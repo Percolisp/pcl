@@ -613,4 +613,41 @@ print $err;
 EOF
      'cond-my INVERSE: `our $err` still counts as a live global (renames)');
 
+# ---- E4.1 pre-work (s342f, task #227): eval-mode trailing declarations.
+# The audit's CPAN half of family F2 was not syntax probes at all — it was
+# `our $VERSION = '1.01'`, a routine module idiom, gating every time.
+
+# (5) `our NAMES [OP= RHS]` as an eval's last statement.  _lower_our_decl
+# already returns the assignment expression as its only form, so the value is
+# the tail — the gate simply never let `our` through.
+for my $src ('our $V = "1.01"', 'our $W ||= 3', 'our ($P,$Q) = (7,8)',
+             'our @R = (4,5,6)', 'our $N') {
+  my $out = eval { Pl::Parser2->parse_code($src, eval_mode => 1) };
+  is($@, '', "eval-tail our: `$src` lowers natively");
+  ok(defined $out && length $out, "eval-tail our: `$src` produced output");
+}
+# The no-init form must emit the READ as its tail value (v1 answered with the
+# emitted variable NAME — a silent-wrong).
+like(eval { Pl::Parser2->parse_code('our $N', eval_mode => 1) } // '',
+     qr/\(defvar \$N /, 'eval-tail our: the no-init decl still defvars its cell');
+
+# (6) `my ()` — legal, declares nothing (perl #113554); my.t asserts
+# `eval "my ()"` leaves $@ EMPTY, so it must not gate in either position.
+is(eval { Pl::Parser2->parse_code('my ();') } && $@, '',
+   'empty-my: `my ();` lowers natively in statement position');
+my $em = eval { Pl::Parser2->parse_code('my ()', eval_mode => 1) };
+is($@, '', 'empty-my: `my ()` lowers natively as an eval tail');
+like($em // '', qr/\(progn\)/,
+     'empty-my: the eval tail is the empty-list form, not (p-undef)');
+
+# (7) A bare MULTI decl as the tail is the LIST of its names.
+is(eval { Pl::Parser2->parse_code('my ($c,$d)', eval_mode => 1) } && $@, '',
+   'multi-tail: `my ($c,$d)` lowers natively');
+# INVERSE: a non-parenthesised multi (`my @a` is single) and the shapes the
+# gate still declines must keep declining — a declaration buried in a comma
+# expression is the #138 family, not this one.
+eval { Pl::Parser2->parse_code('my($a,$b),$x,my($c,$d)', eval_mode => 1) };
+like($@, qr/Parser2 TODO: eval-mode trailing my\/our declaration/,
+     'multi-tail INVERSE: a decl inside a comma expression still refuses');
+
 done_testing();

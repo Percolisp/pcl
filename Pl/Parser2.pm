@@ -4456,7 +4456,19 @@ sub _lower_block {
       return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
     my $our = $self->_lower_our_decl($first);
-    return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx)) if $our;
+    if ($our) {
+      # A no-init `our` in TAIL position still has a value in perl — the
+      # declared variable, read in the tail's context (probed: `our $A` → 5,
+      # `our ($C,$D)` → 2, `our @E` → 2, `our %H` → 1).  _lower_our_decl
+      # contributes no form for that shape (the defvar is a declaration), so
+      # append the read.  Statement position appends nothing, so emission
+      # outside an eval tail is byte-identical.  (Task #227: v1 answered this
+      # shape with the emitted variable NAME — a silent-wrong.)
+      my @ok = _strip_semi($first->schildren);
+      push @$our, $self->_lower_expr([@ok[1 .. $#ok]], $first, 'inherit')
+        if $decl_tail && @ok == 2;
+      return (@$our, $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
     my ($name, $init, $declmod_cond) = $self->_single_scalar_decl($first);
     # Decl-level modifier (`my $x if @_;`): evaluate the condition for its
     # side effects, in void, BEFORE the let (the outer $x is what it sees).
@@ -4621,6 +4633,19 @@ sub _lower_block {
     # the whole `my … = …` statement as an expression and produces the
     # p-array-= / p-hash-= / p-list-= form — same path as Parser.pm's
     # _process_variable_statement).  All these vars stay boxed/containers.
+    # `my ();` declares nothing.  It is legal Perl and a no-op — perl #113554,
+    # and my.t asserts `eval "my ()"` leaves $@ EMPTY, so refusing it is not an
+    # option once the v1 fallback is gone (task #227).  No binding, no form; in
+    # tail position the value is the EMPTY LIST — emitted as the `(progn)` a
+    # bare `()` already lowers to, which yields 0 elements in list context and
+    # undef in scalar.  `(p-undef)` would wrongly be a 1-element list (the same
+    # trap the bare `return;` lowering documents above) and `(vector)` an empty
+    # ARRAY ref; both were measured against perl before settling here.  Must
+    # precede _multi_decl, which reports an empty name list as "unsupported".
+    if (_is_empty_my_decl($first)) {
+      return ($self->_lower_block(\@rest, $vi, $tail_ctx),
+              ($decl_tail ? ('(progn)') : ()));
+    }
     my ($vars, $has_init) = $self->_multi_decl($first);
     die "Parser2 TODO: unsupported declaration: " . $first->content unless $vars;
     # A single container promoted to a package cell by a rename pass
@@ -4753,12 +4778,21 @@ sub _lower_block {
     my @binds = map { ['list', $_, _fresh_container($_)] } @$vars;
     # Tail value: with an init the assignment form (last) returns the place;
     # a bare single container is its own value.  A bare MULTI decl
-    # (`my ($a,@b);` as tail) stays value-less — rare, and the embedded-block
-    # gate declines it (_tail_decl_convertible).
+    # (`my ($c,$d);` as tail) is the LIST of the declared names — perl gives 2
+    # elements in list context and undef (the comma operator's last operand) in
+    # scalar — so lower the name list through the ordinary expression
+    # machinery, which already has both context rules, rather than inventing a
+    # form here (task #227).
+    my @tailval = ();
+    if ($decl_tail && !$has_init) {
+      @tailval = @$vars == 1 ? ($vars->[0])
+               : $k[1]->isa('PPI::Structure::List')
+                 ? ($self->_lower_expr([$k[1]], $first, 'inherit')) : ();
+    }
     return (['let', ['list', @binds],
              ($has_init ? ($self->_lower_expr([@k], $first)) : ()),
              $self->_lower_block(\@rest, $vi, $tail_ctx),
-             (($decl_tail && !$has_init && @$vars == 1) ? ($vars->[0]) : ())]);
+             @tailval]);
   }
 
   # -- BEGIN/END/CHECK/… blocks: v1's p-BEGIN goes to the definitions bucket,
@@ -5897,18 +5931,47 @@ sub _lower_bare_block {
 # or a bare SINGLE container (appended).  NOT convertible: `our` (no-init
 # returns nil, should be the var) and bare multi decls (`my ($a,@b);` —
 # value would need list construction).  Pure token read, no side effects.
+# `my ();` — a declaration with an EMPTY name list.  Legal Perl, declares
+# nothing (perl #113554).
+sub _is_empty_my_decl {
+  my ($stmt) = @_;
+  my @k = _strip_semi($stmt->schildren);
+  return @k == 2
+      && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
+      && $k[1]->isa('PPI::Structure::List')
+      && !@{ $k[1]->find('PPI::Token::Symbol') || [] };
+}
+
 sub _tail_decl_convertible {
   my ($self, $stmt) = @_;
+  return 1 if _is_empty_my_decl($stmt);
   my @sk = _strip_semi($stmt->schildren);
   return 0 unless @sk && $sk[0]->isa('PPI::Token::Word');
   my $kw = $sk[0]->content;
   return 1 if $kw eq 'state';
+  # `our NAMES OP= RHS` as the eval's last statement: _lower_our_decl returns
+  # the assignment EXPRESSION as its only form, and _lower_block returns ()
+  # for the empty remainder, so the assignment is already the tail value —
+  # nothing to convert.  `eval "our \$VERSION = '1.01'"` is a routine module
+  # idiom and was the whole CPAN-board half of audit family F2 (task #227).
+  # A no-init `our` converts too — _lower_block appends the declared
+  # variable's read in tail position, which is the value perl gives.
+  if ($kw eq 'our') {
+    return 1 if @sk == 2;
+    return $sk[2]->isa('PPI::Token::Operator')
+        && Pl::PExpr::TokenUtils::is_assign_op($sk[2]->content) ? 1 : 0;
+  }
   return 0 unless $kw eq 'my';
   my ($name) = $self->_single_scalar_decl($stmt);
   return 1 if $name;
   my ($vars, $has_init) = $self->_multi_decl($stmt);
   return 0 unless $vars;
-  return $has_init || @$vars == 1;
+  return 1 if $has_init || @$vars == 1;
+  # A bare MULTI decl's tail value is the LIST of its names, which the
+  # lowering now emits by running the name list through the expression
+  # machinery — but only when the names are parenthesised (`my ($c,$d)`).
+  my @k = _strip_semi($stmt->schildren);
+  return @k >= 2 && $k[1]->isa('PPI::Structure::List') ? 1 : 0;
 }
 
 sub lower_embedded_block {

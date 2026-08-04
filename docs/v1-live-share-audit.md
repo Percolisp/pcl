@@ -44,7 +44,7 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 | # | Family | Events (sweep + board) | Kind | Where it shows |
 |---|---|---|---|---|
 | F1 | `eval-mode multi-segment (top-level package statement)` | 6 + 18 = **24** | TODO | `eval 'package X; …'` |
-| F2 | `eval-mode trailing my/our declaration (value-losing let)` | 6 + 4 = **10** | TODO | `eval 'my $$x'`, `eval 'my ()'` — perl-syntax-error probes |
+| F2 | `eval-mode trailing my/our declaration (value-losing let)` — **CLEARED s342f** except one shape | 6 + 4 = **10** | TODO | `eval "our $VERSION = '1.01'"` (the whole CPAN half); `eval 'my ()'`; perl-syntax-error probes |
 | F3 | `block-form arg body captures live lexical` | 0 + 8 = **8** | TODO | Try-Tiny `basic/finally/named/when.t`, S-L-U `first/pair/reduce/rt-96343.t` |
 | F4 | `Parser2: PPI parse failed` | 6 + 0 = **6** | TODO | `/tmp/pcl_fp_*.pl` — `fresh_perl`/`runperl` children |
 | F5 | perl **core modules** still gating — **CLEARED s342d** | 0 + 5 = **5** | TODO | `CPAN::Meta::Requirements::Range` (poisoned cond-my `$err`, ×3); `ExtUtils::MM_Unix` (self-referential my-init with a below-assignment tail, ×2) |
@@ -53,6 +53,20 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 
 ### Notes per family
 
+- **F2 is CLEARED (s342f, task #227) except one shape**, and its CPAN half was
+  never a syntax probe: all four board events are `eval "our $VERSION = '…'"`,
+  a routine module idiom.  The gate refused **every** `our`, though
+  `_lower_our_decl` already returns the assignment expression as its only form
+  — so the value was the tail all along.  A no-init `our` now emits the READ
+  too (v1 answered that one with the emitted variable NAME, a silent-wrong),
+  and `my ()` — legal Perl that declares nothing, which my.t asserts leaves
+  `$@` empty — lowers in both statement and tail position.  A bare multi
+  (`my ($c,$d)`) tail is the LIST of its names, lowered through the ordinary
+  expression machinery so both context rules come for free.
+  **Residual, recorded not fixed:** `my($a,$b),$x,my($c,$d)` (RT #126844) —
+  a declaration buried in a comma expression, which is the #138 family.  Its
+  test asserts nothing (`pass()`), and *both* pipelines get the value wrong
+  today (perl 5 elements, v1 0), so the flip costs nothing there.
 - **F3 is a DELIBERATE gate, not a defect** — task #26 shipped it to avoid the
   Try::Tiny catch-block miscompile. It is nonetheless a live v1 dependency:
   eight `.t` files in the CPAN board transpile through v1 today, so removing

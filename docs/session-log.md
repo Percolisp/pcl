@@ -4,6 +4,57 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 342f (2026-08-05, Opus) — #227: the CPAN half of F2 was `our $VERSION`, not a syntax probe
+
+The task said to check each row before assuming work was needed, and that paid:
+the audit's four CPAN-board events in family F2 are all
+`eval "our $VERSION = '1.01'"` — a **routine module idiom**, not the
+perl-syntax-error probes the perl-tests half looks like.
+
+The gate refused **every** `our` as a trailing declaration, though
+`_lower_our_decl` already returns the assignment expression as its only form
+and `_lower_block` returns `()` for the empty remainder — so the value was
+already the tail.  It just never got the chance.  Now scalar, compound (`||=`),
+list and array `our` inits all lower natively and match perl.
+
+Probing the **no-init** form found a v1 silent-wrong: perl gives
+`eval "our \$A"` the variable's value (5); PCL answered `[$b]` — the emitted
+variable NAME.  It now appends the read in tail position, which is what perl
+gives for all four shapes (`our $A` → 5, `our ($C,$D)` → 2, `our @E` → 2,
+`our %H` → 1, probed).
+
+Two more shapes closed while the family was open:
+
+- **`my ()`** — legal Perl that declares nothing (perl #113554), and my.t
+  asserts `eval "my ()"` leaves `$@` **empty**, so refusing it is not an option
+  once the fallback is gone.  It gated in BOTH positions (statement: "unsupported
+  declaration").  The tail value took three tries against perl: `(p-undef)` is a
+  1-element list, `(vector)` an empty ARRAY ref, and `(progn)` — what a bare
+  `()` already lowers to — is the one that gives 0 elements in list context and
+  undef in scalar.
+- **A bare multi (`my ($c,$d)`) tail** is the LIST of its names.  Lowered
+  through the ordinary expression machinery with `'inherit'`, so both context
+  rules come for free (perl: 2 in list, undef in scalar).  Passing the context
+  was the missing piece — without it the list arrived as 1 element.
+
+**Residual, recorded not fixed:** `my($a,$b),$x,my($c,$d)` (RT #126844) — a
+declaration buried in a comma expression, the #138 family.  Its test asserts
+nothing (`pass()`), and *both* pipelines get the value wrong today (perl 5
+elements, v1 0), so the flip costs nothing there.
+
+One emission change fell out and it is a **de-gate**: sort.t's
+`eval { our @copy = sort {…} … }` block was a v1 seam (the raw-text
+`;; our @copy = …` shape) and now lowers natively.  Checked, not assumed:
+sort.t is 203/1 both before and after, and that 1 is its blessed
+`AUTOLOAD without stub` baseline row.
+
+Gate 131 / **4629** PASS; cold sweep 18498/915 GATE clean; sweep-side F2 events
+6 → 5 (only the four invalid-Perl probes, whose test merely requires a
+non-empty `$@`, and the comma-expression residual).  Gen v2-104 → **v2-105**,
+artifacts regenerated.
+
+---
+
 ## Session 342d (2026-08-04, Opus) — #229: two perl core modules off v1, both the same mistake
 
 The first family off the s342c worklist, and the two cases turned out to be one

@@ -824,6 +824,15 @@ not-supported.md → only then probe.*
   (#225 DONE s342c, `docs/v1-live-share-audit.md`; tasks #226–#230).  Measured
   60 v1 routes on a cold cache (24 sweep + 36 CPAN board).  **F5 cleared s342d
   (#229) → five families left**, board 36 → 31 events.
+- **An eval's trailing `our`/`my` declaration has a VALUE, and it is whatever
+  perl gives** (#227, s342f): `our NAMES [OP= RHS]` → the assignment expression
+  (or, with no init, the READ — v1 answered with the variable NAME, a
+  silent-wrong); `my ()` → the EMPTY LIST, emitted as the `(progn)` a bare `()`
+  lowers to (`(p-undef)` is a 1-element list, `(vector)` an ARRAY ref — both
+  measured wrong); a bare multi `my ($c,$d)` → the LIST of its names, lowered
+  through the expression machinery with `'inherit'` so both context rules come
+  for free.  `eval "our $VERSION = '…'"` is a routine module idiom, and it was
+  the entire CPAN half of audit family F2.
 - **A BINDING of a name is not a use of it** (s342d, #229) — the same mistake
   made twice, in two different checks, each costing a perl CORE module a
   whole-file gate.  `$attrs{$_}` is a slot of `%attrs`, so a TEXT scan for
