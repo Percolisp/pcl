@@ -3428,6 +3428,37 @@ sub _foreach_my_constructs {
   return \@out;
 }
 
+# True when SYM is one of the names DECLARED by a plain `my`/`state`
+# statement — `my $err;`, `my ($vobj, $err);` — as opposed to a use of the
+# name.  The initialiser after `=` is a real use (`my $x = $err;`), so the
+# scan stops there.  `our` deliberately does not qualify: it creates the
+# package global.
+#
+# Residual (unchanged in kind by this test): a global reachable only through a
+# NON-interpolating string (`eval '$err = 1'`) is invisible to both this and
+# the interpolation check beside it — the same hole the pass has always had.
+sub _is_lexical_decl_name {
+  my ($sym) = @_;
+  # Climb to the nearest enclosing Statement::Variable — NOT merely the nearest
+  # Statement: in `my ($vobj, $err);` the name sits in the Expression inside the
+  # parens, so stopping at the first Statement finds that and misses the
+  # declaration.  Climbing past a block into an unrelated outer declaration is
+  # harmless: the name is then in that one's initialiser, which the scan below
+  # rejects.
+  my $st = $sym->parent;
+  $st = $st->parent while $st && !$st->isa('PPI::Statement::Variable');
+  return 0 unless $st;
+  my @k = $st->schildren;
+  return 0 unless @k && $k[0]->isa('PPI::Token::Word')
+                     && $k[0]->content =~ /^(?:my|state)$/;
+  for my $k (@k) {
+    last if $k->isa('PPI::Token::Operator') && $k->content eq '=';
+    return 1 if $k == $sym;
+    return 1 if $k->isa('PPI::Node') && $k->find_first(sub { $_[1] == $sym });
+  }
+  return 0;
+}
+
 # W8.5 pre-pass: rename POISONED condition-my names (see the parse() comment).
 sub _rename_poisoned_cond_mys {
   my ($self, $seg) = @_;
@@ -3492,6 +3523,14 @@ sub _rename_poisoned_cond_mys {
       _interp_names($top, \%interp_all);
       for my $s (@{ $top->find('PPI::Token::Symbol') || [] }) {
         next unless $s->symbol eq $old;
+        # A plain `my`/`state` DECLARATION of the name binds it, exactly as a
+        # condition-my or a foreach-my does — it is not evidence that a package
+        # GLOBAL of this name is live, which is the only thing this pass exists
+        # to protect.  `our` still counts: it DOES create the global.
+        # (CPAN::Meta::Requirements::Range gated the whole file on one
+        # `my ($vobj, $err);` while every other $err sat inside an
+        # `if (my $err = $@)` — audit family F5, task #229.)
+        next if _is_lexical_decl_name($s);
         $seg_uses++;
         my $p = $s;
         while ($p) { if ($in_construct{$p}) { $in_uses++; last } $p = $p->parent; }
@@ -4446,10 +4485,7 @@ sub _lower_block {
       # `$s` inside a single-quoted format, and perl does not read it.
       die "Parser2 TODO: self-referential my-init with a below-assignment tail: "
         . $first->content . "\n"
-        if join('', map { $_->content }
-                    grep { !$_->isa('PPI::Token::Quote::Single')
-                           && !$_->isa('PPI::Token::Quote::Literal') } @$init)
-           =~ /\Q$name\E\b/;
+        if _init_reads_scalar($init, $name);
       my @kd = _strip_semi($first->schildren);
       $lowprec_run = [@kd[1 .. $#kd]];
     }
@@ -6946,6 +6982,35 @@ sub _fallback_stmt_capture {
 }
 
 # `my $x` / `my $x = INIT` → ($name, \@init_parts | undef); else ().
+# Does the initialiser of `my $x = …` actually READ $x?  Asked at the TOKEN
+# level, because a text scan cannot tell a scalar from an ELEMENT of the
+# same-named container: `$attrs{$_}` is a slot of %attrs and `$a[0]` a slot of
+# @a — different variables, which perl reads without touching $attrs/$a.
+# PPI's ->symbol does exactly that canonicalisation, so ask it.  Interpolating
+# quotes carry no Symbol tokens, so they keep a text scan — with the same
+# subscript exclusion spelled out.  Non-interpolating literals are skipped
+# entirely (sprintf2.t's `my $s = sprintf '%*2$s', …`: perl does not read $s).
+# A false positive here costs a WHOLE-FILE gate — it cost ExtUtils::MM_Unix
+# one, on `my $attrs = join " ", map { qq[$_="$attrs{$_}"] } sort keys %attrs;`
+# (audit family F5, task #229).
+sub _init_reads_scalar {
+  my ($init, $name) = @_;
+  (my $bare = $name) =~ s/^\$//;
+  for my $el (@$init) {
+    for my $t ($el->isa('PPI::Node') ? $el->tokens : ($el)) {
+      if ($t->isa('PPI::Token::Symbol')) {
+        return 1 if $t->symbol eq $name;
+      } elsif ($t->isa('PPI::Token::Quote::Single')
+            || $t->isa('PPI::Token::Quote::Literal')) {
+        next;
+      } elsif ($t->content =~ /(?<!\\)\$\{?\s*\Q$bare\E\b\}?\s*(?![\{\[])/) {
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 sub _single_scalar_decl {
   my ($self, $stmt) = @_;
   my @k = _strip_semi($stmt->schildren);

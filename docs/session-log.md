@@ -4,6 +4,49 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 342d (2026-08-04, Opus) — #229: two perl core modules off v1, both the same mistake
+
+The first family off the s342c worklist, and the two cases turned out to be one
+error made twice: **a check treating a BINDING as evidence of something else.**
+
+- **`ExtUtils::MM_Unix`** gated on
+  `my $attrs = join " ", map { qq[$_="$attrs{$_}"] } sort keys %attrs;`.
+  The self-referential-init guard scanned the initialiser's **text** for the
+  declared name — and `$attrs{$_}` (a slot of `%attrs`) contains the string
+  `$attrs`.  It now asks PPI's `->symbol`, which canonicalises an element
+  access to its container (`$a[0]` → `@a`, `$a{k}` → `%a`, probe-confirmed);
+  interpolating quotes carry no Symbol tokens, so they keep a text scan with
+  the same subscript exclusion spelled out.
+- **`CPAN::Meta::Requirements::Range`** gated on one `my ($vobj, $err);` while
+  every other `$err` sat inside an `if (my $err = $@)`.  The cond-my poison
+  test counted that declaration as a *use*, concluded a package global `$err`
+  might be live, and renamed — and a poisoned construct holding a string eval
+  gates the file.  A plain `my`/`state` declaration now binds the name, exactly
+  as `foreach my` does since s342b.  **`our` still counts** — it does create
+  the global.
+
+One implementation detail worth keeping: the first attempt at the second fix
+climbed to the nearest enclosing `PPI::Statement`, which for `my ($vobj, $err)`
+is the **Expression inside the parens**, not the `Statement::Variable`.  It
+must climb to the Variable statement specifically.
+
+Probed in both directions before landing (memory rule): the element forms now
+match perl; `my $x = $x, 1` and its interpolated twin are still refused; a real
+use of the name outside every construct still poisons; `our $err` still
+renames.  Also caught by the gate: my *first* regression test was wrong, not
+the code — it used `$err` outside the constructs, which correctly poisons.  It
+became an extra INVERSE row.
+
+Audit re-measured: CPAN board **36 → 31** v1 events with byte-identical output;
+sweep still 24, of which 11 are now correctly classified DIE (the classifier
+keyed on `Parser2 TODO:` and so put F4's `Parser2: PPI parse failed` on the
+wrong side — it now keys on the `Parser2` prefix).  **Five families left.**
+Gate 131 / **4613** PASS; corpus emission identical; cold sweep 18498/915,
+GATE clean.  Gen v2-103 → **v2-104** (those two modules' emission changes and
+the cache key does not distinguish a per-file fallback), artifacts regenerated.
+
+---
+
 ## Session 342c (2026-08-04, Opus) — #225: the live v1 share is SIX families, not zero
 
 The audit guardrail §5a.2 demands before E4.1 deletes v1.  It is now done, and

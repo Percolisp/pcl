@@ -86,13 +86,15 @@ sub parse_with_fallback {
       my $out = eval { Pl::Parser2->$method($args[0], %opts) };
       return pipeline_marker(v2 => $out) if defined $out;
       print STDERR "pl2cl: v2 fell back to v1: $@" if $ENV{PCL_V2_VERBOSE};
-      # Two very different events land here, and only one is a v2 GAP: a
-      # "Parser2 TODO:" die means v2 cannot lower this yet (pre-work), while
-      # any other die is v2 correctly reporting a Perl-level error — which the
-      # fallback then pointlessly retries on v1 (measured s342: chop.t's four
-      # `eval 'chop($x) = 1'` rows).  After the E4.1 gate flip the second kind
-      # simply becomes $@, unchanged; only the first kind changes behaviour.
-      audit_v1_route($@ =~ /^Parser2 TODO:/ ? 'TODO' : 'DIE',
+      # Two very different events land here, and only one is a v2 GAP.  Any die
+      # PARSER2 raises about itself — "Parser2 TODO: …" and "Parser2: PPI parse
+      # failed" alike — means v2 could not take this file (pre-work).  Any other
+      # die is v2 correctly reporting a PERL-level error, which the fallback
+      # then pointlessly retries on v1 and which v1 raises identically
+      # (measured s342: chop.t's four `eval 'chop($x) = 1'` rows).  After the
+      # E4.1 gate flip the second kind simply becomes $@, unchanged; only the
+      # first kind changes behaviour.
+      audit_v1_route($@ =~ /^Parser2\b/ ? 'TODO' : 'DIE',
                      $method, $args[0], $@);
     } else {
       audit_v1_route('MODE', $method, $args[0], "mode: @{[sort @unsupported]}");

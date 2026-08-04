@@ -822,7 +822,16 @@ not-supported.md → only then probe.*
   `Pl/t/tie-01.t`.
 - **The live v1 share is SIX families, not zero — E4.1 §5a.2 is unsatisfied**
   (#225 DONE s342c, `docs/v1-live-share-audit.md`; tasks #226–#230).  Measured
-  60 v1 routes on a cold cache (24 sweep + 36 CPAN board).
+  60 v1 routes on a cold cache (24 sweep + 36 CPAN board).  **F5 cleared s342d
+  (#229) → five families left**, board 36 → 31 events.
+- **A BINDING of a name is not a use of it** (s342d, #229) — the same mistake
+  made twice, in two different checks, each costing a perl CORE module a
+  whole-file gate.  `$attrs{$_}` is a slot of `%attrs`, so a TEXT scan for
+  `$attrs` in a `my $attrs = …` initialiser is wrong: ask PPI's `->symbol`,
+  which canonicalises `$a[0]`→`@a` and `$a{k}`→`%a`.  And `my ($vobj, $err);`
+  DECLARES `$err`, so it is not evidence that a package global `$err` is live
+  (`our` still is).  Climb to `PPI::Statement::Variable`, not merely the
+  nearest `PPI::Statement` — for `my (…)` that is the Expression in the parens.
 - **A `pipeline=v1` cache grep UNDER-COUNTS the live v1 share** (s342c): it is
   blind to every route whose output never becomes a cache entry — eval-strings,
   `fresh_perl` children, temp `.t` transpiles.  The s341 grep saw 2 of 60.  The

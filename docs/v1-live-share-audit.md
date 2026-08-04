@@ -23,8 +23,11 @@ stderr, which a sweep folds into TAP (the s333 banner lesson).
 
 Two classes, and the distinction matters:
 
-- **TODO** — the die began `Parser2 TODO:`, i.e. v2 cannot lower this yet.
-  This is the real gap; after the flip it becomes a user-visible error.
+- **TODO** — the die came from Parser2 about *itself*: `Parser2 TODO: …` or
+  `Parser2: PPI parse failed`.  v2 could not take the file; this is the real
+  gap, and after the flip it becomes a user-visible error.  (The classifier
+  keys on the `Parser2` prefix, not on `TODO:` alone — s342d, when the PPI
+  failures of F4 were landing on the wrong side of the split.)
 - **DIE** — v2 raised a *Perl-level* error (e.g. "Can't modify non-lvalue
   subroutine call in assignment") and the fallback retried it on v1, which
   raises the same thing. Not a gap: after the flip the same text simply
@@ -36,7 +39,7 @@ Both runs below were on a **wiped `~/.pcl-cache`**, at `46f8a38`.
 
 Full perl-tests sweep (108 files): **24 events**.
 Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
-**36 events**. Seven distinct families:
+**36 events**. Seven distinct families — **F5 cleared in s342d, six left**:
 
 | # | Family | Events (sweep + board) | Kind | Where it shows |
 |---|---|---|---|---|
@@ -44,7 +47,7 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 | F2 | `eval-mode trailing my/our declaration (value-losing let)` | 6 + 4 = **10** | TODO | `eval 'my $$x'`, `eval 'my ()'` — perl-syntax-error probes |
 | F3 | `block-form arg body captures live lexical` | 0 + 8 = **8** | TODO | Try-Tiny `basic/finally/named/when.t`, S-L-U `first/pair/reduce/rt-96343.t` |
 | F4 | `Parser2: PPI parse failed` | 6 + 0 = **6** | TODO | `/tmp/pcl_fp_*.pl` — `fresh_perl`/`runperl` children |
-| F5 | perl **core modules** still gating | 0 + 5 = **5** | TODO | `CPAN::Meta::Requirements::Range` (poisoned cond-my `$err`, ×3); `ExtUtils::MM_Unix` (self-referential my-init with a below-assignment tail, ×2) |
+| F5 | perl **core modules** still gating — **CLEARED s342d** | 0 + 5 = **5** | TODO | `CPAN::Meta::Requirements::Range` (poisoned cond-my `$err`, ×3); `ExtUtils::MM_Unix` (self-referential my-init with a below-assignment tail, ×2) |
 | F6 | `oversized top-level run form (73769 chars > 64000)` | 1 + 0 = **1** | TODO | a deliberate v2 refusal — the form would exhaust the SBCL compiler heap |
 | F7 | `PCL: Can't modify non-lvalue subroutine call in assignment` | 5 + 0 = **5** | **DIE** | chop.t's four `eval 'chop($x) = 1'` rows (+1 inline) |
 
@@ -54,10 +57,16 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   Try::Tiny catch-block miscompile. It is nonetheless a live v1 dependency:
   eight `.t` files in the CPAN board transpile through v1 today, so removing
   v1 turns the gate into a hard failure for all of them.
-- **F5 is the same shape as the Math::BigInt blocker just cleared** — the
-  cond-my poison narrowing (s342b) did not clear `$err` in
-  `CPAN::Meta::Requirements::Range`, so the poison test has at least one more
-  false positive in it.
+- **F5 is CLEARED (s342d, task #229)** — it was two false positives of the same
+  kind: a check treating a *binding* as evidence of a live global / a real read.
+  `ExtUtils::MM_Unix` gated because the self-init check scanned TEXT, and
+  `$attrs{$_}` (a slot of `%attrs`) contains the string `$attrs`; it now asks
+  PPI's `->symbol`, which canonicalises an element access to its container.
+  `CPAN::Meta::Requirements::Range` gated because the cond-my poison test
+  counted `my ($vobj, $err);` as a use; a plain `my`/`state` declaration now
+  binds the name, exactly as `foreach my` does after s342b (`our` still
+  counts — it *does* create the global).  Board re-measured: 36 → **31**
+  events, output byte-identical.
 - **F4 is guardrail §5a.4's subject.** These are PPI failures, not v2 gaps:
   today they land in v1 (which runs with `--lenient-ppi`), and after the flip
   they must die loudly naming the file — never become a silent no-op.

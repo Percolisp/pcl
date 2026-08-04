@@ -557,4 +557,60 @@ EOF
 like($cm2, qr/\$i__cond__/,
      'cond-my INVERSE: a global use outside the construct still renames it');
 
+# ---- E4.1 pre-work (s342d, task #229): the two perl CORE modules the s342c
+# ---- live-v1 audit found still gating (docs/v1-live-share-audit.md, F5).
+
+# (3) A my-init that mentions an ELEMENT of a same-named container is NOT
+# self-referential: $attrs{$_} is a slot of %attrs, $a[0] of @a — different
+# variables.  ExtUtils::MM_Unix gated its whole file on
+# `my $attrs = join " ", map { qq[$_="$attrs{$_}"] } sort keys %attrs;`.
+my $mm = eval { Pl::Parser2->parse_code(
+  q{my %attrs=(a=>1); my $attrs = join " ", map { qq[$_="$attrs{$_}"] } sort keys %attrs; print $attrs;}) };
+is($@, '', 'element-init: $attrs{...} in the init of `my $attrs` is not self-reference');
+like($mm // '', qr/p-join/, 'element-init: the join is actually emitted');
+is(eval { Pl::Parser2->parse_code(
+     q{my @a=(1,2); my $a = join ",", map { $a[$_] } 0..1; print $a;}) } && $@, '',
+   'element-init: the array form ($a[$_] inside `my $a`) lowers too');
+# INVERSE: a REAL self-reference with a below-assignment tail is still refused.
+eval { Pl::Parser2->parse_code(q{our $x = "O"; { my $x = $x, 1; print $x; }}) };
+like($@, qr/Parser2 TODO: self-referential my-init/,
+     'element-init INVERSE: `my $x = $x, 1` is still refused');
+eval { Pl::Parser2->parse_code(q{our $x = "O"; { my $x = "<$x>", 1; print $x; }}) };
+like($@, qr/Parser2 TODO: self-referential my-init/,
+     'element-init INVERSE: the INTERPOLATED self-read is still refused');
+
+# (4) A plain `my`/`state` declaration BINDS the name, so it is not evidence
+# that a package global of that name is live.  CPAN::Meta::Requirements::Range
+# gated on one `my ($vobj, $err);` while every other $err sat inside an
+# `if (my $err = $@)`.
+my $cm3 = Pl::Parser2->parse_code(<<'EOF');
+sub f {
+  my ($vobj, $err);
+  eval { die "boom\n" };
+  if (my $err = $@) { my $v = eval "1"; return "caught" }
+  return defined $vobj ? "V" : "-";
+}
+print f(), "\n";
+EOF
+unlike($cm3, qr/\$err__cond__/,
+       'cond-my: a plain `my ($vobj, $err)` decl does not poison the name');
+# INVERSE 1: a REAL use of the name outside every construct still poisons — and
+# because one construct holds a string eval, that is still a whole-file gate.
+eval { Pl::Parser2->parse_code(<<'EOF') };
+sub f {
+  my ($vobj, $err);
+  if (my $err = $@) { my $v = eval "1"; return "caught" }
+  return defined $err ? "def" : "undef";
+}
+EOF
+like($@, qr/Parser2 TODO: poisoned condition-my \$err/,
+     'cond-my INVERSE: a real use outside the constructs still poisons');
+# INVERSE 2: an `our` declaration DOES create the global, so it still poisons.
+like(Pl::Parser2->parse_code(<<'EOF'), qr/\$err__cond__/,
+our $err;
+if (my $err = "INNER") { print $err }
+print $err;
+EOF
+     'cond-my INVERSE: `our $err` still counts as a live global (renames)');
+
 done_testing();
