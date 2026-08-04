@@ -809,7 +809,8 @@ not-supported.md → only then probe.*
   → `STORE`) until the binding stack dies, costing pack.t everything (~70 s →
   not finishing at 600 s).  The cond-my poison narrowing that would move it to
   v2 is correct, probe-verified, and parked on `wip/s341-condmy-narrowing`; it
-  lands WITH #224, never before.
+  lands WITH #224, never before.  **Both landed s342** — the narrowing is on
+  main, BigInt is on v2, pack.t is 66 s / 5636 passing.
 - **#224 FIXED s342 — a tie handler runs with ITS OWN cell's magic off.**  Perl
   (mg.c `save_magic`/`restore_magic`) turns an SV's magic off for the duration
   of any of its magic callbacks; PCL now does the same by swapping the proxy's

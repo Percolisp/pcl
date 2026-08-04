@@ -4,6 +4,30 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 342b (2026-08-04, Opus) — the parked cond-my narrowing lands; E4.1 step 0 is done
+
+With #224 fixed the branch that had been waiting on it (`d0e8247`) applies
+unchanged: a `foreach my $i (…)` BINDS the name, so its uses must not count as
+evidence that a *global* `$i` is live.  Emission delta over the corpus is
+**one file, sort.t, `$i__cond__0` → `$i`** — exactly what the parked commit
+predicted, re-verified here with `corpus-diff.pl --show`.
+
+One row of the branch's own test file was wrong and the gate caught it: it
+asserted the `||=` write matched `p-\|\|=|p-or-=|p-\|\|-=`, but the emitted
+form is `(p-or-assign $Verbose 0)`.  The assertion was corrected to the real
+shape, not weakened — it still fails if the write disappears.
+
+**Both perl-core modules the rule-2 audit found are now on v2.**  pack.t (which
+loads Math::BigInt) is **66 s, 5636 passing / 89 failing** on a cold cache —
+the same numbers as the blessed s322/s334 measurement, so moving BigInt off the
+v1 fallback costs nothing.  Gate 131 / **4605** PASS; gen v2-102 → **v2-103**
+with both checked-in artifacts regenerated (marker line only).
+
+§5a.2 is still not fully satisfied: **task #225** (CPAN board marker grep,
+eval-mode fallbacks) has to run before the live-v1 count can be called 0.
+
+---
+
 ## Session 342 (2026-08-04, Opus) — #224: a tie handler must run with its own cell's magic OFF
 
 The E4.1 blocker, closed at the runtime.  The task's suspicion ("check `ref

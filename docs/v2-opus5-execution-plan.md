@@ -231,17 +231,17 @@ release checks surface divergences, triage those first, per
 **Read §5a (the s340 guardrails) before starting.**  Re-scoped in the plan
 (E4 section) and review §4.
 
-> **BLOCKED as of s341: do step 0 first.**  The §5a.2 audit ran (s341b,
-> `11d1e08`) and found exactly two live `pipeline=v1` markers.  One is fixed
-> (Exporter.pm, `our $x OP=`).  The other, Math/BigInt.pm, cannot be moved to
-> v2 until **task #224** is fixed: the v2-compiled module recurses until the
-> binding stack dies (tie `STORE` → `round_mode` → symbolic-ref write →
-> `STORE`), taking pack.t from ~70 s to not finishing at a 600 s cap.  The
-> narrowing that de-gates BigInt is written and probe-verified on branch
-> `wip/s341-condmy-narrowing` (`d0e8247`) — re-apply it *after* #224, never
-> before.  **Task #225** carries the audit's unfinished halves (CPAN board
-> marker grep, eval-mode fallbacks); §5a.2 is not satisfied until both are
-> done and the live v1 count is 0.
+> **Step 0 is DONE (s342).**  The §5a.2 audit (s341b, `11d1e08`) found exactly
+> two live `pipeline=v1` markers, both now cleared.  Exporter.pm went first
+> (`our $x OP=`).  Math/BigInt.pm was blocked on **task #224** — the v2-compiled
+> module recursed until the binding stack died (tie `STORE` → `round_mode` →
+> symbolic-ref write → `STORE`) — which s342 fixed at the runtime: a tie handler
+> now runs with its own cell's magic off, perl's `save_magic` (`docs/ir-spec.md`
+> §2.2b).  The parked narrowing was then re-applied from
+> `wip/s341-condmy-narrowing`, so **both known perl-core modules are on v2**;
+> pack.t is 66 s / 5636 passing, unchanged.  **Task #225** still carries the
+> audit's unfinished halves (CPAN board marker grep, eval-mode fallbacks);
+> §5a.2 is not satisfied until those are done and the live v1 count is 0.
 
 Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one

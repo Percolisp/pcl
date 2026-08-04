@@ -520,18 +520,41 @@ print "B=\$tmpx\\n";};
        '#184/W10: shadowed interpolated use still keeps the original name');
 }
 
-# ---- E4.1 pre-work (s341): `our $x OP= …` ----
-# perl's own Exporter.pm opens with `our $Verbose ||= 0;`.  The initialiser may
-# use ANY assignment operator; the gate used to accept `=` alone, which routed
-# the whole file to v1 (found by the E4.1 rule-2 cold-cache marker audit).
+# ---- E4.1 pre-work (s341): two v1 fallbacks that the cold-sweep cache found ----
+
+# (1) `our $x OP= …` — perl's own Exporter.pm opens with `our $Verbose ||= 0;`.
+# The initialiser may use ANY assignment operator; the gate used to accept `=`
+# alone and route the whole file to v1.
 my $ourc = eval { Pl::Parser2->parse_code(q{our $Verbose ||= 0; print $Verbose;}) };
 is($@, '', 'our-compound: `our $x ||= 0` lowers natively (no Parser2 TODO)');
-like($ourc // '', qr/\(defvar \$Verbose /, 'our-compound: the package cell is still defvar\'d');
+like($ourc, qr/\(defvar \$Verbose /, 'our-compound: the package cell is still defvar\'d');
+like($ourc, qr/\(p-or-assign \$Verbose 0\)/, 'our-compound: the ||= write is emitted');
 like(eval { Pl::Parser2->parse_code(q{our $n //= 3; our $m += 2; print $n;}) } // '',
      qr/\(defvar \$m /, 'our-compound: //= and += declare their cells too');
 # INVERSE: a non-assignment operator after the name is still not an `our` decl.
 eval { Pl::Parser2->parse_code(q{our $x, $y; print $x;}) };
 like($@, qr/Parser2 TODO: unsupported our declaration/,
      'our-compound INVERSE: `our $x, $y` is still refused (not an assignment)');
+
+# (2) Condition-my poison test: a `foreach my $i (…)` BINDS the name, so its
+# uses say nothing about a global.  Math::BigInt has five C-for `my $i` loops
+# and four `for my $i` loops; counting the latter as outside-uses poisoned the
+# name, and a poisoned construct holding a string eval gated the file to v1.
+my $cm = Pl::Parser2->parse_code(<<'EOF');
+my @r;
+for my $i (1 .. 2) { push @r, $i }
+for (my $i = 0 ; $i < 2 ; $i++) { my $v = eval "1+$i"; push @r, $v }
+print "@r\n";
+EOF
+unlike($cm, qr/\$i__cond__/,
+       'cond-my: foreach-my siblings do not poison the name (no rename)');
+# INVERSE: a genuine use OUTSIDE every binding construct still poisons → rename.
+my $cm2 = Pl::Parser2->parse_code(<<'EOF');
+$i = "GLOBAL";
+for (my $i = 0 ; $i < 2 ; $i++) { print $i }
+print $i;
+EOF
+like($cm2, qr/\$i__cond__/,
+     'cond-my INVERSE: a global use outside the construct still renames it');
 
 done_testing();

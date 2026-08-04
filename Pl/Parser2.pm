@@ -3404,6 +3404,30 @@ sub _rename_state_vars {
   }
 }
 
+# Every `foreach my $NAME (LIST) {...}` construct in the segment that binds
+# $NAME.  Used by the poison test below: a symbol inside one of these is bound
+# by the foreach, so it says nothing about whether a GLOBAL of that name is
+# also live.  (A label may precede the `for`; `our`/`state` loop vars bind the
+# same way for this purpose — the question is only "is this use lexical".)
+sub _foreach_my_constructs {
+  my ($stmts, $name) = @_;
+  my @out;
+  for my $top (@$stmts) {
+    next unless ref $top && $top->isa('PPI::Node');
+    my @compounds = $top->isa('PPI::Statement::Compound') ? ($top) : ();
+    push @compounds, @{ $top->find('PPI::Statement::Compound') || [] };
+    for my $c (@compounds) {
+      my @k = grep { !$_->isa('PPI::Token::Label') } $c->schildren;
+      next unless @k >= 3
+        && $k[0]->isa('PPI::Token::Word') && $k[0]->content =~ /^for(?:each)?$/
+        && $k[1]->isa('PPI::Token::Word') && $k[1]->content =~ /^(?:my|our|state)$/
+        && $k[2]->isa('PPI::Token::Symbol') && $k[2]->content eq $name;
+      push @out, $c;
+    }
+  }
+  return \@out;
+}
+
 # W8.5 pre-pass: rename POISONED condition-my names (see the parse() comment).
 sub _rename_poisoned_cond_mys {
   my ($self, $seg) = @_;
@@ -3446,15 +3470,23 @@ sub _rename_poisoned_cond_mys {
 
   for my $old (sort keys %by_name) {
     (my $bare = $old) =~ s/^\$//;
-    my %in_construct = map { ($_->[0] => 1) } @{ $by_name{$old} };
+    my @bind = map { $_->[0] } @{ $by_name{$old} };
+    # A `foreach my $i (...)` BINDS the name for its whole construct, exactly
+    # as a condition-my does — its uses are lexical, never the global this
+    # pass exists to protect.  Counting them as outside-uses made the poison
+    # verdict fire on any file that spells its loop counter the same way twice
+    # (Math::BigInt: five C-for `my $i` loops + four `for my $i` loops), and
+    # a poisoned name whose construct holds a string eval GATES to v1.
+    push @bind, @{ _foreach_my_constructs($stmts, $old) };
+    my %in_construct = map { ($_ => 1) } @bind;
 
-    # 2. Poison test: any use of the name OUTSIDE all of its cond-my constructs?
+    # 2. Poison test: any use of the name OUTSIDE all of its binding constructs?
     #    Symbols are checked exactly; interpolated uses approximately (a name
     #    interpolated both inside AND outside constructs under-detects — that
     #    case crashes at runtime exactly as before this pass, no worse).
     my ($seg_uses, $in_uses) = (0, 0);
     my (%interp_all, %interp_in);
-    _interp_names($_->[0], \%interp_in) for @{ $by_name{$old} };
+    _interp_names($_, \%interp_in) for @bind;
     for my $top (@$stmts) {
       next unless ref $top && $top->isa('PPI::Node');
       _interp_names($top, \%interp_all);
