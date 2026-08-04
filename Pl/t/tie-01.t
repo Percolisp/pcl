@@ -250,4 +250,62 @@ $x = "hello";
 print "stored:", tied($x)->{last}, "\n";
 PERL
 
+# ---- #224: a tie handler runs with ITS OWN cell's magic off ----
+# Perl's save_magic/restore_magic (mg.c).  Without it, Math::BigInt's
+# `sub STORE { $rnd_mode = (ref $_[0])->round_mode($_[1]) }` — which assigns to
+# the very variable it proxies — recursed until the binding stack died.
+test_tie('STORE assigning its own tied var does not recurse', <<'PERL');
+package Loop;
+our $raw = 'init';
+sub TIESCALAR { bless \$raw, shift }
+sub FETCH      { $raw }
+sub STORE      { print "STORE($_[1])\n"; $main::t = "again-$_[1]" }
+package main;
+our $t;
+tie $t, 'Loop';
+$t = 'A';
+print "done\n";
+PERL
+
+# The raw slot is exposed for the duration: a read inside FETCH sees it, and a
+# write inside STORE lands there instead of re-entering the handler.
+test_tie('reads/writes inside a handler hit the raw slot', <<'PERL');
+package Raw;
+our $s = 'init';
+sub TIESCALAR { bless \$s, shift }
+sub FETCH      { my $inner = $main::t; print "in-FETCH:[$inner]\n"; $s }
+sub STORE      { my $v = $_[1]; print "in-STORE-before:[$main::t]\n"; $main::t = 'RAW'; $s = $v }
+package main;
+our $t;
+tie $t, 'Raw';
+$t = 'A';
+my $v = $t;
+print "read:[$v]\n";
+untie $t;
+print "after-untie:[$t]\n";
+PERL
+
+# INVERSE: magic is off only for the box whose handler is running, and only
+# while it runs — a SECOND tied variable still dispatches from inside, and the
+# first one is tied again on the way out.
+test_tie('magic-off is per-box and ends with the handler', <<'PERL');
+package Other;
+our $o = 'o0';
+sub TIESCALAR { bless \$o, shift }
+sub FETCH      { print "OTHER-FETCH\n"; $o }
+sub STORE      { print "OTHER-STORE($_[1])\n"; $o = $_[1] }
+package Outer;
+our $s = 's0';
+sub TIESCALAR { bless \$s, shift }
+sub FETCH      { $s }
+sub STORE      { $main::u = "from-store"; my $r = $main::u; print "other:[$r]\n"; $s = $_[1] }
+package main;
+our ($t, $u);
+tie $u, 'Other';
+tie $t, 'Outer';
+$t = 'A';
+print "tied-after:[", (defined(tied $t) ? ref(tied $t) : 'UNDEF'), "]\n";
+print "t:[$t]\n";
+PERL
+
 done_testing;

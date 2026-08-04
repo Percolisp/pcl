@@ -810,3 +810,17 @@ not-supported.md → only then probe.*
   not finishing at 600 s).  The cond-my poison narrowing that would move it to
   v2 is correct, probe-verified, and parked on `wip/s341-condmy-narrowing`; it
   lands WITH #224, never before.
+- **#224 FIXED s342 — a tie handler runs with ITS OWN cell's magic off.**  Perl
+  (mg.c `save_magic`/`restore_magic`) turns an SV's magic off for the duration
+  of any of its magic callbacks; PCL now does the same by swapping the proxy's
+  `saved-value` (which IS the raw slot) into the box for the call.  Three
+  companion rules probed the same session: a write hits the raw slot BEFORE
+  `STORE` runs, a `FETCH` result is written BACK to the raw slot, and re-tying
+  REPLACES the magic instead of nesting proxies.  `tied()` still reports the
+  object while magic is off.  Normative: `docs/ir-spec.md` §2.2b; guard
+  `Pl/t/tie-01.t`.
+- **Tie machinery must stay OUT OF LINE** (s342): `unbox` is `declaim`ed inline
+  and `p-scalar-=` expands into generated code, so an `unwind-protect` written
+  at either site multiplies across the whole image — the first attempt made
+  SBCL exhaust a 1 GB heap compiling `Pl/t/socket-01.t`.  The macro has exactly
+  three callers, all `defun`s.

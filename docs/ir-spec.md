@@ -157,6 +157,43 @@ operation respects the fill pointer.
 stores its element **count** (Perl array-in-scalar-context); assigning a
 box created by `\` (is-ref) stores the reference value, not the wrapper.
 
+### 2.2b Tied scalars — the raw slot behind the magic
+
+`tie $x, 'Class'` replaces the box's `value` with a **`p-tie-proxy`**
+holding the tie object and the box's previous value.  Every read
+chokepoint (`unbox`, `box-nv`, `box-sv`, the invocant resolution in
+`p-method-call`) dispatches to `FETCH`; every write chokepoint
+(`box-set`, `p-scalar-=`) dispatches to `STORE`.
+
+The proxy's `saved-value` is not merely a restore-on-untie snapshot — it
+**is the SV's raw slot**, and the following rules make it behave like
+perl's (mg.c).  A port that models tie must reproduce all four:
+
+1. **A write hits the raw slot first, then calls `STORE`** (perl's
+   `sv_setsv` + `mg_set` order), so `untie` after `$tied = "A"` leaves
+   `"A"` behind.
+2. **`FETCH`'s result is written back to the raw slot** (`magic_methpack`
+   ends in `sv_setsv(sv, result)`), so `untie` after a read leaves the
+   fetched value.
+3. **While a handler for a cell is on the stack, that cell's magic is
+   OFF** (`save_magic`/`restore_magic`): reads and writes of the tied
+   variable *inside its own* `FETCH`/`STORE` hit the raw slot instead of
+   re-entering the handler.  This is not an optimization — Math::BigInt's
+   `sub STORE { $rnd_mode = (ref $_[0])->round_mode($_[1]) }` assigns to
+   the very variable it proxies, and without suppression it recurses
+   until the stack dies (task #224).  Suppression is **per cell** (a
+   second tied variable still dispatches from inside), ends with the
+   handler including on a non-local exit, and does **not** hide the tie
+   from `tied()`, which still reports the object.
+4. **Re-tying replaces the magic, it does not stack**: a second `tie` on
+   an already-tied cell carries the existing raw slot forward rather than
+   saving the old proxy as the new "value".
+
+PCL implements 1–4 by swapping the raw value into the box for the
+duration of the handler call (`%with-tie-magic-off`), so no read/write
+site needs a special case; only `tied`/`untie` consult the suppression
+list.
+
 ### 2.3 Arrays
 
 A Perl array is an **adjustable vector with a fill pointer** (growable,

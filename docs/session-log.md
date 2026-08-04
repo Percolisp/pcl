@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 342 (2026-08-04, Opus) — #224: a tie handler must run with its own cell's magic OFF
+
+The E4.1 blocker, closed at the runtime.  The task's suspicion ("check `ref
+$_[0]` first — the invocant is a box wrapping a box") was **wrong**, and the
+cheap discriminating measurement said so in five minutes: a **30-line repro**
+with no Math::BigInt in it reproduces the runaway exactly, and the same file
+under perl prints `STORE` once.
+
+**The mechanism.**  Perl's mg.c wraps every magic callback in
+`save_magic`/`restore_magic`, which turns the SV's magic **off for the duration
+of the call**.  So a read or write of the tied variable from inside its own
+`FETCH`/`STORE` hits the raw slot and does not re-enter the handler.  PCL had
+no such thing, so Math::BigInt's `sub STORE { $rnd_mode = (ref $_[0]) ->
+round_mode($_[1]) }` — which assigns to the very variable it proxies — recursed
+until the binding stack died.
+
+PCL now models the raw slot with the proxy's `saved-value` and **swaps it into
+the box for the duration** (`%with-tie-magic-off`), so every read/write site
+sees an ordinary box and needs no special case; only `tied`/`untie` consult the
+suppression list, because perl's `tied()` still reports the object from inside a
+handler (probed).  Three companion rules fell out of probing the model and are
+implemented with it: a write hits the raw slot **before** `STORE` runs
+(`sv_setsv` then `mg_set`), a `FETCH` result is written **back** to the raw slot
+(`magic_methpack`), and **re-tying replaces** the magic rather than nesting
+proxies.  Normative write-up: `docs/ir-spec.md` §2.2b.
+
+**Two things the first attempt got wrong, both caught by the gate.**
+
+- Writing the `unwind-protect` inline at the call sites blew up compilation:
+  `unbox` is `declaim`ed inline and `p-scalar-=` expands into generated code, so
+  the form multiplied across the image and **SBCL exhausted a 1 GB heap
+  compiling socket-01.t** (11 files failed, most of them nothing to do with
+  tie).  The machinery lives in three out-of-line `defun`s now.
+- The `FETCH` write-back exposed a **latent bug in `p-tie`**: re-tying an
+  already-tied cell saved the OLD PROXY as the new raw slot, so proxies nested
+  and a magic-off read handed a live proxy back to the caller.  join.t ties the
+  same separator three times — it went 43/43 → 39 and aborted.  `p-tie` now
+  carries the existing raw slot forward.
+
+Math::BigInt on v2 is byte-identical to perl (new/add/mul/round_mode/`$rnd_mode`),
+so the parked narrowing can land.  Gate 131 files / **4602** PASS (+3 tie rows,
+one of them the per-box/end-of-handler INVERSE).  Runtime-only change: no
+emission difference, no generation bump, no artifact regeneration.
+
+---
+
 ## Session 341b (2026-08-04, Opus) — E4.1 pre-work: the rule-2 audit found two live v1 fallbacks, one shipped, one blocked
 
 Guardrail §5a.2 says the live v1 share must be ZERO before the gate flip, and

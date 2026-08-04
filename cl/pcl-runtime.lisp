@@ -979,9 +979,10 @@
 ;;; The saved-value is restored when untie() is called.
 
 (defstruct p-tie-proxy
-  "Holds the tie object and the pre-tie value for a tied scalar."
-  tie-obj       ; object returned by TIESCALAR/TIEARRAY/TIEHASH
-  saved-value)  ; p-box-value before tie was installed (restored on untie)
+  "Holds the tie object and the RAW slot value of a tied scalar."
+  tie-obj            ; object returned by TIESCALAR/TIEARRAY/TIEHASH
+  saved-value        ; the RAW slot (pre-tie value, then magic-off writes)
+  (untied nil))      ; untie() ran from inside this box's own tie handler
 
 ;; A tie object can hold a (blessed) ref back to the very box it proxies — e.g.
 ;; `sub TIESCALAR { bless \my $x }` — making the structure self-referential.
@@ -989,6 +990,75 @@
 ;; stack, so print opaquely instead of descending into the slots.
 (defmethod print-object ((p p-tie-proxy) stream)
   (print-unreadable-object (p stream :type t :identity t)))
+
+;;; Perl's save_magic/restore_magic (mg.c): while a tie handler for an SV is on
+;;; the stack, THAT SV's magic is off, so a read or write of the tied variable
+;;; from inside its own FETCH/STORE hits the raw slot instead of re-entering the
+;;; handler.  Math::BigInt depends on it — `sub STORE { $rnd_mode = ... }`
+;;; assigns to the very variable it proxies, and its round_mode() setter writes
+;;; the same cell through a symbolic ref; without suppression that recurses
+;;; until the binding stack dies (task #224).
+;;;
+;;; The raw slot is the proxy's saved-value: swap it into the box for the
+;;; duration so every read/write site sees a plain box with no special case,
+;;; then swap the proxy back — keeping whatever the handler wrote — on the way
+;;; out, including a non-local exit.
+(defvar *p-tie-magic-off* nil
+  "Alist of (box . proxy) for tie handlers currently on the stack.  Only
+   tied()/untie() consult it; every other site sees an ordinary box.")
+
+(defun %p-suppressed-proxy (box)
+  "The tie proxy of BOX when BOX's magic is temporarily off because one of its
+   own tie handlers is running.  NIL otherwise."
+  (cdr (assoc box *p-tie-magic-off* :test #'eq)))
+
+;;; The three dispatch helpers below are the ONLY users of the macro.  They are
+;;; deliberately out-of-line: `unbox` is declaimed inline and `p-scalar-=`
+;;; expands into generated code, so an inline unwind-protect at either site
+;;; multiplies across the whole image (measured s342: SBCL exhausted a 1 GB heap
+;;; compiling socket-01.t).
+(defmacro %with-tie-magic-off ((box proxy) &body body)
+  "Run BODY (a FETCH/STORE dispatch) with BOX's tie magic suppressed."
+  (let ((b (gensym "BOX"))
+        (p (gensym "PROXY")))
+    `(let* ((,b ,box)
+            (,p ,proxy)
+            (*p-tie-magic-off* (cons (cons ,b ,p) *p-tie-magic-off*)))
+       (setf (p-box-value ,b) (p-tie-proxy-saved-value ,p)
+             (p-box-nv-ok ,b) nil
+             (p-box-sv-ok ,b) nil)
+       (unwind-protect (progn ,@body)
+         (setf (p-tie-proxy-saved-value ,p) (p-box-value ,b))
+         (unless (p-tie-proxy-untied ,p)
+           (setf (p-box-value ,b) ,p))
+         (setf (p-box-nv-ok ,b) nil
+               (p-box-sv-ok ,b) nil)))))
+
+(defun %p-tie-fetch (box proxy)
+  "Perl's mg_get: call FETCH with BOX's magic off.  Returns the method's raw
+   result — callers apply their own unbox/to-number/to-string."
+  (%with-tie-magic-off (box proxy)
+                       (let ((result (p-method-call (p-tie-proxy-tie-obj proxy) "FETCH")))
+                         ;; mg.c's magic_methpack ends in sv_setsv(sv, result) —
+                         ;; the raw slot holds the last FETCH, which is what an
+                         ;; untie() leaves behind.
+                         (box-set box result)
+                         result)))
+
+(defun %p-tie-store (box proxy value plain)
+  "Perl's sv_setsv + mg_set: write the raw slot, then call STORE with BOX's
+   magic off.  VALUE goes through box-set (full copy semantics); PLAIN is the
+   already-unboxed value handed to STORE."
+  (%with-tie-magic-off (box proxy)
+                       (box-set box value)
+                       (p-method-call (p-tie-proxy-tie-obj proxy) "STORE" plain)))
+
+(defun %p-tie-store-ref (box proxy ref)
+  "Like %p-tie-store for the reference path of p-scalar-=, where the raw write
+   stores the box itself rather than copying through box-set."
+  (%with-tie-magic-off (box proxy)
+                       (setf (p-box-value box) ref)
+                       (p-method-call (p-tie-proxy-tie-obj proxy) "STORE" ref)))
 
 ;;; A magical scalar lvalue.  Like p-tie-proxy it lives in a p-box's value slot
 ;;; and is intercepted at the unbox/box-set chokepoints, but it dispatches to two
@@ -1010,7 +1080,7 @@
       (let ((v (p-box-value val)))
         (cond
           ((p-tie-proxy-p v)
-           (unbox (p-method-call (p-tie-proxy-tie-obj v) "FETCH")))
+           (unbox (%p-tie-fetch val v)))
           ((p-magic-cell-p v)
            (funcall (p-magic-cell-getter v)))
           (t v)))
@@ -1425,9 +1495,11 @@
   ;; Tied variable: delegate to STORE.  Magic lvalue: delegate to its setter.
   (let ((current (p-box-value box)))
     (when (p-tie-proxy-p current)
-      (return-from box-set
-        (p-method-call (p-tie-proxy-tie-obj current) "STORE"
-                       (if (p-box-p value) (unbox value) value))))
+      ;; Perl's sv_setsv writes the raw slot FIRST, then calls mg_set with the
+      ;; SV's magic off — so untie() after `$tied = "A"` leaves "A" behind, and
+      ;; a read of the tied variable inside STORE sees "A" (probed s342).
+      (let ((plain (if (p-box-p value) (unbox value) value)))
+        (return-from box-set (%p-tie-store box current value plain))))
     (when (p-magic-cell-p current)
       (return-from box-set
         (funcall (p-magic-cell-setter current)
@@ -1445,7 +1517,7 @@
                    ;; Without this, assigning $c = $tied_var copies the proxy
                    ;; into $c, making $c appear tied too.
                    ((p-tie-proxy-p inner)
-                    (unbox (p-method-call (p-tie-proxy-tie-obj inner) "FETCH")))
+                    (unbox (%p-tie-fetch value inner)))
                    ;; Magic source ($c = $$arylen_ref): copy the getter's VALUE,
                    ;; not the magic cell itself (else $c would alias the magic).
                    ((p-magic-cell-p inner)
@@ -1868,7 +1940,7 @@
   (let ((inner (p-box-value box)))
     (when (p-tie-proxy-p inner)
       (return-from box-nv
-        (to-number (p-method-call (p-tie-proxy-tie-obj inner) "FETCH"))))
+        (to-number (%p-tie-fetch box inner))))
     (when (p-magic-cell-p inner)
       (return-from box-nv (to-number (funcall (p-magic-cell-getter inner))))))
   ;; use overload "0+" (numify): call handler if registered for this class
@@ -2019,7 +2091,7 @@
   (let ((inner (p-box-value box)))
     (when (p-tie-proxy-p inner)
       (return-from box-sv
-        (to-string (p-method-call (p-tie-proxy-tie-obj inner) "FETCH"))))
+        (to-string (%p-tie-fetch box inner))))
     (when (p-magic-cell-p inner)
       (return-from box-sv (to-string (funcall (p-magic-cell-getter inner))))))
   ;; use overload '""' (stringify): call handler if registered for this class.
@@ -3928,7 +4000,7 @@
              (setf (symbol-value ',place) (make-p-box nil)))
            (let ((,cur (p-box-value ,place)))
              (if (p-tie-proxy-p ,cur)
-                 (p-method-call (p-tie-proxy-tie-obj ,cur) "STORE" ,val)
+                 (%p-tie-store-ref ,place ,cur ,val)
                  (setf (p-box-value ,place) ,val
                        (p-box-nv-ok ,place) nil
                        (p-box-sv-ok ,place) nil)))
@@ -13909,8 +13981,14 @@ buffer's fill-pointer; everything else falls back to file-length."
                        (error (e)
                          (warn "PCL: tie ~A->~A failed: ~A" classname constructor e)
                          (return-from p-tie *p-undef*))))
+         ;; Re-tying an already-tied variable REPLACES the magic; it does not
+         ;; stack.  Carry the raw slot across, or the old proxy becomes the new
+         ;; proxy's "raw" value and every magic-off read hands a live proxy back
+         ;; to the caller (join.t, tied separator tied three times).
          (proxy (make-p-tie-proxy :tie-obj tie-result
-                                  :saved-value current)))
+                                  :saved-value (if (p-tie-proxy-p current)
+                                                   (p-tie-proxy-saved-value current)
+                                                   current))))
     (setf (p-box-value box) proxy
           (p-box-sv-ok box) nil
           (p-box-nv-ok box) nil)
@@ -13921,21 +13999,34 @@ buffer's fill-pointer; everything else falls back to file-length."
    Calls UNTIE on the tie object if the method exists."
   (when (p-box-p box)
     (let ((v (p-box-value box)))
-      (when (p-tie-proxy-p v)
-        (ignore-errors
-          (p-method-call (p-tie-proxy-tie-obj v) "UNTIE"))
-        (setf (p-box-value box) (p-tie-proxy-saved-value v)
-              (p-box-sv-ok box) nil
-              (p-box-nv-ok box) nil))))
+      (cond
+        ((p-tie-proxy-p v)
+         (ignore-errors
+           (p-method-call (p-tie-proxy-tie-obj v) "UNTIE"))
+         (setf (p-box-value box) (p-tie-proxy-saved-value v)
+               (p-box-sv-ok box) nil
+               (p-box-nv-ok box) nil))
+        ;; untie() from inside this box's own tie handler: the raw slot is
+        ;; already exposed, so just mark the proxy dead so %with-tie-magic-off
+        ;; does not reinstall it on the way out.
+        ((%p-suppressed-proxy box)
+         (let ((proxy (%p-suppressed-proxy box)))
+           (ignore-errors
+             (p-method-call (p-tie-proxy-tie-obj proxy) "UNTIE"))
+           (setf (p-tie-proxy-untied proxy) t))))))
   (make-p-box 1))
 
 (defun p-tied (box)
   "Perl tied() - returns the tie object if box is tied, undef otherwise."
   (if (p-box-p box)
       (let ((v (p-box-value box)))
-        (if (p-tie-proxy-p v)
-            (p-tie-proxy-tie-obj v)
-            *p-undef*))
+        (cond
+          ((p-tie-proxy-p v) (p-tie-proxy-tie-obj v))
+          ;; Magic is temporarily off (one of this box's handlers is running),
+          ;; but perl's tied() still reports the object there (probed s342).
+          ((%p-suppressed-proxy box)
+           (p-tie-proxy-tie-obj (%p-suppressed-proxy box)))
+          (t *p-undef*)))
       *p-undef*))
 
 (defun p-scalar (&rest args)
@@ -14233,7 +14324,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; If obj is a box containing a tie-proxy, FETCH to get the invocant
          (resolved-obj (if (and (p-box-p obj)
                                 (p-tie-proxy-p (p-box-value obj)))
-                           (unbox (p-method-call (p-tie-proxy-tie-obj (p-box-value obj)) "FETCH"))
+                           (unbox (%p-tie-fetch obj (p-box-value obj)))
                            obj))
          (raw-class (%pcl-invocant-class resolved-obj))
          ;; Perl treats "" as "main" and "::" as "main::" in package/method contexts.
