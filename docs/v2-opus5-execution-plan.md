@@ -274,14 +274,24 @@ later.  Hence:
    attributable to E4.1.  If #223's audit cannot attribute the whole +8,
    that is a finding; stop and write it up, do not bless it away.
 2. **Measure before you delete: the live v1 share must be ZERO.**
-   `tools/v2-census.pl` (111/111) covers the corpus files only.  The
-   pipeline marker exists for exactly this audit: wipe `~/.pcl-cache`,
-   run the full sweep + the CPAN board, then (a) grep everything the run
-   cached/emitted for `pipeline=v1` (`grep -ar` — NUL gotcha) and (b)
-   re-run with `PCL_V2_VERBOSE=1` to catch fallbacks that never reach the
-   cache (eval-strings, subprocess loads).  **Every v1 hit found is
-   PRE-WORK to fix before step 2 — never an acceptable loss.**  Two hits
-   with the same `Parser2 TODO:` text are one family; fix the family.
+   `tools/v2-census.pl` (111/111) covers the corpus files only.  **This
+   audit RAN (s342c) — read `docs/v1-live-share-audit.md`; it is NOT
+   satisfied.**  Cold-cache full sweep = 24 v1 routes, cold-cache
+   four-dist CPAN board = 36, in **six real families** (tasks #226–#230)
+   plus one benign class.  **Every v1 hit found is PRE-WORK to fix before
+   step 2 — never an acceptable loss.**  Two hits with the same
+   `Parser2 TODO:` text are one family; fix the family.
+
+   *Method note (s342c): a `pipeline=v1` cache grep UNDER-COUNTS badly* —
+   it is blind to every route whose output never becomes a cache entry
+   (eval-strings, `fresh_perl` children, temp `.t` transpiles), which is
+   most of them; the s341 grep saw 2 of 60 events.  Use the file
+   side-channel instead: `PCL_V2_AUDIT_LOG=<path>` makes `pl2cl` append one
+   line per v1 route, classified **TODO** (a real v2 gap) vs **DIE** (v2
+   correctly raising a Perl-level error that the fallback then pointlessly
+   retries — no work, it self-resolves at the flip).  `PCL_V2_VERBOSE=1`
+   is not usable for this: it writes to stderr, which the sweep folds into
+   TAP.
 3. **`eval $str` is load-bearing (hard requirement, memory + §1).**
    `parse_with_fallback` currently catches an eval-mode Parser2 TODO and
    silently retries v1; after step 2 that same TODO becomes a user-visible

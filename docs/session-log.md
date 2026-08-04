@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 342c (2026-08-04, Opus) — #225: the live v1 share is SIX families, not zero
+
+The audit guardrail §5a.2 demands before E4.1 deletes v1.  It is now done, and
+the answer is that **the gate flip is not close**: `docs/v1-live-share-audit.md`
+records **60 v1 routes on a cold cache** — 24 across the full perl-tests sweep,
+36 across the four-dist CPAN board — in **six real families**, filed as tasks
+**#226–#230**.
+
+**The method was the finding.**  s341b answered this with a `pipeline=v1` grep
+over `~/.pcl-cache` and found *two* hits.  That method is blind by construction
+to every v1 route whose output never becomes a cache entry — eval-strings,
+`fresh_perl`/`runperl` children, temp `.t` transpiles — which is **most of
+them: the grep saw 2 of 60.**  The replacement is a file side-channel at the
+single fallback point (`pl2cl`'s `parse_with_fallback`): `PCL_V2_AUDIT_LOG`
+appends one line per v1 route.  `PCL_V2_VERBOSE` cannot serve — it writes to
+stderr, which a sweep folds into TAP.
+
+It also classifies, and the split matters: **TODO** (the die began
+`Parser2 TODO:` — a real v2 gap) vs **DIE** (v2 correctly raising a *Perl-level*
+error, which the fallback then pointlessly retries on v1 and which raises the
+same thing).  Five of the 24 sweep events are DIE — chop.t's four
+`eval 'chop($x) = 1'` rows, already blessed skips — so a raw fallback count
+over-states the gap by a fifth.
+
+The six families: eval-mode multi-segment package statement (24 events, #226);
+eval-mode trailing my/our declaration (10, #227); the **deliberate** block-form
+capture gate #26, which eight CPAN-board `.t` files ride on today (8, #230);
+`PPI parse failed` on fresh_perl children (6, #228 — guardrail §5a.4's
+lenient-ppi case); **two more perl CORE modules** the sweep-only audit could
+not see, `CPAN::Meta::Requirements::Range` (the cond-my poison test still has a
+false positive after s342b) and `ExtUtils::MM_Unix` (5, #229); and the
+oversized-run-form refusal (1, #230).  Counts are events, not files, and four
+dists is a narrow board — six is a **floor**.
+
+Attribution measured in passing: the four-dist board is **byte-identical**
+between `1e2e6ef` and `46f8a38`, so neither s342 commit moved it; the 8-row
+delta against `docs/cpan-scoreboard.tsv` is entirely the already-filed #208
+drift, re-measured here as *stable since s330*, not growing.
+
+---
+
 ## Session 342b (2026-08-04, Opus) — the parked cond-my narrowing lands; E4.1 step 0 is done
 
 With #224 fixed the branch that had been waiting on it (`d0e8247`) applies

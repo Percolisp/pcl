@@ -48,6 +48,27 @@ if ($ENV{PCL_V1}) {
 # prototype can't handle (e.g. one with `package` statements) still loads via
 # the original pipeline.  Modes the prototype doesn't implement (eval-string,
 # lenient-ppi) route straight to v1.
+# Audit side-channel for the E4.1 rule-2 sweep (plan §5a.2/§5a.3): "how much
+# is still on v1" cannot be answered from ~/.pcl-cache alone, because an
+# eval-string or a subprocess transpile never reaches the cache — and it cannot
+# be answered from PCL_V2_VERBOSE either, because that writes to stderr, which
+# the sweep folds into TAP.  With PCL_V2_AUDIT_LOG set, every v1 route appends
+# one short line to that file instead (append-only, one line per event, well
+# under PIPE_BUF so concurrent jobs interleave cleanly).
+sub audit_v1_route {
+  my ($why, $method, $subject, $err) = @_;
+  my $log = $ENV{PCL_V2_AUDIT_LOG} or return;
+  my $what = (defined $subject && $subject !~ /\n/ && length($subject) < 200)
+             ? $subject : '(inline code)';
+  $err = defined $err ? $err : '';
+  $err =~ s/\s+/ /g;
+  $err =~ s/^\s+|\s+$//g;
+  if (open my $fh, '>>', $log) {
+    print $fh join("\t", $why, $method, $what, substr($err, 0, 200)), "\n";
+    close $fh;
+  }
+}
+
 sub parse_with_fallback {
   my ($method, @args) = @_;
   if ($PARSER_CLASS eq 'Pl::Parser2') {
@@ -60,10 +81,21 @@ sub parse_with_fallback {
     # E3: eval-string mode is v2-native (Parser2 eval_mode/eval_pkg); any
     # other special mode still routes to v1.
     my %v2_modes = (eval_mode => 1, eval_pkg => 1);
-    if (!grep { !$v2_modes{$_} } keys %opts) {
+    my @unsupported = grep { !$v2_modes{$_} } keys %opts;
+    if (!@unsupported) {
       my $out = eval { Pl::Parser2->$method($args[0], %opts) };
       return pipeline_marker(v2 => $out) if defined $out;
       print STDERR "pl2cl: v2 fell back to v1: $@" if $ENV{PCL_V2_VERBOSE};
+      # Two very different events land here, and only one is a v2 GAP: a
+      # "Parser2 TODO:" die means v2 cannot lower this yet (pre-work), while
+      # any other die is v2 correctly reporting a Perl-level error — which the
+      # fallback then pointlessly retries on v1 (measured s342: chop.t's four
+      # `eval 'chop($x) = 1'` rows).  After the E4.1 gate flip the second kind
+      # simply becomes $@, unchanged; only the first kind changes behaviour.
+      audit_v1_route($@ =~ /^Parser2 TODO:/ ? 'TODO' : 'DIE',
+                     $method, $args[0], $@);
+    } else {
+      audit_v1_route('MODE', $method, $args[0], "mode: @{[sort @unsupported]}");
     }
   }
   return pipeline_marker(v1 => Pl::Parser->$method(@args));

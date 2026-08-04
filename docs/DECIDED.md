@@ -820,6 +820,17 @@ not-supported.md → only then probe.*
   REPLACES the magic instead of nesting proxies.  `tied()` still reports the
   object while magic is off.  Normative: `docs/ir-spec.md` §2.2b; guard
   `Pl/t/tie-01.t`.
+- **The live v1 share is SIX families, not zero — E4.1 §5a.2 is unsatisfied**
+  (#225 DONE s342c, `docs/v1-live-share-audit.md`; tasks #226–#230).  Measured
+  60 v1 routes on a cold cache (24 sweep + 36 CPAN board).
+- **A `pipeline=v1` cache grep UNDER-COUNTS the live v1 share** (s342c): it is
+  blind to every route whose output never becomes a cache entry — eval-strings,
+  `fresh_perl` children, temp `.t` transpiles.  The s341 grep saw 2 of 60.  The
+  measurement tool is `PCL_V2_AUDIT_LOG=<path>` (a file side-channel in
+  `pl2cl`), which also splits **TODO** (real v2 gap) from **DIE** (v2 correctly
+  raising a Perl-level error that the fallback needlessly retries on v1 — no
+  work, self-resolves at the flip).  `PCL_V2_VERBOSE` cannot do it: stderr is
+  folded into TAP by the sweep.
 - **Tie machinery must stay OUT OF LINE** (s342): `unbox` is `declaim`ed inline
   and `p-scalar-=` expands into generated code, so an `unwind-protect` written
   at either site multiplies across the whole image — the first attempt made
