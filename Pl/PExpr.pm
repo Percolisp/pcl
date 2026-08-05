@@ -2862,16 +2862,29 @@ sub handle_subcalls {
             }
             $self->add_child_to_node($top_id, $ref_id);
           } else {
-            # Parse block as a named function and get its name.
-            # A &-prototype sub (e.g. try/catch) receives the block as an
-            # anonymous sub: it must accept call arguments via @_, since the
-            # caller may invoke it with args (Try::Tiny's catch passes $error).
-            my $block_func_name =
-              $self->parser->parse_block_as_function($next, $params, $has_block_proto);
-
-            # Create a func_ref node that holds the function name
+            # A &-prototype sub (e.g. try/catch, first/reduce) receives the
+            # block as an anonymous sub: it must accept call arguments via @_,
+            # since the caller may invoke it with args (Try::Tiny's catch
+            # passes $error).  task #78: with the v2 hook the whole lambda
+            # arrives as one CLForm IN PLACE (the same anon-sub wrapper), so
+            # it stays inside the enclosing lexical `let` and closes over it.
+            # v1's route instead emits a top-level `(defun --anon-block-N--)`
+            # that Parser2's seam then HOISTS out of that let — the bug the
+            # #26 gate guards against (fable-answers-s345.md §3).
+            # When the hook declines (or is absent — the seam localizes it OFF
+            # during the discarded native attempt), ask v1 for a LAMBDA
+            # ($return_lambda=1), not a defun: same in-place hosting, and no
+            # emitted `--anon-block-N--` left behind in the bucket for the
+            # seam to drain.  This is the sibling anon-`sub {…}` branch's own
+            # call below, with the block-proto params.
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-            $ref_node->{func_name} = $block_func_name;
+            my $lambda_form = $self->_v2_embedded_body($next, 'sub');
+            if ($lambda_form) {
+              $ref_node->{lambda_form} = $lambda_form;
+            } else {
+              $ref_node->{raw_lambda} =
+                $self->parser->parse_block_as_function($next, $params, $has_block_proto, 1);
+            }
             $self->add_child_to_node($top_id, $ref_id);
           }
         } else {

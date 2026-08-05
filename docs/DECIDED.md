@@ -906,3 +906,22 @@ Full rulings: `docs/fable-answers-s345.md`.  All eleven commits (`0e73b13`…
   an ASK before building) → #237/#238/#239.
 - **Queue**: #78 → #226 → #230 → E4.1 steps 1–4 → STOP, Fable takes #153/E5.0
   steps 1–2.
+
+## s346 (Opus, 2026-08-06) — #78 DONE: block-form arg bodies host IN PLACE
+
+- **A `&`-prototype block arg lowers as an inline lambda at the call site**, not
+  as a hoisted `--anon-block-N--` defun: `Pl/PExpr.pm`'s block-proto branch asks
+  `_v2_embedded_body($block,'sub')` (the anon-`sub {}` sibling's own route), and
+  when that DECLINES asks v1 for a LAMBDA (`$return_lambda=1`), never a defun.
+  The second half matters as much as the first: the seam localizes the embed
+  hook OFF during its discarded native attempt, so the old code left a DEAD
+  defun in the bucket whose text still tripped the gate.
+- **F3 is CLEARED**: live-v1 board events 8 → 0 (`docs/v1-live-share-audit.md`).
+  Corpus emission identical; gate 131/4633; sweep 0 new/0 fixed/0 LOST.  Board
+  statuses match the s343 snapshot except S-L-U `reduce.t` 21 ok/11 → 23 ok/9
+  (two v1 defects, both now agreeing with perl).
+- **The #26 gate STAYS as an unreached backstop** — the three decline shapes
+  (`package` stmt, named sub, `use`) all lower in place and match perl, so it
+  has no producer; deleting it is E4.1 step 3's reachability job, with its
+  three proofs, not a side effect of this change.
+- **Queue now**: #226 → #230 (F6 split; F3 half done) → E4.1 steps 1–4 → STOP.

@@ -165,11 +165,17 @@ my $s5 = Pl::Parser2->parse_code(
   q{sub h3 { my $x = shift; my $t = 1; my $z = shift; return $x + $t + $z; } print h3(1,2);});
 like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run stays on old path');
 
-# ---- block-form-arg capture gate (Try-Tiny `catch { $caught = $_ }` class) ----
+# ---- block-form-arg bodies re-hosted IN PLACE (Try-Tiny `catch { $caught = $_ }`) ----
 
-# A block-form-prototype arg's body hoists as a top-level --anon-block-N--
-# defun, OUTSIDE the lexical lets; if it references a live lexical, the file
-# must gate to v1 (v2 would read an unbound global from the hoisted defun).
+# A block-form-prototype arg's body used to go through v1's
+# parse_block_as_function, which emits a top-level `--anon-block-N--` defun
+# that the expression seam then HOISTS to the section top, OUTSIDE every
+# lexical `let` — so a body referencing a live lexical read an unbound global,
+# and the whole file had to gate to v1 (the #26 gate).  Task #78 re-hosts the
+# body as an inline lambda AT THE CALL SITE, inside the enclosing let, where
+# it closes over the lexical.  These are the INVERSE guards of the old gate
+# assertions: what must hold now is "no hoisted defun, and the lambda is
+# lexically inside the $caught binding".
 {
   my $src_cap = q{
     sub try2 (&;@) { my ($t, @h) = @_; my @r = eval { $t->() }; if ($@) { for my $h (@h) { return $h->($@) } } return @r; }
@@ -179,18 +185,63 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     print $caught;
   };
   my $cl = eval { Pl::Parser2->parse_code($src_cap) };
-  like($@, qr/block-form arg body captures live lexical 'caught'/,
-       'block-form arg body capturing a live lexical gates to v1');
+  ok(defined $cl && $cl !~ /--anon-block-/,
+     'capturing block-form arg lowers natively — no hoisted defun') or diag($@);
+  # The write to $caught must sit INSIDE the `(let (($caught …))` that binds
+  # it — the property the hoist destroyed.  Checked by real paren nesting:
+  # count depth from the binding let to the assignment and require it never
+  # returns to 0.  Strings and char literals are skipped, because a
+  # `die "boom\n"` puts a genuine newline inside a CL string and a
+  # column/line-based scan would misread its closing line as top level.
+  {
+    my $open  = index($cl // '', "\n(let ((\$caught ");
+    my $write = index($cl // '', '(p-my-= $caught (p-aref @_ 0))');
+    my ($depth, $min) = (0, 0);
+    if ($open >= 0 && $write > $open) {
+      my $span = substr($cl, $open + 1, $write - $open - 1);
+      while ($span =~ /\G(?:"(?:[^"\\]|\\.)*"|\#\\.|(\()|(\))|.)/gs) {
+        $depth++ if $1;
+        if ($2) { $depth--; $min = $depth if $depth < $min }
+      }
+    }
+    ok($open >= 0 && $write > $open && $min >= 0 && $depth > 0,
+       'the re-hosted lambda sits inside the lexical let it captures')
+      or diag("open=$open write=$write depth=$depth min=$min");
+  }
 
-  # Same shape with NO lexical capture in the block → still lowers natively.
+  # Same shape with NO lexical capture in the block → same in-place lambda.
   my $src_ok = q{
     sub try2 (&;@) { my ($t, @h) = @_; my @r = eval { $t->() }; if ($@) { for my $h (@h) { return $h->($@) } } return @r; }
     sub catch2 (&;@) { my ($b, @rest) = @_; return ($b, @rest); }
     try2 { die "boom\n" } catch2 { print "caught" };
   };
   my $ok = eval { Pl::Parser2->parse_code($src_ok) };
-  ok(defined $ok && $ok =~ /--anon-block-/, 'non-capturing block-form arg still lowers natively')
-    or diag($@);
+  ok(defined $ok && $ok !~ /--anon-block-/ && $ok =~ /\(catch :p-return \(block nil \(p-print "caught"\)\)\)/,
+     'non-capturing block-form arg lowers to the same in-place lambda') or diag($@);
+
+  # DECLINE RESIDUE: bodies the embed hook refuses (a `package` statement needs
+  # v1's revert wrapper; a named sub / `use` hoists) must ALSO stay in place —
+  # they take v1's $return_lambda route, which produces the lambda as text
+  # rather than emitting a `--anon-block-N--` defun for the seam to hoist.
+  # This is what makes the #26 gate unreachable rather than merely narrower;
+  # the gate itself stays as the drain's backstop until E4.1's reachability
+  # pass retires it.  Runtime parity for these three is checked against perl
+  # in the sweep/board, not here (this file is shape-only outside SKIP).
+  for my $r (['package stmt',  'package Foo; $caught = 1'],
+             ['named sub',     'sub helper { 7 } $caught = helper();'],
+             ['use statement', 'use List::Util qw(sum); $caught = sum(1,2,3);']) {
+    my ($what, $body) = @$r;
+    my $src = qq{
+      sub try2 (&;\@) { my (\$t) = \@_; return \$t->(); }
+      my \$caught = "none";
+      try2 { $body };
+      print \$caught;
+    };
+    my $out = eval { Pl::Parser2->parse_code($src) };
+    ok(defined $out && $out !~ /--anon-block-/,
+       "declining body ($what) still lowers in place — no hoisted defun")
+      or diag($@);
+  }
 }
 
 # ---- state in named subs: native per-sub cell (rename family __state__N) ----

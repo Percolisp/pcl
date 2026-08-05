@@ -45,7 +45,7 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 |---|---|---|---|---|
 | F1 | `eval-mode multi-segment (top-level package statement)` — **NARROWED s342g** | 6 + 18 = **24** | TODO | the **Role::Tiny idiom**: `eval "package X; use Role::Tiny; …"` (all 18 board events) |
 | F2 | `eval-mode trailing my/our declaration (value-losing let)` — **CLEARED s342f** except one shape | 6 + 4 = **10** | TODO | `eval "our $VERSION = '1.01'"` (the whole CPAN half); `eval 'my ()'`; perl-syntax-error probes |
-| F3 | `block-form arg body captures live lexical` | 0 + 8 = **8** | TODO | Try-Tiny `basic/finally/named/when.t`, S-L-U `first/pair/reduce/rt-96343.t` |
+| F3 | `block-form arg body captures live lexical` — **CLEARED s346 (task #78)** | 0 + 8 = **8** → **0** | TODO | was: Try-Tiny `basic/finally/named/when.t`, S-L-U `first/pair/reduce/rt-96343.t` |
 | F4 | `Parser2: PPI parse failed` | 6 + 0 = **6** | TODO | `/tmp/pcl_fp_*.pl` — `fresh_perl`/`runperl` children |
 | F5 | perl **core modules** still gating — **CLEARED s342d** | 0 + 5 = **5** | TODO | `CPAN::Meta::Requirements::Range` (poisoned cond-my `$err`, ×3); `ExtUtils::MM_Unix` (self-referential my-init with a below-assignment tail, ×2) |
 | F6 | `oversized top-level run form (73769 chars > 64000)` | 1 + 0 = **1** | TODO | a deliberate v2 refusal — the form would exhaust the SBCL compiler heap |
@@ -79,10 +79,20 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   a declaration buried in a comma expression, which is the #138 family.  Its
   test asserts nothing (`pass()`), and *both* pipelines get the value wrong
   today (perl 5 elements, v1 0), so the flip costs nothing there.
-- **F3 is a DELIBERATE gate, not a defect** — task #26 shipped it to avoid the
-  Try::Tiny catch-block miscompile. It is nonetheless a live v1 dependency:
-  eight `.t` files in the CPAN board transpile through v1 today, so removing
-  v1 turns the gate into a hard failure for all of them.
+- **F3 is CLEARED (s346, task #78) — 8 board events → 0.**  It was a DELIBERATE
+  gate (task #26, to avoid the Try::Tiny catch-block miscompile), guarding the
+  v1-seam HOIST of a block-form arg's `--anon-block-N--` defun out of its
+  lexical `let`.  The #78 re-host removes the hoist: the `&`-prototype block
+  now lowers as an inline lambda AT THE CALL SITE (the `_v2_embedded_body`
+  route the anon-`sub {}` sibling already used), and when the embed hook
+  declines it takes v1's `$return_lambda=1` text — also in place.  So no defun
+  reaches the drain and the gate has no producer left; it stays as the drain's
+  backstop until E4.1 step 3's reachability pass retires it.
+  *Measured*: the two probes that used to gate now match perl; board file
+  statuses identical to the s343 snapshot except S-L-U `reduce.t`
+  21 ok/11 → **23 ok/9** (t25 "reduce in list context yields only final
+  answer", t32 "missing SMG rt#121992" — both v1 defects, both agree with perl
+  now).  `docs/cpan-scoreboard.tsv` edited for that one row.
 - **F5 is CLEARED (s342d, task #229)** — it was two false positives of the same
   kind: a check treating a *binding* as evidence of a live global / a real read.
   `ExtUtils::MM_Unix` gated because the self-init check scanned TEXT, and

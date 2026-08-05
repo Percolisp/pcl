@@ -261,8 +261,16 @@ release checks surface divergences, triage those first, per
 >   are rephrased perl-shaped (`PCL: unsupported in string eval: …`) in that
 >   same commit (§5a.3).
 >
-> **Pre-work order: #78 → #226 → #230 (F6 split + F3 gate re-measure/delete)
-> → steps 1–4 below.**
+> **Pre-work order: ~~#78~~ → #226 → #230 (F6 split) → steps 1–4 below.**
+>
+> **#78 is DONE (s346, gen v2-106).**  The `&`-prototype block arg lowers as an
+> inline lambda at the call site, and a DECLINED body takes v1's
+> `$return_lambda=1` text — also in place — so no `--anon-block-N--` defun
+> reaches the drain (including from the seam's discarded native attempt, where
+> the embed hook is localized off; that leaked dead defun was the last F3
+> event).  **F3 board events 8 → 0**; the #26 gate stays as an unreached
+> backstop for step 3's reachability pass to retire.  #230's remaining half is
+> the F6 run-form split.
 
 Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one

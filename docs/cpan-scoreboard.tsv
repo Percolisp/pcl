@@ -41,7 +41,7 @@ Scalar-List-Utils-1.70-0	pair.t	PARTIAL	12	7	0
 Scalar-List-Utils-1.70-0	product.t	PARTIAL	11	1	0
 Scalar-List-Utils-1.70-0	prototype.t	PARTIAL	9	4	0
 Scalar-List-Utils-1.70-0	readonly.t	PARTIAL	7	4	0
-Scalar-List-Utils-1.70-0	reduce.t	PARTIAL	21	11	0
+Scalar-List-Utils-1.70-0	reduce.t	PARTIAL	23	9	0
 Scalar-List-Utils-1.70-0	reductions.t	FAIL	0	0	0
 Scalar-List-Utils-1.70-0	refaddr.t	PARTIAL	23	9	0
 Scalar-List-Utils-1.70-0	reftype.t	FAIL	0	0	0

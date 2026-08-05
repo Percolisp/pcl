@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 346 (2026-08-06, Opus) — task #78: the block-form arg body is re-hosted IN PLACE; F3 cleared, the #26 gate has no producer left
+
+E4.1 pre-work item 1 (`fable-answers-s345.md` §3/§5).  gen **v2-106**.
+
+**The bug.** A `&`-prototype block-form arg (`try {} catch {}`, `first {} @l`,
+`reduce {} @l`) was the last shape still going through v1's
+`parse_block_as_function` with `$return_lambda=0`: that EMITS a top-level
+`(defun --anon-block-N-- …)` and returns its NAME.  The expression seam then
+drains that defun to the section top — outside every lexical `let` — so a body
+referencing a live lexical read an unbound global.  Task #26 shipped the
+conservative gate that made the whole file fall back to v1 rather than
+miscompile (`Parser2.pm` ~6276).
+
+**The fix — two edits, both in `Pl/PExpr.pm`'s block-proto branch, both reuse:**
+
+1. Ask `_v2_embedded_body($next, 'sub')` first, exactly as the anon-`sub {}`
+   sibling does; a lowered body becomes `lambda_form` on the func_ref node, so
+   the lambda sits AT THE CALL SITE, inside the `let`, closing over it.
+2. When the hook declines — or is absent, which is the case inside the seam's
+   DISCARDED native attempt (it localizes the hook off) — ask v1 for a LAMBDA
+   (`$return_lambda=1`), not a defun.  Without this, the discarded native parse
+   left a dead `--anon-block-N--` in the bucket whose TEXT still tripped the
+   gate: that was the last F3 event on the board (S-L-U `reduce.t`, matched via
+   the gate's sigil-blind scan — live `@a` against the block's `$a`).
+
+**Measured.**  F3 live-v1 events: sweep 0 (unchanged), CPAN board **8 → 0**.
+`tools/corpus-diff.pl`: emission identical to HEAD across 111 files (no
+perl-tests file uses the shape).  Gate 131 files / **4633** PASS.  Full sweep
+GATE clean — 0 new / 0 fixed / 0 LOST, TOTAL passing 18498 = baseline, the two
+blessed UNSTABLE crash-file rows only.  Four-dist board: every file's status
+identical to the s343 snapshot except S-L-U `reduce.t` **21 ok/11 → 23 ok/9**
+— t25 "reduce in list context yields only final answer" and t32 "missing SMG
+rt#121992", both v1 defects, both agreeing with perl now
+(`docs/cpan-scoreboard.tsv` edited for that one row).
+
+**The #26 gate STAYS** — but as an unreached backstop, not a live guard: the
+three decline shapes probed (`package` statement, named sub, `use` in the
+block) all lower in place now and all match perl, so nothing produces a drained
+defun.  Deleting it belongs to E4.1 step 3's reachability pass with its three
+proofs, not here.
+
+**Guards.** `Pl/t/parser2-02.t`'s two #26 assertions were INVERSE-flipped (they
+asserted the gate fires and that a `--anon-block-` defun exists — both are now
+the wrong behaviour) and joined by three decline-residue rows: +4 rows net.
+The "lambda is inside the let" check counts real paren depth across the span,
+skipping strings — a line/column scan misreads the closing line of
+`die "boom\n"`, whose CL string literal contains a real newline.
+
+---
+
 ## Session 345 (2026-08-06, Fable) — review of s341–s344: batch APPROVED, E4.1 pre-work ruled
 
 No code change — a review-and-rulings session (`docs/fable-answers-s345.md`,
