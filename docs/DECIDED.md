@@ -859,6 +859,17 @@ not-supported.md → only then probe.*
   FAILs on the 14-dist board are author-only tests (`1..0 # SKIP`) or files
   perl cannot run either.  **Always run the perl oracle beside the board** —
   real failures were 41, not 53.
+- **The perl oracle must NOT get `-I<dist>/lib` for an XS dist with no built
+  `.so`** (s344, `docs/cpan-board14-partials-s344.md`): perl then dies at `use`
+  and produces no TAP, so real failures read as "board artifact" — that is how
+  21 Scalar-List-Utils files (110 rows) were first misread. Run the oracle
+  against the *installed* module, and record that it may be an older version.
+- **The 635 PARTIAL rows of the 14-dist board are 8 families, 3 of them 85%**
+  (s344, #231, `docs/cpan-board14-partials-s344.md` + `-partial-causes-s344.tsv`):
+  Text-Balanced 300 (goto/tagbody #232, scope, extract offsets #237),
+  `caller()` fidelity 127 (#233 — `caller` returns 4 elements not 3, filename is
+  the generated `.lisp`, `$0` is `sbcl`, `#line` ignored), List::Util shim 110
+  (#238). Nothing there is a board artifact.
 - **There is no module called `XSLoader` to support — it is the XS boundary**
   (s343).  `Can't locate loadable object for module …` is PCL dying *exactly*
   as perl would without the `.so`, which is deliberate and load-bearing (it is

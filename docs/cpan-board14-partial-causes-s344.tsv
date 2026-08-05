@@ -1,0 +1,71 @@
+# s344 (#231): cause-classification of the 65 PARTIAL files of the 14-dist CPAN board.
+# Companion to docs/cpan-board14-survey-s343.md (which did the 53 FAILs).
+# Families: A-caller B-textbal(B1-goto,B2-scope,B3-extract) C-slu D-role E-capture F-dump G-trytiny H-single
+# PERL-PASS* = perl runs the file clean, but ONLY with the dist's own lib OFF (its XS is unbuilt);
+#              the oracle there is the INSTALLED List::Util, older than the 1.70 dist.
+# dist	file	family	perl	pcl_ok	pcl_notok	first_not_ok	first_diagnostic
+Class-Method-Modifiers-2.15-0	060-caller.t	A-caller	PERL-PARTIAL	4	1	not ok 2 - parent with modifiers sees 'main' as caller # TODO caller magic not implemented yet	
+Sub-Uplevel-0.2800-0	02_uplevel.t	A-caller	PERL-PASS	9	14	not ok 5 - die() not screwed up	# got: 'Died at /home/bernt/.cpan/build/Sub-Uplevel-0.2800-0/t/02_uplevel.t line 15. ' # expected: 'Died at sbcl line 13. '
+Sub-Uplevel-0.2800-0	03_nested_uplevels.t	A-caller	PERL-PASS	1	103	not ok 2 - Case: Call, Call, Call, Call, Wrap(Call)	# got: 'main, Call, Call, Call, Call, Wrap, Sub::Uplevel' # expected: 'main, Call, Call, Call, Call' # Real callers: main, Call, Call, Call, Call, Wra
+Sub-Uplevel-0.2800-0	04_honor_later_override.t	A-caller	PERL-PASS	5	2	not ok 6 - caller from subroutine calls custom routine	# got: 'main' # expected: 'niam'
+Sub-Uplevel-0.2800-0	05_honor_prior_override.t	A-caller	PERL-PASS	6	4	not ok 6 - custom caller() was used	
+Sub-Uplevel-0.2800-0	06_db_args.t	A-caller	PERL-PASS	2	1	not ok 3 - wrapper returned args correct	# got: 'ARRAY(0x2)' # expected: 'ARRAY(0x3)'
+Sub-Uplevel-0.2800-0	07_uplevel_too_high.t	A-caller	PERL-PASS	3	2	not ok 2 - wrapper returned correct caller	# got: 'Sub::Uplevel' # expected: 'main'
+Sub-Uplevel-0.2800-0	09_emptylist.t	A-caller	PERL-PASS	2	1	not ok 2 - caller(N) out of stack returns empty list	# got: '4' # expected: '0'
+Text-Balanced-2.07-0	07_exttag.t	B1-goto	PERL-PASS	18	86	not ok 1 - no error	# got: 'Execution of a form compiled with errors. Form: (go :failed) Compile-time error:
+Text-Balanced-2.07-0	09_gentag.t	B1-goto	PERL-PASS	12	69	not ok 1 - no error	# got: 'The variable @warnings is unbound. at (eval 0) line 0. ' # expected: ''
+Text-Balanced-2.07-0	03_extcbk.t	B2-scope	PERL-PASS	90	11	not ok 5 - no error	# got: 'The variable |Text::Balanced|::$mods is unbound. at (eval 1) line 1. ' # expected: ''
+Text-Balanced-2.07-0	02_extbrk.t	B3-extract	PERL-PASS	12	6	not ok 11 - <a q{uoted} ">" unbalanced right bracket of /(q>)/ either sort (`>>>""">>>>`) is okay >; matched l	# got: ' ' # expected: ';'
+Text-Balanced-2.07-0	05_extmul.t	B3-extract	PERL-PASS	59	27	not ok 1	# got: 'ARRAY(0x53)' # expected: 'ARRAY(0x54)' # got: # ARRAY(0x53)
+Text-Balanced-2.07-0	06_extqlk.t	B3-extract	PERL-PASS	137	99	not ok 73 - <<EOHERE;\nEOHERE\n; matched list	# got: '<' # expected: ';'
+Text-Balanced-2.07-0	08_extvar.t	B3-extract	PERL-PASS	363	2	not ok 362 - ========$a; matched list	# got: '=' # expected: ';'
+Scalar-List-Utils-1.70-0	dualvar.t	C-slu	PERL-PASS*	10	6	not ok 1 - Is a dualvar	
+Scalar-List-Utils-1.70-0	first.t	C-slu	PERL-PASS*	18	6	not ok 12 - undef active sub	# got: '' # expected to match: ^Can't undef active subroutine
+Scalar-List-Utils-1.70-0	getmagic-once.t	C-slu	PERL-PASS*	2	4	not ok 1	
+Scalar-List-Utils-1.70-0	head-tail.t	C-slu	PERL-PASS*	36	6	not ok 13	# got: '999' # expected: '3'
+Scalar-List-Utils-1.70-0	isvstring.t	C-slu	PERL-PASS*	2	1	not ok 2 - isvstring	
+Scalar-List-Utils-1.70-0	lln.t	C-slu	PERL-PASS*	15	4	not ok 8 - Inf	# got: '' # expected: '1'
+Scalar-List-Utils-1.70-0	openhan.t	C-slu	PERL-PASS*	13	3	not ok 2 - STDERR	# got: '*MAIN::stderr' # expected: 'GLOB(0x1)'
+Scalar-List-Utils-1.70-0	pair.t	C-slu	PERL-PASS*	12	7	not ok 2 - pairgrep scalar	# got: '4' # expected: '2'
+Scalar-List-Utils-1.70-0	product.t	C-slu	PERL-PASS*	11	1	not ok 1 - no args	# got: undef # expected: '1'
+Scalar-List-Utils-1.70-0	prototype.t	C-slu	PERL-PASS*	9	4	not ok 8 - @ prototype	# got: undef # expected: '@'
+Scalar-List-Utils-1.70-0	readonly.t	C-slu	PERL-PASS*	7	4	not ok 1 - number constant	
+Scalar-List-Utils-1.70-0	reduce.t	C-slu	PERL-PASS*	21	11	not ok 10 - sub reference	# got: undef # expected: '6'
+Scalar-List-Utils-1.70-0	refaddr.t	C-slu	PERL-PASS*	23	9	not ok 24	
+Scalar-List-Utils-1.70-0	reftype.t	C-slu	PERL-PASS*	26	4	not ok 15 - REF ref	# got: 'SCALAR' # expected: 'REF'
+Scalar-List-Utils-1.70-0	scalarutil-proto.t	C-slu	PERL-PASS*	4	9	not ok 2 - set prototype	# got: undef # expected: '$'
+Scalar-List-Utils-1.70-0	shuffle.t	C-slu	PERL-PASS*	6	1	not ok 7 - rigged rand() yields predictable output	# got: 'ARRAY(0x1)' # expected: 'ARRAY(0x2)'
+Scalar-List-Utils-1.70-0	tainted.t	C-slu	PERL-PASS*	2	3	not ok 3 - interpreter variable	
+Scalar-List-Utils-1.70-0	uniq.t	C-slu	PERL-PASS*	22	9	not ok 7 - uniqstr on undef yields a warning	
+Scalar-List-Utils-1.70-0	uniqnum.t	C-slu	PERL-PASS*	13	10	not ok 5 - uniqnum preserves uniqueness of high precision floats	# got: '1' # expected: '2'
+Scalar-List-Utils-1.70-0	weak.t	C-slu	PERL-PASS*	13	6	not ok 6	
+Scalar-List-Utils-1.70-0	zip.t	C-slu	PERL-PASS*	1	2	not ok 2 - zip of one list returns a list of singleton lists	# got: 'ARRAY(0x1)' # expected: 'ARRAY(0x2)'
+Class-Method-Modifiers-2.15-0	011-after-args.t	D-role	PERL-PASS	1	1	not ok 2 - after saw original arguments	1..2
+Class-Method-Modifiers-2.15-0	100-class-mop-method-modifiers.t	D-role	PERL-PASS	1	2	not ok 1 - ... got the right results back from the around methods (in list context)	# got: 'ARRAY(0x1)' # expected: 'ARRAY(0x2)'
+Class-Method-Modifiers-2.15-0	140-lvalue.t	D-role	PERL-PARTIAL	4	3	not ok 2 - around adding an lvalue attribute works	# got: '1' # expected: '2'
+Role-Tiny-2.002004-0	extend.t	D-role	PERL-PASS	2	2	not ok 3 - before step was run	# got: undef # expected: '1'
+Role-Tiny-2.002004-0	load-module.t	D-role	PERL-PASS	1	3	not ok 2 - modules not loaded if symbol table entries exist	# got: '1' # expected: '0' While evaluating the form starting at line 28, column 0 of not ok 3 - broken modules throw errors
+Role-Tiny-2.002004-0	overload.t	D-role	PERL-PASS	2	13	not ok 1 - subref overload	# got: 'MyClass=HASH(0x1)' # expected: 'welp'
+Role-Tiny-2.002004-0	role-basic-bugs.t	D-role	PERL-PASS	14	1	not ok 15 - Bar__WITH__Baz->can('ARRAY(0x4)')	# Bar__WITH__Baz->can('ARRAY(0x4)') failed 1..15
+Role-Tiny-2.002004-0	role-duplication.t	D-role	PERL-PASS	1	1	not ok 1 - duplicate roles detected	# got: 'Duplicated roles: Role1, Role2 ' # expected to match: \ADuplicated roles: Role1, Role2 
+Role-Tiny-2.002004-0	role-tiny-with.t	D-role	PERL-PASS	5	1	not ok 5	
+Role-Tiny-2.002004-0	stub.t	D-role	PERL-PASS	3	1	not ok 4	1..4
+Capture-Tiny-0.50-0	09-preserve-exit-code.t	E-capture	PERL-PASS	1	1	not ok 1 - $? preserved after capture ends	# got: '0' # expected: '42'
+Capture-Tiny-0.50-0	17-pass-results.t	E-capture	PERL-PASS	1	11	not ok 1 - capture -> STDOUT captured	# got: '' # expected: 'foo '
+Capture-Tiny-0.50-0	19-relayering.t	E-capture	PERL-PASS	3	2	not ok 1 - stdout: layers inside capture match previous	# got: ':' # expected: undef
+Capture-Tiny-0.50-0	25-cap-fork.t	E-capture	PERL-PASS	1	2	not ok 2 - got stderr	# got: '' # expected: 'Certainty '
+Data-Dump-1.25-0	filtered.t	F-dump	PERL-PASS	40	1	not ok 24	# Test 24 got: "0" (HASH(0xd){context}) # Expected: "Bar=HASH(0xc)"
+Data-Dump-1.25-0	hash.t	F-dump	PERL-PASS	4	1	not ok 4	# Test 4 got: "{ \"\" => 4, \"abc\" => 3, \"shift\" => 2, \"strict\" => 1 }" (HASH(0xb){context}) # Expected: "{ -f => 4, abc => 3, shift => 2, strict
+Data-Dump-1.25-0	quote-unicode.t	F-dump	PERL-PASS	7	1	not ok 5	# Test 5 got: "(\"\\x{FFF}\\x{100FF}\" x 60)" (HASH(0x6){context}) # Expected: "(\"\\x{FFF}\\x{100FF}\" x 30)"
+Data-Dump-1.25-0	ref.t	F-dump	PERL-PASS	1	1	not ok 2	# Test 2 got: "do {\n my $a = { C1 => \\\\do{my $fix}, C2 => 'fix' };\n ${${$a->{C1}}} = $a->{C1};\n $a->{C2} = ${$a->{C1}};\n $a;\n }\n" (HASH(0x6){c
+Data-Dump-1.25-0	scalar-obj.t	F-dump	PERL-PASS	2	1	not ok 1	bless(do{\(my $o = 42)}, "Foo")
+Data-Dump-1.25-0	tied.t	F-dump/tie	PERL-PASS	2	2	not ok 1	# Test 1 got: "{}\n" (HASH(0x2){context}) # Expected: "{\n # tied MyTie\n a => \"va\",\n b => \"vb\",\n c => \"vc\",\n d => \"vd\",\n}\n" # (Install t
+Try-Tiny-0.32-0	basic.t	G-trytiny	PERL-PASS	24	1	not ok 24 - previous value of $@ available for capture	# got: 'bar ' # expected: 'HASH(0x1)'
+Try-Tiny-0.32-0	erroneous_usage.t	G-trytiny	PERL-PASS	7	1	not ok 6 - Unterminated try detected	# got: 'try() encountered an unexpected argument (2) - perhaps a missing semi-colon before or ' # expected to match: try\(\)\ encountered\ an\ unexpec
+Try-Tiny-0.32-0	finally.t	G-trytiny	PERL-PASS	29	1	not ok 30	
+Try-Tiny-0.32-0	given_when.t	G-trytiny	PERL-PASS	1	1	not ok 1 - error caught	# got: '' # expected: 'blah '
+Algorithm-Diff-1.201-0	base.t	H-single	PERL-PASS	32	3	not ok 6	# Test 6 got: "a h" (HASH(0x2){context}) # Expected: "a h n p"
+Class-Inspector-1.36-0	class_inspector.t	H-single	PERL-PASS	53	1	not ok 54 - ->subclasses in the presence of an evil ->isa does not crash	# got: '' # expected: 'ARRAY(0x1)' While evaluating the form starting at line 788, column 0 of #P"/tmp/run-dist-t_21371.lisp":
+Class-Inspector-1.36-0	class_inspector__inc_to_local.t	H-single	PERL-PASS	1	1	not ok 2 - Found ourself	
+File-Which-1.27-0	file_which.t	H-single	PERL-PASS	13	6	not ok 3 - Found test-bin	
+Sort-Versions-1.62-0	versions.t	H-single	PERL-PASS	65	31	not ok 6 - failed versions() in foreign package at /home/bernt/.cpan/build/Sort-Versions-1.62-0/t/versions.t l	

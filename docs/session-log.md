@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 344 (2026-08-05, Opus) — #231: the 65 PARTIAL board files, classified — 635 rows in 8 families
+
+No compiler change. The measurement half of the CPAN board that s343 left
+open, plus five bugs probed down to one-line repros.
+
+**Where the rows are.** 635 of the board's 674 not-ok assertions sit in PARTIAL
+files, and three dists hold 85%: Text-Balanced 300, Sub-Uplevel 127,
+Scalar-List-Utils 110. Per-file data in
+`docs/cpan-board14-partial-causes-s344.tsv`, the reading in
+`docs/cpan-board14-partials-s344.md`.
+
+**The oracle correction.** s343's rule ("always run real perl beside the
+board") needed a fix to its *command*: `perl -I<dist>/lib` against an XS dist
+whose `.so` is unbuilt makes perl die at `use` and emit no TAP. On the first
+pass that reported all 21 Scalar-List-Utils files as PERL-NOTAP — i.e. as board
+artifacts. Without the dist lib every one of them runs clean under the
+installed List::Util, so those 110 rows are **real**.
+
+**Five bugs probed, not inferred** (counts are board rows they cost):
+
+- **#232, 155 rows.** `goto LABEL` emits a `go` outside its tagbody when the
+  same label is targeted from *inside a loop body* and *outside it* with another
+  label in between — reduced to 5 lines; 12 neighbouring shapes compile fine.
+  Latent: SBCL only signals when that branch executes, so `f(1)` is silent and
+  correct while `f(0)` crashes.
+- **#233, 127 rows.** `caller` with no EXPR returns **4** elements, not 3
+  (`main /tmp/runpcl_*.lisp 20 main::f`); the filename is the generated `.lisp`;
+  `$0` is `sbcl`; `#line` is ignored; `*CORE::GLOBAL::caller` is not honoured;
+  PCL's own frames are visible to a caller walk. One root, six faces.
+- **#234, silent-wrong.** `my %h = (-f => 4, abc => 3)` gives
+  `{3=>undef, 4=>'abc'}` — a filetest LETTER before `=>` is parsed as the
+  operator and eats the next element. Plain `-bareword` is fine.
+- **#235.** `use lib "$ENV{HOME}/x"` is not interpolated (the same string in an
+  assignment is) — a `use` argument list is taken as raw text.
+- **#236.** TAP `explain()` stringifies instead of dumping, so every
+  `is_deeply` failure on the board reads `got 'ARRAY(0x53)'` and diagnoses
+  nothing — ~40 rows are unreadable until it is fixed.
+
+Also filed: #237 (Text::Balanced extract offsets — one pos()/`\G` question,
+with the discriminating probe written into the task), #238 (List::Util shim
+parity checklist, per-file), #239 (Sort::Versions foreign-package `versions()`,
+31 rows, **cause not found** — the two obvious hypotheses were probed and
+ruled out, and the task says so, so nobody re-tries them).
+
+---
+
 ## Session 342g (2026-08-05, Opus) — #226 narrowed: F1 is the Role::Tiny idiom, and one piece is missing
 
 No compiler change — an attempt made, measured wrong, and reverted, which is

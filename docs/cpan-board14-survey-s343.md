@@ -84,11 +84,16 @@ real, and those 41 collapse to roughly **four causes plus a handful of
 singles** — one Capture-Tiny bug, the role/method-modifier cluster, the XS
 boundary, and `subtest`.
 
-## Next step
+## Next step — DONE in s344
 
-Cause-classify the **65 PARTIAL** files the same way (first not-ok row + the
-perl oracle). That is where the 674 failing assertions are, and no claim about
-"how many bugs remain" is complete without it.
+The 65 PARTIAL files are classified in **`docs/cpan-board14-partials-s344.md`**
+(data: `docs/cpan-board14-partial-causes-s344.tsv`): 635 of the 674 rows, in
+eight families, three of which carry 85% of them — Text-Balanced 300,
+Sub-Uplevel/`caller` 127, Scalar-List-Utils 110. New tasks #232–#239.
+
+**Correction to the method below, learned there:** the oracle command must NOT
+pass `-I<dist>/lib` for an XS dist whose `.so` is unbuilt — perl then dies at
+`use` and produces no TAP, and 21 real-failure files read as artifacts.
 
 Reproduce:
 
