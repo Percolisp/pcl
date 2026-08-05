@@ -243,13 +243,36 @@ release checks surface divergences, triage those first, per
 > audit's unfinished halves (CPAN board marker grep, eval-mode fallbacks);
 > §5a.2 is not satisfied until those are done and the live v1 count is 0.
 
+> **s345 (Fable) ruled the remaining pre-work — `docs/fable-answers-s345.md`:**
+> the audit ran (#225 DONE, `docs/v1-live-share-audit.md`), #227/#228/#229
+> closed, and the three open families resolve as:
+> - **#78 is promoted to E4.1 pre-work**: the #26 block-form capture gate (F3)
+>   fires only on the v1-seam HOIST of `--anon-block-N--` defuns; the
+>   inline_lambda re-host makes it dead code.  Route F3 through #78, never a
+>   new mechanism (answers §3).
+> - **#226 approved**: leading-`package X;` evals lower AS section X with the
+>   D1-lite QUALIFIED emission; five blast-radius probes + the s342g INVERSE
+>   guard are the acceptance tests; F1 audit events must reach 0 (answers §2).
+> - **F6**: split the oversized run form at statement boundaries; never raise
+>   the limit (answers §3).
+> - **#228 ASK**: register `[perl #129069]` beside its five NUL siblings — in
+>   the step-2 commit, same commit as the flip (else the registry flags it
+>   stale); pass-baseline row leaves by EDIT.  Eval-mode's residual refusals
+>   are rephrased perl-shaped (`PCL: unsupported in string eval: …`) in that
+>   same commit (§5a.3).
+>
+> **Pre-work order: #78 → #226 → #230 (F6 split + F3 gate re-measure/delete)
+> → steps 1–4 below.**
+
 Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one
    v1-only bypass.
 2. Flip gates to hard errors: remove `parse_with_fallback` (`pl2cl:51`),
    `PCL_V1`, `PCL_V1_FILES`; purge the consumer list (review §4 names
    them: two Pl/t tests, skip-registry:315, census tooling, the
-   runtime cache-key branch `p-compute-cache-path`).
+   runtime cache-key branch `p-compute-cache-path`).  Same commit: the
+   #228 `[perl #129069]` registration + pass-baseline EDIT, and the
+   eval-mode refusal rephrase (`fable-answers-s345.md` §1–§2).
 3. Delete v1's now-unreachable file-level chunks (~550 lines:
    `parse()` entry, `_assemble_output`,
    `_insert_variable_forward_declarations`, `parse_file/parse_code`,

@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 345 (2026-08-06, Fable) — review of s341–s344: batch APPROVED, E4.1 pre-work ruled
+
+No code change — a review-and-rulings session (`docs/fable-answers-s345.md`,
+indexed in DECIDED.md §s345).
+
+**The review.** All eleven commits since the s340 review (`0e73b13`…`fd20bb9`)
+approved as shipped.  Gate re-verified independently: 131 files / 4629 PASS
+(`tools/prove-core`, fresh core, matching every per-commit claim).  The batch's
+habits are the ones to keep: #224 rejected the task's own suspicion and built a
+module-free repro first; s342g's wrong attempt was measured and REVERTED with
+the finding written into the gate's comment; the audit replaced a method that
+had seen 2 of 60 events; both board surveys ran the perl oracle beside every
+claim.  No findings requiring code changes.
+
+**The rulings** (detail in the answers doc):
+
+- **#228 ASK**: register `[perl #129069]` beside its five NUL siblings — in
+  the E4.1 step-2 flip commit itself (it still passes today via lenient
+  truncation, so an earlier registration trips the stale-detector).
+- **#226 APPROVED**: leading-`package X;` evals lower AS section X via the
+  existing D1-lite QUALIFIED emission.  Five blast-radius probes (sub path,
+  our-globals, method dispatch, __PACKAGE__, free-var capture) + the s342g
+  INVERSE guard are the acceptance tests; the audit's F1 count must reach 0.
+  Residual multi-switch refusals get perl-shaped `$@` text at the flip.
+- **#230**: F3 routes through **#78** (the review located the #26 gate: it
+  guards the v1-seam HOIST of `--anon-block-N--` defuns out of their `let`;
+  the inline_lambda re-host removes the path) — **#78 is now E4.1 pre-work**.
+  F6: split the oversized run form at statement boundaries, don't raise the
+  limit.
+- **Board tasks**: fillers #236 → #234 → #235; post-E4.1 #232 → #233 →
+  #237/#238/#239.
+
+**Queue: #78 → #226 → #230 → E4.1 steps 1–4 → STOP → Fable #153/E5.0
+steps 1–2.**  Plan §5 updated in place.
+
+---
+
 ## Session 344 (2026-08-05, Opus) — #231: the 65 PARTIAL board files, classified — 635 rows in 8 families
 
 No compiler change. The measurement half of the CPAN board that s343 left

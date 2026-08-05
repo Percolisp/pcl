@@ -877,3 +877,32 @@ not-supported.md → only then probe.*
   "module **this module**" is `XSLoader::load()` called with NO arguments —
   perl 5.10+ infers the caller's package, PCL's shim does not; worth fixing for
   diagnosis, not a blocker.
+
+## s345 (Fable, 2026-08-06): s341–s344 batch reviewed + the E4.1 pre-work ruled
+
+Full rulings: `docs/fable-answers-s345.md`.  All eleven commits (`0e73b13`…
+`fd20bb9`) approved as shipped; gate independently re-verified 131/4629 PASS.
+
+- **#228 ASK → REGISTER, never tolerate NUL** (§1): `[perl #129069]` joins its
+  five NUL-byte siblings in the skip-registry, IN the E4.1 step-2 flip commit
+  (earlier and the stale-detector fires — the row still passes via lenient
+  truncation).  Pass-baseline row leaves by EDIT.
+- **#226 → qualified emission APPROVED** (§2): a leading-`package X;` eval
+  lowers AS section X through the D1-lite nested-package QUALIFIED emission —
+  no new mechanism.  Five blast-radius probes + the s342g INVERSE guard are
+  the acceptance tests; audit F1 events must reach 0.  Residual multi-switch
+  stays refused but must reach `$@` perl-shaped
+  (`PCL: unsupported in string eval: …`), rephrased at the flip.
+- **#230/F3 → route through #78** (§3): the #26 gate guards the v1-seam HOIST
+  of `--anon-block-N--` defuns out of their lexical `let`; the inline_lambda
+  re-host removes that path, so **#78 is E4.1 pre-work**.  Never a new
+  mechanism; in-place-defun fallback only if #78 exceeds ~2 sessions, as an
+  ask.  **#230/F6 → SPLIT the oversized run form** at statement boundaries;
+  never raise the limit.
+- **Board tasks prioritized** (§4): fillers #236 (explain — diagnosis
+  multiplier, do first) → #234 (silent-wrong filetest-before-`=>`; fix at the
+  filetest-default mechanism, probe the breaking case) → #235; post-E4.1
+  convergence #232 → #233 (cheap faces first; filename/#line/frame-hiding is
+  an ASK before building) → #237/#238/#239.
+- **Queue**: #78 → #226 → #230 → E4.1 steps 1–4 → STOP, Fable takes #153/E5.0
+  steps 1–2.
