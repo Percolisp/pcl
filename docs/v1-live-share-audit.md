@@ -115,6 +115,23 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   21 ok/11 → **23 ok/9** (t25 "reduce in list context yields only final
   answer", t32 "missing SMG rt#121992" — both v1 defects, both agree with perl
   now).  `docs/cpan-scoreboard.tsv` edited for that one row.
+- **F6 is NARROWED (s346b): its one event is NOT a file-level transpile.**
+  Transpiling all 111 `perl-tests/*.t` with `PCL_V2_AUDIT_LOG` set produced
+  **zero** v1 routes of any family (the log file is not even created; the
+  mechanism was sanity-checked in the same run against a known gating input,
+  and through `xargs`, so this is a real negative, not a plumbing failure).
+  So the oversized run form arises at RUN time — a string `eval` or a
+  `fresh_perl`/`runperl` child during the sweep.  To locate it, the sweep
+  itself is needed:
+  `rm -rf ~/.pcl-cache/* && PCL_V2_AUDIT_LOG=/tmp/f6.tsv perl sweep-perl-tests.pl --jobs 8`
+  then `grep -a oversized /tmp/f6.tsv` — column 3 is the source.  Do that
+  BEFORE designing the chunking: the ruling's "split at top-level statement
+  boundaries" assumes the run bucket has several forms, but the bucket is
+  ALREADY one form per top-level statement (`@runtime` is mapped through
+  `_gate_oversized_run_form` element-wise), so a single statement lowering to
+  one 73k form — the top-level-`my`-swallows-the-rest shape that
+  `_oversized_top_decls` flattens for the common case — would need a different
+  split than the one the ruling describes.
 - **F5 is CLEARED (s342d, task #229)** — it was two false positives of the same
   kind: a check treating a *binding* as evidence of a live global / a real read.
   `ExtUtils::MM_Unix` gated because the self-init check scanned TEXT, and

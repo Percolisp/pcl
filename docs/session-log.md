@@ -61,6 +61,18 @@ PACKAGE field is empty inside an ANONYMOUS sub and correct inside a named one;
 and `(sub { 42 })->()` — an anon sub immediately called — dies "Not a CODE
 reference".
 
+**F6 narrowed on the way out (task #230, no code change).**  Transpiling all
+111 `perl-tests/*.t` with `PCL_V2_AUDIT_LOG` set produced **zero** v1 routes of
+any family — mechanism sanity-checked in the same run against a known gating
+input and through `xargs`, so it is a real negative.  F6's single event
+therefore arises at RUN time (a string eval or a `fresh_perl` child), and the
+locating command is recorded on the task.  Also recorded there, before any
+design: the run bucket is ALREADY one form per top-level statement
+(`@runtime` is mapped element-wise through `_gate_oversized_run_form`), so a
+73769-char single form means ONE statement lowered to it — the ruling's "split
+at statement boundaries" may not be the applicable cut, and its stop-rule
+("if chunking breaks a context/tail assumption, write the ask") applies.
+
 ---
 
 ## Session 346 (2026-08-06, Opus) — task #78: the block-form arg body is re-hosted IN PLACE; F3 cleared, the #26 gate has no producer left
