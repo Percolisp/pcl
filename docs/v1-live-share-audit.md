@@ -43,7 +43,7 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
 
 | # | Family | Events (sweep + board) | Kind | Where it shows |
 |---|---|---|---|---|
-| F1 | `eval-mode multi-segment (top-level package statement)` — **NARROWED s342g** | 6 + 18 = **24** | TODO | the **Role::Tiny idiom**: `eval "package X; use Role::Tiny; …"` (all 18 board events) |
+| F1 | `eval-mode multi-segment (top-level package statement)` — **CLEARED s346 (task #226)** | 6 + 18 = **24** → board **0** | TODO | was the **Role::Tiny idiom**: `eval "package X; use Role::Tiny; …"` (all 18 board events) |
 | F2 | `eval-mode trailing my/our declaration (value-losing let)` — **CLEARED s342f** except one shape | 6 + 4 = **10** | TODO | `eval "our $VERSION = '1.01'"` (the whole CPAN half); `eval 'my ()'`; perl-syntax-error probes |
 | F3 | `block-form arg body captures live lexical` — **CLEARED s346 (task #78)** | 0 + 8 = **8** → **0** | TODO | was: Try-Tiny `basic/finally/named/when.t`, S-L-U `first/pair/reduce/rt-96343.t` |
 | F4 | `Parser2: PPI parse failed` | 6 + 0 = **6** | TODO | `/tmp/pcl_fp_*.pl` — `fresh_perl`/`runperl` children |
@@ -65,6 +65,28 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   (otherwise the body is inside the thunk's lambda); the reuse path is the
   QUALIFIED emission E1.5/D1-lite already built for nested packages.  Needs a
   design call on that blast radius before implementing.
+- **F1 is CLEARED (s346, task #226) — board events 18 → 0.**  The design call
+  came in `fable-answers-s345.md` §2, and the implementation is the reuse it
+  named: the leading `package X;` is simply NOT CONSUMED at segment level, so
+  it reaches `_lower_block`'s D1-lite nested-package path, which pushes X onto
+  the Environment while the SECTION package stays the eval's root — exactly the
+  `current ne cur_pkg` condition `_sub_name_for_emission` and `_lower_our_decl`
+  already qualify on.  Three supporting facts had to be supplied, each by
+  feeding an EXISTING mechanism rather than adding one:
+  1. the segment-level sub extraction is skipped for such a segment, so the
+     subs stay in the statement stream and are named through
+     `_sub_name_for_emission` after the push (this is the s342g silent-wrong);
+  2. the package ENTER forms lead the eval body, ahead of the defs/sched
+     interleave — a `use` lowers into sched, and its import records the package
+     in effect (Role-Tiny `create-hook.t` recorded `main` until this moved);
+  3. that `use` gets `:into "X"`, because the eval body is READ in `:pcl` and
+     `p-use` takes its target from `*package*` — supplied by setting the two
+     facts v1's existing `:into` branch keys on (`_seam_outer_pkg` +
+     `_block_depth`), not by a second predicate.
+  **Residue, GATED not shipped**: an `our` declared in the region and read back
+  UNQUALIFIED is silent-wrong (v2's native emitter has no equivalent of
+  ExprToCL.pm ~900's our-qualify branch), so that shape keeps the v1 retry —
+  task **#240**, with the measurement and the rejected rename approach recorded.
 - **F2 is CLEARED (s342f, task #227) except one shape**, and its CPAN half was
   never a syntax probe: all four board events are `eval "our $VERSION = '…'"`,
   a routine module idiom.  The gate refused **every** `our`, though

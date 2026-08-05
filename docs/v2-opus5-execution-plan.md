@@ -261,7 +261,17 @@ release checks surface divergences, triage those first, per
 >   are rephrased perl-shaped (`PCL: unsupported in string eval: …`) in that
 >   same commit (§5a.3).
 >
-> **Pre-work order: ~~#78~~ → #226 → #230 (F6 split) → steps 1–4 below.**
+> **Pre-work order: ~~#78~~ → ~~#226~~ → #230 (F6 split) → steps 1–4 below.**
+>
+> **#226 is DONE (s346b, gen v2-107).**  The leading `package X;` is not
+> consumed at segment level, so D1-lite's nested-package path pushes X onto the
+> Environment while the section package stays the eval's root — the existing
+> QUALIFIED-emission condition.  Plus: skip the segment-level sub extraction
+> for that segment; the package enter forms lead the BODY (ahead of sched, so a
+> `use`'s import sees X); that `use` gets `:into "X"` via v1's existing branch.
+> **F1 board events 18 → 0.**  Residue REFUSED not shipped: an `our` read back
+> unqualified in the region (task #240).  The multi-switch refusal keeps its
+> `Parser2 TODO:` prefix until step 2 — the retry keys on it.
 >
 > **#78 is DONE (s346, gen v2-106).**  The `&`-prototype block arg lowers as an
 > inline lambda at the call site, and a DECLINED body takes v1's

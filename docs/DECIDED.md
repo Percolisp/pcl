@@ -925,3 +925,32 @@ Full rulings: `docs/fable-answers-s345.md`.  All eleven commits (`0e73b13`…
   has no producer; deleting it is E4.1 step 3's reachability job, with its
   three proofs, not a side effect of this change.
 - **Queue now**: #226 → #230 (F6 split; F3 half done) → E4.1 steps 1–4 → STOP.
+
+## s346b (Opus, 2026-08-06) — #226 DONE: a leading-`package X;` eval lowers AS X
+
+- **The fix is SUBTRACTION**: the leading `package X;` is no longer CONSUMED at
+  segment level, so it reaches `_lower_block`'s D1-lite nested-package path,
+  which pushes X onto the Environment while the SECTION package stays the
+  eval's root — the `current ne cur_pkg` condition the QUALIFIED emission
+  already keys on.  Three supporting facts, each fed to an existing mechanism:
+  (1) skip the segment-level sub extraction for that segment (it runs before
+  lowering and would name subs unqualified — the s342g silent-wrong);
+  (2) the package ENTER forms lead the eval BODY, ahead of the defs/sched
+  interleave (a `use` is in sched, and its import records the package in
+  effect — Role-Tiny create-hook.t); (3) that `use` gets `:into "X"`, supplied
+  by setting the two facts v1's EXISTING `:into` branch keys on
+  (`_seam_outer_pkg`, `_block_depth`), never a second predicate.
+- **F1 board events 18 → 0.**  All five ruling probes + the s342g inverse guard
+  pass with zero v1 routes.  Gate 131/4640; corpus emission identical; sweep
+  0 new / 0 fixed / 0 LOST.
+- **`our` declared in the region and read back UNQUALIFIED stays REFUSED** (v2's
+  native emitter lacks ExprToCL.pm ~900's our-qualify branch; probed 0 vs
+  perl's 10) — task **#240**.  A silent-wrong is never shipped to close a
+  family; the narrow v1 retry is.
+- **A refusal's TEXT is load-bearing before the flip**: `parse_with_fallback`
+  keys the v1 retry on `/^Parser2\b/`, so the perl-shaped rephrase of
+  eval-mode's residual refusals belongs to the E4.1 step-2 commit, not earlier.
+- **Board labels are not the measure**: `role-basic-composition.t` went
+  PASS(8 ok) → PARTIAL(10 ok / 3 not-ok) because it now runs 13 rows where it
+  ran 8 — more coverage AND more passes.  Read rows, not the PASS/PARTIAL bit.
+- **Queue now**: #230 (F6 split) → E4.1 steps 1–4 → STOP, Fable takes #153/E5.0.

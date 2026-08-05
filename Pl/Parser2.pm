@@ -570,7 +570,7 @@ sub parse {
     }
     push @segments, { pkg => $pkg, stmts => [],
                       reopen => ($opened{$pkg}++ ? 1 : 0), version => $version,
-                      blk => $cur_blk };
+                      blk => $cur_blk, pkg_stmt => $child };
     $cur_pkg = $pkg;
     return 1;
   };
@@ -671,6 +671,53 @@ sub parse {
   # cannot reach.  The reuse path is the OTHER mechanism, already built for
   # nested packages by E1.5/D1-lite: emit the symbols QUALIFIED (see
   # _lower_our_decl's "Inside a nested-`package X;` region … qualify it").
+  #
+  # s346 (#226, RULED s345 §2): the fix is to STOP CONSUMING the leading
+  # `package X;` at segment level and hand it to the D1-lite nested-package
+  # path in _lower_block instead.  That path pushes X onto the Environment for
+  # the remainder of the block while the SECTION package (cur_pkg) stays the
+  # eval's root — which is exactly the `current ne cur_pkg` condition the
+  # QUALIFIED emission keys on (_sub_name_for_emission, _lower_our_decl's
+  # qualify branch), so every symbol the region defines is spelled `X::…` and
+  # resolves where the caller looks.  No new mechanism, and file mode is
+  # untouched (there a top-level `package X;` still opens its own section,
+  # whose in-package does the same job at read time).
+  # The segment-level sub extraction must be skipped for such a segment
+  # (eval_pkg_region): it runs BEFORE lowering, so it would name the subs
+  # unqualified — leaving them in the statement stream lets _lower_block's
+  # nested-sub hoist name them through _sub_name_for_emission.
+  #
+  # ONE SHAPE STAYS REFUSED (measured s346, not a guess): an `our` DECLARED in
+  # the region and read back UNQUALIFIED inside it.  `_lower_our_decl`'s
+  # qualify branch makes the WRITE `F1::$Z` and registers the name, and v1's
+  # emitter re-reads it qualified (ExprToCL.pm ~900 "Qualify `our` variables")
+  # — but v2's NATIVE emitter (ExprToCL2) has no such branch, so the read
+  # emits a bare `$Z`, which the eval-mode free-var scan has ALSO made a
+  # p-eval-thunk parameter bound to the CALLER's `$Z`.  Probed:
+  # `eval 'package F1; our $Z = 5; $Z * 2'` → 0, perl 10, while
+  # `$F1::Z * 2` in the same eval is correct.  That is a SILENT WRONG — the
+  # same class the s342g attempt was reverted for — so it keeps the v1 retry
+  # until the emitter gap is closed (task #240).
+  if ($self->eval_mode && @segments == 2
+      && !@{ $segments[0]{stmts} }
+      && $segments[1]{pkg_stmt} && !$segments[1]{blockform}
+      && !defined $segments[1]{version}
+      && !grep { my @k = $_->schildren;
+                 @k && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our' }
+              map { ($_->isa('PPI::Statement::Variable') ? $_ : ()),
+                    @{ $_->find('PPI::Statement::Variable') || [] } }
+              @{ $segments[1]{stmts} }) {
+    $self->{_eval_pkg_stmt} = $segments[1]{pkg_stmt};
+    @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
+                   stmts => [ $segments[1]{pkg_stmt}, @{ $segments[1]{stmts} } ] });
+  }
+  # The residual multi-switch shape (`package A; …; package B; …` inside one
+  # eval — ZERO measured events) stays refused.  Its text keeps the
+  # `Parser2 TODO:` prefix here ON PURPOSE: pl2cl's parse_with_fallback keys
+  # the v1 retry on /^Parser2\b/, so rephrasing it perl-shaped
+  # (`PCL: unsupported in string eval: multiple package sections`) turns the
+  # retry into a user-visible die — which is right only AFTER the flip.  That
+  # rephrase belongs to the E4.1 step-2 commit (fable-answers-s345.md §2/§5a.3).
   die "Parser2 TODO: eval-mode multi-segment (top-level package statement)\n"
     if $self->eval_mode && @segments > 1;
   # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the trailing
@@ -841,6 +888,9 @@ sub parse {
     $self->{_hoisted_def_lines} = [];  # source position per _hoisted_defs entry
     $self->{_live_lex}       = {};
     $self->{_seg_lex}        = {};   # every name let-bound in THIS section (forward-decl exclusion)
+    # #226: collector for the eval region's leading-package enter forms — see
+    # the hoist in _lower_block's Statement::Package branch.
+    $self->{_eval_pkg_enter} = $seg->{eval_pkg_region} ? [] : undef;
     # Named subs + Scheduled blocks of this segment — the embedded-my
     # let-hoist consults these (a sub referencing the name vetoes the hoist).
     {
@@ -879,7 +929,15 @@ sub parse {
     $self->fallback_parser->{_eval_span_captures} = $seg->{eval_span_captures} // {};
     my (@decls, @defs, @def_lines, @top);
     for my $child (@{ $seg->{stmts} }) {
-      if ($child->isa('PPI::Statement::Sub') && $child->name
+      # eval_pkg_region (#226): this segment leads with a `package X;` that is
+      # lowered IN the statement stream, so a sub after it belongs to X — but
+      # this loop runs BEFORE lowering, where the Environment still says the
+      # section package and the name would emit unqualified (the s342g
+      # silent-wrong: `pl-f` read in :pcl while the caller looks up X::pl-f).
+      # Leave them in @top; _lower_block's nested-sub hoist names them through
+      # _sub_name_for_emission, after the D1-lite push.
+      if (!$seg->{eval_pkg_region}
+          && $child->isa('PPI::Statement::Sub') && $child->name
           && !$child->isa('PPI::Statement::Scheduled')) {
         # SIGNATURED sub: v1 owns the whole definition (param binding,
         # defaults, arity).  _fallback_stmt runs v1's _process_sub_statement,
@@ -954,6 +1012,10 @@ sub parse {
       } @runtime],
       captured => [@{ $self->{_captured_decls} }],
       sched    => [@{ $self->{_sched_defs} }],
+      # #226: eval region's leading-package enter forms — emitted at the head
+      # of the eval BODY, ahead of the defs/sched interleave.
+      pkg_enter => [map { Pl::CLForm::to_string($_, 0) }
+                    @{ $self->{_eval_pkg_enter} // [] }],
       # Source positions parallel to defs/sched — the #55 interleave assembly
       # merges the two streams by these (perl compiles subs and runs BEGIN
       # blocks in source order; a BEGIN must not see a sub defined below it).
@@ -3819,7 +3881,11 @@ sub _assemble_eval_mode {
   push @head, @fwd;
   push @head, @{ $sec->{captured} };
 
-  my @body = ($self->_interleaved_defs($sec), @{ $sec->{run} });
+  # #226: a leading `package X;` must be in effect for EVERYTHING the region
+  # emits — including the hoisted sub defs and the sched bucket's `use`
+  # statements, whose import records the caller's package.
+  my @body = (@{ $sec->{pkg_enter} // [] },
+              $self->_interleaved_defs($sec), @{ $sec->{run} });
 
   my @out = ('(in-package :pcl)', '', grep { length } @head);
   push @out, '' if @head;
@@ -4932,6 +4998,22 @@ sub _lower_block {
       $env->pop_package;
       return (@enter, @inner, $restore,
               $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
+    # #226: the eval region's LEADING `package X;` must take effect before the
+    # body's hoisted forms, not at its own position in the run stream.  `use`
+    # statements lower via _fallback_stmt(sched => 1) into the sched bucket,
+    # which _assemble_eval_mode emits BEFORE the run forms — so leaving the
+    # p-set-current-package here ran `use Role::Tiny` in main and its import
+    # recorded the wrong package (Role-Tiny create-hook.t: got 'main', wanted
+    # 'MyRole').  Hoist the enter forms to the head of the BODY (still inside
+    # the thunk lambda, so p-eval-thunk's dynamic bind still unwinds them).
+    if ($self->{_eval_pkg_enter} && $self->{_eval_pkg_stmt}
+        && $first == $self->{_eval_pkg_stmt}) {
+      push @{ $self->{_eval_pkg_enter} }, @enter;
+      $env->push_package($pkg);
+      my @rest_only = $self->_lower_block(\@rest, $vi, $tail_ctx);
+      $env->pop_package;
+      return @rest_only;
     }
     $env->push_package($pkg);
     my @rest_forms = $self->_lower_block(\@rest, $vi, $tail_ctx);
@@ -7017,7 +7099,20 @@ sub _fallback_stmt_capture {
   for (my $a = $stmt->parent; $a; $a = $a->parent) {
     ($in_block = 1), last if $a->isa('PPI::Structure::Block');
   }
-  $p->_block_depth($in_block ? 1 : 0);
+  # #226: inside an eval region's `package X;` the READER package is still the
+  # section's (an eval body is read in `:pcl` — the thunk lambda cannot switch
+  # it), so a `use` must name its import target EXPLICITLY or Role::Tiny's
+  # import records `main` (Role-Tiny create-hook.t).  v1 already emits that
+  # `:into` — _process_include_statement's branch keyed on _block_depth plus
+  # _seam_outer_pkg, written for the same reader-vs-Perl package split inside a
+  # do{}/eval{} block — so SUPPLY THOSE TWO FACTS rather than adding a second
+  # predicate.  The condition is the one every other qualification site uses:
+  # the Environment's package differs from the section's.
+  my $seam_pkg_region =
+    ($self->environment->current_package // 'main') ne ($self->cur_pkg // 'main');
+  local $p->{_seam_outer_pkg} = $seam_pkg_region ? ($self->cur_pkg // 'main')
+                                                 : $p->{_seam_outer_pkg};
+  $p->_block_depth(($in_block || $seam_pkg_region) ? 1 : 0);
   $p->_sections([]);
   $p->_cur_bucket('runtime');
   $p->_open_section('pcl');

@@ -4,6 +4,65 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 346b (2026-08-06, Opus) — task #226: a leading-`package X;` eval lowers AS X; F1 cleared, board events 18 → 0
+
+E4.1 pre-work item 2 (`fable-answers-s345.md` §2).  gen **v2-107**.
+
+**The route was the ruling's, and it is subtraction, not addition**: stop
+CONSUMING the leading `package X;` at segment level, and it reaches
+`_lower_block`'s D1-lite nested-package path, which pushes X onto the
+Environment while the SECTION package stays the eval's root — the exact
+`current ne cur_pkg` condition `_sub_name_for_emission` and `_lower_our_decl`
+already qualify on.  Three supporting facts, each fed to an EXISTING mechanism:
+
+1. **Skip the segment-level sub extraction** for such a segment.  It runs
+   before lowering, so it would name the subs unqualified — the s342g
+   silent-wrong (`pl-f` read in `:pcl` while the caller looks up `X::pl-f`).
+   Left in the statement stream, they hoist through `_sub_name_for_emission`.
+2. **The package ENTER forms lead the body**, ahead of the defs/sched
+   interleave.  A `use` lowers into the sched bucket, which is emitted first —
+   so `use Role::Tiny` ran in `main` and its import recorded the wrong package
+   (Role-Tiny `create-hook.t`: got 'main', wanted 'MyRole').
+3. **That `use` gets `:into "X"`.**  The eval body is READ in `:pcl` (a thunk
+   lambda cannot switch the reader package) and `p-use` takes its import target
+   from `*package*`.  v1 already emits `:into` for the same reader-vs-Perl split
+   inside a do/eval block, so the seam SUPPLIES the two facts that branch keys
+   on (`_seam_outer_pkg`, `_block_depth`) instead of adding a second predicate.
+
+**Acceptance (ruling §2), all five probes + the inverse guard:** `X::f()` and
+`X->f` work while `main->can('f')` is false; `our $V = 7` → `$X::V` is 7;
+bless+method dispatch; `__PACKAGE__` is X; a caller lexical read inside the
+eval still binds through the capture alist.  All match perl with **zero v1
+routes**.  Board F1 events **18 → 0** (only the unrelated ISA route remains).
+
+**One shape REFUSED, not shipped wrong.**  An `our` DECLARED in the region and
+read back UNQUALIFIED is silent-wrong: `_lower_our_decl` qualifies the WRITE to
+`F1::$Z`, v1's emitter re-reads it qualified (ExprToCL.pm ~900), but **v2's
+native emitter has no such branch** — and eval-mode's free-var scan has also
+made `$Z` a thunk parameter bound to the caller's `$Z`.  Probed:
+`eval 'package F1; our $Z = 5; $Z * 2'` → 0, perl 10.  That shape keeps the v1
+retry (task **#240**, measurement + the rejected rename approach recorded).
+The multi-switch shape stays refused (zero measured events); its text keeps the
+`Parser2 TODO:` prefix deliberately — `parse_with_fallback` keys the retry on
+`/^Parser2\b/`, so the perl-shaped rephrase belongs to the step-2 flip commit.
+
+**Measured.**  Gate 131 files / **4640** PASS.  `corpus-diff.pl`: emission
+identical across 111 files.  Full sweep GATE clean — 0 new / 0 fixed / 0 LOST,
+TOTAL 18498 = baseline.  Board vs the s343 snapshot: 82 files, **3 differ** —
+`role-basic-exceptions.t` 2 ok → **4 ok** (0 fail), `reduce.t` (from #78), and
+`role-basic-composition.t` PASS ok=8 → PARTIAL ok=10/notok=3: it now runs
+**13 rows where it ran 8**, so passing rows went 8 → 10 and three honest
+failures became reachable (perl runs 34 — PCL still stops short, just later).
+The PASS→PARTIAL label is the board's zero-not-ok rule, not a regression;
+`docs/cpan-scoreboard.tsv` edited for all three rows.
+
+**Found while probing, unrelated to #226** (recorded on #233): `caller(0)`'s
+PACKAGE field is empty inside an ANONYMOUS sub and correct inside a named one;
+and `(sub { 42 })->()` — an anon sub immediately called — dies "Not a CODE
+reference".
+
+---
+
 ## Session 346 (2026-08-06, Opus) — task #78: the block-form arg body is re-hosted IN PLACE; F3 cleared, the #26 gate has no producer left
 
 E4.1 pre-work item 1 (`fable-answers-s345.md` §3/§5).  gen **v2-106**.

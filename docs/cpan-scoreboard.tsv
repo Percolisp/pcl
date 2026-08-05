@@ -11,8 +11,8 @@ Role-Tiny-2.002004-0	overload.t	PARTIAL	2	13	0
 Role-Tiny-2.002004-0	proto.t	FAIL	0	0	0
 Role-Tiny-2.002004-0	role-basic-basic.t	PASS	2	0	0
 Role-Tiny-2.002004-0	role-basic-bugs.t	PARTIAL	14	1	0
-Role-Tiny-2.002004-0	role-basic-composition.t	PASS	8	0	0
-Role-Tiny-2.002004-0	role-basic-exceptions.t	PASS	2	0	0
+Role-Tiny-2.002004-0	role-basic-composition.t	PARTIAL	10	3	0
+Role-Tiny-2.002004-0	role-basic-exceptions.t	PASS	4	0	0
 Role-Tiny-2.002004-0	role-duplication.t	PARTIAL	1	1	0
 Role-Tiny-2.002004-0	role-long-package-name.t	PASS	7	0	0
 Role-Tiny-2.002004-0	role-tiny-composition.t	PASS	2	0	0

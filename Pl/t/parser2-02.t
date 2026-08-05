@@ -244,6 +244,52 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   }
 }
 
+# ---- #226: eval-mode leading `package X;` lowers AS section X ---------------
+
+# An eval string whose first statement is `package X;` used to gate the whole
+# eval to v1 (audit family F1, 24 events).  It now stays on v2: the package
+# statement is left IN the statement stream for _lower_block's D1-lite path,
+# which pushes X onto the Environment while the SECTION package stays the
+# eval's root — the `current ne cur_pkg` condition every QUALIFIED-emission
+# site keys on.  Runtime parity (X::f callable, our-global, method dispatch,
+# __PACKAGE__, capture) is probed against perl in the board/sweep; these are
+# the shape guards.
+{
+  my $cl = eval { Pl::Parser2->parse_code(q{package X1; sub f { 42 } 1},
+                                          eval_mode => 1, eval_pkg => 'main') };
+  ok(defined $cl, 'eval-mode leading `package X;` no longer gates to v1') or diag($@);
+  # The sub must be defined QUALIFIED: the eval body is read in :pcl, so a bare
+  # `pl-f` would intern in main while the caller looks up X1::pl-f (the s342g
+  # silent-wrong that got that attempt reverted).  This is its INVERSE guard.
+  like($cl // '', qr/\(p-sub X1::pl-f\b/,
+       '#226: the region\'s sub is defined qualified into X, not bare in main');
+  unlike($cl // '', qr/\(p-sub pl-f\b/, '#226: and NOT bare (s342g inverse guard)');
+  # The package switch must lead the BODY, ahead of the defs/sched interleave:
+  # a `use` in the region lowers into sched, and its import records the package
+  # in effect (Role-Tiny create-hook.t got 'main' when the switch came after).
+  my $u = eval { Pl::Parser2->parse_code(q{package X2; use List::Util qw(sum); 1},
+                                         eval_mode => 1, eval_pkg => 'main') };
+  ok(defined $u && $u =~ /p-set-current-package :X2[\s\S]*p-use "List::Util"/,
+     '#226: p-set-current-package precedes the region\'s `use`') or diag($@);
+  # ... and that `use` must name its import target, because the reader package
+  # is still :pcl (v1's existing `:into` branch, fed by the seam).
+  like($u // '', qr/:into "X2"/, '#226: the region\'s `use` imports :into X');
+
+  # STILL REFUSED (silent-wrong otherwise, s346): an `our` declared in the
+  # region and read back UNQUALIFIED — v2's native emitter has no equivalent of
+  # v1's "Qualify `our` variables" branch, so the read would take the caller's
+  # value.  Task #240.  When that is fixed this assertion flips.
+  my $o = eval { Pl::Parser2->parse_code(q{package X3; our $Z = 5; $Z * 2},
+                                         eval_mode => 1, eval_pkg => 'main') };
+  like($@, qr/eval-mode multi-segment/,
+       '#226 residue: an `our` in the region keeps the v1 retry (task #240)');
+
+  # The multi-switch shape stays refused (zero measured events).
+  eval { Pl::Parser2->parse_code(q{package A1; sub a {1} package B1; sub b {2} 1},
+                                 eval_mode => 1, eval_pkg => 'main') };
+  like($@, qr/eval-mode multi-segment/, '#226: two package sections still refused');
+}
+
 # ---- state in named subs: native per-sub cell (rename family __state__N) ----
 
 {
