@@ -261,7 +261,19 @@ release checks surface divergences, triage those first, per
 >   are rephrased perl-shaped (`PCL: unsupported in string eval: …`) in that
 >   same commit (§5a.3).
 >
-> **Pre-work order: ~~#78~~ → ~~#226~~ → #230 (F6 split) → steps 1–4 below.**
+> **Pre-work order (s347 ruling): ~~#78~~ → ~~#226~~ → #240 step 1 → #230 (F6
+> locate + fix-or-rule) → steps 1–4 below.**
+>
+> **s347 (Fable) reviewed s346–s346d — all four commits approved
+> (`docs/fable-answers-s346.md`); two new pre-work facts:**
+> - **#240 step 1 is PRE-FLIP**: the eval-region `our` gate must narrow to
+>   DECLARE-THEN-USE — as written it refuses the routine write-only idiom
+>   (`eval 'package Foo; our $VERSION = …; 1'`), which would break user-visibly
+>   at the flip.  Same commit: a guard row for the file-mode
+>   `sub { package X; use M; }` import fix (#226 fixed it unclaimed).
+> - **F6 re-scoped**: locate via the audited sweep first; top-level-`my` shape
+>   → extend `_oversized_top_decls`; eval/fresh_perl source → no pre-flip fix,
+>   ruled refusal instead.
 >
 > **#226 is DONE (s346b, gen v2-107).**  The leading `package X;` is not
 > consumed at segment level, so D1-lite's nested-package path pushes X onto the
@@ -289,8 +301,12 @@ Order:
    `PCL_V1`, `PCL_V1_FILES`; purge the consumer list (review §4 names
    them: two Pl/t tests, skip-registry:315, census tooling, the
    runtime cache-key branch `p-compute-cache-path`).  Same commit: the
-   #228 `[perl #129069]` registration + pass-baseline EDIT, and the
-   eval-mode refusal rephrase (`fable-answers-s345.md` §1–§2).
+   #228 `[perl #129069]` registration + pass-baseline EDIT, and ALL
+   eval-mode refusal rephrases — multi-switch, the #240 read-back gate,
+   F6 if it landed as a ruled refusal — each perl-shaped
+   (`PCL: unsupported in string eval: …`) with a `docs/not-supported.md`
+   entry naming its owner task (`fable-answers-s345.md` §1–§2,
+   `fable-answers-s346.md` §1.3–1.4).
 3. Delete v1's now-unreachable file-level chunks (~550 lines:
    `parse()` entry, `_assemble_output`,
    `_insert_variable_forward_declarations`, `parse_file/parse_code`,
@@ -336,9 +352,14 @@ later.  Hence:
 3. **`eval $str` is load-bearing (hard requirement, memory + §1).**
    `parse_with_fallback` currently catches an eval-mode Parser2 TODO and
    silently retries v1; after step 2 that same TODO becomes a user-visible
-   `$@`.  The rule-2 audit must show ZERO eval-mode fallbacks before the
-   flip; after the flip, an eval-mode TODO must surface as perl-shaped
-   `$@` text (never a host/SBCL error), and nothing may gate `eval $str`.
+   `$@`.  The rule-2 audit must show ZERO **unexplained** eval-mode
+   fallbacks before the flip (AMENDED s347, `fable-answers-s346.md`
+   §1.4): ruled refusals — the multi-switch shape, the #240 read-back
+   gate, and F6 if it lands as one — are excepted, each REQUIRED to have
+   perl-shaped `$@` text and a `docs/not-supported.md` entry naming its
+   owner task by the step-2 commit.  After the flip, an eval-mode TODO
+   must surface as perl-shaped `$@` text (never a host/SBCL error), and
+   nothing may gate `eval $str`.
 4. **`--lenient-ppi` only ever worked via the v1 route** (v2 deletes the
    flag from %opts and PPI-failure lands in v1).  After the flip it must
    DIE loudly naming the file — never become a silent no-op flag.  All

@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 347 (2026-08-06, Fable) — review of s346–s346d: all four commits APPROVED; #240 split, F6 re-scoped
+
+Review-and-rulings session (`docs/fable-answers-s346.md`, indexed in
+DECIDED.md §s347).  Gate independently re-verified: 131 files / 4640 PASS.
+
+**The review.**  Both code diffs read clean.  #78's fallback call is the
+established anon-sub combination; #226's collapse is guarded on every axis
+with per-segment state that cannot leak across parses.  The habit worth
+naming: #78's second half — the DISCARDED native attempt leaking a dead defun
+whose TEXT tripped the gate — only falls to someone who chases the last event
+instead of calling 8→1 "close enough".  Both silent-wrong holes were gated,
+not shipped, each with its measurement.
+
+**A find the review adds (verified live at both `7f5a889` and HEAD):** the
+`_fallback_stmt_capture` edit also fixed a PRE-EXISTING file-mode silent-wrong
+the commit never claimed — `sub f { package X; use M; }` imported into main
+before #226 and into X after (#187's class).  Unclaimed → unguarded → a guard
+row is required in the next commit.
+
+**The rulings** (detail in the answers doc):
+
+- **Ask 1a CONFIRMED and generalized**: acceptance met + hole found beside it
+  → gate the hole loudly, clear the family, file the task with the
+  measurement.  Never ship silent-wrong to close a family.
+- **Ask 1b — neither option as posed.**  The §5a.2 tension dissolves (the rule
+  binds MEASURED events; #240's shape has zero).  BUT the gate as written
+  over-fires: it refuses the routine WRITE-ONLY idiom
+  (`eval 'package Foo; our $VERSION = "1.25"; 1'` — probed correct today via
+  the retry, would DIE at the flip).  So **#240 step 1 (pre-flip): narrow the
+  gate to declare-then-use**; write-only goes through the collapse.  **#240
+  step 2 (the emitter fix): parked but SCHEDULED** — first post-E4.1 compiler
+  item or with E5.4.  §5a.3 amended: "zero UNEXPLAINED eval-mode fallbacks",
+  ruled refusals excepted with perl-shaped text + not-supported entries whose
+  owner task names their remover.
+- **Ask 2 — F6 re-scope ACCEPTED.**  The s345 wording described a split that
+  already exists.  Locate first; top-level-`my` shape → extend
+  `_oversized_top_decls` (reuse), generic let-chopping REJECTED as a first
+  move; eval/fresh_perl source → no pre-flip fix, ruled refusal + baseline
+  row edit.
+
+**Queue: #240 step 1 (+ the file-mode guard row, same commit) → #230/F6 →
+E4.1 steps 1–4 (step 2 carries #228 + ALL refusal rephrases + not-supported
+entries) → STOP → Fable #153/E5.0.**
+
+---
+
 ## Session 346b (2026-08-06, Opus) — task #226: a leading-`package X;` eval lowers AS X; F1 cleared, board events 18 → 0
 
 E4.1 pre-work item 2 (`fable-answers-s345.md` §2).  gen **v2-107**.

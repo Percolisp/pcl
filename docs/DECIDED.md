@@ -954,3 +954,35 @@ Full rulings: `docs/fable-answers-s345.md`.  All eleven commits (`0e73b13`…
   PASS(8 ok) → PARTIAL(10 ok / 3 not-ok) because it now runs 13 rows where it
   ran 8 — more coverage AND more passes.  Read rows, not the PASS/PARTIAL bit.
 - **Queue now**: #230 (F6 split) → E4.1 steps 1–4 → STOP, Fable takes #153/E5.0.
+
+## s347 (Fable, 2026-08-06) — review of s346–s346d: all four commits APPROVED; the two asks ruled (`docs/fable-answers-s346.md`)
+
+- **Standing rule (from ask 1a, CONFIRMED)**: when a ruling's acceptance is met
+  but a hole is found beside it — gate the hole LOUDLY, clear the family, file
+  the task with the measurement.  Never ship a silent-wrong to close a family.
+- **#240 split (ask 1b)**: step 1 is PRE-FLIP — narrow the eval-region `our`
+  gate to DECLARE-THEN-USE only, because the gate as written refuses the
+  routine write-only idiom (`eval 'package Foo; our $VERSION = …; 1'`, probed
+  s347) and would break it user-visibly at the flip.  Step 2 (the two-half
+  emitter fix) parks but is SCHEDULED: first post-E4.1 compiler item, or with
+  E5.4.  §5a.2 binds MEASURED events, not synthesized probe shapes.
+- **§5a.3 AMENDED**: "zero eval-mode fallbacks" → "zero UNEXPLAINED eval-mode
+  fallbacks"; ruled refusals (multi-switch, #240 read-back, F6 if it lands
+  there) are excepted, each REQUIRED to have perl-shaped `$@` text and a
+  not-supported entry by the step-2 commit.  A not-supported entry that names
+  its own remover (owner task) is not a write-off.
+- **F6 re-scope ACCEPTED (ask 2)**: the run bucket is already per-statement, so
+  the s345 "chunk the bucket" wording described an existing split.  Locate
+  first (audited sweep); top-level-`my` shape → extend `_oversized_top_decls`
+  (reuse); generic let-body chopping REJECTED as a first move; eval/fresh_perl
+  source → NO pre-flip fix, ruled refusal + baseline row edit instead.
+- **Review find, verified live**: #226's `_fallback_stmt_capture` edit also
+  fixed a pre-existing file-mode silent-wrong — `sub f { package X; use M; }`
+  imported into main before, X after.  Unclaimed, therefore unguarded:
+  guard row REQUIRED in #240 step 1's commit.
+- **All eval-mode refusal rephrases land in the E4.1 step-2 commit, none
+  earlier** — `parse_with_fallback` keys the v1 retry on `/^Parser2\b/`, so an
+  early rephrase converts a silent retry into a user-visible die.
+- **Queue**: #240 step 1 → #230/F6 locate+fix-or-rule → E4.1 steps 1–4 →
+  STOP (Fable #153/E5.0); post-E4.1 compiler queue gains #240 step 2 at its
+  head.
