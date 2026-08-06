@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 349 (2026-08-07, Fable) — review of s348: step 1 approved; #240 step 2 re-scoped to the runtime route, promoted PRE-FLIP
+
+Rulings in `docs/fable-answers-s348.md`; DECIDED.md carries the summary.
+Gate independently re-verified: 131 files / 4648 PASS (fresh core).  Every
+s348 acceptance row and both measurements re-probed live and reproduced;
+routing claims verified with `PCL_V2_AUDIT_LOG` (write-only `our $VERSION`
+logs no fallback; declare-then-use logs the `Parser2 TODO:` retry).
+
+**s348 approved as shipped, symbolic-deref arm included** — the arm is the
+gate-the-hole rule applied correctly.
+
+**The §2 ruling.**  No interim gate for the wider hole: option (ii)-as-gate
+needs the same plumbing as the fix (region package into `p-eval-thunk`), so
+the interim artifact is waste.  **#240 step 2 is re-scoped to the runtime
+route and promoted pre-flip** — the s347 parking reason was native-emitter
+surgery in the deletion window, and this route never opens that file.
+Mechanism ruled: bind `*package*` to X's CL package around the thunk's
+free-name resolution AND body, not a `p-eval-lex-lookup`-only patch.  Two
+review probes force the wider binding: the lookup-only fix REGRESSES
+`eval 'package D2; $W = 7; my $n = "W"; ${$n}'` (accidentally right today —
+write and symref read both mis-land in the caller), and the hole has a read
+spelling (`$main::G9 = 9; eval 'package X9; $G9'` → PCL 9, perl undef).
+The binding covers all three spellings; the step-1 gate and Cast+Block arm
+are deleted in the step-2 commit with rows flipped to native-and-correct.
+
+**Discipline attached**: measurement first — instrument the
+`p-eval-lex-lookup` miss path across sweep + board, piggybacked on #230's
+audited locating sweep (one run, two instruments), plus a per-site survey of
+the runtime's ~10 `*package*` fall-throughs.  Stop-rule: a magic name at the
+miss path or non-converging `our` containers → ship die-at-the-miss instead
+and step 2 returns post-E4.1.  One-session cap.
+
+Queue now: #230/F6 (+instrumentation) → #240 step 2 → E4.1 steps 1–4 → STOP
+→ Fable #153/E5.0.
+
+---
+
 ## Session 348 (2026-08-07, Opus) — #240 step 1: the eval-region `our` gate narrowed to declare-then-use; the residue found to be WIDER
 
 E4.1 pre-work, first queue item of `fable-answers-s346.md` §4.  gen v2-107

@@ -1039,3 +1039,42 @@ Full rulings: `docs/fable-answers-s345.md`.  All eleven commits (`0e73b13`…
   `extend-role-tiny.t`, which reproduces at HEAD (drift on task #208).
 - **No cache-generation bump**: eval transpiles are in-memory only
   (`*p-eval-string-cache*`); `p-transpile-string` never touches `~/.pcl-cache`.
+
+## s349 (Fable, 2026-08-07) — review of s348: #240 step 1 approved; step 2 RE-SCOPED to the runtime route and PROMOTED pre-flip
+
+Full rulings: `docs/fable-answers-s348.md`.  Gate independently re-verified
+(131 / 4648 PASS); every s348 acceptance row and both measurements re-probed
+live and reproduced; routing verified via `PCL_V2_AUDIT_LOG`.
+
+- **s348 approved as shipped, symbolic-deref arm included** — the arm is the
+  standing gate-the-hole rule applied correctly (the narrowing would have
+  opened a NEW silent-wrong; over-fire keeps the correct v1 retry).
+- **The wider hole gets NO interim gate** — (ii)-as-gate's plumbing (region
+  package threaded into `p-eval-thunk`) is the whole cost of the FIX, so the
+  interim artifact is waste.  (iii) parser gating on free variables stays
+  REJECTED (over-fires on the legitimate caller-lexical capture).
+- **#240 step 2 RE-SCOPED and PROMOTED pre-flip**: the s347 parking reason
+  (native-emitter surgery in the deletion window) does not apply to the
+  runtime route.  **Mechanism ruled: bind `*package*` to X's CL package around
+  the thunk's free-name resolution AND body** — NOT a patch to
+  `p-eval-lex-lookup` alone.  Two review-added probes force this: a
+  lookup-only fix REGRESSES `eval 'package D2; $W = 7; my $n = "W"; ${$n}'`
+  (accidentally right today: write and symref read both mis-land in caller,
+  value 7 correct while both package slots are wrong), and the hole has a
+  READ spelling too (`$main::G9 = 9; eval 'package X9; $G9'` → PCL 9, perl
+  undef — a caller global wrongly satisfies a region read).  The binding
+  covers all three spellings; the step-1 gate + Cast+Block arm are then
+  DELETED in the same commit (rows flip to native-and-correct with inverse
+  guards).
+- **Measurement first, stop-rule attached (one-session cap)**: instrument
+  `p-eval-lex-lookup`'s miss path across sweep + board — piggybacked on
+  #230/F6's audited locating sweep, one run serves both — plus a per-site
+  survey of the runtime's ~10 `*package*` fall-throughs.  If a magic/special
+  name reaches the miss path, or the `our`-write container does not converge
+  with the thunk parameter, STOP: ship (ii)-as-gate (die at the miss — value
+  arm of rule 12; inside a string eval that is `$@` + undef, loud and
+  perl-shaped) and step 2 returns post-E4.1.
+- **Queue**: #230/F6 (carrying the miss-path instrumentation) → #240 step 2 →
+  E4.1 steps 1–4 (refusal-rephrase list shrinks to multi-switch +
+  F6-if-applicable) → STOP (Fable #153/E5.0).  Post-E4.1 queue head reverts
+  to the board items (#232 → #233 → …).
