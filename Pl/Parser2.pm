@@ -3947,6 +3947,21 @@ sub _assemble_eval_mode {
   my @out = ('(in-package :pcl)', '', grep { length } @head);
   push @out, '' if @head;
   my @names = sort keys %free;
+  # TEMPORARY INSTRUMENTATION (#240 step 2 measurement, RULED s349 §2d.1).
+  # The runtime miss-path log cannot say whether a REGION package is in effect
+  # — nothing establishes one at lookup time today, which is the bug.  So the
+  # emitter records the other half: every #226 collapse event, with the region
+  # package and the free names that will reach p-eval-lex-lookup under it.
+  # DELETE THIS with the step-2 commit.
+  if (my $log = $ENV{PCL_EVAL_REGION_LOG}) {
+    if ($self->{_eval_pkg_enter}) {
+      my $pkg = eval { $self->{_eval_pkg_stmt}->namespace } // '?';
+      if (open my $fh, '>>', $log) {
+        print $fh join("\t", $pkg, scalar(@names), join(' ', @names)), "\n";
+        close $fh;
+      }
+    }
+  }
   if (@names) {
     my $names_str = join(' ', map { "\"$_\"" } @names);
     my $params    = join(' ', @names);

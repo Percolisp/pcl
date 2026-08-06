@@ -4,6 +4,44 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 350 (2026-08-07, Opus) — #230 CLOSED by measurement: F6 is a tr.t eval string; the #240 step-2 instrumentation, run
+
+Two measurement items, **no behaviour change**.  Full write-up:
+`docs/eval-region-measurements-s350.md`.  Gate: 131 files / 4648 PASS.
+Sweep gate clean (0 new / 0 fixed, TOTAL 18498 = baseline).
+
+**#230/F6 LOCATED and CLOSED.**  The audited cold-cache sweep produced 18
+v1-route events; F6 is one `parse_code` — `perl-tests/tr.t:474-498` (RT
+#132608), a string eval whose `tr///` replacement list is 40960 chars and
+lowers to a 73769-char run form.  `parse_code`, so the s346 §2.3 branch
+applies: **eval-string source → no pre-flip fix, ruled refusal.**  Cost at the
+flip MEASURED by disabling the retry for that message alone: **2 tr.t rows**
+(241→239 passing), and the file already aborts at exactly those rows.
+The other 17 events are all named (§1c) — F4/#228 ×6, F2 residual ×5,
+multi-switch ×1, F6 ×1, and 5 `DIE`s that are v2 correctly reporting a perl
+error.  **The F2 residual is free and probably +4**: its four `my $$x` strings
+are `eval.t:239-246`, blessed FAILURES today (PCL accepts what perl rejects,
+principle 9) that start passing once the refusal makes `$@` non-empty.
+
+**#240 step 2 instrumentation — the stop-rule did NOT fire.**  Miss-path log
+over the whole sweep: 2720 events, 29 names, **zero punctuation/magic
+variables**; a `*package*`-consumer survey of the runtime (13 real sites)
+finds every one implements "unqualified → current package", so the binding
+moves all thirteen toward perl and none away.
+
+**Two facts that change step 2 sizing, both new:**
+- The s348 "20 collapse events, all with EMPTY free-var sets" was measured on
+  the module SOURCES.  Under the running board it is **108 region events, 86
+  with free names** (all Class::Method::Modifiers' installer).  The alist wins
+  for every real capture; the only redirected names are 50 phantom `$method`s
+  (a `_eval_scope_free` false positive — the string declares it with `my`).
+- **A region with no free names emits no `p-eval-thunk` at all**, so the
+  binding cannot live only on the thunk's parameter path.
+
+Queue unchanged: **#240 step 2** → E4.1 steps 1–4 → STOP → Fable #153/E5.0.
+
+---
+
 ## Session 349 (2026-08-07, Fable) — review of s348: step 1 approved; #240 step 2 re-scoped to the runtime route, promoted PRE-FLIP
 
 Rulings in `docs/fable-answers-s348.md`; DECIDED.md carries the summary.

@@ -8132,6 +8132,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; $x__lex__N and also invisible. See docs/eval-string-plan.md.
 ;;;
 ;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
+;;; TEMPORARY INSTRUMENTATION (#240 step 2 measurement, RULED s349 §2d.1).
+;;; Every MISS of the capture alist — the path that resolves a string eval's
+;;; free name against a package symbol — appends one line to the file named by
+;;; PCL_EVAL_LEX_MISS_LOG.  The question it answers: which names actually reach
+;;; the package-resolution path, and in which package do they land today, so
+;;; the region-package binding's blast radius is measured rather than assumed.
+;;; DELETE THIS with the step-2 commit.  getenv is re-read per event on
+;;; purpose: a cached value would be frozen into a saved core.
+(defun %p-eval-lex-miss-audit (name sym)
+  (let ((log (sb-posix:getenv "PCL_EVAL_LEX_MISS_LOG")))
+    (when log
+      (ignore-errors
+        (with-open-file (s log :direction :output :if-exists :append
+                           :if-does-not-exist :create)
+          (format s "~a~c~a~c~a~c~a~c~a~%"
+                  name #\Tab
+                  (package-name *package*) #\Tab
+                  *pcl-current-package* #\Tab
+                  (if (boundp sym) "bound" "autoviv") #\Tab
+                  (length *p-eval-lex-alist*)))))))
+
 (defun p-eval-lex-lookup (name)
   "Resolve a free variable NAME (e.g. \"$captured\") referenced inside a string
    eval to the container the eval body should bind it to:
@@ -8144,6 +8165,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (cell (cdr cell))
       (t (let ((sym (intern (%pcl-invert-case name) *package*))
                (sigil (char name 0)))
+           (%p-eval-lex-miss-audit name sym)
            (if (boundp sym)
                (symbol-value sym)
                ;; Autovivify the package global (Perl semantics), INSTALLING the

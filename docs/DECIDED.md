@@ -1078,3 +1078,45 @@ live and reproduced; routing verified via `PCL_V2_AUDIT_LOG`.
   E4.1 steps 1–4 (refusal-rephrase list shrinks to multi-switch +
   F6-if-applicable) → STOP (Fable #153/E5.0).  Post-E4.1 queue head reverts
   to the board items (#232 → #233 → …).
+
+## s350 (2026-08-07, Opus) — #230/F6 measured and CLOSED; #240 step-2 instrumentation run, stop-rule did not fire
+
+Detail: `docs/eval-region-measurements-s350.md`.  No behaviour change; gate
+131/4648 PASS, sweep gate clean (0 new / 0 fixed, TOTAL 18498 = baseline).
+
+- **F6 = `perl-tests/tr.t:474-498` (RT #132608), a STRING EVAL** — a runtime
+  `tr///` whose replacement list is 40960 chars, lowering to a 73769-char run
+  form.  `parse_code`, so the s346 §2.3 branch applies: **no pre-flip fix,
+  ruled refusal.**  `$RUN_FORM_MAX` unchanged.  **Flip cost MEASURED: 2 tr.t
+  rows** (241→239 passing; the file already aborts at exactly those rows) —
+  edit them into `docs/fail-baseline.tsv` with their cause, plus the
+  not-supported entry, IN THE E4.1 STEP-2 COMMIT (never earlier: rephrasing a
+  `Parser2 TODO:` before then turns a silent retry into a user-visible die).
+- **#230 is closed** — F3 was already routed through #78 (s345) and the #26
+  gate stays an unreached backstop for step 3 to retire.
+- **The sweep's whole v1-fallback inventory is 18 events and all are named**
+  (F4/#228 ×6, F2 residual ×5, multi-switch ×1, F6 ×1, 5 `DIE` = v2 correctly
+  reporting a perl error).  §5a.3's "zero UNEXPLAINED" is satisfied for the
+  sweep half.  **The F2 residual costs nothing and likely GAINS 4**: its four
+  `my $$x` strings are `eval.t:239-246`, blessed FAILURES today because PCL
+  accepts what perl rejects (principle 9); the refusal makes `$@` non-empty
+  and they pass.
+- **#240 step-2 stop-rule did NOT fire.**  Miss-path listing over the whole
+  sweep: 2720 events, 29 distinct names, **zero punctuation/magic variables**.
+  The `*package*` consumer survey is 13 real runtime sites, every one
+  implementing "unqualified → current package" — the binding moves all
+  thirteen toward perl, none away (`p-resolve-invocant` is the only one that
+  *removes* a resolution, and removing it is the correction).
+- **Two sizing facts step 2 must now assume, neither available at s349**:
+  (a) the s348 "20 collapse events, all EMPTY free sets" was measured on the
+  module SOURCES — under the running board it is **108 region events, 86 with
+  free names** (Class::Method::Modifiers' installer); the alist wins for every
+  real capture and the only redirected names are 50 phantom `$method`s (a
+  `_eval_scope_free` false positive: the eval string declares it with `my`);
+  (b) **a region with no free names emits no `p-eval-thunk` at all**, so the
+  binding cannot live only on the thunk's parameter path — the body is where
+  all 108 events feel it.
+- **Instruments to DELETE with the step-2 commit**: `PCL_EVAL_LEX_MISS_LOG`
+  (`%p-eval-lex-miss-audit`, `cl/pcl-runtime.lisp`) and `PCL_EVAL_REGION_LOG`
+  (`_assemble_eval_mode`, `Pl/Parser2.pm`).
+- **Queue**: #240 step 2 → E4.1 steps 1–4 → STOP (Fable #153/E5.0).
