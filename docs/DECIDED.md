@@ -1120,3 +1120,19 @@ Detail: `docs/eval-region-measurements-s350.md`.  No behaviour change; gate
   (`%p-eval-lex-miss-audit`, `cl/pcl-runtime.lisp`) and `PCL_EVAL_REGION_LOG`
   (`_assemble_eval_mode`, `Pl/Parser2.pm`).
 - **Queue**: #240 step 2 → E4.1 steps 1–4 → STOP (Fable #153/E5.0).
+
+### s350 addendum — the step-2 wrap fork PROBED away (one mechanism, not two)
+
+A region with no free names emits no `p-eval-thunk`, so step 2 must wrap its
+body — and wrapping is what `_cap_inlining_if_huge` refuses to do to
+`eval-when`/`p-sub`/`defvar`/`p-defpackage`.  **Probed with
+`PCL_EVAL_REGION_WRAP=1` (forces the wrap on every #226 region): emission
+really changes, and every row of Role-Tiny + Class-Method-Modifiers + Try-Tiny
+(48 files, cold cache) is IDENTICAL**; sub installation, `use` import target
+and `our` read-back all still match perl.  **So step 2 uses ONE mechanism** —
+emit the thunk whenever a region package is present and bind `*package*` on
+`p-eval-thunk`, per s349 §2c.  WHY the wrap is safe (do not re-derive): eval
+mode has no compile-file phase to lose — `p-eval` reads/evals form by form and
+the region's defs are already hoisted inside the one eval'd unit; the
+`_cap_inlining_if_huge` prohibition is about FILE-mode top-level forms.
+Third instrument to delete with step 2: `PCL_EVAL_REGION_WRAP`.

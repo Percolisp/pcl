@@ -333,3 +333,59 @@ Both are append-only, one short line per event (well under `PIPE_BUF`, so
 `--jobs 8` interleaves cleanly), and no-ops when the variable is unset.
 `getenv` is re-read per event on purpose — a cached value would freeze into a
 saved core.
+
+---
+
+## 6. The one open design fork — PROBED, and it is not a fork
+
+§3a.2 left step 2 with a question the s349 ruling could not have posed: the
+binding has to cover regions with no free names, those emit no thunk, so their
+bodies would have to be **wrapped** — and wrapping is precisely what
+`_cap_inlining_if_huge` refuses to do to `eval-when` / `p-sub` / `defvar` /
+`p-defpackage`, because a wrapper strips top-level-ness and breaks
+compile-time visibility.  An eval region emits all four.  If that bit, step 2
+would need two mechanisms (wrap when free names exist, head-position package
+switch when they don't) and the fork would be a design call, not an
+implementation detail.
+
+**Measured instead of argued.**  `PCL_EVAL_REGION_WRAP=1` forces the wrap on
+every #226 region regardless of free names.  The emission really does change:
+
+```
+WRAP=0:  <body forms at top level>
+WRAP=1:  (pcl:p-eval-thunk (list )
+          (lambda ()
+            <body forms>))
+```
+
+Run over the three region-heavy dists — Role-Tiny (23 files),
+Class-Method-Modifiers (14), Try-Tiny (11), 48 files, cold cache:
+
+**Every row identical to the unwrapped run.**  `diff` of the two per-file TSVs
+is empty.
+
+Direct probe of the three things the wrap could plausibly break, all matching
+perl exactly under both settings:
+
+| probe | WRAP=0 | WRAP=1 | perl |
+|---|---|---|---|
+| `eval 'package Rw1; use Role::Tiny; sub greet {…} 1'` → `Rw1::greet()` | `hi from Rw1` | same | same |
+| `Rw1->can('greet')` (the sub really installed in the stash) | yes | same | same |
+| `eval 'package Rw2; our $V = 7; sub v { $Rw2::V } 1'` → `Rw2::v()` / `$Rw2::V` | 7 / 7 | same | same |
+
+**So step 2 needs ONE mechanism, not two**: emit the thunk whenever a region
+package is present (empty names list when there are none) and hang the
+`*package*` binding on `p-eval-thunk`, exactly as s349 §2c sketched.  The
+empty-free-set case is a parameter-list detail, not a second design.
+
+The reason the wrap is harmless here is worth recording so it is not
+re-derived: `p-eval` READs and EVALs the eval text **form by form**, and the
+region's definitions are hoisted into the body by `_interleaved_defs` — they
+are already inside one `eval`'d unit whose compile-time phase has run by the
+time the body executes.  The `_cap_inlining_if_huge` prohibition is about
+FILE-mode top-level forms, where `eval-when (:compile-toplevel)` is the only
+thing making a sub visible to a later `BEGIN`.  Eval mode has no compile-file
+phase to lose.
+
+Instrument to delete with step 2, alongside the other two:
+`PCL_EVAL_REGION_WRAP` (`_assemble_eval_mode`, `Pl/Parser2.pm`).

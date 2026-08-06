@@ -3962,7 +3962,15 @@ sub _assemble_eval_mode {
       }
     }
   }
-  if (@names) {
+  # TEMPORARY PROBE (#240 step 2, s350): the ruled binding must also cover a
+  # region with NO free names, which today emits no thunk at all — so the body
+  # would have to be wrapped.  Wrapping is exactly what _cap_inlining_if_huge
+  # refuses to do to eval-when/p-sub/defvar/p-defpackage (it strips top-level-
+  # ness and breaks compile-time visibility), and an eval region emits all
+  # four.  PCL_EVAL_REGION_WRAP=1 forces the wrap so the cost can be MEASURED
+  # before step 2 commits to a mechanism.  DELETE THIS with the step-2 commit.
+  my $force_wrap = $ENV{PCL_EVAL_REGION_WRAP} && $self->{_eval_pkg_enter};
+  if (@names || $force_wrap) {
     my $names_str = join(' ', map { "\"$_\"" } @names);
     my $params    = join(' ', @names);
     push @out, "(pcl:p-eval-thunk (list $names_str)",

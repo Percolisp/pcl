@@ -38,6 +38,16 @@ moves all thirteen toward perl and none away.
 - **A region with no free names emits no `p-eval-thunk` at all**, so the
   binding cannot live only on the thunk's parameter path.
 
+**The one design fork PROBED away.**  A region with no free names emits no
+thunk, so step 2 must wrap its body — and wrapping is what
+`_cap_inlining_if_huge` refuses to do to `eval-when`/`p-sub`/`defvar`/
+`p-defpackage`.  Forced the wrap on every region (`PCL_EVAL_REGION_WRAP=1`):
+emission really changes, and all 48 files of Role-Tiny + Class-Method-Modifiers
++ Try-Tiny come back row-identical, with sub installation, `use` import target
+and `our` read-back still matching perl.  **Step 2 needs ONE mechanism.**  Eval
+mode has no compile-file phase to lose — that prohibition is about FILE-mode
+top-level forms.
+
 Queue unchanged: **#240 step 2** → E4.1 steps 1–4 → STOP → Fable #153/E5.0.
 
 ---
