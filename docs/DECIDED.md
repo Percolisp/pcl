@@ -986,3 +986,56 @@ Full rulings: `docs/fable-answers-s345.md`.  All eleven commits (`0e73b13`…
 - **Queue**: #240 step 1 → #230/F6 locate+fix-or-rule → E4.1 steps 1–4 →
   STOP (Fable #153/E5.0); post-E4.1 compiler queue gains #240 step 2 at its
   head.
+
+## s348 (Opus, 2026-08-07) — #240 step 1: the eval-region `our` gate narrowed to DECLARE-THEN-USE
+
+- **The gate now refuses only a `our` name that is USED AGAIN in the region**
+  (read, later write, interpolated read, read inside a nested sub, one member
+  of a list decl).  A **WRITE-ONLY `our` collapses natively**:
+  `eval 'package Foo; our $VERSION = "1.25"; 1'` and
+  `our @ISA = ("Exporter")` are v2-native and correct — they were v1 retries
+  at s346 and would have died user-visibly at the E4.1 flip.
+- **The mechanism is `_block_captures_name` + one new option, `our_targets`**:
+  an `our` declaration's targets count as declarations rather than uses, but —
+  unlike `my`/`state` — never as SHADOWS, so a later use of the same canon is
+  still a use.  Sigil-exact canons, the inner-`my` shadow rule and the
+  string/regex/heredoc conservatism come along unchanged (reuse, rule 11).
+- **One arm the ruling did not specify**: the gate also fires when the region
+  declares an `our` AND contains a `Cast`+`Block` (symbolic) deref.  A symbolic
+  ref names the variable WITHOUT a sigil, so no token scan can attribute it;
+  `%p-symref-box` interns an unqualified name in `*package*` (the CALLER's CL
+  package) while `_lower_our_decl` qualified the write into X.  Probed:
+  `eval 'package D1; our $Z = 5; my $n = "Z"; ${$n}'` → undef, perl 5 — NEW
+  from the narrowing, so gated in the same commit rather than shipped.
+- **#240's silent-wrong is WIDER than the `our` read-back, and it is s346's,
+  not step 1's** (verified identical at `41907a9` in a worktree): EVERY
+  unqualified package global in an eval package region binds to the CALLER's
+  package.  `eval 'package F2; $Zz = 5; 1'` → perl `$F2::Zz`, PCL `$main::Zz`.
+  Cause, one layer up from the ruling's: the eval-mode free-var scan makes the
+  name a `p-eval-thunk` parameter and `p-eval-lex-lookup` resolves an
+  alist-miss with `(intern … *package*)`.  `our` escapes only because its write
+  is qualified; the read-back is the same bug from the other side.
+- **MEASURED before deciding: the wider hole has ZERO live events.**  All 20
+  eval-region collapses across the entire F1 source (Role-Tiny 23 files +
+  Try-Tiny 11) have an EMPTY free-variable set — every one is the
+  `package X; use Role::Tiny; …` idiom.
+- **NOT gated, and why**: the only compile-time predicate covering it ("the
+  region has a free variable") cannot tell a package global from a caller
+  lexical — that distinction exists only at the runtime alist lookup — so it
+  would also refuse the legitimate `my $x; eval 'package Foo; sub f { $x }'`,
+  the exact over-firing the s347 §1.2 ruling reversed the s346 gate for.
+  Escalated as the s348 ask (`docs/opus5-review-requests-s348.md` §2).
+- **Possible re-scope of #240 step 2**: passing the region package X into
+  `p-eval-thunk`, so `p-eval-lex-lookup` interns an alist-miss in X, appears to
+  fix the wider hole AND the ruled read-back (the qualified `X::$Z` write and
+  the bare read would resolve to the same symbol) — without the two-half
+  emitter fix and without touching native variable naming in the deletion
+  window.  NOT implemented: it is the parked step 2, and its blast radius
+  (which specials can reach that miss path) is unmeasured.
+- **The file-mode `sub f { package X; use M; }` guard row is in**
+  (`Pl/t/use-require-01.t`, 3 rows) — imports into X, NOT main, callable.
+- Gate 131 files / **4648** PASS; corpus emission identical across 111 files;
+  CPAN board (Role-Tiny + Try-Tiny) identical to HEAD but for
+  `extend-role-tiny.t`, which reproduces at HEAD (drift on task #208).
+- **No cache-generation bump**: eval transpiles are in-memory only
+  (`*p-eval-string-cache*`); `p-transpile-string` never touches `~/.pcl-cache`.

@@ -87,6 +87,23 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   UNQUALIFIED is silent-wrong (v2's native emitter has no equivalent of
   ExprToCL.pm ~900's our-qualify branch), so that shape keeps the v1 retry —
   task **#240**, with the measurement and the rejected rename approach recorded.
+- **s348 (#240 step 1)**: that residue gate was narrowed to DECLARE-THEN-USE
+  (RULED s347 §1.2) — a WRITE-ONLY `our` (`our $VERSION = …`, `our @ISA = …`)
+  now collapses natively, since only a *use* can mis-resolve.  Added in the
+  same predicate: `our` + a symbolic (`Cast`+`Block`) deref, which the
+  narrowing would otherwise have made a NEW silent-wrong (a symbolic ref names
+  the variable without a sigil, so no token scan sees it).
+  **And the residue is WIDER than #240 recorded**: EVERY unqualified package
+  global in the region binds to the CALLER's package
+  (`eval 'package F2; $Zz = 5; 1'` → PCL `$main::Zz`, perl `$F2::Zz`), because
+  the free-var scan makes it a thunk parameter and `p-eval-lex-lookup` resolves
+  an alist-miss with `(intern … *package*)`.  Verified identical at `41907a9`,
+  so it is s346's, not step 1's.  **Measured: ZERO live events** — all 20
+  eval-region collapses across the whole F1 source (Role-Tiny + Try-Tiny) have
+  an EMPTY free-variable set.  Not gated (the only compile-time predicate also
+  refuses the legitimate caller-lexical capture); escalated with the
+  measurement and a possible cheaper step-2 route in
+  `docs/opus5-review-requests-s348.md` §2.
 - **F2 is CLEARED (s342f, task #227) except one shape**, and its CPAN half was
   never a syntax probe: all four board events are `eval "our $VERSION = '…'"`,
   a routine module idiom.  The gate refused **every** `our`, though

@@ -278,11 +278,44 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   # STILL REFUSED (silent-wrong otherwise, s346): an `our` declared in the
   # region and read back UNQUALIFIED — v2's native emitter has no equivalent of
   # v1's "Qualify `our` variables" branch, so the read would take the caller's
-  # value.  Task #240.  When that is fixed this assertion flips.
+  # value.  Task #240 step 2.  When that is fixed this assertion flips.
   my $o = eval { Pl::Parser2->parse_code(q{package X3; our $Z = 5; $Z * 2},
                                          eval_mode => 1, eval_pkg => 'main') };
   like($@, qr/eval-mode multi-segment/,
-       '#226 residue: an `our` in the region keeps the v1 retry (task #240)');
+       '#226 residue: an `our` READ BACK keeps the v1 retry (task #240 step 2)');
+
+  # #240 step 1 (RULED s347 §1.2): that refusal is DECLARE-THEN-USE only.  The
+  # s346 gate refused ANY `our`, including the routine WRITE-ONLY module idiom —
+  # correct today via the v1 retry, a user-visible die after the E4.1 flip.
+  # These two are the ruling's acceptance probes.
+  for my $w (q{package X4; our $VERSION = "1.25"; 1},
+             q{package X5; our @ISA = ("Exporter"); 1}) {
+    my $ok = eval { Pl::Parser2->parse_code($w, eval_mode => 1,
+                                            eval_pkg => 'main') };
+    ok(defined $ok, "#240 step 1: write-only `our` collapses natively [$w]")
+      or diag($@);
+  }
+  # A WRITE is a use too: `our $Z; $Z = 5` re-binds the same wrong container.
+  eval { Pl::Parser2->parse_code(q{package X6; our $Z; $Z = 5; 1},
+                                 eval_mode => 1, eval_pkg => 'main') };
+  like($@, qr/eval-mode multi-segment/,
+       '#240 step 1: a later WRITE of the `our` name gates too');
+  # A SYMBOLIC deref can name the `our` variable without a sigil, so no token
+  # scan can see it; `%p-symref-box` interns unqualified names in the CALLER's
+  # package while the `our` write was qualified into X.  Probed:
+  # `eval 'package D1; our $Z = 5; my $n = "Z"; ${$n}'` → undef, perl 5.
+  eval { Pl::Parser2->parse_code(
+           q{package X7; our $Z = 5; my $n = "Z"; ${$n}},
+           eval_mode => 1, eval_pkg => 'main') };
+  like($@, qr/eval-mode multi-segment/,
+       '#240 step 1: an `our` region containing a symbolic deref gates');
+  # ... and a symbolic deref WITHOUT an `our` in the region does not (it is the
+  # unqualified-global residue, wrong in the same place both times — #240's
+  # wider hole, unchanged here and measured to have zero live events).
+  my $sym = eval { Pl::Parser2->parse_code(q{package X8; my $n = "Z"; ${$n}},
+                                           eval_mode => 1, eval_pkg => 'main') };
+  ok(defined $sym, '#240 step 1: a symbolic deref alone does not gate')
+    or diag($@);
 
   # The multi-switch shape stays refused (zero measured events).
   eval { Pl::Parser2->parse_code(q{package A1; sub a {1} package B1; sub b {2} 1},

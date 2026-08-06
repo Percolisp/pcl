@@ -697,16 +697,19 @@ sub parse {
   # `eval 'package F1; our $Z = 5; $Z * 2'` → 0, perl 10, while
   # `$F1::Z * 2` in the same eval is correct.  That is a SILENT WRONG — the
   # same class the s342g attempt was reverted for — so it keeps the v1 retry
-  # until the emitter gap is closed (task #240).
+  # until the emitter gap is closed (task #240 step 2).
+  # #240 step 1 (RULED s347 §1.2): that refusal is DECLARE-THEN-USE only.  The
+  # s346 gate refused ANY `our` in the region, which also refused the routine
+  # WRITE-ONLY idiom (`eval 'package Foo; our $VERSION = "1.25"; 1'`,
+  # `our @ISA = ("Exporter")`) — correct today through the v1 retry, a
+  # user-visible die after the E4.1 flip.  A write-only `our` has no read to
+  # mis-resolve: the qualified WRITE is the whole statement (probed s346), so
+  # it goes through the collapse.
   if ($self->eval_mode && @segments == 2
       && !@{ $segments[0]{stmts} }
       && $segments[1]{pkg_stmt} && !$segments[1]{blockform}
       && !defined $segments[1]{version}
-      && !grep { my @k = $_->schildren;
-                 @k && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our' }
-              map { ($_->isa('PPI::Statement::Variable') ? $_ : ()),
-                    @{ $_->find('PPI::Statement::Variable') || [] } }
-              @{ $segments[1]{stmts} }) {
+      && !$self->_eval_region_our_readback($doc, $segments[1]{stmts})) {
     $self->{_eval_pkg_stmt} = $segments[1]{pkg_stmt};
     @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
                    stmts => [ $segments[1]{pkg_stmt}, @{ $segments[1]{stmts} } ] });
@@ -1729,8 +1732,15 @@ sub _check_sub_captures {
 # single-quoted '$x…' no longer gates a file whose only lexical is @x (my.t).
 # Whitespace is allowed before the subscript bracket: interpolation never has
 # it, but eval-fed single-quoted code can — over-fire keeps the gate (safe).
+# $opts->{our_targets} (#240 step 1): also treat an `our` declaration's target
+# symbols as declaration tokens rather than uses — but NEVER as shadows.  That
+# is the difference the eval-region gate needs: `our $V = 1` alone is a WRITE
+# (no use), while `our $V = 1; … $V …` is the declare-then-use read-back.  A
+# `my`/`state` decl still shadows later uses; an `our` decl re-declares the
+# same package variable, so a later use is a genuine use of it.
 sub _block_captures_name {
-  my ($self, $block, $bare, $canons) = @_;
+  my ($self, $block, $bare, $canons, $opts) = @_;
+  $opts //= {};
   my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
   # Per-CANON text patterns, so a string/heredoc/regex mention can be
   # attributed to one canonical variable and shadow-checked like a Symbol
@@ -1773,8 +1783,10 @@ sub _block_captures_name {
   $ord{ refaddr $_ } = $i++ for $block->tokens;
   for my $d (@{ $block->find('PPI::Statement::Variable') || [] }) {
     my @k = _strip_semi($d->schildren);
-    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
-      && $k[0]->content =~ /^(?:my|state)$/;
+    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word');
+    my $our = $k[0]->content eq 'our';
+    next unless $k[0]->content =~ /^(?:my|state)$/
+      || ($our && $opts->{our_targets});
     my @tgt = $k[1]->isa('PPI::Token::Symbol')   ? ($k[1])
             : $k[1]->isa('PPI::Structure::List')
               ? (grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
@@ -1783,6 +1795,7 @@ sub _block_captures_name {
     for my $t (@tgt) {
       next unless substr($t->content, 1) eq $bare;
       $decl_tok{ refaddr $t } = 1;
+      next if $our;                     # a declaration, but never a shadow
       push @{ $decl{ $t->content } }, [$d, $last];
     }
   }
@@ -1828,6 +1841,50 @@ sub _block_captures_name {
         return 1 if !length($c) || !$shadowed->($t, $c);
       }
     }
+  }
+  return 0;
+}
+
+# #240 step 1 — the DECLARE-THEN-USE half of the eval-region `our` gate
+# (RULED s347 §1.2).  True iff some name the region DECLARES with `our` is
+# also USED in it: that read (or later write) emits a bare `$Z` from v2's
+# native emitter while `_lower_our_decl` qualified the declaration's write to
+# `X::$Z`, and eval mode's free-var scan has bound the bare name to the
+# CALLER's `$Z` — silently wrong (measured s346), so the whole eval keeps the
+# v1 retry.  A WRITE-ONLY `our` (`our $VERSION = "1.25";`, `our @ISA = (…)`)
+# has no such read and lowers correctly, so it must NOT gate.
+# The scan is _block_captures_name's, with our_targets: same sigil-exact
+# canons, same shadow rule (an inner `my $Z` owns its uses), same
+# string/regex/heredoc conservatism (interpolation reads the name too).
+sub _eval_region_our_readback {
+  my ($self, $doc, $stmts) = @_;
+  my %canon;
+  for my $st (@$stmts) {
+    for my $d (($st->isa('PPI::Statement::Variable') ? ($st) : ()),
+               @{ $st->find('PPI::Statement::Variable') || [] }) {
+      my @k = _strip_semi($d->schildren);
+      next unless @k && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our';
+      $canon{$_} = 1 for $self->_declared_names($d);
+    }
+  }
+  return 0 unless %canon;
+  # A SYMBOLIC deref (`${$n}`, `@{"$c\::ISA"}`) reads its name at RUNTIME, so no
+  # token scan can attribute it to a canon.  `%p-symref-box` and its siblings
+  # intern an UNQUALIFIED name in `*package*` — the CALLER's CL package, since
+  # the eval body is read there — while `_lower_our_decl` qualified the region's
+  # `our` write to `X::$Z`.  Probed: `eval 'package D1; our $Z = 5; my $n = "Z";
+  # ${$n}'` → undef, perl 5.  Only the region's `our` names make the two
+  # disagree (an unqualified global is wrong in the same place both times, which
+  # is #240's wider residue, not this gate's), so this arm costs nothing when
+  # the region declares none — hence the early-out above.
+  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
+    my $nx = $cast->snext_sibling;
+    return 1 if $nx && $nx->isa('PPI::Structure::Block');
+  }
+  for my $c (sort keys %canon) {
+    (my $bare = $c) =~ s/^[\$\@\%]//;
+    return 1 if $self->_block_captures_name($doc, $bare, { $c => 1 },
+                                            { our_targets => 1 });
   }
   return 0;
 }

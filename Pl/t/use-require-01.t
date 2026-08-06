@@ -734,4 +734,38 @@ ok($x == 2, "block-form arg body may reference diag before test-lib load");
   unlink $pl_file, $cl_file;
 }
 
+# Test: a statement-form `package X;` inside a SUB BODY owns the `use` after it.
+# Perl's `package X;` runs to the end of its enclosing block, so `use M` in that
+# region imports into X, not into the file's package.  Under v2 this imported
+# into main until s346's #226 `_fallback_stmt_capture` change fixed it as a side
+# effect — unclaimed by that commit, so it was unguarded (found by the s347
+# review; guard row required by fable-answers-s346.md §1 ruling 1).  Same class
+# as #187's `use` inside a do{}/eval{} block.
+{
+  my $test_code = q{
+sub f { package PkgInSub; use List::Util qw(sum); return sum(1,2,3); }
+print "in-X=",    (PkgInSub->can('sum') ? 1 : 0), "\n";
+print "in-main=", (main->can('sum')     ? 1 : 0), "\n";
+print "call=", f(), "\n";
+};
+
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl');
+  print $fh $test_code;
+  close $fh;
+
+  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
+  print $cl_fh $cl_code;
+  close $cl_fh;
+
+  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  like($output, qr/^in-X=1$/m,
+       'package X; in a sub body: the `use` after it imports into X');
+  like($output, qr/^in-main=0$/m,
+       '... and NOT into the file package (the inverse guard)');
+  like($output, qr/^call=6$/m, '... and the import is callable in the region');
+
+  unlink $pl_file, $cl_file;
+}
+
 done_testing();

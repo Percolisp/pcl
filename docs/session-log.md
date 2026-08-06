@@ -4,6 +4,64 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 348 (2026-08-07, Opus) — #240 step 1: the eval-region `our` gate narrowed to declare-then-use; the residue found to be WIDER
+
+E4.1 pre-work, first queue item of `fable-answers-s346.md` §4.  gen v2-107
+(no bump: eval transpiles are in-memory only).
+
+**The narrowing is reuse, one flag wide.**  `_block_captures_name` — the
+shadow-aware capture scan the W5/W10 gates already use — gained
+`$opts->{our_targets}`: an `our` declaration's target symbols count as
+declarations rather than uses, but never as SHADOWS (a `my` shadows later uses;
+an `our` re-declares the same package variable, so a later use is a real use of
+it).  Everything else comes along: sigil-exact canons, the inner-`my` shadow
+rule, and the string/regex/heredoc conservatism that catches an interpolated
+read.  The gate is now `_eval_region_our_readback($doc, $stmts)`.
+
+**Acceptance, all against perl** — write-only `our $VERSION` / `our @ISA` /
+`our %H` / `our ($X,$Y)` collapse v2-native and correct; read-back, a later
+WRITE, an interpolated read, a read inside a nested sub, and one member of a
+list decl all keep the v1 retry; `$B1::Z` (explicitly qualified) is native.
+
+**One arm the ruling did not specify, added rather than shipped wrong.**  The
+narrowing opened exactly one new silent-wrong:
+`eval 'package D1; our $Z = 5; my $n = "Z"; ${$n}'` → undef, perl 5 (v1 at HEAD
+gave 5).  A symbolic ref names the variable WITHOUT a sigil, so no token scan
+can attribute it, and `%p-symref-box` interns an unqualified name in
+`*package*` — the caller's CL package — while `_lower_our_decl` qualified the
+write into X.  The gate therefore also fires on `our` + a `Cast`+`Block` deref;
+free when the region declares no `our`, which all 20 live events do not.
+
+**The find: #240's hole is WIDER than the `our` read-back, and it is s346's.**
+Every unqualified package global in an eval package region binds to the
+CALLER's package — `eval 'package F2; $Zz = 5; 1'` sets `$main::Zz`, perl sets
+`$F2::Zz`.  Verified identical at `41907a9` in a worktree, so it shipped
+unguarded with #226 and is not step 1's.  Cause is the ruling's own mechanism
+one layer up: the free-var scan makes the name a `p-eval-thunk` parameter and
+`p-eval-lex-lookup` resolves an alist-miss with `(intern … *package*)`.
+
+**Measured before deciding: zero live events.**  Instrumented the collapse site
+and ran the entire F1 source (Role-Tiny 23 files + Try-Tiny 11): 20 collapses,
+every one with an EMPTY free-variable set — all the `package X; use Role::Tiny`
+idiom.  NOT gated, because the only compile-time predicate that covers it
+("region has a free variable") cannot tell a package global from a caller
+lexical and would refuse `my $x; eval 'package Foo; sub f { $x }'` — the exact
+over-firing the s347 §1.2 ruling reversed the s346 gate for.  Escalated with
+its measurement as the s348 ask, together with a possible cheaper step 2:
+give `p-eval-thunk` the region package so an alist-miss interns in X, which
+appears to close BOTH the wider hole and the ruled read-back without the
+two-half emitter fix.
+
+**Also in the commit**: the file-mode `sub f { package X; use M; }` guard row
+the s347 ruling required (3 rows in `Pl/t/use-require-01.t` — imports into X,
+NOT into main, callable).
+
+Measured: gate 131 files / **4648** PASS; corpus emission identical across 111
+files; CPAN board (Role-Tiny + Try-Tiny) per-file TSV identical to HEAD except
+`extend-role-tiny.t` PASS→FAIL, which reproduces at HEAD (task #208 drift).
+
+---
+
 ## Session 347 (2026-08-06, Fable) — review of s346–s346d: all four commits APPROVED; #240 split, F6 re-scoped
 
 Review-and-rulings session (`docs/fable-answers-s346.md`, indexed in

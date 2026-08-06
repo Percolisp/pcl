@@ -261,8 +261,23 @@ release checks surface divergences, triage those first, per
 >   are rephrased perl-shaped (`PCL: unsupported in string eval: …`) in that
 >   same commit (§5a.3).
 >
-> **Pre-work order (s347 ruling): ~~#78~~ → ~~#226~~ → #240 step 1 → #230 (F6
-> locate + fix-or-rule) → steps 1–4 below.**
+> **Pre-work order (s347 ruling): ~~#78~~ → ~~#226~~ → ~~#240 step 1~~ → #230
+> (F6 locate + fix-or-rule) → steps 1–4 below.**
+>
+> **#240 step 1 is DONE (s348).**  The gate narrowed to DECLARE-THEN-USE via
+> `_block_captures_name`'s new `our_targets` option (an `our` target is a
+> declaration but never a shadow); write-only `our $VERSION`/`our @ISA` collapse
+> natively.  One arm added beyond the ruling: `our` + a symbolic
+> (`Cast`+`Block`) deref, which the narrowing would otherwise have turned into
+> a NEW silent-wrong.  File-mode `sub { package X; use M; }` guard row shipped
+> with it.  **Open for Fable (`docs/opus5-review-requests-s348.md` §2): the
+> residue is WIDER than #240 recorded** — every unqualified package global in
+> an eval package region binds to the CALLER's package (s346's, verified at
+> `41907a9`; ZERO live events across all 20 collapses in the F1 source).  Not
+> gated because the only compile-time predicate also refuses the legitimate
+> caller-lexical capture.  A possible cheaper step 2 (region package into
+> `p-eval-thunk`, so `p-eval-lex-lookup` interns an alist-miss in X) is in
+> that ask.
 >
 > **s347 (Fable) reviewed s346–s346d — all four commits approved
 > (`docs/fable-answers-s346.md`); two new pre-work facts:**
