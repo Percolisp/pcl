@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 352 (2026-08-07, Opus) — E4.1 opened: step 1 shipped, a stale eval gate deleted, and the flip BLOCKED by measurement
+
+The session started to pull the E4.1 trigger.  Step 1 landed; step 2 did not,
+because instrumenting our own gate falsified its precondition.
+
+**Step 1 (`ef1b3de`) — bundle mode off `Pl::Parser->parse_file`.**  The one
+v1-only bypass in the driver (`v2-code-review.md` §4: "must be ported first
+or E4.1 breaks bundles").  A one-liner, because the comment it replaced was
+wrong — `parse_file` does not "recursively process dependencies"; those load
+at run time via `p-use`.  Both sub-modes verified against perl on a probe
+using a module, package/OO, `map`/`grep`/`first` and a string eval: `--bundle`
+→ fasl and `--executable` → binary both print `total=55 big=8 sq3=9 n=8
+base=c.txt dbl=42`, and the bundle now carries `pipeline=v2`.
+
+**F8 — a stale refusal deleted.**  Instrumenting with `PCL_V2_AUDIT_LOG`
+immediately hit `Parser2 TODO: eval-mode bareword array subscript`, live on
+`eval-constant-01.t` rows 4–5.  It claimed v2 strings the bareword, but
+`PExpr::_bareword_subscript_autoquotes` had gained the eval-mode ALL-CAPS
+carve-out a MONTH EARLIER (`68ab668`), and Parser2 answers `eval_mode` on both
+routes — the E3 commit added a gate against a bug that was already fixed.
+Measured with it removed: the JSON::PP `->canonical` shape agrees with perl,
+and the shape it does not cover (a LOWERCASE sub name) is wrong identically
+under v1, so the fallback bought nothing.  Deleted; the lowercase divergence
+is task #246.
+
+**The blocker (`docs/gate-v1-route-audit-s352.md`).**  `docs/v1-live-share-audit.md`
+(s342c) measured the perl-tests sweep and the CPAN board — never `Pl/t/`.
+A green gate run under `PCL_V2_AUDIT_LOG` finds **27 v1 routes in six TODO
+families** (plus 5 self-resolving DIE events).  The 15-event family is the
+refusal `fable-answers-s345.md` §2 recorded as **"ZERO measured events"** and
+scheduled to be *rephrased* in the step-2 commit: it is **Moo's Sub::Quote**,
+whose generated evals put `my` lines before the `package`, so `#226`'s
+leading-`package` collapse misses by one statement.  Two more events are Moo's
+own `Method::Generate::{Constructor,Accessor}` gating as whole files; the last
+four are `bare $# magic` and the three E1-era capture/span refusals, whose
+Pl/t rows are VALUE assertions — they pass today because v1 answered.
+
+Guardrail §5a.2 ("every v1 hit is PRE-WORK, never an acceptable loss") and the
+s345 ruling cannot both be executed, so this is a ruling to re-issue, not a
+judgement to make here: `docs/opus5-review-requests-s352.md` §1, tasks #247
+(M1) and #248 (M2–M6), both blocking #242.  **USER decision: hand to Fable
+now, and hold — steps 2–4 stay unstarted until Fable rules.**
+
+Also: first gate run failed `glob-01.t` t29, standalone 36/36 and gone on
+re-run — the #180/#215 load-noise family, recorded not chased.
+
+---
+
 ## Session 351 (2026-08-07, Opus) — #240 step 2: `p-eval-thunk` binds `*package*` to the eval's region package; #240 CLOSED, E4.1 pre-work done
 
 Last item of the s349 queue (`docs/fable-answers-s348.md` §4).  Mechanism was

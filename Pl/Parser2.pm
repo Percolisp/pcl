@@ -727,20 +727,15 @@ sub parse {
     die "Parser2 TODO: eval-mode trailing my/our declaration (value-losing let)\n"
       if $last && $last->isa('PPI::Statement::Variable')
       && !$self->_tail_decl_convertible($last);
-    # A lone bareword inside an ARRAY subscript is a sub/constant call in
-    # Perl — usually a `use constant` defined in the ENCLOSING file, which
-    # this transpile cannot see.  v1 emits the runtime call (pl-WORD); v2's
-    # native lowering strings it.  Route to the v1 retry (eval-constant-01.t
-    # #4/#5, the JSON::PP ->canonical shape).
-    for my $sub (@{ $doc->find('PPI::Structure::Subscript') || [] }) {
-      next if !($sub->start && $sub->start->content eq '[');
-      my @k = grep { $_->significant } $sub->children;
-      my @inner = (@k == 1 && $k[0]->isa('PPI::Statement'))
-                ? grep { $_->significant } $k[0]->children : @k;
-      die "Parser2 TODO: eval-mode bareword array subscript (out-of-frame constant)\n"
-        if @inner == 1 && $inner[0]->isa('PPI::Token::Word')
-        && $inner[0]->content =~ /^\w+$/;
-    }
+    # (E4.1 pre-work, s352: the bareword-ARRAY-subscript refusal that used to
+    # sit here is GONE.  It claimed "v2's native lowering strings it", but
+    # PExpr's `_bareword_subscript_autoquotes` already keeps an ALL-CAPS
+    # bareword callable under eval_mode — the carve-out predates this gate —
+    # and Parser2 answers `eval_mode` for both the native and the seam route.
+    # Measured: with the gate removed the JSON::PP ->canonical shape lowers
+    # natively and agrees with perl, and the one shape it does NOT cover, a
+    # LOWERCASE sub name, is wrong IDENTICALLY under v1 — so the fallback was
+    # buying nothing.  That divergence is task #246, not a v1 dependency.)
   }
   $self->_rename_spanning_lexicals(\@segments) if @segments > 1;
   $self->_check_my_spanning(\@segments) if @segments > 1;
