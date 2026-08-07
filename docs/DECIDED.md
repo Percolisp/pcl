@@ -824,6 +824,18 @@ not-supported.md → only then probe.*
   (#225 DONE s342c, `docs/v1-live-share-audit.md`; tasks #226–#230).  Measured
   60 v1 routes on a cold cache (24 sweep + 36 CPAN board).  **F5 cleared s342d
   (#229) → five families left**, board 36 → 31 events.
+- **The live-v1 audit's populations are sweep + board + the Pl/t gate ITSELF,
+  and the E4.1 flip needs zero TODO events across all THREE** (RULED s353,
+  `fable-answers-s352.md` §1.1).  s342c never measured `Pl/t/`, which hid 27
+  gate routes — 15 of them Moo/Sub::Quote — behind a "ZERO events" ruling.
+  Gate families M1–M6 = tasks #247/#248, all pre-flip, order M3→M6→M2→M1→M4→M5.
+- **Sub::Quote's `my …; my …; package X;` eval shape collapses via a WHITELIST
+  leading-`my` predicate on #226's collapse — never general multi-section
+  assembly** (RULED s353, `fable-answers-s352.md` §1.2): accept only
+  initializers built from lexicals/magic vars/literals; anything unrecognized
+  refuses.  True multi-switch (`package A; …; package B;`) stays a ruled
+  refusal; s345 §2's "ZERO measured events" premise is SUPERSEDED for the
+  leading-statements shape.
 - **An eval's trailing `our`/`my` declaration has a VALUE, and it is whatever
   perl gives** (#227, s342f): `our NAMES [OP= RHS]` → the assignment expression
   (or, with no init, the READ — v1 answered with the variable NAME, a

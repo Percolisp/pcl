@@ -326,6 +326,22 @@ release checks surface divergences, triage those first, per
 > backstop for step 3's reachability pass to retire.  #230's remaining half is
 > the F6 run-form split.
 
+> **s353 (Fable) ruled the s352 ask — `docs/fable-answers-s352.md`:** the
+> flip stays HELD; the gate's own 27 v1 routes (six TODO families, s352
+> measurement independently reproduced event-for-event) are ALL pre-work,
+> option (b+): fix order **M3 → M6 → M2 → M1 → M4 → M5**, re-measuring the
+> instrumented gate after each family.  M1 = the narrow WHITELIST predicate
+> on #226's collapse (leading `my` statements whose initializers use only
+> lexicals/magic vars/literals; anything unrecognized refuses), probe
+> battery in §1.2.  M2 = braced-interpolation fix in `_interp_fixer` + PPI
+> narrowing of the shared brace-deref blocker.  M5 (block lexical captured
+> by nested named sub) carries a one-session cap and a stop-rule (new
+> machinery or PExpr term region → STOP, ask; only then is #153-first
+> live).  s345 §2's "ZERO events" premise is SUPERSEDED for the
+> leading-statements shape; the rephrase ruling survives only for the true
+> multi-switch.  Steps 1 (bundle port) and the F8 deletion are APPROVED as
+> shipped.
+
 Order:
 1. Port bundle mode off `Pl::Parser->parse_file` (`pl2cl:283`) — the one
    v1-only bypass.
@@ -370,6 +386,13 @@ later.  Hence:
    plus one benign class.  **Every v1 hit found is PRE-WORK to fix before
    step 2 — never an acceptable loss.**  Two hits with the same
    `Parser2 TODO:` text are one family; fix the family.
+
+   **AMENDED s353 (`fable-answers-s352.md` §1.1): the audit's populations
+   are sweep + CPAN board + the Pl/t gate ITSELF** — s342c measured only
+   the first two, which is how 27 gate routes (15 of them Moo/Sub::Quote)
+   stayed invisible while §5a.2 read "zero".  The step-2 precondition is
+   zero TODO-class events across all THREE populations, re-measured in the
+   step-2 session; DIE-class events are exempt.
 
    *Method note (s342c): a `pipeline=v1` cache grep UNDER-COUNTS badly* —
    it is blind to every route whose output never becomes a cache entry

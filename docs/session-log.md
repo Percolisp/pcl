@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 353 (2026-08-07, Fable) — s352 ask ruled: flip HELD, all six gate v1 families are pre-work, option (b+)
+
+Review-only session; no code changes.  Full rulings:
+`docs/fable-answers-s352.md`.
+
+**Verification.**  The s352 measurement was reproduced independently at HEAD
+`5c8752d`: instrumented gate (`PCL_V2_AUDIT_LOG` + `tools/prove-core`) green
+at 131/4652 with **exactly the same 27 events** in the same six TODO families
++ 5 DIE.  All 15 multi-segment events read back as Sub::Quote's canonical
+shape with zero free names in the leading `my` initializers (only `$_[1]` and
+string literals).  The two M2 brace-deref hits were probed to their source
+lines in site_perl `Method::Generate::{Constructor,Accessor}`: they are
+string INTERPOLATION (`"_set_${name}"`, `"${into}::${asserter}"`), not
+code-level derefs.
+
+**Rulings.**  (c) flip-anyway rejected; (a)-as-#153-first not required — none
+of M1–M6 touches PExpr's term machinery.  All six families are pre-work,
+order **M3 → M6 → M2 → M1 → M4 → M5** (cheapest first, instrumented-gate
+re-measure after each).  M1 approved as a **whitelist** leading-`my`
+predicate on #226's collapse (probe battery of six in the answers doc,
+including both INVERSE refusal probes and the `use`-ordering probe); M2 fixes
+both halves at the shared logic (interp-fixer learns `"${name}"`, blocker
+narrowed to PPI-level Cast+Block); M3 = forward-declare `@#`; M6 =
+foreach-loop-head shadow discount; M4 = canonicalize the spanning rename like
+its checker; M5 (the one genuine feature, static-variable idiom) routes
+through the existing cell-promotion machinery under a one-session cap +
+stop-rule.  **§5a.2 amended**: the audit's populations are sweep + board +
+the Pl/t gate itself, zero TODO events across all three re-measured in the
+step-2 session; DIE class exempt.  s345 §2's "ZERO measured events" premise
+SUPERSEDED for the leading-statements shape (one die text covered two
+shapes); the rephrase ruling survives only for true multi-switch.  Steps 1
+(`ef1b3de`) and F8 (`5c8752d`) approved as shipped; #246 confirmed
+non-blocking; the flaky glob-01.t row filed under #180/#215, not chased.
+
+Queue: #248 M3/M6/M2 → #247 M1 → #248 M4 → #248 M5 → three-population zero →
+#242 → #243 → #244 → STOP → Fable #153/E5.0.
+
+---
+
 ## Session 352 (2026-08-07, Opus) — E4.1 opened: step 1 shipped, a stale eval gate deleted, and the flip BLOCKED by measurement
 
 The session started to pull the E4.1 trigger.  Step 1 landed; step 2 did not,
