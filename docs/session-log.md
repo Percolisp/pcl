@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 353c (2026-08-08, Fable) — M5 executed: the block static-variable idiom lowers natively; only M4 remains
+
+Commit `45b5e5f`; handoff doc §2b has the mechanism.  The stop-rule never
+fired: `_promote_captured` was already extent-scoped and block-capable —
+the one blocker was its documented **enclosing-outer-lexical eval refusal**
+("string eval names the lexical": the eval site's outer let-bound alist
+pair always beat the block's cell).  Closed with a per-site pair riding
+existing plumbing: the flagged cell (`_eval_block_cells`) registers in
+`_let_bound_vars` at its native decl lowering (block-scoped for free by
+the existing save/restore), the global `p-alias-eval-cell` is SKIPPED for
+it (a later alias would clobber the outer promotion's), the alist builder
+strips `__file__N` innermost-first like `__shadow__N`, and `_lower_sub`'s
+alist wipe keeps flagged cells (they are defvars — never the
+unbound-at-call-time crash the wipe defends against).  Containers keep the
+refusal (the alist carries scalar cells only); the M-F pending backstop is
+armed/cleared the same way.
+
+Verified: transpile-test-01b.t's capinner row native (audit event gone);
+new -09 guard row (read / eval write-through / block-end restoration);
+container inverse still refuses with the pre-existing #84 v1 wrongness
+byte-identical at HEAD.  Corpus: eval.t + postfixderef.t changed, both the
+intended effect (two new promotions; `$test`'s cell moves from the
+global-alias route to the per-site pair).  Quadruple green: gate 131/4655
+PASS — **TODO events now 1 = exactly M4** (+ the two deliberate -09
+inverse guards, 5 DIE); sweep GATE clean, TOTAL 18498 = baseline; census
+111/111; gen v2-109, artifacts marker-only.  Perl-undefined-territory
+divergences recorded, not chased (eval-string-only closure mention /
+"will not stay shared"; print-args eval timing → task #250).
+
+---
+
 ## Session 353b (2026-08-07, Fable) — M3+M6+M2+M1 executed: gate v1 TODO events 22 → 2 (only M4+M5 remain)
 
 Same session as the ruling, on the user's "start fixing" go-ahead.  Commit
