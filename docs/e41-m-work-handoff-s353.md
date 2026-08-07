@@ -249,8 +249,27 @@ before/after truncation and the sigil-exact rule.
    refusals' fallback errs today (see §2), so the rephrase is a strict
    improvement in error quality, not a coverage loss.
 
-5. **#243 — step 3 deletion**, then **#244 — step 4 full verification**,
-   then STOP (Fable takes #153/E5.0).
+5. **#243 — step 3 deletion: BLOCKED, and the block is a real finding
+   (measured s356, see the task).**  Plan §5 step 3 told us to verify
+   unreachability before deleting; the verification says DO NOT.  Guardrail
+   §5a.6's proof (a) fails: **27 of the 131 gate files call v1's file-level
+   entry directly** (`Pl::Parser->new(code=>…)->parse()` /
+   `Pl::Parser->parse_code`), ~664 assertion rows, and the MAJORITY are
+   SHAPE assertions on v1's emitted CL text — so they cannot be re-pointed
+   at Parser2 without rewriting each regex against a decision about v2's
+   intended shape.  `_assemble_output` and
+   `_insert_variable_forward_declarations` are called from inside `parse()`,
+   so they are live for the same reason: effectively nothing in the
+   ~550-line list is deletable while those files exist.  The one genuinely
+   dead piece is v1's `lenient_ppi` + `_ppi_with_fallback` (pl2cl drops the
+   opt; no test sets it) — NOT shipped alone, because §5a.6 wants all step-3
+   deletions in one revertable commit.  **ASK on the task**: port / retire /
+   keep-as-test-only-API.  Recommendation there: keep + retire per file as
+   E5 burns down the statement layer those tests exercise, which is also
+   what `docs/v2-code-review.md` §4 already recommends ("a burn-down, not a
+   deletion").
+   **#244 — step 4 full verification does NOT depend on #243** and can run
+   against the shipped flip.  Then STOP (Fable takes #153/E5.0).
 
 ## 4. Standing cautions for the executor
 
