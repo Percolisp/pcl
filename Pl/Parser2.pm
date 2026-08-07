@@ -195,18 +195,71 @@ sub _requalify_block_our_after_pkg_switch {
     }
     next unless @switched;
     for my $canon (@names) {
+      my $sig = substr($canon, 0, 1);
       (my $bare = $canon) =~ s/^[\$\@\%]//;
-      # local is deliberately NOT in this list: it never re-binds the bare
+      # An alias runs to the end of the block OR to the next declaration of
+      # the same name, whichever comes first (M7, s355).  So a block-level
+      # re-declaration does not defeat the requalification — it ENDS it: the
+      # statements before it still belong to this alias, and the ones after
+      # belong to the new binding, which gets its own turn in the outer loop
+      # with its own decl_pkg.  Truncate rather than refuse.  (Role-Tiny's
+      # subclass.t is the shape: one bare block declaring `our @ISA` in each
+      # of four successive packages — ordinary Perl, and the whole file was
+      # routing to v1 for it.)
+      #
+      # local is deliberately NOT a re-binder: it never re-binds the bare
       # name lexically — `local $a[3]` in the switched region still operates
       # on the requalified `@tmp::a` element (probe-verified vs perl), so the
       # flat rewrite stays correct.  Only my/our/state create new bindings.
-      die "Parser2 TODO: re-declaration of '$bare' after in-block our-alias\n"
-        if grep { $_->isa('PPI::Node')
-                  && $_->content =~ /\b(?:my|our|state)\b[^;=]*[\$\@\%]\Q$bare\E\b/ }
-           @switched;
-      $self->_rewrite_var_uses(\@switched, $canon, "${decl_pkg}::${bare}");
+      my @region;
+      for my $s (@switched) {
+        last if _block_level_redecl($s, $canon);
+        # Any OTHER re-declaring shape keeps the conservative die, because
+        # its binding ENDS before the block does and the outer alias then
+        # resumes — a truncation would silently stop requalifying uses that
+        # still belong to this alias.  Two live examples: a Compound HEAD
+        # (`foreach my $a (…) {…}`, scoped to the loop) and an embedded decl
+        # (`(\our @a)->$#*++`, not a Statement::Variable at all).
+        #
+        # SIGIL-EXACT (M7, s355 — the same lesson as M4): only a declaration
+        # of THIS canonical variable re-binds it.  `foreach my $d (…)` binds
+        # the SCALAR $d and leaves the `@d` alias alone, so the old
+        # sigil-blind `[\$\@\%]` refused a requalification that was never
+        # ambiguous — and the v1 fallback it dropped into then produced the
+        # empty list where perl gives (1,2), probe-verified.
+        die "Parser2 TODO: re-declaration of '$bare' after in-block our-alias\n"
+          if $s->isa('PPI::Node')
+          && $s->content =~ /\b(?:my|our|state)\b[^;=]*\Q$sig$bare\E\b/;
+        push @region, $s;
+      }
+      next unless @region;
+      $self->_rewrite_var_uses(\@region, $canon, "${decl_pkg}::${bare}");
     }
   }
+}
+
+# Is $stmt a plain block-level `my`/`our`/`state` declaration STATEMENT that
+# (re)binds $canon?  This is the one re-declaration shape
+# _requalify_block_our_after_pkg_switch can honour by truncating: such a
+# binding runs from here to the end of the enclosing block, so it cleanly
+# partitions the block into "before = the old alias, after = this one".
+# Every other shape (a Compound head, an embedded `our`, a decl nested in an
+# inner block or sub) binds for a SHORTER extent than the rest of the block,
+# which a truncation cannot express — those keep the caller's die.
+sub _block_level_redecl {
+  my ($stmt, $canon) = @_;
+  return 0 unless ref $stmt && $stmt->isa('PPI::Statement::Variable');
+  my $kw = ($stmt->schildren)[0];
+  return 0 unless $kw && $kw->isa('PPI::Token::Word')
+               && $kw->content =~ /^(?:my|our|state)$/;
+  my @k = _strip_semi($stmt->schildren);
+  return 0 unless @k >= 2;
+  my @declared = $k[1]->isa('PPI::Token::Symbol') ? ($k[1]->content)
+               : $k[1]->isa('PPI::Structure::List')
+                 ? (map  { $_->content }
+                    grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
+               : ();
+  return scalar grep { $_ eq $canon } @declared;
 }
 
 # Merge prototypes declared by every use/require in the document (nested ones

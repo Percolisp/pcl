@@ -611,6 +611,49 @@ test_transpile("our-alias survives an in-block package switch", '
 print 0+@tmp2::qa, "\n";
 ');
 
+# M7 (s355): an our-alias runs to the end of the block OR to the next
+# declaration of the same name — so a re-declaration ENDS the alias instead of
+# defeating it.  This is the Role-Tiny subclass.t shape: one bare block
+# declaring `our @ISA` in each of four successive packages, which used to route
+# the whole file to v1.
+test_transpile("our-alias per package: successive our \@ISA in one block", '
+{
+    package M7::Top; sub m0 { __PACKAGE__ }
+    package M7::Left;  our @ISA = qw(M7::Top);
+    package M7::Right; our @ISA = qw(M7::Top);
+    package M7::Bottom; our @ISA = qw(M7::Left M7::Right);
+}
+print "L=@M7::Left::ISA;R=@M7::Right::ISA;B=@M7::Bottom::ISA\n";
+print "m=", M7::Bottom->m0, "\n";
+');
+# INVERSE GUARDS, one snippet because each row costs an SBCL run:
+#  - uses BEFORE the re-declaration must still requalify to the DECLARING
+#    package (`pre:1 2`, not main::v) — truncation must not start early;
+#  - `foreach my $v` binds the SCALAR and must NOT end the `@v` alias
+#    (`loop:1 2`) — the re-declaration test is sigil-exact;
+#  - after `our @v` the alias is the NEW package's (`post:9` = main::v, with
+#    M7a::v still 1 2), and after a top-level `my @w` it is the lexical
+#    (`my:5`, M7b::w still 3 4).
+# Still REFUSED (correct — the alias resumes after it, which a truncation
+# cannot express): a re-declaration nested in an inner block or sub.
+test_transpile("our-alias re-declaration boundaries: sigil-exact, before/after", '
+{ package M7a; our @v = (1,2);
+  package main;
+  print "pre:@v;";
+  foreach my $v (7,8) { }
+  print "loop:@v;";
+  our @v = (9);
+  print "post:@v;";
+}
+{ package M7b; our @w = (3,4);
+  package main;
+  print "pre:@w;";
+  my @w = (5);
+  print "my:@w;";
+}
+print "\nM7a=@M7a::v main=@main::v M7b=@M7b::w\n";
+');
+
 # s299/#45: interpolated postfix deref ("$r->@*" etc.) is gated on the
 # lexical postderef_qq feature; without it the ->@* stays literal text.
 test_transpile(q{interp postderef: ->@* / ->@[slice] / ->@{kslice} / ->$#* with feature on}, '

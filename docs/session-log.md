@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 355 (2026-08-08, Opus 5) — M7 (#251): an our-alias re-declaration ENDS the alias; the board's last unnamed route is gone and §5a.2 is met
+
+s354 left the board with one TODO family no ruling named:
+`re-declaration of 'ISA' after in-block our-alias` on Role-Tiny's
+`subclass.t`.  The task filed it as an ASK — fix, or ruled refusal.  It is a
+**fix**: the gate was refusing ordinary, idiomatic Perl — one bare block
+declaring `our @ISA` in each of four successive packages, the compact way to
+build an MI hierarchy — and **perl runs that file 6/6 while PCL scored 0**.
+Calling it unsupported would have been a real CPAN incompatibility
+(principle 4).
+
+The rule `_requalify_block_our_after_pkg_switch` could not express: **an
+`our` alias runs to the end of the block OR to the next declaration of the
+same name.**  A re-declaration therefore ENDS the alias; it does not defeat
+it.  Two changes, both the lesson M4 had just taught one file over:
+
+1. **Truncate instead of refusing.**  The requalified region now stops at a
+   block-level `PPI::Statement::Variable` for the name — such a binding runs
+   to the block's end, so it partitions the block cleanly and the tail gets
+   its own turn in the outer loop with its own `decl_pkg`.
+2. **Sigil-exact re-declaration test.**  `foreach my $d (…)` binds the
+   SCALAR and must not end an `@d` alias; the old sigil-blind `[\$\@\%]`
+   refused there, and the v1 fallback it dropped into printed the empty list
+   where perl gives `1 2`.
+
+Probed positive and negative against the oracle: the four-package `our @ISA`
+chain, uses before a re-declaration (must still requalify to the DECLARING
+package), `our`-in-a-new-package, top-level `my`, and the `foreach my $v`
+sigil case — all native and byte-equal to perl.  The one shape that still
+refuses is a re-declaration NESTED in an inner block or sub, where the alias
+RESUMES afterwards — correct to refuse, its v1 answer is silently wrong
+today, and it joins step 2's rephrase list.
+
+Measured: board `Moo/accessor-default.t` FAIL 0/0/0 → **PASS 40 ok** (a
+second file behind the same gate that nobody had attributed) and
+`Role-Tiny/subclass.t` FAIL 0/0/0 → **PARTIAL 4 ok / 1 not-ok**; **no other
+board row moved**; board TODO events 2 → 1, the survivor being the ruled
+true-multi-switch.  corpus emission **identical across 111 files**; gate
+131/4658 PASS with its audit unchanged; sweep GATE clean, TOTAL 18498 =
+baseline, 17 named events.  **All three populations are now at zero
+unexplained TODO events — §5a.2 is satisfied and #242 is unblocked.**
+Gen v2-111, both artifacts marker-only.  Guards: two rows in
+`transpile-test-04b.t` beside the existing our-alias row.
+
+---
+
 ## Session 354 (2026-08-08, Opus 5) — M4 executed: the M-work is DONE; the three-population re-measure finds the board's last unnamed route
 
 M4 was the ruling's §1.6 "canonicalize the rename like the checker", and it

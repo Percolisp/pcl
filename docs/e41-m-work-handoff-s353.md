@@ -190,27 +190,62 @@ now; assertions unchanged) plus a new INVERSE guard row asserting `$v` and
      18 blessed in `docs/DECIDED.md` (F4/#228 ×6, F2 residual ×5, F6 ×1,
      5 DIE): **the sweep's single multi-switch event is GONE**, absorbed by
      M1's widened collapse in s353.
-   - **CPAN board — NOT clean: one unnamed TODO family, task #251.**  Moo +
-     Role-Tiny, 35 events = 33 DIE (exempt) + 1 TODO true-multi-switch (Moo
-     `accessor-weaken-pre-5_8_3.t`'s fresh_perl child — a ruled refusal,
-     already on step 2's list) + **1 TODO `re-declaration of 'ISA' after
-     in-block our-alias` on `Role-Tiny/t/subclass.t`** (`Parser2.pm:203`),
-     which no ruling names.  PRE-EXISTING (verbatim at HEAD, untouched by
-     M4) and its board row is byte-identical to the s343 baseline, so
-     nothing regressed — but **§5a.2 is unsatisfied until #251 is ruled**
-     fix-or-refusal.  Row comparison: Role-Tiny 21/23 identical, 2 changed
-     and both already blessed as gains at s346b; **Moo has no blessed
-     baseline at all** (`docs/cpan-board14-s343.tsv` does not cover it), so
-     its s354 numbers (28 PASS / 5 PARTIAL / 38 FAIL of 71) are a first
-     measurement, not a comparison.
+   - **CPAN board — CLEAN as of s355 (#251/M7).**  At s354 it carried one
+     unnamed TODO family, `re-declaration of 'ISA' after in-block our-alias`
+     on `Role-Tiny/t/subclass.t`; M7 fixed it (see §2d).  Re-measured:
+     36 events = 35 DIE (exempt) + **1 TODO, the ruled true-multi-switch**
+     (Moo `accessor-weaken-pre-5_8_3.t`'s fresh_perl child, already on step
+     2's list).  Row comparison: Role-Tiny 21/23 identical vs the s343
+     baseline, the 2 changed both already blessed as gains at s346b;
+     **Moo has no blessed baseline at all** (`docs/cpan-board14-s343.tsv`
+     does not cover it), so its numbers are a first measurement, not a
+     comparison.
+
+   **§5a.2 is therefore SATISFIED — #242 is unblocked.**
+
+## 2d. M7 — DONE (s355, Opus 5), task #251
+
+`_requalify_block_our_after_pkg_switch` refused whenever the switched region
+re-declared the name.  That gated ordinary Perl — one bare block declaring
+`our @ISA` in each of four successive packages, which is how you set up an
+MI hierarchy compactly (Role-Tiny `subclass.t`; **perl runs it 6/6**, PCL
+scored 0).  The rule the pass could not express: **an `our` alias runs to
+the end of the block OR to the next declaration of the same name.**  So a
+re-declaration ENDS the alias rather than defeating it.
+
+- **Truncate, don't refuse.**  The region stops at a block-level
+  `PPI::Statement::Variable` for the name: its binding runs to the block's
+  end, so it partitions the block cleanly and the tail gets its own turn in
+  the outer loop with its own `decl_pkg`.
+- **Sigil-exact re-declaration test** (the M4 lesson again): `foreach my $d`
+  binds the SCALAR `$d` and must not end an `@d` alias.  The old
+  sigil-blind `[\$\@\%]` refused there, and the v1 fallback it dropped into
+  printed the empty list where perl gives `1 2` — probe-verified.
+- **The one surviving refusal**: a re-declaration NESTED in an inner block
+  or sub.  There the alias RESUMES after the inner scope, which a
+  truncation cannot express.  Its v1 fallback is silently wrong today
+  (probed), so step 2's rephrase is a strict improvement — **add it to the
+  step-2 refusal list below.**
+
+Measured: board `Moo/accessor-default.t` FAIL 0/0/0 → **PASS 40 ok** (a
+second file behind the same gate, previously unattributed) and
+`Role-Tiny/subclass.t` FAIL 0/0/0 → **PARTIAL 4 ok / 1 not-ok**; no other
+board row moved.  corpus emission **identical across 111 files**; gate
+131/4658 PASS; sweep GATE clean, TOTAL 18498 = baseline.  Gen v2-111, both
+artifacts regenerated marker-only.  Guards: two rows in
+`Pl/t/transpile-test-04b.t` beside the existing our-alias row — the
+four-package `our @ISA` chain, and an inverse-guard row covering
+before/after truncation and the sigil-exact rule.
 
 4. **#242 — step 2, the flip** (plan §5, guardrails §5a): remove
    `parse_with_fallback`/`PCL_V1`/`PCL_V1_FILES`, purge the consumer list,
    and in the SAME commit: the #228 `[perl #129069]` registration +
    pass-baseline EDIT, and the refusal rephrases — **true multi-switch +
-   F6 + the M1-predicate refusals (unsafe leading statements)** — each
-   perl-shaped (`PCL: unsupported in string eval: …`) with a
-   `docs/not-supported.md` entry naming its owner task.  Note the M1
+   F6 + the M1-predicate refusals (unsafe leading statements) + the M7
+   residue (an our-alias re-declaration NESTED in an inner block or sub,
+   §2d)** — each perl-shaped (`PCL: unsupported in string eval: …`, or for
+   M7 a file-mode equivalent) with a `docs/not-supported.md` entry naming
+   its owner task.  Note the M1
    refusals' fallback errs today (see §2), so the rephrase is a strict
    improvement in error quality, not a coverage loss.
 

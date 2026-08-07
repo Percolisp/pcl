@@ -834,16 +834,31 @@ not-supported.md → only then probe.*
   inverse-guard rows in `transpile-test-09.t` (M1-predicate refusals, on
   #242's step-2 rephrase list), and 5 DIE-class events are v2 correctly
   reporting a perl error (exempt, they self-resolve at the flip).
-- **Three-population zero is TWO-THIRDS met, not met (s354).**  Pl/t clean
-  (above); the sweep clean at 17 events, all named, and **one BETTER than
-  the blessed 18** — M1's widened collapse absorbed the sweep's lone
-  multi-switch event.  The **CPAN board is NOT**: one TODO family,
-  `re-declaration of 'ISA' after in-block our-alias` (`Parser2.pm:203`) on
-  `Role-Tiny/t/subclass.t`, is named by no ruling → **task #251**, which
-  blocks #242.  Pre-existing (verbatim at HEAD) and its board row is
-  identical to the s343 baseline, so it is an unnamed route, not a
-  regression.  Also recorded there: **the board has no blessed Moo
-  baseline** — `docs/cpan-board14-s343.tsv` covers Role-Tiny but not Moo.
+- **THREE-POPULATION ZERO IS MET (s354 measured, s355 closed the board).**
+  Pl/t clean (above); the sweep clean at 17 events, all named, and **one
+  BETTER than the blessed 18** — M1's widened collapse absorbed the sweep's
+  lone multi-switch event; the CPAN board clean after #251/M7, its only
+  remaining TODO being the ruled true-multi-switch.  §5a.2's precondition
+  for the E4.1 flip is satisfied.  Also recorded: **the board has no blessed
+  Moo baseline** — `docs/cpan-board14-s343.tsv` covers Role-Tiny but not Moo.
+- **An `our` alias runs to the end of its block OR to the next declaration
+  of the same name — so a re-declaration ENDS the requalification, it does
+  not defeat it** (#251/M7, s355, `_requalify_block_our_after_pkg_switch`).
+  The pass refused whenever the switched region re-declared the name, which
+  gated ordinary Perl: one bare block declaring `our @ISA` in each of four
+  successive packages (Role-Tiny `subclass.t`; perl runs it 6/6).  Two
+  fixes, both the M4 lesson again: **truncate** the region at a block-level
+  `PPI::Statement::Variable` (its binding runs to the block's end, so it
+  partitions cleanly — the tail gets its own turn with its own decl_pkg),
+  and make the re-declaration test **sigil-exact** (`foreach my $d` binds
+  the SCALAR and must not end an `@d` alias).  Measured: board FAILs
+  `Moo/accessor-default.t` 0 → **PASS 40 ok** and `Role-Tiny/subclass.t`
+  0 → 4 ok, no row anywhere else changed, corpus emission identical across
+  111 files.  **The one surviving refusal is a re-declaration NESTED in an
+  inner block or sub** — there the alias RESUMES after the inner scope,
+  which a truncation cannot express; it is the shape step 2 must rephrase,
+  and its v1 fallback is silently wrong today (probed), so the flip
+  improves it.  Guards: `Pl/t/transpile-test-04b.t`.
 - **The spanning-lexical RENAME resolves variables canonically, exactly like
   the CHECKER** (M4, s354, `Parser2.pm` `_rename_spanning_lexicals`).  Two
   sites had stayed bare-name: the declaration count (so `my %mix` beside
