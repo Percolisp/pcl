@@ -29,96 +29,43 @@ binmode(STDERR, ":utf8");
 use lib dirname(abs_path($0));
 use Pl::Parser;
 
-# v2 (Pl::Parser2 → Pl::CLForm structured emission) is the DEFAULT pipeline
-# (flipped session 273, W9 — see docs/v2-completion-plan.md).  PCL_V1=1 is the
-# escape hatch back to the original text-stream pipeline; PCL_V2=1 is accepted
-# as a harmless no-op so existing scripts keep working.  The cache key mixes in
-# the effective pipeline (see p-compute-cache-path), so flipping PCL_V1 never
-# reuses the other pipeline's cached module transpiles.
-my $PARSER_CLASS = 'Pl::Parser2';
-if ($ENV{PCL_V1}) {
-  $PARSER_CLASS = 'Pl::Parser';
-} else {
-  require Pl::Parser2;
-}
+# v2 (Pl::Parser2 → Pl::CLForm structured emission) is the ONLY pipeline
+# (default since session 273/W9; the v1 escape hatch and the whole-file
+# fallback were removed at E4.1 step 2, task #242).  `PCL_V1`/`PCL_V1_FILES`
+# no longer exist: anything v2 cannot lower is now a hard error, which is the
+# point — a gap used to become a silent re-transpile through a second
+# compiler with different semantics.  `PCL_V2=1` is still accepted as a
+# harmless no-op so existing scripts keep working.
+#
+# `Pl::Parser` is still LOADED (v1's expression seam is called from inside
+# v2); what is gone is the file-level v1 ENTRY.  Step 3 (#243) deletes the
+# file-level chunks that this commit made unreachable.
+require Pl::Parser2;
 
-# v2 whole-file fallback: anything the prototype can't lower (it dies with
-# "Parser2 TODO: …") transpiles through v1 instead of erroring out.  This is
-# what lets p-use/require subprocesses inherit PCL_V2=1 safely — a module the
-# prototype can't handle (e.g. one with `package` statements) still loads via
-# the original pipeline.  Modes the prototype doesn't implement (eval-string,
-# lenient-ppi) route straight to v1.
-# Audit side-channel for the E4.1 rule-2 sweep (plan §5a.2/§5a.3): "how much
-# is still on v1" cannot be answered from ~/.pcl-cache alone, because an
-# eval-string or a subprocess transpile never reaches the cache — and it cannot
-# be answered from PCL_V2_VERBOSE either, because that writes to stderr, which
-# the sweep folds into TAP.  With PCL_V2_AUDIT_LOG set, every v1 route appends
-# one short line to that file instead (append-only, one line per event, well
-# under PIPE_BUF so concurrent jobs interleave cleanly).
-sub audit_v1_route {
-  my ($why, $method, $subject, $err) = @_;
-  my $log = $ENV{PCL_V2_AUDIT_LOG} or return;
-  # Keep the line one line: squash whitespace and truncate.  A bare
-  # "(inline code)" hid what the eval-mode families actually were (s342g).
-  my $what = defined $subject ? $subject : '';
-  $what =~ s/\s+/ /g;
-  $what =~ s/^\s+|\s+$//g;
-  $what = substr($what, 0, 160) . ' …' if length($what) > 160;
-  $what = '(empty)' unless length $what;
-  $err = defined $err ? $err : '';
-  $err =~ s/\s+/ /g;
-  $err =~ s/^\s+|\s+$//g;
-  if (open my $fh, '>>', $log) {
-    print $fh join("\t", $why, $method, $what, substr($err, 0, 200)), "\n";
-    close $fh;
-  }
-  # Some v1 routes are on files that do not outlive the run — `fresh_perl`
-  # writes /tmp/pcl_fp_*.pl and unlinks it as soon as the child exits, so by
-  # the time the audit is read the evidence is gone.  With PCL_V2_AUDIT_KEEP
-  # naming a directory, copy the source aside while it still exists.
-  if (my $dir = $ENV{PCL_V2_AUDIT_KEEP}) {
-    return unless $method eq 'parse_file' && defined $subject && -r $subject;
-    (my $base = $subject) =~ s{.*/}{};
-    if (open my $in, '<', $subject) {
-      my $src = do { local $/; <$in> };
-      close $in;
-      if (open my $out, '>', "$dir/$base") { print {$out} $src; close $out }
-    }
-  }
-}
+# (The v2 whole-file fallback lived here until E4.1 step 2.  It caught a
+# "Parser2 TODO: …" and re-transpiled the file through v1 — which meant a v2
+# gap silently changed compilers mid-run, and any resulting divergence was
+# attributed to the program rather than to the fallback.  The gaps are now
+# hard errors.  The audit side-channel that measured this (PCL_V2_AUDIT_LOG /
+# PCL_V2_AUDIT_KEEP) went with it: with one pipeline there is no route to
+# count.  History: docs/v1-live-share-audit.md, docs/v2-endgame-plan.md §5a.)
 
-sub parse_with_fallback {
+# The ONE parser entry.  Anything v2 cannot lower dies here, and
+# the die IS the answer — there is no second compiler to retry on.  Modes are
+# whitelisted rather than ignored, so an unknown mode is a loud error instead
+# of a silently-dropped option.
+sub parse_source {
   my ($method, @args) = @_;
-  if ($PARSER_CLASS eq 'Pl::Parser2') {
-    my %opts = @args[1 .. $#args];
-    # lenient_ppi only changes behaviour when PPI can't parse the whole file —
-    # and in that case Parser2 dies ("PPI parse failed") and we land in v1
-    # (with the flag) below anyway.  So v2 may safely ignore it; blocking on
-    # it would disable v2 for every runner (runpcl/runt/sweep all pass it).
-    delete $opts{lenient_ppi};
-    # E3: eval-string mode is v2-native (Parser2 eval_mode/eval_pkg); any
-    # other special mode still routes to v1.
-    my %v2_modes = (eval_mode => 1, eval_pkg => 1);
-    my @unsupported = grep { !$v2_modes{$_} } keys %opts;
-    if (!@unsupported) {
-      my $out = eval { Pl::Parser2->$method($args[0], %opts) };
-      return pipeline_marker(v2 => $out) if defined $out;
-      print STDERR "pl2cl: v2 fell back to v1: $@" if $ENV{PCL_V2_VERBOSE};
-      # Two very different events land here, and only one is a v2 GAP.  Any die
-      # PARSER2 raises about itself — "Parser2 TODO: …" and "Parser2: PPI parse
-      # failed" alike — means v2 could not take this file (pre-work).  Any other
-      # die is v2 correctly reporting a PERL-level error, which the fallback
-      # then pointlessly retries on v1 and which v1 raises identically
-      # (measured s342: chop.t's four `eval 'chop($x) = 1'` rows).  After the
-      # E4.1 gate flip the second kind simply becomes $@, unchanged; only the
-      # first kind changes behaviour.
-      audit_v1_route($@ =~ /^Parser2\b/ ? 'TODO' : 'DIE',
-                     $method, $args[0], $@);
-    } else {
-      audit_v1_route('MODE', $method, $args[0], "mode: @{[sort @unsupported]}");
-    }
-  }
-  return pipeline_marker(v1 => Pl::Parser->$method(@args));
+  my %opts = @args[1 .. $#args];
+  # `lenient_ppi` never had a v2 implementation — it only ever worked by
+  # routing to v1, whose parser truncates at the first unparseable line.  The
+  # flag stays ACCEPTED (runpcl/runt/sweep all pass it) and inert; what it
+  # used to paper over now dies naming the file, from Parser2's PPI check.
+  delete $opts{lenient_ppi};
+  my %known = (eval_mode => 1, eval_pkg => 1);
+  my @unknown = sort grep { !$known{$_} } keys %opts;
+  die "pl2cl: unknown transpile mode(s): @unknown\n" if @unknown;
+  return pipeline_marker(v2 => Pl::Parser2->$method($args[0], %opts));
 }
 
 # T0.1 pipeline marker (docs/v2-transfer-plan.md): every transpile carries one
@@ -279,7 +226,7 @@ sub _run_server {
     last unless defined $got && $got == $len;
 
     my $cl = eval {
-      my $output = parse_with_fallback('parse_code', $code,
+      my $output = parse_source('parse_code', $code,
                                        eval_mode => 1, eval_pkg => $pkg);
       my $preamble = build_eval_preamble($pkg);
       $output =~ s/\(in-package :pcl\)/$preamble/;
@@ -332,7 +279,7 @@ sub do_bundle {
   # E4.1 step 1: bundle mode used to call Pl::Parser->parse_file directly — the
   # one v1-ONLY bypass left in pl2cl.  It now goes through the same entry as
   # every other file transpile, so the gate flip in step 2 covers it too.
-  my $transpiled = parse_with_fallback('parse_file', $source_file);
+  my $transpiled = parse_source('parse_file', $source_file);
 
   # Inject preamble
   my $preamble = build_preamble($source_file);
@@ -416,7 +363,7 @@ if ($bundle_mode || $executable_mode) {
 
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
-  my $output = parse_with_fallback('parse_file', $source_file,
+  my $output = parse_source('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
   if ($is_module) {
@@ -434,13 +381,13 @@ if (@ARGV && -f $ARGV[0]) {
 elsif (@ARGV) {
   # Treat arguments as code (no @INC init needed for one-liners)
   $code = join(' ', @ARGV);
-  print parse_with_fallback('parse_code', $code);
+  print parse_source('parse_code', $code);
 }
 elsif (!-t STDIN) {
   # Read from stdin
   local $/;
   $code = <STDIN>;
-  my $output = parse_with_fallback('parse_code', $code,
+  my $output = parse_source('parse_code', $code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
   if (defined $eval_pkg) {

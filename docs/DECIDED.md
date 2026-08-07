@@ -834,6 +834,23 @@ not-supported.md → only then probe.*
   inverse-guard rows in `transpile-test-09.t` (M1-predicate refusals, on
   #242's step-2 rephrase list), and 5 DIE-class events are v2 correctly
   reporting a perl error (exempt, they self-resolve at the flip).
+- **E4.1 STEP 2 IS DONE — THERE IS ONE PIPELINE** (#242, s356).  `PCL_V1`,
+  `PCL_V1_FILES`, `parse_with_fallback` and the `PCL_V2_AUDIT_LOG` side-channel
+  are gone; `pl2cl` has a single `parse_source` entry and an unknown transpile
+  mode is a loud error rather than a silently-dropped option.  `Pl::Parser` is
+  still LOADED (v1's expression seam runs inside v2) — the unreachable
+  file-level chunks are #243.  What the flip required and got:
+  **(a)** the four ruled refusals rephrased perl-shaped and trappable
+  (`PCL: unsupported in string eval: …` reaches `$@` with perl's own
+  `at (eval N) line M.` suffix), each with a `docs/not-supported.md` entry —
+  multi-switch, trailing-declaration, F6 oversized run form, and the M7
+  our-alias residue; **(b)** `--lenient-ppi` accepted-and-inert with the PPI
+  failure now **naming the file** (§5a.4); **(c)** the `#228` `[perl #129069]`
+  registration; **(d)** the cache key's pipeline component frozen to `"v2"` so
+  this generation's paths keep hashing where they did.  A `pl2cl server:`
+  prefix that was leaking into `$@` was removed — the transpiler's message IS
+  the error.  Verified: corpus emission **identical across 111 files**, gate
+  131/4658 PASS, sweep GATE clean at 18499 (+0 vs the edited baseline).
 - **THREE-POPULATION ZERO IS MET (s354 measured, s355 closed the board).**
   Pl/t clean (above); the sweep clean at 17 events, all named, and **one
   BETTER than the blessed 18** — M1's widened collapse absorbed the sweep's

@@ -34,7 +34,7 @@ dor.t	OK	32	0	34
 each.t	OK	51	0	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	110	50	169
+eval.t	PARTIAL	114	46	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14
@@ -54,7 +54,7 @@ kvaslice.t	OK	17	0	17
 kvhslice.t	OK	39	0	39
 lc.t	OK	82	0	2659
 length.t	PARTIAL	35	3	49
-lex.t	OK	46	0	53
+lex.t	OK	45	0	53
 local.t	OK	303	13	319
 loopctl.t	OK	67	0	67
 lop.t	OK	47	0	47
@@ -98,7 +98,7 @@ study.t	OK	43	0	43
 sub.t	OK	62	2	65
 substr.t	OK	374	8	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	241	3	317
+tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257
 undef.t	OK	30	0	35
 unshift.t	OK	19	0	19

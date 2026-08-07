@@ -188,7 +188,11 @@ sub _requalify_block_our_after_pkg_switch {
       next unless ref $p;
       if ($p->isa('PPI::Statement::Package')) { $cur = $p->namespace; next }
       next if $cur eq $decl_pkg;
-      die "Parser2 TODO: nested package statement after in-block our-alias\n"
+      # RULED REFUSAL (M7 residue, #251; rephrased at the E4.1 flip, #242).
+      # docs/not-supported.md: 'An our-alias whose requalified region contains
+      # a nested package statement or an inner-scope re-declaration'.
+      die "PCL: unsupported: `our` alias followed by a nested package"
+        . " statement in the same block\n"
         if $p->isa('PPI::Node')
         && $p->find_any(sub { $_[1]->isa('PPI::Statement::Package') });
       push @switched, $p;
@@ -227,7 +231,12 @@ sub _requalify_block_our_after_pkg_switch {
         # sigil-blind `[\$\@\%]` refused a requalification that was never
         # ambiguous — and the v1 fallback it dropped into then produced the
         # empty list where perl gives (1,2), probe-verified.
-        die "Parser2 TODO: re-declaration of '$bare' after in-block our-alias\n"
+        # RULED REFUSAL (M7 residue, #251; rephrased at the E4.1 flip, #242).
+        # docs/not-supported.md: 'An our-alias whose requalified region
+        # contains a nested package statement or an inner-scope
+        # re-declaration'.
+        die "PCL: unsupported: `our` alias for '$sig$bare' re-declared in an"
+          . " inner scope of the same block\n"
           if $s->isa('PPI::Node')
           && $s->content =~ /\b(?:my|our|state)\b[^;=]*\Q$sig$bare\E\b/;
         push @region, $s;
@@ -506,19 +515,22 @@ sub _ppi_state_restore {
 
 sub parse {
   my $self = shift;
-  # Debug/bisect hook: force files whose path contains one of the
-  # comma-separated substrings through the v1 fallback (per-module pipeline
-  # bisection — e.g. PCL_V1_FILES="Moo/_Utils.pm" to isolate which module's
-  # v2 transpile diverges; used to find task #80).
-  die "Parser2: PCL_V1_FILES match\n"
-    if $ENV{PCL_V1_FILES} && $self->has_filename
-    && grep { length && index($self->filename, $_) >= 0 }
-       split /,/, $ENV{PCL_V1_FILES};
+  # (The PCL_V1_FILES bisect hook lived here — it forced named files through
+  # the whole-file v1 fallback to isolate a diverging module, task #80.  Both
+  # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
+  # there is nothing to bisect against.)
   my $src = Pl::Parser::_preprocess_source(Pl::Parser::_maybe_decode_utf8($self->_source));
   # Route through v1's _ppi_parse so the shared PPI-bug workarounds apply — most
   # importantly _fix_modulo_magic (`7%-3` mis-tokenized as the magic hash %-,
   # dropping the modulo → PARSE ERROR).  A bare PPI::Document->new skipped it.
-  my $doc = $self->fallback_parser->_ppi_parse($src) or die "Parser2: PPI parse failed";
+  # NAME THE FILE (§5a.4, E4.1 step 2).  Before the flip a PPI failure landed
+  # in v1, where `--lenient-ppi` truncated the source at the unparseable line
+  # and the run continued on a silently-shortened program.  There is no
+  # lenient mode on this pipeline, so the failure has to say WHICH file — an
+  # unattributed "PPI parse failed" in a sweep of 100 files is not a report.
+  my $doc = $self->fallback_parser->_ppi_parse($src)
+    or die "PCL: cannot parse " . ($self->has_filename ? $self->filename : "(inline code)")
+           . ": PPI failed to tokenize it\n";
 
   # B-regime flag (docs/raw-numeric-verdict.md §flag): a `use overload` in
   # THIS file means blessed values with per-use conversion handlers can flow
@@ -876,26 +888,31 @@ sub parse {
                               $segments[2]{pkg_stmt}, @{ $segments[2]{stmts} },
                               @{ $segments[3]{stmts} } ] });
   }
-  # The residual multi-segment shapes — true multi-switch (`package A; …;
-  # package B; …`) and leading statements the M1 whitelist refuses — stay
-  # refused.  The text keeps the `Parser2 TODO:` prefix here ON PURPOSE:
-  # pl2cl's parse_with_fallback keys the v1 retry on /^Parser2\b/, so
-  # rephrasing it perl-shaped (`PCL: unsupported in string eval: multiple
-  # package sections`) turns the retry into a user-visible die — which is
-  # right only AFTER the flip.  That rephrase belongs to the E4.1 step-2
-  # commit (fable-answers-s345.md §2/§5a.3, amended s353).
-  die "Parser2 TODO: eval-mode multi-segment (top-level package statement)\n"
+  # RULED REFUSAL (fable-answers-s345.md §2, amended s353; rephrased in the
+  # E4.1 step-2 commit, #242).  Two residual multi-segment shapes: a true
+  # multi-switch (`package A; …; package B; …`) and leading statements the M1
+  # whitelist declines.  §5a.3 requires the text to reach `$@` perl-shaped —
+  # this is an ordinary Perl-level error the program can trap, not a compiler
+  # note.  docs/not-supported.md: 'String eval with multiple package sections'.
+  die "PCL: unsupported in string eval: multiple package sections\n"
     if $self->eval_mode && @segments > 1;
   # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the trailing
   # declaration's statement value.  Eval mode lowers the top level with
   # tail_ctx='inherit' (s308b), so the $decl_tail machinery covers the same
-  # shapes it covers in sub bodies; only the shapes it declines (`our`
-  # without the assignment value, bare multi `my ($a,@b);`) still retry
-  # through v1.
+  # shapes it covers in sub bodies.
+  #
+  # RULED REFUSAL, rephrased at the flip (#242).  What still lands here is
+  # a declaration shape whose VALUE the lowering cannot produce.  Measured
+  # over the whole sweep (s354): all five events are perl-INVALID input —
+  # `my $$x`, `my $$$x`, `my @$x`, `my($a,$b),$x,my($c,$d)` from lex.t/my.t
+  # rows that assert perl REJECTS them (CLAUDE.md principle 9).  Refusing
+  # makes `$@` non-empty, which is what those rows want; DECIDED.md records
+  # the expectation that this GAINS four eval.t rows rather than losing any.
+  # docs/not-supported.md: 'String eval ending in an unconvertible declaration'.
   if ($self->eval_mode) {
     my ($last) = grep { $_->significant && !$_->isa('PPI::Statement::Null') }
                  reverse @{ $segments[0]{stmts} };
-    die "Parser2 TODO: eval-mode trailing my/our declaration (value-losing let)\n"
+    die "PCL: unsupported in string eval: trailing declaration has no value\n"
       if $last && $last->isa('PPI::Statement::Variable')
       && !$self->_tail_decl_convertible($last);
     # (E4.1 pre-work, s352: the bareword-ARRAY-subscript refusal that used to
@@ -2949,8 +2966,15 @@ sub _oversized_top_decls {
 # By-construction backstop for the compiler-heap OOM class: a single emitted
 # top-level runtime form past $RUN_FORM_MAX chars is not loadable under the
 # standard 1 GB heap (SB-REGALLOC grows superlinearly; pack.t's 162k-char
-# form OOMed, the corpus' largest passing form is ~55k) — die → v1 rather
-# than emit a form that crashes SBCL at load.
+# form OOMed, the corpus' largest passing form is ~55k).  Refusing beats
+# emitting a form that crashes SBCL at load.
+#
+# RULED REFUSAL (F6/#230, fable-answers-s346.md §2.3; rephrased at the E4.1
+# flip, #242).  $RUN_FORM_MAX is never raised.  The one measured event is a
+# torture-scale generated source, where one honest loud row is the accepted
+# outcome — a pre-flip effort to compile an arbitrarily huge single form is
+# not required by any target.
+# docs/not-supported.md: 'A single generated top-level form above 64k chars'.
 our $RUN_FORM_MAX = 64_000;
 sub _gate_oversized_run_form {
   my ($self, $text, $size) = @_;
@@ -2958,8 +2982,9 @@ sub _gate_oversized_run_form {
   $size //= length($text);
   if ($size > $RUN_FORM_MAX) {
     (my $head = substr($text, 0, 120)) =~ s/\s+/ /g;
-    die "Parser2 TODO: oversized top-level run form ($size"
-      . " chars > $RUN_FORM_MAX) — would exhaust the SBCL compiler heap: $head\n";
+    die "PCL: unsupported: a single generated top-level form of $size chars"
+      . " exceeds the $RUN_FORM_MAX-char limit"
+      . " (it would exhaust the SBCL compiler heap at load): $head\n";
   }
   return $text;
 }

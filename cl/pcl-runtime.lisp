@@ -11380,7 +11380,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-111"
+(defparameter *pcl-cache-generation* "v2-112"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11480,15 +11480,17 @@ buffer's fill-pointer; everything else falls back to file-length."
   (ensure-directories-exist *pcl-cache-dir*))
 
 (defun p-compute-cache-path (source-path &optional lisp-p)
-  "Compute cache path for a source file: hash of the absolute path, the cache
-   GENERATION (*pcl-cache-generation*), and the EFFECTIVE pipeline (v2 default
-   vs the PCL_V1 escape hatch) — so flipping PCL_V1 back and forth never
-   reuses the other pipeline's cached transpiles.
+  "Compute cache path for a source file: hash of the absolute path and the
+   cache GENERATION (*pcl-cache-generation*).
+   The key used to carry a third component, the EFFECTIVE pipeline, so that
+   toggling the PCL_V1 escape hatch could not reuse the other pipeline's
+   cached transpiles.  E4.1 step 2 (#242) removed the second pipeline; the
+   literal \"v2\" stays in the key so this generation's paths keep hashing
+   where they did before the flag went away.
    LISP-P: if true, return .lisp path; else .fasl"
   (let* ((abs-path (namestring (truename source-path)))
-         (pipeline (if (sb-ext:posix-getenv "PCL_V1") "v1" "v2"))
          (hash (sxhash (concatenate 'string abs-path "|" *pcl-cache-generation*
-                                    "|" pipeline)))
+                                    "|" "v2")))
          (ext (if lisp-p ".lisp" ".fasl")))
     (p-ensure-cache-dir)
     (merge-pathnames (format nil "~16,'0X~A" (logand hash #xFFFFFFFFFFFFFFFF) ext)
@@ -11579,7 +11581,12 @@ buffer's fill-pointer; everything else falls back to file-length."
       (read-sequence resp-buf out)
       (if (string= status "ok")
           resp-buf
-          (error "pl2cl server: ~A" resp-buf)))))
+          ;; The transpiler's own message IS the error — do not wrap it in a
+          ;; host-shaped prefix.  For `eval "..."` this text becomes $@, and
+          ;; E4.1 §5a.3 requires that to read as an ordinary Perl error the
+          ;; program can trap ("PCL: unsupported in string eval: …"), not as
+          ;; a note from a subprocess the Perl program never asked about.
+          (error "~A" (string-right-trim '(#\Newline) resp-buf))))))
 
 ;;; --- Module Loading ---
 

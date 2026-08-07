@@ -184,15 +184,22 @@ tools/pcl-conform                # whole corpus
 tools/pcl-conform 96-flags       # one case-set file
 ```
 
-**Pipelines:** the v2 structured-emission pipeline (`Pl/Parser2.pm` +
-`Pl/ExprToCL2.pm` + `Pl/VarAnnotator.pm` + `Pl/CLForm.pm`) is the **default**
-since 2026-07-05 (W9); anything it can't lower dies "Parser2 TODO: …" and
-falls back to v1 per file. `PCL_V1=1` forces the original v1 pipeline
-(`Pl/Parser.pm` text-stream emission); `PCL_V2=1` is a no-op kept for old
-scripts. Module-cache paths are keyed by `cl/pcl-runtime.lisp`'s
-`*pcl-cache-generation*` **plus the effective pipeline** — bump the
-generation string on any emission-changing commit, or stale cached module
-transpiles will be reused. **Plan/status: `docs/v2-endgame-plan.md` (E1–E5 + §6 the two product
+**Pipeline (singular, since E4.1 step 2 / #242, s356):** the v2
+structured-emission pipeline (`Pl/Parser2.pm` + `Pl/ExprToCL2.pm` +
+`Pl/VarAnnotator.pm` + `Pl/CLForm.pm`) is the **only** one. **`PCL_V1`,
+`PCL_V1_FILES` and the whole-file v1 fallback are GONE** — anything v2
+cannot lower is now a hard error, because a fallback meant a compiler gap
+silently became a re-transpile through a second compiler with different
+semantics. `PCL_V2=1` is still a no-op kept for old scripts. *(`Pl/Parser.pm`
+is still LOADED — v1's expression seam is called from inside v2; what went
+away is the file-level v1 entry. Its now-unreachable file-level chunks are
+task #243.)* Ruled refusals are perl-shaped and trappable
+(`PCL: unsupported in string eval: …` → `$@`), each with a
+`docs/not-supported.md` entry. `--lenient-ppi` is accepted and inert; a PPI
+failure dies naming the file. Module-cache paths are keyed by
+`cl/pcl-runtime.lisp`'s `*pcl-cache-generation*` — bump the generation
+string on any emission-changing commit, or stale cached module transpiles
+will be reused. **Plan/status: `docs/v2-endgame-plan.md` (E1–E5 + §6 the two product
 targets: beat-perl speed / clear macro-IR — perf worklist in
 `docs/faster-codegen-suggestions.md`)
 + `docs/v2-opus5-execution-plan.md` (**the CURRENT ordered worklist +
@@ -347,8 +354,16 @@ func => -12         # 1 param before list
   `0 new / 0 fixed` while coverage evaporated (s328: state.t 157 → 69).  Every
   run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
   is found it prints `LOST: NOT CHECKED` rather than nothing.
-- Full `perl-tests/` sweep: **683 blessed fails** in `docs/fail-baseline.tsv`,
-  **64 files fully passing**, 18498 passing / 915 failing across 108 files
+- Full `perl-tests/` sweep: **679 blessed fails** in `docs/fail-baseline.tsv`,
+  **64 files fully passing**, 18499 passing / 911 failing across 108 files
+  (re-measured s356 at the E4.1 flip; GATE clean, +0.  The flip moved three
+  files, all pre-authorized and edited into the baselines with their causes:
+  **eval.t 110 → 114** — the ruled eval refusal makes the four `my $$x`-family
+  rows fail as perl does, so they pass (and leave `fail-baseline` by EDIT);
+  **tr.t 241 → 239** — `tr.t:494` builds a 73,769-char `eval` string, the one
+  F6 oversized-run-form event, a ruled refusal per `fable-answers-s346.md`
+  §2.3; **lex.t 46 → 45** — the #228 `[perl #129069]` registration, whose pass
+  was an accident of `--lenient-ppi` truncating NUL source to nothing.
   (re-measured s341 on a COLD cache; `sweep-diff.pl diff
   docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed / 0 LOST**, plus 2 rows
   the tool

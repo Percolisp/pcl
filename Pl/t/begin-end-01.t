@@ -194,12 +194,8 @@ END_CODE
   # `our $config = "default"` init OVERWRITES it → "default".  v2 matches perl
   # (source-order: compile-phase BEGIN, then runtime init); v1 emits the init at
   # compile time so BEGIN wins → "from_begin" (a v1 divergence from perl).
-  if (!$ENV{PCL_V1}) {   # v2 is the default pipeline (W9); PCL_V1=1 = escape hatch
-    like($output, qr/\bdefault\b/, 'v2: runtime our-init overwrites compile-time BEGIN (matches perl)');
-    unlike($output, qr/from_begin/, 'v2: BEGIN value does not survive the runtime init');
-  } else {
-    like($output, qr/from_begin/, 'v1: BEGIN modifies our variable (v1 order)');
-  }
+  like($output, qr/\bdefault\b/, 'runtime our-init overwrites compile-time BEGIN (matches perl)');
+  unlike($output, qr/from_begin/, 'BEGIN value does not survive the runtime init');
 }
 
 # Test: Multiple subs before BEGIN, all accessible

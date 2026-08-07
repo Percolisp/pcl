@@ -315,7 +315,11 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   # The multi-switch shape stays refused (zero measured events).
   eval { Pl::Parser2->parse_code(q{package A1; sub a {1} package B1; sub b {2} 1},
                                  eval_mode => 1, eval_pkg => 'main') };
-  like($@, qr/eval-mode multi-segment/, '#226: two package sections still refused');
+  # The refusal text became perl-shaped at the E4.1 flip (#242): it now reaches
+  # `$@` as an ordinary trappable Perl error, not a "Parser2 TODO:" note that
+  # used to key a silent v1 retry.  The assertion — still refused — is unchanged.
+  like($@, qr/^PCL: unsupported in string eval: multiple package sections/,
+       '#226: two package sections still refused');
 }
 
 # ---- state in named subs: native per-sub cell (rename family __state__N) ----
@@ -772,7 +776,7 @@ is(eval { Pl::Parser2->parse_code('my ($c,$d)', eval_mode => 1) } && $@, '',
 # gate still declines must keep declining — a declaration buried in a comma
 # expression is the #138 family, not this one.
 eval { Pl::Parser2->parse_code('my($a,$b),$x,my($c,$d)', eval_mode => 1) };
-like($@, qr/Parser2 TODO: eval-mode trailing my\/our declaration/,
+like($@, qr/^PCL: unsupported in string eval: trailing declaration has no value/,
      'multi-tail INVERSE: a decl inside a comma expression still refuses');
 
 done_testing();

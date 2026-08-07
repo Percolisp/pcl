@@ -344,9 +344,9 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ;; (184 …) DROPPED s295c: passes under the default (v2)
                 ;; pipeline — the our-alias requalify pre-pass homes the
                 ;; magical @a to tmp::a, and the hole-preserving $#a++ makes
-                ;; map{} see the real holes (stale-detector).  PCL_V1=1 still
-                ;; fails this row (v1 has no requalify pass): a truthful
-                ;; v1-only divergence, acceptable on the deletion-bound v1.
+                ;; map{} see the real holes (stale-detector).  (It used to be
+                ;; noted here that PCL_V1=1 still failed this row — v1 had no
+                ;; requalify pass.  The v1 entry is gone: E4.1 step 2, #242.)
                 )
 
 ;; NB qr.t test 6 ("my $b1=$b; bless $b" — $b1 should also be blessed) is the same
@@ -386,6 +386,19 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("^\\* <null> ident$"
                  :feature
                  "NUL byte as first identifier char (*\\0eq). not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
+                ;; The SIXTH NUL row (#228, registered in the E4.1 step-2 flip
+                ;; commit and not before).  `do\0000000` is a fresh_perl child
+                ;; whose source carries a NUL byte, so PPI cannot tokenize it.
+                ;; It PASSED until the flip only by accident: the v1 fallback's
+                ;; --lenient-ppi truncated the unparseable source to nothing and
+                ;; the row asserts empty output, so PCL scored a pass without
+                ;; running the test's semantics.  With one pipeline the parse
+                ;; failure is honest and loud.  RULED s345 §1: register, never
+                ;; teach the pipeline NUL (that is teaching PPI a token it
+                ;; cannot represent).
+                ("^\\[perl #129069\\] - no output and valgrind clean$"
+                 :feature
+                 "NUL byte in the source of a fresh_perl child (do\\0000000) -- PPI cannot tokenize it. not-supported.md: 'NUL bytes (and other control characters) in identifiers'.")
                 ("Assert failure when mentioning a constant twice"
                  :error-msg
                  "expects perl's exact 'Bareword found where operator expected' compile error for invalid input. not-supported.md: 'Error message text and format' / 'Error compatibility for invalid Perl input'.")

@@ -1547,3 +1547,102 @@ but its pragma would behave file-globally rather than lexically.
 point scope-tracked hint snapshots in the transpiler (a per-scope constant
 alist captured at transpile time, restored via unwind-protect at runtime
 scope exit) is the design sketch.
+
+## String eval with multiple package sections
+
+**What:** an `eval` string that changes package more than once, e.g.
+`eval 'package A; …; package B; …'`, and — the same refusal, reached from
+the other side — an eval whose leading statements before a `package X;` are
+not the narrow initializer shapes the s353 whitelist accepts.
+
+```perl
+eval 'package A; our $x = 1; package B; our $y = 2; 1';   # PCL: unsupported
+eval 'my $v = some_free_global(); package X; $v';         # PCL: unsupported
+```
+
+**Error (perl-shaped, trappable in `$@` exactly like any other eval error):**
+`PCL: unsupported in string eval: multiple package sections`
+
+**Why:** an eval body lowers as ONE thunk, and the thunk cannot change the
+reader package part-way through. The single-switch shape (`package X;` plus
+a body) is supported and common — it lowers AS section X through the D1-lite
+qualified emission (#226, RULED s345 §2). A *second* switch would need the
+thunk split into independently-packaged sections with values threaded
+between them, which is whole-file section machinery inside a runtime eval.
+Measured share: one event across the whole sweep + CPAN board, and it is a
+shape no surveyed CPAN module uses.
+
+**Owner:** task #242 (the refusal is deliberate; a real consumer re-opens it).
+
+## String eval ending in an unconvertible declaration
+
+**What:** an `eval` string whose last statement is a declaration whose VALUE
+the lowering cannot produce. Every measured instance is input perl itself
+rejects — `my $$x`, `my $$$x`, `my @$x`, `my($a,$b),$x,my($c,$d)`.
+
+**Error:** `PCL: unsupported in string eval: trailing declaration has no value`
+
+**Why:** an eval returns its last statement's value; for a trailing `my`/`our`
+the lowering converts the declaration into a value-producing form, and a few
+shapes have no such form. All five sweep events are perl-INVALID source from
+lexer-torture rows that assert perl *rejects* them, so a non-empty `$@` is
+the answer those rows want (CLAUDE.md principle 9 — PCL is a transpiler for
+valid Perl, not a validator, but it must not silently accept nonsense).
+
+**Owner:** task #242.
+
+## A single generated top-level form above 64k characters
+
+**What:** one emitted top-level runtime form whose whitespace-collapsed length
+exceeds `$RUN_FORM_MAX` (64,000 chars).
+
+**Error:** `PCL: unsupported: a single generated top-level form of N chars
+exceeds the 64000-char limit (it would exhaust the SBCL compiler heap at
+load): …`
+
+**Why:** SBCL's register allocator grows superlinearly in form size; a
+162k-char form OOMed a 1 GB heap outright, while the largest form in the
+whole corpus that loads fine is ~55k. Refusing at transpile time with a
+precise message beats emitting CL that crashes SBCL at load with no
+attribution. The limit is never raised (RULED s346 §2). The one measured
+event is torture-scale generated source; one honest loud row there is the
+accepted outcome, and shrinking arbitrary generated forms is not required by
+any target.
+
+**Revisit if:** a real CPAN module produces such a form — then the fix is
+splitting the run form (option (a): extend `_oversized_top_decls`), not
+raising the cap.
+
+**Owner:** tasks #230 / #242.
+
+## An `our` alias whose requalified region contains a nested package statement or an inner-scope re-declaration
+
+**What:** inside one block, an `our @x` declared after an in-block `package`
+statement, where the region after a later `package` switch either contains a
+*nested* `package` statement, or re-declares the same variable in an INNER
+scope (a nested block, a sub body, or a `foreach my $x` head).
+
+```perl
+{ package tmp; our @c = (1,2);
+  package main;
+  { my @c = (9); }     # inner-scope re-declaration
+  print "@c\n";        # PCL: unsupported (perl: tmp::c, i.e. "1 2")
+}
+```
+
+**Error:** `PCL: unsupported: `our` alias for '@c' re-declared in an inner
+scope of the same block` (or `… followed by a nested package statement …`).
+
+**Why:** `our @x` binds the bare name to the *declaring* package's variable
+for the rest of the enclosing scope, and a later `package` statement does not
+re-home it — so the uses after the switch are requalified to the declaring
+package. That rewrite is a flat one over the region. A block-level
+re-declaration is fine (it simply ENDS the alias, #251/M7), but an
+inner-scope one does not: the inner binding expires at its own scope's end
+and the OUTER alias RESUMES, which a flat region rewrite cannot express.
+Refusing beats requalifying the wrong half.
+
+**Revisit if:** the requalification is rebuilt as a scope-walk rather than a
+region rewrite — then both shapes fall out.
+
+**Owner:** tasks #251 / #242.

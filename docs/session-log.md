@@ -4,6 +4,60 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 356 (2026-08-08, Opus 5) — E4.1 step 2 (#242): the fallback is gone; PCL has ONE pipeline
+
+The three-population precondition was met at s355, so the flip ran.  What
+went away: `PCL_V1`, `PCL_V1_FILES`, `parse_with_fallback`, and the
+`PCL_V2_AUDIT_LOG` side-channel that existed only to count v1 routes.  What
+replaced it is a single `parse_source` in `pl2cl` that whitelists modes —
+an unknown mode is now a loud error instead of a silently-dropped option,
+which is how `lenient_ppi` used to disappear.  `Pl::Parser` is still LOADED
+(v1's expression seam runs inside v2); only the file-level entry is gone,
+and its unreachable chunks are #243's job.
+
+The point of the flip, restated because it is the whole reason: a v2 gap
+used to become a **silent re-transpile through a second compiler with
+different semantics**, and any resulting divergence got attributed to the
+program rather than to the fallback.  Gaps are now hard errors.
+
+Same commit, as §5 requires: **(a)** the four ruled refusals rephrased
+perl-shaped — multi-switch, trailing-declaration, F6 oversized run form, the
+M7 our-alias residue — each verified to reach `$@` as an ordinary trappable
+error (`PCL: unsupported in string eval: … at (eval 1) line 1.`) with
+execution continuing, and each with a `docs/not-supported.md` entry naming
+its owner task.  A `pl2cl server:` prefix that was leaking into that `$@`
+came out: the transpiler's message IS the error, not a note from a
+subprocess the Perl program never asked about.  **(b)** `--lenient-ppi`
+accepted-and-inert, with the PPI failure it used to paper over now **dying
+naming the file** (§5a.4).  **(c)** the `#228` `[perl #129069]` registration.
+**(d)** the cache key's pipeline component frozen to the literal `"v2"`.
+
+Two `parser2-02.t` guard rows asserted the OLD refusal text; updated to the
+new message (the assertion — still refuses — unchanged).
+
+**Verification.** corpus emission **identical across 111 files** (the flip
+changes routing, not output); gate **131/4658 PASS**; sweep GATE clean.
+The sweep moved three files by a net **+1**, every movement pre-authorized
+and edited into the baselines with its cause (#223 discipline — rows leave
+by EDIT, never by re-blessing a run):
+
+- **eval.t 110 → 114.**  The trailing-declaration refusal makes the four
+  `my $$x` / `my @$x` / `my %$x` / `my $$$x` rows fail — they assert that
+  *perl rejects* those, so refusing is what makes them pass.  `DECIDED.md`
+  predicted exactly +4.  The four rows left `fail-baseline` (683 → 679).
+- **tr.t 241 → 239.**  `tr.t:494` builds a **73,769-char** `eval` string
+  (`"ABCDEFGHIJKLMNO" x (0x12000/15)`) — the single F6 event.
+  `fable-answers-s346.md` §2.3 ruled exactly this case: eval-string source ⇒
+  no pre-flip fix, ruled refusal, affected baseline row edited with its cause.
+- **lex.t 46 → 45.**  The #228 registration, which s345 §1 required to land
+  in this commit and not before.  Its pass was an accident: `--lenient-ppi`
+  truncated the NUL source to nothing and the row asserts empty output.
+
+Gen v2-112; both artifacts regenerated marker-only.  Next: #243 (delete v1's
+unreachable file-level chunks), then #244, then STOP.
+
+---
+
 ## Session 355 (2026-08-08, Opus 5) — M7 (#251): an our-alias re-declaration ENDS the alias; the board's last unnamed route is gone and §5a.2 is met
 
 s354 left the board with one TODO family no ruling named:
