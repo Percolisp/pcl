@@ -326,6 +326,14 @@ release checks surface divergences, triage those first, per
 > backstop for step 3's reachability pass to retire.  #230's remaining half is
 > the F6 run-form split.
 
+> **s353 (Fable) EXECUTED M3, M6, M2 (+2 unmasked layers), and M1 —
+> `docs/e41-m-work-handoff-s353.md` is the current worklist.**  Gate TODO
+> events 22 → 2 (only M4 + M5 remain; the 2 other multi-segment events are
+> the new deliberately-refused inverse-guard rows in transpile-test-09.t).
+> Gen v2-108; artifacts regenerated marker-only; corpus emission identical
+> across 111 files.  Remaining: M4 → M5 (capped) → three-population zero →
+> steps 2–4.
+>
 > **s353 (Fable) ruled the s352 ask — `docs/fable-answers-s352.md`:** the
 > flip stays HELD; the gate's own 27 v1 routes (six TODO families, s352
 > measurement independently reproduced event-for-event) are ALL pre-work,

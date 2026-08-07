@@ -182,6 +182,15 @@ else string) is a runtime-resolution design, not a transpile-time guess.
 #180/#215 load-noise family; standalone-green + non-reproducing.  No
 action, correctly not chased.
 
+## Execution note (added later in s353)
+
+M3, M6, M2, and M1 were executed the same session — see
+`docs/e41-m-work-handoff-s353.md` for what shipped, the two extra layers
+M2 unmasked (the self-referential-my-init false positive and the
+destructive fat-comma tree rewrite), the M1 flattened-block second arm the
+real Sub::Quote shape required, and the pre-existing #163-family
+divergences the probes surfaced.  Gate TODO events 22 → 2 (M4 + M5).
+
 ## Queue after this ruling
 
 #248 M3/M6/M2 (cheap trio) → #247 M1 → #248 M4 → #248 M5 (cap +

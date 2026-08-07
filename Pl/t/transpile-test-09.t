@@ -476,4 +476,54 @@ my $o = eval 'package B7; sub mk { bless {} } mk()';
 print "10 ", ref($o), "\n";
 });
 
+# ── E4.1 M1 (s353): leading-`my` eval regions — the Sub::Quote shape ────────
+# 1 = the faithful write-through (capture value is \$lexical holding a ref;
+# the region writes through two levels — Moo installs every accessor this
+# way).  2 = the whole named-quote shape: bare-block wrapper, leading `my`s,
+# region sub + `$$_UNQUOTED = \&name`, trailing `1;`.  INVERSE guards: a
+# leading `my` whose init has a free package variable (3) or a bareword call
+# (4) must NOT be swept into the region — perl resolves both in the CALLER.
+test_transpile("eval region: leading-my collapse (Sub::Quote shape)", q{
+sub install { return eval q!{ my $q = ${$_[1]->{"k"}}; package RG; $$q = 42; } 1;! || die $@ }
+my $cell; my $uq = \$cell;
+install(undef, { k => \$uq });
+print "1 ", $cell, "\n";
+sub mk { return eval q!{ my $u = ${$_[1]->{"u"}}; package SQ9; no warnings 'closure'; sub hi { "H-" . ${$_[0]} } $$u = \&hi; } 1;! || die $@ }
+my $code; my $slot = \$code;
+mk(undef, { u => \$slot });
+print "2 ", $code->(\ "X"), "\n";
+our $V = "caller"; our $W = "callerW";
+my $r2 = eval 'my $v = $V; package M1X; our $V = 9; ($v eq "caller" ? "good" : "bad-$v")' // "refused";
+print "3 ", ($r2 eq "good" || $r2 eq "refused" ? "ok" : $r2), "\n";
+sub w { "from-w" }
+my $r3 = eval 'my $v = w(); package M1Y; $v' // "refused";
+print "4 ", ($r3 eq "from-w" || $r3 eq "refused" ? "ok" : $r3), "\n";
+});
+
+# ── E4.1 M2 (s353): poisoned cond-my with braced STRING interpolation renames
+# natively; a real code-level ${name} deref keeps the v1 route but stays
+# correct.  Plus the fat-comma non-idempotence fix: under strict, a hash key
+# before => inside a same-name-shadow anon sub must stay a STRING (the old
+# destructive `=>`→`,` tree rewrite turned re-parsed keys into calls —
+# Moo's { no_install => 1 } became (pl-no_install)).
+test_transpile("cond-my braced interp + strict fat-comma keys", q{
+use strict;
+sub f {
+  my ($spec) = @_;
+  if (my $name = $spec) { return "_set_${name}"; }
+  return "none";
+}
+$main::name = "G";
+print f("x"), " ", $main::name, "\n";
+sub defer_sub { my ($n,$c)=@_; return $c }
+package P; sub gen { my ($c,$p,$o)=@_; return $o->{no_install} } package main;
+my $fx = defer_sub "k" => sub {
+  my $fx = P->gen(
+    "p", { no_install => 1, no_defer => 2 }
+  );
+  $fx;
+};
+print "keys ", $fx->(), "\n";
+});
+
 done_testing();

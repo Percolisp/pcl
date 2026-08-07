@@ -215,6 +215,95 @@ sub _requalify_block_our_after_pkg_switch {
 # _extract_module_prototypes with the import list; require → module form, or
 # literal non-interpolating file path via _extract_file_prototypes).  See the
 # parse() call-site comment for why this must run before expression parsing.
+# E4.1 M1 (RULED s353, fable-answers-s352.md §1.2): may segment 0's leading
+# statements be swept INTO the eval package region?  True only when every
+# one is a single-scalar `my` declaration whose initializer is built from
+# WHITELISTED material: scalars declared by an EARLIER leading `my`, magic
+# variables (`$_[1]`, `@_`, `$_` — runtime-special, never *package*-interned),
+# literals with no live sigil, operators/casts/subscripts/parens over those.
+# The swept-in statements then run inside the region thunk, i.e. under
+# `*package*` = X; the whitelist exists precisely to make that binding
+# unobservable — a free package name, an interpolated global, or a bareword
+# call would resolve in X where perl resolves it in the CALLER's package
+# (the #240 silent-wrong, one statement earlier).  WHITELIST, never a
+# blacklist: anything unrecognized refuses (rule 12; the residue risk is a
+# scanner missing a spelling — the s332 §9 lesson).  This is Sub::Quote's
+# accessor/constructor shape, Moo's code generator:
+#   { my $x = ${$_[1]->{"\$x"}}; …; package X; sub NAME { … } }
+sub _eval_safe_leading_stmts {
+  my ($self, $stmts) = @_;
+  my %own;   # scalars declared by earlier leading statements
+  for my $stmt (@$stmts) {
+    return 0 unless $stmt->isa('PPI::Statement::Variable');
+    my @k = grep { $_->significant } $stmt->children;
+    pop @k if @k && $k[-1]->isa('PPI::Token::Structure')
+                 && $k[-1]->content eq ';';
+    return 0 unless @k >= 2
+      && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
+      && $k[1]->isa('PPI::Token::Symbol')
+      && $k[1]->content =~ /^\$\w+$/;
+    my $target = $k[1]->content;
+    # Shape: `my $x;` or `my $x = INIT;` — attributes, declarator
+    # modifiers, list targets all refuse.
+    my @init;
+    if (@k > 2) {
+      return 0 unless $k[2]->isa('PPI::Token::Operator')
+        && $k[2]->content eq '=';
+      @init = @k[3 .. $#k];
+      return 0 unless @init;
+    }
+    for my $el (@init) {
+      for my $t ($el->isa('PPI::Node') ? $el->tokens : ($el)) {
+        next unless $t->significant;
+        next if $t->isa('PPI::Token::Magic');    # BEFORE Symbol: Magic ISA Symbol
+        if ($t->isa('PPI::Token::Symbol')) {
+          return 0 unless $own{ $t->content };   # own target NOT allowed: in
+          next;                                  # `my $x = $x` the RHS is the
+        }                                        # caller's — unknowable here
+        next if $t->isa('PPI::Token::Number');
+        next if $t->isa('PPI::Token::Quote::Single')
+             || $t->isa('PPI::Token::Quote::Literal');
+        if ($t->isa('PPI::Token::Quote::Double')
+            || $t->isa('PPI::Token::Quote::Interpolate')) {
+          # Interpolation resolves free names too — allow only when no LIVE
+          # sigil survives escape stripping ("\$x" is literal text).
+          (my $body = $t->content) =~ s/\\.//g;
+          return 0 if $body =~ /[\$\@]/;
+          next;
+        }
+        next if $t->isa('PPI::Token::Operator');
+        next if $t->isa('PPI::Token::Cast');
+        next if $t->isa('PPI::Token::Structure');
+        return 0;   # Words (bareword calls), heredocs, ArrayIndex, anything new
+      }
+    }
+    $own{$target} = 1;
+  }
+  return 1;
+}
+
+# M1's companion for the TRAILING statements of the flattened-block shape:
+# true when every statement is built from literals/operators/structure only
+# (`1;` — the routine eval-truth tail).  No symbols, no words: a trailing
+# expression with a name in it would resolve in the region package X where
+# perl, back outside the block, resolves it in the CALLER's package.
+sub _eval_literal_only_stmts {
+  my ($stmts) = @_;
+  for my $stmt (@$stmts) {
+    return 0 unless $stmt->isa('PPI::Statement');
+    for my $t ($stmt->tokens) {
+      next unless $t->significant;
+      next if $t->isa('PPI::Token::Number');
+      next if $t->isa('PPI::Token::Quote::Single')
+           || $t->isa('PPI::Token::Quote::Literal');
+      next if $t->isa('PPI::Token::Operator');
+      next if $t->isa('PPI::Token::Structure');
+      return 0;
+    }
+  }
+  return 1;
+}
+
 # Pre-seed the strict_subs pragma from the document's use/no strict includes
 # (see the parse() call site).  Mirrors v1's per-statement rule — bare
 # `use strict` or an arg list mentioning 'subs' counts; `no strict 'refs'`
@@ -500,14 +589,10 @@ sub parse {
   # token rename here is too late, PPI already mis-structures the for-head.)
   # (state decls outside the classic named-sub statement subset were rewritten
   # away by _rewrite_state_prepass above; _rename_state_vars owns the rest.)
-  # Bare `$#` (PPI::Token::Magic) — the deprecated last-index / `$#[…]` on the
-  # oddly-named `@#` array.  v2 mis-parses it (element access, and never
-  # forward-declares `@#`) → unbound crash.  `$#array` is a distinct ArrayIndex
-  # token and is NOT affected.  Torture-test-only; gate → v1.
-  die "Parser2 TODO: bare \$# magic\n"
-    if @{ $doc->find(sub {
-         $_[1]->isa('PPI::Token::Magic') && $_[1]->content eq '$#';
-       }) || [] };
+  # (Bare `$#` magic + subscript — `$#[0]` on the oddly-named `@#` array —
+  # lowers as element access; `@#` is forward-declared by the %punct bucket
+  # in _forward_global_decls.  E4.1 M3, s353: the v1 gate that used to sit
+  # here is gone.  `$#array` is a distinct ArrayIndex token, never affected.)
   # E3 eval-mode: the segment package is the CALL SITE's package, so
   # __PACKAGE__ (and bare sub/global resolution) inside the eval string
   # matches the caller.
@@ -698,21 +783,54 @@ sub parse {
   # region package around the free-name resolution and the body, so both
   # spellings — and the wider hole the s348 gate could not cover at all
   # (`eval 'package F2; $Zz = 5; 1'` setting `$main::Zz`) — resolve in X.
+  # E4.1 M1 (s353): the collapse also accepts LEADING statements that pass
+  # the `_eval_safe_leading_stmts` whitelist.  Verified live: Moo's
+  # Sub::Quote population lowers natively (moo-01.t 15/15, gate audit
+  # events 15 → 0), and the faithful write-through probe (capture value =
+  # \$lexical holding a ref, `$$q = …` inside the region) round-trips.
+  # A LITERAL `\\$x` ref-of-ref capture still mis-derefs — but identically
+  # under the v1 fallback (pre-existing, the #163 referent-kind-tag
+  # residue; probed at HEAD in file mode too), so this arm changes nothing
+  # for that shape.
   if ($self->eval_mode && @segments == 2
-      && !@{ $segments[0]{stmts} }
+      && $self->_eval_safe_leading_stmts($segments[0]{stmts})
       && $segments[1]{pkg_stmt} && !$segments[1]{blockform}
       && !defined $segments[1]{version}) {
     $self->{_eval_pkg_stmt} = $segments[1]{pkg_stmt};
     @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
-                   stmts => [ $segments[1]{pkg_stmt}, @{ $segments[1]{stmts} } ] });
+                   stmts => [ @{ $segments[0]{stmts} },
+                              $segments[1]{pkg_stmt}, @{ $segments[1]{stmts} } ] });
   }
-  # The residual multi-switch shape (`package A; …; package B; …` inside one
-  # eval — ZERO measured events) stays refused.  Its text keeps the
-  # `Parser2 TODO:` prefix here ON PURPOSE: pl2cl's parse_with_fallback keys
-  # the v1 retry on /^Parser2\b/, so rephrasing it perl-shaped
-  # (`PCL: unsupported in string eval: multiple package sections`) turns the
-  # retry into a user-visible die — which is right only AFTER the flip.  That
-  # rephrase belongs to the E4.1 step-2 commit (fable-answers-s345.md §2/§5a.3).
+  # E4.1 M1 (s353): the same collapse for the FLATTENED bare-block spelling.
+  # Sub::Quote wraps everything in one `{ … }` with a trailing `1;`, which
+  # the T-A1 flattening renders as [empty main | blk leading-`my`s | pkg X
+  # (blk) | blk restore + the trailing literal].  Accept when the leading
+  # statements pass the M1 whitelist and the trailing statements are
+  # literal-only (their package/scope is unobservable), and collapse to the
+  # one region segment the #226 machinery already lowers.  The block's
+  # lexical scoping is erased, which the two whitelists make unobservable.
+  if ($self->eval_mode && @segments == 4
+      && !@{ $segments[0]{stmts} } && !$segments[0]{pkg_stmt}
+      && defined $segments[1]{blk} && !$segments[1]{pkg_stmt}
+      && $self->_eval_safe_leading_stmts($segments[1]{stmts})
+      && $segments[2]{pkg_stmt} && !$segments[2]{blockform}
+      && !defined $segments[2]{version}
+      && !$segments[3]{pkg_stmt}
+      && _eval_literal_only_stmts($segments[3]{stmts})) {
+    $self->{_eval_pkg_stmt} = $segments[2]{pkg_stmt};
+    @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
+                   stmts => [ @{ $segments[1]{stmts} },
+                              $segments[2]{pkg_stmt}, @{ $segments[2]{stmts} },
+                              @{ $segments[3]{stmts} } ] });
+  }
+  # The residual multi-segment shapes — true multi-switch (`package A; …;
+  # package B; …`) and leading statements the M1 whitelist refuses — stay
+  # refused.  The text keeps the `Parser2 TODO:` prefix here ON PURPOSE:
+  # pl2cl's parse_with_fallback keys the v1 retry on /^Parser2\b/, so
+  # rephrasing it perl-shaped (`PCL: unsupported in string eval: multiple
+  # package sections`) turns the retry into a user-visible die — which is
+  # right only AFTER the flip.  That rephrase belongs to the E4.1 step-2
+  # commit (fable-answers-s345.md §2/§5a.3, amended s353).
   die "Parser2 TODO: eval-mode multi-segment (top-level package statement)\n"
     if $self->eval_mode && @segments > 1;
   # E3: `eval '...; my $x = EXPR'` — the eval's VALUE is the trailing
@@ -1761,8 +1879,8 @@ sub _block_captures_name {
     || grep { join('', $_->heredoc) =~ $re } @heredocs;
 
   # my/state declarations of the bare name inside the block:
-  # canon → [decl-statement, ord of its last token]; plus the declaring Symbol
-  # tokens themselves (declaration targets, not uses).
+  # canon → [shadowing scope, ord of the decl's last token]; plus the
+  # declaring Symbol tokens themselves (declaration targets, not uses).
   my (%decl, %decl_tok, %ord);
   my $i = 0;
   $ord{ refaddr $_ } = $i++ for $block->tokens;
@@ -1778,7 +1896,28 @@ sub _block_captures_name {
     for my $t (@tgt) {
       next unless substr($t->content, 1) eq $bare;
       $decl_tok{ refaddr $t } = 1;
-      push @{ $decl{ $t->content } }, [$d, $last];
+      push @{ $decl{ $t->content } }, [$d->parent, $last];
+    }
+  }
+  # `for/foreach my $x (LIST) BLOCK` — the loop-head `my $x` shadows for the
+  # BLOCK only (the LIST still sees the outer variable, so a use there stays
+  # a capture).  E4.1 M6, s353: without this the head decl was invisible
+  # (it is Compound tokens, not a Statement::Variable) and a sub whose loop
+  # var merely shares a file lexical's name gated the whole file to v1.
+  for my $c (@{ $block->find('PPI::Statement::Compound') || [] }) {
+    my @k = $c->schildren;
+    for my $j (0 .. $#k - 2) {
+      next unless $k[$j]->isa('PPI::Token::Word')
+        && $k[$j]->content =~ /^(?:for|foreach)$/
+        && $k[$j+1]->isa('PPI::Token::Word') && $k[$j+1]->content eq 'my'
+        && $k[$j+2]->isa('PPI::Token::Symbol');
+      my $t = $k[$j+2];
+      last unless substr($t->content, 1) eq $bare;
+      my ($blk) = grep { $_->isa('PPI::Structure::Block') } @k[$j+3 .. $#k];
+      last unless $blk;
+      $decl_tok{ refaddr $t } = 1;
+      push @{ $decl{ $t->content } }, [$blk, $ord{ refaddr $t }];
+      last;
     }
   }
 
@@ -1787,9 +1926,9 @@ sub _block_captures_name {
     my $u = $ord{ refaddr $tok };
     return 0 unless defined $u;
     for my $dd (@{ $decl{$canon} || [] }) {
-      my ($d, $dlast) = @$dd;
+      my ($scope, $dlast) = @$dd;
       next unless $dlast < $u;                    # decl strictly precedes use
-      my $scope = $d->parent or next;             # decl's enclosing scope
+      next unless $scope;                         # decl's enclosing scope
       for (my $p = $tok->parent; $p; $p = $p->parent) {
         return 1 if refaddr($p) == refaddr($scope);
         last if refaddr($p) == refaddr($block);
@@ -2457,20 +2596,31 @@ sub _interp_fixer {
   my ($canon, $newbare) = @_;
   my $sigil = substr($canon, 0, 1);
   (my $bare = $canon) =~ s/^[\$\@\%]//;
+  # Each arm rewrites the plain spelling AND the braced-interpolation
+  # spelling ("${x}" / "@{x}[…]" / "${x}{k}" — E4.1 M2, s353): braces are
+  # kept in the output so adjacency stays unambiguous.  The `(?:^|[^\\])`
+  # prefix skips escaped sigils, as before.
   return
     $sigil eq '$' ? sub {
-      $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])/$1\$$newbare/g;
+      my $n = 0;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])/$1\$$newbare/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?![\[\{])/$1\${$newbare}/g;
+      return $n;
     }
   : $sigil eq '@' ? sub {
       my $n = 0;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\Q$bare\E\b(?!\{)/$1\@$newbare/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E(?=\[)/$1\$$newbare/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\Q$bare\E\b/$1\$#$newbare/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\{\s*\Q$bare\E\s*\}(?!\{)/$1\@{$newbare}/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?=\[)/$1\${$newbare}/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\{\s*\Q$bare\E\s*\}/$1\$#{$newbare}/g;
       return $n;
     }
   : sub {
       my $n = 0;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)([\$\@])\Q$bare\E(?=\{)/$1$2$newbare/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)([\$\@])\{\s*\Q$bare\E\s*\}(?=\{)/$1$2\{$newbare\}/g;
       return $n;
     };
 }
@@ -2976,6 +3126,27 @@ sub _reg_eval_capture {
 # (`my $x = $x`) still see the OUTER variable, so only the declared symbol
 # itself and symbols AFTER the declaration statement are renamed.
 
+# A CODE-level brace-deref of the bare name — `${x}` / `@{x}` / `%{x}` /
+# `$#{x}` spelled as Cast (or the `$#` Magic) + Block whose sole content is
+# the bare word — references the variable through a Word token the symbol
+# rewrite never sees, so a rename would split the variable.  The blockers
+# refuse on THIS shape only (E4.1 M2, s353); the old whole-content text scan
+# also tripped on "${x}" inside string literals, which _interp_fixer now
+# rewrites (both live Moo events were that spelling, probed to their source
+# lines in Method::Generate::{Constructor,Accessor}).
+sub _has_code_brace_deref {
+  my ($root, $bare) = @_;
+  return scalar @{ $root->find(sub {
+    my $t = $_[1];
+    return 0 unless $t->isa('PPI::Structure::Block')
+      && $t->content =~ /^\{\s*\Q$bare\E\s*\}$/;
+    my $prev = $t->sprevious_sibling;
+    return $prev && ($prev->isa('PPI::Token::Cast')
+                     || ($prev->isa('PPI::Token::Magic')
+                         && $prev->content eq '$#')) ? 1 : 0;
+  }) || [] };
+}
+
 # Reasons renaming `my $x` within $root is NOT safe; undef when safe.
 sub _shadow_rename_blocker {
   my ($self, $root, $sym, $eval_ok) = @_;
@@ -2994,10 +3165,13 @@ sub _shadow_rename_blocker {
     $decls++ if grep { $_->content eq $old } @syms;
   }
   return "multiple declarations" if $decls != 1;
-  # Interpolated uses ("$x" / /$x/ / heredoc / <$x>) are handled: the rename
-  # (_rename_decl_within) rewrites them via _interp_fixer (M-A).  Only the
-  # `${x}` brace-deref form is invisible to the rewrite — refuse that.
-  return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  # Interpolated uses ("$x" / /$x/ / "${x}" / heredoc / <$x>) are handled:
+  # the rename (_rename_decl_within) rewrites them via _interp_fixer (M-A;
+  # braced spellings since M2, s353).  Only a CODE-level brace-deref
+  # (`${x}` as Cast+Block — the name lives in a Word token the symbol
+  # rewrite never sees) keeps the refusal; the old whole-content text scan
+  # also tripped on "${x}" inside string literals (both live Moo events).
+  return "brace-deref" if _has_code_brace_deref($root, $bare);
   # String eval captures lexicals BY NAME (session-250 alist) — the eval'd
   # code would look for the original name.  eval-BLOCKS are fine.  $eval_ok
   # waives this (M-F): the seam my-shadow rename produces a LET-BOUND
@@ -3033,7 +3207,7 @@ sub _state_container_blocker {
     $decls++ if grep { $_->content eq $old } @syms;
   }
   return "multiple declarations" if $decls != 1;
-  return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
+  return "brace-deref" if _has_code_brace_deref($root, $bare);
   # $eval_ok (s299, __shadow__ renames only): the eval capture alist strips
   # the __shadow__N suffix back to the original name sigil-agnostically, so
   # string eval still reaches a container shadow.  state renames produce
@@ -3852,6 +4026,15 @@ sub _assemble_eval_mode {
   # they resolve through the capture alist / alias rule (ir-spec §9.1).
   delete $free{$_} for keys %{ $self->{_file_lex_renamed} // {} };
 
+  # M1 (s353): `\&name` where the sub is DEFINED in this eval (Sub::Quote's
+  # `$$_UNQUOTED = \&NAME` inside the region) is not a caller capture — the
+  # body already resolves it statically.  Leaving it free made the thunk
+  # look "&name" up in the CALLER and bind an empty cell over the real sub.
+  for my $sub (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    next unless $sub->name && !$sub->isa('PPI::Statement::Scheduled');
+    delete $free{ '&' . $sub->name };
+  }
+
   # $a/$b: kept defvar'd (sort comparators need them special) but ALSO listed
   # as params when referenced, so a caller's lexical `my $a`/`my $b` is
   # captured; the param is then a dynamic rebinding (v1's rule).
@@ -3976,10 +4159,15 @@ sub _forward_global_decls {
   # section's defvar (see the parse() comment at the _seg_lex reset).
   my $lb = $seg_lex // {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
-  my (%seen, %cross, %caret);
+  my (%seen, %cross, %caret, %punct);
   for my $line (split /\n/, $text) {
     next if $line =~ /^\s*;;/;
     next if $line =~ /^\s*\(defvar\s/;
+    # The punctuation array `@#` (bare `$#` magic + subscript lowers to
+    # `(p-aref @# …)`) — the [A-Za-z_] scan below can't match it, same as the
+    # caret specials.  A genuine global, never a capturable lexical, so it is
+    # defvar'd even in eval mode (like %caret, unlike %seen).
+    $punct{'@#'} = 1 if $line =~ /(?<![\w:|])\@\#(?!\w)/;
     # Caret specials (${^MPE}, ${^WARNING_BITS}, …) compile to the pipe-delimited
     # CL symbol |${^MPE}| — the [A-Za-z_] scan below can't match the `{^`.  They
     # are user-writable globals; defvar any that appear.  Keyed on the full
@@ -4019,9 +4207,12 @@ sub _forward_global_decls {
     $free_out->{$_} = 1 for keys %seen;
     %seen = ();
   }
-  return () if !(%seen || %cross || %caret);
+  return () if !(%seen || %cross || %caret || %punct);
   my @decls = (';; Forward declarations for undeclared package globals');
   for my $v (sort keys %seen) {
+    push @decls, "(defvar $v " . _fresh_container($v) . ")";
+  }
+  for my $v (sort keys %punct) {
     push @decls, "(defvar $v " . _fresh_container($v) . ")";
   }
   for my $sym (sort keys %caret) {
@@ -4586,7 +4777,7 @@ sub _lower_block {
       # `$s` inside a single-quoted format, and perl does not read it.
       die "Parser2 TODO: self-referential my-init with a below-assignment tail: "
         . $first->content . "\n"
-        if _init_reads_scalar($init, $name);
+        if $self->_init_reads_scalar($init, $name);
       my @kd = _strip_semi($first->schildren);
       $lowprec_run = [@kd[1 .. $#kd]];
     }
@@ -7180,11 +7371,36 @@ sub _fallback_stmt_capture {
 # A false positive here costs a WHOLE-FILE gate — it cost ExtUtils::MM_Unix
 # one, on `my $attrs = join " ", map { qq[$_="$attrs{$_}"] } sort keys %attrs;`
 # (audit family F5, task #229).
+# Tokens inside a BLOCK in the init (an anon-sub body, a map/grep block) go
+# through _block_captures_name instead, so an INNER `my $x` shadow discounts
+# its own uses (E4.1 M2 residue, s353: Moo's Method::Generate::Constructor
+# declares an inner `my $constructor` inside the deferred sub — perl never
+# reads the outer one).  A genuine closure capture of the outer $x still
+# answers 1: the use resolves outside the block.
 sub _init_reads_scalar {
-  my ($init, $name) = @_;
+  my ($self, $init, $name) = @_;
   (my $bare = $name) =~ s/^\$//;
+  my (%inblk, @blocks);
+  for my $el (@$init) {
+    next unless $el->isa('PPI::Node');
+    push @blocks, $el->isa('PPI::Structure::Block') ? $el : ();
+    push @blocks, @{ $el->find('PPI::Structure::Block') || [] };
+  }
+  for my $b (@blocks) {
+    # Only TOP-level blocks: a nested block's own capture test would call a
+    # use shadowed one level up "resolves outside me" and false-refuse.
+    my $nested = 0;
+    for (my $p = $b->parent; $p && !$p->isa('PPI::Statement::Variable');
+         $p = $p->parent) {
+      $nested = 1, last if $p->isa('PPI::Structure::Block');
+    }
+    next if $nested;
+    return 1 if $self->_block_captures_name($b, $bare, { $name => 1 });
+    $inblk{ refaddr $_ } = 1 for $b->tokens;
+  }
   for my $el (@$init) {
     for my $t ($el->isa('PPI::Node') ? $el->tokens : ($el)) {
+      next if $inblk{ refaddr $t };
       if ($t->isa('PPI::Token::Symbol')) {
         return 1 if $t->symbol eq $name;
       } elsif ($t->isa('PPI::Token::Quote::Single')

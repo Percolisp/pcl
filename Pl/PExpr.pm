@@ -4988,9 +4988,16 @@ sub cleanup_for_parsing {
         }
       }
     }
-    # - - - Replace foo => "bar" with "foo" => "bar":
+    # - - - Replace foo => "bar" with "foo" , "bar":
     if (ref($part) eq 'PPI::Token::Operator' && $part->content() eq '=>') {
-      $part->set_content(",");
+      # A NEW comma token in the LOCAL array — never set_content on the
+      # shared tree token.  The old destructive rewrite made this pass
+      # non-idempotent: the key stringification below lives only in the
+      # local array, so a SECOND parse of the same region (shadow-rename
+      # re-lowering, seam retries) saw `,` + a bare Word key, which
+      # strict-subs then compiled as a zero-arg CALL (E4.1 M2 residue,
+      # s353: Moo's `{ no_install => 1 }` became `(pl-no_install)`).
+      $no_ws[$i] = PPI::Token::Operator->new(',');
 
       # Need to check previous too, so it isn't a string constant
       # without quotes:
