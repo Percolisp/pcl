@@ -127,16 +127,46 @@ family — perl's own answer flips on an unrelated `my`), where PCL gives
 the consistent shared-cell answer; and the pre-existing print-args eval
 timing quirk → task #250.
 
+## 2c. M4 — DONE (s354, Opus 5)
+
+The ruling's §1.6 diagnosis was right and had **two** bare-name sites, not
+one; clearing only the first moved the churn rather than removing it.
+
+- **The declaration count.**  `_hard_decl_count($top, $bare)` was called in
+  its sigil-CONFLATED mode, so `my %mix` counted as a re-declaration of
+  `$mix` → `dc=2` → refuse → `_check_my_spanning` died → whole-file v1.
+  Now `'$'`-exact.  This is the last conflated site in the pass: M-F had
+  already established that family *uses* are safe here (Symbol rewrites key
+  on `->symbol`; the `$x` interp fixer skips `$x[`/`$x{`, which is also
+  Perl-correct), so the matching family *decl* must not refuse either.
+  (`_promote_captured` keeps its conflated count on purpose — different
+  pass, different rule, comment there says why.)
+- **The span test.**  `%spanning` is a bare-name TEXT pre-filter, so a
+  sibling `my @x` used in a later segment marked `x` spanning and the scalar
+  loop renamed `$x` even though the scalar never crossed.  Measured: that
+  alone changed `do.t`/`method.t`/`sort.t` emission for no reason.  The
+  scalar loop now asks `_canon_refs_in` — the checker's own resolver, same
+  shape as the container loop's SPANSCAN — in both the single- and
+  multi-instance paths.  The invariant kept is *the rename never refuses a
+  name the checker will die on*: both sides now use one predicate.
+
+Verified: `$mix`/`%mix` lowers natively and matches perl; probes for
+`$v`+`@v` (`$v[1]`, `$#v`, `"@v"`, `"$v"`, `"$v[2]"`), `%w`+`$w` with
+slices, a later-package shadow `my $v`, and a post-block write-through all
+native and byte-equal to perl.  corpus-diff: 5 of 111 files change
+(`array.t` counter renumbering; `caller.t`/`eval.t` a `my` returning to a
+`let` with the eval alist carrying the let-bound box instead of a promoted
+global; `each.t`/`vec.t` a dropped forward-decl false positive) — **all 8
+files touched across both rounds re-swept identical to
+`docs/pass-baseline.tsv`**, row for row.  Gate `131/4656 PASS`, M4's audit
+event gone.  Guards: `transpile-test-02.t` — the two stale "must REFUSE /
+correct via the v1 fallback" descriptions rewritten (both lower natively
+now; assertions unchanged) plus a new INVERSE guard row asserting `$v` and
+`@v` keep separate identities across the boundary.
+
 ## 3. Remaining queue for Opus 5 (in order)
 
-1. **M4 — `my-lexical 'mix' spans a package boundary` (1 gate event).**
-   Ruling §1.6: the CHECKER (`_check_my_spanning`/`_canon_refs_in`) is
-   already canonical via PPI `->symbol`; make the container-spanning
-   RENAME's use-collection resolve the same way so `$mix` (scalar) and
-   `%mix` (reached via `$mix{k}`) rename independently.  Update the
-   guard-edge row's DESCRIPTION (`transpile-test-02.t:572`) in the same
-   commit — its "still correct via the v1 fallback" premise is void
-   post-flip; the value assertion itself is unchanged.
+1. ~~**M4**~~ — DONE s354, see §2c.
 
 2. ~~**M5**~~ — DONE s353c, see §2b.
 
@@ -146,6 +176,33 @@ timing quirk → task #250.
    exempt).  For the board, at minimum re-run the Moo + Role-Tiny dists
    and compare rows against `docs/cpan-module-log.md` baselines (the
    PASS/PARTIAL labels are not the measure — read rows).
+
+   **All three measured s354 (gen v2-110); two clean, one is not:**
+
+   - **Pl/t gate — CLEAN.**  Cold cache, `131/4656 PASS`; 7 audit events =
+     5 DIE (exempt) + **2 TODO that are the deliberate inverse-guard rows
+     at `transpile-test-09.t:496/499`** (the M1-predicate refusals: leading
+     `my` with a free global / a bareword call), already on step 2's
+     rephrase list below.  No unaccounted TODO event in `Pl/t/`.
+   - **Sweep — CLEAN, and one event BETTER than blessed.**  `--jobs 8`,
+     GATE clean, TOTAL passing 18498 = baseline (+0), 0 new / 0 fixed, only
+     the two known crash-file UNSTABLE rows.  17 audit events against the
+     18 blessed in `docs/DECIDED.md` (F4/#228 ×6, F2 residual ×5, F6 ×1,
+     5 DIE): **the sweep's single multi-switch event is GONE**, absorbed by
+     M1's widened collapse in s353.
+   - **CPAN board — NOT clean: one unnamed TODO family, task #251.**  Moo +
+     Role-Tiny, 35 events = 33 DIE (exempt) + 1 TODO true-multi-switch (Moo
+     `accessor-weaken-pre-5_8_3.t`'s fresh_perl child — a ruled refusal,
+     already on step 2's list) + **1 TODO `re-declaration of 'ISA' after
+     in-block our-alias` on `Role-Tiny/t/subclass.t`** (`Parser2.pm:203`),
+     which no ruling names.  PRE-EXISTING (verbatim at HEAD, untouched by
+     M4) and its board row is byte-identical to the s343 baseline, so
+     nothing regressed — but **§5a.2 is unsatisfied until #251 is ruled**
+     fix-or-refusal.  Row comparison: Role-Tiny 21/23 identical, 2 changed
+     and both already blessed as gains at s346b; **Moo has no blessed
+     baseline at all** (`docs/cpan-board14-s343.tsv` does not cover it), so
+     its s354 numbers (28 PASS / 5 PARTIAL / 38 FAIL of 71) are a first
+     measurement, not a comparison.
 
 4. **#242 — step 2, the flip** (plan §5, guardrails §5a): remove
    `parse_with_fallback`/`PCL_V1`/`PCL_V1_FILES`, purge the consumer list,

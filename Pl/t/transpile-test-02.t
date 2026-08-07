@@ -562,18 +562,33 @@ sub main::::flomp { "flump" }
 print "::"->flomp, "-", "::main"->flomp, "\n";
 ');
 
-# Guard edges of the container-spanning rename (each `next` in the loop):
-# an edge the rename must REFUSE still runs correctly via the v1 fallback.
-test_transpile('container spanning guard: interpolated "@list" refuses rename, stays correct', '
+# Edges of the container-spanning rename that USED to be refusals (each a
+# `next` in the loop).  Both now lower natively — the interpolated use via the
+# M-A/M2 interp fixer, the shared bare name via M4's canon-exact declaration
+# count (s354) — so the old "still correct via the v1 fallback" premise is
+# void; the value each row asserts against perl is unchanged.
+test_transpile('container spanning: interpolated "@list" renames and stays correct', '
 my @ilist = (1,2,3);
 { package EI; sub s1 { "@ilist" } }
 print "interp: ", EI::s1(), "\n";
 ');
-test_transpile('container spanning guard: $mix scalar + %mix hash share the bare name — refused', '
+test_transpile('container spanning: $mix scalar + %mix hash share the bare name — renamed independently', '
 my $mix = "s";
 my %mix = (k => "h");
 { package E5; sub g5 { $mix . $mix{k} } }
 print "mix: ", E5::g5(), "\n";
+');
+# INVERSE GUARD for M4: dropping the sigil-conflated declaration count is only
+# safe if the two variables stay DISTINCT after the rename.  Every shape the
+# scalar rewrite must NOT touch is asserted here — `$v[1]`/`$#v` (array, via
+# ->symbol / ArrayIndex) and the interpolated `"@v"`/`"$v[2]"` (the fixer's
+# `(?![\[\{])` lookahead) — beside the two it must (`$v`, `"$v"`).  What still
+# refuses is same-SIGIL ambiguity: two top-level `my $x` in one extent.
+test_transpile('spanning rename: $v scalar and @v array keep separate identities across a package', '
+my $v = "S";
+my @v = (10, 20, 30);
+{ package MX; sub a { $v . "|" . $v[1] . "|" . $#v . "|" . "@v" . "|" . "$v" . "|" . "$v[2]" } }
+print "a: ", MX::a(), "\n";
 ');
 test_transpile("container spanning: hash and array SLICES across the boundary", '
 my %sh = (a => 1, b => 2);

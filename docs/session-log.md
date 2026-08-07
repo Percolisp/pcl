@@ -4,6 +4,60 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 354 (2026-08-08, Opus 5) — M4 executed: the M-work is DONE; the three-population re-measure finds the board's last unnamed route
+
+M4 was the ruling's §1.6 "canonicalize the rename like the checker", and it
+had **two** bare-name sites, not one — clearing only the first moved the
+churn instead of removing it.
+
+1. **The declaration count.**  `_hard_decl_count($top, $bare)` ran in its
+   sigil-CONFLATED mode, so `my %mix` counted as a re-declaration of `$mix`
+   → `dc=2` → refuse → `_check_my_spanning` died → whole-file v1.  Now
+   `'$'`-exact.  Last conflated site in the pass: M-F had already blessed
+   family *uses* as safe here (Symbol rewrites key on `->symbol`; the `$x`
+   interp fixer skips `$x[`/`$x{`, which is also Perl-correct), so the
+   matching family *decl* had no business refusing.
+2. **The span test.**  `%spanning` is a bare-name TEXT pre-filter, so a
+   sibling `my @x` used in a later segment marked `x` spanning and the
+   scalar loop renamed `$x` although the scalar never crossed.  Measured:
+   that alone rewrote `do.t`/`method.t`/`sort.t` for nothing.  The scalar
+   loop now asks `_canon_refs_in` — the checker's own resolver, the same
+   shape as the container loop's SPANSCAN — in both the single- and
+   multi-instance paths.  One predicate now answers on both sides, which is
+   what makes "the rename never refuses a name the checker will die on"
+   true by construction rather than by coincidence.
+
+Probes: `$mix`/`%mix` native and equal to perl; `$v`+`@v` across a package
+boundary with `$v[1]`, `$#v`, `"@v"`, `"$v"`, `"$v[2]"`; `%w`+`$w` with
+slices; a later-package shadow `my $v`; a post-block write-through — all
+native, all byte-equal to perl.  corpus-diff 5/111 (`array.t` counter
+renumbering; `caller.t`/`eval.t` a `my` returning to a `let`, its eval alist
+carrying the let-bound box instead of a promoted global; `each.t`/`vec.t` a
+dropped forward-decl false positive) — and **all 8 files touched across both
+rounds re-swept identical to `docs/pass-baseline.tsv`**, row for row.
+Guards in `transpile-test-02.t`: the two stale "must REFUSE / still correct
+via the v1 fallback" descriptions rewritten (both lower natively now,
+assertions untouched) plus a new INVERSE guard row that `$v` and `@v` keep
+separate identities across the boundary.  Gen v2-110; both artifacts
+regenerated marker-only.
+
+**Then the three-population re-measure (handoff §3.3), and it is not all
+green.**  Pl/t: `131/4656 PASS`, 7 events = 5 DIE + the 2 deliberate -09
+inverse guards — clean.  Sweep: GATE clean, TOTAL 18498 = baseline (+0), 0
+new / 0 fixed, and **17 events against the blessed 18 — M1 absorbed the
+sweep's lone multi-switch**.  CPAN board (Moo + Role-Tiny): 35 events = 33
+DIE + 1 ruled multi-switch + **1 that no ruling names — `re-declaration of
+'ISA' after in-block our-alias` (`Parser2.pm:203`) on
+`Role-Tiny/t/subclass.t`** → **task #251, which blocks #242**.  It is
+pre-existing (verbatim at HEAD, untouched by M4) and subclass.t's row is
+identical to the s343 baseline, so nothing regressed — it is a route nobody
+had named.  Recorded alongside: Role-Tiny 21/23 rows identical, the 2
+changed both already blessed as gains at s346b; **Moo has no blessed
+baseline at all**, so its 28 PASS / 5 PARTIAL / 38 FAIL of 71 is a first
+measurement and not a comparison.  Census 111/111 v2-native, 0 gated.
+
+---
+
 ## Session 353c (2026-08-08, Fable) — M5 executed: the block static-variable idiom lowers natively; only M4 remains
 
 Commit `45b5e5f`; handoff doc §2b has the mechanism.  The stop-rule never

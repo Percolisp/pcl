@@ -2214,6 +2214,24 @@ sub _rename_spanning_lexicals {
     @inst = sort { $b->[0] <=> $a->[0] || $b->[1] <=> $a->[1] } @inst;
     @inst = ([$decl_seg{$bare}, undef, undef]) unless @inst;  # keep bare-name refusal traces
     my $multi = @inst > 1;
+    # CANON-exact span test for the SCALAR `$bare` (M4, s354).  %spanning is a
+    # bare-name TEXT pre-filter, so a sibling `my @x` used in a later segment
+    # marks `x` as spanning even when the scalar never crosses the boundary —
+    # and the loop below would then rename a variable the CHECKER
+    # (_check_my_spanning) never had a complaint about.  Ask the checker's own
+    # resolver instead: _canon_refs_in is the shared primitive that reads
+    # `$x[i]`/`$#x`/`"@x"` as the ARRAY and only `$x`/`"$x"` as the scalar
+    # (same shape as the container loop's SPANSCAN below).  Keeping the two in
+    # step is what makes "the rename never refuses a name the checker will die
+    # on" hold; the whole point of the pass.
+    my $scalar_spans = sub {
+      my ($lo, $up) = @_;
+      for my $j ($lo .. $up) {
+        return 1
+          if $self->_canon_refs_in($segments->[$j]{stmts}, { "\$$bare" => 1 })->{"\$$bare"};
+      }
+      return 0;
+    };
     # Multi-instance: if ANY instance spans, EVERY instance must be renamed —
     # a sibling left under the original name would (a) keep the spanning
     # instance's dc at 2 and (b) sit exposed to its qualified rewrite (it is
@@ -2226,10 +2244,7 @@ sub _rename_spanning_lexicals {
       my $any = 0;
       for my $in (@inst) {
         my $ihi = _blk_extent($segments, $in->[0]);
-        $any ||= grep {
-          my $txt = join "\n", map { $_->content } @{ $segments->[$_]{stmts} };
-          $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
-        } $in->[0] + 1 .. $ihi;
+        $any ||= $scalar_spans->($in->[0] + 1, $ihi);
         last if $any;
       }
       next unless $any;
@@ -2274,10 +2289,25 @@ sub _rename_spanning_lexicals {
     # decl form the shadow machinery cannot scope (a Compound head like
     # `foreach my $x`), refuses.
     my $hi = _blk_extent($segments, $di);
+    # Single instance: rename only if the SCALAR itself crosses (M4).  The
+    # multi case already answered this above, and there it is all-or-nothing —
+    # a sibling instance left under the original name would re-inflate the
+    # spanning one's decl count and sit exposed to its qualified rewrite.
+    next if !$multi && !$scalar_spans->($di + 1, $hi)
+      && $refuse->('scalar does not cross the boundary (canon)');
     my ($dc, $family, $interp, @sdecls) = (0, 0, 0);
     for my $j ($di .. $hi) {
       my $top = $segments->[$j]{stmts};
-      $dc     += $self->_hard_decl_count($top, $bare);
+      # CANON-exact (M4, s354): `my %mix` beside `my $mix` is a different
+      # variable and a different CL symbol — counting it as a re-declaration
+      # of `$mix` refused a rename that is not ambiguous at all.  This is the
+      # same canonical resolution _check_my_spanning already uses (->symbol),
+      # and the last conflated site in this pass: the M-F comment below
+      # already established that family USES are safe here (Symbol rewrites
+      # key on ->symbol; the `$x` interp fixer skips `$x[`/`$x{`), so the
+      # matching family DECL must not refuse either.  (The capture-promotion
+      # pass keeps its conflated count on purpose — see _promote_captured.)
+      $dc     += $self->_hard_decl_count($top, $bare, '$');
       $family ||= $csf->[$j]{family}{$bare};
       $interp ||= $csf->[$j]{interp}{$bare};
       push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }

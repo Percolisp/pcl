@@ -829,6 +829,31 @@ not-supported.md → only then probe.*
   `fable-answers-s352.md` §1.1).  s342c never measured `Pl/t/`, which hid 27
   gate routes — 15 of them Moo/Sub::Quote — behind a "ZERO events" ruling.
   Gate families M1–M6 = tasks #247/#248, all pre-flip, order M3→M6→M2→M1→M4→M5.
+  **All six SHIPPED (M3/M6/M2/M1 s353, M5 s353c, M4 s354): the Pl/t gate is at
+  ZERO unaccounted TODO events** — the 2 that remain are the DELIBERATE
+  inverse-guard rows in `transpile-test-09.t` (M1-predicate refusals, on
+  #242's step-2 rephrase list), and 5 DIE-class events are v2 correctly
+  reporting a perl error (exempt, they self-resolve at the flip).
+- **Three-population zero is TWO-THIRDS met, not met (s354).**  Pl/t clean
+  (above); the sweep clean at 17 events, all named, and **one BETTER than
+  the blessed 18** — M1's widened collapse absorbed the sweep's lone
+  multi-switch event.  The **CPAN board is NOT**: one TODO family,
+  `re-declaration of 'ISA' after in-block our-alias` (`Parser2.pm:203`) on
+  `Role-Tiny/t/subclass.t`, is named by no ruling → **task #251**, which
+  blocks #242.  Pre-existing (verbatim at HEAD) and its board row is
+  identical to the s343 baseline, so it is an unnamed route, not a
+  regression.  Also recorded there: **the board has no blessed Moo
+  baseline** — `docs/cpan-board14-s343.tsv` covers Role-Tiny but not Moo.
+- **The spanning-lexical RENAME resolves variables canonically, exactly like
+  the CHECKER** (M4, s354, `Parser2.pm` `_rename_spanning_lexicals`).  Two
+  sites had stayed bare-name: the declaration count (so `my %mix` beside
+  `my $mix` read as a re-declaration of `$mix` and refused → the checker then
+  died → whole-file v1), and the span test itself (so a sibling `my @x` used
+  in a later segment promoted `$x` gratuitously).  Both now go through
+  `->symbol` / `_canon_refs_in` — the invariant being kept is *the rename
+  never refuses a name the checker will die on*, and the pass must not rename
+  one it won't.  Family USES were already blessed as safe here by M-F; the
+  matching family DECL simply had not followed.
 - **Sub::Quote's `my …; my …; package X;` eval shape collapses via a WHITELIST
   leading-`my` predicate on #226's collapse — never general multi-section
   assembly** (RULED s353, `fable-answers-s352.md` §1.2): accept only
