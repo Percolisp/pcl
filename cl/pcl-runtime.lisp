@@ -8132,40 +8132,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; $x__lex__N and also invisible. See docs/eval-string-plan.md.
 ;;;
 ;;; $@ format: omits " at (eval N) line M." — documented in not-supported.md.
-;;; TEMPORARY INSTRUMENTATION (#240 step 2 measurement, RULED s349 §2d.1).
-;;; Every MISS of the capture alist — the path that resolves a string eval's
-;;; free name against a package symbol — appends one line to the file named by
-;;; PCL_EVAL_LEX_MISS_LOG.  The question it answers: which names actually reach
-;;; the package-resolution path, and in which package do they land today, so
-;;; the region-package binding's blast radius is measured rather than assumed.
-;;; DELETE THIS with the step-2 commit.  getenv is re-read per event on
-;;; purpose: a cached value would be frozen into a saved core.
-(defun %p-eval-lex-miss-audit (name sym)
-  (let ((log (sb-posix:getenv "PCL_EVAL_LEX_MISS_LOG")))
-    (when log
-      (ignore-errors
-        (with-open-file (s log :direction :output :if-exists :append
-                           :if-does-not-exist :create)
-          (format s "~a~c~a~c~a~c~a~c~a~%"
-                  name #\Tab
-                  (package-name *package*) #\Tab
-                  *pcl-current-package* #\Tab
-                  (if (boundp sym) "bound" "autoviv") #\Tab
-                  (length *p-eval-lex-alist*)))))))
-
 (defun p-eval-lex-lookup (name)
   "Resolve a free variable NAME (e.g. \"$captured\") referenced inside a string
    eval to the container the eval body should bind it to:
      - the caller's in-scope lexical, if codegen passed it in *p-eval-lex-alist*;
      - otherwise the real package global (when the symbol is already bound),
        so `our`/top-level vars still read/write correctly;
-     - otherwise a fresh undef container (Perl auto-vivifies the global as undef)."
+     - otherwise a fresh undef container (Perl auto-vivifies the global as undef).
+   The package an unqualified name resolves in is *package*, which p-eval-thunk
+   binds to the eval's REGION package for a `package X; …` eval (#240 step 2)
+   and otherwise leaves as the caller's — perl's rule either way."
   (let ((cell (assoc name *p-eval-lex-alist* :test #'string=)))
     (cond
       (cell (cdr cell))
       (t (let ((sym (intern (%pcl-invert-case name) *package*))
                (sigil (char name 0)))
-           (%p-eval-lex-miss-audit name sym)
            (if (boundp sym)
                (symbol-value sym)
                ;; Autovivify the package global (Perl semantics), INSTALLING the
@@ -8179,12 +8160,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                        ((char= sigil #\%) (make-hash-table :test 'equal))
                        (t (make-p-box nil))))))))))
 
-(defun p-eval-thunk (free-names fn)
+(defun %p-eval-region-package (designator)
+  "Find-or-create the CL package for a string eval's `package X;` region.
+   Same convention as the (setf %p-symref-box) arm — a package Perl code names
+   into existence uses :cl and :pcl, so the runtime's symbols are visible in it.
+   DESIGNATOR is the emitter's _cl_pkg_designator spelling, so this never
+   re-derives the perl-name → CL-name rule."
+  (or (find-package designator)
+      (make-package designator :use '(:cl :pcl))))
+
+(defun p-eval-thunk (free-names fn &optional region-pkg)
   "Apply FN (the lambda wrapping a string-eval body) to the containers for its
    free variables FREE-NAMES, looked up via p-eval-lex-lookup.  The lambda's
    parameters are those same variables, so the eval body — and any closure it
-   builds — references them as ordinary lexicals."
-  (apply fn (mapcar #'p-eval-lex-lookup free-names)))
+   builds — references them as ordinary lexicals.
+   REGION-PKG (#240 step 2) is passed only for an eval whose body is one
+   `package X; …` region: perl says the current package inside it is X, so
+   *package* is bound to X's CL package around BOTH the free-name resolution
+   and the body.  That is what makes an unqualified package global land in X —
+   the lookup's miss path, %p-symref-box and its siblings, p-use's import
+   target, p-bless's default class and the symbolic-funcall resolvers all read
+   *package* for exactly this question.  The eval TEXT was already read in the
+   caller's package, so the lambda's own symbols are unaffected."
+  (if region-pkg
+      (let ((*package* (%p-eval-region-package region-pkg)))
+        (apply fn (mapcar #'p-eval-lex-lookup free-names)))
+      (apply fn (mapcar #'p-eval-lex-lookup free-names))))
 
 (defun p-eval (string &optional lex-alist)
   "Perl eval(STRING): transpile and evaluate a Perl string at runtime.

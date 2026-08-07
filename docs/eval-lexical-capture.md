@@ -87,7 +87,19 @@ plain `(p-eval STRING)`.
 
 - `*p-eval-lex-alist*` — dynamic var holding the caller's `(name . container)`
   alist; `p-eval` binds it.
-- `p-eval-thunk (free-names fn)` — `(apply fn (mapcar #'p-eval-lex-lookup free-names))`.
+- `p-eval-thunk (free-names fn &optional region-pkg)` —
+  `(apply fn (mapcar #'p-eval-lex-lookup free-names))`, with `*package*` bound
+  to REGION-PKG for the extent when it is given.  The emitter passes it (as
+  `_cl_pkg_designator`'s spelling) for an eval whose whole body is one
+  `package X; …` region — #226's collapse — and only then; the thunk is
+  emitted in that case even with an empty free-name list, because the binding
+  matters most to the BODY.  Perl says the current package inside the region
+  IS X, and every unqualified-name resolution in the runtime (stop 2/3 below,
+  `%p-symref-box` and siblings, `p-use`'s import target, `p-bless`'s empty
+  class, the symbolic funcall/coderef resolvers) reads `*package*` to answer
+  it.  Without the binding all of them answered "the caller" — #240, a silent
+  wrong in three spellings (bare write, bare read satisfied by the caller's
+  global, `our` declared-then-read-back), closed in s351.
 - `p-eval-lex-lookup (name)` resolves each free var to:
   1. the caller's lexical, if present in `*p-eval-lex-alist*`;
   2. else the real package global (when the interned symbol is `boundp`) — so

@@ -4,6 +4,65 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 351 (2026-08-07, Opus) — #240 step 2: `p-eval-thunk` binds `*package*` to the eval's region package; #240 CLOSED, E4.1 pre-work done
+
+Last item of the s349 queue (`docs/fable-answers-s348.md` §4).  Mechanism was
+ruled s349 §2c and measured s350; this session implements it, deletes the
+step-1 gate and all three instruments, and closes #240.
+
+**The fix, in one sentence.**  `p-eval-thunk` gains an optional third
+argument — the region's CL package designator, emitted only by the #226
+collapse — and binds `*package*` to that package around BOTH the free-name
+resolution and the body.  `p-eval-lex-lookup` is unchanged: its miss path
+already interns in `*package*`.  So do `%p-symref-box` and its array/hash
+siblings, `p-use`'s default import target, `p-bless`'s empty class and the
+symbolic funcall/coderef resolvers — thirteen sites, all asking the same
+"unqualified → current package" question, and inside a `package X;` region
+perl's answer is X.
+
+**All three spellings of the silent-wrong close together**, which is why the
+ruling refused a `p-eval-lex-lookup`-only patch: a bare write
+(`eval 'package F2; $Zz = 5; 1'` → `$F2::Zz`, was `$main::Zz`), a bare read
+that must NOT see the caller's global (`$main::G9 = 9; eval 'package X9; $G9'`
+→ undef, was 9), and the `our` declared-then-read-back the s346 gate existed
+for (`package F1; our $Z = 5; $Z * 2` → 10, was a v1 retry).  The D2 case the
+s349 review flagged as a regression risk for the lookup-only variant is right
+on both axes now: `package D2; $W = 7; my $n = "W"; ${$n}` gives 7 AND leaves
+7 in `$D2::W`.  Ten-row acceptance battery run against perl: identical.
+
+**The thunk is now emitted whenever a region package is present**, even with
+an empty free-name list — s350 §3a.2's finding that such a region emitted no
+thunk at all, so the binding had nowhere to hang.  That is the s350 §6 probe
+cashed in: forcing the wrap over 48 region-heavy files was row-identical, so
+one mechanism covers both shapes.
+
+**Deleted in the same commit**: `_eval_region_our_readback` and its
+`Cast`+`Block` arm, `_block_captures_name`'s `our_targets` option (the gate
+was its only consumer), and the three s350 instruments
+(`PCL_EVAL_LEX_MISS_LOG`, `PCL_EVAL_REGION_LOG`, `PCL_EVAL_REGION_WRAP`).  A
+single-region eval refuses NOTHING now; only the multi-switch shape is still
+refused, keeping its `Parser2 TODO:` prefix until the E4.1 step-2 commit —
+**so that commit's rephrase list is down to multi-switch + F6.**
+
+**Guards.**  Values: `Pl/t/transpile-test-09.t` "eval package-region:
+unqualified names resolve in X", 10 assertions against the perl oracle (file
+wall time unchanged at ~26 s).  Shape: `Pl/t/parser2-02.t`, including the
+INVERSE guard that a region-LESS eval gets no region argument, and that a
+no-free-names region still gets the thunk.
+
+**Measured.**  Gate **131 files / 4652 tests, PASS** (`tools/prove-core`).  File-mode emission byte-identical across all
+111 corpus files, so no cache-generation bump (eval transpiles are in-memory
+only).  Full cold-ish sweep: **GATE clean** — 0 new / 0 fixed, TOTAL
+passing 18498 = baseline (+0), 64 fully passing, min MemAvailable 4.5 GB; the
+2 UNSTABLE / 4 unverified rows are the standing postfixderef.t / ref.t / tr.t
+crash-file noise.  14-dist CPAN board: **identical to the s350 run** — the
+same 4 rows differ from `docs/cpan-board14-s343.tsv` (140-lvalue 4/3→6/3,
+role-basic-composition 8/0→10/3, role-basic-exceptions 2/0→4/0, reduce
+21/11→23/9), all GAINS, all pre-existing (#208 drift + the s346b "read ROWS
+not labels" case).
+
+---
+
 ## Session 350 (2026-08-07, Opus) — #230 CLOSED by measurement: F6 is a tr.t eval string; the #240 step-2 instrumentation, run
 
 Two measurement items, **no behaviour change**.  Full write-up:

@@ -687,29 +687,21 @@ sub parse {
   # unqualified — leaving them in the statement stream lets _lower_block's
   # nested-sub hoist name them through _sub_name_for_emission.
   #
-  # ONE SHAPE STAYS REFUSED (measured s346, not a guess): an `our` DECLARED in
-  # the region and read back UNQUALIFIED inside it.  `_lower_our_decl`'s
-  # qualify branch makes the WRITE `F1::$Z` and registers the name, and v1's
-  # emitter re-reads it qualified (ExprToCL.pm ~900 "Qualify `our` variables")
-  # — but v2's NATIVE emitter (ExprToCL2) has no such branch, so the read
-  # emits a bare `$Z`, which the eval-mode free-var scan has ALSO made a
-  # p-eval-thunk parameter bound to the CALLER's `$Z`.  Probed:
-  # `eval 'package F1; our $Z = 5; $Z * 2'` → 0, perl 10, while
-  # `$F1::Z * 2` in the same eval is correct.  That is a SILENT WRONG — the
-  # same class the s342g attempt was reverted for — so it keeps the v1 retry
-  # until the emitter gap is closed (task #240 step 2).
-  # #240 step 1 (RULED s347 §1.2): that refusal is DECLARE-THEN-USE only.  The
-  # s346 gate refused ANY `our` in the region, which also refused the routine
-  # WRITE-ONLY idiom (`eval 'package Foo; our $VERSION = "1.25"; 1'`,
-  # `our @ISA = ("Exporter")`) — correct today through the v1 retry, a
-  # user-visible die after the E4.1 flip.  A write-only `our` has no read to
-  # mis-resolve: the qualified WRITE is the whole statement (probed s346), so
-  # it goes through the collapse.
+  # NOTHING IS REFUSED HERE ANY MORE (#240 step 2, RULED s349 §2c).  Two
+  # shapes used to keep the v1 retry, and both were the SAME bug seen from
+  # two sides: an unqualified name inside the region resolved in the CALLER's
+  # package.  `_lower_our_decl`'s qualify branch writes `F1::$Z` while the
+  # read emits a bare `$Z` that eval mode's free-var scan bound to the
+  # caller's container (`eval 'package F1; our $Z = 5; $Z * 2'` → 0, perl
+  # 10); and a symbolic deref (`${$n}`) interned its runtime name in
+  # `*package*`, the caller again.  p-eval-thunk now binds `*package*` to the
+  # region package around the free-name resolution and the body, so both
+  # spellings — and the wider hole the s348 gate could not cover at all
+  # (`eval 'package F2; $Zz = 5; 1'` setting `$main::Zz`) — resolve in X.
   if ($self->eval_mode && @segments == 2
       && !@{ $segments[0]{stmts} }
       && $segments[1]{pkg_stmt} && !$segments[1]{blockform}
-      && !defined $segments[1]{version}
-      && !$self->_eval_region_our_readback($doc, $segments[1]{stmts})) {
+      && !defined $segments[1]{version}) {
     $self->{_eval_pkg_stmt} = $segments[1]{pkg_stmt};
     @segments = ({ pkg => $root_pkg, reopen => 0, eval_pkg_region => 1,
                    stmts => [ $segments[1]{pkg_stmt}, @{ $segments[1]{stmts} } ] });
@@ -894,6 +886,7 @@ sub parse {
     # #226: collector for the eval region's leading-package enter forms — see
     # the hoist in _lower_block's Statement::Package branch.
     $self->{_eval_pkg_enter} = $seg->{eval_pkg_region} ? [] : undef;
+    $self->{_eval_pkg_enter_cl} = undef;
     # Named subs + Scheduled blocks of this segment — the embedded-my
     # let-hoist consults these (a sub referencing the name vetoes the hoist).
     {
@@ -1019,6 +1012,10 @@ sub parse {
       # of the eval BODY, ahead of the defs/sched interleave.
       pkg_enter => [map { Pl::CLForm::to_string($_, 0) }
                     @{ $self->{_eval_pkg_enter} // [] }],
+      # #240 step 2: the region's CL package designator, recorded where the
+      # enter forms were built (never derived a second time) — see
+      # _assemble_eval_mode's p-eval-thunk argument.
+      pkg_enter_cl => $self->{_eval_pkg_enter_cl},
       # Source positions parallel to defs/sched — the #55 interleave assembly
       # merges the two streams by these (perl compiles subs and runs BEGIN
       # blocks in source order; a BEGIN must not see a sub defined below it).
@@ -1732,15 +1729,8 @@ sub _check_sub_captures {
 # single-quoted '$x…' no longer gates a file whose only lexical is @x (my.t).
 # Whitespace is allowed before the subscript bracket: interpolation never has
 # it, but eval-fed single-quoted code can — over-fire keeps the gate (safe).
-# $opts->{our_targets} (#240 step 1): also treat an `our` declaration's target
-# symbols as declaration tokens rather than uses — but NEVER as shadows.  That
-# is the difference the eval-region gate needs: `our $V = 1` alone is a WRITE
-# (no use), while `our $V = 1; … $V …` is the declare-then-use read-back.  A
-# `my`/`state` decl still shadows later uses; an `our` decl re-declares the
-# same package variable, so a later use is a genuine use of it.
 sub _block_captures_name {
-  my ($self, $block, $bare, $canons, $opts) = @_;
-  $opts //= {};
+  my ($self, $block, $bare, $canons) = @_;
   my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
   # Per-CANON text patterns, so a string/heredoc/regex mention can be
   # attributed to one canonical variable and shadow-checked like a Symbol
@@ -1783,10 +1773,8 @@ sub _block_captures_name {
   $ord{ refaddr $_ } = $i++ for $block->tokens;
   for my $d (@{ $block->find('PPI::Statement::Variable') || [] }) {
     my @k = _strip_semi($d->schildren);
-    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word');
-    my $our = $k[0]->content eq 'our';
-    next unless $k[0]->content =~ /^(?:my|state)$/
-      || ($our && $opts->{our_targets});
+    next unless @k >= 2 && $k[0]->isa('PPI::Token::Word')
+      && $k[0]->content =~ /^(?:my|state)$/;
     my @tgt = $k[1]->isa('PPI::Token::Symbol')   ? ($k[1])
             : $k[1]->isa('PPI::Structure::List')
               ? (grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1])
@@ -1795,7 +1783,6 @@ sub _block_captures_name {
     for my $t (@tgt) {
       next unless substr($t->content, 1) eq $bare;
       $decl_tok{ refaddr $t } = 1;
-      next if $our;                     # a declaration, but never a shadow
       push @{ $decl{ $t->content } }, [$d, $last];
     }
   }
@@ -1845,49 +1832,6 @@ sub _block_captures_name {
   return 0;
 }
 
-# #240 step 1 — the DECLARE-THEN-USE half of the eval-region `our` gate
-# (RULED s347 §1.2).  True iff some name the region DECLARES with `our` is
-# also USED in it: that read (or later write) emits a bare `$Z` from v2's
-# native emitter while `_lower_our_decl` qualified the declaration's write to
-# `X::$Z`, and eval mode's free-var scan has bound the bare name to the
-# CALLER's `$Z` — silently wrong (measured s346), so the whole eval keeps the
-# v1 retry.  A WRITE-ONLY `our` (`our $VERSION = "1.25";`, `our @ISA = (…)`)
-# has no such read and lowers correctly, so it must NOT gate.
-# The scan is _block_captures_name's, with our_targets: same sigil-exact
-# canons, same shadow rule (an inner `my $Z` owns its uses), same
-# string/regex/heredoc conservatism (interpolation reads the name too).
-sub _eval_region_our_readback {
-  my ($self, $doc, $stmts) = @_;
-  my %canon;
-  for my $st (@$stmts) {
-    for my $d (($st->isa('PPI::Statement::Variable') ? ($st) : ()),
-               @{ $st->find('PPI::Statement::Variable') || [] }) {
-      my @k = _strip_semi($d->schildren);
-      next unless @k && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our';
-      $canon{$_} = 1 for $self->_declared_names($d);
-    }
-  }
-  return 0 unless %canon;
-  # A SYMBOLIC deref (`${$n}`, `@{"$c\::ISA"}`) reads its name at RUNTIME, so no
-  # token scan can attribute it to a canon.  `%p-symref-box` and its siblings
-  # intern an UNQUALIFIED name in `*package*` — the CALLER's CL package, since
-  # the eval body is read there — while `_lower_our_decl` qualified the region's
-  # `our` write to `X::$Z`.  Probed: `eval 'package D1; our $Z = 5; my $n = "Z";
-  # ${$n}'` → undef, perl 5.  Only the region's `our` names make the two
-  # disagree (an unqualified global is wrong in the same place both times, which
-  # is #240's wider residue, not this gate's), so this arm costs nothing when
-  # the region declares none — hence the early-out above.
-  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
-    my $nx = $cast->snext_sibling;
-    return 1 if $nx && $nx->isa('PPI::Structure::Block');
-  }
-  for my $c (sort keys %canon) {
-    (my $bare = $c) =~ s/^[\$\@\%]//;
-    return 1 if $self->_block_captures_name($doc, $bare, { $c => 1 },
-                                            { our_targets => 1 });
-  }
-  return 0;
-}
 
 # Shared fact scan for the W5/W10 lexical-rename passes.  Accumulates into
 # $f (so callers can scan one segment or the whole file):
@@ -3947,36 +3891,27 @@ sub _assemble_eval_mode {
   my @out = ('(in-package :pcl)', '', grep { length } @head);
   push @out, '' if @head;
   my @names = sort keys %free;
-  # TEMPORARY INSTRUMENTATION (#240 step 2 measurement, RULED s349 §2d.1).
-  # The runtime miss-path log cannot say whether a REGION package is in effect
-  # — nothing establishes one at lookup time today, which is the bug.  So the
-  # emitter records the other half: every #226 collapse event, with the region
-  # package and the free names that will reach p-eval-lex-lookup under it.
-  # DELETE THIS with the step-2 commit.
-  if (my $log = $ENV{PCL_EVAL_REGION_LOG}) {
-    if ($self->{_eval_pkg_enter}) {
-      my $pkg = eval { $self->{_eval_pkg_stmt}->namespace } // '?';
-      if (open my $fh, '>>', $log) {
-        print $fh join("\t", $pkg, scalar(@names), join(' ', @names)), "\n";
-        close $fh;
-      }
-    }
-  }
-  # TEMPORARY PROBE (#240 step 2, s350): the ruled binding must also cover a
-  # region with NO free names, which today emits no thunk at all — so the body
-  # would have to be wrapped.  Wrapping is exactly what _cap_inlining_if_huge
-  # refuses to do to eval-when/p-sub/defvar/p-defpackage (it strips top-level-
-  # ness and breaks compile-time visibility), and an eval region emits all
-  # four.  PCL_EVAL_REGION_WRAP=1 forces the wrap so the cost can be MEASURED
-  # before step 2 commits to a mechanism.  DELETE THIS with the step-2 commit.
-  my $force_wrap = $ENV{PCL_EVAL_REGION_WRAP} && $self->{_eval_pkg_enter};
-  if (@names || $force_wrap) {
+  # #240 step 2 (RULED s349 §2c): a `package X; …` eval region runs with X as
+  # the current package, so p-eval-thunk binds *package* to X around BOTH the
+  # free-name resolution and the body — which is what makes an unqualified
+  # global land in X (the lookup's miss path, %p-symref-box, p-use's import
+  # target, p-bless's default class all ask *package* for exactly that).
+  # The thunk is therefore emitted whenever a region package is present, even
+  # with NO free names: the body is where the binding does most of its work,
+  # and an empty parameter list is the only difference.  Measured s350
+  # (docs/eval-region-measurements-s350.md §6): forcing the wrap over
+  # Role-Tiny + Class-Method-Modifiers + Try-Tiny, 48 files, is row-identical
+  # — the _cap_inlining_if_huge no-wrap rule is about FILE-mode top-level
+  # forms (an eval-when that a later BEGIN must see at compile-file time), and
+  # eval mode has no compile-file phase to lose.
+  my $region_cl = $sec->{pkg_enter_cl};
+  if (@names || defined $region_cl) {
     my $names_str = join(' ', map { "\"$_\"" } @names);
     my $params    = join(' ', @names);
     push @out, "(pcl:p-eval-thunk (list $names_str)",
                " (lambda ($params)",
                @body,
-               " ))";
+               defined $region_cl ? " ) $region_cl)" : " ))";
   } else {
     push @out, @body;
   }
@@ -5090,6 +5025,12 @@ sub _lower_block {
     if ($self->{_eval_pkg_enter} && $self->{_eval_pkg_stmt}
         && $first == $self->{_eval_pkg_stmt}) {
       push @{ $self->{_eval_pkg_enter} }, @enter;
+      # #240 step 2: p-eval-thunk binds *package* to X around the free-name
+      # resolution AND the body, so an unqualified package global inside the
+      # region resolves in X the way perl says it does.  The designator is
+      # $cl_pkg — the same spelling the enter forms use — recorded rather than
+      # re-derived at assembly time.
+      $self->{_eval_pkg_enter_cl} = $cl_pkg;
       $env->push_package($pkg);
       my @rest_only = $self->_lower_block(\@rest, $vi, $tail_ctx);
       $env->pop_package;

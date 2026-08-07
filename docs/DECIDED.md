@@ -1136,3 +1136,42 @@ mode has no compile-file phase to lose — `p-eval` reads/evals form by form and
 the region's defs are already hoisted inside the one eval'd unit; the
 `_cap_inlining_if_huge` prohibition is about FILE-mode top-level forms.
 Third instrument to delete with step 2: `PCL_EVAL_REGION_WRAP`.
+
+## s351 (2026-08-07, Opus) — #240 step 2 SHIPPED: `p-eval-thunk` binds `*package*` to the region package; #240 CLOSED
+
+Mechanism ruled s349 §2c, measured s350, implemented here.  The whole of
+E4.1's pre-work is now done.
+
+- **`p-eval-thunk (free-names fn &optional region-pkg)`.**  When REGION-PKG is
+  given it binds `*package*` to that CL package (find-or-create with
+  `:use '(:cl :pcl)` — the `(setf %p-symref-box)` convention) around BOTH the
+  free-name resolution and the body.  `p-eval-lex-lookup` is UNCHANGED: its
+  miss path already interns in `*package*`.  Normative text:
+  `docs/ir-spec.md` §string eval piece 2, `docs/eval-lexical-capture.md` §3.
+- **The emitter passes it only from the #226 collapse** (`_assemble_eval_mode`),
+  as `_cl_pkg_designator`'s spelling, recorded where the enter forms are built
+  (`_lower_block`'s Statement::Package branch) so the perl-name → CL-name rule
+  is never derived twice.  **The thunk is emitted whenever a region package is
+  present, even with an empty free-name list** — the s350 §6 forced-wrap probe
+  measured that shape as row-identical over 48 region-heavy files first.
+- **All three spellings of #240 are closed** and agree with perl: a bare write
+  (`eval 'package F2; $Zz = 5; 1'` → `$F2::Zz`, not `$main::Zz`), a bare read
+  that must NOT see the caller's global (`$main::G9 = 9; eval 'package X9;
+  $G9'` → undef), and `our` declared-then-read-back (`package F1; our $Z = 5;
+  $Z * 2` → 10).  The D2 regression the s349 review predicted for a
+  lookup-only fix does not occur: value AND package slot are both right.
+- **The step-1 gate is DELETED** — `_eval_region_our_readback`, its
+  `Cast`+`Block` arm, and `_block_captures_name`'s `our_targets` option (the
+  gate was its only consumer) are gone; a single-region eval now refuses
+  NOTHING.  Only the multi-switch shape (two `package` statements in one eval)
+  is still refused, and it keeps its `Parser2 TODO:` prefix until the E4.1
+  step-2 commit.
+- **All three s350 instruments are deleted**: `PCL_EVAL_LEX_MISS_LOG`,
+  `PCL_EVAL_REGION_LOG`, `PCL_EVAL_REGION_WRAP`.
+- Guards: `Pl/t/transpile-test-09.t` "eval package-region: unqualified names
+  resolve in X" (10 assertions against the perl oracle) for the VALUES;
+  `Pl/t/parser2-02.t` for the shape, including the INVERSE guard that a
+  region-less eval gets NO region argument.
+- **No cache-generation bump**: file-mode emission is byte-identical across
+  all 111 corpus files (`tools/corpus-diff.pl`), and eval transpiles are
+  in-memory only (`*p-eval-string-cache*`).

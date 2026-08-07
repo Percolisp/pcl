@@ -275,47 +275,42 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   # is still :pcl (v1's existing `:into` branch, fed by the seam).
   like($u // '', qr/:into "X2"/, '#226: the region\'s `use` imports :into X');
 
-  # STILL REFUSED (silent-wrong otherwise, s346): an `our` declared in the
-  # region and read back UNQUALIFIED — v2's native emitter has no equivalent of
-  # v1's "Qualify `our` variables" branch, so the read would take the caller's
-  # value.  Task #240 step 2.  When that is fixed this assertion flips.
+  # #240 step 2 (RULED s349 §2c): NOTHING in a single-region eval is refused
+  # any more.  The three shapes that used to gate (or to be silently wrong)
+  # were one bug — an unqualified name inside the region resolved in the
+  # CALLER's package — and p-eval-thunk's region-package argument binds
+  # *package* to X around both the free-name resolution and the body.  These
+  # rows assert the MECHANISM; the VALUES are Pl/t/transpile-test-09.t's
+  # 'eval package-region: unqualified names resolve in X' row, against perl.
   my $o = eval { Pl::Parser2->parse_code(q{package X3; our $Z = 5; $Z * 2},
                                          eval_mode => 1, eval_pkg => 'main') };
-  like($@, qr/eval-mode multi-segment/,
-       '#226 residue: an `our` READ BACK keeps the v1 retry (task #240 step 2)');
-
-  # #240 step 1 (RULED s347 §1.2): that refusal is DECLARE-THEN-USE only.  The
-  # s346 gate refused ANY `our`, including the routine WRITE-ONLY module idiom —
-  # correct today via the v1 retry, a user-visible die after the E4.1 flip.
-  # These two are the ruling's acceptance probes.
+  ok(defined $o, '#240 step 2: an `our` READ BACK collapses natively') or diag($@);
+  like($o // '', qr/p-eval-thunk \(list "\$Z"\)[\s\S]*\) :X3\)/,
+       '#240 step 2: the thunk carries the region package designator');
+  # INVERSE guard: the region package must not leak into an eval that has NO
+  # region — there *package* stays the caller's, which is what perl says.
+  my $nr = Pl::Parser2->parse_code(q{my $qq; $qq + 1},
+                                   eval_mode => 1, eval_pkg => 'main');
+  unlike($nr, qr/p-eval-thunk[\s\S]*\) :\w+\)/,
+         '#240 step 2: a region-less eval gets NO region argument');
+  # A region with NO free names emits the thunk anyway — the binding's main
+  # job is the BODY (a `use`, a bare sub install, a symbolic write), and that
+  # shape is the board's dominant one (s350 §2b: 108 region events).
+  my $nf = eval { Pl::Parser2->parse_code(q{package X9; sub f { 1 } 1},
+                                          eval_mode => 1, eval_pkg => 'main') };
+  like($nf // '', qr/p-eval-thunk \(list \)[\s\S]*\) :X9\)/,
+       '#240 step 2: a region with no free names still gets the thunk + X') or diag($@);
+  # Write-only `our`, a later WRITE of an `our` name, and a symbolic deref in
+  # an `our` region: all three were s348 gate rows, all now native.
   for my $w (q{package X4; our $VERSION = "1.25"; 1},
-             q{package X5; our @ISA = ("Exporter"); 1}) {
+             q{package X5; our @ISA = ("Exporter"); 1},
+             q{package X6; our $Z; $Z = 5; 1},
+             q{package X7; our $Z = 5; my $n = "Z"; ${$n}},
+             q{package X8; my $n = "Z"; ${$n}}) {
     my $ok = eval { Pl::Parser2->parse_code($w, eval_mode => 1,
                                             eval_pkg => 'main') };
-    ok(defined $ok, "#240 step 1: write-only `our` collapses natively [$w]")
-      or diag($@);
+    ok(defined $ok, "#240 step 2: collapses natively [$w]") or diag($@);
   }
-  # A WRITE is a use too: `our $Z; $Z = 5` re-binds the same wrong container.
-  eval { Pl::Parser2->parse_code(q{package X6; our $Z; $Z = 5; 1},
-                                 eval_mode => 1, eval_pkg => 'main') };
-  like($@, qr/eval-mode multi-segment/,
-       '#240 step 1: a later WRITE of the `our` name gates too');
-  # A SYMBOLIC deref can name the `our` variable without a sigil, so no token
-  # scan can see it; `%p-symref-box` interns unqualified names in the CALLER's
-  # package while the `our` write was qualified into X.  Probed:
-  # `eval 'package D1; our $Z = 5; my $n = "Z"; ${$n}'` → undef, perl 5.
-  eval { Pl::Parser2->parse_code(
-           q{package X7; our $Z = 5; my $n = "Z"; ${$n}},
-           eval_mode => 1, eval_pkg => 'main') };
-  like($@, qr/eval-mode multi-segment/,
-       '#240 step 1: an `our` region containing a symbolic deref gates');
-  # ... and a symbolic deref WITHOUT an `our` in the region does not (it is the
-  # unqualified-global residue, wrong in the same place both times — #240's
-  # wider hole, unchanged here and measured to have zero live events).
-  my $sym = eval { Pl::Parser2->parse_code(q{package X8; my $n = "Z"; ${$n}},
-                                           eval_mode => 1, eval_pkg => 'main') };
-  ok(defined $sym, '#240 step 1: a symbolic deref alone does not gate')
-    or diag($@);
 
   # The multi-switch shape stays refused (zero measured events).
   eval { Pl::Parser2->parse_code(q{package A1; sub a {1} package B1; sub b {2} 1},

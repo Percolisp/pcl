@@ -444,4 +444,36 @@ my @nonum = getprotobynumber(60000);
 print "10 nonum-count=", scalar(@nonum), "\n";
 ');
 
+# #240 step 2 (s351): inside `eval "package X; …"` an UNQUALIFIED name belongs
+# to X, not to the caller.  p-eval-thunk binds *package* to X around the free-
+# name resolution AND the body, so all three spellings agree with perl: a bare
+# write (1), a bare read that must NOT see the caller's global (2), an `our`
+# declared-then-read-back (3/4), and a symbolic deref, whose value AND package
+# slot both have to land in X (5).  6-7 are the INVERSE guards — the caller's
+# lexical still wins over the region package, and the capture the parser must
+# never refuse still closes.  Shape guards live in Pl/t/parser2-02.t.
+test_transpile("eval package-region: unqualified names resolve in X", q{
+eval 'package F2; $Zz = 5; 1' or die $@;
+print "1 ", (defined ${'F2::Zz'} ? ${'F2::Zz'} : 'undef'),
+      " / ", (defined ${'main::Zz'} ? ${'main::Zz'} : 'undef'), "\n";
+$main::G9 = 9;
+my $g9 = eval 'package X9; $G9';
+print "2 ", (defined $g9 ? $g9 : 'undef'), "\n";
+print "3 ", eval 'package F1; our $Z = 5; $Z * 2', "\n";
+print "4 ", eval 'package D1; our $Z = 5; my $n = "Z"; ${$n}', "\n";
+my $d2 = eval 'package D2; $W = 7; my $n = "W"; ${$n}';
+print "5 ", $d2, " / ", (defined ${'D2::W'} ? ${'D2::W'} : 'undef'), "\n";
+my $q = 5;
+print "6 ", eval 'package X8; $q + 1', "\n";
+my $x = 5;
+eval 'package Cap; sub f { $x } 1' or die $@;
+print "7 ", Cap::f() * 11, "\n";
+eval 'package X10; $S = 3; 1' or die $@;
+print "8 ", eval 'package X10; $S', "\n";
+eval 'package V1; our $VERSION = "1.25"; our @ISA = ("Exporter"); 1' or die $@;
+print "9 ", ${'V1::VERSION'}, " / ", join(',', @{'V1::ISA'}), "\n";
+my $o = eval 'package B7; sub mk { bless {} } mk()';
+print "10 ", ref($o), "\n";
+});
+
 done_testing();

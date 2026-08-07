@@ -261,8 +261,25 @@ release checks surface divergences, triage those first, per
 >   are rephrased perl-shaped (`PCL: unsupported in string eval: …`) in that
 >   same commit (§5a.3).
 >
-> **Pre-work order (s347 ruling): ~~#78~~ → ~~#226~~ → ~~#240 step 1~~ → #230
-> (F6 locate + fix-or-rule) → steps 1–4 below.**
+> **Pre-work order: ~~#78~~ → ~~#226~~ → ~~#240 step 1~~ → ~~#230~~ →
+> ~~#240 step 2~~ → steps 1–4 below.  ALL PRE-WORK IS DONE (s351).**
+>
+> **#240 step 2 is DONE (s351) and #240 is CLOSED.**  `p-eval-thunk` takes an
+> optional region-package designator, emitted by the #226 collapse (and only
+> by it), and binds `*package*` to that package around both the free-name
+> resolution and the body — so every "unqualified → current package"
+> resolution in the runtime answers X, which is what perl says inside the
+> region.  All three spellings of the silent-wrong are closed (bare write,
+> a caller global wrongly satisfying a region read, `our` declared-then-read-
+> back), the step-1 gate and its Cast+Block arm are DELETED, and the thunk is
+> now emitted whenever a region is present even with no free names (the body
+> is where 108 of the 108 board events feel the binding; the forced-wrap probe
+> in `docs/eval-region-measurements-s350.md` §6 measured that as row-identical
+> before the fact).  **So the step-2 rephrase list below is now just
+> multi-switch + F6.**  Value guard: `Pl/t/transpile-test-09.t` "eval
+> package-region: unqualified names resolve in X" (10 assertions vs the perl
+> oracle); shape guards in `Pl/t/parser2-02.t`, including the inverse (a
+> region-less eval gets NO region argument).
 >
 > **#240 step 1 is DONE (s348).**  The gate narrowed to DECLARE-THEN-USE via
 > `_block_captures_name`'s new `our_targets` option (an `our` target is a
@@ -317,8 +334,8 @@ Order:
    them: two Pl/t tests, skip-registry:315, census tooling, the
    runtime cache-key branch `p-compute-cache-path`).  Same commit: the
    #228 `[perl #129069]` registration + pass-baseline EDIT, and ALL
-   eval-mode refusal rephrases — multi-switch, the #240 read-back gate,
-   F6 if it landed as a ruled refusal — each perl-shaped
+   eval-mode refusal rephrases — multi-switch and F6 (the #240 read-back
+   gate is GONE: step 2 fixed it, s351) — each perl-shaped
    (`PCL: unsupported in string eval: …`) with a `docs/not-supported.md`
    entry naming its owner task (`fable-answers-s345.md` §1–§2,
    `fable-answers-s346.md` §1.3–1.4).
@@ -369,8 +386,8 @@ later.  Hence:
    silently retries v1; after step 2 that same TODO becomes a user-visible
    `$@`.  The rule-2 audit must show ZERO **unexplained** eval-mode
    fallbacks before the flip (AMENDED s347, `fable-answers-s346.md`
-   §1.4): ruled refusals — the multi-switch shape, the #240 read-back
-   gate, and F6 if it lands as one — are excepted, each REQUIRED to have
+   §1.4): ruled refusals — the multi-switch shape and F6 (the #240
+   read-back gate is GONE, fixed by step 2 in s351) — are excepted, each REQUIRED to have
    perl-shaped `$@` text and a `docs/not-supported.md` entry naming its
    owner task by the step-2 commit.  After the flip, an eval-mode TODO
    must surface as perl-shaped `$@` text (never a host/SBCL error), and

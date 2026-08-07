@@ -966,7 +966,30 @@ to parameters of a wrapper lambda:
 ```
 
 `p-eval-thunk` resolves each name via `p-eval-lex-lookup` (piece 3) and
-applies the lambda to the resulting containers. Because the containers
+applies the lambda to the resulting containers.
+
+An eval whose whole body is one `package X; …` region takes a third
+argument — the region's CL package designator:
+
+```lisp
+(p-eval-thunk (list "$Z") (lambda ($Z) …body…) :|Foo::Bar|)
+```
+
+With it, `p-eval-thunk` binds `*package*` to X's CL package (find-or-
+create, `:use '(:cl :pcl)`) around **both** the free-name resolution and
+the body. Perl says the current package inside such a region *is* X, and
+every unqualified-name resolution in the runtime asks `*package*` that
+question: `p-eval-lex-lookup`'s stop 2/3 below, `%p-symref-box` and its
+array/hash siblings, `p-use`'s default import target, `p-bless`'s empty
+class, the symbolic funcall/coderef resolvers. Without the argument
+(any eval that is not a single region) `*package*` stays the caller's,
+which is equally what Perl says. The thunk is emitted whenever a region
+package is present, even with an empty free-name list — the binding's
+main effect is on the body. The eval TEXT was read in the caller's
+package before the thunk runs, so the lambda's own symbols are
+unaffected by the binding.
+
+Because the containers
 are bound as ordinary lexical parameters, everything inside the body —
 including closures and **named subs the eval defines**, which outlive
 the eval — captures the *containers themselves*. Writes (`$x = 84`
