@@ -4,6 +4,48 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 353b (2026-08-07, Fable) — M3+M6+M2+M1 executed: gate v1 TODO events 22 → 2 (only M4+M5 remain)
+
+Same session as the ruling, on the user's "start fixing" go-ahead.  Commit
+`4a53d25`; the full story + the remaining Opus worklist is
+`docs/e41-m-work-handoff-s353.md`.
+
+**M3** — `@#` forward-declared via a `%punct` bucket in
+`_forward_global_decls` (the `[A-Za-z_]` scan can't match it, same
+structural gap as the caret specials); the bare-`$#` gate deleted.
+**M6** — `_block_captures_name` now records `for/foreach my $x` loop-head
+declarations as shadows scoped to the BLOCK; a LIST-position use still
+captures (probed both ways).  **M2** turned out to be three nested layers,
+each unmasking the next: the braced-interpolation spellings added to
+`_interp_fixer` + both rename blockers narrowed to the shared PPI-level
+`_has_code_brace_deref` (the two live Moo events were `"${name}"` inside
+STRING LITERALS); then `_init_reads_scalar` learned that an inner same-name
+`my` inside an init's anon-sub is a shadow, not a self-reference (Moo's
+defer_sub shape); then the deepest: **`cleanup_for_parsing`'s fat-comma
+`=>`→`,` rewrite mutated the shared PPI tree** ("XXXX This is destructive"
+since forever), so any re-parse of the same region saw `,` + a bare Word
+key, which strict-subs compiled as a zero-arg call — Moo's
+`{ no_install => 1 }` became `(pl-no_install)`.  Now a fresh local token;
+the pass is idempotent.  **M1 (#247)** — the whitelist predicate per the
+ruling, plus the discovery that real Sub::Quote wraps everything in a bare
+block with a trailing `1;`, needing a second collapse arm for the
+T-A1-flattened 4-segment spelling; region-defined subs are excluded from
+the thunk free-name set.  moo-01.t 15/15 natively.
+
+Quadruple green: gate 131/4654 PASS (audit 2 TODO = exactly M4+M5, plus 2
+DELIBERATE inverse-guard refusals from the new transpile-test-09.t rows and
+5 self-resolving DIE); sweep GATE clean, 0 new / 0 fixed, TOTAL 18498 =
+baseline; corpus emission identical across 111 files; census 111/111.
+Gen v2-108, both artifacts regenerated marker-only.  Pre-existing
+#163-family divergences the probes surfaced (literal `\\$x` deref,
+`\&callersub` eval free name, `use constant` in a region) → task #249,
+none E4.1-blocking (each fails identically with and without v1).
+
+Next (Opus, from the handoff doc): M4 → M5 (one-session cap + stop-rule) →
+three-population zero re-measure → #242 step 2 → #243 → #244 → STOP.
+
+---
+
 ## Session 353 (2026-08-07, Fable) — s352 ask ruled: flip HELD, all six gate v1 families are pre-work, option (b+)
 
 Review-only session; no code changes.  Full rulings:
