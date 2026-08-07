@@ -93,6 +93,40 @@ re-run between families.
   bareword call) fail under the v1 fallback TODAY (both at HEAD) — no
   coverage change; they become perl-shaped refusals at step 2.
 
+## 2b. M5 — DONE (s353c, Fable), same session
+
+The ruling's bet held: the promotion machinery (`_promote_captured`) was
+already extent-scoped and block-capable; the single blocker was the
+documented **enclosing-outer-lexical eval refusal** ("string eval names
+the lexical" — the site alist's outer let-bound pair would beat the cell).
+Closed with a per-site pair riding EXISTING plumbing, no new machinery:
+
+- `_promote_captured` waives that refusal for SCALARS and flags the cell
+  (`_eval_block_cells`); containers keep the refusal (the alist carries
+  scalar cells only).  The M-F pending backstop is armed the same way and
+  cleared by the native decl lowering.
+- The flagged decl's `_file_lex_renamed` lowering registers the cell in
+  `_let_bound_vars` (block-scoped for free by the existing save/restore)
+  and SKIPS the global `p-alias-eval-cell` — a later alias would clobber
+  the OUTER promotion's alias, and post-block evals must keep resolving
+  the outer cell.
+- `_eval_lexical_alist`'s strip rule extends to `__file__N`
+  (innermost-first, like `__shadow__N`), so the pair emits under the
+  original name ahead of the outer pair; `_lower_sub`'s alist wipe keeps
+  flagged cells (defvars — never the unbound-at-call-time crash the wipe
+  defends against).
+
+Verified: `transpile-test-01b.t` capinner row native (audit event gone),
+write-through + block-end restoration probed (new -09 row "M5: block
+static-var + nested sub + evals in both scopes"), container inverse still
+refuses (its v1 wrongness is the pre-existing #84 family, byte-identical
+at HEAD), and two perl-UNDEFINED-territory divergences recorded, not
+chased: a sub whose ONLY mention of the lexical is inside an eval string
+never closes over it in perl ("not available"/"will not stay shared"
+family — perl's own answer flips on an unrelated `my`), where PCL gives
+the consistent shared-cell answer; and the pre-existing print-args eval
+timing quirk → task #250.
+
 ## 3. Remaining queue for Opus 5 (in order)
 
 1. **M4 — `my-lexical 'mix' spans a package boundary` (1 gate event).**
@@ -104,13 +138,7 @@ re-run between families.
    commit — its "still correct via the v1 fallback" premise is void
    post-flip; the value assertion itself is unchanged.
 
-2. **M5 — block lexical captured by a nested named sub (1 gate event).**
-   Ruling §1.7: route through the EXISTING `_file_lex_renamed`
-   cell-promotion path extended to block scope; the eval alist must answer
-   the inner cell inside the block and the outer lexical after it
-   (`transpile-test-01b.t:501` is the probe).  **One-session cap;
-   stop-rule: new rename machinery or any PExpr term-region touch → STOP
-   and write the ask** — only then is #153-first live.
+2. ~~**M5**~~ — DONE s353c, see §2b.
 
 3. **Three-population zero re-measure** (§5a.2 as amended s353): the
    instrumented gate, the audited sweep, and the CPAN board — all with

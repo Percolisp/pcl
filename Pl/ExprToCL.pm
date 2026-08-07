@@ -3539,12 +3539,18 @@ sub _eval_lexical_alist {
   # the DEEPEST shadow must come FIRST (p-eval-lex-lookup assoc takes the
   # first match = the innermost live binding).  Shadow counters increase with
   # nesting depth (roots rename outer-first), so descending N is innermost-
-  # first; the plain name (depth -1) comes last.  Keys v1 can mint (__lex__,
-  # plain) keep the plain sort order — v1 emissions stay byte-identical.
+  # first; the plain name (depth -1) comes last.  __file__N strips the same
+  # way (E4.1 M5, s353): the only __file__ cells that ever enter
+  # _let_bound_vars are the enclosing-outer block promotions, whose cell
+  # must beat the outer plain binding at sites inside the block; their
+  # counters mint in source order, so descending N is innermost-first too.
+  # Keys v1 can mint (__lex__, plain) keep the plain sort order — v1
+  # emissions stay byte-identical.
   my $skey = sub {
     my ($v) = @_;
     $v =~ s/__lex__\d+$//;
-    my $d = $v =~ s/__shadow__(\d+)$// ? $1 : -1;
+    my $d = $v =~ s/__shadow__(\d+)$// ? $1
+          : $v =~ s/__file__(\d+)$//   ? $1 : -1;
     return ($v, $d);
   };
   my @vars = sort {

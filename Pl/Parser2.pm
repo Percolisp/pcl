@@ -2986,6 +2986,7 @@ sub _promote_captured {
   # is fine.
   my $eval_pair = $sig eq '$' && !$self->_enclosing_lex_decl($extent, $bare);
   my $post_eval = 0;
+  my $site_pair = 0;
   for my $st (@post) {
     next unless ref $st && $st->isa('PPI::Node');
     for my $w (@{ $st->find(sub { $_[1]->isa('PPI::Token::Word')
@@ -2993,6 +2994,17 @@ sub _promote_captured {
       my $nx = $w->snext_sibling;
       next if !$nx || $nx->isa('PPI::Structure::Block');    # eval { } — fine
       if ($eval_pair) { $post_eval = 1; next }
+      # E4.1 M5 (s353): the enclosing-outer-lexical SCALAR shape — the
+      # static-variable idiom `my $x; { my $x; sub f { $x } eval q{$x} }` —
+      # no longer refuses.  The promoted cell reaches these evals through a
+      # PER-SITE capture-alist pair under the original name: registered
+      # when the renamed decl lowers (see the _file_lex_renamed my-branch),
+      # block-scoped for free by the existing _let_bound_vars save/restore,
+      # and emitted innermost-first by the alist builder's __file__N strip
+      # rule — so inside the block it precedes the outer let-bound pair,
+      # and after the block it is gone.  Containers keep the refusal below:
+      # the alist carries scalar cells only.
+      if ($sig eq '$') { $site_pair = 1; next }
       my @q = $nx->isa('PPI::Token::Quote') ? ($nx)
             : $nx->isa('PPI::Structure::List')
               ? @{ $nx->find('PPI::Token::Quote') || [] } : ();
@@ -3025,6 +3037,13 @@ sub _promote_captured {
   # check dies (→ v1) on any name still pending.  Only armed when a post-decl
   # string eval actually exists.
   $self->{_pending_eval_caps}{ $sig . $newbare } = 1 if $eval_pair && $post_eval;
+  # M5 (s353): the enclosing-outer shape's waiver carries the same promise —
+  # the per-site pair is registered only by the native decl lowering, which
+  # also clears the pending flag.
+  if ($site_pair) {
+    $self->{_eval_block_cells}{ $sig . $newbare } = 1;
+    $self->{_pending_eval_caps}{ $sig . $newbare } = 1;
+  }
   warn "CAPPROMOTE $canon -> $sig$newbare (extent="
     . ($extent ? "block@" . $extent->location->[0] : 'segment')
     . ", eval_pair=$eval_pair, post_eval=$post_eval)\n" if $ENV{PCL_SPAN_DEBUG};
@@ -4250,7 +4269,15 @@ sub _lower_sub {
   # bound — reachable via the span pairs and the alias rule (ir-spec §9.1).
   # A sub that genuinely REFERENCES an outer lexical is the capture family:
   # promoted or gated before lowering ever gets here.
-  $self->fallback_parser->{_let_bound_vars} = {};
+  # EXCEPT the M5 block cells (s353): those carry no global alias (see the
+  # _eval_block_cells branch), so a body eval can only reach them through
+  # the per-site pair — and they are defvars, so the pair can never be the
+  # unbound-at-call-time crash the wipe defends against.  A sub textually
+  # inside the block closed over the cell; keep it.
+  $self->fallback_parser->{_let_bound_vars} =
+    { map { ($_ => 1) }
+      grep { $self->{_eval_block_cells} && $self->{_eval_block_cells}{$_} }
+      keys %saved_lb };
   my $form = eval { $self->_lower_sub_inner($sub) };
   my $err = $@;
   $self->{_live_lex} = \%saved_lex;
@@ -4789,7 +4816,23 @@ sub _lower_block {
       push @{ $self->{_captured_decls} }, "(defvar $name (make-p-box nil))";
       # Register AFTER the assignment: the decl's own RHS (incl. an eval in
       # it) still resolves the original name to the OUTER variable.
-      my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
+      my @reg;
+      if ($self->{_eval_block_cells} && $self->{_eval_block_cells}{$name}) {
+        # M5 (s353), enclosing-outer shape: NO global alias — a later
+        # p-alias-eval-cell would clobber the OUTER promotion's alias for
+        # the same original name, and post-block evals must keep resolving
+        # the outer cell.  Instead the cell joins the eval-site capture
+        # alists under its ORIGINAL name (the alist builder strips
+        # __file__N, innermost-first), scoped to this block by the
+        # enclosing save/restore of _let_bound_vars.  Deliberately NOT
+        # _reg_lex: _live_lex would re-trip the nested-sub hoist gate, and
+        # _seg_lex is unneeded (_forward_global_decls already skips
+        # _file_lex_renamed names).
+        $self->fallback_parser->{_let_bound_vars}{$name} = 1;
+        delete $self->{_pending_eval_caps}{$name} if $self->{_pending_eval_caps};
+      } else {
+        @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
+      }
       return (@declmod_eval,
               ($lowprec_run
                 ? ($self->_lower_expr($lowprec_run, $first, ':void'))

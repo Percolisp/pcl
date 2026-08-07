@@ -526,4 +526,22 @@ my $fx = defer_sub "k" => sub {
 print "keys ", $fx->(), "\n";
 });
 
+# ── E4.1 M5 (s353): the block static-variable idiom lowers natively — a
+# block-scoped `my` captured by a nested named sub, with string evals
+# naming the same bare in BOTH scopes.  Asserts the read (a), the eval
+# write-through reaching the sub's shared cell (b), and the block-end
+# restoration to the outer lexical (c).  Guard row for the per-site
+# capture-alist pair (_eval_block_cells + the alist __file__N strip).
+test_transpile("M5: block static-var + nested sub + evals in both scopes", q{
+my $x = 1;
+{
+  my $x = 2;
+  sub capinner9 { $x }
+  print "a ", eval(q{$x}), "\n";
+  eval q{$x = 7};
+  print "b ", capinner9(), "\n";
+}
+print "c ", eval(q{$x}), " ", $x, "\n";
+});
+
 done_testing();
