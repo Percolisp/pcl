@@ -328,11 +328,11 @@ sub do_bundle {
 
   say STDERR "Bundling: $source_file -> $output_file";
 
-  # Transpile the main file (this recursively processes dependencies)
-  # NOTE (v2-transfer): bundle mode is a v1-ONLY path today — parse_file here
-  # bypasses parse_with_fallback entirely.  Catalogued in
-  # docs/v2-transfer-plan.md; route through parse_with_fallback at T-D.
-  my $transpiled = pipeline_marker(v1 => Pl::Parser->parse_file($source_file));
+  # Transpile the main file (dependencies are loaded at run time via p-use).
+  # E4.1 step 1: bundle mode used to call Pl::Parser->parse_file directly — the
+  # one v1-ONLY bypass left in pl2cl.  It now goes through the same entry as
+  # every other file transpile, so the gate flip in step 2 covers it too.
+  my $transpiled = parse_with_fallback('parse_file', $source_file);
 
   # Inject preamble
   my $preamble = build_preamble($source_file);
