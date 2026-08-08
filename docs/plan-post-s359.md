@@ -1,0 +1,84 @@
+# Plan after s359 — next sessions (written at session end, 2026-08-08)
+
+State at close: everything green at HEAD — gate `tools/prove-core` 132 files
+/ 4717 PASS; cold-cache sweep GATE clean (0 new / 0 fixed / 0 LOST, TOTAL
+18499 = baseline); corpus emission identical 111/111; gen v2-114 (s359 was
+measured byte-identical, no bump); board at the s358 level (Text::Balanced
+restored, 933 ok rows).  **E4.1 COMPLETE.  #153/E5.0 steps 1–2 SHIPPED.**
+
+## 1. Main line — Opus, next session(s): #153 steps 3–5
+
+Migrate the remaining operand sites onto `_term_extent` and burn the
+`$end_pars` maze down.  Full recipe in task #153; the short form:
+
+- **Per site, measured then flipped** (the s359 `defined` pattern): run
+  corpus + gate with `PCL_TERM_DIFF=1`, explain every disagreement, then
+  flip that site (walker answers → use it; decline → legacy).  One site per
+  commit; corpus-diff + gate per commit; full sweep every 3rd–5th change.
+  Sites: the named-unary branch chain first (`ref`, `exists`, `delete`,
+  `keys`, `values`, `length`, `uc`/`lc`, …), then the strictly-1-arg block.
+- **Widen the walker to the declined shapes as sites need them** —
+  `->method(args)` (consume the args List and continue), cast-block slice
+  groups (`@{$r}[0]`: accept Constructor/Block as slice postfix after a
+  cast deref), prefix-op runs.  Every widening gets rows in
+  `Pl/t/reduce-term-01.t` FIRST (pure perl, instant).
+- **Step 4**: fold the postfix-`->` reduction + subscript/slice builder
+  into `_reduce_term` so the main loop stops reducing opportunistically;
+  delete `$deref_skip`.  **Step 5**: delete the dead `$end_pars` branch
+  chains; final gate + full sweep; any moved row leaves the baseline by
+  EDIT with cause.
+- **Acceptance probes at the end**: #147 (`[] // 0` under a `$`-prototype)
+  and the s317 general-bareword probe (`print "x=", Foo::init;` must
+  CALL) — both recorded in task #153.
+- Read before touching: `docs/pexpr-term-parsing-review.md` (the maze, the
+  Option B design) and task #142 (the three failed s316v attempts — why
+  guards in that region don't work; the walker replaces them, never joins
+  them).
+
+## 2. In parallel or next after — #254 (needs USER scope approval first)
+
+Phase 2 of the post-flip recovery: the capture/package-spanning family
+(9 suite files) + poisoned condition-`my` family (4 files), ~12k rows.
+Plan: `docs/e41-suite-families-plan.md`.  Do NOT start without the
+user's go-ahead.  It touches Parser2 (capture/spanning), not PExpr, so it
+interleaves cleanly with #153 steps 3–5.
+
+## 3. Fable, next Fable session
+
+1. Review the Opus per-site flips (independent reproduction: re-run one
+   site's PCL_TERM_DIFF inventory cold, spot-check the widened walker rows).
+2. Then the next E5 design items: E5.1 seam object / E5.2 embedded-block
+   totality (`docs/v2-endgame-plan.md` §E5), and the boxed-aggregates
+   design (standing ruling: Fable designs it; nobody starts it early).
+
+## 4. Fillers (half-session sized, anytime, can wait)
+
+- #257 — fail-baseline cause column + DRIFTED bucket in sweep-diff (the
+  s359 audit's two structural changes; user: this can wait).
+- Two new fuzzer axes from `docs/bug-review-s359.md` §3c (interp subscript
+  chains; prototype visibility/ordering) + one fuzzer run.
+- Near-green list: #236 → #234 → #235.  Side items: mro/inconsistent_c3_utf8.t
+  STALE row; comp/hints.t + mro/inconsistent_c3.t XDIFF → DIFF.
+- Bug-hunt sequencing recommendation awaits a user nod
+  (`docs/bug-review-s359.md` §4: big hunt = E5 exit gate, pre-R2).
+
+## 5. Standing verification checklist (unchanged)
+
+- Per change: `tools/prove-core` + a targeted single-file run; corpus-diff
+  for anything touching emission.  Full sweep every 3rd–5th change; COLD
+  cache (`rm -rf ~/.pcl-cache/*`) whenever module-level emission could have
+  changed.  Bump `*pcl-cache-generation*` on any emission-changing commit.
+- Gate arithmetic: 132 files / 4717 rows with the pclxs sibling built,
+  4703 without; a worktree compare silently drops the 14 xs rows (set
+  PCLXS_DIR).
+- `grep -a` on any .tsv under docs/ or .faillog/ (NUL bytes).
+- Baselines change by EDIT with cause, never by re-bless-from-run (except
+  pass-baseline re-bless after a per-file audit, with `# taken-at:`).
+
+## 6. Where the fresh context lives
+
+s359 session-log entry (walker design, zero-disagreement measurement, the
+`defined` flip, the baseline-drift audit); `docs/DECIDED.md` s359 section
+(decline-not-guess, measured-then-flipped, the PPI document-GC gotcha);
+tasks #153 (updated recipe), #254 (awaiting approval), #256 (open), #257
+(parked); `docs/bug-review-s359.md`.

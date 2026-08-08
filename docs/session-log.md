@@ -53,6 +53,23 @@ gate, pre-R2** — fixes then land once, on the final compiler shape.
 measured per site, then fold reduction into `_reduce_term`, delete the
 `$end_pars` blocks and `$deref_skip`.  Updated recipe in task #153.
 
+**Later same session (s359b)** — the user asked whether failures wrongly
+written off as not-supported are likely a big problem.  Measured, not
+argued: joined `docs/fail-baseline.tsv` against the fresh cold-cache
+`.faillog` — **650 of 679 blessed rows fail BYTE-IDENTICALLY to bless
+time**; the 18 drifted rows are 8× magic.t tmp-path run-noise + printed-
+representation drift (REF→SCALAR from the #163-era work, p-typeglob→GLOB
+on `${^LAST_FH}`, eval.t:107's cause moved to the ANNOUNCED #155 tie
+refusal — still task-owned); 11 rows sit in the known postfixderef/ref/tr
+crash-file blind spot.  No hidden fixables.  Verdict to the user: small
+and bounded — only three centralized write-off registries exist (17-entry
+skip-registry with stale-detection, the 679-row fail baseline that changes
+only by EDIT, the per-row-checked XDIFF list), and the gate alarms in both
+directions.  Residual = cause drift; the two structural fixes (cause
+column + DRIFTED bucket) filed as **#257, parked as filler per the user**.
+Session closed with `docs/plan-post-s359.md` — next: Opus #153 steps 3–5
+(per-site measured flips), #254 on approval, Fable review + E5.1/E5.2.
+
 ---
 
 ## Session 358 (2026-08-08, Fable) — s357 reviewed + approved; #252/#243 user-decided; Text::Balanced restored (933 rows, better than v1 ever was)
