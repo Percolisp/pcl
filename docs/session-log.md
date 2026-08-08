@@ -6,6 +6,18 @@ Append new entries at the top. One section per session.
 
 ## Session 358 (2026-08-08, Fable) — s357 reviewed + approved; #252/#243 user-decided; Text::Balanced restored (933 rows, better than v1 ever was)
 
+**Later same session (s358b–d):** #253 closed (op/for.t = upstream PPI
+1.291 for-lexer bug, `docs/ppi-upstream-bugs.md` §6); the bug packaged for
+upstream as `docs/ppi-bug-report.t` bug 4 with a canary row in
+misc-fixes-02.t (99 tests) that FAILS when a PPI upgrade fixes it; **#255
+port started — 11 of 27 files done and green through v2** (commit
+`5ad7d3a`).  The port recipe, the three learned gotchas (pl2cl-for-
+package-switching-runtime-rows, Parser2->environment introspection,
+v1-shape rows restated in v2 vocabulary) and the 16-file remainder with
+per-file notes are in task #255.  Batch-2's seven partially-ported files
+were REVERTED to their v1 form at session end (the v1 entry still exists,
+so they stay green) — a clean checkpoint beats a half-ported tree.
+
 Fable review session with the #252 phase-1 fix executed in the same
 sitting.  Rulings: `docs/fable-answers-s357.md`; phase-2 plan:
 `docs/e41-suite-families-plan.md`.
