@@ -2246,7 +2246,21 @@ sub _rename_spanning_lexicals {
     if ($i && %live) {
       my $txt = join "\n", map { $_->content } @{ $segments->[$i]{stmts} };
       for my $bare (keys %live) {
-        $spanning{$bare} = 1 if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+        # `\{?`: the BRACED spelling `"${x}"` is a use of $x, and missing it
+        # was an invariant break, not a conservative refusal — this pre-filter
+        # decides which names the pass CONSIDERS, so a name it skips is never
+        # renamed, prints no SPANREFUSE, and then dies in the CHECKER, which
+        # resolves uses properly (`_canon_refs_in` reads interpolation).  The
+        # pass's contract is that it never refuses a name the checker will die
+        # on (M4, s354); op/exec.t:215 `qq{${quote}…}` broke it.  Same braced
+        # blind spot M2 fixed for #226's collapse in s353.
+        # OVER-matching is safe BY DESIGN and stays that way: this is only a
+        # pre-filter, and every name it admits still has to pass the CANON
+        # span test ($scalar_spans / the SPANSCAN below, both `_canon_refs_in`)
+        # before anything is renamed — which is what already throws out a
+        # sibling `my @x` marking `x`, and now also throws out `'${x}'` inside
+        # a NON-interpolating literal.
+        $spanning{$bare} = 1 if $txt =~ /(?:[\$\@\%]|\$\#)\{?\Q$bare\E\b/;
       }
     }
     my %seg_lex;
@@ -2430,7 +2444,16 @@ sub _rename_spanning_lexicals {
       && $refuse->('sdecls=' . scalar(@sdecls) . " dc=$dc");
     next if $multi && $sdecls[0] != $inst_decl
       && $refuse->('extent sole decl is not this instance');
-    next if $ctxt =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/
+    # A CODE-level brace deref (`${x}` as Cast+Block) keeps the refusal: the
+    # name lives in a Word token inside the Block, which the symbol rewrite
+    # never sees.  ASK PPI, not the text — the whole-content scan this used to
+    # be also tripped on `"${x}"` INSIDE A STRING, which is ordinary
+    # interpolation the interp fixer rewrites (op/exec.t:215
+    # `qq{${quote}…}`).  Same replacement M2 made in _shadow_rename_blocker
+    # (s353) for the same stale scan; this was the second copy.
+    next if (grep { ref $_ && $_->isa('PPI::Node')
+                    && _has_code_brace_deref($_, $bare) }
+             map { @{ $_->{stmts} } } @$segments)
       && $refuse->('${x} deref-block');
     next if $segments->[$di]{blockform} && $refuse->('blockform decl segment');
     my $decl  = $sdecls[0];
