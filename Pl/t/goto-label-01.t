@@ -10,7 +10,7 @@ use Test::More;
 use FindBin qw($RealBin);
 use lib "$RealBin/../..";
 
-use Pl::Parser;
+use Pl::Parser2;
 
 sub run_perl {
     my ($code) = @_;
@@ -39,9 +39,10 @@ sub run_cl {
 
 sub test_transpile {
     my ($name, $code) = @_;
-    my $parser = Pl::Parser->new(code => $code);
-    my @cl = $parser->parse();
-    is(run_cl(join("\n", @cl)), run_perl($code), $name);
+    # #255: through the production v2 pipeline (v1's file-level entry is
+    # being retired) — same behavioural assertion, real compiler.
+    my $cl = Pl::Parser2->parse_code($code);
+    is(run_cl($cl), run_perl($code), $name);
 }
 
 plan tests => 9;
@@ -79,10 +80,9 @@ test_transpile('goto with use pragma in same block',
     'sub u { my $x = shift; unless ($x) { use warnings; goto FAIL; } return "ok"; FAIL: return "fail"; }'
   . ' print u(1), "|", u(0);');
 
-# ── #63 (s295b) top-level forward/backward gotos.  NOTE this file's harness
-# drives Pl::Parser (v1) DIRECTLY — the v2 catch-wrap lowering for gotos
-# from inside map/grep lambdas is guarded in transpile-test-01b.t instead
-# (its harness runs the default pipeline; v1 cannot compile that shape).
+# ── #63 (s295b) top-level forward/backward gotos.  (Until #255 this file
+# drove Pl::Parser (v1) directly; it now runs the v2 pipeline like
+# transpile-test-01b.t, which guards the map/grep-lambda catch-wrap shapes.)
 
 # Plain top-level forward goto (no lambda).
 test_transpile('top-level forward goto skips statements',

@@ -9,7 +9,7 @@ use lib "$FindBin::Bin/../..";
 use Test::More;
 
 # Load test utilities from transpile-test-01.t pattern
-use Pl::Parser;
+use Pl::Parser2;
 
 # Skip if SBCL not available
 my $sbcl_version = `sbcl --version 2>/dev/null`;
@@ -53,9 +53,7 @@ sub run_cl {
 sub test_transpile {
     my ($name, $perl_code) = @_;
 
-    my $parser = Pl::Parser->new(code => $perl_code);
-    my @cl = $parser->parse();
-    my $cl_code = join("\n", @cl);
+        my $cl_code = Pl::Parser2->parse_code($perl_code);
 
     my $perl_out = run_perl($perl_code);
     my $cl_out = run_cl($cl_code);

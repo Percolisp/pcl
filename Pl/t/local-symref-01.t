@@ -13,12 +13,11 @@ use Test::More;
 use File::Temp qw(tempfile);
 
 use lib ".";
-use Pl::Parser;
+use Pl::Parser2;
 
 sub run_pl {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    my $cl_code = $parser->parse();
+        my $cl_code = Pl::Parser2->parse_code($code);
 
     my ($fh, $filename) = tempfile(SUFFIX => '.lisp');
     print $fh $cl_code;
@@ -114,17 +113,14 @@ print $@ =~ /Can't localize through a reference/ ? "ok2\n" : "no2\n";
 
 # ── transpile-level: the macro is emitted (not silently dropped) ──
 {
-    my $parser = Pl::Parser->new(code => '$aa=1; { local ${aa}; $aa=3; }');
-    my $cl = $parser->parse();
+        my $cl = Pl::Parser2->parse_code('$aa=1; { local ${aa}; $aa=3; }');
     like($cl, qr/p-local-deref-scalar/, 'local ${aa} emits p-local-deref-scalar');
 }
 {
-    my $parser = Pl::Parser->new(code => '@aa=(1); { local @{$x}; }');
-    my $cl = $parser->parse();
+        my $cl = Pl::Parser2->parse_code('@aa=(1); { local @{$x}; }');
     like($cl, qr/p-local-deref-array/, 'local @{$x} emits p-local-deref-array');
 }
 {
-    my $parser = Pl::Parser->new(code => '%aa=(); { local %$x; }');
-    my $cl = $parser->parse();
+        my $cl = Pl::Parser2->parse_code('%aa=(); { local %$x; }');
     like($cl, qr/p-local-deref-hash/, 'local %$x emits p-local-deref-hash');
 }

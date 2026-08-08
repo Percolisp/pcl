@@ -7,7 +7,7 @@ use Test::More;
 use FindBin qw($RealBin);
 use lib "$RealBin/../..";
 
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper to run Perl and CL code and compare
 sub run_perl {
@@ -42,9 +42,7 @@ sub run_cl {
 
 sub test_transpile {
     my ($name, $code) = @_;
-    my $parser = Pl::Parser->new(code => $code);
-    my @cl = $parser->parse();
-    my $cl_code = join("\n", @cl);
+        my $cl_code = Pl::Parser2->parse_code($code);
 
     my $perl_result = run_perl($code);
     my $cl_result = run_cl($cl_code);

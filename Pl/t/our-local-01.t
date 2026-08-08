@@ -8,20 +8,25 @@ use Test::More;
 use File::Temp qw(tempfile);
 
 use lib ".";
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper to parse and return CL output
 sub parse_pl {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    return $parser->parse();
+        return Pl::Parser2->parse_code($code);
 }
 
-# Helper to run transpiled code
+# Helper to run transpiled code.  Through pl2cl (not parse_code): the
+# package-switching tests below need the (p-defpackage :main) preamble
+# that only the file entry emits — a bare body's (in-package :main)
+# would hit a package that does not exist yet.
 sub run_pl {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    my $cl_code = $parser->parse();
+    my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl');
+    print $pfh $code;
+    close $pfh;
+    my $cl_code = `./pl2cl "$pl_file" 2>&1`;
+    unlink $pl_file;
 
     my ($fh, $filename) = tempfile(SUFFIX => '.lisp');
     print $fh $cl_code;
@@ -50,7 +55,10 @@ say "# -------- 'our' Transpilation Tests:";
 {
     my $cl = parse_pl('our $count = 0;');
     like($cl, qr/defvar \$count/, 'our $x = val generates defvar');
-    like($cl, qr/setf.*p-box-value.*\$count.*0/s, 'our with value generates setf for init');
+    # Same claim as v1's `setf p-box-value` row: the init is a RUNTIME write
+    # into the declared box, separate from the compile-time defvar.  v2
+    # spells that write (p-scalar-= $count 0).
+    like($cl, qr/p-scalar-= \$count 0/, 'our with value generates runtime init assignment');
 }
 
 # Test: bare our $x

@@ -17,13 +17,12 @@ use File::Temp qw(tempfile);
 use Encode qw(encode_utf8 decode_utf8);
 
 use lib ".";
-use Pl::Parser;
+use Pl::Parser2;
 
 sub run_bytes {
     # CODE is a *byte* string (as PCL reads a source file); transpile + run.
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    my $cl_code = $parser->parse();
+        my $cl_code = Pl::Parser2->parse_code($code);
     my ($fh, $filename) = tempfile(SUFFIX => '.lisp');
     binmode($fh, ':encoding(utf-8)');   # pl2cl binmodes its output to utf8 too
     print $fh $cl_code;

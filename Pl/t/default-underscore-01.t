@@ -8,20 +8,18 @@ use Test::More;
 use File::Temp qw(tempfile);
 
 use lib ".";
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper to parse and return CL output
 sub parse_pl {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    return $parser->parse();
+        return Pl::Parser2->parse_code($code);
 }
 
 # Helper to run transpiled code
 sub run_pl {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    my $cl_code = $parser->parse();
+        my $cl_code = Pl::Parser2->parse_code($code);
 
     my ($fh, $filename) = tempfile(SUFFIX => '.lisp');
     print $fh $cl_code;
