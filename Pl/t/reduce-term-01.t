@@ -87,8 +87,16 @@ extent_is('\@a;',          0, 1, 'ref-of-array');
 extent_is('\&foo;',        0, 1, 'ref-of-code');
 extent_is('${$r};',        0, 1, 'block deref');
 # PPI spells the slice group after a block deref as a Constructor, not a
-# Subscript; the walker declines rather than stop inside the term.
-extent_is('@{$r}[0];',     0, undef, 'cast-block deref + slice group: declines');
+# Subscript (only because it follows a `}` rather than a symbol).  It is a
+# SLICE on the deref, so the walker takes it as one postfix group — and stops:
+# a slice yields a list, nothing postfixes it.  (#153 step 4a.)
+extent_is('@{$r}[0];',     0, 2, 'cast-block deref + slice group');
+extent_is('%{$h}{a};',     0, 2, 'cast-block deref + kv slice group');
+extent_is('${$r}[0];',     0, 2, 'scalar-cast block deref + group');
+extent_is('@{$r}[0] + 1;', 0, 2, 'slice group stops before op');
+# INVERSE: the group rule needs a CAST — a bare block/constructor primary
+# followed by another group is not a slice on anything.
+extent_is('{a=>1}[0];',    0, 0, 'no cast: group does not attach');
 extent_is('$#{$r};',       0, 1, 'arraylen of block deref');
 extent_is('$#$r;',         0, 1, 'arraylen of scalar deref');
 
@@ -114,9 +122,18 @@ extent_is('foo(1)->[0];',  0, 3, 'call + arrow subscript');
 
 # --- method calls -------------------------------------------------------
 extent_is('$obj->method;',      0, 2, 'no-args method');
-extent_is('$obj->method(1);',   0, undef, 'method WITH args: decline');
-extent_is('$obj->$m(1);',       0, undef, 'dynamic method with args: decline');
+# #153 step 4a: an arg List directly after a method NAME is part of the call,
+# so the walker consumes it and keeps walking the chain (it used to decline
+# rather than stop in the middle of a method call).
+extent_is('$obj->method(1);',   0, 3, 'method WITH args');
+extent_is('$obj->$m(1);',       0, 3, 'dynamic method with args');
+extent_is('$obj->m(1)->[0];',   0, 5, 'method args then subscript');
+extent_is('$obj->m(1)->n(2);',  0, 6, 'chained method calls with args');
+extent_is('$obj->m(1) + 2;',    0, 3, 'method call stops before op');
 extent_is('$obj->method->{k};', 0, 4, 'method then subscript');
+# INVERSE: a List after a SUBSCRIPT is not an argument list — `$h{k}(1)` is a
+# code-ref call, which the term grammar does not claim.
+extent_is('$h{k}(1);',          0, 1, 'list after subscript is not method args');
 
 # --- declines (undef is the answer, not an error) -----------------------
 extent_is('foo;',          0, undef, 'bare word: not our call');

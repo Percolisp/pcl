@@ -1962,7 +1962,7 @@ sub _extend_postfix_chain {
 # hand-derived boundaries with grammar-derived ones, never widen coverage
 # silently.
 sub _term_extent {
-  my ($self, $e, $start, $limit) = @_;
+  my ($self, $e, $start, $limit, $no_step4) = @_;   # $no_step4: MEASUREMENT ONLY
   my $n = scalar(@$e);
   $limit = $n - 1 if !defined($limit) || $limit > $n - 1;
   return undef if $start < 0 || $start > $limit;
@@ -2013,29 +2013,37 @@ sub _term_extent {
   }
 
   # postfix*: subscripts and -> groups, via the single shared chain walker.
-  $end = $self->_extend_postfix_chain($e, $end);
+  # The chain walker's `-> method` step consumes only the NAME — the args of a
+  # method call are a separate postfix step, taken here (#153 step 4a) because
+  # the walker is the only caller that wants them: a parenthesised List
+  # directly after a method name IS that call's argument list, and the chain
+  # continues past it (`$o->m(1)->n(2)[0]`).  Before step 4 this shape made the
+  # walker DECLINE rather than stop in the middle of a method call.
+  while (1) {
+    my $next = $self->_extend_postfix_chain($e, $end);
+    if ($next > $end
+        && $next + 1 <= $limit
+        && ref($e->[$next + 1]) eq 'PPI::Structure::List'
+        && $self->is_arrow_op($e->[$next - 1])) {
+      return undef if $no_step4;
+      $end = $next + 1;                # -> method ( args )
+      next;
+    }
+    $end = $next;
+    last;
+  }
   return undef if $end > $limit;
 
-  # The chain walker's `-> method` step consumes only the NAME (its callers
-  # bound args elsewhere).  If a parenthesised arg list follows, this term
-  # extends past what the walk modelled — DECLINE rather than split a method
-  # call in half.  (Step-4 TODO: consume the args List and continue the
-  # chain, once the walker owns reduction too.)
-  if ($end > $start && $end + 1 <= $limit
-      && ref($e->[$end + 1]) eq 'PPI::Structure::List'
-      && $self->is_arrow_op($e->[$end - 1])) {
-    return undef;
-  }
-
   # A Block/Constructor group directly after a cast-deref term is PPI's
-  # spelling of a slice on the deref (@{$r}[0], %{$h}{a}).  The legacy
-  # branches split here too — but a walker that CLAIMS a term must never
-  # stop inside one, so DECLINE and leave the site's legacy handling in
-  # charge.  (Step-3+ TODO: consume it as a slice postfix.)
+  # spelling of a SLICE on the deref (`@{$r}[0]`, `%{$h}{a}`) — a Subscript
+  # everywhere else, but PPI classifies it by what precedes it, and a `}` or a
+  # cast-deref does not qualify.  It is one postfix group and the term ends
+  # there: a slice yields a list, and nothing postfixes a list.  (#153 step 4b;
+  # the walker used to decline here rather than stop inside the term.)
   if ($i > $start && $end + 1 <= $limit
       && (ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
           || ref($e->[$end + 1]) eq 'PPI::Structure::Block')) {
-    return undef;
+    return $no_step4 ? undef : $end + 1;
   }
   return $end;
 }
@@ -2061,6 +2069,22 @@ sub _extend_high_prec {
     $j++;
   }
   return $j;
+}
+
+# MEASUREMENT ONLY (#153 step 4, PCL_TERM_DECL=1) — delete with the step.
+# Reports, per operand-site consultation: NEW = the step-4 widenings claim a
+# term the pre-step-4 walker declined (so this site's answer moved off the
+# legacy chain — every one must be explained), DECL = still declined (which
+# legacy branches are still live, i.e. what step 5 may NOT delete).
+sub _term_probe {
+  my ($self, $site, $fn, $e, $i, $ceiling, $ans) = @_;
+  my $kind = !defined($ans) ? 'DECL'
+           : defined($self->_term_extent($e, $i + 1, $ceiling, 1)) ? undef
+           : 'NEW';
+  return if !defined $kind;
+  warn sprintf "PCL_TERM_%s %s fn=%s%s toks=[%s]\n", $kind, $site, $fn,
+      ($kind eq 'NEW' ? sprintf(' new=+%d', $ans - $i) : ''),
+      $self->_tok_run_desc($e, $i, $ceiling);
 }
 
 # Debug/probe helper: describe a token run compactly for PCL_TERM_DIFF logs.
@@ -3554,6 +3578,8 @@ sub handle_subcalls {
         # disagreements over the 111-file census corpus AND over all 604
         # files of perl's own t/*/*.t — at this site, in both populations.
         my $walker_end = $self->_term_extent($e, $i + 1, $term_ceiling);
+        $self->_term_probe('unary', $sub_name, $e, $i, $term_ceiling, $walker_end)
+          if $ENV{PCL_TERM_DECL};
         if (defined $walker_end) {
             $end_pars = $walker_end;
         } else {
@@ -3698,6 +3724,8 @@ sub handle_subcalls {
         # case).  The two other shapes the wider population found were the
         # prototype-arity bug fixed in the previous commit.
         my $walker_end = $self->_term_extent($e, $i + 1, $term_ceiling);
+        $self->_term_probe('single', $sub_name, $e, $i, $term_ceiling, $walker_end)
+          if $ENV{PCL_TERM_DECL};
         if (defined $walker_end) {
           $end_pars = $walker_end;
         } else {
