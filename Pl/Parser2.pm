@@ -4702,22 +4702,35 @@ sub _lower_block {
   # statement (its let/save-restore scope must enclose the label, which the
   # catch would cut) or when the goto textually precedes such a statement.
   if (@s >= 2) {
-    my ($k, $lbl);
+    # ALL top-level standalone labels, in order.  The first drives the classic
+    # single-label wraps below; the full list drives the #252 general wrap.
+    my @labels;    # [index, name]
     for my $i (1 .. $#s) {
       next unless $s[$i]->isa('PPI::Statement::Compound');
       my @lk = $s[$i]->schildren;
       next unless @lk == 1 && $lk[0]->isa('PPI::Token::Label');
-      ($k, $lbl) = ($i, $lk[0]->content);
-      $lbl =~ s/\s*:\s*$//;
-      last;
+      (my $l = $lk[0]->content) =~ s/\s*:\s*$//;
+      push @labels, [$i, $l];
     }
+    my ($k, $lbl) = @labels ? @{ $labels[0] } : ();
     if (defined $k && $lbl =~ /^\w+$/) {
       my @prefix = @s[0 .. $k - 1];
       my $has_goto = grep { $_->content =~ /\bgoto\s+\Q$lbl\E\b/ } @prefix;
+      # A goto in this prefix to a LATER label needs the #252 general wrap
+      # below: the single-label wraps open no catch for that label, so its
+      # goto would lower to a lexical (go) with no tag in scope.
+      my $cross = 0;
+      if (@labels > 1) {
+        PFX: for my $p (@prefix) {
+          for my $j (1 .. $#labels) {
+            if ($p->content =~ /\bgoto\s+\Q$labels[$j][1]\E\b/) { $cross = 1; last PFX; }
+          }
+        }
+      }
       my $scope_stmt = grep {
         $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_)
       } @prefix;
-      if ($has_goto && !$scope_stmt) {
+      if (!$cross && $has_goto && !$scope_stmt) {
         my $tag = ':pcl-goto-' . $lbl;
         my @pre_forms = do {
           local $self->fallback_parser->{_catch_labels}{$lbl} = $tag;
@@ -4738,7 +4751,7 @@ sub _lower_block {
       # goto that jumps over a hoisted decl leaves its box nil = undef,
       # perl's jumped-over-my behaviour.  Anything outside the subset keeps
       # the standalone-label forward-goto gate as the safety net.
-      elsif ($has_goto) {
+      elsif (!$cross && $has_goto) {
         my (%seen, @hoist);
         my $ok = 1;
         for my $st (@prefix) {
@@ -4755,7 +4768,7 @@ sub _lower_block {
           if (defined $init) {
             my (undef, $imod) = _split_modifier($init);
             if (defined $imod) { $ok = 0; last }
-            if (join('', map { $_->content } @$init) =~ /\Q$nm\E\b/) { $ok = 0; last }
+            if (join('', map { $_->content } @$init) =~ _reads_name_rx($nm)) { $ok = 0; last }
           }
           push @hoist, $nm;
         }
@@ -4772,6 +4785,64 @@ sub _lower_block {
                    ['list', map { ['list', $_, '(make-p-box nil)'] } @hoist],
                    ['catch', $tag, @pre_forms],
                    $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)]);
+        }
+      }
+      # -- #252 GENERAL forward-goto shape (Text::Balanced's _match_tagged):
+      # several standalone labels and gotos that CROSS an intervening label.
+      # Preconditions: label names distinct, every goto to every label is
+      # strictly FORWARD (textually before its label statement), and NO
+      # top-level declaration/local before the LAST label.  Declarations do
+      # not defeat the branch — a leading `my`/`local` is consumed by its
+      # ordinary statement branch, which NESTS the block remainder (labels
+      # included) inside its let/save-restore and recurses back here, so the
+      # declaration's scope encloses every segment and this branch fires at
+      # the level where only code remains.  (A decl BETWEEN labels would need
+      # cross-catch hoisting — rare, still gated below; a goto that jumps
+      # over a declaration keeps the classic #126 single-label hoist.)
+      # Lowering: nest catches so the catch for EACH label encloses
+      # everything before that label:
+      #   (catch :L3 (catch :L2 (catch :L1 P0…) P1…) P2…) P3…
+      # A (throw :Li) from any depth in any earlier segment unwinds to Li's
+      # catch, whose next sibling form is Li's segment — exactly perl's jump
+      # — and normal completion falls through the segments in source order.
+      # The block value is the LAST segment's tail.  Backward or mixed gotos
+      # never fire this branch; they keep the classic tagbody machinery and
+      # its forward-goto gate as the safety net.
+      if (@labels && !grep { $_->[1] !~ /^\w+$/ } @labels) {
+        my %ln;
+        my $dup = grep { $ln{ $_->[1] }++ } @labels;
+        my ($backward, $any_goto) = (0, 0);
+        LBL: for my $L (@labels) {
+          my ($idx, $name) = @$L;
+          for my $j (0 .. $#s) {
+            next if $j == $idx;
+            next unless $s[$j]->content =~ /\bgoto\s+\Q$name\E\b/;
+            if ($j > $idx) { $backward = 1; last LBL; }
+            $any_goto = 1;
+          }
+        }
+        my $decl_stmt = grep {
+          $_->isa('PPI::Statement::Variable') || $self->_is_local_stmt($_)
+        } @s[0 .. $labels[-1][0] - 1];
+        if (!$dup && !$backward && $any_goto && !$decl_stmt) {
+          my @tags = map { ':pcl-goto-' . $_->[1] } @labels;
+          my (@segs, $start);
+          $start = 0;
+          for my $L (@labels) {
+            push @segs, [ @s[$start .. $L->[0] - 1] ];
+            $start = $L->[0] + 1;
+          }
+          push @segs, [ @s[$start .. $#s] ];
+          my ($wrap, @tail_forms);
+          {
+            local @{ $self->fallback_parser->{_catch_labels} }{ map { $_->[1] } @labels } = @tags;
+            $wrap = ['catch', $tags[0], $self->_lower_block($segs[0], $vi, undef)];
+            $wrap = ['catch', $tags[$_], $wrap,
+                     $self->_lower_block($segs[$_], $vi, undef)]
+              for 1 .. $#labels;
+            @tail_forms = $self->_lower_block($segs[-1], $vi, $tail_ctx);
+          }
+          return ($wrap, @tail_forms);
         }
       }
     }
@@ -5136,7 +5207,7 @@ sub _lower_block {
           my @all = grep { !$seen{$_}++ } (@$vars, @chain_names);
           die "Parser2 TODO: self-referential init: " . $first->content
             if $final_txt =~ /(?<![-\w])(?:my|our|local|state)\b/
-            || (grep { $final_txt =~ /\Q$_\E\b/ } @all)
+            || (grep { $final_txt =~ _reads_name_rx($_) } @all)
             || (grep { $self->{_file_lex_renamed}{$_} } @all);
           $self->_reg_lex(@all);
           return (['let', ['list', map { ['list', $_, _fresh_container($_)] } @all],
@@ -5145,7 +5216,7 @@ sub _lower_block {
         }
       }
       my $rhs_txt = join ' ', map { $_->content } @rhs;
-      my @self_ref = grep { $rhs_txt =~ /\Q$_\E\b/ } @$vars;
+      my @self_ref = grep { $rhs_txt =~ _reads_name_rx($_) } @$vars;
       if (@self_ref) {
         # A nested declarator in the RHS (`my @a = my @a = …`) or a var already
         # promoted to a renamed package cell still needs v1's fuller machinery.
@@ -7306,6 +7377,19 @@ sub _fresh_container {
   return '(make-array 0 :adjustable t :fill-pointer 0)' if $sigil eq '@';
   return "(make-hash-table :test 'equal)"               if $sigil eq '%';
   return '(make-p-box nil)';
+}
+
+# Textual "does this code read NAME" scan.  For a SCALAR the match must not
+# fire on `$name[…]` / `$name{…}` — those are elements of @name/%name, not
+# the scalar.  The list-decl self-ref path binds a flagged name to
+# `(p-box-init $name)` — a direct READ of the outer variable — so a false
+# positive there is not the harmless single-scalar kind: with no outer
+# scalar in existence it emits an unbound package-var read (measured:
+# Text::Balanced's `my ($class, $func) = ($class[$i], $func[$i]);` crashed
+# `|Text::Balanced|::$class is unbound` the moment v2 lowered the module).
+sub _reads_name_rx {
+  my ($n) = @_;
+  return substr($n, 0, 1) eq '$' ? qr/\Q$n\E\b(?![\[\{])/ : qr/\Q$n\E\b/;
 }
 
 # Whole-statement fallback: run one statement through the ORIGINAL parser's

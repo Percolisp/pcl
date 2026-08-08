@@ -544,4 +544,64 @@ my $x = 1;
 print "c ", eval(q{$x}), " ", $x, "\n";
 });
 
+# ── #252 (s358): the GENERAL forward-goto shape (Text::Balanced's
+# _match_tagged) — several standalone labels, gotos that CROSS an intervening
+# label, and LIST `my` declarations hoisted past the catch boundary.  One
+# snippet covers: jump over the decls (undef read), jump to each label from
+# before the first, fallthrough through all labels, cross-label jumps from a
+# middle segment, and a hoisted list-decl value surviving into the last
+# segment.  INVERSE GUARD in the same snippet: a backward goto to a
+# standalone label (classic tagbody machinery) must keep working.
+test_transpile("#252: multi-label forward goto + list-decl hoist + backward goto", q{
+sub m3 {
+    my ($mode, $x) = @_;
+    my $extra;
+    my ($a, $b) = (10, 20);
+    goto failed if $mode eq 'f';
+    goto matched if $mode eq 'm';
+    $extra = $a + $b;
+    goto short if $mode eq 's';
+    $extra += 100;
+short:
+    $extra = ($extra // 0) + 1;
+    goto matched if $mode eq 'sm';
+    goto failed if $mode eq 'sf';
+matched:
+    return "M:$x:" . ($extra // 'undef');
+failed:
+    return "F:$x:" . ($extra // 'undef');
+}
+print m3($_->[0], $_->[1]), "\n"
+  for (['f',1], ['m',2], ['s',3], ['sm',4], ['sf',5], ['z',6]);
+my $n = 0;
+AGAIN:
+$n++;
+goto AGAIN if $n < 3;
+print "back:$n\n";
+});
+
+# ── #252 (s358): interpolation of a SUBSCRIPTED variable whose chain
+# continues — "$_[0]->{k}", "$a[0]{k}", "$h{a}[1]" — used to leave the tail
+# LITERAL (silent wrong; inside an overloaded '""' it recursed forever:
+# Text::Balanced 04_extdel.t).  Plus the list-decl element false self-ref:
+# `my ($class) = ($class[$i])` reads @class's element, NOT the (nonexistent)
+# outer scalar — the over-fire emitted an unbound package-var read.
+# INVERSE GUARDS: single subscripts and plain arrow chains unchanged; a REAL
+# scalar self-ref in a list decl still reads the outer value.
+test_transpile("#252: interp subscript chains + list-decl element self-ref", q{
+sub f { return "got $_[0]->{error} at $_[0]->{pos}" }
+print f({error=>"E1", pos=>7}), "\n";
+my @a = ({k=>"V", l=>[5,6]});
+my %h = (a => {b => "X"}, c => [1,2]);
+print "chain $a[0]{k} $a[0]{l}[1] $h{a}{b} $h{c}[0]\n";
+print "single $a[0]{k} plain ", join(",", map { $_->{k} // () } @a), "\n";
+my @class = ("CA", "CB"); my @func = ("FA", "FB");
+my $i = 1;
+my ($class, $func) = ($class[$i], $func[$i]);
+print "elem $class $func\n";
+my $s = "outer";
+my ($p, $s2) = ($s, "x");
+print "real-selfref $p\n";
+});
+
 done_testing();

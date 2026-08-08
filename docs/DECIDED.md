@@ -1244,3 +1244,40 @@ E4.1's pre-work is now done.
 - **No cache-generation bump**: file-mode emission is byte-identical across
   all 111 corpus files (`tools/corpus-diff.pl`), and eval transpiles are
   in-memory only (`*p-eval-string-cache*`).
+
+## s358 (2026-08-08, Fable) — s357 approved; #252/#243 USER-decided; Text::Balanced restored
+
+- **s357 (#244 step-4 verification) APPROVED as measured** — gate, the
+  15,129-row arithmetic, the pre-flip `pipeline=v1` attribution, the board
+  totals and the 27-file #243 blocker all independently reproduced.  One
+  nit: the Text-Balanced dist carried 780 ok rows (766 is the NET board
+  delta after +14 expected gains) → `docs/fable-answers-s357.md` §1.
+- **The audited populations are FOUR: sweep + CPAN board + Pl/t gate +
+  the perl suite** — a closed list; any "zero events" precondition must
+  name all four (§5a.2 re-amended; same miss happened twice) →
+  `docs/fable-answers-s357.md` §2.
+- **A live-v1-style audit runs on a COLD cache** — transpile-time
+  instruments report zero for exactly the already-cached modules (how the
+  audited board missed Text::Balanced) → `docs/fable-answers-s357.md` §2.
+- **#252 = SPLIT (USER, 2026-08-08): phase 1 (Text::Balanced) executed
+  s358; phase 2 (capture/spanning + poisoned-`my` families) is a PLAN
+  awaiting scope approval** → `docs/e41-suite-families-plan.md`, task #254.
+- **#243 = PORT the 27 Pl/t files off v1's file entry (USER, 2026-08-08)**
+  — then complete the step-3 deletion; assertions stay semantically
+  equivalent, v1-implementation-detail rows are dropped with a note, never
+  weakened → task #255, `docs/fable-answers-s357.md` §3.
+- **Forward `goto` to standalone labels is GENERAL for the all-forward
+  case** — nested catches, one per label, each enclosing everything before
+  its label; leading decls handled by ordinary my-branch nesting (NOT
+  hoisted).  Backward/mixed keep the tagbody machinery + gate →
+  `docs/fable-answers-s357.md` §4.1, guard rows in
+  `Pl/t/transpile-test-09.t`.
+- **A textual "reads $name" scan must not fire on `$name[`/`$name{`**
+  (elements of @name/%name, not the scalar) — `_reads_name_rx`, four scans
+  routed through it; the list-decl self-ref path emitted an unbound
+  package-var read on the false positive →
+  `docs/fable-answers-s357.md` §4.2.
+- **Interpolation of a subscripted variable continues its chain**
+  (`"$_[0]->{k}"`, `"$a[0]{k}"`) — chains parse via PPI when a second
+  group follows; a lone subscript keeps the legacy path byte-for-byte →
+  `docs/fable-answers-s357.md` §4.3.

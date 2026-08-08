@@ -4,6 +4,67 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 358 (2026-08-08, Fable) — s357 reviewed + approved; #252/#243 user-decided; Text::Balanced restored (933 rows, better than v1 ever was)
+
+Fable review session with the #252 phase-1 fix executed in the same
+sitting.  Rulings: `docs/fable-answers-s357.md`; phase-2 plan:
+`docs/e41-suite-families-plan.md`.
+
+**Review**: every load-bearing s357 claim independently reproduced — gate
+131/4658 re-run, the 15,129-row arithmetic exact, the pre-flip worktree
+attribution (`pipeline=v1` for sampled files + Text/Balanced.pm, op/for.t
+already PPI-dead), board 1794→1028 and the 27-file #243 blocker.  One nit:
+the Text-Balanced dist held 780 ok rows; 766 is the NET board delta.  The
+two method amendments RATIFIED: the audit populations are FOUR (sweep +
+board + Pl/t + perl suite, a closed list) and live-v1-style audits run on
+a COLD cache.
+
+**User decisions**: #252 = split — "Do 1. Then write a plan for 2."
+(phase 1 executed below; phase 2 = task #254, plan awaiting scope
+approval).  #243 = PORT the 27 Pl/t callers (task #255), then delete.
+
+**Phase 1 shipped — three compiler fixes, found by burning Text::Balanced
+down end to end** (gen v2-112 → v2-113):
+
+1. **General forward-goto** (`_lower_block`): `_match_tagged`'s three
+   standalone labels with cross-label forward gotos lower as NESTED
+   catches — each label's catch encloses everything before it; leading
+   `my`/`local` decls are NOT hoisted but consumed by their ordinary
+   branches, which nest the remainder and recurse (so array.t's existing
+   single-label emission stays byte-identical).  Existing single-label
+   wraps gained a cross-label guard.
+2. **`_reads_name_rx`**: `my ($class, $func) = ($class[$i], $func[$i]);`
+   — the self-ref text scan fired on `$class[` and bound
+   `(p-box-init $class)`, an unbound package-var read.  `$name[`/`$name{`
+   are elements, never the scalar; four scans routed through one helper.
+3. **Interp subscript chains** (`StringInterpolation.pm`):
+   `"$_[0]->{error}"` left `->{error}` LITERAL — inside an overloaded `""`
+   that recursed to death (04_extdel.t's "TIMEOUT").  A chain that
+   continues past the first subscript now parses whole via PPI; lone
+   subscripts keep the legacy path byte-for-byte.
+
+**Verification**: corpus-diff 1 of 111 differs (aassign.t — the interp
+reroute; probe divergence reproduced at HEAD, #169 family; sweep rows 0
+new / 0 fixed), gate **131/4660 PASS** (+2 guard rows in
+transpile-test-09.t), full sweep **GATE clean** 0 new / 0 fixed, TOTAL
+18499 = baseline, min MemAvailable 3.3 GB; board **933 ok / 161 not-ok**
+vs the v1-era 780/300 — every runnable Text-Balanced file produces rows
+and five improved.  pack/mro artifacts regenerated (marker-only).
+
+**Noted**: array.t single-file cold-cache sweep drifts vs baseline (6/2)
+— identical at HEAD, absent from the full sweep → measurement artifact of
+single-file runs, not a regression.  New tasks: #253 (op/for.t PPI
+regression), #254 (phase-2 plan), #255 (#243 port).
+
+**Process slip (mine)**: a backwards guard (`git stash -q && echo …`)
+actually RAN a stash mid-session, silently reverting the working tree —
+caught when corpus-diff went implausibly clean and -09 failed; popped, and
+every post-stash measurement re-run.  The no-stash rule exists for exactly
+this; the two corpus-diff runs bracketing the accident disagreed, which is
+what surfaced it.
+
+---
+
 ## Session 357 (2026-08-08, Opus 5) — #244 E4.1 step 4: the quadruple is green, the two wider populations are not
 
 Step 4 exists to look wider than the quadruple, and that is what it found.

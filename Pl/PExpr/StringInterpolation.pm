@@ -462,10 +462,14 @@ sub parse_interpolated_variable {
     
     # Check for array/hash subscript: $var[...] or $var{...}
     if (substr($content, $end_pos, 1) eq '[') {
+      my $chain = $self->_parse_subscript_chain($parser, $content_ref, $pos, $end_pos);
+      return @$chain if $chain;
       return $self->parse_array_subscript($parser, $content_ref, $pos,
 					  $full_var);
     }
     elsif (substr($content, $end_pos, 1) eq '{') {
+      my $chain = $self->_parse_subscript_chain($parser, $content_ref, $pos, $end_pos);
+      return @$chain if $chain;
       return $self->parse_hash_subscript($parser, $content_ref, $pos,
 					 $full_var);
     }
@@ -535,9 +539,61 @@ sub parse_interpolated_variable {
 
     return ($var_id, $end_pos);
   }
-  
+
   # Failed to parse
   return (undef, $pos);
+}
+
+# A subscripted scalar whose chain CONTINUES past the first subscript —
+# "$_[0]->{error}", "$a[0]{k}", "$h{a}[1]" — interpolates the whole chain in
+# Perl (implicit arrows included).  The single-subscript parsers stop after
+# the first group, which left the tail LITERAL: "$_[0]->{error}" printed
+# `HASH(0x…)->{error}`, and inside Text::Balanced::ErrorMsg's overloaded '""'
+# that self-stringification recursed forever (04_extdel.t).  When (and only
+# when) a second group follows, parse the full chain via PPI — the same move
+# the explicit `$var->[…]` walker below makes; a lone `$var[…]`/`$var{…}`
+# keeps the legacy single-subscript path byte-for-byte.  `@`-sigil slices
+# never chain here.  Returns [node_id, end_pos] or undef.
+sub _parse_subscript_chain {
+  my ($self, $parser, $content_ref, $pos, $end_pos) = @_;
+  my $content = $$content_ref;
+  return undef unless substr($content, $pos, 1) eq '$';
+  my ($expr_end, $groups) = ($end_pos, 0);
+  while ($expr_end < length($content)) {
+    my $bracket_pos;
+    if (substr($content, $expr_end, 2) eq '->'
+        && substr($content, $expr_end + 2, 1) =~ /^[\[\{]$/) {
+      $bracket_pos = $expr_end + 2;
+    } elsif (substr($content, $expr_end, 1) =~ /^[\[\{]$/) {
+      $bracket_pos = $expr_end;
+    } else {
+      last;
+    }
+    my $bracket = substr($content, $bracket_pos, 1);
+    my $close   = $bracket eq '[' ? ']' : '}';
+    my $depth   = 1;
+    my $i       = $bracket_pos + 1;
+    while ($i < length($content) && $depth > 0) {
+      my $ch = substr($content, $i, 1);
+      $depth++ if $ch eq $bracket;
+      $depth-- if $ch eq $close;
+      $i++;
+    }
+    last if $depth != 0;
+    $expr_end = $i;
+    $groups++;
+  }
+  return undef if $groups < 2;
+  my $expr_str = substr($content, $pos, $expr_end - $pos);
+  my $doc = PPI::Document->new(\$expr_str);
+  $self->{_ppi_docs} //= [];
+  push @{$self->{_ppi_docs}}, $doc;
+  my $stmt = $doc && $doc->find_first('PPI::Statement');
+  return undef unless $stmt;
+  my @parts = $stmt->children();
+  my $expr_id = $parser->parse(\@parts);
+  return undef unless defined $expr_id;
+  return [$expr_id, $expr_end];
 }
 
 
