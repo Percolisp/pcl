@@ -3544,16 +3544,16 @@ sub handle_subcalls {
     # the legacy branches must both be bounded by it.
     my $term_ceiling = $end_pars;
     if ($self->is_named_unary($func_name_for_unary) && $end_pars > $i + 1) {
-        # #153 step 2: `defined` takes its operand extent from the ONE
-        # term-grammar walker (_term_extent) when the walker ANSWERS;
+        # #153 step 3: EVERY named unary takes its operand extent from the
+        # ONE term-grammar walker (_term_extent) when the walker ANSWERS;
         # a decline (undef) falls through to the legacy hand-derived
-        # branches below, which also still serve the other named unaries
-        # until they migrate (step 3, Opus).  Corpus-measured equivalent
-        # (PCL_TERM_DIFF over all 111 census files: zero disagreements).
-        my $walker_end;
-        if ($func_name_for_unary eq 'defined') {
-            $walker_end = $self->_term_extent($e, $i + 1, $term_ceiling);
-        }
+        # branches below, which still cover the shapes the walker does not
+        # claim (bare words, prefix-op runs, `->method(args)`, cast-block
+        # slice groups) until the walker is widened to them.
+        # Measured before the flip (PCL_TERM_DIFF, s359 + s361): zero
+        # disagreements over the 111-file census corpus AND over all 604
+        # files of perl's own t/*/*.t — at this site, in both populations.
+        my $walker_end = $self->_term_extent($e, $i + 1, $term_ceiling);
         if (defined $walker_end) {
             $end_pars = $walker_end;
         } else {
@@ -3641,21 +3641,10 @@ sub handle_subcalls {
         # already extended; this fixes the symbol/cast/subscript branches, which
         # previously stopped at the first term.)
         $end_pars = $self->_extend_high_prec($e, $end_pars);
-
-        # #153 measurement probe (step 1→2 bridge): compare the legacy
-        # hand-derived operand extent against the term-grammar walker plus
-        # the same named-unary precedence extension.  Log-only; behaviour
-        # is unchanged.  Run corpora with PCL_TERM_DIFF=1 to inventory the
-        # disagreement families before any site is switched.
-        if ($ENV{PCL_TERM_DIFF}) {
-            my $te = $self->_term_extent($e, $i + 1, $term_ceiling);
-            $te = $self->_extend_high_prec($e, $te) if defined $te;
-            if (defined $te && $te != $end_pars) {
-                warn sprintf "PCL_TERM_DIFF unary op=%s old=+%d new=+%d toks=[%s]\n",
-                    $func_name_for_unary, $end_pars - $i, $te - $i,
-                    $self->_tok_run_desc($e, $i, ($te > $end_pars ? $te : $end_pars));
-            }
-        }
+        # (The step-1→2 PCL_TERM_DIFF probe that used to sit here is gone
+        # with the flip above: once the walker's answer IS $end_pars, the
+        # comparison can only ever report equality.  The probe at the
+        # strictly-1-arg site below is still live.)
     }
 
     # Functions taking EXACTLY 1 param need Cast+Symbol handling (e.g., shift @$arr)
