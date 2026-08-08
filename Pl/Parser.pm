@@ -2110,6 +2110,11 @@ sub _process_expression_statement {
       # The list must be in LIST_CTX (= 1) so split() returns elements not count
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
       $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
+      # A single SCALAR list operand is ONE element even when it holds an
+      # array/hash ref — see _foreach_single_scalar_p.  Same wrap as the
+      # block-form site in Parser2.
+      $cond_cl = "(vector $cond_cl)"
+        if _foreach_single_scalar_p(\@cond_parts);
       $cl_code = "(p-foreach (\$_ $cond_cl) $expr_cl)";
     }
     else {
@@ -6499,6 +6504,86 @@ sub _foreach_alias_rewrite {
   }
 
   return ();
+}
+
+# Is this foreach LIST exactly ONE SCALAR-valued operand — `$x`, `$h{k}`,
+# `$$r`, `${$r}`, `$obj->{k}`?
+#
+# perl flattens a foreach list, but a SCALAR contributes exactly one element
+# even when it holds an ARRAY or HASH ref.  PCL's box model cannot tell those
+# apart at RUNTIME: `\@a` and `[1,2]` are both "a p-box wrapping a vector",
+# which is also how an @array box arrives, and there is no ref-kind slot
+# (rejected by measurement, ruled s335).  So `%p-flatten-for-list` spread the
+# REFERENT: `for ($r) {…}` ran once per element of @$r (probed s361 against
+# perl: 3 iterations instead of 1, and the loop var was an element, not the
+# ref — a silent wrong for a common idiom).
+#
+# The EMITTER knows the sigil, so the decision belongs here — and the fix is
+# to route the single scalar through the SAME `(vector …)` shape a
+# multi-element list already uses (`for ($r, $h)` was always correct).  Only
+# unambiguously-one-value shapes qualify: a `$`-cast run, a `$`-sigil Symbol
+# or `${…}` block primary, then subscripts / `->` subscripts.  A `->` WORD is
+# a method call (may return a list) and a bare `@`/`%` symbol is a real list —
+# both decline, keeping today's behaviour.
+sub _foreach_single_scalar_p {
+  my ($list_parts) = @_;
+  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$list_parts;
+  # A sole element arrives wrapped: PPI::Statement (block form) or the
+  # parens themselves (statement-modifier form, `EXPR for ($r)`).
+  while (@sig == 1
+         && (ref($sig[0]) eq 'PPI::Statement'
+             || ref($sig[0]) eq 'PPI::Statement::Expression'
+             || ref($sig[0]) eq 'PPI::Structure::List'
+             || ref($sig[0]) eq 'PPI::Structure::Condition')) {
+    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
+  }
+  return 0 unless @sig;
+
+  my $i = 0;
+  my $casts = 0;
+  # A LEADING `\` makes the whole thing one reference — `\@a`, `\%h`, `\&f`
+  # are single scalars.  (`\(@a)` is perl's DISTRIBUTED form, a list of refs;
+  # it declines below because its primary is a List, not a Symbol.)
+  my $refcast = 0;
+  if ($i < @sig && ref($sig[$i]) eq 'PPI::Token::Cast'
+      && $sig[$i]->content eq '\\') {
+    $refcast = 1;
+    $i++;
+  }
+  while ($i < @sig && ref($sig[$i]) eq 'PPI::Token::Cast') {
+    return 0 unless $sig[$i]->content eq '$';   # @$r / %$r are real lists
+    $casts++;
+    $i++;
+  }
+  return 0 unless $i < @sig;
+  my $prim = $sig[$i];
+  if (ref($prim) eq 'PPI::Token::Symbol') {
+    # Without a cast the sigil must be '$'; after a '$' cast the symbol is
+    # the ref being dereferenced ($$r), and after `\` any sigil is fine
+    # (the reference, not the aggregate, is the value).
+    return 0 unless $casts || $refcast || $prim->content =~ /^\$/;
+  } elsif (ref($prim) eq 'PPI::Structure::Block') {
+    return 0 unless $casts || $refcast;         # only as ${ EXPR } / \{…}
+  } else {
+    return 0;
+  }
+  $i++;
+  # `\@a[0,1]` / `\@h{a,b}` are SLICES — perl distributes the ref over the
+  # elements, so they are lists.  A `\`-cast term takes no postfix here.
+  return 0 if $refcast && $i < @sig;
+
+  while ($i < @sig) {
+    if (ref($sig[$i]) eq 'PPI::Structure::Subscript') { $i++; next }
+    if (ref($sig[$i]) eq 'PPI::Token::Operator'
+        && $sig[$i]->content eq '->'
+        && $i + 1 < @sig
+        && ref($sig[$i + 1]) eq 'PPI::Structure::Subscript') {
+      $i += 2;
+      next;
+    }
+    return 0;
+  }
+  return 1;
 }
 
 # Process foreach-style loop: for/foreach VAR (LIST) { }

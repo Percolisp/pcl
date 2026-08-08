@@ -639,4 +639,40 @@ print "close=", (close $fh ? 1 : 0), " desc\n";
 unlink $tf;
 });
 
+# ── s361 SILENT WRONG: `foreach` over a SINGLE SCALAR that holds a ref.
+# perl flattens a foreach LIST, but a scalar is one element even when it
+# holds an array/hash ref.  PCL spread the REFERENT — `for ($r) {…}` ran
+# once per element of @$r, with the loop var bound to an ELEMENT — because
+# at runtime a box wrapping a vector is indistinguishable from an @array
+# box.  The emitter knows the sigil; it now wraps the single scalar in the
+# same (vector …) shape a multi-element list already used.
+# BOTH lowering sites are covered: the block form (Parser2) and the
+# statement-modifier form (`EXPR for ($r)`, the v1 statement seam).
+# INVERSE GUARDS, all in one snippet: `@$r`/`@a` must still SPREAD, `\(@a)`
+# is perl's DISTRIBUTED ref (a list, one per element), a two-element list is
+# unchanged, and aliasing must survive the wrap — `for ($x) { $_ = … }`
+# still writes through to $x.
+test_transpile("foreach over a single scalar holding a ref is ONE iteration", q{
+my @a = ("a","b","c");
+my %h = (k => [1,2]);
+my $r = \@a;
+my $obj = { r => [5,6] };
+my ($n1,$n2,$n3,$n4,$n5,$n6,$n7,$n8) = (0) x 8;
+for my $x ($r)        { $n1++; print "ref=", ref($x), "\n" }
+for my $x (\%h)       { $n2++ }
+$n3++ for ($h{k});
+$n4++ for ($obj->{r});
+$n5++ for (@$r);
+$n6++ for (@a);
+$n7++ for ($r, $obj);
+$n8++ for (\(@a));
+print "counts=$n1 $n2 $n3 $n4 $n5 $n6 $n7 $n8\n";
+my $s = "orig";
+for ($s) { $_ = "written" }
+print "alias=$s\n";
+my @w = (1,2);
+for my $e (@w) { $e *= 10 }
+print "spread-alias=@w\n";
+});
+
 done_testing();

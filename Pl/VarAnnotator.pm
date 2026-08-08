@@ -693,6 +693,22 @@ sub _tw_stmt {
         _ev($ctx, $arg->content, 'magic-lvalue-arg')
           if $arg && $arg->content =~ /^\$/;
       }
+      # Same veto, one shape over: `for ($x) { $_ = … }` — the loop var
+      # ALIASES the sole scalar list operand, so a write through it must
+      # reach $x itself.  The list is evaluated once into a one-element
+      # vector, and only a BOX carries the write back; a raw slot silently
+      # dropped it (probed s361 against perl: `alias=orig`, perl says
+      # `alias=written`).  Only a bare `$name` needs this — an element or a
+      # deref (`$h{k}`, `$$r`) already arrives as a live box.
+      {
+        my @sig2 = grep { ref($_) ne 'PPI::Token::Whitespace' } @lp2;
+        while (@sig2 == 1 && $sig2[0]->isa('PPI::Statement')) {
+          @sig2 = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig2[0]->children;
+        }
+        _ev($ctx, $sig2[0]->content, 'foreach-alias-list')
+          if @sig2 == 1 && $sig2[0]->isa('PPI::Token::Symbol')
+          && $sig2[0]->content =~ /^\$\w+$/;
+      }
     }
     for my $k (@k) {
       if ($k->isa('PPI::Structure::Condition')) {

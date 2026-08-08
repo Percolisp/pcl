@@ -603,11 +603,16 @@ EOF
 # shape (substr/pos/vec) de-gates too, now that the per-statement void-wrap
 # heap blocker is fixed (s288) — the loop var binds to the write-through cell.
 {
+  # s361: the sole SCALAR list operand is additionally wrapped in (vector …)
+  # — perl gives it exactly one element even when it holds a ref, and the
+  # runtime cannot tell a boxed vector from an @array box.  The box-returning
+  # head (which is what these two rows are about) is INSIDE that wrap, so
+  # aliasing still works; the assertions pin both.
   my $he = Pl::Parser2->parse_code(q[my %h = (k=>1); for ($h{k}) { $_++ }]);
-  like($he, qr/\(p-foreach \(\$_ \(p-gethash-box %h "k"\)\)/,
+  like($he, qr/\(p-foreach \(\$_ \(vector \(p-gethash-box %h "k"\)\)\)/,
        'hash-element foreach aliases via p-gethash-box');
   my $ae = Pl::Parser2->parse_code(q[my @a = (1,2,3); for ($a[1]) { $_++ }]);
-  like($ae, qr/\(p-foreach \(\$_ \(p-aref-box \@a 1\)\)/,
+  like($ae, qr/\(p-foreach \(\$_ \(vector \(p-aref-box \@a 1\)\)\)/,
        'array-element foreach aliases via p-aref-box');
   # substr magic-lvalue aliasing now lowers natively: the loop var binds to the
   # write-through cell p-substr-lvalue-cell (v1's mechanism, head-swapped).
