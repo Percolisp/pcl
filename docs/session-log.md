@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 362 (2026-08-08, Fable) — s361 review: APPROVED; all claims independently reproduced; one same-family residual filed (#262)
+
+Review-only session (plan-post-s359 §3).  Everything s361 claimed was
+re-verified independently at HEAD `7e5c839`:
+
+- **Gate**: `tools/prove-core` re-run cold — **132 files / 4719 PASS**,
+  matching the claim exactly (transpile-test-09.t's two new oracle-backed
+  snippets included).
+- **The one-disagreement inventory reproduced from scratch**: worktree at
+  the mid-session commit `1279be6` (arity fix in, 3b flip not yet, probe
+  still live), `tools/term-diff-sweep.pl --env PCL_TERM_DIFF=1` over all
+  604 files of perl's t/*/*.t → **exactly one shape, `getc $$_[0]` in
+  t/io/utf8.t** (2 occurrences, same shape) — event-for-event what the
+  ece9d35 commit message claims licensed the flip.
+- **Behavior probes vs real perl** (fresh scratch files, not the shipped
+  tests): the whole prototype family (`($;$)` both args, `($;)` list-op 5,
+  `($)` unary 0) and the whole foreach family (`$r`/`\%h`/`$h{k}` one
+  iteration, `@$r`/`\(@a)` still spread, block-form `for ($s){$_=…}`
+  writes through) — **IDENTICAL to perl**, including adversarial shapes the
+  tests don't carry (nested parens `for ((($r)))`, two-scalar alias
+  writes, `keys %h` decline).
+- **Baseline edits verified**: single-file sweep pos.t 15/15 and hash.t
+  7/7 match the edited baselines; fail-baseline carries 7 hash.t rows and
+  the pos.t defelem row (#261's cause documented).
+- Code review of all four diffs: layer choice (emitter, not runtime),
+  one-predicate-both-sites, decline-not-guess, probe deletion rationale,
+  `_proto_max_args` semantics — all sound.  DECIDED.md/tasks/plan updated
+  as required.  **s361 APPROVED as shipped.**
+
+**One residual found, filed #262 (probe-confirmed PRE-EXISTING at
+`197dcd9`, not an s361 regression)**: the statement-MODIFIER form
+`$_ = "w" for ($s);` still does not write back — d2bb91c added the
+`(vector …)` wrap at both lowering sites but the VarAnnotator
+`foreach-alias-list` veto only fires for the block form, so `$s` keeps a
+raw slot.  Same family as the second d2bb91c fix, other site.
+
+Next per the plan: #153 steps 4–5 (Opus), #254 (Opus); Fable's next
+design items are E5.1/E5.2 + the boxed-aggregates design.
+
+---
+
 ## Session 361 (2026-08-08, Opus) — #153 step 3 DONE (both operand sites on the walker); three silent-wrongs closed, four filed
 
 Picked up `docs/plan-post-s359.md` §1: #153 steps 3–5.  **Step 3 is
