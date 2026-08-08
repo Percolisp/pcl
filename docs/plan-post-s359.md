@@ -1,5 +1,35 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s361 (Opus).**  §1's **step 3 is DONE** — both operand sites are
+> on the walker (`3509115` named unaries, `ece9d35` strictly-1-arg, plus the
+> prototype-arity precondition `1279be6` and the foreach silent-wrong
+> `d2bb91c`).  State at s361 close: gate **132 / 4719 PASS**, cold-cache
+> sweep **GATE clean** (0 new / 0 fixed / 0 LOST, TOTAL 18498 = baseline
+> after two cause-documented baseline EDITs), gen **v2-115**.
+>
+> **NEXT, in order:**
+> 1. **#153 steps 4–5** — §1's remaining bullets: widen `_term_extent` to the
+>    shapes it still DECLINES (cast-block slice groups `@{$r}[0]`,
+>    `->method(args)`, prefix-op runs `~`/`!`, bare words), each widening
+>    getting rows in `Pl/t/reduce-term-01.t` FIRST; then fold the postfix-`->`
+>    reduction + subscript/slice builder into `_reduce_term` and delete
+>    `$deref_skip`; then delete the dead `$end_pars` branch chains at both
+>    sites.  Acceptance probes at the end: #147's `[] // 0` and the s317
+>    general-bareword probe (both in task #153).
+> 2. **#254** (§2) — still unstarted, still approved.
+> 3. Fillers (§4) now also include **#258–#261**, the four probe-confirmed
+>    pre-existing bugs s361 found: `\@a[0,1]` ref-distribution; the `(;$;)`
+>    prototype call that VANISHES behind a PARSE-ERROR comment (also a rule-12
+>    question); the `_` prototype's missing `$_` default; and `$_[N] =~ /\G/`
+>    matching a copy instead of the arg box (#261 — the row pos.t t21 now
+>    fails honestly, having previously passed under a wrong parse).
+>
+> **Standing rule added s361 (§5 amendment): a "measured then flipped" step
+> measures over BOTH the 111-file corpus AND perl's own `t/*/*.t` (604
+> files).**  The corpus alone reported ZERO disagreements while perl's t/
+> produced three real shapes, two of them live silent-wrongs.  Helper:
+> scratchpad `termdiff-par.pl`.
+
 State at close: everything green at HEAD — gate `tools/prove-core` 132 files
 / 4717 PASS; cold-cache sweep GATE clean (0 new / 0 fixed / 0 LOST, TOTAL
 18499 = baseline); corpus emission identical 111/111; gen v2-114 (s359 was
