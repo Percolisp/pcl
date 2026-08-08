@@ -117,7 +117,44 @@ two scopes.  **MECHANISM GAP** — per-declaration (scoped) renaming.  Small fil
 lowest priority; the same "process instances innermost/latest first" trick the
 spanning rename uses (M-B) is the obvious model.
 
-## Step 3 progress
+## Step 3 progress — SHIPPED so far: A-v, #264, B-i
+
+**#264 SHIPPED (`36b4d7f`)** — the span detector now resolves a CODE-level
+`${x}` (Cast + Block-holding-one-Word) to `$x`, through ONE helper
+(`_brace_name_refs`) that the RENAMER consumes too, so the two agree about what
+a use is.  The renamer sets the Word inside the Block, so the shape is handled
+rather than merely gated, and the old `${x} deref-block` refusal is deleted.
+Gate SET diffed file-by-file over both populations (715 files): 30 failures
+before, the same 30 after — **zero new gates**, which is the risk that mattered
+when adding detection.
+
+**B-i SHIPPED (`04316ab`)** — 1257 rows, no new mechanism: a cond rename mints
+a LET-BOUND `$i__cond__N`, so teaching `_eval_lexical_alist`'s key function the
+fourth suffix (beside `__lex__`/`__shadow__`/`__file__`) and passing `eval_ok`
+at the cond site is the whole fix.  `state` keeps the refusal (its `__state__`
+cell is a defvar, never a let).  Gate set 30 → 27, exactly the three B-i files.
+
+**Per-file, against the v1-era snapshot** (the ratified bar — reported as
+measured, not as a family claim; all three scored ZERO before, so the recovery
+is +1765 rows):
+
+| file | now | snapshot | verdict |
+|---|---|---|---|
+| re/regexp_unicode_prop.t | 778/332 | 778/332 | **at snapshot** |
+| op/my.t | 51/8 | 52/7 | one row short — t47, filed **#265** |
+| re/pat_advanced.t | 936/733 | 1073/596 | short; needs `--timeout 900` to finish |
+
+op/my.t's single differing row is `++my $x->{foo}` inside a sub: PCL emits no
+binding for `$x`, so with an outer `$x` in the file the hash persists across
+calls (**#265**, pre-existing, visible only because the file now runs).
+re/pat_advanced.t's 733 failures are regex-engine families — named captures,
+final-sigma casefolding, `\X`, `$REGMARK`, recursion, `(?{ })` — a different
+axis from #254 entirely.
+
+**B-i's file set is therefore de-gated but NOT "done" by the snapshot bar**, and
+op/while.t (B-ii) still refuses as "multiple declarations".
+
+## Earlier step-3 progress
 
 **A-v SHIPPED (s363, `0832e80`)** — and it was TWO stale text scans, not one:
 the pre-filter (fixed with `\{?`) and then, once the name was admitted, the

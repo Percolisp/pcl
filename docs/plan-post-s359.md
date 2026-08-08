@@ -27,10 +27,28 @@
 >   own task if it is to be fixed.  #147's shape, the other acceptance probe,
 >   PASSES (since step 3b) and was re-verified.
 >
-> **Next: §2 (#254), still unstarted, still approved** — the biggest open
-> Opus item.  Then Fable reviews s363 + the E5.1/E5.2 + boxed-aggregates
-> designs (§3).  New filler: **#263** (element in the modifier-form foreach
-> list — the v1 seam lowers `p-gethash` where Parser2 lowers `p-gethash-box`).
+> **§2 (#254) IS UNDERWAY**: session 1's measurement is done
+> (`docs/e41-suite-families-measurement-s363.md` — 13 files, 4 gate messages,
+> **6 causes**, each read off the passes' own refusal channel) and the first
+> three fixes shipped in the recommended order: **A-v**, **#264**, **B-i**
+> (1257 rows).  Remaining in order: **A-iv** (92) → **A-i** (946, needs an
+> extent decision) → **A-ii** (~11k, MECHANISM GAP — this is where #254's
+> STOP-RULE points: size it and ASK) → **A-iii** (195) → **B-ii** (27).
+>
+> **Two rules earned there, both in DECIDED.md**: a pass that DETECTS and a
+> pass that REWRITES must share the resolver (that mismatch WAS A-v and #264);
+> and when a fix widens what a checker sees, **diff the GATE SET file-by-file
+> over both populations** — adding detection can turn silently-wrong files into
+> dying ones.  Measured 30→30 for #264 and 30→27 for B-i.
+>
+> **"De-gated" is not "done"**: the ratified bar is the file's snapshot C_ok.
+> Of B-i's three files only re/regexp_unicode_prop.t reaches it; op/my.t is one
+> row short (**#265**) and re/pat_advanced.t 137 short with a regex-engine
+> residue.  Both numbers are reported in the measurement doc.
+>
+> Then Fable reviews s363 + the E5.1/E5.2 + boxed-aggregates designs (§3).
+> New fillers: **#263** (element in the modifier-form foreach list — the v1
+> seam lowers `p-gethash` where Parser2 lowers `p-gethash-box`), **#265**.
 
 > **UPDATED s362 (Fable review).**  s361 APPROVED — gate, the one-disagreement
 > inventory (reproduced from a `1279be6` worktree over perl's 604 t/ files),

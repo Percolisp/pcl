@@ -75,7 +75,50 @@ now DIES naming the shape and token run (rule 12) instead of silently leaving
 does NOT cover is module transpiles, which is why a cold-cache sweep still
 follows a parser change.
 
-**Verification at session close**: gate `tools/prove-core` **132 files / 4728
+**Then, continuing the step-3 order: #264 and B-i, both shipped.**
+
+**#264 (`36b4d7f`)** — the silent wrong the A-v probe found.  `${x}` written at
+CODE level is a use of `$x`, but PPI spells it Cast + Block-holding-one-Word,
+so there is no Symbol token and every Symbol-driven pass was blind: the
+checker never fired (no gate, just a later segment reading an unbound name),
+the renamer skipped it, and the `${x} deref-block` refusal written for exactly
+this shape sat DOWNSTREAM of the span test and was never reached — guard and
+hole in the wrong order.  ONE helper, `_brace_name_refs`, now answers the
+question for BOTH the detector and the renamer, the renamer rewrites the Word
+inside the Block (`${x}` → `${x__file__N}` / `${Pkg::x__file__N}`), and the
+refusal is deleted as handled.  The risk of adding detection is turning
+silently-wrong files into DYING ones, so the gate SET was diffed file-by-file
+over both populations: **30 failures before, the same 30 after** — zero new
+gates.  Breaking-case probes (`${ $ref }`, `@{[ … ]}`, `${main::g}`, a `my $s`
+shadow) all match perl; the two container gates the probe tripped were verified
+pre-existing.
+
+**B-i (`04316ab`)** — 1257 rows, and it needed **no new mechanism**: a cond
+rename mints a LET-BOUND `$i__cond__N` just like the seam my-shadow rename's
+`$i__shadow__N`, and `_eval_lexical_alist` already strips
+`__lex__`/`__shadow__`/`__file__` so an eval naming the original finds the
+binding.  Teaching the key function the fourth suffix and passing `eval_ok` at
+the cond site is the entire fix; `state` keeps its refusal (a defvar cell, not
+a let).  Probed both directions: an eval INSIDE the construct sees the LEXICAL,
+one outside sees the GLOBAL.  Gate set 30 → 27, exactly the three B-i files.
+
+**Reported as measured, not as a family claim**: against the v1-era snapshot,
+re/regexp_unicode_prop.t lands on it EXACTLY (778/332); op/my.t is 51/8 vs
+52/7, one row short — `++my $x->{foo}` inside a sub emits no binding for `$x`,
+so with an outer `$x` the hash persists across calls (**#265**, pre-existing,
+visible only because the file now runs); re/pat_advanced.t is 936/733 vs
+1073/596 and needs `--timeout 900` to finish at all, its residue being
+regex-engine families (named captures, final sigma, `\X`, `$REGMARK`,
+recursion) — a different axis from #254.  All three scored ZERO before, so the
+recovery is **+1765 rows**, and the two shortfalls are named rather than
+rounded away.  op/while.t (B-ii, "multiple declarations") still refuses.
+
+One Pl/t row had to change: parser2-02.t's INVERSE asserted the OLD refusal
+("… is still a whole-file gate").  Its real content — a use outside the
+constructs still POISONS — is kept and now asserted directly; only the obsolete
+half was replaced.
+
+**Verification at session close**: gate `tools/prove-core` **132 files / 4731
 PASS**; corpus emission identical for both walker commits AND for the #254
 Parser2 change, one explained file for #262; **TWO** cold-cache full sweeps —
 after the walker commits and again after the Parser2 change — both **GATE

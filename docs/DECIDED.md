@@ -1347,6 +1347,32 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s363 (2026-08-08, Opus) — #153 steps 4–5, plus #254's first three fixes
+
+- **`${x}` at CODE level IS a use of `$x`** (`36b4d7f`, #264): PPI spells it
+  Cast + Block-holding-one-Word, so there is no Symbol token and every
+  Symbol-driven pass was blind — the span checker never fired (silent wrong,
+  not even a gate) and the refusal written for that shape sat downstream of the
+  span test, unreachable.  ONE helper, `_brace_name_refs`, now serves BOTH the
+  detector and the renamer; `_has_code_brace_deref` is a filter over it.
+  **A pass that DETECTS and a pass that REWRITES must share the resolver** —
+  the same rule that made A-v (op/exec.t) a bug.
+- **Adding DETECTION can turn silently-wrong files into DYING ones, so diff the
+  GATE SET, not just the gate**: transpile every file of both populations
+  before and after and compare per file (scratchpad `xstat.pl`, s363).  #264
+  measured 30 → 30 (zero new gates); B-i measured 30 → 27 (exactly its three
+  files).  Adopt this whenever a fix widens what a checker sees.
+- **B-i needed no new mechanism** (`04316ab`): a poisoned condition-`my` rename
+  mints a LET-BOUND `$x__cond__N`, so teaching `_eval_lexical_alist`'s key
+  function that fourth suffix (beside `__lex__`/`__shadow__`/`__file__`) and
+  passing `eval_ok` at the cond site is the whole fix.  `state` keeps the
+  refusal — `__state__` is a defvar'd cell, never a let, so it never enters
+  `_let_bound_vars`.  1257 rows.
+- **De-gated ≠ done**: the ratified bar is the file's `perl-suite-run.tsv`
+  snapshot C_ok.  Of B-i's three, only re/regexp_unicode_prop.t lands on it;
+  op/my.t is one row short (**#265**) and re/pat_advanced.t is 137 short with a
+  regex-engine residue.  Report both numbers.
+
 ## s363 (2026-08-08, Opus) — #153 steps 4–5: walker widened, unreachable operand branches deleted
 
 - **The term walker claims method-call ARGS and cast-deref SLICE GROUPS**
