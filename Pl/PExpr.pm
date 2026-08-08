@@ -3567,9 +3567,10 @@ sub handle_subcalls {
         # #153 step 3: EVERY named unary takes its operand extent from the
         # ONE term-grammar walker (_term_extent) when the walker ANSWERS;
         # a decline (undef) falls through to the legacy hand-derived
-        # branches below, which still cover the shapes the walker does not
-        # claim (bare words, prefix-op runs, `->method(args)`, cast-block
-        # slice groups) until the walker is widened to them.
+        # branches below, which cover the two shapes the walker declines BY
+        # DESIGN: bare words and prefix-op runs.  (`->method(args)` and
+        # cast-block slice groups were declines too until s363 step 4 widened
+        # the walker to them.)
         # Measured before the flip (PCL_TERM_DIFF, s359 + s361): zero
         # disagreements over the 111-file census corpus AND over all 604
         # files of perl's own t/*/*.t — at this site, in both populations.

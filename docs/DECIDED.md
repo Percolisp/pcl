@@ -1347,6 +1347,43 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s363 (2026-08-08, Opus) — #153 steps 4–5: walker widened, unreachable operand branches deleted
+
+- **The term walker claims method-call ARGS and cast-deref SLICE GROUPS**
+  (`f322b19`, #153 step 4): `-> method ( args )` consumes the List and
+  continues the chain; a Block/Constructor group after a cast-deref
+  (`@{$r}[0]`, `\$V{V}`) is one slice postfix and ENDS the term (a slice
+  yields a list; nothing postfixes a list).  PPI spells that group as a
+  Constructor only because a `}` precedes it.
+- **Bare WORDS and PREFIX operators stay DECLINED — by design, not by
+  omission.**  Whether a bareword is a call, a filehandle, a class name or a
+  constant is not the term grammar's question (it is decided in the main
+  loop), and a prefix operator is phase-2 operator binding.  The plan text
+  listing "bare words" among step 4's widenings is superseded by the walker's
+  own rule.  → `_term_extent`'s header, session-log s363.
+- **The operand CEILING cannot fall inside a postfix chain**, so a walker
+  decline on a Symbol/Magic/Structure/already-parsed operand is IMPOSSIBLE —
+  the ceiling only ever falls at a top-level low-precedence operator or a
+  ternary `:`.  That argument (plus a 110-decline inventory over both
+  populations in which every decline led with a Word, an Operator or a Cast)
+  licensed deleting those branches at BOTH operand sites (`57086d8`, step 5);
+  what is left handles only the two by-design declines, and anything else
+  DIES naming the shape (rule 12) rather than leaving `$end_pars` at the
+  ceiling — a wrong-sized operand is a value-producing silent wrong.
+- **`tools/corpus-diff.pl`'s corpus IS `perl-tests/*.t` — the sweep's own
+  input set.**  So "emission identical across 111 files" already proves the
+  sweep's `.t` transpiles are identical; the only thing a post-parser-change
+  sweep adds is MODULE transpiles, which corpus-diff does not diff.  (Reason
+  to still run it cold, not a reason to skip it.)
+- **A foreach loop-var write must reach EVERY bare scalar operand, in BOTH
+  spellings** (`70e6e5c`, #262): one helper `_ev_foreach_alias_list` owns the
+  `foreach-alias-list` veto; the block form calls it from `_tw_stmt`, the
+  statement-modifier form from `_tw_stmt_expr`, and it vetoes every top-level
+  comma slot that is a lone bare `$name`.  `$_ = "w" for ($s)` and
+  `for ($p,$q){$_="w"}` were both silent-wrong.  Elements/derefs need no veto
+  (they arrive as live boxes) — EXCEPT in the modifier spelling, where the v1
+  seam lowers to `p-gethash` instead of `p-gethash-box` (#263, open).
+
 ## s361 (2026-08-08, Opus) — #153 step 3: both operand sites on the walker; the measurement population rule
 
 - **MEASURE ON PERL'S OWN t/ TOO, not just the 111-file corpus.** s359's

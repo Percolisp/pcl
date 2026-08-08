@@ -4,6 +4,96 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 363 (2026-08-08, Opus) — #262 closed (both foreach spellings, every operand); #153 steps 4–5 DONE
+
+Picked up `docs/plan-post-s359.md` §1 as written: the #262 warm-up first,
+then #153 steps 4–5.  Three commits, each measured before it landed.
+
+**#262 — a foreach loop-var write must reach EVERY bare scalar operand
+(`70e6e5c`).**  The task described one missing spelling; the probe found the
+veto was narrow in TWO directions, and both were live silent-wrongs:
+
+    $_ = "w" for ($s);        # modifier spelling — never reached the veto
+    for ($p, $q) { $_ = "w" } # two operands — the veto claimed only one
+
+d2bb91c's `foreach-alias-list` event sat inside `_tw_stmt`'s
+Statement::Compound branch, so the statement-modifier form never reached it,
+and it only ever claimed a one-element list.  One helper,
+`_ev_foreach_alias_list`, now owns the rule; both spellings call it (the
+modifier form from `_tw_stmt_expr`, which already splits the modifier off), it
+unwraps whichever wrapper the spelling hands over, and it vetoes every
+top-level comma slot that is a lone bare `$name`.  Probe-confirmed that the
+missing veto was the WHOLE mechanism: with `\$x` forcing the box by other
+means, `for ($x,$y){$_="w"}` already wrote through at HEAD.
+
+Corpus emission moved in exactly one file and the change IS the fix: qq.t's own
+`is()` does `foreach ($left,$right) { s/…/…/ }` and then prints them, so its
+diagnostic escaping had been silently discarded.  Gen v2-115 → v2-116.
+Residue filed as **#263** — an ELEMENT in the modifier spelling
+(`$_ = "w" for ($h{k})`) still writes nothing, a DIFFERENT mechanism: the v1
+statement seam lowers the list to `p-gethash` where Parser2's block form
+lowers it to `p-gethash-box`.
+
+**#153 step 4a/4b — the walker takes method-call args and cast-deref slice
+groups (`f322b19`).**  Two shapes `_term_extent` declined are ordinary
+postfixes: `-> method ( args )` (it now consumes the List and keeps walking,
+so `$o->m(1)->n(2)[0]` is one term) and a Block/Constructor group after a
+cast-deref (`@{$r}[0]`, `\$V{V}` — a slice, which PPI spells as a Constructor
+only because a `}` precedes it).  Rows went into `Pl/t/reduce-term-01.t`
+FIRST, inverse guards included (`$h{k}(1)` is a code-ref call, not method
+args; the group rule needs a cast).
+
+Measured over BOTH populations with a temporary probe reporting NEW (widening
+claims a term the pre-step-4 walker declined) and DECL (still declined):
+**0 NEW / 15 DECL** over the corpus, **1 NEW / 95 DECL** over perl's 604 t/
+files.  The single NEW is `ref\$Ｖ{Ｖ}` (t/uni/gv.t:269) where legacy stopped
+at `\$Ｖ` and left `{Ｖ}` dangling — the widening is the correct extent.  (That
+row still fails at runtime for an unrelated pre-existing reason: `ref \$h{k}`
+on a glob-valued element says REF where perl says GLOB — #163/#249, reproduced
+on plain ASCII.)  Corpus emission identical, as 0-NEW predicted.
+
+**#153 step 5 — delete the branches the walker made unreachable
+(`57086d8`).**  Both operand sites kept hand-derived chains for the decline
+case; most could no longer run.  Gone: the Symbol/Magic operand branches, the
+cast-deref chain follow-on, the Structure-plus-arrow chain, the
+already-parsed-node branch — 88 lines out, 62 in.
+
+The unreachability is an ARGUMENT, not just an absence: a decline on those
+shapes would mean the term crossed the operand CEILING, and the ceiling only
+falls at a top-level low-precedence operator or a ternary `:`, neither of
+which occurs inside a postfix chain.  The measurement agrees — of the 110
+declines reaching these chains across both populations, every one had a Word,
+an Operator or a Cast first, never a Symbol or a Structure.  What remains is
+exactly the two shapes the walker declines BY DESIGN (bare WORD primary,
+prefix operators), each site keeping its own unchanged answer; anything else
+now DIES naming the shape and token run (rule 12) instead of silently leaving
+`$end_pars` at the ceiling.  Zero deaths across all 715 files.
+
+**Note on sweep scope, worth keeping**: `tools/corpus-diff.pl`'s corpus IS
+`perl-tests/*.t`, the sweep's own input set — so "emission identical across
+111 files" already means the sweep's `.t` transpiles are identical.  What it
+does NOT cover is module transpiles, which is why a cold-cache sweep still
+follows a parser change.
+
+**Verification at session close**: gate `tools/prove-core` **132 files / 4728
+PASS**; corpus emission identical for both walker commits, one explained file
+for #262; cold-cache full sweep **GATE clean** — 0 new / 0 fixed / 0 LOST,
+TOTAL passing **18498 = baseline**.  The run's parallel pass flagged array.t
+LOST (-41 rows); the #215 serial re-run put it back at 169/15 OK, so it was
+load noise, and the serial verdict replaced it.  method.t appears in the
+UNSTABLE bucket with 4 new fails above its abort point — checked against a
+worktree at the session-start commit `a38c0a2` and it is **byte-identical
+there** (93 pass / 38 fail, same abort point, same last test), i.e.
+pre-existing crash-file noise.  Gen v2-116.
+
+Acceptance probes at the end of the task: **#147's shape now passes**
+(`f [] // 0` under a `($)` prototype — step 3b fixed it); the s317
+general-bareword probe (`print "x=", Foo::init;` must CALL) still fails, and
+it is NOT an operand-site question — the bareword decision happens in the main
+loop, so it is out of the walker's grammar by design.
+
+---
+
 ## Session 362 (2026-08-08, Fable) — s361 review: APPROVED; all claims independently reproduced; one same-family residual filed (#262)
 
 Review-only session (plan-post-s359 §3).  Everything s361 claimed was

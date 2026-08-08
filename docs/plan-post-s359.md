@@ -1,5 +1,37 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s363 (Opus).**  §1 is **DONE except the fold**: #262 closed
+> (`70e6e5c`, and it was wider than the task said — the two-operand list was
+> silent-wrong in BOTH spellings), and **#153 steps 4–5 shipped** (`f322b19`
+> widens the walker to `->method(args)` and cast-deref slice groups;
+> `57086d8` deletes the operand branches that widening made unreachable, 88
+> lines, with a rule-12 `die` where they used to be).
+>
+> **WHAT REMAINS OF #153 — the FOLD, and it is its own session**: move the
+> postfix-`->` reduction and the subscript/slice builder INTO `_reduce_term`
+> so the main loop stops reducing terms opportunistically, and delete
+> `$deref_skip` (Pl/PExpr.pm ~2950/~3074).  That bookkeeping is entangled with
+> the block-arg / inline_lambda path (`grep {…}->{k}`, #78's v1-route text
+> wrapping, `_v2_embedded_body`), which is exactly the region
+> `pexpr-term-parsing-review.md` §Risk names as the most likely to regress.
+> Recipe and acceptance probes are in task #153.
+>
+> **Two corrections to this plan's earlier text, both settled s363:**
+> - "widen the walker to **bare words**" is WITHDRAWN.  A bareword's meaning
+>   (call / filehandle / class name / constant) is decided in the main loop,
+>   not by the term grammar, and the walker's own header says so.  Bare words
+>   and prefix operators are permanent by-design declines; the sites keep a
+>   small documented fallback for exactly those two.
+> - The **s317 general-bareword acceptance probe** (`print "x=", Foo::init;`
+>   must CALL) is NOT a #153 gate — same reason.  It still fails; it needs its
+>   own task if it is to be fixed.  #147's shape, the other acceptance probe,
+>   PASSES (since step 3b) and was re-verified.
+>
+> **Next: §2 (#254), still unstarted, still approved** — the biggest open
+> Opus item.  Then Fable reviews s363 + the E5.1/E5.2 + boxed-aggregates
+> designs (§3).  New filler: **#263** (element in the modifier-form foreach
+> list — the v1 seam lowers `p-gethash` where Parser2 lowers `p-gethash-box`).
+
 > **UPDATED s362 (Fable review).**  s361 APPROVED — gate, the one-disagreement
 > inventory (reproduced from a `1279be6` worktree over perl's 604 t/ files),
 > and fresh oracle probes all independently verified; session-log s362 has the
