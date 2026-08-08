@@ -1,0 +1,20 @@
+# Per-file TIMEOUT ALLOWANCE registry for tools/run-perl-suite.pl.
+#
+#   rel<TAB>seconds<TAB>cause
+#
+# The effective per-file timeout is max(seconds, --timeout).  Registering a
+# file here is NOT an excuse and NOT a skip: the file still runs, still
+# reports, still fails the run if it diverges.  What it buys is that the file
+# gets measured AT ALL — a file that TIMEOUTs contributes NO TAP rows, so its
+# passing rows vanish from the signal without anything saying so (the #176
+# pack.t lesson: a file invisible to the gate reads as "0 new failures").
+#
+# Rules:
+#  - one line per file, with a CAUSE naming why it needs the time (and the
+#    measurement it was sized from) — an allowance without a cause is a
+#    hiding place;
+#  - size it from a measured run, then round up ~1.5x for machine load;
+#  - when a file gets faster, DELETE its row (the allowance is a max, so a
+#    stale row costs nothing on a fast run, but it misreports the file).
+#
+re/pat_advanced.t	900	s363/#254 B-i: de-gated by the cond-rename eval waiver, it now runs to completion (1669 TAP rows) but needs ~600s wall — at the 90s default it TIMEOUTs and its 936 passing rows evaporate invisibly.

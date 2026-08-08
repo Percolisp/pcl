@@ -22,7 +22,9 @@
 #   --dir D            add one subdir (repeatable)
 #   --all              scan the default dir set (see @DEFAULT_DIRS)
 #   --jobs N           parallel workers (default 8)
-#   --timeout N        per-file SBCL timeout seconds (default 90)
+#   --timeout N        per-file SBCL timeout seconds (default 90); a file
+#                      registered in docs/perl-suite-timeouts.tsv gets the
+#                      LARGER of its allowance and this (see that file)
 #   --no-core          skip the saved-core fast path (source-load the runtime)
 #   --tsv FILE         also write one TSV row per file (rel, P ok/notok,
 #                      C ok/notok, status, signature) for diffing runs
@@ -159,6 +161,7 @@ my $faillog = "$root/.suitelog";
 my $expected_tsv = "$root/docs/perl-suite-expected.tsv";
 my $expected_rows_tsv = "$root/docs/perl-suite-expected-rows.tsv";
 my $fixture_tsv  = "$root/docs/perl-suite-fixture.tsv";
+my $timeouts_tsv = "$root/docs/perl-suite-timeouts.tsv";
 my $bless_rows;
 my (@dirs, @files);
 while (@ARGV) {
@@ -223,6 +226,31 @@ if (open my $ff, '<', $fixture_tsv) {
   }
   close $ff;
 }
+# Per-file TIMEOUT ALLOWANCE registry: rel -> { secs, cause }.  A file that
+# TIMEOUTs contributes NO rows, so a file which merely needs longer than the
+# default reads as a total loss and its passing rows evaporate invisibly —
+# the #176 pack.t lesson, which cost the sweep a whole file's visibility.
+# The sweep answers it with a blind retry at 3x; here the need is KNOWN per
+# file and belongs written down with its cause, so the default run honours it
+# and the allowance is reviewable.  The effective timeout is the MAX of the
+# registry value and --timeout, so raising --timeout still works.
+my %file_timeout;
+if (open my $tf, '<', $timeouts_tsv) {
+  while (<$tf>) {
+    chomp;
+    next if /^\s*(?:#|$)/;
+    my ($rel, $secs, $cause) = split /\t/, $_, 3;
+    next unless defined $secs && $secs =~ /^\d+$/;
+    $file_timeout{$rel} = { secs => $secs, cause => $cause // '' };
+  }
+  close $tf;
+}
+sub timeout_for {
+  my ($rel) = @_;
+  my $e = $file_timeout{$rel} or return $timeout;
+  return $e->{secs} > $timeout ? $e->{secs} : $timeout;
+}
+
 -d $tdir or die "perl t/ tree not found: $tdir (pass --tdir)\n";
 $all = 1 if !@files && !@dirs;
 push @dirs, @DEFAULT_DIRS if $all;
@@ -381,6 +409,14 @@ $JOURNAL->autoflush(1);
 printf $JOURNAL "# run-perl-suite %s: %d files, jobs=%d timeout=%d\n",
   scalar(localtime), scalar(@files), $jobs, $timeout;
 print $JOURNAL "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
+# Timeout allowances in effect for files in THIS run — printed to both the
+# journal and the terminal, so a long-running file's allowance is never a
+# silent property of a registry nobody reads.
+for my $rel (sort grep { $file_timeout{$_} } @files) {
+  my $e = $file_timeout{$rel};
+  printf $JOURNAL "# timeout-allowance\t%s\t%d\t%s\n", $rel, timeout_for($rel), $e->{cause};
+  printf STDERR "timeout allowance: %-24s %4ds  (%s)\n", $rel, timeout_for($rel), $e->{cause};
+}
 print $JOURNAL "# queued\t$_\n" for @files;
 
 
@@ -402,12 +438,13 @@ sub run_one {
   $p_ok    = () = $perl =~ /^ok /mg;
   $p_notok = () = $perl =~ /^not ok /mg;
 
+  my $to = timeout_for($rel);   # per-file allowance (docs/perl-suite-timeouts.tsv)
   (my $safe = $rel) =~ s{/}{_}g;
   my $lisp = "$tmpdir/$safe.lisp";
   # Transpile with CWD = shadow so `require './test.pl'` prototype extraction
   # (cwd-first) reads the PCL stub, not perl's real harness.
   my $terr = system("ulimit -v 4194304 2>/dev/null; cd \Q$shadow\E && "
-                  . "timeout -k 10 $timeout perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
+                  . "timeout -k 10 $to perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
                   . "> \Q$lisp\E 2>\Q$lisp\E.err");
   my $pcl = "";
   my $sbcl_exit = 0;
@@ -424,7 +461,7 @@ sub run_one {
     # -k: an SBCL wedged in a runaway compile ignores/defers TERM and lives on
     # PAST the run (s316h: two escaped SBCLs + their orphaned 6 GB pl2cl
     # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
-    system("cd \Q$shadow\E && $childenv timeout -k 10 $timeout $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
+    system("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
     $sbcl_exit = $? >> 8;
     $pcl = do { local $/; my $fh; open($fh, '<', $out) ? (<$fh> // '') : '' };
     $c_ok    = () = $pcl =~ /^ok /mg;
@@ -654,7 +691,7 @@ while (@queue || %children) {
   # Hard-kill stragglers the in-child timeout somehow missed.
   for my $pid (keys %children) {
     my $info = $children{$pid};
-    next unless time() - $info->{start} > $timeout + 40;
+    next unless time() - $info->{start} > timeout_for($info->{rel}) + 40;
     kill 'KILL', -$pid; waitpid($pid, 0);
     record_result([$info->{rel}, 0, 0, 0, 0, 'TIMEOUT', '(killed)']);
     printf "%-24s %s\n", $info->{rel}, 'TIMEOUT (killed)';
