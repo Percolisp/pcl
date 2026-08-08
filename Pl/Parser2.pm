@@ -3292,24 +3292,24 @@ sub _promote_captured {
 # block-scoped lexical can only be captured by a sub textually inside its block.
 sub _captured_in_subs {
   my ($self, $subs, $canon, $extent) = @_;
-  my $sig = substr($canon, 0, 1);
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   for my $sub (@$subs) {
     next if $extent && !_elem_within($sub, $extent);
-    for my $s (@{ $sub->block->find('PPI::Token::Symbol') || [] }) {
-      return 1 if $s->symbol eq $canon;
-    }
-    if ($sig eq '@') {
-      for my $ai (@{ $sub->block->find('PPI::Token::ArrayIndex') || [] }) {
-        return 1 if $ai->content eq "\$#$bare";
-      }
-    }
-    # M-F: a quoted/heredoc/regex mention is a capture too — string eval
-    # reaches the lexical by NAME (`eval '$yyy'`).  _block_captures_name
-    # attributes the mention per-canon and shadow-checks it, so a sub-local
-    # shadow of the name does not count.  Without this an eval-string-only
-    # capture is invisible to promotion while _check_sub_captures DOES count
-    # it — the refusal here would leave the file gated forever (eval.t fred4).
+    # ONE capture test, the same one the GATE uses (`_check_sub_captures`):
+    # Symbol uses, `$#name`, and quoted/heredoc/regex mentions — the last
+    # because string eval reaches a lexical by NAME (`eval '$yyy'`), M-F.
+    #
+    # This function used to run its own Symbol and ArrayIndex loops FIRST,
+    # a shadow-BLIND duplicate of what _block_captures_name does two lines
+    # later: `$s->symbol eq $canon` counted a sub's OWN `my $x` uses as a
+    # capture of a same-named file lexical.  For a `my` the block lowers as
+    # a let that shadows the promoted cell, so the extra promotion was
+    # merely wasteful — but for a `my` EMBEDDED in another statement
+    # (`… if my $x = …`, `++my $x->{k}`) the embedded-my let is skipped for
+    # promoted names, and the sub then WROTE THE FILE LEXICAL: state leaked
+    # across calls and the outer variable was clobbered (#265, silent wrong).
+    # Deleting the blind loops makes the promoter and the gate agree, which
+    # is the standing rule (detector and rewriter share one resolver).
     return 1 if $self->_block_captures_name($sub->block, $bare, { $canon => 1 });
   }
   return 0;

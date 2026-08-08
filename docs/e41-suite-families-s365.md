@@ -245,3 +245,51 @@ Gate SET over both populations **23 → 22, zero new gates**.  Guard rows:
 position, chained attributes, the `for`-list-with-`continue` shape, a named
 sub's attributes, and the INVERSE guard that a real loop label still lowers as
 a label.  `*pcl-cache-generation*` → **v2-119**.
+
+---
+
+## 8. #265 — a sub's embedded `my` wrote the FILE LEXICAL (half fixed, half measured)
+
+`_captured_in_subs` — the test that decides whether a file lexical gets
+PROMOTED to a defvar'd cell — ran its own `PPI::Token::Symbol` and
+`ArrayIndex` loops and only THEN called `_block_captures_name`.  The loops were
+a shadow-BLIND duplicate of what that function already does correctly, so a
+sub's own `my $x` uses counted as a capture of a same-named file lexical.  The
+file lexical was promoted, and the embedded-`my` let is deliberately skipped
+for promoted names — so this sub had no lexical at all:
+
+```perl
+my $x;
+sub f { ++my $x->{k}; return $x->{k} }   # PCL: 1, 2, and $x leaks out
+                                          # perl: 1, 1, outer stays undef
+```
+
+Deleting the blind loops makes the PROMOTER agree with the GATE
+(`_check_sub_captures` has used the shadow-aware test since M-C) — the standing
+"one resolver" rule again, and again a deletion rather than a narrowing.
+
+**Verified**: the three probe shapes match perl; gate **132 / 4737 PASS**; gate
+SET over both populations **22 → 22, zero new gates**; `tools/corpus-diff.pl`
+reports exactly two changed files, eval.t and state.t, both re-swept at their
+pass baselines (**eval.t 114+46/169, state.t 158+0/166, 0 new fails** — the
+change there is that `$zzz` is no longer promoted and instead reaches the eval
+through the capture alist, which is the same visibility by the other route).
+Guard rows in `Pl/t/transpile-test-09.t`, with the inverse guard that a
+GENUINE capture still shares one cell.  `*pcl-cache-generation*` → **v2-120**.
+
+**Not fixed, and measured**: `op/my.t` t47 does not move (51/8 before and
+after).  Its shape is different — the same NAME is a package GLOBAL used by
+another sub:
+
+```perl
+sub foo  { ($x, $y) = (…) }        # package global $x
+sub foo3 { ++my $x->{foo}; … }     # a genuine fresh lexical
+```
+
+The embedded-`my` path vetoes its let whenever another named sub mentions the
+bare name, and here the veto is RIGHT to refuse a plain `let $x`: `$x` is
+defvar'd, so a `let` of that symbol is a dynamic rebinding, not a lexical.  The
+real fix mints a renamed lexical for the embedded decl and rewrites its uses
+within the enclosing sub (`_rename_decl_within`, shadow-aware since B-ii) —
+a design step, not a filler, because interpolation and eval visibility have to
+follow the rename.  Recorded on task #265 with the one-command discriminator.

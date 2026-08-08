@@ -779,4 +779,29 @@ print "named=", named(), "\n";
 OUT: for my $i (1, 2) { next OUT if $i == 1; print "label=$i\n" }
 });
 
+# ── s365 #265: a sub's OWN `my`, EMBEDDED in another statement, wrote the FILE
+# LEXICAL of the same name.  `_captured_in_subs` (the promoter's test) ran its
+# own Symbol/ArrayIndex loops before calling the shadow-aware
+# `_block_captures_name`, so `$s->symbol eq '$x'` counted the sub's own `my $x`
+# uses as a capture of the file `$x`.  The file lexical was then promoted to a
+# defvar'd cell, and the embedded-`my` let is deliberately skipped for promoted
+# names — so the sub had no lexical at all: it incremented the shared cell,
+# state persisted across calls, and the outer variable was clobbered.  Deleting
+# the blind loops makes the promoter agree with the GATE, which has used the
+# shadow-aware test since M-C.
+# INVERSE GUARD in the same snippet: a sub that GENUINELY captures the file
+# lexical (no shadow of its own) must still share the one cell — the write
+# inside must be visible outside.
+test_transpile("a sub's embedded `my` shadows a same-named file lexical (#265)", q{
+my $x;
+sub f { ++my $x->{k}; return $x->{k} }
+print "1=", f(), " 2=", f(), " outer=", (defined($x) ? "def" : "undef"), "\n";
+my $y = "OUT";
+sub g { my $r = "no"; $r = "yes" if my $y = "IN"; return "$r/$y" }
+print "g=", g(), " outer-y=$y\n";
+my $shared = 1;
+sub bump { $shared++; return $shared }
+print "cap=", bump(), " outer-shared=$shared\n";
+});
+
 done_testing();
