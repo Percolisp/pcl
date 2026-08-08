@@ -29,9 +29,18 @@
 > (`_normalize_anon_sub_attrs`) plus the `Structure::For` re-bless; PExpr's
 > prototype strip generalised to attributes for the correctly-lexed spelling.
 >
-> **Next**: Fable reviews s365 (`docs/opus5-review-requests-s365.md`), then
-> #153's FOLD (its own session).  Opus's next queue if Fable's order stands:
-> #265 → #267 → the §4 fillers.
+> **#265 is HALF DONE (s365).**  The promoter's own shadow-blind Symbol loops
+> are deleted, so a sub's embedded `my` no longer writes a same-named FILE
+> LEXICAL (§8).  The remaining sub-case — the name is a package GLOBAL used by
+> another sub — needs a RENAMED lexical, because a `let` of a defvar'd symbol is
+> a dynamic rebinding; that is a design step, recorded on the task.
+>
+> **Next**: Fable reviews s365 (`docs/opus5-review-requests-s365.md` — 9 asks),
+> then #153's FOLD (its own session).  Opus's next queue if Fable's order
+> stands: **#265's rename half** and **#267** (multi-element foreach alias) are
+> BOTH design-sized — #267 needs per-element lowering at the CLForm level, not
+> the anchored head rewrite — so they want a ruling before they are started;
+> the §4 fillers are the safe filler work meanwhile.
 
 > **UPDATED s364 (Fable review of s363 — `docs/fable-answers-s363.md`).**
 > All seven s363 commits APPROVED (gate independently re-verified 132/4731;

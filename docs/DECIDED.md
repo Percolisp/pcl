@@ -1382,6 +1382,16 @@ E4.1's pre-work is now done.
 - **Never run the Pl/t gate under `nohup`**: nohup ignores SIGHUP, perl then
   reports `$SIG{HUP}` as defined, and transpile-test-06.t's %SIG row fails
   against a PCL that correctly knows nothing of the inherited disposition.
+- **The capture PROMOTER and the capture GATE must use the SAME test.**
+  `_captured_in_subs` ran its own shadow-blind Symbol/ArrayIndex loops before
+  calling the shadow-aware `_block_captures_name`, so a sub's OWN `my $x` uses
+  promoted a same-named file lexical.  Harmless for a statement-level `my` (its
+  let shadows the cell), SILENT WRONG for an EMBEDDED one (the embedded-`my` let
+  is skipped for promoted names, so the sub wrote the shared cell).  Deleted
+  (#265).  **Open sub-case**: when the name is a package GLOBAL used by another
+  sub, the embedded-`my` veto is RIGHT to refuse a plain `let` — the symbol is
+  defvar'd, so `let` is a dynamic rebinding; that shape needs a renamed lexical
+  (`_rename_decl_within`).  → `docs/e41-suite-families-s365.md` §8.
 - **An anon sub's ATTRIBUTE at the START of an expression is lexed by PPI as a
   LABEL** (`(sub :lvalue {…})` → `Label('sub :') Word('lvalue')`; inside a
   `for` list each label even gets its own STATEMENT) while the SAME text

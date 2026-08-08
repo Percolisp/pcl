@@ -1,12 +1,13 @@
 # Review requests — s365 (Opus) → Fable
 
 Session doc: `docs/e41-suite-families-s365.md` (per-file measurements),
-session-log s365, DECIDED.md s365 section.  Six commits.  Everything below is
-shipped and measured; the asks are the calls I should not make alone.
+session-log s365, DECIDED.md s365 section.  Eight commits.  Everything below is
+shipped and measured; the asks are the calls I should not make alone.  (Nine asks:
+1-6 from the #254 queue, 7-8 on #268, 9 on #265.)
 
-**State at close**: gate `tools/prove-core` **132 files / 4736 PASS**; gate SET
+**State at close**: gate `tools/prove-core` **132 files / 4737 PASS**; gate SET
 over both audit populations (715 files) **27 → 22 gated, zero new gates at every
-step**; gen v2-119 (emission changed by #263 and #268).  Corpus-diff,
+step** (22 after #265 too); gen v2-120 (emission changed by #263, #268 and #265).  Corpus-diff,
 cold-cache sweep and full `--all` suite: numbers in the session-log entry.
 
 ---
@@ -163,6 +164,29 @@ strips a `PPI::Token::Prototype` after `sub` so it consumes interleaved
 
 **Ask**: confirm that reading of the ordering (it is the one assumption the fix
 rests on), or tell me it needs a guard.
+
+## Ask 9 — #265: I deleted the promoter's own capture test.  And the half I did NOT do.
+
+`_captured_in_subs` ran its own `PPI::Token::Symbol` / `ArrayIndex` loops and
+only then called the shadow-aware `_block_captures_name` — a blind duplicate of
+what that function already does.  I deleted the loops (§8), so the PROMOTER now
+uses exactly the GATE's test.  Measured: gate 132/4737, gate SET 22 → 22,
+corpus-diff exactly eval.t + state.t and both re-sweep at their pass baselines.
+The eval.t change is worth your eye: `$zzz` is no longer promoted and instead
+reaches the string eval through the CAPTURE ALIST — same visibility, other
+route, same row counts.  **Ask**: confirm that is the intended route, and that
+"one capture test, shared by promoter and gate" is the rule going forward.
+
+The half I did NOT do, with its measurement: **op/my.t t47 does not move**
+(51/8 before and after).  There the same NAME is a package GLOBAL another sub
+writes (`sub foo { ($x,$y) = … }`), so the embedded-`my` veto fires — and it is
+RIGHT to refuse a plain `let $x`, because `$x` is defvar'd and a `let` of that
+symbol is a DYNAMIC rebinding, not a lexical.  The fix mints a renamed lexical
+for the embedded decl and rewrites its uses inside the enclosing sub
+(`_rename_decl_within`, shadow-aware since B-ii), with interpolation and eval
+visibility following the rename.  **Ask**: is that the shape you want, and does
+it go before or after #267 (whose own fix is per-element lowering at the CLForm
+level — the anchored head rewrite cannot express a multi-element alias list)?
 
 ## Deliberate not-dones
 

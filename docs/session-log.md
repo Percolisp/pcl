@@ -96,6 +96,21 @@ is in neither audit population.  Gate SET 23 → 22, zero new gates; guard rows 
 inverse guards in `Pl/t/transpile-test-09.t`; `*pcl-cache-generation*` →
 v2-119.
 
+**7. #265 half-closed** (§8).  `_captured_in_subs` — the test that decides
+whether a file lexical is PROMOTED — ran its own Symbol/ArrayIndex loops before
+the shadow-aware `_block_captures_name`, a blind duplicate of what that function
+already does.  A sub's OWN `my $x` uses therefore counted as a capture of a
+same-named file lexical; the lexical was promoted, and the embedded-`my` let is
+skipped for promoted names, so `sub f { ++my $x->{k} }` had no lexical at all
+and wrote the shared cell (state across calls, outer clobbered).  Deleting the
+blind loops makes the promoter agree with the GATE.  Gate **132/4737 PASS**,
+gate SET 22 → 22, corpus-diff = eval.t + state.t only and both re-sweep at
+their pass baselines (114+46, 158+0, 0 new); gen **v2-120**.
+**op/my.t t47 does NOT move** and is a different sub-case — the same name is a
+package GLOBAL used by another sub, where a plain `let` of the defvar'd symbol
+would be a dynamic rebinding; the real fix mints a renamed lexical
+(`_rename_decl_within`) and is recorded on #265 with its discriminator.
+
 ## Session 364 (2026-08-08, Fable) — review of s363: APPROVED; A-ii parked; ir-spec brought current
 
 Reviewed `docs/opus5-review-requests-s363.md` (seven asks).  Verdict: **all
