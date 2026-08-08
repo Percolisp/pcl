@@ -4,6 +4,92 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 361 (2026-08-08, Opus) — #153 step 3 DONE (both operand sites on the walker); three silent-wrongs closed, four filed
+
+Picked up `docs/plan-post-s359.md` §1: #153 steps 3–5.  **Step 3 is
+complete** — both operand sites now take their operand extent from the ONE
+term-grammar walker — and the measurement that licensed it turned up three
+live silent-wrongs, all fixed here.
+
+**The measurement lesson (the session's main methodological result): the
+111-file census corpus was NOT enough.**  Re-running s359's `PCL_TERM_DIFF`
+probes over the corpus reproduced ZERO disagreements; running the same
+probes over **all 604 files of perl's own `t/*/*.t`** produced three real
+shapes.  Both populations are now the standing recipe for this task
+(scratchpad `termdiff-par.pl` runs the probe over a file list in parallel).
+
+**Four commits:**
+
+- `3509115` **step 3a** — every named unary (not just s359's `defined`)
+  takes its operand from `_term_extent`; declines still fall to the legacy
+  branches.  Zero disagreements at this site in BOTH populations; corpus
+  emission identical; gate 132/4717.
+- `1279be6` **SILENT WRONG, and the precondition for 3b**: `sub f ($;$) {…};
+  f $a, $b;` silently DROPPED every argument after the first.  The
+  strictly-1-arg site read `min_params` (a MINIMUM) as "exactly one".  A user
+  prototype now decides it from max-args AND perl's trailing-`;` list-op rule
+  (`sub unilist ($;)` ⇒ `unilist 0 || 5` is `unilist(0||5)`; perl's own
+  t/comp/proto.t exercises all three spellings).  Builtins untouched.
+- `ece9d35` **step 3b** — the strictly-1-arg site flipped.  After the arity
+  fix exactly ONE disagreement remained in both populations, `getc $$_[0]`
+  (t/io/utf8.t:397), where legacy stopped at `$$_`; the flip fixes it, and
+  the same flip fixes the **#147 family shape** (`($)`-proto + `0 || 5`:
+  perl 1, PCL was 6).  BOTH `PCL_TERM_DIFF` probes DELETED — once a site's
+  answer IS the walker's, the probe can only report equality.
+- `d2bb91c` **SILENT WRONG (found while writing 3b's inverse guards)**:
+  `for my $x ($r) {…}` over a scalar holding a ref DEREFERENCED it and
+  iterated the referent — `for ($r)` 3 iterations where perl runs 1,
+  `for (\%h)` 4≠1, `for ($h{k})` / `for ($obj->{r})` 2≠1.  The runtime
+  cannot decide it (a box wrapping a vector is also how an @array box
+  arrives; no ref-kind slot, ruled s335), so the decision moved to the
+  EMITTER, which knows the sigil: one predicate
+  (`Pl::Parser::_foreach_single_scalar_p`) consumed by BOTH lowering sites
+  (Parser2 block form + the v1 statement-seam modifier form — same bug in
+  both), routing the single scalar through the SAME `(vector …)` shape the
+  multi-element list already used.  A SECOND silent-wrong in the same
+  statement fixed with it: `for ($x) { $_ = … }` never wrote back, because
+  the VarAnnotator had no veto for a scalar used as the LIST (new event
+  `foreach-alias-list`, beside its magic-lvalue sibling).  Emission changed
+  in exactly 4 corpus files, every line a single-scalar foreach gaining its
+  wrap; gen bumped v2-114 → **v2-115**.
+
+**Verification**: gate `tools/prove-core` **132 files / 4719 PASS**;
+corpus-diff explained after every commit; regression rows in
+`Pl/t/transpile-test-09.t` (two snippets: the prototype/term family with the
+bare-word-filehandle decline as inverse guard; the foreach family with
+`@$r`/`@a` still spreading, `\(@a)` distributing, and aliasing writing
+through).  `parser2-01.t`'s two shape assertions re-pinned to the new
+emission (they assert the box-returning head, still there, now inside the
+wrap).
+
+**Sweep (cold cache) and the two baseline EDITs.**  The gate reported 3 new /
+1 fixed / 1 LOST.  Both were diagnosed to a cause, not a count:
+- **pos.t t21 `\G works with defelem scalars`** — caused by the arity fix,
+  and the row had been passing under the WRONG parse (`(ok($_[3])) =~ /\Ge/`).
+  With the correct parse it fails for a real reason: the `=~` target is a
+  COPY (`p-aref`), not the arg box, so pos set through the defelem is
+  invisible.  Filed as **#261**; row added to `fail-baseline.tsv` by EDIT
+  with that cause, `pass-baseline.tsv` pos.t 16/14 → 15/15.
+- **hash.t** — NOT ours: measured 7 failing rows already at the
+  session-start commit `197dcd9` against a 6-row baseline.  The churn is a
+  join-key artifact — baseline row `hash.t 6` had an EMPTY description, and
+  the two current rows (5 and 6) are the DESTROY family (#198).  Replaced
+  the empty row with the two real ones by EDIT.
+
+**Also filed, all probe-confirmed and all pre-existing**: **#258** `\@a[0,1]`
+does not distribute the ref over a slice; **#259** a call to a `(;$;)`-proto
+sub emits `PARSE ERROR … Missing case: [` and the whole statement VANISHES
+(the #138 family — and a rule-12 question for whoever owns the PARSE-ERROR
+path); **#260** the `_` prototype does not default to `$_` on a zero-arg call.
+
+**Left for the next session**: #153 steps 4–5 (widen the walker to the shapes
+it still declines — cast-block slice groups, `->method(args)`, prefix-op runs,
+bare words — each with `reduce-term-01.t` rows first; fold reduction into
+`_reduce_term`; delete the dead `$end_pars` chains and `$deref_skip`), then
+#254.  Recipe and acceptance probes are in task #153.
+
+---
+
 ## Session 360 (2026-08-08, Fable) — USER rulings recorded: #254 APPROVED, big bug hunt deferred to E5 exit gate
 
 Docs-only session (no code, no emission change).  The user ruled on the

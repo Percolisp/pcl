@@ -1346,3 +1346,43 @@ E4.1's pre-work is now done.
   the docs/bug-review-s359.md §4 recommendation accepted — E5 exit gate,
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
+
+## s361 (2026-08-08, Opus) — #153 step 3: both operand sites on the walker; the measurement population rule
+
+- **MEASURE ON PERL'S OWN t/ TOO, not just the 111-file corpus.** s359's
+  `PCL_TERM_DIFF` inventory over the census corpus said ZERO disagreements;
+  the same probes over all 604 files of `t/*/*.t` produced THREE real shapes,
+  two of them live silent-wrongs.  Any "measured then flipped" step in the
+  #153 family runs over BOTH populations before the flip (helper:
+  scratchpad `termdiff-par.pl`).  → session-log s361, task #153.
+- **#153 step 3 DONE**: named-unary site (`3509115`) and strictly-1-arg site
+  (`ece9d35`) both take their operand extent from `_term_extent`; a decline
+  still falls to the legacy branches.  Both `PCL_TERM_DIFF` probes DELETED —
+  once a site's answer IS the walker's, the probe can only report equality.
+  Steps 4–5 (widen the walker to the declined shapes, fold reduction in,
+  delete the dead `$end_pars` chains + `$deref_skip`) remain.
+- **Paren-less call arity is decided by the PROTOTYPE, not by `min_params`**
+  (`1279be6`): `min_params` is a MINIMUM, and reading it as "exactly one"
+  made `sub f ($;$) {…}; f $a, $b;` silently drop every argument after the
+  first.  The site now uses max-args AND perl's **trailing-`;` = LIST-operator
+  precedence** rule (`sub unilist ($;)` ⇒ `unilist 0 || 5` is
+  `unilist(0||5)`, while a plain `($)` is a named unary ⇒ `unilist(0) || 5`).
+  Builtins are untouched (no `min_params` in their records).
+- **A foreach LIST that is a single SCALAR is ONE element — decided in the
+  EMITTER** (`d2bb91c`): the runtime cannot tell a box-wrapping-a-vector
+  (`\@a`, `[1,2]`) from an `@array` box, and the ref-kind slot was rejected
+  by measurement (s335), so `%p-flatten-for-list` was spreading the referent.
+  The sigil is compile-time knowledge: `Pl::Parser::_foreach_single_scalar_p`
+  is the ONE predicate, consumed by BOTH lowering sites (Parser2 block form
+  and the v1 statement-seam modifier form), and the single scalar is routed
+  through the SAME `(vector …)` shape a multi-element list already used.
+  A scalar used as a foreach LIST is also force-boxed (VarAnnotator event
+  `foreach-alias-list`) so `for ($x) { $_ = … }` writes back.
+- **A sweep row that starts failing after a PARSE fix may have been passing
+  under the wrong parse** — check the emission diff before calling it a
+  regression.  pos.t t21 is the worked example: it scored "pass" while the
+  statement parsed as `(ok($_[3])) =~ /\Ge/`; with the correct parse it fails
+  for a real reason (#261, the `=~` target is a copy, not the arg box).
+  Row added to `fail-baseline.tsv` by EDIT with that cause; hash.t's
+  concurrent churn was measured PRE-EXISTING at the session-start commit
+  (an empty-description baseline row — descriptions are join keys).

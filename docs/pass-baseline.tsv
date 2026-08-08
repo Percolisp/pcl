@@ -71,7 +71,7 @@ or.t	OK	11	2	14
 ord.t	OK	38	0	38
 pack.t	OK	5636	89	14722
 parent.t	OK	7	2	-1
-pos.t	OK	16	14	30
+pos.t	OK	15	15	30
 postfixderef.t	PARTIAL	96	25	128
 pow.t	OK	268	0	268
 print.t	OK	2	1	3
