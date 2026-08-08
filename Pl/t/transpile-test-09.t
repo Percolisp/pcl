@@ -45,7 +45,21 @@ sub run_cl {
     print $fh $code;
     close $fh;
 
-    my $cl_code = `$pl2cl $pl_file 2>&1`;
+    # Transpile stderr must NOT be folded into the .lisp: pl2cl ANNOUNCES on
+    # stderr for effect-only drops (the #268/#270 anon-sub `:prototype`
+    # family), and a `PCL: …` line at the top of the file is a CL read error
+    # ("illegal terminating character after a colon").  A warning has no perl
+    # counterpart either — run_perl compares perl's own stderr, and perl says
+    # nothing here.  On a FAILED transpile the stderr is still appended, so a
+    # real error is as visible as it was before.  (Each transpile-test-NN.t
+    # carries its own copy of this helper; only this one is fixed.)
+    my (undef, $err_file) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    my $cl_code = `$pl2cl $pl_file 2>$err_file`;
+    if ($?) {
+        open my $err_in, '<', $err_file or die "open $err_file: $!";
+        $cl_code .= do { local $/; <$err_in> };
+        close $err_in;
+    }
 
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
@@ -802,6 +816,33 @@ print "g=", g(), " outer-y=$y\n";
 my $shared = 1;
 sub bump { $shared++; return $shared }
 print "cap=", bump(), " outer-shared=$shared\n";
+});
+
+# ── #270: an anon sub's `:prototype(…)` at the START of an expression, where
+# the prototype text ends in `$`.  PPI already mis-lexes `sub :ATTR` there as a
+# LABEL (#268); on top of that, the prototype's closing `)` is tokenized as the
+# MAGIC VARIABLE `$)`, so the attribute's paren group never closes and PPI
+# closes it on the SUB's own `)` — swallowing the block.  The #268 repair then
+# found no Block at the end of its run and DECLINED SILENTLY, after which the
+# whole statement was replaced by a PARSE-ERROR comment: perl printed 42, PCL
+# printed nothing and exited 0.
+# Covered here: the bare `($)`, the `;`-bearing spellings that lex one layer
+# differently again, a chained attribute in front, and the `for`-LIST shape
+# (where PPI splits the run across sibling statements) with TWO subs.
+# INVERSE GUARDS in the same snippet: `($$)` and `(\@)` lex correctly and must
+# keep taking the ordinary announce-and-drop path, and a NAMED sub's
+# `:prototype($)` — which lexes correctly anywhere — must still impose its
+# prototype on later calls.
+test_transpile("anon sub :prototype ending in \$ at expression start (#270)", q{
+my @l = (sub :prototype($) { 42 }, sub :prototype(;$) { 43 },
+         sub :prototype($;$) { 44 }, sub :method :prototype($) { 45 },
+         sub :prototype($$) { 46 }, sub :prototype(\@) { 47 });
+print join(",", map { $_->(0) } @l), "\n";
+for my $s (sub :prototype($) { "a" }, sub :prototype($) { "b" }) { print $s->(0) }
+print "\n";
+sub named :prototype($) { return "n:$_[0]" }
+my @args = (7, 8);
+print named(@args), "\n";
 });
 
 done_testing();

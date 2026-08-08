@@ -1678,8 +1678,22 @@ prototype at runtime. Announcing rather than dying follows the s329 boundary
 silently replaced by a PARSE ERROR comment, which is the failure this entry
 exists to prevent.
 
-**Revisit if:** the mis-lexed spelling turns up in real code (it appears in
-neither audit population today), or PPI fixes the lexer — then the repair can
-produce proper `Attribute` tokens and let the existing extractor run.
+**Prototypes ending in `$` (s367, #270):** these are the same drop, but they
+reach it by a second layer of the mis-lex — `prototype($)`'s closing paren is
+tokenized as the magic variable `$)`, so PPI swallows the sub's block into
+the attribute's parens (`docs/ppi-upstream-bugs.md` §7b). Every prototype
+whose text ends in `$` is affected (`($)`, `(;$)`, `($;$)`, …). They are
+repaired at source level before the §7 pass and land on this same
+announce-and-drop path; the message is identical. Before s367 they did not
+reach the announce at all — the §7 repair declined SILENTLY and the whole
+statement vanished at exit 0. That silence is now a die: a `sub :` Label is
+only ever produced by this mis-lex, so a run that does not end at a Block is
+known-mangled input the repair does not cover, and it says so by name.
 
-**Owner:** task #268.
+**Revisit if:** the mis-lexed spelling turns up in real code (it appears in
+neither audit population today — s367 re-measured: 15 sources across both
+populations carry a `sub :ATTR` spelling, none of them this one), or PPI
+fixes the lexer — then the repair can produce proper `Attribute` tokens and
+let the existing extractor run.
+
+**Owner:** tasks #268 / #270.

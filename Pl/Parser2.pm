@@ -579,7 +579,7 @@ sub parse {
 
   # PPI LEXER BUG: an anon sub with an ATTRIBUTE at the START of an expression
   # is tokenized as a LABEL — see _normalize_anon_sub_attrs.
-  $self->_normalize_anon_sub_attrs($doc);
+  $doc = $self->_normalize_anon_sub_attrs($doc);
 
   # `state` outside the classic subset (scalar statement-decl in a named sub)
   # is rewritten at SOURCE level into plain Perl the existing machinery
@@ -3607,15 +3607,17 @@ sub _rewrite_state_prepass {
   my $has = $doc->find(sub {
     $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'state' }) || [];
   return $doc unless ref $has && @$has;
-  $doc = $self->_state_reparse($doc) if $self->_state_normalize_decls($doc);
-  $doc = $self->_state_reparse($doc) if $self->_state_rewrite_routes($doc);
+  $doc = $self->_reparse_doc($doc) if $self->_state_normalize_decls($doc);
+  $doc = $self->_reparse_doc($doc) if $self->_state_rewrite_routes($doc);
   return $doc;
 }
 
-sub _state_reparse {
+# Reparse the document from its own (source-level rewritten) text.  Shared by
+# the state prepass and the #270 prototype repair.
+sub _reparse_doc {
   my ($self, $doc) = @_;
   my $new = $self->fallback_parser->_ppi_parse($doc->serialize)
-    or die "Parser2: PPI reparse after state rewrite failed\n";
+    or die "Parser2: PPI reparse after source-level rewrite failed\n";
   return $new;
 }
 
@@ -3636,7 +3638,7 @@ sub _normalize_tie_my {
     $k[2]->set_content("$sym ; tie $sym");
     $changed++;
   }
-  return $changed ? $self->_state_reparse($doc) : $doc;
+  return $changed ? $self->_reparse_doc($doc) : $doc;
 }
 
 # PPI LEXER BUG (1.291, #268).  At the START of an expression — right after
@@ -3661,6 +3663,10 @@ sub _normalize_tie_my {
 # docs/ppi-upstream-bugs.md §7.
 sub _normalize_anon_sub_attrs {
   my ($self, $doc) = @_;
+  # #270 first: a prototype whose text ends in `$` mangles the run one layer
+  # deeper than the repair below can see, and it is repaired on the raw token
+  # stream before any of the tree surgery here runs.
+  $doc = $self->_repair_swallowing_prototypes($doc);
   for my $lab (@{ $doc->find('PPI::Token::Label') || [] }) {
     next unless $lab->content =~ /^sub\s*:$/;
     # Inside a `for`/`foreach` LIST the lexer goes one step further and puts
@@ -3704,9 +3710,18 @@ sub _normalize_anon_sub_attrs {
       }
       last;
     }
-    # Only the anon-sub shape: the run must end at the sub's block.  Anything
-    # else is left untouched rather than guessed at.
-    next unless @drop && $t && $t->isa('PPI::Structure::Block');
+    # The run must end at the sub's block.  A `sub :` Label is only ever
+    # produced by this mis-lex, so a run that does NOT end at a Block is
+    # known-mangled input in a shape the repair does not cover: die naming it
+    # rather than fall through, which would silently drop the statement
+    # (#270 — that silence is what made `:prototype($)` vanish at exit 0).
+    if (! (@drop && $t && $t->isa('PPI::Structure::Block'))) {
+      my $shape = join '', map { $_->content } $lab, @drop;
+      die "Parser2: unrepaired mis-lexed anon-sub attribute run `$shape` "
+        . "(PPI lexes `sub :ATTR` at the start of an expression as a Label; "
+        . "see docs/ppi-upstream-bugs.md \x{a7}7) at line "
+        . $lab->line_number . "\n";
+    }
     # `:prototype(…)` normally survives as a runtime `__pcl_set_prototype`
     # wrap (Pl::Parser::_extract_prototype_attributes), but that pass runs on
     # the token stream PPI produced — where this one is a Word, invisible to
@@ -3729,6 +3744,74 @@ sub _normalize_anon_sub_attrs {
     $lab->set_content('sub');
   }
   return $doc;
+}
+
+# #270, the second layer of the §7 mis-lex, repaired on the RAW TOKEN STREAM.
+#
+# `prototype($)` — and every prototype whose text ends in `$`: `(;$)`,
+# `($;$)`, … — has its closing paren eaten by the magic variable `$)`, so PPI
+# never closes the attribute's paren group there.  It closes it on the sub's
+# OWN closing paren instead, swallowing the block in between; the tree that
+# results has the ENCLOSING structure left unfinished, so no local tree edit
+# can restore it (and inside a `for` LIST the damage spreads across sibling
+# statements).  `($$)`, `(\@)` etc. lex correctly and never come here.
+#
+# So this runs BEFORE any tree surgery and does not read the tree at all: it
+# walks the token stream from each `sub :` Label, and when the run spells
+# `:[attr:]*prototype(` … `$)` it blanks exactly those tokens.  The document
+# text then reads `sub { … }` as if the attribute had never been written, and
+# one reparse yields the tree PPI would have built for the plain anon sub.
+#
+# Dropping the prototype is EFFECT-ONLY and ANNOUNCES, per the s329 boundary
+# and the #268 entry in docs/not-supported.md: an anon sub has no name for a
+# call-site parser to consult, so nothing downstream consumes the value.
+sub _repair_swallowing_prototypes {
+  my ($self, $doc) = @_;
+  my $repaired = 0;
+  for my $lab (@{ $doc->find('PPI::Token::Label') || [] }) {
+    next unless $lab->content =~ /^sub\s*:$/;
+    my @blank;                                # tokens to erase from the source
+    my $t = _next_sig_token($lab);
+    while ($t && $t->isa('PPI::Token::Label') && $t->content =~ /^\w+\s*:$/) {
+      push @blank, $t;                        # a chained attribute
+      $t = _next_sig_token($t);
+    }
+    next unless $t && $t->isa('PPI::Token::Word') && $t->content eq 'prototype';
+    push @blank, $t;
+    $t = _next_sig_token($t);
+    next unless $t && $t->isa('PPI::Token::Structure') && $t->content eq '(';
+    push @blank, $t;
+    # Everything up to the mis-lexed `$)`, which must all be prototype text —
+    # anything else means this is not the shape, and the run is left alone for
+    # the caller's die to name.
+    my @proto;
+    while (1) {
+      $t = _next_sig_token($t);
+      last unless $t && $t->isa('PPI::Token');
+      last if $t->isa('PPI::Token::Magic') && $t->content eq '$)';
+      last unless $t->content =~ /^[\\\$\@\%\&\*\[\]\;\+\_]+$/;
+      push @proto, $t;
+    }
+    next unless $t && $t->isa('PPI::Token::Magic') && $t->content eq '$)';
+    warn "PCL: attribute `:prototype("
+       . join('', map { $_->content } @proto) . "\$)` on an anonymous sub at "
+       . "the start of an expression is dropped (PPI lexes it as a label; see "
+       . "docs/ppi-upstream-bugs.md \x{a7}7)\n";
+    $lab->set_content('sub');
+    $_->set_content('') for @blank, @proto, $t;
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# The next significant token in DOCUMENT order (structure starts and finishes
+# included) — the raw stream, not the sibling chain.
+sub _next_sig_token {
+  my ($t) = @_;
+  while ($t = $t->next_token) {
+    return $t if $t->significant;
+  }
+  return undef;
 }
 
 # True for a `state` Word that heads a declaration (mirrors the classic

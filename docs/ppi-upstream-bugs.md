@@ -226,6 +226,50 @@ a PARSE ERROR comment — silently dropping code.  Guard rows:
 position (#268)`), which also holds the inverse guards (a REAL loop label
 must still lower as a label).
 
+### 7b. …and if the prototype text ends in `$`, the `$)` eats the paren too  [CONFIRMED 1.291]
+
+Found s367 (task #270) by adversarial probing of the 7 repair.  INSIDE the
+mis-lexed run, `prototype($)`'s closing paren is tokenized as the **magic
+variable `$)`**, so the attribute's paren group never closes there — PPI
+closes it on the SUB's own closing paren instead and swallows the block:
+
+```perl
+my @l = (sub :prototype($) { 42 });   # perl: 42.  PCL (before the fix): NOTHING, exit 0.
+
+   Label(sub :)  Word(prototype)
+   Structure::List ( … )              <- closed by the OUTER `)`
+     Magic($))                        <- ate the prototype's own `)`
+     Structure::Subscript { 42 }      <- the sub's BLOCK, swallowed
+   … and the enclosing List is left UNFINISHED (`( ... ???`)
+```
+
+Every prototype whose text ends in `$` hits it — `($)`, `(;$)`, `($;$)`,
+`($$;$)`, … including the single most common prototype there is.  `($$)`,
+`(\@)`, `($_)` and friends lex correctly and take the 7 path unchanged
+(verified live).  `(;$)` mangles one layer further again: its `;` becomes a
+`Statement::Null`, which is INSIGNIFICANT, so any `schildren`-based walk
+misses it.
+
+Because the stolen `)` belongs to the enclosing structure, no local tree
+edit restores a well-formed tree (and inside a `for` LIST the damage spreads
+across sibling statements).  So `Pl::Parser2::_repair_swallowing_prototypes`
+runs BEFORE all the 7 tree surgery and does not read the tree at all: it
+walks the RAW TOKEN STREAM from each `sub :` Label and, when the run spells
+`:[attr:]*prototype(` … `$)`, blanks exactly those tokens.  The document
+text then reads `sub { … }` as if the attribute had never been written, and
+one reparse (`_reparse_doc`, shared with the state prepass) yields the tree
+PPI would have built for the plain anon sub.  Dropping the prototype is
+effect-only and ANNOUNCES on stderr, per the s329 boundary.
+
+The silent half is closed too: 7's repair used to `next` when its run did
+not end at a Block — the deliberate "don't guess" guard — after which the
+statement was dropped with a PARSE-ERROR comment at exit 0.  A `sub :` Label
+is only ever produced by this mis-lex, so a run that does NOT end at a Block
+is known-mangled input, and it now **dies naming the shape**.  Guard rows:
+`Pl/t/transpile-test-09.t` (`anon sub :prototype ending in $ at expression
+start (#270)`), with `($$)`/`(\@)` and a NAMED `sub f :prototype($)` as the
+inverse guards.
+
 ---
 
 ## How to add to this list

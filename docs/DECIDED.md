@@ -1347,6 +1347,40 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s367 (2026-08-09, Opus) — #270 fixed: the `:prototype($)` silent statement drop
+
+- **A prototype whose text ends in `$` mis-lexes TWICE** — PPI §7 turns
+  `sub :ATTR` at expression start into a Label, and inside that run the
+  closing paren of `prototype($)` is tokenized as the magic variable `$)`,
+  so the attribute's paren group swallows the sub's block.  Affects `($)`,
+  `(;$)`, `($;$)`, … ; `($$)`, `(\@)`, `($_)` lex correctly (probed).
+  → `ppi-upstream-bugs.md` §7b.
+- **The stolen `)` belongs to the ENCLOSING structure, so tree surgery
+  CANNOT fix it** — the enclosing List is left unfinished and, inside a
+  `for` list, the damage spreads across sibling statements (both measured
+  s367 by building the hoist first and watching it destroy the text).  The
+  repair is at SOURCE level on the RAW TOKEN STREAM, before any §7 tree
+  surgery, then one `_reparse_doc` — the mechanism the state prepass already
+  uses (`_state_reparse` renamed and shared).  → `Pl/Parser2.pm`
+  `_repair_swallowing_prototypes`.
+- **`Statement::Null` is INSIGNIFICANT**, so an `schildren` walk silently
+  skips the `;` in `(;$)` — the tell was a stray `;` surviving into the
+  rewritten source.  Walk `children` when you are reconstructing TEXT.
+- **A `sub :` Label is only ever produced by this mis-lex**, so a run that
+  does not end at a Block is known-mangled input: the §7 repair now DIES
+  naming the shape instead of `next`ing into the silent statement drop
+  (rule 12, value side).  Gate SET measured over both populations: 15
+  sources carry a `sub :ATTR` spelling, stderr identical to HEAD on every
+  one, `corpus-diff` identical across 111 files.
+- **`run_cl` in `Pl/t/transpile-test-09.t` no longer folds transpile stderr
+  into the `.lisp`** — a `PCL: …` announce at the top of the file is a CL
+  read error, and an announce has no perl counterpart.  Stderr is still
+  appended when pl2cl FAILS.  (Each `transpile-test-NN.t` carries its own
+  copy of the helper; only -09 is fixed.)
+- **§8 guard shipped**: PExpr's attribute strip announces a LIVE
+  `prototype(...)` Attribute before dropping it — the residual silent path
+  left by `_extract_prototype_attributes`' bail-outs.
+
 ## s366 (2026-08-09, Fable) — review of s365: all nine asks ruled, one new bug
 
 - **All eight s365 commits APPROVED as shipped** — gate independently

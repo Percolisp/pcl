@@ -2674,6 +2674,16 @@ sub handle_subcalls {
         last unless ref($t) eq 'PPI::Token::Operator' && $t->content eq ':'
           && $i + 2 + $drop < scalar(@$e)
           && ref($e->[$i + 2 + $drop]) eq 'PPI::Token::Attribute';
+        # A LIVE `:prototype(…)` normally never reaches here: the named-sub
+        # pass (Pl::Parser::_extract_prototype_attributes) has already turned
+        # it into a runtime `__pcl_set_prototype` wrap.  But that pass has
+        # silent bail-outs, and in those shapes the attribute arrives intact
+        # and would be dropped without a word.  Announce it (#270 §8) — same
+        # family as the anon-sub announce; the drop itself is effect-only.
+        my $attr = $e->[$i + 2 + $drop];
+        warn "PCL: attribute `:" . $attr->content . "` on an anonymous sub "
+           . "is dropped (see docs/not-supported.md)\n"
+          if $attr->content =~ /^prototype\(/;
         $drop += 2;
       }
       if ($drop) {

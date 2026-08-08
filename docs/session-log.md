@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 367 (2026-08-09, Opus) — #270: `sub :prototype($)` at expression start was a SILENT STATEMENT DROP
+
+First item of the s366 queue (`docs/fable-answers-s365.md` §10/§11).
+
+**The bug.** `my @l = (sub :prototype($) { 42 });` — perl prints 42, PCL
+printed NOTHING and exited 0.  Two mis-lexes stacked: PPI §7 turns
+`sub :ATTR` at expression start into a `Label('sub :')`, and INSIDE that run
+`prototype($)`'s closing paren is tokenized as the **magic variable `$)`**,
+so the attribute's paren group never closes there.  PPI closes it on the
+sub's OWN closing paren, swallowing the block as a `Structure::Subscript`.
+The s365 repair then found no Block at the end of its run and DECLINED
+SILENTLY — the deliberate "don't guess" guard — after which the statement
+was replaced by a PARSE-ERROR comment.  Any prototype ending in `$` hits it
+(`($)`, `(;$)`, `($;$)`, …); `($$)`, `(\@)`, `($_)` lex correctly.
+
+**What did NOT work (recorded so it is not retried).** Hoisting the
+swallowed Subscript back out as a Block: the stolen `)` belongs to the
+ENCLOSING structure, which PPI left unfinished, so the repaired tree
+serialized as `my @l = (sub{ 42 };` — and inside a `for` LIST, where the §7
+merge loop moves children between sibling statements, a two-sub list
+serialized as `for my $s (sub { print 1; }`, losing the second sub entirely.
+A local tree edit cannot express this repair.
+
+**The fix.** `_repair_swallowing_prototypes` runs BEFORE all §7 tree surgery
+and never reads the tree: it walks the RAW TOKEN STREAM from each `sub :`
+Label and, when the run spells `:[attr:]*prototype(` … `$)`, blanks exactly
+those tokens.  The text then reads `sub { … }` as if the attribute had never
+been written, and one reparse gives the tree PPI would have built for the
+plain anon sub.  Reuse: the reparse is the state prepass's own
+(`_state_reparse` renamed `_reparse_doc`, both callers share it).  Gotcha
+found on the way: `(;$)` wraps its `;` in a `Statement::Null`, which is
+INSIGNIFICANT — an `schildren` walk skipped it and left a stray `;` behind.
+
+**The silence is now a die.** A `sub :` Label is only ever produced by this
+mis-lex, so a run that does not end at a Block is known-mangled input the
+repair does not cover: it dies naming the shape rather than falling through
+to the drop (rule 12, value side).  Plus §8's guard: PExpr's attribute strip
+announces a LIVE `prototype(...)` Attribute before dropping it — the
+residual silent path left by `_extract_prototype_attributes`' bail-outs.
+
+**Verification.** Gate `tools/prove-core` **132 files / 4738 tests PASS**
+(cold cache).  `tools/corpus-diff.pl` emission **identical to HEAD across
+111 files**.  Gate SET over both populations: 15 sources across
+`perl-tests/`, `lib/`, `Pl/t/`, the 14-dist CPAN board and perl's own `t/`
+carry a `sub :ATTR` spelling; transpiled under HEAD and the working tree,
+**stderr is identical on every one** — no new die anywhere.  Nine prototype
+spellings, the `for`-list shape with two subs, chained `:method :prototype`,
+and a NAMED `sub f :prototype($)` all probed live against perl.
+`*pcl-cache-generation*` → v2-121.
+
+**Test-helper fix (worth knowing).** `run_cl` in `transpile-test-09.t` folded
+transpile **stderr** into the `.lisp` file (`2>&1`), so any announce became a
+CL read error (`illegal terminating character after a colon`).  Stderr is now
+captured separately and appended only when pl2cl FAILS.  Each
+`transpile-test-NN.t` carries its own copy of the helper; only -09 is fixed.
+
+Guard rows: `Pl/t/transpile-test-09.t`, `anon sub :prototype ending in $ at
+expression start (#270)` — with `($$)`/`(\@)` and the named sub as inverse
+guards.  Docs: `ppi-upstream-bugs.md` §7b, `not-supported.md` (the #268 entry
+extended), `DECIDED.md` s367.
+
+**Next in the queue:** #265's rename half (shape approved s366 §9), then
+#267 sizing, then #269 (probe first), then the fillers.
+
+---
+
 ## Session 366 (2026-08-09, Fable) — review of s365: all nine asks ruled, one new bug found
 
 Full rulings: `docs/fable-answers-s365.md`.  All eight s365 commits APPROVED
