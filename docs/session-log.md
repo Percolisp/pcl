@@ -16,7 +16,7 @@ live silent-wrongs, all fixed here.
 probes over the corpus reproduced ZERO disagreements; running the same
 probes over **all 604 files of perl's own `t/*/*.t`** produced three real
 shapes.  Both populations are now the standing recipe for this task
-(scratchpad `termdiff-par.pl` runs the probe over a file list in parallel).
+(`tools/term-diff-sweep.pl` runs the probe over a file list in parallel).
 
 **Four commits:**
 

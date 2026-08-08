@@ -28,7 +28,7 @@
 > measures over BOTH the 111-file corpus AND perl's own `t/*/*.t` (604
 > files).**  The corpus alone reported ZERO disagreements while perl's t/
 > produced three real shapes, two of them live silent-wrongs.  Helper:
-> scratchpad `termdiff-par.pl`.
+> `tools/term-diff-sweep.pl`.
 
 State at close: everything green at HEAD — gate `tools/prove-core` 132 files
 / 4717 PASS; cold-cache sweep GATE clean (0 new / 0 fixed / 0 LOST, TOTAL
@@ -101,8 +101,8 @@ registration is NOT yet signed off — comes back with real shapes.
   for anything touching emission.  Full sweep every 3rd–5th change; COLD
   cache (`rm -rf ~/.pcl-cache/*`) whenever module-level emission could have
   changed.  Bump `*pcl-cache-generation*` on any emission-changing commit.
-- Gate arithmetic: 132 files / 4717 rows with the pclxs sibling built,
-  4703 without; a worktree compare silently drops the 14 xs rows (set
+- Gate arithmetic: 132 files / 4719 rows with the pclxs sibling built (s361),
+  4705 without; a worktree compare silently drops the 14 xs rows (set
   PCLXS_DIR).
 - `grep -a` on any .tsv under docs/ or .faillog/ (NUL bytes).
 - Baselines change by EDIT with cause, never by re-bless-from-run (except

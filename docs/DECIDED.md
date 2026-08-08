@@ -1354,7 +1354,7 @@ E4.1's pre-work is now done.
   the same probes over all 604 files of `t/*/*.t` produced THREE real shapes,
   two of them live silent-wrongs.  Any "measured then flipped" step in the
   #153 family runs over BOTH populations before the flip (helper:
-  scratchpad `termdiff-par.pl`).  → session-log s361, task #153.
+  `tools/term-diff-sweep.pl`).  → session-log s361, task #153.
 - **#153 step 3 DONE**: named-unary site (`3509115`) and strictly-1-arg site
   (`ece9d35`) both take their operand extent from `_term_extent`; a decline
   still falls to the legacy branches.  Both `PCL_TERM_DIFF` probes DELETED —
