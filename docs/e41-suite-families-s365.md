@@ -113,7 +113,8 @@ mis-lex: PPI 1.291 hands `for my $sub (sub :lvalue {$_}, sub :lvalue {…})` a
 `PPI::Structure::For` instead of a `Structure::List`, so a plain foreach lands
 in the C-style branch, whose defensive `continue` die then fires.  Filed as
 **#268** (the discriminator is that a C-style `for` never has a loop VARIABLE
-before the parens).  Recovers 0 of its 12 snapshot rows for now.
+before the parens).  **#268 was then fixed in this same session — see §7; the
+file now reaches its snapshot C_ok of 12.**
 
 ## 4. B-ii — the cond-my rename is shadow-aware, so a nested re-shadow no longer refuses
 
@@ -143,7 +144,7 @@ was a TIMEOUT).**
 | re/pat_advanced.t | B-i | 936/733, regex-engine residue |
 | op/while.t | B-ii | 20/6, **above snapshot** |
 | op/getppid.t | A-i | de-gated, 0/0 = snapshot (`pipe my (…)`) |
-| op/sub_lval.t | A-iii | de-gated from the span refusal; **#268** blocks |
+| op/sub_lval.t | A-iii + #268 | **de-gated (§7), 12/58 = snapshot C_ok** |
 | re/reg_eval_scope.t | A-iv+A-i | still gated — THIRD cause, `lexical 'r' possibly captured by nested sub f2` (nested-sub capture, outside the measured families) → **#269** |
 | op/svleak.t, io/shm.t, op/taint.t | A-ii | PARKED behind E5 (ruled s364) |
 
@@ -176,3 +177,71 @@ was a TIMEOUT).**
 ignores SIGHUP, perl then reports `$SIG{HUP}` as defined, and
 transpile-test-06.t's `%SIG` row fails against a PCL that (correctly) knows
 nothing of the inherited disposition.  It cost this session one false FAIL.
+
+---
+
+## 7. #268 — the PPI attribute/label mis-lex (the last file in §5's table)
+
+`op/sub_lval.t` was the one file A-iii de-gated *partly*: its span refusal was
+gone, but the transpile still died on `Parser2 TODO: C-style for with continue
+block`.  Two layers, both fixed here:
+
+1. **The die itself.**  PPI had lexed the loop parens as a
+   `PPI::Structure::For` (a C-style `for(;;)` header).  `_lower_compound` now
+   re-blesses that to `PPI::Structure::List` when there is a loop VARIABLE or
+   no `;` separator — a C-style `for` never has a loop variable before its
+   parens.
+
+2. **Why PPI got there** — a genuine 1.291 LEXER BUG, now
+   `docs/ppi-upstream-bugs.md` §7.  At the START of an expression an anon sub
+   carrying an attribute becomes `Label('sub :') Word('lvalue')`; chained
+   attributes chain as more Labels; inside a `for` list each label gets a
+   STATEMENT of its own.  Mid-expression the same text tokenizes correctly,
+   which is exactly why `my $f = sub :lvalue {…}` worked and
+   `(sub :lvalue {…})` did not.  Nothing downstream could see an anon sub, so
+   the expression fell through to `Missing case: [` and the whole statement was
+   replaced by a PARSE ERROR comment — **a silent code drop**, the same family
+   as #138 and #259.
+
+   `Pl::Parser2::_normalize_anon_sub_attrs` (document level, beside the other
+   PPI repairs) merges the split statements, drops the attribute run — including
+   `:prototype($$)`'s own parens — and re-blesses the `Label` into a plain
+   `Word('sub')`.  It only fires when the run ends at the sub's block; anything
+   else is left alone rather than guessed at.
+
+   The CORRECTLY-lexed mid-expression spelling had no handler either
+   (`my $one = sub :lvalue { 7 }` was its own "Missing case"); PExpr's existing
+   "strip the prototype after `sub`" pass in `handle_subcalls` now consumes
+   interleaved `(':' Attribute)` pairs as well — reuse, not a second copy.
+
+`:prototype(…)` is the one attribute that normally SURVIVES the drop, as a
+runtime `__pcl_set_prototype` wrap emitted by
+`Pl::Parser::_extract_prototype_attributes` — but that pass keys on a
+`PPI::Token::Attribute`, the very token PPI failed to produce, and it cannot be
+re-run after the repair without a reparse that re-creates the mis-lex.  So the
+repair drops it, **announces on stderr naming the attribute**, and carries a
+`docs/not-supported.md` entry.  Effect-only under the s329 boundary (an anon
+sub has no name for the call-site parser to consult; even the correctly-lexed
+spelling only records it at runtime), and the shape occurs in neither audit
+population — only the mid-expression `my $t118 = sub :prototype($) ($a) {…}`
+does, which is untouched and still passes.
+
+**Result**: `op/sub_lval.t` **211 P / 12 C_ok / 58 C_fail = its snapshot C_ok
+exactly** (the bar).  Its residue is `undef-fn:main::pl-rlv1t`, a different
+axis.  Two more files move on the same fix:
+
+| file | before | after |
+|---|---|---|
+| op/anonconst.t | 0 ok / 1 fail (crash: `Undefined subroutine &main::`) | **1 ok / 6 fail**, no crash — above its snapshot C_ok of 0 |
+| perl-tests/hashassign.t | `$_++ foreach sub :lvalue { … }->()` emitted a PARSE ERROR comment | real anon-sub call; file still **309/309 fully passing** |
+
+(hashassign.t is the one CORPUS file whose emission changes — verified with
+`tools/corpus-diff.pl --show`, and re-swept single-file to confirm the newly
+live statement costs nothing.  op/attrs.t and uni/attrs.t contain attributes
+too but stay gated on an unrelated cause, `my ($cows, @go, %bong) : teapots`.)
+
+Gate SET over both populations **23 → 22, zero new gates**.  Guard rows:
+`Pl/t/transpile-test-09.t`, one snippet covering statement position, list
+position, chained attributes, the `for`-list-with-`continue` shape, a named
+sub's attributes, and the INVERSE guard that a real loop label still lowers as
+a label.  `*pcl-cache-generation*` → **v2-119**.

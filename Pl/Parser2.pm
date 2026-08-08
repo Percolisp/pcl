@@ -577,6 +577,10 @@ sub parse {
   # identical there (same decl scope, tie applied to the same variable).
   $doc = $self->_normalize_tie_my($doc);
 
+  # PPI LEXER BUG: an anon sub with an ATTRIBUTE at the START of an expression
+  # is tokenized as a LABEL — see _normalize_anon_sub_attrs.
+  $self->_normalize_anon_sub_attrs($doc);
+
   # `state` outside the classic subset (scalar statement-decl in a named sub)
   # is rewritten at SOURCE level into plain Perl the existing machinery
   # already lowers, then the document is reparsed — see _rewrite_state_prepass.
@@ -3635,6 +3639,98 @@ sub _normalize_tie_my {
   return $changed ? $self->_state_reparse($doc) : $doc;
 }
 
+# PPI LEXER BUG (1.291, #268).  At the START of an expression — right after
+# `(`, `[`, `{` or a `,` that opens a fresh Statement::Expression — an
+# anonymous sub carrying an ATTRIBUTE is tokenized as a LABEL:
+#
+#     (sub :lvalue { 1 })       Label('sub :')  Word('lvalue')  Block
+#     (sub :lvalue :method {})  Label('sub :')  Label('lvalue :') Word('method')
+#     (sub :prototype($$) {})   Label('sub :')  Word('prototype') List('($$)')
+#
+# Mid-expression the SAME text tokenizes correctly (Word/Operator/Attribute),
+# which is why `my $f = sub :lvalue {…}` parsed and `(sub :lvalue {…})` did
+# not: the token run never reached the anon-sub handler, the expression fell
+# through to "Missing case: [", and the whole statement was replaced by a
+# PARSE ERROR comment — silently dropping code (op/sub_lval.t).
+#
+# Rewrite the mis-lexed run back into the plain `sub` Word the ordinary
+# anon-sub path already consumes.  The attributes are DROPPED, exactly as the
+# named-sub path and PExpr's sibling strip drop them (:lvalue/:method carry no
+# CL meaning here; a :prototype on an ANON sub cannot be consulted by the
+# caller-side parser, which keys on a declared name).  Registered upstream in
+# docs/ppi-upstream-bugs.md §7.
+sub _normalize_anon_sub_attrs {
+  my ($self, $doc) = @_;
+  for my $lab (@{ $doc->find('PPI::Token::Label') || [] }) {
+    next unless $lab->content =~ /^sub\s*:$/;
+    # Inside a `for`/`foreach` LIST the lexer goes one step further and puts
+    # each mis-lexed label in a STATEMENT OF ITS OWN (a label statement is a
+    # complete statement), splitting one expression across two or three
+    # siblings.  Merge them back into the label's statement first, so the run
+    # below sees the same token sequence it sees inside an ordinary list.
+    my $stmt = $lab->parent;
+    if ($stmt && $stmt->isa('PPI::Statement')) {
+      my $merged = 0;
+      while (1) {
+        my @sig = $stmt->schildren;
+        last unless @sig && $sig[-1]->isa('PPI::Token::Label');
+        my $next = $stmt->snext_sibling;
+        last unless $next && $next->isa('PPI::Statement');
+        for my $c ($next->children) {
+          $next->remove_child($c);
+          $stmt->add_element($c);
+        }
+        $next->delete;
+        $merged++;
+      }
+      # It was only a statement because of the label; it is an expression.
+      bless $stmt, 'PPI::Statement::Expression'
+        if $merged && ref($stmt) ne 'PPI::Statement::Expression';
+    }
+    my @drop;
+    my $t = $lab->snext_sibling;
+    while ($t) {
+      if ($t->isa('PPI::Token::Label') && $t->content =~ /^\w+\s*:$/) {
+        push @drop, $t;                       # a chained attribute
+        $t = $t->snext_sibling;
+        next;
+      }
+      last unless $t->isa('PPI::Token::Word');
+      push @drop, $t;                         # the final attribute's name
+      $t = $t->snext_sibling;
+      if ($t && $t->isa('PPI::Structure::List')) {
+        push @drop, $t;                       # `:prototype($$)`'s own parens
+        $t = $t->snext_sibling;
+      }
+      last;
+    }
+    # Only the anon-sub shape: the run must end at the sub's block.  Anything
+    # else is left untouched rather than guessed at.
+    next unless @drop && $t && $t->isa('PPI::Structure::Block');
+    # `:prototype(…)` normally survives as a runtime `__pcl_set_prototype`
+    # wrap (Pl::Parser::_extract_prototype_attributes), but that pass runs on
+    # the token stream PPI produced — where this one is a Word, invisible to
+    # it — and it cannot be re-run here without a reparse that would just
+    # re-create the mis-lex.  Dropping it is EFFECT-ONLY (an anon sub has no
+    # name for the call-site parser to consult; that is already true of the
+    # correctly-lexed spelling, whose wrap is a runtime call), so it
+    # ANNOUNCES and continues per the s329 boundary rather than dying or
+    # going quiet.  docs/not-supported.md carries the entry.
+    # The attribute NAME and its parens are separate tokens here (Word +
+    # Structure::List), so read the run as text rather than per token.
+    my $run   = join '', map { $_->content } @drop;
+    my $proto = $run =~ /(prototype\([^)]*\))/ ? $1 : '';
+    warn "PCL: attribute `:$proto` on an anonymous sub at the start "
+       . "of an expression is dropped (PPI lexes it as a label; see "
+       . "docs/ppi-upstream-bugs.md \x{a7}7)\n"
+      if $proto ne '';
+    $_->delete for @drop;
+    bless $lab, 'PPI::Token::Word';
+    $lab->set_content('sub');
+  }
+  return $doc;
+}
+
 # True for a `state` Word that heads a declaration (mirrors the classic
 # pass's exclusions: `->state`, `state =>`, `sub state`, hash-key uses).
 sub _state_declarator_word {
@@ -6283,6 +6379,23 @@ sub _lower_compound {
       $result = $self->_wrap_cond_mys($result, @cond_mys);
     }
     return $result;
+  }
+
+  # PPI 1.291 sometimes hands a foreach's parenthesised LIST a
+  # PPI::Structure::For instead of a Structure::List — measured on
+  # `for my $sub (sub :lvalue {$_}, sub :lvalue {return $_})` (op/sub_lval.t,
+  # #268), where the anon-sub blocks inside the parens confuse its lexer.  The
+  # source shape decides, not PPI's class name: a C-style `for` NEVER has a
+  # loop VARIABLE before the parens, and it always has `;` separators.  Fix it
+  # here, before either branch reads @k, so the whole foreach path (range
+  # split, aliasing, loop-var scoping) sees the list it would have seen.
+  # Same lexer, same class of failure as #253 — see docs/ppi-upstream-bugs.md.
+  if (($kw eq 'for' || $kw eq 'foreach')
+      && (my ($mis) = grep { $_->isa('PPI::Structure::For') } @k)) {
+    my $has_var  = grep { $_->isa('PPI::Token::Symbol') } @k;
+    my $has_semi = grep { $_->isa('PPI::Token::Structure') && $_->content eq ';' }
+                   $mis->tokens;
+    bless $mis, 'PPI::Structure::List' if $has_var || !$has_semi;
   }
 
   if (($kw eq 'for' || $kw eq 'foreach')

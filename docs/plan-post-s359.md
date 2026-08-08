@@ -7,7 +7,9 @@
 > (fully passing, at snapshot), op/attrproto.t at snapshot 17/28, op/while.t
 > 20/6 above snapshot, op/getppid.t + op/sub_lval.t de-gated onto other causes.
 > Gate SET over both populations: 27 → **23** gated files, **zero new gates at
-> every step** (op/sub_lval.t stays gated — #268 blocks it, not the span rule).  Gate 132/4735 PASS, gen v2-118.
+> every step**, and then **22** once #268 was fixed later in the same session
+> (§7 of the measurement doc): op/sub_lval.t reaches its snapshot C_ok of 12.
+> Gate 132/4736 PASS, gen v2-119.
 >
 > **A-i needed no extent design** — the s363 reading was wrong: the sub owned
 > its `$first` through a statement-modifier `my` the capture scan could not see.
@@ -15,13 +17,21 @@
 >
 > **What remains of #254**: A-ii (parked behind E5, ruled s364), plus three new
 > tasks that are NOT #254 families — **#267** (multi-element foreach alias),
-> **#268** (PPI mis-lexes `for my $x (sub{…},sub{…})` → sub_lval.t's last
-> blocker, ~12 rows), **#269** (reg_eval_scope.t's nested-sub capture).  With
-> those, #254's own worklist is empty: recommend CLOSING #254 after review.
+> **#268** (DONE, see below), **#269** (reg_eval_scope.t's nested-sub capture).
+> With those, #254's own worklist is empty: recommend CLOSING #254 after review.
+>
+> **#268 is DONE (s365).**  It turned out to be an upstream PPI 1.291 LEXER bug
+> registered as `docs/ppi-upstream-bugs.md` §7 — an anon sub's ATTRIBUTE at the
+> start of an expression is lexed as a LABEL (`sub :lvalue {…}` →
+> `Label('sub :') Word('lvalue')`), and inside a `for` list each label gets its
+> own STATEMENT.  Nothing downstream saw an anon sub, so the statement became a
+> PARSE ERROR comment: a silent code drop.  Fixed at the document level
+> (`_normalize_anon_sub_attrs`) plus the `Structure::For` re-bless; PExpr's
+> prototype strip generalised to attributes for the correctly-lexed spelling.
 >
 > **Next**: Fable reviews s365 (`docs/opus5-review-requests-s365.md`), then
 > #153's FOLD (its own session).  Opus's next queue if Fable's order stands:
-> #268 → #265 → #267 → the §4 fillers.
+> #265 → #267 → the §4 fillers.
 
 > **UPDATED s364 (Fable review of s363 — `docs/fable-answers-s363.md`).**
 > All seven s363 commits APPROVED (gate independently re-verified 132/4731;

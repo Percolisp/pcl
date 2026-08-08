@@ -4,10 +4,10 @@ Session doc: `docs/e41-suite-families-s365.md` (per-file measurements),
 session-log s365, DECIDED.md s365 section.  Six commits.  Everything below is
 shipped and measured; the asks are the calls I should not make alone.
 
-**State at close**: gate `tools/prove-core` **132 files / 4735 PASS**; gate SET
+**State at close**: gate `tools/prove-core` **132 files / 4736 PASS**; gate SET
 over both audit populations (715 files) **27 → 22 gated, zero new gates at every
-step**; gen v2-118 (emission changed by #263).  Corpus-diff, cold-cache sweep
-and full `--all` suite: numbers in the session-log entry.
+step**; gen v2-119 (emission changed by #263 and #268).  Corpus-diff,
+cold-cache sweep and full `--all` suite: numbers in the session-log entry.
 
 ---
 
@@ -124,6 +124,45 @@ run if it diverges.
 **Ask**: ratify the mechanism (and the rule that a row must carry a cause and
 be deleted when the file gets faster), or would you rather the suite runner
 gained the sweep's retry instead, so nothing has to be maintained by hand?
+
+## Ask 7 — #268: a PPI lex repair that DROPS an attribute.  Is announce the right verdict?
+
+`_normalize_anon_sub_attrs` repairs PPI's mis-lex of `(sub :lvalue { … })`
+(details in `docs/ppi-upstream-bugs.md` §7) by dropping the attribute run and
+re-blessing `Label('sub :')` into `Word('sub')`.  For `:lvalue`/`:method` that
+is exactly what the named-sub path and PExpr's sibling strip already do, so
+there is nothing to decide.
+
+`:prototype(…)` is different.  It normally SURVIVES, as a runtime
+`__pcl_set_prototype` wrap emitted by `Pl::Parser::_extract_prototype_attributes`
+— but that pass keys on a `PPI::Token::Attribute`, which is precisely the token
+PPI failed to produce here, and it cannot be re-run after my repair without a
+serialize+reparse that would re-create the mis-lex.  I chose: **repair, drop the
+prototype, WARN on stderr naming it, and register it in
+`docs/not-supported.md`.**  Reasoning — it is effect-only under the s329
+boundary (an anon sub has no name for the call-site parser to consult; even the
+correctly-lexed spelling only records the prototype at runtime), the shape
+occurs in NEITHER audit population (only the mid-expression `my $t118 = sub
+:prototype($) ($a) {…}` does, and that path is untouched and still passes), and
+the alternative — refusing to repair — restores the silent statement drop this
+whole task exists to kill.
+
+**Ask**: ratify announce-and-continue here, or would you rather the pass
+refused (loudly) on a prototype attribute and left the statement unlowered —
+i.e. treat a dropped prototype as value-side?
+
+## Ask 8 — the PExpr half: I widened an EXISTING strip instead of adding a branch
+
+The correctly-lexed spelling (`my $one = sub :lvalue { 7 }`) had no handler
+either — it fell through to the same `Missing case: [`.  Rather than adding an
+attribute branch, I generalised the pass in `handle_subcalls` that already
+strips a `PPI::Token::Prototype` after `sub` so it consumes interleaved
+`(':' Attribute)` pairs in the same loop (rule 11).  Safe because
+`_extract_prototype_attributes` runs earlier, in `_ppi_parse`, so no
+`:prototype` attribute is alive by then — only inert ones.
+
+**Ask**: confirm that reading of the ordering (it is the one assumption the fix
+rests on), or tell me it needs a guard.
 
 ## Deliberate not-dones
 

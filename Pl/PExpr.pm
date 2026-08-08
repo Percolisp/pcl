@@ -2654,15 +2654,32 @@ sub handle_subcalls {
     next
         if !$self->is_word($now); # Only want function calls.
 
-    # Strip PPI::Token::Prototype after 'sub' keyword for anonymous subs.
-    # e.g., sub (&) { ... } → sub { ... }
-    # The prototype has no effect on generated CL code; removing it lets
-    # the normal sub { BLOCK } handler below fire correctly.
-    if ($now->content() eq 'sub'
-        && $i + 1 < scalar(@$e)
-        && ref($e->[$i+1]) eq 'PPI::Token::Prototype') {
-      splice @$e, $i+1, 1;  # drop the prototype token
-      $next = ($i+1 < scalar(@$e)) ? $e->[$i+1] : undef;
+    # Strip the PROTOTYPE and/or ATTRIBUTES that may sit between the `sub`
+    # keyword and an anonymous sub's block:
+    #     sub (&) { … }        sub :lvalue { … }        sub :lvalue :method { … }
+    #     sub ($x) :lvalue { … }
+    # PPI spells an attribute as Operator(':') + Token::Attribute (the
+    # attribute token carries its own parens, e.g. `prototype($$)`), so the
+    # two forms interleave; consume whichever comes next until neither does.
+    # Neither affects the generated CL — the named-sub path drops them the
+    # same way — and removing them lets the ordinary `sub { BLOCK }` handler
+    # below fire.  Without the ATTRIBUTE half, `sub :lvalue { … }` in
+    # expression position fell through to "Missing case: [" and the whole
+    # statement was replaced by a PARSE ERROR comment (op/sub_lval.t, #268).
+    if ($now->content() eq 'sub') {
+      my $drop = 0;
+      while ($i + 1 + $drop < scalar(@$e)) {
+        my $t = $e->[$i + 1 + $drop];
+        if (ref($t) eq 'PPI::Token::Prototype') { $drop++; next }
+        last unless ref($t) eq 'PPI::Token::Operator' && $t->content eq ':'
+          && $i + 2 + $drop < scalar(@$e)
+          && ref($e->[$i + 2 + $drop]) eq 'PPI::Token::Attribute';
+        $drop += 2;
+      }
+      if ($drop) {
+        splice @$e, $i + 1, $drop;
+        $next = ($i + 1 < scalar(@$e)) ? $e->[$i + 1] : undef;
+      }
     }
 
     say "handle_subcalls() Look for subname(..), was word. Is next list ",

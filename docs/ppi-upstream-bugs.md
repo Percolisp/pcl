@@ -178,6 +178,56 @@ op/for.t.
 
 ---
 
+## 7. `(sub :lvalue { … })` — an anon sub's ATTRIBUTE at expression start becomes a LABEL  [CONFIRMED 1.291]
+
+Minimal repro (found s365, task #268 — `t/op/sub_lval.t`):
+
+```perl
+my @a = (sub :lvalue { 1 });          # perl: one code ref
+for my $s (sub :lvalue { 1 }) { }     # perl: one iteration
+```
+
+Token dump — the SAME text tokenizes two different ways depending on
+position:
+
+```
+my $f = sub :lvalue { 7 };        # mid-expression: CORRECT
+   Word(sub)  Operator(:)  Attribute(lvalue)  Block
+
+my @a = (sub :lvalue { 1 });      # at expression START: WRONG
+   Label(sub :)  Word(lvalue)  Block
+
+my @a = (sub :lvalue :method {}); # chained attributes chain as Labels
+   Label(sub :)  Label(lvalue :)  Word(method)  Block
+
+for my $s (sub :lvalue {1}, 2) {} # inside a `for` list, WORSE:
+   Structure::For
+     Statement::Compound [ Label(sub :) ]        <- its own STATEMENT
+     Statement           [ Word(lvalue) Block Operator(,) Number(2) ]
+```
+
+Expected: `Word(sub) Operator(:) Attribute(lvalue)` in every position — a
+`sub` keyword cannot be a label name, so `sub :` is never a label.  The
+lexer's statement-start heuristic ("Word `:`" = label) fires before the
+`sub` keyword is considered.  In the `for` case the mis-lex also makes PPI
+call the loop parens a `PPI::Structure::For` (a C-style for header), so the
+loop VARIABLE and the list end up in structurally different shapes than a
+plain `for my $x (LIST)`.
+
+PCL-side workaround: `Pl::Parser2::_normalize_anon_sub_attrs` (a
+document-level pass beside the other PPI repairs) merges the split
+statements back together, drops the attribute run, and re-blesses the
+`Label('sub :')` into a plain `Word('sub')`; the `Structure::For`
+re-bless sits in `_lower_compound` and keys on "a C-style `for` never has a
+loop VARIABLE before its parens".  Before it, the expression fell through to
+`Bug. Fell through. Missing case: [` and the whole statement was replaced by
+a PARSE ERROR comment — silently dropping code.  Guard rows:
+`Pl/t/transpile-test-09.t` (`anon sub with attributes in expression
+position (#268)`), which also holds the inverse guards (a REAL loop label
+must still lower as a label).
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it

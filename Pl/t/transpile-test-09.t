@@ -750,4 +750,33 @@ my $outside = eval '$i';
 print "outside eval=$outside\n";
 });
 
+# ── s365 #268: PPI LEXER BUG — an anonymous sub carrying an ATTRIBUTE at the
+# START of an expression is tokenized as a LABEL (`sub :lvalue {…}` becomes
+# Label('sub :') + Word('lvalue')), and inside a `for` LIST the label even gets
+# a STATEMENT of its own, splitting one expression across siblings.  Nothing
+# downstream could see an anon sub, so the expression fell through to
+# "Missing case: [" and the whole statement was replaced by a PARSE ERROR
+# comment — silently dropping code (op/sub_lval.t, which died on the C-style
+# `for` branch's continue-die because the mis-lex also made PPI call the loop
+# parens a Structure::For).  Mid-expression the same text tokenizes correctly,
+# which is why `my $f = sub :lvalue {…}` always worked.
+# INVERSE GUARDS in the same snippet: a REAL loop label must still lower as a
+# label (`next OUT`), a named sub's attributes must still be dropped without
+# disturbing its body, and a plain attribute-free anon sub in a list must be
+# untouched — the pass keys on the mis-lexed shape only.
+test_transpile("anon sub with attributes in expression position (#268)", q{
+my @a = (sub :lvalue { 1 }, sub { 2 }, sub :lvalue :method { 3 });
+print "n=", scalar(@a), " v=", join(",", map { $_->() } @a), "\n";
+my $one = sub :lvalue { 7 };
+print "stmt=", $one->(), "\n";
+my $suffix = '';
+for my $s (sub :lvalue { 4 }, sub :lvalue { 5 }) {
+  print "loop=", $s->(), "$suffix\n";
+}
+continue { $suffix = ' (second)' }
+sub named :lvalue { 9 }
+print "named=", named(), "\n";
+OUT: for my $i (1, 2) { next OUT if $i == 1; print "label=$i\n" }
+});
+
 done_testing();

@@ -1646,3 +1646,40 @@ Refusing beats requalifying the wrong half.
 region rewrite — then both shapes fall out.
 
 **Owner:** tasks #251 / #242.
+
+## `:prototype(...)` on an anonymous sub at the START of an expression
+
+**What:** the prototype attribute is DROPPED (loudly) when the anon sub
+carrying it opens an expression — after `(`, `[`, `{` or a `,` that starts a
+fresh expression statement:
+
+```perl
+my @a = (sub :prototype($$) { 1 }, 2);   # PCL: prototype dropped, announced
+my $b = sub :prototype($) ($x) { $x };   # fine — the ordinary spelling works
+```
+
+**Message (stderr, at transpile time):** `PCL: attribute `:prototype($$)` on
+an anonymous sub at the start of an expression is dropped (PPI lexes it as a
+label; see docs/ppi-upstream-bugs.md §7)`
+
+**Why:** PPI 1.291 lexes `sub :attr` at expression start as
+`Label('sub :') Word('attr')` (upstream bug, `docs/ppi-upstream-bugs.md` §7).
+`Pl::Parser::_extract_prototype_attributes` — which normally turns
+`:prototype(…)` into a runtime `__pcl_set_prototype` wrap — keys on a
+`PPI::Token::Attribute`, so it never sees this spelling, and it cannot be
+re-run after the repair without a serialize+reparse that would just re-create
+the mis-lex. The repair (`_normalize_anon_sub_attrs`) therefore drops the
+attribute so the code RUNS, and says so.
+
+The loss is effect-only: an anonymous sub has no name for the call-site
+parser to consult, so even the correctly-lexed spelling only records the
+prototype at runtime. Announcing rather than dying follows the s329 boundary
+(`docs/fable-answers-s328.md` §1) — before the repair the whole statement was
+silently replaced by a PARSE ERROR comment, which is the failure this entry
+exists to prevent.
+
+**Revisit if:** the mis-lexed spelling turns up in real code (it appears in
+neither audit population today), or PPI fixes the lexer — then the repair can
+produce proper `Attribute` tokens and let the existing extractor run.
+
+**Owner:** task #268.

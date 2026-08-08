@@ -1382,6 +1382,15 @@ E4.1's pre-work is now done.
 - **Never run the Pl/t gate under `nohup`**: nohup ignores SIGHUP, perl then
   reports `$SIG{HUP}` as defined, and transpile-test-06.t's %SIG row fails
   against a PCL that correctly knows nothing of the inherited disposition.
+- **An anon sub's ATTRIBUTE at the START of an expression is lexed by PPI as a
+  LABEL** (`(sub :lvalue {…})` → `Label('sub :') Word('lvalue')`; inside a
+  `for` list each label even gets its own STATEMENT) while the SAME text
+  mid-expression lexes correctly.  Upstream bug, registered
+  `docs/ppi-upstream-bugs.md` §7; repaired at the document level by
+  `Pl::Parser2::_normalize_anon_sub_attrs`, with the `PPI::Structure::For`
+  re-bless (a C-style `for` never has a loop VARIABLE before its parens) as the
+  second half.  Before it, the statement became a PARSE ERROR comment — a
+  SILENT CODE DROP, same family as #138/#259.  → `docs/e41-suite-families-s365.md` §7.
 
 ## s364 (2026-08-08, Fable) — review of s363: all seven asks ruled
 

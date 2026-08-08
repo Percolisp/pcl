@@ -70,6 +70,32 @@ New tasks: **#267** (multi-element foreach alias), **#268** (PPI for-lexer
 mis-classification), **#269** (reg_eval_scope.t's third cause — nested-sub
 capture).
 
+**6. #268 closed in the same session** (§7 of the measurement doc).  Two
+layers.  The die was the C-style-`for` branch, fixed by re-blessing the
+mis-lexed `PPI::Structure::For` to a `Structure::List` when the loop has a
+VARIABLE or no `;`.  The CAUSE underneath is a PPI 1.291 lexer bug, now
+registered as `docs/ppi-upstream-bugs.md` §7: at the START of an expression
+`sub :lvalue { … }` tokenizes as `Label('sub :') Word('lvalue')` — chained
+attributes chain as more Labels, and inside a `for` list each label gets a
+STATEMENT of its own — while mid-expression the same text tokenizes correctly.
+No pass could see an anon sub, so the expression fell through to
+`Missing case: [` and the whole statement became a PARSE ERROR comment: a
+SILENT CODE DROP.  `_normalize_anon_sub_attrs` (document level, beside the
+other PPI repairs) merges the split statements, drops the attribute run
+(including `:prototype($$)`'s parens) and re-blesses the Label to `Word('sub')`;
+PExpr's existing "strip the prototype after `sub`" pass now also consumes
+`(':' Attribute)` pairs, which is the correctly-lexed spelling — it had no
+handler either (`my $one = sub :lvalue {7}` was its own Missing case).
+**op/sub_lval.t de-gates to 12/58 = its snapshot C_ok**, op/anonconst.t goes
+0 ok/crash → **1 ok / 6**, and perl-tests/hashassign.t's `$_++ foreach sub
+:lvalue {…}->()` becomes a real call (still 309/309).  `:prototype(…)` is the
+one attribute the repair cannot preserve — the extractor that normally wraps it
+keys on the token PPI failed to produce — so it is dropped, **announced on
+stderr**, and registered in `docs/not-supported.md`; effect-only, and the shape
+is in neither audit population.  Gate SET 23 → 22, zero new gates; guard rows +
+inverse guards in `Pl/t/transpile-test-09.t`; `*pcl-cache-generation*` →
+v2-119.
+
 ## Session 364 (2026-08-08, Fable) — review of s363: APPROVED; A-ii parked; ir-spec brought current
 
 Reviewed `docs/opus5-review-requests-s363.md` (seven asks).  Verdict: **all
