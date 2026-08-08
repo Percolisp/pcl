@@ -1,5 +1,19 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s362 (Fable review).**  s361 APPROVED — gate, the one-disagreement
+> inventory (reproduced from a `1279be6` worktree over perl's 604 t/ files),
+> and fresh oracle probes all independently verified; session-log s362 has the
+> evidence.  One same-family residual filed: **#262** — the statement-MODIFIER
+> form `$_ = "w" for ($s);` still doesn't write back (pre-existing at
+> `197dcd9`; d2bb91c wrapped both lowering sites but the VarAnnotator
+> `foreach-alias-list` veto fires only for the block form).  Fix shape is in
+> the task; it belongs WITH #153 steps 4–5 as a first-commit warm-up or a
+> filler — it is small, probe-ready, and completes d2bb91c's family.
+>
+> **Execution order stands: Opus next, on §1 (#153 steps 4–5, taking #262
+> along), then §2 (#254).  Fable's next session = review those flips, then
+> the E5.1/E5.2 + boxed-aggregates designs (§3).**
+
 > **UPDATED s361 (Opus).**  §1's **step 3 is DONE** — both operand sites are
 > on the walker (`3509115` named unaries, `ece9d35` strictly-1-arg, plus the
 > prototype-arity precondition `1279be6` and the foreach silent-wrong
