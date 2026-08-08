@@ -2110,6 +2110,9 @@ sub _process_expression_statement {
       # The list must be in LIST_CTX (= 1) so split() returns elements not count
       my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
       $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
+      # `$_ = "w" for ($h{k})` aliases the live element exactly as the block
+      # form does — same rewrite, same helper (#263).
+      $cond_cl = _apply_foreach_alias_rewrite($cond_cl, \@cond_parts);
       # A single SCALAR list operand is ONE element even when it holds an
       # array/hash ref — see _foreach_single_scalar_p.  Same wrap as the
       # block-form site in Parser2.
@@ -6461,48 +6464,99 @@ sub _process_c_style_for {
 }
 
 
+# The wrappers a foreach LIST can arrive in, peeled down to the significant
+# tokens of its sole element.  ONE resolver, shared by every pass that reasons
+# about the list's shape: the alias rewrite below, the single-scalar wrap
+# (_foreach_single_scalar_p) and VarAnnotator's raw-slot veto.  The spelling
+# decides the wrapper — the block form hands over the list's PPI::Statement
+# children, the statement-MODIFIER form hands over the parens themselves — and
+# when the passes disagreed about which wrappers to peel, the modifier spelling
+# silently lost its write-through (#263: `$_ = "w" for ($h{k})` wrote nothing
+# while the block form wrote through).
+sub _foreach_list_unwrap {
+  my ($list_parts) = @_;
+  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$list_parts;
+  while (@sig == 1
+         && (ref($sig[0]) eq 'PPI::Statement'
+             || ref($sig[0]) eq 'PPI::Statement::Expression'
+             || ref($sig[0]) eq 'PPI::Structure::List'
+             || ref($sig[0]) eq 'PPI::Structure::Condition')) {
+    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
+  }
+  return @sig;
+}
+
+# Apply the aliasing rewrite (if any) to an already-lowered foreach LIST
+# string.  The one place v1 turns the AST verdict into emission, so both v1
+# lowering sites — block form and statement modifier — go through it.
+sub _apply_foreach_alias_rewrite {
+  my ($list_cl, $list_parts) = @_;
+  if (my ($from, $to) = _foreach_alias_rewrite($list_parts)) {
+    # ANCHORED at the outermost call (allowing the single-scalar `(vector `
+    # wrap, which one site applies before this runs and the other after).
+    # The head the AST predicted must BE the outermost one: if it is not, the
+    # rewrite must do nothing rather than box some inner call, which would
+    # hand p-gethash a box where it expects a container — a silent wrong in
+    # place of a missed alias.
+    $list_cl =~ s/\A(\s*(?:\(vector\s+)?)\(\Q$from\E /$1($to /;
+  }
+  return $list_cl;
+}
+
 # If a foreach list is a single aliasable lvalue, return (FROM-HEAD, TO-HEAD) so
 # the caller can rewrite the generated call head to its box-returning form, making
 # the loop variable alias the live container (write-through).  Otherwise ().
-# Two shapes are recognised (AST-level, per the codegen-style preference — inspect
-# the PPI nodes, don't pattern-match the generated CL):
+# Three shapes are recognised (AST-level, per the codegen-style preference —
+# inspect the PPI nodes, don't pattern-match the generated CL):
 #   - a magic-lvalue builtin call: substr(...) / pos(...) / vec(...)
 #     -> p-substr -> p-substr-lvalue-cell, etc.  (Word + argument-List)
-#   - a single hash/array ELEMENT: $h{k} / $a[i]
+#   - a single hash/array ELEMENT of a NAMED container: $h{k} / $a[i]
 #     -> p-gethash -> p-gethash-box  /  p-aref -> p-aref-box  (Symbol + Subscript)
-# A two-part match guards against multi-element lists like `for (substr(...), $y)`.
+#   - the same element THROUGH A REFERENCE: $r->{k} / $r->[i] / $$r{k} / $$r[i]
+#     -> p-gethash-deref -> p-gethash-deref-box  /  p-aref-deref -> …-deref-box
+#     (the two spellings lower to the same head, so one entry covers both)
+# The element shapes are matched as a two- or three-token TERM, which is also
+# what guards against multi-element lists like `for (substr(...), $y)`.
 # Slices (@a[...], @h{...}) and `values %h` are intentionally NOT handled here —
 # they flatten through the shared copy machinery; see docs/foreach-aliasing.md.
+# A list of SEVERAL elements is a known gap in both spellings (task #267): one
+# head swap cannot rewrite N element forms, and picking them apart needs the
+# per-element lowering the seam does not do.
 sub _foreach_alias_rewrite {
   my ($list_parts) = @_;
-  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$list_parts;
-  # A sole list element arrives wrapped in a PPI::Statement (or Expression) —
-  # `for (substr($x,1,3))` gives one PPI::Statement('substr($x,1,3)'). Unwrap it.
-  while (@sig == 1
-         && (ref($sig[0]) eq 'PPI::Statement'
-             || ref($sig[0]) eq 'PPI::Statement::Expression')) {
-    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
-  }
-  return () unless @sig == 2;
+  my @sig = _foreach_list_unwrap($list_parts);
+  return () unless @sig;
 
   # Magic-lvalue builtin call: Word + argument-List.
-  if (ref($sig[0]) eq 'PPI::Token::Word'
+  if (@sig == 2
+      && ref($sig[0]) eq 'PPI::Token::Word'
       && ref($sig[1]) eq 'PPI::Structure::List') {
     my %head = (substr => 'p-substr', pos => 'p-pos', vec => 'p-vec');
     my $h = $head{ $sig[0]->content } or return ();
     return ($h, "$h-lvalue-cell");
   }
 
-  # Scalar element of a named hash/array: $-sigil Symbol + Subscript.
-  # {k} -> hash element (p-gethash-box); [i] -> array element (p-aref-box).
-  if (ref($sig[0]) eq 'PPI::Token::Symbol'
-      && $sig[0]->content =~ /^\$/
-      && ref($sig[1]) eq 'PPI::Structure::Subscript') {
-    my $sub = $sig[1]->content;
-    return ('p-gethash', 'p-gethash-box') if $sub =~ /^\{/;
-    return ('p-aref',    'p-aref-box')    if $sub =~ /^\[/;
-  }
-
+  # Otherwise: any SINGLE-SCALAR term that ENDS in a subscript is an element
+  # access, whatever its spelling — `$h{k}`, `$r->{k}`, `$$r{k}`, `${$r}{k}`,
+  # `$h{a}{b}`, `$r->{a}[0]`, `$a[0][1]`.  The term shape is the sibling
+  # predicate's decision (one resolver), so anything it rejects — a slice, a
+  # bare `$x`, `\@a` — never reaches here.
+  return () unless ref($sig[-1]) eq 'PPI::Structure::Subscript'
+                && _foreach_single_scalar_p(\@sig);
+  # Which HEAD the outermost access emitted follows from what it reads FROM:
+  # a scalar REFERENCE (`$r->{k}` / `$$r{k}` / `${$r}{k}`) lowers to the
+  # -deref head, a named container or an intermediate value (any chain of two
+  # or more subscripts, whose base is the previous access's VALUE) to the
+  # plain one.  Only the LAST bracket picks hash vs array.
+  my $nsub = grep { ref($_) eq 'PPI::Structure::Subscript' } @sig;
+  my $through_ref =
+       (ref($sig[0]) eq 'PPI::Token::Cast' && $sig[0]->content eq '$')
+    || (@sig > 1 && ref($sig[1]) eq 'PPI::Token::Operator'
+        && $sig[1]->content eq '->');
+  my $suffix = ($nsub == 1 && $through_ref) ? '-deref' : '';
+  my $sub = $sig[-1]->content;
+  return ("p-gethash$suffix", "p-gethash$suffix-box") if $sub =~ /^\{/;
+  return ("p-aref$suffix",    "p-aref$suffix-box")    if $sub =~ /^\[/;
   return ();
 }
 
@@ -6527,16 +6581,9 @@ sub _foreach_alias_rewrite {
 # both decline, keeping today's behaviour.
 sub _foreach_single_scalar_p {
   my ($list_parts) = @_;
-  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$list_parts;
   # A sole element arrives wrapped: PPI::Statement (block form) or the
   # parens themselves (statement-modifier form, `EXPR for ($r)`).
-  while (@sig == 1
-         && (ref($sig[0]) eq 'PPI::Statement'
-             || ref($sig[0]) eq 'PPI::Statement::Expression'
-             || ref($sig[0]) eq 'PPI::Structure::List'
-             || ref($sig[0]) eq 'PPI::Structure::Condition')) {
-    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
-  }
+  my @sig = _foreach_list_unwrap($list_parts);
   return 0 unless @sig;
 
   my $i = 0;
@@ -6672,9 +6719,7 @@ sub _process_foreach_loop {
   # binds $_ to it.  The outer call appears before its args, so the first
   # occurrence is the right one; the trailing space avoids matching e.g.
   # (p-substr-ref / (p-gethash-box .
-  if (my ($from, $to) = _foreach_alias_rewrite(\@list_parts)) {
-    $list_cl =~ s/\(\Q$from\E /($to /;
-  }
+  $list_cl = _apply_foreach_alias_rewrite($list_cl, \@list_parts);
 
   # Build label argument if present
   my $label_arg = $label ? " :label $label" : "";

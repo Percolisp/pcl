@@ -8,7 +8,12 @@
 # Covered here (the aliasable forms PCL supports):
 #   - single hash element   $h{k}   -> p-gethash-box
 #   - single array element  $a[i]   -> p-aref-box
+#   - the same THROUGH A REF ($r->{k}, $$r{k})  -> p-gethash-deref-box / …
+#   - subscript CHAINS ($h{a}{b}, $r->{a}[0], $a[0][1]) -> the outer access's
+#     plain box head (its base is the previous access's value, not a name)
 #   - substr/pos/vec lvalues are covered in lvalue-ref-01.t
+# Both SPELLINGS are covered, because they are two lowering sites: the block
+# form `for (LV) { … }` and the statement modifier `EXPR for (LV);` (#262/#263).
 # Also pinned: forms that must NOT alias (computed temps, plain builtins) and the
 # whole-array case, so the boundary doesn't silently drift.
 #
@@ -32,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -97,3 +102,38 @@ test_cl('for(f()) does not write back (normal sub returns a copy)',
 test_cl('for($a[0], $a[1]) still iterates both (no false rewrite)',
     q{my @a=(1,2,3); my @seen; for ($a[0], $a[1]) { push @seen, $_ } print "@seen\n";},
     "1 2\n");
+
+# --- #263 (s365): the STATEMENT-MODIFIER spelling is a second lowering site,
+# and it was not doing the rewrite at all — the two spellings wrap the list
+# differently (Statement children vs the parens), and only one pass peeled
+# both, so the AST verdict never fired for `EXPR for (LV)`.  One shared peeler
+# now serves the rewrite, the single-scalar wrap and the annotator's veto.
+# Widening it covered the ref/chain shapes NEITHER spelling handled before.
+# Grouped into three snippets: each row costs an SBCL run (CLAUDE.md 6).
+test_cl('modifier form aliases a named element (#263)',
+    q{my %h=(k=>"o"); $_="w" for ($h{k}); my @a=("o"); $_="w" for ($a[0]);
+      print "$h{k}$a[0]\n";}, "ww\n");
+test_cl('both spellings alias an element THROUGH a ref',
+    q{my $hr={k=>"o"}; $_="w" for ($hr->{k});
+      my $ar=["o"];    for ($ar->[0]) { $_="w" }
+      my %y=(k=>"o"); my $yr=\%y; for ($$yr{k}) { $_="w" }
+      print "$hr->{k}$ar->[0]$y{k}\n";}, "www\n");
+test_cl('both spellings alias a subscript CHAIN',
+    q{my %d=(k=>{j=>"o"}); for ($d{k}{j}) { $_="w" }
+      my $q={a=>{b=>"o"}};  $_="w" for ($q->{a}{b});
+      my @f=(["o"]);        for ($f[0][0]) { $_="w" }
+      print "$d{k}{j}$q->{a}{b}$f[0][0]\n";}, "www\n");
+
+# INVERSE GUARD for that widening: the rewrite must claim no list that is not a
+# sole aliasable element.  An @array, `keys`, a slice, a call and a two-element
+# list all flatten to VALUES through the shared copy machinery, and boxing one
+# of their calls would hand a box where a container is expected — so no box /
+# lvalue-cell head may appear at all.  (`for (@a)` aliases through p-foreach
+# itself, checked above, not through this rewrite.)
+unlike(transpile(q{
+my @a=(1,2); my %h=(a=>1,b=>2); sub f { "x" }
+for (@a) { $_="w" }  for (keys %h) { $_="w" }  for (@a[0,1]) { $_="w" }
+for (f()) { $_="w" } for ($h{a}, $h{b}) { $_="w" }
+$_="w" for (@a);     $_="w" for ($h{a}, $h{b});
+}), qr/p-(?:gethash|aref)(?:-deref)?-box|-lvalue-cell/,
+    'alias rewrite claims no non-element list, either spelling');

@@ -757,14 +757,11 @@ sub _semi {
 # for the one-operand wrap), so both must veto the same way.
 sub _ev_foreach_alias_list {
   my ($ctx, $parts) = @_;
-  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$parts;
   # The list arrives wrapped differently per spelling: the block form hands
-  # over the list's Statement children, the modifier form the parens.
-  while (@sig == 1
-         && ($sig[0]->isa('PPI::Statement')
-             || $sig[0]->isa('PPI::Structure::List'))) {
-    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
-  }
+  # over the list's Statement children, the modifier form the parens.  One
+  # shared peeler, so this veto and the rewrite it protects can never disagree
+  # about what the sole element is (#263).
+  my @sig = Pl::Parser::_foreach_list_unwrap($parts);
   # One operand per top-level comma; only a lone bare scalar in a slot counts
   # (anything longer is an expression, whose value is already a fresh box).
   my @slot;
