@@ -675,4 +675,32 @@ for my $e (@w) { $e *= 10 }
 print "spread-alias=@w\n";
 });
 
+# ── s363: the same ALIAS write-back, at the shapes d2bb91c's veto missed.
+# The `foreach-alias-list` event force-boxes a bare `$name` used as the loop
+# LIST, so a write through the loop var lands in the variable.  It fired only
+# for the compound/block form and only for a ONE-element list, so both
+# `$_ = … for ($s);` (the statement-modifier spelling never reaches that
+# branch) and `for ($x, $y) {…}` (two operands) silently dropped the write.
+# One helper now vetoes every bare-scalar operand for both spellings.
+# INVERSE GUARDS in the same snippet: a non-bare operand (`$h{k}`, a literal)
+# is untouched, and the loop still iterates once per operand.
+test_transpile("foreach loop-var writes reach every bare scalar operand", q{
+my $m = "orig";
+$_ = "written" for ($m);
+my $m2 = "orig";
+$_ = "written" for $m2;
+my $m3 = "orig";
+$_ = "written" foreach ($m3);
+print "mod=$m $m2 $m3\n";
+my ($p, $q) = ("orig", "orig");
+for ($p, $q) { $_ = "written" }
+my ($u, $v) = ("orig", "orig");
+$_ = "written" for ($u, $v);
+print "two=$p $q $u $v\n";
+my $n = 0;
+my %h = (k => "keep");
+$n++ for ($h{k}, "lit", 3);
+print "count=$n keep=$h{k}\n";
+});
+
 done_testing();

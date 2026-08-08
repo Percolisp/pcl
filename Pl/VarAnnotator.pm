@@ -693,22 +693,10 @@ sub _tw_stmt {
         _ev($ctx, $arg->content, 'magic-lvalue-arg')
           if $arg && $arg->content =~ /^\$/;
       }
-      # Same veto, one shape over: `for ($x) { $_ = … }` — the loop var
-      # ALIASES the sole scalar list operand, so a write through it must
-      # reach $x itself.  The list is evaluated once into a one-element
-      # vector, and only a BOX carries the write back; a raw slot silently
-      # dropped it (probed s361 against perl: `alias=orig`, perl says
-      # `alias=written`).  Only a bare `$name` needs this — an element or a
-      # deref (`$h{k}`, `$$r`) already arrives as a live box.
-      {
-        my @sig2 = grep { ref($_) ne 'PPI::Token::Whitespace' } @lp2;
-        while (@sig2 == 1 && $sig2[0]->isa('PPI::Statement')) {
-          @sig2 = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig2[0]->children;
-        }
-        _ev($ctx, $sig2[0]->content, 'foreach-alias-list')
-          if @sig2 == 1 && $sig2[0]->isa('PPI::Token::Symbol')
-          && $sig2[0]->content =~ /^\$\w+$/;
-      }
+      # Same veto, one shape over: `for ($x) { $_ = … }` — see
+      # _ev_foreach_alias_list.  The statement-MODIFIER spelling of the same
+      # loop vetoes from _tw_stmt_expr, through the same helper.
+      _ev_foreach_alias_list($ctx, \@lp2);
     }
     for my $k (@k) {
       if ($k->isa('PPI::Structure::Condition')) {
@@ -758,6 +746,41 @@ sub _semi {
   return $e->isa('PPI::Token::Structure') && $e->content eq ';';
 }
 
+# `for ($x, $y) { $_ = … }` and its statement-modifier spelling
+# `$_ = … for ($x)`: the loop var ALIASES each scalar list operand, so a write
+# through it must reach that variable itself.  The list is evaluated once into
+# a vector, and only a BOX carries the write back; a raw slot silently dropped
+# it (probed s361 against perl: `alias=orig`, perl says `alias=written`).  Veto
+# the raw slot of every bare `$name` operand — an element or a deref (`$h{k}`,
+# `$$r`) needs nothing here, it already arrives as a live box.  BOTH lowering
+# sites build the list the same way (see Pl::Parser::_foreach_single_scalar_p
+# for the one-operand wrap), so both must veto the same way.
+sub _ev_foreach_alias_list {
+  my ($ctx, $parts) = @_;
+  my @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } @$parts;
+  # The list arrives wrapped differently per spelling: the block form hands
+  # over the list's Statement children, the modifier form the parens.
+  while (@sig == 1
+         && ($sig[0]->isa('PPI::Statement')
+             || $sig[0]->isa('PPI::Structure::List'))) {
+    @sig = grep { ref($_) ne 'PPI::Token::Whitespace' } $sig[0]->children;
+  }
+  # One operand per top-level comma; only a lone bare scalar in a slot counts
+  # (anything longer is an expression, whose value is already a fresh box).
+  my @slot;
+  for my $e (@sig, undef) {
+    if (!defined $e
+        || ($e->isa('PPI::Token::Operator') && $e->content =~ /^(?:,|=>)$/)) {
+      _ev($ctx, $slot[0]->content, 'foreach-alias-list')
+        if @slot == 1 && $slot[0]->isa('PPI::Token::Symbol')
+        && $slot[0]->content =~ /^\$\w+$/;
+      @slot = ();
+      next;
+    }
+    push @slot, $e;
+  }
+}
+
 sub _tw_stmt_expr {
   my ($ctx, $parts, $native_root, $uctx) = @_;
   my @parts = grep { ref $_ && $_->significant && !_semi($_) } @$parts;
@@ -769,6 +792,7 @@ sub _tw_stmt_expr {
   my ($expr, $mod, $cond) = Pl::Parser2::_split_modifier(\@parts);
   if ($mod) {
     _tw_stmt_expr($ctx, $cond, 0, 'bool');
+    _ev_foreach_alias_list($ctx, $cond) if $mod =~ /^for(?:each)?$/;
     local $ctx->{cond} = 1;
     _tw_expr_parse($ctx, $expr, 0);
     return;
