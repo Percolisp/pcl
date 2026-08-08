@@ -604,4 +604,39 @@ my ($p, $s2) = ($s, "x");
 print "real-selfref $p\n";
 });
 
+# ── #153 step 3b (s361): the strictly-1-arg operand site.  Two bugs, one
+# family — how many arguments a paren-less call takes, and where the single
+# operand TERM ends.
+#   * `sub f ($;$)` called without parens used to SILENTLY DROP everything
+#     after the first argument: the site read `min_params` (a MINIMUM) as if
+#     it were "exactly one".  Prototype `max args` decides it now.
+#   * a TRAILING `;` in a prototype gives the sub LIST-operator precedence in
+#     perl, so `listop 0 || 5` is `listop(0 || 5)` == 5 — while a plain `($)`
+#     is a named unary, so `unary 0 || 5` is `unary(0) || 5` == 0.  PCL used
+#     to answer 5 for BOTH (task #147's family).
+#   * the operand term now comes from the ONE term-grammar walker, so
+#     `getc $$pair[0]` reads the ELEMENT; it used to stop at `$$pair` and
+#     read the wrong handle (perl's own t/io/utf8.t:397 is the live case).
+# INVERSE GUARD: the bareword-filehandle shape (`close F, 'desc'`) is a
+# walker DECLINE and must still take only the handle.
+test_transpile("#153/#147: prototype arity, list-op vs unary precedence, 1-arg term extent", q{
+sub two ($;$)   { print "two=@_\n" }
+sub mymk (_;$)  { print "mymk=@_\n" }
+sub listop ($;) { print "listop=$_[0]\n" }
+sub unary ($)   { print "unary=$_[0]\n" }
+my ($p, $q) = ("x", "y");
+two $p, $q;
+mymk foo => 0755;
+listop 0 || 5;
+unary 0 || 5;
+my $tf = "/tmp/pcl-t9-getc-probe.txt";
+open my $w, ">", $tf or die "w: $!"; print $w "AB"; close $w;
+open my $fh, "<", $tf or die "r: $!";
+my $pair = [$fh, "A"];
+my $c = getc $$pair[0];
+print "getc=$c\n";
+print "close=", (close $fh ? 1 : 0), " desc\n";
+unlink $tf;
+});
+
 done_testing();

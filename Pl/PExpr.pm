@@ -3651,7 +3651,6 @@ sub handle_subcalls {
     # Check if this is a strictly 1-param function with Cast+Symbol as argument
     # NOTE: Don't apply this to functions with variable params like bless([1,2])
     #       as they may take more arguments after the Cast+Symbol
-    my $strictly_single_site = 0;
     if (defined $no_pars && $end_pars > $i + 1) {
       # Only limit to single term if function takes EXACTLY 1 param (max is 1)
       my $is_strictly_single = 0;
@@ -3689,7 +3688,19 @@ sub handle_subcalls {
       if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
         # Only apply for non-named-unary 1-param functions
         # Named unary already handled above with proper term detection
-        $strictly_single_site = 1;
+        # #153 step 3b: the operand extent comes from the ONE term-grammar
+        # walker when it answers; a decline falls through to the legacy
+        # branches below (bare-word filehandles are the live one).
+        # Measured before the flip, over the 111-file corpus AND all 604
+        # files of perl's t/*/*.t: ONE disagreement, `getc $$_[0]`, where
+        # the walker takes the whole `$$_[0]` element and legacy stopped at
+        # `$$_` — a silent-wrong this flip fixes (io/utf8.t:397 is the live
+        # case).  The two other shapes the wider population found were the
+        # prototype-arity bug fixed in the previous commit.
+        my $walker_end = $self->_term_extent($e, $i + 1, $term_ceiling);
+        if (defined $walker_end) {
+          $end_pars = $walker_end;
+        } else {
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
@@ -3736,6 +3747,7 @@ sub handle_subcalls {
             $end_pars = $i + 1;
           }
         }
+        }  # end legacy operand branches (walker declined)
       }
     }
 
@@ -3768,19 +3780,11 @@ sub handle_subcalls {
       }
     }
 
-    # #153 measurement probe, strictly-1-arg flavour (no precedence
-    # extension — these functions take exactly the term).  Sits AFTER the
-    # prototype arg-count limiting above, which is part of the legacy
-    # answer being compared (a `($)`-prototype user sub narrows to one
-    # comma-arg there, agreeing with the walker).
-    if ($ENV{PCL_TERM_DIFF} && $strictly_single_site) {
-      my $te = $self->_term_extent($e, $i + 1, $term_ceiling);
-      if (defined $te && $te != $end_pars) {
-        warn sprintf "PCL_TERM_DIFF single fn=%s old=+%d new=+%d toks=[%s]\n",
-            $sub_name, $end_pars - $i, $te - $i,
-            $self->_tok_run_desc($e, $i, ($te > $end_pars ? $te : $end_pars));
-      }
-    }
+    # (The strictly-1-arg PCL_TERM_DIFF probe that used to sit here is gone
+    # with the flip above — like the named-unary one, it can no longer
+    # report anything about the walker: its answer IS $end_pars.  Both
+    # operand sites are now on the walker; `_tok_run_desc` stays as the
+    # shared describe-a-token-run helper for the next site's measurement.)
 
     # - - - Special handling for print/say with filehandle:
     # print FILEHANDLE LIST  (no comma between filehandle and list)
