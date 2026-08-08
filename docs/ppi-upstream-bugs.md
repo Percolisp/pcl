@@ -146,6 +146,34 @@ genuine code block.  Regression guard in `Pl/t/transpile-test-04.t`.
 
 ---
 
+## 6. `for ${*$f} (LIST) { }` — LEXER DIES: "Illegal state in 'for' compound statement"  [CONFIRMED 1.291]
+
+Minimal repro (found s358, task #253 — kills `t/op/for.t` line 767 whole-file):
+
+```perl
+no strict 'refs';
+my $f = "v";
+for ${*$f} (5,11,33) { print }     # valid perl; runs, printing 5,11,33
+```
+
+`PPI::Document->new` returns undef with `Lexer failed: Illegal state in
+'for' compound statement`.  This is not a mis-tokenization but a hard LEXER
+failure: the foreach loop-variable slot accepts `$x` / `my $x` but not a
+block-deref lvalue `${*$f}` (a glob-deref used as the loop alias — the perl
+suite's low-refcnt-package-var / assert-SEGV regression test).  Plain
+`for $x (…)` is fine; `foreach ${*$f} (…)` fails identically.
+
+PCL-side status: **no workaround** — the whole file fails to transpile, and
+that is the honest report.  `t/op/for.t`'s rows in the s323e suite snapshot
+were an ACCIDENT of `--lenient-ppi` truncation (the same class as the #228
+`lex.t` registration); the flag was retired by ruling (§5a.4, s356), so the
+file now reads TRANSPILE-FAIL.  It is NOT a flip loss and NOT a PCL
+regression (task #253, `docs/fable-answers-s357.md`); it joins the #254 §4
+residue registration with this cause.  Re-check when PPI releases past
+1.291.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it

@@ -1281,3 +1281,8 @@ E4.1's pre-work is now done.
   (`"$_[0]->{k}"`, `"$a[0]{k}"`) — chains parse via PPI when a second
   group follows; a lone subscript keeps the legacy path byte-for-byte →
   `docs/fable-answers-s357.md` §4.3.
+- **op/for.t (#253) is an upstream PPI 1.291 lexer bug, not a PCL
+  regression** — `for ${*$f} (LIST) { }` kills the PPI lexer whole-file;
+  its s323e snapshot rows were `--lenient-ppi` truncation (the #228
+  accident class), retired by ruling s356 → `docs/ppi-upstream-bugs.md`
+  §6; registration with cause via #254 §4.

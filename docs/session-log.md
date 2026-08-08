@@ -56,6 +56,16 @@ and five improved.  pack/mro artifacts regenerated (marker-only).
 single-file runs, not a regression.  New tasks: #253 (op/for.t PPI
 regression), #254 (phase-2 plan), #255 (#243 port).
 
+**#253 CLOSED (same session, second commit)**: op/for.t is an upstream
+**PPI 1.291 lexer bug**, not a PCL regression — line-bisected to
+`for ${*$f} (5,11,33) {` (a glob-deref loop alias; valid perl, runs fine),
+which kills `PPI::Document->new` whole-file with "Illegal state in 'for'
+compound statement".  The s323e snapshot's rows for the file were an
+ACCIDENT of the runner's `--lenient-ppi` truncation — the exact #228
+lex.t class — and that flag was retired by ruling in s356, so the file
+now reports honestly.  Registered as `docs/ppi-upstream-bugs.md` §6; its
+suite registration folds into the #254 §4 residue proposal.
+
 **Process slip (mine)**: a backwards guard (`git stash -q && echo …`)
 actually RAN a stash mid-session, silently reverting the working tree —
 caught when corpus-diff went implausibly clean and -09 failed; popped, and
