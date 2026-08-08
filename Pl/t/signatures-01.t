@@ -12,13 +12,16 @@ use lib ".";
 use Data::Dump qw/dump/;
 
 use Test::More tests => 34;
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
 
 # Helper: parse a signature string
 sub parse_sig {
     my $sig_str = shift;
+    # Deliberate UNIT test of parse_prototype_or_signature — a LIVE v1 seam
+    # API (Parser2's expression seam still calls it), not the retired
+    # file-level entry.  The dummy instance only carries an Environment.
     my $parser = Pl::Parser->new(code => "1;");
     return $parser->parse_prototype_or_signature($sig_str);
 }
@@ -127,7 +130,7 @@ diag "";
 diag "-------- Environment integration:";
 
 {
-    my $parser = Pl::Parser->new(code => 'sub foo($x, $y) { 1 }');
+    my $parser = Pl::Parser2->new(code => 'sub foo($x, $y) { 1 }');
     $parser->parse;
 
     my $env = $parser->environment;

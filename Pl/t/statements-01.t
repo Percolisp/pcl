@@ -10,14 +10,13 @@ use warnings;
 use lib ".";
 
 use Test::More tests => 41;
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 
 
 # Helper: parse code and return generated CL
 sub parse_code {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    return $parser->parse;
+        return Pl::Parser2->parse_code($code);
 }
 
 
@@ -53,8 +52,11 @@ output_contains('for $item (1, 2, 3) { }',
 diag "";
 diag "-------- C-style for loops:";
 
+# v2 hoists the `my $i = 0` init into the loop binding (a raw slot) and
+# spells the void `$i++` p-incf-raw — same init/condition/step semantics as
+# v1's in-form (p-my-= …)/(p-post++ …) spellings.
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '(p-for ((p-my-= $i 0))',
+                '(let (($i 0)) (p-for ()',
                 'C-style for: init');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
@@ -62,7 +64,7 @@ output_contains('for (my $i = 0; $i < 10; $i++) { }',
                 'C-style for: condition');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '((p-post++ $i))',
+                '((p-incf-raw $i))',
                 'C-style for: increment');
 
 output_contains('for ($i = 0; $i <= $max; $i += 2) { }',
@@ -148,12 +150,17 @@ package Outer {
 }
 };
     my $result = parse_code($code);
+    # v1 echoed a ;;; comment per package open/close; v2 emits only the
+    # outermost pair.  The SEMANTIC facts the six rows guarded: each nested
+    # package exists, the innermost sub lands in ITS package (perl nested
+    # `package` statements do not nest names — `deep` is Inner::deep, not
+    # Outer::Middle::Inner::deep), and control returns to main after.
     like($result, qr/;;; package Outer/, '3-level: Outer package');
-    like($result, qr/;;; package Middle/, '3-level: Middle package');
-    like($result, qr/;;; package Inner/, '3-level: Inner package');
-    like($result, qr/;;; end package Inner/, '3-level: end Inner');
-    like($result, qr/;;; end package Middle/, '3-level: end Middle');
-    like($result, qr/;;; end package Outer/, '3-level: end Outer');
+    like($result, qr/\(p-defpackage :Middle\)/, '3-level: Middle package exists');
+    like($result, qr/\(p-defpackage :Inner\)/, '3-level: Inner package exists');
+    like($result, qr/\(p-sub Inner::pl-deep/, '3-level: deep lands in Inner (not name-nested)');
+    like($result, qr/\(in-package :main\)/, '3-level: control returns to main after the block');
+    like($result, qr/;;; back to package main/, '3-level: end of outermost package marked');
 }
 
 
@@ -162,9 +169,11 @@ diag "";
 diag "-------- Regression tests (session 3):";
 
 # Regression: foreach with range operator
-# Range was returning list but foreach expects vector
+# Range was returning list but foreach expects vector.  v2 lowers a
+# constant integer range to the raw counting loop (s286b) — no list is
+# built at all, which subsumes the original claim.
 output_contains('foreach my $i (0..5) { print $i; }',
-                '(p-foreach ($i (p-.. 0 5))',
+                '(p-foreach-range-raw ($i 0 5)',
                 'Regression: foreach with range operator');
 
 # Regression: push with @array argument should flatten

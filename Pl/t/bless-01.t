@@ -10,15 +10,14 @@ use warnings;
 use lib ".";
 
 use Test::More tests => 23;
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
 
 # Helper: parse code and return generated CL
 sub parse_code {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    return $parser->parse;
+        return Pl::Parser2->parse_code($code);
 }
 
 
@@ -42,7 +41,7 @@ output_contains('bless({}, "MyClass");',
                 'bless recognized as function');
 
 output_contains('my $obj = bless {}, "MyClass";',
-                '(box-set $obj (p-bless',
+                '(p-my-= $obj (p-bless',
                 'bless in assignment');
 
 output_contains('bless $ref, "Class";',
@@ -59,7 +58,7 @@ output_contains('ref($obj);',
                 'ref function');
 
 output_contains('my $type = ref($x);',
-                '(box-set $type (p-ref $x))',
+                '(p-my-= $type (p-ref $x))',
                 'ref in assignment');
 
 
@@ -88,7 +87,7 @@ diag "-------- Package declaration:";
 {
     my $result = parse_code('package MyClass { sub new {} }');
     like($result, qr/;;; package MyClass/, 'Block package start');
-    like($result, qr/;;; end package MyClass/, 'Block package end');
+    like($result, qr/;;; back to package main/, 'Block package end');
 }
 
 
@@ -133,7 +132,7 @@ package MyClass {
     my $result = parse_code($code);
     like($result, qr/;;; package MyClass/, 'Full class: package start');
     like($result, qr/\(p-sub pl-new/, 'Full class: constructor defined');
-    like($result, qr/;;; end package MyClass/, 'Full class: package end');
+    like($result, qr/;;; back to package main/, 'Full class: package end');
 }
 
 

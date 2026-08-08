@@ -18,7 +18,7 @@ use Test::More tests => 32;
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
 BEGIN { use_ok('Pl::Environment') };
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 
 # ----------------------------------------------------------------------
 # Helper functions
@@ -44,8 +44,7 @@ sub parse_and_gen {
 sub parse_stmt_and_gen {
   my $code    = shift;
 
-  my $parser  = Pl::Parser->new(code => $code);
-  my $cl      = $parser->parse();
+    my $cl = Pl::Parser2->parse_code($code);
 
   return $cl;
 }
@@ -250,7 +249,8 @@ Error occurred
 MSG
 PERL
   my $cl = parse_stmt_and_gen($code);
-  like($cl, qr/p-print.*"Error occurred/, 'Heredoc as function argument');
+  # /s: v2 pretty-prints (p-print ...) across lines
+  like($cl, qr/p-print.*"Error occurred/s, 'Heredoc as function argument');
 }
 
 # Tests complete

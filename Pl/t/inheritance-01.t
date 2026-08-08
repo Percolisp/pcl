@@ -11,7 +11,7 @@ use lib ".";
 use PPI;
 use Test::More;
 
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 BEGIN { use_ok('Pl::ExprToCL') };
 
@@ -23,16 +23,7 @@ diag '-------- Basic @ISA Parsing:';
 # Helper to parse and get output
 sub transpile {
   my $code = shift;
-
-  my $env = Pl::Environment->new();
-  my $parser = Pl::Parser->new(
-    code        => $code,
-    environment => $env,
-  );
-
-  $parser->parse();
-
-  return join("\n", @{$parser->output});
+  return Pl::Parser2->parse_code($code);
 }
 
 # Test @ISA with qw()
@@ -42,9 +33,12 @@ package Child;
 our @ISA = qw(Parent);
 END_PERL
 
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, '@ISA qw() generates CLOS class with parent');
+  # v2 keeps the defclass EMPTY and establishes inheritance through the
+  # runtime @ISA write (C3/MRO reads @ISA); `our @ISA = qw(...)` is an
+  # assignment, not v1's p-push.
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent"\)/, '@ISA qw() generates CLOS class with parent');
   like($cl, qr/defvar \@ISA/, '@ISA array is still created');
-  like($cl, qr/p-push \@ISA "Parent"/, 'Parent pushed to @ISA array');
+  like($cl, qr/Child::\@ISA[^\n]*"Parent"/, 'Parent lands in @ISA array');
 }
 
 # Test @ISA with list syntax
@@ -54,7 +48,7 @@ package Child;
 our @ISA = ('Parent1', 'Parent2');
 END_PERL
 
-  like($cl, qr/defclass plc-child \(Parent1::plc-parent1 Parent2::plc-parent2\)/, '@ISA list generates CLOS class with parents');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent1" "Parent2"\)/, '@ISA list generates CLOS class with parents');
 }
 
 # Test nested package names
@@ -64,7 +58,7 @@ package My::Child;
 our @ISA = qw(My::Parent);
 END_PERL
 
-  like($cl, qr/defclass plc-my-child \(\|My::Parent\|::plc-my-parent\)/, 'Nested package names converted to CLOS class names');
+  like($cl, qr/p-array-= \|My\:\:Child\|::\@ISA \(vector "My::Parent"\)/, 'Nested package names converted to CLOS class names');
 }
 
 
@@ -130,7 +124,7 @@ package Bat;
 our @ISA = qw(Mammal Flyer);
 END_PERL
 
-  like($cl, qr/defclass plc-bat \(Mammal::plc-mammal Flyer::plc-flyer\)/, 'Multiple inheritance generates CLOS class with multiple parents');
+  like($cl, qr/p-array-= Bat::\@ISA \(vector "Mammal" "Flyer"\)/, 'Multiple inheritance generates CLOS class with multiple parents');
 }
 
 
@@ -161,16 +155,14 @@ package Child;
 our @ISA = qw(Parent1 Parent2);
 END_PERL
 
-  my $env = Pl::Environment->new();
-  my $parser = Pl::Parser->new(
-    code        => $code,
-    environment => $env,
-  );
-
-  $parser->parse();
-
-  my $isa = $env->get_isa('Child');
-  is_deeply($isa, ['Parent1', 'Parent2'], '@ISA tracked in environment');
+  # v1's file parse populated the Environment ISA table for `our @ISA`
+  # assignments; v2 defers that shape entirely to the runtime @ISA array
+  # (the env table is fed by the `use parent`/`use base` path, guarded
+  # below).  The observable equivalent of "tracked": both parents reach
+  # the runtime array, in order.
+  my $cl = transpile($code);
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent1" "Parent2"\)/,
+       '@ISA tracked in environment');
 }
 
 
@@ -202,8 +194,8 @@ END_PERL
 
   # Check that each class is generated
   like($cl, qr/defclass plc-animal \(\) \(\)/, 'Animal CLOS class generated');
-  like($cl, qr/defclass plc-mammal \(Animal::plc-animal\)/, 'Mammal inherits from Animal');
-  like($cl, qr/defclass plc-dog \(Mammal::plc-mammal\)/, 'Dog inherits from Mammal');
+  like($cl, qr/p-array-= Mammal::\@ISA \(vector "Animal"\)/, 'Mammal inherits from Animal');
+  like($cl, qr/p-array-= Dog::\@ISA \(vector "Mammal"\)/, 'Dog inherits from Mammal');
 }
 
 
@@ -228,9 +220,9 @@ our @ISA = qw(Mammal Flyer);
 END_PERL
 
   like($cl, qr/defclass plc-animal \(\)/, 'Animal base class');
-  like($cl, qr/defclass plc-mammal \(Animal::plc-animal\)/, 'Mammal inherits Animal');
-  like($cl, qr/defclass plc-flyer \(Animal::plc-animal\)/, 'Flyer inherits Animal');
-  like($cl, qr/defclass plc-bat \(Mammal::plc-mammal Flyer::plc-flyer\)/, 'Bat has multiple parents (diamond)');
+  like($cl, qr/p-array-= Mammal::\@ISA \(vector "Animal"\)/, 'Mammal inherits Animal');
+  like($cl, qr/p-array-= Flyer::\@ISA \(vector "Animal"\)/, 'Flyer inherits Animal');
+  like($cl, qr/p-array-= Bat::\@ISA \(vector "Mammal" "Flyer"\)/, 'Bat has multiple parents (diamond)');
 }
 
 
@@ -287,7 +279,7 @@ package Child;
 our @ISA = ('Parent');
 END_PERL
 
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Single-quoted @ISA works');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent"\)/, 'Single-quoted @ISA works');
 }
 
 
@@ -307,7 +299,7 @@ sub process {
 }
 END_PERL
 
-  like($cl, qr/defclass plc-my-deep-child \(\|My::Deep::Parent\|::plc-my-deep-parent\)/, 'Nested package inheritance');
+  like($cl, qr/p-array-= \|My\:\:Deep\:\:Child\|::\@ISA \(vector "My::Deep::Parent"\)/, 'Nested package inheritance');
   like($cl, qr/p-super-call .* "process" "My::Deep::Child"/, 'SUPER:: in nested package uses full package name');
 }
 
@@ -367,7 +359,7 @@ my $c = Child->new();
 END_PERL
 
   # Child should not have its own new, but call should work via inheritance
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Child inherits from Parent');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent"\)/, 'Child inherits from Parent');
   # The method call Child->new() should use p-method-call
   like($cl, qr/p-method-call.*"Child".*"new"/s, 'Child->new() generates method call');
 }
@@ -427,8 +419,8 @@ sub greet {
 END_PERL
 
   like($cl, qr/defclass plc-grandparent \(\)/, 'GrandParent class');
-  like($cl, qr/defclass plc-parent \(GrandParent::plc-grandparent\)/, 'Parent inherits GrandParent');
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Child inherits Parent');
+  like($cl, qr/p-array-= Parent::\@ISA \(vector "GrandParent"\)/, 'Parent inherits GrandParent');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent"\)/, 'Child inherits Parent');
 
   # Check SUPER:: calls reference correct packages
   like($cl, qr/p-super-call .* "greet" "Parent"/, 'Parent SUPER:: uses "Parent"');
@@ -455,7 +447,7 @@ our @ISA = qw(Left Right);
 END_PERL
 
   # CLOS will use C3 MRO, with Left before Right
-  like($cl, qr/defclass plc-child \(Left::plc-left Right::plc-right\)/, 'Child MRO: Left before Right');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Left" "Right"\)/, 'Child MRO: Left before Right');
 }
 
 
@@ -524,7 +516,7 @@ END_PERL
 
   # Check chained method calls
   like($cl, qr/p-method-call.*p-method-call/s, 'Chained method calls present');
-  like($cl, qr/defclass plc-extendedbuilder \(Builder::plc-builder\)/, 'ExtendedBuilder inherits Builder');
+  like($cl, qr/p-array-= ExtendedBuilder::\@ISA \(vector "Builder"\)/, 'ExtendedBuilder inherits Builder');
 }
 
 
@@ -602,9 +594,9 @@ END_PERL
 
   # Check all classes are generated correctly
   like($cl, qr/defclass plc-animal \(\)/, 'Animal (tree 1)');
-  like($cl, qr/defclass plc-dog \(Animal::plc-animal\)/, 'Dog inherits Animal');
+  like($cl, qr/p-array-= Dog::\@ISA \(vector "Animal"\)/, 'Dog inherits Animal');
   like($cl, qr/defclass plc-vehicle \(\)/, 'Vehicle (tree 2)');
-  like($cl, qr/defclass plc-car \(Vehicle::plc-vehicle\)/, 'Car inherits Vehicle');
+  like($cl, qr/p-array-= Car::\@ISA \(vector "Vehicle"\)/, 'Car inherits Vehicle');
   like($cl, qr/defclass plc-standalone \(\)/, 'Standalone (no inheritance)');
 }
 
@@ -659,7 +651,7 @@ sub name {
 }
 END_PERL
 
-  like($cl, qr/defclass plc-extended \(Base::plc-base\)/, 'Extended inherits Base');
+  like($cl, qr/p-array-= Extended::\@ISA \(vector "Base"\)/, 'Extended inherits Base');
   # Two SUPER::name calls (getter and setter paths)
   my @super_calls = ($cl =~ /p-super-call[^)]+name/g);
   is(scalar @super_calls, 2, 'Two SUPER::name calls (getter and setter)');
@@ -701,7 +693,7 @@ package Child;
 our @ISA = ("Parent");
 END_PERL
 
-  like($cl, qr/defclass plc-child \(Parent::plc-parent\)/, 'Double-quoted @ISA works');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent"\)/, 'Double-quoted @ISA works');
 }
 
 
@@ -716,7 +708,7 @@ package Child;
 our @ISA = ('Parent1', "Parent2");
 END_PERL
 
-  like($cl, qr/defclass plc-child \(Parent1::plc-parent1 Parent2::plc-parent2\)/, 'Mixed quote styles in @ISA');
+  like($cl, qr/p-array-= Child::\@ISA \(vector "Parent1" "Parent2"\)/, 'Mixed quote styles in @ISA');
 }
 
 
@@ -746,9 +738,9 @@ sub method {
 END_PERL
 
   like($cl, qr/defclass plc-level0 \(\)/, 'Level0 base');
-  like($cl, qr/defclass plc-level1 \(Level0::plc-level0\)/, 'Level1 inherits Level0');
-  like($cl, qr/defclass plc-level2 \(Level1::plc-level1\)/, 'Level2 inherits Level1');
-  like($cl, qr/defclass plc-level3 \(Level2::plc-level2\)/, 'Level3 inherits Level2');
+  like($cl, qr/p-array-= Level1::\@ISA \(vector "Level0"\)/, 'Level1 inherits Level0');
+  like($cl, qr/p-array-= Level2::\@ISA \(vector "Level1"\)/, 'Level2 inherits Level1');
+  like($cl, qr/p-array-= Level3::\@ISA \(vector "Level2"\)/, 'Level3 inherits Level2');
 }
 
 
@@ -773,7 +765,7 @@ END_PERL
 
   # Both _private methods should be defined
   like($cl, qr/p-sub pl-_private/, '_private method defined');
-  like($cl, qr/defclass plc-derived \(Base::plc-base\)/, 'Derived inherits Base');
+  like($cl, qr/p-array-= Derived::\@ISA \(vector "Base"\)/, 'Derived inherits Base');
 }
 
 

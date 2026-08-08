@@ -11,15 +11,14 @@ use lib ".";
 
 use Test::More tests => 44;
 use File::Temp qw(tempfile);
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
 
 # Helper: parse code and return generated CL
 sub parse_code {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    return $parser->parse;
+        return Pl::Parser2->parse_code($code);
 }
 
 

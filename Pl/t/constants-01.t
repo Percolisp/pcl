@@ -11,26 +11,29 @@ use warnings;
 use lib ".";
 
 use Test::More tests => 20;
-BEGIN { use_ok('Pl::Parser') };
+BEGIN { use_ok('Pl::Parser2') };
 BEGIN { use_ok('Pl::Environment') };
 
 
 # Helper: parse code and return generated CL
 sub parse_code {
     my $code = shift;
-    my $parser = Pl::Parser->new(code => $code);
-    return $parser->parse;
+        return Pl::Parser2->parse_code($code);
 }
 
 
-# Helper: check if output contains expected string
+# Helper: check if output contains expected string.  v2 pretty-prints long
+# forms across lines, so any whitespace run in EXPECTED matches any
+# whitespace run in the output (the assertion is about the FORM, not the
+# line breaks).
 sub output_contains {
     my $code     = shift;
     my $expected = shift;
     my $desc     = shift // "contains: $expected";
 
     my $result = parse_code($code);
-    like($result, qr/\Q$expected\E/, $desc);
+    my $rx = join '\s+', map { quotemeta } split /\s+/, $expected;
+    like($result, qr/$rx/, $desc);
 }
 
 
@@ -73,20 +76,22 @@ diag "-------- Hash-style constant declaration:";
 diag "";
 diag "-------- Constant usage in expressions:";
 
-# Top-level my now uses eval-when for declaration, box-set for initialization
+# The constant use compiles to a scalar-context call of the constant sub
+# (pl-PI) inside the my-init assignment.  (v1 spelled the binding box-set;
+# v2 spells the same runtime write p-my-= inside the fresh let.)
 output_contains('use constant PI => 3.14159;
 my $x = PI;',
-                '(box-set $x (let ((*wantarray* nil)) (pl-PI)))',
+                '(p-my-= $x (let ((*wantarray* nil)) (pl-PI)))',
                 'Constant in assignment');
 
 output_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
-                '(box-set $area (p-* (p-* (let ((*wantarray* nil)) (pl-PI)) $r) $r))',
+                '(p-my-= $area (p-* (p-* (let ((*wantarray* nil)) (pl-PI)) $r) $r))',
                 'Constant in arithmetic');
 
 output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
-                '(box-set $size (p-* (let ((*wantarray* nil)) (pl-WIDTH)) (let ((*wantarray* nil)) (pl-HEIGHT))))',
+                '(p-my-= $size (p-* (let ((*wantarray* nil)) (pl-WIDTH)) (let ((*wantarray* nil)) (pl-HEIGHT))))',
                 'Multiple constants in expression');
 
 
@@ -118,7 +123,7 @@ diag "";
 diag "-------- Environment integration (prototype tracking):";
 
 {
-    my $parser = Pl::Parser->new(code => 'use constant PI => 3.14159;');
+    my $parser = Pl::Parser2->new(code => 'use constant PI => 3.14159;');
     $parser->parse;
 
     my $env = $parser->environment;
@@ -128,7 +133,7 @@ diag "-------- Environment integration (prototype tracking):";
 }
 
 {
-    my $parser = Pl::Parser->new(code => 'use constant { A => 1, B => 2 };');
+    my $parser = Pl::Parser2->new(code => 'use constant { A => 1, B => 2 };');
     $parser->parse;
 
     my $env = $parser->environment;
