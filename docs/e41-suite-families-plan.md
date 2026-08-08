@@ -1,9 +1,12 @@
 # #252 phase 2 — plan for the two big suite families (written s358, Fable)
 
-Status: **PLAN ONLY** — user directive on #252 was "Do 1. Then write a plan
-for 2."  Phase 1 (Text::Balanced) shipped in s358.  This plan is the ask
-for phase 2; nothing here is authorized to run until the user approves the
-scope.
+Status: **APPROVED (s360, 2026-08-08)** — user: "#254 is approved, so we
+can get a functioning compiler."  The fix scope (§§1–3, families A and B)
+is authorized; Opus executes it (task #254 carries the session-1 recipe).
+**§4's residue registration still needs its own sign-off** — bring it back
+with the real shapes after the measurement session.  History: user
+directive on #252 was "Do 1. Then write a plan for 2."; phase 1
+(Text::Balanced) shipped in s358.
 
 ## 0. What is at stake
 

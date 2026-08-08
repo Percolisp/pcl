@@ -4,6 +4,34 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 360 (2026-08-08, Fable) — USER rulings recorded: #254 APPROVED, big bug hunt deferred to E5 exit gate
+
+Docs-only session (no code, no emission change).  The user ruled on the
+two decisions s359 left open:
+
+- **#254 approved** ("so we can get a functioning compiler"): the
+  `docs/e41-suite-families-plan.md` fix scope (§§1–3) is authorized —
+  family A capture/package-spanning (9 files, the whales taint.t /
+  through.t / svleak.t) first, then family B poisoned condition-`my`
+  (4 files); ~12k of the 15.1k post-flip rows.  Task #254 rewritten as
+  the Opus execution recipe: session 1 = measurement (collapse the 13
+  files to shapes; per shape classify predicate-veto vs mechanism-gap),
+  ship predicate-wides with probe-the-breaking-case, stop-rule on any new
+  promotion pass (competes with E5), verification per the s358-ratified
+  rules (per-dir C_ok vs snapshot, quadruple, cold-cache done-claims).
+  §4's residue registration (15 files) NOT signed off yet — returns with
+  real shapes.  Interleaves with #153 steps 3–5 (Parser2, not PExpr).
+- **Big bug hunt deferred** "to the future when things are stable" —
+  the `docs/bug-review-s359.md` §4 recommendation accepted (E5 exit gate,
+  pre-R2); ruling appended there as §6.
+
+Updated: task #254, `docs/e41-suite-families-plan.md` (status APPROVED),
+`docs/plan-post-s359.md` §2/§4, `docs/DECIDED.md` (s360 section),
+`docs/bug-review-s359.md` §6.  Next: Opus picks up #153 steps 3–5 and/or
+#254 session 1.
+
+---
+
 ## Session 359 (2026-08-08, Fable) — bug review + hunt ruling; #153/E5.0 steps 1–2 SHIPPED (`_term_extent` walker + `defined` flipped onto it)
 
 **User asks**: (1) review the s358 bug crop and rule on whether a big

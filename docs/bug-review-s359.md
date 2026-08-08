@@ -88,3 +88,12 @@ Confirmed: E5.0 (`_reduce_term`, Option B) is the scheduled Fable-led item
 unblocks #147, the #138 state-init residual, the general bareword rule
 (#142's prerequisites), and E5.5 shared predicates.  Steps 1–2 executed
 this session — see the session log (s359) and `Pl/t/reduce-term-01.t`.
+
+## 6. USER RULING (s360, 2026-08-08)
+
+The §4 recommendation is ACCEPTED: the big bug-hunting review is pushed to
+the future, "when things are stable" — i.e. the E5 exit gate, pre-R2.  No
+campaign now; the four standing audit populations remain the hunt in the
+meantime.  In the same decision **#254 was approved** ("so we can get a
+functioning compiler") — the failed-test review happens there first, as
+§4's sequencing proposed.

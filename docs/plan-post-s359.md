@@ -35,13 +35,15 @@ Migrate the remaining operand sites onto `_term_extent` and burn the
   guards in that region don't work; the walker replaces them, never joins
   them).
 
-## 2. In parallel or next after — #254 (needs USER scope approval first)
+## 2. In parallel or next after — #254 (**APPROVED s360, 2026-08-08**)
 
 Phase 2 of the post-flip recovery: the capture/package-spanning family
 (9 suite files) + poisoned condition-`my` family (4 files), ~12k rows.
-Plan: `docs/e41-suite-families-plan.md`.  Do NOT start without the
-user's go-ahead.  It touches Parser2 (capture/spanning), not PExpr, so it
-interleaves cleanly with #153 steps 3–5.
+Plan: `docs/e41-suite-families-plan.md`; the Opus-ready recipe (session 1
+= measurement, per-shape predicate-widen vs mechanism-gap, stop-rule,
+verification) is in task #254.  It touches Parser2 (capture/spanning),
+not PExpr, so it interleaves cleanly with #153 steps 3–5.  §4's residue
+registration is NOT yet signed off — comes back with real shapes.
 
 ## 3. Fable, next Fable session
 
@@ -59,8 +61,9 @@ interleaves cleanly with #153 steps 3–5.
   chains; prototype visibility/ordering) + one fuzzer run.
 - Near-green list: #236 → #234 → #235.  Side items: mro/inconsistent_c3_utf8.t
   STALE row; comp/hints.t + mro/inconsistent_c3.t XDIFF → DIFF.
-- Bug-hunt sequencing recommendation awaits a user nod
-  (`docs/bug-review-s359.md` §4: big hunt = E5 exit gate, pre-R2).
+- ~~Bug-hunt sequencing recommendation awaits a user nod~~ **RULED s360**:
+  the big hunt is "in the future when things are stable" — E5 exit gate,
+  pre-R2, as `docs/bug-review-s359.md` §4 recommended.  No campaign now.
 
 ## 5. Standing verification checklist (unchanged)
 

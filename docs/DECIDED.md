@@ -1329,7 +1329,20 @@ E4.1's pre-work is now done.
 - **PPI gotcha (test infra)**: a token array goes HOLLOW when its
   PPI::Document is garbage-collected (recursive DESTROY); keep the
   document alive when holding tokens.  Noted in reduce-term-01.t.
-- **Bug-hunt sequencing recommendation** (user decision pending):
+- **Bug-hunt sequencing recommendation** (RULED s360, see below):
   docs/bug-review-s359.md — no new campaign now; #254 first if approved;
   big hunt (widened board + full suite + fuzzer with two new axes) is the
   E5 exit gate, pre-R2.
+
+## s360 (2026-08-08) — USER rulings: #254 approved, big bug hunt deferred
+
+- **#254 APPROVED** ("so we can get a functioning compiler"): fix scope of
+  `docs/e41-suite-families-plan.md` §§1–3 authorized — capture/spanning
+  (9 suite files) + poisoned condition-`my` (4 files), ~12k rows; Opus
+  executes, session 1 = measurement, recipe in task #254.  **§4's residue
+  registration (the other 15 dark files) is NOT yet signed off** — comes
+  back with real shapes after measurement.
+- **Big bug hunt DEFERRED** ("in the future when things are stable"):
+  the docs/bug-review-s359.md §4 recommendation accepted — E5 exit gate,
+  pre-R2; the four standing audit populations remain the hunt until then
+  (ruling recorded in that doc's §6).
