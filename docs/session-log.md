@@ -78,6 +78,25 @@ lex.t class — and that flag was retired by ruling in s356, so the file
 now reports honestly.  Registered as `docs/ppi-upstream-bugs.md` §6; its
 suite registration folds into the #254 §4 residue proposal.
 
+**s358f–g (continued session): the #255 PORT IS COMPLETE — all 27 files**
+(commits `0929ee9`, `5ba6155`).  Batch 2a re-applied and finished the 7
+reverted files (inheritance-01's 25 defclass-superclass rows batch-
+transformed to the runtime-@ISA equivalents C3/MRO actually reads); the
+final 9 followed (leading-shift rows = the raw-params calling convention;
+pragma comment echoes = no-runtime-load assertions; two v1-detail rows
+dropped/adjusted with #132 notes).  The port UNCOVERED TWO PRODUCTION
+silent-wrongs, both fixed and verified: (1) v2's prototype premerge never
+saw a file's own `use lib` paths, so a module the file put on @INC lost
+its block-form prototypes — the premerge now seeds inc_paths from literal
+use-lib paths first; (2) the use statement's seam re-merge ran AFTER v2's
+sub hoisting and clobbered a local prototype override with the import —
+merges are now tagged from_module and never overwrite a local
+declaration.  One genuine perl-vs-v2 divergence found and TODO-marked:
+retroactive prototype application to pre-declaration calls (#256).
+Verification: corpus-diff identical 111/111, gate 131/4660 PASS, full
+sweep GATE clean (TOTAL 18499 = baseline), gen v2-113 → v2-114,
+artifacts regenerated.  #243's remainder = the step-3 deletion itself.
+
 **Process slip (mine)**: a backwards guard (`git stash -q && echo …`)
 actually RAN a stash mid-session, silently reverting the working tree —
 caught when corpus-diff went implausibly clean and -09 failed; popped, and
