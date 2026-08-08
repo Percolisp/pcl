@@ -1558,6 +1558,17 @@ sub _check_my_spanning {
         die "Parser2 TODO: my-lexical '$bare' spans a package boundary\n";
       }
     }
+    # A BLOCK-FORM package segment (`package Foo { … }`) is a scope of its
+    # own: its statements ARE the block's, so a `my` declared there is dead
+    # the moment the segment ends and can never span (#254 A-iii).  Skipping
+    # its declarations is the whole rule — and it must be a SKIP of the
+    # declarations, not a blk-style kill on entry, because the outer lexicals
+    # live ON through the block (`{ my $x; package Foo { print $x } }` is a
+    # real span perl resolves to the outer $x, and dropping it here would
+    # turn a die into a silently free read).  op/sub_lval.t's `$x` is the
+    # opposite case: declared inside `package _102486 { … }` and merely
+    # RE-USED as a different variable 40 lines later.
+    next if $segments->[$i]{blockform};
     my %seg_lex;
     $self->_collect_lexical_canon($segments->[$i]{stmts}, \%seg_lex);
     for my $c (keys %seg_lex) {
@@ -2024,6 +2035,54 @@ sub _block_captures_name {
     }
   }
 
+  # A `my`/`state` declaration EMBEDDED in some other statement.  Perl allows
+  # one anywhere an expression goes, and two spellings matter here:
+  #   `die "…" unless my ($how, $first) = /…/;`  — a statement MODIFIER: the
+  #      names live from the end of that STATEMENT to the end of the block;
+  #   `if (my $x = f()) { … }` / `while (my $l = <$fh>) { … }` — the names
+  #      live in the compound statement (its blocks), not after it.
+  # Neither is a PPI::Statement::Variable, so the scan above was blind to
+  # both, and a sub's OWN lexical then read as a capture of a same-named file
+  # lexical — op/getppid.t gated its whole file on exactly that (#254 A-i).
+  # Same class of blind spot M6 closed for the `for my $x (…)` loop head, and
+  # the same rule as everywhere else: the pass that DETECTS a capture and the
+  # scoping the program actually has must agree.
+  for my $w (@{ $block->find('PPI::Token::Word') || [] }) {
+    next unless $w->content =~ /^(?:my|state)$/;
+    my $pv = $w->sprevious_sibling;
+    # `for my $x (…)` — handled above, with the narrower block-only scope.
+    next if $pv && $pv->isa('PPI::Token::Word')
+      && $pv->content =~ /^(?:for|foreach)$/;
+    my $nx = $w->snext_sibling or next;
+    my @tgt = $nx->isa('PPI::Token::Symbol') ? ($nx)
+            : $nx->isa('PPI::Structure::List')
+              ? (grep { $_->isa('PPI::Token::Symbol') } $nx->tokens)
+            : ();
+    next unless grep { substr($_->content, 1) eq $bare } @tgt;
+    # The statement the declaration sits in, innermost-first.
+    my $stmt;
+    for (my $p = $w->parent; $p; $p = $p->parent) {
+      if ($p->isa('PPI::Statement')) { $stmt = $p; last }
+      last if refaddr($p) == refaddr($block);
+    }
+    next unless $stmt;
+    next if $stmt->isa('PPI::Statement::Variable');   # already scanned above
+    # In a compound statement's HEAD the names scope to that statement (its
+    # blocks); anywhere else they scope to the rest of the enclosing block.
+    my $head = $stmt->parent;
+    my ($scope, $last) =
+      ($head && ($head->isa('PPI::Structure::Condition')
+                 || $head->isa('PPI::Structure::For')) && $head->parent)
+        ? ($head->parent,  $ord{ refaddr( ($head->tokens)[-1] ) })
+        : ($stmt->parent,  $ord{ refaddr( ($stmt->tokens)[-1] ) });
+    next unless $scope && defined $last;
+    for my $t (@tgt) {
+      next unless substr($t->content, 1) eq $bare;
+      $decl_tok{ refaddr $t } = 1;
+      push @{ $decl{ $t->content } }, [$scope, $last];
+    }
+  }
+
   my $shadowed = sub {
     my ($tok, $canon) = @_;
     my $u = $ord{ refaddr $tok };
@@ -2275,6 +2334,10 @@ sub _rename_spanning_lexicals {
         $spanning{$bare} = 1 if $txt =~ /(?:[\$\@\%]|\$\#)\{?\Q$bare\E\b/;
       }
     }
+    # Block-form package segment: its `my`s die with the block, so they are
+    # not span candidates — the same skip the CHECKER does, in the same place,
+    # so the two passes agree about what spans (#254 A-iii).
+    next if $segments->[$i]{blockform};
     my %seg_lex;
     $self->_collect_lexical_names($segments->[$i]{stmts}, \%seg_lex);
     for my $bare (keys %seg_lex) {
@@ -3119,24 +3182,20 @@ sub _promote_captured {
   # `my %x` does not block promoting %x (array.t bug-70171 block).
   my $hard = $self->_hard_decl_count($estmts, $bare, $sig eq '$' ? undef : $sig);
   return if $hard != 1 && _caprefuse($canon, "hard-decls=$hard in extent");
-  # A scalar promotion refuses when the bare name is ALSO used in container-
-  # family form within the extent (@x, %x, $#x) — the interp rewriter's
-  # skip-rules for `$x[`/`$x{` are then load-bearing in both directions, and
-  # a same-extent @x beside $x usually means the code mixes two variables of
-  # one name (extent-scoped, unlike the old segment-wide guard: an @a in a
-  # SIBLING block no longer blocks this block's $a — aassign.t f17).
-  if ($sig eq '$') {
-    my $fam = 0;
-    for my $st (@$estmts) {
-      next unless ref $st && $st->isa('PPI::Node');
-      $fam ||= grep { my $c = $_->symbol; $c eq "\@$bare" || $c eq "\%$bare" }
-               @{ $st->find('PPI::Token::Symbol') || [] };
-      $fam ||= grep { $_->content eq "\$#$bare" }
-               @{ $st->find('PPI::Token::ArrayIndex') || [] };
-      last if $fam;
-    }
-    return if $fam && _caprefuse($canon, 'family use (@x/%x/$#x) in extent');
-  }
+  # (#254 A-iv, s365: the blanket "family use (@x/%x/$#x) in extent" refusal
+  # for a SCALAR promotion is GONE.  It predated the sigil-exact rewriter and
+  # duplicated its knowledge as a veto: `$x` and `@x` are two variables, and
+  # every rewrite this promotion performs already keys on the CANONICAL symbol
+  # — the Symbol loop tests `$s->symbol eq '$x'`, which PPI answers `@x` for
+  # the `$x[0]` element spelling; the ArrayIndex loop runs for `@`-canons only;
+  # and the interp fixer's scalar arm carries `(?![\[\{])`, so `"$x[0]"` /
+  # `"$x{k}"` in a string are left alone too.  Nothing in the rewrite was
+  # relying on the veto, so keeping it only refused correct promotions — most
+  # of them where the container is a DIFFERENT variable declared inside a sub
+  # (`my ($name, $ref, @attrs) = @_;` beside a file `my $attrs`, op/attrproto.t).
+  # The genuinely unreachable text shape, `${x}`, keeps its own refusal below.
+  # Same sigil-exactness argument the CONTAINER path has used since array.t's
+  # bug-70171 block, applied to the scalar side.)
   # (s316: the interp rewrite is shadow-aware — _rewrite_var_uses runs the
   # same $skip predicate over interpolated tokens as over symbols — so an
   # interpolated use alongside a shadow no longer refuses the promotion.
@@ -3367,12 +3426,15 @@ sub _has_code_brace_deref {
 
 # Reasons renaming `my $x` within $root is NOT safe; undef when safe.
 sub _shadow_rename_blocker {
-  my ($self, $root, $sym, $eval_ok) = @_;
+  my ($self, $root, $sym, $eval_ok, $shadow_ok) = @_;
   my $old = $sym->content;
   return "non-scalar" unless $old =~ /^\$\w+$/;
   (my $bare = $old) =~ s/^\$//;
   # More than one my/state declaring this name in $root → nested re-shadow;
-  # a single positional rename would merge the scopes.
+  # a single positional rename would merge the scopes — unless the caller
+  # renames SHADOW-AWARE ($shadow_ok, #254 B-ii): _rename_decl_within now
+  # leaves an inner declaration's target and its scope alone, so the two
+  # variables stay two variables.
   my $decls = 0;
   for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
                                   && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
@@ -3382,7 +3444,8 @@ sub _shadow_rename_blocker {
              : ();
     $decls++ if grep { $_->content eq $old } @syms;
   }
-  return "multiple declarations" if $decls != 1;
+  return "multiple declarations" if $decls != 1 && !$shadow_ok;
+  return "no declaration" if $decls == 0;
   # Interpolated uses ("$x" / /$x/ / "${x}" / heredoc / <$x>) are handled:
   # the rename (_rename_decl_within) rewrites them via _interp_fixer (M-A;
   # braced spellings since M2, s353).  Only a CODE-level brace-deref
@@ -3452,7 +3515,19 @@ sub _state_container_blocker {
 sub _rename_decl_within {
   my ($self, $root, $sym, $new) = @_;
   my $old  = $sym->content;
+  my $canon = $sym->symbol;
   my $decl = $sym->statement;
+  # A NESTED re-declaration of the same name inside $root is a different
+  # variable: its own decl target and every use in its scope must keep the
+  # original name (#254 B-ii — op/while.t's `while (my $i = …) { … my $i = 0 }`).
+  # Without this the rename merged the two scopes, which is why the callers'
+  # blocker refused the shape outright; the reducer that decides "is this use
+  # shadowed" is the same one the span pass uses, so the two agree.
+  my $shadowed = sub {
+    my ($t) = @_;
+    return 1 if $t != $sym && _is_lexical_decl_name($t);
+    return $self->_ref_shadowed($t, $canon, [], $root);
+  };
   my $sigil = substr($old, 0, 1);
   (my $bare    = $old) =~ s/^[\$\@\%]//;
   (my $newbare = $new) =~ s/^[\$\@\%]//;
@@ -3471,14 +3546,15 @@ sub _rename_decl_within {
       next if $inside;   # decl RHS: `my $x = $x` reads the OUTER $x
       $past_decl = 1;
     }
-    _fix_interp_token($t, $interp_fix);
+    _fix_interp_token($t, $interp_fix, $shadowed);
     # `$#x` last-index of a renamed @x (container decls: state @x family)
     if ($sigil eq '@' && $t->isa('PPI::Token::ArrayIndex')
         && $t->content eq "\$#$bare") {
-      $t->set_content("\$#$newbare");
+      $t->set_content("\$#$newbare") unless $shadowed->($t);
       next;
     }
     next unless $t->isa('PPI::Token::Symbol') && $t->symbol eq $old;
+    next if $shadowed->($t);
     # Sigil-preserving rewrite: a container's element/slice uses keep their
     # access sigil (`$x[0]`/`$x{k}`/`@x{…}` for @x/%x) — only the NAME part
     # changes.  For scalars this is the identity replacement (element tokens
@@ -4014,7 +4090,7 @@ sub _rename_poisoned_cond_mys {
     #    never appears in _let_bound_vars for the alist to find.
     for my $site (@{ $by_name{$old} }) {
       if (my $why = $self->_shadow_rename_blocker($site->[0], $site->[2],
-                                                  'eval_ok')) {
+                                                  'eval_ok', 'shadow_ok')) {
         die "Parser2 TODO: poisoned condition-my $old ($why)\n";
       }
     }
