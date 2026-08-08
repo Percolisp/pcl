@@ -1962,7 +1962,7 @@ sub _extend_postfix_chain {
 # hand-derived boundaries with grammar-derived ones, never widen coverage
 # silently.
 sub _term_extent {
-  my ($self, $e, $start, $limit, $no_step4) = @_;   # $no_step4: MEASUREMENT ONLY
+  my ($self, $e, $start, $limit) = @_;
   my $n = scalar(@$e);
   $limit = $n - 1 if !defined($limit) || $limit > $n - 1;
   return undef if $start < 0 || $start > $limit;
@@ -2025,7 +2025,6 @@ sub _term_extent {
         && $next + 1 <= $limit
         && ref($e->[$next + 1]) eq 'PPI::Structure::List'
         && $self->is_arrow_op($e->[$next - 1])) {
-      return undef if $no_step4;
       $end = $next + 1;                # -> method ( args )
       next;
     }
@@ -2043,7 +2042,7 @@ sub _term_extent {
   if ($i > $start && $end + 1 <= $limit
       && (ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
           || ref($e->[$end + 1]) eq 'PPI::Structure::Block')) {
-    return $no_step4 ? undef : $end + 1;
+    return $end + 1;
   }
   return $end;
 }
@@ -2071,19 +2070,16 @@ sub _extend_high_prec {
   return $j;
 }
 
-# MEASUREMENT ONLY (#153 step 4, PCL_TERM_DECL=1) — delete with the step.
-# Reports, per operand-site consultation: NEW = the step-4 widenings claim a
-# term the pre-step-4 walker declined (so this site's answer moved off the
-# legacy chain — every one must be explained), DECL = still declined (which
-# legacy branches are still live, i.e. what step 5 may NOT delete).
+# MEASUREMENT (#153, PCL_TERM_DECL=1): report every operand-site consultation
+# the walker DECLINED, with the token run.  That inventory is what says which
+# shapes still reach a site's fallback — the argument behind step 5's deletions
+# and their `die` guards — so it stays live for whoever widens the walker next.
+# Read it with tools/term-diff-sweep.pl over BOTH populations (the 111-file
+# corpus alone is not enough; s361).
 sub _term_probe {
   my ($self, $site, $fn, $e, $i, $ceiling, $ans) = @_;
-  my $kind = !defined($ans) ? 'DECL'
-           : defined($self->_term_extent($e, $i + 1, $ceiling, 1)) ? undef
-           : 'NEW';
-  return if !defined $kind;
-  warn sprintf "PCL_TERM_%s %s fn=%s%s toks=[%s]\n", $kind, $site, $fn,
-      ($kind eq 'NEW' ? sprintf(' new=+%d', $ans - $i) : ''),
+  return if defined $ans;
+  warn sprintf "PCL_TERM_DECL %s fn=%s toks=[%s]\n", $site, $fn,
       $self->_tok_run_desc($e, $i, $ceiling);
 }
 
@@ -3583,55 +3579,22 @@ sub handle_subcalls {
         if (defined $walker_end) {
             $end_pars = $walker_end;
         } else {
+        # #153 step 5: what is left here handles ONLY the shapes the walker
+        # deliberately declines — a bare WORD primary (call? filehandle? class
+        # name? constant? — not the term grammar's call, see _term_extent) and
+        # PREFIX operators (`~`/`!`, unary `+`/`-`, filetests).  The
+        # hand-derived Symbol / cast-deref-chain / Structure-arrow operand
+        # branches that used to live here are DELETED: the walker claims every
+        # one of those shapes, so they were unreachable.  Measured to be
+        # unreachable too — over the 111-file corpus and all 604 files of
+        # perl's own t/*/*.t, every decline that reached this chain had a Word,
+        # an Operator or a Cast as its first operand token, never a Symbol or
+        # a Structure (PCL_TERM_DECL inventory, s363).
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
-            # Cast followed by Symbol is a single dereference term
+            # The only cast shape the walker declines is a cast over a bare
+            # WORD (`ref \select`) — the cast plus that word is the operand.
             $end_pars = $i + 2;
-            # Also include a trailing Subscript: @$h{keys}, $$h{key}, @$a[idx]
-            # so delete/exists/keys on ref-slices see the full lvalue
-            if ($end_pars + 1 <= scalar(@$e) - 1
-                && ref($e->[$end_pars + 1]) eq 'PPI::Structure::Subscript') {
-                $end_pars++;
-                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
-            }
-        } elsif ((ref($next_term) eq 'PPI::Token::Symbol'
-                  || ref($next_term) eq 'PPI::Token::Magic') && $end_pars >= $i + 2) {
-            # Check if symbol is followed by subscript (hash/array access)
-            my $after_symbol = $e->[$i + 2];
-            if (ref($after_symbol) eq 'PPI::Structure::Subscript') {
-                # Symbol + Subscript chain: consume all chained subscripts and
-                # arrow-subscript chains (e.g., $h{a}{b}[c] or $h{a}->{b}->[c])
-                $end_pars = $i + 2;
-                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
-            } elsif (ref($after_symbol) eq 'PPI::Structure::Block'
-                     && $after_symbol->start() eq '{'
-                     && $next_term->content() =~ /^%/) {
-                # %hash + Block is one term (KV slice: %h{keys})
-                $end_pars = $i + 2;
-            } elsif (ref($after_symbol) eq 'PPI::Structure::Constructor'
-                     && $after_symbol->start() eq '['
-                     && $next_term->content() =~ /^%/) {
-                # %arr + Constructor is one term (KV array slice: %arr[indices])
-                $end_pars = $i + 2;
-            } elsif (ref($after_symbol) eq 'PPI::Token::Operator'
-                     && $after_symbol->content() eq '->'
-                     && $end_pars >= $i + 3) {
-                # $r->{key} or $r->[idx]: consume full arrow-subscript chain
-                # so exists/delete/defined can see the whole lvalue
-                $end_pars = $i + 3;  # symbol + -> + subscript/block
-                $end_pars = $self->_extend_postfix_chain($e, $end_pars);
-            } else {
-                $end_pars = $i + 1;
-            }
-        } elsif (ref($next_term) =~ /^PPI::Structure::/
-                 && $end_pars >= $i + 3
-                 && ref($e->[$i + 2]) eq 'PPI::Token::Operator'
-                 && $e->[$i + 2]->content() eq '->'
-                 && ref($e->[$i + 3]) =~ /^PPI::Structure::/) {
-            # Block/Constructor + -> + Subscript: e.g. exists { hash }->{key}
-            # Consume full arrow-subscript chain as the named-unary argument
-            $end_pars = $i + 3;
-            $end_pars = $self->_extend_postfix_chain($e, $end_pars);
         } elsif (ref($next_term) eq 'PPI::Token::Operator'
                  && grep { $next_term->content() eq $_ } ('~', '!')) {
             # Unary prefix operator (~, !) — include operator and its operand as the argument
@@ -3647,12 +3610,29 @@ sub handle_subcalls {
             } else {
                 $end_pars = $i + 1;
             }
-        } else {
-            # Named unary with a literal/word/subtree first arg (not Cast, Symbol/Magic,
-            # or Structure+arrow). Consume through high-prec binary ops (prec >= 55:
-            # . + - * / % x ** =~ !~ << >>), stop before comparison/logical/assignment.
-            # E.g.: eval 'a' . $x . 'b' → eval('a' . $x . 'b'), not (eval 'a') . $x . 'b'
+        } elsif ($self->is_word($next_term)
+                 || ref($next_term) eq 'PPI::Token::Operator'
+                 || ref($next_term) eq 'PPI::Token::Cast') {
+            # A bare WORD, a prefix operator the branch above did not take
+            # (unary `+`/`-`, a filetest `-t`), or a cast run that reaches the
+            # ceiling with no primary.  Consume through high-prec binary ops
+            # (prec >= 55: . + - * / % x ** =~ !~ << >>), stopping before
+            # comparison/logical/assignment — `eval 'a' . $x . 'b'` is
+            # eval('a' . $x . 'b'), not (eval 'a') . $x . 'b'.
             $end_pars = $self->_extend_high_prec($e, $i + 1);
+        } else {
+            # Unreachable by construction: every other operand shape is inside
+            # `cast* primary postfix*`, so the walker answered and this chain
+            # never ran.  A decline here would mean the term crossed the
+            # operand CEILING — which cannot happen, because the ceiling only
+            # ever falls at a top-level low-precedence operator or a ternary
+            # `:`, and a postfix chain contains neither.  Say so loudly rather
+            # than leave $end_pars at the ceiling: that would silently hand the
+            # operator a wrong-sized operand (CLAUDE.md rule 12).
+            die sprintf "PExpr: term walker declined a %s operand to '%s' "
+                      . "(#153 step 5 believed this unreachable): %s\n",
+                ref($next_term), $func_name_for_unary,
+                $self->_tok_run_desc($e, $i, $term_ceiling);
         }
         }  # end legacy operand branches (walker declined, or non-`defined` unary)
 
@@ -3729,32 +3709,17 @@ sub handle_subcalls {
         if (defined $walker_end) {
           $end_pars = $walker_end;
         } else {
+        # #153 step 5, same deletion as the named-unary site above: the Symbol
+        # / Magic / already-parsed-node branches are gone — the walker claims
+        # all three, so they were unreachable (and measured so: every decline
+        # reaching this chain across both populations had a Word, an Operator
+        # or a Cast first).  A prefix operator keeps this site's OLD answer,
+        # which is to leave $end_pars at the ceiling: there never was a branch
+        # for one here, and `one_args + 5` relies on that.
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
-          # Cast followed by Symbol is a single dereference term
+          # A cast over a bare WORD — the only cast shape the walker declines.
           $end_pars = $i + 2;
-        } elsif (ref($next_term) eq 'PPI::Token::Symbol'
-                 || ref($next_term) eq 'PPI::Token::Magic') {
-          # Symbol or Magic (%hash, @arr, $var, $_, @_, …)
-          if ($i + 2 <= $end_pars) {
-            my $after = $e->[$i + 2];
-            if (ref($after) eq 'PPI::Structure::Block'
-                && $after->start() eq '{'
-                && $next_term->content() =~ /^%/) {
-              # %hash + Block is one term (KV slice: %h{keys}) — not a postfix chain
-              $end_pars = $i + 2;
-            } else {
-              # Subscript chain, -> subscript, -> deref (@*/%*), -> slice
-              # (@[..]/%{..}), or just the bare symbol — all bounded by the walk.
-              # (Subsumes the old keys $hr->%* / values $ar->@* special cases.)
-              $end_pars = $self->_extend_postfix_chain($e, $i + 1);
-            }
-          } else {
-            $end_pars = $i + 1;
-          }
-        } elsif ($self->is_internal_node_type($next_term)) {
-          # Already-parsed node (e.g., from previous handle_subcalls)
-          $end_pars = $i + 1;
         } elsif ($self->is_word($next_term)) {
           # A STANDALONE bareword next-term to a strictly-single (max-1-arg)
           # function is a single argument — typically a bareword filehandle:
@@ -3774,6 +3739,15 @@ sub handle_subcalls {
                        && $after->content eq ',')) {
             $end_pars = $i + 1;
           }
+        } elsif (ref($next_term) ne 'PPI::Token::Operator') {
+          # Unreachable by construction — see the named-unary site's `die` for
+          # the argument (a decline on any other shape would mean the term
+          # crossed the operand ceiling, which the ceiling's own definition
+          # forbids).  Loud beats a silently wrong-sized operand.
+          die sprintf "PExpr: term walker declined a %s operand to '%s' "
+                    . "(#153 step 5 believed this unreachable): %s\n",
+              ref($next_term), $sub_name,
+              $self->_tok_run_desc($e, $i, $term_ceiling);
         }
         }  # end legacy operand branches (walker declined)
       }
