@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 357 (2026-08-08, Opus 5) — #244 E4.1 step 4: the quadruple is green, the two wider populations are not
+
+Step 4 exists to look wider than the quadruple, and that is what it found.
+Full write-up: `docs/e41-step4-verification-s357.md`; data in
+`docs/perl-suite-run-s357.tsv` and `docs/cpan-board14-s357.tsv`.
+
+**Green.**  corpus emission identical across 111 files; gate **131 files /
+4658 tests PASS**; full sweep **GATE clean** — 0 new / 0 fixed, TOTAL
+passing **18499 = baseline (+0)**, min MemAvailable 6.1 GB; census
+**111/111**.  The standing postfixderef.t/ref.t crash-file noise is the
+only sweep residue.
+
+**Not green — and it is one mechanism twice.**  The flip made v2 gaps hard
+errors, which is the point; but two populations were never audited for live
+v1 routes, so their coverage went dark:
+
+- **perl suite: 28 files newly TRANSPILE-FAIL, ~15,129 rows.**  Eight
+  families; the two biggest are the E1-era capture/package-spanning (9) and
+  poisoned condition-`my` (4), on shapes the `perl-tests/` copies don't have.
+- **CPAN board: 1794 → 1028 ok**, and *all* of it is one module —
+  `lib/Text/Balanced.pm` dies `Parser2 TODO: forward goto to a standalone
+  label`, every t-file `use`s it, so 9 files → FAIL 0/0 = **766 rows**.
+
+**Attribution is measured, not inferred.**  A worktree at `26ce393`
+(pre-flip) prints `;;; pcl: pipeline=v1` for all 28 suite files and for
+`Text/Balanced.pm`.  The one file that is **not** a flip loss is `op/for.t`
+— pre-flip it already produced no output (a PPI parse failure), so it
+regressed earlier and is a separate item.
+
+**Why the audit missed it — two different causes.**  (1) `s352 §1` named
+exactly three populations (sweep + board + Pl/t gate); the perl suite is a
+**fourth**, and that amendment itself existed because s342c "measured sweep
++ board and never Pl/t" — the same miss, one population further out.
+(2) The board *was* audited and still missed Text::Balanced:
+`PCL_V2_AUDIT_LOG` records at **transpile** time, and a module already in
+`~/.pcl-cache` is never re-transpiled, so a cache hit logs nothing — **a
+live-v1 audit must run on a COLD cache**.
+
+No code changed.  The ask (fix / register / split — ~15.9k rows is the
+user's call, not a quiet write-off) is **task #252**, recommendation (c)
+starting with Text::Balanced: one gap, one module, a whole dist.
+Side items found: `mro/inconsistent_c3_utf8.t` is STALE, and
+`comp/hints.t` / `mro/inconsistent_c3.t` went XDIFF → DIFF.  Gains, all
+expected: `op/push.t`/`op/splice.t`/`op/unshift.t` DIFF → OK, and the board's
+`Role-Tiny/subclass.t` FAIL → PARTIAL (#251/M7 landing).
+
+---
+
 ## Session 356 (2026-08-08, Opus 5) — E4.1 step 2 (#242): the fallback is gone; PCL has ONE pipeline
 
 The three-population precondition was met at s355, so the flip ran.  What
