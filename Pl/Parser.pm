@@ -122,14 +122,10 @@ has collect_prototypes_only => (
   default   => 0,
 );
 
-# DEBUG/TEST FLAG: When set, truncate file at first PPI-unparseable line
-# instead of dying. Used by run-perl-test.pl and sweep-perl-tests.pl to get
-# partial results from files with one exotic line PPI can't handle.
-# Do NOT enable in production — silently dropping code is dangerous.
-has lenient_ppi => (
-  is        => 'ro',
-  default   => 0,
-);
+# (The lenient_ppi truncate-at-first-unparseable-line flag lived here until
+# E4.1 step 3 — it only ever worked by silently dropping code, was retired
+# by ruling in s356 (§5a.4: a PPI failure dies naming the file), and
+# nothing could construct a Parser with it after pl2cl made the flag inert.)
 
 
 sub _build_environment {
@@ -783,44 +779,38 @@ sub _build_ppi_doc {
     close $fh;
     my $doc = $self->_ppi_parse($src);
     return $doc if $doc;
-    die "Failed to parse file: " . $self->filename unless $self->lenient_ppi;
-    return $self->_ppi_with_fallback($src);
+    die "Failed to parse file: " . $self->filename;
   }
   elsif ($self->has_code) {
     my $code = _preprocess_source(_maybe_decode_utf8($self->code));
     my $doc = $self->_ppi_parse($code);
     return $doc if $doc;
-    die "Failed to parse code" unless $self->lenient_ppi;
-    return $self->_ppi_with_fallback($code);
+    die "Failed to parse code";
   }
   else {
     die "Must provide either 'filename' or 'code'";
   }
 }
 
-# DEBUG/TEST: binary-search for the first line PPI can't parse, truncate there.
-# Only called when lenient_ppi is set.
-sub _ppi_with_fallback {
-  my ($self, $src) = @_;
-  my @lines = split /\n/, $src;
-  my ($lo, $hi) = (0, $#lines);
-  while ($lo < $hi) {
-    my $mid = int(($lo + $hi) / 2);
-    my $partial = join("\n", @lines[0..$mid]);
-    if (PPI::Document->new(\$partial)) { $lo = $mid + 1; }
-    else                               { $hi = $mid;     }
-  }
-  warn "PCL [lenient-ppi]: truncating at line $lo due to PPI parse failure\n";
-  my $partial = join("\n", @lines[0..($lo-1)]);
-  my $doc = PPI::Document->new(\$partial);
-  _merge_unicode_symbols($doc) if $doc;
-  return $doc;
-}
 
 
-# Main entry point: parse and generate CL
+# PROTOTYPE-COLLECTION walker (E4.1 step 3).  This was v1's file-level
+# transpile entry; since the flip (#242) the production pipeline is
+# Pl::Parser2, and parse() survives ONLY because the prototype extractors
+# (_extract_module_prototypes / _extract_file_prototypes) walk every use'd
+# module through it with collect_prototypes_only => 1 (where _emit is a
+# no-op).  Full v1 file EMISSION is retired: the guard below makes any
+# attempt to resurrect it a loud error instead of a silent transpile
+# through a second compiler with different semantics — the exact failure
+# mode the flip exists to prevent.  Per-statement/expression code stays
+# reachable through Parser2's seam (_process_element/_parse_expression),
+# which never calls parse().
 sub parse {
   my $self = shift;
+
+  die "Pl::Parser::parse is the prototype-collection walker only; "
+    . "full v1 file emission was retired at E4.1 step 3 — use Pl::Parser2\n"
+    unless $self->collect_prototypes_only;
 
   my $doc = $self->ppi_doc;
 
@@ -8659,57 +8649,10 @@ sub _emit {
 }
 
 
-# Convenience class methods
-#
-# These use two-pass parsing:
-# 1. First pass with collect_prototypes_only => 1 to find all 'use' statements
-#    and extract prototypes from them (recursively). This ensures prototypes
-#    are known even if 'use' appears after code that calls the imported subs.
-# 2. Second pass for real transpilation, with prototypes already in environment.
-
-sub parse_file {
-  my $class    = shift;
-  my $filename = shift;
-  my %opts     = @_;
-
-  # First pass: collect prototypes from all 'use'd modules
-  my $proto_parser = $class->new(
-    filename                => $filename,
-    collect_prototypes_only => 1,
-    %opts,
-  );
-  $proto_parser->parse;
-
-  # Second pass: transpile with prototypes already known
-  my $parser = $class->new(
-    filename    => $filename,
-    environment => $proto_parser->environment,
-    %opts,
-  );
-  return $parser->parse;
-}
-
-sub parse_code {
-  my $class = shift;
-  my $code  = shift;
-  my %opts  = @_;
-
-  # First pass: collect prototypes
-  my $proto_parser = $class->new(
-    code                    => $code,
-    collect_prototypes_only => 1,
-    %opts,
-  );
-  $proto_parser->parse;
-
-  # Second pass: transpile with prototypes already known
-  my $parser = $class->new(
-    code        => $code,
-    environment => $proto_parser->environment,
-    %opts,
-  );
-  return $parser->parse;
-}
+# (The parse_file/parse_code convenience class methods — v1's external
+# two-pass transpile API — were deleted at E4.1 step 3: their last callers,
+# 27 Pl/t files, were ported to Pl::Parser2 in s358 (#255), and parse()
+# above now guards against full-emission use.)
 
 
 # ============================================================
