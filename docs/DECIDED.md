@@ -1347,6 +1347,36 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s364 (2026-08-08, Fable) — review of s363: all seven asks ruled
+
+- **All seven s363 commits APPROVED as shipped** — gate independently
+  re-verified (132/4731), step-5 die guards adversarially probed (regex-token
+  operands, empty operand: no death), all six diffs read.
+  → `docs/fable-answers-s363.md`.
+- **Step 5's `die` stands — die-side of the s329 boundary**: a wrong-sized
+  operand is a VALUE the program consumes; announce-and-continue would commit
+  the silent wrong it announces.  → fable-answers-s363.md §1.
+- **"Detector and rewriter share one resolver" is a STANDING rule** (third
+  confirmation: M2 s353, A-v, #264), and the gate-SET file-by-file diff over
+  both populations is the standing verification for detection-widening
+  changes.  → fable-answers-s363.md §3.
+- **The THREE-ROUTE eval-visibility rule is normative** (ir-spec.md §2b.4):
+  let-bound rename → site alist + suffix strip; defvar'd package cell →
+  alias rule + span pairs; neither → hard refusal.  A new rename family picks
+  its route before it may pass `eval_ok`.  ir-spec's stale cond/state and
+  "falls back to v1" text fixed s364.  → fable-answers-s363.md §4.
+- **A-ii PARKED behind E5**: stop-rule fired + all three files have snapshot
+  C_ok = 0 (svleak 0/0; shm XS-blocked on #117; taint never transpiled, no
+  taint model exists) — zero v1-era recovery by the ratified bar.  Design the
+  declaration-shape enumeration into E5's promotion layer.
+  → fable-answers-s363.md §6.
+- **The s317 bareword probe claim was STALE**: the declared-before spelling
+  CALLS correctly today; only the undeclared spelling diverges (perl
+  stringifies, PCL prints empty) → **#266**.  → fable-answers-s363.md §2.
+- **Before more #254 fixes**: register pat_advanced.t's `--timeout 900` and
+  re-snapshot the three B-i files, else the +1765-row recovery evaporates
+  (the #176 lesson).  → fable-answers-s363.md §5.
+
 ## s363 (2026-08-08, Opus) — #153 steps 4–5, plus #254's first three fixes
 
 - **`${x}` at CODE level IS a use of `$x`** (`36b4d7f`, #264): PPI spells it

@@ -4,6 +4,46 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 364 (2026-08-08, Fable) — review of s363: APPROVED; A-ii parked; ir-spec brought current
+
+Reviewed `docs/opus5-review-requests-s363.md` (seven asks).  Verdict: **all
+seven s363 commits approved as shipped**; rulings in
+`docs/fable-answers-s363.md`.
+
+**Independent verification**: gate re-run cold via `tools/prove-core` —
+`Result: PASS`, 132/4731, exactly the claimed state.  All six code diffs read.
+Step-5's die guards probed adversarially beyond the measured populations
+(`length m/abc/`, `lc m/abc/`, `defined m//`, `length s///r`, `eval;`,
+`ref qr/x/`) — no death; those shapes are walker-claimed internal nodes
+before the operand sites are consulted.
+
+**Rulings that change course**:
+- **A-ii PARKED behind E5** (ask 6).  Beyond the stop-rule's own terms, the
+  suite snapshot shows all three A-ii files at C_ok = 0 — svleak.t 0/0,
+  shm.t an XS crash blocked on #117, taint.t never transpiled (and PCL has
+  no taint model) — so by the ratified bar the ~11k paper rows recover
+  nothing v1 ever had.  #254's realistic remainder ≈ 1260 rows.
+- **The s317 bareword probe claim was stale** (ask 2): the declared-before
+  spelling CALLS correctly (verified live, both `print`-list and assignment
+  spellings); the residue is the UNDECLARED spelling, where perl stringifies
+  and PCL prints empty — filed **#266**.  Task #153 + plan corrected.
+- **Three-route eval-visibility rule written into ir-spec §2b.4** (ask 4):
+  the two-case "let-bound vs defvar'd" invariant would have misled — defvar'd
+  cells ARE eval-visible via the alias rule.  While there, fixed ir-spec's
+  stale claims: cond no longer keeps the blanket string-eval refusal (B-i),
+  the brace-deref blocker is resolver-shared for the spanning pass (#264),
+  and two "falls back to v1" sentences dead since the E4.1 flip.
+- **Required before more #254 fixes** (ask 5): register pat_advanced.t's
+  `--timeout 900` + re-snapshot the three B-i files into the suite
+  expectations — a TIMEOUT file contributes no rows (#176's lesson).
+- Asks 1, 3, 7 confirmed as decided: die stands (s329 value-side);
+  #264's refusal delete + standing shared-resolver rule; #263 = next
+  warm-up, #265 its own filler (not folded into A-i).
+
+Commit: docs + task updates only; no compiler changes this session.
+
+---
+
 ## Session 363 (2026-08-08, Opus) — #262 closed (both foreach spellings, every operand); #153 steps 4–5 DONE
 
 Picked up `docs/plan-post-s359.md` §1 as written: the #262 warm-up first,

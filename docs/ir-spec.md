@@ -436,12 +436,18 @@ The suffixes matter only for mapping output back to source (strip
 
 Renaming by token rewrite is only sound when the token walk can *reach
 every use*. Each pass checks blockers (`_shadow_rename_blocker`,
-`_scan_lex_facts` disqualifiers) and, on any hit, falls back to v1 for
-the whole file (the sanctioned gate) rather than renaming unsoundly:
+`_scan_lex_facts` disqualifiers) and, on any hit, refuses the file with
+a hard `Parser2 TODO:` error rather than renaming unsoundly (before the
+E4.1 flip these conditions gated the file to the v1 pipeline; v1 is
+gone, so a refusal is now terminal):
 
 - **Interpolated uses** — `"$x"`, `/$x/`, heredocs: the name lives inside
   a quote token the Symbol walk can't rewrite.
-- **Brace-deref** — `${x}`: same reason.
+- **Brace-deref** — `${x}`: same reason — for the passes that still walk
+  Symbols only.  The *spanning* rename resolves and rewrites this shape
+  since s363 (#264): one helper (`_brace_name_refs`) answers "which
+  canonical variables does this node mention that way" for both its
+  detector and its rewriter.
 - **Shadowing / multiple declarations** of the bare name: a single
   positional rename would merge distinct scopes.
 - **Array/hash family sharing the bare name** — `@x`, `%x`, `$#x`,
@@ -454,17 +460,39 @@ the whole file (the sanctioned gate) rather than renaming unsoundly:
   string eval (only scalar cells are aliased today), and a renamed decl
   **nested inside an outer `my` of the same bare name** (the site
   alist's let-bound pair precedes the global in resolution order, so
-  the deeper cell could never win the by-name lookup). The `cond`/
-  `state` rename families also keep the blanket string-eval refusal —
-  their cells are neither alist-carried nor aliased.
+  the deeper cell could never win the by-name lookup). The `cond`
+  family no longer refuses (s363, #254 B-i): `$x__cond__N` is
+  let-bound, and `_eval_lexical_alist` strips `__cond__N` like the
+  other let-bound suffixes. `state` keeps the blanket refusal — see the
+  three-route rule below.
 - **`state`** — its per-instance semantics run through the separate
   `state_var_renames` machinery; token-renaming would bypass it.
 
+**The three-route eval-visibility rule (s363/s364, normative).** Which
+mechanism makes a renamed cell reachable from a string eval under its
+original source name decides whether a rename may waive the string-eval
+refusal (`eval_ok`):
+
+1. A **let-bound** rename (`__lex__`, `__shadow__`, `__cond__`) is
+   carried by the eval-site alist; `_eval_lexical_alist` strips the
+   suffix to recover the key, and the pair exists only while the
+   binding is in scope — so an eval inside the construct sees the
+   lexical and one outside sees the global, matching perl.
+2. A **defvar'd package cell** (`__file__` span/capture promotions) is
+   reached through the alias rule (`p-alias-eval-cell`) plus the
+   cross-package span pairs (§9.1).
+3. A cell reachable by **neither** mechanism keeps a hard refusal:
+   today `state`'s `__state__` cells (separate per-instance machinery)
+   and container promotions with a post-decl eval.
+
+A new rename family must decide which of the three it is before it may
+pass `eval_ok`.
+
 Where no rename applies and the capture would misbehave, the same
 conditions exist as hard *gates* (`_check_sub_captures`,
-`_check_my_spanning`, the block-form-arg capture gate): the file lowers
-through v1, whose defvar model handles the capture — with v1's known
-closure caveats.
+`_check_my_spanning`, the block-form-arg capture gate): the file is
+refused with an error naming the condition. (Pre-E4.1 these routed the
+file through v1's defvar model; that fallback no longer exists.)
 
 ## 3. Coercion — the heart of Perl semantics
 
@@ -945,8 +973,8 @@ eval'd code will use); each value is the live container — a scalar box,
 array, or hash — that the compiled code binds under its (possibly
 renamed) symbol. Keys may repeat: resolution is first-match, so the
 alist is ordered **innermost binding first**. Concretely,
-`_eval_lexical_alist` strips the `__lex__N`/`__shadow__N` rename
-suffixes to recover the key and, within one key, orders shadow renames
+`_eval_lexical_alist` strips the `__lex__N`/`__shadow__N`/`__file__N`/
+`__cond__N` rename suffixes to recover the key and, within one key, orders shadow renames
 by descending `N` (deeper shadows have higher counters) with the plain
 unrenamed name last. After the let-bound pairs it appends the
 **cross-package span pairs** (see piece 3). The alist is rebuilt at each

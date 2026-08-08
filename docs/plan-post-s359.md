@@ -1,5 +1,29 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s364 (Fable review of s363 — `docs/fable-answers-s363.md`).**
+> All seven s363 commits APPROVED (gate independently re-verified 132/4731;
+> step-5 die guards adversarially probed beyond the measured populations —
+> no death; die-over-announce confirmed as the s329 value-side).  Rulings
+> that change this plan:
+> - **A-ii is PARKED behind E5** — the stop-rule fired, and all three A-ii
+>   files have snapshot C_ok = 0 (svleak 0/0; shm = XS crash behind #117;
+>   taint never transpiled, and PCL has no taint model), so by the ratified
+>   bar A-ii recovers nothing v1 ever had.  #254's realistic remainder is
+>   A-iv + A-i + A-iii + B-ii ≈ 1260 rows.  Do NOT size it now; design the
+>   declaration-shape enumeration into E5's promotion layer instead.
+> - The s317 probe correction below is itself CORRECTED: the declared-before
+>   spelling CALLS correctly today (verified live s364) — the "must CALL"
+>   shape passes.  Only the UNDECLARED spelling diverges (perl stringifies
+>   `x=Foo::init`, PCL prints empty) → filed **#266**, filler.
+> - **Before more #254 fixes**: register pat_advanced.t's `--timeout 900`
+>   need + re-snapshot the three B-i files into the suite expectations, or
+>   the +1765-row recovery evaporates on the next default-timeout run (the
+>   #176 lesson).  Then #263 warm-up, then A-iv → A-i (SIZE first; the
+>   extent design goes past Fable) → A-iii → B-ii.
+> - The three-route eval-visibility rule (let-bound → site alist; defvar'd
+>   cell → alias rule + span pairs; neither → refuse) is now normative in
+>   `ir-spec.md` §2b.4 — any new rename picks its route before `eval_ok`.
+
 > **UPDATED s363 (Opus).**  §1 is **DONE except the fold**: #262 closed
 > (`70e6e5c`, and it was wider than the task said — the two-operand list was
 > silent-wrong in BOTH spellings), and **#153 steps 4–5 shipped** (`f322b19`
@@ -23,9 +47,11 @@
 >   and prefix operators are permanent by-design declines; the sites keep a
 >   small documented fallback for exactly those two.
 > - The **s317 general-bareword acceptance probe** (`print "x=", Foo::init;`
->   must CALL) is NOT a #153 gate — same reason.  It still fails; it needs its
->   own task if it is to be fixed.  #147's shape, the other acceptance probe,
->   PASSES (since step 3b) and was re-verified.
+>   must CALL) is NOT a #153 gate — same reason.  ~~It still fails~~
+>   *(corrected s364: the declared-before spelling PASSES; the undeclared
+>   spelling stringifies in perl and prints empty in PCL → #266)*.  #147's
+>   shape, the other acceptance probe, PASSES (since step 3b) and was
+>   re-verified.
 >
 > **§2 (#254) IS UNDERWAY**: session 1's measurement is done
 > (`docs/e41-suite-families-measurement-s363.md` — 13 files, 4 gate messages,
