@@ -4,6 +4,57 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 359 (2026-08-08, Fable) — bug review + hunt ruling; #153/E5.0 steps 1–2 SHIPPED (`_term_extent` walker + `defined` flipped onto it)
+
+**User asks**: (1) review the s358 bug crop and rule on whether a big
+bug-hunting campaign over perl's tests and CPAN is needed, and when;
+(2) confirm #153 as next and start it.
+
+**(1) Bug review → `docs/bug-review-s359.md`.**  Seven s358 findings
+tabulated (4 silent-wrongs fixed, 1 loud gap fixed, #256 open, 1 upstream
+PPI).  The read: 5 of 7 came from one mechanism — previously-v1-only code
+asserted against v2 for the first time — so the rate reflects newly-lit
+dark regions, not compiler-wide bugginess (counter-evidence: this session's
+walker-vs-legacy diff over all 111 corpus files found ZERO disagreements).
+**Recommendation**: no new campaign now; the four audit populations are
+the standing hunt.  #254 first if approved (it upgrades the E5 regression
+sensors, Opus can run it in parallel); two new fuzzer axes cheap (interp
+subscript chains, prototype visibility/ordering); the BIG hunt (board
+widened to ~30–50 dists + full suite pass + fuzzer) is the **E5 exit
+gate, pre-R2** — fixes then land once, on the final compiler shape.
+
+**(2) #153 / E5.0 steps 1–2 (the Fable-led half) SHIPPED.**
+- **Step 1**: `_term_extent(\@e,$start,$limit)` — the ONE walker that knows
+  `term := cast* primary postfix*` — plus `_reduce_term` (extent + recursive
+  parse of the slice, input untouched), `_extend_high_prec` (the prec>=55
+  named-unary extension, factored from two identical inline copies —
+  operator knowledge deliberately OUTSIDE the term grammar), and the
+  `PCL_TERM_DIFF` measurement probes at both operand sites.  **undef is a
+  first-class answer**: bare words, prefix ops, `->method(args)`, and
+  cast-block slice groups (`@{$r}[0]`, a PPI Constructor) DECLINE to the
+  site's legacy derivation — the walker never guesses and never stops
+  inside a term.  Unit tests: `Pl/t/reduce-term-01.t` (57 rows, pure perl,
+  ~0s).  Gotcha recorded there: keep the `PPI::Document` alive — its
+  recursive DESTROY hollows the returned tokens (cost one debugging round).
+- **Measurement before flip**: `PCL_TERM_DIFF=1` over all 111 corpus files
+  → zero real disagreements (the only 6 hits were a probe placed BEFORE the
+  `_proto_max_args` narrowing that is part of legacy's final answer —
+  probe moved after it).
+- **Step 2**: `defined` now takes its operand extent from the walker when
+  it answers; decline falls through to the legacy branches (which still
+  serve the other named unaries until step 3).
+- **Verification**: corpus emission identical 111/111 (twice: after step 1
+  refactor, after step 2 flip); gate `tools/prove-core` **132 files / 4717
+  PASS** (+1 file = the new unit test); defined-shape probe file identical
+  to perl; full COLD-CACHE sweep run (verdict recorded at commit).  No
+  cache-generation bump: emission measured byte-identical.
+
+**Steps 3–5 are Opus material** — per-site migration with PCL_TERM_DIFF
+measured per site, then fold reduction into `_reduce_term`, delete the
+`$end_pars` blocks and `$deref_skip`.  Updated recipe in task #153.
+
+---
+
 ## Session 358 (2026-08-08, Fable) — s357 reviewed + approved; #252/#243 user-decided; Text::Balanced restored (933 rows, better than v1 ever was)
 
 **Later same session (s358b–d):** #253 closed (op/for.t = upstream PPI

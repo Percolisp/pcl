@@ -1944,6 +1944,156 @@ sub _extend_postfix_chain {
   return $end;
 }
 
+# ---------------------------------------------------------------------------
+# #153 / E5.0 (Option B, docs/pexpr-term-parsing-review.md) — phase 1 pieces.
+#
+# _term_extent(\@e, $start, $limit) is the ONE walker that knows the term
+# grammar:
+#
+#   term := cast* primary postfix*
+#
+# It returns the (inclusive) index of the last element of the term starting
+# at $start — never past $limit — or undef when the walker cannot bound the
+# term CONFIDENTLY.  undef is a first-class answer, not an error: a bare
+# word (list operator? filehandle? class name? constant?), a prefix
+# operator, or anything else outside the grammar above stays with the call
+# site's legacy derivation.  The walker answers only when the tokens match
+# the grammar; it never guesses, so switching a site to it can only replace
+# hand-derived boundaries with grammar-derived ones, never widen coverage
+# silently.
+sub _term_extent {
+  my ($self, $e, $start, $limit) = @_;
+  my $n = scalar(@$e);
+  $limit = $n - 1 if !defined($limit) || $limit > $n - 1;
+  return undef if $start < 0 || $start > $limit;
+
+  # cast*: sigil/reference casts ($ @ % & * \ $#) before the primary.
+  my $i = $start;
+  $i++ while $i < $limit && ref($e->[$i]) eq 'PPI::Token::Cast';
+  return undef if ref($e->[$i]) eq 'PPI::Token::Cast';  # cast, no primary
+
+  my $p = $e->[$i];
+  my $r = ref($p);
+  my $end;
+  if ($r eq 'PPI::Token::Symbol'
+      || $r eq 'PPI::Token::Magic'
+      || $r eq 'PPI::Token::ArrayIndex'
+      || $r =~ /^PPI::Token::Number/
+      || $r =~ /^PPI::Token::Quote::/
+      || $r =~ /^PPI::Token::QuoteLike::/
+      || $r eq 'PPI::Token::HereDoc'
+      || $r eq 'PPI::Structure::Block'
+      || $r eq 'PPI::Structure::Constructor'
+      || $r eq 'PPI::Structure::List') {
+    $end = $i;
+  } elsif ($self->is_internal_node_type($p)) {
+    $end = $i;                       # already-reduced node
+  } elsif ($self->is_word($p)) {
+    # A word is a self-bounded term ONLY as `name(...)` — a call with
+    # parens.  Anything else about barewords is not this walker's call.
+    if ($i + 1 <= $limit && ref($e->[$i + 1]) eq 'PPI::Structure::List') {
+      $end = $i + 1;
+    } else {
+      return undef;
+    }
+  } else {
+    return undef;                    # operator, regex-op, anything else
+  }
+
+  # KV-slice postfix: %h{a,b} / %h[0,1] arrive as Symbol + Block/Constructor
+  # (PPI does not attach these as Subscript).  One group, no further chain —
+  # a KV slice yields a list; nothing postfixes it.
+  if ($end == $i && $i == $start && $r eq 'PPI::Token::Symbol'
+      && $p->content() =~ /^%/ && $end + 1 <= $limit) {
+    my $nx = $e->[$end + 1];
+    if ((ref($nx) eq 'PPI::Structure::Block' && $nx->start() eq '{')
+        || (ref($nx) eq 'PPI::Structure::Constructor' && $nx->start() eq '[')) {
+      return $end + 1;
+    }
+  }
+
+  # postfix*: subscripts and -> groups, via the single shared chain walker.
+  $end = $self->_extend_postfix_chain($e, $end);
+  return undef if $end > $limit;
+
+  # The chain walker's `-> method` step consumes only the NAME (its callers
+  # bound args elsewhere).  If a parenthesised arg list follows, this term
+  # extends past what the walk modelled — DECLINE rather than split a method
+  # call in half.  (Step-4 TODO: consume the args List and continue the
+  # chain, once the walker owns reduction too.)
+  if ($end > $start && $end + 1 <= $limit
+      && ref($e->[$end + 1]) eq 'PPI::Structure::List'
+      && $self->is_arrow_op($e->[$end - 1])) {
+    return undef;
+  }
+
+  # A Block/Constructor group directly after a cast-deref term is PPI's
+  # spelling of a slice on the deref (@{$r}[0], %{$h}{a}).  The legacy
+  # branches split here too — but a walker that CLAIMS a term must never
+  # stop inside one, so DECLINE and leave the site's legacy handling in
+  # charge.  (Step-3+ TODO: consume it as a slice postfix.)
+  if ($i > $start && $end + 1 <= $limit
+      && (ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
+          || ref($e->[$end + 1]) eq 'PPI::Structure::Block')) {
+    return undef;
+  }
+  return $end;
+}
+
+# Extend an operand end index rightward through high-precedence binary
+# operators (prec >= 55: . + - * / % x ** =~ !~ << >>) and their operands,
+# stopping before comparison/logical/comma/assignment.  This is the
+# named-unary precedence rule (`length $s + 1` == length($s + 1)); it is
+# OPERATOR knowledge, deliberately separate from _term_extent's term
+# grammar.  Factored from the two identical in-line walks at the
+# named-unary operand site.
+sub _extend_high_prec {
+  my ($self, $e, $j) = @_;
+  while ($j + 1 < scalar(@$e)) {
+    my $nxt = $e->[$j + 1];
+    if (ref($nxt) eq 'PPI::Token::Operator') {
+      my $op_str = $nxt->content();
+      unless ($op_str eq '->') {
+        my $op_info = $self->config->precedences->{$op_str};
+        last unless defined $op_info && $op_info->{prec} >= 55;
+      }
+    }
+    $j++;
+  }
+  return $j;
+}
+
+# Debug/probe helper: describe a token run compactly for PCL_TERM_DIFF logs.
+sub _tok_run_desc {
+  my ($self, $e, $from, $to) = @_;
+  $to = scalar(@$e) - 1 if $to > scalar(@$e) - 1;
+  my @out;
+  for my $t (@$e[$from .. $to]) {
+    if ($self->is_internal_node_type($t)) {
+      push @out, '<' . ($t->{type} // 'node') . '>';
+    } else {
+      my $c = eval { $t->content } // '?';
+      $c = substr($c, 0, 20) . '…' if length($c) > 21;
+      my ($short) = (ref($t) =~ /([^:]+)$/);
+      push @out, "$short($c)";
+    }
+  }
+  return join(' ', @out);
+}
+
+# _reduce_term(\@e, $start, $limit) — reduce the term starting at $start to
+# ONE parsed node.  Returns ($node_id, $next_index), or the empty list when
+# _term_extent cannot bound the term.  The slice is reduced by the same
+# recursive parse the operand sites use for their ranges today, so the node
+# is identical to what the legacy derivations produce for the same range.
+sub _reduce_term {
+  my ($self, $e, $start, $limit) = @_;
+  my $end = $self->_term_extent($e, $start, $limit);
+  return () if !defined $end;
+  my $node_id = $self->parse([ @$e[$start .. $end] ]);
+  return ($node_id, $end + 1);
+}
+
 # Pre-pass (runs before handle_subcalls): collapse a dynamic typeglob-slot into a
 # single glob_slot node, for both spellings:
 #   *{EXPR}{SLOT}  — Cast('*') + Block('{EXPR}') + {SLOT}
@@ -3389,7 +3539,24 @@ sub handle_subcalls {
     # But Cast + Symbol (like @$list) counts as one term
     # And Symbol + Subscript (like $h{key} or $a[0]) counts as one term
     my $func_name_for_unary = $now->content();
+    # The operand CEILING (list boundary from low-prec ops / enclosing
+    # ternary) before any term derivation narrows it — the #153 walker and
+    # the legacy branches must both be bounded by it.
+    my $term_ceiling = $end_pars;
     if ($self->is_named_unary($func_name_for_unary) && $end_pars > $i + 1) {
+        # #153 step 2: `defined` takes its operand extent from the ONE
+        # term-grammar walker (_term_extent) when the walker ANSWERS;
+        # a decline (undef) falls through to the legacy hand-derived
+        # branches below, which also still serve the other named unaries
+        # until they migrate (step 3, Opus).  Corpus-measured equivalent
+        # (PCL_TERM_DIFF over all 111 census files: zero disagreements).
+        my $walker_end;
+        if ($func_name_for_unary eq 'defined') {
+            $walker_end = $self->_term_extent($e, $i + 1, $term_ceiling);
+        }
+        if (defined $walker_end) {
+            $end_pars = $walker_end;
+        } else {
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
             # Cast followed by Symbol is a single dereference term
@@ -3459,20 +3626,9 @@ sub handle_subcalls {
             # or Structure+arrow). Consume through high-prec binary ops (prec >= 55:
             # . + - * / % x ** =~ !~ << >>), stop before comparison/logical/assignment.
             # E.g.: eval 'a' . $x . 'b' → eval('a' . $x . 'b'), not (eval 'a') . $x . 'b'
-            my $j = $i + 1;
-            while ($j + 1 < scalar(@$e)) {
-                my $nxt = $e->[$j + 1];
-                if (ref($nxt) eq 'PPI::Token::Operator') {
-                    my $op_str = $nxt->content();
-                    unless ($op_str eq '->') {
-                        my $op_info = $self->config->precedences->{$op_str};
-                        last unless defined $op_info && $op_info->{prec} >= 55;
-                    }
-                }
-                $j++;
-            }
-            $end_pars = $j;
+            $end_pars = $self->_extend_high_prec($e, $i + 1);
         }
+        }  # end legacy operand branches (walker declined, or non-`defined` unary)
 
         # Named unary operators bind LOOSER than the high-precedence binary ops
         # (. + - * / % x ** =~ !~ << >>, all prec >= 55) but TIGHTER than
@@ -3484,20 +3640,21 @@ sub handle_subcalls {
         # named-unary precedence. (Idempotent for the literal branch above, which
         # already extended; this fixes the symbol/cast/subscript branches, which
         # previously stopped at the first term.)
-        {
-            my $j = $end_pars;
-            while ($j + 1 < scalar(@$e)) {
-                my $nxt = $e->[$j + 1];
-                if (ref($nxt) eq 'PPI::Token::Operator') {
-                    my $op_str = $nxt->content();
-                    unless ($op_str eq '->') {
-                        my $op_info = $self->config->precedences->{$op_str};
-                        last unless defined $op_info && $op_info->{prec} >= 55;
-                    }
-                }
-                $j++;
+        $end_pars = $self->_extend_high_prec($e, $end_pars);
+
+        # #153 measurement probe (step 1→2 bridge): compare the legacy
+        # hand-derived operand extent against the term-grammar walker plus
+        # the same named-unary precedence extension.  Log-only; behaviour
+        # is unchanged.  Run corpora with PCL_TERM_DIFF=1 to inventory the
+        # disagreement families before any site is switched.
+        if ($ENV{PCL_TERM_DIFF}) {
+            my $te = $self->_term_extent($e, $i + 1, $term_ceiling);
+            $te = $self->_extend_high_prec($e, $te) if defined $te;
+            if (defined $te && $te != $end_pars) {
+                warn sprintf "PCL_TERM_DIFF unary op=%s old=+%d new=+%d toks=[%s]\n",
+                    $func_name_for_unary, $end_pars - $i, $te - $i,
+                    $self->_tok_run_desc($e, $i, ($te > $end_pars ? $te : $end_pars));
             }
-            $end_pars = $j;
         }
     }
 
@@ -3505,6 +3662,7 @@ sub handle_subcalls {
     # Check if this is a strictly 1-param function with Cast+Symbol as argument
     # NOTE: Don't apply this to functions with variable params like bless([1,2])
     #       as they may take more arguments after the Cast+Symbol
+    my $strictly_single_site = 0;
     if (defined $no_pars && $end_pars > $i + 1) {
       # Only limit to single term if function takes EXACTLY 1 param (max is 1)
       my $is_strictly_single = 0;
@@ -3520,6 +3678,7 @@ sub handle_subcalls {
       if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
         # Only apply for non-named-unary 1-param functions
         # Named unary already handled above with proper term detection
+        $strictly_single_site = 1;
         my $next_term = $e->[$i + 1];
         if (ref($next_term) eq 'PPI::Token::Cast' && $end_pars >= $i + 2) {
           # Cast followed by Symbol is a single dereference term
@@ -3595,6 +3754,20 @@ sub handle_subcalls {
             }
           }
         }
+      }
+    }
+
+    # #153 measurement probe, strictly-1-arg flavour (no precedence
+    # extension — these functions take exactly the term).  Sits AFTER the
+    # prototype arg-count limiting above, which is part of the legacy
+    # answer being compared (a `($)`-prototype user sub narrows to one
+    # comma-arg there, agreeing with the walker).
+    if ($ENV{PCL_TERM_DIFF} && $strictly_single_site) {
+      my $te = $self->_term_extent($e, $i + 1, $term_ceiling);
+      if (defined $te && $te != $end_pars) {
+        warn sprintf "PCL_TERM_DIFF single fn=%s old=+%d new=+%d toks=[%s]\n",
+            $sub_name, $end_pars - $i, $te - $i,
+            $self->_tok_run_desc($e, $i, ($te > $end_pars ? $te : $end_pars));
       }
     }
 

@@ -1310,3 +1310,26 @@ E4.1's pre-work is now done.
   which it clobbered — wrong auto-boxing on every later call).
   Local-before-use divergence (perl's import clobbers with a warning; PCL
   keeps the local) accepted, noted in #256.
+
+## s359 (2026-08-08, Fable) — #153/E5.0 steps 1–2: the term-grammar walker, decline-not-guess
+
+- **`_term_extent` is THE term-grammar walker** (`term := cast* primary
+  postfix*`, Pl/PExpr.pm) — and **undef is a first-class answer**: bare
+  words, prefix operators, `->method(args)`, cast-block slice groups
+  (`@{$r}[0]` — PPI spells the group as a Constructor) DECLINE so the
+  call site keeps its legacy derivation.  The walker never guesses and
+  never stops inside a term.  Unit tests: Pl/t/reduce-term-01.t.
+- **Site flips are measured, then flipped**: `PCL_TERM_DIFF=1` dual-run
+  probes at both operand sites; the s359 inventory over all 111 corpus
+  files found ZERO real disagreements, and `defined` was flipped onto the
+  walker (corpus byte-identical, gate 132/4717, cold-cache sweep GATE
+  clean, TOTAL 18499 = baseline).  Steps 3–5 (per-site migration,
+  reduction fold-in, `$end_pars`/`$deref_skip` deletion) = Opus, recipe
+  in task #153.  Design: docs/pexpr-term-parsing-review.md (Option B).
+- **PPI gotcha (test infra)**: a token array goes HOLLOW when its
+  PPI::Document is garbage-collected (recursive DESTROY); keep the
+  document alive when holding tokens.  Noted in reduce-term-01.t.
+- **Bug-hunt sequencing recommendation** (user decision pending):
+  docs/bug-review-s359.md — no new campaign now; #254 first if approved;
+  big hunt (widened board + full suite + fuzzer with two new axes) is the
+  E5 exit gate, pre-R2.
