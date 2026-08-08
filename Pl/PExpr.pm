@@ -3664,6 +3664,28 @@ sub handle_subcalls {
         my $max = @positive ? (sort { $b <=> $a } @positive)[0] : 0;
         $is_strictly_single = ($max == 1);
       }
+      # A user OLD-STYLE PROTOTYPE answers this question itself, and its
+      # answer REPLACES the one above: `$no_pars` is `min_params` for a
+      # declared sub (no_params_of_sub), i.e. the MINIMUM arity — reading it
+      # as "exactly one" made `sub f ($;$) {…}; f $a, $b;` narrow to `f($a),
+      # $b` and silently DROP every argument after the first (probed s361
+      # against perl: `B3=x` vs perl's `B3=x y`).  Two prototype facts decide
+      # it, and only a prototype knows them:
+      #   - max args == 1  (`_proto_max_args`; undef for @/%/* protos), and
+      #   - no TRAILING `;`, which in perl gives the sub LIST-operator
+      #     precedence instead of named-unary — `sub unilist ($;)`, so
+      #     `unilist 0 || 5` is `unilist(0 || 5)`, not `unilist(0) || 5`
+      #     (perl's own t/comp/proto.t exercises all three spellings).
+      # Builtins are untouched: their Environment records carry no
+      # min_params, so `_proto_max_args` declines and the branch is skipped.
+      if ($self->has_environment) {
+        my $uproto = $self->environment->get_prototype($sub_name);
+        if ($uproto && $uproto->{is_proto} && defined $uproto->{min_params}) {
+          my $pmax = $self->_proto_max_args($uproto);
+          my $listop = (($uproto->{proto_string} // '') =~ /;\s*$/) ? 1 : 0;
+          $is_strictly_single = (defined $pmax && $pmax == 1 && !$listop) ? 1 : 0;
+        }
+      }
       if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
         # Only apply for non-named-unary 1-param functions
         # Named unary already handled above with proper term detection
