@@ -723,17 +723,23 @@ print f(), "\n";
 EOF
 unlike($cm3, qr/\$err__cond__/,
        'cond-my: a plain `my ($vobj, $err)` decl does not poison the name');
-# INVERSE 1: a REAL use of the name outside every construct still poisons — and
-# because one construct holds a string eval, that is still a whole-file gate.
-eval { Pl::Parser2->parse_code(<<'EOF') };
+# INVERSE 1: a REAL use of the name outside every construct still poisons, so
+# the rename still fires.  It is no longer a whole-file gate when a construct
+# holds a STRING EVAL (#254 B-i, s363): `$err__cond__N` is a let-bound lexical
+# and _eval_lexical_alist strips the suffix back to `$err`, so an eval naming
+# the original still reaches it — the same waiver the seam my-shadow rename has
+# had since M-F.  (This row asserted the old refusal; the poisoning half of its
+# claim is what mattered and is kept.)
+my $cm4 = eval { Pl::Parser2->parse_code(<<'EOF') };
 sub f {
   my ($vobj, $err);
   if (my $err = $@) { my $v = eval "1"; return "caught" }
   return defined $err ? "def" : "undef";
 }
 EOF
-like($@, qr/Parser2 TODO: poisoned condition-my \$err/,
-     'cond-my INVERSE: a real use outside the constructs still poisons');
+is($@, '', 'cond-my: a string eval in the construct no longer gates the file');
+like($cm4 // '', qr/\$err__cond__/,
+     'cond-my INVERSE: a real use outside the constructs still poisons (renames)');
 # INVERSE 2: an `our` declaration DOES create the global, so it still poisons.
 like(Pl::Parser2->parse_code(<<'EOF'), qr/\$err__cond__/,
 our $err;

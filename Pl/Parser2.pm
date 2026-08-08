@@ -4003,10 +4003,18 @@ sub _rename_poisoned_cond_mys {
                 || ($interp_all{$bare} && !$interp_in{$bare});
     next unless $poisoned;
 
-    # 3. All of this name's constructs must be renameable, else gate → v1
-    #    (leaving it un-renamed would leave the global unbound at runtime).
+    # 3. All of this name's constructs must be renameable, else the whole file
+    #    is refused (leaving it un-renamed would leave the global unbound at
+    #    runtime).  `eval_ok` (#254 B-i, s363): a string eval naming the
+    #    ORIGINAL `$x` still reaches this rename, because `$x__cond__N` is a
+    #    LET-BOUND lexical and _eval_lexical_alist strips the suffix back to
+    #    the original key — the same waiver the seam my-shadow rename has had
+    #    since M-F, now that the key function knows this suffix too.  A `state`
+    #    rename still keeps the refusal: its cell is a defvar, not a let, so it
+    #    never appears in _let_bound_vars for the alist to find.
     for my $site (@{ $by_name{$old} }) {
-      if (my $why = $self->_shadow_rename_blocker($site->[0], $site->[2])) {
+      if (my $why = $self->_shadow_rename_blocker($site->[0], $site->[2],
+                                                  'eval_ok')) {
         die "Parser2 TODO: poisoned condition-my $old ($why)\n";
       }
     }

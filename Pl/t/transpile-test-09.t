@@ -729,4 +729,25 @@ sub inner { my $s = "LOCAL"; return "5 shadow=${s}" }
 print inner(), "\n";
 });
 
+# ── s363 #254 B-i: a poisoned condition-`my` whose construct holds a STRING
+# EVAL.  The rename mints a LET-BOUND `$i__cond__N` so the package global keeps
+# its name; the eval body still says `$i`, and _eval_lexical_alist now strips
+# `__cond__N` back to the original key (as it already did for __shadow__ /
+# __file__ / __lex__).  What must hold is perl's scoping, both ways: an eval
+# INSIDE the construct sees the LEXICAL, one outside sees the GLOBAL.
+test_transpile("poisoned condition-my + string eval: eval sees the right binding", q{
+our $i = "GLOBAL";
+sub show { return "global=$i" }
+my @list = (10, 20);
+foreach my $n (@list) {
+  if (my $i = $n * 2) {
+    my $inside = eval '$i';
+    print "in-construct eval=$inside\n";
+  }
+}
+print show(), "\n";
+my $outside = eval '$i';
+print "outside eval=$outside\n";
+});
+
 done_testing();
