@@ -703,4 +703,30 @@ $n++ for ($h{k}, "lit", 3);
 print "count=$n keep=$h{k}\n";
 });
 
+# ── s363 #264 SILENT WRONG: `${x}` written at CODE level is a use of $x, but
+# PPI spells it Cast + Block-holding-one-Word, so there is no Symbol token and
+# every Symbol-driven pass was blind to it.  A file lexical used that way after
+# a `package` statement read EMPTY: the span CHECKER never saw the use (so it
+# did not gate either), and the renamer never rewrote it.  One helper
+# (_brace_name_refs) now answers "which canonical variables does this node
+# mention that way" for BOTH the detector and the renamer.
+# INVERSE GUARDS in the same snippet: `${ $ref }` is a real deref of a SYMBOL
+# and must keep working; `@{[ … ]}` is a baby-cart expression, not a name;
+# `${main::g}` is a package global, not a lexical; and a `my $s` shadow inside
+# a sub must still win over the outer name.
+test_transpile("code-level \${x} of a file lexical spans a package boundary", q{
+my $s = "S";
+my $ref = \$s;
+package Foo;
+print "1 scalar-brace=${s}\n";
+print "2 real-deref=${ $ref }\n";
+print "3 babycart=@{[ 1+1 ]}\n";
+package main;
+our $g = "G";
+package Bar;
+print "4 global-brace=${main::g}\n";
+sub inner { my $s = "LOCAL"; return "5 shadow=${s}" }
+print inner(), "\n";
+});
+
 done_testing();

@@ -1644,6 +1644,18 @@ sub _canon_refs_in {
       warn sprintf("SPANHIT arylen \@%s line=%s\n", $b, ($ai->location||['?'])->[0])
         if $ENV{PCL_SPAN_DEBUG};
     }
+    # `${x}` at CODE level is a use of $x with no Symbol token — see
+    # _brace_name_refs.  Missing it here is what let a spanning `${x}` compile
+    # to a read of an unbound name instead of gating (#264).
+    for my $p (@{ _brace_name_refs($stmt) }) {
+      my ($tok, $canon) = @$p;
+      next unless $live->{$canon};
+      next if $self->_ref_shadowed($tok, $canon, $stmts, $seg_parent);
+      $hit{$canon} = 1;
+      warn sprintf("SPANHIT brace %s line=%s stmt=%.70s\n", $canon,
+                   ($tok->location||['?'])->[0], $stmt->content =~ s/\s+/ /gr)
+        if $ENV{PCL_SPAN_DEBUG};
+    }
     my %before = %hit;
     _interp_canon($stmt, $live, \%live_bare, \%hit);
     if ($ENV{PCL_SPAN_DEBUG}) {
@@ -2444,17 +2456,12 @@ sub _rename_spanning_lexicals {
       && $refuse->('sdecls=' . scalar(@sdecls) . " dc=$dc");
     next if $multi && $sdecls[0] != $inst_decl
       && $refuse->('extent sole decl is not this instance');
-    # A CODE-level brace deref (`${x}` as Cast+Block) keeps the refusal: the
-    # name lives in a Word token inside the Block, which the symbol rewrite
-    # never sees.  ASK PPI, not the text — the whole-content scan this used to
-    # be also tripped on `"${x}"` INSIDE A STRING, which is ordinary
-    # interpolation the interp fixer rewrites (op/exec.t:215
-    # `qq{${quote}…}`).  Same replacement M2 made in _shadow_rename_blocker
-    # (s353) for the same stale scan; this was the second copy.
-    next if (grep { ref $_ && $_->isa('PPI::Node')
-                    && _has_code_brace_deref($_, $bare) }
-             map { @{ $_->{stmts} } } @$segments)
-      && $refuse->('${x} deref-block');
+    # (The `${x} deref-block` refusal that used to sit here is GONE, #264: the
+    # rewrite loops below now set the Word inside the Cast's Block, so the one
+    # shape it guarded — a CODE-level `${x}` of THIS scalar — is handled.  The
+    # other sigils it also refused (`@{x}`, `%{x}`, `$#{x}`) are DIFFERENT
+    # canonical variables that renaming `$x` never touches: the refusal was
+    # sigil-blind, the same complaint as the capture path's family-use rule.)
     next if $segments->[$di]{blockform} && $refuse->('blockform decl segment');
     my $decl  = $sdecls[0];
     my $stmts = $segments->[$di]{stmts};
@@ -2489,6 +2496,14 @@ sub _rename_spanning_lexicals {
         next unless $s->symbol eq "\$$bare";
         next if $skip_shadowed->($s, $stmts, $dsp);
         $s->set_content("\$$newbare");
+      }
+      # The same use spelled `${x}` — a Word inside a Cast's Block, invisible
+      # to the Symbol loop above (#264).  The DETECTOR counts it, so the
+      # rewrite must reach it or the rename would leave a live mention behind.
+      for my $p (@{ _brace_name_refs($stmts->[$j]) }) {
+        next unless $p->[1] eq "\$$bare";
+        next if $self->_ref_shadowed($p->[0], "\$$bare", $stmts, $dsp);
+        $p->[0]->set_content($newbare);
       }
       # Mangled path: interp text must follow the rename (identity keeps the
       # name, so same-package interp needs nothing).  Shadow scopes keep the
@@ -2529,6 +2544,13 @@ sub _rename_spanning_lexicals {
           next unless $s->symbol eq "\$$bare";
           next if $skip_shadowed->($s, $seg_stmts, $sp);
           $s->set_content($qual);
+        }
+        # `${x}` in a later segment → `${Pkg::newbare}`, the brace spelling of
+        # the qualified symbol the loop above writes (#264).
+        for my $p (@{ _brace_name_refs($stmt) }) {
+          next unless $p->[1] eq "\$$bare";
+          next if $self->_ref_shadowed($p->[0], "\$$bare", $seg_stmts, $sp);
+          $p->[0]->set_content($segments->[$di]{pkg} . '::' . $newbare);
         }
         if ($do_interp) {
           for my $t (@{ $stmt->find('PPI::Token') || [] }) {
@@ -3305,17 +3327,42 @@ sub _reg_eval_capture {
 # also tripped on "${x}" inside string literals, which _interp_fixer now
 # rewrites (both live Moo events were that spelling, probed to their source
 # lines in Method::Generate::{Constructor,Accessor}).
+# `${name}` / `@{name}` / `%{name}` / `$#{name}` written at CODE level is NOT a
+# deref of an expression — it is a fancy spelling of `$name` / `@name` /
+# `%name` / `$#name`.  PPI spells it Cast + Block-containing-one-Word, so there
+# is no Symbol token and every Symbol-driven pass is blind to it: that blindness
+# is what made a spanning `${x}` read EMPTY instead of gating (#264).  ONE
+# helper answers "which canonical variables does this node mention that way",
+# and both the span DETECTOR (_canon_refs_in) and the span RENAMER consume it —
+# they must agree about what a use is, which is the whole point.
+# Returns [ $word_token, $canon ] pairs; the token is the rename target.
+# `${ $ref }` / `${\ …}` / `@{[ … ]}` hold a Symbol or an expression, not a
+# lone Word, so they are correctly not claimed.
+sub _brace_name_refs {
+  my ($node) = @_;
+  my @out;
+  for my $b (@{ $node->find('PPI::Structure::Block') || [] }) {
+    my $prev = $b->sprevious_sibling or next;
+    my $sig = $prev->isa('PPI::Token::Cast') ? $prev->content
+            : ($prev->isa('PPI::Token::Magic') && $prev->content eq '$#')
+              ? '$#' : next;
+    my @kids = grep { $_->significant } $b->children;
+    next unless @kids == 1 && $kids[0]->isa('PPI::Statement');
+    my @t = grep { $_->significant } $kids[0]->children;
+    next unless @t == 1 && $t[0]->isa('PPI::Token::Word')
+             && $t[0]->content =~ /^\w+$/;      # a qualified name is no lexical
+    my $canon = $sig eq '$#' ? '@' . $t[0]->content
+              : $sig =~ /^[\$\@\%]$/ ? $sig . $t[0]->content
+              : next;                            # `\{name}`, `&{name}`: not ours
+    push @out, [ $t[0], $canon ];
+  }
+  return \@out;
+}
+
 sub _has_code_brace_deref {
   my ($root, $bare) = @_;
-  return scalar @{ $root->find(sub {
-    my $t = $_[1];
-    return 0 unless $t->isa('PPI::Structure::Block')
-      && $t->content =~ /^\{\s*\Q$bare\E\s*\}$/;
-    my $prev = $t->sprevious_sibling;
-    return $prev && ($prev->isa('PPI::Token::Cast')
-                     || ($prev->isa('PPI::Token::Magic')
-                         && $prev->content eq '$#')) ? 1 : 0;
-  }) || [] };
+  return scalar grep { $_->[1] =~ /^[\$\@\%]\Q$bare\E$/ }
+                @{ _brace_name_refs($root) };
 }
 
 # Reasons renaming `my $x` within $root is NOT safe; undef when safe.
