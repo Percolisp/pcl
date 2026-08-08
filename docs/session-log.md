@@ -97,6 +97,19 @@ Verification: corpus-diff identical 111/111, gate 131/4660 PASS, full
 sweep GATE clean (TOTAL 18499 = baseline), gen v2-113 → v2-114,
 artifacts regenerated.  #243's remainder = the step-3 deletion itself.
 
+**s358i: E4.1 IS COMPLETE** (`2d9aa8b`).  The step-3 reachability check
+found `Pl::Parser::parse` NOT dead — the prototype extractors walk every
+`use`d module through it in `collect_prototypes_only` mode (`_emit`
+no-ops), so parse() survives as the collection walker with a GUARD that
+dies on any full-emission use.  What was deleted: `parse_file`/
+`parse_code` (v1's external two-pass API; last callers were the 27 ported
+files) and the `lenient_ppi`/`_ppi_with_fallback` truncation machinery
+(retired by ruling s356, unreachable since).  Statement/expression v1
+code stays live through Parser2's seam, which never calls parse() — E5
+burns that down.  Verified: smoke incl. List::Util `(&@)` extraction,
+corpus-diff identical 111/111, gate 131/4660 PASS, board unchanged.
+Dead code only — no emission change, no generation bump.
+
 **Process slip (mine)**: a backwards guard (`git stash -q && echo …`)
 actually RAN a stash mid-session, silently reverting the working tree —
 caught when corpus-diff went implausibly clean and -09 failed; popped, and

@@ -1286,3 +1286,27 @@ E4.1's pre-work is now done.
   its s323e snapshot rows were `--lenient-ppi` truncation (the #228
   accident class), retired by ruling s356 → `docs/ppi-upstream-bugs.md`
   §6; registration with cause via #254 §4.
+
+## s358i (2026-08-08, Fable) — E4.1 COMPLETE: v1's file-level transpile surface deleted (#243/#255)
+
+- **All 27 Pl/t files ported to Pl::Parser2** (#255, `5ba6155`); porting
+  rule applied throughout: assertions stay semantically equivalent,
+  v1-implementation-detail rows dropped with notes (#132 echoes, call
+  qualification), one perl-vs-v2 divergence TODO-marked (#256:
+  retroactive prototype application to pre-declaration calls).
+- **Pl::Parser::parse survives ONLY as the prototype-collection walker**
+  (`2d9aa8b`) — the extractors are its sole callers
+  (collect_prototypes_only => 1, _emit no-op); a guard dies on any other
+  use.  parse_file/parse_code and lenient_ppi/_ppi_with_fallback are
+  DELETED.  Statement/expression v1 code remains live through Parser2's
+  seam, which never calls parse().  E5 burns that seam down.
+- **Two production silent-wrongs found by the port, both fixed
+  (`5ba6155`)**: (1) the v2 prototype premerge now seeds transpile-time
+  inc_paths from the document's literal `use lib` paths (v1 got the
+  ordering free; the pre-pass didn't, so a file's own lib dir lost its
+  modules' block-form prototypes); (2) `_merge_module_prototypes` tags
+  merged entries from_module and never overwrites a LOCAL declaration
+  (v2's sub hoisting put the seam re-merge AFTER the local override,
+  which it clobbered — wrong auto-boxing on every later call).
+  Local-before-use divergence (perl's import clobbers with a warning; PCL
+  keeps the local) accepted, noted in #256.
