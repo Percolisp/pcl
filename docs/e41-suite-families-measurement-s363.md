@@ -117,10 +117,28 @@ two scopes.  **MECHANISM GAP** — per-declaration (scoped) renaming.  Small fil
 lowest priority; the same "process instances innermost/latest first" trick the
 spanning rename uses (M-B) is the obvious model.
 
-## Recommended order for step 3
+## Step 3 progress
 
-1. **A-v** (exec.t) — a genuine invariant break, one predicate, ~36 rows but it
-   is the cheapest and it restores a stated invariant.
+**A-v SHIPPED (s363, `0832e80`)** — and it was TWO stale text scans, not one:
+the pre-filter (fixed with `\{?`) and then, once the name was admitted, the
+`${x} deref-block` eligibility check, which was still the whole-file text scan
+that s353's M2 had already replaced with the PPI-narrowed
+`_has_code_brace_deref` in `_shadow_rename_blocker`.  Both copies now agree
+with the checker.  op/exec.t transpiles and reaches **C: 15/0 — exactly its
+`perl-suite-run.tsv` snapshot row** (the file's snapshot C_ok is 15, not the 36
+this doc's table carried from task #254's list; 15 is the measured number).
+The other 12 files are unmoved.
+
+The breaking-case probe for that fix found a PRE-EXISTING silent wrong, filed
+**#264**: a CODE-level `${x}` deref of a file lexical across a package boundary
+reads EMPTY, because `_canon_refs_in` does not resolve Cast+Block to the symbol
+— so the checker never dies and the deref-block guard is never reached.  The
+span detector and the eligibility check disagree about what counts as a use.
+**#264 should be fixed before A-i/A-ii**: it may change which files gate.
+
+## Recommended order for the rest of step 3
+1. **#264** — the span detector must see `${x}`; it is a silent wrong today and
+   it can change which files gate, so it comes before the A-family widenings.
 2. **B-i** (1257 rows) — route the cond rename through M-F's existing
    original-name→cell registration.
 3. **A-iv** (92 rows) — sigil-exact the family-use refusal.

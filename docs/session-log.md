@@ -76,15 +76,45 @@ does NOT cover is module transpiles, which is why a cold-cache sweep still
 follows a parser change.
 
 **Verification at session close**: gate `tools/prove-core` **132 files / 4728
-PASS**; corpus emission identical for both walker commits, one explained file
-for #262; cold-cache full sweep **GATE clean** — 0 new / 0 fixed / 0 LOST,
-TOTAL passing **18498 = baseline**.  The run's parallel pass flagged array.t
+PASS**; corpus emission identical for both walker commits AND for the #254
+Parser2 change, one explained file for #262; **TWO** cold-cache full sweeps —
+after the walker commits and again after the Parser2 change — both **GATE
+clean**, 0 new / 0 fixed / 0 LOST, TOTAL passing **18498 = baseline** each
+time.  The run's parallel pass flagged array.t
 LOST (-41 rows); the #215 serial re-run put it back at 169/15 OK, so it was
 load noise, and the serial verdict replaced it.  method.t appears in the
 UNSTABLE bucket with 4 new fails above its abort point — checked against a
 worktree at the session-start commit `a38c0a2` and it is **byte-identical
 there** (93 pass / 38 fail, same abort point, same last test), i.e.
 pre-existing crash-file noise.  Gen v2-116.
+
+**Then #254 session 1 — MEASUREMENT (task-bounded), plus its first fix.**  All
+13 files reproduce and collapse to 4 gate messages / **6 causes**, each read
+off the pass's own refusal channel (`PCL_SPAN_DEBUG=1` → SPANREFUSE +
+CAPREFUSE; SPANHIT comes from the checker, so the two can be compared).
+Write-up: `docs/e41-suite-families-measurement-s363.md`, with the
+PREDICATE-vs-MECHANISM verdict per cause and the step-3 order.  Two sizing
+facts drive that order: **B-i is 1257 rows and needs no new mechanism** (the
+string-eval waiver already exists for two sibling renames), while **A-ii is the
+~11k-row whale and needs a new pass** — which is where #254's stop-rule points.
+
+**A-v shipped (`0832e80`)** — op/exec.t died on `my-lexical 'quote' spans a
+package boundary` while the rename pass that exists to prevent that printed no
+refusal at all.  Two stale TEXT scans behind each other, both already fixed
+once in the sibling pass: the candidate pre-filter missed the braced spelling
+`qq{${quote}…}`, and once that was fixed the eligibility check refused it via
+the whole-file `${x}` text scan that s353's M2 had replaced with the
+PPI-narrowed `_has_code_brace_deref`.  exec.t now transpiles and reaches
+**C: 15/0, exactly its snapshot row**; the other 12 are unmoved; corpus
+emission identical.
+
+The breaking-case probe for that fix found a pre-existing **silent wrong**,
+filed **#264** (verified identical at `4e7f249`): a CODE-level `${x}` deref of
+a file lexical across a package boundary reads EMPTY.  `_canon_refs_in` does
+not resolve Cast+Block to the symbol, so the checker never dies and the
+deref-block guard that exists for exactly this shape is never reached — the
+span detector and the eligibility check disagree about what a use is.  It goes
+first in the remaining step-3 order, because it can change which files gate.
 
 Acceptance probes at the end of the task: **#147's shape now passes**
 (`f [] // 0` under a `($)` prototype — step 3b fixed it); the s317
