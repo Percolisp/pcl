@@ -1,5 +1,28 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s365 (Opus).**  Fable's s364 queue is DONE end to end.  In order:
+> the required registration (`docs/perl-suite-timeouts.tsv` + runner support),
+> then **#263**, **A-iv**, **A-i**, **A-iii**, **B-ii** — measurements per file
+> in `docs/e41-suite-families-s365.md`.  Headline: **io/through.t is OK 942/0**
+> (fully passing, at snapshot), op/attrproto.t at snapshot 17/28, op/while.t
+> 20/6 above snapshot, op/getppid.t + op/sub_lval.t de-gated onto other causes.
+> Gate SET over both populations: 27 → **23** gated files, **zero new gates at
+> every step** (op/sub_lval.t stays gated — #268 blocks it, not the span rule).  Gate 132/4735 PASS, gen v2-118.
+>
+> **A-i needed no extent design** — the s363 reading was wrong: the sub owned
+> its `$first` through a statement-modifier `my` the capture scan could not see.
+> So nothing here is waiting on a Fable semantic ruling.
+>
+> **What remains of #254**: A-ii (parked behind E5, ruled s364), plus three new
+> tasks that are NOT #254 families — **#267** (multi-element foreach alias),
+> **#268** (PPI mis-lexes `for my $x (sub{…},sub{…})` → sub_lval.t's last
+> blocker, ~12 rows), **#269** (reg_eval_scope.t's nested-sub capture).  With
+> those, #254's own worklist is empty: recommend CLOSING #254 after review.
+>
+> **Next**: Fable reviews s365 (`docs/opus5-review-requests-s365.md`), then
+> #153's FOLD (its own session).  Opus's next queue if Fable's order stands:
+> #268 → #265 → #267 → the §4 fillers.
+
 > **UPDATED s364 (Fable review of s363 — `docs/fable-answers-s363.md`).**
 > All seven s363 commits APPROVED (gate independently re-verified 132/4731;
 > step-5 die guards adversarially probed beyond the measured populations —

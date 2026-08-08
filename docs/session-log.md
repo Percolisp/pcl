@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 365 (2026-08-08, Opus) — #254's registration, then A-iv → A-i → A-iii → B-ii; #263
+
+Executed Fable's s364 queue in order.  Full per-file measurement:
+`docs/e41-suite-families-s365.md`.
+
+**0. The required registration first** (§0).  New
+`docs/perl-suite-timeouts.tsv` — a per-file timeout ALLOWANCE registry with a
+cause per row — honoured by `tools/run-perl-suite.pl` as `max(seconds,
+--timeout)` and printed to the journal and stderr on every run.  Verified live:
+the default-timeout runner now completes re/pat_advanced.t at 936/733, the
+exact numbers s363 measured by hand at `--timeout 900`; the other two B-i files
+re-measured unchanged (op/my.t 51/8, re/regexp_unicode_prop.t 778/332).
+
+**1. #263 warm-up — foreach element aliasing, both spellings.**  The block form
+and the statement modifier wrap the list differently (Statement children vs the
+parens) and each pass peeled its own set, so the AST verdict that drives the
+box-head rewrite never fired for `EXPR for (LV)`.  One shared peeler
+(`_foreach_list_unwrap`) now serves the rewrite, the single-scalar wrap and
+VarAnnotator's veto.  Widening it covered the shapes NEITHER spelling handled:
+through a ref (`$r->{k}`, `$$r{k}`) and subscript chains (`$h{a}{b}`,
+`$r->{a}[0]`, `$a[0][1]`).  The applier is now ANCHORED at the outermost call,
+so a wrong head guess is a no-op rather than a box handed to an inner
+`p-gethash`.  4 new rows + an inverse guard in `Pl/t/foreach-aliasing-01.t`.
+Multi-element element lists stay broken in both spellings → **#267**.
+
+**2. A-iv** — the scalar promotion's `family use (@x/%x/$#x)` refusal is
+DELETED, not narrowed: every rewrite it guarded is already sigil-exact (PPI's
+`->symbol` answers `@x` for `$x[0]`; the interp fixer carries `(?![\[\{])`).
+op/attrproto.t de-gates to **17/28 — exactly its snapshot**.
+
+**3. A-i** — and the measurement's reading of it was wrong.  op/getppid.t's sub
+does not capture the file lexical at all; it declares its own `$first` in
+`die … unless my ($how,$first,$second) = …`.  `_block_captures_name` knew only
+two declaration shapes, so an embedded `my` read as a capture.  Added the
+general case with perl's two scopes (modifier → rest of the block; compound
+head → that statement).  **io/through.t is now OK 942/0 — fully passing, at
+snapshot**, #254's single biggest recovery; op/getppid.t de-gates to its
+snapshot 0/0 (`pipe my ($r,$w)` still fails to compile).  No extent design was
+needed and none was built.
+
+**4. A-iii** — a block-form `package Foo { … }` segment is a scope: its `my`s
+cannot span, so the checker and the rename pass both skip its declarations (one
+line each, same place).  It must be a skip of the DECLARATIONS, not a kill of
+the live set on entry — outer lexicals stay visible through the block, probed
+both ways.  op/sub_lval.t's span gate is gone; the file now dies on a PPI
+mis-lex (`for my $sub (sub {…}, sub {…})` lexed as `Structure::For`) → **#268**.
+
+**5. B-ii** — `_rename_decl_within` is shadow-aware (skips an inner
+declaration's target and everything it shadows, via the span pass's
+`_ref_shadowed`), so the cond-my rename waives `multiple declarations`.
+op/while.t **20/6, above its snapshot (11/4, a TIMEOUT)**.
+
+**Verification.**  Gate-SET diffed file-by-file over BOTH populations (715
+files) after each step: HEAD 27 gated → 26 → 24 → 23, **zero new gates at every
+step**.  `tools/prove-core` **132 files / 4735 PASS**.  Emission changed, so
+`*pcl-cache-generation*` → v2-118.  Corpus-diff, cold-cache sweep and a full
+`--all` suite run: numbers in `docs/e41-suite-families-s365.md` §6.
+
+**Gotcha (cost one false FAIL)**: never run the gate under `nohup` — SIGHUP is
+then ignored, perl reports `$SIG{HUP}` as defined, and transpile-test-06.t's
+%SIG row fails against a PCL that correctly knows nothing about it.
+
+New tasks: **#267** (multi-element foreach alias), **#268** (PPI for-lexer
+mis-classification), **#269** (reg_eval_scope.t's third cause — nested-sub
+capture).
+
 ## Session 364 (2026-08-08, Fable) — review of s363: APPROVED; A-ii parked; ir-spec brought current
 
 Reviewed `docs/opus5-review-requests-s363.md` (seven asks).  Verdict: **all

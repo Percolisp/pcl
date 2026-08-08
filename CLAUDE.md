@@ -182,6 +182,13 @@ tools/pcl-xs-install --clean     # drop artifacts built for other ABIs
 # (one SBCL launch per case set), so it is not part of the Pl/t gate.
 tools/pcl-conform                # whole corpus
 tools/pcl-conform 96-flags       # one case-set file
+
+# perl's OWN t/ suite (the companion sweep).  A file that legitimately needs
+# longer than the 90s default is registered in docs/perl-suite-timeouts.tsv
+# (rel<TAB>seconds<TAB>cause; effective timeout = max(row, --timeout), and the
+# allowances in effect are printed per run) — never left to TIMEOUT into "no
+# rows at all", which is how a file's passing rows vanish invisibly (#176).
+tools/run-perl-suite.pl --all --jobs 8
 ```
 
 **Pipeline (singular, since E4.1 step 2 / #242, s356):** the v2
@@ -323,8 +330,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **132 test files, 4717 tests** with a built pclxs sibling (s359, measured);
-  **4703 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
+- **132 test files, 4735 tests** with a built pclxs sibling (s365, measured);
+  **4721 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not

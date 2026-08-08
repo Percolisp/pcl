@@ -1347,6 +1347,42 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s365 (2026-08-08, Opus) — #254's registration + A-iv/A-i/A-iii/B-ii, and #263
+
+- **A per-file TIMEOUT ALLOWANCE registry exists**: `docs/perl-suite-timeouts.tsv`
+  (`rel<TAB>seconds<TAB>cause`), honoured by `tools/run-perl-suite.pl` as
+  `max(seconds, --timeout)` and printed per run.  A file that needs longer than
+  the default is registered WITH ITS CAUSE, never left to TIMEOUT into "no rows"
+  (#176's lesson generalised).  First row: re/pat_advanced.t = 900 s.
+  → `docs/e41-suite-families-s365.md` §0.
+- **A capture/span refusal that is SIGIL-blind or SCOPE-blind is a bug, not
+  conservatism** — three of #254's four remaining causes were exactly that, and
+  all three are now deleted rather than narrowed: the scalar promotion's
+  `family use (@x/%x/$#x)` veto (A-iv), `_block_captures_name`'s blindness to a
+  `my` EMBEDDED in another statement (A-i), and the span detector's lack of a
+  scope for a block-form `package Foo { … }` segment (A-iii).  Each one is the
+  same standing rule one layer over: the pass that DETECTS and the scoping the
+  program actually has must agree.  → `docs/e41-suite-families-s365.md` §1–3.
+- **A-i needs NO extent design** (the s363 measurement's reading is superseded):
+  op/getppid.t's sub never captured the file lexical at all — it declares its
+  own `$first` in a statement-modifier `my`.  Ordering-independent promotion is
+  NOT required and was not built.  → `docs/e41-suite-families-s365.md` §2.
+- **A block-form package's lexicals never span**, but the outer lexicals it
+  encloses still do: the fix SKIPS that segment's declarations, and must not
+  kill the live set on entry (probed both ways).  → §3 of the same doc.
+- **The cond-my rename is shadow-aware** (B-ii): `_rename_decl_within` skips an
+  inner re-declaration's target and everything it shadows (`_ref_shadowed` —
+  the span pass's resolver), so `multiple declarations` is waived for callers
+  that rename that way.  → §4.
+- **foreach aliasing is decided by ONE peeler** (`_foreach_list_unwrap`) shared
+  by the rewrite, the single-scalar wrap and the annotator's veto — the two
+  spellings (block form / statement modifier) wrap the list differently and the
+  passes disagreed, which WAS #263.  The rewrite is anchored at the outermost
+  call, so a wrong head guess is a no-op instead of an inner box.
+- **Never run the Pl/t gate under `nohup`**: nohup ignores SIGHUP, perl then
+  reports `$SIG{HUP}` as defined, and transpile-test-06.t's %SIG row fails
+  against a PCL that correctly knows nothing of the inherited disposition.
+
 ## s364 (2026-08-08, Fable) — review of s363: all seven asks ruled
 
 - **All seven s363 commits APPROVED as shipped** — gate independently
