@@ -169,8 +169,12 @@ were an ACCIDENT of `--lenient-ppi` truncation (the same class as the #228
 `lex.t` registration); the flag was retired by ruling (§5a.4, s356), so the
 file now reads TRANSPILE-FAIL.  It is NOT a flip loss and NOT a PCL
 regression (task #253, `docs/fable-answers-s357.md`); it joins the #254 §4
-residue registration with this cause.  Re-check when PPI releases past
-1.291.
+residue registration with this cause.  Ready to file upstream as **bug 4
+in `docs/ppi-bug-report.t`** (self-contained Test::More file, all four
+rows FAIL on 1.291 = the bugs).  A CANARY row in `Pl/t/misc-fixes-02.t`
+asserts the current broken state — when a PPI upgrade fixes the lexer,
+that row FAILS, which is the signal to drop this section and un-register
+op/for.t.
 
 ---
 

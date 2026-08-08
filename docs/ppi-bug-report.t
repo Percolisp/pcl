@@ -1,13 +1,13 @@
 #!/usr/bin/env perl
 #
-# PPI tokenizer bug report — two small cases.
-# Tested against PPI 1.291 / perl 5.40.3.  Both tests currently FAIL (the bugs).
+# PPI tokenizer/lexer bug report — four small cases.
+# Tested against PPI 1.291 / perl 5.40.3.  All four tests currently FAIL (the bugs).
 #
 #   perl ppi-bug-report.t
 #
 use strict;
 use warnings;
-use Test::More tests => 3;
+use Test::More tests => 4;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -54,4 +54,26 @@ sub toks {
     ok( !grep(/^PPI::Token::Magic=\%-$/, @t),
         '7%-3 should tokenize as 7 % -3, not as the magic hash %-' )
         or diag "got: @t";
+}
+
+# ── Bug 4: for ${*$f} (LIST) {} — LEXER DIES ("Illegal state in 'for' …") ──────
+#
+# A block-deref lvalue as the foreach loop variable is valid Perl (it aliases
+# the glob's scalar slot per iteration):
+#
+#   $ perl -e 'no strict "refs"; my $f = "v"; for ${*$f} (5,11,33) { print "$v " }'
+#   5 11 33
+#
+# (It appears in perl's own test suite: t/op/for.t, the low-refcount-package-var
+# assert/SEGV regression test.)  PPI::Document->new returns undef on it —
+# not a mis-tokenization but a hard lexer failure:
+#   Lexer failed: Illegal state in 'for' compound statement
+# Plain `for $x (…)` is fine; `foreach ${*$f} (…)` fails identically, as does
+# the construct buried anywhere in a larger document (the whole parse dies).
+{
+    my $src = 'no strict "refs"; my $f = "v"; for ${*$f} (5,11,33) { print }';
+    my $doc = PPI::Document->new(\$src);
+    ok( $doc,
+        'for ${*$f} (LIST) {} should parse (valid Perl foreach lvalue)' )
+        or diag "PPI errstr: " . PPI::Document->errstr;
 }

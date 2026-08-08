@@ -6,6 +6,7 @@ use v5.30;
 use strict;
 use warnings;
 use Test::More;
+use PPI;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -19,7 +20,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 98;
+plan tests => 99;
 
 sub run_cl {
     my ($code) = @_;
@@ -899,6 +900,17 @@ test_cl('modulo with glued negative/positive operand (PPI %-/%+ workaround)',
 test_cl('named-capture %+ hash element still works after the %- workaround',
     '"foo42" =~ /(?<n>\d+)/; print "$+{n}\n";',
     "42\n");
+
+# ── PPI bug CANARY (no workaround): for ${*$f} (LIST) {} kills PPI's lexer ────
+# Valid perl (a glob-deref lvalue as the foreach alias; t/op/for.t line 767),
+# but PPI 1.291 dies whole-file: "Illegal state in 'for' compound statement".
+# docs/ppi-upstream-bugs.md §6, filable as docs/ppi-bug-report.t bug 4.  This
+# row asserts the CURRENT broken state on purpose — when it FAILS, a PPI
+# upgrade fixed the lexer: drop this canary, drop §6, un-register op/for.t
+# (its suite registration carries this cause) and re-run the suite file.
+ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
+    'CANARY: PPI still cannot lex `for ${*$f} (LIST){}` — if this FAILS, '
+  . 'PPI is fixed: un-register op/for.t (ppi-upstream-bugs.md §6)' );
 
 # ── runtime warning strings used CL "...\n", but \n in a CL string literal is a
 # bare 'n' (backslash only escapes " and \), so the join uninit warning rendered
