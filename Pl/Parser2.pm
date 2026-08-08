@@ -445,6 +445,27 @@ sub _premerge_include_prototypes {
   my $skip = qr/^(?:overload|base|parent|lib|strict|warnings|warnings::register|
                    feature|utf8|open|bytes|locale|integer|builtin|overloading|
                    XSLoader|DynaLoader|re)$/x;
+  # `use lib "dir"` paths must reach the TRANSPILE-TIME search list before
+  # the extraction loop below, or a module the file itself puts on @INC is
+  # never found and its prototypes (block-form `(&@)` etc.) are silently
+  # lost.  v1 got this for free from statement ORDER (its use-lib branch
+  # unshifts onto inc_paths as it walks); this pre-pass runs before any
+  # statement, so seed it here.  Literal strings and qw() only — an
+  # interpolated path is runtime-computed (the #235 family) and stays out.
+  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'lib';
+    for my $child ($inc->schildren) {
+      if ($child->isa('PPI::Token::Quote')) {
+        my $path = $child->string;
+        unshift @{ $fp->inc_paths }, $path
+          if $path !~ /[\$\@]/ || $child->isa('PPI::Token::Quote::Single');
+      } elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
+        (my $c = $child->content) =~ s/^qw\s*[\(\[\{<]//;
+        $c =~ s/[\)\]\}>]$//;
+        unshift @{ $fp->inc_paths }, grep { length } split /\s+/, $c;
+      }
+    }
+  }
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     my $type = $inc->type // '';
     if ($type eq 'use') {

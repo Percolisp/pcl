@@ -12,12 +12,12 @@ use File::Temp qw(tempfile tempdir);
 use File::Spec;
 
 use lib ".";
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper: parse and return CL output (no SBCL, fast)
 sub parse_pl {
     my $code = shift;
-    return Pl::Parser->parse_code($code);
+    return Pl::Parser2->parse_code($code);
 }
 
 # Helper: get the main section of output (after in-package :pcl or :main)
@@ -162,9 +162,10 @@ note "-------- Phase 2: compile-time before runtime";
         my $x = foo();
         print $x;
     });
-    # my $x = foo() at file scope generates defvar + box-set
-    # The box-set should be AFTER the sub (in runtime section)
-    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/\(box-set \$x/), -1,
+    # my $x = foo() at file scope evaluates its init at RUNTIME (v2: the
+    # let binding runs foo() in place; v1 spelled it defvar + box-set) —
+    # and that runtime init sits AFTER the compile-time sub definition.
+    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/\(let \(\(\$x /), -1,
        'my $x (box-set) stays in runtime, after compile-time sub');
 }
 
@@ -230,8 +231,9 @@ note "-------- Phase 1: defvar hoisting";
     # our-defvar (declarations) before sub (definitions)
     is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-foo/), -1,
        'our-defvar (declarations) before sub (definitions)');
-    # defvar before setf (value assignment)
-    is(relative_order($cl, qr/defvar \$x/, qr/setf.*p-box-value.*\$x.*42/), -1,
+    # defvar before the runtime value write (v1: setf p-box-value; v2
+    # spells the same write p-scalar-=)
+    is(relative_order($cl, qr/defvar \$x/, qr/p-scalar-= \$x 42/), -1,
        'defvar declaration before runtime value assignment');
 }
 

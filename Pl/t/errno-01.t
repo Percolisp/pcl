@@ -8,13 +8,12 @@ use Test::More;
 use File::Temp qw(tempfile);
 
 use lib '.';
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper to get just the generated code (skip preamble)
 sub get_generated_code {
-    my $parser = shift;
-    my @output = $parser->parse();
-    my $text = join("\n", @output);
+    my $code = shift;
+    my $text = Pl::Parser2->parse_code($code);
     my @lines = split /\n/, $text;
     my @code;
     for my $line (@lines) {
@@ -44,29 +43,25 @@ diag '-------- $! (errno) Variable:';
 
 # Test 1: $! generates p-errno-string call
 {
-    my $parser = Pl::Parser->new(code => 'my $e = $!;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $e = $!;');
     like($output, qr/p-errno-string/, '$! generates p-errno-string call');
 }
 
 # Test 2: $! in print statement
 {
-    my $parser = Pl::Parser->new(code => 'print $!;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('print $!;');
     like($output, qr/p-print.*p-errno-string/, '$! works in print');
 }
 
 # Test 3: $! in concatenation
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "Error: " . $!;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "Error: " . $!;');
     like($output, qr/p-\.\s+"Error: "\s+\(p-errno-string\)/, '$! works in concatenation');
 }
 
 # Test 4: $! in die statement with string interpolation
 {
-    my $parser = Pl::Parser->new(code => 'die "Failed: $!";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('die "Failed: $!";');
     like($output, qr/p-die.*p-errno-string/s, '$! works in die with interpolation');
 }
 
@@ -74,9 +69,7 @@ diag '-------- Runtime Execution:';
 
 # Test 5: $! works at runtime (value may vary)
 {
-    my $parser = Pl::Parser->new(code => 'my $e = $!; print "got-errno\n";');
-    my @output = $parser->parse();
-    my $lisp_code = join("\n", @output);
+        my $lisp_code = Pl::Parser2->parse_code('my $e = $!; print "got-errno\n";');
     my $result = run_lisp($lisp_code);
     like($result, qr/got-errno/, '$! can be read at runtime');
 }
@@ -87,9 +80,7 @@ diag '-------- Runtime Execution:';
 open my $fh, '<', '/nonexistent/file/that/does/not/exist/12345';
 print "error:", $!, "\n";
 PERL
-    my $parser = Pl::Parser->new(code => $code);
-    my @output = $parser->parse();
-    my $lisp_code = join("\n", @output);
+        my $lisp_code = Pl::Parser2->parse_code($code);
     my $result = run_lisp($lisp_code);
     # Should contain some error message (varies by system)
     like($result, qr/error:.+/, '$! contains error message after failed open');
@@ -98,8 +89,7 @@ PERL
 
 # Test 7: Common pattern: open or die
 {
-    my $parser = Pl::Parser->new(code => 'open my $fh, "<", $file or die "Cannot open: $!";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('open my $fh, "<", $file or die "Cannot open: $!";');
     like($output, qr/p-open/, 'open is present');
     like($output, qr/p-die/, 'die is present');
     like($output, qr/p-errno-string/, '$! is interpolated in string');
@@ -125,8 +115,7 @@ print "array:", $a[0] + 0, "\n";
 my %h = (e => $!);
 print "hash:", $h{e} + 0, "\n";
 PERL
-    my $parser = Pl::Parser->new(code => $code);
-    my $lisp_code = join("\n", $parser->parse());
+        my $lisp_code = Pl::Parser2->parse_code($code);
     my $result = run_lisp($lisp_code);
     my ($direct) = $result =~ /direct:(\d+)/;
     ok($direct && $direct > 0, "errno is non-zero after failed open (got $direct)");

@@ -6,13 +6,12 @@ use warnings;
 
 use Test::More;
 use lib '.';
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper to get just the generated code (skip preamble)
 sub get_generated_code {
-    my $parser = shift;
-    my @output = $parser->parse();
-    my $text = join("\n", @output);
+    my $code = shift;
+    my $text = Pl::Parser2->parse_code($code);
     my @lines = split /\n/, $text;
     my @code;
     for my $line (@lines) {
@@ -32,22 +31,19 @@ diag "-------- @ARGV variable:";
 
 # Test 1: @ARGV is recognized as a variable
 {
-    my $parser = Pl::Parser->new(code => 'my @args = @ARGV;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my @args = @ARGV;');
     like($output, qr/\@ARGV/, '@ARGV is recognized');
 }
 
 # Test 2: Access @ARGV elements
 {
-    my $parser = Pl::Parser->new(code => 'my $first = $ARGV[0];');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $first = $ARGV[0];');
     like($output, qr/\@ARGV/, '$ARGV[0] accesses @ARGV');
 }
 
 # Test 3: @ARGV in foreach
 {
-    my $parser = Pl::Parser->new(code => 'foreach my $arg (@ARGV) { print $arg; }');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('foreach my $arg (@ARGV) { print $arg; }');
     like($output, qr/\@ARGV/, '@ARGV in foreach loop');
 }
 
@@ -56,22 +52,19 @@ diag "-------- shift/pop at top level (should use \@ARGV):";
 
 # Test 4: shift at top level defaults to @ARGV
 {
-    my $parser = Pl::Parser->new(code => 'my $arg = shift;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $arg = shift;');
     like($output, qr/p-shift\s+\@ARGV/, 'shift at top level uses @ARGV');
 }
 
 # Test 5: pop at top level defaults to @ARGV
 {
-    my $parser = Pl::Parser->new(code => 'my $last = pop;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $last = pop;');
     like($output, qr/p-pop\s+\@ARGV/, 'pop at top level uses @ARGV');
 }
 
 # Test 6: Multiple shifts at top level
 {
-    my $parser = Pl::Parser->new(code => 'my $a = shift; my $b = shift;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $a = shift; my $b = shift;');
     my @matches = ($output =~ /p-shift\s+\@ARGV/g);
     is(scalar @matches, 2, 'Multiple shifts at top level all use @ARGV');
 }
@@ -79,30 +72,31 @@ diag "-------- shift/pop at top level (should use \@ARGV):";
 diag "";
 diag "-------- shift/pop inside subs (should use \@_):";
 
-# Test 7: shift inside sub defaults to @_
+# Test 7: shift inside sub defaults to @_.  v2 optimizes a LEADING
+# `my $x = shift;` into the raw-params calling convention — the sub's
+# arguments are consumed directly as the parameter binding (never @ARGV).
 {
-    my $parser = Pl::Parser->new(code => 'sub foo { my $x = shift; }');
-    my $output = get_generated_code($parser);
-    like($output, qr/p-shift\s+\@_/, 'shift inside sub uses @_');
+        my $output = get_generated_code('sub foo { my $x = shift; }');
+    like($output, qr/p-raw-params \(\$x\)/, 'shift inside sub uses @_');
 }
 
 # Test 8: pop inside sub defaults to @_
 {
-    my $parser = Pl::Parser->new(code => 'sub foo { my $x = pop; }');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('sub foo { my $x = pop; }');
     like($output, qr/p-pop\s+\@_/, 'pop inside sub uses @_');
 }
 
 # Test 9: shift used in typical constructor pattern
 {
-    my $parser = Pl::Parser->new(code => 'sub new { my $class = shift; bless {}, $class; }');
-    my $output = get_generated_code($parser);
-    like($output, qr/p-shift\s+\@_/, 'shift in constructor uses @_');
+        my $output = get_generated_code('sub new { my $class = shift; bless {}, $class; }');
+    like($output, qr/p-raw-params \(\$class\)/, 'shift in constructor uses @_');
 }
 
-# Test 10: Nested subs both use @_
+# Test 10: Nested subs both consume THEIR OWN @_ — inner gets raw-params;
+# outer (whose body holds a nested named sub, which vetoes the params
+# extraction) keeps the explicit (p-shift @_).  Neither touches @ARGV.
 {
-    my $parser = Pl::Parser->new(code => '
+        my $output = get_generated_code('
         sub outer {
             my $a = shift;
             sub inner {
@@ -110,9 +104,8 @@ diag "-------- shift/pop inside subs (should use \@_):";
             }
         }
     ');
-    my $output = get_generated_code($parser);
-    my @matches = ($output =~ /p-shift\s+\@_/g);
-    is(scalar @matches, 2, 'Both nested subs use @_');
+    ok($output =~ /p-raw-params \(\$b\)/ && $output =~ /p-shift\s+\@_/,
+       'Both nested subs use @_');
 }
 
 diag "";
@@ -120,26 +113,23 @@ diag "-------- Mixed context:";
 
 # Test 11: Top level shift, then sub with shift
 {
-    my $parser = Pl::Parser->new(code => '
+        my $output = get_generated_code('
         my $file = shift;
         sub process { my $x = shift; }
     ');
-    my $output = get_generated_code($parser);
     like($output, qr/p-shift\s+\@ARGV/, 'Top level shift uses @ARGV');
-    like($output, qr/p-shift\s+\@_/, 'Sub shift uses @_');
+    like($output, qr/p-raw-params \(\$x\)/, 'Sub shift uses @_');
 }
 
 # Test 12: Explicit @ARGV in sub (should stay @ARGV)
 {
-    my $parser = Pl::Parser->new(code => 'sub foo { my $x = shift @ARGV; }');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('sub foo { my $x = shift @ARGV; }');
     like($output, qr/p-shift\s+\@ARGV/, 'Explicit shift @ARGV in sub stays @ARGV');
 }
 
 # Test 13: Explicit @_ at top level (should stay @_)
 {
-    my $parser = Pl::Parser->new(code => 'my $x = shift @_;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $x = shift @_;');
     like($output, qr/p-shift\s+\@_/, 'Explicit shift @_ at top level stays @_');
 }
 
@@ -148,15 +138,13 @@ diag "-------- Scalar @ARGV:";
 
 # Test 14: scalar @ARGV for count
 {
-    my $parser = Pl::Parser->new(code => 'my $count = scalar @ARGV;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $count = scalar @ARGV;');
     like($output, qr/\@ARGV/, 'scalar @ARGV works');
 }
 
 # Test 15: if (@ARGV) check
 {
-    my $parser = Pl::Parser->new(code => 'if (@ARGV) { print "has args"; }');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('if (@ARGV) { print "has args"; }');
     like($output, qr/\@ARGV/, '@ARGV in condition');
 }
 

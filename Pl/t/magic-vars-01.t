@@ -6,13 +6,12 @@ use warnings;
 
 use Test::More;
 use lib '.';
-use Pl::Parser;
+use Pl::Parser2;
 
 # Helper to get just the generated code (skip preamble)
 sub get_generated_code {
-    my $parser = shift;
-    my @output = $parser->parse();
-    my $text = join("\n", @output);
+    my $code = shift;
+    my $text = Pl::Parser2->parse_code($code);
     my @lines = split /\n/, $text;
     my @code;
     for my $line (@lines) {
@@ -33,22 +32,19 @@ sub get_generated_code {
 
 # Test 1: Basic fc
 {
-    my $parser = Pl::Parser->new(code => 'my $x = fc("HELLO");');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $x = fc("HELLO");');
     like($output, qr/p-fc.*"HELLO"/, 'fc("HELLO") generates p-fc');
 }
 
 # Test 2: fc with variable
 {
-    my $parser = Pl::Parser->new(code => 'my $s = "Test"; my $x = fc($s);');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $s = "Test"; my $x = fc($s);');
     like($output, qr/p-fc.*\$s/, 'fc($s) generates p-fc with variable');
 }
 
 # Test 3: fc with $_
 {
-    my $parser = Pl::Parser->new(code => '$_ = "TEST"; my $x = fc;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('$_ = "TEST"; my $x = fc;');
     like($output, qr/p-fc.*\$_/, 'fc defaults to $_');
 }
 
@@ -58,15 +54,13 @@ sub get_generated_code {
 
 # Test 4: $! in double-quoted string
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "Error: $!";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "Error: $!";');
     like($output, qr/p-errno-string/, '$! interpolates in strings');
 }
 
 # Test 5: $! standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $e = $!;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $e = $!;');
     like($output, qr/p-errno-string/, '$! standalone generates p-errno-string');
 }
 
@@ -76,8 +70,7 @@ sub get_generated_code {
 
 # Test 6: $$ in double-quoted string
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "PID: $$";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "PID: $$";');
     like($output, qr/\$\$/, '$$ interpolates in strings');
 }
 
@@ -87,29 +80,25 @@ sub get_generated_code {
 
 # Test 7: $? in string
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "Exit: $?";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "Exit: $?";');
     like($output, qr/\$\?/, '$? interpolates in strings');
 }
 
 # Test 8: $0 in string
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "Program: $0";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "Program: $0";');
     like($output, qr/\$0/, '$0 interpolates in strings');
 }
 
 # Test 9: $. (line number) in string
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "Line: $.";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "Line: $.";');
     like($output, qr/\|\$\.\|/, '$. interpolates in strings');
 }
 
 # Test 10: $@ in string
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "Error: $@";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "Error: $@";');
     like($output, qr/\$\@/, '$@ interpolates in strings');
 }
 
@@ -119,22 +108,19 @@ sub get_generated_code {
 
 # Test 11: $^O (OS name) standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $os = $^O;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $os = $^O;');
     like($output, qr/\|\$\^O\|/, '$^O generates pipe-quoted symbol');
 }
 
 # Test 12: $^O in string interpolation
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "OS: $^O";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "OS: $^O";');
     like($output, qr/\|\$\^O\|/, '$^O interpolates in strings');
 }
 
 # Test 13: $^V (Perl version) standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $v = $^V;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $v = $^V;');
     like($output, qr/\|\$\^V\|/, '$^V generates pipe-quoted symbol');
 }
 
@@ -144,22 +130,19 @@ sub get_generated_code {
 
 # Test 14: caller() with no args
 {
-    my $parser = Pl::Parser->new(code => 'my $pkg = caller();');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $pkg = caller();');
     like($output, qr/p-caller/, 'caller() generates p-caller');
 }
 
 # Test 15: caller() with level argument
 {
-    my $parser = Pl::Parser->new(code => 'my $pkg = caller(1);');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $pkg = caller(1);');
     like($output, qr/p-caller\s+1/, 'caller(1) generates p-caller with argument');
 }
 
 # Test 16: caller() in list context
 {
-    my $parser = Pl::Parser->new(code => 'my ($pkg, $file, $line) = caller();');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my ($pkg, $file, $line) = caller();');
     like($output, qr/p-caller/, 'caller() in list context');
 }
 
@@ -169,15 +152,13 @@ sub get_generated_code {
 
 # Test 17: $/ (input record separator) standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $sep = $/;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $sep = $/;');
     like($output, qr/\|\$\/\|/, '$/ generates pipe-quoted symbol');
 }
 
 # Test 18: $\ (output record separator) standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $sep = $\\;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $sep = $\\;');
     # Must be |$\\| (backslash escaped inside the |...| symbol).  The old buggy
     # form |$\| escapes the closing pipe -> an unreadable symbol that truncates
     # the whole file at the CL reader.  Must match the runtime's (defvar |$\\|).
@@ -190,15 +171,13 @@ sub get_generated_code {
 
 # Test 19: Multiple magic vars
 {
-    my $parser = Pl::Parser->new(code => 'my $msg = "PID $$ on $^O";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $msg = "PID $$ on $^O";');
     like($output, qr/\$\$.*\|\$\^O\|/s, 'Multiple magic vars interpolate');
 }
 
 # Test 20: Magic var with regular var
 {
-    my $parser = Pl::Parser->new(code => 'my $name = "test"; my $msg = "Process $$ running $name";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $name = "test"; my $msg = "Process $$ running $name";');
     like($output, qr/\$\$.*\$name/s, 'Magic var with regular var interpolate');
 }
 
@@ -208,37 +187,32 @@ sub get_generated_code {
 
 # Test 21: $" (list separator) - tricky in double-quoted string
 {
-    my $parser = Pl::Parser->new(code => 'my $sep = $";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $sep = $";');
     like($output, qr/\|\$"\|/, '$" generates pipe-quoted symbol');
 }
 
 # Test 22: $' (postmatch) standalone
 {
-    my $parser = Pl::Parser->new(code => q{my $x = $';});
-    my $output = get_generated_code($parser);
+    my $output = get_generated_code(q{my $x = $';});
     # $' should be treated as a magic variable
     ok(defined $output, q{$' parses without error});
 }
 
 # Test 23: $& (match) standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $x = $&;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $x = $&;');
     ok(defined $output, '$& parses without error');
 }
 
 # Test 24: $+ (last bracket) standalone
 {
-    my $parser = Pl::Parser->new(code => 'my $x = $+;');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('my $x = $+;');
     ok(defined $output, '$+ parses without error');
 }
 
 # Test 25: Using $! in die message
 {
-    my $parser = Pl::Parser->new(code => 'open(my $fh, "<", "file") or die "Cannot open: $!";');
-    my $output = get_generated_code($parser);
+        my $output = get_generated_code('open(my $fh, "<", "file") or die "Cannot open: $!";');
     like($output, qr/p-errno-string/, '$! in die message interpolates');
 }
 

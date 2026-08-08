@@ -10,7 +10,7 @@ use File::Temp qw(tempfile tempdir);
 use File::Spec;
 
 use lib ".";
-use Pl::Parser;
+use Pl::Parser2;
 
 my $runtime = "cl/pcl-runtime.lisp";
 my $pl2cl   = "./pl2cl";
@@ -21,89 +21,89 @@ my $pl2cl   = "./pl2cl";
 
 note "-------- Transpilation Tests:";
 
-# Test: use strict becomes pragma comment
+# A pragma is consumed at COMPILE time — the load-bearing fact behind v1's
+# ";; use strict (pragma)" comment echo (v2 emits no source echoes, #132):
+# no runtime module load may be emitted for it.
 {
-  my $result = Pl::Parser->parse_code('use strict;');
-  like($result, qr/;; use strict \(pragma\)/, 'use strict is pragma comment');
+  my $result = Pl::Parser2->parse_code('use strict;');
+  unlike($result, qr/p-use|p-require/, 'use strict is pragma comment');
 }
 
-# Test: use warnings becomes pragma comment
 {
-  my $result = Pl::Parser->parse_code('use warnings;');
-  like($result, qr/;; use warnings \(pragma\)/, 'use warnings is pragma comment');
+  my $result = Pl::Parser2->parse_code('use warnings;');
+  unlike($result, qr/p-use|p-require/, 'use warnings is pragma comment');
 }
 
-# Test: use v5.30 becomes pragma comment
 {
-  my $result = Pl::Parser->parse_code('use v5.30;');
-  like($result, qr/;; use v5\.30 \(pragma\)/, 'use v5.30 is pragma comment');
+  my $result = Pl::Parser2->parse_code('use v5.30;');
+  unlike($result, qr/p-use|p-require/, 'use v5.30 is pragma comment');
 }
 
 # Test: use Module generates p-use
 {
-  my $result = Pl::Parser->parse_code('use Foo::Bar;');
+  my $result = Pl::Parser2->parse_code('use Foo::Bar;');
   like($result, qr/\(p-use "Foo::Bar"\)/, 'use Module generates p-use');
 }
 
 # Test: use Module with qw() imports
 {
-  my $result = Pl::Parser->parse_code('use Foo qw(bar baz);');
+  my $result = Pl::Parser2->parse_code('use Foo qw(bar baz);');
   like($result, qr/p-use "Foo" :import-args \(vector "bar" "baz"\)/, 'use with qw() imports');
 }
 
 # Test: require generates p-require
 {
-  my $result = Pl::Parser->parse_code('require Foo::Bar;');
+  my $result = Pl::Parser2->parse_code('require Foo::Bar;');
   like($result, qr/\(p-require "Foo::Bar"\)/, 'require generates p-require');
 }
 
 # Test: require with literal path string generates p-require-file
 {
-  my $result = Pl::Parser->parse_code('require "./test.pl";');
+  my $result = Pl::Parser2->parse_code('require "./test.pl";');
   like($result, qr/p-require-file.*test\.pl/, 'require with path generates p-require-file');
 }
 
 # Test: require with single-quoted path
 {
-  my $result = Pl::Parser->parse_code("require './lib/helper.pl';");
+  my $result = Pl::Parser2->parse_code("require './lib/helper.pl';");
   like($result, qr/p-require-file.*lib.helper\.pl/, 'require with single-quoted path');
 }
 
 # Test: require with absolute path
 {
-  my $result = Pl::Parser->parse_code('require "/usr/lib/foo.pl";');
+  my $result = Pl::Parser2->parse_code('require "/usr/lib/foo.pl";');
   like($result, qr/p-require-file.*\/usr\/lib\/foo\.pl/, 'require with absolute path');
 }
 
 # Test: require with variable
 {
-  my $result = Pl::Parser->parse_code('require $path;');
+  my $result = Pl::Parser2->parse_code('require $path;');
   like($result, qr/p-require-file \$path/, 'require with variable');
 }
 
 # Test: require with expression (concatenation)
 {
-  my $result = Pl::Parser->parse_code('require $dir . "/" . $file;');
+  my $result = Pl::Parser2->parse_code('require $dir . "/" . $file;');
   like($result, qr/p-require-file.*p-\..*\$dir.*\$file/, 'require with expression');
 }
 
 # Test: use lib modifies @INC
 {
-  my $result = Pl::Parser->parse_code('use lib "mylib";');
+  my $result = Pl::Parser2->parse_code('use lib "mylib";');
   like($result, qr/p-unshift \@INC "mylib"/, 'use lib modifies @INC');
 }
 
 # Test: use lib with multiple paths via qw()
 {
-  my $result = Pl::Parser->parse_code('use lib qw(lib1 lib2);');
+  my $result = Pl::Parser2->parse_code('use lib qw(lib1 lib2);');
   like($result, qr/p-unshift \@INC "lib1"/, 'use lib qw() - first path');
   like($result, qr/p-unshift \@INC "lib2"/, 'use lib qw() - second path');
 }
 
-# Test: no strict becomes no-op comment
+# Test: no strict is a compile-time no-op — no runtime load emitted
 {
-  my $result = Pl::Parser->parse_code('no strict;');
-  like($result, qr/;; no strict \(no-op\)/, 'no strict is no-op');
+  my $result = Pl::Parser2->parse_code('no strict;');
+  unlike($result, qr/p-use|p-require/, 'no strict is no-op');
 }
 
 # ============================================================
@@ -621,7 +621,7 @@ say \$Dual::other;
 # `exit 0`, which bypassed the eval{} guard in _extract_module_prototypes and
 # killed pl2cl when scanning Moo::Role's dependency chain — session 251).
 {
-  my $result = Pl::Parser->parse_code('use Moo::Role;');
+  my $result = Pl::Parser2->parse_code('use Moo::Role;');
   like($result, qr/\(p-use "Moo::Role"\)/,
        'use Moo::Role transpiles (no hard exit on prototype-scan parse gap)');
   unlike($result, qr/\?\?\? Term/,

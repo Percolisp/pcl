@@ -8064,12 +8064,26 @@ sub _extract_file_prototypes {
 sub _merge_module_prototypes {
   my ($self, $module_env, $imports) = @_;
 
+  # A merged prototype is tagged from_module, and a merge never overwrites
+  # a LOCAL declaration (an untagged entry).  Under v2, sub definitions are
+  # HOISTED before the use statement's seam re-merge runs, so without this
+  # the re-merge clobbered a local `sub modify_array(\$)` override with the
+  # imported (\@) — and every later call auto-boxed the WRONG way (silent
+  # wrong; Pl/t/prototype-01.t rows 80-82).  Re-merging the same module is
+  # still idempotent (from_module entries overwrite each other freely).
+  my $add = sub {
+    my ($name, $proto) = @_;
+    my $existing = $self->environment->get_prototype($name);
+    return if $existing && !$existing->{from_module};
+    $self->environment->add_prototype($name, { %$proto, from_module => 1 });
+  };
+
   # If specific imports requested, only import those
   if ($imports && @$imports) {
     for my $name (@$imports) {
       my $proto = $module_env->get_prototype($name);
       if ($proto) {
-        $self->environment->add_prototype($name, $proto);
+        $add->($name, $proto);
       }
     }
     return;
@@ -8110,7 +8124,7 @@ sub _merge_module_prototypes {
     $needs_import = 1 if $module_env->export_names->{$name};
 
     if ($needs_import) {
-      $self->environment->add_prototype($name, $proto);
+      $add->($name, $proto);
     }
   }
 }
