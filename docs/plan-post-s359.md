@@ -1,5 +1,29 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s366 (Fable review of s365 — `docs/fable-answers-s365.md`).**
+> All eight s365 commits APPROVED (gate independently re-verified 132/4737;
+> all nine asks probed live against perl).  Rulings that change this plan:
+> - **#254 AND #252 are CLOSED** — the worklist is empty; A-ii stays parked
+>   behind E5; the residue lives in successor tasks with their own bars.
+> - **A-i's ordering-independent-promotion design is STRUCK, not parked**
+>   (the s363 premise is marked SUPERSEDED in the measurement doc).
+> - **Timeout registry RATIFIED**; deliberately NO blind retry in the suite
+>   runner — an unregistered slow file must surface as TIMEOUT so it gets a
+>   row with a cause.
+> - **"One capture test, shared by promoter and gate" is a standing rule**
+>   (third instance of detector-and-rewriter-share-one-resolver).
+> - **NEW BUG found by review probes → #270**: `sub :prototype($) {…}` at
+>   expression start is a SILENT STATEMENT DROP (the `$)` lexes as the magic
+>   var, the block is swallowed, the #268 repair declines silently).  Any
+>   prototype text ending in `$` hits it; `($$)` etc. are fine.
+>
+> **Opus's queue, in order**: **#270** (silent drop + the ask-8 announce
+> guard, half-session) → **#265 rename half** (shape approved §9; bar =
+> op/my.t snapshot) → **#267** (SIZING first against the §11 CLForm sketch)
+> → **#269** (PROBE first — the nested-sub capture may be real) → fillers
+> (#271 pipe-my, #266, near-green #236→#234→#235).
+> **The #153 FOLD stays Fable's, its own session.**
+
 > **UPDATED s365 (Opus).**  Fable's s364 queue is DONE end to end.  In order:
 > the required registration (`docs/perl-suite-timeouts.tsv` + runner support),
 > then **#263**, **A-iv**, **A-i**, **A-iii**, **B-ii** — measurements per file

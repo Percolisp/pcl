@@ -1347,6 +1347,41 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s366 (2026-08-09, Fable) — review of s365: all nine asks ruled, one new bug
+
+- **All eight s365 commits APPROVED as shipped** — gate independently
+  re-verified (132/4737), every semantic ask probed live against real perl.
+  → `docs/fable-answers-s365.md`.
+- **#254 and #252 are CLOSED** — worklist empty; A-ii parked behind E5
+  (s364); residue lives in #265/#267/#269/#271 with their own snapshot bars.
+  → fable-answers-s365.md §5.
+- **A-i's ordering-independent-promotion design is STRUCK, not parked** —
+  the s363 premise is marked SUPERSEDED in the measurement doc; nobody
+  re-derives it.  → fable-answers-s365.md §1.
+- **"One capture test, shared by promoter and gate" is a STANDING rule** —
+  the promoter is the third instance of detector-and-rewriter-share-one-
+  resolver.  → fable-answers-s365.md §9.
+- **Filler-scope rule**: a filler may grow while the growth is the SAME
+  mechanism, each widening step is measured against the gate SET over both
+  populations, and new design axes are FILED, not fixed.
+  → fable-answers-s365.md §4.
+- **Timeout registry RATIFIED; the suite runner gets NO blind retry** — an
+  unregistered slow file must surface as TIMEOUT so it gets a row with a
+  cause; a row is deleted when the file gets faster.
+  → fable-answers-s365.md §6.
+- **NEW BUG (#270), found by review probes**: `sub :prototype($) {…}` at
+  expression start is a SILENT STATEMENT DROP — any prototype text ending in
+  `$` triggers a second layer of PPI §7 (`$)` lexes as the magic var, the
+  block is swallowed into the attribute's parens) and the #268 repair's
+  block-check declines silently.  Ruled: the decline DIES, the repair
+  extends to the `$)` swallow, PExpr's strip gains a `^prototype\(` announce
+  guard.  → fable-answers-s365.md §10.
+- **#265 rename-half shape approved** (renamed lexical via shadow-aware
+  `_rename_decl_within`; eval route = ir-spec §2b.4 let-bound → site alist),
+  ordered BEFORE #267; #267 gets a SIZING step against the CLForm
+  per-element sketch; #269 gets a PROBE step (the nested-sub capture may be
+  real).  → fable-answers-s365.md §9, §11.
+
 ## s365 (2026-08-08, Opus) — #254's registration + A-iv/A-i/A-iii/B-ii, and #263
 
 - **A per-file TIMEOUT ALLOWANCE registry exists**: `docs/perl-suite-timeouts.tsv`

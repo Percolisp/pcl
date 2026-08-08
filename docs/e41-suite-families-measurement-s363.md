@@ -51,6 +51,14 @@ appears only as `${bare}` inside a **string literal that is not interpolating**
 
 ### A-i — "not captured by a named sub after the decl" (3–5 files)
 
+> **SUPERSEDED (s365, ratified s366 — `docs/fable-answers-s365.md` §1).**
+> The premise below is FALSE for both files: the subs do not capture the file
+> lexical at all — each declares its OWN same-named lexical via a `my`
+> EMBEDDED in another statement (`die … unless my (…) = …`), a declaration
+> shape `_block_captures_name` could not see.  The fix was the capture test's
+> blind spot; the ordering-independent-promotion design was never needed and
+> is struck, not parked.
+
 The promotion only claims a lexical captured by a named sub that appears
 **after** the declaration.  through.t/getppid.t capture from a sub defined
 *earlier* in the file (perl does not care — a named sub's body is compiled with

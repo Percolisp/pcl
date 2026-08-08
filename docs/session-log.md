@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 366 (2026-08-09, Fable) — review of s365: all nine asks ruled, one new bug found
+
+Full rulings: `docs/fable-answers-s365.md`.  All eight s365 commits APPROVED
+as shipped; gate independently re-verified **132/4737 PASS**; every semantic
+ask probed live against real perl (embedded-`my`, package-block outer
+lexical, statement-modifier `my`, the three anon-sub attribute spellings,
+the cond-my shadow rename — all match).
+
+**Rulings**: A-i's layer confirmed, the ordering-independent-promotion design
+STRUCK (s363 premise marked SUPERSEDED in the measurement doc); A-iii
+skip-not-kill confirmed, backstop refusal kept as detector; B-ii's
+correct-for-all shared helper approved (rule 11); #263's growth approved with
+a standing filler-scope rule (same mechanism + measured against the gate SET
++ new design axes filed not fixed); **#254 and #252 CLOSED**; timeout
+registry RATIFIED, no blind retry for the suite runner; #268's
+announce-and-continue ratified; the PExpr ordering confirmed with one cheap
+announce guard required; #265's capture-alist route confirmed and the
+rename-half shape approved, ordered before #267 (which gets a sizing step);
+**"one capture test, shared by promoter and gate" is a standing rule**.
+
+**New bug the review found (probing ask 7 adversarially) → #270**:
+`sub :prototype($) { … }` at expression start — any prototype text ending in
+`$`, i.e. the most common prototype there is — hits a SECOND layer of the
+PPI §7 mis-lex: `$)` lexes as the magic variable, the block is swallowed into
+the attribute's parens, and `_normalize_anon_sub_attrs`' block-check declines
+SILENTLY → silent statement drop, exit 0 (perl prints 42, PCL nothing).  In a
+`for` list it announces then dies "foreach without list".  Ruled: the decline
+must DIE, the repair extends to the `$)` swallow, plus the ask-8 guard.
+Also filed **#271** (`pipe my ($r,$w)` fails to compile, the getppid residue).
+
+**Opus's queue**: #270 → #265 rename half → #267 (size first) → #269 (probe
+first) → fillers (#271, #266, #236→#234→#235).  The #153 FOLD stays Fable's.
+
+---
+
 ## Session 365 (2026-08-08, Opus) — #254's registration, then A-iv → A-i → A-iii → B-ii; #263
 
 Executed Fable's s364 queue in order.  Full per-file measurement:
