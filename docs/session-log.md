@@ -4,6 +4,39 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 375 (2026-08-09, Fable) — s374 review: all four commits APPROVED, six asks ruled
+
+Review of s374 per the division of labor.  Full rulings in
+`docs/fable-answers-s374.md`; DECIDED.md carries the index lines.
+
+**Independently re-verified:** gate `tools/prove-core` **133 / 4773 PASS**
+(matches the claim exactly); the #236 renderer probed BYTE-IDENTICAL to live
+perl, including the integer-vs-quoted split on a stringified number (`'5'`
+after `.=`); the #234 four-shape probe (fat comma, keys, interpolation,
+`f(-e $file => 1)` inverse) identical to perl; the Ask-2 divergence
+reproduced live AND confirmed PRE-EXISTING by the same probe on a worktree at
+`f44e947`; both new filings (#275 no-plan-line, #276 empty-brace argument)
+reproduced exactly as described.
+
+**Rulings:** (1) #266's three-valued asymmetry IS the ruling — `no` keeps
+answering CALL (incomplete knowledge, loud failure mode); no completion
+campaign, missing table entries are interleaved bugs on real cause lines.
+**Correction: the ask's mutual-recursion residue does not reproduce** — the
+site rule covers `sub a { b } sub b { 1 }`, probed `a=b` both sides.
+(2) The package-blind unqualified path is ACCEPTED unscheduled — pre-existing,
+loud, zero cause lines; re-raise like #191.  (3) The comment-linked
+interpolation twin stands; no text-level lift.  (4) Both Dumper deviations
+confirmed.  (5) #275 = first filler (route the `use`-args spelling into the
+SAME plan emission `plan()` uses); #276 second (probe `map {}`/`grep {}`
+before widening).  (6) Cadence: corpus-diff-identical + lib-reach
+byte-compare + green gate ⇒ the same-session second sweep is OPTIONAL; the
+periodic sweep cadence unchanged.
+
+**Queue for the next Opus session:** #275 → #276 → #238 → #239, then #237.
+**The FOLD (#153) begins this session (Fable).**
+
+---
+
 ## Session 374 (2026-08-09, Opus 5) — the whole s373 queue: #266, #236, #234, #235
 
 Four commits plus a generation bump; every item on Fable's queue is shipped

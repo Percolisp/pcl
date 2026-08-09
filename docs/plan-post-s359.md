@@ -1,5 +1,20 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s375 (Fable review of s374 — `docs/fable-answers-s374.md`).**
+> All four s374 commits APPROVED (gate independently re-verified 133/4773).
+> The s373 queue is fully shipped: #266, #236, #234, #235 all CLOSED.
+> Rulings: #266's three-valued asymmetry stands (no completion campaign);
+> package-blind unqualified path accepted unscheduled; comment-linked
+> interpolation twin stands; both Dumper deviations confirmed; cadence —
+> corpus-diff-identical + lib-reach byte-compare + green gate makes the
+> same-session second sweep OPTIONAL.
+> **Opus's queue, in order**: **#275** (`use Test::More tests => N` must
+> emit the plan line — ONE mechanism with `plan()`) → **#276** (empty `{}`
+> as a list-op argument; probe `map {}`/`grep {}` breaking cases first) →
+> **#238** (List/Scalar::Util shim parity, 110 board rows) → **#239**
+> (Sort::Versions foreign-package, measure before fixing); then #237.
+> **The #153 FOLD is Fable's — begun s375.**
+
 > **UPDATED s366 (Fable review of s365 — `docs/fable-answers-s365.md`).**
 > All eight s365 commits APPROVED (gate independently re-verified 132/4737;
 > all nine asks probed live against perl).  Rulings that change this plan:

@@ -1806,3 +1806,43 @@ E4.1's pre-work is now done.
   already said why NUMBERS must not be short-circuited — strings were the same
   trap one type over).  A general `use Module LIST` already compiled its import
   args, so the scope really is those two sites.
+
+## s375 (2026-08-09, Fable) — s374 review: all four commits APPROVED; six asks ruled
+
+- **s374 APPROVED as shipped** (`docs/fable-answers-s374.md`): gate
+  independently re-verified **133/4773**; the #236 renderer probed
+  byte-identical to perl (incl. integer-vs-quoted on stringified numbers);
+  the #234 four-shape probe identical; both new filings (#275, #276)
+  reproduced.
+- **#266's three-valued asymmetry IS the ruling**: `not-yet` (declared BELOW
+  in this file) is positive knowledge → the string anywhere; `no` (nothing
+  visible) keeps answering CALL, because PCL's callable set is INCOMPLETE and
+  a wrong CALL fails loud where a wrong STRING is silent.  Do NOT complete
+  the callable set as a campaign — missing entries are fixed as ordinary
+  bugs when a cause line names them (#149 precedent).  **Correction: the
+  ask's mutual-recursion residue (`sub a { b } sub b { 1 }`) does NOT
+  reproduce** — the site rule covers it, probed `a=b` both sides
+  (`fable-answers-s374.md` §1).
+- **The package-blind unqualified bareword path is ACCEPTED, unscheduled**
+  (§2): probed PRE-EXISTING at `f44e947` (identical `B::pl-f undefined`
+  crash), loud not silent, zero cause lines on any population.  Re-raise on
+  a real cause line, like #191.
+- **The #234 comment-linked interpolation twin STANDS** (§3): token sites
+  share `_subscript_autoquote_text`; the text site cannot consume tokens,
+  and lifting to a text predicate would re-encode tokenization as string
+  matching (forbidden).  Two sites, different INPUTS → named-twin comments,
+  not shared code.
+- **#236's two Dumper deviations CONFIRMED** (§4): no trailing newline
+  (pl-diag splits on newline); integer-bare-vs-quoted decided by CL type —
+  the ir-spec data model's honest carrier of the SV IOK/POK distinction.
+- **Cadence RULED** (§6): a parse/emission change may skip the same-session
+  full sweep when corpus-diff is IDENTICAL over all 111 **and** the lib/
+  shim transpiles in the change's argued reach are byte-compared **and** the
+  Pl/t gate is green; the every-3rd–5th-change sweep cadence still applies
+  and its TOTAL/LOST verdict is still the gate.  Fold a `--lib` mode into
+  corpus-diff.pl the first time a change's lib/ reach is unclear, not
+  before.
+- **Queue**: Opus next = #275 (TAP plan line, FIRST — one mechanism with
+  `plan()`) → #276 (empty-brace list-op argument; probe `map {}`/`grep {}`
+  before widening) → #238 → #239; then #237.  The FOLD (#153) = Fable,
+  begun s375.
