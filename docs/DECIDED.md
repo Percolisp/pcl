@@ -2080,3 +2080,25 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   return the list UNSORTED.  Both halves measured live s378.  The real fix is
   two-part — drop the immunity AND make the sort lowering bind the region
   package's pair — and it needs a design call, so it did NOT ride #239.
+
+## s378b (2026-08-09, Opus) — #237 RE-SCOPED: regex interpolation drops direct subscripts
+
+- **`$a[i]` / `$h{k}` interpolated inside a REGEX are silently dropped** — the
+  subscript is left as literal pattern text, so `/^$a[1]$/` compiles as `$a`
+  followed by the character class `[1]`.  Every regex consumer is affected
+  (`m//`, `s///`, `split`, `qr//`, the braced `${a[1]}` form); DOUBLE-QUOTED
+  strings are all CORRECT.  That asymmetry is the tell: `ExprToCL.pm`'s
+  `_gen_interp_regex_pattern` is a SECOND hand-rolled interpolation scanner
+  beside `PExpr/StringInterpolation.pm`, and it only ever learned `${name}`,
+  `$name` and the `$name->[i]` / `$name->{k}` ARROW chains → task #237.
+- **#237's two original premises are DEAD, do not retry them**: `pos()`/`\G`
+  through a scalar ref is faithful (six probes, all identical to perl), and
+  the Text::Balanced symptom is not an offset error but a total extraction
+  failure — `qr/\G$_[1]/` compiles to `(?^:\G[1])`.
+- **The fix needs perl's `intuit_more` heuristic, not a guess** (same bar
+  #286 was deferred under, and this is the cause line that re-opens that
+  family).  PCL's current "always regex syntax" rule is RIGHT for the shapes
+  perl reads that way and they pass today — `/$x[abc]/`, `/$x[^a]/`,
+  `/$x{2,3}/` — so a naive "always a subscript" fix would break exactly those.
+  `/$x[0]/` and `/$x{k}/` are the failing side; `$x[0]` / `$x{2}` are
+  genuinely ambiguous shapes where perl picks the subscript.
