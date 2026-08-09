@@ -60,6 +60,27 @@ the emitted preamble embeds it (`*pcl-pl2cl-path*`, the @INC pushes,
 `*p-core-inc-dirs*`; task #217), so the first pass reported every file as
 changed.  With both roots folded to one token: **751 sources, 0 changed.**
 
+*#272's own measurements*: gate SET **751 sources, 0 changed** (both
+populations, HEAD worktree vs tree); corpus-diff identical over 111; gate
+**132 / 4747**; full sweep COLD **GATE clean, 0 new / 0 fixed / 0 LOST, TOTAL
+18499** — the same verdict as the #274 run.  Guard row in
+`Pl/t/transpile-test-09.t` (27 → 28, 63 s) carrying the bug shape plus all four
+inverse guards in ONE snippet.
+
+**#271 SIZED, not started** (your size-first step).  The `WORD my (LIST)` shape
+occurs in **one file** across both corpora — `op/getppid.t`, 3 `pipe my (…)`.
+The k=1 case already works (`tie my ($x)` → `(p-tie $x "T")`) but by the generic
+single-element-paren unwrap, NOT by a decl-list mechanism, so the fix adds a
+splice path rather than routing through a sibling; user subs are unaffected
+(`f my ($a,$b)` prints `args=2` — p-sub flattens its vector), so only a
+fixed-arity BUILTIN sees the one-vector arg.  The work is finding the single
+argument-run point all paths pass through, inside the region
+`pexpr-term-parsing-review.md` warns about — recommendation on the task and in
+`docs/opus5-review-requests-s372.md` §5: put it **behind #153's FOLD**.
+
+Not reached: **#266**, **#236 → #234 → #235**.  Review asks:
+`docs/opus5-review-requests-s372.md` (5 asks).
+
 ---
 
 ## Session 371 (2026-08-09, Fable) — s370 review: #267 APPROVED as shipped; the four asks RULED
