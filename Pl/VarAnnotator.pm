@@ -755,6 +755,22 @@ sub _semi {
 # `$$r`) needs nothing here, it already arrives as a live box.  BOTH lowering
 # sites build the list the same way (see Pl::Parser::_foreach_single_scalar_p
 # for the one-operand wrap), so both must veto the same way.
+#
+# PAIRED WITH Pl::Parser::_foreach_scalar_elements, the qualifier that decides
+# the `(vector …)` wrapper and walks the same list for commas with the SHARED
+# #138 splitter.  Two walks in one family is deliberate (ruled s371 §3 — read
+# that function's comment too before touching either):
+#   (a) On every list that QUALIFIES there — only `,`/`=>` at depth 0, both
+#       walkers fed the same _foreach_list_unwrap output — the two walks
+#       partition the tokens IDENTICALLY, so a qualifying list can never get
+#       the vector + boxes while this veto missed one of its raw `$name` slots.
+#   (b) This veto is deliberately a SUPERSET on lists that do NOT qualify: it
+#       keeps splitting past `or`/`and`/`xor` (where the qualifier declines the
+#       whole list) and vetoes slots the qualifier rejected, because
+#       `for ($x, @a)` still aliases `$x` through p-flatten-args.  A superset
+#       is the only safe direction for a veto — routing this through the
+#       qualifier would silently drop those vetoes.
+# A THIRD comma walk in this family reopens the shared-primitive question.
 sub _ev_foreach_alias_list {
   my ($ctx, $parts) = @_;
   # The list arrives wrapped differently per spelling: the block form hands

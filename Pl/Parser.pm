@@ -6514,10 +6514,16 @@ sub _apply_foreach_alias_rewrite {
   my ($list_cl, $list_parts) = @_;
   my @hd = _foreach_alias_rewrite($list_parts);
   return $list_cl unless @hd;
-  # A non-matching anchor keeps TODAY's behaviour here (a missed alias, not a
-  # miscompile) — this is the sole-element path, unchanged since #263.  The
-  # multi-element path dies instead; see _foreach_scalar_elements' callers.
-  return _apply_alias_head($list_cl, @hd) // $list_cl;
+  # A FAILED ANCHOR IS ALWAYS A COMPILER SELF-INCONSISTENCY, never a benign
+  # decline (ruled s371, task #274): _foreach_alias_rewrite predicted this head
+  # from the AST, so if the lowered text's outermost call is not that head then
+  # either (a) the verdict was right and the swap is being skipped — the write
+  # lands on a copy, which IS the #262/#263 silent-wrong — or (b) the verdict
+  # was wrong about the lowering, in which case boxing would be wrong too and
+  # the two functions disagree about the same tokens.  Both halves are bugs;
+  # neither may pass silently.  Same wording as the multi-element site.
+  return _apply_alias_head($list_cl, @hd)
+    // die "foreach alias: element head $hd[0] not outermost in: $list_cl\n";
 }
 
 # The ONE text head-swap for an already-lowered foreach element (the v1 seam's
@@ -6526,7 +6532,8 @@ sub _apply_foreach_alias_rewrite {
 # applies before this runs and the other after.  The head the AST predicted
 # must BE the outermost one: if it is not, boxing some INNER call would hand
 # p-gethash a box where it expects a container — a silent wrong in place of a
-# missed alias — so a failed anchor returns undef and the caller rules.
+# missed alias — so a failed anchor returns undef and BOTH callers die on it
+# (s371: the k=1 and k>1 paths are the same rule, see the sole-element site).
 sub _apply_alias_head {
   my ($list_cl, $from, $to) = @_;
   return undef unless $list_cl =~ s/\A(\s*(?:\(vector\s+)?)\(\Q$from\E /$1($to /;
@@ -6610,6 +6617,21 @@ sub _foreach_alias_rewrite {
 # splits `=>`, which is right here: `for ($a => $b)` is a two-element list.  An
 # `or`/`and`/`xor` at depth 0 means the parens hold ONE expression, not a list,
 # and the run declines (as it does today — the operator is not a `->`).
+#
+# PAIRED WITH Pl::VarAnnotator::_ev_foreach_alias_list, which walks the same
+# list for commas a second time (deliberately TWO walks, ruled s371 §3 — read
+# that comment too before touching either).  The invariant that makes two
+# walks safe:
+#   (a) On every list that QUALIFIES here — only `,`/`=>` at depth 0, both
+#       walkers fed the same _foreach_list_unwrap output — the two walks
+#       partition the tokens IDENTICALLY, so the hazard shape (this function
+#       hands out a vector + boxes while the veto missed a raw `$name` slot)
+#       cannot occur.
+#   (b) On lists that do NOT qualify the veto is deliberately a SUPERSET: it
+#       keeps splitting past `or`/`and`/`xor` and vetoes slots this function
+#       rejected, because `for ($x, @a)` still aliases `$x` through
+#       p-flatten-args.  A superset is the only safe direction for a veto.
+# A THIRD comma walk in this family reopens the shared-primitive question.
 sub _foreach_scalar_elements {
   my ($list_parts) = @_;
   my @sig = _foreach_list_unwrap($list_parts);

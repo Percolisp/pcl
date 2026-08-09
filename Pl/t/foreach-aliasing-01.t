@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 22;
 
 sub run_cl {
     my ($code) = @_;
@@ -172,3 +172,23 @@ test_cl('multi-element list aliases every element, both spellings (#267)',
 test_cl('a ref element stays ONE iteration, not spread (#267 inverse)',
     q{my $r=[1,2,3]; my $s=[4,5]; my $n=0; for ($r, $s) { $n++ } print "$n\n";},
     "2\n");
+
+# --- #274 (s371 §2): the ANCHOR contract both callers now die on.
+# _apply_alias_head swaps the head only when the head the AST predicted IS the
+# outermost call in the emission (the `(vector ` wrap either site may add is
+# allowed).  Anything else returns undef, and BOTH callers — k=1 and k>1 — turn
+# that undef into a die, because a failed anchor is always a compiler
+# self-inconsistency: either the verdict was right and the write silently lands
+# on a copy (the #262/#263 silent-wrong), or the verdict and the lowering
+# disagree about the same tokens.  These two rows pin the undef half; the die
+# half is one line at each caller.  Pure perl — no SBCL, no transpile.
+{
+  local @INC = ($project_root, @INC);   # the compiler modules, not the shims
+  require Pl::Parser;
+  is(Pl::Parser::_apply_alias_head('(p-aref $a 0)', 'p-gethash', 'p-gethash-box'),
+     undef, 'a head that is not outermost returns undef (#274 anchor contract)');
+  is(Pl::Parser::_apply_alias_head('(vector (p-gethash %h "k"))',
+                                   'p-gethash', 'p-gethash-box'),
+     '(vector (p-gethash-box %h "k"))',
+     'the outermost head swaps through a (vector …) wrap (#274)');
+}
