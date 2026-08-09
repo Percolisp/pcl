@@ -1943,3 +1943,33 @@ E4.1's pre-work is now done.
   tie (#155), REF-vs-SCALAR (#163), prototype introspection, `weaken`,
   read-only SCALAR storage, taint, get-magic, `subname`, `@_` aliasing,
   error text (#149).
+
+## s376b (2026-08-09, Opus) — #239 DIAGNOSED: `package X;` in a BLOCK does not re-home unqualified globals
+
+- **An in-block `package X;` (inside `eval { … }` / `do { … }`) leaves every
+  unqualified global resolving in the ENCLOSING package.**  Not
+  $a/$b-specific, not eval-specific — reproduced with a plain `$z` in both
+  `eval {}` and `do {}`.  perl puts the write in `Foo::z`; PCL puts it in
+  `main::z`.
+- **Mechanism**: the block lowers to ONE top-level CL form containing both
+  `(in-package :Foo)` and the statements.  CL's reader interns every symbol
+  in a top-level form BEFORE evaluation, so an `in-package` nested inside a
+  form cannot change how the symbols around it were read.  A FILE-level
+  `package X;` works precisely because D1-lite splits it into separate
+  top-level forms.  The emitter already spells that region's PRE-DECLARED
+  globals qualified (`(defvar Foo::$a …)`); only the use sites stay bare.
+- **Fix shape**: #226's QUALIFIED-emission rule, applied to code-level
+  blocks — a sibling trigger for
+  `_requalify_block_our_after_pkg_switch` (Pl/Parser2.pm:157), which already
+  performs exactly this rewrite for `our`-DECLARED names in the same region.
+  The new part is deciding which bare names are globals; route it through
+  the SAME resolver the detector/promoter use, never a sigil- or scope-blind
+  scan.
+- **Population**: 31 occurrences in 14 files across the audit populations,
+  including NINE Class-Method-Modifiers t-files and Role-Tiny's
+  method-conflicts.t (both dists carry open board failures, #135) — so this
+  is a family, not the Sort::Versions one-off it was filed as.
+- Two s344 hypotheses stay RULED OUT and must not be re-tried: `(caller)[0]`
+  reporting the wrong package (it reports `Foo` correctly — instrumented in
+  the real dist), and the symbolic read `${"Foo::a"}` (the READ is right;
+  the WRITE went to the wrong package).  Full detail on task #239.
