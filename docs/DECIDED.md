@@ -1994,3 +1994,41 @@ E4.1's pre-work is now done.
   `Package Role::Tiny does not exist` at load) is diagnosed on #208 and must
   be explained or hand-edited in with its cause.  Best taken AFTER #239
   lands, since #239 moves board files.
+
+## s377 (2026-08-09, Fable) — review of the s376 batch: all four commits APPROVED
+
+Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
+133/4785 PASS; #276/#275/#239 probed live vs perl.
+
+- **Expectation-rewrite rule (Ask 1)**: a gate expectation may be rewritten
+  only when (a) the new text is real perl's output probed live, (b) the diff
+  is exactly the corrected divergence, (c) the edit STRENGTHENS the assertion
+  (never deletes/loosens — that stays "never simplify"), and (d) the same
+  commit carries an explicit guard row for the fixed behaviour.
+- **`builtin::` is PCL's shim-dispatch seam for box-representation
+  primitives (Ask 5)**: perl-shared names must match perl exactly; PCL-only
+  names allowed only for box facts plain Perl cannot express, consumed by
+  `lib/` shims; perl claiming a name later wins.  `readonly` → same seam
+  when the storage fact exists; `prototype` is a CORE builtin → runtime,
+  not the seam.
+- **A change under `lib/` (or `cl/`) is invisible to corpus-diff (Ask 8)**:
+  the s374/s375 second-sweep optionality NEVER applies to it — the shipping
+  session runs the full sweep + the owning dist's files.
+- **#239 fix shape ruled (Ask 7)**: sibling trigger on `_rewrite_var_uses`;
+  four-way resolver (lexical incl. in-scope `our` → declaring package /
+  magic-special / qualified / else → X) from the SAME scope walk the rename
+  machinery uses; unclassifiable name DIES (s372 gate-SET bar applies);
+  variables only — probe the in-region CALL shape during verification.
+  NEW probe finding: the bare-block `our`-alias case diverges TODAY in the
+  opposite direction (`our $x; { package Bar; $x = 1 }` writes Bar::x, perl
+  writes main::x) — mandatory guard probe on #239.
+- **uniqnum key (Ask 6) = HYBRID, measured**: integer-valued args within
+  |v| < 2^64 key as exact integer text, else `pack "d"` (integral NVs beyond
+  2^64 MUST stay pack "d" — 15-digit stringification collapses distinct
+  doubles); ship undef→0 output coercion with it; buys 4 of the 6 rows.
+- **Two predicates stand (Ask 3)**, s370-comma-walk style: paired comments,
+  no refactor; a THIRD consumer of the strip/unwrap shape forces extraction.
+- **Filed**: #285 (perl's no-plan ending diagnostic: stderr + exit 254 —
+  the last #202 spelling; detection-widening bar applies); #286 (ambiguous
+  `f {$k,$v}` / `f {%h}` intuit_curly shapes — deferred, #191 pattern,
+  re-raise on a real cause line).

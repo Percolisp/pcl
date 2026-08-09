@@ -4,6 +4,30 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 377 (2026-08-09, Fable) — review of s376: all four commits APPROVED, eight asks ruled
+
+Independent verification: gate re-run **133 / 4785 PASS**; #276 six-shape
+probe and #275's `import => [...], tests => N` spelling byte-identical to
+perl; #239 reproducer reproduced; real perl's no-plan diagnostic probed
+(stderr + exit 254); the Ask-6 measurement taken (uniqnum.t residue
+classified row by row).  Rulings in `docs/fable-answers-s376.md`, index
+lines in DECIDED.md §s377.
+
+Highlights: the expectation-rewrite rule is now standing (four conjuncts,
+the mirror image of "never simplify"); `builtin::` blessed as the
+shim-dispatch seam for box-representation primitives (perl-shared names
+match perl exactly; `prototype` stays CORE); "a `lib/` change makes the
+sweep non-optional" confirmed and generalized to `cl/`; #239's fix shape
+ruled before build (four-way resolver from the existing scope walk,
+unclassifiable DIES, variables only); uniqnum = hybrid key, measured at 4
+of 6 rows.  New probe finding: the bare-block `our`-alias case
+(`our $x; { package Bar; $x = 1 }`) diverges TODAY in the opposite
+direction — mandatory guard probe on #239.  Filed #285 (no-plan
+diagnostic) and #286 (ambiguous-brace shapes, deferred).  Queue unchanged:
+#239 → #237 → v0.1 track; #153 FOLD chunks 2–3 stay with Fable.
+
+---
+
 ## Session 376 (2026-08-09, Opus) — #275, #276, the first #238 shim pass, and #239 diagnosed
 
 Three queue items, all verified together: **Pl/t gate 133 files / 4785 tests
