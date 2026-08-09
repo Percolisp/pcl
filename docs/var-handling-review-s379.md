@@ -253,8 +253,13 @@ Payoff if it survives measurement: `__cond__`/`__shadow__`/`__emb__`
 passes delete (~300 lines + their vetoes), #205 closes by construction,
 and the "my near a global name" bug class — which has produced at least
 four tasks (#205, #254's second family, #265, #272) — becomes
-unrepresentable.  This is a Fable-design / user-decision item, not a
-filler: it changes the emitted contract (`docs/ir-spec.md` §load model).
+unrepresentable.  This is a Fable-design item that changes the emitted
+contract (`docs/ir-spec.md` §load model must be updated in the same
+commit).  **Per the s379b USER sign-off rule (DECIDED.md), no user ask is
+needed if the measurements show it simpler + clearer + generated code
+faster-or-unchanged + compile time < 50 % worse** — defglobal reads are if
+anything cheaper than special-variable reads, so the runtime leg is
+expected to pass; the audit above is the go/no-go.
 
 ## 7. Hoisting — shrink the reason, not just the machinery
 
@@ -293,8 +298,11 @@ and installed lambda (Target A says measure, not assume).
   `_binding_at` (today) or the §3 table (once it exists).  A diff adding a
   fresh `for (my $p = $node->parent; …)` scope loop is the smell.
 - **Don't start §6/§7 without their measurements** — both are
-  probe-first items with explicit discriminating measurements named above;
-  both change the emitted contract and need user sign-off.
+  probe-first items with explicit discriminating measurements named above.
+  (Per the s379b USER sign-off rule they need no ask once the
+  measurements show simpler + clearer + generated code
+  faster-or-unchanged + compile time < 50 % worse; a result that SLOWS
+  generated code goes back to the user.)
 
 ## 9. Sequencing (recommendation; the queue is the user's)
 
@@ -307,7 +315,10 @@ and installed lambda (Target A says measure, not assume).
    dual-run then runs free in CI while ports proceed.  Natural companion
    to #153's FOLD chunks 2–3, which shrink the seam the table must
    round-trip through.
-5. **§6 and §7 measurements** as fillers; decisions after data, with user.
+5. **§6 and §7 measurements** as fillers; if the four s379b sign-off
+   conjuncts hold (simpler, clearer, generated code faster-or-unchanged,
+   compile < 50 % worse), proceed without asking — only a
+   generated-code slowdown or a semantic surprise goes back to the user.
 
 v0.1 (#277–#283) does not conflict with any of this — none of it changes
 behavior until a port lands, and the dual-run mode is exactly the kind of

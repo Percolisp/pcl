@@ -2145,3 +2145,17 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   poisoned-my — MEASURE FIRST, changes the IR contract), §7 (hoist only
   compile-time-referenced subs — measure first).  Standing: no new scanner
   fixes, no new suffix family, no new scope walk (§8).
+
+## s379b (2026-08-09) — USER: the sign-off rule
+
+- **A design change needs NO user sign-off when all four hold: (1) simpler,
+  (2) clearer, (3) generated code FASTER (or unchanged — a change that
+  SLOWS generated code is still flagged), (4) total compile/transpile time
+  < 50 % worse.**  Take the measurements first; if they hold, proceed.
+  This waives the DESIGN ask only — correctness gates (Pl/t gate,
+  corpus-diff, sweep TOTAL/LOST, probes vs perl) apply in full, semantic
+  behavior changes still follow the probe-and-rule process, and queue ORDER
+  remains the user's.  Immediate effect: `var-handling-review-s379.md`'s
+  directions D (defglobal + save/restore `local`) and §7 (selective
+  hoisting) are no longer "user decisions" — they are measurement-gated
+  work items under this rule.
