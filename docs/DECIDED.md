@@ -1347,6 +1347,38 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s368 (2026-08-09, Opus) — #265 closed: embedded `my` in a sub vs a same-named global
+
+- **The embedded-`my` let-hoist's veto is RIGHT at file level and SCOPE-BLIND
+  inside a named sub.** A sub mentioning the name can share a FILE-level
+  `open my $fh` cell (Capture-Tiny's Utils.pm, #199) — it cannot possibly see
+  a lexical declared inside ANOTHER sub's body. `++my $x->{k}` in `sub foo3`
+  therefore wrote the package global and persisted across calls (op/my.t t47).
+- **Narrowing the veto would have been WRONG — the fix is a rename.** Letting
+  the hoist fire registers `$x` in `_seg_lex`, which suppresses the GLOBAL's
+  forward defvar and strands the other sub. `$x__emb__N` is a name nobody
+  else mentions: the veto stops firing AND `$x` keeps its defvar. (Probed
+  both ways.) Rename root = the enclosing BLOCK, which is exactly perl's
+  scope for an embedded `my`. → `_rename_vetoed_embedded_mys`, ir-spec §2b.3.
+- **ONE veto predicate** (`_embedded_my_veto_names`), read by the refusal and
+  by the pre-pass that removes the need for it — the s363 detector/rewriter
+  rule, third instance after #264 and #265's promoter.
+- **`__emb__N` strips in `_eval_lexical_alist`** like `__cond__`/`__shadow__`:
+  the renamed decl is LET-BOUND, so a string eval naming the original `$x`
+  still finds it (ir-spec §2b.4's first route). Probed live.
+- Measured: gate 132/4739 PASS; `corpus-diff` **1 of 111 files** (my.t, the
+  fix itself); CPAN board **0 of 223 sources changed**; perl-suite gate SET
+  **2 of 523, 0 new dies** (my.t + pat_advanced.t, which has the same shape
+  and gets the same fix); op/my.t 51/8 → **52/7 = its `perl-suite-run.tsv`
+  snapshot**.
+- **A HEAD-compare is INVALID if the tree changes mid-run** — bumping
+  `*pcl-cache-generation*` during the first perl-suite gate-SET pass made
+  194 of 523 files "differ" by their `;;; pcl: … gen=…` header line alone.
+  Normalize the header, or finish the compare before touching the tree.
+- **`grep` goes binary-silent on emitted CL too, not just `.tsv`** —
+  pat_advanced.t builds `chr 0..255`, so its output holds NUL bytes and a
+  plain `grep 'x__emb__'` printed nothing where `grep -a` finds 9 hits.
+
 ## s367 (2026-08-09, Opus) — #270 fixed: the `:prototype($)` silent statement drop
 
 - **A prototype whose text ends in `$` mis-lexes TWICE** — PPI §7 turns

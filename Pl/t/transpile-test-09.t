@@ -845,4 +845,37 @@ my @args = (7, 8);
 print named(@args), "\n";
 });
 
+# ── #265 second half: an expression-embedded `my` INSIDE A NAMED SUB whose name
+# another sub also mentions.  `_lower_block` refuses to let-bind such a decl on
+# the theory that the other sub shares the forward-defvar'd global as its cell —
+# true at FILE level, scope-blind inside a sub body, where the other sub cannot
+# see this sub's lexical.  `++my $x->{foo}` then WROTE THE GLOBAL: the hash
+# persisted across calls (perl re-makes it per call) and clobbered the global
+# (op/my.t t47, [perl #29340]'s companion).  Narrowing the veto alone would be
+# wrong — the let registers `$x` in _seg_lex and suppresses the GLOBAL's defvar,
+# stranding the other sub — so the decl is RENAMED to `$x__emb__N` pre-analysis.
+# INVERSE GUARDS in the same snippet: (a) the FILE-level shape the veto exists
+# for — a sub genuinely closing over `open my $fh` — must still share one cell;
+# (b) the package global must keep its value and its defvar across the renamed
+# sub; (c) a string eval inside the sub must still reach the renamed lexical by
+# its ORIGINAL name (the __emb__ suffix strip in _eval_lexical_alist).
+test_transpile("embedded `my` in a sub vs a same-named package global (#265)", q{
+sub setter { ($x, $y) = ("A", "B") }
+sub foo3 {
+    ++my $x->{foo};
+    print "bar-defined=", (defined $x->{bar} ? 1 : 0), "\n";
+    ++$x->{bar};
+}
+setter(); foo3(); foo3();
+print "global x=$x y=$y\n";
+my $tmp = "/tmp/pcl265.$$.txt";
+open my $fh, '>', $tmp or die;
+sub w { print $fh "shared\n" }
+w(); close $fh;
+open my $in, '<', $tmp or die; print "file=", scalar(<$in>); close $in; unlink $tmp;
+sub setter3 { $e = "GLOBAL" }
+sub emb3    { ++my $e->{k}; return eval '$e->{k}' }
+setter3(); print "emb3=", emb3(), " global e=$e\n";
+});
+
 done_testing();

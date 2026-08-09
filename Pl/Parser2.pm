@@ -993,10 +993,14 @@ sub parse {
   # zero churn.  Runs here, pre-analysis, for the same reason as W5 above.
   $self->{_cond_rename_counter} = 0;
   $self->{_shadow_rename_counter} = 0;
+  $self->{_emb_rename_counter} = 0;
   $self->_rename_poisoned_cond_mys($_) for @segments;
   # s299 sibling pass: nested-bare-block `my` shadowing a package GLOBAL of
   # the same name (see the sub's comment).
   $self->_rename_poisoned_block_mys($_) for @segments;
+  # #265 sibling pass: expression-embedded `my` INSIDE a named sub whose name
+  # another sub also mentions — the let-hoist's veto is scope-blind there.
+  $self->_rename_vetoed_embedded_mys($_) for @segments;
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
@@ -1097,16 +1101,7 @@ sub parse {
     $self->{_eval_pkg_enter_cl} = undef;
     # Named subs + Scheduled blocks of this segment — the embedded-my
     # let-hoist consults these (a sub referencing the name vetoes the hoist).
-    {
-      my @ns;
-      for my $child (@{ $seg->{stmts} }) {
-        next unless ref $child && $child->isa('PPI::Node');
-        push @ns, $child if $child->isa('PPI::Statement::Sub');
-        push @ns, @{ $child->find('PPI::Statement::Sub') || [] };
-      }
-      $self->{_seg_named_subs} =
-        [ grep { $_->name || $_->isa('PPI::Statement::Scheduled') } @ns ];
-    }
+    $self->{_seg_named_subs} = _collect_named_subs($seg->{stmts});
     # `my` lexicals do not cross a segment (package) boundary in v2 — each
     # segment is its own top-level section, and a genuine cross-boundary my is
     # gated by _check_my_spanning.  So the fallback machinery's let-bound set
@@ -4384,6 +4379,94 @@ sub _rename_poisoned_block_mys {
   return;
 }
 
+# W8.5 sibling (#265, s368) — the half of the embedded-`my` story the s365 fix
+# did not reach.  `_lower_block` let-binds an expression-embedded `my`
+# (`open my $fh, …`, `++my $x->{k}`) unless another named sub in the segment
+# mentions the name, on the theory that the sub shares the forward-defvar'd
+# global as its cell.  That theory holds at FILE level, where the sub really
+# can close over the decl — and is SCOPE-BLIND inside a named sub's body,
+# where the other sub cannot possibly see this sub's lexical:
+#
+#     sub setter { ($x, $y) = (…) }        # $x here is the package GLOBAL
+#     sub foo3   { ++my $x->{foo}; … }     # a FRESH lexical, per call
+#
+# Refused, `my $x` lowered as a write to the global: state persisted across
+# calls and clobbered the global (op/my.t t47, [perl #29340]'s companion).
+#
+# Simply narrowing the veto would be wrong — the let registers `$x` in
+# _seg_lex, which suppresses the GLOBAL's forward defvar and leaves `setter`
+# unbound.  So mint a renamed lexical instead: `$x__emb__N` is a name nobody
+# else mentions, so the veto no longer fires AND `$x` keeps its defvar.  The
+# rename root is the enclosing BLOCK, which is exactly the decl's scope
+# (perl scopes an embedded `my` from its statement to the end of that block),
+# and _rename_decl_within starts at the declarator, so earlier statements
+# keep the original name.  Interpolation follows via the M-A fixer inside
+# that helper; string-eval visibility follows because `$x__emb__N` is
+# let-bound and _eval_lexical_alist strips the suffix (ir-spec §2b.4's first
+# route, the same waiver __cond__/__shadow__ carry).
+# A blocked site is left untouched — no worse than before the pass.
+sub _rename_vetoed_embedded_mys {
+  my ($self, $seg) = @_;
+  my $subs = _collect_named_subs($seg->{stmts});
+  return unless @$subs;
+  for my $top (@{ $seg->{stmts} }) {
+    next unless ref $top && $top->isa('PPI::Node');
+    # Reach the candidate statements through the `my` WORDS (one tree walk per
+    # top-level statement), not by enumerating every statement and asking each
+    # whether it holds a `my` — the shape the sibling pass uses, and the one
+    # that keeps this off the compile-time profile (#184's lesson).
+    my %cand;
+    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
+                                   && $_[1]->content eq 'my' }) || [] }) {
+      my $stmt = $w;
+      $stmt = $stmt->parent
+        while $stmt && !($stmt->isa('PPI::Statement')
+                         && $stmt->parent
+                         && $stmt->parent->isa('PPI::Structure::Block'));
+      next unless $stmt;
+      $cand{ refaddr $stmt } //= $stmt;
+    }
+    for my $stmt (values %cand) {
+      # Same statement shape _lower_block's hoist accepts, and its scope root.
+      next unless ref($stmt) eq 'PPI::Statement'
+               || ref($stmt) eq 'PPI::Statement::Expression';
+      my $root = $stmt->parent;
+      # INSIDE A NAMED SUB only: at file level the other sub genuinely shares
+      # the cell and the veto is right (Capture-Tiny's Utils.pm, #199).
+      next unless _enclosing_named_sub($stmt);
+      my @syms = $self->_embedded_my_syms($stmt) or next;
+      my %uniq;
+      my @names = grep { !$uniq{$_}++ } map { $_->content } @syms;
+      my %veto = map { ($_ => 1) }
+                 $self->_embedded_my_veto_names($subs, $stmt, \@names);
+      next unless %veto;
+      for my $sym (@syms) {
+        my $old = $sym->content;
+        next unless $veto{$old};
+        my $sigil = substr($old, 0, 1);
+        my $why = $sigil eq '$'
+          ? $self->_shadow_rename_blocker($root, $sym, 'eval_ok', 'shadow_ok')
+          : $self->_state_container_blocker($root, $sym, 'eval_ok');
+        next if $why;
+        $self->_rename_decl_within($root, $sym,
+          $old . '__emb__' . $self->{_emb_rename_counter}++);
+      }
+    }
+  }
+  return;
+}
+
+# The nearest enclosing NAMED sub definition of $el, if any (a Scheduled block
+# — BEGIN/END — is not one: it has no name to be called by).
+sub _enclosing_named_sub {
+  my ($el) = @_;
+  for (my $p = $el->parent; $p; $p = $p->parent) {
+    return $p if $p->isa('PPI::Statement::Sub')
+              && !$p->isa('PPI::Statement::Scheduled') && $p->name;
+  }
+  return undef;
+}
+
 # Mark (in %$disq) every bare name that appears interpolated ($name / ${name})
 # inside an interpolating token (double-quote, qq, backtick/qx, interpolating
 # heredoc, or a regex match/substitution) anywhere under $node.  Single quotes,
@@ -5823,29 +5906,10 @@ sub _lower_block {
                   && !$self->fallback_parser->{_let_bound_vars}{$_} }
               $self->_embedded_my_names($first);
     if (@emb) {
-      my $vetoed = 0;
-      SUBSCAN: for my $sub (@{ $self->{_seg_named_subs} // [] }) {
-        next if _elem_within($first, $sub);
-        my $t = $sub->content;
-        for my $n (@emb) {
-          my $b = substr($n, 1);
-          next unless $t =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/;
-          # A sub that DECLARES the same name has its own lexical and cannot
-          # be sharing this statement's cell — vetoing on it left BOTH sides
-          # unbound, because the "old forward-defvar'd global" the veto falls
-          # back to is never emitted when every mention is a declaration.
-          #   sub s1 { my $fh; … }                 # its own lexical
-          #   sub nf { open my $fh, '>', …; … }    # vetoed → free var, CRASH
-          # (Capture-Tiny's t/lib/Utils.pm, task #199: `Utils::$fh is unbound`.)
-          # The declaration must cover EVERY use, though: a sub can reference
-          # the file-level cell AND declare its own shadow in an inner block —
-          # `sub t { my $l = <$fh>; { my $fh; } }` — and exempting on the
-          # shadow alone strands the outer reference (s329 review probe).
-          next if $self->_sub_declares_name($sub, $n)
-               && !$self->_sub_freely_references_name($sub, $n);
-          $vetoed = 1; last SUBSCAN;
-        }
-      }
+      # The veto predicate is shared with _rename_vetoed_embedded_mys, the
+      # pre-pass that renames the decls this would otherwise refuse (#265).
+      my $vetoed = $self->_embedded_my_veto_names(
+                     $self->{_seg_named_subs} // [], $first, \@emb) ? 1 : 0;
       if (!$vetoed) {
         $self->_reg_lex(@emb);
         return (['let', ['list', map { ['list', $_, _fresh_container($_)] } @emb],
@@ -5972,14 +6036,15 @@ sub _lower_block {
   return ($self->_lower_stmt($first, $vi, $first_tail), $self->_lower_block(\@rest, $vi, $tail_ctx));
 }
 
-# Names declared by an expression-embedded `my` at the top level of a PLAIN
-# statement (`open my $fh, …`, `weaken(my $p = \%tb)`, `func(my @a)`) — they
-# scope to the enclosing BLOCK (M2).  A `my` nested inside a block within the
-# statement belongs to that block — skipped.  (`state` never reaches lowering
-# un-renamed — the state pre-pass is authoritative.)
-sub _embedded_my_names {
+# Declarator SYMBOLS of an expression-embedded `my` at the top level of a
+# PLAIN statement (`open my $fh, …`, `weaken(my $p = \%tb)`, `func(my @a)`,
+# `++my $x->{k}`) — they scope to the enclosing BLOCK (M2).  A `my` nested
+# inside a block within the statement belongs to that block — skipped.
+# (`state` never reaches lowering un-renamed — the state pre-pass is
+# authoritative.)
+sub _embedded_my_syms {
   my ($self, $stmt) = @_;
-  my @names;
+  my @syms;
   for my $w (@{ $stmt->find(sub {
         $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'my' }) || [] }) {
     my ($p, $nested) = ($w->parent, 0);
@@ -5989,13 +6054,67 @@ sub _embedded_my_names {
     }
     next if $nested;
     my $nx = $w->snext_sibling or next;
-    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-             : ();
-    push @names, grep { /^[\$\@\%]\w+$/ } map { $_->content } @syms;
+    push @syms, $nx->isa('PPI::Token::Symbol')   ? ($nx)
+              : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+              : ();
   }
+  return grep { $_->content =~ /^[\$\@\%]\w+$/ } @syms;
+}
+
+# The same declarations, as a de-duplicated list of NAMES.
+sub _embedded_my_names {
+  my ($self, $stmt) = @_;
   my %seen;
-  return grep { !$seen{$_}++ } @names;
+  return grep { !$seen{$_}++ } map { $_->content } $self->_embedded_my_syms($stmt);
+}
+
+# Named subs + Scheduled blocks under @$stmts.  Shared by the segment driver
+# and the pre-pass below so both read the same population.
+sub _collect_named_subs {
+  my ($stmts) = @_;
+  my @ns;
+  for my $child (@$stmts) {
+    next unless ref $child && $child->isa('PPI::Node');
+    push @ns, $child if $child->isa('PPI::Statement::Sub');
+    push @ns, @{ $child->find('PPI::Statement::Sub') || [] };
+  }
+  return [ grep { $_->name || $_->isa('PPI::Statement::Scheduled') } @ns ];
+}
+
+# Which of @$names does a named sub OTHER than the one holding $stmt reference?
+# That is exactly the condition under which _lower_block refuses to let-bind an
+# expression-embedded `my` — the sub is presumed to share the forward-defvar'd
+# global as its cell, so lexicalizing the decl would strand it.  ONE predicate,
+# read by the refusal AND by the pre-pass that removes the need for it, so the
+# two can never disagree (the s363 detector/rewriter rule).
+sub _embedded_my_veto_names {
+  my ($self, $subs, $stmt, $names) = @_;
+  my %bad;
+  SUBSCAN: for my $sub (@$subs) {
+    next if _elem_within($stmt, $sub);
+    my $t = $sub->content;
+    for my $n (@$names) {
+      next if $bad{$n};
+      my $b = substr($n, 1);
+      next unless $t =~ /(?:[\$\@\%]|\$\#)\Q$b\E\b/;
+      # A sub that DECLARES the same name has its own lexical and cannot be
+      # sharing this statement's cell — vetoing on it left BOTH sides unbound,
+      # because the "old forward-defvar'd global" the veto falls back to is
+      # never emitted when every mention is a declaration.
+      #   sub s1 { my $fh; … }                 # its own lexical
+      #   sub nf { open my $fh, '>', …; … }    # vetoed → free var, CRASH
+      # (Capture-Tiny's t/lib/Utils.pm, task #199: `Utils::$fh is unbound`.)
+      # The declaration must cover EVERY use, though: a sub can reference the
+      # file-level cell AND declare its own shadow in an inner block —
+      # `sub t { my $l = <$fh>; { my $fh; } }` — and exempting on the shadow
+      # alone strands the outer reference (s329 review probe).
+      next if $self->_sub_declares_name($sub, $n)
+           && !$self->_sub_freely_references_name($sub, $n);
+      $bad{$n} = 1;
+      last SUBSCAN if keys(%bad) == @$names;
+    }
+  }
+  return grep { $bad{$_} } @$names;
 }
 
 # Does named sub $sub declare $name (sigil-qualified) itself — i.e. does it

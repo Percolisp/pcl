@@ -3551,7 +3551,10 @@ sub _eval_lexical_alist {
   # LET-BOUND `$x__cond__N`, exactly like the shadow rename — so the eval body
   # naming `$x` finds it here, and only while it is in scope.  Its counters
   # mint in source order, so a cond-my nested inside another gets the higher N
-  # and descending N is innermost-first, as for __file__.  `state` renames
+  # and descending N is innermost-first, as for __file__.  __emb__N (#265) is
+  # the same story one scope in: an expression-embedded `my` inside a named
+  # sub, renamed so the let-hoist's scope-blind veto stops refusing it.
+  # `state` renames
   # (`__state__`) are deliberately NOT stripped: those are defvar'd cells, not
   # let bindings, and never enter _let_bound_vars.
   my $skey = sub {
@@ -3559,6 +3562,7 @@ sub _eval_lexical_alist {
     $v =~ s/__lex__\d+$//;
     my $d = $v =~ s/__shadow__(\d+)$// ? $1
           : $v =~ s/__file__(\d+)$//   ? $1
+          : $v =~ s/__emb__(\d+)$//    ? $1
           : $v =~ s/__cond__(\d+)$//   ? $1 : -1;
     return ($v, $d);
   };

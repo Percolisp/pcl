@@ -4,6 +4,92 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 368 (2026-08-09, Opus) — #265 closed: an embedded `my` inside a sub wrote the same-named package GLOBAL
+
+Second item of the s366 queue (`docs/fable-answers-s365.md` §9/§11), shape
+approved there.
+
+**The bug.** `_lower_block` let-binds an expression-embedded `my`
+(`open my $fh, …`, `++my $x->{k}`) unless another named sub in the segment
+mentions the name — on the theory that the sub shares the forward-defvar'd
+global as its cell. That theory holds at FILE level and is scope-blind
+inside a named sub's body, where the other sub cannot possibly see this
+sub's lexical:
+
+```perl
+sub setter { ($x, $y) = (…) }        # the package GLOBAL
+sub foo3   { ++my $x->{foo}; … }     # perl: a FRESH lexical, per call
+```
+
+Refused, `my $x` lowered as a write to the global: the hash persisted across
+calls and clobbered the global. op/my.t t47 (`[perl #29340]`'s companion).
+
+**Why narrowing the veto is not the fix** (probed both ways): letting the
+hoist fire registers `$x` in `_seg_lex`, which suppresses the GLOBAL's
+forward defvar and leaves `setter` unbound. So the decl is RENAMED instead
+— `$x__emb__N` is a name nobody else mentions, so the veto stops firing AND
+`$x` keeps its defvar. Rename root = the enclosing BLOCK, exactly perl's
+scope for an embedded `my`; `_rename_decl_within` starts at the declarator,
+so earlier statements keep the original name.
+
+**Shape.** A sibling of the W8.5 pre-passes (`_rename_poisoned_cond_mys`,
+`_rename_poisoned_block_mys` — whose `next if $in_sub` is the complementary
+half of this one's "inside a named sub ONLY"), running pre-analysis so every
+downstream reader sees the renamed tokens. Reuse per rule 11: the rename is
+`_rename_decl_within` (shadow-aware since B-ii, and it carries the M-A interp
+fixer), the blocker is `_shadow_rename_blocker`, and the veto is now ONE
+predicate — `_embedded_my_veto_names`, read by the refusal in `_lower_block`
+AND by this pass. That is the s363 detector/rewriter rule again; a second
+copy is exactly how #265's first half broke. `_collect_named_subs` and
+`_embedded_my_syms` were extracted for the same reason.
+`__emb__N` strips in `_eval_lexical_alist` like `__cond__`/`__shadow__`, so a
+string eval naming the original `$x` still finds the renamed let (probed).
+
+**A SECOND file gets the same fix.** `re/pat_advanced.t` has the same shape —
+`(my $x = $AllBytes) =~ s/…//g;` inside a SKIP block in a named sub, with two
+later plain assignments reusing `$x`. It was lowering as `p-scalar-= $x` (the
+global); it now lowers as a `let` over `$x__emb__0`, with **all 9 uses renamed
+consistently**, including the later `($x = $AllBytes)` assignments.  Its suite
+verdict is **936/733 under HEAD and 936/733 after — measured both ways, not
+inferred**: no regression, and no gain either (those rows already passed; the
+file's 137-row gap to its 1073/596 snapshot is the pre-existing regex-engine
+residue the s365 timeout registration records).
+
+**Verification.** op/my.t **51/8 → 52/7 = its `perl-suite-run.tsv` snapshot**
+(the task's bar). Gate `tools/prove-core` **132 files / 4739 tests PASS**.
+`tools/corpus-diff.pl` **1 of 111 files** — my.t, and the hunk is exactly
+`sub foo3`'s `$x` becoming `$x__emb__0`. CPAN board gate SET: **0 of 223
+sources changed** (scratchpad `xstat.pl`, HEAD vs working tree, stderr AND
+normalized emission). Perl-suite gate SET: **2 of 523 changed, 0 new dies** —
+op/my.t and pat_advanced.t, both the fix.
+Three inverse guards probed live against perl — the file-level `open my $fh`
+a sub closes over, the global keeping its value across the renamed sub, and
+a string eval inside the sub reaching the renamed lexical by its original
+name. `*pcl-cache-generation*` → v2-122.
+
+**Two measurement traps hit on the way, both already documented in this
+repo, both in new places — worth the reminder:**
+
+* the first perl-suite gate-SET run reported **194 of 523 changed**. That was
+  the `*pcl-cache-generation*` bump landing MID-RUN: every emitted file
+  carries `;;; pcl: pipeline=v2 gen=…` as line 1, so the files transpiled
+  after the bump differed from HEAD by that line alone. Re-run with the
+  header normalized: 2. **Never mutate the tree during a HEAD compare.**
+* verifying pat_advanced.t's rename, `grep 'x__emb__'` on the emitted CL
+  printed NOTHING — the file builds `chr 0..255`, so the output has NUL
+  bytes and grep went **binary-silent**. `grep -a` shows all 9 hits. Same
+  trap as the `.tsv` one in CLAUDE.md, one directory over.
+
+Guard rows: `Pl/t/transpile-test-09.t`, `embedded \`my\` in a sub vs a
+same-named package global (#265)` — carrying all three inverse guards.
+Docs: `ir-spec.md` §2b.3 (`$x__emb__N` in the rename table), `DECIDED.md`
+s368.
+
+**Next in the queue:** #267 (sizing first — the CLForm per-element sketch),
+then #269 (probe first), then the fillers (#271, #266, #236 → #234 → #235).
+
+---
+
 ## Session 367 (2026-08-09, Opus) — #270: `sub :prototype($)` at expression start was a SILENT STATEMENT DROP
 
 First item of the s366 queue (`docs/fable-answers-s365.md` §10/§11).

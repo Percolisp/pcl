@@ -416,6 +416,7 @@ rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
 | `$Pkg::x__file__N` | v2 spanning refs (W10) | uses of the above from *later package segments* — package-qualified so their section's reader (sitting in its own package) reaches the declaring section's cell |
 | `$x__shadow__N` | v2 seam-shadow rename (W8.5) | a `my $x` *inside a block that lowers through the v1 seam* (`map { my $x = … }`, `do { my $x … }`) while an outer lexical `$x` is live. Unrenamed, the seam's defvar-based handling would write through the outer variable (the v1 bug); renamed, the inner block gets its own unique cell |
 | `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
+| `$x__emb__N` | v2 embedded-`my` rename (W8.5, #265) | an *expression-embedded* `my` **inside a named sub** (`++my $x->{k}`, `open my $fh, …`, `… if my $x = …`) whose bare name is also mentioned by another named sub in the segment. Unrenamed, the let-hoist refuses the decl (it cannot tell that other sub apart from one sharing a file-level cell) and the `my` writes the package GLOBAL — persisting across calls. Renamed, the sub gets its per-call `let` AND the global keeps `$x` and its forward defvar |
 | `$x__lex__N` | v1 closure-capture rename | v1's fix for defvar-poisoned closures: a block `my` captured by a nested sub becomes a fresh, never-defvar'd name so its `let` stays truly lexical. Appears in v2 output too, inside seam-lowered map/grep bodies |
 | `$x__state__N` (+ `…__init`) | v2 state cells (s277c) | a named sub's `state` variable promoted to a per-sub package cell + raw once-flag (see the declarations table above); same blockers as the other renames |
 | `$state__<sub>__<name>__N` (+ `…__init`) | v1 state cells | same idea, v1's spelling — seen in v1-dialect files |
@@ -426,7 +427,7 @@ For a translator the practical takeaway is reassuring: **renames need no
 special handling**. By the time the tree reaches you, a renamed variable
 is just an ordinary variable with an unusual name — read its kind off the
 emitted shape exactly as for any other name (§2b.2): `__file__` cells are
-defvar'd package vars; `__cond__`/`__lex__` are `let`-bound lexicals;
+defvar'd package vars; `__cond__`/`__emb__`/`__lex__` are `let`-bound lexicals;
 `__shadow__` is whichever the lowering path produced (observed: the v1
 seam emits it as a defvar'd cell — sound *because* the name is unique).
 The suffixes matter only for mapping output back to source (strip
