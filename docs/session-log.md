@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 369 (2026-08-09, Fable) — review of s367+s368: both approved; #267 sizing ruled; new residue #272
+
+Review session per `docs/opus5-review-requests-s368.md`.  Rulings in
+**`docs/fable-answers-s368.md`**; index lines in DECIDED.md s369.
+
+**Verification (independent, not read off the commits):** gate
+`tools/prove-core` **132 files / 4739 tests PASS** (cold cache).  Probes
+vs perl, all matching: #270's `sub :prototype($)` in a list (42) + the
+`($$)`/named-sub inverse guards (43/44) + the announce on transpile
+stderr; #265's setter/foo3 shape (`foo,1|foo,1|10`) and the string-eval
+guard (`1,1,5`).  Both diffs read in full — #270's raw-token-stream
+repair + decline-becomes-die and #265's ONE shared veto predicate are the
+shapes the rulings asked for.
+
+**Rulings:**
+
+* **Ask 1** — rename-not-narrow CONFIRMED (the `_seg_lex`/forward-defvar
+  interlock makes a scope-aware veto insufficient); the pre-pass as a
+  third W8.5 sibling CONFIRMED.
+* **Ask 2 (#267)** — (a) YES: `(vector E1 … Ek)` for an all-single-scalar
+  multi-element list; the N=1 rule is the N=k rule, and boxes must never
+  pass through `p-flatten-args`.  Depth-0 split = the shared #138
+  `lowprec_idx` machinery.  Mixed lists stay flattened with NO boxes
+  (boxed-aggregates axis, E5).  (b) YES to the full sweep TOTAL/LOST on
+  top of the both-population gate SET.  (c) SPLIT into two commits:
+  wrapper switch first (expected ZERO behavior change — its sweep is the
+  discriminating measurement), then the per-element box verdict.  Also:
+  probe + not-supported note for the literal-element divergence
+  (`for ($x, 3) { $_++ }` — perl dies read-only), no mechanism.
+* **Ask 3 (#269)** — do-not-delete confirmed; measure the file's
+  reachable rows first; the `(?{…})`-not-running finding is #196's axis.
+* **#271** — diagnosis + layer call endorsed (argument-run lowering).
+
+**New residue found by review probe — task #272** (pre-existing, verified
+in a worktree at `88258a8`): an embedded `my` inside an **anonymous** sub
+body is still veto-refused, so the decl reads the package global —
+`my $f = sub { ++my $x->{k}; … }` crashes with `P-GETHASH-BOX 5` where
+perl makes a fresh lexical.  The pre-pass keys on
+`_enclosing_named_sub`; the correct condition is "inside ANY sub body".
+Measure which route the anon body lowers through before extending.
+
+**Queue:** #267 (two commits, Opus) → #269 (measure, then diagnose,
+capped) → fillers #272 / #271-sizing / #266 / #236→#234→#235.  The FOLD
+(#153) stays Fable's, own session.
+
+---
+
 ## Session 368 (2026-08-09, Opus) — #265 closed: an embedded `my` inside a sub wrote the same-named package GLOBAL
 
 Second item of the s366 queue (`docs/fable-answers-s365.md` §9/§11), shape

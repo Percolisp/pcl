@@ -1347,6 +1347,32 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s369 (2026-08-09, Fable) — s368 asks RULED; #267 sizing decided
+
+- **s367 + s368 APPROVED as shipped** (gate independently re-verified
+  132/4739 cold; all probes reproduced) → `fable-answers-s368.md`.
+- **#265 rename-not-narrow CONFIRMED; third-sibling pre-pass shape
+  CONFIRMED** (populations disjoint via the complementary `$in_sub`
+  guards) → `fable-answers-s368.md` §1.
+- **#267: the N=1 rule IS the N=k rule** — an all-single-scalar
+  multi-element foreach list emits `(vector E1 … Ek)` (per-element
+  `_foreach_single_scalar_p`; depth-0 split = the shared #138
+  `lowprec_idx` machinery, never a new comma scan); boxes must NEVER pass
+  through `p-flatten-args`.  Mixed lists stay flattened, no boxes (E5
+  axis).  **TWO commits**: wrapper switch first with a ZERO-change full
+  sweep (TOTAL/LOST, cold cache) as its own discriminating measurement,
+  then the per-element box verdict → `fable-answers-s368.md` §2.
+- **#269 stays (capture is REAL, refusal conservative not blind)**; measure
+  `reg_eval_scope.t`'s reachable rows before any session — `(?{…})` blocks
+  not running is the #196 regex-engine axis → `fable-answers-s368.md` §3.
+- **#271 layer call endorsed**: fix at argument-run lowering (`my (LIST)`
+  contributes N args), never per-builtin at the runtime →
+  `fable-answers-s368.md` §4.
+- **NEW residue #272 (review probe, PRE-EXISTING at 88258a8)**: embedded
+  `my` inside an ANON sub body still veto-refused → global read →
+  type-error crash; the pre-pass keys on `_enclosing_named_sub`, correct
+  condition is "inside ANY sub body".  Measure the route first.
+
 ## s368 (2026-08-09, Opus) — #265 closed: embedded `my` in a sub vs a same-named global
 
 - **The embedded-`my` let-hoist's veto is RIGHT at file level and SCOPE-BLIND
