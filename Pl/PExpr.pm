@@ -475,8 +475,20 @@ sub parse {
         my $str = PPI::Token::Quote::Single->new("'$bw'");
         return $self->make_node($str);
       }
-      # If the block looks like a hash constructor ({ key => val }), treat as hash_init
-      if (_block_is_hash_constructor($e1)) {
+      # An EMPTY `{}` in term position is an anonymous HASH, never a block —
+      # perl's toke.c decides that on the very next character after the brace,
+      # with no ambiguity to resolve.  PPI already labels `{}` a Constructor
+      # everywhere it can (`my $x = {}`, `return {}`, `[ {} ]`, `f({})`); the
+      # one place it still says Block is after a bareword in paren-less
+      # list-operator position — `f {}`, `explain {}` — which is exactly this
+      # arm.  Falling through to the block-body parse below produced an empty
+      # ARRAY there (`ref` said "" and the call lost an argument), task #276.
+      #
+      # This is NOT folded into _block_is_hash_constructor: that predicate
+      # answers the map/grep/(&@) BODY question, where a bare `{}` is not valid
+      # perl at all (`map {} (1,2)` is a syntax error), so widening it would be
+      # a claim about input principle 9 says we do not have to read.
+      if (_block_is_hash_constructor($e1) || _block_is_empty($e1)) {
         my @list    = $e1->children();
         if (@list == 1 && ref($list[0]) eq 'PPI::Statement') {
           @list = $list[0]->children();
@@ -2382,6 +2394,18 @@ sub _block_is_hash_constructor {
       && ref($ch[0]) eq 'PPI::Token::Word'
       && ref($ch[1]) eq 'PPI::Token::Operator'
       && $ch[1]->content() eq '=>';
+}
+
+# `{}` / `{ }` / `{ # comment\n }` — braces with no content at all.  Same
+# whitespace/comment-stripping and same lone-Statement unwrapping as its
+# sibling above, so the two answer the same question about the same shape.
+sub _block_is_empty {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return scalar(@ch) == 0;
 }
 
 # If a deref BLOCK contains exactly one bareword identifier (e.g. the `foo` in
