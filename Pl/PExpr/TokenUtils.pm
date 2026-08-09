@@ -9,6 +9,7 @@ use strict;
 use warnings;
 
 use Moo;
+use Scalar::Util ();
 
 sub is_atomic {
   my $self      = shift;
@@ -330,5 +331,35 @@ sub is_assign_op {
 # ask).  Callers must still exclude `==` themselves with a `(?!=)` tail — an
 # `OP=` never legally abuts another `=`.
 sub compound_assign_text_re { return qr/(?:$COMPOUND_ASSIGN_ALT)/ }
+
+# --- Source SITE of an element: "where does this sit, and in which file?" ----
+#
+# Perl's compile-time decisions are top-down: a bareword is a call only if the
+# name is already known where the call site is COMPILED (task #266).  Answering
+# that needs two positions and the knowledge that they are comparable at all —
+# positions from two different PPI documents (a bundled module, an eval string)
+# are not.  So the document's identity is part of the site.
+#
+# Returns undef for a synthesized or detached element with no location; every
+# caller must read that as "unknown", never as "before".
+sub decl_site {
+  my ($elem) = @_;
+  return undef unless ref($elem) && Scalar::Util::blessed($elem)
+                   && $elem->can('location') && $elem->can('top');
+  my $loc = $elem->location or return undef;
+  my $top = $elem->top      or return undef;
+  return { doc => Scalar::Util::refaddr($top), pos => [ $loc->[0], $loc->[1] ] };
+}
+
+# Does site A sit at or before site B?  1 / 0, or undef when the two are not
+# comparable (either site unknown, or they come from different documents).
+sub site_precedes {
+  my ($a, $b) = @_;
+  return undef unless $a && $b && defined $a->{doc} && defined $b->{doc};
+  return undef unless $a->{doc} == $b->{doc};
+  return 1 if $a->{pos}[0] < $b->{pos}[0];
+  return 0 if $a->{pos}[0] > $b->{pos}[0];
+  return $a->{pos}[1] <= $b->{pos}[1] ? 1 : 0;
+}
 
 1;

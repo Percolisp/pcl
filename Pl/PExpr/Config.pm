@@ -278,6 +278,17 @@ has precedences => (
 # -2 means use $_ as default.
 # -3 means use @_ as default (in sub) or @ARGV (in main).
 
+# Perl's control-flow operators.  They are deliberately NOT in
+# known_no_of_params: their operand is a LABEL, not a value, and the statement
+# layer parses them.  But they ARE core callable words, and anything asking
+# "is this bareword a call or a string?" has to count them — `push @a, last;`
+# is a `last`, not the string "last" (probed; task #266 measured it live in
+# loopctl.t and my.t).
+has control_flow_ops => (
+  is      => 'ro',
+  default => sub { return { map { $_ => 1 } qw(last next redo goto return) } },
+);
+
 # perldoc perlfun:
 has known_no_of_params => (
   is        => 'ro',

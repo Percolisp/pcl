@@ -115,6 +115,7 @@ sub postfix { shift->config->postfix }
 sub prefix { shift->config->prefix }
 sub precedences { shift->config->precedences }
 sub known_no_of_params { shift->config->known_no_of_params }
+sub control_flow_ops   { shift->config->control_flow_ops }
 sub named_unary { shift->config->named_unary }
 
 sub is_named_unary {
@@ -3525,9 +3526,8 @@ sub handle_subcalls {
           # BUT: if the word is not a known function (not in known_no_of_params,
           # not declared in Environment), it's an unknown bareword string literal
           # in NO-STRICT code: e.g., !Bare || $x — Bare is the string "Bare".
-          my $is_known_bop = exists $self->known_no_of_params->{$sub_name}
-              || ($self->has_environment
-                  && $self->environment->has_prototype($sub_name));
+          my $is_known_bop =
+              $self->_bareword_callable_here($sub_name, $now) eq 'yes';
           # ALL-CAPS words (DIR, FILE, STDIN, MAXSIZE, etc.) are filehandles or
           # constants — leave them as funcalls so %p-fh-arg can identify them.
           # Only mixed-case unknown words (like Bare in !Bare) are string literals.
@@ -3944,37 +3944,45 @@ sub handle_subcalls {
     # words in operator context are strings. With strict, leave as funcall (may
     # fail at runtime, which is correct Perl behavior for typo'd sub names).
     if ($end_pars < $i + 1) {
-      my $is_known_fb = exists $self->known_no_of_params->{$sub_name}
-          || ($self->has_environment
-              && $self->environment->has_prototype($sub_name));
+      my $callable_fb = $self->_bareword_callable_here($sub_name, $now);
       # ALL-CAPS words are filehandles/constants — leave as funcalls.
       my $is_all_caps_fb = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
-      unless ($is_known_fb || $is_all_caps_fb) {
-        my $prev_is_unary = 0;
-        my $prev_is_binary = 0;
+      unless ($callable_fb eq 'yes' || $is_all_caps_fb) {
+        my $prev_is_unary     = 0;
+        my $prev_is_value_op  = 0;
+        my $prev_is_separator = 0;
         if ($i > 0) {
           my $prev_tok = $e->[$i - 1];
           my $prev_op  = $self->is_token_operator($prev_tok);
           if (defined $prev_op) {
             my %unary_ops = map { $_ => 1 } ('+', '-', '!', '~', '\\', 'not');
-            if ($unary_ops{$prev_op}) {
-              $prev_is_unary = 1;
-            } elsif ($prev_op ne ',' && $prev_op ne '=>') {
-              # Commas and fat-commas are argument/list separators, not value-combining
-              # binary operators. A bareword after ',' could be a class name (bless \$x, Foo::)
-              # or a sub call — don't force it to a string based on separator position.
-              # For actual binary operators (.. + - eq etc.), treat RHS bareword as string.
-              $prev_is_binary = 1;
-            }
+            if    ($unary_ops{$prev_op})                 { $prev_is_unary     = 1 }
+            elsif ($prev_op eq ',' || $prev_op eq '=>')  { $prev_is_separator = 1 }
+            else                                         { $prev_is_value_op  = 1 }
           }
         }
         # In strict-subs mode: only unary context and already-flagged words → string.
-        # In no-strict mode: any value-operator context (unary OR binary, not separators) → string.
+        # In no-strict mode: any OPERATOR context → string, SEPARATORS INCLUDED.
+        # Separators used to be excluded, on the grounds that a bareword after
+        # `,` could be a class name or a sub call — but a name that is not
+        # callable here and takes no arguments is neither: `print "x=", nosuch;`
+        # fell through to a funcall and crashed at load with an undefined
+        # function, where perl prints "nosuch" (probed, task #266).
+        # NOT widened on 'no': the no-previous-token case ($i == 0).  A word
+        # that starts its own run is `next;`, a `goto LABEL` operand, or a sub
+        # this compiler cannot see (defined in a `require`d file, imported by a
+        # `:DEFAULT` tag).  PCL's compile-time name knowledge is incomplete, so
+        # an ABSENCE of knowledge keeps answering CALL there — measured:
+        # widening that far turned `next`, `goto again` and File::Spec's
+        # `curdir` into strings.  'not-yet' is different: the file declares the
+        # name BELOW, so perl provably does not know it here either, and the
+        # string reading holds with no previous token at all.
         my $strict_subs = $self->has_environment
                           && $self->environment->has_pragma('strict_subs');
         my $is_op_context = $strict_subs
             ? ($prev_is_unary || $now->{_bareword_string})
-            : ($prev_is_unary || $prev_is_binary || $now->{_bareword_string});
+            : ($prev_is_unary || $prev_is_value_op || $prev_is_separator
+               || $callable_fb eq 'not-yet' || $now->{_bareword_string});
         if ($is_op_context) {
           $now->{_bareword_string} = 1;
           next;
@@ -5027,6 +5035,70 @@ sub _is_known_callable {
     return 1 if defined $s->{package} && $s->{package} eq $cur;
   }
   return 0;
+}
+
+# --- The bareword-vs-string question, asked in ONE place (task #266) --------
+#
+# A bare `foo` with no parens and no arguments is a CALL in Perl only if the
+# name is already known to be callable where the call site is COMPILED; with no
+# `strict subs` in force anything else is simply the string "foo".  Two
+# branches of handle_subcalls need that answer — the binary-operator branch
+# (`foo , …`, `foo . $x`) and the end-of-expression branch (`…, foo;`) — and
+# each used to carry its own copy of a name test that could not answer either
+# half of the question:
+#
+#   * a QUALIFIED name never matched.  Both the prototype table and
+#     declared_subs are keyed by the BARE name (plus a package), so `Foo::init`
+#     read as a string even with `sub init` in package Foo above it — perl
+#     calls (probed).
+#   * the answer was position-blind.  Parser2's pre-scan registers every sub in
+#     the FILE before anything is lowered, so a call site ABOVE `sub foo {…}`
+#     was told the name is callable; perl, compiling top-down, does not know it
+#     yet and reads the string "foo" (probed).  When the name was qualified the
+#     two errors compounded into a silent wrong: the tail-position branch
+#     emitted a call to a sub not yet defined, which returned EMPTY.
+#
+# Everything the compiler cannot place in this file — a core builtin, a
+# constant, a name imported by a `use` — stays callable, which is the old
+# whole-file answer.  Positions from two documents (a bundled module, an eval
+# string) are not comparable, and answer callable for the same reason.
+# Three-valued, and the two negatives are NOT interchangeable:
+#   'yes'     — callable here.
+#   'not-yet' — this FILE declares it, but BELOW this point.  Positive
+#               knowledge: perl, compiling top-down, has not seen it either, so
+#               the bareword is the string, wherever it sits.
+#   'no'      — nothing this compiler can see.  That is an ABSENCE of
+#               knowledge, not evidence: the name may be a builtin missing from
+#               the table, a `goto` label, or a sub from a `require`d file.
+sub _bareword_callable_here {
+  my ($self, $name, $tok) = @_;
+  return 'yes' if exists $self->known_no_of_params->{$name};
+  return 'yes' if $self->control_flow_ops->{$name};
+  # `CORE::length` / `CORE::GLOBAL::foo`: the core builtin under an explicit
+  # namespace, never a sub this file could have declared.
+  if ((my $core = $name) =~ s/^CORE::(?:GLOBAL::)?//) {
+    return 'yes' if exists $self->known_no_of_params->{$core};
+  }
+  return 'no' unless $self->has_environment;
+  my $env = $self->environment;
+  my ($pkg, $base) = $name =~ /^(.+)::([^:]+)\z/ ? ($1, $2) : (undef, $name);
+  my $site = Pl::PExpr::TokenUtils::decl_site($tok);
+  my $declared_below = 0;
+  for my $s (@{ $env->get_declared_subs || [] }) {
+    next unless defined $s->{name} && $s->{name} eq $base;
+    # A qualified call site names its package; an unqualified one stays
+    # package-blind, as the prototype table it replaces here always was.
+    next if defined $pkg && (($s->{package} // '') ne $pkg);
+    my $before = Pl::PExpr::TokenUtils::site_precedes($s, $site);
+    return 'yes' if !defined $before || $before;
+    $declared_below = 1;
+  }
+  return 'not-yet' if $declared_below;
+  # Not declared in this file at all: a prototype entry means an import or a
+  # constant, which perl knows at compile time.  That table cannot answer for a
+  # qualified name (it is keyed bare), so a qualified unknown is a string.
+  return 'yes' if !defined $pkg && $env->has_prototype($name);
+  return 'no';
 }
 
 sub _bareword_subscript_autoquotes {

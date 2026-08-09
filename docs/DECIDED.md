@@ -1757,3 +1757,22 @@ E4.1's pre-work is now done.
   Row added to `fail-baseline.tsv` by EDIT with that cause; hash.t's
   concurrent churn was measured PRE-EXISTING at the session-start commit
   (an empty-description baseline row — descriptions are join keys).
+- **A bare NAME is a CALL only if it is callable WHERE the call site sits**
+  (s374, task #266): perl decides top-down at compile time, so the answer is
+  both QUALIFICATION-aware and POSITION-aware, and `Pl::PExpr::_bareword_callable_here`
+  is the ONE place that knows it — consulted by both handle_subcalls branches
+  that face a no-argument bareword (the binary-operator branch and the
+  end-of-expression branch), which each used to carry their own copy of a name
+  test that could answer neither half.  It is THREE-valued, and the two
+  negatives are not interchangeable: `not-yet` (this file declares the name
+  BELOW — positive knowledge that perl does not know it here either) reads as
+  the string wherever it sits, while `no` (nothing this compiler can see) keeps
+  answering CALL unless the word sits in operator context, because PCL's
+  compile-time name knowledge is INCOMPLETE — measured: treating `no` as a
+  string turned `next`, `goto again` and File::Spec's `curdir` into strings.
+  Declaration SITES ride on `declared_subs` (`Pl::PExpr::TokenUtils::decl_site`
+  / `site_precedes`); positions from two documents are incomparable and answer
+  "callable", the old whole-file answer.  Control-flow words
+  (`last`/`next`/`redo`/`goto`/`return`) are callable everywhere via
+  `Config::control_flow_ops` — they are absent from `known_no_of_params`
+  because their operand is a LABEL.  Guard `Pl/t/bareword-call-01.t`.

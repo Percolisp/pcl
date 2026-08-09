@@ -856,18 +856,25 @@ sub get_isa {
     return $self->isa_declarations->{$pkg} // [];
 }
 
-=head2 add_declared_sub($name, $package)
+=head2 add_declared_sub($name, $package, $at)
 
 Records that a sub was declared in the given package.
 Used to emit forward declarations.
 
     $env->add_declared_sub('greet', 'main');
 
+C<$at> is the optional declaration SITE — C<{ doc =E<gt> ..., pos =E<gt> [line, col] }>
+as produced by L<Pl::PExpr::TokenUtils/decl_site>.  A bareword call site asks
+whether the declaration is ABOVE it before reading the name as a call
+(task #266); without a site the entry answers "position unknown", which every
+caller must read as the old whole-file answer, never as "below".
+
 =cut
 
 sub add_declared_sub {
-    my ($self, $name, $package) = @_;
-    push @{$self->declared_subs}, { name => $name, package => $package };
+    my ($self, $name, $package, $at) = @_;
+    push @{$self->declared_subs}, { name => $name, package => $package,
+                                    ($at ? %$at : ()) };
 }
 
 =head2 get_declared_subs()

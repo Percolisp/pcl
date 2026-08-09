@@ -1043,10 +1043,12 @@ sub parse {
           # v1.  signatures.t: 796+182, fail rows identical to v1.
           my $sig_info = $self->fallback_parser->parse_prototype_or_signature($proto, $sub);
           $self->environment->add_prototype($sub->name, $sig_info);
-          $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}));
+          $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
+                                             Pl::PExpr::TokenUtils::decl_site($sub));
           next;
         }
-        $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}));
+        $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
+                                             Pl::PExpr::TokenUtils::decl_site($sub));
         # Same default signature v1's _process_sub_statement registers for a
         # prototype-less sub: PExpr consults get_prototype() to decide that a
         # bareword `foo` is a CALL (pl-foo), not the string "foo".  A

@@ -6984,9 +6984,14 @@ sub _process_sub_statement {
     if (!($prev && $prev->{from_attr} && !$prototype && !$is_signature_syntax)) {
       $self->environment->add_prototype($name, $sig_info);
     }
-    # Also record for forward declarations
+    # Also record for forward declarations.  The SITE goes with it: a bareword
+    # call site decides call-vs-string by asking whether the declaration is
+    # above it (task #266), and an entry with no site is read as the old
+    # whole-file answer — so this seam must supply one too, or a sub lowered
+    # through here would silently neuter the position test for its own name.
     my $pkg = $self->environment->current_package();
-    $self->environment->add_declared_sub($name, $pkg);
+    $self->environment->add_declared_sub($name, $pkg,
+                                         Pl::PExpr::TokenUtils::decl_site($stmt));
   }
 
   # Build parameter list for defun
