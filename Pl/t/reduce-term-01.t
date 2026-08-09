@@ -163,4 +163,59 @@ extent_is('+3;',           0, undef, 'unary plus: not our call');
   is(scalar(@r), 0, '_reduce_term declines when extent declines');
 }
 
+# --- _fold_terms (#153 FOLD chunk 1) ------------------------------------
+# The pre-pass reduces embedded postfix-bearing terms in place.  These rows
+# pin the guards that make it SAFE, not just the folds that make it work.
+{
+  my $e = toks('$h{k} + $a[0];');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'both embedded terms folded: [node + node]');
+  ok($o->is_internal_node_type($e->[0]), 'left term is a node');
+  ok($o->is_internal_node_type($e->[2]), 'right term is a node');
+}
+{
+  # Whole-array guard: a term that IS the whole expression is left to the
+  # legacy machinery — _reduce_term parses through this same function, so
+  # folding it would recurse forever.
+  my $e = toks('$h{a}{b};');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'whole-array term is NOT folded (recursion guard)');
+}
+{
+  # Cast-start guard: `$$r[0]` must fold FROM THE CAST or not at all.  The
+  # whole-array guard blocks the cast start here, and the Symbol at index 1
+  # must not fold alone — that would re-bind the subscript as `${ $r[0] }`.
+  my $e = toks('$$r[0];');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'tail of a cast-led whole-array term is not folded');
+}
+{
+  # Embedded cast-led term folds from the cast, one node, correct extent.
+  my $e = toks('$$r[0] + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'cast-led term folds from the cast: [node + 1]');
+  ok($o->is_internal_node_type($e->[0]), 'folded cast-led term is a node');
+}
+{
+  # Arrow-start guard: a dynamic method name is the middle of a chain.
+  my $e = toks('$o->$m + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'dynamic-method chain folds as one term');
+}
+{
+  # Word-led terms are not folded (indirect object / list operators), but a
+  # postfix-bearing ARGUMENT after the word is.
+  my $e = toks('foo $x[0];');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 2, 'word stays raw, its postfix-bearing arg folds');
+  is(ref($e->[0]), 'PPI::Token::Word', 'the word itself is untouched');
+}
+{
+  # Combining-rule guard: a raw Block after the term (indirect method args
+  # `$o->SUPER::m{@a}`) blocks the fold — the legacy loop reads the pair.
+  my $e = toks('$o->SUPER::m{@a};');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 4, 'term followed by a raw Block is not folded');
+}
+
 done_testing();

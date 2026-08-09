@@ -789,6 +789,15 @@ sub parse {
   }
 
 
+  # - - - #153 FOLD chunk 1: reduce embedded postfix-bearing terms to nodes
+  # BEFORE the ()-replacement (the walker's `-> method ( args )` step needs
+  # raw Lists) and before the opportunistic arrow/subscript machinery.
+  # PCL_NO_FOLD=1 is the A/B measurement instrument (emission compare against
+  # the legacy in-place reduction); it is deleted at the flip like the
+  # PCL_TERM_DIFF probes were.
+  $self->_fold_terms($e)
+      unless $ENV{PCL_NO_FOLD};
+
   # - - - Find any "()" sets and create a node:
   # (Subcalls has been done at top of sub.)
   for(my $i=0; $i < scalar(@$e); $i++) {
@@ -2113,6 +2122,94 @@ sub _reduce_term {
   return () if !defined $end;
   my $node_id = $self->parse([ @$e[$start .. $end] ]);
   return ($node_id, $end + 1);
+}
+
+# --- #153 FOLD, chunk 1: phase-1 term reduction in the main loop -----------
+#
+# Reduce every POSTFIX-BEARING term whose primary the walker can claim into
+# ONE node, in place, BEFORE the opportunistic arrow/subscript machinery
+# runs.  After this pass the legacy loop sees a single already-reduced node
+# where it used to hand-walk `$h -> {a} [2]` token by token; the reduction
+# itself is _reduce_term's recursive parse of exactly the term's tokens, so
+# the node is built by the SAME builder branches the in-place walk uses for
+# the same tokens — byte-identical emission is the measured expectation, not
+# a hope (corpus + suite emission compare, s375).
+#
+# Deliberately NOT folded here (they stay with the legacy loop, later
+# chunks):
+#   * a WORD-led term — indirect-object syntax, list operators, filehandles
+#     and `=>` autoquote all read the raw word and its neighbours;
+#   * a BLOCK-led term — a `{…}` after grep/map/sort/eval/do/sub is that
+#     word's BLOCK ARGUMENT, not a hash-constructor primary; the
+#     block-vs-constructor question belongs to handle_subcalls (chunk 2,
+#     where $deref_skip lives);
+#   * a term followed by a Block/Constructor group — the legacy loop has
+#     combining rules that read the raw pair (indirect method args
+#     `$o->SUPER::m{@a}`, kv-slice spellings); folding the left side would
+#     blind them.
+#
+# The whole-array guard is load-bearing: _reduce_term parses the subrange
+# through this same function, so claiming ALL of @$e would recurse forever.
+# A term that IS the whole expression is exactly what the legacy machinery
+# already reduces top-down; the fold's job is only the embedded case.
+sub _fold_terms {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e); $i++) {
+    my $t = $e->[$i];
+    my $r = ref($t);
+    my $is_start =
+         $r eq 'PPI::Token::Cast'
+      || $r eq 'PPI::Token::Symbol'
+      || $r eq 'PPI::Token::Magic'
+      || $r eq 'PPI::Token::ArrayIndex'
+      || $r eq 'PPI::Structure::List'
+      || $r eq 'PPI::Structure::Constructor'
+      || $self->is_internal_node_type($t);
+    next if !$is_start;
+    # A position PRECEDED by a cast or an arrow is the middle of some term,
+    # never a start: folding the tail alone re-binds the subscript under the
+    # wrong reading (`$$r[0]` would become `${ $r[0] }`; `$o->$m(...)`'s $m
+    # would become an @m element).  The proper start (the cast / the chain
+    # head) either claimed this position already or was guarded off.
+    if ($i > 0) {
+      my $prev = $e->[$i - 1];
+      next if ref($prev) eq 'PPI::Token::Cast'
+           || $self->is_arrow_op($prev);
+      # A Constructor is a genuine anon-array primary only where nothing
+      # before it could own it as a POSTFIX group.  PPI classifies `[...]`
+      # by its predecessor, and after a `)` (list slice `(...)[0]`), a qw
+      # list, or an already-reduced node it hands over a Constructor that is
+      # really a SUBSCRIPT — folding `[0]->{k}` alone would orphan the term
+      # it subscripts (found live: ref.t list-slice rows, grep.t deref-map).
+      # Only an operator (or expression start) guarantees primary position.
+      next if $r eq 'PPI::Structure::Constructor'
+           && ref($prev) ne 'PPI::Token::Operator';
+    }
+    my $end = $self->_term_extent($e, $i, undef);
+    next if !defined $end;
+    next if $i == 0 && $end == scalar(@$e) - 1;      # whole array: recursion guard
+    # Postfix-bearing only: a bare `$x` / `@$x` / `(…)` term is left as raw
+    # tokens — the machinery reads those shapes (content, sigils) all over.
+    my $p = $i;
+    $p++ while ref($e->[$p]) eq 'PPI::Token::Cast';
+    next if $end <= $p;
+    # Combining-rule guard: raw Block/Constructor after the term.
+    if ($end + 1 < scalar(@$e)) {
+      my $after = ref($e->[$end + 1]);
+      next if $after eq 'PPI::Structure::Block'
+           || $after eq 'PPI::Structure::Constructor';
+    }
+    my ($node_id) = $self->_reduce_term($e, $i, undef);
+    next if !defined $node_id;
+    # The tree stores an internal node's PPIreference wrapper as its data —
+    # that wrapper (with its {type}) is what belongs in the token array.  A
+    # non-wrapper result (the parse reduced to a raw token) gets a fresh one.
+    my $node = $self->get_a_node($node_id);
+    $node = $self->make_subtree_item($node_id)
+        if !$self->is_internal_node_type($node);
+    splice @$e, $i, $end - $i + 1, $node;
+  }
+  return;
 }
 
 # Pre-pass (runs before handle_subcalls): collapse a dynamic typeglob-slot into a

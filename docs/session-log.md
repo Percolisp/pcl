@@ -4,6 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 375b (2026-08-09, Fable) — #153 FOLD chunk 1: `_fold_terms`, emission-identical over all four populations
+
+The FOLD's first chunk: `parse()` now reduces every embedded POSTFIX-BEARING
+term to one node through `_reduce_term` (the phase-1 reducer) BEFORE the
+opportunistic arrow/subscript machinery runs — the main loop's first real
+step from "reduce while binding" to Option B's "reduce, then bind".  Pure
+addition (+97 lines PExpr.pm); the legacy branches the fold shadows are
+deleted in a later chunk, after the fold has survived a full sweep cycle.
+
+**What is deliberately NOT folded (each guard unit-tested):** a WORD-led
+term (indirect object, list operators, filehandles, `=>` autoquote all read
+the raw word); a BLOCK-led term (a `{…}` after grep/eval/do/sub is a block
+ARGUMENT — chunk 2, where `$deref_skip` lives); a term followed by a raw
+Block/Constructor (indirect-method-args combining rules); the WHOLE array
+(recursion guard — `_reduce_term` parses through this same function); any
+position preceded by a Cast or `->` (mid-term); and a Constructor start
+whose predecessor is not an operator (PPI classifies `[...]` by predecessor,
+so after `)` it is really a SUBSCRIPT).
+
+**Two real mis-binds found by measurement, both guarded:** `$$r[0]` re-bound
+as `${ $r[0] }` (the tail of a cast-led term folded alone) and list-slice
+`({...})[0]->{k}` orphaning its List (the Constructor claimed as an
+anon-array primary).  The first corpus pass flagged exactly these two
+families (grep.t, ref.t); both fixed, both pinned in reduce-term-01.t
+(65 → 76 rows).
+
+**Verification — emission byte-identical over ALL FOUR populations:**
+corpus `tools/corpus-diff.pl` IDENTICAL 111/111 vs HEAD; perl-suite A/B
+(same compiler, `PCL_NO_FOLD=1` vs default) SAME 604/604 with zero
+exit-status differences; CPAN board A/B SAME 183/183; lib/ shims SAME
+21/21.  Gate `tools/prove-core` PASS 133 files / 4784 (4773 + 11 new unit
+rows).  Transpile time neutral (pack.t 5.97 s vs 6.01 s).  Emission is
+provably unchanged over every sweep input, so no sweep and NO cache
+generation bump (emission-preserving by measurement; the s375 cadence
+ruling's three legs all met).  `PCL_NO_FOLD` stays as the A/B instrument
+for chunks 2–3 and is deleted with the legacy branches.
+
+**Chunk 2 boundary data (probed vs perl):** `grep {a=>1}->{a}, LIST` is
+expr-form in perl (deparse confirms) and PCL already matches; `eval { 41
+}->[0]` derefs eval's RESULT and PCL matches — so folding Block-led terms
+must key on hash-constructor shape and never on a block after a
+block-taking word.  #271 (`pipe my ($r,$w)`) and #211 (`$$rr->{k}`) remain
+open acceptance targets for later chunks — both probed unchanged from HEAD.
+
+---
+
 ## Session 375 (2026-08-09, Fable) — s374 review: all four commits APPROVED, six asks ruled
 
 Review of s374 per the division of labor.  Full rulings in

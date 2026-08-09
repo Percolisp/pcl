@@ -1846,3 +1846,28 @@ E4.1's pre-work is now done.
   `plan()`) → #276 (empty-brace list-op argument; probe `map {}`/`grep {}`
   before widening) → #238 → #239; then #237.  The FOLD (#153) = Fable,
   begun s375.
+
+## s375b (2026-08-09, Fable) — #153 FOLD chunk 1: phase-1 term reduction in the main loop
+
+- **`_fold_terms` is the FOLD's first chunk**: parse() reduces every embedded
+  postfix-bearing term to ONE node via `_reduce_term` before the arrow/
+  subscript machinery runs.  NOT folded, each guard unit-tested in
+  reduce-term-01.t: Word-led terms, Block-led terms (chunk 2, `$deref_skip`),
+  terms followed by a raw Block/Constructor, the whole array (recursion
+  guard), positions preceded by a Cast or `->` (mid-term), and Constructor
+  starts not preceded by an operator — **PPI classifies `[...]` by its
+  PREDECESSOR**, so after `)` (list slice) it is a SUBSCRIPT, and folding it
+  as an anon-array orphans the term it subscripts (found live in ref.t/
+  grep.t; same family as `_retag_braced_deref_subscript`).
+- **The fold is emission-preserving BY MEASUREMENT over all four audit
+  populations**: corpus-diff IDENTICAL 111/111 vs HEAD; A/B (same compiler,
+  `PCL_NO_FOLD=1` toggle — no worktree, no normalization needed) SAME
+  604/604 suite + 183/183 board + 21/21 lib shims, zero exit diffs; gate
+  133/4784 PASS; perf neutral.  Hence NO sweep and NO cache-generation bump
+  (s375 cadence ruling, all three legs).  `PCL_NO_FOLD` is the standing A/B
+  instrument for chunks 2–3, deleted with the legacy branches.
+- **Chunk-2 boundary probed vs perl**: `grep {a=>1}->{a}, LIST` = expr-form
+  (deparse), `eval {…}->[0]` derefs eval's RESULT — both already match PCL,
+  so Block-led folding must key on hash-constructor SHAPE, never on a block
+  after a block-taking word.  #271/#211 unchanged from HEAD, still the
+  FOLD's later acceptance targets.
