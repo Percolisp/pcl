@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 19;
 
 sub run_cl {
     my ($code) = @_;
@@ -199,3 +199,90 @@ my %g = (x=>1); print "F:", scalar(%g), "\n";
 print "G:", scalar("str"), "\n";
 }), "A:ARRAY\nB:ARRAY\nC:SCALAR\nD:HASH\nE:3\nF:1\nG:str\n",
    'scalar(REF) is the ref itself; scalar(@a)/scalar(%h) are still the counts');
+
+# ------------------------------------ 8. explain() DUMPS a ref (task #236)
+#
+# Test::More::explain renders a ref with Data::Dumper (Indent 1, Terse 1,
+# Sortkeys 1) and passes a non-ref through.  PCL stringified instead, so every
+# is_deeply failure that printed its operands read `got 'ARRAY(0x53)'` and was
+# undiagnosable.  The expected text below is the LIVE Data::Dumper output for
+# each value (probed s374), minus Dumper's trailing newline — PCL omits it so
+# pl-diag does not emit a bare `# ` line after every dump.
+
+is(run_cl(q{use Test::More;
+plan tests => 1;
+print explain([1,[2,3]]), "|\n";
+print explain({b=>2,a=>1}), "|\n";
+print explain([undef,1.5,"x","10",-3]), "|\n";
+print explain("plain"), "|\n";
+ok(1);
+}), <<'EXPECT', 'explain() renders arrays, hashes, sorted keys, number-vs-string quoting');
+1..1
+[
+  1,
+  [
+    2,
+    3
+  ]
+]|
+{
+  'a' => 1,
+  'b' => 2
+}|
+[
+  undef,
+  '1.5',
+  'x',
+  '10',
+  -3
+]|
+plain|
+ok 1
+EXPECT
+
+is(run_cl(q{use Test::More;
+plan tests => 1;
+print explain(bless({a=>1},"Foo")), "|\n";
+print explain(\"str"), "|\n";
+print explain(sub {1}), "|\n";
+print explain([]), "|", explain({}), "|\n";
+print explain(["it's","a\\\\b"]), "|\n";
+ok(1);
+}), <<'EXPECT', 'explain() renders bless/scalar-ref/code-ref/empty forms and quotes like Dumper');
+1..1
+bless( {
+  'a' => 1
+}, 'Foo' )|
+\'str'|
+sub { "DUMMY" }|
+[]|{}|
+[
+  'it\'s',
+  'a\\b'
+]|
+ok 1
+EXPECT
+
+# A cycle must TERMINATE with Dumper's back-reference, not recurse forever;
+# a shared ref prints the path of its first occurrence.
+is(run_cl(q{use Test::More;
+plan tests => 1;
+my $c = [1]; push @$c, $c;
+print explain($c), "|\n";
+my $s = {k=>1};
+print explain([$s,$s]), "|\n";
+ok(1);
+}), <<'EXPECT', 'explain() prints $VAR1 back-references for a cycle and a shared ref');
+1..1
+[
+  1,
+  $VAR1
+]|
+[
+  {
+    'k' => 1
+  },
+  $VAR1->[0]
+]|
+ok 1
+EXPECT

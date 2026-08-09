@@ -682,10 +682,124 @@
                     (mapcar (lambda (m) (format nil "    ~A->can('~A') failed" cls m))
                             missing))))))))
 
-;;; explain(...) — Test::More returns a Data::Dumper-ish rendering for note/diag.
-;;; Not byte-identical to Dumper, but readable and crash-free.
+;;; explain(...) — Test::More returns a Data::Dumper rendering for note/diag.
+;;;
+;;; Test::More::explain passes a NON-ref through unchanged and renders every
+;;; REF with Data::Dumper under Indent(1), Terse(1), Sortkeys(1).  PCL used to
+;;; stringify instead, so every is_deeply failure that printed its operands
+;;; read `got 'ARRAY(0x53)'` — the value was there and the diagnosis was not
+;;; (task #236: ~40 CPAN-board rows had no usable cause line).
+;;;
+;;; The shape test is the one test-deeply-equal already uses — unbox one level,
+;;; then vector = array ref, hash-table = hash ref, box = scalar ref — so
+;;; anything is_deeply can WALK, explain can PRINT.
+;;;
+;;; Layout, key order, quoting and the bless/backslash/sub forms are the live
+;;; `perl` answers (probed s374).  Two deliberate differences from Dumper:
+;;;   * no trailing newline — pl-diag splits on newline and would print a bare
+;;;     `# ` line after every dump;
+;;;   * an integer prints bare and everything else quoted ('1.5', and '10' for
+;;;     the string "10").  Dumper's XS reads the SV's flags; PCL's CL
+;;;     integer-vs-float-vs-string types carry the same distinction.
+;;; A shape with no Dumper form here (a glob ref) falls back to its
+;;; stringification — the old behaviour for everything, and still no worse.
+
+(defvar *dumper-seen* nil
+  "Alist of ref identity -> the $VAR1 path it was first printed at, so a cycle
+   or a shared ref prints the back-reference Dumper prints instead of looping.")
+
+(defun %dumper-quote (s)
+  "Dumper's _quote: single-quoted, with ' and \\ escaped."
+  (with-output-to-string (out)
+    (write-char #\' out)
+    (loop for c across s
+          do (when (or (char= c #\') (char= c #\\)) (write-char #\\ out))
+          (write-char c out))
+    (write-char #\' out)))
+
+(defun %dumper-pad (level)
+  (make-string (* 2 level) :initial-element #\Space))
+
+(defun %dumper-atom (v)
+  "A non-ref leaf: undef, a bare integer, or a quoted string."
+  (cond ((or (null v) (eq v *p-undef*)) "undef")
+        ((integerp v) (princ-to-string v))
+        (t (%dumper-quote (to-string v)))))
+
+(defun %dumper-ref-p (inner)
+  "Is INNER (one unbox down) a shape this renderer dumps structurally?"
+  (or (and (vectorp inner) (not (stringp inner)))
+      (hash-table-p inner)
+      (functionp inner)
+      (p-box-p inner)))
+
+(defun %dumper-class (v)
+  "The bless class of V, or NIL when V is a plain (unblessed) ref."
+  (let ((r (p-ref v)))
+    (and (stringp r) (plusp (length r))
+         (let ((k (p-reftype v)))
+           (and (stringp k) (not (string= r k)) r)))))
+
+(defun %dumper-array (vec level path)
+  (if (zerop (length vec))
+      "[]"
+      (format nil "[~%~{~A~^,~%~}~%~A]"
+              (loop for i from 0 below (length vec)
+                    collect (concatenate 'string (%dumper-pad (1+ level))
+                                         (%dumper-value (aref vec i) (1+ level)
+                                                        (format nil "~A->[~D]" path i))))
+              (%dumper-pad level))))
+
+(defun %dumper-hash (h level path)
+  ;; :__class__ is where a blessed hash stores its class — Dumper prints that
+  ;; as the bless() wrapper, never as a key.
+  (let ((pairs (sort (loop for k being the hash-keys of h
+                           unless (eq k :__class__)
+                           collect (cons (to-string k) k))
+                     #'string< :key #'car)))
+    (if (null pairs)
+        "{}"
+        (format nil "{~%~{~A~^,~%~}~%~A}"
+                (loop for pair in pairs
+                      collect (format nil "~A~A => ~A"
+                                      (%dumper-pad (1+ level))
+                                      (%dumper-quote (car pair))
+                                      (%dumper-value (gethash (cdr pair) h) (1+ level)
+                                                     (format nil "~A->{~A}" path
+                                                             (%dumper-quote (car pair))))))
+                (%dumper-pad level)))))
+
+(defun %dumper-body (inner level path)
+  "The unblessed rendering of a ref shape."
+  (cond ((functionp inner) "sub { \"DUMMY\" }")
+        ((and (vectorp inner) (not (stringp inner))) (%dumper-array inner level path))
+        ((hash-table-p inner) (%dumper-hash inner level path))
+        ((p-box-p inner)
+         (concatenate 'string "\\"
+                      (%dumper-value inner level (format nil "${~A}" path))))
+        (t (%dumper-atom inner))))
+
+(defun %dumper-value (v level path)
+  (let* ((inner (if (p-box-p v) (p-box-value v) v))
+         (seen  (and (%dumper-ref-p inner) (assoc inner *dumper-seen* :test #'eq))))
+    (cond
+      (seen (cdr seen))
+      ((not (%dumper-ref-p inner)) (%dumper-atom inner))
+      (t (push (cons inner path) *dumper-seen*)
+         (let ((body  (%dumper-body inner level path))
+               (class (%dumper-class v)))
+           (if class
+               (format nil "bless( ~A, ~A )" body (%dumper-quote class))
+               body))))))
+
 (defun pl-explain (&rest args)
-  (format nil "~{~A~^~%~}" (mapcar #'to-string args)))
+  (format nil "~{~A~^~%~}"
+          (mapcar (lambda (a)
+                    (let ((inner (if (p-box-p a) (p-box-value a) a)))
+                      (if (%dumper-ref-p inner)
+                          (let ((*dumper-seen* nil)) (%dumper-value a 0 "$VAR1"))
+                          (to-string a))))
+                  args)))
 
 ;;; pass(name)
 (defun pl-pass (&optional name)
