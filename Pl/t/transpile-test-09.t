@@ -878,4 +878,32 @@ sub emb3    { ++my $e->{k}; return eval '$e->{k}' }
 setter3(); print "emb3=", emb3(), " global e=$e\n";
 });
 
+# ── #272 (s372): the same veto was still SCOPE-BLIND for an ANON sub body.  The
+# rename pass keyed on "inside a NAMED sub", but the question the scope asks is
+# only "inside SOME sub's body" — no other sub can see a lexical declared in one.
+# So `my $f = sub { ++my $x->{foo} }` fell back to the package global another sub
+# had written and died on it (type-error in P-GETHASH-BOX, not even a wrong
+# value).  One predicate widened, `_enclosing_named_sub` -> `_enclosing_sub_body`
+# (prototype/attribute-skipping anon-`sub` block recogniser, the shape
+# _state_decl_route already uses).
+# INVERSE GUARDS in the same snippet, all probed against perl: (a) the FILE-level
+# shape the veto exists for still shares one cell (#199); (b) an anon sub NESTED
+# in a named sub; (c) a map BLOCK is not a sub body, so its `my` is untouched;
+# (d) BEGIN is Scheduled, not a sub body.
+test_transpile("embedded `my` inside an ANON sub body (#272)", q{
+sub setter { ($x, $y) = (7, 8) }
+my $anon = sub { ++my $x->{foo}; return $x->{foo} };
+setter();
+print "anon=", $anon->(), $anon->(), " global x=$x\n";
+my $fh2;
+sub reader { return defined($fh2) ? "shared:$fh2" : "shared:undef" }
+$fh2 = "FH"; print "keep=", reader(), "\n";
+sub setz  { $z = "GLOBAL" }
+sub outer { my $g = sub { ++my $z->{k}; return $z->{k} }; return $g->() }
+setz(); print "nested=", outer(), " z=$z\n";
+sub setw { $w = 5 }
+setw(); my @r = map { my $w = $_ * 2; $w } (1,2);
+print "map=@r w=$w\n";
+});
+
 done_testing();

@@ -1347,6 +1347,31 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s372 (2026-08-09, Opus) — #274 shipped; #269 measured and PARKED; #272
+
+- **A FAILED ALIAS ANCHOR DIES AT EVERY k** (#274, ruled s371 §2, shipped
+  `033f088`): the v1 seam's sole-element `_apply_foreach_alias_rewrite` no
+  longer swallows a non-outermost head — same die as the k>1 site.  Measured
+  before flipping: 751 sources across BOTH populations (528 perl-suite + 223
+  CPAN-board), **0 new dies**; corpus-diff identical; sweep GATE clean, TOTAL
+  18499 (baseline 18498).
+- **The two foreach comma walks now carry PAIRED invariant comments** naming
+  each other (`_foreach_scalar_elements` ↔ `_ev_foreach_alias_list`): on a
+  QUALIFYING list they provably agree; the veto is deliberately a SUPERSET
+  elsewhere.  A third walk in the family reopens the shared-primitive question.
+- **#269 is PARKED BEHIND #196, measured not guessed**: `re/reg_eval_scope.t`'s
+  snapshot `C_ok` is **5** of perl's 48, and all 47 assertions exercise
+  `(?{ … })` blocks, which PCL does not run at all — so de-gating buys ~0
+  verified rows.  The gate itself names a REAL capture; do not delete it.
+- **A gate-SET compare must normalize the COMPILER'S OWN ROOT, not just line
+  numbers** — the emitted preamble embeds it (`*pcl-pl2cl-path*`, the @INC
+  pushes, `*p-core-inc-dirs*`: task #217), so a worktree-vs-tree diff reports
+  EVERY file as changed until both roots fold to one token.
+- **The embedded-`my` veto's condition is "inside ANY sub body", not "inside a
+  NAMED sub"** (#272) — whether the body has a name says nothing about who can
+  see its lexicals; the anon spelling fell through to the package global and
+  crashed.  `_enclosing_named_sub` → `_enclosing_sub_body`.
+
 ## s371 (2026-08-09, Fable) — s370 review: #267 APPROVED; asks 1–4 RULED
 
 - **s370 APPROVED as shipped** (gate independently re-verified 132/4744;

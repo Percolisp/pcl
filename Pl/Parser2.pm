@@ -4431,9 +4431,10 @@ sub _rename_vetoed_embedded_mys {
       next unless ref($stmt) eq 'PPI::Statement'
                || ref($stmt) eq 'PPI::Statement::Expression';
       my $root = $stmt->parent;
-      # INSIDE A NAMED SUB only: at file level the other sub genuinely shares
-      # the cell and the veto is right (Capture-Tiny's Utils.pm, #199).
-      next unless _enclosing_named_sub($stmt);
+      # INSIDE A SUB BODY only — named or anonymous (#272): at FILE level the
+      # other sub genuinely shares the cell and the veto is right
+      # (Capture-Tiny's Utils.pm, #199); inside any sub body it cannot.
+      next unless _enclosing_sub_body($stmt);
       my @syms = $self->_embedded_my_syms($stmt) or next;
       my %uniq;
       my @names = grep { !$uniq{$_}++ } map { $_->content } @syms;
@@ -4456,13 +4457,32 @@ sub _rename_vetoed_embedded_mys {
   return;
 }
 
-# The nearest enclosing NAMED sub definition of $el, if any (a Scheduled block
-# — BEGIN/END — is not one: it has no name to be called by).
-sub _enclosing_named_sub {
+# The nearest enclosing SUB BODY of $el, if any: a NAMED sub definition, or
+# the BLOCK of an anonymous `sub { … }` (with its prototype/attributes
+# skipped, the same way _state_decl_route recognises one).  A Scheduled block
+# — BEGIN/END — is neither: it has no call boundary, it runs once in place.
+#
+# WHY the body and not the NAME (#272, s372): the condition the embedded-`my`
+# rename needs is "this declaration is inside SOME sub's body", because then
+# no other sub can possibly see the lexical it declares — which is exactly
+# why the file-level premise of the veto (another sub genuinely SHARES a
+# file-level cell: Capture-Tiny's Utils.pm, #199) does not apply.  Whether
+# that body has a name is irrelevant to the scope question, and keying on the
+# name left the ANON spelling scope-blind: the decl fell back to the package
+# global, so `my $anon = sub { ++my $x->{foo} }` read the global that another
+# sub had written and died on it.
+sub _enclosing_sub_body {
   my ($el) = @_;
   for (my $p = $el->parent; $p; $p = $p->parent) {
     return $p if $p->isa('PPI::Statement::Sub')
               && !$p->isa('PPI::Statement::Scheduled') && $p->name;
+    next unless $p->isa('PPI::Structure::Block');
+    my $w = $p->sprevious_sibling;
+    $w = $w->sprevious_sibling
+      while $w && ($w->isa('PPI::Token::Prototype')
+                || $w->isa('PPI::Token::Attribute')
+                || ($w->isa('PPI::Token::Operator') && $w->content eq ':'));
+    return $p if $w && $w->isa('PPI::Token::Word') && $w->content eq 'sub';
   }
   return undef;
 }

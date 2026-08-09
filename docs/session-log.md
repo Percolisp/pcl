@@ -4,6 +4,64 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 372 (2026-08-09, Opus) — #274 shipped, #269 measured and parked, #272 fixed
+
+Executing Fable's s371 §6 queue in order.
+
+**#269 — the ruled measurement, and it says DON'T.**  `re/reg_eval_scope.t`
+still transpile-FAILS on its single gate (`lexical 'r' possibly captured by
+nested sub f2`), so it contributes 0 rows.  Its `perl-suite-run.tsv` snapshot
+`C_ok` is **5** against perl's 48/1 — that is the whole bar.  And the 5 is
+notional: the file is 385 lines with **73 `(?{ … })` occurrences and all 47
+assertions** (22 via `fresh_perl_is`) exercising regex-embedded code blocks,
+which PCL does not run at all (#196 axis, s368 probe).  De-gating buys ~0
+verified rows; the gate names a REAL capture and must not be deleted.  Parked
+behind #196 with the measurement on the task.
+
+**#274 (`033f088`) — the k=1 anchor-miss now DIES**, ruled s371 §2.  The v1
+seam's sole-element `_apply_foreach_alias_rewrite` was returning the unchanged
+list on a failed anchor; the multi-element site has always died.  A failed
+anchor is always a compiler self-inconsistency (verdict right → the write lands
+on a copy, the #262/#263 silent-wrong; verdict wrong → the two functions
+disagree about the same tokens).  Folded in per s371 §3: **paired invariant
+comments** at the two comma walks, each naming the other, stating the
+qualifying-list agreement and the deliberate superset direction of the veto.
+
+*Measurement (the ruled two-population bar).*  The only non-comment edit is
+`// $list_cl` → `// die`, so emission is byte-identical for anything that does
+not hit the failed-anchor path and the measurable population is exactly
+"sources that now die": **751 sources scanned (528 perl-suite + 223 CPAN-board),
+0 new dies**; 21 non-zero exits, all pre-existing gates.  corpus-diff identical
+across 111; gate 132/4744; full sweep COLD **GATE clean, 0 new / 0 fixed / 0
+LOST, TOTAL 18499 vs baseline 18498** (the 6 UNSTABLE + 4 unverified rows are
+the usual crash-file noise in method.t / postfixderef.t / ref.t / tr.t).
+pack.t TIMEOUTed at the 90 s default under the cold cache and passed on the
+#176 retry.  Guard rows: `Pl/t/foreach-aliasing-01.t` 20 → 22, pinning the
+anchor contract both dies rest on (pure perl, no SBCL).
+
+**#272 — the embedded-`my` veto was still SCOPE-BLIND for an ANON sub body.**
+`_rename_vetoed_embedded_mys` keyed on `_enclosing_named_sub`, but the question
+the scope asks is only "inside SOME sub's body" — no other sub can see a
+lexical declared in one, which is the entire reason the file-level veto (#199,
+Capture-Tiny's shared `open my $fh`) does not apply there.  So
+`my $f = sub { ++my $x->{foo} }` fell through to the package global another sub
+had written and **crashed** (`The value 7 is not of type HASH-TABLE` in
+`P-GETHASH-BOX`) where perl prints `1 1`.  One predicate widened,
+`_enclosing_named_sub` → `_enclosing_sub_body`, reusing the
+prototype/attribute-skipping anon-`sub` block recogniser `_state_decl_route`
+already uses.  Probed live vs perl: the bug shape now matches, and five inverse
+guards match too — the FILE-level #199 shape still shares one cell, an anon sub
+NESTED in a named sub, a `map` BLOCK (not a sub body), a BEGIN block, and an
+anon sub whose name nobody else mentions.
+
+**GATE-SET GOTCHA, new and worth carrying:** a worktree-vs-tree emission diff
+must normalize the **compiler's own ROOT**, not just compiler line numbers —
+the emitted preamble embeds it (`*pcl-pl2cl-path*`, the @INC pushes,
+`*p-core-inc-dirs*`; task #217), so the first pass reported every file as
+changed.  With both roots folded to one token: **751 sources, 0 changed.**
+
+---
+
 ## Session 371 (2026-08-09, Fable) — s370 review: #267 APPROVED as shipped; the four asks RULED
 
 Review of `f2c7c25` + `0e5b088` against `docs/opus5-review-requests-s370.md`.
