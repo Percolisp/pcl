@@ -6776,22 +6776,30 @@ sub _lower_compound {
     }
     my $list_form;
     unless (defined $to_form) {
-      $list_form = $self->_lower_expr(\@list_parts, $stmt, 1);
-      if (@alias_hd) {
-        $list_form = _alias_box_form($list_form, @alias_hd)
-          // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
+      # A list whose every DEPTH-0 element is a single SCALAR operand has a
+      # statically known length, so it must not go through the run-time
+      # flattener: at runtime a box wrapping a vector is indistinguishable
+      # from an @array box, so %p-flatten-for-list spread the referent
+      # (`for ($r)` ran once per element of @$r).  The sigil is compile-time
+      # knowledge — emit the `(vector …)` shape instead, which keeps each
+      # box as one element (so `for ($x) { $_ = 1 }` writes through).  Same
+      # rule at k=1 and k>1; resolver + rationale:
+      # Pl::Parser::_foreach_scalar_elements.
+      my @el = Pl::Parser::_foreach_scalar_elements(\@list_parts);
+      if (@el > 1) {
+        # Each element's token run is lowered EXACTLY ONCE and the whole
+        # list never is — PExpr's cleanup mutates the shared tokens
+        # destructively (same discipline as the range split above).
+        $list_form = ['vector', map { $self->_lower_expr($_, $stmt, 1) } @el];
       }
-      # A single SCALAR list operand contributes exactly ONE element, even
-      # when it holds an array/hash ref — but at runtime a box wrapping a
-      # vector is indistinguishable from an @array box, so
-      # %p-flatten-for-list spread the referent (`for ($r)` ran once per
-      # element of @$r).  The sigil is compile-time knowledge: wrap it in
-      # the SAME (vector …) shape the multi-element list already uses, which
-      # keeps the box itself as the single element (so `for ($x) { $_ = 1 }`
-      # still writes through).  Predicate + rationale:
-      # Pl::Parser::_foreach_single_scalar_p.
-      $list_form = ['vector', $list_form]
-        if Pl::Parser::_foreach_single_scalar_p(\@list_parts);
+      else {
+        $list_form = $self->_lower_expr(\@list_parts, $stmt, 1);
+        if (@alias_hd) {
+          $list_form = _alias_box_form($list_form, @alias_hd)
+            // die "Parser2 TODO: foreach over an aliasable lvalue element\n";
+        }
+        $list_form = ['vector', $list_form] if @el;
+      }
     }
     # The loop variable is scoped to the BODY only: register it, lower the
     # body (and a continue block, which sees the loop var), then restore

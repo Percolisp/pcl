@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -102,6 +102,23 @@ test_cl('for(f()) does not write back (normal sub returns a copy)',
 test_cl('for($a[0], $a[1]) still iterates both (no false rewrite)',
     q{my @a=(1,2,3); my @seen; for ($a[0], $a[1]) { push @seen, $_ } print "@seen\n";},
     "1 2\n");
+
+# --- #267 step 1 (s370): the WRAPPER.  A list whose every depth-0 element is a
+# single scalar has a statically known length, so it takes the `(vector …)`
+# shape at every k — not the run-time flattener, which cannot be handed boxes
+# (a box over a vector is indistinguishable from an @array box: the #262/#263
+# hazard one level up).  Both spellings, since they are two lowering sites.
+like(transpile('my %h=(a=>1,b=>2); for ($h{a}, $h{b}) { }'),
+    qr/\(vector \(p-gethash %h "a"\) \(p-gethash %h "b"\)\)/,
+    'multi-element scalar list emits (vector …), block form (#267)');
+like(transpile('my %h=(a=>1,b=>2); $_="w" for ($h{a}, $h{b});'),
+    qr/\(vector \(p-gethash %h "a"\) \(p-gethash %h "b"\)\)/,
+    'multi-element scalar list emits (vector …), modifier form (#267)');
+# INVERSE GUARD: a MIXED list keeps the flattener — `@a` really does spread, so
+# a static length does not exist and the vector shape would be a miscompile.
+like(transpile('my @a=(1,2); my $x=0; for ($x, @a) { }'),
+    qr/\(p-flatten-args \(list \$x \@a\)\)/,
+    'a list with an @array still flattens at run time (#267 inverse)');
 
 # --- #263 (s365): the STATEMENT-MODIFIER spelling is a second lowering site,
 # and it was not doing the rewrite at all — the two spellings wrap the list

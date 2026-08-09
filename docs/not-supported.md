@@ -43,6 +43,28 @@ global constant table besides.
 
 ---
 
+## A LITERAL in a `foreach` list is writable, not read-only
+
+**Perl behaviour:** a constant in a foreach list is a read-only scalar, and the
+loop variable aliases it — so `for (3) { $_++ }` and `for ($x, 3) { $_++ }`
+both die *"Modification of a read-only value attempted"* (after the writable
+elements before the literal have already been modified).
+
+**PCL behaviour:** the literal becomes an ordinary box like any other element,
+so the write silently lands on a copy and the loop runs to completion.  Every
+non-literal element in the same list is written correctly.
+
+**Rationale:** same missing mechanism as the two entries around this one — a
+read-only **scalar** has nowhere to carry the flag in PCL's box model (task
+#159 gave read-only *arrays* a real representation because there the storage
+itself is fixed-size).  This is not new to #267's multi-element aliasing: the
+single-element spelling `for (3) { $_++ }` has always behaved this way, probed
+live against perl in s370.  Nothing consumes a wrong value — the program keeps
+running where perl stops — so it is an accepted divergence, not a silent-wrong
+in the rule-12 sense.
+
+---
+
 ## Read-only constants via `\undef` stash tricks
 
 **Perl behaviour:** `BEGIN { $::{z} = \undef }` creates a constant slot in the

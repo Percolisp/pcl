@@ -2108,16 +2108,28 @@ sub _process_expression_statement {
     if ($modifier eq 'for' || $modifier eq 'foreach') {
       $cl_modifier = 'foreach';
       # The list must be in LIST_CTX (= 1) so split() returns elements not count
-      my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
-      $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
-      # `$_ = "w" for ($h{k})` aliases the live element exactly as the block
-      # form does — same rewrite, same helper (#263).
-      $cond_cl = _apply_foreach_alias_rewrite($cond_cl, \@cond_parts);
-      # A single SCALAR list operand is ONE element even when it holds an
-      # array/hash ref — see _foreach_single_scalar_p.  Same wrap as the
-      # block-form site in Parser2.
-      $cond_cl = "(vector $cond_cl)"
-        if _foreach_single_scalar_p(\@cond_parts);
+      # An all-single-scalar list takes the `(vector …)` shape at every k, not
+      # the run-time flattener — Parser.pm's _foreach_scalar_elements has the
+      # rule.  Same decision as the block-form site in Parser2, one resolver.
+      my @el = _foreach_scalar_elements(\@cond_parts);
+      my $cond_cl;
+      if (@el > 1) {
+        # Each element run is lowered exactly once; the whole list never is.
+        my @forms = map {
+          my $f = $self->_parse_expression($_, $stmt, 1);
+          $f =~ s/^[ \t]+// if defined $f;
+          $f;
+        } @el;
+        $cond_cl = '(vector ' . join(' ', @forms) . ')';
+      }
+      else {
+        $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
+        $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
+        # `$_ = "w" for ($h{k})` aliases the live element exactly as the block
+        # form does — same rewrite, same helper (#263).
+        $cond_cl = _apply_foreach_alias_rewrite($cond_cl, \@cond_parts);
+        $cond_cl = "(vector $cond_cl)" if @el;
+      }
       $cl_code = "(p-foreach (\$_ $cond_cl) $expr_cl)";
     }
     else {
@@ -6558,6 +6570,47 @@ sub _foreach_alias_rewrite {
   return ("p-gethash$suffix", "p-gethash$suffix-box") if $sub =~ /^\{/;
   return ("p-aref$suffix",    "p-aref$suffix-box")    if $sub =~ /^\[/;
   return ();
+}
+
+# The foreach LIST split into its DEPTH-0 elements, but ONLY when EVERY one of
+# them is a single-scalar operand (_foreach_single_scalar_p).  Returns the list
+# of significant-token runs (one arrayref per element), or () when the list does
+# not qualify — a mixed list (`for ($x, @a)`), a `$x or $y` expression, a
+# call-shaped element, an empty slot from a trailing comma.
+#
+# WHY the whole list and not just the sole element: the N=1 rule below IS the
+# N=k rule (ruled s369).  A list whose every element is a single scalar has a
+# STATICALLY known length k — perl-side flattening is impossible — so
+# `(p-flatten-args (list …))` and `(vector E1 … Ek)` are extensionally identical
+# on this population, and only the vector form can carry BOXES (a box handed to
+# p-flatten-args is indistinguishable from an @array box and gets spread: the
+# #262/#263 silent-wrong, one level up).  Callers therefore switch the wrapper
+# for the whole list, never per element.
+#
+# The split is the SHARED low-precedence one (#140/#138,
+# Pl::PExpr::TokenUtils::lowprec_idx) — never a private comma scan.  It also
+# splits `=>`, which is right here: `for ($a => $b)` is a two-element list.  An
+# `or`/`and`/`xor` at depth 0 means the parens hold ONE expression, not a list,
+# and the run declines (as it does today — the operator is not a `->`).
+sub _foreach_scalar_elements {
+  my ($list_parts) = @_;
+  my @sig = _foreach_list_unwrap($list_parts);
+  return () unless @sig;
+
+  my @elems;
+  my $from = 0;
+  while (defined(my $lp = Pl::PExpr::TokenUtils::lowprec_idx(\@sig, $from))) {
+    return () unless $sig[$lp]->content =~ /^(?:,|=>)$/;
+    return () unless Pl::PExpr::TokenUtils::lowprec_split_safe(\@sig, $from, $lp);
+    push @elems, [ @sig[$from .. $lp - 1] ];
+    $from = $lp + 1;
+  }
+  push @elems, [ @sig[$from .. $#sig] ];
+
+  for my $e (@elems) {
+    return () unless @$e && _foreach_single_scalar_p($e);
+  }
+  return @elems;
 }
 
 # Is this foreach LIST exactly ONE SCALAR-valued operand — `$x`, `$h{k}`,
