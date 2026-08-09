@@ -2159,3 +2159,24 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   directions D (defglobal + save/restore `local`) and §7 (selective
   hoisting) are no longer "user decisions" — they are measurement-gated
   work items under this rule.
+
+## s379c (2026-08-09) — USER: three planning answers
+
+- **#237 is SPLIT**: Fable designs/builds the shared variable-reference
+  event scanner + the intuit_more bracket classifier + its probe table;
+  Opus wires in the consumers (regex/dq/rename) and the guard rows after.
+- **IR STABILITY GATES v0.1**: the intermediate code (emitted CL) must be
+  STABLE at the first release — any change to the emitted shape happens
+  BEFORE v0.1, not after.  Derived ordering: after #237 → #287, run the
+  IR-affecting batch first — the §6 defglobal measurement (+ implementation
+  if the s379b conjuncts hold), the §7 selective-hoisting measurement
+  (same), and the #281/#75-scoped macro-vocabulary pass — THEN the
+  mechanical v0.1 track (#277–#280, #282, #283) and the tag.  IR-NEUTRAL
+  work (direction A binder + ports, #153 FOLD, direction C's internal
+  fold) may land any time; direction A step 3 (emission-time naming) is
+  v0.2 material unless it makes the pre-v0.1 batch.
+- **The s379b < 50 % compile-time budget is PER CHANGE, drift watched**:
+  each change is judged against the tree it lands on, but cumulative
+  whole-corpus transpile time is tracked and the user is flagged if the
+  total creeps past ~50 % over the s379 baseline (~65 s whole-corpus,
+  measured s378).

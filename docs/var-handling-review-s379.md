@@ -304,22 +304,27 @@ and installed lambda (Target A says measure, not assume).
   faster-or-unchanged + compile time < 50 % worse; a result that SLOWS
   generated code goes back to the user.)
 
-## 9. Sequencing (recommendation; the queue is the user's)
+## 9. Sequencing (USER-ruled s379c: IR changes go BEFORE v0.1)
 
-1. **#237 via the shared scanner** (§4 = `fable-answers-s378.md` §3's b′)
-   — already queued next; build the scanner AS the fix.  1–2 sessions.
-2. **#287** (sort pair, ruled) — 1 session, rides on fresh #239 context.
-3. **§5 promotion-engine fold** — mechanical, filler-sized per family,
-   Opus-suitable; each fold is corpus-diff-verifiable.
-4. **§3 step 1 (binder + dual-run)** — Fable-led design, one session; the
-   dual-run then runs free in CI while ports proceed.  Natural companion
-   to #153's FOLD chunks 2–3, which shrink the seam the table must
-   round-trip through.
-5. **§6 and §7 measurements** as fillers; if the four s379b sign-off
-   conjuncts hold (simpler, clearer, generated code faster-or-unchanged,
-   compile < 50 % worse), proceed without asking — only a
-   generated-code slowdown or a semantic surprise goes back to the user.
+The organizing rule (USER, s379c): **the emitted CL must be stable at the
+first release** — anything that changes the intermediate code's shape lands
+before the v0.1 tag; IR-neutral internal work may land any time.
 
-v0.1 (#277–#283) does not conflict with any of this — none of it changes
-behavior until a port lands, and the dual-run mode is exactly the kind of
-assurance a release wants running anyway.
+1. **#237 via the shared scanner** (§4 = `fable-answers-s378.md` §3's b′),
+   **SPLIT (USER s379c)**: Fable builds the scanner core + the intuit_more
+   bracket classifier + its probe table; Opus wires the consumers
+   (regex, dq, rename machinery) and the guard rows.  1–2 sessions.
+2. **#287** (sort pair, ruled `fable-answers-s378.md` §2) — 1 session.
+3. **The pre-v0.1 IR batch** — every emitted-shape change, together:
+   - §6 defglobal measurement → implement if the s379b conjuncts hold;
+   - §7 selective-hoisting measurement → same bar;
+   - the #281/#75-scoped macro-vocabulary pass over the generated code.
+   Only a generated-code slowdown or a semantic surprise goes back to the
+   user (s379b rule; compile budget per change, drift watched against the
+   s379 ~65 s whole-corpus baseline).
+4. **v0.1 mechanical track** (#277–#280, #282, #283) → tag.  The IR is
+   frozen at whatever step 3 produced.
+5. **Post-v0.1, IR-neutral**: §3 binder + dual-run and its ports (byte-
+   identical by construction, corpus-diff-gated), §5 promotion-engine fold,
+   #153 FOLD chunks 2–3.  §3 step 3 (emission-time naming) changes the IR
+   and is v0.2 material unless it is pulled into step 3's batch.
