@@ -2102,3 +2102,46 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   `/$x{2,3}/` — so a naive "always a subscript" fix would break exactly those.
   `/$x[0]/` and `/$x{k}/` are the failing side; `$x[0]` / `$x{2}` are
   genuinely ambiguous shapes where perl picks the subscript.
+
+## s379 (2026-08-09, Fable) — s378 review: both commits APPROVED; six asks ruled; two resolver fixes shipped (`docs/fable-answers-s378.md`)
+
+- **Absorb-vs-file-a-companion, refined**: a sibling bug may be ABSORBED into
+  a ruled fix's scope only when (i) zero new mechanism — the ruled mechanism
+  inherently answers it, (ii) loudly recorded, (iii) guarded in the same
+  commit.  Absent any one, file the companion → `fable-answers-s378.md` §1.
+- **#287 fix shape RULED**: two halves in ONE commit — drop `$a`/`$b` from
+  `%PKG_SWITCH_IMMUNE_VARS` AND make the sort lowering bind the pair the
+  comparator block actually reads (reuse `_pkg_in_effect_at`, rule 11); the
+  perl gotcha list to probe (`sort Other::cmp` = caller's pair, etc.) is in
+  §2.  Slot: after #237.
+- **#237 fix shape RULED = (b′)**: ONE shared variable-reference EVENT
+  scanner extracted from StringInterpolation.pm; dq-strings take every
+  chain, the REGEX consumer applies the intuit_more bracket classifier per
+  event; `_gen_interp_regex_pattern`'s private walk is DELETED as the
+  acceptance criterion.  Do NOT route regexes through the dq interpolator
+  wholesale (escape semantics differ).  **#286 is NOT folded in** — intuit_curly
+  is a different heuristic at a different site; it stays deferred on its own
+  cause line → §3.
+- **Guard-row placement**: wall-time headroom beats thematic grouping; a
+  family's rows may scatter — the task/DECIDED entry is the anchor → §6.
+- **Signature params ARE binders to the package-switch resolver** (s379 fix
+  `2af263f`): the head scan reads Prototype/Signature through the seam's own
+  `_signature_param_specs`; a Symbol in a DEFAULT expr is a use; a pure
+  prototype binds nothing.  And `my`/`our`/`state` in NON-declarator
+  positions (fat-comma key, hash-subscript key, method name, `my sub`)
+  contribute no binding and never die → §7.
+- **#288 filed (pre-existing)**: a bareword CALL in a package-switched
+  region resolves to the ENCLOSING package's sub where perl dies
+  "Undefined subroutine &P::hello" — wrong-callee silent-wrong, task carries
+  the layer-discriminating measurement.
+- **Raw `.fails.tsv` row counts are NOT comparable to baseline row counts**
+  (signatures.t: 90 raw vs 34 keys, 0 new) — compare through `sweep-diff`
+  or by its join key → §7.
+- **Variable-handling design review** (USER ask) →
+  `docs/var-handling-review-s379.md`: 51 % of Parser2.pm is variable
+  identity; 26 interpolation-scanner sites; directions A (bind-once symbol
+  table, W12-style dual-run), B (one interp scanner = #237's mechanism),
+  C (one promotion engine), D (defglobal + save/restore `local` dissolves
+  poisoned-my — MEASURE FIRST, changes the IR contract), §7 (hoist only
+  compile-time-referenced subs — measure first).  Standing: no new scanner
+  fixes, no new suffix family, no new scope walk (§8).

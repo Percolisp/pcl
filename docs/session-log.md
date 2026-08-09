@@ -4,6 +4,49 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 379 (2026-08-09, Fable) — s378 review: APPROVED + two resolver fixes; the variable-handling design review
+
+Reviewed `5d94161` (#239) + `4f35ffa` (#237 re-scope) and ruled on all six
+s378 asks: **both commits APPROVED as shipped** (`docs/fable-answers-s378.md`).
+Gate independently re-verified 133/4787 cold; corpus byte-identical; nine
+resolver probes vs perl.  Rulings: absorbing the §9.1 sibling APPROVED with
+the refined companion-vs-absorb rule; #287 = two halves ONE commit (drop the
+immunity + sort lowering binds the pair the block reads, `_pkg_in_effect_at`
+reused), after #237; #237 = shape (b′) — ONE shared variable-reference
+scanner with the intuit_more classifier only in the regex consumer, #286 NOT
+folded; the two shared-rewriter changes APPROVED; two lists CONFIRMED
+separate; guard placement = wall-time headroom wins.
+
+**Two review-probe findings fixed (`2af263f`)**: (1) NEW in 5d94161 —
+signature params were invisible to `_decl_binding_in` (`sub f ($x) { package
+P; $x + 1 }`: perl 42, PCL 1, body requalified to $P::x under the seam's
+plain-lexical binding); head scan now reads Prototype/Signature through the
+seam's own `_signature_param_specs` splitter.  (2) False die on legal perl —
+`my`/`our` as fat-comma or hash-subscript keys hit the rule-12 die;
+non-declarator positions now contribute no binding.  Verified: gate
+133/4788 (+1 guard row in -09), corpus-diff byte-identical, all 21 lib/
+shims + pack-impl + mro byte-identical vs 9177f99 (preamble-normalized),
+signatures.t single-file sweep fail rows byte-identical (888/90).  Gen
+v2-127 → v2-128.  **Filed #288** (pre-existing): a bareword CALL in a
+switched region calls the enclosing package's sub where perl dies.
+
+**USER ASK: the variable-handling design review** →
+`docs/var-handling-review-s379.md`.  Measured: 51 % of Parser2.pm (~4,450
+lines) is variable identity; 26 interpolation-scanner sites (1 real parser
++ 25 approximations); 6 rename-suffix families, 3 near-duplicate veto
+predicates, 5+ scope resolvers.  Four directions: (A) bind-once symbol
+table with W12-style dual-run migration; (B) ONE interpolation event
+scanner, built AS #237's mechanism; (C) one promotion engine folding the
+suffix zoo; (D) measured proposal — `sb-ext:defglobal` + save/restore
+`local` dissolves the poisoned-my family (probe s379: perl's local installs
+a NEW container, so the emitted save/restore must swap the SLOT, and PCL's
+current semantics are already faithful).  Plus §7: hoist only
+compile-time-referenced subs (measure first).  Sequencing: #237(B) → #287 →
+promotion fold → binder dual-run beside #153 FOLD; §6/§7 are probe-first
+user decisions.
+
+---
+
 ## Session 378b (2026-08-09, Opus) — #237 re-scoped + the s378 review request
 
 After #239 shipped, took #237's own cheap discriminating measurement and it
