@@ -8069,8 +8069,15 @@ sub _process_use_lib {
     # Extract path arguments from the statement
     for my $child ($stmt->schildren) {
       if ($child->isa('PPI::Token::Quote')) {
-        my $path = $child->string;
-        $self->_emit("  (p-unshift \@INC \"$path\")");
+        # Through the ordinary expression path, never $child->string wrapped in
+        # CL quotes: `use lib "$ENV{HOME}/lib"` is INTERPOLATED by perl at
+        # compile time, and the raw text put the literal characters
+        # `$ENV{HOME}/lib` on @INC — which surfaces much later as
+        # "Can't locate X.pm in @INC" with the un-interpolated path in the
+        # message, the way this was found (task #235).  The same seam also
+        # escapes a quote or a backslash inside the path, which the raw wrap
+        # did not.
+        $self->_emit("  (p-unshift \@INC " . $self->_parse_expression([$child], $stmt) . ")");
       }
       elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
         # qw(path1 path2)
@@ -8677,21 +8684,22 @@ sub _compile_constant_value {
   my $self  = shift;
   my $parts = shift;
 
-  # Simple case: single literal.
-  # NOTE: Number tokens are intentionally NOT short-circuited here — emitting
-  # $tok->content raw mishandles octal (0777 -> CL 777) and, worse, float
-  # literals that overflow double range (e.g. POSIX::LDBL_MAX 1.18e+4932) which
-  # SBCL cannot even read, crashing compile-file.  Numbers fall through to the
-  # full ExprToCL path below, which maps those to #o.../(p-double-inf) etc.
-  if (@$parts == 1) {
-    my $tok = $parts->[0];
-    if ($tok->isa('PPI::Token::Quote')) {
-      # String - get the actual string value
-      my $str = $tok->string // $tok->content;
-      return '"' . $str . '"';
-    }
-  }
-
+  # NOTHING is short-circuited here — every value goes through the same
+  # ExprToCL path the rest of the program's expressions use.
+  #
+  # Numbers never were: emitting $tok->content raw mishandles octal
+  # (0777 -> CL 777) and, worse, float literals that overflow double range
+  # (e.g. POSIX::LDBL_MAX 1.18e+4932) which SBCL cannot even read, crashing
+  # compile-file.  A single QUOTE token used to be, wrapping $tok->string in CL
+  # quotes, and that was the same trap one type over — four ways at once
+  # (probed s374, task #235's family):
+  #   use constant X => "$ENV{HOME}/a";  # interpolation DROPPED
+  #   use constant X => "a\nb";          # CL reads \n as n  -> "anb"
+  #   use constant X => 'a\b';           # CL eats the \     -> "ab"
+  #   use constant X => 'a"b';           # emits "a"b" — UNREADABLE CL, the
+  #                                      #   whole file dies at load
+  # The ExprToCL path escapes and interpolates correctly for all of them.
+  #
   # Complex expression: use PExpr to parse
   my $result;
   eval {

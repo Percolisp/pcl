@@ -768,4 +768,49 @@ print "call=", f(), "\n";
   unlink $pl_file, $cl_file;
 }
 
+# ============================================================
+# `use` ARGUMENTS ARE INTERPOLATED (task #235)
+# ============================================================
+#
+# `use lib "$ENV{HOME}/x"` and `use constant X => "$ENV{HOME}/a"` are evaluated
+# by perl at COMPILE time — interpolation and all.  Both sites here used to
+# wrap the token's RAW text in CL quotes instead of compiling it, which dropped
+# the interpolation (surfacing much later as "Can't locate X.pm in @INC" with a
+# literal `$ENV{HOME}` in the message — how it was found), and mangled every
+# string that needed escaping: "x\nz" became CL's "xnz", 'a\b' became "ab", and
+# 'a"b' emitted UNREADABLE CL that killed the whole file at load.
+{
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl');
+  print $fh <<'PERL';
+use lib "$ENV{HOME}/pcl-t-zzz";
+use constant INTERP => "$ENV{HOME}/a";
+use constant NL     => "x\nz";
+use constant DQ     => 'a"b';
+use constant BS     => 'a\b';
+print "INC0=$INC[0]\n";
+print "INTERP=", INTERP, "\n";
+print "NL=", NL, "\n";
+print "DQ=", DQ, "\n";
+print "BS=", BS, "\n";
+PERL
+  close $fh;
+
+  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
+  print $cl_fh $cl_code;
+  close $cl_fh;
+
+  my $out  = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $home = $ENV{HOME};
+  like($out, qr/^INC0=\Q$home\E\/pcl-t-zzz$/m,
+       'use lib "$ENV{HOME}/..." puts the INTERPOLATED path on @INC');
+  like($out, qr/^INTERP=\Q$home\E\/a$/m,
+       'a use constant value is interpolated too');
+  like($out, qr/^NL=x\nz$/m,  '... and a \n in it is a NEWLINE, not an n');
+  like($out, qr/^DQ=a"b$/m,   '... and an embedded quote does not break the CL');
+  like($out, qr/^BS=a\\b$/m,  '... and a backslash survives');
+
+  unlink $pl_file, $cl_file;
+}
+
 done_testing();
