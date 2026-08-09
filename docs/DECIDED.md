@@ -1347,6 +1347,26 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s371 (2026-08-09, Fable) — s370 review: #267 APPROVED; asks 1–4 RULED
+
+- **s370 APPROVED as shipped** (gate independently re-verified 132/4744;
+  ten live probes vs perl identical, incl. same-scalar-twice, k=2
+  vivification, named loop var) → `fable-answers-s370.md`.
+- **Probes + guard rows ARE the verification bar when a shape occurs in no
+  corpus** — do NOT widen the population (new axis; file-don't-grow).
+  Corpus-diff-first is the standing cheap-first order → §1.
+- **The k=1 foreach-alias anchor-miss must DIE like k>1** — a failed anchor
+  is always a compiler self-inconsistency, never a benign decline.  Own
+  filler commit, two-population gate SET + sweep TOTAL/LOST first → §2.
+- **The two foreach comma walks (qualifier vs VarAnnotator veto) stay TWO**
+  — on every qualifying list they provably agree; the veto is deliberately
+  a superset on non-qualifying lists.  Paired invariant comments required;
+  a third walk in the family reopens the question → §3.
+- **Mixed-list residue CORRECTED**: `for ($x, @a)` DOES alias `@a`'s
+  elements (boxes survive `p-flatten-args`); what misses is an
+  ELEMENT-shaped slot (`$h{a}`) and `values %h` in a non-qualifying list.
+  E5 axis, DO-NOT-START — but probe the right boundary → §5.
+
 ## s370 (2026-08-09, Opus) — #267 SHIPPED (both ruled commits); #273 filed
 
 - **An all-single-scalar foreach list is `(vector E1 … Ek)` at EVERY k**, and
