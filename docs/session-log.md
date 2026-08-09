@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 378b (2026-08-09, Opus) — #237 re-scoped + the s378 review request
+
+After #239 shipped, took #237's own cheap discriminating measurement and it
+KILLED both premises: `pos()`/`\G` through a scalar ref is faithful (six
+probes, all identical to perl), and the Text::Balanced symptom is a total
+extraction failure, not an offset error and not eval-related.
+
+Real cause: **regex interpolation drops direct subscripts**. Text::Balanced
+builds `qr/\G$_[1]/`, which PCL compiles to `(?^:\G[1])` — the interpolator
+reads `$_` and leaves `[1]` as a literal character class.
+`_gen_interp_regex_pattern` in `Pl/ExprToCL.pm` is a SECOND hand-rolled
+interpolation scanner beside `StringInterpolation.pm`; it knows `${name}`,
+`$name` and the `$name->[i]` ARROW chains but never `$a[i]` / `$h{k}`.
+Double-quoted strings are all correct, every regex consumer (`m//`, `s///`,
+`split`, `qr//`, braced `${a[1]}`) is wrong — the classic
+"works in one context, not another" second-copy tell.
+
+NOT a one-liner: PCL's current "always regex syntax" reading is RIGHT for
+`/$x[abc]/`, `/$x[^a]/` and `/$x{2,3}/`, which pass today, so a naive
+"always a subscript" fix breaks exactly those. The bar is toke.c's
+`intuit_more` — the same one #286 was deferred under, and this is the real
+cause line that re-opens that family.
+
+Docs only (`4f35ffa`). Review request for the whole batch (#239, the #237
+re-scope, and the measured #287) in `docs/opus5-review-requests-s378.md` —
+six asks, including one explicit flag: #239 shipped wider than its title and
+I FIXED the s377 §9.1 `our`-alias sibling instead of filing it as the
+companion the ruling reserved.
+
+---
+
+
 ## Session 378 (2026-08-09, Opus) — #239 DONE: an in-block `package X;` now re-homes globals
 
 Queue item #239, built to the s377 ruling (`docs/fable-answers-s376.md` §7).
