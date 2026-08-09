@@ -2032,3 +2032,51 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   the last #202 spelling; detection-widening bar applies); #286 (ambiguous
   `f {$k,$v}` / `f {%h}` intuit_curly shapes — deferred, #191 pattern,
   re-raise on a real cause line).
+
+## s378 (2026-08-09, Opus) — #239 DONE: an in-block `package X;` re-homes globals
+
+- **A `package X;` inside a BLOCK re-homes every unqualified package VARIABLE
+  for the rest of that block — and v2 could not express that with the nested
+  `(in-package :X)` it was emitting.**  CL's reader interns every symbol of a
+  top-level form before evaluation, so a package switch nested inside one form
+  changes nothing about the symbols around it.  Measured s378 across NINE block
+  kinds: `eval`/`do`/named-sub/`BEGIN`/`if`/`while`/labelled/anon-sub/`sort`
+  all wrote the ENCLOSING package's variable; only the plain bare block (the
+  one shape D1-lite splits into separate top-level forms) was right.  Fix =
+  `_requalify_block_globals_after_pkg_switch` in `Pl/Parser2.pm`, a sibling
+  trigger beside the `our` one, rewriting the region's bare names to `X::name`
+  through the same `_rewrite_var_uses` family rewriter → task #239,
+  guard rows `Pl/t/transpile-test-09.t`.
+- **The four-way resolver, and where "left alone" is not enough**: an `our`
+  alias in scope is requalified to ITS DECLARING package, not left bare —
+  leaving it bare let the section package answer, which is the s377 §9.1
+  divergence (`our $x; { package Bar; $x = "X" }` wrote Bar::x where perl
+  writes main::x).  That bare-block sibling is FIXED by the same pass, not
+  filed as a companion.
+- **`$a`/`$b` are immune to the switch, deliberately**: the sort lowering
+  emits `(lambda ($a $b) …)`, i.e. it LEXICALLY binds those two symbols in the
+  section's package, so requalifying them would leave a `sort { $a <=> $b }`
+  inside a switched region reading `X::$a` while the lambda bound the
+  section's — a working sort turned silently wrong.  Listed with the
+  always-main specials in `%PKG_SWITCH_IMMUNE_VARS`; `@a`/`@b` are ordinary
+  globals and are NOT immune.
+- **Variables only — sub definitions, `*glob` installs and bareword CALLS
+  inside such a region were already correct** (probed s378): they resolve
+  through the package stack at lowering time, never through the CL reader.
+- **"$Foo::bar" is ONE qualified name to every interpolation scanner**:
+  `_interp_canon`'s captures now run to the end of a qualified name and
+  `_interp_fixer`'s unbraced arms carry `(?!::)`.  Without that, renaming a
+  variable called `Foo` reached into an already-qualified `@Foo::bar` and
+  produced `@main::Foo::bar` (caught live by the M7 gate row).  The BRACED
+  form `"${x}::y"` genuinely IS `$x` then text and keeps no guard.
+- **`local` is not a binder for this pass**: `_symbol_is_declarator` grew an
+  optional keyword-regex argument so the requalifier can pass the
+  my/state/our subset — `local $v` in the region localizes the REQUALIFIED
+  global and its symbol must be rewritten with the rest.
+- **NEW ASK, measured (task #287)**: the `$a`/`$b` immunity is exactly what
+  stops #239 clearing its board population.  Dropping it takes Sort-Versions
+  `versions.t` from 65/31 to **96/0**, and simultaneously makes every
+  `sort { $a <=> $b }` inside an eval/do/named-sub package-switched region
+  return the list UNSORTED.  Both halves measured live s378.  The real fix is
+  two-part — drop the immunity AND make the sort lowering bind the region
+  package's pair — and it needs a design call, so it did NOT ride #239.

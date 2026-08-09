@@ -271,6 +271,287 @@ sub _block_level_redecl {
   return scalar grep { $_ eq $canon } @declared;
 }
 
+# Variables an in-block `package X;` must NOT re-home, for the two distinct
+# reasons below.  This answers a DIFFERENT question from
+# _forward_global_decls's %runtime_vars ("does this name need a defvar?"),
+# which is why the two lists are separate and neither is derived from the
+# other — keep them in step by cause, not by copy:
+#   - perl itself keeps these in main whatever package is in effect, so a
+#     switch cannot move them ($_, @_, @ARGV/$ARGV/@ARGVOUT, %ENV, @INC/%INC,
+#     %SIG; %_args is PCL's own arg vector, same status);
+#   - $a/$b are RUNTIME-OWNED here: the sort lowering emits
+#     `(lambda ($a $b) …)`, i.e. it LEXICALLY binds the two symbols in the
+#     section's package.  Requalifying a `sort { $a <=> $b }` inside a
+#     switched region would leave the body reading X::$a while the lambda
+#     still bound the section's $a — a working sort turned silently wrong
+#     (probed s378).  @a/@b are ordinary globals and are NOT in this set.
+my %PKG_SWITCH_IMMUNE_VARS = map { $_ => 1 }
+  qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG $a $b);
+
+# (#239) Perl's `package X;` inside a BLOCK re-homes every unqualified
+# package variable for the REST OF THAT BLOCK — the switch is lexical, ends
+# with the block, and reaches nested blocks and nested sub bodies inside the
+# region exactly as a file-level `package X;` reaches the rest of the file.
+#
+# v2 emits a block as ONE top-level CL form, and CL's reader interns every
+# symbol in a top-level form BEFORE evaluation, so an `(in-package :X)`
+# nested inside that form cannot change how the symbols around it were read:
+# every bare `$z` in the region had already been interned in the ENCLOSING
+# package.  A file-level `package X;` works precisely because D1-lite splits
+# it into SEPARATE top-level forms — which is also why the plain bare block,
+# the one shape D1-lite splits, was the only one measuring correct: probed
+# s378 across nine block kinds, eval/do/sub/BEGIN/if/while/label/sort all
+# wrote the ENCLOSING package's variable where perl writes X's.
+#
+# So requalify the region's bare names to X's Perl spelling up front, reusing
+# the `our` trigger's family-aware rewriter ($z → $X::z, @a → @X::a,
+# $a[0] → $X::a[0], $#a → $#X::a, and every interpolated spelling of those).
+# Each bare name is classified four ways (RULED s377,
+# docs/fable-answers-s376.md §7), from the scope walk below rather than a
+# fresh regex walk:
+#   (a) lexical — a my/state binding in scope, or an `our` ALIAS in scope,
+#       whose home is the DECLARING package, never X and never the enclosing
+#       one.  A my/state is left alone; an `our` is requalified to ITS home,
+#       because leaving it alone would let the section package answer (the
+#       s377 §9.1 finding: `our $x; { package Bar; $x = "X" }` wrote Bar::x
+#       where perl writes main::x — the same family diverging in the
+#       OPPOSITE direction in the bare-block path this pass now also covers);
+#   (b) magic/special — %PKG_SWITCH_IMMUNE_VARS above, plus every name that
+#       is not word-shaped ($1, $@, ${^WARNING_BITS}, …);
+#   (c) already qualified — including a name _requalify_block_our_after_
+#       pkg_switch has already rewritten, which is why this pass runs AFTER
+#       it, and a name an inner switched region already claimed, which is
+#       why the blocks are processed deepest-first;
+#   (d) none of the above → a global of X → requalify, sigil-family-aware.
+# A name whose declarator the resolver cannot READ dies (rule 12) rather
+# than receiving a silently-wrong package home.
+#
+# SCOPE: variable symbols only.  Sub definitions, `*glob` installs and
+# bareword CALLS inside such a region were probed s378 and are ALREADY homed
+# to X correctly — they resolve through the package stack at lowering time,
+# not through the CL reader, so they never had this bug.
+sub _requalify_block_globals_after_pkg_switch {
+  my ($self, $doc) = @_;
+  my @blocks;
+  for my $blk (@{ $doc->find('PPI::Structure::Block') || [] }) {
+    # `package X { … }` (the block form) does not switch its ENCLOSING
+    # scope, so it is not a region opener; its body is an ordinary section.
+    next unless grep { $_->isa("PPI::Statement::Package") && !_pkg_stmt_has_block($_) }
+                $blk->schildren;
+    my $depth = 0;
+    $depth++ for _ancestors($blk);
+    push @blocks, [$depth, $blk];
+  }
+  for my $e (sort { $b->[0] <=> $a->[0] } @blocks) {
+    $self->_requalify_switched_regions($e->[1]);
+  }
+  return;
+}
+
+# `package NAME { … }` (the block form) confines its package to the block and
+# does NOT switch the enclosing scope, so it opens no region.  PPI 1.291's
+# Statement::Package has no ->block accessor — ask the children.
+sub _pkg_stmt_has_block {
+  my ($stmt) = @_;
+  return scalar grep { $_->isa('PPI::Structure::Block') } $stmt->schildren;
+}
+
+sub _ancestors {
+  my ($node) = @_;
+  my @a;
+  for (my $p = $node->parent; $p; $p = $p->parent) { push @a, $p }
+  return @a;
+}
+
+# Split one block into its package-switched regions and requalify each.  A
+# region runs from a `package X;` statement to the next one (or the end of
+# the block); the statements BEFORE the first switch keep the enclosing
+# package and are never touched.
+sub _requalify_switched_regions {
+  my ($self, $blk) = @_;
+  my ($pkg, @region, @regions);
+  for my $s ($blk->schildren) {
+    if ($s->isa("PPI::Statement::Package") && !_pkg_stmt_has_block($s)) {
+      push @regions, [$pkg, [@region]] if defined $pkg && @region;
+      ($pkg, @region) = ($s->namespace);
+      next;
+    }
+    push @region, $s if defined $pkg;
+  }
+  push @regions, [$pkg, [@region]] if defined $pkg && @region;
+  for my $r (@regions) {
+    my ($p, $stmts) = @$r;
+    next unless defined $p && $p =~ /^\w+(?:::\w+)*$/;
+    $self->_requalify_region($stmts, $p);
+  }
+  return;
+}
+
+sub _requalify_region {
+  my ($self, $stmts, $pkg) = @_;
+  # Candidate names: every variable the region MENTIONS, in any of the three
+  # spellings a name can reach the emitter through — a Symbol token, an
+  # ArrayIndex ($#a), or interpolating text with no token of its own
+  # ("$v" inside a string is the only appearance some globals have).
+  my %cand;
+  for my $stmt (@$stmts) {
+    next unless ref $stmt && $stmt->isa('PPI::Node');
+    $cand{ $_->symbol } = 1 for @{ $stmt->find('PPI::Token::Symbol') || [] };
+    for my $ai (@{ $stmt->find('PPI::Token::ArrayIndex') || [] }) {
+      $cand{ '@' . substr($ai->content, 2) } = 1 if $ai->content =~ /^\$\#\w+$/;
+    }
+    _interp_canon($stmt, undef, undef, \%cand);   # undef $live = collect all
+  }
+  for my $canon (sort keys %cand) {
+    my $sig = substr($canon, 0, 1);
+    (my $bare = $canon) =~ s/^[\$\@\%]//;
+    next unless $sig =~ /^[\$\@\%]$/;          # &sub / *glob: not this axis
+    next if $bare =~ /::/;                     # (c) already qualified
+    next unless $bare =~ /^[A-Za-z_]\w*$/;     # (b) $1, $@, ${^X}, …
+    next if $PKG_SWITCH_IMMUNE_VARS{$canon};   # (b)
+    my %homes;                                 # (a) `our` homes seen, ne $pkg
+    my $binding = sub {
+      my ($tok) = @_;
+      # A my/state/our DECLARATOR names a new binding, not a use of the
+      # package global.  `local` is deliberately absent: it never re-binds
+      # the bare name lexically, so `local $v` in the region localizes the
+      # REQUALIFIED global and its symbol must be rewritten with the rest
+      # (the same rule the `our` trigger above states and probe-verified).
+      return 'lex' if $tok->isa('PPI::Token::Symbol')
+        && $self->_symbol_is_declarator($tok, qr/^(?:my|state|our)$/);
+      return $self->_binding_at($tok, $canon);
+    };
+    $self->_rewrite_var_uses($stmts, $canon, "${pkg}::${bare}", undef, sub {
+      my $b = $binding->($_[0]);
+      return 0 if !defined $b;                 # (d) global of X → rewrite
+      return 1 if $b eq 'lex';                 # (a) my/state → leave alone
+      return 0 if $b eq $pkg;                  # (a) our alias already homed here
+      $homes{$b} = 1;                          # (a) our alias elsewhere → pass 2
+      return 1;
+    });
+    # Pass 2 — the `our` aliases, each to its OWN declaring package.  It runs
+    # second because pass 1's $skip is what discovers them: every token that
+    # could match this canon is offered to it exactly once.
+    for my $home (sort keys %homes) {
+      $self->_rewrite_var_uses($stmts, $canon, "${home}::${bare}", undef, sub {
+        my $b = $binding->($_[0]);
+        return defined($b) && $b eq $home ? 0 : 1;
+      });
+    }
+  }
+  return;
+}
+
+# What binds $canon at this token: 'lex' (a my/state in scope), a PACKAGE
+# NAME (an `our` alias in scope, whose home is the package in effect at the
+# DECLARATION), or undef (nothing — so it is a global of whatever package is
+# in effect here).  The walk is the ordinary Perl scope walk: at every
+# enclosing scope, the declarations that precede us in it, plus the scope's
+# own HEAD (`sub f($x)`, `sub ($x) {…}`, `foreach my $x (…)`,
+# `if (my $x = …)`, `for (my $i = 0; …)`) — which binds for the whole block.
+# Unlike _ref_shadowed (which answers a narrower, segment-local question for
+# the span gates and deliberately stops at the segment parent) this one must
+# climb all the way to the Document, because a FILE lexical declared outside
+# the block is in scope inside it.
+sub _binding_at {
+  my ($self, $node, $canon) = @_;
+  my $child = $node;
+  for (my $p = $node->parent; $p; $child = $p, $p = $p->parent) {
+    next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
+    # LAST declaration before the use wins, not the first: a scope may
+    # re-declare the name (`our @v = (1,2); … our @v = (9);`) and Perl binds
+    # the most recent one.  Taking the first made a use after the second
+    # `our` read the FIRST one's package (probed live: gate row
+    # "our-alias re-declaration boundaries" printed M7a's value for main's).
+    my $found;
+    for my $sib ($p->schildren) {
+      last if $sib == $child;
+      my $b = $self->_stmt_binding($sib, $canon);
+      $found = $b if defined $b;
+    }
+    return $found if defined $found;
+    next unless $p->isa('PPI::Structure::Block');
+    my $b = $self->_head_binding($p, $canon);
+    return $b if defined $b;
+  }
+  return undef;
+}
+
+# The binding a STATEMENT at scope level contributes (see _binding_at).
+sub _stmt_binding {
+  my ($self, $stmt, $canon) = @_;
+  return 'lex' if $self->_stmt_declares_canon($stmt, $canon);
+  return undef unless ref $stmt && $stmt->isa('PPI::Statement::Variable');
+  my $kw = ($stmt->schildren)[0];
+  return undef unless $kw && $kw->isa('PPI::Token::Word') && $kw->content eq 'our';
+  return undef unless grep { $_ eq $canon } $self->_declared_names($stmt);
+  return _pkg_in_effect_at($stmt);
+}
+
+# The binding a block's HEAD contributes to the block: everything written
+# before the `{` inside the same construct.  A head declaration is scoped to
+# the construct, so it binds for the whole block and nothing after it.
+sub _head_binding {
+  my ($self, $blk, $canon) = @_;
+  my $par = $blk->parent or return undef;
+  my @head;
+  for my $sib ($par->schildren) {
+    last if $sib == $blk;
+    push @head, $sib;
+  }
+  return $self->_decl_binding_in(\@head, $canon);
+}
+
+# Scan a run of elements for a my/state/our declaration of $canon.  Used for
+# block heads only, where the declarators are loose TOKENS of the enclosing
+# statement (`foreach my $x (…) {…}`) as often as they are nested in a list
+# (`if (my $x = …) {…}`, `sub f($x) {…}`).
+sub _decl_binding_in {
+  my ($self, $elems, $canon) = @_;
+  my $found;                                   # last one wins, as in _binding_at
+  for my $e (@$elems) {
+    my @words = $e->isa('PPI::Token::Word') ? ($e)
+              : $e->isa('PPI::Node')
+                ? @{ $e->find(sub { $_[1]->isa('PPI::Token::Word') }) || [] }
+              : ();
+    for my $w (@words) {
+      next unless $w->content =~ /^(?:my|state|our)$/;
+      my $nx = $w->snext_sibling;
+      my @syms = !$nx                            ? undef
+               : $nx->isa('PPI::Token::Symbol')  ? ($nx)
+               : $nx->isa('PPI::Structure::List')
+                 ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : undef;
+      # RULE 12: a declarator whose declared names we cannot READ would make
+      # every use of $canon in the region a guess between "lexical, leave
+      # alone" and "global of X, requalify" — and the wrong guess is a
+      # silently mis-homed value, not a crash.  Say so instead.
+      die "PCL: unclassifiable `" . $w->content . "` declarator in a"
+        . " package-switched block (resolving $canon)\n"
+        if grep { !defined } @syms;
+      next unless grep { $_->symbol eq $canon } @syms;
+      $found = $w->content eq 'our' ? _pkg_in_effect_at($w) : 'lex';
+    }
+  }
+  return $found;
+}
+
+# The package a `package NAME;` statement has put in effect at this node:
+# the nearest one that PRECEDES it in its own scope or any enclosing one.
+# A `package` inside a preceding sibling BLOCK never leaks out of it, which
+# is exactly why the walk looks at siblings and never inside them.
+sub _pkg_in_effect_at {
+  my ($node) = @_;
+  my $child = $node;
+  for (my $p = $node->parent; $p; $child = $p, $p = $p->parent) {
+    for (my $s = $child->sprevious_sibling; $s; $s = $s->sprevious_sibling) {
+      return $s->namespace
+        if $s->isa("PPI::Statement::Package") && !_pkg_stmt_has_block($s);
+    }
+  }
+  return 'main';
+}
+
 # Merge prototypes declared by every use/require in the document (nested ones
 # included — pack.t's `BEGIN { require './test.pl' }`) into the shared
 # Environment, mirroring v1's statement-time extraction (use →
@@ -661,6 +942,13 @@ sub parse {
   # so uses in the switched region would silently read the WRONG package's
   # variable.  Requalify them to the declaring package's spelling up front.
   $self->_requalify_block_our_after_pkg_switch($doc);
+
+  # (#239) …and the same block's UNDECLARED globals: a `package X;` inside a
+  # block re-homes every bare name for the rest of that block, which a
+  # nested `(in-package :X)` cannot express because the CL reader has
+  # already interned those symbols.  Requalify them too — AFTER the `our`
+  # pass, whose output this one reads as "already qualified".
+  $self->_requalify_block_globals_after_pkg_switch($doc);
 
   # (s300d) The s295c "bare fork pipe-open with die-on-failure" gate is gone:
   # %p-open-fork-pipe now implements the 2-arg `open FH, "|-"` / "-|" fork
@@ -1703,17 +1991,28 @@ sub _interp_canon {
           || $t->isa('PPI::Token::Regexp::Substitute')) {
       $c = $t->content;
     } else { next; }
-    while ($c =~ /(?<!\\)\$#(\w+)/g) { $hit->{"\@$1"} = 1 if $live->{"\@$1"} }
-    while ($c =~ /(?<!\\)[\$\@]\s*\{\s*(\w+)/g) {                    # ${x}/@{x} deref
-      $hit->{$_} = 1 for @{ $live_bare->{$1} || [] };
+    # The name captures run to the END of a package-qualified name: perl
+    # reads "$Foo::bar" as the QUALIFIED global, never as $Foo followed by
+    # literal "::bar".  Stopping at the first \w+ named a variable the
+    # string does not mention — harmless for a live-set lookup (qualified
+    # names are never live), fatal for the requalifier, which took the
+    # "@M7a" out of an already-requalified "@M7a::v" for a fresh global.
+    while ($c =~ /(?<!\\)\$#(\w+(?:::\w+)*)/g) { $hit->{"\@$1"} = 1 if !$live || $live->{"\@$1"} }
+    while ($c =~ /(?<!\\)[\$\@]\s*\{\s*(\w+(?:::\w+)*)/g) {          # ${x}/@{x} deref
+      # Collect-all mode has no live set to disambiguate the brace form
+      # against, so it names all three families — over-collection is inert
+      # (a canon with no matching spelling rewrites nothing) where a miss
+      # would be a silently unrequalified global.
+      if (!$live) { $hit->{"\$$1"} = $hit->{"\@$1"} = $hit->{"\%$1"} = 1 }
+      else { $hit->{$_} = 1 for @{ $live_bare->{$1} || [] } }
     }
-    while ($c =~ /(?<!\\)\@(\w+)/g) { $hit->{"\@$1"} = 1 if $live->{"\@$1"} }
-    while ($c =~ /(?<!\\)\$(\w+)(\s*[\[\{])?/g) {                    # $x / $x[.] / $x{.}
+    while ($c =~ /(?<!\\)\@(\w+(?:::\w+)*)/g) { $hit->{"\@$1"} = 1 if !$live || $live->{"\@$1"} }
+    while ($c =~ /(?<!\\)\$(\w+(?:::\w+)*)(\s*[\[\{])?/g) {          # $x / $x[.] / $x{.}
       # Copy captures FIRST: the inner `=~ /\[/` on success resets $1 to undef
       # (no groups), which silently dropped every interpolated "$x[i]" hit.
       my ($nm, $br) = ($1, $2);
       my $sig = !$br ? '$' : $br =~ /\[/ ? '@' : '%';
-      $hit->{"$sig$nm"} = 1 if $live->{"$sig$nm"};
+      $hit->{"$sig$nm"} = 1 if !$live || $live->{"$sig$nm"};
     }
   }
   return;
@@ -1721,15 +2020,20 @@ sub _interp_canon {
 
 # Is this Symbol token the variable being DECLARED by an enclosing
 # my/state/our/local (the declarator), rather than a use of it?
+# $kw_rx narrows WHICH declarators count.  The default is all four; the
+# package-switch requalifier passes the my/state/our subset because `local`
+# is not a binder — `local $v` names the very global the caller is about to
+# requalify, so its symbol must be rewritten, not skipped.
 sub _symbol_is_declarator {
-  my ($self, $sym) = @_;
+  my ($self, $sym, $kw_rx) = @_;
+  $kw_rx //= qr/^(?:my|state|our|local)$/;
   # Expression-embedded declaration (`open my $fh, …`, `func(my $x)`,
   # `foreach my $i`): the declarator keyword is the symbol's immediately
   # preceding significant sibling — there is no Statement::Variable wrapper
   # for the statement-walk below to find (M2, scalar.t's false span hits).
   my $prev = $sym->sprevious_sibling;
   return 1 if $prev && $prev->isa('PPI::Token::Word')
-    && $prev->content =~ /^(?:my|state|our|local)$/;
+    && $prev->content =~ $kw_rx;
   my $stmt = $sym;
   $stmt = $stmt->parent while $stmt && !$stmt->isa('PPI::Statement');
   # The contents of `my (LIST)`'s parens parse as a nested
@@ -1749,7 +2053,7 @@ sub _symbol_is_declarator {
   return 0 unless $stmt && $stmt->isa('PPI::Statement::Variable');
   my $kw = ($stmt->schildren)[0];
   return 0 unless $kw && $kw->isa('PPI::Token::Word')
-    && $kw->content =~ /^(?:my|state|our|local)$/;
+    && $kw->content =~ $kw_rx;
   # Declared names occupy the tokens BEFORE the statement's top-level `=`.
   for my $child ($stmt->schildren) {
     last if $child->isa('PPI::Token::Operator') && $child->content eq '=';
@@ -2830,18 +3134,22 @@ sub _interp_fixer {
   # spelling ("${x}" / "@{x}[…]" / "${x}{k}" — E4.1 M2, s353): braces are
   # kept in the output so adjacency stays unambiguous.  The `(?:^|[^\\])`
   # prefix skips escaped sigils, as before.
+  # `(?!::)` on the UNBRACED arms: "$x::y" interpolates the qualified global
+  # $x::y, not $x followed by the text "::y", so a rename of $x must not
+  # reach into it (the braced form "${x}::y" DOES mean $x then text, which
+  # is why those arms carry no such guard).
   return
     $sigil eq '$' ? sub {
       my $n = 0;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])/$1\$$newbare/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E\b(?![\[\{])(?!::)/$1\$$newbare/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?![\[\{])/$1\${$newbare}/g;
       return $n;
     }
   : $sigil eq '@' ? sub {
       my $n = 0;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\Q$bare\E\b(?!\{)/$1\@$newbare/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\Q$bare\E\b(?!\{)(?!::)/$1\@$newbare/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\Q$bare\E(?=\[)/$1\$$newbare/g;
-      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\Q$bare\E\b/$1\$#$newbare/g;
+      $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\Q$bare\E\b(?!::)/$1\$#$newbare/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\@\{\s*\Q$bare\E\s*\}(?!\{)/$1\@{$newbare}/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\{\s*\Q$bare\E\s*\}(?=\[)/$1\${$newbare}/g;
       $n += $_[0] =~ s/((?:^|[^\\])(?:\\\\)*)\$\#\{\s*\Q$bare\E\s*\}/$1\$#{$newbare}/g;

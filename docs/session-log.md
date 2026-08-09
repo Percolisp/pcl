@@ -4,6 +4,81 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 378 (2026-08-09, Opus) — #239 DONE: an in-block `package X;` now re-homes globals
+
+Queue item #239, built to the s377 ruling (`docs/fable-answers-s376.md` §7).
+Verification: **Pl/t gate 133 files / 4787 tests PASS** (cold cache),
+**full sweep GATE clean** (0 new / 0 fixed; TOTAL passing 18498 → 18499;
+65 files fully passing, unchanged), corpus-diff **8 of 111 files**, all one
+mechanism, **CPAN board byte-identical to s376** (70 PASS / 64 PARTIAL /
+49 FAIL, 2053 ok / 483 not-ok, `docs/cpan-board14-s378.tsv`).  Gen bumped
+**v2-126 → v2-127**; both checked-in transpiled artifacts regenerated
+(`cl/pcl-pack.lisp` re-verified at 5636/89 = the blessed count;
+`cl/pcl-mro.lisp` body byte-identical, only the stamp moved).
+
+**The bug was far wider than the task title.** Probed across NINE block
+kinds: `eval`, `do`, named sub, `BEGIN`, `if`, `while`, labelled block, anon
+sub and `sort` ALL wrote the enclosing package's variable where perl writes
+X's.  Only the plain bare block was right — and it is right by accident:
+D1-lite splits that one shape into separate top-level CL forms.  Everything
+else lowers to ONE top-level form, and CL's reader interns every symbol of a
+form *before* it runs, so the nested `(in-package :X)` the emitter was
+producing could never re-home the symbols around it.
+
+**Fix**: `_requalify_block_globals_after_pkg_switch`, a sibling pre-pass
+beside the `our` one, spelling the region's variables package-qualified at
+the SOURCE level before lowering, through the same `_rewrite_var_uses`
+family rewriter (`$z` → `$X::z`, `@a` → `@X::a`, `$a[0]` → `$X::a[0]`,
+`$#a` → `$#X::a`, and every interpolated spelling).  Blocks are processed
+deepest-first so an inner switch claims its own region first and the outer
+pass then sees qualified names.  The four-way resolver runs off the scope
+walk the rename machinery already uses; an unreadable declarator DIES
+(rule 12).  Die-scan over both non-corpus populations — 21 `lib/` shims and
+324 board files — **zero dies**; the corpus is covered by corpus-diff.
+
+**The s377 §9.1 guard probe is FIXED, not filed**: `our $x; { package Bar;
+$x = "X" }` wrote `Bar::x` where perl writes `main::x`.  An in-scope `our`
+alias is requalified to its DECLARING package, so the same pass closes the
+divergence that ran in the opposite direction.
+
+**Three bugs the new pass exposed, all fixed here:**
+- `_binding_at` must take the LAST declaration before a use, not the first —
+  a scope may re-declare (`our @v = (1,2); … our @v = (9)`), and taking the
+  first made a later use read the earlier one's package.  Caught by the M7
+  gate row, which went red.
+- `"$Foo::bar"` is ONE qualified name to every interpolation scanner:
+  `_interp_canon`'s captures now run to the end of a qualified name, and
+  `_interp_fixer`'s UNBRACED arms carry `(?!::)`.  Without both, renaming a
+  variable called `Foo` reached into an already-requalified `@Foo::bar` and
+  produced `@main::Foo::bar`.  (The braced form `"${x}::y"` genuinely is
+  `$x` then text and keeps no guard.)  Both are pre-existing hazards in the
+  shared rewriter that only this pass was wide enough to trip.
+- `local` is not a binder for this purpose — `_symbol_is_declarator` grew an
+  optional keyword-regex argument so the requalifier passes the
+  my/state/our subset; `local $v` in the region localizes the REQUALIFIED
+  global and must be rewritten with the rest.
+
+**`$a`/`$b` are deliberately immune**, with the trade measured in both
+directions — see task **#287**, filed as the new ask the ruling's call-shape
+probe was supposed to surface.  Dropping the immunity takes Sort-Versions
+`versions.t` from 65/31 to **96/0**; it also makes every `sort { $a <=> $b }`
+inside an eval/do/sub package-switched region return the list **unsorted**,
+because the emitted `(lambda ($a $b) …)` binds the section's two symbols
+while the requalified body reads `X::$a`.  The real fix is two-part (drop the
+immunity AND make the sort lowering bind the region package's pair) and needs
+a design call, so it did not ride #239.  Guard rows for both halves are in
+`Pl/t/transpile-test-09.t` already.
+
+Guard rows: two new snippets in `Pl/t/transpile-test-09.t` (file 48 s → 50 s,
+far under the 167 s slowest) — the nine-block-kind matrix plus nesting,
+containers, interpolation and a nested sub body; and the inverse guards
+(lexicals, the `our` alias, `$_`/`%ENV`/`@ARGV`, the four sort shapes, and
+`local`).  `docs/ir-spec.md` §1 gained the consumer-facing statement that a
+block's variables are spelled package-qualified in the emitted CL and never
+depend on an enclosing `in-package`.
+
+---
+
 ## Session 377 (2026-08-09, Fable) — review of s376: all four commits APPROVED, eight asks ruled
 
 Independent verification: gate re-run **133 / 4785 PASS**; #276 six-shape

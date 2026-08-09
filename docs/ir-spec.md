@@ -70,6 +70,24 @@ itself carries no host-specific semantics beyond them.
   it), not a formatting choice. A `package` statement mid-file starts a
   new section; a reopened package gets only `(in-package …)` +
   `p-set-current-package`.
+- **A `package X;` INSIDE A BLOCK is not expressed by the emitted
+  `in-package`** (#239, s378). A block lowers to ONE top-level form, and
+  the CL reader interns every symbol of a top-level form before it is
+  evaluated, so a nested `(in-package :X)` cannot re-home the symbols
+  around it. Perl's switch is nonetheless lexical and covers the rest of
+  the block — nested blocks and nested sub bodies included. The compiler
+  therefore **spells the region's variables package-qualified at the
+  source level** before lowering (`Pl/Parser2.pm`
+  `_requalify_block_globals_after_pkg_switch`): `$z` → `$X::z`,
+  `@a` → `@X::a`, `$a[0]` → `$X::a[0]`, `$#a` → `$#X::a`, and the same in
+  interpolating text. A consumer reading the emitted CL therefore sees
+  explicit `X::$z` symbols, never a bare name whose package depends on an
+  enclosing `in-package`. Lexicals, in-scope `our` aliases (which resolve
+  to their DECLARING package), already-qualified names and the always-main
+  specials are left where they are; `$a`/`$b` are excluded because the sort
+  lowering lexically binds those two symbols. Sub definitions, `*glob`
+  installs and bareword calls in such a region never had the problem —
+  they resolve through the package stack at lowering time.
 
 ## 2. The data model
 

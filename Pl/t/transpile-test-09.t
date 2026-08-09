@@ -906,4 +906,66 @@ setw(); my @r = map { my $w = $_ * 2; $w } (1,2);
 print "map=@r w=$w\n";
 });
 
+# (#239) `package X;` INSIDE A BLOCK re-homes every unqualified package
+# variable for the rest of that block.  v2 emits a block as ONE top-level CL
+# form and the reader interns its symbols before the nested `(in-package :X)`
+# ever runs, so eight of the nine block kinds wrote the ENCLOSING package's
+# variable; only the plain bare block (the one shape D1-lite splits into
+# separate top-level forms) was right.  All nine kinds in one snippet — each
+# row costs a perl run and an SBCL run.
+test_transpile("in-block `package X;` re-homes globals in every block kind (#239)", q{
+no strict 'refs';
+sub w { my $t = shift; join("", map { "$_=" . (defined(${"P::$_"}) ? ${"P::$_"} : "U")
+        . "/" . (defined(${"main::$_"}) ? ${"main::$_"} : "U") . ";" } ($t)) }
+{ package P; $bare = "V"; }
+eval { package P; $ev = "V"; };
+do { package P; $do = "V"; };
+sub f { package P; $sb = "V"; } f();
+BEGIN { package P; $bg = "V"; }
+if (1) { package P; $if = "V"; }
+my $n = 0; while ($n++ < 1) { package P; $wh = "V"; }
+L: { package P; $lb = "V"; }
+my @s = sort { package P; $so = "V"; $a <=> $b } (2,1);
+print w($_) for qw(bare ev do sb bg if wh lb so);
+print "\n";
+# NESTED switch: the inner region wins, and the outer one does not reach past it
+eval { package P; $out = "1"; { package Q; $in = "2"; } };
+print "P::out=$P::out Q::in=$Q::in main::out=", (defined($main::out)?$main::out:"U"), "\n";
+# CONTAINERS + interpolation + a nested sub BODY are all inside the region
+eval { package P; @ar = (1,2); %h = (k=>"H"); $txt = "@ar|$ar[1]|$#ar|$h{k}"; };
+eval { package P; sub setv { $viasub = "S" } }; P::setv();
+print "ar=@P::ar txt=$P::txt viasub=$P::viasub\n";
+});
+
+# The four-way resolver, all inverse guards (the cases requalification must
+# NOT touch).  The `our` row is the s377 review's mandatory guard: it diverged
+# the OPPOSITE way (PCL wrote Bar::x where perl writes main::x) in the
+# bare-block path that always looked correct.
+test_transpile("in-block package switch leaves lexicals, our-aliases and specials alone (#239)", q{
+no strict 'refs';
+our $ali = "OUR";
+my  $lex = "LEX";
+{ package Bar; $ali = "W"; $seen = $lex; my $inner = "I"; $got = $inner; }
+print "ali:main=$main::ali Bar=", (defined(${"Bar::ali"}) ? ${"Bar::ali"} : "U"),
+      " seen=$Bar::seen got=$Bar::got\n";
+# specials stay in main whatever package is in effect
+$_ = "UND"; $ENV{PCL239} = "E";
+{ package Baz; $sawund = $_; $sawenv = $ENV{PCL239}; @ARGV = ("A"); }
+print "und=$Baz::sawund env=$Baz::sawenv argv=@ARGV\n";
+# $a/$b are the sort lowering's own bindings — a switch must not move them.
+# Measured s378: requalifying them takes Sort-Versions versions.t from 65/31
+# to 96/0 AND makes every one of these three comparators return the list
+# UNSORTED, because the emitted (lambda ($a $b) ...) binds the SECTION's two
+# symbols while the body would read X::$a.  Both halves are the trade.
+{ package Sortish; my @o = sort { $a <=> $b } (3,1,2); print "sorted=@o\n"; }
+eval { package SoE; my @o = sort { $a <=> $b } (3,1,2); print "evalsort=@o\n"; };
+do   { package SoD; my @o = sort { $a <=> $b } (5,4);   print "dosort=@o\n"; };
+sub sof { package SoF; my @o = sort { $a <=> $b } (9,7); print "subsort=@o\n"; } sof();
+# a `local` inside the region localizes the REQUALIFIED global
+$Loc::v = "outer";
+sub peek { $Loc::v }
+{ package Loc; local $v = "inner"; print "local=", main::peek(), "\n"; }
+print "after=$Loc::v\n";
+});
+
 done_testing();
