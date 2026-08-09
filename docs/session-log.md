@@ -4,6 +4,78 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 370 (2026-08-09, Opus) — #267 SHIPPED in both ruled commits; #273 filed
+
+**#267 closed** (`f2c7c25` + `0e5b088`), the two commits `docs/fable-answers-s368.md`
+§2c ruled. Nothing else in the queue was started.
+
+**Step 1 — the wrapper.** A foreach list whose every DEPTH-0 element is a single
+scalar has a STATICALLY known length, so `(p-flatten-args (list …))` and
+`(vector E1 … Ek)` are extensionally identical on it — and only the vector form
+can carry boxes (a box over a vector is indistinguishable from an `@array` box,
+the #262/#263 hazard one level up). ONE resolver,
+`Pl::Parser::_foreach_scalar_elements`: unwrap through the existing
+`_foreach_list_unwrap`, split with the SHARED #138/#140 splitter
+(`TokenUtils::lowprec_idx` / `lowprec_split_safe` — never a private comma scan),
+return the runs only when every one passes `_foreach_single_scalar_p`. `@el == 1`
+IS the old single-scalar verdict, so k=1 emission is byte-identical and only k>1
+takes the new branch.
+
+**Step 2 — the per-element verdict.** The sole-element rewrite, run k times: one
+verdict function, one head-swapper per pipeline, mapped by POSITION. Verdicts are
+taken off the UNTOUCHED tokens before any lowering (PExpr's cleanup mutates them
+destructively). `_apply_foreach_alias_rewrite` split so the v1 seam still has
+exactly one text head-swap (`_apply_alias_head`, returning undef on a failed
+anchor); the k>1 path DIES on that, the k=1 path keeps its silent no-op — the
+asymmetry is ask 2.
+
+**THE POPULATION IS EMPTY — and that is the session's lesson.** Every ruled
+measurement was taken and every one is zero, because the shape occurs in no
+corpus we own: corpus-diff **identical across 111** (both steps), CPAN board gate
+SET **0 of 232**, perl-suite gate SET **0 of 605**, full sweep cold-cache **GATE
+clean, 0 new / 0 fixed / 0 LOST, TOTAL 18498 → 18499**. **corpus-diff should have
+run BEFORE the sweep** — it costs minutes and would have proved the sweep could
+not move. The fix is verified by twelve probes run live against perl (both
+spellings × named element / array element / `->` ref / `=>` separator / subscript
+chain / three elements / element+scalar, plus `s///` through the alias, plus the
+two inverse guards) and by `Pl/t/foreach-aliasing-01.t` 15 → 20 rows.
+
+**GATE-SET GOTCHA, new:** 18 "stderr differs" hits across the two SETs were
+**compiler LINE NUMBERS only** — `Pl/Parser.pm` grew ~60 lines, so every
+`Use of uninitialized value … at ROOT/Pl/Parser2.pm line N` shifted. Normalizing
+`ROOT/(Pl|tools)/\S+ line \d+` leaves **0**. Any gate-SET run whose diff changes
+a `.pm`'s line count needs that normalization or it reports phantom drift.
+
+**#273 FILED — a sweep VERDICT was swallowed for 55 minutes.** The run finished
+at the 4-minute mark (108 rows in `.faillog/_status.tsv`, parent gone); what held
+the shell pipeline open was one orphan trio from an early `pack.t` job —
+`timeout 90 sbcl …` → `sbcl` (blocked in `anon_pipe_read`) → `perl pl2cl --server`
+(blocked in `futex_do_wait`). A DEADLOCK, not #128's spin: 22 s CPU in 58 min.
+**`timeout N` is not a backstop for this shape** — it fired, but SBCL catches
+SIGTERM and its handler could not run while blocked on the pipe. The orphan had
+inherited the run's stdout, so `tail` never saw EOF; `kill -9` released the
+complete verdict instantly. Rule for next time: **check `_status.tsv`'s row count
+and mtime before believing a sweep is still running**, and reproduce the verdict
+from disk with `sweep-diff.pl` rather than re-running.
+
+**Baseline hygiene:** that sweep's `1 fixed` (`my.t $x->{bar} is not defined`) is
+NOT #267's — `my.t` was re-run in a HEAD worktree and passes there too, so it is
+**s368's #265 fix whose sweep row was never retired**. Removed from
+`docs/fail-baseline.tsv` by EDIT per #223 (681 → 680), never by re-blessing.
+
+**Residues recorded on the task:** mixed lists (`for ($x, @a)`) still do not
+alias an aggregate's elements through a box (boxed-aggregates axis, E5,
+DO-NOT-START); a LITERAL element is writable where perl dies read-only —
+probed, **pre-existing at N=1**, one `docs/not-supported.md` entry, no mechanism.
+
+Gate **132 files / 4744 tests PASS**, gen v2-123. Asks →
+`docs/opus5-review-requests-s370.md` (§1 empty population, §2 the k=1 die
+asymmetry, §3 VarAnnotator's deliberate second comma walk, §4 #273 FYI).
+Correction: step 1's commit message quotes 4739, a number taken before its own
+three guard rows landed — the committed tree is 4742.
+
+---
+
 ## Session 369 (2026-08-09, Fable) — review of s367+s368: both approved; #267 sizing ruled; new residue #272
 
 Review session per `docs/opus5-review-requests-s368.md`.  Rulings in

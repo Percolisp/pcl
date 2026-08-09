@@ -1347,6 +1347,33 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s370 (2026-08-09, Opus) — #267 SHIPPED (both ruled commits); #273 filed
+
+- **An all-single-scalar foreach list is `(vector E1 … Ek)` at EVERY k**, and
+  each aliasable element carries its BOX head — the N=1 rule IS the N=k rule
+  (#267, ruled s369 §2, shipped `f2c7c25` + `0e5b088`).  Resolver:
+  `Pl::Parser::_foreach_scalar_elements` (depth-0 split via the SHARED #138
+  splitter; all-or-nothing per list).  Boxes must NEVER pass through
+  `p-flatten-args`.  **Mixed lists (`for ($x, @a)`) stay flattened and boxless**
+  — aliasing an aggregate's elements is the boxed-aggregates axis (E5,
+  DO-NOT-START).
+- **A LITERAL foreach element is writable, not read-only** — `for ($x, 3)
+  { $_++ }` where perl dies.  Probed, **pre-existing at N=1**; accepted
+  divergence, `docs/not-supported.md`.
+- **A gate-SET stderr diff must normalize compiler LINE NUMBERS**
+  (`ROOT/(Pl|tools)/\S+ line \d+`) — a `.pm` that gains lines otherwise reports
+  phantom drift on every file that warns.  18 such hits in s370, 0 real.
+- **Run `corpus-diff.pl` BEFORE spending a full sweep**: identical emission over
+  `perl-tests/*.t` proves the sweep's `.t` half cannot move, for minutes instead
+  of an hour.
+- **A sweep can FINISH and have its verdict swallowed** (#273): an orphaned
+  `sbcl` + `pl2cl --server` deadlock inherits the run's stdout, so the pipeline
+  never sees EOF, and **`timeout N` cannot kill it** (SBCL catches SIGTERM; the
+  handler cannot run while blocked on the pipe).  Check `.faillog/_status.tsv`'s
+  row count + mtime before believing a sweep is still running; reproduce the
+  verdict from disk with `tools/sweep-diff.pl diff docs/fail-baseline.tsv
+  .faillog`.
+
 ## s369 (2026-08-09, Fable) — s368 asks RULED; #267 sizing decided
 
 - **s367 + s368 APPROVED as shipped** (gate independently re-verified
