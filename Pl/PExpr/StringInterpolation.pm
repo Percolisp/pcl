@@ -968,8 +968,16 @@ sub parse_hash_subscript {
   # Parse key - could be bareword, variable, or expression
   my $key_id;
   
-  # Check if it's a simple bareword (no quotes, no special chars)
-  if ($key_str =~ /^[a-zA-Z_]\w*$/) {
+  # Check if it's a simple bareword (no quotes, no special chars).
+  # A leading `-` is part of it: perl autoquotes a `-BAREWORD` hash key, so
+  # "$h{-f}" is the key "-f".  Without the `-?` the key parsed as an
+  # EXPRESSION, and a single-letter one is PPI's filetest operator — the
+  # interpolation then read `-f $_` and produced the empty string (task #234;
+  # `-foo` survived only because unary minus on a bareword happens to give
+  # "-foo").  The token-side twin of this rule is
+  # Pl::PExpr::_subscript_autoquote_text; a digit key (`$h{-1}`) still parses
+  # as the expression it is.
+  if ($key_str =~ /^-?[a-zA-Z_]\w*$/) {
     # Bareword key - convert to string
     my $str_token = PPI::Token::Quote::Double->new('"' . $key_str . '"');
     $str_token->{separator} = '"';

@@ -40,7 +40,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -128,3 +128,36 @@ test_cl('bless into a trailing-:: bareword class',
 test_cl('under strict subs a declared sub is still a plain-bareword call',
     'use strict; use warnings; sub helper { 42 } print "h=", helper;'
   . ' print "\n";', "h=42\n");
+
+# ── `-BAREWORD` autoquoting: the fat comma and the hash subscript (#234) ─────
+#
+# Perl autoquotes a `-BAREWORD` in the two positions that autoquote at all —
+# before `=>` and inside a hash subscript — and the STRING reading wins over
+# the operator one.  PPI hands a single-letter `-f` over as the FILETEST
+# operator token, so neither autoquote site recognised it: the `$_` default
+# turned it into `-f($_)` and the result ATE the next list element, or produced
+# an empty key.  `-foo` and `-1` tokenize differently and were always right.
+
+test_cl('a filetest letter before => is the key "-f", not a filetest',
+    'my %h = (-f => 4, abc => 3);'
+  . ' print join(",", map { "$_=$h{$_}" } sort keys %h), "\n";',
+    "-f=4,abc=3\n");
+
+test_cl('a filetest letter is a hash KEY in a subscript and in interpolation',
+    'my %h; $h{-f} = 1; $h{-foo} = 2; $h{-1} = 4;'
+  . ' print join(",", sort keys %h), " i=$h{-f}\n";',
+    "-1,-f,-foo i=1\n");
+
+# INVERSE: a REAL filetest whose RESULT the fat comma follows keeps running —
+# perl only autoquotes the word IMMEDIATELY before `=>`.
+test_cl('a filetest applied to an operand is still a filetest before =>',
+    'sub g { return "[@_]" } my $f = "/etc/hostname";'
+  . ' print g(-e $f => 1), " ", (-e $f ? "y" : "n"), "\n";',
+    "[1 1] y\n");
+
+# INVERSE: an ARRAY subscript is not autoquoted in perl, and a numeric key is
+# still the number.
+test_cl('array subscripts and numeric keys are untouched',
+    'my @a = (10,20,30); my %h = (-1 => 5);'
+  . ' print "$a[-1] $a[1] ", join(",", %h), "\n";',
+    "30 20 -1,5\n");

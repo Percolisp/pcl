@@ -5115,6 +5115,32 @@ sub _bareword_subscript_autoquotes {
   return 1;                                         # unknown bareword: string index
 }
 
+# The ONE answer to "does this LONE subscript token autoquote, and to what
+# text?".  Two sites ask it — the interpolation path (_subscript_to_cl_str) and
+# the expression path (_parse_subscript_ix) — and they had drifted into two
+# copies of the Word case, which is why the filetest key below was fixed in one
+# and still broken in the other.
+sub _subscript_autoquote_text {
+  my ($self, $tok, $is_array) = @_;
+  my $ref = ref($tok);
+  if ($ref eq 'PPI::Token::Word') {
+    return $tok->content
+      if $self->_bareword_subscript_autoquotes($tok->content, $is_array);
+    return undef;      # known callable in an array subscript — evaluate it
+  }
+  # `$h{-f}`: perl autoquotes a `-BAREWORD` HASH key, so this is the string
+  # "-f".  A SINGLE-letter one arrives from PPI as the FILETEST operator token,
+  # so the Word case never saw it and the key came out EMPTY — the filetest ran
+  # on $_ instead — while `$h{-foo}` and `$h{-1}`, which tokenize differently,
+  # were always right (probed).  Same root as the fat-comma case in
+  # cleanup_for_parsing (task #234).  An ARRAY subscript is not autoquoted in
+  # perl, so it keeps evaluating.
+  return $tok->content
+    if !$is_array && $ref eq 'PPI::Token::Operator'
+       && $tok->content =~ /^-[A-Za-z]$/;
+  return undef;
+}
+
 sub _subscript_to_cl_str {
   my ($subscript, $self, $is_array) = @_;
   my @kids = grep { !$_->isa('PPI::Token::Whitespace') } $subscript->children();
@@ -5124,12 +5150,11 @@ sub _subscript_to_cl_str {
   }
   if (@inner == 1) {
     my $k = $inner[0];
-    if (ref($k) eq 'PPI::Token::Word') {
-      return '"' . $k->content . '"'
-        if $self->_bareword_subscript_autoquotes($k->content, $is_array);
-      # else: known callable in an array subscript — evaluate it (fall through)
-    } elsif (ref($k) eq 'PPI::Token::Number') {
+    if (ref($k) eq 'PPI::Token::Number') {
       return $k->content;
+    }
+    if (defined(my $q = $self->_subscript_autoquote_text($k, $is_array))) {
+      return '"' . $q . '"';
     }
   }
   return $self->parser->_parse_expression(\@inner, undef) if $self->has_parser;
@@ -5146,10 +5171,10 @@ sub _parse_subscript_ix {
   if (@sig == 1 && ($sig[0]->isa('PPI::Statement::Expression')
                     || ref($sig[0]) eq 'PPI::Statement')) {
     my @ekids = grep { !$_->isa('PPI::Token::Whitespace') } $sig[0]->children();
-    if (@ekids == 1 && ref($ekids[0]) eq 'PPI::Token::Word') {
-      my $word = $ekids[0]->content();
-      if ($self->_bareword_subscript_autoquotes($word, $is_array)) {
-        my $str_tok = PPI::Token::Quote::Single->new("'$word'");
+    if (@ekids == 1) {
+      my $q = $self->_subscript_autoquote_text($ekids[0], $is_array);
+      if (defined $q) {
+        my $str_tok = PPI::Token::Quote::Single->new("'$q'");
         return $self->make_node($str_tok);
       }
       # else: known callable in an array subscript — parse as an expression below
@@ -5294,8 +5319,25 @@ sub cleanup_for_parsing {
       next
           if $i == 0;
       my $prev  = $no_ws[$i-1];
-      $no_ws[$i-1] = $self->_make_string_of_token_word($prev)
-          if ref($prev) eq "PPI::Token::Word";
+      if (ref($prev) eq "PPI::Token::Word") {
+        $no_ws[$i-1] = $self->_make_string_of_token_word($prev);
+      }
+      # A FILETEST letter is autoquoted by the fat comma too, and the string
+      # reading WINS over the operator one: `my %h = (-f => 4)` is the key
+      # "-f" in perl, not a filetest (probed).  PPI hands `-f` over as one
+      # Operator token, so it never looked like a Word here; the filetest's
+      # `$_` default then turned the pair into `-f($_), 4` and the result ate
+      # the next element — a SILENT WRONG (task #234).  This is the one place
+      # that knows "the fat comma quotes what is on its left", so the letter is
+      # settled here rather than in the `$_`-default pre-pass, which by then
+      # sees the element ALREADY SPLIT and has no `=>` left to key on.
+      # The narrow key matters: only a letter IMMEDIATELY before `=>` is a
+      # string.  `f(-e $file => 1)` is a real filetest whose RESULT the fat
+      # comma follows, and perl keeps it (probed).
+      elsif (ref($prev) eq 'PPI::Token::Operator'
+             && $prev->content =~ /^-[A-Za-z]$/) {
+        $no_ws[$i-1] = PPI::Token::Quote::Single->new("'" . $prev->content . "'");
+      }
     }
   }
 
