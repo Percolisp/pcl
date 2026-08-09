@@ -159,4 +159,19 @@ before spending a session on the gate.
 
 * **The FOLD (#153)** — untouched, still yours.
 * **Boxed aggregates / E5.1–E5.2** — DO-NOT-START, untouched.
-* **The fillers** (#271, #266, #236 → #234 → #235) — not reached.
+* **#271 DIAGNOSED, not fixed** — `pipe my ($r, $w)` emits
+  `(p-pipe (vector $r $w))` against a 2-arg macro. Cause verified: `my`/`our`
+  in expression context is an identity returning `$args[0]`
+  (`ExprToCL.pm:2557`/`:3417`, both gated `@args == 1`), and for `my ($r,$w)`
+  the parenthesised list IS that one argument. Confirmed independently —
+  `my @l = (my ($d,$e))` emits `(vector (vector $d $e))`, the inner vector
+  being the identity's return. It normally hides because every other consumer
+  flattens (the sub seam, list assignment); only a fixed-arity runtime macro
+  breaks. The fix belongs at **argument-run lowering** (a `my (LIST)` should
+  contribute N args, perl's list-context rule) — NOT at the runtime, where
+  teaching `p-pipe` to take a vector would be a per-builtin special case that
+  silently tolerates an arity error everywhere else. **I stopped at the
+  diagnosis**: argument lowering is shared by every call, so it needs the full
+  gate + corpus-diff + both-population gate SET, which is not filler-sized.
+  The task carries the cheap sizing measurement to take first.
+* **#266, #236 → #234 → #235** — not reached.
