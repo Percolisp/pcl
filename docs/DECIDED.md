@@ -1871,3 +1871,19 @@ E4.1's pre-work is now done.
   so Block-led folding must key on hash-constructor SHAPE, never on a block
   after a block-taking word.  #271/#211 unchanged from HEAD, still the
   FOLD's later acceptance targets.
+
+## s375c (2026-08-09) — USER: the v0.1 public-release track is opened
+
+- **Release plan = `docs/release-plan-v0.1.md`** (tasks #277–#283 + #217/#128
+  promoted).  Two USER rulings: (1) **the runtime + saved core are COMPILED
+  AT INSTALL** on the target — the XS bridge's install-time model, never
+  first-use (#277); (2) **a pre-release IR pass**: re-measure the generated
+  code, introduce the macro vocabulary where it costs no speed, and update
+  `docs/ir-spec.md` normatively (#281 — the scoped pull-forward of Target B;
+  #75 stays the full flag-day; emission-changing, full verification).
+- Track order: FOLD chunks 2–3 → #217→#277/#278/#128 → #281 → #279/#280 →
+  big bug hunt (the s360 E5 exit gate — this release is what it was deferred
+  FOR) → #282 fresh-machine gate → #283 CI → tag v0.1.
+- Open USER decisions listed in the plan doc: public name (PCL collides in
+  the CL world; percolisp org exists), publish process docs or not, LICENSE
+  body check, pclxs bundling, hosting/remote.

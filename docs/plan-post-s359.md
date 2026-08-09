@@ -1,5 +1,14 @@
 # Plan after s359 — next sessions (written at session end, 2026-08-08)
 
+> **UPDATED s375c (USER, 2026-08-09): the v0.1 PUBLIC-RELEASE track is
+> opened — `docs/release-plan-v0.1.md` (tasks #277–#283; #217/#128
+> promoted into it).** Two USER rulings: the runtime + saved core are
+> COMPILED AT INSTALL (#277, the XS install-time model), and a pre-release
+> IR pass updates `docs/ir-spec.md` + introduces the macro vocabulary over
+> the generated code (#281, scoped Target B; after the #153 FOLD).  The
+> release track runs AFTER the standing queues below — Opus's filler queue
+> and the FOLD are unchanged and come first.
+
 > **UPDATED s375 (Fable review of s374 — `docs/fable-answers-s374.md`).**
 > All four s374 commits APPROVED (gate independently re-verified 133/4773).
 > The s373 queue is fully shipped: #266, #236, #234, #235 all CLOSED.

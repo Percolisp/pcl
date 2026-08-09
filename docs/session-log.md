@@ -4,6 +4,27 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 375c (2026-08-09, USER + Fable) — the v0.1 public-release track is opened
+
+USER-initiated: plan the first public release.  Plan doc:
+**`docs/release-plan-v0.1.md`**; tasks **#277–#283** filed, #217 and #128
+promoted into the track.  Two USER rulings recorded in DECIDED.md:
+(1) **the runtime + saved core are COMPILED AT INSTALL** on the target
+machine (#277 — the XS bridge's install-time model, never at first use);
+(2) **a pre-release IR pass** (#281): re-measure the generated code against
+`generated-cl-ir-review.md`, introduce the macro vocabulary where it costs
+no speed, update `docs/ir-spec.md` normatively — the scoped pull-forward of
+Target B (#75 stays the full flag-day).  Track order: FOLD chunks 2–3 →
+#217→#277/#278/#128 → #281 → #279/#280 → big bug hunt (the s360 E5 exit
+gate) → #282 fresh-machine gate → #283 CI → tag v0.1.  Found while
+surveying: the repo root carries 29 loose planning .md files and three
+literal `REF(0x…)` junk files (#279), the README still carries the stale
+E4.1-era "uploads will wait" note (#280), and the repo has NO git remote.
+Open USER decisions (name, process-docs publishing, LICENSE body, pclxs
+bundling, hosting) are listed in the plan doc.
+
+---
+
 ## Session 375b (2026-08-09, Fable) — #153 FOLD chunk 1: `_fold_terms`, emission-identical over all four populations
 
 The FOLD's first chunk: `parse()` now reduces every embedded POSTFIX-BEARING
