@@ -1973,3 +1973,24 @@ E4.1's pre-work is now done.
   reporting the wrong package (it reports `Foo` correctly — instrumented in
   the real dist), and the symbolic read `${"Foo::a"}` (the READ is right;
   the WRITE went to the wrong package).  Full detail on task #239.
+
+## s376c (2026-08-09) — USER: the three s376 questions
+
+- **#239 goes NEXT, before #237.**  The in-block `package X;` bug is a
+  measured family (31 occurrences / 14 files, nine of them
+  Class-Method-Modifiers, plus Role-Tiny method-conflicts.t), its cause is
+  pinned, and the fix reuses a rewriter that already exists.
+- **#238's `subname` family is SIZED FIRST, not implemented** (task #284).
+  exotic_names.t (1554 rows) + subname.t (21) both hang on PCL not being able
+  to name a compiled CL closure.  Measure two things before any code: whether
+  a function-object → name registry answers `subname()` at no hot-path cost,
+  and how many of the 1554 rows need only a NAME versus the exotic
+  NUL/newline/latin-1 stash names.  Bring the answer back before writing.
+- **The CPAN board gets a fresh baseline, but only after a PER-FILE audit**
+  (#208) — the s376 whole-board run is saved as `docs/cpan-board14-s376.tsv`
+  (2053 ok / 483 not-ok at beb4187).  Same discipline as #223's sweep
+  pass-baseline: a blanket refresh absorbs a loss silently.  Read ROWS, not
+  the PASS/PARTIAL label; the one known LOSS (Role-Tiny extend-role-tiny.t,
+  `Package Role::Tiny does not exist` at load) is diagnosed on #208 and must
+  be explained or hand-edited in with its cause.  Best taken AFTER #239
+  lands, since #239 moves board files.
