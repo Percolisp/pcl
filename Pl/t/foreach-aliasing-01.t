@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -103,17 +103,21 @@ test_cl('for($a[0], $a[1]) still iterates both (no false rewrite)',
     q{my @a=(1,2,3); my @seen; for ($a[0], $a[1]) { push @seen, $_ } print "@seen\n";},
     "1 2\n");
 
-# --- #267 step 1 (s370): the WRAPPER.  A list whose every depth-0 element is a
-# single scalar has a statically known length, so it takes the `(vector …)`
-# shape at every k — not the run-time flattener, which cannot be handed boxes
-# (a box over a vector is indistinguishable from an @array box: the #262/#263
-# hazard one level up).  Both spellings, since they are two lowering sites.
-like(transpile('my %h=(a=>1,b=>2); for ($h{a}, $h{b}) { }'),
-    qr/\(vector \(p-gethash %h "a"\) \(p-gethash %h "b"\)\)/,
-    'multi-element scalar list emits (vector …), block form (#267)');
-like(transpile('my %h=(a=>1,b=>2); $_="w" for ($h{a}, $h{b});'),
-    qr/\(vector \(p-gethash %h "a"\) \(p-gethash %h "b"\)\)/,
-    'multi-element scalar list emits (vector …), modifier form (#267)');
+# --- #267 (s370): the WRAPPER and the per-element HEADS, in one pattern each.
+# A list whose every depth-0 element is a single scalar has a statically known
+# length, so it takes the `(vector …)` shape at every k — not the run-time
+# flattener, which cannot be handed boxes (a box over a vector is
+# indistinguishable from an @array box: the #262/#263 hazard one level up).
+# With the wrapper switched (step 1) the sole-element verdict then applies PER
+# ELEMENT (step 2): one verdict function, one head-swapper, k of them, the
+# verdicts taken off the untouched tokens before any lowering and mapped onto
+# the lowered elements by position.  Both spellings — two lowering sites.
+like(transpile('my %h=(a=>1,b=>2); for ($h{a}, $h{b}) { $_="W" }'),
+    qr/\(vector \(p-gethash-box %h "a"\) \(p-gethash-box %h "b"\)\)/,
+    'multi-element scalar list: (vector …) + per-element box, block form (#267)');
+like(transpile('my %h=(a=>1,b=>2); $_="W" for ($h{a}, $h{b});'),
+    qr/\(vector \(p-gethash-box %h "a"\) \(p-gethash-box %h "b"\)\)/,
+    'multi-element scalar list: (vector …) + per-element box, modifier form (#267)');
 # INVERSE GUARD: a MIXED list keeps the flattener — `@a` really does spread, so
 # a static length does not exist and the vector shape would be a miscompile.
 like(transpile('my @a=(1,2); my $x=0; for ($x, @a) { }'),
@@ -141,16 +145,30 @@ test_cl('both spellings alias a subscript CHAIN',
       my @f=(["o"]);        for ($f[0][0]) { $_="w" }
       print "$d{k}{j}$q->{a}{b}$f[0][0]\n";}, "www\n");
 
-# INVERSE GUARD for that widening: the rewrite must claim no list that is not a
-# sole aliasable element.  An @array, `keys`, a slice, a call and a two-element
-# list all flatten to VALUES through the shared copy machinery, and boxing one
-# of their calls would hand a box where a container is expected — so no box /
-# lvalue-cell head may appear at all.  (`for (@a)` aliases through p-foreach
-# itself, checked above, not through this rewrite.)
+# INVERSE GUARD for that widening: the rewrite must claim no list that is not
+# an aliasable ELEMENT.  An @array, `keys`, a slice and a call all flatten to
+# VALUES through the shared copy machinery, and boxing one of their calls would
+# hand a box where a container is expected — so no box / lvalue-cell head may
+# appear at all.  (`for (@a)` aliases through p-foreach itself, checked above,
+# not through this rewrite.)  NB: a two-element list of ELEMENTS is deliberately
+# NOT in this snippet since #267 step 2 — it now boxes, and is guarded below.
 unlike(transpile(q{
 my @a=(1,2); my %h=(a=>1,b=>2); sub f { "x" }
 for (@a) { $_="w" }  for (keys %h) { $_="w" }  for (@a[0,1]) { $_="w" }
-for (f()) { $_="w" } for ($h{a}, $h{b}) { $_="w" }
-$_="w" for (@a);     $_="w" for ($h{a}, $h{b});
+for (f()) { $_="w" } for ($h{a}, @a) { $_="w" }
+$_="w" for (@a);     $_="w" for (keys %h);
 }), qr/p-(?:gethash|aref)(?:-deref)?-box|-lvalue-cell/,
     'alias rewrite claims no non-element list, either spelling');
+
+# --- #267 step 2 (s370): the write-through those heads buy, at runtime.
+test_cl('multi-element list aliases every element, both spellings (#267)',
+    q{my %h=(a=>"o",b=>"o"); for ($h{a}, $h{b}) { $_="W" }
+      my @a=("o","o","o"); $_="W" for ($a[0], $a[2]);
+      my $r={x=>"o",y=>"o"}; for ($r->{x}, $r->{y}) { $_="W" }
+      print "$h{a}$h{b}|@a|$r->{x}$r->{y}\n";}, "WW|W o W|WW\n");
+# INVERSE GUARD: a scalar holding a REF is still ONE element after boxing — the
+# #262/#263 hazard is exactly that a box over a vector looks like an @array box,
+# so a boxed element must never be spread by the loop.
+test_cl('a ref element stays ONE iteration, not spread (#267 inverse)',
+    q{my $r=[1,2,3]; my $s=[4,5]; my $n=0; for ($r, $s) { $n++ } print "$n\n";},
+    "2\n");

@@ -6789,8 +6789,21 @@ sub _lower_compound {
       if (@el > 1) {
         # Each element's token run is lowered EXACTLY ONCE and the whole
         # list never is — PExpr's cleanup mutates the shared tokens
-        # destructively (same discipline as the range split above).
-        $list_form = ['vector', map { $self->_lower_expr($_, $stmt, 1) } @el];
+        # destructively (same discipline as the range split above).  The
+        # alias VERDICTS are therefore taken over the untouched tokens,
+        # BEFORE any lowering runs; the head swap then maps onto the lowered
+        # elements BY POSITION.  This is the sole-element rewrite applied per
+        # element — one verdict function, one head-swapper, k of them.
+        my @hd = map { [ Pl::Parser::_foreach_alias_rewrite($_) ] } @el;
+        my @forms;
+        for my $i (0 .. $#el) {
+          my $f = $self->_lower_expr($el[$i], $stmt, 1);
+          $f = _alias_box_form($f, @{ $hd[$i] })
+            // die "Parser2 TODO: foreach over an aliasable lvalue element\n"
+            if @{ $hd[$i] };
+          push @forms, $f;
+        }
+        $list_form = ['vector', @forms];
       }
       else {
         $list_form = $self->_lower_expr(\@list_parts, $stmt, 1);

@@ -2115,11 +2115,20 @@ sub _process_expression_statement {
       my $cond_cl;
       if (@el > 1) {
         # Each element run is lowered exactly once; the whole list never is.
-        my @forms = map {
-          my $f = $self->_parse_expression($_, $stmt, 1);
+        # Alias VERDICTS come off the untouched tokens BEFORE any lowering
+        # (PExpr's cleanup mutates them), then map onto the lowered elements
+        # by position — the sole-element rewrite, applied k times.
+        my @hd = map { [ _foreach_alias_rewrite($_) ] } @el;
+        my @forms;
+        for my $i (0 .. $#el) {
+          my $f = $self->_parse_expression($el[$i], $stmt, 1);
           $f =~ s/^[ \t]+// if defined $f;
-          $f;
-        } @el;
+          $f = _apply_alias_head($f, @{ $hd[$i] })
+            // die "foreach alias: element head "
+                 . $hd[$i][0] . " not outermost in: $f\n"
+            if @{ $hd[$i] };
+          push @forms, $f;
+        }
         $cond_cl = '(vector ' . join(' ', @forms) . ')';
       }
       else {
@@ -6503,15 +6512,24 @@ sub _foreach_list_unwrap {
 # lowering sites — block form and statement modifier — go through it.
 sub _apply_foreach_alias_rewrite {
   my ($list_cl, $list_parts) = @_;
-  if (my ($from, $to) = _foreach_alias_rewrite($list_parts)) {
-    # ANCHORED at the outermost call (allowing the single-scalar `(vector `
-    # wrap, which one site applies before this runs and the other after).
-    # The head the AST predicted must BE the outermost one: if it is not, the
-    # rewrite must do nothing rather than box some inner call, which would
-    # hand p-gethash a box where it expects a container — a silent wrong in
-    # place of a missed alias.
-    $list_cl =~ s/\A(\s*(?:\(vector\s+)?)\(\Q$from\E /$1($to /;
-  }
+  my @hd = _foreach_alias_rewrite($list_parts);
+  return $list_cl unless @hd;
+  # A non-matching anchor keeps TODAY's behaviour here (a missed alias, not a
+  # miscompile) — this is the sole-element path, unchanged since #263.  The
+  # multi-element path dies instead; see _foreach_scalar_elements' callers.
+  return _apply_alias_head($list_cl, @hd) // $list_cl;
+}
+
+# The ONE text head-swap for an already-lowered foreach element (the v1 seam's
+# counterpart to Parser2::_alias_box_form, which works on the CLForm tree).
+# ANCHORED at the outermost call, allowing the `(vector ` wrap that one site
+# applies before this runs and the other after.  The head the AST predicted
+# must BE the outermost one: if it is not, boxing some INNER call would hand
+# p-gethash a box where it expects a container — a silent wrong in place of a
+# missed alias — so a failed anchor returns undef and the caller rules.
+sub _apply_alias_head {
+  my ($list_cl, $from, $to) = @_;
+  return undef unless $list_cl =~ s/\A(\s*(?:\(vector\s+)?)\(\Q$from\E /$1($to /;
   return $list_cl;
 }
 
