@@ -1776,3 +1776,33 @@ E4.1's pre-work is now done.
   (`last`/`next`/`redo`/`goto`/`return`) are callable everywhere via
   `Config::control_flow_ops` — they are absent from `known_no_of_params`
   because their operand is a LABEL.  Guard `Pl/t/bareword-call-01.t`.
+- **`explain()` DUMPS a ref** (s374, #236): Test::More renders every ref with
+  Data::Dumper under Indent(1)/Terse(1)/Sortkeys(1) and passes a non-ref
+  through; PCL stringified, so an is_deeply failure that printed its operands
+  read `got 'ARRAY(0x53)'`.  The renderer in `cl/pcl-test.lisp` reuses
+  `test-deeply-equal`'s shape test, so anything is_deeply can WALK, explain can
+  PRINT, and it prints Dumper's `$VAR1` back-reference for a cycle or a shared
+  ref.  Two deliberate differences, both commented at the code: no trailing
+  newline (pl-diag would emit a bare `# ` line) and integer-vs-quoted decided
+  by the CL type.
+- **`-BAREWORD` autoquotes before `=>` and inside a HASH subscript** (s374,
+  #234): perl reads `(-f => 4)` as the key "-f" and `$h{-f}` as that key, and
+  the STRING reading beats the operator one.  A SINGLE-letter `-f` arrives from
+  PPI as the FILETEST operator token, so both autoquote sites missed it (`-foo`
+  and `-1` tokenize differently and were always right), the `$_` default took
+  over, and the filetest's result ATE the next list element.  Settled at the
+  three sites that own an autoquote decision — the fat-comma rewrite in
+  `cleanup_for_parsing`, `_subscript_autoquote_text` (NEW: the ONE answer both
+  subscript paths now ask, they had drifted into two copies), and the
+  interpolation key regex.  NOT in the `$_`-default pre-pass: by then the
+  element is already split and there is no `=>` left to key on.
+- **`use` ARGUMENTS are compiled, never wrapped as raw text** (s374, #235):
+  `use lib "$ENV{HOME}/x"` and `use constant X => "…"` are compile-time perl
+  expressions.  Two hand-rolled sites wrapped `$tok->string` in CL quotes,
+  which dropped interpolation AND mangled escaping four ways — `"a\nb"` → CL
+  "anb", `'a\b'` → "ab", `'a"b'` → unreadable CL that killed the file at load.
+  Both now use the ordinary expression path; the single-quote-token
+  short-circuit in `_compile_constant_value` is DELETED (its own comment
+  already said why NUMBERS must not be short-circuited — strings were the same
+  trap one type over).  A general `use Module LIST` already compiled its import
+  args, so the scope really is those two sites.

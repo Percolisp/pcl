@@ -4,6 +4,81 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 374 (2026-08-09, Opus 5) — the whole s373 queue: #266, #236, #234, #235
+
+Four commits plus a generation bump; every item on Fable's queue is shipped
+and closed.  Gate ends at **133 files / 4773 PASS**.
+
+**#266 — a bare NAME is a call only where it is callable** (`151fdcb`).  Perl
+decides bareword-vs-string at COMPILE time, top-down, and PCL got both halves
+wrong in two branches of `handle_subcalls` that each carried their own copy of
+a name test: a QUALIFIED name never matched (the sub tables are keyed bare +
+package), and the whole-file pre-scan made the answer position-blind.
+Qualified, the two compounded into the filed silent wrong — a call to a sub
+not yet defined, returning EMPTY — and an unknown name at the END of a list
+(`print "x=", nosuch;`) CRASHED at load with an undefined function.  One
+shared `_bareword_callable_here` now answers, and it is THREE-valued because
+the negatives differ: `not-yet` (declared BELOW in this file) is positive
+knowledge and reads as the string anywhere; `no` (nothing visible) keeps
+answering CALL outside operator context, because PCL's compile-time name
+knowledge is incomplete.  **That distinction was measured, not guessed**:
+treating `no` as a string turned `next`, `goto again` and File::Spec's
+`curdir` into strings (corpus-diff: 20 files moved; the narrowed rule moves
+2, both FIXES).  Declaration sites ride on `declared_subs` via
+`TokenUtils::decl_site`/`site_precedes`; two documents are incomparable and
+answer "callable".  Control-flow words are callable everywhere
+(`Config::control_flow_ops`) — absent from `known_no_of_params` because their
+operand is a LABEL, and `push @a, last;` must stay a `last`.  Verified: 12-case
+grid + 11 breaking-case probes all match live perl; full sweep GATE clean,
+0 new / 0 fixed, TOTAL 18499, no LOST.  Guard `Pl/t/bareword-call-01.t`.
+
+**#236 — explain() dumps** (`3d1b917`).  Test::More renders a ref with
+Data::Dumper (Indent 1, Terse 1, Sortkeys 1); PCL stringified, so every
+is_deeply failure that printed its operands read `got 'ARRAY(0x53)'` — ~40
+CPAN-board rows with no usable cause line, which is why Fable ruled it the
+first filler.  The renderer reuses `test-deeply-equal`'s shape test and prints
+Dumper's `$VAR1` back-reference for a cycle or a shared ref.  Guard: three
+rows in `Pl/t/tap-assert-01.t`, each against the live Dumper text.
+
+**#234 — `-BAREWORD` autoquotes** (`5b0e112`).  `(-f => 4, abc => 3)` gave
+{3=>undef, 4=>'abc'} and `$h{-f}` an empty key: PPI hands a single-letter `-f`
+over as the FILETEST operator, so neither autoquote site recognised it and the
+`$_` default made the filetest eat the next element.  Fixed at the three sites
+that own an autoquote decision (fat comma, subscript, interpolation) — and the
+subscript one had drifted into TWO copies, now sharing
+`_subscript_autoquote_text`.  corpus-diff: emission IDENTICAL over 111 files.
+
+**#235 — `use` arguments are compiled** (`cbf6d71`).  `use lib "$ENV{HOME}/x"`
+and `use constant X => "…"` wrapped the token's RAW text in CL quotes, which
+dropped interpolation and mangled escaping four ways — `"a\nb"` → CL "anb",
+`'a\b'` → "ab", and `'a"b'` → UNREADABLE CL that killed the whole file at
+load.  Both sites now use the ordinary expression path; the single-quote
+short-circuit in `_compile_constant_value` is deleted (its own comment already
+said why NUMBERS must not be short-circuited).  Scope answered: a general
+`use Module LIST` already compiled its import args.  corpus-diff identical;
+the five constant-using lib/ shims byte-identical.
+
+**Cache generation** bumped v2-123 → **v2-125** across the two
+emission-touching commits; both checked-in transpiled artifacts regenerated
+and byte-identical below the header.
+
+**Two new bugs found by the probes, filed not fixed:** `use Test::More tests
+=> N` emits NO `1..N` plan line (the `plan tests => N` spelling does) — a TAP
+file a harness cannot judge; and an EMPTY `{}` as a list-operator argument
+(`explain {}`) parses as an empty ARRAY, where perl reads a hashref
+(`explain {a=>1}` is already right).
+
+**Batch verification (second full sweep, after #234+#235):** GATE clean, verdict
+byte-identical to the first — `0 new, 0 fixed`, TOTAL 18499 passing, no LOST,
+the same 6 UNSTABLE / 4 unverified rows in files already PARTIAL in the
+baseline (method.t, postfixderef.t, ref.t, tr.t).
+
+**Queue for the next Opus session:** empty — Fable's s373 list is done.  The
+FOLD (#153) remains Fable's, in its own session.  Review asks:
+`docs/opus5-review-requests-s374.md`.
+
+---
+
 ## Session 373 (2026-08-09, Fable) — s372 review: both commits APPROVED, five asks ruled
 
 Review of s372 per the division of labor.  Full rulings in

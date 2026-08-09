@@ -48,7 +48,7 @@ retargeted the task at filing).
 
 6. **Add Regression Tests for Bug Fixes**: When fixing a bug, add a test case to an existing test file that covers the fixed behavior. This prevents regressions.
 
-   **The constraint is a file's RUN TIME, not its test count** (user, 2026-07-28, restated and refined 2026-08-01). `prove -j8` parallelises across files, so the gate's wall time ≈ the *slowest single file* — a file with many fast rows is fine, a file with a few slow ones is not. What makes a row slow: `test_transpile` runs a perl oracle **and** an SBCL transpile+run; `run_cl` spawns SBCL. So before adding, ask *how long does this file take*, and measure with `prove --timer Pl/t/<file>`; if the answer is heading past the current slowest file, start the next `transpile-test-NN.t` instead (copy an existing file's header/helpers). `transpile-test-01.t` (118 rows) and `transpile-test-07.t` (45, closed by the user in s321) are the two to leave alone; as of s321 the files are 01, 01b, 02, 03, 04, 04b, 05, 06, 07, 08, so the next new one is **`-09`**.
+   **The constraint is a file's RUN TIME, not its test count** (user, 2026-07-28, restated and refined 2026-08-01). `prove -j8` parallelises across files, so the gate's wall time ≈ the *slowest single file* — a file with many fast rows is fine, a file with a few slow ones is not. What makes a row slow: `test_transpile` runs a perl oracle **and** an SBCL transpile+run; `run_cl` spawns SBCL. So before adding, ask *how long does this file take*, and measure with `prove --timer Pl/t/<file>`; if the answer is heading past the current slowest file, start the next `transpile-test-NN.t` instead (copy an existing file's header/helpers). `transpile-test-01.t` (118 rows) and `transpile-test-07.t` (45, closed by the user in s321) are the two to leave alone; as of s321 the files are 01, 01b, 02, 03, 04, 04b, 05, 06, 07, 08, so the next new one is **`-10`** (`-09` landed in s321-era; s374 added the non-transpile-test `bareword-call-01.t`).
 
 7. **Document Complex Semantics in `docs/`**: When solving a problem involving tricky Perl-vs-CL semantics, write a `docs/topic-name.md` file explaining the problem, the solution, and edge cases. Reference it from CLAUDE.md's "Key Files to Read" section. This prevents re-investigating the same issue in future sessions. Examples: declaration ordering, wantarray context, string escapes.
 
@@ -330,8 +330,8 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **132 test files, 4735 tests** with a built pclxs sibling (s365, measured);
-  **4721 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
+- **133 test files, 4773 tests** with a built pclxs sibling (s374, measured);
+  **4759 without** (arithmetic: minus the 14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -362,7 +362,7 @@ func => -12         # 1 param before list
   run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
   is found it prints `LOST: NOT CHECKED` rather than nothing.
 - Full `perl-tests/` sweep: **679 blessed fails** in `docs/fail-baseline.tsv`,
-  **64 files fully passing**, 18499 passing / 911 failing across 108 files
+  **65 files fully passing**, 18499 passing / 910 failing across 108 files
   (re-measured s356 at the E4.1 flip; GATE clean, +0.  The flip moved three
   files, all pre-authorized and edited into the baselines with their causes:
   **eval.t 110 → 114** — the ruled eval refusal makes the four `my $$x`-family
