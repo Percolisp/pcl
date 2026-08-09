@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 376 (2026-08-09, Opus) — #275, #276, and the first #238 shim pass
+
+Three queue items, all verified together: **Pl/t gate 133 files / 4785 tests
+PASS**, **full sweep GATE clean** (0 new / 0 fixed, TOTAL passing 18498 →
+18499), corpus-diff **1 of 111 files** (method.t, explained), CPAN board
+re-run whole (2053 ok / 483 not-ok, snapshot in
+`docs/cpan-board14-s376.tsv`).  Gen bumped **v2-125 → v2-126** with both
+transpiled artifacts restamped (`cl/pcl-mro.lisp` had drifted one
+generation behind at s374).
+
+- **#275** — `use Test::More tests => N` published TAP with NO plan line.
+  Test::More`s import IS its plan setter; `p-use` was dropping the whole
+  import list for a PCL-provided module.  Now forwarded to `%test-import`
+  in the TAP layer, which strips `import => [...]` and hands the rest to
+  the existing `pl-plan`.  Two gate files carried the bug as their
+  expectation and now carry the `1..N` as the guard.
+- **#276** — an empty `{}` after a paren-less list operator (`f {}`,
+  `explain {}`) parsed as an empty ARRAY.  One new arm in PExpr`s
+  term-position Block dispatch; deliberately not folded into
+  `_block_is_hash_constructor` (that answers the map/grep BODY question,
+  where `{}` is not valid perl).
+- **#238 first pass** — the Scalar-List-Utils dist`s own 38 files went
+  319 ok/120 not-ok → **398 ok/75 not-ok** (12→17 PASS, 5→2 FAIL).  Eight
+  dying stubs implemented, zip/mesh`s result shapes corrected, the four
+  `uniq*` separated, `$List::Util::RAND` honoured, one shared `_need_code`
+  for all ten block-taking functions (t/undefined-block.t 0/18 → 18/18),
+  `looks_like_number` rewritten to grok_number`s rules, and
+  `isdual`/`isvstring` wired to two new `builtin::` primitives.  The
+  remaining 75 rows are parked families, enumerated on task #238.
+
+---
+
 ## Session 375c (2026-08-09, USER + Fable) — the v0.1 public-release track is opened
 
 USER-initiated: plan the first public release.  Plan doc:

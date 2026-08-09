@@ -33,10 +33,26 @@ sub reftype {
 sub weaken { }
 sub isweak { 0 }
 
+# Perl's grok_number: what the CORE numeric conversion would accept without a
+# warning.  Three things this must get right that a naive /^\d+$/ does not:
+#   * Inf / Infinity / NaN (any case, optional sign) ARE numbers;
+#   * the literal "0 but true" is a number (perl's blessed zero);
+#   * the digit class is ASCII 0-9 ONLY — \d also matches MONGOLIAN DIGIT FIVE
+#     and friends, which perl does NOT accept (Scalar-List-Utils t/lln.t).
+# A plain reference is not a number, but an OVERLOADED object answers on its
+# stringification (t/lln.t's Math::BigInt rows) — that is what perl does via
+# SvAMAGIC before it ever looks at the buffer.
 sub looks_like_number {
     my ($val) = @_;
     return 0 unless defined $val;
-    return $val =~ /^\s*[+-]?(?:\d+\.?\d*|\.\d+)(?:[Ee][+-]?\d+)?\s*$/;
+    if (ref $val) {
+        return 0 unless blessed($val) && overload::Overloaded($val);
+        $val = "$val";
+    }
+    return 1 if $val eq '0 but true';
+    return 1 if $val =~ /\A\s*[+-]?(?:Inf(?:inity)?|NaN)\s*\z/i;
+    return 1 if $val =~ /\A\s*[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[Ee][+-]?[0-9]+)?\s*\z/;
+    return 0;
 }
 
 sub readonly { 0 }
@@ -50,8 +66,11 @@ sub dualvar {
     return builtin::dualvar($num, $str);
 }
 
-sub isdual    { 0 }
-sub isvstring { 0 }
+# Both ask about the SCALAR'S REPRESENTATION, which no plain Perl can inspect —
+# so they route to the runtime through the same builtin:: dispatch namespace
+# blessed/reftype/dualvar already use.
+sub isdual    { return builtin::is_dual($_[0]) }
+sub isvstring { return builtin::is_vstring($_[0]) }
 sub openhandle { $_[0] }
 sub set_prototype { }
 

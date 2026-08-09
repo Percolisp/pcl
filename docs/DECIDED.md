@@ -1887,3 +1887,59 @@ E4.1's pre-work is now done.
 - Open USER decisions listed in the plan doc: public name (PCL collides in
   the CL world; percolisp org exists), publish process docs or not, LICENSE
   body check, pclxs bundling, hosting/remote.
+
+## s376 (2026-08-09, Opus) — #275 + #276 + the #238 shim batch
+
+- **`use Test::More tests => N` is a PLAN, and it now reaches the TAP layer
+  (#275).**  Test::Builder::Module::import strips an `import => [...]`
+  export list and hands EVERYTHING ELSE to `plan()`, so `tests => N`,
+  `'no_plan'` and `skip_all => REASON` all mean the matching `plan()` call.
+  `p-use` returned as soon as it recognised a PCL-provided module, dropping
+  the whole list — so such a file published TAP with **no plan line and no
+  `done_testing`**, one no harness can judge (the #202 family).  Fix:
+  `p-use` forwards the import list to `%test-import` in `cl/pcl-test.lisp`
+  (that is where Test::More's semantics belong); it consumes `import`,
+  hands the rest to the existing `pl-plan`, and lets `pl-plan` reject an
+  unrecognised form as it already did.  A bare VERSION (`use Test::More
+  0.88`) is not an import arg and stays plan-less, as in perl.  Guards:
+  `Pl/t/tap-assert-01.t` (every expected block now opens with its `1..N`,
+  plus one row for `no_plan` / `skip_all` / VERSION) and
+  `Pl/t/goto-sub-phase-01.t`.  58 board files gain a plan line; no board or
+  sweep row moves (the counters read `ok`/`not ok`, never the plan).
+- **An empty `{}` in TERM position is an anonymous HASH, not a block
+  (#276).**  perl's toke.c decides on the character after the brace, with
+  no ambiguity to resolve.  PPI already labels `{}` a Constructor
+  everywhere it can; the one place it still says Block is after a bareword
+  in paren-less list-operator position — `f {}`, `explain {}` — where PCL
+  fell through to the block-body parse and produced an empty ARRAY (`ref`
+  said `""` and the call lost an argument).  Fixed in `Pl/PExpr.pm`'s
+  single term-position Block arm via `_block_is_empty`, deliberately NOT
+  folded into `_block_is_hash_constructor`: that predicate answers the
+  map/grep/`(&@)` BODY question, where a bare `{}` is not valid perl at all
+  (`map {} (1,2)` is a syntax error), so widening it would be a claim about
+  input principle 9 says we need not read.  Emission moves in ONE corpus
+  file (method.t's three `new{}` rows, already-failing "pl-new is
+  undefined" either way — verified 93+38/163, identical to baseline).
+  Gen bumped to **v2-126**, both transpiled artifacts restamped
+  (byte-identical below the header).
+- **#238 List::Util/Scalar::Util shim parity, first pass: 319 ok/120 not-ok
+  → 398 ok/75 not-ok on the dist's own 38 files** (12→17 PASS, 5→2 FAIL).
+  Implemented: `maxstr`/`minstr`/`reductions`/`sample`/`zip_shortest`/
+  `mesh_longest`/`mesh_shortest` (were dying stubs); `zip` returns
+  ARRAYREFS and `mesh` flattens (they were both the flat list);
+  `product()` of nothing is 1; `head`/`tail` take `($@)`, clamp both ends
+  and die "Not enough arguments"; the four `uniq*` separated by what they
+  compare and what they RETURN (`uniqnum`'s key is `pack "d"` — the raw
+  double, because stringifying collapses 1.4142135623730951 and
+  ...54 into one key); `$List::Util::RAND` honoured by `shuffle`/`sample`;
+  `pairgrep`/`pairfirst` scalar-context answers; one shared `_need_code`
+  gives all ten block-taking functions perl's two error texts
+  (t/undefined-block.t 0/18 → 18/18); `looks_like_number` accepts
+  Inf/Infinity/NaN and `0 but true`, uses `[0-9]` not `\d` (MONGOLIAN
+  DIGIT FIVE), and answers on an overloaded object's stringification;
+  `isdual`/`isvstring` route through new `builtin::is_dual` /
+  `builtin::is_vstring` (box-representation facts no plain Perl can ask).
+  **Remaining 75 rows are all parked families**, listed on task #238:
+  tie (#155), REF-vs-SCALAR (#163), prototype introspection, `weaken`,
+  read-only SCALAR storage, taint, get-magic, `subname`, `@_` aliasing,
+  error text (#149).
