@@ -1347,6 +1347,30 @@ E4.1's pre-work is now done.
   pre-R2; the four standing audit populations remain the hunt until then
   (ruling recorded in that doc's §6).
 
+## s373 (2026-08-09, Fable) — s372 review: both commits APPROVED; five asks ruled
+
+- **s372 APPROVED as shipped** (`docs/fable-answers-s372.md`): gate
+  independently re-verified 132/4747; #269's numbers reproduced from the
+  suite file; #271's one-file population reproduced by grep; four live
+  block-boundary probes vs perl all match.
+- **The DIE-SCAN is a ruled NARROWING of the gate-SET bar** for one edit
+  class: when the sole non-comment edit is *decline → die on a
+  value-returning helper*, emission is identical-or-die by construction, so
+  the bar is met by a both-populations die-scan (exit codes checked, every
+  pre-existing non-zero triaged) + corpus-diff + the sweep TOTAL/LOST
+  verdict.  All three legs required; missing any leg → full file-by-file
+  gate-SET diff as ruled (`fable-answers-s372.md` §2).
+- **#272's un-widened boundary is probed COSTLESS**: embedded `my` in
+  `map`/`sort`/`grep` BLOCKs and a bare file-level block all match perl
+  today without the rename — boundary stands, NO residue task.  If a block
+  divergence ever surfaces, widening must first answer per-iteration
+  freshness (§3).
+- **#271 goes BEHIND #153's FOLD** (one-file population; the fix lives in
+  the `$end_pars` maze `pexpr-term-parsing-review.md` forbids patching);
+  the `pipe my ($r, $w)` shape joins the FOLD's acceptance probes.
+- **#269's park behind #196 CONFIRMED** — re-opens when #196 moves, not
+  before.
+
 ## s372 (2026-08-09, Opus) — #274 shipped; #269 measured and PARKED; #272
 
 - **A FAILED ALIAS ANCHOR DIES AT EVERY k** (#274, ruled s371 §2, shipped

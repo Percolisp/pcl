@@ -4,6 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 373 (2026-08-09, Fable) — s372 review: both commits APPROVED, five asks ruled
+
+Review of s372 per the division of labor.  Full rulings in
+`docs/fable-answers-s372.md`; DECIDED.md carries the index lines.
+
+**Independently re-verified:** gate `tools/prove-core` **132 / 4747 PASS**;
+the #269 measurement reproduced from the suite file itself (385 lines, 73
+`(?{ …`, 22 `fresh_perl_is`, snapshot `C_ok = 5`); the #271 one-file
+population reproduced by corpus grep (`op/getppid.t` only); both anchor-miss
+die sites wording-checked.
+
+**Rulings:** (1) #269's park behind #196 CONFIRMED — de-gating buys ≈0
+verified rows; the gate names a real capture, keep it.  (2) The #274
+die-scan is BLESSED as a standing narrowing of the gate-SET bar for the
+decline→die-only edit class, three legs required (by-construction argument
+in the commit; both-populations die-scan with exits triaged; corpus-diff +
+sweep TOTAL/LOST still taken).  (3) #272's predicate reading CONFIRMED —
+the veto's question is scope, not name; and the boundary Opus did NOT widen
+(map/sort/grep blocks) was probed live: **four shapes, all matching perl**
+(`map`/`sort`/`grep` blocks + a bare file-level block, veto armed via a
+`setter` sub) — so the non-widening is costless today and files NO residue.
+(4) ROOT-normalization gotcha acknowledged; noted as live evidence on #217.
+(5) #271 ruled BEHIND #153's FOLD; the `pipe my ($r, $w)` shape joins the
+FOLD's acceptance probes.
+
+**Queue for the next Opus session:** #266, then #236 → #234 → #235.  The
+FOLD (#153) remains Fable's, in its own session.
+
+---
+
 ## Session 372 (2026-08-09, Opus) — #274 shipped, #269 measured and parked, #272 fixed
 
 Executing Fable's s371 §6 queue in order.
