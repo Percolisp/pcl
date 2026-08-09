@@ -510,15 +510,45 @@ sub _decl_binding_in {
   my ($self, $elems, $canon) = @_;
   my $found;                                   # last one wins, as in _binding_at
   for my $e (@$elems) {
+    # A SIGNATURE (`sub f ($x, $y = 0) {…}`) binds its parameters for the
+    # whole block with no my/state/our keyword at all (s379 review probe:
+    # the body's $x was requalified to $X::x while the seam still bound the
+    # plain lexical — silent wrong value).  This PPI tokenizes prototypes
+    # AND signatures as Token::Prototype, so the named-params discriminator
+    # is the same textual one _is_pure_prototype uses, and the param NAMES
+    # come from the same splitter the v1 seam binds them with — a Symbol
+    # inside a DEFAULT expression is a use, not a parameter, and stays
+    # eligible for requalification.  A pure prototype binds nothing.
+    if ($e->isa('PPI::Token::Prototype') || $e->isa('PPI::Structure::Signature')) {
+      my $str = $e->content;
+      next if $str !~ /[\$\@\%]\w/;
+      $str =~ s/^\s*\(\s*//;                   # the splitter expects the parens
+      $str =~ s/\s*\)\s*$//;                   # already peeled, as its caller does
+      $found = 'lex' if grep { ($_->{name} // '') eq $canon }
+        @{ $self->fallback_parser->_signature_param_specs($str) };
+      next;
+    }
     my @words = $e->isa('PPI::Token::Word') ? ($e)
               : $e->isa('PPI::Node')
                 ? @{ $e->find(sub { $_[1]->isa('PPI::Token::Word') }) || [] }
               : ();
     for my $w (@words) {
       next unless $w->content =~ /^(?:my|state|our)$/;
+      # Only a real DECLARATOR position counts.  The same three words are
+      # legal perl elsewhere and must neither bind nor die (s379 review
+      # probe: `if ($h{my}) { package P; … }` died "unclassifiable"):
+      #   - a method name (`$obj->my(...)`);
+      #   - a fat-comma key (`my => 1`) — always the string;
+      #   - a bare hash-subscript key (`$h{my}`) — no next sibling;
+      #   - a lexical sub (`my sub f {…}`) — declares no VARIABLE, and its
+      #     name can never collide with $canon's symbol space.
+      my $pv = $w->sprevious_sibling;
+      next if $pv && $pv->isa('PPI::Token::Operator') && $pv->content eq '->';
       my $nx = $w->snext_sibling;
-      my @syms = !$nx                            ? undef
-               : $nx->isa('PPI::Token::Symbol')  ? ($nx)
+      next if !$nx;
+      next if $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+      next if $nx->isa('PPI::Token::Word') && $nx->content eq 'sub';
+      my @syms = $nx->isa('PPI::Token::Symbol')  ? ($nx)
                : $nx->isa('PPI::Structure::List')
                  ? @{ $nx->find('PPI::Token::Symbol') || [] }
                : undef;

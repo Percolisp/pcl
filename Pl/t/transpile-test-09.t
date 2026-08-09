@@ -968,4 +968,22 @@ sub peek { $Loc::v }
 print "after=$Loc::v\n";
 });
 
+# (s379 review) The resolver's two false verdicts on head elements:
+#  - a SIGNATURE binds its parameters with no my/state/our keyword, so the
+#    body's $x was requalified to $X::x while the seam still bound the plain
+#    lexical (perl 42, PCL 1 — silent wrong value).  A Symbol inside a
+#    DEFAULT expression is a use, not a parameter, and a PURE prototype
+#    (`($$)`) binds nothing;
+#  - `my`/`our` as a fat-comma key or bare hash subscript is a STRING, not a
+#    declarator — it died "unclassifiable `my` declarator" on legal perl.
+test_transpile("signature params and keyword-as-hash-key vs package-switch resolver (s379)", q{
+use feature 'signatures'; no strict; no warnings;
+sub f ($x, $y = $x + 1) { package P; "got:$x:$y" }
+print f(41), "\n";
+print "P::x=", (defined $P::x ? $P::x : "U"), "\n";
+%h = (my => 1, our => 2, state => 3);
+if ($h{my} + $h{our} + $h{state}) { package Q; $z = "ok"; }
+print "z=", (defined $Q::z ? $Q::z : "U"), "\n";
+});
+
 done_testing();
