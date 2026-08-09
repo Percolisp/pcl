@@ -225,6 +225,46 @@
     (format t "1..~A~%" count)
     (setf *test-planned* count)))
 
+;;; `use Test::More tests => N` — the IMPORT-ARG spelling of the plan.
+;;;
+;;; Test::More's import IS its plan setter: Test::Builder::Module::import
+;;; strips an `import => [...]` export list and hands EVERYTHING ELSE to
+;;; plan().  So `use Test::More tests => 23`, `use Test::More 'no_plan'` and
+;;; `use Test::More skip_all => "why"` mean exactly the corresponding plan()
+;;; call.  PCL used to drop the whole import list (p-use returns as soon as it
+;;; recognises a PCL-provided module), so a file that spelled its plan this way
+;;; published a TAP stream with no plan line AND no done_testing — one no
+;;; harness can judge.  That is the #202 family ("a claim that cannot be
+;;; evaluated must say so"), and it hid from our own measurements only because
+;;; sweep-perl-tests.pl counts rows itself instead of reading the plan.
+;;; Task #275.
+;;;
+;;; The export list is consumed and ignored: PCL exports the whole TAP API
+;;; unconditionally, and letting `import` reach pl-plan would look like an
+;;; unknown plan key there.  Anything else unrecognised is pl-plan's to reject
+;;; — perl's Test::Builder croaks "'X' is not a valid plan" on it too.
+(defun %test-import (import-args)
+  "Apply a Test::More import list as a plan.  IMPORT-ARGS is whatever p-use
+   was handed: a vector (`use Test::More tests => 2`), a bare string
+   (`use Test::More 'no_plan'`), or NIL/empty for a plain `use Test::More`."
+  (let ((vals (mapcar #'unbox
+                      (cond ((null import-args) nil)
+                            ((stringp import-args) (list import-args))
+                            ((and (vectorp import-args)
+                                  (not (stringp import-args)))
+                             (coerce import-args 'list))
+                            ((listp import-args) import-args)
+                            (t (list import-args)))))
+        (plan-args '()))
+    (loop while vals
+          for a = (pop vals)
+          do (if (and (stringp a) (string= a "import"))
+                 (pop vals)                       ; the export list — ignored
+                 (push a plan-args)))
+    (let ((plan-args (nreverse plan-args)))
+      (when plan-args
+        (apply #'pl-plan plan-args)))))
+
 ;;; BAIL_OUT(reason)
 (defun pl-BAIL_OUT (reason)
   (format t "Bail out!  ~A~%" reason)

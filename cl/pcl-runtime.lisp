@@ -11380,7 +11380,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-125"
+(defparameter *pcl-cache-generation* "v2-126"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11862,6 +11862,13 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
   (when (member module-name *p-pcl-provided-modules* :test #'string=)
     (p-ensure-test-lib)
+    ;; `use Test::More tests => N` / 'no_plan' / skip_all => REASON: the import
+    ;; list IS the plan for these modules, so it must reach the TAP layer.
+    ;; Dropping it published a plan-less TAP stream (task #275).  The handler
+    ;; lives in cl/pcl-test.lisp — that is where Test::More's semantics belong,
+    ;; and it is only loadable once p-ensure-test-lib has run.
+    (when (and do-import (not (eq import-args :default)))
+      (funcall (intern "%TEST-IMPORT" :pcl) import-args))
     (return-from p-use t))
   ;; Lexical pragmas (strict/warnings/feature/...): never load the core .pm —
   ;; PCL doesn't model the hint bitmasks they touch.  Reached only via a string
@@ -13226,6 +13233,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     (def "UNWEAKEN" (lambda (r) (declare (ignore r)) *p-undef*))
     (def "IS_WEAK"  (lambda (r) (p-isweak r)))
     (def "DUALVAR"  (lambda (num str) (p-dualvar num str)))
+    ;; Companions to DUALVAR: both ask a question about the SCALAR'S OWN
+    ;; REPRESENTATION that no amount of plain Perl can answer — whether the box
+    ;; carries two independent caches (a dualvar) and whether it holds a
+    ;; v-string payload rather than an ordinary string.  Perl answers 1/"".
+    (def "IS_DUAL"  (lambda (x) (make-p-box (if (%pcl-dualvar-p x) 1 ""))))
+    (def "IS_VSTRING" (lambda (x) (make-p-box (if (p-vstring-p (unbox x)) 1 ""))))
     (def "BLESSED"  #'%p-builtin-blessed)
     (def "REFADDR"  #'%p-builtin-refaddr)
     (def "REFTYPE"  #'%p-builtin-reftype)

@@ -145,13 +145,13 @@ print "main:$g\n";
 is(run_cl(q{use Test::More tests => 2;
 require_ok('File::Basename');
 ok(defined &File::Basename::basename, 'require_ok actually loaded the module');
-}), "ok 1 - require File::Basename;\nok 2 - require_ok actually loaded the module\n",
+}), "1..2\nok 1 - require File::Basename;\nok 2 - require_ok actually loaded the module\n",
    'require_ok loads the module (it used to report ok and load nothing)');
 
 is(run_cl(q{use Test::More tests => 2;
 use_ok('File::Basename');
 ok(defined &main::basename, 'use_ok imported into the caller');
-}), "ok 1 - use File::Basename;\nok 2 - use_ok imported into the caller\n",
+}), "1..2\nok 1 - use File::Basename;\nok 2 - use_ok imported into the caller\n",
    'use_ok loads AND imports into the calling package');
 
 # INVERSE: a module that cannot be found must FAIL the row, not pass it.
@@ -167,7 +167,7 @@ my $builder = Test::More->builder;
 binmode($builder->failure_output, ':utf8');
 binmode($builder->todo_output, ':utf8');
 ok(ref($builder) eq 'Test::Builder', 'builder is a Test::Builder');
-}), "ok 1 - builder is a Test::Builder\n",
+}), "1..1\nok 1 - builder is a Test::Builder\n",
    'Test::More->builder returns handles binmode accepts');
 
 # ------------------------------------------------- 4. embedded-my veto scoping

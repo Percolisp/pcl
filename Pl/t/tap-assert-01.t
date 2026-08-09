@@ -22,6 +22,9 @@
 #     about the environment it never checked.
 #   * plan() fell through unrecognized forms silently, leaving the whole file
 #     unjudgeable.
+#   * the IMPORT-ARG spelling of the plan (`use Test::More tests => N`) was
+#     dropped entirely, so such a file published TAP with no plan line at all
+#     (task #275).  Every expected block below now opens with its `1..N`.
 #
 # Plus the runtime bug the audit's own probes found: scalar() DEREFERENCED a
 # reference (`ref(scalar($aref))` was "", `scalar($aref)` was the element
@@ -44,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 20;
 
 sub run_cl {
     my ($code) = @_;
@@ -91,6 +94,7 @@ cmp_ok("a", 'cmp', "a", 'cmp equal is false');
 cmp_ok("abc", '=~', qr/b/, 'bind matches');
 cmp_ok("abc", '!~', qr/b/, 'negated bind matches');
 }), <<'TAP', 'cmp_ok answers <=>, cmp, =~ and !~ instead of failing them');
+1..6
 ok 1 - spaceship unequal is true
 not ok 2 - spaceship equal is false
 #      got: '1'
@@ -125,14 +129,14 @@ is(run_cl(q{use Test::More tests => 3;
 ok(eq_hash({a=>1,b=>2}, {a=>1,b=>2}), 'eq_hash equal');
 ok(!eq_hash({a=>1}, {a=>2}), 'eq_hash different value');
 ok(!eq_hash({a=>1}, {a=>1,b=>2}), 'eq_hash different size');
-}), "ok 1 - eq_hash equal\nok 2 - eq_hash different value\nok 3 - eq_hash different size\n",
+}), "1..3\nok 1 - eq_hash equal\nok 2 - eq_hash different value\nok 3 - eq_hash different size\n",
    'eq_hash runs at all (it type-errored on every hashref) and both verdicts are reachable');
 
 # ---------------------------------------------------- 4. Test::More's wording
 
 is(run_cl(q{use Test::More tests => 1;
 use_ok('File::Basename', 'basename');
-}), "ok 1 - use File::Basename;\n",
+}), "1..1\nok 1 - use File::Basename;\n",
    'use_ok description is "use Foo;" — never the import list (descriptions are keys)');
 
 is(run_cl(q{use Test::More tests => 4;
@@ -141,6 +145,7 @@ isa_ok([1,2], 'Bar');
 isa_ok('Plain', 'Bar');
 isa_ok(undef, 'Bar');
 }), <<'TAP', 'isa_ok names WHAT the thing is — four kinds, four distinct rows');
+1..4
 not ok 1 - An object of class 'Foo' isa 'Bar'
 #     The object of class 'Foo' isn't a 'Bar'
 not ok 2 - A reference of type 'ARRAY' isa 'Bar'
@@ -157,6 +162,7 @@ can_ok($o, 'nope');
 can_ok($o, 'nope1', 'nope2');
 can_ok('Foo');
 }), <<'TAP', 'can_ok names the class and the single method, and rejects a no-method call');
+1..3
 not ok 1 - Foo->can('nope')
 #     Foo->can('nope') failed
 not ok 2 - Foo->can(...)
@@ -186,6 +192,25 @@ plan('bogus');
 ok(1, 'never judged');
 }), qr/unrecognized plan form/,
    'an unrecognized plan form names itself instead of leaving the file unjudgeable');
+
+# ------------------- 6b. the plan can also be spelled as an import list (#275)
+#
+# Test::More's import IS its plan setter, so `use Test::More tests => N`,
+# `use Test::More 'no_plan'` and `use Test::More skip_all => "why"` must mean
+# exactly the matching plan() call.  PCL used to DROP the whole import list for
+# a PCL-provided module, so a file spelling its plan this way published TAP
+# with no plan line and no done_testing — one no harness can judge.  The
+# `tests => N` spelling is guarded by the `1..N` first line of every expected
+# block above; these two cover the other spellings.  A VERSION
+# (`use Test::More 0.88`) is not an import arg and must stay plan-less.
+is(run_cl(q{use Test::More 'no_plan';
+ok(1, 'a'); ok(1, 'b');
+}) . "--\n" . run_cl(q{use Test::More skip_all => 'why not';
+ok(1, 'never runs');
+}) . "--\n" . run_cl(q{use Test::More 0.88;
+ok(1, 'a');
+}), "ok 1 - a\nok 2 - b\n1..2\n--\n1..0 # Skip why not\n--\nok 1 - a\n",
+   'no_plan / skip_all / a bare VERSION each reach the TAP layer as perl reads them');
 
 # ------------------------------- 7. scalar() never dereferences (runtime fix)
 
