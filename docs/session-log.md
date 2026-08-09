@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 376 (2026-08-09, Opus) — #275, #276, and the first #238 shim pass
+## Session 376 (2026-08-09, Opus) — #275, #276, the first #238 shim pass, and #239 diagnosed
 
 Three queue items, all verified together: **Pl/t gate 133 files / 4785 tests
 PASS**, **full sweep GATE clean** (0 new / 0 fixed, TOTAL passing 18498 →
@@ -25,6 +25,13 @@ generation behind at s374).
   term-position Block dispatch; deliberately not folded into
   `_block_is_hash_constructor` (that answers the map/grep BODY question,
   where `{}` is not valid perl).
+- **#239 DIAGNOSED, no code** — an in-block `package X;` (inside `eval {}` /
+  `do {}`) leaves every unqualified global resolving in the ENCLOSING
+  package, because the block lowers to ONE top-level CL form and CL`s reader
+  interns its symbols before `in-package` can run.  31 occurrences in 14
+  files across the audit populations (nine Class-Method-Modifiers t-files,
+  Role-Tiny method-conflicts.t), so it is a family, not the Sort::Versions
+  one-off it was filed as.  Reproducer + fix shape on task #239.
 - **#238 first pass** — the Scalar-List-Utils dist`s own 38 files went
   319 ok/120 not-ok → **398 ok/75 not-ok** (12→17 PASS, 5→2 FAIL).  Eight
   dying stubs implemented, zip/mesh`s result shapes corrected, the four
