@@ -128,6 +128,39 @@ probe-and-guard treatment at wiring time.
 Verification: new file 180/180; full Pl/t gate green (additive-only change;
 gate run recorded below).  Queue: #237 Opus half (consumer wiring, regex
 first with the ruled guard rows) → pre-v0.1 IR batch.
+## Session 381 (2026-08-10, Fable) — s380 review: #287 APPROVED as shipped
+
+Reviewed `0061f3c` against the `docs/fable-answers-s378.md` §2 ruling.  No
+asks were filed by s380 (the commit was pre-ruled), and no deviations found —
+**APPROVED as shipped**, nothing to fix.  Compliance points checked in the
+diff: both halves in ONE commit; `_pkg_stmt_in_effect_at` extracted from
+`_pkg_in_effect_at`'s one walk with `_pkg_region_at` as a second reader (rule
+11 — no third resolver, and its qualifying condition is verbatim the
+requalifier's: package STATEMENT, not block form, schild of a Block); all
+four sort-lambda sites route through `Pl::PExpr::_sort_pair`; the
+`(declare (special …))` twin exists in BOTH the text and form emitters; the
+bare pair emits an empty declaration, so unswitched sorts are byte-identical.
+
+**Independent verification.**  Pl/t gate re-run on a COLD cache
+(`~/.pcl-cache` cleared, `tools/prove-core`): **133 files / 4789 tests,
+Result: PASS** — s380's numbers reproduced.  15 probes vs real perl, all
+IDENTICAL, covering the three removed divergences (named / qualified /
+coderef comparators compiled in main, called from a region → list unchanged),
+comparators compiled INSIDE the region (sorted), the
+`${(caller)[0]."::a"}` symbolic read, nested regions, `reverse sort`,
+pair re-homing, `package` INSIDE the comparator block, and — beyond s380's
+set — a multi-segment `package Foo::Bar;` region (block + symbolic read,
+both matching).  `tools/corpus-diff.pl HEAD~1` reproduced: **1 of 111 files**
+(sort.t), and the hunks are exactly the region shape (qualified defvars +
+region lambdas binding the declared-special pair).  Sort-Versions
+`versions.t` re-run live under `tools/pclperl-for-tests`: **96 ok / 0
+not-ok**.  Full sweep not re-run — s380's own run was gate-clean with the
+TOTAL check (18498 → 18499) and this session's corpus-diff confirms the .t
+half could only move in sort.t.
+
+Queue check: #287 closed; next per USER s379c is the **#237 Fable half**
+(shared variable-reference event scanner + intuit_more classifier), which
+task #237 shows in_progress in a parallel session at review time.
 
 ## Session 380 (2026-08-09/10, Opus) — #287 DONE: `sort` binds the pair of the package it was COMPILED in
 
