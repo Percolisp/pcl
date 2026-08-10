@@ -204,6 +204,19 @@ not-supported.md → only then probe.*
   missing the cl-ppcre extended-mode workaround, and (s321) choking on the
   `/xx` option, with the `handler-case` turning the error into a quiet test
   FAILURE.  Route through `%pcl-create-scanner` → task #179, CLAUDE.md 11.
+- **A regex PATTERN interpolates through the one scanner, and each reference
+  lowers by being COMPILED AS CODE.**  `Pl::InterpScan` (perl's own
+  `S_intuit_more`/`Perl_regcurly`) decides where a reference starts and
+  whether `[…]`/`{…}` after it is a subscript or regex syntax; the
+  ExprToCL consumer copies the text between events verbatim (regex escapes
+  must reach cl-ppcre unprocessed) and lowers each event by re-parsing its
+  own source text through the ordinary expression pipeline — never a second
+  lowering table.  The interpolation GATE is the same scan, because a
+  narrower gate silently un-does the consumer (`/$1/`, `/$#a/`, `/\Q$^O\E/`
+  stayed literal).  The s/// REPLACEMENT keeps the legacy predicate on
+  purpose (dq text, and `$1$2` is better served by the runtime's backref
+  substitution than a per-match lambda) → `interp-scan.md`, task #237,
+  guard `Pl/t/regex-interp-01.t`, s382f.
 - **A qr is an OBJECT, and its `(?^flags:…)` wrapper is load-bearing.**  A
   pattern that is exactly one interpolated qr IS that qr (outer modifiers
   ignored); as PART of a bigger pattern the wrapper embeds verbatim; `/xx`

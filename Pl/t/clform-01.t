@@ -244,12 +244,13 @@ like($ql, qr/\(pl-f "lit"\)/,    'q{} literal → "lit" atom');
 # interpolated → (pcl::p-regex-from-parts PAT "flags") over a CLForm pattern
 # ("…"/$var/(p-string-concat …)/(p-gethash …)).  s/// and tr/// still decline.
 my $rl = Pl::Parser2->parse_code(<<'EOT');
-my $x = "abc"; my $r = { k => "z" };
+my $x = "abc"; my $r = { k => "z" }; my $ar = [1,2];
 my $m  = $x =~ /a.c/;
 my $q  = qr/\d+/i;
 my $mi = $x =~ /$x/;
 my $mc = $x =~ /pre${x}post/i;
 my $md = $x =~ /$r->{k}/;
+my $me = $x =~ /$ar->[0]/;
 $x =~ s/a/b/;
 $x =~ tr/a/b/;
 print $m;
@@ -262,8 +263,15 @@ like($rl, qr/\(pcl::p-regex-from-parts \$x ""\)/,
      'interp /$x/ → (pcl::p-regex-from-parts $x "")');
 like($rl, qr/\(pcl::p-regex-from-parts \(p-string-concat "pre" \$x "post"\) "i"\)/,
      'interp /pre${x}post/i → concat parts + flags');
-like($rl, qr/\(pcl::p-regex-from-parts \(p-gethash \$r "k"\) ""\)/,
-     'interp /$r->{k}/ → deref-chain (p-gethash …) part');
+# A deref chain in a PATTERN lowers exactly as the same reference lowers in
+# code and in dq text — through the one expression pipeline (task #237).  The
+# walk this replaced emitted the non-deref `(p-gethash $r "k")` / `(p-aref $r
+# 0)`; the array spelling MISSED at runtime (probed s382f: `/^$r->[0]$/` did
+# not match where perl did), so both spellings are pinned here.
+like($rl, qr/\(pcl::p-regex-from-parts \(p-gethash-deref \$r "k"\) ""\)/,
+     'interp /$r->{k}/ → deref-chain (p-gethash-deref …) part');
+like($rl, qr/\(pcl::p-regex-from-parts \(p-aref-deref \$ar 0\) ""\)/,
+     'interp /$ar->[0]/ → deref-chain (p-aref-deref …) part');
 like($rl, qr/\(p-subst "a" "b"\)/,  's/// still declines → (p-subst …)');
 like($rl, qr/\(p-tr /,              'tr/// still declines → (p-tr …)');
 

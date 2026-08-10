@@ -13,6 +13,7 @@ use Moo;
 use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm ();
+use Pl::InterpScan ();
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
@@ -677,17 +678,18 @@ sub gen_leaf_form {
   # interpolated.  Non-interp → a single-level (p-regex "…") / (pcl::p-qr "…")
   # (content re-escaped).  Interp → (pcl::p-regex-from-parts PAT "flags") where
   # PAT is _gen_interp_regex_pattern's CLForm ("…"/$var/(p-aref …)/(p-gethash …)
-  # / (p-string-concat …)).  All the helpers (_parse_regex_content,
-  # _has_regex_interpolation, _gen_interp_regex_pattern) are pure — no gensym,
-  # no env mutation, no gen_node — so building the form directly (never
-  # declining) has no double-run risk.  s/// and tr/// convert via
+  # / (p-string-concat …)).  _parse_regex_content and _has_regex_interpolation
+  # are pure; _gen_interp_regex_pattern lowers each reference through a
+  # sub-compile whose only side effects are the environment's idempotent
+  # set-adds (referenced packages, caret globals) — and this branch never
+  # declines, so it runs exactly once per node either way.  s/// and tr/// via
   # gen_substitution_form / gen_transliteration_form (never decline, so their
   # side effects — the /e sub-compile — run exactly once).
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 1);
     if (_has_regex_interpolation($pattern)) {
-      my $pat_form = _gen_interp_regex_pattern($pattern);
+      my $pat_form = $self->_gen_interp_regex_pattern($pattern);
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
     }
@@ -703,7 +705,7 @@ sub gen_leaf_form {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 0);
     if (_has_regex_interpolation($pattern)) {
-      my $pat_form = _gen_interp_regex_pattern($pattern);
+      my $pat_form = $self->_gen_interp_regex_pattern($pattern);
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
     }
@@ -737,89 +739,130 @@ sub _parse_regex_content {
   return ($pattern, $flags);
 }
 
-# Check if a raw regex pattern content has unescaped $var or @var interpolation.
+# Does a raw regex pattern interpolate?  The scanner answers — the same one
+# that then places the references (task #237), so the gate and the consumer
+# cannot disagree.  The private predicate this replaced looked only for
+# `$name`/`@name`/`${`, so `/$1/`, `/$#a/`, `/$$/` and the punctuation magics
+# stayed LITERAL text where perl interpolates them (probed s382f: `"b" =~
+# /^$1$/` matches in perl, missed here).  The `[\$\@]` pre-filter keeps the
+# no-sigil majority (most patterns) off the scanner entirely.
 sub _has_regex_interpolation {
   my ($pattern) = @_;
-  return $pattern =~ /(?<!\\)\$[a-zA-Z_{]|(?<!\\)\@[a-zA-Z_{]/;
+  return 0 if $pattern !~ /[\$\@]/;
+  return scalar @{ Pl::InterpScan::scan($pattern, in_regex => 1) };
+}
+
+# Does an s/// REPLACEMENT need the interpolating (lambda) path?  This is the
+# pre-scanner predicate, kept deliberately: see gen_substitution_form.
+sub _replacement_interpolates {
+  my ($subst) = @_;
+  return $subst =~ /(?<!\\)\$[a-zA-Z_{]|(?<!\\)\@[a-zA-Z_{]/;
 }
 
 # Build a CLForm that evaluates to the interpolated pattern string: a "…"
-# literal, a $var / (p-aref …) / (p-gethash …) part, or (p-string-concat …)
-# over a mix.  Text callers wrap the result in Pl::CLForm::to_flat; the E2 leaf
-# form path (gen_leaf_form) embeds it structurally.  Handles $scalar_var and
-# $var->[i] / $var->{k} deref chains.
+# literal, one reference part, or (p-string-concat …) over a mix.  Text callers
+# wrap the result in Pl::CLForm::to_flat; the E2 leaf form path (gen_leaf_form)
+# embeds it structurally.
+#
+# A pattern interpolates like a double-quoted string, but with perl's PATTERN
+# start rules ($ before ")|" or whitespace is the tail anchor; @+/@- never
+# interpolate) and with S_intuit_more deciding whether a `[…]`/`{…}` group
+# after a variable is a SUBSCRIPT or regex syntax (a charclass / a {n,m}
+# quantifier).  Both live in Pl::InterpScan — the one scanner every
+# interpolation consumer shares (task #237; standing rule
+# docs/var-handling-review-s379.md §8: interpolation scanning happens there,
+# never in a private walk).  This consumer only places the events: the text
+# BETWEEN them is copied verbatim, because regex escapes (\d, \b, \Q…) must
+# reach cl-ppcre unprocessed — the one way pattern text differs from dq text.
 sub _gen_interp_regex_pattern {
-  my ($pattern) = @_;
+  my ($self, $pattern) = @_;
+  my $events = Pl::InterpScan::scan($pattern, in_regex => 1);
   my @parts;
   my $literal = '';
-  my $i = 0;
-  while ($i < length($pattern)) {
-    my $c = substr($pattern, $i, 1);
-    if ($c eq '\\') {
-      $literal .= substr($pattern, $i, 2);
-      $i += 2;
-    } elsif ($c eq '$' && substr($pattern, $i) =~ /^\$\{([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\}/) {
-      my $varname = $1;
-      if (length($literal)) {
-        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-        push @parts, qq{"$esc"};
-        $literal = '';
-      }
-      push @parts, "\$$varname";
-      $i += 3 + length($varname);
-    } elsif ($c eq '$' && substr($pattern, $i) =~ /^\$([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)/) {
-      my $varname = $1;
-      if (length($literal)) {
-        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-        push @parts, qq{"$esc"};
-        $literal = '';
-      }
-      my $cl_expr = "\$$varname";
-      $i += 1 + length($varname);
-      # Handle arrow dereferences: $var->[N] or $var->{key} (possibly chained)
-      while ($i + 2 < length($pattern) && substr($pattern, $i, 2) eq '->') {
-        my $bracket = substr($pattern, $i + 2, 1);
-        if ($bracket eq '[') {
-          my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
-          while ($j < length($pattern) && $depth > 0) {
-            my $ch = substr($pattern, $j, 1);
-            $depth++ if $ch eq '[';
-            $depth-- if $ch eq ']';
-            $j++;
-          }
-          last if $depth != 0;
-          my $idx = substr($pattern, $start, $j - $start - 1);
-          $cl_expr = ['p-aref', $cl_expr, $idx];
-          $i = $j;
-        } elsif ($bracket eq '{') {
-          my ($start, $depth, $j) = ($i + 3, 1, $i + 3);
-          while ($j < length($pattern) && $depth > 0) {
-            my $ch = substr($pattern, $j, 1);
-            $depth++ if $ch eq '{';
-            $depth-- if $ch eq '}';
-            $j++;
-          }
-          last if $depth != 0;
-          my $key = substr($pattern, $start, $j - $start - 1);
-          $key =~ s/^["']//; $key =~ s/["']$//;
-          $key =~ s/\\/\\\\/g; $key =~ s/"/\\"/g;
-          $cl_expr = ['p-gethash', $cl_expr, qq{"$key"}];
-          $i = $j;
-        } else { last; }
-      }
-      push @parts, $cl_expr;
-    } else {
-      $literal .= $c;
-      $i++;
-    }
-  }
-  if (length($literal)) {
-    (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
+  my $flush = sub {
+    return if !length $literal;
+    (my $esc = $literal) =~ s/\\/\\\\/g;
+    $esc =~ s/"/\\"/g;
     push @parts, qq{"$esc"};
+    $literal = '';
+  };
+  my $pos = 0;
+  for my $ev (@$events) {
+    my ($s, $e) = @{ $ev->{span} };
+    $literal .= substr($pattern, $pos, $s - $pos);
+    $pos = $e;
+    $flush->();
+    push @parts, $self->_interp_ref_form(substr($pattern, $s, $e - $s), $ev);
   }
+  $literal .= substr($pattern, $pos);
+  $flush->();
   return @parts == 0 ? '""'
        : @parts == 1 ? $parts[0]
        : ['p-string-concat', @parts];
+}
+
+# One scanner event → the CLForm producing its interpolated text.  A plain
+# unqualified scalar is its own atom — the overwhelmingly common case, and
+# byte-identical to what the private walk emitted.  Everything else (direct
+# subscripts $a[i]/$h{k}, chains, package-qualified names, $#a, $$r, arrays,
+# slices, ${EXPR}) is lowered by compiling the reference's SOURCE TEXT as
+# ordinary code, so the one expression pipeline answers what each shape means
+# instead of a second lowering table drifting beside it (rule 11).  An
+# '@'-sigil reference yields a list and joins with $", exactly as
+# gen_string_concat does for the same reference in dq text.
+sub _interp_ref_form {
+  my ($self, $src, $ev) = @_;
+  my $list = $ev->{sigil} eq '@';
+  if ($ev->{sigil} eq '$' && !@{ $ev->{chain} } && !$ev->{postderef}
+      && ($ev->{form} eq 'plain' || $ev->{form} eq 'braced')
+      && defined $ev->{name} && $ev->{name} =~ /^[A-Za-z_]\w*\z/
+      && !exists $SPECIAL_VARS{ '$' . $ev->{name} }) {
+    return "\$$ev->{name}";
+  }
+  my $form = $self->_compile_ref_text_form($src, $list);
+  # rule 12: a reference this consumer cannot lower would silently land in
+  # the pattern as literal text — a wrong VALUE the match then consumes.
+  die "PCL: cannot compile interpolated regex reference '$src'\n"
+    if !defined $form;
+  return $list ? ['p-join', '|$"|', $form] : $form;
+}
+
+# Compile one fragment of Perl source (an interpolated reference) to a CLForm
+# through the ordinary expression pipeline — the same move
+# _gen_interp_replacement and StringInterpolation::_parse_postfix_deref make
+# when a reference is easier to re-parse than to re-implement.  $list forces
+# LIST context first (a slice in scalar context would reduce to its last
+# element instead of joining — gen_string_concat's rule).  Returns undef when
+# PPI/PExpr cannot read the fragment.
+sub _compile_ref_text_form {
+  my ($self, $src, $list) = @_;
+  my $form = eval {
+    require PPI::Document;
+    require Pl::PExpr;
+    my $doc = PPI::Document->new(\$src);
+    return undef if !$doc;
+    my @stmts = grep { !$_->isa('PPI::Token::Whitespace') } $doc->children;
+    return undef if !@stmts || !$stmts[0]->can('children');
+    my @parts = map { $_->clone() }
+                grep { ref($_) ne 'PPI::Token::Whitespace' } $stmts[0]->children;
+    return undef if !@parts;
+    my $expr_o = Pl::PExpr->new(
+      e        => \@parts,
+      full_PPI => $doc,
+      ($self->environment ? (environment => $self->environment) : ()),
+    );
+    my $id = $expr_o->parse_expr_to_tree(\@parts);
+    return undef if !defined $id;
+    $expr_o->set_node_context($id, LIST_CTX) if $list;
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => $self->indent_level,
+    );
+    $gen->gen_node_form($id);
+  };
+  return undef if $@ || !defined $form || (!ref($form) && $form eq '');
+  return $form;
 }
 
 # Symbol / Magic leaf → CLForm (E2-converted; shared by gen_leaf and
@@ -1002,7 +1045,7 @@ sub gen_leaf {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 1);
     if (_has_regex_interpolation($pattern)) {
-      my $pat_expr = Pl::CLForm::to_flat(_gen_interp_regex_pattern($pattern));
+      my $pat_expr = Pl::CLForm::to_flat($self->_gen_interp_regex_pattern($pattern));
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
     }
@@ -1071,7 +1114,7 @@ sub gen_leaf {
     my $content = $node->content();
     my ($pattern, $flags) = _parse_regex_content($content, 0);
     if (_has_regex_interpolation($pattern)) {
-      my $pat_expr = Pl::CLForm::to_flat(_gen_interp_regex_pattern($pattern));
+      my $pat_expr = Pl::CLForm::to_flat($self->_gen_interp_regex_pattern($pattern));
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
     }
@@ -5921,7 +5964,7 @@ sub gen_substitution_form {
   # (p-string-concat …)) evaluated to the pattern string at runtime.
   my $match_form;
   if (_has_regex_interpolation($match)) {
-    $match_form = _gen_interp_regex_pattern($match);
+    $match_form = $self->_gen_interp_regex_pattern($match);
   } else {
     (my $m = $match) =~ s/\\/\\\\/g;
     $m =~ s/"/\\"/g;
@@ -5937,8 +5980,12 @@ sub gen_substitution_form {
   }
 
   # Replacement with variable interpolation: wrap in a lambda so $varname/$1..$9
-  # evaluate at match time
-  if (_has_regex_interpolation($subst)) {
+  # evaluate at match time.  Deliberately NOT the scanner gate: a replacement
+  # is dq text, not a pattern, and a bare `$1`/`$2` replacement is served
+  # better by the runtime's native backref substitution (no lambda call per
+  # match) than by the interpolation path.  Widening this gate is its own
+  # measured change (docs/interp-scan.md §wiring).
+  if (_replacement_interpolates($subst)) {
     return ['p-subst', $match_form,
             ['lambda', ['list'], $self->_gen_interp_replacement($subst)],
             @mod_strs];

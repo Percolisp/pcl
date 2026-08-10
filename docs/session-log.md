@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382f (2026-08-11, Opus) — #237 Opus half, consumer 1: the regex-pattern interpolator now goes through Pl::InterpScan
+
+The ruled acceptance bar was "delete `_gen_interp_regex_pattern`'s private
+walk"; it is gone.  The consumer is now `scan($pattern, in_regex => 1)`:
+literal text between events copied VERBATIM (regex escapes must reach
+cl-ppcre unprocessed — the one way pattern text differs from dq text), each
+event lowered to a CLForm.
+
+**The design decision inside it**: rather than write a second lowering table
+(`$x[i]`→p-aref, `$h{k}`→p-gethash, `@a`→join, `$#a`, `$$r`, `${EXPR}`, …)
+beside the dq/code one, each reference is lowered by **compiling its own
+source text as ordinary code** through the expression pipeline — the move
+`_gen_interp_replacement` and `StringInterpolation::_parse_postfix_deref`
+already make.  One shape is fast-pathed to its atom (plain unqualified
+non-magic scalar, no chain): the common case, byte-identical to the old
+walk.  `@`-sigil results join with `$"` exactly as `gen_string_concat` does.
+A reference the pipeline cannot read DIES (rule 12 — it would otherwise
+become literal pattern text, a value the match consumes); zero events on the
+corpus, the sweep or the gate.
+
+**The gate had to move with it.**  `_has_regex_interpolation` is now the same
+scan (behind a `[\$\@]` pre-filter): the old predicate matched only
+`$name`/`@name`/`${`, so `/$1/`, `/$#a/`, `/$$/`, `/\Q$^O\E/` and the
+punctuation magics stayed literal where perl interpolates — a narrower gate
+silently un-did the consumer.  The s/// REPLACEMENT keeps the legacy
+predicate on purpose (dq text, not a pattern; a bare `$1$2` replacement is
+better served by the runtime's native backref substitution than a per-match
+lambda) — widening that is its own measured change.
+
+**Measured**: 28 runtime shapes probed against live perl, all identical
+(before: 16 diverged).  `Pl/t/regex-interp-01.t` re-derives every verdict
+from perl AT TEST TIME (33 rows, 1.9 s) so a perl drift fails loudly.
+corpus-diff: 2 of 111 files (`qr.t` `s/${qr||}/` → the expr-form deref perl
+reads; `sprintf.t` `\Q$^O\E`), both probed correct.  `lib/**` +
+`cl/pack-impl.pl` emission byte-identical → the checked-in artifacts needed
+no regeneration.  Compile time 91.4 s vs 94.5 s at HEAD over the corpus.
+Gate 134 files / 4972; `clform-01.t` t68's expectation was REWRITTEN under
+the s377 four-conjunct rule (it pinned the walk's non-dereferencing
+`(p-gethash $r "k")`; the array spelling `(p-aref $r 0)` MISSED at runtime,
+probed) and strengthened with the `p-aref-deref` sibling.
+
+Residue recorded in `docs/interp-scan.md`: `postderef_qq` stays off in
+pattern mode (unchanged behavior — the pattern side would need the node, not
+just the text); `${^TAINT}` reads undef where perl reads 0, a pre-existing
+*runtime value* divergence newly visible in patterns → task #293.  Consumers
+2 (rename machinery) and 3 (StringInterpolation) are still unwired.
+
 ## Session 382e (2026-08-11, Fable) — Direction D set up for execution: step 1 shipped + the task chain
 
 USER: "set it up".  Two deliverables:
