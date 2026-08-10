@@ -183,6 +183,28 @@ sub _scan_name {
   return ($name, $name_end, $span_end);
 }
 
+# All-digit names are magic ($1, $0, ${12}) — form 'magic', canon undef,
+# never rename targets.
+sub _digits { return $_[0] =~ /^[0-9]+$/ }
+
+# Parse "{ blank* ident blank* }" with the brace at $pos.  Returns
+# (name, name_span, after) for an identifier body, (undef, undef, after)
+# for an expression body, or () when the brace is unbalanced.  What an
+# identifier vs an expression MEANS is the caller's per-sigil decision.
+sub _braced_ident {
+  my ($text, $pos) = @_;
+  my $after = _match_bracket($text, $pos);
+  return () unless $after;
+  my $guts_start = $pos + 1;
+  my $guts = substr($text, $guts_start, $after - 1 - $guts_start);
+  if ($guts =~ /^(\s*)(\w+(?:::\w+)*)(\s*)$/) {
+    my ($lead, $name) = ($1, $2);
+    my $ns = $guts_start + length $lead;
+    return ($name, [$ns, $ns + length $name], $after);
+  }
+  return (undef, undef, $after);
+}
+
 sub _ev {
   my (%f) = @_;
   return { sigil => $f{sigil}, form => $f{form}, name => $f{name},
@@ -249,19 +271,15 @@ sub _scan_dollar {
 
   # $::name — main-package spelling; the source spelling is the name
   if ($next eq ':' && substr($text, $pos + 2, 1) eq ':') {
-    if (substr($text, $pos + 3) =~ /^(\w+(?:::\w+)*)/) {
-      my $name = '::' . $1;
-      my $name_end = $pos + 1 + length $name;
-      my $span_end = $name_end;
-      $span_end += 2 if substr($text, $name_end, 2) eq '::';
-      my $ev = _ev(sigil => '$', form => 'plain', name => $name,
-                   canon => '$' . $name, name_span => [$pos + 1, $name_end],
-                   span => [$pos, $span_end]);
-      _scan_chain($text, $ev, $opt);
-      _scan_postderef($text, $ev, $opt);
-      return $ev;
-    }
-    return undef;   # bare $:: — literal (falls out of the $: magic too)
+    my ($base, $name_end, $span_end) = _scan_name($text, $pos + 3);
+    return undef unless defined $base;   # bare $:: — literal
+    my $name = '::' . $base;
+    my $ev = _ev(sigil => '$', form => 'plain', name => $name,
+                 canon => '$' . $name, name_span => [$pos + 1, $name_end],
+                 span => [$pos, $span_end]);
+    _scan_chain($text, $ev, $opt);
+    _scan_postderef($text, $ev, $opt);
+    return $ev;
   }
 
   # Single-punctuation magic; $+ / $- subscript as %+/%-/@+/@- elements
@@ -277,9 +295,9 @@ sub _scan_dollar {
   my ($name, $name_end, $span_end) = _scan_name($text, $pos + 1);
   return undef unless defined $name;
   my $ev = _ev(sigil => '$',
-               form => ($name =~ /^[0-9]+$/ ? 'magic' : 'plain'),
+               form => (_digits($name) ? 'magic' : 'plain'),
                name => $name,
-               canon => ($name =~ /^[0-9]+$/ ? undef : '$' . $name),
+               canon => (_digits($name) ? undef : '$' . $name),
                name_span => [$pos + 1, $name_end],
                span => [$pos, $span_end]);
   _scan_chain($text, $ev, $opt);
@@ -296,27 +314,24 @@ sub _scan_dollar {
 # "${x}[ is @x-family" arm has the sigil family WRONG.)
 sub _scan_braced_dollar {
   my ($text, $pos, $opt) = @_;
-  my $after = _match_bracket($text, $pos + 1);
+  my ($name, $name_span, $after) = _braced_ident($text, $pos + 1);
   return undef unless $after;
   my $guts_start = $pos + 2;
-  my $guts = substr($text, $guts_start, $after - 1 - $guts_start);
 
   # ${^NAME} caret-string magic (no ws allowed, as in perl)
-  if ($guts =~ /^(\^\w+)$/) {
+  if (substr($text, $guts_start, $after - 1 - $guts_start) =~ /^(\^\w+)$/) {
     return _ev(sigil => '$', form => 'magic', name => $1, canon => undef,
                name_span => [$guts_start, $after - 1],
                span => [$pos, $after]);
   }
   # ${name} / ${ name } — perl's scan_ident allows blanks around the
   # identifier (StringInterpolation requires the bare spelling — table)
-  if ($guts =~ /^(\s*)(\w+(?:::\w+)*)(\s*)$/) {
-    my ($lead, $name) = ($1, $2);
-    my $ns = $guts_start + length $lead;
+  if (defined $name) {
     return _ev(sigil => '$',
-               form => ($name =~ /^[0-9]+$/ ? 'magic' : 'braced'),
+               form => (_digits($name) ? 'magic' : 'braced'),
                name => $name,
-               canon => ($name =~ /^[0-9]+$/ ? undef : '$' . $name),
-               name_span => [$ns, $ns + length $name],
+               canon => (_digits($name) ? undef : '$' . $name),
+               name_span => $name_span,
                span => [$pos, $after]);
   }
   # ${ EXPR } — deref of the block's value; consumers re-parse expr_span
@@ -331,20 +346,16 @@ sub _scan_array_index {
   my ($text, $pos, $opt) = @_;
   my $c2 = substr($text, $pos + 2, 1);
   if ($c2 eq '{') {
-    my $after = _match_bracket($text, $pos + 2);
+    my ($name, $name_span, $after) = _braced_ident($text, $pos + 2);
     return undef unless $after;
-    my $guts_start = $pos + 3;
-    my $guts = substr($text, $guts_start, $after - 1 - $guts_start);
-    if ($guts =~ /^(\s*)(\w+(?:::\w+)*)(\s*)$/) {
-      my ($lead, $name) = ($1, $2);
-      my $ns = $guts_start + length $lead;
+    if (defined $name) {
       return _ev(sigil => '$#', form => 'braced', name => $name,
-                 canon => ($name =~ /^[0-9]+$/ ? undef : '@' . $name),
-                 name_span => [$ns, $ns + length $name],
+                 canon => (_digits($name) ? undef : '@' . $name),
+                 name_span => $name_span,
                  span => [$pos, $after]);
     }
     return _ev(sigil => '$#', form => 'expr', name => undef, canon => undef,
-               expr_span => [$guts_start, $after - 1],
+               expr_span => [$pos + 3, $after - 1],
                span => [$pos, $after]);
   }
   if ($c2 eq '$') {
@@ -357,7 +368,7 @@ sub _scan_array_index {
   my ($name, $name_end, $span_end) = _scan_name($text, $pos + 2);
   return undef unless defined $name;
   return _ev(sigil => '$#', form => 'plain', name => $name,
-             canon => ($name =~ /^[0-9]+$/ ? undef : '@' . $name),
+             canon => (_digits($name) ? undef : '@' . $name),
              name_span => [$pos + 2, $name_end],
              span => [$pos, $span_end]);
 }
@@ -368,22 +379,19 @@ sub _scan_snail {
   my $next = substr($text, $pos + 1, 1);
 
   # @{name} / @{ EXPR } — braces CLOSE the reference here too (probed:
-  # "@{x}[0]" prints the whole @x then literal "[0]")
+  # "@{x}[0]" prints the whole @x then literal "[0]").  A digit-led body
+  # (`@{12}`) is not an array name; it stays on the expression path.
   if ($next eq '{') {
-    my $after = _match_bracket($text, $pos + 1);
+    my ($name, $name_span, $after) = _braced_ident($text, $pos + 1);
     return undef unless $after;
-    my $guts_start = $pos + 2;
-    my $guts = substr($text, $guts_start, $after - 1 - $guts_start);
-    if ($guts =~ /^(\s*)([a-zA-Z_]\w*(?:::\w+)*)(\s*)$/) {
-      my ($lead, $name) = ($1, $2);
-      my $ns = $guts_start + length $lead;
+    if (defined $name && $name !~ /^[0-9]/) {
       return _ev(sigil => '@', form => 'braced', name => $name,
                  canon => '@' . $name,
-                 name_span => [$ns, $ns + length $name],
+                 name_span => $name_span,
                  span => [$pos, $after]);
     }
     return _ev(sigil => '@', form => 'expr', name => undef, canon => undef,
-               expr_span => [$guts_start, $after - 1],
+               expr_span => [$pos + 2, $after - 1],
                span => [$pos, $after]);
   }
 
@@ -414,9 +422,9 @@ sub _scan_snail {
   my ($name, $name_end, $span_end) = _scan_name($text, $pos + 1);
   return undef unless defined $name;
   my $ev = _ev(sigil => '@',
-               form => ($name =~ /^[0-9]+$/ ? 'magic' : 'plain'),
+               form => (_digits($name) ? 'magic' : 'plain'),
                name => $name,
-               canon => ($name =~ /^[0-9]+$/ ? undef : '@' . $name),
+               canon => (_digits($name) ? undef : '@' . $name),
                name_span => [$pos + 1, $name_end],
                span => [$pos, $span_end]);
   _scan_chain($text, $ev, $opt, 1);
@@ -479,6 +487,7 @@ sub _scan_chain {
 # ->$* ->$#* ->@* ->@[..] ->@{..} after a reference or its chain.  %-forms
 # never interpolate.  Gated on the option in BOTH modes (toke gates the
 # string and pattern cases on the same lexical feature).
+# KEEP IN STEP with intuit_more's ->-branch (the port's approval list).
 sub _scan_postderef {
   my ($text, $ev, $opt) = @_;
   return unless $opt->{postderef_qq};
@@ -518,6 +527,9 @@ sub intuit_more {
   my $n = length $text;
   my $c0 = $i < $n ? substr($text, $i, 1) : '';
 
+  # KEEP IN STEP with _scan_postderef: this port answers "does more bind?",
+  # the scanner binds it — the two spellings of ->$* ->$#* ->@* ->@[ ->@{
+  # must agree or a form would be approved here and dropped there.
   if ($c0 eq '-' && substr($text, $i + 1, 1) eq '>') {
     my $c2 = substr($text, $i + 2, 1);
     return 1 if $c2 eq '[' || $c2 eq '{';
@@ -566,6 +578,9 @@ sub intuit_more {
       $weight -= ($seen{$ch} // 0) * 10;
       my $nx = substr($text, $p + 1, 1);
       if ($nx =~ /^\w/) {
+        # deliberate second copy of _scan_name's grammar: this function is
+        # a self-contained C port (it approximates toke's scan_ident, not
+        # the scanner's name rule) — keep the two spellings in step
         my ($ident) = substr($text, $p + 1) =~ /^(\w+(?:::\w+)*)/;
         if (length($ident) > 1 && $known && $known->($ident)) {
           $weight -= 100;
