@@ -4,6 +4,42 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382g (2026-08-11, Opus) — #290 pre-work: the global partition, landed and measured before the flip touches emission
+
+Direction D's two emitters — the declaration side (`Pl/Parser2.pm`) and the
+`local` lowering (`Pl/Parser.pm`) — must give the same verdict for every
+global, and a disagreement is a LOAD-TIME error rather than a wrong answer
+(SBCL refuses a name that is both `defvar`-special and
+`define-symbol-macro`'d).  So the partition went in first, on its own, with
+its own test and **no emission change**: `Pl/GlobalPartition.pm` +
+`Pl/t/global-partition-01.t` (68 rows, 30 ms).
+
+ORDINARY = a word-shaped package variable, qualified or not → symbol-macro
+cell + `p-local-cell`.  EXCEPTION = today's `defvar` + dynamic `let`, two
+causes: (a) not word-shaped — punctuation/caret magic, runtime-owned, several
+with bespoke `local` lowerings, and the place `local` actually runs hot (so
+keeping their fast dynamic bind IS the answer to the plan's one measured
+regression); (b) word-shaped but runtime-owned or thread-of-control, plus the
+sort pair `$a`/`$b` in every package (#287).  Unrecognised → exception, the
+conservative side.
+
+**Measured, not assumed**: every `(defvar …)` the emitter really produces
+across the corpus, classified — **1076 occurrences / 629 distinct ORDINARY,
+461 / 43 distinct EXCEPTION**, and the 43 are exactly 38 `$a`/`$b` pairs
+across 19 packages plus 5 caret magics.  No third class, independently
+confirming `docs/defglobal-audit-s382.md`.  The flip's blast radius is now a
+number.
+
+**Correction to the plan's risk note** (recorded in #290): "partition
+mistakes DIE at load" is exact for defvar-vs-symbol-macro, but `let` of a
+symbol-macro name is legal CL — the lexical binding SHADOWS the symbol macro.
+That is the mechanism direction D wants (my-shadows become lexical, 36%
+faster); it just means a name that should have stayed global and gets
+let-bound goes silently lexical instead of erroring.  The one hand-check the
+flip needs: no ORDINARY name is let-bound by any remaining emitter path.
+
+#290 is now pure plumbing at four places, all named in the task body.
+
 ## Session 382f (2026-08-11, Opus) — #237 Opus half, consumer 1: the regex-pattern interpolator now goes through Pl::InterpScan
 
 The ruled acceptance bar was "delete `_gen_interp_regex_pattern`'s private
