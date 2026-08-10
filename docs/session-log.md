@@ -4,6 +4,35 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382d (2026-08-11, Fable) — Direction-D performance verification (USER challenge) + the implementation plan
+
+The USER asked for certainty that the symbol-macro global isn't slower;
+the first parity number covered reads only, so a full battery ran over
+the REALISTIC shapes (cells hold p-boxes; assignment mutates the box, so
+cells are read-mostly — confirmed against live emission first).  Three
+mechanism variants measured; the winner is
+`(define-symbol-macro $x (sb-ext:symbol-global-value '$x))` — ONE symbol,
+direct cell access (valid since partition symbols are never dynamically
+bound, by construction), full name-based interop probed.  Numbers:
+reads 20% FASTER than today's specials (63 vs 79 ms/100M), my-shadow
+binds 36% faster (29 vs 46 ms/10M), call-level parity, and ONE flagged
+regression per the s379b conjunct-3 duty: `local` of an ordinary user
+global costs ~41 ns vs ~4.6 ns (the unproclaimed setter is a full call;
+open-coding needs a proclamation that forbids `let`).  Accepted with
+eyes open: rare construct, absolute cost ≈ two hash lookups, hot locals
+target magic vars which stay defvar at today's speed, and
+`tools/bench-exec.pl` before/after is a step-2 gate.  Also rejected by
+probe: plain symbol-value access (local 8.4×), progv local (4.8×),
+two-symbol defglobal cell (equal speed, but a runtime-wide name→cell
+audit — recorded as the upgrade path).
+
+Plan of record: `docs/direction-d-plan.md` — runtime `p-local-cell`
+first, then the one-commit flip (partition predicate in ONE function,
+ir-spec + gen bump + §3 probe/guard rows in the same commit, sweep
+TOTAL/LOST + board + bench as gates, artifacts regenerated), then
+per-family deletion of `__shadow__`/`__cond__`/`__emb__` (+#205), then
+the fuzzer.  Task #289 updated to point at it.
+
 ## Session 382c (2026-08-11, Fable) — Direction-D audit: GO, with the mechanism corrected to the symbol-macro global
 
 The §6 go/no-go measurement from `var-handling-review-s379.md`, USER-

@@ -2279,3 +2279,24 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   ~300 Parser2 lines delete; #205 closes by construction.
 - **s379b conjuncts all hold → implementation proceeds without an ask**
   (pre-v0.1 IR batch; ir-spec.md + gen bump in the same commit).
+
+## s382d (2026-08-11, Fable) — #289 mechanism FINALIZED after USER perf challenge (docs/direction-d-plan.md)
+
+- **Access macro is `(sb-ext:symbol-global-value '$x)`, not `symbol-value`**
+  — direct cell access, valid because partition symbols are never
+  dynamically bound (holds by construction).  Measured: READS 20% FASTER
+  than today's specials (63 vs 79 ms/100M, boxed shapes), my-shadow binds
+  36% faster (29 vs 46 ms/10M), call-level parity, name-based
+  symbol-value/boundp/makunbound interop probed intact.
+- **FLAGGED regression (s379b conjunct-3 duty): `local` of an ORDINARY
+  user global costs ~41 ns vs ~4.6 ns** (the unproclaimed-symbol setter
+  is a full call; open-coding requires a proclamation that forbids `let`).
+  Accepted because: rare (54+~20 corpus sites, none hot), absolute cost
+  ≈ two hash lookups, and hot locals target MAGIC vars which stay defvar
+  at today's speed.  bench-exec.pl before/after is a step-2 gate.
+- **Rejected by probe**: plain symbol-value access (local 8.4×), progv
+  local (4.8×), two-symbol defglobal cell (same speed as chosen, but a
+  runtime-wide name→cell mapping audit; recorded as the upgrade path if
+  a profile ever shows ordinary-global local hot).
+- Plan of record for #289: `docs/direction-d-plan.md` (steps, gates,
+  guard rows, artifact regeneration, rollback).
