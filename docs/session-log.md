@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382 (2026-08-10, Fable) — #237 Fable half: Pl::InterpScan shipped (event scanner + intuit_more + probe table)
+
+The ruled Fable half of #237 (`fable-answers-s378.md` §3 = b′, split USER
+s379c): `Pl/InterpScan.pm` — THE shared variable-reference event scanner for
+interpolating text (design `var-handling-review-s379.md` §4) — plus
+line-faithful ports of perl 5.40.3's `S_intuit_more` (toke.c) and
+`Perl_regcurly` (regcomp.c), read from the running perl's own build tree, and
+the ruling's probe table.  NO consumer wired: emission is untouched (the
+module is loaded by nothing in the pipeline yet); the Opus half wires
+regex/dq/rename consumers + guard rows against the contract + divergence
+table in `docs/interp-scan.md`.
+
+Probe-first workflow: two live-perl batteries (~90 shapes) were run BEFORE
+freezing the design, and they corrected three of my assumptions — (1) `{2}`
+after a var in a pattern is a QUANTIFIER (regcurly), correcting the s378b
+DECIDED parenthetical that guessed subscript; (2) only the FIRST bracket
+group is classified — continuations bind unconditionally (`/$m[0][abc]/`
+dies on the bareword; `/$h2{k}{2,3}/` dies "Not a HASH reference"); (3)
+braces CLOSE a reference in BOTH modes (`"${x}[0]"` reads the SCALAR then
+literal `[0]` — under strict `"${m}[0]"` dies "Global symbol $m"), which
+also convicts `_interp_fixer`'s pre-existing `${x}[`-is-@-family arm of a
+wrong sigil mapping (divergence table §2; fix rides the fixer's port to
+events).  Also probed and ported: the weigher's gv_fetch hook is real
+(`[\n@foo]` flips with @foo's existence), 1–2-digit-only subscript shortcut
+(`[100]` is a charclass), `@+`/`@-` never interpolate in patterns while
+`$"`/`$]`/`$$`/`$#x`/`$+[0]` all do, and regex-mode `\c` does not hide a
+following `$`.
+
+`Pl/t/interp-scan-01.t` (180 assertions, 47 ms): one row table, three
+layers — the probe table re-derived from LIVE perl at every run (a perl
+drift fails the file), classifier-vs-probe fidelity, and event-shape pins
+with exact spans (they are the rename machinery's future splice targets).
+Divergences between perl (= scanner) and today's StringInterpolation
+(`$$ar[0]`, `@-[0]`, `${ x }`, `$12abc`, `$::a::b`, `$$$x`, …) are each
+recorded with their probe result in `docs/interp-scan.md` for
+probe-and-guard treatment at wiring time.
+
+Verification: new file 180/180; full Pl/t gate green (additive-only change;
+gate run recorded below).  Queue: #237 Opus half (consumer wiring, regex
+first with the ruled guard rows) → pre-v0.1 IR batch.
+
 ## Session 380 (2026-08-09/10, Opus) — #287 DONE: `sort` binds the pair of the package it was COMPILED in
 
 Both ruled halves of #287 (`docs/fable-answers-s378.md` §2) shipped in ONE

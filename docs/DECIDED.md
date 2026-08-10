@@ -2224,3 +2224,32 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   the region's $a/$b pair (#287)").
 - **Sort-Versions `versions.t`: 65 pass / 31 fail → 96 / 0** — the dist that
   filed the ask, now clean.
+
+## s382 (2026-08-10, Fable) — #237 Fable half SHIPPED: Pl::InterpScan (event scanner + intuit_more port + probe table)
+
+- **`Pl/InterpScan.pm` is THE variable-reference scanner for interpolating
+  text** (ruled b′, `fable-answers-s378.md` §3; split USER s379c): `scan` /
+  `scan_one` emit events (sigil/form/name/canon/span/name_span/chain/
+  slice/postderef); `intuit_more` + `regcurly` are line-faithful ports of
+  perl 5.40.3's toke.c/regcomp.c, read from the running perl's own source.
+  NO consumer is wired yet — emission unchanged; Opus wires consumers +
+  guard rows per `docs/interp-scan.md` (the contract + divergence table).
+  Verified by `Pl/t/interp-scan-01.t`: a live-perl probe table (re-derived
+  every run), classifier-vs-probe, and event-shape pins.  Per
+  `var-handling-review-s379.md` §8, new interpolation behavior goes in this
+  module or not at all.
+- **CORRECTION to the s378b entry above**: probed, `/$x{2}/` is a
+  QUANTIFIER (regcurly: `{2}` `{2,}` `{2,3}` `{,3}` `{ 2, 3 }` all are),
+  NOT a subscript as the parenthetical guessed.  Subscript side: `{k}`
+  `{'k'}` `{$i}` `{-3}` `{}` `{2x}`.
+- **Only the FIRST bracket group is classified** — continuations always
+  bind (`/$m[0][abc]/` dies on the bareword, `/$h2{k}{2,3}/` dies "Not a
+  HASH reference"), and `->[`/`->{` bind unconditionally everywhere.
+- **Braces CLOSE a reference in interpolation, both modes**: `"${x}[0]"`
+  is $x then literal `[0]` (`"${m}[0]"` under strict dies on the SCALAR
+  $m); `@{x}[0]`, `${ar}->@*` likewise.  Consequence: `_interp_fixer`'s
+  `${x}[`-is-@-family arm has the sigil family WRONG (pre-existing; fix
+  lands when the fixer becomes an event consumer — divergence table §2).
+- **The weigher's symbol-table hook is real and ported** (`known_name`):
+  `/$x[\n@foo]/` flips subscript↔charclass with @foo's existence; only
+  1–2 digit guts are subscripts (`[100]`/`[123]` are charclasses).
