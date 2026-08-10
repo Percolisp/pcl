@@ -5729,7 +5729,9 @@ sub gen_inline_lambda {
   my $node_id = shift;
   my $kids    = shift;
 
-  my $params   = join(' ', @{$node->{params} // []});
+  my @pair     = @{$node->{params} // []};
+  my $params   = join(' ', @pair);
+  my $spec     = _sort_pair_special_decl($node->{params});
   # task #78 safety net: a Parser2-lowered body carries body_form only; the
   # form handler normally intercepts it, but flat-print here too so no text
   # caller can ever see a bodyless lambda.
@@ -5756,14 +5758,14 @@ sub gen_inline_lambda {
     }
     my $has_dollar_dollar = $proto && $proto->{is_proto}
                           && ($proto->{proto_string} // '') eq '$$';
-    my $call_args = $has_dollar_dollar ? ' $a $b' : '';
+    my $call_args = $has_dollar_dollar ? " $params" : '';
     my $lambda_body = "(let ((*wantarray* nil))\n"
                     . "  (handler-case ($cl_func$call_args)\n"
                     . "    (undefined-function ()\n"
                     . "      (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
                     . "        (when (fboundp al) (funcall (symbol-function al)))))))";
     $kids = [];
-    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
+    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    $spec(catch :p-return\n      (block nil\n$lambda_body))))";
   }
 
   # Scalar comparator (sort $var LIST): call via p-sort-get-fn at runtime.
@@ -5774,9 +5776,9 @@ sub gen_inline_lambda {
     # Capture *package* at lambda creation so p-sort-get-fn can look up
     # string sub names in the correct (user) package even when called from
     # inside p-sort (which runs in the :pcl package).
-    my $lambda_body = "(let ((*wantarray* nil) (*package* |sort--pkg|))\n  (funcall (p-sort-get-fn $scalar_cl) \$a \$b))";
+    my $lambda_body = "(let ((*wantarray* nil) (*package* |sort--pkg|))\n  (funcall (p-sort-get-fn $scalar_cl) $params))";
     $kids = [];
-    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    (catch :p-return\n      (block nil\n$lambda_body))))";
+    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    $spec(catch :p-return\n      (block nil\n$lambda_body))))";
   }
 
   # Sort comparator blocks may contain explicit `return` — wrap with catch.
@@ -5785,9 +5787,28 @@ sub gen_inline_lambda {
   # grep/map blocks do NOT get the catch: `return` inside them should
   # propagate to the enclosing sub's (catch :p-return ...).
   if ($for_func eq 'sort') {
-    return "(lambda ($params)\n  (catch :p-return\n    (block nil\n(let ((*wantarray* nil))\n$body))))";
+    return "(lambda ($params)\n  $spec(catch :p-return\n    (block nil\n(let ((*wantarray* nil))\n$body))))";
   }
   return "(lambda ($params)\n$body)";
+}
+
+# A sort comparator lambda inside a block-level `package X;` region binds the
+# REGION's pair — X::$a / X::$b — because that is what the requalified body
+# reads and what perl sets (Pl::PExpr::_sort_pair has the full reasoning).
+# Those two symbols are defvar'd by the region's own entry forms, but those
+# run INSIDE the enclosing top-level form, so they have NOT proclaimed the
+# symbols special by the time this lambda is compiled (probed s380: a nested
+# defvar leaves the parameter a plain LEXICAL).  This declaration is what
+# makes the binding dynamic, so a comparator that reads the GLOBAL — perl's
+# `sort NAME LIST` shape, and the `${(caller)[0]."::a"}` symbolic shape
+# Sort::Versions uses — sees the values.  The section's bare $a/$b need
+# nothing: their defvars are top level, hence no declaration and byte-for-byte
+# unchanged emission for every unswitched sort.
+sub _sort_pair_special_decl {
+  my ($params) = @_;
+  my @qualified = grep { /::/ } @{ $params // [] };
+  return '' unless @qualified;
+  return '(declare (special ' . join(' ', @qualified) . ")) ";
 }
 
 # E2 form variant (task #78): only for a Parser2-lowered body (`body_form`,
@@ -5799,8 +5820,15 @@ sub gen_inline_lambda {
 # (`return` inside them must propagate to the enclosing sub's catch).
 sub gen_inline_lambda_form {
   my ($self, $node, $node_id, $kids) = @_;
-  my $params   = ['list', @{$node->{params} // []}];
+  my @pair     = @{$node->{params} // []};
+  my $params   = ['list', @pair];
   my $for_func = $node->{for_func} // '';
+  # Form twin of _sort_pair_special_decl (see its comment): a region's
+  # qualified pair must be declared special here or the parameter binding is
+  # lexical and a comparator reading the global sees nothing.  Empty — hence
+  # emission byte-identical — for the bare pair.
+  my @spec     = grep { /::/ } @pair;
+  my @decl     = @spec ? (['declare', ['special', @spec]]) : ();
 
   # Named comparator (sort NAME LIST) — form twin of the text branch:
   # $a/$b dynamic bindings, ($$)-prototype subs get them as args too, and
@@ -5817,10 +5845,10 @@ sub gen_inline_lambda_form {
     }
     my $call = ($proto && $proto->{is_proto}
                 && ($proto->{proto_string} // '') eq '$$')
-             ? [$cl_func, '$a', '$b'] : [$cl_func];
+             ? [$cl_func, @pair] : [$cl_func];
     return
       ['let', ['list', ['list', '|sort--pkg|', '*package*']],
-        ['lambda', $params,
+        ['lambda', $params, @decl,
           ['catch', ':p-return',
             ['block', 'nil',
               ['let', ['list', ['list', '*wantarray*', 'nil']],
@@ -5840,12 +5868,12 @@ sub gen_inline_lambda_form {
     my $scalar = ($kids && @$kids) ? $self->gen_node_form($kids->[0]) : 'nil';
     return
       ['let', ['list', ['list', '|sort--pkg|', '*package*']],
-        ['lambda', $params,
+        ['lambda', $params, @decl,
           ['catch', ':p-return',
             ['block', 'nil',
               ['let', ['list', ['list', '*wantarray*', 'nil'],
                                ['list', '*package*', '|sort--pkg|']],
-                ['funcall', ['p-sort-get-fn', $scalar], '$a', '$b']]]]]];
+                ['funcall', ['p-sort-get-fn', $scalar], @pair]]]]]];
   }
 
   my $bf = $node->{body_form};
@@ -5855,7 +5883,7 @@ sub gen_inline_lambda_form {
   }
   return undef unless $bf;
   if ($for_func eq 'sort') {
-    return ['lambda', $params,
+    return ['lambda', $params, @decl,
             ['catch', ':p-return',
              ['block', 'nil',
               ['let', ['list', ['list', '*wantarray*', 'nil']], @$bf]]]];

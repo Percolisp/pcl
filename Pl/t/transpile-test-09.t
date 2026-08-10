@@ -952,20 +952,55 @@ print "ali:main=$main::ali Bar=", (defined(${"Bar::ali"}) ? ${"Bar::ali"} : "U")
 $_ = "UND"; $ENV{PCL239} = "E";
 { package Baz; $sawund = $_; $sawenv = $ENV{PCL239}; @ARGV = ("A"); }
 print "und=$Baz::sawund env=$Baz::sawenv argv=@ARGV\n";
-# $a/$b are the sort lowering's own bindings — a switch must not move them.
-# Measured s378: requalifying them takes Sort-Versions versions.t from 65/31
-# to 96/0 AND makes every one of these three comparators return the list
-# UNSORTED, because the emitted (lambda ($a $b) ...) binds the SECTION's two
-# symbols while the body would read X::$a.  Both halves are the trade.
-{ package Sortish; my @o = sort { $a <=> $b } (3,1,2); print "sorted=@o\n"; }
-eval { package SoE; my @o = sort { $a <=> $b } (3,1,2); print "evalsort=@o\n"; };
-do   { package SoD; my @o = sort { $a <=> $b } (5,4);   print "dosort=@o\n"; };
-sub sof { package SoF; my @o = sort { $a <=> $b } (9,7); print "subsort=@o\n"; } sof();
 # a `local` inside the region localizes the REQUALIFIED global
 $Loc::v = "outer";
 sub peek { $Loc::v }
 { package Loc; local $v = "inner"; print "local=", main::peek(), "\n"; }
 print "after=$Loc::v\n";
+});
+
+# (#287, s380) $a/$b are NOT immune to the package switch: a `package X;`
+# region re-homes them like any other global, and the sort lowering binds the
+# pair the comparator body actually READS — X::$a/X::$b inside a switched
+# BLOCK, the section's bare pair everywhere else (a FILE-level `package X;` is
+# already its own top-level form, so a bare $a there is X's $a and nothing
+# moves).  That is also perl's rule, and it is why the two "unsorted" rows
+# below are CORRECT: sort sets the pair of the package the sort was COMPILED
+# in, never the comparator's, so a comparator compiled in main sees main's
+# untouched pair.  Between s378 and s380 the pair was immune instead, which
+# kept the four block-comparator rows working but left the symbolic read — the
+# mechanism Sort::Versions uses — reading a pair nobody had written
+# (versions.t 65/31).
+test_transpile("package-switched sort binds the region's \$a/\$b pair (#287)", q{
+no strict 'refs'; no warnings;
+# comparators COMPILED IN MAIN, called from a switched region: perl sets
+# P::a/P::b, the bodies read main::a/main::b, so both lists come back as-is.
+sub P::bylen    { length($a) <=> length($b) }
+sub Other::cmp2 { $a <=> $b }
+eval { package P; my @s = sort bylen ("aaa","a","aa"); print "named=@s\n"; };
+eval { package P; my @s = sort Other::cmp2 (3,1,2);   print "qual=@s\n"; };
+# the symbolic read: the comparator reaches the pair through its CALLER's
+# package, which only works if the lambda's binding is DYNAMIC.  Call it
+# qualified — a bare call from inside a region is #288.
+sub cmp_sym { my $p = (caller)[0]; ${$p."::a"} <=> ${$p."::b"} }
+eval { package P; my @s = sort { main::cmp_sym() } (3,1,2); print "sym=@s\n"; };
+# the switch re-homes the pair itself, like any other global
+eval { package P; ($a,$b) = (7,8); };
+print "pair=$P::a $P::b\n";
+# and the ordinary block comparator still sorts, in every block kind
+{ package Sortish; my @o = sort { $a <=> $b } (3,1,2); print "sorted=@o\n"; }
+eval { package SoE; my @o = sort { $a <=> $b } (3,1,2); print "evalsort=@o\n"; };
+do   { package SoD; my @o = sort { $a <=> $b } (5,4);   print "dosort=@o\n"; };
+sub sof { package SoF; my @o = sort { $a <=> $b } (9,7); print "subsort=@o\n"; } sof();
+# a `package` INSIDE the block is not in effect at the sort KEYWORD, so the
+# lambda binds the bare pair while the requalified body reads $P::a/$P::b —
+# still 7 and 8 from the line above, whatever the elements are.  perl agrees.
+# (Observe the pair; do NOT sort on it — a comparator with a constant
+# NON-ZERO verdict prints the sort ALGORITHM's permutation, not perl's
+# semantics.  The rows above are all zero-verdict or real comparisons, where
+# perl's mergesort and the runtime's stable-sort must agree.)
+my $saw; my @in = sort { package P; $saw = "$a:$b"; 0 } (2,1,3);
+print "inblock=$saw|@in\n";
 });
 
 # (s379 review) The resolver's two false verdicts on head elements:

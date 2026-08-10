@@ -2449,6 +2449,31 @@ sub _block_sole_bareword {
 }
 
 
+# The two symbols a `sort` comparator lambda must BIND (#287, s380).
+#
+# Perl sets the `$a`/`$b` of the package the sort was COMPILED in.  v2 emits a
+# whole block as ONE top-level CL form, so inside a block-level `package X;`
+# region the reader has already interned every bare name in the ENCLOSING
+# package — which is why Parser2's requalifier rewrites the region's source
+# spellings ($a → $X::a) in the first place.  The comparator body therefore
+# reads X's pair there and the section's bare pair everywhere else (a
+# FILE-level `package X;` is split into its own top-level form, so a bare $a
+# is already read as X's), and the lambda must bind whichever the body reads.
+#
+# The region test is Parser2's ONE package-in-effect walk (rule 11 — never a
+# fresh scope loop here).  Without the v2 seam there is no requalifier either,
+# so the bare pair is right by construction; that is what has_parser gates.
+# The result is CL text, not perl text: package X's `$a` is the symbol `X::$a`.
+sub _sort_pair {
+  my ($self, $tok) = @_;
+  return ['$a', '$b'] unless $self->has_parser;
+  return ['$a', '$b'] unless ref $tok && $tok->isa('PPI::Element');
+  my $pkg = Pl::Parser2::_pkg_region_at($tok);
+  return ['$a', '$b'] unless defined $pkg;
+  (my $sym = $self->parser->_cl_pkg_designator($pkg)) =~ s/^://;
+  return ["${sym}::\$a", "${sym}::\$b"];
+}
+
 # This replaces all sub calls in an expression.
 # It use known number of parameters for subs and priorities.
 
@@ -2942,7 +2967,7 @@ sub handle_subcalls {
           $self->add_child_to_node($top_id, $node_id);
 
           if ($self->has_parser) {
-            my $params = ($func_name eq 'sort') ? ['$a', '$b'] : ['$_'];
+            my $params = ($func_name eq 'sort') ? $self->_sort_pair($now) : ['$_'];
             # task #78: a following -> deref chain wraps body_cl text — keep
             # those on the v1 route (checked BEFORE the hook so a declined
             # block is never lowered twice).
@@ -3099,7 +3124,7 @@ sub handle_subcalls {
         my $deref_skip = 0;  # extra elements consumed by -> deref chain after block
         if ($self->has_parser) {
           # Determine parameters based on function type
-          my $params = ($func_name eq 'sort') ? ['$a', '$b']
+          my $params = ($func_name eq 'sort') ? $self->_sort_pair($now)
                      : ($func_name eq 'eval') ? []
                      : ($func_name eq 'grep' || $func_name eq 'map') ? ['$_']
                      : [];  # Other & prototype functions: no implicit params
@@ -3307,7 +3332,7 @@ sub handle_subcalls {
         # Inline lambda that wraps the named comparator call
         # body_cl is a placeholder; comparator_name drives ExprToCL codegen
         my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-        $lambda_node->{params}          = ['$a', '$b'];
+        $lambda_node->{params}          = $self->_sort_pair($now);
         $lambda_node->{body_cl}         = 'nil';
         $lambda_node->{for_func}        = 'sort';
         $lambda_node->{comparator_name} = $comp_name;
@@ -3346,7 +3371,7 @@ sub handle_subcalls {
       $self->add_child_to_node($top_id, $sort_id);
 
       my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
-      $lambda_node->{params}     = ['$a', '$b'];
+      $lambda_node->{params}     = $self->_sort_pair($now);
       $lambda_node->{body_cl}    = 'nil';
       $lambda_node->{for_func}   = 'sort';
       $lambda_node->{scalar_cmp} = 1;  # flag: scalar comparator

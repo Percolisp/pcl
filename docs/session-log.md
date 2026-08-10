@@ -4,6 +4,57 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 380 (2026-08-09/10, Opus) — #287 DONE: `sort` binds the pair of the package it was COMPILED in
+
+Both ruled halves of #287 (`docs/fable-answers-s378.md` §2) shipped in ONE
+commit.  `$a`/`$b` are out of `%PKG_SWITCH_IMMUNE_VARS` — they are ordinary
+globals and #239's requalifier re-homes them like any other — and the sort
+lowering now binds *the pair the comparator body actually reads*.
+
+Mechanism: `Pl::Parser2::_pkg_region_at` answers "is this node inside a
+BLOCK-level switched region", i.e. "were this node's bare names requalified",
+using the same qualifying condition `_requalify_block_globals_after_pkg_switch`
+uses and sharing `_pkg_in_effect_at`'s one walk (extracted as
+`_pkg_stmt_in_effect_at` — rule 11, no third resolver).  A FILE-level
+`package X;` is already its own top-level form, so it is deliberately NOT a
+region and its emission does not move.  `Pl::PExpr::_sort_pair` feeds all four
+sort-lambda sites (paren block, block form, `sort NAME LIST`,
+`sort $scalar LIST`); `ExprToCL` reads `$node->{params}` instead of hard-coding
+`$a $b`, and emits `(declare (special X::$a X::$b))` for a qualified pair.
+
+That declaration is load-bearing, and the reason is a CL fact worth
+remembering: the region's `defvar` is emitted INSIDE the enclosing top-level
+form, so the symbol is NOT proclaimed special when the lambda is compiled —
+probed in bare SBCL, interpreted and via compile-file, the parameter is then a
+plain LEXICAL and `(symbol-value 'X::$a)` still sees the defvar's value.  A
+block comparator survives that; a NAMED comparator and the
+`${(caller)[0]."::a"}` symbolic read do not.  The bare pair needs no
+declaration (its defvars are top level), so every unswitched sort is emitted
+byte-for-byte unchanged.
+
+Matching perl here REMOVED three divergences and added none: perl sets the
+`$a`/`$b` of the package the SORT was compiled in, never the comparator's, so
+`sort bylen` / `sort Other::cmp` called from inside a region legitimately
+return the list UNCHANGED.
+
+**Verification.**  Pl/t gate 133 files / 4789 tests PASS on a cold cache
+(generation bumped v2-128 → v2-129).  18 probes vs perl, all matching, five of
+which diverged before the change.  `tools/corpus-diff.pl`: **1 of 111 files**
+(`sort.t`, only inside its `{ package Foo; … }` block).  Full sweep gate
+clean.  **Sort-Versions `versions.t` 65/31 → 96/0** — the dist that filed the
+ask, now clean.  `cl/pcl-pack.lisp` / `cl/pcl-mro.lisp` need no regeneration:
+neither `cl/pack-impl.pl` nor `lib/mro.pm` contains a `sort` at all, and
+mro.pm's `package` is file-level.
+
+**A guard row must not make a claim the SORT ALGORITHM answers** — caught live
+while writing the new rows.  A comparator with a constant NON-ZERO verdict
+prints perl's mergesort merge order (`2 3 1`) against the runtime's
+`stable-sort` (`3 1 2`); nothing semantic.  Zero-verdict rows are fine (both
+are stable, deliberately).  The rewritten row prints what the comparator
+OBSERVED instead.  Guards: `Pl/t/transpile-test-09.t`, "package-switched sort
+binds the region's $a/$b pair (#287)", which also carries the s2/s3
+caller-pair-gotcha shapes and the s9 symbolic read.
+
 ## Session 379 (2026-08-09, Fable) — s378 review: APPROVED + two resolver fixes; the variable-handling design review
 
 Reviewed `5d94161` (#239) + `4f35ffa` (#237 re-scope) and ruled on all six

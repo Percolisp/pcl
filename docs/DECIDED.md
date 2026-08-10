@@ -2180,3 +2180,47 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   whole-corpus transpile time is tracked and the user is flagged if the
   total creeps past ~50 % over the s379 baseline (~65 s whole-corpus,
   measured s378).
+
+## s380 (2026-08-09/10, Opus) — #287 DONE: `sort` binds the pair of the package it was COMPILED in
+
+- **perl's rule, now PCL's: `sort` sets the `$a`/`$b` of the package the SORT
+  was compiled in, never the comparator's.**  So a comparator compiled in
+  `main` and called from inside a `package P;` region reads `$main::a` and
+  sees nothing — `sort bylen`/`sort Other::cmp` from a region legitimately
+  return the list UNCHANGED, in perl and in PCL.  Matching perl here REMOVED
+  three PCL divergences; it added none.
+- **`$a`/`$b` are no longer immune to the package switch** (the s378 entry
+  above is SUPERSEDED on this point): they are ordinary globals, `#239`
+  requalifies them like any other, and the sort lowering binds *the pair the
+  comparator body actually reads* — `Pl::PExpr::_sort_pair`, feeding all four
+  sort-lambda sites (paren block, block form, `sort NAME LIST`,
+  `sort $scalar LIST`) and `ExprToCL`'s `$node->{params}`.
+- **The discriminator is "was this node REQUALIFIED", not "what package is in
+  effect"** — a FILE-level `package X;` is split by D1-lite into its own
+  top-level form, so a bare `$a` there is already read as X's and rewriting
+  it would only churn bytes.  `Pl::Parser2::_pkg_region_at` answers exactly
+  that question (BLOCK-level `package X;` statement, word-shaped namespace —
+  deliberately the same condition `_requalify_block_globals_after_pkg_switch`
+  uses), which is why corpus-diff moved **1 of 111 files** (`sort.t`, only
+  inside its `{ package Foo; … }` block).  It shares `_pkg_in_effect_at`'s
+  ONE walk via the extracted `_pkg_stmt_in_effect_at` (rule 11 — no third
+  package-in-effect resolver).
+- **A qualified pair MUST be `(declare (special X::$a X::$b))` in the lambda.**
+  The region's `defvar` is emitted INSIDE the enclosing top-level form, so it
+  has not proclaimed the symbol special when the lambda is compiled — probed
+  in bare SBCL, interpreted and compile-file both: without the declaration the
+  parameter is a plain LEXICAL and `(symbol-value 'X::$a)` still reads the
+  defvar's value.  A block comparator would survive that; a NAMED comparator
+  and the `${(caller)[0]."::a"}` symbolic read would not.  The bare pair needs
+  nothing (its defvars are top level), so every unswitched sort is emitted
+  byte-for-byte unchanged.
+- **A guard row must not make a claim the SORT ALGORITHM answers.**  Caught
+  live in this session: a comparator with a constant NON-ZERO verdict prints
+  perl's mergesort merge order (`2 3 1`) vs the runtime's `stable-sort`
+  (`3 1 2`) — nothing semantic.  Zero-verdict rows are fine (both are stable,
+  deliberately: `p-sort` uses `stable-sort` because perl's sort is stable);
+  for a non-zero one, print what the comparator OBSERVED instead of the sorted
+  list.  Guard rows: `Pl/t/transpile-test-09.t` ("package-switched sort binds
+  the region's $a/$b pair (#287)").
+- **Sort-Versions `versions.t`: 65 pass / 31 fail → 96 / 0** — the dist that
+  filed the ask, now clean.

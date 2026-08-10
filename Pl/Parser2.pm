@@ -271,22 +271,25 @@ sub _block_level_redecl {
   return scalar grep { $_ eq $canon } @declared;
 }
 
-# Variables an in-block `package X;` must NOT re-home, for the two distinct
-# reasons below.  This answers a DIFFERENT question from
+# Variables an in-block `package X;` must NOT re-home: perl itself keeps these
+# in main whatever package is in effect, so a switch cannot move them ($_, @_,
+# @ARGV/$ARGV/@ARGVOUT, %ENV, @INC/%INC, %SIG; %_args is PCL's own arg vector,
+# same status).  This answers a DIFFERENT question from
 # _forward_global_decls's %runtime_vars ("does this name need a defvar?"),
 # which is why the two lists are separate and neither is derived from the
-# other — keep them in step by cause, not by copy:
-#   - perl itself keeps these in main whatever package is in effect, so a
-#     switch cannot move them ($_, @_, @ARGV/$ARGV/@ARGVOUT, %ENV, @INC/%INC,
-#     %SIG; %_args is PCL's own arg vector, same status);
-#   - $a/$b are RUNTIME-OWNED here: the sort lowering emits
-#     `(lambda ($a $b) …)`, i.e. it LEXICALLY binds the two symbols in the
-#     section's package.  Requalifying a `sort { $a <=> $b }` inside a
-#     switched region would leave the body reading X::$a while the lambda
-#     still bound the section's $a — a working sort turned silently wrong
-#     (probed s378).  @a/@b are ordinary globals and are NOT in this set.
+# other — keep them in step by cause, not by copy.
+#
+# `$a`/`$b` are NOT here (#287, s380).  They were, between s378 and s380, for
+# a reason that has since been fixed at its own layer: the sort lowering used
+# to hard-code `(lambda ($a $b) …)`, i.e. the SECTION's two symbols, so
+# requalifying a `sort { $a <=> $b }` inside a switched region left the body
+# reading X::$a while the lambda still bound the section's $a — a working sort
+# turned silently wrong.  The lowering now binds the pair the comparator block
+# actually reads (Pl::PExpr::_sort_pair, keyed on _pkg_region_at below), which
+# is also what perl does: sort sets the $a/$b of the package the sort was
+# COMPILED in.  @a/@b are ordinary globals and were never in this set.
 my %PKG_SWITCH_IMMUNE_VARS = map { $_ => 1 }
-  qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG $a $b);
+  qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG);
 
 # (#239) Perl's `package X;` inside a BLOCK re-homes every unqualified
 # package variable for the REST OF THAT BLOCK — the switch is lexical, ends
@@ -572,14 +575,45 @@ sub _decl_binding_in {
 # is exactly why the walk looks at siblings and never inside them.
 sub _pkg_in_effect_at {
   my ($node) = @_;
+  my $stmt = _pkg_stmt_in_effect_at($node);
+  return $stmt ? $stmt->namespace : 'main';
+}
+
+# The `package NAME;` STATEMENT itself, or undef when none is in effect.  ONE
+# walk with two readers — the namespace above and the switched-region test
+# below (rule 11: do not grow a third package-in-effect resolver).
+sub _pkg_stmt_in_effect_at {
+  my ($node) = @_;
   my $child = $node;
   for (my $p = $node->parent; $p; $child = $p, $p = $p->parent) {
     for (my $s = $child->sprevious_sibling; $s; $s = $s->sprevious_sibling) {
-      return $s->namespace
+      return $s
         if $s->isa("PPI::Statement::Package") && !_pkg_stmt_has_block($s);
     }
   }
-  return 'main';
+  return undef;
+}
+
+# The package of the BLOCK-LEVEL switched region this node sits in, or undef.
+#
+# The distinction matters to every consumer that has to know whether the CL
+# READER already interned the surrounding bare names in this package or in
+# the enclosing one.  A FILE-level `package X;` is split by D1-lite into its
+# own top-level form, so a bare `$a` there is read as X's `$a` and nothing
+# needs rewriting; a BLOCK-level one is not, which is the whole reason
+# _requalify_block_globals_after_pkg_switch rewrites the region's source
+# spellings.  So "undef" here means exactly "this node's bare names were NOT
+# requalified", and the qualifying condition is deliberately the same one
+# that pass uses: a `package X;` STATEMENT (never the `package X { … }` block
+# form) whose parent is a Block, with a word-shaped namespace.
+sub _pkg_region_at {
+  my ($node) = @_;
+  my $stmt = _pkg_stmt_in_effect_at($node) or return undef;
+  my $par  = $stmt->parent                 or return undef;
+  return undef unless $par->isa('PPI::Structure::Block');
+  my $ns = $stmt->namespace;
+  return undef unless defined $ns && $ns =~ /^\w+(?:::\w+)*$/;
+  return $ns;
 }
 
 # Merge prototypes declared by every use/require in the document (nested ones
@@ -5070,9 +5104,15 @@ sub _forward_global_decls {
   my ($self, $text, $pkg, $seg_lex, $free_out) = @_;
   $pkg //= 'main';
   $text = _blank_string_innards($text // '');
-  # $a/$b are runtime-owned (the sort lowering defvars them); @a/@b are NOT —
-  # nothing defines them, so excluding them left `\@a` before any assignment
-  # unbound at load (postfixderef.t; v1's list never had them).
+  # $a/$b are runtime-owned: the section head defvars the BARE pair
+  # unconditionally, so a second defvar here would only be noise.  (This is a
+  # different question from %PKG_SWITCH_IMMUNE_VARS' "can a package switch
+  # re-home this name" — keep the two in step by cause, not by copy.  Since
+  # #287 the sort lowering binds a REGION's qualified pair where one applies;
+  # those symbols are defvar'd by the region's own entry forms, and being
+  # qualified they never reach this unqualified list at all.)  @a/@b are NOT
+  # runtime-owned — nothing defines them, so excluding them left `\@a` before
+  # any assignment unbound at load (postfixderef.t; v1's list never had them).
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
                                         $a $b);
   # Exclude names let-bound in THIS section ($seg_lex, recorded by _reg_lex
