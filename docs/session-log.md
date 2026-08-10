@@ -4,6 +4,27 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382e (2026-08-11, Fable) — Direction D set up for execution: step 1 shipped + the task chain
+
+USER: "set it up".  Two deliverables:
+
+**Step 1 of the plan is SHIPPED**: `p-local-cell` in `cl/pcl-runtime.lisp`
+(exported) — the `local`-on-a-symbol-macro-global lowering target:
+save/install/restore through `sb-ext:symbol-global-value` under
+`unwind-protect`, mirroring `p-local-glob`'s idiom.  Unit-checked against
+a live symbol-macro global: the body sees the installed box, the cell is
+restored on normal exit AND through a die, and the form returns the body
+value.  Parens checked; full Pl/t gate re-run green (runtime edit rule).
+Inert until step 2 routes `local` lowering to it — emission unchanged.
+
+**The execution chain is in the task system**: #290 (the flip, blocked by
+#237's Opus wiring half — both bump the cache generation) → #291 (delete
+`__shadow__`/`__cond__`/`__emb__` per family; #205 closes) → #292
+(difftest fuzz + perl-suite net); #289 is the umbrella.  Each task body
+is self-sufficient (mechanism, gates, guard rows, expected numbers) so
+any session can execute without re-reading the history; the plan of
+record stays `docs/direction-d-plan.md`.
+
 ## Session 382d (2026-08-11, Fable) — Direction-D performance verification (USER challenge) + the implementation plan
 
 The USER asked for certainty that the symbol-macro global isn't slower;

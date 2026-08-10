@@ -225,6 +225,7 @@
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if #:p-local-dot
+   #:p-local-cell
    #:p-local-pipe
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
@@ -13504,6 +13505,23 @@ buffer's fill-pointer; everything else falls back to file-length."
   (if (aref saved 2) (setf (symbol-value scalar-sym) (aref saved 3)) (makunbound scalar-sym))
   (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
   (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
+
+(defmacro p-local-cell (sym init &body body)
+  "Direction-D `local` on a SYMBOL-MACRO GLOBAL (task #289, plan
+   docs/direction-d-plan.md): save the cell, install INIT (the emitter
+   passes the same p-box-for-local / p-copy-array / p-copy-hash form it
+   builds for the dynamic-let lowering today), restore on exit — die
+   path included via unwind-protect.  Access goes through
+   sb-ext:symbol-global-value, matching the access macro: partition
+   symbols are NEVER dynamically bound, so the direct global cell is the
+   one source of truth (probed s382d, incl. symbol-value interop).
+   Exception-set names ($a/$b, runtime magic) keep the dynamic-let
+   lowering and must never be routed here."
+  (let ((old (gensym "OLD")))
+    `(let ((,old (sb-ext:symbol-global-value ',sym)))
+       (setf (sb-ext:symbol-global-value ',sym) ,init)
+       (unwind-protect (progn ,@body)
+         (setf (sb-ext:symbol-global-value ',sym) ,old)))))
 
 (defmacro p-local-glob (pkg-str name-str &body body)
   "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
