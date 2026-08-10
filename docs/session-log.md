@@ -38,7 +38,29 @@ faster); it just means a name that should have stayed global and gets
 let-bound goes silently lexical instead of erroring.  The one hand-check the
 flip needs: no ORDINARY name is let-bound by any remaining emitter path.
 
-#290 is now pure plumbing at four places, all named in the task body.
+**Second pre-work commit (`53f797f`): `p-defcell`, the declaration half of the
+cell pair** — sibling to step 1's `p-local-cell`, also inert.  It is the
+`defvar` of the cell world and had to keep BOTH of defvar's properties, not
+just the obvious one.  The trap: the natural spelling (define-symbol-macro +
+an unconditional `setf`) is **not** define-once, so a second section
+declaring the same name — or a module loaded twice — would WIPE a value the
+first had assigned.  Silent, and outside what the plan's "partition mistakes
+die loudly" note covers.  Hence a `boundp` guard, and hence row B of the new
+test.  The other property, compile-time visibility, comes free from
+top-level `progn` keeping its subforms top-level.
+
+Probed in situ against the loaded runtime (not in isolation): read/write,
+define-once, local install + restore on normal exit and through a die,
+`symbol-value`/`boundp` interop both directions, container cells.  Both
+partition-clash directions confirmed loud.  New guard
+`Pl/t/global-cell-01.t` (8 rows, 1.3 s) also covers `p-local-cell`
+retroactively — step 1 shipped it with only an ad-hoc check.  Gate 137 /
+5079 green.
+
+#290 is now pure plumbing at four places, all named in the task body: both
+runtime macros exist and are guarded, and the partition that chooses between
+them is decided and measured.  What is left is the two emitters, ir-spec, the
+artifacts, and the gate stack.
 
 ## Session 382f (2026-08-11, Opus) — #237 Opus half, consumer 1: the regex-pattern interpolator now goes through Pl::InterpScan
 
