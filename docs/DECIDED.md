@@ -2253,3 +2253,29 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
 - **The weigher's symbol-table hook is real and ported** (`known_name`):
   `/$x[\n@foo]/` flips subscript↔charclass with @foo's existence; only
   1–2 digit guts are subscripts (`[100]`/`[123]` are charclasses).
+
+## s382c (2026-08-11, Fable) — Direction-D audit DONE: GO, mechanism CORRECTED (docs/defglobal-audit-s382.md)
+
+- **`sb-ext:defglobal` is DEAD for direction D** — probed: SBCL refuses
+  `let` of a global name outright ("cannot be used in LET"); the
+  var-handling-review §6 premise of free lexical shadowing was FALSE.
+- **The working mechanism is the SYMBOL-MACRO GLOBAL**:
+  `(define-symbol-macro $x (symbol-value '$x))` over an initialized,
+  unproclaimed value cell.  Probed: `let` = plain lexical shadow (perl's
+  `my`), closures capture it, save/restore-under-unwind-protect = `local`
+  (die path included), read cost at parity with specials (111 vs 106 ms /
+  100M).  Special and symbol-macro are mutually exclusive BOTH directions
+  — a partition bug dies at load, never silently.
+- **Corpus classification: NO third class** (675 defvar'd names, 113
+  files): 416 my/param collisions (accidental dynamics today — D makes
+  them correct lexical shadows), 348 runtime-magic rebinds (stay defvar),
+  54+ `local` lowerings (become save/restore; `p-local-glob` already
+  ships the idiom, runtime has NO progv), 32 declare-special = sort pairs
+  only.  0 bare defvars, so the cell-init requirement has no gap.
+- **Exception set (stays defvar), name-based and image-global**: `$a`/`$b`
+  in every package + the runtime-magic list.
+- **Payoff measured**: 809 poisoned-my renames in corpus emission
+  (`__shadow__` 611 / `__cond__` 194 / `__emb__` 4) + 3 veto predicates +
+  ~300 Parser2 lines delete; #205 closes by construction.
+- **s379b conjuncts all hold → implementation proceeds without an ask**
+  (pre-v0.1 IR batch; ir-spec.md + gen bump in the same commit).

@@ -4,6 +4,40 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382c (2026-08-11, Fable) — Direction-D audit: GO, with the mechanism corrected to the symbol-macro global
+
+The §6 go/no-go measurement from `var-handling-review-s379.md`, USER-
+approved this session.  Full results: `docs/defglobal-audit-s382.md`.
+
+The headline is a premise kill: **`sb-ext:defglobal` cannot carry
+direction D at all** — SBCL refuses `let` of a global name ("names a
+global lexical variable, and cannot be used in LET"), so the review's
+"lexical shadowing for free" never existed.  The probe battery found the
+mechanism that DOES work: `(define-symbol-macro $x (symbol-value '$x))`
+over an initialized, unproclaimed cell — `let` then shadows lexically
+(perl's `my`), closures capture the shadow, `local` lowers to
+save/restore + `unwind-protect` (die path probed), reads are at cost
+parity with specials, and SBCL enforces the special/symbol-macro
+partition with a loud load-time error in both directions.
+
+The corpus classification (675 defvar'd names, 113 emitted files) found
+**no third class**: 416 my/param-collision bindings — today's ACCIDENTAL
+dynamic bindings, which the flip turns into correct perl shadows — plus
+348 deliberate runtime-magic rebinds (stay defvar), the `local` family
+(becomes save/restore; `p-local-glob` already ships the exact idiom and
+the runtime contains no progv), and 32 declare-special sites that are
+exactly the s380 sort pairs.  Zero bare defvars, so the cell-init
+requirement has no gap.  Measured payoff: 809 poisoned-my renames in the
+corpus emission + three veto predicates + ~300 Parser2 lines delete,
+and #205 closes by construction.
+
+All four s379b conjuncts hold, so implementation proceeds without a
+further ask, as the pre-v0.1 IR-batch item: task #289 carries the
+settled constraints (name-based exception set `$a`/`$b` + runtime magic;
+`local` re-lowering; ir-spec + gen bump in the same commit; Pl/t + full
+sweep TOTAL/LOST + board as the gate since the flip touches every
+global-bearing file).
+
 ## Session 382 (2026-08-10, Fable) — #237 Fable half: Pl::InterpScan shipped (event scanner + intuit_more + probe table)
 
 The ruled Fable half of #237 (`fable-answers-s378.md` §3 = b′, split USER
