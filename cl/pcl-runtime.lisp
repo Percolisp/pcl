@@ -225,7 +225,7 @@
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if #:p-local-dot
-   #:p-local-cell
+   #:p-defcell #:p-local-cell
    #:p-local-pipe
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
@@ -13505,6 +13505,43 @@ buffer's fill-pointer; everything else falls back to file-length."
   (if (aref saved 2) (setf (symbol-value scalar-sym) (aref saved 3)) (makunbound scalar-sym))
   (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
   (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
+
+(defmacro p-defcell (sym init)
+  "Declare an ORDINARY package global (direction D, task #289): SYM becomes a
+   symbol macro reading/writing its own global cell directly, and the cell is
+   initialized ONCE.  This is the `defvar` of the cell world and must keep
+   defvar's two properties, both probed s382g:
+
+   (1) DEFINE-ONCE.  Several sections can forward-declare the same name (a
+       name used as a package global in more than one section gets a
+       declaration in each), and a module can be loaded twice.  `defvar`
+       makes the later ones no-ops; an unconditional (setf symbol-global-value)
+       would WIPE a value an earlier section already assigned — a silent
+       wrong.  Hence the boundp guard.
+
+   (2) COMPILE-TIME VISIBILITY.  Top-level `progn` keeps its subforms
+       top-level, so define-symbol-macro is processed at compile time and the
+       rest of the file reads SYM through the cell, exactly as defvar's
+       special proclamation is seen.
+
+   Direct cell access (sb-ext:symbol-global-value) is valid because partition
+   symbols are NEVER dynamically bound — that is what Pl::GlobalPartition
+   decides, and the exception set ($a/$b, punctuation/caret magic) keeps
+   plain defvar instead.  Getting that partition wrong is LOUD: SBCL refuses
+   a symbol that is both special and a symbol macro, in either order.
+   Name-based access (symbol-value, boundp, makunbound, the glob and
+   symbolic-ref helpers) reaches the same cell unchanged.
+
+   NOTE for readers: a lexical `let` of SYM is legal CL and SHADOWS the
+   symbol macro rather than erroring.  That is deliberate — it is how a perl
+   `my` shadow becomes a real lexical (and 36% faster than the dynamic
+   rebind it replaced) — but it means an emitter must never `let`-bind a
+   name it declared here expecting to write the global."
+  `(progn
+     (define-symbol-macro ,sym (sb-ext:symbol-global-value ',sym))
+     (unless (boundp ',sym)
+       (setf (sb-ext:symbol-global-value ',sym) ,init))
+     ',sym))
 
 (defmacro p-local-cell (sym init &body body)
   "Direction-D `local` on a SYMBOL-MACRO GLOBAL (task #289, plan
