@@ -82,16 +82,37 @@ shape is deliberately excluded from the guard row, with a pointer).
 **STATE: on branch `wip/s382h-direction-d-flip`, NOT merged — one open
 regression (task #295).**  Measured: **Pl/t 138 files / 5091 tests PASS**
 (cold, saved core); full sweep **0 new / 0 fixed**, TOTAL passing 18498 →
-**18494 (−4)**, with the whole shortfall in ONE file.  eval.t's `$zzz` family
-(A/B'd row by row against a HEAD worktree: +3 rows 35–37, −8 rows 51–62) —
-a string eval no longer sees a caller's `my` that shares its name with a
-package global, because that used to work only through the accidental dynamic
-binding the flip removes.  The nested-eval sites have no capture alist and the
-name is not promoted, so the fix is a design call (three candidates in #295),
-not a mechanical one; the flip does not land on main until it is made.  The
-CPAN board and `tools/bench-exec.pl` were not run for the same reason —
-running them against a knowingly-incomplete flip would only produce numbers
-that have to be re-taken.
+**18494 (−4)**, with the whole shortfall in ONE file — eval.t, A/B'd row by
+row against a HEAD worktree: **+3 (rows 35–37), −8 (51–62)**.
+
+**The cause took two diagnoses, and the first one was wrong — recorded because
+the wrong one is the expensive one to repeat.**  "A string eval no longer sees
+a caller's `my` that shares a name with a package global" is FALSE: flat,
+in-sub, in-block and nested-eval shapes all match perl exactly (probed).  The
+fix that diagnosis implied — publishing the thunk's resolved names so nested
+evals inherit them — was implemented, **measured at zero rows moved, and
+reverted**.  The real shape is a sub *defined inside* a string eval:
+
+    $::zzz = $::zzz = 0;  my $zzz = 1;
+    eval q{ sub fred1 { print eval('$zzz') } };
+    fred1();                   # perl 1, PCL 0
+    { my $zzz = 2; fred1() }   # perl 1, PCL 0
+
+It is built while the eval runs and called after it returns, so the capture
+alist is out of scope and the inner eval falls through to the global.  Before
+the flip this was right *by accident* — `$zzz` was `defvar`'d only because the
+file also touches `$::zzz`, leaving the file's `my` a live dynamic binding —
+and even then only 2 of the 4 rows were right (HEAD returns the caller block's
+`2` where perl says `1`).  A proper fix lands 4 of 4, i.e. **better than the
+baseline it replaces**.  Shape: an eval-mode named sub captures
+`*p-eval-lex-alist*` at definition time and rebinds it around its body — one
+emitter, nothing new in the runtime.  That adds a THIRD capture route beside
+the site alist and the alias rule, which `docs/ir-spec.md` §9.1 is normative
+about, so it goes to Fable before it is built (task #295).
+
+The flip does not land on main until that is settled.  The CPAN board and
+`tools/bench-exec.pl` were not run for the same reason — numbers taken against
+a knowingly-incomplete flip only have to be re-taken.
 
 ---
 
