@@ -6,6 +6,33 @@ Append new entries at the top. One section per session.
 
 ## Session 384 (2026-08-12, Opus) — #294 shipped; #291 attempted in full, MEASURED not shippable, reverted with four blockers filed
 
+**Continued s384c — #298 CLOSED (`a1e3814`), one of the four blockers gone.**
+`my $c1 = bless $c1, "C3"` was a hard refusal on main today (the `our $c1`
+spelling stops the block-shadow rename from masking it; op/bless.t survives
+only because ITS `$c1` is poisoned and gets renamed).  The syntactic
+pre-check reads the list-operator comma as a statement tail; PExpr, which owns
+exactly that ambiguity, parses it as one assignment.  The fix asks PExpr
+instead of guessing — lower the run in the OUTER scope (before `_reg_lex`), and
+if it is exactly one assignment to the name, feed its RHS to the `p-box-init`
+binding the no-tail path already uses.  A genuine `my $x = $x, 1` still
+refuses, and both early-return paths that bind no `let` of their own (a
+promoted cell, a goto-hoisted box) keep the refusal.  corpus-diff identical
+across all 111 files (the change only converts a die into code).  Gate
+138 files / 5100 tests.  Guard rows: the reproducer + a `sort { $a <=> $b }`
+self-ref variant + the inverse refusal, plus the three family rows written
+during the #291 attempt, restored — they assert perl semantics through
+`test_transpile`, so they pass with the renames in place.  The #205 row is
+deliberately NOT restored: it fails until the enabler lands, and its
+reproducer lives in task #205.
+
+**NEXT SESSION STARTS HERE.**  Remaining #291 blockers: **#296** (the design
+call — Fable's), **#297**, **#299**.  Also owed and cheap: **#292's
+pass-baseline re-bless** — `.faillog` currently holds the gate-clean sweep
+(TOTAL 18506), and the #223 procedure needs a per-file audit first, because
+four files (method.t, postfixderef.t, ref.t, tr.t) were PARTIAL in that run
+and must not be blessed downward.
+
+
 **Shipped: #294.**  Since the direction-D flip an ordinary global and a lexical
 are the SAME symbol, so the foreach macros decide "localize the cell" vs "bind
 a lexical" by asking whether the loop variable names a global symbol macro in

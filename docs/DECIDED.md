@@ -2387,3 +2387,20 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   `Pl/t/transpile-test-10.t` pass both with and without the renames, because
   they assert perl's semantics via `test_transpile` rather than the emitted
   spelling.  They are the acceptance bar for the retry.
+
+## s384c (2026-08-12, Opus) — #298: when a syntactic pre-check and PExpr disagree about a comma, ASK PExpr
+
+- **`my $c = bless $c, "C3"` refused the whole file.**  `_lower_block` treats a
+  depth-0 low-prec token in a `my`-init as a statement tail and hands the run to
+  PExpr INSIDE the fresh `let`, where a self-referential init would read the new
+  binding — hence the refusal.  But that comma is a LIST-OPERATOR argument
+  separator, and only PExpr can tell (`my $c = h 1, 2` really does pass both).
+- **The rule: lower the run in the OUTER scope and read the RESULT.**  Exactly
+  one assignment to the declared name ⇒ there was no tail ⇒ its RHS goes into
+  the `p-box-init` let binding.  Anything else keeps the refusal.  Lowered
+  exactly once — PExpr's cleanup mutates the shared tokens, so a speculative
+  re-lowering is not available.
+- **Reachable on plain main**: `our $c1` stops the block-shadow rename from
+  covering the name.  op/bless.t survives only because ITS `$c1` is poisoned.
+- Guard rows in `Pl/t/transpile-test-10.t`, incl. the inverse (`my $x = $x, 1`
+  still refuses).  corpus-diff identical across 111 files — a die became code.
