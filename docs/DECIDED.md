@@ -29,6 +29,15 @@ not-supported.md → only then probe.*
   seeded rand → drand48) → `ir-spec.md` (rule), `fable-answers-s316v.md` §6h.
 - **`eval $str`**: HARD REQUIREMENT, must always work, never gated (user
   2026-07-07).
+- **String-eval scope capture has NO third route** (s383, #295): the eval'd
+  text's enclosing scope reaches eval sites INSIDE the text — and named subs
+  the eval defines, called later — via `%p-eval-env%`, a lexical bound at
+  body entry to the entry value of `*p-eval-lex-alist*` and APPENDED to each
+  eval-mode site alist (route 1, the pad chain lexicalized).  Never an
+  ambient/dynamic hand-off: that leaks the eval's lexicals into subs it
+  merely calls (measured: the s382h "publish around the body" fix moved
+  zero rows and was reverted) → `ir-spec.md` §9.1 "pad-chain continuation";
+  guard `Pl/t/transpile-test-10.t`.
 - **Speed vs readable generated CL**: performance wins (user 2026-07-02) →
   CLAUDE.md §2.
 - **Bareword class names** (`tie $x, Tie::StdHash`): per-builtin

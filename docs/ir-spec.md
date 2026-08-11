@@ -1113,6 +1113,34 @@ the eval — captures the *containers themselves*. Writes (`$x = 84`
 box-sets the scalar box) are visible to the enclosing compiled code and
 vice versa, with no copy-back step.
 
+**The pad-chain continuation (`%p-eval-env%`, s383/#295).** Perl
+compiles eval'd text *in the pad chain of the eval site*: an eval site
+**inside** the eval'd text sees the text's own lexicals and then the
+enclosing scope at the outer site — and a named sub the eval defines
+keeps that chain when called after the eval has returned. The site
+alist reifies the outer link, but `*p-eval-lex-alist*`'s dynamic
+binding dies with the eval, so the compiled body lexicalizes it: when
+any eval site occurs in the compiled text, the body (inside the thunk
+lambda when one is emitted, as the single body form otherwise) is
+wrapped in
+
+```lisp
+(let ((%p-eval-env% pcl:*p-eval-lex-alist*)) …body…)
+```
+
+and every eval site *emitted in eval mode* appends `%p-eval-env%` to
+its site alist — `(p-eval $code %p-eval-env%)`, or
+`(p-eval $code (append (list own-pairs…) %p-eval-env%))` when the site
+has let-bound pairs of its own (own pairs first: they are inner scope).
+Named subs close over `%p-eval-env%` like any lexical, which is what
+makes the chain survive the eval's extent; nested evals thread it (each
+nesting level's `%p-eval-env%` binds to the alist its own `p-eval`
+received, which already carries every outer level). This is **not** a
+fourth resolution stop — it rides the site alist, stop 1 below.
+Implementers must not substitute an ambient/dynamic hand-off: a sub
+merely *called* from eval'd code must not see the eval's lexicals, and
+only lexical capture makes that distinction.
+
 **Piece 3 — name resolution: `(p-eval-lex-lookup NAME)`.** Exactly
 three stops, in order:
 

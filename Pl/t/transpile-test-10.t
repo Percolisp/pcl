@@ -200,4 +200,29 @@ swap();
 print "out: $p $q\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #295 (the flip's one regression, fixed s383): an eval site inside a compiled
+# eval body carries %p-eval-env% — the enclosing eval's capture alist, held as
+# a LEXICAL the eval's subs close over (ir-spec §9.1's pad-chain continuation).
+# fred1: sub defined inside an eval, called after it returns — its own eval
+# must see the file's `my $zzz` (= 1), in both calls (the caller's block
+# shadow is not in its pad chain).  fred2: same through TWO eval levels (the
+# env threads).  fact: `my $fact` referenced by its own eval text at every
+# recursion depth, plus `local` of an ordinary global inside eval mode
+# (p-local-cell's lexical rebind must agree with the threaded env).
+# ---------------------------------------------------------------------------
+test_transpile('eval-defined subs keep the eval scope; env threads through nesting', '
+$::zzz = $::zzz = 0;
+my $zzz = 1;
+eval q{ sub fred1 { print "f1: ", eval(q($zzz)), "\n" } };
+fred1();
+{ my $zzz = 2; fred1() }
+eval q{ eval q{ sub fred2 { print "f2: ", eval(q($zzz)), "\n" } } };
+fred2();
+our $foo; $foo = 5;
+my $fact = q{ local($foo) = $foo; $foo <= 1 ? 1 : $foo-- * (eval $fact) };
+print "fact: ", eval($fact), "\n";
+print "foo after: $foo\n";
+');
+
 done_testing();

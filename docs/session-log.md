@@ -4,7 +4,52 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 382h (2026-08-11, Opus) — #290 THE FLIP: ordinary globals are cells, `local` is `p-local-cell`
+## Session 383 (2026-08-11, Fable) — #295 ruled and fixed: the pad chain is lexicalized, no third capture route; the #290 flip merges
+
+Reviewed the s382h flip commit (approved — the partition routing, the
+`local` split ordering, the six runtime interactions and the guard file all
+check out) and took the #295 design call it was blocked on.
+
+**The ruling: there is NO third capture route.**  The task proposed
+"capture `*p-eval-lex-alist*` at definition time and rebind it around an
+eval-defined sub's body" — that shape cannot work as written (`p-eval`
+binds the alist by REPLACEMENT, so the very first inner eval site clobbers
+the rebind with its own empty site alist), and its dynamic flavor is the
+same scope-leak family as the reverted s382h fix: a dynamic hand-off is
+visible to subs the eval'd code merely CALLS, which perl's pads are not.
+What perl actually does is lexical: eval'd text is compiled IN the pad
+chain of the eval site, so an eval site *inside* the text sees the text's
+own lexicals and then the outer site's scope — and a named sub defined by
+the eval carries that chain out with it as closure state.  So the fix
+lexicalizes the chain through the existing route 1:
+
+- `_eval_lexical_alist` (the ONE shared alist builder, all four emitter
+  call sites): in eval mode, append the symbol `%p-eval-env%` after the
+  let-bound pairs (own pairs first — inner scope wins assoc).
+- `_assemble_eval_mode`: when any site consumed it, wrap the body —
+  inside the thunk lambda when one is emitted, as the single body form
+  otherwise — in `(let ((%p-eval-env% pcl:*p-eval-lex-alist*)) …)`.
+
+Nesting threads with zero extra mechanism: each eval level's
+`%p-eval-env%` binds to the alist its own `p-eval` received, which already
+carries every outer level.  Runtime untouched; file-mode emission untouched
+(`tools/corpus-diff.pl`: byte-identical across all 111 files — the marker
+name is scan-proof because the forward-decl scan's `(?!-)` possessive guard
+already rejects hyphenated internals).  ir-spec §9.1 gains the normative
+"pad-chain continuation" block; DECIDED.md has the one-liner.
+
+**Measured**: zz2.pl (the repro) 1/1 vs perl both calls; eval.t **114 → 121
+passing** (pre-flip baseline 114/46; the flip was at 110; the fail SET is
+row-for-row identical to the blessed baseline — the fix restored the 8 lost
+rows and landed 7 more, the caller-shadow rows HEAD had accidentally wrong
+plus the nested-scope family).  New combined guard row in
+`Pl/t/transpile-test-10.t` (fred1 both calls, fred2 through TWO eval
+levels, and the `my $fact` recursive factorial with `local` of an ordinary
+global inside eval mode — the p-local-cell interaction-5 shape my change
+could most plausibly have broken; probed byte-identical vs perl).  Pl/t
+gate **138 files / 5092 tests PASS** (prove-core).  Full sweep + board +
+bench run this session below; flip merged to main after they came back
+clean.
 
 Direction D's step 2 (`docs/direction-d-plan.md` §4), the one commit the two
 pre-work commits were built for.  Emission changed at every declaration site

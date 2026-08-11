@@ -3638,6 +3638,21 @@ sub _eval_lexical_alist {
     next if $seen{$key};
     push @pairs, ['cons', "\"$key\"", $span->{$key}];
   }
+  # EVAL MODE (#295, ir-spec §9.1): an eval site inside a compiled eval body
+  # appends %p-eval-env% — the lexical holding the ENCLOSING eval's alist,
+  # bound once at body entry by _assemble_eval_mode.  Perl's rule is that an
+  # eval site sees its whole pad chain, which for eval'd text continues past
+  # the text into the scope of the outer eval site; the site alist is that
+  # chain's reification, so the outer link must ride the ALIST (lexical, so a
+  # named sub the eval defines closes over it and keeps it after the eval
+  # returns) — never the dynamic *p-eval-lex-alist* (extent dies with the
+  # eval, and an ambient rebind would leak the caller's scope into subs it
+  # merely CALLS).  Appended LAST: own let-bound pairs are inner scope.
+  if ($parser->can('eval_mode') && $parser->eval_mode) {
+    $parser->{_eval_env_used} = 1;
+    return '%p-eval-env%' if !@pairs;
+    return ['list', 'append', ['list', 'list', @pairs], '%p-eval-env%'];
+  }
   return '' if !@pairs;
   # NB: a 'list' HEAD is CLForm's bare-parens marker, so the literal CL
   # (list …) call is spelled with 'list' as the first ELEMENT instead.

@@ -5025,6 +5025,17 @@ sub _assemble_eval_mode {
   my @body = (@{ $sec->{pkg_enter} // [] },
               $self->_interleaved_defs($sec), @{ $sec->{run} });
 
+  # #295: some eval site in this body appended %p-eval-env% (see
+  # _eval_lexical_alist) — bind it here, at body entry, to the alist the
+  # enclosing p-eval is dynamically holding RIGHT NOW.  A lexical, not a
+  # dynamic rebind: a named sub defined by this eval closes over it, so its
+  # own eval sites still see the enclosing scope when called after this eval
+  # has returned (eval.t's fred1/fred2).  One form, so it wraps the whole
+  # body whether or not the thunk lambda is emitted around it.
+  if ($fb->{_eval_env_used}) {
+    @body = ('(let ((%p-eval-env% pcl:*p-eval-lex-alist*))', @body, ')');
+  }
+
   my @out = ('(in-package :pcl)', '', grep { length } @head);
   push @out, '' if @head;
   my @names = sort keys %free;
