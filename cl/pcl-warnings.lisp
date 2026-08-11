@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-59
+;;; pcl: pipeline=v2 gen=v2-131
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -11,6 +11,7 @@
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" pcl::@INC)
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" pcl::@INC)
 (vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3" pcl::@INC)
+(setf pcl::*p-core-inc-dirs* (list "/home/bernt/pcl/lib" "/home/bernt/pcl" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3"))
 ;; Switch to main package (Perl's default for code without 'package' statement)
 (p-defpackage :main)
 (in-package :main)
@@ -41,9 +42,9 @@
 (defvar $b (make-p-box nil))
 
 ;; Forward declarations for undeclared package globals
-(defvar warnings::$VERSION (make-p-box nil))
+(p-defcell warnings::$VERSION (make-p-box nil))
 
-(defvar $VERSION (make-p-box nil))
+(p-defcell $VERSION (make-p-box nil))
 
 (p-sub pl-import (&rest %_args) (p-args-body (block nil)))
 
@@ -80,6 +81,8 @@
             (p-warn :loc "lib/warnings.pm line 39" $message)))))))
 
 (p-set-current-package :warnings "warnings")
+
+(p-run-compile-phase-blocks)
 
 (p-scalar-= warnings::$VERSION "1.70")
 

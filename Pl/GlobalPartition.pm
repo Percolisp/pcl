@@ -51,7 +51,7 @@ use v5.20;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(is_exception_global partition_name);
+our @EXPORT_OK = qw(is_exception_global partition_name global_decl_form);
 
 # Cause (b): word-shaped names that stay dynamically bound.  The magic half is
 # the same membership %PKG_SWITCH_IMMUNE_VARS states for its own question —
@@ -98,6 +98,23 @@ sub partition_name {
 sub is_exception_global {
   my ($cl_name) = @_;
   return partition_name($cl_name) eq 'exception' ? 1 : 0;
+}
+
+# The DECLARATION line for a global, as the partition decides it.  Every
+# emitter that declares a package variable goes through here — the spelling
+# and the partition must never drift apart, and a name declared `defvar` in
+# one place and `p-defcell` in another is a load-time error in SBCL (which is
+# the good outcome; the bad one is two emitters silently disagreeing about
+# WHICH cell a `local` saves).
+#
+# INIT is the same fresh-container form both sides already build
+# (make-p-box / make-array / make-hash-table), so the two arms differ only in
+# the declarer.  p-defcell is define-once via a boundp guard, exactly as
+# defvar is — see its docstring in cl/pcl-runtime.lisp.
+sub global_decl_form {
+  my ($cl_name, $init) = @_;
+  my $declarer = is_exception_global($cl_name) ? 'defvar' : 'p-defcell';
+  return "($declarer $cl_name $init)";
 }
 
 1;

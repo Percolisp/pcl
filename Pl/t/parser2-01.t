@@ -243,8 +243,8 @@ is($hi_defs, 2, 'same-named sub defined once per package section');
 # references the bare name (s278c).
 my $span = eval { Pl::Parser2->parse_code(qq{my \$x = 1;\npackage Foo;\nprint \$x;\n}) };
 is($@, '', 'W10: qualifying my across a package boundary lowers natively');
-like($span, qr/\(defvar \$x \(make-p-box nil\)\)/,
-     'W10: spanning lexical gets a defvar cell in the declaring section');
+like($span, qr/\(p-defcell \$x \(make-p-box nil\)\)/,
+     'W10: spanning lexical gets a declared cell in the declaring section');
 unlike($span, qr/\$x__file__\d+/,
      'W10: a file-unique spanning name is NOT mangled (plain $Pkg::name)');
 like($span, qr/main::\$x\b/,
@@ -265,16 +265,16 @@ like($span_interp, qr/\(p-string-concat main::\$x\)/,
 # (identity, like the span pass — no __file__N mangle), so string eval and
 # interp text keep resolving.
 my $capt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump(), "\n";});
-like($capt, qr/\(defvar \$n \(make-p-box nil\)\)/,
-     'W5: captured file-unique scalar gets an identity defvar cell');
+like($capt, qr/\(p-defcell \$n \(make-p-box nil\)\)/,
+     'W5: captured file-unique scalar gets an identity cell');
 unlike($capt, qr/\$n__file__\d+/, 'W5: file-unique captured name is NOT mangled');
 unlike($capt, qr/\(let \(\(\$n\b/, 'W5: promoted cell is NOT let-bound');
 # A NON-unique name (block-nested shadow elsewhere) takes the mangled path;
 # the shadow scope keeps its own name (M-C shadow-aware count + rewrite).
 my $captm = Pl::Parser2->parse_code(
   q{my $n = 1; sub bump { $n + 1 } { my $n = 9; print $n; } print bump(), "\n";});
-like($captm, qr/\(defvar \$n__file__\d+ \(make-p-box nil\)\)/,
-     'W5: shadowed captured lexical gets a MANGLED defvar cell');
+like($captm, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\)\)/,
+     'W5: shadowed captured lexical gets a MANGLED cell');
 like($captm, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in place');
 like($captm, qr/\(let \(\(\$n (?:9|\(make-p-box)/,
      'W5: the block shadow keeps its own let-bound $n');
@@ -286,7 +286,7 @@ like($captm, qr/\(let \(\(\$n (?:9|\(make-p-box)/,
 # cell — no gate, no mangle.
 my $capt_i = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { "got $n" } print bump(), "\n";}) };
 is($@, '', 'interpolated captured lexical lowers natively (identity promotion)');
-like($capt_i, qr/\(defvar \$n \(make-p-box/, 'identity promotion: defvar under the ORIGINAL name');
+like($capt_i, qr/\(p-defcell \$n \(make-p-box/, 'identity promotion: declared under the ORIGINAL name');
 like($capt_i, qr/\(p-scalar-= \$n 1\)/, 'identity promotion: assigned in place, no mangle');
 
 # …and two declarations of the same name (shadowing) stay gated.
@@ -301,7 +301,7 @@ like($nocapt, qr/\(let \(\(\$n 1\)\)/, 'sub with its own params does not block v
 my $oct = Pl::Parser2->parse_code(q{my $o = 0100; print "$o\n";});
 like($oct, qr/\(\$o #o100\)/, 'octal literal routed to fallback (#o100), not bare 0100');
 
-# --- `our` declarations: package vars — defvar hoisted to the section top,
+# --- `our` declarations: package vars — declaration hoisted to the section top,
 # no let, assignment through the ordinary machinery.
 my $our = Pl::Parser2->parse_code(<<'EOF');
 our $count = 3;
@@ -312,12 +312,12 @@ print show(), "\n";
 package Dog;
 our @ISA = ('Animal');
 EOF
-like($our, qr/^\(defvar \$count \(make-p-box nil\)\)/m, 'our $x defvar hoisted');
-like($our, qr/^\(defvar \@list /m, 'our @a defvar hoisted');
+like($our, qr/^\(p-defcell \$count \(make-p-box nil\)\)/m, 'our $x declaration hoisted');
+like($our, qr/^\(p-defcell \@list /m, 'our @a declaration hoisted');
 like($our, qr/\(p-scalar-= \$count 3\)/, 'our $x init via p-scalar-= (box-set clears sv/nv caches; a raw p-box-value setf reads back stale — D23)');
 like($our, qr/\(p-list-= \(vector \$p \$q\)/, 'our (LIST) init via p-list-=');
 unlike($our, qr/\(let \(\(\$count/, 'our vars are not let-bound');
-like($our, qr/\(in-package :Dog\).*\(defvar \@ISA /s, 'our @ISA defvar lands in its package section');
+like($our, qr/\(in-package :Dog\).*\(p-defcell \@ISA /s, 'our @ISA declaration lands in its package section');
 my $ourshadow = eval { Pl::Parser2->parse_code(q{my $x = 1; our $x; print $x;}) };
 like($@, qr/shadows a my-lexical/, 'our shadowing a my-lexical dies to v1');
 
@@ -338,8 +338,8 @@ unlike($blk, qr/;;; back to package main\n\(p-defpackage/,
 
 # Versioned package: $VERSION defvar (eval-when) + a source-order assignment.
 my $ver = Pl::Parser2->parse_code(qq{package Counter 1.5;\nprint \$Counter::VERSION;\n});
-like($ver, qr/\(defvar Counter::\$VERSION \(make-p-box nil\)\)/,
-     'versioned package defvars $VERSION');
+like($ver, qr/\(p-defcell Counter::\$VERSION \(make-p-box nil\)\)/,
+     'versioned package declares $VERSION');
 like($ver, qr/\(p-scalar-= Counter::\$VERSION 1\.5\)/,
      'versioned package assigns $VERSION in source order');
 
@@ -492,8 +492,8 @@ like($nest, qr/\(p-declare-sub pl-geta\)/, 'hoisted sub gets p-declare-sub');
 # W5: the static-variable idiom (block lexical captured by a nested sub) is
 # rewritten to a shared package cell — no gate.
 my $capt2 = Pl::Parser2->parse_code(q[{ my $x = 0; sub bump2 { $x = $x + 1; return $x; } } print bump2(), "\n";]);
-like($capt2, qr/\(defvar \$x__file__\d+ \(make-p-box nil\)\)/,
-     'W5: static-variable idiom gets a defvar cell');
+like($capt2, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\)\)/,
+     'W5: static-variable idiom gets a declared cell');
 like($capt2, qr/\(p-sub pl-bump2/, 'W5: capturing nested sub still hoisted');
 
 # …and an array block lexical captured by a nested sub (with init) is now
@@ -501,8 +501,8 @@ like($capt2, qr/\(p-sub pl-bump2/, 'W5: capturing nested sub still hoisted');
 # write-through assignment.  This shape used to gate → v1, which MISCOMPILED
 # it (s282b edge probes).
 my $capt2a = Pl::Parser2->parse_code(q[{ my @x = (0); sub bump2a { push @x, 1 } } print "ok\n";]);
-like($capt2a, qr/\(defvar \@x__file__\d+ /,
-     'M-D: array block lexical captured by nested sub gets a defvar container');
+like($capt2a, qr/\(p-defcell \@x__file__\d+ /,
+     'M-D: array block lexical captured by nested sub gets a declared container');
 like($capt2a, qr/\(p-array-= \@x__file__\d+ /,
      'M-D: promoted container keeps its init as a write-through assignment');
 

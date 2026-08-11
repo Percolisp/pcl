@@ -67,11 +67,13 @@ sub test_cl {
 
 # Test 1: state var storage cell carries a unique renamed name.
 # v1: outer (let (($state__f__x…)) (p-sub …)); v2 (default since s277c):
-# per-sub defvar'd cell $x__state__N + raw once-flag (docs/ir-spec.md §2b).
+# per-sub cell $x__state__N + raw once-flag (docs/ir-spec.md §2b).  Since
+# s382h the declarer is `p-defcell` — the renamed name is word-shaped, so the
+# partition calls it ORDINARY like any other package global (task #289).
 {
     my $cl = transpile('use feature ":5.10"; sub f { state $x = 1; $x }');
-    like($cl, qr/\(defvar \$x__state__\d+ \(make-p-box nil\)\)/,
-         'state var generates a defvar cell with unique name');
+    like($cl, qr/\(p-defcell \$x__state__\d+ \(make-p-box nil\)\)/,
+         'state var generates a declared cell with unique name');
 }
 
 # Test 2: state var generates init guard

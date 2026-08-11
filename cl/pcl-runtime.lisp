@@ -394,6 +394,42 @@
         (concatenate 'string (pcl-pkg-perl-name (symbol-package name)) "::" bare))
       (and name (format nil "~A" name))))
 
+;;; ── Global storage: cells vs specials (direction D, task #289) ───────────
+;;; An ORDINARY package global is a symbol macro over its own global value
+;;; cell (`p-defcell`); the exception set ($_, $a/$b, punctuation magic, …)
+;;; is a `defvar` special.  Everywhere the runtime VIVIFIES a variable it
+;;; reached by NAME — symbolic refs, glob assignment, a write to a package
+;;; var nothing declared — it used to proclaim the symbol special first.
+;;; That proclamation is an ERROR on a symbol macro, and it is unnecessary:
+;;; symbol-value/boundp read and write the same global cell either way.  So
+;;; every such site asks this one function instead of proclaiming directly.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-ensure-storage (sym)
+    "Give SYM global storage the COMPILER will agree with, and return SYM.
+
+     A name the compiler has not declared can still be created at run time —
+     by a symbolic ref (`@{\"${class}::ISA\"}`, the Exporter/base idiom), by a
+     glob assignment, by a write to a package variable no declaration
+     mentioned.  Whatever this makes it, a later `p-defcell` for the SAME name
+     — from another file, or this file's own declarations — has to agree, or
+     SBCL refuses the second one.  So vivify it as the ORDINARY shape (a
+     symbol macro over its own value cell), exactly what p-defcell emits.
+
+     Already-special names take the other branch: those are the runtime's own
+     magic variables, which are `defvar`'d before any of this runs, and the
+     partition's exception set is precisely them.  (`Foo::$a` in a package
+     whose module has not loaded yet is the one name that could be vivified
+     as a cell here and then meet a `defvar` — it dies at load, loudly, and
+     has never been observed: reaching `$a` by symbolic ref is not an idiom.)
+
+     The eval is unavoidable — define-symbol-macro is a macro over a LITERAL
+     symbol, and these symbols are computed — but it runs at most once per
+     name, on paths that already intern and look up packages."
+    (case (sb-int:info :variable :kind sym)
+      ((:macro :special :constant :global) sym)
+      (t (eval `(define-symbol-macro ,sym (sb-ext:symbol-global-value ',sym)))
+         sym))))
+
 ;;; p-defpackage: Create/update a Perl package namespace.
 ;;; Wraps defpackage in eval-when so it runs at compile time (needed so that
 ;;; subsequent in-package forms can find the package during compile-file), and
@@ -409,7 +445,7 @@
      (let* ((pkg (find-package ,(string name)))
             (isa-sym (when pkg (intern "@isa" pkg))))
        (when (and isa-sym (not (boundp isa-sym)))
-         (proclaim (list 'special isa-sym))
+         (%p-ensure-storage isa-sym)
          (setf (symbol-value isa-sym)
                (make-array 0 :adjustable t :fill-pointer 0))))))
 
@@ -3997,7 +4033,7 @@
             (cur (gensym "CUR")))
         `(let ((,val ,value))
            (unless (boundp ',place)
-             (proclaim '(special ,place))
+             (%p-ensure-storage (quote ,place))
              (setf (symbol-value ',place) (make-p-box nil)))
            (let ((,cur (p-box-value ,place)))
              (if (p-tie-proxy-p ,cur)
@@ -4012,7 +4048,7 @@
       (let ((val (gensym "VAL")))
         `(let ((,val ,value))
            (unless (boundp ',place)
-             (proclaim '(special ,place))
+             (%p-ensure-storage (quote ,place))
              (setf (symbol-value ',place) (make-p-box nil)))
            (box-set ,place ,val)
            ,place))))
@@ -4235,7 +4271,7 @@
     ;; so this is a no-op for them and only fixes the unwrapped readline/each forms.
     `(let ((,val (let ((*wantarray* t)) ,value)))
        (unless (boundp ',place)
-         (proclaim '(special ,place))
+         (%p-ensure-storage (quote ,place))
          (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
        (p-array-fill ,place ,val))))
 
@@ -4307,7 +4343,7 @@
         (ret (gensym "RET")))
     `(let ((,val ,value))
        (unless (boundp ',place)
-         (proclaim '(special ,place))
+         (%p-ensure-storage (quote ,place))
          (setf (symbol-value ',place) (make-hash-table :test 'equal)))
        (let ((,cnt (p-hash-fill ,place ,val)))
          (if (eq *wantarray* t)
@@ -4438,7 +4474,7 @@
            (assign-scalar (lvar idx-expr)
              `(progn
                 (unless (boundp ',lvar)
-                  (proclaim '(special ,lvar))
+                  (%p-ensure-storage (quote ,lvar))
                   (setf (symbol-value ',lvar) (make-p-box nil)))
                 (box-set ,lvar (if (< ,idx-expr (length ,src-vec))
                                    (aref ,src-vec ,idx-expr)
@@ -4464,7 +4500,7 @@
                (t
                 (push `(progn
                          (unless (boundp ',var)
-                           (proclaim '(special ,var))
+                           (%p-ensure-storage (quote ,var))
                            (setf (symbol-value ',var) (make-p-box nil)))
                          (box-set ,var *p-undef*))
                       forms)))
@@ -4649,7 +4685,7 @@
            (val (gensym "VAL")))
        `(let ((,val ,value))
           (unless (boundp ',hash)
-            (proclaim '(special ,hash))
+            (%p-ensure-storage (quote ,hash))
             (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
           (setf (p-gethash ,hash ,key) ,val))))
     ;; Array access with simple symbol - auto-declare array if needed
@@ -4661,7 +4697,7 @@
            (val (gensym "VAL")))
        `(let ((,val ,value))
           (unless (boundp ',arr)
-            (proclaim '(special ,arr))
+            (%p-ensure-storage (quote ,arr))
             (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
           (setf (p-aref ,arr ,idx) ,val))))
     ;; Nested hash access - autovivification
@@ -4756,7 +4792,7 @@
        (if (symbolp arr)
            `(progn
               (unless (boundp ',arr)
-                (proclaim '(special ,arr))
+                (%p-ensure-storage (quote ,arr))
                 (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
               (let* ((,src ,value)
                      ;; Convert source to vector
@@ -4814,7 +4850,7 @@
        (if (symbolp hash)
            `(progn
               (unless (boundp ',hash)
-                (proclaim '(special ,hash))
+                (%p-ensure-storage (quote ,hash))
                 (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
               (let* ((,src ,value)
                      (,src-vec (cond
@@ -6097,7 +6133,7 @@
       ;; Simple array variable: ensure declared
       `(progn
          (unless (boundp ',arr)
-           (proclaim '(special ,arr))
+           (%p-ensure-storage (quote ,arr))
            (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
          (p-push-impl ,arr ,@items))
       ;; Complex place
@@ -6411,7 +6447,7 @@ create the key on a read-only call, which perl does not."
   (if (symbolp arr)
       `(progn
          (unless (boundp ',arr)
-           (proclaim '(special ,arr))
+           (%p-ensure-storage (quote ,arr))
            (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
          (p-splice-impl ,arr ,@args))
       `(p-splice-impl ,arr ,@args)))
@@ -7541,72 +7577,118 @@ box that vivifies (aref VEC I) on first write (%p-defelem-box)."
                   (vector-push-extend item result))))
          result)))))
 
-(defmacro p-foreach ((var list) &rest body-and-keys)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-cell-loop-var-p (var env)
+    "Is VAR an ORDINARY package global — a `p-defcell` symbol macro — in ENV?
+
+     Perl's `foreach $pkgvar (…)` implicitly LOCALIZES the package variable:
+     the loop var is aliased to each element for the body's dynamic extent and
+     restored afterwards, and a sub called from the body sees the current
+     element.  A `let` gives that only for a SPECIAL variable; over a
+     direction-D cell (task #289) a `let` would install a lexical shadow the
+     called sub cannot see — silently wrong.  So the loop macros ask this
+     question and switch to save/set/restore over the cell.
+
+     ENV is the macroexpansion environment, which makes the answer correct for
+     shadowing too: inside `(let (($x …)) …)` the name is a lexical, not a
+     symbol macro, and the ordinary `let` binding is what perl's `my $x` loop
+     var wants.  Exception-set names ($_, $a/$b, magic) are plain specials and
+     answer NIL here, keeping today's dynamic bind."
+    (and (symbolp var) (nth-value 1 (macroexpand-1 var env)))))
+
+(defmacro p-foreach ((var list) &rest body-and-keys &environment env)
   "Perl foreach loop with optional :label and :continue.
-Uses tagbody/go instead of loop -- see p-while for rationale."
+Uses tagbody/go instead of loop -- see p-while for rationale.
+A package-global loop var is localized over its cell (%p-cell-loop-var-p)."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
-    (let ((block-name (or label (gensym "FOREACH")))
-          (last-tag (when label (%pcl-loop-tag "LAST" label)))
-          (vec (gensym))
-          (raw (gensym))
-          (i (gensym)))
+    (let* ((block-name (or label (gensym "FOREACH")))
+           (last-tag (when label (%pcl-loop-tag "LAST" label)))
+           (vec (gensym))
+           (raw (gensym))
+           (old (gensym "OLD"))
+           (i (gensym))
+           (cellp (%p-cell-loop-var-p var env))
+           (iter-forms (cons `(incf ,i)
+                             (cons (make-loop-iteration-body label body)
+                                   (when continue-form (list continue-form))))))
       `(block ,block-name
          (let* ((,raw (let ((*wantarray* t)) ,list))  ; list in list-context; body keeps outer context
                 (,vec (%p-flatten-for-list ,raw))
-                (,i 0))
-           ,(let ((inner `(block nil    ; for unlabeled p-last
-                            (tagbody
-                             :next
-                               (when (>= ,i (length ,vec)) (return-from ,block-name ""))
-                               (let ((,var (%p-foreach-elt ,vec ,i)))
-                                 (incf ,i)
-                                 ,(make-loop-iteration-body label body)
-                                 ,@(when continue-form (list continue-form)))
-                               (go :next)))))
-              (if label
-                  `(catch ',last-tag ,inner)
-                  inner)))))))
+                (,i 0)
+                ,@(when cellp `((,old (sb-ext:symbol-global-value ',var)))))
+           ,(let* ((inner `(block nil    ; for unlabeled p-last
+                             (tagbody
+                              :next
+                                (when (>= ,i (length ,vec)) (return-from ,block-name ""))
+                                ,(if cellp
+                                     `(progn
+                                        (setf (sb-ext:symbol-global-value ',var)
+                                              (%p-foreach-elt ,vec ,i))
+                                        ,@iter-forms)
+                                     `(let ((,var (%p-foreach-elt ,vec ,i)))
+                                        ,@iter-forms))
+                                (go :next))))
+                   (wrapped (if label `(catch ',last-tag ,inner) inner)))
+              (if cellp
+                  `(unwind-protect ,wrapped
+                     (setf (sb-ext:symbol-global-value ',var) ,old))
+                  wrapped)))))))
 
-(defun %expand-foreach-range (rawp var from to body-and-keys)
+(defun %expand-foreach-range (rawp var from to body-and-keys env)
   "Shared expander for p-foreach-range / p-foreach-range-raw.  RAWP selects the
 loop-var binding: NIL binds a fresh box per iteration (like p-foreach's
 ensure-boxed — required for $_ and any var the annotator could not prove
 unboxable), T binds the raw counter value (annotator-approved named vars; the
-string-range fallback vector holds raw strings, also fine in a raw slot)."
+string-range fallback vector holds raw strings, also fine in a raw slot).
+A package-global loop var (%p-cell-loop-var-p) is localized over its cell
+instead of let-bound, and is ALWAYS boxed: the cell's contract is that it
+holds a box, and a raw integer parked there would be read as one by anything
+that reaches the global by name."
   (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
-    (let ((block-name (or label (gensym "FOREACH")))
-          (last-tag (when label (%pcl-loop-tag "LAST" label)))
-          (kind (gensym))
-          (a (gensym))
-          (b (gensym))
-          (vec (gensym))
-          (i (gensym))
-          (hi (gensym)))
+    (let* ((block-name (or label (gensym "FOREACH")))
+           (last-tag (when label (%pcl-loop-tag "LAST" label)))
+           (kind (gensym))
+           (a (gensym))
+           (b (gensym))
+           (vec (gensym))
+           (i (gensym))
+           (old (gensym "OLD"))
+           (hi (gensym))
+           (cellp (%p-cell-loop-var-p var env)))
       `(block ,block-name
          (multiple-value-bind (,kind ,a ,b)
              (let ((*wantarray* t))    ; endpoints in the list's context, like p-foreach's list
                (%p-range-classify ,from ,to))
            (let* ((,vec (when (eq ,kind :string) (p-.. ,a ,b)))
                   (,i (if ,vec 0 ,a))
-                  (,hi (if ,vec (1- (length ,vec)) ,b)))
-             ,(let ((inner `(block nil    ; for unlabeled p-last
-                              (tagbody
-                               :next
-                                 (when (> ,i ,hi) (return-from ,block-name ""))
-                                 (let ((,var ,(if rawp
-                                                  `(if ,vec (aref ,vec ,i) ,i)
-                                                  `(if ,vec
-                                                       (ensure-boxed (aref ,vec ,i))
-                                                       (make-p-box ,i)))))
-                                   (incf ,i)
-                                   ,(make-loop-iteration-body label body)
-                                   ,@(when continue-form (list continue-form)))
-                                 (go :next)))))
-                (if label
-                    `(catch ',last-tag ,inner)
-                    inner))))))))
+                  (,hi (if ,vec (1- (length ,vec)) ,b))
+                  ,@(when cellp `((,old (sb-ext:symbol-global-value ',var)))))
+             ,(let* ((val (if (and rawp (not cellp))
+                              `(if ,vec (aref ,vec ,i) ,i)
+                              `(if ,vec
+                                   (ensure-boxed (aref ,vec ,i))
+                                   (make-p-box ,i))))
+                     (iter-forms (cons `(incf ,i)
+                                       (cons (make-loop-iteration-body label body)
+                                             (when continue-form (list continue-form)))))
+                     (inner `(block nil    ; for unlabeled p-last
+                               (tagbody
+                                :next
+                                  (when (> ,i ,hi) (return-from ,block-name ""))
+                                  ,(if cellp
+                                       `(progn
+                                          (setf (sb-ext:symbol-global-value ',var) ,val)
+                                          ,@iter-forms)
+                                       `(let ((,var ,val))
+                                          ,@iter-forms))
+                                  (go :next))))
+                     (wrapped (if label `(catch ',last-tag ,inner) inner)))
+                (if cellp
+                    `(unwind-protect ,wrapped
+                       (setf (sb-ext:symbol-global-value ',var) ,old))
+                    wrapped))))))))
 
-(defmacro p-foreach-range ((var from to) &rest body-and-keys)
+(defmacro p-foreach-range ((var from to) &rest body-and-keys &environment env)
   "Perl foreach over a SINGLE range (`for $v (A..B)`) — perl's own counting-loop
 optimization: numeric ranges iterate a counter and never materialize the range
 vector (p-.. would allocate B-A+1 elements).  Endpoints are evaluated ONCE, up
@@ -7615,13 +7697,13 @@ p-..), made at RUNTIME, so string ranges ('a'..'e') fall back to iterating the
 materialized vector.  Same :label/:continue protocol and lexical skeleton as
 p-foreach (unlabeled p-next/p-last are a lexical (go :next)/(return nil)); the
 body appears ONCE — only the per-iteration value source branches on the vec."
-  (%expand-foreach-range nil var from to body-and-keys))
+  (%expand-foreach-range nil var from to body-and-keys env))
 
-(defmacro p-foreach-range-raw ((var from to) &rest body-and-keys)
+(defmacro p-foreach-range-raw ((var from to) &rest body-and-keys &environment env)
   "p-foreach-range with a RAW loop-var binding (no per-iteration box).  Emitted
 only when the VarAnnotator proves the body never captures/aliases the var —
 and never for $_, which must stay a box (s///, chomp write through it)."
-  (%expand-foreach-range t var from to body-and-keys))
+  (%expand-foreach-range t var from to body-and-keys env))
 
 (defun p-return-value (val)
   "Prepare a value for return - unbox simple scalars but keep references intact."
@@ -11381,7 +11463,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-130"
+(defparameter *pcl-cache-generation* "v2-131"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11707,7 +11789,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           ((and (stringp name) (plusp (length name))
                 (member (char name 0) '(#\$ #\@ #\%)))
            (let ((to-sym (intern cl-name to-pkg)))
-             (proclaim (list 'special to-sym))
+             (%p-ensure-storage to-sym)
              (when (boundp from-sym)
                (setf (symbol-value to-sym) (symbol-value from-sym)))))
           ;; Function: set fdefinition in TO-PKG so already-compiled
@@ -12748,7 +12830,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (let* ((sym-name (concatenate 'string "$" (%pcl-invert-case var-str)))
            (sym (or (find-symbol sym-name pkg)
                     (intern sym-name pkg))))
-      (proclaim `(special ,sym))
+      (%p-ensure-storage sym)
       (setf (symbol-value sym) new-box)))
   new-box)
 
@@ -12771,7 +12853,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   *package*))
          (sym-name (concatenate 'string "@" (%pcl-invert-case var-str)))
          (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
-    (proclaim `(special ,sym))
+    (%p-ensure-storage sym)
     (unless (and (boundp sym)
                  (vectorp (symbol-value sym))
                  (not (stringp (symbol-value sym))))
@@ -12796,7 +12878,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   *package*))
          (sym-name (concatenate 'string "%" (%pcl-invert-case var-str)))
          (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
-    (proclaim `(special ,sym))
+    (%p-ensure-storage sym)
     (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
       (setf (symbol-value sym) (make-hash-table :test 'equal)))
     (symbol-value sym)))
@@ -13553,12 +13635,38 @@ buffer's fill-pointer; everything else falls back to file-length."
    symbols are NEVER dynamically bound, so the direct global cell is the
    one source of truth (probed s382d, incl. symbol-value interop).
    Exception-set names ($a/$b, runtime magic) keep the dynamic-let
-   lowering and must never be routed here."
+   lowering and must never be routed here.
+
+   THE BODY ALSO REBINDS SYM LEXICALLY to the installed container.  In
+   ordinary code that is a pure alias — the lexical and the cell hold the
+   same box, so it changes nothing.  It matters where something ELSE has
+   already shadowed the name lexically, and the one thing that does is the
+   string-eval thunk: `p-eval-thunk` passes each free name as a lambda
+   PARAMETER, so inside an eval body `$foo` is the parameter, not the cell.
+   Without this rebinding, `local($foo)` would install a fresh box in the
+   cell while the body kept reading and writing the parameter's box — and a
+   NESTED eval, which resolves `$foo` by name, would see the untouched
+   installed box.  eval.t's recursive-factorial idiom
+   (`local($foo)=$foo; $foo <= 1 ? 1 : $foo-- * (eval $fact)`) then never
+   terminates: the decrement is invisible to the recursion's own guard.
+   Before direction D the parameter was a DYNAMIC binding of a special, so
+   parameter and cell were the same storage by construction; this `let`
+   restores that agreement in the cell world."
   (let ((old (gensym "OLD")))
-    `(let ((,old (sb-ext:symbol-global-value ',sym)))
+    ;; The cell may be UNBOUND: a name that is `my`-declared in one block and
+    ;; `local`-ed in another gets no forward declaration at all (the
+    ;; declaration pass excludes every name the section let-binds — task
+    ;; #205's shape, live in perl-tests/sort.t's `local $sortsub`).  Perl
+    ;; localizes the package variable there regardless, so save "was unbound"
+    ;; and restore it by makunbound rather than reading a cell that has none.
+    `(let ((,old (if (boundp ',sym) (sb-ext:symbol-global-value ',sym) '%p-cell-unbound)))
        (setf (sb-ext:symbol-global-value ',sym) ,init)
-       (unwind-protect (progn ,@body)
-         (setf (sb-ext:symbol-global-value ',sym) ,old)))))
+       (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
+                         (declare (ignorable ,sym))
+                         ,@body)
+         (if (eq ,old '%p-cell-unbound)
+             (makunbound ',sym)
+             (setf (sb-ext:symbol-global-value ',sym) ,old))))))
 
 (defmacro p-local-glob (pkg-str name-str &body body)
   "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
@@ -16054,9 +16162,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; warnings module stub - needed because modules like Carp.pm check $warnings::VERSION
 (defpackage :warnings (:use :cl :pcl))
 (in-package :warnings)
+;; p-defcell, not defvar: these are ORDINARY perl package variables by
+;; Pl::GlobalPartition's reckoning, so a transpiled file that references
+;; $warnings::VERSION declares the same symbol as a cell.  Declaring it special
+;; here and a symbol macro there is a load-time error (task #289) — the two
+;; sides must use the one declarer.  p-defcell is define-once, so this
+;; initialization still wins.
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defvar $VERSION (make-p-box "1.50"))
-  (defvar $BYTES (make-p-box 12))   ; bytes in warning bitmask (12 in modern Perl)
+  (p-defcell $VERSION (make-p-box "1.50"))
+  (p-defcell $BYTES (make-p-box 12))   ; bytes in warning bitmask (12 in modern Perl)
   )
 (defun pl-unimport (&rest args) (declare (ignore args)) nil)
 (defun pl-import (&rest args) (declare (ignore args)) nil)
@@ -16067,7 +16181,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defpackage :|Carp| (:use :cl :pcl))
 (in-package :|Carp|)
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defvar $VERSION (make-p-box "1.50")))
+  (p-defcell $VERSION (make-p-box "1.50")))   ; a cell, like every other $VERSION
 (defun pl-croak (&rest args)
   (error "Carp::croak: ~a" (if args (to-string (car args)) "")))
 (defun pl-confess (&rest args)

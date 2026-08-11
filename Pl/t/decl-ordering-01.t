@@ -203,8 +203,8 @@ note "-------- Phase 1: defvar hoisting";
         sub get_x { return $x; }
         our $x = 10;
     });
-    is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-get_x/), -1,
-       'our-defvar (declarations) before sub (definitions)');
+    is(relative_order($cl, qr/p-defcell \$x/, qr/\(p-sub pl-get_x/), -1,
+       'our-declaration (declarations) before sub (definitions)');
 }
 
 # Test: multiple defvars (from 'our') are hoisted before the sub.
@@ -214,10 +214,10 @@ note "-------- Phase 1: defvar hoisting";
         our $x = 1;
         our $y = 2;
     });
-    is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-compute/), -1,
-       '$x defvar before sub');
-    is(relative_order($cl, qr/defvar \$y/, qr/\(p-sub pl-compute/), -1,
-       '$y defvar before sub');
+    is(relative_order($cl, qr/p-defcell \$x/, qr/\(p-sub pl-compute/), -1,
+       '$x declared before sub');
+    is(relative_order($cl, qr/p-defcell \$y/, qr/\(p-sub pl-compute/), -1,
+       '$y declared before sub');
 }
 
 # Test: defvar declaration before the sub, and the value assignment (setf) stays
@@ -228,13 +228,13 @@ note "-------- Phase 1: defvar hoisting";
         our $x = 42;
         print foo();
     });
-    # our-defvar (declarations) before sub (definitions)
-    is(relative_order($cl, qr/defvar \$x/, qr/\(p-sub pl-foo/), -1,
-       'our-defvar (declarations) before sub (definitions)');
+    # our-declaration (declarations) before sub (definitions)
+    is(relative_order($cl, qr/p-defcell \$x/, qr/\(p-sub pl-foo/), -1,
+       'our-declaration (declarations) before sub (definitions)');
     # defvar before the runtime value write (v1: setf p-box-value; v2
     # spells the same write p-scalar-=)
-    is(relative_order($cl, qr/defvar \$x/, qr/p-scalar-= \$x 42/), -1,
-       'defvar declaration before runtime value assignment');
+    is(relative_order($cl, qr/p-defcell \$x/, qr/p-scalar-= \$x 42/), -1,
+       'cell declaration before runtime value assignment');
 }
 
 

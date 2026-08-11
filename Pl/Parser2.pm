@@ -30,6 +30,7 @@ use Pl::PExpr;
 use Pl::ExprToCL2;
 use Pl::VarAnnotator;
 use Pl::CLForm qw(raw raw_wrap);
+use Pl::GlobalPartition qw(global_decl_form);
 
 has filename => (is => 'ro', predicate => 1);
 has code     => (is => 'ro', predicate => 1);
@@ -1628,7 +1629,7 @@ sub parse {
       my $ver_cl = ($sec->{version} =~ /^\d+(?:\.\d+)?$/) ? $sec->{version}
                                                           : "\"$sec->{version}\"";
       push @body, "(eval-when (:compile-toplevel :load-toplevel :execute)",
-                  "  (defvar $sym (make-p-box nil)))";
+                  "  " . global_decl_form($sym, '(make-p-box nil)') . ")";
       @ver_run = ("(p-scalar-= $sym $ver_cl)", '');
     }
     # Per-package $a/$b specials: once per package (not on reopen — duplicate
@@ -5126,7 +5127,10 @@ sub _forward_global_decls {
   my (%seen, %cross, %caret, %punct);
   for my $line (split /\n/, $text) {
     next if $line =~ /^\s*;;/;
-    next if $line =~ /^\s*\(defvar\s/;
+    # A declaration line is not a USE — skip both spellings (a p-defcell line
+    # that reached the scan would re-declare its own name, and for a renamed
+    # cell that second declaration lands in the wrong bucket).
+    next if $line =~ /^\s*\((?:defvar|p-defcell)\s/;
     # The punctuation array `@#` (bare `$#` magic + subscript lowers to
     # `(p-aref @# …)`) — the [A-Za-z_] scan below can't match it, same as the
     # caret specials.  A genuine global, never a capturable lexical, so it is
@@ -5172,19 +5176,23 @@ sub _forward_global_decls {
     %seen = ();
   }
   return () if !(%seen || %cross || %caret || %punct);
+  # Every one of the four buckets goes through Pl::GlobalPartition, which
+  # decides defvar-vs-p-defcell (task #289 direction D).  %punct and %caret are
+  # all-exception by construction — routed anyway, so the partition stays the
+  # single authority and a future caret name that IS word-shaped cannot drift.
   my @decls = (';; Forward declarations for undeclared package globals');
   for my $v (sort keys %seen) {
-    push @decls, "(defvar $v " . _fresh_container($v) . ")";
+    push @decls, global_decl_form($v, _fresh_container($v));
   }
   for my $v (sort keys %punct) {
-    push @decls, "(defvar $v " . _fresh_container($v) . ")";
+    push @decls, global_decl_form($v, _fresh_container($v));
   }
   for my $sym (sort keys %caret) {
-    push @decls, "(defvar $sym " . _fresh_container(substr($sym, 1)) . ")";
+    push @decls, global_decl_form($sym, _fresh_container(substr($sym, 1)));
   }
   for my $qv (sort keys %cross) {
     (my $var = $qv) =~ s/^.*:://;
-    push @decls, "(defvar $qv " . _fresh_container($var) . ")";
+    push @decls, global_decl_form($qv, _fresh_container($var));
   }
   return @decls;
 }
@@ -5717,11 +5725,11 @@ sub _lower_block {
       my $kind = $self->{_state_renamed}{$name}
         or die "Parser2 TODO: unrenamed state declaration: " . $first->content . "\n";
       push @{ $self->{_captured_decls} },
-        "(defvar $name " . _fresh_container($name) . ")";
+        global_decl_form($name, _fresh_container($name));
       my @forms;
       if ($kind eq 'init') {
         my $flag = $name . '__init';
-        push @{ $self->{_captured_decls} }, "(defvar $flag nil)";
+        push @{ $self->{_captured_decls} }, global_decl_form($flag, 'nil');
         # Scalar: guarded box-set.  Container (@x/%x): the whole assignment
         # `@x__state__N = LIST` through the expression seam — v1 emits the
         # p-array-= / p-hash-= form (same path the my-container branch uses).
@@ -5829,7 +5837,8 @@ sub _lower_block {
       # lower as `our` does: a defvar'd box hoisted to the section top (so the
       # hoisted named sub that captures it sees the same special symbol) plus a
       # plain package-var assignment in place.  No let, not let-bound.
-      push @{ $self->{_captured_decls} }, "(defvar $name (make-p-box nil))";
+      push @{ $self->{_captured_decls} },
+        global_decl_form($name, '(make-p-box nil)');
       # Register AFTER the assignment: the decl's own RHS (incl. an eval in
       # it) still resolves the original name to the OUTER variable.
       my @reg;
@@ -5997,7 +6006,7 @@ sub _lower_block {
     my @k = _strip_semi($first->schildren);
     if (@$vars == 1 && $self->{_file_lex_renamed}{$vars->[0]}) {
       push @{ $self->{_captured_decls} },
-        "(defvar $vars->[0] " . _fresh_container($vars->[0]) . ")";
+        global_decl_form($vars->[0], _fresh_container($vars->[0]));
       my @assign = $has_init ? ($self->_lower_expr([@k], $first)) : ();
       return (@assign, $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
@@ -6102,7 +6111,7 @@ sub _lower_block {
     my @renamed = grep { $self->{_file_lex_renamed}{$_} } @$vars;
     if (@renamed) {
       push @{ $self->{_captured_decls} },
-        "(defvar $_ " . _fresh_container($_) . ")" for @renamed;
+        global_decl_form($_, _fresh_container($_)) for @renamed;
       # Register AFTER the assignment (the decl's RHS reads the outer vars).
       my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture(@renamed) : ();
       my @unren  = grep { !$self->{_file_lex_renamed}{$_} } @$vars;
@@ -8257,7 +8266,8 @@ sub _lower_our_decl {
       $self->environment->add_our_variable($cur, $n);
       $prefix = ($cur =~ /::/ ? "|$cur|" : $cur) . '::';
     }
-    push @{ $self->{_captured_decls} }, "(defvar ${prefix}${n} " . _fresh_container($n) . ")";
+    push @{ $self->{_captured_decls} },
+      global_decl_form("${prefix}${n}", _fresh_container($n));
   }
   return [] if @k == 2;
   # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.

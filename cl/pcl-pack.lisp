@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-128
+;;; pcl: pipeline=v2 gen=v2-131
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -42,12 +42,12 @@
 (defvar $b (make-p-box nil))
 
 ;; Forward declarations for undeclared package globals
-(defvar $pcl_pack_comma_warned (make-p-box nil))
+(p-defcell $pcl_pack_comma_warned (make-p-box nil))
 
-(defvar $CAN_ENDIAN (make-p-box nil))
-(defvar $CAN_SHRIEK (make-p-box nil))
-(defvar $MAX_GROUP_DEPTH (make-p-box nil))
-(defvar $pcl_pack_comma_warned (make-p-box nil))
+(p-defcell $CAN_ENDIAN (make-p-box nil))
+(p-defcell $CAN_SHRIEK (make-p-box nil))
+(p-defcell $MAX_GROUP_DEPTH (make-p-box nil))
+(p-defcell $pcl_pack_comma_warned (make-p-box nil))
 
 (p-sub pl-_pack_type_info
   (&rest %_args)
@@ -1810,7 +1810,7 @@
         (let (($tmpl (make-p-box nil)) (@args (make-array 0 :adjustable t :fill-pointer 0)))
           (let ((*wantarray* nil)) (p-list-= (vector $tmpl @args) @_))
           ;; local $pcl_pack_comma_warned = 0
-(let (($pcl_pack_comma_warned (p-box-for-local 0)))
+(p-local-cell $pcl_pack_comma_warned (p-box-for-local 0)
             (pl-_pack_check_brackets $tmpl)
             (let (($result (make-p-box nil)))
               (p-my-= $result "")

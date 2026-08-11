@@ -54,7 +54,7 @@ say "# -------- 'our' Transpilation Tests:";
 # Declaration (compile-time) uses nil, initialization (runtime) sets value
 {
     my $cl = parse_pl('our $count = 0;');
-    like($cl, qr/defvar \$count/, 'our $x = val generates defvar');
+    like($cl, qr/p-defcell \$count/, q{our $x = val declares an ordinary global cell});
     # Same claim as v1's `setf p-box-value` row: the init is a RUNTIME write
     # into the declared box, separate from the compile-time defvar.  v2
     # spells that write (p-scalar-= $count 0).
@@ -64,22 +64,22 @@ say "# -------- 'our' Transpilation Tests:";
 # Test: bare our $x
 {
     my $cl = parse_pl('our $flag;');
-    like($cl, qr/defvar \$flag/, 'bare our generates defvar');
+    like($cl, qr/p-defcell \$flag/, q{bare our declares a cell});
     like($cl, qr/make-p-box nil/, 'bare our initializes to nil');
 }
 
 # Test: our with list
 {
     my $cl = parse_pl('our ($x, $y) = (1, 2);');
-    like($cl, qr/defvar \$x/, 'our list declares first var');
-    like($cl, qr/defvar \$y/, 'our list declares second var');
+    like($cl, qr/p-defcell \$x/, q{our list declares first var});
+    like($cl, qr/p-defcell \$y/, q{our list declares second var});
 }
 
 # Test: our in package
 {
     my $cl = parse_pl('package Counter; our $count = 0;');
     like($cl, qr/in-package :Counter/, 'package declaration emitted');
-    like($cl, qr/defvar \$count/, 'our in package generates defvar');
+    like($cl, qr/p-defcell \$count/, q{our in package declares a cell});
 }
 
 say "# -------- 'our' Runtime Tests:";
@@ -187,7 +187,7 @@ package Foo::Bar;
 our $setting = "test";
 });
     like($cl, qr/\|Foo::Bar\|/, 'nested package name uses pipe quoting');
-    like($cl, qr/defvar \$setting/, 'our in nested package works');
+    like($cl, qr/p-defcell \$setting/, q{our in nested package works});
 }
 
 # Test: our variable modification persists
@@ -246,17 +246,24 @@ say Registry::count();
 
 say "# -------- 'local' Transpilation Tests:";
 
+# The declarer and the `local` lowering below both changed shape in s382h
+# (task #289, direction D): an ORDINARY package global is a symbol macro over
+# its own cell (`p-defcell`) and `local` on one is `p-local-cell`, because a
+# `let` of a cell name would be a LEXICAL shadow no called sub can see.  The
+# exception set ($a/$b, punctuation magic) keeps defvar + the dynamic let —
+# pinned by Pl/t/transpile-test-10.t, which asserts both arms together.
+
 # Test: local $x = value generates let
 {
     my $cl = parse_pl('local $x = 20;');
-    like($cl, qr/\(let \(\(\$x/, 'local generates let binding');
+    like($cl, qr/\(p-local-cell \$x /, q{local on an ordinary global opens a p-local-cell});
     like($cl, qr/p-box-for-local\s+20/, 'local with init uses p-box-for-local');
 }
 
 # Test: bare local $x generates let with nil
 {
     my $cl = parse_pl('local $x;');
-    like($cl, qr/\(let \(\(\$x/, 'bare local generates let');
+    like($cl, qr/\(p-local-cell \$x /, q{bare local opens a p-local-cell});
     like($cl, qr/make-p-box nil/, 'bare local initializes to nil');
 }
 

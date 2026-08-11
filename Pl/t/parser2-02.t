@@ -30,7 +30,7 @@ like($fc, qr/\(p-foreach .*:continue \(progn/s, 'foreach continue: :continue key
 my $md = Pl::Parser2->parse_code(q{my $aa, $bb, $cc; $bb = 1; print $aa;});
 like($md, qr/\(let \(\(\$aa \(make-p-box nil\)\)\)/, 'my $aa,… : only $aa let-bound');
 unlike($md, qr/\(let \(\(\$bb/, 'my $aa,… : $bb is NOT let-bound (package var)');
-like($md, qr/\(defvar \$bb /, 'my $aa,… : $bb forward-declared as a package global');
+like($md, qr/\(p-defcell \$bb /, 'my $aa,… : $bb forward-declared as a package global');
 
 # `my $a . $foo;` — declares $a, concatenation discarded.
 my $dc = Pl::Parser2->parse_code(q{my $foo = "f"; my $a . $foo; print $a;});
@@ -97,7 +97,7 @@ $name = 9;
 print $name;
 EOF
 like($pc, qr/\$name__cond__\d+/, 'poisoned condition-my renamed');
-like($pc, qr/\(defvar \$name /, 'the package global $name still gets its defvar');
+like($pc, qr/\(p-defcell \$name /, 'the package global $name still gets its declaration');
 
 # A self-contained condition-my (no outside use) keeps its name — zero churn.
 my $cc = Pl::Parser2->parse_code(
@@ -327,8 +327,8 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
 {
   my $st = Pl::Parser2->parse_code(
     q{use feature 'state'; sub c { state $n = 0; $n = $n + 1; return $n; } print c();});
-  like($st, qr/\(defvar \$n__state__0 \(make-p-box nil\)\)/,
-       'state: per-sub cell hoisted as a defvar box');
+  like($st, qr/\(p-defcell \$n__state__0 \(make-p-box nil\)\)/,
+       'state: per-sub cell hoisted as a declared box');
   like($st, qr/\(unless \$n__state__0__init \(box-set \$n__state__0 0\) \(setf \$n__state__0__init t\)\)/,
        'state: guarded once-init in v1 shape');
   unlike($st, qr/\(let \(\(\$n__state__0/, 'state: cell is never let-bound');
@@ -336,7 +336,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   # No init → cell only, no flag.
   my $sp = Pl::Parser2->parse_code(
     q{use feature 'state'; sub t2 { state $k; return $k; } print t2();});
-  like($sp, qr/\(defvar \$k__state__0 /, 'state without init: cell defvar');
+  like($sp, qr/\(p-defcell \$k__state__0 /, 'state without init: cell declared');
   unlike($sp, qr/__init/, 'state without init: no once-flag');
 
   # Out-of-subset shapes still gate.
@@ -350,7 +350,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   my $g2 = eval { Pl::Parser2->parse_code(
     q{use feature 'state'; for (1..3) { state $x = 0; } print 1;}) };
   is($@, '', 'file-level state no longer gates to v1');
-  like($g2, qr/\(defvar \$x__state__\d+ /, 'file-level state: cell defvar');
+  like($g2, qr/\(p-defcell \$x__state__\d+ /, 'file-level state: cell declared');
   like($g2, qr/__state__\d+__init/, 'file-level state: once-init guard');
 }
 
@@ -563,7 +563,7 @@ EOF
                fresh(); other();};
   my $cl = eval { Pl::Parser2->parse_code($code) };
   is($@, '', 'captured file lexical with an interpolated use + shadow no longer gates');
-  like($cl, qr/\(defvar \$tmpfile__file__\d+ /,
+  like($cl, qr/\(p-defcell \$tmpfile__file__\d+ /,
        'promotion happened: the captured lexical became a package cell');
   # The OUTER sub's interpolated read takes the renamed cell …
   like($cl, qr/"outer="\s*\$tmpfile__file__\d+/,
@@ -608,7 +608,7 @@ fresh(); other();};
          "#184: shadow predicate asked $calls times, not once per token");
   # …and the padding did not change what the rewrite DID (same three verdicts
   # as the unpadded case above) — the speed-up must not cost the scoping.
-  like($cl, qr/\(defvar \$tmpfile__file__\d+ /, '#184: promotion still happens');
+  like($cl, qr/\(p-defcell \$tmpfile__file__\d+ /, '#184: promotion still happens');
   like($cl, qr/"outer="\s*\$tmpfile__file__\d+/,
        '#184: outer interpolated use still takes the cell');
   like($cl, qr/"inner="\s*\$tmpfile\b/,
@@ -656,10 +656,10 @@ print "B=\$tmpx\\n";};
 # alone and route the whole file to v1.
 my $ourc = eval { Pl::Parser2->parse_code(q{our $Verbose ||= 0; print $Verbose;}) };
 is($@, '', 'our-compound: `our $x ||= 0` lowers natively (no Parser2 TODO)');
-like($ourc, qr/\(defvar \$Verbose /, 'our-compound: the package cell is still defvar\'d');
+like($ourc, qr/\(p-defcell \$Verbose /, 'our-compound: the package cell is still declared');
 like($ourc, qr/\(p-or-assign \$Verbose 0\)/, 'our-compound: the ||= write is emitted');
 like(eval { Pl::Parser2->parse_code(q{our $n //= 3; our $m += 2; print $n;}) } // '',
-     qr/\(defvar \$m /, 'our-compound: //= and += declare their cells too');
+     qr/\(p-defcell \$m /, 'our-compound: //= and += declare their cells too');
 # INVERSE: a non-assignment operator after the name is still not an `our` decl.
 eval { Pl::Parser2->parse_code(q{our $x, $y; print $x;}) };
 like($@, qr/Parser2 TODO: unsupported our declaration/,
@@ -764,7 +764,7 @@ for my $src ('our $V = "1.01"', 'our $W ||= 3', 'our ($P,$Q) = (7,8)',
 # The no-init form must emit the READ as its tail value (v1 answered with the
 # emitted variable NAME — a silent-wrong).
 like(eval { Pl::Parser2->parse_code('our $N', eval_mode => 1) } // '',
-     qr/\(defvar \$N /, 'eval-tail our: the no-init decl still defvars its cell');
+     qr/\(p-defcell \$N /, 'eval-tail our: the no-init decl still declares its cell');
 
 # (6) `my ()` — legal, declares nothing (perl #113554); my.t asserts
 # `eval "my ()"` leaves $@ EMPTY, so it must not gate in either position.

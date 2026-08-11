@@ -20,6 +20,10 @@ use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm ();
 use Pl::ExprToCL;
 use Pl::Environment;
+# THE global partition (task #289): every declaration this file emits, and the
+# `local` lowering below, ask the same function whether a name keeps today's
+# defvar + dynamic-let or becomes a symbol-macro cell.
+use Pl::GlobalPartition qw(global_decl_form is_exception_global);
 
 # File-level counters (shared across all Parser instances within a load)
 my $anon_block_counter = 0;
@@ -1489,7 +1493,7 @@ sub _insert_variable_forward_declarations {
     my @caret = @{$self->environment->get_caret_globals};
     if (@caret) {
       push @$decls, ";; Unknown \${^NAME} caret variables -> ordinary global scalars (undef).";
-      push @$decls, "(defvar $_ (make-p-box nil))" for @caret;
+      push @$decls, global_decl_form("$_", "(make-p-box nil)") for @caret;
       push @$decls, "";
     }
   }
@@ -1507,7 +1511,7 @@ sub _insert_variable_forward_declarations {
       my $init = $sigil eq '@' ? "(make-array 0 :adjustable t :fill-pointer 0)"
                : $sigil eq '%' ? "(make-hash-table :test 'equal)"
                :                 "(make-p-box nil)";
-      push @eov_decls, "(defvar $cl_var $init)";
+      push @eov_decls, global_decl_form("$cl_var", "$init");
       $declared{$cl_var} = 1;
     }
     if (@eov_decls) {
@@ -1519,8 +1523,8 @@ sub _insert_variable_forward_declarations {
 
   my %forced_sort_var;  # $a/$b force-declared here (vs. user-declared via my)
   unless ($declared{'$a'}) {
-    push @$decls, "(defvar \$a (make-p-box nil))";
-    push @$decls, "(defvar \$b (make-p-box nil))";
+    push @$decls, global_decl_form("\$a", "(make-p-box nil)");
+    push @$decls, global_decl_form("\$b", "(make-p-box nil)");
     push @$decls, "";
     $declared{'$a'} = 1;
     $declared{'$b'} = 1;
@@ -1578,11 +1582,11 @@ sub _insert_variable_forward_declarations {
       my ($pkg, $var) = @{$cross_pkg_vars{$key}};
       my $sigil = substr($var, 0, 1);
       if ($sigil eq '$') {
-        push @cross_decls, "(defvar $pkg\::$var (make-p-box nil))";
+        push @cross_decls, global_decl_form("$pkg\::$var", "(make-p-box nil)");
       } elsif ($sigil eq '@') {
-        push @cross_decls, "(defvar $pkg\::$var (make-array 0 :adjustable t :fill-pointer 0))";
+        push @cross_decls, global_decl_form("$pkg\::$var", "(make-array 0 :adjustable t :fill-pointer 0)");
       } elsif ($sigil eq '%') {
-        push @cross_decls, "(defvar $pkg\::$var (make-hash-table :test 'equal))";
+        push @cross_decls, global_decl_form("$pkg\::$var", "(make-hash-table :test 'equal)");
       }
     }
     if (@cross_decls) {
@@ -1627,11 +1631,11 @@ sub _insert_variable_forward_declarations {
   for my $var (@undeclared) {
     my $sigil = substr($var, 0, 1);
     if ($sigil eq '$') {
-      push @$decls, "(defvar $var (make-p-box nil))";
+      push @$decls, global_decl_form("$var", "(make-p-box nil)");
     } elsif ($sigil eq '@') {
-      push @$decls, "(defvar $var (make-array 0 :adjustable t :fill-pointer 0))";
+      push @$decls, global_decl_form("$var", "(make-array 0 :adjustable t :fill-pointer 0)");
     } elsif ($sigil eq '%') {
-      push @$decls, "(defvar $var (make-hash-table :test 'equal))";
+      push @$decls, global_decl_form("$var", "(make-hash-table :test 'equal)");
     }
   }
   push @$decls, "";
@@ -2584,7 +2588,7 @@ sub _process_our_declaration {
                  : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                  :                 '(make-hash-table :test #\'equal)';
         my $cl_var = "${cl_pkg_sym}::${var}";
-        $self->_emit("(defvar $cl_var $init)");
+        $self->_emit(global_decl_form("$cl_var", "$init"));
       }
     }
   });
@@ -2609,7 +2613,7 @@ sub _process_our_declaration {
         # Array: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
           $self->_emit("(p-eval-always");
-          $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
+          $self->_emit("  " . global_decl_form("$cl_var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
         });
         unless ($is_empty_list) {
           # Parse full statement so PExpr sees '@arr = ...' and propagates
@@ -2622,7 +2626,7 @@ sub _process_our_declaration {
         # Hash: declare at compile time, initialize at runtime
         $self->_with_bucket('declarations', sub {
           $self->_emit("(p-eval-always");
-          $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
+          $self->_emit("  " . global_decl_form("$cl_var", "(make-hash-table :test 'equal)") . ")");
         });
         unless ($is_empty_list) {
           # Parse full statement so PExpr sees '%hash = ...' and propagates
@@ -2636,7 +2640,7 @@ sub _process_our_declaration {
         my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
         $self->_with_bucket('declarations', sub {
           $self->_emit("(p-eval-always");
-          $self->_emit("  (defvar $cl_var (make-p-box nil)))");
+          $self->_emit("  " . global_decl_form("$cl_var", "(make-p-box nil)") . ")");
         });
         $self->_emit("(setf (p-box-value $cl_var) $init_cl)");
       }
@@ -2650,11 +2654,11 @@ sub _process_our_declaration {
           my $cl_var = $self->_our_var_cl_name($pkg, $var);
           $self->_emit("(p-eval-always");
           if ($sigil eq '@') {
-            $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
+            $self->_emit("  " . global_decl_form("$cl_var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
           } elsif ($sigil eq '%') {
-            $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
+            $self->_emit("  " . global_decl_form("$cl_var", "(make-hash-table :test 'equal)") . ")");
           } else {
-            $self->_emit("  (defvar $cl_var (make-p-box nil)))");
+            $self->_emit("  " . global_decl_form("$cl_var", "(make-p-box nil)") . ")");
           }
         }
       });
@@ -2675,11 +2679,11 @@ sub _process_our_declaration {
         my $cl_var = $self->_our_var_cl_name($pkg, $var);
         $self->_emit("(p-eval-always");
         if ($sigil eq '@') {
-          $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
+          $self->_emit("  " . global_decl_form("$cl_var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
         } elsif ($sigil eq '%') {
-          $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
+          $self->_emit("  " . global_decl_form("$cl_var", "(make-hash-table :test 'equal)") . ")");
         } else {
-          $self->_emit("  (defvar $cl_var (make-p-box nil)))");
+          $self->_emit("  " . global_decl_form("$cl_var", "(make-p-box nil)") . ")");
         }
       }
     });
@@ -2739,13 +2743,13 @@ sub _process_toplevel_state_declaration {
       my $sigil  = substr($cl_var, 0, 1);
       $self->_emit("(p-eval-always");
       if ($sigil eq '@') {
-        $self->_emit("  (defvar $cl_var (make-array 0 :adjustable t :fill-pointer 0)))");
+        $self->_emit("  " . global_decl_form("$cl_var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
       } elsif ($sigil eq '%') {
-        $self->_emit("  (defvar $cl_var (make-hash-table :test 'equal)))");
+        $self->_emit("  " . global_decl_form("$cl_var", "(make-hash-table :test 'equal)") . ")");
       } else {
-        $self->_emit("  (defvar $cl_var (make-p-box nil)))");
+        $self->_emit("  " . global_decl_form("$cl_var", "(make-p-box nil)") . ")");
       }
-      $self->_emit("(p-eval-always (defvar ${cl_var}__init nil))");
+      $self->_emit("(p-eval-always " . global_decl_form("${cl_var}__init", "nil") . ")");
     }
   });
 
@@ -2849,11 +2853,11 @@ sub _process_my_toplevel_declaration {
       my $sigil = substr($var, 0, 1);
       $self->_emit("(p-eval-always");
       if ($sigil eq '@') {
-        $self->_emit("  (defvar $var (make-array 0 :adjustable t :fill-pointer 0)))");
+        $self->_emit("  " . global_decl_form("$var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
       } elsif ($sigil eq '%') {
-        $self->_emit("  (defvar $var (make-hash-table :test 'equal)))");
+        $self->_emit("  " . global_decl_form("$var", "(make-hash-table :test 'equal)") . ")");
       } else {
-        $self->_emit("  (defvar $var (make-p-box nil)))");
+        $self->_emit("  " . global_decl_form("$var", "(make-p-box nil)") . ")");
       }
     }
   });
@@ -3071,7 +3075,7 @@ sub _process_isa_declaration {
                  || $self->_block_depth > 0);
   my $isa_sym = $qualify ? $self->_qualified_isa_symbol($pkg) : "\@ISA";
   $self->_with_bucket('declarations', sub {
-    $self->_emit("(defvar $isa_sym (make-array 0 :adjustable t :fill-pointer 0))");
+    $self->_emit(global_decl_form("$isa_sym", "(make-array 0 :adjustable t :fill-pointer 0)"));
   });
   for my $parent (@$parents) {
     $self->_emit("(p-push $isa_sym \"$parent\")");
@@ -3212,7 +3216,7 @@ sub _process_use_base {
 
   # Declare @ISA in declarations bucket, push parents at load time
   $self->_with_bucket('declarations', sub {
-    $self->_emit("(defvar \@ISA (make-array 0 :adjustable t :fill-pointer 0))");
+    $self->_emit(global_decl_form("\@ISA", "(make-array 0 :adjustable t :fill-pointer 0)"));
   });
   for my $parent (@parents) {
     $self->_emit("(p-push \@ISA \"$parent\")");
@@ -3668,7 +3672,7 @@ sub _process_local_declaration {
                   : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                   :                 "(make-hash-table :test #'equal)";
         my $cl_var = "${pkg}::${var}";
-        $self->_emit("(defvar $cl_var $init)");
+        $self->_emit(global_decl_form("$cl_var", "$init"));
         $self->environment->add_our_variable($pkg, $var) if $self->environment;
       }
     });
@@ -3734,7 +3738,12 @@ sub _process_local_declaration {
     return;
   }
 
-  # Build let bindings
+  # Build the localization bindings.  Each entry is [PLACE, INIT-FORM]; the
+  # emission below splits them by Pl::GlobalPartition (task #289): an ORDINARY
+  # package global becomes a `p-local-cell` open (its storage is a global cell,
+  # not a dynamic binding, so a `let` would install a LEXICAL shadow that no
+  # called sub can see), while temporaries and exception-set names keep today's
+  # dynamic let/let*.
   my @bindings;
   my $use_let_star = 0;
   my $local_tail_cl;          # #138: `local $x = A, B` — B, emitted in the let
@@ -3785,7 +3794,7 @@ sub _process_local_declaration {
 
     if ($var eq '$!' || $var eq '|$!|') {
       # local $! = N: bind *p-stored-errno* (auto-restored by let) and set C errno
-      push @bindings, "(pcl::*p-stored-errno* (pcl::%pcl-local-errno-init $init_cl))";
+      push @bindings, ["pcl::*p-stored-errno*", "(pcl::%pcl-local-errno-init $init_cl)"];
     }
     elsif ($sigil eq '@') {
       # local @arr = EXPR: evaluate EXPR with old @arr, make an independent copy.
@@ -3802,26 +3811,26 @@ sub _process_local_declaration {
         my ($mutated_var, $inner_rhs) = ($1, $2);
         if ($mutated_var eq $var) {
           # Same-var: skip the p-array-= mutation; copy the RHS directly.
-          push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $inner_rhs)))";
+          push @bindings, ["$var", "(p-copy-array (let ((*wantarray* t)) $inner_rhs))"];
         } else {
           # Different-var: bind BOTH vars so CL saves/restores each independently.
           $self->{_local_counter} //= 0;
           my $tmp = "pcl-local-inner-" . $self->{_local_counter}++;
-          unshift @bindings, "($tmp (let ((*wantarray* t)) $inner_rhs))";
-          push @bindings, "($mutated_var (p-copy-array $tmp))";
-          push @bindings, "($var (p-copy-array $tmp))";
+          unshift @bindings, ["$tmp", "(let ((*wantarray* t)) $inner_rhs)"];
+          push @bindings, ["$mutated_var", "(p-copy-array $tmp)"];
+          push @bindings, ["$var", "(p-copy-array $tmp)"];
           $use_let_star = 1;
         }
       } else {
-        push @bindings, "($var (p-copy-array (let ((*wantarray* t)) $init_cl)))";
+        push @bindings, ["$var", "(p-copy-array (let ((*wantarray* t)) $init_cl))"];
       }
     }
     elsif ($sigil eq '%') {
       # local %h = EXPR: evaluate EXPR with old %h, make an independent copy.
-      push @bindings, "($var (p-copy-hash (let ((*wantarray* t)) $init_cl)))";
+      push @bindings, ["$var", "(p-copy-hash (let ((*wantarray* t)) $init_cl))"];
     }
     else {
-      push @bindings, "($var (p-box-for-local $init_cl))";
+      push @bindings, ["$var", "(p-box-for-local $init_cl)"];
     }
   }
   else {
@@ -3832,16 +3841,16 @@ sub _process_local_declaration {
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($var eq '$!' || $var eq '|$!|') {
         # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
-        push @bindings, "(pcl::*p-stored-errno* 0)";
+        push @bindings, ["pcl::*p-stored-errno*", "0"];
       }
       elsif ($sigil eq '@') {
-        push @bindings, "($var (make-array 0 :adjustable t :fill-pointer 0))";
+        push @bindings, ["$var", "(make-array 0 :adjustable t :fill-pointer 0)"];
       }
       elsif ($sigil eq '%') {
-        push @bindings, "($var (make-hash-table :test 'equal))";
+        push @bindings, ["$var", "(make-hash-table :test 'equal)"];
       }
       else {
-        push @bindings, "($var (make-p-box nil))";
+        push @bindings, ["$var", "(make-p-box nil)"];
       }
     }
   }
@@ -3859,15 +3868,44 @@ sub _process_local_declaration {
     $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
     $self->{_local_counter} //= 0;
     $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;
-    unshift @bindings, "($rhs_tmp_cl $rhs_cl)";
+    unshift @bindings, ["$rhs_tmp_cl", "$rhs_cl"];
   }
 
-  my $bindings_str = join("\n        ", @bindings);
+  # Split by the partition (task #289).  ORDINARY package globals live in a
+  # global cell reached through a symbol macro: a `let` of such a name is legal
+  # CL but installs a LEXICAL shadow, which perl's `local` is not — the whole
+  # point of `local` is that a called sub sees the new value.  Those become
+  # nested `p-local-cell` opens.  Everything else — the generated temporaries
+  # (pcl-local-rhs-N / pcl-local-inner-N, which have no sigil), `$a`/`$b` and
+  # the runtime's magic vars — is still a real special, and keeps today's
+  # dynamic let/let* (also the faster path: ~4.6 ns vs ~41 ns, and magic-var
+  # `local` is where real perl code spends that time).
+  #
+  # ORDER MATTERS: the let/let* comes FIRST, because its temporaries hold RHS
+  # values that must be read while the OLD values are still installed; the cell
+  # opens follow, each evaluating its own init before overwriting the cell.
+  my @let_b  = grep {  is_exception_global($_->[0]) } @bindings;
+  my @cell_b = grep { !is_exception_global($_->[0]) } @bindings;
+
   my $let_form = ($rhs_tmp_cl || $use_let_star) ? "let*" : "let";
   my $at_top_level = ($self->environment->in_subroutine == 0
                       && $self->indent_level == 0);
-  $self->_emit("($let_form ($bindings_str)");
-  $self->indent_level($self->indent_level + 1);
+  if (@let_b) {
+    my $bindings_str = join("\n        ", map { "($_->[0] $_->[1])" } @let_b);
+    $self->_emit("($let_form ($bindings_str)");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+  }
+  elsif ($at_top_level) {
+    # No dynamic binding left to carry the notinline declaration below, but a
+    # top-level `local` still wraps the rest of the file — see the comment
+    # there.  `locally` is the declaration-only form of `let`.
+    $self->_emit("(locally");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+  }
 
   # A `local` that is a DIRECT top-level statement (indent_level 0, not in a
   # sub) has dynamic scope extending to end of file, so PCL wraps the entire
@@ -3887,9 +3925,15 @@ sub _process_local_declaration {
     $self->_emit(_notinline_ops_decl());
   }
 
-  # Track that we have an open let that needs closing
-  $self->{_local_let_depth} //= 0;
-  $self->{_local_let_depth}++;
+  # The ORDINARY globals: one `p-local-cell` open each, nested inside the let
+  # (and inside each other), every one counting toward _local_let_depth exactly
+  # as the let does — the block end closes them all.
+  for my $b (@cell_b) {
+    $self->_emit("(p-local-cell $b->[0] $b->[1]");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+  }
 
   # #138: the comma tail of `local $x = A, B;` — a plain statement that runs
   # with the localization in effect, before the rest of the block.
@@ -7123,8 +7167,8 @@ sub _process_sub_statement {
         # Save/restore bucket+indent to emit at top level in declarations.
         my $saved_b = $self->_cur_bucket; my $saved_i = $self->indent_level;
         $self->_cur_bucket('declarations'); $self->indent_level(0);
-        $self->_emit("(defvar $unique $init_val)");
-        $self->_emit("(defvar ${unique}__init nil)");
+        $self->_emit(global_decl_form("$unique", "$init_val"));
+        $self->_emit(global_decl_form("${unique}__init", "nil"));
         $self->_cur_bucket($saved_b); $self->indent_level($saved_i);
       } else {
         push @bindings, "($unique $init_val)";
@@ -7356,7 +7400,7 @@ sub _emit_package_version {
   # read-before-declaration-in-the-same-unit pattern (perl-tests package_block.t
   # test 2).  Matching that needs cross-section BEGIN-phase emission.
   $self->_emit("(eval-when (:compile-toplevel :load-toplevel :execute)");
-  $self->_emit("  (defvar $sym (make-p-box nil)))");
+  $self->_emit("  " . global_decl_form("$sym", "(make-p-box nil)") . ")");
   $self->_emit("(p-scalar-= $sym $ver_cl)");
 }
 
@@ -7544,8 +7588,8 @@ sub _emit_package_preamble {
     my $pkg_a = $cl_pkg_sym . '::$a';
     my $pkg_b = $cl_pkg_sym . '::$b';
     $self->_with_bucket('declarations', sub {
-      $self->_emit("(defvar $pkg_a (make-p-box nil))");
-      $self->_emit("(defvar $pkg_b (make-p-box nil))");
+      $self->_emit(global_decl_form("$pkg_a", "(make-p-box nil)"));
+      $self->_emit(global_decl_form("$pkg_b", "(make-p-box nil)"));
       $self->_emit("");
     });
     # Record original-case name + make current at runtime (caller()/__PACKAGE__).
@@ -7574,8 +7618,8 @@ sub _emit_package_preamble {
   # Declare $a/$b as special in this package so sort comparator lambdas
   # (lambda ($a $b) ...) create dynamic bindings visible to named comparator subs.
   $self->_with_bucket('declarations', sub {
-    $self->_emit("(defvar \$a (make-p-box nil))");
-    $self->_emit("(defvar \$b (make-p-box nil))");
+    $self->_emit(global_decl_form("\$a", "(make-p-box nil)"));
+    $self->_emit(global_decl_form("\$b", "(make-p-box nil)"));
     $self->_emit("");
   });
   # Record original-case name + make current at runtime (caller()/__PACKAGE__).
@@ -8537,7 +8581,7 @@ sub _process_use_vars {
                : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                :                 '(make-hash-table :test #\'equal)';
       $self->_emit("(p-eval-always");
-      $self->_emit("  (defvar $cl_var $init))");
+      $self->_emit("  " . global_decl_form("$cl_var", "$init") . ")");
     }
     $self->_emit("");
   });
@@ -9194,7 +9238,7 @@ sub _parse_signature {
                   :                 '(make-hash-table :test #\'equal)';
         $self->environment->add_our_variable($pkg, $ovar);
         $self->_with_bucket('declarations', sub {
-          $self->_emit("(p-eval-always (defvar $ovar $init))");
+          $self->_emit("(p-eval-always " . global_decl_form("$ovar", "$init") . ")");
         });
       }
     }
@@ -9249,8 +9293,8 @@ sub _parse_signature {
           # generated names — declare them here.  Under v2 its text scan also
           # declares them; the duplicate defvars are identical no-ops.
           $self->_with_bucket('declarations', sub {
-            $self->_emit("(defvar $cell (make-p-box nil))");
-            $self->_emit("(defvar ${cell}__init (make-p-box nil))");
+            $self->_emit(global_decl_form("$cell", "(make-p-box nil)"));
+            $self->_emit(global_decl_form("${cell}__init", "(make-p-box nil)"));
           });
         }
         # Substitute the cell name directly: the decl statement's value is

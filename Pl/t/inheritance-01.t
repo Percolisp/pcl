@@ -37,7 +37,7 @@ END_PERL
   # runtime @ISA write (C3/MRO reads @ISA); `our @ISA = qw(...)` is an
   # assignment, not v1's p-push.
   like($cl, qr/p-array-= Child::\@ISA \(vector "Parent"\)/, '@ISA qw() generates CLOS class with parent');
-  like($cl, qr/defvar \@ISA/, '@ISA array is still created');
+  like($cl, qr/p-defcell \@ISA/, '@ISA array is still created');
   like($cl, qr/Child::\@ISA[^\n]*"Parent"/, 'Parent lands in @ISA array');
 }
 
@@ -269,7 +269,7 @@ our @ISA = ();
 END_PERL
 
   # Should still emit the @ISA initialization
-  like($cl, qr/defvar \@ISA/, 'Empty @ISA still creates array');
+  like($cl, qr/p-defcell \@ISA/, 'Empty @ISA still creates array');
 }
 
 # Test @ISA with single quoted strings

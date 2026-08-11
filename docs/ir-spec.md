@@ -141,7 +141,7 @@ holding a number or string directly. The shapes tell you which is which:
 |---|---|---|---|
 | boxed lexical | `(let (($x (make-p-box nil)))` | `(p-my-= $x V)` | `$x` |
 | raw lexical | `(let (($n 10))` | `(setf $n V)` | `$n` |
-| package var | `(defvar $g (make-p-box nil))` | `(p-scalar-= $g V)` | `$g` |
+| package var | `(p-defcell $g (make-p-box nil))` — `defvar` for the exception set (§2b.1) | `(p-scalar-= $g V)` | `$g` |
 
 A **coercing compound assignment** on a raw slot (`$n += V` and the whole
 `-= *= /= %= **= x= .= <<= >>= &= |= ^= &.= |.= ^.=` family — every op
@@ -410,6 +410,34 @@ of poisoning the name. The prime invariant, worth memorizing:
 > When a lexical must be globally visible after all, it gets a **fresh
 > unique name** first, so the `defvar` cannot poison any other `let`.
 
+Since s382h (task #289, "direction D") the *poisoning* half of that
+tension is gone at the root, because **an ordinary package global is no
+longer a special variable at all**. It is a symbol macro over its own
+global value cell:
+
+    (p-defcell $x (make-p-box nil))     ; ≈ (define-symbol-macro $x <cell>)
+                                        ;   + initialize the cell once
+
+Two consequences a consumer must know:
+
+- A `let` of such a name is legal CL and installs an ordinary **lexical**
+  binding — it does *not* rebind the global. That is precisely what Perl's
+  `my $x` shadowing a package `$x` means, so the shadow no longer leaks
+  into called subs.
+- `local` therefore cannot be a `let`: it lowers to `p-local-cell`, which
+  saves the cell, installs the new value, and restores under
+  `unwind-protect` (§7.2).
+
+**Exception set** — names that keep `defvar` and the dynamic `let`, decided
+by name alone (`Pl::GlobalPartition`, the one authority both emitters ask):
+everything not word-shaped (punctuation and caret magic — `$@`, `$1`, `$!`,
+`|${^WARNING_BITS}|`, …) plus the runtime-owned word-shaped set
+`$_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %INC %ENV %SIG` and the sort pair
+`$a`/`$b` in every package. For those a dynamic binding *is* the mechanism
+(sort binds the pair; the magic vars are where `local` actually runs hot),
+and mixing the two declarers on one symbol is a load-time error in SBCL —
+loud, never silent.
+
 ### 2b.2 The declaration forms
 
 | Perl | v2 emission |
@@ -418,9 +446,10 @@ of poisoning the name. The prime invariant, worth memorizing:
 | `my $x = INIT;` (raw slot, §2.2) | `(let (($x INIT)) …rest…)` |
 | `my $i = $i + 1;` (self-ref init) | `(let (($i (p-box-init $i))) …)` — CL `let` inits evaluate in the *outer* environment, matching Perl's "RHS sees the outer variable" rule |
 | `my @a; my %h;` | `let` binding to a fresh vector / hash table |
-| `our $g = V;` | `(defvar $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place. `our` shadowing a `my` gates to v1 |
-| `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(defvar $n__state__K (make-p-box nil))` + raw once-flag `(defvar $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
-| undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced-but-never-let-bound name gets `(defvar NAME <fresh container>)` under "Forward declarations"; package-qualified refs get the defvar in *their* package |
+| `our $g = V;` | `(p-defcell $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place (`defvar` instead for an exception-set name). `our` shadowing a `my` gates to v1 |
+| `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(p-defcell $n__state__K (make-p-box nil))` + raw once-flag `(p-defcell $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
+| undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced-but-never-let-bound name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
+| `state $n` cells, promoted lexicals (`__file__`/`__shadow__`/`__cond__`) | the same `p-defcell`, since the renamed name is word-shaped and therefore ordinary. The renamed cell is never `let`-bound, which is what makes the rename removable (task #291) |
 
 The rest-of-block nesting means scope is structural (review doc §2.3):
 reading a `)` closes a scope. At file level the `let`s nest the remaining
@@ -446,7 +475,7 @@ rule: in `my $x = $x + 1`, the RHS reads the *outer* `$x`
 
 | symbol shape | family | meaning |
 |---|---|---|
-| `$x__file__N` | v2 file-cell promotion (W5/W10) | a file lexical that must be visible outside the `let`s — because a named sub captures it, because a **BEGIN/END scheduled block references it** (their `p-BEGIN` forms live in the definitions stream, outside the runtime `let` chain — s295c, source-position interleaved since s300b: `my $x; BEGIN { $x = 5 }` / END-cleanup idioms), or because it spans a `package` boundary — promoted to a `defvar`'d package-level box (the `our` shape: defvar + `p-scalar-=`, no `let`). The fresh name is the whole point: `defvar $x__file__0` cannot poison an unrelated `let $x` |
+| `$x__file__N` | v2 file-cell promotion (W5/W10) | a file lexical that must be visible outside the `let`s — because a named sub captures it, because a **BEGIN/END scheduled block references it** (their `p-BEGIN` forms live in the definitions stream, outside the runtime `let` chain — s295c, source-position interleaved since s300b: `my $x; BEGIN { $x = 5 }` / END-cleanup idioms), or because it spans a `package` boundary — promoted to a package-level CELL (the `our` shape: p-defcell + `p-scalar-=`, no `let`). The fresh name is the whole point: declaring `$x__file__0` cannot disturb an unrelated `let $x` |
 | `$Pkg::x__file__N` | v2 spanning refs (W10) | uses of the above from *later package segments* — package-qualified so their section's reader (sitting in its own package) reaches the declaring section's cell |
 | `$x__shadow__N` | v2 seam-shadow rename (W8.5) | a `my $x` *inside a block that lowers through the v1 seam* (`map { my $x = … }`, `do { my $x … }`) while an outer lexical `$x` is live. Unrenamed, the seam's defvar-based handling would write through the outer variable (the v1 bug); renamed, the inner block gets its own unique cell |
 | `$x__cond__N` | v2 poisoned-condition rename (W8.5) | `if (my $x = …)` / `for (my $x…)` where the *same bare name* is also used outside the construct as a package global. The construct's lexical takes the fresh name so the global keeps `$x` and gets its forward defvar |
@@ -918,10 +947,26 @@ A qualified Perl variable `$Foo::x` is the symbol `$x` in namespace `FOO`.
 
 ### 7.2 Package variables and `local`
 
-Package vars are globally-registered boxes (`defvar`). `local` saves the
-box's current **value** and restores it on scope exit (dynamic, not
-lexical) — including `local` on hash/array elements and typeglobs, via
-dedicated `p-local-*` macros. Restore also invalidates the box caches.
+Package vars are globally-registered boxes. **How** the box is registered
+depends on the partition (§2b.1): an ordinary variable lives in a global
+value cell reached through a symbol macro (`p-defcell`); the exception set
+keeps `defvar`. Name-based access — `symbol-value`, `boundp`,
+`makunbound`, the glob and symbolic-ref helpers — reaches the same storage
+either way, so nothing in the runtime has to know which side a name is on.
+
+`local` saves the current **value** and restores it on scope exit
+(dynamic, not lexical): `p-local-cell` for a cell, a dynamic `let` for an
+exception name, plus the dedicated `p-local-*` macros for hash/array
+elements, typeglobs and the magic cells (`$.`, `$|`, `$!`). Every flavor
+restores through a non-local exit as well as a normal one. Restore also
+invalidates the box caches.
+
+`foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
+the body and everything it calls see the current element, and the old
+value is restored on exit, including via `last`/`die`. The loop macros
+decide which mechanism to use from the expansion environment (a symbol
+macro ⇒ localize the cell; a special ⇒ dynamic `let`; a lexical `my` loop
+var ⇒ plain lexical binding, no localization at all).
 
 ### 7.3 Method dispatch
 
@@ -976,7 +1021,16 @@ match leaves `$1` from the previous successful match intact.
 
 Generated files are loaded form-by-form; a `use`/`require` triggers
 transpilation (or cache lookup) of the target module and loads it inline,
-recursively. `eval "string"` calls the transpiler *at runtime* on the
+recursively.
+
+**Declarations are define-once.** Both declarers initialize a variable only
+when it is not already bound — `defvar` by definition, `p-defcell` by an
+explicit `boundp` guard. This is load-bearing, not tidiness: the same name
+can be declared by more than one section of a file *and* by more than one
+file, and a module can be loaded twice; an unconditional initialization
+would wipe a value an earlier declaration's code had already assigned. A
+translator that lowers these declarations to plain assignment introduces a
+silent wrong. `eval "string"` calls the transpiler *at runtime* on the
 string (`docs/eval-lexical-capture.md` is the original design note;
 §9.1 below is normative). Calling context does not propagate into
 string eval (documented divergence). Translators targeting environments

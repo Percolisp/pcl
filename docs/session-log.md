@@ -4,6 +4,97 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 382h (2026-08-11, Opus) — #290 THE FLIP: ordinary globals are cells, `local` is `p-local-cell`
+
+Direction D's step 2 (`docs/direction-d-plan.md` §4), the one commit the two
+pre-work commits were built for.  Emission changed at every declaration site
+and every `local`; the partition (`Pl::GlobalPartition`, s382g) is the single
+authority both emitters ask, so `defvar`-vs-`p-defcell` cannot drift.
+
+**The mechanical half** is small: `global_decl_form()` joins the partition to
+its spelling, and every emitter that declares a package variable goes through
+it — Parser2's four forward-decl buckets, the `$VERSION` decl, the state /
+promoted-cell / `our` decls, and the 41 declaration literals still live in
+v1's statement handlers (reachable through the v2 fallback).  `local` splits
+its bindings: temporaries and exception-set names keep today's dynamic
+`let`/`let*`, ordinary globals become nested `p-local-cell` opens, ordered
+so the RHS temporaries still read the OLD values.
+
+**The interesting half is what the flip exposed** — six real interactions, all
+found by running things, none by reading:
+
+1. **Every runtime site that VIVIFIES a variable by NAME had to become a cell
+   maker.**  `proclaim (special …)` on a symbol that is already a symbol
+   macro is an ERROR, and worse, a symbol the runtime proclaims special today
+   collides with a `p-defcell` for the same name in a file loaded later.  All
+   17 sites now call `%p-ensure-storage`, which defines the symbol macro
+   (via `eval`, since the symbol is computed) unless the symbol is already
+   special — which is exactly the runtime's own magic set.  `use Socket` died
+   on this in one line: Exporter reaches `@EXPORT` by symbolic ref.
+2. **`p-defpackage` vivifies `@ISA`** — same fix; without it every file with a
+   package plus an `our @ISA` failed to load.
+3. **`cl/pcl-warnings.lisp` is a THIRD checked-in transpiled artifact** that
+   no doc lists beside pack/mro.  It was at gen v2-59 and its stale `defvar
+   warnings::$VERSION` clashed with the runtime's own — which is also why the
+   runtime's `warnings::`/`Carp::` `$VERSION` declarations are now `p-defcell`:
+   a perl-visible package variable must use the one declarer.
+4. **`foreach $pkgvar (LIST)` is an implicit `local`** (perl aliases the
+   package variable and restores it), and the loop macros implemented that
+   with a `let` — which over a cell is a LEXICAL shadow no called sub can
+   see.  `p-foreach` and the range expander now ask `%p-cell-loop-var-p`
+   (the macroexpansion environment answers, so a `my` loop var and a lexically
+   shadowed name stay plain `let`s) and localize the cell under
+   `unwind-protect` instead.
+5. **`p-local-cell` rebinds the name lexically to the installed box.**  In
+   ordinary code that is a pure alias; it matters inside a string eval, whose
+   thunk passes each free name as a lambda PARAMETER.  Without it, eval.t's
+   recursive factorial (`local($foo)=$foo; … $foo-- * (eval $fact)`) never
+   terminated: the decrement went to the parameter's box while the nested
+   eval, resolving `$foo` by name, read the untouched box `local` had
+   installed.  Before the flip the parameter was itself a dynamic binding of a
+   special, so the two were the same storage by construction.
+6. **`p-local-cell` tolerates an UNBOUND cell.**  A name that is `my` in one
+   block and `local` in another gets no declaration at all (task #205's
+   shape) — `perl-tests/sort.t`'s `local $sortsub`.  It saves "was unbound"
+   and restores by `makunbound`.
+
+**Semantics, each probed against real perl** (plan §3, guarded in the new
+`Pl/t/transpile-test-10.t`, 11 rows): a called sub no longer sees the
+caller's `my` shadow of a global; `$$name` under such a shadow reads the
+package variable; `local` restores through `die`; never-assigned globals read
+undef; `foreach` over a global localizes and restores, including through
+`last`/`die`; mixed `local` (cells + `$_`) restores together; `local (LIST) =
+RHS` still reads the old values.
+
+**Expectation rewrites** in six gate files (`our-local-01`, `state-01`,
+`parser2-01/02`, `inheritance-01`, `decl-ordering-01`): every one asserts the
+DECLARER's spelling, which this commit changes by design — `defvar` →
+`p-defcell`, `(let (($x …` → `(p-local-cell $x`.  The four-conjunct rule
+holds: the emission was probed, the diff is exactly the mechanism change, and
+`transpile-test-10.t` pins BOTH arms of the partition in one row so a future
+drift in either direction fails.
+
+**NOT fixed here, filed instead**: `for my $i (…)` where `$i` is also a
+package global still leaks the loop value into called subs — probed at HEAD
+and after, identical, so it is not a direction-D regression (task #294; the
+shape is deliberately excluded from the guard row, with a pointer).
+
+**STATE: on branch `wip/s382h-direction-d-flip`, NOT merged — one open
+regression (task #295).**  Measured: **Pl/t 138 files / 5091 tests PASS**
+(cold, saved core); full sweep **0 new / 0 fixed**, TOTAL passing 18498 →
+**18494 (−4)**, with the whole shortfall in ONE file.  eval.t's `$zzz` family
+(A/B'd row by row against a HEAD worktree: +3 rows 35–37, −8 rows 51–62) —
+a string eval no longer sees a caller's `my` that shares its name with a
+package global, because that used to work only through the accidental dynamic
+binding the flip removes.  The nested-eval sites have no capture alist and the
+name is not promoted, so the fix is a design call (three candidates in #295),
+not a mechanical one; the flip does not land on main until it is made.  The
+CPAN board and `tools/bench-exec.pl` were not run for the same reason —
+running them against a knowingly-incomplete flip would only produce numbers
+that have to be re-taken.
+
+---
+
 ## Session 382g (2026-08-11, Opus) — #290 pre-work: the global partition, landed and measured before the flip touches emission
 
 Direction D's two emitters — the declaration side (`Pl/Parser2.pm`) and the
