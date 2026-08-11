@@ -256,4 +256,95 @@ for $g (1..3) { print peek(), "\n" }
 print peek(), "\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #291 family 1 (`__shadow__`, s299 / postfixderef.t): a `my` in a nested BARE
+# BLOCK whose name is also a package global at file level.  The block lexical
+# used to be renamed to NAME__shadow__N so the global could keep its
+# declaration; now both keep the name — the `let` shadows the symbol macro,
+# and the global's value survives the block untouched.
+# ---------------------------------------------------------------------------
+test_transpile('block my shadows a same-named package global, all three sigils', '
+@a = (1,2,3);
+$s = "S-global";
+%h = (k => "H-global");
+{ my ($s, @a, %h); @a = (4,5); $s = "S-block"; $h{k} = "H-block";
+  print "in: @a $s $h{k}\n"; }
+print "out: @a $s $h{k}\n";
+');
+
+# ---------------------------------------------------------------------------
+# #291 family 2 (`__cond__`, defins.t): a `my` in a CONDITION or C-for head
+# whose name is also a package global.  Same story as family 1 — the head's
+# `my` is a lexical shadow, the global keeps its cell and its value.  The
+# `our` spelling is included because `our` is what genuinely creates a global,
+# and it was the case the deleted pass treated as most certainly poisoned.
+# ---------------------------------------------------------------------------
+test_transpile('condition-my and C-for-my shadow same-named package globals', '
+our $err = "E-global";
+our $i   = "I-global";
+my @l = (1,2);
+while (my $l = shift @l) { print "w:$l\n" }
+if (my $err = "E-inner") { print "if:$err\n" }
+for (my $i = 0; $i < 2; $i++) { print "f:$i\n" }
+print "out: $err $i\n";
+');
+
+# ---------------------------------------------------------------------------
+# #291 family 3 (`__emb__`, #265/#272): an expression-embedded `my` inside a
+# sub body whose name another sub mentions.  The let-hoist's veto — "that sub
+# shares the forward-declared global as its cell" — is true at FILE level and
+# false inside a sub body, so the veto is no longer asked there and the decl
+# binds a plain lexical.  Rows: (a) named-sub body, (b) ANON-sub body (#272),
+# (c) the FILE-level shape the veto exists for, which must still share the one
+# cell (Capture-Tiny's Utils.pm, #199).
+# ---------------------------------------------------------------------------
+test_transpile('embedded my inside a sub body vs the file-level shared cell', '
+sub setter { ($x, $y) = ("SX", "SY") }
+sub foo3   { ++my $x->{foo}; return $x->{foo} }
+setter();
+print "named: ", foo3(), foo3(), " x=$x y=$y\n";
+my $anon = sub { ++my $x->{foo}; return $x->{foo} };
+print "anon: ", $anon->(), $anon->(), " x=$x\n";
+my $tmp = "/tmp/pcl-291emb-$$.txt";
+open my $fh, ">", $tmp or die "w: $!";
+sub w { print $fh "shared\n" }
+w();
+close $fh;
+open my $in, "<", $tmp or die "r: $!";
+print "file: ", scalar(<$in>);
+close $in;
+unlink $tmp;
+');
+
+# ---------------------------------------------------------------------------
+# #298: `my $c = bless $c, "C3"` — a SELF-REFERENTIAL init whose only depth-0
+# low-prec token is a list-operator argument separator.  The syntactic
+# pre-check reads that comma as a statement tail and used to refuse the whole
+# file; PExpr, which owns the `my $c = h 1, 2` ambiguity, parses it as one
+# assignment, so the run is lowered in the OUTER scope and its RHS goes into
+# the p-box-init binding.  `our $c1` is what makes this reachable on main: it
+# stops the block-shadow rename from covering the name.
+# ---------------------------------------------------------------------------
+test_transpile('self-referential my-init whose comma is a list-op separator', '
+our $c1 = bless(\(my $s = "x"), "C");
+{ my $c1 = bless $c1, "C3"; print "in:", ref($c1), "\n" }
+print "out:", ref($c1), "\n";
+our @l = (3, 1, 2);
+{ my @l = sort { $a <=> $b } @l; print "sorted:@l\n" }
+print "orig:@l\n";
+');
+
+# INVERSE: a genuine below-assignment TAIL must still be refused — its tail
+# runs inside the new binding, which the p-box-init shape cannot express.
+{
+  my ($fh, $tmp) = tempfile(SUFFIX => '.pl');
+  print $fh qq{our \$x = "O";\n{ my \$x = \$x, 1; print "\$x\\n"; }\n};
+  close $fh;
+  my $err = `$pl2cl \Q$tmp\E 2>&1 >/dev/null`;
+  like($err, qr/self-referential my-init with a below-assignment tail/,
+       'a real `my $x = $x, 1` tail is still refused');
+  unlink $tmp;
+}
+
+
 done_testing();

@@ -5827,19 +5827,27 @@ sub _lower_block {
     # trailing>` branch below already uses.  The declaration then contributes
     # only the (boxed) binding.  $x stays BOXED in the remainder: a comma/or
     # write is not a native-root arithmetic event, so no raw slot is lost.
-    my $lowprec_run;
+    my ($lowprec_run, $selfref_run);
     if (defined $init && defined _lowprec_idx($init, 0)
         && !(_split_modifier($init))[1]) {
-      # Self-referencing init (`my $x = $x, …`) would read the fresh binding
-      # instead of the shadowed outer one — v1's let-binding dance does not
-      # compose with a tail, so refuse rather than miscompile.  Unlike the
-      # $self_init text scan below (where an over-fire is harmless), a false
-      # positive HERE costs a whole-file gate, so NON-INTERPOLATING literals
-      # are excluded: sprintf2.t's `my $s = sprintf '%*2$s', "abc", $i` has
-      # `$s` inside a single-quoted format, and perl does not read it.
+      # Self-referencing init (`my $x = $x, …`): the run is lowered INSIDE the
+      # fresh let below, where $x already denotes the new nil box, so the RHS
+      # would read the binding instead of the shadowed outer one.  Flag it —
+      # the `if ($name)` branch below re-routes the shapes it can (#298) and
+      # refuses the rest.  (Unlike the $self_init text scan further down, where
+      # an over-fire is harmless, a false positive here costs the whole file,
+      # so NON-INTERPOLATING literals are excluded: sprintf2.t's
+      # `my $s = sprintf '%*2$s', "abc", $i` has `$s` inside a single-quoted
+      # format, and perl does not read it.)
+      $selfref_run = $self->_init_reads_scalar($init, $name);
+      # The two paths that return BEFORE that branch bind no `let` of their
+      # own (a promoted cell / a goto-hoisted box), so the re-route has nothing
+      # to move the init into: they keep the refusal.
       die "Parser2 TODO: self-referential my-init with a below-assignment tail: "
         . $first->content . "\n"
-        if $self->_init_reads_scalar($init, $name);
+        if $selfref_run
+        && ($self->{_file_lex_renamed}{$name}
+            || ($self->{_goto_hoisted} && $self->{_goto_hoisted}{$name}));
       my @kd = _strip_semi($first->schildren);
       $lowprec_run = [@kd[1 .. $#kd]];
     }
@@ -5920,6 +5928,25 @@ sub _lower_block {
       if (defined $init && !$imod
           && join('', map { $_->content } @$init) =~ /\Q$name\E\b/) {
         $self_init = ['p-box-init', $self->_lower_expr($init, $first)];
+      }
+      # #298: a self-referential init whose only depth-0 low-prec token is a
+      # LIST-OPERATOR argument separator (`my $c = bless $c, "C3"`) has no
+      # statement tail at all — and PExpr, which owns that ambiguity, is the
+      # only thing that can say so.  Ask it: lower the run HERE, still in the
+      # outer scope (before _reg_lex), so every `$c` in it denotes the
+      # SHADOWED variable perl reads.  If the answer is exactly one assignment
+      # to $name, there was no tail, and its RHS goes into the p-box-init let
+      # binding — the same shape the no-tail path above builds.  Anything else
+      # is a genuine `my $x = A, B` whose tail must run inside the new
+      # binding, which this shape cannot express: refuse, as before.
+      # (Lowered exactly once either way — PExpr's cleanup mutates the shared
+      # tokens destructively, so a speculative re-lowering is not available.)
+      if ($lowprec_run && $selfref_run) {
+        my $rhs = _sole_assign_rhs($self->_lower_expr($lowprec_run, $first), $name);
+        die "Parser2 TODO: self-referential my-init with a below-assignment tail: "
+          . $first->content . "\n" if !defined $rhs;
+        $self_init = ['p-box-init', $rhs];
+        $lowprec_run = undef;
       }
       $self->_reg_lex($name);
       # #138: the whole `$x = A, B` run as one expression inside the fresh
@@ -6836,6 +6863,23 @@ sub _tail_below_assign_prec {
 # classification, and neither statement parser may depend on the other.
 # These two are thin local names for it.
 sub _lowprec_idx        { Pl::PExpr::TokenUtils::lowprec_idx(@_) }
+
+# Is $form exactly ONE scalar assignment to $name, and nothing else?  Then the
+# depth-0 low-prec token _lowprec_idx saw was a list-operator argument
+# separator, not a statement tail — PExpr consumed it into the RHS.  Returns
+# the RHS form, or undef for every other shape (a comma expression, a raw
+# seam string, an assignment to something else).  Used by the #298 re-route in
+# _lower_block; deliberately exact, since the caller's fallback is a refusal.
+sub _sole_assign_rhs {
+  my ($form, $name) = @_;
+  return undef unless ref($form) eq 'ARRAY' && @$form == 3;
+  my ($head, $target) = @{$form}[0, 1];
+  return undef if ref $head || ref $target;
+  return undef unless defined $head && defined $target;
+  return undef unless $head eq 'p-scalar-=' || $head eq 'p-my-=';
+  return undef unless $target eq $name;
+  return $form->[2];
+}
 sub _lowprec_split_safe { Pl::PExpr::TokenUtils::lowprec_split_safe(@_) }
 
 # Leaf-level tail wrap under the sub-body :void regime (task #60): the body
