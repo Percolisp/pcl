@@ -2334,3 +2334,26 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   a profile ever shows ordinary-global local hot).
 - Plan of record for #289: `docs/direction-d-plan.md` (steps, gates,
   guard rows, artifact regeneration, rollback).
+
+## s384 (2026-08-12, Opus) — #294: `foreach my $x` states its declaration in the IR (`:my t`)
+
+- **Since the flip a lexical and an ordinary global are the SAME symbol, so
+  "is this loop variable a package cell?" is not answerable from the emitted
+  form alone.**  `%p-cell-loop-var-p` reads the macroexpansion environment,
+  which is right for `foreach $x` (an enclosing `my $x` shadows the symbol
+  macro; no global → plain `let`) and WRONG for `foreach MY $x` — the loop's
+  own declaration is not in the environment yet, so a same-named package
+  variable made the loop LOCALIZE the cell.  Measured: a sub called from the
+  body saw the loop value (#294), and a closure made in the body saw the
+  post-loop restore.
+- **The compiler states it: `:my t`, after `:label`, before the body**, from
+  BOTH foreach emitters (Parser2's compound branch and the v1 seam's
+  `_process_foreach_statement`, still live for block-form args/anon subs —
+  measured reachable in 20+ corpus files).  The runtime consults the key
+  FIRST; `%p-cell-loop-var-p` is now only ever asked about an UNDECLARED loop
+  variable.  Normative: `ir-spec.md` §6.2 "Loop variable: lexical or
+  localized"; guard rows (incl. the must-not-break `foreach $global` case) in
+  `Pl/t/transpile-test-10.t`.
+- **This is a PRECONDITION for #291**: the poisoned-`my` deletion makes more
+  names carry cells, which is exactly what turns this latent guess into
+  live miscompiles.

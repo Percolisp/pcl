@@ -6860,6 +6860,11 @@ sub _process_foreach_loop {
 
   # Build label argument if present
   my $label_arg = $label ? " :label $label" : "";
+  # `:my t` for `foreach my $x` — see the Parser2 foreach branch and
+  # %p-cell-loop-var-p: the macro cannot see the declaration, so a package
+  # variable of the same name would make it localize a cell where perl
+  # declares a lexical (#294).
+  $label_arg .= " :my t" if $loop_var_is_my && $cl_loop_var ne '$_';
 
   $self->_emit("(p-foreach ($cl_loop_var $list_cl)$label_arg");
   $self->indent_level($self->indent_level + 1);

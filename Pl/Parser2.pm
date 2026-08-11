@@ -7147,6 +7147,17 @@ sub _lower_compound {
     my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
     die "Parser2 TODO: foreach without list" unless $list && $block;
     my $name = $var ? $var->content : '$_';
+    # `foreach MY $x` declares a fresh lexical, so the loop must bind one — no
+    # matter what a package variable of the same name is doing.  The loop macro
+    # cannot see the declaration (the name is not bound in its macroexpansion
+    # environment yet), so say it: `:my t` overrides %p-cell-loop-var-p, which
+    # would otherwise localize the global's cell and leak the loop value into
+    # every sub the body calls (#294).  `foreach our $x` / `foreach $x` carry no
+    # key — there the macro's environment reading IS the right answer.
+    my $loop_my = $var && do {
+      my $p = $var->sprevious_sibling;
+      $p && $p->isa('PPI::Token::Word') && $p->content eq 'my' ? 1 : 0;
+    };
     # `for $Pkg::x (...)`: the BINDING must be the CL-ordered global
     # (Pkg::$x) — the raw perl order is unreadable ($MAIN package error) —
     # while $name stays the perl name for $vi/_reg_lex bookkeeping.
@@ -7247,12 +7258,13 @@ sub _lower_compound {
     my @cont = $self->_continue_keys(\@k, $vi);
     $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
+    my @my_keys = $loop_my ? (':my', 't') : ();
     return defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
          ['list', $cl_name, $from_form, $to_form],
-         _label_keys($label), @body, @cont]
+         _label_keys($label), @my_keys, @body, @cont]
       : ['p-foreach', ['list', $cl_name, $list_form],
-         _label_keys($label), @body, @cont];
+         _label_keys($label), @my_keys, @body, @cont];
   }
 
   die "Parser2 TODO: compound '$kw'";

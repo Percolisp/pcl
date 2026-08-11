@@ -7412,19 +7412,30 @@ create the key on a read-only call, which perl does not."
   "Perl unless"
   `(if (not (p-true-p ,condition)) ,then-form ,else-form))
 
-;;; Helper: extract :label and :continue from loop body-and-keys.
-;;; Returns (values label continue-form body).
+;;; Helper: extract :label, :my and :continue from loop body-and-keys.
+;;; Returns (values label continue-form body myp).
+;;;
+;;; :my t marks a foreach whose loop variable is a perl `my` — the compiler
+;;; states it because the runtime cannot see it.  Since the direction-D flip an
+;;; ordinary package global and a lexical are spelled the SAME symbol, and the
+;;; loop macros decide "localize the cell" vs "bind a lexical" by asking whether
+;;; the symbol is a global symbol macro here (%p-cell-loop-var-p).  That reading
+;;; is right for `foreach $x` and WRONG for `foreach my $x`, whose variable is a
+;;; fresh lexical no matter what a package variable of the same name is doing —
+;;; so the emitter marks the declaration and this key overrides the guess.
 (defun parse-loop-keys (body-and-keys)
   (let* ((label (when (eq (first body-and-keys) :label)
                   (second body-and-keys)))
-         (rest (if label (cddr body-and-keys) body-and-keys))
+         (after-label (if label (cddr body-and-keys) body-and-keys))
+         (myp (eq (first after-label) :my))
+         (rest (if myp (cddr after-label) after-label))
          (continue-form nil)
          (body rest)
          (pos (position :continue rest)))
     (when pos
       (setf continue-form (nth (1+ pos) rest))
       (setf body (subseq rest 0 pos)))
-    (values label continue-form body)))
+    (values label continue-form body myp)))
 
 ;;; Helper: generate the inner iteration body structure for Perl loops.
 ;;; Handles labeled (catch/throw for next/redo across loop boundaries)
@@ -7591,23 +7602,32 @@ box that vivifies (aref VEC I) on first write (%p-defelem-box)."
 
      ENV is the macroexpansion environment, which makes the answer correct for
      shadowing too: inside `(let (($x …)) …)` the name is a lexical, not a
-     symbol macro, and the ordinary `let` binding is what perl's `my $x` loop
-     var wants.  Exception-set names ($_, $a/$b, magic) are plain specials and
-     answer NIL here, keeping today's dynamic bind."
+     symbol macro, so `foreach $x` over an ENCLOSING `my $x` binds lexically.
+     Exception-set names ($_, $a/$b, magic) are plain specials and answer NIL
+     here, keeping today's dynamic bind.
+
+     What ENV canNOT tell us is `foreach MY $x` — the loop's own declaration
+     is not in the environment yet when this macro expands, so a package
+     variable of the same name makes this answer T and the loop would localize
+     a cell where perl declares a fresh lexical (a called sub then saw the loop
+     value: task #294).  The compiler states that case with :my, which the
+     callers consult FIRST — this predicate is only ever asked about an
+     UNDECLARED loop variable."
     (and (symbolp var) (nth-value 1 (macroexpand-1 var env)))))
 
 (defmacro p-foreach ((var list) &rest body-and-keys &environment env)
-  "Perl foreach loop with optional :label and :continue.
+  "Perl foreach loop with optional :label, :my and :continue.
 Uses tagbody/go instead of loop -- see p-while for rationale.
-A package-global loop var is localized over its cell (%p-cell-loop-var-p)."
-  (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
+A package-global loop var is localized over its cell (%p-cell-loop-var-p);
+:my says the compiler declared the variable, which settles that question."
+  (multiple-value-bind (label continue-form body myp) (parse-loop-keys body-and-keys)
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
            (vec (gensym))
            (raw (gensym))
            (old (gensym "OLD"))
            (i (gensym))
-           (cellp (%p-cell-loop-var-p var env))
+           (cellp (and (not myp) (%p-cell-loop-var-p var env)))
            (iter-forms (cons `(incf ,i)
                              (cons (make-loop-iteration-body label body)
                                    (when continue-form (list continue-form))))))
@@ -7640,11 +7660,11 @@ loop-var binding: NIL binds a fresh box per iteration (like p-foreach's
 ensure-boxed — required for $_ and any var the annotator could not prove
 unboxable), T binds the raw counter value (annotator-approved named vars; the
 string-range fallback vector holds raw strings, also fine in a raw slot).
-A package-global loop var (%p-cell-loop-var-p) is localized over its cell
-instead of let-bound, and is ALWAYS boxed: the cell's contract is that it
-holds a box, and a raw integer parked there would be read as one by anything
-that reaches the global by name."
-  (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
+A package-global loop var (%p-cell-loop-var-p, overridden by :my) is localized
+over its cell instead of let-bound, and is ALWAYS boxed: the cell's contract is
+that it holds a box, and a raw integer parked there would be read as one by
+anything that reaches the global by name."
+  (multiple-value-bind (label continue-form body myp) (parse-loop-keys body-and-keys)
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
            (kind (gensym))
@@ -7654,7 +7674,7 @@ that reaches the global by name."
            (i (gensym))
            (old (gensym "OLD"))
            (hi (gensym))
-           (cellp (%p-cell-loop-var-p var env)))
+           (cellp (and (not myp) (%p-cell-loop-var-p var env))))
       `(block ,block-name
          (multiple-value-bind (,kind ,a ,b)
              (let ((*wantarray* t))    ; endpoints in the list's context, like p-foreach's list
@@ -11463,7 +11483,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-131"
+(defparameter *pcl-cache-generation* "v2-132"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

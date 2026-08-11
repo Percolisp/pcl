@@ -758,7 +758,9 @@ conditionals over `p-true-p` (§3.3). Ternary `?:` is also `p-if`.
 
 `p-while`, `p-until`, `p-for` (C-style: `(p-for (INIT) (COND) (STEP)
 body…)`), `p-foreach ((VAR LIST) body…)`. All accept trailing keys
-`:label NAME` (must be first key) and `:continue (progn …)`.
+`:label NAME` (must be first key) and `:continue (progn …)`.  The foreach
+family additionally accepts `:my t` (after `:label`, before the body) —
+see "Loop variable: lexical or localized" below.
 
 The compiled shape per iteration: an outer named block (the loop's exit
 target), a `tagbody` with a `:next` label (the continue target). Loop
@@ -780,6 +782,24 @@ to **each element's box** (`ensure-boxed`) — so mutating the loop variable
 writes through to the array, matching Perl's foreach aliasing (raw
 elements get a fresh box; files where that aliasing would be observable
 gate to the v1 pipeline).
+
+**Loop variable: lexical or localized.**  Perl's `foreach $pkgvar (…)`
+implicitly *localizes* the package variable — the loop variable is aliased to
+each element for the body's dynamic extent, so a sub called from the body sees
+the current element, and the old value is restored on exit (including on
+`die`).  `foreach my $x (…)` declares a fresh *lexical* instead, which no
+called sub can see.  Since the direction-D flip (§2) an ordinary global and a
+lexical are spelled the SAME symbol, so the two cases are told apart like this:
+
+- `:my t` present → **lexical binding**, always.  The compiler emits this key
+  for `foreach my $x`, whose declaration the macro cannot otherwise see.
+- no `:my` key → the macro asks whether VAR names a global cell (a
+  `p-defcell` symbol macro) *in its macroexpansion environment*.  Yes →
+  save/set/restore over the cell.  No (a plain lexical is in scope, or the
+  name is exception-partition, or there is no such global) → lexical binding.
+
+A consumer that lowers this IR must reproduce the same split; treating `:my`
+as decoration silently leaks the loop value into every sub the body calls.
 
 **Counting-loop range foreach** (s286b): a foreach whose list is a **sole
 range** `A..B` lowers to `(p-foreach-range ((VAR A B)) body…)` or its

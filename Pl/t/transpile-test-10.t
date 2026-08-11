@@ -225,4 +225,35 @@ print "fact: ", eval($fact), "\n";
 print "foo after: $foo\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #294: `foreach MY $x` binds a LEXICAL even when a package variable of the
+# same name exists.  Since the flip the two are spelled the same symbol, so
+# the loop macro used to read the global cell out of its macroexpansion
+# environment and localize it — a sub called from the body then saw the loop
+# value, and a closure made in the body saw the post-loop restore.  The
+# compiler now states the declaration (`:my t`).  The third row is the case
+# the fix must NOT break: `foreach $x` over a package global, where perl DOES
+# localize and a called sub MUST see the current element.
+# ---------------------------------------------------------------------------
+test_transpile('foreach my $x does not localize a same-named global', '
+our $i = "global";
+sub see { return $i }
+for my $i (1..3) { print see(), "\n" }
+print see(), "\n";
+');
+
+test_transpile('foreach my $x closure capture with a same-named global', '
+our $n = "global";
+my %f;
+for my $n ("A".."C") { $f{$n} = sub { $n } }
+print $f{A}->(), $f{B}->(), $f{C}->(), " $n\n";
+');
+
+test_transpile('foreach over a package global still localizes for callees', '
+our $g = "before";
+sub peek { return $g }
+for $g (1..3) { print peek(), "\n" }
+print peek(), "\n";
+');
+
 done_testing();
