@@ -4,6 +4,98 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 384 (2026-08-12, Opus) — #294 shipped; #291 attempted in full, MEASURED not shippable, reverted with four blockers filed
+
+**Shipped: #294.**  Since the direction-D flip an ordinary global and a lexical
+are the SAME symbol, so the foreach macros decide "localize the cell" vs "bind
+a lexical" by asking whether the loop variable names a global symbol macro in
+their macroexpansion environment (`%p-cell-loop-var-p`).  That reading is right
+for `foreach $x` and WRONG for `foreach my $x`, whose own declaration is not in
+the environment yet — with a same-named package variable around, the loop
+localized the cell and a sub called from the body saw the loop value:
+
+    our $i = "global"; sub see { $i }
+    for my $i (1..3) { print see() }     # perl: global x3.  PCL was: 1 2 3
+
+The compiler now states it: **`:my t`**, after `:label`, before the body, from
+BOTH foreach emitters — Parser2's compound branch and the v1 seam's
+`_process_foreach_statement`, which is still live for block-form args and
+anon-sub bodies (measured reachable in 20+ corpus files).  `parse-loop-keys`
+returns it as a fourth value and the two expanders consult it before the
+predicate, so `%p-cell-loop-var-p` is now only ever asked about an UNDECLARED
+loop variable.  corpus-diff: 44 files, every hunk exactly a `:my t` insertion.
+ir-spec §6.2 gains the normative split; three guard rows incl. the inverse
+(`foreach $globalvar`, where perl DOES localize and a callee must see it).
+The three checked-in artifacts were regenerated for it (`398ad80`) — a311943
+had bumped the generation without them.
+
+**Gate 138 files / 5095 tests PASS (cold); full sweep GATE clean — 0 new /
+0 fixed, TOTAL 18498 → 18506 (+8, the standing pass-baseline shortfall #292
+owes), 6 UNSTABLE crash-file rows on the s341/s383 noise list.**
+
+**#291 was executed end to end and then REVERTED.**  All three families were
+deleted (corpus rename bindings 716/128/5 → 36/0/0, ~345 lines out of
+Parser2.pm + ExprToCL.pm), the Pl/t gate was green at 5104, and then the full
+sweep found 6 new failures + a LOST file.  The work is in the reflog
+(enabler `1b444ea`, families `ada7876` / `423c611` / `f5ff1ae`); main carries
+only #294 and the artifact regen.
+
+**What the attempt established — the plan's premise is half right.**
+`docs/direction-d-plan.md` §4 step 3 says the renames are redundant post-flip
+because "a `my` near a global is a plain lexical shadow".  That is one of their
+TWO causes.  The other: `_seg_lex` makes `_forward_global_decls` SKIP any name
+the section let-binds anywhere, so without a rename the GLOBAL loses its
+declaration and is unbound at load — probed: deleting `_rename_poisoned_block_
+mys` alone drops `(p-defcell @a …)` and the file-level `@a` crashes.  Both
+causes are the same `defvar` fact, so the enabler is to drop that exclusion in
+FILE mode only (EVAL mode keeps it: there the same list is the p-eval-thunk's
+capture PARAMETERS, bound from the CALLER's lexicals — a different question the
+flip did not touch).  With the enabler, **#205's two s329 probes run identical
+to perl** and the sweep TOTAL rises to 18529 (+31).
+
+**And what it uncovered — four blockers, each now a task with a reproducer.**
+Every one is something the renames were quietly IMPLEMENTING, not merely
+dodging:
+
+- **#296 `my $a` / `my $b` is a DYNAMIC bind.**  The exception partition keeps
+  those names `defvar` (the sort lowering needs them special, #287), so
+  `(let (($a …)) …)` is a dynamic rebinding and a closure made inside loses the
+  value at scope exit.  `sub mk { my $a = shift; sub { $a } }` returns nothing
+  where perl returns "F"/"G".  **PRE-EXISTING — probed identical on plain main
+  (771614e)**; closure.t only hit it because the block rename had been giving
+  the declaration a non-special symbol.  Fix is a design call: rename
+  exception-named lexicals (name-decidable, one GlobalPartition call), or
+  shrink the partition by giving sort a `p-local-cell` bind.
+- **#297 a `my` in a C-for CONDITION has no `let` at all** — it lowers to a bare
+  assignment into the package cell (`for (my $i=0; (my $k=$i) < $j; ++$i)` left
+  `$k` defined afterwards).  The `__cond__` rename was the only thing scoping
+  it; `while (my $x = …)` has its own let and is unaffected.
+- **#298 `my $c1 = bless $c1, "C3"`** (a self-referential init whose depth-0
+  comma is a list-operator separator, not a statement tail) becomes a hard
+  refusal — bless.t TRANSPILE_FAIL, 106 rows LOST.  `_rename_decl_within`
+  deliberately skips the decl's own RHS, so the rename was producing exactly
+  perl's "RHS reads the outer variable"; the no-tail path already does this
+  without any rename via `(p-box-init …)`.
+- **#299 the enabler ALONE costs 5 closure.t rows**, cause unidentified.
+  corpus-diff of closure.t between the two trees is EXACTLY 47 added
+  `(p-defcell …)` lines and nothing else, so a "dead" cell is not
+  emission-neutral — the same risk class as #294's `%p-cell-loop-var-p`, and
+  the reason to look for other places that read "has a cell" as a proxy for
+  "is a global".  The isolated `linger`/Watch snippet does NOT reproduce
+  (watch=1 on both trees, DESTROY-not-fired as documented), so the residue is
+  file-context dependent.
+
+**The guard rows survive the revert.**  All 20 rows in
+`Pl/t/transpile-test-10.t` — the three #294 foreach rows, #205's hidden-
+readline probe, and one row per deleted family — pass with the renames in
+place, because they assert perl's semantics rather than the mechanism.  They
+are the acceptance bar when #291 is retried.
+
+**Order for the retry (#291 now blocked on all four):** #296 → #297 → #298 →
+#299, then the enabler and the three deletions as before.
+
+---
+
 ## Session 383 (2026-08-11, Fable) — #295 ruled and fixed: the pad chain is lexicalized, no third capture route; the #290 flip merges
 
 Reviewed the s382h flip commit (approved — the partition routing, the

@@ -2357,3 +2357,33 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
 - **This is a PRECONDITION for #291**: the poisoned-`my` deletion makes more
   names carry cells, which is exactly what turns this latent guess into
   live miscompiles.
+
+## s384b (2026-08-12, Opus) — #291 MEASURED NOT SHIPPABLE AS PLANNED; four blockers filed
+
+- **The poisoned-`my` renames have TWO causes, and `direction-d-plan.md` §4
+  step 3 names only one.**  Besides "a `defvar` poisons the section's own
+  `let`", `_seg_lex` makes `_forward_global_decls` SKIP any name the section
+  let-binds, so without a rename the GLOBAL loses its declaration and is
+  unbound at load (probed: deleting the block-my pass alone drops
+  `(p-defcell @a …)`).  The enabler is to drop that exclusion in FILE mode
+  only — **EVAL mode keeps it**, because there the same list is the
+  p-eval-thunk's capture PARAMETERS from the CALLER, a question the flip did
+  not touch.
+- **The renames were IMPLEMENTING three things, not just dodging one.**  Each
+  is now a blocker task with a live reproducer: **#296** `my $a`/`my $b` is a
+  DYNAMIC bind because the exception partition keeps them `defvar` (closures
+  lose the value; PRE-EXISTING, probed on plain main); **#297** a `my` in a
+  C-for CONDITION has no `let` at all and writes the package cell; **#298**
+  `my $x = <self-ref with a list-operator comma>` becomes a hard refusal,
+  because `_rename_decl_within` skips the decl's own RHS and so was producing
+  perl's "RHS reads the OUTER variable" for free.
+- **#299: a "dead" cell is NOT emission-neutral.**  The enabler alone (declare
+  every referenced name) costs 5 closure.t rows; corpus-diff shows the ONLY
+  change to that file is 47 added `p-defcell` lines.  Same risk class as
+  #294's `%p-cell-loop-var-p` — **before widening what gets a cell, grep for
+  every place that reads "this name has a cell" as a proxy for "this name is
+  a global"**.
+- **Guard rows outlive a reverted mechanism**: all 20 rows of
+  `Pl/t/transpile-test-10.t` pass both with and without the renames, because
+  they assert perl's semantics via `test_transpile` rather than the emitted
+  spelling.  They are the acceptance bar for the retry.
