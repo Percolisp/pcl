@@ -47,9 +47,31 @@ plus the nested-scope family).  New combined guard row in
 levels, and the `my $fact` recursive factorial with `local` of an ordinary
 global inside eval mode — the p-local-cell interaction-5 shape my change
 could most plausibly have broken; probed byte-identical vs perl).  Pl/t
-gate **138 files / 5092 tests PASS** (prove-core).  Full sweep + board +
-bench run this session below; flip merged to main after they came back
-clean.
+gate **138 files / 5092 tests PASS** (prove-core).
+
+**The remaining #290 gates, all green, and the flip is MERGED to main
+(ff, `8a273fe`).**  Full sweep: **GATE clean — 0 new / 0 fixed, TOTAL
+18498 → 18506 (+8)**; the 6 UNSTABLE rows are above-abort-point churn in
+the standing PARTIAL crash files, and method.t (the one not on the s341
+noise list) re-ran serially at exactly its baseline 93+38/163 — load
+noise, serial verdict replaces (s335 rule).  `tools/bench-exec.pl`: no
+flip regression on any row — cfor 0.26x, collatz 0.41x, strcat 4.9x
+reflect perf work landed since the recorded table; pack/packunpk
+~1147x/~1355x match the recorded pre-existing #74 numbers; the `local`
+41ns concern is answered by the partition itself (hot locals are magic
+vars, still defvar).  14-dist CPAN board vs the s343 TSV: **ok 1794 →
+2071, not-ok 674 → 385**; of the 35 moved rows only two moved DOWN, and
+both reproduce IDENTICALLY on main a0732cf (Role-Tiny stub.t 2/2 = #208
+drift vs the stale baseline; Text-Balanced 05_extmul.t rc=124 timeout on
+both sides) — nothing on the board is attributable to the flip.
+
+**Housekeeping owed to #292**: the serial method.t re-run clobbered
+`.faillog`, so the +8 pass-baseline re-bless (eval.t 114 → 121) could not
+be taken from this run's gate-green faillog; #292's companion sweep
+re-blesses per the #223 procedure.  Until then the baseline is merely
+LOW, which the gate tolerates, and the new eval.t rows are guarded by the
+transpile-test-10.t row.  #290 and #295 closed; queue is #291 (delete the
+poisoned-my machinery — #205 closes with it) → #292 (fuzz + suite net).
 
 Direction D's step 2 (`docs/direction-d-plan.md` §4), the one commit the two
 pre-work commits were built for.  Emission changed at every declaration site
