@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-131
+;;; pcl: pipeline=v2 gen=v2-132
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -69,7 +69,10 @@
     (block nil
       (let ((*wantarray* :void))
         (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
-        (p-foreach ($u (p-cast-@ "UNIVERSAL::ISA")) (p-if (p-str-eq $u $class) (p-return 1)))
+        (p-foreach ($u (p-cast-@ "UNIVERSAL::ISA"))
+          :my
+          t
+          (p-if (p-str-eq $u $class) (p-return 1)))
         (p-return 0)))))
 
 (p-sub pl-invalidate_all_method_caches (&rest %_args) (p-args-body (block nil (p-return))))
@@ -114,11 +117,17 @@
                   (p-if (p-! @seqs) (p-last))
                   (let (($cand (make-p-box nil)))
                     (p-foreach ($seq @seqs)
+                      :my
+                      t
                       (let (($head (make-p-box nil)))
                         (p-my-= $head (p-aref-deref $seq 0))
                         (let (($in_tail 0))
                           (p-foreach ($s @seqs)
+                            :my
+                            t
                             (p-foreach-range-raw ($i 1 (p-array-last-index $s))
+                              :my
+                              t
                               (p-if (p-str-eq (p-aref-deref $s $i) $head)
                                 (progn (setf $in_tail 1) (p-last))))
                             (p-if $in_tail (p-last)))
@@ -132,6 +141,8 @@
 ")))
                     (p-push @result $cand)
                     (p-foreach ($seq @seqs)
+                      :my
+                      t
                       (p-if (p-&& (p-cast-@ $seq) (p-str-eq (p-aref-deref $seq 0) $cand))
                         (p-shift (p-cast-@ $seq))))))
                 (p-return (p-backslash @result))))))))))
