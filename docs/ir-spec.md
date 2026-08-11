@@ -48,6 +48,22 @@ itself carries no host-specific semantics beyond them.
   `print;`/`say;`/`printf;` arrive as `(p-print $_)` etc., materialized by
   the codegen like every other `$_`-default form).
 - **`(declare …)` forms are host compiler advice** — droppable wholesale.
+- **No host-implementation symbols appear in the tree** (normative, and
+  cheaply checkable: `./pl2cl FILE | grep -ac 'sb-[a-z]*:'` is **0** over
+  the whole corpus, measured s382g). The runtime is free to use SBCL
+  internals — it does, extensively — but every such mechanism reaches the
+  emitted code wrapped in a `p-*` macro, so a translator reimplements the
+  vocabulary of §10 and never an implementation detail.
+  **This is an invariant to hold, not just a fact about today**: it would
+  be easy to lose. Direction D (task #289) declares each ordinary package
+  global as a symbol macro over a directly-addressed global cell, which in
+  its natural spelling would put `sb-ext:symbol-global-value` at *every
+  global declaration and every `local`* — thousands of sites. It does not,
+  because both halves are runtime macros (`p-defcell`, `p-local-cell`) and
+  the emitted forms stay `(p-defcell $x (make-p-box nil))` /
+  `(p-local-cell $x INIT …)`. A port then owes two macro definitions
+  instead of a new convention at every declaration. Any future change that
+  needs a host primitive in emitted code should reach for the same shape.
 - **Order is the program.** A file is a sequence of top-level forms
   executed in order by `load`. There is no linker step: a name must be
   defined by an earlier form (or a forward declaration) before a later

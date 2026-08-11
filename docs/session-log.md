@@ -57,6 +57,21 @@ partition-clash directions confirmed loud.  New guard
 retroactively — step 1 shipped it with only an ad-hoc check.  Gate 137 /
 5079 green.
 
+**An IR invariant, found while answering a USER question and now normative.**
+Measured: the emitted CL contains **zero** `sb-*` symbols across the whole
+corpus.  The runtime uses SBCL internals freely, but the generated tree never
+has — which is what makes `ir-spec.md`'s "translate this elsewhere" purpose
+real.  Direction D could easily have ended that by accident: a
+symbol-macro-over-a-global-cell in its natural spelling puts
+`sb-ext:symbol-global-value` at *every* global declaration and *every*
+`local` — thousands of sites.  It does not, because both halves are runtime
+macros and the emitted forms stay `(p-defcell $x …)` / `(p-local-cell $x …)`,
+so a port owes two macro definitions instead of a new convention everywhere.
+Written up as normative in `ir-spec.md` §1 and `DECIDED.md`, with the
+one-line check (`grep -ac 'sb-[a-z]*:'` = 0) added to #290's gate list —
+and #290's step 1 corrected, since its body had until now told the next
+session to emit the expansion inline.
+
 #290 is now pure plumbing at four places, all named in the task body: both
 runtime macros exist and are guarded, and the partition that chooses between
 them is decided and measured.  What is left is the two emitters, ir-spec, the

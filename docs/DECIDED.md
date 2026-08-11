@@ -204,6 +204,18 @@ not-supported.md → only then probe.*
   missing the cl-ppcre extended-mode workaround, and (s321) choking on the
   `/xx` option, with the `handler-case` turning the error into a quiet test
   FAILURE.  Route through `%pcl-create-scanner` → task #179, CLAUDE.md 11.
+- **The emitted CL contains NO host-implementation symbols — a host
+  primitive reaches generated code only wrapped in a `p-*` macro.**
+  Checkable: `./pl2cl FILE | grep -ac 'sb-[a-z]*:'` is 0 over the corpus
+  (measured s382g).  The runtime uses SBCL internals freely; the IR does
+  not, so a translator reimplements the `p-*` vocabulary and never an
+  implementation detail.  Direction D is the worked example of holding the
+  line: a symbol-macro-over-global-cell would naturally have put
+  `sb-ext:symbol-global-value` at every global declaration and every
+  `local`, and instead lives inside `p-defcell`/`p-local-cell` → two macro
+  definitions for a port instead of thousands of sites.  Any future change
+  needing a host primitive in emitted code takes the same shape →
+  `ir-spec.md` §1, tasks #289/#290, s382g.
 - **A regex PATTERN interpolates through the one scanner, and each reference
   lowers by being COMPILED AS CODE.**  `Pl::InterpScan` (perl's own
   `S_intuit_more`/`Perl_regcurly`) decides where a reference starts and
