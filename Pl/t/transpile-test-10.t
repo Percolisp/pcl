@@ -530,4 +530,31 @@ test_transpile('a later declaration of an exception name owns the uses after it'
 ');
 
 
+# ---------------------------------------------------------------------------
+# #205: a section-let-bound name that is ALSO needed as a package global.  The
+# forward-decl pass used to SKIP any name the section let-binds anywhere (a
+# `defvar` would have proclaimed it special and turned that `let` into a
+# dynamic rebind), so the global never existed: "$fh is unbound" at load.  The
+# whole poisoned-`my` rename family existed to dodge that by renaming the
+# LEXICAL; since the flip a `p-defcell` symbol macro and a `let` of the same
+# name coexist, so the declaration is simply emitted (#291).
+#
+# The shape needs a HIDDEN use no Symbol-token scan sees: `<$fh>` readline of
+# a file-level `open my $fh` (vetoed to the global by the let-hoist), inside a
+# sub that ALSO block-shadows the name.  `looper` is the half that must keep
+# working: a compound-header decl covering its own uses, no global needed.
+# ---------------------------------------------------------------------------
+test_transpile('let-bound name that is also the veto global gets its cell', '
+my $tmp = "/tmp/pcl-205-probe-$$.txt";
+open my $w, ">", $tmp or die "w: $!";
+print $w "hello\n";
+close $w;
+open my $fh, "<", $tmp or die "r: $!";
+sub tricky { my $line = <$fh>; { my $fh = "shadow"; } chomp $line; return "got:$line" }
+sub looper { my $s = ""; for my $fh (1..2) { $s .= "i$fh" } return $s }
+print tricky(), " ", looper(), "\n";
+close $fh;
+unlink $tmp;
+');
+
 done_testing();

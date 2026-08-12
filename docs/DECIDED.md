@@ -2602,3 +2602,36 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   (`sub DEBUG { $DEBUG_VAL }` never inlines; SET_DEBUG has zero callers).
   Fix = `use constant DEBUG => $ENV{PCL_PEXPR_DEBUG} // 0` — #303 step 0.
   Hot-spot numbers (accessors, `CLForm::_flat` ×1.24M) recorded in #213.
+
+## s388b (2026-08-12, Opus) — #291's enabler: the forward-decl pass stops excluding let-bound names (#205 closes)
+
+- **The poisoned-`my` renames had TWO causes, and the plan named only one.**
+  The flip removed "a `defvar` poisons the section's own `let`" — but the
+  renames also existed because `_seg_lex` made `_forward_global_decls` SKIP any
+  name the section let-binds anywhere, so without a rename the GLOBAL lost its
+  declaration and was unbound at load (probed: deleting
+  `_rename_poisoned_block_mys` alone drops `(p-defcell @a …)`).  Both causes are
+  the same `defvar` fact, so both die with it.
+- **FILE mode: the exclusion is gone** — every referenced name gets its cell,
+  and a `let` of the same name shadows the symbol macro.  **EVAL mode keeps
+  it**: there the list is not declarations but the p-eval-thunk's capture
+  PARAMETERS, bound from the CALLER's lexicals, and a name the eval region
+  declares itself is not a caller capture.  That question is untouched by the
+  flip.  The switch is the presence of `$free_out`, the parameter that routes
+  the list to the thunk.
+- **Cost, measured s384: +1.5%–7% emitted lines** (inert `p-defcell`s for names
+  that are only ever lexical here: my.t +20, sort.t +58, pack.t +150).
+  Accepted — the alternative is guessing a name's role from an assembled-text
+  scan, which is what the renames were, and they were scope-blind three times
+  (#205, #265, #272).  A future exact answer is the bind-once symbol table
+  (`var-handling-review-s379.md` direction B/C), not a fourth approximation.
+- **#205 CLOSES here** (the s329 probe — a hidden `<$fh>` readline of a
+  file-level `open my $fh`, inside a sub that also block-shadows the name — runs
+  identical to perl; it crashed "unbound" before).  Guard row in
+  `Pl/t/transpile-test-10.t`.
+- **PRECONDITIONS, all shipped first**: #294 (`:my t`), #297, #298, #296.
+- **A green gate is NOT the check when a merge touched a TEST file — the COUNT
+  is** (s388, caught live): a botched conflict resolution deleted 12 rows from
+  `transpile-test-10.t` and the gate still said PASS, at 5096 where 5109 was
+  due.  Verify a rebuilt test file against its pre-merge version by diff before
+  trusting the run.

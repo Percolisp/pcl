@@ -5417,13 +5417,29 @@ sub _forward_global_decls {
   # any assignment unbound at load (postfixderef.t; v1's list never had them).
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
                                         $a $b);
-  # Exclude names let-bound in THIS section ($seg_lex, recorded by _reg_lex
-  # during the section's lowering — NOT the now-scoped _let_bound_vars, which
-  # has shrunk back to top-level scope by the time this assembly-phase pass
-  # runs).  Per-section, not file-cumulative: a name let-bound only in some
-  # OTHER section but used as a package global here still needs this
-  # section's defvar (see the parse() comment at the _seg_lex reset).
-  my $lb = $seg_lex // {};
+  # Names let-bound in THIS section ($seg_lex, recorded by _reg_lex during the
+  # section's lowering — NOT the now-scoped _let_bound_vars, which has shrunk
+  # back to top-level scope by the time this assembly-phase pass runs).
+  #
+  # In FILE mode this set no longer excludes anything (#291, direction D).  The
+  # exclusion existed because a `defvar` PROCLAIMS its symbol special, so
+  # declaring a name the section also let-binds turned that `let` into a
+  # dynamic rebinding — the whole poisoned-`my` rename family (`__shadow__`,
+  # `__cond__`, `__emb__`) existed to dodge it by giving the LEXICAL a fresh
+  # name so the GLOBAL could keep its declaration.  Since the flip an ordinary
+  # global is a `p-defcell` symbol-macro, which a `let` of the same name simply
+  # SHADOWS — declaration and lexical coexist, and the renames are gone.  The
+  # cost is a dead cell for a name that is only ever lexical here; the
+  # alternative (guessing which of the two roles a name plays from an
+  # assembled-text scan) is what the renames were, and it was scope-blind three
+  # times over (#205, #265, #272).
+  #
+  # In EVAL mode the set still excludes, because there this list is not
+  # declarations at all: $free_out routes it to the p-eval-thunk's capture
+  # PARAMETERS, bound from the CALLER's lexicals.  A name the eval region
+  # declares itself is not a caller capture, and the flip says nothing about
+  # that question.
+  my $lb = $free_out ? ($seg_lex // {}) : {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
   my (%seen, %cross, %caret, %punct);
   for my $line (split /\n/, $text) {
