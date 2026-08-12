@@ -573,4 +573,21 @@ $s = "S-global";
 print "out: @a $s $h{k}\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #291 family 2 (`__cond__`, defins.t): a `my` in a CONDITION or C-for head
+# whose name is also a package global.  Same story as family 1 — the head's
+# `my` is a lexical shadow, the global keeps its cell and its value.  The
+# `our` spelling is included because `our` is what genuinely creates a global,
+# and it was the case the deleted pass treated as most certainly poisoned.
+# ---------------------------------------------------------------------------
+test_transpile('condition-my and C-for-my shadow same-named package globals', '
+our $err = "E-global";
+our $i   = "I-global";
+my @l = (1,2);
+while (my $l = shift @l) { print "w:$l\n" }
+if (my $err = "E-inner") { print "if:$err\n" }
+for (my $i = 0; $i < 2; $i++) { print "f:$i\n" }
+print "out: $err $i\n";
+');
+
 done_testing();

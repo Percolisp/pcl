@@ -89,18 +89,22 @@ like($si, qr/"\(" \$e__shadow__\d+ "\)"/,
 like($si, qr/\(p-join \|\$"\| \@r\) " " \$e\)/,
      'interp text outside the shadow block keeps the outer $e');
 
-# Poisoned condition-my (same name later used as a package global) is renamed
-# to $x__cond__N so the global gets its forward defvar (defins.t crash).
+# A condition-my whose name is ALSO a package global (defins.t crash): the two
+# roles now share the name — the construct's `my` is a plain `let`, which
+# lexically shadows the global's p-defcell symbol macro.  Until #291 the
+# lexical was renamed to $name__cond__N, because a `defvar` of the global
+# would have made that `let` a dynamic rebind.
 my $pc = Pl::Parser2->parse_code(<<'EOF');
 my @l = (1,2);
 while (my $name = shift @l) { print $name; }
 $name = 9;
 print $name;
 EOF
-like($pc, qr/\$name__cond__\d+/, 'poisoned condition-my renamed');
+unlike($pc, qr/__cond__/, 'condition-my keeps its name (the rename is gone)');
+like($pc, qr/\(let \(\(\$name /, 'the condition-my is let-bound — a lexical shadow');
 like($pc, qr/\(p-defcell \$name /, 'the package global $name still gets its declaration');
 
-# A self-contained condition-my (no outside use) keeps its name — zero churn.
+# A self-contained condition-my (no outside use) is unchanged too.
 my $cc = Pl::Parser2->parse_code(
   q{my @l = (1,2); while (my $line = shift @l) { print "$line\n"; }});
 unlike($cc, qr/__cond__/, 'self-contained condition-my not renamed');
@@ -678,14 +682,18 @@ print "@r\n";
 EOF
 unlike($cm, qr/\$i__cond__/,
        'cond-my: foreach-my siblings do not poison the name (no rename)');
-# INVERSE: a genuine use OUTSIDE every binding construct still poisons → rename.
+# The case that used to rename: a genuine use OUTSIDE every binding construct.
+# Both roles keep the name now — the C-for head binds a `let`, and the global
+# gets its cell for the trailing `print $i` (#291).
 my $cm2 = Pl::Parser2->parse_code(<<'EOF');
 $i = "GLOBAL";
 for (my $i = 0 ; $i < 2 ; $i++) { print $i }
 print $i;
 EOF
-like($cm2, qr/\$i__cond__/,
-     'cond-my INVERSE: a global use outside the construct still renames it');
+unlike($cm2, qr/\$i__cond__/,
+       'cond-my: a global use outside the construct no longer renames it');
+like($cm2, qr/\(let \(\(\$i /, 'the C-for head my is let-bound — a lexical shadow');
+like($cm2, qr/\(p-defcell \$i /, 'the package global $i still gets its declaration');
 
 # ---- E4.1 pre-work (s342d, task #229): the two perl CORE modules the s342c
 # ---- live-v1 audit found still gating (docs/v1-live-share-audit.md, F5).
@@ -724,13 +732,11 @@ print f(), "\n";
 EOF
 unlike($cm3, qr/\$err__cond__/,
        'cond-my: a plain `my ($vobj, $err)` decl does not poison the name');
-# INVERSE 1: a REAL use of the name outside every construct still poisons, so
-# the rename still fires.  It is no longer a whole-file gate when a construct
-# holds a STRING EVAL (#254 B-i, s363): `$err__cond__N` is a let-bound lexical
-# and _eval_lexical_alist strips the suffix back to `$err`, so an eval naming
-# the original still reaches it — the same waiver the seam my-shadow rename has
-# had since M-F.  (This row asserted the old refusal; the poisoning half of its
-# claim is what mattered and is kept.)
+# INVERSE 1: a REAL use of the name outside every construct.  This used to
+# rename (and, before #254 B-i, gate the whole file when the construct held a
+# STRING EVAL).  Since #291 there is no rename at all: the condition-my is a
+# `let`, which lexically shadows the global's cell, and the eval inside still
+# sees it through _let_bound_vars under its own name.
 my $cm4 = eval { Pl::Parser2->parse_code(<<'EOF') };
 sub f {
   my ($vobj, $err);
@@ -739,15 +745,19 @@ sub f {
 }
 EOF
 is($@, '', 'cond-my: a string eval in the construct no longer gates the file');
-like($cm4 // '', qr/\$err__cond__/,
-     'cond-my INVERSE: a real use outside the constructs still poisons (renames)');
-# INVERSE 2: an `our` declaration DOES create the global, so it still poisons.
-like(Pl::Parser2->parse_code(<<'EOF'), qr/\$err__cond__/,
+unlike($cm4 // 'x', qr/__cond__/,
+       'cond-my: a real use outside the constructs no longer renames');
+like($cm4 // '', qr/\(let \(\(\$err /,
+     'cond-my: the construct binds a lexical $err over the global');
+# INVERSE 2: an `our` declaration DOES create the global — both roles, one name.
+my $cm5 = Pl::Parser2->parse_code(<<'EOF');
 our $err;
 if (my $err = "INNER") { print $err }
 print $err;
 EOF
-     'cond-my INVERSE: `our $err` still counts as a live global (renames)');
+unlike($cm5, qr/__cond__/, 'cond-my: `our $err` beside a condition-my needs no rename');
+like($cm5, qr/\(p-defcell \$err /, 'cond-my: the `our` global still gets its cell');
+like($cm5, qr/\(let \(\(\$err /,   'cond-my: the condition-my still gets its lexical');
 
 # ---- E4.1 pre-work (s342f, task #227): eval-mode trailing declarations.
 # The audit's CPAN half of family F2 was not syntax probes at all — it was
