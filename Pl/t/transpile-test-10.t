@@ -557,4 +557,20 @@ close $fh;
 unlink $tmp;
 ');
 
+# ---------------------------------------------------------------------------
+# #291 family 1 (`__shadow__`, s299 / postfixderef.t): a `my` in a nested BARE
+# BLOCK whose name is also a package global at file level.  The block lexical
+# used to be renamed to NAME__shadow__N so the global could keep its
+# declaration; now both keep the name — the `let` shadows the symbol macro,
+# and the global's value survives the block untouched.
+# ---------------------------------------------------------------------------
+test_transpile('block my shadows a same-named package global, all three sigils', '
+@a = (1,2,3);
+$s = "S-global";
+%h = (k => "H-global");
+{ my ($s, @a, %h); @a = (4,5); $s = "S-block"; $h{k} = "H-block";
+  print "in: @a $s $h{k}\n"; }
+print "out: @a $s $h{k}\n";
+');
+
 done_testing();

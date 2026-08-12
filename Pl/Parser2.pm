@@ -1381,9 +1381,12 @@ sub parse {
   $self->{_shadow_rename_counter} = 0;
   $self->{_emb_rename_counter} = 0;
   $self->_rename_poisoned_cond_mys($_) for @segments;
-  # s299 sibling pass: nested-bare-block `my` shadowing a package GLOBAL of
-  # the same name (see the sub's comment).
-  $self->_rename_poisoned_block_mys($_) for @segments;
+  # (The s299 sibling pass for a nested-bare-block `my` shadowing a package
+  # global of the same name is GONE, #291: the block lexical and the global
+  # now coexist under their shared name — `let` over `p-defcell` is a lexical
+  # shadow — so there is nothing left to dodge.  `_shadow_rename_counter`
+  # still numbers the v1-SEAM shadow rename, _gate_seam_my_shadow, whose cause
+  # is the seam's _let_bound_vars contract and not the declaration model.)
   # #265 sibling pass: expression-embedded `my` INSIDE a named sub whose name
   # another sub also mentions — the let-hoist's veto is scope-blind there.
   $self->_rename_vetoed_embedded_mys($_) for @segments;
@@ -4783,18 +4786,6 @@ sub _rename_poisoned_cond_mys {
   }
 }
 
-# W8.5 sibling (s299): a `my` inside a NESTED BARE BLOCK whose name is ALSO
-# used as a package global elsewhere in the segment (postfixderef.t: global
-# @a at file level + `my ($s,@a,%h)` inside a block).  The block lexical
-# registers in _seg_lex, which suppresses the global's forward defvar — the
-# global is then unbound at load.  Same cure as the cond-my pass: rename the
-# block-scoped lexical (the block is its whole scope) to NAME__shadow__N —
-# the suffix _eval_lexical_alist already strips, so string eval inside the
-# block still reaches the shadow by its original name.  Only poisoned names
-# rename; a blocked site is left untouched (the global stays unbound exactly
-# as before — never worse).  Sub bodies are skipped (their lexicals are the
-# capture machinery's turf); foreach loop-vars and condition-mys are skipped
-# (loop/cond scope, handled by their own machinery).
 # #296: a `my`/`state` declaring an EXCEPTION-partition name.
 #
 # Since the direction-D flip an ORDINARY global is a symbol macro over a cell,
@@ -4940,98 +4931,6 @@ sub _lexical_decl_scope {
     return ($p, undef) if $p->isa('PPI::Structure::Block');
   }
   return ($s->top, undef);
-}
-
-sub _rename_poisoned_block_mys {
-  my ($self, $seg) = @_;
-  my $stmts = $seg->{stmts};
-
-  # 1. Collect nested-block my-decl sites: [block, my-word, symbol].
-  my @sites;
-  for my $top (@$stmts) {
-    next unless ref $top && $top->isa('PPI::Node');
-    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
-                                   && $_[1]->content eq 'my' }) || [] }) {
-      # The declaring statement must be a plain variable/expression statement
-      # (excludes `foreach my $x` — parent is the Compound — and other
-      # declarator positions).
-      my $ds = $w->parent;
-      next unless $ds && (ref($ds) eq 'PPI::Statement::Variable'
-                          || ref($ds) eq 'PPI::Statement'
-                          || ref($ds) eq 'PPI::Statement::Expression');
-      my ($p, $block, $bad) = ($w->parent, undef, 0);
-      while ($p && $p != $top) {
-        if ($p->isa('PPI::Structure::Condition')
-            || $p->isa('PPI::Structure::For')) { $bad = 1; last }
-        if ($p->isa('PPI::Structure::Block')) { $block = $p; last }
-        $p = $p->parent;
-      }
-      next if $bad || !$block;
-      my ($q, $in_sub) = ($block, 0);
-      while ($q) {
-        if ($q->isa('PPI::Statement::Sub')) { $in_sub = 1; last }
-        $q = $q->parent;
-      }
-      next if $in_sub;
-      my $nx = $w->snext_sibling or next;
-      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-               : ();
-      push @sites, [$block, $w, $_]
-        for grep { $_->content =~ /^[\$\@\%]\w+$/ } @syms;
-    }
-  }
-  return unless @sites;
-
-  my %by_name;
-  push @{ $by_name{ $_->[2]->content } }, $_ for @sites;
-
-  NAME: for my $old (sort keys %by_name) {
-    my $sigil = substr($old, 0, 1);
-    (my $bare = $old) =~ s/^[\$\@\%]//;
-    my %in_block = map { (refaddr($_->[0]) => 1) } @{ $by_name{$old} };
-
-    # 2. Poison test: a NON-declarator use of the name outside all of its
-    #    blocks.  A my/our/local DECLARATOR outside means the name is a real
-    #    lexical/global declaration elsewhere — the suppression is then that
-    #    declaration's business, not ours: skip the whole name.
-    my $inside_one = sub {
-      my ($tok) = @_;
-      for (my $p = $tok->parent; $p; $p = $p->parent) {
-        return 1 if $p->isa('PPI::Structure::Block') && $in_block{refaddr $p};
-      }
-      return 0;
-    };
-    my $poisoned = 0;
-    for my $top (@$stmts) {
-      next unless ref $top && $top->isa('PPI::Node');
-      for my $s (@{ $top->find('PPI::Token::Symbol') || [] }) {
-        next unless ($s->symbol // '') eq $old;
-        next if $inside_one->($s);
-        next NAME if $self->_symbol_is_declarator($s);
-        $poisoned = 1;
-      }
-      if ($sigil eq '@') {
-        for my $ai (@{ $top->find('PPI::Token::ArrayIndex') || [] }) {
-          next unless $ai->content eq "\$#$bare";
-          $poisoned = 1 unless $inside_one->($ai);
-        }
-      }
-    }
-    next NAME unless $poisoned;
-
-    # 3. Rename each renameable site; leave blocked ones as-is (no worse).
-    for my $site (@{ $by_name{$old} }) {
-      my ($block, $w, $s) = @$site;
-      my $why = $sigil eq '$'
-        ? $self->_shadow_rename_blocker($block, $s, 'eval_ok')
-        : $self->_state_container_blocker($block, $s, 'eval_ok');
-      next if $why;
-      $self->_rename_decl_within($block, $s,
-        $old . '__shadow__' . $self->{_shadow_rename_counter}++);
-    }
-  }
-  return;
 }
 
 # W8.5 sibling (#265, s368) — the half of the embedded-`my` story the s365 fix
