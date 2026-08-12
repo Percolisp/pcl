@@ -53,10 +53,13 @@ my $raw = `sbcl --control-stack-size 512 --noinform --non-interactive --load $ro
 # Cleanup
 unlink $lisp, "/tmp/runpcl_$$.err";
 
-# Filter SBCL noise and print
+# Filter SBCL noise and print.  Strip only LEADING blank lines (the banner
+# region) — a blanket s/^\s*\n//gm deleted every blank line the PROGRAM
+# printed, so byte-compares against perl were silently wrong for any output
+# containing "\n\n" (s386).
 $raw =~ s/^;[^\n]*\n//gm;
 $raw =~ s/^PCL (?:Runtime|Test)[^\n]*\n//gm;
 $raw =~ s/^STYLE-WARNING[^\n]*\n//gm;
-$raw =~ s/^\s*\n//gm;
+$raw =~ s/\A(?:\s*\n)+//;
 
 print $raw;

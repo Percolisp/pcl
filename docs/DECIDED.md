@@ -2472,9 +2472,51 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   comparator OBSERVED, never the resulting ORDER (an inconsistent comparator's
   order is the sort ALGORITHM's answer, perl mergesort vs SBCL stable-sort).
 - **BUILT s385 on `wip/s385-296`, gate green at 5105, and the full sweep said
-  NO** — two regressions, both written up in task #296: string-eval capture of
-  a renamed `$a` (the dynamic bind had been providing it; fix belongs at the
-  `p-eval` runtime seam, NOT in the free-name list, which would break
-  `eval 'sub { $a <=> $b }'`), and split.t −2 rows, file-context dependent.
+  NO** — two regressions, both written up in task #296.  *(The s385 shapes for
+  both were superseded by the s386 ruling — see the s386 section below: B1 is
+  an eval-mode resolution-order fix, NOT the progv seam; B2 is an isolated
+  sibling-redeclaration bug, NOT file-context dependent.)*
 - **The Pl/t gate was green with both regressions live** — for a change this
   wide the full sweep is the gate, not prove.
+
+## s386 (2026-08-12, Fable) — s385 review: both commits APPROVED; #296's two fix shapes ruled
+
+- **s385 APPROVED as shipped** (#297 + #301): gate independently re-verified
+  cold 138/5103; eight probes vs perl identical (five C-for head shapes +
+  shadow inverse + body read/write; seven heredoc spellings).  The one
+  divergence found is exactly the filed #300, behaving as documented →
+  `fable-answers-s385.md`.
+- **#296 design call RATIFIED (option (a) rename), and taking it was right**
+  — the sign-off rule selected the option needing no ask →
+  `fable-answers-s385.md` §1.  Do not re-litigate.
+- **#296-B1 RULED: NOT the progv seam** — a progv rebuilds the old
+  dynamic-extent approximation one level down (fails the escaping-closure and
+  comparator-under-`my` probes, 3/5 vs perl).  THE FIX: in eval-mode name
+  resolution the CAPTURE ALIST beats the special table — an exception name
+  that is an alist key compiles as the renamed captured lexical (the ordinary
+  `__shadow__` path: read/write/#295 pad chain inherited); no key → special,
+  unchanged.  Alist membership IS perl's "was a `my $a` in scope here".
+  Five-row acceptance table in `fable-answers-s385.md` §2a + task #296.
+- **#296-B2 DIAGNOSED: sibling same-scope redeclaration** — an earlier
+  exception-`my`'s rewrite region must STOP at a sibling redeclaration of the
+  same name (B-ii only covered NESTED redecls); two-line reproducer in task
+  #296.  The "not isolated, file-context dependent" conclusion was a
+  by-NUMBER TAP join across shifted numbering pointing at a region that in
+  fact passes → `fable-answers-s385.md` §2b.
+- **STANDING RULE (ask 3, adopted): a sweep-diff bucket count is meaningless
+  without the file's row TOTAL, in BOTH directions — and a row NUMBER is only
+  meaningful within the run that produced it.**  Join TAP by description;
+  for unnamed rows re-derive number→source from the CURRENT tree's own TAP,
+  never from the other tree's numbering → `fable-answers-s385.md` §3.
+- **Shape-assertion expectation edits (ask 4)**: substitute conjunct = the new
+  text is copied from the emission of a build whose RUNTIME behavior for that
+  snippet is perl-verified; default on sample-name collision = RENAME the
+  sample + one dedicated interaction pin row; the branch's nine edits stand →
+  `fable-answers-s385.md` §4.
+- **#300 stays filed, unscheduled** (probe-confirmed to behave exactly as
+  documented; interleave on a real cause line, no campaign) →
+  `fable-answers-s385.md` §5.
+- **runpcl/runt no longer delete the program's blank lines** — the blanket
+  `s/^\s*\n//gm` noise filter falsified byte-compares vs perl for any output
+  containing `\n\n` (leading blanks only now; fixed s386, verified
+  byte-identical on three probes).  `tools/run-dist-t.pl` never had it.

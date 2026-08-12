@@ -69,7 +69,9 @@ my $raw = do { open(my $f, '<', $out) or die "read $out: $!\n"; local $/; <$f> }
 $raw =~ s/^;[^\n]*\n//gm;
 $raw =~ s/^PCL (?:Runtime|Test)[^\n]*\n//gm;
 $raw =~ s/^STYLE-WARNING[^\n]*\n//gm;
-$raw =~ s/^\s*\n//gm;
+# Leading blanks only — a blanket s/^\s*\n//gm ate the PROGRAM's blank lines
+# (falsified byte-compares vs perl, s386).
+$raw =~ s/\A(?:\s*\n)+//;
 
 print $raw;
 
