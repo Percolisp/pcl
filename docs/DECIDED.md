@@ -2430,3 +2430,23 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   fresh instance per iteration.  Observable only by closing over it in the body
   — and it is NOT new: `while (my $x = shift @l) { push @c, sub { $x } }`
   diverges the same way and is untouched by #291.
+
+## s385b (2026-08-12, Opus) — #301: ONE predicate answers "does this heredoc interpolate?"
+
+- **A heredoc is RAW exactly when its terminator is SINGLE-quoted**, and perl
+  allows both `~` and whitespace between `<<` and a QUOTED terminator:
+  `<<'E'`, `<< 'E'`, `<<~'E'`, `<<~ 'E'` are all raw.  PCL asked this with FOUR
+  hand-written regexes and every one was narrower than perl — PExpr's `/^<<'/`
+  missed both `~` and the space, the three Parser2 copies missed the space.
+- **A miss is SILENT-WRONG**: the text goes through string interpolation, so
+  `$x`/`@y` vanish and `\n` collapses to a real newline, with no diagnostic.
+  Same class as the #138 silently deleted statement.
+- **`Pl::PExpr::TokenUtils::heredoc_is_raw` is now the only spelling** — it
+  reads `{_heredoc_content} // content` (the rename passes rewrite the marker
+  there) against `/^<<~?\s*'/`.  All four sites call it.
+- Found by #299's triage: the one perl-tests assertion that catches it
+  (closure.t RT #23265) lives inside a top-level form that dies at load today
+  (#205), so the row never ran.  corpus-diff: 1 of 111 files, the one hunk
+  being that heredoc going from a `p-string-concat` of interpolated pieces to
+  a plain string literal.  Guard row covers all seven spellings and was
+  verified to FAIL against the old predicate.

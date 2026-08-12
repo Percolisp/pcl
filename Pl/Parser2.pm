@@ -2044,7 +2044,7 @@ sub _interp_canon {
   for my $t (@{ $node->find('PPI::Token') || [] }) {
     my $c;
     if ($t->isa('PPI::Token::HereDoc')) {
-      next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;   # non-interpolating
+      next if Pl::PExpr::TokenUtils::heredoc_is_raw($t);  # #301: THE shared predicate
       $c = join '', $t->heredoc;
     } elsif ($t->isa('PPI::Token::Quote::Double')
           || $t->isa('PPI::Token::Quote::Interpolate')
@@ -3252,7 +3252,7 @@ sub _interp_token_candidate {
 sub _fix_interp_token {
   my ($t, $fix, $skip) = @_;
   if ($t->isa('PPI::Token::HereDoc')) {
-    return if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;  # non-interpolating
+    return if Pl::PExpr::TokenUtils::heredoc_is_raw($t);  # #301: THE shared predicate
     my $lines = $t->{_heredoc} || [];
     my @new = @$lines;                       # rewrite a copy, so $skip can veto
     my $hit = 0;
@@ -4872,7 +4872,7 @@ sub _interp_names {
   for my $t (@{ $node->find('PPI::Token') || [] }) {
     my $c;
     if ($t->isa('PPI::Token::HereDoc')) {
-      next if ($t->{_heredoc_content} // $t->content) =~ /^<<~?'/;   # non-interpolating
+      next if Pl::PExpr::TokenUtils::heredoc_is_raw($t);  # #301: THE shared predicate
       $c = join '', $t->heredoc;
     } elsif ($t->isa('PPI::Token::Quote::Double')
           || $t->isa('PPI::Token::Quote::Interpolate')

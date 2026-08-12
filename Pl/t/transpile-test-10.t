@@ -371,6 +371,43 @@ for (my $i = 0; (my $k = $i) < $j; ++$i) { print see(), "|", $k, "\n" }
 print "after:", $k, "\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #301 (not direction-D; lands here because this is the current NEW-TESTS file).
+# A heredoc is RAW exactly when its terminator is SINGLE-quoted, and perl allows
+# both `~` and whitespace between `<<` and a quoted terminator.  Four separate
+# hand-written regexes used to answer "does this heredoc interpolate?" and every
+# one was narrower than perl, so `<< 'E'` / `<<~'E'` / `<<~ 'E'` were run through
+# string interpolation — variables vanished and `\n` collapsed, silently.  All
+# seven spellings in ONE row: the interpolating three are the inverse, and they
+# are what a fix that simply stopped interpolating heredocs would break.
+# ---------------------------------------------------------------------------
+test_transpile('heredoc raw-vs-interpolating, all seven marker spellings', <<'PL301');
+my $x = "XX"; my @y = ("A","B");
+my %r;
+$r{"<<'E'"}   = <<'E1';
+raw $x @y \n
+E1
+$r{"<< 'E'"}  = << 'E2';
+raw $x @y \n
+E2
+$r{"<<~'E'"}  = <<~'E3';
+    raw $x @y \n
+    E3
+$r{"<<~ 'E'"} = <<~ 'E4';
+    raw $x @y \n
+    E4
+$r{'<<"E"'}   = <<"E5";
+dq $x @y \n
+E5
+$r{'<< "E"'}  = << "E6";
+dq $x @y \n
+E6
+$r{'<<~"E"'}  = <<~"E7";
+    dq $x @y \n
+    E7
+for my $k (sort keys %r) { my $v = $r{$k}; $v =~ s/\n/N/g; printf "%-10s => [%s]\n", $k, $v }
+PL301
+
 # INVERSE: a genuine below-assignment TAIL must still be refused — its tail
 # runs inside the new binding, which the p-box-init shape cannot express.
 {

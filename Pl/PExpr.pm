@@ -744,10 +744,12 @@ sub parse {
     # - - - Heredoc <<'EOF' or <<"EOF" or <<EOF
     if (ref($e1) eq 'PPI::Token::HereDoc') {
       say "parse(): Found heredoc"                   if 1 & DEBUG;
-      # For interpolated heredocs (<<"..." or <<BARE but not <<'...'),
-      # route through the string interpolation system so $var/@arr are expanded.
-      my $marker = $e1->content;   # e.g. <<'' or <<"" or <<EOF
-      if ($marker !~ /^<<'/) {
+      # For interpolated heredocs (<<"..." or <<BARE but not any of the raw
+      # single-quoted spellings), route through the string interpolation system
+      # so $var/@arr are expanded.  heredoc_is_raw is THE shared predicate —
+      # this test used to be `/^<<'/` here, which read `<< 'E'` and `<<~'E'` as
+      # interpolating and silently ate their variables (#301).
+      if (! Pl::PExpr::TokenUtils::heredoc_is_raw($e1)) {
         my $inner = join('', $e1->heredoc());
         # Route through interpolation when there's something to interpolate OR
         # any escape sequence to collapse (\$ \@ \\ \n ...): the raw-literal

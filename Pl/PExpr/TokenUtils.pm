@@ -351,6 +351,26 @@ sub decl_site {
   return { doc => Scalar::Util::refaddr($top), pos => [ $loc->[0], $loc->[1] ] };
 }
 
+# Is this PPI::Token::HereDoc a RAW (non-interpolating) heredoc?  THE one
+# predicate — every site that asks "does this heredoc interpolate?" calls it
+# (#301).  A heredoc is raw exactly when its terminator is SINGLE-quoted, and
+# perl allows both `~` (indented form) and whitespace between `<<` and a
+# QUOTED terminator: all of `<<'E'`, `<< 'E'`, `<<~'E'`, `<<~ 'E'` are raw.
+# Four hand-written regexes used to answer this and every one of them was
+# narrower than perl: PExpr's `/^<<'/` missed both `~` and the space, the three
+# Parser2 copies missed the space.  A miss is SILENT-WRONG — the text is run
+# through string interpolation, so `$x`/`@y` vanish and `\n` collapses to a
+# newline, with no diagnostic (closure.t RT #23265's fresh_perl source).
+#
+# Reads `{_heredoc_content}` first: the rename passes rewrite a heredoc's
+# marker there, and content() still holds the original.
+sub heredoc_is_raw {
+  my ($t) = @_;
+  return 0 unless ref($t) && Scalar::Util::blessed($t)
+               && $t->isa('PPI::Token::HereDoc');
+  return (($t->{_heredoc_content} // $t->content) =~ /^<<~?\s*'/) ? 1 : 0;
+}
+
 # Does site A sit at or before site B?  1 / 0, or undef when the two are not
 # comparable (either site unknown, or they come from different documents).
 sub site_precedes {
