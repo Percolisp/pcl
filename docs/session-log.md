@@ -4,6 +4,45 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 386b (2026-08-12, Fable) — USER-asked large-scale duplication review: v1 is still the PRIMARY expression compiler (88% fallback), ~3.5k lines confirmed dead
+
+**New measurement no prior review had: a dynamic call trace of every Pl::
+sub over a full 138-file corpus transpile** (wrap-all-subs tracer; the two
+standing reviews — var-handling-s379, v2-code-review — were re-verified,
+not re-derived).  Full findings: `docs/compiler-duplication-review-s386.md`.
+
+**Headline: the "doubled functionality" the user senses is LIVE, not dead.**
+`_lower_expr` ran 19,165 times; the v1 fallback `_parse_expression_form`
+fired 16,897 times — an **88% fallback rate**; ExprToCL2's native rate is
+~12%, unchanged since the s316t estimate.  126 of Parser.pm's 139 subs are
+live through the seam; v1's bucket machinery churns 171k `_emit`/279k
+`_sections` calls per corpus; Parser2 keeps its lexical registry INSIDE the
+v1 object (27 access sites).  This re-affirms #153's FOLD as the structural
+answer, adds the fallback rate as its progress metric, and prepends a
+chunk 0: move `_let_bound_vars`/`_catch_labels`/`_eval_span_captures`
+ownership into Parser2.
+
+**Confirmed-dead mass: ~3.5k lines (~10% of compiler Perl)** — E2's text→
+CLForm conversion added `*_form` twins and never deleted the old text
+emitters: ExprToCL has 35 never-called subs / 2,238 lines (`gen_funcall`
+alone is 883); BlockAnalyzer is 0/11 subs called (whole module); Parser.pm
+carries 437 lines of superseded handlers; VarAnnotator ~200 lines of W12
+text-scan remnant.  Filed as task **#303** (sequenced AFTER #291; bar =
+corpus-diff byte-identical + gate + sweep).  Eval-mode/bundle/
+instrumentation paths were excluded from all dead claims (trace covers
+file transpiles only).
+
+**Compile-time hot spots measured into #213**: `PExpr::DEBUG` is a real
+function called 4.3M times per corpus (never inlines; fix = one
+`use constant` line, #303 step 0); accessor churn (`token_utils` 8.0M,
+`node_tree` 3.1M); `CLForm::_flat` ×1.24M — direct evidence for #213's
+quadratic-nesting diagnosis.
+
+**Nothing new scheduled ahead of the correctness queue** — the sequence
+stays #296 → #291 → #292, then #303, then #153 chunk 0 + FOLD.
+
+---
+
 ## Session 386 (2026-08-12, Fable) — s385 review: APPROVED; #296's B1 seam overruled (eval-compile, not progv), B2 cracked (sibling redecl, isolated)
 
 **Both s385 commits approved as shipped.**  Gate independently re-verified

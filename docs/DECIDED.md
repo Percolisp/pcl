@@ -2520,3 +2520,24 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   `s/^\s*\n//gm` noise filter falsified byte-compares vs perl for any output
   containing `\n\n` (leading blanks only now; fixed s386, verified
   byte-identical on three probes).  `tools/run-dist-t.pl` never had it.
+
+## s386b (2026-08-12, Fable) — USER-asked duplication review: the numbers behind the queue
+
+- **v1 is still the PRIMARY expression compiler — 88% of seam expressions
+  fall back to `_parse_expression_form` (16,897/19,165); ExprToCL2 native
+  ~12%, unchanged since s316t.**  Measured by a full-corpus dynamic call
+  trace.  #153's FOLD is the ruled answer; fallback rate = its progress
+  metric; chunk 0 = move `_let_bound_vars`/`_catch_labels`/
+  `_eval_span_captures` out of the fallback_parser object →
+  `compiler-duplication-review-s386.md` §1, task #153.
+- **~3.5k lines of the compiler are confirmed dead on the corpus** — the
+  pre-E2 TEXT emitters beside their `*_form` twins (ExprToCL 2,238 lines),
+  BlockAnalyzer (whole module), 437 lines of superseded v1 handlers,
+  VarAnnotator's W12 text-scan remnant.  Deletion batch = task #303,
+  AFTER #291; bar = corpus-diff byte-identical.  Eval-mode/bundle/
+  instrumentation paths excluded from dead claims (trace = file
+  transpiles only) → review doc §2.
+- **`PExpr::DEBUG` is a real sub called 4.3M times per corpus transpile**
+  (`sub DEBUG { $DEBUG_VAL }` never inlines; SET_DEBUG has zero callers).
+  Fix = `use constant DEBUG => $ENV{PCL_PEXPR_DEBUG} // 0` — #303 step 0.
+  Hot-spot numbers (accessors, `CLForm::_flat` ×1.24M) recorded in #213.
