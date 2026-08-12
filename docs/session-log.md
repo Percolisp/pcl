@@ -4,7 +4,66 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 385 (2026-08-12, Opus) — #297 CLOSED: every `my` in a loop HEAD gets its own `let`
+## Session 385 (2026-08-12, Opus) — #297 + #301 shipped; #299 ANSWERED (premise wrong); #296 built in full, measured, NOT shipped
+
+**Three things closed, one measured and put on ice.**  Main is `4d0a38f`, gate
+138 files / 5103 tests PASS.
+
+**#301 SHIPPED (`4d0a38f`) — a silent-wrong found by #299's triage.**
+A heredoc is RAW exactly when its terminator is single-quoted, and perl allows
+both `~` and whitespace between `<<` and a QUOTED terminator.  FOUR hand-written
+regexes answered "does this heredoc interpolate?" and every one was narrower
+than perl — PExpr's `/^<<'/` missed both, the three Parser2 copies missed the
+space — so `<< 'E'`, `<<~'E'` and `<<~ 'E'` were run through string
+interpolation: variables vanished, `\n` collapsed, no diagnostic.
+`TokenUtils::heredoc_is_raw` is now the only spelling.  `<<~'EOF'` is the modern
+form, which is how a live bug stayed invisible: the one perl-tests assertion
+that catches it (closure.t RT #23265) sits inside a form that dies at load
+today (#205), so it had never run.  Guard row covers all seven spellings and
+was verified to FAIL against the old predicate.
+
+**#299 ANSWERED — its premise was wrong, nothing to fix.**  Joining closure.t's
+TAP BY DESCRIPTION (the numbering shifts, so joining by number is meaningless):
+**0 regressed, 0 lost, 19 NEW rows** (14 ok / 5 not ok); closure.t goes
+258 → **271 passing (+13)**.  The enabler does not cost rows, it buys them.
+The 19 were missing because one top-level form died at load on
+`The variable $bar is unbound` (#205) and `p-load-with-recovery` dropped it
+whole — s384 read sweep-diff's "new fails" bucket without the TOTAL line.
+The 5 newly-visible failures are honest and triaged: 3 × DESTROY-at-scope-exit
+(#198), 1 × the heredoc bug (#301, now fixed), 1 × an anon sub not cloned per
+`for`-modifier iteration.  **#291 is now blocked on #296 alone.**
+
+**#296 BUILT IN FULL AND MEASURED — branch `wip/s385-296`, not merged.**
+The design call is settled and the core fix works: an exception-partition `my`
+must be RENAMED (option (a)), not re-partitioned — option (b) costs ~41 ns per
+sort CALL, misses `my %ENV`, and disturbs #287.  All the reproducers pass, the
+Pl/t gate was green at 5105, and perl's surprising rule is preserved and
+verified (a `my $a` in scope makes a sort comparator read the LEXICAL: perl
+`a=LEX`, PCL before `a=9`, after `a=LEX`).  corpus-diff 42/111 files in four
+explained buckets, one of which is a genuine improvement (the renamed lexical
+gets the VarAnnotator's normal raw-slot verdict instead of the conservative one
+the special name forced).
+
+**The full sweep said no, twice over**, and that is the whole point of running
+it: (1) string-eval capture of a renamed `$a` breaks — the dynamic bind had
+been silently providing it, and the fix is at the runtime seam (`p-eval`
+progv-binding the exception-named alist keys), not in the free-name list, which
+would break `eval 'sub { $a <=> $b }'`; (2) split.t loses 2 rows, confirmed by
+a serial re-run, file-context dependent, not isolated.  Both are written up
+with their probes in task #296.  Same discipline as s384's #291: build it,
+measure it, and if the sweep says no, preserve the work on a branch rather than
+ship a wide semantic change with known regressions.
+
+**NEXT SESSION**: #296's two blockers (B1 is designed, B2 needs isolation),
+then #291.  Still owed: **#292's pass-baseline re-bless** (+8; the #223
+procedure needs a per-file audit — method.t, postfixderef.t, ref.t and tr.t
+were PARTIAL).  New tasks filed this session: **#300** (a loop-head `my` is
+bound once for the whole loop; `while` diverges identically, pre-existing),
+**#301** (closed).
+
+---
+
+## Session 385a (2026-08-12, Opus) — #297 CLOSED: every `my` in a loop HEAD gets its own `let`
 
 **Second of the four #291 blockers gone.**  The C-style `for` head is one
 lexical scope in perl and every `my` in it scopes to the loop — but only the

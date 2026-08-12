@@ -2450,3 +2450,31 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   being that heredoc going from a `p-string-concat` of interpolated pieces to
   a plain string literal.  Guard row covers all seven spellings and was
   verified to FAIL against the old predicate.
+
+## s385c (2026-08-12, Opus) — #296: the design is SETTLED, the implementation is on ice
+
+- **RULED: an EXCEPTION-partition `my` is RENAMED, not re-partitioned.**  CL
+  cannot lexically bind a proclaimed special and `symbol-macrolet` over one is
+  undefined behaviour, so only a different SYMBOL fixes the dynamic-rebind bug.
+  Option (b) — shrink the partition, have sort bind the pair with
+  `p-local-cell` — is REJECTED: ~41 ns per sort CALL, does not cover
+  `my %ENV`, and disturbs #287's just-shipped package-qualified pair.
+- **Not the poisoned-my family**: name-decidable (one
+  `Pl::GlobalPartition::is_exception_global` call), no poison test, no
+  WHETHER analysis.  It OUTLIVES #291, which deletes the other three passes.
+- **Ordering is load-bearing**: it must run BEFORE
+  `_rename_captured_file_lexicals` and the three poisoned-my passes, or a
+  file-level `my $a` captured by a named sub dies
+  ("Parser2 TODO: file lexical 'a__excl__0' captured by sub foo").
+- **perl's surprising rule, verified**: a `my $a` in scope makes a sort
+  comparator read the LEXICAL, not the sort-bound pair — perl `a=LEX`, PCL
+  before `a=9` (WRONG), after `a=LEX`.  A guard row asserts what the
+  comparator OBSERVED, never the resulting ORDER (an inconsistent comparator's
+  order is the sort ALGORITHM's answer, perl mergesort vs SBCL stable-sort).
+- **BUILT s385 on `wip/s385-296`, gate green at 5105, and the full sweep said
+  NO** — two regressions, both written up in task #296: string-eval capture of
+  a renamed `$a` (the dynamic bind had been providing it; fix belongs at the
+  `p-eval` runtime seam, NOT in the free-name list, which would break
+  `eval 'sub { $a <=> $b }'`), and split.t −2 rows, file-context dependent.
+- **The Pl/t gate was green with both regressions live** — for a change this
+  wide the full sweep is the gate, not prove.
