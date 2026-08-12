@@ -3589,14 +3589,10 @@ sub _eval_lexical_alist {
   # counters mint in source order, so descending N is innermost-first too.
   # Keys v1 can mint (__lex__, plain) keep the plain sort order — v1
   # emissions stay byte-identical.
-  # __cond__N strips the same way (#254 B-i, s363): the poisoned-condition-my
-  # rename (`if (my $x = …)` where a package global $x is also live) mints a
-  # LET-BOUND `$x__cond__N`, exactly like the shadow rename — so the eval body
-  # naming `$x` finds it here, and only while it is in scope.  Its counters
-  # mint in source order, so a cond-my nested inside another gets the higher N
-  # and descending N is innermost-first, as for __file__.  __emb__N (#265) is
-  # the same story one scope in: an expression-embedded `my` inside a named
-  # sub, renamed so the let-hoist's scope-blind veto stops refusing it.
+  # (The two poisoned-`my` renames `__cond__N` and `__emb__N` are GONE with
+  # #291 — a lexical and a package global of the same name coexist now, so
+  # nothing mints those suffixes and they have no entries below.  `__shadow__`
+  # survives as the v1-SEAM rename only.)
   # `state` renames
   # (`__state__`) are deliberately NOT stripped: those are defvar'd cells, not
   # let bindings, and never enter _let_bound_vars.
@@ -3605,9 +3601,7 @@ sub _eval_lexical_alist {
     $v =~ s/__lex__\d+$//;
     my $d = $v =~ s/__shadow__(\d+)$// ? $1
           : $v =~ s/__file__(\d+)$//   ? $1
-          : $v =~ s/__emb__(\d+)$//    ? $1
-          : $v =~ s/__excl__(\d+)$//   ? $1
-          : $v =~ s/__cond__(\d+)$//   ? $1 : -1;
+          : $v =~ s/__excl__(\d+)$//   ? $1 : -1;
     return ($v, $d);
   };
   my @vars = sort {

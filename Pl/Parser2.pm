@@ -1368,25 +1368,15 @@ sub parse {
   }
   $self->_rename_captured_file_lexicals($_) for @segments;
 
-  # W8.5: a condition-`my` name (while (my $name = …)) is registered let-bound
-  # (_seg_lex) so it is never defvar'd by its section — but when the SAME name is also used as
-  # a package global elsewhere in the segment (defins.t: a later
-  # `($seen ? $dummy : $name) = <FILE>`), that exclusion leaves the global
-  # unbound.  Rename the condition-declared lexical (its construct is its whole
-  # scope) to a fresh `$x__cond__N` so the global keeps its name and gets its
-  # forward defvar.  Only POISONED names are renamed (any use outside all of
-  # that name's cond-my constructs); self-contained loops keep their names —
-  # zero churn.  Runs here, pre-analysis, for the same reason as W5 above.
-  $self->{_cond_rename_counter} = 0;
+  # (#291: the two W8.5 passes that renamed a poisoned `my` — the condition-my
+  # `$x__cond__N` and the nested-bare-block `$x__shadow__N` — are GONE.  Both
+  # existed because a `defvar` of the package global would have poisoned the
+  # construct's own `let`, and because the exclusion that avoided THAT left the
+  # global undeclared; since the flip a `p-defcell` symbol macro and a `let` of
+  # the same name simply coexist.  `_shadow_rename_counter` still numbers the
+  # v1-SEAM shadow rename, _gate_seam_my_shadow, whose cause is the seam's
+  # _let_bound_vars contract and not the declaration model.)
   $self->{_shadow_rename_counter} = 0;
-  $self->{_emb_rename_counter} = 0;
-  $self->_rename_poisoned_cond_mys($_) for @segments;
-  # s299 sibling pass: nested-bare-block `my` shadowing a package GLOBAL of
-  # the same name (see the sub's comment).
-  $self->_rename_poisoned_block_mys($_) for @segments;
-  # #265 sibling pass: expression-embedded `my` INSIDE a named sub whose name
-  # another sub also mentions — the let-hoist's veto is scope-blind there.
-  $self->_rename_vetoed_embedded_mys($_) for @segments;
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
@@ -2660,8 +2650,7 @@ sub _blk_extent {
 #     a genuine same-level re-binding);
 #   - a decl in a Compound statement's HEAD (`foreach my $x`, `if (my $x…)`)
 #     — its scope is the construct, which _ref_shadowed cannot delimit, so it
-#     cannot be safely skipped by the rewrite (poisoned cond-mys are usually
-#     pre-renamed to $x__cond__N, in which case they no longer carry $bare).
+#     cannot be safely skipped by the rewrite.
 # NOT counted: a decl nested inside a Structure::Block or a named sub — a
 # distinct shadowing variable whose scope the rewrite skips via
 # _symbol_is_declarator + _ref_shadowed.  Both Statement::Variable decls and
@@ -4680,121 +4669,6 @@ sub _is_lexical_decl_name {
   return 0;
 }
 
-# W8.5 pre-pass: rename POISONED condition-my names (see the parse() comment).
-sub _rename_poisoned_cond_mys {
-  my ($self, $seg) = @_;
-  my $stmts = $seg->{stmts};
-
-  # 1. Collect condition-my declaration sites: [construct, my-word, symbol].
-  #    Conditions of if/unless/while/until (Structure::Condition) and all three
-  #    sections of a C-for (Structure::For) — a `my` there scopes to the whole
-  #    construct.  A `my` nested in a deeper Block inside the condition is that
-  #    block's business, not a condition-my.
-  my @sites;
-  for my $top (@$stmts) {
-    next unless ref $top && $top->isa('PPI::Node');
-    my @compounds = $top->isa('PPI::Statement::Compound') ? ($top) : ();
-    push @compounds, @{ $top->find('PPI::Statement::Compound') || [] };
-    for my $c (@compounds) {
-      for my $cond (grep { $_->isa('PPI::Structure::Condition')
-                        || $_->isa('PPI::Structure::For') } $c->schildren) {
-        for my $w (@{ $cond->find(sub { $_[1]->isa('PPI::Token::Word')
-                                        && $_[1]->content eq 'my' }) || [] }) {
-          my ($p, $nested) = ($w->parent, 0);
-          while ($p && $p != $cond) {
-            if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
-            $p = $p->parent;
-          }
-          next if $nested;
-          my $nx = $w->snext_sibling or next;
-          my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-                   : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-                   : ();
-          push @sites, [$c, $w, $_] for grep { $_->content =~ /^\$\w+$/ } @syms;
-        }
-      }
-    }
-  }
-  return unless @sites;
-
-  my %by_name;
-  push @{ $by_name{ $_->[2]->content } }, $_ for @sites;
-
-  for my $old (sort keys %by_name) {
-    (my $bare = $old) =~ s/^\$//;
-    my @bind = map { $_->[0] } @{ $by_name{$old} };
-    # A `foreach my $i (...)` BINDS the name for its whole construct, exactly
-    # as a condition-my does — its uses are lexical, never the global this
-    # pass exists to protect.  Counting them as outside-uses made the poison
-    # verdict fire on any file that spells its loop counter the same way twice
-    # (Math::BigInt: five C-for `my $i` loops + four `for my $i` loops), and
-    # a poisoned name whose construct holds a string eval GATES to v1.
-    push @bind, @{ _foreach_my_constructs($stmts, $old) };
-    my %in_construct = map { ($_ => 1) } @bind;
-
-    # 2. Poison test: any use of the name OUTSIDE all of its binding constructs?
-    #    Symbols are checked exactly; interpolated uses approximately (a name
-    #    interpolated both inside AND outside constructs under-detects — that
-    #    case crashes at runtime exactly as before this pass, no worse).
-    my ($seg_uses, $in_uses) = (0, 0);
-    my (%interp_all, %interp_in);
-    _interp_names($_, \%interp_in) for @bind;
-    for my $top (@$stmts) {
-      next unless ref $top && $top->isa('PPI::Node');
-      _interp_names($top, \%interp_all);
-      for my $s (@{ $top->find('PPI::Token::Symbol') || [] }) {
-        next unless $s->symbol eq $old;
-        # A plain `my`/`state` DECLARATION of the name binds it, exactly as a
-        # condition-my or a foreach-my does — it is not evidence that a package
-        # GLOBAL of this name is live, which is the only thing this pass exists
-        # to protect.  `our` still counts: it DOES create the global.
-        # (CPAN::Meta::Requirements::Range gated the whole file on one
-        # `my ($vobj, $err);` while every other $err sat inside an
-        # `if (my $err = $@)` — audit family F5, task #229.)
-        next if _is_lexical_decl_name($s);
-        $seg_uses++;
-        my $p = $s;
-        while ($p) { if ($in_construct{$p}) { $in_uses++; last } $p = $p->parent; }
-      }
-    }
-    my $poisoned = ($seg_uses > $in_uses)
-                || ($interp_all{$bare} && !$interp_in{$bare});
-    next unless $poisoned;
-
-    # 3. All of this name's constructs must be renameable, else the whole file
-    #    is refused (leaving it un-renamed would leave the global unbound at
-    #    runtime).  `eval_ok` (#254 B-i, s363): a string eval naming the
-    #    ORIGINAL `$x` still reaches this rename, because `$x__cond__N` is a
-    #    LET-BOUND lexical and _eval_lexical_alist strips the suffix back to
-    #    the original key — the same waiver the seam my-shadow rename has had
-    #    since M-F, now that the key function knows this suffix too.  A `state`
-    #    rename still keeps the refusal: its cell is a defvar, not a let, so it
-    #    never appears in _let_bound_vars for the alist to find.
-    for my $site (@{ $by_name{$old} }) {
-      if (my $why = $self->_shadow_rename_blocker($site->[0], $site->[2],
-                                                  'eval_ok', 'shadow_ok')) {
-        die "Parser2 TODO: poisoned condition-my $old ($why)\n";
-      }
-    }
-    for my $site (@{ $by_name{$old} }) {
-      $self->_rename_decl_within($site->[0], $site->[2],
-        $old . '__cond__' . $self->{_cond_rename_counter}++);
-    }
-  }
-}
-
-# W8.5 sibling (s299): a `my` inside a NESTED BARE BLOCK whose name is ALSO
-# used as a package global elsewhere in the segment (postfixderef.t: global
-# @a at file level + `my ($s,@a,%h)` inside a block).  The block lexical
-# registers in _seg_lex, which suppresses the global's forward defvar — the
-# global is then unbound at load.  Same cure as the cond-my pass: rename the
-# block-scoped lexical (the block is its whole scope) to NAME__shadow__N —
-# the suffix _eval_lexical_alist already strips, so string eval inside the
-# block still reaches the shadow by its original name.  Only poisoned names
-# rename; a blocked site is left untouched (the global stays unbound exactly
-# as before — never worse).  Sub bodies are skipped (their lexicals are the
-# capture machinery's turf); foreach loop-vars and condition-mys are skipped
-# (loop/cond scope, handled by their own machinery).
 # #296: a `my`/`state` declaring an EXCEPTION-partition name.
 #
 # Since the direction-D flip an ORDINARY global is a symbol macro over a cell,
@@ -4940,176 +4814,6 @@ sub _lexical_decl_scope {
     return ($p, undef) if $p->isa('PPI::Structure::Block');
   }
   return ($s->top, undef);
-}
-
-sub _rename_poisoned_block_mys {
-  my ($self, $seg) = @_;
-  my $stmts = $seg->{stmts};
-
-  # 1. Collect nested-block my-decl sites: [block, my-word, symbol].
-  my @sites;
-  for my $top (@$stmts) {
-    next unless ref $top && $top->isa('PPI::Node');
-    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
-                                   && $_[1]->content eq 'my' }) || [] }) {
-      # The declaring statement must be a plain variable/expression statement
-      # (excludes `foreach my $x` — parent is the Compound — and other
-      # declarator positions).
-      my $ds = $w->parent;
-      next unless $ds && (ref($ds) eq 'PPI::Statement::Variable'
-                          || ref($ds) eq 'PPI::Statement'
-                          || ref($ds) eq 'PPI::Statement::Expression');
-      my ($p, $block, $bad) = ($w->parent, undef, 0);
-      while ($p && $p != $top) {
-        if ($p->isa('PPI::Structure::Condition')
-            || $p->isa('PPI::Structure::For')) { $bad = 1; last }
-        if ($p->isa('PPI::Structure::Block')) { $block = $p; last }
-        $p = $p->parent;
-      }
-      next if $bad || !$block;
-      my ($q, $in_sub) = ($block, 0);
-      while ($q) {
-        if ($q->isa('PPI::Statement::Sub')) { $in_sub = 1; last }
-        $q = $q->parent;
-      }
-      next if $in_sub;
-      my $nx = $w->snext_sibling or next;
-      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-               : ();
-      push @sites, [$block, $w, $_]
-        for grep { $_->content =~ /^[\$\@\%]\w+$/ } @syms;
-    }
-  }
-  return unless @sites;
-
-  my %by_name;
-  push @{ $by_name{ $_->[2]->content } }, $_ for @sites;
-
-  NAME: for my $old (sort keys %by_name) {
-    my $sigil = substr($old, 0, 1);
-    (my $bare = $old) =~ s/^[\$\@\%]//;
-    my %in_block = map { (refaddr($_->[0]) => 1) } @{ $by_name{$old} };
-
-    # 2. Poison test: a NON-declarator use of the name outside all of its
-    #    blocks.  A my/our/local DECLARATOR outside means the name is a real
-    #    lexical/global declaration elsewhere — the suppression is then that
-    #    declaration's business, not ours: skip the whole name.
-    my $inside_one = sub {
-      my ($tok) = @_;
-      for (my $p = $tok->parent; $p; $p = $p->parent) {
-        return 1 if $p->isa('PPI::Structure::Block') && $in_block{refaddr $p};
-      }
-      return 0;
-    };
-    my $poisoned = 0;
-    for my $top (@$stmts) {
-      next unless ref $top && $top->isa('PPI::Node');
-      for my $s (@{ $top->find('PPI::Token::Symbol') || [] }) {
-        next unless ($s->symbol // '') eq $old;
-        next if $inside_one->($s);
-        next NAME if $self->_symbol_is_declarator($s);
-        $poisoned = 1;
-      }
-      if ($sigil eq '@') {
-        for my $ai (@{ $top->find('PPI::Token::ArrayIndex') || [] }) {
-          next unless $ai->content eq "\$#$bare";
-          $poisoned = 1 unless $inside_one->($ai);
-        }
-      }
-    }
-    next NAME unless $poisoned;
-
-    # 3. Rename each renameable site; leave blocked ones as-is (no worse).
-    for my $site (@{ $by_name{$old} }) {
-      my ($block, $w, $s) = @$site;
-      my $why = $sigil eq '$'
-        ? $self->_shadow_rename_blocker($block, $s, 'eval_ok')
-        : $self->_state_container_blocker($block, $s, 'eval_ok');
-      next if $why;
-      $self->_rename_decl_within($block, $s,
-        $old . '__shadow__' . $self->{_shadow_rename_counter}++);
-    }
-  }
-  return;
-}
-
-# W8.5 sibling (#265, s368) — the half of the embedded-`my` story the s365 fix
-# did not reach.  `_lower_block` let-binds an expression-embedded `my`
-# (`open my $fh, …`, `++my $x->{k}`) unless another named sub in the segment
-# mentions the name, on the theory that the sub shares the forward-defvar'd
-# global as its cell.  That theory holds at FILE level, where the sub really
-# can close over the decl — and is SCOPE-BLIND inside a named sub's body,
-# where the other sub cannot possibly see this sub's lexical:
-#
-#     sub setter { ($x, $y) = (…) }        # $x here is the package GLOBAL
-#     sub foo3   { ++my $x->{foo}; … }     # a FRESH lexical, per call
-#
-# Refused, `my $x` lowered as a write to the global: state persisted across
-# calls and clobbered the global (op/my.t t47, [perl #29340]'s companion).
-#
-# Simply narrowing the veto would be wrong — the let registers `$x` in
-# _seg_lex, which suppresses the GLOBAL's forward defvar and leaves `setter`
-# unbound.  So mint a renamed lexical instead: `$x__emb__N` is a name nobody
-# else mentions, so the veto no longer fires AND `$x` keeps its defvar.  The
-# rename root is the enclosing BLOCK, which is exactly the decl's scope
-# (perl scopes an embedded `my` from its statement to the end of that block),
-# and _rename_decl_within starts at the declarator, so earlier statements
-# keep the original name.  Interpolation follows via the M-A fixer inside
-# that helper; string-eval visibility follows because `$x__emb__N` is
-# let-bound and _eval_lexical_alist strips the suffix (ir-spec §2b.4's first
-# route, the same waiver __cond__/__shadow__ carry).
-# A blocked site is left untouched — no worse than before the pass.
-sub _rename_vetoed_embedded_mys {
-  my ($self, $seg) = @_;
-  my $subs = _collect_named_subs($seg->{stmts});
-  return unless @$subs;
-  for my $top (@{ $seg->{stmts} }) {
-    next unless ref $top && $top->isa('PPI::Node');
-    # Reach the candidate statements through the `my` WORDS (one tree walk per
-    # top-level statement), not by enumerating every statement and asking each
-    # whether it holds a `my` — the shape the sibling pass uses, and the one
-    # that keeps this off the compile-time profile (#184's lesson).
-    my %cand;
-    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
-                                   && $_[1]->content eq 'my' }) || [] }) {
-      my $stmt = $w;
-      $stmt = $stmt->parent
-        while $stmt && !($stmt->isa('PPI::Statement')
-                         && $stmt->parent
-                         && $stmt->parent->isa('PPI::Structure::Block'));
-      next unless $stmt;
-      $cand{ refaddr $stmt } //= $stmt;
-    }
-    for my $stmt (values %cand) {
-      # Same statement shape _lower_block's hoist accepts, and its scope root.
-      next unless ref($stmt) eq 'PPI::Statement'
-               || ref($stmt) eq 'PPI::Statement::Expression';
-      my $root = $stmt->parent;
-      # INSIDE A SUB BODY only — named or anonymous (#272): at FILE level the
-      # other sub genuinely shares the cell and the veto is right
-      # (Capture-Tiny's Utils.pm, #199); inside any sub body it cannot.
-      next unless _enclosing_sub_body($stmt);
-      my @syms = $self->_embedded_my_syms($stmt) or next;
-      my %uniq;
-      my @names = grep { !$uniq{$_}++ } map { $_->content } @syms;
-      my %veto = map { ($_ => 1) }
-                 $self->_embedded_my_veto_names($subs, $stmt, \@names);
-      next unless %veto;
-      for my $sym (@syms) {
-        my $old = $sym->content;
-        next unless $veto{$old};
-        my $sigil = substr($old, 0, 1);
-        my $why = $sigil eq '$'
-          ? $self->_shadow_rename_blocker($root, $sym, 'eval_ok', 'shadow_ok')
-          : $self->_state_container_blocker($root, $sym, 'eval_ok');
-        next if $why;
-        $self->_rename_decl_within($root, $sym,
-          $old . '__emb__' . $self->{_emb_rename_counter}++);
-      }
-    }
-  }
-  return;
 }
 
 # The nearest enclosing SUB BODY of $el, if any: a NAMED sub definition, or
@@ -5417,13 +5121,29 @@ sub _forward_global_decls {
   # any assignment unbound at load (postfixderef.t; v1's list never had them).
   my %runtime_vars = map { $_ => 1 } qw($_ @_ %_args @ARGV @INC %ENV %INC %SIG
                                         $a $b);
-  # Exclude names let-bound in THIS section ($seg_lex, recorded by _reg_lex
-  # during the section's lowering — NOT the now-scoped _let_bound_vars, which
-  # has shrunk back to top-level scope by the time this assembly-phase pass
-  # runs).  Per-section, not file-cumulative: a name let-bound only in some
-  # OTHER section but used as a package global here still needs this
-  # section's defvar (see the parse() comment at the _seg_lex reset).
-  my $lb = $seg_lex // {};
+  # Names let-bound in THIS section ($seg_lex, recorded by _reg_lex during the
+  # section's lowering — NOT the now-scoped _let_bound_vars, which has shrunk
+  # back to top-level scope by the time this assembly-phase pass runs).
+  #
+  # In FILE mode this set no longer excludes anything (#291, direction D).  The
+  # exclusion existed because a `defvar` PROCLAIMS its symbol special, so
+  # declaring a name the section also let-binds turned that `let` into a
+  # dynamic rebinding — the whole poisoned-`my` rename family (`__shadow__`,
+  # `__cond__`, `__emb__`) existed to dodge it by giving the LEXICAL a fresh
+  # name so the GLOBAL could keep its declaration.  Since the flip an ordinary
+  # global is a `p-defcell` symbol-macro, which a `let` of the same name simply
+  # SHADOWS — declaration and lexical coexist, and the renames are gone.  The
+  # cost is a dead cell for a name that is only ever lexical here; the
+  # alternative (guessing which of the two roles a name plays from an
+  # assembled-text scan) is what the renames were, and it was scope-blind three
+  # times over (#205, #265, #272).
+  #
+  # In EVAL mode the set still excludes, because there this list is not
+  # declarations at all: $free_out routes it to the p-eval-thunk's capture
+  # PARAMETERS, bound from the CALLER's lexicals.  A name the eval region
+  # declares itself is not a caller capture, and the flip says nothing about
+  # that question.
+  my $lb = $free_out ? ($seg_lex // {}) : {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
   my (%seen, %cross, %caret, %punct);
   for my $line (split /\n/, $text) {
@@ -6643,9 +6363,17 @@ sub _lower_block {
                   && !$self->fallback_parser->{_let_bound_vars}{$_} }
               $self->_embedded_my_names($first);
     if (@emb) {
-      # The veto predicate is shared with _rename_vetoed_embedded_mys, the
-      # pre-pass that renames the decls this would otherwise refuse (#265).
-      my $vetoed = $self->_embedded_my_veto_names(
+      # INSIDE A SUB BODY the veto's premise is false and the question is not
+      # even asked (#265/#272, re-shaped by #291): another sub cannot possibly
+      # share a lexical declared inside THIS sub's body, so there is nothing to
+      # strand — and the package global of that name keeps its own cell either
+      # way, since the forward-decl pass no longer excludes let-bound names.
+      # (Until #291 this was reached by RENAMING the decl to `$x__emb__N`, a
+      # name no sub mentions, so that the veto below would not fire.  Same
+      # outcome, one mechanism fewer.)  At FILE level the premise holds and the
+      # veto stands: Capture-Tiny's Utils.pm really does share the cell (#199).
+      my $vetoed = !_enclosing_sub_body($first)
+                && $self->_embedded_my_veto_names(
                      $self->{_seg_named_subs} // [], $first, \@emb) ? 1 : 0;
       if (!$vetoed) {
         $self->_reg_lex(@emb);
@@ -7444,7 +7172,7 @@ sub _lower_compound {
     # perl's MAGICAL string increment still runs — the carve-out numified
     # it, hanging `for (my $i = "aa"; $i ne "ad"; $i++)`.)
     #
-    # RENAMED counters (`$x__cond__N` from block-shadow promotion) are
+    # RENAMED counters (an `$x__file__N` promotion, say) are
     # invisible to the block-level $vi (keyed by ORIGINAL names), so re-run
     # the annotator over just this loop's statements — init/cond/STEP/body,
     # step INCLUDED (A-num classifies it; the old carve-out had to exclude

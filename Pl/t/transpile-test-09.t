@@ -851,14 +851,15 @@ print named(@args), "\n";
 # true at FILE level, scope-blind inside a sub body, where the other sub cannot
 # see this sub's lexical.  `++my $x->{foo}` then WROTE THE GLOBAL: the hash
 # persisted across calls (perl re-makes it per call) and clobbered the global
-# (op/my.t t47, [perl #29340]'s companion).  Narrowing the veto alone would be
-# wrong — the let registers `$x` in _seg_lex and suppresses the GLOBAL's defvar,
-# stranding the other sub — so the decl is RENAMED to `$x__emb__N` pre-analysis.
+# (op/my.t t47, [perl #29340]'s companion).  Narrowing the veto alone USED to
+# be wrong — the let registered `$x` in _seg_lex and suppressed the GLOBAL's
+# defvar, stranding the other sub — so s368 renamed the decl to `$x__emb__N`
+# instead.  Since #291 the narrowing IS the fix: the veto is simply not asked
+# inside a sub body, and the global keeps its own cell regardless.
 # INVERSE GUARDS in the same snippet: (a) the FILE-level shape the veto exists
 # for — a sub genuinely closing over `open my $fh` — must still share one cell;
-# (b) the package global must keep its value and its defvar across the renamed
-# sub; (c) a string eval inside the sub must still reach the renamed lexical by
-# its ORIGINAL name (the __emb__ suffix strip in _eval_lexical_alist).
+# (b) the package global must keep its value and its declaration across the
+# sub; (c) a string eval inside the sub must still reach the sub's lexical.
 test_transpile("embedded `my` in a sub vs a same-named package global (#265)", q{
 sub setter { ($x, $y) = ("A", "B") }
 sub foo3 {

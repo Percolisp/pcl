@@ -530,4 +530,91 @@ test_transpile('a later declaration of an exception name owns the uses after it'
 ');
 
 
+# ---------------------------------------------------------------------------
+# #205: a section-let-bound name that is ALSO needed as a package global.  The
+# forward-decl pass used to SKIP any name the section let-binds anywhere (a
+# `defvar` would have proclaimed it special and turned that `let` into a
+# dynamic rebind), so the global never existed: "$fh is unbound" at load.  The
+# whole poisoned-`my` rename family existed to dodge that by renaming the
+# LEXICAL; since the flip a `p-defcell` symbol macro and a `let` of the same
+# name coexist, so the declaration is simply emitted (#291).
+#
+# The shape needs a HIDDEN use no Symbol-token scan sees: `<$fh>` readline of
+# a file-level `open my $fh` (vetoed to the global by the let-hoist), inside a
+# sub that ALSO block-shadows the name.  `looper` is the half that must keep
+# working: a compound-header decl covering its own uses, no global needed.
+# ---------------------------------------------------------------------------
+test_transpile('let-bound name that is also the veto global gets its cell', '
+my $tmp = "/tmp/pcl-205-probe-$$.txt";
+open my $w, ">", $tmp or die "w: $!";
+print $w "hello\n";
+close $w;
+open my $fh, "<", $tmp or die "r: $!";
+sub tricky { my $line = <$fh>; { my $fh = "shadow"; } chomp $line; return "got:$line" }
+sub looper { my $s = ""; for my $fh (1..2) { $s .= "i$fh" } return $s }
+print tricky(), " ", looper(), "\n";
+close $fh;
+unlink $tmp;
+');
+
+# ---------------------------------------------------------------------------
+# #291 family 1 (`__shadow__`, s299 / postfixderef.t): a `my` in a nested BARE
+# BLOCK whose name is also a package global at file level.  The block lexical
+# used to be renamed to NAME__shadow__N so the global could keep its
+# declaration; now both keep the name — the `let` shadows the symbol macro,
+# and the global's value survives the block untouched.
+# ---------------------------------------------------------------------------
+test_transpile('block my shadows a same-named package global, all three sigils', '
+@a = (1,2,3);
+$s = "S-global";
+%h = (k => "H-global");
+{ my ($s, @a, %h); @a = (4,5); $s = "S-block"; $h{k} = "H-block";
+  print "in: @a $s $h{k}\n"; }
+print "out: @a $s $h{k}\n";
+');
+
+# ---------------------------------------------------------------------------
+# #291 family 2 (`__cond__`, defins.t): a `my` in a CONDITION or C-for head
+# whose name is also a package global.  Same story as family 1 — the head's
+# `my` is a lexical shadow, the global keeps its cell and its value.  The
+# `our` spelling is included because `our` is what genuinely creates a global,
+# and it was the case the deleted pass treated as most certainly poisoned.
+# ---------------------------------------------------------------------------
+test_transpile('condition-my and C-for-my shadow same-named package globals', '
+our $err = "E-global";
+our $i   = "I-global";
+my @l = (1,2);
+while (my $l = shift @l) { print "w:$l\n" }
+if (my $err = "E-inner") { print "if:$err\n" }
+for (my $i = 0; $i < 2; $i++) { print "f:$i\n" }
+print "out: $err $i\n";
+');
+
+# ---------------------------------------------------------------------------
+# #291 family 3 (`__emb__`, #265/#272): an expression-embedded `my` inside a
+# sub body whose name another sub mentions.  The let-hoist's veto — "that sub
+# shares the forward-declared global as its cell" — is true at FILE level and
+# false inside a sub body, so the veto is no longer asked there and the decl
+# binds a plain lexical.  Rows: (a) named-sub body, (b) ANON-sub body (#272),
+# (c) the FILE-level shape the veto exists for, which must still share the one
+# cell (Capture-Tiny's Utils.pm, #199).
+# ---------------------------------------------------------------------------
+test_transpile('embedded my inside a sub body vs the file-level shared cell', '
+sub setter { ($x, $y) = ("SX", "SY") }
+sub foo3   { ++my $x->{foo}; return $x->{foo} }
+setter();
+print "named: ", foo3(), foo3(), " x=$x y=$y\n";
+my $anon = sub { ++my $x->{foo}; return $x->{foo} };
+print "anon: ", $anon->(), $anon->(), " x=$x\n";
+my $tmp = "/tmp/pcl-291emb-$$.txt";
+open my $fh, ">", $tmp or die "w: $!";
+sub w { print $fh "shared\n" }
+w();
+close $fh;
+open my $in, "<", $tmp or die "r: $!";
+print "file: ", scalar(<$in>);
+close $in;
+unlink $tmp;
+');
+
 done_testing();

@@ -448,8 +448,19 @@ loud, never silent.
 | `my @a; my %h;` | `let` binding to a fresh vector / hash table |
 | `our $g = V;` | `(p-defcell $g (make-p-box nil))` hoisted to the section's declarations + `(p-scalar-= $g V)` in place (`defvar` instead for an exception-set name). `our` shadowing a `my` gates to v1 |
 | `state $n = 0;` in a **named sub** | native since s277c: the variable is renamed to a per-sub package cell (§2b.3) — `(p-defcell $n__state__K (make-p-box nil))` + raw once-flag `(p-defcell $n__state__K__init nil)` hoisted to the declarations; the statement lowers to `(unless $n__state__K__init (box-set $n__state__K INIT) (setf $n__state__K__init t))` followed by the bare cell as the statement value. One cell per named sub = exactly Perl's named-sub `state` semantics. `state` *outside* named subs, in anon subs / map-grep-sort blocks (per-closure instances), list/non-scalar `state`, and blocked renames still gate → v1, which uses its own `$state__<sub>__<name>__N` cells |
-| undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced-but-never-let-bound name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
-| `state $n` cells, promoted lexicals (`__file__`/`__shadow__`/`__cond__`) | the same `p-defcell`, since the renamed name is word-shaped and therefore ordinary. The renamed cell is never `let`-bound, which is what makes the rename removable (task #291) |
+| undeclared globals | swept up at assembly time (`_forward_global_decls`, a text scan over the finished section): every referenced name gets `(p-defcell NAME <fresh container>)` — `(defvar …)` for the exception set — under "Forward declarations"; package-qualified refs get the declaration in *their* package |
+| `state $n` cells, promoted lexicals (`__file__`/`__state__`) | the same `p-defcell`, since the renamed name is word-shaped and therefore ordinary |
+
+**A name may be BOTH declared here and `let`-bound in the same section**, and
+that is not a contradiction: a `p-defcell` is a symbol macro, which a `let` of
+the same name lexically shadows.  So the scan declares a cell for every name it
+sees and never asks which role the name plays — under `defvar` it had to ask
+(a special proclamation would have turned the section's own `let`s into dynamic
+rebinds), and the three approximate answers it used were the `__shadow__` /
+`__cond__` / `__emb__` renames, deleted in #291.  The cost is an inert cell for
+a name that is only ever lexical here; the benefit is that "is this a lexical
+or a global?" stops being a question the compiler has to guess (see also §6.2's
+`:my`, the one place the guess survives and is stated instead).
 
 The rest-of-block nesting means scope is structural (review doc §2.3):
 reading a `)` closes a scope. At file level the `let`s nest the remaining

@@ -2602,3 +2602,92 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   (`sub DEBUG { $DEBUG_VAL }` never inlines; SET_DEBUG has zero callers).
   Fix = `use constant DEBUG => $ENV{PCL_PEXPR_DEBUG} // 0` — #303 step 0.
   Hot-spot numbers (accessors, `CLForm::_flat` ×1.24M) recorded in #213.
+
+## s388b (2026-08-12, Opus) — #291's enabler: the forward-decl pass stops excluding let-bound names (#205 closes)
+
+- **The poisoned-`my` renames had TWO causes, and the plan named only one.**
+  The flip removed "a `defvar` poisons the section's own `let`" — but the
+  renames also existed because `_seg_lex` made `_forward_global_decls` SKIP any
+  name the section let-binds anywhere, so without a rename the GLOBAL lost its
+  declaration and was unbound at load (probed: deleting
+  `_rename_poisoned_block_mys` alone drops `(p-defcell @a …)`).  Both causes are
+  the same `defvar` fact, so both die with it.
+- **FILE mode: the exclusion is gone** — every referenced name gets its cell,
+  and a `let` of the same name shadows the symbol macro.  **EVAL mode keeps
+  it**: there the list is not declarations but the p-eval-thunk's capture
+  PARAMETERS, bound from the CALLER's lexicals, and a name the eval region
+  declares itself is not a caller capture.  That question is untouched by the
+  flip.  The switch is the presence of `$free_out`, the parameter that routes
+  the list to the thunk.
+- **Cost, measured s384: +1.5%–7% emitted lines** (inert `p-defcell`s for names
+  that are only ever lexical here: my.t +20, sort.t +58, pack.t +150).
+  Accepted — the alternative is guessing a name's role from an assembled-text
+  scan, which is what the renames were, and they were scope-blind three times
+  (#205, #265, #272).  A future exact answer is the bind-once symbol table
+  (`var-handling-review-s379.md` direction B/C), not a fourth approximation.
+- **#205 CLOSES here** (the s329 probe — a hidden `<$fh>` readline of a
+  file-level `open my $fh`, inside a sub that also block-shadows the name — runs
+  identical to perl; it crashed "unbound" before).  Guard row in
+  `Pl/t/transpile-test-10.t`.
+- **PRECONDITIONS, all shipped first**: #294 (`:my t`), #297, #298, #296.
+- **A green gate is NOT the check when a merge touched a TEST file — the COUNT
+  is** (s388, caught live): a botched conflict resolution deleted 12 rows from
+  `transpile-test-10.t` and the gate still said PASS, at 5096 where 5109 was
+  due.  Verify a rebuilt test file against its pre-merge version by diff before
+  trusting the run.
+
+## s388c (2026-08-12, Opus) — #291 COMPLETE: the three poisoned-`my` renames are gone
+
+- **All three passes deleted, one per commit, each gated**: `__shadow__`
+  (nested bare block, s388c), `__cond__` (if/while/C-for head, s388d),
+  `__emb__` (expression-embedded `my` in a sub body, s388e).  Corpus rename
+  bindings 716/128/5 → 36/0/0; the remaining 36 `__shadow__` are
+  `_gate_seam_my_shadow`, a v1-seam mechanism with a live cause that stays
+  until the seam does (#153).
+- **Family 3 is not a deletion, it is the FIX the rename was standing in for.**
+  `_lower_block`'s let-hoist VETO presumes another named sub shares the
+  forward-declared global as this declaration's cell — true at FILE level
+  (Capture-Tiny's Utils.pm, #199), false inside a sub body, where no other sub
+  can see this body's lexical (#265, #272).  s368 could not simply narrow it,
+  because the `let` registered the name in `_seg_lex` and suppressed the
+  GLOBAL's declaration.  s388b removed that, so the narrowing IS the fix: the
+  veto is not asked when the statement sits inside a sub body.  Same outcome,
+  one mechanism fewer.
+- **`__excl__` STAYS in the eval-capture-alist strip list.**  Twice during this
+  replay the s384 hunk wanted to shorten that list to its s384 shape and would
+  have dropped #296's suffix with the deleted ones.  It is a let-bound lexical
+  whose suffix the alist must strip so a string eval in its scope finds it
+  under the original name — the #296-B1 path.  A suffix leaves that list only
+  when its MINTER leaves the compiler.
+- **A four-commit replay of reverted work is not a cherry-pick.**  Every
+  Parser2.pm hunk conflicted, because the regions the s384 commits delete now
+  hold code written after them (#296's two passes sit inside family 1's and 2's
+  spans).  Resolved by hand, deletions-only verified per commit
+  (`diff | grep -c '^>'` = 0), gate re-run after each.
+
+## s388d (2026-08-12, Opus) — #291's sweep: 4 new closure.t rows, each a NAMED cause
+
+- **GATE clean after the baseline edit**: 0 new / 0 fixed, 2 unstable
+  (postfixderef.t, ref.t — known PARTIAL crash files).  **TOTAL passing
+  18498 → 18532 (+34)**, accounted for per file: closure.t +14, eval.t +13
+  (9 of them #296-B1's, already on main), method.t +4, for.t +2, my.t +1.
+- **The 4 new closure.t failures are newly-REACHABLE, not new breakage.**
+  Before the enabler the file died at load on `The variable $bar is unbound`
+  and `p-load-with-recovery` dropped a whole top-level form; those assertions
+  never ran.  Causes, one per row (read individually, not inferred from the
+  count):
+  - t264 `RT #1028`, t265 `RT #10085`, t270 (unnamed, `is($flag, 1)`,
+    closure.t:653) — **DESTROY at scope exit (#198)**.  Each watches a
+    `DESTROY` that appends to a scalar; PCL never fires it, so got='1' where
+    perl has '12'.
+  - t272 `cloneable with //ee` — **an anon sub is not cloned per
+    statement-modifier `for` iteration** (`push @s, sub {…} for 1,2`), so
+    `$s[0] == $s[1]`.  Its sibling `cloneable with eval` passes.
+- **Rows entered the baseline BY EDIT** (s330), verified as a 4-line insertion
+  against the previous file before installing; 680 → 684 rows.
+- **eval.t's 4 baseline fail rows are absent and reported UNVERIFIED** (the
+  file is PARTIAL).  Left in the baseline — removing them would be blessing an
+  unverified pass, which is the error the s330 rule exists to prevent.
+- **corpus-diff carries no signal for a change like this** and was not run:
+  #291 alters emission for nearly every file by construction (cells added,
+  renames removed).  The sweep is the measurement.
