@@ -91,7 +91,9 @@ sub _build_fallback_parser {
   $p->_sections([]);
   $p->_cur_bucket('runtime');
   $p->_open_section('pcl');
-  $p->{_let_bound_vars} = {};
+  # The lexical registry lives HERE, on the owner (#153 chunk 0); the seam
+  # parser reads it through lex_home.
+  $self->{_let_bound_vars} //= {};
   # Back-reference so the seam knows its sections are scratch: anything the
   # v1 block-lowering HOISTS (a `use`, a BEGIN, an `our` defvar found inside a
   # do{}/eval{}/anon-sub body) must land in THIS parser's buckets, not in the
@@ -1498,7 +1500,7 @@ sub parse {
     # exactly v1's file-lexical model for the colliding name; captured
     # lexicals are renamed (promotion passes / the seam's __lex__N) or gated,
     # so the per-iteration-closure hazard cannot reach this path.
-    $self->fallback_parser->{_let_bound_vars} = {};
+    $self->{_let_bound_vars} = {};
     # M-F: this segment's span-mangled cells, visible to string evals by
     # their ORIGINAL name via the capture alist (_eval_lexical_alist).
     # These per-site pairs cover CROSS-PACKAGE sites (the eval-time lookup
@@ -5237,7 +5239,7 @@ sub _lower_sub {
   # must not leak into a later call site's string-eval capture alist.
   # _eval_extra_captures likewise (M-F): a promoted cell declared inside the
   # sub body dies with it.
-  my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
   # A named sub is HOISTED outside the file's lexical `let`s, so an OUTER
   # let-bound name is unbound inside its body — it must not reach a body
   # eval's capture alist (eval.t recurse: the alist's `(cons "$curr_test"
@@ -5252,14 +5254,14 @@ sub _lower_sub {
   # the per-site pair — and they are defvars, so the pair can never be the
   # unbound-at-call-time crash the wipe defends against.  A sub textually
   # inside the block closed over the cell; keep it.
-  $self->fallback_parser->{_let_bound_vars} =
+  $self->{_let_bound_vars} =
     { map { ($_ => 1) }
       grep { $self->{_eval_block_cells} && $self->{_eval_block_cells}{$_} }
       keys %saved_lb };
   my $form = eval { $self->_lower_sub_inner($sub) };
   my $err = $@;
   $self->{_live_lex} = \%saved_lex;
-  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+  $self->{_let_bound_vars} = \%saved_lb;
   $env->in_subroutine($env->in_subroutine - 1);
   die $err if $err;
   return $form;
@@ -5397,7 +5399,7 @@ sub _reg_lex {
     # the string-eval capture alist emit the raw unreadable perl-order
     # symbol.  Globals are reachable inside eval by name anyway.
     next if $n =~ /::/;
-    $self->fallback_parser->{_let_bound_vars}{$n} = 1;
+    $self->{_let_bound_vars}{$n} = 1;
     $self->{_live_lex}{$n} = 1;
     # Per-section accumulator — drives the forward-decl exclusion (a name
     # let-bound in THIS section is never defvar'd by this section; other
@@ -5420,7 +5422,7 @@ sub _lower_scope {
   # leak into the string-eval capture alist at a call site AFTER the block
   # closes.  _seg_lex (cumulative within the section) still guards the
   # forward-decl pass.
-  my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
   # Push an Environment scope frame around the block so LEXICAL PRAGMAS set by a
   # fallback-emitted statement inside the block (`use integer` / `no integer`)
   # are saved and restored — v1 relies on push_scope/pop_scope for this, and
@@ -5430,7 +5432,7 @@ sub _lower_scope {
   my @forms = $self->_lower_block($stmts, $vi, $tail_ctx);
   $self->environment->pop_scope;
   $self->{_live_lex} = \%saved;
-  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+  $self->{_let_bound_vars} = \%saved_lb;
   return @forms;
 }
 
@@ -5887,7 +5889,7 @@ sub _lower_block {
         # _reg_lex: _live_lex would re-trip the nested-sub hoist gate, and
         # _seg_lex is unneeded (_forward_global_decls already skips
         # _file_lex_renamed names).
-        $self->fallback_parser->{_let_bound_vars}{$name} = 1;
+        $self->{_let_bound_vars}{$name} = 1;
         delete $self->{_pending_eval_caps}{$name} if $self->{_pending_eval_caps};
       } else {
         @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture($name) : ();
@@ -6247,8 +6249,7 @@ sub _lower_block {
     # the in-place capture behavior.
     if ($first->block && defined $self->_proto_or_sig_str($first)
         && !$self->_is_pure_prototype($first)) {
-      my $p    = $self->fallback_parser;
-      my $lb   = $p->{_let_bound_vars} // {};
+      my $lb   = $self->{_let_bound_vars} // {};
       my $text = $first->content;
       my $refs_letbound = 0;
       for my $lv (keys %$lb) {
@@ -6260,7 +6261,7 @@ sub _lower_block {
       if ($refs_letbound) {
         @out = $self->_fallback_stmt($first);
       } else {
-        local $p->{_let_bound_vars} = {};
+        local $self->{_let_bound_vars} = {};
         @out = $self->_fallback_stmt($first);
       }
       return (@out, $self->_lower_block(\@rest, $vi, $tail_ctx));
@@ -6365,7 +6366,7 @@ sub _lower_block {
   # not veto — its body IS the let's scope).
   if (ref($first) eq 'PPI::Statement' || ref($first) eq 'PPI::Statement::Expression') {
     my @emb = grep { !$self->{_file_lex_renamed}{$_}
-                  && !$self->fallback_parser->{_let_bound_vars}{$_} }
+                  && !$self->{_let_bound_vars}{$_} }
               $self->_embedded_my_names($first);
     if (@emb) {
       # INSIDE A SUB BODY the veto's premise is false and the question is not
@@ -6791,7 +6792,7 @@ sub _lower_stmt {
       return ['setf', $name,
               _wrap_freeze($vi->{$name}, $name, $self->_lower_expr($rhs, $stmt))];
     }
-    if ($self->fallback_parser->{_let_bound_vars}{$name}) {
+    if ($self->{_let_bound_vars}{$name}) {
       return ['p-my-=', $name, $self->_lower_expr($rhs, $stmt)];
     }
   }
@@ -6988,7 +6989,7 @@ sub _lower_compound {
     my (%sv_live, %sv_lb);
     if (@cond_mys) {
       %sv_live = %{ $self->{_live_lex} // {} };
-      %sv_lb   = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+      %sv_lb   = %{ $self->{_let_bound_vars} // {} };
       $self->_reg_lex(@cond_mys);
     }
     my $result;
@@ -7032,7 +7033,7 @@ sub _lower_compound {
     }
     if (@cond_mys) {
       $self->{_live_lex} = \%sv_live;
-      $self->fallback_parser->{_let_bound_vars} = \%sv_lb;
+      $self->{_let_bound_vars} = \%sv_lb;
       $result = $self->_wrap_cond_mys($result, @cond_mys);
     }
     return $result;
@@ -7048,7 +7049,7 @@ sub _lower_compound {
     my (%sv_live, %sv_lb);
     if (@cond_mys) {
       %sv_live = %{ $self->{_live_lex} // {} };
-      %sv_lb   = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+      %sv_lb   = %{ $self->{_let_bound_vars} // {} };
       $self->_reg_lex(@cond_mys);
     }
     my $cond = $self->_lower_expr([_cond_parts($cond_s)], $stmt);
@@ -7064,7 +7065,7 @@ sub _lower_compound {
                   $self->_continue_keys(\@k, $vi)];
     if (@cond_mys) {
       $self->{_live_lex} = \%sv_live;
-      $self->fallback_parser->{_let_bound_vars} = \%sv_lb;
+      $self->{_let_bound_vars} = \%sv_lb;
       $result = $self->_wrap_cond_mys($result, @cond_mys);
     }
     return $result;
@@ -7108,7 +7109,7 @@ sub _lower_compound {
     # before ANY of it registers and restore at every exit: a leak puts the
     # (unbound-after-the-let) name into a later sibling's string-eval capture
     # alist (bop.t %res section abort).
-    my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+    my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
     my %saved_lex = %{ $self->{_live_lex} // {} };
 
     # Multiple `my` decls in the init (`for (my $i = 0, my $j = 10; …)`) are the
@@ -7129,7 +7130,7 @@ sub _lower_compound {
       my @body = $self->_lower_scope([$block->schildren], $vi);
       my $form = ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @init_mys],
                   ['p-for', $initform, $cond, $step, _label_keys($label), @body]];
-      $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+      $self->{_let_bound_vars} = \%saved_lb;
       $self->{_live_lex} = \%saved_lex;
       return $self->_wrap_cond_mys($form, @head_mys);
     }
@@ -7223,7 +7224,7 @@ sub _lower_compound {
                ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
                $cond, $step, _label_keys($label), @body];
     }
-    $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+    $self->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
     return $self->_wrap_cond_mys($form, @head_mys);
   }
@@ -7338,12 +7339,12 @@ sub _lower_compound {
     # Without this, a later sibling's string-eval capture alist would list the
     # (now-unbound) loop var → unbound-variable at load (W3 regression seen in
     # cmpchain.t).  _seg_lex keeps it (forward-decl).
-    my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+    my %saved_lb  = %{ $self->{_let_bound_vars} // {} };
     my %saved_lex = %{ $self->{_live_lex} // {} };
     $self->_reg_lex($name);
     my @body = $self->_lower_scope([$block->schildren], $vi);
     my @cont = $self->_continue_keys(\@k, $vi);
-    $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+    $self->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
     my @my_keys = $loop_my ? (':my', 't') : ();
     return defined $to_form
@@ -7579,7 +7580,7 @@ sub lower_embedded_block {
   # not duplicate hoists or see fat-comma-rewritten tokens.
   my $ppi_snap    = _ppi_state_snapshot(@stmts);
   my %saved_lex   = %{ $self->{_live_lex} // {} };
-  my %saved_lb    = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  my %saved_lb    = %{ $self->{_let_bound_vars} // {} };
   my $scope_depth = scalar @{ $env->scope_stack };
   my @side_snaps  = map { [$_, scalar @{ $self->{$_} // [] }] }
                     qw(_captured_decls _hoisted_decls _hoisted_defs
@@ -7605,7 +7606,7 @@ sub lower_embedded_block {
   };
   pop @{ $env->scope_stack } while @{ $env->scope_stack } > $scope_depth;
   $self->{_live_lex} = \%saved_lex;
-  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+  $self->{_let_bound_vars} = \%saved_lb;
 
   if (!$forms || !@$forms || grep { _embed_form_unsafe($_) } @$forms) {
     for my $s (@side_snaps) {
@@ -7661,7 +7662,7 @@ sub _lower_embedded_anon {
   my $env = $self->environment;
   my $ppi_snap    = _ppi_state_snapshot(@stmts);
   my %saved_lex   = %{ $self->{_live_lex} // {} };
-  my %saved_lb    = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+  my %saved_lb    = %{ $self->{_let_bound_vars} // {} };
   my $scope_depth = scalar @{ $env->scope_stack };
   my @side_snaps  = map { [$_, scalar @{ $self->{$_} // [] }] }
                     qw(_captured_decls _hoisted_decls _hoisted_defs
@@ -7679,7 +7680,7 @@ sub _lower_embedded_anon {
   $env->in_subroutine($env->in_subroutine - 1);
   pop @{ $env->scope_stack } while @{ $env->scope_stack } > $scope_depth;
   $self->{_live_lex} = \%saved_lex;
-  $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+  $self->{_let_bound_vars} = \%saved_lb;
 
   if (!$forms || !@$forms || grep { _embed_form_unsafe($_) } @$forms) {
     if ($census) {
@@ -7761,7 +7762,7 @@ sub _lower_expr {
     ($census_expr_o, $census_root) = ($expr_o, $node_id);
     Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
                        sub_info => $self->_cur_sub_info,
-                       lexicals => $self->fallback_parser->{_let_bound_vars} // {})
+                       lexicals => $self->{_let_bound_vars} // {})
                  ->gen_form($node_id, $native_ctx);
   };
   if (_seam_census()) {
@@ -7848,7 +7849,7 @@ sub _lower_expr {
 # (declined subtrees) get v1's own text rewrite.
 sub _seam_lex_assign_fix {
   my ($self, $form) = @_;
-  my $lb = $self->fallback_parser->{_let_bound_vars} // {};
+  my $lb = $self->{_let_bound_vars} // {};
   return unless %$lb;
   my $walk;
   $walk = sub {
@@ -8361,7 +8362,7 @@ sub _lower_our_decl {
     # A defvar of a let-bound name would proclaim it special and poison the
     # lexical lets (see _forward_global_decls) — shadowing our/my → v1.
     die "Parser2 TODO: our '$n' shadows a my-lexical\n"
-      if $self->fallback_parser->{_let_bound_vars}{$n};
+      if $self->{_let_bound_vars}{$n};
     # Inside a nested-`package X;` region (D1/E1.5) the declared cell belongs
     # to X, but this defvar is read in the SECTION's package — qualify it, and
     # register the our-variable so the fallback expression path qualifies
@@ -8569,7 +8570,7 @@ sub _fallback_stmt_capture {
   # statements (`my $x = …;` at this level) must keep their registrations.
   my $confines = $stmt->isa('PPI::Statement::Compound');
   my %saved_lb;
-  %saved_lb = %{ $p->{_let_bound_vars} // {} } if $confines;
+  %saved_lb = %{ $self->{_let_bound_vars} // {} } if $confines;
   # Reflect the statement's REAL block-nesting into the isolated capture: v1's
   # _process_element keys several bucket decisions on `_block_depth > 0` — most
   # importantly a bareword `require Module` nested in a block/sub stays INLINE
@@ -8632,7 +8633,7 @@ sub _fallback_stmt_capture {
   $p->indent_level($saved[2]);
   $p->{_local_let_depth} = $saved[3];
   $p->_block_depth($saved_bd);
-  $p->{_let_bound_vars} = \%saved_lb if $confines;
+  $self->{_let_bound_vars} = \%saved_lb if $confines;
   return (@runtime ? join("\n", @runtime) : undef, $opens);
 }
 
@@ -8818,7 +8819,7 @@ sub _seam_note_expr {
   $self->{_seam_expr_root}{ _seam_node_desc($expr_o, $root_id) }++;
   my $gen = Pl::ExprToCL2->new(expr_o => $expr_o, environment => $self->environment,
                                sub_info => $self->_cur_sub_info,
-                               lexicals => $self->fallback_parser->{_let_bound_vars} // {});
+                               lexicals => $self->{_let_bound_vars} // {});
   my $depth = 0;
   $self->_seam_blame($gen, $expr_o, $root_id, \$depth);
 }

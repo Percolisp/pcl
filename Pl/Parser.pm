@@ -4857,7 +4857,7 @@ sub _process_block {
   # disturbing package context for subs already defined before their calls.
   # Only fires when _let_bound_vars is non-empty (otherwise subs already go to
   # declarations/definitions and are pre-hoisted).
-  if (%{$self->{_let_bound_vars} // {}}) {
+  if (%{$self->lex_home->{_let_bound_vars} // {}}) {
     # First pass: find which sub names appear as word tokens before their FIRST definition.
     # Only the first definition of a sub is ever hoisted — later redefinitions stay in order
     # so that last-definition-wins semantics are preserved.
@@ -5419,7 +5419,7 @@ sub _begin_block_closure_scope {
     saved_env       => { %$env_renames },
     saved_scope_new => $self->{_current_scope_new_renames},
     saved_scope_old => $self->{_current_scope_old_renames},
-    saved_letbound  => $self->{_let_bound_vars},
+    saved_letbound  => $self->lex_home->{_let_bound_vars},
     saved_indent    => $self->indent_level,
   };
 
@@ -5444,7 +5444,7 @@ sub _begin_block_closure_scope {
   $self->{_current_scope_new_renames} = { %{$clo->{saved_scope_new} // {}}, %new_renames };
   $self->{_current_scope_old_renames} = { %{$clo->{saved_scope_old} // {}},
                                           map { $_ => $clo->{saved_env}{$_} } @vars };
-  $self->{_let_bound_vars} = { %{$clo->{saved_letbound} // {}}, map { $_ => 1 } @vars };
+  $self->lex_home->{_let_bound_vars} = { %{$clo->{saved_letbound} // {}}, map { $_ => 1 } @vars };
 
   $self->_emit("(let (" . join(" ", @bindings) . ")");
   $self->indent_level($self->indent_level + 1);
@@ -5460,7 +5460,7 @@ sub _end_block_closure_scope {
   $self->environment->state_var_renames($clo->{saved_env});
   $self->{_current_scope_new_renames} = $clo->{saved_scope_new};
   $self->{_current_scope_old_renames} = $clo->{saved_scope_old};
-  $self->{_let_bound_vars}            = $clo->{saved_letbound};
+  $self->lex_home->{_let_bound_vars}            = $clo->{saved_letbound};
 }
 
 
@@ -5805,7 +5805,7 @@ sub _vars_in_interpolated_text {
 sub _current_outer_scope {
   my ($self) = @_;
   my %outer;
-  for my $v (keys %{$self->{_let_bound_vars} // {}}) {
+  for my $v (keys %{$self->lex_home->{_let_bound_vars} // {}}) {
     $outer{$v} = { type => 'my', cl_name => $v };
   }
   my $renames = $self->environment->state_var_renames // {};
@@ -5837,7 +5837,7 @@ sub _emit_scoped_block {
 
   # Collect globally unique 'my' vars (excluding state vars and vars already
   # let-bound by an enclosing _emit_scoped_block, preserving order).
-  my $already_bound = $self->{_let_bound_vars} // {};
+  my $already_bound = $self->lex_home->{_let_bound_vars} // {};
   my (%seen_var);
   my @all_my_vars = grep { !$seen_var{$_}++ && !$state_vars->{$_}
                                              && !$already_bound->{$_} }
@@ -5903,9 +5903,9 @@ sub _emit_scoped_block {
   # BEFORE any tagbody/:next structure emitted by $emit_body closes things up.
   # _emit_scoped_block saves/restores so nested scopes don't interfere.
   my $saved_hook        = $self->{_stmt_pre_hook};
-  my $old_let_vars      = $self->{_let_bound_vars};
+  my $old_let_vars      = $self->lex_home->{_let_bound_vars};
   my $saved_pending     = $self->{_pending_let_closes};
-  $self->{_let_bound_vars}     = { %{$old_let_vars // {}} };
+  $self->lex_home->{_let_bound_vars}     = { %{$old_let_vars // {}} };
   $self->{_pending_let_closes} = [];
 
   $self->{_stmt_pre_hook} = sub {
@@ -5918,7 +5918,7 @@ sub _emit_scoped_block {
       my $lv    = $new_renames{$var} // $var;
       my $sigil = substr($lv, 0, 1);
       push @bindings, "($lv " . _let_init($sigil) . ")";
-      $parser->{_let_bound_vars}{$lv} = 1;
+      $parser->lex_home->{_let_bound_vars}{$lv} = 1;
     }
     return unless @bindings;
     $parser->_emit("(let (" . join(" ", @bindings) . ")");
@@ -5931,7 +5931,7 @@ sub _emit_scoped_block {
   # Restore state.  Pending closes are flushed inside _process_block (at end
   # of the statement loop, before any tagbody/:next structure emitted by
   # $emit_body).  Nothing left to close here.
-  $self->{_let_bound_vars}     = $old_let_vars;
+  $self->lex_home->{_let_bound_vars}     = $old_let_vars;
   $self->{_pending_let_closes} = $saved_pending;
   $self->{_stmt_pre_hook}      = $saved_hook;
   if (%new_renames) {
@@ -5993,7 +5993,7 @@ sub _with_declarations {
     # Any var found by the deep search but not by BlockAnalyzer needs a hoisted
     # flat-let at the top of the block so it is visible to all subsequent statements.
     my $state_vars    = $self->{_current_state_vars} // {};
-    my $already_bound = $self->{_let_bound_vars}     // {};
+    my $already_bound = $self->lex_home->{_let_bound_vars}     // {};
     my %stmt_level    = map  { $_ => 1 }
                         grep { !$state_vars->{$_} && !$already_bound->{$_} }
                         map  { @{$_->{vars}} }
@@ -6018,10 +6018,10 @@ sub _with_declarations {
       } @hoisted);
       $self->_emit("(let ($bindings)");
       $self->indent_level($self->indent_level + 1);
-      my $old_let = $self->{_let_bound_vars};
-      $self->{_let_bound_vars} = { %{$old_let // {}}, map { $_ => 1 } @hoisted };
+      my $old_let = $self->lex_home->{_let_bound_vars};
+      $self->lex_home->{_let_bound_vars} = { %{$old_let // {}}, map { $_ => 1 } @hoisted };
       $self->_emit_scoped_block($analysis, $emit_body);
-      $self->{_let_bound_vars} = $old_let;
+      $self->lex_home->{_let_bound_vars} = $old_let;
       $self->indent_level($self->indent_level - 1);
       $self->_emit(")");
     } else {
@@ -6181,9 +6181,9 @@ sub _with_declarations {
     # closures capture the symbol (which is nil after the loop) rather than the
     # per-iteration value. p-my-= (box-set) skips this proclaim, preserving lexicality.
     # If you add a new let-binding path, you MUST update _let_bound_vars accordingly.
-    my $old_let_vars = $self->{_let_bound_vars};
+    my $old_let_vars = $self->lex_home->{_let_bound_vars};
     my @bound_names = map { $new_renames{$_} // $_ } @my_vars;
-    $self->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @bound_names };
+    $self->lex_home->{_let_bound_vars} = { %{$old_let_vars // {}}, map { $_ => 1 } @bound_names };
 
     # Apply new renames to environment so ExprToCL emits the unique CL names.
     # Also expose them via _current_scope_new_renames for _process_variable_statement
@@ -6245,7 +6245,7 @@ sub _with_declarations {
       }
     }
 
-    $self->{_let_bound_vars} = $old_let_vars;
+    $self->lex_home->{_let_bound_vars} = $old_let_vars;
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");
   } else {
@@ -6898,14 +6898,14 @@ sub _process_foreach_loop {
     # lives in _lexical_foreach_vars, not _let_bound_vars.  Add it to
     # _let_bound_vars for the body so a string eval in the body captures it
     # (e.g. `for my $x (...) { eval '$x' }`).  Save/restore around the body.
-    my $saved_let_bound = $self->{_let_bound_vars};
+    my $saved_let_bound = $self->lex_home->{_let_bound_vars};
     if ($cl_loop_var ne '$_') {
-      $self->{_let_bound_vars} = { %{$saved_let_bound // {}}, $cl_loop_var => 1 };
+      $self->lex_home->{_let_bound_vars} = { %{$saved_let_bound // {}}, $cl_loop_var => 1 };
     }
     $self->_with_declarations($block, sub {
       $self->_process_block($block, 1);
     });
-    $self->{_let_bound_vars} = $saved_let_bound;
+    $self->lex_home->{_let_bound_vars} = $saved_let_bound;
     if (defined $saved_loop_var_rename) {
       $cur_renames = $self->environment->state_var_renames // {};
       $self->environment->state_var_renames({ %$cur_renames, $loop_var => $saved_loop_var_rename });
@@ -6977,10 +6977,10 @@ sub _process_sub_statement {
   # variables (e.g. $x__lex__N renamed for closure capture).  p-declare-sub
   # still goes to declarations for forward-reference support.
   my $is_nested_named = $name && $self->environment->in_subroutine > 0
-                        && !%{$self->{_let_bound_vars} // {}};
+                        && !%{$self->lex_home->{_let_bound_vars} // {}};
   my $old_bucket = $self->_cur_bucket;
   my $old_indent = $self->indent_level;
-  if ($self->environment->in_subroutine == 0 && !%{$self->{_let_bound_vars} // {}}) {
+  if ($self->environment->in_subroutine == 0 && !%{$self->lex_home->{_let_bound_vars} // {}}) {
     $self->_cur_bucket('definitions');
   } elsif ($is_nested_named) {
     # A nested NAMED sub must be hoisted OUT of the enclosing sub's form so it is
@@ -8935,8 +8935,8 @@ sub _emit {
   # of a lexical one, breaking closure capture.
   # p-my-= is a semantic macro (expands to box-set) that expresses intent for
   # other compiler backends reading the generated IR.
-  if ($line && ($self->{_let_bound_vars} || $self->{_sig_param_lexicals})) {
-    my %lex = (%{$self->{_let_bound_vars} // {}},
+  if ($line && ($self->lex_home->{_let_bound_vars} || $self->{_sig_param_lexicals})) {
+    my %lex = (%{$self->lex_home->{_let_bound_vars} // {}},
                %{$self->{_sig_param_lexicals} // {}});
     for my $var (keys %lex) {
       my $pat = quotemeta("(p-scalar-= $var");

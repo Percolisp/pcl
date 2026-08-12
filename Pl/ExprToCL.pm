@@ -3573,7 +3573,7 @@ sub _eval_lexical_alist {
   my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
                 && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
   return '' unless $parser;
-  my $lb = $parser->{_let_bound_vars} // {};
+  my $lb = $parser->lex_home->{_let_bound_vars} // {};
   # The alist KEY is the original Perl name; the VALUE is the live CL symbol.
   # Closure-captured lexicals are renamed to $name__lex__N (so per-call let
   # bindings stay lexical); strip that suffix so the key matches the bare name

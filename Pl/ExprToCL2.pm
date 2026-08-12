@@ -25,7 +25,8 @@ has environment  => (is => 'ro');
 has indent_level => (is => 'rw', default => 0);
 
 # Live let-bound lexical set at this expression's position (sigiled names:
-# '$x', '@a', '%h') — Parser2 passes fallback_parser->{_let_bound_vars}.
+# '$x', '@a', '%h') — Parser2 passes its own _let_bound_vars registry
+# (owner-homed since #153 chunk 0).
 # W11 element access is native ONLY for let-bound containers: they are
 # guaranteed bound (no boundp/auto-declare arm needed) and are never
 # state-renamed package cells.
