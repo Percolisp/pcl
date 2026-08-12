@@ -7080,6 +7080,14 @@ sub _lower_compound {
     my ($init_s, $cond_s, $step_s) =
       map { $_ && !$_->isa('PPI::Statement::Null') ? $_ : undef } @sect[0 .. 2];
 
+    # The whole C-for HEAD is one lexical scope, and every `my` in it scopes to
+    # the loop — exactly like `while (my $x = …)`.  Save the lexical registries
+    # before ANY of it registers and restore at every exit: a leak puts the
+    # (unbound-after-the-let) name into a later sibling's string-eval capture
+    # alist (bop.t %res section abort).
+    my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
+    my %saved_lex = %{ $self->{_live_lex} // {} };
+
     # Multiple `my` decls in the init (`for (my $i = 0, my $j = 10; …)`) are the
     # comma operator: `(my $i = 0), (my $j = 10)`.  _single_scalar_decl would
     # misparse the whole comma-list as $i's RHS, so bind ALL declared counters in
@@ -7087,7 +7095,8 @@ sub _lower_compound {
     # matching v1) — no unboxing carve-out for the multi-counter case.
     my @init_mys = $init_s ? $self->_cond_my_names($init_s) : ();
     if (@init_mys >= 2) {
-      $self->_reg_lex(@init_mys);
+      my @head_mys = $self->_cond_my_names($cond_s, $step_s);
+      $self->_reg_lex(@head_mys, @init_mys);
       my $initform = ['list', $self->_lower_expr([_strip_semi($init_s->schildren)], $stmt)];
       my $cond = $cond_s
         ? ['list', $self->_auto_defined_raw(
@@ -7095,21 +7104,32 @@ sub _lower_compound {
         : ['list', 't'];
       my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
       my @body = $self->_lower_scope([$block->schildren], $vi);
-      return ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @init_mys],
-              ['p-for', $initform, $cond, $step, _label_keys($label), @body]];
+      my $form = ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @init_mys],
+                  ['p-for', $initform, $cond, $step, _label_keys($label), @body]];
+      $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
+      $self->{_live_lex} = \%saved_lex;
+      return $self->_wrap_cond_mys($form, @head_mys);
     }
 
     # A `my $i = INIT` init binds the counter in a let AROUND the p-for —
     # register the name BEFORE lowering cond/step/body so fallback expressions
     # see it as let-bound.  Unboxable (e.g. step `$i = $i + 1`) → raw slot;
     # else boxed (a `$i++` step keeps VarAnnotator conservative).
-    # The counter is scoped to the loop (head + body): restore
-    # _let_bound_vars/_live_lex before returning, exactly like the foreach
-    # branch below — a leak puts the (unbound-after-the-let) name into a later
-    # sibling's string-eval capture alist (bop.t %res section abort).
-    my %saved_lb  = %{ $self->fallback_parser->{_let_bound_vars} // {} };
-    my %saved_lex = %{ $self->{_live_lex} // {} };
+    # The counter is scoped to the loop (head + body), like the foreach branch
+    # below — see the registry save above.
     my ($name, $init) = $init_s ? $self->_single_scalar_decl($init_s) : ();
+
+    # #297: every OTHER `my` in the head — one in the CONDITION or the STEP, and
+    # an init `_single_scalar_decl` declined (`my ($x) = …`, `my @a = …`) — gets
+    # ONE fresh boxed/container let around the whole construct (_wrap_cond_mys),
+    # exactly as a `while`/`if` condition-my does; the section itself lowers to
+    # the per-iteration assignment into it.  Without the let the declaration was
+    # a bare write into the package cell, so the name stayed defined (and shared
+    # with the global) after the loop.  $name is excluded: its own let is below,
+    # and it may take a raw/unboxed slot a `(make-p-box nil)` wrap would defeat.
+    my @head_mys = grep { !defined $name || $_ ne $name }
+                   $self->_cond_my_names($cond_s, $step_s, $init_s);
+    $self->_reg_lex(@head_mys) if @head_mys;
     $self->_reg_lex($name) if $name;
     # #138: a SINGLE `my` with a comma tail (`for (my $i = 0, $j = 9; …)`) —
     # the tail is not part of $i's init (perl: `(my $i = 0), ($j = 9)`), and
@@ -7182,7 +7202,7 @@ sub _lower_compound {
     }
     $self->fallback_parser->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
-    return $form;
+    return $self->_wrap_cond_mys($form, @head_mys);
   }
 
   if ($kw eq 'for' || $kw eq 'foreach') {

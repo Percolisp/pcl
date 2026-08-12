@@ -2404,3 +2404,29 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   covering the name.  op/bless.t survives only because ITS `$c1` is poisoned.
 - Guard rows in `Pl/t/transpile-test-10.t`, incl. the inverse (`my $x = $x, 1`
   still refuses).  corpus-diff identical across 111 files — a die became code.
+
+## s385 (2026-08-12, Opus) — #297: EVERY `my` in a loop HEAD gets its own `let`
+
+- **The head of a C-style `for` is one lexical scope, and every `my` in it
+  scopes to the loop.**  The init counter always had a `let`; a `my` in the
+  CONDITION or the STEP, and an init `_single_scalar_decl` declines
+  (`my ($x) = …`, `my @a = …`), had none — the declaration lowered to a bare
+  write into the package cell, so the name stayed defined after the loop and
+  shared storage with a same-named global.  `while (my $x = …)` / `if (my $x
+  = …)` have had the wrap since forever; this makes C-for consistent with
+  them, through the SAME `_cond_my_names` + `_wrap_cond_mys` pair (rule 11).
+- **Why it had to land before #291**: the `__cond__` rename was the only thing
+  scoping those declarations.  Verified live by disabling the rename and the
+  `_seg_lex` forward-decl exclusion (#291's enabler) together: all five shapes
+  then run identical to perl.
+- **The registry save/restore now covers the WHOLE head** (it used to start
+  after the multi-counter branch), so the multi-`my` init no longer leaks its
+  counters into a later sibling's string-eval capture alist either.
+- corpus-diff: exactly 2 of 111 files (`my.t`, `loopctl.t`), every hunk the
+  let-wrap plus the now-unneeded top-level `p-defcell` for the renamed name.
+  Both files re-measured against HEAD in the sweep: identical (67/0, 52/0).
+- **Known divergence, filed as #300 and normative in `ir-spec.md` §6.2**: the
+  wrap is ONE binding for the whole loop, where perl gives the declaration a
+  fresh instance per iteration.  Observable only by closing over it in the body
+  — and it is NOT new: `while (my $x = shift @l) { push @c, sub { $x } }`
+  diverges the same way and is untouched by #291.

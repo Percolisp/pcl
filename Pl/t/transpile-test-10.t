@@ -334,6 +334,43 @@ our @l = (3, 1, 2);
 print "orig:@l\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #297: EVERY `my` in a C-for HEAD scopes to the loop and needs its own `let`.
+# The init counter always had one; a `my` in the CONDITION or the STEP, and a
+# list/array init `_single_scalar_decl` declines (`my ($x) = …`, `my @a = …`),
+# lowered to a bare write into the package cell — so the name stayed defined
+# (and shared with the global) after the loop.  The `__cond__` rename was the
+# only thing scoping them, which is why this had to be fixed before #291 can
+# delete it.  Rows: condition-my, step-my, list-init, array-init, and a
+# multi-counter init with a condition-my on top.
+# ---------------------------------------------------------------------------
+test_transpile('every my in a C-for head is scoped to the loop', '
+my $j = 3;
+for (my $i = 0; (my $k = $i) < $j; ++$i) { }
+print defined($k) ? "k:DEFINED\n" : "k:undef\n";
+for (my $n = 0; $n < 2; my $s = $n, ++$n) { }
+print defined($s) ? "s:DEFINED\n" : "s:undef\n";
+for (my ($x) = (0); $x < 2; $x++) { print "x=$x\n" }
+print defined($x) ? "x:DEFINED\n" : "x:undef\n";
+for (my @a = (1,2); @a; shift @a) { print "n=", scalar(@a), "\n" }
+print defined($a[0]) ? "a:DEFINED\n" : "a:undef\n";
+for (my $p = 0, my $q = 2; (my $r = $p) < $q; ++$p) { }
+print defined($r) ? "r:DEFINED\n" : "r:undef\n";
+');
+
+# INVERSE: the same-named package GLOBAL must keep its cell AND its value —
+# the head `my` is a lexical shadow, so a sub called from the body still reads
+# the global (the #294 shape one construct over), and the global is untouched
+# after the loop.  This is the row that fails if the new let were a dynamic
+# rebind or if it swallowed the global's declaration.
+test_transpile('C-for head my shadows a same-named global, callee still sees it', '
+our $k = "global";
+sub see { $k }
+my $j = 2;
+for (my $i = 0; (my $k = $i) < $j; ++$i) { print see(), "|", $k, "\n" }
+print "after:", $k, "\n";
+');
+
 # INVERSE: a genuine below-assignment TAIL must still be refused — its tail
 # runs inside the new binding, which the p-box-init shape cannot express.
 {

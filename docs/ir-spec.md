@@ -801,6 +801,21 @@ lexical are spelled the SAME symbol, so the two cases are told apart like this:
 A consumer that lowers this IR must reproduce the same split; treating `:my`
 as decoration silently leaks the loop value into every sub the body calls.
 
+**Declarations in a loop/condition HEAD.**  A `my` anywhere in an `if`/`while`
+condition, or in ANY of a C-style `for`'s three head sections, scopes to the
+whole construct — head *and* body — and to nothing after it.  The IR states
+that structurally: the construct is wrapped in a `let` binding a fresh cell per
+declared name, and the section itself lowers to the per-iteration assignment
+into it (`(let (($k (make-p-box nil))) (p-for () ((p-< (p-my-= $k $i) $j)) …))`).
+The C-for INIT counter is the one exception in *spelling* only — it gets its own
+`let` one level in, because it may also take an unboxed raw slot.  There is no
+"declare it in the enclosing scope" fallback: a head `my` that reached the
+package cell would stay defined after the loop and collide with a same-named
+global (#297).  Known divergence: the wrap is ONE binding for the whole loop,
+where perl gives the declaration a fresh instance per iteration — observable
+only by closing over it in the body (`while (my $x = shift @l) { push @c, sub
+{ $x } }` yields perl's 1,2,3 vs PCL's last value); tracked as #300.
+
 **Counting-loop range foreach** (s286b): a foreach whose list is a **sole
 range** `A..B` lowers to `(p-foreach-range ((VAR A B)) body…)` or its
 `-raw` variant instead of materializing the range vector.  Semantics:

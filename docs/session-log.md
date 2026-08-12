@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 385 (2026-08-12, Opus) — #297 CLOSED: every `my` in a loop HEAD gets its own `let`
+
+**Second of the four #291 blockers gone.**  The C-style `for` head is one
+lexical scope in perl and every `my` in it scopes to the loop — but only the
+INIT counter had a `let`.  A `my` in the CONDITION or the STEP, and an init
+`_single_scalar_decl` declines (`my ($x) = …`, `my @a = …`), lowered to a bare
+write into the package cell:
+
+    my $j = 3;
+    for (my $i = 0; (my $k = $i) < $j; ++$i) { }
+    print defined($k) ? "DEFINED:$k\n" : "undef\n";   # perl: undef
+
+The `__cond__` rename was the only thing scoping them (it minted a private
+global `$k__cond__0` that nothing else could name), which is why this had to
+land before #291 deletes it.
+
+**The fix is the existing pair, not a new one** (rule 11): the same
+`_cond_my_names` + `_wrap_cond_mys` that `while (my $x = …)` and
+`if (my $x = …)` have always used, now asked for the C-for's cond/step
+sections and for an init the scalar-decl path declined.  `$name` (the init
+counter) is excluded — it has its own `let` one level in and may take a
+raw/unboxed slot a `(make-p-box nil)` wrap would defeat.  The lexical-registry
+save/restore moved to the TOP of the head so it covers the whole scope; the
+multi-counter branch, which had no restore at all, no longer leaks its
+counters into a later sibling's string-eval capture alist either.
+
+**Verified against the tree #291 will produce**, not just this one: with the
+`__cond__` rename AND the `_seg_lex` forward-decl exclusion (#291's enabler)
+both disabled, all five shapes — condition-my, step-my, `my ($x)` init,
+`my @a` init, multi-counter init plus a condition-my — run identical to perl.
+With only the rename disabled they crash on the undeclared global, which is
+#205/#299's half, not this one.
+
+**corpus-diff: exactly 2 of 111 files** (`my.t`, `loopctl.t`), every hunk the
+let-wrap plus the now-unneeded top-level `p-defcell` for the renamed name.
+Both re-measured against HEAD in a worktree: **identical, 67/0 and 52/0** — no
+row moved.  No shipped module under `lib/` has a C-for head `my` in its
+condition/step (grepped), so module transpiles cannot move either.
+Pl/t gate **138 files / 5102 tests PASS**; cache generation v2-133 → v2-134
+with the three checked-in artifacts regenerated (diff = the stamp line only,
+confirming the emission change does not reach them).
+
+**Full sweep GATE clean** — 0 new / 0 fixed, TOTAL 18498 → **18506** (+8, the
+standing pass-baseline shortfall #292 owes, unchanged from s384), 65 fully
+passing files, 6 UNSTABLE rows all on the standing s341/s383 crash-file noise
+list (method.t 4, postfixderef.t 1, ref.t 1 — above their abort points) and 4
+baseline fails unverified inside two PARTIAL files.
+
+**Two guard rows** in `Pl/t/transpile-test-10.t` (file now 28 s): all five
+shapes in one, plus the INVERSE — `our $k` + a sub reading it, where the head
+`my` must shadow without swallowing the global's cell or its value.
+
+**Residue filed as #300, and normative in `ir-spec.md` §6.2**: the wrap is ONE
+binding for the whole loop where perl gives the declaration a fresh instance
+per iteration.  Observable only by closing over it in the body — and NOT new:
+`while (my $x = shift @l) { push @c, sub { $x } }` prints perl's 1,2,3 vs
+PCL's empty, unchanged by anything here and untouched by #291.  A `my` in the
+loop BODY is correct (its let is re-entered per iteration), so the gap is
+exactly "declared in the head".
+
+**NEXT SESSION**: remaining #291 blockers are **#296** (the `my $a`/`my $b`
+design call — Fable's) and **#299**.  Still owed and cheap: **#292's
+pass-baseline re-bless** (this run's `.faillog` is gate-clean; the #223
+procedure needs the per-file audit first — method.t, postfixderef.t, ref.t and
+tr.t were PARTIAL and must not be blessed downward).  Noted en route: the
+blessed `docs/pass-baseline.tsv` still says `my.t 51 1`, while both HEAD and
+this tree run it 52/0 — the same staleness #292 owes.
+
+---
+
 ## Session 384 (2026-08-12, Opus) — #294 shipped; #291 attempted in full, MEASURED not shippable, reverted with four blockers filed
 
 **Continued s384c — #298 CLOSED (`a1e3814`), one of the four blockers gone.**
