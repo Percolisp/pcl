@@ -1377,10 +1377,6 @@ sub parse {
   # v1-SEAM shadow rename, _gate_seam_my_shadow, whose cause is the seam's
   # _let_bound_vars contract and not the declaration model.)
   $self->{_shadow_rename_counter} = 0;
-  $self->{_emb_rename_counter} = 0;
-  # #265 sibling pass: expression-embedded `my` INSIDE a named sub whose name
-  # another sub also mentions — the let-hoist's veto is scope-blind there.
-  $self->_rename_vetoed_embedded_mys($_) for @segments;
 
   # Pre-pass: collect per-sub facts BEFORE lowering anything, so call sites
   # that precede (or recurse into) a sub's definition see them.  Register each
@@ -4820,84 +4816,6 @@ sub _lexical_decl_scope {
   return ($s->top, undef);
 }
 
-# W8.5 sibling (#265, s368) — the half of the embedded-`my` story the s365 fix
-# did not reach.  `_lower_block` let-binds an expression-embedded `my`
-# (`open my $fh, …`, `++my $x->{k}`) unless another named sub in the segment
-# mentions the name, on the theory that the sub shares the forward-defvar'd
-# global as its cell.  That theory holds at FILE level, where the sub really
-# can close over the decl — and is SCOPE-BLIND inside a named sub's body,
-# where the other sub cannot possibly see this sub's lexical:
-#
-#     sub setter { ($x, $y) = (…) }        # $x here is the package GLOBAL
-#     sub foo3   { ++my $x->{foo}; … }     # a FRESH lexical, per call
-#
-# Refused, `my $x` lowered as a write to the global: state persisted across
-# calls and clobbered the global (op/my.t t47, [perl #29340]'s companion).
-#
-# Simply narrowing the veto would be wrong — the let registers `$x` in
-# _seg_lex, which suppresses the GLOBAL's forward defvar and leaves `setter`
-# unbound.  So mint a renamed lexical instead: `$x__emb__N` is a name nobody
-# else mentions, so the veto no longer fires AND `$x` keeps its defvar.  The
-# rename root is the enclosing BLOCK, which is exactly the decl's scope
-# (perl scopes an embedded `my` from its statement to the end of that block),
-# and _rename_decl_within starts at the declarator, so earlier statements
-# keep the original name.  Interpolation follows via the M-A fixer inside
-# that helper; string-eval visibility follows because `$x__emb__N` is
-# let-bound and _eval_lexical_alist strips the suffix (ir-spec §2b.4's first
-# route, the same waiver __cond__/__shadow__ carry).
-# A blocked site is left untouched — no worse than before the pass.
-sub _rename_vetoed_embedded_mys {
-  my ($self, $seg) = @_;
-  my $subs = _collect_named_subs($seg->{stmts});
-  return unless @$subs;
-  for my $top (@{ $seg->{stmts} }) {
-    next unless ref $top && $top->isa('PPI::Node');
-    # Reach the candidate statements through the `my` WORDS (one tree walk per
-    # top-level statement), not by enumerating every statement and asking each
-    # whether it holds a `my` — the shape the sibling pass uses, and the one
-    # that keeps this off the compile-time profile (#184's lesson).
-    my %cand;
-    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
-                                   && $_[1]->content eq 'my' }) || [] }) {
-      my $stmt = $w;
-      $stmt = $stmt->parent
-        while $stmt && !($stmt->isa('PPI::Statement')
-                         && $stmt->parent
-                         && $stmt->parent->isa('PPI::Structure::Block'));
-      next unless $stmt;
-      $cand{ refaddr $stmt } //= $stmt;
-    }
-    for my $stmt (values %cand) {
-      # Same statement shape _lower_block's hoist accepts, and its scope root.
-      next unless ref($stmt) eq 'PPI::Statement'
-               || ref($stmt) eq 'PPI::Statement::Expression';
-      my $root = $stmt->parent;
-      # INSIDE A SUB BODY only — named or anonymous (#272): at FILE level the
-      # other sub genuinely shares the cell and the veto is right
-      # (Capture-Tiny's Utils.pm, #199); inside any sub body it cannot.
-      next unless _enclosing_sub_body($stmt);
-      my @syms = $self->_embedded_my_syms($stmt) or next;
-      my %uniq;
-      my @names = grep { !$uniq{$_}++ } map { $_->content } @syms;
-      my %veto = map { ($_ => 1) }
-                 $self->_embedded_my_veto_names($subs, $stmt, \@names);
-      next unless %veto;
-      for my $sym (@syms) {
-        my $old = $sym->content;
-        next unless $veto{$old};
-        my $sigil = substr($old, 0, 1);
-        my $why = $sigil eq '$'
-          ? $self->_shadow_rename_blocker($root, $sym, 'eval_ok', 'shadow_ok')
-          : $self->_state_container_blocker($root, $sym, 'eval_ok');
-        next if $why;
-        $self->_rename_decl_within($root, $sym,
-          $old . '__emb__' . $self->{_emb_rename_counter}++);
-      }
-    }
-  }
-  return;
-}
-
 # The nearest enclosing SUB BODY of $el, if any: a NAMED sub definition, or
 # the BLOCK of an anonymous `sub { … }` (with its prototype/attributes
 # skipped, the same way _state_decl_route recognises one).  A Scheduled block
@@ -6445,9 +6363,17 @@ sub _lower_block {
                   && !$self->fallback_parser->{_let_bound_vars}{$_} }
               $self->_embedded_my_names($first);
     if (@emb) {
-      # The veto predicate is shared with _rename_vetoed_embedded_mys, the
-      # pre-pass that renames the decls this would otherwise refuse (#265).
-      my $vetoed = $self->_embedded_my_veto_names(
+      # INSIDE A SUB BODY the veto's premise is false and the question is not
+      # even asked (#265/#272, re-shaped by #291): another sub cannot possibly
+      # share a lexical declared inside THIS sub's body, so there is nothing to
+      # strand — and the package global of that name keeps its own cell either
+      # way, since the forward-decl pass no longer excludes let-bound names.
+      # (Until #291 this was reached by RENAMING the decl to `$x__emb__N`, a
+      # name no sub mentions, so that the veto below would not fire.  Same
+      # outcome, one mechanism fewer.)  At FILE level the premise holds and the
+      # veto stands: Capture-Tiny's Utils.pm really does share the cell (#199).
+      my $vetoed = !_enclosing_sub_body($first)
+                && $self->_embedded_my_veto_names(
                      $self->{_seg_named_subs} // [], $first, \@emb) ? 1 : 0;
       if (!$vetoed) {
         $self->_reg_lex(@emb);

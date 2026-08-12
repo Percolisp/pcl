@@ -590,4 +590,31 @@ for (my $i = 0; $i < 2; $i++) { print "f:$i\n" }
 print "out: $err $i\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #291 family 3 (`__emb__`, #265/#272): an expression-embedded `my` inside a
+# sub body whose name another sub mentions.  The let-hoist's veto — "that sub
+# shares the forward-declared global as its cell" — is true at FILE level and
+# false inside a sub body, so the veto is no longer asked there and the decl
+# binds a plain lexical.  Rows: (a) named-sub body, (b) ANON-sub body (#272),
+# (c) the FILE-level shape the veto exists for, which must still share the one
+# cell (Capture-Tiny's Utils.pm, #199).
+# ---------------------------------------------------------------------------
+test_transpile('embedded my inside a sub body vs the file-level shared cell', '
+sub setter { ($x, $y) = ("SX", "SY") }
+sub foo3   { ++my $x->{foo}; return $x->{foo} }
+setter();
+print "named: ", foo3(), foo3(), " x=$x y=$y\n";
+my $anon = sub { ++my $x->{foo}; return $x->{foo} };
+print "anon: ", $anon->(), $anon->(), " x=$x\n";
+my $tmp = "/tmp/pcl-291emb-$$.txt";
+open my $fh, ">", $tmp or die "w: $!";
+sub w { print $fh "shared\n" }
+w();
+close $fh;
+open my $in, "<", $tmp or die "r: $!";
+print "file: ", scalar(<$in>);
+close $in;
+unlink $tmp;
+');
+
 done_testing();

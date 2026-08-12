@@ -3589,13 +3589,10 @@ sub _eval_lexical_alist {
   # counters mint in source order, so descending N is innermost-first too.
   # Keys v1 can mint (__lex__, plain) keep the plain sort order — v1
   # emissions stay byte-identical.
-  # (The poisoned-condition-my rename `__cond__N` is GONE with #291 — the
-  # lexical and the package global coexist under one name now — so nothing
-  # mints that suffix any more and it has no entry below.)  __emb__N (#265)
-  # is still minted, one scope in: an expression-embedded `my` inside a sub
-  # body, renamed so the let-hoist's scope-blind veto stops refusing it; it
-  # strips like the others, and its counters mint in source order so
-  # descending N is innermost-first, as for __file__.
+  # (The two poisoned-`my` renames `__cond__N` and `__emb__N` are GONE with
+  # #291 — a lexical and a package global of the same name coexist now, so
+  # nothing mints those suffixes and they have no entries below.  `__shadow__`
+  # survives as the v1-SEAM rename only.)
   # `state` renames
   # (`__state__`) are deliberately NOT stripped: those are defvar'd cells, not
   # let bindings, and never enter _let_bound_vars.
@@ -3604,7 +3601,6 @@ sub _eval_lexical_alist {
     $v =~ s/__lex__\d+$//;
     my $d = $v =~ s/__shadow__(\d+)$// ? $1
           : $v =~ s/__file__(\d+)$//   ? $1
-          : $v =~ s/__emb__(\d+)$//    ? $1
           : $v =~ s/__excl__(\d+)$//   ? $1 : -1;
     return ($v, $d);
   };

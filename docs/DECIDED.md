@@ -2635,3 +2635,32 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   `transpile-test-10.t` and the gate still said PASS, at 5096 where 5109 was
   due.  Verify a rebuilt test file against its pre-merge version by diff before
   trusting the run.
+
+## s388c (2026-08-12, Opus) — #291 COMPLETE: the three poisoned-`my` renames are gone
+
+- **All three passes deleted, one per commit, each gated**: `__shadow__`
+  (nested bare block, s388c), `__cond__` (if/while/C-for head, s388d),
+  `__emb__` (expression-embedded `my` in a sub body, s388e).  Corpus rename
+  bindings 716/128/5 → 36/0/0; the remaining 36 `__shadow__` are
+  `_gate_seam_my_shadow`, a v1-seam mechanism with a live cause that stays
+  until the seam does (#153).
+- **Family 3 is not a deletion, it is the FIX the rename was standing in for.**
+  `_lower_block`'s let-hoist VETO presumes another named sub shares the
+  forward-declared global as this declaration's cell — true at FILE level
+  (Capture-Tiny's Utils.pm, #199), false inside a sub body, where no other sub
+  can see this body's lexical (#265, #272).  s368 could not simply narrow it,
+  because the `let` registered the name in `_seg_lex` and suppressed the
+  GLOBAL's declaration.  s388b removed that, so the narrowing IS the fix: the
+  veto is not asked when the statement sits inside a sub body.  Same outcome,
+  one mechanism fewer.
+- **`__excl__` STAYS in the eval-capture-alist strip list.**  Twice during this
+  replay the s384 hunk wanted to shorten that list to its s384 shape and would
+  have dropped #296's suffix with the deleted ones.  It is a let-bound lexical
+  whose suffix the alist must strip so a string eval in its scope finds it
+  under the original name — the #296-B1 path.  A suffix leaves that list only
+  when its MINTER leaves the compiler.
+- **A four-commit replay of reverted work is not a cherry-pick.**  Every
+  Parser2.pm hunk conflicted, because the regions the s384 commits delete now
+  hold code written after them (#296's two passes sit inside family 1's and 2's
+  spans).  Resolved by hand, deletions-only verified per commit
+  (`diff | grep -c '^>'` = 0), gate re-run after each.
