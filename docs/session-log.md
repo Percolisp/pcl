@@ -4,6 +4,61 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 388 (2026-08-12, Opus) — #296-B2: a LATER declaration owns the uses after it; #296 CLOSED, branch merged
+
+**B2 was the branch's last blocker, and probing found a SECOND spelling of it.**
+The diagnosed shape was a sibling redeclaration in one scope (`perl-tests/split.t`
+declares `my ($a,$b) = split …` three times in one block).  Probing the family
+turned up the construct-scoped twin — `{ my $a = "O"; while (my $a = …) { print
+$a } }` printed the OUTER value — which is the same defect and was equally live.
+Both were correct on `main` and broken by the branch's rename.
+
+**Cause, one sentence:** `_rename_decl_within` walked from its declarator to the
+end of the scope, so an earlier `my $a`'s rename claimed uses that belong to a
+later `my $a`; the later declaration's own pass then found nothing left to
+rename (the tokens already said `$a__excl__0`) and its binding sat unread.
+`_ref_shadowed` could not stop it: it inspects Block/Sub parents, and neither a
+same-scope sibling statement nor a construct head is a sibling of one.
+
+**Fix:** the walk now ends its claim at a later declaration of the same canonical
+name, in the two shapes `_lexical_decl_scope` distinguishes — the one function
+that already answers "what region does this declarator scope to", so the two
+agree by construction:
+
+- **same scope → STOP**, at the LAST TOKEN OF THE STATEMENT, not at the
+  declarator.  perl does not introduce the new name until the current statement
+  finishes, so the redeclaration's own initializer still reads the EARLIER
+  variable (probed: `my $a = "X"; my $a = "[$a]"` prints `[X]`;
+  `my ($a,$b)=(1,2); my ($a,$b)=($b,$a)` prints `21`).
+- **construct scope → SKIP the construct**, resuming after it, except the region
+  `_lexical_decl_scope` names as evaluated OUTSIDE it (a `for my $a (LIST)`'s
+  LIST, a condition-`my`'s own statement).  Covers `for my $x`, `while (my $x)`,
+  `for (my $x = 0; …)`.
+- **nested block → unchanged**, still `_ref_shadowed`'s call: it is positionally
+  exact there (statements before the inner `my` are still the outer variable's),
+  which a whole-region skip would not be.
+
+**Measured.** 19 probe rows over two probe files identical to perl (redecl RHS,
+three-way split.t shape, closures over each of three same-block decls, regex and
+heredoc interpolation after a redecl, nested block, sub body, file level).
+`split.t` back to its 9 baseline fails.  corpus-diff **2 of 111 files**, both
+explained: `split.t` (the fix) and `lc.t`, where a file-level `my $a` had been
+swallowing a later `for my $a (0,1)` loop variable — the loop var now gets its
+own symbol, i.e. two variables again.  Gate **138 files / 5108 tests PASS**.
+Cache generation v2-137 → **v2-138**.
+
+**FULL SWEEP (the merge bar — Pl/t was green with both regressions live):**
+GATE **clean**, 0 new / 0 fixed / no LOST, 6 unstable + 4 unverified all in the
+known PARTIAL crash files (method.t, postfixderef.t, ref.t, tr.t).
+**TOTAL passing 18498 → 18508 (+10)**, entirely newly-reachable rows in
+`eval.t` (+9, from B1's eval-capture work) and `my.t` (+1); neither file's fail
+set moved.
+
+**#296 closes.**  Branch `wip/s385-296` merged to `main`; **#291 (delete the
+poisoned-my machinery) is unblocked and is the next step.**
+
+---
+
 ## Session 387 (2026-08-12, Opus) — #296-B1: a string eval reads the caller's renamed exception lexical
 
 **Not a merge — one blocker of two.**  Work continues on `wip/s385-296`

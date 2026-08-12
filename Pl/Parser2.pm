@@ -3943,6 +3943,7 @@ sub _rename_decl_within {
   (my $newbare = $new) =~ s/^[\$\@\%]//;
   my $interp_fix = _interp_fixer($old, $newbare);
   my ($seen_sym, $past_decl) = (0, 0);
+  my ($stop_tok, $skip_end, $skip_in) = (undef) x 3;
   for my $t ($root->tokens) {
     if (!$seen_sym) {
       next unless $t == $sym;
@@ -3956,9 +3957,89 @@ sub _rename_decl_within {
       next if $inside;   # decl RHS: `my $x = $x` reads the OUTER $x
       $past_decl = 1;
     }
+    # A LATER declaration of the same name ends this one's claim on the uses it
+    # covers (#296-B2).  Only a `my`/`state` word can open one, so the test
+    # costs nothing on ordinary tokens.
+    if (!$stop_tok && !$skip_end && $t->isa('PPI::Token::Word')
+        && $t->content =~ /^(?:my|state)$/) {
+      my ($kind, $end, $inner) = _redecl_region($root, $t, $sym, $canon);
+      if    (($kind // '') eq 'stop') { $stop_tok = $end }
+      elsif (defined $kind)           { ($skip_end, $skip_in) = ($end, $inner) }
+    }
+    if ($skip_end) {
+      my $out = 0;                      # in the construct's OUTER-evaluated part
+      for (my $p = $t; $p; $p = $p->parent) {
+        if (refaddr($p) == refaddr($skip_in)) { $out = 1; last }
+      }
+      $skip_end = undef if refaddr($t) == refaddr($skip_end);
+      next if !$out;
+    }
     _rename_use_token($t, $old, $new, $interp_fix, $shadowed);
+    last if $stop_tok && refaddr($t) == refaddr($stop_tok);
   }
   return $new;
+}
+
+# Where an earlier declaration's rewrite region gives way to a LATER `my`/`state`
+# word $w declaring the same $canon.  Returns:
+#
+#   ('stop', TOKEN)         $w re-declares in the SAME scope $root — perl's
+#                           later `my` is a NEW variable and every use from
+#                           there on is ITS use, rewritten by its own pass.
+#                           TOKEN is the LAST TOKEN OF THE STATEMENT, not the
+#                           declarator: perl does not introduce the new name
+#                           until the current statement finishes, so the
+#                           redeclaration's own initializer still reads the
+#                           EARLIER variable (probed: `my $a = "X";
+#                           my $a = "[$a]"` prints `[X]`).
+#   ('skip', TOKEN, NODE)   $w declares into a CONSTRUCT (`for my $x (LIST)`,
+#                           `while (my $x = …)`, `for (my $x = 0; …)`), whose
+#                           whole extent is the new variable's scope.  Rewriting
+#                           resumes after TOKEN (the construct's last token);
+#                           inside it only NODE — the region _lexical_decl_scope
+#                           says is evaluated in the OUTER scope — is still ours.
+#   ()                      not a redeclaration of $canon, or one scoped to a
+#                           nested BLOCK: _ref_shadowed decides those, and it is
+#                           positionally exact there (statements before the inner
+#                           `my` still belong to us), which a whole-region skip
+#                           would not be.
+#
+# Both cases were live on this branch and correct before it: an earlier decl's
+# region ran straight through the later declarator, renaming uses the later
+# declaration's own pass then could not find — split.t's three same-block
+# `my ($a,$b) = split …` statements all read the FIRST split's values, and a
+# `while (my $a = …)` body read the enclosing block's `my $a`.  _ref_shadowed
+# cannot see either: it inspects Block/Sub parents, and a construct's head is a
+# sibling of neither.
+sub _redecl_region {
+  my ($root, $w, $sym, $canon) = @_;
+  my $nx = $w->snext_sibling or return ();
+  my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+           : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+           : ();
+  for my $s (@syms) {
+    next if $s == $sym || $s->symbol ne $canon;
+    my ($r, $d) = _lexical_decl_scope($w, $s);
+    next unless $r;
+    if (refaddr($r) == refaddr($root)) {
+      # The declaring STATEMENT as $root sees it — the child of $root holding
+      # the declarator.  (Not $w->statement: a `my` embedded in an argument
+      # list — `func(my $x)` — sits in an inner Statement::Expression, and
+      # perl's "not until the statement ends" is about the whole statement.)
+      my $top = $w;
+      $top = $top->parent while $top->parent && refaddr($top->parent) != refaddr($root);
+      return ('stop', _last_token($top));
+    }
+    next unless $r->isa('PPI::Statement::Compound');
+    return ('skip', _last_token($r), $d // $w->parent);
+  }
+  return ();
+}
+
+sub _last_token {
+  my ($node) = @_;
+  return $node unless $node->isa('PPI::Node');
+  return ($node->tokens)[-1];
 }
 
 # Rewrite ONE token that USES the variable $old (code symbol, `$#x` array

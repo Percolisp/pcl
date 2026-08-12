@@ -502,5 +502,32 @@ print "insub:", g(), "\n";
 print "eval:", eval q{$a}, "\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #296-B2: a LATER declaration of the same exception name ends the earlier
+# one's claim on the uses that follow it.  Two spellings, both live on the
+# branch that introduced the rename and both correct before it:
+#   - a SIBLING redeclaration in the same scope (perl-tests/split.t's three
+#     `my ($a,$b) = split …` statements in one block);
+#   - a CONSTRUCT-scoped one (`while (my $a = …)`, `for my $a (…)`) — the
+#     head is a sibling of no Block, so the shadow reducer cannot see it.
+# The redeclaration's own INITIALIZER still reads the earlier variable: perl
+# does not introduce the new name until the statement finishes.
+# ---------------------------------------------------------------------------
+test_transpile('a later declaration of an exception name owns the uses after it', '
+{ my $s = "1,2;3";
+  my ($a,$b) = split(/,/, $s); print "1:[$a][$b]\n";
+  my ($a,$b) = split(/;/, $s); print "2:[$a][$b]\n";
+  my ($a,$b) = ($b,$a);        print "3:[$a][$b]\n"; }
+{ my $a = "X"; my $a = "[$a]"; print "4:$a\n"; }
+{ my $a = "p"; my $c1 = sub {$a}; my $a = "q"; my $c2 = sub {$a};
+  print "5:", $c1->(), $c2->(), "\n"; }
+{ my $a = "OUT"; my $n = 0;
+  while (my $a = $n++ ? undef : "[$a]") { print "6:$a\n" }
+  print "7:$a\n"; }
+{ my $a = "L"; for my $a ($a, "z") { print "8:$a\n" } print "9:$a\n"; }
+{ my $a = "O"; for (my $a = 0; $a < 2; $a++) { print "10:$a\n" } print "11:$a\n"; }
+{ my $a = "o"; { my $a = "i"; print "12:$a\n"; } print "13:$a\n"; }
+');
+
 
 done_testing();

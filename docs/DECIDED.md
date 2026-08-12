@@ -2516,3 +2516,24 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   sub — at no cost, because a promoted cell is not a `let`.  Keyed on "file has
   ANY string eval" instead, it reverted four corpus files' renames;
   corpus-diff caught it.
+- **B2 (later declaration wins) SHIPPED s388; #296 CLOSED, branch merged.**
+  `_rename_decl_within` walked from its declarator to the end of the scope, so
+  an earlier `my $a`'s rename claimed uses belonging to a LATER `my $a`; the
+  later declaration's own pass then found nothing left to rename and its binding
+  sat unread.  The walk now ends its claim at a later declaration of the same
+  canonical name, in the two shapes `_lexical_decl_scope` distinguishes:
+  **same scope → STOP at the LAST TOKEN OF THE STATEMENT** (perl does not
+  introduce the new name until the statement finishes, so the redeclaration's
+  own initializer still reads the EARLIER variable — probed,
+  `my $a = "X"; my $a = "[$a]"` prints `[X]`); **construct scope → SKIP the
+  construct**, resuming after it, except the region `_lexical_decl_scope` names
+  as evaluated outside it (`for my $x (LIST)`, `while (my $x = …)`,
+  `for (my $x = 0; …)`).  A NESTED BLOCK redeclaration is unchanged — still
+  `_ref_shadowed`'s call, which is positionally exact there.
+- **`_ref_shadowed` cannot see EITHER kind of later declaration** (s388): it
+  inspects Block/Sub parents, and neither a same-scope sibling statement nor a
+  construct HEAD is a sibling of one.  That is why both spellings were live at
+  once, and why the fix belongs in the rename walk, not in the shadow reducer.
+  The construct-scoped twin was found by PROBING the family, not by the failing
+  rows — `{ my $a = "O"; while (my $a = …) { print $a } }` printed the outer
+  value and no test named it.
