@@ -3606,6 +3606,7 @@ sub _eval_lexical_alist {
     my $d = $v =~ s/__shadow__(\d+)$// ? $1
           : $v =~ s/__file__(\d+)$//   ? $1
           : $v =~ s/__emb__(\d+)$//    ? $1
+          : $v =~ s/__excl__(\d+)$//   ? $1
           : $v =~ s/__cond__(\d+)$//   ? $1 : -1;
     return ($v, $d);
   };

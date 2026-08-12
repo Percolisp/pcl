@@ -372,6 +372,56 @@ print "after:", $k, "\n";
 ');
 
 # ---------------------------------------------------------------------------
+# #296: a `my`/`state` of an EXCEPTION-partition name binds a symbol that is
+# PROCLAIMED SPECIAL, so its `let` was a DYNAMIC rebinding — a closure made
+# inside lost the value at scope exit.  The declaration is renamed to a fresh
+# non-special symbol.  Every shape in one row: sub-local (the reproducer),
+# `%ENV` (the rename is name-decidable, not $a/$b-specific), `for my $a`
+# (#294's `:my t` binds it lexically, which is the same trap), file-level
+# captured by a named sub (the pass must run BEFORE the capture promotion),
+# and a block shadow whose global must survive.
+# ---------------------------------------------------------------------------
+test_transpile('exception-named my binds a LEXICAL: closures, foreach, capture', '
+sub mk { my $a = shift; return sub { $a } }
+print "closure:", mk("F")->(), mk("G")->(), "\n";
+sub mkb { my $b = shift; return sub { $b } }
+print "closureb:", mkb("F")->(), mkb("G")->(), "\n";
+sub mke { my %ENV = (K => $_[0]); return sub { $ENV{K} } }
+print "closureE:", mke("F")->(), mke("G")->(), "\n";
+my @c;
+for my $a (1,2,3) { push @c, sub { $a } }
+print "foreach:", join(",", map { $_->() } @c), "\n";
+our $g = "GLOBAL";
+sub see { $g }
+{ my $g = "inner"; print "shadow:$g see:", see(), "\n" }
+print "after:$g\n";
+');
+
+# INVERSE — the partition itself must not move: sort still binds the package
+# $a/$b pair, in main AND (per #287) in the package the comparator was
+# COMPILED in.  The middle row asserts what the comparator OBSERVED, never the
+# resulting ORDER: with a `my $a` in scope perl gives the comparator the
+# LEXICAL, and an inconsistent comparator's output order is the sort
+# ALGORITHM's answer (mergesort vs stable-sort), not a claim PCL can make.
+test_transpile('sort still binds the package $a/$b pair; a lexical $a wins inside', '
+my @s = sort { $a <=> $b } (3, 1, 2);
+print "plain:@s\n";
+{
+  my $a = "LEX";
+  my %seen;
+  my @t = sort { $seen{$a eq "LEX" ? "LEX" : "PKG"} = 1; 0 } (7, 9);
+  print "observed:", join(",", sort keys %seen), "\n";
+}
+my @u = sort { $a <=> $b } (5, 4);
+print "again:@u\n";
+package Foo;
+our @q = (30, 10, 20);
+sub go { my @r = sort { $a <=> $b } @q; return "@r" }
+package main;
+print "pkg:", Foo::go(), "\n";
+');
+
+# ---------------------------------------------------------------------------
 # #301 (not direction-D; lands here because this is the current NEW-TESTS file).
 # A heredoc is RAW exactly when its terminator is SINGLE-quoted, and perl allows
 # both `~` and whitespace between `<<` and a quoted terminator.  Four separate

@@ -31,7 +31,10 @@ unlike($cl, qr/p-list-= \(vector \$n\)/, 'no p-list-= param destructuring');
 unlike($cl, qr/\(\$i \(make-p-box/, 'no dead hoisted loop-var box');
 my $c_boxes = () = $cl =~ /\(\$c \(make-p-box/g;
 is($c_boxes, 0, '$c is unboxed (single arith write)');
-like($cl, qr/\(let \(\(\$c \(p-\+ \$a \$b\)\)\)/, '$c bound raw at its declaration site');
+# $a/$b are exception-partition, so #296 renames the two accumulators to
+# $a__excl__N/$b__excl__N before any of this analysis runs; $c is ordinary.
+like($cl, qr/\(let \(\(\$c \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/,
+     '$c bound raw at its declaration site');
 
 # Spec #2 (amended by task #60): exactly ONE :void bind — the hoisted
 # sub-body regime (`(let ((*wantarray* :void))` once around fib's body,
@@ -45,9 +48,10 @@ like($cl, qr/\(let \(\(\*wantarray\* :void\)\)\s*\n?\s*\(let \(\(\$a/,
 # B-num (task #62 scan-licensed freeze): $a's only uses are numeric ($a + $b),
 # so the bare copy `$a = $b;` goes raw through the strict numeric freeze; $b's
 # `return $b` is an opaque use, so ITS bare copy stays a boxed p-my-=.
-like($cl, qr/\(setf \$a \(%pcl-to-number-strict \$b "\$a"\)\)/,
+like($cl, qr/\(setf \$a__excl__\d+ \(%pcl-to-number-strict \$b__excl__\d+ "\$a__excl__\d+"\)\)/,
      'all-numeric-use var: bare copy freezes raw (B-num)');
-like($cl, qr/\(p-my-= \$b \$c\)/, 'opaque-use var copy is plain p-my-= (no wrap, no p-scalar-=)');
+like($cl, qr/\(p-my-= \$b__excl__\d+ \$c\)/,
+     'opaque-use var copy is plain p-my-= (no wrap, no p-scalar-=)');
 unlike($cl, qr/p-scalar-=/, 'no special-proclaiming p-scalar-= anywhere');
 
 # Foreach list is list-context: a range, not a flip-flop.  (s286: a sole

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-135
+;;; pcl: pipeline=v2 gen=v2-136
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -1901,12 +1901,12 @@
                             (p-for ()
                               ((p-< $i__cond__4 (p-int (p-/ $n 2))))
                               ((p-incf-raw $i__cond__4))
-                              (let (($b (make-p-box nil)))
-                                (p-my-= $b
+                              (let (($b__excl__0 (make-p-box nil)))
+                                (p-my-= $b__excl__0
                                   (p-if (p-< (p-+ (p-cast-$ $si_ref) $i__cond__4) $slen)
                                     (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $i__cond__4) 1))
                                     0))
-                                (p-.= $hex (p-sprintf "%02x" $b)))))
+                                (p-.= $hex (p-sprintf "%02x" $b__excl__0)))))
                           (p-my-= $hex (p-substr $hex 0 $n))
                           (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $n 1) 2)))
                           (let ((*wantarray* *pcl-caller-wantarray*))
@@ -1922,16 +1922,16 @@
                               (p-for ()
                                 ((p-< $i__cond__5 (p-int (p-/ $n 2))))
                                 ((p-incf-raw $i__cond__5))
-                                (let (($b (make-p-box nil)))
-                                  (p-my-= $b
+                                (let (($b__excl__1 (make-p-box nil)))
+                                  (p-my-= $b__excl__1
                                     (p-if (p-< (p-+ (p-cast-$ $si_ref) $i__cond__5) $slen)
                                       (p-ord
                                         (p-substr $s (p-+ (p-cast-$ $si_ref) $i__cond__5) 1))
                                       0))
                                   (p-.= $hex
                                     (p-sprintf "%x%x"
-                                      (p-bit-and $b #xF)
-                                      (p-bit-and (p->> $b 4) #xF))))))
+                                      (p-bit-and $b__excl__1 #xF)
+                                      (p-bit-and (p->> $b__excl__1 4) #xF))))))
                             (p-my-= $hex (p-substr $hex 0 $n))
                             (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $n 1) 2)))
                             (let ((*wantarray* *pcl-caller-wantarray*))
@@ -1948,21 +1948,25 @@
                                   (p-for ()
                                     ((p-< $i__cond__6 $nbits))
                                     ((p-incf-raw $i__cond__6))
-                                    (let (($b (make-p-box nil)))
-                                      (p-my-= $b
-                                        (p-if
-                                          (p-<
-                                            (p-+ (p-cast-$ $si_ref)
-                                              (p-int (p-/ $i__cond__6 8)))
-                                            $slen)
-                                          (p-ord
-                                            (p-substr $s
-                                              (p-+ (p-cast-$ $si_ref)
-                                                (p-int (p-/ $i__cond__6 8)))
-                                              1))
-                                          0))
+                                    (let
+                                      (($b__excl__2
+                                          (%pcl-to-number-strict
+                                            (p-if
+                                              (p-<
+                                                (p-+ (p-cast-$ $si_ref)
+                                                  (p-int (p-/ $i__cond__6 8)))
+                                                $slen)
+                                              (p-ord
+                                                (p-substr $s
+                                                  (p-+ (p-cast-$ $si_ref)
+                                                    (p-int (p-/ $i__cond__6 8)))
+                                                  1))
+                                              0)
+                                            "$b__excl__2")))
                                       (p-funcall-ref $push_val
-                                        (p-bit-and (p->> $b (p-- 7 (p-% $i__cond__6 8))) 1))))))
+                                        (p-bit-and
+                                          (p->> $b__excl__2 (p-- 7 (p-% $i__cond__6 8)))
+                                          1))))))
                               (progn
                                 (let (($bits (make-p-box nil)))
                                   (p-my-= $bits "")
@@ -1970,22 +1974,26 @@
                                     (p-for ()
                                       ((p-< $i__cond__7 $nbits))
                                       ((p-incf-raw $i__cond__7))
-                                      (let (($b (make-p-box nil)))
-                                        (p-my-= $b
-                                          (p-if
-                                            (p-<
-                                              (p-+ (p-cast-$ $si_ref)
-                                                (p-int (p-/ $i__cond__7 8)))
-                                              $slen)
-                                            (p-ord
-                                              (p-substr $s
-                                                (p-+ (p-cast-$ $si_ref)
-                                                  (p-int (p-/ $i__cond__7 8)))
-                                                1))
-                                            0))
+                                      (let
+                                        (($b__excl__3
+                                            (%pcl-to-number-strict
+                                              (p-if
+                                                (p-<
+                                                  (p-+ (p-cast-$ $si_ref)
+                                                    (p-int (p-/ $i__cond__7 8)))
+                                                  $slen)
+                                                (p-ord
+                                                  (p-substr $s
+                                                    (p-+ (p-cast-$ $si_ref)
+                                                      (p-int (p-/ $i__cond__7 8)))
+                                                    1))
+                                                0)
+                                              "$b__excl__3")))
                                         (p-.= $bits
                                           (p-if
-                                            (p-bit-and (p->> $b (p-- 7 (p-% $i__cond__7 8))) 1)
+                                            (p-bit-and
+                                              (p->> $b__excl__3 (p-- 7 (p-% $i__cond__7 8)))
+                                              1)
                                             "1"
                                             "0")))))
                                   (p-funcall-ref $push_val $bits))))
@@ -2003,21 +2011,23 @@
                                     (p-for ()
                                       ((p-< $i__cond__8 $nbits))
                                       ((p-incf-raw $i__cond__8))
-                                      (let (($b (make-p-box nil)))
-                                        (p-my-= $b
-                                          (p-if
-                                            (p-<
-                                              (p-+ (p-cast-$ $si_ref)
-                                                (p-int (p-/ $i__cond__8 8)))
-                                              $slen)
-                                            (p-ord
-                                              (p-substr $s
-                                                (p-+ (p-cast-$ $si_ref)
-                                                  (p-int (p-/ $i__cond__8 8)))
-                                                1))
-                                            0))
+                                      (let
+                                        (($b__excl__4
+                                            (%pcl-to-number-strict
+                                              (p-if
+                                                (p-<
+                                                  (p-+ (p-cast-$ $si_ref)
+                                                    (p-int (p-/ $i__cond__8 8)))
+                                                  $slen)
+                                                (p-ord
+                                                  (p-substr $s
+                                                    (p-+ (p-cast-$ $si_ref)
+                                                      (p-int (p-/ $i__cond__8 8)))
+                                                    1))
+                                                0)
+                                              "$b__excl__4")))
                                         (p-funcall-ref $push_val
-                                          (p-bit-and (p->> $b (p-% $i__cond__8 8)) 1))))))
+                                          (p-bit-and (p->> $b__excl__4 (p-% $i__cond__8 8)) 1))))))
                                 (progn
                                   (let (($bits (make-p-box nil)))
                                     (p-my-= $bits "")
@@ -2025,21 +2035,25 @@
                                       (p-for ()
                                         ((p-< $i__cond__9 $nbits))
                                         ((p-incf-raw $i__cond__9))
-                                        (let (($b (make-p-box nil)))
-                                          (p-my-= $b
-                                            (p-if
-                                              (p-<
-                                                (p-+ (p-cast-$ $si_ref)
-                                                  (p-int (p-/ $i__cond__9 8)))
-                                                $slen)
-                                              (p-ord
-                                                (p-substr $s
-                                                  (p-+ (p-cast-$ $si_ref)
-                                                    (p-int (p-/ $i__cond__9 8)))
-                                                  1))
-                                              0))
+                                        (let
+                                          (($b__excl__5
+                                              (%pcl-to-number-strict
+                                                (p-if
+                                                  (p-<
+                                                    (p-+ (p-cast-$ $si_ref)
+                                                      (p-int (p-/ $i__cond__9 8)))
+                                                    $slen)
+                                                  (p-ord
+                                                    (p-substr $s
+                                                      (p-+ (p-cast-$ $si_ref)
+                                                        (p-int (p-/ $i__cond__9 8)))
+                                                      1))
+                                                  0)
+                                                "$b__excl__5")))
                                           (p-.= $bits
-                                            (p-if (p-bit-and (p->> $b (p-% $i__cond__9 8)) 1)
+                                            (p-if
+                                              (p-bit-and (p->> $b__excl__5 (p-% $i__cond__9 8))
+                                                1)
                                               "1"
                                               "0")))))
                                     (p-funcall-ref $push_val $bits))))
@@ -2177,13 +2191,14 @@
                                                 "cl/pack-impl.pl line 877"
                                                 "Unterminated compressed integer in unpack
 "))
-                                            (let (($b (make-p-box nil)))
-                                              (p-my-= $b
+                                            (let (($b__excl__6 (make-p-box nil)))
+                                              (p-my-= $b__excl__6
                                                 (p-ord
                                                   (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))
-                                              (p-my-= $more (p-bit-and $b #x80))
+                                              (p-my-= $more (p-bit-and $b__excl__6 #x80))
                                               (p-my-= $v
-                                                (p-bit-or (p-<< $v 7) (p-bit-and $b #x7F)))))
+                                                (p-bit-or (p-<< $v 7)
+                                                  (p-bit-and $b__excl__6 #x7F)))))
                                           (p-funcall-ref $push_val $v)
                                           (p-post++ $done))))))
                                 nil)))))))))
@@ -2320,16 +2335,16 @@
                                                     "cl/pack-impl.pl line 936"
                                                     "Unterminated compressed integer in unpack
 "))
-                                                (let (($b (make-p-box nil)))
-                                                  (p-my-= $b
+                                                (let (($b__excl__7 (make-p-box nil)))
+                                                  (p-my-= $b__excl__7
                                                     (p-ord
                                                       (p-substr $s
                                                         (p-post++ (p-cast-$ $si_ref))
                                                         1)))
-                                                  (p-my-= $more (p-bit-and $b #x80))
+                                                  (p-my-= $more (p-bit-and $b__excl__7 #x80))
                                                   (p-my-= $slash_n
                                                     (p-bit-or (p-<< $slash_n 7)
-                                                      (p-bit-and $b #x7F)))))))
+                                                      (p-bit-and $b__excl__7 #x7F)))))))
                                           (p-if (p-str-eq $ch "Z")
                                             (progn
                                               (let
@@ -2443,18 +2458,22 @@
                                                                   (p->= (p-cast-$ $si_ref)
                                                                     $slen)
                                                                   (p-last))
-                                                                (let (($b (make-p-box nil)))
-                                                                  (p-my-= $b
+                                                                (let
+                                                                  (($b__excl__8
+                                                                      (make-p-box nil)))
+                                                                  (p-my-= $b__excl__8
                                                                     (p-ord
                                                                       (p-substr $s
                                                                         (p-post++
                                                                           (p-cast-$ $si_ref))
                                                                         1)))
                                                                   (p-my-= $more
-                                                                    (p-bit-and $b #x80))
+                                                                    (p-bit-and $b__excl__8
+                                                                      #x80))
                                                                   (p-my-= $slash_n
                                                                     (p-bit-or (p-<< $slash_n 7)
-                                                                      (p-bit-and $b #x7F)))))))
+                                                                      (p-bit-and $b__excl__8
+                                                                        #x7F)))))))
                                                           (progn
                                                             (let (($raw2 (make-p-box nil)))
                                                               (p-my-= $raw2

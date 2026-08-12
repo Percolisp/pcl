@@ -1315,6 +1315,17 @@ sub parse {
   # lowering.
   $self->_rename_state_vars($_) for @segments;
 
+  # #296: a `my`/`state` of an EXCEPTION-partition name ($a/$b/@ARGV/…) must
+  # not be let-bound under its own symbol — that symbol is a proclaimed
+  # special, so the `let` is a DYNAMIC rebind.  Runs HERE, before the capture
+  # promotion below and before the three poisoned-my passes, so every one of
+  # them sees the final name: a file-level `my $a` captured by a named sub has
+  # to reach _rename_captured_file_lexicals already renamed, or that pass
+  # promotes `$a` and this one then renames the promoted decl out from under
+  # it (probed: "Parser2 TODO: file lexical 'a__excl__0' captured by sub foo").
+  $self->{_excl_rename_counter} = 0;
+  $self->_rename_exception_mys($_) for @segments;
+
   # W5: rewrite file lexicals captured by named subs to fresh package-level
   # cells (see _rename_captured_file_lexicals).  Runs BEFORE the pre-pass so
   # every downstream reader (sub_info, _sub_ctx_insensitive, VarAnnotator,
@@ -3887,10 +3898,15 @@ sub _state_container_blocker {
 # Every caller's blocker guarantees a single declaration of the name in
 # $root, so there is no shadow scope to skip.
 sub _rename_decl_within {
-  my ($self, $root, $sym, $new) = @_;
+  my ($self, $root, $sym, $new, $decl_override) = @_;
   my $old  = $sym->content;
   my $canon = $sym->symbol;
-  my $decl = $sym->statement;
+  # $decl is the region evaluated in the OUTER scope, skipped by the rewrite.
+  # It is the declaring STATEMENT for an ordinary decl (`my $x = $x` reads the
+  # outer $x), but a caller whose ROOT *is* that statement must say which
+  # sub-region to skip instead — a `for my $x (LIST)` roots at the Compound,
+  # where the default would skip the whole construct (#296).
+  my $decl = $decl_override // $sym->statement;
   # A NESTED re-declaration of the same name inside $root is a different
   # variable: its own decl target and every use in its scope must keep the
   # original name (#254 B-ii — op/while.t's `while (my $i = …) { … my $i = 0 }`).
@@ -4662,6 +4678,90 @@ sub _rename_poisoned_cond_mys {
 # as before — never worse).  Sub bodies are skipped (their lexicals are the
 # capture machinery's turf); foreach loop-vars and condition-mys are skipped
 # (loop/cond scope, handled by their own machinery).
+# #296: a `my`/`state` declaring an EXCEPTION-partition name.
+#
+# Since the direction-D flip an ORDINARY global is a symbol macro over a cell,
+# so `my $x` near one is a plain lexical `let` that shadows it.  An EXCEPTION
+# name (Pl::GlobalPartition — $a/$b plus the runtime-owned set) is still a
+# `defvar`, i.e. PROCLAIMED SPECIAL, so `(let (($a …)) …)` is a DYNAMIC
+# rebinding: a closure made inside loses the value at scope exit, and a sub
+# called from the scope sees it.  Measured on plain main:
+#
+#     sub mk { my $a = shift; return sub { $a } }
+#     print mk("F")->(), mk("G")->();      # perl FG, PCL empty
+#
+# CL cannot lexically bind a proclaimed special, so no emission fixes this
+# while the name stays `$a` — the declaration must get a different SYMBOL.
+# And the partition must keep these names dynamic: the sort lowering binds the
+# $a/$b pair (#287) and the runtime binds $_/@_/%ENV/… by name, so shrinking
+# the partition instead would cost every sort CALL a p-local-cell (~41 ns,
+# plan §2) and still leave `my %ENV` broken.
+#
+# THIS IS NOT THE POISONED-MY FAMILY (#291 deletes those three; this one
+# stays).  There is no poison test and no analysis deciding WHETHER: the
+# trigger is the NAME — one Pl::GlobalPartition call — and the only scope work
+# is finding the declaration's own root, which perl states syntactically.
+# Corpus census (perl-tests + lib + pack-impl, 133 files): 147 sites, every
+# one `$a` or `$b`; 132 block-scoped, 12 file-level, 3 foreach loop variables.
+#
+# A blocked site is left untouched — exactly today's (broken) emission, never
+# worse — because a partial rename would split one variable in two.
+sub _rename_exception_mys {
+  my ($self, $seg) = @_;
+  for my $top (@{ $seg->{stmts} }) {
+    next unless ref $top && $top->isa('PPI::Node');
+    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
+                                   && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+      my $nx = $w->snext_sibling or next;
+      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : ();
+      for my $s (@syms) {
+        next unless $s->content =~ /^[\$\@\%]\w+$/;
+        next unless Pl::GlobalPartition::is_exception_global($s->content);
+        my ($root, $decl) = _lexical_decl_scope($w, $s);
+        next unless $root;
+        my $why = $s->content =~ /^\$/
+          ? $self->_shadow_rename_blocker($root, $s, 'eval_ok', 'shadow_ok')
+          : $self->_state_container_blocker($root, $s, 'eval_ok');
+        next if $why;
+        $self->_rename_decl_within($root, $s,
+          $s->content . '__excl__' . $self->{_excl_rename_counter}++, $decl);
+      }
+    }
+  }
+  return;
+}
+
+# The SCOPE of a `my`/`state` declaration, as perl states it syntactically:
+# returns (ROOT, DECL) for _rename_decl_within — ROOT is the region whose
+# tokens may be rewritten, DECL the sub-region evaluated in the OUTER scope
+# (the initializer / the foreach list), which must not be.  DECL undef means
+# "the declaring statement", which is _rename_decl_within's own default.
+#
+#   for my $x (LIST) {…}   construct-scoped; LIST runs outside it
+#   if/while (my $x = …)   construct-scoped; the head runs in it, so DECL
+#                          stays the declaring statement
+#   for (…; my $x…; …)     ditto, via Structure::For
+#   my $x inside a block   block-scoped (sub body, bare block, loop body)
+#   my $x at file level    to end of document — the decl's own top node
+sub _lexical_decl_scope {
+  my ($w, $s) = @_;
+  my $par = $w->parent;
+  if ($par && $par->isa('PPI::Statement::Compound')) {   # foreach loop variable
+    my ($list) = grep { $_->isa('PPI::Structure::List') } $par->schildren;
+    return ($par, $list // $s);
+  }
+  for (my $p = $w->parent; $p; $p = $p->parent) {
+    if ($p->isa('PPI::Structure::Condition') || $p->isa('PPI::Structure::For')) {
+      my $c = $p->parent;
+      return $c && $c->isa('PPI::Statement::Compound') ? ($c, undef) : ();
+    }
+    return ($p, undef) if $p->isa('PPI::Structure::Block');
+  }
+  return ($s->top, undef);
+}
+
 sub _rename_poisoned_block_mys {
   my ($self, $seg) = @_;
   my $stmts = $seg->{stmts};
