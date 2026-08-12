@@ -126,6 +126,22 @@ has collect_prototypes_only => (
   default   => 0,
 );
 
+# Where the cross-statement lexical registries live (_let_bound_vars,
+# _catch_labels, _eval_span_captures): the v2 driver (Pl::Parser2) OWNS them
+# (#153 chunk 0) — one registry, one owner, both compilers read through this
+# accessor.  A parser serving as a v2 expression seam reaches its owner via
+# the _v2_owner back-ref; a standalone parser (the prototype-collection
+# walkers) is its own home.  _v2_owner is weakened, so "was owned but the
+# owner is gone" must DIE (rule 12): falling back to $self there would read
+# a fresh empty registry — silently dropping every live lexical.
+sub lex_home {
+  my $self = shift;
+  return $self->{_v2_owner} if $self->{_v2_owner};
+  die "PCL internal error: seam parser outlived its v2 owner; "
+    . "lexical registry unreachable" if $self->{_v2_owned};
+  return $self;
+}
+
 # (The lenient_ppi truncate-at-first-unparseable-line flag lived here until
 # E4.1 step 3 — it only ever worked by silently dropping code, was retired
 # by ruling in s356 (§5a.4: a PPI failure dies naming the file), and

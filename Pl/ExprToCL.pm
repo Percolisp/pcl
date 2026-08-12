@@ -2106,9 +2106,9 @@ sub gen_funcall_form {
           my $label = $label_node->content();
           my $parser = ($self->expr_o->can('has_parser')
                         && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
-          if ($parser && $parser->{_catch_labels}
-              && $parser->{_catch_labels}{$label}) {
-            return ['throw', $parser->{_catch_labels}{$label}, 'nil'];
+          my $catch = $parser && $parser->lex_home->{_catch_labels};
+          if ($catch && $catch->{$label}) {
+            return ['throw', $catch->{$label}, 'nil'];
           }
           return ['go', ":$label"];
         }
@@ -2780,9 +2780,9 @@ sub gen_funcall {
             # enclosing (tagbody :label …) re-runs the jumped-to region.
             my $parser = ($self->expr_o->can('has_parser')
                           && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
-            if ($parser && $parser->{_catch_labels}
-                && $parser->{_catch_labels}{$label}) {
-              return "(throw $parser->{_catch_labels}{$label} nil)";
+            my $catch = $parser && $parser->lex_home->{_catch_labels};
+            if ($catch && $catch->{$label}) {
+              return "(throw $catch->{$label} nil)";
             }
             return "(go :$label)";
           }
@@ -3628,7 +3628,7 @@ sub _eval_lexical_alist {
   # original-name global, found by p-eval-lex-lookup's global fall-through;
   # ir-spec §9.1).  Only SPAN cells keep emitted pairs, package-qualified
   # for the cross-segment case.)
-  my $span = $parser->{_eval_span_captures} // {};
+  my $span = $parser->lex_home->{_eval_span_captures} // {};
   for my $key (sort keys %$span) {
     next if $seen{$key};
     push @pairs, ['cons', "\"$key\"", $span->{$key}];

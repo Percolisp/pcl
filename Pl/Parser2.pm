@@ -99,6 +99,10 @@ sub _build_fallback_parser {
   # other alive for the life of the process.
   $p->{_v2_owner} = $self;
   Scalar::Util::weaken($p->{_v2_owner});
+  # Non-weak twin of _v2_owner: lex_home dies (instead of silently answering
+  # with an empty registry) if the owner has been GC'd out from under a still-
+  # live seam parser.
+  $p->{_v2_owned} = 1;
   return $p;
 }
 
@@ -1503,7 +1507,7 @@ sub parse {
     # cells, and nested/late evals with no site alist at all — goes through
     # the alias rule instead (p-alias-eval-cell at the decl's run position;
     # ir-spec §9.1).
-    $self->fallback_parser->{_eval_span_captures} = $seg->{eval_span_captures} // {};
+    $self->{_eval_span_captures} = $seg->{eval_span_captures} // {};
     my (@decls, @defs, @def_lines, @top);
     for my $child (@{ $seg->{stmts} }) {
       # eval_pkg_region (#226): this segment leads with a `package X;` that is
@@ -5558,8 +5562,9 @@ sub _lower_block {
   # works.  Lowering: wrap the statements before the label in
   # (catch :pcl-goto-LBL …) falling through to the label point, and lower
   # every `goto LBL` in that prefix as (throw :pcl-goto-LBL nil) — the
-  # `_catch_labels` flag on the fallback parser, consulted by ExprToCL's
-  # goto branch, is `local`ized around the prefix lowering so backward
+  # `_catch_labels` registry on this object (ExprToCL's goto branch reads it
+  # through the seam parser's lex_home) is `local`ized around the prefix
+  # lowering so backward
   # gotos (in the tagbody remainder) keep the lexical (go).  Only the FIRST
   # standalone label of the list is considered (a later label's prefix
   # would cross this one's tagbody; the recursion inside the tagbody
@@ -5599,7 +5604,7 @@ sub _lower_block {
       if (!$cross && $has_goto && !$scope_stmt) {
         my $tag = ':pcl-goto-' . $lbl;
         my @pre_forms = do {
-          local $self->fallback_parser->{_catch_labels}{$lbl} = $tag;
+          local $self->{_catch_labels}{$lbl} = $tag;
           $self->_lower_block(\@prefix, $vi, undef);
         };
         $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
@@ -5641,7 +5646,7 @@ sub _lower_block {
         if ($ok && @hoist) {
           my $tag = ':pcl-goto-' . $lbl;
           my @pre_forms = do {
-            local $self->fallback_parser->{_catch_labels}{$lbl} = $tag;
+            local $self->{_catch_labels}{$lbl} = $tag;
             local $self->{_goto_hoisted} = { map { $_ => 1 } @hoist };
             $self->_lower_block(\@prefix, $vi, undef);
           };
@@ -5701,7 +5706,7 @@ sub _lower_block {
           push @segs, [ @s[$start .. $#s] ];
           my ($wrap, @tail_forms);
           {
-            local @{ $self->fallback_parser->{_catch_labels} }{ map { $_->[1] } @labels } = @tags;
+            local @{ $self->{_catch_labels} }{ map { $_->[1] } @labels } = @tags;
             $wrap = ['catch', $tags[0], $self->_lower_block($segs[0], $vi, undef)];
             $wrap = ['catch', $tags[$_], $wrap,
                      $self->_lower_block($segs[$_], $vi, undef)]
