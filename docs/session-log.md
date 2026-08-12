@@ -4,6 +4,80 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 388b (2026-08-12, Opus) — #291 SHIPPED: the poisoned-`my` rename family is gone; #205 closes
+
+**Replayed the four s384 commits that the full sweep rejected**, now that all
+four blockers they exposed are closed (#294 `a311943`, #298 `a1e3814`,
+#297 `e3616eb`, #296 `66bdb93`).  Branch `wip/s388-291`.
+
+**The enabler first (`62d88e2`), because the deletions do not work without
+it.**  The renames had TWO causes and `docs/direction-d-plan.md` §4 step 3 named
+only one.  Cause A, which the #290 flip removed: a `defvar` proclaims its symbol
+special, so declaring a name the section also let-binds turned that `let` into a
+dynamic rebind.  Cause B, the consequence the compiler drew from A:
+`_forward_global_decls` SKIPS any name in `_seg_lex`, so a nested `my $x` cost
+the package global `$x` its declaration and left it unbound at load.  The
+renames dodged B by giving the LEXICAL a fresh name.  Probed: deleting
+`_rename_poisoned_block_mys` alone drops `(p-defcell @a …)` and the file-level
+`@a` crashes.  So FILE mode stops excluding; EVAL mode keeps the exclusion,
+because there the same list is the `p-eval-thunk`'s capture PARAMETERS from the
+caller, not declarations.  **#205 closes** — its s329 probe now runs identical
+to perl.
+
+**Then one commit per family, each gated**: `__shadow__` (`2817d96`),
+`__cond__` (`9e2760d`), `__emb__` (`781f3f8`).  Corpus rename bindings
+**716/128/5 → 36/0/0**, ~345 lines out of `Parser2.pm` + `ExprToCL.pm`.  The 36
+survivors are `_gate_seam_my_shadow`, a v1-seam mechanism with a live cause that
+goes with #153.
+
+**Family 3 is not a deletion — it is the fix the rename stood in for.**
+`_lower_block`'s let-hoist VETO presumes another named sub shares the
+forward-declared global as this declaration's cell: true at FILE level
+(Capture-Tiny's `Utils.pm`, #199), false inside a sub body, where no other sub
+can see this body's lexical (#265, #272).  s368 could not simply narrow it,
+because the `let` registered the name in `_seg_lex` and suppressed the GLOBAL's
+declaration.  The enabler removed that, so the narrowing IS the fix — 11 lines
+added, 96 removed.
+
+**A replay of reverted work is not a cherry-pick.**  Every `Parser2.pm` hunk
+conflicted: the regions the s384 commits delete now hold code written after them
+(#296's `_rename_exception_mys` and `_rename_free_eval_captures` sit *inside*
+families 1 and 2's spans, sharing their comment headers).  Resolved by hand,
+deletions-only verified per commit, gate re-run after each.  **Twice the s384
+hunk tried to shorten `_eval_lexical_alist`'s strip list back to its s384 shape
+and would have taken `__excl__` — #296's suffix — with the dead ones.**  A
+suffix leaves that list only when its MINTER leaves the compiler.
+
+**FULL SWEEP — the bar that rejected this change in s384.**  GATE clean after
+the baseline edit: 0 new / 0 fixed, 2 unstable (postfixderef.t, ref.t — the
+known PARTIAL crash files).  **TOTAL passing 18498 → 18532 (+34)**, every row
+accounted for per file: closure.t +14, eval.t +13 (9 of them #296-B1's, already
+on main), method.t +4, for.t +2, my.t +1.
+
+**Four new closure.t failures, each diagnosed to a cause and edited into
+`docs/fail-baseline.tsv` by hand** (s330 rule — rows enter and leave by edit,
+never by re-blessing from a run).  They are newly-REACHABLE honest failures:
+before the enabler the file died at load on `The variable $bar is unbound` and
+`p-load-with-recovery` dropped a whole top-level form.
+- t264 `RT #1028`, t265 `RT #10085`, t270 (unnamed, `is($flag, 1)` at line 653)
+  — all three are **DESTROY at scope exit (#198)**; each watches a `DESTROY`
+  that appends to a scalar, and PCL never fires it.
+- t272 `cloneable with //ee` — **an anon sub is not cloned per
+  statement-modifier `for` iteration**, so `$s[0] == $s[1]`.  Its sibling row
+  `cloneable with eval` passes.
+#299 predicted exactly this set; its fifth row was the `<< 'EOF'` heredoc bug,
+fixed meanwhile by #301.
+
+eval.t's 4 baseline fail rows are absent from this run and reported UNVERIFIED
+(the file is PARTIAL).  Left in the baseline rather than removed on an
+unverified basis.
+
+corpus-diff was not run: #291 changes emission for nearly every file by
+construction (cells added, renames removed), so it carries no signal here — the
+sweep is the measurement.
+
+---
+
 ## Session 388 (2026-08-12, Opus) — #296-B2: a LATER declaration owns the uses after it; #296 CLOSED, branch merged
 
 **B2 was the branch's last blocker, and probing found a SECOND spelling of it.**

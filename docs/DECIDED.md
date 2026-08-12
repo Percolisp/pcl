@@ -2664,3 +2664,30 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   hold code written after them (#296's two passes sit inside family 1's and 2's
   spans).  Resolved by hand, deletions-only verified per commit
   (`diff | grep -c '^>'` = 0), gate re-run after each.
+
+## s388d (2026-08-12, Opus) — #291's sweep: 4 new closure.t rows, each a NAMED cause
+
+- **GATE clean after the baseline edit**: 0 new / 0 fixed, 2 unstable
+  (postfixderef.t, ref.t — known PARTIAL crash files).  **TOTAL passing
+  18498 → 18532 (+34)**, accounted for per file: closure.t +14, eval.t +13
+  (9 of them #296-B1's, already on main), method.t +4, for.t +2, my.t +1.
+- **The 4 new closure.t failures are newly-REACHABLE, not new breakage.**
+  Before the enabler the file died at load on `The variable $bar is unbound`
+  and `p-load-with-recovery` dropped a whole top-level form; those assertions
+  never ran.  Causes, one per row (read individually, not inferred from the
+  count):
+  - t264 `RT #1028`, t265 `RT #10085`, t270 (unnamed, `is($flag, 1)`,
+    closure.t:653) — **DESTROY at scope exit (#198)**.  Each watches a
+    `DESTROY` that appends to a scalar; PCL never fires it, so got='1' where
+    perl has '12'.
+  - t272 `cloneable with //ee` — **an anon sub is not cloned per
+    statement-modifier `for` iteration** (`push @s, sub {…} for 1,2`), so
+    `$s[0] == $s[1]`.  Its sibling `cloneable with eval` passes.
+- **Rows entered the baseline BY EDIT** (s330), verified as a 4-line insertion
+  against the previous file before installing; 680 → 684 rows.
+- **eval.t's 4 baseline fail rows are absent and reported UNVERIFIED** (the
+  file is PARTIAL).  Left in the baseline — removing them would be blessing an
+  unverified pass, which is the error the s330 rule exists to prevent.
+- **corpus-diff carries no signal for a change like this** and was not run:
+  #291 alters emission for nearly every file by construction (cells added,
+  renames removed).  The sweep is the measurement.
