@@ -8308,12 +8308,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; and bareword qualifiers relative to the caller's PERL package, and the
     ;; preamble's (in-package ...) is derived from the same name.  *package* may
     ;; be MAIN here even when the Perl current package is Foo.
+    ;; #296-B1: the emission depends on WHICH of the caller's lexicals this
+    ;; eval captures, not only on the source text — an exception-partition
+    ;; name ($a/$b/…) the alist carries compiles as the captured lexical, and
+    ;; the same spelling with no alist entry compiles as the dynamic special
+    ;; (perl's own rule: `my $a` in scope masks sort's $a).  So the capture
+    ;; names are part of the compiler's INPUT and therefore part of the cache
+    ;; KEY — without that, the same eval string used from two different scopes
+    ;; would reuse whichever emission compiled first.  Sorted, so two sites
+    ;; with the same lexicals share the entry.
     (let* ((pkg-name  *pcl-current-package*)
-           (cache-key (cons s pkg-name))
+           (cap-names (sort (mapcar #'car lex-alist) #'string<))
+           (cache-key (list* s pkg-name cap-names))
            (cached    (gethash cache-key *p-eval-string-cache*)))
       (handler-case
           (let* ((cl-text  (or cached
-                               (let ((r (p-transpile-string s pkg-name)))
+                               (let ((r (p-transpile-string s pkg-name
+                                                            cap-names)))
                                  (setf (gethash cache-key
                                                 *p-eval-string-cache*) r)
                                  r)))
@@ -11483,7 +11494,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-136"
+(defparameter *pcl-cache-generation* "v2-137"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11663,15 +11674,23 @@ buffer's fill-pointer; everything else falls back to file-length."
            :external-format :utf-8)))
   *p-transpiler-process*)
 
-(defun p-transpile-string (perl-code pkg-name)
+(defun p-transpile-string (perl-code pkg-name &optional capture-names)
   "Transpile a Perl string to CL code via the persistent pl2cl server.
+   CAPTURE-NAMES are the caller's in-scope lexical names (the keys of the
+   eval's capture alist).  The compiler needs them for the ONE question whose
+   answer they change (#296-B1): an exception-partition name the alist carries
+   is the caller's `my $a`, so it must compile as that captured lexical rather
+   than as the dynamically-bound special.  Everything else resolves at RUNTIME
+   through p-eval-lex-lookup and is unaffected by this list.
    Returns the CL text string, or signals an error on failure."
   (let* ((proc     (p-ensure-transpiler))
          (in       (sb-ext:process-input  proc))
          (out      (sb-ext:process-output proc))
          (code-len (length perl-code)))
-    ;; Send request: pkg\n char-count\n perl-code
+    ;; Send request: pkg\n captures\n char-count\n perl-code
     (write-string pkg-name in)
+    (write-char #\Newline in)
+    (write-string (format nil "~{~A~^ ~}" capture-names) in)
     (write-char #\Newline in)
     (write-string (princ-to-string code-len) in)
     (write-char #\Newline in)

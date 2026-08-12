@@ -470,5 +470,37 @@ PL301
   unlink $tmp;
 }
 
+# ---------------------------------------------------------------------------
+# #296-B1: the STRING-EVAL half of the exception-name rename.  A `my $a` the
+# rename moved to a fresh symbol must still be what an eval compiled in its
+# scope reads — and an eval compiled with NO such lexical in scope must still
+# read sort's dynamically-bound $a.  The discriminator is the capture alist,
+# which is perl's own rule (fable-answers-s385.md §2a).  All five rows of the
+# ruled acceptance table in one snippet; perl is the oracle.
+# ---------------------------------------------------------------------------
+test_transpile('string eval sees a renamed exception-name lexical; without one, sort still wins', '
+our $seen;
+{ my $a = "IN"; print "1: ", eval q{"[$a]"}, "\n"; }
+{ my $f; { my $a = "CAP"; $f = eval q{sub { "[$a]" }}; } print "2: ", $f->(), "\n"; }
+{ my $cmp = eval q{sub { $a <=> $b }}; my @s = sort $cmp (2,3,1);
+  print "3: ", join(",", @s), "\n"; }
+{ my $a = 5; my $cmp = eval q{sub { $seen = $a; 0 }}; my @s = sort $cmp (2,3,1);
+  print "4: a=$seen\n"; }
+{ my $a = "orig"; eval q{$a = "W"}; print "5: $a\n"; }
+');
+
+# The FILE-level twin: a named sub is hoisted out of the file-level scope, so
+# only the promotion-to-cell path reaches it — the rename must stand aside
+# there (task #296 reproducer 2), while a file-level closure over the same
+# declaration keeps working.
+test_transpile('a file lexical named $a reaches an eval inside a named sub', '
+my $a = "FILE";
+my $f = sub { $a };
+sub g { my $b = "SUB"; return eval q{join(",", $a, $b)} }
+print "closure:", $f->(), "\n";
+print "insub:", g(), "\n";
+print "eval:", eval q{$a}, "\n";
+');
+
 
 done_testing();
