@@ -41,6 +41,11 @@ quadratic-nesting diagnosis.
 **Nothing new scheduled ahead of the correctness queue** — the sequence
 stays #296 → #291 → #292, then #303, then #153 chunk 0 + FOLD.
 
+**NEXT SESSION (Opus): start at `docs/opus-handoff-s386.md`** — the entry
+point: state snapshot, the four-item queue with per-item merge bars, the
+guardrails active for this batch, and the STOP point (after #303, hand
+back to Fable for #153 chunk 0 + FOLD).
+
 ---
 
 ## Session 386 (2026-08-12, Fable) — s385 review: APPROVED; #296's B1 seam overruled (eval-compile, not progv), B2 cracked (sibling redecl, isolated)
