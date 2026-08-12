@@ -69,6 +69,22 @@ fired-on-claimed-shape vs fired-on-deliberate-decline over corpus + suite
 deletions.  The legacy reduction is NOT wholesale-deletable — it IS the
 reducer `_reduce_term`'s recursive parse invokes for the whole-array case.
 
+**#211 CLOSED (`00b8f09`) — the FOLD acceptance target, taken while the
+territory was open.**  `$$rr->{k}` == `(${$rr})->{k}` in perl: the leading
+scalar-deref cast binds WITH the ref target, THEN the arrow derefs that
+value.  PCL's arrow-as-sugar splice turned it into `$$rr{k}` (one level
+short): the X[] branch built the `*_ref_acc` node on the bare Symbol, and
+the cast-removal — written for the no-arrow `$$scalar{key}` reading —
+swallowed a REAL deref level.  Fix: with `$is_reference` and a `$` Cast
+before a Symbol/Block base, parse `[Cast, base]` together as the ref
+expression — the exact rule Case 2 (`$$r->()`) already implements.  Rows +
+inverse one-deref guards in `transpile-test-10.t`; gate **138/5125**;
+corpus-diff IDENTICAL 111/111 and the shape is absent from lib/ and
+perl-tests (censused) — no module emission can change, sweep provably
+cannot move (s375 cadence legs).  **NEW: #305** — the TRIPLE-cast spelling
+`$$$rrr->{k}` still silently prints nothing (pre-existing; both
+cast-consuming sites share the single-cast limit).
+
 ---
 
 ## Session 388b (2026-08-12, Opus) — #291 SHIPPED: the poisoned-`my` rename family is gone; #205 closes
