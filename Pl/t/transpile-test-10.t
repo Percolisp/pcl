@@ -617,4 +617,62 @@ close $in;
 unlink $tmp;
 ');
 
+# ---------------------------------------------------------------------------
+# #153 FOLD chunk 2 — the intuit_curly boundary after grep/map/sort, and the
+# eval/do result-deref (probed vs perl 5.40, s389).  A hash-constructor-shaped
+# (or empty) `{…}` followed by `->` after grep/map/sort is an anon-hash EXPR
+# term, not a block; for sort the deref'd value is simply a LIST ELEMENT
+# (sort has no expr-comparator form).  An eval/do BLOCK followed by `->`
+# derefs the block's RESULT.  Before chunk 2, the $deref_skip text-wrap
+# consumed the chain into the lambda body: eval double-applied the deref
+# (empty where perl prints 41) and sort swallowed the element ("3 1" where
+# perl prints "1 1 3").
+# ---------------------------------------------------------------------------
+test_transpile('eval BLOCK -> deref applies to the RESULT, once', '
+my $v = eval {[41]}->[0];
+print "v=$v\n";
+my $w = eval {[41,43]}->[1];
+print "w=$w\n";
+my $h = eval {{k=>7}}->{k};
+print "h=$h\n";
+my $c = eval {[41]}->[0] + do {[1]}->[0];
+print "c=$c\n";
+');
+
+test_transpile('sort {ctor}->{k}, LIST — the deref is a list element', '
+my @r = sort {a=>1}->{a}, (3,1);
+print "block: @r\n";
+my @p = sort({a=>1}->{a}, (3,1));
+print "paren: @p\n";
+');
+
+test_transpile('grep/map ctor-deref incl. the empty-hash spelling', '
+my @e = grep {}->{a}, (1,2);
+print "empty: ", scalar(@e), "\n";
+my @g = grep {a=>$_}->{a}, ("chobb", "", "foo");
+print "grep: ", scalar(@g), " $g[0]\n";
+my @m = map({x=>$_}->{x}, ("x", "y"));
+print "map: @m\n";
+');
+
+test_transpile('inverse guards: real blocks and comparators unchanged', '
+my @g = grep { $_ } (1, 0, 2);
+print "grep: @g\n";
+my @s = sort { $b <=> $a } (1, 3, 2);
+print "sort: @s\n";
+my $e = eval { 41 };
+print "eval: $e\n";
+my @m = map { $_ + 1 } (1, 2);
+print "map: @m\n";
+');
+
+# A block-SHAPED `{…}` followed by `->` after grep/map/sort is a perl
+# COMPILE-TIME syntax error (near "}->"); PCL must die at transpile, not
+# silently deref the list-op result.
+{
+    my $cl = transpile('my @r = grep { $_ > 1 }->{a}, (1,2,3); print "@r\n";');
+    like($cl, qr/syntax error near "\}->"/,
+         'block-shaped {…}-> after grep dies perl-shaped at transpile');
+}
+
 done_testing();

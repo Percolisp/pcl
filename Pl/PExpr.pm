@@ -2155,8 +2155,8 @@ sub _reduce_term {
 #     and `=>` autoquote all read the raw word and its neighbours;
 #   * a BLOCK-led term — a `{…}` after grep/map/sort/eval/do/sub is that
 #     word's BLOCK ARGUMENT, not a hash-constructor primary; the
-#     block-vs-constructor question belongs to handle_subcalls (chunk 2,
-#     where $deref_skip lives);
+#     block-vs-constructor question belongs to handle_subcalls
+#     (_ctor_deref_verdict, chunk 2 — s389);
 #   * a term followed by a Block/Constructor group — the legacy loop has
 #     combining rules that read the raw pair (indirect method args
 #     `$o->SUPER::m{@a}`, kv-slice spellings); folding the left side would
@@ -2408,6 +2408,25 @@ sub _block_is_empty {
     @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
   }
   return scalar(@ch) == 0;
+}
+
+# #153 FOLD chunk 2 — perl's intuit_curly boundary for a brace group after
+# grep/map/sort that is FOLLOWED by a `->` subscript (probed vs perl 5.40,
+# s389): a hash-constructor-shaped `{…}` (or an empty `{}`) is not a block
+# at all — it is an anon-hash EXPR term.  `grep {a=>1}->{a}, LIST` selects;
+# `sort {a=>1}->{a}, (3,1)` prints "1 1 3" — the deref'd value is simply a
+# LIST ELEMENT, sort has no expr-comparator form; `grep {}->{a}, LIST` is
+# the empty-hash spelling.  A block-SHAPED `{…}` followed by `->` is a perl
+# COMPILE-TIME syntax error (`near "}->"`) for all three words.  Returns
+# 'ctor', 'err', or undef (no `->` subscript follows — not this boundary's
+# question; the brace group keeps its block reading).
+sub _ctor_deref_verdict {
+  my ($block, $t1, $t2) = @_;
+  return undef unless $t1 && $t2
+    && ref($t1) eq 'PPI::Token::Operator' && $t1->content() eq '->'
+    && ref($t2) eq 'PPI::Structure::Subscript';
+  return (_block_is_hash_constructor($block) || _block_is_empty($block))
+    ? 'ctor' : 'err';
 }
 
 # If a deref BLOCK contains exactly one bareword identifier (e.g. the `foo` in
@@ -2946,6 +2965,20 @@ sub handle_subcalls {
           }
         }
 
+        # #153 FOLD chunk 2, paren spelling: grep({a=>1}->{a}, LIST) — the
+        # brace group is an anon-hash TERM (see _ctor_deref_verdict), so
+        # re-bless it into the Constructor it is and fall through to the
+        # ordinary funcall path, which parses the List contents as plain
+        # arguments.  The block-shaped spelling dies exactly as perl does.
+        if (@inner_ch >= 3 && ref($inner_ch[0]) eq 'PPI::Structure::Block') {
+          my $v = _ctor_deref_verdict(@inner_ch[0, 1, 2]);
+          if (defined $v) {
+            die 'PCL: syntax error near "}->" (a ' . $func_name
+              . " BLOCK cannot be dereferenced)\n" if $v eq 'err';
+            bless $inner_ch[0], 'PPI::Structure::Constructor';
+          }
+        }
+
         if (@inner_ch && ref($inner_ch[0]) eq 'PPI::Structure::Block') {
           my $block = $inner_ch[0];
           # Rest: children after the block; strip only the optional leading comma
@@ -2970,36 +3003,15 @@ sub handle_subcalls {
 
           if ($self->has_parser) {
             my $params = ($func_name eq 'sort') ? $self->_sort_pair($now) : ['$_'];
-            # task #78: a following -> deref chain wraps body_cl text — keep
-            # those on the v1 route (checked BEFORE the hook so a declined
-            # block is never lowered twice).
-            my $has_deref = @rest_ch >= 2
-              && ref($rest_ch[0]) eq 'PPI::Token::Operator'
-              && $rest_ch[0]->content eq '->'
-              && ref($rest_ch[1]) eq 'PPI::Structure::Subscript';
-            my $body_form = $has_deref
-              ? undef : $self->_v2_embedded_body($block, $func_name);
+            # (A following `->` deref chain never reaches this branch: the
+            # chunk-2 normalizer above re-routed the ctor-shaped spelling
+            # and died on the block-shaped one.)
+            my $body_form = $self->_v2_embedded_body($block, $func_name);
             my $body_cl;
             if (!$body_form) {
               $body_cl = _block_is_hash_constructor($block)
                 ? $self->parser->parse_hash_block_to_cl_string($block)
                 : $self->parser->parse_block_to_cl_string($block, $func_name);
-
-              # Handle -> deref chain after block in paren form: grep({HASH}->{key}, LIST)
-              # @rest_ch starts with -> subscript pairs; consume them into body_cl.
-              while (@rest_ch >= 2
-                     && ref($rest_ch[0]) eq 'PPI::Token::Operator'
-                     && $rest_ch[0]->content eq '->'
-                     && ref($rest_ch[1]) eq 'PPI::Structure::Subscript') {
-                my $sub = $rest_ch[1];
-                my $start = $sub->start->content;
-                my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
-                last unless defined $key_cl;
-                $body_cl = ($start eq '{')
-                    ? "(p-gethash-deref $body_cl $key_cl)"
-                    : "(p-aref-deref $body_cl $key_cl)";
-                splice @rest_ch, 0, 2;
-              }
             }
 
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
@@ -3028,6 +3040,25 @@ sub handle_subcalls {
           splice @$e, $i, 2, $top_node;
           next;
         }
+      }
+    }
+
+    # #153 FOLD chunk 2, block spelling: `grep {a=>1}->{a}, LIST` — the brace
+    # group followed by a `->` subscript is an anon-hash TERM, not a block
+    # argument (see _ctor_deref_verdict).  Re-bless it into the Constructor
+    # it is, so the branch below never fires and the ordinary word/args
+    # machinery parses the term; die perl-shaped on the block-shaped
+    # spelling.  This replaces the $deref_skip text-wrap route, which was
+    # also silently WRONG for sort (it swallowed the deref'd value, which
+    # perl treats as a plain LIST ELEMENT) and for eval (double-applied
+    # deref — the wrapped chain was left in the stream and bound again).
+    if (ref($next) eq 'PPI::Structure::Block'
+        && $now->content() =~ /^(?:grep|map|sort)$/) {
+      my $v = _ctor_deref_verdict($next, $e->[$i + 2], $e->[$i + 3]);
+      if (defined $v) {
+        die 'PCL: syntax error near "}->" (a ' . $now->content()
+          . " BLOCK cannot be dereferenced)\n" if $v eq 'err';
+        bless $next, 'PPI::Structure::Constructor';
       }
     }
 
@@ -3123,7 +3154,6 @@ sub handle_subcalls {
         $self->add_child_to_node($top_id, $node_id);
 
         # Use parser callback if available (handles multi-statement blocks)
-        my $deref_skip = 0;  # extra elements consumed by -> deref chain after block
         if ($self->has_parser) {
           # Determine parameters based on function type
           my $params = ($func_name eq 'sort') ? $self->_sort_pair($now)
@@ -3137,40 +3167,18 @@ sub handle_subcalls {
           # For other blocks, use named function (may need to be called separately)
           if ($func_name eq 'grep' || $func_name eq 'map' || $func_name eq 'sort'
               || $func_name eq 'eval') {
-            # task #78: a following -> deref chain wraps body_cl text — keep
-            # those on the v1 route (checked BEFORE the hook so a declined
-            # block is never lowered twice).
-            my $has_deref = $i + 3 < @$e
-              && ref($e->[$i + 2]) eq 'PPI::Token::Operator'
-              && $e->[$i + 2]->content eq '->'
-              && ref($e->[$i + 3]) eq 'PPI::Structure::Subscript';
-            my $body_form = $has_deref
-              ? undef : $self->_v2_embedded_body($next, $func_name);
+            # (A `->` deref chain after the block never reaches this branch
+            # for grep/map/sort — the chunk-2 normalizer above re-routed or
+            # died.  For eval/do the chain stays IN the token stream and is
+            # bound onto the funcall node by the ordinary postfix machinery,
+            # derefing the block's RESULT exactly as perl does.)
+            my $body_form = $self->_v2_embedded_body($next, $func_name);
             my $body_cl;
             if (!$body_form) {
               # Parse block body as CL string
               $body_cl = _block_is_hash_constructor($next)
                 ? $self->parser->parse_hash_block_to_cl_string($next)
                 : $self->parser->parse_block_to_cl_string($next, $func_name);
-
-              # Handle -> deref chain after block: grep {HASH}->{key}, LIST
-              # Consume any leading '-> subscript' pairs from @$e[$i+2..], wrapping body_cl.
-              while ($i + 2 + $deref_skip < @$e
-                     && ref($e->[$i + 2 + $deref_skip]) eq 'PPI::Token::Operator'
-                     && $e->[$i + 2 + $deref_skip]->content eq '->'
-                     && $i + 3 + $deref_skip < @$e
-                     && ref($e->[$i + 3 + $deref_skip]) eq 'PPI::Structure::Subscript') {
-                my $sub = $e->[$i + 3 + $deref_skip];
-                my $start = $sub->start->content;
-                my $key_cl = _subscript_to_cl_str($sub, $self, $start eq '[');
-                last unless defined $key_cl;
-                if ($start eq '{') {
-                  $body_cl = "(p-gethash-deref $body_cl $key_cl)";
-                } else {
-                  $body_cl = "(p-aref-deref $body_cl $key_cl)";
-                }
-                $deref_skip += 2;
-              }
             }
 
             # Create inline_lambda node
@@ -3179,7 +3187,6 @@ sub handle_subcalls {
             $lambda_node->{body_cl}   = $body_cl;
             $lambda_node->{body_form} = $body_form if $body_form;
             $lambda_node->{for_func} = $func_name;
-            $lambda_node->{deref_skip} = $deref_skip;
             $self->add_child_to_node($top_id, $lambda_id);
           } elsif ($func_name eq 'do') {
             # do { } : emit an INLINE lambda (return_lambda=1) rather than a
@@ -3247,7 +3254,6 @@ sub handle_subcalls {
 
         # For grep/map/sort: parse remaining elements as the list to process.
         # For eval/do: the block is the only argument; don't consume what follows.
-        # $deref_skip: number of extra elements already consumed by -> deref chain.
         #
         # For a user (&;@)-prototype sub (Try::Tiny's try/catch/finally), the
         # slurpy @ consumes only JUXTAPOSED trailing terms; a comma immediately
@@ -3256,15 +3262,15 @@ sub handle_subcalls {
         # siblings), whereas `try {} catch {}` (no comma) → catch{} is slurped.
         # grep/map/sort are true list-ops whose list starts juxtaposed and then
         # continues across commas, so this only applies to $has_block_proto subs.
-        my $next_after = $e->[$i + 2 + $deref_skip];
+        my $next_after = $e->[$i + 2];
         my $comma_stops = $has_block_proto
           && $next_after
           && $next_after->isa('PPI::Token::Operator')
           && ($next_after->content eq ',' || $next_after->content eq '=>');
 
         if ($func_name ne 'eval' && $func_name ne 'do' && !$comma_stops
-            && $i + 2 + $deref_skip < scalar(@$e)) {
-          my @rest = @$e[$i + 2 + $deref_skip .. $#$e];
+            && $i + 2 < scalar(@$e)) {
+          my @rest = @$e[$i + 2 .. $#$e];
           my $rest_list = $self->cleanup_for_parsing(\@rest);
           # Parse rest as comma-separated list (usually just one element)
           my $rest_ids = $self->parse_list($rest_list);
