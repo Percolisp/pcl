@@ -34,7 +34,8 @@ like($md, qr/\(p-defcell \$bb /, 'my $aa,… : $bb forward-declared as a package
 
 # `my $a . $foo;` — declares $a, concatenation discarded.
 my $dc = Pl::Parser2->parse_code(q{my $foo = "f"; my $a . $foo; print $a;});
-like($dc, qr/\(let \(\(\$a \(make-p-box nil\)\)\)/, 'my $a . $foo : $a let-bound');
+like($dc, qr/\(let \(\(\$a__excl__\d+ \(make-p-box nil\)\)\)/,
+     'my $a . $foo : $a let-bound');   # $a is exception-partition → #296 rename
 
 # ---- W8 tail (s273): VarAnnotator write shapes + self-ref my init + our-init ----
 

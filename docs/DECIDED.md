@@ -2451,32 +2451,93 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   a plain string literal.  Guard row covers all seven spellings and was
   verified to FAIL against the old predicate.
 
-## s385c (2026-08-12, Opus) — #296: the design is SETTLED, the implementation is on ice
+## s385c (2026-08-12, Opus) — #296: an EXCEPTION-partition `my` is RENAMED, not re-partitioned
 
-- **RULED: an EXCEPTION-partition `my` is RENAMED, not re-partitioned.**  CL
-  cannot lexically bind a proclaimed special and `symbol-macrolet` over one is
-  undefined behaviour, so only a different SYMBOL fixes the dynamic-rebind bug.
-  Option (b) — shrink the partition, have sort bind the pair with
-  `p-local-cell` — is REJECTED: ~41 ns per sort CALL, does not cover
-  `my %ENV`, and disturbs #287's just-shipped package-qualified pair.
-- **Not the poisoned-my family**: name-decidable (one
-  `Pl::GlobalPartition::is_exception_global` call), no poison test, no
-  WHETHER analysis.  It OUTLIVES #291, which deletes the other three passes.
-- **Ordering is load-bearing**: it must run BEFORE
-  `_rename_captured_file_lexicals` and the three poisoned-my passes, or a
-  file-level `my $a` captured by a named sub dies
-  ("Parser2 TODO: file lexical 'a__excl__0' captured by sub foo").
-- **perl's surprising rule, verified**: a `my $a` in scope makes a sort
-  comparator read the LEXICAL, not the sort-bound pair — perl `a=LEX`, PCL
-  before `a=9` (WRONG), after `a=LEX`.  A guard row asserts what the
-  comparator OBSERVED, never the resulting ORDER (an inconsistent comparator's
-  order is the sort ALGORITHM's answer, perl mergesort vs SBCL stable-sort).
-- **BUILT s385 on `wip/s385-296`, gate green at 5105, and the full sweep said
-  NO** — two regressions, both written up in task #296.  *(The s385 shapes for
-  both were superseded by the s386 ruling — see the s386 section below: B1 is
-  an eval-mode resolution-order fix, NOT the progv seam; B2 is an isolated
-  sibling-redeclaration bug, NOT file-context dependent.)*
-- **The Pl/t gate was green with both regressions live** — for a change this
+- **The bug (pre-existing since the #290 flip, not caused by #291).**  An
+  ORDINARY global is a symbol macro over a cell, so `my $x` beside one is a
+  plain lexical `let`.  An EXCEPTION name ($a/$b and the runtime-owned set) is
+  still a `defvar` — PROCLAIMED SPECIAL — so `(let (($a …)) …)` is a DYNAMIC
+  rebinding: a closure made inside loses the value at scope exit.
+  `sub mk { my $a = shift; sub { $a } }` printed nothing where perl prints the
+  value.  Same for `my $b`, `my %ENV`, and `for my $a`.
+- **CL cannot lexically bind a proclaimed special**, so no emission fixes this
+  while the name stays `$a`: the declaration must get a different SYMBOL.
+  `symbol-macrolet` over a special is undefined behaviour, so that is not an
+  escape either.
+- **RULED: rename the declaration (option (a)), do NOT shrink the partition.**
+  Shrinking it — making $a/$b ordinary and having the sort lowering bind them
+  with `p-local-cell` — would cost every sort CALL ~41 ns (plan §2), still
+  leave `my %ENV` broken, and disturb #287's just-shipped package-qualified
+  pair.  The rename costs nothing at runtime and is name-decidable: ONE
+  `Pl::GlobalPartition::is_exception_global` call.
+- **This is NOT the poisoned-my family.**  No poison test, no analysis of
+  WHETHER — only the declaration's own scope, which perl states syntactically.
+  It OUTLIVES #291, which deletes the other three passes.
+- **Ordering is load-bearing**: it runs before `_rename_captured_file_lexicals`
+  and before the three poisoned-my passes, so every later pass sees the final
+  name.  Probed the other way round: a file-level `my $a` captured by a named
+  sub then died "Parser2 TODO: file lexical 'a__excl__0' captured by sub foo".
+- **Perl's own rule is preserved, and it is the surprising one**: a `my $a` in
+  scope makes a sort comparator read the LEXICAL, not the sort-bound pair.
+  Probed — perl `a=LEX`, PCL before `a=9` (the package pair, WRONG), after
+  `a=LEX`.  A guard row asserts what the comparator OBSERVED, never the
+  resulting ORDER: an inconsistent comparator's order is the sort ALGORITHM's
+  answer (perl mergesort vs SBCL stable-sort), not a claim PCL can make.
+- **corpus-diff: 42 of 111 files, four explained buckets** — (1) the rename
+  plus pretty-printer re-wrap; (2) `__shadow__`/`__cond__` counter
+  RENUMBERING, because the earlier pass now renames fewer names; (3) a
+  promoted lexical moving from the exception partition to ORDINARY
+  (`defvar $a` → `p-defcell $a__excl__N`), which is correct — it IS ordinary
+  now; (4) the VarAnnotator and the params fast path giving the renamed
+  lexical their NORMAL verdict (raw slot, `p-raw-params`) instead of the
+  conservative one the special name forced — correct and faster.
+- Nine Pl/t expectations that spell `$a`/`$b` as sample variables were updated
+  to the renamed spelling (STRENGTHENS: the suffix pins that the rename fired
+  AND the shape held); one was made whitespace-tolerant for the re-wrap.
+- **B1 (string-eval capture) SHIPPED s387 (`a062914`)**: in EVAL-MODE
+  compilation the CAPTURE ALIST beats the special table — a free $a/$b whose
+  spelling the caller's alist carries compiles as that captured lexical (a
+  fresh non-special `$a__evalcap__N` bound as a thunk param whose LOOKUP name
+  stays `"$a"`); no key → today's special path, so an eval'd comparator with
+  no `my $a` in scope still reads sort's dynamic binding.  The five-row
+  acceptance table + both reproducers are identical to perl.
+- **A capture-dependent emission makes the capture names part of the eval CACHE
+  KEY** (s387): eval-mode compilation runs in the `pl2cl --server` SUBPROCESS
+  (its request was `pkg\nlen\ncode`), so the names now travel in a `<captures>`
+  header line and `*p-eval-string-cache*` is keyed on
+  (source, pkg, capture-names).  Without that key, one eval string used from
+  two scopes would reuse whichever emission compiled first — silent-wrong.
+- **Block-scoped and FILE-level lexicals reach an eval by DIFFERENT mechanisms**
+  (s387): a block `my` reaches it through the site capture alist; a file-level
+  one reaches an eval inside a NAMED SUB only through promotion to a package
+  cell (the sub is hoisted out of the file-level `let`), and that pass finds
+  the declaration by its PERL name in the eval text.  So the #296 rename stands
+  aside for exactly that case — file-level decl + a string eval inside a named
+  sub — at no cost, because a promoted cell is not a `let`.  Keyed on "file has
+  ANY string eval" instead, it reverted four corpus files' renames;
+  corpus-diff caught it.
+- **B2 (later declaration wins) SHIPPED s388; #296 CLOSED, branch merged.**
+  `_rename_decl_within` walked from its declarator to the end of the scope, so
+  an earlier `my $a`'s rename claimed uses belonging to a LATER `my $a`; the
+  later declaration's own pass then found nothing left to rename and its binding
+  sat unread.  The walk now ends its claim at a later declaration of the same
+  canonical name, in the two shapes `_lexical_decl_scope` distinguishes:
+  **same scope → STOP at the LAST TOKEN OF THE STATEMENT** (perl does not
+  introduce the new name until the statement finishes, so the redeclaration's
+  own initializer still reads the EARLIER variable — probed,
+  `my $a = "X"; my $a = "[$a]"` prints `[X]`); **construct scope → SKIP the
+  construct**, resuming after it, except the region `_lexical_decl_scope` names
+  as evaluated outside it (`for my $x (LIST)`, `while (my $x = …)`,
+  `for (my $x = 0; …)`).  A NESTED BLOCK redeclaration is unchanged — still
+  `_ref_shadowed`'s call, which is positionally exact there.
+- **`_ref_shadowed` cannot see EITHER kind of later declaration** (s388): it
+  inspects Block/Sub parents, and neither a same-scope sibling statement nor a
+  construct HEAD is a sibling of one.  That is why both spellings were live at
+  once, and why the fix belongs in the rename walk, not in the shadow reducer.
+  The construct-scoped twin was found by PROBING the family, not by the failing
+  rows — `{ my $a = "O"; while (my $a = …) { print $a } }` printed the outer
+  value and no test named it.
+- **The Pl/t gate was green with BOTH regressions live** — for a change this
   wide the full sweep is the gate, not prove.
 
 ## s386 (2026-08-12, Fable) — s385 review: both commits APPROVED; #296's two fix shapes ruled

@@ -217,8 +217,8 @@ diag '-------- __PACKAGE__ Token:';
 {
     my $code = 'package A; my $a = __PACKAGE__; package B; my $b = __PACKAGE__;';
         my $output = get_generated_code($code);
-    like($output, qr/\$a\s+"A"/, '__PACKAGE__ is "A" in package A');
-    like($output, qr/\$b\s+"B"/, '__PACKAGE__ is "B" in package B');
+    like($output, qr/\$a__excl__\d+\s+"A"/, '__PACKAGE__ is "A" in package A');
+    like($output, qr/\$b__excl__\d+\s+"B"/, '__PACKAGE__ is "B" in package B');
 }
 
 # Test 24: Runtime execution

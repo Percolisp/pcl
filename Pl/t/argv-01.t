@@ -104,7 +104,10 @@ diag "-------- shift/pop inside subs (should use \@_):";
             }
         }
     ');
-    ok($output =~ /p-raw-params \(\$b\)/ && $output =~ /p-shift\s+\@_/,
+    # $b is exception-partition, so #296 renames the lexical before the
+    # params fast path sees it — the suffix pins that the RENAMED name still
+    # collapses to p-raw-params.
+    ok($output =~ /p-raw-params \(\$b__excl__\d+\)/ && $output =~ /p-shift\s+\@_/,
        'Both nested subs use @_');
 }
 

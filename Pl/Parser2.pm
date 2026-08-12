@@ -43,6 +43,14 @@ has code     => (is => 'ro', predicate => 1);
 # `package` statements) die → the per-eval v1 retry (kept until E4).
 has eval_mode => (is => 'ro', default => sub { 0 });
 has eval_pkg  => (is => 'ro', default => sub { undef });
+# #296-B1: the names of the caller's in-scope lexicals (the capture alist's
+# keys, sent by p-transpile-string).  Read by exactly one pass —
+# _rename_free_eval_captures — which needs to know whether a free `$a` in this
+# eval string is the caller's `my $a` (compile it as that captured lexical) or
+# the package's dynamic `$a` (leave today's special path alone).  perl draws
+# the line in the same place, so the list is a FACT about the eval site, not a
+# heuristic.  Empty/absent = "no captures known", i.e. today's behaviour.
+has eval_captures => (is => 'ro', default => sub { [] });
 
 # Pre-pass result, keyed by package: { pkg => { perl sub name →
 # { cl_name, insensitive } } } (see ExprToCL2).  Bareword sub resolution is
@@ -99,7 +107,8 @@ sub parse_code {
   my ($class, $code, %opts) = @_;
   return $class->new(
     code => $code,
-    map { $_ => $opts{$_} } grep { defined $opts{$_} } qw(eval_mode eval_pkg),
+    map { $_ => $opts{$_} } grep { defined $opts{$_} }
+      qw(eval_mode eval_pkg eval_captures),
   )->parse;
 }
 
@@ -1165,13 +1174,19 @@ sub parse {
   # through an eval in THIS file (lexicals never cross files), and skipping
   # the inert call keeps eval-free files byte-identical.  Non-eval uses of
   # the word (`->eval`, `eval =>`, hash keys) over-fire harmlessly.
+  # _str_eval_in_named_sub is the same scan's second question (#296-B1): a
+  # string eval inside a NAMED sub can only reach a file lexical through the
+  # promotion-to-cell path, because the sub is hoisted out of the file-level
+  # `let` that the eval-site capture alist is built from.
   $self->{_file_has_str_eval} = 0;
+  $self->{_str_eval_in_named_sub} = 0;
   for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
                                  && $_[1]->content eq 'eval' }) || [] }) {
     my $nx = $w->snext_sibling;
     next if $nx && $nx->isa('PPI::Structure::Block');
     $self->{_file_has_str_eval} = 1;
-    last;
+    $self->{_str_eval_in_named_sub} = 1 if _inside_named_sub($w);
+    last if $self->{_str_eval_in_named_sub};
   }
 
   # W10: a file lexical declared in one segment and used in a later one spans
@@ -1314,6 +1329,24 @@ sub parse {
   # authoritative — no un-renamed declarator-shaped `state` survives into
   # lowering.
   $self->_rename_state_vars($_) for @segments;
+
+  # #296: a `my`/`state` of an EXCEPTION-partition name ($a/$b/@ARGV/…) must
+  # not be let-bound under its own symbol — that symbol is a proclaimed
+  # special, so the `let` is a DYNAMIC rebind.  Runs HERE, before the capture
+  # promotion below and before the three poisoned-my passes, so every one of
+  # them sees the final name: a file-level `my $a` captured by a named sub has
+  # to reach _rename_captured_file_lexicals already renamed, or that pass
+  # promotes `$a` and this one then renames the promoted decl out from under
+  # it (probed: "Parser2 TODO: file lexical 'a__excl__0' captured by sub foo").
+  $self->{_excl_rename_counter} = 0;
+  $self->_rename_exception_mys($_) for @segments;
+
+  # #296-B1: the eval-mode half — a FREE exception name this eval captures
+  # from the caller (`eval q{"[$a]"}` inside a `my $a` scope) compiles as that
+  # captured lexical.  Runs right after the decl pass, so the only `$a` tokens
+  # left are genuinely free ones, and before every consumer of the names.
+  $self->{_evalcap_counter} = 0;
+  $self->_rename_free_eval_captures($doc) if $self->eval_mode;
 
   # W5: rewrite file lexicals captured by named subs to fresh package-level
   # cells (see _rename_captured_file_lexicals).  Runs BEFORE the pre-pass so
@@ -3887,10 +3920,15 @@ sub _state_container_blocker {
 # Every caller's blocker guarantees a single declaration of the name in
 # $root, so there is no shadow scope to skip.
 sub _rename_decl_within {
-  my ($self, $root, $sym, $new) = @_;
+  my ($self, $root, $sym, $new, $decl_override) = @_;
   my $old  = $sym->content;
   my $canon = $sym->symbol;
-  my $decl = $sym->statement;
+  # $decl is the region evaluated in the OUTER scope, skipped by the rewrite.
+  # It is the declaring STATEMENT for an ordinary decl (`my $x = $x` reads the
+  # outer $x), but a caller whose ROOT *is* that statement must say which
+  # sub-region to skip instead — a `for my $x (LIST)` roots at the Compound,
+  # where the default would skip the whole construct (#296).
+  my $decl = $decl_override // $sym->statement;
   # A NESTED re-declaration of the same name inside $root is a different
   # variable: its own decl target and every use in its scope must keep the
   # original name (#254 B-ii — op/while.t's `while (my $i = …) { … my $i = 0 }`).
@@ -3902,11 +3940,10 @@ sub _rename_decl_within {
     return 1 if $t != $sym && _is_lexical_decl_name($t);
     return $self->_ref_shadowed($t, $canon, [], $root);
   };
-  my $sigil = substr($old, 0, 1);
-  (my $bare    = $old) =~ s/^[\$\@\%]//;
   (my $newbare = $new) =~ s/^[\$\@\%]//;
   my $interp_fix = _interp_fixer($old, $newbare);
   my ($seen_sym, $past_decl) = (0, 0);
+  my ($stop_tok, $skip_end, $skip_in) = (undef) x 3;
   for my $t ($root->tokens) {
     if (!$seen_sym) {
       next unless $t == $sym;
@@ -3920,24 +3957,120 @@ sub _rename_decl_within {
       next if $inside;   # decl RHS: `my $x = $x` reads the OUTER $x
       $past_decl = 1;
     }
-    _fix_interp_token($t, $interp_fix, $shadowed);
-    # `$#x` last-index of a renamed @x (container decls: state @x family)
-    if ($sigil eq '@' && $t->isa('PPI::Token::ArrayIndex')
-        && $t->content eq "\$#$bare") {
-      $t->set_content("\$#$newbare") unless $shadowed->($t);
-      next;
+    # A LATER declaration of the same name ends this one's claim on the uses it
+    # covers (#296-B2).  Only a `my`/`state` word can open one, so the test
+    # costs nothing on ordinary tokens.
+    if (!$stop_tok && !$skip_end && $t->isa('PPI::Token::Word')
+        && $t->content =~ /^(?:my|state)$/) {
+      my ($kind, $end, $inner) = _redecl_region($root, $t, $sym, $canon);
+      if    (($kind // '') eq 'stop') { $stop_tok = $end }
+      elsif (defined $kind)           { ($skip_end, $skip_in) = ($end, $inner) }
     }
-    next unless $t->isa('PPI::Token::Symbol') && $t->symbol eq $old;
-    next if $shadowed->($t);
-    # Sigil-preserving rewrite: a container's element/slice uses keep their
-    # access sigil (`$x[0]`/`$x{k}`/`@x{…}` for @x/%x) — only the NAME part
-    # changes.  For scalars this is the identity replacement (element tokens
-    # of a same-bare container resolve their ->symbol to @x/%x and never
-    # match a scalar $old).
-    (my $c = $t->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/ or next;
-    $t->set_content($c);
+    if ($skip_end) {
+      my $out = 0;                      # in the construct's OUTER-evaluated part
+      for (my $p = $t; $p; $p = $p->parent) {
+        if (refaddr($p) == refaddr($skip_in)) { $out = 1; last }
+      }
+      $skip_end = undef if refaddr($t) == refaddr($skip_end);
+      next if !$out;
+    }
+    _rename_use_token($t, $old, $new, $interp_fix, $shadowed);
+    last if $stop_tok && refaddr($t) == refaddr($stop_tok);
   }
   return $new;
+}
+
+# Where an earlier declaration's rewrite region gives way to a LATER `my`/`state`
+# word $w declaring the same $canon.  Returns:
+#
+#   ('stop', TOKEN)         $w re-declares in the SAME scope $root — perl's
+#                           later `my` is a NEW variable and every use from
+#                           there on is ITS use, rewritten by its own pass.
+#                           TOKEN is the LAST TOKEN OF THE STATEMENT, not the
+#                           declarator: perl does not introduce the new name
+#                           until the current statement finishes, so the
+#                           redeclaration's own initializer still reads the
+#                           EARLIER variable (probed: `my $a = "X";
+#                           my $a = "[$a]"` prints `[X]`).
+#   ('skip', TOKEN, NODE)   $w declares into a CONSTRUCT (`for my $x (LIST)`,
+#                           `while (my $x = …)`, `for (my $x = 0; …)`), whose
+#                           whole extent is the new variable's scope.  Rewriting
+#                           resumes after TOKEN (the construct's last token);
+#                           inside it only NODE — the region _lexical_decl_scope
+#                           says is evaluated in the OUTER scope — is still ours.
+#   ()                      not a redeclaration of $canon, or one scoped to a
+#                           nested BLOCK: _ref_shadowed decides those, and it is
+#                           positionally exact there (statements before the inner
+#                           `my` still belong to us), which a whole-region skip
+#                           would not be.
+#
+# Both cases were live on this branch and correct before it: an earlier decl's
+# region ran straight through the later declarator, renaming uses the later
+# declaration's own pass then could not find — split.t's three same-block
+# `my ($a,$b) = split …` statements all read the FIRST split's values, and a
+# `while (my $a = …)` body read the enclosing block's `my $a`.  _ref_shadowed
+# cannot see either: it inspects Block/Sub parents, and a construct's head is a
+# sibling of neither.
+sub _redecl_region {
+  my ($root, $w, $sym, $canon) = @_;
+  my $nx = $w->snext_sibling or return ();
+  my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+           : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+           : ();
+  for my $s (@syms) {
+    next if $s == $sym || $s->symbol ne $canon;
+    my ($r, $d) = _lexical_decl_scope($w, $s);
+    next unless $r;
+    if (refaddr($r) == refaddr($root)) {
+      # The declaring STATEMENT as $root sees it — the child of $root holding
+      # the declarator.  (Not $w->statement: a `my` embedded in an argument
+      # list — `func(my $x)` — sits in an inner Statement::Expression, and
+      # perl's "not until the statement ends" is about the whole statement.)
+      my $top = $w;
+      $top = $top->parent while $top->parent && refaddr($top->parent) != refaddr($root);
+      return ('stop', _last_token($top));
+    }
+    next unless $r->isa('PPI::Statement::Compound');
+    return ('skip', _last_token($r), $d // $w->parent);
+  }
+  return ();
+}
+
+sub _last_token {
+  my ($node) = @_;
+  return $node unless $node->isa('PPI::Node');
+  return ($node->tokens)[-1];
+}
+
+# Rewrite ONE token that USES the variable $old (code symbol, `$#x` array
+# index, or interpolating text mentioning it) to $new — the shared body of
+# every use-rewrite in the file.  $shadowed answers "does this token belong to
+# a different variable of the same name" for its caller's scope model; the
+# positional/scope logic stays there, this is only the rewrite.
+# (Extracted from _rename_decl_within so the free-capture rename
+# — _rename_free_eval_captures, #296-B1 — cannot drift from it.)
+sub _rename_use_token {
+  my ($t, $old, $new, $interp_fix, $shadowed) = @_;
+  my $sigil = substr($old, 0, 1);
+  (my $bare    = $old) =~ s/^[\$\@\%]//;
+  (my $newbare = $new) =~ s/^[\$\@\%]//;
+  _fix_interp_token($t, $interp_fix, $shadowed);
+  # `$#x` last-index of a renamed @x (container decls: state @x family)
+  if ($sigil eq '@' && $t->isa('PPI::Token::ArrayIndex')
+      && $t->content eq "\$#$bare") {
+    $t->set_content("\$#$newbare") unless $shadowed->($t);
+    return;
+  }
+  return unless $t->isa('PPI::Token::Symbol') && $t->symbol eq $old;
+  return if $shadowed->($t);
+  # Sigil-preserving rewrite: a container's element/slice uses keep their
+  # access sigil (`$x[0]`/`$x{k}`/`@x{…}` for @x/%x) — only the NAME part
+  # changes.  For scalars this is the identity replacement (element tokens
+  # of a same-bare container resolve their ->symbol to @x/%x and never
+  # match a scalar $old).
+  (my $c = $t->content) =~ s/^([\$\@\%])\Q$bare\E\b/$1$newbare/ or return;
+  $t->set_content($c);
+  return;
 }
 
 # ---- state source rewrite (E1-e, s296) -------------------------------------
@@ -4662,6 +4795,153 @@ sub _rename_poisoned_cond_mys {
 # as before — never worse).  Sub bodies are skipped (their lexicals are the
 # capture machinery's turf); foreach loop-vars and condition-mys are skipped
 # (loop/cond scope, handled by their own machinery).
+# #296: a `my`/`state` declaring an EXCEPTION-partition name.
+#
+# Since the direction-D flip an ORDINARY global is a symbol macro over a cell,
+# so `my $x` near one is a plain lexical `let` that shadows it.  An EXCEPTION
+# name (Pl::GlobalPartition — $a/$b plus the runtime-owned set) is still a
+# `defvar`, i.e. PROCLAIMED SPECIAL, so `(let (($a …)) …)` is a DYNAMIC
+# rebinding: a closure made inside loses the value at scope exit, and a sub
+# called from the scope sees it.  Measured on plain main:
+#
+#     sub mk { my $a = shift; return sub { $a } }
+#     print mk("F")->(), mk("G")->();      # perl FG, PCL empty
+#
+# CL cannot lexically bind a proclaimed special, so no emission fixes this
+# while the name stays `$a` — the declaration must get a different SYMBOL.
+# And the partition must keep these names dynamic: the sort lowering binds the
+# $a/$b pair (#287) and the runtime binds $_/@_/%ENV/… by name, so shrinking
+# the partition instead would cost every sort CALL a p-local-cell (~41 ns,
+# plan §2) and still leave `my %ENV` broken.
+#
+# THIS IS NOT THE POISONED-MY FAMILY (#291 deletes those three; this one
+# stays).  There is no poison test and no analysis deciding WHETHER: the
+# trigger is the NAME — one Pl::GlobalPartition call — and the only scope work
+# is finding the declaration's own root, which perl states syntactically.
+# Corpus census (perl-tests + lib + pack-impl, 133 files): 147 sites, every
+# one `$a` or `$b`; 132 block-scoped, 12 file-level, 3 foreach loop variables.
+#
+# A blocked site is left untouched — exactly today's (broken) emission, never
+# worse — because a partial rename would split one variable in two.
+sub _rename_exception_mys {
+  my ($self, $seg) = @_;
+  for my $top (@{ $seg->{stmts} }) {
+    next unless ref $top && $top->isa('PPI::Node');
+    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
+                                   && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
+      my $nx = $w->snext_sibling or next;
+      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+               : ();
+      for my $s (@syms) {
+        next unless $s->content =~ /^[\$\@\%]\w+$/;
+        next unless Pl::GlobalPartition::is_exception_global($s->content);
+        my ($root, $decl) = _lexical_decl_scope($w, $s);
+        next unless $root;
+        # A FILE-level decl in a file whose string eval sits inside a NAMED SUB
+        # is left to the capture/promotion machinery (task #296's second
+        # reproducer: `my $a = "FILE"; sub g { eval '$a' }`).  A named sub is
+        # HOISTED out of the file-level `let`, so the eval-site capture alist
+        # cannot carry the lexical to it — only promotion to a package cell
+        # reaches, and that pass finds the declaration by its PERL name in the
+        # eval text.  Renaming first hides it and strands the decl in a let.
+        # A file-level eval is not affected: the alist carries the name there
+        # (do.t/qr.t emit `(cons "$a" $a__excl__0)`), so those keep the rename
+        # — and a promoted cell is not a `let`, so this pass has nothing to fix
+        # in the skipped case anyway.
+        next if $root->isa('PPI::Document') && $self->{_str_eval_in_named_sub};
+        my $why = $s->content =~ /^\$/
+          ? $self->_shadow_rename_blocker($root, $s, 'eval_ok', 'shadow_ok')
+          : $self->_state_container_blocker($root, $s, 'eval_ok');
+        next if $why;
+        $self->_rename_decl_within($root, $s,
+          $s->content . '__excl__' . $self->{_excl_rename_counter}++, $decl);
+      }
+    }
+  }
+  return;
+}
+
+# #296-B1, the eval-mode HALF of the same fact.  A string eval compiled inside
+# a scope that declared `my $a` must read THAT lexical, and perl says so:
+#
+#     { my $a = "IN"; print eval q{"[$a]"} }        # perl: [IN]
+#     my $cmp = eval q{sub { $a <=> $b }};          # no `my $a` in scope:
+#     sort $cmp @list;                              #   sort's dynamic $a
+#
+# The two cases differ ONLY in whether a `my $a` was in scope at the eval site
+# — which is exactly what the capture alist records, so `eval_captures`
+# membership IS the perl rule, not a heuristic (ruled s386,
+# fable-answers-s385.md §2a; the progv/dynamic-extent shapes were OVERRULED
+# there — they lose the capture the moment the eval returns, which case 2 of
+# that table, an escaping closure, measures).
+#
+# The rewrite: rename the eval body's free `$a` to a fresh symbol that is NOT
+# proclaimed special, and keep "$a" as the p-eval-thunk's LOOKUP name.  The
+# thunk then binds a plain lexical to the captured container, which is the
+# ordinary `$x__shadow__N` capture path — read, write, and #295's pad chain
+# come with it.  With no alist key nothing is renamed and the special path is
+# untouched, so a comparator eval'd outside a `my $a` scope still reads sort's
+# dynamic binding.
+#
+# Skipped when the eval body DECLARES the name itself: a `my $a` inside the
+# string is its own variable, and if _rename_exception_mys could not rename it
+# (a blocker fired) the remaining `$a` tokens are that declaration's, not the
+# caller's.  Leaving them is today's emission — never worse.
+sub _rename_free_eval_captures {
+  my ($self, $doc) = @_;
+  my @caps = grep { /^[\$\@\%]\w+$/ && Pl::GlobalPartition::is_exception_global($_) }
+             @{ $self->eval_captures // [] };
+  return unless @caps;
+  my $never_shadowed = sub { 0 };
+  for my $old (@caps) {
+    # Own declaration in the eval body → not the caller's variable.  (A `my`
+    # the decl pass above renamed is already off the bare name, so what is
+    # left here is a decl it could not rename.)
+    next if grep { $_->symbol eq $old && _is_lexical_decl_name($_) }
+            @{ $doc->find('PPI::Token::Symbol') || [] };
+    # No occurrence test: the use may be INTERPOLATED (`eval q{"[$a]"}` — the
+    # commonest shape), which no Symbol-token scan sees.  A rename that hits
+    # nothing costs one unused counter value and emits nothing.
+    my $new = $old . '__evalcap__' . $self->{_evalcap_counter}++;
+    (my $newbare = $new) =~ s/^[\$\@\%]//;
+    my $interp_fix = _interp_fixer($old, $newbare);
+    _rename_use_token($_, $old, $new, $interp_fix, $never_shadowed)
+      for $doc->tokens;
+    $self->{_evalcap_names}{$new} = $old;
+  }
+  return;
+}
+
+# The SCOPE of a `my`/`state` declaration, as perl states it syntactically:
+# returns (ROOT, DECL) for _rename_decl_within — ROOT is the region whose
+# tokens may be rewritten, DECL the sub-region evaluated in the OUTER scope
+# (the initializer / the foreach list), which must not be.  DECL undef means
+# "the declaring statement", which is _rename_decl_within's own default.
+#
+#   for my $x (LIST) {…}   construct-scoped; LIST runs outside it
+#   if/while (my $x = …)   construct-scoped; the head runs in it, so DECL
+#                          stays the declaring statement
+#   for (…; my $x…; …)     ditto, via Structure::For
+#   my $x inside a block   block-scoped (sub body, bare block, loop body)
+#   my $x at file level    to end of document — the decl's own top node
+sub _lexical_decl_scope {
+  my ($w, $s) = @_;
+  my $par = $w->parent;
+  if ($par && $par->isa('PPI::Statement::Compound')) {   # foreach loop variable
+    my ($list) = grep { $_->isa('PPI::Structure::List') } $par->schildren;
+    return ($par, $list // $s);
+  }
+  for (my $p = $w->parent; $p; $p = $p->parent) {
+    if ($p->isa('PPI::Structure::Condition') || $p->isa('PPI::Structure::For')) {
+      my $c = $p->parent;
+      return $c && $c->isa('PPI::Statement::Compound') ? ($c, undef) : ();
+    }
+    return ($p, undef) if $p->isa('PPI::Structure::Block');
+  }
+  return ($s->top, undef);
+}
+
 sub _rename_poisoned_block_mys {
   my ($self, $seg) = @_;
   my $stmts = $seg->{stmts};
@@ -4997,6 +5277,10 @@ sub _assemble_eval_mode {
   # $a/$b: kept defvar'd (sort comparators need them special) but ALSO listed
   # as params when referenced, so a caller's lexical `my $a`/`my $b` is
   # captured; the param is then a dynamic rebinding (v1's rule).
+  # A name #296-B1 renamed is NOT here — its tokens are `$a__evalcap__N` now,
+  # so this find sees nothing and the capture takes the lexical param path
+  # below instead (which is the whole point: a dynamic rebind cannot outlive
+  # the eval, and perl's does).
   for my $ab ('$a', '$b') {
     $free{$ab} = 1
       if @{ $doc->find(sub {
@@ -5054,7 +5338,13 @@ sub _assemble_eval_mode {
   # eval mode has no compile-file phase to lose.
   my $region_cl = $sec->{pkg_enter_cl};
   if (@names || defined $region_cl) {
-    my $names_str = join(' ', map { "\"$_\"" } @names);
+    # The lambda PARAMETER is the name the body reads; the LOOKUP name is what
+    # p-eval-lex-lookup asks the caller's alist for.  They differ for exactly
+    # one family: a #296-B1 renamed exception capture, whose body symbol had
+    # to become non-special (`$a__evalcap__0`) while the alist still keys the
+    # caller's lexical under its perl spelling (`$a`).
+    my $caps = $self->{_evalcap_names} // {};
+    my $names_str = join(' ', map { '"' . ($caps->{$_} // $_) . '"' } @names);
     my $params    = join(' ', @names);
     push @out, "(pcl:p-eval-thunk (list $names_str)",
                " (lambda ($params)",

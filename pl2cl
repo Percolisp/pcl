@@ -62,7 +62,7 @@ sub parse_source {
   # flag stays ACCEPTED (runpcl/runt/sweep all pass it) and inert; what it
   # used to paper over now dies naming the file, from Parser2's PPI check.
   delete $opts{lenient_ppi};
-  my %known = (eval_mode => 1, eval_pkg => 1);
+  my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1);
   my @unknown = sort grep { !$known{$_} } keys %opts;
   die "pl2cl: unknown transpile mode(s): @unknown\n" if @unknown;
   return pipeline_marker(v2 => Pl::Parser2->$method($args[0], %opts));
@@ -205,9 +205,14 @@ sub build_eval_preamble {
 sub _run_server {
   # Persistent transpiler server: read requests from stdin, write CL to stdout.
   # Character-based protocol (UTF-8 on both sides, lengths = char counts):
-  #   Request:  "<pkg>\n<char-count>\n<perl-code: exactly char-count chars>"
+  #   Request:  "<pkg>\n<captures>\n<char-count>\n<perl-code: exactly char-count chars>"
   #   Response: "ok\n<char-count>\n<cl-code: exactly char-count chars>"
   #          or "err\n<char-count>\n<error: exactly char-count chars>"
+  # <captures> is the space-separated list of the caller's in-scope lexical
+  # names (the eval capture alist's keys), possibly empty.  Only ONE decision
+  # reads it — #296-B1, "is this exception-partition name the caller's `my $a`
+  # or the dynamic special" — and the runtime keys its eval cache on the same
+  # list, because it is compiler INPUT.
   binmode(STDIN,  ':encoding(utf-8)');
   binmode(STDOUT, ':encoding(utf-8)');
 
@@ -215,6 +220,11 @@ sub _run_server {
     my $pkg = <STDIN>;
     last unless defined $pkg;
     chomp $pkg;
+
+    my $caps_str = <STDIN>;
+    last unless defined $caps_str;
+    chomp $caps_str;
+    my @caps = split ' ', $caps_str;
 
     my $len_str = <STDIN>;
     last unless defined $len_str;
@@ -227,7 +237,8 @@ sub _run_server {
 
     my $cl = eval {
       my $output = parse_source('parse_code', $code,
-                                       eval_mode => 1, eval_pkg => $pkg);
+                                       eval_mode => 1, eval_pkg => $pkg,
+                                       eval_captures => \@caps);
       my $preamble = build_eval_preamble($pkg);
       $output =~ s/\(in-package :pcl\)/$preamble/;
       $output

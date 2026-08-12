@@ -45,7 +45,7 @@ like($cl, qr/\(p-if \$a \(let \(\(\*wantarray\* nil\)\) \(pl-foo 7\)\) \(make-p-
 my $sc = Pl::Parser2->parse_code(
   'my @arr = (1,2); my $a = 3; my $s = "x $a @arr @{[1+2]} @arr[0..1] y"; print $s;');
 
-like($sc, qr/\(p-string-concat "x "\s+\$a\s+" "\s+\(p-join \|\$"\| \@arr\)\s+" "\s+\(p-join \|\$"\| \(p-cast-@ \(make-p-box \(p-array-init \(p-\+ 1 2\)\)\)\)\)\s+" "\s+\(p-join \|\$"\| \(p-aslice \@arr \(p-\.\. 0 1\)\)\)\s+" y"\)/,
+like($sc, qr/\(p-string-concat "x "\s+\$a__excl__\d+\s+" "\s+\(p-join \|\$"\| \@arr\)\s+" "\s+\(p-join \|\$"\| \(p-cast-@ \(make-p-box \(p-array-init \(p-\+ 1 2\)\)\)\)\)\s+" "\s+\(p-join \|\$"\| \(p-aslice \@arr \(p-\.\. 0 1\)\)\)\s+" y"\)/,
      'string_concat form: scalar, @arr join, @{[...]} cast, slice join, literals');
 
 # --- converted: gen_funcall_form (E2.1, generic path) ------------------------
@@ -161,7 +161,7 @@ like($do, qr/\(funcall \(lambda \(\)/,   'do { BLOCK } → (funcall (lambda () �
 # The old pin `(p-do (p-get-coderef $ref))` never called the sub at all.
 like($do, qr/\(p-do \(p-funcall-ref \$ref \@_\)\)/,
      'do &$cref → generic tail (p-do (p-funcall-ref $ref @_))');
-like($do, qr/\(let \(\(\*wantarray\* nil\)\) \(funcall \(lambda/,
+like($do, qr/\(let \(\(\*wantarray\* nil\)\)\s*\(funcall \(lambda/,
      'do block gets its scalar-context wantarray bind');
 
 # --- converted: gen_funcall_form grep/map (E2.1) ----------------------------

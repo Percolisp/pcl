@@ -372,6 +372,56 @@ print "after:", $k, "\n";
 ');
 
 # ---------------------------------------------------------------------------
+# #296: a `my`/`state` of an EXCEPTION-partition name binds a symbol that is
+# PROCLAIMED SPECIAL, so its `let` was a DYNAMIC rebinding — a closure made
+# inside lost the value at scope exit.  The declaration is renamed to a fresh
+# non-special symbol.  Every shape in one row: sub-local (the reproducer),
+# `%ENV` (the rename is name-decidable, not $a/$b-specific), `for my $a`
+# (#294's `:my t` binds it lexically, which is the same trap), file-level
+# captured by a named sub (the pass must run BEFORE the capture promotion),
+# and a block shadow whose global must survive.
+# ---------------------------------------------------------------------------
+test_transpile('exception-named my binds a LEXICAL: closures, foreach, capture', '
+sub mk { my $a = shift; return sub { $a } }
+print "closure:", mk("F")->(), mk("G")->(), "\n";
+sub mkb { my $b = shift; return sub { $b } }
+print "closureb:", mkb("F")->(), mkb("G")->(), "\n";
+sub mke { my %ENV = (K => $_[0]); return sub { $ENV{K} } }
+print "closureE:", mke("F")->(), mke("G")->(), "\n";
+my @c;
+for my $a (1,2,3) { push @c, sub { $a } }
+print "foreach:", join(",", map { $_->() } @c), "\n";
+our $g = "GLOBAL";
+sub see { $g }
+{ my $g = "inner"; print "shadow:$g see:", see(), "\n" }
+print "after:$g\n";
+');
+
+# INVERSE — the partition itself must not move: sort still binds the package
+# $a/$b pair, in main AND (per #287) in the package the comparator was
+# COMPILED in.  The middle row asserts what the comparator OBSERVED, never the
+# resulting ORDER: with a `my $a` in scope perl gives the comparator the
+# LEXICAL, and an inconsistent comparator's output order is the sort
+# ALGORITHM's answer (mergesort vs stable-sort), not a claim PCL can make.
+test_transpile('sort still binds the package $a/$b pair; a lexical $a wins inside', '
+my @s = sort { $a <=> $b } (3, 1, 2);
+print "plain:@s\n";
+{
+  my $a = "LEX";
+  my %seen;
+  my @t = sort { $seen{$a eq "LEX" ? "LEX" : "PKG"} = 1; 0 } (7, 9);
+  print "observed:", join(",", sort keys %seen), "\n";
+}
+my @u = sort { $a <=> $b } (5, 4);
+print "again:@u\n";
+package Foo;
+our @q = (30, 10, 20);
+sub go { my @r = sort { $a <=> $b } @q; return "@r" }
+package main;
+print "pkg:", Foo::go(), "\n";
+');
+
+# ---------------------------------------------------------------------------
 # #301 (not direction-D; lands here because this is the current NEW-TESTS file).
 # A heredoc is RAW exactly when its terminator is SINGLE-quoted, and perl allows
 # both `~` and whitespace between `<<` and a quoted terminator.  Four separate
@@ -419,6 +469,65 @@ PL301
        'a real `my $x = $x, 1` tail is still refused');
   unlink $tmp;
 }
+
+# ---------------------------------------------------------------------------
+# #296-B1: the STRING-EVAL half of the exception-name rename.  A `my $a` the
+# rename moved to a fresh symbol must still be what an eval compiled in its
+# scope reads — and an eval compiled with NO such lexical in scope must still
+# read sort's dynamically-bound $a.  The discriminator is the capture alist,
+# which is perl's own rule (fable-answers-s385.md §2a).  All five rows of the
+# ruled acceptance table in one snippet; perl is the oracle.
+# ---------------------------------------------------------------------------
+test_transpile('string eval sees a renamed exception-name lexical; without one, sort still wins', '
+our $seen;
+{ my $a = "IN"; print "1: ", eval q{"[$a]"}, "\n"; }
+{ my $f; { my $a = "CAP"; $f = eval q{sub { "[$a]" }}; } print "2: ", $f->(), "\n"; }
+{ my $cmp = eval q{sub { $a <=> $b }}; my @s = sort $cmp (2,3,1);
+  print "3: ", join(",", @s), "\n"; }
+{ my $a = 5; my $cmp = eval q{sub { $seen = $a; 0 }}; my @s = sort $cmp (2,3,1);
+  print "4: a=$seen\n"; }
+{ my $a = "orig"; eval q{$a = "W"}; print "5: $a\n"; }
+');
+
+# The FILE-level twin: a named sub is hoisted out of the file-level scope, so
+# only the promotion-to-cell path reaches it — the rename must stand aside
+# there (task #296 reproducer 2), while a file-level closure over the same
+# declaration keeps working.
+test_transpile('a file lexical named $a reaches an eval inside a named sub', '
+my $a = "FILE";
+my $f = sub { $a };
+sub g { my $b = "SUB"; return eval q{join(",", $a, $b)} }
+print "closure:", $f->(), "\n";
+print "insub:", g(), "\n";
+print "eval:", eval q{$a}, "\n";
+');
+
+# ---------------------------------------------------------------------------
+# #296-B2: a LATER declaration of the same exception name ends the earlier
+# one's claim on the uses that follow it.  Two spellings, both live on the
+# branch that introduced the rename and both correct before it:
+#   - a SIBLING redeclaration in the same scope (perl-tests/split.t's three
+#     `my ($a,$b) = split …` statements in one block);
+#   - a CONSTRUCT-scoped one (`while (my $a = …)`, `for my $a (…)`) — the
+#     head is a sibling of no Block, so the shadow reducer cannot see it.
+# The redeclaration's own INITIALIZER still reads the earlier variable: perl
+# does not introduce the new name until the statement finishes.
+# ---------------------------------------------------------------------------
+test_transpile('a later declaration of an exception name owns the uses after it', '
+{ my $s = "1,2;3";
+  my ($a,$b) = split(/,/, $s); print "1:[$a][$b]\n";
+  my ($a,$b) = split(/;/, $s); print "2:[$a][$b]\n";
+  my ($a,$b) = ($b,$a);        print "3:[$a][$b]\n"; }
+{ my $a = "X"; my $a = "[$a]"; print "4:$a\n"; }
+{ my $a = "p"; my $c1 = sub {$a}; my $a = "q"; my $c2 = sub {$a};
+  print "5:", $c1->(), $c2->(), "\n"; }
+{ my $a = "OUT"; my $n = 0;
+  while (my $a = $n++ ? undef : "[$a]") { print "6:$a\n" }
+  print "7:$a\n"; }
+{ my $a = "L"; for my $a ($a, "z") { print "8:$a\n" } print "9:$a\n"; }
+{ my $a = "O"; for (my $a = 0; $a < 2; $a++) { print "10:$a\n" } print "11:$a\n"; }
+{ my $a = "o"; { my $a = "i"; print "12:$a\n"; } print "13:$a\n"; }
+');
 
 
 done_testing();
