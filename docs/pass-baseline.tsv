@@ -1,11 +1,11 @@
-# taken-at: 6e2c9fb 2026-08-04
+# taken-at: 297b5e4 2026-08-12
 aassign.t	OK	169	19	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
 args.t	OK	22	1	23
 arith.t	OK	183	0	183
 arith2.t	OK	9	0	9
-array.t	OK	169	16	195
+array.t	OK	169	15	195
 assignwarn.t	OK	116	0	116
 auto.t	OK	47	0	47
 bless.t	OK	106	0	106
@@ -17,7 +17,7 @@ chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
 chop.t	PARTIAL	96	0	148
 chr.t	OK	38	0	42
-closure.t	OK	258	0	259
+closure.t	OK	272	4	278
 cmpchain.t	OK	1476	0	1476
 concat.t	OK	234	0	225
 concat2.t	OK	4	0	4
@@ -34,11 +34,11 @@ dor.t	OK	32	0	34
 each.t	OK	51	0	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	114	46	169
+eval.t	PARTIAL	127	33	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14
-for.t	OK	129	0	130
+for.t	OK	131	0	132
 grent.t	OK	3	0	3
 grep.t	OK	71	0	77
 hash.t	OK	7	7	14
@@ -59,10 +59,10 @@ local.t	OK	303	13	319
 loopctl.t	OK	67	0	67
 lop.t	OK	47	0	47
 magic.t	PARTIAL	149	40	208
-method.t	PARTIAL	93	38	163
+method.t	PARTIAL	97	34	163
 min_local.t	OK	10	0	10
 multideref.t	PARTIAL	42	10	65
-my.t	OK	51	1	52
+my.t	OK	52	0	52
 negate.t	OK	47	0	47
 not.t	OK	20	0	24
 num.t	OK	56	0	56
@@ -70,7 +70,7 @@ oct.t	OK	79	0	79
 or.t	OK	11	2	14
 ord.t	OK	38	0	38
 pack.t	OK	5636	89	14722
-parent.t	OK	7	2	-1
+parent.t	OK	7	2	9
 pos.t	OK	15	15	30
 postfixderef.t	PARTIAL	96	25	128
 pow.t	OK	268	0	268
