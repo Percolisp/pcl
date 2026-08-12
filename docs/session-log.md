@@ -4,6 +4,58 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 387 (2026-08-12, Opus) — #296-B1: a string eval reads the caller's renamed exception lexical
+
+**Not a merge — one blocker of two.**  Work continues on `wip/s385-296`
+(`a062914`); B2 (sibling same-scope redeclaration) is still open and the
+branch does not merge until it lands *and* the full sweep runs.
+
+**The ruled shape, implemented** (`docs/fable-answers-s385.md` §2a): in
+EVAL-MODE compilation the capture alist beats the special table.  A free
+`$a`/`$b` whose spelling the caller's alist carries is that caller's `my $a`,
+so it compiles as the captured lexical — a fresh non-special symbol
+(`$a__evalcap__N`) bound as an ordinary `p-eval-thunk` parameter whose LOOKUP
+name stays `"$a"`.  No alist key → nothing changes, and an eval'd comparator
+still reads sort's dynamic binding.  All five ruled acceptance rows now match
+perl (they were 3/5 before: direct read, escaping closure and the
+comparator-under-`my` were wrong).
+
+**What the ruling did not name, and cost most of the work: the capture names
+had to CROSS A PROCESS BOUNDARY.**  Eval-mode compilation runs in the
+`pl2cl --server` subprocess, whose request was `pkg\nlen\ncode` — the alist
+never travelled, so the compiler could not consult it.  The protocol gained a
+`<captures>` header line, `p-transpile-string` sends it, and — the part that
+would otherwise have been a silent-wrong — `*p-eval-string-cache*` is now
+keyed on `(source, pkg, capture-names)`: the emission depends on the captures,
+so the same eval string used from two different scopes must not reuse
+whichever emission compiled first.
+
+**Two shapes, two mechanisms** (the session's real finding).  A BLOCK-scoped
+`my $a` reaches its eval through the site capture alist; a FILE-level one
+reaches an eval inside a NAMED SUB only through promotion to a package cell,
+because the sub is hoisted out of the file-level `let`.  That pass finds the
+declaration by its PERL name in the eval text, so renaming first stranded it
+in a `let` and the eval read the empty global (task #296's second reproducer).
+The carve-out is exactly that case — file-level decl + a string eval inside a
+named sub — and it is free: a promoted cell is not a `let`, so this pass has
+nothing to fix there.  The first attempt keyed on "file has any string eval"
+and reverted four corpus files' renames; corpus-diff caught it, and the
+narrowed rule is emission-IDENTICAL across all 111.
+
+`_rename_decl_within`'s per-token rewrite was extracted as `_rename_use_token`
+so the free-capture rename cannot drift from it (rule 11).
+
+**Measured:** five-row table + both reproducers identical to real perl; #296's
+own reproducers (mk/mkb/mke closures, `for my $a`, file-level closure) still
+identical; `tools/corpus-diff.pl` identical to the branch parent across 111
+files; gate **138 files / 5107 tests PASS** (two new `test_transpile` guard
+rows in `Pl/t/transpile-test-10.t`).  Cache generation → v2-137.
+
+**Next:** #296-B2 (fix shape ruled and reproducer in the task), then gate +
+corpus-diff + **full sweep with TOTAL/LOST**, then merge; then #291.
+
+---
+
 ## Session 385 (2026-08-12, Opus) — #297 CLOSED: every `my` in a loop HEAD gets its own `let`
 
 **Second of the four #291 blockers gone.**  The C-style `for` head is one

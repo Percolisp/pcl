@@ -2494,3 +2494,25 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
 - Nine Pl/t expectations that spell `$a`/`$b` as sample variables were updated
   to the renamed spelling (STRENGTHENS: the suffix pins that the rename fired
   AND the shape held); one was made whitespace-tolerant for the re-wrap.
+- **B1 (string-eval capture) SHIPPED s387 (`a062914`)**: in EVAL-MODE
+  compilation the CAPTURE ALIST beats the special table — a free $a/$b whose
+  spelling the caller's alist carries compiles as that captured lexical (a
+  fresh non-special `$a__evalcap__N` bound as a thunk param whose LOOKUP name
+  stays `"$a"`); no key → today's special path, so an eval'd comparator with
+  no `my $a` in scope still reads sort's dynamic binding.  The five-row
+  acceptance table + both reproducers are identical to perl.
+- **A capture-dependent emission makes the capture names part of the eval CACHE
+  KEY** (s387): eval-mode compilation runs in the `pl2cl --server` SUBPROCESS
+  (its request was `pkg\nlen\ncode`), so the names now travel in a `<captures>`
+  header line and `*p-eval-string-cache*` is keyed on
+  (source, pkg, capture-names).  Without that key, one eval string used from
+  two scopes would reuse whichever emission compiled first — silent-wrong.
+- **Block-scoped and FILE-level lexicals reach an eval by DIFFERENT mechanisms**
+  (s387): a block `my` reaches it through the site capture alist; a file-level
+  one reaches an eval inside a NAMED SUB only through promotion to a package
+  cell (the sub is hoisted out of the file-level `let`), and that pass finds
+  the declaration by its PERL name in the eval text.  So the #296 rename stands
+  aside for exactly that case — file-level decl + a string eval inside a named
+  sub — at no cost, because a promoted cell is not a `let`.  Keyed on "file has
+  ANY string eval" instead, it reverted four corpus files' renames;
+  corpus-diff caught it.
