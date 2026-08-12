@@ -1192,7 +1192,28 @@ sub parse {
 
     if ($self->is_arr_or_hash_braces($term)) {
       # X[] or X{}
-      my $pre_id= $self->parse([$pre]);
+      # #211: with a REAL arrow ($is_reference), a leading scalar-deref cast
+      # binds WITH the ref target — `$$rr->{k}` == `(${$rr})->{k}`, deref
+      # $rr FIRST, then the arrow derefs THAT value (same rule Case 2 gives
+      # `$$r->()`).  Parse [Cast, $pre] together as the base; the cast-removal
+      # after the node build then consumes a cast that is genuinely part of
+      # the base, instead of silently swallowing a deref level (the arrow
+      # splice had turned `$$rr->{k}` into `$$rr{k}`, one level short).
+      # Without the arrow the cast IS the one deref the *_ref_acc node
+      # encodes ($$scalar{key}), so nothing changes there.
+      my $pre_id;
+      if ($is_reference
+          && $i >= 2
+          && ref($e->[$i-2]) eq 'PPI::Token::Cast'
+          && $e->[$i-2]->content() eq '$'
+          && ((!$self->is_internal_node_type($pre)
+               && $self->is_var($pre) && $pre->content() =~ /^\$/)
+              || (ref($pre) eq 'PPI::Structure::Block'
+                  && $pre->start() eq '{'))) {
+        $pre_id = $self->parse([$e->[$i-2], $pre]);
+      } else {
+        $pre_id = $self->parse([$pre]);
+      }
       my $pre_n = $self->get_a_node($pre_id);
 
       my $type  = ($self->is_arr_braces($term) ? "a_acc" : "h_acc");

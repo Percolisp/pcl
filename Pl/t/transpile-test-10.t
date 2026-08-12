@@ -666,6 +666,34 @@ my @m = map { $_ + 1 } (1, 2);
 print "map: @m\n";
 ');
 
+# ---------------------------------------------------------------------------
+# #211: a leading scalar-deref cast binds WITH the ref target BEFORE a `->`
+# subscript (probed vs perl 5.40): `$$rr->{k}` == `(${$rr})->{k}` — deref
+# $rr FIRST, then the arrow derefs THAT value.  The arrow-as-sugar splice
+# treated `$$rr->{k}` as `$$rr{k}` (== `$rr->{k}`), one level short.  Same
+# rule Case 2 (`$$r->()`) already implements for calls.
+# ---------------------------------------------------------------------------
+test_transpile('#211: $$rr->{k} / ${$rr}->[i] keep the outer deref level', '
+my $x = {k=>1};
+my $rr = \$x;
+print "a=", $$rr->{k}, "\n";
+my @arr = (10,20);
+my $ar = \@arr;
+my $rra = \$ar;
+print "b=", ${$rra}->[1], "\n";
+print "c=", $$rra->[0], "\n";
+');
+
+test_transpile('inverse: $$r{k} / ${$r}[i] stay ONE deref level', '
+my %h = (k=>5);
+my $r = \%h;
+print "a=", $$r{k}, "\n";
+my @a = (7,8);
+my $ra = \@a;
+print "b=", ${$ra}[1], "\n";
+print "c=", $ra->[0], "\n";
+');
+
 # A block-SHAPED `{…}` followed by `->` after grep/map/sort is a perl
 # COMPILE-TIME syntax error (near "}->"); PCL must die at transpile, not
 # silently deref the list-op result.
