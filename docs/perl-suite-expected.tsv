@@ -92,7 +92,6 @@ class/phasers.t	not-supported.md §Perl 5.38 class/field/method — deferred to 
 class/utf8.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 mro/basic.t	not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
 mro/inconsistent_c3.t	not-supported.md §mro + §error-text — C3 merge-failure error wording differs
-mro/inconsistent_c3_utf8.t	not-supported.md §mro + §error-text — C3 merge-failure error wording differs (utf8 pkg names)
 mro/isa_aliases.t	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes)
 mro/isa_aliases_utf8.t	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes, utf8)
 mro/isa_c3.t	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals

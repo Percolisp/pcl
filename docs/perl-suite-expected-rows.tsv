@@ -1689,7 +1689,6 @@ re/reg_eval.t	match vars are localized
 re/reg_eval.t	regex distillation 1
 re/reg_eval.t	regex distillation 2
 re/reg_eval.t	regex distillation 3
-re/reg_eval.t	regex distillation 4
 re/uniprops01.t	*summary*
 re/uniprops02.t	*summary*
 re/uniprops03.t	*summary*

@@ -2691,3 +2691,42 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
 - **corpus-diff carries no signal for a change like this** and was not run:
   #291 alters emission for nearly every file by construction (cells added,
   renames removed).  The sweep is the measurement.
+
+## s388e (2026-08-13, Opus) — #292's net: fuzzer clean, companion suite clean OF #291 — and the suite SNAPSHOT is 191 commits stale
+
+- **Fuzzer (`tools/difftest-ops.pl`) reproduces the standing clean result
+  EXACTLY**: 1060 valid, 1056 match, 4 mismatches in the same 2 blessed
+  clusters as s336 (`**` exact-bignum ×3, `ctx-count split` ×1), each with its
+  `not-supported.md` section.  No new divergence from the direction-D flip or
+  #291.
+- **Companion suite vs `docs/perl-suite-run.tsv`: 44 C_ok decreases and 36
+  status changes — NONE of them #291.**  21 files flipped to TRANSPILE-fail
+  (`opbasic/cmp.t` alone 12078 → 0).  Discriminating measurement: transpile
+  each of the 21 at `66bdb93` (main immediately BEFORE #291) and compare the
+  first error line, NORMALIZED for compiler line numbers and worktree paths —
+  **19 identical, and the 2 apparent differences are both artefacts**:
+  `op/lexsub.t` (my normalizer covered `Parser2.pm` but not `Parser.pm` — the
+  message is the same) and `comp/our.t`, where
+  `our '$y__shadow__0' shadows a my-lexical` became `our '$y' …` — the same
+  refusal now naming the REAL variable because #291 deleted the rename.
+  C_ok 0 → 0 on both sides; the message got strictly better.
+- **THE SNAPSHOT IS THE PROBLEM, not the compiler.**  `perl-suite-run.tsv` is
+  stamped `1e7c4d7` (s323e) — **191 commits back**, before E4.1 (#242, s356)
+  flipped v1 gates to HARD ERRORS and retired `--lenient-ppi`.  The TRANSPILE
+  cluster is precisely that flip: files that used to yield partial rows through
+  a silent v1 re-transpile (or through lenient truncation) now refuse loudly.
+  `op/for.t` is the already-documented instance of exactly this (#253).  A
+  companion-suite snapshot older than a semantics flip measures the flip, not
+  the session.
+- **Two STALE registrations cleared BY HAND, not by `--bless-rows`**:
+  `mro/inconsistent_c3_utf8.t` (whole-file expected-divergence that now passes;
+  removed from `perl-suite-expected.tsv`) and `re/reg_eval.t`'s rowkey
+  `regex distillation 4` (removed from `perl-suite-expected-rows.tsv`).
+  `--bless-rows` would have rewritten all 1740 rowkeys from a drifted run and
+  silently blessed the whole TRANSPILE cluster as expected — the same error the
+  fail-baseline's "rows leave by EDIT" rule exists to prevent.  Verified: the
+  two files now report OK and XDIFF respectively.
+- **NOT DONE, filed as #304**: re-blessing the suite snapshot.  It is a real
+  decision, not hygiene — blessing 44 C_ok decreases makes them the new normal,
+  and some are deliberate E4.1 refusals while others may be unexamined losses.
+  It needs a per-file audit the way #223 gave the sweep baselines.

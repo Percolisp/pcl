@@ -29,9 +29,10 @@ perl tools/difftest-ops.pl [--jobs N] [--limit N] [--show-ok]
 Exit code is non-zero iff there were mismatches. A full run is ~1060 snippets and
 takes ~15 minutes at `--jobs 8` (each PCL run spawns a fresh SBCL).
 
-**The standing clean result** — reproduced verbatim s336 (2026-08-03), and what
-a run must be compared against.  Both clusters are blessed divergences with a
-`docs/not-supported.md` section; ANY other mismatch is a bug:
+**The standing clean result** — reproduced verbatim s336 (2026-08-03) and again
+**s388b (2026-08-12, #292)**, and what a run must be compared against.  Both
+clusters are blessed divergences with a `docs/not-supported.md` section; ANY
+other mismatch is a bug:
 
 ```
 RESULT: 1060 valid snippets, 1056 match, 4 MISMATCH in 2 clusters
