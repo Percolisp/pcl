@@ -2730,3 +2730,35 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   decision, not hygiene — blessing 44 C_ok decreases makes them the new normal,
   and some are deliberate E4.1 refusals while others may be unexamined losses.
   It needs a per-file audit the way #223 gave the sweep baselines.
+
+## s389 (2026-08-13, Fable) — #153 chunk 0 (lex_home) + FOLD chunk 2 (intuit_curly boundary)
+
+- **The lexical registries have ONE owner: Parser2** (`_let_bound_vars`,
+  `_catch_labels`, `_eval_span_captures` live on the Parser2 object; the v1
+  seam and ExprToCL reach them through `Pl::Parser::lex_home`, which follows
+  the `_v2_owner` back-ref, or answers `$self` for a standalone
+  prototype-collection parser).  A seam parser whose weakened owner is GONE
+  dies in the accessor — never a silent empty registry (`_v2_owned` non-weak
+  twin).  Pure ownership move: corpus byte-identical 111/111, sweep clean.
+- **The brace group after grep/map/sort followed by `->` Subscript is perl's
+  intuit_curly EXPR-form boundary** (probed vs perl 5.40, 13 shapes):
+  hash-ctor-shaped OR EMPTY `{…}` → anon-hash term (for sort the deref'd
+  value is a plain LIST ELEMENT — sort has no expr-comparator form);
+  block-shaped → perl COMPILE-TIME syntax error near `}->`.  PCL: one
+  shared `_ctor_deref_verdict` at both entry spellings re-blesses
+  Block→Constructor and falls through to the generic parse; block-shaped
+  dies perl-shaped.  `eval {…}->…` / `do {…}->…` deref the block's RESULT —
+  the chain stays IN the token stream and binds on the funcall node.
+- **`$deref_skip` is DELETED — and it was hiding three silent-wrongs**: the
+  eval spelling double-consumed the chain (wrapped into body text AND left
+  in the stream → `eval {[41]}->[0]` printed empty), sort swallowed the
+  deref'd element in BOTH the block and paren spellings, and the
+  `inline_lambda` `{deref_skip}` node field had no reader anywhere.  The
+  paren path was a full TWIN of the block path (second-copy rule) — both
+  copies gone, plus the #78 `has_deref` v1-forcing gate.
+- **FOLD chunk 3 design** (recorded on task #153): instrument the legacy
+  opportunistic arrow/subscript branches for fired-on-claimed vs
+  fired-on-declined over corpus + suite + board, then widen or delete;
+  `PCL_NO_FOLD` dies with the deletions.  The legacy reduction is NOT
+  wholesale-deletable — it IS the reducer `_reduce_term`'s recursive parse
+  invokes for the whole-array case.

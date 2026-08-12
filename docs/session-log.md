@@ -4,6 +4,73 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 389 (2026-08-13, Fable) — #153 chunk 0 (registry ownership) + FOLD chunk 2 (intuit_curly boundary, $deref_skip deleted)
+
+**Chunk 0 — the lex_home move (`f9d4ac5` + `76d7dd7`).**  Parser2 now OWNS
+the three cross-compiler lexical registries (`_let_bound_vars`,
+`_catch_labels`, `_eval_span_captures`); the v1 seam parser and ExprToCL
+reach them through ONE accessor, `Pl::Parser::lex_home`, which returns the
+existing `_v2_owner` weak back-ref (or `$self` for the standalone
+prototype-collection walkers).  A seam parser whose owner has been GC'd
+DIES in the accessor instead of silently answering with an empty registry —
+the non-weak `_v2_owned` twin distinguishes that from never-owned (rule 12).
+Every save/restore, `local`-element and ref-swap idiom survives verbatim;
+same single shared hash, now homed on the owner.  The census had GROWN since
+s386's 27 sites (Parser2 ~30 code sites, Parser.pm 24, ExprToCL 4) — counted
+untruncated, the s388 lesson.  Verified per commit: corpus-diff
+byte-identical 111/111, gate 138/5118; full sweep after: **GATE clean, 0
+new / 0 fixed, TOTAL 18532 = baseline**, only the two known crash-file
+unstable rows.  The cross-compiler state entanglement every scoping change
+paid twice is gone.
+
+**FOLD chunk 2 — the intuit_curly boundary (`00eb2ba`), and it was not just
+cleanup: probing the boundary BEFORE designing found THREE live
+silent-wrongs.**  Probes vs perl 5.40 (13 shapes):
+- `eval {[41]}->[0]` printed EMPTY where perl prints 41 — the `$deref_skip`
+  loop wrapped the chain into the lambda's body TEXT, but the eval-branch
+  splice removed only word+block, leaving the consumed `->` `[0]` in the
+  stream to bind AGAIN (double deref).  `eval{…}->[0] + do{…}->[0]` and the
+  hash spelling were wrong the same way.
+- `sort {a=>1}->{a}, (3,1)` printed "3 1" where perl prints "1 1 3" — in
+  perl the brace group is an anon-hash ctor and the deref'd value is simply
+  a LIST ELEMENT (sort has no expr-comparator form); the wrap route
+  swallowed it.  BOTH spellings (block and paren twin) had it.
+- Block-SHAPED `{…}->` after grep/map/sort is a perl COMPILE-TIME syntax
+  error (`near "}->"`); empty `{}` counts as a ctor (`grep {}->{a}, LIST`
+  runs and selects nothing).
+
+**Fix shape (CLAUDE.md 11 — normalize into the existing path):** ONE shared
+`_ctor_deref_verdict` consulted at both entry spellings.  Ctor-shaped or
+empty `{…}` + `->` Subscript after grep/map/sort → re-bless the Block into
+the `PPI::Structure::Constructor` it is and fall through to the ordinary
+word/args machinery (the same tokens every non-list-op context already
+parses); block-shaped → die perl-shaped.  eval/do stop consuming the chain
+— it stays in the token stream and binds onto the funcall node (`do`'s
+already-working path), derefing the RESULT once.  Deleted: both
+`$deref_skip` text-wrap copies, the #78 `has_deref` v1-forcing gate (the
+v2 `body_form` route reopens for these bodies), and the `inline_lambda`
+`{deref_skip}` field — which had **no reader anywhere**.
+
+**Verified:** rows FIRST in `transpile-test-10.t` (3 fail-pre-fix bug rows
++ inverse guards + a die row; 38/38 after), guard file
+`transpile-test-05.t` 75/75, 12-probe battery all MATCH (valid) / all die
+naming `}->` (invalid), corpus-diff **1 of 111 files — grep.t only**, its
+three ctor-deref sites now emitting the standard expr-form grep shape
+(same lambda body, minus the old route's redundant wantarray wrap).  Gate
+**138 / 5123** (+5 rows).  Gen **v2-143**.  Cold-cache full sweep: **GATE
+clean — 0 new / 0 fixed, TOTAL passing 18532 = baseline**, grep.t fully
+passing, only the standing postfixderef.t/ref.t crash-file noise (2
+unstable, 8 unverified).
+
+**Chunk 3 design recorded on task #153:** instrument the legacy
+opportunistic arrow/subscript branches (the "4 arrow cases" region) for
+fired-on-claimed-shape vs fired-on-deliberate-decline over corpus + suite
++ board; widen or delete per verdict; `PCL_NO_FOLD` dies with the
+deletions.  The legacy reduction is NOT wholesale-deletable — it IS the
+reducer `_reduce_term`'s recursive parse invokes for the whole-array case.
+
+---
+
 ## Session 388b (2026-08-12, Opus) — #291 SHIPPED: the poisoned-`my` rename family is gone; #205 closes
 
 **Replayed the four s384 commits that the full sweep rejected**, now that all
