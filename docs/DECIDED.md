@@ -2762,3 +2762,42 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   `PCL_NO_FOLD` dies with the deletions.  The legacy reduction is NOT
   wholesale-deletable — it IS the reducer `_reduce_term`'s recursive parse
   invokes for the whole-array case.
+
+## s390 (2026-08-13, Opus) — #303 dead-code batch chunks 1-2, and how a dead-code census lies
+
+- **A dynamic call trace taken by a LOAD-TIME wrap-all-subs tracer cannot
+  see a lazily-`require`d module.**  `docs/compiler-duplication-review-s386.md`
+  §2 called `Pl::BlockAnalyzer` "whole module, 0 of 11 subs called"; it fires
+  **1244x per corpus transpile** (Parser.pm `_with_declarations` requires it
+  at runtime).  §2 now carries a CORRECTION block.  Audited: BlockAnalyzer is
+  the only lazily-required `Pl::` module.  **Do not delete it.**
+- **Moo's `is => 'lazy'` names its builder IMPLICITLY** — `_build_X` can have
+  ZERO textual references and run on every object (`_build_fallback_parser`,
+  `_build_ppi_doc`).  A grep census must special-case it.
+- **`^sub (\w+)` over a `.pm` also matches POD** — `Environment::body`, the
+  s386 review's largest single Environment claim (157 lines), is a POD line
+  reading "sub body, or direct value of a return statement)".  Confirm every
+  candidate with `grep -rn "^sub NAME\b"` before counting it.
+- **The bar for deleting a sub is BOTH legs**: static (`grep -rn NAME`, no
+  `| head`, whole output) AND dynamic (source-level counter in every
+  column-0 named sub, run over corpus AND the Pl/t gate — the gate covers
+  eval mode and module transpiles).  Tooling: scratchpad `instrument.pl`
+  (`--undo` restores from git) + `census.pl`; recipe on task #303.
+  LIMIT: a ONE-LINE `sub f { ... }` records as called at load (its counter
+  lands at file scope) — biases toward LIVE, never invents a dead sub;
+  settle one-liners by grep.
+- **A text emitter whose CLForm twin can decline is not statically dead** —
+  measure the declines.  Only `inline_lambda` declines (77 corpus events /
+  33 files, 51 gate events); all 24 other named types: zero in both
+  populations, so their pre-E2 text emitters are gone (`7285ccc`).
+- **`%NAMED_TYPE` exists because `!exists $self->handlers->{$type}` was the
+  "this type is a BINARY OPERATOR" test** at both ExprToCL dispatch sites —
+  dropping a named type from the table would hand it to `gen_binary_op`
+  under its own name.  The set stays; the text table holds one entry; a
+  named type reaching the text dispatch DIES (rule 12).
+- **The VarAnnotator text annotator is reachable only as a SILENT FALLBACK
+  when `_analyze_tree` dies** (plus an unreachable `!$host` guard and
+  `PCL_W12_DIFF`).  Recommendation recorded on #303: delete it, make both
+  paths die — an annotator decides BOXING, so a second one silently
+  substituting is a silent-wrong generator (the E4.1 fallback lesson).
+  Behaviour change: needs the s373 gate-SET bar.

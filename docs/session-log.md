@@ -4,6 +4,88 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 390 (2026-08-13, Opus 5) — #303 dead-code batch: 2,067 lines deleted, and the review's dead list disproved three ways
+
+**The headline is not the deletion, it is that the map was wrong.**
+`docs/compiler-duplication-review-s386.md` §2 tabulates ~3.5k "confirmed
+dead" lines from a dynamic call trace.  Executing it found three independent
+ways that trace lies, each of which would have shipped a plausible-looking
+deletion of live code.  §2 now carries a CORRECTION block; the per-candidate
+verdicts live on task #303.
+
+**Chunk 1 — ExprToCL's pre-E2 text emitters (`7285ccc`), 6593 → 4547 lines.**
+E2 added `*_form` CLForm twins *beside* the old text emitters and never
+deleted the originals; a text emitter runs only when its form twin DECLINES,
+so "dead" is empirical, not static.  Measured over BOTH populations before
+touching anything (the s388h lesson): corpus (111 file transpiles) and the
+Pl/t gate (138 files, so eval mode and module transpiles too).  Result:
+`inline_lambda` declines 77×/33 files and 51× respectively; **every other
+named type, zero in both**.  So 24 of the 25 text emitters went, plus 8
+helpers only they called (census re-run to a fixpoint: 0 dead subs left).
+
+The `%handlers` table could not simply lose its entries — `!exists
+$self->handlers->{$type}` is the *"this type is a BINARY OPERATOR"* test at
+both dispatch sites, so a named type dropping out of it would be handed to
+`gen_binary_op` under its own name ("funcall").  The key set survives as
+`%NAMED_TYPE`; the table itself now holds one entry.  Rule 12: a named type
+reaching the text dispatch means a form emitter declined a shape whose twin
+is gone — a compiler self-inconsistency whose value flows onward — so it
+DIES naming the type.  Filed **#307**: the `_form` suffix is now historical.
+
+**Chunk 2 — 21 individually-verified subs (`609b20a`).**  Deleted only the
+INTERSECTION of two independent measurements: STATIC (`grep -rn NAME`, no
+`| head`, whole output read — only the definition itself) and DYNAMIC (a
+**source-level** coverage counter at the top of all 677 column-0 named subs
+in `Pl/`, run over corpus + gate, 8.2M call events).  Gone: two Parser.pm
+predicates, two Parser2.pm scanners, ten PExpr.pm token-stack helpers, the
+`is_list_parentheses` and `_is_block` DELEGATION PAIRS (dead on both sides),
+and five POD-documented `Environment` API methods with no caller, plus their
+POD.
+
+**The three traps, recorded because each is a repeatable mistake:**
+1. **`Pl::BlockAnalyzer` is LIVE** — the review says "whole module, 0 of 11
+   subs called".  Instrumented, it fires **1244× per corpus transpile**.
+   Parser.pm `require`s it LAZILY at runtime, *after* a load-time
+   wrap-all-subs tracer has installed its wrappers.  Audited: it is the only
+   lazily-required `Pl::` module, so that blind spot is now closed.
+2. **Moo's `is => 'lazy'` names its builder IMPLICITLY** —
+   `_build_fallback_parser` and `_build_ppi_doc` have zero textual
+   references and are called on every object.  The first builds the v1
+   fallback parser, the most-used object in the compiler.
+3. **`Environment::body` is not a sub at all** — the review's largest single
+   Environment claim (157 lines).  Line 266 is a POD line beginning "sub
+   body, or direct value of a return statement)", which an `^sub (\w+)`
+   inventory regex reads as a definition.
+
+**Known limit of the dynamic half** (documented on #303 for whoever repeats
+it): a ONE-LINE `sub f { ... }` gets its counter inserted on the *following*
+line, i.e. at file scope, so it records as called at load.  That biases
+toward LIVE — it can hide a dead sub, never invent one — which is why the
+one-line delegators were established by grep instead.
+
+**Verification, both chunks:** `tools/corpus-diff.pl` emission identical to
+HEAD across 111 files; gate 138 files / 5125 tests with failures **identical
+to HEAD**.  No sweep: emission is byte-identical and nothing under `lib/` or
+`cl/` was touched, so the corpus-diff rule applies.
+
+**Environment note (not PCL's):** `Pl/t/xs-02.t` + `xs-03.t` (8 rows) fail in
+this checkout because the sibling `~/pclxs` has advanced to ABI 7 while
+`xs-pin` says 6 — the parallel pclxs work, confirmed present at HEAD in a
+worktree before either commit, and the user has asked that XS problems be
+ignored for now.  The other 130 files are green.
+
+**Left for the next session, each a JUDGMENT not a mechanical delete** (all
+on #303): the VarAnnotator W12 text annotator — reachable only as an
+unreachable `!$host` guard, a **silent fallback when `_analyze_tree` dies**,
+and `PCL_W12_DIFF`; recommendation is to delete it and make both paths DIE,
+since an annotator decides BOXING and a silent substitute is a silent-wrong
+generator (the E4.1 lesson), which needs the s373 gate-SET bar.  Then the
+Parser.pm v1 state handlers (their call sites never fire — #153 FOLD
+territory, size it there), BlockAnalyzer's unwired `pexpr_factory` path, and
+STEP 0 (DEBUG→constant), still blocked on the `SET_DEBUG(4)` decision.
+
+---
+
 ## Session 389 (2026-08-13, Fable) — #153 chunk 0 (registry ownership) + FOLD chunk 2 (intuit_curly boundary, $deref_skip deleted)
 
 **Chunk 0 — the lex_home move (`f9d4ac5` + `76d7dd7`).**  Parser2 now OWNS

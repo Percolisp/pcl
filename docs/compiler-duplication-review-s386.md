@@ -64,6 +64,29 @@ chain.
 
 ## 2. Confirmed-dead mass: ~3.5k lines (~10% of compiler Perl), mechanically deletable
 
+> **CORRECTION (s390, while executing #303) — THE TABLE BELOW IS WRONG IN
+> THREE PLACES.  Do not delete from it; re-measure.**  The trace behind it
+> (a wrap-all-subs tracer installed at load time) has two blind spots, and
+> the line inventory has a third:
+>
+> 1. **`Pl/BlockAnalyzer.pm` is LIVE, not dead** — instrumented at the
+>    source it fires **1244 times per corpus transpile**.  Parser.pm
+>    `require`s it LAZILY at runtime (`_with_declarations`, the sub-body
+>    path), i.e. *after* the tracer wrapped everything.  Its row below is
+>    void, as is "its only callers are v1 statement paths that never fire".
+> 2. **Moo's `is => 'lazy'` names its builder implicitly** — a `_build_X`
+>    sub can have zero textual references and still be called on every
+>    object.  `_build_fallback_parser` (the v1 fallback parser!) and
+>    `_build_ppi_doc` are both in that class.
+> 3. **`Environment::body` is not a sub** — the 157 lines in the last row
+>    are a POD paragraph whose line reads "sub body, or direct value of a
+>    return statement)", matched by an `^sub (\w+)` inventory regex.
+>
+> What survived measurement and shipped in s390: the ExprToCL text emitters
+> (2,046 lines, `7285ccc`) and 21 individually-verified subs (`609b20a`).
+> The method that holds — **both legs, every candidate** — and the
+> per-candidate verdicts for everything still open are in task **#303**.
+
 The literal "doubled functionality": E2 converted v1's emitter to CLForm
 by adding `*_form` twins beside the old text emitters — **and the old ones
 were never deleted.**  They are what you read when you open the file.
