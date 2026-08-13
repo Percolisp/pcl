@@ -19,14 +19,13 @@ use Moo;
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
-# analyze($class, $block, $outer, $pexpr_factory)
+# analyze($class, $block, $outer)
 #   $block         — PPI element (Block/Document/etc.) or arrayref of PPI elements
 #   $outer         — hashref: perl_name => { type=>'my'|'our'|..., cl_name=>'...' }
-#   $pexpr_factory — optional coderef ($stmt) => Pl::PExpr, skipped when undef
 #
 # Returns an analysis hashref (see docs/two-phase-compiler.md "Output").
 sub analyze {
-    my ($class, $block, $outer, $pexpr_factory) = @_;
+    my ($class, $block, $outer) = @_;
     $outer //= {};
 
     my @stmts   = _stmts_of($block);
@@ -35,9 +34,11 @@ sub analyze {
     my $decls      = $self->_collect_declarations(\@stmts);
     my %in_block   = map { $_ => 1 } map { @{$_->{vars}} } @$decls;
     my $captured   = $self->_find_closure_captures(\@stmts, \%in_block);
-    my $usages     = $pexpr_factory
-                     ? $self->_collect_usages(\@stmts, \%in_block, $pexpr_factory)
-                     : {};
+    # Usage collection (the OpcodeTree walk behind an optional $pexpr_factory
+    # 4th argument) was never wired: no caller has ever passed one, so $usages
+    # was always empty and the walk was dead.  Deleted in #303; the consumers
+    # below see exactly what they always saw.
+    my $usages     = {};
     my $outer_refs = $self->_find_outer_refs($usages, \%in_block);
     my $vars       = $self->_build_var_map($decls, $usages, $captured,
                                            $outer_refs, $outer);
@@ -171,77 +172,6 @@ sub _find_closure_captures {
     }
 
     return \%captured;
-}
-
-# ── Usage collection (OpcodeTree-level) ──────────────────────────────────────
-#
-# Phase 1: not wired (pexpr_factory is never passed in Phase 1).
-# Phase 6: the factory is passed; this drives type_hint inference.
-
-my %ARITH_OPS  = map { $_ => 1 } qw(+ - * / % ** ++ --
-                                      < > <= >= == != <=>
-                                      += -= *= /= %= **=);
-my %STRING_OPS = map { $_ => 1 } qw(. x eq ne lt gt le ge =~ !~ .= x=);
-my %BOOL_OPS   = map { $_ => 1 } qw(&& || // ! not and or);
-my %REF_OPS    = map { $_ => 1 } qw(\\ ->);
-
-sub _collect_usages {
-    my ($self, $stmts, $in_block, $pexpr_factory) = @_;
-    my %usages;
-    my $idx = 0;
-    for my $stmt (@$stmts) {
-        my $expr_o = eval { $pexpr_factory->($stmt) };
-        if ($expr_o && !$@) {
-            $self->_walk_tree($expr_o, $expr_o->node_top,
-                              undef, 0, $idx, \%usages);
-        }
-        $idx++;
-    }
-    return \%usages;
-}
-
-sub _walk_tree {
-    my ($self, $tree, $node_id, $parent_op, $child_pos, $stmt_idx, $usages) = @_;
-
-    my $node = $tree->node_data($node_id);
-    my $kids = $tree->children_ids($node_id);
-
-    if (ref($node) && $node->isa('PPI::Token::Symbol')) {
-        my $var  = $node->content;
-        my $role = _role_from_parent($parent_op, $child_pos);
-        my $ctx  = _context_from_op($parent_op);
-        push @{$usages->{$var}}, {
-            stmt_idx => $stmt_idx,
-            role     => $role,
-            context  => $ctx,
-        };
-        return;
-    }
-
-    my $op = ref($node) eq 'HASH' ? ($node->{type} // '') : '';
-    for my $i (0 .. $#$kids) {
-        $self->_walk_tree($tree, $kids->[$i], $op, $i, $stmt_idx, $usages);
-    }
-}
-
-sub _role_from_parent {
-    my ($op, $pos) = @_;
-    return 'read' unless defined $op;
-    return $pos == 0 ? 'write' : 'read'  if $op eq '=';
-    return $pos == 0 ? 'both'  : 'read'  if $op =~ /^.+=$/;
-    return 'both' if $op =~ /^\+\+$|^--$/;
-    return 'read';
-}
-
-sub _context_from_op {
-    my ($op) = @_;
-    return 'unknown' unless defined $op;
-    return 'arith'   if $ARITH_OPS{$op};
-    return 'string'  if $STRING_OPS{$op};
-    return 'bool'    if $BOOL_OPS{$op};
-    return 'ref'     if $REF_OPS{$op};
-    return 'call'    if $op eq 'funcall' || $op eq 'method_call';
-    return 'unknown';
 }
 
 # ── Outer-reference detection ─────────────────────────────────────────────────
