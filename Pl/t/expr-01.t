@@ -39,13 +39,11 @@ ok(!$expr_o->is_token_operator($expr1->[2]), "is_op 2");
 # my $code2         = '$foo->() # No parameters break parsing?';
 # my $code2         = '$foo[3][4]->(5)';
 # my $code2         = '5 + foo';
-# Pl::PExpr::SET_DEBUG(0);
 # $doc          = PPI::Document->new(\$code2);
 # $expr1        = _get_ppi_part($doc);
 # say "Code: $code2";
 # my $n_id      = $expr_o->parse_expr_to_tree($expr1);
 # _dump_expr_vals($code2, $expr1, $expr_o, $n_id);
-# Pl::PExpr::SET_DEBUG(0);
 # exit 0;
 
 
@@ -59,7 +57,6 @@ ok(!$expr_o->is_word($expr2->[1]),    "is_word 2");
 # say "Code: $code"; say $expr2->[0]->content(); say dump $expr2; # exit 0;
 
 # - - - Make a tree out of trivial exprs:
-# Pl::PExpr::SET_DEBUG(1 + 2);
 $code         = 'foo(10, 5)';
 # $code         = '$foo->(10, 5)';
 $doc          = PPI::Document->new(\$code);
@@ -76,7 +73,6 @@ is($node->{type}, "funcall", "Type is 'funcall' for: $code");
 is($kid_nodes[0]->content(), "foo", "Sub name: $code");
 is($kid_nodes[1]->content(), "10", "1st param for: $code");
 is($kid_nodes[2]->content(),  "5", "2nd param for: $code");
-# Pl::PExpr::SET_DEBUG(0);
 
 _dump_expr_vals($code, $expr, $expr_o, $node_id)
     if 0;
@@ -121,7 +117,6 @@ _dump_expr_vals($code, $expr, $expr_o, $node_id)
     if 0;
 
 # - - - Commas without fun calls:
-# Pl::PExpr::SET_DEBUG(1 + 8);
 $code         = '5, "foo" => 10';
 $doc          = PPI::Document->new(\$code);
 $expr         = _get_ppi_part($doc);
@@ -136,7 +131,6 @@ is(ref $node, "PPIreference", "List object for: $code");
 is($kid_nodes[0]->content(), "5",     "1st param for: $code");
 is($kid_nodes[1]->content(), '"foo"', "2nd param for: $code");
 is($kid_nodes[2]->content(), "10",    "3nd param for: $code");
-Pl::PExpr::SET_DEBUG(0);
 
 _dump_expr_vals($code, $expr, $expr_o, $node_id)
     if 0;
@@ -173,7 +167,6 @@ _dump_expr_vals($code, $expr, $expr_o, $node_id)
 
 
 # - - - Parse order of l-associative:
-# Pl::PExpr::SET_DEBUG(1 + 8);
 
 # l-associative:
 #        +
@@ -200,7 +193,6 @@ $kid_ids      = $expr_o->get_node_children($kid_ids->[0]);
 is($kid_nodes[0]->content, '3', "1st param for the lower '+' is '3'");
 is($kid_nodes[1]->content, '4', "2nd param for the lower '+' is '4'");
 
-Pl::PExpr::SET_DEBUG(0);
 
 _dump_expr_vals($code, $expr, $expr_o, $node_id)
     if 0;
@@ -343,10 +335,8 @@ sub test_expr {
   my $expr    = _get_ppi_part($doc);
   my $expr_o  = Pl::PExpr->new(e => $expr);
 
-  Pl::PExpr::SET_DEBUG($debuglvl);
   my $node_id = $expr_o->parse_expr_to_tree($expr);
   _test_expr_2($node_id, $expr_o, $tst_spec, $code);
-  Pl::PExpr::SET_DEBUG(0);
 }
 
 sub _test_expr_2 {

@@ -27,7 +27,6 @@ my $kid_ids;
 my @kid_nodes;
 
 # - - - Parse order of r-associative:
-# Pl::PExpr::SET_DEBUG(1 + 8);
 
 # r-associative: $q = $w = $z
 #         =
@@ -36,7 +35,6 @@ my @kid_nodes;
 
 # But when add more, will need parentheses
 
-Pl::PExpr::SET_DEBUG(0);
 
 
 if (0) {
@@ -60,15 +58,12 @@ if (0) {
   $expr       = _get_ppi_part($doc);
 # say dump $expr; exit 0;
   $expr_o     = Pl::PExpr->new(e => $expr);
-Pl::PExpr::SET_DEBUG(4);
   $node_id    = $expr_o->parse_expr_to_tree($expr);
-  # Pl::PExpr::SET_DEBUG(0);
   say "/////////////////  Dump of $code parsed:";
   _dump_expr_vals($code, $expr, $expr_o, $node_id);
   exit 0;
 }
 
-Pl::PExpr::SET_DEBUG(0);
 my $q = "'";
 
 
@@ -78,10 +73,8 @@ my $q = "'";
 # $expr         = _get_ppi_part($doc);
 # say "Code: $code";
 # $expr_o       = Pl::PExpr->new();
-# Pl::PExpr::SET_DEBUG(1);
 # $node_id      = $expr_o->parse_expr_to_tree($expr);
 # _dump_expr_vals($code, $expr, $expr_o, $node_id);
-# Pl::PExpr::SET_DEBUG(0);
 # exit 0;
 
 
@@ -139,7 +132,6 @@ test_expr('$foo = $bar // $frotz',
 test_expr('$x // $y // $z', ['//', ['//', '$x', '$y'], '$z']);
 
 # $code         = '$foo = $bar // $frotz';
-# Pl::PExpr::SET_DEBUG(0);
 # $doc          = PPI::Document->new(\$code);
 # $expr         = _get_ppi_part($doc);
 # say "Code: $code";
@@ -147,7 +139,6 @@ test_expr('$x // $y // $z', ['//', ['//', '$x', '$y'], '$z']);
 # my $top_n_id  = $expr_o->parse_expr_to_tree($expr);
 # # say dump $expr_o; exit 0;
 # _dump_expr_vals($code, $expr, $expr_o, $top_n_id);
-# Pl::PExpr::SET_DEBUG(0);
 # exit 0;
 
 
@@ -393,7 +384,6 @@ my $n_id;
 $code         = 'bar("foo" => 3,5)';
 # THis fails now:
 # $code         = '$q={foo => 5, bar => 10}';
-Pl::PExpr::SET_DEBUG(0);
 $doc          = PPI::Document->new(\$code);
 $expr         = _get_ppi_part($doc);
 say "Code: $code";
@@ -403,13 +393,11 @@ $expr_o       = Pl::PExpr->new();
 $n_id         = $expr_o->parse_expr_to_tree($expr);
 # say dump $expr_o; exit 0;
 _dump_expr_vals($code, $expr, $expr_o, $n_id);
-Pl::PExpr::SET_DEBUG(0);
 
 
 $code         = '$q={foo => 5, bar => 10}';
 # $code         = '!$foo';
 # $code         = 'funny($foo)->barf(5)';
-Pl::PExpr::SET_DEBUG(0);
 $doc          = PPI::Document->new(\$code);
 $expr         = _get_ppi_part($doc);
 say "Code: $code";
@@ -417,7 +405,6 @@ $expr_o       = Pl::PExpr->new();
 $n_id         = $expr_o->parse_expr_to_tree($expr);
 # say dump $expr_o; exit 0;
 _dump_expr_vals($code, $expr, $expr_o, $n_id);
-Pl::PExpr::SET_DEBUG(0);
 
 
 # ----------------------------------------------------------------------
@@ -435,13 +422,10 @@ sub test_expr {
   my $expr    = _get_ppi_part($doc);
   my $expr_o  = Pl::PExpr->new(e => $expr);
 
-  Pl::PExpr::SET_DEBUG($debuglvl);
   my $node_id = $expr_o->parse_expr_to_tree($expr);
   $expr_o->debug_dump_tree($node_id)
       if $debuglvl == 1024;
   _test_expr_2($node_id, $expr_o, $tst_spec, $code);
-  Pl::PExpr::SET_DEBUG(0)
-      if $debuglvl;
 }
 
 sub _test_expr_2 {

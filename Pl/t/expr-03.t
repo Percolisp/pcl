@@ -29,7 +29,6 @@ my @kid_nodes;
 
 my $n_id;
 $code         = '$x < $y < $z and $q';
-Pl::PExpr::SET_DEBUG(0);
 $doc          = PPI::Document->new(\$code);
 $expr         = _get_ppi_part($doc);
 say "Code: $code";
@@ -37,14 +36,12 @@ $expr_o       = Pl::PExpr->new();
 $n_id         = $expr_o->parse_expr_to_tree($expr);
 # say dump $expr_o; exit 0;
 _dump_expr_vals($code, $expr, $expr_o, $n_id);
-Pl::PExpr::SET_DEBUG(0);
 
 
 exit 0;
 $code         = '-f "foo" . $bar';
 # $code         = '!$foo';
 # $code         = 'funny($foo)->barf(5)';
-Pl::PExpr::SET_DEBUG(0);
 $doc          = PPI::Document->new(\$code);
 $expr         = _get_ppi_part($doc);
 say "Code: $code";
@@ -52,7 +49,6 @@ $expr_o       = Pl::PExpr->new();
 $n_id         = $expr_o->parse_expr_to_tree($expr);
 # say dump $expr_o; exit 0;
 _dump_expr_vals($code, $expr, $expr_o, $n_id);
-Pl::PExpr::SET_DEBUG(0);
 
 
 # ----------------------------------------------------------------------
@@ -74,10 +70,8 @@ sub test_expr {
   my $expr    = _get_ppi_part($doc);
   my $expr_o  = Pl::PExpr->new(e => $expr);
 
-  Pl::PExpr::SET_DEBUG($debuglvl);
   my $node_id = $expr_o->parse_expr_to_tree($expr);
   _test_expr_2($node_id, $expr_o, $tst_spec, $code);
-  Pl::PExpr::SET_DEBUG(0);
 }
 
 sub _test_expr_2 {

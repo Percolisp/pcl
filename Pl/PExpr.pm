@@ -50,10 +50,17 @@ our @EXPORT_OK = qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 #      non L-value subs to do that?
 
 
-# use constant DEBUG => 8;
-my $DEBUG_VAL  = 0; # Stupid to not have a constant for DEBUG during dev
-sub DEBUG { $DEBUG_VAL; }
-sub SET_DEBUG { $DEBUG_VAL = shift; }
+# Debug tracing, as a COMPILE-TIME constant (#303 step 0, ruled s391): the
+# ~50 `… if N & DEBUG` guards below are on the hottest paths in the compiler,
+# and while DEBUG was a sub reading a file lexical it never inlined — the s386
+# call trace measured 4.3M DEBUG calls per corpus transpile, all of them
+# returning 0.  As a constant every guard folds away at compile time.
+#
+# Turning tracing on is therefore an ENV var, read once when this module is
+# compiled, not a runtime setter:  PCL_PEXPR_DEBUG=N prove …
+# The bits: 1 parse, 2 operator replacement, 4 parse_list, 8 handle_subcalls,
+# 16 annotate_contexts, 32 string interpolation (StringInterpolation.pm).
+use constant DEBUG => $ENV{PCL_PEXPR_DEBUG} // 0;
 
 
 

@@ -60,10 +60,8 @@ sub test_expr {
   my $expr    = _get_ppi_part($doc);
   my $expr_o  = Pl::PExpr->new(e => $expr);
 
-  Pl::PExpr::SET_DEBUG($debuglvl);
   my $node_id = $expr_o->parse_expr_to_tree($expr);
   _test_expr_2($node_id, $expr_o, $tst_spec, $code);
-  Pl::PExpr::SET_DEBUG(0);
 }
 
 sub _test_expr_2 {
