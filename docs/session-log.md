@@ -4,6 +4,81 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 392 (2026-08-14, Opus 5) — #304 CLOSED: the suite snapshot audited then re-blessed, and the audit found a live crash
+
+**#304 (`6088486`) — the companion-suite snapshot, 191 commits stale, is
+audited and re-blessed** (`docs/perl-suite-audit-s392.md`; DECIDED updated).
+Fresh `--all --jobs 6` run at 582667e: 523 files, 89 OK / 30 NOTAP / 101 XDIFF
+/ 1 FIXTURE / 302 UNEXPLAINED, stamped `taken-at:`.
+
+**Seven of the 44 "decreases" were my own flag, not lost coverage.** A TIMEOUT
+row's C_ok is *how far the file got before the cutoff*; the stale snapshot's
+rows were measured at `--timeout 300` (its header says so, s325/#195) and my
+run used the 90 s default.  Re-measured at 300 s in the same tree the six
+`re/regexp*.t` files return the snapshot's numbers **to the digit** (793/794)
+and comp/require.t comes back 543 → **909**.  All 8 TIMEOUT rows are spliced
+from that re-measure.  **Standing rule: never diff TIMEOUT rows across
+different `--timeout` values.**
+
+**The remaining 37, each with a verdict:**
+- 21 TRANSPILE files collapse to **7 `Parser2 TODO:` families**, none with a
+  not-supported.md owner ⇒ category (b), filed **#314**.  One family is 96% of
+  the entire loss: `my @raw, @upgraded, @utf8;` costs opbasic/cmp.t **12078
+  rows**.  op/for.t (#253) and re/reg_eval_scope.t (#269) have owners already.
+- **Two are a LIVE CRASH — filed #313**, found only because the audit ran:
+  `Cannot proclaim a macro variable special: બʑ::@ISA`.
+  `GlobalPartition::_split_name` matches a package segment's FIRST character
+  ASCII-only (`[A-Za-z_]`), so a package whose name starts with a non-ASCII
+  letter falls to the EXCEPTION partition and is `defvar`'d over the
+  symbol-macro cell `p-defpackage` already made — the exact hazard that
+  module's own header warns about.  12-line reproducer on the task; the fix is
+  one regex but it moves names between partitions, so it needs the full sweep.
+  Invisible to the gate and the sweep: utf8 package names live only in
+  `t/mro/*_utf8.t`.
+- op/tr.t (F6 oversized form), op/decl-refs.t (state-in-eval),
+  re/pat_advanced.t (snapshot pre-dates its s363 measurement), the
+  XDIFF-registered files: owner exists, no action.
+- 14 undiagnosed per-row decreases, first diverging row captured for each,
+  filed **#315** — including two files that were OK and now are not.
+
+Also recovered: **36 increases the stale snapshot hid**, four of them files
+that now pass outright (op/push.t, op/splice.t, op/unshift.t,
+mro/inconsistent_c3_utf8.t).
+
+**#303 step 0 (`5b17768`) — PExpr's DEBUG is now a compile-time constant.**
+`sub DEBUG { $DEBUG_VAL }` never inlined (4.3M calls per corpus transpile, all
+returning 0).  `use constant DEBUG => $ENV{PCL_PEXPR_DEBUG} // 0`;
+`$DEBUG_VAL`/`SET_DEBUG`/its call sites deleted; pre-flight read all ~52
+guarded statements whole (every one a `say`).  corpus-diff IDENTICAL, gate
+138/5128 with only the 8 known pclxs ABI-drift xs rows.  StringInterpolation's
+8 `$parser->DEBUG` sites stay as method calls — a constant is still a method,
+and qualifying them breaks strict-subs at compile time.
+
+**#303 measurement banked (the expensive half of items 2.1/2.3/2.4).** A
+file-appending probe (never stderr — pl2cl's stderr is merged into generated
+CL by test helpers), **positive-controlled before believing any zero**:
+- corpus, 111 transpiles: `analyze` entered 1943×, `_gen_interp_replacement`
+  15× → **W12 `!$host` 0, W12 tree-crash 0, all four interp-fallback tags 0,
+  gen_anon_sub_form 0**.
+- Pl/t gate, 138 files (eval mode + module transpiles): analyze 6242×,
+  interp 26× → **the same five counters all 0**.
+Only the full sweep (population 3) is left before the W12 + interp fallbacks
+can be deleted under the s373 gate-SET bar.
+
+**PARKED, not shipped: `wip/s392-303-singles`** — #303 items 2.4/2.5/2.6
+(gen_anon_sub_form + form_handlers row; ExprToCL2::generate after auditing all
+eight `->generate(` receivers; the OpcodeTree `extras`/`add_extra`/`{xa}`
+write-only pair with its sole writer and POD sentence).  Edited and
+syntax-checked, **corpus-diff interrupted and gate never run** — finish those
+two before cherry-picking.  It also corrects a stale comment in
+`Pl/t/clform-01.t`: the s///e lambda is built by `gen_subst_form`, never by
+gen_anon_sub_form, which is why the probe saw zero.
+
+**Next:** finish the wip branch's verification → #303 items 2.1/2.3 (needs one
+instrumented full sweep) → #313 (crash) → #314 sized F-A1 first.
+
+---
+
 ## Session 391 (2026-08-14, Fable) — s390 review: all five commits approved; the #303 judgment items ruled
 
 **Review session; rulings in `docs/fable-answers-s390.md`.**  Verified
@@ -15136,6 +15211,7 @@ INVALID/MISSING/REDUNDANT warning detection for malformed/excess/short args
 # PCL Session Log
 
 Append new entries at the top. One section per session.
+
 
 ---
 
