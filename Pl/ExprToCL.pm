@@ -75,34 +75,38 @@ has form_handlers => (
   builder => '_build_form_handlers',
 );
 
+# The node types that have a NAMED emitter — as opposed to a binary
+# operator, which is dispatched by its operator text (gen_binary_op*).  This
+# is the key set of the pre-E2 text `handlers` table; the table itself is
+# gone (#303, s390) because 24 of its 25 emitters were shadowed by a form
+# twin that never declines.  The SET still has to exist: `!$NAMED_TYPE{...}`
+# is the "this type is a binary operator" test at both dispatch sites, and a
+# named type that fell out of it would be handed to gen_binary_op under its
+# own name.
+my %NAMED_TYPE = map { $_ => 1 } qw(
+  funcall methodcall ref_funcall prefix_op postfix_op
+  a_acc h_acc a_ref_acc h_ref_acc
+  slice_a_acc slice_h_acc kv_slice_h_acc kv_slice_a_acc
+  arr_init hash_init progn tree_val filehandle readline
+  glob backtick anon_sub func_ref inline_lambda glob_slot
+);
+
+# READING THE COMMENTS BELOW: the `*_form` emitters were introduced by E2 as
+# CLForm-producing twins of text emitters named without the suffix, and their
+# per-sub comments still explain themselves by reference to that twin ("E2
+# form variant of gen_hash_access", "same shape/side effects as the text
+# emitter", …).  Those text emitters are GONE (#303, s390) — every name in
+# such a comment that does not exist in this file is one of them, and lives in
+# git history.  The `_form` suffix is therefore historical, not a distinction;
+# renaming it away is task #307.
+#
+# The one text emitter still reachable: gen_inline_lambda_form declines the
+# shapes it does not cover (measured s390 over both populations — 77 corpus
+# events across 33 files, 51 Pl/t gate events; every other named type: zero).
 sub _build_handlers {
   my $self = shift;
   return {
-    'funcall'       => \&gen_funcall,
-    'methodcall'    => \&gen_methodcall,
-    'ref_funcall'   => \&gen_ref_funcall,
-    'prefix_op'     => \&gen_prefix_op,
-    'postfix_op'    => \&gen_postfix_op,
-    'a_acc'         => \&gen_array_access,
-    'h_acc'         => \&gen_hash_access,
-    'a_ref_acc'     => \&gen_array_ref_access,
-    'h_ref_acc'     => \&gen_hash_ref_access,
-    'slice_a_acc'   => \&gen_array_slice,
-    'slice_h_acc'   => \&gen_hash_slice,
-    'kv_slice_h_acc' => \&gen_kv_hash_slice,
-    'kv_slice_a_acc' => \&gen_kv_array_slice,
-    'arr_init'      => \&gen_array_init,
-    'hash_init'     => \&gen_hash_init,
-    'progn'         => \&gen_progn,
-    'tree_val'      => \&gen_tree_val,
-    'filehandle'    => \&gen_filehandle,
-    'readline'      => \&gen_readline,
-    'glob'          => \&gen_glob,
-    'backtick'      => \&gen_backtick,
-    'anon_sub'      => \&gen_anon_sub,
-    'func_ref'      => \&gen_func_ref,
     'inline_lambda' => \&gen_inline_lambda,
-    'glob_slot'        => \&gen_glob_slot,
   };
 }
 
@@ -184,13 +188,13 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # a statically-known context (the RHS of `my $x = …`, a boolean position, …)
 # must bind *wantarray* to that static context or the sub's context leaks in
 # (the recurring "wantarray leak" bug: `my $e = each %h` inside a list-context
-# sub wrongly returns the (k,v) pair).  gen_funcall wraps every call to one of
+# sub wrongly returns the (k,v) pair).  gen_funcall_form wraps every call to one of
 # these in `(let ((*wantarray* t/nil)) …)` per the node's annotated context.
 #
 # INVARIANT: this set must list EVERY runtime builtin that branches on
 # *wantarray*.  When you add such a builtin to pcl-runtime.lisp, add it here.
 # (readline `<FH>` and the file-glob `<pat>` are separate PPI node types, not
-# funcalls — they apply the same wrapper in gen_readline / gen_glob.)
+# funcalls — they apply the same wrapper in gen_readline_form / gen_glob_form.)
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   reverse localtime gmtime caller unpack each splice readdir
   getprotobyname getprotobynumber
@@ -233,7 +237,7 @@ my %OP_EXCEPTIONS = (
   # Reference operator
   '\\'  => 'p-backslash',
 
-  # Note: Sigil cast operators (@, %, $) are handled in gen_prefix_op
+  # Note: Sigil cast operators (@, %, $) are handled in gen_prefix_op_form
   # They can't be in OP_EXCEPTIONS because % is also the modulo operator
 
   # Operators with names that could conflict with user subs
@@ -419,16 +423,6 @@ sub _amp_cast_operand_id {
 }
 
 
-# Get context keyword for a node (:scalar or :list)
-sub get_context_keyword {
-  my $self    = shift;
-  my $node_id = shift;
-
-  my $ctx = $self->expr_o->get_node_context($node_id);
-  # SCALAR_CTX = 0, LIST_CTX = 1
-  return $ctx == 1 ? ':list' : ':scalar';
-}
-
 
 # Main entry point: generate CL code from AST
 sub generate {
@@ -491,7 +485,7 @@ sub gen_internal_node {
 
   # E2: a type with no named handler is a binary operator (gen_binary_op) —
   # try the form emitter (declines =/=~/!~, converts the rest).
-  if (!exists $self->handlers->{$type}) {
+  if (!$NAMED_TYPE{$type}) {
     my $form = $self->gen_binary_op_form($type, $kids, $node_id);
     return Pl::CLForm::to_flat($form) if defined $form;
   }
@@ -517,6 +511,15 @@ sub gen_internal_node_text {
     return $handler->($self, $node, $node_id, $kids);
   }
 
+  # Rule 12: a named type reaching here means its form emitter declined a
+  # shape whose text twin was deleted as unreachable (#303).  That is a
+  # compiler self-inconsistency and the value would flow onward — die
+  # naming the type rather than lowering it as a binary operator called
+  # "funcall".
+  die "PCL internal: form emitter declined node type '$type', "
+    . "whose text emitter was deleted as unreachable (#303)\n"
+    if $NAMED_TYPE{$type};
+
   # Assume it's a binary operator (operators stored with operator as type)
   return $self->gen_binary_op($type, $kids, $node_id);
 }
@@ -540,7 +543,7 @@ sub gen_node_form {
       return $form if defined $form;
     }
     # Internal-node-typed binary op (type not a named handler) → form emitter.
-    if (!exists $self->handlers->{$type}) {
+    if (!$NAMED_TYPE{$type}) {
       my $form = $self->gen_binary_op_form($type, $kids, $node_id);
       return $form if defined $form;
     }
@@ -1145,16 +1148,6 @@ sub _is_integer_literal_node {
   return $content =~ /^\d+$/;  # non-negative integer only (negatives are prefix-op)
 }
 
-sub _is_regex_match_node {
-  # Returns true if the node is a regex-match expression (=~ or !~).
-  # Such nodes are boolean-valued and not compared numerically with $. in flip-flops.
-  my ($expr_o, $node) = @_;
-  return 0 unless defined $node;
-  return 0 unless $expr_o->is_internal_node_type($node);
-  my $type = $node->{type} // '';
-  return $type eq '=~' || $type eq '!~';
-}
-
 sub _is_string_literal_node {
   # Returns true for PPI string literal nodes (single/double/heredoc quotes etc.)
   # String literals in flip-flops use $.  comparison (may warn "isn't numeric").
@@ -1237,7 +1230,7 @@ sub gen_binary_op {
     my $ctx = $self->expr_o->get_node_context($node_id);
     if ($lhs_is_paren && $ctx == LIST_CTX) {
       # List repeat: (@x,1) x 4 — force LHS to list context so
-      # gen_progn returns (vector ...) not (progn ...) / scalar last-val
+      # gen_progn_form returns (vector ...) not (progn ...) / scalar last-val
       $self->expr_o->set_node_context($kids->[0], LIST_CTX);
       my $left  = $self->gen_node($kids->[0]);
       my $right = $self->gen_node($kids->[1]);
@@ -2636,911 +2629,6 @@ sub gen_funcall_form {
       : $call;
 }
 
-sub gen_funcall {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # Check for __FILE__ and __LINE__ as zero-arg "functions"
-  # (Parser wraps them in funcall when followed by operators)
-  if (@$kids == 1) {
-    my $func_node = $self->expr_o->get_a_node($kids->[0]);
-    if (ref($func_node) eq 'PPI::Token::Word' && $func_node->can('content')) {
-      my $content = $func_node->content() // '';
-      if ($content eq '__FILE__') {
-        my $source_file = $self->environment
-	    ? $self->environment->source_file : '-';
-        $source_file //= '-';
-        return qq{"$source_file"};
-      }
-      if ($content eq '__LINE__') {
-        my $line = $func_node->line_number // 0;
-        return $line;
-      }
-      if ($content eq '__PACKAGE__') {
-        my $pkg = $self->environment
-	    ? $self->environment->current_package : 'main';
-        $pkg //= 'main';
-        return qq{"$pkg"};
-      }
-      # Perl: -bareword produces string "-bareword"
-      # PPI tokenizes this as a single PPI::Token::Word
-      if ($content =~ /^-[A-Za-z_]\w*$/) {
-        return qq{"$content"};
-      }
-    }
-  }
-
-  # First child is function name
-  my $func_name = $self->gen_node($kids->[0]);
-
-  # PPI tokenizes "-funcname" as a single Word. When followed by arguments,
-  # this means unary negation of the function call, not a call to "-funcname".
-  # e.g. "-splice @a" → (p-- (p-splice @a))
-  if ($func_name =~ /^-([A-Za-z_]\w*)$/) {
-    my $real_func = $1;
-    if (exists $RUNTIME_NAMES{$real_func}) {
-      # Known built-in: generate unary minus of the call
-      my $inner_cl = $self->cl_name($real_func, 1);
-      my @arg_strs = map { $self->gen_node($_) } @{$kids}[1..$#$kids];
-      my $args_str = @arg_strs ? ' ' . join(' ', @arg_strs) : '';
-      return "(p-- ($inner_cl$args_str))";
-    }
-  }
-
-  my $cl_func   = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
-
-  # Special handling: SUPER::method(args) as indirect-object call
-  # SUPER::m{@a} is indirect-object syntax: first arg is the invocant (from block)
-  # Generate: (pcl::%pcl-super-indirect "m" "pkg" ARGS) where first arg is invocant
-  if ($func_name =~ /^SUPER::(.+)$/) {
-    my $method = $1;
-    my $cur_pkg = ($self->environment && $self->environment->can('current_package'))
-                    ? ($self->environment->current_package // 'main')
-                    : 'main';
-    if (@$kids >= 2) {
-      # ALL args: the trailing-LIST shapes (SUPER::m{}@a, SUPER::m{@a}"b")
-      # parse to multiple kids; the runtime flattens and takes the first
-      # element of the combined list as the invocant.
-      my $arg_str = join ' ', map { $self->gen_node($_) } @{$kids}[1 .. $#$kids];
-      return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" $arg_str)";
-    }
-    # No args — call without invocant (will signal error at runtime)
-    return "(pcl::%pcl-super-indirect \"$method\" \"$cur_pkg\" nil)";
-  }
-
-  # Special handling: require BAREWORD (module name) in expression context.
-  # Statement-level `require Foo;` is handled in Parser.pm, but in expression
-  # context (e.g. `$] >= 5.010 && require mro`) the bareword reaches here and
-  # would otherwise be emitted as a function call (require (pl-mro)).  Detect a
-  # single bareword/qualified module-name argument and load it by name.
-  if ($func_name eq 'require' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    my $mod;
-    if (ref($arg_node) eq 'PPI::Token::Word') {
-      $mod = $arg_node->content;
-    }
-    # Bareword wrapped in a 0-arg funcall node (mro -> funcall(Word 'mro')).
-    elsif ($self->expr_o->is_internal_node_type($arg_node)
-           && $arg_node->{type} eq 'funcall') {
-      my $ak = $self->expr_o->get_node_children($kids->[1]);
-      if (@$ak == 1) {
-        my $w = $self->expr_o->get_a_node($ak->[0]);
-        $mod = $w->content if ref($w) eq 'PPI::Token::Word';
-      }
-    }
-    if (defined $mod && $mod =~ /^\w+(?:::\w+)*$/) {
-      return qq{(p-require "$mod")};
-    }
-    # Non-bareword `require EXPR`: perl's EXPR form has FILENAME semantics
-    # (numeric values dispatch to the version check in p-require-file).
-    return "(p-require-file " . $self->gen_node($kids->[1]) . ")";
-  }
-
-  # Special handling for next/last/redo/goto with label argument
-  if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo'
-       || $func_name eq 'goto') && @$kids == 2) {
-    # Check if the argument is a bareword label (funcall with single word child)
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-
-    # goto &funcname — tail-call: call target with current @_ and return its result.
-    # PPI tokenizes `goto &new1` as Word('goto') + Symbol('&new1').
-    if ($func_name eq 'goto' &&
-        ref($arg_node) eq 'PPI::Token::Symbol' &&
-        $arg_node->content() =~ /^&(.+)$/) {
-      my $target = $self->cl_name($1, 1);
-      return "(p-goto-sub #'$target)";
-    }
-
-    # goto &$scalar — tail-call via dynamic coderef/name.
-    # PPI tokenizes `goto &$cref` as Word('goto') + Cast('&') + Symbol('$cref').
-    # goto wants the coderef MENTION (the `&` prefix alone lowers to a call
-    # with @_), so reach past it and wrap the inner expression ourselves.
-    if ($func_name eq 'goto' &&
-        defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
-      my $fn_expr = $self->gen_node($amp_id);
-      return "(p-goto-sub (p-get-coderef $fn_expr))";
-    }
-
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'funcall') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids == 1) {
-        my $label_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        if (ref($label_node) eq 'PPI::Token::Word') {
-          my $label = $label_node->content();
-          if ($func_name eq 'goto') {
-            # goto LABEL: a FORWARD goto being catch-wrapped by Parser2's
-            # #63 lowering (flag localized around the prefix lowering, so
-            # it is set exactly while this goto's region is lowered) must
-            # be a dynamic transfer — the tag's tagbody opens later, and
-            # the goto may sit inside a map/grep lambda, both unreachable
-            # by a lexical (go).  Backward gotos keep the (go): the
-            # enclosing (tagbody :label …) re-runs the jumped-to region.
-            my $parser = ($self->expr_o->can('has_parser')
-                          && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
-            my $catch = $parser && $parser->lex_home->{_catch_labels};
-            if ($catch && $catch->{$label}) {
-              return "(throw $catch->{$label} nil)";
-            }
-            return "(go :$label)";
-          }
-          return "($cl_func $label)";
-        }
-      }
-    }
-
-    # goto EXPR (computed goto) — expression evaluates to a label name.
-    # Not fully implementable in CL (go requires compile-time tags).
-    # Generate a no-op rather than an undefined function call.
-    if ($func_name eq 'goto') {
-      my $arg_cl = $self->gen_node($kids->[1]);
-      return "(p-goto-computed $arg_cl)";
-    }
-  }
-
-  # Special handling for do { } blocks - evaluates block inline, returns last value
-  if ($func_name eq 'do' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node)) {
-      if ($arg_node->{type} eq 'func_ref') {
-        my $func_ref = $self->gen_node($kids->[1]);
-        my $ctx = $self->expr_o->get_node_context($node_id);
-        # INHERIT_CTX: don't override *wantarray*; p-return will restore it
-        return "(funcall $func_ref)" if $ctx == INHERIT_CTX;
-        return $self->_ctx_wrap("(funcall $func_ref)", $ctx);
-      }
-      elsif ($arg_node->{type} eq 'anon_sub') {
-        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
-        my @body_parts;
-        for my $kid_id (@$block_kids) {
-          push @body_parts, $self->gen_node($kid_id);
-        }
-        return "(progn " . join(' ', @body_parts) . ")";
-      }
-      elsif ($arg_node->{type} eq 'inline_lambda') {
-        # do { BLOCK } parsed as inline_lambda (avoids defun side-effect that
-        # would corrupt a surrounding p-if when do{} sits in an elsif condition)
-        my $body = $arg_node->{body_cl} // 'nil';
-        my $ctx  = $self->expr_o->get_node_context($node_id);
-        return "(progn $body)" if $ctx == INHERIT_CTX;
-        return $self->_ctx_wrap("(progn $body)", $ctx);
-      }
-    }
-  }
-
-  # Special handling for eval { } blocks
-  # eval { block } catches exceptions and sets $@
-  if ($func_name eq 'eval' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node)) {
-      my $ctx = $self->expr_o->get_node_context($node_id);
-      my $wrap = sub {
-        my ($inner) = @_;
-        return $inner if $ctx == INHERIT_CTX;
-        return $self->_ctx_wrap($inner, $ctx);
-      };
-      if ($arg_node->{type} eq 'anon_sub') {
-        # eval { block } with inline anon_sub - generate p-eval-block with body
-        my $block_kids = $self->expr_o->get_node_children($kids->[1]);
-        my @body_parts;
-        for my $kid_id (@$block_kids) {
-          push @body_parts, $self->gen_node($kid_id);
-        }
-        my $body = join(' ', @body_parts);
-        return $wrap->("(p-eval-block $body)");
-      }
-      elsif ($arg_node->{type} eq 'inline_lambda') {
-        # eval { block } parsed as inline_lambda (avoids defun side-effect).
-        # task #78 safety net: a Parser2-lowered body has body_form only —
-        # flat-print it (the form branch normally intercepts this shape).
-        my $body = defined $arg_node->{body_cl} ? $arg_node->{body_cl}
-                 : $arg_node->{body_form}
-                 ? join(' ', map { Pl::CLForm::to_flat($_) } @{$arg_node->{body_form}})
-                 : 'nil';
-        return $wrap->("(p-eval-block $body)");
-      }
-      elsif ($arg_node->{type} eq 'func_ref') {
-        # eval { block } with named function (from Parser callback)
-        my $func_ref = $self->gen_node($kids->[1]);
-        return $wrap->("(p-eval-block (funcall $func_ref))");
-      }
-      else {
-        # An internal node that is NOT a block form = an interpolated/computed
-        # STRING, e.g. eval "package $into; sub greet { ... }" (a concatenation).
-        # This is still eval STRING and must carry the lexical-capture alist —
-        # without this it fell through to the generic funcall path with no alist,
-        # so the modifier idiom never captured its lexicals.  See
-        # docs/eval-free-vars-plan.md / docs/eval-lexical-capture.md.
-        my $arg_cl = $self->gen_node($kids->[1]);
-        my $alist  = $self->_eval_lexical_alist;
-        return $alist
-          ? "(p-eval $arg_cl " . Pl::CLForm::to_flat($alist) . ")"
-          : "(p-eval $arg_cl)";
-      }
-    }
-    else {
-      # eval STRING (plain string literal): pass the caller's in-scope lexicals as
-      # an alist so the eval body can capture them (the transpiler wraps the body
-      # in a lambda whose params are those vars).  See docs/eval-lexical-capture.md.
-      my $arg_cl = $self->gen_node($kids->[1]);
-      my $alist  = $self->_eval_lexical_alist;
-      return $alist
-        ? "(p-eval $arg_cl " . Pl::CLForm::to_flat($alist) . ")"
-        : "(p-eval $arg_cl)";
-    }
-  }
-
-  # Special handling for grep/map expression form (without block)
-  # grep EXPR, LIST  →  (p-grep (lambda ($_) EXPR) LIST)
-  # The EXPR typically uses $_ which should be the lambda parameter
-  if (($func_name eq 'grep' || $func_name eq 'map') && @$kids >= 2) {
-    my $first_arg_node = $self->expr_o->get_a_node($kids->[1]);
-    my $is_lambda_form = $self->expr_o->is_internal_node_type($first_arg_node) &&
-                         ($first_arg_node->{type} eq 'inline_lambda' ||
-                          $first_arg_node->{type} eq 'func_ref' ||
-                          $first_arg_node->{type} eq 'anon_sub');
-
-    if (!$is_lambda_form) {
-      # Expression form: wrap first arg in lambda
-      my $expr_cl = $self->gen_node($kids->[1]);
-      my @rest_args;
-      for my $i (2 .. $#$kids) {
-        push @rest_args, $self->gen_node($kids->[$i]);
-      }
-      my $list_str = join(' ', @rest_args);
-      return "($cl_func (lambda (\$_) $expr_cl) $list_str)";
-    }
-  }
-
-  # Special handling for bless(REF, CLASSNAME)
-  # The classname can be a bareword like MyClass or o:: which should be a string
-  if ($func_name eq 'bless' && @$kids >= 2) {
-    my $ref_arg = $self->gen_node($kids->[1]);
-    my $cur_pkg = $self->environment ? $self->environment->current_package : 'main';
-    my $class_arg = "\"$cur_pkg\"";  # Default class is the package at point of bless call
-
-    if (@$kids >= 3) {
-      # Bareword class → string (_class_name_bareword); anything else generates
-      # normally (quoted string, shift, or other expression).
-      $class_arg = $self->_class_name_bareword($kids->[2])
-                // $self->gen_node($kids->[2]);
-    }
-    return "(p-bless $ref_arg $class_arg)";
-  }
-
-  # tie VARIABLE, CLASSNAME, LIST — the same class-name argument position.
-  if ($func_name eq 'tie' && @$kids >= 3) {
-    my $class_arg = $self->_class_name_bareword($kids->[2]);
-    if (defined $class_arg) {
-      my @args = ($self->gen_node($kids->[1]), $class_arg,
-                  map { $self->gen_node($kids->[$_]) } 3 .. $#$kids);
-      return "(p-tie " . join(' ', @args) . ")";
-    }
-  }
-
-  # Special handling for push/unshift: flatten @array arguments
-  # In Perl, push(@x, @y) flattens @y, but push(@x, [1,2,3]) doesn't flatten the anon array
-  # We detect @-sigiled expressions at code-gen time and wrap them with p-flatten
-  if (($func_name eq 'push' || $func_name eq 'unshift') && @$kids >= 2) {
-    my $target = $self->gen_node($kids->[1]);  # First arg is target array
-    my @items;
-    for my $i (2 .. $#$kids) {
-      my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
-      my $arg = $self->gen_node($kids->[$i]);
-      my $should_flatten = 0;
-
-      # Check if this is an @-sigiled variable (e.g., @arr)
-      if (ref($arg_node) eq 'PPI::Token::Symbol') {
-        my $sigil = substr($arg_node->content(), 0, 1);
-        $should_flatten = 1 if $sigil eq '@';
-      }
-      # Check if this is an array deref (e.g., @$ref, @{expr})
-      # These are prefix_op nodes with @ Cast as first child
-      elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-             $arg_node->{type} eq 'prefix_op') {
-        my $arg_kids = $self->expr_o->get_node_children($kids->[$i]);
-        if (@$arg_kids >= 1) {
-          my $cast_node = $self->expr_o->get_a_node($arg_kids->[0]);
-          if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '@') {
-            $should_flatten = 1;
-          }
-        }
-      }
-
-      if ($should_flatten) {
-        # Wrap with p-flatten to expand array elements
-        $arg = "(p-flatten $arg)";
-      }
-      push @items, $arg;
-    }
-    my $items_str = @items ? ' ' . join(' ', @items) : '';
-    return "($cl_func $target$items_str)";
-  }
-
-  # Special handling for readline(BAREWORD): treat arg as filehandle symbol, not function call
-  if ($func_name eq 'readline' && @$kids == 2) {
-    my $fh_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
-      my $fh_name = $fh_node->content() // '';
-      return "(p-readline '$fh_name)";
-    }
-    # Funcall node with single word child (bareword wrapped in funcall)
-    if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
-      my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$fh_kids == 1) {
-        my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
-        if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
-          my $fh_name = $word_node->content() // '';
-          return "(p-readline '$fh_name)";
-        }
-      }
-    }
-  }
-
-  # Special handling for select(BAREWORD): the single argument is a filehandle,
-  # not a value — quote it so CL does not evaluate an unbound bareword symbol
-  # (e.g. `select STDERR`). p-select is a no-op stub, so the quoted name is
-  # harmless; select($fh) and 4-arg select(...) are unaffected (@$kids != 2 or
-  # the arg is not a bareword).
-  if ($func_name eq 'select' && @$kids == 2) {
-    my $fh_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
-      return "(p-select '" . ($fh_node->content() // '') . ")";
-    }
-    if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
-      my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$fh_kids == 1) {
-        my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
-        if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
-          return "(p-select '" . ($word_node->content() // '') . ")";
-        }
-      }
-    }
-  }
-
-  # Special handling for tied(): needs the box, not the unboxed value.
-  # p-aref normally unboxes (which would call FETCH on tied vars), so we use
-  # p-aref-box to get the box at the array index without triggering FETCH.
-  if ($func_name eq 'tied' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        my $idx = $self->gen_node($arg_kids->[1]);
-        $arr = _swap_elem_sigil($arr, q(@));
-        return "(p-tied (p-aref-box $arr $idx))";
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash = $self->gen_node($arg_kids->[0]);
-        my $key  = $self->gen_node($arg_kids->[1]);
-        $hash = _swap_elem_sigil($hash, q(%));
-        return "(p-tied (p-gethash-box $hash $key))";
-      }
-    }
-  }
-
-  # Special handling for pos(): needs the box for identity tracking.
-  # p-aref normally unboxes scalar elements, but pos() needs the box to track
-  # the position in *p-match-pos*. Same pattern as tied().
-  if ($func_name eq 'pos' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        my $idx = $self->gen_node($arg_kids->[1]);
-        $arr = _swap_elem_sigil($arr, q(@));
-        return "(p-pos (p-aref-box $arr $idx))";
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash = $self->gen_node($arg_kids->[0]);
-        my $key  = $self->gen_node($arg_kids->[1]);
-        $hash = _swap_elem_sigil($hash, q(%));
-        return "(p-pos (p-gethash-box $hash $key))";
-      }
-    }
-  }
-
-  # Special handling for delete on arrays: delete $a[idx]
-  # Need to pass array and index separately, not the dereferenced value
-  if ($func_name eq 'delete' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'a_acc') {
-      # Array access: delete $a[idx] -> (p-delete-array @arr idx)
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        my $arr = $self->gen_node($arg_kids->[0]);
-        # Convert $a to @a for array (Symbol or Magic like $_)
-        if ((ref($arr_node) eq 'PPI::Token::Symbol'
-             || ref($arr_node) eq 'PPI::Token::Magic')) {
-          $arr = _swap_elem_sigil($arr, q(@));
-        }
-        my $idx = $self->gen_node($arg_kids->[1]);
-        return "(p-delete-array $arr $idx)";
-      }
-    }
-    # Hash access: delete $h{key} -> (p-delete %h key)
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        my $hash = $self->gen_node($arg_kids->[0]);
-        # Convert $h to %h for hash (Symbol or Magic like $_)
-        if ((ref($hash_node) eq 'PPI::Token::Symbol'
-             || ref($hash_node) eq 'PPI::Token::Magic')) {
-          $hash = _swap_elem_sigil($hash, q(%));
-        }
-        my $key = $self->gen_node($arg_kids->[1]);
-        return "(p-delete $hash $key)";
-      }
-    }
-    # Hash slice: delete @foo{4,5} -> (p-delete-hash-slice %hash key1 key2 ...)
-    # Also handles empty slice: delete @foo{()} -> (p-delete-hash-slice %hash)
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'slice_h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 1) {
-        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        my $hash = $self->gen_node($arg_kids->[0]);
-        # Convert @ to % for hash access (handle qualified names too).
-        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /(?:^|::)\@/) {
-          $hash =~ s/(^|::)\@/${1}%/;
-        }
-        my @keys;
-        for my $i (1 .. $#$arg_kids) {
-          push @keys, $self->gen_node($arg_kids->[$i]);
-        }
-        my $keys_str = @keys ? ' ' . join(' ', @keys) : '';
-        return "(p-delete-hash-slice $hash$keys_str)";
-      }
-    }
-    # Array slice: delete @arr[1,2,3] -> (p-delete-array-slice @arr idx1 idx2 ...)
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'slice_a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        my @indices;
-        for my $i (1 .. $#$arg_kids) {
-          push @indices, $self->gen_node($arg_kids->[$i]);
-        }
-        my $idx_str = join(' ', @indices);
-        return "(p-delete-array-slice $arr $idx_str)";
-      }
-    }
-    # KV slice delete: delete %foo{6,7} -> (p-delete-kv-hash-slice %hash key1 key2 ...)
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'kv_slice_h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash = $self->gen_node($arg_kids->[0]);
-        my @keys;
-        for my $i (1 .. $#$arg_kids) {
-          push @keys, $self->gen_node($arg_kids->[$i]);
-        }
-        my $keys_str = join(' ', @keys);
-        return "(p-delete-kv-hash-slice $hash $keys_str)";
-      }
-    }
-    # KV array slice: delete %arr[6,7] -> (p-delete-kv-array-slice @arr idx1 idx2 ...)
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'kv_slice_a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 1) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        $arr =~ s/(^|::)\%/${1}\@/;  # %arr -> @arr (KV sigil -> array container)
-        my @indices;
-        for my $i (1 .. $#$arg_kids) {
-          push @indices, $self->gen_node($arg_kids->[$i]);
-        }
-        my $idx_str = @indices ? ' ' . join(' ', @indices) : '';
-        return "(p-delete-kv-array-slice $arr$idx_str)";
-      }
-    }
-    # Hash ref access: delete $ref->{key} -> (p-delete (unbox ref) key)
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_ref_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $ref = $self->gen_node($arg_kids->[0]);
-        my $key = $self->gen_node($arg_kids->[1]);
-        return "(p-delete (unbox $ref) $key)";
-      }
-    }
-    # Array ref access: delete $ref->[i] -> (p-delete-array (unbox ref) i).
-    # Mirrors the exists a_ref_acc arm; its absence made delete arity-crash.
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'a_ref_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $ref = $self->gen_node($arg_kids->[0]);
-        my $idx = $self->gen_node($arg_kids->[1]);
-        return "(p-delete-array (unbox $ref) $idx)";
-      }
-    }
-  }
-
-  # Special handling for exists on arrays and hashes
-  # Need to pass container and key/index separately
-  if ($func_name eq 'exists' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    # exists &funcname — subroutine existence check
-    if (ref($arg_node) eq 'PPI::Token::Symbol') {
-      my $sym = $arg_node->content();
-      if ($sym =~ /^&(.+)$/) {
-        my ($pkg, $name) = $self->_split_func_sym($1);
-        return "(p-sub-exists \"$pkg\" \"$name\")";
-      }
-    }
-    # exists &{$coderef} — coderef existence check (prefix_op with & cast)
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'prefix_op') {
-      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids2 >= 2) {
-        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
-        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
-          my $inner = $self->gen_node($arg_kids2->[1]);
-          return "(p-coderef-exists-p $inner)";
-        }
-      }
-    }
-    if ($self->expr_o->is_internal_node_type($arg_node)) {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        if ($arg_node->{type} eq 'a_acc') {
-          # Array access: exists $a[idx] -> (p-exists-array @arr idx)
-          my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
-          my $arr = $self->gen_node($arg_kids->[0]);
-          # $a[i] -> @a : rewrite the scalar sigil to the array sigil, whether
-          # bare ($a -> @a) or package-qualified (Foo::$a / |Foo::Bar|::$a ->
-          # ...::@a). The `$` to rewrite is at the start or right after `::`.
-          if ((ref($arr_node) eq 'PPI::Token::Symbol'
-               || ref($arr_node) eq 'PPI::Token::Magic')) {
-            $arr = _swap_elem_sigil($arr, q(@));
-          }
-          my $idx = $self->gen_node($arg_kids->[1]);
-          return "(p-exists-array $arr $idx)";
-        }
-        elsif ($arg_node->{type} eq 'h_acc') {
-          # Hash access: exists $h{key} -> (p-exists %h key)
-          my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
-          my $hash = $self->gen_node($arg_kids->[0]);
-          # $h{k} -> %h : rewrite the scalar sigil to the hash sigil, whether
-          # bare ($h -> %h) or package-qualified (Foo::$h / |Foo::Bar|::$h ->
-          # ...::%h). The `$` to rewrite is at the start or right after `::`.
-          if ((ref($hash_node) eq 'PPI::Token::Symbol'
-               || ref($hash_node) eq 'PPI::Token::Magic')) {
-            $hash = _swap_elem_sigil($hash, q(%));
-          }
-          my $key = $self->gen_node($arg_kids->[1]);
-          return "(p-exists $hash $key)";
-        }
-        elsif ($arg_node->{type} eq 'h_ref_acc') {
-          # Hash-ref access: exists $r->{key} -> (p-exists (unbox REF) key)
-          my $ref = $self->gen_node($arg_kids->[0]);
-          my $key = $self->gen_node($arg_kids->[1]);
-          return "(p-exists (unbox $ref) $key)";
-        }
-        elsif ($arg_node->{type} eq 'a_ref_acc') {
-          # Array-ref access: exists $r->[idx] -> (p-exists-array (unbox REF) idx)
-          my $ref = $self->gen_node($arg_kids->[0]);
-          my $idx = $self->gen_node($arg_kids->[1]);
-          return "(p-exists-array (unbox $ref) $idx)";
-        }
-      }
-    }
-  }
-
-  # defined &funcname — subroutine defined check
-  if ($func_name eq 'defined' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($arg_node) eq 'PPI::Token::Symbol') {
-      my $sym = $arg_node->content();
-      if ($sym =~ /^&(.+)$/) {
-        my ($pkg, $name) = $self->_split_func_sym($1);
-        return "(p-sub-defined \"$pkg\" \"$name\")";
-      }
-    }
-    # defined &{$coderef} — coderef defined check (prefix_op with & cast)
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'prefix_op') {
-      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids2 >= 2) {
-        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
-        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
-          my $inner = $self->gen_node($arg_kids2->[1]);
-          return "(p-coderef-defined-p $inner)";
-        }
-      }
-    }
-    # defined(FILEHANDLE) — bareword filehandle check (e.g. defined(FILE), defined(DIR))
-    # Case 1: arg is a PPI::Token::Word leaf (all-caps bareword)
-    if (ref($arg_node) eq 'PPI::Token::Word') {
-      my $name = $arg_node->content();
-      if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
-        return "(p-defined-fh '$name)";
-      }
-    }
-    # Case 2: arg is an internal funcall node with a single uppercase-word child (no args)
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'funcall') {
-      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids2 == 1) {
-        my $fn_node = $self->expr_o->get_a_node($arg_kids2->[0]);
-        if (ref($fn_node) eq 'PPI::Token::Word') {
-          my $name = $fn_node->content();
-          if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
-            return "(p-defined-fh '$name)";
-          }
-        }
-      }
-    }
-  }
-
-  # undef &funcname — undefine a sub (keeps it in exists table)
-  if ($func_name eq 'undef' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($arg_node) eq 'PPI::Token::Symbol') {
-      my $sym = $arg_node->content();
-      if ($sym =~ /^&(.+)$/) {
-        my ($pkg, $name) = $self->_split_func_sym($1);
-        return "(p-undef-sub \"$pkg\" \"$name\")";
-      }
-    }
-    # undef &{expr} / undef &$cref — the coderef mention, not a call.
-    if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
-      my $inner = $self->gen_node($amp_id);
-      return "(p-undef (p-get-coderef $inner))";
-    }
-  }
-
-  # Check for reference prototype that requires auto-boxing
-  my $proto = $self->environment ? $self->environment->get_prototype($func_name) : undef;
-  my @ref_params;
-  if ($proto && $proto->{is_proto} && $proto->{params}) {
-    # Use proto_type for auto-boxing checks (contains original like \@, \%, $, etc.)
-    @ref_params = map { $_->{proto_type} // $_->{name} } @{$proto->{params}};
-  }
-
-  # Whether the '$'-slot SCALAR-context imposition (below) may fire for this
-  # call.  When the call supplies FEWER syntactic arguments than the prototype's
-  # mandatory-param count, an array argument is flattening to fill the remaining
-  # mandatory slots (Perl does NOT scalarize it) — e.g. `sub like_yn ($$$@)`
-  # called as `like_yn(0, @_)` where @_ spreads across the trailing $$@.  Only
-  # impose scalar context when args >= min_params.  (This also matches Perl's
-  # rule that a prototype defined LATER than the call site isn't enforced: in
-  # those flatten-into-@_ helpers the count is always short.)
-  my $n_call_args = $#$kids;  # kids[0] is the function word
-  my $may_impose_scalar =
-       @ref_params
-    && defined $proto->{min_params}
-    && $proto->{min_params} >= 0
-    && $n_call_args >= $proto->{min_params};
-
-  # Functions that modify their arguments (need l-value access to array/hash elements)
-  # undef $hash{k} / undef $arr[i] must receive the box, not the unboxed value
-  my %lvalue_funcs = map { $_ => 1 } qw(chop chomp undef);
-  my $needs_lvalue = $lvalue_funcs{$func_name} // 0;
-
-  # Rest are arguments
-  # Temporarily clear tail_position while generating arguments: tail_position is
-  # a flag that the current STATEMENT is the sub's last expression (so the outer
-  # call can inherit caller context).  Arguments are NOT the tail call — they
-  # need their own annotated context from child_context/annotate_contexts.
-  my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
-  $self->environment->tail_position(0) if $self->environment && $saved_tail;
-
-  my @args;
-  for my $i (1 .. $#$kids) {
-    # A plain '$' prototype slot imposes SCALAR context on its argument
-    # (e.g. perl's test.pl `sub is ($$@)` → `is(@a, 3)` counts @a; `is(each
-    # @h, 0)` evaluates each in scalar context).  The '\@'/'\%'/'\$' ref slots
-    # are handled separately below (auto-box, not scalar-context).  Set the
-    # node's context BEFORE gen_node so wantarray-sensitive builtins (each,
-    # keys, ...) are generated in scalar context, not merely wrapped after.
-    my $param_idx = $i - 1;
-    my $impose_scalar = ($may_impose_scalar
-                         && $param_idx < @ref_params
-                         && defined $ref_params[$param_idx]
-                         && $ref_params[$param_idx] eq '$');
-    $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
-
-    # Set l-value context for functions that modify their arguments; user
-    # subs get 'argbox' — their element args alias through @_ (#131).
-    my $saved_lvalue = $self->lvalue_context;
-    if    ($needs_lvalue)               { $self->lvalue_context(1) }
-    elsif (index($cl_func, 'pl-') >= 0
-           && $self->_is_elem_arg($kids->[$i])) { $self->lvalue_context('argbox') }
-    my $arg = $self->gen_node($kids->[$i]);
-    $self->lvalue_context($saved_lvalue);
-
-    # An aggregate (@a/%h) or list-returning builtin (keys/values) passed to a
-    # '$' slot must yield its scalar value (count), not flatten into the arg
-    # list — wrap it like the `scalar EXPR` keyword does.  Args that are
-    # already obviously scalar (number/string literals, $-sigil symbols) need
-    # no coercion, and wantarray-sensitive builtins (each/sort/...) are already
-    # handled by the SCALAR_CTX annotation above — so skip the wrap for those
-    # to keep generated code clean.
-    if ($impose_scalar) {
-      my $an = $self->expr_o->get_a_node($kids->[$i]);
-      my $r = ref($an);
-      my $already_scalar =
-           $r eq 'PPI::Token::Number'
-        || $r =~ /^PPI::Token::Quote\b/
-        || ($r eq 'PPI::Token::Symbol' && $an->content() =~ /^\$/)
-        || ($r eq 'PPI::Token::Magic'  && $an->content() =~ /^\$/);
-      $arg = "(p-scalar $arg)" unless $already_scalar;
-    }
-
-    # Check if this position has a reference prototype (\@, \%, \$)
-    if ($param_idx < @ref_params) {
-      my $param_type = $ref_params[$param_idx];
-      if ($param_type =~ /^\\([@%\$])$/) {
-        my $expected_sigil = $1;
-        # Check if arg is an unref'd array/hash/scalar that needs wrapping
-        my $arg_node = $self->expr_o->get_a_node($kids->[$i]);
-        if (ref($arg_node) eq 'PPI::Token::Symbol') {
-          my $arg_sigil = substr($arg_node->content(), 0, 1);
-          # If arg sigil matches expected and it's not already a reference
-          if ($arg_sigil eq $expected_sigil) {
-            $arg = "(p-backslash $arg)";
-          }
-        }
-      }
-    }
-    push @args, $arg;
-  }
-
-  # Bare print/say/printf (no LIST after the optional filehandle) defaults to
-  # $_ — emitted EXPLICITLY so the generated CL is self-describing (the runtime
-  # no longer supplies a hidden $_ default; see docs/generated-cl-ir-review.md).
-  # A `:fh …` marker is not a list arg, so `print STDERR;` / `printf STDERR;`
-  # also get the default.  This is what fixes bare `printf;` (which had no
-  # runtime default and printed nothing), making the family consistent.
-  if ($func_name eq 'print' || $func_name eq 'say' || $func_name eq 'printf') {
-    push @args, '$_' unless grep { $_ !~ /^:fh\b/ } @args;
-  }
-
-  # Restore tail_position before the tail-call context check below.
-  $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
-
-  my $args_str = @args ? ' ' . join(' ', @args) : '';
-
-  # die/warn: pass the source location so the runtime appends Perl's
-  # " at FILE line N." suffix (when the message doesn't end in a newline).
-  # The (:loc "...") marker is stripped by p-die/p-warn before concatenation.
-  if ($cl_func eq 'p-die' || $cl_func eq 'p-warn') {
-    my $word = $self->expr_o->get_a_node($kids->[0]);
-    my $line = (ref($word) && $word->can('line_number')) ? ($word->line_number // 0) : 0;
-    my $file = ($self->environment && $self->environment->source_file) || '-';
-    $file =~ s/(["\\])/\\$1/g;
-    $args_str = " :loc \"$file line $line\"$args_str";
-  }
-
-  my $call = "($cl_func$args_str)";
-
-  # 'my'/'our' in expression context is an identity (returns the expression's value).
-  # e.g. 'if (my $a = my $b = 3)' → (p-my-= $a (p-my-= $b 3)) with no wrapper needed.
-  if (($func_name eq 'my' || $func_name eq 'our') && @args == 1) {
-    return $args[0];
-  }
-
-  my $ctx = $self->expr_o->get_node_context($node_id);
-
-  # split: p-split always returns a vector; no *wantarray* wrapper needed.
-  # Arguments must NOT be evaluated in list context (e.g. =~ as pattern arg
-  # would return captures vector instead of 1/0 if *wantarray* is t).
-  if ($func_name eq 'split') {
-    return $ctx == 0 ? "(length $call)" : $call;
-  }
-
-  # INHERIT_CTX or tail position: do not override *wantarray*; let the
-  # caller's dynamic binding propagate through.  This must come BEFORE any
-  # wantarray-sensitive built-in special cases (reverse/localtime/etc.) so that
-  # when such a built-in IS the tail call of a sub, the caller's context flows
-  # through rather than being frozen to the annotation-time context.
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
-
-  # Wantarray-sensitive built-ins (reverse/localtime/gmtime/caller/unpack/each/
-  # splice): their result depends on *wantarray*, which they read at runtime.
-  # Bind it explicitly to the node's static context so the enclosing sub's
-  # *wantarray* can't leak in (see %WANTARRAY_SENSITIVE).  unpack: scalar
-  # unpack() in a list-context assignment (@a = scalar unpack()) must force
-  # scalar so p-unpack returns $result[0] not @result.
-  if ($WANTARRAY_SENSITIVE{$func_name}) {
-    return $self->_wrap_wantarray_ctx($call, $ctx);
-  }
-
-  # join always evaluates its list arguments in list context (args after sep),
-  # regardless of the context in which join() itself is called.
-  if ($func_name eq 'join') {
-    return "(let ((*wantarray* t)) $call)";
-  }
-  if ($func_name eq 'do') {
-    return $self->_ctx_wrap($call, $ctx);
-  }
-
-  # User sub calls: always bind *wantarray* so the callee sees the correct
-  # context regardless of what the surrounding scope has set.
-  # Built-ins (in %RUNTIME_NAMES) don't call p-wantarray; only wrap them for
-  # list context (to avoid disturbing wantarray-sensitive built-ins called
-  # inside a scalar-context scope).
-  if (!exists $RUNTIME_NAMES{$func_name}) {
-    return $self->_ctx_wrap($call, $ctx);
-  }
-
-  # Built-in in list context: still wrap so it gets list-context signal
-  # (e.g. a wantarray-sensitive built-in called as the RHS of @arr = builtin())
-  return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $call)" : $call;
-}
-
-
-# Wrap a wantarray-sensitive CALL in `(let ((*wantarray* t/nil)) …)` for the
-# given static context CTX, so the enclosing sub's *wantarray* cannot leak into
-# it.  Shared by gen_funcall (built-ins in %WANTARRAY_SENSITIVE), gen_readline
-# (<FH>) and gen_glob (<pat>) — the three syntactic forms whose result depends
-# on *wantarray*.  INHERIT_CTX or a tail-call position is left UNWRAPPED so the
-# real caller's dynamic binding flows through (these built-ins treat :void like
-# scalar, so a 2-way t/nil mapping is sufficient).
-sub _wrap_wantarray_ctx {
-  my ($self, $call, $ctx) = @_;
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
-  return $ctx == LIST_CTX
-      ? "(let ((*wantarray* t)) $call)"
-      : "(let ((*wantarray* nil)) $call)";
-}
-
-# Wrap CALL in (let ((*wantarray* WA)) ...) for the node's static context CTX,
-# where WA is t (list) / nil (scalar) / :void (void).  Callers handle INHERIT_CTX
-# themselves (it must NOT reach here).  When CTX is VOID and a sub-body :void
-# regime is active (environment->wa_void_active), the ambient *wantarray* is
-# already :void, so the binding is a no-op and is skipped — this is what keeps
-# nested void-context calls from re-asserting :void on every statement.
-sub _ctx_wrap {
-  my ($self, $call, $ctx) = @_;
-  return $call if $ctx == VOID_CTX
-               && $self->environment && $self->environment->wa_void_active;
-  my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-  return "(let ((*wantarray* $wa)) $call)";
-}
 
 # Form variants of _wrap_wantarray_ctx / _ctx_wrap for E2-converted
 # emitters: same logic, CLForm output (flat-prints to the same bytes).
@@ -3655,118 +2743,6 @@ sub _eval_lexical_alist {
 }
 
 
-# Method call: (p-method-call obj 'method args...)
-sub gen_methodcall {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # First child is object, second is method name
-  my $obj_node = $self->expr_o->get_a_node($kids->[0]);
-  my $obj;
-
-  # Check if object is a class name (funcall with no args = bare word like Counter)
-  # Disambiguation at compile time when possible, otherwise defer to runtime:
-  #   - Known package (e.g., Counter->new()) → string "Counter"
-  #   - Known function (e.g., foo->method() where foo is a sub) → function call
-  #   - Unknown bareword → use p-resolve-invocant for runtime dispatch
-  #     (In Perl, Foo->bar() checks if sub Foo exists before treating as class)
-  if ($self->expr_o->is_internal_node_type($obj_node) &&
-      $obj_node->{type} eq 'funcall') {
-    my $obj_kids = $self->expr_o->get_node_children($kids->[0]);
-    if (@$obj_kids == 1) {
-      # Single child = potential bare class name or function call
-      my $class_node = $self->expr_o->get_a_node($obj_kids->[0]);
-      if (ref($class_node) eq 'PPI::Token::Word') {
-        my $name = $class_node->content();
-        if ($name eq '__PACKAGE__') {
-          # Compile-time token: __PACKAGE__->method resolves the invocant to the
-          # current package name (same as bareword __PACKAGE__ elsewhere), NOT a
-          # class literally named "__PACKAGE__".  Common idiom in module BEGIN
-          # blocks, e.g. Math::BigInt::Calc's __PACKAGE__->_base_len(...).
-          my $pkg = ($self->environment && $self->environment->current_package)
-                      ? $self->environment->current_package : 'main';
-          $obj = '"' . $pkg . '"';
-        } elsif ($self->environment && $self->environment->is_package($name)) {
-          # Known package → class name string
-          $obj = '"' . $name . '"';
-        } elsif ($self->environment && $self->environment->has_prototype($name)) {
-          # Known function → function call
-          $obj = $self->gen_node($kids->[0]);
-        } else {
-          # Unknown bareword → runtime dispatch (checks for sub first, then class)
-          $obj = '(p-resolve-invocant "' . $name . '")';
-        }
-      } else {
-        $obj = $self->gen_node($kids->[0]);
-      }
-    } else {
-      $obj = $self->gen_node($kids->[0]);
-    }
-  } elsif ($self->_is_paren_scalar_base($kids->[0])) {
-    # A parenthesised single-value invocant — (EXPR)->method — is a scalar, so
-    # generate it in SCALAR context.  Under LIST_CTX (e.g. the call is an
-    # argument to another sub) a paren node otherwise renders as (vector ...),
-    # making the invocant an array ref → "Can't call method on unblessed
-    # reference".  Same fix as the array/hash arrow-deref bases above.
-    $obj = $self->_gen_scalar_deref_base($kids->[0]);
-  } else {
-    $obj = $self->gen_node($kids->[0]);
-  }
-
-  my $method_node = $self->expr_o->get_a_node($kids->[1]);
-  my $method  = $self->gen_node($kids->[1]);
-
-  # Check if method name is a variable (dynamic method call)
-  my $is_dynamic_method = 0;
-  if (ref($method_node) eq 'PPI::Token::Symbol' && $method_node->content() =~ /^\$/) {
-    $is_dynamic_method = 1;
-  } elsif ($self->expr_o->is_internal_node_type($method_node)) {
-    # Computed method name, e.g. $obj->${ EXPR }(...) — the method is the
-    # runtime value of an expression (a name string or a coderef).
-    $is_dynamic_method = 1;
-  }
-
-  # Rest are arguments
-  # Method args alias through @_ like any user-sub call (defelem, #131);
-  # 'argbox' only when the arg itself is an element access.
-  my $saved_lvalue_mc = $self->lvalue_context;
-  my @args;
-  for my $i (2 .. $#$kids) {
-    $self->lvalue_context(
-      $self->_is_elem_arg($kids->[$i]) ? 'argbox' : $saved_lvalue_mc);
-    push @args, $self->gen_node($kids->[$i]);
-  }
-  $self->lvalue_context($saved_lvalue_mc);
-
-  my $args_str = @args ? ' ' . join(' ', @args) : '';
-
-  # Check for SUPER:: method call (also handles old Perl 4 SUPER'method syntax)
-  my $call;
-  if ($method =~ /^SUPER(?:::|')(.+)$/) {
-    my $real_method = $1;
-    # Need current package for SUPER:: lookup
-    my $current_pkg = $self->environment ? $self->environment->current_package : 'main';
-    (my $rm_str = $real_method) =~ s/"/\\"/g;
-    $call = "(p-super-call $obj \"$rm_str\" \"$current_pkg\"$args_str)";
-  } elsif ($is_dynamic_method) {
-    # Dynamic method call: $obj->$method_var
-    # Method name is in a variable, pass the variable value
-    $call = "(p-method-call $obj $method$args_str)";
-  } else {
-    # Use string literal to preserve case (CL symbols are upcased, breaking AUTOLOAD)
-    (my $method_str = $method) =~ s/"/\\"/g;
-    $call = "(p-method-call $obj \"$method_str\"$args_str)";
-  }
-
-  # Bind *wantarray* so the method body sees the correct call context.
-  my $ctx = $self->expr_o->get_node_context($node_id);
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
-  return $self->_ctx_wrap($call, $ctx);
-}
-
 # E2 form variant of gen_methodcall.  Same invocant disambiguation, dynamic /
 # SUPER:: detection (all AST-level — is_package/has_prototype lookups and node
 # ref-type checks, no generated-text inspection except the SUPER:: prefix on a
@@ -3857,38 +2833,6 @@ sub gen_methodcall_form {
 }
 
 
-# Code ref call: (p-funcall-ref ref args...)
-sub gen_ref_funcall {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # First child is the code reference
-  my $ref = $self->gen_node($kids->[0]);
-
-  # Rest are arguments.  A coderef call is always user code — element args
-  # alias through @_ (defelem, #131); 'argbox' only when the arg itself is
-  # an element access.
-  my @args;
-  my $saved_lvalue = $self->lvalue_context;
-  for my $i (1 .. $#$kids) {
-    $self->lvalue_context(
-      $self->_is_elem_arg($kids->[$i]) ? 'argbox' : $saved_lvalue);
-    push @args, $self->gen_node($kids->[$i]);
-  }
-  $self->lvalue_context($saved_lvalue);
-
-  my $args_str = @args ? ' ' . join(' ', @args) : '';
-  my $call = "(p-funcall-ref $ref$args_str)";
-
-  # Bind *wantarray* so the code-ref body sees the correct call context.
-  my $ctx = $self->expr_o->get_node_context($node_id);
-  return $call if $ctx == INHERIT_CTX;
-  return $call if $self->environment && $self->environment->tail_position;
-  return $self->_ctx_wrap($call, $ctx);
-}
-
 # E2 form variant of gen_ref_funcall.  No operand-text inspection; converts
 # fully.  Same ctx-wrap discipline as gen_methodcall_form / gen_funcall_form.
 sub gen_ref_funcall_form {
@@ -3937,212 +2881,6 @@ sub gen_ternary {
   return ['p-if', $cond, $then, $else];
 }
 
-
-# Prefix operator: (p-OP operand) or (p-OP-pre operand)
-sub gen_prefix_op {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # First child is the operator, second is the operand
-  my $op_node = $self->expr_o->get_a_node($kids->[0]);
-  my $op      = $op_node->content();
-
-  # Special case: \&func (reference to function)
-  # Use p-backslash-sub to safely handle undefined functions (AUTOLOAD dispatch).
-  if ($op eq '\\') {
-    my $operand_id   = $kids->[1];
-    my $operand_node = $self->expr_o->get_a_node($operand_id);
-    if (ref($operand_node) eq 'PPI::Token::Symbol' &&
-        $operand_node->content() =~ /^&(.+)$/) {
-      my $func_name = $1;
-      # \&NAME references the sub slot (the user sub), never a builtin — even
-      # when NAME happens to be a builtin name (Perl: `\&length` refers to
-      # `&main::length`, not the `length` operator). Force the user sub.
-      my $cl_func = $self->cl_name($func_name, 1, 1);
-      return "(p-backslash-sub '$cl_func)";
-    }
-    # \&{expr} / \&$var — the coderef itself, not a call: reach past the
-    # `&` prefix (which alone would lower to a call with @_) and take the
-    # coderef mention.  p-backslash passes functions through unchanged.
-    if (defined(my $amp_id = $self->_amp_cast_operand_id($operand_id))) {
-      my $saved = $self->lvalue_context;
-      $self->lvalue_context(1);
-      my $inner = $self->gen_node($amp_id);
-      $self->lvalue_context($saved);
-      return "(p-backslash (p-get-coderef $inner))";
-    }
-    # \(LIST) — distribute \\ over each element. PExpr marks the operand node
-    # with 'backslash_paren_list' when the source had explicit parens.
-    if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
-      # For single-child tree_val with a scalar expression (not an array var,
-      # range, or list-function), use p-backslash directly.  This handles
-      # \(my $v = expr) correctly — without this check it generates a vector
-      # of one ref instead of a plain scalar ref, breaking bless.
-      my $inner_node = $self->expr_o->get_a_node($operand_id);
-      if ($self->expr_o->is_internal_node_type($inner_node)
-          && ($inner_node->{type} // '') eq 'tree_val') {
-        my $tv_kids = $self->expr_o->get_node_children($operand_id);
-        if (@$tv_kids == 1 && !$self->_is_list_node_for_refgen($tv_kids->[0])) {
-          # Single scalar child: \(scalar_expr) == \scalar_expr
-          my $saved_ctx = $self->expr_o->get_node_context($operand_id);
-          $self->expr_o->set_node_context($operand_id, 0);
-          my $scalar_expr = $self->gen_node($operand_id);
-          $self->expr_o->set_node_context($operand_id, $saved_ctx);
-          return "(p-backslash $scalar_expr)";
-        }
-        # Multi-term comma list: \(T1, T2, ...) — each @/% var gets one ref,
-        # ranges spread into N scalar refs, scalars get one scalar ref.
-        if (@$tv_kids > 1) {
-          return $self->_gen_backslash_multi_term($tv_kids);
-        }
-      }
-      my $raw_ctx   = $self->expr_o->get_node_context_raw($node_id);
-      my $saved_ctx = $self->expr_o->get_node_context($node_id);
-      $self->expr_o->set_node_context($operand_id, LIST_CTX);
-      my $list_expr = $self->gen_node($operand_id);
-      $self->expr_o->set_node_context($operand_id, $saved_ctx);
-      # \(LIST) is a list operator: in explicit scalar/void context it yields a
-      # ref to the LAST element (comma-operator semantics), e.g.
-      # `bless \(map "$_", "x"), "C"` is a SCALAR ref, not an ARRAY ref.  When the
-      # context is list or unannotated (list-natural), keep the full vector.
-      if (defined $raw_ctx && ($raw_ctx == SCALAR_CTX || $raw_ctx == VOID_CTX)) {
-        return "(p-list-scalar (p-refgen-list $list_expr))";
-      }
-      return "(p-refgen-list $list_expr)";
-    }
-  }
-
-  # $#{ array } — last index of array (braced form of $#array)
-  # PPI tokenises $#{@a} as Cast[$#] + Block{@a}; handle before cl_name()
-  if ($op eq '$#') {
-    my $arr_expr = $self->gen_node($kids->[1]);
-    return "(p-array-last-index $arr_expr)";
-  }
-
-  # ${expr}++ / $$var++ / ${expr}-- / $$var-- (and @/% variants):
-  # The shunting-yard parser incorrectly produces prefix_op($, postfix_op(X, ++))
-  # because ++ has higher precedence (92) than Cast $ (90).
-  # The correct semantics is postfix_op(prefix_op($, X), ++):
-  #   (p-post++ (p-cast-$ X))  not  (p-cast-$ (p-post++ X))
-  if ($op eq '$' || $op eq '@' || $op eq '%') {
-    my $inner_id   = $kids->[1];
-    my $inner_node = $self->expr_o->get_a_node($inner_id);
-    if ($self->expr_o->is_internal_node_type($inner_node)
-        && $inner_node->{type} eq 'postfix_op') {
-      my $po_kids    = $self->expr_o->get_node_children($inner_id);
-      my $po_op_node = $self->expr_o->get_a_node($po_kids->[1]);
-      my $po_op      = $po_op_node->content();
-      if ($po_op eq '++' || $po_op eq '--') {
-        # Inner expression should NOT be in lvalue context: we want the VALUE
-        # (the reference) to pass to p-cast-$, not the box.
-        my $saved = $self->lvalue_context;
-        $self->lvalue_context(0);
-        my $inner_expr = $self->gen_node($po_kids->[0]);
-        $self->lvalue_context($saved);
-        return "(p-post$po_op (p-cast-$op $inner_expr))";
-      }
-    }
-  }
-
-  # Unary + is a pure no-op disambiguator in Perl (`map +(LIST), ...`,
-  # `func +(...)`, `print +(...)`). It must NOT numify or collapse a list to a
-  # scalar — it passes its operand through unchanged, inheriting the surrounding
-  # context. Propagate our node's context to the operand so a parenthesised list
-  # stays a list (fixes `map +($_, $h{$_}), LIST`). See docs/sweep-bug-catalog.md.
-  if ($op eq '+') {
-    my $operand_id = $kids->[1];
-    my $my_ctx     = defined $node_id
-                     ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
-    # A parenthesised SINGLE expression `+(EXPR)` is just EXPR — unwrap the
-    # tree_val so it does not become a 1-element vector in list context (e.g.
-    # `print +(2+3)`). A multi-term `+(A, B)` keeps the list (becomes a vector).
-    my $on = $self->expr_o->get_a_node($operand_id);
-    if ($self->expr_o->is_internal_node_type($on)
-        && ($on->{type} // '') eq 'tree_val') {
-      my $tv_kids = $self->expr_o->get_node_children($operand_id);
-      $operand_id = $tv_kids->[0] if @$tv_kids == 1;
-    }
-    my $saved = $self->expr_o->get_node_context($operand_id);
-    $self->expr_o->set_node_context($operand_id, $my_ctx);
-    my $inner = $self->gen_node($operand_id);
-    $self->expr_o->set_node_context($operand_id, $saved);
-    return $inner;
-  }
-
-  # ++, --, \ and @ need l-value context for array/hash elements.
-  # @ needs lvalue so subscripts return boxes → p-cast-@ can auto-vivify.
-  # \ needs l-value to get a reference to the box, not a copy of the value.
-  my $needs_lvalue = ($op eq '++' || $op eq '--' || $op eq '\\' || $op eq '@');
-  my $saved_lvalue = $self->lvalue_context;
-  $self->lvalue_context(1) if $needs_lvalue;
-  my $operand = $self->gen_node($kids->[1]);
-  $self->lvalue_context($saved_lvalue);
-
-  # \$#array — reference to the arylen ($#array) magic. A plain
-  # (p-backslash (p-array-last-index X)) backslashes a COPY of the integer, so
-  # $$ref = N would not resize X. Emit a live magic-cell ref instead (getter =
-  # p-array-last-index, setter = p-set-array-length). See docs/sweep-bug-catalog.md.
-  if ($op eq '\\' && $operand =~ /^\(p-array-last-index (.+)\)$/) {
-    return "(p-arylen-ref $1)";
-  }
-
-  # \substr / \pos / \vec — references to scalar magic lvalues. Like \$#array,
-  # a plain (p-backslash (p-substr ...)) backslashes a COPY of the extracted
-  # value, so $$ref = X would not write back. Emit live magic-cell refs instead
-  # (getter reads, setter writes through). See docs/sweep-bug-catalog.md.
-  # /s: a complex first argument (e.g. a do-block lowered to a multiline
-  # funcall-lambda) puts newlines in the operand text — without /s the match
-  # failed and the \substr silently degraded to a copy (no write-through).
-  if ($op eq '\\') {
-    if ($operand =~ /^\(p-substr (.+)\)$/s) { return "(p-substr-ref $1)"; }
-    if ($operand =~ /^\(p-pos (.+)\)$/s)    { return "(p-pos-ref $1)"; }
-    if ($operand =~ /^\(p-vec (.+)\)$/s)    { return "(p-vec-ref $1)"; }
-  }
-
-  # Get CL name for the operator
-  my $cl_op = $self->cl_name($op);
-
-  # Under 'use integer', ~ returns signed 64-bit complement
-  if ($op eq '~' && $self->environment && $self->environment->has_pragma('use_integer')) {
-    return "(p-to-s64 (lognot (pcl::%pcl-to-integer (to-number $operand))))";
-  }
-
-  # For ++ and --, distinguish prefix from postfix
-  if ($op eq '++' || $op eq '--') {
-    # Special case: $#array lvalue - emit setter form
-    if ($operand =~ /^\(p-array-last-index (.+)\)$/) {
-      my $arr = $1;
-      my $delta_op = ($op eq '++') ? '1+' : '1-';
-      return "(p-set-array-length $arr ($delta_op (p-array-last-index $arr)))";
-    }
-    $cl_op = "p-pre" . $op;
-  }
-  # Sigil cast operators (dereference) - use p-cast-X
-  # (@{EXPR}[slice] / @{EXPR}{slice} never reach here: PExpr builds a
-  # slice_a_acc/slice_h_acc node when a Cast+Block is followed by a trailing
-  # subscript — see docs/symbolic-ref-slice-parse-fix.md.)
-  elsif ($op eq '@' || $op eq '%' || $op eq '$') {
-    $cl_op = "p-cast-$op";
-  }
-  # & Cast: &{expr} / &$var with no argument list is a CALL passing the
-  # current @_ (same rule as the leaf-Symbol `&foo;` form).  The parents
-  # that want the coderef itself — \, defined, exists, undef, goto — never
-  # reach this branch: they intercept via _amp_cast_operand_id and lower
-  # the mention themselves ((p-get-coderef expr) and friends).
-  elsif ($op eq '&') {
-    return "(p-funcall-ref $operand @_)";
-  }
-  # * Cast: *$var (typeglob ref) — use distinct marker so assignment can detect it.
-  # When on LHS of =, becomes (p-glob-assign-dynamic ...).
-  # As rvalue, returns the typeglob object.
-  elsif ($op eq '*') {
-    return "(p-dynamic-typeglob $operand)";
-  }
-
-  return "($cl_op $operand)";
-}
 
 # E2 form variant of gen_prefix_op.  The `\` backslash family and `++`/`--`
 # — whose TEXT emitter regexes the generated operand text to detect magic
@@ -4318,47 +3056,6 @@ sub gen_prefix_op_form {
 }
 
 
-# Postfix operator: (p-OP-post operand)
-sub gen_postfix_op {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # Check if this is a chained comparison (odd number of kids >= 5:
-  # term op term op term ...)
-  if (scalar(@$kids) >= 5 && scalar(@$kids) % 2 == 1) {
-    return $self->gen_chained_comparison($kids);
-  }
-
-  # Get operator first to check if we need l-value context
-  my $op_node = $self->expr_o->get_a_node($kids->[1]);
-  my $op      = $op_node->content();
-
-  # ++ and -- modify their operand, need l-value context for array/hash elements
-  my $needs_lvalue = ($op eq '++' || $op eq '--');
-  my $saved_lvalue = $self->lvalue_context;
-  $self->lvalue_context(1) if $needs_lvalue;
-  my $operand = $self->gen_node($kids->[0]);
-  $self->lvalue_context($saved_lvalue);
-
-  # For ++ and --, use p-post++ / p-post-- naming
-  my $cl_op;
-  if ($op eq '++' || $op eq '--') {
-    # Special case: $#array lvalue - emit setter form (return old value)
-    if ($operand =~ /^\(p-array-last-index (.+)\)$/) {
-      my $arr = $1;
-      my $delta_op = ($op eq '++') ? '1+' : '1-';
-      return "(let ((_prev (p-array-last-index $arr))) (p-set-array-length $arr ($delta_op _prev)) _prev)";
-    }
-    $cl_op = "p-post" . $op;
-  } else {
-    $cl_op = $self->cl_name($op) . '-post';
-  }
-
-  return "($cl_op $operand)";
-}
-
 # E2 form variant of gen_postfix_op — FULL coverage: the chained-comparison
 # container, plain ++/--/other postfix ops, and the `$#array++` arylen
 # setter (keyed on the generated operand form's head, like
@@ -4408,69 +3105,6 @@ sub gen_postfix_op_form {
 }
 
 
-# Chained comparison: $x < $y < $z      -> (p-chain-cmp $x '< $y '< $z)
-#                     a == b != c == d   -> (p-chain-cmp a '== b '!= c '== d)
-# Kids alternate: term, op, term, op, ..., term  (always odd count >= 5)
-sub gen_chained_comparison {
-  my $self = shift;
-  my $kids = shift;
-
-  my @parts;
-  for my $i (0 .. $#$kids) {
-    if ($i % 2 == 0) {
-      push @parts, $self->gen_node($kids->[$i]);                              # term
-    } else {
-      push @parts, "'" . $self->expr_o->get_a_node($kids->[$i])->content();  # 'op
-    }
-  }
-  return "(p-chain-cmp " . join(" ", @parts) . ")";
-}
-
-
-# Array access: (p-aref arr idx) or (p-aref-box arr idx) in l-value context
-# In Perl, $arr[0] accesses @arr, so we convert $sigil to @sigil
-sub gen_array_access {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $arr_node = $self->expr_o->get_a_node($kids->[0]);
-  my $arr = $self->gen_node($kids->[0]);
-  my $idx = $self->gen_node($kids->[1]);
-
-  # Convert $varname to @varname (Perl $arr[i] accesses @arr)
-  # Handle both plain $arr and package-qualified Pkg::$arr.
-  # Only rewrite when the container is a bare variable (Symbol/Magic): for a
-  # nested access like $a[$i]{...} the container is already a full (p-aref ...)
-  # form whose inner package-qualified index (Pkg::$i) would be wrongly hit by
-  # the `::$` alternative.
-  if (ref($arr_node) eq 'PPI::Token::Symbol'
-      || ref($arr_node) eq 'PPI::Token::Magic') {
-    $arr = _swap_elem_sigil($arr, q(@));
-  }
-
-  # Numeric-named arrays like @0, @1 are not valid Perl identifiers.
-  # $0[n] parses as @0[n] but @0 is never a real variable; return undef.
-  return '(p-undef)' if $arr =~ /^@\d+$/;
-
-  # Punctuation-named `#` array (@#) comes from `$#[idx]` — the removed `$#`
-  # magic taking a subscript, which Perl reads as element idx of @#.  Its name
-  # is not a word char, so the forward-declaration scan misses it; register it
-  # so a file-level defvar is emitted (undef/empty, not an unbound crash).
-  $self->environment->register_punct_global($arr)
-    if $self->environment && $arr eq '@#';
-
-  # Apply rename map for @varname (closure/state variable captures)
-  if ($self->environment) {
-    my $renames = $self->environment->state_var_renames;
-    $arr = $renames->{$arr} if $renames && exists $renames->{$arr};
-  }
-
-  # Use p-aref-box in l-value context for modifying operations
-  my $func = $self->_elem_accessor('p-aref');
-  return "($func $arr $idx)";
-}
 
 # E2 form variant of gen_array_access.  Same shape/side effects as the text
 # emitter; generation ORDER preserved (container then index).  The container
@@ -4531,57 +3165,6 @@ sub _swap_elem_sigil {
   return $sym;
 }
 
-sub gen_hash_access {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $hash = $self->gen_node($kids->[0]);
-
-  # $h{a, b, c} → key is join($;, a, b, c) (SUBSEP multi-key)
-  my $key_node = $self->expr_o->get_a_node($kids->[1]);
-  my $key;
-  if ($self->expr_o->is_internal_node_type($key_node)
-      && $key_node->{type} eq 'progn') {
-    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
-    if (@$key_kids > 1) {
-      my @parts = map { $self->gen_node($_) } @$key_kids;
-      $key = "(p-join |\$;| (vector " . join(' ', @parts) . "))";
-    } else {
-      $key = $self->gen_node($kids->[1]);
-    }
-  } else {
-    $key = $self->gen_node($kids->[1]);
-  }
-
-  # Convert $varname to %varname (Perl $hash{k} accesses %hash)
-  # Handle both plain $hash and package-qualified Pkg::$hash.
-  # Only rewrite when the container is a bare variable (Symbol/Magic): for a
-  # nested access like $h{$k}[...] the container is already a full (p-gethash
-  # ...) form whose inner package-qualified key (Pkg::$k) would be wrongly hit
-  # by the `::$` alternative.
-  my $hash_node = $self->expr_o->get_a_node($kids->[0]);
-  if (ref($hash_node) eq 'PPI::Token::Symbol'
-      || ref($hash_node) eq 'PPI::Token::Magic') {
-    $hash = _swap_elem_sigil($hash, q(%));
-  }
-
-  # Punctuation-named `#` hash (%#) from `$#{key}` — see gen_array_access.
-  $self->environment->register_punct_global($hash)
-    if $self->environment && $hash eq '%#';
-
-  # Apply rename map for %varname (closure/state variable captures)
-  if ($self->environment) {
-    my $renames = $self->environment->state_var_renames;
-    $hash = $renames->{$hash} if $renames && exists $renames->{$hash};
-  }
-
-  # Use p-gethash-box in l-value context for modifying operations
-  my $func = $self->_elem_accessor('p-gethash');
-  return "($func $hash $key)";
-}
-
 
 # True when NODE is a parenthesised single-value base — a tree_val or progn with
 # exactly one child, e.g. the `($r//0)` in `($r//0)->[i]`. Such a base is a
@@ -4594,23 +3177,6 @@ sub _is_paren_scalar_base {
   return 0 unless $type eq 'tree_val' || $type eq 'progn';
   my $kids = $self->expr_o->get_node_children($node_id);
   return $kids && @$kids == 1;
-}
-
-# Generate a parenthesised arrow-deref base in SCALAR context, so a single-child
-# tree_val/progn renders as the bare scalar ref rather than (vector ...) (which
-# happens under LIST_CTX — gen_tree_val — or lvalue — gen_progn). The base is a
-# scalar REF that is READ to obtain the pointer; autoviv of the indexed slot is
-# still performed by the -box runtime fn at the call site.
-sub _gen_scalar_deref_base {
-  my ($self, $base_id) = @_;
-  my $saved_ctx = $self->expr_o->get_node_context($base_id);
-  $self->expr_o->set_node_context($base_id, 0);   # SCALAR_CTX
-  my $saved_lv = $self->lvalue_context;
-  $self->lvalue_context(0);
-  my $cl = $self->gen_node($base_id);
-  $self->lvalue_context($saved_lv);
-  $self->expr_o->set_node_context($base_id, $saved_ctx);
-  return $cl;
 }
 
 # E2 form twin: same scalar-context/lvalue dance, structural child.
@@ -4664,116 +3230,7 @@ sub gen_hash_access_form {
   return [$func, $hash, $key];
 }
 
-# Array ref access: (p-aref-deref ref idx)
-sub gen_array_ref_access {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
 
-  # (LIST)[idx] or method()[idx]: force LIST_CTX on child 0 so the expression
-  # is evaluated in list context — Perl always does this for X[N] subscripts.
-  # 'list_ctx_subscript' is set by the Constructor path in PExpr.pm (covers
-  # paren-list and method-call subscripts). Arrow-deref $arr->[N] does NOT
-  # set this flag, so those keep their outer context (usually scalar).
-  # Also handle qw[...][idx]: child 0 is a 'progn' (qw words), always LIST_CTX.
-  my $is_list_subscript = $self->expr_o->node_tree->get_metadata($node_id, 'list_ctx_subscript');
-  my $child0_node = $self->expr_o->get_a_node($kids->[0]);
-  # A parenthesised single-value base — ($r//0)->[N] — is a scalar ref, NOT a
-  # list subscript. Without this, the base is forced to LIST_CTX/lvalue and
-  # renders as (vector ...), so `($r//0)->[i]{k}...=v` autovivified into a bogus
-  # 1-element vector (p-autoviv-aref-for-hash TYPE-ERROR, multideref.t).
-  my $paren_scalar_base = !$is_list_subscript && $self->_is_paren_scalar_base($kids->[0]);
-  if (!$paren_scalar_base
-      && ($is_list_subscript
-          || ($self->expr_o->is_internal_node_type($child0_node)
-              && $child0_node->{type} eq 'progn'))) {
-    $self->expr_o->set_node_context($kids->[0], 1);  # LIST_CTX = 1
-  }
-
-  my $ref = $paren_scalar_base
-            ? $self->_gen_scalar_deref_base($kids->[0])
-            : $self->gen_node($kids->[0]);
-  my $idx = $self->gen_node($kids->[1]);
-
-  # In l-value context (e.g. \$ref->[i], or a modifying op) return the LIVE box
-  # at the slot so a reference tracks later writes (stacked Moo `around` relies on
-  # \$cache->{wrapped} seeing reassignment).  Plain reads stay snapshot-valued.
-  my $func = $self->lvalue_context ? 'p-aref-deref-box' : 'p-aref-deref';
-  return "($func $ref $idx)";
-}
-
-
-# Hash ref access: (p-gethash-deref ref key)
-sub gen_hash_ref_access {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # A parenthesised scalar base — ($r//0)->{k} — is a scalar ref, so generate it
-  # in scalar context rather than letting it render as (vector ...). (Hash-ref
-  # access has no list-subscript form, so a single-value paren base here is always
-  # a scalar arrow-deref base.)
-  my $ref = $self->_is_paren_scalar_base($kids->[0])
-            ? $self->_gen_scalar_deref_base($kids->[0])
-            : $self->gen_node($kids->[0]);
-
-  # $href->{a, b} → key is join($;, a, b) (SUBSEP multi-key)
-  my $key_node = $self->expr_o->get_a_node($kids->[1]);
-  my $key;
-  if ($self->expr_o->is_internal_node_type($key_node)
-      && $key_node->{type} eq 'progn') {
-    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
-    if (@$key_kids > 1) {
-      my @parts = map { $self->gen_node($_) } @$key_kids;
-      $key = "(p-join |\$;| (vector " . join(' ', @parts) . "))";
-    } else {
-      $key = $self->gen_node($kids->[1]);
-    }
-  } else {
-    $key = $self->gen_node($kids->[1]);
-  }
-
-  # L-value context (\$ref->{k}, modifying ops): return the LIVE box at the slot
-  # so a reference tracks later writes (see gen_array_ref_access).
-  my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
-  return "($func $ref $key)";
-}
-
-
-# Array slice: (p-aslice arr idx1 idx2 ...)
-sub gen_array_slice {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $arr = $self->gen_node($kids->[0]);
-  my @indices;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @indices, $self->gen_node($kids->[$i]);
-  }
-
-  my $idx_str = join(' ', @indices);
-  return $self->_slice_in_context("(p-aslice $arr $idx_str)", $node_id);
-}
-
-# An array/hash slice in scalar context yields its LAST element (list semantics),
-# not the element count.  Wrap the slice vector accordingly: scalar → last elem,
-# list/void → the vector itself, inherited (e.g. `return @a[...]`) → runtime check.
-sub _slice_in_context {
-  my ($self, $slice_cl, $node_id) = @_;
-  # Use the RAW context: an unannotated slice is list-natural (e.g. inside string
-  # interpolation or a freshly-parsed unit-test expression) and must keep its full
-  # vector — defaulting it to scalar would wrongly reduce it to the last element.
-  my $ctx = defined $node_id ? $self->expr_o->get_node_context_raw($node_id) : undef;
-  return $slice_cl unless defined $ctx;            # unannotated → full slice vector
-  return "(p-list-scalar $slice_cl)"  if $ctx == SCALAR_CTX;
-  return "(p-slice-result $slice_cl)" if $ctx == INHERIT_CTX;
-  return $slice_cl;  # LIST_CTX / VOID_CTX: keep the full slice vector
-}
 
 # E2 form variant of _slice_in_context (same context rule, CLForm in/out).
 sub _slice_in_context_form {
@@ -4974,222 +3431,9 @@ sub gen_glob_slot_form {
 }
 
 
-# Hash slice: (p-hslice hash key1 key2 ...)
-# Note: @foo{keys} accesses %foo, so we convert @ sigil to %
-sub gen_hash_slice {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $hash_node = $self->expr_o->get_a_node($kids->[0]);
-  my $hash = $self->gen_node($kids->[0]);
-  # Convert @ to % for hash access (@ is context sigil, % is container sigil),
-  # handling package-qualified names (Foo::@h / |Foo::Bar|::@h) too.
-  if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /(?:^|::)\@/) {
-    $hash =~ s/(^|::)\@/${1}%/;
-  }
-  my @keys;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @keys, $self->gen_node($kids->[$i]);
-  }
-
-  my $key_str = join(' ', @keys);
-  return $self->_slice_in_context("(p-hslice $hash $key_str)", $node_id);
-}
-
-# KV hash slice: %hash{keys} - returns key-value pairs
-sub gen_kv_hash_slice {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $hash = $self->gen_node($kids->[0]);
-  my @keys;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @keys, $self->gen_node($kids->[$i]);
-  }
-
-  my $key_str = join(' ', @keys);
-  return "(p-kv-hslice $hash $key_str)";
-}
 
 
-# Typeglob slot access: *name{SLOT} -> (p-glob-slot <glob> "SLOT")
-sub gen_glob_slot {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
 
-  my $glob_cl   = $self->gen_node($kids->[0]);
-  # Computed slot {$type} / {EXPR}: the slot name is produced at runtime; the
-  # slot expression is child 1, and p-glob-slot stringifies + upcases the result.
-  if ($node->{slot_is_expr}) {
-    my $slot_cl = $self->gen_node($kids->[1]);
-    return "(p-glob-slot $glob_cl $slot_cl)";
-  }
-  my $slot_name = uc($node->{slot_name} // 'SCALAR');
-  return "(p-glob-slot $glob_cl \"$slot_name\")";
-}
-
-
-# KV array slice: %arr[indices] - returns key-value pairs
-sub gen_kv_array_slice {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $arr = $self->gen_node($kids->[0]);
-  # %arr[...] uses @ sigil for the array variable in CL (handle qualified names).
-  $arr =~ s/(^|::)\%/${1}\@/;
-  # %$ref[...] — $ref is a scalar holding an array ref; unbox to get the vector
-  $arr = "(unbox $arr)" if $arr =~ /^\$/;
-  my @indices;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @indices, $self->gen_node($kids->[$i]);
-  }
-
-  my $idx_str = join(' ', @indices);
-  return "(p-kv-aslice $arr $idx_str)";
-}
-
-# Array initializer: (p-array-init ...)
-# Uses p-array-init to flatten nested arrays (handles [(@x) x 2] etc.)
-sub gen_array_init {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # The contents of an anonymous array constructor [ ... ] are ALWAYS evaluated
-  # in list context, regardless of the context the [...] expression itself sits
-  # in.  Two things leak otherwise: (1) the annotated context, and (2) the
-  # tail_position flag — a wantarray-sensitive builtin (reverse/unpack/…) skips
-  # its (let ((*wantarray* t)) …) wrapper in tail position, so the enclosing
-  # scalar context leaks in.  E.g. `my $s = do { ...; "@{[reverse @a]}" }` ran
-  # reverse in scalar context (reversing the joined string "123" -> "321")
-  # instead of the list (3,2,1).  The bracket contents are never the tail call.
-  my $saved_tail = $self->environment ? $self->environment->tail_position : 0;
-  $self->environment->tail_position(0) if $self->environment && $saved_tail;
-  my @elements;
-  for my $kid_id (@$kids) {
-    my $saved_ctx = $self->expr_o->get_node_context($kid_id);
-    $self->expr_o->set_node_context($kid_id, LIST_CTX);
-    push @elements, $self->gen_node($kid_id);
-    $self->expr_o->set_node_context($kid_id, $saved_ctx);
-  }
-  $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
-
-  # Use p-array-init which flattens nested arrays
-  # Wrap in make-p-box because [...] creates a REFERENCE to an anonymous array
-  # (a scalar value), not the array itself. Without boxing, p-setf @arr
-  # would flatten the inner array instead of storing it as a reference.
-  if (@elements) {
-    my $elem_str = join(' ', @elements);
-    return "(make-p-box (p-array-init $elem_str))";
-  } else {
-    return "(make-p-box (make-array 0 :adjustable t :fill-pointer 0))";
-  }
-}
-
-
-# Hash initializer: (p-hash ...)
-sub gen_hash_init {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my @pairs;
-  for my $kid_id (@$kids) {
-    push @pairs, $self->gen_node($kid_id);
-  }
-
-  my $pairs_str = join(' ', @pairs);
-  # Wrap in make-p-box because {...} creates a REFERENCE to an anonymous hash
-  return "(make-p-box (p-hash $pairs_str))";
-}
-
-
-# Progn (comma-separated list): (progn ...)
-sub gen_progn {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $ctx = $self->expr_o->get_node_context($node_id);
-
-  # In list context, each child element also contributes in list context
-  # so that split() returns a list (not count), @arr expands, etc.
-  if ($ctx == 1) {  # LIST_CTX = 1
-    for my $kid_id (@$kids) {
-      $self->expr_o->set_node_context($kid_id, 1);
-    }
-  }
-
-  my @forms;
-  for my $kid_id (@$kids) {
-    push @forms, $self->gen_node($kid_id);
-  }
-
-  my $forms_str = join(' ', @forms);
-
-  # In list context, generate a vector instead of progn
-  # This handles: @a = (1,2,3), etc.
-  if ($ctx == 1) {  # LIST_CTX = 1
-    # Perl flattens a parenthesised list: any element that yields a list (an
-    # @array, a range 1..3, a list-returning call like reverse/map/sort, a
-    # nested (...), ...) spreads into the outer list.  A plain (vector ...) does
-    # NOT flatten, so e.g. (1..3, 9) wrongly nests the range as one element.
-    # Flatten at RUNTIME via p-flatten-args, which spreads any raw vector and
-    # keeps scalars/refs/blessed as-is — so it is correct for EVERY list-valued
-    # element without enumerating node types.  Keep the fast plain-vector path
-    # only when every child is a provably-scalar leaf (number/string/$scalar),
-    # which covers the common (1,2,3)/($x,$y) literal-list case.
-    my $all_scalar = 1;
-    for my $kid_id (@$kids) {
-      unless ($self->_node_is_definitely_scalar($kid_id)) {
-        $all_scalar = 0;
-        last;
-      }
-    }
-    return $all_scalar
-        ? "(vector $forms_str)"
-        : "(p-flatten-args (list $forms_str))";
-  }
-
-  # In VOID/INHERIT context with multiple forms, check wantarray at runtime.
-  # The runtime check handles map blocks (whose body is compiled in VOID_CTX
-  # but whose lambda runs with *wantarray* t) and caller-dependent positions.
-  # Statically-annotated SCALAR_CTX must NOT defer to the dynamic *wantarray*:
-  # a proven-scalar operand position (the LHS of and/or, an if condition, a
-  # cmpchain comparison operand) stays the comma operator (progn) even when
-  # the dynamic *wantarray* happens to be t — same contract as gen_tree_val.
-  # Wrap @array items with (p-flatten ...) so %p-collect-list in
-  # %p-flatten-for-list can spread @arrays while keeping arrayrefs as scalars.
-  if (@forms > 1 && ($ctx == VOID_CTX || $ctx == INHERIT_CTX)) {
-    my @flat_forms;
-    for my $i (0 .. $#$kids) {
-      my $form = $forms[$i];
-      my $kid_node = $self->expr_o->get_a_node($kids->[$i]);
-      if ($self->_is_array_expr_node($kid_node, $kids->[$i])) {
-        $form = "(p-flatten $form)";
-      }
-      push @flat_forms, $form;
-    }
-    my $flat_str = join(' ', @flat_forms);
-    return "(if *wantarray* (vector $flat_str) (progn $forms_str))";
-  }
-
-  return "(progn $forms_str)";
-}
 
 # Helper: true if a node represents an @array (should flatten in list context).
 sub _is_array_expr_node {
@@ -5228,7 +3472,7 @@ sub _node_is_definitely_scalar {
 }
 
 # Returns true if a node (by ID) is a known list-returning expression.
-# Used by gen_tree_val to decide whether to wrap in (vector ...) or not.
+# Used by gen_tree_val_form to decide whether to wrap in (vector ...) or not.
 # Checks the AST structure — no string-matching on generated code.
 sub _child_is_list_expr {
   my ($self, $node_id) = @_;
@@ -5277,55 +3521,6 @@ sub _is_list_node_for_refgen {
     return 1 if ($node->content() // '') eq '..';
   }
   return 0;
-}
-
-# Generate \(T1, T2, ...) for multi-term comma lists.
-# Perl rule: @/% vars → one ref each (ARRAY/HASH ref), ranges spread to N scalar refs,
-# other terms → one scalar ref each.
-sub _gen_backslash_multi_term {
-  my ($self, $tv_kids) = @_;
-  my $id = $g_refgen_count++;
-
-  my @parts;  # each is ['single', CL_EXPR] or ['range', CL_EXPR]
-  for my $kid_id (@$tv_kids) {
-    my $kid_node = $self->expr_o->get_a_node($kid_id);
-    my $is_range = ref($kid_node) eq 'PPI::Token::Operator'
-                && ($kid_node->content() // '') eq '..';
-    if ($is_range) {
-      my $saved = $self->expr_o->get_node_context($kid_id);
-      $self->expr_o->set_node_context($kid_id, LIST_CTX);
-      my $kid_expr = $self->gen_node($kid_id);
-      $self->expr_o->set_node_context($kid_id, $saved);
-      push @parts, ['range', "(p-refgen-list $kid_expr)"];
-    } else {
-      # @/% vars, scalars, and everything else: one ref
-      my $kid_expr = $self->gen_node($kid_id);
-      push @parts, ['single', "(p-backslash $kid_expr)"];
-    }
-  }
-
-  my $has_range = grep { $_->[0] eq 'range' } @parts;
-  unless ($has_range) {
-    # No ranges: simple vector of refs
-    my $forms = join(' ', map { $_->[1] } @parts);
-    return "(vector $forms)";
-  }
-
-  # Mix: use let + loop to concatenate variable-length parts
-  my $result_var = "|--pcl-bsl-r$id--|";
-  my $iter_var   = "|--pcl-bsl-x$id--|";
-  my @stmts;
-  for my $part (@parts) {
-    if ($part->[0] eq 'range') {
-      push @stmts, "(loop for $iter_var across $part->[1] do "
-                 . "(vector-push-extend $iter_var $result_var))";
-    } else {
-      push @stmts, "(vector-push-extend $part->[1] $result_var)";
-    }
-  }
-  my $stmts_str = join("\n  ", @stmts);
-  return "(let (($result_var (make-array 4 :adjustable t :fill-pointer 0)))\n  "
-       . "$stmts_str\n  $result_var)";
 }
 
 # Form twin of _gen_backslash_multi_term (E2): same parts walk, same counter
@@ -5377,75 +3572,6 @@ sub _gen_backslash_multi_term_form {
 }
 
 
-# Tree value (parenthesized expression): just generate the content
-sub gen_tree_val {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $ctx = $self->expr_o->get_node_context($node_id);
-
-  # If single child in scalar context, just return it
-  # But in list context, we need (vector $x) for proper list assignment
-  if (scalar(@$kids) == 1) {
-    # Propagate context to the child so split/funcs return lists not scalars,
-    # and a range (..) emits its runtime wantarray check rather than defaulting
-    # to flip-flop.  A single-child (EXPR) is transparent: the child shares the
-    # paren's context (LIST, or INHERIT for a ternary branch in a sub tail).
-    if ($ctx == LIST_CTX || $ctx == INHERIT_CTX) {
-      $self->expr_o->set_node_context($kids->[0], $ctx);
-    }
-    # Check at AST level (before codegen) whether child is a list-returning expr.
-    # If so, we must NOT wrap it in (vector ...) — the child already returns a
-    # vector.  Use the range-aware predicate so a single paren'd range like
-    # (10..12) (e.g. the RHS of @a[..] = (10..12)) is not nested as one element.
-    my $child_is_list = ($ctx == 1) && $self->_is_list_node_for_refgen($kids->[0]);
-    my $child = $self->gen_node($kids->[0]);
-    if ($ctx == 1) {  # LIST_CTX = 1
-      # Special case: regex match already returns captures in list context
-      # Don't wrap in vector, just ensure *wantarray* is set
-      if ($child =~ /\(p-=~\s/) {
-        return "(let ((*wantarray* t)) $child)";
-      }
-      return $child_is_list ? $child : "(vector $child)";
-    }
-    return $child;
-  }
-
-  # Multiple values
-  my @forms;
-  for my $kid_id (@$kids) {
-    push @forms, $self->gen_node($kid_id);
-  }
-
-  my $forms_str = join(' ', @forms);
-
-  # In list context, generate a vector instead of progn
-  # This handles: @a = (1, 2, 3), foreach (1, 2, 3), etc.
-  if ($ctx == 1) {  # LIST_CTX = 1
-    return "(vector $forms_str)";
-  }
-
-  # INHERIT context with multiple forms: the real context is only known at
-  # runtime (e.g. this is a ternary branch inside `return`, where Perl treats
-  # ($a, LIST) as a list in list context but as the comma operator in scalar
-  # context).  p-flatten-args builds a flat vector (spreads raw vectors/
-  # hashes, keeps boxes/refs).  Two restrictions, both load-bearing:
-  # - only INHERIT_CTX: a statically scalar operand position (e.g. the
-  #   comma exprs in cmpchain.t's `($e .= "a", $x) == ($e .= "b", $y)`) must
-  #   stay a progn even when the *dynamic* *wantarray* happens to be t
-  #   (the comparison sits inside join's list-context args).
-  # - (eq *wantarray* t), not truthiness: :void takes the comma-operator
-  #   branch (Sub::Defer: `*_subname = cond ? \&f : ($flag = 1, sub {...})`
-  #   inside a :void-wrapped statement).
-  if (@forms > 1 && $ctx == INHERIT_CTX) {
-    return "(if (eq *wantarray* t) (p-flatten-args (list $forms_str)) (progn $forms_str))";
-  }
-
-  return "(progn $forms_str)";
-}
-
 # E2 form variant of gen_tree_val.  Mirrors the text emitter branch-for-branch.
 # The one text inspection — `$child =~ /\(p-=~\s/` in the single-child
 # list-context branch (a regex match already returns captures in list context,
@@ -5496,131 +3622,7 @@ sub gen_tree_val_form {
 }
 
 
-# Generate filehandle marker for print/say
-sub gen_filehandle {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
 
-  # Filehandle has one child - the actual handle name/variable
-  if (@$kids) {
-    my $fh = $self->gen_node($kids->[0]);
-    # Quote bareword filehandles (FH, STDOUT, foo, etc.) so CL doesn't try to
-    # evaluate them.  Barewords are identifiers without sigils or parens —
-    # Perl allows any-case handles (`open(foo,...); print foo LIST`), so this
-    # covers both all-caps and lower/mixed-case registered handles.  A `$fh`
-    # variable or a parenthesised expression is left to evaluate as-is.
-    if ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
-      return ":fh '$fh";
-    }
-    return ":fh $fh";
-  }
-  return ":fh nil";
-}
-
-
-# Generate readline operator <FH> or <$fh>
-sub gen_readline {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # Readline may have a filehandle child, or none (for <>)
-  my $call;
-  if (@$kids) {
-    my $fh = $self->gen_node($kids->[0]);
-    # Quote bareword filehandles (any word not starting with $ or ( )
-    $call = ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/)
-            ? "(p-readline '$fh)"
-            : "(p-readline $fh)";
-  } else {
-    # Empty <> reads from ARGV or STDIN
-    $call = "(p-readline)";
-  }
-
-  # <FH> is wantarray-sensitive (list context reads all records, scalar reads
-  # one), exactly like reverse/unpack in gen_funcall.  Bind *wantarray* for the
-  # node's annotated context so the enclosing sub's context can't leak in — e.g.
-  # `my $a = <FH>` inside a sub called in list context must still read ONE line.
-  # (The p-readline macro's *p-in-list-assign-rhs* guard still wins for
-  # `while (($x) = <FH>)`.)
-  my $ctx = defined $node_id
-            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
-  return $self->_wrap_wantarray_ctx($call, $ctx);
-}
-
-
-# Generate file glob <*.txt> or <$pattern>
-# Handles negated character classes [!x] by generating grep filter,
-# since SBCL's pathname wildcards don't support negation properly.
-sub gen_glob {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # Glob has a pattern child (string or interpolated)
-  my $pattern_str;
-  my $call;
-
-  if (@$kids == 1) {
-    $pattern_str = $self->gen_node($kids->[0]);
-    $call = "(p-glob $pattern_str)";
-  } elsif (@$kids > 1) {
-    # Interpolated pattern - concatenate parts
-    my @parts = map { $self->gen_node($_) } @$kids;
-    my $concat = "(p-. " . join(' ', @parts) . ")";
-    $pattern_str = $concat;
-    $call = "(p-glob $concat)";
-  } else {
-    $pattern_str = '"*"';
-    $call = "(p-glob)";
-  }
-
-  # Check for negated character class [!...] or [^...] in literal patterns
-  # For these, generate a glob + filter since SBCL doesn't handle negation
-  my $needs_filter = 0;
-  my $negated_chars = '';
-  my $modified_pattern = $pattern_str;
-
-  if ($pattern_str =~ /^"([^"]*)"$/) {
-    my $pat = $1;
-    # Look for [!chars] or [^chars] - negated character class
-    if ($pat =~ /\[([!\^])([^\]]+)\]/) {
-      $needs_filter = 1;
-      my $neg_marker = $1;
-      $negated_chars = $2;
-      # Replace negated class with ? wildcard for the glob
-      my $simple_pat = $pat;
-      $simple_pat =~ s/\[[!\^][^\]]+\]/?/g;
-      $modified_pattern = qq{"$simple_pat"};
-      $call = "(p-glob $modified_pattern)";
-    }
-  }
-
-  # The file glob <pat> is wantarray-sensitive (list returns all matches, scalar
-  # iterates one per call), so bind *wantarray* to the node's static context the
-  # same way gen_readline / gen_funcall do — otherwise the enclosing sub's
-  # context leaks in (`my $first = <*.c>` inside a list-context sub).
-  my $ctx = defined $node_id
-            ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
-
-  if ($needs_filter) {
-    # Generate: (remove-if (lambda (f) (find (char basename 0) "negated")) (p-glob pattern))
-    # More Perl-like: filter files where the matched char is NOT in the negated set
-    # Extract just the filename part for matching
-    my $filter = qq{(remove-if (lambda (--f--) }
-               . qq{(let ((--name-- (file-namestring (pathname --f--)))) }
-               . qq{(and (> (length --name--) 0) }
-               . qq{(find (char --name-- 0) "$negated_chars")))) }
-               . qq{$call)};
-    return $self->_wrap_wantarray_ctx($filter, $ctx);
-  }
-
-  return $self->_wrap_wantarray_ctx($call, $ctx);
-}
 
 # E2 form variant of gen_glob.  No operand-text dispatch: the pattern is
 # generated as a form and the negated-char-class detection runs on its FLAT
@@ -5677,36 +3679,6 @@ sub gen_glob_form {
 }
 
 
-# Generate backtick command execution `command`
-sub gen_backtick {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # Backtick has a string child containing the command
-  my $cmd = $self->gen_node($kids->[0]);
-  return "(p-backtick $cmd)";
-}
-
-
-# Generate anonymous sub (for grep/map blocks)
-# Output: (lambda () body)
-sub gen_anon_sub {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  # Generate body from children
-  my @body_parts;
-  for my $kid_id (@$kids) {
-    push @body_parts, $self->gen_node($kid_id);
-  }
-  my $body = join(' ', @body_parts);
-
-  return "(lambda () $body)";
-}
 
 # E2 form variant of gen_anon_sub: sub { … } → (lambda () body…).  Clean, no
 # text inspection.  Empty body declines (the text emitter emits "(lambda () )"
@@ -5718,20 +3690,6 @@ sub gen_anon_sub_form {
   return ['lambda', ['list'], @body];
 }
 
-
-# Generate function reference for block callbacks
-# Output: #'func-name
-sub gen_func_ref {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  return Pl::CLForm::to_flat($node->{lambda_form}) if $node->{lambda_form};
-  return $node->{raw_lambda} if $node->{raw_lambda};
-  my $func_name = $node->{func_name};
-  return "#'$func_name";
-}
 
 # E2 form variant: \&foo → #'name atom.  A lambda_form is a Parser2-lowered
 # do{}/anon-sub lambda (task #78); a raw_lambda is v1's pre-generated CL
