@@ -2835,3 +2835,33 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
 - **BlockAnalyzer's `$pexpr_factory` 4th argument was never passed by anyone**
   — `$usages` was always `{}`.  That path is deleted (s390e); the module's
   other 7 subs are LIVE.
+
+## s391 (2026-08-14, Fable) — s390 review: batch approved, #303's judgment items ruled
+
+Rulings + independent verification in `docs/fable-answers-s390.md`; the same
+verdicts are on task #303.
+
+- **All five s390 commits APPROVED as shipped** — cold gate 138/5128 (only
+  the 8 user-ignored xs rows), fresh #305 probes byte-identical to perl,
+  sweep verdict recomputed from artifacts (TOTAL 18532 → 18535), deleted
+  names re-grepped clean.
+- **A silently-substituting FALLBACK annotator/emitter is ruled the same as
+  a missing case**: VarAnnotator's W12 text fallback and ExprToCL's
+  `_gen_interp_replacement_simple` both DELETE, with the miss becoming a
+  rule-12 DIE — measurement-first (instrument the fallback paths over both
+  populations + sweep; zero events ⇒ delete under the s373 gate-SET bar;
+  non-zero ⇒ per-event verdicts first).  `_text_gate_tags` stays (shared
+  with the tree annotator's parse-failure fallback).
+- **DEBUG→constant is GO** — the "21 live SET_DEBUG calls" blocker
+  dissolves: the one non-zero call sits in `if (0) {}`, no live caller
+  passes non-zero.  `use constant DEBUG => $ENV{PCL_PEXPR_DEBUG} // 0`;
+  bar = corpus-diff + gate; pre-flight the guarded sites for side effects.
+- **`_tok_run_desc` KEEP (handoff corrected)** — it is `_term_probe`'s own
+  helper; deleting it breaks the retained #153 instrument.  A delete list
+  must be closed under "who calls whom" against its own KEEP list.
+- **Deleting an unreachable form handler keeps its `%NAMED_TYPE` row** — the
+  type must die via the rule-12 arm if it ever arrives, never lower as a
+  binary operator (`gen_anon_sub_form` ruling).
+- Queue: Opus = #304 (per-file audit, never `--bless-rows`) → #303
+  cheapest-first (DEBUG → anon_sub/generate/extras singles → W12 →
+  interp fallback).  v1 state handlers stay with #153's FOLD (Fable).

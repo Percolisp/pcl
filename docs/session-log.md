@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 391 (2026-08-14, Fable) — s390 review: all five commits approved; the #303 judgment items ruled
+
+**Review session; rulings in `docs/fable-answers-s390.md`.**  Verified
+independently: cold-cache gate 138/5128 with exactly the 8 xs rows failing
+(pclxs ABI drift, user-ignored); a fresh 13-row #305 probe file byte-identical
+to perl 5.40 (cast runs, mixed sigils, five bare-`$$` PID inverses); the sweep
+verdict recomputed from the s390 artifacts (0 new / 0 fixed, TOTAL 18532 →
+18535); every deleted name re-grepped (zero live references; the s390a
+"inserted" helpers pre-exist at dc60298 — they moved, not appeared).
+
+**Rulings on #303's open items** (details in the answers doc):
+- **W12 text annotator: DELETE + DIE, measurement-first** — instrument the
+  `!$host` and tree-crash fallback paths over corpus + gate + sweep; zero
+  events ⇒ delete under the s373 gate-SET bar; non-zero ⇒ each event is a
+  live silent-wrong needing a verdict first.  `_text_gate_tags` STAYS.
+- **`_gen_interp_replacement_simple`: same ruling** (a weaker text walker
+  silently substituting for a failed parse) — plus probe the
+  empty-replacement spelling before wiring the die.
+- **`gen_anon_sub_form`**: delete sub + table row, KEEP the `%NAMED_TYPE`
+  row so an arriving node dies via the rule-12 arm.
+- **`ExprToCL2::generate`**: delete after auditing every polymorphic
+  `->generate(` receiver.  **`OpcodeTree::extras`**: settle the pair
+  (writer `add_extra` + raw `->{xa}` reads), never orphan the writer.
+- **`PExpr::_tok_run_desc`: KEEP — handoff corrected.**  It is
+  `_term_probe`'s own helper and the KEEP list retains `_term_probe`.
+- **DEBUG→constant: GO.**  The blocking SET_DEBUG(4) is inside `if (0) {}`;
+  no live caller passes non-zero.  `use constant DEBUG =>
+  $ENV{PCL_PEXPR_DEBUG} // 0`, delete the setter + 21 call sites, pre-flight
+  the ~52 guarded sites for side effects.  Bar: corpus-diff + gate.
+- **Parser.pm v1 state handlers: confirmed #153 FOLD territory** — out of #303.
+
+**Queue**: Opus next = #304 (per-file audit, never `--bless-rows`), then #303
+cheapest-first (DEBUG → zero-change singles → W12 → interp fallback).  Fable:
+FOLD chunk 3, #271, #281, boxed aggregates.
+
 ## Session 390 (2026-08-13, Opus 5) — #303 dead-code batch: 2,067 lines deleted, and the review's dead list disproved three ways
 
 **The headline is not the deletion, it is that the map was wrong.**
