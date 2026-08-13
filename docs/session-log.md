@@ -74,6 +74,51 @@ this checkout because the sibling `~/pclxs` has advanced to ABI 7 while
 worktree before either commit, and the user has asked that XS problems be
 ignored for now.  The other 130 files are green.
 
+**#305 (`8385780`) — the task's suspicion was right about the SITES and wrong
+about the CAUSE, and the difference mattered.**  It suspected a single-cast
+limit in the two cast-consuming sites.  That limit is real, but generalising
+it changed nothing, because the token stream never contained the casts:
+**PPI lexes `$$` as the PID magic variable** unless an identifier follows
+directly — already on file as `docs/ppi-upstream-bugs.md` §1, unfixed, with
+`docs/not-supported.md` recommending the `${$$ref}` block form as the
+workaround.  The mis-lex is not uniform (`$$rr` correct, `$$$rr`
+Magic+Symbol, `$$$$rr` Magic+Cast+Symbol), which is why one repair covers
+every depth.  Two parts, both keyed on the mechanism (rule 11):
+`_split_pid_magic_cast_run`, ONE token pre-pass that rewrites the Magic into
+two Casts when a deref sigil / scalar / brace block follows (adjacency read
+from PPI sibling links, so `$$ $x` is untouched); then both sites take the
+whole RUN, per perl's rule that the OUTERMOST cast picks the access kind, the
+inner ones are derefs on the base, and an arrow makes all of them derefs.
+
+The failure being fixed was a **silent statement drop**: the stray Magic
+matched no case, the "Missing case" die degraded to a `;; PARSE ERROR`
+comment, and `print "b=", $$$rrr->{k}, "\n";` printed nothing at all — not
+even the literal prefix.  The mixed-sigil spellings (`@$$arr[0,1]`,
+`%$$hrr{"a"}`) reached the sites as real casts and crashed the SBCL load.
+
+**One self-inflicted regression, caught by probing rather than by the gate:**
+folding inner casts into the base makes `$pre_n` a cast node instead of a
+Symbol, so the `is_var($pre_n)` guard on the slice/kv/element type decision
+silently fell through to a plain `a_acc` and `@$$arr[0,1]` returned ONE
+element.  A crash had become a silent-wrong — the worst direction — until
+`$base_casts` was made to qualify for the same mapping.
+
+Verification: 21 shapes probed against perl 5.40 across two probe files, both
+byte-identical, plus 7 inverse rows confirming bare `$$` is still the PID.
+corpus-diff changed exactly ONE file, `ref.t`, every hunk a `;; PARSE ERROR …
+nil` becoming real code.  Gate 138 / 5128.  **Full sweep: GATE clean, TOTAL
+18532 → 18535 (+3)** — the three recovered statements.  Those three are TAP
+assertions, so ref.t's later assertion NUMBERS shift by +3 and baseline rows
+with empty descriptions (joined by number) appear to move; the tool bucketed
+them as UNSTABLE/DID-NOT-RUN crash-file noise and TOTAL is the measure.
+Baselines deliberately NOT re-blessed.  Gen v2-143 → v2-144.
+
+**#303 chunk 3 (`30b4bf9`)** — BlockAnalyzer's `$pexpr_factory` path: a 4th
+argument no caller has ever passed, so `$usages` was always `{}` and the
+OpcodeTree walk behind it was dead (4 subs + 4 unread op tables, 70 lines).
+Behaviour-identical by construction.  It is the ONLY dead thing in that
+module — the review's "whole module" claim stays disproved.
+
 **Left for the next session, each a JUDGMENT not a mechanical delete** (all
 on #303): the VarAnnotator W12 text annotator — reachable only as an
 unreachable `!$host` guard, a **silent fallback when `_analyze_tree` dies**,

@@ -2801,3 +2801,37 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   paths die — an annotator decides BOXING, so a second one silently
   substituting is a silent-wrong generator (the E4.1 fallback lesson).
   Behaviour change: needs the s373 gate-SET bar.
+
+## s390d/e (2026-08-13, Opus) — #305 the cast RUN, and the `$$` mis-lex repair
+
+- **PPI lexes `$$` as the PID magic variable unless an identifier follows it
+  DIRECTLY** (`docs/ppi-upstream-bugs.md` §1, on file since before s390 and
+  now WORKED AROUND).  The mis-lex is not uniform: `$$rr` is correct
+  (Cast+Symbol), `$$$rr` is Magic+Symbol, `$$$$rr` is Magic+Cast+Symbol.
+  Repair = `Pl::PExpr::_split_pid_magic_cast_run`, ONE token pre-pass beside
+  `_default_filetest_operand`; source ADJACENCY comes from PPI sibling links,
+  not the whitespace-filtered token list, so `$$ $x` is left alone.  The
+  `docs/not-supported.md` "Triple dereference without braces" limitation is
+  RETIRED.
+- **Perl's rule for a RUN of leading deref casts before a subscript**: the
+  OUTERMOST cast decides the ACCESS KIND (`@` slice / `%` kv-slice / `$`
+  element), every INNER cast is a deref on the BASE, and a real `->` supplies
+  the kind so ALL the casts become derefs.  `$$$rrr->{k}` == `${${$rrr}}->{k}`.
+  Both cast-consuming sites read the run through `_cast_run_start` /
+  `_all_scalar_casts`; with 0 or 1 casts the behaviour is bit-for-bit the
+  pre-#305 one.
+- **Folding casts into the base changes what `$pre_n` IS** — it becomes a cast
+  node, not a Symbol, so an `is_var($pre_n)` guard on a type decision silently
+  falls through.  That turned `@$$arr[0,1]` from a crash into a ONE-element
+  silent-wrong for one probe run; `$base_casts` now qualifies for the mapping.
+  Probe the mixed-sigil spellings whenever this region is touched.
+- **A previously-DROPPED statement that is a TAP assertion renumbers the file**:
+  recovering ref.t's three dropped statements shifted every later assertion by
+  +3, so baseline rows with EMPTY descriptions (joined by number, not
+  description) appear to move.  `sweep-diff` bucketed them as UNSTABLE /
+  DID-NOT-RUN; **TOTAL passing is the measure** (18532 → 18535).  Do not read
+  those buckets as regressions, and do not re-bless a PARTIAL file's numbers
+  casually (#223/#257).
+- **BlockAnalyzer's `$pexpr_factory` 4th argument was never passed by anyone**
+  — `$usages` was always `{}`.  That path is deleted (s390e); the module's
+  other 7 subs are LIVE.
