@@ -2865,3 +2865,32 @@ verdicts are on task #303.
 - Queue: Opus = #304 (per-file audit, never `--bless-rows`) → #303
   cheapest-first (DEBUG → anon_sub/generate/extras singles → W12 →
   interp fallback).  v1 state handlers stay with #153's FOLD (Fable).
+
+## s392 (2026-08-14, Opus) — #304: the companion-suite snapshot audited, then re-blessed
+
+Full audit + per-file verdicts: `docs/perl-suite-audit-s392.md`; the 37
+decreases are owned by tasks #313 (crash), #314 (E4.1 refusals), #315
+(undiagnosed rows).
+
+- **A TIMEOUT row's `C_ok` is not comparable across different `--timeout`
+  values** — it records how far the file got before the cutoff, not a
+  compiler property.  Seven of the 44 apparent decreases were exactly this:
+  re-measured at `--timeout 300` the six `re/regexp*.t` files return the
+  stale snapshot's numbers TO THE DIGIT (793/794), and comp/require.t comes
+  back +366.  Re-measure before diffing; the snapshot records which rows
+  were spliced from a 300 s run.
+- **The E4.1 coverage cost on the companion suite is concentrated, not
+  diffuse**: 21 TRANSPILE files collapse to 7 `Parser2 TODO:` families, and
+  ONE of them — `my @a, @b, @c` (a comma-list `my`) — is opbasic/cmp.t's
+  12078 rows, 96% of the total loss (task #314).
+- **A `Parser2 TODO:` refusal is a compiler GAP, never a blessed
+  non-support** — it gets a task, not a `docs/not-supported.md` entry, and a
+  snapshot must not be re-blessed until each one has a verdict (the #223 rule
+  for the sweep baselines, now applied to the suite snapshot).
+- **The audit found a live crash both the gate and the sweep miss (#313)**:
+  `Cannot proclaim a macro variable special: <pkg>::@ISA` for any package
+  whose name STARTS with a non-ASCII letter — `GlobalPartition::_split_name`
+  matches the segment head ASCII-only, so the name falls to the EXCEPTION
+  partition and is `defvar`'d over the cell `p-defpackage` already made.
+  utf8 package names occur in `t/mro/*_utf8.t` and nowhere in perl-tests/ or
+  Pl/t — which is the argument for keeping this snapshot fresh.
