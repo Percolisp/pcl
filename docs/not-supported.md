@@ -1042,7 +1042,16 @@ require significant runtime changes for a removed, never-stable feature.
 
 ---
 
-## Triple (and higher) dereference without braces: `$$$ref`
+## Triple (and higher) dereference without braces: `$$$ref`  — RESOLVED s390 (#305)
+
+> **NO LONGER A LIMITATION.**  `$$$ref`, `$$$$ref`, the arrow forms
+> (`$$$rrr->{k}`), the no-arrow element forms (`$$$rr{k}`) and the
+> mixed-sigil runs (`@$$arr[0,1]`, `%$$hrr{"a"}`) all work and are probed
+> byte-identical to perl.  The PPI mis-lex is repaired by ONE token pre-pass,
+> `Pl::PExpr::_split_pid_magic_cast_run`; see `docs/ppi-upstream-bugs.md` §1.
+> Bare `$$` is still the PID (guarded).  The rationale below is kept as the
+> record of why it was deferred — note it proposed a fragile SOURCE rewrite in
+> `_preprocess_source`; the fix that worked is a TOKEN-stream repair instead.
 
 **Perl behaviour:** `$$$ref` is a triple dereference: Perl parses it as
 `${$$ref}` — dereference `$$ref` (which is itself a scalar ref), then

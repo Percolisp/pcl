@@ -170,6 +170,33 @@ sub is_list { shift->token_utils->is_list(@_) }
 sub is_word { shift->token_utils->is_word(@_) }
 sub is_internal_node_type { shift->token_utils->is_internal_node_type(@_) }
 
+# The maximal run of Cast tokens immediately before position $p in @$e.
+# Returns the index of the FIRST (outermost) cast, or $p itself when the
+# token before $p is not a Cast.  The caller takes @$e[$start .. $p-1] as the
+# casts and splices that same span.  See the "THE CAST RUN (#305)" comment at
+# the Case 0-3 dispatch for what the run means; both cast-consuming sites
+# read it through this ONE helper.
+sub _cast_run_start {
+  my ($self, $e, $p) = @_;
+  my $s = $p;
+  $s-- while $s >= 1 && ref($e->[$s-1]) eq 'PPI::Token::Cast';
+  return $s;
+}
+
+# True when every cast in @$e[$from .. $to] is a scalar deref '$'.  An inner
+# non-'$' cast is not a deref level (there is no slice-of-a-slice), so a run
+# that fails this keeps the pre-#305 single-cast handling rather than being
+# folded into the base.
+sub _all_scalar_casts {
+  my ($self, $e, $from, $to) = @_;
+  return 0 if $from > $to;
+  for my $k ($from .. $to) {
+    return 0 if ref($e->[$k]) ne 'PPI::Token::Cast'
+             || $e->[$k]->content ne '$';
+  }
+  return 1;
+}
+
 
 # ----------------------------------------------------------------------
 # See PPI tree:
@@ -407,6 +434,7 @@ sub parse {
 
   $e            = $self->cleanup_for_parsing($e);
   $self->_merge_split_qualified_words($e);
+  $self->_split_pid_magic_cast_run($e);
   $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
@@ -839,6 +867,22 @@ sub parse {
   # Case 1B: X->$foo()   (method call, named method.)
   # Case 2:  X->(...)    (^ to fun)
   # Case 3:  X->[], X->{}
+  #
+  # THE CAST RUN (#305).  PPI hands a prefixed term as a FLAT run of Cast
+  # tokens before the Symbol/Block: `@$$arr[0]` is Cast(@) Cast($) Symbol.
+  # Perl's rule for such a run, in front of a subscript:
+  #
+  #   * the OUTERMOST (leftmost) cast decides the ACCESS KIND — `@` slice,
+  #     `%` kv-slice, `$` element;
+  #   * every INNER cast is one more deref applied to the BASE;
+  #   * and with a real `->` arrow, the arrow supplies the access kind, so
+  #     ALL the casts are derefs on the base:
+  #     `$$$rrr->{k}` == `${${$rrr}}->{k}`.
+  #
+  # Both cast-consuming sites below used to look at exactly ONE token
+  # (`$e->[$i-2]`).  With two or more casts the extra ones were left in the
+  # stream, matched no case, and the "Missing case" die dropped the WHOLE
+  # statement (`$$$rr{k}`, `$$$rrr->{k}`) or crashed the load (`@$$arr[0]`).
 
   # Handle Case 0 of "->", just remove syntax sugar:
   for(my $i=0; $i < scalar(@$e); $i++) {
@@ -965,20 +1009,17 @@ sub parse {
 
         # (This '($q...)->(5)' should work the same.)
         #
-        # A leading scalar deref binds WITH the ref target: $$r->() means
+        # Leading scalar derefs bind WITH the ref target: $$r->() means
         # (${$r})->() — deref $r to the coderef, THEN call.  PPI hands us a flat
-        # Cast('$') + Symbol/Block before the '->', and without consuming the
-        # cast here it would wrap the whole funcall instead — ${ $r->() }.  So
-        # if $e->[$i-2] is a scalar Cast, parse it together with $pre as the ref.
-        my @pre_toks      = ($pre);
-        my $cast_consumed = 0;
-        if ($i >= 2
-            && ref($e->[$i-2]) eq 'PPI::Token::Cast'
-            && $e->[$i-2]->content eq '$') {
-          unshift @pre_toks, $e->[$i-2];
-          $cast_consumed = 1;
-        }
-        my $pre_id = $self->parse(\@pre_toks);
+        # run of Cast('$') before the Symbol/Block, and without consuming it
+        # here the casts would wrap the whole funcall instead — ${ $r->() }.
+        # ALL of them belong to the target (#305): `$$$crr->(1)` is
+        # `${${$crr}}->(1)`, so parse the whole run together with $pre.
+        my $cast_s  = $self->_cast_run_start($e, $i-1);
+        $cast_s     = $i-1
+          if !$self->_all_scalar_casts($e, $cast_s, $i-2);
+        my @pre_toks = (@$e[$cast_s .. $i-2], $pre);
+        my $pre_id   = $self->parse(\@pre_toks);
         my $pst_id = $nxt->{id};
         my $kids   = $self->get_node_children($pst_id);
 
@@ -988,18 +1029,12 @@ sub parse {
           $self->add_child_to_node($id, $kid_id); # Parameters
         }
 
-        my $np;                  # the new node's position in @$e
-        if ($cast_consumed) {
-          $e->[$i-2] = $node;
-          splice @$e, $i-1, 3;   # remove the ref term, '->', and the param list
-          $np = $i-2;
-          $i -= 2;
-        } else {
-          $e->[$i-1] = $node;
-          splice @$e, $i, 2;     # remove '->' and the param list
-          $np = $i-1;
-          $i--;
-        }
+        # Replace [casts…, ref term, '->', param list] with the new node.
+        # With no casts $cast_s == $i-1, so this is the plain two-token splice.
+        $e->[$cast_s] = $node;
+        splice @$e, $cast_s+1, ($i + 1) - $cast_s;
+        my $np = $cast_s;        # the new node's position in @$e
+        $i = $cast_s;
         # Implicit arrow after a call: $cr->(){k} / $cr->()[i] mean
         # $cr->()->{k} / $cr->()->[i].  PPI cannot tell these braces are
         # subscripts (they follow ')'), so it tags {k} as a Block and [i] as
@@ -1199,20 +1234,38 @@ sub parse {
       # splice had turned `$$rr->{k}` into `$$rr{k}`, one level short).
       # Without the arrow the cast IS the one deref the *_ref_acc node
       # encodes ($$scalar{key}), so nothing changes there.
-      my $pre_id;
-      if ($is_reference
-          && $i >= 2
-          && ref($e->[$i-2]) eq 'PPI::Token::Cast'
-          && $e->[$i-2]->content() eq '$'
-          && ((!$self->is_internal_node_type($pre)
-               && $self->is_var($pre) && $pre->content() =~ /^\$/)
-              || (ref($pre) eq 'PPI::Structure::Block'
-                  && $pre->start() eq '{'))) {
-        $pre_id = $self->parse([$e->[$i-2], $pre]);
-      } else {
-        $pre_id = $self->parse([$pre]);
+      # The cast run before the base (#305).  $n_casts == 0 or 1 reproduces
+      # the pre-#305 behaviour exactly; 2+ is what used to be dropped.
+      my $cast_s   = $self->_cast_run_start($e, $i-1);
+      my $n_casts  = $i - 1 - $cast_s;
+      my $base_ok  = (!$self->is_internal_node_type($pre)
+                      && $self->is_var($pre) && $pre->content() =~ /^\$/)
+                  || (ref($pre) eq 'PPI::Structure::Block'
+                      && $pre->start() eq '{');
+
+      # How many of the casts fold INTO the base parse as deref levels:
+      #   arrow    — all of them (the arrow supplies the access kind);
+      #   no arrow — all but the OUTERMOST, which is the access kind and is
+      #              the one deref the *_ref_acc / slice node itself encodes.
+      my $base_casts = 0;
+      if ($base_ok && $n_casts) {
+        if ($is_reference) {
+          $base_casts = $n_casts
+            if $self->_all_scalar_casts($e, $cast_s, $i-2);
+        } elsif ($n_casts >= 2) {
+          $base_casts = $n_casts - 1
+            if $self->_all_scalar_casts($e, $cast_s+1, $i-2);
+        }
       }
+      my $pre_id = $base_casts
+                 ? $self->parse([@$e[$i-1-$base_casts .. $i-2], $pre])
+                 : $self->parse([$pre]);
       my $pre_n = $self->get_a_node($pre_id);
+
+      # The cast that DECIDES the access kind is the outermost one.  When the
+      # run is 0 or 1 long this is the same token the pre-#305 code read at
+      # $i-2.
+      my $outer_cast = $n_casts ? $e->[$cast_s] : undef;
 
       my $type  = ($self->is_arr_braces($term) ? "a_acc" : "h_acc");
       # If it was X->[] or X->{}:
@@ -1220,10 +1273,9 @@ sub parse {
         $type   = ($self->is_arr_braces($term) ? "a_ref_acc" : "h_ref_acc");
       } elsif (ref($pre) eq 'PPI::Structure::Block'
                && $pre->start() eq '{'
-               && $i >= 2
-               && ref($e->[$i-2]) eq 'PPI::Token::Cast'
-               && ($e->[$i-2]->content() eq '@'
-                   || $e->[$i-2]->content() eq '$')) {
+               && $outer_cast
+               && ($outer_cast->content() eq '@'
+                   || $outer_cast->content() eq '$')) {
         # Braced deref with a TRAILING subscript: @{EXPR}[..] / @{EXPR}{..} are
         # slices of the deref'd EXPR; ${EXPR}[..] / ${EXPR}{..} are element
         # accesses.  The subscript's position disambiguates at parse time: a
@@ -1234,14 +1286,20 @@ sub parse {
         # p-aref/p-gethash resolve ref-vs-string at runtime.  The %-sigil kv
         # forms have their own raw-token patterns above ($is_kv_*_deref_*).
         # See docs/symbolic-ref-slice-parse-fix.md.
-        $type = $e->[$i-2]->content() eq '@'
+        $type = $outer_cast->content() eq q{@}
               ? ($self->is_arr_braces($term) ? "slice_a_acc" : "slice_h_acc")
               : ($self->is_arr_braces($term) ? "a_ref_acc"   : "h_ref_acc");
-      } elsif ($self->is_var($pre_n)
-               && $pre_n->content() =~ /^\$/) {
+      } elsif ($base_casts
+               || ($self->is_var($pre_n) && $pre_n->content() =~ /^\$/)) {
         # Check for $$scalar[n] / $$scalar{key} (Cast '$') or
         # @{$hashref}{keys} / @$scalar{keys} (Cast '@') patterns.
-        my $cast_before = ($i >= 2) ? $e->[$i-2] : undef;
+        #
+        # $base_casts alone also qualifies: once inner casts are folded into
+        # the base (`@$$arr[0,1]`), $pre_n is a cast node, not the Symbol the
+        # is_var test wants — but the OUTERMOST cast still decides the access
+        # kind by exactly this mapping.  Without this the type silently fell
+        # back to a plain a_acc and the slice returned one element (#305).
+        my $cast_before = $outer_cast;
         if ($cast_before
             && ref($cast_before) eq 'PPI::Token::Cast'
             && $cast_before->content() eq '$') {
@@ -1300,25 +1358,26 @@ sub parse {
       $e->[$i-1] = $node;
       splice @$e, $i, 1;         # Remove $term (subscript)
 
-      if (($type eq 'slice_a_acc' || $type eq 'slice_h_acc'
-           || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
-          && $i >= 2
-          && ref($e->[$i-2]) eq 'PPI::Token::Cast'
-          && ($e->[$i-2]->content() eq '@' || $e->[$i-2]->content() eq '%')) {
-        # Also remove the Cast '@'/'%' that precedes the ref symbol
-        splice @$e, $i-2, 1;
-        $i -= 2;
-      } elsif (($type eq 'a_ref_acc' || $type eq 'h_ref_acc')
-               && $i >= 2
-               && ref($e->[$i-2]) eq 'PPI::Token::Cast'
-               && $e->[$i-2]->content() eq '$') {
-        # $$scalar[n] / $$scalar{key}: also remove the leading Cast '$'
-        # so it doesn't get applied again as a prefix p-cast-$ on the result.
-        splice @$e, $i-2, 1;
-        $i -= 2;
-      } else {
-        $i--;
-      }
+      # Remove the casts this node ACCOUNTED for, so none is applied again as
+      # a prefix p-cast-$ on the result.  That is the ones folded into the
+      # base plus, when the outermost cast chose the access kind, that one
+      # too.  A cast the node did NOT account for (a run whose inner casts
+      # were not all '$', so $base_casts stayed 0) is deliberately left in
+      # the stream to fail loudly rather than silently lose a deref level.
+      # $base_casts > 0 means a widened path ran, and both of those account
+      # for the WHOLE run: the arrow path folds every cast into the base, the
+      # no-arrow path folds all but the outermost and spends that one on the
+      # access kind.  Otherwise it is the pre-#305 single-cast test.
+      my $consumed = $base_casts ? $n_casts
+        : ($outer_cast
+           && ((($type eq 'slice_a_acc' || $type eq 'slice_h_acc'
+                 || $type eq 'kv_slice_a_acc' || $type eq 'kv_slice_h_acc')
+                && ($outer_cast->content() eq '@'
+                    || $outer_cast->content() eq '%'))
+               || (($type eq 'a_ref_acc' || $type eq 'h_ref_acc')
+                   && $outer_cast->content() eq '$'))) ? 1 : 0;
+      splice @$e, $i-1-$consumed, $consumed if $consumed;
+      $i = $i - 1 - $consumed;
       next;
     }
 
@@ -4427,6 +4486,38 @@ sub _stringify_trailing_colon_package {
     next if defined $next && ref($next) eq 'PPI::Token::Word'
          && $next->content =~ /^::/;
     splice @$e, $i, 1, PPI::Token::Quote::Single->new("'$name'");
+  }
+}
+
+# PPI upstream bug (docs/ppi-upstream-bugs.md §8, #305): `$$` is lexed as the
+# PID magic variable whenever it is NOT directly followed by an identifier —
+# so `$$rr` is Cast($) Symbol($rr), correctly, but `$$$rr` comes through as
+# Magic($$) Symbol($rr) and `$$$$rr` as Magic($$) Cast($) Symbol($rr).  The
+# stray Magic matched no case and the "Missing case" die then dropped the
+# whole statement (`$$$rr{k}`, `$$$rrr->{k}` printed NOTHING).
+#
+# Perl's rule is positional: `$$` immediately before another deref sigil, a
+# scalar, or a brace block is two scalar-deref casts; `$$` before an operator,
+# a comma, `;`, `}` … is the PID.  Rewriting it here — ONE pre-pass, before
+# any of the term machinery runs — means both cast-consuming sites below see
+# the ordinary Cast run they already understand, instead of each growing a
+# Magic special case (rule 11).
+#
+# Source ADJACENCY is the test, read from PPI's own sibling links rather than
+# from @$e (which has whitespace filtered out): `$$ $x` is not a deref run.
+sub _split_pid_magic_cast_run {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e); $i++) {
+    my $tok = $e->[$i];
+    next unless ref($tok) eq 'PPI::Token::Magic' && $tok->content eq '$$';
+    my $nxt = $tok->next_sibling;
+    next if !$nxt || $nxt->isa('PPI::Token::Whitespace');
+    next unless ref($nxt) eq 'PPI::Token::Cast'
+             || (ref($nxt) eq 'PPI::Token::Symbol' && $nxt->content =~ /^\$/)
+             || (ref($nxt) eq 'PPI::Structure::Block'    && $nxt->start eq '{')
+             || (ref($nxt) eq 'PPI::Structure::Subscript' && $nxt->start eq '{');
+    splice @$e, $i, 1, PPI::Token::Cast->new('$'), PPI::Token::Cast->new('$');
+    $i++;   # skip past the pair just written
   }
 }
 

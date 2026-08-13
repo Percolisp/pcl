@@ -703,4 +703,43 @@ print "c=", $ra->[0], "\n";
          'block-shaped {…}-> after grep dies perl-shaped at transpile');
 }
 
+# ---------------------------------------------------------------------------
+# #305: a RUN of leading deref casts, not just one.  PPI lexes `$$` as the PID
+# magic variable unless an identifier follows directly, so `$$$rr` arrived as
+# Magic($$) Symbol($rr) — matched no case, and the "Missing case" die dropped
+# the whole statement (these all printed NOTHING).  A pre-pass splits that
+# Magic into two Casts; the term machinery then folds the run per perl's rule:
+# the OUTERMOST cast picks the access kind, every inner one is a deref, and a
+# real `->` makes all of them derefs on the base.  All rows probed vs perl.
+# ---------------------------------------------------------------------------
+test_transpile('#305: multi-cast deref before -> subscript/call', '
+my %h = (k=>9); my $r = \%h; my $rr = \$r; my $rrr = \$rr; my $rrrr = \$rrr;
+print "a=", $$rr->{k}, "\n";
+print "b=", $$$rrr->{k}, "\n";
+print "c=", $$$$rrrr->{k}, "\n";
+my @a = (7,8,9); my $ar = \@a; my $arr = \$ar; my $arrr = \$arr;
+print "d=", $$$arrr->[1], "\n";
+my $c = sub { "c(@_)" }; my $cr = \$c; my $crr = \$cr;
+print "e=", $$$crr->(1), "\n";
+my %h2 = (k => {j=>"deep"}); my $r2 = \%h2; my $rr2 = \$r2; my $rrr2 = \$rr2;
+print "f=", $$$rrr2->{k}{j}, "\n";
+');
+
+test_transpile('#305: multi-cast WITHOUT an arrow — outermost cast picks the kind', '
+my %h = (a=>1,b=>2,k=>9); my $hr = \%h; my $hrr = \$hr;
+my @a = (7,8,9); my $ar = \@a; my $arr = \$ar;
+print "a=", $$$hrr{k}, "\n";
+print "b=", $$$arr[1], "\n";
+print "c=", join(",", @$$arr[0,1]), "\n";
+print "d=", join(",", @$$hrr{qw(a b)}), "\n";
+print "e=", join(",", %$$hrr{"a"}), "\n";
+');
+
+test_transpile('#305 inverse: bare $$ is still the PID, not a deref run', '
+print "a=", ($$ > 0 ? "pid" : "bad"), "\n";
+my @l = ($$, 2);      print "b=", scalar(@l), "\n";
+my %h = ($$ => "v");  print "c=", (exists $h{$$} ? "key" : "bad"), "\n";
+print "d=", ("pid=$$" =~ /^pid=\d+$/ ? "interp" : "bad"), "\n";
+');
+
 done_testing();

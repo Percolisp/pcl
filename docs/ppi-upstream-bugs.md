@@ -41,6 +41,27 @@ $_->isa('PPI::Token') && printf "%-22s %s\n", ref($_), $_->content
 `${$$ref}` block form as the workaround (`docs/not-supported.md` →
 "Triple … dereference without braces").
 
+**WORKED AROUND IN PCL (s390, #305) — the workaround note above is retired.**
+The mis-lex is positional and therefore repairable: `$$` is the PID only when
+it is NOT directly followed by another deref sigil, a scalar, or a brace
+block.  `Pl::PExpr::_split_pid_magic_cast_run` is one pre-pass over the token
+list (beside `_default_filetest_operand`, before any term machinery) that
+rewrites such a `Magic('$$')` into two `Cast('$')`; source ADJACENCY is read
+from PPI's own sibling links, not from the whitespace-filtered `@$e`, so
+`$$ $x` is left alone.  Everything downstream then sees the ordinary cast run
+it already understands.
+
+Note the mis-lex is not uniform, which is why one repair covers all depths:
+`$$rr` lexes CORRECTLY (Cast+Symbol), `$$$rr` gives Magic+Symbol, `$$$$rr`
+gives Magic+Cast+Symbol — PPI takes `$$` greedily and then resumes normally.
+
+Until s390 this was a **silent statement drop**: the stray Magic matched no
+case, the "Missing case" die degraded to a `;; PARSE ERROR` comment, and
+`print "x=", $$$rrr->{k}, "\n";` printed NOTHING AT ALL — not even the
+literal prefix.  Three such statements were being dropped inside
+`perl-tests/ref.t`.  Guard rows: `Pl/t/transpile-test-10.t` (`#305` × 3,
+including the inverse that bare `$$` is still the PID).
+
 ---
 
 ## 2. C99 hex-float literal `0x1.8p+1` split into 5 tokens  [CONFIRMED 1.291]
