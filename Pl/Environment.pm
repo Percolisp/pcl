@@ -588,48 +588,6 @@ sub has_pragma {
     return $self->scope_stack->[-1]{pragmas}{$name};
 }
 
-=head2 declare_var($name)
-
-Records a variable declaration (my/our/local/state) in the current scope frame.
-
-    $env->declare_var('$x');
-
-=cut
-
-sub declare_var {
-    my ($self, $name) = @_;
-    $self->scope_stack->[-1]{declared_vars}{$name} = 1;
-}
-
-=head2 is_var_declared($name)
-
-Checks if a variable is declared in any enclosing scope (innermost to outermost).
-
-    if ($env->is_var_declared('$x')) { ... }
-
-=cut
-
-sub is_var_declared {
-    my ($self, $name) = @_;
-    for my $frame (reverse @{$self->scope_stack}) {
-        return 1 if $frame->{declared_vars}{$name};
-    }
-    return 0;
-}
-
-=head2 add_undeclared_var($name)
-
-Adds a variable to the set needing file-level defvar.
-
-    $env->add_undeclared_var('$x');
-
-=cut
-
-sub add_undeclared_var {
-    my ($self, $name) = @_;
-    $self->undeclared_vars->{$name} = 1;
-}
-
 =head2 add_caret_global($sym)
 
 Records an unknown C<${^NAME}> caret variable (by its pipe-quoted CL symbol)
@@ -663,17 +621,6 @@ Returns sorted list of caret-variable CL symbols needing a file-level defvar.
 sub get_caret_globals {
     my $self = shift;
     return [sort keys %{$self->caret_globals}];
-}
-
-=head2 get_undeclared_vars()
-
-Returns sorted list of variables needing file-level defvar.
-
-=cut
-
-sub get_undeclared_vars {
-    my $self = shift;
-    return [sort keys %{$self->undeclared_vars}];
 }
 
 =head2 is_lvalue_sub($name)
@@ -841,19 +788,6 @@ Records the @ISA declaration for a package.
 sub set_isa {
     my ($self, $pkg, $parents) = @_;
     $self->isa_declarations->{$pkg} = $parents;
-}
-
-=head2 get_isa($pkg)
-
-Returns the @ISA for a package, or empty arrayref if not set.
-
-    my $parents = $env->get_isa('Child');  # ['Parent1', 'Parent2']
-
-=cut
-
-sub get_isa {
-    my ($self, $pkg) = @_;
-    return $self->isa_declarations->{$pkg} // [];
 }
 
 =head2 add_declared_sub($name, $package, $at)

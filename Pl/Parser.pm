@@ -5534,38 +5534,6 @@ sub parse_hash_block_to_cl_form {
 }
 
 
-# Return true if the elements contain any standalone bare label statements
-# (PPI::Statement::Compound with only a PPI::Token::Label, no keyword/block).
-# Only checks the immediate children — does not recurse into sub-blocks.
-sub _has_bare_labels_shallow {
-  my $self = shift;
-  my $elements = shift;
-  my @top;
-  if (ref($elements) eq 'ARRAY') {
-    @top = @$elements;
-  } elsif (ref($elements) && $elements->can('children')) {
-    @top = $elements->children;
-  } else {
-    return 0;
-  }
-  for my $elem (@top) {
-    next unless ref($elem);
-    # Direct bare label: the element itself is a compound with only a label
-    if (ref($elem) eq 'PPI::Statement::Compound') {
-      my @sig = grep { ref($_) && ref($_) !~ /Whitespace|Comment/ } $elem->children;
-      return 1 if @sig == 1 && ref($sig[0]) eq 'PPI::Token::Label';
-    }
-    # When the elements arg is a block, its direct children are statements
-    next unless $elem->can('children');
-    for my $child ($elem->children) {
-      next unless ref($child) eq 'PPI::Statement::Compound';
-      my @sig = grep { ref($_) && ref($_) !~ /Whitespace|Comment/ } $child->children;
-      return 1 if @sig == 1 && ref($sig[0]) eq 'PPI::Token::Label';
-    }
-  }
-  return 0;
-}
-
 # Find all variable declarations recursively in a PPI element
 # Returns arrayref of { type => 'my'|'our'|..., var => '$x' }
 sub _find_all_declarations {
@@ -7676,13 +7644,6 @@ my %PCL_SYMBOLS = map { $_ => 1 } qw(
   p-join p-split p-ref p-bless p-die p-warn p-open p-close
   p-read p-write p-int p-abs p-substr p-index p-lc p-uc
 );
-
-# Check if a sub name conflicts with PCL runtime
-sub _is_pcl_symbol {
-  my $self = shift;
-  my $name = shift;
-  return exists $PCL_SYMBOLS{"p-$name"};
-}
 
 
 # Process use/require statements

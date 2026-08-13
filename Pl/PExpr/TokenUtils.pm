@@ -193,16 +193,6 @@ sub is_token_operator {
   return undef;
 }
 
-sub is_list_parentheses {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  # XXXX Add test for { ... } or [ ... ]. Needed?
-  return 1
-      if ref($stmt) eq 'PPI::Structure::List';
-  return undef;
-}
-
 sub is_list {
   my $self      = shift;
   my $stmt      = shift;
@@ -230,16 +220,6 @@ sub is_internal_node_type {
 
   return (defined $node->{type} ? $node->{type} : 1)
       if ref($node) eq 'PPIreference';
-  return undef;
-}
-
-sub _is_block {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  return 1
-      if ref($stmt) eq 'PPI::Structure::Block';
-
   return undef;
 }
 

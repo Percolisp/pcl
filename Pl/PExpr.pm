@@ -166,11 +166,9 @@ sub is_hash_braces { shift->token_utils->is_hash_braces(@_) }
 sub is_inline_hash { shift->token_utils->is_inline_hash(@_) }
 sub is_inline_arr { shift->token_utils->is_inline_arr(@_) }
 sub is_token_operator { shift->token_utils->is_token_operator(@_) }
-sub is_list_parentheses { shift->token_utils->is_list_parentheses(@_) }
 sub is_list { shift->token_utils->is_list(@_) }
 sub is_word { shift->token_utils->is_word(@_) }
 sub is_internal_node_type { shift->token_utils->is_internal_node_type(@_) }
-sub _is_block { shift->token_utils->_is_block(@_) }
 
 
 # ----------------------------------------------------------------------
@@ -4381,17 +4379,6 @@ sub op_info {
   return $operands->{$name} // $operands->{lc $name};
 }
 
-sub is_op_prefix {
-  my $self      = shift;
-  my $op        = shift;
-
-  my $name      = $self->is_token_operator($op) // '';
-  my $prefix    = $self->prefix();
-
-  # Exact-first for the same case-sensitivity reason as op_info above.
-  return $prefix->{$name} // $prefix->{lc $name};
-}
-
 # After "print $var TOKEN", determine if TOKEN starts a new term
 # (making $var a filehandle) or is an operator (making $var an argument).
 # Filetest operators (-e, -f, -d, …) default their operand to $_ when no term
@@ -5060,80 +5047,9 @@ sub debug_dump_tree {
 # Operands on item queue:
 
 
-# Unused routines. Should probably have been used.
-sub _is_empty {
-  my $self      = shift;
-  my $e         = shift;
-
-  return 1
-      if scalar(@$e) == 0;
-
-  return undef;
-}
 
 
-sub _peek {
-  my $self      = shift;
-  my $e         = shift;
 
-  return undef
-      if scalar(@$e) == 0;
-
-  return $e->[0];
-}
-
-
-sub _peek_next {
-  my $self      = shift;
-  my $e         = shift;
-
-  return undef
-      if scalar(@$e) < 2;
-
-  return $e->[1];
-}
-
-sub _peek_next_next {
-  my $self      = shift;
-  my $e         = shift;
-
-  return undef
-      if scalar(@$e) < 3;
-
-  return $e->[2];
-}
-
-sub _peek_next_next_next {
-  my $self      = shift;
-  my $e         = shift;
-
-  return undef
-      if scalar(@$e) < 4;
-
-  return $e->[3];
-}
-
-
-sub _pop {
-  my $self      = shift;
-  my $e         = shift;
-
-  return shift @$e;
-}
-
-sub _unpop {
-  my $self      = shift;
-  my $e         = shift;
-  my $item      = shift;
-
-  unshift @$e, $item;
-}
-
-
-# Find priority of an operand
-sub _get_prio {
-  
-}
 
 # ----------------------------------------------------------------------
 
@@ -5313,26 +5229,6 @@ sub _subscript_autoquote_text {
   return $tok->content
     if !$is_array && $ref eq 'PPI::Token::Operator'
        && $tok->content =~ /^-[A-Za-z]$/;
-  return undef;
-}
-
-sub _subscript_to_cl_str {
-  my ($subscript, $self, $is_array) = @_;
-  my @kids = grep { !$_->isa('PPI::Token::Whitespace') } $subscript->children();
-  my @inner = @kids;
-  if (@inner == 1 && $inner[0]->isa('PPI::Statement::Expression')) {
-    @inner = grep { !$_->isa('PPI::Token::Whitespace') } $inner[0]->children();
-  }
-  if (@inner == 1) {
-    my $k = $inner[0];
-    if (ref($k) eq 'PPI::Token::Number') {
-      return $k->content;
-    }
-    if (defined(my $q = $self->_subscript_autoquote_text($k, $is_array))) {
-      return '"' . $q . '"';
-    }
-  }
-  return $self->parser->_parse_expression(\@inner, undef) if $self->has_parser;
   return undef;
 }
 

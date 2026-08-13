@@ -3171,37 +3171,6 @@ sub _enclosing_block {
   return undef;
 }
 
-# Count my/state declarations of the bare name within $scope, which is either a
-# PPI node (a block — search its descendants) or an arrayref of statements (the
-# whole segment).  Used to check a candidate is the SOLE declaration in its own
-# lexical extent — a same-name `my` in a DIFFERENT block is a distinct variable.
-sub _count_name_decls {
-  # $sig: count only declarations of that one canonical variable (see
-  # _hard_decl_count — same rule: container canons must not treat a sibling
-  # `my $x` as a shadow of `%x`/`@x`).  Default counts every sigil.
-  my ($self, $scope, $bare, $sig) = @_;
-  my @vs;
-  if (ref $scope eq 'ARRAY') {
-    for my $stmt (@$scope) {
-      push @vs, $stmt if ref $stmt && $stmt->isa('PPI::Statement::Variable');
-      push @vs, @{ $stmt->find('PPI::Statement::Variable') || [] } if ref $stmt && $stmt->isa('PPI::Node');
-    }
-  } else {
-    push @vs, @{ $scope->find('PPI::Statement::Variable') || [] };
-  }
-  my $n = 0;
-  for my $v (@vs) {
-    my $kw = ($v->schildren)[0];
-    next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content =~ /^(?:my|state)$/;
-    for my $dn ($self->_declared_names($v)) {
-      next if defined $sig && substr($dn, 0, 1) ne $sig;
-      (my $b = $dn) =~ s/^[\$\@\%]//;
-      $n++ if $b eq $bare;
-    }
-  }
-  return $n;
-}
-
 # Sigil-aware rename of every use of ONE variable.  When $within (a block node)
 # is given, only tokens inside it are rewritten — the variable's lexical extent,
 # so a same-name variable in a sibling block is untouched.  When $skip (a
@@ -4618,30 +4587,6 @@ sub _rename_state_vars {
     $self->{_file_lex_renamed}{$new} = 1;
     $self->{_file_lex_renamed}{ $new . '__init' } = 1;
   }
-}
-
-# Every `foreach my $NAME (LIST) {...}` construct in the segment that binds
-# $NAME.  Used by the poison test below: a symbol inside one of these is bound
-# by the foreach, so it says nothing about whether a GLOBAL of that name is
-# also live.  (A label may precede the `for`; `our`/`state` loop vars bind the
-# same way for this purpose — the question is only "is this use lexical".)
-sub _foreach_my_constructs {
-  my ($stmts, $name) = @_;
-  my @out;
-  for my $top (@$stmts) {
-    next unless ref $top && $top->isa('PPI::Node');
-    my @compounds = $top->isa('PPI::Statement::Compound') ? ($top) : ();
-    push @compounds, @{ $top->find('PPI::Statement::Compound') || [] };
-    for my $c (@compounds) {
-      my @k = grep { !$_->isa('PPI::Token::Label') } $c->schildren;
-      next unless @k >= 3
-        && $k[0]->isa('PPI::Token::Word') && $k[0]->content =~ /^for(?:each)?$/
-        && $k[1]->isa('PPI::Token::Word') && $k[1]->content =~ /^(?:my|our|state)$/
-        && $k[2]->isa('PPI::Token::Symbol') && $k[2]->content eq $name;
-      push @out, $c;
-    }
-  }
-  return \@out;
 }
 
 # True when SYM is one of the names DECLARED by a plain `my`/`state`
