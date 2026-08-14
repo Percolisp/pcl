@@ -4012,8 +4012,9 @@ sub _unescape_subst_replacement {
 # s/// replacement (non-/e) -> CL, via the REAL double-quoted-string
 # interpolator.
 #
-# It used to be a hand-rolled mini-interpolator (kept below as
-# _gen_interp_replacement_simple) whose loop understood exactly \1..\9,
+# It used to be a hand-rolled mini-interpolator (_gen_interp_replacement_simple,
+# deleted #303/s393 — it was still the fallback here, entered ZERO times over
+# corpus, Pl/t gate and full sweep) whose loop understood exactly \1..\9,
 # $1..$9, ${name} and $name.  A SUBSCRIPT fell through as literal text, so
 # `s/(a)/$h{$1}/g` emitted (p-string-concat $h "{" $1 "}") and produced the
 # string "{a}" — plausible garbage, silently, for one of the most common
@@ -4031,28 +4032,39 @@ sub _gen_interp_replacement {
   # the closing quote.  That shape cannot be interpolated meaningfully anyway,
   # so leave it to the simple path rather than hand PPI something broken.
   my $trailing = ($norm =~ /(\\+)\z/) ? length($1) : 0;
-  unless ($trailing % 2) {
-    my $q = $norm;
-    $q =~ s/"/\\"/g;
-    my $form = eval {
-      require PPI::Token::Quote::Double;
-      require Pl::PExpr;
-      my $fake = PPI::Token::Quote::Double->new(qq{"$q"});
-      my $expr_o = Pl::PExpr->new(
-        e => [$fake],
-        ($self->environment ? (environment => $self->environment) : ()),
-      );
-      my $id = $expr_o->str_interpol->parse_interpolated_string($expr_o, $fake);
-      my $gen = Pl::ExprToCL->new(
-        expr_o       => $expr_o,
-        environment  => $self->environment,
-        indent_level => $self->indent_level,
-      );
-      $gen->gen_node_form($id);
-    };
-    return $form if defined $form && (ref $form || $form ne '');
-  }
-  return _gen_interp_replacement_simple($str);
+  die "PCL internal: s/// replacement ends in an odd run of backslashes, "
+    . "which cannot be quoted for the dq-string parser: '$str'\n"
+    if $trailing % 2;
+  my $q = $norm;
+  $q =~ s/"/\\"/g;
+  my $form = eval {
+    require PPI::Token::Quote::Double;
+    require Pl::PExpr;
+    my $fake = PPI::Token::Quote::Double->new(qq{"$q"});
+    my $expr_o = Pl::PExpr->new(
+      e => [$fake],
+      ($self->environment ? (environment => $self->environment) : ()),
+    );
+    my $id = $expr_o->str_interpol->parse_interpolated_string($expr_o, $fake);
+    my $gen = Pl::ExprToCL->new(
+      expr_o       => $expr_o,
+      environment  => $self->environment,
+      indent_level => $self->indent_level,
+    );
+    $gen->gen_node_form($id);
+  };
+  # Rule 12: the value flows onward AS THE REPLACEMENT STRING, so a miss here
+  # is silent-wrong text in the output, not a lost effect.  The hand-rolled
+  # mini-interpolator this used to fall back to (_gen_interp_replacement_simple)
+  # was deleted in #303/s393 after all three of its entry routes measured ZERO
+  # over all three populations — corpus, Pl/t gate, full sweep.  An EMPTY
+  # replacement never reaches this sub at all: gen_subst_form only calls it
+  # when _replacement_interpolates says so, and `s/x//` does not (probed s393,
+  # it emits (p-subst "x" "")), so an empty form here is a parse miss too.
+  die "PCL internal: s/// replacement did not lower as a dq string: '$str'"
+    . ($@ ? " ($@)" : " (parser returned an empty form)\n")
+    if !defined $form || (!ref $form && $form eq '');
+  return $form;
 }
 
 # \1..\9 mean the same as $1..$9 in a replacement; the dq-string parser has no
@@ -4076,74 +4088,6 @@ sub _subst_backrefs_to_dollars {
   return $out;
 }
 
-sub _gen_interp_replacement_simple {
-  my ($str) = @_;
-  my @parts;
-  my $literal = '';
-  my $i = 0;
-  while ($i < length($str)) {
-    my $c = substr($str, $i, 1);
-    if ($c eq '\\') {
-      my $next = $i+1 < length($str) ? substr($str, $i+1, 1) : '';
-      if ($next =~ /[1-9]/) {
-        # \1..\9 in replacement = backref, map to CL var $1..$9
-        if (length($literal)) {
-          (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-          push @parts, qq{"$esc"};
-          $literal = '';
-        }
-        push @parts, "\$$next";
-        $i += 2;
-      } else {
-        # dq escape (\n, \x41, \x{263a}, …) — process to its characters; the
-        # lambda's result is spliced in verbatim, so no cl-ppcre doubling here.
-        my ($chars, $len) = _take_dq_escape($str, $i);
-        $literal .= $chars;
-        $i += $len;
-      }
-    } elsif ($c eq '$' && $i+1 < length($str) && substr($str, $i+1, 1) =~ /[1-9]/) {
-      # $1..$9 backreference — available as CL dynamic variable inside the lambda
-      my $n = substr($str, $i+1, 1);
-      if (length($literal)) {
-        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-        push @parts, qq{"$esc"};
-        $literal = '';
-      }
-      push @parts, "\$$n";
-      $i += 2;
-    } elsif ($c eq '$' && substr($str, $i) =~ /^\$\{([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)\}/) {
-      my $varname = $1;
-      if (length($literal)) {
-        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-        push @parts, qq{"$esc"};
-        $literal = '';
-      }
-      push @parts, "\$$varname";
-      $i += 3 + length($varname);
-    } elsif ($c eq '$' && substr($str, $i) =~ /^\$([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)/) {
-      my $varname = $1;
-      if (length($literal)) {
-        (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-        push @parts, qq{"$esc"};
-        $literal = '';
-      }
-      push @parts, "\$$varname";
-      $i += 1 + length($varname);
-    } else {
-      $literal .= $c;
-      $i++;
-    }
-  }
-  if (length($literal)) {
-    (my $esc = $literal) =~ s/\\/\\\\/g; $esc =~ s/"/\\"/g;
-    push @parts, qq{"$esc"};
-  }
-  # Every part is an atom ("literal", $1..$9, $varname) — the multi-part
-  # case is a structural concat form (task #78: no raw text out of here).
-  return @parts == 0 ? '""'
-       : @parts == 1 ? $parts[0]
-       : ['p-string-concat', @parts];
-}
 
 # Parse a s///e replacement string as Perl and return CL code
 sub _compile_subst_e_expr {

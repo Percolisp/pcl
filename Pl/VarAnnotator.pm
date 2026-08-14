@@ -7,10 +7,15 @@ package Pl::VarAnnotator;
 #   my $vi = Pl::VarAnnotator->analyze(\@stmts, $params, $known_subs, $host);
 #   $vi->{'$sum'}{unboxable}   # 1 → emit raw let + setf; writes proven arith
 #
-# The tree annotator (_analyze_tree) is the DEFAULT since W12 (s276).
-# _analyze_text — the s272 name-keyed TEXT-SCAN prototype — remains only as
-# the fallback when a statement parse dies inside the tree walk or when no
-# $host is supplied (the PCL_W12_OLD=1 escape hatch was deleted in s277).
+# The tree annotator (_analyze_tree) is the ONLY annotator.  It became the
+# default at W12 (s276); the s272 name-keyed TEXT-SCAN prototype
+# (_analyze_text) survived behind two fallbacks — "the tree walk died" and
+# "no $host" — until #303/s393 measured BOTH at ZERO over all three
+# populations (111-file corpus, 138-file Pl/t gate, full perl-tests sweep)
+# and deleted it; those two paths now die (see analyze).  What stayed is
+# _text_gate_tags, which the tree annotator calls on its own per-statement
+# parse-failure fallback text.  The PCL_W12_OLD=1 escape hatch went in s277,
+# PCL_W12_DIFF's dual-run in s393.
 #
 #   _analyze_tree — the W12 annotator: per-statement parse_expr_to_tree
 #     (the same OpcodeTree ExprToCL2 consumes) + a structural event walk.
@@ -51,10 +56,11 @@ package Pl::VarAnnotator;
 #     statement's source, plus a bare `$x =` write gate (the tree normally
 #     owns write classification, so the text gate list alone is not enough).
 #
-# Runtime switches (bring-up history: docs/v2-completion-plan.md §W12):
-#   default            = tree verdicts
-#   PCL_W12_DIFF=1     = run BOTH, print one W12DIFF line per verdict
-#                        difference to STDERR, still return tree verdicts
+# Runtime switch (bring-up history: docs/v2-completion-plan.md §W12):
+#   PCL_B_DEBUG=1      = one B-DEBUG line per name with its verdict, coerce
+#                        class, strbuf flag and the reasons that boxed it
+#                        (the reasons are only STORED in the verdict hash
+#                        under this switch — nothing else reads them)
 #
 # Unboxable requires ALL of:
 #   - declared exactly once in the region as a single `my $x` (shadowing → box)
@@ -166,22 +172,21 @@ sub arg_writing_builtin {
   return 0;
 }
 
+# The ONE entry.  Both former fallbacks to the text annotator now DIE (#303,
+# s393): the annotator decides whether a name may leave its box, so a
+# fallback verdict is a VALUE the emitter consumes — a wrong one is a silent
+# miscompile, which is rule 12's die case, not its announce case.  Both arms
+# measured ZERO across all three populations (111-file corpus, 138-file Pl/t
+# gate, full perl-tests sweep) before the text annotator was deleted.
 sub analyze {
   my ($class, $stmts, $extra_params, $known_subs, $host) = @_;
-  if (!$host) {
-    return _analyze_text($stmts, $extra_params, $known_subs);
-  }
+  die "PCL internal: VarAnnotator->analyze called with no host (the text "
+    . "annotator it used to fall back to was deleted as unreachable, #303)\n"
+    if !$host;
   my $tree_vi = eval { _analyze_tree($stmts, $extra_params, $known_subs, $host) };
-  if (!$tree_vi) {
-    # Text fallback on a tree crash.  Warn only under diff mode: pl2cl
-    # stderr is merged into generated CL by several test helpers.
-    warn "W12DIFF TREE-CRASH: $@" if $ENV{PCL_W12_DIFF};
-    return _analyze_text($stmts, $extra_params, $known_subs);
-  }
-  if ($ENV{PCL_W12_DIFF}) {
-    my $text_vi = _analyze_text($stmts, $extra_params, $known_subs);
-    _diff_report($stmts, $text_vi, $tree_vi);
-  }
+  die "PCL internal: VarAnnotator tree walk failed (#303 deleted the text "
+    . "fallback as unreachable): " . ($@ || "returned no verdicts\n")
+    if !$tree_vi;
   return $tree_vi;
 }
 
@@ -219,170 +224,6 @@ sub _text_gate_tags {
   push @tags, 'write-in-fallback'
     if $with_bare_write && $text =~ /$bare\s*=[^=~]/;
   return @tags;
-}
-
-sub _analyze_text {
-  my ($stmts, $extra_params, $known_subs) = @_;
-  my @stmts = grep { ref $_ } @$stmts;
-  my $text = join("\n", map { $_->content } @stmts);
-  my %vi;
-
-  # 1. Collect single-scalar `my` declarations (anywhere in the region).
-  # Sub parameters (bound by the lambda list, not by a `my` in this region)
-  # are seeded as known one-shot declarations so the same gates apply to them.
-  my %decl_count;
-  my %decl_init_ok;
-  for my $p (@{ $extra_params // [] }) {
-    $decl_count{$p} = 1;
-    $decl_init_ok{$p} = 1;
-  }
-  for my $stmt (@stmts) {
-    my $vars = $stmt->find('PPI::Statement::Variable') || [];
-    my @all = (($stmt->isa('PPI::Statement::Variable') ? ($stmt) : ()), @$vars);
-    for my $d (@all) {
-      next unless ref $d;
-      my @kids = $d->schildren;
-      next unless @kids >= 2
-        && $kids[0]->isa('PPI::Token::Word') && $kids[0]->content eq 'my';
-      if ($kids[1]->isa('PPI::Token::Symbol') && $kids[1]->content =~ /^\$\w+$/) {
-        my $name = $kids[1]->content;
-        $decl_count{$name}++;
-        # init = everything after '='
-        my @rhs;
-        my $seen_eq = 0;
-        for my $k (@kids[2 .. $#kids]) {
-          if (!$seen_eq) {
-            $seen_eq = 1 if $k->isa('PPI::Token::Operator') && $k->content eq '=';
-            next;
-          }
-          push @rhs, $k;
-        }
-        $decl_init_ok{$name} = !$seen_eq || _arith_rhs(\@rhs, $known_subs);
-      } else {
-        # my (LIST) — mark every scalar in it as multi-declared (→ boxed)
-        my $syms = $d->find('PPI::Token::Symbol') || [];
-        $decl_count{$_->content} += 2
-          for grep { $_->content =~ /^\$\w+$/ } @$syms;
-      }
-    }
-  }
-
-  # 2. Region-wide disqualifiers.
-  my $has_eval = $text =~ /\beval\b/;
-  my %in_nested_sub;
-  for my $stmt (@stmts) {
-    my $blocks = $stmt->find(sub {
-      $_[1]->isa('PPI::Structure::Block') && do {
-        my $prev = $_[1]->sprevious_sibling;
-        $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
-      };
-    }) || [];
-    for my $b (@$blocks) {
-      $in_nested_sub{$_}++ for ($b->content =~ /(\$\w+)/g);
-    }
-  }
-
-  # 3. Per-name gates.
-  for my $name (keys %decl_count) {
-    my @reasons;
-    push @reasons, 'multi-decl'     if $decl_count{$name} != 1;
-    push @reasons, 'init-shape'     unless $decl_init_ok{$name};
-    push @reasons, 'eval-in-region' if $has_eval;
-    push @reasons, 'nested-sub-ref' if $in_nested_sub{$name};
-    push @reasons, _text_gate_tags($name, $text);
-    $vi{$name} = { unboxable => (@reasons ? 0 : 1),
-                   ($ENV{PCL_W12_DIFF} ? (reasons => \@reasons) : ()) };
-  }
-
-  # 4. Every plain `$x = RHS;` write must be arith-shaped too.
-  for my $stmt (@stmts) {
-    my @assigns = ($stmt, @{ $stmt->find('PPI::Statement') || [] });
-    for my $s (@assigns) {
-      next unless ref $s && $s->isa('PPI::Statement') && !$s->isa('PPI::Statement::Variable');
-      my @k = $s->schildren;
-      next unless @k >= 3
-        && $k[0]->isa('PPI::Token::Symbol') && $k[0]->content =~ /^\$\w+$/
-        && $k[1]->isa('PPI::Token::Operator') && $k[1]->content eq '=';
-      my $name = $k[0]->content;
-      next unless $vi{$name} && $vi{$name}{unboxable};
-      unless (_arith_rhs([@k[2 .. $#k]], $known_subs)) {
-        $vi{$name}{unboxable} = 0;
-        push @{ $vi{$name}{reasons} }, 'write-shape' if $ENV{PCL_W12_DIFF};
-      }
-    }
-  }
-
-  return \%vi;
-}
-
-# True when the RHS provably stores a RAW CL value (never a box) in the slot:
-#   - it contains at least one TOP-LEVEL %ARITH_OP operator (every such p-op
-#     coerces its operands — boxes, strings, sub results — and returns a raw
-#     number/string), or
-#   - it is a single bare number/string literal.
-# Operands may be numbers, string literals, $scalars, parenthesized
-# subexpressions, and calls to KNOWN user subs (`f(...)` with args of ANY
-# shape — the args only feed the call; the top-level operator coerces its
-# result).  Operators inside call parens do not count as top-level: a bare
-# `f($a + 1)` could still return a box.
-sub _arith_rhs {
-  my ($elems, $known_subs) = @_;
-  my ($ok, $ops, $lits, $others) = _scan($elems, $known_subs);
-  return 0 unless $ok;
-  return 1 if $ops;                                # $i * 3 + 7 / $s . "x"
-  return 1 if $lits == 1 && !$others;              # my $sum = 0; my $s = 'a';
-  return 0;                        # bare `$x = $y` / `$x = f()` may alias a box
-}
-
-# Walk one nesting level; returns (ok, top_level_ops, literals, other_values).
-sub _scan {
-  my ($elems, $known_subs) = @_;
-  my @e = grep { ref $_ && $_->significant } @$elems;
-  my ($ops, $lits, $others) = (0, 0, 0);
-  for (my $i = 0; $i <= $#e; $i++) {
-    my $e = $e[$i];
-    my $r = ref $e;
-    if ($e->isa('PPI::Statement')) {                 # transparent wrapper
-      my ($ok, $o, $l, $v) = _scan([$e->schildren], $known_subs);
-      return 0 unless $ok;
-      $ops += $o; $lits += $l; $others += $v;
-    }
-    elsif ($e->isa('PPI::Token::Number'))            { $lits++ }
-    elsif ($r eq 'PPI::Token::Quote::Single'
-        || $r eq 'PPI::Token::Quote::Double')        { $lits++ }
-    elsif ($r eq 'PPI::Token::Symbol') {
-      return 0 unless $e->content =~ /^\$\w+$/;
-      # W11: element access `$h{k}` / `$a[i]` — the Symbol plus its subscript
-      # chain is ONE value (the element).  Consume the trailing Subscript(s)
-      # without scanning inside (the key only selects the slot; writes inside
-      # it are caught by the step-3 text regexes).  p-gethash/p-aref return
-      # the element VALUE, which may itself be a reference box — so this
-      # counts as `others` (like a sub call): only an operator-coerced RHS
-      # may unbox, a bare `$x = $h{k}` stays boxed.
-      $i++ while $i < $#e && ref($e[$i+1]) eq 'PPI::Structure::Subscript';
-      $others++;
-    }
-    elsif ($r eq 'PPI::Token::Operator') {
-      return 0 unless $ARITH_OP{$e->content};
-      $ops++;
-    }
-    elsif ($r eq 'PPI::Token::Structure') {
-      return 0 unless $e->content eq ';';
-    }
-    elsif ($r eq 'PPI::Token::Word'
-           && $known_subs && $known_subs->{$e->content}
-           && $i < $#e && ref($e[$i+1]) eq 'PPI::Structure::List') {
-      $i++;                                          # skip the arg list
-      $others++;                                     # call result: a value
-    }
-    elsif ($r eq 'PPI::Structure::List') {           # (subexpression)
-      my ($ok, $o, $l, $v) = _scan([$e->children], $known_subs);
-      return 0 unless $ok;
-      $ops += $o; $lits += $l; $others += $v;
-    }
-    else { return 0 }
-  }
-  return (1, $ops, $lits, $others);
 }
 
 # ==========================================================================
@@ -474,13 +315,13 @@ sub _analyze_tree {
       }
       if ($coerce) {
         $vi{$name} = { unboxable => 1, coerce => $coerce,
-                       ($ENV{PCL_W12_DIFF} ? (reasons => ["b-$coerce"]) : ()) };
+                       ($ENV{PCL_B_DEBUG} ? (reasons => ["b-$coerce"]) : ()) };
         _mark_strbuf($ctx, \%vi, $name);
         next;
       }
     }
     $vi{$name} = { unboxable => (@reasons ? 0 : 1),
-                   ($ENV{PCL_W12_DIFF} ? (reasons => \@reasons) : ()) };
+                   ($ENV{PCL_B_DEBUG} ? (reasons => \@reasons) : ()) };
     _mark_strbuf($ctx, \%vi, $name) unless @reasons;
   }
   if ($ENV{PCL_B_DEBUG}) {
@@ -1333,40 +1174,6 @@ sub _tw_operand_ok {
   return 1 if $r eq 'PPI::Token::Symbol' && !@$kids
            && $node->content =~ /^\$\w+$/;
   return 0;
-}
-
-# ------------------------------------------------------------ diff report
-
-sub _diff_report {
-  my ($stmts, $text_vi, $tree_vi) = @_;
-  my ($first) = grep { ref $_ } @$stmts;
-  my $where = '?';
-  if ($first) {
-    my $line = eval { $first->line_number } // '?';
-    $where = "line $line";
-  }
-  for my $name (sort keys %$text_vi) {
-    # names absent from the tree side are declared only inside nested sub
-    # bodies — never consulted at this region's level — skip
-    next unless exists $tree_vi->{$name};
-    my ($t, $w) = ($text_vi->{$name}{unboxable}, $tree_vi->{$name}{unboxable});
-    next if $t == $w;
-    my $treasons = join(',', @{ $text_vi->{$name}{reasons} // [] }) || '-';
-    my $wreasons = join(',', @{ $tree_vi->{$name}{reasons} // [] }) || '-';
-    my $line = sprintf "W12DIFF %s %s text=%s(%s) tree=%s(%s)\n",
-      $where, $name,
-      $t ? 'unboxable' : 'boxed', $treasons,
-      $w ? 'unboxable' : 'boxed', $wreasons;
-    # PCL_W12_DIFF=/abs/path appends there — STDERR of pl2cl is merged into
-    # the generated CL by some test helpers, so warn only when no path given.
-    if (($ENV{PCL_W12_DIFF} // '') =~ m{^/}) {
-      open my $fh, '>>', $ENV{PCL_W12_DIFF} or next;
-      print $fh $line;
-      close $fh;
-    } else {
-      warn $line;
-    }
-  }
 }
 
 1;
