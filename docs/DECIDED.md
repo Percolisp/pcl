@@ -2956,3 +2956,30 @@ decreases are owned by tasks #313 (crash), #314 (E4.1 refusals), #315
   the streams under sbcl directly before concluding anything about which
   stream a diagnostic uses.  (Cost s393 one wrong diagnosis, caught by
   re-measuring.)
+
+## s394 (2026-08-15, Fable) — s393 review: batch approved, both asks ruled
+
+Rulings + independent verification in `docs/fable-answers-s393.md`.
+
+- **All six s393 commits APPROVED as shipped** — cold gate independently
+  re-verified 139/5148 (only the 8 user-ignored xs rows), sweep verdict
+  recomputed from artifacts (TOTAL 18535, 0 new / 0 fixed), fresh probes vs
+  live perl for F-A1 / #316 / #317 all reproduce.
+- **Ask 3 (F-A1's absorbed second half): IN SCOPE.**  The boundary rule: a
+  filler may absorb a second consumer when it answers the SAME question about
+  the SAME syntactic shape and the fix routes both through ONE predicate;
+  a second consumer answering a DIFFERENT question is its own commit.
+- **Ask 4: script_run / regex_sets are blessed ENGINE non-support** (cl-ppcre
+  parity, owner family #196/#71), unlike a `Parser2 TODO:` which is always a
+  compiler gap.  Register as XDIFF + not-supported entries — but fix the
+  `capture_warnings` test.pl-stub gap FIRST (a harness gap stacked under
+  regex_sets), and each entry must say what would LIFT it (#71/PCRE2 lifts
+  script_run; `(?[ … ])` is perl-only and survives #71).  Mechanics: #320.
+- **NEW residue #318 (review probe): in `my VAR, <tail>;` the tail reads the
+  FRESH binding where perl reads the OLD one** (`$x = 9; my $x, $b1 = $x + 1;`
+  → perl 10, PCL 1; container spelling likewise).  Pre-existing for scalars,
+  inherited by containers; occurs in no population; unscheduled.
+- **Skipping the cache-generation bump is fine ONLY with the justification
+  stated**: corpus-diff IDENTICAL ⇒ no cacheable input's emission moved (a
+  refusal never cached; no cached module has the newly-fixed shape).  Say so
+  in the commit/review when skipping; bump in every other case.

@@ -4,6 +4,38 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 394 (2026-08-15, Fable) — s393 batch reviewed + APPROVED; both asks ruled; #318–#320 filed
+
+Review of `docs/opus5-review-requests-s393.md`; rulings in
+`docs/fable-answers-s393.md`, DECIDED updated.
+
+**Independent verification**: cold gate 139/5148 (failures exactly the 8
+user-ignored pclxs xs rows — the user notes pclxs is under separate work, so
+those rows stay ignored); sweep verdict recomputed from the s393 artifacts
+(0 new / 0 fixed, TOTAL 18535); all four code diffs read end-to-end
+(`_multi_decl` vs `_lead_decl_with_expr_tail` proven disjoint; the $ID
+widening admits exactly the Unicode heads; the five rule-12 sites are dies);
+fresh probes vs live perl reproduce the F-A1 tail-global case, the #316 glob
+reproducer and the #317 flattening rule-out.
+
+**Ask 3 ruled IN SCOPE** — the absorbed collector fix answers the SAME
+question about the SAME shape through ONE predicate; boundary recorded so it
+is not a blanket license.  **Ask 4 ruled REGISTER** — engine parity is
+blessed non-support with owners (#196/#71); carve-outs: fix the
+`capture_warnings` test.pl-stub gap first, and each entry says what lifts it.
+
+**Filed**: #318 (review-probe residue: `my VAR, <tail>;` tail reads the FRESH
+binding, perl reads the OLD — perl 10 vs PCL 1 on the scalar reproducer;
+pre-existing, no population hit, unscheduled), #319 (`version::is_strict`
+shim, op/packagev.t −17), #320 (the ask-4 registration mechanics).  Fixed
+leaked tool-call syntax in #316's task JSON.
+
+**Queue confirmed**: #314's six remaining families (F-A1 method) → #320 →
+#316/#317/#319 fillers → v0.1 track (#277–#283).  Fable-side unchanged:
+#153 FOLD chunks 2–3, #271, #281, boxed aggregates.
+
+---
+
 ## Session 393 (2026-08-14, Opus 5) — #303 CLOSED, #313 fixed, #314's big family opened
 
 **s393a (`e4b5108`) — the three parked #303 singles, verified and shipped.**
