@@ -23,6 +23,12 @@
 # XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)
 # FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)
 # NOT-RUN with QUARANTINED = deliberately not run this session; UNMEASURED, never passing
+# s395 (#314 F-B fixed): `our NAMES <non-assignment tail>` lowers -- op/inccode.t
+#   and op/repeat.t re-measured in the fixed tree and spliced.  op/repeat.t
+#   TRANSPILE-FAIL -> 47 ok / 3 not-ok (the 3 are @_-aliasing / lvalue-cx /
+#   `(1) x ~1`, all unrelated to the declaration).  op/inccode.t
+#   TRANSPILE-FAIL -> 1 ok: it COMPILES now and dies at test 2 on the
+#   coderef-in-@INC feature, which is that whole file (task #321).
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -273,7 +279,7 @@ op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF
 op/hexfp.t	125	0	110	15	DIFF	
 op/inc.t	93	0	60	15	DIFF	
 op/inccode-tie.t	89	0	0	0	DIFF	crash:simple-error: PCL: unsupported in string eval: multiple package sections at (eval N) line N.
-op/inccode.t	89	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/inccode.t	89	0	1	0	DIFF	crash:simple-error: coderef in @INC (the file COMPILES now, task #321)
 op/incfilter.t	153	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Filter::Util::Call in @INC
 op/index.t	415	0	49	13	DIFF	parse-error
 op/index_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
@@ -334,7 +340,7 @@ op/readline.t	35	1	25	7	DIFF	undef-fn:PerlIO::pl-get_layers
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.
 op/ref.t	257	0	195	45	DIFF	
 op/refstack.t	0	0	0	0	NOTAP	
-op/repeat.t	50	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/repeat.t	50	0	47	3	DIFF	
 op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
 op/require_gh20577.t	9	0	4	5	DIFF	
 op/require_override.t	10	0	7	3	DIFF	

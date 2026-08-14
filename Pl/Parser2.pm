@@ -7494,8 +7494,11 @@ sub _tail_decl_convertible {
   # variable's read in tail position, which is the value perl gives.
   if ($kw eq 'our') {
     return 1 if @sk == 2;
-    return $sk[2]->isa('PPI::Token::Operator')
-        && Pl::PExpr::TokenUtils::is_assign_op($sk[2]->content) ? 1 : 0;
+    # Any operator tail, not only an assignment: `our $x++` lowers to the
+    # post-increment expression exactly as `our $x = 1` lowers to the
+    # assignment, and in both cases that expression IS _lower_our_decl's only
+    # form, hence already the tail value.  (Same widening as there.)
+    return $sk[2]->isa('PPI::Token::Operator') ? 1 : 0;
   }
   return 0 unless $kw eq 'my';
   my ($name) = $self->_single_scalar_decl($stmt);
@@ -8318,15 +8321,22 @@ sub _lower_our_decl {
     @names = map  { $_->content }
              grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
   }
-  # The initialiser may use ANY assignment operator, not just `=`: perl's
+  # The tail may be ANY operator, not only an assignment: perl's
   # `our $Verbose ||= 0;` (Exporter.pm) declares the package cell and then
-  # runs a compound assignment on it.  Ask the #140 one-true set rather than
-  # matching `=` by hand — the tail below lowers `NAMES OP RHS` through the
-  # ordinary expression machinery either way.
+  # runs a compound assignment on it, and `our $count++;` (op/inccode.t's
+  # tied FETCH, op/repeat.t) declares it and then evaluates `$count++` as an
+  # ordinary expression.  Both are the same statement shape — DECLARE, then
+  # lower `NAMES <tail>` through the expression machinery — and both are the
+  # `our` twin of `my VAR <non-'=' tail>` (_lead_decl_with_expr_tail).  The
+  # only thing that must be rejected here is a tail that is not an operator
+  # at all (an unrecognised declaration shape), so ask that and nothing more.
+  # NB the operator-vs-assignment distinction still matters to ONE consumer,
+  # _tail_decl_convertible: in eval-tail position the value of `our $x = 1`
+  # is the assignment's, of `our $x++` the post-increment's — both are simply
+  # this function's last form, so it accepts both.
   my $bad = !@names
     || (grep { !/^[\$\@\%]\w+$/ } @names)
-    || (@k > 2 && !($k[2]->isa('PPI::Token::Operator')
-                    && Pl::PExpr::TokenUtils::is_assign_op($k[2]->content)));
+    || (@k > 2 && !$k[2]->isa('PPI::Token::Operator'));
   die "Parser2 TODO: unsupported our declaration: " . $stmt->content if $bad;
   for my $n (@names) {
     # A defvar of a let-bound name would proclaim it special and poison the

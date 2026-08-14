@@ -1,5 +1,7 @@
 #!/usr/bin/env perl
-# my-decl-tail-01.t — task #314 family F-A1: `my VAR <non-'=' trailing>;`
+# my-decl-tail-01.t — task #314 families F-A1 and F-B: a DECLARATION whose
+# statement continues as an ordinary expression — `my VAR <non-'=' trailing>;`
+# and its `our` twin `our NAMES <non-assignment trailing>;`.
 #
 #   my @raw, @upgraded, @utf8;
 #
@@ -38,7 +40,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 13;
 
 sub run_cl {
     my ($code) = @_;
@@ -110,6 +112,32 @@ print f(), "\n";},
 test_cl('a fresh container per loop iteration',
     q{for my $i (1..2) { my @a, @b; push @a,$i; print scalar(@a); } print "\n";},
     "11\n");
+
+# ── the `our` twin of the same shape (#314 family F-B, s395) ────────────────
+# `our NAMES <tail>` is the same statement: declare the package cell(s), then
+# evaluate `NAMES <tail>` as an ordinary expression.  It was refused with
+# `Parser2 TODO: unsupported our declaration` because the gate demanded an
+# ASSIGNMENT operator after the name — which made op/inccode.t (89 rows) and
+# op/repeat.t (50) whole TRANSPILE-FAIL files over one tied `FETCH`.
+test_cl('`our $count++` declares the cell and increments it',
+    q{package Foo;
+sub bump { our $count++; return $count }
+package main;
+print Foo::bump(), Foo::bump(), $Foo::count, "\n";},
+    "122\n");
+
+test_cl('a non-assignment tail still runs its side effects',
+    q{sub side { print "S"; return 1 }
+our $x, side();
+$x = 4;
+print "$x\n";},
+    "S4\n");
+
+test_cl('container `our @a, @b;` declares both as package arrays',
+    q{our @a, @b;
+push @a, 1; push @b, 2, 3;
+print scalar(@a), scalar(@b), "$a[0]$b[1]\n";},
+    "1213\n");
 
 # ── INVERSE guard: the ordinary declarations must not have moved ────────────
 test_cl('plain `my @a = (…)` and bare `my @a;` are untouched',

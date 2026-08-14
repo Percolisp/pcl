@@ -665,10 +665,22 @@ like($ourc, qr/\(p-defcell \$Verbose /, 'our-compound: the package cell is still
 like($ourc, qr/\(p-or-assign \$Verbose 0\)/, 'our-compound: the ||= write is emitted');
 like(eval { Pl::Parser2->parse_code(q{our $n //= 3; our $m += 2; print $n;}) } // '',
      qr/\(p-defcell \$m /, 'our-compound: //= and += declare their cells too');
-# INVERSE: a non-assignment operator after the name is still not an `our` decl.
-eval { Pl::Parser2->parse_code(q{our $x, $y; print $x;}) };
-like($@, qr/Parser2 TODO: unsupported our declaration/,
-     'our-compound INVERSE: `our $x, $y` is still refused (not an assignment)');
+# A NON-assignment operator after the name is the SAME statement shape, not a
+# different one — perl declares the cell and evaluates `NAMES <tail>` as an
+# ordinary expression.  Probed against perl 5.40.3 (s395, #314 family F-B):
+#   perl -e '$x=1; our $x, $y; print $x'            -> 1
+#   perl -e 'sub f {print "called\n"} our $z, f();' -> called
+# so the tail's side effects DO run, and only `use strict` rejects the
+# spelling (invalid perl there, principle 9 — not our business).  This used to
+# be pinned as a REFUSAL here; op/inccode.t's tied `sub FETCH { our $count++ }`
+# and op/repeat.t's `our $Tiecount++` are the same shape and were both whole
+# TRANSPILE-FAIL files because of it.
+my $ourt = eval { Pl::Parser2->parse_code(q{our $x, $y; print $x;}) };
+is($@, '', 'our-tail: `our $x, $y` lowers natively (no Parser2 TODO)');
+like($ourt, qr/\(p-defcell \$x /, 'our-tail: the declared cell is still emitted');
+my $ourinc = eval { Pl::Parser2->parse_code(q{our $count++; print $count;}) } // '';
+like($ourinc, qr/\(p-defcell \$count /, 'our-tail: `our $count++` declares the cell');
+like($ourinc, qr/\(p-post\+\+ \$count\)/, 'our-tail: …and the increment is emitted');
 
 # (2) Condition-my poison test: a `foreach my $i (…)` BINDS the name, so its
 # uses say nothing about a global.  Math::BigInt has five C-for `my $i` loops
