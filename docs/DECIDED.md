@@ -3033,3 +3033,12 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   experimental`.  Entry corrected in place; task **#325** sizes the feature —
   it is ONE cause behind ~1400 rows of #314's residue across four t/ files, and
   in PCL's model an alias is "two names hold the SAME box/vector/hash object".
+- **re/regexp.t and its five siblings HANG at TAP row 906 — they are not slow**
+  (s395, task #326).  `--timeout 150` and `--timeout 400` give byte-identical
+  counts (793 ok / 112 not-ok); a slow file grows with time, and the contended
+  90 s run giving FEWER (344) shows what slowness looks like in the same data.
+  Six drivers share one data file (`t/re/re_tests`, 2169 independent one-line
+  regex tests), so ~7500 rows are unmeasured.  **The last TAP row names the
+  offending pattern** — never bisect by adding exits to perl's own `.t` files.
+  comp/require.t is the genuinely SLOW one (909 at `--timeout 300`, 350 at 90 s)
+  and wants a `docs/perl-suite-timeouts.tsv` row.

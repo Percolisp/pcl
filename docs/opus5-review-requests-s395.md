@@ -42,12 +42,21 @@ one comes back at its snapshot value **exactly**: comp/require.t **909** (at
 `--timeout 300`), re/regexp.t **793**, re/regexp_noamp.t **794** (at
 `--timeout 400`).  None of those rows was spliced.
 
-**FYI 3 (pre-existing, not from this session): six `re/regexp*.t` files still
-say TIMEOUT even at 400 s**, and comp/require.t at 90 s.  They are not
-registered in `docs/perl-suite-timeouts.tsv`, so on a busy run their rows
-evaporate into a number that looks like a regression — which is exactly the
-#176 pack.t lesson, and it cost this session a re-measure to rule out.  Worth a
-registry row each (re/pat_advanced.t already has one at 900 s).
+**FYI 3 — the six `re/regexp*.t` files are HUNG, not slow (measured after the
+first draft of this doc; task #326).**  150 s and 400 s give byte-identical
+counts (793 ok / 112 not-ok), so the file stops dead at TAP row 906; a slow
+file would have produced more rows with more time, and the contended 90 s run
+producing FEWER (344) shows what slowness actually looks like in the same data.
+Six drivers share one data file (`t/re/re_tests`, 2169 independent one-line
+regex tests), so the unmeasured tail is ~7500 rows.  The last TAP row names the
+pattern — no bisecting, and no editing perl's own `.t` files.  comp/require.t
+IS the slow case (909 at 300 s) and just wants a registry row.
+
+**And the #176 half stands regardless**: none of those seven files has a row in
+`docs/perl-suite-timeouts.tsv`, so on a busy run their rows evaporate into a
+number that reads as a regression — which is exactly what cost this session a
+re-measure to rule out.  re/pat_advanced.t already carries such a row at 900 s
+as the precedent.
 
 Compile time checked against session-start HEAD on the same file
 (perl-tests/pack.t, two runs each): 4.05 / 3.79 s before, 4.42 / 3.64 s after —
@@ -55,7 +64,9 @@ noise, far inside the 50% budget, despite two new per-parse token pre-passes.
 
 New tasks: **#321** (coderef-in-@INC), **#322** (the attribute protocol),
 **#323** (three test.pl stubs that manufacture a PASS), **#324** (`(?{ })`
-blows the control stack instead of announcing).
+blows the control stack instead of announcing), **#325** (refaliasing: ONE
+feature behind ~1400 rows of #314 residue), **#326** (re/regexp.t and its five
+siblings HANG at row 906 — ~7500 rows unmeasured).
 
 ---
 
