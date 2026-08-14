@@ -7,6 +7,12 @@
 #   have a verdict in docs/perl-suite-audit-s392.md.  Rows this snapshot
 #   records as LOWER than reality, with their owning task, are listed there —
 #   do not read a decrease here as "expected" without checking that file.
+# s393 (#313 fixed): mro/basic_utf8.t and mro/next_edgecases_utf8.t re-measured
+#   in the fixed tree and spliced in — both were recorded at their CRASHED
+#   value ("Cannot proclaim a macro variable special"), the debt the audit
+#   said was owed back.  basic_utf8 9 -> 10, next_edgecases_utf8 0 -> 9, and
+#   both return to XDIFF.  That clears the audit's LIVE CRASH entry; the
+#   #314 (TRANSPILE cluster) and #315 (14 undiagnosed) rows still stand.
 # NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)
 # XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)
 # FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)
@@ -124,7 +130,7 @@ mro/basic_05_c3.t	2	0	0	1	XDIFF	crash:simple-error: No SUPER::foo found from Dia
 mro/basic_05_c3_utf8.t	2	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_05_dfs.t	2	0	0	1	XDIFF	crash:simple-error: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/basic_05_dfs_utf8.t	2	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_utf8.t	53	0	9	8	DIFF	crash:simple-error: Cannot proclaim a macro variable special: ᛁ앛ଌᛠ::@ISA | NOT fully registered: 1 unregistered diverging row(s): [at t/mro/basic_utf8.t line 77] | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
+mro/basic_utf8.t	53	0	10	10	XDIFF	crash:simple-error: Can't locate object method "new" via package "DESTROY_MRO_Ｄჷ및" (perhaps you forgot t | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/c3_with_overload.t	7	0	7	0	OK	
 mro/c3_with_overload_utf8.t	7	0	7	0	OK	
 mro/complex_c3.t	12	0	11	0	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
@@ -150,7 +156,7 @@ mro/method_caching_utf8.t	28	0	10	0	XDIFF	undef-fn:ǎᔆɗF::pl-앗dƑ | not-sup
 mro/next_NEXT.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "next::method" via package "Fuz" at - line N. | not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
 mro/next_NEXT_utf8.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "fಓ" via package "Fᶽ" (perhaps you forgot to load "Fᶽ"?)  | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 mro/next_edgecases.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
-mro/next_edgecases_utf8.t	12	0	0	0	DIFF	crash:simple-error: Cannot proclaim a macro variable special: બʑ::@ISA | NOT fully registered: 1 unregistered diverging row(s): *summary* | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
+mro/next_edgecases_utf8.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 mro/next_goto.t	4	0	0	0	XDIFF	undef-fn:next::pl-method | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_goto_utf8.t	4	0	0	0	XDIFF	crash:simple-error: Can't locate object method "ᕗ" via package "ᵗ톺" (perhaps you forgot to load "ᵗ톺" | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/next_inanon.t	2	0	0	0	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)

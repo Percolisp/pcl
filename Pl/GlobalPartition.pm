@@ -72,14 +72,28 @@ my %WORD_SHAPED_EXCEPTION = map { $_ => 1 } qw(
 # A pipe-quoted VARIABLE (|$.|, |${^MPE}|), a bare punctuation name ($@, @#),
 # a (p-stash …) form or anything else returns () — "not word-shaped", which
 # the caller reads as EXCEPTION.
+#
+# $ID is the identifier shape a package SEGMENT or a variable NAME has, in
+# the spelling the two emitters produce: one word character that is not a
+# digit, then word characters.  It must be UNICODE-AWARE, because `use utf8`
+# source hands PCL real Unicode package names (perl's own t/mro/*_utf8.t).
+# Task #313: the head used to be ASCII-only (`[A-Za-z_]`) while the `\w` after
+# it already matched Unicode, so `Baɾ::` split but `બʑ::` did not — the split
+# failed, partition_name read that as "not word-shaped" = EXCEPTION, and the
+# `defvar` it then emitted for `બʑ::@ISA` collided with the symbol-macro cell
+# p-defpackage had already made for that package's @ISA: a LOAD-TIME crash
+# ("Cannot proclaim a macro variable special"), which is precisely the hazard
+# this file's header warns about.
+my $ID = qr/[^\W\d]\w*/;
+
 sub _split_name {
   my ($cl_name) = @_;
   return () if !defined $cl_name;
   my $rest = $cl_name;
   my $pkg;
   if ($rest =~ s/^\|([^|]*)\|:://)      { $pkg = $1 }
-  elsif ($rest =~ s/^([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*):://) { $pkg = $1 }
-  return () if $rest !~ /^([\$\@\%])([A-Za-z_]\w*)\z/;
+  elsif ($rest =~ s/^($ID(?:::$ID)*):://) { $pkg = $1 }
+  return () if $rest !~ /^([\$\@\%])($ID)\z/;
   return ($pkg, "$1$2");
 }
 

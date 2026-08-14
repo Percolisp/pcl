@@ -12,9 +12,14 @@
 #
 # Pure perl, no SBCL spawn.
 use v5.30;
+use utf8;                # the #313 rows below name a Unicode package
 use strict;
 use warnings;
 use Test::More;
+# The #313 rows put Unicode names in their descriptions; without this the TAP
+# stream warns "Wide character in print" on every one of them.
+binmode(Test::More->builder->$_, ':encoding(UTF-8)')
+  for qw(output failure_output todo_output);
 use FindBin;
 use lib "$FindBin::Bin/../..";
 use Pl::GlobalPartition qw(is_exception_global partition_name);
@@ -76,5 +81,23 @@ is_deeply(\@disagree, [],
 # ...and the converse is NOT claimed: $a/$b are partition exceptions but were
 # deliberately REMOVED from the immune table by #287.
 ok(is_exception_global('$a'), '$a is a partition exception');
+
+# --- Unicode names are ORDINARY (task #313) --------------------------------
+# `use utf8` source gives PCL real Unicode package and variable names (perl's
+# own t/mro/*_utf8.t).  The segment head used to be matched ASCII-only while
+# the rest was \w, so a name whose FIRST character is non-ASCII failed to
+# split and fell to EXCEPTION = `defvar` — colliding at load time with the
+# symbol-macro cell p-defpackage had already made for that package's @ISA.
+# `Baɾ::@ISA` passed even then (ASCII head), which is why only the *_utf8
+# suite files ever crashed; both spellings are pinned here.
+for my $n ('બʑ::@ISA', 'Baɾ::@ISA', 'બʑ::$VERSION', 'Ünïcode::Bʑ::%h',
+           '$café', '@bʑ', 'બʑ::Inner::@a') {
+  is(partition_name($n), 'ordinary', "ordinary, Unicode name: $n");
+}
+# The exception causes still win over a Unicode PACKAGE: cause (b) keys on the
+# bare name, which is what the sort lowering and the runtime bind.
+is(partition_name('બʑ::$a'), 'exception', 'sort pair stays an exception in a Unicode package');
+# A digit may not start an identifier — still not word-shaped.
+is(partition_name('9bad::$x'), 'exception', 'digit-initial package segment is not word-shaped');
 
 done_testing();

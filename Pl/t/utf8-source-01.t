@@ -38,7 +38,7 @@ sub run_bytes {
     return decode_utf8($output);
 }
 
-plan tests => 5;
+plan tests => 6;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -58,3 +58,20 @@ is(run_bytes(encode_utf8("use utf8;\nmy \$café = 42;\nprint \$café, \"\\n\";")
 # index() is character-based under use utf8.
 is(run_bytes(encode_utf8('use utf8; my $s = "axé"; print index($s,"é"), "\n";')),
    "2\n", 'use utf8: index() is character-based');
+
+# Task #313 (LOAD-TIME CRASH, found by the s392 companion-suite audit): a
+# package whose name STARTS with a non-ASCII letter must land in the ORDINARY
+# global partition like any other user package.  Pl::GlobalPartition matched a
+# segment's first character ASCII-only, so `બʑ::@ISA` was misread as "not
+# word-shaped" = EXCEPTION and declared `defvar` — while p-defpackage had
+# already made that package's @ISA a symbol-macro cell.  SBCL then refused the
+# file outright ("Cannot proclaim a macro variable special").  The nested-block
+# shape is required: it is what makes the declaration come out QUALIFIED.
+is(run_bytes(encode_utf8(
+     "use utf8;\nuse strict; use warnings;\n"
+   . "{\n"
+   . "    { package Ascii; our \@ISA = ('X'); }\n"
+   . "    { package બʑ;    our \@ISA = ('X'); }\n"
+   . "}\n"
+   . "print \"ok\\n\";\n")),
+   "ok\n", 'utf8 package name in a nested block: @ISA is an ordinary cell (#313)');
