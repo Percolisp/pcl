@@ -36,6 +36,13 @@
 #   remaining not-oks are the ATTRIBUTE PROTOCOL itself (MODIFY_*_ATTRIBUTES
 #   dispatch, the compile error perl raises for an unconsumed attribute, and
 #   attributes::get) -- task #322, docs/not-supported.md.
+# s395 (#314 single: the brace spelling of a punctuation variable):
+#   re/pat_rt_report.t TRANSPILE-FAIL -> 2431 ok / 39 not-ok.  Four assertions
+#   spelling @+ / @- as `@{+}` / `@{-}` inside a pattern held the whole 2513-row
+#   file; `$#-` / `$#+` (one Magic token to PPI, not an ArrayIndex) was the
+#   second half.  The file now runs to the `(?{ CODE })` block at line 343 and
+#   dies there with a control-stack exhaustion -- a deliberate non-support
+#   crashing instead of announcing, task #324, worth ~82 more rows.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -447,7 +454,7 @@ re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_re_eval.t	527	0	64	461	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_rt_report.t	2513	1	0	0	TRANSPILE	TRANSPILE-FAIL
+re/pat_rt_report.t	2513	1	2431	39	DIFF	crash:sb-kernel::control-stack-exhausted: (?{ CODE }) regex code block, task #324
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_special_cc.t	9	0	9	0	OK	
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads

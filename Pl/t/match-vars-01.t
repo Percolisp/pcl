@@ -40,7 +40,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 19;
+plan tests => 25;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -164,4 +164,52 @@ END
 is run_cl(<<'END'), "42\n", '$$ can be modified';
 $$ = 42;
 print "$$\n";
+END
+
+# ── The BRACE spelling of a punctuation variable: `@{+}`, `@{-}`, `%{+}` ─────
+# Perl's `${ NAME }` takes a punctuation name as readily as an identifier, so
+# these are the variables @+ / @- / %+ themselves.  PPI produces a single Magic
+# token for the identifier and caret spellings but Cast + Block{Operator} for
+# these, so they were a SILENT EMPTY list in code and a die inside a regex
+# ("cannot compile interpolated regex reference '@{+}'") — which was all of
+# t/re/pat_rt_report.t, 2513 rows (#314).  Expectations probed against perl.
+
+# 20. @{+} / @{-} in ordinary code
+is run_cl(<<'END'), "3/1\n", '@{+} and @{-} are the magic arrays';
+"abcd" =~ /bc/;
+my @p = @{+};
+my @m = @{-};
+print "@p/@m\n";
+END
+
+# 21. …and interpolated in a string
+is run_cl(<<'END'), "3/1\n", '@{+} interpolates like @+';
+"abcd" =~ /bc/;
+print "@{+}/@{-}\n";
+END
+
+# 22. …and inside a regex, which is where perl's own suite spells it
+is run_cl(<<'END'), "ok\n", '@{+} interpolates into a pattern (Bug 27940)';
+"abcd" =~ /bc/;
+print "ok\n" if "A@+B" =~ /A@{+}B/;
+END
+
+# 23. %{+} is the named-capture hash
+is run_cl(<<'END'), "n\n", '%{+} is %+';
+"x" =~ /(?<n>x)/;
+print join(",", sort keys %{+}), "\n";
+END
+
+# 24. $#- / $#+ — PPI lexes these as ONE Magic token, not an ArrayIndex, so
+# they used to be emitted as the literal (unbound) symbols |$#-| / |$#+|.
+is run_cl(<<'END'), "3 3\n", '$#- and $#+ are the last indices of @- and @+';
+"I like pie" =~ /(I) (like) (pie)/;
+print "$#- $#+\n";
+END
+
+# 25. INVERSE: the ordinary `@{…}` derefs must not have moved.
+is run_cl(<<'END'), "7 8|3|A3B\n", 'ordinary @{$ref} and @{[expr]} are untouched';
+my $r = [7,8];
+my @c = @{[1+2]};
+print "@{$r}|@c|", ("A3B" =~ /A@{[1+2]}B/ ? "A3B" : "no"), "\n";
 END

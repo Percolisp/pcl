@@ -442,6 +442,8 @@ sub parse {
   $e            = $self->cleanup_for_parsing($e);
   $self->_merge_split_qualified_words($e);
   $self->_split_pid_magic_cast_run($e);
+  $self->_fold_braced_punct_magic($e);
+  $self->_retag_magic_array_index($e);
   $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
@@ -4525,6 +4527,71 @@ sub _split_pid_magic_cast_run {
              || (ref($nxt) eq 'PPI::Structure::Subscript' && $nxt->start eq '{');
     splice @$e, $i, 1, PPI::Token::Cast->new('$'), PPI::Token::Cast->new('$');
     $i++;   # skip past the pair just written
+  }
+}
+
+# `@{+}` / `${!}` / `%{+}` — perl's BRACE spelling of a PUNCTUATION variable.
+# `${ NAME }` accepts a punctuation name as readily as an identifier, so `@{+}`
+# is the match-end array `@+` and `${!}` is `$!` — a variable, not a
+# dereference of anything.
+#
+# ONE decision function, asked by both consumers (rule 11): the token-level
+# fold below, and Pl::PExpr::StringInterpolation's `@{…}` scanner, which only
+# ever holds the brace TEXT.  Returns the variable's ordinary spelling, or
+# undef when the content is not a single punctuation character.
+sub braced_punct_magic_name {
+  my ($sigil, $inner) = @_;
+  return undef unless defined $inner && $inner =~ /\A\s*([^\w\s])\s*\z/;
+  return $sigil . $1;
+}
+
+# The token-level half.  PPI produces a single Token::Magic for the identifier
+# and CARET spellings (`${^CAPTURE}`), but for the punctuation ones it produces
+# Cast + Structure::Block holding a lone Operator, because `+` is an operator
+# everywhere else it appears.
+#
+# A deref block holding exactly ONE Operator token can never be an expression —
+# `+` alone is not one — so the reading is unambiguous and this is a pure
+# re-tokenization: fold the pair into the Magic token PPI itself makes for the
+# bare spelling.  ONE pre-pass, so both consumers see an ordinary magic
+# variable (rule 11): the term machinery below, and the INTERPOLATION path,
+# which compiles a reference's source text back through this same parser.
+#
+# Before this, `@{+}` in code silently produced an EMPTY list, and inside a
+# regex it died in ExprToCL::_interp_ref_form ("cannot compile interpolated
+# regex reference '@{+}'") — which was re/pat_rt_report.t's whole file, 2513
+# rows held hostage by four assertions that spell @+ and @- that way (#314).
+sub _fold_braced_punct_magic {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i + 1 < scalar(@$e); $i++) {
+    my $cast = $e->[$i];
+    next unless ref($cast) eq 'PPI::Token::Cast'
+             && $cast->content =~ /^[\$\@\%]$/;
+    my $blk = $e->[$i + 1];
+    next unless ref($blk) eq 'PPI::Structure::Block' && $blk->start eq '{';
+    my @inner = grep { !$_->isa('PPI::Token::Whitespace') }
+                map  { $_->isa('PPI::Statement') ? $_->schildren : $_ } $blk->children;
+    next unless @inner == 1 && ref($inner[0]) eq 'PPI::Token::Operator';
+    my $name = braced_punct_magic_name($cast->content, $inner[0]->content)
+      or next;
+    splice @$e, $i, 2, PPI::Token::Magic->new($name);
+  }
+}
+
+# `$#-` / `$#+` — the last index of the magic arrays @- and @+.  PPI lexes
+# `$#foo` as a Token::ArrayIndex but these two as a single Token::Magic, so
+# they never reached the `$#…` machinery: the leaf emitter had no case and they
+# came out as the literal CL symbols `|$#-|` / `|$#+|`, unbound at load.  That
+# is what re/pat_rt_report.t died on the moment the @{+} fold let it start
+# (#314).  Retag to the ArrayIndex token the ordinary path already lowers —
+# `(p-array-last-index @-)` — so there is no new emission case (rule 11).
+sub _retag_magic_array_index {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i < scalar(@$e); $i++) {
+    my $tok = $e->[$i];
+    next unless ref($tok) eq 'PPI::Token::Magic'
+             && $tok->content =~ /^\$#[-+]$/;   # @- and @+ are the only magic ARRAYS
+    $e->[$i] = PPI::Token::ArrayIndex->new($tok->content);
   }
 }
 

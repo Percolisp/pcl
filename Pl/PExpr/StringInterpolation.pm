@@ -391,6 +391,17 @@ sub parse_interpolated_variable {
         my $var_id = $parser->make_node($var_token);
         return ($var_id, pos($content));
       }
+      # `$#-` / `$#+` — the last index of a magic ARRAY.  Identical to the bare
+      # form above except that the name is punctuation, and @- / @+ are the
+      # only magic arrays there are, so the set is exactly those two (perl
+      # interpolates both; probed).  PPI would hand the CODE spelling over as a
+      # single Magic token the emitter has no case for, which is why
+      # Pl::PExpr::_retag_magic_array_index performs the same retag there.
+      if (substr($content, $pos + 2, 1) =~ /^[-+]$/) {
+        my $var_token = PPI::Token::ArrayIndex->new('$#' . substr($content, $pos + 2, 1));
+        my $var_id = $parser->make_node($var_token);
+        return ($var_id, $pos + 3);
+      }
       # Standalone $# (deprecated output number format) — treat as literal
     }
 
@@ -776,6 +787,16 @@ sub parse_array_braced_interpolation {
   # both of which have non-bareword content and so skip this branch.)
   if ($expr_str =~ /\A[a-zA-Z_]\w*(?:::\w+)*\z/) {
     $expr_str = '@' . $expr_str;
+  }
+  # …and `@{+}` / `@{-}` with a PUNCTUATION name is likewise the array @+ / @-
+  # itself.  Same rule, same reason, and the same decision function the token
+  # pre-pass asks (Pl::PExpr::braced_punct_magic_name) — this path only ever
+  # holds the brace TEXT, so it cannot ask it at the token level.  Without
+  # this, the inner `+` was parsed as an expression on its own and died
+  # ("Handle single node of unknown type: PPI::Token::Operator"), which is
+  # what `qr/A@{+}B/` cost re/pat_rt_report.t: the whole file (#314).
+  elsif (defined(my $magic = Pl::PExpr::braced_punct_magic_name('@', $expr_str))) {
+    $expr_str = $magic;
   }
 
   my $doc = PPI::Document->new(\$expr_str);
