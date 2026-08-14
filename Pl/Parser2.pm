@@ -2226,6 +2226,27 @@ sub _stmt_declares_canon {
 # ($canons->{bare}{'$x'} = 1) — the capture gates use this to test only the
 # DECLARED variables: a file `my @x` must not gate on a sub that touches only
 # the package global $x (bare-name text matching conflated them — my.t).
+# `my VAR <non-'=' trailing>;` — `my $aa, $bb, $cc;`, `my @raw, @up, @utf8;`,
+# `my $a . $foo;`.  Perl declares ONLY VAR here and evaluates the rest as an
+# ordinary expression, so the other names are PACKAGE variables (it warns
+# "Parenthesize").  Returns VAR, or undef when the statement is not that shape.
+#
+# ONE predicate, two consumers (CLAUDE.md 11): the lowering in _lower_block and
+# the lexical-name collector below.  They must not disagree about what a
+# statement declares — while the collector answered "all of them" (its
+# conservative unknown-shape branch), `my $a1, $b1; sub g { $b1 }` refused with
+# "file lexical 'b1' captured by sub g" even though $b1 is a package global
+# there and perl prints it happily (probed s393, #314).
+sub _lead_decl_with_expr_tail {
+  my ($stmt) = @_;
+  my @kd = _strip_semi($stmt->schildren);
+  return undef unless @kd >= 3
+    && $kd[0]->isa('PPI::Token::Word') && $kd[0]->content eq 'my'
+    && $kd[1]->isa('PPI::Token::Symbol') && $kd[1]->content =~ /^[\$\@\%]\w+$/
+    && $kd[2]->isa('PPI::Token::Operator') && $kd[2]->content ne '=';
+  return $kd[1]->content;
+}
+
 sub _collect_lexical_names {
   my ($self, $stmts, $live, $canons) = @_;
   my $add = sub {
@@ -2242,6 +2263,7 @@ sub _collect_lexical_names {
     my ($vars) = $self->_multi_decl($stmt);
     if ($n)        { $add->($n) }
     elsif ($vars)  { $add->($_) for @$vars }
+    elsif (defined(my $lead = _lead_decl_with_expr_tail($stmt))) { $add->($lead) }
     else {
       # Unrecognized declaration shape — take every symbol conservatively.
       my $syms = $stmt->find('PPI::Token::Symbol') || [];
@@ -5956,21 +5978,24 @@ sub _lower_block {
                $self->_lower_block(\@rest, $vi, $tail_ctx),
                (($decl_tail && !@assign) ? ($name) : ())]);
     }
-    # -- my $scalar <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;`)
-    #    Perl declares ONLY $scalar and evaluates the rest as an ordinary (void)
-    #    expression whose first operand is the fresh lvalue; the other names are
-    #    package vars (it warns "Parenthesize").  Lower as a boxed `my $scalar`
-    #    let + the whole `$scalar <trailing>` expression discarded.  Keep
-    #    $scalar BOXED in the remainder (a later `$scalar = …` must not hit the
-    #    setf raw-slot path — VarAnnotator may have marked it unboxable).
+    # -- my VAR <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;` /
+    #    `my @raw, @upgraded, @utf8;`)
+    #    Perl declares ONLY the first variable and evaluates the rest as an
+    #    ordinary (void) expression whose first operand is the fresh lvalue; the
+    #    other names are package vars (it warns "Parenthesize").  Lower as a
+    #    `my VAR` let + the whole `VAR <trailing>` expression discarded.  Keep a
+    #    SCALAR BOXED in the remainder (a later `$x = …` must not hit the setf
+    #    raw-slot path — VarAnnotator may have marked it unboxable); a container
+    #    binds the same fresh container `my @a;` alone binds.
+    #    The container spelling was a `Parser2 TODO: unsupported declaration`
+    #    refusal until s393/#314 — one predicate too narrow, and it was
+    #    opbasic/cmp.t's whole file (12078 rows) in the companion suite.
     my @kd = _strip_semi($first->schildren);
-    if (@kd >= 3 && $kd[0]->content eq 'my'
-        && $kd[1]->isa('PPI::Token::Symbol') && $kd[1]->content =~ /^\$\w+$/
-        && $kd[2]->isa('PPI::Token::Operator') && $kd[2]->content ne '=') {
-      my $sname = $kd[1]->content;
+    if (defined(my $lead = _lead_decl_with_expr_tail($first))) {
+      my $sname = $lead;
       $self->_reg_lex($sname);
       my $vi2 = { %$vi, $sname => { unboxable => 0 } };
-      return (['let', ['list', ['list', $sname, '(make-p-box nil)']],
+      return (['let', ['list', ['list', $sname, _fresh_container($sname)]],
                $self->_lower_expr([@kd[1 .. $#kd]], $first, ':void'),
                $self->_lower_block(\@rest, $vi2, $tail_ctx),
                ($decl_tail ? ($sname) : ())]);

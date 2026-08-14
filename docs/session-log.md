@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 393 (2026-08-14, Opus 5) — #303 CLOSED, #313 fixed, #314's big family opened
+
+**s393a (`e4b5108`) — the three parked #303 singles, verified and shipped.**
+The s392 branch was edited and audited but its corpus-diff had been
+interrupted and the gate never ran; finished both.  `gen_anon_sub_form` (+ its
+form_handlers row, `anon_sub` STAYS in %NAMED_TYPE so an arriving node hits
+the rule-12 die), `ExprToCL2::generate` (all eight `->generate(` sites audited
+— every receiver is a `Pl::ExprToCL`), and the OpcodeTree `add_extra`/`extras`
+pair with its write-only `{xa}` slot, its sole writer `PExpr::_add_tag_to_node`
+("XXXX Needed??" — answered NO), the StringInterpolation call site and the POD
+sentence advertising it.  Corpus-diff identical, gate 138/5128.
+
+**s393b (`11996d7`) — #303 items 5/6, and #303 CLOSES.**  Both rulings were
+waiting on a THIRD population; this session ran the instrumented full sweep
+that supplies it.  Counters, corpus / Pl/t gate / full sweep:
+`VarAnnotator::analyze` **1943 / 6242 / 11238**, `_gen_interp_replacement`
+**15 / 26 / 15**, and the five FALLBACK arms inside them **0 / 0 / 0**.  So:
+the W12 TEXT annotator (`_analyze_text`, `_arith_rhs`, `_scan`,
+`_diff_report`, 249 lines) and the s/// mini-interpolator
+(`_gen_interp_replacement_simple`, 68 lines) are deleted and all five paths
+DIE.  Rule 12 applies in its die form both times — the annotator decides
+whether a name may leave its box, the interpolator IS the replacement string.
+Ruling 6's pre-check answered by probe: an empty replacement never reaches
+that sub at all (`gen_subst_form` only calls it when
+`_replacement_interpolates` says so, and `s/x//` does not), so the
+empty-form tail was a parse miss like the others.  `PCL_W12_DIFF` is gone; its
+two `reasons` stores now key on `PCL_B_DEBUG`, the only reader.  Item 7 was
+ruled OUT of #303 at s391 (#153 FOLD territory).
+
+**s393c (`d50a326`) — #313, the live crash the #304 audit found.**
+`Pl::GlobalPartition::_split_name` matched an identifier HEAD ASCII-only next
+to a `\w` that already matched Unicode, so `Baɾ::` split and `બʑ::` did not —
+and a failed split reads as "not word-shaped" = EXCEPTION = `defvar`, over the
+symbol-macro cell `p-defpackage` had already made for that package's `@ISA`.
+Fix: one shared `$ID = qr/[^\W\d]\w*/` for the package segments and the
+variable name.  No `@ISA` special case — this is THE partition function.  The
+shape needs a QUALIFIED declaration (nested block), which is why the gate
+never saw it.  Repays exactly the debt the audit recorded:
+`mro/next_edgecases_utf8.t` **0 → 9**, `mro/basic_utf8.t` **9 → 10**, both
+DIFF → XDIFF; rows spliced into the snapshot with a header note.  Guards: 9
+rows in `Pl/t/global-partition-01.t` + the 12-line reproducer as an SBCL run
+row in `Pl/t/utf8-source-01.t`.
+
+**s393d — #314 family F-A1: `my @raw, @upgraded, @utf8;`.**  The audit's
+biggest single item (12078 rows = 96% of the E4.1 flip's companion-suite
+cost) was CLAUDE.md 11 exactly: `Pl/Parser2.pm` already had the branch for
+`my $aa, $bb, $cc;` — perl declares only the first name and evaluates the
+rest as a void expression — and it tested `/^\$\w+$/`.  Widened to all three
+sigils, binding via the existing `_fresh_container`.  opbasic/cmp.t
+**TRANSPILE → 12078 ok / 0 not-ok**, its pre-flip value to the digit.
+The 10-shape probe found the family's second half: `_collect_lexical_names`
+answered "every symbol in the statement" for this shape, so a named sub
+reading a TAIL name refused with "file lexical captured by sub" — for a
+PACKAGE global.  Both consumers now ask one predicate,
+`_lead_decl_with_expr_tail`; that also fixes the SCALAR spelling, which had
+the bug since it shipped.  Guard: new `Pl/t/my-decl-tail-01.t`, 10 rows, 14 s.
+
+**Verification.**  Every commit: corpus-diff IDENTICAL across 111 files (this
+shape occurs nowhere in perl-tests/ — it is a companion-suite-only spelling)
+and a green gate.  Two full sweeps: after s393b+c, GATE clean with TOTAL 18535
+(+3) — identical to the pre-change run — and a third after F-A1.  The s393b
+deletions met the s373 gate-SET bar on all three legs.
+
+---
+
 ## Session 392 (2026-08-14, Opus 5) — #304 CLOSED: the suite snapshot audited then re-blessed, and the audit found a live crash
 
 **#304 (`6088486`) — the companion-suite snapshot, 191 commits stale, is

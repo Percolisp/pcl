@@ -2894,3 +2894,52 @@ decreases are owned by tasks #313 (crash), #314 (E4.1 refusals), #315
   partition and is `defvar`'d over the cell `p-defpackage` already made.
   utf8 package names occur in `t/mro/*_utf8.t` and nowhere in perl-tests/ or
   Pl/t — which is the argument for keeping this snapshot fresh.
+
+## s393 (2026-08-14, Opus) — #303 CLOSED, #313 fixed: two dead fallbacks die, one partition regex widens
+
+- **A three-population ZERO is what buys a deletion, and the probe must be
+  positive-controlled BEFORE any zero is believed** (#303 items 5/6).  The
+  counters: `VarAnnotator::analyze` entered 1943 / 6242 / 11238 times over
+  corpus / Pl/t gate / full sweep, `_gen_interp_replacement` 15 / 26 / 15 —
+  and the five FALLBACK arms inside them fired **0** in all three.  Both
+  fallbacks are now deleted and their paths DIE: the annotator decides
+  whether a name may leave its box and the interpolator produces the
+  replacement STRING, so in both cases a fallback verdict is a value the
+  program consumes — rule 12's die case, not its announce case.
+- **An empty s/// replacement never reaches `_gen_interp_replacement`** —
+  `gen_subst_form` only calls it when `_replacement_interpolates` says so,
+  and `s/x//` does not (it emits `(p-subst "x" "")`).  So the
+  "form is defined but empty" tail was a parse miss like the other two, and
+  dies with them.  (This was ruling 6's pre-check; probed s393, don't redo.)
+- **`PCL_W12_DIFF` is gone**; the two `reasons` stores it gated now key on
+  `PCL_B_DEBUG`, which was already the only reader — a `B-DEBUG` line used to
+  print `reasons=[]` unless the *diff* switch was also set.
+- **The identifier head in `Pl::GlobalPartition` is Unicode, not ASCII**
+  (#313, a LIVE load-time crash): one shared `$ID = qr/[^\W\d]\w*/` for both
+  the package segments and the variable name.  The old head class
+  `[A-Za-z_]` next to a Unicode-matching `\w` meant `Baɾ::` split and `બʑ::`
+  did not; a failed split reads as "not word-shaped" = EXCEPTION = `defvar`,
+  which then collided with the symbol-macro cell `p-defpackage` had already
+  made for that package's `@ISA`.  **The shape needs the declaration to be
+  QUALIFIED** — `package બʑ { our @ISA = … }` at file top level was always
+  fine, the nested-block spelling is what crashes.  Guards:
+  `Pl/t/global-partition-01.t` (9 rows) + `Pl/t/utf8-source-01.t` (the
+  12-line reproducer, run under SBCL).  It repays exactly the two rows the
+  #304 audit called owed: `mro/next_edgecases_utf8.t` 0 → 9,
+  `mro/basic_utf8.t` 9 → 10, both DIFF → XDIFF again.
+- **`my VAR <non-'=' trailing>;` declares ONLY VAR — and ONE predicate says so
+  for both consumers** (#314 family F-A1).  `my @raw, @upgraded, @utf8;` is
+  perl's "declare the first, evaluate the rest in void context, the other
+  names are PACKAGE variables" shape (it warns "Parenthesize"; opbasic/*.t
+  runs without strict, so real code writes it).  The lowering had the branch
+  for the SCALAR spelling and tested `/^\$\w+$/` — widening it to all three
+  sigils, binding through the existing `_fresh_container`, turned
+  opbasic/cmp.t from TRANSPILE-FAIL into **12078 ok / 0 not-ok**, its
+  pre-E4.1-flip value to the digit and 96% of the flip's companion-suite cost.
+  The second half of the same question: `_collect_lexical_names` answered
+  "every symbol in the statement", so a named sub reading a TAIL name refused
+  with "file lexical captured by sub" for a name that is a package global —
+  wrong for the SCALAR spelling too, since it shipped.  Both sites now call
+  `_lead_decl_with_expr_tail`.  Guard `Pl/t/my-decl-tail-01.t` (10 rows, every
+  expectation probed against live perl).  corpus-diff IDENTICAL: this spelling
+  occurs nowhere in perl-tests/, only in the companion suite.
