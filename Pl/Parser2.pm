@@ -922,13 +922,12 @@ sub parse {
   # coercers — the designed backstop, loud die instead of silent corruption.
   $self->{_overload_in_file} = 1 if $src =~ /\buse\s+overload\b/;
 
-  # Typed lexicals (`my Dog $spot;`, `my Foo $f = …;`): PPI keeps the class
-  # name as a bare Word token between the declarator and the sigil symbol.  It
-  # only informs field access in the (removed) pseudo-hashes era; runtime-wise
-  # it is inert — v1 drops it.  Strip it here so every downstream pass (facts,
-  # span/rename, lowering) sees a plain `my $f` decl instead of dying in
-  # _multi_decl "unsupported declaration".
-  $self->_strip_typed_lexical_classes($doc);
+  # Declaration decorations — the typed-lexical class word (`my Dog $spot;`)
+  # and the attribute list (`my $x : shared = 1;`).  Both sit between the
+  # declarator and the rest of the statement, neither survives into the
+  # generated code, and both break every downstream decl-shape matcher if
+  # left in place.  Strip them here, before any other pass sees the document.
+  $self->_strip_decl_decorations($doc);
 
   # Statement-level `tie my $y, ARGS;` embeds its declaration inside a plain
   # statement, where the lexical facts scan (and so capture promotion) cannot
@@ -8702,21 +8701,74 @@ sub _cond_parts {
   return map { $_->schildren } grep { $_->isa('PPI::Statement') } $cond->children;
 }
 
-# Strip the optional class-name Word from typed lexical declarations
-# (`my Foo $f` → `my $f`, `our Foo $g = …` → `our $g = …`).  In a Variable
-# statement the shape `<my|our|state> <Word> <Symbol>` is unambiguously a
-# typed lexical (the bare Word can only be the class); it is runtime-inert
-# (v1 discards it) but breaks every decl-shape matcher (_single_scalar_decl /
-# _multi_decl), so remove it before any downstream pass runs.
-sub _strip_typed_lexical_classes {
+# Remove the two DECORATIONS a declaration statement may carry between the
+# declarator and the rest of the statement, so that every downstream
+# decl-shape matcher (_single_scalar_decl / _multi_decl /
+# _lead_decl_with_expr_tail / the span and capture scans) sees a plain
+# declaration.  One walk, two independent halves:
+#
+#   (a) the typed-lexical CLASS word — `my Foo $f` → `my $f`, `our Foo $g = …`.
+#       In a Variable statement `<my|our|state> <Word> <Symbol>` is
+#       unambiguously a typed lexical (the bare Word can only be the class),
+#       and it is runtime-inert (v1 discards it too).
+#
+#   (b) the ATTRIBUTE list — `my $x : shared = 1`, `my ($c,@g,%b) : teapots =
+#       …`, `my $x : switch(10,foo(7,3)) : expensive`.  PPI does NOT spell
+#       these as Token::Attribute inside a Statement::Variable (it does for
+#       subs): they arrive as Operator(':') followed by a run of Words and
+#       parenthesised argument Lists, terminated by `=`, `;` or end.
+#
+# Why (b) must happen HERE and not in a decl matcher: without it the ':' is
+# just "some operator after the name", so `my $x : shared = 1;` matched
+# _lead_decl_with_expr_tail — the `my VAR <non-'=' tail>` shape — and lowered
+# as a bare `my $x` plus the void expression `$x : shared = 1`.  That printed
+# an EMPTY $x where perl prints 1: a silent wrong, live in the tree since the
+# scalar branch shipped and inherited by the container spelling at s393d.
+# One pre-pass fixes every path instead of each matcher growing a ':' case
+# (CLAUDE.md 11), and it is also the whole of #314 family F-A2 (op/attrs.t,
+# uni/attrs.t — both TRANSPILE-FAIL on `my (…) : teapots = …`).
+#
+# The DROP is announced, not silent: an attribute on a lexical is never inert
+# in perl — it calls MODIFY_<TYPE>_ATTRIBUTES in the declaring package, and
+# perl makes it a compile error when nothing handles it.  Ignoring it is
+# rule 12's effect-only ANNOUNCE case (the declaration still binds the right
+# variable; only the hook does not run), so it says so once per distinct
+# attribute per file.  See docs/not-supported.md §"Attributes on variable
+# declarations".
+sub _strip_decl_decorations {
   my ($self, $doc) = @_;
   for my $v (@{ $doc->find('PPI::Statement::Variable') || [] }) {
     my @k = $v->schildren;
+    next unless @k >= 2
+      && $k[0]->isa('PPI::Token::Word') && $k[0]->content =~ /^(?:my|our|state)$/;
+    # (a) typed-lexical class word
+    if (@k >= 3 && $k[1]->isa('PPI::Token::Word') && $k[2]->isa('PPI::Token::Symbol')) {
+      $k[1]->remove;
+      @k = $v->schildren;
+    }
+    # (b) attribute list: from the ':' up to (not including) the first token
+    # that is neither an attribute name, its argument list, nor another ':'.
     next unless @k >= 3
-      && $k[0]->isa('PPI::Token::Word') && $k[0]->content =~ /^(?:my|our|state)$/
-      && $k[1]->isa('PPI::Token::Word')
-      && $k[2]->isa('PPI::Token::Symbol');
-    $k[1]->remove;
+      && ($k[1]->isa('PPI::Token::Symbol') || $k[1]->isa('PPI::Structure::List'))
+      && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq ':';
+    my (@drop, @named);
+    for my $t (@k[2 .. $#k]) {
+      if ($t->isa('PPI::Token::Operator') && $t->content eq ':') { push @drop, $t; next }
+      if ($t->isa('PPI::Token::Word')) { push @drop, $t; push @named, $t->content; next }
+      # A parenthesised argument list belongs to the attribute BEFORE it.
+      if ($t->isa('PPI::Structure::List') && @named) {
+        push @drop, $t;
+        $named[-1] .= $t->content;
+        next;
+      }
+      last;
+    }
+    $_->delete for @drop;
+    for my $a (@named) {
+      next if $self->{_attr_announced}{$a}++;
+      warn "PCL: attribute `:$a` on a variable declaration is dropped "
+         . "(MODIFY_*_ATTRIBUTES is not called; see docs/not-supported.md)\n";
+    }
   }
   return;
 }

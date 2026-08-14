@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
-# my-decl-tail-01.t — task #314 families F-A1 and F-B: a DECLARATION whose
-# statement continues as an ordinary expression — `my VAR <non-'=' trailing>;`
-# and its `our` twin `our NAMES <non-assignment trailing>;`.
+# my-decl-tail-01.t — task #314 families F-A1, F-B and F-A2: what may follow a
+# declared name inside its own statement — `my VAR <non-'=' trailing>;`, its
+# `our` twin `our NAMES <non-assignment trailing>;`, and the one thing that
+# LOOKS like a trailing expression but is not: an attribute list.
 #
 #   my @raw, @upgraded, @utf8;
 #
@@ -40,7 +41,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 15;
 
 sub run_cl {
     my ($code) = @_;
@@ -138,6 +139,28 @@ test_cl('container `our @a, @b;` declares both as package arrays',
 push @a, 1; push @b, 2, 3;
 print scalar(@a), scalar(@b), "$a[0]$b[1]\n";},
     "1213\n");
+
+# ── an ATTRIBUTE is not a tail (#314 family F-A2, s395) ─────────────────────
+# PPI spells `my $x : shared = 1` as Symbol, Operator(':'), Word — so the ':'
+# read as "a non-'=' operator after the name" and the statement lowered as a
+# bare `my $x` plus the void expression `$x : shared = 1`.  perl prints 1;
+# PCL printed EMPTY.  The attributes are stripped before any decl matcher runs
+# now, so the declaration is an ordinary initialised one again.
+# (Probed against perl with MODIFY_*_ATTRIBUTES stubs installed, which is what
+# makes these declarations legal perl at all.)
+test_cl('an attributed scalar declaration still initialises',
+    q{BEGIN { *MODIFY_SCALAR_ATTRIBUTES = sub { return } }
+my $x : shared = 1;
+print "$x\n";},
+    "1\n");
+
+test_cl('the op/attrs.t opening statement: attributed list declaration',
+    q{BEGIN { *MODIFY_SCALAR_ATTRIBUTES = sub { return };
+         *MODIFY_ARRAY_ATTRIBUTES  = sub { return };
+         *MODIFY_HASH_ATTRIBUTES   = sub { return } }
+my ($cows, @go, %bong) : teapots = qw[ jibber jabber joo ];
+print "$cows/@go/", scalar(keys %bong), "\n";},
+    "jibber/jabber joo/0\n");
 
 # ── INVERSE guard: the ordinary declarations must not have moved ────────────
 test_cl('plain `my @a = (…)` and bare `my @a;` are untouched',

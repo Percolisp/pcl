@@ -29,6 +29,13 @@
 #   `(1) x ~1`, all unrelated to the declaration).  op/inccode.t
 #   TRANSPILE-FAIL -> 1 ok: it COMPILES now and dies at test 2 on the
 #   coderef-in-@INC feature, which is that whole file (task #321).
+# s395 (#314 F-A2 fixed): attributes on a variable declaration are stripped
+#   (and announced) instead of refusing the file -- op/attrs.t and
+#   uni/attrs.t re-measured in the fixed tree and spliced.  op/attrs.t
+#   TRANSPILE-FAIL -> 28 ok / 61 not-ok, uni/attrs.t -> 8 / 26.  The
+#   remaining not-oks are the ATTRIBUTE PROTOCOL itself (MODIFY_*_ATTRIBUTES
+#   dispatch, the compile error perl raises for an unconsumed attribute, and
+#   attributes::get) -- task #322, docs/not-supported.md.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -206,7 +213,7 @@ op/array.t	195	0	169	26	DIFF
 op/assignwarn.t	116	0	116	0	OK	
 op/attrhand.t	4	0	0	0	DIFF	crash:simple-error: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle
 op/attrproto.t	48	0	17	28	DIFF	
-op/attrs.t	157	2	0	0	TRANSPILE	TRANSPILE-FAIL
+op/attrs.t	157	2	28	61	DIFF	undef-fn:attributes::pl-_guess_stash
 op/auto.t	47	0	47	0	OK	
 op/avhv.t	40	0	38	2	DIFF	
 op/bless.t	116	2	111	5	DIFF	
@@ -522,7 +529,7 @@ run/switchn.t	3	0	1	1	DIFF
 run/switchp.t	3	0	1	0	DIFF	
 run/switcht.t	0	0	9	4	NOTAP	
 run/switchx.t	8	0	0	3	DIFF	
-uni/attrs.t	35	0	0	0	TRANSPILE	TRANSPILE-FAIL
+uni/attrs.t	35	0	8	26	DIFF	
 uni/bless.t	84	0	83	1	DIFF	
 uni/caller.t	18	0	1	3	DIFF	crash:simple-error: Undefined subroutine &main:: called at (eval N) line N.
 uni/chomp.t	446	0	446	0	OK	

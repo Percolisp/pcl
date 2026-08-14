@@ -1728,3 +1728,48 @@ fixes the lexer — then the repair can produce proper `Attribute` tokens and
 let the existing extractor run.
 
 **Owner:** tasks #268 / #270.
+
+---
+
+## Attributes on a variable declaration (`my $x : shared`, `my @a : Foo(1)`)
+
+**Perl behaviour:** an attribute list on a `my` / `our` / `state` declaration is
+a compile-time call: perl looks up `MODIFY_SCALAR_ATTRIBUTES` /
+`MODIFY_ARRAY_ATTRIBUTES` / `MODIFY_HASH_ATTRIBUTES` in the declaring package
+(or in the class of a typed lexical) and passes it the package, a reference to
+the fresh variable, and the attribute names.  Whatever the handler returns
+unconsumed is a compile ERROR — `Invalid SCALAR attribute: Foo at … line N` —
+so an unhandled attribute stops the program from compiling at all.
+`attributes::get()` reads back what `FETCH_*_ATTRIBUTES` reports.
+
+**PCL behaviour:** the attribute list is STRIPPED from the declaration before
+anything else reads the statement, and the declaration then behaves exactly
+like the same declaration without it (`my $x : shared = 1` binds and
+initialises `$x` normally).  No `MODIFY_*_ATTRIBUTES` handler is called, no
+attribute is recorded, and an attribute perl would reject is accepted.  Each
+distinct attribute is ANNOUNCED once per file on stderr:
+
+    PCL: attribute `:shared` on a variable declaration is dropped
+    (MODIFY_*_ATTRIBUTES is not called; see docs/not-supported.md)
+
+**Rationale:** this is rule 12's effect-only ANNOUNCE case
+(`docs/fable-answers-s328.md` §1) — the declaration still binds the right
+variable with the right value, so nothing downstream consumes a wrong VALUE;
+only the hook does not run.  It is the same treatment attributes on a `sub`
+already get (they are dropped by `Pl::PExpr`'s cast/attribute strip), and
+stripping is what makes the declaration lower at all: before s395 the `:` was
+read as an ordinary trailing operator, so `my $x : shared = 1;` lowered as a
+bare `my $x` plus a discarded expression and printed EMPTY — a silent wrong.
+
+**Cost, measured (s395):** `t/op/attrs.t` 0 → 28 ok / 61 not-ok (it was a whole
+TRANSPILE-FAIL file), `t/uni/attrs.t` 0 → 8 / 26.  The remaining failures are
+this entry: rows that require the compile error, and rows that read attributes
+back through `attributes::get` (`undef-fn:attributes::pl-_guess_stash`).
+
+**What would LIFT this:** implementing the attribute protocol — dispatch to
+`MODIFY_*_ATTRIBUTES` at the declaration site, die with perl's message on what
+comes back unconsumed, and a `lib/attributes.pm` shim for `get`/`reftype`.
+That is a feature, not a rephrasing of this entry; filed as task #322 with the
+row counts above as its bar.  Nothing about the box model blocks it.
+
+**Owner:** task #322 (attribute protocol); the strip itself is #314 family F-A2.
