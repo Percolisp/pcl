@@ -54,7 +54,10 @@
 #   which came back TIMEOUT-shaped (~793 -> ~350) because the run shared the
 #   machine with a second suite invocation and a timing measurement.  A
 #   TIMEOUT row is not comparable (DECIDED s390/s392): comp/require.t
-#   re-measured alone at --timeout 300 gives 909, its snapshot value exactly.
+#   re-measured alone gives its snapshot value EXACTLY in every case:
+#   comp/require.t 909 (--timeout 300), re/regexp.t 793 and re/regexp_noamp.t
+#   794 (--timeout 400).  Those six re/regexp*.t files and comp/require.t have
+#   no docs/perl-suite-timeouts.tsv row -- the #176 hole, still open.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL

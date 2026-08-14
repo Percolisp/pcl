@@ -37,9 +37,17 @@ anything that prints or compares a glob, and the full run is what found them.
 regression** — comp/require.t (909 → 350) and six re/regexp*.t variants
 (~793 → ~350).  That run shared the machine with a second suite invocation and
 a transpile-timing measurement, and a TIMEOUT row's C_ok is "how far it got",
-not a result (DECIDED s390/s392).  comp/require.t re-measured alone at
-`--timeout 300` comes back at **909, its snapshot value exactly**; the regexp
-family is re-measuring the same way.  None of those rows was spliced.
+not a result (DECIDED s390/s392).  Re-measured alone on a quiet machine, every
+one comes back at its snapshot value **exactly**: comp/require.t **909** (at
+`--timeout 300`), re/regexp.t **793**, re/regexp_noamp.t **794** (at
+`--timeout 400`).  None of those rows was spliced.
+
+**FYI 3 (pre-existing, not from this session): six `re/regexp*.t` files still
+say TIMEOUT even at 400 s**, and comp/require.t at 90 s.  They are not
+registered in `docs/perl-suite-timeouts.tsv`, so on a busy run their rows
+evaporate into a number that looks like a regression — which is exactly the
+#176 pack.t lesson, and it cost this session a re-measure to rule out.  Worth a
+registry row each (re/pat_advanced.t already has one at 900 s).
 
 Compile time checked against session-start HEAD on the same file
 (perl-tests/pack.t, two runs each): 4.05 / 3.79 s before, 4.42 / 3.64 s after —
