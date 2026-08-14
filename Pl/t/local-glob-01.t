@@ -38,7 +38,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 8;
+plan tests => 11;
 
 # 1. RHS reads @_, which *_ localization would otherwise clear first.
 is(run_pl(<<'PL'), "foobar\n", 'local *_ = \join("",@_) sees old @_');
@@ -95,4 +95,28 @@ sub t {
 }
 $_ = "preset";
 t();
+PL
+
+# ── A glob STRINGIFIES to its perl spelling (#316, s395) ────────────────────
+# Single-segment package names are upcased into CL packages and a glob's name
+# is stored case-INVERTED (the symbol spelling), so both halves came back
+# upcased: `print *plain` gave `*MAIN::PLAIN` where perl gives `*main::plain`.
+# %pcl-invert-case is its own inverse, so one call restores each half — except
+# for the package, where the inversion is applied on the way in only to names
+# WITHOUT "::", so an all-lowercase multi-segment package must be left alone.
+# All five expectations are the live perl answers.
+is(run_pl(<<'PL'), "*main::plain\n*Foo::bar\n*main::STDOUT\n", 'globs stringify in perl case');
+print *plain, "\n";
+print *Foo::bar, "\n";
+print *STDOUT, "\n";
+PL
+
+is(run_pl(<<'PL'), "*version::regex::thing\n", 'an all-lowercase multi-segment package is not upcased');
+package version::regex;
+sub q1 { return *thing }
+print q1(), "\n";
+PL
+
+is(run_pl(<<'PL'), "STDOUT|main\n", '*FOO{NAME} and {PACKAGE} still answer the same way');
+print *STDOUT{NAME}, "|", *STDOUT{PACKAGE}, "\n";
 PL

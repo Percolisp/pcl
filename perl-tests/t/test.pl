@@ -204,7 +204,29 @@ sub skip_all_without_perlio { }
 sub skip_all_without_config { }
 sub skip_all_without_dynamic_extension { }
 
-# warnings_like - plural alias used by a few t/ files
+# capture_warnings - run CODE, return the warnings it emitted, in order.
+# This is the REAL t/test.pl implementation (its lines 1735-1747), verbatim
+# apart from the $Level bookkeeping this stub does not keep: a missing sub here
+# is an `undef-fn` crash that kills the rest of the file, and re/regex_sets.t
+# calls it (task #320).  It is genuinely evaluable — docs/not-supported.md
+# records that pl-warn DOES invoke $SIG{__WARN__} (only __DIE__ is missing).
+sub __capture {
+    push @::__capture, join "", @_;
+}
+
+sub capture_warnings {
+    my $code = shift;
+    local @::__capture;
+    local $SIG{__WARN__} = \&__capture;
+    &$code;
+    return @::__capture;
+}
+
+# warnings_like - plural alias used by a few t/ files.
+# NB: this, warning_is and warning_like all PASS unconditionally — they run the
+# code and never compare the warning.  That is the #202 class (a claim that
+# cannot fail), and it is now fixable on top of capture_warnings above; task
+# #323 carries the measured population and the baseline work it implies.
 sub warnings_like (&$;$) {
     my ($code, $expected, $name) = @_;
     $code->();

@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 395 (2026-08-15, Opus 5) — #314 families F-B/F-A2 + its biggest single, then the #316/#317/#319/#320 fillers
+
+Worked Fable's s394 queue in order.  **Companion-suite rows recovered this
+session: +5 093** (2431 + 193 + 47 + 36 + 35 + 6 + 3 + 1, per file below).
+
+**s395a (`44cc113`) — #314 family F-B: `our NAMES <non-assignment tail>`.**
+`our $count++;` refused (`unsupported our declaration`) because
+`_lower_our_decl` demanded an ASSIGNMENT operator after the name — a
+distinction only `_tail_decl_convertible` cares about, and it accepts both.
+Same statement shape as s393d's F-A1, so: declare the cell, lower
+`NAMES <tail>` through the expression machinery.  op/repeat.t
+TRANSPILE-FAIL → 47/3, op/inccode.t → COMPILES then dies at test 2 on
+coderef-in-@INC (that file's whole subject; **task #321**).  Ten shapes probed
+vs perl including `eval 'our $t++'`.  parser2-02.t's INVERSE row pinned
+`our $x, $y` as a REFUSAL — perl accepts it, so the expectation was REWRITTEN
+(four rows, strictly stronger) under the standing rewrite rule.
+
+**s395b (`7c18251`) — #314 family F-A2: an attribute is not a trailing
+expression.**  `my ($cows,@go,%bong) : teapots = …` refused; the probe found
+worse.  PPI spells a Statement::Variable attribute as Operator(':') + Words,
+so `my $x : shared = 1;` matched `_lead_decl_with_expr_tail` and lowered as a
+bare `my $x` plus a discarded expression — **printing EMPTY where perl prints
+1, live since the scalar branch shipped**.  Fix: `_strip_typed_lexical_classes`
+grows a second half and becomes `_strip_decl_decorations`; the attribute run is
+deleted before any pass sees the document, and the drop is ANNOUNCED (rule 12
+effect-only).  op/attrs.t 0 → 28/61, uni/attrs.t 0 → 8/26; the remainder is the
+attribute PROTOCOL (**task #322**) with a not-supported entry that #322 deletes.
+
+**s395c (`0a6514d`) — #314 single: `@{+}` is the variable @+.  2431 rows.**
+`qr/A@{+}B/` (4 assertions) held all 2513 rows of re/pat_rt_report.t.  Perl's
+`${ NAME }` takes a punctuation name; PPI lexes those as Cast + Block holding a
+lone Operator (it folds the identifier and caret spellings itself).  A deref
+block holding exactly ONE Operator can never be an expression, so the fold is a
+pure re-tokenization — ONE decision function
+(`Pl::PExpr::braced_punct_magic_name`) asked by the token pre-pass and by
+StringInterpolation's `@{…}` scanner, which already had this rule for
+IDENTIFIER names.  In plain code `@{+}` had been a SILENT EMPTY list.  `$#-` /
+`$#+` were the second half (one Magic token, not an ArrayIndex) — retagged, no
+new emission case.  0 → **2431 ok / 39 not-ok**; the file now reaches the
+`(?{ CODE })` block and blows the control stack there (**task #324**, ~82 rows).
+
+**s395d — the four fillers, one commit.**
+- **#319** `version::is_strict` / `is_lax`: perl composes them from qr-in-qr;
+  lib/version.pm spells each grammar as one literal, verified against the real
+  `version::` over packagev.t's 40 strings plus 12 more.  op/packagev.t
+  **5 → 198 ok** (+193).
+- **#317** `plan reverse 9;`: `plan` is a perl sub, so its args flatten; the CL
+  `pl-plan` got the unflattened vector and DIED, so op/select.t produced no TAP.
+  Routed through `p-flatten-args` — the same spreading a p-sub does.  0 → 3/6.
+- **#316** glob stringification: both halves of `*main::plain` came back
+  upcased.  `%pcl-invert-case` is its own inverse, and the package half needs
+  the exact inverse of `perl-pkg-to-cl-pkg-name` (new
+  `%pcl-cl-pkg-to-perl-name`) or an all-lowercase MULTI-segment package
+  (`version::regex`) upcases.  uni/parser.t 17 → 23.
+- **#320** steps 1–3: `capture_warnings` added to the transpilable
+  `perl-tests/t/test.pl` (it was an undef-fn crash) — re/regex_sets.t 1 → 4 ok
+  with all 96 rows now judged instead of stopping at 53 — then re/script_run.t
+  and re/regex_sets.t registered XDIFF against two new not-supported entries,
+  each stating whether #71 (PCRE2) lifts it: script-run YES, `(?[ ])` NO.
+  **Task #323 filed**: `warning_is`/`warning_like`/`warnings_like` in that same
+  stub PASS unconditionally — the #202 class — with the population measured.
+
+Cache generation bumped v2-144 → v2-145.
+
+---
+
 ## Session 394 (2026-08-15, Fable) — s393 batch reviewed + APPROVED; both asks ruled; #318–#320 filed
 
 Review of `docs/opus5-review-requests-s393.md`; rulings in

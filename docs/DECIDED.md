@@ -2983,3 +2983,46 @@ Rulings + independent verification in `docs/fable-answers-s393.md`.
   stated**: corpus-diff IDENTICAL ⇒ no cacheable input's emission moved (a
   refusal never cached; no cached module has the newly-fixed shape).  Say so
   in the commit/review when skipping; bump in every other case.
+
+## s395 (2026-08-15, Opus) — #314 F-B/F-A2 + `@{+}`, and the four fillers
+
+Session log entry has the per-file numbers; tasks #321–#324 filed.
+
+- **A declaration statement may CONTINUE as an expression, for `our` too**:
+  `our $count++;` is the same shape as `my VAR <tail>` — declare the cell,
+  lower `NAMES <tail>` through the ordinary machinery.  The
+  operator-vs-ASSIGNMENT distinction is only `_tail_decl_convertible`'s
+  business (eval-tail value), and it accepts both.  (#314 family F-B.)
+- **PPI does NOT spell a variable-declaration attribute as Token::Attribute**
+  (it does for subs): inside a Statement::Variable it is Operator(':') +
+  bare Words + optional argument Lists, terminated by `=`, `;` or anything
+  else.  So `my $x : shared = 1` matched the `my VAR <non-'=' tail>` shape and
+  printed EMPTY — **strip the decorations in ONE document pre-pass before any
+  decl matcher runs**, never by teaching each matcher about ':'.  Attributes
+  on a declaration are dropped with an ANNOUNCE (rule 12 effect-only) and
+  a not-supported entry; the protocol itself is task #322.
+- **`@{+}` / `${!}` / `%{+}` are VARIABLES, not derefs** — perl's `${ NAME }`
+  takes a punctuation name.  PPI folds the identifier and caret spellings into
+  one Magic token but lexes the punctuation ones as Cast + Block holding a lone
+  Operator; a deref block holding exactly ONE Operator can never be an
+  expression, so folding it back is a pure re-tokenization.  In plain code it
+  had been a SILENT EMPTY list, in a pattern a die — 2513 rows of
+  re/pat_rt_report.t on four assertions.  **`$#-` / `$#+` are one Magic token
+  too** (not an ArrayIndex like `$#foo`) — retag, do not add an emission case.
+- **`plan` is a perl SUB, so its argument list FLATTENS** — a CL-implemented
+  TAP entry point must spread through `p-flatten-args` (the same spreading a
+  p-sub does for @_) or `plan reverse 9` arrives as an unflattened vector and
+  the file publishes no TAP at all (#317).
+- **A glob's stringification must UNDO both case inversions**, and the package
+  half needs the exact inverse of `perl-pkg-to-cl-pkg-name`
+  (`%pcl-cl-pkg-to-perl-name`): the inversion is applied on the way in only to
+  names WITHOUT "::", so inverting unconditionally upcases an all-lowercase
+  multi-segment package (`version::regex`).  (#316.)
+- **`Pl::Parser2->parse_code` omits the `(p-defpackage :main)` that pl2cl
+  emits**, so a program that opens with a non-main `package` and later switches
+  back to main dies `package MAIN does not exist` under any Pl/t harness built
+  on parse_code.  Use a pl2cl-based harness for multi-package guard rows.
+- **perl-tests/t/test.pl's `warning_is` / `warning_like` / `warnings_like`
+  MANUFACTURE a pass** — they run the code and never compare the warning.
+  That is the #202 class and it is evaluable (pl-warn does invoke
+  `$SIG{__WARN__}`); measured population and the baseline work in task #323.

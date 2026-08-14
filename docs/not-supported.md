@@ -1773,3 +1773,56 @@ That is a feature, not a rephrasing of this entry; filed as task #322 with the
 row counts above as its bar.  Nothing about the box model blocks it.
 
 **Owner:** task #322 (attribute protocol); the strip itself is #314 family F-A2.
+
+---
+
+## Regex script-run assertions `(*script_run:…)` / `(*sr:…)` (and the atomic pair)
+
+**Perl behaviour:** perl 5.28+ has `(*script_run: PATTERN)` (short form `(*sr:`)
+and `(*atomic_script_run: …)` / `(*asr:`), which match only when every character
+the group consumed belongs to a single Unicode script — the defence against
+mixed-script spoofing (`раураl` with a Latin `l`).
+
+**PCL behaviour:** not supported.  PCL's regex engine is cl-ppcre, which has no
+script-run assertion, so the pattern fails to compile and every assertion built
+on it diverges.
+
+**Cost, measured (s395):** `t/re/script_run.t` is 185 rows, all of them.  The
+file is registered as XDIFF (`docs/perl-suite-expected.tsv`) — it still runs
+and still prints its row count every sweep, so the number stays visible as a
+fix target.  Its rows were never passing: before #202 made `unlike()` able to
+fail, a pattern cl-ppcre refused to compile was reported as a PASS, which is
+why the file's count DROPPED to zero when that hole was closed (s393, #315).
+
+**What would LIFT this:** PCRE2 has had script runs since 10.33, so the PCRE2
+backend (task #71) retires this registration outright.  Task #196
+(exponential backtracking) is the same engine family.  This is non-support of
+the CURRENT engine, not of PCL.
+
+**Owner:** tasks #71 / #196; registration mechanics, task #320.
+
+---
+
+## Regex extended character classes `(?[ … ])`
+
+**Perl behaviour:** perl 5.18+ has `(?[ ... ])`, a set-operation syntax inside a
+pattern — union `+`/`|`, intersection `&`, subtraction `-`, symmetric difference
+`^`, complement `!`, over bracketed character classes and `\p{}` properties, with
+whitespace ignored and nesting allowed.
+
+**PCL behaviour:** not supported — cl-ppcre has no equivalent, and the syntax is
+not a rewrite of ordinary alternation (intersection and subtraction have no
+plain-class spelling).
+
+**Cost, measured (s395):** `t/re/regex_sets.t`, 96 perl rows.  With
+`capture_warnings` added to the transpilable `t/test.pl` stub (task #320 step 1
+— it had been an `undef-fn` crash that stopped the file after 53 rows), the
+file now runs end to end at 4 ok / 84 not-ok; the 84 are this entry.
+Registered as XDIFF, still counted every sweep.
+
+**What would LIFT this:** nothing currently planned — `(?[ ])` is perl-only, and
+PCRE2 does NOT implement it, so task #71 does NOT retire this registration
+(unlike the script-run entry above).  Lifting it means implementing set algebra
+over character classes in the pattern translator.
+
+**Owner:** task #320 (registration); no implementation task filed.

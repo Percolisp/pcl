@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 20;
+plan tests => 21;
 
 sub run_cl {
     my ($code) = @_;
@@ -211,6 +211,21 @@ ok(1, 'never runs');
 ok(1, 'a');
 }), "ok 1 - a\nok 2 - b\n1..2\n--\n1..0 # Skip why not\n--\nok 1 - a\n",
    'no_plan / skip_all / a bare VERSION each reach the TAP layer as perl reads them');
+
+# ---------------- 6c. plan()'s argument list FLATTENS, like any perl sub (#317)
+#
+# `plan reverse 9;` is t/op/select.t's first statement.  `plan` is a perl sub
+# in t/test.pl, so its arguments flatten and it receives ONE argument, 9; PCL
+# implements it in CL, so the call site handed it the value of `(p-reverse 9)`
+# — a one-element vector — and the form dispatch DIED, which left that whole
+# file with no TAP at all.  pl-plan now spreads its arguments through
+# p-flatten-args, the same flattening a p-sub does to build @_.
+# (Probed against perl: `plan reverse 3` there prints `1..3`.)
+is(run_cl(q{use Test::More;
+plan reverse 3;
+ok(1, 'one'); ok(1, 'two'); ok(1, 'three');
+}), "1..3\nok 1 - one\nok 2 - two\nok 3 - three\n",
+   'plan reverse N — a one-element aggregate is the count, as perl flattens it');
 
 # ------------------------------- 7. scalar() never dereferences (runtime fix)
 

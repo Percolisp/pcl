@@ -183,8 +183,15 @@
 ;;; plan(N) or plan(tests => N) or plan(skip_all => REASON) or plan('no_plan')
 (defun pl-plan (&rest args)
   (setf *test-plan-pid* (sb-posix:getpid))
-  ;; Unbox all args (test scripts pass boxed values)
-  (let ((args (mapcar #'unbox args)))
+  ;; FLATTEN first, then unbox.  `plan` is a perl SUB in t/test.pl, so its
+  ;; argument list flattens like any other: `plan reverse 9` hands perl ONE
+  ;; argument, 9.  This is a CL function, so the call site passes the value of
+  ;; `(p-reverse 9)` — a one-element vector — straight through, and the form
+  ;; dispatch below (which knows a bare count, `tests => N` and `skip_all =>
+  ;; …`) had no case for it and DIED, so t/op/select.t produced no TAP at all
+  ;; (task #317).  p-flatten-args is the same spreading a p-sub does to build
+  ;; @_, so there is no second flattening rule here (rule 11).
+  (let ((args (mapcar #'unbox (coerce (p-flatten-args args) 'list))))
     (cond
       ;; plan(N)
       ((and (= (length args) 1) (numberp (first args)))

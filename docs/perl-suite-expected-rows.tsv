@@ -1689,6 +1689,284 @@ re/reg_eval.t	match vars are localized
 re/reg_eval.t	regex distillation 1
 re/reg_eval.t	regex distillation 2
 re/reg_eval.t	regex distillation 3
+re/regex_sets.t	"\N{KELVIN SIGN}" matches compiled qr/(?[ \N{KELVIN SIGN} ])/
+re/regex_sets.t	'A' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'B' doesn't match /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'C' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'D' doesn't match /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'a' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'b' doesn't match /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'c' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'd' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'e' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'f' matches /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	'g' doesn't match /(?[ ( [ABC] - [B] ) + ( [abc] - [b] ) + [def] ])/
+re/regex_sets.t	(?[ : ]) matches itself in C locale (a single character class)
+re/regex_sets.t	(?[ \N{KELVIN SIGN} ]) matches "k" under /i in C locale
+re/regex_sets.t	(?[ \N{KELVIN SIGN} ]) matches "k" under /i in UTF8-locale
+re/regex_sets.t	(?[ \N{KELVIN SIGN} ]) matches itself under /i in C locale
+re/regex_sets.t	(?[ \N{KELVIN SIGN} ]) matches itself under /i in UTF8-locale
+re/regex_sets.t	*summary*
+re/regex_sets.t	... including within nested []
+re/regex_sets.t	... without warnings
+re/regex_sets.t	... without warnings
+re/regex_sets.t	... without warnings
+re/regex_sets.t	/(?[(\c]) / should not panic
+re/regex_sets.t	/(?[(\c]) / should not panic
+re/regex_sets.t	/(?[(\c]) ]\b/ should be a syntax error
+re/regex_sets.t	/(?[(\c])/ should be a syntax error
+re/regex_sets.t	/(?[[!]&[0]^[!]&[0]+[a]])/ compiles and matches 'a'
+re/regex_sets.t	/(?[\c[]](])/ should be a syntax error
+re/regex_sets.t	/a, then interpolating and intersection works for ASCII in the set
+re/regex_sets.t	/a, then interpolating and intersection works for ASCII not in the set
+re/regex_sets.t	/a, then interpolating and intersection works for non-ASCII in one set
+re/regex_sets.t	/a, then interpolating and intersection works for non-ASCII not in either set
+re/regex_sets.t	/i does affect literals
+re/regex_sets.t	/i doesn't affect \p{}
+re/regex_sets.t	/i on interpolated (?[ ]) is retained in outer without /i
+re/regex_sets.t	/i on interpolated (?[ ]) is retained in outer without /i
+re/regex_sets.t	/i on outer (?[ ]) doesn't leak to interpolated one
+re/regex_sets.t	/i on outer (?[ ]) doesn't leak to interpolated one
+re/regex_sets.t	A comment isn't parsed
+re/regex_sets.t	Can have (?\#comments)
+re/regex_sets.t	Can ignore a comment
+re/regex_sets.t	Can use '^' flag in a nested call
+re/regex_sets.t	Can use various flags in a nested call
+re/regex_sets.t	Matches ARABIC-INDIC DIGIT FIVE
+re/regex_sets.t	Matches ARABIC-INDIC DIGIT NINE
+re/regex_sets.t	Matches ARABIC-INDIC DIGIT ZERO
+re/regex_sets.t	Modifier flags in interpolated set don't disrupt
+re/regex_sets.t	NEL is white space
+re/regex_sets.t	Nesting parens and grouping
+re/regex_sets.t	Nesting parens and grouping
+re/regex_sets.t	Three ! ! ! are the complement
+re/regex_sets.t	Two ! ! are the original
+re/regex_sets.t	[:] is not a posix class
+re/regex_sets.t	[perl \#125892]
+re/regex_sets.t	[perl \#133889]
+re/regex_sets.t	\c[ should match itself
+re/regex_sets.t	\c\ should match itself
+re/regex_sets.t	\c\# should match itself
+re/regex_sets.t	\c] should match itself
+re/regex_sets.t	\r doesn't match \t
+re/regex_sets.t	\r doesnt match ! \p{lb=cr}
+re/regex_sets.t	\r matches \p{lb=cr}
+re/regex_sets.t	\s matches \cK
+re/regex_sets.t	basic symmetric difference works
+re/regex_sets.t	basic symmetric difference works
+re/regex_sets.t	basic symmetric difference works
+re/regex_sets.t	can do basic complement
+re/regex_sets.t	can do basic complement
+re/regex_sets.t	can do basic complement
+re/regex_sets.t	can do basic intersection
+re/regex_sets.t	can do basic intersection
+re/regex_sets.t	can do basic subtraction
+re/regex_sets.t	can do basic subtraction
+re/regex_sets.t	can do basic union
+re/regex_sets.t	can escape NEL to match
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	embedded qr/(?[ ])/ works
+re/regex_sets.t	intersection has higher precedence than union
+re/regex_sets.t	intersection has higher precedence than union
+re/regex_sets.t	qr/(?[ ! ! (\w])/ doesnt panic
+re/regex_sets.t	qr/(?[ ( \p{Uppercase} ) + (\p{Lowercase} - ([a] + [b]))  ]) compiles and properly matches
+re/regex_sets.t	qr/(?[ ( \p{Uppercase} ) + (\p{Lowercase} - ([a] + [b]))  ]) compiles and properly matches
+re/regex_sets.t	qr/qr/(?[ ! ( ! (\w)])/
+re/regex_sets.t	spaces around internal [] aren't required
+re/regex_sets.t	| means union
+re/regex_sets.t	| means union
+re/regex_sets.t	| means union
+re/script_run.t	'1' followed by Thai digit
+re/script_run.t	'1' followed by Thai digit
+re/script_run.t	'1' followed by Thai digit
+re/script_run.t	'1' followed by Thai digit
+re/script_run.t	... and not in combination with an assigned one
+re/script_run.t	... and not in combination with an assigned one
+re/script_run.t	... and not in combination with an assigned one
+re/script_run.t	... and not in combination with an assigned one
+re/script_run.t	... but not in combination with real ARABIC digits
+re/script_run.t	... but not in combination with real ARABIC digits
+re/script_run.t	... but not in combination with real ARABIC digits
+re/script_run.t	... but not in combination with real ARABIC digits
+re/script_run.t	... even if first in the sequence
+re/script_run.t	... even if first in the sequence
+re/script_run.t	... even if first in the sequence
+re/script_run.t	... even if first in the sequence
+re/script_run.t	... in either order
+re/script_run.t	... in either order
+re/script_run.t	... in either order
+re/script_run.t	... in either order
+re/script_run.t	... likewise if the digits come first
+re/script_run.t	... likewise if the digits come first
+re/script_run.t	... likewise if the digits come first
+re/script_run.t	... likewise if the digits come first
+re/script_run.t	... nor when the ARABIC digits come before them
+re/script_run.t	... nor when the ARABIC digits come before them
+re/script_run.t	... nor when the ARABIC digits come before them
+re/script_run.t	... nor when the ARABIC digits come before them
+re/script_run.t	... nor with a digit following
+re/script_run.t	... nor with a digit following
+re/script_run.t	... nor with a digit following
+re/script_run.t	... nor with a digit following
+re/script_run.t	0-9 are the digits for Deseret
+re/script_run.t	0-9 are the digits for Deseret
+re/script_run.t	0-9 are the digits for Deseret
+re/script_run.t	0-9 are the digits for Deseret
+re/script_run.t	A bunch of narrowing down of multiple possible scripts
+re/script_run.t	A bunch of narrowing down of multiple possible scripts
+re/script_run.t	A bunch of narrowing down of multiple possible scripts
+re/script_run.t	A bunch of narrowing down of multiple possible scripts
+re/script_run.t	A script containing only inherited characters matches
+re/script_run.t	A script containing only inherited characters matches
+re/script_run.t	A script containing only inherited characters matches
+re/script_run.t	A script containing only inherited characters matches
+re/script_run.t	A single unassigned code point is a script run
+re/script_run.t	A single unassigned code point is a script run
+re/script_run.t	A single unassigned code point is a script run
+re/script_run.t	A single unassigned code point is a script run
+re/script_run.t	ARABIC with a Shia digit is a script run
+re/script_run.t	ARABIC with a Shia digit is a script run
+re/script_run.t	ARABIC with a Shia digit is a script run
+re/script_run.t	ARABIC with a Shia digit is a script run
+re/script_run.t	All Latin is a script run
+re/script_run.t	All Latin is a script run
+re/script_run.t	All Latin is a script run
+re/script_run.t	All Latin is a script run
+re/script_run.t	Also when they aren't in the initial position
+re/script_run.t	Also when they aren't in the initial position
+re/script_run.t	Also when they aren't in the initial position
+re/script_run.t	Also when they aren't in the initial position
+re/script_run.t	An empty string is a script run
+re/script_run.t	An empty string is a script run
+re/script_run.t	An empty string is a script run
+re/script_run.t	An empty string is a script run
+re/script_run.t	An inherited script matches others
+re/script_run.t	An inherited script matches others
+re/script_run.t	An inherited script matches others
+re/script_run.t	An inherited script matches others
+re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
+re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
+re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
+re/script_run.t	Arabic-Thaana chars followed by Arabic is Arabic
+re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
+re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
+re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
+re/script_run.t	Arabic-Thaana chars followed by Latin isn't a script run
+re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
+re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
+re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
+re/script_run.t	Arabic-Thaana chars followed by Thaana is Thaana
+re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
+re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
+re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
+re/script_run.t	Arabic-Thaana digits followed by a Thaana leter is a script run
+re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
+re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
+re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
+re/script_run.t	Arabic-Thaana digits followed by an Arabic digit from a different sequence isn't a script run
+re/script_run.t	But not more than one
+re/script_run.t	But not more than one
+re/script_run.t	But not more than one
+re/script_run.t	But not more than one
+re/script_run.t	Common then Latin is a script run
+re/script_run.t	Common then Latin is a script run
+re/script_run.t	Common then Latin is a script run
+re/script_run.t	Common then Latin is a script run
+re/script_run.t	Common then Sinhala (which has its own 0) is a script run
+re/script_run.t	Common then Sinhala (which has its own 0) is a script run
+re/script_run.t	Common then Sinhala (which has its own 0) is a script run
+re/script_run.t	Common then Sinhala (which has its own 0) is a script run
+re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
+re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
+re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
+re/script_run.t	Cyrillic 'paypal' with a Latin 'l' is not a script run
+re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Glagolithic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
+re/script_run.t	Cyrillic followed by Permic-Arabic is Arabic
+re/script_run.t	Doesn't skip parts of exact matches
+re/script_run.t	Fullwidth digits may be digits for Deseret
+re/script_run.t	Fullwidth digits may be digits for Deseret
+re/script_run.t	Fullwidth digits may be digits for Deseret
+re/script_run.t	Fullwidth digits may be digits for Deseret
+re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
+re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
+re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
+re/script_run.t	Glagolithic followed by Glagolithic-Arabic is Glagolithic
+re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
+re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
+re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
+re/script_run.t	Glagolithic followed by Permic-Arabic isn't a script run
+re/script_run.t	Hebrew then Common is a script run
+re/script_run.t	Hebrew then Common is a script run
+re/script_run.t	Hebrew then Common is a script run
+re/script_run.t	Hebrew then Common is a script run
+re/script_run.t	Hebrew then Latin isn't a script run
+re/script_run.t	Hebrew then Latin isn't a script run
+re/script_run.t	Hebrew then Latin isn't a script run
+re/script_run.t	Hebrew then Latin isn't a script run
+re/script_run.t	Latin followed by Greek isn't a script run
+re/script_run.t	Latin followed by Greek isn't a script run
+re/script_run.t	Latin followed by Greek isn't a script run
+re/script_run.t	Latin followed by Greek isn't a script run
+re/script_run.t	Latin then Common is a script run
+re/script_run.t	Latin then Common is a script run
+re/script_run.t	Latin then Common is a script run
+re/script_run.t	Latin then Common is a script run
+re/script_run.t	Mixed Hiragana and Han
+re/script_run.t	Mixed Hiragana and Han
+re/script_run.t	Mixed Hiragana and Han
+re/script_run.t	Mixed Hiragana and Han
+re/script_run.t	Nested asr works to exclude some things
+re/script_run.t	Non-ASCII Common digits work with Greek
+re/script_run.t	Non-ASCII Common digits work with Greek
+re/script_run.t	Non-ASCII Common digits work with Latin
+re/script_run.t	Non-ASCII Common digits work with Latin
+re/script_run.t	Non-ASCII Common digits work with Latin
+re/script_run.t	Non-ASCII Common digits work with Latin
+re/script_run.t	Non-ASCII Common digits work with Latin
+re/script_run.t	Outer asr works on a run
+re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
+re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
+re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
+re/script_run.t	Permic followed by Glagolithic-Arabic isn't a script run
+re/script_run.t	Permic followed by Permic-Arabic is Permic
+re/script_run.t	Permic followed by Permic-Arabic is Permic
+re/script_run.t	Permic followed by Permic-Arabic is Permic
+re/script_run.t	Permic followed by Permic-Arabic is Permic
+re/script_run.t	Script with own zero works with ASCII digits
+re/script_run.t	Script without own zero works with ASCII digits
+re/script_run.t	Thai digit followed by '1'
+re/script_run.t	Thai digit followed by '1'
+re/script_run.t	Thai digit followed by '1'
+re/script_run.t	Thai digit followed by '1'
+re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
+re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
+re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
+re/script_run.t	Two code points each in multiple scripts that 't intersect singly are a script run
+re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
+re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
+re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
+re/script_run.t	Two code points each in multiple scripts that don't intersect aren't a script run
+re/script_run.t	Two digits in same extended script but from different sets of 10
+re/script_run.t	Two digits in same extended script but from different sets of 10
+re/script_run.t	Two digits in same extended script but from different sets of 10
+re/script_run.t	Two digits in same extended script but from different sets of 10
+re/script_run.t	[0-9] work for Arabic
+re/script_run.t	[0-9] work for Arabic
+re/script_run.t	[0-9] work for Arabic
+re/script_run.t	[0-9] work for Arabic
+re/script_run.t	[perl \#133997]
 re/uniprops01.t	*summary*
 re/uniprops02.t	*summary*
 re/uniprops03.t	*summary*

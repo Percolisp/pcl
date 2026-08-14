@@ -477,6 +477,17 @@
       (string pkg-str)
       (%pcl-invert-case pkg-str)))
 
+;;; The INVERSE of PERL-PKG-TO-CL-PKG-NAME: the Perl spelling of a CL package
+;;; object, for every site that hands a package name back to the program
+;;; (glob stringification, *FOO{PACKAGE}).  %pcl-invert-case is its own
+;;; inverse, but it is applied only to SINGLE-segment names on the way in — a
+;;; name containing "::" is used verbatim — so undoing it has to make the same
+;;; distinction, or an all-lowercase multi-segment package (version::regex)
+;;; comes back upcased.
+(defun %pcl-cl-pkg-to-perl-name (pkg)
+  (let ((n (package-name pkg)))
+    (if (search "::" n) n (%pcl-invert-case n))))
+
 ;;; %pcl-cl-sub-name: CL symbol-NAME for a Perl sub/method NAME, matching the
 ;;; token `pl-<name>` the codegen emits and the :invert reader interns.  The
 ;;; "pl-" prefix participates in the case-uniformity test, so it must be
@@ -2080,9 +2091,12 @@
                      (format nil "SCALAR(0x~(~X~))" (object-address v))))
     ((hash-table-p v) (format nil "HASH(0x~(~X~))" (object-address v)))
     ((vectorp v) (format nil "ARRAY(0x~(~X~))" (object-address v)))
+    ;; A glob stringifies to its PERL spelling, so both halves must undo the
+    ;; case inversion they are stored under — `*plain` printed `*MAIN::PLAIN`
+    ;; (#316).  Same restoration `*STDOUT{NAME}` / `{PACKAGE}` already do.
     ((p-typeglob-p v) (format nil "*~A::~A"
-                              (package-name (p-typeglob-package v))
-                              (p-typeglob-name v)))
+                              (%pcl-cl-pkg-to-perl-name (p-typeglob-package v))
+                              (%pcl-invert-case (p-typeglob-name v))))
     ;; A raw I/O stream is a lexical filehandle (`open my $fh, …`), which in
     ;; Perl is a GLOB ref — stringify as GLOB(0xADDR), not SBCL's #<fd-stream …>.
     ;; (Named handles reach here as typeglobs, handled above.)
@@ -11494,7 +11508,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-144"
+(defparameter *pcl-cache-generation* "v2-145"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -13586,7 +13600,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         ((string= slot-s "NAME")
          (make-p-box (%pcl-invert-case (p-typeglob-name glob))))
         ((string= slot-s "PACKAGE")
-         (make-p-box (%pcl-invert-case (package-name (p-typeglob-package glob)))))
+         (make-p-box (%pcl-cl-pkg-to-perl-name (p-typeglob-package glob))))
         ((string= slot-s "GLOB")    glob)
         ;; Every other slot name (FORMAT, or a bareword that is no slot at all)
         ;; is undef in perl too — `*STDOUT{XYZZY}` yields undef, it does not
