@@ -96,25 +96,12 @@ sub unshift_child_id {
 
 
 
-# - - - If a node is "special" in some way?
-
-sub add_extra {
-  my $self      = shift;
-  my $node_id   = shift;
-  my $extra     = shift;
-
-  my $node      = $self->nodes()->[$node_id];
-  push @{$node->{xa}}, $extra;
-}
-
-sub extras {
-  my $self      = shift;
-  my $node_id   = shift;
-
-  my $node      = $self->nodes()->[$node_id];
-  return $node->{xa} // [];
-}
-
+# (add_extra/extras and the {xa} slot deleted #303/s392: a WRITE-ONLY field.
+# The one writer was PExpr::_add_tag_to_node, called from string
+# interpolation to stash the original quote token's text on the concat node;
+# nothing ever read it back — not extras(), not a raw {xa} — in the whole
+# repo.  Rule: settle the PAIR, never keep a write-only field for a
+# hypothetical consumer; git history is the archive.)
 
 # - - - Metadata storage (for context, etc.)
 

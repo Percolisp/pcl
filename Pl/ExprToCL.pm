@@ -116,7 +116,6 @@ sub _build_form_handlers {
     'funcall'          => \&gen_funcall_form,
     'methodcall'       => \&gen_methodcall_form,
     'ref_funcall'      => \&gen_ref_funcall_form,
-    'anon_sub'         => \&gen_anon_sub_form,
     'prefix_op'        => \&gen_prefix_op_form,
     'postfix_op'       => \&gen_postfix_op_form,
     'tree_val'         => \&gen_tree_val_form,
@@ -3680,16 +3679,12 @@ sub gen_glob_form {
 
 
 
-# E2 form variant of gen_anon_sub: sub { … } → (lambda () body…).  Clean, no
-# text inspection.  Empty body declines (the text emitter emits "(lambda () )"
-# with a trailing space a form cannot reproduce).
-sub gen_anon_sub_form {
-  my ($self, $node, $node_id, $kids) = @_;
-  return undef unless @$kids;
-  my @body = map { $self->gen_node_form($_) } @$kids;
-  return ['lambda', ['list'], @body];
-}
-
+# (gen_anon_sub_form deleted #303/s392: the `anon_sub` node type reached this
+# seam ZERO times over both populations — 111 corpus transpiles and the 138-file
+# Pl/t gate.  PExpr still MAKES anon_sub nodes; Parser2 lowers them before the
+# expression seam is asked.  `anon_sub` deliberately STAYS in %NAMED_TYPE so an
+# arriving node hits gen_internal_node_text's rule-12 die instead of being
+# lowered as a binary operator named "anon_sub" — ruled s391.)
 
 # E2 form variant: \&foo → #'name atom.  A lambda_form is a Parser2-lowered
 # do{}/anon-sub lambda (task #78); a raw_lambda is v1's pre-generated CL

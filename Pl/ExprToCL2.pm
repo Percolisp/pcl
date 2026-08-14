@@ -51,15 +51,13 @@ my %BINOP = (
   'cmp' => 'p-str-cmp',
 );
 
-# Same entry as Pl::ExprToCL::generate — returns a string (or undef when the
-# expression is outside the native subset; caller then uses the old pipeline).
-sub generate {
-  my ($self, $node_id) = @_;
-  $node_id //= $self->expr_o->root;
-  my $form = $self->gen_form($node_id);
-  return undef unless defined $form;
-  return ('  ' x $self->indent_level) . Pl::CLForm::to_string($form, $self->indent_level);
-}
+# (generate() deleted #303/s392.  It was the string-returning twin of
+# gen_form, kept from the prototype days when this class had to be a drop-in
+# for Pl::ExprToCL.  Both construction sites — Parser2.pm's seam and its
+# census walker — call gen_form and consume the FORM; audited s392: all eight
+# `->generate(` call sites in the repo construct `Pl::ExprToCL->new(...)` on
+# the adjacent lines, so no receiver could ever be an ExprToCL2.  The two
+# classes are unrelated (no `extends`), so nothing inherits either.)
 
 # $ctx describes the POSITION of this expression, for the funcall bind only:
 #   undef / 'nil' → scalar (default), 't' → list, ':void' → statement

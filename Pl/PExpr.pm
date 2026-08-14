@@ -5396,17 +5396,8 @@ sub set_top_node_id {
 }
 
 
-sub _add_tag_to_node {
-  my $self      = shift;
-  my $node_id   = shift;
-  my $extra     = shift;
-
-  # XXXX Needed??
-  my $node_tree = $self->node_tree();
-  $node_tree->add_extra($node_id, $extra);
-  
-
-}
+# (_add_tag_to_node deleted #303/s392 — its own "XXXX Needed??" answered NO.
+# It was the sole writer of OpcodeTree's {xa} slot, which nothing read.)
 
 
 # ----------------------------------------------------------------------
@@ -6151,9 +6142,8 @@ Sequence of expressions (comma operator or list context).
 
 =item string_concat
 
-Interpolated strings are decomposed into parts for concatenation. The
-original string is preserved in the node's C<extras()> field (see
-L<Pl::OpcodeTree>). Note: the C<.> operator produces a regular binop.
+Interpolated strings are decomposed into parts for concatenation. Note: the
+C<.> operator produces a regular binop.
 
     "Foo $bar baz"   -> string_concat("Foo ", $bar, " baz")
 

@@ -214,8 +214,6 @@ sub parse_interpolated_string {
 
   # Build string_concat node with all parts
   my ($concat_node, $concat_id) = $parser->make_node_insert('string_concat');
-  # Add the original string to the node:
-  $parser->_add_tag_to_node($concat_id, $str_token->content());
 
   for my $part_id (@parts) {
     $parser->add_child_to_node($concat_id, $part_id);
