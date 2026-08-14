@@ -7,6 +7,12 @@
 #   have a verdict in docs/perl-suite-audit-s392.md.  Rows this snapshot
 #   records as LOWER than reality, with their owning task, are listed there —
 #   do not read a decrease here as "expected" without checking that file.
+# s393 (#314 F-A1 fixed): opbasic/cmp.t re-measured and spliced —
+#   TRANSPILE-FAIL -> 12078 ok / 0 not-ok, its pre-E4.1-flip value to the
+#   digit.  The other 17 files of the #314 TRANSPILE cluster were re-run in
+#   the same tree and are UNMOVED (their own six families); op/decl-refs.t
+#   still reads 42 exactly.  So F-A1 was one file, as the audit said — and
+#   that one file was 96% of the loss.
 # s393 (#313 fixed): mro/basic_utf8.t and mro/next_edgecases_utf8.t re-measured
 #   in the fixed tree and spliced in — both were recorded at their CRASHED
 #   value ("Cannot proclaim a macro variable special"), the debt the audit
@@ -401,7 +407,7 @@ op/while.t	26	0	20	6	DIFF
 op/write.t	636	0	0	0	DIFF	
 op/yadayada.t	34	0	21	12	DIFF	undef-fn:main::pl-A
 opbasic/arith.t	183	0	183	0	OK	
-opbasic/cmp.t	13280	0	0	0	TRANSPILE	TRANSPILE-FAIL
+opbasic/cmp.t	13280	0	12078	0	DIFF	
 opbasic/concat.t	254	0	248	6	DIFF	
 opbasic/magic_phase.t	7	0	0	5	DIFF	
 opbasic/qq.t	30	0	30	0	OK	
