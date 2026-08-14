@@ -7,7 +7,18 @@ Append new entries at the top. One section per session.
 ## Session 395 (2026-08-15, Opus 5) — #314 families F-B/F-A2 + its biggest single, then the #316/#317/#319/#320 fillers
 
 Worked Fable's s394 queue in order.  **Companion-suite rows recovered this
-session: +5 093** (2431 + 193 + 47 + 36 + 35 + 6 + 3 + 1, per file below).
+session: +2 730** across 14 files (a full `--all` companion run says exactly
+those 14 moved and nothing else; the per-file numbers are below).  The full
+sweep is GATE clean (0 new / 0 fixed, TOTAL 18535) and the gate is 140 files /
+5168 tests with only the ignored pclxs xs rows.
+
+The five files #316's task did NOT predict — op/gv.t 47→50, uni/gv.t 36→38,
+op/stash.t 46→48, uni/stash.t 41→43, op/substr.t 375→376 — are all the glob-case
+fix: it reaches anything that prints or compares a glob.  The seven files that
+came back LOWER (comp/require.t 909→350 and six re/regexp*.t at ~793→~350) are
+all TIMEOUT-shaped, from a run sharing the machine with a second suite
+invocation; comp/require.t alone at `--timeout 300` returns 909 exactly, its
+snapshot value.  None of those rows was spliced.
 
 **s395a (`44cc113`) — #314 family F-B: `our NAMES <non-assignment tail>`.**
 `our $count++;` refused (`unsupported our declaration`) because

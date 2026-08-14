@@ -4,7 +4,8 @@ Four commits, worked from `docs/fable-answers-s393.md` §7's queue in order:
 #314's remaining families (F-B, F-A2, and the biggest single), then #320, then
 the #316/#317/#319 fillers.
 
-**Companion-suite rows recovered: +5 093** across eight files.  Nothing else
+**Companion-suite rows recovered: +2 730** across FOURTEEN files -- the full
+`--all` companion run says exactly those 14 moved and nothing else.  Nothing else
 moved: corpus-diff IDENTICAL across 111 files at every step, gate green at
 every step (**140 files / 5168 tests**, failures exactly the pclxs xs rows the
 user has said to ignore), and the **full sweep is GATE clean — 0 new / 0 fixed,
@@ -23,6 +24,26 @@ generation bump), which is why pack.t took its registered TIMEOUT retry.
 | op/select.t | 0 (plan died) | 3 ok / 6 |
 | re/regex_sets.t | 1 ok / 52 (crash at row 53) | 4 ok / 84, all 96 judged |
 | op/inccode.t | TRANSPILE-FAIL | COMPILES, 1 ok then #321 |
+| op/gv.t | 47 ok | 50 |
+| uni/gv.t | 36 ok | 38 |
+| op/stash.t | 46 ok | 48 |
+| uni/stash.t | 41 ok | 43 |
+| op/substr.t | 375 ok | 376 |
+
+The last five were NOT predicted by #316's task: the glob-case fix reaches
+anything that prints or compares a glob, and the full run is what found them.
+
+**The seven files that came back LOWER are all TIMEOUT-shaped and none is a
+regression** — comp/require.t (909 → 350) and six re/regexp*.t variants
+(~793 → ~350).  That run shared the machine with a second suite invocation and
+a transpile-timing measurement, and a TIMEOUT row's C_ok is "how far it got",
+not a result (DECIDED s390/s392).  comp/require.t re-measured alone at
+`--timeout 300` comes back at **909, its snapshot value exactly**; the regexp
+family is re-measuring the same way.  None of those rows was spliced.
+
+Compile time checked against session-start HEAD on the same file
+(perl-tests/pack.t, two runs each): 4.05 / 3.79 s before, 4.42 / 3.64 s after —
+noise, far inside the 50% budget, despite two new per-parse token pre-passes.
 
 New tasks: **#321** (coderef-in-@INC), **#322** (the attribute protocol),
 **#323** (three test.pl stubs that manufacture a PASS), **#324** (`(?{ })`

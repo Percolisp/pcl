@@ -43,6 +43,18 @@
 #   second half.  The file now runs to the `(?{ CODE })` block at line 343 and
 #   dies there with a control-stack exhaustion -- a deliberate non-support
 #   crashing instead of announcing, task #324, worth ~82 more rows.
+# s395 (the four fillers): rows re-measured in a FULL --all run and spliced.
+#   op/packagev.t 5 -> 198 (#319 version::is_strict/is_lax), op/select.t 0 -> 3
+#   (#317 plan args flatten), re/regex_sets.t 1 -> 4 and now XDIFF plus
+#   re/script_run.t XDIFF (#320).  The #316 glob-case fix reached FIVE files
+#   the task had not predicted: uni/parser.t 17 -> 23, op/gv.t 47 -> 50,
+#   uni/gv.t 36 -> 38, op/stash.t 46 -> 48, uni/stash.t 41 -> 43,
+#   op/substr.t 375 -> 376 -- anything that prints or compares a glob.
+# NOT spliced from that run: comp/require.t and the six re/regexp*.t files,
+#   which came back TIMEOUT-shaped (~793 -> ~350) because the run shared the
+#   machine with a second suite invocation and a timing measurement.  A
+#   TIMEOUT row is not comparable (DECIDED s390/s392): comp/require.t
+#   re-measured alone at --timeout 300 gives 909, its snapshot value exactly.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -283,7 +295,7 @@ op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
 op/grent.t	3	0	3	0	OK	
 op/grep.t	77	0	71	6	DIFF	
 op/groups.t	4	0	4	0	OK	
-op/gv.t	304	0	47	50	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
+op/gv.t	304	0	50	47	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash.t	494	0	6	6	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
@@ -336,7 +348,7 @@ op/ord.t	38	0	38	0	OK
 op/overload_integer.t	2	0	2	0	OK	
 op/override.t	36	0	0	0	DIFF	undef-fn:Internals::pl-V
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed
-op/packagev.t	307	0	5	17	DIFF	undef-fn:version::pl-is_strict
+op/packagev.t	307	0	198	109	DIFF	
 op/pos.t	33	0	15	15	DIFF	
 op/postfixderef.t	128	0	82	24	DIFF	undef-fn:main::pl-foo
 op/pow.t	268	0	268	0	OK	
@@ -362,7 +374,7 @@ op/reset.t	45	0	25	19	DIFF
 op/reverse.t	25	0	25	0	OK	
 op/rt119311.t	22	0	4	1	DIFF	crash:simple-error: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t
 op/runlevel.t	24	0	0	0	DIFF	
-op/select.t	9	0	0	0	DIFF	crash:simple-error: plan(): unrecognized plan form (#(N))
+op/select.t	9	0	3	6	DIFF	
 op/setpgrpstack.t	3	0	3	0	OK	
 op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNFNBNEBB.
 op/signame_canonical.t	15	0	0	0	DIFF	
@@ -379,7 +391,7 @@ op/sprintf.t	559	0	534	25	DIFF
 op/sprintf2.t	1704	0	1525	13	DIFF	undef-fn:main::pl-a8p
 op/srand.t	10	0	8	2	DIFF	
 op/sselect.t	23	0	17	6	DIFF	
-op/stash.t	54	1	46	8	DIFF	undef-fn:main::pl-SUPER
+op/stash.t	54	1	48	6	DIFF	undef-fn:main::pl-SUPER
 op/stash_parse_gv.t	5	0	5	0	OK	
 op/stat.t	108	3	0	0	DIFF	undef-fn:main::pl-is_linux_container
 op/stat_errors.t	638	0	305	333	DIFF	
@@ -388,7 +400,7 @@ op/study.t	43	0	43	0	OK
 op/studytied.t	14	0	13	1	DIFF	
 op/sub.t	64	1	51	14	DIFF	
 op/sub_lval.t	211	0	12	58	DIFF	undef-fn:main::pl-rlv1t
-op/substr.t	400	0	375	24	DIFF	crash:simple-error: substr outside of string
+op/substr.t	400	0	376	23	DIFF	crash:simple-error: substr outside of string
 op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/svflags.t	16	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -477,7 +489,7 @@ re/reg_nc_tie.t	37	0	6	7	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-FETCH
 re/reg_nocapture.t	25	0	14	11	DIFF	
 re/reg_pmod.t	88	0	58	30	DIFF	
 re/reg_posixcc.t	2560	0	1544	7646	DIFF	
-re/regex_sets.t	96	0	1	52	DIFF	undef-fn:main::pl-capture_warnings
+re/regex_sets.t	96	0	4	84	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it
 re/regex_sets_compat.t	2167	2	1600	258	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
 re/regexp.t	2167	2	793	112	TIMEOUT	timeout
 re/regexp_noamp.t	2169	0	794	111	DIFF	unbound:$1y
@@ -492,7 +504,7 @@ re/regexp_unicode_prop.t	1110	0	778	332	DIFF
 re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/rt122747.t	3	0	3	0	OK	
 re/rxcode.t	42	0	26	15	DIFF	
-re/script_run.t	185	0	0	185	DIFF	
+re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions — cl-ppcre has no (*script_run:…); LIFTED by the PCRE2 backend (task #71)
 re/speed.t	59	0	0	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
 re/speed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/stclass_threads.t	0	0	5	1	NOTAP	
@@ -545,7 +557,7 @@ uni/eval.t	5	0	5	0	OK
 uni/fold.t	19128	104	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).
 uni/greek.t	0	0	0	0	NOTAP	
-uni/gv.t	206	0	36	39	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.
+uni/gv.t	206	0	38	37	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.
 uni/labels.t	10	0	3	5	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (go :ここ) Compile-time error: attempt t
 uni/latin2.t	0	0	0	0	NOTAP	
 uni/lex_utf8.t	16	0	6	10	DIFF	
@@ -554,11 +566,11 @@ uni/method.t	62	0	0	0	DIFF	crash:simple-error: Can't locate object method "ｂ" 
 uni/opcroak.t	5	0	0	3	DIFF	crash:simple-error: PCL: unsupported in string eval: multiple package sections at (eval N) line N.
 uni/overload.t	191	2	177	14	DIFF	undef-fn:main::pl-todo_skip
 uni/package.t	18	0	1	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-scalar-= $압Ƈ 'd읯ⱪ N) Compile-tim
-uni/parser.t	58	0	17	41	DIFF	
+uni/parser.t	58	0	23	35	DIFF	
 uni/readline.t	7	0	3	1	DIFF	unbound:Fʜ
 uni/select.t	3	2	0	0	DIFF	unbound:$ᛞ웊
 uni/sprintf.t	52	0	49	3	DIFF	
-uni/stash.t	48	1	41	8	DIFF	
+uni/stash.t	48	1	43	6	DIFF	
 uni/tie.t	9	1	9	1	OK	
 uni/title.t	5936	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/tr_utf8.t	8	0	8	0	OK	
