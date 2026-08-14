@@ -6,7 +6,11 @@ the #316/#317/#319 fillers.
 
 **Companion-suite rows recovered: +5 093** across eight files.  Nothing else
 moved: corpus-diff IDENTICAL across 111 files at every step, gate green at
-every step, and the full sweep verdict is below.
+every step (**140 files / 5168 tests**, failures exactly the pclxs xs rows the
+user has said to ignore), and the **full sweep is GATE clean — 0 new / 0 fixed,
+TOTAL passing 18535**, the same number and the same standing 2 UNSTABLE +
+8 unverified as s393/s394.  Run on a COLD cache (`~/.pcl-cache` cleared for the
+generation bump), which is why pack.t took its registered TIMEOUT retry.
 
 | file | before | after |
 |---|---|---|
