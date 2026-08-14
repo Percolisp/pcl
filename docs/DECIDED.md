@@ -3026,3 +3026,10 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   MANUFACTURE a pass** — they run the code and never compare the warning.
   That is the #202 class and it is evaluable (pl-warn does invoke
   `$SIG{__WARN__}`); measured population and the baseline work in task #323.
+- **`refaliasing` was NOT removed in perl 5.40** — `docs/not-supported.md` said
+  so and rested its "do not implement" rationale on it.  Probed on 5.40.3: all
+  five shapes (`\my $x = \$y`, `\my @b`, `\my %g`, `our \$T = \$::TODO`,
+  `for \my %e (@list)`) work, warning only `Aliasing via reference is
+  experimental`.  Entry corrected in place; task **#325** sizes the feature —
+  it is ONE cause behind ~1400 rows of #314's residue across four t/ files, and
+  in PCL's model an alias is "two names hold the SAME box/vector/hash object".

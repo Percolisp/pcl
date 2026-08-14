@@ -179,10 +179,18 @@ cross-family grouping appears that the audit's refusal-text keying hid:
   `docs/not-supported.md` has an entry saying so — but these four t/ files still
   exist and still measure it.
 
-So: is the refaliasing grouping worth a task ahead of the remaining
-per-file families (F-D spanning, F-E our-shadows-my, F-F state)?  It is the
-largest remaining #314 population by a wide margin, and the not-supported entry
-would have to be retired rather than cited.
+So: is the refaliasing grouping worth taking ahead of the remaining per-file
+families (F-D spanning, F-E our-shadows-my, F-F state)?  Filed as **#325** with
+the five shapes probed and the hard parts listed (lvalue `\$x`, the three
+declarator forms, the VarAnnotator consequence that an aliased scalar can never
+be unboxed, and the foreach form landing in #267's splitter).
+
+**And the entry's premise was FALSE.**  `docs/not-supported.md` §Ref aliasing
+said the feature was "removed in Perl 5.40 without graduating to stable", and
+its rationale rested on that.  Probed on the dev perl, 5.40.3: all five shapes
+work, warning only `Aliasing via reference is experimental`.  Corrected in place
+with the probe recorded, since the rationale for NOT implementing it was
+resting on a fact that is not true.
 
 **op/for-many.t** is genuinely its own thing (perl 5.36 `for my ($q,$r) (LIST)`,
 n-at-a-time, and the loop variables ALIAS the elements — the file mutates

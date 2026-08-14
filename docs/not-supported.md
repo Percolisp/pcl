@@ -1024,21 +1024,35 @@ the fix requires a fundamentally different argument-passing model.
 ## Ref aliasing (`use feature 'refaliasing'`)
 
 **Perl behaviour:** `use feature 'refaliasing'` enables assignment to references
-as lvalues: `\$x = \$y` makes `$x` an alias for `$y`.  It was experimental in
-Perl 5.22–5.38 and removed in Perl 5.40 without graduating to stable.
+as lvalues: `\$x = \$y` makes `$x` an alias for `$y`.  Its companion
+`declared_refs` allows the declarator forms `\my $x = \$y`, `our \$T = \$::TODO`
+and `for \my %e (@list)`.
+
+> **CORRECTION (s395):** this entry used to say the feature was "removed in Perl
+> 5.40 without graduating to stable", and the rationale below rested on that.
+> **It is false.**  Probed on the dev perl, 5.40.3: all five shapes above work,
+> warning only `Aliasing via reference is experimental`.  It is still
+> experimental, not removed.
 
 **PCL behaviour:** Not implemented.  The `use feature 'refaliasing'` pragma is
 silently accepted as a no-op, but the lvalue-ref assignment `\$h{foo} = \$var`
 does not create an alias.
 
-**Rationale:** The feature was removed from Perl itself.  No stable CPAN modules
-depend on it.  Implementing lvalue-ref aliasing in the PCL box/unbox model would
-require significant runtime changes for a removed, never-stable feature.
+**Rationale:** No stable CPAN module depends on it, and it is still
+experimental.  **But the "significant runtime changes" this entry used to claim
+are not obvious**: in PCL a scalar variable IS a box, so `\$x = \$y` is "make
+$x's cell hold $y's box", and a container alias is sharing the vector or hash
+object.  Task **#325** sizes it against the four t/ files that measure it
+(~1400 rows, the largest single block of task #314's residue); if it lands,
+this entry is DELETED, not rephrased.
 
 **Affected tests:**
 - `perl-tests/substr.t` — last block (`{ # [perl #132527] ... }`) commented out (1 test)
 - `perl-tests/aassign.t` — blocks at lines 124–175 and 284 use refaliasing (multiple tests)
 - `perl-tests/each.t` — block at lines 319–320 uses refaliasing
+- companion suite, measured s395: `t/re/opt.t` (639 rows, TRANSPILE-FAIL on one
+  `our \$TODO = \$::TODO`), `t/op/const-optree.t` (148, `for \%_ (@tests)`),
+  `t/op/lvref.t` (199, `\state @a = [1..3]`), `t/op/decl-refs.t` (402, at 42)
 
 ---
 
