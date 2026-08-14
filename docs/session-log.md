@@ -61,6 +61,23 @@ PACKAGE global.  Both consumers now ask one predicate,
 `_lead_decl_with_expr_tail`; that also fixes the SCALAR spelling, which had
 the bug since it shipped.  Guard: new `Pl/t/my-decl-tail-01.t`, 10 rows, 14 s.
 
+**s393e/f (#315) — all 14 companion-suite decreases diagnosed**
+(`docs/suite-decreases-s393.md`).  Re-measured first: every one reproduces its
+snapshot value to the digit.  **The biggest is not a regression at all** —
+re/script_run.t (70 -> 0, 185 rows) is #202/F1: `unlike` used to end its
+scanner call in `(error () t)`, so any pattern cl-ppcre refused to compile was
+an unconditional PASS, and this file is 185 like/unlike assertions against
+`qr/(*script_run: ...)/`, which cl-ppcre rejects.  Half of them are `unlike`;
+that was the 70.  Same rows, honestly reported since s330.  Two NEW bugs came
+out of the probes: **#316** a glob stringifies UPCASED (`*MAIN::PLAIN` for
+`*plain` — not Unicode-specific), **#317** `plan reverse 9;` dies
+"unrecognized plan form" so op/select.t emits no TAP (flattening probed and
+ruled out — `plan` is a runtime function that receives the vector directly).
+The rest map onto existing owners: #137/#139, #233, #226/#240, DESTROY, the
+version shim, cl-ppcre parity, and two files whose "loss" is TAP renumbering
+rather than a lost assertion.  The opbasic/cmp.t snapshot row was spliced in
+s393e.
+
 **Verification.**  Every commit: corpus-diff IDENTICAL across 111 files (this
 shape occurs nowhere in perl-tests/ — it is a companion-suite-only spelling)
 and a green gate.  Two full sweeps: after s393b+c, GATE clean with TOTAL 18535

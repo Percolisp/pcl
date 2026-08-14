@@ -2943,3 +2943,16 @@ decreases are owned by tasks #313 (crash), #314 (E4.1 refusals), #315
   `_lead_decl_with_expr_tail`.  Guard `Pl/t/my-decl-tail-01.t` (10 rows, every
   expectation probed against live perl).  corpus-diff IDENTICAL: this spelling
   occurs nowhere in perl-tests/, only in the companion suite.
+- **A coverage DECREASE can be an assertion becoming HONEST** (#315, s393).
+  re/script_run.t "lost" 70 rows to #202/F1: `unlike`'s scanner call used to
+  end in `(error () t)`, so any pattern cl-ppcre refused to compile was an
+  unconditional PASS — and that file is 185 like/unlike assertions against
+  `qr/(*script_run: …)/`, which cl-ppcre rejects outright.  Roughly half are
+  `unlike`; those were the 70.  Before reading a decrease as a regression,
+  check whether an assertion in that file GAINED a failure path.  Per-file
+  causes for all 14: `docs/suite-decreases-s393.md`.
+- **`./runpcl` merges stderr into stdout** (`2>&1` in the script), so a runtime
+  warning read through it LOOKS like it is polluting the TAP stream.  Separate
+  the streams under sbcl directly before concluding anything about which
+  stream a diagnostic uses.  (Cost s393 one wrong diagnosis, caught by
+  re-measuring.)
