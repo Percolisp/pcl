@@ -11,6 +11,39 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s404 (2026-08-15, Opus 5) — session B: the portfolio, the two @INC silent-wrongs, POD prototypes
+
+- **`--quick` is the companion suite's default form** (`tools/run-perl-suite.pl
+  --all --quick --jobs 4`): it does not run the measured HANG set or a file
+  whose registered allowance exceeds 120 s, and each gets a NOT-RUN row naming
+  the rule and cause (UNEXPLAINED, like QUARANTINE).  A capped file is not run
+  at all rather than run on a smaller budget — a truncated TAP stream is a
+  DIFFERENT measurement, not a cheaper one.  → task #345, CLAUDE.md.
+- **Hang vs slow is a MEASUREMENT, and the two go to different registries.**
+  Run the file at a LARGER budget (task #326's test): same rows ⇒ HANG ⇒
+  `%QUICK_SKIP` in the runner; more rows ⇒ SLOW ⇒ `docs/perl-suite-timeouts.tsv`,
+  whose promise is "give it the time and it finishes".  Measured s404:
+  re/overload.t and re/speed.t are hangs, re/pat_psycho.t is slow (completes at
+  300 s) — so s400 §7.4 held for one of its two files.
+- **An EXTENSION carries no program preamble** — `pl2cl --extension` (like
+  `--module`, but diagnostics stay on because a developer runs it).  The three
+  checked-in artifacts load INTO a running program, so a preamble RESET its
+  @INC; `p-load-extension` now DIES (rule 12) on an extension that changes
+  @INC / `*pcl-pl2cl-path*` / `*p-core-inc-dirs*`.  **#217 closes** and #277
+  loses its regenerate-at-install item.  → task #349, `Pl/t/extension-preamble-01.t`.
+- **`require` is a RUNTIME statement AT EVERY DEPTH** — only `use` is
+  compile-time.  A file-top bareword `require` no longer hoists into the
+  declarations bucket above a runtime `push @INC` (52 of 657 files' emission
+  moves, one shape).  → task #350.
+- **Prototype extraction: ask the CLASS, not the class NAME** — a
+  `PPI::Token::Pod` in a block walked with `children` reached `find` (a Node
+  method) and killed EVERY prototype of the module (Unicode::UCD's 13).
+  → task #353.
+- **Sizing (free, from the drop announcements over both populations): #351 = 6
+  drops in 3 files, all in perl's t/, none in the sweep population; #354 = 0 in
+  both populations** (CPAN-only).  So #351 stays the first filler after B
+  rather than jumping ahead of #346.  → `docs/opus5-review-requests-s404.md` §8.
+
 ## s403 (2026-08-15, Fable) — the s402 review: approved, two rules, #354/#355 filed
 
 - **s402 APPROVED as shipped (quick ruling by USER instruction — NOT

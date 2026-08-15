@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 404 (2026-08-15, Opus 5) — session B: the portfolio (#345), the two @INC silent-wrongs (#349, #350), #353
+
+Session B of `docs/plan-post-s400.md`, all four items shipped.  Review request:
+`docs/opus5-review-requests-s404.md`.
+
+**#345 — `tools/run-perl-suite.pl --quick`.**  Two kinds of file are not run:
+the measured HANG set, and any file whose registered allowance exceeds the
+120 s quick cap.  Each gets a NOT-RUN row naming which rule fired and its
+cause, counting as UNEXPLAINED exactly like QUARANTINE — the hole stays
+countable.  A capped file is NOT run with a smaller budget on purpose: a
+truncated TAP stream is a different measurement (`C_ok` = "how far it got"),
+which would break quick's own bar of identical verdicts.
+
+**The hang set is now MEASURED, not assumed.**  s400 §7.4 said to register
+allowances for `re/pat_psycho.t` and `re/speed.t`; at three budgets the two
+files behave differently, so they are registered differently:
+`re/overload.t` 3 of 87 rows at 90/300/900 s and `re/speed.t` 1 of 59 at
+300/900 s are HANGS (skip set — an allowance would promise what is false),
+while `re/pat_psycho.t` COMPLETED at 300 s with 11 rows (allowance 450 s in
+`docs/perl-suite-timeouts.tsv`, which the cap then keeps out of quick runs).
+
+**#353 — prototype extraction died on top-level POD.**  One line: the sub-hoist
+pre-pass asks the CLASS (`isa('PPI::Node')`), not the class NAME, so a
+`PPI::Token::Pod` no longer reaches `find`.  13 `Unicode::UCD` prototypes were
+being thrown away; inverse-checked at HEAD (MISSING → FOUND), guarded by three
+rows in `Pl/t/prototype-01.t`.  Emission does not move: corpus-diff identical,
+`emission-ab` 657/657 SAME over both populations.
+
+**#349 — the artifacts' program preamble (closes #217).**  `pl2cl --extension`
+emits no program preamble; all three checked-in artifacts regenerated and now
+carry zero machine paths, so `Pl/t/no-hardcoded-paths-01.t` scans them instead
+of excluding them.  Measured before the fix (temporary instrumentation, one
+sweep): 17 extension loads in 14 files, EVERY one losing an `@INC` entry (13
+the program's own directory, 4 the `/tmp` of a fresh_perl child).
+`p-load-extension` now DIES on an extension that changes `@INC`,
+`*pcl-pl2cl-path*` or `*p-core-inc-dirs*` (rule 12); new guard file
+`Pl/t/extension-preamble-01.t`.
+
+**#350 — the file-top `require` hoist is gone.**  perl runs `require` where it
+stands; PCL hoisted a depth-0 bareword one above a runtime `push @INC` and
+died where perl loads.  Measured with `emission-ab --env`: 52 of 657 files
+move, every diff exactly that form changing position.  The quoted-path and
+expression spellings already emitted in place.  One gate expectation
+(`parser2-01.t`, "v1 parity") rewritten under the four-conjunct rule, plus a
+runtime row in `Pl/t/use-require-01.t`.
+
+---
+
 ## Session 403 (2026-08-15, Fable) — the s402 review, ruled quickly on the request's own measurements
 
 USER asked for quick answers without a re-verification pass, so this is the
