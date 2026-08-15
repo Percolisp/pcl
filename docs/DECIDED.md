@@ -3373,6 +3373,22 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   the FILE-level case should die like perl is an open design call — 33 of the
   379 drops.
 
+- **`tools/run-perl-suite.pl` was the ONLY runner without
+  `--control-stack-size 512`** (the gate, the sweep and `./runpcl` all pass
+  it), so the companion suite measured PCL on SBCL's 2 MB default and four
+  files died `control-stack-exhausted` THERE AND NOWHERE ELSE.  #324's
+  `(?{ CODE })` attribution was wrong, and its probes "did not reproduce"
+  because they ran through `./runpcl`, which has the flag.  **When one runner
+  disagrees with the others about a crash, diff the RUNNERS before the code**
+  — second occurrence, so the four hand-written sbcl command lines are now
+  task #344.  Fixed s399j: +37 C_ok (re/pat_rt_report.t 2431→2454,
+  op/utf8cache.t 0→2, re/pat_psycho.t 0→11, re/speed.t 0→1).  The flag costs
+  memory — `--all --jobs 8` reserves 8 × 512 MB and got SIGTERMed at 41 of 521
+  files; `--jobs 4` is comfortable, `PCL_SUITE_STACK_MB` overrides.
+- **`tools/corpus-diff.pl` prints the SILENT-DROP count on both sides** — a
+  `;; PARSE ERROR` progn is invisible at run time, so nothing else notices one
+  being added; the population-wide version is `tools/drop-census.pl` (#343).
+
 ## s398 (2026-08-15, Fable) — #153 FOLD chunk 3 verified and flipped; Option B phase 1 complete
 
 - **#153 FOLD chunk 3 SHIPPED (s398a–c: `f501ada`, `c6a211e`, `5323d9e`);

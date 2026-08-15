@@ -291,3 +291,47 @@ Remaining from the s397 list: the **v0.1 track** (#277–#280, #282–#283) — 
 not start it, because it is release engineering with user-facing decisions
 (installer shape, repo hygiene, CI) rather than mechanical work.  Fillers
 unstarted: #330, #321, #322, #324, #326, #328, plus this session's #337–#343.
+
+---
+
+## Addendum (after the queue): #324 was the harness, and the run that proves it is unfinished
+
+Three more commits after §9 was written.
+
+- `07069ab` — `corpus-diff.pl` prints the SILENT-DROP count on both sides.
+  Free (it already has both emissions) and it is the cheap half of §6's gate
+  idea: the perl-tests corpus is covered on the tool run that every emission
+  change already does.
+- `275540a` — **#324 is not `(?{ CODE })`.**  `tools/run-perl-suite.pl` was
+  the only runner without `--control-stack-size 512`, so the companion suite
+  measured PCL on SBCL's 2 MB default — 256× smaller than the gate, the sweep
+  and `./runpcl` — and four files died `control-stack-exhausted` there and
+  nowhere else.  s395's probes "did not reproduce" because they ran through
+  `./runpcl`, which has the flag.  +37 C_ok: re/pat_rt_report.t 2431/39 →
+  2454/56 (it now runs to the end), op/utf8cache.t 0/2 → 2/0,
+  re/pat_psycho.t 0/11 → 11/0, re/speed.t 0/0 → 1/0.
+
+**What is NOT verified, and it is the next session's first step:** the `--all`
+confirmation run was stopped by the user at **391 of 521 files**.  Those 391
+differ from the snapshot in exactly ONE row — `mro/package_aliases_utf8.t`, the
+registered `*rows-unstable*` file at its known serial value — so nothing is
+known to have moved, but re/, run/ and uni/ (~130 files) have not been looked
+at with the flag on.  The snapshot header says so in place.
+
+**Two decisions this hands you.**  (1) re/pat_psycho.t and re/speed.t no longer
+crash — they now RUN the pathological patterns they exist to time, and PCL is
+slow on them (>400 s for pat_psycho under `--jobs 1`).  Buying their ~12 rows
+with a `docs/perl-suite-timeouts.tsv` allowance costs minutes of every full
+companion run; I left their rows carrying the old crash signature rather than
+make that call silently.  (2) **#344** — four runners hand-write their own sbcl
+command line and this is the second drift (the sweep's `--load` of the test
+library was the first).  `PCLCore::sbcl_prefix` is already the helper; the work
+is moving it where the other three can use it, with byte-identical command
+lines as the acceptance.
+
+**One process note for the cadence rule.**  This session ran the full
+perl-tests sweep four times — once per code commit — where the standing rule is
+"every 3rd–5th change".  Each was defensible under a standing rule of its own
+(a `cl/` change, a runtime change, a baseline-moving change, a name-resolution
+change), but it is most of the session's wall time, and if you want the rule to
+win over those, say so and I will batch.

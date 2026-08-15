@@ -134,6 +134,31 @@ marks a real dropped statement, `ok <~>, '~ works';`), #343 (the census).
 GATE clean, TOTAL 18516 after the #323 baseline edit.  Cache generation
 v2-148.
 
+**AFTER the queue, three more (s399f–j).**  `corpus-diff.pl` now prints the
+SILENT-DROP count on both sides — free, since it already has both emissions,
+and it is the cheap half of #343's gate idea.  The #339 stderr finding was
+written up as an explicit ASK for Fable (§7 of the review request) at the
+user's request: the interesting part is the REVERT, because the same message
+covers a decline the compiler recovers from and a statement that vanished.
+
+And **#324 turned out to be the harness, not `(?{ CODE })`.**
+`tools/run-perl-suite.pl` was the ONLY runner without
+`--control-stack-size 512` — the gate, the sweep and `./runpcl` all pass it —
+so the companion suite measured PCL with a control stack 256× smaller than
+everything else, and four files "crashed with control-stack-exhausted" there
+and nowhere else.  That is also why s395's probes did not reproduce: they were
+run through `./runpcl`, which has the flag.  With it: re/pat_rt_report.t
+2431/39 → 2454/56 (runs to the end), op/utf8cache.t 0/2 → 2/0,
+re/pat_psycho.t 0/11 → 11/0, re/speed.t 0/0 → 1/0 — **+37 C_ok and four
+crashes gone**.  The last two now RUN the pathological patterns they exist to
+time, which makes them slow; buying their 12 rows with a timeouts.tsv
+allowance is left as a deliberate decision on #324.  **Verification is
+partial**: the `--all` run was stopped at 391 of 521 files, which differ from
+the snapshot in exactly one row (the registered `*rows-unstable*` file at its
+known serial value); the remaining ~130 are the next session's first step.
+Filed **#344** — four runners hand-write their own sbcl command line and this
+is the second drift; `PCLCore::sbcl_prefix` is already the helper.
+
 ---
 
 ## Session 398 (2026-08-15, Fable) — #153 FOLD chunk 3 VERIFIED and FLIPPED (W1–W9); a list-slice silent drop fixed; four filler bugs filed
