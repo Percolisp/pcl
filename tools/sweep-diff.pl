@@ -39,17 +39,28 @@
 # exists the LOST check SAYS SO on its own line — an unchecked gate must never
 # look like a passed one.
 #
-# `diff` exits nonzero if there are NEW failures or any LOST rows — usable as a
-# CI gate.
+# THE FIFTH BUCKET — DROPS (task #343, ruled docs/fable-answers-s400.md §6.5).
+# A statement the compiler could not lower is replaced by nil and the program
+# runs on (the #138 family), which no bucket above can see: the row simply is
+# not there.  The sweep now records a per-file `drops` count in _status.tsv and
+# this tool compares it against the blessed census
+# docs/parse-error-drop-census-s399.tsv (override: --drop-census PATH).  A file
+# with MORE drops than the census fails the run like a NEW failure; FEWER is a
+# fix, and the census row leaves by EDIT — never by re-blessing the file.
+#
+# `diff` exits nonzero if there are NEW failures, any LOST rows, or any new
+# dropped statements — usable as a CI gate.
 
 use strict;
 use warnings;
 
 # Read a per-file run status table: one line of
-#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned [<TAB> note]
+#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned [<TAB> drops <TAB> note]
 # as the sweep writes to <dir>/_status.tsv and as `save-status` blesses.
-# Returns file => { status, pass, fail, planned }.  An absent table is an empty
-# hash, and every caller treats "no entry" as "no information", never as zero.
+# Returns file => { status, pass, fail, planned, drops }.  An absent table is an
+# empty hash, and every caller treats "no entry" as "no information", never as
+# zero — same for a missing `drops` column (the blessed pass baseline has five
+# columns and predates it), which reads back as -1 = NOT MEASURED.
 sub read_status_file {
     my ($sf) = @_;
     my %st;
@@ -59,15 +70,52 @@ sub read_status_file {
         chomp $line;
         next unless length $line;
         next if $line =~ /^#/;
-        my ($file, $status, $pass, $fail, $planned) = split /\t/, $line;
+        my ($file, $status, $pass, $fail, $planned, $drops) = split /\t/, $line;
         next unless defined $file;
         $st{$file} = { status  => $status  // 'OK',
                        pass    => defined $pass    ? $pass    : -1,
                        fail    => defined $fail    ? $fail    : -1,
-                       planned => defined $planned ? $planned : -1 };
+                       planned => defined $planned ? $planned : -1,
+                       drops   => (defined $drops && $drops =~ /^-?\d+$/) ? $drops : -1 };
     }
     close $fh;
     return \%st;
+}
+
+# ── The DROPS baseline: the #138-family census (task #343, ruled §6.5) ───────
+# docs/parse-error-drop-census-s399.tsv, whose rows are
+#   <rel-path> <TAB> <drops> <TAB> <the compiler's own message(s)>
+# over BOTH populations.  The sweep only measures perl-tests/*.t, so only those
+# rows are comparable here; the companion half is compared by
+# tools/run-perl-suite.pl.  The census IS the baseline: a drop that is fixed
+# leaves it by EDIT, exactly like a fail-baseline row.
+sub load_drop_census {
+    my ($base_path, $explicit) = @_;
+    my @try;
+    if (defined $explicit) {
+        die "--drop-census: no such file: $explicit\n" unless -e $explicit;
+        @try = ($explicit);
+    } else {
+        my $dir = -d $base_path ? $base_path : ($base_path =~ s{/[^/]*$}{}r);
+        $dir = '.' if !length $dir;
+        @try = ("$dir/parse-error-drop-census-s399.tsv",
+                'docs/parse-error-drop-census-s399.tsv');
+    }
+    for my $p (@try) {
+        next unless -e $p;
+        my %c;
+        open my $fh, '<', $p or next;
+        while (my $line = <$fh>) {
+            chomp $line;
+            next if !length $line || $line =~ /^#/;
+            my ($rel, $n) = split /\t/, $line;
+            next unless defined $n && $n =~ /^\d+$/;
+            $c{$rel} = $n;
+        }
+        close $fh;
+        return ($p, \%c);
+    }
+    return (undef, {});
 }
 
 # The status of the run under <path>: only a directory (a live .faillog) has one.
@@ -124,13 +172,15 @@ sub load {
     return \%rec;
 }
 
-my $pass_baseline_opt;
-{   # --pass-baseline PATH may appear anywhere
+my ($pass_baseline_opt, $drop_census_opt);
+{   # --pass-baseline PATH / --drop-census PATH may appear anywhere
     my @keep;
     while (@ARGV) {
         my $a = shift @ARGV;
         if ($a eq '--pass-baseline') { $pass_baseline_opt = shift @ARGV; next }
         if ($a =~ /^--pass-baseline=(.*)$/) { $pass_baseline_opt = $1; next }
+        if ($a eq '--drop-census') { $drop_census_opt = shift @ARGV; next }
+        if ($a =~ /^--drop-census=(.*)$/) { $drop_census_opt = $1; next }
         push @keep, $a;
     }
     @ARGV = @keep;
@@ -247,6 +297,23 @@ if (%$pass_base && %$cur_status) {
     }
 }
 
+# ── DROPS: statements this run's transpiles lost, vs the blessed census ──────
+# Silent at run time, so no other bucket can see them: a dropped statement is
+# simply not in the emitted CL (perl-tests/bless.t's is a test row that never
+# runs, in a file this sweep calls passing).  MORE drops than the census = the
+# run is NOT clean; FEWER = a fix, and the census row leaves by EDIT.
+my ($census_path, $census) = load_drop_census($base_path, $drop_census_opt);
+my (@drop_up, @drop_down);
+if (%$census && %$cur_status) {
+    for my $file (sort keys %$cur_status) {
+        my $now = $cur_status->{$file}{drops};
+        next if !defined $now || $now < 0;         # not measured this run
+        my $was = $census->{"perl-tests/$file"} // 0;
+        push @drop_up,   [$file, $was, $now] if $now > $was;
+        push @drop_down, [$file, $was, $now] if $now < $was;
+    }
+}
+
 my @new_all = sort grep { !exists $base->{$_} } keys %$cur;
 # A NEW failure is only a genuine regression if its file finished cleanly this
 # run.  A file that CRASHED/PARTIAL'd has a nondeterministic tail of assertions
@@ -317,6 +384,36 @@ if (@lost) {
     print "\n";
 }
 
+if (@drop_up || @drop_down) {
+    print "DROPPED STATEMENTS vs the census (", ($census_path // '?'), "):\n";
+    printf "  + %-14s %d -> %d dropped statement(s) — NEW silent drop\n", @$_[0,1,2]
+        for sort { $a->[0] cmp $b->[0] } @drop_up;
+    printf "  - %-14s %d -> %d dropped statement(s) — fixed; EDIT the census row\n", @$_[0,1,2]
+        for sort { $a->[0] cmp $b->[0] } @drop_down;
+    print "\n";
+}
+# Same rule as the TOTAL line below: a check that goes quiet when it could not
+# run is indistinguishable from one that passed.
+if (!%$census) {
+    print "DROPS: NOT CHECKED — no drop census found",
+          (defined $drop_census_opt ? " at $drop_census_opt" : ''),
+          " (re-bless with: tools/drop-census.pl . docs/parse-error-drop-census-s399.tsv)\n";
+} elsif (!%$cur_status) {
+    print "DROPS: NOT CHECKED — the current run has no _status.tsv (needs a live .faillog directory)\n";
+} else {
+    my ($cur_d, $base_d, $unmeasured) = (0, 0, 0);
+    for my $file (sort keys %$cur_status) {
+        my $now = $cur_status->{$file}{drops};
+        if (!defined $now || $now < 0) { $unmeasured++; next }
+        $cur_d  += $now;
+        $base_d += $census->{"perl-tests/$file"} // 0;
+    }
+    printf "TOTAL dropped statements: census %d, current %d (%+d)%s%s\n",
+        $base_d, $cur_d, $cur_d - $base_d,
+        ($unmeasured ? sprintf("  [%d file(s) not measured]", $unmeasured) : ''),
+        (@drop_up ? '  <-- a NEW drop landed: this run is NOT clean' : '');
+}
+
 # The TOTAL line is the gate itself: it must be printed on EVERY run, including
 # the runs where nothing was lost, and it must say so when it could not be
 # computed.  A check that goes quiet when it cannot run is indistinguishable
@@ -333,11 +430,12 @@ if (!%$pass_base) {
         (@lost ? '  <-- LOST is non-empty: this run is NOT clean' : '');
 }
 
-printf "summary: %d new, %d fixed%s%s%s (baseline %d fails, current %d fails)\n",
+printf "summary: %d new, %d fixed%s%s%s%s (baseline %d fails, current %d fails)\n",
     scalar(@new), scalar(@fixed),
     (@lost ? sprintf(", %d LOST", scalar(@lost)) : ''),
+    (@drop_up ? sprintf(", %d file(s) with NEW drops", scalar(@drop_up)) : ''),
     (@new_unstable ? sprintf(", %d unstable (crash-file noise)", scalar(@new_unstable)) : ''),
     (@notrun ? sprintf(", %d unverified (did not run)", scalar(@notrun)) : ''),
     scalar(keys %$base), scalar(keys %$cur);
 
-exit((@new || @lost) ? 1 : 0);
+exit((@new || @lost || @drop_up) ? 1 : 0);

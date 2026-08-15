@@ -445,6 +445,19 @@ func => -12         # 1 param before list
   `0 new / 0 fixed` while coverage evaporated (s328: state.t 157 → 69).  Every
   run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
   is found it prints `LOST: NOT CHECKED` rather than nothing.
+  **FIFTH bucket, DROPS (s402, #343)** — statements the compiler could not
+  lower and replaced with `nil` (#138 family).  They are invisible to every
+  other bucket: the row simply is not there (bless.t's drop IS a test row, in
+  a file the sweep calls passing).  The sweep records a per-file `drops` count
+  in `.faillog/_status.tsv` (columns: name, status, pass, fail, planned,
+  **drops**, note) and `sweep-diff.pl` compares it against
+  `docs/parse-error-drop-census-s399.tsv` — **the census IS the baseline**, a
+  drop leaves it by EDIT; more drops than the census fails the run like a NEW
+  failure.  `tools/run-perl-suite.pl` prints the same comparison for perl's
+  own t/, and every transpile now announces a drop as it happens:
+  `PCL: statement dropped at F line N: <text> -- <reason>` (task #339; OFF in
+  `pl2cl --module`, the runtime's module load — `PCL_DROP_ANNOUNCE=all`
+  forces it back on).
 - Full `perl-tests/` sweep, CURRENT (s399): **704 blessed fails**,
   **64 files fully passing**, **TOTAL passing 18516** across 108 files.  The
   s399 move is the only one that is not a regression to chase: task #323 made

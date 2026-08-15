@@ -122,6 +122,14 @@ sub run_one_test {
     $timeout ||= $TIMEOUT;
 
     my $pass = 0; my $fail = 0; my $skip = 0; my $planned = -1; my $status = 'OK'; my $snippet = '';
+    # DROPS (task #343, ruled fable-answers-s400.md §6.5): how many statements
+    # the compiler could not lower and replaced with nil in THIS file's emitted
+    # CL.  A drop is invisible at run time — the statement simply is not there,
+    # and perl-tests/bless.t's is a test row that never runs in a file this
+    # sweep reports as passing — so the count rides along with every run that
+    # already transpiles the file, and tools/sweep-diff.pl compares it against
+    # the blessed census.  -1 means NOT MEASURED (no CL was produced), never 0.
+    my $drops = -1;
 
     eval {
         local $SIG{ALRM} = sub { die "TIMEOUT\n" };
@@ -139,6 +147,7 @@ sub run_one_test {
             chdir $orig; alarm(0);
             die "TRANSPILE_FAIL\n" . (split /\n/, $err)[0] . "\n";
         }
+        $drops = () = $cl_code =~ /;; PARSE ERROR:/g;
 
         my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', DIR => $tmpdir, UNLINK => 0);
         print $cl_fh $cl_code;
@@ -238,9 +247,10 @@ sub run_one_test {
         ($pass, $fail, $skip) = (0, 0, 0);
     }
 
-    # Write tab-separated result (skip + planned added between fail and status)
+    # Write tab-separated result (skip + planned added between fail and status;
+    # drops after planned — the free-form snippet stays last)
     open(my $rf, '>', $result_file) or die;
-    print $rf join("\t", $name, $pass, $fail, $skip, $planned, $status, $snippet) . "\n";
+    print $rf join("\t", $name, $pass, $fail, $skip, $planned, $drops, $status, $snippet) . "\n";
     close $rf;
 }
 
@@ -367,12 +377,13 @@ while (@queue || %children) {
         $warm_first = 0;   # the cache is populated (or the first file failed) — fan out
 
         # Read result file
-        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, status => 'NO_RESULT', snippet => '' };
         if (open my $rf, '<', $info->{result_file}) {
             chomp(my $line = <$rf>);
             close $rf;
-            my ($n, $p, $f, $sk, $pl, $s, $snip) = split /\t/, $line, 7;
+            my ($n, $p, $f, $sk, $pl, $dr, $s, $snip) = split /\t/, $line, 8;
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
+                   drops => $dr // -1,
                    status => $s // 'OK', snippet => $snip // '' };
         }
 
@@ -430,7 +441,7 @@ while (@queue || %children) {
                 printf "  KILLED %-22s TIMEOUT - re-queued at %ds\n",
                        $info->{name}, $info->{timeout} * $RETRY;
             } else {
-                $results{$info->{name}} = { pass => 0, fail => 0, skip => 0, planned => -1,
+                $results{$info->{name}} = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1,
                                             status => 'TIMEOUT', snippet => "(killed)" };
                 printf "  KILLED %-22s TIMEOUT\n", $info->{name};
                 $finished++;
@@ -500,14 +511,32 @@ if ($retries) {
 }
 print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 
+# DROPS headline (task #343): the count is worthless if nobody reads it, and
+# the per-file comparison against the blessed census happens in sweep-diff.pl.
+# Here we only say how many statements this corpus lost at transpile time, and
+# in how many files, so a jump is visible even on a run with --no-gate.
+{
+    my @with = grep { ($results{$_}{drops} // -1) > 0 } keys %results;
+    my $sum = 0; $sum += $results{$_}{drops} for @with;
+    my @unmeasured = grep { ($results{$_}{drops} // -1) < 0 } keys %results;
+    printf "\nDROPS (statements the compiler could not lower): %d in %d file(s)%s\n",
+        $sum, scalar(@with),
+        (@unmeasured ? sprintf("; %d file(s) NOT MEASURED (no CL produced)", scalar(@unmeasured)) : '');
+    printf "  %-22s %d\n", $_, $results{$_}{drops} for sort { $results{$b}{drops} <=> $results{$a}{drops} || $a cmp $b } @with;
+}
+
 # Per-file run status, written alongside the failure log so tools/sweep-diff.pl
 # can tell a file that CRASHED/PARTIAL/TIMEOUT (and therefore did not run its
 # remaining assertions) apart from one that genuinely passed.  Without this, a
 # flaky -j8 crash (e.g. pack.t's transient SIMPLE-FILE-ERROR) makes every
 # baseline failure in that file look "FIXED".  One line per file:
-#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> note
+#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> drops <TAB> note
 # where `note` carries the crash-localization snippet (# ABORTED after test N ...)
-# for CRASH/PARTIAL files.
+# for CRASH/PARTIAL files, and `drops` is the #138-family count (task #343):
+# how many statements the compiler replaced with nil in this file's CL, or -1
+# when no CL was produced.  The pass baseline blessed by `sweep-diff.pl
+# save-status` has only the first five columns — a reader that finds no drops
+# column must treat it as UNKNOWN, never as zero.
 sub write_status_file {
     open my $sf, '>', "$log_dir/_status.tsv" or return;
     for my $name (sort keys %results) {
@@ -515,7 +544,8 @@ sub write_status_file {
         my $note = ($r->{status} // 'OK') eq 'OK' ? '' : ($r->{snippet} // '');
         $note =~ s/[\t\n]/ /g;
         print $sf join("\t", $name, $r->{status} // 'OK',
-                       $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1, $note) . "\n";
+                       $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1,
+                       $r->{drops} // -1, $note) . "\n";
     }
     close $sf;
 }
@@ -576,12 +606,13 @@ sub rerun_serially {
         die "fork: $!" unless defined $pid;
         if ($pid == 0) { run_one_test($file, $result_file, $TIMEOUT * $RETRY); _exit(0) }
         waitpid($pid, 0);
-        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, status => 'NO_RESULT', snippet => '' };
         if (open my $in, '<', $result_file) {
             chomp(my $line = <$in>);
             close $in;
-            my ($n, $p, $f, $sk, $pl, $s, $snip) = split /\t/, $line, 7;
+            my ($n, $p, $f, $sk, $pl, $dr, $s, $snip) = split /\t/, $line, 8;
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
+                   drops => $dr // -1,
                    status => $s // 'OK', snippet => $snip // '' };
         }
         printf "  serial %-22s pass=%d fail=%d planned=%s status=%s  [%ds]  (parallel run: pass=%d status=%s)\n",

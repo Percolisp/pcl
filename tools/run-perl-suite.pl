@@ -448,6 +448,13 @@ print $JOURNAL "# queued\t$_\n" for @files;
 sub run_one {
   my ($rel, $result_file) = @_;
   my ($p_ok, $p_notok, $c_ok, $c_notok, $status, $sig) = (0, 0, 0, 0, 'OK', '');
+  # DROPS (task #343, ruled fable-answers-s400.md §6.5): statements the
+  # compiler could not lower and replaced with nil in this file's CL.  They are
+  # invisible in the TAP comparison — the statement simply is not there — so
+  # the count rides along with the transpile this run already does, and is
+  # compared per file against docs/parse-error-drop-census-s399.tsv in the
+  # summary.  -1 = NOT MEASURED (no CL produced), never 0.
+  my $drops = -1;
   my $f = "$tdir/$rel";
 
   unless (-f $f) {
@@ -473,6 +480,11 @@ sub run_one {
   my $pcl = "";
   my $sbcl_exit = 0;
   if ($terr == 0) {
+    if (open my $lf, '<', $lisp) {
+      $drops = 0;
+      while (my $l = <$lf>) { $drops++ while $l =~ /;; PARSE ERROR:/g }
+      close $lf;
+    }
     # CWD = shadow t/ (fixture files resolve through the symlinks, test.pl to
     # the stub); timeout(1) actually kills a hung SBCL (alarm in the parent
     # would leave an orphan).
@@ -557,7 +569,7 @@ sub run_one {
 
 WRITE:
   open my $rf, '>', $result_file or _exit(1);
-  print $rf join("\t", $rel, $p_ok, $p_notok, $c_ok, $c_notok, $status, $sig), "\n";
+  print $rf join("\t", $rel, $p_ok, $p_notok, $c_ok, $c_notok, $status, $sig, $drops), "\n";
   close $rf;
   # Reap everything this worker's process group spawned — timeout(1) kills
   # only its direct child, so fork-heavy tests leave orphaned grandchildren.
@@ -591,7 +603,7 @@ my %QUARANTINE = (
 );
 my @quarantined = grep { $QUARANTINE{$_} } @files;
 for my $rel (@quarantined) {
-  record_result([$rel, 0, 0, 0, 0, 'NOT-RUN', "QUARANTINED: $QUARANTINE{$rel}"]);
+  record_result([$rel, 0, 0, 0, 0, 'NOT-RUN', "QUARANTINED: $QUARANTINE{$rel}", -1]);
   printf "%-24s %s\n", $rel, "NOT-RUN (QUARANTINED: $QUARANTINE{$rel})";
 }
 @files = grep { !$QUARANTINE{$_} } @files;
@@ -643,8 +655,9 @@ while (@queue || %children) {
     my $info = delete $children{$pid};
     my $line = '';
     if (open my $rf, '<', $info->{result_file}) { chomp($line = <$rf> // ''); close $rf }
-    my @r = split /\t/, $line, 7;
-    @r = ($info->{rel}, 0, 0, 0, 0, 'NO-RESULT', '') if @r < 6;
+    my @r = split /\t/, $line, 8;   # …, sig, drops (task #343)
+    @r = ($info->{rel}, 0, 0, 0, 0, 'NO-RESULT', '', -1) if @r < 6;
+    $r[7] = -1 unless defined $r[7] && $r[7] =~ /^-?\d+$/;
     # Expected-divergence registry: divergent+expected -> XDIFF (doesn't fail
     # the run); OK+expected -> STALE (fails the run: remove the stale row).
     #
@@ -719,7 +732,7 @@ while (@queue || %children) {
     my $info = $children{$pid};
     next unless time() - $info->{start} > timeout_for($info->{rel}) + 40;
     kill 'KILL', -$pid; waitpid($pid, 0);
-    record_result([$info->{rel}, 0, 0, 0, 0, 'TIMEOUT', '(killed)']);
+    record_result([$info->{rel}, 0, 0, 0, 0, 'TIMEOUT', '(killed)', -1]);
     printf "%-24s %s\n", $info->{rel}, 'TIMEOUT (killed)';
     delete $children{$pid};
   }
@@ -934,7 +947,7 @@ sub emit_report {
     my ($st, $why) = $inflight{$rel}
       ? ('KILLED',  '(run died with this file in flight)')
       : ('NOT-RUN', '(run died before this file started)');
-    record_result([$rel, 0, 0, 0, 0, $st, $why]);
+    record_result([$rel, 0, 0, 0, 0, $st, $why, -1]);
   }
   if (@lost) {
     printf "\n!! RUN DID NOT COMPLETE — %d of %d files have no measurement.\n"
@@ -963,6 +976,42 @@ sub emit_report {
     if @quarantined;
   print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
 
+  # DROPS vs the census (task #343, ruled §6.5).  The companion half of the
+  # sweep's DROPS bucket: this population owns 63 of the census's 72 files, and
+  # a dropped statement is invisible in the TAP comparison above — the row it
+  # would have produced simply does not exist.  MORE than the census = a new
+  # silent drop; FEWER = a fix, and the census row leaves by EDIT.
+  {
+    my %census;
+    my $census_path = "$root/docs/parse-error-drop-census-s399.tsv";
+    if (open my $cf, '<', $census_path) {
+      while (my $l = <$cf>) {
+        chomp $l;
+        next if !length $l || $l =~ /^#/;
+        my ($rel, $n) = split /\t/, $l;
+        $census{$rel} = $n if defined $n && $n =~ /^\d+$/;
+      }
+      close $cf;
+    }
+    if (!%census) {
+      print "DROPS: NOT CHECKED — no census at $census_path\n";
+    } else {
+      my ($sum, $unmeasured, @up, @down) = (0, 0);
+      for my $rel (sort keys %results) {
+        my $now = $results{$rel}[7];
+        if (!defined $now || $now < 0) { $unmeasured++; next }
+        $sum += $now;
+        my $was = $census{"t/$rel"} // 0;
+        push @up,   [$rel, $was, $now] if $now > $was;
+        push @down, [$rel, $was, $now] if $now < $was;
+      }
+      printf "DROPS: %d dropped statement(s) in this run%s\n", $sum,
+        ($unmeasured ? " ($unmeasured file(s) NOT MEASURED — no CL)" : '');
+      printf "  + %-24s %d -> %d  NEW silent drop\n", @$_[0,1,2] for @up;
+      printf "  - %-24s %d -> %d  fixed; EDIT the census row\n", @$_[0,1,2] for @down;
+    }
+  }
+
   if ($JOURNAL) {
     printf $JOURNAL "# %s\n", @lost ? "INCOMPLETE: @{[scalar @lost]} files unmeasured"
                                     : "complete";
@@ -972,7 +1021,11 @@ sub emit_report {
   if ($tsv_file) {
     open my $tf, '>', $tsv_file or die "write $tsv_file: $!\n";
     # Legend at the point of use — this has been misread twice (s316v).
-    print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
+    print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig  drops   [P=PERL, C=PCL]\n";
+    print $tf "# drops = statements the compiler could not lower, replaced by nil in the\n";
+    print $tf "#   emitted CL (#138 family, task #343); -1 = NOT MEASURED (no CL produced).\n";
+    print $tf "#   Baseline: docs/parse-error-drop-census-s399.tsv.  Rows written before s402\n";
+    print $tf "#   have no drops column — that is UNKNOWN, not zero.\n";
     print $tf "# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)\n";
     print $tf "# XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)\n";
     print $tf "# FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)\n";

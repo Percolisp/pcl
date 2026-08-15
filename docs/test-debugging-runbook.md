@@ -68,7 +68,8 @@ Edit `cl/skip-registry.lisp` — add one line under the file's `register-skips` 
 The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So:
 - Abort/under-count localization is automatic (session 217). The harness emits
   `# PCL-INCOMPLETE last=N planned=M desc=…`; the sweep refines it by exit code into
-  `<faillog>/_status.tsv` col 6 (`grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,2,6`):
+  `<faillog>/_status.tsv` col 7 (`grep -v '\tOK\t' .faillog/_status.tsv | cut -f1,2,7`;
+  the columns are name, status, pass, fail, planned, **drops** (s402, task #343), note):
   - **CRASH** → `CRASH after test N (<desc>) -- crash site ~test N+1 | <SBCL error>`. Open the
     source at test N+1, fix the PCL defect so the rest of the file runs; the registry can then
     reach the later assertions.
@@ -78,6 +79,22 @@ The registry hooks per-assertion (`test-ok`); a crash/abort never reaches it. So
 - A **whole-file crash from a not-supported feature** (e.g. `(?{code})`, Tie::Array hang):
   use the file-level `@SKIP` list in `sweep-perl-tests.pl` (coarse), or implement the
   deferred per-statement `handler-case` wrapper (`docs/test-skip-registry.md` §3.1).
+
+## 4a. A failure that never ran: the DROPS bucket (task #343, s402)
+A statement the compiler could not lower is replaced by `nil` and the file runs
+on, so the assertion it carried appears in **no** count — `perl-tests/bless.t`
+has exactly one, and it is a test row, in a file the sweep calls passing. Two
+places see it now:
+- the transpile says so on stderr the moment it happens —
+  `PCL: statement dropped at FILE line N: <source text> -- <reason>` (task #339;
+  `PCL_DROP_ANNOUNCE=all` also turns it on for the runtime's module transpiles);
+- the sweep records a per-file `drops` count and `tools/sweep-diff.pl` compares
+  it against `docs/parse-error-drop-census-s399.tsv` — **more drops than the
+  census fails the run**, fewer is a fix and the census row leaves by EDIT.
+  `tools/run-perl-suite.pl` prints the same comparison for perl's own t/.
+
+To see the whole population at once (not just what a run touched):
+`tools/drop-census.pl . /tmp/drops.tsv` then diff against the blessed census.
 
 ## 5. The migration (remaining work): un-mutate the ~14 inline-skipped files
 Files with inline `ok(1,'SKIP…')` / commented-out tests (sort.t, state.t, reset.t, lex.t,
