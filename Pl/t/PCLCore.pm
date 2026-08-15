@@ -14,28 +14,21 @@ package PCLCore;
 # source-load, so a hand-set PCL_TEST_CORE can never mask a runtime edit.
 use strict;
 use warnings;
+use File::Basename qw(dirname);
+use lib dirname(__FILE__) . "/../../tools/lib";
+use PCLSbcl ();
 
 # sbcl args that go BETWEEN `sbcl` and the caller's `--load <cl_file>`:
 #   core mode:   --core <core> --control-stack-size 512 --noinform --non-interactive
 #   source mode: --control-stack-size 512 --noinform --non-interactive --load <runtime>
-# NB: --core is a RUNTIME option and must precede the toplevel options, or SBCL
-# aborts with "C runtime option --core in the middle of Lisp options" (the same
-# trap the pcl wrapper hit).  The caller appends `--load <cl_file>` after these.
+#
+# The prefix itself is BUILT IN ONE PLACE for all five runners that spawn SBCL
+# (tools/lib/PCLSbcl.pm, task #344) — the gate reaches it through here, so the
+# ~40 Pl/t files calling sbcl_prefix() need no change.  What stays here is the
+# gate's own contract: the core comes from PCL_TEST_CORE, freshness-checked.
 sub sbcl_prefix {
     my ($runtime) = @_;
-    my @base = ('--control-stack-size', '512', '--noinform', '--non-interactive');
-    my $core = $ENV{PCL_TEST_CORE};
-    if ($core && $core ne '1' && -f $core && _fresh($core, $runtime)) {
-        return ('--core', $core, @base);
-    }
-    return (@base, '--load', $runtime);
-}
-
-# A core is usable only if it is at least as new as the runtime it must reflect.
-sub _fresh {
-    my ($core, $runtime) = @_;
-    return 0 unless -f $core && -f $runtime;
-    return (stat $core)[9] >= (stat $runtime)[9];
+    return PCLSbcl::sbcl_prefix(runtime => $runtime, env_core => 1);
 }
 
 1;

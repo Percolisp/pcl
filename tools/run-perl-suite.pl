@@ -129,6 +129,7 @@ use FindBin;
 use lib "$FindBin::RealBin/lib";
 # Description-based TAP pairing (task #177) — unit-tested in tools/t/tap-align.t.
 use PclTapAlign qw(tap_rows align_taps);
+use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -332,24 +333,23 @@ unless ($no_core) {
 # $?.  That is why every run exited 0 no matter how many files diverged, i.e.
 # the "Exit: nonzero iff ..." contract above never actually held (task #157).
 END { local $?; unlink $core if $core && $$ == $MAIN_PID }
-# --core must precede all other toplevel sbcl options.
+# The prefix (stack size, banner flags, --core placement) is built by
+# tools/lib/PCLSbcl.pm — the ONE place all five runners share (task #344).
+# It is what made #324 possible: this runner used to hand-write the option
+# string and was the only one WITHOUT --control-stack-size, so the companion
+# suite ran PCL with SBCL's 2 MB default, a stack 256× smaller than the gate's.
+# Deep-recursion files then died `control-stack-exhausted` HERE and nowhere
+# else, and the truncation was read as a PCL crash: re/pat_rt_report.t stopped
+# at 2431 of 2514 rows and its snapshot row blamed `(?{ CODE })`.
 #
-# --control-stack-size 512 (s399, task #324): every OTHER runner already passes
-# it — Pl/t/PCLCore.pm (the gate), sweep-perl-tests.pl, ./runpcl — and this one
-# did not, so the companion suite ran PCL with SBCL's 2 MB default, a stack 256×
-# smaller than the gate's.  Deep-recursion files then died
-# `control-stack-exhausted` HERE and nowhere else, and the truncation was read
-# as a PCL crash: re/pat_rt_report.t stopped at 2431 of 2514 rows and its
-# snapshot row blamed `(?{ CODE })`.  With the flag it reaches 2510 — the same
-# stack every other measurement uses, so the suite measures PCL rather than the
-# harness.
-# MB, overridable: 512 matches the other runners, but this one spawns a PERL
-# side and a PCL side per worker, so `--jobs 8` reserves 8x this much stack at
-# once — see the measurement in task #324 before lowering it.
-my $stack_mb = $ENV{PCL_SUITE_STACK_MB} // 512;
-my $stack = "--control-stack-size $stack_mb";
-my $sbcl = $core ? "sbcl --core \Q$core\E $stack --noinform --non-interactive"
-                 : "sbcl $stack --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E";
+# The stack size stays overridable HERE because this runner spawns a PERL side
+# and a PCL side per worker, so `--jobs 8` reserves 8x this much stack at once
+# — see the measurement in task #324 before lowering it.
+my $stack_mb = $ENV{PCL_SUITE_STACK_MB} // $PCLSbcl::STACK_MB;
+my $sbcl = $core
+  ? PCLSbcl::sbcl_prefix_str(core => $core, stack_mb => $stack_mb)
+  : PCLSbcl::sbcl_prefix_str(runtime => $runtime, stack_mb => $stack_mb)
+      . " --load \Q$testlib\E";
 
 my $tmpdir = tempdir(CLEANUP => 0);
 END { local $?; system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir && $$ == $MAIN_PID }
@@ -476,7 +476,9 @@ sub run_one {
     # -k: an SBCL wedged in a runaway compile ignores/defers TERM and lives on
     # PAST the run (s316h: two escaped SBCLs + their orphaned 6 GB pl2cl
     # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
-    system("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl --load \Q$lisp\E > \Q$out\E 2>&1");
+    my $sbcl_cmd = "$sbcl --load \Q$lisp\E";
+    print STDERR "SBCL[run-perl-suite]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
+    system("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl_cmd > \Q$out\E 2>&1");
     $sbcl_exit = $? >> 8;
     $pcl = do { local $/; my $fh; open($fh, '<', $out) ? (<$fh> // '') : '' };
     $c_ok    = () = $pcl =~ /^ok /mg;

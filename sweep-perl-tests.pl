@@ -24,6 +24,9 @@ use File::Basename;
 use File::Temp qw(tempfile tempdir);
 use Cwd qw(abs_path getcwd);
 use POSIX qw(:sys_wait_h _exit);
+use FindBin;
+use lib "$FindBin::RealBin/tools/lib";
+use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 
 my $JOBS    = 8;
 my $TIMEOUT = 90;  # seconds per test (first attempt)
@@ -149,7 +152,12 @@ sub run_one_test {
         # uncaught die in any single form, so one not-supported statement (e.g.
         # `pack "P"`, or `die if $@` after an unsatisfiable string eval) no longer
         # aborts the whole file and silently swallows every test after it.
-        system("timeout $timeout sbcl --control-stack-size 512 --noinform --non-interactive --load $runtime --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --eval \"(pcl::p-load-with-recovery \\\"$cl_file\\\")\" >$tmp_out 2>&1");
+        # quote => 0: these paths were never shell-quoted here, and the #344
+        # move is byte-identical by construction (see tools/lib/PCLSbcl.pm).
+        my $sbcl_cmd = PCLSbcl::sbcl_prefix_str(runtime => $runtime, quote => 0)
+            . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --eval \"(pcl::p-load-with-recovery \\\"$cl_file\\\")\"";
+        print STDERR "SBCL[sweep]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
+        system("timeout $timeout $sbcl_cmd >$tmp_out 2>&1");
         my $sbcl_exit = $? >> 8;
         my $out = do { local $/; my $f; open($f, '<', $tmp_out) ? do { my $c = <$f>; $c // '' } : '' };
         unlink $tmp_out;
