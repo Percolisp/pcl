@@ -1021,38 +1021,68 @@ the fix requires a fundamentally different argument-passing model.
 
 ---
 
-## Ref aliasing (`use feature 'refaliasing'`)
+## Ref aliasing (`use feature 'refaliasing'`)  — IMPLEMENTED s396 (#325)
 
-**Perl behaviour:** `use feature 'refaliasing'` enables assignment to references
-as lvalues: `\$x = \$y` makes `$x` an alias for `$y`.  Its companion
-`declared_refs` allows the declarator forms `\my $x = \$y`, `our \$T = \$::TODO`
-and `for \my %e (@list)`.
+> **NO LONGER A LIMITATION for the assignment forms.**  `\$x = \$y`,
+> `\my $x = \$y` (and the `@`/`%` spellings), `our \$T = \$::TODO`,
+> `\$h{k} = \$v` / `\$a[i] = \$v`, `\&c = \&d`, and the list spellings
+> `(\$x) = @_` / `\($x) = @_` / `\(my $p) = @_` / `\my($s) = @_` all alias,
+> probed row-for-row against perl 5.40.3.  Guard: `Pl/t/refaliasing-01.t`.
+>
+> The mechanism is one arm in `p-setf`'s place dispatch: a `\`-cast lvalue
+> REBINDS THE NAME'S STORAGE to the right-hand referent, which in PCL's model
+> is exactly "both names now hold the same box / vector / hash-table".  Before
+> it, four of the six spellings were **silent wrong** (the write landed in a
+> throwaway ref box) and two were hard refusals.
 
-> **CORRECTION (s395):** this entry used to say the feature was "removed in Perl
-> 5.40 without graduating to stable", and the rationale below rested on that.
-> **It is false.**  Probed on the dev perl, 5.40.3: all five shapes above work,
-> warning only `Aliasing via reference is experimental`.  It is still
-> experimental, not removed.
+**What is still missing** (each its own cause, none of them the alias itself):
 
-**PCL behaviour:** Not implemented.  The `use feature 'refaliasing'` pragma is
-silently accepted as a no-op, but the lvalue-ref assignment `\$h{foo} = \$var`
-does not create an alias.
-
-**Rationale:** No stable CPAN module depends on it, and it is still
-experimental.  **But the "significant runtime changes" this entry used to claim
-are not obvious**: in PCL a scalar variable IS a box, so `\$x = \$y` is "make
-$x's cell hold $y's box", and a container alias is sharing the vector or hash
-object.  Task **#325** sizes it against the four t/ files that measure it
-(~1400 rows, the largest single block of task #314's residue); if it lands,
-this entry is DELETED, not rephrased.
+- **`for \my %e (@list)` / `for \%_ (@tests)`** — the foreach spellings.  PPI
+  cannot lex a `for` whose loop variable is a `\`-cast or a non-scalar: the
+  compound statement comes out holding only the word `for`, with the rest (and
+  every following statement) swallowed into one flat sibling.  Needs the
+  token-stream repair pattern; **task #327**.  Blocks `t/op/const-optree.t`.
+- **`my \$x` in RVALUE position** (`is \$x, my \$y, …`) — the declarator as an
+  expression whose value is a ref.  `t/op/decl-refs.t` is mostly this plus
+  diagnostics.
+- **the feature-gating diagnostics** — `Experimental aliasing via reference not
+  enabled` when the feature is off, and the `Aliasing via reference is
+  experimental` warning when it is on.  PCL accepts the syntax unconditionally
+  and warns for neither; 135 of `t/op/decl-refs.t`'s rows are exactly these.
+  Same family as the general `use warnings` model (task #221).
+- **`\state @a = [1..3]`** — blocked by the pre-existing non-scalar `state`
+  outside a named sub refusal (#314 family F-F), not by aliasing.  Blocks
+  `t/op/lvref.t`.
 
 **Affected tests:**
 - `perl-tests/substr.t` — last block (`{ # [perl #132527] ... }`) commented out (1 test)
-- `perl-tests/aassign.t` — blocks at lines 124–175 and 284 use refaliasing (multiple tests)
+- `perl-tests/aassign.t` — blocks at lines 124–175 and 284 use refaliasing
 - `perl-tests/each.t` — block at lines 319–320 uses refaliasing
-- companion suite, measured s395: `t/re/opt.t` (639 rows, TRANSPILE-FAIL on one
-  `our \$TODO = \$::TODO`), `t/op/const-optree.t` (148, `for \%_ (@tests)`),
-  `t/op/lvref.t` (199, `\state @a = [1..3]`), `t/op/decl-refs.t` (402, at 42)
+
+---
+
+## `re::optimization` — the regex engine's internal optimizer report
+
+**Perl behaviour:** `re::optimization($qr)` (XS, in perl's `re` module) returns
+a hashref describing what perl's regex COMPILER decided about a pattern:
+`minlen`, `minlenret`, the `anchored` and `floating` substrings with their
+offsets and utf8-ness, `noscan`, `isall`, `skip`, `implicit`, the anchor flags
+(`SBOL`/`MBOL`/`GPOS`) and the start-class (`stclass`).
+
+**PCL behaviour:** absent.  `t/re/opt.t` dies `undef-fn: re::optimization`.
+
+**Rationale:** these are not observable regex SEMANTICS — they are a readout of
+one particular engine's internal optimizer state.  PCL matches with cl-ppcre,
+whose optimizer is a different program making different decisions, so there is
+no answer to report that would be perl's answer.  Reproducing them would mean
+reimplementing perl's regex optimizer alongside the matcher purely so a test
+file could inspect it.
+
+**Affected tests:** `t/re/opt.t` (639 rows).  Registered XDIFF.  Found s396
+while implementing refaliasing: the file's ONLY blocker had been the
+`our \$TODO = \$::TODO` on line 46, and task #325 sized its 639 rows as
+reachable on that basis — with the declaration lowering fixed, the file
+transpiles and runs, and this is what it hits instead.
 
 ---
 

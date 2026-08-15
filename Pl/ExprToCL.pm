@@ -1655,6 +1655,13 @@ sub gen_binary_op_form {
         return ['box-set', $tern, $rhs];
       }
     }
+    # \($x) = LIST — a one-element \(…) lvalue is still a LIST assignment
+    # (see _is_backslash_paren_lvalue); re-wrap it into the (vector …) shape
+    # the branch below already handles, rather than adding a second list path.
+    if ($left_flat =~ /^\(p-backslash / && $self->_is_backslash_paren_lvalue($kids->[0])) {
+      $left      = ['vector', $left];
+      $left_flat = Pl::CLForm::to_flat($left);
+    }
     if ($left_flat =~ /^\(vector[ )]/) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = ['p-list-=', $left, $right];
@@ -3520,6 +3527,25 @@ sub _is_list_node_for_refgen {
     return 1 if ($node->content() // '') eq '..';
   }
   return 0;
+}
+
+# True when NODE_ID is `\( … )` — a refgen whose operand is a PARENTHESIZED
+# list.  Only the assignment lowering cares: as an rvalue `\($x)` really is
+# `\$x` (one ref either way, which is why gen_prefix_op_form collapses it),
+# but as an LVALUE the parens are what make it a LIST assignment — perl's
+# `\($x) = @_` aliases $x to $_[0], while `\$x = @_` is scalar context and
+# dies "not a SCALAR reference".  The multi-element spelling keeps its
+# list-ness on its own (it emits a (vector …)); this is the one-element case.
+sub _is_backslash_paren_lvalue {
+  my ($self, $node_id) = @_;
+  return 0 unless defined $node_id;
+  my $kids = $self->expr_o->get_node_children($node_id);
+  return 0 unless $kids && @$kids == 2;
+  my $op_node = $self->expr_o->get_a_node($kids->[0]);
+  return 0 unless ref($op_node) && $op_node->can('content')
+                  && ($op_node->content() // '') eq '\\';
+  return $self->expr_o->node_tree->get_metadata($kids->[1], 'backslash_paren_list')
+           ? 1 : 0;
 }
 
 # Form twin of _gen_backslash_multi_term (E2): same parts walk, same counter

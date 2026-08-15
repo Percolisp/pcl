@@ -8313,12 +8313,19 @@ sub _lower_our_decl {
   my @k = _strip_semi($stmt->schildren);
   return undef unless @k >= 2
     && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our';
+  # `our \$T = \$::TODO;` (declared_refs) — the `\` belongs to the ASSIGNMENT,
+  # not to the declaration: the statement declares the package cell for $T and
+  # then aliases it, so the names are read past the cast and the cast stays in
+  # the expression tail, where p-setf's \-cast place turns it into an alias.
+  # Same DECLARE-then-lower-the-tail shape as `our $count++` (family F-B).
+  my $ni = 1;
+  $ni = 2 if @k > 2 && $k[1]->isa('PPI::Token::Cast') && $k[1]->content eq '\\';
   my @names;
-  if ($k[1]->isa('PPI::Token::Symbol')) {
-    @names = ($k[1]->content);
-  } elsif ($k[1]->isa('PPI::Structure::List')) {
+  if ($k[$ni]->isa('PPI::Token::Symbol')) {
+    @names = ($k[$ni]->content);
+  } elsif ($k[$ni]->isa('PPI::Structure::List')) {
     @names = map  { $_->content }
-             grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
+             grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[$ni];
   }
   # The tail may be ANY operator, not only an assignment: perl's
   # `our $Verbose ||= 0;` (Exporter.pm) declares the package cell and then
@@ -8335,7 +8342,7 @@ sub _lower_our_decl {
   # this function's last form, so it accepts both.
   my $bad = !@names
     || (grep { !/^[\$\@\%]\w+$/ } @names)
-    || (@k > 2 && !$k[2]->isa('PPI::Token::Operator'));
+    || (@k > $ni + 1 && !$k[$ni + 1]->isa('PPI::Token::Operator'));
   die "Parser2 TODO: unsupported our declaration: " . $stmt->content if $bad;
   for my $n (@names) {
     # A defvar of a let-bound name would proclaim it special and poison the
@@ -8359,7 +8366,7 @@ sub _lower_our_decl {
     push @{ $self->{_captured_decls} },
       global_decl_form("${prefix}${n}", _fresh_container($n));
   }
-  return [] if @k == 2;
+  return [] if @k == $ni + 1;
   # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.
   # NOTE (D20 reverted, D23): a single-scalar init MUST go through p-scalar-=
   # (box-set invalidates the box's sv/nv caches), NOT `(setf (p-box-value …))`.

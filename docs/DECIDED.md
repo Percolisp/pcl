@@ -3042,3 +3042,47 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   offending pattern** — never bisect by adding exits to perl's own `.t` files.
   comp/require.t is the genuinely SLOW one (909 at `--timeout 300`, 350 at 90 s)
   and wants a `docs/perl-suite-timeouts.tsv` row.
+
+## s396 (2026-08-15, Opus) — #325 refaliasing: the assignment forms
+
+- **A `\`-cast in LVALUE position is an ALIAS, and PCL's box model makes it a
+  one-line move**: the assignment REBINDS THE NAME'S STORAGE to the right-hand
+  referent — `(setq $x <$y's box>)` for a scalar, the vector/hash-table object
+  for `@`/`%`, the referent box written into the SLOT for `\$h{k} = \$v`.
+  Both names then denote one object, which is perl's aliasing exactly, and
+  `\$x == \$y` follows for free (a ref's identity is its referent's).
+- **The whole surface converges on ONE p-setf arm.**  Every spelling the
+  emitter produces — `\$x = …`, `\my @b = …`, `our \$T = …`, `(\$x) = @_`
+  (through `p-list-=`'s default arm, which routes an unrecognised element form
+  to `p-setf`), `\$h{k} = …` (`p-gethash-box` place), `\&c = \&d`
+  (`p-backslash-sub` place) — arrives as a `p-setf` PLACE that is a `\`-cast.
+  So the fix is one arm in the place dispatch, not a branch per parse path.
+  Before it, four of six spellings were **silent wrong**: the place was a
+  FRESH ref box, so `(box-set (p-backslash $x) …)` wrote into a temporary.
+- **`\$x = \$y` vs `\$x = $r` differ by ONE BOX LAYER, and `is-ref` is what
+  tells them apart** — not a layer count.  `p-backslash` sets `is-ref` on the
+  wrapper it makes; a VARIABLE holding that wrapper does not have it.  Reading
+  the flag keeps a reference-to-a-reference right, where "peel twice" would
+  take one level too many.  (`p-alias-scalar-target`.)
+- **`\(EXPR)` collapses to `\EXPR` as an rvalue but NOT as an lvalue.**  One
+  ref either way for a value, but the parens are what make `\($x) = @_` a LIST
+  assignment (perl aliases $x to $_[0]); `\$x = @_` is scalar context and dies.
+  The one-element case is the only one that needed saying — the multi-element
+  spelling already emits a `(vector …)`.  (`_is_backslash_paren_lvalue`.)
+- **`our \$T = \$::TODO` is the DECLARE-then-lower-the-tail shape again**
+  (s395's family F-B): read the names PAST the cast, leave the cast in the
+  expression tail, and the alias falls out of the ordinary expression path.
+- **#325's row estimate was 46% wrong, and only running the file could say
+  so.**  `t/re/opt.t` (639 of the ~1400) had exactly one refusal, so the task
+  sized it as reachable; with the refusal gone it transpiles, runs, and dies on
+  **`re::optimization`** — perl's XS readout of its own regex optimizer
+  (minlen/anchored/floating/stclass).  That is not regex SEMANTICS, it is one
+  engine's internal state, and cl-ppcre is a different program: registered
+  XDIFF with a not-supported entry.  **A "one refusal blocks N rows" estimate
+  is an upper bound until the file has actually run.**
+- **PPI cannot lex a `for` whose loop variable is a `\`-cast or a non-scalar**
+  — the compound statement keeps only the word `for` and swallows the rest of
+  the file into one flat sibling, so no tree edit can repair it.  Token-stream
+  repair + reparse (the #270 pattern), spelled as a rewrite into
+  `for my $tmp (LIST) { \my %e = $tmp; BODY }` so the alias mechanism above
+  does the work.  Task **#327**; blocks `t/op/const-optree.t`.

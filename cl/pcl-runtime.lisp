@@ -218,6 +218,9 @@
    ;; Module system
    #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version
    ;; Functions
+   ;; Reference aliasing (use feature 'refaliasing'): p-setf's \-cast place
+   #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
+   #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
    #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
@@ -4674,11 +4677,135 @@
                  ,result-var)
                (make-p-box (length ,src-vec))))))))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-alias-expansion (place value)
+    "Expand a REFALIASING assignment `\\TARGET = VALUE` (use feature
+     'refaliasing' / 'declared_refs').  TARGET is the form the emitter produced
+     for the \\-cast's operand, so this is the ONE place that knows what a
+     \\-lvalue means; every spelling (`\\$x = ...`, `\\my @b = ...`,
+     `(\\$x) = @_` through p-list-='s default arm, `our \\$T = ...`) arrives
+     here as a p-setf place.
+
+     An alias is NOT a value write: it REBINDS THE NAME'S STORAGE to the object
+     the right-hand reference points at.  In PCL a scalar variable holds a
+     p-box, an array variable holds the vector and a hash variable the
+     hash-table, so `\\$x = \\$y` is `(setq $x <$y's box>)` — after it both
+     names denote the same object, which is exactly perl's aliasing, and
+     `\\$x == \\$y` follows for free (a ref stringifies/numifies from its
+     referent's identity).
+
+     A container SLOT (`\\$h{k} = \\$v`) is the same move one level down: the
+     slot's box is replaced by the referent box, which every reader already
+     unboxes.
+
+     Rule 12: an unhandled target form is a compiler gap, not a default — it
+     dies here, naming the form, rather than falling through to the value
+     write that made `\\$x = \\$y` a silent no-op before this existed."
+    (let ((target (second place)))
+      (flet ((sigil (sym) (char (symbol-name sym) 0)))
+        (cond
+          ;; \&c = \&d — a code alias is a glob-slot store, so the two names
+          ;; share one function object (and one coderef identity).
+          ((eq (car place) 'p-backslash-sub)
+           `(setf (symbol-function ,target) (p-alias-code-target ,value)))
+          ;; \$x = REF — rebind the name to the referent BOX.  setq covers both
+          ;; storage kinds: a `let`-bound lexical and a p-defcell symbol macro
+          ;; (which expands to a setf of the global cell).
+          ((and (symbolp target) (char= (sigil target) #\$))
+           `(setq ,target (p-alias-scalar-target ,value)))
+          ;; \@a = REF / \%h = REF — rebind to the referent vector / hash-table.
+          ((and (symbolp target) (char= (sigil target) #\@))
+           `(setq ,target (p-alias-array-target ,value)))
+          ((and (symbolp target) (char= (sigil target) #\%))
+           `(setq ,target (p-alias-hash-target ,value)))
+          ;; \$h{k} = REF, \$a[i] = REF — replace the SLOT's box.  The emitter
+          ;; spells an element lvalue as p-gethash-box / p-aref-box, which is
+          ;; already "the box in that slot", so the alias just stores another box
+          ;; there.
+          ((and (consp target) (eq (car target) 'p-gethash-box))
+           `(p-alias-hash-slot ,(second target) ,(third target) ,value))
+          ((and (consp target) (eq (car target) 'p-aref-box))
+           `(p-alias-array-slot ,(second target) ,(third target) ,value))
+          (t
+           (error "PCL: refaliasing target not supported: ~S" target))))))
+
+  (defun %p-alias-place-p (place)
+    "True for a p-setf place that is a \\-cast, i.e. a refaliasing assignment."
+    (and (consp place)
+         (member (car place) '(p-backslash p-backslash-sub)))))
+
+(defun p-alias-scalar-target (ref)
+  "The BOX a scalar reference points at, for `\\$x = REF`.
+
+   Two shapes reach here and IS-REF is what separates them (that is the flag's
+   job — p-backslash sets it on the wrapper it makes):
+     `\\$x = \\$y`   — REF is the \\-wrapper itself, so the referent is its value;
+     `\\$x = $r`    — REF is a VARIABLE whose value is the wrapper, one deeper.
+   Reading the wrapper's identity rather than counting box layers keeps a
+   reference-to-a-reference right, where a layer count would peel one too many.
+   Perl's own diagnostic when the right-hand side is not a scalar reference."
+  (let* ((wrapper (if (and (p-box-p ref)
+                           (not (p-box-is-ref ref))
+                           (p-box-p (p-box-value ref))
+                           (p-box-is-ref (p-box-value ref)))
+                      (p-box-value ref)
+                      ref))
+         (inner (unbox wrapper)))
+    (if (p-box-p inner)
+        inner
+        (error "Assigned value is not a SCALAR reference"))))
+
+(defun p-alias-array-target (ref)
+  "The VECTOR an array reference points at, for `\\@a = REF`."
+  (let ((v (p-cast-@ ref)))
+    (if (and (vectorp v) (not (stringp v)))
+        v
+        (error "Assigned value is not an ARRAY reference"))))
+
+(defun p-alias-hash-target (ref)
+  "The HASH-TABLE a hash reference points at, for `\\%h = REF`."
+  (let ((h (p-cast-% ref)))
+    (if (hash-table-p h)
+        h
+        (error "Assigned value is not a HASH reference"))))
+
+(defun p-alias-code-target (ref)
+  "The FUNCTION a code reference points at, for `\\&c = REF`."
+  (let ((f (unbox ref)))
+    (if (functionp f)
+        f
+        (error "Assigned value is not a CODE reference"))))
+
+(defun p-alias-hash-slot (hash key ref)
+  "`\\$h{k} = REF` — make the slot hold the referent box itself."
+  (let ((h (unbox hash))
+        (box (p-alias-scalar-target ref)))
+    (unless (hash-table-p h)
+      (error "Not a HASH reference"))
+    (setf (gethash (to-string key) h) box)))
+
+(defun p-alias-array-slot (arr idx ref)
+  "`\\$a[i] = REF` — make the slot hold the referent box itself."
+  (let* ((a (unbox arr))
+         (box (p-alias-scalar-target ref))
+         (i (truncate (to-number idx))))
+    (unless (and (vectorp a) (not (stringp a)))
+      (error "Not an ARRAY reference"))
+    (let ((n (if (< i 0) (+ (length a) i) i)))
+      (when (< n 0) (error "Modification of non-creatable array value attempted"))
+      (loop while (>= n (length a)) do (vector-push-extend nil a))
+      (setf (aref a n) box))))
+
 ;; p-setf dispatches to the appropriate assignment form based on place type.
 ;; For element access (p-aref, p-gethash, etc.), uses CL's setf mechanism.
 (defmacro p-setf (place value)
   "Perl assignment - dispatches to type-specific forms or uses CL setf for element access."
   (cond
+    ;; Reference aliasing: the lvalue is a \-cast, so this assignment REBINDS
+    ;; the name's storage to the right-hand referent instead of writing a
+    ;; value.  Kept first: a \-cast place can never mean anything else.
+    ((%p-alias-place-p place)
+     (%p-alias-expansion place value))
     ;; Array variable (symbol starting with @) -> p-array-=
     ((and (symbolp place)
           (char= (char (symbol-name place) 0) #\@))
@@ -11508,7 +11635,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-145"
+(defparameter *pcl-cache-generation* "v2-146"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
