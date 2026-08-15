@@ -50,6 +50,28 @@ expression spellings already emitted in place.  One gate expectation
 (`parser2-01.t`, "v1 parity") rewritten under the four-conjunct rule, plus a
 runtime row in `Pl/t/use-require-01.t`.
 
+**Then #354 + #351 (`a46aa3f`), the two PPI operator-vs-term mis-lexes.**
+`)*name` lexed as a GLOB (statement dropped whole — Data::Dump:325) and
+`/PATTERN/` after a paren-less call lexed as DIVISION (`ok /foo/, "d"` dropped;
+`ok /foo/x` compiled to real division and died).  Both repaired on the raw
+token stream in the `_repair_*` family.  **#351's condition is perl's own and
+is a NEGATIVE**: `/` after a bareword is division only when the word is a TERM
+(measured — for a non-term perl does not fall back to division, it is a SYNTAX
+ERROR), so "not a term" is the whole test.  The population scan earned its keep:
+of 28 `WORD /` sites, `map { … } <op/*>` must NOT be repaired (PPI derails the
+glob into `< Word / * >`) — hence the `<` guard.  11 dropped statements
+recovered; emission moves in 3 files, all in perl's t/; corpus-diff identical.
+
+**A third bug found on the way, fixed with them**: `pl2cl`'s stdin branch held a
+bare `local $/;` across the parse, and PPI's tokenization of a trailing
+`__END__`/`__DATA__` DEPENDS on `$/` — so every program compiled via
+`pl2cl < file` got an extra empty line in its DATA handle.  The slurp is scoped
+and `_ppi_parse` trims a tail the parse invented.  Rule 13: ppi-upstream-bugs
+§12/§13, ppi-bug-report Bug 9/Bug 10 (10 rows, all failing as they must), three
+canaries, end-to-end guards.  **#356 filed**: `print PI / 2` is dropped and
+`print PI + 1` treats the constant as a FILEHANDLE and prints nothing — both
+pre-existing, found while probing #351's breaking cases.
+
 ---
 
 ## Session 403 (2026-08-15, Fable) — the s402 review, ruled quickly on the request's own measurements

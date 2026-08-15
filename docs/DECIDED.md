@@ -43,6 +43,18 @@ not-supported.md → only then probe.*
   drops in 3 files, all in perl's t/, none in the sweep population; #354 = 0 in
   both populations** (CPAN-only).  So #351 stays the first filler after B
   rather than jumping ahead of #346.  → `docs/opus5-review-requests-s404.md` §8.
+- **A `/` after a bareword is DIVISION only when the word is a TERM** — for
+  anything else perl does not fall back to division, it is a SYNTAX ERROR, so
+  "not a term" is a SAFE repair condition under principle 9.  Term = 0-ary
+  builtin (the one arity table), `use constant`/`sub NAME ()` in the document,
+  or the ALL-CAPS convention.  → task #351, `_repair_word_match`.
+- **A `*` where a TERM has just ended is multiplication, never a glob** — `)`,
+  `]`, a SUBSCRIPT-closing `}`, a Symbol or a Quote; a BLOCK-closing `}` is the
+  real-glob case (`sub f {…} *bar = \&f`).  → task #354, `_repair_glob_multiply`.
+- **PPI's tokenization depends on `$/`**: with the slurp separator in force a
+  trailing `__END__`/`__DATA__` section gains a newline.  Scope every slurp AND
+  do not trust the parse — `_ppi_parse` trims a tail the parse invented.
+  → `docs/ppi-upstream-bugs.md` §13.
 
 ## s403 (2026-08-15, Fable) — the s402 review: approved, two rules, #354/#355 filed
 

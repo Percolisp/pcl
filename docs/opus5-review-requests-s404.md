@@ -10,6 +10,7 @@ two new silent-wrongs (#349, #350), plus #353 folded in per
 | `a82acbc` s404b | **#353** — prototype extraction died on top-level POD |
 | `d1ecafc` s404c | **#349** (closes **#217**) — an extension carries no program preamble |
 | `987c78a` s404d | **#350** — a file-top `require` runs where it stands |
+| `a46aa3f` s404f | **#354 + #351** — the two PPI operator-vs-term mis-lexes (§10) |
 
 The parts worth your time: **§1.2** (a ruling whose premise was false for one
 of its two files — measured), **§4**'s population number, **§8** (the #351 /
@@ -274,3 +275,73 @@ files, 2.5 min, collecting every `PCL: statement dropped` line (388 of them):
 5. **The one rewritten gate expectation** (§5) — please check the four
    conjuncts yourself; it is the only test whose meaning changed.
 
+
+## 10. #354 + #351 — the two PPI operator-vs-term mis-lexes (one commit)
+
+Fable's §7 put these next, and the sizing in §8 said neither touches a sweep
+row, so they went in one commit: the layer (`_repair_*` on the raw token
+stream) and the mechanism (rewrite source, reparse) are shared, even though
+each predicate is its own.
+
+**#354** — `_repair_glob_multiply` splits `*name` back into operator + word
+when the previous significant token ENDS A TERM.  `}` counts only when it
+closes a SUBSCRIPT: `$h{x}*foo()` is multiplication, `sub f {…} *bar = \&f;` is
+a real glob, and the tree says which.  Seven shapes probed against perl.
+
+**#351** — `_repair_word_match` rewrites the opening `/` to `m/`.  The
+condition Fable ruled (#266's callable classifier) turned out to be
+**unavailable at repair time and unnecessary**: the classifier needs the
+environment, which at repair time knows nothing (`ok` comes from a
+BEGIN-required `test.pl`), and perl's rule has a NEGATIVE form that needs no
+import knowledge at all —
+
+    sub ok {…} … ok /foo/, "d";     CALL(1 desc)      (declared ABOVE)
+    … ok /foo/, "d"; sub ok {…}     syntax error      (declared BELOW)
+    … ok /foo/, "d";                syntax error      (not declared)
+    require "./t.pl"; ok /foo/…     syntax error      (runtime require)
+    time / 60                       division
+    use constant PI => 6; PI / 2    3  (division)
+    sub f {…} print f / 2           match ("Search pattern not terminated")
+    sub g () {…} print g / 2        5  (division)
+
+perl reads `/` as division only when the word is a TERM; for a non-term it does
+not fall back to division, it is a **syntax error**.  PCL assumes valid Perl
+(principle 9), so **"not a term" is the whole test** — and "term" is answerable
+from the document plus the arity table: 0-ary builtins (from the ONE table, not
+a new list), `use constant`/`sub NAME ()` declared here, and the ALL-CAPS
+convention `_bareword_subscript_autoquotes` already uses.  **Please rule on
+that substitution** — it is a deviation from the letter of §4's ruling, made
+because the ruled condition cannot see the names that matter.
+
+**The population scan is what makes this safe, and it found the trap.**  28
+`WORD /` sites over both populations: `ok` (6), `while` (11), `when` (2) — all
+repairs — and `map { … } <op/*>` (3), where PPI derails a GLOB into
+`< Word / * >` and a repair would have been catastrophic.  Hence the `<` guard.
+
+**A third bug, found on the way and fixed with them.**  `pl2cl`'s stdin branch
+held a bare `local $/;` across the parse, and **PPI's tokenization of a trailing
+`__END__`/`__DATA__` depends on `$/`** — in slurp mode the section gains a
+newline.  Every program compiled through `pl2cl < file` therefore got an extra
+empty line in its `<DATA>` handle; `tools/emission-ab.pl` feeds files that way,
+which is how it surfaced (as an unexplained diff I chased rather than waved
+through).  The slurp is scoped, and `_ppi_parse` — the one place either pipeline
+turns source into a document — trims a tail the parse invented, so the result no
+longer depends on the caller's `$/`.
+
+**Measurements:** emission-ab over both populations 653 SAME / 4 DIFF (the three
+files whose drops now compile + `tie_fetch_count.t`, whose empty `__DATA__`
+stops gaining a line); corpus-diff **identical** across 111 files (so the sweep
+cannot move); the announcement census **388 → 377**, i.e. 11 statements
+recovered; companion `--dir re` moves exactly one row — `pat_re_eval.t`
+461 → 462 failing rows, a statement that used to vanish now reporting honestly;
+gate **145 files / 5306 rows**, failures exactly the 13 pclxs xs rows.
+
+**Rule 13 discharged:** `ppi-upstream-bugs.md` §12 and §13; `ppi-bug-report.t`
+Bug 9 and Bug 10 (`tests => 10`, all ten rows failing on PPI 1.291, as they
+must); three canaries in `misc-fixes-02.t`; end-to-end guards in
+`transpile-test-10.t` and `data-handle-01.t` (including the stdin path).
+
+**#356 filed** (pre-existing, found probing #351's breaking cases): `print PI /
+2, "\n"` is dropped, and `print PI + 1, "\n"` treats the constant as a
+FILEHANDLE — `(p-print :fh 'PI 1 "\n")` — and prints nothing at all.  Both are
+the #266 question asked at the print-filehandle site.
