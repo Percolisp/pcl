@@ -451,6 +451,7 @@ sub parse {
   # the Cast '*'.  Without parens, handle_subcalls would otherwise orphan the
   # trailing {EXPR}{SLOT} blocks and the parse would fall through.
   $self->_retag_braced_deref_subscript($e);
+  $self->_retag_list_slice_subscripts($e);
   $self->_precollapse_dyn_glob_slots($e);
   $self->handle_subcalls($e);
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
@@ -2613,6 +2614,41 @@ sub _retag_braced_deref_subscript {
              && ref($cast) eq 'PPI::Token::Cast'
              && ($cast->content() eq '$' || $cast->content() eq '@');
     bless $term, 'PPI::Structure::Subscript';   # correct PPI's misclassification
+  }
+}
+
+# The SAME PPI habit one group further along: after a LIST SLICE `(…)[i]` /
+# `qw(…)[i]` — where the `[i]` is itself a Constructor by predecessor (see
+# W4 in _term_extent) — a following arrow-less `{k}` arrives as a Structure::
+# BLOCK, again only because a `]` precedes it.  It is a hash SUBSCRIPT on the
+# slice (`({foo=>"bar"})[0]{foo}`, `(f())[0]{k}`), and left as a Block it
+# matched no case: the statement fell through to the "Missing case" die and
+# became a PARSE ERROR comment (a #138-family silent drop, s398).  Re-tag it
+# a Subscript so the ordinary `<node>{k}` chain machinery (the path
+# `$h{a}{b}` takes) handles it, and the term walker sees a plain chain.  A
+# following `[j]` Constructor is left alone: CtorSub already reduces
+# `<node>[j]` and it works today (`([qw/a b/])[0][1]`); the walk continues
+# past it so `(…)[0][1]{k}` is caught too.
+sub _retag_list_slice_subscripts {
+  my ($self, $e) = @_;
+  for (my $i = 1; $i < scalar(@$e); $i++) {
+    next unless ref($e->[$i]) eq 'PPI::Structure::Constructor'
+             && $e->[$i]->start() eq '[';
+    my $r = ref($e->[$i-1]);
+    next unless $r eq 'PPI::Structure::List'
+             || $r eq 'PPI::Structure::Condition'
+             || $r eq 'PPI::Token::QuoteLike::Words';
+    my $j = $i + 1;
+    while ($j < scalar(@$e)) {
+      my $g = $e->[$j];
+      if (ref($g) eq 'PPI::Structure::Block' && $g->start() eq '{') {
+        bless $g, 'PPI::Structure::Subscript';
+      } elsif (!(ref($g) eq 'PPI::Structure::Constructor' && $g->start() eq '[')) {
+        last;
+      }
+      $j++;
+    }
+    $i = $j - 1;
   }
 }
 

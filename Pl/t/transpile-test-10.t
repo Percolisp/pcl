@@ -742,4 +742,30 @@ my %h = ($$ => "v");  print "c=", (exists $h{$$} ? "key" : "bad"), "\n";
 print "d=", ("pid=$$" =~ /^pid=\d+$/ ? "interp" : "bad"), "\n";
 ');
 
+test_transpile('s398: arrow-less hash subscript after a LIST SLICE (PPI labels the {k} a Block) — was a silent PARSE-ERROR drop', '
+sub f { return ({k=>"v", j=>{d=>"deep"}}, {k=>"w"}) }
+my $x = ({a=>1})[0]{a};                 print "a=$x\n";
+print "b=", ({foo => "bar"})[0]{foo}, "\n";
+print "c=", (f())[1]{k}, "\n";
+print "d=", (f())[0]{j}{d}, "\n";
+print "e=", (f())[0]{j}->{d}, "\n";
+my @l = ((f())[0]{k}, "z");             print "f=@l\n";
+print "g=", ({a=>1})[0]{a} + 1, "\n";
+print "h=", ([[1,2],[3,4]])[0][1]{x} // "u", "\n" if 0; print "h=", ([{x=>5}])[0][0]{x}, "\n";
+print "i=", ("a", "b", {q=>7})[2]{q}, "\n";
+');
+
+test_transpile('s398 inverse: the list-slice shapes that already worked keep their reading', '
+sub f { return (0,1,2) }
+print "a=", ([qw/foo bar/])[0][1], "\n";
+print "b=", ({foo=>"bar"})[0]->{foo}, "\n";
+print "c=", qw(a b c)[1], "\n";
+print "d=", (f())[2] + 1, "\n";
+if ((f())[1]) { print "e=cond\n" }
+for my $v ((f())[2]) { print "f=$v\n" }
+my @s = (f())[1,2];  print "g=@s\n";
+print "h=", (sub {"bar"})[0]->(), "\n";
+print "i=", (map { {k=>$_} } 1..2)[1]{k}, "\n";
+');
+
 done_testing();
