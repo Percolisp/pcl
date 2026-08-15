@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 105;
+plan tests => 106;
 
 sub run_cl {
     my ($code) = @_;
@@ -956,6 +956,13 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     ok( $doc && grep { $_->isa('PPI::Token::Symbol') && $_->content =~ /^\*/ } $doc->tokens,
         'CANARY: PPI still lexes `)*name` as a GLOB instead of multiplication — '
       . 'if this FAILS, drop _repair_glob_multiply (ppi-upstream-bugs.md §12)' );
+}
+{
+    my $doc = PPI::Document->new(\'sort <STDIN>;');
+    ok( $doc && !grep { $_->isa('PPI::Token::QuoteLike::Readline') } $doc->tokens,
+        'CANARY: PPI still lexes `<FH>` after a list operator as `<` … `>` — '
+      . 'if this FAILS, drop _fix_ppi_glob_after_block AND the `<` guard in '
+      . '_repair_word_match (ppi-upstream-bugs.md §14)' );
 }
 {
     # This one is not about tokens but about `$/`: with the slurp separator in

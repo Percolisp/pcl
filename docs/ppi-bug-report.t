@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 10;
+use Test::More tests => 11;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -189,4 +189,24 @@ sub toks {
     my $slurped = do { local $/; PPI::Document->new(\$src)->serialize };
     is( $slurped, $src,
         'serialize round-trips a trailing __END__ section regardless of $/' );
+}
+
+# ── Bug 11: <FH> / <glob> after a list operator or a block is lexed as < … > ──
+#
+# `<…>` in TERM position is a readline/glob wherever that position comes from.
+# perl:
+#
+#   $ echo x | perl -e 'print <STDIN>'
+#   x
+#
+# PPI gets it right after `=` and after a comma, and wrong after a
+# list-operator Word (`sort <STDIN>`, `print <STDIN>`) or after a closing brace
+# it took for the end of a term (`map { $h{$_}++ } <op/*>`), where it emits
+# Operator('<') … Operator('>') — a comparison chain.  This is the same
+# operator-vs-term error as bugs 8 and 9, in the third direction.
+{
+    my @t = toks('sort <STDIN>;');
+    ok( grep(/^PPI::Token::QuoteLike::Readline=/, @t),
+        '<STDIN> after a list operator should be a readline, as it is after a comma' )
+        or diag "got: @t";
 }

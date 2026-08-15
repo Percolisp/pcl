@@ -540,6 +540,44 @@ invented, so the result no longer depends on the caller's `$/` at all.
 
 ---
 
+## 14. `<FH>` / `<glob>` after a list operator or a block is lexed as `<` … `>`  [CONFIRMED 1.291]
+
+**Perl:** `<…>` in TERM position is a readline/glob, wherever that position
+comes from — after `sort`, after `print`, after a `map`/`grep` block.
+
+**PPI:** correct after `=` and after a comma, wrong after a list-operator Word
+or a closing brace it took for the end of a term:
+
+```
+my @s = <op/*>;               QuoteLike::Readline(<op/*>)              <- right
+join ",", <STDIN>;            QuoteLike::Readline(<STDIN>)             <- right
+sort <STDIN>;                 Word(sort) Operator(<) Word(STDIN) Operator(>)   <- WRONG
+print <STDIN>;                Word(print) Operator(<) …                <- WRONG
+my @l = sort <$fh>;           … Operator(<) Symbol($fh) Operator(>)    <- WRONG
+map { $h{$_}++ } <op/*>;      … Structure(}) Operator(<) Word(op) Operator(/) Operator(*) Operator(>)  <- WRONG
+my @s = grep { 1 } <op/*>;    same                                     <- WRONG
+```
+
+This is the same operator-vs-term expectation error as §11 and §12, in the
+third direction: a TERM position PPI reads as an operator one.  (§3 was the
+INVERSE — comparison chains read as globs — and was fixed upstream in 1.291;
+this direction was not.)
+
+**Repro + failing row:** Bug 11 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: none today, because two workarounds cover it — but they are
+load-bearing and undocumented until now (logged s404).**
+`Pl::PExpr::_fix_ppi_glob_after_block` scans the token run for `< … >` that
+looks like a glob/readline and rebuilds the single
+`PPI::Token::QuoteLike::Readline` token; it is why `sort <$fh>`, `print <$fh>`
+and `map { … } <op/*>` all transpile correctly (probed against perl, s404).
+The second is a NEGATIVE dependency: `_repair_word_match` (§11) must NOT treat
+the `/` inside a derailed `<op/*>` run as a match, so it skips a `/` whose
+Word is preceded by `<` — i.e. this bug's damage is what that guard is keyed
+on.  If PPI is fixed, both come out together.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it
