@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # pcl-conform — run pclxs's conformance suite against PCL as a host.
 #
 # pclxs defines "a host is done" as "the conformance suite passes against

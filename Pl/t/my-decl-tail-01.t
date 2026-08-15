@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # my-decl-tail-01.t — task #314 families F-A1, F-B and F-A2: what may follow a
 # declared name inside its own statement — `my VAR <non-'=' trailing>;`, its
 # `our` twin `our NAMES <non-assignment trailing>;`, and the one thing that

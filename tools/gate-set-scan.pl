@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # gate-set-scan.pl — the s372 two-population GATE-SET measurement: transpile
 # every file of BOTH populations and record what the compiler said (first
 # stderr line, normalized), so a before/after diff shows exactly which files'

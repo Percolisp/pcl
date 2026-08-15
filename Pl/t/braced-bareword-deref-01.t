@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # braced-bareword-deref-01.t — ${name}/@{name}/%{name}/$#{name} with a bare
 # identifier are the *variable* (the lexical, or the package var if none), NOT a
 # symbolic ref.  Perl: `${name}` == `$name`, `@{arr}` == `@arr`,

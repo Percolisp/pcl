@@ -1,0 +1,91 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# tag-license — put the PCL license tag on code files, idempotently.
+#
+#   tools/tag-license FILE...      tag (or normalise) the named files
+#   tools/tag-license --all        every code file PCLLicense::code_files names
+#   tools/tag-license --check      list code files missing the tag; exit 1 if any
+#
+# The tag text, the comment style, the insertion point (after a shebang /
+# emacs mode line / transpiled-artifact gen stamp) and the definition of
+# "code file" all come from tools/lib/PCLLicense.pm — this script only edits.
+# An OLD-style block (the s3xx three-line "Copyright (c) 2025-2026" header
+# with no holder or SPDX line) is replaced in place; a file that already
+# carries the exact current block is left untouched.  tools/rebuild-pack
+# calls this on the regenerated artifact, and Pl/t/license-tag-01.t is the
+# gate row that fails when a code file lacks the tag.
+use strict;
+use warnings;
+use FindBin;
+use lib "$FindBin::Bin/lib";
+use PCLLicense;
+
+my $root = "$FindBin::Bin/..";
+my ($all, $check);
+my @files;
+for my $a (@ARGV) {
+  if    ($a eq '--all')   { $all = 1 }
+  elsif ($a eq '--check') { $check = 1 }
+  elsif ($a =~ /^-/)      { die "tag-license: unknown option $a\n" }
+  else                    { push @files, $a }
+}
+if ($all || $check) {
+  my ($list) = PCLLicense::code_files($root);
+  push @files, map { "$root/$_" } @$list;
+}
+die "usage: tag-license FILE... | --all | --check\n" unless @files;
+
+my $missing = 0;
+for my $f (@files) {
+  if ($check) {
+    next if PCLLicense::has_tag($f);
+    $missing++;
+    (my $rel = $f) =~ s{^\Q$root\E/}{};
+    print "MISSING: $rel\n";
+    next;
+  }
+  tag_file($f);
+}
+exit($missing ? 1 : 0) if $check;
+exit 0;
+
+sub tag_file {
+  my ($path) = @_;
+  if (PCLLicense::has_tag($path)) { return }
+  open my $in, '<:raw', $path or die "tag-license: $path: $!";
+  my @lines = <$in>;
+  close $in;
+
+  # 1. drop an old-style block anywhere in the first 20 lines
+  my $limit = @lines < 20 ? $#lines : 19;
+  for my $i (0 .. $limit) {
+    next unless $lines[$i] =~ /^(?:#+|;+)\s*Copyright \(c\) \d{4}(?:-\d{4})?(?:\s+the PCL authors)?\s*$/;
+    my $j = $i + 1;
+    while ($j <= $#lines
+           && $lines[$j] =~ /^(?:#+|;+)\s*(?:This is free software|under the same terms|same terms as the Perl|SPDX-License-Identifier)/) {
+      $j++;
+    }
+    $j++ if $j <= $#lines && $lines[$j] =~ /^\s*$/;   # its trailing blank
+    splice @lines, $i, $j - $i;
+    last;
+  }
+
+  # 2. insert the current block (+ one blank) at the contract position
+  my $pfx = PCLLicense::prefix_for($path);
+  my $at  = PCLLicense::insert_index(\@lines);
+  my @block = (map { "$pfx$_\n" } @PCLLicense::TAG_LINES);
+  push @block, "\n";
+  # do not double a blank line that already follows the insertion point
+  if ($at <= $#lines && $lines[$at] =~ /^\s*$/) { pop @block }
+  splice @lines, $at, 0, @block;
+
+  open my $out, '>:raw', $path or die "tag-license: write $path: $!";
+  print {$out} @lines;
+  close $out;
+  (my $rel = $path) =~ s{^\Q$root\E/}{};
+  print "tagged: $rel\n";
+}

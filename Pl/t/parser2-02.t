@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Pl/t/parser2-02.t — v2 pipeline prototype (Pl::Parser2), continuation of
 # parser2-01.t.  New work items add their guards HERE to keep each file a
 # manageable size.  Same conventions: shape checks call Pl::Parser2->parse_code

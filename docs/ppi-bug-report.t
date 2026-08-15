@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 #
 # PPI tokenizer/lexer bug report — seven small cases.
 # Tested against PPI 1.291 / perl 5.40.3.  All seven tests currently FAIL (the bugs).

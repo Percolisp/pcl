@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # writes-args-01.t — task #189: a sub that writes through @_ writes its
 # CALLER's variables, and the element targets of s/// and tr/// are the
 # element itself.  Both halves were SILENT wrongs.

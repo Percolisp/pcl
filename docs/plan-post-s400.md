@@ -167,7 +167,9 @@ From `docs/release-plan-v0.1.md` (all still open):
    source — they stay AS-IS under `docs/`, nothing archived or pruned.**
    **#279** is unblocked and is now pure mechanics (root junk, the 29 loose
    planning `.md`s, `.gitignore`).
-3. **LICENSE body** — verify it is the intended dual Perl/Artistic text.
+3. ~~LICENSE body~~ **RULED by the USER (s401): same as Perl; every PCL code
+   file tagged (`tools/tag-license`; gate row `Pl/t/license-tag-01.t`);
+   nothing from the Perl distribution or CPAN is tagged.**
 4. **pclxs bundling** — recommendation: release PCL first, mention pclxs as
    the experimental XS sibling; its GitHub push stays your deferred call
    (#92).

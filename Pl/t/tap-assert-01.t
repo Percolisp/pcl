@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # tap-assert-01.t — task #202: the TAP layer's own assertions must be able to
 # FAIL.  Every row here is an INVERSE probe: it drives an assertion into the
 # state where it must say `not ok`, or into a state it used to answer with a

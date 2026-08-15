@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # arylen-ref-01.t — \$#array is a live write-through reference to the array-length
 # (arylen) magic, implemented via a p-magic-cell intercepted at the box chokepoints
 # (unbox / box-set / box-sv / box-nv), the same mechanism `tie` uses.

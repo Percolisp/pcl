@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Transpile tests part 8.  NEW TESTS GO HERE — -06 is at the ~50-test cap and
 # -07 is past it, and the BIGGEST test file bounds the parallel suite's wall
 # time (one SBCL spawn per test), so start a new file rather than grow one.

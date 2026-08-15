@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # lvalue-ref-01.t — \substr / \pos / \vec are live write-through references to
 # scalar magic lvalues, implemented via a p-magic-cell (kind :lvalue) intercepted
 # at the box chokepoints (unbox / box-set / box-sv / box-nv), the same mechanism

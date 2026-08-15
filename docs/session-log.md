@@ -59,6 +59,20 @@ runtime `push @INC` has not run (loud; one companion file, io/perlio.t, by
 static census; the fix is a measurement — emit in place, corpus-diff both
 populations).
 
+**s401b/c — two USER rulings taken live in the same session.**  (1) "This
+is open source" — the process docs are published AS-IS; #279 is pure
+mechanics.  (2) "License — same as Perl.  Tag all code files." (and: "Don't
+tag code files straight from the Perl distro!") — the LICENSE text stands;
+230 PCL code files got the header (`tools/tag-license`, rules in ONE place
+`tools/lib/PCLLicense.pm`; 40 already-tagged files normalised to the
+holder + SPDX form; artifacts tagged on line 2, `rebuild-pack` re-applies
+it); gate row `Pl/t/license-tag-01.t` (11 rows: one per root + exclusions
+exist + exclusions met + a plausible-count sanity row); perl-tests/,
+cpan-tests/, `lib/IO/Handle.pm`, `lib/Math/BigInt/Calc.pm` excluded by name.
+The three artifacts were REGENERATED because the tag moved their sources'
+line numbers, which the emitted die/warn `:loc` strings embed — the only
+diff.  Gate 144 files / 5289 rows.
+
 **The plan (`docs/plan-post-s400.md`)**: Opus sessions A (#339 + #343
 pieces + the ir-spec promise) → B (#345 `--quick`, #349, #350) → C (#346,
 #342 piece 1) → D (#340 op/try.t) → E (#277 installer, quoting, #280) →

@@ -1,4 +1,9 @@
 ;;; pcl: pipeline=v2 gen=v2-148
+;;;; Copyright (c) 2025-2026 the PCL authors
+;;;; This is free software; you can redistribute it and/or modify it under the
+;;;; same terms as the Perl 5 programming language system itself.
+;;;; SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -69,7 +74,7 @@
         (let (($message (make-p-box nil)))
           (p-my-= $message (p-pop @_))
           (let ((*wantarray* *pcl-caller-wantarray*))
-            (p-warn :loc "lib/warnings.pm line 33" $message)))))))
+            (p-warn :loc "lib/warnings.pm line 38" $message)))))))
 
 (p-sub pl-warnif
   (&rest %_args)
@@ -79,7 +84,7 @@
         (let (($message (make-p-box nil)))
           (p-my-= $message (p-pop @_))
           (let ((*wantarray* *pcl-caller-wantarray*))
-            (p-warn :loc "lib/warnings.pm line 39" $message)))))))
+            (p-warn :loc "lib/warnings.pm line 44" $message)))))))
 
 (p-set-current-package :warnings "warnings")
 

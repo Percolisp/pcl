@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # drop-census.pl — count the #138 family: every file whose EMITTED CL contains
 # a `(progn ;; PARSE ERROR: … nil)`, i.e. a statement the compiler could not
 # lower, replaced by nil, with execution continuing.

@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # sprintf-invalid-01.t — invalid sprintf conversions.
 #
 # Perl leaves an unrecognised conversion (e.g. %C, %I, %Z, %vc) verbatim in the

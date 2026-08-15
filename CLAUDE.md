@@ -228,6 +228,13 @@ PCL_SHOW_SBCL=1 <any runner>      # print the exact command it spawns
 # tools/lib/PCLPaths.pm (perl_suite_t -> $PCL_PERL_SUITE_T / $PERLBREW_ROOT /
 # %Config).  Guards: Pl/t/no-hardcoded-paths-01.t (in the gate),
 # tools/t/sbcl-prefix.t (run directly, like tools/t/tap-align.t).
+
+# LICENSE = same as Perl, and EVERY PCL code file carries the tag (USER s401).
+# A new .pm/.pl/.t/.lisp/.sh or shebang script:
+tools/tag-license FILE           # idempotent; rules in tools/lib/PCLLicense.pm
+tools/tag-license --check        # what Pl/t/license-tag-01.t (in the gate) checks
+# Never tag files from the Perl distribution or CPAN (perl-tests/, cpan-tests/,
+# the two lib/ carry-overs are excluded by name in PCLLicense.pm).
 ```
 
 ### WHAT TO RUN WHEN (RULED s401, `docs/fable-answers-s400.md` §8 — replaces "every 3rd–5th change")
@@ -405,9 +412,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **143 test files, 5278 tests** with a built pclxs sibling (s400, measured;
+- **144 test files, 5289 tests** with a built pclxs sibling (s401, measured;
   the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5264 without** (arithmetic: minus the
+  user s394/s395: ignore XS rows); **5275 without** (arithmetic: minus the
   14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and

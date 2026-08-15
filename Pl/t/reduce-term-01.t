@@ -1,4 +1,8 @@
 #          -*-Mode: CPerl -*-
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 # #153 / E5.0 step 1: unit tests for _term_extent / _reduce_term — the ONE
 # term-grammar walker (Option B phase 1, docs/pexpr-term-parsing-review.md).

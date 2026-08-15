@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # readonly-array-01.t: Internals::SvREADONLY(@a, 1) makes an array FIXED SIZE
 # (task #159).  Perl's read-only AV forbids every size change and nothing else:
 # its ELEMENTS stay writable.  PCL implements that by swapping the variable's

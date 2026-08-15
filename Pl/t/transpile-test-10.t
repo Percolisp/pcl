@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Transpile tests part 10 — the direction-D global-cell flip (tasks #289/#290).
 # An ORDINARY package global is now a symbol macro over its own global cell
 # (p-defcell) instead of a `defvar` special, and `local` on one lowers to

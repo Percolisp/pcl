@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Tests for the <> / <ARGV> diamond operator: read records across the files
 # named in @ARGV, fall back to STDIN when @ARGV is empty, set $ARGV and a
 # cumulative $. across files.  Each script sets @ARGV at runtime so the test is

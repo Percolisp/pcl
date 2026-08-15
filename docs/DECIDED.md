@@ -63,6 +63,17 @@ not-supported.md → only then probe.*
   source"** — session-log, DECIDED.md, the fable-answers/review-request
   series stay under `docs/`; no `docs/history/`, no pruning before the tag.
   #279 is pure mechanics.  → `release-plan-v0.1.md` decision 2.
+- **LICENSE = same as Perl (USER, s401), and EVERY PCL code file carries the
+  tag** — the text, the comment style, the insertion point (after a shebang /
+  emacs mode line / artifact gen stamp) and the definition of "code file"
+  live in ONE place, `tools/lib/PCLLicense.pm`; `tools/tag-license` applies
+  it idempotently (also from `tools/rebuild-pack`); `Pl/t/license-tag-01.t`
+  is the gate row (one row per root, exclusions must exist and be met).
+  **Files from the Perl distribution or CPAN are NOT tagged** (USER: "Don't
+  tag code files straight from the Perl distro!") — perl-tests/, cpan-tests/,
+  `lib/IO/Handle.pm`, `lib/Math/BigInt/Calc.pm`, each excluded by name with
+  its reason.  Regenerating an artifact re-applies the tag on line 2 (line 1
+  stays the gen stamp).  → `release-plan-v0.1.md` decision 3, LICENSE.
 
 ## s400 (2026-08-15, Opus 5) — #344/#324/#207/#278
 

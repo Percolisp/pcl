@@ -45,7 +45,13 @@ Fable-shaped parts.
    it is open source — the process docs (session-log, DECIDED.md, the
    fable-answers/review-request series) stay in the public repo AS-IS under
    `docs/`; no archiving, no pruning.**  #279 is now pure mechanics.
-3. **LICENSE body** — verify it is the intended dual Perl/Artistic text.
+3. ~~**LICENSE body**~~ **RULED by the USER, s401: "License — same as Perl.  Tag
+   all code files."**  The dual Artistic-1.0-Perl OR GPL-1.0-or-later text
+   stands; every PCL code file now carries the tag (`tools/tag-license`,
+   `tools/lib/PCLLicense.pm`, gate row `Pl/t/license-tag-01.t`); files from
+   the Perl distribution / CPAN are NOT tagged (user: "Don't tag code files
+   straight from the Perl distro!") — perl-tests/, cpan-tests/, and the two
+   lib/ carry-overs are excluded by name with reasons.
 4. **pclxs bundling** — recommendation: release PCL first, mention pclxs as
    the experimental XS sibling; its GitHub push stays the user's deferred
    call (#92).

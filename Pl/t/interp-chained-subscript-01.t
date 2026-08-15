@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # interp-chained-subscript-01.t — string interpolation of chained subscripts with
 # an IMPLICIT arrow: "$h->{a}[1]" == $h->{a}->[1], "$a->[1][0]" == $a->[1]->[0],
 # "$h->{a}{b}{c}" == $h->{a}->{b}->{c}.

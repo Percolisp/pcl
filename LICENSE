@@ -32,7 +32,14 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE.
 
-Third-party code included for testing purposes (for example, the modules under
-cpan-tests/) is the property of its respective authors and is distributed under
-its own license terms, which are stated in those files; it is not covered by
-this notice.
+Third-party code included for testing purposes (the CPAN distributions under
+cpan-tests/, and perl's own test files under perl-tests/) is the property of
+its respective authors and is distributed under its own license terms, which
+are stated in those files; it is not covered by this notice.  The same holds
+for the two perl-core / CPAN modules carried under lib/ with local edits
+(lib/IO/Handle.pm, lib/Math/BigInt/Calc.pm) — their authors' notices stand,
+and they are under the same terms as Perl already.
+
+Every PCL code file carries this notice as a header (the exact text lives in
+tools/lib/PCLLicense.pm; tools/tag-license applies it and
+Pl/t/license-tag-01.t enforces it), with the SPDX identifier above.

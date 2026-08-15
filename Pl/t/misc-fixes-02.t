@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # misc-fixes-02.t - Continuation of misc-fixes-01.t (which became the largest .t).
 # Operator-semantics bugs surfaced by the differential fuzzer (tools/difftest-ops.pl).
 

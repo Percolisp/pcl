@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # XSLoader::load finds a cached artifact — the other half of the XS bridge.
 #
 # Pl/t/xs-01.t asks "does an XSUB work once we boot it by hand".  This asks

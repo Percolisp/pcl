@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # global-cell-01.t — the direction-D runtime pair: p-defcell (declare an
 # ORDINARY package global as a symbol-macro cell) and p-local-cell (localize
 # one).  Task #289, plan docs/direction-d-plan.md; the partition that decides

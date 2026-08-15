@@ -1,4 +1,8 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 # Regression: `use utf8` must decode the *source* as UTF-8, so multi-byte
 # sequences in string literals and identifiers are single CHARACTERS (length /

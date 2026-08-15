@@ -1,4 +1,9 @@
 ;;; pcl: pipeline=v2 gen=v2-148
+;;;; Copyright (c) 2025-2026 the PCL authors
+;;;; This is free software; you can redistribute it and/or modify it under the
+;;;; same terms as the Perl 5 programming language system itself.
+;;;; SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -103,7 +108,7 @@
           (p-if (p-post++ (p-gethash-deref-box $seen $class))
             (progn
               (p-die :loc
-                "lib/mro.pm line 69"
+                "lib/mro.pm line 71"
                 (p-string-concat "Recursive inheritance detected in package '"
                   $class
                   "'
@@ -147,7 +152,7 @@
                           (p-if (p-! $in_tail) (progn (p-my-= $cand $head) (p-last))))))
                     (p-if (p-! (p-defined $cand))
                       (p-die :loc
-                        "lib/mro.pm line 99"
+                        "lib/mro.pm line 101"
                         (p-string-concat "Inconsistent hierarchy during C3 merge of '"
                           $class
                           "'

@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # bench-exec.pl — execution-speed comparison of PCL (v2) vs Perl, STARTUP
 # SUBTRACTED.  Measures only the time spent running the benchmark's hot loop,
 # not process startup, parsing, or fasl load.

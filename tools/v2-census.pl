@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # v2-census.pl — T0.2/T0.3 census driver (docs/v2-transfer-plan.md).
 #
 # Runs pl2cl over a corpus and aggregates, per file:

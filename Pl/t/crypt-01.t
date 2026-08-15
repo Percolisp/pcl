@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # crypt-01.t: crypt(PLAINTEXT, SALT) via FFI to the system crypt(3).
 # PCL calls the same crypt(3) Perl does, so output is byte-identical on the
 # same platform.  We compare PCL's output to this perl's crypt() directly.

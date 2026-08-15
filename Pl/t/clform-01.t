@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Pl/t/clform-01.t — Pl::CLForm printer + the E2 emitter-conversion scaffold
 # (docs/v2-endgame-plan.md E2).  Pure-perl (no SBCL spawn): unit tests for
 # to_flat (the exact flat renderer every converted ExprToCL emitter is

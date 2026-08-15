@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Transpile tests part 6: embedded-block structured lowering (task #78) and
 # onward.  FULL at 50 tests — new tests go in transpile-test-07.t: the
 # BIGGEST file bounds the parallel suite's wall time (one SBCL spawn per

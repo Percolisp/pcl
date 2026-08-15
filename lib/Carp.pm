@@ -1,6 +1,8 @@
-# Copyright (c) 2025-2026
-# This is free software; you can redistribute it and/or modify it
-# under the same terms as the Perl 5 programming language system itself.
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 #
 # PCL shim for Carp.  The real Carp.pm pulls in machinery (utf8, deep
 # caller() introspection) that PCL does not fully model, so we ship a small

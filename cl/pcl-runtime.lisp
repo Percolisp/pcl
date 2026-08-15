@@ -1,10 +1,11 @@
+;;;; Copyright (c) 2025-2026 the PCL authors
+;;;; This is free software; you can redistribute it and/or modify it under the
+;;;; same terms as the Perl 5 programming language system itself.
+;;;; SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 ;;;; PCL Runtime - Common Lisp runtime for Perl to CL transpiler
 ;;;; Requires SBCL (Steel Bank Common Lisp)
 ;;;;
-;;;; Copyright (c) 2025-2026
-;;;; This is free software; you can redistribute it and/or modify it
-;;;; under the same terms as the Perl 5 programming language system itself.
-
 ;;; PCL requires SBCL >= 2.5.2: the test suite is validated on 2.5.2/2.6.0
 ;;; and the runtime uses SBCL-internal symbols (sb-unicode, sb-kernel float
 ;;; bits, …).  This check is deliberately the FIRST code to execute, so on
@@ -16293,6 +16294,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; cl/pcl-mro.lisp like pack-impl); the runtime owns only the interpreter
 ;;; fact "always loaded", via the same self-loading-stub pattern as p-pack.
 ;;; Regenerate after editing the shim:  ./pl2cl lib/mro.pm > cl/pcl-mro.lisp
+;;;   && tools/tag-license cl/pcl-mro.lisp   (the license tag on line 2 —
+;;;   Pl/t/license-tag-01.t fails without it; the gen stamp stays line 1)
 
 (p-defpackage :mro)
 (p-defpackage :warnings)
@@ -16319,6 +16322,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; `use warnings` is a skipped pragma, so lib/warnings.pm is reached only via
 ;;; these always-available stubs.  Shim doc: lib/warnings.pm header.
 ;;; Regenerate after editing the shim:  ./pl2cl lib/warnings.pm > cl/pcl-warnings.lisp
+;;;   && tools/tag-license cl/pcl-warnings.lisp   (license tag on line 2, as for mro)
 (%pcl-def-ext-stub warnings::pl-enabled "pcl-warnings")
 (%pcl-def-ext-stub warnings::pl-fatal_enabled "pcl-warnings")
 (%pcl-def-ext-stub warnings::pl-enabled_at_level "pcl-warnings")

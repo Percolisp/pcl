@@ -1,6 +1,7 @@
-## Copyright (c) 2025-2026
-## This is free software; you can redistribute it and/or modify it
-## under the same terms as the Perl 5 programming language system itself.
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 ## PROVENANCE: this is a pure-Perl re-implementation of Perl's built-in
 ## pack()/unpack(), which in real Perl are implemented in C in pp_pack.c

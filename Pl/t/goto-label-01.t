@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
 # Intra-sub `goto LABEL` (forward error gotos and backward retry gotos), plus
 # `goto LABEL` nested inside an if/while at the top level.  CL `go` needs a
 # lexically-enclosing tagbody; the parser wraps the minimal run of complete
