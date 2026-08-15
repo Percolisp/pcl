@@ -121,6 +121,29 @@
 #   exactly ONE row, mro/package_aliases_utf8.t, which is the registered
 #   *rows-unstable* file reading its known serial value (72/34).  The
 #   remaining ~130 (re/, run/, uni/) are UNVERIFIED against the flag.
+# s400 (#324): VERIFICATION COMPLETED — the remaining 135 files (re/, run/,
+#   uni/) were run with the flag.  125 read this snapshot exactly.  Nine are
+#   TIMEOUT-shaped and not comparable across runs (DECIDED s390/s392): the six
+#   re/regexp*.t + re/overload.t (task #326), plus re/pat_psycho.t and
+#   re/speed.t, which no longer crash and therefore now RUN the pathological
+#   patterns they exist to time (the deliberate #324 consequence above).
+#   The tenth, re/pat_advanced.t, MOVED and is spliced below — it is NOT the
+#   stack flag: measured at PCL_SUITE_STACK_MB=2 (SBCL's old default) it gives
+#   the same 927/751, and bisected over the s399 commits it changes at 6f04839,
+#   the #323 warning helpers.
+# s400 (#323 census CORRECTION): 927/751, was 937/732.  s399 declared the
+#   #323 population CLOSED at eight companion files; it is ELEVEN.  The census
+#   used a plain `grep -l`, which prints NOTHING for a file grep decides is
+#   binary — and perl's regex test files are full of control bytes (the same
+#   trap CLAUDE.md documents for .tsv, `grep -a`).  The three missed files are
+#   re/pat_advanced.t, re/pat.t and re/reg_mesg.t; only the first produces rows
+#   (re/pat.t crashes at load, re/reg_mesg.t dies on display_rx), and its move
+#   is the same cause as the other four: warning_like now compares the warning
+#   instead of pass()ing, and PCL emits no warnings-gated diagnostic
+#   (not-supported.md "Warnings-gated diagnostics are absent", owner #221).
+#   The 19 new not-oks are the `qr/(?g-o)/ warns` family and "Ignoring zero
+#   length \N{} in character class warning"; +9 rows because the real helper
+#   emits one row per expected warning where the stub emitted one per call.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -526,7 +549,7 @@ re/no_utf8_pm.t	1	0	1	0	OK
 re/opt.t	639	17	0	0	XDIFF	undef-fn:re::pl-optimization | not-supported.md §re::optimization - the regex engine's internal optimizer report (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
 re/overload.t	87	0	3	0	DIFF	
 re/pat.t	1263	4	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
-re/pat_advanced.t	1678	0	937	732	DIFF	
+re/pat_advanced.t	1678	0	927	751	DIFF	
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
