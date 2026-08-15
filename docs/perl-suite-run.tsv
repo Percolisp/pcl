@@ -103,6 +103,24 @@
 #   UNMOVED, verified in the same run: op/time.t 72/0 (its warning_is rows
 #   expect NO warning), op/inc.t 60/15, op/split_unicode.t 107/40, re/subst.t
 #   (crash, unchanged).
+# s399 (#324, the harness): tools/run-perl-suite.pl was the ONLY runner without
+#   --control-stack-size, so the companion suite ran PCL on SBCL's 2 MB default
+#   while the gate, the sweep and ./runpcl all use 512 MB.  Four files
+#   "crashed with control-stack-exhausted" in this measurement and nowhere
+#   else.  Flag added; the two files measurable at the DEFAULT timeout are
+#   re-measured and spliced:
+#     re/pat_rt_report.t  2431/39 CRASH -> 2454/56, runs to the end
+#     op/utf8cache.t         0/2  CRASH ->    2/0
+#   The other two now RUN instead of crashing but are SLOW, so they need a
+#   docs/perl-suite-timeouts.tsv decision before their rows are comparable
+#   (measured at --timeout 300: re/pat_psycho.t 11/0, re/speed.t 1/0; both
+#   TIMEOUT at the 90 s default).  Their rows are left as they were, still
+#   carrying the crash signature, deliberately — see task #324.
+#   VERIFICATION OF THE FLAG IS PARTIAL: a --all --jobs 4 run was stopped by
+#   the user at 391 of 521 files; those 391 differ from this snapshot in
+#   exactly ONE row, mro/package_aliases_utf8.t, which is the registered
+#   *rows-unstable* file reading its known serial value (72/34).  The
+#   remaining ~130 (re/, run/, uni/) are UNVERIFIED against the flag.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -473,7 +491,7 @@ op/universal.t	142	2	75	57	DIFF	crash:simple-error: No SUPER::isa found from RTN
 op/unlink.t	6	0	4	2	DIFF	crash:simple-error: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl
 op/unshift.t	19	0	19	0	OK	
 op/upgrade.t	64	0	64	0	OK	
-op/utf8cache.t	16	0	2	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
+op/utf8cache.t	16	0	2	0	DIFF	
 op/utf8decode.t	710	0	620	90	DIFF	
 op/utf8magic.t	6	0	2	4	DIFF	
 op/utfhash.t	99	0	91	0	DIFF	
@@ -514,7 +532,7 @@ re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_re_eval.t	527	0	64	461	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_rt_report.t	2513	1	2431	39	DIFF	crash:sb-kernel::control-stack-exhausted: (?{ CODE }) regex code block, task #324
+re/pat_rt_report.t	2513	1	2454	56	DIFF	
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_special_cc.t	9	0	9	0	OK	
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads

@@ -333,8 +333,23 @@ unless ($no_core) {
 # the "Exit: nonzero iff ..." contract above never actually held (task #157).
 END { local $?; unlink $core if $core && $$ == $MAIN_PID }
 # --core must precede all other toplevel sbcl options.
-my $sbcl = $core ? "sbcl --core \Q$core\E --noinform --non-interactive"
-                 : "sbcl --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E";
+#
+# --control-stack-size 512 (s399, task #324): every OTHER runner already passes
+# it — Pl/t/PCLCore.pm (the gate), sweep-perl-tests.pl, ./runpcl — and this one
+# did not, so the companion suite ran PCL with SBCL's 2 MB default, a stack 256×
+# smaller than the gate's.  Deep-recursion files then died
+# `control-stack-exhausted` HERE and nowhere else, and the truncation was read
+# as a PCL crash: re/pat_rt_report.t stopped at 2431 of 2514 rows and its
+# snapshot row blamed `(?{ CODE })`.  With the flag it reaches 2510 — the same
+# stack every other measurement uses, so the suite measures PCL rather than the
+# harness.
+# MB, overridable: 512 matches the other runners, but this one spawns a PERL
+# side and a PCL side per worker, so `--jobs 8` reserves 8x this much stack at
+# once — see the measurement in task #324 before lowering it.
+my $stack_mb = $ENV{PCL_SUITE_STACK_MB} // 512;
+my $stack = "--control-stack-size $stack_mb";
+my $sbcl = $core ? "sbcl --core \Q$core\E $stack --noinform --non-interactive"
+                 : "sbcl $stack --noinform --non-interactive --load \Q$runtime\E --load \Q$testlib\E";
 
 my $tmpdir = tempdir(CLEANUP => 0);
 END { local $?; system("rm -rf \Q$tmpdir\E") if $tmpdir && -d $tmpdir && $$ == $MAIN_PID }
