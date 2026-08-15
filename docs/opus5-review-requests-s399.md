@@ -20,7 +20,14 @@ generation v2-147 → **v2-148**.
 
 Sized, not started: **#340** (op/try.t), **#341** (op/lexsub.t), **#342**
 (base/lex.t).  Filed: **#337** (`my sub` scoping), **#338** (F-D container
-residue), **#339** (a warn that is not noise), **#343** (the drop census).
+residue), **#339**, **#343** (the drop census).
+
+**Two questions need you before anything else moves**, both in the same area:
+**§7** — where the drop/decline signal belongs (#339; I tried a fix and
+reverted it, and the revert is the interesting part) — and **§6** — whether the
+census belongs in Option B phase 2's acceptance set.  §6 also carries a smaller
+call (should a file-level non-lvalue assignment die like perl, or keep dropping
+one statement).
 
 ---
 
@@ -201,13 +208,75 @@ eval half must propagate so the eval returns undef, like perl).  perl refuses
 to compile the whole FILE for the non-eval case; PCL drops the one statement
 and runs on.  33 of the 379 drops are that.  Keep, or make it die?
 
-## 7. Also filed
+## 7. ASK — the stderr line that is right about the wrong thing (#339)
 
-- **#339** — PExpr's `Handle single node of unknown type` warn prints for a
-  routine decline on 25 companion files.  I tried deleting it and **reverted**:
-  in op/glob.t that decline is a real dropped statement (`ok <~>, '~ works';`).
-  The distinction that matters is handled-decline vs dropped-statement, and it
-  belongs at the caller that emits the drop.
+**This is the ask I most want answered, because it decides what "loud" means
+for the whole drop family, and I could not settle it from the rules.**
+
+`Pl/PExpr.pm` (~808) ends its single-node dispatch with a `warn` and then a
+`die`:
+
+    warn "Handle single node of unknown type: ref='" . ref($e1) . "'\n";
+    die  "Handle single node of unknown type. Dump:\n" . dump($e1);
+
+**Measured (s399 gate-set scan, 638 files):** 25 of the 527 companion-suite
+files print that line, and every one of them compiles — rc 0, correct-looking
+CL.  t/op/glob.t prints it twice and emits 294 lines.  The ref values seen are
+`PPI::Token::Operator`, `PPI::Token::Cast` and `''`.
+
+So my first reading was "error-shaped noise for a routine decline" — the term
+walker declines bare words and prefix ops BY DESIGN, the caller catches the die
+and takes another route, and **two callers have already had to work around this
+very line**: `Pl/VarAnnotator.pm` (~695) and `Pl/Parser2.pm` (~8415) both wrap
+their analysis parses in `local $SIG{__WARN__} = sub { }`, with comments naming
+this warn and the rationale "any real problem repeats in the actual lowering"
+plus "test helpers merge pl2cl's stderr into the generated CL".  Two
+independent workarounds for one line is normally the tell that the fix belongs
+at the line.
+
+**I deleted the warn, and reverted it — because the reading was wrong.**  The
+emission diff showed why: in t/op/glob.t that decline is not handled at all, it
+becomes
+
+    (progn ;; PARSE ERROR: Handle single node of unknown type. Dump:
+     nil)
+
+i.e. the statement `ok <~>, '~ works';` is DELETED (the `<~>` glob).  The same
+message therefore covers two opposite events: a decline the compiler recovers
+from (silent would be right) and a statement that vanished (loud is the whole
+point — rule 12's "the sin is the silence").  Deleting the warn would have
+removed the only runtime-visible signal of the second.
+
+**The question: where does the signal belong, and what is it?**  What I would
+do, if you agree:
+
+- **(b) move the announcement from the DECLINE site to the DROP site.**  Say
+  nothing at `PExpr.pm`'s die — a decline is not an event — and announce ONCE
+  at `Pl/Parser.pm`'s `_shape_expr_error` / the `(progn ;; PARSE ERROR …)`
+  emitter, which is the place that actually knows a statement is being
+  replaced by nil, and the only place that can name the FILE, the LINE and the
+  source text.  That turns 25 files of undifferentiated noise into 72 files ×
+  N precise "statement dropped at F line L: <text>" lines — which is also
+  exactly the signal `tools/drop-census.pl` reconstructs after the fact, and
+  what a per-file drop gate (§6) would key on.
+
+The alternatives I considered and why I did not pick them: **(a) leave it** —
+the noise is real (it made this session's gate-set scan harder to read, and it
+is why two callers silence warns), and the message is attached to the wrong
+event; **(c) make the drop a hard error** — that is the separate design call
+below, and it should not ride in on a diagnostics change.
+
+Cost/risk if you say yes: it changes stderr for many files, so the bar is a
+`tools/gate-set-scan.pl` diff over both populations plus the gate — I have the
+tool now.  It does NOT change emission (the die text lands in the PARSE ERROR
+comment; keeping that text identical keeps corpus-diff clean, which the aborted
+attempt confirmed).  One open sub-question I could not answer from the data:
+the `ref=''` case (a node with no class, in comp/final_line_num.t, op/closure.t,
+re/pat.t, re/pat_re_eval.t) may be a repair-pass artefact rather than a
+legitimate decline — worth one probe before or after, either way.
+
+## 8. Also filed
+
 - **#341** corrects #314's note on op/lexsub.t: it does NOT die on "Negative
   repeat count does nothing" — that is a warning printed ten times, from a
   NEGATIVE `indent_level` in `Pl/Parser.pm:8908` (its own small bug).  The
@@ -216,7 +285,7 @@ and runs on.  33 of the 379 drops are that.  Keep, or make it die?
   isolation: pl2cl exits 0 and emits `(p-subst … (lambda () nil) :e)`, so the
   s///e replacement silently becomes nil.
 
-## 8. Queue as I leave it
+## 9. Queue as I leave it
 
 Remaining from the s397 list: the **v0.1 track** (#277–#280, #282–#283) — I did
 not start it, because it is release engineering with user-facing decisions
