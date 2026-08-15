@@ -144,6 +144,19 @@
 #   The 19 new not-oks are the `qr/(?g-o)/ warns` family and "Ignoring zero
 #   length \N{} in character class warning"; +9 rows because the real helper
 #   emits one row per expected warning where the stub emitted one per call.
+# s400 (#207, which_perl): NO ROW MOVED.  cl/pcl-test.lisp's which_perl
+#   returned a LITERAL perlbrew perl path; it now returns $^X, which the
+#   runtime derives, and that resolves to the same interpreter here — the fix
+#   is machine-portability (#278), not behaviour.
+#   MEASURED BUT NOT LANDED (task #348, USER-decided s400): pointing which_perl
+#   at $PCLPERL, so its children run PCL like fresh_perl_*/runperl already do
+#   (#90).  All 19 companion callers were run that way — seventeen unmoved,
+#   op/closure.t 267/3 -> 235/27 (honest: PCL's nested-sub-captures-foreach
+#   gap, task #347), and run/cloexec.t 16/6 -> HANG at its first backtick
+#   child, still hanging at --timeout 400 (task #346).  The sweep half:
+#   perl-tests/closure.t OK 272 -> PARTIAL 240/28.  Two measurement HOLES for
+#   ~56 vacuous rows made honest is the wrong trade while #176/#204 stand, so
+#   the switch waits for #346/#347.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -612,7 +625,7 @@ re/uniprops08.t	30492	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/
 re/uniprops09.t	29848	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/uniprops10.t	26334	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/user_prop_race_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-run/cloexec.t	22	0	16	6	DIFF	
+run/cloexec.t	22	0	16	6	DIFF
 run/exit.t	17	0	14	3	DIFF	
 run/fresh_perl.t	91	0	55	36	XDIFF	unbound:main::H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.
 run/locale.t	44	0	0	0	DIFF	

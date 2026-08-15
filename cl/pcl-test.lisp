@@ -976,20 +976,50 @@
   (declare (ignore args))
   (pcl:make-p-box (incf *test-count*)))
 
-;;; which_perl() — Perl test.pl helper: return path to the running Perl interpreter.
-;;; Used by closure.t and others to run a sub-perl process via system().
+;;; which_perl() — Perl test.pl helper: the interpreter a sub-process runs.
+;;; Users: perl-tests/closure.t and pack.t, and 19 files of perl's own t/.
+;;;
+;;; It used to return a LITERAL perlbrew path (task #207/#278) — machine-specific,
+;;; so the repo only worked on its author's box.  It now returns $^X, which the
+;;; runtime derives at load time ($PERL, else `command -v perl`, else "perl"),
+;;; and DIES rather than guess if that resolves to nothing.
+;;;
+;;; DELIBERATELY NOT $PCLPERL (task #348, USER-decided s400).  Pointing it at
+;;; tools/pclperl-for-tests would make these children run PCL — the #90 policy
+;;; that fresh_perl_*/runperl already follow, and the reason those rows are not
+;;; the perl-to-perl comparison they look like.  It was implemented and MEASURED
+;;; here: 17 of the 19 companion files unmoved, op/closure.t 267/3 -> 235/27
+;;; honest (PCL's nested-sub-captures-foreach gap, task #347), and two holes —
+;;; perl-tests/closure.t OK 272 -> PARTIAL 240/28 and run/cloexec.t hanging at
+;;; its first backtick child (task #346).  Coverage evaporating is worse than a
+;;; vacuous pass (#176/#204), so the switch waits for those two.
 (export '(pl-which_perl))
 (defun pl-which_perl (&rest args)
   (declare (ignore args))
-  (pcl:make-p-box "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/bin/perl"))
+  (let ((x (and (boundp '|$^X|)
+                (pcl:to-string (pcl:unbox (symbol-value '|$^X|))))))
+    (unless (and x (plusp (length x)))
+      (error "which_perl(): no interpreter resolved — $^X names none"))
+    (pcl:make-p-box x)))
 
-;;; run_perl(switches => [...], prog => "code") — Perl test.pl helper: run a sub-Perl process.
-;;; PCL cannot fork a Perl subprocess, so this always returns undef.
-;;; Tests using run_perl will fail (not crash) gracefully.
+;;; run_perl(switches => [...], prog => "code") — Perl test.pl helper.
+;;;
+;;; Deliberately NOT implemented here: the transpilable stub perl-tests/t/test.pl
+;;; defines run_perl in Perl on top of _pcl_child_perl, and BOTH populations
+;;; reach that stub (perl-tests/test.pl is a redirect to it, the companion
+;;; suite's shadow t/ overlays it), so a second copy in Lisp would be the same
+;;; behaviour maintained twice.  This arm is reached only by a file that calls
+;;; run_perl WITHOUT requiring test.pl — measured s400: zero such files in
+;;; perl-tests/ and in perl's t/.
+;;;
+;;; It used to return undef, which the caller then judged: a value that cannot
+;;; be right, produced silently, i.e. exactly the rule-12 (and #202) failure
+;;; mode.  If the arm is ever reached, it says so.
 (export '(pl-run_perl))
 (defun pl-run_perl (&rest args)
   (declare (ignore args))
-  pcl::*p-undef*)
+  (error "run_perl(): PCL's CL harness has no child launcher — the test must ~
+          require './test.pl' (perl-tests/t/test.pl), which defines run_perl"))
 
 ;;; unlink_all(@files) — Perl test.pl helper: delete the named files, returning
 ;;; the count that are gone afterwards (t/test.pl counts an already-absent file
