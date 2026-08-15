@@ -192,15 +192,34 @@ my @argv_form = @rest
 # Errors escaping a toplevel form arrive wrapped in sb-c::input-error-in-load,
 # whose report prepends "While evaluating the form ..." — unwrap to the
 # original condition so only the perl-shaped message prints.
+#
+# NOT `load` (task #346).  `load` holds the .lisp file OPEN for as long as the
+# program runs inside it, so the child program sees descriptors a real perl
+# child does not: measured, fd 3 AND fd 4 both point at prog.lisp, and
+# `open(my $t, "<&=3")` SUCCEEDS here where perl fails it with EBADF.  For a
+# test file that is ABOUT descriptors (t/run/cloexec.t opens fd 3 on purpose)
+# that is not noise, it is the thing under test.
+#
+# So: slurp the source, CLOSE the file, then read-and-eval one form at a time
+# from a string stream.  Reading incrementally is what keeps `(in-package …)`
+# working — it is a READ-time effect, so reading all forms up front under one
+# *package* would mis-read every form after a package switch.
 my $load_form = sprintf(
-  '(handler-case (load "%s") (error (e) (when (typep e (quote sb-int:encapsulated-condition)) (setf e (sb-int:encapsulated-condition e))) (format *error-output* "~A" e) (finish-output *error-output*) (sb-ext:exit :code 255)))',
-  $lisp);
+  '(handler-case'
+. '  (let ((src (with-open-file (s "%s" :direction :input :external-format :utf-8)'
+. '               (let ((buf (make-string (file-length s))))'
+. '                 (subseq buf 0 (read-sequence buf s))))))'
+. '    (with-input-from-string (in src)'
+. '      (let ((eof (quote #:eof)) (*load-pathname* (pathname "%s")) (*load-truename* (probe-file "%s")))'
+. '        (loop for form = (read in nil eof) until (eq form eof) do (eval form)))))'
+. '  (error (e) (when (typep e (quote sb-int:encapsulated-condition)) (setf e (sb-int:encapsulated-condition e))) (format *error-output* "~A" e) (finish-output *error-output*) (sb-ext:exit :code 255)))',
+  $lisp, $lisp, $lisp);
 my $cmd = join(' ', map { "\Q$_\E" } (@sbcl, @argv_form, '--eval', $load_form))
         . " 2> \Q$dir\E/err";
 system($cmd);
 my $status = ($? >> 8) & 0xFF;
 if (open(my $efh, '<', "$dir/err")) {
-  my $skip_block = 0;
+  my ($skip_block, $seen_real) = (0, 0);
   while (my $line = <$efh>) {
     # Multi-line compiler-note blocks: "; ..." bodies, "compilation unit
     # finished" trailers, and their indented continuation lines.
@@ -208,7 +227,15 @@ if (open(my $efh, '<', "$dir/err")) {
       $skip_block = 1; next;
     }
     if ($skip_block and $line =~ /^\s(?:\s|caught|Undefined|%|p-|\S+$)/) { next }
+    # A note block is FRAMED by blank lines (one before "; file: …", one after
+    # its "; compilation unit finished" trailer).  Without this the frame
+    # survived the scrub and a trivial program printed 56 empty lines on stderr
+    # — task #346.  A blank line the PROGRAM itself printed is still passed
+    # through: only the ones adjacent to a skipped block are dropped, and the
+    # flag is cleared by the first line of real output.
+    if ($line =~ /^\s*$/ and ($skip_block or !$seen_real)) { next }
     $skip_block = 0;
+    $seen_real = 1;
     next if $line =~ /^PCL Runtime loaded$/;
     next if $line =~ /^STYLE-WARNING:/;
     # SBCL's loader prints an eager two-line context note when an error
