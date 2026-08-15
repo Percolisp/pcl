@@ -1945,7 +1945,7 @@ sub _check_my_spanning {
         # match here (the tokens carry the new name).
         next if $self->{_file_lex_renamed}{$c};
         (my $bare = $c) =~ s/^[\$\@\%]//;
-        die "Parser2 TODO: my-lexical '$bare' spans a package boundary\n";
+        die "Parser2 TODO: my-lexical '$bare' (canon $c) spans a package boundary\n";
       }
     }
     # A BLOCK-FORM package segment (`package Foo { … }`) is a scope of its
@@ -2565,6 +2565,28 @@ sub _block_captures_name {
 #   disq{bare}         — names unrenameable by Symbol-token content: used in
 #                        array/hash family form (@x, %x, $#x, $x[…], $x{…})
 #                        or interpolated in a string/regex/heredoc.
+# Every STATEMENT in a fact set that declares the scalar `$bare` as its own
+# lexical: the single-scalar form (`my $x [= …]`, recorded in scalar_decl) and
+# the plain LIST form (`my ($x, $y)`, recorded per name in mlist_decl).  perl
+# declares each name in a list form exactly as the single form does, and the
+# span rename touches ONE symbol inside the declaring statement either way, so
+# for that pass the two shapes are interchangeable — which is why they are
+# merged HERE rather than by conflating the two facts (the capture-promotion
+# pass reads them separately on purpose: it promotes per CANON and needs the
+# sigil-carrying name, and it would otherwise process a list decl twice).
+#
+# This is #314 family F-D: without it `my ($fetch, $store) = (0, 0);` gave
+# `sdecls=0 dc=1` — the declaration counted, but no statement was found to
+# rename — so a package-spanning list-form lexical refused and the CHECKER
+# killed the whole file (io/shm.t, op/taint.t).
+sub _scalar_decl_stmts {
+  my ($facts, $bare) = @_;
+  return [ @{ $facts->{scalar_decl}{$bare} || [] },
+           map  { $_->[0] }
+           grep { $_->[1] =~ /^\$/ }
+           @{ $facts->{mlist_decl}{$bare} || [] } ];
+}
+
 sub _scan_lex_facts {
   my ($self, $stmts, $f) = @_;
   $f->{$_} //= {} for qw(decl_count canon_decl_count scalar_decl disq
@@ -2813,7 +2835,7 @@ sub _rename_spanning_lexicals {
     my @inst;
     for my $i (0 .. $#$segments) {
       my $top = $segments->[$i]{stmts};
-      for my $v (@{ $sf[$i]{scalar_decl}{$bare} || [] }) {
+      for my $v (@{ _scalar_decl_stmts($sf[$i], $bare) }) {
         my ($ix) = grep { $top->[$_] == $v } 0 .. $#$top;
         push @inst, [$i, $ix, $v] if defined $ix;
       }
@@ -2918,7 +2940,7 @@ sub _rename_spanning_lexicals {
       $family ||= $csf->[$j]{family}{$bare};
       $interp ||= $csf->[$j]{interp}{$bare};
       push @sdecls, grep { my $v = $_; grep { $_ == $v } @$top }
-                    @{ $csf->[$j]{scalar_decl}{$bare} || [] };
+                    @{ _scalar_decl_stmts($csf->[$j], $bare) };
     }
     # (The old blanket 'family use (@x/%x/$#x)' refusal was REMOVED in M-F:
     # Symbol rewrites key on ->symbol (a sibling @x/%x is never touched),

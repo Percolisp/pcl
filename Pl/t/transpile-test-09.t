@@ -717,6 +717,37 @@ $n++ for ($h{k}, "lit", 3);
 print "count=$n keep=$h{k}\n";
 });
 
+# ── s399 #314 family F-D: a LIST-form `my` whose name spans a package
+# boundary.  The span rename enumerated its candidate declarations from
+# `scalar_decl`, which _scan_lex_facts fills only from the SINGLE-scalar form —
+# so `my ($fetch, $store) = (0, 0);` refused with `sdecls=0 dc=1` (the
+# declaration counted, but no statement was found to rename) and the CHECKER
+# then killed the whole file: io/shm.t and op/taint.t, both v1-era.  perl
+# declares each name of a list form exactly as the single form does, so the two
+# shapes are now merged for that pass (_scalar_decl_stmts).
+# INVERSE GUARDS in the same snippet: a list decl whose names do NOT span is
+# untouched; a same-name list decl inside a BLOCK is a distinct variable and
+# must keep its own value on both sides of the block; and the single-scalar
+# spelling still spans exactly as it did.
+test_transpile("list-form my whose name spans a package boundary", q{
+my ($fetch, $store) = (0, 0);
+my ($kept, $also) = ("K", "A");
+package Foo;
+sub bump { $fetch++; $store += 2 }
+package main;
+Foo::bump(); Foo::bump();
+print "1 spanned=$fetch/$store\n";
+print "2 unspanned=$kept/$also\n";
+{ my ($fetch) = ("inner"); print "3 shadow=$fetch\n"; }
+print "4 after-shadow=$fetch\n";
+my $solo = 1;
+package Baz;
+sub sbump { $solo += 10 }
+package main;
+Baz::sbump();
+print "5 solo=$solo\n";
+});
+
 # ── s363 #264 SILENT WRONG: `${x}` written at CODE level is a use of $x, but
 # PPI spells it Cast + Block-holding-one-Word, so there is no Symbol token and
 # every Symbol-driven pass was blind to it.  A file lexical used that way after
