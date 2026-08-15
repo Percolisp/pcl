@@ -674,9 +674,61 @@ diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
 
 # ============================================================
 diag "";
+diag "-------- Top-level POD in a let-bound block (task #353):";
+
+# A module whose prototypes were SILENTLY LOST.  The sub-hoist pre-pass in
+# Parser::_process_block walks `children` (which includes INSIGNIFICANT tokens)
+# and skipped only Whitespace and Comment by class name — so a PPI::Token::Pod
+# reached a `find` call, which is a PPI::Node method.  The die was caught by
+# _extract_module_prototypes, reported once as "Failed to extract prototypes
+# from <Module>", and undef was cached: EVERY prototype in the module became
+# invisible to the compiler.  Real victim: Unicode::UCD, in six companion files.
+# The pre-pass only runs when the block has let-bound vars and a sub is CALLED
+# before its definition, which is why most POD-carrying modules never hit it.
+{
+  open my $fh, '>', "$test_module_dir/PodProto.pm" or die $!;
+  print $fh <<'END_MODULE';
+package PodProto;
+use strict;
+
+{
+  my $counter = 0;
+  sub bump ($) { $counter += $_[0]; readout(); }
+
+=head1 NAME
+
+PodProto - top-level POD inside a block that binds a lexical
+
+=cut
+
+  sub readout { $counter }
+}
+1;
+END_MODULE
+  close $fh;
+
+  my $code = qq{
+    use lib "$test_module_dir";
+    use PodProto;
+    bump 1;
+  };
+  my $parser = Pl::Parser2->new(code => $code);
+  my $env = $parser->environment;
+  eval { $parser->parse() };
+  ok(!$@, 'parser handles a module with POD inside a let-bound block') or diag $@;
+
+  my $proto = $env->get_prototype('bump');
+  ok($proto, 'prototype extracted despite the top-level POD (task #353)');
+  is($proto && $proto->{proto_string}, '$', 'bump proto_string is $');
+}
+
+
+# ============================================================
+diag "";
 diag "-------- Cleanup:";
 
 # Cleanup extra test modules
+unlink "$test_module_dir/PodProto.pm";
 unlink "$test_module_dir/ProtoHelper.pm";
 unlink "$test_module_dir/ProtoUser.pm";
 unlink "$test_module_dir/RefProto.pm";

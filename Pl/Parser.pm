@@ -4887,8 +4887,22 @@ sub _process_block {
           $sub_defined{$sub_name} = 1;
         }
       } else {
-        # Record all word tokens as potential calls
-        my $words = $child->find('PPI::Token::Word') || [];
+        # Record all word tokens as potential calls.
+        #
+        # ASK THE CLASS, NOT THE NAME (task #353).  `children` (unlike
+        # `schildren`) yields INSIGNIFICANT tokens too, and the skips above
+        # name only Whitespace and Comment — so a `PPI::Token::Pod` reached
+        # here and `find` is a PPI::Node method, not a Token one.  It died,
+        # the caller turned that into "Failed to extract prototypes from
+        # <Module>" and cached undef, and EVERY prototype in a module with
+        # top-level POD inside a let-bound block was silently unavailable to
+        # the compiler (Unicode::UCD, six companion files).  A bare Word IS
+        # its own call site; anything else here (Pod, __END__ separators)
+        # contributes no words.  Same guard shape as
+        # Parser2::_collect_named_subs.
+        my $words = $child->isa('PPI::Node')
+                    ? ($child->find('PPI::Token::Word') || [])
+                    : ($child->isa('PPI::Token::Word') ? [$child] : []);
         for my $w (@$words) {
           $words_seen{$w->content} = 1;
         }
