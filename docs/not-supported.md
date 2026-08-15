@@ -1057,28 +1057,78 @@ the fix requires a fundamentally different argument-passing model.
 
 ---
 
-## `re::optimization` — the regex engine's internal optimizer report
+## Readouts of perl's own internals: `B::` optree inspection, `re::optimization`, `XS::APItest`
 
-**Perl behaviour:** `re::optimization($qr)` (XS, in perl's `re` module) returns
-a hashref describing what perl's regex COMPILER decided about a pattern:
-`minlen`, `minlenret`, the `anchored` and `floating` substrings with their
-offsets and utf8-ness, `noscan`, `isall`, `skip`, `implicit`, the anchor flags
-(`SBOL`/`MBOL`/`GPOS`) and the start-class (`stclass`).
+**What this covers:** test code that inspects perl's IMPLEMENTATION rather than
+the language perl implements — the optree its compiler built and the decisions
+it made while building it, the regex engine's optimizer state, the SV-level
+bookkeeping XS sees.  These are not observable Perl SEMANTICS: two conforming
+implementations of the language can disagree on every one of them and both be
+right.  PCL compiles to Common Lisp and matches with cl-ppcre, so there is no
+answer it could give that would be *perl's* answer.
 
-**PCL behaviour:** absent.  `t/re/opt.t` dies `undef-fn: re::optimization`.
+**What would lift it:** nothing.  PCL has no perl optree, no perl SV, and a
+different regex optimizer, so the only way to report these numbers would be to
+reimplement perl's compiler and matcher alongside PCL's own purely so a test
+file could inspect them.  This section is where a registration goes when it is
+unfixable by construction rather than merely unimplemented — a module PCL could
+one day shim (IPC::SysV, XS::APItest's *language* surface) is ordinary
+not-implemented and gets its own entry instead.
 
-**Rationale:** these are not observable regex SEMANTICS — they are a readout of
-one particular engine's internal optimizer state.  PCL matches with cl-ppcre,
-whose optimizer is a different program making different decisions, so there is
-no answer to report that would be perl's answer.  Reproducing them would mean
-reimplementing perl's regex optimizer alongside the matcher purely so a test
-file could inspect it.
+**Counting the class:** every suite registration that cites *this section name*
+is a member, so `grep -c 'Readouts of perl.s own internals'
+docs/perl-suite-expected.tsv` IS the population (ruled s397,
+`docs/fable-answers-s396.md` §4).
+
+### `re::optimization` — the regex engine's internal optimizer report
+
+`re::optimization($qr)` (XS, in perl's `re` module) returns a hashref
+describing what perl's regex COMPILER decided about a pattern: `minlen`,
+`minlenret`, the `anchored` and `floating` substrings with their offsets and
+utf8-ness, `noscan`, `isall`, `skip`, `implicit`, the anchor flags
+(`SBOL`/`MBOL`/`GPOS`) and the start-class (`stclass`).  PCL: absent —
+`t/re/opt.t` dies `undef-fn: re::optimization`.  cl-ppcre's optimizer is a
+different program making different decisions.
 
 **Affected tests:** `t/re/opt.t` (639 rows).  Registered XDIFF.  Found s396
 while implementing refaliasing: the file's ONLY blocker had been the
 `our \$TODO = \$::TODO` on line 46, and task #325 sized its 639 rows as
 reachable on that basis — with the declaration lowering fixed, the file
 transpiles and runs, and this is what it hits instead.
+
+### Constant-folding / inlinability and the `:method` attribute readout
+
+`t/op/const-optree.t` asks, for ~40 spellings of `sub () { … }`, whether
+*perl's compiler* turned the sub into an inlinable constant, and whether the
+`:method` attribute was recorded.  Neither is asked directly: inlinability is
+read out of the exact wording of a redefinition warning (`Constant subroutine
+… redefined` vs `Subroutine … redefined`), and `:method` out of whether
+`use warnings 'ambiguous'` produced `Ambiguous call resolved as CORE::time()`.
+Both are diagnostics ABOUT an optree PCL does not build.
+
+**That file is NOT registered, and this subsection is why it is worth reading
+before someone registers it (s399).**  The s397 ruling authorised registering
+it on the premise that *every* diverging row is such a readout.  The per-row
+read the bar demands says otherwise — of its 62 diverging rows:
+
+* **53** are the internals readouts above (28 `… is/is not inlinable`,
+  25 `… has (no) :method attribute`) — this section;
+* **5** are `… now throws exception (RT 134138)`: perl REJECTS
+  `sub () { $x }` when `$x` is modified elsewhere ("Constants from lexical
+  variables potentially modified elsewhere are no longer permitted"), PCL
+  compiles it and closes over `$x` — §Error compatibility for invalid Perl
+  input (CLAUDE.md §9), a different blessed class;
+* **4** are `retval of my sub …` — a REAL FIX TARGET, not a readout: PCL
+  compiles `my sub x () { 8 }` as a PACKAGE sub, so two lexical subs of the
+  same name in different scopes clobber each other and every `\&x` resolves to
+  the last one (probed: `sub { my sub x () {8} \&x }` and
+  `sub { my sub x () {3} \&x }` give perl `8 3`, PCL `3 3` — silent wrong).
+  Task #337.
+
+All-or-nothing (the `docs/perl-suite-expected.tsv` header rule): those last
+four keep the file UNEXPLAINED, because a registration would silence them.
+Re-register it when #337 lands — with the reason citing this section *and*
+§Error compatibility for invalid Perl input, and with a fresh per-row read.
 
 ---
 

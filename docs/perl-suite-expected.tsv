@@ -70,7 +70,7 @@ mro/vulcan_c3.t	not-supported.md §mro — C3-only, no mro:: API / next::method 
 mro/vulcan_c3_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/vulcan_dfs.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/vulcan_dfs_utf8.t	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-re/opt.t	not-supported.md §re::optimization - the regex engine's internal optimizer report (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
+re/opt.t	not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
 re/uniprops01.t	not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/uniprops02.t	not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/uniprops03.t	not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
