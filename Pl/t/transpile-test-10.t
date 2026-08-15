@@ -760,6 +760,43 @@ print "h=", ([[1,2],[3,4]])[0][1]{x} // "u", "\n" if 0; print "h=", ([{x=>5}])[0
 print "i=", ("a", "b", {q=>7})[2]{q}, "\n";
 ');
 
+# ── PPI operator-vs-term repairs (#354, #351) ────────────────────────────────
+# Both shapes used to be DROPPED whole; each row runs the perl oracle too, so
+# the inverse cases (real division, a real glob) are guarded by the same rows.
+test_transpile('#354: `)*name` is multiplication, and a real glob still is not', '
+my ($s, $k) = (0, "ab");
+$s += length($k)*length($k);            print "a=$s\n";
+my $x = 3;                              print "b=", $x*length($k), "\n";
+my @a = (5);                            print "c=", $a[0]*length($k), "\n";
+my %h = (x => 4);                       print "d=", $h{x}*length($k), "\n";
+print "e=", 2*length($k), "\n";
+print "f=", "3"*length($k), "\n";
+sub gf { 7 } *bar = \&gf;               print "g=", bar(), "\n";
+');
+
+test_transpile('#351: /re/ after a paren-less call is a MATCH; a term keeps division', '
+sub myok { print "CALL(@_)\n" }
+$_ = "foofoo";
+my $qr = qr/foo/;
+myok /$qr/, "interp";
+myok /foo/, "literal";
+myok /foo/;
+print /foo/, "\n";
+myok /foo/x, "modifier";
+myok /foo/ ? 1 : 0;
+print "div1=", (time / 60 > 0 ? "ok" : "bad"), "\n";
+use constant PIVAL => 6;
+print "div2=", PIVAL / 2, "\n";
+sub gz () { 10 }
+print "div3=", gz / 2, "\n";
+my $n = 12;
+print "div4=", $n / 4, "\n";
+');
+
+# (The `$/`-dependent __DATA__ shape — ppi-upstream-bugs.md §13 — is guarded in
+# Pl/t/data-handle-01.t, which runs perl on a real FILE: the helper here uses
+# `perl -e`, where a __DATA__ section does not exist at all.)
+
 test_transpile('s398 inverse: the list-slice shapes that already worked keep their reading', '
 sub f { return (0,1,2) }
 print "a=", ([qw/foo bar/])[0][1], "\n";

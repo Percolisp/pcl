@@ -455,10 +455,88 @@ that is not a term itself) starts a match.
 dropped whole — `ok /$qr/, "desc";` produces no call at all (`t/re/pat_re_eval.t`
 line 1114, `t/re/pat.t`) — and with a modifier letter it compiles to real
 DIVISION: `ok /foo/x, "d";` emits `(P-/ (P-/ …) "x")` and dies at run time with
-`division-by-zero`.  No workaround yet: the repair belongs with the token-stream
-repair family (`_repair_*` in `Pl/Parser2.pm`, the §7b/§10 pattern), and the
-condition has to be perl's own (a `/` after a Word that is not a term and not a
-named unary), which is why it is a task and not a one-line guard.
+`division-by-zero`.
+
+**PCL workaround (s404):** `_repair_word_match` in `Pl/Parser2.pm` rewrites the
+opening `/` to `m/` on the raw token stream and reparses.  Its condition is
+perl's, and it is a NEGATIVE, which is what makes it safe: perl reads `/` after
+a bareword as division ONLY when the word is a TERM (a constant, a
+`()`-prototyped sub, or a 0-ary builtin) — for anything else perl does not fall
+back to division, it is a **syntax error** (measured: `ok /foo/` with `ok`
+undeclared, and with `ok` declared BELOW, are both syntax errors).  PCL assumes
+valid Perl (principle 9), so "not a term" is exactly the test.  Measured over
+both populations: 28 `WORD /` sites, of which the repair fires on `ok`, `while`
+and `when` and must NOT fire on `map { … } <op/*>`, where PPI derails a GLOB
+into `< Word / * >` — hence the `<` guard.  Removes 11 dropped statements.
+
+---
+
+## 12. `)*name` — a `*` after a term is lexed as a GLOB, not multiplication  [CONFIRMED 1.291]
+
+**Perl:** a `*` where a term has just ENDED is multiplication; a glob can only
+start where a TERM can.
+
+```perl
+my ($s, $k) = (0, "ab");
+$s += length($k)*length($k);   # perl: 4
+```
+
+**PPI:** after a token that ends a term, `*name` written with no space becomes
+one `PPI::Token::Symbol` (a typeglob):
+
+```
+$s += length($k)*length($k);   Word(length) List Symbol(*length) List     <- wrong
+$s = $x*length($k);            Symbol($x)   Symbol(*length) List          <- wrong
+$s = $a[0]*foo();              Structure(]) Symbol(*foo)                  <- wrong
+$s = $h{x}*foo();              Structure(}) Symbol(*foo)                  <- wrong
+$s = "3"*length($k);           Quote("3")   Symbol(*length)               <- wrong
+$s = 2*length($k);             Number(2) Operator(*) Word(length)         <- RIGHT
+$s = length($k) * length($k);  … Operator(*) Word(length)                 <- RIGHT (space)
+sub f { 1 } *bar = \&f;        Structure(}) Symbol(*bar)                  <- RIGHT (a real glob)
+```
+
+A NUMBER on the left, or a single space, lexes correctly — which is what makes
+this so easy to miss.
+
+**Repro + failing row:** Bug 9 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: SILENT WRONG (task #354).**  The statement reaches PExpr as
+`Word List Symbol List`, a shape it has no case for, so the WHOLE STATEMENT is
+dropped (#138 family).  `Data::Dump` line 325 is exactly this, in any program
+that uses it.  **Workaround (s404):** `_repair_glob_multiply` splits the token
+back into `*` + word when the previous significant token ends a term.  `}` is
+counted only when it closes a SUBSCRIPT — the block-closing case above is a
+real glob, and the tree is what tells them apart.
+
+---
+
+## 13. Tokenization of a trailing `__END__`/`__DATA__` section depends on `$/`  [CONFIRMED 1.291]
+
+**Perl:** `$/` is an input-record separator for *reading*; it has nothing to do
+with how source text is parsed.
+
+**PPI:** with `$/` undefined (slurp mode — extremely common in code that has
+just read the source with `local $/`), a document whose LAST line is `__END__`
+or `__DATA__` comes back with ONE EXTRA newline in the section:
+
+```perl
+my $src = "# c\n__END__\n";
+{ local $/; PPI::Document->new(\$src)->serialize }   # 13 bytes — an extra "\n"
+PPI::Document->new(\$src)->serialize                 # 12 bytes — correct
+```
+
+so `serialize` is not the identity and the DATA section gains a line that the
+file does not contain.
+
+**Repro + failing row:** Bug 10 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: SILENT WRONG, fixed at both ends (s404).**  `pl2cl`'s stdin
+branch had a bare `local $/;` that stayed in effect across the parse, so every
+program transpiled through `pl2cl < file` got an extra empty line in its
+`<DATA>` handle (this is how `tools/emission-ab.pl` feeds files, which is where
+it surfaced).  The slurp is now scoped, and `_ppi_parse` — the one place either
+pipeline turns source into a document — trims trailing whitespace the parse
+invented, so the result no longer depends on the caller's `$/` at all.
 
 ---
 

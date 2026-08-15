@@ -58,7 +58,7 @@ sub test_data {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 7;
+plan tests => 9;
 
 # Basic __DATA__ readline
 test_data('__DATA__: single line read', <<'PERL');
@@ -146,3 +146,35 @@ apple
 banana
 cherry
 PERL
+
+# The section must hold EXACTLY what the file holds — no invented line.  PPI's
+# tokenization of a trailing __END__/__DATA__ depends on `$/`
+# (docs/ppi-upstream-bugs.md §13): with the slurp separator in force it adds a
+# newline, which `pl2cl < file` used to do to every program it compiled.  Both
+# ends are fixed (the slurp is scoped; _ppi_parse trims an invented tail), and
+# this row is what would catch a return of either.
+test_data('__DATA__: no invented trailing line (ppi-upstream-bugs.md §13)', <<'PERL');
+my @l = <DATA>;
+print "count=", scalar(@l), "\n";
+print "last=[", $l[-1], "]\n";
+__DATA__
+alpha
+beta
+PERL
+
+# The same, through the STDIN path — the one that carried the bug.
+{
+    my $code = "my \@l = <DATA>;\nprint scalar(\@l), \"\\n\";\n__DATA__\nalpha\nbeta\n";
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    my $cl = `$pl2cl < $file 2>/dev/null`;
+    my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cl_fh $cl;
+    close $cl_fh;
+    my $out = `sbcl @sbcl_rt --load $cl_file 2>&1`;
+    $out =~ s/^;.*\n//gm;
+    $out =~ s/^PCL Runtime loaded\n//gm;
+    $out =~ s/^\s*\n//gm;
+    is($out, "2\n", 'pl2cl < file: DATA has 2 lines, not 3 (the scoped slurp)');
+}

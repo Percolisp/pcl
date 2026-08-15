@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 102;
+plan tests => 105;
 
 sub run_cl {
     my ($code) = @_;
@@ -944,6 +944,30 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
         'CANARY: PPI still drops the list and block from a `for my ($q,$r) '
       . '(LIST)` compound — if this FAILS, drop _repair_nary_foreach and '
       . '_repair_alias_foreach (ppi-upstream-bugs.md §10)' );
+}
+{
+    my $doc = PPI::Document->new(\'ok /foo/, "d";');
+    ok( $doc && !grep { $_->isa('PPI::Token::Regexp::Match') } $doc->tokens,
+        'CANARY: PPI still lexes `/re/` after a paren-less word as DIVISION — '
+      . 'if this FAILS, drop _repair_word_match (ppi-upstream-bugs.md §11)' );
+}
+{
+    my $doc = PPI::Document->new(\'$s += length($k)*length($k);');
+    ok( $doc && grep { $_->isa('PPI::Token::Symbol') && $_->content =~ /^\*/ } $doc->tokens,
+        'CANARY: PPI still lexes `)*name` as a GLOB instead of multiplication — '
+      . 'if this FAILS, drop _repair_glob_multiply (ppi-upstream-bugs.md §12)' );
+}
+{
+    # This one is not about tokens but about `$/`: with the slurp separator in
+    # force, PPI adds a newline to a trailing __END__ section, so serialize
+    # stops being the identity.  PCL both scopes its slurps and trims the
+    # invented tail in _ppi_parse; when PPI is fixed, the trim can go.
+    my $src = "# c\n__END__\n";
+    my $slurped = do { local $/; PPI::Document->new(\$src)->serialize };
+    isnt( $slurped, $src,
+        'CANARY: PPI parsing still depends on $/ (trailing __END__ gains a '
+      . 'newline in slurp mode) — if this FAILS, drop _trim_invented_tail '
+      . '(ppi-upstream-bugs.md §13)' );
 }
 
 # ── runtime warning strings used CL "...\n", but \n in a CL string literal is a

@@ -954,6 +954,14 @@ sub parse {
   $doc = $self->_repair_nary_foreach($doc);
   $doc = $self->_repair_alias_foreach($doc);
 
+  # PPI LEXER BUGS in the OPERATOR-vs-TERM decision, both of which eat a whole
+  # statement: `)*name` lexed as a glob (#354) and `/PATTERN/` after a
+  # paren-less call lexed as division (#351).  Both are repaired on the raw
+  # token stream with perl's own rule — see _repair_glob_multiply and
+  # _repair_word_match.
+  $doc = $self->_repair_glob_multiply($doc);
+  $doc = $self->_repair_word_match($doc);
+
   # `state` outside the classic subset (scalar statement-decl in a named sub)
   # is rewritten at SOURCE level into plain Perl the existing machinery
   # already lowers, then the document is reparsed — see _rewrite_state_prepass.
@@ -4139,6 +4147,9 @@ sub _rewrite_state_prepass {
 # the state prepass and the #270 prototype repair.
 sub _reparse_doc {
   my ($self, $doc) = @_;
+  # The trailing-tail trim for PPI's global-state bug lives in _ppi_parse (the
+  # ONE place either pipeline turns source into a document), so a reparse here
+  # inherits it — see the note there and docs/ppi-upstream-bugs.md §13.
   my $new = $self->fallback_parser->_ppi_parse($doc->serialize)
     or die "Parser2: PPI reparse after source-level rewrite failed\n";
   return $new;
@@ -4479,6 +4490,162 @@ sub _repair_nary_foreach {
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# PPI LEXER BUG (task #354, docs/ppi-upstream-bugs.md §12).  After a token that
+# ENDS A TERM, `*name` written with no space is lexed as a GLOB — a
+# PPI::Token::Symbol — instead of the multiplication it can only be:
+#
+#     $s += length($k)*length($k);   =>  Word List Symbol(*length) List
+#
+# PExpr has no case for that shape, so the WHOLE STATEMENT is dropped (#138
+# family).  Data::Dump line 325 is exactly this, in any program that uses it.
+# What makes it easy to miss: a space (`) * length`) lexes correctly, and so
+# does a NUMBER on the left (`2*length($k)`) — measured, both.
+#
+# The repair is perl's rule on the raw token stream: a `*` cannot open a glob
+# where a term has just ended, so split the token back into operator + word and
+# reparse.  Everything the predicate leans on is in _ends_term.
+sub _repair_glob_multiply {
+  my ($self, $doc) = @_;
+  my $repaired = 0;
+  for my $sym (@{ $doc->find('PPI::Token::Symbol') || [] }) {
+    my ($name) = $sym->content =~ /^\*(\w+(?:::\w+)*)\z/ or next;
+    next unless _ends_term(_prev_sig_token($sym));
+    $sym->set_content("* $name");
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# PPI LEXER BUG (task #351, docs/ppi-upstream-bugs.md §11).  A bare `/PATTERN/`
+# as the first argument of a PAREN-LESS call is tokenized as DIVISION:
+#
+#     ok /foo/, "desc";   =>  Word(ok) Operator(/) Word(foo) Operator(/) …
+#
+# so the statement is dropped whole, and with a modifier letter (`ok /foo/x`)
+# it compiles to real division and dies at run time.  PPI gets it right after
+# `grep`, `return`, `(` and `=`, and wrong after every other Word — including
+# core list operators (`print /foo/`).
+#
+# THE CONDITION IS PERL'S, and it is a NEGATIVE, which is what makes it safe:
+# perl reads `/` after a bareword as division only when the word is a TERM (a
+# constant, a `()`-prototyped sub, or a 0-ary builtin).  For anything else perl
+# does not fall back to division — it is a SYNTAX ERROR (measured: `ok /foo/`
+# with no `sub ok` above it, and with `ok` declared BELOW, are both syntax
+# errors; `sub f {…} print f / 2` reads the `/` as a match; `sub g () {…}` and
+# `use constant PI => 6` read it as division).  PCL assumes valid Perl input
+# (principle 9), so "not a term" is exactly the right test.
+#
+# Measured over both populations (657 files, 28 `WORD /` sites): the shapes are
+# `ok`, `while` and `when` — all repairs — plus one that must NOT be touched,
+# `map { … } <op/*>`, where PPI derails a GLOB into `< Word / * >`.  Hence the
+# `<` guard, which no amount of reading would have suggested.
+sub _repair_word_match {
+  my ($self, $doc) = @_;
+  my @tok = grep { $_->significant } $doc->tokens;
+  my $repaired = 0;
+  for my $i (1 .. $#tok) {
+    my ($prev, $t) = @tok[$i - 1, $i];
+    next unless $t->isa('PPI::Token::Operator') && $t->content eq '/';
+    next unless $prev->isa('PPI::Token::Word');
+    next if $i >= 2 && $tok[$i - 2]->isa('PPI::Token::Operator')
+                    && $tok[$i - 2]->content eq '<';       # <op/*> glob run
+    next if $self->_word_is_term($prev->content, $doc);
+    # A match needs a closing delimiter; without one this is not the shape and
+    # the statement is left to the ordinary error path to name.
+    my $close = 0;
+    for my $j ($i + 1 .. $#tok) {
+      last if $tok[$j]->isa('PPI::Token::Structure') && $tok[$j]->content eq ';';
+      ($close = 1), last if $tok[$j]->isa('PPI::Token::Operator')
+                         && $tok[$j]->content eq '/';
+    }
+    next unless $close;
+    $t->set_content('m/');
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# Is this bareword a TERM — the half of perl's rule that keeps `time / 60` and
+# `PI / 2` division?  Three sources, in the order they are cheap:
+#   * the 0-ary builtins (time, times, wantarray, __PACKAGE__, …);
+#   * a constant or `()`-prototyped sub DECLARED IN THIS DOCUMENT — perl learns
+#     both at compile time, and so can we, from the raw tokens;
+#   * the ALL-CAPS convention, which is what the compiler already assumes for a
+#     constant it cannot place (PExpr::_bareword_subscript_autoquotes).  An
+#     imported constant (`use POSIX qw(DBL_MAX); DBL_MAX / 2`) is invisible to
+#     a token scan, and this is the cheap way not to break it.
+sub _word_is_term {
+  my ($self, $name, $doc) = @_;
+  my $zero = $self->_zero_arity_builtins;
+  return 1 if $zero->{$name};
+  return 1 if $name =~ /^[A-Z][A-Z0-9_]*\z/;
+  my $terms = $self->{_doc_term_words} ||= _scan_document_terms($doc);
+  return $terms->{$name} ? 1 : 0;
+}
+
+sub _zero_arity_builtins {
+  my ($self) = @_;
+  return $self->{_zero_arity} ||= do {
+    # The ONE arity table (Pl::PExpr::Config), read through PExpr as every
+    # other consumer does — never a second list of builtin names here.
+    my $t = Pl::PExpr->new->known_no_of_params;
+    +{ map { $_ => 1 }
+       grep { defined $t->{$_} && !ref $t->{$_} && $t->{$_} == 0 } keys %$t };
+  };
+}
+
+# Names this DOCUMENT makes a term: `use constant NAME =>`, the hash form
+# `use constant { A => …, B => … }`, and `sub NAME ()` (the empty prototype IS
+# what makes perl read the next `/` as division — measured).
+sub _scan_document_terms {
+  my ($doc) = @_;
+  my %term;
+  my @tok = grep { $_->significant } $doc->tokens;
+  for my $i (0 .. $#tok) {
+    my $t = $tok[$i];
+    next unless $t->isa('PPI::Token::Word');
+    if ($t->content eq 'constant' && $i > 0
+        && $tok[$i - 1]->isa('PPI::Token::Word') && $tok[$i - 1]->content eq 'use') {
+      for my $j ($i + 1 .. $#tok) {
+        last if $tok[$j]->isa('PPI::Token::Structure') && $tok[$j]->content eq ';';
+        $term{ $tok[$j]->content } = 1
+          if $tok[$j]->isa('PPI::Token::Word')
+          && $tok[$j + 1] && $tok[$j + 1]->isa('PPI::Token::Operator')
+          && $tok[$j + 1]->content eq '=>';
+      }
+    }
+    elsif ($t->content eq 'sub' && $tok[$i + 1]
+           && $tok[$i + 1]->isa('PPI::Token::Word')
+           && $tok[$i + 2] && $tok[$i + 2]->isa('PPI::Token::Prototype')
+           && $tok[$i + 2]->prototype =~ /^\s*\z/) {
+      $term{ $tok[$i + 1]->content } = 1;
+    }
+  }
+  return \%term;
+}
+
+# Does this token END A TERM?  That is perl's own operator-vs-term state, and
+# it is what decides both repairs below: after a term, `*` and `/` are
+# ARITHMETIC; before one, they start a glob or a match.
+#
+# `}` is deliberately ambiguous and is only counted when it closes a SUBSCRIPT:
+# `$h{x}*foo()` is multiplication, but `sub f {…} *bar = \&f;` is a real glob,
+# and the tree is what tells them apart (measured, both spellings).
+sub _ends_term {
+  my ($t) = @_;
+  return 0 unless $t;
+  return 1 if $t->isa('PPI::Token::Symbol')          # $x @a %h *glob, and Magic
+           || $t->isa('PPI::Token::Number')
+           || $t->isa('PPI::Token::Quote')           # '…' "…" q qq
+           || $t->isa('PPI::Token::QuoteLike::Words');
+  if ($t->isa('PPI::Token::Structure')) {
+    return 1 if $t->content eq ')' || $t->content eq ']';
+    return 1 if $t->content eq '}'
+             && $t->parent && $t->parent->isa('PPI::Structure::Subscript');
+  }
+  return 0;
 }
 
 # The previous significant token in DOCUMENT order — the raw stream twin of

@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 8;
+use Test::More tests => 10;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -155,4 +155,38 @@ sub toks {
     ok( grep(/^PPI::Token::Regexp::Match=/, @t),
         '/x/ after a paren-less word should be a match, as it is after grep/return' )
         or diag "got: @t";
+}
+
+# ── Bug 9: `)*name` is lexed as a GLOB instead of multiplication ──────────────
+#
+# A `*` where a term has just ENDED can only be multiplication; a glob starts
+# where a TERM can.  perl agrees:
+#
+#   $ perl -e 'my ($s,$k)=(0,"ab"); $s += length($k)*length($k); print "$s\n"'
+#   4
+#
+# PPI makes `*length` one Token::Symbol when the previous token ends a term —
+# after `)`, `]`, a subscript `}`, a Symbol or a Quote.  With a NUMBER on the
+# left (`2*length($k)`) or a single space (`) * length`) it is correct, which is
+# what makes this easy to miss.  A consumer sees `Word List Symbol List` and has
+# no way back: the multiplication is gone.
+{
+    my @t = toks('$s += length($k)*length($k);');
+    ok( !grep(/^PPI::Token::Symbol=\*/, @t),
+        ')*name after a term should be Operator(*) + Word, not a glob Symbol' )
+        or diag "got: @t";
+}
+
+# ── Bug 10: parsing depends on $/ — a trailing __END__ gains a newline ────────
+#
+# `$/` is the input-record separator for READING; it has no business affecting
+# how source text is tokenized.  With `$/` undef (slurp mode — what code that
+# has just read the source with `local $/` leaves behind), a document whose last
+# line is `__END__`/`__DATA__` comes back one byte longer: serialize is no
+# longer the identity, and the DATA section gains a line the file never had.
+{
+    my $src = "# c\n__END__\n";
+    my $slurped = do { local $/; PPI::Document->new(\$src)->serialize };
+    is( $slurped, $src,
+        'serialize round-trips a trailing __END__ section regardless of $/' );
 }

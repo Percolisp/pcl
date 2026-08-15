@@ -434,9 +434,14 @@ elsif (@ARGV) {
   print parse_source('parse_code', $code);
 }
 elsif (!-t STDIN) {
-  # Read from stdin
-  local $/;
-  $code = <STDIN>;
+  # Read from stdin.  SCOPE the slurp: a bare `local $/;` here stays in effect
+  # for the whole branch — including the parse below — and PPI's tokenization
+  # of a trailing `__END__`/`__DATA__` section DEPENDS on `$/` (measured:
+  # the same bytes gain one newline when parsed with `$/` undef, see
+  # docs/ppi-upstream-bugs.md §13).  That silently added an empty line to the
+  # DATA handle of every program transpiled through the stdin path — which is
+  # how tools/emission-ab.pl feeds files.
+  $code = do { local $/; <STDIN> };
   my $output = parse_source('parse_code', $code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
