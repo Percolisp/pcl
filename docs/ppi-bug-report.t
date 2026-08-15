@@ -5,14 +5,14 @@
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 #
-# PPI tokenizer/lexer bug report — seven small cases.
-# Tested against PPI 1.291 / perl 5.40.3.  All seven tests currently FAIL (the bugs).
+# PPI tokenizer/lexer bug report — eight small cases.
+# Tested against PPI 1.291 / perl 5.40.3.  All eight tests currently FAIL (the bugs).
 #
 #   perl ppi-bug-report.t
 #
 use strict;
 use warnings;
-use Test::More tests => 7;
+use Test::More tests => 8;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -134,4 +134,25 @@ sub toks {
     ok( $doc && $first && $first->content =~ /\{/,
         'for my ($q,$r) (LIST) {…} should keep its list and block in the Compound' )
         or diag "compound was: " . ($first ? $first->content : '(no parse)');
+}
+
+# ── Bug 8: /PATTERN/ after a paren-less WORD is read as division ───────────────
+#
+# After a bareword that is not a known unary operator, perl expects a TERM, so
+# the `/` starts a match against $_:
+#
+#   $ perl -e 'sub ok { print "ok(@_)\n" } $_ = "aa"; ok /a/, "desc"'
+#   ok(1 desc)
+#   $ perl -e '$_ = "aa"; print /a/, "\n"'      # print, a core list operator
+#   1
+#
+# PPI already gets this right after `grep`, `return`, `(` and `=`, but after any
+# other Word it emits Operator '/' + Word + Operator '/' — i.e. two divisions —
+# so the match, and the whole argument list with it, is lost.  A consumer cannot
+# recover it: the pattern's own text has been re-tokenized as code.
+{
+    my @t = toks('ok /x/, "d";');
+    ok( grep(/^PPI::Token::Regexp::Match=/, @t),
+        '/x/ after a paren-less word should be a match, as it is after grep/return' )
+        or diag "got: @t";
 }

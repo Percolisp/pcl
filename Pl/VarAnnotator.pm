@@ -696,11 +696,11 @@ sub _tw_expr_parse {
   $p->indent_level(0);
 
   my $ok = eval {
-    # Analysis-only parse: PExpr warns before it dies on unsupported shapes
-    # ("Handle single node of unknown type…"); those diagnostics will repeat
-    # in the REAL lowering if relevant, and several test helpers merge
-    # pl2cl's stderr into the generated CL — so silence warns here.
-    local $SIG{__WARN__} = sub { };
+    # (The `local $SIG{__WARN__} = sub {}` that used to sit here silenced ONE
+    # line — PExpr's "Handle single node of unknown type" warn before its
+    # decline die.  That warn is gone since task #339, so the workaround left
+    # with its cause; an analysis parse that has something real to say should
+    # say it.)
     # No _v2_embed hook (task #78) in analysis parses: it may be live when
     # this analysis runs inside an embedded-block lowering, and an
     # analysis-triggered Parser2 lowering would be pure discarded side

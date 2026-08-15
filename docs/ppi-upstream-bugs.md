@@ -420,6 +420,48 @@ for my ($q,$r) (@l) { BODY }  =>  my @L = map \$_, (@l); my $I = 0;
 
 ---
 
+## 11. `/PATTERN/` after a paren-less WORD is tokenized as division  [CONFIRMED 1.291]
+
+**Perl:** after a bareword that is not a known unary operator, the tokenizer
+expects a TERM, so `/` starts a match against `$_`:
+
+```perl
+sub ok { print "ok(@_)\n" }
+$_ = "aa";
+ok /a/, "desc";        # perl: ok(1 desc)
+print /a/, "\n";       # perl: 1        <- a CORE list operator, same shape
+```
+
+**PPI:** correct after `grep`, `return`, `(` and `=` — and wrong after any
+other Word, including core list operators:
+
+```
+ok /x/, 1;      Word(ok)     Operator(/) Word(x) Operator(/) Operator(,) Number(1)
+print /x/, 1;   Word(print)  Operator(/) Word(x) Operator(/) Operator(,) Number(1)
+grep /x/, @a;   Word(grep)   Regexp::Match(/x/)  Operator(,) Symbol(@a)      <- right
+return /x/;     Word(return) Regexp::Match(/x/)                              <- right
+ok(/x/);        Word(ok) Structure(() Regexp::Match(/x/) Structure())        <- right
+```
+
+Nothing downstream can recover it: the pattern's own text has been
+re-tokenized *as code* (`/$qr/` becomes two divisions around a Symbol), so the
+match and the whole argument list are lost. The rule PPI already implements
+for `grep`/`return` is the general one — a `/` in TERM position (after a Word
+that is not a term itself) starts a match.
+
+**Repro + failing row:** Bug 8 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: SILENT WRONG, two flavours (task #351).**  The statement is
+dropped whole — `ok /$qr/, "desc";` produces no call at all (`t/re/pat_re_eval.t`
+line 1114, `t/re/pat.t`) — and with a modifier letter it compiles to real
+DIVISION: `ok /foo/x, "d";` emits `(P-/ (P-/ …) "x")` and dies at run time with
+`division-by-zero`.  No workaround yet: the repair belongs with the token-stream
+repair family (`_repair_*` in `Pl/Parser2.pm`, the §7b/§10 pattern), and the
+condition has to be perl's own (a `/` after a Word that is not a term and not a
+named unary), which is why it is a task and not a one-line guard.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it

@@ -751,13 +751,19 @@ sub parse {
       if ($self->has_environment && $self->environment->has_prototype($name)) {
         my $sig = $self->environment->get_prototype($name);
         if ($sig->{min_params} == 0 && @{$sig->{params}} == 0) {
-          # Zero-arg function - create funcall node
+          # Zero-arg function — a funcall node whose ONLY child is the name.
+          # That is the shape the rest of this file reads back ("Zero-param
+          # funcall has exactly 1 child (the function name)", the `*`
+          # filehandle-prototype post-pass below), and it is built the way
+          # every other internal node is: make_node_insert + add_child_to_node.
+          # It used to call a nonexistent `$self->add_node({type=>…})` — an
+          # OpcodeTree method, never a PExpr one — so this branch ALWAYS died
+          # with "Can't locate object method", the caller caught it, and the
+          # statement was silently dropped (task #343: `sub FILE1 () { 1 }` +
+          # `sub dummy { tell FILE1 }` — t/comp/parser.t).
+          my ($node, $call_id) = $self->make_node_insert('funcall');
           my $func_id = $self->make_node($e1);
-          my $call_id = $self->add_node({
-            type     => 'funcall',
-            function => $func_id,
-            args     => [],
-          });
+          $self->add_child_to_node($call_id, $func_id);
           say "parse(): Made funcall node $call_id for zero-arg function $name"
               if 1 & DEBUG;
           return $call_id;
@@ -806,7 +812,15 @@ sub parse {
     }
 
     # - - - What else can it be?? :-)
-    warn "Handle single node of unknown type: ref='" . ref($e1) . "'\n";
+    # NO `warn` here (task #339, ruled fable-answers-s400.md §6.2): this die is
+    # a routine DECLINE — the term walker declines bare words, prefix operators
+    # and a few token classes BY DESIGN, and callers catch it and take another
+    # route.  An unconditional warn made 25 companion files print an
+    # error-shaped line while compiling fine, which is the opposite of the
+    # rule-12 discipline.  The EVENT worth announcing is the one place a
+    # decline actually costs the program a statement: Pl/Parser.pm's two
+    # `PARSE ERROR` emitters (_announce_dropped_statement) say so there, with
+    # the file, line and source text this site does not have.
     die "Handle single node of unknown type. Dump:\n" . dump($e1);
   }
 

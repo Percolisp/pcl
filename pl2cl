@@ -123,6 +123,14 @@ GetOptions(
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or die "Usage: pl2cl [options] <file.pl>\n";
 
+# The #138-family drop announcement (task #339) is a diagnostic for the person
+# running a transpile.  `--module` is the RUNTIME transpiling a module in the
+# middle of a program run (p-transpile-file), so its stderr is the PROGRAM's —
+# and it only happens on a cold module cache, which would make the line
+# nondeterministic on top of noisy.  Off there; PCL_DROP_ANNOUNCE=all forces it
+# back on (that is how you see the drop inside a CPAN module).
+$Pl::Parser::ANNOUNCE_DROPS = 0 if $is_module;
+
 # Get path to this script for runtime to use
 my $script_path = abs_path($0);
 

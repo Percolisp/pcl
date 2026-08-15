@@ -8414,11 +8414,10 @@ sub _expr_scalar_rooted {
              map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
   my $ok = eval {
     # Analysis-only parse — no _v2_embed hook (see _lower_expr's native
-    # attempt for the rationale), and no PExpr warns: test helpers merge
-    # pl2cl's stderr into the generated CL, and any real problem repeats in
-    # the actual lowering (same rationale as VarAnnotator's _tw_expr_parse;
-    # `sub u { ... }` warned "Handle single node of unknown type" here).
-    local $SIG{__WARN__} = sub { };
+    # attempt for the rationale).  The `local $SIG{__WARN__} = sub {}` that
+    # used to sit here silenced ONE line, PExpr's "Handle single node of
+    # unknown type" warn (`sub u { ... }` triggered it); that warn is gone
+    # since task #339, so the workaround left with its cause.
     local $self->fallback_parser->{_v2_embed};
     my $expr_o = Pl::PExpr->new(
       e           => \@parts,

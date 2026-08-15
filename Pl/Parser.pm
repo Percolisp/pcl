@@ -8822,6 +8822,7 @@ sub _parse_expression_internal {
 
   if ($@) {
     my $error = $self->_shape_expr_error($@);
+    $self->_announce_dropped_statement($parts, $stmt, $error);
     return ("(progn ;; PARSE ERROR: $error\n nil)", []);
   }
 
@@ -8844,6 +8845,70 @@ sub _shape_expr_error {
   $error =~ s/ at \/.*//s;  # Remove file/line info
   $error =~ s/\n.*//s;      # First line only
   return $error;
+}
+
+# THE DROP ANNOUNCEMENT (task #339, ruled fable-answers-s400.md §6.2).
+# Both PARSE ERROR emitters above replace a whole statement with `nil` and let
+# the program run on — the #138 family, and the worst failure mode in this
+# codebase, because it is SILENT: perl-tests/bless.t drops a test row that then
+# appears in no count, in a file the sweep reports as passing.  So the one
+# place where the statement is actually lost says so, once, on stderr:
+#
+#   PCL: statement dropped at FILE line N: <source text> -- <reason>
+#
+# FIXED PREFIX: runners and tools/gate-set-scan.pl key on it, so do not
+# reword it.  (The ruling spells the separator as an em dash; it is ASCII `--`
+# here because pl2cl does `binmode(STDERR, ":utf8")`, so a raw UTF-8 em dash in
+# the source would be DOUBLE-encoded on the way out, and a `\x{2014}` character
+# would warn "Wide character" under any entry point without that layer.  Every
+# other diagnostic in this compiler is ASCII for the same reason.)  It is a TRANSPILE-time diagnostic — the runtime never sees a
+# drop — and pl2cl's exit status stays 0; a drop becomes a DIE only at the end
+# of Option B phase 2, when the census is explained and near zero (#343, ruled
+# §6.4).  In eval-string mode the transpile runs in the `pl2cl --server`
+# subprocess, whose stderr the runtime discards (`:error nil`), so this line
+# is a file-mode diagnostic in practice.
+#
+# Nothing is said at the DECLINE site (Pl/PExpr.pm's "Handle single node of
+# unknown type" die): a decline is not an event — the term walker declines by
+# design and callers re-route.
+# OFF in `pl2cl --module` (set there): that mode is the RUNTIME transpiling a
+# module while a program runs, so the line would land in the PROGRAM's stderr —
+# and only on a cold module cache, which makes it nondeterministic output as
+# well as noise.  Module drops are still counted, by tools/drop-census.pl and
+# tools/corpus-diff.pl, which read the emitted CL.  `PCL_DROP_ANNOUNCE=all`
+# forces them on, which is how you see a drop inside a CPAN module
+# (Data::Dump.pm has one).
+our $ANNOUNCE_DROPS = 1;
+my %announced_drop;   # "file:line:text" seen this process — announce ONCE
+sub _announce_dropped_statement {
+  my ($self, $parts, $stmt, $reason) = @_;
+  return unless $ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all';
+  # Prototype-extraction parses throw their output away (_emit is a no-op), so
+  # a drop there costs the program nothing and would only double the line.
+  return if $self->collect_prototypes_only;
+
+  my $file = $self->has_filename ? $self->filename : '-';
+  # The statement is the best source text when the caller has it; otherwise the
+  # token list it was called with is exactly what could not be lowered.
+  my @src = (ref($stmt) && eval { $stmt->isa('PPI::Element') })
+          ? ($stmt)
+          : grep { ref($_) && eval { $_->isa('PPI::Element') } }
+                 (ref($parts) eq 'ARRAY' ? @$parts : ());
+  my $line = 0;
+  for my $s (@src) { $line = $s->line_number // 0; last if $line }
+  my $text = join '', map { $_->content // '' } @src;
+  $text =~ s/\s+/ /g;
+  $text =~ s/^ //; $text =~ s/ $//;
+  $text = substr($text, 0, 120) . '...' if length($text) > 123;
+  $text = '(no source text)' unless length $text;
+  # ONCE per statement: a statement can reach an emitter twice (the v2 seam
+  # tries the form entry, a block body is lowered inside an outer lowering),
+  # and op/switch.t measured 138 events for 112 emitted drops.  The COUNT of
+  # drops is the runners' `drops` column (task #343), which reads the emitted
+  # CL; this line is the identity of the statement that was lost.
+  return if $announced_drop{"$file:$line:$text"}++;
+  print STDERR "PCL: statement dropped at $file line $line: $text -- $reason\n";
+  return;
 }
 
 # E2.final root flip (task #78): identical parse + context annotation to
@@ -8875,6 +8940,7 @@ sub _parse_expression_form {
 
   if ($@) {
     my $error = $self->_shape_expr_error($@);
+    $self->_announce_dropped_statement($parts, $stmt, $error);
     return Pl::CLForm::raw("(progn ;; PARSE ERROR: $error\n nil)");
   }
 

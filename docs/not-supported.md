@@ -831,6 +831,20 @@ supported, both as direct assignment targets and as live references:
 
 Only user-defined `: lvalue` subs remain unsupported.
 
+**What happens to the assignment (ruled s401, `docs/fable-answers-s400.md`
+§6.3).**  perl refuses to compile the whole FILE; PCL is finer-grained and
+deliberately so.  In FILE mode PCL **drops the assignment statement** — it is
+replaced by `nil`, execution continues, and the drop ANNOUNCES itself on
+stderr at transpile time (`PCL: statement dropped at F line N: … -- PCL: Can't
+modify non-lvalue subroutine call in assignment`, task #339).  In EVAL-STRING
+mode the error propagates instead, so the `eval` returns undef and sets `$@`
+exactly as perl's compile error does — which is what a feature probe
+(`eval 'return 1; &_sub = 1'`) is asking.  The file-mode drop is kept
+deliberately: dying at transpile would take every other row of
+`perl-tests/substr.t` and `t/op/sub_lval.t` with it (the s329 boundary — the
+sin was the silence, and the announcement removes it).  33 of the 379 drops in
+`docs/parse-error-drop-census-s399.tsv` are this refusal.
+
 **Rationale:** Implementing user lvalue subs requires an "lvalue context"
 that propagates through the call, returns a settable location, and then
 performs the store — a fundamentally different calling convention from

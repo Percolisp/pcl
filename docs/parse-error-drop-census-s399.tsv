@@ -10,8 +10,16 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL: 72 files, 379 drops — 9 perl-tests files (12 drops), 63 companion
-# files (367), ZERO in lib/.
+# TOTAL: 72 files, 377 drops — 9 perl-tests files (12 drops), 63 companion
+# files (365), ZERO in lib/.
+#
+# EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
+# fail-baseline row — never by re-blessing the whole census from a run):
+#   s402  t/comp/parser.t 10 -> 8: the `add_node` internal error is FIXED
+#         (Pl/PExpr.pm's zero-arg-prototype branch called a method PExpr does
+#         not have, so it ALWAYS died and the statement was dropped —
+#         `sub FILE1 () { 1 }` + `sub dummy { tell FILE1 }`).  Verified by
+#         tools/run-perl-suite.pl's DROPS column on that file.  Task #343.
 #
 # Causes, aggregated over files:
 #   56  Bug. Fell through. Missing case: [        <- the dominant one
@@ -20,8 +28,8 @@
 #    2  Ternary operator: Found '?'
 #    2  Got op X, not postfix. But there is nothing after it??
 #    1  WTF? :-) Expr starts with ->/brace??
-#    1  Can't locate object method "add_node" via package "Pl::PExpr"  <- an
-#       internal error, not a decline
+#    0  Can't locate object method "add_node" via package "Pl::PExpr"  <- an
+#       internal error, not a decline; FIXED s402 (was 1)
 #
 # A drop is NOT always harmless: perl-tests/bless.t's single drop is the test
 # row `is ref $untied, "main", 'blessing through tied refs' or diag $@;` — an
@@ -46,7 +54,7 @@ t/class/phasers.t	2	Bug. Fell through. Missing case: [ x2
 t/class/threads.t	1	Bug. Fell through. Missing case: [ x1
 t/class/utf8.t	1	Bug. Fell through. Missing case: [ x1
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
-t/comp/parser.t	10	Bug. Fell through. Missing case: [ x6 | Can't locate object method "add_node" via package "Pl::PExpr" x2 | Handle single node of unknown type. Dump: x2
+t/comp/parser.t	8	Bug. Fell through. Missing case: [ x6 | Handle single node of unknown type. Dump: x2
 t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
 t/io/fflush.t	1	Handle single node of unknown type. Dump: x1
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
