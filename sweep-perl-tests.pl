@@ -257,6 +257,26 @@ sub mem_report {
     return sprintf("min MemAvailable during the run: %.1f GB", $min_mem_kb / 1048576);
 }
 
+# An SBCL child that used string eval spawns `pl2cl --server` (the persistent
+# transpiler).  When that SBCL is killed the server is REPARENTED TO INIT and
+# keeps running: its stdin has hit EOF, but the loop only notices between
+# requests, so a server that was mid-transpile grinds on.  Measured s396: two
+# such orphans sat at 4.8 GB and 4.6 GB for half an hour, competing with the
+# run that had outlived them — and MemAvailable is exactly what decides
+# whether a parallel sweep stays stable (task #215).
+#
+# Reap them between files.  PPID 1 is the whole test: a server whose SBCL is
+# alive has that SBCL as its parent, so a CONCURRENT run in another shell is
+# never touched.  Same helper in tools/run-perl-suite.pl.
+sub reap_orphan_transpilers {
+    my @ps = `ps -eo pid,ppid,args 2>/dev/null`;
+    for my $l (@ps) {
+        next unless $l =~ m{^\s*(\d+)\s+1\s+.*\bpl2cl\s+--server\b};
+        kill 'KILL', $1;
+    }
+    return;
+}
+
 # Parallel dispatch.  A queue entry is [file, timeout]: a file that TIMEOUTs is
 # re-queued once at $RETRY x its timeout (task #176).  Because the retry goes on
 # the END of the queue it also runs on a quieter machine, which is the other
@@ -363,6 +383,7 @@ while (@queue || %children) {
 
         printf "  done  %-22s %s  [%ds]\n", $info->{name}, $line_result, $elapsed;
         STDOUT->flush();
+        reap_orphan_transpilers();
 
         delete $children{$pid};
     }

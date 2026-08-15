@@ -3156,3 +3156,28 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
 - **The full sweep is what found it, and the Pl/t gate could not have.**  Both
   gates were green with the bug present; only the per-file row audit against
   `docs/pass-baseline.tsv` showed the two assertions had ceased to exist.
+
+## s396e — "already a vector" and "spreads under `\(…)`" are two questions
+
+- **They differ on exactly ONE shape, a HASH**, and conflating them broke
+  op/inc.t.  `_child_is_list_expr` answers *"does this already EVALUATE to a
+  vector, so a paren around it needs no `(vector …)` wrapper?"* — a hash
+  evaluates to a hash-table, which is NOT a vector.  `_is_list_node_for_refgen`
+  in `'spread'` mode answers *"does `\(X)` distribute over more than one
+  element?"* — a hash spreads into its 2N key/value scalars.
+- **Widening the wrong one changes LVALUE lowering**, because
+  `gen_tree_val_form` consults the same predicate: with `%h` called a list,
+  `(%h)` stopped emitting `(vector %h)`, so `(%h) = LIST` lowered as
+  `p-hash-=` instead of `p-list-=` and the chained
+  `my (%orig) = my (%inc) = my (%dec) = …` in op/inc.t lost 8 rows.  One
+  function, one MODE argument, so the shared part cannot drift.
+- **An orphaned `pl2cl --server` can hold GIGABYTES for as long as it lives.**
+  An SBCL child that used string eval spawns one; when `timeout -k` SIGKILLs
+  that SBCL the server is reparented to init, and because its loop only checks
+  stdin BETWEEN requests, one caught mid-transpile (op/cond.t's 20k-nested
+  ternary — the quadratic pathological-nesting case) never notices EOF.  Two of
+  them held 4.8 GB and 4.6 GB for half an hour in s396.  Both runners now reap
+  `pl2cl --server` processes whose PPID is 1 between files — PPID 1 is the
+  whole test, so a concurrent run in another shell is untouched.  This is the
+  MEMORY half of #273, and it feeds #215: MemAvailable is what decides whether
+  a parallel sweep stays stable.

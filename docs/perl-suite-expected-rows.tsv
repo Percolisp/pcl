@@ -1211,6 +1211,7 @@ op/ver.t	Warnings are enabled by default post 5.35
 op/ver.t	at t/op/ver.t line 20
 op/ver.t	at t/op/ver.t line 59
 op/ver.t	v-strings even work in Mordor
+re/opt.t	*summary*
 re/pat_re_eval.t	(*{ ... }) ctl_n 1
 re/pat_re_eval.t	(*{ ... }) ctl_n 2
 re/pat_re_eval.t	(*{ ... }) ctl_n 3

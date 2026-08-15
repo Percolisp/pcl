@@ -2937,7 +2937,8 @@ sub gen_prefix_op_form {
       if ($self->expr_o->is_internal_node_type($inner_node)
           && ($inner_node->{type} // '') eq 'tree_val') {
         my $tv_kids = $self->expr_o->get_node_children($operand_id);
-        if (@$tv_kids == 1 && !$self->_is_list_node_for_refgen($tv_kids->[0])) {
+        if (@$tv_kids == 1
+            && !$self->_is_list_node_for_refgen($tv_kids->[0], 'spread')) {
           # Single scalar child: \(scalar_expr) == \scalar_expr
           my $saved_ctx = $self->expr_o->get_node_context($operand_id);
           $self->expr_o->set_node_context($operand_id, 0);
@@ -3491,14 +3492,10 @@ sub _child_is_list_expr {
   my ($self, $node_id) = @_;
   my $node = $self->expr_o->get_a_node($node_id);
 
-  # Array variable: @arr, @_  — already a vector.  A HASH flattens to a
-  # key/value list in list context just as an array does, so `\(%h)` must
-  # distribute into 2N scalar refs (perl), not collapse to one `\%h`.  The
-  # trailing-character test is what separates the variable `%h` / `%$r` /
-  # `%{…}` from the MODULUS operator, whose token content is exactly "%".
+  # Array variable: @arr, @_  — already a vector
   if (ref($node) && $node->can('content')) {
     my $content = $node->content() // '';
-    return 1 if $content =~ /^\@/ || $content =~ /^\%[\w\$\{:]/;
+    return 1 if $content =~ /^@/;
   }
 
   # Only internal (non-leaf) nodes below this point
@@ -3529,11 +3526,28 @@ sub _child_is_list_expr {
 # Returns true if the node is a list-generating expression for \(LIST) purposes:
 # arrays, ranges, list-context functions (same as _child_is_list_expr but also
 # covers the range operator .. since \(1..3) must spread into N scalar refs).
+#
+# MODE picks which of two nearly-identical questions is being asked, and they
+# differ on exactly ONE shape — a hash:
+#   default    "does this already EVALUATE to a vector, so a paren around it
+#              needs no (vector …) wrapper?"  A hash evaluates to a hash-table,
+#              which is NOT a vector: `(%h)` must keep its wrapper, and `(%h) =
+#              LIST` must stay a LIST assignment (op/inc.t's chained
+#              `my (%orig) = my (%inc) = …` breaks otherwise).
+#   'spread'   "does `\(X)` distribute over more than one element?"  A hash
+#              spreads into its 2N key/value scalars, so `\(%h)` is 2N scalar
+#              refs and not one `\%h` (perl, probed).
+# One function so the shared part cannot drift; the trailing-character test is
+# what separates the VARIABLE `%h` / `%$r` / `%{…}` from the MODULUS operator,
+# whose token content is exactly "%".
 sub _is_list_node_for_refgen {
-  my ($self, $node_id) = @_;
+  my ($self, $node_id, $mode) = @_;
   return 1 if $self->_child_is_list_expr($node_id);
-  # Range operator .. — binary op stored as PPI::Token::Operator with children
   my $node = $self->expr_o->get_a_node($node_id);
+  if (($mode // '') eq 'spread' && ref($node) && $node->can('content')) {
+    return 1 if ($node->content() // '') =~ /^\%[\w\$\{:]/;
+  }
+  # Range operator .. — binary op stored as PPI::Token::Operator with children
   if (ref($node) eq 'PPI::Token::Operator') {
     return 1 if ($node->content() // '') eq '..';
   }
