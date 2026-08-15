@@ -4,6 +4,137 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 396 (2026-08-15, Opus 5) — #325 refaliasing end to end, then #314's residue measured to the bottom
+
+Worked the queue in order: #325 (refaliasing), which split into three commits,
+and then the remaining #314 families — where the session's other product is a
+set of MEASUREMENTS that retire most of them.
+
+**Companion-suite rows recovered: +149** (op/const-optree.t 0 → 86,
+op/for-many.t 0 → 63), plus **4 rows in `perl-tests/aassign.t`** whose blessed
+failures were the refaliasing block.  Gate 141 files / 5197 tests, failures
+exactly the pclxs xs rows the user has said to ignore.  Cache generation
+v2-145 → v2-147.
+
+**s396a (`d0032e8`) — a `\`-cast LVALUE is an ALIAS.**  Six spellings probed
+against perl 5.40.3 before any code: **four were SILENT WRONG** (`\$x = \$y`,
+`\my $x`, `\my @b`, `\my %g` all wrote into a throwaway ref box and changed
+nothing) and two were hard refusals.  The fix is ONE arm in `p-setf`'s PLACE
+dispatch, because every spelling the emitter produces converges there already —
+`\$x = …` and `\my @b = …` as a plain place, `(\$x) = @_` through `p-list-=`'s
+default arm, `\$h{k} = …` as a `(p-gethash-box …)` place, `\&c = \&d` as
+`(p-backslash-sub …)`.  The arm REBINDS THE NAME'S STORAGE: `(setq $x <$y's
+box>)`, the vector/hash-table object for `@`/`%`, the referent box written into
+the slot for an element.  `\$x == \$y` follows for free.
+
+Two things the probes found that the design did not predict: `\$x = \$y` and
+`\$x = $r` differ by ONE BOX LAYER and **`is-ref` is what tells them apart**
+(a layer count peels one too many through a ref-to-ref); and **`\(EXPR)`
+collapses to `\EXPR` as an rvalue but NOT as an lvalue** — the parens are what
+make `\($x) = @_` a LIST assignment.
+
+**#325's row estimate was 46% wrong, and only running the file could say so.**
+re/opt.t (639 of the ~1400) had exactly one refusal, so the task sized it as
+reachable; with the refusal gone it transpiles, runs, and dies on
+`re::optimization` — perl's XS readout of its own regex optimizer.  Registered
+XDIFF.  **A "one refusal blocks N rows" estimate is an upper bound until the
+file has run.**
+
+**s396b (`84afe27`) — `for \my %e (@list)` (#327).**  PPI cannot lex a `for`
+whose loop variable is a `\`-cast or a non-scalar: the compound keeps only the
+word `for` and swallows the rest of the file into one flat sibling, so no tree
+edit can repair it.  Token-stream repair + reparse (the #270 pattern), spelled
+as a re-write into `for my $tmp (LIST) { \my %e = $tmp; BODY }` so the alias
+mechanism does the work — no new foreach macro, no VarAnnotator work.  The one
+semantic question was PROBED rather than assumed: **perl does NOT restore an
+aliased PACKAGE foreach variable**, so no save/restore is needed.
+op/const-optree.t 0 → 86 (the remaining 62 are `B::` optree inspection).
+
+**s396c (`ebabc69`) — `for my ($q,$r) (LIST)` (#329), the n-at-a-time foreach.**
+Same mis-lex, same cure; re-spelled as a `while` over `map \$_, LIST` with
+`\my $q = $L[$I]` per variable.  Three decisions, each settled by a probe:
+`map \$_` and not `\(LIST)` (**`\(@Q, @A)` is two ARRAY refs** — the first
+version silently ran two iterations instead of six); `while` + `continue` and
+not a C-style `for` (perl allows a continue block here, and putting the step in
+it is what puts `next`/`redo`/`last` where perl puts them); and a PAD array
+with its own slot per missing variable.  op/for-many.t 0 → **63 ok / 8**, where
+2 of the 8 are principle-9 "reject invalid perl" rows and 6 are one missing
+fact — PCL has read-only ARRAYS but no read-only SCALARS (task #330).
+
+Two pre-existing bugs the probes turned up and this commit fixes: **`\(%h)`
+gave one HASH ref where perl gives 2N SCALAR refs**, and the widening moved
+`(%h) = LIST` from `p-list-=` to `p-hash-=` — the only corpus-diff hit,
+verified by running aassign.t.
+
+### What the measurements retired
+
+Half of #314's residue is **not reachable, measured not guessed**:
+
+| file | rows | what it actually needs |
+|---|---|---|
+| op/coresubs.t | 1109 | `use B` + `B::walkoptree` — waiving its state blocker experimentally makes it transpile and produce ZERO rows |
+| re/opt.t | 639 | `re::optimization` (perl's own regex-optimizer readout) |
+| op/svleak.t | 156 | `XS::APItest::sv_count` (PL_sv_count) |
+| io/shm.t | 21 | IPC::SysV |
+| op/const-optree.t | 62 of the remainder | `B::` optree inspection |
+
+**A t/ file that measures perl's INTERNALS is not a PCL row count** — check
+what a file's assertions read before sizing a family from its plan.
+
+**F-E (comp/our.t, 7 rows) was ATTEMPTED AND REVERTED → task #328.**  Narrowing
+the `our shadows a my-lexical` refusal to the exception partition makes the file
+7/7, but it is a SILENT WRONG: a use after `our $y` keeps reading the `my $y`
+it shadows (eight shapes probed, five diverge).  And the obvious fix does not
+work — **`main::$z` and `$z` are THE SAME CL SYMBOL**, so qualifying cannot
+escape a lexical binding; it needs a global-read FORM.  The refusal stands.
+
+### s396d/e — what the SWEEP and the SUITE caught that both gates missed
+
+Two bugs shipped green through `tools/prove-core` and were found only by
+auditing the two full populations:
+
+- **s396d (`fbb47cd`)**: aassign.t reported 4 FIXED rows but emitted 3 FEWER —
+  two of the "fixed" ones had **stopped existing**.  `\($a[0], $a[1]) = \(…)`,
+  the LIST spelling of an element alias, reaches p-setf as the PLAIN accessor
+  `(p-aref …)` while the single-element spelling arrives as `(p-aref-box …)`;
+  s396a took only the `-box` twins, so the list spelling hit rule 12's die at
+  MACROEXPANSION and took the whole enclosing form — and its two `is` calls —
+  out of the load.  **sweep-diff's FIXED bucket counts a row that VANISHED**,
+  and LOST cannot catch it either (LOST reads the pass baseline; the row was
+  never passing).  All four element spellings, in both flavours, now map to one
+  slot helper.
+- **s396e (`342d82c`)**: the `\(%h)` fix had been put in `_child_is_list_expr`,
+  which `gen_tree_val_form` also consults — so `(%h)` stopped emitting
+  `(vector %h)` and `(%h) = LIST` lowered as `p-hash-=`.  op/inc.t's chained
+  `my (%orig) = my (%inc) = …` lost 8 rows to that.  The two questions differ on
+  exactly one shape and now share one function with a MODE argument.
+
+**Baselines.** `docs/fail-baseline.tsv` 684 → 680 (the four aassign.t rows out
+by EDIT), `docs/pass-baseline.tsv` re-blessed gate-green after the per-file
+audit (`# taken-at: ebabc69`), and the two now read +0 against each other.
+Five rows spliced into `docs/perl-suite-run.tsv`.  `comp/require.t` gets a
+450 s row in `docs/perl-suite-timeouts.tsv` (#326's "do this regardless" half):
+with it the file returns its snapshot 909/835 exactly, instead of the 294–351
+a 90 s default gives.
+
+**And the 5 GB the user caught.**  An SBCL child that used string eval spawns
+`pl2cl --server`; when `timeout -k` SIGKILLs that SBCL the server is reparented
+to init, and since its loop only checks stdin BETWEEN requests, one caught
+mid-transpile never notices EOF.  Two orphans from op/cond.t's 20k-nested
+ternary sat at 4.8 GB and 4.6 GB for half an hour.  **Both runners now reap
+`pl2cl --server` processes whose PPID is 1 between files** — PPID 1 is the whole
+test, so a concurrent run in another shell is untouched.  Memory half of #273;
+it feeds #215.
+
+### Tasks
+
+Filed **#327** (done), **#328** (our-shadows-my, with the eight probe shapes and
+why qualification cannot work), **#329** (done), **#330** (read-only scalars,
+with the hot-path cost stated).  #325 closes for the assignment and foreach
+forms; its residue is named in `docs/not-supported.md`.
+
+---
+
 ## Session 395 (2026-08-15, Opus 5) — #314 families F-B/F-A2 + its biggest single, then the #316/#317/#319/#320 fillers
 
 Worked Fable's s394 queue in order.  **Companion-suite rows recovered this

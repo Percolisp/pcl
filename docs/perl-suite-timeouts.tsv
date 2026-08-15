@@ -18,3 +18,4 @@
 #    stale row costs nothing on a fast run, but it misreports the file).
 #
 re/pat_advanced.t	900	s363/#254 B-i: de-gated by the cond-rename eval waiver, it now runs to completion (1669 TAP rows) but needs ~600s wall — at the 90s default it TIMEOUTs and its 936 passing rows evaporate invisibly.
+comp/require.t	450	s396 (task #326): the file is genuinely SLOW, not hung — it returns 909 ok / 835 at --timeout 300 and only 294-351 at the 90s default, where its 909 passing rows evaporate invisibly (the #176 pack.t lesson).  Sized from the 300s measurement, rounded up 1.5x for machine load.

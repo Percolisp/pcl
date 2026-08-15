@@ -58,6 +58,20 @@
 #   comp/require.t 909 (--timeout 300), re/regexp.t 793 and re/regexp_noamp.t
 #   794 (--timeout 400).  Those six re/regexp*.t files and comp/require.t have
 #   no docs/perl-suite-timeouts.tsv row -- the #176 hole, still open.
+# s396 (#325/#327/#329 refaliasing + the n-at-a-time foreach): FIVE rows
+#   re-measured in the fixed tree and spliced.  op/const-optree.t
+#   TRANSPILE-FAIL -> 86/62 and op/for-many.t TRANSPILE-FAIL -> 63/8 are the
+#   two features landing; op/aassign.t 169 -> 173 is the refaliasing block in
+#   that file; re/opt.t is TRANSPILE-FAIL -> XDIFF (it transpiles now and needs
+#   re::optimization, a not-supported entry).  op/substr.t 376/23 -> 376/24 is
+#   NOT a regression: at s395 it CRASHED before its last test, and the
+#   refaliasing fix lets it reach test 400 and JUDGE it (failing on 4-arg
+#   substr as an lvalue, task #209) -- one more assertion evaluated, C_ok
+#   unchanged.  Verified against a worktree at 6fa8cb9.
+# s396 NOT spliced, deliberately: comp/require.t and the six re/regexp*.t are
+#   TIMEOUT-shaped and this run was contended (op/cond.t's solo phase held
+#   5.4 GB).  comp/require.t returns its snapshot 909/835 exactly once given
+#   the timeouts.tsv allowance added this session; the six are task #326.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -224,7 +238,7 @@ mro/vulcan_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: 
 mro/vulcan_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 mro/vulcan_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
 op/64bitint.t	425	0	425	0	OK	
-op/aassign.t	188	1	169	20	DIFF	
+op/aassign.t	188	1	173	16	DIFF	
 op/alarm.t	5	0	5	0	OK	
 op/anonconst.t	7	0	1	6	DIFF	
 op/anonsub.t	14	1	1	5	DIFF	
@@ -252,7 +266,7 @@ op/closure.t	281	1	267	3	DIFF	undef-fn:main::pl-ff
 op/cmpchain.t	1750	0	1476	274	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.
 op/concat2.t	4	0	4	0	OK	
 op/cond.t	5	0	4	0	XDIFF	timeout | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
-op/const-optree.t	148	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/const-optree.t	148	0	86	62	DIFF	
 op/context.t	8	0	7	1	DIFF	
 op/coreamp.t	778	0	0	0	DIFF	undef-fn:|File::Spec|::pl-Functions
 op/coresubs.t	1109	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -286,7 +300,7 @@ op/filetest.t	436	0	16	6	DIFF	undef-fn:main::pl-f
 op/filetest_stack_ok.t	136	0	71	65	DIFF	
 op/filetest_t.t	7	0	0	0	DIFF	crash:sb-int:simple-file-error: Error opening #P"/dev/tty": No such device or address
 op/flip.t	14	0	12	2	DIFF	
-op/for-many.t	71	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/for-many.t	71	0	63	8	DIFF	
 op/for.t	148	1	0	0	TRANSPILE	TRANSPILE-FAIL
 op/fork.t	28	0	1	0	DIFF	
 op/fresh_perl_utf8.t	1	0	0	1	DIFF	
@@ -403,7 +417,7 @@ op/study.t	43	0	43	0	OK
 op/studytied.t	14	0	13	1	DIFF	
 op/sub.t	64	1	51	14	DIFF	
 op/sub_lval.t	211	0	12	58	DIFF	undef-fn:main::pl-rlv1t
-op/substr.t	400	0	376	23	DIFF	crash:simple-error: substr outside of string
+op/substr.t	400	0	376	24	DIFF	
 op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/svflags.t	16	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -460,7 +474,7 @@ re/fold_grind_l.t	113	0	0	0	DIFF
 re/fold_grind_u.t	213	0	0	0	DIFF	
 re/keep_tabs.t	14	0	14	0	OK	
 re/no_utf8_pm.t	1	0	1	0	OK	
-re/opt.t	639	17	0	0	TRANSPILE	TRANSPILE-FAIL
+re/opt.t	639	17	0	0	XDIFF	undef-fn:re::pl-optimization | not-supported.md §re::optimization - the regex engine's internal optimizer report (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
 re/overload.t	87	0	3	0	DIFF	
 re/pat.t	1263	4	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
 re/pat_advanced.t	1678	0	937	732	DIFF	
