@@ -9,6 +9,17 @@
 # passing rows vanish from the signal without anything saying so (the #176
 # pack.t lesson: a file invisible to the gate reads as "0 new failures").
 #
+# NOT FOR HANGS (measured s404, task #345).  This registry promises "give the
+# file the time and it finishes".  A file that returns the SAME rows at 10x the
+# budget is not slow, it is stuck, and an allowance here would make that promise
+# false while costing the run its minutes: those files live in %QUICK_SKIP in
+# tools/run-perl-suite.pl instead, with the measurement that put them there.
+# The test is task #326's: run it at a LARGER budget and compare the row counts.
+#
+# In `--quick` (the default companion form), a file registered here for more
+# than 120 s is NOT RUN at all and says so — a truncated TAP stream is a
+# different measurement, not a cheaper one.
+#
 # Rules:
 #  - one line per file, with a CAUSE naming why it needs the time (and the
 #    measurement it was sized from) — an allowance without a cause is a
@@ -19,3 +30,4 @@
 #
 re/pat_advanced.t	900	s363/#254 B-i: de-gated by the cond-rename eval waiver, it now runs to completion (1669 TAP rows) but needs ~600s wall — at the 90s default it TIMEOUTs and its 936 passing rows evaporate invisibly.
 comp/require.t	450	s396 (task #326): the file is genuinely SLOW, not hung — it returns 909 ok / 835 at --timeout 300 and only 294-351 at the 90s default, where its 909 passing rows evaporate invisibly (the #176 pack.t lesson).  Sized from the 300s measurement, rounded up 1.5x for machine load.
+re/pat_psycho.t	450	s404 (#345 / ruling s400 §7.4): the pathological-pattern file. Measured this session — at --timeout 300 it COMPLETES (DIFF, 11 of perl's 15 rows) and at --timeout 900 under load it TIMEOUTs at 12 rows, so it is genuinely SLOW-and-flaky, not stuck (re/speed.t, measured the same way, returns 1 of 59 rows at both budgets and is in %QUICK_SKIP instead). Sized from the 300s completion, rounded up 1.5x. Above the 120s quick cap, so --quick does not run it.

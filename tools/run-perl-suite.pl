@@ -29,6 +29,14 @@
 #   --timeout N        per-file SBCL timeout seconds (default 90); a file
 #                      registered in docs/perl-suite-timeouts.tsv gets the
 #                      LARGER of its allowance and this (see that file)
+#   --quick            the DEFAULT companion form (task #345): do not run the
+#                      files that spend a whole timeout to produce nothing new
+#                      — the #326 hang set — and do not run a file whose
+#                      registered allowance exceeds the quick CAP (120 s),
+#                      because it cannot finish inside it.  Every such file
+#                      gets a NOT-RUN row naming which of the two reasons and
+#                      its cause, so the coverage hole is visible and still
+#                      fails the run; see the --quick block below.
 #   --no-core          skip the saved-core fast path (source-load the runtime)
 #   --tsv FILE         also write one TSV row per file (rel, P ok/notok,
 #                      C ok/notok, status, signature) for diffing runs
@@ -172,6 +180,7 @@ my $expected_rows_tsv = "$root/docs/perl-suite-expected-rows.tsv";
 my $fixture_tsv  = "$root/docs/perl-suite-fixture.tsv";
 my $timeouts_tsv = "$root/docs/perl-suite-timeouts.tsv";
 my $bless_rows;
+my $quick;
 my (@dirs, @files);
 while (@ARGV) {
   my $a = shift @ARGV;
@@ -179,6 +188,7 @@ while (@ARGV) {
   elsif ($a eq '--tdir')           { $tdir = shift @ARGV }
   elsif ($a eq '--dir')            { push @dirs, shift @ARGV }
   elsif ($a eq '--all')            { $all = 1 }
+  elsif ($a eq '--quick')          { $quick = 1 }
   elsif ($a eq '--jobs')           { $jobs = shift @ARGV }
   elsif ($a eq '--timeout')        { $timeout = shift @ARGV }
   elsif ($a eq '--no-core')        { $no_core = 1 }
@@ -293,6 +303,81 @@ for my $d (@dirs) {
     $d, $n_all, $n_all - $n_harness, $n_harness;
 }
 @files or die "no files (give t-relative paths, --dir <subdir>, or --all)\n";
+
+# ------------------------------------- files this run deliberately does NOT run
+#
+# QUARANTINE (task #160, ruled s320): files that take the whole MACHINE down,
+# not just themselves.  op/list.t alone consumed a 10 GB cgroup in 53 s under
+# --jobs 1 on an idle box and got OOM-killed, taking the run with it and
+# leaving op/pack.t unmeasured behind it in the queue.  The transpiler is
+# innocent (pl2cl: 1.23 s, 64 MB, 564 lines of CL) — the blowup is SBCL-side,
+# diagnosis is POST-R1 and needs the user to re-authorize running these.
+my %QUARANTINE = (
+  'op/list.t' => 'task #160 — 10 GB SBCL blowup OOM-kills the run',
+  'op/pack.t' => 'task #160 — never measured; was queued behind op/list.t when it OOMed',
+);
+
+# --quick (task #345, ruled docs/fable-answers-s400.md §8) — the DEFAULT
+# companion form, and the reason the companion suite is affordable per change.
+#
+# Roughly HALF a full run's wall time is spent on the same known-bad tail every
+# time, and it produces NOTHING: the #326 files stop dead at the same TAP row
+# whatever the budget (793+112 at 150 s AND at 400 s — measured, task #326), and
+# a file whose registered allowance is minutes cannot finish inside a quick
+# run's budget at all.  Quick mode does not run either kind.
+#
+# It does NOT hide them.  Each gets a NOT-RUN row carrying WHICH rule fired and
+# its cause — an UNEXPLAINED status, exactly like QUARANTINE, so the file still
+# fails the run and still shows in the tsv as a hole.  That is the difference
+# between "not measured this run" and "fine": the hole stays countable.
+#
+# Why NOT-RUN rather than "run it with a smaller budget": a truncated TAP stream
+# is not a cheaper measurement, it is a DIFFERENT one — C_ok then means "how far
+# it got before the cutoff" (the s325/#195 lesson, see the snapshot header), so
+# the file's verdict would differ between quick and full runs for no reason but
+# the clock.  Quick's bar is that every file which runs in BOTH forms gets the
+# SAME verdict; a capped-and-truncated file would break exactly that.
+#
+# MEMBERSHIP IS MEASURED, never assumed: a file belongs here only when a
+# LARGER budget returns the SAME rows (task #326's own test).  A file that
+# merely needs longer belongs in docs/perl-suite-timeouts.tsv instead — that
+# registry's promise is "give it the time and it finishes", and a file which
+# never finishes would make the promise false.
+my %QUICK_SKIP = (
+  # The six drivers over t/re/re_tests that share one hang (task #326).  They
+  # burn the whole per-file timeout to re-emit the same ~905 rows.
+  're/regexp.t'             => 'task #326 — hangs at TAP row ~905 (identical counts at 150 s and 400 s)',
+  're/regexp_noamp.t'       => 'task #326 — same driver/data as re/regexp.t, same stall',
+  're/regexp_notrie.t'      => 'task #326 — same driver/data as re/regexp.t, same stall',
+  're/regexp_qr.t'          => 'task #326 — same driver/data as re/regexp.t, same stall',
+  're/regexp_qr_embed.t'    => 'task #326 — same driver/data as re/regexp.t, same stall',
+  're/regexp_trielist.t'    => 'task #326 — same driver/data as re/regexp.t, same stall',
+  # Two of the three files task #345 called "the tail", measured s404 at 90 s,
+  # 300 s and 900 s: 10x the default budget buys nothing, so an allowance would
+  # be a lie.  (The third, re/pat_psycho.t, IS merely slow — it completed at
+  # 300 s with 11 rows — so it is registered in docs/perl-suite-timeouts.tsv
+  # instead, and the allowance cap below keeps it out of a quick run anyway.)
+  're/overload.t'           => 'HANG measured s404 — 3 of perl\'s 87 rows at 90 s, at 300 s (s398) and at 900 s',
+  're/speed.t'              => 'HANG measured s404 — 1 of perl\'s 59 rows at 300 s AND at 900 s (pathological patterns it times; #326 family)',
+);
+my $QUICK_CAP = 120;   # seconds; a registered allowance above this is not run
+
+my %not_run;
+for my $rel (@files) {
+  if ($QUARANTINE{$rel}) { $not_run{$rel} = "QUARANTINED: $QUARANTINE{$rel}"; next }
+  next unless $quick;
+  if ($QUICK_SKIP{$rel}) { $not_run{$rel} = "QUICK-SKIP: $QUICK_SKIP{$rel}"; next }
+  my $e = $file_timeout{$rel} or next;
+  $not_run{$rel} = sprintf("QUICK-CAPPED: registered allowance %ds > quick cap %ds — %s",
+                           $e->{secs}, $QUICK_CAP, $e->{cause})
+    if $e->{secs} > $QUICK_CAP;
+}
+my @quarantined    = grep { ($not_run{$_} // '') =~ /^QUARANTINED/  } @files;
+my @quick_skipped  = grep { ($not_run{$_} // '') =~ /^QUICK-SKIP/   } @files;
+my @quick_capped   = grep { ($not_run{$_} // '') =~ /^QUICK-CAPPED/ } @files;
+printf STDERR "quick mode: %d file(s) not run (%d hang-set, %d allowance > %ds) — listed NOT-RUN below\n",
+  scalar(@quick_skipped) + scalar(@quick_capped),
+  scalar(@quick_skipped), scalar(@quick_capped), $QUICK_CAP if $quick;
 
 # ------------------------------------------------- crash-honest reporting
 # A run that DIES must never look like a run that was never asked for
@@ -430,13 +515,16 @@ mkdir $faillog;
 my $journal_file = "$faillog/run-journal.tsv";
 open my $JOURNAL, '>', $journal_file or die "write $journal_file: $!\n";
 $JOURNAL->autoflush(1);
-printf $JOURNAL "# run-perl-suite %s: %d files, jobs=%d timeout=%d\n",
-  scalar(localtime), scalar(@files), $jobs, $timeout;
+printf $JOURNAL "# run-perl-suite %s: %d files, jobs=%d timeout=%d%s\n",
+  scalar(localtime), scalar(@files), $jobs, $timeout,
+  ($quick ? sprintf(" QUICK (cap %ds; %d file(s) not run — see the NOT-RUN rows)",
+                    $QUICK_CAP, scalar(@quick_skipped) + scalar(@quick_capped))
+          : '');
 print $JOURNAL "# file  P_ok  P_notok  C_ok  C_notok  status  sig   [P=PERL, C=PCL]\n";
 # Timeout allowances in effect for files in THIS run — printed to both the
 # journal and the terminal, so a long-running file's allowance is never a
 # silent property of a registry nobody reads.
-for my $rel (sort grep { $file_timeout{$_} } @files) {
+for my $rel (sort grep { $file_timeout{$_} && !$not_run{$_} } @files) {
   my $e = $file_timeout{$rel};
   printf $JOURNAL "# timeout-allowance\t%s\t%d\t%s\n", $rel, timeout_for($rel), $e->{cause};
   printf STDERR "timeout allowance: %-24s %4ds  (%s)\n", $rel, timeout_for($rel), $e->{cause};
@@ -586,28 +674,18 @@ my %HEAVY = map { $_ => 1 } (
 );
 my @heavy = grep { $HEAVY{$_} } @files;
 
-# QUARANTINE (task #160, ruled s320): files that take the whole MACHINE down,
-# not just themselves.  op/list.t alone consumed a 10 GB cgroup in 53 s under
-# --jobs 1 on an idle box and got OOM-killed, taking the run with it and
-# leaving op/pack.t unmeasured behind it in the queue.  The transpiler is
-# innocent (pl2cl: 1.23 s, 64 MB, 564 lines of CL) — the blowup is SBCL-side,
-# diagnosis is POST-R1 and needs the user to re-authorize running these.
-#
-# Quarantine means NOT RUN, never "skipped": each gets a NOT-RUN row carrying
-# the reason, which is an UNEXPLAINED status, so the file still fails the run
-# and still shows up in the tsv as a hole in the release signal.  Hiding it
-# would be the one thing worse than not measuring it.
-my %QUARANTINE = (
-  'op/list.t' => 'task #160 — 10 GB SBCL blowup OOM-kills the run',
-  'op/pack.t' => 'task #160 — never measured; was queued behind op/list.t when it OOMed',
-);
-my @quarantined = grep { $QUARANTINE{$_} } @files;
-for my $rel (@quarantined) {
-  record_result([$rel, 0, 0, 0, 0, 'NOT-RUN', "QUARANTINED: $QUARANTINE{$rel}", -1]);
-  printf "%-24s %s\n", $rel, "NOT-RUN (QUARANTINED: $QUARANTINE{$rel})";
+# The deliberately-not-run files (QUARANTINE / --quick, decided above): one
+# NOT-RUN row each, carrying WHICH rule fired and its cause.  Recorded here,
+# after the journal is open, so they reach the journal like any other row.
+for my $rel (grep { $not_run{$_} } @files) {
+  # The tsv/journal row keeps the WHOLE cause (it is the record); the terminal
+  # line is truncated, because a registry cause is a paragraph and a wall of
+  # text is how a reader stops reading the report.
+  record_result([$rel, 0, 0, 0, 0, 'NOT-RUN', $not_run{$rel}, -1]);
+  printf "%-24s %s\n", $rel, "NOT-RUN (" . short_cause($not_run{$rel}) . ")";
 }
-@files = grep { !$QUARANTINE{$_} } @files;
-@heavy = grep { !$QUARANTINE{$_} } @heavy;
+@files = grep { !$not_run{$_} } @files;
+@heavy = grep { !$not_run{$_} } @heavy;
 # Workers sit in their own process groups, so terminal SIGINT no longer
 # reaches them — forward it.  exit() still runs the END blocks, which is
 # now what PRINTS the report for everything unfinished (task #157); a
@@ -819,6 +897,14 @@ sub multiset_diff {
   return (\@only_a, \@only_b);
 }
 
+sub short_cause {
+  my ($text, $max) = @_;
+  $text //= '';
+  $max  //= 110;
+  $text =~ s/\s+/ /g;
+  return length($text) > $max ? substr($text, 0, $max - 3) . '...' : $text;
+}
+
 sub row_list_excerpt {
   my ($rows) = @_;
   my @show = @$rows > 3 ? (@$rows[0 .. 2], sprintf("+%d more", @$rows - 3)) : @$rows;
@@ -974,6 +1060,17 @@ sub emit_report {
   printf "%d of those UNEXPLAINED are QUARANTINED (never run this session): %s\n",
     scalar(@quarantined), join(', ', map { "$_ ($QUARANTINE{$_})" } @quarantined)
     if @quarantined;
+  # Same for the --quick holes: the whole point of quick mode is that what it
+  # does not measure is COUNTED and NAMED here, never inferred from an absence.
+  if ($quick) {
+    printf "--quick did not run %d file(s): %d hang-set (task #326), %d registered allowance > %ds\n",
+      scalar(@quick_skipped) + scalar(@quick_capped),
+      scalar(@quick_skipped), scalar(@quick_capped), $QUICK_CAP;
+    printf "  QUICK-SKIP    %-24s %s\n", $_, short_cause($QUICK_SKIP{$_}) for @quick_skipped;
+    printf "  QUICK-CAPPED  %-24s allowance %ds (%s)\n",
+      $_, $file_timeout{$_}{secs}, short_cause($file_timeout{$_}{cause}) for @quick_capped;
+    print  "  re-run without --quick to measure them (docs/perl-suite-timeouts.tsv holds the allowances)\n";
+  }
   print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
 
   # DROPS vs the census (task #343, ruled §6.5).  The companion half of the

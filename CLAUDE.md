@@ -214,9 +214,14 @@ tools/pcl-conform 96-flags       # one case-set file
 # (rel<TAB>seconds<TAB>cause; effective timeout = max(row, --timeout), and the
 # allowances in effect are printed per run) — never left to TIMEOUT into "no
 # rows at all", which is how a file's passing rows vanish invisibly (#176).
-tools/run-perl-suite.pl --all --jobs 8
+tools/run-perl-suite.pl --all --quick --jobs 4   # THE DEFAULT FORM (#345)
+tools/run-perl-suite.pl --all --jobs 4           # full: once per session, at most
 # NB: --all --jobs 8 can OOM the 10 GB scope (each worker reserves a 512 MB
 # control stack for a PCL side AND runs a perl side) — use --jobs 4 (s399).
+# --quick does not run the files that spend a whole timeout to produce nothing
+# (the #326 hang set) or whose registered allowance exceeds 120 s.  Each gets a
+# NOT-RUN row naming which rule fired and why, and still counts as UNEXPLAINED,
+# so the coverage hole is countable — never inferred from an absence.
 
 # THE FIVE RUNNERS THAT SPAWN SBCL share one command-line builder,
 # tools/lib/PCLSbcl.pm ($STACK_MB, --core placement, banner flags): the gate
