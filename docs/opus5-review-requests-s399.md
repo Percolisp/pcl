@@ -335,3 +335,55 @@ perl-tests sweep four times — once per code commit — where the standing rule
 (a `cl/` change, a runtime change, a baseline-moving change, a name-resolution
 change), but it is most of the session's wall time, and if you want the rule to
 win over those, say so and I will batch.
+
+---
+
+## ASK (user, at session end) — look at the test suites: optimize WHAT WE RUN WHEN
+
+> "that one hour sweep can't be run every half hour" — and the cadence rule
+> ("full sweep + suite only every 3rd–5th change") is the only thing written
+> down today, so each session re-derives the rest.  The user asked for this to
+> be looked at as a whole.  Sizing task is **#345**; the design call is yours.
+
+**The portfolio, with what each one costs and — the part that matters — what
+it is BLIND to.**  Measured this session unless noted.
+
+| measurement | cost | sees | blind to |
+|---|---|---|---|
+| `tools/prove-core` (gate) | ~4 min | 142 files / 5275 rows of PCL's own tests, transpile + runtime | everything not in `Pl/t/` |
+| `tools/corpus-diff.pl` | ~2 min | BYTE emission over the 111 perl-tests files vs a ref | runtime behaviour; `cl/`+`lib/` (loaded, not transpiled); anything outside perl-tests |
+| full perl-tests sweep | ~10 min | 108 files / 18516 rows, runtime, both baselines, module transpiles | perl's own suite; transpile-only regressions in files it does not run |
+| companion `--all` | **30–60 min** | 521 files of perl's own t/ | — (it is the widest, and the most expensive) |
+| `tools/gate-set-scan.pl` (new) | 2.5 min/population | the transpile VERDICT of 638 files across BOTH populations | runtime — a file that compiles differently but still runs looks identical |
+| `tools/drop-census.pl` (new) | 3.5 min | silently dropped statements in the emitted CL of 658 files | everything else |
+| `tools/pcl-conform` | minutes | XS conformance, 398 cases | the language |
+
+**Three things this session showed about that table.**
+
+1. **Two of my four full sweeps were predicted-null and found nothing.**  Both
+   followed an IDENTICAL `corpus-diff` with no `cl/`, `lib/` or
+   `perl-tests/t/` change and no name-resolution change — i.e. the standing
+   rule "corpus-diff's corpus IS the sweep's input set" already implies the
+   sweep cannot move.  ~20 minutes.  The rule exists as a POSITIVE ("run
+   corpus-diff first"); what is missing is the NEGATIVE ("…and then do not run
+   the sweep").
+2. **Half the companion hour is the known-bad tail** — the six `re/regexp*.t`
+   hang files (#326) each burn the full per-file timeout and produce nothing;
+   `re/pat_psycho.t` and `re/speed.t` now add ~10 min for ~12 rows.  #345
+   proposes a `--quick` that skips them while still REPORTING them as not-run.
+3. **The cheapest gate is often a new one, not a bigger old one.**  Eleven
+   generations of artifact drift were invisible to every measurement above;
+   what caught it was a three-grep `Pl/t/` row costing zero seconds.  Same
+   shape available for the drop census (#343) and, per #344, for the four
+   runners' divergent sbcl command lines — which is the class of bug NOTHING
+   in the table can see, because each runner defines its own reality.
+
+**What I would ask you to rule on:** a decision table keyed on WHAT CHANGED
+(`Pl/` vs `cl/` vs `lib/` vs `perl-tests/t/` vs `tools/`) rather than on a
+change COUNT, since the count rule is what both over- and under-fires; whether
+`--quick` is the right shape for the companion run; and whether any of the
+three new tools (gate-set scan, drop census, the corpus-diff drop counter)
+should become standing per-change steps or stay on-demand.  My instinct is
+that only the drop counter earns per-change status — it is already free — but
+that is exactly the kind of call worth having ruled once instead of re-argued
+per session.
