@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 401 (2026-08-15, Fable) — the s399+s400 review, the plan for the coming sessions, the WHAT-CHANGED cadence table, and two new silent-wrongs from the review probes
+
+User ask: "check status and write a plan for the coming sessions".  Docs
+only — no code moved.  Rulings in **`docs/fable-answers-s400.md`**, the plan
+in **`docs/plan-post-s400.md`**, the index lines in `docs/DECIDED.md` s401.
+
+**Status, independently verified.**  Gate `tools/prove-core` **143 files /
+5278 rows**, failures exactly the 13 pclxs xs rows.  Full sweep RE-RUN
+(`--jobs 8`; the s400 `.faillog` held only the two targeted re-runs):
+**GATE clean, 0 new / 0 fixed, TOTAL 18516 = baseline**, the standing 2
+UNSTABLE + 8 unverified, 62 fully passing (s399 said 64 — which 0-fail files
+stopped early this run; TOTAL and LOST are the bar).  Generation v2-148,
+all three artifacts in sync.  Both batches (s399a–e, s400a–d) APPROVED as
+shipped; no review fix needed.
+
+**Rulings (§ numbers = the answers doc).**  §3 a registration authorised in
+the abstract still has to survive its per-row read (standing).  §4 #221's
+trigger fired → SCHEDULED post-v0.1, zero cost on the non-undef path.  §5
+#338 filler; b1 = delete the uniqueness rule if direction D makes it
+redundant.  §6 the drop family: census + reproducer = Option B phase 2's
+acceptance set and metric; #339 option (b) with four amendments (fixed
+prefix at Parser.pm's `PARSE ERROR` emitters, comment text unchanged, the
+two `$SIG{__WARN__}` workarounds deleted with the warn, the `ref=''`
+probe first); the 33 file-level lvalue-sub drops KEEP dropping, loudly
+(s329 boundary); a drop DIES only as phase 2's last step; the drop GATE is
+a RUNNER COLUMN (sweep `_status.tsv` + suite snapshot, sweep-diff DROPS
+bucket vs the census tsv), not a Pl/t row.  §7 quoting → unify to QUOTED
+(filler in #277); #348 after #346 (first) → #347, land-early REJECTED (a
+deliberate hang is the tail #345 removes); the gen-stamp promise goes into
+`ir-spec.md`; re/pat_psycho.t + re/speed.t get their allowance.  **§8 the
+USER portfolio ask: the count rule is RETIRED, replaced by a WHAT-CHANGED
+decision table** — now in CLAUDE.md Quick Reference ("WHAT TO RUN WHEN");
+its negative is the point (corpus-diff identical + lib byte-identical + not
+a name-resolution change ⇒ the sweep cannot move — do not run it); companion
+`--quick` is the default form, full `--all` at most once per session and
+only when a row says so.
+
+**Two NEW silent-wrongs, from probing what the checked-in artifacts DO when
+they load** (nobody had run them under a program that modifies `@INC`):
+**#349** — `p-load-extension` `load`s `cl/pcl-pack.lisp`, whose PROGRAM
+preamble `(setf pcl::@INC (make-array 0 …))` + the build machine's dirs
+REPLACES the running program's `@INC` at the first `pack` (`push @INC,
+$d; pack(...); require MyLocal` → perl loads, PCL "Can't locate"; the
+push is silently gone even when nothing dies).  That preamble is also the
+whole of #217 (the artifacts embed the author's paths because they carry a
+preamble an extension never needed), so the fix is one mechanism: `pl2cl
+--extension` emits no preamble, the artifacts become machine-independent,
+`no-hardcoded-paths-01.t` tightens to zero exclusions, `p-load-extension`
+gets a rule-12 guard, #217 closes, the installer stops regenerating.
+**#350** — a file-top `require Bareword;` is hoisted into the declarations
+bucket (`p-eval-always`) ahead of every runtime statement, so a preceding
+runtime `push @INC` has not run (loud; one companion file, io/perlio.t, by
+static census; the fix is a measurement — emit in place, corpus-diff both
+populations).
+
+**The plan (`docs/plan-post-s400.md`)**: Opus sessions A (#339 + #343
+pieces + the ir-spec promise) → B (#345 `--quick`, #349, #350) → C (#346,
+#342 piece 1) → D (#340 op/try.t) → E (#277 installer, quoting, #280) →
+F (#337 → #341) → G (#347 → #348), then #279/#282/#283; fillers listed.
+Fable: #281 design (no longer blocked by #153 — the FOLD is done) → Option B
+phase 2 sizing + execution before release phase 4 → boxed aggregates; #221
+first post-release.  Five USER decisions still open (plan §4: public name,
+publish process docs / #279, LICENSE body, pclxs bundling, hosting).
+
+---
+
 ## Session 400 (2026-08-15, Opus 5) — the #324 verification finished (and its one mover explained), ONE builder for the SBCL command line, and no hand-written source hard-codes a home path
 
 Four commits.  The session's finding is a measurement trap that bit three

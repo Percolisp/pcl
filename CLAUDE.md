@@ -230,6 +230,36 @@ PCL_SHOW_SBCL=1 <any runner>      # print the exact command it spawns
 # tools/t/sbcl-prefix.t (run directly, like tools/t/tap-align.t).
 ```
 
+### WHAT TO RUN WHEN (RULED s401, `docs/fable-answers-s400.md` §8 — replaces "every 3rd–5th change")
+
+The cadence is keyed on WHAT CHANGED, because every measurement is blind to
+a known set of change kinds.  Rows are ADDITIVE — every row that applies
+fires.  **Always, per change:** `tools/prove-core` (~4.5 min); if anything
+under `Pl/` changed, `tools/corpus-diff.pl` (~2 min — READ its SILENT-DROP
+line) + `tools/emission-ab.pl --ref <base> --list lib/**/*.pm` (seconds);
+plus the targeted files the change names.
+
+| what changed | full perl-tests sweep (~10 min) | companion suite (`--quick` ~15–25 min; full `--all` 30–60) | also |
+|---|---|---|---|
+| `Pl/**`, corpus-diff IDENTICAL, lib byte-identical, NOT a name-resolution change | **NO — it cannot move; do not run it "to be safe"** | no | — |
+| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | the dirs whose files carry the shape (`grep -a`); `--quick` once if broad | gen bump + `tools/rebuild-pack` (staleness gate enforces it) |
+| `Pl/**` name-resolution / scoping / rename / capture / promotion (Parser2 `_rename_*`, `_promote_*`, VarAnnotator, GlobalPartition, eval capture, span passes) | **YES — the sweep IS the gate** (#296) | `--quick` once | gate-SET scan over both populations when a checker / refusal / decline WIDENS (s372) |
+| `cl/**` runtime | YES (invisible to corpus-diff) | the dirs the change touches (op/, io/, re/ …) | rule-12 read of the touched dispatch |
+| `lib/**` shim | YES | the files that `use` the module (`grep -a`) | — |
+| harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick`** (both populations reach it) | baselines edited ROW BY ROW |
+| runners: `sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file-by-file | same | `PCL_SHOW_SBCL=1` before/after diff |
+| `docs/**`, `tools/t/**`, memory | nothing beyond the gate | no | — |
+
+Companion: **`--quick` is the default form** (#345: skips the #326 hang
+set, caps registered allowances at 120 s, LISTS every skipped/capped file as
+NOT-RUN); the full `--all` at most once per session and only when a row
+says so, before a snapshot re-bless, or for a Fable review.  Fable review
+sessions: cold gate + full sweep + probes, plus a `--quick` companion when
+the batch touched name resolution or the harness.  The three s399 tools:
+`corpus-diff`'s drop counter is per-change (free); `tools/gate-set-scan.pl`
+is on-demand, MANDATORY only for the checker-widening row;
+`tools/drop-census.pl` is a runner column (#343) — not a separate step.
+
 **Pipeline (singular, since E4.1 step 2 / #242, s356):** the v2
 structured-emission pipeline (`Pl/Parser2.pm` + `Pl/ExprToCL2.pm` +
 `Pl/VarAnnotator.pm` + `Pl/CLForm.pm`) is the **only** one. **`PCL_V1`,
@@ -494,6 +524,7 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2g. `docs/fable-answers-s400.md` + **`docs/plan-post-s400.md`** - **s399 + s400 asks ALL RULED (s401, 2026-08-15) and THE PLAN FOR THE COMING SESSIONS**: both batches APPROVED as shipped (gate independently re-verified 143/5278; sweep RE-RUN clean TOTAL 18516).  **WHAT-TO-RUN-WHEN table replaces the count rule** (Quick Reference above; #345 implements `--quick`).  Drop family: announce at the DROP site (#339 (b)), census = Option B phase 2's metric, DIE only as phase 2's last step, DROPS as a runner column (#343); file-level lvalue-sub drops keep dropping loudly.  #221 SCHEDULED post-v0.1.  #348 after #346 (first) → #347.  **TWO NEW SILENT-WRONGS from review probes: #349 (the checked-in artifacts RESET `@INC` when they load at first `pack` — closes #217 via `pl2cl --extension`) and #350 (file-top `require` hoisted above a runtime `push @INC`).**  Opus sessions A–G: #339+#343 pieces → #345+#349+#350 → #346+#342 piece 1 → #340 try → #277 installer → #337→#341 → #347→#348 → v0.1 rest.  Fable: #281 design → Option B phase 2 → boxed aggregates.  Five USER decisions still open (plan §4).
 2h. `docs/fable-answers-s396.md` - **s395 + s396 asks ALL RULED (s397, 2026-08-15)**: both batches APPROVED as shipped (gate independently re-verified 141/5203 cold; sweep RE-RUN clean TOTAL 18539; ten refaliasing / n-at-a-time probes vs perl identical).  **Orphaned `pl2cl --server` ends ITSELF** (getppid tick, s397a) — the s396 PPID==1 reaper was inert under `systemd --user` (a subreaper adopts orphans); reapers stay as belt keyed on parent-is-a-reaper.  **NO new suite verdict for "measures perl internals"** — one citable not-supported class section instead; op/const-optree.t may register XDIFF.  #323 = own session; refaliasing-first ratified.  **#332 filed** (parenthesised-array refaliasing spellings silent wrong).  Queue: #331 artifacts (opener + staleness row) → #332 → internals registration → #323 → F-D → size try/lexsub/lex.t singles → v0.1; Fable: FOLD chunk 3 — **DONE s398 (Option B phase 1 complete, `docs/DECIDED.md` §s398); next Fable = #281 macro vocabulary → boxed aggregates.**  Fillers filed s398: #333–#336 (all pre-existing silent-wrongs found by the chunk-3 review probes).
 2i. `docs/fable-answers-s385.md` - **s385 asks ALL RULED (s386, 2026-08-12)**: both s385 commits APPROVED as shipped (gate independently re-verified 138/5103 cold; eight probes vs perl). **#296 design call RATIFIED** (option (a) rename; do not re-litigate). **#296-B1 RULED: NOT progv** — eval-mode name resolution consults the CAPTURE ALIST before the special table (alist key ⇒ ordinary renamed-lexical path; five-row acceptance table vs perl in task #296). **#296-B2 DIAGNOSED**: sibling same-scope redeclaration — the earlier decl's rewrite region must STOP at a sibling redecl (two-line reproducer; the "not isolated" claim was a by-number TAP join onto the wrong region). **Standing rule (ask 3)**: bucket counts need the row TOTAL in both directions AND a row number is only meaningful within its own run. Shape-assertion expectation-edit conjuncts + sample-rename default (ask 4). #300 unscheduled (ask 5). runpcl/runt blank-line strip fixed (byte-compares were falsified). Queue: #296 finish → #291 → #292 → v0.1 track.
 2j. `docs/fable-answers-s378.md` - **s378 asks ALL RULED (s379, 2026-08-09)**: both s378 commits APPROVED as shipped (gate independently re-verified 133/4787 cold; nine resolver probes vs perl). **Absorb-vs-companion rule refined** (zero-new-mechanism + loud + guarded = may absorb). **#287 ruled**: two halves ONE commit (drop $a/$b immunity + sort lowering binds the pair the block reads), after #237. **#237 ruled (b′)**: ONE shared variable-reference event scanner (from StringInterpolation.pm) + intuit_more classifier in the regex consumer only; deleting `_gen_interp_regex_pattern`'s walk is the acceptance bar; #286 NOT folded. Two review fixes shipped (`2af263f`): signature params now bind in the package-switch resolver; keyword-shaped hash keys no longer die. #288 filed (bareword call in switched region falls back to enclosing sub where perl dies). **USER-asked design review: `docs/var-handling-review-s379.md`** — 51% of Parser2.pm is variable identity, 26 interp-scanner sites; directions A (bind-once symbol table) / B (one scanner = #237) / C (one promotion engine) / D (defglobal, measure first); standing rules: no new scanner fixes, no new suffix family, no new scope walk. Queue: #237 → #287 → v0.1 track.

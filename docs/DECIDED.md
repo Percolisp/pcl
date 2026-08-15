@@ -11,6 +11,55 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s401 (2026-08-15, Fable) — the s399+s400 review, the WHAT-CHANGED cadence table, two new silent-wrongs
+
+- **What runs when is keyed on WHAT CHANGED, not on a change count** — the
+  "every 3rd–5th change" rule is RETIRED; the decision table is in
+  CLAUDE.md (Quick Reference → "WHAT TO RUN WHEN") and its rationale in
+  `fable-answers-s400.md` §8.  Its NEGATIVE is the point: corpus-diff
+  IDENTICAL + lib byte-identical + not a name-resolution change ⇒ the sweep
+  CANNOT move — do not run it "to be safe".  Companion `--quick` is the
+  default form; the full `--all` at most once per session, and only when a
+  row says so.  → task #345, plan `docs/plan-post-s400.md`.
+- **A registration authorised in the abstract still has to survive its
+  per-row read** (op/const-optree.t, s399; `unlike`, s393) — a standing
+  rule now.  → `fable-answers-s400.md` §3.
+- **The drop family: announce at the DROP site, not the decline site;
+  the census is Option B phase 2's metric; a drop DIES only as phase 2's
+  last step** — `PCL: statement dropped at F line L: <text> — <reason>` at
+  Parser.pm's `PARSE ERROR` emitters, PExpr's warn deleted, the two
+  `$SIG{__WARN__}` workarounds with it; the drop GATE is a RUNNER COLUMN
+  (sweep `_status.tsv` + suite snapshot, sweep-diff DROPS bucket vs the
+  census tsv), not a Pl/t row.  → §6, tasks #339 #343.
+- **The 33 file-level "Can't modify non-lvalue subroutine call" drops KEEP
+  dropping, loudly** — user `:lvalue` subs are a blessed non-support and a
+  transpile-time die takes every other row of the file (s329 boundary).
+  → §6.3.
+- **#221 (warnings model) is SCHEDULED post-v0.1**, first item of the
+  post-release correctness backlog; design constraint = zero cost on the
+  non-undef path.  → §4.
+- **#348 lands only after #346 (first) and #347** — a deliberate HANG in
+  the companion run is the tail #345 removes.  → §7.2.
+- **`tools/lib/PCLSbcl.pm` unifies to QUOTED paths** (filler in #277) — a
+  checkout under a path with a space is a fresh-machine reality.  → §7.1.
+- **Line 1 of every emitted file, `;;; pcl: pipeline=v2 gen=<gen>`, is a
+  PROMISE** tools may key on — goes into `ir-spec.md`; the two guards cite
+  it.  → §7.3.
+- **The checked-in artifacts RESET `@INC` (and `*pcl-pl2cl-path*`,
+  `*p-core-inc-dirs*`) when they load at the first `pack`/`mro`/
+  `warnings::enabled` call** — a runtime `push @INC` is silently lost
+  (probed).  They carry a PROGRAM preamble an extension never needed, which
+  is also the whole of #217; fix = `pl2cl --extension` (no preamble) +
+  a rule-12 guard in `p-load-extension`; #217 closes with it and the
+  installer stops regenerating.  → task #349, §9.
+- **A file-top `require Bareword;` is HOISTED above every runtime
+  statement** (`p-eval-always` in the declarations bucket), so a preceding
+  runtime `push @INC` has not run — loud, one companion file; fix is a
+  MEASUREMENT (emit in place, corpus-diff both populations).  → task #350.
+- **Fable's order: #281 (IR pass) design → Option B phase 2 sizing +
+  execution (before release phase 4) → boxed aggregates.**  #281 is no longer
+  blocked by #153 (the FOLD is done).  → plan §3.
+
 ## s400 (2026-08-15, Opus 5) — #344/#324/#207/#278
 
 - **A plain `grep` SILENTLY SKIPS a file it thinks is binary, and that has
