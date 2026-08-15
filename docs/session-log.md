@@ -53,6 +53,21 @@ Pl/t row) → #332 → the internals registration → #323 (own session) → F-D
 size the three singles (try / lexsub / lex.t) → v0.1.  Fable: FOLD chunk 3
 (begun this session), #281 vocabulary, boxed aggregates.
 
+**#153 FOLD chunk 3 BEGUN, then PARKED at the user's stop — branch
+`wip/s397-fold-chunk3` (2 commits, main untouched at `afa894a`).**
+`447bce7` is the measurement instrument (`PCL_FOLD_PROBE=1`: every legacy
+arrow/subscript branch reports each firing with a verdict judged from the
+fold's own guards); `e62ecc3` applies the five walker widenings the data
+asks for — **UNVERIFIED** (no corpus-diff, no PCL_NO_FOLD A/B, no gate yet;
+do not merge).  The measurement over corpus + suite + board14 + lib says the
+fold's embedded misses are ONE family: **`-> <funcall>` is not a chain
+step, so an embedded method call with args never folds** (Case1
+WALKER-STOPS 105 / 1191 / 14663 / 1113 across the four populations), plus
+coderef calls `-> (args)`, word-led `Class->m(...)`, list slices
+`(...)[i]`, `->$#*` and `*x{IO}`; DynGlob fired ZERO times (a wider
+108-dist check was started and killed at the stop — rerun before deleting).
+Full tables + the ordered next steps on task #153 (`chunk3_s397`).
+
 ---
 
 ## Session 396 (2026-08-15, Opus 5) — #325 refaliasing end to end, then #314's residue measured to the bottom

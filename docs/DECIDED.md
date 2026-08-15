@@ -3267,3 +3267,19 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   (v2-136 vs v2-147) — #331 is Opus's next-session OPENER**, with the
   staleness CHECK (artifact line-1 generation vs `*pcl-cache-generation*`) as a
   Pl/t row so it cannot recur silently.
+- **#153 FOLD chunk 3 MEASURED (s397, Fable), work PARKED on branch
+  `wip/s397-fold-chunk3` — do not merge without the verification steps on
+  task #153.**  The chunk-1 fold never claims an embedded METHOD CALL WITH
+  ARGS: `handle_subcalls` has already reduced `name(args)` to a `<funcall>`
+  node by fold time and `-> <funcall>` is not a step of the chain walker
+  (`_extend_postfix_chain`), so `$o->m(args)` embedded stays with the legacy
+  loop — 14,663 firings on the 14-dist board alone.  Same for `-> (args)`
+  coderef calls, word-led `Class->m(...)`, list slices `(...)[i]`, `->$#*`,
+  `*x{IO}`.  perl REJECTS `f()[0]` and `$o->m()[0]` (probed) — only a List or
+  qw() primary takes a Constructor as a list-slice group.  Instrument:
+  `PCL_FOLD_PROBE=1` + `tools/term-diff-sweep.pl`; verdicts WHOLE / DECLINE /
+  GUARD / WALKER-STOPS / CONT / GAP.  A ()-replacement artefact (method args
+  become `<tree_val>` before the legacy loop) read as a false GAP until the
+  probe mirrored the walker's `-> name (args)` step over the node — a probe
+  that judges at a LATER pass than the thing it measures must replay the
+  passes in between.
