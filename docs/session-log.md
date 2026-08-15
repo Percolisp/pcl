@@ -4,6 +4,91 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 398 (2026-08-15, Fable) — #153 FOLD chunk 3 VERIFIED and FLIPPED (W1–W9); a list-slice silent drop fixed; four filler bugs filed
+
+Picked up the branch parked in s397 (`wip/s397-fold-chunk3`) and ran the
+verification steps on task #153 in order — corpus-diff, the two A/B
+compares over all four populations, rows, gate, re-probe — then widened
+where the re-probe still showed the walker stopping short, re-verified,
+and flipped.  Three commits on main; the wip branch stays as history.
+
+**s398a (`f501ada`) — walker widenings W1–W9 + the measurement instrument.**
+The s397 measurement's five widenings (W1 `-> <funcall>` chain step, W2
+`-> (args)` coderef call, W3 `-> $#*`, W4 list-slice group after a
+List/qw() primary, W5 word-directly-followed-by-arrow as a self-bounded
+primary + Quote::/qw()/word-arrow in the fold's start set) verified;
+the re-probe then showed FOUR more families the s397 list had not
+covered, each applied the same way: **W6** `*name{SLOT}` glob slot (Symbol
++ Block = one group, chain continues — 4/49/31 firings), **W7** `-> ${
+EXPR }` computed method + its args (5/32/2), **W8** PPI's
+`Structure::Condition` label for the leading `(…)` of a postfix-if
+condition is a paren primary (16, Mojo::DOM58), **W9** further arrow-less
+`[j]` groups after a list-slice group.  Verification, all on the commit
+itself: `tools/corpus-diff.pl` IDENTICAL 111/111; main-vs-branch A/B
+byte-identical over suite 604/604, board14 296/296 (all `.t`/`.pm` of the
+14 dists), lib 21/21; fold-on vs fold-off (`PCL_NO_FOLD=1`) SAME 111/604/
+296/21, zero exit-status differences; gate 141 files (only the 13 known
+pclxs xs rows); `reduce-term-01.t` 76 → 127 (every widening pinned with an
+inverse row; 20 extent rows fail on main's walker, the inverses hold on
+both).  Ten probe batteries vs perl 5.40.3 identical (w1–w7, amb, cond,
+inv).  Driver: an 8-job two-worktree A/B script, landed as
+**`tools/emission-ab.pl`** (two refs or one compiler under two
+environments, any file list) — its first version deleted the ref worktree
+from a forked child's END block, so every "ref" transpile returned rc 2
+with empty stderr; a forked END must be guarded by `$$ == $parent`, and
+an all-SAME verdict is only believable once both sides produced bytes.
+
+**s398b (`c6a211e`) — `(LIST)[i]{k}` was a SILENT PARSE-ERROR drop.**
+Found by the review probes, identical on main: PPI labels the `{k}` after a
+list slice's `]` a Block (by predecessor, as it labels the `[i]` a
+Constructor); the legacy loop knows only Subscripts, so `is( ({foo=>"bar"})
+[0]{foo}, … )` fell through to "Missing case" → `(progn ;; PARSE ERROR …
+nil)` and the STATEMENT vanished (ref.t "hash deref from list slice w/o ->"
+never produced a row); the `[j]` twin always worked.  Fixed at ONE pre-pass,
+`_retag_list_slice_subscripts` (sibling of `_retag_braced_deref_subscript`):
+re-bless such Blocks to Subscripts, so the `$h{a}{b}` chain machinery and
+the walker both see a plain chain.  corpus-diff vs s398a: exactly ref.t, two
+hunks, both the fixed shapes; nine fix + nine inverse shapes probed vs perl;
+rows in transpile-test-10.t (43 → 45).
+
+**s398c (`5323d9e`) — the flip.**  `PCL_FOLD_PROBE` (20 probe calls, 18
+tag calls, five subs) and `PCL_NO_FOLD` deleted (−194 lines); the in-loop
+DynGlob handler replaced by a rule-12 die — UNREACHABLE by argument
+(`_precollapse_dyn_glob_slots` consumes the identical triple at `parse()`
+entry) and by measurement (ZERO firings over the four populations AND every
+`*{`-containing file of all 108 `~/.cpan/build` dists, 135 files).  Gate
+141 / 5256.
+
+**Final residue (embedded firings after W9, the instrument's last run):**
+board14 and lib ZERO; corpus 0 true misses (2 = whole arrays with an
+arrow-less trailing CALL `(sub{…})[0]()`, outside the term grammar by design
+— the `$h{k}(1)` inverse); suite 7 = the same 2 + 4 `$${$_[0]}` (PPI's
+`$$`-mislex spelling, op/uni gv.t — walker declines, legacy Xsub reduces)
++ 1 `return (…)[3]` (a `return(...)` funcall node + slice, Params::Check).
+Whole-array firings (the reducer's own path) by branch, all populations:
+Xsub 33.7k, Case1 20.4k, Case3 12.7k, Case1C 6.8k, Case2 2.0k, CtorSub 844,
+Case0 705, … KVarrDeref/KVhashDeref 4 each — every legacy branch still
+runs, as the WHOLE-term reducer.
+
+**Option B phase 1 is COMPLETE** (steps 1–5 + FOLD chunks 1–3).  What
+chunk 3 does NOT move, by construction: the s386 seam-fallback rate (v1 =
+88% of seam expressions) — the fold lives inside v1's PExpr; that metric
+falls only when v2 consumes the reducer's output.  Remaining Option B scope
+= phase 2 (operator binding: the `$end_pars` machinery, ~3930–4110 + the
+two indirect-object regions, "take the next node") — recorded on #153.
+
+**Filed (all pre-existing on main, found by the review probes, fillers):**
+#333 `Foo->x => 1` autoquotes the METHOD name → PARSE ERROR nil (silent);
+#334 `->can('Pkg::name')` false; #335 `print 1 if (f())[1]` — a list slice
+heading a postfix-if condition is silently false (Condition + Constructor →
+Missing case); #336 `(qw(a b), "c")[2]` empty / `[0]` = "ab" (a qw inside
+a sliced list is not flattened).  Also observed, already parked:
+`ref(*STDOUT{IO})` false (the `*FH{IO}` representation).
+
+**Sweep / suite (final main, cold cache):** full sweep **GATE clean, TOTAL 18539 → 18540 (+1)** — the recovered ref.t list-slice row (ref.t 189 → 190 passing); 0 new / 0 fixed / 2 UNSTABLE (the standing ref.t + postfixderef.t crash-file noise — the ref.t one, "IO slot of the temporary glob", fails identically on pre-s398 main, probed) / 8 unverified.  Companion suite (`tools/run-perl-suite.pl --all --jobs 8`, 523 files: 89 OK / 106 XDIFF / 30 NOTAP / 1 FIXTURE): vs `docs/perl-suite-run.tsv` exactly ONE real move, **op/ref.t 195 → 196** (the same fixed row; spliced into the snapshot with a note); mro/package_aliases_utf8.t 48 → 39 is its registered `*rows-unstable*` noise (serial re-run 72/34); the six re/regexp*.t + re/overload.t are TIMEOUT-shaped at the 90 s default as in every full run (#326) — re-measured at `--timeout 300` they return their snapshot values TO THE DIGIT (regexp 793/112, noamp 794/111, notrie/qr/qr_embed/trielist 793/112, overload 3/0) — no move.
+
+---
+
 ## Session 397 (2026-08-15, Fable) — s395 + s396 reviewed and APPROVED; the orphaned server ends itself; #332 filed
 
 Review of `docs/opus5-review-requests-s395.md` (never reviewed — s396 had

@@ -72,6 +72,14 @@
 #   TIMEOUT-shaped and this run was contended (op/cond.t's solo phase held
 #   5.4 GB).  comp/require.t returns its snapshot 909/835 exactly once given
 #   the timeouts.tsv allowance added this session; the six are task #326.
+# s398 (#153 FOLD chunk 3 + the `(LIST)[i]{k}` retag fix): ONE row moved --
+#   op/ref.t 195 -> 196 (the arrow-less hash-subscript-after-a-list-slice
+#   row, "hash deref from list slice w/o ->", was a PARSE-ERROR drop and now
+#   evaluates).  Everything else UNMOVED in a full --jobs 8 run (emission was
+#   byte-identical to main over the whole suite for the fold itself);
+#   mro/package_aliases_utf8.t 48 -> 39 is its registered *rows-unstable*
+#   noise (serial re-run 72/34); the six re/regexp*.t + re/overload.t
+#   TIMEOUT-shaped as always at the 90s default (#326).
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -381,7 +389,7 @@ op/read.t	2116	0	2116	0	OK
 op/readdir.t	16	0	13	3	DIFF	
 op/readline.t	35	1	25	7	DIFF	undef-fn:PerlIO::pl-get_layers
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.
-op/ref.t	257	0	195	45	DIFF	
+op/ref.t	257	0	196	45	DIFF	
 op/refstack.t	0	0	0	0	NOTAP	
 op/repeat.t	50	0	47	3	DIFF	
 op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N

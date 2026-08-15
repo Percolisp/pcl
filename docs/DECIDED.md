@@ -3283,3 +3283,50 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   probe mirrored the walker's `-> name (args)` step over the node — a probe
   that judges at a LATER pass than the thing it measures must replay the
   passes in between.
+
+## s398 (2026-08-15, Fable) — #153 FOLD chunk 3 verified and flipped; Option B phase 1 complete
+
+- **#153 FOLD chunk 3 SHIPPED (s398a–c: `f501ada`, `c6a211e`, `5323d9e`);
+  Option B PHASE 1 (reducer + fold) is COMPLETE.**  Nine walker widenings
+  W1–W9 (`-> <funcall>`, `-> (args)`, `-> $#*`, list-slice group after a
+  List/Condition/qw() primary, word-directly-followed-by-arrow primary +
+  Quote::/qw()/word-arrow start set, `*name{SLOT}` glob slot, `-> ${EXPR}`
+  computed method + args, PPI `Structure::Condition` as a paren primary,
+  further `[j]` after a slice); emission byte-identical over ALL FOUR
+  populations in BOTH compares (main-vs-branch AND fold-on-vs-off), so no
+  cache-generation bump (s375 rule).  `PCL_FOLD_PROBE` + `PCL_NO_FOLD`
+  deleted at the flip; the in-loop DynGlob handler is a rule-12 die
+  (unreachable by argument — the pre-pass consumes the triple first — and by
+  measurement: zero over the four populations + all 135 `*{` files of 108
+  dists).  → session-log s398, task #153 `chunk3_s398`.
+- **The fold's residue is BY DESIGN, not a gap** (final re-probe): board14
+  and lib ZERO embedded firings; corpus 0 true misses; suite 7 = whole arrays
+  with an arrow-less trailing CALL `(…)[0]()` (the `$h{k}(1)` inverse — a
+  List after a subscript is not the term grammar's), `$${$_[0]}` (PPI
+  `$$`-mislex spelling; the walker declines, Xsub reduces), and `return
+  (…)[3]` (a `return(...)` funcall node + slice).  Do not widen for these
+  without a population that needs it.
+- **Chunk 3 does NOT move the s386 seam-fallback metric, by construction**
+  — the fold lives inside v1's PExpr; the 88% falls only when v2 consumes
+  the reducer's output.  Remaining Option B scope = PHASE 2 (operator
+  binding: the `$end_pars` machinery, "take the next node") — on #153.
+- **`(LIST)[i]{k}` — arrow-less hash subscript after a list slice — was a
+  SILENT PARSE-ERROR drop; fixed at ONE pre-pass** (s398b,
+  `_retag_list_slice_subscripts`, sibling of `_retag_braced_deref_subscript`):
+  PPI labels the `{k}` after a slice's `]` a Block by predecessor; re-bless
+  to Subscript so the `$h{a}{b}` chain path and the walker both see a plain
+  chain.  The `[j]` twin (`([qw/a b/])[0][1]`) is left on CtorSub — it
+  works and its emission is unchanged.  Guard rows transpile-test-10.t.
+- **A forked child's `END` block runs too** — an A/B driver whose END
+  removed the ref worktree deleted it under its siblings (every ref
+  transpile rc 2, empty stderr); guard with `$$ == $parent`.  The driver is
+  now `tools/emission-ab.pl` (parallel two-ref or env-flag emission A/B over
+  ANY file list — the four-population bar's tool; corpus-diff.pl stays the
+  one-command corpus check).  Same family
+  as the s397 "probe judges at a later pass" note: measure the measurer.
+- **Filed, all PRE-EXISTING on main (fillers)**: #333 `Foo->x => 1`
+  autoquotes the method name (silent nil); #334 `->can('Pkg::name')`;
+  #335 `print 1 if (f())[1]` silently false (Condition + Constructor →
+  Missing case — `is_list` should accept the Condition mislabel, one
+  predicate); #336 `(qw(a b), "c")[2]` — a qw inside a SLICED list is not
+  flattened.

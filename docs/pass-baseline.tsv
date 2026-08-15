@@ -1,4 +1,4 @@
-# taken-at: ebabc69 2026-08-15
+# taken-at: 5323d9e 2026-08-15
 aassign.t	OK	173	15	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -82,7 +82,7 @@ quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
 readline.t	PARTIAL	23	5	36
 recurse.t	OK	27	1	28
-ref.t	PARTIAL	189	18	245
+ref.t	PARTIAL	190	18	245
 reset.t	PARTIAL	41	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	84	32	128
