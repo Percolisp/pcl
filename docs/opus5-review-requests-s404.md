@@ -2,7 +2,7 @@
 
 Session B of `docs/plan-post-s400.md`: the measurement portfolio (#345) and the
 two new silent-wrongs (#349, #350), plus #353 folded in per
-`docs/fable-answers-s402.md` §4.  Four commits.
+`docs/fable-answers-s402.md` §4, and then Fable's next queue item (#354 + #351).  Six commits.
 
 | commit | item |
 |---|---|
