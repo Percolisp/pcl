@@ -4242,8 +4242,24 @@ sub _compile_subst_e_expr {
       $result = $body;
     }
   };
-  if ($@) {
-    warn "Failed to compile s///e expression '$expr': $@";
+  # RULE 12 (task #342 piece 1): a replacement we could not compile must DIE,
+  # not become nil.  `s/…/EXPR/e` REPLACES matched text with EXPR's value, so a
+  # nil body is a value the program then consumes — it substituted the empty
+  # string and carried on, rc 0, with only a warning on stderr nobody reads:
+  #
+  #     s|(?:)|"${\<<END}" … |e;      perl: the heredoc text
+  #                                    PCL : "", exit 0   (before this)
+  #
+  # The same file could ALSO die from a different shape of the same construct
+  # (base/lex.t does, rc 255), so one input path died and another silently
+  # substituted nothing — that inconsistency was the bug.  Measured population
+  # before the change: 7 sites in 2 files (t/op/taint.t 6, t/base/lex.t 1),
+  # both of which already fail to transpile for other reasons, so no verdict
+  # moves; what changes is that a future one cannot hide.
+  if ($@ || !defined $result) {
+    my $why = $@ || "the replacement produced no form";
+    $why =~ s/\s+\z//;
+    die "PCL: cannot compile the s///e replacement '$expr': $why\n";
   }
   return $result;
 }

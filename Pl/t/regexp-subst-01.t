@@ -13,7 +13,9 @@ use warnings;
 use lib ".";
 
 use PPI;
-use Test::More tests => 24;
+use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use Test::More;
 
 BEGIN { use_ok('Pl::PExpr') };
 BEGIN { use_ok('Pl::ExprToCL') };
@@ -172,5 +174,37 @@ test_codegen('"$+{year}"',
 
 diag "";
 diag "All s/// and tr/// tests completed!";
+
+diag "";
+diag "-------- s///e replacement that cannot be compiled must DIE (task #342):";
+
+# RULE 12: `s/…/EXPR/e` replaces matched text with EXPR's VALUE, so a
+# replacement the compiler cannot build must not become nil — that substituted
+# the empty string, exit 0, with only a warning nobody reads.  perl prints the
+# heredoc text here; PCL must fail loudly instead of quietly printing "not ok".
+{
+    my $root = "$RealBin/../..";
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'PL';
+my $test = 42;
+$_ = "";
+s|(?:)|"${\<<END}"
+ok $test - heredoc in "" in multiline s///e outside eval
+END
+|e;
+print $_ || "not ok $test\n";
+PL
+    close $fh;
+    my $err = "$file.err";
+    my $out = `$root/pl2cl $file 2>$err`;
+    my $rc  = $? >> 8;
+    my $msg = do { open my $e, '<', $err or die; local $/; <$e> };
+    unlink $err;
+    isnt($rc, 0, 's///e with an uncompilable replacement exits nonzero (rule 12)');
+    like($msg, qr/cannot compile the s\/\/\/e replacement/,
+         '... and says which replacement it could not compile');
+    unlike($out, qr/lambda \(\) nil/,
+           '... and emits no nil replacement thunk');
+}
 
 done_testing();
