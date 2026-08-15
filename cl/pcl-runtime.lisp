@@ -4718,13 +4718,20 @@
            `(setq ,target (p-alias-array-target ,value)))
           ((and (symbolp target) (char= (sigil target) #\%))
            `(setq ,target (p-alias-hash-target ,value)))
-          ;; \$h{k} = REF, \$a[i] = REF — replace the SLOT's box.  The emitter
-          ;; spells an element lvalue as p-gethash-box / p-aref-box, which is
-          ;; already "the box in that slot", so the alias just stores another box
-          ;; there.
-          ((and (consp target) (eq (car target) 'p-gethash-box))
+          ;; \$h{k} = REF, \$a[i] = REF — replace the SLOT's box.  All four
+          ;; spellings of an element place mean the same slot: the -box twins
+          ;; (lvalue position) and the plain accessors (which is what a list
+          ;; assignment's element forms are), each also in its deref flavour
+          ;; for `\$ref->[0]`.  The container argument differs in shape between
+          ;; them — raw vector, box, ref — so the helpers resolve it through
+          ;; p-cast-@ / p-cast-%, which already knows every one.
+          ((and (consp target)
+                (member (car target) '(p-gethash p-gethash-box
+                                       p-gethash-deref p-gethash-deref-box)))
            `(p-alias-hash-slot ,(second target) ,(third target) ,value))
-          ((and (consp target) (eq (car target) 'p-aref-box))
+          ((and (consp target)
+                (member (car target) '(p-aref p-aref-box
+                                       p-aref-deref p-aref-deref-box)))
            `(p-alias-array-slot ,(second target) ,(third target) ,value))
           (t
            (error "PCL: refaliasing target not supported: ~S" target))))))
@@ -4777,16 +4784,19 @@
         (error "Assigned value is not a CODE reference"))))
 
 (defun p-alias-hash-slot (hash key ref)
-  "`\\$h{k} = REF` — make the slot hold the referent box itself."
-  (let ((h (unbox hash))
+  "`\\$h{k} = REF` — make the slot hold the referent box itself.  HASH is
+   whatever the element place's container argument evaluates to (a raw hash, a
+   box, or a hash ref for the deref spellings); p-cast-% resolves all three."
+  (let ((h (p-cast-% hash))
         (box (p-alias-scalar-target ref)))
     (unless (hash-table-p h)
       (error "Not a HASH reference"))
     (setf (gethash (to-string key) h) box)))
 
 (defun p-alias-array-slot (arr idx ref)
-  "`\\$a[i] = REF` — make the slot hold the referent box itself."
-  (let* ((a (unbox arr))
+  "`\\$a[i] = REF` — make the slot hold the referent box itself.  See
+   p-alias-hash-slot for why the container goes through the cast."
+  (let* ((a (p-cast-@ arr))
          (box (p-alias-scalar-target ref))
          (i (truncate (to-number idx))))
     (unless (and (vectorp a) (not (stringp a)))

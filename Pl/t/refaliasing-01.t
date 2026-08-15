@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 29;
+plan tests => 32;
 
 my $PREAMBLE = "use feature 'refaliasing', 'declared_refs';\n"
              . "no warnings 'experimental';\n";
@@ -113,6 +113,22 @@ test_cl('\$h{k} = \$v aliases the hash SLOT',
     q{my $v = 5; my %h; \$h{k} = \$v; $h{k} = 8; print "$v\n";}, "8\n");
 test_cl('\$a[i] = \$v aliases the array SLOT',
     q{my $v = 5; my @a; \$a[0] = \$v; $a[0] = 11; print "$v\n";}, "11\n");
+# An element place has FOUR spellings — the -box twins the emitter uses in
+# lvalue position, and the plain accessors a LIST assignment's elements are —
+# each also in a deref flavour.  The list-assignment spelling is the one
+# perl-tests/aassign.t uses, and it is what the first version of this got
+# wrong: the missing arm made the whole statement fail to COMPILE, which took
+# two of that file's assertions out of existence rather than failing them.
+test_cl('\($a[0], $a[1]) = \(…) aliases both slots (list spelling)',
+    q{my $v = 5; my $w = 6; my @a; \($a[0], $a[1]) = \($v, $w);
+      $a[0] = 11; $a[1] = 22; print "$v $w\n";}, "11 22\n");
+test_cl('\($h{x}, $h{y}) = \(…) aliases both slots',
+    q{my $v = 5; my $w = 6; my %h; \($h{x}, $h{y}) = \($v, $w);
+      $h{x} = 11; $h{y} = 22; print "$v $w\n";}, "11 22\n");
+test_cl('\$ref->[i] / \$ref->{k} alias through a deref',
+    q{my $v = 5; my $w = 6; my $ar = []; my $hr = {};
+      \$ar->[0] = \$v; \$hr->{k} = \$w; $ar->[0] = 33; $hr->{k} = 44;
+      print "$v $w\n";}, "33 44\n");
 
 # --- list forms ------------------------------------------------------------
 

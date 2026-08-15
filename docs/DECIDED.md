@@ -3133,3 +3133,26 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   op/const-optree.t's remainder are `B::` optree inspection.  **A t/ file that
   measures perl's INTERNALS is not a PCL row count** — check what a file's
   assertions actually read before sizing a family from its plan.
+
+## s396d — sweep-diff's FIXED bucket also counts rows that VANISHED
+
+- **A row that stops being EMITTED reads as FIXED.**  `sweep-diff.pl` joins
+  failing rows by description; a baseline failure whose assertion no longer
+  runs at all is simply "not failing", so it lands in FIXED next to the genuine
+  ones — and LOST cannot catch it either, because LOST reads the PASS baseline
+  and this row was never passing.  **When a file's FIXED count and its emitted
+  ROW COUNT move together, audit the descriptions.**  s396 did: two of
+  aassign.t's four "fixed" rows had disappeared, because
+  `\($a[0], $a[1]) = \($y,$x)` hit rule 12's die at MACROEXPANSION and took the
+  whole enclosing form (and its two `is` calls) out of the load.
+- **An element lvalue has FOUR spellings and a place-dispatch arm must take all
+  of them**: the `-box` twins the emitter uses in lvalue position
+  (`p-aref-box`/`p-gethash-box`) and the PLAIN accessors, which is what a LIST
+  assignment's element forms are — each also in its deref flavour.  The first
+  refaliasing arm took only the `-box` pair, so the single-element spelling
+  worked and the list spelling died.  The container argument differs in shape
+  between them, so the helpers resolve it through `p-cast-@` / `p-cast-%`
+  rather than assuming one.
+- **The full sweep is what found it, and the Pl/t gate could not have.**  Both
+  gates were green with the bug present; only the per-file row audit against
+  `docs/pass-baseline.tsv` showed the two assertions had ceased to exist.
