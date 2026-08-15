@@ -1916,3 +1916,65 @@ PCRE2 does NOT implement it, so task #71 does NOT retire this registration
 over character classes in the pattern translator.
 
 **Owner:** task #320 (registration); no implementation task filed.
+
+---
+
+## Warnings-gated diagnostics are absent (`use warnings` is not modelled)
+
+**Perl behaviour:** most perl diagnostics are DEFAULT-OFF and switched on by
+`use warnings` (or `-w`) in the enclosing lexical scope: `Use of uninitialized
+value $x in addition (+)`, `Odd number of elements in hash assignment`,
+`Reference found where even-sized list expected`, `Argument "…" isn't numeric`,
+and the rest of the `uninitialized`/`numeric`/`misc` categories.
+
+**PCL behaviour:** absent.  PCL tracks no warnings state anywhere (grepped
+`Pl/` and `cl/`, s337c), so every diagnostic it has is UNCONDITIONAL — and
+unconditional is the wrong answer for a default-off one: emitting `print() on
+unopened filehandle` unconditionally broke `fileio-02.t` and
+`transpile-test-09.t` (measured s337c).  So the standing rule is that a
+default-off diagnostic stays ABSENT rather than being emitted always.
+
+What DOES work, and is not part of this gap: `warn` itself, `$SIG{__WARN__}`
+(so `capture_warnings` and the `warning_is`/`warning_like`/`warnings_like`
+helpers evaluate honestly), and every diagnostic perl emits unconditionally.
+
+**What would lift it:** task #221 — a minimal model (`use warnings`/`no
+warnings` compiled per lexical scope into one dynamic boolean the runtime
+consults; no categories).  It was UNSCHEDULED pending its own trigger, "the
+first test family or CPAN module whose failure is *warning not emitted*".
+
+**s399 IS that trigger.**  Task #323 replaced three `t/test.pl` stubs that had
+been manufacturing a pass (they ran the code and never compared the warning —
+the #202 class) with the real implementations, and the rows that had been
+silently green became honest failures:
+
+- `perl-tests/assignwarn.t` — 20 rows (96/20 vs 116/0 before), every one a
+  `Use of uninitialized value` the compound assignment operators must warn;
+- `perl-tests/hashassign.t` — 4 rows (305/4 vs 309/0), the `Odd number of
+  elements in hash assignment` and `Reference found where even-sized list
+  expected` pair, each in its plain and its `($s, %h)` spelling;
+- `perl-tests/time.t` — unchanged at 72/0: its `warning_is` rows expect NO
+  warning, and PCL emits none, so they pass honestly.
+
+In the companion suite the population is CLOSED and was measured whole — eight
+files call the three helpers anywhere under perl's `t/`, and all eight were
+run:
+
+- `t/op/assignwarn.t` 116/0 → 96/20 and `t/op/hashassign.t` 309/0 → 305/4 (the
+  same files as above), plus `t/op/numify.t` 32/0 → 21/11 (`Argument "…" isn't
+  numeric` — each string's numified VALUE is asserted separately and PCL passes
+  those).  All three registered XDIFF; `op/assignwarn.t` opts out of the ROW
+  check as `*rows-unstable*` because the file iterates `keys %should_warn`, so
+  both sides emit rows in per-process random order.
+- `t/op/utf8decode.t` 644/42 → 620/90, and it stays UNEXPLAINED on purpose:
+  86 of the 90 are this entry (the malformed-UTF-8 warnings), but 4 —
+  "Got expected Unicode characters" — are a PRE-EXISTING divergence of a
+  different kind, verified by re-running the file in a worktree at `f8ffd56`.
+  All-or-nothing, so no registration until those four have a cause.  Note the
+  file's row count now MATCHES perl's 710: the old stub emitted one row where
+  perl emits two, which is what produced the "PCL's TAP numbering is offset for
+  592 rows" note the snapshot used to carry.
+- `t/op/time.t`, `t/op/inc.t`, `t/op/split_unicode.t`, `re/subst.t` — UNMOVED.
+
+**Owner:** task #221.  A row failing for this reason is a registration, not a
+regression — and it stops being one the day #221 lands.

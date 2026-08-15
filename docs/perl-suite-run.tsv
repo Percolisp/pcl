@@ -80,6 +80,29 @@
 #   mro/package_aliases_utf8.t 48 -> 39 is its registered *rows-unstable*
 #   noise (serial re-run 72/34); the six re/regexp*.t + re/overload.t
 #   TIMEOUT-shaped as always at the 90s default (#326).
+# s399 (#323, the three t/test.pl warning helpers made honest): FOUR rows
+#   re-measured in this tree and spliced.  warning_is / warning_like /
+#   warnings_like used to run the code and pass() unconditionally (the #202
+#   class), so every row asserting a WARNING was manufactured.  With the real
+#   t/test.pl bodies in the stub, the rows are honest and RED, and the cause is
+#   the same for all of them: PCL emits no warnings-gated diagnostic
+#   (docs/not-supported.md "Warnings-gated diagnostics are absent"; owner #221).
+#     op/assignwarn.t  116/0 -> 96/20   (Use of uninitialized value, per op)
+#     op/hashassign.t  309/0 -> 305/4   (Odd number of elements / Reference
+#                                        found where even-sized list expected)
+#     op/numify.t       32/0 -> 21/11   (Argument "..." isn't numeric)
+#     op/utf8decode.t  644/42 -> 620/90 (malformed-UTF-8 warnings; note the
+#                                        row count now MATCHES perl's 710 --
+#                                        the old stub emitted 1 row where perl
+#                                        emits 2, which is what produced the
+#                                        "PCL's TAP numbering is offset for 592
+#                                        rows" note this file used to carry.
+#                                        Its 4 "Got expected Unicode
+#                                        characters" fails are PRE-EXISTING,
+#                                        verified in a worktree at f8ffd56.)
+#   UNMOVED, verified in the same run: op/time.t 72/0 (its warning_is rows
+#   expect NO warning), op/inc.t 60/15, op/split_unicode.t 107/40, re/subst.t
+#   (crash, unchanged).
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -254,7 +277,7 @@ op/append.t	13	0	13	0	OK
 op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.
 op/arith2.t	9	0	9	0	OK	
 op/array.t	195	0	169	26	DIFF	
-op/assignwarn.t	116	0	116	0	OK	
+op/assignwarn.t	116	0	96	20	DIFF	
 op/attrhand.t	4	0	0	0	DIFF	crash:simple-error: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle
 op/attrproto.t	48	0	17	28	DIFF	
 op/attrs.t	157	2	28	61	DIFF	undef-fn:attributes::pl-_guess_stash
@@ -324,7 +347,7 @@ op/gv.t	304	0	50	47	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash.t	494	0	6	6	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/hashassign.t	309	0	309	0	OK	
+op/hashassign.t	309	0	305	4	DIFF	
 op/hashwarn.t	20	0	5	15	DIFF	
 op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF
 op/hexfp.t	125	0	110	15	DIFF	
@@ -365,7 +388,7 @@ op/mydef.t	2	0	0	2	DIFF
 op/negate.t	48	0	48	0	OK	
 op/not.t	24	0	20	4	XDIFF	not-supported.md §Interned boolean constants (!0 / !1 identity) — t21/t22 "not 0/1 is read-only" need the shared read-only scalar; PCL returns a fresh mutable value per call
 op/numconvert.t	1446	0	0	0	DIFF	
-op/numify.t	32	0	32	0	OK	
+op/numify.t	32	0	21	11	DIFF	
 op/numify_chkflags.t	14	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/oct.t	79	0	79	0	OK	
 op/or.t	13	1	11	3	DIFF	
@@ -451,7 +474,7 @@ op/unlink.t	6	0	4	2	DIFF	crash:simple-error: Couldn't unlink tempdir '/tmp/pcl-t
 op/unshift.t	19	0	19	0	OK	
 op/upgrade.t	64	0	64	0	OK	
 op/utf8cache.t	16	0	2	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
-op/utf8decode.t	710	0	644	42	DIFF	
+op/utf8decode.t	710	0	620	90	DIFF	
 op/utf8magic.t	6	0	2	4	DIFF	
 op/utfhash.t	99	0	91	0	DIFF	
 op/utftaint.t	0	0	72	17	NOTAP	

@@ -1,4 +1,8 @@
 # taken-at: 5323d9e 2026-08-15
+# s399 (#323): assignwarn.t 116->96 and hashassign.t 309->305 EDITED BY HAND, not re-blessed —
+#   the three t/test.pl warning helpers stopped manufacturing a pass, so 24 rows became honest
+#   failures.  Cause for every one: PCL emits no warnings-gated diagnostic
+#   (docs/not-supported.md section "Warnings-gated diagnostics are absent"; owner task #221).
 aassign.t	OK	173	15	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -6,7 +10,7 @@ args.t	OK	22	1	23
 arith.t	OK	183	0	183
 arith2.t	OK	9	0	9
 array.t	OK	169	15	195
-assignwarn.t	OK	116	0	116
+assignwarn.t	OK	96	20	116
 auto.t	OK	47	0	47
 bless.t	OK	106	0	106
 blocks.t	OK	16	9	26
@@ -42,7 +46,7 @@ for.t	OK	131	0	132
 grent.t	OK	3	0	3
 grep.t	OK	71	0	77
 hash.t	OK	7	7	14
-hashassign.t	OK	309	0	309
+hashassign.t	OK	305	4	309
 hexfp.t	OK	106	15	125
 if.t	OK	2	0	2
 index.t	OK	110	0	120

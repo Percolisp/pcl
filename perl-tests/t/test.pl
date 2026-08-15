@@ -222,15 +222,43 @@ sub capture_warnings {
     return @::__capture;
 }
 
-# warnings_like - plural alias used by a few t/ files.
-# NB: this, warning_is and warning_like all PASS unconditionally — they run the
-# code and never compare the warning.  That is the #202 class (a claim that
-# cannot fail), and it is now fixable on top of capture_warnings above; task
-# #323 carries the measured population and the baseline work it implies.
+# warnings_like / warning_is / warning_like — the REAL t/test.pl bodies (its
+# lines 1751-1804), on top of capture_warnings above.  Task #323.
+#
+# All three used to run the code and pass() unconditionally: the expected
+# warning was never compared, so a test that emitted the WRONG warning, or none
+# at all, read as ok.  That is the #202 class — a claim that cannot fail — and
+# #202 removed it from cl/pcl-test.lisp for the same reason.  Rows that go red
+# here are honest: each is a warning PCL does not emit, or emits differently,
+# and needs a cause, never a re-bless.
+#
+# `$Level` is the only thing not carried over: this stub keeps no caller-depth
+# bookkeeping, and it affects diagnostics only.
+sub _fail_excess_warnings {
+    my ($expect, $got, $name) = @_;
+    # This will fail, and produce diagnostics.
+    is($expect, scalar @$got, $name);
+    diag("Saw these warnings:");
+    diag($_) foreach @$got;
+}
+
+# NB (real t/test.pl's own note): generates a VARIABLE number of tests — a
+# file using it plans with done_testing().
 sub warnings_like (&$;$) {
-    my ($code, $expected, $name) = @_;
-    $code->();
-    pass($name // "warnings_like");
+    my ($code, $expect, $name) = @_;
+    my @w = capture_warnings($code);
+    cmp_ok(scalar @w, '==', scalar @$expect, $name);
+    foreach my $e (@$expect) {
+        if (ref $e) {
+            like(shift @w, $e, $name);
+        } else {
+            is(shift @w, $e, $name);
+        }
+    }
+    if (@w) {
+        diag("Saw these additional warnings:");
+        diag($_) foreach @w;
+    }
 }
 
 # isa_ok - check if object is blessed into class
@@ -372,20 +400,32 @@ sub refcount_is {
     ok(1, $test);
 }
 
-# warning_is - run a code block and check it emits (or doesn't emit) a warning.
-# Stub: just runs the code and passes the warning assertion unconditionally.
-# Used by assignwarn.t, time.t, and others.
+# warning_is - run a code block and check it emits (or doesn't emit) exactly
+# the expected warning.  Real t/test.pl body (task #323); see the note above
+# warnings_like for why this stopped manufacturing a pass.
 sub warning_is (&$;$) {
-    my ($code, $expected, $name) = @_;
-    $code->();
-    pass($name // "warning_is");
+    my ($code, $expect, $name) = @_;
+    die sprintf "Expect must be a string or undef, not a %s reference", ref $expect
+        if ref $expect;
+    my @w = capture_warnings($code);
+    if (@w > 1) {
+        _fail_excess_warnings(0 + defined $expect, \@w, $name);
+    } else {
+        is($w[0], $expect, $name);
+    }
 }
 
-# warning_like - same as warning_is but expects a regex match on the warning
+# warning_like - same as warning_is but expects a regex match on the warning.
 sub warning_like (&$;$) {
-    my ($code, $expected, $name) = @_;
-    $code->();
-    pass($name // "warning_like");
+    my ($code, $expect, $name) = @_;
+    die sprintf "Expect must be a regexp object"
+        unless ref $expect eq 'Regexp';
+    my @w = capture_warnings($code);
+    if (@w > 1) {
+        _fail_excess_warnings(0 + defined $expect, \@w, $name);
+    } else {
+        like($w[0], $expect, $name);
+    }
 }
 
 # ------------------------------------------------------------------------

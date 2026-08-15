@@ -548,6 +548,7 @@ mro/vulcan_c3_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
 mro/vulcan_dfs.t	... got the right MRO for the Vulcan Dylan Example
 mro/vulcan_dfs_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
 op/args.t	delete $_[0] : outside block
+op/assignwarn.t	*rows-unstable*
 op/chr.t	[at t/op/chr.t line 28]
 op/chr.t	[at t/op/chr.t line 29]
 op/chr.t	[at t/op/chr.t line 30]
@@ -841,11 +842,26 @@ op/do.t	do $subref() is syntax error
 op/do.t	do subname("arg") is syntax error
 op/do.t	do subname() is syntax error
 op/exists_sub.t	exists takes subroutine names with no argument list
+op/hashassign.t	[at t/op/hashassign.t line 327]
+op/hashassign.t	[at t/op/hashassign.t line 328]
+op/hashassign.t	[at t/op/hashassign.t line 330]
+op/hashassign.t	[at t/op/hashassign.t line 331]
 op/localref.t	old value not visible during restore
 op/not.t	!0 returns the same value each time [perl \#114838]
 op/not.t	!1 returns the same value each time [perl \#114838]
 op/not.t	not 0 is read-only
 op/not.t	not 1 is read-only
+op/numify.t	numifying '+ inf' trigger a warning
+op/numify.t	numifying '++4' trigger a warning
+op/numify.t	numifying '+-inf' trigger a warning
+op/numify.t	numifying '+0x456' trigger a warning
+op/numify.t	numifying '- +3' trigger a warning
+op/numify.t	numifying '- 0x789' trigger a warning
+op/numify.t	numifying '- 3.14' trigger a warning
+op/numify.t	numifying '0b101' trigger a warning
+op/numify.t	numifying '0x123' trigger a warning
+op/numify.t	numifying '1x123' trigger a warning
+op/numify.t	numifying 'abc' trigger a warning
 op/print.t	print doesn't launder utf8 overlongs
 op/signatures.t	($a) interpreted as protoype when not enabled
 op/signatures.t	($a) not signature when not enabled
