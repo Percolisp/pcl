@@ -253,7 +253,13 @@ Perl) transpiled by PCL plus a hand-written appendix: run
 --timeout 380 perl-tests/pack.t` and `tools/sweep-diff.pl` (expect 0 new;
 s316b: 5635 pass / 90 fail).  It was found at gen v2-30 against a v2-71
 compiler — 40 generations of drift, which made every pack.t run a test of
-the *old* emitter.  `cl/pcl-mro.lisp` comes from `lib/mro.pm` the same way.
+the *old* emitter (and again at s396: v2-136 vs v2-147, eleven generations).
+`cl/pcl-mro.lisp` comes from `lib/mro.pm` the same way, and so does
+**`cl/pcl-warnings.lisp` from `lib/warnings.pm`** — there are THREE.
+**The drift is now a GATE**: `Pl/t/artifact-staleness-01.t` compares each
+artifact's line-1 `gen=` stamp against `*pcl-cache-generation*`, so bumping
+the generation without regenerating fails a row the same session (s399,
+task #331).  The artifacts are discovered by that stamp, not listed.
 
 ## Architecture
 
@@ -356,9 +362,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **141 test files, 5256 tests** with a built pclxs sibling (s398, measured;
+- **142 test files, 5275 tests** with a built pclxs sibling (s399, measured;
   the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5242 without** (arithmetic: minus the
+  user s394/s395: ignore XS rows); **5261 without** (arithmetic: minus the
   14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
@@ -368,8 +374,8 @@ func => -12         # 1 param before list
   silently subtracts those 14**, because the worktree lives elsewhere and its
   sibling path does not exist.  A worktree is still the right way to compare
   against HEAD (never a stash-copy) — just set `PCLXS_DIR=~/pclxs`, or expect
-  and subtract the 14.  What must hold either way is `Result: PASS` and 132
-  files.
+  and subtract the 14.  What must hold either way is `Result: PASS` and the
+  file count.
 - **XS conformance: 398 pass, 0 fail — fully green** against pclxs's corpus
   with real perl as oracle (`tools/pcl-conform`, re-measured s339 after the
   rule-12 pass over `cl/pcl-xs.lisp`; XS OO/magic
@@ -389,6 +395,16 @@ func => -12         # 1 param before list
   `0 new / 0 fixed` while coverage evaporated (s328: state.t 157 → 69).  Every
   run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
   is found it prints `LOST: NOT CHECKED` rather than nothing.
+- Full `perl-tests/` sweep, CURRENT (s399): **704 blessed fails**,
+  **64 files fully passing**, **TOTAL passing 18516** across 108 files.  The
+  s399 move is the only one that is not a regression to chase: task #323 made
+  `warning_is`/`warning_like`/`warnings_like` in `perl-tests/t/test.pl` stop
+  manufacturing a pass, so 24 rows (assignwarn.t 20, hashassign.t 4) became
+  honest failures with ONE cause — PCL emits no warnings-gated diagnostic
+  (`not-supported.md` "Warnings-gated diagnostics are absent", owner #221).
+  Both baselines were edited ROW BY ROW, never re-blessed, and
+  `docs/pass-baseline.tsv` carries a header note saying so.
+  Historical baseline text follows.
 - Full `perl-tests/` sweep: **679 blessed fails** in `docs/fail-baseline.tsv`,
   **65 files fully passing**, 18499 passing / 910 failing across 108 files
   (re-measured s356 at the E4.1 flip; GATE clean, +0.  The flip moved three
@@ -511,6 +527,7 @@ Not relevant now:
 - `docs/v1-implementation-plan.md` - **V1 feature plan** (prioritized, with full implementation details for each item including `local $hash{key}`, bare-if return, string eval, etc.)
 - `docs/test-infrastructure.md` - **Test infra notes**: why SBCL startup is slow, `fresh_perl_is` limitations, saved-core optimisation
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
+- `docs/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 72 files / 379 drops over perl-tests + perl's t/ + lib, with the compiler's own message per file. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
 - `docs/tap-assertion-audit.md` - **What the TAP layer can and cannot claim** (#202, s330): the per-function inventory of reachable failure paths, the ten findings (unlike could not fail; eq_hash had never run; cmp_ok manufactured verdicts for `<=>`/`cmp`/`=~`/`!~`), the rule that **a claim that cannot be evaluated reports `not ok` naming the reason and only `plan()` dies**, why TAP descriptions must be Test::More's (they are join keys), and the two deliberate non-changes. Read before touching `cl/pcl-test.lisp`.
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.

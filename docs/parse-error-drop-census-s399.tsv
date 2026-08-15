@@ -1,0 +1,100 @@
+# parse-error-drop-census-s399.tsv — every file whose EMITTED CL contains a
+# `;; PARSE ERROR:` progn, i.e. a statement the compiler could not lower and
+# replaced with nil.  This is the #138 family (the silently deleted statement),
+# measured over the whole population for the first time (s399, task #343).
+#
+# Columns: <rel-path><TAB><drops in the file><TAB><the compiler's own message(s),
+# with a count each>.
+#
+# Population: perl-tests/*.t (111) + perl's t/ default dirs (527, op/cond.t
+# excluded as always) + lib/**.pm (21).  Measured with
+# tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
+#
+# TOTAL: 72 files, 379 drops — 9 perl-tests files (12 drops), 63 companion
+# files (367), ZERO in lib/.
+#
+# Causes, aggregated over files:
+#   56  Bug. Fell through. Missing case: [        <- the dominant one
+#   21  Handle single node of unknown type
+#    5  PCL: <a ruled refusal, swallowed into a drop instead of dying>
+#    2  Ternary operator: Found '?'
+#    2  Got op X, not postfix. But there is nothing after it??
+#    1  WTF? :-) Expr starts with ->/brace??
+#    1  Can't locate object method "add_node" via package "Pl::PExpr"  <- an
+#       internal error, not a decline
+#
+# A drop is NOT always harmless: perl-tests/bless.t's single drop is the test
+# row `is ref $untied, "main", 'blessing through tied refs' or diag $@;` — an
+# assertion that never runs and never appears in any count.
+perl-tests/bless.t	1	Bug. Fell through. Missing case: [ x1
+perl-tests/bop.t	2	Bug. Fell through. Missing case: [ x2
+perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
+perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
+perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
+perl-tests/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
+perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
+perl-tests/state.t	1	Bug. Fell through. Missing case: [ x1
+perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
+t/class/accessor.t	2	Bug. Fell through. Missing case: [ x2
+t/class/class.t	5	Bug. Fell through. Missing case: [ x5
+t/class/construct.t	2	Bug. Fell through. Missing case: [ x2
+t/class/destruct.t	1	Bug. Fell through. Missing case: [ x1
+t/class/field.t	2	Bug. Fell through. Missing case: [ x2
+t/class/inherit.t	7	Bug. Fell through. Missing case: [ x7
+t/class/method.t	6	Bug. Fell through. Missing case: [ x6
+t/class/phasers.t	2	Bug. Fell through. Missing case: [ x2
+t/class/threads.t	1	Bug. Fell through. Missing case: [ x1
+t/class/utf8.t	1	Bug. Fell through. Missing case: [ x1
+t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
+t/comp/parser.t	10	Bug. Fell through. Missing case: [ x6 | Can't locate object method "add_node" via package "Pl::PExpr" x2 | Handle single node of unknown type. Dump: x2
+t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
+t/io/fflush.t	1	Handle single node of unknown type. Dump: x1
+t/io/open.t	1	Bug. Fell through. Missing case: [] x1
+t/mro/basic_utf8.t	1	Bug. Fell through. Missing case: [ x1
+t/mro/package_aliases_utf8.t	2	Bug. Fell through. Missing case: [ x2
+t/op/alarm.t	1	Handle single node of unknown type. Dump: x1
+t/op/bless.t	1	Bug. Fell through. Missing case: [ x1
+t/op/bop.t	2	Bug. Fell through. Missing case: [ x2
+t/op/closure.t	3	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x1
+t/op/coreamp.t	7	Bug. Fell through. Missing case: [ x3 | PCL: Can't modify non-lvalue subroutine call in assignment x4
+t/op/current_sub.t	4	Bug. Fell through. Missing case: [ x3 | WTF? :-) Expr starts with ->/brace?? x1
+t/op/defer.t	13	Bug. Fell through. Missing case: [ x13
+t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2
+t/op/die_unwind.t	4	Bug. Fell through. Missing case: [ x4
+t/op/filetest.t	19	Bug. Fell through. Missing case: [ x19
+t/op/filetest_stack_ok.t	1	Bug. Fell through. Missing case: [ x1
+t/op/filetest_t.t	5	Bug. Fell through. Missing case: [ x5
+t/op/fork.t	2	Handle single node of unknown type. Dump: x2
+t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
+t/op/glob.t	1	Handle single node of unknown type. Dump: x1
+t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
+t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
+t/op/method.t	1	Bug. Fell through. Missing case: [ x1
+t/op/override.t	2	Handle single node of unknown type. Dump: x2
+t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
+t/op/rt119311.t	1	Bug. Fell through. Missing case: [ x1
+t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
+t/op/smartmatch.t	4	Bug. Fell through. Missing case: [ x4
+t/op/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
+t/op/sprintf2.t	19	Bug. Fell through. Missing case: [ x19
+t/op/stat.t	3	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x1
+t/op/state.t	1	Bug. Fell through. Missing case: [ x1
+t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
+t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
+t/op/switch.t	112	Bug. Fell through. Missing case: [ x112
+t/op/tie_fetch_count.t	5	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x3
+t/op/universal.t	1	Handle single node of unknown type. Dump: x1
+t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
+t/op/utftaint.t	1	Bug. Fell through. Missing case: [ x1
+t/op/write.t	2	Handle single node of unknown type. Dump: x2
+t/re/pat.t	11	Bug. Fell through. Missing case: [] x5 | Handle single node of unknown type. Dump: x5 | Ternary operator: Found '?' but no matching ':' x1
+t/re/pat_advanced.t	11	Bug. Fell through. Missing case: [ x3 | Bug. Fell through. Missing case: [] x1 | Ternary operator: Found '?' but no matching ':' x7
+t/re/pat_re_eval.t	1	Handle single node of unknown type. Dump: x1
+t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
+t/re/subst.t	3	Bug. Fell through. Missing case: [] x2 | Handle single node of unknown type. Dump: x1
+t/uni/caller.t	2	Bug. Fell through. Missing case: [ x2
+t/uni/gv.t	13	Bug. Fell through. Missing case: [ x9 | Handle single node of unknown type. Dump: x4
+t/uni/method.t	2	Handle single node of unknown type. Dump: x2
+t/uni/readline.t	2	Handle single node of unknown type. Dump: x2
+t/uni/stash.t	4	Bug. Fell through. Missing case: [ x4
+t/uni/write.t	1	Handle single node of unknown type. Dump: x1

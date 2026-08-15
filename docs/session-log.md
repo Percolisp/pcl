@@ -4,6 +4,138 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 399 (2026-08-15, Opus 5) — the s397 queue, items 1–6: artifacts, #332, the internals registration, #323, #314 F-D, the three singles sized — and a first census of the #138 silent-drop family
+
+Five commits, all on main, each with its own measurement.  The queue was
+worked in order; three of the six items produced a finding that CONTRADICTED
+the premise they were filed under, and those are the parts worth reading.
+
+**s399a (`7af2a97`) — #331, the checked-in artifacts.**  `cl/pcl-pack.lisp`,
+`cl/pcl-mro.lisp` and — a THIRD the task had not counted — `cl/pcl-warnings.lisp`
+were all stamped gen v2-136 against a v2-147 compiler, so every pack.t / mro /
+warnings run since s387 was testing the old emitter.  The regenerated diff is
+exactly the drift s396 characterised (+149 `p-defcell` forward declarations in
+pack, the COND-RENAME family gone, layout).  Verified at the task's bar: pack.t
+5636/89 = the blessed count with 0 new; gate 142/5261; full sweep GATE clean,
+TOTAL 18540 = baseline.  `Pl/t/artifact-staleness-01.t` stops it recurring —
+artifacts are DISCOVERED by their line-1 gen stamp rather than listed, and a
+count row exists so a header-format change cannot make the file pass
+vacuously.  That count row is how the third artifact turned up.
+
+**s399b (`bf3fe69`) — #332, `\(@a) = LIST`.**  The three parenthesised-array
+refaliasing spellings reached `p-setf` as the RVALUE form
+`(p-list-scalar (p-refgen-list @a))` — not a `\`-cast place, so the alias arm
+never saw it and the array stayed EMPTY with exit 0.  One mechanism (the
+sibling of `_is_backslash_paren_lvalue`, recognised on the FORM, which is what
+all three spellings share) lowers it to the place `(p-backslash-list @a)`, and
+`p-alias-array-elements` resolves referents through the same
+`p-alias-scalar-target` the scalar arm uses.  Fifteen shapes byte-identical to
+perl, including the list-context RHS (a sub call on the right had been the
+comma-operator scalar form) and the INVERSE rvalue.  Rule 12: any other
+`\(…)` target now DIES at transpile.  corpus-diff identical; gate 142/5274;
+sweep clean.  Generation v2-147 → v2-148, artifacts regenerated (gen line
+only — which is the point of regenerating them).
+
+**s399c (`f8ffd56`) — the ASK-1 registration, and a ruling premise corrected.**
+The class section is in (`not-supported.md` "Readouts of perl's own internals:
+`B::` optree inspection, `re::optimization`, `XS::APItest`", with the mandatory
+"what would lift it: nothing" line), `re::optimization` folded in as its first
+item, and re/opt.t's reason now cites the class name so `grep -c` IS the
+population.  **op/const-optree.t is NOT registered.**  The ruling authorised it
+on the premise that every diverging row is such a readout; the per-row read the
+bar demands says 53 of 62 are — 5 are `now throws exception (RT 134138)`
+(perl REJECTS `sub () { $x }` when `$x` is modified elsewhere; §Error
+compatibility for invalid Perl input, a different blessed class) and **4 are a
+real fix target**: `my sub x () { 8 }` compiles to a PACKAGE sub, so two
+same-named lexical subs in different scopes clobber each other and every `\&x`
+resolves to the last one (perl `8 3`, PCL `3 3`, silent — task #337).  In
+isolation PCL is right, which is why it took a file with two of them.
+All-or-nothing keeps the file UNEXPLAINED; the section records the split so the
+next session can re-register after #337 without re-deriving it.
+
+**s399d (`6f04839`) — #323, and #221's trigger has fired.**  `warning_is`,
+`warning_like` and `warnings_like` in the transpilable `t/test.pl` stub ran the
+code and `pass()`ed unconditionally — the #202 class, a claim that cannot fail.
+Replaced by the REAL t/test.pl bodies on top of `capture_warnings`.  24 rows
+went honest and RED, every one the same cause: PCL emits no warnings-gated
+diagnostic.  perl-tests/assignwarn.t 116/0 → 96/20, hashassign.t 309/0 → 305/4,
+time.t unchanged at 72/0 (its rows expect NO warning — they now pass honestly).
+That is exactly the trigger task #221 was waiting for, so the standing "no
+warnings model" decision now has a concrete consumer and its own
+not-supported section.  Baselines edited ROW BY ROW with a header note, never
+re-blessed (TOTAL 18540 → 18516, sweep-diff clean against the edited pair).
+Companion suite: the population is CLOSED — eight files call these helpers
+anywhere under perl's `t/`, all eight run.  op/numify.t 32/0 → 21/11 joins
+assignwarn/hashassign as XDIFF; **op/assignwarn.t opts out of the ROW check as
+`*rows-unstable*`, measured**: the file iterates `keys %should_warn`, so BOTH
+sides emit rows in per-process random order and the description-multiset
+pairing reports a different split every run (81 then 73).  op/utf8decode.t
+644/42 → 620/90 stays UNEXPLAINED (86 are this entry; 4 are a pre-existing
+divergence of another kind, verified in a worktree) — and its row count now
+MATCHES perl's 710, retiring the "numbering is offset for 592 rows" note.
+
+**s399e (`c754abc`) — #314 family F-D, scalar half.**  `my ($fetch, $store) =
+(0, 0);` spanning a package boundary refused with `sdecls=0 dc=1`: the
+declaration COUNTED but no statement was found to rename, because
+`_scan_lex_facts` fills `scalar_decl` only from the single-scalar form.  perl
+declares each name of a list form exactly as the single form does, so the two
+facts are merged for that pass in ONE accessor (`_scalar_decl_stmts`); the
+promotion pass keeps reading them separately, or a list decl would be processed
+twice.  io/shm.t TRANSPILE-FAIL → transpiles; op/taint.t moves past this
+refusal onto two other pre-existing ones.  Measured at the s372 two-population
+bar with a **GATE-SET scan of 638 files** (111 perl-tests + 527 of perl's t/,
+first stderr line normalized): FOUR rows differ and only four.  The checker's
+die now names the CANONICAL variable — it cost a probe to learn op/svleak.t
+dies on `@a`, not `$a`.  **The s395 diagnosis of the container half was
+imprecise** and it is two different things, both measured and filed as #338:
+svleak.t declares `my @a` three times (the container loop's file-uniqueness
+rule), and a container name inside a list decl needs the DECL LOWERING, which
+knows only the no-init single-container shape.
+
+**The three singles SIZED, not started (#340 try, #341 lexsub, #342 base/lex).**
+op/try.t: PPI lexes `try {} catch ($e) {} finally {}` cleanly, and six
+semantics were probed — `return` inside try returns from the ENCLOSING SUB,
+`$@` is NOT touched, `finally` runs on a `next` out of the block, and
+`finally` without `catch` is a syntax error; `unwind-protect` + `handler-case`
+give all of it.  op/lexsub.t: **the #314 note that it dies on "Negative repeat
+count does nothing" is wrong** — that is a warning printed ten times (a
+NEGATIVE `indent_level` in Pl/Parser.pm:8908, its own small bug); the killer is
+the capture refusal, and the substantive work is #337.  base/lex.t: the
+isolated blocking shape is a **rule-12 violation** — pl2cl exits 0, warns
+"Failed to compile s///e expression", and emits `(p-subst … (lambda () nil) :e)`,
+i.e. the replacement silently becomes nil.
+
+**The session's own finding: the first CENSUS of the #138 silent-drop family
+(task #343, `docs/parse-error-drop-census-s399.tsv`).**  Chasing a stderr line
+the gate-set scan kept printing led to `(progn ;; PARSE ERROR: … nil)` — a
+statement the compiler could not lower, replaced by nil, execution continuing.
+Nobody had ever counted them: **72 files carry one, 379 drops total** (9
+perl-tests files, 63 companion, ZERO in lib/), 56 of them the same message
+("Bug. Fell through. Missing case: [").  A drop is not cosmetic —
+perl-tests/bless.t's is the test row `is ref $untied, "main", '…' or diag $@;`,
+an assertion that never runs and appears in no count, in a file the sweep
+reports as passing.  The biggest single cause minimises to
+
+    f ref $u, "m", "d" or g "fb";     perl: f( m d) g(fb)     PCL: (nothing)
+
+— a parenless call × a named-unary first argument × a following low-precedence
+`or`/`and`; parenthesising the args, or dropping the named unary, makes it work.
+That is `Test::More`'s `is … or diag $@`.  It lives in the `$end_pars` region
+CLAUDE.md says not to patch in place, so it (with #259 and #335, the same
+fall-through) belongs in Option B **phase 2**'s acceptance set, and the census
+is phase 2's metric.
+
+**Fillers filed:** #337 (`my sub` scoping), #338 (F-D container residue),
+#339 (PExpr's error-shaped warn for a routine decline — **investigated and
+NOT taken**: deleting the warn was tried and reverted, because in op/glob.t it
+marks a real dropped statement, `ok <~>, '~ works';`), #343 (the census).
+
+**Gate 142 files / 5275 tests** (only the 13 known pclxs xs rows).  Full sweep
+GATE clean, TOTAL 18516 after the #323 baseline edit.  Cache generation
+v2-148.
+
+---
+
 ## Session 398 (2026-08-15, Fable) — #153 FOLD chunk 3 VERIFIED and FLIPPED (W1–W9); a list-slice silent drop fixed; four filler bugs filed
 
 Picked up the branch parked in s397 (`wip/s397-fold-chunk3`) and ran the

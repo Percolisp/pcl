@@ -3284,6 +3284,95 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   that judges at a LATER pass than the thing it measures must replay the
   passes in between.
 
+## s399 (2026-08-15, Opus 5) — the s397 queue items 1–6, and the first #138 drop census
+
+- **The checked-in transpiled artifacts are THREE, not two** — `cl/pcl-pack.lisp`,
+  `cl/pcl-mro.lisp` and `cl/pcl-warnings.lisp` (from `lib/warnings.pm`) — and
+  their staleness is now a GATE: `Pl/t/artifact-staleness-01.t` compares each
+  file's line-1 `gen=` stamp against `*pcl-cache-generation*`.  Artifacts are
+  DISCOVERED by the stamp, not listed, and a count row keeps a header-format
+  change from making the file pass vacuously (that row is how the third
+  artifact was found).  Consequence, deliberate: **an emission-changing commit
+  that bumps the generation must regenerate the artifacts in the same commit**,
+  which is what CLAUDE.md already asked for and nothing enforced.  → s399a
+  `7af2a97`, task #331.
+- **`\(@a) = LIST` / `\my(@x)` / `\(my @x)` alias the ELEMENT SLOTS** and
+  resize the array to the right-hand length (perl REPLACES, it does not merge).
+  The lvalue reaches `p-setf` as the `\`-cast place `(p-backslash-list @a)`;
+  the runtime arm is `p-alias-array-elements`, resolving referents through the
+  same `p-alias-scalar-target` as the scalar arm.  Any other `\(…)` target
+  DIES at transpile (rule 12) — `\(%h) =` and `\(@$ref) =` are compile errors
+  in perl too.  → s399b `bf3fe69`, task #332, guard `Pl/t/refaliasing-01.t`.
+- **"Readouts of perl's own internals" is ONE not-supported section** (`B::`
+  optree inspection, `re::optimization`, `XS::APItest`), and citing its name in
+  `docs/perl-suite-expected.tsv` IS the population (`grep -c`).  Its
+  "what would lift it" line is *nothing*.  → s399c `f8ffd56`, ruling
+  `fable-answers-s396.md` §4.
+- **op/const-optree.t does NOT register, and the ruling's premise was wrong** —
+  the per-row read the bar demands splits its 62 diverging rows 53 internals /
+  5 §Error-compatibility (`now throws exception (RT 134138)`) / **4 a real fix
+  target**.  All-or-nothing keeps the file UNEXPLAINED.  A registration
+  authorised in the abstract still has to survive its per-row read.
+- **`my sub NAME` compiles to a PACKAGE sub** — two same-named lexical subs in
+  different scopes clobber each other and every `\&x` resolves to the last one
+  (perl `8 3`, PCL `3 3`, silent).  In isolation PCL is right, so it needs two
+  of them to show.  → task #337; op/lexsub.t is the same feature's other half.
+- **A claim that cannot be evaluated must not manufacture a pass — now also in
+  `perl-tests/t/test.pl`**: `warning_is`/`warning_like`/`warnings_like` carry
+  the real t/test.pl bodies.  24 rows went honest and RED with ONE cause.
+  → s399d `6f04839`, task #323.
+- **PCL emits no warnings-gated diagnostic, and that now has a section and an
+  owner** (`not-supported.md` "Warnings-gated diagnostics are absent"; task
+  #221).  **#221's trigger — "the first test family whose failure is *warning
+  not emitted*" — HAS FIRED**: assignwarn.t (20), hashassign.t (4),
+  op/numify.t (11), op/utf8decode.t (86).  The standing rule is unchanged
+  (default-off diagnostics stay ABSENT, never unconditional); what changed is
+  that the debt is now countable.
+- **A file whose TAP order depends on hash iteration gets `*rows-unstable*`** —
+  measured, not assumed: op/assignwarn.t iterates `keys %should_warn`, so both
+  sides emit rows in per-process random order and the description-multiset
+  pairing reports a different missing/extra split every run (81 then 73).  The
+  COUNTS are stable, so the file still registers XDIFF; only the ROW check opts
+  out.  → s399d.
+- **A LIST-form `my` may span a package boundary** (#314 F-D scalar half): the
+  span pass's candidate declarations are `scalar_decl` + the `$`-sigil entries
+  of `mlist_decl`, merged in one accessor because perl declares each name of a
+  list form exactly as the single form does.  The promotion pass keeps them
+  separate — merging there processes a list decl twice.  io/shm.t transpiles.
+  → s399e `c754abc`.
+- **The span checker's die names the CANONICAL variable** (`my-lexical 'a'
+  (canon @a) …`).  The bare name hid the one fact that says which loop must
+  handle it, and cost a probe.
+- **#314 F-D's container half is TWO different things, and the s395 diagnosis
+  of it was wrong** — not "container decls are not recorded" (`container_decl`
+  and its own span loop have existed since s305) but (b1) op/svleak.t declares
+  `my @a` three times, so the loop's file-uniqueness rule refuses, and (b2) a
+  container name inside a list decl needs the DECL LOWERING, which knows only
+  the no-init single-container shape.  → task #338.
+- **The #138 silent-drop family is 72 files / 379 drops, measured for the first
+  time** (`docs/parse-error-drop-census-s399.tsv`, task #343): 9 perl-tests
+  files, 63 companion, ZERO in lib/; 56 of them one message ("Bug. Fell
+  through. Missing case: [").  A drop is NOT cosmetic — bless.t's is the test
+  row `is ref $untied, "main", '…' or diag $@;`, which never runs and appears
+  in no count in a file the sweep reports as passing.
+- **The census's dominant cause minimises to `f ref $u, "m" or g "fb"`** — a
+  parenless call × a named-unary first argument × a following low-precedence
+  `or`/`and`.  Parenthesising the arguments, or dropping the named unary, works.
+  It is the `$end_pars` region (`pexpr-term-parsing-review.md`: do not patch in
+  place), so it belongs — with #259 and #335, the same fall-through — in Option
+  B **phase 2**'s acceptance set, and the census is phase 2's metric.
+- **PExpr's `Handle single node of unknown type` warn is NOT pure noise** —
+  deleting it was tried and REVERTED: in op/glob.t that decline becomes a
+  `;; PARSE ERROR` drop of `ok <~>, '~ works';`.  The distinction that matters
+  is handled-decline vs dropped-statement, and it belongs at the caller that
+  emits the drop, not at the die site.  → task #339.
+- **The `PCL:` refusals that appear as drops are DELIBERATE**, not an
+  oversight: `_shape_expr_error` re-raises every `PCL:` error except
+  "Can't modify non-lvalue subroutine call in assignment" outside eval mode
+  (the eval half must propagate so the eval returns undef, like perl).  Whether
+  the FILE-level case should die like perl is an open design call — 33 of the
+  379 drops.
+
 ## s398 (2026-08-15, Fable) — #153 FOLD chunk 3 verified and flipped; Option B phase 1 complete
 
 - **#153 FOLD chunk 3 SHIPPED (s398a–c: `f501ada`, `c6a211e`, `5323d9e`);
