@@ -872,10 +872,22 @@ sub record_result {
 # alive has that SBCL as its parent, so a CONCURRENT run in another shell is
 # never touched.
 sub reap_orphan_transpilers {
+  # ORPHAN := its parent is a REAPER, not the SBCL that spawned it.  PID 1 is
+  # only one adoption target: on a systemd desktop login every orphan is
+  # adopted by the session's `systemd --user` (a subreaper), so a PPID==1
+  # test never fired on the machine it was written on (measured s397).  The
+  # reap stays conservative — a server whose parent is anything else (an
+  # sbcl, or a foreign harness) is never touched; the server's OWN
+  # getppid watchdog (pl2cl --server, s397) is the fix that covers every
+  # adoption target, this is the belt for a server stuck in one long op.
   my @ps = `ps -eo pid,ppid,args 2>/dev/null`;
   for my $l (@ps) {
-    next unless $l =~ m{^\s*(\d+)\s+1\s+\S*perl\S*\s+\S*\bpl2cl\s+--server\s*$};
-    kill 'KILL', $1;
+      next unless $l =~ m{^\s*(\d+)\s+(\d+)\s+\S*perl\S*\s+\S*\bpl2cl\s+--server\s*$};
+      my ($pid, $ppid) = ($1, $2);
+      my $pcomm = '';
+      if (open my $c, '<', "/proc/$ppid/comm") { $pcomm = <$c> // ''; chomp $pcomm }
+      next unless $ppid == 1 || $pcomm =~ /^(?:systemd|init)$/;
+      kill 'KILL', $pid;
   }
   return;
 }

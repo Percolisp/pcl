@@ -3207,3 +3207,63 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
 - **Scope, unchanged**: only what PPI itself tokenizes or structures wrongly.  A
   correct token stream that PExpr then reads wrongly is PCL's bug and belongs in
   a task.
+
+## s397 (2026-08-15, Fable) — review of s395+s396; the orphaned-server fix belongs IN the server
+
+- **s395 + s396 batches APPROVED as shipped** (`docs/fable-answers-s396.md`):
+  cold gate independently re-verified 141/5203 (failures exactly the 13 pclxs
+  xs rows), full sweep re-run GATE clean TOTAL 18539 = baseline, ten fresh
+  refaliasing / n-at-a-time probes vs perl 5.40.3 all identical, compile time
+  on pack.t 2.76 → 2.76/2.87 s (noise).
+- **A process that can outlive its parent is the ONE place that knows it did
+  — liveness policy lives IN `pl2cl --server`, not in every caller.**  The
+  server now ticks once a second (`$SIG{ALRM}` + `getppid()`); a changed parent
+  means the client SBCL is gone and the reply would go nowhere, so it
+  `POSIX::_exit`s.  Measured: a server orphaned 0.5 s into a 2.8 s transpile
+  was gone 0.5 s after its parent died; two requests answered across five idle
+  ticks (PerlIO retries the EINTR'd read after the handler).  This closes the
+  MEMORY half of #273 for every adoption target, and it is the fix the s396
+  ASK 2 option (1) asked about — option (2) (an SBCL exit hook) was rejected:
+  it cannot see the SIGKILL case, which is the one that happened.
+- **`PPID == 1` is NOT what "orphaned" looks like on a systemd desktop.**  Every
+  orphan under a `systemd --user` session is adopted by THAT process (a
+  subreaper, PID 4471 here), so the s396 reaper's PPID==1 key never fired on
+  the machine it was written on — measured with a real orphaned server (ppid
+  4471, comm `systemd`).  The reapers in both runners stay as the belt (a
+  server stuck in ONE long op cannot run the tick) but now key on "parent is
+  a reaper" = PPID 1 or parent comm `systemd`/`init`, still never touching a
+  server whose parent is an sbcl or anything else.  Rule earned: **a
+  process-tree assumption is measured on the machine, not inferred from the
+  textbook** — `sh -c 'cmd &'` and `ps -o ppid` is a ten-second probe.
+- **No new suite verdict for "measures perl's internals" (s396 ASK 1).**  XDIFF
+  + a not-supported section already say "explained divergence, per row, STALE
+  if it ever passes"; whether the cause is CLOSABLE is a property of the
+  ENTRY (its "what would lift it" line), not of the verdict — and half the
+  named files are not internals at all (IPC::SysV is a module PCL could shim;
+  op/coresubs.t and op/svleak.t are still behind REAL compiler declines that
+  stand on their own).  What the ask is right about is countability: the
+  class gets ONE not-supported section ("Readouts of perl's own internals:
+  `B::` optrees, `re::optimization`, `XS::APItest`") that every such
+  registration cites, so `grep -c` of that section name in
+  `perl-suite-expected.tsv` IS the population.  op/const-optree.t (86/62,
+  every diverging row a `B::` inlinability/`:method` readout) may register
+  XDIFF under it now — the all-or-nothing bar is met.
+- **#323 (the three test.pl stubs that manufacture a PASS) is scheduled as its
+  own session, not a filler** (s395 ASK 1): it is a baseline event by
+  construction (8 sweep rows + ≥8 companion files flip red for CAUSES, not for
+  bugs), so it needs the sweep + companion run + per-row cause edits in one
+  sitting; the false passes are known and bounded, nothing is hidden by
+  waiting.  After #331 and the F-D fix, before the v0.1 track.
+- **The parenthesized-ARRAY refaliasing spellings are SILENT WRONG — task
+  #332.**  `\(@a) = (\$x, \$y)`, `\my(@x) = \(@y)`, `\(my @c) = LIST` (perlref
+  §"Assigning to References": "@x now contains $x, $y, and $z") reach p-setf as
+  the place `(p-list-scalar (p-refgen-list @a))`, which is not a `\`-cast place
+  and so falls through to a value write into a throwaway — perl prints `10 2`,
+  PCL prints an empty line, exit 0.  The slice spellings (`\@a[5..7] = …`,
+  `\@h{'foo','bar'} = …`) correctly DIE naming the target.  Rule 12: the die is
+  the minimum; the fix is per-element (replace @a's contents with the referent
+  boxes).  Found by review probes; occurs in no population.
+- **`cl/pcl-pack.lisp` / `cl/pcl-mro.lisp` are ELEVEN generations stale
+  (v2-136 vs v2-147) — #331 is Opus's next-session OPENER**, with the
+  staleness CHECK (artifact line-1 generation vs `*pcl-cache-generation*`) as a
+  Pl/t row so it cannot recur silently.

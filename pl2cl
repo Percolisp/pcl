@@ -20,6 +20,7 @@ use Getopt::Long;
 use File::Spec;
 use File::Basename;
 use Cwd qw(abs_path);
+use POSIX ();
 
 # Output UTF-8 so non-ASCII chars (from \xNN escapes) are valid for SBCL's reader
 binmode(STDOUT, ":utf8");
@@ -215,6 +216,23 @@ sub _run_server {
   # list, because it is compiler INPUT.
   binmode(STDIN,  ':encoding(utf-8)');
   binmode(STDOUT, ':encoding(utf-8)');
+
+  # LIVENESS (task #273, ruled s397).  This loop looks at STDIN only BETWEEN
+  # requests, so a server whose client SBCL is SIGKILLed while a transpile is
+  # in flight never sees the EOF: it is reparented (to init, or to the
+  # session's subreaper -- `systemd --user` on a desktop login, which is why
+  # a PPID==1 test in the callers never fired) and grinds on holding
+  # gigabytes (s396: two orphans at 4.8 GB and 4.6 GB for half an hour).  The
+  # one process that KNOWS the client is gone is this one, so it asks: a
+  # once-a-second tick compares getppid() with the client's pid, and a
+  # changed answer means the reply would go nowhere.  Safe signals deliver
+  # the tick between perl ops, so it fires inside a long transpile too (worst
+  # case: after the current op -- a long regex match -- completes); the
+  # blocking reads below are EINTR-safe (PerlIO retries after the handler).
+  # _exit, not exit: nothing to flush, no partial reply to a dead pipe.
+  my $client = getppid();
+  $SIG{ALRM} = sub { POSIX::_exit(0) if getppid() != $client; alarm 1 };
+  alarm 1;
 
   while (1) {
     my $pkg = <STDIN>;
