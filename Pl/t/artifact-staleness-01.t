@@ -29,10 +29,12 @@
 #   cl/pcl-pack.lisp   tools/rebuild-pack
 #                      then  perl sweep-perl-tests.pl --jobs 1 --timeout 380 \
 #                              perl-tests/pack.t   &&  tools/sweep-diff.pl
-#   cl/pcl-mro.lisp    ./pl2cl lib/mro.pm > cl/pcl-mro.lisp   (pl2cl exits 0
-#                      with EMPTY output on a compile error — check the size)
+#   cl/pcl-mro.lisp    ./pl2cl --extension lib/mro.pm > cl/pcl-mro.lisp
+#                      (pl2cl exits 0 with EMPTY output on a compile error —
+#                      check the size.  --extension = no program preamble,
+#                      task #349; Pl/t/extension-preamble-01.t guards it)
 #   cl/pcl-warnings.lisp
-#                      ./pl2cl lib/warnings.pm > cl/pcl-warnings.lisp
+#                      ./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp
 
 use v5.30;
 use strict;

@@ -5,19 +5,6 @@
 ;;;; SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 (in-package :pcl)
-(setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
-;; Initialize @INC from Perl
-(setf pcl::@INC (make-array 0 :adjustable t :fill-pointer 0))
-(vector-push-extend "/home/bernt/pcl/cl" pcl::@INC)
-(vector-push-extend "." pcl::@INC)
-(vector-push-extend "/home/bernt/pcl/lib" pcl::@INC)
-(vector-push-extend "/home/bernt/pcl" pcl::@INC)
-(vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux" pcl::@INC)
-(vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" pcl::@INC)
-(vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" pcl::@INC)
-(vector-push-extend "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3" pcl::@INC)
-(setf pcl::*p-core-inc-dirs* (list "/home/bernt/pcl/lib" "/home/bernt/pcl" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3/x86_64-linux" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/site_perl/5.40.3" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3/x86_64-linux" "/home/bernt/perl5/perlbrew/perls/perl-5.40.3/lib/5.40.3"))
-;; Switch to main package (Perl's default for code without 'package' statement)
 (p-defpackage :main)
 (in-package :main)
 

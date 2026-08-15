@@ -18,13 +18,16 @@
 # %Config, an env override with a documented name — tools/lib/PCLPaths.pm is
 # where that lives) or supplied at install time.  Never written down.
 #
-# NOT COVERED, deliberately: the checked-in TRANSPILED ARTIFACTS
-# (cl/pcl-pack.lisp, cl/pcl-mro.lisp, cl/pcl-warnings.lisp).  Their preamble
-# embeds the BUILD machine's @INC because pl2cl emits it for every file it
-# compiles; making that preamble relocatable is task #217 and an emission
-# change, not a hygiene edit.  They are excluded BY THEIR gen STAMP, the same
-# discovery rule Pl/t/artifact-staleness-01.t uses — and counted, so the
-# exclusion cannot silently widen to cover a hand-written file.
+# COVERED SINCE s404 (task #349 closed #217): the checked-in TRANSPILED
+# ARTIFACTS (cl/pcl-pack.lisp, cl/pcl-mro.lisp, cl/pcl-warnings.lisp) are
+# scanned like any hand-written file.  They used to be EXCLUDED because their
+# preamble embedded the build machine's @INC — which turned out to be the whole
+# of #217's problem: they carried a PROGRAM preamble an extension never needed,
+# and it reset the running program's @INC on load.  `pl2cl --extension` emits
+# no preamble, so there is nothing left to excuse.  They are still identified
+# BY THEIR gen STAMP (the discovery rule of Pl/t/artifact-staleness-01.t,
+# normative in docs/ir-spec.md §9.2) and counted, so the day one of them
+# regrows a machine path this test says which file and why.
 #
 # Files are read as BYTES and matched with a plain regex: `grep` prints
 # nothing at all for a file it decides is binary, which is exactly how the
@@ -56,16 +59,12 @@ sub scan_file {
   open my $fh, '<:raw', $path or die "cannot read $path: $!";
   my $first = <$fh>;
   # A transpiled artifact announces itself in line 1 — same rule as
-  # artifact-staleness-01.t, and the same promise: docs/ir-spec.md §9.2
-  # fixes the stamp's format, which is what lets this guard tell a GENERATED
-  # file (whose machine paths are the emitter's, task #217/#349) apart from a
-  # hand-written source file (whose machine path is a bug).
-  # Excluded, and counted (task #217 owns them).
-  if (defined $first && $first =~ /^;;;\s*pcl:\s*pipeline=\S+\s+gen=\S+/) {
-    close $fh;
-    push @artifacts, rel($path);
-    return;
-  }
+  # artifact-staleness-01.t, and the same promise: docs/ir-spec.md §9.2 fixes
+  # the stamp's format.  It is COUNTED here, not skipped (task #349): a
+  # generated file has no more licence to carry this machine's paths than a
+  # hand-written one, now that `pl2cl --extension` gives it none.
+  push @artifacts, rel($path)
+    if defined $first && $first =~ /^;;;\s*pcl:\s*pipeline=\S+\s+gen=\S+/;
   $scanned++;
   my $line = 1;
   for my $chunk (defined $first ? ($first) : (), <$fh>) {
@@ -94,9 +93,12 @@ is(scalar @offenders, 0, 'no hand-written source carries an absolute home path')
   or diag("hard-coded paths (derive them, or move them to an env override —\n"
         . "see tools/lib/PCLPaths.pm):\n  " . join("\n  ", @offenders));
 
-# The exclusion is the only way a real offender could hide, so it is pinned.
+# Nothing is excluded any more.  The count is pinned anyway: it says the three
+# artifacts are still discovered by their stamp AND went through the scan above
+# (a regression that re-introduced a preamble would fail the offenders row, not
+# this one — this row is what tells you the scan saw them at all).
 is(scalar @artifacts, 3,
-   'exactly three files are excluded, all of them transpiled artifacts (#217)')
-  or diag("excluded: " . join(', ', sort @artifacts));
+   'the three transpiled artifacts are scanned like any other source (#349)')
+  or diag("stamped files scanned: " . join(', ', sort @artifacts));
 
 done_testing();

@@ -42,7 +42,12 @@ test -s "$tmp/appendix.lisp" || {
 }
 
 # 2. Transpile the Perl source — its output is the new header + body, verbatim.
-./pl2cl cl/pack-impl.pl > "$tmp/body.lisp"
+#    --extension: NO program preamble (task #349).  An extension is `load`ed
+#    INTO a running program by p-load-extension, so a preamble here would
+#    REPLACE that program's @INC with this machine's list at the first pack()
+#    call — silently losing a runtime `push @INC` — and it is what put this
+#    machine's absolute paths into the checked-in artifact (task #217).
+./pl2cl --extension cl/pack-impl.pl > "$tmp/body.lisp"
 # pl2cl exits 0 with EMPTY output when a Pl module fails to compile — check.
 test -s "$tmp/body.lisp" || { echo "rebuild-pack: pl2cl produced no output" >&2; exit 1; }
 

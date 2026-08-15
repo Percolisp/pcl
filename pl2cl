@@ -102,6 +102,7 @@ sub pipeline_marker {
 my $no_cache = $ENV{PCL_NO_CACHE} // 0;
 my $cache_lisp = 0;
 my $is_module = 0;      # When true, skip preamble (for dynamic module loading)
+my $is_extension = 0;   # When true, skip preamble (checked-in artifact build)
 my $bundle_mode = 0;    # Compile to single .fasl
 my $executable_mode = 0; # Create standalone executable
 my $output_file;        # Output file for bundle/executable
@@ -114,6 +115,7 @@ GetOptions(
   'no-cache'     => \$no_cache,
   'cache-lisp'   => \$cache_lisp,
   'module'       => \$is_module,
+  'extension'    => \$is_extension,  # build a checked-in cl/*.lisp artifact
   'bundle'       => \$bundle_mode,
   'executable'   => \$executable_mode,
   'output|o=s'   => \$output_file,
@@ -403,10 +405,21 @@ if (@ARGV && -f $ARGV[0]) {
   my $output = parse_source('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
-  if ($is_module) {
-    # Module mode: skip full preamble (@INC etc. are already live in the running SBCL),
-    # but still inject the default package switch so subs are defined in :main, not :pcl.
-    # Any explicit 'package Foo' in the module will override this immediately.
+  if ($is_module || $is_extension) {
+    # Module / extension mode: skip full preamble (@INC etc. are already live in
+    # the running SBCL), but still inject the default package switch so subs are
+    # defined in :main, not :pcl.  Any explicit 'package Foo' in the module will
+    # override this immediately.
+    #
+    # --extension is the ARTIFACT build (cl/pcl-pack.lisp & co., task #349).  An
+    # extension is `load`ed INTO a running program by p-load-extension, so a
+    # program preamble there is not merely redundant, it is WRONG: it REPLACED
+    # the running program's @INC with the build machine's list at the first
+    # pack/mro/warnings call, silently losing a runtime `push @INC` (probed vs
+    # perl on the task), and it is why the checked-in artifacts embedded this
+    # machine's absolute paths at all (task #217).  It differs from --module
+    # only in that it is a DEVELOPER-run build, so the drop announcement stays
+    # on (see the $Pl::Parser::ANNOUNCE_DROPS note above).
     $output =~ s/(\(in-package :pcl\))/$1\n(p-defpackage :main)\n(in-package :main)/;
   } else {
     my $preamble = build_preamble($source_file);
@@ -454,6 +467,8 @@ else {
   say "  -o, --output    Output file (default: <input>.fasl or <input>)";
   say "  --no-cache      Disable module caching (also: PCL_NO_CACHE=1)";
   say "  --cache-lisp    Cache .lisp instead of .fasl (for debugging)";
+  say "  --extension     Build a checked-in cl/*.lisp artifact: no program";
+  say "                  preamble (it loads INTO a program that has one)";
   exit 1;
 }
 

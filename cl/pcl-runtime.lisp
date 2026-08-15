@@ -16293,9 +16293,14 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; IMPLEMENTATION stays at the right layer (lib/mro.pm, transpiled to
 ;;; cl/pcl-mro.lisp like pack-impl); the runtime owns only the interpreter
 ;;; fact "always loaded", via the same self-loading-stub pattern as p-pack.
-;;; Regenerate after editing the shim:  ./pl2cl lib/mro.pm > cl/pcl-mro.lisp
+;;; Regenerate after editing the shim:
+;;;   ./pl2cl --extension lib/mro.pm > cl/pcl-mro.lisp
 ;;;   && tools/tag-license cl/pcl-mro.lisp   (the license tag on line 2 —
 ;;;   Pl/t/license-tag-01.t fails without it; the gen stamp stays line 1)
+;;; --extension omits the PROGRAM preamble (task #349): an extension loads INTO
+;;; a running program, so emitting one would reset that program's @INC to the
+;;; build machine's list at the first mro:: call — and p-load-extension now
+;;; DIES on an artifact that does (rule 12).
 
 (p-defpackage :mro)
 (p-defpackage :warnings)
@@ -16321,7 +16326,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; warnings:: query/emit API (charnames' `warnings::enabled('utf8')` etc.) —
 ;;; `use warnings` is a skipped pragma, so lib/warnings.pm is reached only via
 ;;; these always-available stubs.  Shim doc: lib/warnings.pm header.
-;;; Regenerate after editing the shim:  ./pl2cl lib/warnings.pm > cl/pcl-warnings.lisp
+;;; Regenerate after editing the shim:
+;;;   ./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp
 ;;;   && tools/tag-license cl/pcl-warnings.lisp   (license tag on line 2, as for mro)
 (%pcl-def-ext-stub warnings::pl-enabled "pcl-warnings")
 (%pcl-def-ext-stub warnings::pl-fatal_enabled "pcl-warnings")
@@ -16862,10 +16868,40 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (concatenate 'string name ".lisp")
                    *pcl-runtime-directory*)))
         (when (probe-file file)
-          (handler-bind ((warning #'muffle-warning))
-            (load file))
+          (let ((inc @INC)
+                (len (length @INC))
+                (pl2cl *pcl-pl2cl-path*)
+                (core-dirs *p-core-inc-dirs*))
+            (handler-bind ((warning #'muffle-warning))
+              (load file))
+            (%pcl-check-extension-clean name inc len pl2cl core-dirs))
           (setf (gethash name *pcl-loaded-extensions*) t)
           (return-from p-load-extension t)))))
+  nil)
+
+;;; An extension is `load`ed INTO a running program, at its first
+;;; pack/mro/warnings call — so it may install DEFINITIONS and nothing else.
+;;;
+;;; It used to install a PROGRAM preamble as well, because `pl2cl` emitted one
+;;; for every file it compiled: loading cl/pcl-pack.lisp REPLACED the running
+;;; program's @INC with the build machine's list, so
+;;;
+;;;     push @INC, "/tmp/mylib"; pack("N", 42);   perl keeps it, PCL lost it
+;;;
+;;; silently, until a later `require` could not find a module the program had
+;;; just added (task #349) — and it is why the checked-in artifacts embedded
+;;; one machine's absolute paths at all (task #217).  `pl2cl --extension` emits
+;;; no preamble; this is rule 12's half: an artifact built WITHOUT the flag
+;;; dies here naming itself, instead of quietly editing the program's state.
+(defun %pcl-check-extension-clean (name inc len pl2cl core-dirs)
+  (unless (and (eq inc @INC) (= len (length @INC))
+               (equal pl2cl *pcl-pl2cl-path*)
+               (equal core-dirs *p-core-inc-dirs*))
+    (error "PCL: extension ~a.lisp changed the program's load state (@INC / ~
+            *pcl-pl2cl-path* / *p-core-inc-dirs*).  It was built WITHOUT ~
+            `pl2cl --extension`, so it carries a program preamble: regenerate ~
+            it (tools/rebuild-pack, or ./pl2cl --extension lib/<mod>.pm)."
+           name))
   nil)
 
 ;;; pack/unpack loaded lazily on first call via self-loading stubs above.
