@@ -11,6 +11,39 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s400 (2026-08-15, Opus 5) — #344/#324/#207/#278
+
+- **A plain `grep` SILENTLY SKIPS a file it thinks is binary, and that has
+  now falsified three measurements** — s399's #323 population census (8
+  files, really 11: perl's regex `.t` files are full of control bytes), the
+  #278 hard-coded-path survey (22 hits, really 31 — `cl/pcl-pack.lisp`), and
+  the earlier `.tsv`/emitted-CL cases.  **Any census that decides scope uses
+  `grep -a` or perl**, and a guard that greps reads BYTES (see
+  `Pl/t/no-hardcoded-paths-01.t`).  → `session-log.md` s400.
+- **The SBCL command line is built in ONE place**:
+  `tools/lib/PCLSbcl.pm` (`sbcl_prefix`/`sbcl_prefix_str`, `$STACK_MB=512`).
+  Five runners spawn SBCL; a runner may choose WHAT to load, never the stack
+  size / banner flags / `--core` placement.  `PCL_SHOW_SBCL=1` prints the
+  command a runner spawns — that is the drift check.  → task #344.
+- **Paths outside the checkout are DERIVED, never written down** —
+  `tools/lib/PCLPaths.pm` (`perl_suite_t`: `$PCL_PERL_SUITE_T`, else
+  `$PERLBREW_ROOT`, else `%Config{prefix}`; dies naming the override).
+  Enforced by `Pl/t/no-hardcoded-paths-01.t`, which excludes the three
+  transpiled artifacts by their gen stamp and counts them (#217 owns those).
+  → task #278.
+- **`which_perl`'s children keep running REAL perl for now (USER, s400)** —
+  the `$PCLPERL` switch (#90's policy) is implemented and MEASURED but held:
+  17 of 19 companion callers unmoved, op/closure.t 267/3 → 235/27 honest
+  (#347), but perl-tests/closure.t OK → PARTIAL and run/cloexec.t HANGS
+  (#346).  Two measurement holes for ~56 vacuous rows is the wrong trade
+  while #176/#204 stand.  → task #348 (blocked by #346, #347),
+  `perl-suite-run.tsv` header.
+- **A TIMEOUT-shaped row is not comparable across runs — but the file that
+  moved is** — the s400 completion of #324's verification: of 135 files, 125
+  identical, 9 TIMEOUT-shaped noise, 1 real mover, and the mover was pinned
+  with two cheap measurements (re-run at the OLD stack size; diff the emitted
+  CL) before any bisect.  → `session-log.md` s400.
+
 ## Semantics / language policy
 
 - **DESTROY**: not fired in ANY shape (scope exit, undef, reassign, sub

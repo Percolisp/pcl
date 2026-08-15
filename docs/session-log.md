@@ -4,6 +4,98 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 400 (2026-08-15, Opus 5) — the #324 verification finished (and its one mover explained), ONE builder for the SBCL command line, and no hand-written source hard-codes a home path
+
+Four commits.  The session's finding is a measurement trap that bit three
+times in one day, and a policy question that was implemented, measured, and
+then deliberately NOT landed.
+
+**s400a (`b2cf620`) — #344, one builder for the SBCL command line.**  FIVE
+runners spawn SBCL — the gate (`Pl/t/PCLCore.pm`), the sweep, the companion
+suite, `./runpcl`, and `tools/pclperl-for-tests` (which already went through
+PCLCore) — and each hand-wrote its own option string.  That is how #324
+happened: `tools/run-perl-suite.pl` was the only one without
+`--control-stack-size`, so the companion suite measured PCL on a 2 MB stack.
+The prefix now comes from `tools/lib/PCLSbcl.pm` (`sbcl_prefix` /
+`sbcl_prefix_str`, `$STACK_MB = 512`); callers still choose WHAT to load, never
+the stack size, the banner flags or the `--core` placement.  The task's bar was
+"no command line changes", so they were PRINTED and diffed rather than
+inferred: a `PCL_SHOW_SBCL=1` hook (kept — it turns the next drift
+investigation into a one-liner) emits the exact string each runner spawns,
+captured before and after over all six shapes, and the diff is EMPTY once the
+random temp paths are normalized.  One difference the move exposed and
+deliberately preserved: the sweep and `./runpcl` never shell-quoted their paths
+while the suite did — `quote => 0` keeps them byte-identical, and the
+inconsistency now lives in one file instead of three.  `tools/t/sbcl-prefix.t`
+(13 rows) pins `--core` placement, the 512 MB default and the gate's
+`PCL_TEST_CORE` freshness contract.
+
+**s400b (`13b6e1a`) — #324's verification finished, and #323's census was
+wrong.**  s399 left the `--all` confirmation stopped at 391 of 521 files.  The
+remaining 135 (re/, run/, uni/) were run: **125 read the snapshot exactly**,
+9 are TIMEOUT-shaped and not comparable across runs (the six re/regexp*.t +
+re/overload.t (#326), plus re/pat_psycho.t and re/speed.t, which no longer
+crash and therefore now RUN the pathological patterns they exist to time), and
+ONE moved — re/pat_advanced.t 937/732 → 927/751.
+
+It is not the stack flag, and two cheap measurements said so before any
+bisect: `PCL_SUITE_STACK_MB=2` (SBCL's old default) gives the same 927/751,
+and the file's emitted CL is byte-identical between s398 and HEAD apart from
+the preamble.  Bisected over the s399 commits — 5323d9e 937/732, 7af2a97
+937/732, bf3fe69 937/732, **6f04839 927/751**, HEAD 927/751 — it changes at
+#323, the warning helpers.  Which means s399's "the population is CLOSED —
+eight files call these helpers" was wrong: **the census used a plain `grep -l`,
+and grep prints NOTHING for a file it decides is binary.**  perl's regex test
+files are full of control bytes, so three were invisible.  The real population
+is ELEVEN; the three missed are re/pat_advanced.t, re/pat.t and re/reg_mesg.t,
+and only the first produces rows (re/pat.t crashes at load, re/reg_mesg.t dies
+on an undefined `display_rx`).  Its move has the same single cause as the other
+four: `warning_like` now COMPARES the warning, and PCL emits no warnings-gated
+diagnostic (#221).  Same trap, same day, twice more: `cl/pcl-pack.lisp`'s nine
+hard-coded paths were invisible to a plain grep in the #278 survey below.
+
+**s400c (`732ba36`) — #207: `which_perl` stops naming the author's perl.**
+It returned the literal `/home/bernt/…/bin/perl`; it now returns `$^X`, which
+the runtime derives, and dies rather than guess.  Byte-identical here, so no
+row moves (verified: perl-tests/closure.t back at 272 with its four blessed
+fails, pack.t 5636/89, gate green).  `run_perl`'s CL arm returned `*p-undef*`
+silently — the rule-12 failure mode — and now says so; it is NOT reimplemented
+in Lisp because the transpilable stub defines it in Perl and both populations
+reach that stub (measured: zero files call `run_perl` without requiring
+`test.pl`).
+
+**The half that was measured and deliberately NOT landed (task #348, USER
+call).**  `which_perl`'s real problem is not the path: pointing it at real perl
+makes every child it spawns run PERL, so those assertions compare perl to perl
+— the vacuous-child problem #90 removed for `fresh_perl_*`/`runperl` via
+`$PCLPERL`.  That version was implemented and measured over all 19 companion
+callers plus the full sweep: **17 unmoved**, op/closure.t 267/3 → 235/27
+(honest — a NAMED sub inside an ANON sub does not capture the enclosing
+foreach/filescope variable, and PCL's own compiler announces it: "Parser2 TODO:
+lexical 'foreach' possibly captured by nested sub"; task #347),
+perl-tests/closure.t **OK 272/0 → PARTIAL 240/28** (stops early, 64 s), and
+run/cloexec.t **16/6 → HANG** at its first backtick child, still hanging at
+`--timeout 400` (task #346).  Two measurement HOLES for ~56 vacuous rows made
+honest is the wrong trade while #176/#204 stand, so #348 is blocked by #346 and
+#347 rather than closed, and the numbers are in the snapshot header so nobody
+re-derives them.
+
+**s400d (`89cf15f`) — #278: the t/ tree is derived, and a gate row keeps it
+that way.**  `tools/lib/PCLPaths.pm` resolves perl's t/ tree from
+`$PCL_PERL_SUITE_T`, else `$PERLBREW_ROOT`, else `%Config{prefix}`, and DIES
+naming the override when none resolves — a wrong guess must never look like an
+empty corpus; `--tdir` still wins (resolved after the argument loop).
+`Pl/t/no-hardcoded-paths-01.t` reads files as BYTES, excludes the three
+transpiled artifacts by their gen stamp and COUNTS them, and reports
+file:line; verified both ways with a scratch offender.  The artifacts' 27
+preamble hits stay — that is #217, an emission change.
+
+**Gate 143 files / 5278 tests** (+1 file / +3 rows, the new guard), failures
+only in the 13 known pclxs xs rows.  Full sweep run this session; with the
+landed (hygiene-only) change it is baseline-clean.
+
+---
+
 ## Session 399 (2026-08-15, Opus 5) — the s397 queue, items 1–6: artifacts, #332, the internals registration, #323, #314 F-D, the three singles sized — and a first census of the #138 silent-drop family
 
 Five commits, all on main, each with its own measurement.  The queue was

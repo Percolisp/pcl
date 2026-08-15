@@ -215,6 +215,19 @@ tools/pcl-conform 96-flags       # one case-set file
 # allowances in effect are printed per run) — never left to TIMEOUT into "no
 # rows at all", which is how a file's passing rows vanish invisibly (#176).
 tools/run-perl-suite.pl --all --jobs 8
+# NB: --all --jobs 8 can OOM the 10 GB scope (each worker reserves a 512 MB
+# control stack for a PCL side AND runs a perl side) — use --jobs 4 (s399).
+
+# THE FIVE RUNNERS THAT SPAWN SBCL share one command-line builder,
+# tools/lib/PCLSbcl.pm ($STACK_MB, --core placement, banner flags): the gate
+# (Pl/t/PCLCore.pm), the sweep, this suite, ./runpcl, tools/pclperl-for-tests.
+# A runner chooses WHAT to load, never HOW SBCL starts — one drifting runner
+# is how #324 measured PCL on a 2 MB stack for months.
+PCL_SHOW_SBCL=1 <any runner>      # print the exact command it spawns
+# Paths OUTSIDE the checkout are derived, never written down:
+# tools/lib/PCLPaths.pm (perl_suite_t -> $PCL_PERL_SUITE_T / $PERLBREW_ROOT /
+# %Config).  Guards: Pl/t/no-hardcoded-paths-01.t (in the gate),
+# tools/t/sbcl-prefix.t (run directly, like tools/t/tap-align.t).
 ```
 
 **Pipeline (singular, since E4.1 step 2 / #242, s356):** the v2
@@ -362,9 +375,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **142 test files, 5275 tests** with a built pclxs sibling (s399, measured;
+- **143 test files, 5278 tests** with a built pclxs sibling (s400, measured;
   the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5261 without** (arithmetic: minus the
+  user s394/s395: ignore XS rows); **5264 without** (arithmetic: minus the
   14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
