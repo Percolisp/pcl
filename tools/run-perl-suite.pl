@@ -874,7 +874,7 @@ sub record_result {
 sub reap_orphan_transpilers {
   my @ps = `ps -eo pid,ppid,args 2>/dev/null`;
   for my $l (@ps) {
-    next unless $l =~ m{^\s*(\d+)\s+1\s+.*\bpl2cl\s+--server\b};
+    next unless $l =~ m{^\s*(\d+)\s+1\s+\S*perl\S*\s+\S*\bpl2cl\s+--server\s*$};
     kill 'KILL', $1;
   }
   return;
@@ -882,6 +882,10 @@ sub reap_orphan_transpilers {
 
 sub emit_report {
   return 0 if $reported++;
+  # Also at the END: the per-file reap in record_result cannot catch a server
+  # orphaned by the LAST file's kill (measured s396 — op/cond.t runs last, in
+  # the solo phase, and left a 5.6 GB server behind after the run finished).
+  reap_orphan_transpilers();
   # Files with no row: the run died before it got to them (task #157).
   # KILLED/NOT-RUN are UNEXPLAINED statuses, so a died run exits nonzero and
   # its tsv is complete — the release gate can see the hole instead of

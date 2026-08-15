@@ -271,7 +271,7 @@ sub mem_report {
 sub reap_orphan_transpilers {
     my @ps = `ps -eo pid,ppid,args 2>/dev/null`;
     for my $l (@ps) {
-        next unless $l =~ m{^\s*(\d+)\s+1\s+.*\bpl2cl\s+--server\b};
+        next unless $l =~ m{^\s*(\d+)\s+1\s+\S*perl\S*\s+\S*\bpl2cl\s+--server\s*$};
         kill 'KILL', $1;
     }
     return;
@@ -495,6 +495,10 @@ sub write_status_file {
     close $sf;
 }
 write_status_file();
+
+# Also at the END: the per-file reap cannot catch a server orphaned by the LAST
+# file's kill (measured s396 — a 5.6 GB one survived a finished run).
+reap_orphan_transpilers();
 
 print "\n" . mem_report() . "\n";
 
