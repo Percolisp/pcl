@@ -903,6 +903,7 @@ sub parse {
     if ($i > 0
         && $self->is_arr_or_hash_braces($e->[$i-1])
         && $self->is_arr_or_hash_braces($e->[$i+1])) {
+      $self->_fold_probe($e, $i, 'Case0');
       splice @$e, $i, 1;
       # $i--; Not needed, we know the skipped one is [] or {}.
     }
@@ -999,6 +1000,7 @@ sub parse {
       if ($nxt_is_brace) {
         # Handle Case 3 (X->[]) like X[], with a special flag:
         # Just remove the '->' part and fall through, handled with X[].
+        $self->_fold_probe($e, $i, 'Case3');
         splice @$e, $i, 1;
         $term   = $nxt;
         $nxt    = $e->[$i+1];
@@ -1006,6 +1008,7 @@ sub parse {
       } elsif ($self->is_internal_node_type($nxt)
                && $nxt->{type} eq 'tree_val') {
         # Case 2: X->(..) Apply a fun call.
+        $self->_fold_probe($e, $i, 'Case2');
         # Need to make $pre a funref call to the parameters in the
         # parentheses.
 
@@ -1041,6 +1044,7 @@ sub parse {
         # Replace [casts…, ref term, '->', param list] with the new node.
         # With no casts $cast_s == $i-1, so this is the plain two-token splice.
         $e->[$cast_s] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $cast_s+1, ($i + 1) - $cast_s;
         my $np = $cast_s;        # the new node's position in @$e
         $i = $cast_s;
@@ -1068,6 +1072,7 @@ sub parse {
         # Should really have a check for if it is the first.
 
         # Case 1: X->foo(...) (method call)
+        $self->_fold_probe($e, $i, 'Case1');
         # The 'f00->(...)' part has been compiled by handle_subcalls()
         # at the top of parse().
 
@@ -1080,6 +1085,7 @@ sub parse {
         #  $barf  2
 
         $nxt->{type}= 'methodcall';
+        $self->_fold_probe_tag($nxt);
 
         my $pre_id  = $self->parse([$pre]);
         my $pst_id  = $nxt->{id};
@@ -1092,6 +1098,7 @@ sub parse {
                && $nxt_2 && $self->is_internal_node_type($nxt_2)
                && $nxt_2->{type} eq 'tree_val') {
         # Case 1B: X->$foo(...)
+        $self->_fold_probe($e, $i, 'Case1B');
         my $pre_id = $self->parse([$pre]);
         my $meth_id= $self->parse([$nxt]); # Variable name with method
         my $pars_id= $nxt_2->{id};
@@ -1106,12 +1113,14 @@ sub parse {
         }
 
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, 3;
         $i--;
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() eq '$'
                && ref($nxt_2) eq 'PPI::Structure::Block') {
+        $self->_fold_probe($e, $i, 'Case1E');
         # Case 1E: X->${ EXPR }(...) — method whose name (or coderef) is the
         # scalar deref of EXPR.  e.g. Moo::Object's $self->${\(...)}(@_).
         # Build the ${ EXPR } deref node as a (computed/dynamic) method, with
@@ -1131,11 +1140,13 @@ sub parse {
           $count++;  # also consume the params node
         }
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, $count;
         $i--;
         next;
       } elsif ($self->is_word($nxt)) {
         # Case 1C: X->method (no parentheses)
+        $self->_fold_probe($e, $i, 'Case1C');
         # Method call without arguments, e.g., $obj->DEBUG or $self->nodes
         my $pre_id = $self->parse([$pre]);
         my $meth_id = $self->make_node($nxt);  # Method name as node
@@ -1145,12 +1156,14 @@ sub parse {
         $self->add_child_to_node($id, $meth_id); # Method name
 
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, 2;  # Remove -> and method name
         $i--;
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() =~ /^([\$@%])\*$/) {
         # Postfix deref: X->$* (scalar), X->@* (array), X->%* (hash) — Perl 5.20+
+        $self->_fold_probe($e, $i, 'PostDeref');
         # Equivalent to $$X, @$X, %$X respectively.
         my $sigil    = $1;
         my $pre_id   = $self->parse([$pre]);
@@ -1160,12 +1173,14 @@ sub parse {
         $self->add_child_to_node($id, $op_id);   # Cast sigil ($, @, or %)
         $self->add_child_to_node($id, $pre_id);  # Ref being dereferenced
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, 2;  # Remove -> and Cast($*/\@*/\%*)
         $i--;
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() eq '$#*') {
         # Postfix deref: X->$#* — last index of an arrayref (Perl 5.20+).
+        $self->_fold_probe($e, $i, 'PostArylen');
         # Equivalent to $#{X}; build the same $# prefix_op the braced form uses
         # ($# op token + ref operand) so codegen emits (p-array-last-index X).
         my $pre_id   = $self->parse([$pre]);
@@ -1175,6 +1190,7 @@ sub parse {
         $self->add_child_to_node($id, $op_id);   # $# operator
         $self->add_child_to_node($id, $pre_id);  # Arrayref being dereferenced
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, 2;  # Remove -> and Cast($#*)
         $i--;
         next;
@@ -1184,6 +1200,7 @@ sub parse {
                && (ref($nxt_2) eq 'PPI::Structure::Subscript'
                    || ref($nxt_2) eq 'PPI::Structure::Block')) {
         # Postfix deref slice: X->@[i,j] / X->@{k,l} / X->%[i,j] / X->%{k,l}
+        $self->_fold_probe($e, $i, 'PostSlice');
         # (Perl 5.20+).  Equivalent to @{X}[i,j], @{X}{k,l}, %{X}[i,j], %{X}{k,l}
         # — build the same slice node the prefix forms use.
         my $sigil  = $1;
@@ -1205,12 +1222,14 @@ sub parse {
           $self->add_child_to_node($id, $ix_id);
         }
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, 3;  # Remove ->, Cast(@/%), and the subscript
         $i--;
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/) {
         # Case 1D: X->$foo (variable method name, no parentheses)
+        $self->_fold_probe($e, $i, 'Case1D');
         # Method call with method name in a variable, no arguments
         # e.g., $obj->$method or $_[0]->$probe
         my $pre_id = $self->parse([$pre]);
@@ -1221,6 +1240,7 @@ sub parse {
         $self->add_child_to_node($id, $meth_id); # Method (name in $variable)
 
         $e->[$i-1] = $node;
+        $self->_fold_probe_tag($node);
         splice @$e, $i, 2;  # Remove -> and $variable
         $i--;
         next;
@@ -1234,6 +1254,7 @@ sub parse {
 
     if ($self->is_arr_or_hash_braces($term)) {
       # X[] or X{}
+      $self->_fold_probe($e, $i, 'Xsub') unless $is_reference;
       # #211: with a REAL arrow ($is_reference), a leading scalar-deref cast
       # binds WITH the ref target — `$$rr->{k}` == `(${$rr})->{k}`, deref
       # $rr FIRST, then the arrow derefs THAT value (same rule Case 2 gives
@@ -1365,6 +1386,7 @@ sub parse {
 
       # Replace $pre with the new node, remove the subscript term.
       $e->[$i-1] = $node;
+      $self->_fold_probe_tag($node);
       splice @$e, $i, 1;         # Remove $term (subscript)
 
       # Remove the casts this node ACCOUNTED for, so none is applied again as
@@ -1397,6 +1419,7 @@ sub parse {
         && !$self->is_internal_node_type($pre)
         && $self->is_var($pre)
         && $pre->content() =~ /^%/) {
+      $self->_fold_probe($e, $i, 'KVhash');
       my $pre_id = $self->parse([$pre]);
       my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
 
@@ -1417,6 +1440,7 @@ sub parse {
       }
 
       $e->[$i-1] = $node;
+      $self->_fold_probe_tag($node);
       splice @$e, $i, 1;
       $i--;
       next;
@@ -1424,6 +1448,7 @@ sub parse {
 
     # Handle KV array slice: %arr[indices] - PPI gives Symbol '%arr' + Constructor '[...]'
     if ($is_kv_arr_constructor) {
+      $self->_fold_probe($e, $i, 'KVarr');
       my $pre_id = $self->parse([$pre]);
       my($node, $id) = $self->make_node_insert('kv_slice_a_acc');
 
@@ -1444,6 +1469,7 @@ sub parse {
       }
 
       $e->[$i-1] = $node;
+      $self->_fold_probe_tag($node);
       splice @$e, $i, 1;
       $i--;
       next;
@@ -1451,6 +1477,7 @@ sub parse {
 
     # Handle KV array slice via block-deref: %{$ref}[indices]
     if ($is_kv_arr_deref_constructor) {
+      $self->_fold_probe($e, $i, 'KVarrDeref');
       my @block_kids = $e->[$i-1]->children();
       my $ref_id = $self->parse(\@block_kids);
       my($node, $id) = $self->make_node_insert('kv_slice_a_acc');
@@ -1472,6 +1499,7 @@ sub parse {
       }
 
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
+      $self->_fold_probe_tag($node);
       splice @$e, $i-1, 2;  # Remove Block and Constructor
       $i -= 2;
       next;
@@ -1480,6 +1508,7 @@ sub parse {
     # Handle KV hash slice via block-deref: %{$ref}{"keys"} - Cast('%') + Block('{ref}') + Block('{"keys"}')
     # e.g., %{$h}{"c","d"} -> (p-kv-hslice $h "c" "d")
     if ($is_kv_hash_deref_block) {
+      $self->_fold_probe($e, $i, 'KVhashDeref');
       my @block_kids = $e->[$i-1]->children();
       my $ref_id = $self->parse(\@block_kids);
       my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
@@ -1501,6 +1530,7 @@ sub parse {
       }
 
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
+      $self->_fold_probe_tag($node);
       splice @$e, $i-1, 2;  # Remove Block and Block
       $i -= 2;
       next;
@@ -1511,11 +1541,13 @@ sub parse {
     # Parse the Cast+Block pair into the (p-dynamic-typeglob ...) node, then
     # wrap it in a glob_slot node — same shape as the static *name{SLOT} below.
     if ($is_dyn_typeglob_slot) {
+      $self->_fold_probe($e, $i, 'DynGlob');
       my $glob_id = $self->parse([$e->[$i-2], $e->[$i-1]]);
       my($node, $id) = $self->make_node_insert('glob_slot');
       $self->add_child_to_node($id, $glob_id);
       $self->_attach_glob_slot($id, $node, $term);
       $e->[$i-2] = $node;   # Replace Cast '*' position with node
+      $self->_fold_probe_tag($node);
       splice @$e, $i-1, 2;  # Remove Block(EXPR) and Block(SLOT)
       $i -= 2;
       next;
@@ -1524,12 +1556,14 @@ sub parse {
     # Handle typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
     # e.g., *_{ARRAY} -> (p-glob-slot (p-make-typeglob "main" "_") "ARRAY")
     if ($is_typeglob_slot) {
+      $self->_fold_probe($e, $i, 'Glob');
       my $glob_id = $self->parse([$pre]);
       my($node, $id) = $self->make_node_insert('glob_slot');
       $self->add_child_to_node($id, $glob_id);
       # Slot: literal bareword (*name{CODE}), scalar var, string, or expression.
       $self->_attach_glob_slot($id, $node, $term);
       $e->[$i-1] = $node;
+      $self->_fold_probe_tag($node);
       splice @$e, $i, 1;
       $i--;
       next;
@@ -1539,6 +1573,7 @@ sub parse {
     # Handle qw[...][idx] — subscript on a qw word list literal
     # qw[void scalar list][1] → (p-aref-deref (vector "void" "scalar" "list") 1)
     if ($is_qw_subscript) {
+      $self->_fold_probe($e, $i, 'QW');
       my $pre_id = $self->parse([$pre]);
       my($node, $id) = $self->make_node_insert('a_ref_acc');
       my @ix = $term->children();
@@ -1546,6 +1581,7 @@ sub parse {
       $self->add_child_to_node($id, $pre_id);
       $self->add_child_to_node($id, $ix_id);
       $e->[$i-1] = $node;
+      $self->_fold_probe_tag($node);
       splice @$e, $i, 1;
       $i--;
       next;
@@ -1557,6 +1593,7 @@ sub parse {
         && $term->start() eq '['
         && $self->is_internal_node_type($pre)) {
       # Treat as array subscript on the result of the previous expression.
+      $self->_fold_probe($e, $i, 'CtorSub');
       # Mark as list-context subscript: (EXPR)[N] / method()[N] forces list
       # context on the expression, unlike $arr->[N] which is a scalar deref.
       my $pre_id = $pre->{id};
@@ -1570,6 +1607,7 @@ sub parse {
       $self->add_child_to_node($id, $ix_id);
 
       $e->[$i-1] = $node;
+      $self->_fold_probe_tag($node);
       splice @$e, $i, 1;
       $i--;
       next;
@@ -2014,6 +2052,13 @@ sub parse_list {
 #            | -> @* | -> %* | -> $*          (postfix deref)
 #            | -> @[..] | -> @{..} | -> %[..] | -> %{..}   (postfix slice)
 #            | -> method                      (method name; args are bounded elsewhere)
+#            | -> <funcall>                    (method call whose `name(args)` handle_subcalls
+#                                                already reduced — #153 chunk 3, W1)
+#            | -> ( args )                       (coderef call: raw List, or the <tree_val> the
+#                                                ()-replacement makes of it — chunk 3, W2)
+#            | -> $#*                             (postfix last-index — chunk 3, W3)
+#            | -> ${ EXPR }                        (computed method name — chunk 3, W7;
+#                                                its `( args )` are taken by _term_extent)
 # It replaces five hand-rolled, subtly-divergent copies of this walk that used to
 # live in the named-unary / 1-arg-function operand-boundary logic (some handled
 # `-> subscript` but not `-> @*`, etc.).  $end is the index of the last token of
@@ -2048,6 +2093,21 @@ sub _extend_postfix_chain {
              || ref($after) eq 'PPI::Token::Symbol'
              || ref($after) eq 'PPI::Token::Magic') {
       $end += 2;                                    # -> method (name)
+    } elsif ($self->is_internal_node_type($after)
+             && ($after->{type} // '') eq 'funcall') {
+      $end += 2;                                    # -> <funcall> (method + args, W1)
+    } elsif (ref($after) eq 'PPI::Structure::List'
+             || ($self->is_internal_node_type($after)
+                 && ($after->{type} // '') eq 'tree_val')) {
+      $end += 2;                                    # -> ( args )  coderef call (W2)
+    } elsif (ref($after) eq 'PPI::Token::Cast'
+             && $after->content() eq '$'
+             && $end + 3 < $n
+             && ref($e->[$end + 3]) eq 'PPI::Structure::Block') {
+      $end += 3;                                    # -> ${ EXPR }  computed method (W7)
+    } elsif (ref($after) eq 'PPI::Token::Cast'
+             && $after->content() eq '$#*') {
+      $end += 2;                                    # -> $#*  (W3)
     } else {
       last;
     }
@@ -2095,20 +2155,74 @@ sub _term_extent {
       || $r eq 'PPI::Token::HereDoc'
       || $r eq 'PPI::Structure::Block'
       || $r eq 'PPI::Structure::Constructor'
-      || $r eq 'PPI::Structure::List') {
+      || $r eq 'PPI::Structure::List'
+      # PPI labels the leading `(…)` of a postfix-conditional CONDITION a
+      # Structure::Condition (`return X if (A)->[0] ne 'tag'`); in an
+      # expression it is just a parenthesised group — the same equivalence the
+      # single-element site draws (#153 chunk 3, W8).
+      || $r eq 'PPI::Structure::Condition') {
     $end = $i;
   } elsif ($self->is_internal_node_type($p)) {
     $end = $i;                       # already-reduced node
   } elsif ($self->is_word($p)) {
     # A word is a self-bounded term ONLY as `name(...)` — a call with
-    # parens.  Anything else about barewords is not this walker's call.
+    # parens — or as `Name->…` — a word DIRECTLY followed by an arrow is the
+    # invocant / callee of that arrow (class name, `shift->m`, `__PACKAGE__->m`,
+    # `foo->[0]`) and nothing else: not a filehandle, not a list operator, not
+    # an `=>` autoquote (#153 chunk 3, W5 — measured the second-largest
+    # embedded population the fold left to the legacy loop).  WHAT the word
+    # means is still decided by the reduction (the same branches as before);
+    # the walker only bounds it.  Anything else about barewords is not this
+    # walker's call.
     if ($i + 1 <= $limit && ref($e->[$i + 1]) eq 'PPI::Structure::List') {
       $end = $i + 1;
+    } elsif ($i + 1 <= $limit && $self->is_arrow_op($e->[$i + 1])) {
+      $end = $i;
     } else {
       return undef;
     }
   } else {
     return undef;                    # operator, regex-op, anything else
+  }
+
+  # LIST SLICE: a `[..]` group directly after a parenthesised List or a qw()
+  # word list is a slice of that list — `(f())[0]`, `(1,2,3)[1]`, `qw(a b)[1]`.
+  # PPI hands it over as a Constructor (it classifies `[..]` by predecessor),
+  # so the postfix walker below, which knows only Subscripts, would stop
+  # before it.  One group, then the ordinary chain continues (`(…)[0]->{k}`).
+  # (#153 chunk 3, W4 — CtorSub firings over four populations were all this
+  # shape; perl rejects `f()[0]` and `$o->m()[0]`, so a Constructor after a
+  # funcall/methodcall node is deliberately NOT taken.)
+  if ($end == $i && ($r eq 'PPI::Structure::List'
+                    || $r eq 'PPI::Structure::Condition'
+                    || $r eq 'PPI::Token::QuoteLike::Words')
+      && $end + 1 <= $limit
+      && ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
+      && $e->[$end + 1]->start() eq '[') {
+    $end++;
+    # …and any further ARROW-LESS `[j]` groups on the slice, which PPI also
+    # labels Constructor by predecessor — `([…])[0][1]` (W9; the ref.t
+    # list-slice deref rows).  A `{k}` after the `]` arrives as a Block and is
+    # re-labelled a Subscript by _retag_list_slice_subscripts before the
+    # walker runs, so the ordinary chain below takes it.
+    while ($end + 1 <= $limit
+           && ref($e->[$end + 1]) eq 'PPI::Structure::Constructor'
+           && $e->[$end + 1]->start() eq '[') {
+      $end++;
+    }
+  }
+
+  # GLOB SLOT: *name{SLOT} arrives as Symbol(*name) + Block({SLOT}) — PPI does
+  # not attach the group as a Subscript after a glob sigil.  One postfix group,
+  # and the chain CONTINUES: a slot yields a value (`*STDOUT{IO}->autoflush`).
+  # (#153 chunk 3, W6 — the Glob branch's embedded firings over four
+  # populations were all this shape.  `*{EXPR}{SLOT}` / `*$v{SLOT}` never
+  # reach here: _precollapse_dyn_glob_slots reduces them before the loop.)
+  if ($end == $i && $r eq 'PPI::Token::Symbol' && $p->content() =~ /^\*/
+      && $end + 1 <= $limit
+      && ref($e->[$end + 1]) eq 'PPI::Structure::Block'
+      && $e->[$end + 1]->start() eq '{') {
+    $end++;
   }
 
   # KV-slice postfix: %h{a,b} / %h[0,1] arrive as Symbol + Block/Constructor
@@ -2135,7 +2249,12 @@ sub _term_extent {
     if ($next > $end
         && $next + 1 <= $limit
         && ref($e->[$next + 1]) eq 'PPI::Structure::List'
-        && $self->is_arrow_op($e->[$next - 1])) {
+        && ($self->is_arrow_op($e->[$next - 1])
+            # -> ${ EXPR } ( args ): the name step is Cast+Block (W7)
+            || ($next >= 2
+                && ref($e->[$next]) eq 'PPI::Structure::Block'
+                && ref($e->[$next - 1]) eq 'PPI::Token::Cast'
+                && $self->is_arrow_op($e->[$next - 2])))) {
       $end = $next + 1;                # -> method ( args )
       next;
     }
@@ -2264,8 +2383,19 @@ sub _fold_terms {
       || $r eq 'PPI::Token::Magic'
       || $r eq 'PPI::Token::ArrayIndex'
       || $r eq 'PPI::Structure::List'
+      || $r eq 'PPI::Structure::Condition'      # PPI's postfix-if paren label (W8)
       || $r eq 'PPI::Structure::Constructor'
-      || $self->is_internal_node_type($t);
+      || $self->is_internal_node_type($t)
+      # #153 chunk 3 (W5): a quoted string or a qw() list can head a postfix
+      # chain (`"Class"->new`, `qw(a b)[1]`), and so can a WORD that is
+      # DIRECTLY followed by an arrow (`Foo->new(...)`, `shift->m`,
+      # `__PACKAGE__->m`) — the arrow makes the word an invocant, never a
+      # filehandle / list operator / `=>` key.  All other words stay with the
+      # main loop, by design (s364).
+      || $r =~ /^PPI::Token::Quote::/
+      || $r eq 'PPI::Token::QuoteLike::Words'
+      || ($self->is_word($t) && $i + 1 < scalar(@$e)
+          && $self->is_arrow_op($e->[$i + 1]));
     next if !$is_start;
     # A position PRECEDED by a cast or an arrow is the middle of some term,
     # never a start: folding the tail alone re-binds the subscript under the
@@ -2311,6 +2441,142 @@ sub _fold_terms {
     splice @$e, $i, $end - $i + 1, $node;
   }
   return;
+}
+
+# --- #153 FOLD chunk 3 MEASUREMENT (PCL_FOLD_PROBE=1) — DELETED AT THE FLIP.
+#
+# Every legacy opportunistic arrow/subscript branch in parse()'s main loop
+# reports each firing with a VERDICT about the term it is reducing, judged
+# from the fold's own guards on the CURRENT token array:
+#   WHOLE            the chain IS the whole array — the reducer's own path
+#                    (_reduce_term parses exactly the term's tokens through
+#                    this loop), by design;
+#   DECLINE:<why>    the fold cannot claim the start (word-led, block-led,
+#                    extent-undef) — by design, or a walker gap to size;
+#   GUARD:<name>     a _fold_terms guard vetoed the start (after-cast,
+#                    after-arrow, ctor-not-after-op, followed-by-group);
+#   WALKER-STOPS     _term_extent bounds the term BEFORE the group this
+#                    branch consumes — a chain-walker gap;
+#   CONT:<origin>    the chain's head was reduced earlier in THIS loop pass
+#                    by a branch whose verdict was <origin> — the same shape,
+#                    continued (a word-led `Foo->new->[0]` reads CONT after
+#                    its Case1C head);
+#   GAP              claimable by every guard, embedded, and yet the fold did
+#                    not take it — the finding chunk 3 exists to count.
+# Read with tools/term-diff-sweep.pl --env PCL_FOLD_PROBE=1 --match '^PCL_FOLD_FIRE'
+# over corpus + suite + board, then `sort | uniq -c` on branch+verdict.
+sub _fold_probe {
+  my ($self, $e, $gi, $branch) = @_;
+  return if !$ENV{PCL_FOLD_PROBE};
+  my $s = $self->_probe_chain_start($e, $gi);
+  my ($verdict, $end) = $self->_probe_fold_verdict($e, $s, $gi);
+  $end = $self->_probe_chain_end($e, $gi) if !defined $end || $end < $gi;
+  my $whole = ($s == 0 && $end >= $#$e) ? 1 : 0;
+  $self->{_fold_pending} = $verdict;
+  my $fn = eval { $self->parser->filename } // '(unknown)';
+  warn sprintf "PCL_FOLD_FIRE %s %s w=%d fn=%s toks=[%s]\n",
+      $branch, $verdict, $whole, $fn, $self->_tok_run_desc($e, $s, $end);
+  return;
+}
+
+# Stamp the node a legacy branch just built with the verdict of the firing
+# that built it, so a later firing whose chain HEAD is that node can report
+# CONT:<origin> instead of a false GAP.
+sub _fold_probe_tag {
+  my ($self, $node) = @_;
+  return if !$ENV{PCL_FOLD_PROBE};
+  $node->{_fold_origin} = delete $self->{_fold_pending}
+      if ref($node) eq 'PPIreference' && defined $self->{_fold_pending};
+  return;
+}
+
+# The chain's head: from the element left of the group at $gi, walk left over
+# postfix pieces (Case 0 fires at an arrow between two subscripts) and then
+# over the cast run.
+sub _probe_chain_start {
+  my ($self, $e, $gi) = @_;
+  my $s = $gi - 1;
+  $s-- while $s > 0
+          && (ref($e->[$s]) eq 'PPI::Structure::Subscript'
+              || $self->is_arr_or_hash_braces($e->[$s])
+              || $self->is_arrow_op($e->[$s]));
+  return $self->_cast_run_start($e, $s);
+}
+
+# The chain's end for a head the walker declines (word-led): the postfix
+# chain plus a method's argument List, the same loop _term_extent runs.
+sub _probe_chain_end {
+  my ($self, $e, $gi) = @_;
+  my $end = $gi - 1;
+  while (1) {
+    my $next = $self->_extend_postfix_chain($e, $end);
+    if ($next > $end && $next + 1 <= $#$e
+        && ref($e->[$next + 1]) eq 'PPI::Structure::List'
+        && ($self->is_arrow_op($e->[$next - 1])
+            || ($next >= 2 && ref($e->[$next]) eq 'PPI::Structure::Block'
+                && ref($e->[$next - 1]) eq 'PPI::Token::Cast'
+                && $self->is_arrow_op($e->[$next - 2])))) {
+      $end = $next + 1; next;
+    }
+    # The group THIS branch consumes (a Constructor slice, a glob-slot Block —
+    # shapes the chain walker alone does not know) is part of the chain: step
+    # over it once and keep walking, or a `(…)[0]->{k}` whole-term reads w=0.
+    if ($next == $end && $end < $gi) { $end = $gi; next }
+    $end = $next; last;
+  }
+  return $end < $gi ? $gi : $end;
+}
+
+sub _probe_fold_verdict {
+  my ($self, $e, $s, $gi) = @_;
+  my $t = $e->[$s];
+  my $r = ref($t);
+  # (mirrors _fold_terms's start set, incl. the chunk-3 W5 additions)
+  my $word_arrow = $self->is_word($t) && $s + 1 <= $#$e
+                && $self->is_arrow_op($e->[$s + 1]);
+  return ('DECLINE:word-led')  if $self->is_word($t) && !$word_arrow;
+  return ('DECLINE:block-led') if $r eq 'PPI::Structure::Block';
+  my $is_start = $r eq 'PPI::Token::Cast' || $r eq 'PPI::Token::Symbol'
+              || $r eq 'PPI::Token::Magic' || $r eq 'PPI::Token::ArrayIndex'
+              || $r eq 'PPI::Structure::List' || $r eq 'PPI::Structure::Constructor'
+              || $r eq 'PPI::Structure::Condition'
+              || $self->is_internal_node_type($t)
+              || $r =~ /^PPI::Token::Quote::/ || $r eq 'PPI::Token::QuoteLike::Words'
+              || $word_arrow;
+  if (!$is_start) {
+    my ($short) = ($r =~ /([^:]+)$/);
+    return ("DECLINE:start-" . ($short // $r));
+  }
+  my $end = $self->_term_extent($e, $s, undef);
+  return ('DECLINE:extent-undef') if !defined $end;
+  # PROBE-TIME ONLY: the ()-replacement has already turned a method's raw
+  # argument List into a <tree_val> node by the time the legacy loop fires,
+  # and _term_extent's `-> name ( args )` step reads a raw List — so mirror
+  # that step over the node, or every embedded `$o->$m(args)` reads as a
+  # false GAP (it WAS claimable at fold time).
+  while ($end >= 1 && $end + 1 <= $#$e
+         && $self->is_arrow_op($e->[$end - 1])
+         && $self->is_internal_node_type($e->[$end + 1])
+         && ($e->[$end + 1]{type} // '') eq 'tree_val') {
+    $end = $self->_extend_postfix_chain($e, $end + 1);
+  }
+  return ('WALKER-STOPS', $end)   if $end < $gi;
+  return ('WHOLE', $end)          if $s == 0 && $end == $#$e;
+  if ($s > 0) {
+    my $prev = $e->[$s - 1];
+    return ('GUARD:after-cast', $end)  if ref($prev) eq 'PPI::Token::Cast';
+    return ('GUARD:after-arrow', $end) if $self->is_arrow_op($prev);
+    return ('GUARD:ctor-not-after-op', $end)
+        if $r eq 'PPI::Structure::Constructor' && ref($prev) ne 'PPI::Token::Operator';
+  }
+  if ($end + 1 <= $#$e) {
+    my $a = ref($e->[$end + 1]);
+    return ('GUARD:followed-by-group', $end)
+        if $a eq 'PPI::Structure::Block' || $a eq 'PPI::Structure::Constructor';
+  }
+  return ("CONT:$t->{_fold_origin}", $end)
+      if $self->is_internal_node_type($t) && $t->{_fold_origin};
+  return ('GAP', $end);
 }
 
 # Pre-pass (runs before handle_subcalls): collapse a dynamic typeglob-slot into a

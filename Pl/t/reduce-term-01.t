@@ -135,6 +135,103 @@ extent_is('$obj->method->{k};', 0, 4, 'method then subscript');
 # code-ref call, which the term grammar does not claim.
 extent_is('$h{k}(1);',          0, 1, 'list after subscript is not method args');
 
+# --- #153 FOLD chunk 3 widenings W1–W5 ---------------------------------
+# handle_subcalls runs BEFORE the fold, so at fold time `m(1)` is already ONE
+# funcall node: model that state by splicing a synthetic node wrapper in.
+sub with_node {
+  my ($code, $at, $len, $type) = @_;
+  my $e = toks($code);
+  splice @$e, $at, $len, $o->make_subtree_item(0, $type);
+  return $e;
+}
+# W1: `-> <funcall>` is a chain step.
+{
+  my $e = with_node('$o->m(1) + 1;', 2, 2, 'funcall');   # $o -> <funcall> + 1
+  is($o->_term_extent($e, 0), 2, 'W1: -> <funcall> is a chain step');
+  $e = with_node('$o->m(1)->{k}->n(2);', 2, 2, 'funcall'); # $o -> <fc> -> {k} -> n (2)
+  is($o->_term_extent($e, 0), 7, 'W1: chain continues past -> <funcall>');
+  $e = with_node('$o->m(1);', 2, 2, 'funcall');
+  is($o->_term_extent($e, 0), 2, 'W1: whole-array method call');
+}
+# W2: `-> ( args )` — a coderef call — raw List or the <tree_val> node.
+extent_is('$code->(1);',            0, 2, 'W2: coderef call, raw List');
+extent_is('$h{k}->(1)->[0];',       0, 5, 'W2: coderef call then subscript');
+extent_is('$code->(1) + 1;',        0, 2, 'W2: coderef call stops before op');
+{
+  my $e = with_node('$code->(1) + 1;', 2, 1, 'tree_val');
+  is($o->_term_extent($e, 0), 2, 'W2: coderef call, <tree_val> args');
+}
+# W3: `-> $#*` postfix last-index.
+extent_is('$ar->$#*;',              0, 2, 'W3: postfix $#*');
+extent_is('$ar->$#* + 1;',          0, 2, 'W3: postfix $#* stops before op');
+# W4: a `[..]` Constructor directly after a List / qw() primary is a LIST
+# SLICE group; the chain continues after it.
+extent_is('(1,2,3)[1];',            0, 1, 'W4: list slice');
+extent_is('(f())[0]->{k};',         0, 3, 'W4: list slice then chain');
+extent_is('qw(a b)[1];',            0, 1, 'W4: qw list slice');
+extent_is('(1,2)[0] + 1;',          0, 1, 'W4: list slice stops before op');
+# INVERSE: perl rejects `f()[0]` and `$o->m()[0]` — a Constructor after a
+# call/method-call is NOT taken (the walker stops before it).
+extent_is('foo()[0];',              0, 1, 'W4 inverse: no slice group after a call');
+extent_is('$o->m()[0];',            0, 3, 'W4 inverse: no slice group after a method call');
+extent_is('(1,2){0};',              0, 0, 'W4 inverse: only [..] is a list slice');
+# W5: a WORD directly followed by an arrow is a self-bounded primary.
+extent_is('Foo->new;',              0, 2, 'W5: class method call');
+extent_is('Foo::Bar->new(1);',      0, 3, 'W5: qualified class + args');
+extent_is('shift->m;',              0, 2, 'W5: shift->m');
+extent_is('__PACKAGE__->m(1)->[0];', 0, 5, 'W5: __PACKAGE__ chain');
+extent_is('foo->[0];',              0, 2, 'W5: word arrow subscript');
+extent_is('Foo->new + 1;',          0, 2, 'W5: stops before op');
+extent_is('Foo::->new;',            0, 2, 'W5: Foo:: spelling');
+# INVERSE: a word NOT directly followed by an arrow is still declined.
+extent_is('Foo => 1;',              0, undef, 'W5 inverse: fat comma is not an arrow');
+extent_is('foo $x->m;',             0, undef, 'W5 inverse: word then term is a list op');
+# W6: a glob slot `*name{SLOT}` (Symbol + Block) is one postfix group and the
+# chain continues.
+extent_is('*STDOUT{IO};',            0, 1, 'W6: glob slot');
+extent_is('*STDOUT{IO}->autoflush(1);', 0, 4, 'W6: glob slot then method chain');
+extent_is('*x{CODE} + 1;',           0, 1, 'W6: glob slot stops before op');
+extent_is('\*STDOUT{IO};',           0, 2, 'W6: ref of a glob slot');
+extent_is('*x + 1;',                 0, 0, 'W6 inverse: bare glob, no group');
+# W7: `-> ${ EXPR }` is a computed-method step, and its `( args )` belong to it.
+extent_is('$o->${\ "m"};',           0, 3, 'W7: computed method');
+extent_is('$o->${\ "m"}(1);',        0, 4, 'W7: computed method with args');
+extent_is('$o->${\ "m"}(1)->[0];',   0, 6, 'W7: computed method args then chain');
+extent_is('Foo->${\ "m"} + 1;',      0, 3, 'W7: on a class word, stops before op');
+# W8: PPI labels the leading `(…)` of a postfix-if condition a Condition;
+# it is a paren primary — chain and list-slice rules apply.
+{
+  my $doc = PPI::Document->new(\'return 1 if (my $t = $r)->[0] eq "x";');
+  push @keep_docs, $doc;
+  my ($stmt) = grep { $_->isa('PPI::Statement') } $doc->children;
+  my @sig = grep { $_->significant } $stmt->children;
+  my ($ci) = grep { ref($sig[$_]) eq 'PPI::Structure::Condition' } 0 .. $#sig;
+  ok(defined $ci, 'W8: PPI gives a Structure::Condition after postfix if');
+  my @e = @sig[$ci .. $#sig - 1];   # drop the trailing ';'
+  is($o->_term_extent(\@e, 0), 2, 'W8: Condition primary + arrow subscript');
+  $doc = PPI::Document->new(\'print 1 if (f())[1] == 2;');
+  push @keep_docs, $doc;
+  ($stmt) = grep { $_->isa('PPI::Statement') } $doc->children;
+  @sig = grep { $_->significant } $stmt->children;
+  ($ci) = grep { ref($sig[$_]) eq 'PPI::Structure::Condition' } 0 .. $#sig;
+  @e = @sig[$ci .. $#sig - 1];
+  is($o->_term_extent(\@e, 0), 1, 'W8: Condition + Constructor is a list slice');
+}
+# W9: after a list-slice group, PPI labels a further ARROW-LESS `[j]` group a
+# Constructor by predecessor — it is a subscript on the slice; the arrow chain
+# continues after it.  (The `{k}` twin arrives as a Block and is re-labelled a
+# Subscript by the retag pre-pass — its rows live with that pass.)
+extent_is('([1,2])[0][1];',         0, 2, 'W9: array subscript after a list slice');
+extent_is('(f())[0][1]->{x};',      0, 4, 'W9: then the arrow chain continues');
+extent_is('([1,2])[0][1] + 1;',     0, 2, 'W9: stops before op');
+extent_is('(1,2) [1];',             0, 1, 'W9: whitespace before the slice group is not significant');
+{
+  my $e = toks('my $x = ([1,2])[0][1] + 1;');
+  splice @$e, 0, 3;                    # the RHS: List [0] [1] + 1
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W9 fold: list slice + array subscript folds: [node + 1]');
+}
+
 # --- declines (undef is the answer, not an error) -----------------------
 extent_is('foo;',          0, undef, 'bare word: not our call');
 extent_is('foo 1;',        0, undef, 'list operator: not our call');
@@ -216,6 +313,36 @@ extent_is('+3;',           0, undef, 'unary plus: not our call');
   my $e = toks('$o->SUPER::m{@a};');
   $o->_fold_terms($e);
   is(scalar(@$e), 4, 'term followed by a raw Block is not folded');
+}
+
+{
+  # #153 chunk 3 (W5): the fold's start set — a WORD directly followed by an
+  # arrow, a quoted string, a qw() list; and (W4) a List whose slice group
+  # follows.  Each embedded term folds to ONE node; a word not followed by an
+  # arrow (fat comma) stays raw.
+  my $e = toks('Foo->new(1) + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W5 fold: Class->new(args) folds: [node + 1]');
+  ok($o->is_internal_node_type($e->[0]), 'W5 fold: the folded term is a node');
+  $e = toks('shift->m + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W5 fold: shift->m folds');
+  $e = toks('"Class"->new + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W5 fold: quoted-string invocant folds');
+  $e = toks('qw(a b)[1] . "x";');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W4/W5 fold: qw list slice folds');
+  $e = toks('(1,2)[0] + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W4 fold: list slice folds from the List');
+  $e = toks('Foo => $h{k};');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W5 inverse: fat-comma word stays raw, its value folds');
+  is(ref($e->[0]), 'PPI::Token::Word', 'W5 inverse: the word itself is untouched');
+  $e = toks('$o->SUPER::new + 1;');
+  $o->_fold_terms($e);
+  is(scalar(@$e), 3, 'W5: SUPER::new after an arrow is mid-chain, folds from $o');
 }
 
 done_testing();
