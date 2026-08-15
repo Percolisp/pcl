@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-136
+;;; pcl: pipeline=v2 gen=v2-147
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -43,6 +43,19 @@
 (defvar $b (make-p-box nil))
 
 ;; Forward declarations for undeclared package globals
+(p-defcell $cand (make-p-box nil))
+(p-defcell $class (make-p-box nil))
+(p-defcell $head (make-p-box nil))
+(p-defcell $i (make-p-box nil))
+(p-defcell $in_tail (make-p-box nil))
+(p-defcell $s (make-p-box nil))
+(p-defcell $seen (make-p-box nil))
+(p-defcell $seq (make-p-box nil))
+(p-defcell $type (make-p-box nil))
+(p-defcell $u (make-p-box nil))
+(p-defcell @parents (make-array 0 :adjustable t :fill-pointer 0))
+(p-defcell @result (make-array 0 :adjustable t :fill-pointer 0))
+(p-defcell @seqs (make-array 0 :adjustable t :fill-pointer 0))
 (p-defcell mro::$VERSION (make-p-box nil))
 
 (p-defcell $VERSION (make-p-box nil))

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-136
+;;; pcl: pipeline=v2 gen=v2-147
 (in-package :pcl)
 (setf pcl::*pcl-pl2cl-path* #P"/home/bernt/pcl/pl2cl")
 ;; Initialize @INC from Perl
@@ -42,6 +42,7 @@
 (defvar $b (make-p-box nil))
 
 ;; Forward declarations for undeclared package globals
+(p-defcell $message (make-p-box nil))
 (p-defcell warnings::$VERSION (make-p-box nil))
 
 (p-defcell $VERSION (make-p-box nil))
