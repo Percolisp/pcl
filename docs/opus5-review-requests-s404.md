@@ -345,3 +345,46 @@ must); three canaries in `misc-fixes-02.t`; end-to-end guards in
 2, "\n"` is dropped, and `print PI + 1, "\n"` treats the constant as a
 FILEHANDLE — `(p-print :fh 'PI 1 "\n")` — and prints nothing at all.  Both are
 the #266 question asked at the print-filehandle site.
+
+## 11. Session C, started: #342 piece 1 and #346's harness half
+
+**#342 piece 1 (`e588c56`) — the s///e nil thunk is gone.**  A replacement the
+compiler cannot build now DIES naming it, instead of becoming `(lambda () nil)`
+— which substituted the empty string, exit 0, with a warning nobody reads.  The
+same construct in another shape already made the file die (base/lex.t, rc 255),
+so one input path died and another silently substituted nothing; that
+inconsistency was the bug.
+
+Population measured first, as the task asks: **7 sites in 2 files**
+(`t/op/taint.t` 6, `t/base/lex.t` 1), both already failing to transpile for
+other reasons — so nothing moves, which is exactly when to close a rule-12
+hole.  The decline→die bar (s373, three legs) is met: `emission-ab` 657 files
+**657 SAME / 0 DIFF / 0 RCDIFF** (the rc column IS the die-scan), `gate-set-scan`
+638 files **0 changed rows**, sweep **GATE clean, TOTAL 18516 = baseline, DROPS
+12 = 12**.  Gate 145 / 5313.  Piece 2 (the heredoc inside `${\ }`) is untouched.
+
+**#346's harness half (`df10b95`) — two measured bugs in `pclperl-for-tests`.**
+
+* **fd leak**: `load` holds the transpiled `.lisp` open while the program runs
+  inside it, so the child saw `fd 3 -> prog.lisp` and `fd 4 -> prog.lisp`, and
+  `open(my $t, "<&=3")` SUCCEEDED where perl fails EBADF.  For `t/run/cloexec.t`
+  — which opens fd 3 on purpose — that is the thing under test, not noise.
+  Fixed by slurping the source, closing the file, then read+eval one form at a
+  time from a string stream (incremental reads keep `(in-package …)` correct,
+  since that is a READ-time effect).
+* **56 blank stderr lines** for `print "hello\n"`: SBCL frames each
+  compiler-note block with a blank line and the scrubber kept the frames.  Now
+  dropped adjacent to a scrubbed block and KEPT when the program printed them —
+  `warn "first\n"; warn "\n"; warn "last\n"` is byte-identical to perl.
+
+**Owed, and recorded rather than skipped:** the hang itself is not re-measured
+with the fd fix in place, and the runners row of the WHAT-CHANGED table owes a
+companion re-run compared file-by-file.  The cheap way into the first needs no
+code change — `$^X` honours `$PERL` and `which_perl` returns `$^X`, so
+`PERL=$PWD/tools/pclperl-for-tests tools/run-perl-suite.pl run/cloexec.t --jobs 1
+--timeout 300` reproduces #348's configuration for one file.  Next session
+starts there.
+
+**#358 filed** (found by the same probe): `open(FH, "<&=N")` SUCCEEDS on a
+closed descriptor where perl fails EBADF — now the remaining reason cloexec.t
+cannot measure what it exists to measure.
