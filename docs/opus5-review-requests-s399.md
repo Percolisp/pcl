@@ -101,6 +101,14 @@ that read has changed the answer (s393's `unlike` was the first).
 
 ## 4. #323 — 24 rows went red on purpose, and **#221's trigger has fired**
 
+> **CORRECTION (s400, read `opus5-review-requests-s400.md` §2 before this
+> section):** the "population is CLOSED — eight files" claim below is WRONG.
+> It is ELEVEN.  The census used a plain `grep -l`, which prints nothing for a
+> file it decides is binary, and perl's regex `.t` files are full of control
+> bytes.  The three missed are re/pat_advanced.t (937/732 → 927/751, spliced in
+> s400 — and it is the single row that moved in #324's verification), re/pat.t
+> and re/reg_mesg.t (no rows).  Everything else in this section stands.
+
 The three helpers ran the code and `pass()`ed unconditionally.  Replaced by the
 real t/test.pl bodies on top of `capture_warnings`.  Every row that flipped has
 ONE cause: PCL emits no warnings-gated diagnostic.
@@ -295,6 +303,12 @@ unstarted: #330, #321, #322, #324, #326, #328, plus this session's #337–#343.
 ---
 
 ## Addendum (after the queue): #324 was the harness, and the run that proves it is unfinished
+
+> **DONE in s400** — the remaining 135 files ran (125 identical, 9
+> TIMEOUT-shaped, 1 mover, and the mover is #323's, not the flag's).  #324 is
+> closed; the two files whose timeouts.tsv allowance is still an open decision
+> (re/pat_psycho.t, re/speed.t) fold into the portfolio ASK below (#345).
+> Details: `opus5-review-requests-s400.md` §2.
 
 Three more commits after §9 was written.
 
