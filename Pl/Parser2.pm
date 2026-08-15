@@ -943,6 +943,10 @@ sub parse {
 
   # PPI LEXER BUG: a `for` whose loop variable is a \-cast (refaliasing) or a
   # non-scalar swallows the rest of the file — see _repair_alias_foreach.
+  # Its n-at-a-time sibling (`for my ($q,$r) (LIST)`, perl 5.36) mis-lexes the
+  # same way and is repaired the same way, and it runs FIRST because its
+  # rewrite EMITS a `\my $q = …` the alias repair must not see as a loop head.
+  $doc = $self->_repair_nary_foreach($doc);
   $doc = $self->_repair_alias_foreach($doc);
 
   # `state` outside the classic subset (scalar statement-decl in a named sub)
@@ -4354,6 +4358,110 @@ sub _repair_alias_foreach {
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# PPI LEXER BUG (task #329): `for my ($q, $r) (LIST) {…}` — perl 5.36's
+# n-at-a-time foreach.  Same mis-lex as _repair_alias_foreach (PPI only knows
+# `foreach [my] $scalar (LIST) BLOCK`, so the compound keeps just `for my` and
+# the rest lands in a flat sibling), and the same cure: repair the RAW TOKEN
+# STREAM, then reparse.
+#
+# The re-spelling is a `while` loop over a list of REFERENCES, which is what
+# makes the loop variables ALIAS the list elements the way perl's do:
+#
+#     for my ($q, $r) (@a) { BODY } continue { CONT }
+#       ⇒  my @L = map \$_, (@a);               # one ref per ELEMENT
+#          my @PD; push @L, \$PD[scalar @PD] while @L % 2;   # short last chunk
+#          my $I = 0;
+#          while ($I < @L) { \my $q = $L[$I]; \my $r = $L[$I+1]; BODY }
+#          continue { CONT; $I += 2 }
+#
+# Every piece is a mechanism PCL already has: `map \$_, LIST` gives one
+# write-through ref per element because map ALIASES $_ to each element (probed
+# against perl for arrays, several arrays, a hash, literals and `reverse` — all
+# six identical), and `\my $q = REF` is the refaliasing declaration from #325.
+# NOT `\(LIST)`: that distributes over the list's TERMS, so `\(@Q, @A)` is two
+# ARRAY refs (perl's own answer, probed) — right for `\(…)`, wrong here.
+#
+# `while`, not a C-style `for`: perl allows a `continue` block on this loop
+# (op/for-many.t uses one together with redo/next) and a C-style for cannot
+# carry one.  The three non-local exits then land where perl puts them —
+# `next` runs the continue block and the step, `redo` runs neither, `last`
+# leaves — because the step IS in the continue block.
+#
+# The PAD array gives the short final chunk its own writable slots, one per
+# missing variable, which is perl's answer (`for my ($q,$r,$s) (@a)` with 7
+# elements leaves $s undef on the last pass) — a single shared pad would make
+# two loop variables the same variable.
+sub _repair_nary_foreach {
+  my ($self, $doc) = @_;
+  my ($n, $repaired) = (0, 0);
+  for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {
+    next unless $w->content =~ /^for(?:each)?$/;
+    my $my = _next_sig_token($w);
+    next unless $my && $my->isa('PPI::Token::Word') && $my->content eq 'my';
+    my $o1 = _next_sig_token($my);
+    next unless $o1 && $o1->isa('PPI::Token::Structure') && $o1->content eq '(';
+    my $vars = $o1->parent;
+    next unless $vars && $vars->isa('PPI::Structure::List') && $vars->finish;
+    my @names = map { $_->content } @{ $vars->find('PPI::Token::Symbol') || [] };
+    # Scalars only — perl rejects every other spelling of this list, so a
+    # non-scalar here is not this construct and must not be rewritten.
+    next unless @names && !grep { !/^\$\w+$/ } @names;
+    my $o2 = _next_sig_token($vars->finish);
+    next unless $o2 && $o2->isa('PPI::Token::Structure') && $o2->content eq '(';
+    my $list = $o2->parent;
+    next unless $list && $list->isa('PPI::Structure::List') && $list->finish;
+    my $brace = _next_sig_token($list->finish);
+    next unless $brace && $brace->isa('PPI::Token::Structure') && $brace->content eq '{';
+    my $block = $brace->parent;
+    next unless $block && $block->isa('PPI::Structure::Block') && $block->finish;
+
+    my $k = @names;
+    my ($L, $PD, $I) = ("\@__PCL_FL$n", "\@__PCL_PD$n", "\$__PCL_FI$n");
+    (my $Ls = $L) =~ s/^\@/\$/;
+    my $setup = "my $L = map \\\$_, " . $list->content . "; my $PD; "
+              . "push $L, \\$PD\[scalar $PD] while $L % $k; my $I = 0; ";
+    # A label belongs to the LOOP, not to the setup statements in front of it.
+    my $label = '';
+    if (my $prev = _prev_sig_token($w)) {
+      if ($prev->isa('PPI::Token::Label')) {
+        $label = $prev->content . ' ';
+        $prev->set_content('');
+      }
+    }
+    $w->set_content($setup . $label . 'while ');
+    $my->set_content('');
+    $_->set_content('') for $vars->tokens;
+    $_->set_content('') for $list->tokens;
+    $o2->set_content("($I < $L)");
+    $brace->set_content('{ ' . join('', map {
+      "\\my $names[$_] = $Ls\[$I" . ($_ ? " + $_" : '') . "]; " } 0 .. $k - 1));
+    # The step goes in the continue block so `next` reaches it; an existing
+    # continue block keeps its own statements and gains the step after them,
+    # which is the order perl runs them in.
+    my $cont_w = _next_sig_token($block->finish);
+    my $cont_b = $cont_w && $cont_w->isa('PPI::Token::Word')
+              && $cont_w->content eq 'continue' ? $cont_w->snext_sibling : undef;
+    if ($cont_b && $cont_b->isa('PPI::Structure::Block') && $cont_b->finish) {
+      $cont_b->finish->set_content("; $I += $k; }");
+    } else {
+      $block->finish->set_content("} continue { $I += $k; }");
+    }
+    $n++;
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# The previous significant token in DOCUMENT order — the raw stream twin of
+# _next_sig_token.
+sub _prev_sig_token {
+  my ($t) = @_;
+  while ($t = $t->previous_token) {
+    return $t if $t->significant;
+  }
+  return undef;
 }
 
 # The next significant token in DOCUMENT order (structure starts and finishes

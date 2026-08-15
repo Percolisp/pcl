@@ -3099,3 +3099,37 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   has no `::` and fell through to `p-setf` by luck — a reminder that the
   dispatch chain is ordered text matching, so a new place form must be placed
   above every pattern its text could satisfy.
+
+## s396b–c — the n-at-a-time foreach, and what #314's residue actually costs
+
+- **perl 5.36's `for my ($q, $r) (LIST)` mis-lexes exactly like the refaliasing
+  foreach**, and takes the same token-stream repair (#329).  The re-spelling is
+  a `while` over `map \$_, LIST` with `\my $q = $L[$I]` per variable.
+- **`map \$_, LIST` is the per-ELEMENT refgen; `\(LIST)` is not.**  map aliases
+  `$_` to each element, so `\$_` is a write-through ref to the original —
+  probed identical to perl for arrays, several arrays, a hash, literals and
+  `reverse`.  `\(LIST)` distributes over the list's TERMS, so **`\(@Q, @A)` is
+  two ARRAY refs** (perl's own answer): right for `\(…)`, silently wrong as a
+  general element-ref idiom.
+- **`while` + `continue`, never a C-style `for`, when a perl loop may carry a
+  continue block** — and putting the STEP in the continue block is what puts
+  the three non-local exits where perl puts them: `next` runs the continue
+  block and the step, `redo` runs neither, `last` leaves.
+- **`\(%h)` is 2N scalar refs, not one hash ref** (fixed with #329, it was a
+  pre-existing silent-wrong): a hash flattens to a key/value list in list
+  context exactly as an array flattens.  `p-refgen-list` now delegates the
+  hash case to `%p-flatten-list`, the same flattener list assignment uses, so
+  the ORDER matches `%h` everywhere else and the VALUE boxes arrive unwrapped
+  (which is what makes the value refs write back).
+- **PCL has read-only ARRAYS but no read-only SCALARS**, so
+  `Modification of a read-only value attempted` never fires for a scalar and a
+  literal in a foreach list is writable.  Six rows of op/for-many.t; task #330
+  weighs it against `box-set` being the hot path.
+- **Half of #314's remaining residue is not reachable, measured not guessed.**
+  op/coresubs.t (1109) needs `use B` + `B::walkoptree` — waiving its state
+  blocker experimentally makes it transpile and produce ZERO rows.
+  op/svleak.t (156) needs `XS::APItest::sv_count` (PL_sv_count), io/shm.t (21)
+  needs IPC::SysV, re/opt.t (639) needs `re::optimization`, and 62 of
+  op/const-optree.t's remainder are `B::` optree inspection.  **A t/ file that
+  measures perl's INTERNALS is not a PCL row count** — check what a file's
+  assertions actually read before sizing a family from its plan.

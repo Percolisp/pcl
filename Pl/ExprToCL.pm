@@ -3491,10 +3491,14 @@ sub _child_is_list_expr {
   my ($self, $node_id) = @_;
   my $node = $self->expr_o->get_a_node($node_id);
 
-  # Array variable: @arr, @_  — already a vector
+  # Array variable: @arr, @_  — already a vector.  A HASH flattens to a
+  # key/value list in list context just as an array does, so `\(%h)` must
+  # distribute into 2N scalar refs (perl), not collapse to one `\%h`.  The
+  # trailing-character test is what separates the variable `%h` / `%$r` /
+  # `%{…}` from the MODULUS operator, whose token content is exactly "%".
   if (ref($node) && $node->can('content')) {
     my $content = $node->content() // '';
-    return 1 if $content =~ /^@/;
+    return 1 if $content =~ /^\@/ || $content =~ /^\%[\w\$\{:]/;
   }
 
   # Only internal (non-leaf) nodes below this point

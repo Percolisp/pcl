@@ -11635,7 +11635,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-146"
+(defparameter *pcl-cache-generation* "v2-147"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -12801,6 +12801,14 @@ buffer's fill-pointer; everything else falls back to file-length."
                  ((p-flatten-marker-p item)
                   (loop for elem across (p-flatten-marker-array item)
                         do (vector-push-extend (p-backslash elem) result)))
+                 ;; A HASH flattens to its key/value list first — `\(%h)` is
+                 ;; 2N scalar refs, not one hash ref.  %p-flatten-list is the
+                 ;; same flattener list assignment uses, so the ORDER matches
+                 ;; `%h` everywhere else and the VALUE boxes come through
+                 ;; unwrapped, which is what makes the value refs write back.
+                 ((hash-table-p item)
+                  (loop for elem across (%p-flatten-list item)
+                        do (add-ref elem)))
                  ((and (vectorp item) (not (stringp item)))
                   (loop for elem across item
                         do (add-ref elem)))

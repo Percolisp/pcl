@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 29;
 
 my $PREAMBLE = "use feature 'refaliasing', 'declared_refs';\n"
              . "no warnings 'experimental';\n";
@@ -150,6 +150,43 @@ test_cl('for \$::s (LIST) likewise',
 test_cl('an ordinary foreach over a list of refs is not rewritten',
     q{my ($p,$q) = (1,2); my @out;
       for my $r (\$p, \$q) { push @out, $$r } print "@out\n";}, "1 2\n");
+
+# --- n-at-a-time foreach (task #329) ---------------------------------------
+#
+# perl 5.36's `for my ($q, $r) (LIST)`.  PPI cannot lex it either, and the
+# repair re-spells it as a `while` over `map \$_, LIST` — one write-through ref
+# per element — with `\my $q = $L[$I]` doing the aliasing.  So these rows guard
+# the same mechanism from a second direction.
+
+test_cl('for my ($q,$r) (LIST) walks two at a time',
+    q{my @have; for my ($q,$r) ('A','B','C','D') { push @have, "$q;$r" }
+      print "@have\n";}, "A;B C;D\n");
+test_cl('a short final chunk leaves the extra variables undef',
+    q{my @have; for my ($q,$r,$s) (1..5) {
+        push @have, join ";", map { $_ // 'undef' } $q,$r,$s } print "@have\n";},
+    "1;2;3 4;5;undef\n");
+test_cl('the loop variables ALIAS the array elements',
+    q{my @b = (1,2,3,4); for my ($q,$r) (@b) { ($q,$r) = ($r,$q) } print "@b\n";},
+    "2 1 4 3\n");
+# A multi-term list is the case `\(LIST)` gets wrong (it would give one ARRAY
+# ref per term); `map \$_` distributes over the ELEMENTS, as perl does.
+test_cl('a list of several arrays aliases element by element',
+    q{my @Q = qw(a b c); my @A = qw(d e f);
+      for my ($l,$r) (@Q,@A) { $l = uc $l } print "@Q | @A\n";},
+    "A b C | d E f\n");
+test_cl('a hash flattens to key/value pairs and the VALUES alias',
+    q{my %h = (k=>1); for my ($key,$val) (%h) { $val = 9 } print "$h{k}\n";},
+    "9\n");
+# next runs the continue block and the step, redo runs neither, and the loop
+# keeps its own continue block's statements.
+test_cl('redo / next / continue land where perl puts them',
+    q{my @n = (3,2,1,0); my ($redo,$next,$cont);
+      for my ($l,$r) (@n) { $l *= 3; ++$r; redo unless $redo++; next unless $next++;
+                            $l *= 5; $r *= 7 } continue { $cont .= 'x' }
+      print "@n|$redo|$next|$cont\n";}, "27 4 15 7|3|2|xx\n");
+# INVERSE: an ordinary one-variable foreach must be untouched by the repair.
+test_cl('an ordinary foreach is not rewritten',
+    q{my @o; for my $x (1,2,3) { push @o, $x*2 } print "@o\n";}, "2 4 6\n");
 
 # --- INVERSE: a \-cast in RVALUE position is untouched ---------------------
 
