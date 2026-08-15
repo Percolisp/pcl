@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 106;
+plan tests => 109;
 
 sub run_cl {
     my ($code) = @_;
@@ -956,6 +956,25 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     ok( $doc && grep { $_->isa('PPI::Token::Symbol') && $_->content =~ /^\*/ } $doc->tokens,
         'CANARY: PPI still lexes `)*name` as a GLOB instead of multiplication — '
       . 'if this FAILS, drop _repair_glob_multiply (ppi-upstream-bugs.md §12)' );
+}
+{
+    my $doc = PPI::Document->new(\'my $x = (1+2)-1;');
+    ok( $doc && grep { $_->isa('PPI::Token::Number') && $_->content eq '-1' } $doc->tokens,
+        'CANARY: PPI still swallows `)-1` into a negative Number — if this '
+      . 'FAILS, drop _fix_ppi_negative_number_bug (ppi-upstream-bugs.md §15)' );
+}
+{
+    my $doc = PPI::Document->new(\'my $r = $a ^^ $b;');
+    ok( $doc && !grep { $_->isa('PPI::Token::Operator') && $_->content eq '^^' } $doc->tokens,
+        'CANARY: PPI still splits perl 5.40 `^^` into two operators — if this '
+      . 'FAILS, drop _fix_ppi_logical_xor_bug (ppi-upstream-bugs.md §16)' );
+}
+{
+    my $doc = PPI::Document->new(\'my $v = ${$r}[0];');
+    my @s = map { ref } @{ $doc->find(sub { $_[1]->isa('PPI::Structure') }) || [] };
+    ok( !(grep { $_ eq 'PPI::Structure::Subscript' } @s),
+        'CANARY: PPI still structures a braced-deref subscript as a Constructor '
+      . '— if this FAILS, drop the re-blessing in PExpr (ppi-upstream-bugs.md §17)' );
 }
 {
     my $doc = PPI::Document->new(\'sort <STDIN>;');

@@ -578,6 +578,83 @@ on.  If PPI is fixed, both come out together.
 
 ---
 
+## 15. `)` followed by `-1` — the operator is swallowed into a negative NUMBER  [CONFIRMED 1.291]
+
+**Perl:** `(1+2)-1` is subtraction; a `-` where a term has just ended cannot
+start a literal.
+
+**PPI:**
+
+```
+my $x = (1+2)-1;   … Structure()) Number(-1) Structure(;)     <- WRONG
+my $x = (1+2) - 1; … Structure()) Operator(-) Number(1)        <- right (space)
+```
+
+so the subtraction disappears and the consumer sees two adjacent terms.  Same
+operator-vs-term family as §11/§12/§14: after `)` a term has ENDED, so `-` is
+an operator.
+
+**Repro + failing row:** Bug 12 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: none today** — `Pl::PExpr::_fix_ppi_negative_number_bug`
+splits such a Number back into `Operator(-)` + the positive number when the
+previous token ends a term.  Logged s404 (the workaround predates the log).
+
+---
+
+## 16. perl 5.40's `^^` (logical XOR) is tokenized as two `^` operators  [CONFIRMED 1.291]
+
+**Perl 5.40:** `$a ^^ $b` is the low-precedence-style logical XOR operator.
+
+**PPI:** `Operator(^) Operator(^)` — two bitwise XORs, which is a different
+expression entirely (and, applied to two operands, a parse the consumer cannot
+tell from `$a ^ (^$b)`).
+
+**Repro + failing row:** Bug 13 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: none today** — `Pl::PExpr::_fix_ppi_logical_xor_bug` merges the
+adjacent pair back into one `^^` token.  Logged s404 (the workaround predates
+the log).
+
+---
+
+## 17. A SUBSCRIPT after a deref or a KV slice is structured as something else  [CONFIRMED 1.291]
+
+**Perl:** `${$r}[0]` is element 0 of `@$r`, and `%h{...}` (5.20+) is a key/value
+hash slice — in both, the bracketed part SUBSCRIPTS what precedes it.
+
+**PPI:** it builds a different structure class for each:
+
+```
+my $v = ${$r}[0];        Structure::Block({$r})  Structure::Constructor([0])   <- WRONG
+my %kv = %h{qw(a b)};    Symbol(%h)              Structure::Block({qw(a b)})   <- WRONG
+my @s  = @h{qw(a b)};    Symbol(@h)              Structure::Subscript({…})     <- right
+```
+
+`Constructor` means "an anonymous arrayref literal" and `Block` means "a code
+block" — so a consumer that trusts the structure class reads `${$r}[0]` as a
+deref followed by a fresh `[0]` arrayref, and the KV slice as a hash followed by
+a block.
+
+**Repro + failing row:** Bug 14 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: none today** — `Pl::PExpr` re-blesses both shapes at the sites
+noted around `_parse_subscript_ix` (the braced-deref case) and the `%h{…}` /
+`%a[…]` KV-slice cases.  Logged s404 (the workarounds predate the log).
+
+---
+
+## Possibly FIXED upstream — verify before trusting
+
+* **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`
+  exists for it, but on 1.291 six spellings (`$c ? foo : bar` at statement
+  start, in a list, in a call, ALL-CAPS, with parens, without spaces) all lex
+  CORRECTLY.  Either the trigger is narrower than the comment says or PPI fixed
+  it; task #357 is to find the shape or drop the workaround, with a canary
+  either way.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it

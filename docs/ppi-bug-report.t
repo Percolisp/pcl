@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 11;
+use Test::More tests => 14;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -209,4 +209,44 @@ sub toks {
     ok( grep(/^PPI::Token::QuoteLike::Readline=/, @t),
         '<STDIN> after a list operator should be a readline, as it is after a comma' )
         or diag "got: @t";
+}
+
+# ── Bug 12: `)` followed by -1 swallows the operator into a negative NUMBER ───
+#
+#   $ perl -e 'print( (1+2)-1 )'
+#   2
+#
+# After `)` a term has ENDED, so `-` is an operator.  PPI emits Number('-1'),
+# and the subtraction is gone: the consumer sees two adjacent terms.  With a
+# space (`(1+2) - 1`) it is correct, which is what makes it easy to miss.
+{
+    my @t = toks('my $x = (1+2)-1;');
+    ok( !grep(/^PPI::Token::Number=-1$/, @t),
+        ')-1 should be Operator(-) + Number(1), not a negative literal' )
+        or diag "got: @t";
+}
+
+# ── Bug 13: perl 5.40's `^^` (logical XOR) is two `^` operators ───────────────
+#
+# 5.40 added `^^`.  PPI emits Operator('^') twice, which is a different
+# expression (bitwise XOR applied twice) and cannot be told apart from one.
+{
+    my @t = toks('my $r = $a ^^ $b;');
+    ok( grep(/^PPI::Token::Operator=\^\^$/, @t),
+        '^^ should be one logical-XOR operator token' )
+        or diag "got: @t";
+}
+
+# ── Bug 14: a SUBSCRIPT after a deref / a KV slice gets the wrong structure ───
+#
+# `${$r}[0]` is element 0 of @$r and `%h{...}` (5.20+) is a key/value slice: the
+# bracketed part SUBSCRIPTS what precedes it.  PPI builds Structure::Constructor
+# (an anonymous arrayref) and Structure::Block (a code block) instead — while
+# the sibling `@h{...}` correctly gets a Structure::Subscript.
+{
+    my $doc = PPI::Document->new(\'my $v = ${$r}[0];');
+    my @s = map { ref } @{ $doc->find(sub { $_[1]->isa('PPI::Structure') }) || [] };
+    ok( (grep { $_ eq 'PPI::Structure::Subscript' } @s),
+        '[0] after a braced deref should be a Subscript, not a Constructor' )
+        or diag "got: @s";
 }
