@@ -130,6 +130,7 @@ use lib "$FindBin::RealBin/lib";
 # Description-based TAP pairing (task #177) — unit-tested in tools/t/tap-align.t.
 use PclTapAlign qw(tap_rows align_taps);
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
+use PCLPaths qw(perl_suite_t);
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -154,7 +155,10 @@ my $testlib = "$root/cl/pcl-test.lisp";
 # harness itself), japh (obfuscated), lib (needs the build-tree module layout).
 my @DEFAULT_DIRS = qw(base cmd comp opbasic op mro class run uni re io);
 
-my $tdir = "/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t";
+# perl's own t/ — derived (PCL_PERL_SUITE_T, else the perlbrew build tree of
+# the running perl), never hard-coded: task #278.  Resolved AFTER the argument
+# loop, so `--tdir PATH` still works on a machine where nothing derives.
+my $tdir;
 my ($all, $no_core, $tsv_file);
 my $jobs = 8;
 my $timeout = 90;
@@ -178,6 +182,7 @@ while (@ARGV) {
   elsif ($a eq '--faillog')        { $faillog = shift @ARGV }
   else                             { push @files, $a }
 }
+$tdir //= perl_suite_t();
 $faillog = "$root/$faillog" unless $faillog =~ m{^/};
 
 # Expected-divergence registry: rel -> reason (citing docs/not-supported.md).

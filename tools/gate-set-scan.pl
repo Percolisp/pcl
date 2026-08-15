@@ -30,13 +30,16 @@
 use strict;
 use warnings;
 use File::Basename qw(basename);
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use PCLPaths qw(perl_suite_t);
 
 my $root = shift or die "usage: gate-set-scan.pl ROOT OUT [JOBS]\n";
 my $out  = shift or die "usage: gate-set-scan.pl ROOT OUT [JOBS]\n";
 my $jobs = shift || 8;
-# perl's own t/ — same default as tools/run-perl-suite.pl, overridable so this
-# script is not a second place to edit when the perlbrew build moves (#278).
-my $tdir = $ENV{PCL_PERL_SUITE_T} // "/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t";
+# perl's own t/ — derived (PCL_PERL_SUITE_T, else the perlbrew build tree of
+# the running perl), never hard-coded: task #278.
+my $tdir = perl_suite_t();
 
 my @files = sort glob("$root/perl-tests/*.t");
 push @files, sort glob("$tdir/$_/*.t")
