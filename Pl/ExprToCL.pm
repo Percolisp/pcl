@@ -1662,6 +1662,13 @@ sub gen_binary_op_form {
       $left      = ['vector', $left];
       $left_flat = Pl::CLForm::to_flat($left);
     }
+    # A \-cast LVALUE is refaliasing, and p-setf's place dispatch is what knows
+    # it (task #325).  This must precede the sigil tests below: a PACKAGE
+    # target emits `(p-backslash main::%a)`, whose text matches the `::%`
+    # hash-assignment regex and would lower as an ordinary hash assignment.
+    if ($left_flat =~ /^\(p-backslash(?:-sub)? /) {
+      return ['p-setf', $left, $right];
+    }
     if ($left_flat =~ /^\(vector[ )]/) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = ['p-list-=', $left, $right];

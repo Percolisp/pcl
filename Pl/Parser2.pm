@@ -941,6 +941,10 @@ sub parse {
   # is tokenized as a LABEL — see _normalize_anon_sub_attrs.
   $doc = $self->_normalize_anon_sub_attrs($doc);
 
+  # PPI LEXER BUG: a `for` whose loop variable is a \-cast (refaliasing) or a
+  # non-scalar swallows the rest of the file — see _repair_alias_foreach.
+  $doc = $self->_repair_alias_foreach($doc);
+
   # `state` outside the classic subset (scalar statement-decl in a named sub)
   # is rewritten at SOURCE level into plain Perl the existing machinery
   # already lowers, then the document is reparsed — see _rewrite_state_prepass.
@@ -4287,6 +4291,66 @@ sub _repair_swallowing_prototypes {
        . "docs/ppi-upstream-bugs.md \x{a7}7)\n";
     $lab->set_content('sub');
     $_->set_content('') for @blank, @proto, $t;
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# PPI LEXER BUG (task #327): `for \my %e (@list) {…}` — the refaliasing
+# foreach.  PPI only lexes `foreach [my] $scalar (LIST) BLOCK`; both the
+# `\`-cast and a non-scalar loop variable break it, and the damage is not
+# local — the Statement::Compound comes out holding ONLY the word `for`, with
+# the rest of the construct AND EVERY FOLLOWING STATEMENT swallowed into one
+# flat sibling.  So no tree edit can repair it: like #270, this runs on the RAW
+# TOKEN STREAM (unaffected by the lexing) and reparses.
+#
+# The rewrite is a pure RE-SPELLING into the alias assignment the compiler
+# already has (p-setf's \-cast place, task #325):
+#
+#     for \my %e (@list) { BODY }
+#       ⇒  for my $__PCL_RA0 (@list) { \my %e = $__PCL_RA0; BODY }
+#
+# so there is no new foreach macro and no VarAnnotator work: %e is an ordinary
+# block-level declaration, scoped to the body and fresh per iteration, which is
+# exactly perl's scoping.  A PACKAGE loop variable needs no save/restore —
+# probed on 5.40.3, perl does NOT restore an aliased package loop variable
+# after the loop (`our $s; for \$::s (\"a",\"b") {} print $s` prints "b"), so
+# the alias persisting IS the perl behaviour.
+sub _repair_alias_foreach {
+  my ($self, $doc) = @_;
+  my ($n, $repaired) = (0, 0);
+  for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {
+    next unless $w->content =~ /^for(?:each)?$/;
+    my $cast = _next_sig_token($w);
+    next unless $cast && $cast->isa('PPI::Token::Cast') && $cast->content eq '\\';
+    my $t = _next_sig_token($cast);
+    my $decl;
+    if ($t && $t->isa('PPI::Token::Word') && $t->content =~ /^(?:my|our|state)$/) {
+      $decl = $t;
+      $t = _next_sig_token($t);
+    }
+    next unless $t && $t->isa('PPI::Token::Symbol');
+    my $var  = $t;
+    my $open = _next_sig_token($var);
+    next unless $open && $open->isa('PPI::Token::Structure') && $open->content eq '(';
+    # The list and block structures ARE built (only the compound statement is
+    # not), so the block's opening brace is reachable from the list's finish.
+    my $list = $open->parent;
+    next unless $list && $list->isa('PPI::Structure::List') && $list->finish;
+    my $brace = _next_sig_token($list->finish);
+    next unless $brace && $brace->isa('PPI::Token::Structure') && $brace->content eq '{';
+    my $tmp  = '$__PCL_RA' . $n++;
+    my $name = $var->content;
+    my $dw   = $decl ? $decl->content : '';
+    # `our` spells the cast INSIDE the declaration (`our \$T = …`); the other
+    # declarators spell it outside (`\my %e = …`, `\state @a = …`).
+    my $alias = $dw eq 'our' ? "our \\$name = $tmp;"
+              : $dw          ? "\\$dw $name = $tmp;"
+              :                "\\$name = $tmp;";
+    $cast->set_content('my ');       # the trailing space matters: `for \%_ (…)`
+    $decl->set_content('') if $decl; # has no whitespace of its own to reuse
+    $var->set_content($tmp);
+    $brace->set_content("{ $alias");
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;

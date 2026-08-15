@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 22;
 
 my $PREAMBLE = "use feature 'refaliasing', 'declared_refs';\n"
              . "no warnings 'experimental';\n";
@@ -120,6 +120,36 @@ test_cl('(\$x) = @list aliases through a list assignment',
     q{my $t = 1; @_ = \$t; my $x; (\$x) = @_; $x = 9; print "$t\n";}, "9\n");
 test_cl('\(my $p) = @list aliases the fresh lexical',
     q{my $t = 1; @_ = \$t; \(my $p) = @_; $p = 9; print "$t\n";}, "9\n");
+
+# --- foreach (task #327) ---------------------------------------------------
+#
+# PPI cannot lex `for \my %e (LIST) {…}` at all — the compound statement comes
+# out holding only the word `for` and swallows the rest of the file — so the
+# token-stream repair re-spells it as `for my $tmp (LIST) { \my %e = $tmp; … }`
+# and the alias mechanism above does the work.
+
+test_cl('for \my %e (LIST) aliases each element in turn',
+    q{my @in = ({x=>1},{x=>2}); for \my %e (@in) { $e{seen} = 1 }
+      print join("|", map { join(",", sort keys %$_) } @in), "\n";},
+    "seen,x|seen,x\n");
+test_cl('for \my $x (LIST) binds the referent, not the ref',
+    q{my @out; for \my $topic (\"p", \"q") { push @out, $topic } print "@out\n";},
+    "p q\n");
+test_cl('for \my @b (LIST) aliases arrays',
+    q{my @out; for \my @b ([1,2],[3,4]) { push @out, @b } print "@out\n";},
+    "1 2 3 4\n");
+# A PACKAGE loop variable needs no save/restore: probed on perl 5.40.3, perl
+# does NOT restore an aliased package loop variable when the loop ends.
+test_cl('for \%::a (LIST) leaves the last alias in place, as perl does',
+    q{our %a = (orig=>1); my @in = ({x=>1},{x=>2});
+      for \%::a (@in) { } print join(",", sort keys %a), "\n";}, "x\n");
+test_cl('for \$::s (LIST) likewise',
+    q{our $s = "orig"; for \$::s (\"a", \"b") { } print "$s\n";}, "b\n");
+# INVERSE: an ordinary foreach — and one whose LIST holds \-refs — must be
+# untouched by the repair (it keys on a \-cast in the LOOP VARIABLE position).
+test_cl('an ordinary foreach over a list of refs is not rewritten',
+    q{my ($p,$q) = (1,2); my @out;
+      for my $r (\$p, \$q) { push @out, $$r } print "@out\n";}, "1 2\n");
 
 # --- INVERSE: a \-cast in RVALUE position is untouched ---------------------
 

@@ -3082,7 +3082,20 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   is an upper bound until the file has actually run.**
 - **PPI cannot lex a `for` whose loop variable is a `\`-cast or a non-scalar**
   — the compound statement keeps only the word `for` and swallows the rest of
-  the file into one flat sibling, so no tree edit can repair it.  Token-stream
-  repair + reparse (the #270 pattern), spelled as a rewrite into
-  `for my $tmp (LIST) { \my %e = $tmp; BODY }` so the alias mechanism above
-  does the work.  Task **#327**; blocks `t/op/const-optree.t`.
+  the file into one flat sibling, so no tree edit can repair it.  Fixed (#327)
+  by token-stream repair + reparse (the #270 pattern), spelled as a rewrite
+  into `for my $tmp (LIST) { \my %e = $tmp; BODY }` so the alias mechanism
+  above does the work — no new foreach macro, no VarAnnotator work, and the
+  loop variable is scoped to the body and fresh per iteration, which is perl's
+  scoping.  `t/op/const-optree.t` 0 → 86.
+- **perl does NOT restore an aliased PACKAGE foreach variable** (probed 5.40.3:
+  `our $s = "orig"; for \$::s (\"a", \"b") {} print $s` prints **b**).  An
+  ordinary `for $pkgvar (…)` localizes and restores; the aliasing form leaves
+  the last alias standing.  So the foreach rewrite needs no save/restore.
+- **A `\`-cast lvalue must be matched BEFORE the sigil regexes** in the
+  assignment dispatch: a package target emits `(p-backslash main::%a)`, whose
+  TEXT matches the `::%` hash-assignment test and lowers as an ordinary hash
+  assignment (`(boundp '(p-backslash %a))` at runtime).  The lexical spelling
+  has no `::` and fell through to `p-setf` by luck — a reminder that the
+  dispatch chain is ordered text matching, so a new place form must be placed
+  above every pattern its text could satisfy.

@@ -1025,8 +1025,9 @@ the fix requires a fundamentally different argument-passing model.
 
 > **NO LONGER A LIMITATION for the assignment forms.**  `\$x = \$y`,
 > `\my $x = \$y` (and the `@`/`%` spellings), `our \$T = \$::TODO`,
-> `\$h{k} = \$v` / `\$a[i] = \$v`, `\&c = \&d`, and the list spellings
-> `(\$x) = @_` / `\($x) = @_` / `\(my $p) = @_` / `\my($s) = @_` all alias,
+> `\$h{k} = \$v` / `\$a[i] = \$v`, `\&c = \&d`, the list spellings
+> `(\$x) = @_` / `\($x) = @_` / `\(my $p) = @_` / `\my($s) = @_`, and the
+> FOREACH spellings `for \my %e (@list)` / `for \%::a (@list)` all alias,
 > probed row-for-row against perl 5.40.3.  Guard: `Pl/t/refaliasing-01.t`.
 >
 > The mechanism is one arm in `p-setf`'s place dispatch: a `\`-cast lvalue
@@ -1037,11 +1038,6 @@ the fix requires a fundamentally different argument-passing model.
 
 **What is still missing** (each its own cause, none of them the alias itself):
 
-- **`for \my %e (@list)` / `for \%_ (@tests)`** — the foreach spellings.  PPI
-  cannot lex a `for` whose loop variable is a `\`-cast or a non-scalar: the
-  compound statement comes out holding only the word `for`, with the rest (and
-  every following statement) swallowed into one flat sibling.  Needs the
-  token-stream repair pattern; **task #327**.  Blocks `t/op/const-optree.t`.
 - **`my \$x` in RVALUE position** (`is \$x, my \$y, …`) — the declarator as an
   expression whose value is a ref.  `t/op/decl-refs.t` is mostly this plus
   diagnostics.
