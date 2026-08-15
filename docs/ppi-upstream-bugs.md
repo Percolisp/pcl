@@ -293,6 +293,133 @@ inverse guards.
 
 ---
 
+## 8. A variable declaration's ATTRIBUTE is not a `Token::Attribute`  [CONFIRMED 1.291]
+
+Minimal repro (found s395, task #314 family F-A2 — `t/op/attrs.t`, `t/uni/attrs.t`):
+
+```perl
+my $x : shared = 1;      # valid perl; prints 1
+```
+
+```
+# PPI::Document->new(\'my $x : shared = 1;')->tokens
+# PPI::Token::Word          my
+# PPI::Token::Symbol        $x
+# PPI::Token::Operator      :          <-- expected PPI::Token::Attribute 'shared'
+# PPI::Token::Word          shared     <--
+# PPI::Token::Operator      =
+# PPI::Token::Number        1
+# PPI::Token::Structure     ;
+# (statement class: PPI::Statement::Variable)
+```
+
+PPI *does* produce a `PPI::Token::Attribute` for the same syntax on a **sub**
+(`sub f : lvalue {…}`), but inside a `PPI::Statement::Variable` the attribute
+run comes back as a bare `Operator ':'` followed by ordinary `Word`s (plus an
+argument `List` for `: Foo(bar)`). So there is no way to tell a declaration's
+attribute from an unrelated `?:` fragment except by position.
+
+Why it matters beyond tidiness: the shape is indistinguishable from a
+declaration followed by a trailing expression, so a consumer that supports
+`my $x <tail>` will silently take `: shared = 1` as that tail. In PCL that made
+`my $x : shared = 1; print $x` **print nothing** — a silent wrong that had been
+live since the scalar branch shipped, found only by probing the family.
+
+PCL-side workaround: `_strip_decl_decorations` (Pl/Parser2.pm) deletes the
+attribute run in ONE document pre-pass, before any decl-shape matcher runs, and
+ANNOUNCES the drop (rule 12, effect-only). Unblocked `t/op/attrs.t` 0 → 28 and
+`t/uni/attrs.t` 0 → 8; the remainder is the attribute PROTOCOL (task #322).
+
+---
+
+## 9. `${ PUNCTUATION }` is a variable, but lexes as Cast + Block  [CONFIRMED 1.291]
+
+Minimal repro (found s395 — `t/re/pat_rt_report.t`, 2513 rows behind it):
+
+```perl
+my @plus = @{+};        # valid perl: @{+} IS the magic array @+
+print "@{+}";           # same in a string, and in a pattern: qr/A@{+}B/
+```
+
+```
+# @{+}    -> Cast '@'  Structure '{'  Operator '+'  Structure '}'
+# @{foo}  -> Cast '@'  Structure '{'  Word     'foo'  Structure '}'   (same shape)
+# ${!}    -> Cast '$'  Structure '{'  Operator '!'  Structure '}'
+# $#-     -> PPI::Token::Magic '$#-'                 (NOT an ArrayIndex)
+```
+
+Perl's `${ NAME }` accepts a punctuation name, so `@{+}` is `@+`, `${!}` is
+`$!`, `%{+}` is `%+`. PPI folds the **identifier** spelling (`@{foo}` → `@foo`)
+and the **caret** spelling itself, but leaves the punctuation ones as a deref
+Cast over a Block containing a lone `Operator`. A deref block holding exactly
+one Operator token can never be an expression, so this is unambiguous and PPI
+could fold it the same way it folds the others.
+
+Second half, same family: `$#foo` lexes as `PPI::Token::ArrayIndex`, but `$#-`
+and `$#+` come back as a single `PPI::Token::Magic` — so a consumer keyed on
+ArrayIndex sees no case at all and emits the name as a bare symbol.
+
+In PCL this was a **silent empty list** in plain code and a die in a pattern.
+Workaround: one decision function (`Pl::PExpr::braced_punct_magic_name`) asked
+by the token pre-pass and by StringInterpolation's `@{…}` scanner — a pure
+re-tokenization, no new emission case. `t/re/pat_rt_report.t` 0 → 2431.
+
+---
+
+## 10. `for` accepts only `[my] $scalar` as its loop variable — and mis-lexes the rest of the FILE  [CONFIRMED 1.291]
+
+Minimal repros (found s396, tasks #327 and #329):
+
+```perl
+use feature 'refaliasing', 'declared_refs';
+for \my %e (@l) { A() }          # valid perl 5.22+: %e aliases each element
+for my ($q, $r) (@l) { A() }     # valid perl 5.36+: two at a time
+```
+
+```
+# for \my %e (@l) { A() } print "x";
+#   PPI::Statement::Compound   for
+#   PPI::Statement             \my %e (@l) { A() } print "x";
+#
+# for my ($q, $r) (@l) { A() } print "x";
+#   PPI::Statement::Compound   for my
+#   PPI::Statement             ($q, $r) (@l) { A() } print "x";
+#
+# for my $q (@l) { A() } print "x";            <-- the shape PPI does handle
+#   PPI::Statement::Compound   for my $q (@l) { A() }
+#   PPI::Statement             print "x";
+```
+
+The loop-variable slot only accepts `$scalar` or `my $scalar`. A `\`-cast
+(refaliasing), a non-scalar (`%e`, `@a`), and the 5.36 parenthesized
+n-at-a-time list all fail it — and unlike §6 this is **not** a clean lexer
+error: the `Compound` statement silently keeps only the keyword, and the entire
+rest of the construct **plus every following statement up to the next `;`** is
+swallowed into one flat sibling `PPI::Statement`. A consumer therefore sees a
+`for` with no list and no block, and loses unrelated code with it.
+
+Related: §6 is the same slot rejecting a block-deref lvalue `${*$f}`, where it
+dies loudly instead. The two together suggest the loop-variable slot is the
+thing to widen upstream.
+
+PCL-side workaround: repair the RAW TOKEN STREAM and reparse (the §7b pattern —
+no tree edit can work, the enclosing structure is unfinished). Both shapes are
+re-spelled into constructs PPI does lex:
+
+```perl
+for \my %e (@l) { BODY }      =>  for my $tmp (@l) { \my %e = $tmp; BODY }
+for my ($q,$r) (@l) { BODY }  =>  my @L = map \$_, (@l); my $I = 0;
+                                  while ($I < @L) { \my $q = $L[$I];
+                                                    \my $r = $L[$I+1]; BODY }
+                                  continue { $I += 2 }
+```
+
+`_repair_alias_foreach` / `_repair_nary_foreach` (Pl/Parser2.pm). Unblocked
+`t/op/const-optree.t` 0 → 86 and `t/op/for-many.t` 0 → 63. Guard rows in
+`Pl/t/refaliasing-01.t`.
+
+---
+
 ## How to add to this list
 
 When PCL hits a parse problem, first check whether **PPI** mis-tokenizes it

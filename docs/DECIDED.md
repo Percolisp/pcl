@@ -3181,3 +3181,29 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   whole test, so a concurrent run in another shell is untouched.  This is the
   MEMORY half of #273, and it feeds #215: MemAvailable is what decides whether
   a parallel sweep stays stable.
+
+## s396h — PPI bugs get LOGGED, not just worked around (CLAUDE.md rule 13)
+
+- **USER RULE (s396): every PPI mis-tokenization or mis-lex PCL works around
+  gets a section in `docs/ppi-upstream-bugs.md` IN THE SAME COMMIT**, plus a
+  runnable case in `docs/ppi-bug-report.t` (the self-contained Test::More file
+  that IS the upstream report — every row FAILS on the current PPI, because a
+  failing row is the bug).  Reason: PPI is upstream software we depend on and
+  keep finding real bugs in; the workaround is exactly the moment the bug feels
+  finished and the logging feels skippable.  An unlogged PPI bug is a fix we
+  owe upstream and never send, and a rediscovery a future session pays for.
+- **Backfilled s396**: FOUR bugs had been worked around without an entry.  Now
+  §8 (a variable declaration's attribute is `Operator ':'` + Words, not a
+  `Token::Attribute` — PPI *does* produce one for subs), §9 (`${ PUNCTUATION }`
+  is a variable: PPI folds `@{foo}` and the caret spelling but leaves `@{+}` as
+  Cast + Block, and `$#-`/`$#+` come back as one Magic token where `$#foo` is an
+  ArrayIndex), §10 (`for` accepts only `[my] $scalar`, and unlike §6 fails
+  SILENTLY — the Compound keeps just the keyword and swallows the rest of the
+  construct plus every following statement to the next `;`).
+- **A canary row asserts the CURRENT broken behaviour**, because the repair is
+  keyed on it: when PPI is fixed the repair stops matching and the shape breaks
+  again silently.  A FAILING canary is the signal to DELETE the workaround, not
+  to fix the row.  Three added to `Pl/t/misc-fixes-02.t` beside the §6 one.
+- **Scope, unchanged**: only what PPI itself tokenizes or structures wrongly.  A
+  correct token stream that PExpr then reads wrongly is PCL's bug and belongs in
+  a task.

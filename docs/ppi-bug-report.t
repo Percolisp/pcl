@@ -1,13 +1,13 @@
 #!/usr/bin/env perl
 #
-# PPI tokenizer/lexer bug report — four small cases.
-# Tested against PPI 1.291 / perl 5.40.3.  All four tests currently FAIL (the bugs).
+# PPI tokenizer/lexer bug report — seven small cases.
+# Tested against PPI 1.291 / perl 5.40.3.  All seven tests currently FAIL (the bugs).
 #
 #   perl ppi-bug-report.t
 #
 use strict;
 use warnings;
-use Test::More tests => 4;
+use Test::More tests => 7;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -76,4 +76,57 @@ sub toks {
     ok( $doc,
         'for ${*$f} (LIST) {} should parse (valid Perl foreach lvalue)' )
         or diag "PPI errstr: " . PPI::Document->errstr;
+}
+
+# ── Bug 5: a VARIABLE declaration's attribute is not a Token::Attribute ────────
+#
+# `my $x : shared = 1;` is valid Perl (prints 1).  PPI produces a
+# PPI::Token::Attribute for the same syntax on a SUB (`sub f : lvalue {…}`),
+# but inside a PPI::Statement::Variable the attribute run comes back as a bare
+# Operator ':' plus ordinary Words — indistinguishable from an unrelated
+# expression fragment, so a consumer that supports `my $x <trailing expr>`
+# silently takes ": shared = 1" as that expression.
+{
+    my @t = toks('my $x : shared = 1;');
+    ok( grep(/^PPI::Token::Attribute=/, @t),
+        'my $x : shared = 1 should yield a Token::Attribute, as sub attributes do' )
+        or diag "got: @t";
+}
+
+# ── Bug 6: ${ PUNCTUATION } is a variable, but lexes as Cast + Block ───────────
+#
+# Perl's ${ NAME } accepts a punctuation name, so @{+} IS the magic array @+
+# (and ${!} is $!, %{+} is %+):
+#
+#   $ perl -e '"ab" =~ /(a)/; print "@{+}"'
+#   a
+#
+# PPI already folds the IDENTIFIER spelling (@{foo} -> @foo) and the caret
+# spelling, but leaves the punctuation ones as Cast + Block{lone Operator}.  A
+# deref block holding exactly one Operator token can never be an expression, so
+# the fold is unambiguous.
+{
+    my @t = toks('@{+}');
+    ok( !grep(/^PPI::Token::Structure=\{$/, @t),
+        '@{+} should fold to the magic array @+, as @{foo} folds to @foo' )
+        or diag "got: @t";
+}
+
+# ── Bug 7: `for` takes only [my] $scalar, and swallows the rest of the file ────
+#
+# Both of these are valid Perl — `for \my %e (@l)` (refaliasing, 5.22+) and
+# `for my ($q, $r) (@l)` (n-at-a-time, 5.36+).  PPI's loop-variable slot accepts
+# neither, and unlike bug 4 it does not fail loudly: the Statement::Compound
+# keeps ONLY the keyword, and the rest of the construct plus every following
+# statement up to the next ';' is swallowed into one flat sibling statement.  So
+# a consumer sees a `for` with no list and no block, and loses unrelated code
+# with it.  (Compare `for my $q (@l) { A() } print "x";`, which parses into two
+# statements as expected.)
+{
+    my $src = 'for my ($q, $r) (@l) { A() } print "x";';
+    my $doc = PPI::Document->new(\$src);
+    my ($first) = $doc ? $doc->schildren : ();
+    ok( $doc && $first && $first->content =~ /\{/,
+        'for my ($q,$r) (LIST) {…} should keep its list and block in the Compound' )
+        or diag "compound was: " . ($first ? $first->content : '(no parse)');
 }

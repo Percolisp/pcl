@@ -141,6 +141,32 @@ retargeted the task at filing).
     computed-label `goto` die cost state.t 88 verified rows while sweep-diff
     reported "0 new".  The sin is the silence, not the fall-through.
 
+13. **Every PPI bug gets LOGGED, in the same commit as its workaround.**
+    PPI is upstream software we depend on, and PCL keeps finding real bugs in
+    it. Each one is worth reporting back — but only if it is written down while
+    the repro is in hand, and that is exactly the moment it is easiest to skip
+    (the workaround already works, so the bug feels finished). It is not: an
+    unlogged PPI bug is a fix we owe upstream and never send, and it is also
+    the thing a future session will re-derive from scratch.
+
+    **When you work around a PPI mis-tokenization or mis-lex, add a section to
+    `docs/ppi-upstream-bugs.md` in the same commit**, containing:
+    - a MINIMAL repro (valid Perl, smallest that shows it) and what perl does;
+    - the actual `PPI::Document` token/structure dump vs. the expected one;
+    - the PPI version tested (`perl -MPPI -e 'print $PPI::VERSION'`);
+    - PCL's workaround and which files/tests it unblocks.
+
+    Then add the case to `docs/ppi-bug-report.t` — the self-contained
+    Test::More file that IS the upstream report, where every row FAILS on the
+    current PPI (a failing row is the bug). Bump its `tests => N`. A **canary
+    row** asserting the currently-broken behaviour is welcome in
+    `Pl/t/misc-fixes-02.t`: when a PPI upgrade fixes the bug, that row fails,
+    which is the signal to drop the workaround.
+
+    **Scope (the file's own note):** only things PPI itself tokenizes or
+    structures wrongly. A correct token stream that PCL's PExpr then interprets
+    wrongly is PCL's bug, not PPI's, and belongs in a task instead.
+
 ## Quick Reference
 
 ```bash

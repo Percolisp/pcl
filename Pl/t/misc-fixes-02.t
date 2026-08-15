@@ -20,7 +20,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 99;
+plan tests => 102;
 
 sub run_cl {
     my ($code) = @_;
@@ -911,6 +911,35 @@ test_cl('named-capture %+ hash element still works after the %- workaround',
 ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     'CANARY: PPI still cannot lex `for ${*$f} (LIST){}` — if this FAILS, '
   . 'PPI is fixed: un-register op/for.t (ppi-upstream-bugs.md §6)' );
+
+# ── PPI bug CANARIES for the three mis-lexes PCL WORKS AROUND ────────────────
+# Each of these asserts the CURRENT broken PPI behaviour, because PCL's repair
+# is keyed on it: when PPI is fixed the repair stops matching and the shape
+# breaks again, silently.  A FAILING row here is the signal to delete the
+# corresponding workaround, not to "fix" the row.
+# docs/ppi-upstream-bugs.md §8/§9/§10, filable as ppi-bug-report.t bugs 5/6/7.
+{
+    my $doc = PPI::Document->new(\'my $x : shared = 1;');
+    ok( $doc && !grep { $_->isa('PPI::Token::Attribute') } $doc->tokens,
+        'CANARY: PPI still gives a declaration attribute as Operator+Word, not '
+      . 'Token::Attribute — if this FAILS, drop _strip_decl_decorations\'s '
+      . 'attribute half (ppi-upstream-bugs.md §8)' );
+}
+{
+    my $doc = PPI::Document->new(\'@{+}');
+    ok( $doc && grep { $_->isa('PPI::Token::Cast') } $doc->tokens,
+        'CANARY: PPI still lexes `@{+}` as Cast+Block instead of folding it to '
+      . 'the magic @+ — if this FAILS, drop braced_punct_magic_name '
+      . '(ppi-upstream-bugs.md §9)' );
+}
+{
+    my $doc = PPI::Document->new(\'for my ($q, $r) (@l) { A() }');
+    my ($first) = $doc ? $doc->schildren : ();
+    ok( $first && $first->content !~ /\{/,
+        'CANARY: PPI still drops the list and block from a `for my ($q,$r) '
+      . '(LIST)` compound — if this FAILS, drop _repair_nary_foreach and '
+      . '_repair_alias_foreach (ppi-upstream-bugs.md §10)' );
+}
 
 # ── runtime warning strings used CL "...\n", but \n in a CL string literal is a
 # bare 'n' (backslash only escapes " and \), so the join uninit warning rendered
