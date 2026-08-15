@@ -114,8 +114,8 @@ ANON sub closing over the enclosing foreach/filescope variable (the s63 TODO,
 `$PCLPERL` switch in `pl-which_perl` lands, the 19 companion callers + the
 sweep re-run, moved rows spliced with causes, baselines edited ROW BY ROW.
 
-**Then the rest of the v0.1 mechanical track**: #279 (needs the USER
-decision in §4), #280 if not done in E, then **#282** (fresh-machine
+**Then the rest of the v0.1 mechanical track**: #279 (pure mechanics now —
+the process-docs question is RULED, §4), #280 if not done in E, then **#282** (fresh-machine
 container install from README alone — AFTER #281 lands, so the emission it
 gates is the one that ships) and **#283** CI (Pl/t gate + corpus-diff on
 PRs).
@@ -163,9 +163,10 @@ before touching them in place).
 From `docs/release-plan-v0.1.md` (all still open):
 1. **Public name** — "PCL" collides with Portable Common Loops and *Practical
    Common Lisp*; `percolisp` exists as an org.  Cheap before release.
-2. **Publish the process docs?** (session-log, DECIDED, the fable-answers /
-   review-request series) — recommendation YES under `docs/`; this also
-   unblocks **#279** (repo hygiene), which carries the same decision.
+2. ~~Publish the process docs?~~ **RULED by the USER (s401): it is open
+   source — they stay AS-IS under `docs/`, nothing archived or pruned.**
+   **#279** is unblocked and is now pure mechanics (root junk, the 29 loose
+   planning `.md`s, `.gitignore`).
 3. **LICENSE body** — verify it is the intended dual Perl/Artistic text.
 4. **pclxs bundling** — recommendation: release PCL first, mention pclxs as
    the experimental XS sibling; its GitHub push stays your deferred call

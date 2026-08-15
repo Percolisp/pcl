@@ -41,9 +41,10 @@ Fable-shaped parts.
 1. **Public name** — "PCL" collides with Portable Common Loops and
    *Practical Common Lisp*; the `percolisp` GitHub org already exists.
    A rename is cheap before release, expensive after.
-2. **Publish the process docs?** (session-log, DECIDED.md, the
-   fable-answers/review-request series.)  Recommendation: yes, under
-   `docs/` — visible engineering discipline.
+2. ~~**Publish the process docs?**~~ **RULED by the USER, s401 (2026-08-15):
+   it is open source — the process docs (session-log, DECIDED.md, the
+   fable-answers/review-request series) stay in the public repo AS-IS under
+   `docs/`; no archiving, no pruning.**  #279 is now pure mechanics.
 3. **LICENSE body** — verify it is the intended dual Perl/Artistic text.
 4. **pclxs bundling** — recommendation: release PCL first, mention pclxs as
    the experimental XS sibling; its GitHub push stays the user's deferred

@@ -59,6 +59,10 @@ not-supported.md → only then probe.*
 - **Fable's order: #281 (IR pass) design → Option B phase 2 sizing +
   execution (before release phase 4) → boxed aggregates.**  #281 is no longer
   blocked by #153 (the FOLD is done).  → plan §3.
+- **The process docs are PUBLISHED AS-IS (USER, s401): "this is open
+  source"** — session-log, DECIDED.md, the fable-answers/review-request
+  series stay under `docs/`; no `docs/history/`, no pruning before the tag.
+  #279 is pure mechanics.  → `release-plan-v0.1.md` decision 2.
 
 ## s400 (2026-08-15, Opus 5) — #344/#324/#207/#278
 
