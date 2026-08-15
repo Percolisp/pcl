@@ -11,6 +11,48 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s402 (2026-08-15, Opus 5) — the drop family gets a voice, a runner column and a spec promise
+
+- **A dropped statement ANNOUNCES itself, once, at the DROP site**:
+  `PCL: statement dropped at FILE line N: <text> -- <reason>` on stderr from
+  `Pl/Parser.pm`'s two `PARSE ERROR` emitters, transpile-time, exit status
+  unchanged.  The prefix is FIXED (tools key on it); the separator is ASCII
+  `--` because `pl2cl` sets `binmode(STDERR, ":utf8")` and a raw em dash would
+  be double-encoded.  Deduped per (file, line, text) — a statement can reach an
+  emitter twice (op/switch.t: 138 events, 112 emitted drops).  PExpr's
+  "Handle single node of unknown type" WARN is gone; the die is untouched.
+  → task #339, `session-log.md` s402.
+- **The announcement is OFF in `pl2cl --module`** — that mode is the RUNTIME
+  transpiling a module mid-run (`p-transpile-file`), so the line would land in
+  the PROGRAM's output, and only on a cold module cache (nondeterministic).
+  `PCL_DROP_ANNOUNCE=all` forces it on; that is how you see a drop inside a
+  CPAN module (Data::Dump.pm:325 has one).  Found by a RED gate row, not by
+  reasoning.  → task #339.
+- **A blanket `local $SIG{__WARN__} = sub {}` hides more than its stated
+  cause** — both analysis-parse silencers claimed to silence only PExpr's
+  decline warn; measured over both populations they also hid an uninitialized
+  value in `VarAnnotator` and two deep-recursion warnings.  Deleted anyway (the
+  sin is the silence), exposed signals filed.  → task #352.
+- **DROPS is the sweep's FIFTH bucket and a runner COLUMN** —
+  `.faillog/_status.tsv` gains `drops` (col 6; note moves to 7; `-1` = NOT
+  MEASURED, never 0), `sweep-diff.pl` compares it against
+  `docs/parse-error-drop-census-s399.tsv` (the census IS the baseline; a drop
+  leaves by EDIT) and FAILS the run on a new drop;
+  `tools/run-perl-suite.pl` records the same column (field 8) and prints the
+  same comparison for perl's t/.  → task #343, CLAUDE.md Test Status.
+- **Line 1's `gen=` stamp is normative** — `docs/ir-spec.md` §9.2 fixes its
+  format and names its two consumers (`artifact-staleness-01.t`,
+  `no-hardcoded-paths-01.t`), both of which now cite it.  → ruling §7.3.
+- **PPI mis-lexes a bare `/PATTERN/` after a paren-less call as DIVISION** —
+  `ok /$qr/, "d"` is dropped whole, `ok /foo/x, "d"` compiles to real division
+  and dies; right after `grep`/`return`/`(`/`=`, wrong after every other Word
+  (`print` included).  `ppi-upstream-bugs.md` §11 + `ppi-bug-report.t` Bug 8.
+  → task #351.
+- **`$e1` = undef at PExpr's term dispatch (the `ref=''` decline) has three
+  causes, two of them legitimate**: deliberately invalid Perl
+  (comp/final_line_num.t's `print 1+` at EOF), a `format` block (blessed
+  non-support), and #351.  → task #339 amendment (iv).
+
 ## s401 (2026-08-15, Fable) — the s399+s400 review, the WHAT-CHANGED cadence table, two new silent-wrongs
 
 - **What runs when is keyed on WHAT CHANGED, not on a change count** — the

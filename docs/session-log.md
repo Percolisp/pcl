@@ -4,6 +4,97 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 402 (2026-08-15, Opus 5) — plan session A: the drop family gets a voice (#339), a runner column (#343) and a spec promise (ir-spec §9.2)
+
+Session A of `docs/plan-post-s400.md`: diagnostics and tools, so every later
+measurement is cheaper.  Three items, all shipped.
+
+**#339 — the drop announcement moved from the DECLINE site to the DROP site.**
+`Pl/PExpr.pm`'s unconditional `warn "Handle single node of unknown type"` is
+DELETED (a decline is not an event: the term walker declines by design and the
+caller re-routes), and `Pl/Parser.pm`'s two `PARSE ERROR` emitters now say, once
+per statement:
+
+    PCL: statement dropped at FILE line N: <source text> -- <reason>
+
+on stderr, at transpile time, exit status unchanged.  It paid for itself
+immediately: `perl-tests/bless.t line 179: is ref $untied, "main", 'blessing
+through tied refs' or diag $@;` — the census's example, now self-reporting; and
+`t/comp/parser.t line 541: tell FILE1` named the `add_node` internal error the
+task was asking me to find.  Deviation from the ruling, deliberate: the
+separator is ASCII `--`, not an em dash, because `pl2cl` does
+`binmode(STDERR, ":utf8")` and a raw UTF-8 dash would be DOUBLE-encoded
+(measured, `303 242 302 200 302 224`).  Deduped per (file, line, text): a
+statement can reach an emitter twice — op/switch.t announced 138 events for 112
+emitted drops before the dedupe, 112 after.
+
+**OFF in `pl2cl --module`.**  Found by the gate, not by reasoning:
+`Pl/t/misc-fixes-01.t` t47 went red because `use Data::Dump` transpiles the
+module *inside the running SBCL* (`p-transpile-file`, `:error *error-output*`),
+so the announcement landed in the PROGRAM's stdout+stderr — and only on a cold
+module cache, i.e. nondeterministically.  `PCL_DROP_ANNOUNCE=all` forces it back
+on; that is how you see the drop inside a CPAN module, and Data::Dump.pm:325 has
+one (`$kstat_sum2 += length($key)*length($key);` — a real CPAN statement PCL
+deletes, in a population the census never covered).
+
+**The two `$SIG{__WARN__}` blanket silencers are deleted with the warn** — and
+the ruling's condition ("if that warn was all they silenced") turned out to be
+FALSE, measured over both populations with a full-stderr scan (659 files):
+`Pl/VarAnnotator.pm`'s also hid "Use of uninitialized value in pattern match"
+from its own line 1005 (t/op/numconvert.t) and two "Deep recursion" lines
+(concat.t, opbasic/concat.t).  I kept the deletion — the sin is the silence, and
+the same "Deep recursion" warning already prints unsilenced from
+`Pl::CLForm::_flat` 3193 times on one file — and filed the exposed signals as
+**#352**.  Fable's call if it should go back.
+
+**#343 — the DROPS runner column.**  The sweep counts `;; PARSE ERROR` in each
+file's emitted CL and records it in `.faillog/_status.tsv` (columns are now
+name, status, pass, fail, planned, **drops**, note; `-1` = NOT MEASURED, never
+0), `tools/sweep-diff.pl` gains a **fifth bucket, DROPS**, compared against
+`docs/parse-error-drop-census-s399.tsv` — the census IS the baseline, a drop
+leaves it by EDIT, and MORE drops than the census fails the run like a NEW
+failure.  `tools/run-perl-suite.pl` records the same column (8th field) and
+prints the same per-file comparison for perl's own t/.  Also the
+`add_node` piece: `Pl/PExpr.pm`'s zero-arg-prototype branch called
+`$self->add_node({...})`, an OpcodeTree method that PExpr does not have, so the
+branch ALWAYS died and the statement was dropped (`sub FILE1 () { 1 }` +
+`sub dummy { tell FILE1 }`).  It now builds the funcall node the way the rest of
+the file reads it back (`make_node_insert` + one child = the function name —
+which is what the `*`-prototype post-pass below it documents).  Ten probes of
+the zero-arg-prototype family identical to perl.
+
+**ir-spec §9.2 — the gen stamp is a promise** (ruling 7.3): line 1 is
+`;;; pcl: pipeline=v2 gen=<generation>`, its format is fixed, and the two guards
+that key on it now cite the section.
+
+**Measurements.**  `tools/corpus-diff.pl` **identical across 111 files**, silent
+drops 12, unchanged (the announcement adds no bytes; the comment text is
+untouched).  `tools/emission-ab.pl` over the 19 `lib/**.pm` shims: 19 SAME.
+Gate **144 files / 5289 rows**, failures exactly the 13 pclxs xs rows.
+Gate-SET scan over both populations (638 files, base worktree vs working tree):
+**160 changed rows, and every one is accounted for** — 69 files whose first
+stderr line is now the drop announcement (the drop was always there), 11 whose
+first line changed because the deleted warn *was* line 1 and a PRE-EXISTING
+line moved up (verified present in the before-scan: the Unicode::UCD prototype
+failure ×6, `Use of uninitialized value $kind` ×2, deep-recursion lines), of
+which 3 are the workaround deletion (#352).  No file gained a die, and none
+lost one.
+
+**Three tasks filed, all silent-wrongs found by probes.**  **#351** — PPI
+mis-lexes a bare `/PATTERN/` after a paren-less call as DIVISION, so
+`ok /$qr/, "desc";` is DROPPED WHOLE and `ok /foo/x, "d";` compiles to real
+division and dies at run time; PPI gets it right after `grep`/`return`/`(`/`=`
+and wrong after every other Word, `print` included.  Logged as
+`docs/ppi-upstream-bugs.md` §11 with a failing row in `docs/ppi-bug-report.t`
+(Bug 8, `tests => 8`).  This was the `ref=''` probe amendment (iv) asked for:
+the other two `ref=''` sites are legitimate declines (comp/final_line_num.t is
+deliberately INVALID Perl — `print 1+` at EOF; op/closure.t is a `format`
+block).  **#352** — the two signals the blanket silencer was hiding.  **#353** —
+prototype extraction dies on any module with top-level POD in a let-bound block
+(`$child->find` on a `PPI::Token::Pod`), so all of Unicode::UCD's prototypes are
+silently unavailable to six companion files; one-line fix identified, NOT taken
+here because a sweep was already in flight.
+
 ## Session 401 (2026-08-15, Fable) — the s399+s400 review, the plan for the coming sessions, the WHAT-CHANGED cadence table, and two new silent-wrongs from the review probes
 
 User ask: "check status and write a plan for the coming sessions".  Docs

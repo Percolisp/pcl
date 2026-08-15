@@ -56,7 +56,11 @@ sub scan_file {
   open my $fh, '<:raw', $path or die "cannot read $path: $!";
   my $first = <$fh>;
   # A transpiled artifact announces itself in line 1 — same rule as
-  # artifact-staleness-01.t.  Excluded, and counted (task #217 owns them).
+  # artifact-staleness-01.t, and the same promise: docs/ir-spec.md §9.2
+  # fixes the stamp's format, which is what lets this guard tell a GENERATED
+  # file (whose machine paths are the emitter's, task #217/#349) apart from a
+  # hand-written source file (whose machine path is a bug).
+  # Excluded, and counted (task #217 owns them).
   if (defined $first && $first =~ /^;;;\s*pcl:\s*pipeline=\S+\s+gen=\S+/) {
     close $fh;
     push @artifacts, rel($path);

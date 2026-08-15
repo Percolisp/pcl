@@ -74,7 +74,8 @@ itself carries no host-specific semantics beyond them.
 - **The first line is the pipeline marker** — `;;; pcl: pipeline=v2
   gen=v2-NN` — a comment stamping which pipeline and cache generation
   emitted the file. Non-semantic like all comments, but it is the
-  version key tooling should read.
+  version key tooling should read, and it is a **promise**, not an
+  incidental: see §9.2.
 - **File layout:** preamble (`in-package`, `@INC` setup) → per-package
   *sections* in source order, each: package preamble → declarations
   (`p-declare-sub`, `defvar`) → definitions → runtime (top-level
@@ -1268,6 +1269,36 @@ eval. Only scalar cells are aliased today; a file needing
 container-capture-by-eval, or a renamed cell nested inside an outer
 `my` of the same name (whose alist pair would always win stop 1), gates
 to v1 (§2b.4).
+
+### 9.2 The generation stamp is a promise (normative, s402)
+
+**Line 1 of every file PCL emits is `;;; pcl: pipeline=v2 gen=<generation>`,
+where `<generation>` is the value of `cl/pcl-runtime.lisp`'s
+`*pcl-cache-generation*` at the moment of emission.** It is a comment, so it
+carries no semantics for a translator — but it is a *stable interface*, and
+tooling is entitled to key on it. Two consequences, both already relied on:
+
+- **Staleness is checkable without re-running the compiler.** The three
+  transpiled artifacts checked into the tree (`cl/pcl-pack.lisp`,
+  `cl/pcl-mro.lisp`, `cl/pcl-warnings.lisp`) are just emitted files, so their
+  line-1 stamp says which compiler built them. `Pl/t/artifact-staleness-01.t`
+  compares each stamp against the live generation, which is why an
+  emission-changing commit that forgets `tools/rebuild-pack` fails a row the
+  same session instead of drifting for forty generations (#331). The
+  artifacts are *discovered by the stamp*, not by a list — anything under
+  `cl/` whose first line carries it is an artifact and is checked.
+- **The module cache keys on it.** A cached module transpile is only reused
+  when its generation matches, so bumping the generation string is what makes
+  an emission change take effect for already-cached modules.
+
+Two obligations follow, and both are gated: an emission-changing commit
+**bumps** the generation (or stale cache entries are silently reused), and it
+**regenerates the artifacts** in the same commit. The stamp's *format* is
+part of the promise: a single line, first line of the file, matching
+`^;;; pcl: pipeline=\S+ gen=(\S+)`. `Pl/t/no-hardcoded-paths-01.t` cites it
+too — it is the marker that tells a generated artifact apart from a
+hand-written source file, which is the difference between "this path is a
+bug" and "this path is a build-machine artifact of the emitter".
 
 ## 10. Op inventory — family rules
 

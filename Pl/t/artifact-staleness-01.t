@@ -18,7 +18,10 @@
 #
 # Each artifact stamps its generation in line 1
 # (`;;; pcl: pipeline=v2 gen=v2-NNN`); the compiler's is
-# `*pcl-cache-generation*` in cl/pcl-runtime.lisp.  Drift is a mismatch, so
+# `*pcl-cache-generation*` in cl/pcl-runtime.lisp.  That stamp is a PROMISE,
+# not an incidental of today's emitter — `docs/ir-spec.md` §9.2 states its
+# format normatively, and this row is one of the two consumers it names.
+# Drift is a mismatch, so
 # this file is three greps and no SBCL spawn — the session that bumps the
 # generation without regenerating gets a red row instead of a silent debt.
 #
