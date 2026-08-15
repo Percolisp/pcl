@@ -22,6 +22,12 @@
 # appear in the output, and each diff is explained.  Exit status: 0 when
 # identical, 1 when files differ (so it can gate scripts).
 #
+# Every run also prints the SILENT-DROP count on both sides — the number of
+# `(progn ;; PARSE ERROR: … nil)` forms, i.e. statements the compiler could
+# not lower and replaced with nil.  They are invisible at run time, so a
+# change that adds one otherwise shows up nowhere; task #343 and
+# docs/parse-error-drop-census-s399.tsv have the population-wide census.
+#
 # What it gets right that ad-hoc reruns keep getting wrong (s287):
 #   - the SAME input files (this tree's perl-tests/) are fed to BOTH
 #     compilers — a ref that changed perl-tests must not pollute the diff;
@@ -113,6 +119,33 @@ for my $f (@files) {
     (my $base = $f) =~ s{.*/}{};
     push @changed, $base
         if $norm->("$tmp/new/$base.lisp") ne $norm->("$tmp/ref/$base.lisp");
+}
+
+# SILENT-DROP counter (task #343).  A `(progn ;; PARSE ERROR: … nil)` is a
+# statement the compiler could not lower and replaced with nil — invisible at
+# RUN time, so neither the gate nor the sweep notices when a change adds one
+# (perl-tests/bless.t carries one today and it is a test row that never runs,
+# in a file the sweep reports as passing).  Both emissions are already in
+# hand here, so counting them is free; the population-wide version is
+# tools/drop-census.pl against docs/parse-error-drop-census-s399.tsv.
+my $drops = sub {
+    my ($dir) = @_;
+    my $n = 0;
+    for my $f (@files) {
+        (my $base = $f) =~ s{.*/}{};
+        open my $fh, '<', "$dir/$base.lisp" or next;
+        local $/;
+        my $t = <$fh> // '';
+        $n += () = $t =~ /;; PARSE ERROR:/g;
+    }
+    return $n;
+};
+my ($d_ref, $d_new) = ($drops->("$tmp/ref"), $drops->("$tmp/new"));
+if ($d_ref != $d_new) {
+    printf "SILENT DROPS: %d -> %d (%+d) — each is a statement replaced by nil;"
+         . " explain every added one (task #343)\n", $d_ref, $d_new, $d_new - $d_ref;
+} else {
+    printf "silent drops: %d, unchanged\n", $d_new;
 }
 
 if (@changed) {
