@@ -11,6 +11,33 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s403 (2026-08-15, Fable) — the s402 review: approved, two rules, #354/#355 filed
+
+- **s402 APPROVED as shipped (quick ruling by USER instruction — NOT
+  independently re-verified this time)** — ASCII `--` separator, per-(file,
+  line, text) dedupe, `--module` OFF, the runner column, ir-spec §9.2 with the
+  discovered-by-stamp sentence KEPT.  → `docs/fable-answers-s402.md`.
+- **A blanket `$SIG{__WARN__}` that swallows is NEVER a fix** — the s402
+  deletion stands although its stated condition was false; the only forms are
+  (1) fix the cause or (2) `no warnings 'category'` at the narrowest lexical
+  scope with a comment saying why the category is expected there (the deep
+  tree walkers get `no warnings 'recursion'`).  → §2, task #352.
+- **A compiler diagnostic that can fire during a RUN must answer "and on a
+  warm cache?"** — if the answer differs it is not a program-output diagnostic
+  (side channel or off).  Modules join the drop census through their cached
+  emission (`;; PARSE ERROR:`), not through stderr.  → §3, note on #343.
+- **#351's repair keys on the EXISTING callable classifier (#266), never a
+  word list; layer = Parser2 `_repair_*`, never `$end_pars`.**  → §4.
+- **PPI 1.291 lexes `)*name` as a GLOB** — `length($k)*length($k)` is dropped
+  whole (Data::Dump:325 is this, in a plain program too); same family + repair
+  layer as #351; rule 13 obligations ride the repair commit.  → task #354.
+- **Pl/t transpile helpers: ONE stderr-aware helper in PCLCore.pm, a drop
+  announcement FAILS the row** (the gate as its own drop detector) — filler.
+  → task #355.
+- **#353 folds into session B** (one-line compiler change; B owes a sweep
+  anyway; acceptance = the six companion files + one guard row).  → §4.
+
+
 ## s402 (2026-08-15, Opus 5) — the drop family gets a voice, a runner column and a spec promise
 
 - **A dropped statement ANNOUNCES itself, once, at the DROP site**:

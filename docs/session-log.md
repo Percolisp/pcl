@@ -4,6 +4,33 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 403 (2026-08-15, Fable) — the s402 review, ruled quickly on the request's own measurements
+
+USER asked for quick answers without a re-verification pass, so this is the
+first `fable-answers-*` whose gate/sweep numbers are the request's, not
+re-run.  `docs/fable-answers-s402.md`: **s402 approved as shipped.**  §1.2's
+deletion of the two blanket `$SIG{__WARN__}` silencers stands even though
+the amendment's condition was false — the sin is the silence; the two exposed
+signals are #352's (the undef `->content` is a real defect; the deep-recursion
+lines get `no warnings 'recursion'` in the tree walkers, the narrow lexical
+form, never a handler).  `--module` OFF ratified with the general rule "a
+diagnostic that can fire during a RUN must answer: and on a warm cache?".
+ir-spec §9.2 keeps the discovered-by-stamp sentence.  #351's repair keys on
+#266's callable classifier.  #353 folds into session B.
+
+**One probe, one new bug: #354** — the Data::Dump line-325 by-product is not
+module-specific: PPI 1.291 lexes `)*name` as a GLOB, so
+`$s += length($k)*length($k)` (no spaces) is dropped whole in any program;
+same family and repair layer as #351.  **#355 filed** for the request's §5:
+one stderr-aware helper in `Pl/t/PCLCore.pm` that fails a row on a drop
+announcement, then port the ~20 `2>&1` copies onto it (filler).
+
+Next: session B (#345, #349, #350 + #353), sizing counts for #351/#354 as a
+by-product of B's measurement pass, then #354+#351, #355.
+
+---
+
+
 ## Session 402 (2026-08-15, Opus 5) — plan session A: the drop family gets a voice (#339), a runner column (#343) and a spec promise (ir-spec §9.2)
 
 Session A of `docs/plan-post-s400.md`: diagnostics and tools, so every later
