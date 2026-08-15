@@ -4,6 +4,57 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 397 (2026-08-15, Fable) — s395 + s396 reviewed and APPROVED; the orphaned server ends itself; #332 filed
+
+Review of `docs/opus5-review-requests-s395.md` (never reviewed — s396 had
+answered its ASK 2 by doing it) and `-s396.md`; rulings in
+`docs/fable-answers-s396.md`, DECIDED updated.
+
+**Independent verification**: cold gate **141 / 5203** (failures exactly the
+13 pclxs xs rows), full sweep RE-RUN **GATE clean, TOTAL 18539 = baseline**
+(the s396 `.faillog` held only a single-file run, so the verdict had to be
+re-earned), ten fresh refaliasing / n-at-a-time probes vs perl 5.40.3 all
+identical (closures per pair, re-alias twice, `for my ($k,$v) (%h)` write-
+through, labelled `next OUTER`, `redo`, eval'd alias), one s395 battery
+identical, compile time on pack.t unchanged (2.76 → 2.76/2.87 s), the
+intuit_curly FYI reproduced, `docs/ppi-bug-report.t` fails all 7 rows on PPI
+1.291 as designed.
+
+**s397a (`63a2344`) — the s396 reaper was INERT on this machine, and the fix
+moved into the server.**  Probing the process tree (`sh -c 'cmd &'` + `ps -o
+ppid`) showed every orphan under a `systemd --user` session is adopted by
+that subreaper (PID 4471), never PID 1, so the `PPID == 1` key never fired.
+`pl2cl --server` now ticks once a second (`$SIG{ALRM}` + `getppid()`) and
+`POSIX::_exit`s when its parent changes — the one process that KNOWS its
+client died; measured: a server orphaned 0.5 s into a 2.8 s transpile was
+gone 0.5 s later, and two requests were answered across five idle ticks
+(PerlIO retries the EINTR'd read).  The runners' reapers stay as the belt,
+keyed on "parent is a reaper" (PPID 1 or comm systemd/init).  Ruled: liveness
+policy lives in the process that can outlive its parent; an SBCL exit hook
+was rejected (cannot see SIGKILL).
+
+**Rulings**: #323 = its own session (baseline event; after #331/#332, before
+v0.1); refaliasing-first RATIFIED retroactively (+149 rows for one arm — key
+families on the FEATURE, not the refusal text; "one refusal blocks N rows"
+is an upper bound until the file has run); **NO new suite verdict for
+"measures perl internals"** — XDIFF + a not-supported section already say it,
+closability belongs to the SECTION's "what would lift it" line, half the
+named files are not internals (IPC::SysV is a shimmable module; coresubs/
+svleak sit behind real declines) — but the class gets ONE citable section so
+`grep -c` is the population, and op/const-optree.t may register under it now.
+
+**Review probes → #332**: the parenthesised-ARRAY refaliasing spellings
+(`\(@a) = (\$x,\$y)`, `\my(@x) = \(@y)`, `\(my @c) = LIST`) are SILENT WRONG
+— the emitter uses the RVALUE form `(p-list-scalar (p-refgen-list @a))` as
+the place, which is not a `\`-cast place; the slice spellings correctly die.
+
+**Queue** (fable-answers-s396.md §7): #331 artifacts (opener, + a staleness
+Pl/t row) → #332 → the internals registration → #323 (own session) → F-D →
+size the three singles (try / lexsub / lex.t) → v0.1.  Fable: FOLD chunk 3
+(begun this session), #281 vocabulary, boxed aggregates.
+
+---
+
 ## Session 396 (2026-08-15, Opus 5) — #325 refaliasing end to end, then #314's residue measured to the bottom
 
 Worked the queue in order: #325 (refaliasing), which split into three commits,
