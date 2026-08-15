@@ -31,10 +31,12 @@ use strict;
 use warnings;
 use File::Basename qw(basename);
 
-my $root = shift or die "usage: gateset.pl ROOT OUT [JOBS]\n";
-my $out  = shift or die "usage: gateset.pl ROOT OUT [JOBS]\n";
+my $root = shift or die "usage: gate-set-scan.pl ROOT OUT [JOBS]\n";
+my $out  = shift or die "usage: gate-set-scan.pl ROOT OUT [JOBS]\n";
 my $jobs = shift || 8;
-my $tdir = "/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t";
+# perl's own t/ — same default as tools/run-perl-suite.pl, overridable so this
+# script is not a second place to edit when the perlbrew build moves (#278).
+my $tdir = $ENV{PCL_PERL_SUITE_T} // "/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t";
 
 my @files = sort glob("$root/perl-tests/*.t");
 push @files, sort glob("$tdir/$_/*.t")
@@ -73,7 +75,7 @@ sub reap {
 
 for my $f (@files) {
   reap() while keys(%kid) >= $jobs;
-  my $tmp = "/tmp/gateset.$$." . scalar(keys %kid) . "." . int(rand 1e6);
+  my $tmp = "/tmp/pcl-gate-set.$$." . scalar(keys %kid) . "." . int(rand 1e6);
   my $pid = fork();
   die "fork: $!" unless defined $pid;
   if (!$pid) {
@@ -89,4 +91,4 @@ reap() while keys %kid;
 open my $o, '>', $out or die "$out: $!";
 print $o sort @rows;
 close $o;
-printf STDERR "gateset: %d files -> %s\n", scalar(@rows), $out;
+printf STDERR "gate-set-scan: %d files -> %s\n", scalar(@rows), $out;
