@@ -221,7 +221,8 @@
    ;; Reference aliasing (use feature 'refaliasing'): p-setf's \-cast place
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
    #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
-   #:p-backslash #:p-backslash-sub #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
+   #:p-alias-array-elements
+   #:p-backslash #:p-backslash-sub #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -4708,6 +4709,13 @@
           ;; share one function object (and one coderef identity).
           ((eq (car place) 'p-backslash-sub)
            `(setf (symbol-function ,target) (p-alias-code-target ,value)))
+          ;; \(@a) = LIST — the parenthesized-ARRAY spelling.  Not a rebind of
+          ;; the NAME (that is \@a = REF above) but of each element SLOT, and
+          ;; the array is resized to the right-hand length; the emitter hands
+          ;; the array here as a p-backslash-list place.  *wantarray* t: the
+          ;; right-hand side is a list, exactly as in p-array-=.
+          ((eq (car place) 'p-backslash-list)
+           `(p-alias-array-elements ,target (let ((*wantarray* t)) ,value)))
           ;; \$x = REF — rebind the name to the referent BOX.  setq covers both
           ;; storage kinds: a `let`-bound lexical and a p-defcell symbol macro
           ;; (which expands to a setf of the global cell).
@@ -4739,7 +4747,7 @@
   (defun %p-alias-place-p (place)
     "True for a p-setf place that is a \\-cast, i.e. a refaliasing assignment."
     (and (consp place)
-         (member (car place) '(p-backslash p-backslash-sub)))))
+         (member (car place) '(p-backslash p-backslash-sub p-backslash-list)))))
 
 (defun p-alias-scalar-target (ref)
   "The BOX a scalar reference points at, for `\\$x = REF`.
@@ -4782,6 +4790,26 @@
     (if (functionp f)
         f
         (error "Assigned value is not a CODE reference"))))
+
+(defun p-alias-array-elements (arr refs)
+  "`\\(@a) = LIST` — perlref's parenthesized-ARRAY refaliasing: each element
+   SLOT of @a becomes the scalar its right-hand reference points at.  Perl
+   REPLACES the contents rather than merging, so the array ends up exactly as
+   long as the right-hand list (probed: `my @a=(7,8,9); \\(@a) = (\\$x,\\$y)`
+   leaves two elements).  Referents resolve through p-alias-scalar-target —
+   the same helper the `\\$x = REF` arm uses — so a ref-to-a-ref, and a
+   variable holding the ref, stay right here too.  %p-flatten-list is what
+   spreads the right-hand side, because it PRESERVES a reference box while
+   snapshotting a plain scalar's value, which is precisely the split we need."
+  (let ((v (p-cast-@ arr))
+        (items (%p-flatten-list refs)))
+    (unless (and (vectorp v) (not (stringp v)))
+      (error "Not an ARRAY reference"))
+    (%p-check-array-writable v)
+    (setf (fill-pointer v) 0)
+    (loop for r across items
+          do (vector-push-extend (p-alias-scalar-target r) v))
+    v))
 
 (defun p-alias-hash-slot (hash key ref)
   "`\\$h{k} = REF` — make the slot hold the referent box itself.  HASH is
@@ -11645,7 +11673,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-147"
+(defparameter *pcl-cache-generation* "v2-148"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

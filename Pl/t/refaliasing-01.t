@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 45;
 
 my $PREAMBLE = "use feature 'refaliasing', 'declared_refs';\n"
              . "no warnings 'experimental';\n";
@@ -137,6 +137,63 @@ test_cl('(\$x) = @list aliases through a list assignment',
 test_cl('\(my $p) = @list aliases the fresh lexical',
     q{my $t = 1; @_ = \$t; \(my $p) = @_; $p = 9; print "$t\n";}, "9\n");
 
+# --- \(@a) = LIST — the parenthesized-ARRAY spellings (task #332) -----------
+#
+# perlref lists these as lvalues: `\(@x) = \(@y)` makes @x's elements the same
+# scalars as @y's.  All three spellings reached p-setf as the RVALUE form
+# `(p-list-scalar (p-refgen-list @a))` — a list of FRESH refs, so the alias arm
+# never saw it and the write landed in a throwaway box: SILENT WRONG, output
+# an empty array with exit 0.  Every expectation below was probed against perl
+# 5.40.3 first; note that perl REPLACES the array's contents (row 2), it does
+# not merge.
+
+like(transpile('my @a; my $x; \(@a) = (\$x);'),
+    qr/\(p-setf \(p-backslash-list \@a\)/,
+    '\(@a) = LIST reaches p-setf as a \-cast place');
+
+test_cl('\(@a) = (\$x,\$y) aliases the element slots',
+    q{my @a; my ($x,$y) = (1,2); \(@a) = (\$x,\$y); $x = 10;
+      print "@a|", scalar(@a), "\n";}, "10 2|2\n");
+test_cl('\(@a) = LIST REPLACES the array, it does not merge',
+    q{my @b = (7,8,9); my ($x,$y) = (1,2); \(@b) = (\$x,\$y);
+      print "@b|", scalar(@b), "\n";}, "1 2|2\n");
+test_cl('\my(@x) = \(@y) aliases element for element',
+    q{my @y = (1,2,3); \my(@x) = \(@y); $y[0] = 9; print "@x\n";}, "9 2 3\n");
+test_cl('\(my @c) = LIST aliases the fresh lexical array',
+    q{my ($p,$q) = (3,4); \(my @c) = (\$p,\$q); $p = 30; print "@c\n";},
+    "30 4\n");
+# Same two right-hand shapes the scalar arm has to tell apart.
+test_cl('\(@a) = ($ref) — a variable holding the ref',
+    q{my $x = 1; my $r = \$x; my @a; \(@a) = ($r); $x = 11; print "@a\n";},
+    "11\n");
+test_cl('\(@a) = ($ref_to_ref) does not peel too far',
+    q{my $y = 2; my $rr = \\\\$y; my @g; \(@g) = ($rr); print ${$g[0]}, "\n";},
+    "2\n");
+test_cl('\(@pkg::a) = LIST aliases a package array',
+    q{our @pk; my ($p,$q) = (5,6); \(@main::pk) = (\$p,\$q); $p = 50;
+      print "@pk\n";}, "50 6\n");
+# The right-hand side is a LIST: a call there must run in list context (it was
+# emitting the comma-operator scalar form before the fix).
+test_cl('the right-hand side of \(@a) = is in LIST context',
+    q{my ($s,$t) = (7,8); sub refs { return (\$s,\$t) }
+      my @i; \(@i) = refs(); $s = 70; print "@i\n";}, "70 8\n");
+test_cl('an empty right-hand list truncates the array',
+    q{my @j = (1,2,3); \(@j) = (); print scalar(@j), "\n";}, "0\n");
+test_cl('a write through the aliased element reaches the other array',
+    q{my @k1 = (1,2,3); my @k2; \(@k2) = \(@k1); $k2[1] = 99; print "@k1\n";},
+    "1 99 3\n");
+# `\(%h) = …` is a compile error in perl ("Can't modify reference to
+# parenthesized hash in list assignment"), and a dereference target likewise.
+# Rule 12: PCL refuses at transpile time rather than writing into a temporary.
+{
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $PREAMBLE, q{my %h; my $v = 1; \(%h) = (\$v);};
+    close $fh;
+    my $err = `$pl2cl $pl_file 2>&1 >/dev/null`;
+    like($err, qr/refaliasing target not supported/,
+        '\(%h) = LIST is refused, never silently written');
+}
+
 # --- foreach (task #327) ---------------------------------------------------
 #
 # PPI cannot lex `for \my %e (LIST) {…}` at all — the compound statement comes
@@ -206,6 +263,12 @@ test_cl('an ordinary foreach is not rewritten',
 
 # --- INVERSE: a \-cast in RVALUE position is untouched ---------------------
 
+# \(@a) in RVALUE position is the ordinary distribute-over-elements refgen: a
+# list of N scalar refs, each pointing INTO @a.  The #332 lowering must not
+# reach it.
+test_cl('my @r = \(@a) is still a list of refs into @a',
+    q{my @e = (1,2); my @r = \(@e); $e[0] = 9;
+      print scalar(@r), " ", ${$r[0]}, "\n";}, "2 9\n");
 test_cl('my $r = \$y is still a REFERENCE, not an alias',
     q{my $y = 5; my $r = \$y; $r = 7; print "$y $r\n";}, "5 7\n");
 # A wrong-kind right-hand side must die perl's death rather than alias anything.

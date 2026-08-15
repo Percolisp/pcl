@@ -1576,6 +1576,29 @@ sub gen_binary_op_form {
     }
   }
 
+  # `\(@a) = LIST` — refaliasing an array's ELEMENT SLOTS (perlref, "Assigning
+  # to References": `\(@x) = \(@y)` makes @x's elements the same scalars as
+  # @y's, and the array is resized to the right-hand length).  All three
+  # spellings — `\(@a)`, `\my(@x)`, `\(my @x)` — reach here as the RVALUE form
+  # `(p-list-scalar (p-refgen-list @a))`, a list of FRESH refs, which is not a
+  # \-cast place: p-setf's alias arm never saw it and the write landed in a
+  # throwaway box, SILENT WRONG (task #332).  Recognised on the FORM, which is
+  # the one shape the three spellings share, and lowered to the \-cast place
+  # `(p-backslash-list @a)` so it goes through the SAME alias dispatch as
+  # `\$x = REF`.  Runs BEFORE right-gen: the right-hand side is a LIST here
+  # (`\(@a) = (\$x,\$y)` had been emitting the comma-operator scalar form).
+  if ($op eq '=' && defined(my $tgt = _refgen_list_place_target($left))) {
+    # A whole ARRAY is the only lvalue perl allows in this position: `\(%h) =`
+    # and `\(@$ref) =` are compile errors there ("Can't modify reference to
+    # parenthesized hash in list assignment"), and rule 12 says the compiler
+    # says so rather than writing into a temporary.
+    die "PCL: refaliasing target not supported: " . Pl::CLForm::to_flat($left) . "\n"
+      unless !ref($tgt) && $tgt =~ /^(?:[\w:]+::)?\@\w+$/;
+    $self->expr_o->set_node_context($kids->[1], LIST_CTX);
+    my $rhs = $self->gen_node_form($kids->[1]);
+    return ['p-setf', ['p-backslash-list', $tgt], $rhs];
+  }
+
   # 'isa' — RHS bareword class name must be a string literal.
   if ($op eq 'isa') {
     my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
@@ -3571,6 +3594,22 @@ sub _is_backslash_paren_lvalue {
                   && ($op_node->content() // '') eq '\\';
   return $self->expr_o->node_tree->get_metadata($kids->[1], 'backslash_paren_list')
            ? 1 : 0;
+}
+
+# The target form inside a `\(LIST)` lvalue, or undef when LEFT is not one.
+# `\(…)` in a non-single-scalar, non-multi-term spelling emits
+# `(p-refgen-list X)` — wrapped in `(p-list-scalar …)` in scalar/void context,
+# which a statement-level assignment always is.  Sibling of
+# _is_backslash_paren_lvalue: that one answers "is the one-element scalar
+# spelling a list assignment", this one hands back X so the `=` lowering can
+# decide whether X is an lvalue at all (task #332).
+sub _refgen_list_place_target {
+  my ($form) = @_;
+  return undef unless ref $form eq 'ARRAY' && @$form == 2 && !ref $form->[0];
+  $form = $form->[1] if $form->[0] eq 'p-list-scalar';
+  return undef unless ref $form eq 'ARRAY' && @$form == 2 && !ref $form->[0]
+                   && $form->[0] eq 'p-refgen-list';
+  return $form->[1];
 }
 
 # Form twin of _gen_backslash_multi_term (E2): same parts walk, same counter
