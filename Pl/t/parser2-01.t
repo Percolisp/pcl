@@ -182,12 +182,20 @@ like($agg, qr/\(p-list-= \(vector \$p \$q\)/, 'my (LIST) init via p-list-=');
 my $use = Pl::Parser2->parse_code(
   'use constant PI => 3; print PI() + 1, "\n";');
 like($use, qr/\(p-sub pl-PI/, 'use constant: captured declaration hoisted');
-# (v1 parity: `require` is an eval-always definition, hoisted ABOVE runtime
-# statements — same bucket ordering as the v1 assembly.)
+# `require` lowers IN STATEMENT POSITION at every depth (task #350, s404).
+# This row used to assert the opposite — `(p-eval-always (p-require …))` ABOVE
+# the prints — on the grounds of "v1 parity", i.e. which bucket v1's assembly
+# happened to use.  Perl's rule is the one that matters and it is the other
+# way: only `use` is compile-time, so `require Foo;` runs where it stands.
+# Probed vs perl 5.40.3: `push @INC, $dir; require MyLocal; MyLocal::hi()`
+# loads under perl and could not under the hoist (see the runtime row in
+# Pl/t/use-require-01.t).
 my $ord = Pl::Parser2->parse_code(
   'print "a\n"; require POSIX; print "b\n";');
-like($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"\)\).*\(p-print\s+"a/s,
-     'require hoisted as eval-always declaration (v1 parity)');
+like($ord, qr/\(p-print\s+"a.*\(p-require "POSIX"\).*\(p-print\s+"b/s,
+     'require lowers between the two prints, in source order (#350)');
+unlike($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"/,
+       'require is NOT hoisted to an eval-always declaration (#350)');
 
 # M-B session 3: a `require` NESTED in a block/sub stays INLINE (runtime
 # p-require, not hoisted to eval-always) — Perl runs it at runtime, so a

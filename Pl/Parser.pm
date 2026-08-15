@@ -7851,11 +7851,27 @@ sub _process_include_statement {
     return;
   }
 
-  # require inside a sub or block body must stay inline (not hoisted) so that:
-  # 1. eval { require Foo } can catch load failures properly
-  # 2. Perl semantics: require inside a block runs at runtime, not compile time
-  # 3. require inside SKIP { } must not run when the block is skipped
-  if ($type eq 'require' && ($self->environment->in_subroutine > 0 || $self->_block_depth > 0)) {
+  # `require` is a RUNTIME statement AT EVERY DEPTH (task #350, s404).  Only
+  # `use` is compile-time; perl runs `require Foo;` where it stands, so a
+  # file-top one must not be hoisted above the code before it:
+  #
+  #     push @INC, $dir;  require MyLocal;    perl: loads
+  #                                           PCL before this fix: Can't locate
+  #
+  # It used to hoist only at depth 0 (into the definitions bucket, as
+  # `(p-eval-always (p-require …))`).  A nested one never hoisted, for three
+  # reasons that were always the same reason: `eval { require Foo }` must be
+  # able to catch the load failure, a `require` in a block runs at runtime, and
+  # a `require` inside `SKIP { }` must not run when the block is skipped
+  # (scalar.t's `require threads` — hoisting it loads XS unconditionally and
+  # dies).  The same argument applies at the top level; the hoist predates the
+  # emitted `(p-defpackage …)` line that guarantees read-time package existence
+  # today, so nothing depends on it (measured: 52 of 657 files over both
+  # populations change emission, every one of them exactly this form moving to
+  # its own position).  The quoted-path and expression spellings
+  # (`require "f.pl"`, `require $var`) already emitted in place — this makes
+  # the family consistent.
+  if ($type eq 'require') {
     $self->_emit(";; $perl_code");
     $self->_emit("(p-require \"$module\")");
     $self->_emit("");

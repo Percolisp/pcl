@@ -817,4 +817,38 @@ PERL
   unlink $pl_file, $cl_file;
 }
 
+# ============================================================
+# #350: a file-top `require` runs WHERE IT STANDS
+# ============================================================
+# perl runs `require` at runtime — only `use` is compile-time — so a module
+# directory pushed onto @INC by the line before it must be visible to it.  PCL
+# used to hoist a file-top bareword require into the declarations bucket, ahead
+# of the push, and died with "Can't locate MyLocal350.pm".  Probed against perl
+# 5.40.3, which prints the string below.
+{
+  my $dir = tempdir(CLEANUP => 1);
+  open my $mfh, '>', "$dir/MyLocal350.pm" or die "write module: $!";
+  print $mfh "package MyLocal350;\nsub hi { 'hi from MyLocal350' }\n1;\n";
+  close $mfh;
+
+  my ($pl_fh, $pl_file) = tempfile(SUFFIX => '.pl');
+  print $pl_fh <<"PL";
+push \@INC, "$dir";
+require MyLocal350;
+print MyLocal350::hi(), "\\n";
+PL
+  close $pl_fh;
+
+  my $cl_code = `$pl2cl --no-cache $pl_file 2>/dev/null`;
+  my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
+  print $cl_fh $cl_code;
+  close $cl_fh;
+
+  my $out = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  like($out, qr/^hi from MyLocal350$/m,
+       'a runtime `push @INC` is visible to the file-top require after it (#350)');
+
+  unlink $pl_file, $cl_file;
+}
+
 done_testing();
