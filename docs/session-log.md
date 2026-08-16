@@ -4,6 +4,111 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 405 (2026-08-16, Opus 5) — the cloexec hang was an `open` bug (#358 closes #346), and try/catch/finally (#340)
+
+Session C's two owed measurements first, and both paid off immediately.
+
+**#346 — the hang is CLOSED, and it was not the harness.**  `PERL=$PWD/tools/
+pclperl-for-tests tools/run-perl-suite.pl run/cloexec.t --jobs 1 --timeout 300`
+reproduced it for one file, and the stalled child was caught live:
+`/proc/<pid>/fd` showed 0, 1, 2 only — s404l's fd-leak fix held — but
+`/proc/<pid>/status` said **State: R (running)**.  A spin, not a wait.  The
+child's whole program is `open INHERIT, "<&=$fd"; my $line = <INHERIT>`, and
+the fd it is given is deliberately NOT inherited, so:
+
+**#358 — `open FH, "<&=N"` on a closed descriptor SUCCEEDED.**  perl fails it
+EBADF (probed, all three spellings); SBCL's `make-fd-stream` does not check the
+fd, so PCL handed back a stream whose first read retried EBADF forever.  One
+`fcntl(F_GETFD)` in `%p-open-dup` closes it.  Measured: the file goes from
+**TIMEOUT (2 rows) to DIFF 16/6** — which is exactly the row it already had
+with real-perl children, so **#348's cloexec half is unblocked** (#347 still
+stands).  Reproducer and guard rows in `Pl/t/fileio-02.t`.
+
+**The runners row of the WHAT-CHANGED table, paid.**  `tools/pclperl-for-tests`
+changed in s404l, so the two populations were re-run and compared file by file.
+One row moved, in the right direction, in both: `perl-tests/ref.t` 190 → 191
+passing and `t/op/ref.t` 196/45 → 197/44.  Attributed by bisection in a
+worktree (e588c56 = 190, df10b95 = 191): the blank-line fix, in a file that
+spawns 23 `fresh_perl`/`runperl` children whose stderr it compares byte for
+byte.  Both baselines edited row by row with that cause.
+
+**#340 — perl 5.34's `try`/`catch`/`finally`.**  Two halves:
+
+* **A PPI repair.**  With `use feature 'try'` in scope PPI knows the construct
+  half way: `try {…} catch (VAR) {…}` is a `Statement::Compound`, and then
+  `finally {…}` is left OUT and its unterminated orphan swallows the next
+  statement whole — an assertion per site in op/try.t.  Rule 13 discharged:
+  `ppi-upstream-bugs.md` §18, `ppi-bug-report.t` Bug 15 (`tests => 15`, all
+  fifteen failing as they must), canary in `misc-fixes-02.t`.  The repair
+  terminates the orphan where perl does and `_lower_block` joins it back — the
+  route the unlabeled `continue` block already takes.
+* **The lowering.**  One `_lower_compound` arm and the `p-try` macro.  It is
+  deliberately not `p-eval-block`: nothing catches `:p-return` (so `return`,
+  `last`, `next`, `redo` belong to the enclosing sub/loop), `$@` is localized
+  (empty inside try AND catch, restored BEFORE finally runs), the construct
+  yields the executed block's last value in the caller's context, and catch
+  fires on a FALSE exception.  `%p-caught-perl-value` is now the ONE
+  condition→Perl-value converter, shared with `p-eval-block`.
+
+`Pl/t/try-catch-01.t` (24 rows) runs every probed semantic through perl and
+PCL and compares — all 24 green.  **op/try.t: TRANSPILE-FAIL → 23/28**, and the
+five that remain are four other registered families (two lvalue-sub rows — the
+file's one drop; caller() file/line, probed identical inside and outside try;
+the experimental-feature compile warning, #221; and perl's parse-error text for
+`catch` without (VAR), which principle 9 puts out of scope).  Left DIFF rather
+than registered XDIFF so a real try regression still shows.
+
+**#277 — the installer (release phase 1, session E).**  `tools/install-pcl`
+checks every dependency before copying anything and reports them all at once;
+copies the runtime tree in its repo-RELATIVE shape (that arrangement IS the
+lookup mechanism, and `Pl/t` is not part of an installation); compiles the
+runtime into `<root>/pcl.core` AT INSTALL, temp-name-then-rename; writes
+wrappers rather than symlinks in `$PREFIX/bin` (runpcl derives its root from
+`dirname($0)`); replaces an existing tree instead of merging into it, because a
+stale `lib/` shim is an @INC entry that shadows a core module; and refuses to
+finish unless the INSTALLED tools transpile and run a program with exactly
+perl's output.  `PCLSbcl` picks `<root>/pcl.core` up automatically, with the
+freshness test `PCL_TEST_CORE` gets — a checkout has no core, so no development
+runner's command line moved (`PCL_SHOW_SBCL=1` before/after, plus four rows in
+`tools/t/sbcl-prefix.t`).  End-to-end test: `tools/t/install-pcl.t` (11 rows,
+5 s with `--no-core`).  Measured on a real install: **2.9 s**, a **43 MB** core,
+and hello-world in **0.16 s with the core vs 1.58 s without**; the emitted
+preamble points at the INSTALLED tree, so #349's relocatability holds on a tree
+that is not the checkout.
+
+**Measured, in the order the WHAT-CHANGED table asks for them:** gate **146
+files / 5341 rows** (failures exactly the 13 pclxs xs rows); `corpus-diff`
+**emission identical across 111 files**, silent drops 12 unchanged;
+`emission-ab` over `lib/**` **19/19 SAME**; full sweep (the runtime changed, so
+non-optional) **GATE clean, 0 new / 0 fixed, TOTAL 18517 = baseline, DROPS
+census 12 = 12**; companion `--all --quick` re-run and compared file by file —
+**18 of 523 rows differ from the s400 snapshot and every one is explained**: 11
+are `--quick` not running the hang set and the three >120 s allowances, 3 are
+label-only DIFF→XDIFF (registered after the snapshot), 1 is the registered
+rows-unstable file, and 3 are real movements already accounted for (op/ref.t
++1 above, `re/pat_re_eval.t` 461 → 462 and `io/shm.t` TRANSPILE → XDIFF, both
+from s404's PPI repairs).
+
+**A companion run was thrown away, and the rule it taught.**  The session's
+first `--all --quick` overlapped two `Pl/Parser2.pm` edits and came back with
+145 TRANSPILE files and three lost ref.t rows — all of it the window in which
+`parse()` called `_repair_try_finally` before the sub existed, including the
+ref.t rows, whose `fresh_perl` CHILDREN are transpiled at run time.  **Never
+edit the compiler while a measurement is running**: the failure mode is not a
+crash, it is a plausible-looking table.
+
+**Filed:** **#359** — `$^F` / fd inheritance across exec, the six rows still
+between cloexec.t and OK (sized: `run-program :preserve-fds` works, measured,
+for fd ≥ 4; fd 3 is SBCL's own spawn plumbing).  **#360** — `use experimental
+'try'` cannot be used at all, for two independent reasons: PPI switches its
+`try` support on only for `use feature`, and `experimental.pm` dies at load
+because `$_ = version->new($_) for values %min_version` does not alias (the
+`values` half of the residue `fable-answers-s370` §5 records, RULED onto the E5
+boxed-aggregates axis).  Both in `docs/opus5-review-requests-s405.md` §5, with
+asks.
+
+---
+
 ## Session 404 (2026-08-15, Opus 5) — session B: the portfolio (#345), the two @INC silent-wrongs (#349, #350), #353
 
 Session B of `docs/plan-post-s400.md`, all four items shipped.  Review request:

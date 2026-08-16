@@ -11,6 +11,58 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s405 (2026-08-16, Opus 5) — the cloexec hang was an open() bug (#358 closes #346), and try/catch/finally (#340)
+
+- **`open FH, "<&=N"` on a CLOSED descriptor must FAIL EBADF, and PCL's SPUN.**
+  SBCL's `make-fd-stream` does not check the fd, so the stream came back fine
+  and its first read retried EBADF forever — a hang, not an error.  One
+  `fcntl(F_GETFD)` before the stream is built.  **This was #346's hang**:
+  `t/run/cloexec.t` exists to have a child open an fd it was NOT given, so
+  under a PCL child it spun (measured: TIMEOUT at 300 s with 2 rows → DIFF
+  16/6, which is exactly its real-perl-child row).  → task #358, `Pl/t/fileio-02.t`.
+- **A HANG is a diagnosis, not a verdict — take `/proc/<pid>/status` too.**
+  The stalled child was state **R (running)**, not blocked, which is what said
+  "retry loop" rather than "waiting on a descriptor" and pointed straight at
+  the open.  `ls -l /proc/<pid>/fd` alone would have shown only that the s404l
+  fd leak was gone.
+- **perl 5.34's `try`/`catch`/`finally` is IMPLEMENTED** (`use feature 'try'`):
+  one arm in `_lower_compound` + the `p-try` macro.  It is NOT `eval {}` with a
+  different name — `return`/`last`/`next` belong to the enclosing sub/loop
+  (nothing catches `:p-return`), `$@` is localized (empty inside try AND inside
+  catch, restored BEFORE finally runs), the construct has a value in the
+  caller's context, and catch fires on a FALSE exception.  op/try.t 0 → 23/28;
+  the five that remain are four OTHER registered families.  → task #340,
+  `Pl/t/try-catch-01.t`.
+- **PPI leaves `finally {…}` out of the try statement, and the orphan swallows
+  the next one** (ppi-upstream-bugs §18).  Repaired by terminating the orphan
+  where perl does (a `;` on the finally block's brace) and joining it back in
+  `_lower_block` — the route the unlabeled `continue` block already takes.
+  **`use experimental 'try'` does not switch PPI's try support on at all**, so
+  that spelling still does not parse (task #360, with the `for values %h`
+  aliasing gap that also makes the module die at load).
+- **Never edit the compiler while a measurement is running.**  A companion
+  `--all --quick` run overlapped two Parser2 edits and reported 145 TRANSPILE
+  files and three ref.t rows lost — all of it an artifact of the window in
+  which `_repair_try_finally` was called but not yet defined.  The run was
+  discarded and re-run.
+- **#277 SHIPPED — `tools/install-pcl`, and the installed layout is a
+  CONTRACT.**  `$PREFIX/lib/pcl/` holds the runtime tree in its
+  repo-RELATIVE shape (`pl2cl`, `runpcl`, `Pl/`, `lib/`, `cl/`, `tools/lib/`)
+  because that arrangement IS the lookup mechanism (`dirname(abs_path($0))`,
+  `FindBin::RealBin`); `Pl/t` is not part of an installation; `$PREFIX/bin`
+  gets WRAPPERS, never symlinks (runpcl derives its root from `dirname($0)`).
+  The core is compiled at install from the INSTALLED runtime, written to a temp
+  name and renamed.  An existing tree is REPLACED, not merged (`--force`): a
+  stale `lib/Foo.pm` shim is an @INC entry that shadows a core module.
+  → `docs/release-plan-v0.1.md` phase 1, `tools/t/install-pcl.t`.
+- **A saved core beside the tree (`<root>/pcl.core`, with `<root>/cl/<runtime>`)
+  is used automatically** by `PCLSbcl`, under the same freshness test
+  `PCL_TEST_CORE` gets.  The `/cl/` in the pattern is load-bearing — "two
+  directories up" would couple the answer to whatever sits beside an arbitrary
+  caller's path.  A CHECKOUT has no `pcl.core`, so no development runner's
+  command line changes (verified with `PCL_SHOW_SBCL=1`, pinned by four rows in
+  `tools/t/sbcl-prefix.t`).
+
 ## s404 (2026-08-15, Opus 5) — session B: the portfolio, the two @INC silent-wrongs, POD prototypes
 
 - **`--quick` is the companion suite's default form** (`tools/run-perl-suite.pl

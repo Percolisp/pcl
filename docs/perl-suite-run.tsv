@@ -157,6 +157,46 @@
 #   perl-tests/closure.t OK 272 -> PARTIAL 240/28.  Two measurement HOLES for
 #   ~56 vacuous rows made honest is the wrong trade while #176/#204 stand, so
 #   the switch waits for #346/#347.
+# s405 (#346 CLOSED): the run/cloexec.t hang above was #358 — PCL's
+#   `open FH, "<&=N"` on a CLOSED descriptor built a stream on it (perl fails
+#   EBADF), and the first read then retried EBADF forever.  The child of that
+#   file exists to open an fd it was NOT given, so it spun.  With the runtime
+#   fix the file reads 16/6 under a PCL child — IDENTICAL to its real-perl-child
+#   row here, so #348's cloexec half is unblocked (#347 still stands).  The
+#   fd LEAK fixed in s404l is a second, independent cause that also had to go:
+#   `load` held the transpiled .lisp open, so fd 3 and 4 were valid in every
+#   child.
+# s405 (#340, op/try.t 0 -> 23/5): perl 5.34's try/catch/finally is
+#   implemented — one Compound arm + the p-try macro + a PPI repair (finally is
+#   not in PPI's try statement and its orphan swallowed the next statement,
+#   ppi-upstream-bugs.md §18).  The five remaining rows are all OTHER families,
+#   probed: two are the file-level lvalue-sub refusal (`fscalar = 123` — the
+#   file's one drop, census row edited), one is caller() reporting the
+#   generated .lisp file/line rather than the Perl ones (identical inside and
+#   outside try — probed), one is the experimental-feature compile warning
+#   (#221, warnings-gated diagnostics are absent), and one asserts perl's
+#   parse-error TEXT for `catch` without (VAR), which principle 9 puts out of
+#   scope.  Left DIFF rather than registered XDIFF so a real try regression
+#   still shows.
+# s405: SIX rows spliced after an `--all --quick` run compared file by file
+#   against this snapshot (18 of 523 differed; the other 12 are --quick's 11
+#   NOT-RUN files and mro/package_aliases_utf8.t, the registered rows-unstable
+#   one).  Three are real movements, three are label-only:
+#     op/ref.t          196/45 -> 197/44   (below, the s404l blank-line fix)
+#     re/pat_re_eval.t  461 -> 462 failing (s404's #351/#354 — a statement that
+#                                          used to VANISH now reports honestly)
+#     io/shm.t          TRANSPILE -> XDIFF (0 rows either way: the file now
+#                                          transpiles and reaches its registered
+#                                          IPC::SysV crash; s404's repairs)
+#     op/assignwarn.t, op/hashassign.t, op/numify.t: DIFF -> XDIFF, counts
+#                                          IDENTICAL — registered in
+#                                          perl-suite-expected.tsv after this
+#                                          snapshot was taken.
+# s405 (op/ref.t 196/45 -> 197/44): the s404l blank-line fix in
+#   tools/pclperl-for-tests — a PCL child no longer prints 56 empty stderr
+#   lines, so one exact-output comparison in a file that spawns 23 children
+#   matches.  The same +1 appears in the sweep half (perl-tests/ref.t 190 ->
+#   191 passing).
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -243,7 +283,7 @@ io/scalar.t	128	0	96	32	DIFF
 io/scalar_ungetc.t	19	0	1	1	DIFF	crash:simple-error: Can't locate object method "ungetc" via package "main" at - line N.
 io/sem.t	22	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
 io/semctl.t	2	0	0	0	DIFF	
-io/shm.t	21	0	0	0	TRANSPILE	TRANSPILE-FAIL | NOT fully registered: 1 unregistered diverging row(s): *no-log* | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
+io/shm.t	21	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
 io/socket.t	45	0	0	0	DIFF	
 io/socketpair.t	8	0	0	0	DIFF	
 io/tell.t	36	0	26	0	DIFF	crash:sb-int:simple-file-error: The path #P"/tmp/yNdYnKNAgM/t/>/tmp/pcl-test-N-N" does not exist.
@@ -331,7 +371,7 @@ op/append.t	13	0	13	0	OK
 op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.
 op/arith2.t	9	0	9	0	OK	
 op/array.t	195	0	169	26	DIFF	
-op/assignwarn.t	116	0	96	20	DIFF	
+op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.
 op/attrhand.t	4	0	0	0	DIFF	crash:simple-error: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle
 op/attrproto.t	48	0	17	28	DIFF	
 op/attrs.t	157	2	28	61	DIFF	undef-fn:attributes::pl-_guess_stash
@@ -401,7 +441,7 @@ op/gv.t	304	0	50	47	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash.t	494	0	6	6	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/hashassign.t	309	0	305	4	DIFF	
+op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).
 op/hashwarn.t	20	0	5	15	DIFF	
 op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF
 op/hexfp.t	125	0	110	15	DIFF	
@@ -442,7 +482,7 @@ op/mydef.t	2	0	0	2	DIFF
 op/negate.t	48	0	48	0	OK	
 op/not.t	24	0	20	4	XDIFF	not-supported.md §Interned boolean constants (!0 / !1 identity) — t21/t22 "not 0/1 is read-only" need the shared read-only scalar; PCL returns a fresh mutable value per call
 op/numconvert.t	1446	0	0	0	DIFF	
-op/numify.t	32	0	21	11	DIFF	
+op/numify.t	32	0	21	11	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 11 diverging rows (21/11 vs perl 32/0) are `numifying '…' trigger a warning`, i.e. perl's `Argument "…" isn't numeric`. The VALUE each string numifies to is asserted separately and PCL passes those. Owner task #221; visible since s399 (#323).
 op/numify_chkflags.t	14	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/oct.t	79	0	79	0	OK	
 op/or.t	13	1	11	3	DIFF	
@@ -466,7 +506,7 @@ op/read.t	2116	0	2116	0	OK
 op/readdir.t	16	0	13	3	DIFF	
 op/readline.t	35	1	25	7	DIFF	undef-fn:PerlIO::pl-get_layers
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.
-op/ref.t	257	0	196	45	DIFF	
+op/ref.t	257	0	197	44	DIFF	
 op/refstack.t	0	0	0	0	NOTAP	
 op/repeat.t	50	0	47	3	DIFF	
 op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
@@ -521,7 +561,7 @@ op/time.t	72	0	72	0	OK
 op/time_loop.t	2	0	2	0	OK	
 op/tr.t	317	0	92	2	DIFF	crash:simple-error: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i
 op/tr_latin1.t	2	0	1	1	DIFF	
-op/try.t	28	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/try.t	28	0	23	5	DIFF	
 op/undef.t	88	0	17	4	DIFF	undef-fn:main::pl-tcp
 op/universal.t	142	2	75	57	DIFF	crash:simple-error: No SUPER::isa found from RTN::B
 op/unlink.t	6	0	4	2	DIFF	crash:simple-error: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl
@@ -566,7 +606,7 @@ re/pat_advanced.t	1678	0	927	751	DIFF
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_re_eval.t	527	0	64	461	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
+re/pat_re_eval.t	527	0	64	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_rt_report.t	2513	1	2454	56	DIFF	
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
