@@ -9090,6 +9090,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (return-from %p-open-dup t))
       (setf *p-stored-errno* 9)          ; EBADF
       (return-from %p-open-dup nil))
+    ;; A raw fd NUMBER must be OPEN.  perl's dup/fdopen fails EBADF on a closed
+    ;; descriptor (probed: `open($t,"<&=37")` and `"<&37"` and `">&=37"` all
+    ;; fail with "Bad file descriptor"), but SBCL's make-fd-stream does not
+    ;; check — it hands back a stream whose first read retries EBADF forever,
+    ;; i.e. a SPIN, not an error (task #358).  That is also why t/run/cloexec.t
+    ;; hung under a PCL child (task #346): the whole point of that file is to
+    ;; have the child open an fd it was NOT given.
+    (when (and fd-num
+               (handler-case (progn (sb-posix:fcntl fd-num sb-posix:f-getfd) nil)
+                 (error () t)))
+      (setf *p-stored-errno* 9)          ; EBADF
+      (return-from %p-open-dup nil))
     (let ((std (and (symbolp fh)
                     ;; string-equal: the generated code passes the handle
                     ;; symbol under :invert readtable case (|stdout|).

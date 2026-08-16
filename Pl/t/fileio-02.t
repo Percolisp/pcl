@@ -67,7 +67,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 32;
+plan tests => 34;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -603,5 +603,37 @@ print "eof_scalar=",   (eof($TST) ? 1 : 0), "\n";   # 0
 my $second = <TST>;         # bareword read continues from same position
 print "second=[$second]";
 close(TST);
+PERL
+}
+
+# --- Test 33: fdopen of a CLOSED descriptor fails EBADF (task #358) ---
+# perl's `open FH, "<&=N"` fails with EBADF when fd N is not open.  PCL used to
+# hand back a stream on the dead descriptor, whose first read then retried
+# EBADF forever — a SPIN, not an error.  That is also why t/run/cloexec.t hung
+# under a PCL child (#346): the file exists to have the child open an fd it was
+# deliberately NOT given.  The numeric errno is compared, not its text.
+{
+    my $tmpfile = make_temp_data_file("alpha\n", "beta\n");
+    test_io('fdopen a closed fd fails EBADF, does not hang', <<"PERL");
+open(my \$f, '<', '$tmpfile') or die "open: \$!";
+my \$n = fileno(\$f);
+close \$f;
+my \$ok = open(my \$g, "<&=\$n");
+print \$ok ? "opened\n" : "failed errno=" . (0 + \$!) . "\n";
+my \$ok2 = open(my \$h, ">&=\$n");
+print \$ok2 ? "opened2\n" : "failed2 errno=" . (0 + \$!) . "\n";
+PERL
+}
+
+# --- Test 34: fdopen of a LIVE descriptor still works (the inverse guard) ---
+{
+    my $tmpfile = make_temp_data_file("alpha\n", "beta\n");
+    test_io('fdopen a live fd still reads through it', <<"PERL");
+open(my \$f, '<', '$tmpfile') or die "open: \$!";
+my \$n = fileno(\$f);
+open(my \$g, "<&=\$n") or die "dup: \$!";
+my \$line = <\$g>;
+print "got=[\$line]";
+close \$g;
 PERL
 }
