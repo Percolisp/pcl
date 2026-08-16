@@ -177,7 +177,7 @@
    ;; do BLOCK
    #:p-do
    ;; Exception handling
-   #:p-eval #:p-eval-block #:p-eval-thunk #:p-eval-lex-lookup
+   #:p-eval #:p-eval-block #:p-eval-thunk #:p-eval-lex-lookup #:p-try
    #:p-alias-eval-cell
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
@@ -8565,6 +8565,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (if (numberp val) val nil))
     (error () nil)))
 
+(defun %p-caught-perl-value (e)
+  "The Perl VALUE of a caught condition E: the exception object for an object
+   `die`, else the message text — with perl's \" at FILE line N.\" tail when the
+   message does not already end in a newline (p-die adds the real location; this
+   is the fallback for a CL error that never went through it).
+
+   ONE definition, shared by the two places a Perl program can see a caught
+   error: `eval {}` (p-eval-block, which puts it in $@) and `try/catch`
+   (p-try, which binds it to the catch variable)."
+  (if (typep e 'p-exception)
+      (p-exception-object e)
+      (let ((msg (format nil "~A" e)))
+        (if (and (> (length msg) 0)
+                 (char= (char msg (1- (length msg))) #\Newline))
+            msg
+            (format nil "~A at (eval 0) line 0.~%" msg)))))
+
 ;;; p-eval-block: Execute code catching errors (Perl's eval { })
 ;;; Sets $@ to error message on failure, empty string on success.
 ;;; Returns nil on error, block result on success.
@@ -8578,19 +8595,56 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   `(handler-case
        (prog1 (let ((|$^S| 1)) (catch :p-return ,@body))
          (box-set $@ ""))
-     (p-exception (e)
-       ;; Object exception - preserve the object in $@
-       (box-set $@ (p-exception-object e))
-       nil)
      (error (e)
-       ;; String exception - convert to string.
-       ;; Perl appends " at SCRIPT line N.\n" when message doesn't end with \n.
-       (let ((msg (format nil "~A" e)))
-         (box-set $@ (if (and (> (length msg) 0)
-                              (char= (char msg (1- (length msg))) #\Newline))
-                         msg
-                         (format nil "~A at (eval 0) line 0.~%" msg))))
+       (box-set $@ (%p-caught-perl-value e))
        nil)))
+
+(defmacro p-try (try-form catch-clause &optional finally-form)
+  "Perl's `try BLOCK catch (VAR) BLOCK [finally BLOCK]` (feature 'try', 5.34).
+   CATCH-CLAUSE is (VAR CATCH-FORM); FINALLY-FORM is optional.
+
+   Every rule below was probed against perl 5.40.3, and each one is why this is
+   NOT p-eval-block with a different name:
+
+   * `$@` is LOCALIZED to the construct: it reads \"\" inside try and inside
+     catch, and holds its pre-try value again by the time finally runs and
+     afterwards.  The caught error reaches the program ONLY through VAR.
+   * `return` / `last` / `next` / `redo` inside try belong to the ENCLOSING sub
+     or loop — eval {} catches :p-return, try must not — so nothing here
+     catches them.  finally still runs on that path: it is an unwind-protect
+     cleanup, not a form after the body.
+   * the construct's VALUE is the executed block's last value, in whatever
+     context the caller supplied (`do { try { 123 } catch ($e) { 456 } }`);
+     finally's value is discarded.  *wantarray* is untouched, so `wantarray`
+     inside try answers for the enclosing sub, and no new frame means caller()
+     does not see the block either.
+   * catch runs on ANY exception, including a FALSE one (`die 0`, or an object
+     that overloads bool to 0) — the test is that an exception was thrown,
+     never the truth of a value."
+  (destructuring-bind (var catch-form) catch-clause
+    (let ((saved (gensym "AT")) (caught (gensym "CAUGHT")) (err (gensym "ERR"))
+          (val (gensym "VAL")))
+      `(let ((,saved (p-box-value $@))
+             (,caught nil)
+             (,err nil))
+         (unwind-protect
+              (let ((,val (handler-case
+                              (progn (box-set $@ "")
+                                     (let ((|$^S| 1)) ,try-form))
+                            (error (e)
+                              (setf ,caught t
+                                    ,err (%p-caught-perl-value e))
+                              nil))))
+                (if ,caught
+                    (let ((,var (make-p-box nil)))
+                      (box-set ,var ,err)
+                      (box-set $@ "")
+                      ,catch-form)
+                    ,val))
+           ;; $@ is restored BEFORE finally runs — probed: a finally block sees
+           ;; the pre-try value, not the error it just handled.
+           (box-set $@ ,saved)
+           ,@(when finally-form (list finally-form)))))))
 
 ;;; ============================================================
 ;;; File I/O Functions

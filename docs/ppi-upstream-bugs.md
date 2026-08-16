@@ -644,6 +644,54 @@ noted around `_parse_subscript_ix` (the braced-deref case) and the `%h{…}` /
 
 ---
 
+## 18. `finally { … }` is not part of the `try` statement — and eats the next one  [CONFIRMED 1.291]
+
+**Perl:** `try BLOCK catch (VAR) BLOCK finally BLOCK` (5.34's `use feature
+'try'`, finally since 5.36) is ONE statement, and it self-terminates: no `;` is
+needed after the closing brace, exactly like `if`/`while`.
+
+**PPI:** with `use feature 'try'` in scope PPI knows the construct half way.  It
+builds a `PPI::Statement::Compound` for `try {…} catch (VAR) {…}` and then stops
+— `finally {…}` is left out, and because the orphan statement it starts is not
+terminated, that statement SWALLOWS everything up to the next `;`:
+
+```perl
+use feature 'try';
+try { foo(); } catch ($e) { bar($e); } finally { baz(); }
+is($x, 1, 'desc');
+```
+
+```
+PPI::Statement::Include     use feature 'try';
+PPI::Statement::Compound    try { foo(); } catch ($e) { bar($e); }
+PPI::Statement              finally { baz(); } is($x, 1, 'desc');   <- WRONG, two statements
+```
+
+Expected: one `PPI::Statement::Compound` holding try/catch/finally, then
+`is($x, 1, 'desc');` as its own statement.
+
+Two neighbouring facts, both measured on 1.291:
+
+* **Without the pragma** the whole construct is one plain `PPI::Statement` that
+  swallows the rest — but perl does not compile that file either, so PCL leaves
+  it alone (principle 9: assume valid Perl input).
+* **`use experimental 'try'`** — the other way real code enables the feature —
+  does NOT switch PPI's `try` support on, so it lexes like the no-pragma case.
+
+**PPI version tested:** 1.291.
+
+**Repro + failing row:** Bug 15 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: a whole statement disappeared.**  The assertion after a
+`finally` block was swallowed into it and never ran — in `t/op/try.t` that is
+several rows.  `Pl::Parser2::_repair_try_finally` terminates the orphan where
+perl does (a `;` on the finally block's closing brace) and `_lower_block` joins
+the `finally {…};` that is left back onto its `try` — the same route the
+unlabeled `continue` block already takes.  Canary:
+`Pl/t/misc-fixes-02.t`; end-to-end guard: `Pl/t/try-catch-01.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 109;
+plan tests => 110;
 
 sub run_cl {
     my ($code) = @_;
@@ -994,6 +994,20 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
         'CANARY: PPI parsing still depends on $/ (trailing __END__ gains a '
       . 'newline in slurp mode) — if this FAILS, drop _trim_invented_tail '
       . '(ppi-upstream-bugs.md §13)' );
+}
+{
+    # `finally {…}` is left OUT of the try Compound, and the orphan statement
+    # it starts swallows the next statement whole.
+    my $doc = PPI::Document->new(\<<'PERL');
+use feature 'try';
+try { foo(); } catch ($e) { bar($e); } finally { baz(); }
+is($x, 1, 'desc');
+PERL
+    my @s = grep { $_->isa('PPI::Statement') } ($doc ? $doc->schildren : ());
+    ok( !(grep { $_->content =~ /^is\(/ } @s),
+        'CANARY: PPI still lets a `finally` block swallow the statement after '
+      . 'it — if this FAILS, drop _repair_try_finally and the finally join in '
+      . '_lower_block (ppi-upstream-bugs.md §18)' );
 }
 
 # ── runtime warning strings used CL "...\n", but \n in a CL string literal is a

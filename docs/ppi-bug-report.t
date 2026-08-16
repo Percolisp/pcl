@@ -5,14 +5,14 @@
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
 #
-# PPI tokenizer/lexer bug report — eight small cases.
-# Tested against PPI 1.291 / perl 5.40.3.  All eight tests currently FAIL (the bugs).
+# PPI tokenizer/lexer bug report — fifteen small cases.
+# Tested against PPI 1.291 / perl 5.40.3.  All fifteen tests currently FAIL (the bugs).
 #
 #   perl ppi-bug-report.t
 #
 use strict;
 use warnings;
-use Test::More tests => 14;
+use Test::More tests => 15;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -249,4 +249,22 @@ sub toks {
     ok( (grep { $_ eq 'PPI::Structure::Subscript' } @s),
         '[0] after a braced deref should be a Subscript, not a Constructor' )
         or diag "got: @s";
+}
+
+# ── Bug 15: `finally {…}` is not part of the try statement, and eats the next ─
+#
+# With `use feature 'try'` in scope, `try {…} catch (VAR) {…} finally {…}` is
+# ONE self-terminating statement.  PPI builds a Statement::Compound for the
+# try/catch part and stops; `finally {…}` starts an unterminated statement that
+# then swallows everything up to the next `;` — here, a whole assertion.
+{
+    my $doc = PPI::Document->new(\<<'PERL');
+use feature 'try';
+try { foo(); } catch ($e) { bar($e); } finally { baz(); }
+is($x, 1, 'desc');
+PERL
+    my @s = grep { $_->isa('PPI::Statement') } $doc->schildren;
+    ok( (grep { $_->content =~ /^is\(/ } @s),
+        'the statement after a finally block should be its own statement' )
+        or diag "got: " . join(' | ', map { $_->content =~ s/\s+/ /gr } @s);
 }

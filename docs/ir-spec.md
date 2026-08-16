@@ -879,6 +879,33 @@ to string messages (documented divergence).
 `$SIG{__WARN__}` fires on `warn`; `$SIG{__DIE__}` does **not** fire
 (documented divergence).
 
+`try BLOCK catch (VAR) BLOCK [finally BLOCK]` (perl 5.34's `use feature
+'try'`) compiles to `p-try`, and it is **deliberately not** `p-eval-block`:
+
+```lisp
+(p-try (progn TRY…) ($e (progn CATCH…)) (progn FINALLY…))   ; finally optional
+```
+
+1. **no `:p-return` catch and no loop-tag catch** — `return`, `last`, `next`,
+   `redo` and `goto` inside the try block belong to the ENCLOSING sub or loop,
+   which is the sharpest difference from `eval {}`;
+2. `$@` is **localized to the construct**: set to `""` around the try body and
+   again around the catch body, and restored to its pre-`try` value in an
+   `unwind-protect` cleanup — so a `finally` block, and everything after the
+   construct, reads the OLD `$@`.  The caught value reaches the program only
+   through VAR;
+3. the catch body runs whenever an exception was signalled — never on a test of
+   `$@`'s truth, so `die 0` and a bool-overloading object are caught;
+4. the construct's VALUE is the executed block's last form, evaluated in the
+   caller's context (`*wantarray*` is not rebound), and `finally`'s value is
+   discarded.  No new frame is pushed, so `caller()` does not see the block;
+5. `finally` is an `unwind-protect` cleanup: it runs on every exit path,
+   including a `return` out of the try block.
+
+The Perl value of a caught condition (object payload, or message text with
+perl's " at … line …" tail) is `%p-caught-perl-value`, shared by `p-eval-block`
+and `p-try` — the two places a program can see a caught error.
+
 ### 6.4 goto
 
 Four source forms, four fates:
