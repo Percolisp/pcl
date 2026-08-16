@@ -2232,7 +2232,7 @@ sub _process_expression_statement {
   for my $i (0 .. $#parts) {
     if (ref($parts[$i]) eq 'PPI::Token::Word') {
       my $word = $parts[$i]->content;
-      if ($word =~ /^(if|unless|while|until|for|foreach)$/) {
+      if (Pl::PExpr::Config::is_statement_modifier($word)) {
         $modifier_idx = $i;
         $modifier = $word;
         last;
@@ -2411,7 +2411,7 @@ sub _process_variable_statement {
     my $mod_idx = -1;
     for my $i (1 .. $#parts) {
       next unless ref($parts[$i]) eq 'PPI::Token::Word';
-      if ($parts[$i]->content =~ /^(?:if|unless|while|until|for|foreach)$/) {
+      if (Pl::PExpr::Config::is_statement_modifier($parts[$i]->content)) {
         $mod_idx = $i;
         last;
       }

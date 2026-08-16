@@ -1939,11 +1939,33 @@ sub _class_name_bareword {
 # Byte-for-byte the text emitter's shapes.  The only remaining decline is
 # a non-Word call head (never fires on the corpus — s304 census); the
 # decline decision precedes any side effect.
+# A statement keyword is never a FUNCTION, and `if` is in %RUNTIME_NAMES, so a
+# bareword one lowered to the p-if MACRO with whatever arity it happened to
+# have: `my $x = if if if` (legal perl when a lexical sub is named `if` —
+# t/op/lexsub.t asserts it) emitted `(p-if (p-if) (p-my-= $x (p-if)))`, a
+# zero-argument p-if whose MACROEXPANSION error killed the whole file at load.
+# A statement the compiler cannot lower is a DROP — announced, one statement
+# lost, the rest of the program runs (#138 family, task #374).
+#
+# The word list is Pl::PExpr::Config's `statement_keywords`, not a local copy:
+# the same six words are already inlined as a regex in several parser sites and
+# an seventh copy here would be the drift rule 11 exists to stop.
 sub gen_funcall_form {
   my $self    = shift;
   my $node    = shift;
   my $node_id = shift;
   my $kids    = shift;
+
+  if (@$kids >= 1) {
+    my $fn = $self->expr_o->get_a_node($kids->[0]);
+    if (ref($fn) eq 'PPI::Token::Word' && $fn->can('content')
+        && $self->expr_o->statement_keywords->{ $fn->content // '' }) {
+      # NOT a `PCL:`-prefixed message: that prefix is the ruled-refusal channel
+      # (_shape_expr_error re-raises it, killing the file).  This is a DROP —
+      # one statement replaced by nil, announced, the program runs on.
+      die "statement keyword `" . $fn->content . "` used as a function\n";
+    }
+  }
 
   # Zero-arg special words (Parser wraps them in funcall when followed by
   # operators) and -bareword strings: pure atoms, same bytes as the text

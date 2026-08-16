@@ -46,6 +46,27 @@ to end vs perl including the Try::Tiny inverse), plus a canary in
 `misc-fixes-02.t`.  Rule 13: `ppi-upstream-bugs.md` §20 and three new failing
 rows (Bug 17) in `docs/ppi-bug-report.t`.
 
+### #374 half (a) — a statement keyword is never a function
+
+`op/lexsub.t` was dying at macroexpansion on `(p-if)` — a p-if MACRO called as a
+zero-argument function.  The cause turned out to be one line of table: **`if` is
+in ExprToCL's `%RUNTIME_NAMES`**, so a bareword `if` reaching the funcall
+generator lowered to the macro with whatever arity it happened to have.  A
+statement keyword is never a function, so the generator refuses it and the
+statement becomes a counted, announced DROP instead of a form that cannot
+expand.  `op/lexsub.t` **6/8 → 7/10**, its next blocker a different one.
+
+**The word list is shared, not a seventh copy** (the user asked, mid-session,
+whether something already checked this — it did not).  The same six modifier
+words were inlined as a regex in four parser sites, and the two *named* sets
+nearby answer different questions: `%SIG_DEFAULT_KEYWORDS` is "does this
+bareword make a signature default swallow", and InterpScan's `%KEYWORDS` is
+perl's whole keyword list, builtins included, for the interpolation weigher.
+So `Pl::PExpr::Config` now holds both sets — `statement_modifiers` (the six
+that can trail an expression) and `statement_keywords` (those plus
+`else`/`elsif`) — and the four inline copies were converged onto
+`is_statement_modifier()`.
+
 ### #368 — anon `__SUB__` returned a no-op lambda, so the gap produced a NUMBER
 
 ```perl

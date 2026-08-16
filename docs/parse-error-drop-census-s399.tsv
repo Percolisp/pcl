@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 73 files, 377 drops — 9 perl-tests files (12
-# drops), 64 companion files (365), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 73 files, 381 drops — 9 perl-tests files (12
+# drops), 64 companion files (369), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops.  A count that RISES is not automatically a regression:
 # two files that used to die at transpile now emit CL, so their drops became
 # countable for the first time — see the s405 edits — and the s408 edit trades
@@ -68,6 +68,17 @@
 #         `NAME NAME NAME`, and the surviving `(p-if)` pair is a rule-12 case
 #         of its own.
 #
+#   s408b t/op/lexsub.t 10 -> 14, the OTHER half of the same file, and this one
+#         is a straight WIN for the file: the two `our sub if` statements were
+#         still emitting the zero-argument `(p-if)` above, because `if` is in
+#         ExprToCL's %RUNTIME_NAMES and a bareword one lowered to the p-if
+#         MACRO.  A statement keyword is never a function (task #374), so the
+#         funcall generator refuses it and the statement becomes a counted DROP
+#         like its renamed siblings.  With no crash-form left the file stops
+#         dying at macroexpansion: op/lexsub.t 6/8 -> 7/10, and its next
+#         blocker is a different one (undef-fn:main::pl-F).  Verified emission-
+#         identical everywhere else: corpus-diff IDENTICAL 111, emission-ab
+#         over perl's own t/ 559 SAME / 1 DIFF (this file).
 # Causes, aggregated over files (re-counted from the rows below, s405):
 #   49  Bug. Fell through. Missing case: [        <- the dominant one
 #   20  Handle single node of unknown type
@@ -126,7 +137,7 @@ t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	10	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
+t/op/lexsub.t	14	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/override.t	2	Handle single node of unknown type. Dump: x2
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2

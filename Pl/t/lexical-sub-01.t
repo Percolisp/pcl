@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 21;
 
 my $PREAMBLE = "use feature 'lexical_subs';\nno warnings 'experimental::lexical_subs';\n";
 
@@ -200,3 +200,32 @@ test_lexsub('a lexical sub is not reachable through ->can', <<'PERL');
 my sub f { "L" }
 print __PACKAGE__->can('f') ? "CAN" : "NOCAN", "\n";
 PERL
+
+# A lexical sub named after a KEYWORD (#374).  perl allows it and t/op/lexsub.t
+# asserts it; PCL's statement grammar owns those words, so `my $x = if if if`
+# cannot be lowered.  What matters is HOW it fails: it used to emit a
+# zero-argument `(p-if)` — the p-if MACRO called as a function, because `if` is
+# in ExprToCL's %RUNTIME_NAMES — and that form's macroexpansion error killed
+# the WHOLE FILE at load.  Now the statement is a counted, announced DROP and
+# the program runs on.
+{
+    # `our sub if` is a PACKAGE sub, so #337's rename deliberately leaves it
+    # alone and the words stay keywords — this is the half that used to reach
+    # the macro.  (`my`/`state sub if` renames, and then drops in the term
+    # grammar instead; both halves are #374, both are counted in the census.)
+    my $pl_file = write_pl(<<'PERL');
+sub is { }
+{ our sub if() { 42 }
+  my $x = if if if;
+  is $x, 42; }
+print "after\n";
+PERL
+    my ($cl, $err, $rc) = PCLCore::transpile_raw("$pl2cl $pl_file");
+    unlike($cl, qr/\(p-if\)/,
+           '#374: a keyword-named sub never emits a zero-argument (p-if), whose '
+         . 'macroexpansion error used to kill the whole file at load');
+    like($cl, qr/PARSE ERROR: statement keyword/,
+         '#374: …the statement is a counted DROP instead');
+    like($err, qr/PCL: statement dropped/,
+         '#374: …and the drop is announced, so it is not silent');
+}

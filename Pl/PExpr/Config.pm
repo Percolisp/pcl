@@ -290,6 +290,44 @@ has control_flow_ops => (
   default => sub { return { map { $_ => 1 } qw(last next redo goto return) } },
 );
 
+# statement_keywords: the words that open (or modify) a STATEMENT.  They are
+# grammar, never functions — perl will not let a sub of these names be called
+# as one, and neither can PCL: the statement layer has already consumed them by
+# the time an expression sees one, so a bareword survivor is a shape the
+# compiler could not lower.
+#
+# THE ONE COPY of both, and they are two questions, not one:
+#   statement_modifiers — the six that can TRAIL an expression (`EXPR if COND`).
+#                         Asked by the modifier splitters in Parser.pm and
+#                         Parser2.pm, which used to inline this regex four times.
+#   statement_keywords  — those six PLUS `else`/`elsif`: the words that can only
+#                         ever be grammar.  Asked by ExprToCL when a bareword
+#                         reaches the funcall generator.
+# The two WIDER sets elsewhere answer different questions and stay where they
+# are: `%SIG_DEFAULT_KEYWORDS` (Parser.pm) is "does this bareword make a
+# signature default swallow", and `%KEYWORDS` (InterpScan) is perl's whole
+# keyword list — builtins included — for the interpolation weigher.
+#
+# Why the keyword set exists (task #374): `if` is in ExprToCL's %RUNTIME_NAMES,
+# so a bareword one lowered to the p-if MACRO with whatever arity it had —
+# `my $x = if if if` (legal perl when a lexical sub is named `if`, and
+# t/op/lexsub.t asserts it) emitted a zero-argument `(p-if)` whose
+# MACROEXPANSION error killed the whole file at load.
+our %STATEMENT_MODIFIERS = map { $_ => 1 } qw(if unless while until for foreach);
+our %STATEMENT_KEYWORDS  = (%STATEMENT_MODIFIERS, map { $_ => 1 } qw(else elsif));
+
+sub is_statement_modifier { return $STATEMENT_MODIFIERS{ $_[0] // '' } ? 1 : 0 }
+
+has statement_keywords => (
+  is      => 'ro',
+  default => sub { return { %STATEMENT_KEYWORDS } },
+);
+
+has statement_modifiers => (
+  is      => 'ro',
+  default => sub { return { %STATEMENT_MODIFIERS } },
+);
+
 # perldoc perlfun:
 has known_no_of_params => (
   is        => 'ro',

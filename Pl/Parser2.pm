@@ -7505,7 +7505,7 @@ sub _lower_stmt {
       # modifier here; the value expr is then empty (return undef/()).
       my ($expr, $mod, $cond);
       if (@k && $k[0]->isa('PPI::Token::Word')
-          && $k[0]->content =~ /^(?:if|unless|while|until|for|foreach)$/) {
+          && Pl::PExpr::Config::is_statement_modifier($k[0]->content)) {
         ($expr, $mod, $cond) = ([], $k[0]->content, [@k[1 .. $#k]]);
       } else {
         ($expr, $mod, $cond) = _split_modifier(\@k);
@@ -9171,7 +9171,7 @@ sub _split_modifier {
   my ($parts) = @_;
   for my $i (1 .. $#$parts) {
     my $p = $parts->[$i];
-    if ($p->isa('PPI::Token::Word') && $p->content =~ /^(if|unless|while|until|for|foreach)$/) {
+    if ($p->isa('PPI::Token::Word') && Pl::PExpr::Config::is_statement_modifier($p->content)) {
       return ([@$parts[0 .. $i - 1]], $p->content, [@$parts[$i + 1 .. $#$parts]]);
     }
   }

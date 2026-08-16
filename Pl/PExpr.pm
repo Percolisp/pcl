@@ -124,6 +124,7 @@ sub prefix { shift->config->prefix }
 sub precedences { shift->config->precedences }
 sub known_no_of_params { shift->config->known_no_of_params }
 sub control_flow_ops   { shift->config->control_flow_ops }
+sub statement_keywords { shift->config->statement_keywords }
 sub named_unary { shift->config->named_unary }
 
 sub is_named_unary {
