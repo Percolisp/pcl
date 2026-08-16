@@ -431,10 +431,14 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **147 test files, 5355 tests** with a built pclxs sibling (s406, measured;
-  the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5341 without** (arithmetic: minus the
-  14 xs rows).  The gate count is deterministic *per environment*, but it
+- **149 test files, 5442 rows** with a built pclxs sibling (s409, measured
+  COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
+  work, user s394/s395: ignore XS rows); **5428 without** (arithmetic: minus
+  the 14 xs rows).  **RULED s409: compare a gate count against a measurement
+  of the SAME tree** — the xs files PRODUCE 0–14 rows depending on where
+  pclxs\x27s current state aborts them, so a written-down total drifts on its
+  own; when only a number is at hand, subtract the xs rows produced in each
+  run (s408 wrote 5439 with 11 xs rows = the same 5428).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
   `plan skip_all` (contributing 0) when it is missing or `libpclxs.so` is not
@@ -570,6 +574,8 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2d. **`docs/fable-answers-s408.md` + `docs/plan-post-s408.md` — the s408 batch RULED (s409, Fable, 2026-08-16) and THE LIVE QUEUE**: all seven s408 commits APPROVED as shipped (gate re-verified COLD 149/5442, only the 13 pclxs xs rows; sweep RE-RUN clean TOTAL 18513; 27 probes vs perl 5.40.3, no regression).  Standing rules added: **a census INCREASE is legal when it converts a worse failure (a crash-form) into a counted drop**; **a gate row count is compared against a measurement of the SAME tree** (the xs files produce 0–14 rows on their own); **an eval-mode drop DIES — "announce and continue" REJECTED** (it keeps the wrong value); a fragment mini-parse is the established pattern; **a `--quick` NOT-RUN row is never a mover** (#366 runner bug fixed: 11 files were re-run ALONE, +23 min).  **Three tasks head the next Opus session — #378** (anon `__SUB__` IMPLEMENTED as a self-reference rewrite: #368's die aborts op/sub.t 51/14 → 25/6, a cost s408 did not measure; the shape is modern Perl's recursive closure), **#377** (`sub outer { my $x = shift; my sub inner { $x } }` CRASHES unbound `$x__file__0` — p-raw-params binds the promoted name, no cell) and **#376** (the lexsub rename's three uncovered spellings: `my sub c; sub c {…}` fwd-decl SILENT WRONG across two scopes; `sub NAME` in the region defines the LEXICAL in perl; cross-package use crashes).  #374 half (b) corrected (position-aware renaming, not TERM TERM TERM).  **Queue (plan-post-s408 §2): H = #378 → #377 → #376 → #341 measured (→ #373 only if rows sit behind it) → I = #342-2 + #281 items 1+2+6 → J–L = Option B phase 2 (#371 → #372 → #343 → #369/#370 → the flip) → M–N = #279 → #280 → #282 → #283.  Fable: #281 design half, B1 operand grammar, boxed aggregates post-v0.1, #221 post-release.**
+
 2e. **`docs/fable-answers-s406.md` — the s404 + s405 + s406 asks ALL RULED as one batch (s407, Fable, 2026-08-16): all three sessions APPROVED as shipped (gate independently re-verified 147/5355; sweep RE-RUN clean TOTAL 18517; try/catch, #347, #358, #348 and #362 probed live).  Two REVIEW FIXES landed (`e79f0a6`): a Word after `->` is a METHOD NAME and ends a term — `$o->name x 3` (#361 regression), `$o->w / $o->h / 2` (#351 regression), `$o->w*w()` (#354 hole) were one family; and **#362 CLOSED at its real cause** (`%to-number-raw` had no `functionp` arm — the compared-only side was frozen to a raw numeric slot; NOT `\&NAME` identity).  Rulings: #360 = PPI `custom_feature_include_cb` (core feature pragmas are LANGUAGE; **`use v5.40; try` is a whole-statement DROP today**) + `lib/experimental.pm` shim; **a DROP inside a string eval DIES** (#363, the server discards stderr); string-eval feature inheritance #364; #337 split confirmed; #359 behind the release, fd-3 announces; runner serial re-run #366 + process-group kill #367; anon `__SUB__` dies #368; imported `()`-sub bareword #365.  **Queue: `docs/plan-post-s400.md` §2d** — F=#337 → #360+#364 → #363 → #366+#367 → #342-2 → release leftovers.**
 2f. `docs/fable-answers-s402.md` - **s402 review RULED (s403, 2026-08-15, quick — NOT re-verified, by USER instruction)**: s402 APPROVED as shipped.  Blanket `$SIG{__WARN__}` deletion STANDS though its condition was false — the only forms are fix-the-cause or `no warnings 'category'` at the narrowest scope (tree walkers get `'recursion'`; #352).  **General rule: a diagnostic that can fire during a RUN must answer "and on a warm cache?"** (`--module` OFF ratified; modules join the drop census via cached emission).  ir-spec §9.2 keeps discovered-by-stamp.  #351's repair keys on #266's callable classifier, layer `_repair_*`.  **#354 NEW: PPI 1.291 lexes `)*name` as a GLOB — `length($k)*length($k)` dropped whole (Data::Dump:325).**  #355 = one stderr-aware Pl/t helper (drop announcement FAILS the row).  #353 folds into session B.  Queue: B (#345 #349 #350 +#353) → #354+#351 → #355 → plan-post-s400 C–G.
 

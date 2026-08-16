@@ -11,6 +11,57 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s409 (2026-08-16, Fable) — the s408 review: approved as shipped; the census-increase rule; two lexsub-family tasks
+
+- **s408 APPROVED as shipped (all seven code commits)** — gate re-verified COLD
+  149/5442 (only the 13 pclxs xs rows), sweep RE-RUN clean TOTAL 18513, 27
+  probes vs perl 5.40.3.  → `docs/fable-answers-s408.md`; queue →
+  `docs/plan-post-s408.md`.
+- **A census INCREASE is legal when it converts a WORSE failure into a counted
+  drop** (a crash-form the census cannot see → an announced drop): the edit
+  note names the form replaced + the owning task; the file's verdict must not
+  regress; sweep TOTAL/LOST unchanged.  Never hold such a change until the drop
+  is fixed — the census counts drops, it does not freeze them.  → answers §3.6.
+- **A gate row count is compared against a measurement of the SAME tree**,
+  never a number in a doc: `Pl/t/xs-01/02/03.t` PRODUCE 0–14 rows depending on
+  where pclxs's current state aborts them.  Subtract the xs rows produced in
+  each run when only a written number is at hand.  → answers §3.1.
+- **An eval-mode drop DIES; "announce over the protocol and continue" is
+  REJECTED** — it keeps the wrong VALUE (undef, `$@` empty) the program
+  consumes (rule 12 value case).  A lost companion row asserting "no error"
+  about code PCL cannot compile is not a cost (op/smartmatch.t 143 → 44: 99
+  `~~` evals that never ran; they become #371's ruled refusal).  FILE mode's
+  flip stays Option B phase 2's LAST step.  → answers §3.4.
+- **A fragment mini-parse (`PPI::Document->new` on an interpolated span) is the
+  established pattern** (28 sites); `_ppi_new` is the one construction site
+  for FULL documents only.  → answers §3.3.
+- **#368's die is right, but a die that ABORTS a companion file is a COST that
+  must be measured in the dir it touches** — op/sub.t 51/14 → 25/6 at its
+  `sub {…; CORE::__SUB__->()}->()` (line 214), unmeasured in s408 (only
+  op/current_sub.t was re-run).  Anon `__SUB__` is modern Perl's recursive
+  closure, so it is IMPLEMENTED, not softened: **#378** = a self-reference
+  rewrite at the PPI entry that already rewrites a named sub's `__SUB__`
+  (`sub {…}` → `do { my $__SUB__N; $__SUB__N = sub {…$__SUB__N…}; $__SUB__N }`).
+  → answers §2.3, snapshot row edited by hand.
+- **A `--quick` NOT-RUN (or KILLED) row is never a MOVER** — #366's re-run
+  phase re-ran all 11 NOT-RUN files ALONE at their full allowances (+23 min)
+  and overwrote the NOT-RUN rows with serial verdicts, un-quicking the report;
+  fixed s409, and the re-run label now says which of the three values agree.
+  → `tools/run-perl-suite.pl` `rerun_movers_serially`.
+- **#337's "latest start wins" needs no shadow walk** — confirmed (region =
+  [decl, end of scope] clipped at a same-scope sibling; candidates restricted
+  to enclosing scopes).  Its residue is #376 (fwd-decl `my sub c; sub c {…}`
+  SILENT WRONG across two scopes; `sub NAME` inside the region defines the
+  LEXICAL in perl; cross-package use crashes) and #377 (`my $x = shift` +
+  nested sub reading it → unbound `$x__file__0`: p-raw-params binds the
+  promoted name lexically and no cell is emitted) — both PRE-EXISTING at
+  b7ce704, both head the next Opus session.  → answers §2.
+- **#374 half (b) is POSITION-AWARE renaming, not `TERM TERM TERM`**: `my $x =
+  if if if` deparses to `(my $x = if()) if if()` — the middle `if` is the
+  modifier keyword.  Fix is in the renamer's classification; exotic; behind
+  Option B phase 2.  → task #374, answers §2.3.
+
+
 ## s408 (2026-08-16, Opus 5) — an eval-mode DROP dies (#363); `qq {…}` (#375)
 
 - **In EVAL-STRING mode a #138-family drop DIES into `$@`** (#363, as ruled):

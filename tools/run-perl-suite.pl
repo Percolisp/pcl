@@ -801,10 +801,17 @@ sub rerun_movers_serially {
   return if $rerun_movers_done++;
   my %snap = read_snapshot();
   return if !%snap;
+  # A file this run did NOT measure is not a mover: a --quick NOT-RUN row (the
+  # #326 hang set, the >120 s allowances) differs from the snapshot trivially,
+  # and re-running it here ALONE, at its full allowance, would spend the ~40
+  # minutes --quick exists to save AND overwrite the NOT-RUN row with a serial
+  # verdict, un-quicking the report (measured s409: eleven such re-runs).
+  # KILLED is the same kind of row.  Only a measured verdict can move.
   my @movers = grep {
     my $s = $snap{$_};
     my $r = $results{$_};
-    $s && $r && ($r->[5] ne $s->{status} || $r->[3] != $s->{c_ok} || $r->[4] != $s->{c_notok});
+    $s && $r && $r->[5] !~ /^(?:NOT-RUN|KILLED)$/
+      && ($r->[5] ne $s->{status} || $r->[3] != $s->{c_ok} || $r->[4] != $s->{c_notok});
   } sort keys %results;
   return if !@movers;
   my $capped = 0;
@@ -834,12 +841,18 @@ sub rerun_movers_serially {
     $r[7] = -1 if !defined $r[7] || $r[7] !~ /^-?\d+$/;
     classify_result(\@r);
     my $agrees = ($r[5] eq $par->[5] && $r[3] == $par->[3] && $r[4] == $par->[4]);
+    my $sn = $snap{$rel};
+    my $serial_is_snap = ($r[5] eq $sn->{status} && $r[3] == $sn->{c_ok} && $r[4] == $sn->{c_notok});
     record_result(\@r);
+    # Say which of the THREE values agree; never assert a match that was not
+    # checked (s409: the label used to claim "serial matches the snapshot"
+    # for every serial != parallel row, including three-way disagreements).
+    my $verdict = $agrees         ? 'REAL MOVE (both runs agree)'
+                : $serial_is_snap ? 'contention — serial matches the snapshot'
+                : sprintf('THREE-WAY: snapshot %s %d/%d — rows unstable? (serial recorded)',
+                          $sn->{status}, $sn->{c_ok}, $sn->{c_notok});
     printf "   %-24s parallel %s %d/%-4d  serial %s %d/%-4d  %s\n",
-      $rel, $par->[5], $par->[3], $par->[4], $r[5], $r[3], $r[4],
-      ($agrees ? 'REAL MOVE (both runs agree)'
-       : sprintf("contention — serial matches the snapshot: %s %d/%d",
-                 $snap{$rel}{status}, $snap{$rel}{c_ok}, $snap{$rel}{c_notok}));
+      $rel, $par->[5], $par->[3], $par->[4], $r[5], $r[3], $r[4], $verdict;
   }
   return;
 }

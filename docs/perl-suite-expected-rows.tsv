@@ -1005,8 +1005,6 @@ op/signatures.t	do does not swallow trailing comma
 op/signatures.t	dump does not swallow trailing comma
 op/signatures.t	duplicate sig var names
 op/signatures.t	each does not swallow trailing comma
-op/signatures.t	else does not swallow trailing comma
-op/signatures.t	elsif does not swallow trailing comma
 op/signatures.t	endgrent does not swallow trailing comma
 op/signatures.t	endhostent does not swallow trailing comma
 op/signatures.t	endnetent does not swallow trailing comma
@@ -1032,8 +1030,6 @@ op/signatures.t	field does not swallow trailing comma
 op/signatures.t	fileno does not swallow trailing comma
 op/signatures.t	finally does not swallow trailing comma
 op/signatures.t	flock does not swallow trailing comma
-op/signatures.t	for does not swallow trailing comma
-op/signatures.t	foreach does not swallow trailing comma
 op/signatures.t	fork does not swallow trailing comma
 op/signatures.t	format does not swallow trailing comma
 op/signatures.t	formline does not swallow trailing comma
@@ -1070,7 +1066,6 @@ op/signatures.t	goto does not swallow trailing comma
 op/signatures.t	grep does not swallow trailing comma
 op/signatures.t	handle commonality in scalar parms # TODO can't handle commonaility
 op/signatures.t	hex does not swallow trailing comma
-op/signatures.t	if does not swallow trailing comma
 op/signatures.t	index does not swallow trailing comma
 op/signatures.t	int does not swallow trailing comma
 op/signatures.t	ioctl does not swallow trailing comma
@@ -1193,12 +1188,10 @@ op/signatures.t	uc does not swallow trailing comma
 op/signatures.t	ucfirst does not swallow trailing comma
 op/signatures.t	umask does not swallow trailing comma
 op/signatures.t	undef does not swallow trailing comma
-op/signatures.t	unless does not swallow trailing comma
 op/signatures.t	unlink does not swallow trailing comma
 op/signatures.t	unpack does not swallow trailing comma
 op/signatures.t	unshift does not swallow trailing comma
 op/signatures.t	untie does not swallow trailing comma
-op/signatures.t	until does not swallow trailing comma
 op/signatures.t	use does not swallow trailing comma
 op/signatures.t	utime does not swallow trailing comma
 op/signatures.t	values does not swallow trailing comma
@@ -1208,7 +1201,6 @@ op/signatures.t	waitpid does not swallow trailing comma
 op/signatures.t	wantarray does not swallow trailing comma
 op/signatures.t	warn does not swallow trailing comma
 op/signatures.t	when does not swallow trailing comma
-op/signatures.t	while does not swallow trailing comma
 op/signatures.t	write does not swallow trailing comma
 op/signatures.t	x does not swallow trailing comma
 op/sigsystem.t	*summary*

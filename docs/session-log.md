@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 409 (2026-08-16, Fable) — the s408 review: approved as shipped, two lexsub-family bugs filed, the plan from here
+
+`docs/fable-answers-s408.md` rules the seven s408 commits: **all APPROVED as
+shipped**, no regression.  Gate independently re-verified COLD (**149 / 5442**,
+only the 13 pclxs xs rows), full sweep RE-RUN clean (**TOTAL 18513 = baseline,
+drops 12 = census**), companion `--all --quick` re-run (523 files: 87 OK / 30 NOTAP / 110 XDIFF / 1
+FIXTURE / 295 UNEXPLAINED — three measured movers, each re-run ALONE), and
+27 probes vs perl 5.40.3 — 19 identical, 4 registered as documented, **4
+pre-existing divergences → tasks #376 and #377** (both verified at `b7ce704` in
+a worktree: not s408's, but s408 made `my sub` a real feature and these are
+the shapes its users write first).
+
+**#377** — `sub outer { my $x = shift; my sub inner { $x * 2 } inner() }`
+CRASHES (unbound `$x__file__0`): the promotion renames the captured `my $x` in
+both subs, but the declaration was lowered by the raw-params optimisation,
+which binds the promoted name LEXICALLY inside `pl-outer` and emits no cell.
+`my $x = 70` in the same place emits `p-defcell` and runs; `my ($x) = @_` is the
+capture refusal — three spellings of "take a param", three answers.  **#376** —
+the lexical-sub rename's three uncovered spellings: the forward-declaration
+idiom `my sub c; sub c {…}` (perlsub's own idiom) is SILENT WRONG across two
+scopes (`c2 c2` vs perl `c1 c2` — the exact bug #337 fixed, in the spelling it
+skipped); a plain `sub NAME {…}` inside the region DEFINES THE LEXICAL in perl
+(PCL keeps it a package sub); a use from another package's code crashes
+(undefined function in the current package).  Fix shapes in the tasks.
+
+**Rulings** (DECIDED s409): a census INCREASE is legal when it converts a worse
+failure (a crash-form) into a counted drop, with the trade argued and a task
+owning the residue; a gate row count is compared against a measurement of the
+SAME tree (the xs files produce 0–14 rows on their own); an eval-mode drop
+DIES and "announce over the protocol, continue" is REJECTED (it keeps the
+wrong value the program consumes — op/smartmatch.t's 99 rows are #371's
+smartmatch arm, same verdict with a ruled refusal text later); a fragment
+mini-parse is the established pattern (28 sites).  #373 stays a filler behind
+#341's per-row read.  #375's "third place" does not exist (grepped; the regex
+family `m {…}` / `s {…} {…}` / `qr {…}` / `tr {…} {…}` probed identical).
+**#374 half (b) corrected**: `my $x = if if if` deparses to `(my $x = if()) if
+if()` — the middle `if` is the modifier keyword; the fix is position-aware
+renaming in the RENAMER, not term grammar; exotic, stays behind Option B.
+
+**The companion found two more things.**  `op/sub.t` 51/14 → **25/6**: #368's
+rule-12 die (`__SUB__` in an ANON sub) is reached at op/sub.t:214 and aborts
+the file — 26 rows, a cost s408 did not measure (only op/current_sub.t was
+re-run after that commit).  The die is right; the feature is modern Perl's
+recursive closure, so **#378 IMPLEMENTS it** (a self-reference rewrite at the
+PPI entry that already rewrites a named sub's `__SUB__`; snapshot row edited
+by hand).  And `op/signatures.t` 912/334 → **920/326**, a WIN from #374(a) —
+the eight statement-keyword `sub ($x = if, $y) {}` evals now die as perl's do;
+STALE, read, re-blessed with `--bless-rows`.  **Runner bug fixed** (#366 ×
+#345): a `--quick` NOT-RUN row was treated as a mover, so all 11 NOT-RUN files
+were re-run ALONE at their full allowances (+23 min, the report un-quicked);
+only a measured verdict can move now, and the re-run label says which of the
+three values agree instead of asserting a match it never checked.
+
+**The plan: `docs/plan-post-s408.md`** (supersedes plan-post-s400 §2d).  Opus:
+**H** = #378 → #377 → #376 → #341 measured (→ #373 only if rows sit behind it) →
+**I** = #342 piece 2 + #281 items 1+2+6 → **J–L** = Option B phase 2 (#371 →
+#372 → #343 → #369/#370 → re-census → the flip) → **M–N** = #279 → #280 →
+#282 → #283 (#359 behind the release).  Fable: #281 design half, the B1 operand
+grammar, boxed aggregates post-v0.1, #221 post-release.  USER decisions still
+open: public name, pclxs bundling, hosting.
+
+
 ## Session 408 (2026-08-16, Opus 5) — #337 `my sub` is a LEXICAL, then #360 the feature pragmas
 
 *(Sessions F and the first half of the next item in `plan-post-s400.md` §2d.)*

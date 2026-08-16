@@ -1,0 +1,185 @@
+# Plan after s408 — the coming sessions (Fable, s409, 2026-08-16)
+
+Written at the user's request ("review what Opus 5 did and write a plan to
+continue") after the s408 review (`docs/fable-answers-s408.md`, which holds
+every ruling this plan rests on).  **Supersedes the queue of
+`docs/plan-post-s400.md` §2d** — that file stays as the record of sessions
+A–F; this one is the live queue from here.  Session letters are relative;
+sessions are Opus's unless marked Fable, one letter ≈ one session.
+
+## 0. Status, independently verified this session
+
+| measurement | value | note |
+|---|---|---|
+| Gate `tools/prove-core`, COLD (cache cleared) at `74c1b93` | **149 files / 5442 rows**, PASS except the 13 pclxs xs rows (4+4+5) | the xs files produced 14 rows this run; they move on their own (§4 rule) |
+| Full perl-tests sweep, `--jobs 8` | **GATE clean, 0 new / 0 fixed, TOTAL 18513 = baseline, drops 12 = census**; 6 UNSTABLE + 10 unverified, all inside the three PARTIAL files #363 moved (crash-file noise) | 4 min wall on this machine |
+| Companion `--all --quick --jobs 4` | 523 files: 87 OK / 30 NOTAP / 110 XDIFF / 1 FIXTURE / 295 UNEXPLAINED; **3 measured movers**: op/signatures.t +8 (a WIN, re-blessed), **op/sub.t −26 (#368's die aborts the file → #378)**, one rows-unstable | run because the batch touched name resolution AND the runners; the run also exposed a #366×#345 runner bug (NOT-RUN rows re-run serially), fixed |
+| Cache generation | **v2-154**, three artifacts stamped v2-154 | `artifact-staleness-01.t` green in the cold gate |
+| Probes vs perl 5.40.3 | 27 shapes; **19 identical**, 4 registered (loud) as documented, **4 pre-existing divergences → tasks #376 / #377** | §2 of the answers |
+| Working tree | clean at `74c1b93` before this session's docs commit | — |
+
+**Three NEW tasks from the review** — two from probes (both verified
+PRE-EXISTING at `b7ce704`, i.e. not s408 regressions — but both sit in the
+family s408 opened) and one from the companion run: **#376** the lexical-sub rename's three uncovered spellings (the
+`my sub c; sub c {…}` forward-declaration idiom is SILENT WRONG across two
+scopes; a plain `sub NAME` inside the region defines the LEXICAL in perl; a
+use from another package crashes) and **#377** `sub outer { my $x = shift; my
+sub inner { $x } }` CRASHES with an unbound `$x__file__0` (the promotion pass
+and the raw-params lowering disagree about who owns the declaration).
+**#378** anon `__SUB__` must be IMPLEMENTED (a self-reference rewrite): #368's
+die is right by rule 12 but it aborts `op/sub.t` at line 214 (51/14 → 25/6, 26
+rows), and the shape is modern Perl's recursive closure.
+
+## 1. The two standing goals, unchanged
+
+- **v0.1 public release** (`docs/release-plan-v0.1.md`, USER s375c): phase 1
+  install ✓ (#277, #278) → 2 IR pass (#281) → 3 neatness (#279, #280) → 4
+  the bug hunt → 5 fresh-machine gate + CI (#282, #283).  Tag precondition =
+  #282 green + phase 4, not a date.
+- **Correctness first, then speed** (R2).  Ordered so the release ships with
+  the known SILENT families closed or loud.  s408 closed two silent families
+  (lexical subs, eval-mode drops) and exposed one (`qq {…}`), so the family
+  count is moving the right way; the residue is in §2.
+
+## 2. Opus queue, in order
+
+**Session H — lexical subs and `__SUB__`, the residue (name resolution: the
+sweep IS the gate).**
+0. **#378** — implement anon `__SUB__` at the PPI entry that already rewrites
+   a named sub's to `\&name`: `sub {…__SUB__…}` → `do { my $__SUB__N; $__SUB__N =
+   sub {…$__SUB__N…}; $__SUB__N }`, innermost-enclosing wins.  Bar: op/sub.t
+   back to ≥ 51/14, five probe shapes in the task, the #368 not-supported
+   paragraph deleted in the same commit.  Small; do it first — it recovers 26
+   companion rows and closes a refusal on a feature real code uses.
+1. **#377** next — it is the shape a `my sub` user hits immediately (a
+   private helper reading the enclosing sub's `shift`ed param) and it is a
+   crash.  Fix shape (i) in the task: a promoted `__file__N` name is never a
+   raw-params binding; the shift-lowering consults the promotion table and
+   falls back to the cell form.  Guard the `my $x = 70` twin (unchanged) and
+   `my ($x) = @_` (stays the refusal or joins (i) — probe first).
+2. **#376** — three edits in `_rename_lexical_subs`: (1) a bodiless `my sub
+   NAME;` opens a region; (2) a Word after `sub` heading a PACKAGE sub
+   statement inside a covering region is renamed (it is the lexical's
+   definition, as perl reads it); (3) a cross-package use rewrites to the
+   QUALIFIED renamed name via the existing package-at-token resolver — or
+   DIES naming the shape if that is not cheap.  Carry BOTH lists (fires /
+   must-not-fire: a package `sub f` outside any region; `sub f;` inside one —
+   probe perl first).
+3. **#341 measured** after both: run `t/op/lexsub.t` alone, read its next
+   blocker (`undef-fn:main::pl-F` at s408 — likely #376(c)'s shape), file
+   what remains.  Its ~150 unmeasured rows are the payoff of #337/#374(a).
+4. **#373** stays a filler (population ~0): a sixth protocol line — the
+   sub-capture alist (name → renamed symbol for every lexical sub whose
+   region covers the eval site), keyed into the eval cache like the features.
+   Do it only if #341's read shows rows behind it.
+
+Bar for H: corpus-diff explained per file (the three files that carry `my
+sub`, plus whatever carries anon `__SUB__`), full sweep TOTAL/LOST, `--quick`
+companion once (op/sub.t, op/current_sub.t, op/lexsub.t read per row), gate.
+
+**Session I — the small rule-12 hole + the FREE IR items.**
+5. **#342 piece 2** — heredoc body inside `${\ …}` inside an `s///e`
+   replacement: a heredoc pre-pass on the replacement text (the nil
+   replacement thunk is a rule-12 violation today).  Small; base/lex.t is the
+   file.
+6. **#281 items 1+2+6** — `p-list-ctx`/`p-scalar-ctx`/`p-caller-ctx`
+   context-bind macros, per-file defvar dedupe, `p-sort-cmp` — same
+   expansions, FREE (measured s407); `ir-spec.md` updated normatively.
+   Emission-changing: corpus-diff explained per file, gate, sweep TOTAL/LOST,
+   gen bump, the three artifacts.  This is release phase 2's mechanical half;
+   the design half (§3.2 string-literal escape, `p-cond` bench) is Fable's.
+
+**Sessions J–L — Option B phase 2, as sized (`docs/option-b-phase2-plan.md`).**
+7. **Track A #371** — feature-ABSENCE drops become RULED REFUSALS at the two
+   PARSE-ERROR emitters (given/when ~117, class ~25, smartmatch infix,
+   indirect object, defer/format/hexfloat).  No parser risk; one session.
+   **op/smartmatch.t's 99 rows** (the −46 companion trade, ruled in the
+   answers §3.4) are the smartmatch-infix arm: same verdict, but the `$@`
+   text becomes the ruled `PCL: unsupported …` refusal naming the feature.
+   Bar: census falls by the classified count, every remainder explained.
+8. **Track B1 #372** — a named unary's operand may BEGIN with a named unary
+   (stacked filetests `-f -d $x`); A/B by the fold recipe.  Fable designs
+   the operand grammar first (§3 item 2) — Opus executes.
+9. **Track B2 #343** — the parenless-call × named-unary × low-prec shape.
+10. **Fillers #369** (`qx{}` delimiters DROPPED — silent wrong) + **#370**
+    (PPI lexes term-initial `~~` as smartmatch; rule 13 already logged) →
+    **re-census** → **the announce→DIE flip** for file mode (the last step;
+    plan-post-s400 §3 item 3).  #374 half (b) (a keyword-named lexical sub is
+    a call only in TERM position — corrected in the task this session) and
+    #365 (imported `()`-sub bareword) wait for `_reduce_term` here.
+
+**Sessions M–N — release phase 3–5.**
+11. **#279** repo hygiene (USER ruled s401: docs stay AS-IS under `docs/`;
+    root junk + the 29 loose planning `.md`s + `.gitignore`) → **#280**
+    README/STATUS/CHANGELOG → **#282** fresh-machine gate → **#283** CI.
+    **#359** stays behind the release (fd-3 announces).
+
+**Cross-cutting, every session:** the WHAT-TO-RUN table in CLAUDE.md decides
+what runs; a review request per session (`docs/opus5-review-requests-sNNN.md`)
+with the asks that need a ruling; every probe-found silent-wrong FILED with
+its reproducer (this session: #376, #377).
+
+## 3. Fable queue
+
+1. **This session (s409)**: the review, `docs/fable-answers-s408.md`, this
+   plan, DECIDED s409, CLAUDE.md pointer, tasks #376/#377 filed and #374
+   corrected.
+2. **#281 design half**: the string-literal escape (§3.2 of
+   `generated-cl-ir-review.md`) and `p-cond` (#218) behind the bench; the
+   macro vocabulary where it clarifies at zero speed cost.  Fable writes the
+   arms as a worklist; Opus executes (session I takes the FREE items now).
+3. **Option B phase 2 B1 design** — the operand grammar (`_reduce_term` /
+   `_term_extent`: a named unary's operand may begin with a named unary,
+   without touching the `$end_pars` region in place).  Needed before session
+   K; one Fable session, A/B recipe attached.
+4. **Boxed aggregates** (E5) — after v0.1, unchanged.  Its first consumer is
+   already waiting: `lib/experimental.pm` is a shim whose delete-when trigger
+   is `for values %h` aliasing (`Pl/t/feature-pragma-01.t` guards it).
+5. **#221** (the minimal warnings model) — first item of the POST-release
+   correctness backlog.
+
+## 4. Standing rules added by the s408 review (also in DECIDED s409)
+
+- **A census INCREASE is legal when it converts a WORSE failure into a counted
+  drop** (a crash-form the census cannot see → an announced drop): the edit
+  note names the form it replaced and the task that owns the residue, the
+  file's verdict must not regress, sweep TOTAL/LOST unchanged.  Holding such a
+  change until the drop is fixed would freeze the census as a ratchet on a
+  metric that does not count crash-forms.
+- **A gate row count is compared against a measurement of the SAME tree**,
+  never against a number in a doc — the pclxs xs files (`xs-01/02/03.t`)
+  contribute 0–14 rows depending on where pclxs's current state aborts them.
+  When only a written number is at hand, subtract the xs rows PRODUCED IN
+  EACH RUN before comparing.
+- **An eval-mode drop DIES; "announce over the protocol and continue" is
+  rejected** — it would keep the wrong VALUE (undef, `$@` empty) that the
+  program consumes, which is rule 12's value-flows-onward case.  A lost row
+  whose assertion is "no error" about a construct PCL cannot compile is not a
+  cost.
+- **A fragment mini-parse (`PPI::Document->new` on an interpolated span) is
+  the codebase's established pattern** (28 sites in StringInterpolation /
+  ExprToCL / Parser); one more that reuses the token-stream predicate is
+  fine.  Full documents still have ONE construction site (`_ppi_new`).
+
+## 5. Decisions that are the USER's — still open (from plan-post-s400 §4)
+
+1. **Public name** — "PCL" collides; cheap to settle before #280.
+2. **pclxs bundling** — release PCL first, mention pclxs as the experimental
+   XS sibling; its GitHub push stays your call (#92).
+3. **Hosting / remote** — the repo has no remote; #283 (CI) waits on it.
+
+## 6. Guardrails (unchanged from plan-post-s400 §5, restated for the reader)
+
+- The WHAT-CHANGED table decides what runs; name-resolution / scoping /
+  rename ⇒ the full sweep IS the gate (sessions H and J–L are all of that
+  kind).
+- A census uses `grep -a` or perl; a guard reads bytes.
+- Every silent-wrong found by a probe is FILED with its reproducer before the
+  session ends.
+- Baselines are edited ROW BY ROW with causes; `save-status` re-blesses only
+  gate-green after a per-file audit.
+- Do not touch the `$end_pars` region in place (Option B phase 2 owns it).
+- **Never edit the compiler while a measurement runs.**
+- **A `cl/**` change re-runs the companion DIRS it touches** — #368 re-ran one
+  file (op/current_sub.t) and missed op/sub.t in the same dir; the row says
+  "the dirs the change touches", and it means the dir.

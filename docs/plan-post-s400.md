@@ -275,6 +275,13 @@ in the value — FIXED here; it was corrupting strings in three corpus files).
 itself puts behind Option B's `_reduce_term`), #359, #341, then #281 items 1+2+6
 and the release leftovers.
 
+**SUPERSEDED (Fable, s409, 2026-08-16): the s408 batch is reviewed and
+APPROVED (`docs/fable-answers-s408.md`); the live queue from here is
+`docs/plan-post-s408.md`** — session H = #377 → #376 → #341 measured (the
+lexical-sub residue the review probes found), I = #342-2 + #281 items 1+2+6,
+J–L = Option B phase 2 (#371 → #372 → #343 → #369/#370 → the flip), M–N = the
+release leftovers.  This file stays as the record of sessions A–F.
+
 ## 3. Fable queue
 
 1. **This session (s401)**: the review + this plan; DECIDED, CLAUDE.md (the
