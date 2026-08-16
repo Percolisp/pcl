@@ -237,6 +237,7 @@ sessions, in order:**
    pre-pass on the replacement text), then **#365** (imported `()`-sub bareword
    at the operator-loop term site — the #266 classifier), **#368** (anon
    `__SUB__` dies), **#359** (behind the release; fd-3 announces).
+5b. **#281 items 1+2+6** (context-bind macros `p-list-ctx`/`p-scalar-ctx`/`p-caller-ctx`, per-file defvar dedupe, `p-sort-cmp` — same expansions, FREE; ir-spec updated normatively; full emission-changing verification + gen bump + artifacts) — may run in parallel with anything above.
 6. **Option B phase 2, as SIZED in `docs/option-b-phase2-plan.md`** (Fable,
    s407 — the census is ~300 feature absences, ~40 term grammar, ~15 lexer
    bugs): **Track A #371** (feature-absence drops become ruled refusals — one
@@ -258,7 +259,7 @@ a SILENT-WRONG task carries the EMISSION of its reproducer.
 1. **This session (s401)**: the review + this plan; DECIDED, CLAUDE.md (the
    WHAT-CHANGED table, the pointer), tasks #349/#350 filed and #217/#221/
    #338/#339/#343/#345/#348 updated with their rulings.
-2. **#281 — the IR pass (release phase 2), DESIGN first.**  Re-measure the
+2. **#281 — the IR pass (release phase 2), DESIGN first.**  **Step 1 MEASURED s407** (`generated-cl-ir-review.md` "Measured again"): items 1 (context-bind macros), 2 (defvar dedupe) and 6 (`p-sort-cmp`) are FREE and may go to Opus as one commit set now; the string-literal escape (§3.2) and `p-cond` (#218) are the design half and wait for the bench.  Re-measure the
    `generated-cl-ir-review.md` friction list against v2-148 emission (raw
    seams, context-bind noise, host-idiom constructors, #218 nested p-if
    chains, #219 void-position comma arms), then the macro vocabulary where it

@@ -504,3 +504,61 @@ nesting is fixed.  Also visible everywhere, already catalogued: §3.5
 context binds, §3.4/§4b.1 mixed assignment spellings (`p-my-=` /
 `p-scalar-=` / `p-list-=` / `setf` / `box-set` on one screen), duplicate
 `defvar $a/$b` + qualified/unqualified `$VERSION` pairs (#66 family).
+
+### Measured again (s407, pl2cl at gen v2-151 — #281 step 1, Fable)
+
+Same three-file shape plus corpus/lib samples; counters per emitted file
+(`ind>40` = lines indented past column 40, `lead-ws` = leading-whitespace bytes,
+`wa/100L` = `(let ((*wantarray* …))` binds per 100 output lines, `echo;;` =
+`;; <perl source>` echo comments, `dupdv` = duplicate `(defvar X` lines,
+`%_args` = `(declare (ignore %_args) …)` lines, `maxdep` = deepest paren depth):
+
+| file | out lines | ind>40 | lead-ws | wa/100L | echo;; | dupdv | %_args | maxdep |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Try::Tiny | 341 | 0% | 18% | 8.2 | 24 | 4 | 0 | 21 |
+| Data::Dump | 1206 | 35% | 54% | 7.0 | 19 | 2 | 0 | 43 |
+| perl-tests/closure.t | 1495 | 9% | 37% | 16.1 | 21 | 2 | 0 | 30 |
+| perl-tests/sort.t | 3900 | 9% | 35% | 17.4 | 41 | 19 | 0 | 28 |
+| perl-tests/hash.t | 633 | 2% | 24% | 10.9 | 26 | 6 | 0 | 22 |
+| lib/List/Util.pm | 702 | 0% | 21% | 10.7 | 7 | 2 | 0 | 13 |
+
+What changed since s335 and what did not — the #281 worklist, ranked by
+measured frequency:
+
+1. **§3.5 context binds are still the loudest thing in the file**: 7–17 per
+   100 lines, i.e. every 6th–14th line.  Three macros (`p-list-ctx`,
+   `p-scalar-ctx`, `p-caller-ctx`), expansion identical → free.  FIRST.
+2. **§3.6 duplicate defvars are real and per-section**: sort.t emits
+   `(defvar $a …)`/`(defvar $b …)` TEN times each (one pair per section) plus
+   `Bar::$a` twice; every file carries 2–19.  Assembly-time `%seen` per
+   file.  Free.
+3. **§3.1's printing symptom is GONE** — no flush-left restarts mid-form in
+   any sample (the E2 layout work + the fold); the remaining `raw` regions
+   print through CLForm.  What is left of §3.1 is the *structural* half
+   (CLForm not yet the total carrier — the s386 88% seam rate), which is
+   #153's, not #281's.
+4. **§3.2 control characters inside string literals — unchanged**: every
+   `"…\n"` prints an actual newline (Data::Dump has 37 such continuation
+   lines).  A printer-side escape needs a reader-side counterpart (CL has no
+   `\n`); candidates: emit `(p-str "a" #\Newline "b")`-style concatenation for
+   literals with control characters, or a `#.`-free reader macro.  Design
+   item, not free — measure the load-time cost before choosing.
+5. **#218 nesting is Data::Dump's whole 35% / depth 43** (elsif chains and
+   sequential `my` lets); Try::Tiny and List::Util are flat.  `p-cond` for
+   elsif chains is a macro that changes shape → bench; `let*` runs (#213 b)
+   at E5.
+6. **The sort comparator boilerplate** `(lambda ($a $b) (catch :p-return
+   (block nil …)))` appears once per `sort BLOCK`; a `p-sort-cmp` macro with
+   the same expansion names the semantic rule (§3.6: `return` exits a sort
+   block) — free.
+7. `%_args` declares are gone (0 everywhere) — the s335 item is closed.
+8. The `;; <perl source>` echo comments (7–41 per file) are the seam's
+   traceability line; keep, but the spec should say they are comments a
+   consumer may drop (§4b.1's two-dialect note stands until #153's FOLD).
+
+Everything under 1, 2 and 6 is emission-changing at zero runtime cost and
+can go in ONE Opus commit set: corpus-diff explained per file (every diff
+is one of the three shapes), gate, sweep TOTAL/LOST, gen bump, the three
+artifacts regenerated, and `docs/ir-spec.md` updated normatively (§6.x for
+the context macros, the sort-comparator rule).  Items 4 and 5 are the
+design half of #281 and wait for the bench.
