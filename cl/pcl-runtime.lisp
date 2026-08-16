@@ -11757,7 +11757,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-154"
+(defparameter *pcl-cache-generation* "v2-155"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -16446,18 +16446,22 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Stub packages for common Perl modules
 ;;; ============================================================
 
-;; CORE::__SUB__ inside an ANONYMOUS sub (task #368).  A NAMED sub's __SUB__ is
-;; rewritten to \&name at parse time and is correct; only the anon path reaches
-;; here, and PCL does not track the current sub.
+;; CORE::__SUB__ that the PARSE could not resolve.  Both sub shapes are
+;; rewritten at the shared PPI entry (_rewrite_current_sub): a NAMED sub's
+;; __SUB__ becomes \&name, an ANONYMOUS sub's becomes a self-reference
+;; variable (task #378).  What is left over reaches here — __SUB__ in no sub
+;; at all (perl: undef) and __SUB__ inside a STRING EVAL, whose enclosing sub
+;; this parse cannot see (perl: the sub containing the eval).
 ;;
-;; This used to return a no-op lambda, and that is the worst shape a gap can
-;; take: `sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) }` printed 0 where
-;; perl prints 120 — a VALUE the program then consumed, silently.  Rule 12's
-;; boundary (s329) says exactly this case DIES; an effect-only gap may announce
-;; and continue, one whose value flows onward may not.
+;; It DIES rather than answering either of those, because the wrong answer is
+;; a VALUE the program consumes: the first shape this function ever had was a
+;; no-op lambda, and `sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) }`
+;; then printed 0 where perl prints 120 — silently.  Rule 12's s329 boundary
+;; says exactly this case dies; an effect-only gap may announce and continue.
 (defun pl-__SUB__ ()
-  (error "PCL: __SUB__ inside an anonymous sub is not supported ~
-          (docs/not-supported.md); a NAMED sub's __SUB__ works"))
+  (error "PCL: __SUB__ outside any sub, or inside a string eval, is not ~
+          supported (docs/not-supported.md); in a named or anonymous sub ~
+          it works"))
 
 ;; utf8::unicode_to_native / native_to_unicode map between Unicode and the
 ;; platform's native code point.  On any ASCII (non-EBCDIC) platform — which is

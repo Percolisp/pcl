@@ -696,41 +696,45 @@ the `reset` / `?pat?` tests fail).
 
 ---
 
-## `__SUB__` (current sub reference)  [PARTIAL — named subs work; anon subs DIE]
+## `__SUB__` (current sub reference)  [PARTIAL — in a sub it works; outside one it DIES]
 
 **Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
 reference to the currently executing subroutine, enabling anonymous subs
 to recurse without a named variable.
 
-**PCL behaviour (since s316o):** Inside a NAMED sub — body or signature
-default — `__SUB__` is rewritten at the shared PPI entry to `(\&name)`
-(`_rewrite_current_sub` in `Pl/Parser.pm`): zero runtime cost, correct
-recursion (op/signatures.t t122), late-bound so redefinition is honored.
-Inside an ANONYMOUS sub it resolves to the runtime stub `pl-__SUB__`, which
-**DIES** (task #368, s408): `PCL: __SUB__ inside an anonymous sub is not
-supported`.
+**PCL behaviour:** both sub shapes are resolved at the shared PPI entry
+(`_rewrite_current_sub` in `Pl/Parser.pm`), so `__SUB__` costs nothing at run
+time and works inside a sub of either kind:
 
-**It used to return a no-op lambda, and that was the wrong failure shape.**
+- a NAMED sub — body or signature default — becomes `(\&name)` (since
+  s316o): correct recursion (op/signatures.t t122), late-bound, so a
+  redefinition is honored;
+- an ANONYMOUS sub becomes a source-level SELF-REFERENCE (task #378, s410):
+  `sub { … __SUB__ … }` → `do { my $__SUB__N; $__SUB__N = sub { … $__SUB__N
+  … }; $__SUB__N }`, innermost enclosing sub wins.  `__SUB__ == $f` holds,
+  because the variable holds the very coderef being built.
+
+**What still dies** — the two shapes the parse cannot resolve:
+
+1. `__SUB__` in NO sub at all.  perl gives `undef`; PCL dies naming the shape.
+2. `__SUB__` inside a STRING EVAL.  perl resolves it to the sub containing the
+   eval; that parse sees only the eval text, so the enclosing sub is not
+   visible (the sub-capture protocol of task #373 is where it would come from).
+
+Both die rather than guess, because the answer is a VALUE the program
+consumes — the shape this feature first had was a no-op lambda, and
 
 ```perl
 my $f = sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) };
 print $f->(5);          #   perl: 120        PCL was: 0
 ```
 
-The stub's value flowed straight into the program's arithmetic, so the gap
-produced a silently wrong NUMBER.  Rule 12's boundary (s329) is exactly this
-test — an effect-only missing case may announce and continue, one whose value
-the program consumes must die — so it does.  A real implementation needs a
-per-closure self binding, which changes closure shape; that is E5-adjacent, not
-a stub fix.
+printed a silently wrong NUMBER.  Rule 12's boundary (s329) is exactly this
+test.  History: #368 (s408) turned the no-op lambda into that die, which cost
+op/sub.t 26 rows by aborting the file at its [perl #122845] closure-recursion
+test; #378 (s410) implemented the feature and got them back.
 
-**Rationale for the anon gap:** an anonymous closure has no name to
-rewrite to; a correct version needs a per-closure self-binding
-(`my $self; $self = sub {…}` shape or a dynamic `*current-sub*`), which
-either changes closure shape or taxes every call.  Anon `__SUB__`
-recursion is rare in CPAN code.
-
-**Affected tests:** anon-`__SUB__` uses only.
+**Affected tests:** `__SUB__` outside a sub, and inside a string eval.
 
 ---
 

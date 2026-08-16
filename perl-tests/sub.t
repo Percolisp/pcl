@@ -210,18 +210,22 @@ use constant { constant1 => 1, constant2 => 2 };
     ok(1, 'SKIP: constant-redefinition warnings not generated in PCL');
 }
 
-## PCL SKIP: CORE::__SUB__ not implemented (see docs/not-supported.md).
-## __SUB__ returns the currently executing sub reference — used here to make an
-## anonymous sub recurse without a named variable. Original test:
-##   package _122845 { our $depth = 0; my $parent;
-##     sub { local $depth = $depth + 1;
-##           our $ok++, return if $depth == 2;
-##           ()= $parent;
-##           our $whatever;    # triggers crash in old Perl without this fix
-##           CORE::__SUB__->(); }->();
-##   };
-##   is $_122845::ok, 1, '[perl #122845] no crash in closure recursion with our-vars';
-ok(1, 'SKIP: CORE::__SUB__ (use feature current_sub) not implemented in PCL');
+package _122845 {
+    our $depth = 0;
+    my $parent; # just to make the sub a closure
+
+    sub {
+	local $depth = $depth + 1;
+	our $ok++, return if $depth == 2;
+
+	()= $parent;  # just to make the sub a closure
+	our $whatever; # this causes the crash
+
+	CORE::__SUB__->();
+    }->();
+};
+is $_122845::ok, 1,
+  '[perl #122845] no crash in closure recursion with our-vars';
 
 ## PCL SKIP: string eval runs in a subprocess and cannot capture outer lexical variables.
 ## Original test: eval '$x' inside a sub nested in 'sub predeclared' should see the

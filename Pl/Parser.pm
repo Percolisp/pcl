@@ -12,6 +12,7 @@ use warnings;
 use Moo;
 
 use PPI;
+use Scalar::Util qw(refaddr);
 use Data::Dump qw/dump/;
 use File::Basename;
 use File::Spec;
@@ -470,10 +471,15 @@ sub _ppi_parse {
   # it strips the `:prototype(...)` attribute (and wraps anon subs), and the
   # signature desugar then finds the now-attribute-free `sub` it spliced in
   # (its find() runs over the already-mutated tree).
+  # _rewrite_current_sub runs LAST: an ANON sub's signature is a single
+  # Token::Prototype until _desugar_anon_signatures turns it into statements,
+  # so a `__SUB__` in a parameter DEFAULT (`sub ($k, $r = __SUB__->($k-1))`)
+  # is not a Word — and therefore invisible — before that pass.  A NAMED sub's
+  # signature is already a Structure, so it never depended on the order.
   if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc)
-               | _rewrite_current_sub($doc)
                | $self->_extract_prototype_attributes($doc)
-               | $self->_desugar_anon_signatures($doc))) {
+               | $self->_desugar_anon_signatures($doc)
+               | _rewrite_current_sub($doc))) {
     my $fixed = $doc->serialize;
     my $redo  = _ppi_new($fixed, %opt);   # the seed applies to the reparse too
     if ($redo) {
@@ -553,63 +559,146 @@ sub _reclassify_bare_vwords {
 }
 
 
-# __SUB__ (feature "current_sub") inside a NAMED sub — body or signature
-# default (op/signatures.t t122: `sub f ($c = 5, $r = $c > 0 ?
-# __SUB__->($c-1) : "")` recurses through the default) — is statically the
-# enclosing sub, so rewrite the token to `(\&name)` at the shared PPI entry:
-# zero runtime cost, works in both pipelines, and p-backslash-sub's
-# late-binding keeps redefinition semantics.  Inside an ANONYMOUS sub the
-# self-reference has no name; those keep the runtime stub (documented gap —
-# a correct version needs a per-closure binding, which taxes every call).
-# The walk stops at the INNERMOST enclosing sub, so an anon sub nested in a
-# named one correctly refuses the rewrite.
+# __SUB__ (feature "current_sub") is the sub currently executing.  Both
+# spellings — the bare word and `CORE::__SUB__` — are rewritten at the shared
+# PPI entry, so the answer is static and costs nothing at run time; the walk
+# always stops at the INNERMOST enclosing sub.
+#
+#   NAMED sub  → `(\&name)`.  Its body or its signature default both count as
+#     "lexically inside" (op/signatures.t t122: `sub f ($c = 5, $r = $c > 0 ?
+#     __SUB__->($c-1) : "")` recurses through the default).  p-backslash-sub's
+#     late binding keeps redefinition semantics.
+#
+#   ANON sub   → a source-level SELF-REFERENCE (task #378).  The closure has
+#     no name to take a reference to, so give it one:
+#
+#       sub { … __SUB__ … }
+#         → do { my $__SUB__N; $__SUB__N = sub { … $__SUB__N … }; $__SUB__N }
+#
+#     `my $w; $w = sub { $w->(…) }` is a shape PCL already compiles, so this
+#     rides an existing path with no new mechanism, and `__SUB__ == $f` holds
+#     because the variable holds the very coderef being built.  Anon subs that
+#     do not mention the token are untouched.  (The rejected alternative was a
+#     dynamic *pcl-current-sub* bound per anon call — a special bind on EVERY
+#     call to serve a rare token.)  Before #378 these died in the runtime stub,
+#     which cost op/sub.t 26 rows by aborting the file at its [perl #122845]
+#     closure-recursion test.
 sub _rewrite_current_sub {
   my ($doc) = @_;
   my $changed = 0;
+  my (@blocks, %words_of);            # anon-sub block => its __SUB__ tokens
 
   for my $word (@{ $doc->find('PPI::Token::Word') || [] }) {
-    next unless $word->parent && ($word->content // '') eq '__SUB__';
-    my $name;
-    for (my $el = $word->parent; $el; $el = $el->parent) {
-      # A signature/list directly under a sub statement, or the sub's block:
-      # both mean "lexically inside that sub".
-      my $par = $el->parent or last;
-      if ($el->isa('PPI::Structure::Block')) {
-        if ($par->isa('PPI::Statement::Sub') && defined $par->name) {
-          $name = $par->name;
-          last;
-        }
-        # Anon-sub block?  Walk back over sig/proto/attribute tokens to `sub`.
-        my $p = $el->sprevious_sibling;
-        while ($p && ($p->isa('PPI::Structure::List')
-                   || $p->isa('PPI::Structure::Signature')
-                   || $p->isa('PPI::Token::Prototype')
-                   || $p->isa('PPI::Token::Attribute')
-                   || ($p->isa('PPI::Token::Operator') && $p->content eq ':'))) {
-          $p = $p->sprevious_sibling;
-        }
-        last if $p && $p->isa('PPI::Token::Word') && $p->content eq 'sub';
-      }
-      elsif (($el->isa('PPI::Structure::Signature')
-              || $el->isa('PPI::Structure::List'))
-             && $par->isa('PPI::Statement::Sub') && defined $par->name) {
-        $name = $par->name;
-        last;
-      }
+    next unless $word->parent;
+    next unless ($word->content // '') =~ /^(?:CORE::)?__SUB__$/;
+    my ($name, $block) = _current_sub_owner($word);
+    if (defined $name) {
+      _replace_element($word, "(\\&$name)");
+      $changed = 1;
+      next;
     }
-    next unless defined $name;
+    next unless $block;
+    # refaddr, NOT the object: PPI overloads stringification to an element's
+    # CONTENT, so a text key would both collide between two identical anon
+    # subs and go STALE the moment a nested one is rewritten (measured: the
+    # outer sub's own __SUB__ silently kept the runtime stub).
+    push @blocks, $block unless $words_of{ refaddr $block };
+    push @{ $words_of{ refaddr $block } }, $word;
+  }
 
-    my $text = "(\\&$name)";
-    my $ndoc = PPI::Document->new(\$text) or next;
-    my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
-             $ndoc->children;
-    $_->remove for @el;
-    $word->insert_before($_) for @el;
-    $word->delete;
-    $changed = 1;
+  # Innermost first: wrapping a block SERIALIZES it, so a nested anon sub must
+  # already carry its own rewrite when its parent is re-emitted.  Depth is the
+  # ancestor count — the same "the covering declaration with the latest start
+  # wins" ordering #337's lexical-sub rename uses.
+  my %depth = map { refaddr($_) => _ppi_depth($_) } @blocks;
+  my $n = 0;                       # per-DOCUMENT: emission stays deterministic
+  for my $block (sort { $depth{refaddr $b} <=> $depth{refaddr $a} } @blocks) {
+    $changed = 1 if _wrap_anon_self_ref($block, $words_of{ refaddr $block }, $n++);
   }
 
   return $changed;
+}
+
+# Replace one element with the elements a fragment mini-parse produces.
+sub _replace_element {
+  my ($el, $text) = @_;
+  my $ndoc = PPI::Document->new(\$text) or return 0;
+  my @new = map { $_->isa('PPI::Statement') ? $_->children : $_ }
+            $ndoc->children;
+  $_->remove for @new;
+  $el->insert_before($_) for @new;
+  $el->delete;
+  return 1;
+}
+
+sub _ppi_depth {
+  my ($el) = @_;
+  my $d = 0;
+  $d++ while $el = $el->parent;
+  return $d;
+}
+
+# The sub a `__SUB__` token belongs to: (NAME, undef) for a named sub,
+# (undef, BLOCK) for an anonymous one, () when it is in no sub at all.
+sub _current_sub_owner {
+  my ($word) = @_;
+  for (my $el = $word->parent; $el; $el = $el->parent) {
+    # A signature/list directly under a sub statement, or the sub's block:
+    # both mean "lexically inside that sub".
+    my $par = $el->parent or last;
+    if ($el->isa('PPI::Structure::Block')) {
+      return ($par->name, undef)
+        if $par->isa('PPI::Statement::Sub') && defined $par->name;
+      return (undef, $el) if _anon_sub_word($el);
+    }
+    elsif (($el->isa('PPI::Structure::Signature')
+            || $el->isa('PPI::Structure::List'))
+           && $par->isa('PPI::Statement::Sub') && defined $par->name) {
+      return ($par->name, undef);
+    }
+  }
+  return ();
+}
+
+# The `sub` keyword heading an ANONYMOUS sub whose body is $block, or undef.
+# Walks back over the signature/prototype/attribute tokens that may sit
+# between the keyword and the `{`.
+sub _anon_sub_word {
+  my ($block) = @_;
+  my $p = $block->sprevious_sibling;
+  while ($p && ($p->isa('PPI::Structure::List')
+             || $p->isa('PPI::Structure::Signature')
+             || $p->isa('PPI::Token::Prototype')
+             || $p->isa('PPI::Token::Attribute')
+             || ($p->isa('PPI::Token::Operator') && $p->content eq ':'))) {
+    $p = $p->sprevious_sibling;
+  }
+  return $p if $p && $p->isa('PPI::Token::Word') && $p->content eq 'sub';
+  return undef;
+}
+
+# `sub SIG { … __SUB__ … }` → `do { my $__SUB__N; $__SUB__N = sub SIG { …
+# $__SUB__N … }; $__SUB__N }`.  No parentheses around the `do`: `print sub
+# {…}->()` would become `print (…)->()`, which perl reads as a call.
+sub _wrap_anon_self_ref {
+  my ($block, $words, $n) = @_;
+  my $head = _anon_sub_word($block) or return 0;
+  my $var  = "\$__SUB__$n";
+
+  _replace_element($_, $var) for @$words;
+
+  my @run;
+  for (my $el = $head; $el; $el = $el->next_sibling) {
+    push @run, $el;
+    last if $el == $block;
+  }
+  return 0 unless @run && $run[-1] == $block;
+
+  my $text = join '', map { $_->content } @run;
+  return 0 unless _replace_element($run[0],
+                                   "do { my $var; $var = $text; $var }");
+  $_->delete for @run[1 .. $#run];
+  return 1;
 }
 
 # The `:prototype(...)` attribute (perl 5.20+) declares a sub's prototype

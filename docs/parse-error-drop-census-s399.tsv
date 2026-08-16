@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 73 files, 381 drops — 9 perl-tests files (12
-# drops), 64 companion files (369), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 73 files, 380 drops — 9 perl-tests files (12
+# drops), 64 companion files (368), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops.  A count that RISES is not automatically a regression:
 # two files that used to die at transpile now emit CL, so their drops became
 # countable for the first time — see the s405 edits — and the s408 edit trades
@@ -79,6 +79,14 @@
 #         blocker is a different one (undef-fn:main::pl-F).  Verified emission-
 #         identical everywhere else: corpus-diff IDENTICAL 111, emission-ab
 #         over perl's own t/ 559 SAME / 1 DIFF (this file).
+#   s410  t/op/current_sub.t 4 -> 3: #378 implements `__SUB__` inside an
+#         ANONYMOUS sub as a source-level self-reference, so the statement
+#         `__SUB__->()` at the head of an expression — the one drop whose cause
+#         was "WTF? :-) Expr starts with ->/brace??", the only instance of that
+#         cause in either population — now lowers.  The remaining 3 are the
+#         `Fell through. Missing case: [` family.  Re-measured directly
+#         (`pl2cl FILE | grep -c ';; PARSE ERROR'`) and by the runner's DROPS
+#         column, which reported it as `4 -> 3 fixed`.
 # Causes, aggregated over files (re-counted from the rows below, s405):
 #   49  Bug. Fell through. Missing case: [        <- the dominant one
 #   20  Handle single node of unknown type
@@ -87,7 +95,7 @@
 #    2  Bug. Fell through. Missing case: [bless({…}, "PPIreference"), undef]
 #    2  Ternary operator: Found '?'
 #    2  Got op X, not postfix. But there is nothing after it??
-#    1  WTF? :-) Expr starts with ->/brace??
+#    0  WTF? :-) Expr starts with ->/brace??  <- FIXED s410 (#378; was 1)
 #    0  Can't locate object method "add_node" via package "Pl::PExpr"  <- an
 #       internal error, not a decline; FIXED s402 (was 1)
 #
@@ -125,7 +133,7 @@ t/op/bless.t	1	Bug. Fell through. Missing case: [ x1
 t/op/bop.t	2	Bug. Fell through. Missing case: [ x2
 t/op/closure.t	3	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x1
 t/op/coreamp.t	7	Bug. Fell through. Missing case: [ x3 | PCL: Can't modify non-lvalue subroutine call in assignment x4
-t/op/current_sub.t	4	Bug. Fell through. Missing case: [ x3 | WTF? :-) Expr starts with ->/brace?? x1
+t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
 t/op/defer.t	13	Bug. Fell through. Missing case: [ x13
 t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2
 t/op/die_unwind.t	4	Bug. Fell through. Missing case: [ x4

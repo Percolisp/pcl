@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 115;
+plan tests => 117;
 
 sub run_cl {
     my ($code) = @_;
@@ -1101,23 +1101,36 @@ test_cl('lexical filehandle stringifies as GLOB(0x..)',
       . '_repair_word_x_call (ppi-upstream-bugs.md §19)' );
 }
 
-# ── #368: `__SUB__` inside an ANONYMOUS sub DIES, it does not return a no-op ──
+# ── #378: `__SUB__` inside an ANONYMOUS sub is the closure itself ─────────────
 #
-# A NAMED sub's __SUB__ is rewritten to (\&name) at the shared PPI entry and is
-# correct; only the anon path reaches the runtime stub.  That stub used to
-# return a no-op lambda, so `sub { … __SUB__->($n-1) }` computed with undef and
-# printed 0 where perl prints 120 — a wrong NUMBER, silently.  Rule 12's
-# boundary (s329): a missing case whose VALUE the program consumes must die.
+# A NAMED sub's __SUB__ is rewritten to (\&name) at the shared PPI entry; the
+# anon one has no name to reference, so the parse gives it one —
+# `do { my $__SUB__N; $__SUB__N = sub { … $__SUB__N … }; $__SUB__N }`.  History:
+# the runtime stub first returned a NO-OP LAMBDA, so this printed 0 where perl
+# prints 120 (a wrong number, silently); #368 made that die by rule 12's s329
+# boundary; #378 implements the feature, which is what real code writes.
 {
+    # One program, four claims — an extra run_cl is an extra SBCL spawn, and
+    # this file's WALL TIME is the gate's constraint (CLAUDE.md 6).
     my $out = run_cl(<<'PERL');
 use feature 'current_sub'; no warnings;
 my $f = sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) };
 print $f->(5), "\n";
+my $s; $s = sub { print +(__SUB__ == $s ? "same" : "diff"), "\n" };
+$s->();
+my $g = sub { my $k = shift; my $in = sub { my $j = shift; $j <= 0 ? "i" : __SUB__->($j-1) };
+              return $k <= 0 ? "o" . $in->(2) : __SUB__->($k-1) };
+print $g->(3), "\n";
 PERL
-    like($out, qr/PCL: __SUB__ inside an anonymous sub is not supported/,
-         '#368: anon __SUB__ dies naming itself, instead of yielding a no-op lambda');
+    like($out, qr/^120$/m,
+         '#378: an anon sub recurses through __SUB__ (perl: 120)');
     unlike($out, qr/^0$/m,
-           '#368: …and never hands back the 0 that came of computing with undef');
+           '#378: …and never hands back the 0 that came of computing with undef');
+    # __SUB__ IS the enclosing coderef, not a copy of it — perl's `__SUB__ ==
+    # $f` is true, and the self-reference rewrite gives exactly that.
+    like($out, qr/^same$/m, '#378: __SUB__ == the coderef that is executing');
+    like($out, qr/^oi$/m,
+         '#378: nested anon subs each get their OWN self-reference');
 }
 {
     # The INVERSE, which must keep working: a NAMED sub recurses through
