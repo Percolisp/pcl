@@ -690,6 +690,51 @@ the `finally {…};` that is left back onto its `try` — the same route the
 unlabeled `continue` block already takes.  Canary:
 `Pl/t/misc-fixes-02.t`; end-to-end guard: `Pl/t/try-catch-01.t`.
 
+## 19. A call to a sub named `x` after a list operator is lexed as the repetition operator  [CONFIRMED 1.291]
+
+**Perl:** `x` is both the repetition operator and a legal sub name, and perl
+decides by asking whether a complete TERM precedes it.  After a list operator
+there is none, so the word is the call:
+
+```perl
+sub x { "PKG" }
+print x(), "|\n";        # perl prints: PKG|
+print x, "|\n";          # perl prints: PKG|   (no parens, same reading)
+print STDOUT x(), "|\n"; # perl prints: PKG|   (a handle is not an operand either)
+```
+
+**PPI:** any Word before `x` counts as a term, so the operator reading wins:
+
+```
+PPI::Token::Word           [print]
+PPI::Token::Operator       [x]        <- WRONG, should be Word
+PPI::Token::Structure      [(]
+PPI::Token::Structure      [)]
+PPI::Token::Operator       [,]
+PPI::Token::Quote::Double  ["|\n"]
+```
+
+Expected: `Word(print) Word(x) Structure(() Structure()) Operator(,) …` — which
+is what PPI produces in every position where it expects a term, e.g. after `=`
+(`my $r = x();`), after a comma, or after the `+` disambiguator
+(`print +x(), …`).
+
+**PPI version tested:** 1.291.
+
+**Repro + failing row:** Bug 16 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: SILENT WRONG, rc 0 (task #361).**  `print x(), "|\n"` compiled
+to `(p-str-x (p-print $_) (progn))` — the print of `$_` repeated zero times.
+Nothing was printed and nothing was announced.  `Pl::Parser2::_repair_word_x_call`
+inserts perl's own disambiguator (a unary `+`, a documented no-op that PCL
+already emits as a plain call) when the Word before `x` is not a DECLARED term —
+the same condition `_repair_word_match` uses for `/PATTERN/` (§11), with the
+ALL-CAPS shortcut dropped, because an ALL-CAPS word before `x` is a filehandle
+rather than a constant.  Guard rows: `Pl/t/bareword-call-01.t`; canary:
+`Pl/t/misc-fixes-02.t`.
+
+---
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting

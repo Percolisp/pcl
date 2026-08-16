@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -166,3 +166,41 @@ test_cl('array subscripts and numeric keys are untouched',
     'my @a = (10,20,30); my %h = (-1 => 5);'
   . ' print "$a[-1] $a[1] ", join(",", %h), "\n";',
     "30 20 -1,5\n");
+
+# ── `x`: the one operator-shaped name that is a legal sub name (task #361) ───
+#
+# PPI decides operator-vs-term by looking at the token before `x`, and counts
+# any Word as a complete term — so `print x(), …` came out as
+# `(print $_) x ()`, which prints NOTHING and says nothing (silent wrong, rc 0).
+# perl reads it as the call, because a list operator cannot be the left operand
+# of `x`.  The repair (Parser2::_repair_word_x_call) fires only when the word
+# before is not a DECLARED term, which is what keeps the three inverse guards
+# below reading as repetition.
+
+test_cl('a call to a sub named x after print is a call, not repetition',
+    qq{sub x { "PKG" }\nprint x(), "|\\n";}, "PKG|\n");
+
+test_cl('the same call without parens is still a call',
+    qq{sub x { "V" }\nprint x, "|\\n";}, "V|\n");
+
+test_cl('a call to x after a FILEHANDLE word is a call',
+    qq{sub x { "S" }\nprint STDOUT x(), "|\\n";}, "S|\n");
+
+# INVERSE: a DECLARED constant IS a term, so `x` after it stays the operator —
+# and this shape used to be dropped whole ("Fell through. Missing case: []")
+# because PCL read every ALL-CAPS bareword after print as a filehandle.
+test_cl('a constant before x keeps the repetition operator',
+    qq{use constant FOO => "-";\nprint FOO x 3, "\\n";}, "---\n");
+
+# INVERSE: same for the other binary operators after a constant — all three
+# were dropped statements before #361.
+test_cl('a constant before . - == is an operand, not a filehandle',
+    qq{use constant N => 10;\nuse constant S => "a";\n}
+  . qq{print S . "b", " ", N - 1, " ", (N == 10 ? "y" : "n"), "\\n";},
+    "ab 9 y\n");
+
+# INVERSE: a real filehandle word followed by a term is still a filehandle,
+# and a string or scalar before x is still repetition.
+test_cl('print STDOUT -1 is a handle plus an argument; "-" x 5 is repetition',
+    qq{print STDOUT -1, "\\n"; print "-" x 5, "\\n"; my \$s = "="; print \$s x 3, "\\n";},
+    "-1\n-----\n===\n");

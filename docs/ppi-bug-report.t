@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 15;
+use Test::More tests => 16;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -267,4 +267,20 @@ PERL
     ok( (grep { $_->content =~ /^is\(/ } @s),
         'the statement after a finally block should be its own statement' )
         or diag "got: " . join(' | ', map { $_->content =~ s/\s+/ /gr } @s);
+}
+
+# ── Bug 16: a call to a sub named `x` is lexed as the repetition operator ────
+#
+# `x` is both an operator and a legal sub name, and perl decides by asking
+# whether a complete TERM precedes it.  After a list operator there is none, so
+# `print x(), "|\n"` calls x() — PPI counts the Word `print` as a term and
+# emits Operator(x), which reads as "print $_ repeated () times".
+{
+    my $doc = PPI::Document->new(\'sub x { "PKG" } print x(), "|\n";');
+    my ($op) = grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+               $doc->tokens;
+    ok( !$op, '`x` after a list operator should be a Word (a call), not an Operator' )
+        or diag "got Operator(x) at: " . join(' ',
+             map { ref($_) . '[' . $_->content . ']' }
+             grep { $_->significant } $doc->tokens);
 }

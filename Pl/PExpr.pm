@@ -178,6 +178,22 @@ sub is_list { shift->token_utils->is_list(@_) }
 sub is_word { shift->token_utils->is_word(@_) }
 sub is_internal_node_type { shift->token_utils->is_internal_node_type(@_) }
 
+# Is NAME a zero-argument function — `use constant NAME => …`, `sub NAME () {…}`,
+# a `*NAME = sub () {…}` glob install?  Perl calls such a word a TERM, and that
+# one fact decides two things in this file: the word lowers to a call with no
+# arguments (the bareword branch of parse()), and it is NOT a print filehandle
+# (`print FOO . "b"` is a concatenation, `print STDOUT -1` is a handle plus an
+# argument).  ONE copy, because the two readings must never disagree — a word
+# that is a term for one of them and a handle for the other is how
+# `print FOO x 3` came to be dropped whole (task #361).
+sub _is_zero_arg_func {
+  my ($self, $name) = @_;
+  return 0 unless $self->has_environment && $self->environment->has_prototype($name);
+  my $sig = $self->environment->get_prototype($name);
+  return 0 unless $sig && defined $sig->{min_params};
+  return ($sig->{min_params} == 0 && @{ $sig->{params} || [] } == 0) ? 1 : 0;
+}
+
 # The maximal run of Cast tokens immediately before position $p in @$e.
 # Returns the index of the FIRST (outermost) cast, or $p itself when the
 # token before $p is not a Cast.  The caller takes @$e[$start .. $p-1] as the
@@ -748,9 +764,7 @@ sub parse {
       my $name = $e1->content;
 
       # Check if this is a known zero-arg function (e.g., constant)
-      if ($self->has_environment && $self->environment->has_prototype($name)) {
-        my $sig = $self->environment->get_prototype($name);
-        if ($sig->{min_params} == 0 && @{$sig->{params}} == 0) {
+      if ($self->_is_zero_arg_func($name)) {
           # Zero-arg function — a funcall node whose ONLY child is the name.
           # That is the shape the rest of this file reads back ("Zero-param
           # funcall has exactly 1 child (the function name)", the `*`
@@ -767,7 +781,6 @@ sub parse {
           say "parse(): Made funcall node $call_id for zero-arg function $name"
               if 1 & DEBUG;
           return $call_id;
-        }
       }
 
       # Regular bareword (filehandle, etc.)
@@ -4216,9 +4229,21 @@ sub handle_subcalls {
       # open(foo, ...) — Perl allows `print foo LIST` for any-case handles.
       if ($self->is_word($maybe_fh)) {
         my $fh_name = $maybe_fh->content;
-        if ($fh_name =~ /^[A-Z][A-Z0-9_]*$/
-            || ($self->has_environment
-                && $self->environment->is_filehandle($fh_name))) {
+        # A word this document declared as a zero-arg sub — `use constant FOO
+        # => …`, `sub FOO () {…}` — is a TERM, and perl reads it as one:
+        # `print FOO . "b"`, `print FOO - 1`, `print FOO x 3` all print the
+        # constant's value combined with the operand, while `print STDOUT -1`
+        # prints -1 to STDOUT.  The discriminator is the WORD (declared or
+        # not), not what follows it (probed s406, task #361).  PCL took every
+        # ALL-CAPS bareword as a handle, so those three statements were DROPPED
+        # whole ("Fell through. Missing case: []") — the operator had no left
+        # operand once the word was pruned as a filehandle.  A name that IS a
+        # registered filehandle stays one: `open(FOO, …)` wins over a same-named
+        # constant, because that is the only reading that can be intended.
+        my $registered_fh = $self->has_environment
+                         && $self->environment->is_filehandle($fh_name);
+        if (($fh_name =~ /^[A-Z][A-Z0-9_]*$/ || $registered_fh)
+            && ($registered_fh || !$self->_is_zero_arg_func($fh_name))) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
           # A comma/fat-comma right after the bareword means it is a LIST

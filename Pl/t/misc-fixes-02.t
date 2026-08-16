@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 110;
+plan tests => 111;
 
 sub run_cl {
     my ($code) = @_;
@@ -1076,3 +1076,17 @@ test_cl('lexical filehandle stringifies as GLOB(0x..)',
     'my $buf = ""; open(my $fh, ">", \$buf) or die;'
   . ' my $s = "$fh"; print $s =~ /^GLOB\(0x[0-9a-f]+\)$/ ? "ok\n" : "bad:$s\n";',
     "ok\n");
+
+# ── PPI bug CANARY for the `x`-as-operator mis-lex PCL WORKS AROUND ──────────
+# `sub x {…} print x(), …` — PPI counts the Word before `x` as a term, so the
+# call comes out as the repetition operator (ppi-upstream-bugs.md §19, report
+# bug 16).  PCL's _repair_word_x_call is keyed on that, so when PPI is fixed
+# this row FAILS: drop the repair, do not "fix" the row.
+{
+    my $doc = PPI::Document->new(\'sub x { "PKG" } print x(), "|\n";');
+    ok( $doc && grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+                $doc->tokens,
+        'CANARY: PPI still lexes a call to a sub named `x` after a list '
+      . 'operator as the repetition operator — if this FAILS, drop '
+      . '_repair_word_x_call (ppi-upstream-bugs.md §19)' );
+}

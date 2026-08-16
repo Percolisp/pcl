@@ -36,6 +36,12 @@
 #         either population whose emission the fix moved) stopped dying, so it
 #         has CL to count for the first time.  Its 8 drops are the `my sub`
 #         shapes the term grammar cannot lower — task #337's own territory.
+#   s406  t/op/lexsub.t 8 -> 6: two of those drops were `is x, 3, '…'`, where
+#         PPI lexed the call to a sub named `x` as the repetition operator
+#         (#361, ppi-upstream-bugs.md §19).  With _repair_word_x_call the two
+#         statements lower and RUN.  This file is the only one in either
+#         population whose emission #361 moves (emission-ab 605 files:
+#         604 SAME / 1 DIFF / 0 RCDIFF; corpus-diff identical).
 #
 # Causes, aggregated over files (re-counted from the rows below, s405):
 #   49  Bug. Fell through. Missing case: [        <- the dominant one
@@ -95,7 +101,7 @@ t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	8	Bug. Fell through. Missing case: [ x3 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x4
+t/op/lexsub.t	6	Bug. Fell through. Missing case: [ x3 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/override.t	2	Handle single node of unknown type. Dump: x2
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2

@@ -954,13 +954,15 @@ sub parse {
   $doc = $self->_repair_nary_foreach($doc);
   $doc = $self->_repair_alias_foreach($doc);
 
-  # PPI LEXER BUGS in the OPERATOR-vs-TERM decision, both of which eat a whole
-  # statement: `)*name` lexed as a glob (#354) and `/PATTERN/` after a
-  # paren-less call lexed as division (#351).  Both are repaired on the raw
-  # token stream with perl's own rule — see _repair_glob_multiply and
-  # _repair_word_match.
+  # PPI LEXER BUGS in the OPERATOR-vs-TERM decision, each of which eats a whole
+  # statement: `)*name` lexed as a glob (#354), `/PATTERN/` after a paren-less
+  # call lexed as division (#351), and a call to a sub named `x` after a list
+  # operator lexed as the repetition operator (#361).  All three are repaired
+  # on the raw token stream with perl's own rule — the word before must not be
+  # a TERM — see _repair_glob_multiply, _repair_word_match, _repair_word_x_call.
   $doc = $self->_repair_glob_multiply($doc);
   $doc = $self->_repair_word_match($doc);
+  $doc = $self->_repair_word_x_call($doc);
 
   # PPI LEXER BUG: a `finally { … }` block is not part of the try Compound PPI
   # built, and the orphan statement it starts swallows the rest of the block —
@@ -4572,6 +4574,48 @@ sub _repair_word_match {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
+# PPI LEXER BUG (task #361, docs/ppi-upstream-bugs.md §19).  `x` is both an
+# operator and a legal sub name, and PPI decides which by looking at the token
+# before it — a Word counts as a complete term, so:
+#
+#     sub x { "PKG" }  print x(), "|\n";
+#         => Word(print) Operator(x) Structure(() …      WRONG
+#
+# and the statement compiles to `(print $_) x ()` — the print of $_ repeated
+# zero times.  It prints NOTHING and announces nothing: silent wrong, rc 0.
+# perl reads it as the call (measured: "PKG|"), because `print` is a list
+# operator and cannot be the left operand of `x`.
+#
+# SAME CONDITION AS _repair_word_match, and the same reason it is safe: the
+# previous Word must not be a TERM.  `print FOO x 3` (a constant), `print "-" x
+# 5`, `print $s x 3` and `print g() x 3` all keep the operator reading, because
+# the token before `x` is a term in each.  `x` is the only member of this
+# family that is legal perl at all — every other operator-shaped name (eq, lt,
+# cmp, and, …) is a compile error as a sub name, and `not` is a named unary
+# that PPI already gets right (both probed s406).
+#
+# The repair is perl's own disambiguator: a unary `+` in front of the call,
+# which is a documented no-op and makes PPI lex the word as a word.  PCL
+# already emits `+x()` as a plain call, so the fix costs no emission shape.
+sub _repair_word_x_call {
+  my ($self, $doc) = @_;
+  my @tok = grep { $_->significant } $doc->tokens;
+  my $repaired = 0;
+  for my $i (1 .. $#tok) {
+    my ($prev, $t) = @tok[$i - 1, $i];
+    next unless $t->isa('PPI::Token::Operator') && $t->content eq 'x';
+    next unless $prev->isa('PPI::Token::Word');
+    # DECLARED terms only: an ALL-CAPS word that this document does not declare
+    # as a constant is a FILEHANDLE here (`print STDOUT x(), …`), and a handle
+    # is not an operand, so perl reads the `x` as the call.  A declared
+    # constant (`use constant FOO => "-"; print FOO x 3`) keeps the operator.
+    next if $self->_word_is_declared_term($prev->content, $doc);
+    $t->set_content('+x');
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
 # PPI LEXER BUG (task #340, docs/ppi-upstream-bugs.md §18).  With
 # `use feature 'try'` in scope PPI 1.291 knows the construct half way: it lexes
 # `try {…} catch (VAR) {…}` into a PPI::Statement::Compound and then STOPS.  A
@@ -4624,9 +4668,19 @@ sub _repair_try_finally {
 #     a token scan, and this is the cheap way not to break it.
 sub _word_is_term {
   my ($self, $name, $doc) = @_;
+  return 1 if $name =~ /^[A-Z][A-Z0-9_]*\z/;
+  return $self->_word_is_declared_term($name, $doc);
+}
+
+# The same question WITHOUT the ALL-CAPS guess, for the callers where an
+# ALL-CAPS bareword is more likely a FILEHANDLE than a constant.  `print FOO x
+# 3` needs the guess (FOO is a constant if it is anything); `print STDOUT x()`
+# needs its absence, because a handle is not an operand and perl reads the `x`
+# as a call.  Splitting the predicate keeps ONE copy of each half.
+sub _word_is_declared_term {
+  my ($self, $name, $doc) = @_;
   my $zero = $self->_zero_arity_builtins;
   return 1 if $zero->{$name};
-  return 1 if $name =~ /^[A-Z][A-Z0-9_]*\z/;
   my $terms = $self->{_doc_term_words} ||= _scan_document_terms($doc);
   return $terms->{$name} ? 1 : 0;
 }
