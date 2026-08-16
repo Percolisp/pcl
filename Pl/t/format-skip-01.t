@@ -38,7 +38,7 @@ sub transpile {
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $code;
     close $fh;
-    return scalar `$pl2cl $pl_file 2>&1`;
+    return scalar PCLCore::transpile(qq{$pl2cl $pl_file});
 }
 
 sub run_cl {

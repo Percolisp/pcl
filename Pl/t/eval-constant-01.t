@@ -29,6 +29,9 @@ use lib ".";
 
 use Test::More tests => 5;
 use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 my $runtime = "cl/pcl-runtime.lisp";
 my $pl2cl   = "./pl2cl";
@@ -38,7 +41,7 @@ sub run_pl {
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $code;
     close $fh;
-    my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+    my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
     close $cl_fh;

@@ -30,7 +30,7 @@ sub run_cl {
     print $fh $code;
     close $fh;
 
-    my $cl_code = `$pl2cl $pl_file 2>&1`;
+    my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
 
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;

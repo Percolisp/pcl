@@ -11,6 +11,9 @@ use strict;
 use warnings;
 use Test::More;
 use File::Temp qw(tempfile tempdir);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 my $pl2cl = './pl2cl';
 my $runtime = 'cl/pcl-runtime.lisp';
@@ -34,7 +37,7 @@ sub run_pcl {
   print $fh $code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
@@ -64,7 +67,7 @@ sub run_pcl {
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-glob.*"\*\.txt"/, 'glob <*.txt> generates p-glob call');
 
@@ -78,7 +81,7 @@ sub run_pcl {
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-glob.*"\/tmp\/\*\.log"/, 'glob </tmp/*.log> generates p-glob with path');
 
@@ -92,7 +95,7 @@ sub run_pcl {
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-readline/, '<STDIN> still generates p-readline');
   unlike($cl, qr/p-glob/, '<STDIN> does NOT generate p-glob');
@@ -107,7 +110,7 @@ sub run_pcl {
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-readline.*\$fh/, '<$fh> generates p-readline');
   unlike($cl, qr/p-glob/, '<$fh> does NOT generate p-glob');
@@ -204,7 +207,7 @@ END_CODE
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-readline.*STDIN/, 'STDIN recognized as readline');
   like($cl, qr/p-glob.*\*\.pm/, '*.pm recognized as glob');
@@ -219,7 +222,7 @@ END_CODE
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-readline\)/, 'empty <> is readline');
   unlike($cl, qr/p-glob/, 'empty <> is NOT glob');
@@ -266,7 +269,7 @@ END_CODE
   print $fh $code;
   close $fh;
 
-  my $cl = `$pl2cl $pl_file 2>&1`;
+  my $cl = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl, qr/p-glob.*"\*\.txt"/, 'glob() function generates p-glob call');
 

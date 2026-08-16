@@ -12,6 +12,9 @@ use strict;
 use warnings;
 use Test::More;
 use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 my $pl2cl = './pl2cl';
 my $runtime = 'cl/pcl-runtime.lisp';
@@ -24,7 +27,7 @@ sub run_pcl {
   print $fh $code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
@@ -128,7 +131,7 @@ END_CODE
   print $fh $code;
   close $fh;
 
-  my $cl_code = `$pl2cl $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl_code, qr/p-BEGIN/,
        'BEGIN generates p-BEGIN (eval-when :compile-toplevel :execute)');
@@ -143,7 +146,7 @@ END_CODE
   print $fh $code;
   close $fh;
 
-  my $cl_code = `$pl2cl $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl_code, qr/push.*lambda.*\*end-blocks\*/s,
        'END generates push to *end-blocks*');
@@ -234,7 +237,7 @@ END_CODE
   print $fh $code;
   close $fh;
 
-  my $cl_code = `$pl2cl $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
 
   like($cl_code, qr/p-sub.*pl-foo/s,
        'sub generates p-sub macro call');

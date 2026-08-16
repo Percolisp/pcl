@@ -51,7 +51,7 @@ sub run_cl {
     print $fh $code;
     close $fh;
 
-    my $cl_code = `$pl2cl $pl_file 2>&1`;
+    my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});
 
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     print $cl_fh $cl_code;
@@ -85,7 +85,18 @@ sub transpile {
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $code;
     close $fh;
-    return `$pl2cl $pl_file 2>&1`;
+    return PCLCore::transpile(qq{$pl2cl $pl_file});
+}
+
+# …and its sibling for the ONE row that asserts pl2cl REFUSES an input: it
+# wants the diagnostic, which is the stream transpile() judges.
+sub transpile_stderr {
+    my ($code) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code;
+    close $fh;
+    my (undef, $err) = PCLCore::transpile_raw(qq{$pl2cl $pl_file});
+    return $err;
 }
 
 # ---------------------------------------------------------------------------
@@ -701,10 +712,12 @@ print "c=", $ra->[0], "\n";
 
 # A block-SHAPED `{…}` followed by `->` after grep/map/sort is a perl
 # COMPILE-TIME syntax error (near "}->"); PCL must die at transpile, not
-# silently deref the list-op result.
+# silently deref the list-op result.  This row ASSERTS on the refusal, so it
+# reads stderr itself (PCLCore::transpile_raw) instead of going through
+# transpile(), whose job is to fail a row on exactly that stream (#355).
 {
-    my $cl = transpile('my @r = grep { $_ > 1 }->{a}, (1,2,3); print "@r\n";');
-    like($cl, qr/syntax error near "\}->"/,
+    my $err = transpile_stderr('my @r = grep { $_ > 1 }->{a}, (1,2,3); print "@r\n";');
+    like($err, qr/syntax error near "\}->"/,
          'block-shaped {…}-> after grep dies perl-shaped at transpile');
 }
 

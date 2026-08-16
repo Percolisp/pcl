@@ -33,6 +33,9 @@ use strict;
 use warnings;
 use lib ".";
 use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 use Test::More;
 
@@ -136,7 +139,7 @@ plan tests => scalar(keys %expect);
 my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
 print $fh $driver;
 close $fh;
-my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
 print $cl_fh $cl_code;
 close $cl_fh;

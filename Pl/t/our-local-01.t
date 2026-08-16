@@ -10,6 +10,9 @@ use warnings;
 
 use Test::More;
 use File::Temp qw(tempfile);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 
 use lib ".";
 use Pl::Parser2;
@@ -29,7 +32,7 @@ sub run_pl {
     my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl');
     print $pfh $code;
     close $pfh;
-    my $cl_code = `./pl2cl "$pl_file" 2>&1`;
+    my $cl_code = PCLCore::transpile(qq{./pl2cl "$pl_file"});
     unlink $pl_file;
 
     my ($fh, $filename) = tempfile(SUFFIX => '.lisp');

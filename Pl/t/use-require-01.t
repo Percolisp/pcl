@@ -11,6 +11,9 @@ use strict;
 use warnings;
 use Test::More;
 use File::Temp qw(tempfile tempdir);
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLCore;
 use File::Spec;
 
 use lib ".";
@@ -118,20 +121,20 @@ note "-------- pl2cl CLI Tests:";
 
 # Test: pl2cl generates @INC initialization
 {
-  my $result = `echo 'my \$x = 1;' | $pl2cl 2>&1`;
+  my $result = PCLCore::transpile(qq{echo 'my \$x = 1;' | $pl2cl});
   like($result, qr/\*pcl-pl2cl-path\*/, 'pl2cl sets *pcl-pl2cl-path*');
   like($result, qr/setf pcl::\@INC/, 'pl2cl initializes @INC');
 }
 
 # Test: --no-cache flag
 {
-  my $result = `echo 'my \$x = 1;' | $pl2cl --no-cache 2>&1`;
+  my $result = PCLCore::transpile(qq{echo 'my \$x = 1;' | $pl2cl --no-cache});
   like($result, qr/\*pcl-skip-cache\* t/, '--no-cache sets *pcl-skip-cache*');
 }
 
 # Test: --cache-lisp flag
 {
-  my $result = `echo 'my \$x = 1;' | $pl2cl --cache-lisp 2>&1`;
+  my $result = PCLCore::transpile(qq{echo 'my \$x = 1;' | $pl2cl --cache-lisp});
   like($result, qr/\*pcl-cache-fasl\* nil/, '--cache-lisp sets *pcl-cache-fasl* nil');
 }
 
@@ -164,7 +167,7 @@ say TestMod::get_value();
   print $fh $test_code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 
   # Write CL code to temp file
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
@@ -201,7 +204,7 @@ if (\$INC{"TestMod.pm"}) {
   print $fh $test_code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
@@ -242,7 +245,7 @@ say Counter::get_count();
   print $fh $test_code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
@@ -274,7 +277,7 @@ sub run_pl {
   print $fh $code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
 
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
@@ -481,7 +484,7 @@ say Cached::test();
 };
   close $pl_fh;
 
-  my $cl_code = `$pl2cl $pl_file 2>&1`;  # Note: no --no-cache
+  my $cl_code = PCLCore::transpile(qq{$pl2cl $pl_file});  # Note: no --no-cache
 
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
@@ -724,7 +727,7 @@ ok($x == 2, "block-form arg body may reference diag before test-lib load");
   print $fh $test_code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
   close $cl_fh;
@@ -757,7 +760,7 @@ print "call=", f(), "\n";
   print $fh $test_code;
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
   close $cl_fh;
@@ -799,7 +802,7 @@ print "BS=", BS, "\n";
 PERL
   close $fh;
 
-  my $cl_code = `$pl2cl --no-cache $pl_file 2>&1`;
+  my $cl_code = PCLCore::transpile(qq{$pl2cl --no-cache $pl_file});
   my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp');
   print $cl_fh $cl_code;
   close $cl_fh;
