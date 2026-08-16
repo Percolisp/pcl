@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 26;
 
 sub run_cl {
     my ($code) = @_;
@@ -204,3 +204,23 @@ test_cl('a constant before . - == is an operand, not a filehandle',
 test_cl('print STDOUT -1 is a handle plus an argument; "-" x 5 is repetition',
     qq{print STDOUT -1, "\\n"; print "-" x 5, "\\n"; my \$s = "="; print \$s x 3, "\\n";},
     "-1\n-----\n===\n");
+
+# ── INVERSE, s407 review: a METHOD NAME before an operator is a term ────────
+# `$o->name x 3` was mis-repaired into `$o->name + x(3)` (undefined function
+# main::pl-x) — a regression of the #361 repair; `$o->w / $o->h / 2` was
+# dropped whole by the #351 repair; and `$o->w*w()` had always been dropped
+# (PPI lexes `*w` as a glob after the method-name Word — the #354 hole).  One
+# rule fixes all three: a Word after `->` ENDS A TERM (Parser2::
+# _is_method_name_word), and the `x` repair fires only in a document that
+# DECLARES a sub named x at all.
+test_cl('a method call before x / * is a term: repetition, division, multiplication',
+    qq{package Foo; sub new { bless {}, shift } sub name { "ab" } sub w { 12 } sub h { 3 }\n}
+  . qq{package main; sub x { "X" } my \$o = Foo->new; my \$k = 2;\n}
+  . qq{print \$o->name x 3, "|", \$o->w / \$o->h / 2, "|", \$o->w*\$k, "|", \$o->w*w(), "|", Foo->new->name x 2, "\\n";\n}
+  . qq{sub w { 5 }},
+    "ababab|2|24|60|abab\n");
+
+test_cl('with no `sub x` in the document, WORD x N is repetition whatever WORD is',
+    qq{package Foo; sub new { bless {}, shift } sub name { "ab" }\n}
+  . qq{package main; my \$o = Foo->new; print \$o->name x 2, "|", (\$o->name) x 2, "\\n";},
+    "abab|abab\n");

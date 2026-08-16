@@ -31,10 +31,16 @@ use lib "$RealBin/../..";
 my $root = "$RealBin/../..";
 
 # --- 1. the shape, everywhere in the compiler ------------------------------
+# The COMPILER only — Pl/ and pl2cl, the code that runs under perl in the
+# long-lived server.  NOT lib/: those shims are Perl that PCL transpiles and
+# SBCL runs, where a closure cycle is collected like anything else, and where
+# `__SUB__` inside an anonymous sub is a documented no-op stub
+# (not-supported.md "__SUB__") — so the remedy this row names would turn a
+# harmless idiom into a silent wrong there (s407 review).
 {
     my @hits;
     for my $rel (glob("$root/Pl/*.pm"), glob("$root/Pl/*/*.pm"),
-                 glob("$root/lib/*.pm"), "$root/pl2cl") {
+                 "$root/pl2cl") {
         open my $fh, '<', $rel or next;
         my @l = <$fh>;
         close $fh;

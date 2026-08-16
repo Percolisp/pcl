@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 20;
+plan tests => 22;
 
 # One SBCL launch for the whole family: each line prints one answer.
 # Every expectation below was taken from real perl running the same program.
@@ -104,6 +104,15 @@ for my $t (sub { my @c = @$sref; 1 },
 }
 print "t19:", join("|", @errs), "\n";
 print "t20:", $z, "\n";
+
+# --- \&f identity through a RAW numeric slot (task #362, s407): $c2's only
+#     use is `==`, so type flow freezes it to a raw number at the write; the
+#     raw numifier had no arm for a function and answered 0, while $c1 (also
+#     CALLED, so it stays a box) numified to the address — "diff".  Both
+#     spellings must agree, and match perl's "same".
+sub cf { 1 } my $c1 = \&cf; my $c2 = \&cf; my $cv = $c1->();
+print "t21:", ($c1 == $c2 ? "EQ" : "NE"), "\n";
+print "t22:", (0+$c2 > 0 ? "ADDR" : "ZERO"), "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -146,3 +155,7 @@ like $out, qr/^t19:Not an ARRAY reference\|Not a HASH reference\|Not a HASH refe
     'a scalar ref used as a container dies with perl\'s message on all four paths';
 like $out, qr/^t20:7$/m,
     'INVERSE: the scalar behind that ref is untouched by the failed derefs';
+like $out, qr/^t21:EQ$/m,
+    '\\&f == \\&f when one side is a raw-numeric slot (#362: the raw numifier answered 0)';
+like $out, qr/^t22:ADDR$/m,
+    'a code ref in a raw slot numifies to its address, not 0';

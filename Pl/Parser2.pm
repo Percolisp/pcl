@@ -4558,6 +4558,7 @@ sub _repair_word_match {
     next unless $prev->isa('PPI::Token::Word');
     next if $i >= 2 && $tok[$i - 2]->isa('PPI::Token::Operator')
                     && $tok[$i - 2]->content eq '<';       # <op/*> glob run
+    next if _is_method_name_word($prev);                # $o->w / $o->h: division
     next if $self->_word_is_term($prev->content, $doc);
     # A match needs a closing delimiter; without one this is not the shape and
     # the statement is left to the ordinary error path to name.
@@ -4605,6 +4606,12 @@ sub _repair_word_x_call {
     my ($prev, $t) = @tok[$i - 1, $i];
     next unless $t->isa('PPI::Token::Operator') && $t->content eq 'x';
     next unless $prev->isa('PPI::Token::Word');
+    # A METHOD NAME is a term (`$o->name x 3` repeats the method's value; it
+    # was mis-repaired into `$o->name + x(3)` — s407 review, a regression of
+    # this repair), and the repair only makes sense at all when this document
+    # DECLARES a sub named `x`: without one, valid perl cannot be calling it.
+    next if _is_method_name_word($prev);
+    next unless $self->_document_declares_sub('x', $doc);
     # DECLARED terms only: an ALL-CAPS word that this document does not declare
     # as a constant is a FILEHANDLE here (`print STDOUT x(), …`), and a handle
     # is not an operand, so perl reads the `x` as the call.  A declared
@@ -4681,8 +4688,51 @@ sub _word_is_declared_term {
   my ($self, $name, $doc) = @_;
   my $zero = $self->_zero_arity_builtins;
   return 1 if $zero->{$name};
-  my $terms = $self->{_doc_term_words} ||= _scan_document_terms($doc);
+  my $terms = $self->_doc_term_words($doc);
   return $terms->{$name} ? 1 : 0;
+}
+
+# The two per-document name sets ONE token walk produces (_scan_document_terms):
+# the words this document makes a TERM, and the subs it DECLARES by any `sub
+# NAME` — cached together, because a second scan for the second answer is how
+# the two drift apart.
+sub _doc_term_words {
+  my ($self, $doc) = @_;
+  $self->_scan_terms_and_subs($doc) unless $self->{_doc_term_words};
+  return $self->{_doc_term_words};
+}
+
+# Does this document declare `sub NAME` at all (any prototype, or none)?  The
+# question the `x` repair must ask before it turns `WORD x` into a CALL: perl
+# reads `x` after a list operator as a term start — a call to sub x — and valid
+# perl can only mean that when a sub named x exists.  With no `sub x` in the
+# document (an imported one is invisible; accepted), `WORD x N` is the
+# repetition operator whatever WORD is, and the repair must not fire — it turned
+# `$o->name x 3` into `$o->name + x(3)` (s407 review).
+sub _document_declares_sub {
+  my ($self, $name, $doc) = @_;
+  $self->_scan_terms_and_subs($doc) unless $self->{_doc_sub_words};
+  return $self->{_doc_sub_words}{$name} ? 1 : 0;
+}
+
+sub _scan_terms_and_subs {
+  my ($self, $doc) = @_;
+  my ($terms, $subs) = _scan_document_terms($doc);
+  $self->{_doc_term_words} = $terms;
+  $self->{_doc_sub_words}  = $subs;
+  return;
+}
+
+# A Word that is a METHOD NAME — the significant token before it is `->` — is a
+# TERM in perl's operator-vs-term state (`$o->w / $o->h`, `$o->name x 3`,
+# `$o->w*w()`), and none of the three repairs may read the operator after it as
+# anything else.  Found in the s407 review: two of the repairs (#351, #361)
+# regressed exactly these shapes, and #354's _ends_term never knew the third.
+sub _is_method_name_word {
+  my ($t) = @_;
+  return 0 unless $t && $t->isa('PPI::Token::Word');
+  my $prev = _prev_sig_token($t);
+  return ($prev && $prev->isa('PPI::Token::Operator') && $prev->content eq '->') ? 1 : 0;
 }
 
 sub _zero_arity_builtins {
@@ -4698,10 +4748,11 @@ sub _zero_arity_builtins {
 
 # Names this DOCUMENT makes a term: `use constant NAME =>`, the hash form
 # `use constant { A => …, B => … }`, and `sub NAME ()` (the empty prototype IS
-# what makes perl read the next `/` as division — measured).
+# what makes perl read the next `/` as division — measured).  Returns that set
+# AND the set of every `sub NAME` the document declares, from the one walk.
 sub _scan_document_terms {
   my ($doc) = @_;
-  my %term;
+  my (%term, %sub);
   my @tok = grep { $_->significant } $doc->tokens;
   for my $i (0 .. $#tok) {
     my $t = $tok[$i];
@@ -4717,13 +4768,17 @@ sub _scan_document_terms {
       }
     }
     elsif ($t->content eq 'sub' && $tok[$i + 1]
-           && $tok[$i + 1]->isa('PPI::Token::Word')
-           && $tok[$i + 2] && $tok[$i + 2]->isa('PPI::Token::Prototype')
-           && $tok[$i + 2]->prototype =~ /^\s*\z/) {
-      $term{ $tok[$i + 1]->content } = 1;
+           && $tok[$i + 1]->isa('PPI::Token::Word')) {
+      # `sub NAME` / `my sub NAME` / `sub NAME ($$)`: a declared sub of any
+      # arity (the `x` repair asks this); with an EMPTY prototype it is also a
+      # term (the `/` repair asks that).
+      $sub{ $tok[$i + 1]->content } = 1;
+      $term{ $tok[$i + 1]->content } = 1
+        if $tok[$i + 2] && $tok[$i + 2]->isa('PPI::Token::Prototype')
+        && $tok[$i + 2]->prototype =~ /^\s*\z/;
     }
   }
-  return \%term;
+  return (\%term, \%sub);
 }
 
 # Does this token END A TERM?  That is perl's own operator-vs-term state, and
@@ -4736,6 +4791,7 @@ sub _scan_document_terms {
 sub _ends_term {
   my ($t) = @_;
   return 0 unless $t;
+  return 1 if _is_method_name_word($t);              # $o->w*w(): multiplication
   return 1 if $t->isa('PPI::Token::Symbol')          # $x @a %h *glob, and Magic
            || $t->isa('PPI::Token::Number')
            || $t->isa('PPI::Token::Quote')           # '…' "…" q qq

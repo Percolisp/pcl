@@ -2628,6 +2628,13 @@
     ((hash-table-p val) (%p-hash-user-count val))
     ;; Compiled regex in numeric context → object address (like a reference)
     ((p-regex-match-p val) (object-address val))
+    ;; A code ref is a RAW function (no wrapper box, unlike \$x \@a \%h), so
+    ;; it reaches this path whenever it sits in a raw slot: `my $r2 = \&f`
+    ;; frozen to a raw-numeric slot by type flow (its only use was `==`).
+    ;; Its numeric value is its address, exactly as box-nv answers for the
+    ;; boxed copy — the missing arm made `\&f == \&f` FALSE (task #362: the
+    ;; boxed side numified to the address, this side to 0).
+    ((functionp val) (object-address val))
     (t 0)))
 
 (declaim (inline to-number))
