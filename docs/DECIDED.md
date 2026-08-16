@@ -46,6 +46,11 @@ not-supported.md → only then probe.*
   can it be done in a simpler way?" → NEXT Fable session, before executing
   anything.**  → task #379 (all numbers + the E5.4-first hypothesis),
   plan-post-s408 §3.0.  Not on the v0.1 critical path as planned.
+- **USER (end of s409): a COMPREHENSIVE SEARCH FOR DOUBLED CODE** — "lots of
+  small bits can be extracted to subs" — is part of the same next-Fable plan:
+  a duplicate-code census (5–20-line copies, ranked by size × count) → a
+  mechanical extraction worklist for Opus, corpus-diff IDENTICAL per step.
+  CLAUDE.md 11 is the rule; this is its census.  → task #379.
 - **#368's die is right, but a die that ABORTS a companion file is a COST that
   must be measured in the dir it touches** — op/sub.t 51/14 → 25/6 at its
   `sub {…; CORE::__SUB__->()}->()` (line 214), unmeasured in s408 (only

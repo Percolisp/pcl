@@ -138,6 +138,15 @@ its reproducer (this session: #376, #377).
    "one compiler" for the release means one GENERATOR or zero v1 lines).
    Write the plan BEFORE executing anything; the E5.1–E5.5 estimate (9–17
    sessions, `v2-endgame-plan.md`) is the number to beat.
+   **Same plan, second half (USER, end of s409): "a comprehensive search for
+   doubled code — lots of small bits can be extracted to subs."**  A
+   systematic duplicate-code census over `Pl/**`, `cl/pcl-runtime.lisp`,
+   `tools/**` (the "same 5–20 lines written two or three times" kind — the
+   four inlined modifier regexes until #374a, the two bucket-dance copies,
+   the sibling autoquote copies of #266, the two delimiter hand-strips of
+   #375), ranked by size × count, each cluster a candidate "extract to one
+   sub" under CLAUDE.md 11.  Deliverable: a worklist Opus executes
+   mechanically (corpus-diff IDENTICAL per extraction).  Task #379 §"ADDED".
 1. **This session (s409)**: the review, `docs/fable-answers-s408.md`, this
    plan, DECIDED s409, CLAUDE.md pointer, tasks #376/#377 filed and #374
    corrected.

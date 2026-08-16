@@ -70,6 +70,9 @@ layer, 12 statement classes handed to v1 whole, PExpr's destructive parse
 complex — can it be done in a simpler way?  Next time."**  Filed as **#379**
 with every number and the E5.4-first hypothesis; it opens the next Fable
 session (plan-post-s408 §3.0).
+Also from the USER: **"a comprehensive search for doubled code — lots of
+small bits can be extracted to subs"** — the same session's second half
+(duplicate-code census → mechanical extraction worklist; #379 §ADDED).
 
 **The plan: `docs/plan-post-s408.md`** (supersedes plan-post-s400 §2d).  Opus:
 **H** = #378 → #377 → #376 → #341 measured (→ #373 only if rows sit behind it) →
