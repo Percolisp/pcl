@@ -240,3 +240,61 @@ Those rows were never measuring anything.
 5. **#375's blast radius**: I fixed the two hand-strip sites I found by grep.  If
    there is a third place that strips quote delimiters by hand, it has the same
    bug — a sweep of that pattern might be worth a filler.
+
+## 11. #367 + #366 — the runners
+
+**#367's premise needed sharpening, and the sharpening is the finding.**
+`timeout` already kills the process GROUP it creates — measured, a plain
+grandchild dies with it.  What escapes is anything **SBCL** starts:
+`sb-ext:run-program` puts its child in a NEW process group (measured: the
+child's PID equals its PGID), so the group signal never reaches it.  `setpgrp`
+does not change the SESSION, so that is the handle that still does — each
+file's command now runs in its own session and the leftovers are reaped.
+
+Not hypothetical: a full companion run reaped orphans from four real files,
+**8 from `op/alarm.t` alone**.  A spin fixture proves the mechanism both ways
+(survives a plain `timeout`, reaped by the runner).
+
+**#366** re-runs every snapshot-differing file alone after the parallel pass,
+prints both values, takes the serial one; capped at 40 with the cap printed.
+`classify_result` was extracted so the serial pass cannot reach a different
+verdict than the parallel one.
+
+Bar: `PCL_SHOW_SBCL=1` byte-identical for both runners; **sweep verdicts
+identical over all 108 files**; companion verdicts differ in 4 rows, all
+explained (one my own `$sig` bug — putting the orphan count in `$sig` *before*
+the status was decided turned an OK file into DIFF — plus two row re-blessings
+and op/cond.t's SIGTERM).
+
+**One hole, deliberately made countable**: the re-run phase sits after the
+dispatch loop, and a full `--all` run is SIGTERMed by op/cond.t's memory guard
+about half the time (2 of 4 full runs this session), so it does not always run.
+The report now SAYS the re-run did not happen rather than leaving its absence
+to be inferred.
+
+## 12. #368 — anon `__SUB__`
+
+`pl-__SUB__` returned a no-op lambda whose value flowed into the program's
+arithmetic: `sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) }` printed **0**
+where perl prints 120.  That is rule 12's boundary case exactly (s329), so it
+dies now.  Named subs are unaffected and the guard rows check both directions.
+`op/current_sub.t` is unchanged — it never reached the stub.
+
+## 13. Session summary
+
+| # | what | commit |
+|---|---|---|
+| #337 | `my sub` is a LEXICAL (session F) | `7f930fc` |
+| #360 | the core feature pragmas, via PPI's own hook | `719ecf0` |
+| #364 | a string eval inherits its site's features | `ed67333` |
+| #363 + #375 | an eval-mode drop dies; the `qq {…}` silent-wrong it exposed | `850a4bf` |
+| #367 + #366 | the runners: session isolation, serial re-run of movers | `5fef203` |
+| #368 | anon `__SUB__` dies | `49b8a0c` |
+
+Filed this session: **#373** (a string eval cannot see a lexical sub),
+**#374** (a keyword-named lexical sub — both halves), **#375** (the `qq {…}`
+delimiters, fixed here).
+
+Two silent-wrongs were found by *making something else loud* — #375 by #363's
+die, and #374's `(p-if)` crash-form by #337's rename.  Both were producing
+wrong values in code that looked fine.
