@@ -57,6 +57,20 @@ were re-run ALONE at their full allowances (+23 min, the report un-quicked);
 only a measured verdict can move now, and the re-run label says which of the
 three values agree instead of asserting a match it never checked.
 
+**End of session — the "one compiler" question (USER).**  Asked how much is
+left until one compiler for the first release: measured, one PIPELINE (s356)
+but **88.2 % of expressions still lower through v1's ExprToCL** (16,898 /
+19,166, `tools/v2-census.pl`, unchanged since s316t) plus 1,050 seam
+statements per corpus; strings→forms is done (ExprToCL 41 `*_form`, 0
+string), and the remaining cost is entanglement — the bucket/`_emit` drain
+around every fallback, embedded blocks calling back into v1's statement
+layer, 12 statement classes handed to v1 whole, PExpr's destructive parse
+(88 % parsed twice), the ~1 h bar per change — E5.1–E5.5 at 9–17 sessions.
+**USER: "we should make a plan to reorganize all that, it seems much too
+complex — can it be done in a simpler way?  Next time."**  Filed as **#379**
+with every number and the E5.4-first hypothesis; it opens the next Fable
+session (plan-post-s408 §3.0).
+
 **The plan: `docs/plan-post-s408.md`** (supersedes plan-post-s400 §2d).  Opus:
 **H** = #378 → #377 → #376 → #341 measured (→ #373 only if rows sit behind it) →
 **I** = #342 piece 2 + #281 items 1+2+6 → **J–L** = Option B phase 2 (#371 →

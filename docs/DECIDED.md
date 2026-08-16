@@ -35,6 +35,17 @@ not-supported.md → only then probe.*
 - **A fragment mini-parse (`PPI::Document->new` on an interpolated span) is the
   established pattern** (28 sites); `_ppi_new` is the one construction site
   for FULL documents only.  → answers §3.3.
+- **"One compiler" — the state, measured s409, and the USER's instruction.**
+  One PIPELINE since s356; but 88.2 % of expressions (16,898 / 19,166,
+  `tools/v2-census.pl`) still lower through v1's ExprToCL and 1,050
+  statements/corpus through v1's statement layer — unchanged since s316t.
+  Strings→forms is DONE (ExprToCL 41 `*_form`, 0 string); the complexity is
+  ENTANGLEMENT (bucket/`_emit` drain around every fallback, embedded blocks →
+  v1 statement layer, 12 statement classes, destructive parse = 88 % parsed
+  TWICE).  **USER: "seems much too complex — make a plan to reorganize it,
+  can it be done in a simpler way?" → NEXT Fable session, before executing
+  anything.**  → task #379 (all numbers + the E5.4-first hypothesis),
+  plan-post-s408 §3.0.  Not on the v0.1 critical path as planned.
 - **#368's die is right, but a die that ABORTS a companion file is a COST that
   must be measured in the dir it touches** — op/sub.t 51/14 → 25/6 at its
   `sub {…; CORE::__SUB__->()}->()` (line 214), unmeasured in s408 (only

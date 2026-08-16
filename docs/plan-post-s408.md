@@ -121,6 +121,23 @@ its reproducer (this session: #376, #377).
 
 ## 3. Fable queue
 
+0. **NEXT FABLE SESSION — USER (s409, end of session): "we should make a plan
+   to reorganize all that, it seems much too complex — can it be done in a
+   simpler way?"**  "All that" = the two-compiler entanglement, re-measured
+   s409: one pipeline, but **88.2 % of expressions (16,898 / 19,166 per
+   corpus) still lower through v1's ExprToCL** and 1,050 statements per
+   corpus through v1's statement layer; the strings→forms conversion is
+   already DONE (ExprToCL: 41 `*_form` generators, 0 string ones), so the
+   remaining complexity is ENTANGLEMENT — the bucket/`_emit` side channel the
+   seam drains around every fallback, embedded blocks calling back into a
+   statement compiler, 12 statement classes handed to v1 whole, PExpr's
+   destructive parse (88 % of expressions parsed TWICE), and the ~1 h
+   measurement bar per change.  **Task #379 holds every number and the
+   starting hypothesis** (E5.4 first: one parse, one generator, ~2–3
+   sessions; return hoisted forms instead of draining buckets; ask whether
+   "one compiler" for the release means one GENERATOR or zero v1 lines).
+   Write the plan BEFORE executing anything; the E5.1–E5.5 estimate (9–17
+   sessions, `v2-endgame-plan.md`) is the number to beat.
 1. **This session (s409)**: the review, `docs/fable-answers-s408.md`, this
    plan, DECIDED s409, CLAUDE.md pointer, tasks #376/#377 filed and #374
    corrected.
