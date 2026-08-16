@@ -402,6 +402,11 @@ printf STDERR "quick mode: %d file(s) not run (%d hang-set, %d allowance > %ds) 
 # precisely how the whole run's evidence used to vanish at once.
 my $MAIN_PID = $$;
 my (%children, %results);
+# Task #366: how many snapshot-differing files get a serial re-run before the
+# report.  Capped so a broken tree cannot double the wall time; the cap is
+# PRINTED when it bites, never silent.
+my $RERUN_CAP = 40;
+my $rerun_movers_done = 0;
 my ($dispatch_started, $reported) = (0, 0);
 END {
   return if $$ != $MAIN_PID || !$dispatch_started || $reported;
@@ -553,7 +558,13 @@ sub run_one {
   # ulimit -v: fork-heavy tests can orphan children past the timeout; the cap
   # stops any single perl from eating the machine (a 6 GB leak OOM-killed the
   # whole desktop session twice before group-reaping was added).
-  my $perl = `ulimit -v 4194304 2>/dev/null; cd \Q$tdir\E && timeout 30 perl \Q$f\E 2>/dev/null`;
+  (my $safe0 = $rel) =~ s{/}{_}g;
+  my $poutf = "$tmpdir/$safe0.perlout";
+  my $orphans = 0;
+  (undef, my $k) = run_isolated("ulimit -v 4194304 2>/dev/null; cd \Q$tdir\E && "
+                              . "timeout 30 perl \Q$f\E > \Q$poutf\E 2>/dev/null");
+  $orphans += $k;
+  my $perl = do { local $/; my $fh; open($fh, '<', $poutf) ? (<$fh> // '') : '' };
   $p_ok    = () = $perl =~ /^ok /mg;
   $p_notok = () = $perl =~ /^not ok /mg;
 
@@ -562,9 +573,10 @@ sub run_one {
   my $lisp = "$tmpdir/$safe.lisp";
   # Transpile with CWD = shadow so `require './test.pl'` prototype extraction
   # (cwd-first) reads the PCL stub, not perl's real harness.
-  my $terr = system("ulimit -v 4194304 2>/dev/null; cd \Q$shadow\E && "
+  (my $terr, $k) = run_isolated("ulimit -v 4194304 2>/dev/null; cd \Q$shadow\E && "
                   . "timeout -k 10 $to perl -I\Q$root\E \Q$pl2cl\E --no-cache --lenient-ppi \Q$f\E "
                   . "> \Q$lisp\E 2>\Q$lisp\E.err");
+  $orphans += $k;
   my $pcl = "";
   my $sbcl_exit = 0;
   if ($terr == 0) {
@@ -587,8 +599,10 @@ sub run_one {
     # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
     my $sbcl_cmd = "$sbcl --load \Q$lisp\E";
     print STDERR "SBCL[run-perl-suite]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
-    system("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl_cmd > \Q$out\E 2>&1");
-    $sbcl_exit = $? >> 8;
+    (my $rc, $k) = run_isolated("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl_cmd"
+                              . " > \Q$out\E 2>&1");
+    $orphans += $k;
+    $sbcl_exit = $rc >> 8;
     $pcl = do { local $/; my $fh; open($fh, '<', $out) ? (<$fh> // '') : '' };
     $c_ok    = () = $pcl =~ /^ok /mg;
     $c_notok = () = $pcl =~ /^not ok /mg;
@@ -618,6 +632,12 @@ sub run_one {
           : ($p_ok + $p_notok) == 0                      ? 'NOTAP'
           : ($p_ok == $c_ok && $p_notok == $c_notok && !$sig) ? 'OK'
           :                                                'DIFF';
+
+  # #367: say when this file left descendants behind — AFTER the status is
+  # decided.  Reaping an orphan is an observation about the RUN, never a
+  # divergence: putting it in $sig before this line turned op/alarm.t (5/0 vs
+  # perl's 5/0, and 8 orphans) into a DIFF.
+  $sig = ($sig ? "$sig; " : "") . "reaped $orphans orphan(s)" if $orphans;
 
   # Per-test failure log: pair the two TAP streams BY DESCRIPTION (align_taps
   # — never by test number, see its comment) and record every diverging test.
@@ -746,61 +766,7 @@ while (@queue || %children) {
     # feature gap is blessed can never hide behind the file-level reason.  A
     # registered row that stopped diverging is STALE, same as a whole file
     # that starts passing.
-    if (my $reason = $expected{$r[0]}) {
-      if ($r[5] =~ /^(?:DIFF|TRANSPILE|TIMEOUT)$/) {
-        my @actual = diverging_rowkeys($r[0]);
-        my @reg    = @{ $expected_rows{$r[0]} || [] };
-        # A file whose row set is MEASURED nondeterministic (see the
-        # *rows-unstable* paragraph in the rows baseline) opts out of the row
-        # check — the file-level reason covers it wholesale, as before #185.
-        # One entry, never mixed with real rows, and it has to be put there by
-        # hand: --bless-rows will not invent it.
-        my ($new, $gone) = (@reg == 1 && $reg[0] eq '*rows-unstable*')
-                           ? ([], []) : multiset_diff(\@actual, \@reg);
-        if (@$new) {
-          $r[6] = join(' | ', grep { length } $r[6] // '',
-                       sprintf("NOT fully registered: %d unregistered diverging row(s): %s",
-                               scalar(@$new), row_list_excerpt($new)),
-                       $reason);
-        } elsif (@$gone) {
-          $r[5] = 'STALE';
-          $r[6] = sprintf("%d registered row(s) no longer diverge (%s) — re-bless with --bless-rows",
-                          scalar(@$gone), row_list_excerpt($gone));
-        } else {
-          $r[5] = 'XDIFF';
-          $r[6] = join(' | ', grep { length } $r[6] // '',
-                       (@reg == 1 && $reg[0] eq '*rows-unstable*'
-                        ? 'rows NOT checked (*rows-unstable*)' : ()),
-                       $reason);
-        }
-      } elsif ($r[5] eq 'OK') {
-        $r[5] = 'STALE';
-        $r[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
-      }
-    }
-    # Fixture-artifact registry (task #172): per-ROW, and only ever applied to
-    # a file whose ENTIRE divergence is registered rows.  One unregistered row
-    # and the file stays DIFF — naming the intruders, so a real bug appearing
-    # inside a fixture-affected file can never hide behind the registration.
-    elsif (my $fx = $fixture{$r[0]}) {
-      if ($r[5] eq 'DIFF') {
-        my @diverging = read_diverging_rows($r[0]);
-        my @unreg = grep { !$fx->{rows}{$_} } @diverging;
-        if (!@diverging) {
-          $r[6] = join(' | ', grep { length } $r[6] // '',
-                       'fixture rows registered but no per-row log — left DIFF');
-        } elsif (@unreg) {
-          $r[6] = join(' | ', grep { length } $r[6] // '',
-                       "NOT a pure fixture artifact: unregistered failing rows @unreg");
-        } else {
-          $r[5] = 'FIXTURE';
-          $r[6] = join(' | ', grep { length } $r[6] // '', $fx->{cause});
-        }
-      } elsif ($r[5] eq 'OK') {
-        $r[5] = 'STALE';
-        $r[6] = "fixture-artifact row now PASSES — remove it from docs/perl-suite-fixture.tsv";
-      }
-    }
+    classify_result(\@r);
     record_result(\@r);
     printf "%-24s P:%4d/%-3d C:%4d/%-4d %-7s %s\n", @r[0 .. 5], $r[6] // '';
     STDOUT->flush();
@@ -818,8 +784,80 @@ while (@queue || %children) {
 }
 }
 
+rerun_movers_serially();
 bless_expected_rows() if $bless_rows;
 exit(emit_report() ? 1 : 0);
+
+# ---- A moved row is re-run ALONE before it is believed (task #366) ---------
+#
+# s406 measured 22 of 36 companion differences as pure CONTENTION: a file that
+# spawns fresh_perl/runperl children loses rows when the machine is busy, and
+# every one of them reproduced the snapshot when re-run by itself.  That made
+# "re-run a mover alone" a rule the operator had to remember; this is the
+# runner doing it, the way the sweep already re-runs a LOST file serially
+# (#215).  BOTH values are printed and the SERIAL one is the verdict — a file
+# that differs in both runs really moved.
+sub rerun_movers_serially {
+  return if $rerun_movers_done++;
+  my %snap = read_snapshot();
+  return if !%snap;
+  my @movers = grep {
+    my $s = $snap{$_};
+    my $r = $results{$_};
+    $s && $r && ($r->[5] ne $s->{status} || $r->[3] != $s->{c_ok} || $r->[4] != $s->{c_notok});
+  } sort keys %results;
+  return if !@movers;
+  my $capped = 0;
+  if (@movers > $RERUN_CAP) {
+    $capped = @movers - $RERUN_CAP;
+    @movers = @movers[0 .. $RERUN_CAP - 1];
+  }
+  printf "\n-- %d file(s) differ from the snapshot — re-running each ALONE (task #366)%s\n",
+    scalar(@movers), ($capped ? "; $capped more NOT re-run (cap $RERUN_CAP)" : '');
+  for my $rel (@movers) {
+    my $par = $results{$rel};
+    my (undef, $result_file) = tempfile(DIR => $tmpdir, SUFFIX => '.res', OPEN => 0);
+    my $pid = fork();
+    die "fork: $!" if !defined $pid;
+    if (!$pid) {
+      setpgrp(0, 0);
+      $SIG{$_} = 'DEFAULT' for 'INT', 'TERM';
+      %children = ();
+      run_one($rel, $result_file);
+      _exit(0);
+    }
+    waitpid($pid, 0);
+    my $line = '';
+    if (open my $rf, '<', $result_file) { chomp($line = <$rf> // ''); close $rf }
+    my @r = split /\t/, $line, 8;
+    next if @r < 6;                        # no result: keep the parallel one
+    $r[7] = -1 if !defined $r[7] || $r[7] !~ /^-?\d+$/;
+    classify_result(\@r);
+    my $agrees = ($r[5] eq $par->[5] && $r[3] == $par->[3] && $r[4] == $par->[4]);
+    record_result(\@r);
+    printf "   %-24s parallel %s %d/%-4d  serial %s %d/%-4d  %s\n",
+      $rel, $par->[5], $par->[3], $par->[4], $r[5], $r[3], $r[4],
+      ($agrees ? 'REAL MOVE (both runs agree)'
+       : sprintf("contention — serial matches the snapshot: %s %d/%d",
+                 $snap{$rel}{status}, $snap{$rel}{c_ok}, $snap{$rel}{c_notok}));
+  }
+  return;
+}
+
+# docs/perl-suite-run.tsv, the blessed per-file snapshot: name -> counts.
+sub read_snapshot {
+  my %s;
+  open my $fh, '<', "$root/docs/perl-suite-run.tsv" or return ();
+  while (my $l = <$fh>) {
+    next if $l =~ /^#/ || $l !~ /\S/;
+    chomp $l;
+    my @f = split /\t/, $l;
+    next if @f < 6;
+    $s{$f[0]} = { c_ok => $f[3], c_notok => $f[4], status => $f[5] };
+  }
+  close $fh;
+  return %s;
+}
 
 # ----------------------------------------------------------- summary
 # One row per file requested, ALWAYS — see the crash-honest reporting note
@@ -976,6 +1014,70 @@ HDR
   return;
 }
 
+# The registry classification of ONE result row (expected-divergence,
+# fixture-artifact).  EXTRACTED from the dispatch loop (task #366) so the
+# serial re-run of moved rows classifies identically — two copies of this
+# would be two verdicts for the same file.
+sub classify_result {
+  my ($r) = @_;
+  if (my $reason = $expected{$r->[0]}) {
+    if ($r->[5] =~ /^(?:DIFF|TRANSPILE|TIMEOUT)$/) {
+      my @actual = diverging_rowkeys($r->[0]);
+      my @reg    = @{ $expected_rows{$r->[0]} || [] };
+      # A file whose row set is MEASURED nondeterministic (see the
+      # *rows-unstable* paragraph in the rows baseline) opts out of the row
+      # check — the file-level reason covers it wholesale, as before #185.
+      # One entry, never mixed with real rows, and it has to be put there by
+      # hand: --bless-rows will not invent it.
+      my ($new, $gone) = (@reg == 1 && $reg[0] eq '*rows-unstable*')
+                         ? ([], []) : multiset_diff(\@actual, \@reg);
+      if (@$new) {
+        $r->[6] = join(' | ', grep { length } $r->[6] // '',
+                     sprintf("NOT fully registered: %d unregistered diverging row(s): %s",
+                             scalar(@$new), row_list_excerpt($new)),
+                     $reason);
+      } elsif (@$gone) {
+        $r->[5] = 'STALE';
+        $r->[6] = sprintf("%d registered row(s) no longer diverge (%s) — re-bless with --bless-rows",
+                        scalar(@$gone), row_list_excerpt($gone));
+      } else {
+        $r->[5] = 'XDIFF';
+        $r->[6] = join(' | ', grep { length } $r->[6] // '',
+                     (@reg == 1 && $reg[0] eq '*rows-unstable*'
+                      ? 'rows NOT checked (*rows-unstable*)' : ()),
+                     $reason);
+      }
+    } elsif ($r->[5] eq 'OK') {
+      $r->[5] = 'STALE';
+      $r->[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
+    }
+  }
+  # Fixture-artifact registry (task #172): per-ROW, and only ever applied to
+  # a file whose ENTIRE divergence is registered rows.  One unregistered row
+  # and the file stays DIFF — naming the intruders, so a real bug appearing
+  # inside a fixture-affected file can never hide behind the registration.
+  elsif (my $fx = $fixture{$r->[0]}) {
+    if ($r->[5] eq 'DIFF') {
+      my @diverging = read_diverging_rows($r->[0]);
+      my @unreg = grep { !$fx->{rows}{$_} } @diverging;
+      if (!@diverging) {
+        $r->[6] = join(' | ', grep { length } $r->[6] // '',
+                     'fixture rows registered but no per-row log — left DIFF');
+      } elsif (@unreg) {
+        $r->[6] = join(' | ', grep { length } $r->[6] // '',
+                     "NOT a pure fixture artifact: unregistered failing rows @unreg");
+      } else {
+        $r->[5] = 'FIXTURE';
+        $r->[6] = join(' | ', grep { length } $r->[6] // '', $fx->{cause});
+      }
+    } elsif ($r->[5] eq 'OK') {
+      $r->[5] = 'STALE';
+      $r->[6] = "fixture-artifact row now PASSES — remove it from docs/perl-suite-fixture.tsv";
+    }
+  }
+  return;
+}
+
 sub record_result {
   my ($r) = @_;
   $results{$r->[0]} = $r;
@@ -996,6 +1098,74 @@ sub record_result {
 # Reap them between files.  PPID 1 is the whole test: a server whose SBCL is
 # alive has that SBCL as its parent, so a CONCURRENT run in another shell is
 # never touched.
+# ---- Per-file SESSION isolation (task #367) --------------------------------
+#
+# `timeout` already kills the process GROUP it created — measured, a plain
+# grandchild dies with it.  What escapes is anything SBCL starts: `run-program`
+# puts its child in a NEW PROCESS GROUP (measured: the child's PID == its PGID),
+# so the group signal cannot reach it, and a spinning `pclperl-for-tests` or
+# `pl2cl --server` outlives the run.  In s405 one such orphan burned a core for
+# 3516 s through every measurement of the session and nothing noticed.
+#
+# The SESSION is the handle that survives that: setpgrp does not change it, so
+# every descendant of a file's run still shares the session we give it.  Run
+# each file's command in its own session and, when it is over, kill whatever is
+# still in there.  `timeout` stays inside the command, so the timing behaviour
+# this runner was tuned to is unchanged.
+sub run_isolated {
+  my ($cmd) = @_;
+  my $pid = fork();
+  die "run-perl-suite: fork failed: $!\n" if !defined $pid;
+  if (!$pid) {
+    POSIX::setsid();                       # our PID becomes the session id
+    exec('/bin/sh', '-c', $cmd);
+    POSIX::_exit(127);
+  }
+  waitpid($pid, 0);
+  my $rc = $?;
+  return ($rc, reap_session($pid));
+}
+
+# Everything still alive in session $sid: TERM, a short grace, then KILL.
+# Returns how many were reaped, which the caller reports — an orphan that is
+# never counted is how #367 stayed invisible for a session.
+sub reap_session {
+  my ($sid) = @_;
+  my @doomed = _session_members($sid);
+  my $found  = @doomed;          # what we REAPED — not what survived it
+  return 0 if !$found;
+  kill 'TERM', @doomed;
+  for (1 .. 10) {
+    last if !(@doomed = _session_members($sid));
+    select undef, undef, undef, 0.1;
+  }
+  if (@doomed = _session_members($sid)) {
+    kill 'KILL', @doomed;
+    select undef, undef, undef, 0.2;
+  }
+  return $found;
+}
+
+sub _session_members {
+  my ($sid) = @_;
+  my @out;
+  opendir my $dh, '/proc' or return ();
+  for my $e (readdir $dh) {
+    next if $e !~ /^[0-9]+$/ || $e == $$;
+    open my $sf, '<', "/proc/$e/stat" or next;
+    my $line = <$sf>;
+    close $sf;
+    next if !defined $line;
+    # `pid (comm) state ppid pgrp session …` — comm can hold spaces and
+    # parens, so parse after the LAST ')'.
+    my $tail = substr($line, rindex($line, ')') + 1);
+    my @f = split ' ', $tail;
+    push @out, $e if defined $f[3] && $f[3] == $sid;
+  }
+  closedir $dh;
+  return @out;
+}
+
 sub reap_orphan_transpilers {
   # ORPHAN := its parent is a REAPER, not the SBCL that spawned it.  PID 1 is
   # only one adoption target: on a systemd desktop login every orphan is
@@ -1057,6 +1227,13 @@ sub emit_report {
     scalar(@{ $by_status{FIXTURE} // [] }), $n_bad;
   # Quarantined files are NOT-RUN by construction, so they are already counted
   # as UNEXPLAINED above — say so, so nobody reads the number as new breakage.
+  # #366: the serial re-run happens after the dispatch loop, so an interrupted
+  # run (op/cond.t's memory guard SIGTERMs the parent about half the time)
+  # never reaches it.  SAY so — an unmeasured mover that reads as measured is
+  # the same failure as a silently skipped file.
+  print "NOTE: the serial re-run of snapshot-differing files (task #366) did NOT run —\n"
+      . "  this run was interrupted.  Re-run any moved file ALONE before believing it.\n"
+    if !$rerun_movers_done;
   printf "%d of those UNEXPLAINED are QUARANTINED (never run this session): %s\n",
     scalar(@quarantined), join(', ', map { "$_ ($QUARANTINE{$_})" } @quarantined)
     if @quarantined;

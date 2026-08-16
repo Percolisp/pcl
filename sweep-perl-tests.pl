@@ -171,8 +171,15 @@ sub run_one_test {
         my $sbcl_cmd = PCLSbcl::sbcl_prefix_str(runtime => $runtime, quote => 0)
             . " --eval \"(setf pcl::*pcl-skip-cache* t)\" --load $testlib --load $registry --eval \"(setf pcl::*current-test-file* \\\"$name\\\")\" --eval \"(pcl::p-load-with-recovery \\\"$cl_file\\\")\"";
         print STDERR "SBCL[sweep]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
-        system("timeout $timeout $sbcl_cmd >$tmp_out 2>&1");
-        my $sbcl_exit = $? >> 8;
+        # Own SESSION per file (task #367): `timeout` kills the process GROUP,
+        # but anything SBCL starts through run-program is put in a NEW group
+        # and escapes it — measured, a spinning child outlived the run and
+        # burned a core for the rest of the session.  setpgrp does not change
+        # the SESSION, so that is the handle that still reaches every
+        # descendant.  `timeout` stays inside, so the timing is unchanged.
+        my ($rc, $reaped) = run_isolated("timeout $timeout $sbcl_cmd >$tmp_out 2>&1");
+        warn "sweep: $name left $reaped orphan(s), reaped\n" if $reaped;
+        my $sbcl_exit = $rc >> 8;
         my $out = do { local $/; my $f; open($f, '<', $tmp_out) ? do { my $c = <$f>; $c // '' } : '' };
         unlink $tmp_out;
         if ($sbcl_exit == 124) { die "TIMEOUT\n" }
@@ -291,6 +298,59 @@ sub mem_report {
 # Reap them between files.  PPID 1 is the whole test: a server whose SBCL is
 # alive has that SBCL as its parent, so a CONCURRENT run in another shell is
 # never touched.  Same helper in tools/run-perl-suite.pl.
+# ---- Per-file SESSION isolation (task #367) --------------------------------
+# The twin of tools/run-perl-suite.pl's; see the long note there for why the
+# SESSION, and not the process group, is the handle that reaches an
+# SBCL-spawned descendant.
+sub run_isolated {
+  my ($cmd) = @_;
+  my $pid = fork();
+  die "sweep: fork failed: $!\n" if !defined $pid;
+  if (!$pid) {
+    POSIX::setsid();
+    exec('/bin/sh', '-c', $cmd);
+    POSIX::_exit(127);
+  }
+  waitpid($pid, 0);
+  my $rc = $?;
+  return ($rc, reap_session($pid));
+}
+
+sub reap_session {
+  my ($sid) = @_;
+  my @doomed = _session_members($sid);
+  my $found  = @doomed;
+  return 0 if !$found;
+  kill 'TERM', @doomed;
+  for (1 .. 10) {
+    last if !(@doomed = _session_members($sid));
+    select undef, undef, undef, 0.1;
+  }
+  if (@doomed = _session_members($sid)) {
+    kill 'KILL', @doomed;
+    select undef, undef, undef, 0.2;
+  }
+  return $found;
+}
+
+sub _session_members {
+  my ($sid) = @_;
+  my @out;
+  opendir my $dh, '/proc' or return ();
+  for my $e (readdir $dh) {
+    next if $e !~ /^[0-9]+$/ || $e == $$;
+    open my $sf, '<', "/proc/$e/stat" or next;
+    my $line = <$sf>;
+    close $sf;
+    next if !defined $line;
+    my $tail = substr($line, rindex($line, ')') + 1);
+    my @f = split ' ', $tail;
+    push @out, $e if defined $f[3] && $f[3] == $sid;
+  }
+  closedir $dh;
+  return @out;
+}
+
 sub reap_orphan_transpilers {
     # ORPHAN := its parent is a REAPER, not the SBCL that spawned it.  PID 1 is
     # only one adoption target: on a systemd desktop login every orphan is

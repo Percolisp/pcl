@@ -46,6 +46,44 @@ to end vs perl including the Try::Tiny inverse), plus a canary in
 `misc-fixes-02.t`.  Rule 13: `ppi-upstream-bugs.md` §20 and three new failing
 rows (Bug 17) in `docs/ppi-bug-report.t`.
 
+### #367 + #366 — the runners: what escapes a timeout, and re-running a mover alone
+
+**#367's premise needed sharpening, and the sharpening is the finding.**
+`timeout` already kills the process GROUP it created — measured, a plain
+grandchild dies with it.  What escapes is anything **SBCL** starts:
+`sb-ext:run-program` puts its child in a NEW process group (measured: the
+child's PID equals its PGID), so the group signal cannot reach it.  The
+SESSION is the handle that still does — `setpgrp` does not change it.  So each
+file's command now runs in its own session (fork + `POSIX::setsid`, `timeout`
+unchanged inside it) and whatever is left in that session afterwards is TERMed,
+then KILLed.  Both runners.
+
+A deliberate spin fixture proves it: a `.t` that starts a spinner the way PCL
+does survives a plain `timeout` (measured, PID left behind) and is reaped by
+the runner.  And it is not hypothetical — a full companion run reaped orphans
+from four real files, **8 of them from `op/alarm.t` alone**.
+
+That count is reported per row, which caught my own mistake: putting it in
+`$sig` *before* the status was decided turned `op/alarm.t` (5/0 against perl's
+5/0) into a DIFF.  Reaping an orphan is an observation about the run, never a
+divergence.
+
+**#366**: after the parallel pass the runner now re-runs every file whose
+`(status, C_ok, C_notok)` differs from `docs/perl-suite-run.tsv`, one at a
+time, prints BOTH values and takes the serial one — the rule s406 made the
+operator remember, which this session followed by hand three times.  Capped at
+40 files with the cap printed when it bites.  The registry classification was
+EXTRACTED into `classify_result` so the serial pass cannot reach a different
+verdict than the parallel one.  The phase sits after the dispatch loop, so an
+interrupted run (op/cond.t's memory guard SIGTERMs the parent about half the
+time) never reaches it — and the report now SAYS so rather than leaving the
+absence to be inferred.
+
+Runners bar: `PCL_SHOW_SBCL=1` byte-identical for both, and a full companion
+run compared file-by-file against the previous one differs in exactly four
+rows — one my `$sig` bug (fixed and re-verified), two from re-blessing
+cmpchain/signatures rows, one the op/cond.t SIGTERM.
+
 ### #375 — `qq {…}` kept its delimiters in the value (found BY #363)
 
 perl allows whitespace between a quote-like operator and its delimiter, and the
