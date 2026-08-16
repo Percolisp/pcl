@@ -46,6 +46,71 @@ to end vs perl including the Try::Tiny inverse), plus a canary in
 `misc-fixes-02.t`.  Rule 13: `ppi-upstream-bugs.md` §20 and three new failing
 rows (Bug 17) in `docs/ppi-bug-report.t`.
 
+### #375 — `qq {…}` kept its delimiters in the value (found BY #363)
+
+perl allows whitespace between a quote-like operator and its delimiter, and the
+delimiter is the first NON-space character.  PCL took the character right after
+`qq` — the SPACE — so the real delimiters stayed in the value:
+
+    my $b = qq {interp $x here};     perl: "interp V here"   PCL: "{interp V here}"
+
+Only the INTERPOLATING form was wrong (`qq {plain}` and `q {…}` go down another
+path), which is why it survived: the wrong value only appears when the string
+interpolates.  PPI has always answered correctly through `->string`; the fix is
+to ask it instead of hand-stripping (two sites, `StringInterpolation.pm` and
+`TokenUtils.pm`).
+
+**How it surfaced is the point.**  `perl-tests/index.t` builds an assertion with
+`qq {is (index ("$str", "$q"), $res, } . qq {"…"}` and EVALS it.  With the
+braces left in, the eval text was unparseable — and before #363 that dropped a
+statement *silently*, so the file scored 110/120 with 10 rows quietly missing.
+With #363's die, the file's own `die $@ if $@` aborted it at test 59 and the
+sweep showed **-61 rows**.  That -61 was never the flip's cost; it was this
+bug's, and a loud failure in one place exposed a silent wrong in another.
+Three corpus files carried wrong strings (index.t, magic.t, yadayada.t) — every
+corpus-diff hunk is a delimiter disappearing from a literal.  Guards:
+`Pl/t/string-interp-01.t`, four spellings plus the non-interpolating twins.
+
+### #363 — a drop inside a string eval, measured before the flip
+
+The population instrument (`PCL_EVAL_DROP_LOG`) records every eval-mode drop
+with its cause.  perl-tests: **48 events, 34 unique statements**, and the shape
+of the population is the finding — most of them are *deliberately invalid Perl*
+that the tests eval to assert `$@` is set:
+
+| file | shapes | what they are |
+|---|---|---|
+| yadayada.t | 10 | `... if 1`, `1 or ...`, `... sub quux {}` — the yada statement |
+| postfixderef.t | 5 | `$ref->**`, `$subref->&*` — VALID perl PCL cannot parse |
+| eval.t | 3 | `1+;`, `$foo =;`, `""!=!~//` |
+| hexfp.t | 3 | `0x.3`, `5p3`, `0xc.3` — invalid hex-float literals |
+| grep.t, tr.t | 1 each | `grep $x (1,2,3);`, `$a ~= tr/a/b/;` |
+
+For the invalid ones perl sets `$@` and PCL returns undef with `$@` EMPTY, so
+dying is not a trade — it is the correct answer, and those rows should get
+*better*.  The postfix-deref family is the other kind: valid perl PCL cannot
+lower, where the die turns a silent wrong value into a trappable error.
+
+**The flip, and what the first measurement really said.**  The first sweep
+after it read **−66 rows**, and −61 of those were `index.t` alone.  That was
+not the flip's cost: `index.t` does `eval $test_str; die $@ if $@;`, and its
+`$test_str` was malformed — by **#375**, the `qq {…}` bug above, which had been
+quietly producing wrong strings all along.  With that fixed, `index.t` is back
+at 110/120 and the flip's real cost is **4 rows net**:
+
+| file | move | what the row asserts |
+|---|---|---|
+| dor.t | −3 | `'<FOO> // … compiles'` — `$@ eq ''` about code PCL cannot lower |
+| postfixderef.t | −2 | same, `$ref->**` / `$subref->&*` |
+| yadayada.t | −1 | same, a `...` statement |
+| eval.t | **+1** | an invalid construct in an eval now sets `$@`, as perl does |
+| magic.t | **+1** | #375 — its `qq < … >` string was wrong |
+
+Every lost row was passing *only because the failure was silent*, which is the
+trade the ruling asked for.  Baselines edited row by row with causes; re-run
+against them: **0 new / 0 fixed, TOTAL 18513 = baseline, drops 12 = census**.
+Gen v2-153 → **v2-154**, three artifacts.  Gate **149 files / 5436 rows**.
+
 ### #364 — a string eval inherits its site's features
 
 perl's feature pragmas are lexical and `eval STRING` inherits them.  PCL

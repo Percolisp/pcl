@@ -47,17 +47,21 @@ sub parse_interpolated_string {
 
   say "parse_interpolated_string: Input: $content" if $parser->DEBUG & 32;
 
-  # Remove surrounding quotes/delimiters based on type
-  if (ref($str_token) eq 'PPI::Token::Quote::Interpolate') {
-    # qq{...}, qq(...), qq[...], qq/.../, qq!...! etc.
+  # Remove surrounding quotes/delimiters.  PPI already knows exactly where a
+  # quote-like's delimiters are, so ASK IT (CLAUDE.md 11) — the hand-strip this
+  # replaced took the character right after `qq` as the delimiter, which for
+  # `qq {…}` is a SPACE: the braces stayed in the value and every such string
+  # was silently wrong.  It is what made perl-tests/index.t's eval'd
+  # assertions unparseable (`{is (index …, } "…")`), found via #363.
+  if ($str_token->can('string')) {
+    $content = $str_token->string;
+  } elsif (ref($str_token) eq 'PPI::Token::Quote::Interpolate') {
     $content =~ s/^qq(.)//;
     my $open_delim = $1;
-    # Handle paired delimiters
     my %pairs = ('{' => '}', '(' => ')', '[' => ']', '<' => '>');
     my $close_delim = $pairs{$open_delim} // $open_delim;
     $content =~ s/\Q$close_delim\E$//;
   } else {
-    # Standard double-quoted string
     $content =~ s/^"//;
     $content =~ s/"$//;
   }

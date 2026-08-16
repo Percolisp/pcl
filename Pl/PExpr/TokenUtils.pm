@@ -71,11 +71,15 @@ sub is_string {
 
   # Handle qq{} and other Quote::Interpolate forms
   if (ref($stmt) eq 'PPI::Token::Quote::Interpolate') {
-    my $content = $stmt->content();
-    # Extract inner content (remove qq and delimiters)
-    # qq{...}, qq(...), qq[...], qq/.../ etc.
-    $content =~ s/^qq.//;
-    $content =~ s/.$//;
+    # ->string, not a hand-strip: `qq {…}` (whitespace before the delimiter)
+    # made the old `s/^qq.//` take the SPACE as the delimiter and leave the
+    # braces in the content — see the note in StringInterpolation.pm.
+    my $content = $stmt->can('string') ? $stmt->string : do {
+      my $c = $stmt->content();
+      $c =~ s/^qq.//;
+      $c =~ s/.$//;
+      $c;
+    };
 
     # Return 2 if interpolation needed, 1 if plain
     (my $tmp = $content) =~ s/\\\\/\x00\x00/g;

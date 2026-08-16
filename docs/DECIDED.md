@@ -11,6 +11,38 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s408 (2026-08-16, Opus 5) — an eval-mode DROP dies (#363); `qq {…}` (#375)
+
+- **In EVAL-STRING mode a #138-family drop DIES into `$@`** (#363, as ruled):
+  perl's contract for `eval STRING` is "what does not compile sets `$@`", and
+  nothing else can say so there — the runtime starts `pl2cl --server` with
+  `:error nil`, so the announcement goes NOWHERE and the statement simply
+  disappears from the program.  FILE mode is untouched (announce, rc 0) until
+  Option B phase 2.  → `Pl::Parser::_announce_dropped_statement`,
+  `Pl/t/eval-01.t` (3 rows incl. the file-mode inverse).
+- **Measured cost: 4 rows net.**  −3 dor.t, −2 postfixderef.t, −1 yadayada.t —
+  every one a `'… compiles'` assertion (`$@ eq ''`) about code PCL genuinely
+  cannot lower, i.e. **rows that were passing only because the failure was
+  silent**; +1 eval.t (an invalid construct in an eval now sets `$@` as perl
+  does) and +1 magic.t (from #375).  Baselines edited row by row.
+- **A loud failure in one place exposes a silent wrong in another.**  The first
+  flip measurement said −66, of which −61 was `index.t` alone: its own `die $@
+  if $@` aborted the file because an eval'd assertion was malformed — by #375,
+  a bug that had been quietly producing wrong STRINGS.  The −61 was never the
+  flip's cost.  **Do not accept a big regression number at face value; find the
+  file's own mechanism first.**
+- **#375: `qq {…}` with WHITESPACE before the delimiter kept the delimiters in
+  the VALUE** (`qq {interp $x}` → `"{interp V}"`).  PCL took the character right
+  after `qq` — the space — as the delimiter; **PPI's `->string` has always been
+  right, and asking it is the fix** (CLAUDE.md 11).  Only the interpolating form
+  was wrong, which is why it survived.  Three corpus files carried wrong
+  strings.  → `Pl/t/string-interp-01.t`.
+- **The population instrument earns its keep, and so does reading the shapes.**
+  `PCL_EVAL_DROP_LOG` counted 48 events / 34 shapes (perl-tests) and 548 / 446
+  (perl's t/) before the flip; the shapes said "mostly deliberately-invalid
+  Perl", which predicted small honest movement — and the two files that moved
+  most were the two the shapes did NOT explain.
+
 ## s408 (2026-08-16, Opus 5) — lexical subs are LEXICALS (#337); the feature pragmas (#360)
 
 - **The core feature-enabling pragmas are answered by a TABLE in PCL, through

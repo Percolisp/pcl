@@ -9049,10 +9049,14 @@ our $ANNOUNCE_DROPS = 1;
 my %announced_drop;   # "file:line:text" seen this process — announce ONCE
 sub _announce_dropped_statement {
   my ($self, $parts, $stmt, $reason) = @_;
-  return unless $ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all';
   # Prototype-extraction parses throw their output away (_emit is a no-op), so
   # a drop there costs the program nothing and would only double the line.
   return if $self->collect_prototypes_only;
+  # (The eval-mode DIE below is decided before this gate, deliberately: what
+  # `PCL_DROP_ANNOUNCE` controls is a diagnostic, not whether a statement may
+  # vanish from a program.)
+  return if !$self->eval_mode
+         && !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
 
   my $file = $self->has_filename ? $self->filename : '-';
   # The statement is the best source text when the caller has it; otherwise the
@@ -9073,10 +9077,28 @@ sub _announce_dropped_statement {
   # and op/switch.t measured 138 events for 112 emitted drops.  The COUNT of
   # drops is the runners' `drops` column (task #343), which reads the emitted
   # CL; this line is the identity of the statement that was lost.
+  # #363: IN EVAL-STRING MODE A DROP DIES.  perl's contract for `eval STRING`
+  # is "what does not compile sets $@", and here nothing else can say so: the
+  # runtime starts `pl2cl --server` with :error nil, so the line below goes
+  # NOWHERE and the statement simply disappears from the program (measured:
+  # `eval q{ f ref $u, "m" or g "fb"; 7 }` returned 7 with $@ empty and the
+  # call gone).  The die travels the route the ruled `PCL: unsupported in
+  # string eval:` refusals already take — the server answers "err", p-eval
+  # turns that into $@ — which is why the text keeps the `PCL:` prefix.
+  #
+  # This is Option B phase 2's announce->DIE step (fable-answers-s400 §6.4)
+  # taken EARLY, and only for the path that cannot announce.  FILE mode is
+  # untouched: it still announces and exits 0 until phase 2 flips it too.
+  #
+  # NOT deduplicated (the dedupe below is for a repeated diagnostic): the
+  # first drop in an eval ends that eval.
+  die "PCL: statement dropped at (eval) line $line: $text -- $reason\n"
+    if $self->eval_mode;
   return if $announced_drop{"$file:$line:$text"}++;
   print STDERR "PCL: statement dropped at $file line $line: $text -- $reason\n";
   return;
 }
+
 
 # E2.final root flip (task #78): identical parse + context annotation to
 # _parse_expression_internal, but generation goes through gen_node_form, so

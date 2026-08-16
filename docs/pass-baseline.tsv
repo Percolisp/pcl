@@ -7,6 +7,15 @@
 #   stopped printing 56 blank stderr lines per child (s404l), so one of the 23
 #   fresh_perl/runperl exact-output comparisons in that file now matches.  The
 #   companion half moved the same way (t/op/ref.t 196 -> 197).
+# s408 (#363, an eval-mode DROP now DIES into $@): FIVE rows EDITED BY HAND.
+#   dor.t 32->29, postfixderef.t 96->94, yadayada.t 21->20 — each lost row is a
+#   '... compiles' assertion ($@ eq '') about code PCL genuinely cannot lower
+#   (`<FOO> // 0`, `$ref->**`, a `...` statement).  They were passing only
+#   because the failure was SILENT; the drop now reports itself, so they are
+#   honest failures and their rows are in fail-baseline.tsv with the message.
+#   eval.t 127->128 and magic.t 149->150 GAINED: eval.t because an invalid
+#   construct in an eval now sets $@ as perl does, magic.t because of #375 —
+#   `qq < … >` had been keeping its delimiters in the string value.
 aassign.t	OK	173	15	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -38,11 +47,11 @@ delete.t	OK	53	3	56
 die.t	OK	3	0	3
 die_exit.t	OK	17	0	17
 do.t	OK	65	3	73
-dor.t	OK	32	0	34
+dor.t	OK	29	3	34
 each.t	OK	51	0	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	127	33	169
+eval.t	PARTIAL	128	32	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14
@@ -66,7 +75,7 @@ lex.t	OK	45	0	53
 local.t	OK	303	13	319
 loopctl.t	OK	67	0	67
 lop.t	OK	47	0	47
-magic.t	PARTIAL	149	40	208
+magic.t	PARTIAL	150	39	208
 method.t	PARTIAL	97	34	163
 min_local.t	OK	10	0	10
 multideref.t	PARTIAL	42	10	65
@@ -80,7 +89,7 @@ ord.t	OK	38	0	38
 pack.t	OK	5636	89	14722
 parent.t	OK	7	2	9
 pos.t	OK	15	15	30
-postfixderef.t	PARTIAL	96	25	128
+postfixderef.t	PARTIAL	94	27	128
 pow.t	OK	268	0	268
 print.t	OK	2	1	3
 push.t	OK	32	0	32
@@ -114,4 +123,4 @@ vec.t	OK	76	0	78
 wantarray.t	OK	27	1	28
 warn.t	OK	11	0	11
 while.t	OK	4	0	4
-yadayada.t	PARTIAL	21	12	34
+yadayada.t	PARTIAL	20	13	34

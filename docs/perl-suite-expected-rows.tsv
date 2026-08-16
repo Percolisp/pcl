@@ -558,19 +558,14 @@ op/chr.t	[at t/op/chr.t line 81]
 op/chr.t	[at t/op/chr.t line 82]
 op/cmpchain.t	!= != <=> non-associative
 op/cmpchain.t	!= != cmp non-associative
-op/cmpchain.t	!= != ~~ non-associative
 op/cmpchain.t	!= <=> non-associative
 op/cmpchain.t	!= == <=> non-associative
 op/cmpchain.t	!= == cmp non-associative
-op/cmpchain.t	!= == ~~ non-associative
 op/cmpchain.t	!= cmp non-associative
 op/cmpchain.t	!= eq <=> non-associative
 op/cmpchain.t	!= eq cmp non-associative
-op/cmpchain.t	!= eq ~~ non-associative
 op/cmpchain.t	!= ne <=> non-associative
 op/cmpchain.t	!= ne cmp non-associative
-op/cmpchain.t	!= ne ~~ non-associative
-op/cmpchain.t	!= ~~ non-associative
 op/cmpchain.t	< < isa non-associative
 op/cmpchain.t	< <= isa non-associative
 op/cmpchain.t	< > isa non-associative
@@ -611,22 +606,16 @@ op/cmpchain.t	<=> ne == non-associative
 op/cmpchain.t	<=> ne eq non-associative
 op/cmpchain.t	<=> ne ne non-associative
 op/cmpchain.t	<=> ne non-associative
-op/cmpchain.t	<=> ~~ non-associative
 op/cmpchain.t	== != <=> non-associative
 op/cmpchain.t	== != cmp non-associative
-op/cmpchain.t	== != ~~ non-associative
 op/cmpchain.t	== <=> non-associative
 op/cmpchain.t	== == <=> non-associative
 op/cmpchain.t	== == cmp non-associative
-op/cmpchain.t	== == ~~ non-associative
 op/cmpchain.t	== cmp non-associative
 op/cmpchain.t	== eq <=> non-associative
 op/cmpchain.t	== eq cmp non-associative
-op/cmpchain.t	== eq ~~ non-associative
 op/cmpchain.t	== ne <=> non-associative
 op/cmpchain.t	== ne cmp non-associative
-op/cmpchain.t	== ne ~~ non-associative
-op/cmpchain.t	== ~~ non-associative
 op/cmpchain.t	> < isa non-associative
 op/cmpchain.t	> <= isa non-associative
 op/cmpchain.t	> > isa non-associative
@@ -667,22 +656,16 @@ op/cmpchain.t	cmp ne == non-associative
 op/cmpchain.t	cmp ne eq non-associative
 op/cmpchain.t	cmp ne ne non-associative
 op/cmpchain.t	cmp ne non-associative
-op/cmpchain.t	cmp ~~ non-associative
 op/cmpchain.t	eq != <=> non-associative
 op/cmpchain.t	eq != cmp non-associative
-op/cmpchain.t	eq != ~~ non-associative
 op/cmpchain.t	eq <=> non-associative
 op/cmpchain.t	eq == <=> non-associative
 op/cmpchain.t	eq == cmp non-associative
-op/cmpchain.t	eq == ~~ non-associative
 op/cmpchain.t	eq cmp non-associative
 op/cmpchain.t	eq eq <=> non-associative
 op/cmpchain.t	eq eq cmp non-associative
-op/cmpchain.t	eq eq ~~ non-associative
 op/cmpchain.t	eq ne <=> non-associative
 op/cmpchain.t	eq ne cmp non-associative
-op/cmpchain.t	eq ne ~~ non-associative
-op/cmpchain.t	eq ~~ non-associative
 op/cmpchain.t	ge < isa non-associative
 op/cmpchain.t	ge <= isa non-associative
 op/cmpchain.t	ge > isa non-associative
@@ -794,42 +777,14 @@ op/cmpchain.t	lt le isa non-associative
 op/cmpchain.t	lt lt isa non-associative
 op/cmpchain.t	ne != <=> non-associative
 op/cmpchain.t	ne != cmp non-associative
-op/cmpchain.t	ne != ~~ non-associative
 op/cmpchain.t	ne <=> non-associative
 op/cmpchain.t	ne == <=> non-associative
 op/cmpchain.t	ne == cmp non-associative
-op/cmpchain.t	ne == ~~ non-associative
 op/cmpchain.t	ne cmp non-associative
 op/cmpchain.t	ne eq <=> non-associative
 op/cmpchain.t	ne eq cmp non-associative
-op/cmpchain.t	ne eq ~~ non-associative
 op/cmpchain.t	ne ne <=> non-associative
 op/cmpchain.t	ne ne cmp non-associative
-op/cmpchain.t	ne ne ~~ non-associative
-op/cmpchain.t	ne ~~ non-associative
-op/cmpchain.t	~~ != != non-associative
-op/cmpchain.t	~~ != == non-associative
-op/cmpchain.t	~~ != eq non-associative
-op/cmpchain.t	~~ != ne non-associative
-op/cmpchain.t	~~ != non-associative
-op/cmpchain.t	~~ <=> non-associative
-op/cmpchain.t	~~ == != non-associative
-op/cmpchain.t	~~ == == non-associative
-op/cmpchain.t	~~ == eq non-associative
-op/cmpchain.t	~~ == ne non-associative
-op/cmpchain.t	~~ == non-associative
-op/cmpchain.t	~~ cmp non-associative
-op/cmpchain.t	~~ eq != non-associative
-op/cmpchain.t	~~ eq == non-associative
-op/cmpchain.t	~~ eq eq non-associative
-op/cmpchain.t	~~ eq ne non-associative
-op/cmpchain.t	~~ eq non-associative
-op/cmpchain.t	~~ ne != non-associative
-op/cmpchain.t	~~ ne == non-associative
-op/cmpchain.t	~~ ne eq non-associative
-op/cmpchain.t	~~ ne ne non-associative
-op/cmpchain.t	~~ ne non-associative
-op/cmpchain.t	~~ ~~ non-associative
 op/cond.t	SEGV in Perl_scalar
 op/const-optree.t	closure after \(my $x=1) has no :method attribute
 op/const-optree.t	closure after \(my $x=1) is not inlinable
@@ -994,8 +949,6 @@ op/signatures.t	[at t/op/signatures.t line 978]
 op/signatures.t	[at t/op/signatures.t line 981]
 op/signatures.t	[at t/op/signatures.t line 984]
 op/signatures.t	__CLASS__ does not swallow trailing comma
-op/signatures.t	__DATA__ does not swallow trailing comma
-op/signatures.t	__END__ does not swallow trailing comma
 op/signatures.t	__FILE__ does not swallow trailing comma
 op/signatures.t	__LINE__ does not swallow trailing comma
 op/signatures.t	__PACKAGE__ does not swallow trailing comma
@@ -1020,7 +973,6 @@ op/signatures.t	`values @_` warns of experimental @_
 op/signatures.t	abs does not swallow trailing comma
 op/signatures.t	accept does not swallow trailing comma
 op/signatures.t	alarm does not swallow trailing comma
-op/signatures.t	and does not swallow trailing comma
 op/signatures.t	atan2 does not swallow trailing comma
 op/signatures.t	bind does not swallow trailing comma
 op/signatures.t	binmode does not swallow trailing comma
@@ -1038,7 +990,6 @@ op/signatures.t	chroot does not swallow trailing comma
 op/signatures.t	class does not swallow trailing comma
 op/signatures.t	close does not swallow trailing comma
 op/signatures.t	closedir does not swallow trailing comma
-op/signatures.t	cmp does not swallow trailing comma
 op/signatures.t	connect does not swallow trailing comma
 op/signatures.t	continue does not swallow trailing comma
 op/signatures.t	cos does not swallow trailing comma
@@ -1063,7 +1014,6 @@ op/signatures.t	endprotoent does not swallow trailing comma
 op/signatures.t	endpwent does not swallow trailing comma
 op/signatures.t	endservent does not swallow trailing comma
 op/signatures.t	eof does not swallow trailing comma
-op/signatures.t	eq does not swallow trailing comma
 op/signatures.t	error when not enabled 1
 op/signatures.t	error when not enabled 2
 op/signatures.t	eval does not swallow trailing comma
@@ -1087,7 +1037,6 @@ op/signatures.t	foreach does not swallow trailing comma
 op/signatures.t	fork does not swallow trailing comma
 op/signatures.t	format does not swallow trailing comma
 op/signatures.t	formline does not swallow trailing comma
-op/signatures.t	ge does not swallow trailing comma
 op/signatures.t	getc does not swallow trailing comma
 op/signatures.t	getgrent does not swallow trailing comma
 op/signatures.t	getgrgid does not swallow trailing comma
@@ -1119,7 +1068,6 @@ op/signatures.t	glob does not swallow trailing comma
 op/signatures.t	gmtime does not swallow trailing comma
 op/signatures.t	goto does not swallow trailing comma
 op/signatures.t	grep does not swallow trailing comma
-op/signatures.t	gt does not swallow trailing comma
 op/signatures.t	handle commonality in scalar parms # TODO can't handle commonaility
 op/signatures.t	hex does not swallow trailing comma
 op/signatures.t	if does not swallow trailing comma
@@ -1133,7 +1081,6 @@ op/signatures.t	kill does not swallow trailing comma
 op/signatures.t	last does not swallow trailing comma
 op/signatures.t	lc does not swallow trailing comma
 op/signatures.t	lcfirst does not swallow trailing comma
-op/signatures.t	le does not swallow trailing comma
 op/signatures.t	length does not swallow trailing comma
 op/signatures.t	link does not swallow trailing comma
 op/signatures.t	listen does not swallow trailing comma
@@ -1142,8 +1089,6 @@ op/signatures.t	localtime does not swallow trailing comma
 op/signatures.t	lock does not swallow trailing comma
 op/signatures.t	log does not swallow trailing comma
 op/signatures.t	lstat does not swallow trailing comma
-op/signatures.t	lt does not swallow trailing comma
-op/signatures.t	m does not swallow trailing comma
 op/signatures.t	map does not swallow trailing comma
 op/signatures.t	masking warning
 op/signatures.t	method does not swallow trailing comma
@@ -1157,14 +1102,11 @@ op/signatures.t	multiline1: $c
 op/signatures.t	multiline1: $d
 op/signatures.t	multiline1: $e
 op/signatures.t	my does not swallow trailing comma
-op/signatures.t	ne does not swallow trailing comma
 op/signatures.t	next does not swallow trailing comma
 op/signatures.t	no does not swallow trailing comma
-op/signatures.t	not does not swallow trailing comma
 op/signatures.t	oct does not swallow trailing comma
 op/signatures.t	open does not swallow trailing comma
 op/signatures.t	opendir does not swallow trailing comma
-op/signatures.t	or does not swallow trailing comma
 op/signatures.t	ord does not swallow trailing comma
 op/signatures.t	our does not swallow trailing comma
 op/signatures.t	pack does not swallow trailing comma
@@ -1175,11 +1117,7 @@ op/signatures.t	print does not swallow trailing comma
 op/signatures.t	printf does not swallow trailing comma
 op/signatures.t	prototype does not swallow trailing comma
 op/signatures.t	push does not swallow trailing comma
-op/signatures.t	qq does not swallow trailing comma
-op/signatures.t	qr does not swallow trailing comma
 op/signatures.t	quotemeta does not swallow trailing comma
-op/signatures.t	qw does not swallow trailing comma
-op/signatures.t	qx does not swallow trailing comma
 op/signatures.t	rand does not swallow trailing comma
 op/signatures.t	read does not swallow trailing comma
 op/signatures.t	readdir does not swallow trailing comma
@@ -1197,7 +1135,6 @@ op/signatures.t	reverse does not swallow trailing comma
 op/signatures.t	rewinddir does not swallow trailing comma
 op/signatures.t	rindex does not swallow trailing comma
 op/signatures.t	rmdir does not swallow trailing comma
-op/signatures.t	s does not swallow trailing comma
 op/signatures.t	say does not swallow trailing comma
 op/signatures.t	scalar does not swallow trailing comma
 op/signatures.t	seek does not swallow trailing comma
@@ -1250,7 +1187,6 @@ op/signatures.t	tie does not swallow trailing comma
 op/signatures.t	tied does not swallow trailing comma
 op/signatures.t	time does not swallow trailing comma
 op/signatures.t	times does not swallow trailing comma
-op/signatures.t	tr does not swallow trailing comma
 op/signatures.t	truncate does not swallow trailing comma
 op/signatures.t	try does not swallow trailing comma
 op/signatures.t	uc does not swallow trailing comma
@@ -1275,8 +1211,6 @@ op/signatures.t	when does not swallow trailing comma
 op/signatures.t	while does not swallow trailing comma
 op/signatures.t	write does not swallow trailing comma
 op/signatures.t	x does not swallow trailing comma
-op/signatures.t	xor does not swallow trailing comma
-op/signatures.t	y does not swallow trailing comma
 op/sigsystem.t	*summary*
 op/ver.t	ASCII sprintf("%*vb", "\#\#", v1.22.333.4444)
 op/ver.t	ASCII sprintf("%vX", v1.22.333.4444)

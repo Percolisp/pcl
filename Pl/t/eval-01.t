@@ -14,7 +14,7 @@ use warnings;
 
 use lib ".";
 
-use Test::More tests => 44;
+use Test::More tests => 47;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -436,4 +436,44 @@ SKIP: {
         });
         like($out, qr/^22/, 'eval string reads enclosing lexical array element');
     }
+}
+
+# ---- #363: a DROP inside a string eval DIES into $@ -------------------------
+#
+# A #138-family drop replaces a statement with nil and lets the program run on.
+# In FILE mode that is announced on stderr; in an EVAL STRING nothing can say
+# so — the runtime starts `pl2cl --server` with :error nil, so the statement
+# simply disappeared and the eval returned a value built without it.  perl's
+# contract for eval STRING is "what does not compile sets $@", so here the drop
+# dies and the eval reports it.  (Option B phase 2's announce->DIE step, taken
+# early for the one path that cannot announce.)
+SKIP: {
+    skip "pl2cl not found", 3 unless -x $pl2cl;
+    skip "sbcl not found",  3 unless `which sbcl 2>/dev/null`;
+
+    # The measured repro: the `f ref $u, "m" or g "fb";` statement was silently
+    # gone — PCL printed nothing for it and gave the eval's last value, 7.
+    my $out = run_pl(q{
+        no warnings;
+        sub f { print "f(@_)\n" } sub g { print "g(@_)\n" }
+        my $u = "x";
+        my $r = eval q{ f ref $u, "m" or g "fb"; 7 };
+        print "r=[", (defined $r ? $r : ""), "] err=[", ($@ ? "set" : "EMPTY"), "]\n";
+        print "msg=[$@]\n";
+    });
+    like($out, qr/r=\[\] err=\[set\]/,
+         'a drop inside a string eval leaves $@ SET and the eval undef, never a '
+       . 'value built without the dropped statement');
+    like($out, qr/PCL: statement dropped at \(eval\)/,
+         '…and $@ carries the drop message, with the fixed prefix');
+
+    # FILE mode is deliberately unchanged: the same statement outside an eval
+    # is still a drop the program survives (announced on stderr, rc 0).
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh qq{no warnings;\nsub f { print "f\\n" } sub g { print "g\\n" }\n}
+            . qq{my \$u = "x";\nf ref \$u, "m" or g "fb";\nprint "after\\n";\n};
+    close $fh;
+    my (undef, $err, $rc) = PCLCore::transpile_raw(qq{$pl2cl --no-cache $pl_file});
+    like($err, qr/PCL: statement dropped at \S+ line \d+/,
+         'in FILE mode the same statement still ANNOUNCES and does not die');
 }

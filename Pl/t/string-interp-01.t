@@ -17,7 +17,7 @@ use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
 
-use Test::More tests => 102;
+use Test::More tests => 130;
 BEGIN { use_ok('Pl::PExpr') };
 
 my $code;
@@ -322,6 +322,28 @@ $node = $expr_o->get_a_node($node_id);
 ok($node->can('content'), "Operators in plain string");
 is($node->content(), '"2 + 2"', "Plain string with operators");
 
+
+diag "";
+diag "-------- Quote-like operators with WHITESPACE before the delimiter (s408):";
+
+# perl allows whitespace between a quote-like operator and its delimiter, and
+# the delimiter is the first NON-space character.  PCL used to take the
+# character right after `qq` — the SPACE — as the delimiter, so the real
+# delimiters stayed in the VALUE: `qq {interp $x}` produced "{interp V}".
+# Silently wrong strings; and where such a string was later eval'd
+# (perl-tests/index.t, yadayada.t) the eval'd CODE was malformed, which is how
+# this was found — #363's die made the malformed eval loud.  PPI has always
+# answered correctly through ->string; the fix is to ask it (CLAUDE.md 11).
+for my $case (
+    [ 'qq {interp $x here}', ['"interp "', '$x', '" here"'], 'qq + space + brace' ],
+    [ 'qq{tight $x here}',   ['"tight "',  '$x', '" here"'], 'qq + brace, no space' ],
+    [ 'qq  ($x in parens)', ['$x', '" in parens"'],    'qq + spaces + paren' ],
+    [ 'qq <$x in angles>',  ['$x', '" in angles"'],    'qq + space + angle' ],
+) {
+    my ($src, $want, $name) = @$case;
+    my ($eo, $nid) = parse_expr($src);
+    verify_string_concat($eo, $nid, $want, $name);
+}
 
 done_testing();
 

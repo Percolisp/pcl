@@ -243,6 +243,23 @@
 #   other movers were mro/package_aliases_utf8.t (registered rows-unstable —
 #   72/34 this time, 54/34/34 before) and op/utf8cache.t (TIMEOUT under load,
 #   DIFF 2/0 alone): contention, per the s406 rule above, not findings.
+# s408 (#363, an eval-mode DROP now DIES into $@; #375, the `qq {…}` delimiters):
+#   FOURTEEN rows spliced, every one the SAME family — an `eval STRING` whose text
+#   PCL cannot lower now reports $@ instead of silently returning undef, so a row
+#   that asserted "no error" (or that read undef as the right answer) is now
+#   honest.  WINS: op/cmpchain.t 1476 -> 1521 (+45) and op/signatures.t 891 -> 912
+#   (+21) — both are `eval "<invalid perl>"` rows asserting $@ is set, which PCL
+#   could not do before; both were REGISTERED, so their rows were re-blessed and
+#   they are XDIFF again with 66 fewer diverging rows.  op/magic.t 167 -> 168 and
+#   op/eval.t 129 -> 130 are #375's (a `qq < … >` string had the delimiters in it).
+#   LOSSES, all false passes: op/smartmatch.t 143 -> 44 is the big one — that file
+#   does `$res = eval $tstr; if ($@ ne '') { fail }`, so 99 unsupported `~~`
+#   expressions were silently dropped, $@ stayed empty and undef happened to
+#   satisfy the "does not match" assertion.  Same shape: op/dor.t -3, op/glob.t -3
+#   ("eval'ed a glob"), op/postfixderef.t -2, op/exec.t -2, comp/parser.t -2,
+#   op/yadayada.t -1, comp/retainedlines.t -1, op/packagev.t -1, op/smartkve.t
+#   (+2 fails, same passing).  Each mover was RE-RUN ALONE (s406 rule);
+#   op/utf8cache.t's TIMEOUT did not reproduce and is contention, not a move.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -281,12 +298,12 @@ comp/opsubs.t	36	0	31	5	DIFF
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL
 comp/package.t	14	0	0	0	DIFF	crash:sb-kernel::arg-count-error: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)
 comp/package_block.t	7	0	0	7	DIFF	
-comp/parser.t	191	0	65	109	DIFF	unbound:q�
+comp/parser.t	191	0	63	111	DIFF	
 comp/parser_run.t	70	0	29	41	DIFF	unbound:main::$00
 comp/proto.t	216	0	47	14	DIFF	crash:simple-error: Undefined subroutine &main::N called at (eval N) line N.
 comp/redef.t	20	0	1	19	DIFF	
 comp/require.t	1750	0	909	835	DIFF	
-comp/retainedlines.t	109	0	19	90	DIFF	
+comp/retainedlines.t	109	0	18	91	DIFF	
 comp/term.t	23	0	23	0	OK	
 comp/uproto.t	32	0	13	21	DIFF	
 comp/use.t	87	0	42	45	DIFF	undef-fn:main::pl-true
@@ -434,7 +451,7 @@ op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and g
 op/chop.t	148	0	96	4	DIFF	
 op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — ALL 7 failing rows (38/7 vs perl 45/0) are two blessed subsections. t10-13 are the `### use bytes` block (t/op/chr.t lines 28-31: under the pragma `chr(-1)` must be the single byte "\xFF"; PCL has no byte view, so it keeps "\x{FFFD}"). t40-42 are `### Code points above U+10FFFF` (lines 80-82: chr(0x110000)/0x1FFFFF/0x200000 in perl's extended UTF-8) — measured s319/s320: SBCL's char-code-limit is 1114112, so a CL string physically cannot hold them and (code-char #x110000) yields no character. Blessed in fable-answers-s318.md §11; task #173.
 op/closure.t	281	1	267	3	DIFF	undef-fn:main::pl-ff
-op/cmpchain.t	1750	0	1476	274	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.
+op/cmpchain.t	1750	0	1521	229	XDIFF	
 op/concat2.t	4	0	4	0	OK	
 op/cond.t	5	0	4	0	XDIFF	timeout | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
 op/const-optree.t	148	0	90	58	XDIFF	
@@ -456,13 +473,13 @@ op/die_exit.t	17	0	17	0	OK
 op/die_keeperr.t	24	0	15	9	DIFF	
 op/die_unwind.t	13	0	8	5	DIFF	
 op/do.t	71	0	66	7	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §DESTROY called by garbage collector — ALL 7 failing rows (66/7 vs perl 71/0) are two blessed categories, established row-by-row s321 after the TAP re-alignment (task #177) showed the old number-join had blamed two rows that PASS. (a) perl t63-t66 + PCL's 2 EXTRA rows: one `foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref()))` loop asserting `$@ =~ /\Asyntax error/`. `do SUBNAME(LIST)` was VALID Perl before 5.20 and meant call-the-sub; PCL keeps that historical semantics, so the assertions fail AND each test's `fail()` guard fires (those are the 2 PCL-only rows — the same divergence, not a second defect). Ruled no-fix in fable-answers-s318.md §4, task #158 :principle9. (b) perl t68 "RT 124248": `f(do { 1; !!(my $x = bless []) })` requires the blessed temp to be DESTROYed at do-block exit (FREETMPS) before f() runs — refcount-deterministic destruction, which PCL does not have; same family as op/args.t t23. NB t67 (delete-helem copied) and t70 ($@ false on do dir) PASS — probed s321 — and t71 ($! is EISDIR on do dir) was FIXED s321 (p-do now carries the OS errno into $!).
-op/dor.t	34	0	32	2	DIFF	
+op/dor.t	34	0	29	5	DIFF	
 op/dump.t	0	0	0	0	NOTAP	
 op/each.t	65	0	4	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/each_array.t	65	0	65	0	OK	
-op/eval.t	169	0	129	39	DIFF	undef-fn:main::pl-ARRAY
+op/eval.t	169	0	130	38	DIFF	undef-fn:main::pl-ARRAY
 op/evalbytes.t	9	0	5	4	DIFF	
-op/exec.t	41	0	15	0	DIFF	crash:simple-error: Couldn't execute "lskdfj": No such file or directory
+op/exec.t	41	0	13	1	DIFF	crash:simple-error: Couldn't execute "lskdfj": No such file or directory
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.
 op/exp.t	31	0	31	0	OK	
 op/fh.t	8	0	5	3	DIFF	
@@ -477,7 +494,7 @@ op/fork.t	28	0	1	0	DIFF
 op/fresh_perl_utf8.t	1	0	0	1	DIFF	
 op/getpid.t	0	0	0	1	NOTAP	crash:simple-error: Can't locate object method "new" via package "threads" at - line N.
 op/getppid.t	8	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w)) Compile-time error
-op/glob.t	18	0	16	1	DIFF	
+op/glob.t	18	0	13	4	DIFF	
 op/gmagic.t	78	0	0	0	DIFF	crash:simple-error: Can't call method FETCH on an undefined value
 op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
 op/grent.t	3	0	3	0	OK	
@@ -518,7 +535,7 @@ op/loopctl.t	66	1	63	4	DIFF
 op/lop.t	47	0	47	0	OK	
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL
 op/magic-27839.t	2	0	2	0	OK	
-op/magic.t	207	1	167	40	DIFF	
+op/magic.t	207	1	168	39	DIFF	
 op/method.t	163	0	96	30	DIFF	undef-fn:main::pl-new
 op/mkdir.t	17	0	17	0	OK	
 op/multideref.t	65	0	32	6	DIFF	crash:sb-int:simple-program-error: invalid number of arguments: N
@@ -536,9 +553,9 @@ op/ord.t	38	0	38	0	OK
 op/overload_integer.t	2	0	2	0	OK	
 op/override.t	36	0	0	0	DIFF	undef-fn:Internals::pl-V
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed
-op/packagev.t	307	0	198	109	DIFF	
+op/packagev.t	307	0	197	110	DIFF	
 op/pos.t	33	0	15	15	DIFF	
-op/postfixderef.t	128	0	82	24	DIFF	undef-fn:main::pl-foo
+op/postfixderef.t	128	0	80	26	DIFF	undef-fn:main::pl-foo
 op/pow.t	268	0	268	0	OK	
 op/print.t	3	0	2	1	XDIFF	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.
 op/protowarn.t	12	0	4	8	DIFF	
@@ -566,11 +583,11 @@ op/select.t	9	0	3	6	DIFF
 op/setpgrpstack.t	3	0	3	0	OK	
 op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNFNBNEBB.
 op/signame_canonical.t	15	0	0	0	DIFF	
-op/signatures.t	1245	1	891	355	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).
+op/signatures.t	1245	1	912	334	XDIFF	
 op/sigsystem.t	4	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.
 op/sleep.t	4	0	4	0	OK	
-op/smartkve.t	18	0	3	13	DIFF	
-op/smartmatch.t	353	0	143	210	DIFF	
+op/smartkve.t	18	0	3	15	DIFF	
+op/smartmatch.t	353	0	44	309	DIFF	
 op/sort.t	205	0	181	24	DIFF	undef-fn:main::pl-revers
 op/splice.t	34	0	34	0	OK	
 op/split.t	219	0	210	9	DIFF	
@@ -625,7 +642,7 @@ op/wantarray.t	28	0	27	1	DIFF
 op/warn.t	32	1	19	14	DIFF	
 op/while.t	26	0	20	6	DIFF	
 op/write.t	636	0	0	0	DIFF	
-op/yadayada.t	34	0	21	12	DIFF	undef-fn:main::pl-A
+op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A
 opbasic/arith.t	183	0	183	0	OK	
 opbasic/cmp.t	13280	0	12078	0	DIFF	
 opbasic/concat.t	254	0	248	6	DIFF	
