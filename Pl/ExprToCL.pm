@@ -2075,19 +2075,13 @@ sub gen_funcall_form {
       else {
         # Internal node that is NOT a block form = interpolated/computed
         # STRING — still eval STRING, must carry the capture alist.
-        my $arg_form = $self->gen_node_form($kids->[1]);
-        my $alist    = $self->_eval_lexical_alist;
-        return $alist ? ['p-eval', $arg_form, $alist]
-                      : ['p-eval', $arg_form];
+        return $self->_gen_eval_string_form($self->gen_node_form($kids->[1]));
       }
     }
     else {
       # eval STRING (plain string literal) with the caller's in-scope
       # lexicals as an alist (docs/eval-lexical-capture.md).
-      my $arg_form = $self->gen_node_form($kids->[1]);
-      my $alist    = $self->_eval_lexical_alist;
-      return $alist ? ['p-eval', $arg_form, $alist]
-                    : ['p-eval', $arg_form];
+      return $self->_gen_eval_string_form($self->gen_node_form($kids->[1]));
     }
   }
 
@@ -2684,6 +2678,32 @@ sub _ctx_wrap_form {
                && $self->environment && $self->environment->wa_void_active;
   my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
   return ['let', ['list', ['list', '*wantarray*', $wa]], $call];
+}
+
+# `eval STRING` — the call, with everything the eval SITE knows that the eval
+# TEXT cannot: the caller's in-scope lexicals (arg 2) and the perl features in
+# effect here (arg 3, #364).  Both are compiler INPUT for the string's own
+# transpile, and both are therefore part of the runtime's eval cache key.
+# Shorter forms are kept EXACTLY as they were — no features and no lexicals
+# still emits a plain (p-eval STRING) — so nothing that has neither moves.
+sub _gen_eval_string_form {
+  my ($self, $arg_form) = @_;
+  my $alist = $self->_eval_lexical_alist;
+  my $feats = $self->_eval_site_features;
+  return ['p-eval', $arg_form, ($alist || 'nil'), $feats] if $feats;
+  return $alist ? ['p-eval', $arg_form, $alist] : ['p-eval', $arg_form];
+}
+
+# The features in effect at this eval site, as a quoted CL list of names, or
+# '' when there are none.  Published per statement by Parser2 (#364).
+sub _eval_site_features {
+  my ($self) = @_;
+  my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
+                && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+  return '' if !$parser;
+  my $f = $parser->lex_home->{_eval_site_features};
+  return '' if !$f || !@$f;
+  return Pl::CLForm::raw("'(" . join(' ', map { "\"$_\"" } @$f) . ")");
 }
 
 # Build the lexical-capture alist passed as the 2nd arg to (p-eval STRING ...).

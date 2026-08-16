@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 27;
 
 # ---- 1. the table is perl's -----------------------------------------------
 
@@ -148,6 +148,54 @@ test_src('no feature "try" after use v5.40 turns it back off',
     qq{use v5.40;\nno feature 'try';\n$TINY});
 test_src('signatures still come from the bundle',
     qq{use v5.36;\nsub add (\$x, \$y) { \$x + \$y }\nprint add(2,3), "\\n";\n});
+
+# ---- 4. a STRING EVAL inherits the site's features (#364) ------------------
+#
+# perl's feature pragmas are lexical and `eval STRING` inherits them.  PCL
+# compiles the eval text in a separate process, on the bare string, so the SITE
+# has to say — the features ride the server request next to the capture alist
+# and join the eval cache key.
+
+test_src('eval STRING inherits `use feature "try"` from its site', <<'PERL');
+use feature 'try';
+no warnings;
+my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
+print "r=[$r] err=[$@]\n";
+PERL
+
+test_src('…and inherits it from a version bundle', <<'PERL');
+use v5.40;
+no warnings;
+my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
+print "r=[$r] err=[$@]\n";
+PERL
+
+test_src('an eval with NO feature leaves `try` an ordinary sub call', <<'PERL');
+no warnings;
+sub try { my ($blk) = @_; "called-try:" . $blk->() }
+my $r = eval q{ try(sub { 7 }) };
+print "r=[$r] err=[$@]\n";
+PERL
+
+# THE CACHE: the same eval TEXT under two different feature scopes must not
+# share an entry.  Both orders, because a cache bug shows in only one of them.
+test_src('same eval text, two feature scopes — feature scope first', <<'PERL');
+no warnings;
+my $code = 'try { 42 } catch ($e) { 0 }';
+my $with    = do { use feature 'try'; eval $code };
+my $without = eval $code;
+print "with=", (defined $with ? $with : "undef"),
+      " without=", (defined $without ? $without : "undef"), "\n";
+PERL
+
+test_src('same eval text, two feature scopes — plain scope first', <<'PERL');
+no warnings;
+my $code = 'try { 42 } catch ($e) { 0 }';
+my $without = eval $code;
+my $with    = do { use feature 'try'; eval $code };
+print "with=", (defined $with ? $with : "undef"),
+      " without=", (defined $without ? $without : "undef"), "\n";
+PERL
 
 # DELETE-WHEN trigger for lib/experimental.pm: the shim exists only because
 # `for values %h` does not alias, which is what makes the real module die at

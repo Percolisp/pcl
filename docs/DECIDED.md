@@ -35,6 +35,22 @@ not-supported.md → only then probe.*
 - **`lib/experimental.pm` is a PCL shim** with a delete-when trigger: the real
   module dies at load because `for values %h` does not alias (E5 axis).  The
   trigger is a guard row that FAILS when aliasing lands.
+- **A string eval INHERITS the feature pragmas in effect at its site** (#364),
+  and the site is the only thing that knows: PCL compiles the eval text in the
+  `pl2cl --server` subprocess on the bare string.  The features ride the server
+  request next to `eval_captures` (a fifth protocol line), seed PPI's lexer via
+  the document's `feature_mods`, and **join the eval cache key** — same text
+  under two feature scopes must not share an entry (guard rows, both orders).
+  The site's own answer comes from PPI's `->presumed_features`, which is exact
+  and lexical (a `no feature 'try'` in an inner block turns it off there and
+  back on after) now that the #360 table teaches it every spelling.
+- **The per-statement publication hook is `_lower_block`, not `_lower_stmt`** —
+  the declaration paths (`my $r = eval "…"`, the commonest eval statement there
+  is) never reach `_lower_stmt`.  Found by tracing, after the first attempt
+  silently published nothing.
+- **`lex_home` IS the Parser2 object**, so a key published there shares a
+  namespace with Parser2's own fields — a same-named per-document map and
+  per-statement value collided and read as "Not an ARRAY reference".
 
 ## s408 (2026-08-16, Opus 5) — lexical subs are LEXICALS (#337, session F)
 

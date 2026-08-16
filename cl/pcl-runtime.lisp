@@ -8477,10 +8477,14 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (apply fn (mapcar #'p-eval-lex-lookup free-names)))
       (apply fn (mapcar #'p-eval-lex-lookup free-names))))
 
-(defun p-eval (string &optional lex-alist)
+(defun p-eval (string &optional lex-alist features)
   "Perl eval(STRING): transpile and evaluate a Perl string at runtime.
    LEX-ALIST carries the caller's in-scope lexicals (name . container) so the
    eval body can capture them (see p-eval-thunk).
+   FEATURES are the perl feature names in effect at the eval SITE (#364):
+   perl's feature pragmas are lexical and a string eval inherits them, but this
+   text is compiled on its own, so the site has to say.  They reach PPI's lexer
+   as its initial feature state, and they are part of the cache key.
    Binds *pcl-caller-wantarray* so wantarray() in the eval'd code reflects context."
   (let ((*pcl-caller-wantarray* *wantarray*)
         (*p-eval-lex-alist* lex-alist)
@@ -8504,14 +8508,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; KEY — without that, the same eval string used from two different scopes
     ;; would reuse whichever emission compiled first.  Sorted, so two sites
     ;; with the same lexicals share the entry.
+    ;; #364: FEATURES join the key for the same reason.  perl's feature pragmas
+    ;; are lexical and a string eval inherits them, so the same text compiles
+    ;; differently under `use feature 'try'` than without it — `try {…} catch
+    ;; (…) {…}` is one statement there and a swallowing bareword call here.
     (let* ((pkg-name  *pcl-current-package*)
            (cap-names (sort (mapcar #'car lex-alist) #'string<))
-           (cache-key (list* s pkg-name cap-names))
+           (feat-names (sort (copy-list features) #'string<))
+           (cache-key (list* s pkg-name (append feat-names (list :caps) cap-names)))
            (cached    (gethash cache-key *p-eval-string-cache*)))
       (handler-case
           (let* ((cl-text  (or cached
                                (let ((r (p-transpile-string s pkg-name
-                                                            cap-names)))
+                                                            cap-names
+                                                            feat-names)))
                                  (setf (gethash cache-key
                                                 *p-eval-string-cache*) r)
                                  r)))
@@ -11747,7 +11757,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-152"
+(defparameter *pcl-cache-generation* "v2-153"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -11927,7 +11937,7 @@ buffer's fill-pointer; everything else falls back to file-length."
            :external-format :utf-8)))
   *p-transpiler-process*)
 
-(defun p-transpile-string (perl-code pkg-name &optional capture-names)
+(defun p-transpile-string (perl-code pkg-name &optional capture-names features)
   "Transpile a Perl string to CL code via the persistent pl2cl server.
    CAPTURE-NAMES are the caller's in-scope lexical names (the keys of the
    eval's capture alist).  The compiler needs them for the ONE question whose
@@ -11935,15 +11945,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    is the caller's `my $a`, so it must compile as that captured lexical rather
    than as the dynamically-bound special.  Everything else resolves at RUNTIME
    through p-eval-lex-lookup and is unaffected by this list.
+   FEATURES are the perl features in effect at the eval site (#364), which
+   decide how the TEXT lexes — `try`/`signatures` today.
    Returns the CL text string, or signals an error on failure."
   (let* ((proc     (p-ensure-transpiler))
          (in       (sb-ext:process-input  proc))
          (out      (sb-ext:process-output proc))
          (code-len (length perl-code)))
-    ;; Send request: pkg\n captures\n char-count\n perl-code
+    ;; Send request: pkg\n captures\n features\n char-count\n perl-code
     (write-string pkg-name in)
     (write-char #\Newline in)
     (write-string (format nil "~{~A~^ ~}" capture-names) in)
+    (write-char #\Newline in)
+    (write-string (format nil "~{~A~^ ~}" features) in)
     (write-char #\Newline in)
     (write-string (princ-to-string code-len) in)
     (write-char #\Newline in)

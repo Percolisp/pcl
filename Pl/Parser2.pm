@@ -58,6 +58,16 @@ has eval_pkg  => (is => 'ro', default => sub { undef });
 # heuristic.  Empty/absent = "no captures known", i.e. today's behaviour.
 has eval_captures => (is => 'ro', default => sub { [] });
 
+# #364: the perl FEATURES in effect at the eval SITE.  perl's feature pragmas
+# are lexical and a string eval inherits them, but PCL compiles the eval text
+# in a separate process on the bare string — so `use feature 'try'; eval q{try
+# {…} catch ($e) {…}}` parsed with no features at all and the construct became
+# one swallowing statement.  The site knows the answer (PPI's
+# ->presumed_features, fed by the #360 table), so it rides the server request
+# next to eval_captures and seeds PPI's lexer here.  Like eval_captures, this
+# is compiler INPUT and therefore part of the eval CACHE key (s387).
+has eval_features => (is => 'ro', default => sub { [] });
+
 # Pre-pass result, keyed by package: { pkg => { perl sub name →
 # { cl_name, insensitive } } } (see ExprToCL2).  Bareword sub resolution is
 # package-scoped in Perl, so ExprToCL2/VarAnnotator only ever see the CURRENT
@@ -114,13 +124,53 @@ sub _build_fallback_parser {
   return $p;
 }
 
+# EVAL MODE: the features the SITE told us about, in PPI's own shape, ready to
+# seed the lexer (PPI::Lexer consults the document's feature_mods before the
+# first token).  Empty in file mode — a file's own pragmas are in its text.
+sub _eval_feature_seed {
+  my ($self) = @_;
+  my @feats = @{ $self->eval_features // [] } or return ();
+  return (feature_mods => { map +($_ => 'perl'), @feats });
+}
+
+# The features in effect AT each string-eval site in this document, recorded
+# against every enclosing statement so the lowering can look one up by the
+# statement it is handed (refaddr, O(1)).  One find + one walk per eval; eval
+# sites are rare, and nothing here runs per token (the #184 lesson).
+#
+# perl's answer is exact and lexical — a `no feature 'try'` in an inner block
+# turns it off for an eval there and back on after — and PPI's
+# ->presumed_features gives exactly that, now that the #360 table teaches it
+# every spelling.  Only ENABLED features are recorded: they are what changes
+# how the eval TEXT lexes, and carrying the disabled ones would put noise in
+# the request and the cache key.
+sub _scan_eval_site_features {
+  my ($doc) = @_;
+  my %by_stmt;
+  for my $w (@{ $doc->find(sub {
+                  $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval' }) || [] }) {
+    my $f = eval { $w->presumed_features } or next;
+    my @on = sort grep { $f->{$_} } keys %$f;
+    next if !@on;
+    for (my $p = $w->parent; $p; $p = $p->parent) {
+      next if !$p->isa('PPI::Statement');
+      # Union when one statement holds two eval sites with different answers:
+      # the alternative is to pick one, and enabling is the direction that
+      # keeps a program working.  No real code does this.
+      my %seen = map +($_ => 1), @{ $by_stmt{ refaddr $p } || [] }, @on;
+      $by_stmt{ refaddr $p } = [sort keys %seen];
+    }
+  }
+  return \%by_stmt;
+}
+
 sub parse_file { my ($class, $fn, %opts) = @_; return $class->new(filename => $fn)->parse }
 sub parse_code {
   my ($class, $code, %opts) = @_;
   return $class->new(
     code => $code,
     map { $_ => $opts{$_} } grep { defined $opts{$_} }
-      qw(eval_mode eval_pkg eval_captures),
+      qw(eval_mode eval_pkg eval_captures eval_features),
   )->parse;
 }
 
@@ -916,7 +966,7 @@ sub parse {
   # and the run continued on a silently-shortened program.  There is no
   # lenient mode on this pipeline, so the failure has to say WHICH file — an
   # unattributed "PPI parse failed" in a sweep of 100 files is not a report.
-  my $doc = $self->fallback_parser->_ppi_parse($src)
+  my $doc = $self->fallback_parser->_ppi_parse($src, $self->_eval_feature_seed)
     or die "PCL: cannot parse " . ($self->has_filename ? $self->filename : "(inline code)")
            . ": PPI failed to tokenize it\n";
 
@@ -1007,6 +1057,11 @@ sub parse {
   # Runs BEFORE every name-keyed pass below (prototype registry, term scan,
   # sub_info, hoisting), so all of them see one consistent set of names.
   $self->_rename_lexical_subs($doc);
+
+  # #364: which features each string-eval site inherits.  Computed here, once,
+  # while the document is whole; _lower_stmt publishes the answer for the
+  # statement it is lowering and ExprToCL puts it in the (p-eval …) call.
+  $self->{_eval_features_by_stmt} = _scan_eval_site_features($doc);
 
   # Cross-file prototypes must be in the shared Environment BEFORE any
   # expression parses: v2 lowers named subs ahead of the statement stream and
@@ -6451,6 +6506,14 @@ sub _lower_block {
   my ($first, @rest) = @s;
   my $first_tail = @rest ? undef : $tail_ctx;
 
+  # #364: publish the perl features this statement's string evals inherit, for
+  # the (p-eval …) emission in ExprToCL.  HERE rather than in _lower_stmt
+  # because the declaration paths below (`my $r = eval "…"` — the commonest
+  # eval statement there is) never reach it.  Set unconditionally, so an eval
+  # can only ever see its OWN site's answer.
+  $self->fallback_parser->lex_home->{_eval_site_features} =
+    $self->{_eval_features_by_stmt}{ refaddr $first };
+
   # -- local …;  → v1's local machinery via the fallback seam; the opened
   # save/restore scope wraps the lowered block remainder (see _lower_local).
   # Standalone `delete local $h{k};` is a plain PPI::Statement with the same
@@ -7422,6 +7485,10 @@ sub _decl_scope_block {
 
 sub _lower_stmt {
   my ($self, $stmt, $vi, $tail_ctx) = @_;
+  # #364: the same publication as in _lower_block, for the statements that
+  # reach here on their own (a compound's parts, a for-head's init/step).
+  $self->fallback_parser->lex_home->{_eval_site_features} =
+    $self->{_eval_features_by_stmt}{ refaddr $stmt };
 
   if ($stmt->isa('PPI::Statement::Compound')) {
     return $self->_lower_compound($stmt, $vi, $tail_ctx);

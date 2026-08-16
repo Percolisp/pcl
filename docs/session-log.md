@@ -46,6 +46,40 @@ to end vs perl including the Try::Tiny inverse), plus a canary in
 `misc-fixes-02.t`.  Rule 13: `ppi-upstream-bugs.md` §20 and three new failing
 rows (Bug 17) in `docs/ppi-bug-report.t`.
 
+### #364 — a string eval inherits its site's features
+
+perl's feature pragmas are lexical and `eval STRING` inherits them.  PCL
+compiles the eval text in the `pl2cl --server` subprocess, on the bare string,
+so `use feature 'try'; eval q{try {…} catch ($e) {…}}` parsed with no features
+at all: the construct became one swallowing statement and the eval returned
+undef, silently.
+
+The site is the only thing that knows the answer, and PPI gives it exactly —
+`->presumed_features` is lexical, so a `no feature 'try'` in an inner block
+turns it off there and back on after (probed).  So the features ride the server
+request next to the capture alist (a fifth protocol line), seed PPI's lexer
+through the document's `feature_mods`, and **join the eval cache key**: the
+same text under two feature scopes must not share an entry, which is the s387
+rule that a capture-dependent emission keys the cache.  Guard rows run both
+orders, because a cache bug shows in only one of them.
+
+Two things cost time and are worth remembering:
+
+* **`lex_home` IS the Parser2 object.**  Publishing a per-statement value under
+  the same key as Parser2's own per-document map made the reader see a hashref
+  where it wanted an arrayref — "Not an ARRAY reference", surfacing as a
+  PARSE ERROR drop on every `eval` statement.
+* **The hook is `_lower_block`, not `_lower_stmt`.**  The declaration paths —
+  `my $r = eval "…"`, the commonest eval statement there is — never reach
+  `_lower_stmt`, so the first version published nothing at all and the probe
+  looked unchanged.  Traced rather than guessed.
+
+Measured: corpus-diff **1 of 111 files** — `signatures.t`, and the difference is
+proven mechanically to be *only* the 530 feature arguments added to its
+`p-eval` calls (strip them from the new emission and the whitespace-normalized
+files are byte-identical).  Gen v2-152 → **v2-153**, all three artifacts
+regenerated.  Gate **149 files / 5405 rows**.
+
 ### #337 — `my sub` is a LEXICAL (session F)
 
 **The bug.** PCL compiles every named sub as a PACKAGE sub, so two `my sub x`

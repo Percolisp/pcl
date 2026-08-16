@@ -450,8 +450,11 @@ sub _ppi_new {
 }
 
 sub _ppi_parse {
-  my ($self, $src) = @_;
-  my $doc = _ppi_new($src);
+  my ($self, $src, %opt) = @_;
+  # %opt is how EVAL-MODE seeds the lexer with the features in effect at the
+  # eval SITE (#364): perl's feature pragmas are lexical and a string eval
+  # inherits them, but this parse only ever sees the bare eval text.
+  my $doc = _ppi_new($src, %opt);
   # PPI GLOBAL-STATE BUG (docs/ppi-upstream-bugs.md §13, task #356): once
   # certain documents have been parsed in a PROCESS, a later document's
   # trailing `__END__`/`__DATA__` section comes back carrying ONE EXTRA
@@ -472,7 +475,7 @@ sub _ppi_parse {
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc))) {
     my $fixed = $doc->serialize;
-    my $redo  = _ppi_new($fixed);
+    my $redo  = _ppi_new($fixed, %opt);   # the seed applies to the reparse too
     if ($redo) {
       _trim_invented_tail($redo, $fixed);
       $doc = $redo;
