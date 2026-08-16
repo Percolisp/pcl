@@ -17,8 +17,9 @@
 Docs/tasks in the same session: `DECIDED.md` s406 section, `session-log.md`
 s406, `perl-suite-run.tsv` (one row spliced + two notes), `plan-post-s400.md`
 §2b, tasks #346/#347/#358 marked completed (s405 closed them but the tracker
-still said pending), #359/#360 given task files at last, **#361 filed** (a new
-silent wrong, §5), #337/#342 given their probe measurements.
+still said pending), #359/#360 given task files at last, **#361 filed and then
+fixed** (§5), **#362 filed** (§7 ask 6 — `\&f == \&f` is false), #337/#342
+given their probe measurements.
 
 ## 2. Measurements
 
@@ -141,13 +142,23 @@ nothing in the tree and nothing in the perlbrew perl — the standing rule is
    also hits #347's refusal inside a loop body) is a separate axis I would size
    on its own.  Confirm the split before I start, since the plan lists F as one
    session.
-6. **#361's ALL-CAPS split** — `_word_is_term` now delegates to
+6. **#362 filed, not fixed** (found by the same probe battery, then narrowed):
+   `\&f == \&f` is FALSE in PCL and true in perl — `\&NAME` builds a new
+   reference on every evaluation.  Named subs only: `\%h`, `\@a`, `\$s` and a
+   copied anon coderef all compare equal, and a stringified coderef is stable
+   (hash keys hit), so it is the numeric identity alone.  **This looks like the
+   same family as the Moo/Sub::Defer `%DEFERRED` wall** (memory
+   `project_coderef_identity_blocker`: the lookup misses because the coderef it
+   gets back is a different object).  If that is one cause, the fix is worth
+   more than its five probe rows — worth a ruling on whether it jumps the
+   queue before #337.
+7. **#361's ALL-CAPS split** — `_word_is_term` now delegates to
    `_word_is_declared_term`, and the `x` repair uses the latter (an ALL-CAPS
    word before `x` is a filehandle, not a constant) while the `/PATTERN/`
    repair keeps the guess (an imported constant is invisible to a token scan).
    That asymmetry is deliberate and probed, but it IS two answers to "is this
    word a term" — tell me if you want one rule instead, and which way.
-7. **Nothing here depends on an s405 ask being ruled a particular way.**  #348
+8. **Nothing here depends on an s405 ask being ruled a particular way.**  #348
    landed under §2c's standing (its blockers were fixed, so it was no longer an
    interim call), and I did not touch #359 (still behind the release: the
    `:preserve-fds` widening is ~8 call sites plus open-time marking, not one
