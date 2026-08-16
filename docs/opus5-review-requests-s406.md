@@ -146,12 +146,19 @@ nothing in the tree and nothing in the perlbrew perl — the standing rule is
    `\&f == \&f` is FALSE in PCL and true in perl — `\&NAME` builds a new
    reference on every evaluation.  Named subs only: `\%h`, `\@a`, `\$s` and a
    copied anon coderef all compare equal, and a stringified coderef is stable
-   (hash keys hit), so it is the numeric identity alone.  **This looks like the
-   same family as the Moo/Sub::Defer `%DEFERRED` wall** (memory
-   `project_coderef_identity_blocker`: the lookup misses because the coderef it
-   gets back is a different object).  If that is one cause, the fix is worth
-   more than its five probe rows — worth a ruling on whether it jumps the
-   queue before #337.
+   (hash keys hit), so it is the numeric identity alone.  I *guessed* this was
+   the Moo/Sub::Defer `%DEFERRED` wall and then **took the discriminating
+   measurement instead of leaving the guess in the task** (the CLAUDE.md rule):
+
+       my $stub = sub {…};  *{"Pkg::new"} = $stub;   # the Sub::Defer shape
+       $stub == \&Pkg::new        perl same   PCL same   <- install/lookup WORKS
+       \&Pkg::new == \&Pkg::new   perl same   PCL DIFF   <- the bug, and only it
+
+   So the one-install-one-lookup path already matches perl; this task is the
+   two-independent-lookups case, and the Moo wall is the same bug only if
+   Sub::Defer takes `\&NAME` twice for one sub — unmeasured, and the cheap way
+   to settle it is to instrument `undefer_sub`.  Ask: does #362 jump ahead of
+   #337, or wait for that instrumentation?
 7. **#361's ALL-CAPS split** — `_word_is_term` now delegates to
    `_word_is_declared_term`, and the `x` repair uses the latter (an ALL-CAPS
    word before `x` is a filehandle, not a constant) while the `/PATTERN/`
