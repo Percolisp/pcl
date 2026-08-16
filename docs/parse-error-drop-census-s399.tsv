@@ -27,6 +27,11 @@
 #         token repairs (#351 `/re/` after a paren-less call lexed as division,
 #         #354 `)*name` lexed as a glob) recovered those statements; re-measured
 #         directly (`pl2cl FILE | grep -c ';; PARSE ERROR'`).
+#   s407  t/re/pat_advanced.t 11 -> 4: the same s404 #351 repair (`1 while /re/g`
+#         statements) recovered 7 more; missed in the s405 edit because the runner
+#         only complains on an INCREASE.  Re-measured by tools/drop-census.pl at
+#         e79f0a6 (73 files / 373 drops).  The 4 left are `1 while /(a+b?)(*SKIP)…/g`
+#         (a `?` inside a regex PPI mis-lexes when the pattern carries `(?{…})`).
 #   s405  t/op/try.t 0 -> 1, a NEW row: the file could not transpile at all
 #         before try/catch existed (#340), so it had no CL to count.  Its one
 #         drop is `fscalar = 123;` — the file-level lvalue-sub refusal, which
@@ -122,7 +127,7 @@ t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/utftaint.t	1	Bug. Fell through. Missing case: [ x1
 t/op/write.t	2	Handle single node of unknown type. Dump: x2
 t/re/pat.t	8	Bug. Fell through. Missing case: [] x5 | Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
-t/re/pat_advanced.t	11	Bug. Fell through. Missing case: [ x3 | Bug. Fell through. Missing case: [] x1 | Ternary operator: Found '?' but no matching ':' x7
+t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
 t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
 t/re/subst.t	3	Bug. Fell through. Missing case: [] x2 | Handle single node of unknown type. Dump: x1
 t/uni/caller.t	2	Bug. Fell through. Missing case: [ x2

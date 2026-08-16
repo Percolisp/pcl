@@ -73,6 +73,21 @@ not-supported.md → only then probe.*
   modules is inside the standing permission (recipe: runbook "Leak hunting").
 - **`Pl/t/parser-leak-01.t` scans the COMPILER only** — lib/ shims run under
   SBCL (cycles collected) and `__SUB__` is a no-op stub there.
+- **Option B phase 2 is SIZED from the census TEXT, and it is mostly NOT
+  parser work** (`docs/option-b-phase2-plan.md`): of 373 drops (73 files,
+  `tools/drop-census.pl` at e79f0a6 = the edited baseline exactly), ~300 are
+  FEATURE ABSENCES / deliberate error tests (given/when ~117, lvalue-sub ~41
+  (ruled), class ~25, hexfloat ~20, unicode stash names ~16, defer 13,
+  format ~9, `~~` infix 5, indirect object 4, `__SUB__` 4), ~40 are the term
+  grammar (stacked filetests ~27, the #343 shape ~4, singles), ~15 lexer
+  bugs / gaps (`qx{}` delimiters DROPPED #369, term-initial `~~` #370).
+  Tracks: **A #371** refusals at the drop site (no parser risk) → **B1 #372**
+  (a named unary's operand may BEGIN with a named unary; A/B by the fold
+  recipe) → **B2 #343** → fillers → re-census → the announce→DIE flip at
+  ≤ ~30 all-explained.  **Do NOT rewrite `parse()`'s main loop for this** —
+  the maze may stay a corridor; B3 deletes only what is then unreachable.
+  Recipe: `tools/drop-census.pl` (counts) + **`tools/drop-harvest.pl`** (the
+  TEXT — new s407).
 
 
 ## s406 (2026-08-16, Opus 5) — #348 lands, one gate transpile helper (#355), the compiler's own leak (#128)

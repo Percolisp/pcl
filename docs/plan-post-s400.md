@@ -237,7 +237,15 @@ sessions, in order:**
    pre-pass on the replacement text), then **#365** (imported `()`-sub bareword
    at the operator-loop term site — the #266 classifier), **#368** (anon
    `__SUB__` dies), **#359** (behind the release; fd-3 announces).
-6. Release phase 1 leftovers: **#278 → #279 → #280 → #282 (after #281) →
+6. **Option B phase 2, as SIZED in `docs/option-b-phase2-plan.md`** (Fable,
+   s407 — the census is ~300 feature absences, ~40 term grammar, ~15 lexer
+   bugs): **Track A #371** (feature-absence drops become ruled refusals — one
+   session, no parser risk) → **B1 #372** (a named unary's operand may begin
+   with a named unary: stacked filetests; A/B by the fold recipe) → **B2 #343**
+   (the parenless-call × named-unary × low-prec shape) → fillers **#369**
+   (`qx{}` delimiters DROPPED) + **#370** (PPI lexes term-initial `~~` as
+   smartmatch) → re-census → the announce→DIE flip (plan §3).
+7. Release phase 1 leftovers: **#278 → #279 → #280 → #282 (after #281) →
    #283**.
 
 Standing additions from this review (also in DECIDED s407): a token-stream
@@ -260,7 +268,7 @@ a SILENT-WRONG task carries the EMISSION of its reproducer.
    a worklist; Opus executes the mechanical arms in parallel with sessions
    E–G.  Emission-changing: corpus-diff explained per file, gate, sweep
    TOTAL/LOST, gen bump, artifacts regenerated.  Likely 2+ sessions.
-3. **Option B phase 2 — SIZE, then execute.**  The `$end_pars` collapse
+3. **Option B phase 2 — SIZED s407 (`docs/option-b-phase2-plan.md`); execution is Opus's (#371 → #372 → #343 → #369/#370 → the flip), B1's operand grammar is the one Fable-designed piece.  The text below is the pre-sizing plan, kept for the record.**  ~~SIZE, then execute.~~  The `$end_pars` collapse
    (`docs/pexpr-term-parsing-review.md` §Phase 2; task #153
    `option_b_status_s398`): first decide whether the fold's non-postfix
    terms become nodes (A/B over four populations, byte-identical bar), then

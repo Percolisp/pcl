@@ -326,3 +326,8 @@ Task **#365**, with the probe table.  Silent-wrong today.
 "Leak hunting"; tasks #362 (closed, cause corrected), #360 (widened), #337 (split
 confirmed), #359 (ruling), #363–#368 filed; the two review fixes committed with
 their guards.
+
+**Fable track, same session:** Option B phase 2 SIZED — `docs/option-b-phase2-plan.md`
+(three tracks: #371 refusals, #372 B1 operand grammar, #343 B2; fillers #369 `qx{}`
+delimiters dropped, #370 term-initial `~~` PPI mis-lex; then the DIE flip); new
+`tools/drop-harvest.pl`; census baseline row pat_advanced.t 11 → 4 edited with cause.

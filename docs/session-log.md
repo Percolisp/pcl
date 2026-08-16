@@ -64,6 +64,25 @@ shape stands, crlf_through = (a), scratch `local::lib` inside the permission
 Queue for Opus: `docs/plan-post-s400.md` §2d — F=#337 → #360+#364 → #363 →
 #366+#367 → #342-2/#365/#368/#359 → release leftovers.
 
+**Fable track — Option B phase 2 SIZED (`docs/option-b-phase2-plan.md`).**  The
+census (`tools/drop-census.pl`: 73 files / 373 drops at e79f0a6; the baseline's
+one stale row, pat_advanced.t 11 → 4, edited with its cause) was harvested to
+TEXT with the new `tools/drop-harvest.pl` and read row by row: **~300 of 373
+are feature ABSENCES or deliberate error tests** (given/when ~117, the ruled
+lvalue-sub drops ~41, class ~25, hexfloat literals ~20, unicode stash names
+~16, defer 13, formats ~9, infix `~~` 5, indirect object 4, `__SUB__` 4),
+**~40 are the term grammar** (stacked filetests `-f -d $x` ~27, the #343
+parenless-call × named-unary × low-prec shape ~4, odd singles), **~15 are
+lexer bugs / small gaps** — `qx{…}`/`qx(…)` are DROPPED outright (#369, silent
+undef) and PPI lexes a term-initial `~~` as smartmatch (#370, rule 13).  So the
+`$end_pars` collapse as planned would buy ~10% of the metric; the plan is now
+three tracks — **A #371** refusals at the drop site (one Opus session, no
+parser risk), **B1 #372** (a named unary's operand may BEGIN with a named
+unary — the one Fable-designed grammar piece, A/B by the fold recipe), **B2
+#343**, fillers, re-census, then the announce→DIE flip at ≤ ~30 all-explained
+drops.  Do NOT rewrite `parse()`'s main loop for this.  Next Fable item: #281
+(the IR pass design).
+
 
 ## Session 406 (2026-08-16, Opus 5) — #348 lands for free, one transpile helper for the gate (#355), and the compiler's own memory leak (#128)
 
