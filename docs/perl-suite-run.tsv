@@ -206,6 +206,32 @@
 #   lines, so one exact-output comparison in a file that spawns 23 children
 #   matches.  The same +1 appears in the sweep half (perl-tests/ref.t 190 ->
 #   191 passing).
+# s406 (#348 LANDED — which_perl's children now run PCL): ONE row moved, and
+#   it moved for a reason worth reading twice.
+#     io/crlf_through.t  726/216 DIFF -> 942/0 OK
+#   That file is `$main::use_crlf = 1; do './io/through.t'`, and through.t
+#   pipes its data through a which_perl child.  With a REAL perl child the 216
+#   failures were PCL's `:crlf` layer disagreeing with perl's; with a PCL child
+#   both ends agree — so the row now says "PCL is self-consistent", not "PCL
+#   matches perl".  Attributed with one measurement: `PCL_FRESH_PERL=real`
+#   reproduces 726/216 exactly.  The gap itself is UNCHANGED and still owned by
+#   task #139 (probed again s406: `>:crlf` writes 61 0a where perl writes
+#   61 0d 0a; `<:crlf` returns 610d0a where perl returns 610a — the layer is a
+#   no-op in both directions), and io/crlf.t still measures it directly
+#   (16408/16421, 13 rows).  The other 18 companion callers did not move at
+#   all: the 19 were run before and after and their failure logs are
+#   byte-identical.
+# s406 (measurement hygiene, NOT a row change): an `--all --quick --jobs 4`
+#   run compared against this snapshot showed 36 differing rows, of which 22
+#   were CONTENTION — every one of them re-run alone reproduced the snapshot
+#   value exactly (op/lc.t, op/magic.t, op/ref.t, op/sprintf2.t, op/stash.t,
+#   op/print.t, op/splice.t, op/stash_parse_gv.t, …).  A file that spawns
+#   fresh_perl/runperl children loses rows when the machine is busy, and #348
+#   made the run busier (19 files now spawn PCL children too).  The rule the
+#   next session should follow: a companion row that moved is not a finding
+#   until it has been re-run ALONE.  The remaining 14 = 11 --quick NOT-RUN,
+#   mro/package_aliases_utf8.t (registered rows-unstable), op/utf8cache.t
+#   (DIFF 2/0 -> TIMEOUT 2/0, same counts) and io/crlf_through.t above.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -259,7 +285,7 @@ io/binmode.t	9	0	9	0	OK
 io/bom.t	3	0	0	3	DIFF	
 io/closepid.t	3	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N") Co
 io/crlf.t	16421	0	16412	6	DIFF	undef-fn:PerlIO::pl-get_layers
-io/crlf_through.t	942	0	726	216	DIFF	
+io/crlf_through.t	942	0	942	0	OK	
 io/data.t	4	0	0	0	DIFF	
 io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented
 io/dup.t	29	0	4	0	DIFF	

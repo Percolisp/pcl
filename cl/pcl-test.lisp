@@ -985,23 +985,32 @@
 ;;; runtime derives at load time ($PERL, else `command -v perl`, else "perl"),
 ;;; and DIES rather than guess if that resolves to nothing.
 ;;;
-;;; DELIBERATELY NOT $PCLPERL (task #348, USER-decided s400).  Pointing it at
-;;; tools/pclperl-for-tests would make these children run PCL — the #90 policy
-;;; that fresh_perl_*/runperl already follow, and the reason those rows are not
-;;; the perl-to-perl comparison they look like.  It was implemented and MEASURED
-;;; here: 17 of the 19 companion files unmoved, op/closure.t 267/3 -> 235/27
-;;; honest (PCL's nested-sub-captures-foreach gap, task #347), and two holes —
-;;; perl-tests/closure.t OK 272 -> PARTIAL 240/28 and run/cloexec.t hanging at
-;;; its first backtick child (task #346).  Coverage evaporating is worse than a
-;;; vacuous pass (#176/#204), so the switch waits for those two.
+;;; It resolves $PCLPERL FIRST (task #348, landed s406), exactly as the stub
+;;; perl-tests/t/test.pl's _pcl_child_perl does for fresh_perl_*/runperl: under
+;;; the PCL harness that names tools/pclperl-for-tests, so a child these tests
+;;; spawn runs PCL and its assertions say something about PCL.  Returning $^X
+;;; unconditionally (the s400 state) made every such child run REAL perl, so
+;;; the rows compared perl to perl and were vacuous — the #90 policy hole.
+;;; PCL_FRESH_PERL=real forces the real perl (comparison mode), and outside the
+;;; harness $PCLPERL is unset, so an oracle run is unaffected.
+;;;
+;;; The switch was implemented and measured in s400 and then HELD, because two
+;;; files then lost coverage instead of gaining honesty (#176/#204: a file that
+;;; hangs or aborts contributes NO rows): run/cloexec.t hung at its first
+;;; backtick child (task #346, the cause turned out to be #358 — `open` on a
+;;; closed fd spun on EBADF) and closure.t lost rows to PCL's nested-sub capture
+;;; gap (task #347).  Both are fixed, which is what unblocked this.
 (export '(pl-which_perl))
 (defun pl-which_perl (&rest args)
   (declare (ignore args))
-  (let ((x (and (boundp '|$^X|)
-                (pcl:to-string (pcl:unbox (symbol-value '|$^X|))))))
-    (unless (and x (plusp (length x)))
+  (let* ((x (and (boundp '|$^X|)
+                 (pcl:to-string (pcl:unbox (symbol-value '|$^X|)))))
+         (forced-real (equal (sb-ext:posix-getenv "PCL_FRESH_PERL") "real"))
+         (pclperl (and (not forced-real) (sb-ext:posix-getenv "PCLPERL")))
+         (chosen (if (and pclperl (plusp (length pclperl))) pclperl x)))
+    (unless (and chosen (plusp (length chosen)))
       (error "which_perl(): no interpreter resolved — $^X names none"))
-    (pcl:make-p-box x)))
+    (pcl:make-p-box chosen)))
 
 ;;; run_perl(switches => [...], prog => "code") — Perl test.pl helper.
 ;;;

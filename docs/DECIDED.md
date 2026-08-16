@@ -278,13 +278,18 @@ not-supported.md → only then probe.*
   Enforced by `Pl/t/no-hardcoded-paths-01.t`, which excludes the three
   transpiled artifacts by their gen stamp and counts them (#217 owns those).
   → task #278.
-- **`which_perl`'s children keep running REAL perl for now (USER, s400)** —
-  the `$PCLPERL` switch (#90's policy) is implemented and MEASURED but held:
-  17 of 19 companion callers unmoved, op/closure.t 267/3 → 235/27 honest
-  (#347), but perl-tests/closure.t OK → PARTIAL and run/cloexec.t HANGS
-  (#346).  Two measurement holes for ~56 vacuous rows is the wrong trade
-  while #176/#204 stand.  → task #348 (blocked by #346, #347),
-  `perl-suite-run.tsv` header.
+- **`which_perl`'s children run PCL (`$PCLPERL`), LANDED s406** — the #90
+  policy now covers `which_perl` too, so a test that spawns a child through it
+  measures PCL and not perl-to-perl.  Held since s400 for two measurement
+  holes; both were fixed first (#358 the cloexec hang, #347 the closure gap),
+  and with them fixed the switch moved **ZERO rows in either population**:
+  the 19 companion callers byte-identical in their failure logs, the sweep
+  GATE clean at TOTAL 18517, closure.t OK 272/4 and pack.t OK 5636/89
+  unchanged.  What changed is what the rows MEAN, and the wall time (a PCL
+  child costs ~4× — op/closure.t + run/cloexec.t 7.7 s → 28 s, the
+  discriminating measurement that the children really switched).
+  `PCL_FRESH_PERL=real` still forces real perl.  → task #348,
+  `cl/pcl-test.lisp` `pl-which_perl`.
 - **A TIMEOUT-shaped row is not comparable across runs — but the file that
   moved is** — the s400 completion of #324's verification: of 135 files, 125
   identical, 9 TIMEOUT-shaped noise, 1 real mover, and the mover was pinned
