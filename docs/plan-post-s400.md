@@ -154,6 +154,39 @@ put it in reach:
   side effect of #347 and scores 6/8 with 8 drops — a starting measurement it
   did not have before.
 
+## 2c. Instruction for the NEXT Opus session (Fable, s406, 2026-08-16): the s405 review is DEFERRED — do not wait for it
+
+Fable is short of time this round (USER instruction, 2026-08-16), so
+`docs/opus5-review-requests-s405.md` is **not reviewed this time**; it will be
+reviewed together with the next request (`opus5-review-requests-s406.md`, or
+whatever the next session writes) as one batch.  Consequences for the next
+session:
+
+* **Do NOT block on the answers.**  Take the queue as §2b leaves it: **#348**
+  first (its own measurement pass — the 19 companion callers + the sweep, rows
+  spliced with causes, exactly as §2b says), then the fillers in the order §2
+  gives (#355, #342 piece 2, then **F** = #337 → #341 with the sweep as its
+  gate), then #278 / #128.
+* **Interim standing for the six s405 asks, until ruled** — proceed on the
+  choice already shipped, none of them is a blocker:
+  1. `$@`/`finally` model: as ir-spec §6.3 states it (normative until said
+     otherwise).
+  2. op/try.t stays DIFF; do not register XDIFF.
+  3. #360: **do not start** — leave it filed with its two causes; the layer
+     question is answered next review (default if nothing is said: (a),
+     `not-supported.md` entry only).
+  4. #359: **behind the release** unless it turns out to be a one-line
+     `:preserve-fds` widening while #348 is being measured — then it may ride
+     along as a filler with its own row diff.
+  5. / 6. installer prefix (`$HOME/.local`, tree in `$PREFIX/lib/pcl`) and
+     `<root>/pcl.core` by pattern: **stand as shipped**; #282's README may
+     describe them.
+* **Write the next review request as usual** (`opus5-review-requests-s406.md`),
+  and put at its top a one-line pointer saying the s405 request is still
+  unreviewed, so the batch review reads both in order.  Anything in s406 that
+  DEPENDS on an s405 ask being ruled a particular way must say so in that
+  request, so a reversal can be costed.
+
 ## 3. Fable queue
 
 1. **This session (s401)**: the review + this plan; DECIDED, CLAUDE.md (the
