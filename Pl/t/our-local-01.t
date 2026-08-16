@@ -53,7 +53,7 @@ sub run_pl {
     return $output;
 }
 
-plan tests => 27;
+plan tests => 30;
 
 say "# -------- 'our' Transpilation Tests:";
 
@@ -327,6 +327,56 @@ say $x;
 {
     my $cl = parse_pl('local @arr;');
     like($cl, qr/make-array 0/, 'local @arr creates empty array');
+}
+
+# ── s410: an `our` statement's TAIL must run ─────────────────────────────────
+#
+# perl declares the package cell unconditionally (a compile-time act) and runs
+# the rest as an ordinary statement.  Two shapes used to lose that tail in
+# SILENCE: a trailing statement modifier (v2 handed the modifier tokens to the
+# expression parser, which dropped the whole statement; v1 discarded them), and
+# a tail that is not an `=` assignment (`our $c++`, `our $V ||= 7` — Exporter's
+# idiom), which v1's `=` scan never saw.  Both pipelines are exercised: the
+# named sub stays v2-native, the anon sub containing a `local` routes its whole
+# body through the v1 statement layer, which is where the second copy lived.
+{
+    my $output = run_pl(<<'PERL');
+our $gl = 0;
+sub v2native {
+    our $c = 0;   our $c++;
+    our $V ||= 7;
+    our $d = 3;   our $d += 4;
+    our $e = 1 if 1;
+    our $z = 5 if 0;
+    print "v2 $c $V $d $e ", (defined $z ? "BAD" : "undef"), "\n";
+}
+my $v1routed = sub {
+    local $gl = 1;
+    our $C = 0;   our $C++;
+    our $W ||= 7;
+    our $D = 3;   our $D += 4;
+    our $E = 1 if 1;
+    our @A = (1,2) if 1;
+    print "v1 $C $W $D $E @A\n";
+};
+v2native();
+$v1routed->();
+# the shape this was found through: a comma expression whose right half is a
+# `return`, guarded by a modifier, in a recursive closure (op/sub.t's
+# [perl #122845]).  Losing the tail made it recurse forever.
+our $depth = 0; our $ok = 0;
+my $r; $r = sub { local $depth = $depth + 1;
+                  our $ok++, return if $depth == 2;
+                  $r->() };
+$r->();
+print "rec $ok\n";
+PERL
+    like($output, qr/^v2 1 7 7 1 undef$/m,
+         'v2: our tail runs — ++, ||=, +=, and a modifier that is false');
+    like($output, qr/^v1 1 7 7 1 1 2$/m,
+         'v1-routed block: the same five shapes, second copy of the mechanism');
+    like($output, qr/^rec 1$/m,
+         '`our $ok++, return if COND` returns — the tail is not dropped');
 }
 
 done_testing();

@@ -9220,6 +9220,31 @@ sub _lower_our_decl {
     @names = map  { $_->content }
              grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[$ni];
   }
+  # A trailing statement modifier belongs to the STATEMENT, not to the
+  # declaration: perl declares the package cell unconditionally (it is a
+  # compile-time act) and makes only the TAIL conditional — `our $ok++,
+  # return if $depth == 2` (op/sub.t's [perl #122845] closure recursion)
+  # increments and returns only at depth 2, but $ok exists either way.  The
+  # whole run used to go to _lower_expr with the modifier still attached,
+  # which PExpr answered with "Fell through. Missing case: []" — i.e. the
+  # statement was DROPPED (#138 family, silent-wrong: the assignment simply
+  # never happened), and the no-tail spelling `our $z if C;` died outright
+  # on the $bad check below.  Split it with the same helper the `my` path
+  # uses and re-apply it to the lowered tail.  The split is only accepted
+  # PAST the declared names, so a word that merely looks like a modifier in
+  # declarator position (`our sub if() {…}`, op/lexsub.t) still reaches the
+  # $bad check unchanged.  while/until/for/foreach are left attached, so
+  # they keep today's announced drop (task #380; zero occurrences in
+  # perl-tests + perl's own t/ + lib) rather than gaining a half-modelled
+  # loop here.
+  my ($mod, $cond);
+  {
+    my ($head, $m, $c) = _split_modifier(\@k);
+    if ($m && !_modifier_needs_fallback($m) && @$head > $ni) {
+      ($mod, $cond) = ($m, $c);
+      @k = @$head;
+    }
+  }
   # The tail may be ANY operator, not only an assignment: perl's
   # `our $Verbose ||= 0;` (Exporter.pm) declares the package cell and then
   # runs a compound assignment on it, and `our $count++;` (op/inccode.t's
@@ -9259,7 +9284,11 @@ sub _lower_our_decl {
     push @{ $self->{_captured_decls} },
       global_decl_form("${prefix}${n}", _fresh_container($n));
   }
-  return [] if @k == $ni + 1;
+  # Declaration only.  With a modifier (`our $z if C;`) the condition still
+  # RUNS — perl evaluates it at runtime for its side effects, exactly as the
+  # `my` path's @declmod_eval does — it just has nothing to guard.
+  return [ $mod ? ($self->_lower_expr($cond, $stmt, ':void')) : () ]
+    if @k == $ni + 1;
   # `NAMES = RHS` minus the `our` keyword is a plain (list) assignment.
   # NOTE (D20 reverted, D23): a single-scalar init MUST go through p-scalar-=
   # (box-set invalidates the box's sv/nv caches), NOT `(setf (p-box-value …))`.
@@ -9269,7 +9298,8 @@ sub _lower_our_decl {
   # real perl prints "default" — the runtime our-init runs in source order and
   # clobbers the BEGIN value).  v1 emits the raw setf and has this stale-cache
   # divergence; v2 deliberately matches perl here, not v1.
-  return [ $self->_lower_expr([@k[1 .. $#k]], $stmt) ];
+  my $form = $self->_lower_expr([@k[1 .. $#k]], $stmt);
+  return [ $mod ? _apply_modifier($form, $mod, $cond, $self, $stmt) : $form ];
 }
 
 # `my @a` / `my %h` / `my ($p, @q)` [= INIT] → (\@var_names, $has_init); else ().

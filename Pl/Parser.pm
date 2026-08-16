@@ -2693,16 +2693,33 @@ sub _process_our_declaration {
   my @vars;
   my $init_idx = -1;
 
-  for my $i (0 .. $#$parts) {
-    my $p = $parts->[$i];
+  # A trailing statement modifier belongs to the STATEMENT, not to the
+  # declaration, so it is split off BEFORE the names are read — otherwise
+  # `our $c++ if $x` would read $x as a second declared name.  Same scan
+  # (and same shared predicate) as the in-sub `my` branch in
+  # _process_variable_statement, whose comment explains the shape.
+  my $mod_idx = -1;
+  for my $i (1 .. $#$parts) {
+    next unless ref($parts->[$i]) eq 'PPI::Token::Word';
+    next unless Pl::PExpr::Config::is_statement_modifier($parts->[$i]->content);
+    $mod_idx = $i;
+    last;
+  }
+  my @decl_parts = $mod_idx > 0 ? @$parts[0 .. $mod_idx - 1] : @$parts;
+
+  my $names_end = 0;
+  for my $i (0 .. $#decl_parts) {
+    my $p = $decl_parts[$i];
     my $ref = ref($p);
 
     if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
       push @vars, $p->content;
+      $names_end = $i;
     }
     elsif ($ref eq 'PPI::Structure::List') {
       # List declaration: our ($x, $y)
       push @vars, $self->_find_symbols_in_list($p);
+      $names_end = $i;
     }
     elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
       $init_idx = $i;
@@ -2717,9 +2734,43 @@ sub _process_our_declaration {
     $self->environment->add_our_variable($pkg, $var);
   }
 
-  # Special handling for @ISA - inheritance declaration
+  # Special handling for @ISA - inheritance declaration.  Deliberately BEFORE
+  # the modifier/tail branch below: `our @ISA = (...)` sets inheritance up at
+  # COMPILE time, which a runtime modifier cannot express, and no corpus
+  # writes a conditional @ISA (perl-tests + perl's own t/ + lib: zero).
   if (@vars == 1 && $vars[0] eq '@ISA' && $init_idx >= 0) {
     $self->_process_isa_declaration($stmt, $parts, $init_idx, $perl_code);
+    return;
+  }
+
+  # DECLARE, then run `NAMES <tail>` as an ordinary statement.  Two shapes
+  # reach here that the three branches below cannot express, and both used to
+  # be lost in SILENCE — the declaration was emitted and the tail simply
+  # vanished (measured s410 inside an anon sub containing a `local`, which
+  # routes its whole body here: `our $c++` left $c at 0, `our $V ||= 7` left
+  # $V undef, `our $d += 4` left $d at 3, `our $e = 1 if 1` left $e undef,
+  # `our @a = (1,2) if 1` emitted a PARSE ERROR into the assignment):
+  #
+  #   - a trailing statement MODIFIER — perl declares the package cell
+  #     unconditionally (a compile-time act) and makes only the tail
+  #     conditional;
+  #   - a tail that is not an `=` assignment at all (`our $count++;`,
+  #     `our $Verbose ||= 0;` — Exporter's idiom), which the `=` scan above
+  #     never sees and the bare-declaration branch below discards.
+  #
+  # Both are `NAMES <tail>` once the declarator is stripped, i.e. exactly the
+  # statement the expression path already lowers (it owns all six modifiers) —
+  # the same move the in-sub `my` branch of _process_variable_statement makes,
+  # and the same rule Parser2::_lower_our_decl states for v2.
+  my $has_expr_tail = $mod_idx > 0
+    || ($init_idx < 0
+        && grep { $_->significant } @$parts[$names_end + 1 .. $#$parts]);
+  if ($has_expr_tail) {
+    $self->_emit_our_declarations(\@vars, $pkg, $perl_code);
+    my $synth = PPI::Statement->new();
+    $synth->add_element($_->clone) for @$parts[1 .. $#$parts];
+    $self->_process_expression_statement($synth);
+    $self->_emit("");
     return;
   }
 
@@ -2802,20 +2853,7 @@ sub _process_our_declaration {
     else {
       # Multiple variables: our ($x, $y) = (1, 2)
       # First declare all at compile time, then assign at runtime
-      $self->_with_bucket('declarations', sub {
-        for my $var (@vars) {
-          my $sigil = substr($var, 0, 1);
-          my $cl_var = $self->_our_var_cl_name($pkg, $var);
-          $self->_emit("(p-eval-always");
-          if ($sigil eq '@') {
-            $self->_emit("  " . global_decl_form("$cl_var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
-          } elsif ($sigil eq '%') {
-            $self->_emit("  " . global_decl_form("$cl_var", "(make-hash-table :test 'equal)") . ")");
-          } else {
-            $self->_emit("  " . global_decl_form("$cl_var", "(make-p-box nil)") . ")");
-          }
-        }
-      });
+      $self->_emit_our_declarations(\@vars, $pkg);
       # Now do the assignment at runtime.
       # our (...) = (...) is a list assignment, so the RHS is LIST context
       # (so '1..3' generates a range, not a flip-flop).
@@ -2827,23 +2865,30 @@ sub _process_our_declaration {
   }
   else {
     # Bare declaration: our $x; or our @arr; or our %hash;
-    $self->_with_bucket('declarations', sub {
-      for my $var (@vars) {
-        my $sigil = substr($var, 0, 1);
-        my $cl_var = $self->_our_var_cl_name($pkg, $var);
-        $self->_emit("(p-eval-always");
-        if ($sigil eq '@') {
-          $self->_emit("  " . global_decl_form("$cl_var", "(make-array 0 :adjustable t :fill-pointer 0)") . ")");
-        } elsif ($sigil eq '%') {
-          $self->_emit("  " . global_decl_form("$cl_var", "(make-hash-table :test 'equal)") . ")");
-        } else {
-          $self->_emit("  " . global_decl_form("$cl_var", "(make-p-box nil)") . ")");
-        }
-      }
-    });
+    $self->_emit_our_declarations(\@vars, $pkg);
   }
 
   $self->_emit("");
+}
+
+# The compile-time half of an `our` declaration: one p-eval-always defvar per
+# name, in the declarations bucket, container chosen by sigil.  Three callers
+# had the same eight lines (multi-var init, bare declaration, and the
+# declare-then-run-the-tail branch); this is the one copy.
+sub _emit_our_declarations {
+  my ($self, $vars, $pkg, $perl_code) = @_;
+  $self->_with_bucket('declarations', sub {
+    $self->_emit(";; $perl_code") if defined $perl_code;
+    for my $var (@$vars) {
+      my $sigil  = substr($var, 0, 1);
+      my $cl_var = $self->_our_var_cl_name($pkg, $var);
+      my $init = $sigil eq '@' ? "(make-array 0 :adjustable t :fill-pointer 0)"
+               : $sigil eq '%' ? "(make-hash-table :test 'equal)"
+               :                 "(make-p-box nil)";
+      $self->_emit("(p-eval-always");
+      $self->_emit("  " . global_decl_form("$cl_var", $init) . ")");
+    }
+  });
 }
 
 # Process top-level 'state' declaration - like my but with init-once guard.
