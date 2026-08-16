@@ -8303,8 +8303,15 @@ sub _seam_lex_assign_fix {
   my ($self, $form) = @_;
   my $lb = $self->{_let_bound_vars} // {};
   return unless %$lb;
-  my $walk;
-  $walk = sub {
+  # `my $w; $w = sub { … $w->(…) … }` is a REFERENCE CYCLE: the closure
+  # captures the very variable that holds it, so perl frees NEITHER — and this
+  # runs once per seam expression.  Measured s406 (task #128): two CVs and
+  # their pads leaked per transpile, ~8.5 kB for a 40-character eval string and
+  # ~150 kB for a 1.4 kB one, growing linearly with no plateau — which is that
+  # task's original report, "~6 GB after ~1400 eval requests" in a long-lived
+  # `pl2cl --server`.  __SUB__ (feature current_sub, on under `use v5.30`)
+  # recurses without naming itself, so the closure dies with its caller.
+  my $walk = sub {
     my ($f) = @_;
     if (Pl::CLForm::is_raw($f)) {
       for my $var (keys %$lb) {
@@ -8317,7 +8324,7 @@ sub _seam_lex_assign_fix {
     $f->[0] = 'p-my-='
       if @$f >= 2 && !ref $f->[0] && $f->[0] eq 'p-scalar-='
       && !ref $f->[1] && $lb->{$f->[1]};
-    $walk->($_) for @$f;
+    __SUB__->($_) for @$f;
   };
   $walk->($form);
 }
