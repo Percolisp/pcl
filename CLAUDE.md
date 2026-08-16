@@ -431,9 +431,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **147 test files, 5348 tests** with a built pclxs sibling (s406, measured;
+- **147 test files, 5355 tests** with a built pclxs sibling (s406, measured;
   the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5334 without** (arithmetic: minus the
+  user s394/s395: ignore XS rows); **5341 without** (arithmetic: minus the
   14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and

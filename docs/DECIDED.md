@@ -36,6 +36,15 @@ not-supported.md → only then probe.*
   "Test / triage infrastructure"; zero rows moved in either population, and the
   one companion row that did (io/crlf_through.t → OK) moved because both ends
   now share PCL's `:crlf` gap, not because anything was fixed (#139).
+- **A bareword before an operator is a TERM only if it is DECLARED one** —
+  `use constant FOO => …` / `sub FOO () {…}` make FOO an operand
+  (`print FOO x 3`, `print FOO . "b"`); an undeclared ALL-CAPS word after
+  `print` is a FILEHANDLE, and a handle is not an operand
+  (`print STDOUT x(), …` calls `x`).  Two predicates, one copy each:
+  `PExpr::_is_zero_arg_func` (the print-filehandle decision, shared with the
+  bareword branch of `parse()`) and `Parser2::_word_is_declared_term`
+  (`_word_is_term` minus the ALL-CAPS guess).  → task #361,
+  `ppi-upstream-bugs.md` §19.
 
 ## s405 (2026-08-16, Opus 5) — the cloexec hang was an open() bug (#358 closes #346), and try/catch/finally (#340)
 

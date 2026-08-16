@@ -85,9 +85,36 @@ files, emission-ab 18/18 SAME.
 task files — created.  #346/#347/#358 were still `pending` in the tracker
 though s405 closed them — marked completed with their causes.
 
-**MEASURED this session**: gate **147 files / 5348 rows** (only the 13 pclxs xs
+**#361 — `print x(), …` printed NOTHING, and it was two bugs.**  Found by the
+#337 probe battery, whose sub happened to be named `x`.
+
+* **PPI** (`ppi-upstream-bugs.md` §19, report Bug 16, CONFIRMED 1.291): `x` is
+  both the repetition operator and a legal sub name, and PPI decides by looking
+  at the token before it — any Word counts as a term, so `sub x {…} print x(),
+  "|\n"` lexed as Operator(x) and compiled to `(p-str-x (p-print $_) (progn))`:
+  the print of `$_` repeated zero times.  Nothing printed, nothing announced,
+  rc 0.  `_repair_word_x_call` inserts perl's own disambiguator (a unary `+`,
+  which PCL already emits as a plain call) when the Word before `x` is not a
+  DECLARED term — `_repair_word_match`'s condition minus the ALL-CAPS shortcut,
+  because an ALL-CAPS word before `x` is a filehandle rather than a constant.
+* **PCL's own older half**, found by the same probes: `print FOO . "b"`,
+  `print FOO - 1`, `print FOO x 3`, `print FOO == 3 ? …` were DROPPED WHOLE
+  ("Fell through. Missing case: []") — every ALL-CAPS bareword after print was
+  taken as a filehandle, leaving the operator without a left operand.  The
+  print branch now asks `_is_zero_arg_func`, the predicate `parse()`'s bareword
+  branch already used inline.
+
+17 shapes probed against perl, all identical now (7 were wrong).  corpus-diff
+IDENTICAL 111; **emission-ab over perl's own t/, 605 files: 604 SAME / 1 DIFF** —
+`t/op/lexsub.t`, where two `is x, 3, '…'` statements stop being DROPS and run
+(census 8 → 6, edited with its cause).  Generation v2-150, all three artifacts
+regenerated (each a one-line stamp diff, which is itself the evidence their
+sources are untouched); pack.t re-verified 5636/89, 0 new.
+
+**MEASURED this session**: gate **147 files / 5355 rows** (only the 13 pclxs xs
 rows fail), full sweep GATE clean TOTAL 18517, corpus-diff IDENTICAL 111,
-emission-ab 18/18 SAME, companion `--all --quick` explained row by row.
+emission-ab 18/18 SAME over `lib/` and 604/605 SAME over perl's t/, companion
+`--all --quick` explained row by row.
 
 ## Session 405 (2026-08-16, Opus 5) — the cloexec hang was an `open` bug (#358 closes #346), try/catch/finally (#340), the installer (#277), and the closure gap (#347)
 

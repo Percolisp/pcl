@@ -12,6 +12,7 @@
 | `5376d99` s406a | **#348** — `which_perl`'s children run PCL (`$PCLPERL`); zero rows moved in either population |
 | `d5d88c8` s406b | **#355** — one gate transpile helper: stderr is captured separately and JUDGED, never fed to the Lisp reader |
 | `e7d16bf` s406c | **#128** — the transpiler leaked ~8.5 kB per transpile through one self-referential closure; `__SUB__` fixes it |
+| `32094da` s406e | **#361** — `print x(), …` printed NOTHING (a PPI mis-lex) and `print CONST OP …` was dropped whole (PCL's own); both are the same question, "is this word a declared TERM" |
 
 Docs/tasks in the same session: `DECIDED.md` s406 section, `session-log.md`
 s406, `perl-suite-run.tsv` (one row spliced + two notes), `plan-post-s400.md`
@@ -23,12 +24,13 @@ silent wrong, §5), #337/#342 given their probe measurements.
 
 | measurement | value |
 |---|---|
-| Gate `tools/prove-core` | **147 files / 5348 rows**, PASS except the 13 pclxs xs rows (user: ignore) |
+| Gate `tools/prove-core` | **147 files / 5355 rows**, PASS except the 13 pclxs xs rows (user: ignore) |
 | Full perl-tests sweep (after #348) | **GATE clean, 0 new / 0 fixed, TOTAL 18517 = baseline**, drops 12 = census, 2 UNSTABLE + 8 unverified (the usual crash-file noise) |
 | 19 companion which_perl callers, before/after | identical counts, **byte-identical failure logs** (12 `.fails.tsv`) |
 | Companion `--all --quick --jobs 4` | 36 rows differ from the snapshot: 11 `--quick` NOT-RUN, 1 registered rows-unstable, 1 timing-only status flip, **22 contention** (each reproduces the snapshot when re-run alone), **1 real** (§3) |
-| corpus-diff (after #128) | **IDENTICAL across 111 files**, silent drops 12 unchanged |
+| corpus-diff (after #128, and again after #361) | **IDENTICAL across 111 files**, silent drops 12 unchanged |
 | emission-ab over `lib/` | 18 files, 18 SAME |
+| emission-ab over perl's own t/ (after #361) | 605 files, **604 SAME / 1 DIFF / 0 RCDIFF** — t/op/lexsub.t, two drops become live statements |
 | `pl2cl --server`, 200 requests | RSS +16 kB total (was **+4.1 MB**) |
 
 ## 3. #348: it landed for free, and the one row that moved is a WARNING, not a win
@@ -70,19 +72,34 @@ step change.
 
 I did not change the runner.  **Ask 2** below.
 
-## 5. #361 — a new silent wrong, found by a probe (filed, not fixed)
+## 5. #361 — a new silent wrong found by a probe, then FIXED (`32094da`)
 
     sub x { "PKG" }
-    print x(), "|\n";        # perl: PKG|      PCL: prints NOTHING, rc 0
+    print x(), "|\n";        # perl: PKG|      PCL: printed NOTHING, rc 0
 
-PCL reads the bareword `x` in print's argument list as the REPETITION OPERATOR
-and emits `(p-str-x (p-print $_) (progn))`.  Narrow and probed: `my $r = x()`,
-`my @l = (x(), 1)`, `$obj->x` and `print((x()), …)` are all correct — only the
-list-operator argument position diverges, and `x` and `not` are the only
-operator-shaped names that are legal sub names at all (the rest are perl
-compile errors).  Layer: the `_is_print_term_start` family, with #266's rule
-("a bare NAME is a CALL only where it is CALLABLE").  The case a widening would
-BREAK is `print "-" x 5, "\n"`, so that is the probe the fix must carry.
+Filed, then fixed in the same session because the probes turned up a SECOND bug
+under it and the two share one question — *is this word a declared TERM?*
+
+* **PPI's half** (`ppi-upstream-bugs.md` §19, report Bug 16, canary in
+  `misc-fixes-02.t`): any Word before `x` counts as a complete term, so the
+  call lexed as the repetition operator and compiled to
+  `(p-str-x (p-print $_) (progn))` — the print of `$_` repeated zero times.
+  `_repair_word_x_call` inserts perl's own disambiguator (a unary `+`, which
+  PCL already emits as a plain call) when the preceding Word is not a DECLARED
+  term.
+* **PCL's half**, older and louder: `print FOO . "b"`, `print FOO - 1`,
+  `print FOO x 3`, `print FOO == 3 ? …` were DROPPED WHOLE, because every
+  ALL-CAPS bareword after print was read as a filehandle.  The print branch now
+  asks `_is_zero_arg_func` — the predicate `parse()`'s bareword branch already
+  used inline.
+
+17 shapes probed vs perl, all identical now (7 were wrong), including every
+case a widening could break: `print "-" x 5`, `print $s x 3`, `print g() x 3`,
+`("a") x 2`, `print STDOUT -1`, `map { x() }`.  corpus-diff IDENTICAL 111;
+emission-ab over perl's t/ 604/605 SAME, the one mover being `t/op/lexsub.t`
+where two `is x, 3, '…'` statements stop being drops (census 8 → 6).
+Generation v2-150, three artifacts regenerated (one-line stamp diffs), pack.t
+5636/89 with 0 new.  **Ask 6** below.
 
 ## 6. #128: what the leak hunt cost, and the tool question
 
@@ -124,7 +141,13 @@ nothing in the tree and nothing in the perlbrew perl — the standing rule is
    also hits #347's refusal inside a loop body) is a separate axis I would size
    on its own.  Confirm the split before I start, since the plan lists F as one
    session.
-5. **Nothing here depends on an s405 ask being ruled a particular way.**  #348
+6. **#361's ALL-CAPS split** — `_word_is_term` now delegates to
+   `_word_is_declared_term`, and the `x` repair uses the latter (an ALL-CAPS
+   word before `x` is a filehandle, not a constant) while the `/PATTERN/`
+   repair keeps the guess (an imported constant is invisible to a token scan).
+   That asymmetry is deliberate and probed, but it IS two answers to "is this
+   word a term" — tell me if you want one rule instead, and which way.
+7. **Nothing here depends on an s405 ask being ruled a particular way.**  #348
    landed under §2c's standing (its blockers were fixed, so it was no longer an
    interim call), and I did not touch #359 (still behind the release: the
    `:preserve-fds` widening is ~8 call sites plus open-time marking, not one
