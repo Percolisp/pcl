@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 111;
+plan tests => 112;
 
 sub run_cl {
     my ($code) = @_;
@@ -962,6 +962,16 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     ok( $doc && grep { $_->isa('PPI::Token::Number') && $_->content eq '-1' } $doc->tokens,
         'CANARY: PPI still swallows `)-1` into a negative Number — if this '
       . 'FAILS, drop _fix_ppi_negative_number_bug (ppi-upstream-bugs.md §15)' );
+}
+{
+    # PPI's own answer, with NO callback attached — the state the feature table
+    # in Pl::Parser stands in for.
+    my $doc = PPI::Document->new(\"use v5.40;\ntry { f() } catch (\$e) { g() }\nh();\n");
+    my @s = grep { $_->isa('PPI::Statement') } $doc->schildren;
+    ok( $doc && !(grep { $_->content =~ /^h\(/ } @s),
+        'CANARY: PPI still ignores `try` in the version bundles (and in `use '
+      . 'experimental`) — if this FAILS, drop _pcl_feature_include_cb\'s bundle '
+      . 'and experimental arms (ppi-upstream-bugs.md §20)' );
 }
 {
     my $doc = PPI::Document->new(\'my $r = $a ^^ $b;');

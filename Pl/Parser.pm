@@ -343,9 +343,115 @@ sub _fix_spaced_sigils {
   return $changed;
 }
 
+# ---- Core feature pragmas, answered for PPI's own lexer (task #360) -------
+#
+# PPI decides whether `try` / `signatures` are IN EFFECT at a token, and it
+# gets two of perl's three spellings wrong: `use experimental 'try'` comes back
+# as `signatures => 0`, and a VERSION BUNDLE (`use v5.40`) answers signatures
+# only — so `use v5.40; try {…} catch ($e) {…}` lexed like the no-feature case
+# (one swallowing statement) and the whole statement was DROPPED, announced,
+# rc 0.  `use feature 'try'` was the only spelling that worked.
+#
+# A feature-enabling CORE pragma is LANGUAGE, not module behaviour (CLAUDE.md
+# 9a): `feature`, `experimental` and the `use vN` bundles are perl's own, the
+# way `strict` / `warnings` / `utf8` already are here.  And the mechanism is
+# PPI's OWN hook — `custom_feature_include_cb` is consulted BEFORE its built-in
+# logic — so this is a table, not a source rewrite.  Returning undef falls
+# through to PPI, which still owns every other include.
+#
+# The bundle thresholds are perl's, read off `%feature::feature_bundle` rather
+# than guessed: `try` is in bundles 5.39 and 5.40, `signatures` from 5.35.
+# They are a STATIC table on purpose — PCL must compile `use v5.40; try` the
+# same way whatever perl it happens to run under — and `Pl/t/feature-pragma-01.t`
+# re-derives them from the running perl so a drift fails a row.
+our %PCL_FEATURE_BUNDLE = (signatures => 5.035, try => 5.039);
+
+sub _pcl_feature_include_cb {
+  my ($inc) = @_;
+  my $type = $inc->type // '';
+  return undef if $type ne 'use' && $type ne 'no';       # require enables nothing
+  # `use v5.40;` / `use 5.040;` — a VERSION BUNDLE.  It REPLACES the scope's
+  # feature set (perl: `use feature 'try'; use v5.36;` leaves try OFF), which
+  # is why the "off" answers here are explicit rather than omitted.
+  my $v = $inc->version;
+  if (defined $v && length $v) {
+    return undef if $type eq 'no';
+    my $n = _perl_version_number($v);
+    return undef if !defined $n;
+    return { map +($_ => ($n >= $PCL_FEATURE_BUNDLE{$_} ? 'perl' : 0)),
+             keys %PCL_FEATURE_BUNDLE };
+  }
+  my $module = $inc->module // '';
+  return undef if $module ne 'feature' && $module ne 'experimental';
+  # perl's experimental.pm is `feature->import(@names)` plus a warnings
+  # unimport, so for the features PPI's lexer knows the two spellings are the
+  # same answer.  Naming only what the statement asks for matters: a returned
+  # key STOPS PPI's logic, and `use experimental 'try'` must not also claim
+  # something about signatures (which is exactly PPI's bug here).
+  my $on = $type eq 'use' ? 'perl' : 0;
+  my %mods;
+  for my $name (_include_string_args($inc)) {
+    $mods{$name} = $on if exists $PCL_FEATURE_BUNDLE{$name};
+  }
+  # An EMPTY answer, not undef: this table owns both pragmas outright, and
+  # "you asked for a feature I do not model" must mean "nothing changes".
+  # Falling through would hand `use experimental 'defer'` back to PPI, whose
+  # experimental branch answers `signatures => 0` for it — silently turning
+  # OFF a feature an earlier `use feature 'signatures'` switched on.
+  return \%mods;
+}
+
+# A perl version literal as a number comparable with the bundle table above:
+# `v5.40` / `v5.40.1` are dotted (minor is thousandths), `5.036` is already
+# one.  Deliberately NOT version.pm — `lib/` carries a version.pm SHIM for
+# transpiled code, and the transpiler must not depend on which of the two its
+# own @INC finds first.
+sub _perl_version_number {
+  my ($v) = @_;
+  return undef if !defined $v;
+  $v =~ s/_//g;
+  return $1 + $2 / 1000 + ($3 // 0) / 1_000_000
+    if $v =~ /^v(\d+)\.(\d+)(?:\.(\d+))?\z/
+    || $v =~ /^(\d+)\.(\d+)\.(\d+)\z/;
+  return $v + 0 if $v =~ /^\d+(?:\.\d+)?\z/;
+  return undef;
+}
+
+# The string arguments of an include, in order: `'try'`, `qw(try say)` and the
+# parenthesised spellings alike.  (PPI has a private _decompose_arguments; this
+# reads the public ->arguments instead, so a PPI internal cannot move under us.)
+sub _include_string_args {
+  my ($inc) = @_;
+  my @out;
+  for my $arg ($inc->arguments) {
+    my @toks = $arg->isa('PPI::Token') ? ($arg)
+             : $arg->isa('PPI::Node')
+               ? @{ $arg->find(sub {
+                     $_[1]->isa('PPI::Token::Quote')
+                  || $_[1]->isa('PPI::Token::QuoteLike::Words') }) || [] }
+             : ();
+    for my $t (@toks) {
+      push @out, $t->isa('PPI::Token::QuoteLike::Words') ? $t->literal
+               : $t->isa('PPI::Token::Quote')            ? $t->string
+               : ();
+    }
+  }
+  return @out;
+}
+
+# THE PPI construction site.  Every document PCL parses is built here — the
+# first parse and the post-repair reparse below — so the feature callback is
+# attached once and cannot drift between them.
+sub _ppi_new {
+  my ($src, %opt) = @_;
+  return PPI::Document->new(\$src,
+                            custom_feature_include_cb => \&_pcl_feature_include_cb,
+                            %opt);
+}
+
 sub _ppi_parse {
   my ($self, $src) = @_;
-  my $doc = PPI::Document->new(\$src);
+  my $doc = _ppi_new($src);
   # PPI GLOBAL-STATE BUG (docs/ppi-upstream-bugs.md §13, task #356): once
   # certain documents have been parsed in a PROCESS, a later document's
   # trailing `__END__`/`__DATA__` section comes back carrying ONE EXTRA
@@ -366,7 +472,7 @@ sub _ppi_parse {
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc))) {
     my $fixed = $doc->serialize;
-    my $redo  = PPI::Document->new(\$fixed);
+    my $redo  = _ppi_new($fixed);
     if ($redo) {
       _trim_invented_tail($redo, $fixed);
       $doc = $redo;

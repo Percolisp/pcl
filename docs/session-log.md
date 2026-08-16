@@ -4,7 +4,49 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 408 (2026-08-16, Opus 5) — #337: `my sub` is a LEXICAL (session F of `plan-post-s400.md` §2d)
+## Session 408 (2026-08-16, Opus 5) — #337 `my sub` is a LEXICAL, then #360 the feature pragmas
+
+*(Sessions F and the first half of the next item in `plan-post-s400.md` §2d.)*
+
+### #360 — two of perl's three ways to enable `try` did not work
+
+`use feature 'try'` was the only spelling PCL compiled.  `use v5.40; try {…}
+catch ($e) {…}` was a **whole-statement DROP** (announced, rc 0) and `use
+experimental 'try'` did not compile at all.  Both are PPI: its `feature_mods`
+hard-codes `signatures` for version bundles >= 5.035 and stops (no bundle ever
+enables `try`), and its `experimental` branch answers `{signatures => …}` for
+any argument list — so `use experimental 'try'` not only misses `try`, it
+returns `signatures => 0` and *disables* signatures.
+
+**PPI has the hook**, so the fix is a table, not a source rewrite:
+`custom_feature_include_cb` is consulted BEFORE the built-in logic, and
+`Pl::Parser::_pcl_feature_include_cb` now answers all three spellings and the
+`no` forms from one place — the single PPI construction site, so the first
+parse and the post-repair reparse cannot drift.  Two decisions worth keeping:
+
+* **The bundle thresholds are static, and a guard row re-derives them from the
+  running perl.**  PCL must compile `use v5.40; try` the same way whatever perl
+  it runs under, so reading `%feature::feature_bundle` at runtime would be
+  wrong; a test that reads it turns a drift into a red row instead.  (perl's
+  own answer: `try` in bundles 5.39/5.40, `signatures` from 5.35.)
+* **An argument outside the table returns an EMPTY answer, not undef.**
+  Falling through would hand `use experimental 'defer'` back to PPI, whose
+  branch would answer `signatures => 0` and silently disable signatures.
+
+`lib/experimental.pm` is a shim with a delete-when trigger: the real module
+dies at load because `for values %h` does not alias (`->stringify` on the
+string "5.34.0"), which is E5's axis and deliberately untouched.
+
+Measured: **corpus-diff IDENTICAL across 111 files**, `emission-ab` over lib/
+21/21 SAME and **over perl's own t/ 560/560 SAME** — the table moves no
+existing file's emission, which is the claim that matters for a lexer change.
+`op/try.t` unchanged at 23/5.  Guards: `Pl/t/feature-pragma-01.t` (22 rows in
+three layers — the table vs perl's bundles, the callback per spelling, and end
+to end vs perl including the Try::Tiny inverse), plus a canary in
+`misc-fixes-02.t`.  Rule 13: `ppi-upstream-bugs.md` §20 and three new failing
+rows (Bug 17) in `docs/ppi-bug-report.t`.
+
+### #337 — `my sub` is a LEXICAL (session F)
 
 **The bug.** PCL compiles every named sub as a PACKAGE sub, so two `my sub x`
 in different scopes clobbered each other and every reference — including one

@@ -735,6 +735,55 @@ rather than a constant.  Guard rows: `Pl/t/bareword-call-01.t`; canary:
 
 ---
 
+## 20. Two of perl's three ways to enable `try` are not recognised, so the construct mis-lexes  [CONFIRMED 1.291]
+
+**Perl:** three spellings enable 5.34's try/catch, and they are equivalent —
+`use feature 'try'`, `use experimental 'try'` (which *is* `feature->import` plus
+a warnings unimport), and the version bundles `use v5.40` / `use 5.040` (perl's
+`:5.39` and `:5.40` bundles contain `try`; `:5.36` does not).
+
+**PPI:** `PPI::Statement::Include::feature_mods` knows only the first.  For the
+other two the lexer never switches `try` on, so the construct lexes like the
+no-pragma case — ONE unterminated statement that swallows what follows:
+
+```perl
+use v5.40;
+try { die "boom\n" } catch ($e) { print "caught: $e" }
+print "after\n";
+```
+
+```
+PPI::Statement::Include     use v5.40;
+PPI::Statement              try { … } catch ($e) { … } print "after\n";   <- WRONG
+```
+
+Expected: a `PPI::Statement::Compound` for the try/catch, then `print "after\n";`
+as its own statement — which is exactly what PPI produces for the same file
+with `use feature 'try';` on the first line.
+
+Two separate defects behind it, both in `feature_mods`:
+
+* **the version hack.**  Its comment says installing a future `feature.pm` is
+  impossible, so it hard-codes `signatures` for `>= 5.035` and stops.  No bundle
+  ever enables `try`.
+* **the `experimental` branch** answers `{ signatures => … }` and nothing else —
+  so `use experimental 'try'` not only fails to enable `try`, it returns
+  `signatures => 0` and *disables* signatures.  It also ignores `use` vs `no`,
+  so `no experimental 'signatures'` reads as an enable.
+
+**PPI version tested:** 1.291.
+
+**Repro + failing rows:** Bug 17 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL: a whole statement disappeared** — `use v5.40; try {…}` was an
+announced DROP at rc 0, and `use experimental 'try'` did not compile at all.
+PPI has the hook for it (`custom_feature_include_cb`, consulted BEFORE the
+built-in logic), so the fix is a table rather than a source rewrite:
+`Pl::Parser::_pcl_feature_include_cb` answers all three spellings and the `no`
+forms, with the bundle thresholds taken from perl's own `%feature::feature_bundle`.
+Guard: `Pl/t/feature-pragma-01.t` (which also re-derives the thresholds from the
+running perl, so a perl that changes them fails a row).
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting

@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 16;
+use Test::More tests => 19;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -283,4 +283,44 @@ PERL
         or diag "got Operator(x) at: " . join(' ',
              map { ref($_) . '[' . $_->content . ']' }
              grep { $_->significant } $doc->tokens);
+}
+
+# ── Bug 17: only one of perl's three ways to enable `try` is recognised ──────
+#
+# `use feature 'try'`, `use experimental 'try'` and the version bundles
+# `use v5.40` / `use 5.040` all enable the same feature in perl.  PPI knows only
+# the first, so under the other two the construct lexes like the no-pragma case:
+# ONE unterminated statement that swallows the statement after it.
+{
+    my $doc = PPI::Document->new(\<<'PERL');
+use v5.40;
+try { foo(); } catch ($e) { bar($e); }
+is($x, 1, 'desc');
+PERL
+    my @s = grep { $_->isa('PPI::Statement') } $doc->schildren;
+    ok( (grep { $_->content =~ /^is\(/ } @s),
+        'a version bundle >= 5.39 should enable try (its bundle contains it)' )
+        or diag "got: " . join(' | ', map { $_->content =~ s/\s+/ /gr } @s);
+}
+{
+    my $doc = PPI::Document->new(\<<'PERL');
+use experimental 'try';
+try { foo(); } catch ($e) { bar($e); }
+is($x, 1, 'desc');
+PERL
+    my @s = grep { $_->isa('PPI::Statement') } $doc->schildren;
+    ok( (grep { $_->content =~ /^is\(/ } @s),
+        "use experimental 'try' should enable try (it IS feature->import)" )
+        or diag "got: " . join(' | ', map { $_->content =~ s/\s+/ /gr } @s);
+}
+# …and it must not answer about a feature it was not asked about: the
+# experimental branch returns `signatures => 0` for ANY argument list, so this
+# turns OFF the signatures the line before switched on.
+{
+    my $doc = PPI::Document->new(\"use feature 'signatures';\nuse experimental 'try';\n");
+    my (undef, $exp) = @{ $doc->find('PPI::Statement::Include') || [] };
+    my $mods = $exp->feature_mods || {};
+    ok( !exists $mods->{signatures},
+        "use experimental 'try' should say nothing about signatures" )
+        or diag "got: " . join(', ', map { "$_=$mods->{$_}" } sort keys %$mods);
 }

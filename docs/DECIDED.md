@@ -11,6 +11,31 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s408 (2026-08-16, Opus 5) — lexical subs are LEXICALS (#337); the feature pragmas (#360)
+
+- **The core feature-enabling pragmas are answered by a TABLE in PCL, through
+  PPI's own hook** (`custom_feature_include_cb`, consulted before PPI's built-in
+  logic): `Pl::Parser::_pcl_feature_include_cb` handles `use feature`, `use
+  experimental` and the `use vN` / `use N.NNN` BUNDLES, plus every `no` form.
+  PPI knew only `use feature`, so `use v5.40; try {…}` was a whole-statement
+  DROP and `use experimental 'try'` did not compile.  A feature-enabling core
+  pragma is LANGUAGE, not module behaviour (9a) — and the mechanism is a table,
+  never a source rewrite.  → task #360, `Pl/t/feature-pragma-01.t`,
+  `ppi-upstream-bugs.md` §20 + Bug 17 in the report.
+- **The bundle thresholds are STATIC but re-derived from the running perl by a
+  guard row** — PCL must compile `use v5.40; try` the same way whatever perl it
+  runs under, so the table cannot be read from `%feature::feature_bundle` at
+  runtime; a test that re-derives it turns a drift into a red row instead.
+  (`try` is in bundles 5.39/5.40, `signatures` from 5.35 — perl's own answer.)
+- **A version bundle REPLACES the scope's feature set**, so the table's "off"
+  answers are explicit: `use feature 'try'; use v5.36;` leaves try OFF, as perl
+  does.  And an argument the table does not model returns an EMPTY answer
+  rather than falling through — PPI's `experimental` branch answers
+  `signatures => 0` for any list, which would silently disable signatures.
+- **`lib/experimental.pm` is a PCL shim** with a delete-when trigger: the real
+  module dies at load because `for values %h` does not alias (E5 axis).  The
+  trigger is a guard row that FAILS when aliasing lands.
+
 ## s408 (2026-08-16, Opus 5) — lexical subs are LEXICALS (#337, session F)
 
 - **`my sub NAME` / `state sub NAME` get a scope-unique name
