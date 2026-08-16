@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 24;
 
 my $PREAMBLE = "use feature 'lexical_subs';\nno warnings 'experimental::lexical_subs';\n";
 
@@ -228,4 +228,41 @@ PERL
          '#374: …the statement is a counted DROP instead');
     like($err, qr/PCL: statement dropped/,
          '#374: …and the drop is announced, so it is not silent');
+}
+
+# ── #377: a lexical sub reading the enclosing sub's PARAMETER ────────────────
+#
+# The shape a `my sub` user writes first — a private helper that reads what the
+# enclosing sub was called with.  All three spellings of "take a param" used to
+# go three different ways: `my $x = shift` CRASHED on an unbound $x__file__0
+# (the promotion renamed the captured lexical, but the raw-params fast path
+# bound the promoted name LEXICALLY and emitted no cell), `my ($x) = @_` killed
+# the whole FILE with "lexical 'x' possibly captured by nested sub" (the
+# promoter never saw a one-element list declaration — it is not
+# _single_scalar_decl's shape, the container branch wants a [@%] sigil, and the
+# list branch wanted two names), and `my $x = 70` worked.  One program so the
+# three sit next to each other, and perl is the oracle for all of them.
+test_lexsub('#377: a lexical sub reads its enclosing sub\'s parameter, in every spelling', <<'PERL');
+sub o1 { my $x = shift;        my sub i { $x * 2 }  return i(); }
+sub o2 { my ($x) = @_;         my sub i { $x * 2 }  return i(); }
+sub o3 { my ($x, $y) = @_;     my sub i { $x + $y } return i(); }
+sub o4 { my $x = 70;           my sub i { $x * 2 }  return i(); }
+sub o5 { my $x = shift;        my sub i { 7 }       return i() + $x; }
+print o1(3), " ", o1(4), "\n";
+print o2(3), " ", o2(4), "\n";
+print o3(1,2), " ", o3(10,20), "\n";
+print o4(), " ", o4(), "\n";
+print o5(1), " ", o5(2), "\n";
+PERL
+
+# The counterpart the fix must NOT disturb: a sub whose parameter no nested sub
+# captures keeps the p-raw-params fast path (no promotion, no cell).  Asserted
+# on the EMISSION, because the VALUE is the same either way.
+{
+    my $pl_file = write_pl("sub plain { my \$x = shift; return \$x * 3 }\nprint plain(5), \"\\n\";\n");
+    my $cl = PCLCore::transpile("$pl2cl $pl_file");
+    like($cl, qr/\(p-raw-params \(\$x\)/,
+         '#377: an uncaptured shift-param still takes the raw-params fast path');
+    unlike($cl, qr/\$x__file__/,
+           '#377: …and is not promoted to a cell');
 }

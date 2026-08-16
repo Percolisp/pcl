@@ -2031,8 +2031,8 @@ around the rule and asserts its answers.
 
 **PCL behaviour:** the captured lexical is PROMOTED to a package-level cell
 that the hoisted sub and the in-place code share, so the sub reads the LAST
-value written rather than the first instance.  Three shapes, all probed
-against perl 5.40.3 (s405):
+value written rather than the first instance.  Four shapes, all probed
+against perl 5.40.3 (the first three s405, the fourth s410):
 
 ```perl
 for my $i (1, 2) { my $z = 10 * $i; sub h2 { $z } }  print h2();
@@ -2043,7 +2043,18 @@ while ($n++ < 2) { my $w = 100 + $n; sub h5 { $w } } print h5();
 my $w = 10; sub uses_w { $w }
 foreach my $w (1, 2) { sub in_loop { $w } }          print in_loop();
 #   perl: undef     PCL: 10
+sub outer { my $x = shift; sub inner { $x * 2 } inner() }
+print outer(3), " ", outer(4);
+#   perl: 6 6       PCL: 6 8
 ```
+
+The fourth is the per-CALL member of the family — an enclosing sub's
+PARAMETER, which is re-created on every call, captured by a nested PLAIN
+`sub`.  Before task #377 it was a CRASH (an unbound promoted name), so the
+divergence is what it turned into, not a new loss.  Written with `my sub
+inner` instead — which is how post-5.26 code spells a private helper, and the
+spelling the shape is usually reached through — PCL and perl AGREE (6 8),
+because a lexical sub is re-created per call in perl too.
 
 **What DOES match perl, and is not part of this gap** — the shapes that make up
 almost all real code:

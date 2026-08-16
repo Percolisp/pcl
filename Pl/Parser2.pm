@@ -2710,8 +2710,18 @@ sub _scan_lex_facts {
       # its own per-name promotion candidate, recorded with its canonical
       # (sigil-carrying) symbol (push.t's `my ($first,$second)=…;
       # sub two_things { ($first,$second) }`; undef.t's `my (%hash,%mirror)`).
-      if ($cvars && @$cvars > 1 && !(grep { !/^[\$\@\%]\w+$/ } @$cvars)
-          && $kw->content eq 'my') {
+      # The ONE-element spelling `my ($x) = @_;` is the SAME declaration with
+      # the same promotion, and it used to fall between every branch here: it
+      # is not _single_scalar_decl's shape (a list assignment), the container
+      # branch above wants a [@%] sigil, and this one wanted two names — so
+      # the promoter never saw the commonest way a sub takes a parameter, and
+      # a nested named sub capturing it killed the whole FILE with "lexical
+      # 'x' possibly captured".  `my ($x, $y) = @_` two lines away promoted
+      # fine (#377; the N=1-is-the-N=k rule again, cf. #267).  The single
+      # CONTAINER spelling `my (@a) = …` stays the container branch's.
+      if ($cvars && !(grep { !/^[\$\@\%]\w+$/ } @$cvars)
+          && $kw->content eq 'my'
+          && (@$cvars > 1 || $cvars->[0] =~ /^\$/)) {
         for my $mv (@$cvars) {
           (my $bare = $mv) =~ s/^[\$\@\%]//;
           push @{ $f->{mlist_decl}{$bare} }, [$v, $mv];
@@ -6099,6 +6109,25 @@ sub _lower_sub_inner {
       # value; an empty (block nil) would lose it (s307 $decl_tail family).
       $tail_param = $params->[-1] if !@body_stmts;
     }
+  }
+  # #377: a PROMOTED name (`…__file__N`) is not this sub's private lexical any
+  # more — a nested named sub was hoisted out and reads it as a free special —
+  # so its declaration has to publish a CELL.  Both param bindings below are
+  # LEXICAL (p-raw-params binds the name raw; the boxed convention binds a
+  # `let`), so a promoted param may take neither: put the declaration back into
+  # the body, where _lower_block's _file_lex_renamed branch emits the
+  # global_decl_form + the plain assignment.  Measured: `sub outer { my $x =
+  # shift; my sub inner { $x * 2 } inner() }` crashed on an unbound
+  # $x__file__0, while the same sub with one more use of @_ — which already
+  # defeats the shift coalescing — ran and matched perl.  The sub then answers
+  # like every other member of the "will not stay shared" family
+  # (docs/not-supported.md): perl's plain-`sub` twin keeps the FIRST instance,
+  # PCL's shared cell reads the last write; for the `my sub` spelling, which
+  # is what this shape is written as, the two agree.
+  if ($params && grep { $self->{_file_lex_renamed}{$_} } @$params) {
+    $params     = undef;
+    @body_stmts = @stmts;
+    $tail_param = undef;
   }
   $self->_reg_lex(@{ $params // [] });
 
