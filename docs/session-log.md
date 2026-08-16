@@ -4,6 +4,67 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 407 (2026-08-16, Fable) — the s404 + s405 + s406 batch review, two regressions fixed, #362 closed at its real cause
+
+Three review requests were pending (s404's had never been answered; s403 ruled
+s402 and the s406 deferral named only s405).  Ruled as one batch in
+`docs/fable-answers-s406.md`: **all three sessions APPROVED as shipped**, gate
+independently re-verified cold (**147 / 5355**, only the 13 pclxs xs rows), and
+every semantic claim probed live against perl 5.40.3 (try/catch six extra
+shapes, #347's six, #358 standalone, #348's resolution, #362's tables).
+
+**Two regressions the review found — one family, one fix (`e79f0a6`).**  The
+three token-stream repairs (#354 `)*name`, #351 `WORD /re/`, #361 `WORD x`) all
+answer perl's operator-vs-term question and all three were blind to the same
+term: **a Word after `->` is a METHOD NAME and ends a term.**
+
+    $o->name x 3        perl ababab   PCL crash (`$o->name + x(3)`)   REGRESSION of #361
+    $o->w / $o->h / 2   perl 2        PCL dropped whole              REGRESSION of #351
+    $o->w*w()           perl 60       PCL dropped whole              #354's hole, pre-existing
+
+None of the shapes occurs in any population (corpus-diff IDENTICAL 111, lib
+18/18 SAME, perl's t/ 556/556 SAME — before and after), which is why the sizing
+scans could not see them: the 17-probe / 28-site scans asked only "where does
+the repair fire", never "where must it not, over the term forms" — now a
+standing rule (DECIDED s407).  `Parser2::_is_method_name_word` is the one
+predicate; the `x` repair additionally requires that the document DECLARES a
+`sub x` at all (perl reads `WORD x N` as a call only where a sub x can be
+meant).  Guards in `Pl/t/bareword-call-01.t`.  Gen v2-151, three artifacts
+regenerated (stamp-only diffs), pack.t 5636/89.
+
+**#362 CLOSED — and its cause was not the one filed.**  `\&f == \&f` was false
+not because `\&NAME` builds a new reference (it does not: `p-backslash-sub`
+returns `symbol-function`), but because type flow froze the compared-only side
+to a RAW numeric slot and `%to-number-raw` had no `functionp` arm — a rule-12
+`(t 0)` swallow, the second copy of `box-nv`'s dispatch.  A code ref is the ONE
+reference that is a raw function rather than a wrapper box, which is why it read
+as "named subs only".  The emission of the probe (`%pcl-to-number-strict`) was
+the whole diagnosis — a SILENT-WRONG task now carries the emission of its
+reproducer.  One arm; guard `ref-identity-01.t` t21/t22; full sweep after the
+runtime change **GATE clean, TOTAL 18517 = baseline, drops 12 = census**.
+
+**Findings filed** (all pre-existing): `use v5.40; try …` is a whole-statement
+DROP (PPI's version hack knows only signatures — folded into #360, whose layer
+question is RULED: PPI's `custom_feature_include_cb` on the Document, a table of
+perl's CORE feature spellings, + a thin `lib/experimental.pm` shim); **a DROP
+inside a string eval is SILENT even with `PCL_DROP_ANNOUNCE=all`** (the server
+is started `:error nil`) — RULED: in eval mode a drop DIES into `$@`, #363,
+population first; string-eval FEATURE inheritance #364; an imported `()`-sub
+(`use Math::Trig; pi`) is a STRING in operator/list positions #365; the runner
+re-runs a moved row alone #366; both runners kill the process GROUP on TIMEOUT
+#367 (a spinning grandchild burned a core for an hour in s405); anon `__SUB__`
+returns a no-op lambda — must die #368.  #356 verified fixed by #361 and closed.
+The other asks: re/speed.t not registered, NOT-RUN ratified, `--extension`
+approved, #350 flip-in-session fine, parser2-01.t rewrite meets the four
+conjuncts, try model normative in ir-spec §6.3, op/try.t stays DIFF, #347's
+trade upheld, #359 behind the release with the fd-3 hole announcing, installer
+shape stands, crlf_through = (a), scratch `local::lib` inside the permission
+(recipe: runbook §8), #337 split confirmed.
+
+Queue for Opus: `docs/plan-post-s400.md` §2d — F=#337 → #360+#364 → #363 →
+#366+#367 → #342-2/#365/#368/#359 → release leftovers.
+
+
 ## Session 406 (2026-08-16, Opus 5) — #348 lands for free, one transpile helper for the gate (#355), and the compiler's own memory leak (#128)
 
 `docs/plan-post-s400.md` §2c said: do not wait for the s405 review, continue at

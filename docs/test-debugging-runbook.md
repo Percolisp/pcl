@@ -127,3 +127,36 @@ in isolation before re-blessing, since a crashed file's true fail set is simply 
 - After a runtime/parser change, run `prove -j8 Pl/t/` (the gate) — it does NOT use the
   registry/log, so it's the independent correctness check.
 - Update `docs/sweep-bug-catalog.md`, `docs/session-log.md`, and `MEMORY.md` when counts change.
+
+## 8. Leak hunting in the COMPILER (perl side) — the arena census, first not last
+
+Ruled s407 (`docs/fable-answers-s406.md` §4.8 ask 3): dev-only CPAN modules
+for a hunt go into a **scratch `local::lib` under the session scratchpad** —
+nothing in the tree, nothing in the perlbrew perl — and that is inside the
+standing "dist fetches blanket-OK'd" permission (a system install still asks).
+
+What s406's #128 hunt taught (an hour of negatives, then two minutes to the
+line): **weak-ref canaries and "does any package variable grow" can only prove
+NEGATIVES**; when every object you can name is freed and RSS still grows
+linearly, that IS the signature of a REFERENCE CYCLE, and the tool that names
+the line is an **arena census** — count every live SV by type/origin across N
+transpiles and diff.  Do it FIRST when growth is linear with no plateau.
+
+    # once per session
+    cpanm -L "$SCRATCH/ll" Devel::Gladiator Devel::Cycle
+    # driver: transpile the same snippet N times, census before/after
+    perl -I"$SCRATCH/ll/lib/perl5" -I. -MDevel::Gladiator=walk_arena,arena_ref_counts -e '
+      use Pl::Parser2; my $src = q{...};
+      Pl::Parser2->parse_code($src) for 1..50;         # warm up
+      my $a = arena_ref_counts();
+      Pl::Parser2->parse_code($src) for 1..100;
+      my $b = arena_ref_counts();
+      for (sort keys %$b) { my $d = ($b->{$_}//0) - ($a->{$_}//0);
+                            printf "%6d  %s\n", $d, $_ if $d > 5 }'
+    # a type that grows by ~k per transpile is the leak; for CODE refs,
+    # walk_arena + Devel::Cycle::find_cycle names the closure and its cycle.
+
+The banned shape (DECIDED s406): `my $w; $w = sub { … $w->(…) … }` — use
+`__SUB__`.  Guard: `Pl/t/parser-leak-01.t` (compiler files only; a lib/ shim
+runs under SBCL, where a cycle is collected and `__SUB__` in an anon sub is a
+no-op stub — do not "fix" one there).

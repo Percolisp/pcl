@@ -11,6 +11,70 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s407 (2026-08-16, Fable) — the s404 + s405 + s406 batch review: `docs/fable-answers-s406.md`
+
+- **All three sessions APPROVED as shipped**; three requests were pending (s404's
+  was never answered either).  → `fable-answers-s406.md` §0.
+- **A Word after `->` is a METHOD NAME and ENDS A TERM — every token-stream
+  repair must know it.**  `$o->name x 3` (repaired to `+x(3)`, crash: #361
+  regression), `$o->w / $o->h / 2` (dropped: #351 regression) and `$o->w*w()`
+  (dropped: #354's hole) were one family; `Parser2::_is_method_name_word` is
+  the one predicate, consulted by `_ends_term` and both Word repairs.  The `x`
+  repair ALSO fires only when the document DECLARES a `sub x`
+  (`_document_declares_sub`, from the same token walk as the term words).
+  → answers §2, `Pl/t/bareword-call-01.t`.
+- **A token-stream repair needs BOTH lists in its commit: where it fires, and
+  where it must NOT (over the term forms: method call, subscript, `)`, quote,
+  number, declared term).**  The 17-probe / 28-site scans of #351/#361 were all
+  the first list.  → answers §4.6.
+- **#362 CLOSED — cause corrected: NOT `\&NAME` identity.**  `p-backslash-sub`
+  returns the same function object every time; the compared-only side was
+  type-flow-frozen to a RAW numeric slot and `%to-number-raw` had no `functionp`
+  arm (a rule-12 `(t 0)` swallow, the second-copy shape).  A code ref is the ONE
+  reference that is a raw function, not a wrapper box.  **A "SILENT WRONG" task
+  must carry the EMISSION of its reproducer** — the `%pcl-to-number-strict`
+  line was the whole diagnosis.  → answers §3, `Pl/t/ref-identity-01.t` t21/22.
+- **The #351 "not a term" substitution is RATIFIED** (perl's negative rule +
+  principle 9), with the method-name amendment above; the imported lowercase
+  `()`-sub residue (`use Math::Trig; pi / 2 + pi / 4`) is accepted and is
+  #365's (the #266 classifier at the operator-loop term site).  → §4.6, §5.4.
+- **The try/catch `$@`/finally model is NORMATIVE in ir-spec §6.3** (confirmed;
+  six extra shapes probed identical).  op/try.t stays DIFF.  #347's die→
+  registered-divergence trade UPHELD.  → §4.7.
+- **Feature-enabling CORE pragmas are LANGUAGE, and PPI has the hook**:
+  `_ppi_parse` passes `custom_feature_include_cb` answering `use feature` /
+  `use experimental` / the `use vN` bundles (**`use v5.40` enables `try` —
+  today a whole-statement DROP**; `use v5.36` does not).  `experimental.pm`'s
+  own death (`for values %h` does not alias) gets a thin `lib/experimental.pm`
+  shim.  → #360 (widened), answers §4.7 ask 3, §5.1.
+- **A DROP inside a string eval DIES (perl-shaped, into `$@`)** — the eval
+  server's stderr is `:error nil`, so announcing is impossible there; perl's
+  contract for `eval STRING` is "what does not compile sets `$@`"; it is Option
+  B phase 2's last step taken early for the one path that cannot announce.
+  Population first (s373 three legs).  → #363, answers §5.2.
+- **String-eval FEATURE inheritance**: the eval site's `presumed_features`
+  rides the server request beside `eval_captures`, keys the eval cache (s387),
+  reaches `PPI::Document->new(…, feature_mods => …)`.  → #364.
+- **anon-sub `__SUB__` returning a no-op lambda is a value-producing missing
+  case → DIE** (s329 boundary), measure op/current_sub.t first.  → #368.
+- **The companion RUNNER re-runs a moved row alone** (the #215 shape; capped,
+  both values reported, serial = verdict).  → #366.  **Both runners kill the
+  process GROUP on TIMEOUT** (a spinning grandchild burned a core for an
+  hour, s405 §1.5).  → #367.
+- **`re/speed.t` NOT registered (a hang, not slow); NOT-RUN rather than a
+  smaller budget; `--extension` its own flag; #350 flip-in-session with the
+  measurement in the commit; the `parser2-01.t` rewrite meets the four
+  conjuncts.**  → §4.1.
+- **#337 split CONFIRMED**: rename half (shapes 1/2/3/12) = session F, sweep
+  as gate; shape 10 joins #347's registered "will not stay shared" family
+  (per-call cell for a hoisted sub), sized separately.  → §4.8 ask 4.
+- **#359 behind the release; the fd-3 hole ANNOUNCES**.  Installer shape
+  stands as shipped.  crlf_through OK = (a).  Scratch `local::lib` of dev
+  modules is inside the standing permission (recipe: runbook "Leak hunting").
+- **`Pl/t/parser-leak-01.t` scans the COMPILER only** — lib/ shims run under
+  SBCL (cycles collected) and `__SUB__` is a no-op stub there.
+
+
 ## s406 (2026-08-16, Opus 5) — #348 lands, one gate transpile helper (#355), the compiler's own leak (#128)
 
 - **A self-referential closure (`my $w; $w = sub { … $w->(…) … }`) is BANNED in
@@ -19,8 +83,8 @@ not-supported.md → only then probe.*
   walker in `Pl/Parser2.pm::_seam_lex_assign_fix` leaked ~8.5 kB per transpile
   of a 50-character snippet (~150 kB for a 1.4 kB source, linear, no plateau) —
   which IS task #128's "6 GB after ~1400 eval requests" in a long-lived
-  `pl2cl --server`.  Guard: `Pl/t/parser-leak-01.t` (the shape across `Pl/`,
-  `lib/`, `pl2cl`, plus a 300-transpile RSS bound).  → `session-log.md` s406.
+  `pl2cl --server`.  Guard: `Pl/t/parser-leak-01.t` (the shape across `Pl/` and
+  `pl2cl` — NOT `lib/`, s407 — plus a 300-transpile RSS bound).  → `session-log.md` s406.
 - **A gate file NEVER folds transpile stderr into the `.lisp` it loads** — it
   calls `PCLCore::transpile($cmd)`, which captures stderr separately and JUDGES
   it (a `PCL: statement dropped` line or a nonzero exit FAILS the row; other

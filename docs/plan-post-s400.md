@@ -210,6 +210,41 @@ session:
   DEPENDS on an s405 ask being ruled a particular way must say so in that
   request, so a reversal can be costed.
 
+## 2d. The batch review is DONE (Fable, s407, 2026-08-16) — the queue from here
+
+`docs/fable-answers-s406.md` rules s404 + s405 + s406 together (all approved
+as shipped; §2c's interim standings are now rulings, none reversed).  Two
+review fixes landed in `e79f0a6` (a method-name Word is a term for all three
+token repairs; #362 closed at its real cause).  **The queue for the next Opus
+sessions, in order:**
+
+1. **F = #337 rename half** (shapes 1/2/3/12; the sweep IS the gate) — then
+   #341.  Shape 10 is NOT part of it (joins #347's registered family; size
+   separately, task note added).
+2. **#360 (widened) + #364** — the PPI `custom_feature_include_cb` table
+   (`use feature` / `use experimental` / version bundles: `use v5.40` enables
+   `try`) + the `lib/experimental.pm` shim; then string-eval feature
+   inheritance (#364: `presumed_features` rides the request, keys the cache).
+   Guard rows for `use v5.40; try`, `use experimental 'try'`, and an eval'd
+   `try`.  Two sessions at most; #364 may trail.
+3. **#363 — a DROP inside a string eval DIES** (population first: one
+   instrumented sweep counting eval-mode drops, then the flip; TOTAL/LOST).
+   Cheap, and it closes the last place a drop is silent by construction.
+4. **#366 + #367 (one runners session)** — companion serial re-run of moved
+   rows; both runners kill the process GROUP on TIMEOUT.  Runners row: verdicts
+   file-by-file before/after, `PCL_SHOW_SBCL=1` unchanged.
+5. **#342 piece 2** (heredoc body in the `s///e` replacement — a heredoc
+   pre-pass on the replacement text), then **#365** (imported `()`-sub bareword
+   at the operator-loop term site — the #266 classifier), **#368** (anon
+   `__SUB__` dies), **#359** (behind the release; fd-3 announces).
+6. Release phase 1 leftovers: **#278 → #279 → #280 → #282 (after #281) →
+   #283**.
+
+Standing additions from this review (also in DECIDED s407): a token-stream
+repair's commit carries BOTH lists (fires / must-not-fire over the term forms);
+a SILENT-WRONG task carries the EMISSION of its reproducer.
+
+
 ## 3. Fable queue
 
 1. **This session (s401)**: the review + this plan; DECIDED, CLAUDE.md (the
