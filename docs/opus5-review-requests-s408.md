@@ -298,3 +298,28 @@ delimiters, fixed here).
 Two silent-wrongs were found by *making something else loud* — #375 by #363's
 die, and #374's `(p-if)` crash-form by #337's rename.  Both were producing
 wrong values in code that looked fine.
+
+## 14. #374 half (a) — taken early, because the cause turned out to be one table entry
+
+`t/op/lexsub.t` died at macroexpansion on `(p-if)`, and §7 asked you to rule on
+the census increase that exposed it.  While writing that up I found the cause is
+one line: **`if` is in ExprToCL's `%RUNTIME_NAMES`**, so a bareword `if`
+reaching the funcall generator lowered to the p-if MACRO with whatever arity it
+had.  A statement keyword is never a function — the generator refuses it, the
+statement becomes a counted DROP, and with no crash-form left the file runs
+further (**6/8 → 7/10**, next blocker `undef-fn:main::pl-F`).
+
+The user asked mid-session whether something already checked "is this word a
+statement keyword".  It did not: the six modifier words were **inlined as a
+regex in four parser sites**, and the two named sets nearby answer different
+questions (`%SIG_DEFAULT_KEYWORDS` = does a bareword make a signature default
+swallow; InterpScan's `%KEYWORDS` = perl's whole keyword list, builtins
+included).  So `Pl::PExpr::Config` now holds both `statement_modifiers` and
+`statement_keywords`, and the four copies were converged.
+
+Census `t/op/lexsub.t` 10 → 14, trade argued in its header; corpus-diff
+IDENTICAL, emission-ab over perl's t/ 559 SAME / 1 DIFF, sweep GATE clean.
+
+**Ask 6**: half (b) — `TERM TERM TERM` of declared empty-prototype subs — is
+Option B phase 2's term grammar, where the *renamed* spelling already drops.
+Confirm it stays there rather than becoming a filler.
