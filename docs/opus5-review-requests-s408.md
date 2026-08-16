@@ -6,7 +6,12 @@ Session **F** of `docs/plan-post-s400.md` §2d: **#337, the rename half**.
 
 | commit | what |
 |---|---|
-| `PENDING` s408a | **#337** — `my sub NAME` / `state sub NAME` are LEXICALS: a scope-unique rename + the uses their region owns, including the code inside interpolating text |
+| `7f930fc` s408a | **#337** — `my sub NAME` / `state sub NAME` are LEXICALS: a scope-unique rename + the uses their region owns, including the code inside interpolating text |
+| `719ecf0` s408b | **#360** — the core feature pragmas (`use v5.40`, `use experimental`) answered by a table, through PPI's own hook |
+| `ed67333` s408c | **#364** — a string eval inherits the perl features in effect at its site; they key the eval cache |
+| `850a4bf` s408d | **#363** — an eval-mode DROP dies into `$@`; and **#375**, the `qq {…}` silent-wrong it exposed |
+
+*(§§2–8 below are #337's; #360/#364 are §9, #363/#375 are §10.)*
 
 Docs/tasks in the same commit: `DECIDED.md` s408 section, `session-log.md`
 s408, `not-supported.md` (one new section + one paragraph added to the #347
@@ -166,3 +171,72 @@ Two sub-questions inside #374, if the shape is accepted:
    duplicating it, but it does parse a fragment with a fresh
    `PPI::Document->new`.  Is that acceptable, or should the fragment path be
    folded into something already in the pipeline?
+
+## 9. #360 + #364 — the feature pragmas, and what a string eval inherits
+
+**#360.** `use feature 'try'` was the only one of perl's three spellings PCL
+compiled: `use v5.40; try {…} catch ($e) {…}` was a **whole-statement DROP**
+(announced, rc 0) and `use experimental 'try'` did not compile at all.  Both
+are PPI (`ppi-upstream-bugs.md` §20, Bug 17 — three new failing rows in the
+report), and PPI has the hook, so the fix is a table consulted before its
+built-in logic.  Two decisions the ruling did not spell out, both measured: a
+version bundle REPLACES the scope's feature set (so the "off" answers are
+explicit), and an argument outside the table returns an EMPTY answer rather
+than falling through — PPI's `experimental` branch answers `signatures => 0`
+for *any* list, which would silently disable signatures.
+
+Measured: corpus-diff IDENTICAL, lib 21/21 SAME, **perl's own t/ 560/560 SAME**,
+op/try.t unchanged.  Nothing in either population uses `use experimental`
+except op/taint.t, which is TRANSPILE-FAIL for an unrelated cause.
+
+**#364.**  The features ride the server request as a fifth protocol line, seed
+PPI's lexer through the document's `feature_mods`, and join the eval CACHE key.
+corpus-diff moved exactly one file (signatures.t), and the difference is proven
+*mechanically* to be only the 530 feature arguments: strip them from the new
+emission and the whitespace-normalized files are byte-identical.
+
+Two things cost time and are in DECIDED because they will cost the next session
+time too: **`lex_home` IS the Parser2 object** (a per-statement value published
+under the same key as a per-document map read as "Not an ARRAY reference"), and
+**the per-statement hook is `_lower_block`, not `_lower_stmt`** — the
+declaration paths (`my $r = eval "…"`) never reach the latter.
+
+## 10. #363 + #375 — the flip, and the -66 that was not the flip's
+
+**The first measurement was a lie, and reading it is the finding.**  The sweep
+after the flip said **-66 rows**, of which **-61 was `index.t` alone**.  That
+file does `eval $test_str; die $@ if $@;` — its own logic — and its
+`$test_str` was MALFORMED by a *separate* bug: **`qq {…}` with whitespace
+before the delimiter kept the delimiters in the value** (#375).  PCL took the
+character right after `qq` — the space — as the delimiter.  Only the
+interpolating form was wrong, which is why it had survived; three corpus files
+were producing wrong strings.  PPI's `->string` has always been right.
+
+With #375 fixed, the flip's real cost is **4 rows net** in perl-tests and
+**14 moved rows** in the companion, every one the same family: an eval whose
+text PCL cannot lower now reports `$@` instead of silently returning undef.
+
+| | |
+|---|---|
+| WINS | op/cmpchain.t **+45**, op/signatures.t **+21** (both registered — rows re-blessed, XDIFF again, 66 fewer diverging rows), op/magic.t +1, op/eval.t +1 |
+| LOSSES, all false passes | op/smartmatch.t **143 → 44**, dor.t -3, glob.t -3, postfixderef.t -2, exec.t -2, comp/parser.t -2, yadayada.t -1, retainedlines.t -1, packagev.t -1 |
+
+`op/smartmatch.t` is the one to look at: it does `$res = eval $tstr; if ($@ ne
+'') { fail }`, so 99 unsupported `~~` expressions were dropped in silence, `$@`
+stayed empty, and `undef` happened to satisfy the "does not match" assertion.
+Those rows were never measuring anything.
+
+### Asks
+
+4. **Is the -46 net in the companion the trade you want?**  I believe yes — every
+   lost row asserted "no error" about code PCL genuinely cannot compile — but it
+   is a big number and it is the first time this project has traded ~100 rows for
+   honesty in one go.  The alternative I did NOT take, and which the ruling's own
+   rationale ("the reader of stderr does not exist here") would allow: carry the
+   announcement BACK over the protocol and print it from the runtime, so the
+   drop is loud without being fatal.  That costs zero rows and still kills the
+   silence.  Worth a ruling before Option B phase 2 makes the same choice for
+   file mode.
+5. **#375's blast radius**: I fixed the two hand-strip sites I found by grep.  If
+   there is a third place that strips quote delimiters by hand, it has the same
+   bug — a sweep of that pattern might be worth a filler.
