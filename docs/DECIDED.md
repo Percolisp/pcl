@@ -45,6 +45,23 @@ not-supported.md → only then probe.*
   files and three ref.t rows lost — all of it an artifact of the window in
   which `_repair_try_finally` was called but not yet defined.  The run was
   discarded and re-run.
+- **#347 CLOSED — a PROMOTED lexical is legitimately captured by a hoisted
+  named sub, and the hoist gate was the only scan that did not know it.**  The
+  sibling scan (`_gate_file_lexical_captures`) has carried that exemption since
+  W5 ("the hoisted sub and the in-place code share the one defvar'd box");
+  `_hoist_nested_sub` lacked the identical `next`, so the promotion happened and
+  the gate fired anyway — costing the WHOLE FILE, because the v1 fallback the
+  die was written for is gone.  **op/closure.t under PCL children 235/27 →
+  267/3 (its real-perl-child row), so with #358 both of #348's blockers are
+  closed.**  Exactly one file in either population changes emission
+  (`t/op/lexsub.t`, rc 2 → 0).
+- **perl's "will not stay shared" family is a REGISTERED divergence, not a
+  refusal** (`not-supported.md`): when the captured lexical is re-created per
+  call or per iteration, perl's named sub keeps the FIRST instance and PCL's
+  reads the shared cell (three measured shapes).  Five of six probed shapes
+  match perl exactly, the two that do not never died in the first place, and a
+  wrong answer here surfaces as a failing TAP row — while the refusal it
+  replaced took every row of the file with it.
 - **#277 SHIPPED — `tools/install-pcl`, and the installed layout is a
   CONTRACT.**  `$PREFIX/lib/pcl/` holds the runtime tree in its
   repo-RELATIVE shape (`pl2cl`, `runpcl`, `Pl/`, `lib/`, `cl/`, `tools/lib/`)

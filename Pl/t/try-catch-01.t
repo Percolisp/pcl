@@ -43,7 +43,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 25;
+plan tests => 26;
 
 my $PREAMBLE = "use feature 'try';\nno warnings 'experimental::try';\n";
 
@@ -256,4 +256,15 @@ print "h=$h{k}\n";
 try { print "semi " } catch ($e) { };
 try { print "fin " } catch ($e) { } finally { print "F " };
 print "done\n";
+PERL
+
+# The catch variable is scoped to the catch block: it shadows an outer variable
+# of the same name and must not leak past the construct — at file scope and
+# inside a sub (probed both).
+test_try('the catch variable shadows, and does not leak', <<'PERL');
+my $e = "outer";
+try { die "x\n" } catch ($e) { print "in: $e" }
+print "after: $e\n";
+sub f { my $e = "sub"; try { die "y\n" } catch ($e) { print "insub: $e" } return $e }
+print "ret: ", f(), "\n";
 PERL

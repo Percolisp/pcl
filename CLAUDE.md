@@ -372,6 +372,9 @@ Perl Source → PPI → PExpr (AST) → ExprToCL → Common Lisp
 - `sub` with signatures and defaults
 - `package` with block scoping
 - `use constant`
+- `try`/`catch`/`finally` (perl 5.34 `use feature 'try'`; task #340, s405) —
+  `p-try`, semantics in `docs/ir-spec.md` §6.3.  **`use experimental 'try'`
+  does NOT work** (two independent reasons, task #360).
 
 ### OO Support
 - `bless`, `ref`
@@ -428,9 +431,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **144 test files, 5289 tests** with a built pclxs sibling (s401, measured;
+- **146 test files, 5345 tests** with a built pclxs sibling (s405, measured;
   the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5275 without** (arithmetic: minus the
+  user s394/s395: ignore XS rows); **5331 without** (arithmetic: minus the
   14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
@@ -474,8 +477,12 @@ func => -12         # 1 param before list
   `PCL: statement dropped at F line N: <text> -- <reason>` (task #339; OFF in
   `pl2cl --module`, the runtime's module load — `PCL_DROP_ANNOUNCE=all`
   forces it back on).
-- Full `perl-tests/` sweep, CURRENT (s399): **704 blessed fails**,
-  **64 files fully passing**, **TOTAL passing 18516** across 108 files.  The
+- Full `perl-tests/` sweep, CURRENT (s405): **TOTAL passing 18517** across 108
+  files, GATE clean.  The one row above the s399 number is `ref.t` 190 → 191,
+  edited into `docs/pass-baseline.tsv` by hand with its cause (s404l's
+  blank-line fix in `tools/pclperl-for-tests`, attributed by bisection in a
+  worktree).  The s399 measurement it sits on: **704 blessed fails**,
+  **64 files fully passing**, TOTAL passing 18516 across 108 files.  The
   s399 move is the only one that is not a regression to chase: task #323 made
   `warning_is`/`warning_like`/`warnings_like` in `perl-tests/t/test.pl` stop
   manufacturing a pass, so 24 rows (assignwarn.t 20, hashassign.t 4) became
@@ -641,6 +648,12 @@ Not relevant now:
 ### Adding a statement type
 1. Add case in `Pl/Parser.pm` `_process_element()`
 2. Create `_process_X_statement()` method
+
+(v2, which is the only pipeline: a COMPOUND statement gets an arm in
+`Pl/Parser2.pm`'s `_lower_compound`, and its runtime shape a macro in
+`cl/pcl-runtime.lisp` — exported, or generated code cannot see it.  Worked
+example, s405: `try`/`catch`/`finally` = one arm + `p-try` + a PPI repair,
+because PPI leaves `finally` out of the statement it builds.)
 
 ## TODOs
 

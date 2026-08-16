@@ -4,9 +4,11 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 405 (2026-08-16, Opus 5) — the cloexec hang was an `open` bug (#358 closes #346), and try/catch/finally (#340)
+## Session 405 (2026-08-16, Opus 5) — the cloexec hang was an `open` bug (#358 closes #346), try/catch/finally (#340), the installer (#277), and the closure gap (#347)
 
-Session C's two owed measurements first, and both paid off immediately.
+Session C's two owed measurements first, and both paid off immediately; then
+sessions D and E of `docs/plan-post-s400.md`, and G's first half, which the
+first measurement put in reach.
 
 **#346 — the hang is CLOSED, and it was not the harness.**  `PERL=$PWD/tools/
 pclperl-for-tests tools/run-perl-suite.pl run/cloexec.t --jobs 1 --timeout 300`
@@ -21,8 +23,8 @@ EBADF (probed, all three spellings); SBCL's `make-fd-stream` does not check the
 fd, so PCL handed back a stream whose first read retried EBADF forever.  One
 `fcntl(F_GETFD)` in `%p-open-dup` closes it.  Measured: the file goes from
 **TIMEOUT (2 rows) to DIFF 16/6** — which is exactly the row it already had
-with real-perl children, so **#348's cloexec half is unblocked** (#347 still
-stands).  Reproducer and guard rows in `Pl/t/fileio-02.t`.
+with real-perl children, so **#348's cloexec half is unblocked** (its other
+blocker, #347, fell later in the same session).  Reproducer and guard rows in `Pl/t/fileio-02.t`.
 
 **The runners row of the WHAT-CHANGED table, paid.**  `tools/pclperl-for-tests`
 changed in s404l, so the two populations were re-run and compared file by file.
@@ -50,8 +52,8 @@ byte.  Both baselines edited row by row with that cause.
   fires on a FALSE exception.  `%p-caught-perl-value` is now the ONE
   condition→Perl-value converter, shared with `p-eval-block`.
 
-`Pl/t/try-catch-01.t` (24 rows) runs every probed semantic through perl and
-PCL and compares — all 24 green.  **op/try.t: TRANSPILE-FAIL → 23/28**, and the
+`Pl/t/try-catch-01.t` (25 rows) runs every probed semantic through perl and
+PCL and compares — all 25 green.  **op/try.t: TRANSPILE-FAIL → 23/28**, and the
 five that remain are four other registered families (two lvalue-sub rows — the
 file's one drop; caller() file/line, probed identical inside and outside try;
 the experimental-feature compile warning, #221; and perl's parse-error text for
@@ -77,11 +79,13 @@ preamble points at the INSTALLED tree, so #349's relocatability holds on a tree
 that is not the checkout.
 
 **Measured, in the order the WHAT-CHANGED table asks for them:** gate **146
-files / 5341 rows** (failures exactly the 13 pclxs xs rows); `corpus-diff`
+files / 5345 rows** (5341 before the closure rows; failures exactly the 13
+pclxs xs rows); `corpus-diff`
 **emission identical across 111 files**, silent drops 12 unchanged;
-`emission-ab` over `lib/**` **19/19 SAME**; full sweep (the runtime changed, so
-non-optional) **GATE clean, 0 new / 0 fixed, TOTAL 18517 = baseline, DROPS
-census 12 = 12**; companion `--all --quick` re-run and compared file by file —
+`emission-ab` over `lib/**` **19/19 SAME** and over **both populations 638
+files: 637 SAME / 1 DIFF / 1 RCDIFF**; full sweep TWICE (the runtime changed,
+and #347 is a name-resolution change, where the sweep IS the gate) **GATE clean
+both times, 0 new / 0 fixed, TOTAL 18517 = baseline, DROPS census 12 = 12**; companion `--all --quick` re-run and compared file by file —
 **18 of 523 rows differ from the s400 snapshot and every one is explained**: 11
 are `--quick` not running the hang set and the three >120 s allowances, 3 are
 label-only DIFF→XDIFF (registered after the snapshot), 1 is the registered
@@ -96,6 +100,37 @@ first `--all --quick` overlapped two `Pl/Parser2.pm` edits and came back with
 ref.t rows, whose `fresh_perl` CHILDREN are transpiled at run time.  **Never
 edit the compiler while a measurement is running**: the failure mode is not a
 crash, it is a plausible-looking table.
+
+**#347 — the closure gap, and it was ONE missing `next`.**  A named sub nested
+in a block died — `Parser2 TODO: lexical 'X' possibly captured by nested sub` —
+and since the v1 fallback that die was written for is gone (E4.1), it cost the
+whole file.  `op/closure.t` BUILDS programs of exactly this shape and runs them
+in a child, which is why the 24 rows it lost were invisible to any
+transpile-time scan.
+
+The sibling scan (`_check_sub_captures`) already had the answer, in a
+comment labelled W5: **a name already PROMOTED to a package-level cell is
+legitimately captured** — the hoisted sub and the in-place code share the one
+box, which is the whole point of promoting it.  `_hoist_nested_sub` was missing
+that `next`, so the promotion happened and the gate fired anyway.  Six shapes
+probed against perl before the fix and six after: the static-variable idiom, a
+named sub in a named sub, the `foreach` loop VARIABLE, two same-named lexicals
+with one promoted, and the two loop-body shapes.  **Five of six match perl
+exactly**, including perl's counter-intuitive "will not stay shared" answers.
+
+Measured: **`op/closure.t` under PCL children 235/27 → 267/3, i.e. exactly the
+row it has under real-perl children — all 24 rows back**, and with #358 doing
+the same for `run/cloexec.t`, **both of #348's blockers are now closed**.
+`emission-ab` over both populations moved exactly ONE file, `t/op/lexsub.t`
+(rc 2 → 0): it stopped dying and now scores 6/8 where the snapshot has
+TRANSPILE — a `my sub` file, i.e. #337's own territory, with 8 drops now
+countable (census row added).  The two loop-body divergences are pre-existing
+(they never died) and are registered in `not-supported.md` with all three
+measured shapes.  A third companion `--all --quick` after the fix reads the
+snapshot exactly, bar the 11 `--quick` NOT-RUN files, the registered
+rows-unstable one, and `op/utf8cache.t` going DIFF → TIMEOUT with its row
+counts unchanged (a timing artifact; emission-ab proves the only file the fix
+touches is `op/lexsub.t`).
 
 **Filed:** **#359** — `$^F` / fd inheritance across exec, the six rows still
 between cloexec.t and OK (sized: `run-program :preserve-fds` works, measured,

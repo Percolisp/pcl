@@ -192,6 +192,15 @@
 #                                          IDENTICAL — registered in
 #                                          perl-suite-expected.tsv after this
 #                                          snapshot was taken.
+# s405 (#347, op/lexsub.t TRANSPILE -> DIFF 6/8): narrowing the
+#   nested-named-sub capture refusal (a PROMOTED lexical is legitimately
+#   captured — the hoisted sub and the in-place code share the one cell) made
+#   this file transpile.  It is the ONLY file in either population whose
+#   emission the fix moves (emission-ab 638: 637 SAME / 1 DIFF / 1 RCDIFF), and
+#   its 8 drops are `my sub` shapes — task #337's territory (census row added).
+#   The fix's real target is invisible here: op/closure.t builds its programs
+#   and runs them in a CHILD, so its row moves only when the child is PCL —
+#   235/27 (s400) -> 267/3, i.e. the row it already had with perl children.
 # s405 (op/ref.t 196/45 -> 197/44): the s404l blank-line fix in
 #   tools/pclperl-for-tests — a PCL child no longer prints 56 empty stderr
 #   lines, so one exact-output comparison in a file that spawns 23 children
@@ -462,7 +471,7 @@ op/lc.t	2716	0	2683	33	DIFF
 op/leaky-magic.t	71	0	0	0	DIFF	crash:simple-error: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/
 op/length.t	49	0	35	12	DIFF	
 op/lex_assign.t	353	0	350	3	DIFF	
-op/lexsub.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/lexsub.t	156	0	6	8	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-if) Compile-time error: during macroexp
 op/lfs.t	17	0	0	0	DIFF	
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|

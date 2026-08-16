@@ -129,6 +129,31 @@ shows up), #333–#336 (the s398 probe fillers, all silent-wrongs: #333/#335/
 #336 are `$end_pars`-adjacent — check whether Option B phase 2 absorbs them
 before touching them in place).
 
+## 2b. Progress against §2 (s405)
+
+Sessions **A** (s402), **B** (s404), **C** (s404–s405), **D** and **E** are
+done, and **G's first half** landed early because the measurement that closed C
+put it in reach:
+
+* **C** — #346 turned out to be **#358**, a runtime `open` bug: `"<&=N"` on a
+  CLOSED descriptor built a stream whose first read spun on EBADF forever.
+  run/cloexec.t TIMEOUT → DIFF 16/6.  #342 piece 1 shipped in s404.
+* **D** — **#340** try/catch/finally, with the PPI repair its `finally` needs
+  (op/try.t TRANSPILE-FAIL → 23/28; the five left are four other registered
+  families).
+* **E** — **#277** `tools/install-pcl`: deps checked before anything is copied,
+  the tree installed in its repo-relative shape, the core COMPILED AT INSTALL,
+  wrappers not symlinks, replace-not-merge, and a smoke test the install must
+  pass.  Phase 1 now needs only #278 and #128.
+* **G, first half** — **#347** was one missing `next`: the hoist gate did not
+  know the W5 exemption its sibling scan has always had (a PROMOTED lexical is
+  legitimately captured).  op/closure.t under PCL children 235/27 → **267/3**.
+  **So #348 has no blocker left** — it is the next session's first item, and it
+  wants its own measurement pass (19 companion callers + the sweep).
+* **F** (#337 → #341) is untouched, but `t/op/lexsub.t` now transpiles as a
+  side effect of #347 and scores 6/8 with 8 drops — a starting measurement it
+  did not have before.
+
 ## 3. Fable queue
 
 1. **This session (s401)**: the review + this plan; DECIDED, CLAUDE.md (the
