@@ -25,6 +25,17 @@ Rough sizing: 5–8 sessions after phase 0 completes, most of it
 Opus-executable; #281's vocabulary design and the bug-hunt triage are the
 Fable-shaped parts.
 
+**Phase 1 progress.**  **#217 closed s404** (`pl2cl --extension`: the three
+checked-in artifacts carry no machine paths, so nothing has to be regenerated
+on the target machine — which also removed this phase's "artifact regen" item).
+**#277 shipped s405**: `tools/install-pcl` — dependency check before anything is
+copied, the runtime tree installed in its repo-relative shape, the saved core
+COMPILED AT INSTALL from the installed runtime, `bin/` wrappers, and a smoke
+test the install must pass to be called done; `PCLSbcl` finds `<root>/pcl.core`
+automatically, and a checkout has none, so no development runner changed.  Test:
+`tools/t/install-pcl.t`.  Remaining in phase 1: **#278** (path sweep to zero)
+and **#128** (the server leak — its memory half closed s397a).
+
 ## Ground rules for the track
 
 - **#281 is EMISSION-CHANGING**: full verification (corpus-diff explained

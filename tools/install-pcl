@@ -1,0 +1,300 @@
+#!/usr/bin/env perl
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# install-pcl — install PCL onto this machine (task #277, release phase 1).
+#
+# THE MODEL (USER ruling, docs/release-plan-v0.1.md): the runtime and its saved
+# SBCL core are COMPILED AT INSTALL TIME on the target machine — the same model
+# the XS bridge already uses (docs/xs-artifact-cache.md), never at first use.
+# A first run that pays a compile is a first run that behaves differently from
+# every later one, and a compile inside a user's program is a compile whose
+# failure surfaces as their bug.
+#
+# WHAT GETS INSTALLED
+#
+#   $PREFIX/lib/pcl/        the tree the runners need, in its REPO-RELATIVE
+#                           shape: pl2cl, runpcl, Pl/, lib/, cl/, tools/lib/.
+#                           The layout is not cosmetic — pl2cl finds Pl:: with
+#                           dirname(abs_path($0)) and runpcl finds tools/lib
+#                           with FindBin::RealBin, so the relative arrangement
+#                           IS the lookup mechanism.
+#   $PREFIX/lib/pcl/pcl.core   the saved core, built here from the INSTALLED
+#                           runtime (so it can never reflect a different one).
+#   $PREFIX/bin/pl2cl       wrapper scripts that exec the real ones.  Not
+#   $PREFIX/bin/runpcl      symlinks: runpcl takes its root from dirname($0),
+#                           which a symlink would answer with $PREFIX/bin.
+#
+# Usage:
+#   tools/install-pcl                     # into $HOME/.local
+#   tools/install-pcl --prefix /opt/pcl
+#   tools/install-pcl --no-core           # skip the core build (slower runs)
+#   tools/install-pcl --dry-run           # print what it would do
+#
+# The install FAILS, loudly and before copying anything, when a dependency is
+# missing or too old, and it fails after copying when the smoke test does not
+# produce exactly what it must.  A half-installed PCL that "mostly works" is
+# the thing this script exists to prevent.
+
+use v5.20;
+use strict;
+use warnings;
+use File::Basename qw(dirname basename);
+use File::Path qw(make_path remove_tree);
+use File::Spec;
+use File::Copy qw(copy);
+use Cwd qw(abs_path);
+use Getopt::Long;
+
+my $root = abs_path(dirname(dirname(abs_path($0))));   # the checkout
+
+my %opt = (prefix => $ENV{PREFIX} // "$ENV{HOME}/.local", core => 1);
+GetOptions(\%opt, 'prefix=s', 'core!', 'dry-run', 'force', 'quiet', 'help')
+    or die "usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run]\n";
+if ($opt{help}) {
+    print <<"USAGE";
+usage: $0 [--prefix DIR] [--no-core] [--force] [--dry-run] [--quiet]
+
+  --prefix DIR   install root (default: \$HOME/.local, or \$PREFIX)
+  --no-core      do not build the saved SBCL core (runs stay correct, but
+                 every sbcl spawn then recompiles the runtime, ~1.2 s)
+  --force        REPLACE an existing installed tree (it is removed first, so
+                 a shim that no longer exists cannot survive into the new
+                 install and shadow a core module)
+  --dry-run      print the steps, change nothing
+  --quiet        only warnings and errors
+USAGE
+    exit 0;
+}
+
+my $prefix  = abs_path_maybe($opt{prefix});
+my $libdir  = "$prefix/lib/pcl";
+my $bindir  = "$prefix/bin";
+
+sub say_step { say "==> $_[0]" unless $opt{quiet} }
+sub say_info { say "    $_[0]"  unless $opt{quiet} }
+
+# abs_path fails on a path that does not exist yet; resolve what we can.
+sub abs_path_maybe {
+    my ($p) = @_;
+    return abs_path($p) if -e $p;
+    my $parent = dirname($p);
+    return -e $parent ? abs_path($parent) . '/' . basename($p) : $p;
+}
+
+# ---------------------------------------------------------------- dependencies
+
+# Each row: name, how to get its version, the minimum, why PCL needs it.
+# A missing OPTIONAL row warns; a missing required row is fatal, and ALL of
+# them are checked before the first one is reported, so one run tells the user
+# everything they have to install.
+sub check_deps {
+    my @missing;
+    my @found;
+
+    my $perl_min = 5.020;
+    if ($] < $perl_min) { push @missing, "perl >= 5.20 (this is $])" }
+    else                { push @found,   sprintf("perl %vd", $^V) }
+
+    for my $m (qw(PPI Moo Test::More File::Temp)) {
+        my $v = module_version($m);
+        if (defined $v) { push @found, "$m $v" }
+        else            { push @missing, "$m (perl module)" }
+    }
+
+    my $sbcl = qx{sbcl --version 2>/dev/null};
+    chomp $sbcl;
+    if ($sbcl =~ /SBCL\s+(\d+)\.(\d+)\.(\d+)/) {
+        my @v = ($1, $2, $3);
+        push @found, "sbcl $v[0].$v[1].$v[2]";
+        # The supported floor is what the suite is actually validated against
+        # (CLAUDE.md Dependencies), not a guessed range.
+        my $have = sprintf('%d%03d%03d', @v);
+        push @missing, "sbcl >= 2.5.2 (this is $v[0].$v[1].$v[2])"
+            if $have < 2_005_002;
+    }
+    else { push @missing, "sbcl (not on PATH, or --version unrecognised)" }
+
+    say_info($_) for @found;
+    return @missing;
+}
+
+sub module_version {
+    my ($m) = @_;
+    my $out = qx{$^X -M$m -e 'print \$${m}::VERSION // "?"' 2>/dev/null};
+    return ($? == 0 && length $out) ? $out : undef;
+}
+
+# ------------------------------------------------------------------ the copy
+
+# The runtime subset, in repo-relative form.  Everything else in the checkout
+# (Pl/t, perl-tests, docs, the other tools) is development material.
+my @TREE = qw(pl2cl runpcl Pl lib cl tools/lib);
+
+sub copy_tree {
+    my ($src, $dst) = @_;
+    if (-d $src) {
+        make_path($dst) unless -d $dst || $opt{'dry-run'};
+        opendir(my $dh, $src) or die "opendir $src: $!\n";
+        for my $e (sort grep { !/^\.\.?$/ } readdir $dh) {
+            # `t` under Pl/ is the gate; it is not part of an installation.
+            next if $e eq 't' && basename($src) eq 'Pl';
+            copy_tree("$src/$e", "$dst/$e");
+        }
+        closedir $dh;
+        return;
+    }
+    return unless -f $src;
+    return if $opt{'dry-run'};
+    make_path(dirname($dst)) unless -d dirname($dst);
+    copy($src, $dst) or die "copy $src -> $dst: $!\n";
+    my $mode = (stat $src)[2] & 07777;
+    chmod $mode, $dst;
+}
+
+# ------------------------------------------------------------------- wrappers
+
+sub write_wrapper {
+    my ($name) = @_;
+    my $path = "$bindir/$name";
+    return if $opt{'dry-run'};
+    open my $fh, '>', $path or die "write $path: $!\n";
+    print $fh <<"SH";
+#!/bin/sh
+# PCL $name — installed by tools/install-pcl.  Execs the real script, which
+# finds Pl/, lib/, cl/ and tools/lib/ relative to ITSELF; a symlink here would
+# make runpcl resolve its root to this bin directory instead.
+exec "$libdir/$name" "\$\@"
+SH
+    close $fh;
+    chmod 0755, $path;
+}
+
+# --------------------------------------------------------------- the core build
+
+sub build_core {
+    my $runtime = "$libdir/cl/pcl-runtime.lisp";
+    my $core    = "$libdir/pcl.core";
+    return if $opt{'dry-run'};
+    my $tmp = "$core.new.$$";
+    my $cmd = sprintf('sbcl --noinform --non-interactive --load %s --eval %s',
+                      quotemeta($runtime),
+                      quotemeta(qq{(sb-ext:save-lisp-and-die "$tmp" :executable nil)}));
+    my $out = qx{$cmd 2>&1};
+    unless ($? == 0 && -f $tmp) {
+        unlink $tmp;
+        die "install-pcl: building the saved core FAILED — the install is not "
+          . "usable as it stands.  Re-run with --no-core to install without "
+          . "it (every run then recompiles the runtime).\n\n$out\n";
+    }
+    # Atomic: a half-written core is a core that loads and then dies inside a
+    # user's program, which is the failure this rename prevents.
+    rename $tmp, $core or die "install-pcl: rename $tmp -> $core: $!\n";
+}
+
+# ------------------------------------------------------- artifact staleness
+
+# The three checked-in transpiled artifacts carry the compiler generation they
+# were built with on line 1 (ir-spec.md §9.2).  The gate has a test for this
+# (Pl/t/artifact-staleness-01.t); here it is a WARNING, because an installer
+# is not the place to refuse a checkout the developer chose to ship.
+sub check_artifacts {
+    my $gen;
+    if (open my $rt, '<', "$root/cl/pcl-runtime.lisp") {
+        while (<$rt>) { ($gen) = /\*pcl-cache-generation\*\s+"([^"]+)"/ and last }
+        close $rt;
+    }
+    return unless defined $gen;
+    my @stale;
+    opendir(my $dh, "$root/cl") or return;
+    for my $f (sort grep { /\.lisp$/ } readdir $dh) {
+        open my $a, '<', "$root/cl/$f" or next;
+        my $line1 = <$a>;
+        close $a;
+        next unless defined $line1 && $line1 =~ /^;;; pcl: .*\bgen=(\S+)/;
+        push @stale, "$f (gen=$1)" if $1 ne $gen;
+    }
+    closedir $dh;
+    warn "install-pcl: WARNING — checked-in artifacts are older than the "
+       . "compiler in this checkout (generation $gen): @stale.  They will run "
+       . "on the codegen that built them; `tools/rebuild-pack` and its "
+       . "siblings regenerate them.\n" if @stale;
+}
+
+# ------------------------------------------------------------------ smoke test
+
+# The install is not finished until the INSTALLED tools transpile and run a
+# program.  Two of them, because they exercise different halves: pl2cl alone
+# (does the tree resolve?) and runpcl (does the core/runtime load and run?).
+sub smoke {
+    my $tmp = File::Spec->tmpdir . "/pcl-install-smoke.$$.pl";
+    open my $fh, '>', $tmp or die "write $tmp: $!\n";
+    print $fh qq{my \@w = map { uc } qw(pcl works);\nprint "\@w\\n";\n};
+    close $fh;
+
+    my $cl = qx{$bindir/pl2cl $tmp 2>&1};
+    unless ($? == 0 && $cl =~ /\(p-print/) {
+        unlink $tmp;
+        die "install-pcl: SMOKE TEST FAILED — the installed pl2cl did not "
+          . "transpile a two-line program.\n\n$cl\n";
+    }
+
+    my $out = qx{$bindir/runpcl $tmp 2>&1};
+    unlink $tmp;
+    unless ($? == 0 && $out eq "PCL WORKS\n") {
+        die "install-pcl: SMOKE TEST FAILED — the installed runpcl ran the "
+          . "program but printed:\n$out\nexpected: PCL WORKS\n";
+    }
+}
+
+# ------------------------------------------------------------------------ main
+
+say_step("PCL install: $root -> $prefix");
+say_step("checking dependencies");
+my @missing = check_deps();
+die "install-pcl: missing dependencies:\n" . join('', map { "    - $_\n" } @missing)
+  . "install nothing until these are present.\n" if @missing;
+
+check_artifacts();
+
+# An EXISTING tree is replaced, never merged.  A copy-over leaves behind any
+# file the checkout has since deleted — and a stale `lib/Foo.pm` shim is not
+# inert, it is an @INC entry that shadows the core module PCL now uses.
+if (-d $libdir && !$opt{'dry-run'}) {
+    die "install-pcl: $libdir already exists.  Re-run with --force to replace "
+      . "it (a merge would leave stale shims behind, which is worse than "
+      . "either state).\n" unless $opt{force};
+    die "install-pcl: $libdir exists but does not look like a PCL install "
+      . "(no pl2cl, no cl/pcl-runtime.lisp) — refusing to remove it.\n"
+        unless -f "$libdir/pl2cl" || -f "$libdir/cl/pcl-runtime.lisp";
+    say_step("replacing the existing install in $libdir");
+    File::Path::remove_tree($libdir);
+}
+
+say_step($opt{'dry-run'} ? "would copy the runtime tree to $libdir" : "copying the runtime tree to $libdir");
+say_info($_) for @TREE;
+copy_tree("$root/$_", "$libdir/$_") for @TREE;
+
+say_step($opt{'dry-run'} ? "would write wrappers in $bindir" : "writing wrappers in $bindir");
+make_path($bindir) unless -d $bindir || $opt{'dry-run'};
+write_wrapper($_) for qw(pl2cl runpcl);
+
+if ($opt{core}) {
+    say_step($opt{'dry-run'} ? "would build the saved core" : "compiling the runtime into $libdir/pcl.core");
+    build_core();
+    say_info(sprintf("%.0f MB", (-s "$libdir/pcl.core") / (1024 * 1024)))
+        if !$opt{'dry-run'} && -f "$libdir/pcl.core";
+}
+else {
+    say_step("skipping the saved core (--no-core): every run will recompile the runtime");
+}
+
+unless ($opt{'dry-run'}) {
+    say_step("smoke test");
+    smoke();
+}
+
+say_step("done");
+say_info("add $bindir to PATH if it is not there already") unless $opt{quiet};

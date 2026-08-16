@@ -7,3 +7,8 @@
 .suitelog/
 *~
 .suitelog-*/
+
+# A saved SBCL core built INTO the checkout (tools/install-pcl --prefix .).
+# PCLSbcl picks up <root>/pcl.core automatically, which is the point — but it
+# is a ~60 MB build artifact, never a tracked file.
+/pcl.core

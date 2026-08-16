@@ -185,6 +185,17 @@ prove -v Pl/t/codegen-01.t
 # Quick transpile test
 echo 'my $x = 1 + 2;' | ./pl2cl
 
+# INSTALL PCL onto a machine (task #277, release phase 1).  The runtime and its
+# saved core are COMPILED AT INSTALL — the XS model, never at first use.
+# Copies the runtime tree (pl2cl, runpcl, Pl/, lib/, cl/, tools/lib/) in its
+# repo-RELATIVE shape (the lookups depend on it), writes bin/ wrappers, builds
+# <root>/pcl.core, and refuses to finish unless the INSTALLED tools transpile
+# and run a program.  PCLSbcl picks the installed core up automatically; a
+# checkout has none, so development runners are unaffected.
+tools/install-pcl --prefix ~/.local      # default prefix is $HOME/.local
+tools/install-pcl --no-core --dry-run    # what it would do; no core build
+prove tools/t/install-pcl.t              # its end-to-end test (not in the gate)
+
 # XS: build a distribution for PCL and put it where XSLoader::load looks.
 # Compile happens HERE, at install time, like perl — not at first use.
 # Cache key is the pclxs ABI from xs-pin, encoded in the PATH, so an ABI

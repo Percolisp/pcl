@@ -50,6 +50,16 @@ our $STACK_MB = 512;
 #               than the runtime (the gate's contract — a hand-set stale core
 #               can never mask a runtime edit).  An explicit `core` wins.
 #   stack_mb => override $STACK_MB for this call
+#
+# THE INSTALLED CORE (task #277).  `tools/install-pcl` compiles the runtime
+# into <installed-root>/pcl.core at install time — the USER-ruled model, the
+# same one the XS bridge uses: the compile happens once, on the target machine,
+# never inside a user's program.  So when a runner asks for source mode and a
+# core is sitting beside the runtime's directory, that core IS the install and
+# is used.  The freshness test is the same one PCL_TEST_CORE gets, so a core
+# older than the runtime next to it is ignored rather than trusted — in a
+# CHECKOUT there is no pcl.core at all, which is why this cannot change what
+# any development runner spawns (verify with PCL_SHOW_SBCL=1).
 sub sbcl_prefix {
     my (%o) = @_;
     my @base = ('--control-stack-size', $o{stack_mb} // $STACK_MB,
@@ -59,8 +69,21 @@ sub sbcl_prefix {
         my $c = $ENV{PCL_TEST_CORE};
         $core = $c if $c && $c ne '1' && -f $c && _fresh($c, $o{runtime});
     }
+    $core = _installed_core($o{runtime}) unless defined $core && length $core;
     return ('--core', $core, @base) if defined $core && length $core;
     return (@base, defined $o{runtime} ? ('--load', $o{runtime}) : ());
+}
+
+# <root>/pcl.core for an INSTALLED tree, whose shape is <root>/cl/<runtime>.
+# The `/cl/` in the pattern is deliberate: matching on "two directories up"
+# would make the answer depend on whatever happens to sit beside an arbitrary
+# caller's runtime path, which is exactly the kind of accidental coupling the
+# one-command-line-builder exists to prevent.
+sub _installed_core {
+    my ($runtime) = @_;
+    return undef unless defined $runtime && $runtime =~ m{\A(.*)/cl/[^/]+\z};
+    my $core = "$1/pcl.core";
+    return (-f $core && _fresh($core, $runtime)) ? $core : undef;
 }
 
 # The same thing as a shell string, starting with `sbcl`.

@@ -11,7 +11,7 @@
 # the harness.  Run it directly:  prove tools/t/sbcl-prefix.t
 use strict;
 use warnings;
-use Test::More tests => 13;
+use Test::More tests => 17;
 use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
@@ -93,3 +93,42 @@ is(sbcl_prefix_str(runtime => '/a b/rt.lisp'),
 is(sbcl_prefix_str(runtime => '/a/rt.lisp', quote => 0),
    'sbcl --control-stack-size 512 --noinform --non-interactive --load /a/rt.lisp',
    'quote => 0 reproduces the callers that never quoted (byte-identical move)');
+
+# --- the INSTALLED core (task #277) ----------------------------------------
+# tools/install-pcl compiles the runtime into <root>/pcl.core at install time
+# and lays the tree out as <root>/cl/pcl-runtime.lisp.  A runner that asks for
+# source mode in such a tree gets the core; a CHECKOUT has no pcl.core, which
+# is why this cannot change what any development runner spawns.
+{
+    my $inst = tempdir(CLEANUP => 1);
+    mkdir "$inst/cl" or die $!;
+    my $irt   = "$inst/cl/pcl-runtime.lisp";
+    my $icore = "$inst/pcl.core";
+    open my $fh, '>', $irt or die $!; print $fh "x\n"; close $fh;
+
+    is_deeply([ sbcl_prefix(runtime => $irt) ],
+              ['--control-stack-size', 512, '--noinform', '--non-interactive',
+               '--load', $irt],
+              'installed core: absent -> source mode (a checkout is unaffected)');
+
+    open my $cf, '>', $icore or die $!; print $cf "x\n"; close $cf;
+    is_deeply([ sbcl_prefix(runtime => $irt) ],
+              ['--core', $icore, '--control-stack-size', 512,
+               '--noinform', '--non-interactive'],
+              'installed core: <root>/pcl.core beside <root>/cl/ is used');
+
+    # Same freshness contract as PCL_TEST_CORE: a core older than the runtime
+    # it must reflect is ignored, never trusted.
+    utime time - 100, time - 100, $icore;
+    is_deeply([ sbcl_prefix(runtime => $irt) ],
+              ['--control-stack-size', 512, '--noinform', '--non-interactive',
+               '--load', $irt],
+              'installed core: a core older than the runtime is ignored');
+
+    # A runtime that is not under a `cl/` directory must not pick up whatever
+    # pcl.core happens to sit two levels up.
+    my $loose = "$inst/pcl-runtime.lisp";
+    open my $lf, '>', $loose or die $!; print $lf "x\n"; close $lf;
+    ok( !grep({ $_ eq '--core' } sbcl_prefix(runtime => $loose)),
+        'installed core: the lookup requires the <root>/cl/ layout' );
+}
