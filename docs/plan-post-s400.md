@@ -254,6 +254,27 @@ repair's commit carries BOTH lists (fires / must-not-fire over the term forms);
 a SILENT-WRONG task carries the EMISSION of its reproducer.
 
 
+
+### s408 (Opus 5) — items 1–4 of this queue are DONE, plus two found on the way
+
+| queue item | state |
+|---|---|
+| 1. **F = #337** rename half | `7f930fc` — sweep clean; `op/const-optree.t` +4 and REGISTERED at last |
+| 2. **#360 + #364** | `719ecf0`, `ed67333` — all three `try` spellings; eval inherits its site's features |
+| 3. **#363** | `850a4bf` — an eval-mode drop dies into `$@`; cost 4 rows net, every one a false pass |
+| 4. **#366 + #367** | `5fef203` — session isolation + the serial re-run of movers |
+| 5. **#368** | `49b8a0c` (taken early — it is small and it was a value-producing gap) |
+
+Found and filed on the way: **#373** (a string eval cannot see a lexical sub —
+size with #364), **#374** (a keyword-named lexical sub: the term grammar half is
+Option B's, the zero-argument `(p-if)` half is a rule-12 case that gates
+`t/op/lexsub.t`'s ~150 unmeasured rows), **#375** (`qq {…}` kept its delimiters
+in the value — FIXED here; it was corrupting strings in three corpus files).
+
+**LEFT in this queue**, unchanged in order: #342 piece 2, #365 (which the task
+itself puts behind Option B's `_reduce_term`), #359, #341, then #281 items 1+2+6
+and the release leftovers.
+
 ## 3. Fable queue
 
 1. **This session (s401)**: the review + this plan; DECIDED, CLAUDE.md (the
