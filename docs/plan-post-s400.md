@@ -154,6 +154,29 @@ put it in reach:
   side effect of #347 and scores 6/8 with 8 drops — a starting measurement it
   did not have before.
 
+**s406 adds (Opus 5):**
+
+* **G is COMPLETE** — **#348** landed and moved **zero rows in either
+  population** (the 19 companion callers byte-identical in their failure logs,
+  the sweep GATE clean at TOTAL 18517).  The one companion row that moved,
+  io/crlf_through.t 726/216 → OK 942/0, is not a fix: that file pipes through a
+  which_perl child, so both ends now share PCL's `:crlf` gap (#139, re-probed —
+  the layer is a no-op in both directions).
+* **#355** done: `PCLCore::transpile` / `transpile_raw`, 60 sites in 38 files.
+* **#128 CLOSED** (it was a filler in the phase-1 track): the transpiler leaked
+  ~8.5 kB per transpile through one self-referential closure in
+  `_seam_lex_assign_fix`; `__SUB__` fixes it, guard `Pl/t/parser-leak-01.t`.
+  Phase 1 of the release now needs **#279/#280/#282/#283** only.
+* **NOT started, deliberately**: #342 piece 2 (probed — the replacement text
+  reaches the compiler with the heredoc BODY in it, and PPI then lexes that
+  body as CODE, which is why the `s///e` in the body's own text blows up; the
+  fix is a heredoc pre-pass on the replacement, and `<<` is also the shift
+  operator, so it is not a drive-by) and **F = #337** (probed against perl: 12
+  shapes recorded in the task — the fix is a per-scope rename with a region
+  that stops at a sibling redeclaration, and `my sub` in a loop body is a
+  fresh closure per iteration, which PCL's top-level hoist cannot give).
+  Both want a session that can finish them.
+
 ## 2c. Instruction for the NEXT Opus session (Fable, s406, 2026-08-16): the s405 review is DEFERRED — do not wait for it
 
 Fable is short of time this round (USER instruction, 2026-08-16), so

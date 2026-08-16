@@ -431,9 +431,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **146 test files, 5345 tests** with a built pclxs sibling (s405, measured;
+- **147 test files, 5348 tests** with a built pclxs sibling (s406, measured;
   the 13 pclxs xs rows currently FAIL there — pclxs is under separate work,
-  user s394/s395: ignore XS rows); **5331 without** (arithmetic: minus the
+  user s394/s395: ignore XS rows); **5334 without** (arithmetic: minus the
   14 xs rows).  The gate count is deterministic *per environment*, but it
   is conditional: `Pl/t/xs-01/02/03.t` (6+4+4 = **exactly 14** rows) resolve
   pclxs as `$FindBin::Bin/../../../pclxs` — **a sibling of the CHECKOUT** — and
@@ -477,8 +477,11 @@ func => -12         # 1 param before list
   `PCL: statement dropped at F line N: <text> -- <reason>` (task #339; OFF in
   `pl2cl --module`, the runtime's module load — `PCL_DROP_ANNOUNCE=all`
   forces it back on).
-- Full `perl-tests/` sweep, CURRENT (s405): **TOTAL passing 18517** across 108
-  files, GATE clean.  The one row above the s399 number is `ref.t` 190 → 191,
+- Full `perl-tests/` sweep, CURRENT (s406, re-run after #348 switched
+  `which_perl`'s children to PCL): **TOTAL passing 18517** across 108
+  files, GATE clean, drops 12 = census — identical to s405 in every bucket
+  (closure.t stays OK 272/4, pack.t OK 5636/89).  The one row above the s399
+  number is `ref.t` 190 → 191,
   edited into `docs/pass-baseline.tsv` by hand with its cause (s404l's
   blank-line fix in `tools/pclperl-for-tests`, attributed by bisection in a
   worktree).  The s399 measurement it sits on: **704 blessed fails**,

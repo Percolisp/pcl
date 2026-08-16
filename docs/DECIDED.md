@@ -11,6 +11,32 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s406 (2026-08-16, Opus 5) — #348 lands, one gate transpile helper (#355), the compiler's own leak (#128)
+
+- **A self-referential closure (`my $w; $w = sub { … $w->(…) … }`) is BANNED in
+  the compiler — use `__SUB__`.**  It is a reference cycle: the CV holds the
+  variable that holds the CV, so perl frees neither it nor its pad.  One such
+  walker in `Pl/Parser2.pm::_seam_lex_assign_fix` leaked ~8.5 kB per transpile
+  of a 50-character snippet (~150 kB for a 1.4 kB source, linear, no plateau) —
+  which IS task #128's "6 GB after ~1400 eval requests" in a long-lived
+  `pl2cl --server`.  Guard: `Pl/t/parser-leak-01.t` (the shape across `Pl/`,
+  `lib/`, `pl2cl`, plus a 300-transpile RSS bound).  → `session-log.md` s406.
+- **A gate file NEVER folds transpile stderr into the `.lisp` it loads** — it
+  calls `PCLCore::transpile($cmd)`, which captures stderr separately and JUDGES
+  it (a `PCL: statement dropped` line or a nonzero exit FAILS the row; other
+  stderr is a diag).  A row that ASSERTS on the transpiler's diagnostics uses
+  `PCLCore::transpile_raw` instead.  → task #355, `Pl/t/PCLCore.pm`.
+- **A companion-suite row that moved is NOT a finding until it has been re-run
+  ALONE.**  Measured s406: an `--all --quick --jobs 4` run differed from the
+  snapshot in 36 rows, and 22 of them were contention — each reproduced the
+  snapshot exactly when run by itself.  Files that spawn fresh_perl/runperl
+  children lose rows under load, and #348 makes the run busier.
+  → `perl-suite-run.tsv` s406 note.
+- **`which_perl`'s children run PCL (#348 LANDED)** — see the entry under
+  "Test / triage infrastructure"; zero rows moved in either population, and the
+  one companion row that did (io/crlf_through.t → OK) moved because both ends
+  now share PCL's `:crlf` gap, not because anything was fixed (#139).
+
 ## s405 (2026-08-16, Opus 5) — the cloexec hang was an open() bug (#358 closes #346), and try/catch/finally (#340)
 
 - **`open FH, "<&=N"` on a CLOSED descriptor must FAIL EBADF, and PCL's SPUN.**

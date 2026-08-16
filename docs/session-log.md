@@ -4,6 +4,91 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 406 (2026-08-16, Opus 5) — #348 lands for free, one transpile helper for the gate (#355), and the compiler's own memory leak (#128)
+
+`docs/plan-post-s400.md` §2c said: do not wait for the s405 review, continue at
+#348.  Three items, each measured before it was believed.
+
+**#348 — which_perl's children run PCL, and it costs NOTHING.**  The switch is
+four lines (`$PCLPERL` first, `PCL_FRESH_PERL=real` still forces real perl,
+`$^X` as the fallback — the same resolution the stub's `_pcl_child_perl` has
+always used for `fresh_perl_*`/`runperl`).  It was implemented and measured in
+s400 and then HELD, because it cost two measurement holes; both causes were
+fixed first (#358 the cloexec spin, #347 the closure gap), so this session's
+job was to re-measure, not to trade:
+
+* the **19 companion callers**, before and after: identical counts and
+  **byte-identical failure logs** (12 `.fails.tsv`, diff-clean);
+* the **full sweep**: GATE clean, 0 new / 0 fixed, TOTAL 18517 = baseline,
+  drops 12 = census; `closure.t` stays **OK 272/4** (s400: PARTIAL 240/28) and
+  `pack.t` OK 5636/89;
+* the children really did switch — the discriminating measurement:
+  op/closure.t + run/cloexec.t take **28 s with PCL children vs 7.7 s** under
+  `PCL_FRESH_PERL=real`, and a direct probe of `pl-which_perl` answers
+  `$PCLPERL` / `$^X` / `$^X` for the three cases.
+
+**ONE row moved, and not as a fix**: `io/crlf_through.t` 726/216 DIFF → 942/0
+OK.  That file is `$main::use_crlf = 1; do './io/through.t'`, and through.t
+pipes its data through a which_perl child — with a REAL perl child the 216
+failures were PCL's `:crlf` layer disagreeing with perl's; with a PCL child
+both ends agree.  Attributed with one measurement (`PCL_FRESH_PERL=real`
+reproduces 726/216), re-probed (`>:crlf` writes `61 0a` where perl writes
+`61 0d 0a`; `<:crlf` returns `610d0a` where perl returns `610a` — the layer is
+a no-op in BOTH directions) and recorded on task **#139**, which still owns it:
+io/crlf.t (16408/16421) is now the only file measuring that gap.
+
+**A measurement-hygiene finding worth carrying**: an `--all --quick --jobs 4`
+companion run differed from the snapshot in **36 rows, of which 22 were pure
+CONTENTION** — every one re-run ALONE reproduced the snapshot value exactly
+(op/lc.t, op/magic.t, op/ref.t, op/sprintf2.t, op/stash.t, op/print.t,
+op/splice.t, op/stash_parse_gv.t …).  A file that spawns fresh_perl/runperl
+children loses rows when the machine is busy, and #348 makes the run busier.
+**A companion row that moved is not a finding until it has been re-run alone.**
+
+**#355 — one transpile helper, and it caught a hider immediately.**  ~40 gate
+files ran `` my $cl = `$pl2cl $file 2>&1` `` and wrote the result straight into
+the `.lisp` they load: transpile stderr became Lisp source, so a dropped
+statement would surface as a READER error instead of the drop line (which is
+what the two blanket `$SIG{__WARN__}` handlers deleted in s402 were hiding).
+`PCLCore::transpile` now captures stderr separately and JUDGES it — the fixed
+`PCL: statement dropped` prefix or a nonzero exit FAILS the row, anything else
+is a diag — with `PCLCore::transpile_raw` for the rows that assert on the
+transpiler's own diagnostics.  60 sites in 38 files ported; the first hider was
+transpile-test-10.t's `grep { … }->{a}` row, which asserts pl2cl DIES
+perl-shaped and had been reading that message out of the merged stream.
+
+**#128 — the transpiler leaked its own recursion.**  The ORPHAN half of that
+task closed in s397a; this is the ORIGINAL report ("~6 GB after ~1400 eval
+requests" in a long-lived `pl2cl --server`).  Measured with a driver that
+speaks the server protocol: **200 requests grew RSS 43100 → 47192 kB, perfectly
+linear**; in-process, 600 transpiles of a 50-character snippet leaked 8.5 kB
+each with no plateau, and a 1.4 kB source leaked ~150 kB per transpile — it
+scales with the parse tree.  Every PCL object and every PPI document was
+FREED (weak-ref canaries), and no package variable grew, which is the signature
+of a reference CYCLE.  An arena census (Devel::Gladiator, installed into a
+scratch `local::lib`, nothing added to the tree) found exactly **2 leaked CODE
+refs per transpile**, both from `Pl/Parser2.pm::_seam_lex_assign_fix`:
+
+    my $walk;  $walk = sub { … $walk->($_) for @$f };
+
+The closure captures the variable holding it, so perl frees neither the CV nor
+its pad — and the pad holds that walk's share of the form.  `__SUB__` (feature
+`current_sub`, on under `use v5.30`) recurses without naming itself.  After:
+600 in-process transpiles move RSS by **0 kB**, 200 server requests by 16 kB
+total.  `Pl/t/parser-leak-01.t` guards the SHAPE (the idiom, anywhere in `Pl/`,
+`lib/` or `pl2cl` — the family, not the site) and the BEHAVIOUR (300 transpiles
+< 1 MB; the inverse guard measured 5524 kB with HEAD's Parser2.pm loaded
+through a shadow `@INC`).  Emission untouched: corpus-diff IDENTICAL across 111
+files, emission-ab 18/18 SAME.
+
+**Housekeeping**: #359 and #360 were described in s405's write-up but never got
+task files — created.  #346/#347/#358 were still `pending` in the tracker
+though s405 closed them — marked completed with their causes.
+
+**MEASURED this session**: gate **147 files / 5348 rows** (only the 13 pclxs xs
+rows fail), full sweep GATE clean TOTAL 18517, corpus-diff IDENTICAL 111,
+emission-ab 18/18 SAME, companion `--all --quick` explained row by row.
+
 ## Session 405 (2026-08-16, Opus 5) — the cloexec hang was an `open` bug (#358 closes #346), try/catch/finally (#340), the installer (#277), and the closure gap (#347)
 
 Session C's two owed measurements first, and both paid off immediately; then
