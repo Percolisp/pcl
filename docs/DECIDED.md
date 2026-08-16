@@ -11,6 +11,51 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s408 (2026-08-16, Opus 5) — lexical subs are LEXICALS (#337, session F)
+
+- **`my sub NAME` / `state sub NAME` get a scope-unique name
+  (`NAME__lexsub__N`) and the uses their region owns are rewritten** —
+  `Pl::Parser2::_rename_lexical_subs`, run in `parse()` before every name-keyed
+  pass.  The region runs from the DECLARATION (a call before it still reaches
+  the package sub) to the end of the enclosing block, and stops at a sibling
+  redeclaration (#296-B2).  Nesting needs no shadow test: the covering
+  declaration with the LATEST start wins, which is the innermost one in scope.
+  → task #337, `Pl/t/lexical-sub-01.t` (18 oracle rows).
+- **A rename that only rewrites the TOKEN STREAM is incomplete: interpolated
+  code (`"@{[ f() ]}"`, heredocs, patterns) is compiled from the string's
+  TEXT.**  Found by a probe — the pass itself caused "the function main::pl-f
+  is undefined".  The spans come from `Pl::InterpScan` (standing rule §8) and
+  the code inside one is classified by parsing it as Perl, through the SAME
+  predicate as the token stream, never by matching the name in text.
+  → `_fix_lexsub_interp`, guard rows 16/17 of the new file.
+- **Three divergences REGISTERED, not fixed** (`docs/not-supported.md`): a
+  string eval cannot see a lexical sub (loud, and it "worked" before only
+  because every lexical sub WAS a package sub — the same accident as the bug);
+  a body's call to its own name is accepted where perl rejects it (principle
+  9); a lexical sub in a loop body cannot be a fresh closure per iteration
+  (#337 shape 10 = #347's "will not stay shared" family).
+- **A gate ROW-COUNT difference against a written-down number is not a finding
+  until it is attributed** — the docs said 147/5355, this session measured
+  147/5359, and a per-file worktree compare at HEAD showed the two trees
+  IDENTICAL file by file.  The pclxs xs files abort at different points as
+  pclxs is worked on, so their row counts move on their own.  Compare a
+  measurement against a measurement OF THE SAME TREE, never against a number
+  in a doc.  *(Shape asked for confirmation, `opus5-review-requests-s408.md` §8.)*
+- **op/const-optree.t is REGISTERED at last** (XDIFF, rows blessed): #337 fixed
+  the 4 `retval of my sub …` rows, and a fresh per-row read of the 58 that
+  remain (28 inlinable + 25 `:method` readouts, 5 RT 134138) met the
+  all-or-nothing bar with two cited reasons.  It is the worked example of why
+  that bar is per-row: the s397 ruling had authorised the registration, and the
+  per-row read is what found a real fix target inside it.
+- **The drop census took its first INCREASE, deliberately** — `t/op/lexsub.t`
+  6 → 10.  A lexical sub named after a KEYWORD (`state sub if() {44}; my $x =
+  if if if`) is renamed, so the statement stops being a keyword parse and
+  becomes a term-grammar drop; what it emitted before is a **zero-argument
+  `(p-if)` whose macroexpansion error is that file's crash cause**.  Four
+  crash-forms → four counted drops, argued in the census header, residue =
+  task #374.  *(Ruling asked: §7 of the review request — is "census up with the
+  trade argued" the right shape when a change converts crash-forms to drops?)*
+
 ## s407 (2026-08-16, Fable) — the s404 + s405 + s406 batch review: `docs/fable-answers-s406.md`
 
 - **All three sessions APPROVED as shipped**; three requests were pending (s404's

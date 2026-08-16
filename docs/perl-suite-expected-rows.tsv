@@ -831,6 +831,64 @@ op/cmpchain.t	~~ ne ne non-associative
 op/cmpchain.t	~~ ne non-associative
 op/cmpchain.t	~~ ~~ non-associative
 op/cond.t	SEGV in Perl_scalar
+op/const-optree.t	closure after \(my $x=1) has no :method attribute
+op/const-optree.t	closure after \(my $x=1) is not inlinable
+op/const-optree.t	complex lexical op tree before a nested lvalue closure has no :method attribute
+op/const-optree.t	complex lexical op tree before a nested lvalue closure is not inlinable
+op/const-optree.t	complex lexical op tree before an lvalue closure has no :method attribute
+op/const-optree.t	complex lexical op tree before an lvalue closure is not inlinable
+op/const-optree.t	my sub with constant and return has no :method attribute
+op/const-optree.t	my sub with constant and return is not inlinable
+op/const-optree.t	my sub with constant has no :method attribute
+op/const-optree.t	my sub with constant is inlinable
+op/const-optree.t	my sub with optimised statement and constant has no :method attribute
+op/const-optree.t	my sub with optimised statement and constant is inlinable
+op/const-optree.t	my sub with optimised statement, constant and return has no :method attribute
+op/const-optree.t	my sub with optimised statement, constant and return is not inlinable
+op/const-optree.t	my sub:method with constant is inlinable
+op/const-optree.t	return $variable modified elsewhere has no :method attribute
+op/const-optree.t	return $variable modified elsewhere is not inlinable
+op/const-optree.t	return $variable unmodified elsewhere has no :method attribute
+op/const-optree.t	return $variable unmodified elsewhere is not inlinable
+op/const-optree.t	simple lexical after an lvalue closure has no :method attribute
+op/const-optree.t	simple lexical after an lvalue closure is not inlinable
+op/const-optree.t	simple lexical after another closure and no lvalue has no :method attribute
+op/const-optree.t	simple lexical after another closure and no lvalue is not inlinable
+op/const-optree.t	simple lexical before an lvalue closure: now throws exception (RT 134138)
+op/const-optree.t	simple lexical before another closure and no lvalue has no :method attribute
+op/const-optree.t	simple lexical before another closure and no lvalue is inlinable
+op/const-optree.t	sub () { $x } with eval in scope: now throws exception (RT 134138)
+op/const-optree.t	sub () { $x } with eval not in scope has no :method attribute
+op/const-optree.t	sub () { $x } with eval not in scope is inlinable
+op/const-optree.t	sub () { $x } with s///ee in scope: now throws exception (RT 134138)
+op/const-optree.t	sub () { 0; $x } with $x modified elsewhere has no :method attribute
+op/const-optree.t	sub () { 0; $x } with $x modified elsewhere is not inlinable
+op/const-optree.t	sub () { 0; $x } with $x unmodified elsewhere has no :method attribute
+op/const-optree.t	sub () { 0; $x } with $x unmodified elsewhere is inlinable
+op/const-optree.t	sub () { 0; return $x } has no :method attribute
+op/const-optree.t	sub () { 0; return $x } is not inlinable
+op/const-optree.t	sub () { 0; return $x; ... } has no :method attribute
+op/const-optree.t	sub () { 0; return $x; ... } is not inlinable
+op/const-optree.t	sub () { my $x; state sub z { $x } $outer } has no :method attribute
+op/const-optree.t	sub () { my $x; state sub z { $x } $outer } is not inlinable
+op/const-optree.t	sub closing over state var has no :method attribute
+op/const-optree.t	sub closing over state var is inlinable
+op/const-optree.t	sub closing over state var++: now throws exception (RT 134138)
+op/const-optree.t	sub with constant and return has no :method attribute
+op/const-optree.t	sub with constant and return is not inlinable
+op/const-optree.t	sub with constant has no :method attribute
+op/const-optree.t	sub with constant is inlinable
+op/const-optree.t	sub with null+kids (if-block), then constant has no :method attribute
+op/const-optree.t	sub with null+kids (if-block), then constant is not inlinable
+op/const-optree.t	sub with optimised statement and constant has no :method attribute
+op/const-optree.t	sub with optimised statement and constant is inlinable
+op/const-optree.t	sub with optimised statement, constant and return has no :method attribute
+op/const-optree.t	sub with optimised statement, constant and return is not inlinable
+op/const-optree.t	sub with simple lexical modified elsewhere: now throws exception (RT 134138)
+op/const-optree.t	sub with simple lexical unmodified elsewhere has no :method attribute
+op/const-optree.t	sub with simple lexical unmodified elsewhere is inlinable
+op/const-optree.t	sub:method with constant is inlinable
+op/const-optree.t	sub:method with simple lexical is inlinable
 op/crypt.t	crypt turns off utf8 on its target
 op/current_sub.t	*summary*
 op/do.t	*extra* do subname() called

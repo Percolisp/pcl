@@ -33,6 +33,7 @@ use Pl::Parser;
 use Pl::Environment;
 use Pl::PExpr;
 use Pl::ExprToCL2;
+use Pl::InterpScan ();
 use Pl::VarAnnotator;
 use Pl::CLForm qw(raw raw_wrap);
 use Pl::GlobalPartition qw(global_decl_form);
@@ -997,6 +998,15 @@ sub parse {
     $words[0]->set_content(join '', map { $_->content } @words);
     $_->delete for @words[1 .. $#words];
   }
+
+  # `my sub NAME {…}` / `state sub NAME {…}` are LEXICALS, but every named sub
+  # compiles to a PACKAGE sub — so two same-named lexical subs in different
+  # scopes clobbered each other and every reference resolved to the LAST one,
+  # silently (#337).  Give each declaration a scope-unique name and rewrite
+  # the uses its region owns, the way the _rename_* family does for `my $x`.
+  # Runs BEFORE every name-keyed pass below (prototype registry, term scan,
+  # sub_info, hoisting), so all of them see one consistent set of names.
+  $self->_rename_lexical_subs($doc);
 
   # Cross-file prototypes must be in the shared Environment BEFORE any
   # expression parses: v2 lowers named subs ahead of the statement stream and
@@ -3943,6 +3953,226 @@ sub _state_container_blocker {
     }
   }
   return undef;
+}
+
+# ---------------------------------------------------------------------------
+# LEXICAL SUBS — `my sub NAME {…}` / `state sub NAME {…}` (#337).
+#
+# A lexical sub is a LEXICAL: its name is visible from the declaration to the
+# end of the enclosing block, two declarations of the same name in different
+# scopes are two DIFFERENT subs, and a call (or `\&NAME`) resolves to the one
+# whose scope it sits in.  PCL compiles every named sub as a PACKAGE sub, so
+# before this pass the second `my sub x` OVERWROTE the first and every
+# reference — including one captured in a closure built before it — resolved
+# to whichever was defined LAST.  Silent: no warning, no die, a wrong value
+# (probed vs perl 5.40.3: `8 3` there, `3 3` here).
+#
+# The fix is what the _rename_* family already does for `my $x`: give the
+# declaration a scope-unique name and rewrite the uses its region owns.  The
+# region runs from the DECLARATION — not from the top of the block: a call
+# BEFORE it still reaches the package sub (probed) — to the end of the
+# enclosing scope, and STOPS at a sibling redeclaration of the same name in
+# that scope (the #296-B2 rule).  Nesting needs no separate shadow test: a use
+# is claimed by the covering declaration with the LATEST start, which is by
+# construction the innermost one in scope there.
+#
+# DELIBERATELY unchanged (the last four registered in docs/not-supported.md):
+#   * `our sub` — that IS a package sub, and it already matches perl.
+#   * a body's call to its own name (`my sub rec { rec(…) }`): perl DIES
+#     there (a `my sub` is not in scope inside itself), PCL resolves it to
+#     the sub — principle 9, PCL is the more permissive one.
+#   * a lexical sub reached from a STRING eval: perl finds it in the pad, PCL
+#     cannot see into the string.
+#   * a fresh closure per loop iteration (`for my $i (…) { my sub g {…} }`) —
+#     the hoisted-CV residue of #347's "will not stay shared" family, sized
+#     separately; a rename cannot express it.
+#
+# A lexical sub named after a KEYWORD (`state sub if () { 44 }`, which perl
+# allows and t/op/lexsub.t asserts) IS renamed, and that turns `my $x = if if
+# if` from a keyword parse into three juxtaposed zero-arg calls the term
+# grammar cannot lower — an announced DROP where the keyword parse used to
+# emit a zero-argument `(p-if)`, i.e. the very form whose macroexpansion
+# error crashes that file.  A counted drop is the better of the two failures
+# and it is deliberate; the shape belongs to Option B phase 2's term-grammar
+# track (task #374), not here.
+sub _rename_lexical_subs {
+  my ($self, $doc) = @_;
+  my @decls;
+  for my $st (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    next if $st->isa('PPI::Statement::Scheduled');
+    my $type = $st->type // '';
+    next if $type ne 'my' && $type ne 'state';
+    my $name = $st->name;
+    next if !defined $name || $name !~ /^\w+\z/;      # never qualified
+    # `my sub b;` declares the name but defines nothing, and the `sub b {…}`
+    # that fills it in later is a package-sub token shape.  Leave the pair
+    # alone rather than rename half of it (in the corpus it occurs only
+    # inside eval strings — perl-tests/sub.t 427/436).
+    next if !$st->block;
+    my $scope = _lexsub_scope($st) or next;
+    push @decls, { st => $st, name => $name, scope => $scope };
+  }
+  return if !@decls;
+
+  my %idx;
+  my $n = 0;
+  $idx{ refaddr $_ } = $n++ for $doc->tokens;
+  for my $d (@decls) {
+    $d->{start} = $idx{ refaddr( ($d->{st}->tokens)[0] ) };
+    $d->{stop}  = $idx{ refaddr( _last_token($d->{scope}) ) };
+    $d->{new}   = sprintf '%s__lexsub__%d', $d->{name}, ++$self->{_lexsub_counter};
+  }
+  # A sibling redeclaration in the SAME scope ends the earlier one's claim
+  # (#296-B2).  It ends it AT the declarator, not after the statement: unlike
+  # `my $a = "[$a]"`, a sub declaration's own body is the new sub's, which is
+  # also what keeps a self-recursive body resolving to itself.
+  for my $d (@decls) {
+    for my $o (@decls) {
+      next if refaddr($o) == refaddr($d) || $o->{name} ne $d->{name};
+      next if refaddr($o->{scope}) != refaddr($d->{scope});
+      next if $o->{start} <= $d->{start};
+      $d->{stop} = $o->{start} - 1 if $o->{start} - 1 < $d->{stop};
+    }
+  }
+  my %by_name;
+  push @{ $by_name{ $_->{name} } }, $_ for @decls;
+
+  # The declaration covering a use of $name at token index $i: the one with the
+  # LATEST start among those whose region contains it — the innermost in scope.
+  my $covering = sub {
+    my ($name, $t, $i) = @_;
+    my $win;
+    for my $d (@{ $by_name{$name} || [] }) {
+      next if $i < $d->{start} || $i > $d->{stop};
+      next if !_has_ancestor($t, $d->{scope});
+      $win = $d if !$win || $d->{start} > $win->{start};
+    }
+    return $win;
+  };
+
+  for my $t ($doc->tokens) {
+    my ($name, $sigil) = _lexsub_use_name($t);
+    if (defined $name) {
+      next if !$by_name{$name};
+      my $win = $covering->($name, $t, $idx{ refaddr $t }) or next;
+      next if !_lexsub_renamable($t, $win->{st});
+      $t->set_content($sigil . $win->{new});
+      next;
+    }
+    next if !_interp_token_candidate($t);
+    my $i = $idx{ refaddr $t };
+    my %ren;
+    for my $nm (keys %by_name) {
+      my $win = $covering->($nm, $t, $i) or next;
+      $ren{$nm} = $win->{new};
+    }
+    next if !%ren;
+    _fix_interp_token($t, sub { _fix_lexsub_interp($_[0], \%ren) });
+  }
+  return;
+}
+
+# Interpolated CODE — `"@{[ f() ]}"`, `"${\ f() }"`, the same inside a heredoc
+# or a regex — is compiled from the STRING's TEXT, not from these tokens, so a
+# rename that only rewrote the token stream left the embedded call pointing at
+# a package sub that no longer exists (loud: "the function main::pl-f is
+# undefined" — found by a probe, this pass caused it).  Rewrite the embedded
+# code too.  The spans come from Pl::InterpScan (standing rule §8: new
+# interpolation behavior lives there or nowhere), and the code inside a span is
+# classified by the SAME predicate as the token stream — by parsing it as what
+# it is, Perl, rather than by matching the name in text where it could equally
+# be a string, a hash key or a method name.
+#
+# Signature is _interp_fixer's: rewrite $_[0] in place, return a hit count.
+sub _fix_lexsub_interp {
+  my $ren = $_[1];                          # $_[0] is rewritten IN PLACE
+  return 0 if !grep { $_[0] =~ /\b\Q$_\E\b/ } keys %$ren;
+  my @ev = grep { ($_->{form} // '') eq 'expr' && $_->{expr_span} }
+           @{ Pl::InterpScan::scan($_[0]) };
+  return 0 if !@ev;
+  my $hits = 0;
+  for my $ev (reverse @ev) {                # right to left: spans stay valid
+    my ($s, $e) = @{ $ev->{expr_span} };
+    my $new = _rename_lexsub_in_code(substr($_[0], $s, $e - $s), $ren);
+    next if !defined $new;
+    substr($_[0], $s, $e - $s) = $new;
+    $hits++;
+  }
+  return $hits;
+}
+
+# One embedded-code span, renamed.  Returns the new text, or undef when
+# nothing in it was a use of a lexical sub.
+sub _rename_lexsub_in_code {
+  my ($code, $ren) = @_;
+  my $mini = eval { PPI::Document->new(\$code) } or return undef;
+  my $hit = 0;
+  for my $t ($mini->tokens) {
+    my ($name, $sigil) = _lexsub_use_name($t);
+    next if !defined $name;
+    my $new = $ren->{$name} or next;
+    next if !_lexsub_renamable($t, undef);
+    $t->set_content($sigil . $new);
+    $hit = 1;
+  }
+  return $hit ? $mini->serialize : undef;
+}
+
+# The lexical scope a declaration lives in: the nearest enclosing block, or
+# the document for a file-level one.
+sub _lexsub_scope {
+  my ($st) = @_;
+  for (my $p = $st->parent; $p; $p = $p->parent) {
+    return $p if $p->isa('PPI::Document') || $p->isa('PPI::Structure::Block');
+  }
+  return undef;
+}
+
+sub _has_ancestor {
+  my ($t, $node) = @_;
+  for (my $p = $t; $p; $p = $p->parent) {
+    return 1 if refaddr($p) == refaddr($node);
+  }
+  return 0;
+}
+
+# The sub name a token could be naming, and the sigil to put back: a bare Word
+# (`f()`, `\&{…}`-free call, `sort f @l`, the declaration's own name) or an
+# unqualified `&f` Symbol (`\&f`, `&f()`, `defined &f`, `goto &f`).
+sub _lexsub_use_name {
+  my ($t) = @_;
+  return ($t->content, '')
+    if $t->isa('PPI::Token::Word') && $t->content =~ /^\w+\z/;
+  return ($1, '&')
+    if $t->isa('PPI::Token::Symbol') && $t->content =~ /^&(\w+)\z/;
+  return ();
+}
+
+# Is this token in the region really a USE of the lexical sub?  A `&NAME`
+# Symbol always is.  A Word is not when it is a method name, a fat-comma or
+# bare-subscript hash key, a module name in a `use`/`require`, or the name of
+# some OTHER sub declaration — a package `sub f {…}` written inside the
+# region still defines the package sub, and a nested `my sub f` is renamed by
+# its own declaration, never by this one.
+sub _lexsub_renamable {
+  my ($t, $decl) = @_;
+  return 1 if $t->isa('PPI::Token::Symbol');
+  return 0 if _is_method_name_word($t);
+  my $stmt = $t->statement;
+  return 0 if $stmt && $stmt->isa('PPI::Statement::Include');
+  my $nx = _next_sig_token($t);
+  return 0 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  my $par = $t->parent;
+  # `$h{f}` — the Word is the sole content of a subscript's Expression.
+  return 0 if $par && $par->isa('PPI::Statement') && $par->parent
+           && $par->parent->isa('PPI::Structure::Subscript')
+           && !grep { refaddr($_) != refaddr($t) } $par->schildren;
+  my $pv = _prev_sig_token($t);
+  if ($pv && $pv->isa('PPI::Token::Word')
+      && $pv->content =~ /^(?:sub|package|require)\z/) {
+    return ($decl && $par && refaddr($par) == refaddr($decl)) ? 1 : 0;
+  }
+  return 1;
 }
 
 # Rename the declaration $sym (a `my $x` Symbol) and every post-declaration

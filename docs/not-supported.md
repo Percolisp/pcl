@@ -1120,10 +1120,17 @@ read out of the exact wording of a redefinition warning (`Constant subroutine
 `use warnings 'ambiguous'` produced `Ambiguous call resolved as CORE::time()`.
 Both are diagnostics ABOUT an optree PCL does not build.
 
-**That file is NOT registered, and this subsection is why it is worth reading
-before someone registers it (s399).**  The s397 ruling authorised registering
-it on the premise that *every* diverging row is such a readout.  The per-row
-read the bar demands says otherwise — of its 62 diverging rows:
+**That file IS registered, since s408 — and only since then.**  The s397
+ruling authorised registering it on the premise that *every* diverging row is
+such a readout; the per-row read the bar demands said otherwise, and the four
+rows that were NOT readouts were a real fix target that a registration would
+have silenced.  #337 fixed them, a fresh per-row read of all 58 that remain
+confirmed the file is now fully explained (28 inlinable + 25 `:method` = this
+section, 5 RT 134138 = §Error compatibility for invalid Perl input), and the
+row was added with both reasons.  Keep the history below: it is the worked
+example of why the bar is per-row and all-or-nothing.
+
+Of the **62** diverging rows at the s399 reading:
 
 * **53** are the internals readouts above (28 `… is/is not inlinable`,
   25 `… has (no) :method attribute`) — this section;
@@ -1132,17 +1139,16 @@ read the bar demands says otherwise — of its 62 diverging rows:
   variables potentially modified elsewhere are no longer permitted"), PCL
   compiles it and closes over `$x` — §Error compatibility for invalid Perl
   input (CLAUDE.md §9), a different blessed class;
-* **4** are `retval of my sub …` — a REAL FIX TARGET, not a readout: PCL
-  compiles `my sub x () { 8 }` as a PACKAGE sub, so two lexical subs of the
-  same name in different scopes clobber each other and every `\&x` resolves to
-  the last one (probed: `sub { my sub x () {8} \&x }` and
+* **4** were `retval of my sub …` — a REAL FIX TARGET, not a readout: PCL
+  compiled `my sub x () { 8 }` as a PACKAGE sub, so two lexical subs of the
+  same name in different scopes clobbered each other and every `\&x` resolved
+  to the last one (probed: `sub { my sub x () {8} \&x }` and
   `sub { my sub x () {3} \&x }` give perl `8 3`, PCL `3 3` — silent wrong).
-  Task #337.
+  **Task #337, FIXED s408** — the file went 86/62 → 90/58, and those four rows
+  are why it could not be registered for nine sessions.
 
-All-or-nothing (the `docs/perl-suite-expected.tsv` header rule): those last
-four keep the file UNEXPLAINED, because a registration would silence them.
-Re-register it when #337 lands — with the reason citing this section *and*
-§Error compatibility for invalid Perl input, and with a fresh per-row read.
+All-or-nothing (the `docs/perl-suite-expected.tsv` header rule): those four
+kept the file UNEXPLAINED, because a registration would have silenced them.
 
 ---
 
@@ -2045,3 +2051,78 @@ WHOLE FILE with it — `t/op/closure.t` builds programs of exactly this shape an
 runs them in a child, so a compile-time die there cost every row of the child.
 A wrong answer in this family is not silent in any measurement PCL runs: it
 surfaces as a failing TAP row.
+
+**A lexical sub in a loop body belongs to this family too** (#337 shape 10):
+
+```perl
+for my $i (1, 2) { my sub g { "g$i" } print g(), " " }
+#   perl: g1 g2     PCL: the capture refusal, or one sub for both iterations
+```
+
+`my sub g` compiles to a hoisted named sub like any other, so it cannot be a
+fresh closure per iteration.  The scope-unique rename (#337, below) gives it
+its own NAME; what it cannot give it is its own per-iteration CELL, which is
+the same promotion-decision change described above.
+
+## A lexical sub (`my sub NAME`) reached from a place that is not the token stream
+
+`my sub NAME {…}` / `state sub NAME {…}` are LEXICALS: the name is visible from
+the declaration to the end of the enclosing block, and two declarations of the
+same name in different scopes are two different subs.  PCL implements that by
+giving each declaration a scope-unique name (`NAME__lexsub__N`) and rewriting
+the uses its region owns — `Pl::Parser2::_rename_lexical_subs`, task #337.  The
+rename reaches the token stream and the code embedded in interpolating text
+(`"@{[ NAME() ]}"`, heredocs, patterns — via `Pl::InterpScan`).  It does not
+reach two places, and both diverge:
+
+**1. A STRING eval cannot see a lexical sub.**
+
+```perl
+my sub f { "L" }
+print eval "f()";
+#   perl: L      PCL: undef, with "Undefined subroutine &main::f" in $@
+```
+
+Perl finds the sub in the enclosing pad, exactly as a string eval finds a `my`
+variable.  PCL's eval capture alist carries VARIABLES only, so the eval
+compiles `f()` against the package stash, where a lexical sub is (correctly)
+not present.  Loud, trappable, and it never produces a wrong value.
+*(Before the rename this "worked" by accident, because every lexical sub WAS a
+package sub — the same accident that made two of them clobber each other.
+Lifting it means giving the eval request a sub-capture alist alongside the
+variable one; sized with #364, not scheduled.)*
+
+**2. A body's call to its own name is accepted, where perl rejects it.**
+
+```perl
+my sub rec { my $n = shift; return "" if $n <= 0; "r" . rec($n - 1) }
+print rec(3);
+#   perl: dies "Undefined subroutine &main::rec called"    PCL: rrr
+```
+
+A `my sub` is not in scope inside its own body — `state sub` is the spelling
+that is.  PCL's region starts at the declaration and includes the body, so the
+self-call resolves to the sub.  This is CLAUDE.md principle 9 (PCL is more
+permissive on a program perl REJECTS), and `t/op/lexsub.t` asserts perl's
+answer, so those rows fail there by design.
+
+**3. A lexical sub named after a KEYWORD is renamed, and the statement it
+appears in is then DROPPED.**
+
+```perl
+{ state sub if() { 44 }  my $x = if if if;  print $x }
+#   perl: 44      PCL: the statement is dropped (announced), $x is undef
+```
+
+perl lets a lexical sub take a keyword's name and `t/op/lexsub.t` asserts it.
+After the rename the statement is three juxtaposed zero-arg calls, which the
+term grammar cannot lower — Option B phase 2's track, task **#374**.  What it
+emitted BEFORE the rename was worse and is still what the un-renamed `our sub
+if` spelling emits: a zero-argument `(p-if)`, whose macroexpansion error is
+`t/op/lexsub.t`'s crash cause.  #374 owns both halves.
+
+**Also unchanged, and matching perl:** `our sub NAME` (that IS a package sub);
+prototypes and signatures on a lexical sub; a lexical sub closing over a `my`
+variable; `\&NAME`, `&NAME`, `defined &NAME`, `goto &NAME` and `sort NAME LIST`
+inside the region; and `__PACKAGE__->can('NAME')`, which is now correctly FALSE
+(before the rename it lied).

@@ -10,11 +10,15 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 73 files, 382 drops — 9 perl-tests files (12
-# drops), 64 companion files (370), ZERO in lib/.  (At the s399 measurement:
-# 72 files, 379 drops.  The count RISING is not a regression here: two files
-# that used to die at transpile now emit CL, so their drops became countable
-# for the first time — see the s405 edits.)
+# TOTAL after the edits below: 73 files, 377 drops — 9 perl-tests files (12
+# drops), 64 companion files (365), ZERO in lib/.  (At the s399 measurement:
+# 72 files, 379 drops.  A count that RISES is not automatically a regression:
+# two files that used to die at transpile now emit CL, so their drops became
+# countable for the first time — see the s405 edits — and the s408 edit trades
+# 4 crash-forms for 4 counted drops.  Every rise is argued in its own edit
+# note; the runner still FAILS on any rise it has not been told about.)
+# The total is the sum of the rows below — recomputed s408, which is how the
+# stale "382" this line used to carry was found.
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
@@ -47,6 +51,22 @@
 #         statements lower and RUN.  This file is the only one in either
 #         population whose emission #361 moves (emission-ab 605 files:
 #         604 SAME / 1 DIFF / 0 RCDIFF; corpus-diff identical).
+#   s408  t/op/lexsub.t 6 -> 10, an INCREASE, and the only one this census has
+#         taken — read the trade before copying it.  #337 renames a lexical sub
+#         to a scope-unique name, INCLUDING one named after a keyword (`state
+#         sub if () { 44 }` / `my sub if () { 44 }`, which perl allows and this
+#         file asserts).  `my $x = if if if` therefore stops being a keyword
+#         parse and becomes three juxtaposed zero-arg calls, which the term
+#         grammar cannot lower -> 4 announced drops.  What those 4 statements
+#         emitted BEFORE was `(p-if (p-if) (p-my-= $x (p-if)))` — a
+#         zero-argument p-if whose macroexpansion error IS this file's crash
+#         cause ("Form: (p-if) Compile-time error: during macroexp").  So the
+#         edit trades 4 crash-forms for 4 counted drops; the file's verdict is
+#         unchanged (DIFF 6/8) because `our sub if` at line 71 is NOT renamed
+#         (it is a package sub) and its 2 crash-forms come first.  Task #374
+#         owns the residue: the term grammar (Option B phase 2) is what lowers
+#         `NAME NAME NAME`, and the surviving `(p-if)` pair is a rule-12 case
+#         of its own.
 #
 # Causes, aggregated over files (re-counted from the rows below, s405):
 #   49  Bug. Fell through. Missing case: [        <- the dominant one
@@ -106,7 +126,7 @@ t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	6	Bug. Fell through. Missing case: [ x3 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
+t/op/lexsub.t	10	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/override.t	2	Handle single node of unknown type. Dump: x2
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2

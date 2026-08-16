@@ -232,6 +232,17 @@
 #   until it has been re-run ALONE.  The remaining 14 = 11 --quick NOT-RUN,
 #   mro/package_aliases_utf8.t (registered rows-unstable), op/utf8cache.t
 #   (DIFF 2/0 -> TIMEOUT 2/0, same counts) and io/crlf_through.t above.
+# s408 (#337, op/const-optree.t 86/62 -> 90/58 and DIFF -> XDIFF): `my sub` /
+#   `state sub` are now LEXICALS (a scope-unique rename), so the four
+#   "retval of my sub …" rows pass.  Those four were the file's only non-readout
+#   divergences and are why it stayed UNEXPLAINED for nine sessions; a fresh
+#   per-row read of the 58 that remain (28 inlinable + 25 :method readouts,
+#   5 RT 134138) met the all-or-nothing bar, so the file is REGISTERED in
+#   docs/perl-suite-expected.tsv with both reasons and its rows blessed.
+#   Confirmed by a SOLO re-run, not just the --quick run.  The same run's only
+#   other movers were mro/package_aliases_utf8.t (registered rows-unstable —
+#   72/34 this time, 54/34/34 before) and op/utf8cache.t (TIMEOUT under load,
+#   DIFF 2/0 alone): contention, per the s406 rule above, not findings.
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -426,7 +437,7 @@ op/closure.t	281	1	267	3	DIFF	undef-fn:main::pl-ff
 op/cmpchain.t	1750	0	1476	274	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.
 op/concat2.t	4	0	4	0	OK	
 op/cond.t	5	0	4	0	XDIFF	timeout | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
-op/const-optree.t	148	0	86	62	DIFF	
+op/const-optree.t	148	0	90	58	XDIFF	
 op/context.t	8	0	7	1	DIFF	
 op/coreamp.t	778	0	0	0	DIFF	undef-fn:|File::Spec|::pl-Functions
 op/coresubs.t	1109	0	0	0	TRANSPILE	TRANSPILE-FAIL

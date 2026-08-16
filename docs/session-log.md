@@ -4,6 +4,87 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 408 (2026-08-16, Opus 5) — #337: `my sub` is a LEXICAL (session F of `plan-post-s400.md` §2d)
+
+**The bug.** PCL compiles every named sub as a PACKAGE sub, so two `my sub x`
+in different scopes clobbered each other and every reference — including one
+captured in a closure built *before* the second declaration ran — resolved to
+whichever was defined LAST.  Silent: no warning, no die, a wrong value.
+
+    my $g1 = sub { my sub x () { 8 } \&x };
+    my $g2 = sub { my sub x () { 3 } \&x };
+    print &{$g1->()}, " ", &{$g2->()};      perl: 8 3      PCL: 3 3
+
+**The fix** is the one the `_rename_*` family already applies to `my $x`:
+`Parser2::_rename_lexical_subs` gives each `my sub` / `state sub` a
+scope-unique name (`NAME__lexsub__N`) and rewrites the uses its region owns.
+The region runs from the DECLARATION — not the top of the block; a call before
+it still reaches the package sub, probed — to the end of the enclosing scope,
+and stops at a sibling redeclaration (#296-B2).  **Nesting needed no shadow
+test**: a use is claimed by the covering declaration with the LATEST start,
+which is by construction the innermost one in scope there, so shadowing,
+sibling redeclaration and the before-the-declaration rule all fall out of one
+comparison.  It runs in `parse()` ahead of every name-keyed pass (prototype
+registry, term scan, sub_info, hoisting), so they all see one set of names.
+
+**A rename that only rewrites the TOKEN STREAM is incomplete — a probe caught
+it.**  `"@{[ f() ]}"` is compiled from the STRING's text, so the embedded call
+still named the package sub, which after the rename no longer exists: "the
+function main::pl-f is undefined", a crash the pass itself introduced.  The
+spans come from `Pl::InterpScan` (standing rule §8) and the code inside one is
+classified by *parsing it as Perl* through the SAME predicate as the token
+stream — never by matching the name in text, where it could equally be a
+string, a hash key or a method.  Wired through the existing
+`_fix_interp_token`, so heredoc bodies and patterns come free (and
+`heredoc_is_raw` keeps `<<'E'` out of it).
+
+**Probes: 34 shapes vs perl 5.40.3, 31 identical.**  The three that differ are
+all REGISTERED in `not-supported.md` — a string eval cannot see a lexical sub
+(loud; it "worked" before only because every lexical sub WAS a package sub —
+the same accident as the bug), a body's call to its own name is accepted where
+perl rejects it (principle 9), and a lexical sub in a loop body cannot be a
+fresh closure per iteration (#337 shape 10 = #347's "will not stay shared"
+family).  `__PACKAGE__->can('f')` now correctly answers NOCAN; before the
+rename it lied.
+
+**Measured.**  Gate 147 files / 5359 rows, only the 13 pclxs xs rows failing —
+and **per-file IDENTICAL to a HEAD worktree** (counts.tsv diff empty).  That
+compare is why the +4 against the written-down 5355 is not a finding: the xs
+files abort at different points as pclxs is worked on, so their row counts move
+on their own.  `corpus-diff` 3 of 111 files differ (eval.t, sort.t, sub.t) and
+every hunk is a name substitution of a `my sub` and its uses, silent drops 12
+unchanged; `emission-ab` lib 20/20 SAME.  **Full sweep GATE clean — 0 new / 0
+fixed, TOTAL 18517 = baseline, drops 12 = census**, and the three
+emission-changed files are row-for-row at baseline (eval.t PARTIAL 127/33/169,
+sort.t OK 203/1/205, sub.t OK 62/2/65).  Guard `Pl/t/lexical-sub-01.t`, 18
+oracle rows, 52 s.  Gen **v2-151 → v2-152**, all three artifacts regenerated
+(one-line stamp diffs; pack.t re-verified **5636/89 = the blessed count**).
+Final gate **148 files / 5377 rows**.
+
+**The companion run moved three rows and only one is a finding.**
+`op/const-optree.t` **86/62 → 90/58** — exactly the four `retval of my sub …`
+rows #337 was filed for, confirmed by a SOLO re-run.  Those four were the
+file's only non-readout divergences and are why it stayed UNEXPLAINED for nine
+sessions; a fresh per-row read of the 58 that remain (28 inlinable + 25
+`:method` readouts, 5 RT 134138) met the all-or-nothing bar, so the file is now
+**REGISTERED** (`perl-suite-expected.tsv`, both reasons, rows blessed, verified
+XDIFF).  The other two movers were the s406 rule in action: one registered
+rows-unstable file and one TIMEOUT that reproduces the snapshot when run alone.
+
+**The drop census took its first INCREASE, deliberately — read the trade.**
+`t/op/lexsub.t` 6 → 10.  perl lets a lexical sub take a KEYWORD's name
+(`state sub if() { 44 }; my $x = if if if`) and that file asserts it; after the
+rename the statement is three juxtaposed zero-arg calls, which the term grammar
+cannot lower, so it is an announced drop.  What those four statements emitted
+BEFORE is worse and is still what the un-renamed `our sub if` spelling emits:
+`(p-if (p-if) (p-my-= $x (p-if)))` — **a zero-argument `p-if`, whose
+macroexpansion error IS that file's crash cause**.  Four crash-forms became
+four counted drops; the file's verdict is unchanged (DIFF 6/8) because the
+`our sub` pair comes first.  Task **#374** owns both halves — the term grammar
+is Option B phase 2's, and the zero-argument `p-if` is a rule-12 case of its
+own that gates ~150 unmeasured rows.  Summing the census rows also caught its
+header total being stale (382 → the actual 377).
+
 ## Session 407 (2026-08-16, Fable) — the s404 + s405 + s406 batch review, two regressions fixed, #362 closed at its real cause
 
 Three review requests were pending (s404's had never been answered; s403 ruled
