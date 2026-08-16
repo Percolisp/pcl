@@ -295,4 +295,59 @@ my $baz = bizz(9);
 print &$baz(), "\n";       # 9 (then branch captured shifted arg)
 ', "7\n8\n7\n9\n");
 
+
+# ============ TEST N: a NAMED sub inside a foreach, capturing the loop
+# variable (task #347).  Until this was fixed the compiler DIED here
+# ("Parser2 TODO: lexical 'fv' possibly captured by nested sub h3"), which
+# cost the whole file — op/closure.t builds programs of exactly this shape and
+# runs them in a child, so every row of the child was lost.
+#
+# Every expectation below was probed against perl 5.40.3 first, and they are
+# perl's "will not stay shared" answers, not the intuitive ones: a NAMED sub
+# is compiled once and closes over the variable OUTSIDE the loop, never the
+# per-iteration alias.
+test_io("named sub inside foreach captures the OUTER loop variable", '
+my $fv = 900;
+foreach $fv (7, 8) { sub h3 { $fv } }
+print h3(), "\n";
+', "900\n");
+
+# The op/closure.t shape itself, cut down: a named sub inside a foreach inside
+# a NAMED sub, capturing (a) a global, (b) a file lexical, (c) the loop
+# variable, (d) the enclosing sub s lexical.  perl answers 1001, 4001, 1, 1 —
+# the last two because the named subs never saw an instantiated pad.
+test_io("named subs inside a foreach inside a named sub (op/closure.t shape)", '
+$global_scalar = 1000;
+my $fs_scalar = 4000;
+sub outer {
+  my $sub_scalar = 7000;
+  my $foreach = 12000;
+  my @list = (10000, 10010);
+  foreach $foreach (@list) {
+    sub named_57 { ++$global_scalar }
+    sub named_60 { ++$fs_scalar }
+    sub named_63 { ++$foreach }
+    sub named_64 { ++$sub_scalar }
+  }
+}
+my $a = named_57(); my $b = named_60(); my $c = named_63(); my $d = named_64();
+print "$a $b $c $d\n";
+', "1001 4001 1 1\n");
+
+# INVERSE GUARDS — the shapes the refusal was there to protect must still be
+# right.  The static-variable idiom SHARES its lexical with the named sub
+# (perl: 5 then 6), and a named sub capturing a file lexical sees the one box.
+test_io("the static-variable idiom still shares its lexical", '
+{ my $x = 5; sub getx { $x++ } }
+my $p = getx(); my $q = getx();
+print "$p $q\n";
+', "5 6\n");
+
+test_io("a named sub capturing a file lexical still sees the one box", '
+my $fs = 4000;
+sub bumpfs { ++$fs }
+my $r = bumpfs(); $fs = 50; my $s = bumpfs();
+print "$r $s\n";
+', "4001 51\n");
+
 done_testing();

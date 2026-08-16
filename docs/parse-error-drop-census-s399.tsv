@@ -10,9 +10,11 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 72 files, 374 drops — 9 perl-tests files (12
-# drops), 63 companion files (362), ZERO in lib/.  (At the s399 measurement:
-# 72 files, 379 drops.)
+# TOTAL after the edits below: 73 files, 382 drops — 9 perl-tests files (12
+# drops), 64 companion files (370), ZERO in lib/.  (At the s399 measurement:
+# 72 files, 379 drops.  The count RISING is not a regression here: two files
+# that used to die at transpile now emit CL, so their drops became countable
+# for the first time — see the s405 edits.)
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
@@ -29,6 +31,11 @@
 #         before try/catch existed (#340), so it had no CL to count.  Its one
 #         drop is `fscalar = 123;` — the file-level lvalue-sub refusal, which
 #         drops LOUDLY by ruling (fable-answers-s400 §6.3), not a try gap.
+#   s405  t/op/lexsub.t 0 -> 8, a NEW row for the same reason: #347 narrowed
+#         the nested-named-sub capture refusal, and this file (the ONLY one in
+#         either population whose emission the fix moved) stopped dying, so it
+#         has CL to count for the first time.  Its 8 drops are the `my sub`
+#         shapes the term grammar cannot lower — task #337's own territory.
 #
 # Causes, aggregated over files (re-counted from the rows below, s405):
 #   49  Bug. Fell through. Missing case: [        <- the dominant one
@@ -88,6 +95,7 @@ t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
+t/op/lexsub.t	8	Bug. Fell through. Missing case: [ x3 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/override.t	2	Handle single node of unknown type. Dump: x2
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2

@@ -1992,3 +1992,56 @@ run:
 
 **Owner:** task #221.  A row failing for this reason is a registration, not a
 regression — and it stops being one the day #221 lands.
+
+---
+
+## A NAMED sub whose captured lexical is re-created per call or per iteration (perl's "will not stay shared")
+
+**Perl behaviour:** a named sub is compiled ONCE and closes over the pad entry
+that exists at compile time.  When the enclosing `my` is re-created on every
+call or every loop iteration, the sub therefore keeps the FIRST instance and
+never sees the later ones — which is why perl emits `Variable "$x" will not
+stay shared` for exactly this shape.  Perl's own `t/op/closure.t` is built
+around the rule and asserts its answers.
+
+**PCL behaviour:** the captured lexical is PROMOTED to a package-level cell
+that the hoisted sub and the in-place code share, so the sub reads the LAST
+value written rather than the first instance.  Three shapes, all probed
+against perl 5.40.3 (s405):
+
+```perl
+for my $i (1, 2) { my $z = 10 * $i; sub h2 { $z } }  print h2();
+#   perl: 10        PCL: 20
+my $n = 0;
+while ($n++ < 2) { my $w = 100 + $n; sub h5 { $w } } print h5();
+#   perl: 101       PCL: 102
+my $w = 10; sub uses_w { $w }
+foreach my $w (1, 2) { sub in_loop { $w } }          print in_loop();
+#   perl: undef     PCL: 10
+```
+
+**What DOES match perl, and is not part of this gap** — the shapes that make up
+almost all real code:
+
+* the static-variable idiom, `{ my $x = 5; sub getx { $x++ } }` — a file-level
+  block's lexical is created once, so perl shares it too (5 then 6, both);
+* a named sub inside a NAMED sub (`sub outer { my $s = 70; sub h4 { $s } }`) —
+  both give the first-instance answer (undef before `outer` runs, 70 after);
+* the foreach loop VARIABLE captured by a named sub — both give the variable
+  from OUTSIDE the loop, because `foreach` localizes and restores it (task
+  #347, which made this shape compile at all: it used to be a hard refusal that
+  cost the whole file);
+* two same-named lexicals, one promoted and one block-scoped — the promotion
+  machinery renames, so each sub sees its own.
+
+**What would lift it:** the hoisted sub needs its own never-written cell when
+the enclosing lexical's storage is per-call or per-iteration, instead of
+sharing the promoted one.  That is a change to the promotion decision (which
+lexical a nested named sub may share), not to the hoist — sized but not
+scheduled.
+
+**Why it is registered rather than refused:** the refusal it replaced took the
+WHOLE FILE with it — `t/op/closure.t` builds programs of exactly this shape and
+runs them in a child, so a compile-time die there cost every row of the child.
+A wrong answer in this family is not silent in any measurement PCL runs: it
+surfaces as a failing TAP row.

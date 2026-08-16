@@ -5831,6 +5831,15 @@ sub _hoist_nested_sub {
     $by_bare{$bare}{$var} = 1;
   }
   for my $bare (sort keys %by_bare) {
+    # W5's exemption, which this sibling scan was missing (task #347): a name
+    # already PROMOTED to a package-level cell is legitimately captured — the
+    # hoisted sub and the in-place code share the one defvar'd box, which is
+    # the whole point of the promotion.  The identical `next` guards the
+    # file-lexical scan in _check_sub_captures; without it here, the
+    # promotion happened and the gate fired anyway.  Any sigil: container
+    # promotions record '@x__file__N' / '%x__file__N', and a promotion may be
+    # IDENTITY (the name keeps its spelling), so both are looked up.
+    next if grep { $self->{_file_lex_renamed}{"$_$bare"} } '$', '@', '%';
     die "Parser2 TODO: lexical '$bare' possibly captured by nested sub " . $sub->name . "\n"
       if $self->_block_captures_name($sub->block, $bare, $by_bare{$bare});
   }
