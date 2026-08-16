@@ -696,7 +696,7 @@ the `reset` / `?pat?` tests fail).
 
 ---
 
-## `__SUB__` (current sub reference)  [PARTIAL — named subs work, anon subs do not]
+## `__SUB__` (current sub reference)  [PARTIAL — named subs work; anon subs DIE]
 
 **Perl behaviour:** `use feature 'current_sub'; __SUB__` returns a
 reference to the currently executing subroutine, enabling anonymous subs
@@ -706,8 +706,23 @@ to recurse without a named variable.
 default — `__SUB__` is rewritten at the shared PPI entry to `(\&name)`
 (`_rewrite_current_sub` in `Pl/Parser.pm`): zero runtime cost, correct
 recursion (op/signatures.t t122), late-bound so redefinition is honored.
-Inside an ANONYMOUS sub it still resolves to the runtime stub
-`pl-__SUB__`, which returns a no-op lambda.
+Inside an ANONYMOUS sub it resolves to the runtime stub `pl-__SUB__`, which
+**DIES** (task #368, s408): `PCL: __SUB__ inside an anonymous sub is not
+supported`.
+
+**It used to return a no-op lambda, and that was the wrong failure shape.**
+
+```perl
+my $f = sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) };
+print $f->(5);          #   perl: 120        PCL was: 0
+```
+
+The stub's value flowed straight into the program's arithmetic, so the gap
+produced a silently wrong NUMBER.  Rule 12's boundary (s329) is exactly this
+test — an effect-only missing case may announce and continue, one whose value
+the program consumes must die — so it does.  A real implementation needs a
+per-closure self binding, which changes closure shape; that is E5-adjacent, not
+a stub fix.
 
 **Rationale for the anon gap:** an anonymous closure has no name to
 rewrite to; a correct version needs a per-closure self-binding

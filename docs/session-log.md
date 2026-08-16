@@ -46,6 +46,21 @@ to end vs perl including the Try::Tiny inverse), plus a canary in
 `misc-fixes-02.t`.  Rule 13: `ppi-upstream-bugs.md` §20 and three new failing
 rows (Bug 17) in `docs/ppi-bug-report.t`.
 
+### #368 — anon `__SUB__` returned a no-op lambda, so the gap produced a NUMBER
+
+```perl
+my $f = sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) };
+print $f->(5);          #   perl: 120        PCL: 0
+```
+
+The stub's no-op lambda flowed straight into the program's arithmetic.  Rule
+12's boundary (s329) is exactly this test — an effect-only missing case may
+announce and continue, one whose value the program consumes must die — so it
+does now, naming itself.  A NAMED sub's `__SUB__` is unaffected (it is
+rewritten to `(\&name)` at the shared PPI entry, and the guard rows check both
+directions).  `op/current_sub.t` is unchanged (0/0 XDIFF, same signature): it
+never reached the stub, dying earlier on an arity mismatch.
+
 ### #367 + #366 — the runners: what escapes a timeout, and re-running a mover alone
 
 **#367's premise needed sharpening, and the sharpening is the finding.**

@@ -16446,9 +16446,18 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Stub packages for common Perl modules
 ;;; ============================================================
 
-;; CORE::__SUB__ stub — returns a no-op lambda (PCL does not track current sub)
+;; CORE::__SUB__ inside an ANONYMOUS sub (task #368).  A NAMED sub's __SUB__ is
+;; rewritten to \&name at parse time and is correct; only the anon path reaches
+;; here, and PCL does not track the current sub.
+;;
+;; This used to return a no-op lambda, and that is the worst shape a gap can
+;; take: `sub { $_[0] <= 1 ? 1 : $_[0] * __SUB__->($_[0]-1) }` printed 0 where
+;; perl prints 120 — a VALUE the program then consumed, silently.  Rule 12's
+;; boundary (s329) says exactly this case DIES; an effect-only gap may announce
+;; and continue, one whose value flows onward may not.
 (defun pl-__SUB__ ()
-  (lambda (&rest args) (declare (ignore args)) nil))
+  (error "PCL: __SUB__ inside an anonymous sub is not supported ~
+          (docs/not-supported.md); a NAMED sub's __SUB__ works"))
 
 ;; utf8::unicode_to_native / native_to_unicode map between Unicode and the
 ;; platform's native code point.  On any ASCII (non-EBCDIC) platform — which is
