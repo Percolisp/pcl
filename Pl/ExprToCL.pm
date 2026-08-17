@@ -4227,6 +4227,107 @@ sub _compile_subst_e_expr {
   my $self = shift;
   my $expr = shift;
 
+  my ($result, $err) = $self->_try_compile_subst_e($expr);
+  if (!defined $result) {
+    # RETRY with any interpolation-block heredoc spliced in (task #342 piece
+    # 2).  Only on a replacement that already failed, so every shape that
+    # compiles today keeps its emission byte-for-byte.
+    my $flat = _splice_interp_heredocs($expr);
+    ($result) = $self->_try_compile_subst_e($flat) if defined $flat;
+  }
+  # RULE 12 (task #342 piece 1): a replacement we could not compile must DIE,
+  # not become nil.  `s/…/EXPR/e` REPLACES matched text with EXPR's value, so a
+  # nil body is a value the program then consumes — it substituted the empty
+  # string and carried on, rc 0, with only a warning on stderr nobody reads:
+  #
+  #     s|(?:)|"${\<<END}" … |e;      perl: the heredoc text
+  #                                    PCL : "", exit 0   (before this)
+  #
+  # The same file could ALSO die from a different shape of the same construct
+  # (base/lex.t did, rc 255), so one input path died and another silently
+  # substituted nothing — that inconsistency was the bug.  Measured population
+  # before the change: 7 sites in 2 files (t/op/taint.t 6, t/base/lex.t 1),
+  # both of which already fail to transpile for other reasons, so no verdict
+  # moved; what changed is that a future one cannot hide.
+  if (!defined $result) {
+    my $why = $err || "the replacement produced no form";
+    $why =~ s/\s+\z//;
+    die "PCL: cannot compile the s///e replacement '$expr': $why\n";
+  }
+  return $result;
+}
+
+# A heredoc OPENED INSIDE an interpolation block — `"${\<<END}"`, with the body
+# on the lines after it (t/base/lex.t).  PPI lexes the whole `"${\<<END}"` as
+# ONE Quote::Double token, so it never sees the opener, and the body and its
+# terminator are left behind as loose code that the expression parser reads as
+# `ok $test - heredoc END` and refuses.  perl gets this right because the
+# interpolation block is compiled as code while the heredoc body follows the
+# STATEMENT — and for an s///e replacement the statement IS the replacement
+# text, so the body is already inside the string PCL was handed.
+#
+# The body is HOISTED into a `my` variable and the opener replaced by that
+# variable, NOT spliced in as a literal where it stood: the opener sits inside
+# the `"…"`, so a literal there would end the string at its own first quote
+# (measured — `"${\"ok …"}"`, and the CL reader then choked).  A variable
+# reference is quote-free, `${\ $v }` derefs it exactly as `${\ <<END}` did,
+# and `_try_compile_subst_e` already turns a leading `my $v = …;` statement in
+# a replacement into a `let` binding.  Returns the rewritten text, or undef
+# when there was nothing to splice.
+sub _splice_interp_heredocs {
+  my ($text) = @_;
+  my @lines = split /\n/, $text, -1;
+  my ($changed, $guard) = (0, 0);
+  my @hoist;
+  LINE: for (my $i = 0; $i < @lines; $i++) {
+    # <<IDENT / <<"IDENT" / <<'IDENT', each optionally ~-indented.
+    next unless $lines[$i] =~ /<<(~?)(?:"([^"\n]*)"|'([^'\n]*)'|([A-Za-z_]\w*))/;
+    my ($tilde, $dq, $sq, $bare) = ($1, $2, $3, $4);
+    my ($from, $len) = ($-[0], $+[0] - $-[0]);
+    my $term = defined $sq ? $sq : defined $dq ? $dq : $bare;
+    my $end;
+    for my $j ($i + 1 .. $#lines) {
+      my $l = $lines[$j];
+      $l =~ s/^\s+// if $tilde;
+      next if $l ne $term;
+      $end = $j;
+      last;
+    }
+    next if !defined $end;
+    my @body = @lines[$i + 1 .. $end - 1];
+    if ($tilde) {                       # <<~END strips the common indentation
+      my $ind;
+      for my $b (@body, $lines[$end]) {
+        next if $b !~ /\S/;
+        my ($w) = $b =~ /^(\s*)/;
+        $ind = $w if !defined $ind || length($w) < length($ind);
+      }
+      if (defined $ind && length $ind) { s/^\Q$ind\E// for @body }
+    }
+    my $lit = join '', map { "$_\n" } @body;
+    if (defined $sq) { $lit =~ s/([\\'])/\\$1/g; $lit = "'$lit'" }
+    else             { $lit =~ s/([\\"])/\\$1/g; $lit = "\"$lit\"" }
+    my $var = '$__pcl_hd_' . scalar(@hoist);
+    push @hoist, "my $var = $lit;";
+    substr($lines[$i], $from, $len) = $var;
+    splice @lines, $i + 1, $end - $i;
+    $changed = 1;
+    redo LINE if ++$guard < 20;         # a second opener on the same line
+  }
+  return undef if !$changed;
+  return join("\n", @hoist, @lines);
+}
+
+# One compile attempt.  Returns (FORM, undef) or (undef, WHY).
+#
+# `nil` is the ANSWER, not a failure, when the replacement parses to no
+# statements at all — `s/o//eg` reaches here with an empty replacement and its
+# CL is `nil` (measured: initialising this to undef instead made closure.t
+# fail to transpile).  The rule-12 die is for a replacement that THREW.
+sub _try_compile_subst_e {
+  my $self = shift;
+  my $expr = shift;
+
   my $result = 'nil';
   eval {
     require PPI::Document;
@@ -4284,26 +4385,9 @@ sub _compile_subst_e_expr {
       $result = $body;
     }
   };
-  # RULE 12 (task #342 piece 1): a replacement we could not compile must DIE,
-  # not become nil.  `s/…/EXPR/e` REPLACES matched text with EXPR's value, so a
-  # nil body is a value the program then consumes — it substituted the empty
-  # string and carried on, rc 0, with only a warning on stderr nobody reads:
-  #
-  #     s|(?:)|"${\<<END}" … |e;      perl: the heredoc text
-  #                                    PCL : "", exit 0   (before this)
-  #
-  # The same file could ALSO die from a different shape of the same construct
-  # (base/lex.t does, rc 255), so one input path died and another silently
-  # substituted nothing — that inconsistency was the bug.  Measured population
-  # before the change: 7 sites in 2 files (t/op/taint.t 6, t/base/lex.t 1),
-  # both of which already fail to transpile for other reasons, so no verdict
-  # moves; what changes is that a future one cannot hide.
-  if ($@ || !defined $result) {
-    my $why = $@ || "the replacement produced no form";
-    $why =~ s/\s+\z//;
-    die "PCL: cannot compile the s///e replacement '$expr': $why\n";
-  }
-  return $result;
+  return (undef, $@) if $@;
+  return (undef, undef) if !defined $result;
+  return ($result, undef);
 }
 
 

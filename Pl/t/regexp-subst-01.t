@@ -176,23 +176,58 @@ diag "";
 diag "All s/// and tr/// tests completed!";
 
 diag "";
-diag "-------- s///e replacement that cannot be compiled must DIE (task #342):";
+diag "-------- heredoc inside \${\\ …} inside an s///e replacement (task #342):";
 
-# RULE 12: `s/…/EXPR/e` replaces matched text with EXPR's VALUE, so a
-# replacement the compiler cannot build must not become nil — that substituted
-# the empty string, exit 0, with only a warning nobody reads.  perl prints the
-# heredoc text here; PCL must fail loudly instead of quietly printing "not ok".
+# The construct t/base/lex.t is built around: a heredoc OPENED inside an
+# interpolation block, with the body inside the s/// delimiters.  PPI lexes
+# `"${\<<END}"` as one Quote::Double token and never sees the opener, so the
+# body and terminator were left as loose code the expression parser refused.
+# perl is the oracle: the same source through both.
 {
     my $root = "$RealBin/../..";
     my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh <<'PL';
 my $test = 42;
+my $v = "V";
 $_ = "";
 s|(?:)|"${\<<END}"
 ok $test - heredoc in "" in multiline s///e outside eval
 END
 |e;
 print $_ || "not ok $test\n";
+$_ = "cYd";
+s|Y|"${\<<'RAW'}"
+raw $v
+RAW
+|e;
+print $_;
+PL
+    close $fh;
+    my $perl_out = `perl $file 2>&1`;
+    my $pcl_out  = `$root/runpcl $file 2>&1`;
+    is($pcl_out, $perl_out,
+       '#342: heredoc in ${\ …} in an s///e replacement — same as perl')
+      or diag("perl: [$perl_out]\nPCL:  [$pcl_out]");
+    like($perl_out, qr/heredoc in "" in multiline/,
+         '#342: …and the oracle really did substitute the heredoc');
+}
+
+diag "";
+diag "-------- s///e replacement that cannot be compiled must DIE (task #342):";
+
+# RULE 12: `s/…/EXPR/e` replaces matched text with EXPR's VALUE, so a
+# replacement the compiler cannot build must not become nil — that substituted
+# the empty string, exit 0, with only a warning nobody reads.  The trigger is
+# VALID Perl that PCL genuinely cannot compile (smartmatch — a documented
+# feature absence, Track A of Option B phase 2): perl prints 1 here.
+{
+    my $root = "$RealBin/../..";
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'PL';
+no warnings;
+$_ = "z";
+s|z|my $q = 1; $q ~~ [1]|e;
+print $_, "\n";
 PL
     close $fh;
     my $err = "$file.err";
