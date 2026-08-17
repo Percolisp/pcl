@@ -82,6 +82,7 @@ use strict;
 use warnings;
 
 use Pl::PExpr ();
+use Pl::Passes ();
 
 # Operators whose p-functions return raw CL values (number / string / 1-or-"").
 my %ARITH_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != <=>
@@ -270,8 +271,13 @@ sub _analyze_tree {
   _tw_stmts($ctx, \@stmts);
 
   my %vi;
-  my $no_b = $ENV{PCL_NO_RAW_VERDICT}
+  # Kind-A gates (Pl::Passes; PCL_OPT): 'raw-numeric' is the B-regime freeze
+  # below (PCL_NO_RAW_VERDICT is its alias, resolved inside Pl::Passes);
+  # 'raw-slot' is the whole unboxable verdict — off, every name is boxed,
+  # which is the general form each name with a reason already takes.
+  my $no_b = !Pl::Passes::enabled('raw-numeric')
           || ($host && $host->{_overload_in_file});
+  my $no_raw_slot = !Pl::Passes::enabled('raw-slot');
   for my $name (keys %{ $ctx->{decl_count} }) {
     my @reasons;
     push @reasons, 'multi-decl'     if $ctx->{decl_count}{$name} != 1;
@@ -329,6 +335,13 @@ sub _analyze_tree {
                    ($ENV{PCL_B_DEBUG} ? (reasons => \@reasons) : ()) };
     _mark_strbuf($ctx, \%vi, $name) unless @reasons;
   }
+  if ($no_raw_slot) {
+    for my $v (values %vi) {
+      $v->{unboxable} = 0;
+      delete @$v{qw(coerce strbuf)};
+      push @{ $v->{reasons} }, 'opt-off:raw-slot' if $ENV{PCL_B_DEBUG};
+    }
+  }
   if ($ENV{PCL_B_DEBUG}) {
     for my $name (sort keys %vi) {
       warn sprintf "B-DEBUG %s unboxable=%d coerce=%s strbuf=%d reasons=[%s] uses={%s}\n",
@@ -352,6 +365,7 @@ sub _analyze_tree {
 # not a buffer init → excluded.
 sub _mark_strbuf {
   my ($ctx, $vi, $name) = @_;
+  return unless Pl::Passes::enabled('str-buffer');   # Kind-A gate (PCL_OPT)
   return unless $ctx->{write_ops}{$name}{'.='};
   return if grep { $_ ne '.=' } keys %{ $ctx->{write_ops}{$name} };
   return if $ctx->{foreach_var}{$name};

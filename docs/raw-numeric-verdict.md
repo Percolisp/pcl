@@ -15,7 +15,8 @@ notes below.**  Companion to the box/raw split in `docs/ir-spec.md` §2.2.
   Conditions (`if`/`while`/modifiers) walk with a `bool` root.
 - **Verdict**: fires only when the var's ONLY blocking reasons are
   `write-shape`/`write-incdec-root`, it is not a sub param, and no
-  parse-fallback text mentions it.  `PCL_NO_RAW_VERDICT=1` disables;
+  parse-fallback text mentions it.  `PCL_OPT=-raw-numeric` disables (the
+  optimization registry, Pl::Passes, s411; `PCL_NO_RAW_VERDICT=1` is its alias);
   `PCL_B_DEBUG=1` dumps per-var verdict/uses.  A `use overload` in the FILE
   disables both verdicts (`Parser2::{_overload_in_file}`); cross-file
   overloaded arrivals are the strict coercers' job.

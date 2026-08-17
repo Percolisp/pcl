@@ -185,6 +185,16 @@ prove -v Pl/t/codegen-01.t
 # Quick transpile test
 echo 'my $x = 1 + 2;' | ./pl2cl
 
+# THE OPTIMIZATION REGISTRY (Pl/Passes.pm, s411 Phase R, task #383): every
+# speed transform is a NAMED, facts-licensed emission (Kind A) or a CLForm
+# pass (Kind B, none registered yet); PCL_OPT switches them.  Kind-A names:
+# raw-slot raw-numeric str-buffer foreach-range (+ insensitive-call elem-setf
+# with Phase A).  A typo DIES naming the known list.  PCL_OPT=none is the
+# general-form compiler: its emission must RUN identically (Pl/t/passes-01.t;
+# the gate under it differs only in transpile-SHAPE rows).
+PCL_OPT=none ./pl2cl < prog.pl               # everything off
+PCL_OPT=-raw-numeric,-str-buffer ./runpcl x.pl   # named ones off (PCL_NO_RAW_VERDICT=1 = -raw-numeric)
+
 # INSTALL PCL onto a machine (task #277, release phase 1).  The runtime and its
 # saved core are COMPILED AT INSTALL — the XS model, never at first use.
 # Copies the runtime tree (pl2cl, runpcl, Pl/, lib/, cl/, tools/lib/) in its

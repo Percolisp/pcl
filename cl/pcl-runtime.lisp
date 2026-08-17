@@ -4434,13 +4434,27 @@
                   (vector-push-extend
                    (if (p-box-p item)
                        (let ((inner (p-box-value item)))
-                         (if (or (p-box-p inner)
-                                 (p-box-class item)
-                                 (and (vectorp inner) (not (stringp inner)))  ; array ref
-                                 (hash-table-p inner)  ; hash ref
-                                 (%p-dualvar-box-p item))  ; $!/dualvar: keep both halves
-                             item   ; reference, blessed, or dualvar: preserve the box
-                             inner))  ; plain scalar: snapshot value
+                         (cond
+                           ((or (p-box-p inner)
+                                (p-box-class item)
+                                (and (vectorp inner) (not (stringp inner)))  ; array ref
+                                (hash-table-p inner)  ; hash ref
+                                (%p-dualvar-box-p item))  ; $!/dualvar: keep both halves
+                            item)   ; reference, blessed, or dualvar: preserve the box
+                           ;; A MAGIC or TIED source (a defelem @_ alias, an
+                           ;; arylen / substr / pos lvalue, a tied scalar):
+                           ;; snapshot the VALUE it reads as NOW — perl
+                           ;; evaluates the whole RHS before any store — never
+                           ;; the cell or the proxy: copying the cell made
+                           ;; `my ($x) = @_; $x = 0` write THROUGH the alias and
+                           ;; vivify the caller's `$h{k}`, and copying the proxy
+                           ;; made the target itself tied (s411, found by
+                           ;; PCL_OPT=none: the raw-params fast path hid it).
+                           ((p-magic-cell-p inner)
+                            (funcall (p-magic-cell-getter inner)))
+                           ((p-tie-proxy-p inner)
+                            (unbox (%p-tie-fetch item inner)))
+                           (t inner)))  ; plain scalar: snapshot value
                        item)
                    result)))))
       (add src))

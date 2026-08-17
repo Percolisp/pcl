@@ -47,6 +47,27 @@ not-supported.md → only then probe.*
   lines) are InterpScan consumer 3** — schedule the port, not a helper.
   `Parser2::_interp_names` is 1.65 s EXCLUSIVE in a 50 s sample = consumer 2
   is also the compile-time fix.  → worklist rows 1, 27.
+- **Phase R DONE s411 (Fable, same session): `Pl/Passes.pm` + `PCL_OPT`** — Kind-A
+  `enabled(name)` gates `raw-slot` (the whole unboxable verdict, incl.
+  `p-raw-params`), `raw-numeric` (`PCL_NO_RAW_VERDICT` = alias),
+  `str-buffer`, `foreach-range`; Kind-B `register_pass`/`run` at the four
+  `to_string` handoffs (identity until a pass exists); an unknown name in
+  PCL_OPT DIES with the known list (`Parser2::parse` → `check_env`).
+  `PCL_OPT=none` is the general-form compiler: `Pl/t/passes-01.t` (22 rows)
+  pins that every name gates its shape and that the SAME program prints the
+  SAME output under every setting.  **The bar's reading: under `none` every
+  RUN row passes; transpile-SHAPE rows that assert a fast shape differ by
+  definition** (list in the plan §2 Phase R).  → plan §2 Phase R; #383.
+- **`PCL_OPT=none` found a default-configuration silent-wrong on its first
+  run (as predicted): `%p-flatten-list` snapshotted a MAGIC CELL / TIE PROXY
+  instead of its value**, so `my ($x) = @_; $x = 0` (when the raw-params
+  fast path did not apply — a closure captured `$x`) wrote THROUGH the
+  defelem alias and VIVIFIED the caller's `$h{k}`, and a tied source made
+  the target tied.  Fixed at the runtime (snapshot the getter's / FETCH's
+  value, as `box-set` already did); guard row transpile-test-10.t; ir-spec
+  §@_ aliasing "copying OUT of @_ is by VALUE".  Sweep clean.  Filed while
+  probing: **#389** `++$$r` / `--$$r` / `++${$r}` is a whole-statement DROP
+  in every position (announced; Option B phase 2 operand grammar).
 - **s410 asks ruled short** (`docs/fable-answers-s410.md`): v1 fixes stay
   legal when reachable + small AND filed on the E5.3 class; `__SUB__` outside
   a sub keeps the die; #376 blast radius = follow perl; #377 twin registered;

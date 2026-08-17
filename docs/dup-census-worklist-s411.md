@@ -80,7 +80,7 @@ current ones.
 | 10 | `ExprToCL.pm` · `gen_funcall_form` `exists`/`delete` arms | ~47 | **EXTRACT — with family 2** | same helper. |
 | 13 | `cl/pcl-runtime.lisp` · `p-array-fill` / `p-copy-array` — the per-item `cond` written once for `(loop across …)` and once for `(loop in …)`, in two functions | ~38 | **EXTRACT (Lisp) — `macrolet`/`flet` inside each function** | zero-cost by construction (local, inlined); the runtime row of WHAT-TO-RUN: sweep + `tools/bench-exec.pl` on array assignment.  Rule 12 check while there: the `cond` ends in a `t` arm that stores — legal, it is the general case, not a missing one. |
 | 14, 26 | `Parser.pm` · `_parse_expression_internal` / `_parse_expression_form` / `_compile_constant_value` / `_compile_default_expr` / `parse_hash_block_to_cl_string` / `_form` — the `Pl::PExpr->new(…) … Pl::ExprToCL->new(…)` construction, 6× | ~62 | **EXTRACT — AFTER Phase A** | Phase A2/A4 rewrite what these sites do (Parser2 constructs the generator; the four TEXT `->generate(` become `to_flat(gen_node_form)`).  Then ONE `_expr_compiler($parts, $stmt)` in Parser.pm serves the survivors.  Written earlier it is written twice. |
-| 15, 27, 33 | `StringInterpolation.pm` · `parse_interpolated_variable` / `_parse_subscript_chain` | ~80 | **SUPERSEDED — family 1** | — |
+| 15, 33 | `StringInterpolation.pm` · `parse_interpolated_variable` / `_parse_subscript_chain` | ~80 | **SUPERSEDED — family 1** | — |
 | 17 | `ExprToCL.pm` · `gen_array_slice_form` / `gen_hash_slice_form` / `gen_kv_*_slice_form` | ~29 | **EXTRACT** | one `_slice_form($head, $container_id, $index_ids, %opt)`; four thin wrappers.  Cold. |
 | 18 | `tools/difftest-ops.pl` · `add_builtin` / `prog_stmts` | ~49 | **LEAVE (or a data table)** | a fuzzer's generator cases; the repetition is the case list.  If touched: a table of `[name, arity, ctx]` rows and one loop. |
 | 20 | `ExprToCL.pm` · `gen_hash_access_form` / `gen_hash_ref_access_form` (14 lines EXACT) | ~26 | **EXTRACT** | the key-lowering half is identical; `_hash_key_form($key_id)`.  344 + 146 calls/sample; per node; free. |
@@ -111,7 +111,7 @@ waiting for the plan's phases:
 6. Lisp: 23 (`define-slow-binop`), 13, 21, 37, 42/46–48 — sweep + bench
    per commit; `tools/check-parens.lisp` after each edit.
 7. **After Phase A**: families 2 + 10, then 14/26.
-8. Family 1 + 15/27/33 + Parser2 27: **the InterpScan consumers 2 and 3
+8. Family 1 + 15/33 + Parser2 27: **the InterpScan consumers 2 and 3
    port** — schedule as its own session (structural; #237's remaining
    halves).  Family 38 rides along.
 

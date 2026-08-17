@@ -35,6 +35,7 @@ use Pl::PExpr;
 use Pl::ExprToCL2;
 use Pl::InterpScan ();
 use Pl::VarAnnotator;
+use Pl::Passes ();
 use Pl::CLForm qw(raw raw_wrap);
 use Pl::GlobalPartition qw(global_decl_form);
 
@@ -953,6 +954,10 @@ sub _ppi_state_restore {
 
 sub parse {
   my $self = shift;
+  # PCL_OPT names are validated HERE, once every module is loaded (a Kind-B
+  # pass may register from any of them) — a typo dies with the known list
+  # before any parse, instead of surfacing from inside an analysis walk.
+  Pl::Passes::check_env();
   # (The PCL_V1_FILES bisect hook lived here — it forced named files through
   # the whole-file v1 fallback to isolate a diverging module, task #80.  Both
   # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
@@ -1662,8 +1667,12 @@ sub parse {
       pkg      => $seg->{pkg},
       reopen   => $seg->{reopen},
       version  => $seg->{version},
-      decls    => [map { Pl::CLForm::to_string($_, 0) } @decls],
-      defs     => [map { Pl::CLForm::to_string($_, 0) } @defs],
+      # Every top-level form passes through the Kind-B optimization registry
+      # (Pl::Passes::run — the identity until a pass is registered) HERE, the
+      # one place a lowered tree becomes text.  Captured/sched entries are v1
+      # TEXT already and are not trees; they stay outside the registry.
+      decls    => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) } @decls],
+      defs     => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) } @defs],
       # A top-level `my` nests its whole block remainder in ONE `let` form; for
       # a large block (arith.t's ~180 `$T++` calls) that single form exhausts
       # SBCL's compiler heap when the R1 hot ops open-code inline.  v1 caps this
@@ -1679,7 +1688,7 @@ sub parse {
       # thresholds calibrated on v1-flat text (compile cost tracks content,
       # not layout) — three files spuriously gated at the E2.final root flip.
       run      => [map {
-        my $text = Pl::CLForm::to_string($_, 0);
+        my $text = Pl::CLForm::to_string(Pl::Passes::run($_), 0);
         (my $collapsed = $text) =~ s/\s+/ /g;
         $self->_gate_oversized_run_form(
           Pl::Parser::_cap_inlining_if_huge($text, length $collapsed),
@@ -1689,7 +1698,7 @@ sub parse {
       sched    => [@{ $self->{_sched_defs} }],
       # #226: eval region's leading-package enter forms — emitted at the head
       # of the eval BODY, ahead of the defs/sched interleave.
-      pkg_enter => [map { Pl::CLForm::to_string($_, 0) }
+      pkg_enter => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) }
                     @{ $self->{_eval_pkg_enter} // [] }],
       # #240 step 2: the region's CL package designator, recorded where the
       # enter forms were built (never derived a second time) — see
@@ -8157,7 +8166,11 @@ sub _lower_compound {
     # miscompile.  (Postfix `EXPR for A..B` is a different lowering site,
     # not covered here.)
     my ($from_form, $to_form, $range_raw);
-    my @range = @alias_hd ? () : _foreach_range_split(\@list_parts);
+    # Kind-A gate (Pl::Passes, PCL_OPT): off, the range materializes through
+    # the general p-foreach path — a skip is a missed optimization, never a
+    # miscompile (the same contract as the guard-rejected shapes above).
+    my @range = (@alias_hd || !Pl::Passes::enabled('foreach-range'))
+              ? () : _foreach_range_split(\@list_parts);
     if (@range) {
       ($from_form, $to_form) = eval {
         ($self->_lower_expr($range[0], $stmt), $self->_lower_expr($range[1], $stmt));

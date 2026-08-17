@@ -59,6 +59,22 @@ were the reviews.  **USER decision: structural first, "but not at any cost".**
 - Tasks: #379 in_progress → plan; #383 Phase R, #384 Phase A, #385 Phase B,
   #386 Phase C, #387 the extraction worklist, #388 InterpScan consumers 2+3.
 
+**Then, same session — Phase R SHIPPED (the flag the USER asked for):**
+`Pl/Passes.pm` (Kind-A `enabled`, Kind-B `register_pass`/`run`, `PCL_OPT`,
+typo dies, `PCL_NO_RAW_VERDICT` alias), four names gated (`raw-slot`,
+`raw-numeric`, `str-buffer`, `foreach-range`), `Pl::Passes::run` at the four
+printer handoffs, `Pl/t/passes-01.t` (22 rows), CLAUDE.md Quick Reference,
+`raw-numeric-verdict.md`.  Bars: corpus-diff IDENTICAL; `PCL_OPT=none` gate
+= every RUN row passes (the shape-assertion rows differ by definition —
+listed in the plan); default sweep clean after the runtime fix (TOTAL 18513,
+0 new / 0 fixed / 0 LOST, drops 12); `PCL_OPT=none` sweep: see the line
+below.  **The flag found a bug on its first run**: `%p-flatten-list`
+snapshotted a magic CELL (defelem @_ alias) / tie PROXY instead of the
+value — `my ($x) = @_; $x = 0` in a closure-capturing sub vivified the
+caller's `$h{k}` in the DEFAULT configuration too (raw-params had hidden
+it); fixed at the runtime, guard row transpile-test-10.t, ir-spec.  Filed
+#389 (`++$$r` whole-statement drop) from the probes.
+
 **Measurement notes for whoever re-measures:** the two temporary knobs
 (`return undef` at `ExprToCL2::gen_form`; the `EMBED-TRY/EMBED-DECLINE`
 warns in `lower_embedded_block`; the caller-chain warn at ExprToCL:4021)

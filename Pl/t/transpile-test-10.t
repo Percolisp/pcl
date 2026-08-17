@@ -823,4 +823,22 @@ print "h=", (sub {"bar"})[0]->(), "\n";
 print "i=", (map { {k=>$_} } 1..2)[1]{k}, "\n";
 ');
 
+# s411 (Phase R, PCL_OPT=none found it): a defelem @_ alias — `$h{k}` passed
+# to a sub — must be COPIED by value into `my ($x) = @_` / `my $x = shift`,
+# never aliased: %p-flatten-list snapshotted the magic CELL, so a later write
+# to $x went through the alias and vivified the caller's key.  The raw-params
+# fast path hid it; a closure capture (or PCL_OPT=none) takes the general path.
+test_transpile('s411: a defelem @_ alias is copied by value into a boxed my-param (no vivify on write)', '
+no warnings;
+my %h = (k => 1);
+sub a4 { my ($x) = @_; my $f = sub { $x }; $x = 0; }   a4($h{a4}); print "a4:", (exists $h{a4} ? "BAD" : "ok"), "\n";
+sub a5 { my $x = shift;  my $f = sub { $x }; $x = 0; }   a5($h{a5}); print "a5:", (exists $h{a5} ? "BAD" : "ok"), "\n";
+sub a6 { my ($x, $y) = @_; my $f = sub { $x }; $y = 0 } a6($h{a6}, 1); print "a6:", (exists $h{a6} ? "BAD" : "ok"), "\n";
+sub w  { $_[0] = 99 } w($h{w}); print "w:$h{w}\n";
+package Cnt; sub TIESCALAR { bless {c=>0} } sub FETCH { my $s = shift; ++$s->{c} } sub STORE { print "STORE $_[1]\n" }
+package main;
+tie my $t, "Cnt";
+my ($p, $q) = ($t, 7); print "p=$p q=$q\n"; $p = 5; print "p=$p t=$t\n";
+');
+
 done_testing();

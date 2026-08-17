@@ -60,7 +60,7 @@ loop (`for f in perl-tests/*.t; do ./pl2cl < $f >/dev/null; done`, 68.4 s
 at s411 on this machine) before and after every phase — the "not slower
 later" number.
 
-### Phase R — the optimization registry (½ session, first, IDENTICAL)
+### Phase R — the optimization registry (½ session, first, IDENTICAL) — **DONE s411** (see the note at the end of this phase)
 
 The USER's stated target: optimizations behind a flag, so they can be
 worked on after the compiler is done.  Today: no registry, one ad-hoc knob
@@ -86,6 +86,27 @@ CLOSED tree.
   first time all of them are, together); a Pl/t row per name asserting
   the flag changes emission.  #73/#74/#77 land later as Kind-B passes,
   one file each, exactly as the architecture doc says.
+
+**Done s411 (Fable), in this session, as measured:** `Pl/Passes.pm` (Kind-A
+`enabled`, Kind-B `register_pass`/`run`, `PCL_OPT`, lazy name check that
+DIES on a typo, `PCL_NO_RAW_VERDICT` alias); four names gated (`raw-slot`
+= the whole unboxable verdict incl. `p-raw-params`, `raw-numeric`,
+`str-buffer`, `foreach-range`); `Pl::Passes::run` at the four
+`to_string` handoffs in Parser2's section assembly; `Pl/t/passes-01.t`
+(22 rows: each name gates its shape, the flag is NOT a correctness switch —
+same program output under every setting — typo dies, Kind-B order + flag).
+Bars: `PCL_OPT` unset corpus-diff IDENTICAL; **`PCL_OPT=none` gate: every
+RUN row passes; the transpile-SHAPE rows that assert the fast shape differ
+by definition** (parser2-01/02, raw-verdict-01, clform-01, argv-01,
+writes-args-01, statements-01 5/7/28, lexical-sub-01 23, prototype-01 91 —
+the bar is refined to that reading).  **It found a bug on its first run**,
+as predicted: `my ($x) = @_; $x = 0` in a sub whose param could not take
+the raw-params fast path (a closure captured it) VIVIFIED the caller's
+`$h{k}` — `%p-flatten-list` snapshotted a defelem magic CELL instead of its
+value.  Fixed at the runtime (value copy, as `box-set` already did), guard
+row in transpile-test-10.t, ir-spec §@_ aliasing; a default-configuration
+silent-wrong (probed: `sub r { my ($x) = @_; my $f = sub { $x }; $x = 0 }`).
+Compile time unchanged (a hash lookup per gate).
 
 ### Phase A — one expression compiler (1–2 sessions, EMISSION)
 

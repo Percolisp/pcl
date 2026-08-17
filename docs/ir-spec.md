@@ -720,7 +720,10 @@ elements: `f($h{k})` / `f($a[i])` emit `p-gethash-argbox` /
 coderef, method), which return the slot box when the element exists and
 a lazy defelem magic cell when it does not — reads see undef and never
 vivify; the first write through `$_[N]` creates the key / extends the
-array.  A plain `my` lexical scalar is boxed **when the callee is known
+array.  **Copying OUT of `@_` is by VALUE**: `my ($x) = @_` / `my $x =
+shift` snapshot the getter's value (`%p-flatten-list`, `box-set`), never the
+magic cell — a later `$x = 0` must not write through the alias (s411; the
+raw-params fast path had hidden the general path's aliasing).  A plain `my` lexical scalar is boxed **when the callee is known
 to write through `@_`** (task #189): the callee's body is scanned once,
 the fact rides `sub_info` as `writes_args`, and the VarAnnotator's
 `arg-to-writer` event boxes that call site's arguments — so
