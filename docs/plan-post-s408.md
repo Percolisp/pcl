@@ -30,6 +30,34 @@ and the raw-params lowering disagree about who owns the declaration).
 die is right by rule 12 but it aborts `op/sub.t` at line 214 (51/14 → 25/6, 26
 rows), and the shape is modern Perl's recursive closure.
 
+
+## 2a. Progress (Opus, s410 — `03cc639`…`1484246`)
+
+**Session H is COMPLETE.**  #378 (anon `__SUB__` implemented as the ruled
+self-reference rewrite — op/sub.t 25/6 → 52/13, one row BETTER than the 51/14
+before #368), #377 (both halves: the raw-params/promotion disagreement AND
+`my ($x) = @_`, which the probe showed was worth joining — the promoter never
+saw a one-element list declaration), #376 (all three spellings), #341 measured
+and CLOSED.  Its bar needed one thing the plan did not know about: **an `our`
+statement's TAIL was being lost in both pipelines** (`our $ok++, return if …`
+is what op/sub.t:214's recursion terminates on), fixed in `03cc639` with the
+remainder filed as #380.
+
+**Session I:** item 5 (#342 piece 2) done in `1484246`; **item 6 (#281 items
+1+2+6) is where the next session starts** — it was begun and reverted
+unfinished, and `docs/opus5-review-requests-s410.md` §6.2 has the full
+inventory (four macros not three, 31 string sites, 6 form sites, the two
+multi-binding lets that must stay lets) plus **a correction to item 2's
+premise** (sort.t's ten `(defvar $a …)` are ten DIFFERENT symbols, one per
+`in-package` section; the true duplicate count is 11, of a different shape).
+Asks 7.7/7.8 in that file are the two rulings that would change how it is done.
+
+**#341's answer changes what J–L should expect**: op/lexsub.t's ~139
+unmeasured rows are behind the INDIRECT-OBJECT call `h F` (task **#381**), not
+behind anything lexsub-shaped — and a Track A refusal (#371) does not recover
+them, because a refusal dies too.  Also filed: **#380** (`our $x = E while C`,
+population zero) and **#382** (the document-level heredoc pre-pass).
+
 ## 1. The two standing goals, unchanged
 
 - **v0.1 public release** (`docs/release-plan-v0.1.md`, USER s375c): phase 1

@@ -4,6 +4,180 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 410 (2026-08-17, Opus 5) — session H complete, session I begun: `our`'s lost tail, anon `__SUB__`, the lexical-sub residue
+
+Five commits, `03cc639`…`1484246`.  Queue: `docs/plan-post-s408.md` §2 —
+session H (#378 → #377 → #376 → #341) is DONE, session I item 5 (#342 piece 2)
+is done, item 6 (#281 items 1+2+6) was begun and reverted unfinished.
+
+| measurement | value |
+|---|---|
+| Gate `tools/prove-core` | **149 files / 5459 rows**, PASS except the 13 known pclxs xs rows |
+| Full perl-tests sweep, `--jobs 8` | **GATE clean, 0 new / 0 fixed, TOTAL 18513 = baseline, drops 12 = census** — run after each of the three name-resolution commits, identical every time |
+| corpus-diff | **IDENTICAL across 111 files** after every commit; silent drops 12, unchanged |
+| emission-ab | all 22 lib shims SAME, every commit |
+| Companion `--all --quick --jobs 4` | run TWICE (after #378, and after #377+#376): 523 files, 87 OK / 30 NOTAP / 111 XDIFF / 1 FIXTURE / 294 UNEXPLAINED both times.  **One real mover: op/sub.t 25/6 → 52/13** |
+| Cache generation | v2-154 → **v2-155**, the three artifacts regenerated (stamp-only diff) |
+| Probes vs perl 5.40.3 | **46 shapes, every one identical** (review request §8) |
+| Tasks | #378 #377 #376 #341 #342 closed; **#380 #381 #382 filed** |
+
+## Session 410 (2026-08-17, Opus 5) — session H: `our`'s lost tail, then anon `__SUB__`
+
+Queue: `docs/plan-post-s408.md` §2 session H (#378 → #377 → #376 → #341).
+
+**The `our` tail, found on the way into #378.**  `#378`'s bar is op/sub.t back
+to ≥ 51/14, and the row that pays for it is `[perl #122845]`:
+
+```perl
+sub { local $depth = $depth + 1;
+      our $ok++, return if $depth == 2;
+      CORE::__SUB__->(); }->();
+```
+
+With `__SUB__` implemented that recursion becomes REAL — and it never
+terminated, because **an `our` statement's TAIL was being lost**.  Two
+mechanisms, one in each pipeline, both silent:
+
+* v2 (`Parser2::_lower_our_decl`) handed everything after `our` to the
+  expression machinery WITH the statement modifier still attached, so PExpr
+  answered "Fell through. Missing case: []" and the whole statement became a
+  `;; PARSE ERROR` drop.  `our $z = 5 if 1;` left `$z` undef; the no-tail
+  spelling `our $z if C;` died outright on the shape check.
+* v1 (`Parser::_process_our_declaration`) scanned for an `=` and, finding
+  none, emitted the declaration and DISCARDED the rest.  Measured inside an
+  anon sub containing a `local` — which routes its whole body to v1 — five
+  shapes were wrong at once: `our $c++` left `$c` at 0, `our $V ||= 7` left
+  `$V` undef (Exporter's idiom), `our $d += 4` left `$d` at 3, `our $e = 1 if
+  1` left `$e` undef, `our @a = (1,2) if 1` wrote a PARSE ERROR into the
+  assignment.
+
+Both are the same rule, and v2 already states it: perl declares the package
+cell unconditionally (a compile-time act) and runs `NAMES <tail>` as an
+ordinary statement.  v2 now splits the modifier with `_split_modifier` and
+re-applies it with `_apply_modifier` (the trio the `my` path uses), accepting
+the split only PAST the declared names so `our sub if() {…}` still reaches the
+shape check.  v1 routes `NAMES <tail>` — modifier and all — through
+`_process_expression_statement`, which owns all six modifiers; that is the
+same move the in-sub `my` branch two hundred lines above already makes.  The
+`our` declaration emitter, which had been written out three times, is now one
+`_emit_our_declarations`.  Nine shapes probed against perl, all identical;
+guard rows in `Pl/t/our-local-01.t` exercise BOTH pipelines (a named sub for
+v2, an anon sub with a `local` for v1).  The four LOOP modifiers still drop
+(announced, not silent) — **task #380**, corpus population measured at zero.
+
+**#378 — anon `__SUB__` implemented.**  At the shared PPI entry that already
+rewrites a named sub's `__SUB__` to `(\&name)`, an anonymous sub that mentions
+the token (either spelling — `CORE::__SUB__` is one Word and was never matched
+before) becomes a source-level self-reference:
+
+```
+sub { … __SUB__ … }  →  do { my $__SUB__N; $__SUB__N = sub { … $__SUB__N … }; $__SUB__N }
+```
+
+`my $w; $w = sub { $w->(…) }` is a shape PCL already compiles, so this rides an
+existing path with no new mechanism and costs nothing where the token is
+absent.  Blocks are wrapped INNERMOST FIRST, because wrapping serializes the
+run.  No parentheses around the `do`: `print sub {…}->()` would become
+`print (…)->()`, which perl reads as a call.
+
+Two things the implementation turned on:
+
+* **PPI overloads stringification to an element's CONTENT**, so the obvious
+  `%words_of{$block}` keyed by object is keyed by TEXT — it collides between
+  two identical anon subs and goes STALE the moment a nested one is rewritten.
+  The outer sub's own `__SUB__` then silently kept the runtime stub.  Keyed by
+  `refaddr` now.
+* The pass had to move to LAST in `_ppi_parse`'s repair chain: an anon sub's
+  signature is a single `Token::Prototype` until `_desugar_anon_signatures`
+  turns it into statements, so a `__SUB__` in a parameter default is not a Word
+  before then.  A named sub's signature is already a Structure, which is why
+  the order never mattered until now.
+
+17 shapes probed against perl 5.40.3, all identical: factorial, fib through two
+levels of nesting, `__SUB__ == $f`, `sub {…}->(3)`, `CORE::__SUB__`, nested
+anon subs each with their own, hash value / return value / map block / grep
+block, two textually identical anon subs, an anon sub inside a `my sub`, an
+anon signature default, and the named-sub inverses.  What still dies is
+narrower and now says so: `__SUB__` in no sub at all (perl: undef) and inside a
+string eval (perl: the sub containing the eval — the #373 capture seam).
+`perl-tests/sub.t`'s `ok(1, 'SKIP: CORE::__SUB__ …')` was replaced by the real
+`[perl #122845]` test, which passes.
+
+**#377 — a lexical sub reading the enclosing sub's PARAMETER.**  The shape a
+`my sub` user writes first, and all three ways to take a parameter went
+different ways: `my $x = shift` CRASHED (unbound `$x__file__0`), `my ($x) = @_`
+killed the whole FILE with the capture refusal, `my $x = 70` worked.  Two
+causes.  The promotion renames the captured lexical in both subs, but the
+declaration was lowered by the raw-params optimisation, which binds the
+promoted name LEXICALLY and emits no cell — so a promoted name may take
+neither param binding (the other binds a `let`) and the declaration goes back
+into the body, where the `_file_lex_renamed` branch emits the cell.  And
+`_scan_lex_facts` only recorded a LIST declaration as a promotion candidate
+when it declared TWO OR MORE names, so a one-element `my ($x) = @_` was
+invisible to the promoter — not `_single_scalar_decl`'s shape, not the
+container branch's sigil, one short of the list branch's bound, while
+`my ($x, $y) = @_` two lines away promoted fine.  The N=1 case is the N=k case
+(#267).  Seven shapes probed vs perl, all identical.  The plain named-sub twin
+now RUNS at 6 8 where perl says 6 6 — the per-call member of the registered
+"will not stay shared" family, which is what a crash turned into.
+
+**#376 — the lexical-sub rename's three uncovered spellings**, all three fixed
+and all three probed: a bodiless `my sub c;` now OPENS a region (perlsub's own
+mutual-recursion idiom, which used to leave both halves package subs and
+clobber across scopes); a plain `sub NAME {…}` inside a region is RENAMED,
+because in perl it DEFINES the lexical and creates no package sub; and a use
+or definition under a different `package NAME;` spells the QUALIFIED renamed
+name, through the resolver the variable-rename family already uses.  The third
+turned out to be load-bearing for the second: with only the first two, a
+definition inside `{ package O; … }` landed in O while the call in main looked
+in main.  Nine must-not-fire shapes probed identical.
+
+**#341 measured — and the answer is not a lexsub bug (task #381).**
+`t/op/lexsub.t` alone: perl 156/0, PCL 7/10 and then the file DIES at row 18,
+`is((h F), 4242, …)`.  `h F` is the INDIRECT-OBJECT method call, `F->h` in
+perl; PCL compiles it to `(pl-h (pl-F))` and dies on the undefined `pl-F`.
+139 of perl's 156 rows are behind that one statement.  perl's own rule is the
+discriminator PCL already has (#266's callable classifier): a bareword after a
+callable word is an indirect object only when it is not itself a declared sub
+— probed both ways, and PCL AGREES with perl in the `sub F` direction.  A
+Track A refusal (#371) would not recover the rows, because a refusal dies too;
+#381 has the lowering shape, the interim counted-drop route the s409 census
+ruling allows, and the sequencing (with #372/#343).  #373 therefore stays a
+filler: the rows are behind #381, not behind the string-eval seam.
+
+**Session I, item 1 — #342 piece 2** (heredoc inside `${\ … }` inside an
+`s///e` replacement).  The replacement text PCL is handed already CONTAINS the
+body, because it sits inside the `s|…|…|e` delimiters; PPI lexes `"${\<<END}"`
+as one Quote::Double token, never sees the opener, and leaves the body and
+terminator as loose code the expression parser refuses.  A heredoc pre-pass on
+the replacement text fixes it, run ONLY on a replacement that already failed —
+so no working shape changes emission.  The body is HOISTED into a `my`
+variable rather than spliced in where it stood: the opener is inside the
+`"…"`, so a literal there ends the string at its own first quote (measured —
+the emission came out `"${\"ok …"}"` and the CL reader choked).  **A
+regression this almost shipped, caught by corpus-diff**: splitting the function
+into a try-half and a retry dropped the `my $result = 'nil'` initialisation,
+and `nil` is the ANSWER when a replacement parses to no statements at all —
+`s/o//eg` in closure.t reaches that code, and closure.t stopped transpiling
+(1494 lines → 0).  The other four spellings in base/lex.t put the body AFTER
+the statement, where it belongs to the enclosing DOCUMENT → **task #382**;
+base/lex.t still does not transpile, on `s/${s|||;\""}not //;` two lines later.
+
+**Ended mid-way through #281 item 1** (the `p-list-ctx` / `p-scalar-ctx` /
+`p-void-ctx` / `p-caller-ctx` macros).  The work in progress was REVERTED
+rather than left half-applied; what it had established is in the review
+request §6: the four macros and their exports, the 31 single-binding emission
+sites a mechanical prefix rewrite covers (the two multi-binding lets —
+`*package*` in the sort seam, `*p-in-list-assign-rhs*` in the list-assign RHS
+— must stay plain lets), the six form-shaped sites in Parser2/ExprToCL2 that
+need a `_ctx_macro` dispatch, and **a correction to item 2**: the s407 reading
+"sort.t emits `(defvar $a …)` ten times" counts TEXT, not SYMBOLS — those ten
+are in ten different `in-package` sections, i.e. ten different symbols.  The
+true duplicate count for that file is 11, and they are a different shape (a
+bare defvar in a section plus the QUALIFIED spelling of the same symbol).
+
+---
+
 ## Session 409 (2026-08-16, Fable) — the s408 review: approved as shipped, two lexsub-family bugs filed, the plan from here
 
 `docs/fable-answers-s408.md` rules the seven s408 commits: **all APPROVED as
