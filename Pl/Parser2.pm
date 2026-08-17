@@ -4069,11 +4069,14 @@ sub _rename_lexical_subs {
     next if $type ne 'my' && $type ne 'state';
     my $name = $st->name;
     next if !defined $name || $name !~ /^\w+\z/;      # never qualified
-    # `my sub b;` declares the name but defines nothing, and the `sub b {…}`
-    # that fills it in later is a package-sub token shape.  Leave the pair
-    # alone rather than rename half of it (in the corpus it occurs only
-    # inside eval strings — perl-tests/sub.t 427/436).
-    next if !$st->block;
+    # `my sub b;` declares the name but defines nothing — it OPENS a region
+    # like a bodied declaration, and the `sub b {…}` that fills it in later is
+    # renamed by _lexsub_renamable's package-sub arm, because that is what
+    # perl does with it.  This is perlsub's own idiom for mutually recursive
+    # lexical subs, and leaving the pair alone left BOTH halves package subs,
+    # so two scopes clobbered each other exactly as #337's core bug did
+    # (probed: `{ my sub c; sub c {"c1"} print c() } { my sub c; sub c {"c2"}
+    # print c() }` — perl `c1 c2`, PCL `c2 c2`).  Task #376(a).
     my $scope = _lexsub_scope($st) or next;
     push @decls, { st => $st, name => $name, scope => $scope };
   }
@@ -4121,7 +4124,7 @@ sub _rename_lexical_subs {
       next if !$by_name{$name};
       my $win = $covering->($name, $t, $idx{ refaddr $t }) or next;
       next if !_lexsub_renamable($t, $win->{st});
-      $t->set_content($sigil . $win->{new});
+      $t->set_content($sigil . _lexsub_spelling($win, $t));
       next;
     }
     next if !_interp_token_candidate($t);
@@ -4129,7 +4132,7 @@ sub _rename_lexical_subs {
     my %ren;
     for my $nm (keys %by_name) {
       my $win = $covering->($nm, $t, $i) or next;
-      $ren{$nm} = $win->{new};
+      $ren{$nm} = _lexsub_spelling($win, $t);
     }
     next if !%ren;
     _fix_interp_token($t, sub { _fix_lexsub_interp($_[0], \%ren) });
@@ -4181,6 +4184,22 @@ sub _rename_lexsub_in_code {
     $hit = 1;
   }
   return $hit ? $mini->serialize : undef;
+}
+
+# The renamed name as THIS token has to spell it.  A lexical sub is scoped to
+# the file or block, never to a package — but PCL resolves a bare name in the
+# package in effect at the token, so a use (or the definition) written under a
+# different `package NAME;` must name the declaring package explicitly, or it
+# reaches a sub that does not exist there (probed: `my sub helper {"H"};
+# package Other; sub go { helper() }` → perl H, PCL "the function
+# Other::pl-helper__lexsub__N is undefined").  The resolver is the one the
+# variable-rename family already uses — rule 11: no second package walk.
+# Task #376(c).
+sub _lexsub_spelling {
+  my ($d, $t) = @_;
+  my $decl_pkg = _pkg_in_effect_at($d->{st});
+  return $d->{new} if $decl_pkg eq _pkg_in_effect_at($t);
+  return $decl_pkg . '::' . $d->{new};
 }
 
 # The lexical scope a declaration lives in: the nearest enclosing block, or
@@ -4235,7 +4254,20 @@ sub _lexsub_renamable {
   my $pv = _prev_sig_token($t);
   if ($pv && $pv->isa('PPI::Token::Word')
       && $pv->content =~ /^(?:sub|package|require)\z/) {
-    return ($decl && $par && refaddr($par) == refaddr($decl)) ? 1 : 0;
+    return 1 if $decl && $par && refaddr($par) == refaddr($decl);
+    return 0 if $pv->content ne 'sub';      # `package NAME` / `require NAME`
+    # A plain `sub NAME …` written INSIDE the region DEFINES THE LEXICAL in
+    # perl — that is exactly what makes the forward-declaration idiom work —
+    # and no package sub of that name comes into existence.  Probed vs perl
+    # 5.40.3: `my sub f {"L"} { package O; sub f {"M"} } print f()` prints M,
+    # and `O->can("f")` is false; the same in one package prints M with no
+    # main::g.  Task #376(b).  A `my`/`state sub` statement is not this
+    # declaration's to rename — its own declaration covers it (the covering
+    # rule picks the innermost), and _rename_lexical_subs never reaches here
+    # for one, since that token IS its decl.
+    return $par && $par->isa('PPI::Statement::Sub')
+        && !$par->isa('PPI::Statement::Scheduled')
+        && (($par->type // '') eq '') ? 1 : 0;
   }
   return 1;
 }

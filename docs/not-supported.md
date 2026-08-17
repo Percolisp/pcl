@@ -2155,4 +2155,10 @@ if` spelling emits: a zero-argument `(p-if)`, whose macroexpansion error is
 prototypes and signatures on a lexical sub; a lexical sub closing over a `my`
 variable; `\&NAME`, `&NAME`, `defined &NAME`, `goto &NAME` and `sort NAME LIST`
 inside the region; and `__PACKAGE__->can('NAME')`, which is now correctly FALSE
-(before the rename it lied).
+(before the rename it lied).  Since s410 (task #376) that list also includes
+the three spellings the rename used to miss: the forward-declaration idiom
+`my sub c; sub c {…}` (perlsub's own way to write mutually recursive lexical
+subs), a plain `sub NAME {…}` written inside the region — which DEFINES the
+lexical in perl, and creates no package sub — and a use from code under
+another `package NAME;`, since a lexical is scoped to the file, not to a
+package.

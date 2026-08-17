@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 31;
 
 my $PREAMBLE = "use feature 'lexical_subs';\nno warnings 'experimental::lexical_subs';\n";
 
@@ -266,3 +266,63 @@ PERL
     unlike($cl, qr/\$x__file__/,
            '#377: …and is not promoted to a cell');
 }
+
+# ── #376: the three spellings the rename did not cover ───────────────────────
+#
+# (a) the FORWARD-DECLARATION idiom, perlsub's own way to write mutually
+# recursive lexical subs.  The pass used to skip a bodiless `my sub c;`, so
+# both halves stayed package subs and two scopes clobbered each other —
+# exactly the bug #337 exists to fix, in the spelling it skipped (perl `c1 c2`,
+# PCL `c2 c2`).
+test_lexsub('#376a: `my sub c; sub c {…}` is a LEXICAL in each scope', <<'PERL');
+{ my sub c; sub c { "c1" } print c(), " " }
+{ my sub c; sub c { "c2" } print c(), "\n" }
+PERL
+
+test_lexsub('#376a: perlsub mutual recursion through two forward declarations', <<'PERL');
+my sub even; my sub odd;
+sub even { my $n = shift; $n == 0 ? 1 : odd($n-1) }
+sub odd  { my $n = shift; $n == 0 ? 0 : even($n-1) }
+print even(10), even(7), "\n";
+PERL
+
+# (b) a plain `sub NAME {…}` inside the region DEFINES the lexical in perl —
+# which is what makes (a) work — and no package sub of that name comes into
+# existence.  Both packages, because the region does not stop at a `package`.
+test_lexsub('#376b: a package `sub NAME` in the region defines the LEXICAL', <<'PERL');
+my sub f { "L" }
+{ package O; sub f { "M" } }
+print f(), " ", (O->can("f") ? "O::f exists" : "no O::f"), "\n";
+my sub g { "L" }
+sub g { "M" }
+print g(), " ", (main->can("g") ? "main::g exists" : "no main::g"), "\n";
+PERL
+
+# (c) a lexical is scoped to the FILE, not to a package, so a use written
+# under another `package NAME;` must still reach it.
+test_lexsub('#376c: a lexical sub is file-scoped, not package-scoped', <<'PERL');
+my sub helper { "H" }
+package Other2;
+sub go { helper() }
+package main;
+print Other2::go(), "\n";
+PERL
+
+# The must-NOT-fire list for the same three edits.
+test_lexsub('#376: a package sub outside every region keeps its identity', <<'PERL');
+sub before { "P" }
+{ my sub before { "L" } print before(), " " }
+print before(), "\n";
+PERL
+
+test_lexsub('#376: a bodiless package `sub NAME;` in the region is harmless', <<'PERL');
+my sub k { "L" }
+sub k;
+print k(), "\n";
+PERL
+
+test_lexsub('#376: `package NAME` and a method spelled like the lexical', <<'PERL');
+package NameLike; sub go { "G" } package main; print NameLike::go(), " ";
+{ package M2; sub new { bless {}, shift } sub f { "meth" } }
+{ my sub f { "lex" } my $o = M2->new; print $o->f(), " ", f(), "\n"; }
+PERL

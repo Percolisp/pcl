@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 73 files, 380 drops — 9 perl-tests files (12
-# drops), 64 companion files (368), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 73 files, 378 drops — 9 perl-tests files (12
+# drops), 64 companion files (366), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops.  A count that RISES is not automatically a regression:
 # two files that used to die at transpile now emit CL, so their drops became
 # countable for the first time — see the s405 edits — and the s408 edit trades
@@ -87,6 +87,15 @@
 #         `Fell through. Missing case: [` family.  Re-measured directly
 #         (`pl2cl FILE | grep -c ';; PARSE ERROR'`) and by the runner's DROPS
 #         column, which reported it as `4 -> 3 fixed`.
+#   s410b t/op/lexsub.t 14 -> 12: #376 covers the three lexical-sub spellings
+#         the rename used to miss, and two of this file's drops were the
+#         forward-declaration idiom (`my sub c; sub c {…}`) — with the region
+#         open and the fill-in renamed, those statements lower.  The 12 left
+#         are the same two families as before: 4 `statement keyword \`if\` used
+#         as a function` (#374's half of `my $x = if if if`) and 8 term-grammar
+#         declines.  The file's verdict is unchanged (DIFF 7/10) — its next
+#         blocker is the INDIRECT-OBJECT call `h F` at line 91, which holds 139
+#         of perl's 156 rows: task #381.
 # Causes, aggregated over files (re-counted from the rows below, s405):
 #   49  Bug. Fell through. Missing case: [        <- the dominant one
 #   20  Handle single node of unknown type
@@ -145,7 +154,7 @@ t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	14	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
+t/op/lexsub.t	12	Bug. Fell through. Missing case: [ x5 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/override.t	2	Handle single node of unknown type. Dump: x2
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
