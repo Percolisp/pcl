@@ -58,6 +58,25 @@ not-supported.md → only then probe.*
   SAME output under every setting.  **The bar's reading: under `none` every
   RUN row passes; transpile-SHAPE rows that assert a fast shape differ by
   definition** (list in the plan §2 Phase R).  → plan §2 Phase R; #383.
+- **Phase A1–A3 DONE s411 (Fable, same session): ONE expression compiler.**
+  `Pl/ExprToCL2.pm` DELETED; its two rules are Kind-A gates in ExprToCL
+  (`insensitive-call` at the user-sub bind, `elem-setf` at the `=` element
+  store — with a PURE-key predicate: the native rule let a call key through
+  and CL setf evaluates the key before the value, perl the value first);
+  `_lower_expr` parses ONCE (v1's `_parse_expression_form` carries
+  `sub_info`/`lexicals` to ExprToCL); the discarded parse, snapshot/restore,
+  string ctx encoding, `_expr_via_fallback` and the blame census are gone.
+  **Verified with `tools/emission-normalize.pl` (NEW; the s410 7.7 (a)
+  normalizer: reader → rewrite the expected shapes → flat print; `--corpus
+  REF`)**: identical to HEAD after normalization except FOUR explained files
+  — method.t (the native generator resolved `our $AUTOLOAD` inside a package
+  BLOCK in MAIN: a package-resolution BUG the fold FIXES), ref.t/sort.t
+  (calls spelled package-QUALIFIED now, v1's robust spelling), sub.t (three
+  declarations no longer emitted twice by the discarded parse).  Sweep
+  TOTAL 18513 (+0) clean; gen v2-156; corpus compile 68.4 → 55.1 s.  **A
+  shape row that pinned a native SPELLING is updated with its reason, not
+  the emission** (parser-01 7, parser2-02 46).  A4 (one DIALECT: v1's TEXT
+  `->generate(` sites → forms; delete the text twins) is the next item.
 - **`PCL_OPT=none` found a default-configuration silent-wrong on its first
   run (as predicted): `%p-flatten-list` snapshotted a MAGIC CELL / TIE PROXY
   instead of its value**, so `my ($x) = @_; $x = 0` (when the raw-params

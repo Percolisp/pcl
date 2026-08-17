@@ -108,9 +108,41 @@ row in transpile-test-10.t, ir-spec §@_ aliasing; a default-configuration
 silent-wrong (probed: `sub r { my ($x) = @_; my $f = sub { $x }; $x = 0 }`).
 Compile time unchanged (a hash lookup per gate).
 
-### Phase A — one expression compiler (1–2 sessions, EMISSION)
+### Phase A — one expression compiler (1–2 sessions, EMISSION) — **A1–A3 DONE s411; A4 open**
 
 E5.4 as measured, not as estimated.
+
+**Done s411 (Fable, same session):** A1 the two rules in ExprToCL
+(`sub_info` + `lexicals` attributes; `insensitive-call` at the user-sub bind
+site, `elem-setf` at the `=` element-store branch with a PURE-key predicate
+(`_elem_setf_ok` / `_pure_form`: atom or arithmetic/string/comparison tree
+over atoms) — the native rule had let a CALL key through, where CL setf
+evaluates the key BEFORE the value while perl and p-setf evaluate the value
+first; both names in `Pl::Passes`); A2 `_lower_expr` = one parse (v1's
+`_parse_expression_form` now takes `sub_info`/`lexicals` and hands them to
+ExprToCL), the native attempt / snapshot-restore / string ctx /
+`_expr_via_fallback` deleted; A3 `Pl/ExprToCL2.pm` DELETED, the seam census
+retargeted (`expr=`/`seam-stmt=` totals, `stmt` + `head` histograms;
+`tools/v2-census.pl` prints the E5.3 statement worklist and the expression
+heads).  `_auto_defined_cond` (v1 text) and `_auto_defined_raw` (Parser2
+structural) learned the `setf` head — the ONE regression the normalizer
+caught (a `while ($h{k} = <FH>)` lost its implicit `defined`).
+**The bar, as run:** `tools/emission-normalize.pl` (NEW this session, the
+s410 7.7 (a) tool: reader → rewrite the expected shapes → flat print;
+`--corpus REF` compares the working tree with a ref over perl-tests) —
+after normalization the corpus is identical to HEAD except FOUR explained
+files: method.t (`return if our $AUTOLOAD eq 'DESTROY'` inside
+`package foo120694 {…}`: the native generator resolved `$AUTOLOAD` in MAIN —
+a package-resolution BUG the fold fixes; a phantom `(p-defcell $AUTOLOAD)`
+goes with it), ref.t + sort.t (calls now spelled package-QUALIFIED,
+`Foo::pl-f`, v1's robust spelling; the bare spelling worked only because it
+sat inside the section's `in-package`), sub.t (three declaration forms no
+longer emitted TWICE — the discarded parse's side effects).  Gate green
+(two shape rows that pinned the native spellings updated with reasons:
+parser-01 7, parser2-02 46); full sweep TOTAL 18513 (+0), 0 new / 0 fixed /
+0 LOST, drops 12; gen v2-155 → **v2-156**, three artifacts regenerated;
+whole-corpus compile time **55.1 s** (60.6 s after Phase R, 68.4 s at
+session start).  `Pl/t/passes-01.t` +5 rows for the two names.
 
 - **A1** Port the two rules into `Pl/ExprToCL.pm`: `insensitive-call`
   (needs `sub_info` on ExprToCL — Parser2 constructs the generator itself

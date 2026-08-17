@@ -9,10 +9,13 @@
 # Runs pl2cl over a corpus and aggregates, per file:
 #   - which pipeline produced the output (the T0.1 marker line),
 #   - the whole-file gate reason when v2 fell back (PCL_V2_VERBOSE stderr),
-#   - the seam histograms when v2 succeeded (PCL_V2_SEAM_CENSUS stderr):
-#       stmt   — statements lowered via _fallback_stmt (v1 statement seam)
-#       root   — root construct of expressions that fell back
-#       blame  — porting-frontier constructs (the T-C worklist, ranked)
+#   - the seam histograms (PCL_V2_SEAM_CENSUS stderr; retargeted s411/Phase A
+#     when the second expression generator was deleted):
+#       stmt   — statements lowered via _fallback_stmt (v1 statement seam —
+#                the E5.3 port worklist, docs/plan-one-compiler-s411.md §4.1)
+#       head   — first-token shape of every expression the ONE generator lowers
+#     The raw-residue census (which SUBTREES still print as v1 text) is
+#     PCL_E2_RAW_CENSUS, a separate knob.
 #
 # Usage:
 #   perl tools/v2-census.pl [--jobs N] [FILES...]        # default: perl-tests/*.t
@@ -36,7 +39,7 @@ die "no input files\n" unless @files;
 
 # ---------------------------------------------------------------- run corpus
 my (%gate, %pipeline, %file_seam, %tot);
-my (%h_stmt, %h_root, %h_blame);
+my (%h_stmt, %h_head);
 
 my @queue = @files;
 my %kids;   # pid → file
@@ -94,19 +97,18 @@ for my $f (@files) {
     next;
   }
   # v2-native file: fold its seam histograms into the global ones.
-  my ($ne, $se, $ss) = (0, 0, 0);
+  my ($ex, $ss) = (0, 0);
   for my $line (split /\n/, $r->{stderr}) {
     my @c = split /\t/, $line;
     next unless @c >= 3 && $c[0] eq 'pcl-seam';
     if ($c[1] eq 'totals') {
-      ($ne) = $c[3] =~ /(\d+)/; ($se) = $c[4] =~ /(\d+)/; ($ss) = $c[5] =~ /(\d+)/;
+      ($ex) = $c[3] =~ /(\d+)/; ($ss) = $c[4] =~ /(\d+)/;
     }
-    elsif ($c[1] eq 'stmt')  { $h_stmt{$c[2]}  += $c[3] }
-    elsif ($c[1] eq 'root')  { $h_root{$c[2]}  += $c[3] }
-    elsif ($c[1] eq 'blame') { $h_blame{$c[2]} += $c[3] }
+    elsif ($c[1] eq 'stmt') { $h_stmt{$c[2]} += $c[3] }
+    elsif ($c[1] eq 'head') { $h_head{$c[2]} += $c[3] }
   }
-  $file_seam{$short} = [$ne, $se, $ss];
-  $tot{native} += $ne; $tot{seam} += $se; $tot{stmt} += $ss;
+  $file_seam{$short} = [$ex, $ss];
+  $tot{expr} += $ex; $tot{stmt} += $ss;
 }
 
 # --------------------------------------------------------------------- report
@@ -126,38 +128,28 @@ for my $g (sort { @{$gate{$b}} <=> @{$gate{$a}} || $a cmp $b } keys %gate) {
   say "| " . scalar(@fl) . " | $g | @fl |";
 }
 say "";
-say "## Expression seam (v2-native files only)";
+say "## Expressions and the statement seam";
 say "";
-my $pct = $tot{native} + $tot{seam}
-        ? sprintf('%.1f', 100 * $tot{seam} / ($tot{native} + $tot{seam})) : 0;
-say "Totals: **$tot{native} native**, **$tot{seam} seam** expressions "
-    . "($pct% of expressions fall back), $tot{stmt} seam statements.";
+say "Totals: **$tot{expr} expressions** through the one generator, **$tot{stmt} seam statements** (v1's statement layer, whole).";
 say "";
-say "### Blame frontier (the ranked T-C port worklist)";
-say "";
-say "| n | construct |";
-say "|---|-----------|";
-say "| $h_blame{$_} | `$_` |"
-  for sort { $h_blame{$b} <=> $h_blame{$a} || $a cmp $b } keys %h_blame;
-say "";
-say "### Fallen-back expression roots";
-say "";
-say "| n | root |";
-say "|---|------|";
-say "| $h_root{$_} | `$_` |"
-  for sort { $h_root{$b} <=> $h_root{$a} || $a cmp $b } keys %h_root;
-say "";
-say "### Statement seam";
+say "### Statement seam (the E5.3 port worklist)";
 say "";
 say "| n | statement kind |";
 say "|---|----------------|";
 say "| $h_stmt{$_} | `$_` |"
   for sort { $h_stmt{$b} <=> $h_stmt{$a} || $a cmp $b } keys %h_stmt;
 say "";
-say "### Per-file seam load (worst 25 by seam-expr)";
+say "### Expression heads (what the corpus is made of)";
 say "";
-say "| file | native | seam-expr | seam-stmt |";
-say "|------|--------|-----------|-----------|";
+say "| n | first token |";
+say "|---|-------------|";
+say "| $h_head{$_} | `$_` |"
+  for (sort { $h_head{$b} <=> $h_head{$a} || $a cmp $b } keys %h_head)[0 .. 39];
+say "";
+say "### Per-file seam load (worst 25 by seam statements)";
+say "";
+say "| file | expressions | seam-stmt |";
+say "|------|-------------|-----------|";
 my @worst = sort { $file_seam{$b}[1] <=> $file_seam{$a}[1] } keys %file_seam;
-say "| $_ | $file_seam{$_}[0] | $file_seam{$_}[1] | $file_seam{$_}[2] |"
+say "| $_ | $file_seam{$_}[0] | $file_seam{$_}[1] |"
   for @worst[0 .. ($#worst > 24 ? 24 : $#worst)];

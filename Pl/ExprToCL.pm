@@ -15,6 +15,7 @@ use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm ();
 use Pl::InterpScan ();
+use Pl::Passes ();
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
@@ -53,6 +54,21 @@ has indent_str => (
 has lvalue_context => (
   is       => 'rw',
   default  => 0,
+);
+
+# The two per-sub / per-scope FACTS the Kind-A rules below consume (Phase A of
+# docs/plan-one-compiler-s411.md — folded here from ExprToCL2, the deleted
+# second generator).  Both default EMPTY: a caller that has no facts (v1's
+# statement layer, the re-entrant string/regex compiles) simply never
+# licenses the fast shapes.  Parser2::_lower_expr passes its _cur_sub_info
+# and _let_bound_vars.
+has sub_info => (          # name → { cl_name, insensitive, … } (Parser2 sub facts)
+  is      => 'ro',
+  default => sub { {} },
+);
+has lexicals => (          # sigil-name → 1 for every let-bound lexical in scope
+  is      => 'ro',
+  default => sub { {} },
 );
 
 
@@ -1710,6 +1726,16 @@ sub gen_binary_op_form {
     } elsif ($left_flat =~ /^\(p-(?:gethash|aref|aslice|hslice) /) {
       # Single-element / slice store: $h{k}=… / $a[i]=… (MUST precede the sigil
       # regexes: a package-qualified element form contains "::%"/"::@").
+      # Kind-A `elem-setf` (Pl::Passes; ExprToCL2's W11 element-write rule,
+      # folded here in Phase A): a plain element of a LET-BOUND lexical
+      # container writes through CL's setf directly — p-setf's arm adds only
+      # a `boundp` auto-declare, which a lexical never needs and which
+      # manufactures a phantom GLOBAL of the same name.  Conditions: an
+      # unqualified `%name`/`@name` in `lexicals`, not a state-renamed
+      # container, and a key/index form free of side effects (setf
+      # evaluates the key BEFORE the value; perl and p-setf evaluate the
+      # value first — with a pure key the order cannot be observed).
+      return ['setf', $left, $right] if $self->_elem_setf_ok($left);
       return ['p-setf', $left, $right];
     } elsif ($left_flat =~ /(?:^|::)@/) {
       return ['p-array-=', $left, $right];
@@ -2675,6 +2701,15 @@ sub gen_funcall_form {
 
   # User sub calls: always bind *wantarray*; built-ins only in list context.
   if (!exists $RUNTIME_NAMES{$func_name}) {
+    # Kind-A `insensitive-call` (Pl::Passes): a KNOWN user sub whose body
+    # never observes its context — no `wantarray`, every `return` scalar-
+    # rooted (Parser2::_sub_ctx_insensitive, the fact rides sub_info) — is
+    # called WITHOUT the *wantarray* bind: the callee cannot tell, and the
+    # bind is a special-variable rebinding per call.  ExprToCL2's native
+    # funcall rule, folded here (Phase A); the general form is the bind.
+    my $info = $self->sub_info->{$func_name};
+    return $call
+      if $info && $info->{insensitive} && Pl::Passes::enabled('insensitive-call');
     return $self->_ctx_wrap_form($call, $ctx);
   }
   return $ctx == LIST_CTX
@@ -2692,6 +2727,36 @@ sub _wrap_wantarray_ctx_form {
   return ['let',
           ['list', ['list', '*wantarray*', $ctx == LIST_CTX ? 't' : 'nil']],
           $call];
+}
+
+# elem-setf licence (see the `=` dispatch): LEFT is a lowered element place
+# whose container is a let-bound lexical and whose key/index is PURE — an
+# atom (literal, symbol) or a tree of the arithmetic/string/comparison ops
+# over atoms.  Anything with a call, a deref or an assignment in it is not.
+my %PURE_HEAD = map { $_ => 1 }
+  qw(p-+ p-- p-* p-/ p-% p-** p-. p-x p-neg p-! p-not
+     p-== p-!= p-< p-<= p-> p->= p-<=>
+     p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge p-str-cmp
+     p-and p-or p-&& p-|| p-// p-scalar);
+sub _pure_form {
+  my ($f) = @_;
+  return 1 unless ref $f;                                   # atom
+  return 0 unless ref $f eq 'ARRAY' && @$f && !ref $f->[0];
+  return 0 unless $PURE_HEAD{ $f->[0] };
+  _pure_form($_) or return 0 for @{$f}[1 .. $#$f];
+  return 1;
+}
+sub _elem_setf_ok {
+  my ($self, $left) = @_;
+  return 0 unless Pl::Passes::enabled('elem-setf');
+  return 0 unless ref $left eq 'ARRAY' && @$left == 3 && !ref $left->[0]
+    && ($left->[0] eq 'p-gethash' || $left->[0] eq 'p-aref');
+  my $container = $left->[1];
+  return 0 if ref $container || $container !~ /^[%@]\w+$/;
+  return 0 unless $self->lexicals->{$container};
+  return 0 if $self->environment
+    && exists +($self->environment->state_var_renames // {})->{$container};
+  return _pure_form($left->[2]);
 }
 
 sub _ctx_wrap_form {

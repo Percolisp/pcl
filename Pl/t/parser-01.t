@@ -71,9 +71,11 @@ END
   my $result = Pl::Parser2->parse_code($code);
 
   # Sub body should appear in MyClass section, before the runtime call.
-  # (v1 qualified the call MyClass::pl-do_setup; v2 emits the unqualified
-  # (pl-do_setup) — it resolves inside the :MyClass section, same target.)
-  like($result, qr/\(in-package :MyClass\).*\(p-sub pl-do_setup\b.*\(pl-do_setup\)/s,
+  # (The call is spelled package-qualified, MyClass::pl-do_setup — the one
+  # generator's spelling since s411 Phase A; the deleted native generator
+  # emitted the bare (pl-do_setup), which resolved to the same target only
+  # because it sat inside the :MyClass section.)
+  like($result, qr/\(in-package :MyClass\).*\(p-sub pl-do_setup\b.*\((?:MyClass::)?pl-do_setup\)/s,
        'Sub body appears in MyClass section before call');
   like($result, qr/\(p-sub pl-do_setup\b/,
        'p-sub for package sub');

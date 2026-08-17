@@ -33,7 +33,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
-plan tests => 22;
+plan tests => 27;
 
 # One program that exercises all four Kind-A transforms: a raw let slot
 # with a counting loop (raw-slot + foreach-range), an append-only string
@@ -105,6 +105,30 @@ like($no_buf,   qr/\(p-\.=-raw \$s "x"\)/,    '-str-buffer: the raw slot keeps a
 my $no_range = transpile_with('-foreach-range');
 like($no_range, qr/\(p-foreach \(\$i \(p-\.\. 1 10\)\) :my t \(p-incf-raw \$n \$i\)\)/,
      '-foreach-range: general loop over a materialized range, slot still raw');
+
+# Phase A names (folded from the deleted ExprToCL2): a call to a context-
+# INSENSITIVE user sub gets no *wantarray* bind; `$h{k} = V` on a let-bound
+# hash writes through CL setf.
+{
+    my ($afh, $a_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $afh <<'PERL';
+sub ins { my ($x) = @_; return $x + 1 }
+sub sens { return wantarray ? "L" : "S" }
+my %h = (k => 1); my @a = (1, 2);
+$h{k} = ins(2); $a[1] = 7; my $s = sens();
+print "$h{k} $a[1] $s\n";
+PERL
+    close $afh;
+    my $t = sub { my ($opt) = @_; local $ENV{PCL_OPT} = $opt if defined $opt; delete local $ENV{PCL_OPT} unless defined $opt; PCLCore::transpile(qq{$pl2cl $a_file}) };
+    my $d = $t->(undef);
+    like($d,   qr/\(setf \(p-gethash %h "k"\) \(pl-ins 2\)\)/, 'default: elem-setf + no bind around the insensitive call');
+    like($d,   qr/\(let \(\(\*wantarray\* nil\)\) \(pl-sens\)\)/,   'default: a context-SENSITIVE sub keeps its bind');
+    my $ni = $t->('-insensitive-call');
+    like($ni,  qr/\(setf \(p-gethash %h "k"\) \(let \(\(\*wantarray\* nil\)\) \(pl-ins 2\)\)\)/, '-insensitive-call: the bind is back, setf stays');
+    my $ne = $t->('-elem-setf');
+    like($ne,  qr/\(p-setf \(p-gethash %h "k"\) \(pl-ins 2\)\)/, '-elem-setf: p-setf is back, no bind stays');
+    like($ne,  qr/\(p-setf \(p-aref \@a 1\) 7\)/,           '-elem-setf: the array element too');
+}
 
 # --- 2. not a correctness switch: same output under every setting --------
 my $out_def  = run_with();

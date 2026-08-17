@@ -295,8 +295,13 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   my $o = eval { Pl::Parser2->parse_code(q{package X3; our $Z = 5; $Z * 2},
                                          eval_mode => 1, eval_pkg => 'main') };
   ok(defined $o, '#240 step 2: an `our` READ BACK collapses natively') or diag($@);
-  like($o // '', qr/p-eval-thunk \(list "\$Z"\)[\s\S]*\) :X3\)/,
-       '#240 step 2: the thunk carries the region package designator');
+  # (Since s411 Phase A the one generator resolves `$Z` to X3::$Z at compile
+  # time, so the free-name list is EMPTY here — the deleted native generator
+  # left the bare `$Z` for the thunk to resolve at run time.  The designator
+  # is still carried: it binds *package* around the body for the names that
+  # DO stay free — a symbolic reference, an eval-in-eval.)
+  like($o // '', qr/p-eval-thunk \(list ?\)[\s\S]*X3::\$Z[\s\S]*\) :X3\)/,
+       '#240 step 2: the thunk carries the region package designator (and $Z resolves in X3 at compile time)');
   # INVERSE guard: the region package must not leak into an eval that has NO
   # region — there *package* stays the caller's, which is what perl says.
   my $nr = Pl::Parser2->parse_code(q{my $qq; $qq + 1},

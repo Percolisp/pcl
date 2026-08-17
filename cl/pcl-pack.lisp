@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-155
+;;; pcl: pipeline=v2 gen=v2-156
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -513,9 +513,7 @@
                             (progn
                               (let (($inner (make-p-box nil)))
                                 (p-my-= $inner (p-substr $tmpl $grpbeg (p-- $grpend $grpbeg)))
-                                (p-incf $pos
-                                  (p-* (let ((*wantarray* nil)) (pl-_pack_template_size $inner))
-                                    $nrep))
+                                (p-incf $pos (p-* (pl-_pack_template_size $inner) $nrep))
                                 (p-next))))
                           (p-if (p-str-eq $ch "@")
                             (progn
@@ -1176,14 +1174,12 @@
                                                           (p-if $nb
                                                             (progn
                                                               (p-.= (p-cast-$ $result_ref)
-                                                                (let ((*wantarray* nil))
-                                                                  (pl-_pack_emit_int
-                                                                    $actual_count
-                                                                    $nb
-                                                                    $sig
-                                                                    (p-if $be
-                                                                      1
-                                                                      (vector (p-if $le 0 $dbe)))))))
+                                                                (pl-_pack_emit_int $actual_count
+                                                                  $nb
+                                                                  $sig
+                                                                  (p-if $be
+                                                                    1
+                                                                    (vector (p-if $le 0 $dbe))))))
                                                             (p-if
                                                               (p-|| (p-str-eq $ch "A")
                                                                 (p-str-eq $ch "a"))
@@ -1274,14 +1270,12 @@
                                                           (p-if $nb
                                                             (progn
                                                               (p-.= (p-cast-$ $result_ref)
-                                                                (let ((*wantarray* nil))
-                                                                  (pl-_pack_emit_int
-                                                                    $actual_count
-                                                                    $nb
-                                                                    $sig
-                                                                    (p-if $be
-                                                                      1
-                                                                      (vector (p-if $le 0 $dbe)))))))
+                                                                (pl-_pack_emit_int $actual_count
+                                                                  $nb
+                                                                  $sig
+                                                                  (p-if $be
+                                                                    1
+                                                                    (vector (p-if $le 0 $dbe))))))
                                                             (p-if
                                                               (p-|| (p-str-eq $ch "A")
                                                                 (p-str-eq $ch "a"))
@@ -1360,11 +1354,10 @@
                                                                       (p-post++
                                                                         (p-cast-$ $ai_ref))))
                                                                   (p-.= (p-cast-$ $result_ref)
-                                                                    (let ((*wantarray* nil))
-                                                                      (pl-_pack_emit_int $val
-                                                                        $dnb
-                                                                        $dsig
-                                                                        $dbe_eff))))))))))
+                                                                    (pl-_pack_emit_int $val
+                                                                      $dnb
+                                                                      $dsig
+                                                                      $dbe_eff)))))))))
                                                     (p-if (p-str-eq $dfmt "w")
                                                       (progn
                                                         (let (($remaining (make-p-box nil)))
@@ -1389,15 +1382,13 @@
                                                             (p-if $nb
                                                               (progn
                                                                 (p-.= (p-cast-$ $result_ref)
-                                                                  (let ((*wantarray* nil))
-                                                                    (pl-_pack_emit_int
-                                                                      $actual_count
-                                                                      $nb
-                                                                      $sig
-                                                                      (p-if $be
-                                                                        1
-                                                                        (vector
-                                                                          (p-if $le 0 $dbe)))))))
+                                                                  (pl-_pack_emit_int
+                                                                    $actual_count
+                                                                    $nb
+                                                                    $sig
+                                                                    (p-if $be
+                                                                      1
+                                                                      (vector (p-if $le 0 $dbe))))))
                                                               (p-if (p-str-eq $ch "w")
                                                                 (progn
                                                                   (let (($v (make-p-box nil)))
@@ -1674,12 +1665,11 @@
                                                     " in pack
 ")))
                                               (p-.= (p-cast-$ $result_ref)
-                                                (let ((*wantarray* nil))
-                                                  (pl-_pack_emit_int
-                                                    (let ((*wantarray* t)) (p-int $nv))
-                                                    $nb
-                                                    $sig
-                                                    $be2)))))))
+                                                (pl-_pack_emit_int
+                                                  (let ((*wantarray* t)) (p-int $nv))
+                                                  $nb
+                                                  $sig
+                                                  $be2))))))
                                       (p-next))))
                                 (p-if (p-str-eq $ch "f")
                                   (progn
@@ -1698,8 +1688,7 @@
                                                   0)
                                                 0))
                                             (p-.= (p-cast-$ $result_ref)
-                                              (let ((*wantarray* nil))
-                                                (pl-_pack_float32 $v $be2))))))
+                                              (pl-_pack_float32 $v $be2)))))
                                       (p-next))))
                                 (p-if (p-|| (p-str-eq $ch "d") (p-str-eq $ch "F"))
                                   (progn
@@ -1718,8 +1707,7 @@
                                                   0)
                                                 0))
                                             (p-.= (p-cast-$ $result_ref)
-                                              (let ((*wantarray* nil))
-                                                (pl-_pack_float64 $v $be2))))))
+                                              (pl-_pack_float64 $v $be2)))))
                                       (p-next))))
                                 (p-if
                                   (p-||
@@ -2277,8 +2265,7 @@
                                     (p-while
                                       (p-&& (p-< $done $n) (p-< (p-cast-$ $si_ref) $slen))
                                       (p-funcall-ref $push_val
-                                        (let ((*wantarray* t))
-                                          (pl-_unpack_utf8_char $s $si_ref)))
+                                        (pl-_unpack_utf8_char $s $si_ref))
                                       (p-post++ $done))))))
                             (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "W"))
                               (setf --pcl-if-ret--2
@@ -2437,12 +2424,11 @@
                                                   "length/code after end of string in unpack
 ")))
                                             (p-my-= $slash_n
-                                              (let ((*wantarray* nil))
-                                                (pl-_unpack_read_int $s
-                                                  (p-cast-$ $si_ref)
-                                                  $nb
-                                                  $be2
-                                                  $sig)))
+                                              (pl-_unpack_read_int $s
+                                                (p-cast-$ $si_ref)
+                                                $nb
+                                                $be2
+                                                $sig))
                                             (p-incf (p-cast-$ $si_ref) $nb)))
                                         (p-if (p-str-eq $ch "w")
                                           (progn
@@ -2561,12 +2547,11 @@
                                                                 "length/code after end of string in unpack
 "))
                                                             (p-my-= $slash_n
-                                                              (let ((*wantarray* nil))
-                                                                (pl-_unpack_read_int $s
-                                                                  (p-cast-$ $si_ref)
-                                                                  $dnb
-                                                                  $dbe3
-                                                                  $dsig)))
+                                                              (pl-_unpack_read_int $s
+                                                                (p-cast-$ $si_ref)
+                                                                $dnb
+                                                                $dbe3
+                                                                $dsig))
                                                             (p-incf (p-cast-$ $si_ref) $dnb)))
                                                         (p-if (p-str-eq $dch "w")
                                                           (progn (p-my-= $slash_n 0)
@@ -2629,12 +2614,11 @@
                                                                       $slen)))
                                                                 ((p-incf-raw $i))
                                                                 (p-funcall-ref $push_val
-                                                                  (let ((*wantarray* t))
-                                                                    (pl-_unpack_read_int $s
-                                                                      (p-cast-$ $si_ref)
-                                                                      $dnb
-                                                                      $dbe3
-                                                                      $dsig)))
+                                                                  (pl-_unpack_read_int $s
+                                                                    (p-cast-$ $si_ref)
+                                                                    $dnb
+                                                                    $dbe3
+                                                                    $dsig))
                                                                 (p-incf (p-cast-$ $si_ref)
                                                                   $dnb)))))
                                                         (p-if
@@ -2833,12 +2817,11 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (let ((*wantarray* t))
-                                                (pl-_unpack_read_int $s
-                                                  (p-cast-$ $si_ref)
-                                                  $nb
-                                                  $be2
-                                                  $sig)))
+                                              (pl-_unpack_read_int $s
+                                                (p-cast-$ $si_ref)
+                                                $nb
+                                                $be2
+                                                $sig))
                                             (p-incf (p-cast-$ $si_ref) $nb)))
                                         (p-next)))))
                                 (p-if (p-str-eq $ch "f")
@@ -2857,8 +2840,7 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 4) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (let ((*wantarray* t))
-                                                (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2)))
+                                              (pl-_unpack_float32 $s (p-cast-$ $si_ref) $be2))
                                             (p-incf (p-cast-$ $si_ref) 4)))
                                         (p-next)))))
                                 (p-if (p-|| (p-str-eq $ch "d") (p-str-eq $ch "F"))
@@ -2877,8 +2859,7 @@
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 8) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
-                                              (let ((*wantarray* t))
-                                                (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2)))
+                                              (pl-_unpack_float64 $s (p-cast-$ $si_ref) $be2))
                                             (p-incf (p-cast-$ $si_ref) 8)))
                                         (p-next)))))
                                 (p-if

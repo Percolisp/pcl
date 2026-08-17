@@ -23,7 +23,7 @@ package Pl::VarAnnotator;
 # PCL_W12_DIFF's dual-run in s393.
 #
 #   _analyze_tree — the W12 annotator: per-statement parse_expr_to_tree
-#     (the same OpcodeTree ExprToCL2 consumes) + a structural event walk.
+#     (the same OpcodeTree ExprToCL consumes) + a structural event walk.
 #     Event vocabulary per name (docs/v2-completion-plan.md §W12):
 #       write            statement-root `$x = RHS` — the ONE shape Parser2
 #                        lowers natively (raw `setf` / let-init), so it is not

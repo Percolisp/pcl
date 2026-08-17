@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-155
+;;; pcl: pipeline=v2 gen=v2-156
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -58,7 +58,7 @@
 
 (p-sub pl-get_linear_isa
   (&rest %_args)
-  (p-raw-params ($class $type) (block nil (p-return (pl-_c3_linearize $class)))))
+  (p-raw-params ($class $type) (block nil (p-return (mro::pl-_c3_linearize $class)))))
 
 (p-sub pl-get_mro (&rest %_args) (p-args-body (block nil (p-return "c3"))))
 

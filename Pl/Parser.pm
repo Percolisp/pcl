@@ -6656,7 +6656,9 @@ sub _auto_defined_cond {
   my $waw      = qr/(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) )?/;
   if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+$waw\((?:$auto_pat)\b/) {
     return "(progn $cond_cl (p-defined $1))";
-  } elsif ($cond_cl =~ /^\(p-setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+  } elsif ($cond_cl =~ /^\((?:p-)?setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {
+    # (`setf` as well as `p-setf`: ExprToCL's elem-setf rule writes a
+    # let-bound container's element through CL setf directly, s411)
     return "(p-defined $cond_cl)";
   } elsif ($cond_cl =~ /^\(p-setf\s+\$_\s+$waw\((?:$auto_pat)\b/) {
     return "(progn $cond_cl (p-defined \$_))";
@@ -9241,7 +9243,9 @@ sub _announce_dropped_statement {
 # expression as one text atom.  Error semantics mirror the text entry
 # exactly; the PARSE ERROR / no-output shapes come back as raw chunks.
 sub _parse_expression_form {
-  my ($self, $parts, $stmt, $context) = @_;
+  my ($self, $parts, $stmt, $context, %opt) = @_;
+  # %opt: sub_info + lexicals — the two FACTS ExprToCL's Kind-A rules read
+  # (Phase A: they used to reach only ExprToCL2's native attempt).
 
   my $form;
   eval {
@@ -9257,6 +9261,8 @@ sub _parse_expression_form {
       expr_o       => $expr_o,
       environment  => $self->environment,
       indent_level => 0,
+      ($opt{sub_info} ? (sub_info => $opt{sub_info}) : ()),
+      ($opt{lexicals} ? (lexicals => $opt{lexicals}) : ()),
     );
     $form = $gen->gen_node_form($node_id);
   };

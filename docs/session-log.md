@@ -75,6 +75,28 @@ caller's `$h{k}` in the DEFAULT configuration too (raw-params had hidden
 it); fixed at the runtime, guard row transpile-test-10.t, ir-spec.  Filed
 #389 (`++$$r` whole-statement drop) from the probes.
 
+**Then Phase A1–A3 (the same session, `s411c`) — ONE expression compiler.**
+`Pl/ExprToCL2.pm` deleted; `insensitive-call` + `elem-setf` are Kind-A gates
+in ExprToCL (`sub_info` + `lexicals` attributes; PURE-key predicate for
+setf — the native rule had let a call key through, evaluation order); one
+parse in `_lower_expr`; the census retargeted (`tools/v2-census.pl` prints
+the E5.3 statement worklist).  **New tool `tools/emission-normalize.pl`** —
+the normalizer the s410 review asked for — was the bar: after normalization
+the corpus equals HEAD except method.t (native `$AUTOLOAD` resolved in MAIN
+inside `package foo120694 {…}` — a bug the fold fixes), ref.t/sort.t
+(qualified call spelling), sub.t (no more duplicated declarations); it also
+caught the ONE regression (a `while ($h{k} = <FH>)` losing its implicit
+`defined` — `_auto_defined_cond`/`_auto_defined_raw` learned the `setf`
+head).  Gate green (parser-01 7 + parser2-02 46 updated: they pinned native
+spellings), sweep TOTAL 18513 (+0), gen v2-156 + three artifacts, corpus
+compile 68.4 → 55.1 s.  A4 (one dialect) is the next Opus item.
+
+**Traps of the session (so the next one skips them):** `git stash` reflex —
+twice; the second time it took the whole Phase A tree and had to be popped
+(the standing rule exists for this).  Task JSON must be written with
+`->utf8` to a `:raw` handle.  Test files that assert an EMISSION SPELLING of
+a deleted code path are shape rows: update them with the reason.
+
 **Measurement notes for whoever re-measures:** the two temporary knobs
 (`return undef` at `ExprToCL2::gen_form`; the `EMBED-TRY/EMBED-DECLINE`
 warns in `lower_embedded_block`; the caller-chain warn at ExprToCL:4021)

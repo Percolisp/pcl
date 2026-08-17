@@ -1121,7 +1121,7 @@ sub make_string_literal_node {
   $encoded =~ s/\t/\\t/g;
   # Sigils too: a decoded literal `$msg` must round-trip as `\$msg`, or the
   # token is not a faithful dq literal and a downstream consumer that honours
-  # interpolation (ExprToCL2::_string_literal_form) re-interpolates it
+  # interpolation (ExprToCL's dq-string emitter; once ExprToCL2::_string_literal_form) re-interpolates it
   # (closure.t END_MARK heredocs: `\$msg` text lost its `$msg`).
   $encoded =~ s/([\$\@])/\\$1/g;
 

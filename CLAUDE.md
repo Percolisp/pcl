@@ -293,9 +293,13 @@ the batch touched name resolution or the harness.  The three s399 tools:
 is on-demand, MANDATORY only for the checker-widening row;
 `tools/drop-census.pl` is a runner column (#343) — not a separate step.
 
-**Pipeline (singular, since E4.1 step 2 / #242, s356):** the v2
-structured-emission pipeline (`Pl/Parser2.pm` + `Pl/ExprToCL2.pm` +
-`Pl/VarAnnotator.pm` + `Pl/CLForm.pm`) is the **only** one. **`PCL_V1`,
+**Pipeline (singular, since E4.1 step 2 / #242, s356) — and ONE expression
+compiler (since s411, Phase A of `docs/plan-one-compiler-s411.md`):** the v2
+structured-emission pipeline (`Pl/Parser2.pm` + `Pl/VarAnnotator.pm` +
+`Pl/CLForm.pm`, expressions through PExpr → `Pl/ExprToCL.pm` ONCE — the
+second generator `Pl/ExprToCL2.pm` and its discarded parse are DELETED; its
+two emission rules are the Kind-A gates `insensitive-call` / `elem-setf` in
+`Pl/Passes.pm`) is the **only** one. **`PCL_V1`,
 `PCL_V1_FILES` and the whole-file v1 fallback are GONE** — anything v2
 cannot lower is now a hard error, because a fallback meant a compiler gap
 silently became a re-transpile through a second compiler with different
