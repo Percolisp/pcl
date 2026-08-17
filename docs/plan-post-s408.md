@@ -7,6 +7,12 @@ every ruling this plan rests on).  **Supersedes the queue of
 A–F; this one is the live queue from here.  Session letters are relative;
 sessions are Opus's unless marked Fable, one letter ≈ one session.
 
+**SUPERSEDED as the live queue by `docs/plan-one-compiler-s411.md` (s411,
+Fable, 2026-08-18; USER: structural first, not at any cost).**  Phases R–C of
+that plan run FIRST; this file's §2 items I (#281 items 1+2+6), J–L (Option B
+phase 2) and M–N (release phases 3–5) resume after them, in this order, and
+§3.0 (#379) is DONE — the plan is written.  Nothing else here changes.
+
 ## 0. Status, independently verified this session
 
 | measurement | value | note |

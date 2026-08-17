@@ -146,6 +146,12 @@ bit-for-bit).  Keeps a per-eval v1 retry until E4.
 
 ### E5 — Post-deletion simplification (the finish the user asked for)
 
+**SUPERSEDED as the worklist (s411, `docs/plan-one-compiler-s411.md`):**
+measured, E5.4 is two emission rules and E5.2 is 12 decline shapes, so the
+release shape is 3–5 sessions (Phases R–C there), not 9–17; E5.1 becomes one
+function, E5.3 moves post-release (`local` first).  The step names below
+stay as the vocabulary; the estimates are history.
+
 **RESTRUCTURED (s316t review, `docs/v2-code-review.md` §8) into five
 independently-shippable steps, each verified by corpus-diff + full sweep.
 The target they converge on is `docs/v2-target-architecture.md`.**

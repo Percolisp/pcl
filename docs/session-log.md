@@ -4,6 +4,70 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 411 (2026-08-18, Fable) — #379: the one-compiler plan, the duplicate-code census, and the USER's reprioritisation
+
+**USER (start of session): "All work seems to be finding bugs and fixing
+them … for weeks.  The target is a flag for turning optimizations on/off …
+When will the duplicated code be extracted?  When will the work move
+forward?"**  Answered from the record: 568 commits since 07-20, ~300
+bug/feature, ~50 structural (all in the Aug 4–15 window: E4.1, FOLD, #303,
+InterpScan, direction D), 100 % correctness/harness since s399; the 88.2 %
+v1-expression number unchanged since s316t; the pass registry designed
+(`v2-target-architecture.md` §3) but not built (no `Pl/Passes.pm`, one
+knob `PCL_NO_RAW_VERDICT`); the duplicate census asked at s409 not started
+(this was the first Fable session since).  Cause: the review→execute loop
+refilled the correctness queue faster than it drained and Fable's sessions
+were the reviews.  **USER decision: structural first, "but not at any cost".**
+
+**Deliverables (this commit):**
+- `docs/plan-one-compiler-s411.md` — the answer to #379, SIZED FROM
+  MEASUREMENTS: (1) with the native attempt forced off, the corpus differs
+  in exactly TWO emission rules (`(setf (p-gethash…))` vs `p-setf`; no
+  `*wantarray*` bind for a context-insensitive callee) — 643 lines / 24
+  files, nothing else; (2) the native attempt costs 9 % of compile time
+  (68.4 → 62.3 s whole corpus); (3) `lower_embedded_block` declines 12 of
+  1 064 embedded blocks (7 `raw_wrap` = a `local` inside the block, 4
+  `eval { require X }` tails, 1 tail decl); (4) ~1 500 embedded blocks per
+  corpus are compiled by v1's TEXT route and DISCARDED — 924 in the native
+  attempt (`_v2_embed` cleared, ExprToCL2 then declines), 882 in the
+  file-level analysis parse — every embedded block is compiled ~2.4×;
+  (5) compile time by phase from the new call census (`_process_element`
+  11.2 s of 50, `PExpr::parse` 9.0, `_scan_lex_facts` 5.7, `_interp_names`
+  1.65 EXCLUSIVE).  The plan: **Phase R** registry (`Pl/Passes.pm`,
+  `PCL_OPT`, five Kind-A gates named) → **Phase A** one expression compiler
+  (port the two rules into ExprToCL, ONE parse in `_lower_expr`, delete
+  ExprToCL2 + snapshot/restore + the string ctx encoding + `_seam_lex_
+  assign_fix`; A4 switches v1's four TEXT `->generate(` sites to
+  `to_flat(gen_node_form)` and deletes the text twins) → **Phase B** one
+  seam function (`capture_v1` in Parser.pm; PExpr `analysis_only` so the
+  analysis parses compile no blocks; hook-only embedded blocks) → **Phase C**
+  the 12 decline shapes.  3–5 sessions to the release shape vs E5.1–E5.5's
+  9–17; E5.3 (`local` first) post-release.
+- `docs/dup-census-worklist-s411.md` + `tools/dup-census.pl` +
+  `tools/sub-call-census.pl` (Devel::NYTProf, installed into the perlbrew
+  perl): 462 clusters / ~4 300 deletable lines over 52 files; families
+  ranked with verdicts (EXTRACT / LEAVE / DELETED-BY phase / SUPERSEDED-BY
+  port) and an execution order.  Headline: the #1 family (StringInterpolation
+  subscript scanners, ~350 lines) is InterpScan consumer 3 — schedule the
+  port; the Parser2 `my`-scan family (8 copies) is one `_decl_syms_under`
+  (sweep = gate); `run_isolated` is a 54-line EXACT copy across the two
+  runners; v1 `_process_*` families are LEAVE (E5.3 deletes them).
+- `docs/fable-answers-s410.md` — the eight s410 asks ruled short (7.1 v1
+  fixes legal when reachable + small AND filed on the class; 7.6 last-commit
+  bump only when both land in one push; 7.7 = the normalizer, now also
+  Phase A's bar).
+- Tasks: #379 in_progress → plan; #383 Phase R, #384 Phase A, #385 Phase B,
+  #386 Phase C, #387 the extraction worklist, #388 InterpScan consumers 2+3.
+
+**Measurement notes for whoever re-measures:** the two temporary knobs
+(`return undef` at `ExprToCL2::gen_form`; the `EMBED-TRY/EMBED-DECLINE`
+warns in `lower_embedded_block`; the caller-chain warn at ExprToCL:4021)
+were working-tree edits, reverted with `git checkout` — nothing of them is
+committed.  `nytprofmerge` on a dozen 200 MB profiles is not reliable;
+`sub-call-census.pl` sums per-profile in Perl instead.
+
+---
+
 ## Session 410 (2026-08-17, Opus 5) — session H complete, session I begun: `our`'s lost tail, anon `__SUB__`, the lexical-sub residue
 
 Five commits, `03cc639`…`1484246`.  Queue: `docs/plan-post-s408.md` §2 —

@@ -11,6 +11,49 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s411 (2026-08-18, Fable) — #379: the one-compiler plan; the duplicate-code census; structural first (USER)
+
+- **STRUCTURAL FIRST, NOT AT ANY COST (USER 2026-08-18)** — the queue is
+  `docs/plan-one-compiler-s411.md` §6 (Phase R registry → A one expression
+  compiler → B one seam function → C the 12 decline shapes → the old queue
+  resumes).  A newly found silent-wrong is FILED and jumps the queue only if
+  it regresses a baseline or blocks a phase; a fix landing in code a phase
+  deletes is wasted — check the deletion list first.  Fable sessions rule
+  the asks and do structure; no cold re-verification of a gate Opus ran.
+- **E5.1–E5.5 (9–17 sessions) REPLACED as the worklist by `plan-one-compiler-s411.md`
+  (3–5 sessions to the release shape)** — MEASURED: the two generators'
+  entire emission difference is TWO rules (`elem-setf`, `insensitive-call`;
+  643 diff lines / 24 files with the native attempt forced off); the native
+  attempt costs 9 % of compile time; `lower_embedded_block` declines 12 of
+  1 064 embedded blocks; ~1 500 embedded blocks per corpus are compiled by
+  v1 TEXT and DISCARDED (native attempt + analysis parses).  "One compiler"
+  for v0.1 = one GENERATOR + one statement entry; zero v1 lines = E5.3 post-
+  release, `local` (310/corpus) first.  → plan §1 (numbers), §2 (phases),
+  §5 (what it deliberately does not do).
+- **The optimization registry (`Pl/Passes.pm`, `PCL_OPT`) is Phase R, FIRST**
+  — the USER's "flag to turn optimizations on/off so they can be done after
+  the compiler is done"; Kind-A gates for the five existing transforms
+  (`raw-numeric`, `str-buffer`, `foreach-range`, `insensitive-call`,
+  `elem-setf`), empty Kind-B hooks; `PCL_NO_RAW_VERDICT` = alias of
+  `-raw-numeric`.  → plan §2 Phase R; design `v2-target-architecture.md` §3.
+- **Duplicate-code census = `tools/dup-census.pl` (families, EXACT/SHAPE,
+  `--calls` hot tags) + `tools/sub-call-census.pl` (Devel::NYTProf per-sub
+  calls/time)**; verdicts and order in `docs/dup-census-worklist-s411.md`
+  (rules: DELETED-BY a phase → do not touch; SUPERSEDED-BY a port → do the
+  port; hot code → collapse in place, never a new call layer; the Parser2
+  `my`-scan family → the sweep is the gate).  462 clusters / ~4 300
+  deletable lines at s411; v1 `_process_*` families are LEAVE.
+- **StringInterpolation's subscript scanners (the #1 duplicate family, ~350
+  lines) are InterpScan consumer 3** — schedule the port, not a helper.
+  `Parser2::_interp_names` is 1.65 s EXCLUSIVE in a 50 s sample = consumer 2
+  is also the compile-time fix.  → worklist rows 1, 27.
+- **s410 asks ruled short** (`docs/fable-answers-s410.md`): v1 fixes stay
+  legal when reachable + small AND filed on the E5.3 class; `__SUB__` outside
+  a sub keeps the die; #376 blast radius = follow perl; #377 twin registered;
+  #381 behind Option B phase 2 (itself behind the plan); the LAST-commit gen
+  bump is legal only when both commits land in one push; #281 item 1 = the
+  normalizer (a), now also Phase A's bar; item 2 folds into item 1.
+
 ## s409 (2026-08-16, Fable) — the s408 review: approved as shipped; the census-increase rule; two lexsub-family tasks
 
 - **s408 APPROVED as shipped (all seven code commits)** — gate re-verified COLD
