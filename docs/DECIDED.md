@@ -77,6 +77,15 @@ not-supported.md → only then probe.*
   shape row that pinned a native SPELLING is updated with its reason, not
   the emission** (parser-01 7, parser2-02 46).  A4 (one DIALECT: v1's TEXT
   `->generate(` sites → forms; delete the text twins) is the next item.
+- **Phase A4 DONE s411 (`s411d`): ONE DIALECT** — `generate`/`gen_node` = the
+  flat print of `gen_node_form` (corpus-diff IDENTICAL: E2's dual-run promise
+  held); the text emitters (`gen_binary_op` 295 lines, `gen_internal_node*`,
+  `gen_inline_lambda`, `handlers`) DELETED, ExprToCL −430 lines; the two
+  decline sites DIE (rule 12).  It exposed one broken emission: a NESTED
+  subscript in a dq string (`"$_[$_[2]]"`, postfixderef.t) printed as
+  `(p-aref @_ )` (run-time crash) — now an announced drop, census 12 → 13
+  under the s409 rule, **#390** filed (InterpScan consumer 3).  Gate-SET scan
+  over both populations: zero verdicts moved; sweep 18513 (+0).
 - **`PCL_OPT=none` found a default-configuration silent-wrong on its first
   run (as predicted): `%p-flatten-list` snapshotted a MAGIC CELL / TIE PROXY
   instead of its value**, so `my ($x) = @_; $x = 0` (when the raw-params

@@ -104,6 +104,8 @@
 #    2  Bug. Fell through. Missing case: [bless({…}, "PPIreference"), undef]
 #    2  Ternary operator: Found '?'
 #    2  Got op X, not postfix. But there is nothing after it??
+#    1  PCL internal: no form emitter for expression leaf …  <- ADDED s411 (A4): the
+#       ONE-dialect emitter DIES where the deleted text emitter printed a broken form
 #    0  WTF? :-) Expr starts with ->/brace??  <- FIXED s410 (#378; was 1)
 #    0  Can't locate object method "add_node" via package "Pl::PExpr"  <- an
 #       internal error, not a decline; FIXED s402 (was 1)
@@ -117,6 +119,7 @@ perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
 perl-tests/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
+perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1  [ADDED s411 Phase A4 under the s409 census-INCREASE rule: `"$_[$_[2]]"` — a NESTED array subscript inside a dq string loses its inner index (task #390, StringInterpolation → InterpScan consumer 3); the deleted text emitter used to print the empty Number leaf as `(p-aref @_ )` and the program CRASHED at run time (sb-int:simple-program-error) — the form emitter dies and the statement drops, announced]
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/state.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2

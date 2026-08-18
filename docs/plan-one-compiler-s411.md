@@ -108,7 +108,7 @@ row in transpile-test-10.t, ir-spec §@_ aliasing; a default-configuration
 silent-wrong (probed: `sub r { my ($x) = @_; my $f = sub { $x }; $x = 0 }`).
 Compile time unchanged (a hash lookup per gate).
 
-### Phase A — one expression compiler (1–2 sessions, EMISSION) — **A1–A3 DONE s411; A4 open**
+### Phase A — one expression compiler (1–2 sessions, EMISSION) — **DONE s411 (A1–A3 `s411c`, A4 `s411d`)**
 
 E5.4 as measured, not as estimated.
 
@@ -143,6 +143,25 @@ parser-01 7, parser2-02 46); full sweep TOTAL 18513 (+0), 0 new / 0 fixed /
 0 LOST, drops 12; gen v2-155 → **v2-156**, three artifacts regenerated;
 whole-corpus compile time **55.1 s** (60.6 s after Phase R, 68.4 s at
 session start).  `Pl/t/passes-01.t` +5 rows for the two names.
+
+**A4 done s411 (Fable, `s411d`) — ONE DIALECT.**  `generate` and `gen_node`
+are the flat print of `gen_node_form` (corpus-diff IDENTICAL for the switch —
+E2's dual-run promise held); the text emitters `gen_internal_node`,
+`gen_internal_node_text`, `gen_binary_op` (295 lines), `gen_inline_lambda`,
+`_build_handlers` + the `handlers` attribute and `_sort_pair_special_decl`
+are DELETED (ExprToCL 4 745 → 4 315 lines); `gen_inline_lambda_form` takes a
+text body as one raw form; the two decline sites in `gen_node_form` DIE
+(rule 12).  `gen_leaf` stays: it is the ATOM producer `gen_leaf_form` calls
+for Word/Operator/Cast/HereDoc leaves (atoms are text by definition).
+Measured consequence: postfixderef.t — a NESTED subscript in a dq string
+(`"$_[$_[2]]"`) yields a content-less Number leaf that the text emitter
+printed as the BROKEN `(p-aref @_ )` (a run-time crash); it now dies → an
+announced drop (census 12 → 13 under the s409 census-INCREASE rule; task
+#390 filed — an InterpScan consumer-3 case).  Bars: corpus-diff = that one
+file; gate green (150/5487 minus the pclxs rows); full sweep TOTAL 18513
+(+0), DROPS gate clean; **the s372 gate-SET scan over both populations
+(638 files, HEAD vs tree): ZERO verdicts moved**; compile time 55.2 s
+(unchanged).
 
 - **A1** Port the two rules into `Pl/ExprToCL.pm`: `insensitive-call`
   (needs `sub_info` on ExprToCL — Parser2 constructs the generator itself

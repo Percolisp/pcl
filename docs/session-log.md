@@ -91,6 +91,13 @@ head).  Gate green (parser-01 7 + parser2-02 46 updated: they pinned native
 spellings), sweep TOTAL 18513 (+0), gen v2-156 + three artifacts, corpus
 compile 68.4 → 55.1 s.  A4 (one dialect) is the next Opus item.
 
+**Then A4 (`s411d`) — one dialect:** `generate`/`gen_node` print the FORM
+generator flat (corpus IDENTICAL), 430 lines of text emitters deleted, the
+decline sites die; the die exposed `"$_[$_[2]]"` (a nested subscript in a
+dq string, postfixderef.t) printing as `(p-aref @_ )` = a run-time crash,
+now an announced drop (census +1 by the s409 rule; #390 filed).  Gate-SET
+scan over both populations: no verdict moved; sweep +0.  Phase A COMPLETE.
+
 **Traps of the session (so the next one skips them):** `git stash` reflex —
 twice; the second time it took the whole Phase A tree and had to be popped
 (the standing rule exists for this).  Task JSON must be written with

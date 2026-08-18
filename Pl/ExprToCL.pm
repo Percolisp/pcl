@@ -72,12 +72,6 @@ has lexicals => (          # sigil-name → 1 for every let-bound lexical in sco
 );
 
 
-has handlers => (
-  is      => 'ro',
-  lazy    => 1,
-  builder => '_build_handlers',
-);
-
 # E2 seam re-housing (docs/v2-endgame-plan.md E2): emitters converted from
 # text-producing to CLForm-producing register here, keyed by the same node
 # type as `handlers`.  A form handler WINS over the text handler for its
@@ -93,13 +87,12 @@ has form_handlers => (
 );
 
 # The node types that have a NAMED emitter — as opposed to a binary
-# operator, which is dispatched by its operator text (gen_binary_op*).  This
-# is the key set of the pre-E2 text `handlers` table; the table itself is
-# gone (#303, s390) because 24 of its 25 emitters were shadowed by a form
-# twin that never declines.  The SET still has to exist: `!$NAMED_TYPE{...}`
-# is the "this type is a binary operator" test at both dispatch sites, and a
-# named type that fell out of it would be handed to gen_binary_op under its
-# own name.
+# operator, which is dispatched by its operator text (gen_binary_op_form).
+# This is the key set of the pre-E2 text `handlers` table; the table and the
+# last text emitter it named are gone (#303 s390, Phase A4 s411).  The SET
+# still has to exist: `!$NAMED_TYPE{...}` is the "this type is a binary
+# operator" test at the dispatch site, and a named type that fell out of it
+# would be handed to gen_binary_op_form under its own name.
 my %NAMED_TYPE = map { $_ => 1 } qw(
   funcall methodcall ref_funcall prefix_op postfix_op
   a_acc h_acc a_ref_acc h_ref_acc
@@ -107,25 +100,6 @@ my %NAMED_TYPE = map { $_ => 1 } qw(
   arr_init hash_init progn tree_val filehandle readline
   glob backtick anon_sub func_ref inline_lambda glob_slot
 );
-
-# READING THE COMMENTS BELOW: the `*_form` emitters were introduced by E2 as
-# CLForm-producing twins of text emitters named without the suffix, and their
-# per-sub comments still explain themselves by reference to that twin ("E2
-# form variant of gen_hash_access", "same shape/side effects as the text
-# emitter", …).  Those text emitters are GONE (#303, s390) — every name in
-# such a comment that does not exist in this file is one of them, and lives in
-# git history.  The `_form` suffix is therefore historical, not a distinction;
-# renaming it away is task #307.
-#
-# The one text emitter still reachable: gen_inline_lambda_form declines the
-# shapes it does not cover (measured s390 over both populations — 77 corpus
-# events across 33 files, 51 Pl/t gate events; every other named type: zero).
-sub _build_handlers {
-  my $self = shift;
-  return {
-    'inline_lambda' => \&gen_inline_lambda,
-  };
-}
 
 sub _build_form_handlers {
   my $self = shift;
@@ -445,100 +419,26 @@ sub generate {
   my $self    = shift;
   my $node_id = shift // $self->expr_o->root;
 
-  return ($self->indent_str x $self->indent_level) . $self->gen_node($node_id);
+  # ONE dialect (Phase A4): the text entry is the FORM entry, printed flat —
+  # E2 made the two byte-identical, so every text caller (v1's statement
+  # layer, the constant/default compiles, the re-entrant string compiles)
+  # now runs the same generator as Parser2.
+  return ($self->indent_str x $self->indent_level)
+       . Pl::CLForm::to_flat($self->gen_node_form($node_id));
 }
 
 
 # Generate code for a single node
 sub gen_node {
-  my $self    = shift;
-  my $node_id = shift;
-
-  my $node    = $self->expr_o->get_a_node($node_id);
-  my $kids    = $self->expr_o->get_node_children($node_id);
-
-  # Internal node (PPIreference with type)
-  if ($self->expr_o->is_internal_node_type($node)) {
-    return $self->gen_internal_node($node, $node_id, $kids);
-  }
-
-  # Binary operator: PPI::Token::Operator with children
-  # (Binary ops are stored as operator tokens, not PPIreference)
-  if (ref($node) eq 'PPI::Token::Operator' && @$kids) {
-    my $op = $node->content();
-    return $self->gen_binary_op($op, $kids, $node_id);
-  }
-
-  # Word-form binary operators (e.g. 'isa') with children
-  if (ref($node) eq 'PPI::Token::Word' && @$kids) {
-    my $op = $node->content();
-    return $self->gen_binary_op($op, $kids, $node_id);
-  }
-
-  # Leaf node (PPI token)
-  return $self->gen_leaf($node);
+  my ($self, $node_id) = @_;
+  # ONE dialect (Phase A4): the flat print of the FORM emitter.  Every
+  # "I want this node as text" site (a container symbol, a filehandle word,
+  # a method name, the v1 statement layer through generate()) reads the same
+  # generator Parser2 does; the text emitters that used to live behind this
+  # entry are gone.
+  return Pl::CLForm::to_flat($self->gen_node_form($node_id));
 }
 
-
-# Generate code for internal nodes (operators, funcalls, etc.)
-sub gen_internal_node {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $type    = $node->{type};
-
-  # E2: a converted (form-producing) emitter wins when one exists for the
-  # type.  Flat-printing the form here keeps every unconverted text caller
-  # byte-identical to the pre-conversion output (to_flat embeds raw child
-  # text verbatim), so byte-parity per conversion step is checkable with
-  # tools/corpus-diff.pl.  undef = the handler declined this shape.
-  if (my $fh = $self->form_handlers->{$type}) {
-    my $form = $fh->($self, $node, $node_id, $kids);
-    return Pl::CLForm::to_flat($form) if defined $form;
-  }
-
-  # E2: a type with no named handler is a binary operator (gen_binary_op) —
-  # try the form emitter (declines =/=~/!~, converts the rest).
-  if (!$NAMED_TYPE{$type}) {
-    my $form = $self->gen_binary_op_form($type, $kids, $node_id);
-    return Pl::CLForm::to_flat($form) if defined $form;
-  }
-
-  return $self->gen_internal_node_text($node, $node_id, $kids);
-}
-
-# The text-emitter dispatch (pre-E2 shape).  Called directly by
-# gen_node_form when a form handler declines, so a declining handler is
-# never consulted twice for the same node.
-sub gen_internal_node_text {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my $type    = $node->{type};
-
-  # Dispatch based on node type
-  my $handler = $self->handlers->{$type};
-
-  if ($handler) {
-    return $handler->($self, $node, $node_id, $kids);
-  }
-
-  # Rule 12: a named type reaching here means its form emitter declined a
-  # shape whose text twin was deleted as unreachable (#303).  That is a
-  # compiler self-inconsistency and the value would flow onward — die
-  # naming the type rather than lowering it as a binary operator called
-  # "funcall".
-  die "PCL internal: form emitter declined node type '$type', "
-    . "whose text emitter was deleted as unreachable (#303)\n"
-    if $NAMED_TYPE{$type};
-
-  # Assume it's a binary operator (operators stored with operator as type)
-  return $self->gen_binary_op($type, $kids, $node_id);
-}
 
 # E2: form-of-node, for CONVERTED emitters generating their children.
 # Returns the child's CLForm when its emitter is converted (and does not
@@ -563,17 +463,16 @@ sub gen_node_form {
       my $form = $self->gen_binary_op_form($type, $kids, $node_id);
       return $form if defined $form;
     }
-    warn "pcl-raw\tnode:$type\n" if $ENV{PCL_E2_RAW_CENSUS};
-    return Pl::CLForm::raw($self->gen_internal_node_text($node, $node_id, $kids));
+    # No form emitter took this node.  Rule 12: a missing case DIES — there is
+    # no text emitter to fall back to any more (Phase A4), and a decline here
+    # was always a compiler gap; _parse_expression_form turns the die into the
+    # announced PARSE-ERROR drop.
+    die "PCL internal: no form emitter for expression node type '$type'\n";
   }
-  # A PPI::Token::Operator/Word WITH children is a binary op (gen_node's
-  # gen_binary_op case), NOT a leaf → the binary-op form emitter (declines
-  # =/=~/!~ before any side effect, so the raw(gen_node) fallback re-runs
-  # gen_binary_op cleanly).  A genuine leaf (no children) goes to
-  # gen_leaf_form: a converted leaf returns a CLForm; anything not yet
-  # converted declines (undef) and the leaf's v1 text is embedded as a raw
-  # atom.  gen_leaf's leaf side effects (idempotent package/caret set-adds,
-  # read-only rename lookups) make the decline→re-run through gen_node safe.
+  # A PPI::Token::Operator/Word WITH children is a binary op, NOT a leaf →
+  # the binary-op form emitter.  A genuine leaf (no children) goes to
+  # gen_leaf_form; a leaf it does not cover DIES below (rule 12 — since
+  # Phase A4 there is no text emitter to fall back to).
   my $kids = $self->expr_o->get_node_children($node_id) || [];
   if (@$kids
       && (ref($node) eq 'PPI::Token::Operator' || ref($node) eq 'PPI::Token::Word')) {
@@ -583,13 +482,9 @@ sub gen_node_form {
   if (!@$kids && defined(my $lf = $self->gen_leaf_form($node))) {
     return $lf;
   }
-  if ($ENV{PCL_E2_RAW_CENSUS}) {
-    my $desc = ref($node) ? ref($node) . ':' . (eval { $node->content } // '?')
-                          : "scratch:$node";
-    $desc = substr($desc, 0, 60);
-    warn "pcl-raw\t$desc\n";
-  }
-  return Pl::CLForm::raw($self->gen_node($node_id));
+  my $desc = ref($node) ? ref($node) . ':' . (eval { $node->content } // '?')
+                        : "scratch:$node";
+  die "PCL internal: no form emitter for expression leaf " . substr($desc, 0, 60) . "\n";
 }
 
 # E2 leaf conversion (docs/v2-endgame-plan.md E2.1, literal/sym frontier):
@@ -1170,304 +1065,6 @@ sub _is_string_literal_node {
   my ($node) = @_;
   return 0 unless defined $node;
   return ref($node) =~ /^PPI::Token::Quote/;
-}
-
-# Binary operator: (pcl:p-OP left right)
-# Operators always use pcl: prefix to avoid conflicts with user-defined subs
-sub gen_binary_op {
-  my $self    = shift;
-  my $op      = shift;
-  my $kids    = shift;
-  my $node_id = shift;  # Optional: for context-dependent operators like 'x'
-
-  my $cl_op = $self->cl_op_name($op);
-
-  # Special case: '..'/'..' — range in list context, flip-flop in scalar context
-  if (($op eq '..' || $op eq '...') && defined $node_id) {
-    my $ctx = $self->expr_o->get_node_context($node_id);
-    my $left_node  = $self->expr_o->get_a_node($kids->[0]);
-    my $right_node = $self->expr_o->get_a_node($kids->[1]);
-    my $both_int  = _is_integer_literal_node($left_node) && _is_integer_literal_node($right_node);
-    # Literal flip-flop: both operands are compile-time constants (ints or strings).
-    # Perl compares them against $. (the line number), possibly warning "isn't numeric".
-    # Variable/expression operands (including regex matches) use boolean evaluation.
-    my $both_literal = ($both_int
-                        || (_is_string_literal_node($left_node) && _is_string_literal_node($right_node)));
-    # INHERIT_CTX with non-literal operands: range of booleans is degenerate; treat as scalar.
-    # INHERIT_CTX with literals: emit a runtime wantarray check.
-    my $effective_ctx = $ctx;
-    if ($ctx == INHERIT_CTX && !$both_literal) {
-      $effective_ctx = SCALAR_CTX;
-    }
-    if ($effective_ctx != LIST_CTX && $effective_ctx != INHERIT_CTX) {
-      # Scalar (or demoted INHERIT) context: emit flip-flop
-      my $ff_id = $g_flipflop_count++;
-      my $left  = $self->gen_node($kids->[0]);
-      my $right = $self->gen_node($kids->[1]);
-      if ($both_int) {
-        # Integer literals: clean $.  comparison, no warnings
-        my $macro = ($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num';
-        return "($macro $ff_id $left $right)";
-      } elsif ($both_literal) {
-        # String literals: $. comparison with numeric coercion, warns for non-numeric strings
-        my $macro = ($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn';
-        return "($macro $ff_id $left $right)";
-      } else {
-        # Variables, expressions, regex matches: boolean evaluation (no $. comparison)
-        my $macro = ($op eq '...') ? 'p-flipflop-3' : 'p-flipflop';
-        return "($macro $ff_id $left $right)";
-      }
-    }
-    if ($effective_ctx == INHERIT_CTX) {
-      # Literals in INHERIT_CTX: runtime wantarray check
-      my $ff_id = $g_flipflop_count++;
-      my $left  = $self->gen_node($kids->[0]);
-      my $right = $self->gen_node($kids->[1]);
-      my ($ff_macro, $range_fn);
-      if ($both_int) {
-        $ff_macro = ($op eq '...') ? 'p-flipflop-num-3' : 'p-flipflop-num';
-      } else {
-        $ff_macro = ($op eq '...') ? 'p-flipflop-dyn-3' : 'p-flipflop-dyn';
-      }
-      $range_fn  = ($op eq '...') ? 'p-...' : 'p-..';
-      return "(if (eq *wantarray* t) ($range_fn $left $right) ($ff_macro $ff_id $left $right))";
-    }
-    # List context: range endpoints are always scalars, not lists
-    $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
-    $self->expr_o->set_node_context($kids->[1], SCALAR_CTX);
-    # Fall through to normal range (p-.. / p-...)
-  }
-
-  # Special case: 'x' operator - use list repeat when LHS is parenthesized and in list context
-  if ($op eq 'x' && defined $node_id) {
-    my $lhs_node = $self->expr_o->get_a_node($kids->[0]);
-    my $lhs_is_paren = $self->expr_o->is_internal_node_type($lhs_node) &&
-                       ($lhs_node->{type} eq 'tree_val' || $lhs_node->{type} eq 'progn');
-    my $ctx = $self->expr_o->get_node_context($node_id);
-    if ($lhs_is_paren && $ctx == LIST_CTX) {
-      # List repeat: (@x,1) x 4 — force LHS to list context so
-      # gen_progn_form returns (vector ...) not (progn ...) / scalar last-val
-      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
-      my $left  = $self->gen_node($kids->[0]);
-      my $right = $self->gen_node($kids->[1]);
-      return "(p-list-x $left $right)";
-    }
-    if ($lhs_is_paren && $ctx == INHERIT_CTX) {
-      # Caller-context-dependent, e.g. `return (LIST) x $n`: list repeat in
-      # list context, string repeat in scalar context.  Emit a runtime
-      # *wantarray* check (mirrors the '..' INHERIT_CTX path above), generating
-      # the parenthesized LHS in both list and scalar context.
-      $self->expr_o->set_node_context($kids->[0], LIST_CTX);
-      my $left_list   = $self->gen_node($kids->[0]);
-      $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
-      my $left_scalar = $self->gen_node($kids->[0]);
-      my $right = $self->gen_node($kids->[1]);
-      return "(if (eq *wantarray* t) (p-list-x $left_list $right) (p-str-x $left_scalar $right))";
-    }
-  }
-
-  my $left  = $self->gen_node($kids->[0]);
-
-  # Special case: isa operator - RHS bareword must be a string
-  if ($op eq 'isa') {
-    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
-    my $right;
-    if (ref($rhs_node) eq 'PPI::Token::Word' && !$self->expr_o->get_node_children($kids->[1])) {
-      # Bareword class name → quoted string
-      my $class_name = $rhs_node->content();
-      $right = qq{"$class_name"};
-    } else {
-      $right = $self->gen_node($kids->[1]);
-    }
-    return "(p-isa $left $right)";
-  }
-
-  # Special case: hash assignment with list
-  # %h = () or %h = (k=>v, ...) — pass flat vector so p-hash-= can count
-  # input elements for scalar-context return (Perl: scalar(%h=(a,b,c,d)) = 4).
-  if ($op eq '=' && $left =~ /^%/) {
-    my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($rhs_node)) {
-      my $rhs_type = $rhs_node->{type};
-      if ($rhs_type eq 'tree_val' || $rhs_type eq 'progn') {
-        my $rhs_kids = $self->expr_o->get_node_children($kids->[1]);
-        # p-hash-= reads *wantarray* at runtime to decide list vs scalar return.
-        # Wrap it with the annotated context so runtime matches compile-time expectation.
-        my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
-        if (@$rhs_kids == 0) {
-          my $result = "(p-hash-= $left (make-array 0 :adjustable t :fill-pointer 0))";
-          return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
-               : $ctx == SCALAR_CTX ? "(let ((*wantarray* nil)) $result)"
-               : $result;
-        } else {
-          # Flat vector — p-hash-= flattens, deduplicates, and counts internally
-          my @parts = map { $self->gen_node($_) } @$rhs_kids;
-          my $result = "(p-hash-= $left (vector " . join(" ", @parts) . "))";
-          return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
-               : $ctx == SCALAR_CTX ? "(let ((*wantarray* nil)) $result)"
-               : $result;
-        }
-      }
-    }
-  }
-
-  my $right = $self->gen_node($kids->[1]);
-
-  # Special case: keys(%h) = N is hash pre-sizing - no-op in CL
-  # CL hash tables auto-resize, so just evaluate the RHS for side effects
-  if ($op eq '=' && $left =~ /^\(p-keys /) {
-    return "$right";
-  }
-
-  # Special case: $#arr = N  →  (p-set-array-length @arr N)
-  if ($op eq '=' && $left =~ /^\(p-array-last-index (.+)\)$/) {
-    my $arr = $1;
-    return "(p-set-array-length $arr $right)";
-  }
-
-  # Typeglob assignment: *foo = RHS  →  (p-glob-assign "pkg" "name" rhs)
-  # Runtime dispatch to the appropriate slot based on RHS type.
-  if ($op eq '=' && $left =~ /^\(p-make-typeglob "([^"]+)" "([^"]+)"\)$/) {
-    my ($pkg, $name) = ($1, $2);
-    return "(p-glob-assign \"$pkg\" \"$name\" $right)";
-  }
-
-  # Dynamic typeglob assignment: *$var = RHS  →  (p-glob-assign-dynamic name-expr rhs)
-  # e.g. *$::AUTOLOAD = sub { ... } assigns to the CODE slot of the glob named by $AUTOLOAD.
-  if ($op eq '=' && $left =~ /^\(p-dynamic-typeglob (.+)\)$/) {
-    my $name_expr = $1;
-    return "(p-glob-assign-dynamic $name_expr $right)";
-  }
-
-  # For assignment, dispatch to type-specific forms based on LHS sigil.
-  # Handles both local vars (@a, %h, $x) and qualified vars (Pkg::@a, Pkg::%h, Pkg::$x).
-  if ($op eq '=') {
-    # Assigning to a subroutine/code-ref CALL (`&sub = x`, `foo() = x`,
-    # `$cref->() = x`) is only valid for an lvalue sub — which PCL does not
-    # support — so it is a compile error, exactly as in Perl.  Raising it here
-    # (a transpile-time die) is what makes feature-detection probes that rely on
-    # the compile error work: Class::Method::Modifiers' _sub_attrs does
-    # `eval 'return 1; &_sub = 1'` and treats failure as "not an lvalue sub".
-    # In eval-string mode the die surfaces via the pl2cl server's error status,
-    # so the eval returns undef and the probe correctly reports ''.  The
-    # built-in magic lvalues substr/pos/vec ARE supported, so allow those.
-    if (defined $node_id) {
-      my $lnode = $self->expr_o->get_a_node($kids->[0]);
-      my $bad_lvalue = 0;
-      if ($self->expr_o->is_internal_node_type($lnode)
-          && ($lnode->{type} eq 'funcall' || $lnode->{type} eq 'ref_funcall')) {
-        # foo() = x  /  $cref->() = x
-        $bad_lvalue = 1;
-        if ($lnode->{type} eq 'funcall') {
-          my $fkids = $self->expr_o->get_node_children($kids->[0]);
-          if ($fkids && @$fkids) {
-            my $fn = $self->expr_o->get_a_node($fkids->[0]);
-            my $nm = (ref($fn) && $fn->can('content')) ? $fn->content : '';
-            $bad_lvalue = 0 if $nm =~ /^(?:CORE::)?(?:substr|pos|vec)$/;
-          }
-        }
-      } elsif (ref($lnode) && $lnode->can('content')
-               && $lnode->content =~ /^&/) {
-        # &sub = x  (ampersand call as an lvalue; a leaf Symbol token, not a
-        # funcall node — see _emit_token's &NAME branch).
-        $bad_lvalue = 1;
-      }
-      # PCL: prefix makes the parser propagate this as a hard error (Parser.pm
-      # ~6722) instead of swallowing it into a ;; PARSE ERROR comment — so in
-      # eval-string mode the transpile FAILS and the eval returns undef, exactly
-      # like Perl's compile error for assignment to a non-lvalue sub.
-      die "PCL: Can't modify non-lvalue subroutine call in assignment\n"
-        if $bad_lvalue;
-    }
-    # Perl: `($c ? $a : $b) = V` is a SCALAR assignment to the chosen side
-    # (perlop: the ternary is an lvalue), NOT a one-element list assignment —
-    # V gets SCALAR context and the expression's value is the assigned value,
-    # so a while-loop's implicit defined() applies to it.  The vector branch
-    # below would evaluate V in LIST context (defins.t t10: draining readdir
-    # on the first iteration) and return a COUNT (1 even for an undef RHS,
-    # so the loop would never terminate).
-    if (defined $node_id) {
-      my $tern_id = $self->_sole_ternary_lvalue_id($kids->[0]);
-      if (defined $tern_id) {
-        $self->expr_o->set_node_context($kids->[1], SCALAR_CTX);
-        my $tern = $self->gen_node($tern_id);
-        my $rhs  = $self->gen_node($kids->[1]);
-        return "(box-set $tern $rhs)";
-      }
-    }
-    if ($left =~ /^\(vector[ )]/) {
-      my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
-      my $result = "(p-list-= $left $right)";
-      return $ctx == LIST_CTX ? "(let ((*wantarray* t)) $result)"
-           : $ctx == SCALAR_CTX ? "(let ((*wantarray* nil)) $result)"
-           : $result;
-    } elsif ($left =~ /^\(p-cast-% /) {
-      # %$ref = (list): assign to a dereferenced hash
-      return "(p-hash-deref-= $left $right)";
-    } elsif ($left =~ /^\(p-cast-@ /) {
-      # @$ref = (list): assign to a dereferenced array
-      return "(p-array-deref-= $left $right)";
-    } elsif ($left =~ /^\(p-(?:gethash|aref|aslice|hslice) /) {
-      # Single-element store: $h{k} = ... / $a[i] = ...  (via p-setf).  This
-      # MUST precede the sigil regexes below: a package-qualified element form
-      # like (p-gethash |Foo::Bar|::%H "x") contains "::%" (or "::@" for arrays)
-      # which would otherwise be mis-detected as a whole %hash/@array LHS and
-      # routed to p-hash-= / p-array-= (which expect a bare symbol place and
-      # crash on the gethash/aref form).  Same trap for slices with a
-      # package-qualified head: (p-aslice tmp::@a ...) = ... (array.t #8910
-      # block after the our-alias requalify pre-pass).
-      return "(p-setf $left $right)";
-    } elsif ($left =~ /(?:^|::)@/) {
-      return "(p-array-= $left $right)";
-    } elsif ($left =~ /(?:^|::)%/) {
-      return "(p-hash-= $left $right)";
-    } elsif ($left =~ /(?:^|::)\$/) {
-      return "(p-scalar-= $left $right)";
-    }
-    # Element access, slices, etc. - keep using p-setf
-  }
-
-  # 'use integer' pragma: truncate operands first, then operate.
-  # Perl's 'use integer' truncates BOTH operands before the operation.
-  # Uses p-int (exported, does truncate(to-number(val))) to stay in pcl namespace.
-  if ($self->environment && $self->environment->has_pragma('use_integer')) {
-    if ($op eq '/') {
-      return "(truncate (p-int $left) (p-int $right))";
-    } elsif ($op eq '%') {
-      return "(rem (p-int $left) (p-int $right))";
-    } elsif ($op eq '+') {
-      return "(+ (p-int $left) (p-int $right))";
-    } elsif ($op eq '-') {
-      return "(- (p-int $left) (p-int $right))";
-    } elsif ($op eq '*') {
-      return "(* (p-int $left) (p-int $right))";
-    } elsif ($op eq '&') {
-      return "(p-to-s64 (logand (pcl::%pcl-to-integer (to-number $left)) (pcl::%pcl-to-integer (to-number $right))))";
-    } elsif ($op eq '|') {
-      return "(p-to-s64 (logior (pcl::%pcl-to-integer (to-number $left)) (pcl::%pcl-to-integer (to-number $right))))";
-    } elsif ($op eq '^') {
-      return "(p-to-s64 (logxor (pcl::%pcl-to-integer (to-number $left)) (pcl::%pcl-to-integer (to-number $right))))";
-    } elsif ($op eq '<<') {
-      return "(p-<<-int $left $right)";
-    } elsif ($op eq '>>') {
-      return "(p->>-int $left $right)";
-    }
-  }
-
-  # Match operators read *wantarray* at runtime to choose between a boolean
-  # (scalar) and a capture list (list).  When the surrounding expression pins
-  # the match to a definite context, wrap it so the ambient *wantarray* from an
-  # enclosing list construct does not leak in.  e.g. `join ':', split('a'=~/b/,…)`
-  # — the match is split's scalar pattern arg, but join binds *wantarray* t.
-  # Only a bare match is context-sensitive; s/// and tr/// return a scalar count,
-  # so skip the wrapper for those (and keep their codegen string unchanged).
-  if (($op eq '=~' || $op eq '!~') && $right !~ /^\(p-(?:subst|tr|translate)\b/) {
-    my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
-    return "(let ((*wantarray* nil)) ($cl_op $left $right))" if $ctx == SCALAR_CTX;
-    return "(let ((*wantarray* t)) ($cl_op $left $right))"   if $ctx == LIST_CTX;
-  }
-
-  return "($cl_op $left $right)";
 }
 
 # E2 form variant of gen_binary_op.  Converts every binary op structurally,
@@ -3925,103 +3522,26 @@ sub gen_hash_init_form {
   return ['make-p-box', ['p-hash', @pairs]];
 }
 
-# Generate inline lambda for grep/map/sort blocks
-# Output: (lambda (params) body)
-sub gen_inline_lambda {
-  my $self    = shift;
-  my $node    = shift;
-  my $node_id = shift;
-  my $kids    = shift;
-
-  my @pair     = @{$node->{params} // []};
-  my $params   = join(' ', @pair);
-  my $spec     = _sort_pair_special_decl($node->{params});
-  # task #78 safety net: a Parser2-lowered body carries body_form only; the
-  # form handler normally intercepts it, but flat-print here too so no text
-  # caller can ever see a bodyless lambda.
-  my $body     = defined $node->{body_cl} ? $node->{body_cl}
-               : $node->{body_form}
-               ? join(' ', map { Pl::CLForm::to_flat($_) } @{$node->{body_form}})
-               : 'nil';
-  my $for_func = $node->{for_func} // '';
-
-  # Named sort comparator (sort NAME LIST).
-  # Perl sets $a/$b as package globals; the lambda params ($a $b) create dynamic
-  # bindings so subs reading $a/$b globals still work.
-  # For ($$) prototype subs (my($a,$b)=@_), pass $a $b as explicit args too.
-  # For all other subs, pass no args (Perl's normal sort behaviour: @_ is empty).
-  # If the function is undefined, dispatch to AUTOLOAD (Perl #30661).
-  if ($for_func eq 'sort' && $node->{comparator_name}) {
-    my $cl_func = $self->cl_name($node->{comparator_name});
-    my $proto;
-    if ($self->environment) {
-      my $cname = $node->{comparator_name};
-      $proto = $self->environment->get_prototype($cname)
-            // $self->environment->get_prototype($cname =~ s/^:://r)
-            // $self->environment->get_prototype($cname =~ s/.*:://r);
-    }
-    my $has_dollar_dollar = $proto && $proto->{is_proto}
-                          && ($proto->{proto_string} // '') eq '$$';
-    my $call_args = $has_dollar_dollar ? " $params" : '';
-    my $lambda_body = "(let ((*wantarray* nil))\n"
-                    . "  (handler-case ($cl_func$call_args)\n"
-                    . "    (undefined-function ()\n"
-                    . "      (let ((al (intern \"PL-AUTOLOAD\" |sort--pkg|)))\n"
-                    . "        (when (fboundp al) (funcall (symbol-function al)))))))";
-    $kids = [];
-    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    $spec(catch :p-return\n      (block nil\n$lambda_body))))";
-  }
-
-  # Scalar comparator (sort $var LIST): call via p-sort-get-fn at runtime.
-  # The lambda params $a/$b create dynamic bindings; p-sort-get-fn resolves
-  # the scalar (coderef, string name, glob, or glob ref) to a CL function.
-  if ($for_func eq 'sort' && $node->{scalar_cmp}) {
-    my $scalar_cl = $kids && @$kids ? $self->gen_node($kids->[0]) : 'nil';
-    # Capture *package* at lambda creation so p-sort-get-fn can look up
-    # string sub names in the correct (user) package even when called from
-    # inside p-sort (which runs in the :pcl package).
-    my $lambda_body = "(let ((*wantarray* nil) (*package* |sort--pkg|))\n  (funcall (p-sort-get-fn $scalar_cl) $params))";
-    $kids = [];
-    return "(let ((|sort--pkg| *package*))\n  (lambda ($params)\n    $spec(catch :p-return\n      (block nil\n$lambda_body))))";
-  }
-
-  # Sort comparator blocks may contain explicit `return` — wrap with catch.
-  # Bind *wantarray* = nil (scalar): the comparator must return a scalar, and
-  # Perl's wantarray() inside a comparator returns false (scalar context).
-  # grep/map blocks do NOT get the catch: `return` inside them should
-  # propagate to the enclosing sub's (catch :p-return ...).
-  if ($for_func eq 'sort') {
-    return "(lambda ($params)\n  $spec(catch :p-return\n    (block nil\n(let ((*wantarray* nil))\n$body))))";
-  }
-  return "(lambda ($params)\n$body)";
-}
-
+# The inline lambda for grep/map/sort/eval/do bodies (task #78 form emitter;
+# since Phase A4 the ONLY one).  A Parser2-lowered body arrives as body_form
+# (an arrayref of CLForms); a body v1 compiled to text (a block
+# lower_embedded_block declined, or an expression inside a v1-routed
+# statement) arrives as body_cl and rides as one raw form.  Sort comparators
+# get the :p-return catch and the scalar-context *wantarray* bind; grep/map/
+# eval bodies get neither (`return` inside them must propagate to the
+# enclosing sub's catch).
+#
 # A sort comparator lambda inside a block-level `package X;` region binds the
 # REGION's pair — X::$a / X::$b — because that is what the requalified body
 # reads and what perl sets (Pl::PExpr::_sort_pair has the full reasoning).
 # Those two symbols are defvar'd by the region's own entry forms, but those
 # run INSIDE the enclosing top-level form, so they have NOT proclaimed the
 # symbols special by the time this lambda is compiled (probed s380: a nested
-# defvar leaves the parameter a plain LEXICAL).  This declaration is what
-# makes the binding dynamic, so a comparator that reads the GLOBAL — perl's
-# `sort NAME LIST` shape, and the `${(caller)[0]."::a"}` symbolic shape
-# Sort::Versions uses — sees the values.  The section's bare $a/$b need
-# nothing: their defvars are top level, hence no declaration and byte-for-byte
-# unchanged emission for every unswitched sort.
-sub _sort_pair_special_decl {
-  my ($params) = @_;
-  my @qualified = grep { /::/ } @{ $params // [] };
-  return '' unless @qualified;
-  return '(declare (special ' . join(' ', @qualified) . ")) ";
-}
-
-# E2 form variant (task #78): only for a Parser2-lowered body (`body_form`,
-# an arrayref of CLForms — see Pl::Parser2::lower_embedded_block); every
-# other shape (v1 pipeline, named/scalar sort comparators, declined blocks)
-# keeps the text emitter's fixed multiline layouts via body_cl.  Same
-# wrappers as the text emitter: sort comparators get the :p-return catch and
-# the scalar-context *wantarray* bind; grep/map/eval bodies get neither
-# (`return` inside them must propagate to the enclosing sub's catch).
+# defvar leaves the parameter a plain LEXICAL).  The (declare (special …))
+# below is what makes the binding dynamic, so a comparator that reads the
+# GLOBAL — perl's `sort NAME LIST` shape, and the `${(caller)[0]."::a"}`
+# symbolic shape Sort::Versions uses — sees the values.  The section's bare
+# $a/$b need nothing: their defvars are top level.
 sub gen_inline_lambda_form {
   my ($self, $node, $node_id, $kids) = @_;
   my @pair     = @{$node->{params} // []};
@@ -4081,11 +3601,17 @@ sub gen_inline_lambda_form {
   }
 
   my $bf = $node->{body_form};
-  if ($ENV{PCL_E2_RAW_CENSUS} && !$bf) {
-    (my $snip = $node->{body_cl} // '') =~ s/\s+/ /g;
-    warn "pcl-raw\tlambda:$for_func:body_cl\t" . substr($snip, 0, 70) . "\n";
+  if (!$bf) {
+    # A body v1 compiled to TEXT (a block that lower_embedded_block declined,
+    # or an expression inside a v1-routed statement): E2's residue rule —
+    # the text rides as ONE raw inside the structural lambda (Phase A4; the
+    # text lambda emitter is gone).  Still counted by the raw census.
+    if ($ENV{PCL_E2_RAW_CENSUS}) {
+      (my $snip = $node->{body_cl} // '') =~ s/\s+/ /g;
+      warn "pcl-raw\tlambda:$for_func:body_cl\t" . substr($snip, 0, 70) . "\n";
+    }
+    $bf = [Pl::CLForm::raw($node->{body_cl} // 'nil')];
   }
-  return undef unless $bf;
   if ($for_func eq 'sort') {
     return ['lambda', $params, @decl,
             ['catch', ':p-return',
