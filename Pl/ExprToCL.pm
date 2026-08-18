@@ -2930,6 +2930,22 @@ sub _gen_scalar_deref_base_form {
   return $f;
 }
 
+# The KEY of a hash element (#387 family 20, s413 — the half that was
+# identical between the bare `$h{…}` and the `->{…}` access): a multi-key
+# `$h{a,b,c}` (a progn of 2+ parts) joins with $; — (p-join |$;| (vector …));
+# anything else is the key expression itself.
+sub _hash_key_form {
+  my ($self, $key_id) = @_;
+  my $key_node = $self->expr_o->get_a_node($key_id);
+  if ($self->expr_o->is_internal_node_type($key_node)
+      && $key_node->{type} eq 'progn') {
+    my $key_kids = $self->expr_o->get_node_children($key_id);
+    return ['p-join', '|$;|', ['vector', map { $self->gen_node_form($_) } @$key_kids]]
+      if @$key_kids > 1;
+  }
+  return $self->gen_node_form($key_id);
+}
+
 # E2 form variant of gen_hash_access.  Container then key (order preserved);
 # multi-key $h{a,b,c} → (p-join |$;| (vector …)); bare-var sigil rewrite /
 # %# register / rename as strings, nested container structural.
@@ -2940,20 +2956,7 @@ sub gen_hash_access_form {
              || ref($hash_node) eq 'PPI::Token::Magic';
   my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
 
-  my $key_node = $self->expr_o->get_a_node($kids->[1]);
-  my $key;
-  if ($self->expr_o->is_internal_node_type($key_node)
-      && $key_node->{type} eq 'progn') {
-    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
-    if (@$key_kids > 1) {
-      my @parts = map { $self->gen_node_form($_) } @$key_kids;
-      $key = ['p-join', '|$;|', ['vector', @parts]];
-    } else {
-      $key = $self->gen_node_form($kids->[1]);
-    }
-  } else {
-    $key = $self->gen_node_form($kids->[1]);
-  }
+  my $key = $self->_hash_key_form($kids->[1]);
 
   if ($is_bare) {
     $hash = _swap_elem_sigil($hash, q(%));
@@ -3011,22 +3014,23 @@ sub gen_hash_ref_access_form {
   my $ref = $self->_is_paren_scalar_base($kids->[0])
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
-  my $key_node = $self->expr_o->get_a_node($kids->[1]);
-  my $key;
-  if ($self->expr_o->is_internal_node_type($key_node)
-      && $key_node->{type} eq 'progn') {
-    my $key_kids = $self->expr_o->get_node_children($kids->[1]);
-    if (@$key_kids > 1) {
-      my @parts = map { $self->gen_node_form($_) } @$key_kids;
-      $key = ['p-join', '|$;|', ['vector', @parts]];
-    } else {
-      $key = $self->gen_node_form($kids->[1]);
-    }
-  } else {
-    $key = $self->gen_node_form($kids->[1]);
-  }
+  my $key = $self->_hash_key_form($kids->[1]);
   my $func = $self->lvalue_context ? 'p-gethash-deref-box' : 'p-gethash-deref';
   return [$func, $ref, $key];
+}
+
+# The index/key operands of a slice node — children 1.. of $kids, each put in
+# LIST context and lowered, in order (#387 family 17, s413: the loop the four
+# slice emitters below each spelled).  The container (child 0) is lowered
+# by the caller FIRST, as before.
+sub _slice_index_forms {
+  my ($self, $kids) = @_;
+  my @forms;
+  for my $i (1 .. $#$kids) {
+    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
+    push @forms, $self->gen_node_form($kids->[$i]);
+  }
+  return @forms;
 }
 
 # @a[i,j] → (p-aslice @a i j), context-wrapped.
@@ -3034,12 +3038,7 @@ sub gen_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $arr = $self->gen_node_form($kids->[0]);
-  my @indices;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @indices, $self->gen_node_form($kids->[$i]);
-  }
-  return $self->_slice_in_context_form(['p-aslice', $arr, @indices], $node_id);
+  return $self->_slice_in_context_form(['p-aslice', $arr, $self->_slice_index_forms($kids)], $node_id);
 }
 
 # @h{a,b} → (p-hslice %h a b), context-wrapped (bare Symbol @→% sigil rewrite).
@@ -3052,12 +3051,7 @@ sub gen_hash_slice_form {
   if ($is_bare && $hash =~ /(?:^|::)\@/) {
     $hash =~ s/(^|::)\@/${1}%/;
   }
-  my @keys;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @keys, $self->gen_node_form($kids->[$i]);
-  }
-  return $self->_slice_in_context_form(['p-hslice', $hash, @keys], $node_id);
+  return $self->_slice_in_context_form(['p-hslice', $hash, $self->_slice_index_forms($kids)], $node_id);
 }
 
 # %h{a,b} → (p-kv-hslice %h a b)  (no context wrap).
@@ -3065,12 +3059,7 @@ sub gen_kv_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash = $self->gen_node_form($kids->[0]);
-  my @keys;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @keys, $self->gen_node_form($kids->[$i]);
-  }
-  return ['p-kv-hslice', $hash, @keys];
+  return ['p-kv-hslice', $hash, $self->_slice_index_forms($kids)];
 }
 
 # %a[i,j] → (p-kv-aslice @a i j)  (%→@ sigil rewrite; $ref base → (unbox …)).
@@ -3080,12 +3069,7 @@ sub gen_kv_array_slice_form {
   my $arr = $self->gen_node($kids->[0]);
   $arr =~ s/(^|::)\%/${1}\@/;
   my $arr_form = $arr =~ /^\$/ ? ['unbox', $arr] : $arr;
-  my @indices;
-  for my $i (1 .. $#$kids) {
-    $self->expr_o->set_node_context($kids->[$i], LIST_CTX);
-    push @indices, $self->gen_node_form($kids->[$i]);
-  }
-  return ['p-kv-aslice', $arr_form, @indices];
+  return ['p-kv-aslice', $arr_form, $self->_slice_index_forms($kids)];
 }
 
 # --- E2 form variants: progn + the small I/O nodes --------------------------
