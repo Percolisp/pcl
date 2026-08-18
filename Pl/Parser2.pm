@@ -9149,16 +9149,17 @@ sub _expr_scalar_rooted {
   my @snap = map { [$_, $_->content] }
              map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
   my $ok = eval {
-    # Analysis-only parse — no _v2_embed hook (see _lower_expr's native
-    # attempt for the rationale).  The `local $SIG{__WARN__} = sub {}` that
-    # used to sit here silenced ONE line, PExpr's "Handle single node of
+    # ANALYSIS-ONLY parse (PExpr `analysis_only`, Phase B1): embedded block
+    # bodies stay uncompiled, so this parse neither lowers through the
+    # `_v2_embed` hook nor emits v1 text.  The `local $SIG{__WARN__} = sub {}`
+    # that used to sit here silenced ONE line, PExpr's "Handle single node of
     # unknown type" warn (`sub u { ... }` triggered it); that warn is gone
     # since task #339, so the workaround left with its cause.
-    local $self->fallback_parser->{_v2_embed};
     my $expr_o = Pl::PExpr->new(
-      e           => \@parts,
-      environment => $self->environment,
-      parser      => $self->fallback_parser,
+      e             => \@parts,
+      environment   => $self->environment,
+      parser        => $self->fallback_parser,
+      analysis_only => 1,
     );
     my ($id) = $expr_o->parse_expr_to_tree(\@parts);
     while (1) {

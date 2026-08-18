@@ -161,6 +161,21 @@ has parser => (
   predicate => 'has_parser',
 );
 
+# Phase B1 (docs/plan-one-compiler-s411.md): an ANALYSIS parse wants the
+# expression's SHAPE — VarAnnotator's tree walk, Parser2's
+# _expr_scalar_rooted — never its emission.  Under analysis_only the block
+# sites (map/grep/sort/eval/do/&-proto/anon sub) build their lambda nodes
+# with NO body: neither the structural route (the parser's `_v2_embed` hook)
+# nor v1's text compile of the block runs, so an analysis parse compiles
+# nothing and emits nothing — the discarded ~900 block compiles per corpus
+# measured s411, and with them the reason those callers had to save/restore
+# the parser's emission buckets.  A body-less lambda node reaching an
+# emitter DIES there (rule 12): analysis trees never reach emission.
+has analysis_only => (
+  is      => 'ro',
+  default => sub { 0 },
+);
+
 
 # Delegate token utility methods
 sub is_atomic { shift->token_utils->is_atomic(@_) }
@@ -2630,6 +2645,39 @@ sub _v2_embedded_body {
   return $r;
 }
 
+# The body of an embedded map/grep/sort/eval block, as the inline_lambda
+# node carries it: (body_form, body_cl) — the structural route first, v1's
+# text compile of the block otherwise.  ONE copy for the two block sites
+# (the map/grep/sort operator form and the eval-family form).  Under
+# analysis_only both routes are skipped and the node gets no body at all.
+sub _embedded_lambda_body {
+  my ($self, $block, $func_name) = @_;
+  return () if $self->analysis_only;
+  my $body_form = $self->_v2_embedded_body($block, $func_name);
+  return ($body_form, undef) if $body_form;
+  return (undef, _block_is_hash_constructor($block)
+    ? $self->parser->parse_hash_block_to_cl_string($block)
+    : $self->parser->parse_block_to_cl_string($block, $func_name));
+}
+
+# Fill a func_ref node for a block that becomes a LAMBDA (do{}, a &-proto
+# call's block, anon sub): lambda_form from the structural route, else
+# raw_lambda = v1's parse_block_as_function text with the site's own
+# arguments.  $wrap (optional) turns the hook's body forms into the lambda —
+# do{} needs (lambda () (progn …)); the sub shapes get the whole lambda from
+# the hook already.  Under analysis_only the node stays body-less.
+sub _embedded_func_ref {
+  my ($self, $ref_node, $block, $for_func, $v1_args, $wrap) = @_;
+  return if $self->analysis_only;
+  my $form = $self->_v2_embedded_body($block, $for_func);
+  if ($form) {
+    $ref_node->{lambda_form} = $wrap ? $wrap->($form) : $form;
+    return;
+  }
+  $ref_node->{raw_lambda} = $self->parser->parse_block_as_function($block, @$v1_args);
+}
+
+
 sub _block_is_hash_constructor {
   my $block = shift;
   my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
@@ -3250,13 +3298,7 @@ sub handle_subcalls {
             # (A following `->` deref chain never reaches this branch: the
             # chunk-2 normalizer above re-routed the ctor-shaped spelling
             # and died on the block-shaped one.)
-            my $body_form = $self->_v2_embedded_body($block, $func_name);
-            my $body_cl;
-            if (!$body_form) {
-              $body_cl = _block_is_hash_constructor($block)
-                ? $self->parser->parse_hash_block_to_cl_string($block)
-                : $self->parser->parse_block_to_cl_string($block, $func_name);
-            }
+            my ($body_form, $body_cl) = $self->_embedded_lambda_body($block, $func_name);
 
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
             $lambda_node->{params}    = $params;
@@ -3416,14 +3458,7 @@ sub handle_subcalls {
             # died.  For eval/do the chain stays IN the token stream and is
             # bound onto the funcall node by the ordinary postfix machinery,
             # derefing the block's RESULT exactly as perl does.)
-            my $body_form = $self->_v2_embedded_body($next, $func_name);
-            my $body_cl;
-            if (!$body_form) {
-              # Parse block body as CL string
-              $body_cl = _block_is_hash_constructor($next)
-                ? $self->parser->parse_hash_block_to_cl_string($next)
-                : $self->parser->parse_block_to_cl_string($next, $func_name);
-            }
+            my ($body_form, $body_cl) = $self->_embedded_lambda_body($next, $func_name);
 
             # Create inline_lambda node
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
@@ -3449,14 +3484,8 @@ sub handle_subcalls {
             # node carries lambda_form (same (funcall (lambda () (progn …)))
             # shape); the progn — not (block nil) — keeps loop transparency.
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-            my $body_form = $self->_v2_embedded_body($next, 'do');
-            if ($body_form) {
-              $ref_node->{lambda_form} =
-                ['lambda', ['list'], ['progn', @$body_form]];
-            } else {
-              $ref_node->{raw_lambda} =
-                $self->parser->parse_block_as_function($next, [], 0, 1, 1);
-            }
+            $self->_embedded_func_ref($ref_node, $next, 'do', [[], 0, 1, 1],
+              sub { ['lambda', ['list'], ['progn', @{ $_[0] }]] });
             $self->add_child_to_node($top_id, $ref_id);
           } else {
             # A &-prototype sub (e.g. try/catch, first/reduce) receives the
@@ -3468,20 +3497,15 @@ sub handle_subcalls {
             # v1's route instead emits a top-level `(defun --anon-block-N--)`
             # that Parser2's seam then HOISTS out of that let — the bug the
             # #26 gate guards against (fable-answers-s345.md §3).
-            # When the hook declines (or is absent — the seam localizes it OFF
-            # during the discarded native attempt), ask v1 for a LAMBDA
+            # When the hook declines (or is absent — no Parser2 lowering above
+            # this parse), ask v1 for a LAMBDA
             # ($return_lambda=1), not a defun: same in-place hosting, and no
             # emitted `--anon-block-N--` left behind in the bucket for the
             # seam to drain.  This is the sibling anon-`sub {…}` branch's own
             # call below, with the block-proto params.
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-            my $lambda_form = $self->_v2_embedded_body($next, 'sub');
-            if ($lambda_form) {
-              $ref_node->{lambda_form} = $lambda_form;
-            } else {
-              $ref_node->{raw_lambda} =
-                $self->parser->parse_block_as_function($next, $params, $has_block_proto, 1);
-            }
+            $self->_embedded_func_ref($ref_node, $next, 'sub',
+                                      [$params, $has_block_proto, 1]);
             $self->add_child_to_node($top_id, $ref_id);
           }
         } else {
@@ -3539,13 +3563,7 @@ sub handle_subcalls {
           # task #78: with the v2 hook, the whole lambda arrives as one
           # CLForm (v1's exact wrapper shape); otherwise v1's text.
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          my $lambda_form = $self->_v2_embedded_body($next, 'sub');
-          if ($lambda_form) {
-            $ref_node->{lambda_form} = $lambda_form;
-          } else {
-            $ref_node->{raw_lambda} =
-              $self->parser->parse_block_as_function($next, [], 1, 1);
-          }
+          $self->_embedded_func_ref($ref_node, $next, 'sub', [[], 1, 1]);
 
           # Replace sub { } with the function reference (4-arg splice preserves comma)
           splice @$e, $i, 2, $ref_node;

@@ -678,10 +678,10 @@ sub _tw_expr_parse {
   my @parts = grep { ref $_ && $_->significant } @$parts;
   return unless @parts;
 
-  # Expression-embedded blocks (do/map/grep/sort/eval{} …): PExpr compiles
-  # their bodies to a CL STRING (inline_lambda body_cl) — invisible to the
-  # tree walk — and they lower inside the v1 seam, where every write is a
-  # box-set.  Walk their statements STRUCTURALLY with the seam flag so all
+  # Expression-embedded blocks (do/map/grep/sort/eval{} …): the analysis
+  # parse below leaves their bodies UNCOMPILED (opaque lambda nodes, invisible
+  # to the tree walk), and they lower inside the v1 seam, where every write
+  # is a box-set.  Walk their statements STRUCTURALLY with the seam flag so all
   # writes count as write-embedded.  Sub-blocks are closures: the nested-sub
   # region fact owns those.
   for my $b (@{ _tw_top_blocks(\@parts) }) {
@@ -698,32 +698,25 @@ sub _tw_expr_parse {
   # bug).  Snapshot/restore both, via the shared Parser2 helper.
   my $snap = Pl::Parser2::_ppi_state_snapshot(@parts);
 
-  # Analysis-only parse: divert any parser bucket emission (block-form args
-  # can emit anon-block defuns DURING parsing) into a scratch section set and
-  # DISCARD it — the real lowering emits later.
+  # ANALYSIS-ONLY parse (PExpr `analysis_only`, Phase B1): the embedded
+  # blocks' bodies are not compiled at all — no structural lowering through
+  # the `_v2_embed` hook, no v1 text compile — so nothing here can emit or
+  # recurse into Parser2, and the parser's emission buckets need no
+  # save/redirect/restore.  (Before B1 this parse compiled every block body
+  # through v1 into a scratch section and threw the text away: ~900 discarded
+  # block compiles per corpus, measured s411.)
   my $p = $ctx->{host}->fallback_parser;
-  my @sv = ($p->_sections, $p->_cur_bucket, $p->indent_level);
-  $p->_sections([]);
-  $p->_cur_bucket('definitions');
-  $p->_open_section('pcl');
-  $p->_cur_bucket('definitions');
-  $p->indent_level(0);
-
   my $ok = eval {
     # (The `local $SIG{__WARN__} = sub {}` that used to sit here silenced ONE
     # line — PExpr's "Handle single node of unknown type" warn before its
     # decline die.  That warn is gone since task #339, so the workaround left
     # with its cause; an analysis parse that has something real to say should
     # say it.)
-    # No _v2_embed hook (task #78) in analysis parses: it may be live when
-    # this analysis runs inside an embedded-block lowering, and an
-    # analysis-triggered Parser2 lowering would be pure discarded side
-    # effects (worst case unbounded block-in-block recursion).
-    local $p->{_v2_embed};
     my $expr_o = Pl::PExpr->new(
-      e           => \@parts,
-      environment => $ctx->{host}->environment,
-      parser      => $p,
+      e             => \@parts,
+      environment   => $ctx->{host}->environment,
+      parser        => $p,
+      analysis_only => 1,
     );
     my ($root, $decls) = $expr_o->parse_expr_to_tree(\@parts);
     for my $d (@{ $decls // [] }) {
@@ -737,9 +730,6 @@ sub _tw_expr_parse {
     1;
   };
 
-  $p->_sections($sv[0]);
-  $p->_cur_bucket($sv[1]);
-  $p->indent_level($sv[2]);
   Pl::Parser2::_ppi_state_restore($snap);
 
   push @{ $ctx->{fallback_texts} }, join(' ', map { $_->content } @parts)

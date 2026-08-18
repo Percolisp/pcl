@@ -3488,6 +3488,9 @@ sub gen_func_ref_form {
   my ($self, $node, $node_id, $kids) = @_;
   return $node->{lambda_form} if $node->{lambda_form};
   return Pl::CLForm::raw($node->{raw_lambda}) if $node->{raw_lambda};
+  # Body-less: built by an analysis-only parse (Phase B1) — never emitted.
+  die "PCL internal: analysis-only func_ref reached emission\n"
+    if !defined $node->{func_name};
   return "#'" . $node->{func_name};
 }
 
@@ -3602,6 +3605,10 @@ sub gen_inline_lambda_form {
 
   my $bf = $node->{body_form};
   if (!$bf) {
+    # A node with NEITHER body was built by an analysis-only parse (PExpr
+    # `analysis_only`, Phase B1) — such a tree never reaches emission (rule 12).
+    die "PCL internal: analysis-only inline_lambda ($for_func) reached emission\n"
+      if !defined $node->{body_cl};
     # A body v1 compiled to TEXT (a block that lower_embedded_block declined,
     # or an expression inside a v1-routed statement): E2's residue rule —
     # the text rides as ONE raw inside the structural lambda (Phase A4; the
