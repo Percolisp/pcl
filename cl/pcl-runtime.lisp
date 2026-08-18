@@ -4960,57 +4960,41 @@
            (src (gensym "SRC"))
            (src-vec (gensym "SRC-VEC"))
            (indices (gensym "INDICES")))
-       ;; Auto-declare array if needed (when arr is a simple symbol)
-       (if (symbolp arr)
-           `(progn
-              (unless (boundp ',arr)
-                (%p-ensure-storage (quote ,arr))
-                (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
-              (let* ((,src ,value)
-                     ;; Convert source to vector
-                     (,src-vec (cond
-                                 ((listp ,src) (coerce ,src 'vector))
-                                 ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                 (t (vector ,src))))
-                     ;; Flatten indices (handle range operator returning vector or list)
-                     (,indices (let ((idx-list nil))
-                                 (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
-                                   (cond
-                                     ((listp idx)
-                                      (dolist (i idx) (push i idx-list)))
-                                     ((and (vectorp idx) (not (stringp idx)))
-                                      (loop for i across idx do (push i idx-list)))
-                                     (t (push idx idx-list)))))))
-                ;; Assign each element
-                (loop for i from 0 below (length ,indices)
-                      for idx in ,indices
-                      do (setf (p-aref ,arr idx)
-                               (if (< i (length ,src-vec))
-                                   (aref ,src-vec i)
-                                   *p-undef*)))
-                ;; Return the values that were assigned
-                ,src-vec))
-           ;; Non-symbol array expression - just use it directly
-           `(let* ((,src ,value)
-                   (,src-vec (cond
-                               ((listp ,src) (coerce ,src 'vector))
-                               ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                               (t (vector ,src))))
-                   (,indices (let ((idx-list nil))
-                               (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
-                                 (cond
-                                   ((listp idx)
-                                    (dolist (i idx) (push i idx-list)))
-                                   ((and (vectorp idx) (not (stringp idx)))
-                                    (loop for i across idx do (push i idx-list)))
-                                   (t (push idx idx-list)))))))
-              (loop for i from 0 below (length ,indices)
-                    for idx in ,indices
-                    do (setf (p-aref ,arr idx)
-                             (if (< i (length ,src-vec))
-                                 (aref ,src-vec i)
-                                 *p-undef*)))
-              ,src-vec))))
+       ;; The assignment proper; a simple-symbol array is auto-declared first
+       ;; (#387 family 46, s413: the body was spelled once per case).
+       (let ((body
+               `(let* ((,src ,value)
+                       ;; Convert source to vector
+                       (,src-vec (cond
+                                   ((listp ,src) (coerce ,src 'vector))
+                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                                   (t (vector ,src))))
+                       ;; Flatten indices (handle range operator returning vector or list)
+                       (,indices (let ((idx-list nil))
+                                   (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
+                                     (cond
+                                       ((listp idx)
+                                        (dolist (i idx) (push i idx-list)))
+                                       ((and (vectorp idx) (not (stringp idx)))
+                                        (loop for i across idx do (push i idx-list)))
+                                       (t (push idx idx-list)))))))
+                  ;; Assign each element
+                  (loop for i from 0 below (length ,indices)
+                        for idx in ,indices
+                        do (setf (p-aref ,arr idx)
+                                 (if (< i (length ,src-vec))
+                                     (aref ,src-vec i)
+                                     *p-undef*)))
+                  ;; Return the values that were assigned
+                  ,src-vec)))
+         (if (symbolp arr)
+             `(progn
+                (unless (boundp ',arr)
+                  (%p-ensure-storage (quote ,arr))
+                  (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
+                ,body)
+             ;; Non-symbol array expression - just use it directly
+             body))))
     ;; Hash slice assignment: (p-setf (p-hslice hash keys...) values)
     ((and (listp place) (eq (car place) 'p-hslice))
      (let ((hash (cadr place))
@@ -5018,53 +5002,37 @@
            (src (gensym "SRC"))
            (src-vec (gensym "SRC-VEC"))
            (keys (gensym "KEYS")))
-       ;; Auto-declare hash if needed (when hash is a simple symbol)
-       (if (symbolp hash)
-           `(progn
-              (unless (boundp ',hash)
-                (%p-ensure-storage (quote ,hash))
-                (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
-              (let* ((,src ,value)
-                     (,src-vec (cond
-                                 ((listp ,src) (coerce ,src 'vector))
-                                 ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                 (t (vector ,src))))
-                     (,keys (let ((key-list nil))
-                              (dolist (k (list ,@keys-exprs) (nreverse key-list))
-                                (cond
-                                  ((listp k)
-                                   (dolist (kk k) (push kk key-list)))
-                                  ((and (vectorp k) (not (stringp k)))
-                                   (loop for kk across k do (push kk key-list)))
-                                  (t (push k key-list)))))))
-                (loop for i from 0 below (length ,keys)
-                      for k in ,keys
-                      do (setf (p-gethash ,hash k)
-                               (if (< i (length ,src-vec))
-                                   (aref ,src-vec i)
-                                   *p-undef*)))
-                ,src-vec))
-           ;; Non-symbol hash expression
-           `(let* ((,src ,value)
-                   (,src-vec (cond
-                               ((listp ,src) (coerce ,src 'vector))
-                               ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                               (t (vector ,src))))
-                   (,keys (let ((key-list nil))
-                            (dolist (k (list ,@keys-exprs) (nreverse key-list))
-                              (cond
-                                ((listp k)
-                                 (dolist (kk k) (push kk key-list)))
-                                ((and (vectorp k) (not (stringp k)))
-                                 (loop for kk across k do (push kk key-list)))
-                                (t (push k key-list)))))))
-              (loop for i from 0 below (length ,keys)
-                    for k in ,keys
-                    do (setf (p-gethash ,hash k)
-                             (if (< i (length ,src-vec))
-                                 (aref ,src-vec i)
-                                 *p-undef*)))
-              ,src-vec))))
+       ;; The assignment proper; a simple-symbol hash is auto-declared first
+       ;; (#387 family 46, s413: the body was spelled once per case).
+       (let ((body
+               `(let* ((,src ,value)
+                       (,src-vec (cond
+                                   ((listp ,src) (coerce ,src 'vector))
+                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                                   (t (vector ,src))))
+                       (,keys (let ((key-list nil))
+                                (dolist (k (list ,@keys-exprs) (nreverse key-list))
+                                  (cond
+                                    ((listp k)
+                                     (dolist (kk k) (push kk key-list)))
+                                    ((and (vectorp k) (not (stringp k)))
+                                     (loop for kk across k do (push kk key-list)))
+                                    (t (push k key-list)))))))
+                  (loop for i from 0 below (length ,keys)
+                        for k in ,keys
+                        do (setf (p-gethash ,hash k)
+                                 (if (< i (length ,src-vec))
+                                     (aref ,src-vec i)
+                                     *p-undef*)))
+                  ,src-vec)))
+         (if (symbolp hash)
+             `(progn
+                (unless (boundp ',hash)
+                  (%p-ensure-storage (quote ,hash))
+                  (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
+                ,body)
+             ;; Non-symbol hash expression
+             body))))
     ;; $! as lvalue: (p-setf (p-errno-string) val) -> set C errno
     ((and (listp place) (eq (car place) 'p-errno-string))
      `(setf (p-errno-string) ,value))
