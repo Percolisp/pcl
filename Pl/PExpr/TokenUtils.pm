@@ -122,55 +122,36 @@ sub is_arrow_op {
   return undef;
 }
 
+# The five brace predicates (#387 family 34, s413): one line each, the same
+# truth table (1 / undef), and deliberately NO shared helper — is_hash_braces
+# is the hottest predicate in the compiler (92 k calls in the s413 12-file
+# sample, 176 k in s411's); a call layer here is a measurable compile-time
+# cost, which is also why Pl::PExpr calls these five as plain functions.
 sub is_arr_or_hash_braces {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  return 1
-      if ref($stmt) eq 'PPI::Structure::Subscript'
-      && ($stmt->start() eq '[' || $stmt->start() eq '{');
-  return undef;
+  my (undef, $stmt) = @_;
+  return ref($stmt) eq 'PPI::Structure::Subscript'
+      && ($stmt->start() eq '[' || $stmt->start() eq '{') ? 1 : undef;
 }
 
 sub is_arr_braces {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  return 1
-      if ref($stmt) eq 'PPI::Structure::Subscript'
-      && $stmt->start() eq '[';
-  return undef;
+  my (undef, $stmt) = @_;
+  return ref($stmt) eq 'PPI::Structure::Subscript' && $stmt->start() eq '[' ? 1 : undef;
 }
 
 # Not for code. :-)
 sub is_hash_braces {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  return 1
-      if ref($stmt) eq 'PPI::Structure::Subscript'
-      && $stmt->start() eq '{';
-  return undef;
+  my (undef, $stmt) = @_;
+  return ref($stmt) eq 'PPI::Structure::Subscript' && $stmt->start() eq '{' ? 1 : undef;
 }
 
 sub is_inline_hash {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  return 1
-      if ref($stmt) eq 'PPI::Structure::Constructor'
-      && $stmt->start() eq '{';
-  return undef;
+  my (undef, $stmt) = @_;
+  return ref($stmt) eq 'PPI::Structure::Constructor' && $stmt->start() eq '{' ? 1 : undef;
 }
 
 sub is_inline_arr {
-  my $self      = shift;
-  my $stmt      = shift;
-
-  return 1
-      if ref($stmt) eq 'PPI::Structure::Constructor'
-      && $stmt->start() eq '[';
-  return undef;
+  my (undef, $stmt) = @_;
+  return ref($stmt) eq 'PPI::Structure::Constructor' && $stmt->start() eq '[' ? 1 : undef;
 }
 
 sub is_token_operator {

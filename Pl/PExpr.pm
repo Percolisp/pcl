@@ -184,11 +184,16 @@ sub is_string { shift->token_utils->is_string(@_) }
 sub is_number { shift->token_utils->is_number(@_) }
 sub is_var { shift->token_utils->is_var(@_) }
 sub is_arrow_op { shift->token_utils->is_arrow_op(@_) }
-sub is_arr_or_hash_braces { shift->token_utils->is_arr_or_hash_braces(@_) }
-sub is_arr_braces { shift->token_utils->is_arr_braces(@_) }
-sub is_hash_braces { shift->token_utils->is_hash_braces(@_) }
-sub is_inline_hash { shift->token_utils->is_inline_hash(@_) }
-sub is_inline_arr { shift->token_utils->is_inline_arr(@_) }
+# The five brace predicates are stateless one-liners in TokenUtils and never
+# read their invocant, so they are called as FUNCTIONS — no accessor, no
+# method dispatch — is_hash_braces is the compiler's hottest predicate
+# (#387 family 34, s413).  The rest keep the delegating shape: some of them
+# call sibling predicates on $self.
+sub is_arr_or_hash_braces { Pl::PExpr::TokenUtils::is_arr_or_hash_braces(@_) }
+sub is_arr_braces { Pl::PExpr::TokenUtils::is_arr_braces(@_) }
+sub is_hash_braces { Pl::PExpr::TokenUtils::is_hash_braces(@_) }
+sub is_inline_hash { Pl::PExpr::TokenUtils::is_inline_hash(@_) }
+sub is_inline_arr { Pl::PExpr::TokenUtils::is_inline_arr(@_) }
 sub is_token_operator { shift->token_utils->is_token_operator(@_) }
 sub is_list { shift->token_utils->is_list(@_) }
 sub is_word { shift->token_utils->is_word(@_) }
