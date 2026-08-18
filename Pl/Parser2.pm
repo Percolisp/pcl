@@ -8561,7 +8561,10 @@ sub _lower_embedded_body {
   # runtime restore, which a bare lambda does not have (the switch leaked
   # out of `map { package XM; … }`).  Keep v1's route.  (PPI find returns 0,
   # not undef, when nothing matches.)
-  return undef if @{ $block->find('PPI::Statement::Package') || [] };
+  if (@{ $block->find('PPI::Statement::Package') || [] }) {
+    warn "pcl-raw\tbody-decl:package\n" if $ENV{PCL_E2_RAW_CENSUS};
+    return undef;
+  }
 
   # Tail shapes v1 lowers differently: scheduled/sub tails still decline.
   # A tail DECLARATION converts when its value semantics are covered by the
@@ -8571,16 +8574,23 @@ sub _lower_embedded_body {
   # defined-tail_ctx ret-var transform yields the cond value when the body
   # is skipped — v1's plain (p-if COND EXPR) wrongly dropped it (`map
   # { X if C }` lost the "" element perl produces); loop modifiers take the
-  # statement-level _fallback_stmt inside the converted block.
+  # statement-level _fallback_stmt inside the converted block.  A tail
+  # INCLUDE converts (Phase C, s412): _lower_block routes it through
+  # _fallback_stmt, whose runtime raw IS the tail value — `(p-require "X")`
+  # for `eval { require X }` (require's value, as perl), and a `use`/`no`
+  # emits no runtime form at all, so the block's value is the previous
+  # statement's — which is perl's too (a `use` runs nothing at run time).
   my $tail = $stmts[-1];
-  return undef
-    if !$tail->isa('PPI::Statement')
-    || ($tail->isa('PPI::Statement::Variable')
-        && !$self->_tail_decl_convertible($tail))
-    || $tail->isa('PPI::Statement::Scheduled')
-    || $tail->isa('PPI::Statement::Sub')
-    || $tail->isa('PPI::Statement::Include')
-    || $tail->isa('PPI::Statement::Package');
+  if (!$tail->isa('PPI::Statement')
+      || ($tail->isa('PPI::Statement::Variable')
+          && !$self->_tail_decl_convertible($tail))
+      || $tail->isa('PPI::Statement::Scheduled')
+      || $tail->isa('PPI::Statement::Sub')
+      || $tail->isa('PPI::Statement::Package')) {
+    warn "pcl-raw\tbody-decl:tail-" . (ref($tail) =~ s/^PPI::Statement:*//r || 'stmt') . "\n"
+      if $ENV{PCL_E2_RAW_CENSUS};
+    return undef;
+  }
 
   my $env = $self->environment;
   # Decline must be side-effect-free: snapshot everything a partial lowering
@@ -8617,6 +8627,12 @@ sub _lower_embedded_body {
   $self->{_let_bound_vars} = \%saved_lb;
 
   if (!$forms || !@$forms || grep { _embed_form_unsafe($_) } @$forms) {
+    if ($ENV{PCL_E2_RAW_CENSUS}) {
+      my $why = !$forms ? 'lower-died: ' . substr(($@ // '') =~ s/\s+/ /gr, 0, 60)
+              : !@$forms ? 'empty-forms'
+              : 'embed-unsafe';
+      warn "pcl-raw\tbody-decl:$why\n";
+    }
     for my $s (@side_snaps) {
       splice @{ $self->{$s->[0]} }, $s->[1] if $self->{$s->[0]};
     }

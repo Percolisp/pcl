@@ -818,4 +818,25 @@ eval { Pl::Parser2->parse_code('my($a,$b),$x,my($c,$d)', eval_mode => 1) };
 like($@, qr/^PCL: unsupported in string eval: trailing declaration has no value/,
      'multi-tail INVERSE: a decl inside a comma expression still refuses');
 
+# s412 (Phase C): v1's `local` machinery caps inlining — `(locally (declare
+# (notinline …)))` / a `(declare (notinline …))` at the head of its let — only
+# for a `local` that wraps the REST OF THE FILE (a huge cold form: local.t OOM,
+# s268).  Under Parser2's seam every v1-routed statement lowers at indent 0,
+# so the indent-keyed discriminator called a `local` in a file-level LOOP body
+# top-level too and suppressed the fast-path inlining in that hot body; the
+# seam's block_depth is the real-nesting fact and now takes part.
+{
+  my $top = Pl::Parser2->parse_code(q{our $x = 1; local $x = 2; sub f { $x } print f();});
+  like($top, qr/notinline/, 'a true top-level local (wraps the rest of the file) keeps the inlining cap');
+  my $loop = Pl::Parser2->parse_code(
+    q{our $x = 5; sub f { $x } for my $i (1..2) { local $x = $i; print f(); }});
+  unlike($loop, qr/notinline/, 'a local inside a file-level loop body gets NO inlining cap (hot code)');
+  like($loop, qr/\(p-local-cell \$x \(p-box-for-local \$i\)/, '…and still lowers as p-local-cell');
+  my $ev = Pl::Parser2->parse_code(
+    q{our $x = 5; sub f { $x } my $r = eval { local $x = 1; my @l = map { $_ } 1..2; f() }; print $r;});
+  unlike($ev, qr/notinline/, 'a local inside an eval body: no inlining cap');
+  like($ev, qr/p-eval-block/, 'the eval body lowers');
+  like($ev, qr/\(p-foreach-range-raw|\(p-map \(lambda/, 'the eval body with a local is lowered STRUCTURALLY (map goes through the structural route)');
+}
+
 done_testing();

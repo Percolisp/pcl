@@ -134,14 +134,24 @@ sub _flat {
 # way).  A converted (form-producing) ExprToCL emitter inside a text
 # context is printed with THIS, so byte-parity with the old text emitter
 # is checkable per step (tools/corpus-diff.pl).  Unlike _flat above this
-# never declines — flat is the contract, not an optimization.  raw_wrap
-# is a statement-level device and cannot appear inside an expression
-# form; a loud die beats silently mangling its deferred closers.
+# never declines — flat is the contract, not an optimization.
+# A raw_wrap (a v1 `local` inside a structurally lowered eval/do/sub body,
+# Phase C of docs/plan-one-compiler-s411.md) renders as its open text, the
+# body forms, and exactly $closes `)`s — balanced by construction, the same
+# closers to_string appends; a segment that ENDS inside a `;` comment gets
+# the next piece on a fresh line so nothing is swallowed.
 sub to_flat {
   my ($f) = @_;
   return $f unless ref $f;
   return $$f if is_raw($f);
-  die "CLForm::to_flat: raw_wrap inside an expression form" if is_raw_wrap($f);
+  if (is_raw_wrap($f)) {
+    my $out = $f->{open};
+    for my $b (@{ $f->{body} }) {
+      $out .= (_ends_in_comment($out) ? "\n" : ' ') . to_flat($b);
+    }
+    $out .= "\n" if _ends_in_comment($out);
+    return $out . (')' x $f->{closes});
+  }
   my ($head, @args) = @$f;
   my @parts = ($head eq 'list' ? () : $head);
   push @parts, map { to_flat($_) } @args;
@@ -235,15 +245,21 @@ sub _raw_census {
 }
 
 # A form the FLAT printer cannot safely embed in an expression position
-# (task #78 embed-safety scan, shared by Parser2 and PExpr): raw_wrap
-# (statement-level device, to_flat dies on it) or a raw chunk that ENDS
-# inside a line comment (a sibling or closing paren printed after it on the
-# same line would be swallowed).  Interior newlines/comments are fine —
-# to_flat embeds raw text verbatim, as v1's text emitters always did.
+# (task #78 embed-safety scan, shared by Parser2 and PExpr): a raw chunk
+# that ENDS inside a line comment (a sibling or closing paren printed after
+# it on the same line would be swallowed).  Interior newlines/comments are
+# fine — to_flat embeds raw text verbatim, as v1's text emitters always did.
+# A raw_wrap is safe when its body is: to_flat prints its open text and its
+# closers with the same end-of-comment care as to_string (until Phase C it
+# was refused outright — every eval/do/sub body holding a `local` took the
+# v1 text route for that alone).
 sub embed_unsafe {
   my ($f) = @_;
   return 0 unless ref $f;
-  return 1 if is_raw_wrap($f);
+  if (is_raw_wrap($f)) {
+    for my $sub (@{ $f->{body} }) { return 1 if embed_unsafe($sub) }
+    return 0;
+  }
   return _ends_in_comment($$f) if is_raw($f);
   return 0 unless ref $f eq 'ARRAY';
   for my $sub (@$f) { return 1 if embed_unsafe($sub) }

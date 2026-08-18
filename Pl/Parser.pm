@@ -4313,8 +4313,18 @@ sub _process_local_declaration {
   my @cell_b = grep { !is_exception_global($_->[0]) } @bindings;
 
   my $let_form = ($rhs_tmp_cl || $use_let_star) ? "let*" : "let";
+  # "Top level" = this `local` wraps the REST OF THE FILE (see the notinline
+  # comment below).  Under Parser2's seam every v1-routed statement is
+  # lowered at indent 0 (capture_v1), so indent_level alone called a `local`
+  # inside a file-level loop/if/eval body top-level too and wrapped that
+  # body's remainder in `(locally (declare (notinline …)))` — suppressing the
+  # fast-path inlining in exactly the hot loop bodies the discriminator meant
+  # to exclude (found s412 when Phase C routed `eval { local … }` bodies
+  # here).  _block_depth is the seam's real-nesting fact (0 only for a
+  # statement outside every block); v1's own walk tracks it the same way.
   my $at_top_level = ($self->environment->in_subroutine == 0
-                      && $self->indent_level == 0);
+                      && $self->indent_level == 0
+                      && !$self->_block_depth);
   if (@let_b) {
     my $bindings_str = join("\n        ", map { "($_->[0] $_->[1])" } @let_b);
     $self->_emit("($let_form ($bindings_str)");

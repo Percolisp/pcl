@@ -27,6 +27,9 @@
 #                     legal, this tool only proves that NOTHING ELSE moved.
 #   ctx-macros        (p-list-ctx F) / (p-scalar-ctx F) / (p-void-ctx F) /
 #                     (p-caller-ctx F) → the `let` they abbreviate (#281 item 1)
+#   notinline-locally (locally (declare (notinline …)) B…) → (progn B…) — the
+#                     top-level-`local` inlining cap; its discriminator moved
+#                     at s412 (Phase C), a wrap-only change normalizes away
 #
 # The reader is a small S-expression reader for PCL's OWN emission: strings
 # with backslash escapes, `|…|` symbol segments (may contain parens and
@@ -48,7 +51,7 @@ my @rules;
 my ($do_diff, $corpus_ref);
 GetOptions('rule=s' => \@rules, 'diff' => \$do_diff, 'corpus=s' => \$corpus_ref)
   or die "usage: $0 [--rule NAME]... FILE | --diff A B | --corpus REF\n";
-my %RULE = map { $_ => 1 } (@rules ? @rules : qw(elem-setf insensitive-call ctx-macros));
+my %RULE = map { $_ => 1 } (@rules ? @rules : qw(elem-setf insensitive-call ctx-macros notinline-locally));
 
 if ($corpus_ref) { exit corpus_mode($corpus_ref) }
 if ($do_diff) {
@@ -201,6 +204,22 @@ sub rewrite {
   if ($RULE{'ctx-macros'} && @$f == 2 && $h =~ /^p-(list|scalar|void|caller)-ctx$/) {
     my $bind = { list => 't', scalar => 'nil', void => ':void', caller => '*pcl-caller-wantarray*' }->{$1};
     return ['let', [['*wantarray*', $bind]], $f->[1]];
+  }
+  # (locally (declare (notinline …)) BODY…) → (progn BODY…): v1's `local`
+  # machinery wraps a "top-level" local's remainder in it to cap inlining
+  # in a huge cold form; the discriminator moved at s412 (Phase C), so an
+  # emission change that only adds/removes this wrap normalizes away.
+  if ($RULE{'notinline-locally'}) {
+    my $is_ni = sub { is_list($_[0]) && head($_[0]) eq 'declare'
+                      && is_list($_[0][1]) && head($_[0][1]) eq 'notinline' };
+    if ($h eq 'locally' && @$f >= 2 && $is_ni->($f->[1])) {
+      return @$f == 3 ? $f->[2] : ['progn', @$f[2 .. $#$f]];
+    }
+    # the same declaration at the head of a `let` body (a top-level `local`
+    # of an exception global carries it inside its own let)
+    if (($h eq 'let' || $h eq 'let*') && @$f >= 3 && $is_ni->($f->[2])) {
+      return [$h, $f->[1], @$f[3 .. $#$f]];
+    }
   }
   return $f;
 }

@@ -858,4 +858,21 @@ my @n = map({ k => $_ }, 1..2);      print "map-paren:", ref($n[0]), $n[1]{k}, "
 my %h = map { $_ => 1 } qw(p q);     print "map-pairs:", join(",", sort keys %h), "\n";
 ');
 
+# s412 (Phase C): an eval/do/sub body holding a `local` is lowered
+# STRUCTURALLY (the v1 raw_wrap rides inside the lambda; until s412 the whole
+# body took v1's text route for that alone) — the dynamic extent must still
+# end with the block, and `eval { require X }` (a tail Include, also lifted)
+# must yield require's value / undef + $@.
+test_transpile('s412: local inside eval/do/sub bodies restores at block exit; eval { require X } tail value', '
+our $x = 5; sub f { $x }
+my $r = eval { local $x = 1; f() };           print "eval:$r $x\n";
+my $d = do { local $x = 2; f() + 1 };         print "do:$d $x\n";
+my $s = sub { local $x = 3; f() };            print "sub:", $s->(), " $x\n";
+for my $i (7..8) { local $x = $i; print "loop:", f(), "\n" }  print "after:$x\n";
+my @l = eval { local $x = 9; map { $_ + $x } 1..2 }; print "list:@l $x\n";
+my $ok = eval { require Nope::Missing::Mod }; print defined $ok ? "req:$ok" : "req:undef", ($@ =~ /locate/ ? " err" : " ?"), "\n";
+my $p = eval { require POSIX; 1 };            print "posix:$p\n";
+our @arr = (1,2); my $c = eval { local @arr = (3); scalar @arr }; print "arr:$c ", scalar(@arr), "\n";
+');
+
 done_testing();
