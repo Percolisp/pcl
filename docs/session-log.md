@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 414 (2026-08-19, Opus 5) — the s413 runtime branch verified and merged (#395); #387 families 2+10 extracted, three bugs found in the differences (#397, the empty-slice split, the runtime twin)
+## Session 414 (2026-08-19, Opus 5) — #395: the s413 runtime branch verified and merged; #387 CLOSED (families 2+10, 14/26, 38, the &-mention family; the tail rule satisfied) with four more bugs found in the differences; #281 items 1+2+6 WIP on branch `s414-ir-macros`
 
 **Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six
 runtime dedup families 23, 13, 21 + fix #394, 37, 42, 46–48) was one commit
@@ -150,6 +150,58 @@ four in `Pl/Parser.pm`'s `_process_block` / `_process_block_in_tail_context` /
 walkers (SUPERSEDED-BY the InterpScan consumer-3 port, #388).  What is left is
 SHAPE-only.  So the EXTRACT half of #387 is done under the s413 scope ruling,
 and the queue moves to `docs/plan-post-s408.md` §2.
+
+### #281 items 1+2+6 — WIP ON BRANCH `s414-ir-macros` (`7e56c4f`), the sweep still to run
+
+The session ended here, so the work is on a branch with its bar written into
+the commit message.  It is complete and gate-green; what is missing is the
+full sweep, the pack-artifact re-check, the bench and the `ir-spec.md` update.
+**Next session: run those four, then `git merge --ff-only s414-ir-macros`.**
+
+What it does — the three zero-runtime-cost items ranked in
+`docs/generated-cl-ir-review.md`'s s407 re-measurement:
+
+- **The context protocol, named.**  `p-list-ctx` / `p-scalar-ctx` /
+  `p-void-ctx` / `p-caller-ctx` expand to exactly the `(let ((*wantarray* …))
+  …)` they replace — 7 to 17 of those per 100 emitted lines, the loudest shape
+  in the file.  Seventeen emission sites now ask ONE builder,
+  `Pl::CLForm::ctx_bind`, which DIES on an unknown context.  (Fable's list
+  named three macros; `:void` is 246 of sort.t's 665 binds, so it got one too.)
+- **The sort comparator, named.**  `p-sort-cmp` expands to the
+  `(lambda PAIR (catch :p-return (block nil …)))` the three sort sites spelled,
+  keeping leading `(declare …)` at the lambda head.
+- **Duplicate declarations.**  `_forward_global_decls` emits per SECTION, so a
+  name used from several sections of one package was declared once per
+  section — 16 repeats in sort.t, 4 in hash.t, 2 in closure.t.  **The key is
+  (package, name), never the text**: `in-package` is READ-time per top-level
+  form, so sort.t's ten `(defvar $a …)` lines are ten different symbols and no
+  duplicates at all.  The s407 `dupdv` counter measured text, and a text-level
+  fix here would have been a silent wrong.
+
+**The finding worth carrying: THREE consumers pattern-match the emitted
+context wrap, and a rename defeats them silently.**
+`Parser2::_auto_defined_call` and `Parser::_auto_defined_cond` (perl's implicit
+`defined()` around `while (my $l = <FH>)` — unseen, the loop stops on a "0"
+line), the runtime's `%p-fh-arg` (unseen, `binmode(NOPE)` CALLS `pl-NOPE`,
+undefined function) and the runtime's `p-list-=` undef-placeholder test.  The
+first was caught by the corpus A/B and the second by the gate — neither by
+reading the diff.  Both runtime matchers now go through one new
+`%p-strip-ctx`, which peels either spelling.
+
+**The proof the commit rests on**: `tools/emission-normalize.pl --corpus HEAD`
+says **identical after normalization across 111 files** — the emission moved in
+exactly the three intended shapes and nowhere else.  The tool gained
+`sort-cmp` and `dup-decls` rules, `ctx-macros` covers any body length, and the
+macro spellings now expand BEFORE the other rules (or `insensitive-call` stops
+seeing the `let` it needs — that ordering bug cost one round).
+
+Expectation rows in ten Pl/t files were rewritten to the new spelling
+(STRONGER: they name the context or the comparator instead of a bare `let`),
+and the rule's fourth conjunct is a new `transpile-test-10.t` row that
+macroexpands all five macros at the runtime and compares them to the exact
+forms they renamed.  Generation v2-158, all three artifacts regenerated — and
+**re-tagged**: `pl2cl --extension` does not emit the license header the gate
+requires, which is now written into `Pl/t/artifact-staleness-01.t`'s recipe.
 
 ## Session 413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387): 9 families on `main`, 6 on a branch for Opus; scope ruled compiler + runtime; three silent-wrongs found by the reviews; handoff
 

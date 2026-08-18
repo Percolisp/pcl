@@ -97,6 +97,32 @@ not-supported.md → only then probe.*
   consumer-3 port, #388).  Everything else is SHAPE-only.  The queue moves to
   `docs/plan-post-s408.md` §2 (I = #281 items 1+2+6 → J–L Option B phase 2 →
   M–N release).
+- **#281 items 1+2+6 are on branch `s414-ir-macros` (`7e56c4f`), NOT merged** —
+  complete and gate-green (150 files / 5522 rows, only the 13 pclxs xs rows),
+  with `tools/emission-normalize.pl --corpus HEAD` reporting **identical after
+  normalization across 111 files**, but the FULL SWEEP, the pack-artifact
+  re-check, the bench and the `docs/ir-spec.md` update are still to run.  The
+  commit message carries that bar.  Next session: run the four, then
+  `git merge --ff-only`.
+- **A RENAME OF AN EMITTED SHAPE IS NOT COSMETIC — grep for the consumers that
+  pattern-match it.**  Renaming `(let ((*wantarray* …)) …)` to the `p-…-ctx`
+  macros broke THREE matchers: `Parser2::_auto_defined_call` +
+  `Parser::_auto_defined_cond` (perl's implicit `defined()` around
+  `while (my $l = <FH>)` — unseen, the loop stops on a "0" line), the runtime's
+  `%p-fh-arg` (unseen, `binmode(NOPE)` CALLS `pl-NOPE`, undefined function) and
+  the runtime's `p-list-=` undef-placeholder test.  The first was caught by the
+  corpus A/B and the second by the gate, neither by reading the diff.  Both
+  runtime matchers now share ONE `%p-strip-ctx`.
+- **The duplicate-declaration key is (PACKAGE, NAME), never the text**
+  (#281 item 2): `in-package` is READ-time per top-level form, so sort.t's ten
+  `(defvar $a …)` lines are ten DIFFERENT symbols and no duplicates at all.
+  The s407 `dupdv` counter measured text; a text-level fix would have been a
+  silent wrong.  The real repeats — one name, one package, several sections —
+  are 16 in sort.t, 4 in hash.t, 2 in closure.t.
+- **Regenerating an artifact needs `tools/tag-license` after it**: `pl2cl
+  --extension` does not emit the license header `Pl/t/license-tag-01.t`
+  requires, so a regeneration without it turns one red row into two.  Written
+  into `Pl/t/artifact-staleness-01.t`'s recipe.
 
 ## s413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387); scope = compiler + runtime (USER); three silent-wrongs found by the family reviews; handoff to Opus
 
