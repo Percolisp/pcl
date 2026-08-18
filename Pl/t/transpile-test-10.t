@@ -875,4 +875,26 @@ my $p = eval { require POSIX; 1 };            print "posix:$p\n";
 our @arr = (1,2); my $c = eval { local @arr = (3); scalar @arr }; print "arr:$c ", scalar(@arr), "\n";
 ');
 
+# `"\b"` in double-quoted context is BACKSPACE (0x08) — dq strings, qq{},
+# heredocs, backticks and s/// replacements alike; tr/// already had it.
+# PCL's dq escape decoder had no `\b` arm, so the "unknown \X → X" rule made
+# it a plain `b` (silent wrong; found reviewing the two escape decoders for
+# their merge, #387 family 44; task #393).  Every path that reaches the
+# decoder is exercised: the non-interpolated string, an interpolated one, a
+# heredoc, a plain and an interpolated s/// replacement.  Perl-probed.
+test_transpile('#393: "\b" is backspace in every double-quoted context (dq, qq, heredoc, s/// replacement); tr keeps it', '
+my $x = "Z";
+my $s = "a\bc";                 print "dq:", join(",", map { ord } split //, $s), "\n";
+my $i = "a\b$x";                print "interp:", join(",", map { ord } split //, $i), "\n";
+my $q = qq{p\bq};               print "qq:", join(",", map { ord } split //, $q), "\n";
+my $h = <<"E";
+h\bh
+E
+chomp $h;                       print "heredoc:", join(",", map { ord } split //, $h), "\n";
+(my $r = "aXc") =~ s/X/\b/;     print "subst:", join(",", map { ord } split //, $r), "\n";
+(my $t = "aXc") =~ s/X/\b$x/;   print "isubst:", join(",", map { ord } split //, $t), "\n";
+(my $u = "a\x08c") =~ tr/\b/B/; print "tr:$u\n";
+print "still-unknown:", "\q\z", " and-f:", ord("\f"), "\n";
+');
+
 done_testing();

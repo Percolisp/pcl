@@ -4069,6 +4069,7 @@ sub _process_dq_escape {
   return "\a" if $esc eq 'a';
   return "\e" if $esc eq 'e';
   return "\f" if $esc eq 'f';
+  return "\b" if $esc eq 'b';   # backspace, as in perl (was 'b': task #393, s413)
   return "\$" if $esc eq '$';
   return '@'  if $esc eq '@';
   return '"'  if $esc eq '"';
