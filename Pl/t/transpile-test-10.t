@@ -897,4 +897,29 @@ chomp $h;                       print "heredoc:", join(",", map { ord } split //
 print "still-unknown:", "\q\z", " and-f:", ord("\f"), "\n";
 ');
 
+# The slice-argument flatten rule, applied by EVERY slice reader / KV reader /
+# slice delete (runtime %p-flatten-slice-args): a range or an interpolated
+# @list contributes its elements; a STRING is one index/key, never its
+# characters.  Three siblings disagreed with it (task #394, found reviewing
+# the six copies for their extraction, #387 family 21): p-aslice exploded a
+# raw string index into characters (@a["12"] read element 0 twice), and the
+# two array-slice deletes did not flatten at all (delete @a[1..2] deleted
+# element 0).  Perl-probed.
+test_transpile('#394: slice arguments flatten alike everywhere — string index is one index; delete @a[RANGE]/@a[@list]/%a[RANGE] flatten', '
+my @a = (10,20,30,40,50,60,70,80,90,100,110,120,130);
+print "lit:", join(",", @a["1"]), "\n";
+my $s = "1"; print "cat:", join(",", @a[$s . "2"]), "\n";
+my @b = @a["12", "0"]; print "two:@b\n";
+my $i = "12"; print "var:", join(",", @a[$i]), "\n";
+my @r = @a[1..3]; print "range:@r\n";
+my %h = (ab => 1, cd => 2); print "hslice:", join(",", @h{"ab", "cd"}), "\n";
+my @d = delete @a["12"]; print "delstr:@d ", scalar(@a), "\n";
+my @x = (10,20,30,40,50,60);
+my @dr = delete @x[1..2];   print "delrange:@dr | ", join(",", map { defined $_ ? $_ : "u" } @x), "\n";
+my @ix = (4, 5);
+my @dl = delete @x[@ix];    print "dellist:@dl | ", scalar(@x), "\n";
+my @y = (1,2,3,4,5,6);
+my @kv = delete %y[1..2];   print "delkv:@kv | ", scalar(@y), "\n";
+');
+
 done_testing();

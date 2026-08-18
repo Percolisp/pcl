@@ -7038,16 +7038,29 @@ create the key on a read-only call, which perl does not."
   "Live BOX at $ref->[idx] — the array-ref analogue of p-gethash-deref-box."
   (p-aref-box (p-ensure-arrayref ref) idx))
 
+;;; The KEY / INDEX list of a slice or slice-delete, flattened (#387 family
+;;; 21, s413 — six functions spelled this loop, and the three that DISAGREED
+;;; with it were the bugs of task #394): a non-string vector (a range `1..3`,
+;;; an interpolated @list) and a non-empty list contribute their elements;
+;;; anything else — a number, a box, a STRING (one key, never its characters:
+;;; p-aslice used to explode "12" into #\1 #\2), nil — is one entry.  Every
+;;; slice reader, KV reader and slice delete goes through here (the two array
+;;; deletes used to take a range vector as ONE index and deleted element 0).
+;;; Inline: it runs once per slice, and its callers already allocate.
+(declaim (inline %p-flatten-slice-args))
+(defun %p-flatten-slice-args (args)
+  (loop for arg in args
+        if (and (vectorp arg) (not (stringp arg)))
+        append (coerce arg 'list)
+        else if (and (listp arg) (not (null arg)))
+        append arg
+        else
+        collect arg))
+
 (defun p-aslice (arr &rest indices)
   "Perl array slice @arr[indices] - returns vector of values.
    Handles individual indices, lists, and vectors (from range operator)."
-  (let ((flat-indices (loop for idx in indices
-                            if (vectorp idx)
-                            append (coerce idx 'list)
-                            else if (and (listp idx) (not (null idx)))
-                            append idx
-                            else
-                            collect idx))
+  (let ((flat-indices (%p-flatten-slice-args indices))
         (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (idx flat-indices result)
       (vector-push-extend (p-aref arr idx) result))))
@@ -7056,13 +7069,7 @@ create the key on a read-only call, which perl does not."
   "Perl hash slice @hash{keys} - returns vector of values.
    Handles individual keys, lists, and vectors (from range operator).
    Strings are vectors in CL but must not be expanded into characters."
-  (let ((flat-keys (loop for key in keys
-                         if (and (vectorp key) (not (stringp key)))
-                         append (coerce key 'list)
-                         else if (and (listp key) (not (null key)))
-                         append key
-                         else
-                         collect key))
+  (let ((flat-keys (%p-flatten-slice-args keys))
         (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (key flat-keys result)
       (vector-push-extend (p-gethash hash key) result))))
@@ -7071,13 +7078,7 @@ create the key on a read-only call, which perl does not."
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
    Handles individual keys, lists, and vectors (from range operator).
    Strings are vectors in CL but must not be expanded into characters."
-  (let ((flat-keys (loop for key in keys
-                         if (and (vectorp key) (not (stringp key)))
-                         append (coerce key 'list)
-                         else if (and (listp key) (not (null key)))
-                         append key
-                         else
-                         collect key))
+  (let ((flat-keys (%p-flatten-slice-args keys))
         (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (key flat-keys result)
       (let ((k (to-string key)))
@@ -7088,13 +7089,7 @@ create the key on a read-only call, which perl does not."
   "Perl KV array slice %arr[indices] - returns vector of (index, value) pairs.
    Handles individual indices, lists, and vectors (e.g. from range operator).
    Repeated indices yield repeated pairs, matching Perl semantics."
-  (let ((flat-indices (loop for idx in indices
-                            if (and (vectorp idx) (not (stringp idx)))
-                            append (coerce idx 'list)
-                            else if (and (listp idx) (not (null idx)))
-                            append idx
-                            else
-                            collect idx))
+  (let ((flat-indices (%p-flatten-slice-args indices))
         (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (idx flat-indices result)
       (let* ((i (truncate (to-number idx)))
@@ -7409,13 +7404,7 @@ create the key on a read-only call, which perl does not."
    Handles hash references (unboxes) and vector/list key arguments.
    Empty slice returns nil (undef) per [perl #29127]."
   (let* ((h (unbox hash))
-         (flat-keys (loop for key in keys
-                          if (and (vectorp key) (not (stringp key)))
-                          append (coerce key 'list)
-                          else if (and (listp key) (not (null key)))
-                          append key
-                          else
-                          collect key)))
+         (flat-keys (%p-flatten-slice-args keys)))
     (when (null flat-keys) (return-from p-delete-hash-slice nil))
     ;; Wrong kind of referent (delete @{$aryref}{…}): perl's fatal.  The loop
     ;; below calls GETHASH directly rather than going through p-gethash, so it
@@ -7432,13 +7421,7 @@ create the key on a read-only call, which perl does not."
   "Perl delete for KV hash slices: delete %hash{k1, k2, ...}
    Handles hash references (unboxes) and vector/list key arguments."
   (let* ((h (unbox hash))
-         (flat-keys (loop for key in keys
-                          if (and (vectorp key) (not (stringp key)))
-                          append (coerce key 'list)
-                          else if (and (listp key) (not (null key)))
-                          append key
-                          else
-                          collect key))
+         (flat-keys (%p-flatten-slice-args keys))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     ;; Wrong kind of referent: perl's fatal (task #154) — this loop calls
     ;; GETHASH directly rather than through p-gethash.
@@ -7455,6 +7438,10 @@ create the key on a read-only call, which perl does not."
    Sets elements to nil (deleted marker), trims trailing nils, and returns old values."
   (%p-check-array-writable (unbox arr))                  ; task #159
   (let* ((a (unbox arr))
+         ;; a range / an interpolated @list arrives as ONE vector argument —
+         ;; flatten like every other slice function (task #394: this and the KV
+         ;; twin used the vector itself as an index, i.e. deleted element 0)
+         (indices (%p-flatten-slice-args indices))
          (result (make-array (length indices) :adjustable t :fill-pointer 0)))
     (dolist (idx indices)
       (let* ((i (truncate (to-number idx)))
@@ -7477,6 +7464,7 @@ create the key on a read-only call, which perl does not."
    Deletes elements at given indices and returns key-value pairs (index, value, ...)."
   (%p-check-array-writable (unbox arr))                  ; task #159
   (let* ((a (unbox arr))
+         (indices (%p-flatten-slice-args indices))       ; task #394, as above
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (idx indices)
       (let* ((i (truncate (to-number idx)))
