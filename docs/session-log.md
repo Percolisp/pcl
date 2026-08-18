@@ -4,6 +4,86 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387): 9 families on `main`, 6 on a branch for Opus; scope ruled compiler + runtime; three silent-wrongs found by the reviews; handoff
+
+**Context.** The previous session was cut off by network trouble (a hanging
+process burned tokens; the user ended it when the service dropped to Opus 4.8
+— nothing on the machine, the tree was clean at `s412g`).  Fable time is
+short this week; this session finished its half and hands over
+(`docs/opus5-handoff-s413.md`).
+
+**USER RULINGS (mid-session):** "Only the compiler matters for duplicated
+code, the tools might be replaced" — and the runtime matters too.  Scope of
+the census = `Pl/**` + `cl/pcl-runtime.lisp`; `tools/**` and the runners are
+out (worklist §1 rule 7; memory `feedback_dup_census_compiler_only`); test
+files are never optimized (guard rows only ADDED).  Family 6 (`s413a`,
+`tools/lib/PCLProc.pm` — the runners' shared session isolation + reaping,
+with `tools/t/pclproc.t`) landed before the ruling and stays.
+
+**Census re-run first** (`tools/sub-call-census.pl --sample 12` +
+`dup-census.pl`): 452 clusters / 4 242 deletable lines (s411: 462 / 4 348),
+ranking unchanged after Phases A–C + #391, so §3's order stood.
+
+**On `main`, one commit per family, each `tools/corpus-diff.pl` IDENTICAL
+over 111 files (drops 13 = census) and gate-green (150 files, only the 13
+pclxs xs rows):** `s413b` family 5 — `Parser2::_decl_syms_under`, ONE
+my/state declaration walk ([$word,$sym,$block] triples; words / nested /
+sub_bounds / plain), eight hand copies gone incl. the two rename blockers via
+`_count_decls_of` (walk COUNT down — the s379 rule); `s413c` family 34 — the
+five brace predicates one-liners, and PExpr calls them as FUNCTIONS (the Moo
+accessor + method dispatch was the only call layer on the hottest predicate;
+compile A/B `pl2cl FILE` over the corpus, HEAD worktree vs tree, two
+interleaved rounds: 57.2/57.9 vs 57.4/57.9 s — neutral); `s413d` family 3 —
+`add_child_flattening` + `_kv_slice_node` (seven flatten copies in the
+postfix loop); `s413e` family 4 — `_reduce_pre` (THE reduction step, 12
+sites) + `_prefix_op_node` (4); `s413f` family 8 — `_take_rest_as_args`;
+`s413g` families 17+20 — `_slice_index_forms` + `_hash_key_form`; `s413i`
+family 44 — `_decode_escape` (dq = decoder + case markers, tr = decoder).
+Every PExpr helper keeps node-id allocation ORDER at every site — that is
+what makes the emission identical rather than merely equivalent.
+
+**Three pre-existing silent-wrongs, each "the sibling that spelled the rule
+differently" (the census as a bug finder — probe the DIFFERENCE vs perl
+before unifying):** **#393** `"\b"` in dq context was `b` (perl backspace;
+tr had the arm; the whole 17-row escape table probed identical to perl
+otherwise) — FIXED `s413h`, guard row transpile-test-10.t, corpus-neutral;
+**#394** `p-aslice` exploded a STRING index into characters (`@a["12"]` →
+element 0 twice) and the two array-slice deletes did not flatten at all
+(`delete @a[1..2]` deleted element 0) — FIXED on the branch by the family-21
+helper itself (`s413l`), guard row there.
+
+**Branch `s413-lisp-dedup` (`s413j`–`s413o`) = the six runtime families**
+23 (`%with-binary-overload`, 7 copies + `%def-overloaded-arith`), 13
+(`%p-array-fill-item` macro, 4 loops), 21+#394 (`%p-flatten-slice-args`
+inline, 8 users), 37 (`%p-extend-to` inline, 6 writers; `p-alias-array-slot`
+left — no writability check there), 42 (`%p-symref-symbol`), 46–48 (p-setf's
+slice arms build the body once — expansion identical) — each parens-checked,
+the tip loads with HEAD's exact warning set (52 style / 4), macroexpansions
+and both inlines inspected in the disassembly, five bench rows added
+(arrfill, slices, sliceasgn, ovlsub, symref; snippets validated perl == PCL).
+**Gate + bench A/B + full sweep on the branch tip + the fast-forward merge
+are Opus's task #395** (handoff §2).
+
+**The batch's sweep (over `main`, at the end — one measurement covers the
+batch because every other commit is corpus-diff IDENTICAL; family 5 is the
+one that needed it):** GATE clean, TOTAL 18513 (+0), 0 new / 0 fixed, drops
+13 = census, LOST 0; 6 UNSTABLE rows in the known crash-files
+(postfixderef.t, ref.t, yadayada.t — all PARTIAL in the blessed baseline).
+
+**Traps:** an INTERRUPTED tool call may have run to completion (`s413g` was
+doubled: the interrupted command had already committed 17+20 and copied the
+`\b` fix in; the re-run committed the fix under the 17+20 message —
+soft-reset, re-committed as `s413h`).  `perl -ne` with `<STDIN>` inside and
+a file argument reads the terminal — hangs.  `q{}` cannot hold unbalanced
+braces — heredocs for edit scripts.
+
+**Next:** `docs/opus5-handoff-s413.md` — #395 first, then the remaining
+in-scope families (2+10, 14/26 unblocked by Phase A; 38; the tail), then
+`docs/plan-post-s408.md` §2 (#281 items 1+2+6 → Option B phase 2 with
+Fable's operand grammar first → release).
+
+---
+
 ## Session 412 (2026-08-18, Fable) — Phases B + C of the one-compiler plan + #391: ONE seam function, the hook always answers, analysis parses compile nothing, the decline shapes 17 → 3, the prototype pre-scan is a facts walk (v1 parse() gone, compile −21 %)
 
 Two commits, `719ef4c` (B1) and `97cc944` (B2+B3); plan

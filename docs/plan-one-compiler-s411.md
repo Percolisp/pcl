@@ -410,7 +410,10 @@ Opus sessions, in order:
    sweep runs it 81 → 64 s, −21 %) — + the first batch of
    the duplicate worklist's EXTRACT items (`docs/dup-census-worklist-s411.md`
    §2, each corpus-diff IDENTICAL, cold code first, hot code with the
-   timing).
+   timing).  **s413 (Fable): DONE for the compiler half (`s413a`–`s413i`
+   on `main`); the runtime half is on branch `s413-lisp-dedup`, verify +
+   merge = Opus task #395 — `docs/opus5-handoff-s413.md`.  Scope ruled
+   COMPILER + RUNTIME ONLY (USER s413).**
 4. Then the previous queue resumes where it stood (`docs/plan-post-s408.md`
    §2): #281 items 1+2+6 (with the s410 7.7 (a) normalizer — it is the same
    tool Phase A's bar needs, so it likely already exists by then), Option B

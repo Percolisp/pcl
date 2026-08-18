@@ -11,6 +11,55 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387); scope = compiler + runtime (USER); three silent-wrongs found by the family reviews; handoff to Opus
+
+- **USER RULING (s413): duplicated-code extraction matters ONLY for the
+  compiler and the runtime** — `Pl/**` + `cl/pcl-runtime.lisp` are the
+  product; `tools/**` and the two runner scripts are scaffolding that may be
+  replaced and are OUT OF SCOPE; test files are never an optimization target
+  (guard rows are only ADDED).  `docs/dup-census-worklist-s411.md` §1 rule 7;
+  memory `feedback_dup_census_compiler_only`.  Family 6 (`s413a`,
+  `tools/lib/PCLProc.pm`) landed before the ruling and stays.
+- **Families 5, 34, 3, 4, 8, 17+20, 44 landed on `main` (`s413b`–`s413i`)**,
+  each `tools/corpus-diff.pl` IDENTICAL over 111 files (drops 13 = census)
+  and gate-green (150 files, only the 13 pclxs xs rows): ONE my/state
+  declaration walk in Parser2 (`_decl_syms_under`, eight copies → one, the
+  walk COUNT went down), the five brace predicates one-liners AND called as
+  functions from PExpr (the Moo accessor + dispatch was the only call layer
+  on the hottest predicate; compile A/B 57.2/57.9 s vs 57.4/57.9 s =
+  neutral), the postfix-`->` loop's mechanics (`add_child_flattening`,
+  `_kv_slice_node`, `_reduce_pre`, `_prefix_op_node`, `_take_rest_as_args` —
+  node-id allocation order preserved at every site, which is what makes the
+  emission identical rather than merely equivalent), ExprToCL's
+  `_slice_index_forms` / `_hash_key_form` / `_decode_escape`.
+- **Families 23, 13, 21, 37, 42, 46–48 (the runtime) are on branch
+  `s413-lisp-dedup` (`s413j`–`s413o`)**, verified by Fable (parens; the tip
+  loads with HEAD's exact warning set; macroexpansions and the two `declaim
+  inline`s inspected in the disassembly) — **gate + bench A/B + full sweep on
+  the branch tip and the fast-forward merge are Opus's task #395**
+  (`docs/opus5-handoff-s413.md` §2).  Runtime rows added to
+  `tools/bench-exec.pl` (arrfill, slices, sliceasgn, ovlsub, symref).
+- **The census is a BUG FINDER: when copies of one rule differ, probe the
+  difference against perl before unifying — it is a reason for two copies or
+  a bug, never noise.**  Three found today, each "the sibling that spelled
+  it differently": **#393** `"\b"` in dq context was `b` (perl: backspace;
+  tr had the arm) — FIXED `s413h`, guard row transpile-test-10.t, whole
+  escape table (17 rows) probed identical to perl before and after; **#394**
+  `@a["12"]` exploded a STRING index into characters and `delete @a[1..2]` /
+  `delete @a[@i]` / `delete %a[1..2]` deleted element 0 (the two array
+  deletes did not flatten at all) — FIXED on the branch (`s413l`, ONE
+  `%p-flatten-slice-args`, 8 users), guard row on the branch.
+- **One full sweep covers a batch when every other commit is corpus-diff
+  IDENTICAL** (a mover bisects to the one non-identical commit); it ran at
+  the batch's end over `main` (verdict in the session log).  **An
+  interrupted tool call may have RUN to completion** — check `git log
+  --stat` before re-running a commit command (`s413g` was doubled once and
+  soft-reset).
+- **Handoff:** `docs/opus5-handoff-s413.md` — §2 the branch verification
+  recipe, §3 the queue (remaining in-scope families 2+10, 14/26, 38 →
+  `docs/plan-post-s408.md` §2: #281 items 1+2+6 → Option B phase 2 with
+  Fable's operand grammar first → release), §4 the rules above.
+
 ## s412 (2026-08-18, Fable) — Phase B DONE: ONE seam function; the hook always answers; analysis parses compile nothing
 
 - **Phase B1 DONE (`s412a`): PExpr `analysis_only => 1`** — an ANALYSIS parse
