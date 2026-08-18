@@ -13070,42 +13070,46 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((%p-scalar-referent-p val) (%p-not-a-ref "HASH"))
       (t v))))
 
+;;; The symbol a symbolic reference names (#387 family 42, s413 — the prologue
+;;; the four %p-symref-* readers/writers each spelled).  NAME-STR is perl's
+;;; name without the sigil (`x`, `Foo::Bar::x`); SIGIL is "$" / "@" / "%".
+;;; The last `::` splits package from variable; perl-pkg-to-cl-pkg-name keeps a
+;;; multi-segment package case-preserved to match its CL package |Foo::Bar|
+;;; (a plain string-upcase gave FOO::BAR, no such package) and upcases a
+;;; single segment; an unqualified name lives in *package*.  With CREATE the
+;;; package and the symbol are made (and the symbol's storage ensured) when
+;;; missing — the writers' contract; without it the reader gets NIL for an
+;;; unknown package or an unknown symbol.
+(defun %p-symref-symbol (name-str sigil create)
+  (let* ((pos (search "::" name-str :from-end t))
+         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
+         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (pkg (if pkg-str
+                  (or (find-package pkg-str)
+                      (and create (make-package pkg-str :use '(:cl :pcl))))
+                  *package*)))
+    (when pkg
+      (let ((sym-name (concatenate 'string sigil (%pcl-invert-case var-str))))
+        (if create
+            (let ((sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+              (%p-ensure-storage sym)
+              sym)
+            (find-symbol sym-name pkg))))))
+
 (defun %p-symref-box (name-str)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
    Returns the box on success, NIL if the name is invalid or variable not found."
   ;; CL symbols cannot contain null bytes — silently return nil
   (when (find #\Nul name-str) (return-from %p-symref-box nil))
-  (let* ((pos (search "::" name-str :from-end t))
-         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
-         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
-         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
-         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
-         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
-         (pkg (if pkg-str (find-package pkg-str) *package*)))
-    (when pkg
-      (let ((sym (find-symbol (concatenate 'string "$" (%pcl-invert-case var-str)) pkg)))
-        (when (and sym (boundp sym))
-          (let ((v (symbol-value sym)))
-            (when (p-box-p v) v)))))))
+  (let ((sym (%p-symref-symbol name-str "$" nil)))
+    (when (and sym (boundp sym))
+      (let ((v (symbol-value sym)))
+        (when (p-box-p v) v)))))
 
 (defun (setf %p-symref-box) (new-box name-str)
   "Set Perl symbolic scalar reference NAME-STR to NEW-BOX."
   (when (find #\Nul name-str) (return-from %p-symref-box new-box))
-  (let* ((pos (search "::" name-str :from-end t))
-         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
-         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
-         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
-         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
-         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
-         (pkg (if pkg-str
-                  (or (find-package pkg-str)
-                      (make-package pkg-str :use '(:cl :pcl)))
-                  *package*)))
-    (let* ((sym-name (concatenate 'string "$" (%pcl-invert-case var-str)))
-           (sym (or (find-symbol sym-name pkg)
-                    (intern sym-name pkg))))
-      (%p-ensure-storage sym)
-      (setf (symbol-value sym) new-box)))
+  (setf (symbol-value (%p-symref-symbol name-str "$" t)) new-box)
   new-box)
 
 (defun %p-symref-array (name-str)
@@ -13115,19 +13119,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    Returns the adjustable vector."
   (when (find #\Nul name-str) (return-from %p-symref-array
                                 (make-array 0 :adjustable t :fill-pointer 0)))
-  (let* ((pos (search "::" name-str :from-end t))
-         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
-         ;; match its CL package |Foo::Bar|; single-seg is upcased.  Plain
-         ;; string-upcase wrongly gave FOO::BAR (no such package) for multi-seg.
-         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
-         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
-         (pkg (if pkg-str
-                  (or (find-package pkg-str)
-                      (make-package pkg-str :use '(:cl :pcl)))
-                  *package*))
-         (sym-name (concatenate 'string "@" (%pcl-invert-case var-str)))
-         (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
-    (%p-ensure-storage sym)
+  (let ((sym (%p-symref-symbol name-str "@" t)))
     (unless (and (boundp sym)
                  (vectorp (symbol-value sym))
                  (not (stringp (symbol-value sym))))
@@ -13141,18 +13133,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    Returns the hash-table."
   (when (find #\Nul name-str) (return-from %p-symref-hash
                                 (make-hash-table :test 'equal)))
-  (let* ((pos (search "::" name-str :from-end t))
-         ;; perl-pkg-to-cl-pkg-name: multi-seg (Foo::Bar) stays case-preserved to
-         ;; match its CL package |Foo::Bar|; single-seg is upcased.
-         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
-         (var-str (if pos (subseq name-str (+ pos 2)) name-str))
-         (pkg (if pkg-str
-                  (or (find-package pkg-str)
-                      (make-package pkg-str :use '(:cl :pcl)))
-                  *package*))
-         (sym-name (concatenate 'string "%" (%pcl-invert-case var-str)))
-         (sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
-    (%p-ensure-storage sym)
+  (let ((sym (%p-symref-symbol name-str "%" t)))
     (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
       (setf (symbol-value sym) (make-hash-table :test 'equal)))
     (symbol-value sym)))
