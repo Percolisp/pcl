@@ -66,8 +66,8 @@ sub test_cl {
 # Test 1: sort { BLOCK } LIST → inline lambda with $a/$b params
 {
     my $cl = transpile('sort { $a cmp $b } @arr;');
-    like($cl, qr/p-sort.*lambda.*\$a.*\$b/s,
-         'sort { BLOCK } LIST generates inline lambda with $a/$b');
+    like($cl, qr/p-sort.*p-sort-cmp.*\$a.*\$b/s,
+         'sort { BLOCK } LIST generates a p-sort-cmp over $a/$b');
 }
 
 # Test 2: sort NAME LIST → wrapped in lambda, not a bare call

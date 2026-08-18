@@ -420,7 +420,7 @@ END_CODE
 
 # Regression (defins.t test 16): a list-assignment whose RHS is a lone glob, used
 # as a while-condition, must run glob as a SCALAR iterator (one file per loop) not
-# list context (all files at once).  glob is wrapped (let ((*wantarray* t)) ...) on
+# list context (all files at once).  glob is wrapped (p-list-ctx ...) on
 # a p-list-= RHS, so p-glob must fall back to scalar mode when *p-in-list-assign-rhs*
 # is set — mirroring p-readline's handling of while (($x) = <FH>).
 {

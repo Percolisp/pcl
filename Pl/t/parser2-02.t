@@ -521,8 +521,8 @@ EOF
   # (\s+ between subforms: since the E2.final root flip the structural printer
   # may break long forms across lines — layout is free, the shape is pinned.)
   like($st,
-       qr/\(p-sort\s+\(lambda \(\$a \$b\)\s+\(catch :p-return \(block nil \(let \(\(\*wantarray\* nil\)\) \(p-<=> \$a \$b\)\)\)\)\)\s+\@a\)/,
-       '#78: sort block keeps catch/block/wantarray wrappers, structurally');
+       qr/\(p-sort\s+\(p-sort-cmp \(\$a \$b\)\s+\(p-scalar-ctx \(p-<=> \$a \$b\)\)\)\s+\@a\)/,
+       '#78: sort block is ONE p-sort-cmp over the pair, scalar-context body');
 
   my $ev = Pl::Parser2->parse_code(q{my $e = eval { 42 };});
   like($ev, qr/\(p-eval-block 42\)/, '#78: eval block body is structural');

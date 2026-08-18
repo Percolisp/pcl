@@ -1197,9 +1197,9 @@ sub gen_binary_op_form {
         : ['p-hash-=', $left,
            ['vector', map { $self->gen_node_form($_) } @$rhs_kids]];
       return $ctx == LIST_CTX
-               ? ['let', ['list', ['list', '*wantarray*', 't']],   $result]
+               ? Pl::CLForm::ctx_bind('t', $result)
            : $ctx == SCALAR_CTX
-               ? ['let', ['list', ['list', '*wantarray*', 'nil']], $result]
+               ? Pl::CLForm::ctx_bind('nil', $result)
            : $result;
     }
   }
@@ -1324,9 +1324,9 @@ sub gen_binary_op_form {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : 0;
       my $result = ['p-list-=', $left, $right];
       return $ctx == LIST_CTX
-               ? ['let', ['list', ['list', '*wantarray*', 't']],   $result]
+               ? Pl::CLForm::ctx_bind('t', $result)
            : $ctx == SCALAR_CTX
-               ? ['let', ['list', ['list', '*wantarray*', 'nil']], $result]
+               ? Pl::CLForm::ctx_bind('nil', $result)
            : $result;
     } elsif ($left_flat =~ /^\(p-cast-% /) {
       # %$ref = (list): assign to a dereferenced hash
@@ -1387,9 +1387,9 @@ sub gen_binary_op_form {
                        || ref($rhs_node) eq 'PPI::Token::Regexp::Transliterate';
     if (!$rhs_is_subst_tr) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
-      return ['let', ['list', ['list', '*wantarray*', 'nil']], [$cl_op, $left, $right]]
+      return Pl::CLForm::ctx_bind('nil', [$cl_op, $left, $right])
         if $ctx == SCALAR_CTX;
-      return ['let', ['list', ['list', '*wantarray*', 't']], [$cl_op, $left, $right]]
+      return Pl::CLForm::ctx_bind('t', [$cl_op, $left, $right])
         if $ctx == LIST_CTX;
     }
   }
@@ -2129,7 +2129,7 @@ sub gen_funcall_form {
 
   # join always evaluates its list arguments in list context.
   if ($func_name eq 'join') {
-    return ['let', ['list', ['list', '*wantarray*', 't']], $call];
+    return Pl::CLForm::ctx_bind('t', $call);
   }
 
   # do FILE: same ctx-wrap as a user sub (do is a built-in, so it needs an
@@ -2152,7 +2152,7 @@ sub gen_funcall_form {
     return $self->_ctx_wrap_form($call, $ctx);
   }
   return $ctx == LIST_CTX
-      ? ['let', ['list', ['list', '*wantarray*', 't']], $call]
+      ? Pl::CLForm::ctx_bind('t', $call)
       : $call;
 }
 
@@ -2163,9 +2163,7 @@ sub _wrap_wantarray_ctx_form {
   my ($self, $call, $ctx) = @_;
   return $call if $ctx == INHERIT_CTX;
   return $call if $self->environment && $self->environment->tail_position;
-  return ['let',
-          ['list', ['list', '*wantarray*', $ctx == LIST_CTX ? 't' : 'nil']],
-          $call];
+  return Pl::CLForm::ctx_bind($ctx == LIST_CTX ? 't' : 'nil', $call);
 }
 
 # elem-setf licence (see the `=` dispatch): LEFT is a lowered element place
@@ -2203,7 +2201,7 @@ sub _ctx_wrap_form {
   return $call if $ctx == VOID_CTX
                && $self->environment && $self->environment->wa_void_active;
   my $wa = $ctx == LIST_CTX ? 't' : $ctx == VOID_CTX ? ':void' : 'nil';
-  return ['let', ['list', ['list', '*wantarray*', $wa]], $call];
+  return Pl::CLForm::ctx_bind($wa, $call);
 }
 
 # `eval STRING` — the call, with everything the eval SITE knows that the eval
@@ -3284,7 +3282,7 @@ sub gen_tree_val_form {
     my $child = $self->gen_node_form($kids->[0]);
     if ($ctx == LIST_CTX) {
       if (Pl::CLForm::to_flat($child) =~ /\(p-=~\s/) {
-        return ['let', ['list', ['list', '*wantarray*', 't']], $child];
+        return Pl::CLForm::ctx_bind('t', $child);
       }
       return $child_is_list ? $child : ['vector', $child];
     }
@@ -3463,17 +3461,15 @@ sub gen_inline_lambda_form {
              ? [$cl_func, @pair] : [$cl_func];
     return
       ['let', ['list', ['list', '|sort--pkg|', '*package*']],
-        ['lambda', $params, @decl,
-          ['catch', ':p-return',
-            ['block', 'nil',
-              ['let', ['list', ['list', '*wantarray*', 'nil']],
-                ['handler-case', $call,
-                  ['undefined-function', ['list'],
-                    ['let', ['list',
-                             ['list', 'al',
-                              ['intern', '"PL-AUTOLOAD"', '|sort--pkg|']]],
-                      ['when', ['fboundp', 'al'],
-                        ['funcall', ['symbol-function', 'al']]]]]]]]]]];
+        ['p-sort-cmp', $params, @decl,
+          Pl::CLForm::ctx_bind('nil',
+            ['handler-case', $call,
+              ['undefined-function', ['list'],
+                ['let', ['list',
+                         ['list', 'al',
+                          ['intern', '"PL-AUTOLOAD"', '|sort--pkg|']]],
+                  ['when', ['fboundp', 'al'],
+                    ['funcall', ['symbol-function', 'al']]]]]])]];
   }
 
   # Scalar comparator (sort $var LIST) — resolved at runtime by
@@ -3483,12 +3479,12 @@ sub gen_inline_lambda_form {
     my $scalar = ($kids && @$kids) ? $self->gen_node_form($kids->[0]) : 'nil';
     return
       ['let', ['list', ['list', '|sort--pkg|', '*package*']],
-        ['lambda', $params, @decl,
-          ['catch', ':p-return',
-            ['block', 'nil',
-              ['let', ['list', ['list', '*wantarray*', 'nil'],
-                               ['list', '*package*', '|sort--pkg|']],
-                ['funcall', ['p-sort-get-fn', $scalar], @pair]]]]]];
+        ['p-sort-cmp', $params, @decl,
+          # TWO bindings, so this one stays a plain `let`: p-scalar-ctx names
+          # the context bind alone and would drop the *package* rebind.
+          ['let', ['list', ['list', '*wantarray*', 'nil'],
+                           ['list', '*package*', '|sort--pkg|']],
+            ['funcall', ['p-sort-get-fn', $scalar], @pair]]]];
   }
 
   # The body is ALWAYS forms since Phase B3 — the parser's embed_block answers
@@ -3498,10 +3494,8 @@ sub gen_inline_lambda_form {
   my $bf = $node->{body_form}
     or die "PCL internal: analysis-only inline_lambda ($for_func) reached emission\n";
   if ($for_func eq 'sort') {
-    return ['lambda', $params, @decl,
-            ['catch', ':p-return',
-             ['block', 'nil',
-              ['let', ['list', ['list', '*wantarray*', 'nil']], @$bf]]]];
+    return ['p-sort-cmp', $params, @decl,
+            Pl::CLForm::ctx_bind('nil', @$bf)];
   }
   return ['lambda', $params, @$bf];
 }

@@ -122,9 +122,9 @@ PERL
     my $t = sub { my ($opt) = @_; local $ENV{PCL_OPT} = $opt if defined $opt; delete local $ENV{PCL_OPT} unless defined $opt; PCLCore::transpile(qq{$pl2cl $a_file}) };
     my $d = $t->(undef);
     like($d,   qr/\(setf \(p-gethash %h "k"\) \(pl-ins 2\)\)/, 'default: elem-setf + no bind around the insensitive call');
-    like($d,   qr/\(let \(\(\*wantarray\* nil\)\) \(pl-sens\)\)/,   'default: a context-SENSITIVE sub keeps its bind');
+    like($d,   qr/\(p-scalar-ctx \(pl-sens\)\)/,   'default: a context-SENSITIVE sub keeps its bind');
     my $ni = $t->('-insensitive-call');
-    like($ni,  qr/\(setf \(p-gethash %h "k"\) \(let \(\(\*wantarray\* nil\)\) \(pl-ins 2\)\)\)/, '-insensitive-call: the bind is back, setf stays');
+    like($ni,  qr/\(setf \(p-gethash %h "k"\) \(p-scalar-ctx \(pl-ins 2\)\)\)/, '-insensitive-call: the bind is back, setf stays');
     my $ne = $t->('-elem-setf');
     like($ne,  qr/\(p-setf \(p-gethash %h "k"\) \(pl-ins 2\)\)/, '-elem-setf: p-setf is back, no bind stays');
     like($ne,  qr/\(p-setf \(p-aref \@a 1\) 7\)/,           '-elem-setf: the array element too');

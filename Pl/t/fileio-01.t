@@ -290,7 +290,7 @@ test_codegen('opendir($dh, $dir)',
 # readdir is wantarray-sensitive since s324 (list context drains the handle),
 # so call sites carry an explicit *wantarray* bind like localtime/each do.
 test_codegen('readdir($dh)',
-            '(let ((*wantarray* nil)) (p-readdir $dh))',
+            '(p-scalar-ctx (p-readdir $dh))',
             'readdir');
 
 test_codegen('closedir($dh)',

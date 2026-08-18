@@ -6391,15 +6391,17 @@ sub _process_while_statement {
 # Apply Perl's implicit defined() insertion to a loop CONDITION whose value is
 # the result of each / readdir / readline(<FH>) / glob — these terminate the
 # loop on *undef*, not on a false-but-defined value (each's index 0, a "0" line,
-# an empty record).  The call may be wrapped in `(let ((*wantarray* nil/t)) …)`
-# (the wantarray-leak fix, see docs/wantarray-leak-review.md), so the detection
-# sees through that optional wrapper.  Shared by the while, while-modifier and
-# C-style-for condition handlers.  Returns the (possibly rewritten) condition.
+# an empty record).  The call may be wrapped in a CONTEXT BIND — `(p-scalar-ctx
+# …)` / `(p-list-ctx …)` since #281 item 1, and still the raw `(let
+# ((*wantarray* nil/t)) …)` in older captured text (the wantarray-leak fix, see
+# docs/wantarray-leak-review.md) — so the detection sees through either
+# spelling.  Shared by the while, while-modifier and C-style-for condition
+# handlers.  Returns the (possibly rewritten) condition.
 sub _auto_defined_cond {
   my ($self, $cond_cl) = @_;
   return $cond_cl unless defined $cond_cl;
   my $auto_pat = qr/p-each|p-readdir|p-readline|p-glob/;
-  my $waw      = qr/(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) )?/;
+  my $waw      = qr/(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) |\(p-(?:list|scalar|void|caller)-ctx )?/;
   if ($cond_cl =~ /^\(p-(?:scalar|my)-=\s+(\$\S+)\s+$waw\((?:$auto_pat)\b/) {
     return "(progn $cond_cl (p-defined $1))";
   } elsif ($cond_cl =~ /^\((?:p-)?setf\s+\(p-(?:gethash|aref)\b.*\((?:$auto_pat)\b/) {

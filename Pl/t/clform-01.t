@@ -50,7 +50,7 @@ my $cl = Pl::Parser2->parse_code(
 
 like($cl, qr/\(p-if \$a \(p-if \$b 1 2\) 3\)/,
      'converted-in-converted: nested ternary forms compose');
-like($cl, qr/\(p-if \$a \(let \(\(\*wantarray\* nil\)\) \(pl-foo 7\)\) \(make-p-box \(p-array-init 8\)\)\)/,
+like($cl, qr/\(p-if \$a \(p-scalar-ctx \(pl-foo 7\)\) \(make-p-box \(p-array-init 8\)\)\)/,
      'unconverted children arrive as raw atoms, bytes preserved');
 
 # --- converted: gen_string_concat / gen_array_str_interp --------------------
@@ -75,7 +75,7 @@ EOT
 
 like($fc, qr/\(pl-two \(p-scalar \@a\) 3\)/,
      'funcall form: prototype $-slot imposes (p-scalar @a), literal skipped');
-like($fc, qr/\(let \(\(\*wantarray\* t\)\) \(p-join "," 1 2\)\)/,
+like($fc, qr/\(p-list-ctx \(p-join "," 1 2\)\)/,
      'funcall form: join gets its list-context bind');
 like($fc, qr/\(p-print :fh 'STDERR "e"\)/,
      'funcall form: print filehandle marker passes through untouched');
@@ -174,7 +174,7 @@ like($do, qr/\(funcall \(lambda \(\)/,   'do { BLOCK } → (funcall (lambda () �
 # The old pin `(p-do (p-get-coderef $ref))` never called the sub at all.
 like($do, qr/\(p-do \(p-funcall-ref \$ref \@_\)\)/,
      'do &$cref → generic tail (p-do (p-funcall-ref $ref @_))');
-like($do, qr/\(let \(\(\*wantarray\* nil\)\)\s*\(funcall \(lambda/,
+like($do, qr/\(p-scalar-ctx\s*\(funcall \(lambda/,
      'do block gets its scalar-context wantarray bind');
 
 # --- converted: gen_funcall_form grep/map (E2.1) ----------------------------
@@ -378,9 +378,9 @@ like($ms, qr/\(vector 1 2 3\)/,            'list-context progn → (vector 1 2 3
 like($ms, qr/\(vector\)/,                  'empty () → (vector), normalized (task #78)');
 like($ms, qr/\(p-print :fh 'STDERR\s/,      'filehandle marker → :fh \x27STDERR');
 like($ms, qr/\(p-backtick "echo hi"\)/,    'backtick → (p-backtick "echo hi")');
-like($ms, qr/\(let \(\(\*wantarray\* nil\)\) \(p-readline \$fh\)\)/,
+like($ms, qr/\(p-scalar-ctx \(p-readline \$fh\)\)/,
      'readline <$fh> scalar-context bound');
-like($ms, qr/\(let \(\(\*wantarray\* t\)\) \(p-readline 'STDIN\)\)/,
+like($ms, qr/\(p-list-ctx \(p-readline 'STDIN\)\)/,
      'readline <STDIN> list-context bound + bareword quote');
 
 # --- converted: gen_glob_form (E2.1) ----------------------------------------
@@ -394,14 +394,14 @@ my @c = <[!._]*>;
 my $one = <*.log>;
 print "@a";
 EOT
-like($gl, qr/\(let \(\(\*wantarray\* t\)\) \(p-glob "\*\.txt"\)\)/,
+like($gl, qr/\(p-list-ctx \(p-glob "\*\.txt"\)\)/,
      'glob literal → (p-glob "*.txt") list-context bound');
 like($gl, qr/\(p-glob \(p-\. \$dir "\/\*\.c"\)\)/,
      'glob interpolated → (p-glob (p-. …))');
 like($gl, qr/\(remove-if\s+\(lambda \(--f--\)\s+\(let \(\(--name-- \(file-namestring \(pathname --f--\)\)\)\)\s+\(and \(> \(length --name--\) 0\) \(find \(char --name-- 0\) "\._"\)\)\)\)\s+\(p-glob "\?\*"\)\)/,
      'glob [!chars] → glob "?"-simplified + remove-if filter');
-like($gl, qr/\(let \(\(\*wantarray\* nil\)\) \(p-glob "\*\.log"\)\)/,
-     'glob scalar-context → (let ((*wantarray* nil)) (p-glob …))');
+like($gl, qr/\(p-scalar-ctx \(p-glob "\*\.log"\)\)/,
+     'glob scalar-context → (p-scalar-ctx (p-glob …))');
 
 # --- converted: gen_methodcall_form (E2.1, internal-node frontier) -----------
 # invocant disambiguation (class string / __PACKAGE__ / resolve-invocant /
@@ -498,7 +498,7 @@ like($po, qr/\(let \(\(_prev \(p-array-last-index \@a\)\)\)\s+\(p-set-array-leng
 # vector / progn / flatten branches, and the single-child list-context regex
 # special case: a (p-=~ …) ANYWHERE in the child (even nested inside a larger
 # expression) suppresses the (vector …) wrap in favour of a bare
-# (let ((*wantarray* t)) child) — the byte-exact to_flat($child) grep.  This
+# (p-list-ctx child) — the byte-exact to_flat($child) grep.  This
 # is the error-prone case, so the regex-inside-expression shapes are pinned
 # explicitly here.
 
@@ -516,26 +516,26 @@ print "@m1";
 EOT
 
 # regex directly the single child → let-wrap, NEVER (vector …)
-like($tv, qr/\(p-array-= \@m1\s+\(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$x /,
+like($tv, qr/\(p-array-= \@m1\s+\(p-list-ctx \(p-list-ctx \(p-=~ \$x /,
      'list-ctx ($x =~ /re/) → let-wrap, no vector');
 unlike($tv, qr/\@m1 \(vector/,
      '=~ as the sole child of @m1 is NOT wrapped in (vector …)');
 # !~ is boolean (emits p-!~), NOT a p-=~ match → IS vector-wrapped
-like($tv, qr/\(p-array-= \@m2\s+\(vector \(let \(\(\*wantarray\* t\)\) \(p-!~ \$x /,
+like($tv, qr/\(p-array-= \@m2\s+\(vector \(p-list-ctx \(p-!~ \$x /,
      'list-ctx ($x !~ /re/) → (vector (p-!~ …)) — not the regex special case');
 # bare /foo/ lowers to (p-=~ $_ …) → let-wrap
-like($tv, qr/\(p-array-= \@m3\s+\(let \(\(\*wantarray\* t\)\) \(let \(\(\*wantarray\* t\)\) \(p-=~ \$_ /,
+like($tv, qr/\(p-array-= \@m3\s+\(p-list-ctx \(p-list-ctx \(p-=~ \$_ /,
      'list-ctx bare (/foo/) → let-wrap ($_ match)');
 # CRITICAL: regex NESTED inside a larger expression still suppresses vector —
 # a naive "child is a =~ node" AST predicate would wrongly emit (vector …) here.
-like($tv, qr/\(p-array-= \@m4\s+\(let \(\(\*wantarray\* t\)\)\s+\(p-\+ 1 /,
+like($tv, qr/\(p-array-= \@m4\s+\(p-list-ctx\s+\(p-\+ 1 /,
      'list-ctx (1 + ($x =~ /y/)) → let-wrap (regex nested in expression)');
 unlike($tv, qr/\(p-array-= \@m4 \(vector /,
      'nested-regex single child is NOT vector-wrapped');
 # multi-child with a regex element is a genuine multi-value list → (vector …);
 # the regex element is itself a single-child tree_val, so it keeps its own
-# (let ((*wantarray* t)) (p-=~ …)) let-wrap inside the vector.
-like($tv, qr/\(p-array-= \@m5\s+\(vector \(let \(\(\*wantarray\* t\)\) \(p-=~ /,
+# (p-list-ctx (p-=~ …)) let-wrap inside the vector.
+like($tv, qr/\(p-array-= \@m5\s+\(vector \(p-list-ctx \(p-=~ /,
      'multi-child list with a regex element → (vector (let … (p-=~ …)) …)');
 # plain single scalar / multi / range branches
 like($tv, qr/\(p-array-= \@m6\s+\(vector \$x\)/,   'single non-regex child → (vector $x)');
@@ -555,12 +555,12 @@ my @l = $c->(1, 2, 3);
 $c->();
 print $r1;
 EOT
-like($rf, qr/\(let \(\(\*wantarray\* nil\)\) \(p-funcall-ref \$c 5\)\)/,
-     'scalar-ctx code-ref call → (let ((*wantarray* nil)) (p-funcall-ref $c 5))');
-like($rf, qr/\(let \(\(\*wantarray\* t\)\) \(p-funcall-ref \$c 1 2 3\)\)/,
-     'list-ctx code-ref call → (let ((*wantarray* t)) (p-funcall-ref …))');
-like($rf, qr/\(let \(\(\*wantarray\* :void\)\) \(p-funcall-ref \$c\)\)/,
-     'void-ctx code-ref call → (let ((*wantarray* :void)) (p-funcall-ref $c))');
+like($rf, qr/\(p-scalar-ctx \(p-funcall-ref \$c 5\)\)/,
+     'scalar-ctx code-ref call → (p-scalar-ctx (p-funcall-ref $c 5))');
+like($rf, qr/\(p-list-ctx \(p-funcall-ref \$c 1 2 3\)\)/,
+     'list-ctx code-ref call → (p-list-ctx (p-funcall-ref …))');
+like($rf, qr/\(p-void-ctx \(p-funcall-ref \$c\)\)/,
+     'void-ctx code-ref call → (p-void-ctx (p-funcall-ref $c))');
 
 # --- converted: gen_binary_op_form (E2.1) -----------------------------------
 # arithmetic / comparison / logical / string / . / x / .. / isa all convert to
@@ -648,17 +648,17 @@ $x =~ s/a/b/;
 $x =~ tr/a/b/;
 print "$b$nb";
 EOT
-like($rx, qr/\(let \(\(\*wantarray\* nil\)\) \(p-=~ \$x \(p-regex "\/a\/"\)\)\)/,
-     'scalar-ctx match → (let ((*wantarray* nil)) (p-=~ …))');
-like($rx, qr/\(let \(\(\*wantarray\* nil\)\) \(p-!~ \$x /,
+like($rx, qr/\(p-scalar-ctx \(p-=~ \$x \(p-regex "\/a\/"\)\)\)/,
+     'scalar-ctx match → (p-scalar-ctx (p-=~ …))');
+like($rx, qr/\(p-scalar-ctx \(p-!~ \$x /,
      'scalar-ctx !~ match → nil-wrapped');
-like($rx, qr/\(let \(\(\*wantarray\* t\)\) \(p-=~ \$x \(p-regex "\/\(\\\\w\)\(\\\\w\)\/"\)\)\)/,
-     'list-ctx match → (let ((*wantarray* t)) (p-=~ …))');
+like($rx, qr/\(p-list-ctx \(p-=~ \$x \(p-regex "\/\(\\\\w\)\(\\\\w\)\/"\)\)\)/,
+     'list-ctx match → (p-list-ctx (p-=~ …))');
 like($rx, qr/\(p-=~ \$x \(p-subst "a" "b"\)\)/,
      's/// RHS → (p-=~ … (p-subst …)) with NO wantarray wrap');
 like($rx, qr/\(p-=~ \$x \(p-tr "a" "b"\)\)/,
      'tr/// RHS → (p-=~ … (p-tr …)) with NO wantarray wrap');
-unlike($rx, qr/\(let \(\(\*wantarray\* \w+\)\) \(p-=~ \$x \(p-subst/,
+unlike($rx, qr/\(p-\w+-ctx \(p-=~ \$x \(p-subst/,
      's/// RHS is never wantarray-wrapped');
 
 # --- s///e replacement → (lambda () CODE) -----------------------------------

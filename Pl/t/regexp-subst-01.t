@@ -103,7 +103,7 @@ test_codegen('s/pat/rep/x',
              's///x extended (implicit $_)');
 
 test_codegen('s/pat/rep/gimsxe',
-             '(p-=~ $_ (p-subst "pat" (lambda () (let ((*wantarray* nil)) (pl-rep))) :e :g :i :m :s :x))',
+             '(p-=~ $_ (p-subst "pat" (lambda () (p-scalar-ctx (pl-rep))) :e :g :i :m :s :x))',
              's/// all common modifiers (implicit $_)');
 
 

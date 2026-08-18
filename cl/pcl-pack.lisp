@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-157
+;;; pcl: pipeline=v2 gen=v2-158
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -194,7 +194,7 @@
   (&rest %_args)
   (p-raw-params ($ch $bang)
     (block nil
-      (let ((*wantarray* :void))
+      (p-void-ctx
         (p-if (p-str-eq $ch "c")
           (progn
             ;; return (1, 1, 0)
@@ -266,8 +266,8 @@
   (p-args-body
     (block nil
       (let (($s (make-p-box nil)) ($ti (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $s $ti) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $s $ti) @_))
+        (p-void-ctx
           (let (($tlen (%pcl-to-number-strict (p-length $s) "$tlen")))
             (p-while (p-< $ti $tlen)
               (let (($ch (%pcl-to-string-strict (p-substr $s $ti 1) "$ch")))
@@ -308,8 +308,8 @@
   (p-args-body
     (block nil
       (let (($s (make-p-box nil)) ($ti (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $s $ti) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $s $ti) @_))
+        (p-void-ctx
           (let (($tlen (%pcl-to-number-strict (p-length $s) "$tlen")))
             (let (($depth 1))
               (p-while (p-&& (p-< $ti $tlen) (p-> $depth 0))
@@ -340,18 +340,16 @@
           ($inh_le (make-p-box nil))
           ($ch (make-p-box nil))
           ($ctx (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $tmpl $ti_ref $inh_be $inh_le $ch $ctx) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $tmpl $ti_ref $inh_be $inh_le $ch $ctx) @_))
+        (p-void-ctx
           (let (($tlen (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
             (let (($bang (make-p-box nil)) ($be (make-p-box nil)) ($le (make-p-box nil)))
-              (let ((*wantarray* nil))
-                (p-list-= (vector $bang $be $le) (vector 0 $inh_be $inh_le)))
+              (p-scalar-ctx (p-list-= (vector $bang $be $le) (vector 0 $inh_be $inh_le)))
               (let
                 (($got_be (make-p-box nil))
                   ($got_le (make-p-box nil))
                   ($got_bang (make-p-box nil)))
-                (let ((*wantarray* nil))
-                  (p-list-= (vector $got_be $got_le $got_bang) (vector 0 0 0)))
+                (p-scalar-ctx (p-list-= (vector $got_be $got_le $got_bang) (vector 0 0 0)))
                 (p-while (p-< (p-cast-$ $ti_ref) $tlen)
                   (let (($m (%pcl-to-string-strict (p-substr $tmpl (p-cast-$ $ti_ref) 1) "$m")))
                     (p-if (p-str-eq $m "!")
@@ -470,8 +468,8 @@
   (p-args-body
     (block nil
       (let (($tmpl (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $tmpl) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $tmpl) @_))
+        (p-void-ctx
           (let (($pos (make-p-box nil)))
             (p-my-= $pos 0)
             (let (($ti (make-p-box nil)))
@@ -484,10 +482,9 @@
                     (p-my-= $ch (p-substr $tmpl $ti 1))
                     (p-post++ $ti)
                     (let (($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)))
-                      (let ((*wantarray* nil))
+                      (p-scalar-ctx
                         (p-list-= (vector $grpbeg $grpend)
-                          (vector (let ((*wantarray* t)) (p-undef))
-                            (let ((*wantarray* t)) (p-undef)))))
+                          (vector (p-list-ctx (p-undef)) (p-list-ctx (p-undef)))))
                       (p-if (p-str-eq $ch "(")
                         (progn (p-my-= $grpend (pl-_pack_find_group_end $tmpl $ti))
                           (p-my-= $grpbeg $ti)
@@ -496,18 +493,16 @@
                         (p-my-= $bang 0)
                         (p-while
                           (p-&& (p-< $ti $tlen)
-                            (let ((*wantarray* nil))
-                              (p-=~ (p-substr $tmpl $ti 1) (p-regex "/[!<>]/"))))
+                            (p-scalar-ctx (p-=~ (p-substr $tmpl $ti 1) (p-regex "/[!<>]/"))))
                           (p-if (p-str-eq (p-substr $tmpl $ti 1) "!") (p-my-= $bang 1))
                           (p-post++ $ti))
                         (let
                           (($all (make-p-box nil))
                             ($count (make-p-box nil))
                             ($nrep (make-p-box nil)))
-                          (let ((*wantarray* nil))
+                          (p-scalar-ctx
                             (p-list-= (vector $all $count $nrep)
-                              (let ((*wantarray* t))
-                                (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
+                              (p-list-ctx (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
                           (p-if (p-! (p-&& (p-defined $nrep) (p->= $nrep 1))) (p-my-= $nrep 1))
                           (p-if (p-defined $grpbeg)
                             (progn
@@ -541,9 +536,9 @@
                                 (progn (p-decf $pos $nrep) (p-if (p-< $pos 0) (p-my-= $pos 0))))
                               (p-next)))
                           (let (($nb (make-p-box nil)))
-                            (let ((*wantarray* nil))
+                            (p-scalar-ctx
                               (p-list-= (vector $nb)
-                                (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                (p-list-ctx (pl-_pack_type_info $ch $bang))))
                             (p-if $nb (progn (p-incf $pos (p-* $nb $nrep)) (p-next)))
                             (p-if
                               (p-|| (p-|| (p-str-eq $ch "A") (p-str-eq $ch "a"))
@@ -571,8 +566,8 @@
   (p-args-body
     (block nil
       (let (($tmpl (make-p-box nil)) ($ti_ref (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $tmpl $ti_ref) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $tmpl $ti_ref) @_))
+        (p-void-ctx
           (let (($tlen (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
             (p-if
               (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
@@ -602,7 +597,7 @@
                     (let (($inner (make-p-box nil)))
                       (p-my-= $inner
                         (p-substr $tmpl $start (p-- (p-- (p-cast-$ $ti_ref) $start) 1)))
-                      (p-if (let ((*wantarray* nil)) (p-=~ $inner (p-regex "/^\\d+$/")))
+                      (p-if (p-scalar-ctx (p-=~ $inner (p-regex "/^\\d+$/")))
                         (progn
                           (let (($n (make-p-box nil)))
                             (p-my-= $n (p-+ $inner 0))
@@ -614,8 +609,8 @@
                           "Within []-length '@' not allowed
 "))
                       (p-if
-                        (p-&& (let ((*wantarray* nil)) (p-=~ $inner (p-regex "/^\\d/")))
-                          (let ((*wantarray* nil)) (p-!~ $inner (p-regex "/^\\d+$/"))))
+                        (p-&& (p-scalar-ctx (p-=~ $inner (p-regex "/^\\d/")))
+                          (p-scalar-ctx (p-!~ $inner (p-regex "/^\\d+$/"))))
                         (p-die :loc
                           "cl/pack-impl.pl line 250"
                           "Malformed integer in []
@@ -626,14 +621,13 @@
 (p-return 0 $n $n)))))))
             (p-if
               (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
-                (let ((*wantarray* nil))
-                  (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref) 1) (p-regex "/\\d/"))))
+                (p-scalar-ctx (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref) 1) (p-regex "/\\d/"))))
               (progn
                 (let (($n (make-p-box nil)))
                   (p-my-= $n 0)
                   (p-while
                     (p-&& (p-< (p-cast-$ $ti_ref) $tlen)
-                      (let ((*wantarray* nil))
+                      (p-scalar-ctx
                         (p-=~ (p-substr $tmpl (p-cast-$ $ti_ref) 1) (p-regex "/\\d/"))))
                     (p-my-= $n (p-+ (p-* $n 10) (p-substr $tmpl (p-cast-$ $ti_ref) 1)))
                     (p-post++ (p-cast-$ $ti_ref)))
@@ -651,9 +645,8 @@
           ($nbytes (make-p-box nil))
           ($signed (make-p-box nil))
           ($be (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $val $nbytes $signed $be) @_))
-        (let ((*wantarray* :void))
-          (p-my-= $val (p-int (p-+ $val 0)))
+        (p-scalar-ctx (p-list-= (vector $val $nbytes $signed $be) @_))
+        (p-void-ctx (p-my-= $val (p-int (p-+ $val 0)))
           (let (($result ""))
             (p-if $be
               (progn
@@ -674,7 +667,7 @@
   (&rest %_args)
   (p-raw-params ($s $si $nbytes $be $signed)
     (block nil
-      (let ((*wantarray* :void))
+      (p-void-ctx
         (let (($slen (%pcl-to-number-strict (p-length $s) "$slen")))
           (let (($v (make-p-box nil)))
             (p-my-= $v 0)
@@ -723,9 +716,8 @@
           ($nrep (make-p-box nil))
           ($star (make-p-box nil))
           ($result_ref (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $ch $arg $nrep $star $result_ref) @_))
-        (let ((*wantarray* :void))
-          (p-if (p-! (p-defined $arg)) (p-my-= $arg ""))
+        (p-scalar-ctx (p-list-= (vector $ch $arg $nrep $star $result_ref) @_))
+        (p-void-ctx (p-if (p-! (p-defined $arg)) (p-my-= $arg ""))
           (let (($slen (make-p-box nil)))
             (p-my-= $slen (p-length $arg))
             (let ((--pcl-if-ret--0 nil))
@@ -767,8 +759,7 @@
                                         ((p-incf-raw $k))
                                         (p-.= (p-cast-$ $result_ref)
                                           (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0)))))
-                                    (let ((*wantarray* *pcl-caller-wantarray*))
-                                      (p-.= (p-cast-$ $result_ref) (p-chr 0))))))
+                                    (p-caller-ctx (p-.= (p-cast-$ $result_ref) (p-chr 0))))))
                               nil)
                             --pcl-if-ret--1))))
                     (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "b"))
@@ -930,7 +921,7 @@
                                                                       *wantarray*))
                                                                   (catch :p-return
                                                                     (block nil
-                                                                      (let ((*wantarray* :void))
+                                                                      (p-void-ctx
                                                                         (let
                                                                           (($c
                                                                               (make-p-box nil)))
@@ -939,9 +930,7 @@
                                                                               (p-bit-and
                                                                                 (p-aref @_ 0)
                                                                                 63)))
-                                                                          (let
-                                                                            ((*wantarray*
-                                                                                *pcl-caller-wantarray*))
+                                                                          (p-caller-ctx
                                                                             (p-if (p-== $c 32)
                                                                               96
                                                                               $c)))))))))
@@ -950,24 +939,24 @@
                                                                 (p-.
                                                                   (p-.
                                                                     (p-chr
-                                                                      (let ((*wantarray* nil))
+                                                                      (p-scalar-ctx
                                                                         (p-funcall-ref $uu
                                                                           (p-bit-and
                                                                             (p->> $cm 18)
                                                                             63))))
                                                                     (p-chr
-                                                                      (let ((*wantarray* nil))
+                                                                      (p-scalar-ctx
                                                                         (p-funcall-ref $uu
                                                                           (p-bit-and
                                                                             (p->> $cm 12)
                                                                             63)))))
                                                                   (p-chr
-                                                                    (let ((*wantarray* nil))
+                                                                    (p-scalar-ctx
                                                                       (p-funcall-ref $uu
                                                                         (p-bit-and (p->> $cm 6)
                                                                           63)))))
                                                                 (p-chr
-                                                                  (let ((*wantarray* nil))
+                                                                  (p-scalar-ctx
                                                                     (p-funcall-ref $uu
                                                                       (p-bit-and $cm 63)))))))))))))
                                               (p-.= (p-cast-$ $result_ref)
@@ -981,27 +970,26 @@
   (p-args-body
     (block nil
       (let (($code (make-p-box nil)) ($r (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $code $r) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $code $r) @_))
+        (p-void-ctx
           (p-if (p-< $code #x80)
-            (progn
-              (let ((*wantarray* *pcl-caller-wantarray*)) (p-.= (p-cast-$ $r) (p-chr $code))))
+            (progn (p-caller-ctx (p-.= (p-cast-$ $r) (p-chr $code))))
             (p-if (p-< $code #x800)
               (progn
-                (let ((*wantarray* *pcl-caller-wantarray*))
+                (p-caller-ctx
                   (p-.= (p-cast-$ $r)
                     (p-. (p-chr (p-bit-or #xC0 (p->> $code 6)))
                       (p-chr (p-bit-or #x80 (p-bit-and $code #x3F)))))))
               (p-if (p-< $code #x10000)
                 (progn
-                  (let ((*wantarray* *pcl-caller-wantarray*))
+                  (p-caller-ctx
                     (p-.= (p-cast-$ $r)
                       (p-.
                         (p-. (p-chr (p-bit-or #xE0 (p->> $code 12)))
                           (p-chr (p-bit-or #x80 (p-bit-and (p->> $code 6) #x3F))))
                         (p-chr (p-bit-or #x80 (p-bit-and $code #x3F)))))))
                 (progn
-                  (let ((*wantarray* *pcl-caller-wantarray*))
+                  (p-caller-ctx
                     (p-.= (p-cast-$ $r)
                       (p-.
                         (p-.
@@ -1023,12 +1011,11 @@
           ($inh_le (make-p-box nil))
           ($out_base (make-p-box nil))
           ($depth (make-p-box nil)))
-        (let ((*wantarray* nil))
+        (p-scalar-ctx
           (p-list-=
             (vector $tmpl $ai_ref $args_ref $result_ref $inh_be $inh_le $out_base $depth)
             @_))
-        (let ((*wantarray* :void))
-          (p-if (p-! (p-defined $out_base)) (p-my-= $out_base 0))
+        (p-void-ctx (p-if (p-! (p-defined $out_base)) (p-my-= $out_base 0))
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
           (p-if (p-> $depth $MAX_GROUP_DEPTH)
             (p-die :loc
@@ -1046,10 +1033,9 @@
                     (p-my-= $ch (p-substr $tmpl $ti 1))
                     (p-post++ $ti)
                     (let (($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)))
-                      (let ((*wantarray* nil))
+                      (p-scalar-ctx
                         (p-list-= (vector $grpbeg $grpend)
-                          (vector (let ((*wantarray* t)) (p-undef))
-                            (let ((*wantarray* t)) (p-undef)))))
+                          (vector (p-list-ctx (p-undef)) (p-list-ctx (p-undef)))))
                       (p-if (p-str-eq $ch "(")
                         (progn (p-my-= $grpend (pl-_pack_find_group_end $tmpl $ti))
                           (p-my-= $grpbeg $ti)
@@ -1059,9 +1045,9 @@
                         (($bang (make-p-box nil))
                           ($be (make-p-box nil))
                           ($le (make-p-box nil)))
-                        (let ((*wantarray* nil))
+                        (p-scalar-ctx
                           (p-list-= (vector $bang $be $le)
-                            (let ((*wantarray* t))
+                            (p-list-ctx
                               (pl-_pack_parse_mods $tmpl
                                 (p-backslash $ti)
                                 $inh_be
@@ -1073,10 +1059,9 @@
                             (($star (make-p-box nil))
                               ($count (make-p-box nil))
                               ($nrep (make-p-box nil)))
-                            (let ((*wantarray* nil))
+                            (p-scalar-ctx
                               (p-list-= (vector $star $count $nrep)
-                                (let ((*wantarray* t))
-                                  (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
+                                (p-list-ctx (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
                             (let (($had_count (make-p-box nil)))
                               (p-my-= $had_count (p-|| $star (p-> $ti $ti_before_count)))
                               (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
@@ -1091,8 +1076,7 @@
                                           (p-my-= $c (p-substr $tmpl $ti 1))
                                           (p-if
                                             (p-|| (p-|| (p-str-eq $c "*") (p-str-eq $c "["))
-                                              (let ((*wantarray* nil))
-                                                (p-=~ $c (p-regex "/\\d/"))))
+                                              (p-scalar-ctx (p-=~ $c (p-regex "/\\d/"))))
                                             (p-die :loc
                                               "cl/pack-impl.pl line 440"
                                               "'/' does not take a repeat count in pack
@@ -1105,9 +1089,9 @@
                                       (($dbang (make-p-box nil))
                                         ($dbe2 (make-p-box nil))
                                         ($dle2 (make-p-box nil)))
-                                      (let ((*wantarray* nil))
+                                      (p-scalar-ctx
                                         (p-list-= (vector $dbang $dbe2 $dle2)
-                                          (let ((*wantarray* t))
+                                          (p-list-ctx
                                             (pl-_pack_parse_mods $tmpl
                                               (p-backslash $ti)
                                               $be
@@ -1122,9 +1106,9 @@
                                           (($dstar2 (make-p-box nil))
                                             ($dcnt2 (make-p-box nil))
                                             ($dnrep2 (make-p-box nil)))
-                                          (let ((*wantarray* nil))
+                                          (p-scalar-ctx
                                             (p-list-= (vector $dstar2 $dcnt2 $dnrep2)
-                                              (let ((*wantarray* t))
+                                              (p-list-ctx
                                                 (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
                                           (let
                                             (($had_dcount
@@ -1135,10 +1119,9 @@
                                               (($dnb (make-p-box nil))
                                                 ($dsig (make-p-box nil))
                                                 ($ddbe (make-p-box nil)))
-                                              (let ((*wantarray* nil))
+                                              (p-scalar-ctx
                                                 (p-list-= (vector $dnb $dsig $ddbe)
-                                                  (let ((*wantarray* t))
-                                                    (pl-_pack_type_info $dfmt $dbang))))
+                                                  (p-list-ctx (pl-_pack_type_info $dfmt $dbang))))
                                               (let (($actual_count (make-p-box nil)))
                                                 (p-if
                                                   (p-||
@@ -1167,9 +1150,9 @@
                                                           (($nb (make-p-box nil))
                                                             ($sig (make-p-box nil))
                                                             ($dbe (make-p-box nil)))
-                                                          (let ((*wantarray* nil))
+                                                          (p-scalar-ctx
                                                             (p-list-= (vector $nb $sig $dbe)
-                                                              (let ((*wantarray* t))
+                                                              (p-list-ctx
                                                                 (pl-_pack_type_info $ch $bang))))
                                                           (p-if $nb
                                                             (progn
@@ -1263,9 +1246,9 @@
                                                           (($nb (make-p-box nil))
                                                             ($sig (make-p-box nil))
                                                             ($dbe (make-p-box nil)))
-                                                          (let ((*wantarray* nil))
+                                                          (p-scalar-ctx
                                                             (p-list-= (vector $nb $sig $dbe)
-                                                              (let ((*wantarray* t))
+                                                              (p-list-ctx
                                                                 (pl-_pack_type_info $ch $bang))))
                                                           (p-if $nb
                                                             (progn
@@ -1374,9 +1357,9 @@
                                                             (($nb (make-p-box nil))
                                                               ($sig (make-p-box nil))
                                                               ($dbe (make-p-box nil)))
-                                                            (let ((*wantarray* nil))
+                                                            (p-scalar-ctx
                                                               (p-list-= (vector $nb $sig $dbe)
-                                                                (let ((*wantarray* t))
+                                                                (p-list-ctx
                                                                   (pl-_pack_type_info $ch
                                                                     $bang))))
                                                             (p-if $nb
@@ -1487,7 +1470,7 @@
                                           (let (($fc (make-p-box nil)))
                                             (p-my-= $fc (p-substr $inner $gti 1))
                                             (p-if
-                                              (let ((*wantarray* nil))
+                                              (p-scalar-ctx
                                                 (p-=~ $fc (p-regex "/^[\\d\\*\\[]/")))
                                               (p-die :loc
                                                 "cl/pack-impl.pl line 557"
@@ -1630,9 +1613,9 @@
                                 (($nb (make-p-box nil))
                                   ($sig (make-p-box nil))
                                   ($dbe (make-p-box nil)))
-                                (let ((*wantarray* nil))
+                                (p-scalar-ctx
                                   (p-list-= (vector $nb $sig $dbe)
-                                    (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                    (p-list-ctx (pl-_pack_type_info $ch $bang))))
                                 (p-if $nb
                                   (progn
                                     (let (($be2 (make-p-box nil)))
@@ -1665,8 +1648,7 @@
                                                     " in pack
 ")))
                                               (p-.= (p-cast-$ $result_ref)
-                                                (pl-_pack_emit_int
-                                                  (let ((*wantarray* t)) (p-int $nv))
+                                                (pl-_pack_emit_int (p-list-ctx (p-int $nv))
                                                   $nb
                                                   $sig
                                                   $be2))))))
@@ -1762,8 +1744,7 @@
                                                     (p-if (p-< $nv 0) "-Inf" "Inf"))
                                                   " in pack
 ")))
-                                            (pl-_pack_utf8_char
-                                              (let ((*wantarray* t)) (p-int $nv))
+                                            (pl-_pack_utf8_char (p-list-ctx (p-int $nv))
                                               $result_ref)))))
                                     (p-next)))
                                 (p-if (p-str-eq $ch "W")
@@ -1842,7 +1823,7 @@
 "))
                                               (p-if
                                                 (p-&&
-                                                  (let ((*wantarray* nil))
+                                                  (p-scalar-ctx
                                                     (p-=~ $orig_s (p-regex "/[eE]/")))
                                                   (p->= $v (p-** 2 64)))
                                                 (p-die :loc
@@ -1884,9 +1865,9 @@
   (&rest %_args)
   (p-raw-params ($tmpl)
     (block nil
-      (let ((*wantarray* :void))
+      (p-void-ctx
         (let (($n_open (make-p-box nil)) ($n_close (make-p-box nil)))
-          (let ((*wantarray* nil)) (p-list-= (vector $n_open $n_close) (vector 0 0)))
+          (p-scalar-ctx (p-list-= (vector $n_open $n_close) (vector 0 0)))
           (let (($tlen (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
             (let (($i 0))
               (p-for ()
@@ -1931,9 +1912,9 @@
   (&rest %_args)
   (p-args-body
     (block nil
-      (let ((*wantarray* :void))
+      (p-void-ctx
         (let (($tmpl (make-p-box nil)) (@args (make-array 0 :adjustable t :fill-pointer 0)))
-          (let ((*wantarray* nil)) (p-list-= (vector $tmpl @args) @_))
+          (p-scalar-ctx (p-list-= (vector $tmpl @args) @_))
           ;; local $pcl_pack_comma_warned = 0
 (p-local-cell $pcl_pack_comma_warned (p-box-for-local 0)
             (pl-_pack_check_brackets $tmpl)
@@ -1954,8 +1935,8 @@
   (p-args-body
     (block nil
       (let (($s (make-p-box nil)) ($si_ref (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $s $si_ref) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $s $si_ref) @_))
+        (p-void-ctx
           (let (($slen (%pcl-to-number-strict (p-length $s) "$slen")))
             (p-if (p->= (p-cast-$ $si_ref) $slen) (p-return 0))
             (let (($b0 (make-p-box nil)))
@@ -1991,9 +1972,8 @@
           ($si_ref (make-p-box nil))
           ($push_val (make-p-box nil))
           ($checksum_p (make-p-box nil)))
-        (let ((*wantarray* nil))
-          (p-list-= (vector $ch $nrep $all $s $si_ref $push_val $checksum_p) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $ch $nrep $all $s $si_ref $push_val $checksum_p) @_))
+        (p-void-ctx
           (let (($slen (make-p-box nil)))
             (p-my-= $slen (p-length $s))
             (let ((--pcl-if-ret--2 nil))
@@ -2013,8 +1993,7 @@
                         (p-incf (p-cast-$ $si_ref) $n)
                         (p-if (p-str-eq $ch "A") (p-=~ $raw (p-subst "[ \\x00]+$" "")))
                         (p-if (p-str-eq $ch "Z") (p-=~ $raw (p-subst "\\x00.*" "" :s)))
-                        (let ((*wantarray* *pcl-caller-wantarray*))
-                          (p-funcall-ref $push_val $raw))))))
+                        (p-caller-ctx (p-funcall-ref $push_val $raw))))))
                 (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "H"))
                   (setf --pcl-if-ret--2
                     (progn
@@ -2034,8 +2013,7 @@
                                 (p-.= $hex (p-sprintf "%02x" $b__excl__0)))))
                           (p-my-= $hex (p-substr $hex 0 $n))
                           (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $n 1) 2)))
-                          (let ((*wantarray* *pcl-caller-wantarray*))
-                            (p-funcall-ref $push_val $hex))))))
+                          (p-caller-ctx (p-funcall-ref $push_val $hex))))))
                   (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "h"))
                     (setf --pcl-if-ret--2
                       (progn
@@ -2058,8 +2036,7 @@
                                       (p-bit-and (p->> $b__excl__1 4) #xF))))))
                             (p-my-= $hex (p-substr $hex 0 $n))
                             (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $n 1) 2)))
-                            (let ((*wantarray* *pcl-caller-wantarray*))
-                              (p-funcall-ref $push_val $hex))))))
+                            (p-caller-ctx (p-funcall-ref $push_val $hex))))))
                     (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "B"))
                       (setf --pcl-if-ret--2
                         (progn
@@ -2111,7 +2088,7 @@
                                             "1"
                                             "0")))))
                                   (p-funcall-ref $push_val $bits))))
-                            (let ((*wantarray* *pcl-caller-wantarray*))
+                            (p-caller-ctx
                               (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $nbits 7) 8)))))))
                       (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "b"))
                         (setf --pcl-if-ret--2
@@ -2165,7 +2142,7 @@
                                               "1"
                                               "0")))))
                                     (p-funcall-ref $push_val $bits))))
-                              (let ((*wantarray* *pcl-caller-wantarray*))
+                              (p-caller-ctx
                                 (p-incf (p-cast-$ $si_ref) (p-int (p-/ (p-+ $nbits 7) 8)))))))
                         (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "u"))
                           (setf --pcl-if-ret--2
@@ -2200,16 +2177,14 @@
                                                       (*pcl-caller-wantarray* *wantarray*))
                                                     (catch :p-return
                                                       (block nil
-                                                        (let ((*wantarray* :void))
+                                                        (p-void-ctx
                                                           (let
                                                             (($i
                                                                 (%pcl-to-number-strict
                                                                   (p-+ (p-cast-$ $si_ref)
                                                                     (p-aref @_ 0))
                                                                   "$i")))
-                                                            (let
-                                                              ((*wantarray*
-                                                                  *pcl-caller-wantarray*))
+                                                            (p-caller-ctx
                                                               (p-if (p-< $i $slen)
                                                                 (p-bit-and
                                                                   (p--
@@ -2223,20 +2198,20 @@
                                                     (p-bit-or
                                                       (p-bit-or
                                                         (p-<<
-                                                          (let ((*wantarray* nil))
+                                                          (p-scalar-ctx
                                                             (p-funcall-ref $get (p-* 4 $k)))
                                                           18)
                                                         (p-<<
-                                                          (let ((*wantarray* nil))
+                                                          (p-scalar-ctx
                                                             (p-funcall-ref $get
                                                               (p-+ (p-* 4 $k) 1)))
                                                           12))
                                                       (p-<<
-                                                        (let ((*wantarray* nil))
+                                                        (p-scalar-ctx
                                                           (p-funcall-ref $get
                                                             (p-+ (p-* 4 $k) 2)))
                                                         6))
-                                                    (let ((*wantarray* nil))
+                                                    (p-scalar-ctx
                                                       (p-funcall-ref $get (p-+ (p-* 4 $k) 3)))))
                                                 (p-if (p-< (p-* $k 3) $nb)
                                                   (p-.= $decoded
@@ -2253,8 +2228,7 @@
                                               "
 "))
                                           (p-post++ (p-cast-$ $si_ref)))))))
-                                (let ((*wantarray* *pcl-caller-wantarray*))
-                                  (p-funcall-ref $push_val $decoded)))))
+                                (p-caller-ctx (p-funcall-ref $push_val $decoded)))))
                           (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "U"))
                             (setf --pcl-if-ret--2
                               (progn
@@ -2278,7 +2252,7 @@
                                         ((p-&& (p-< $i $n) (p-< (p-cast-$ $si_ref) $slen)))
                                         ((p-incf-raw $i))
                                         (p-funcall-ref $push_val
-                                          (let ((*wantarray* t))
+                                          (p-list-ctx
                                             (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))))))))
                               (p-if (setf --pcl-if-ret--2 (p-str-eq $ch "w"))
                                 (setf --pcl-if-ret--2
@@ -2289,7 +2263,7 @@
                                         (p-&& (p-|| $all (p-< $done $nrep))
                                           (p-< (p-cast-$ $si_ref) $slen))
                                         (let (($v (make-p-box nil)) ($more (make-p-box nil)))
-                                          (let ((*wantarray* nil))
+                                          (p-scalar-ctx
                                             (p-list-= (vector $v $more) (vector 0 1)))
                                           (p-while $more
                                             (p-if (p->= (p-cast-$ $si_ref) $slen)
@@ -2324,12 +2298,11 @@
           ($checksum_p (make-p-box nil))
           ($group_base (make-p-box nil))
           ($depth (make-p-box nil)))
-        (let ((*wantarray* nil))
+        (p-scalar-ctx
           (p-list-=
             (vector $tmpl $s $si_ref $push_val $inh_be $inh_le $checksum_p $group_base $depth)
             @_))
-        (let ((*wantarray* :void))
-          (p-if (p-! (p-defined $group_base)) (p-my-= $group_base 0))
+        (p-void-ctx (p-if (p-! (p-defined $group_base)) (p-my-= $group_base 0))
           (p-if (p-! (p-defined $depth)) (p-my-= $depth 0))
           (p-if (p-> $depth $MAX_GROUP_DEPTH)
             (p-die :loc
@@ -2348,10 +2321,9 @@
                     (p-my-= $ch (p-substr $tmpl $ti 1))
                     (p-post++ $ti)
                     (let (($grpbeg (make-p-box nil)) ($grpend (make-p-box nil)))
-                      (let ((*wantarray* nil))
+                      (p-scalar-ctx
                         (p-list-= (vector $grpbeg $grpend)
-                          (vector (let ((*wantarray* t)) (p-undef))
-                            (let ((*wantarray* t)) (p-undef)))))
+                          (vector (p-list-ctx (p-undef)) (p-list-ctx (p-undef)))))
                       (p-if (p-str-eq $ch "(")
                         (progn (p-my-= $grpend (pl-_pack_find_group_end $tmpl $ti))
                           (p-my-= $grpbeg $ti)
@@ -2361,9 +2333,9 @@
                         (($bang (make-p-box nil))
                           ($be (make-p-box nil))
                           ($le (make-p-box nil)))
-                        (let ((*wantarray* nil))
+                        (p-scalar-ctx
                           (p-list-= (vector $bang $be $le)
-                            (let ((*wantarray* t))
+                            (p-list-ctx
                               (pl-_pack_parse_mods $tmpl
                                 (p-backslash $ti)
                                 $inh_be
@@ -2375,10 +2347,9 @@
                             (($all (make-p-box nil))
                               ($count (make-p-box nil))
                               ($nrep (make-p-box nil)))
-                            (let ((*wantarray* nil))
+                            (p-scalar-ctx
                               (p-list-= (vector $all $count $nrep)
-                                (let ((*wantarray* t))
-                                  (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
+                                (p-list-ctx (pl-_pack_parse_count $tmpl (p-backslash $ti)))))
                             (let (($had_count (make-p-box nil)))
                               (p-my-= $had_count (p-|| $all (p-> $ti $ti_before_count)))
                               (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
@@ -2397,8 +2368,7 @@
                                           (p-my-= $c (p-substr $tmpl $ti 1))
                                           (p-if
                                             (p-|| (p-|| (p-str-eq $c "*") (p-str-eq $c "["))
-                                              (let ((*wantarray* nil))
-                                                (p-=~ $c (p-regex "/\\d/"))))
+                                              (p-scalar-ctx (p-=~ $c (p-regex "/\\d/"))))
                                             (p-die :loc
                                               "cl/pack-impl.pl line 922"
                                               "'/' does not take a repeat count in unpack
@@ -2408,9 +2378,9 @@
                                     (($nb (make-p-box nil))
                                       ($sig (make-p-box nil))
                                       ($dbe (make-p-box nil)))
-                                    (let ((*wantarray* nil))
+                                    (p-scalar-ctx
                                       (p-list-= (vector $nb $sig $dbe)
-                                        (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                        (p-list-ctx (pl-_pack_type_info $ch $bang))))
                                     (let (($slash_n (make-p-box nil)))
                                       (p-my-= $slash_n 0)
                                       (p-if $nb
@@ -2495,9 +2465,9 @@
                                             (($dbang (make-p-box nil))
                                               ($dbe2 (make-p-box nil))
                                               ($dle2 (make-p-box nil)))
-                                            (let ((*wantarray* nil))
+                                            (p-scalar-ctx
                                               (p-list-= (vector $dbang $dbe2 $dle2)
-                                                (let ((*wantarray* t))
+                                                (p-list-ctx
                                                   (pl-_pack_parse_mods $tmpl
                                                     (p-backslash $ti)
                                                     $be
@@ -2509,9 +2479,9 @@
                                               (($dall (make-p-box nil))
                                                 ($dcnt (make-p-box nil))
                                                 ($dnrep (make-p-box nil)))
-                                              (let ((*wantarray* nil))
+                                              (p-scalar-ctx
                                                 (p-list-= (vector $dall $dcnt $dnrep)
-                                                  (let ((*wantarray* t))
+                                                  (p-list-ctx
                                                     (pl-_pack_parse_count $tmpl
                                                       (p-backslash $ti)))))
                                               (p-my-= $ti (pl-_pack_skip_ws $tmpl $ti))
@@ -2526,9 +2496,9 @@
                                                   (($dnb (make-p-box nil))
                                                     ($dsig (make-p-box nil))
                                                     ($ddbe (make-p-box nil)))
-                                                  (let ((*wantarray* nil))
+                                                  (p-scalar-ctx
                                                     (p-list-= (vector $dnb $dsig $ddbe)
-                                                      (let ((*wantarray* t))
+                                                      (p-list-ctx
                                                         (pl-_pack_type_info $dch $dbang))))
                                                   (p-if $chain
                                                     (progn
@@ -2696,7 +2666,7 @@
                                           (let (($fc (make-p-box nil)))
                                             (p-my-= $fc (p-substr $inner $gti 1))
                                             (p-if
-                                              (let ((*wantarray* nil))
+                                              (p-scalar-ctx
                                                 (p-=~ $fc (p-regex "/^[\\d\\*\\[]/")))
                                               (p-die :loc
                                                 "cl/pack-impl.pl line 1027"
@@ -2798,9 +2768,9 @@
                                 (($nb (make-p-box nil))
                                   ($sig (make-p-box nil))
                                   ($dbe (make-p-box nil)))
-                                (let ((*wantarray* nil))
+                                (p-scalar-ctx
                                   (p-list-= (vector $nb $sig $dbe)
-                                    (let ((*wantarray* t)) (pl-_pack_type_info $ch $bang))))
+                                    (p-list-ctx (pl-_pack_type_info $ch $bang))))
                                 (p-if $nb
                                   (progn
                                     (let (($be2 (make-p-box nil)))
@@ -2909,8 +2879,8 @@
   (p-args-body
     (block nil
       (let (($tmpl (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $tmpl) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $tmpl) @_))
+        (p-void-ctx
           (let (($tlen (%pcl-to-number-strict (p-length $tmpl) "$tlen")))
             (let (($ti (make-p-box nil)))
               (p-my-= $ti 0)
@@ -2927,7 +2897,7 @@
                       (p-my-= $ti (p-+ $grpend 1)))))
                 (p-while
                   (p-&& (p-< $ti $tlen)
-                    (let ((*wantarray* nil)) (p-=~ (p-substr $tmpl $ti 1) (p-regex "/[!<>]/"))))
+                    (p-scalar-ctx (p-=~ (p-substr $tmpl $ti 1) (p-regex "/[!<>]/"))))
                   (p-post++ $ti))
                 (pl-_pack_parse_count $tmpl (p-backslash $ti))
                 ;; return (substr($tmpl, 0, $ti), substr($tmpl, $ti))
@@ -2938,9 +2908,8 @@
   (p-args-body
     (block nil
       (let (($tmpl (make-p-box nil)) ($s (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $tmpl $s) @_))
-        (let ((*wantarray* :void))
-          (p-if (p-! (p-defined $s)) (p-my-= $s ""))
+        (p-scalar-ctx (p-list-= (vector $tmpl $s) @_))
+        (p-void-ctx (p-if (p-! (p-defined $s)) (p-my-= $s ""))
           (p-=~ $tmpl (p-subst "\\A(?:[ \\t\\n\\r\\f,]|#[^\\n]*\\n?)*" ""))
           (let (($checksum_width (make-p-box nil)))
             (p-my-= $checksum_width 0)
@@ -2989,9 +2958,9 @@
                   (p-if $checksum_width
                     (progn
                       (let (($cs_tmpl (make-p-box nil)) ($rest_tmpl (make-p-box nil)))
-                        (let ((*wantarray* nil))
+                        (p-scalar-ctx
                           (p-list-= (vector $cs_tmpl $rest_tmpl)
-                            (let ((*wantarray* t)) (pl-_next_format_item $tmpl))))
+                            (p-list-ctx (pl-_next_format_item $tmpl))))
                         (let (($checksum (make-p-box nil)))
                           (p-my-= $checksum 0)
                           (p-if (p-length $cs_tmpl)

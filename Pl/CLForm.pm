@@ -24,12 +24,39 @@ use v5.30;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_flat to_program);
+our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_flat to_program ctx_bind);
 
 use Scalar::Util ();
 use constant ONE_LINE_MAX => 95;
 
 our %RAW_PROV;
+# THE CONTEXT BIND, built in ONE place (task #281 item 1, s414).  Perl's
+# calling context is a dynamic binding of *wantarray*, and every emitter that
+# needs one asks here instead of spelling the `let` itself — seventeen sites
+# did.  CTX is the CL form the binding takes: 't' (list), 'nil' (scalar),
+# ':void' (void) or '*pcl-caller-wantarray*' (propagate the caller's).  The
+# macros expand to exactly that let (cl/pcl-runtime.lisp), so this renames the
+# emission without changing it.
+#
+# An unknown CTX DIES naming the value (CLAUDE.md rule 12): the set is closed,
+# and a silent fallthrough here would emit a bind that reads as one context
+# and behaves as another.
+my %CTX_MACRO = (
+  't'                      => 'p-list-ctx',
+  'nil'                    => 'p-scalar-ctx',
+  ':void'                  => 'p-void-ctx',
+  '*pcl-caller-wantarray*' => 'p-caller-ctx',
+);
+
+sub ctx_bind {
+  my ($ctx, @body) = @_;
+  my $macro = $CTX_MACRO{$ctx // ''}
+    or die "PCL internal: no context macro for '"
+         . (defined $ctx ? $ctx : 'undef')
+         . "' (known: " . join(' ', sort keys %CTX_MACRO) . ")\n";
+  return [$macro, @body];
+}
+
 sub raw {
   my ($s) = @_;
   my $r = bless \$s, 'Pl::CLForm::Raw';

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-157
+;;; pcl: pipeline=v2 gen=v2-158
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -57,21 +57,19 @@
   (&rest %_args)
   (p-args-body
     (block nil
-      (let ((*wantarray* :void))
+      (p-void-ctx
         (let (($message (make-p-box nil)))
           (p-my-= $message (p-pop @_))
-          (let ((*wantarray* *pcl-caller-wantarray*))
-            (p-warn :loc "lib/warnings.pm line 38" $message)))))))
+          (p-caller-ctx (p-warn :loc "lib/warnings.pm line 38" $message)))))))
 
 (p-sub pl-warnif
   (&rest %_args)
   (p-args-body
     (block nil
-      (let ((*wantarray* :void))
+      (p-void-ctx
         (let (($message (make-p-box nil)))
           (p-my-= $message (p-pop @_))
-          (let ((*wantarray* *pcl-caller-wantarray*))
-            (p-warn :loc "lib/warnings.pm line 44" $message)))))))
+          (p-caller-ctx (p-warn :loc "lib/warnings.pm line 44" $message)))))))
 
 (p-set-current-package :warnings "warnings")
 

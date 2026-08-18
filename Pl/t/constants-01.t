@@ -86,17 +86,17 @@ diag "-------- Constant usage in expressions:";
 # v2 spells the same runtime write p-my-= inside the fresh let.)
 output_contains('use constant PI => 3.14159;
 my $x = PI;',
-                '(p-my-= $x (let ((*wantarray* nil)) (pl-PI)))',
+                '(p-my-= $x (p-scalar-ctx (pl-PI)))',
                 'Constant in assignment');
 
 output_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
-                '(p-my-= $area (p-* (p-* (let ((*wantarray* nil)) (pl-PI)) $r) $r))',
+                '(p-my-= $area (p-* (p-* (p-scalar-ctx (pl-PI)) $r) $r))',
                 'Constant in arithmetic');
 
 output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
-                '(p-my-= $size (p-* (let ((*wantarray* nil)) (pl-WIDTH)) (let ((*wantarray* nil)) (pl-HEIGHT))))',
+                '(p-my-= $size (p-* (p-scalar-ctx (pl-WIDTH)) (p-scalar-ctx (pl-HEIGHT))))',
                 'Multiple constants in expression');
 
 
@@ -109,7 +109,7 @@ diag "-------- Constant after print is a list element, not a filehandle:";
 # swallow FOO as a filehandle and print nothing for it.
 {
     my $cl = parse_code('use constant FOO => 1; print FOO, "x";');
-    like($cl, qr/\(p-print \(let \(\(\*wantarray\* t\)\) \(pl-FOO\)\) "x"\)/,
+    like($cl, qr/\(p-print \(p-list-ctx \(pl-FOO\)\) "x"\)/,
          'print FOO, ... treats FOO as a list element (constant), not a filehandle');
     unlike($cl, qr/p-print :fh.*pl-FOO/,
            'print FOO, ... does NOT route FOO as a filehandle');

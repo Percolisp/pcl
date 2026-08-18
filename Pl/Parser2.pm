@@ -6043,21 +6043,37 @@ sub _forward_global_decls {
   # decides defvar-vs-p-defcell (task #289 direction D).  %punct and %caret are
   # all-exception by construction — routed anyway, so the partition stays the
   # single authority and a future caret name that IS word-shaped cannot drift.
-  my @decls = (';; Forward declarations for undeclared package globals');
-  for my $v (sort keys %seen) {
-    push @decls, global_decl_form($v, _fresh_container($v));
-  }
-  for my $v (sort keys %punct) {
-    push @decls, global_decl_form($v, _fresh_container($v));
-  }
-  for my $sym (sort keys %caret) {
-    push @decls, global_decl_form($sym, _fresh_container(substr($sym, 1)));
-  }
+  # ONE declaration per (package, name) per FILE (#281 item 2, s414).  These
+  # blocks are emitted per SECTION, so a name referenced from several sections
+  # of the SAME package was declared once per section — 16 such repeats in
+  # sort.t, 4 in hash.t, 2 in closure.t.  Dropping a repeat is safe because the
+  # survivor is an EARLIER top-level form and both declarers are define-once
+  # (defvar; p-defcell via its boundp guard), so the later one was already a
+  # no-op at load.
+  #
+  # The key is (package, name), NEVER the text.  A section emits its own
+  # `in-package`, and `in-package` is READ-time per top-level form, so a bare
+  # `$x` under package Foo and one under Bar are DIFFERENT symbols and both
+  # declarations are needed — which is why sort.t's ten `(defvar $a …)` lines
+  # are not duplicates at all (they are ten packages), and why a text-level
+  # de-duplication here would be a silent wrong.  A name that carries its own
+  # `::` is package-independent and keyed by itself.
+  my @decls;
+  my $emit = sub {
+    my ($name, $init) = @_;
+    my $key = $name =~ /::/ ? $name : "$pkg\0$name";
+    return if $self->{_declared_globals}{$key}++;
+    push @decls, global_decl_form($name, $init);
+  };
+  $emit->($_, _fresh_container($_))            for sort keys %seen;
+  $emit->($_, _fresh_container($_))            for sort keys %punct;
+  $emit->($_, _fresh_container(substr($_, 1))) for sort keys %caret;
   for my $qv (sort keys %cross) {
     (my $var = $qv) =~ s/^.*:://;
-    push @decls, global_decl_form($qv, _fresh_container($var));
+    $emit->($qv, _fresh_container($var));
   }
-  return @decls;
+  return () unless @decls;
+  return (';; Forward declarations for undeclared package globals', @decls);
 }
 
 # ---------------------------------------------------------------- subs
@@ -6207,8 +6223,8 @@ sub _lower_sub_inner {
     return ['p-sub', $clname, ['list', '&rest', '%_args'],
             ['p-args-body', ['block', 'nil',
               ['let', ['list', map { ['list', $_, '(make-p-box nil)'] } @$params],
-                ['let', ['list', ['list', '*wantarray*', 'nil']],
-                  ['p-list-=', ['vector', @$params], '@_']],
+                Pl::CLForm::ctx_bind('nil',
+                  ['p-list-=', ['vector', @$params], '@_']),
                 $self->_lower_body_regime(\@body_stmts, $vi),
                 ($tail_param ? ($tail_param) : ())]]]];
   }
@@ -6238,8 +6254,8 @@ sub _lower_body_regime {
     return $self->_lower_block($stmts, $vi, 'inherit');
   }
   local $self->environment->{wa_void_active} = 1;
-  return ['let', ['list', ['list', '*wantarray*', ':void']],
-          $self->_lower_block($stmts, $vi, 'inherit')];
+  return Pl::CLForm::ctx_bind(':void',
+          $self->_lower_block($stmts, $vi, 'inherit'));
 }
 
 # Register a `my`-declared name: for the fallback machinery's my-vs-package
@@ -7743,7 +7759,7 @@ sub _lower_stmt {
       # native/fallback distinction that lived here is gone, Phase A)
       && _stmt_has_global_match($stmt)
       && !$self->environment->wa_void_active) {
-    $form = ['let', ['list', ['list', '*wantarray*', ':void']], $form];
+    $form = Pl::CLForm::ctx_bind(':void', $form);
   }
   return $self->_restore_caller_wa($tail_ctx,
          _apply_modifier($form, $mod, $cond, $self, $stmt));
@@ -7804,8 +7820,7 @@ sub _restore_caller_wa {
   return @forms
     unless defined $tail_ctx && "$tail_ctx" eq 'inherit'
     && $self->environment->wa_void_active && @forms;
-  return ['let', ['list', ['list', '*wantarray*', '*pcl-caller-wantarray*']],
-          @forms];
+  return Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', @forms);
 }
 
 # True if the statement contains an `m//g` match (list-vs-scalar context
@@ -8655,7 +8670,7 @@ sub _lower_embedded_anon {
                      ['list', '*pcl-caller-wantarray*', '*wantarray*']],
              ['catch', ':p-return',
               ['block', 'nil',
-               ['let', ['list', ['list', '*wantarray*', ':void']]]]]]];
+               Pl::CLForm::ctx_bind(':void')]]]];
   }
 
   # Same conservative declines as the block form: package switches need v1's
@@ -8861,16 +8876,22 @@ sub _auto_defined_raw {
 }
 
 # An each/readdir/readline/glob call form, possibly under the emitter's
-# (let ((*wantarray* …)) …) context wrap — or a raw chunk with that text
-# shape (a declined subtree in the RHS position).
+# CONTEXT BIND — `(p-scalar-ctx …)` since #281 item 1, and still a bare `let`
+# where two variables are bound together — or a raw chunk with that text shape
+# (a declined subtree in the RHS position).  BOTH spellings must be seen
+# through: a context wrap the detector cannot see past silently drops perl's
+# implicit defined() and turns `while (my $l = <FH>)` into a loop that stops on
+# a "0" line (caught by the corpus A/B when the macros landed, s414).
+my %CTX_MACRO_HEAD = map { $_ => 1 } qw(p-list-ctx p-scalar-ctx p-void-ctx p-caller-ctx);
 sub _auto_defined_call {
   my ($f) = @_;
   if (Pl::CLForm::is_raw($f)) {
-    return $$f =~ /^(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) )?\(p-(?:each|readdir|readline|glob)\b/;
+    return $$f =~ /^(?:\(let \(\(\*wantarray\* (?:nil|t)\)\) |\(p-(?:list|scalar|void|caller)-ctx )?\(p-(?:each|readdir|readline|glob)\b/;
   }
   return 0 unless ref $f eq 'ARRAY' && @$f && !ref $f->[0];
   return 1 if $AUTO_DEFINED_HEAD{$f->[0]};
   return _auto_defined_call($f->[-1]) if $f->[0] eq 'let' && @$f >= 3;
+  return _auto_defined_call($f->[-1]) if $CTX_MACRO_HEAD{$f->[0]} && @$f >= 2;
   return 0;
 }
 

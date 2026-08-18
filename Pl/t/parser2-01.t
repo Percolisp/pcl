@@ -42,13 +42,13 @@ like($cl, qr/\(let \(\(\$c \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/,
      '$c bound raw at its declaration site');
 
 # Spec #2 (amended by task #60): exactly ONE :void bind — the hoisted
-# sub-body regime (`(let ((*wantarray* :void))` once around fib's body,
+# sub-body regime (`(p-void-ctx …)` once around fib's body,
 # v1's wa_void_active model) — and never per-statement wraps around plain
 # assignments.  Pre-hoist this asserted zero wraps; the regime traded that
 # for suppressing every per-statement bind (SBCL heap blowup on large subs).
-my $void_wraps = () = $cl =~ /\(let \(\(\*wantarray\* :void\)\)/g;
+my $void_wraps = () = $cl =~ /\(p-void-ctx\b/g;
 is($void_wraps, 1, 'exactly one :void bind: the hoisted sub-body regime');
-like($cl, qr/\(let \(\(\*wantarray\* :void\)\)\s*\n?\s*\(let \(\(\$a/,
+like($cl, qr/\(p-void-ctx\s*\n?\s*\(let \(\(\$a/,
      'the :void regime wraps the body once, directly above the first decl');
 # B-num (task #62 scan-licensed freeze): $a's only uses are numeric ($a + $b),
 # so the bare copy `$a = $b;` goes raw through the strict numeric freeze; $b's
@@ -82,7 +82,7 @@ like($rec, qr/\(p-\+ \(pl-fib \(p-- \$n 1\)\) \(pl-fib \(p-- \$n 2\)\)\)/,
      'insensitive callee: direct native calls, no *wantarray* bind');
 my $ctx = Pl::Parser2->parse_code(
   'sub pair { my ($x) = @_; return ($x, $x); } sub inc { my ($x) = @_; return $x + 1; } my $s = 0; $s = inc(pair(7) + 0) + 100;');
-like($ctx, qr/\(let \(\(\*wantarray\* nil\)\) \(pl-pair 7\)\)/,
+like($ctx, qr/\(p-scalar-ctx \(pl-pair 7\)\)/,
      'sensitive callee (returns a list) keeps the *wantarray* bind');
 like($ctx, qr/\(pl-inc \(p-\+/,
      'insensitive callee called directly even with nested sensitive arg');

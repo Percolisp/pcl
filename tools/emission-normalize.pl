@@ -25,8 +25,15 @@
 #                     emits cannot be told apart from one both emit; the
 #                     sweep is the oracle for whether a dropped bind was
 #                     legal, this tool only proves that NOTHING ELSE moved.
-#   ctx-macros        (p-list-ctx F) / (p-scalar-ctx F) / (p-void-ctx F) /
-#                     (p-caller-ctx F) → the `let` they abbreviate (#281 item 1)
+#   ctx-macros        (p-list-ctx F…) / (p-scalar-ctx F…) / (p-void-ctx F…) /
+#                     (p-caller-ctx F…) → the `let` they abbreviate (#281 item 1)
+#   sort-cmp          (p-sort-cmp PARAMS [decls…] BODY…) → the lambda/catch/
+#                     block it abbreviates (#281 item 6)
+#   dup-decls         a (defvar|p-defcell) repeated for the same (PACKAGE,
+#                     NAME) is dropped — on BOTH sides, like insensitive-call
+#                     (#281 item 2).  The package matters: in-package is
+#                     READ-time per top-level form, so the same text under two
+#                     packages is two different symbols
 #   notinline-locally (locally (declare (notinline …)) B…) → (progn B…) — the
 #                     top-level-`local` inlining cap; its discriminator moved
 #                     at s412 (Phase C), a wrap-only change normalizes away
@@ -51,7 +58,9 @@ my @rules;
 my ($do_diff, $corpus_ref);
 GetOptions('rule=s' => \@rules, 'diff' => \$do_diff, 'corpus=s' => \$corpus_ref)
   or die "usage: $0 [--rule NAME]... FILE | --diff A B | --corpus REF\n";
-my %RULE = map { $_ => 1 } (@rules ? @rules : qw(elem-setf insensitive-call ctx-macros notinline-locally));
+my %RULE = map { $_ => 1 } (@rules ? @rules
+                          : qw(elem-setf insensitive-call ctx-macros sort-cmp
+                               dup-decls notinline-locally));
 
 if ($corpus_ref) { exit corpus_mode($corpus_ref) }
 if ($do_diff) {
@@ -191,6 +200,25 @@ sub rewrite {
   my @k = map { rewrite($_) } @$f;
   $f = \@k;
   my $h = head($f);
+  # THE MACRO SPELLINGS EXPAND FIRST, and their result falls through to the
+  # rules below rather than returning: (p-list-ctx (pl-F …)) must still be
+  # seen by insensitive-call as the `let` it abbreviates, or a side that emits
+  # the macro and a side that emits the let stop comparing equal.
+  if ($RULE{'ctx-macros'} && $h =~ /^p-(list|scalar|void|caller)-ctx$/) {
+    my $bind = { list => 't', scalar => 'nil', void => ':void', caller => '*pcl-caller-wantarray*' }->{$1};
+    $f = ['let', [['*wantarray*', $bind]], @$f[1 .. $#$f]];
+    $h = head($f);
+  }
+  # (p-sort-cmp PARAMS [decls…] BODY…) → the lambda/catch/block it abbreviates
+  # (#281 item 6).  Leading (declare …) forms stay at the lambda head, exactly
+  # as the macro puts them.
+  if ($RULE{'sort-cmp'} && $h eq 'p-sort-cmp' && @$f >= 2) {
+    my @body = @$f[2 .. $#$f];
+    my @decl;
+    push @decl, shift @body while @body && head($body[0]) eq 'declare';
+    $f = ['lambda', $f->[1], @decl, ['catch', ':p-return', ['block', 'nil', @body]]];
+    $h = head($f);
+  }
   if ($RULE{'elem-setf'} && $h eq 'setf' && @$f == 3
       && (head($f->[1]) eq 'p-gethash' || head($f->[1]) eq 'p-aref')) {
     return ['p-setf', $f->[1], $f->[2]];
@@ -201,10 +229,7 @@ sub rewrite {
       && head($f->[2]) =~ /^(?:[\w:|]+::)?pl-/) {
     return $f->[2];
   }
-  if ($RULE{'ctx-macros'} && @$f == 2 && $h =~ /^p-(list|scalar|void|caller)-ctx$/) {
-    my $bind = { list => 't', scalar => 'nil', void => ':void', caller => '*pcl-caller-wantarray*' }->{$1};
-    return ['let', [['*wantarray*', $bind]], $f->[1]];
-  }
+
   # (locally (declare (notinline …)) BODY…) → (progn BODY…): v1's `local`
   # machinery wraps a "top-level" local's remainder in it to cap inlining
   # in a huge cold form; the discriminator moved at s412 (Phase C), so an
@@ -234,8 +259,33 @@ sub flat {
   return '(' . join(' ', map { flat($_) } @$f) . ')';
 }
 
+# A global DECLARATION repeated for the same (package, name) is dropped — on
+# BOTH sides, so a side that stopped emitting the repeat cannot be told from
+# one that never did (#281 item 2, the same "drop on both sides" shape as
+# insensitive-call).  The key must carry the package: `in-package` is READ-time
+# per top-level form, so a bare `$a` under :Foo and one under :Bar are
+# DIFFERENT symbols and both declarations are real.
+sub drop_dup_decls {
+  my ($forms) = @_;
+  my ($pkg, %seen, @out) = ('pcl');
+  for my $f (@$forms) {
+    my $h = head($f);
+    if ($h eq 'in-package' && @$f == 2 && !ref $f->[1]) {
+      ($pkg = $f->[1]) =~ s/^://;
+    }
+    elsif (($h eq 'defvar' || $h eq 'p-defcell') && @$f >= 2 && !ref $f->[1]) {
+      my $key = $f->[1] =~ /::/ ? $f->[1] : "$pkg\0$f->[1]";
+      next if $seen{$key}++;
+    }
+    push @out, $f;
+  }
+  return \@out;
+}
+
 sub normalize_text {
   my ($text) = @_;
   my $forms = read_forms($text);
+  $forms = drop_dup_decls($forms) if $RULE{'dup-decls'};
   return join("\n", map { flat(rewrite($_)) } @$forms) . "\n";
 }
+

@@ -260,8 +260,10 @@
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[|
-   ;; Context
+   ;; Context — the variable and the four macros that name its bindings (#281)
    #:*wantarray*
+   #:p-list-ctx #:p-scalar-ctx #:p-void-ctx #:p-caller-ctx
+   #:p-sort-cmp
    #:*pcl-caller-wantarray*
    #:*p-in-list-assign-rhs*
    ;; Call depth tracking (for p-caller at top level)
@@ -940,6 +942,82 @@
   "Saved *wantarray* from sub entry. p-wantarray reads this so wantarray() always
    reflects the context of the CURRENT sub's caller, even when *wantarray* has been
    overridden by gen_funcall for a nested call.")
+
+;;; THE CONTEXT PROTOCOL, NAMED (task #281 item 1, s414).  Perl's calling
+;;; context is a dynamic binding of *wantarray* (docs/ir-spec.md §5), and that
+;;; binding was the loudest single shape in the emitted file — 7 to 17 of them
+;;; per 100 lines, i.e. every 6th to 14th line, spelled as a bare `let` a
+;;; reader has to decode.  These four macros expand to EXACTLY that let, so
+;;; the generated code is renamed, never changed: same bindings, same body,
+;;; same code after macroexpansion, no runtime cost by construction.
+;;; A translator reading PCL's output should treat them as the context marks
+;;; they are; there is no fifth context.
+(defmacro p-list-ctx (&body body)
+  "Evaluate BODY in Perl LIST context."
+  `(let ((*wantarray* t)) ,@body))
+
+(defmacro p-scalar-ctx (&body body)
+  "Evaluate BODY in Perl SCALAR context."
+  `(let ((*wantarray* nil)) ,@body))
+
+(defmacro p-void-ctx (&body body)
+  "Evaluate BODY in Perl VOID context."
+  `(let ((*wantarray* :void)) ,@body))
+
+(defmacro p-caller-ctx (&body body)
+  "Evaluate BODY in the context this sub was CALLED in — the propagating case
+   (goto &sub, a tail call): *wantarray* becomes the saved caller context."
+  `(let ((*wantarray* *pcl-caller-wantarray*)) ,@body))
+
+;;; THE SORT COMPARATOR, NAMED (task #281 item 6, s414).  A `sort BLOCK` /
+;;; `sort NAME` comparator is a lambda over the comparison pair whose body
+;;; runs inside (catch :p-return (block nil …)) — because perl's `return`
+;;; inside a sort block exits the COMPARATOR, not the enclosing sub.  Spelling
+;;; that out at each of the three emission sites hid the rule in boilerplate;
+;;; this macro expands to exactly the same three forms.
+;;; Leading (declare …) forms stay at the lambda head, where CL requires them:
+;;; a region's package-qualified pair must be declared special there or the
+;;; parameter binding is lexical and a comparator reading the global sees
+;;; nothing (see Pl/ExprToCL.pm gen_inline_lambda_form).
+(defmacro p-sort-cmp (params &body body)
+  "A Perl sort comparator over PARAMS: BODY with `return` bound to it."
+  (let ((decls '()))
+    (loop while (and body (consp (car body)) (eq (car (car body)) 'declare))
+          do (push (pop body) decls))
+    `(lambda ,params ,@(nreverse decls)
+       (catch :p-return (block nil ,@body)))))
+
+;;; PEEL A CONTEXT WRAP OFF AN EMITTED FORM, at macroexpansion time.  A macro
+;;; that pattern-matches the code its caller was handed — %p-fh-arg recovering
+;;; a bareword filehandle from (pl-NAME), p-list-='s undef-placeholder test —
+;;; must see through the context bind, or the wrap silently defeats the match
+;;; (a bareword FH then CALLS pl-NAME, an undefined function).  There are TWO
+;;; spellings and both must be peeled: the (p-…-ctx BODY) macros above, and the
+;;; bare (let ((*wantarray* V)) BODY) they replaced — still emitted where a
+;;; second variable is bound alongside, and still present in captured v1 text.
+;;; Comparison is by symbol NAME, like the "PL-" tests elsewhere: an emitted
+;;; form arrives with whatever package's symbols the generated file interned.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-ctx-wrap-p (form)
+    "True when FORM is a one-body context wrap; NIL otherwise."
+    (and (consp form) (symbolp (car form))
+         (or (and (= (length form) 2)
+                  (member (symbol-name (car form))
+                          '("P-LIST-CTX" "P-SCALAR-CTX" "P-VOID-CTX" "P-CALLER-CTX")
+                          :test #'string=))
+             (and (= (length form) 3)
+                  (string= (symbol-name (car form)) "LET")
+                  (consp (second form)) (= (length (second form)) 1)
+                  (consp (first (second form)))
+                  (symbolp (first (first (second form))))
+                  (string= (symbol-name (first (first (second form))))
+                           "*WANTARRAY*")))))
+
+  (defun %p-strip-ctx (form)
+    "FORM with every context wrap peeled off; FORM itself when there is none."
+    (if (%p-ctx-wrap-p form)
+        (%p-strip-ctx (car (last form)))
+        form)))
 
 ;;; END blocks - executed in reverse order at program exit
 (defvar *end-blocks* nil "List of END block thunks to execute at exit")
@@ -4454,18 +4532,15 @@
           (greedy-done nil))
       (flet
           ((is-undef-form (v)
-             ;; True when v is any form that produces Perl undef used as a skip placeholder
-             (or (eq v '*p-undef*)
-                 (and (listp v)
-                      (symbolp (car v))
-                      (string= (symbol-name (car v)) "P-UNDEF"))
-                 ;; (let ((*wantarray* t)) (p-undef)) wrapper emitted by wantarray ctx
-                 (and (listp v)
-                      (eq (car v) 'let)
-                      (= (length v) 3)
-                      (listp (third v))
-                      (symbolp (car (third v)))
-                      (string= (symbol-name (car (third v))) "P-UNDEF"))))
+             ;; True when v is any form that produces Perl undef used as a skip
+             ;; placeholder.  A context wrap around it is peeled by
+             ;; %p-strip-ctx — BOTH spellings, so the #281 macros cannot turn a
+             ;; placeholder into a real assignment target.
+             (let ((v (%p-strip-ctx v)))
+               (or (eq v '*p-undef*)
+                   (and (listp v)
+                        (symbolp (car v))
+                        (string= (symbol-name (car v)) "P-UNDEF")))))
            (cur-idx ()
              ;; The current index as a CL literal or form.
              ;; When dynamic skips exist: (+ static-idx dyn1 dyn2 ...)
@@ -9319,7 +9394,14 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;; it is a bareword filehandle — quote it.  Otherwise pass through as-is.
 ;; Also handles (pl-NAME) forms where codegen wrapped the bareword in a funcall.
 (defmacro %p-fh-arg (fh-form)
-  (cond
+  ;; A CONTEXT WRAP around the argument is peeled first (%p-strip-ctx): a
+  ;; scalar-context user-sub call is emitted wrapped, and the (pl-NAME) arm
+  ;; below is exactly what a bareword filehandle looks like inside one.  That
+  ;; used to be a SECOND copy of the arm, keyed on the `let` spelling only —
+  ;; which the #281 context macros would have silently defeated (probed: the
+  ;; bareword then CALLS pl-NAME, an undefined function).
+  (let ((fh-form (%p-strip-ctx fh-form)))
+   (cond
     ;; Bare symbol without sigil — bareword filehandle: quote it
     ((and (symbolp fh-form)
           (let ((name (symbol-name fh-form)))
@@ -9343,22 +9425,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
      ;; "tst" — symbolic-FH open(\$TST="TST") then bareword use.)
      `',(intern (%pcl-invert-case
                  (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3))))
-    ;; (let (BINDINGS) (pl-NAME)) — wantarray-wrapped bareword FH.
-    ;; Sessions 162+ wrap scalar-context user sub calls in (let ((*wantarray* V)) ...).
-    ;; Unwrap the let and extract the bare filehandle name.
-    ((and (listp fh-form)
-          (= (length fh-form) 3)
-          (eq (car fh-form) 'let)
-          (let ((body (caddr fh-form)))
-            (and (listp body)
-                 (= (length body) 1)
-                 (symbolp (car body))
-                 (> (length (symbol-name (car body))) 3)
-                 (string-equal (subseq (symbol-name (car body)) 0 3) "PL-"))))
-     `',(intern (%pcl-invert-case
-                 (subseq (%pcl-invert-case (symbol-name (car (caddr fh-form)))) 3))))
     ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
-    (t fh-form)))
+    (t fh-form))))
 
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"
@@ -11700,7 +11768,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-157"
+(defparameter *pcl-cache-generation* "v2-158"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -35,6 +35,9 @@
 #                      task #349; Pl/t/extension-preamble-01.t guards it)
 #   cl/pcl-warnings.lisp
 #                      ./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp
+#   BOTH of the above then need  tools/tag-license FILE  — the transpiler does
+#   not emit the license header the tree's own gate (Pl/t/license-tag-01.t)
+#   requires, so a regeneration without it turns one red row into two (s414).
 
 use v5.30;
 use strict;

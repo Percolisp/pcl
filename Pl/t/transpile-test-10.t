@@ -995,4 +995,46 @@ sub named { 1 }
 print "sub:", (defined &named ? 1 : 0), " miss:", (defined &nope ? 1 : 0), "\n";
 ');
 
+# ---------------------------------------------------------------------------
+# THE #281 MACROS ARE A RENAME, NOT A CHANGE.  The shape rows above (and in
+# clform-01, codegen-01, constants-01, fileio-01, misc-fixes-02, parser2-01/02,
+# passes-01, regexp-subst-01, sort-01) pin the new SPELLING; this row pins its
+# MEANING, by macroexpansion at the runtime: each context macro must expand to
+# exactly the `(let ((*wantarray* …)) …)` it replaced, and p-sort-cmp to the
+# lambda/catch/block a sort comparator was always emitted as — with leading
+# (declare …) forms kept at the lambda head, where CL requires them and where a
+# region's package-qualified $a/$b must be declared special.
+{
+    my ($lfh, $lisp) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $lfh <<'LISP';
+(in-package :pcl)
+(princ (if (equal (macroexpand-1 '(p-list-ctx x))
+                  '(let ((*wantarray* t)) x)) "T" "F"))
+(princ (if (equal (macroexpand-1 '(p-scalar-ctx x))
+                  '(let ((*wantarray* nil)) x)) "T" "F"))
+(princ (if (equal (macroexpand-1 '(p-void-ctx x))
+                  '(let ((*wantarray* :void)) x)) "T" "F"))
+(princ (if (equal (macroexpand-1 '(p-caller-ctx x))
+                  '(let ((*wantarray* *pcl-caller-wantarray*)) x)) "T" "F"))
+(princ (if (equal (macroexpand-1 '(p-list-ctx a b c))
+                  '(let ((*wantarray* t)) a b c)) "T" "F"))
+(princ (if (equal (macroexpand-1 '(p-sort-cmp ($a $b) (p-<=> $a $b)))
+                  '(lambda ($a $b) (catch :p-return (block nil (p-<=> $a $b)))))
+           "T" "F"))
+(princ (if (equal (macroexpand-1
+                    '(p-sort-cmp ($a $b) (declare (special |Foo::$a|)) (body)))
+                  '(lambda ($a $b) (declare (special |Foo::$a|))
+                     (catch :p-return (block nil (body)))))
+           "T" "F"))
+(terpri)
+LISP
+    close $lfh;
+    my $out = `sbcl @sbcl_rt --load $lisp 2>&1`;
+    $out =~ s/^;.*\n//gm;
+    $out =~ s/^PCL Runtime loaded\n//gm;
+    $out =~ s/^\s*\n//gm;
+    is($out, "TTTTTTT\n",
+       '#281: every context macro and p-sort-cmp expand to exactly the form they renamed');
+}
+
 done_testing();

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-157
+;;; pcl: pipeline=v2 gen=v2-158
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -72,8 +72,7 @@
   (&rest %_args)
   (p-raw-params ($class)
     (block nil
-      (let ((*wantarray* :void))
-        (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
+      (p-void-ctx (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
         (p-foreach ($u (p-cast-@ "UNIVERSAL::ISA"))
           :my
           t
@@ -89,8 +88,8 @@
   (p-args-body
     (block nil
       (let (($class (make-p-box nil)) ($seen (make-p-box nil)))
-        (let ((*wantarray* nil)) (p-list-= (vector $class $seen) @_))
-        (let ((*wantarray* :void))
+        (p-scalar-ctx (p-list-= (vector $class $seen) @_))
+        (p-void-ctx
           (p-my-= $seen (make-p-box (p-hash (p-cast-% (p-|| $seen (make-p-box (p-hash)))))))
           (p-if (p-post++ (p-gethash-deref-box $seen $class))
             (progn
@@ -105,20 +104,18 @@
             (p-if (p-! @parents) (p-return (make-p-box (p-array-init $class))))
             (let ((@seqs (make-array 0 :adjustable t :fill-pointer 0)))
               (p-array-= @seqs
-                (let ((*wantarray* t))
+                (p-list-ctx
                   (p-map
                     (lambda ($_)
                       (make-p-box
-                        (p-array-init
-                          (p-cast-@ (let ((*wantarray* t)) (mro::pl-_c3_linearize $_ $seen))))))
+                        (p-array-init (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen))))))
                     @parents)))
               (p-push @seqs (make-p-box (p-array-init @parents)))
               (let ((@result (make-array 0 :adjustable t :fill-pointer 0)))
                 (p-array-= @result (vector $class))
                 (p-while 1
                   (p-array-= @seqs
-                    (let ((*wantarray* t))
-                      (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
+                    (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
                   (p-if (p-! @seqs) (p-last))
                   (let (($cand (make-p-box nil)))
                     (p-foreach ($seq @seqs)

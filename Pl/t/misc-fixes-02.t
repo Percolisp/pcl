@@ -130,7 +130,7 @@ test_cl('array/hash slice in string interpolation joins with $" (list ctx)',
 
 # Anonymous array constructor [ ... ] evaluates its contents in LIST context and
 # is never the enclosing sub's tail call.  Bug: a wantarray-sensitive builtin
-# inside [...] (e.g. reverse) skipped its (let ((*wantarray* t)) ...) wrapper in
+# inside [...] (e.g. reverse) skipped its (p-list-ctx ...) wrapper in
 # tail position, so a scalar context leaked in — `do { ...; "@{[reverse @a]}" }`
 # reversed the joined string ("123" -> "321") instead of the list (3,2,1).
 # Found by the difftest-ops babycart axis (session 242).  sort/map (always-list)
@@ -581,15 +581,16 @@ test_cl('chained < > comparison is not misparsed as a glob/readline',
 # that could take an operand (print/return/scalar/sort).  The glob-fixup pass now
 # reconstructs the readline token.  (YAML::PP's `return scalar <$fh>` hit this:
 # the unhandled `<`/`>` operand became an undef "single node of unknown type".)
-# readline is wantarray-sensitive, so it is emitted inside a `(let ((*wantarray*
-# …)) …)` context wrapper (see docs/wantarray-leak-review.md) — the assertion
+# readline is wantarray-sensitive, so it is emitted inside a context wrapper
+# (`(p-scalar-ctx …)` / `(p-list-ctx …)`, #281 item 1; see
+# docs/wantarray-leak-review.md) — the assertion
 # tolerates that wrapper but still pins that <$fh> parsed as a p-readline (not
 # the `<`/`>` operators).
 like(transpile_to_cl('my $line = scalar <$fh>;'),
-    qr/\(p-scalar \((?:let \(\(\*wantarray\* nil\)\) )?\(p-readline \$fh\)/,
+    qr/\(p-scalar \((?:p-scalar-ctx )?\(p-readline \$fh\)/,
     'scalar <$fh> parses as a readline, not < > operators');
 like(transpile_to_cl('print <$fh>;'),
-    qr/\(p-print \((?:let \(\(\*wantarray\* t\)\) )?\(p-readline \$fh\)/,
+    qr/\(p-print \((?:p-list-ctx )?\(p-readline \$fh\)/,
     'print <$fh> parses as a readline');
 # Guard the comparison sibling: `$a < $b` (no closing >) stays a less-than.
 like(transpile_to_cl('my $r = $a < $b;'), qr/\(p-< \$a \$b\)/,
