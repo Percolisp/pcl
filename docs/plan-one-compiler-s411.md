@@ -281,7 +281,27 @@ events; whole-corpus compile 54.3 s (flat).
   IDENTICAL; `PCL_E2_RAW_CENSUS` `decl:no-hook` count → 0 in lowering
   parses.
 
-### Phase C — the 12 decline shapes (½–1 session, EMISSION for the two fixes)
+### Phase C — the 12 decline shapes (½–1 session, EMISSION for the two fixes) — **DONE s412 (`s412d`)**
+
+**Done s412 (Fable), as measured.**  The corpus had 17 declines (12 body +
+5 anon): raw_wrap 10 → `to_flat` renders a raw_wrap and `embed_unsafe`
+accepts one whose body is safe (the printer route, as planned — no `local`
+port); tail-Include 4 → the decline is lifted (`_fallback_stmt`'s runtime
+raw is the tail value; #392 filed for perl's empty list-context value after
+a use/no tail); left: 2 `package`-inside-anon-sub (caller.t) + 1 tail
+declaration (local.t), which keep `_embed_via_v1` (and the PPI snapshot/
+restore around the structural attempt) alive — "no decline path" is
+therefore NOT literally reached; those two shapes are E5.3-adjacent
+(`package` inside a block needs the revert wrapper natively; the tail decl
+the `$decl_tail` machinery).  Routing `eval { local … }` bodies to v1's
+`local` handler exposed that its top-level inlining cap misfired under the
+seam (indent 0 for every v1-routed statement — a `local` in a file-level
+loop body lost the fast-path inlining); `_block_depth` joined the
+discriminator.  Bars: corpus-diff 45 files, normalized (`emission-normalize
+--rule notinline-locally`) to 4 explained files; gate 150/5488 minus the
+pclxs rows; full sweep TOTAL 18513 (+0), GATE clean, drops 13; gen v2-157 +
+artifacts; A/B on the loop-with-local shape neutral.  Census
+`decl:hook-declined` 17 → 3.
 
 Not a burn-down of `_fallback_stmt`; just the two shapes that keep an
 embedded block off the structural route:
@@ -384,7 +404,7 @@ Opus sessions, in order:
 1. **Phase R** (½) + **Phase A** (1–2) — R first, then A1–A3 in one
    session and A4 in the next if it does not fit; A carries the sweep.
 2. **Phase B** (1) — DONE s412.
-3. **Phase C** (½–1) + **#391** (the module prototype pre-scan as a
+3. **Phase C** (½–1) — DONE s412 — + **#391** (the module prototype pre-scan as a
    facts-only PPI walk — the last live entry into v1's file-level `parse()`
    AND ~a quarter of compile time; bars in the task) + the first batch of
    the duplicate worklist's EXTRACT items (`docs/dup-census-worklist-s411.md`

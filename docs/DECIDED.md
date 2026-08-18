@@ -66,6 +66,32 @@ not-supported.md → only then probe.*
   HASH ref since the E2 hook applied `_block_is_hash_constructor` to every
   kind.  Guard row transpile-test-10.t.  perl reads the braces as an anon
   hash only after map/grep (the `map({k => $_}, LIST)` paren form).
+- **Phase C DONE (`s412d`): the embedded-block decline shapes 17 → 3 per
+  corpus.**  (1) `Pl::CLForm::to_flat` renders a `raw_wrap` (open text +
+  body forms + its closers, comment-safe) and `embed_unsafe` accepts one
+  whose body is safe — a v1 `local` inside an eval/do/sub body no longer
+  sends the whole body to v1's text route (10 of the 17).  (2) A tail
+  `PPI::Statement::Include` converts: `_lower_block` routes it through
+  `_fallback_stmt`, whose runtime raw IS the tail value (`eval { require X }`
+  = require's value / undef + `$@`; a `use`/`no` tail emits no runtime form
+  → the previous statement's value, as perl in scalar context; #392 filed
+  for perl's EMPTY list-context value there).  Left declining (kept in
+  `_embed_via_v1`): a `package` statement inside the block (2, caller.t), a
+  non-convertible tail declaration (1, local.t).
+- **v1's top-level-`local` inlining cap keyed on `indent_level == 0` alone
+  MISFIRED under the seam** (every v1-routed statement lowers at indent 0):
+  a `local` in a file-level LOOP body got `(locally (declare (notinline …)))`
+  around the rest of the body — the fast-path inlining suppressed in exactly
+  the hot code the discriminator meant to exclude (found when Phase C routed
+  `eval { local … }` bodies there).  `_block_depth == 0` (the seam's
+  real-nesting fact) joined the conjunction: a true file-level `local` keeps
+  the cap, a nested one does not.  This is why ~40 corpus files changed;
+  `tools/emission-normalize.pl --rule notinline-locally` (new) proves the
+  rest identical except the four files whose bodies now go structural
+  (their diffs are the structural route's known shapes: `foreach-range-raw`,
+  the void regime, `(vector …)`-less single-element foreach lists, an
+  unqualified cell spelling inside its own section).  Guard rows
+  parser2-02.t (shape) + transpile-test-10.t (semantics, perl-probed).
 - **Bash trap of the session**: a commit message written inline with
   backticks in a double-quoted string EXECUTES them (`local $p->{…}` ran as a
   shell command and left a file named `{_v2_embed}` in the tree).  Write

@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 412 (2026-08-18, Fable) — Phase B of the one-compiler plan: ONE seam function, the hook always answers, analysis parses compile nothing
+## Session 412 (2026-08-18, Fable) — Phases B + C of the one-compiler plan: ONE seam function, the hook always answers, analysis parses compile nothing, the decline shapes 17 → 3
 
 Two commits, `719ef4c` (B1) and `97cc944` (B2+B3); plan
 `docs/plan-one-compiler-s411.md` §2 Phase B, task #385 → done.  Every step
@@ -71,6 +71,35 @@ guard row transpile-test-10.t (perl-probed, crashes on HEAD).
 **Not run, and why:** the full sweep — corpus-diff IDENTICAL + lib SAME +
 not a name-resolution change ⇒ the WHAT-TO-RUN-WHEN row says it cannot
 move; the gate-SET scan covered both populations for the new die.
+
+**Then Phase C (`13299d2`, `s412d`) — the decline shapes 17 → 3.**
+`Pl::CLForm::to_flat` renders a `raw_wrap` (open text + body forms +
+its closers, comment-safe) and `embed_unsafe` accepts one whose body is
+safe — a v1 `local` inside an eval/do/sub body no longer sends the whole
+body to v1's text route (10 of 17); a tail Include converts (4;
+`eval { require X }` = require's value / undef + `$@`; #392 filed: perl's
+list-context value after a `use`/`no` tail is EMPTY, PCL and HEAD both
+give the previous statement's value); left: `package` inside an anon sub
+(2) + a non-convertible tail decl (1) — `_embed_via_v1` and the PPI
+snapshot/restore stay for them.  **Found on the way, pre-existing at HEAD:
+v1's top-level-`local` inlining cap (`(locally (declare (notinline …)))`,
+the s268 local.t OOM guard) keyed on `indent_level == 0` alone, and every
+seam-lowered statement runs at indent 0 — so a `local` in a file-level
+LOOP body suppressed the fast-path inlining for the rest of that hot
+body**; `_block_depth` joined the discriminator (a true file-level local
+keeps the cap).  That change touched ~41 corpus files; the new
+`tools/emission-normalize.pl --rule notinline-locally` proves the rest
+identical except 4 files whose bodies now go structural (established
+shapes: `foreach-range-raw`, the anon void regime, an unqualified cell
+spelling inside its own section = the same symbol, unboxed single-element
+foreach lists).  Bars: gate 150/5488 minus the pclxs rows; full sweep
+GATE clean, TOTAL 18513 (+0), drops 13; gen v2-157 + the three artifacts;
+A/B on a loop-with-local neutral.  Guard rows parser2-02.t (shape) +
+transpile-test-10.t (semantics).  **Phases R + A + B + C of the
+one-compiler plan are COMPLETE — the release shape of
+`docs/plan-one-compiler-s411.md` §2 is reached, minus the two decline
+shapes above; NEXT = #391 (module prototype pre-scan) → the EXTRACT batch
+(#387) → plan-post-s408 §2 resumes.**
 
 **Traps of the session:** a commit message written INLINE in double quotes
 executes its backticks (`local $p->{_v2_embed}` ran as a shell command; a
