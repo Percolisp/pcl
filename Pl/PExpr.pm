@@ -3336,21 +3336,11 @@ sub handle_subcalls {
           && $next_after->isa('PPI::Token::Operator')
           && ($next_after->content eq ',' || $next_after->content eq '=>');
 
-        if ($func_name ne 'eval' && $func_name ne 'do' && !$comma_stops
-            && $i + 2 < scalar(@$e)) {
-          my @rest = @$e[$i + 2 .. $#$e];
-          my $rest_list = $self->cleanup_for_parsing(\@rest);
-          # Parse rest as comma-separated list (usually just one element)
-          my $rest_ids = $self->parse_list($rest_list);
-          for my $rest_id (@$rest_ids) {
-            $self->add_child_to_node($top_id, $rest_id);
-          }
-          # Remove all processed elements and replace start with result node
-          splice @$e, $i, scalar(@$e) - $i;
-          $e->[$i] = $top_node;
-        } else {
+        if ($func_name eq 'eval' || $func_name eq 'do' || $comma_stops) {
           # Replace eval+block (2 elements) with result node in-place
           splice @$e, $i, 2, $top_node;
+        } else {
+          $self->_take_rest_as_args($e, $i, $top_id, $top_node);
         }
         next;
       }
@@ -3408,18 +3398,7 @@ sub handle_subcalls {
         $self->add_child_to_node($top_id, $lambda_id);
 
         # Parse remaining elements (after sort + NAME) as the list
-        if ($i + 2 < scalar(@$e)) {
-          my @rest = @$e[$i + 2 .. $#$e];
-          my $rest_list = $self->cleanup_for_parsing(\@rest);
-          my $rest_ids  = $self->parse_list($rest_list);
-          for my $rest_id (@$rest_ids) {
-            $self->add_child_to_node($top_id, $rest_id);
-          }
-          splice @$e, $i, scalar(@$e) - $i;
-          $e->[$i] = $top_node;
-        } else {
-          splice @$e, $i, 2, $top_node;
-        }
+        $self->_take_rest_as_args($e, $i, $top_id, $top_node);
         next;
       }
     }
@@ -3451,18 +3430,7 @@ sub handle_subcalls {
       $self->add_child_to_node($lambda_id, $scalar_ids->[0]) if @$scalar_ids;
       $self->add_child_to_node($top_id, $lambda_id);
 
-      if ($i + 2 < scalar(@$e)) {
-        my @rest = @$e[$i + 2 .. $#$e];
-        my $rest_list = $self->cleanup_for_parsing(\@rest);
-        my $rest_ids  = $self->parse_list($rest_list);
-        for my $rest_id (@$rest_ids) {
-          $self->add_child_to_node($top_id, $rest_id);
-        }
-        splice @$e, $i, scalar(@$e) - $i;
-        $e->[$i] = $top_node;
-      } else {
-        splice @$e, $i, 2, $top_node;
-      }
+      $self->_take_rest_as_args($e, $i, $top_id, $top_node);
       next;
     }
 
@@ -5482,6 +5450,26 @@ sub _reduce_pre {
   $e->[$$i-1] = $node;
   splice @$e, $$i, $width;
   $$i--;
+  return;
+}
+
+# `WORD BLOCK LIST…` / `sort NAME LIST…` / `sort $cmp LIST…` (#387 family 8,
+# s413): everything after the two head elements at $i, $i+1 is the call's
+# LIST — parsed as a comma list, each item attached to $top_id, and the whole
+# run from $i replaced by $top_node; with nothing after the head the two
+# elements are replaced in place.  Once per block-form call.
+sub _take_rest_as_args {
+  my ($self, $e, $i, $top_id, $top_node) = @_;
+  if ($i + 2 < scalar(@$e)) {
+    my @rest = @$e[$i + 2 .. $#$e];
+    my $rest_list = $self->cleanup_for_parsing(\@rest);
+    my $rest_ids  = $self->parse_list($rest_list);   # usually one element
+    $self->add_child_to_node($top_id, $_) for @$rest_ids;
+    splice @$e, $i, scalar(@$e) - $i;
+    $e->[$i] = $top_node;
+  } else {
+    splice @$e, $i, 2, $top_node;
+  }
   return;
 }
 
