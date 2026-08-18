@@ -78,11 +78,6 @@ has indent_level => (
 );
 
 
-has output => (
-  is        => 'rw',
-  default   => sub { [] },
-);
-
 # Output bucket system (replaces flat @output + post-processing)
 # Each section = one package entry point; buckets are assembled in order:
 #   preamble → declarations → definitions → runtime
@@ -1061,70 +1056,74 @@ sub _build_ppi_doc {
 
 
 
-# PROTOTYPE-COLLECTION walker (E4.1 step 3).  This was v1's file-level
-# transpile entry; since the flip (#242) the production pipeline is
-# Pl::Parser2, and parse() survives ONLY because the prototype extractors
-# (_extract_module_prototypes / _extract_file_prototypes) walk every use'd
-# module through it with collect_prototypes_only => 1 (where _emit is a
-# no-op).  Full v1 file EMISSION is retired: the guard below makes any
-# attempt to resurrect it a loud error instead of a silent transpile
-# through a second compiler with different semantics — the exact failure
-# mode the flip exists to prevent.  Per-statement/expression code stays
-# reachable through Parser2's seam (_process_element/_parse_expression),
-# which never calls parse().
-sub parse {
-  my $self = shift;
+# (v1's file-level `parse()` — the whole-file transpile entry until E4.1
+# step 3, then the prototype-collection walker only — is DELETED at s412,
+# task #391: its last callers, the two prototype extractors below, walk the
+# document for FACTS instead.  Nothing constructs a whole-file v1 emission
+# any more; the per-statement/expression code stays reachable through
+# Parser2's seam only.)
 
-  die "Pl::Parser::parse is the prototype-collection walker only; "
-    . "full v1 file emission was retired at E4.1 step 3 — use Pl::Parser2\n"
-    unless $self->collect_prototypes_only;
-
-  my $doc = $self->ppi_doc;
-
-  # Reset parse state so second pass (parse_file shares environment between
-  # passes) always starts clean. Without these resets:
-  #   - package_stack accumulates from the first pass
-  #   - state_var_renames contains first-pass renames, which contaminate
-  #     second-pass code (e.g. $f renamed to $state__toplevel__f__34 from
-  #     first pass bleeds into second-pass foreach/bare-block uses of $f)
-  #   - Counters must restart at 0 so defvar names match usage names in the
-  #     second pass (both are generated fresh, in the same order)
+# PROTOTYPE COLLECTION as a FACTS WALK (task #391, s412).  What a use'd
+# module contributes to its user is exactly two things — the prototype
+# records of the subs it declares (`sub NAME (PROTO)`, signatures, `use
+# constant` zero-arg terms, the `:prototype` attribute — and, transitively,
+# what ITS use'd modules contribute) and its @EXPORT names — and until s412
+# they were gathered by running v1's ENTIRE statement pipeline over the
+# module with emission suppressed (`parse()` in collect_prototypes_only
+# mode): every statement processed, every expression parsed and generated,
+# every block compiled, for a walk whose consumers read `prototypes` and
+# `export_names` and nothing else.  Measured s412: 26 % of whole-corpus
+# compile time (13.1 s of a 50 s sample; perl-tests' 3 000-line test.pl was
+# fully compiled on every transpile).
+#
+# This walk visits the document in ORDER (the same depth-first source order
+# v1's walk registered things in — a nested named sub or a `use` inside a
+# body is reached when its enclosing statement is) and reads only the facts:
+#   PPI::Statement::Sub      → the head (_sub_head / _sub_sig_info /
+#                              _register_sub_prototype — the SAME helpers the
+#                              definition uses, one copy), then its body for
+#                              nested declarations;
+#   PPI::Statement::Include  → v1's own include handler, which is where `use
+#                              constant`, `use lib` (the shared @INC list),
+#                              `use Module LIST` (extract + merge, recursing
+#                              into that module) and `require "file"` live —
+#                              its emission is a no-op here;
+#   any other node           → recurse (BEGIN blocks, compounds, expression
+#                              statements whose anon-sub bodies declare
+#                              named subs).
+# Nothing else in a module can add a prototype: the four add_prototype sites
+# are the sub definition, the :prototype attribute pre-pass (run by _ppi_parse
+# when the document is built), `use constant`, and the module merge.
+sub collect_prototypes {
+  my ($self, $doc) = @_;
+  # v1's walk reset these for its own emission; here nothing is emitted, but
+  # `use base`/overload/lib handlers still read the package stack.
   $self->environment->package_stack([$self->eval_pkg // 'main']);
-  $self->environment->state_var_renames({});
-  $anon_block_counter = 0;
-  $state_var_counter  = 0;
-  $lex_var_counter    = 0;
-
-  # Initialize bucket system
   $self->_sections([]);
   $self->_cur_bucket('runtime');
   $self->_open_section('pcl');
+  $self->_walk_prototype_facts($doc);
+  return 1;
+}
 
-  # Initial (in-package :pcl) goes to preamble
-  $self->_with_bucket('preamble', sub {
-    $self->_emit("(in-package :pcl)");
-    $self->_emit("");
-  });
-
-  $self->_process_children($doc);
-
-  # Close any local let forms opened at file level (e.g. local $^W at file scope).
-  # _process_block closes them for block-scoped locals, but file-level locals
-  # (outside any { }) need to be closed here after all children are processed.
-  my $file_local_depth = $self->{_local_let_depth} // 0;
-  while ($file_local_depth > 0) {
-    $self->indent_level($self->indent_level - 1);
-    $self->_emit(")  ;; end local (file scope)");
-    $self->{_local_let_depth}--;
-    $file_local_depth--;
+sub _walk_prototype_facts {
+  my ($self, $node) = @_;
+  for my $child ($node->schildren) {
+    # (PPI::Statement::Scheduled — BEGIN/END/… — ISA Statement::Sub; it is a
+    # block, not a declaration: recurse only.)
+    if ($child->isa('PPI::Statement::Sub') && !$child->isa('PPI::Statement::Scheduled')) {
+      my ($name, $prototype, $is_sig_syntax, $block) = $self->_sub_head($child);
+      my $sig_info = $self->_sub_sig_info($child, $prototype, $is_sig_syntax);
+      $self->_register_sub_prototype($child, $name, $sig_info, $prototype, $is_sig_syntax);
+      $self->_walk_prototype_facts($block) if $block;
+    }
+    elsif ($child->isa('PPI::Statement::Include')) {
+      $self->_process_include_statement($child);
+    }
+    elsif ($child->isa('PPI::Node')) {
+      $self->_walk_prototype_facts($child);
+    }
   }
-
-  # Insert forward declarations for undeclared package variables
-  $self->_insert_variable_forward_declarations();
-
-  my @assembled = $self->_assemble_output();
-  $self->output(\@assembled);
-  return join("\n", @assembled);
 }
 
 # Transform Perl qualified sub name to CL format
@@ -1297,112 +1296,6 @@ sub assert_seam_clean {
   }
 }
 
-# Assemble all sections into a flat ordered list of lines.
-# Also prepends missing package declarations to the first section's preamble.
-sub _assemble_output {
-  my $self = shift;
-
-  # Collect packages declared in section 0's preamble only.
-  # Packages declared only in later sections still need a predeclaration at
-  # the top because section 0 code may reference them before they're defined.
-  my %declared_pkgs;
-  for my $line (@{$self->_sections->[0]{preamble}}) {
-    if ($line =~ /^\s*\(defpackage\s+:(\S+)/) {
-      my $pkg = $1;
-      $pkg =~ s/^\|//; $pkg =~ s/\|$//;
-      $declared_pkgs{$pkg} = 1;
-    }
-  }
-
-  # Collect packages referenced in qualified names (Pkg::symbol)
-  my %needed_packages;
-  for my $section (@{$self->_sections}) {
-    for my $bucket (qw(preamble declarations definitions runtime)) {
-      for my $line (@{$section->{$bucket}}) {
-        # [^\W\d]\w* = \w-word not starting with a digit — NOT [A-Za-z_]:
-        # Unicode package names (use utf8; package 닌g난ㄬ) must be collected
-        # too, or their qualified symbols are unreadable (uni/attrs.t s309).
-        while ($line =~ /\b([^\W\d]\w*)::/g) {
-          my $pkg = $1;
-          next if lc($pkg) eq 'pcl';  # our runtime package
-          $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
-        }
-        while ($line =~ /\|([^|]+)\|::/g) {
-          my $pkg = $1;
-          $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
-        }
-      }
-    }
-  }
-
-  # Also add packages from environment's undeclared list
-  my $env_pkgs = $self->environment->get_undeclared_packages();
-  for my $pkg (@$env_pkgs) {
-    $needed_packages{$pkg} = 1 unless $declared_pkgs{$pkg};
-  }
-
-  # Prepend missing package declarations to first section's preamble
-  if (%needed_packages) {
-    my @predecls;
-    for my $pkg (sort keys %needed_packages) {
-      my $cl_pkg = $self->_cl_pkg_designator($pkg);
-      push @predecls, ";; Pre-declare package for dynamic loading";
-      push @predecls, "(pcl:p-defpackage $cl_pkg)";
-      push @predecls, "";
-    }
-    unshift @{$self->_sections->[0]{preamble}}, @predecls;
-  }
-
-  # eval-string mode: emit all preambles+declarations, then wrap the combined
-  # definitions+runtime (the actual eval body) in a (p-eval-thunk ...) so the
-  # caller's in-scope lexicals become lambda parameters.  See eval_mode above.
-  if ($self->eval_mode) {
-    my (@head, @body);
-    for my $section (@{$self->_sections}) {
-      push @head, @{$section->{preamble}};
-      push @head, @{$section->{declarations}};
-      push @body, @{$section->{definitions}};
-      my @rt = @{$section->{runtime}};
-      push @body, _wrap_runtime_labels(\@rt);
-    }
-    my @free = @{$self->{_eval_free_vars} // []};
-    return (@head, @body) unless @free;
-    my $names  = join(' ', map { "\"$_\"" } @free);
-    my $params = join(' ', @free);
-    return (@head,
-            "(pcl:p-eval-thunk (list $names)",
-            " (lambda ($params)",
-            @body,
-            " ))");
-  }
-
-  # Assemble: for each section emit preamble → declarations → definitions → runtime
-  my @lines;
-  my $boundary_emitted = 0;
-  for my $section (@{$self->_sections}) {
-    push @lines, @{$section->{preamble}};
-    push @lines, @{$section->{declarations}};
-    push @lines, @{$section->{definitions}};
-    # The compile->run boundary: UNITCHECK/CHECK (reverse) then INIT (source
-    # order) run once, before the first runtime code — perl's phase order.
-    # Emitted before the FIRST non-empty runtime section; later sections'
-    # compile-phase blocks approximate (PCL interleaves sections that perl
-    # compiles wholly before running).  Eval-mode assembly never emits this,
-    # so blocks registered inside eval are perl's "too late" case.
-    if (!$boundary_emitted && grep { /\S/ } @{$section->{runtime}}) {
-      push @lines, "(p-run-compile-phase-blocks)";
-      $boundary_emitted = 1;
-    }
-    # If the runtime section contains bare top-level labels (standalone :WORD lines
-    # not inside a tagbody), wrap the contiguous run of expression-only forms that
-    # contains each label in a (tagbody ...).  Forms that contain p-sub / eval-when /
-    # defvar definitions are kept outside the tagbody to preserve top-level semantics.
-    my @rt = @{$section->{runtime}};
-    push @lines, map { _cap_inlining_if_huge($_) } _wrap_runtime_labels(\@rt);
-  }
-  push @lines, "(p-run-compile-phase-blocks)" unless $boundary_emitted;
-  return @lines;
-}
 
 
 # A top-level `local $x = ...;` in Perl puts the whole rest of the enclosing
@@ -1742,284 +1635,6 @@ sub _bare_block_is_anon_hash {
   return 1;
 }
 
-sub _insert_variable_forward_declarations {
-  my $self = shift;
-
-  return if $self->collect_prototypes_only;
-
-  # Variables defined in the pcl runtime (inherited via :use :pcl)
-  my %runtime_vars = map { $_ => 1 } qw(
-    $_ @_ %_args @ARGV @INC %ENV %INC %SIG $@
-    $1 $2 $3 $4 $5 $6 $7 $8 $9
-    $0 $$ $?
-  );
-
-  my %declared;           # variables with defvar already in preamble/declarations
-  my %let_bound;          # variables bound by let/let*/foreach at FILE scope only (union)
-  my %foreach_let_bound;  # only from (p-foreach ($var ...)) lines
-  my %other_let_bound;    # only from other (let/let* ...) forms
-  my %referenced;         # all variable references at FILE scope only
-  my %cross_pkg_vars;     # pkg::$var references needing defvar in their package
-
-  # Only scan section 0's preamble+declarations for "already declared" defvars.
-  # Forward declarations are inserted into section 0. A defvar in a later section
-  # (e.g. section 7) doesn't help section 0's runtime code which runs first.
-  # defvars inside runtime code (e.g. from 'my @a' in bare blocks) must also NOT
-  # suppress a forward declaration for the same reason.
-  {
-    my $s0 = $self->_sections->[0];
-    for my $line (@{$s0->{preamble}}, @{$s0->{declarations}}) {
-      if ($line =~ /\(defvar\s+([\$\@\%][a-zA-Z_]\w*)\b/) {
-        $declared{$1} = 1;
-      }
-    }
-  }
-
-  # Collect all lines from all sections' all buckets
-  my @all_lines;
-  for my $section (@{$self->_sections}) {
-    push @all_lines, @{$section->{preamble}};
-    push @all_lines, @{$section->{declarations}};
-    push @all_lines, @{$section->{definitions}};
-    push @all_lines, @{$section->{runtime}};
-  }
-
-  # Track nesting inside sub definitions.
-  # We only care about let_bound/referenced at file scope (sub_depth == 0),
-  # because 'my $a' inside a sub should NOT prevent defvar for file-scope $a.
-  my $sub_depth = 0;
-
-  for my $line (@all_lines) {
-    # Skip comment lines
-    next if $line =~ /^\s*;;/;
-
-    # Track entry/exit of sub definitions
-    if ($line =~ /^\(p-sub\s|^\(defun\s/) {
-      $sub_depth++;
-    }
-
-    if ($sub_depth == 0) {
-      # Collect let/let*-bound variables (non-foreach).
-      if ($line =~ /\(let\*?\s+\(/) {
-        while ($line =~ /\(([\$\@\%][a-zA-Z_]\w*)\s+/g) {
-          $let_bound{$1} = 1;
-          $other_let_bound{$1} = 1;
-        }
-      }
-      # Collect foreach-bound variables (tracked separately to identify pure loop vars).
-      if ($line =~ /\(p-foreach\s+\(([\$\@\%][a-zA-Z_]\w*)\b/) {
-        $let_bound{$1} = 1;
-        $foreach_let_bound{$1} = 1;
-      }
-      # Collect all variable references
-      while ($line =~ /([\$\@\%][a-zA-Z_]\w*)/g) {
-        my $var = $1;
-        next if $var =~ /::/;  # skip package-qualified (handled separately below)
-        $referenced{$var} = 1;
-      }
-    }
-
-    # Collect cross-package variable references at ANY nesting depth
-    # (including inside overload handler lambdas, sub bodies, etc.).
-    # e.g. o::$str, o::$num inside overload lambdas need defvar in their package.
-    # Skip special packages (ENV, INC, SIG, pcl, main) and already-defvar'd forms.
-    # Also handles pipe-quoted multi-component package names: |do::not::overwrite|::$this
-    unless ($line =~ /^\s*\(defvar\s/) {
-      # ENV/INC/SIG/pcl are runtime pseudo-packages, never user globals.
-      # `main` is NOT skipped wholesale: a main-package global referenced ONLY
-      # inside a sub (e.g. $::TODO -> main::$TODO) would otherwise get no defvar
-      # and crash at runtime with an unbound variable — the file-scope
-      # %referenced scan only runs at sub_depth==0.  But main-qualified RUNTIME
-      # specials (main::@ARGV, main::%ENV, …) must still be skipped so we don't
-      # shadow the live runtime ones.
-      my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
-      while ($line =~ /(?:\b([a-zA-Z_]\w*)|\|([^|]+)\|)::([\$\@\%][a-zA-Z_]\w*)/g) {
-        my ($pkg, $var) = (defined($1) ? $1 : "|$2|", $3);
-        my $bare_pkg = defined($1) ? $1 : $2;
-        next if $skip_pkg{$bare_pkg};
-        next if $bare_pkg eq 'main' && $runtime_vars{$var};
-        next if $var =~ /^[\$\@\%][0-9]/;  # special: $1, $2...
-        $cross_pkg_vars{"$pkg\::$var"} = [$pkg, $var];
-      }
-    }
-
-    # Track closing of sub definitions by counting parens
-    if ($sub_depth > 0 && $line =~ /^\)/) {
-      $sub_depth--;
-    }
-  }
-
-  # Undeclared = referenced - declared - runtime - pure-foreach-my vars
-  # Note: do NOT exclude all let_bound vars. A variable may be let-bound inside a
-  # bare block (e.g. 'my @a' -> (let ((@a ...))...)) but still referenced as a
-  # package variable at an earlier point in load order. defvar is idempotent,
-  # so emitting a forward declaration for regular let-bound vars is safe.
-  # EXCEPTION: 'for my $var' variables are Perl lexicals, never package globals.
-  # Once defvar'd, ALL let-bindings of that name become dynamic (special) — closures
-  # inside the loop would capture the symbol rather than the per-iteration value.
-  # Safe to skip defvar when the var is foreach-only (not also bound by other let forms).
-  # Always declare $a and $b (Perl sort variables) — they are package-scoped globals
-  # used by named sort comparator subs (sub cmp { $a <=> $b }) as dynamic variables.
-  # defvar makes them CL special vars; lambda params (lambda ($a $b) ...) then create
-  # dynamic bindings that named subs see.  They appear inside sub bodies (sub_depth>0)
-  # so the file-scope scan above misses them; emit unconditionally before @undeclared.
-  my $decls = $self->_sections->[0]{declarations};
-
-  # Emit defvars for unknown ${^NAME} caret variables seen during codegen.
-  # Perl treats these as ordinary main-forced global scalars (undef until set,
-  # autovivifying); CL needs a box-valued defvar so reads/increments work
-  # instead of an unbound-symbol crash. See ExprToCL _emit_token's caret branch.
-  if ($self->environment) {
-    my @caret = @{$self->environment->get_caret_globals};
-    if (@caret) {
-      push @$decls, ";; Unknown \${^NAME} caret variables -> ordinary global scalars (undef).";
-      push @$decls, global_decl_form("$_", "(make-p-box nil)") for @caret;
-      push @$decls, "";
-    }
-  }
-
-  # Embedded `our $var` declarations (e.g. \our $referent, bless \our $x) — the
-  # package global is referenced only inside a generated body, so the file-scope
-  # scan below misses it. Emit one idempotent defvar each (matching the sigil's
-  # container), skipping any already declared.
-  if ($self->environment) {
-    my $eov = $self->environment->expression_our_vars;
-    my @eov_decls;
-    for my $cl_var (sort keys %$eov) {
-      next if $declared{$cl_var};
-      my $sigil = $eov->{$cl_var};
-      my $init = $sigil eq '@' ? "(make-array 0 :adjustable t :fill-pointer 0)"
-               : $sigil eq '%' ? "(make-hash-table :test 'equal)"
-               :                 "(make-p-box nil)";
-      push @eov_decls, global_decl_form("$cl_var", "$init");
-      $declared{$cl_var} = 1;
-    }
-    if (@eov_decls) {
-      push @$decls, ";; Embedded `our \$var` declarations (\\our \$x, use constant => \\our \$v).";
-      push @$decls, @eov_decls;
-      push @$decls, "";
-    }
-  }
-
-  my %forced_sort_var;  # $a/$b force-declared here (vs. user-declared via my)
-  unless ($declared{'$a'}) {
-    push @$decls, global_decl_form("\$a", "(make-p-box nil)");
-    push @$decls, global_decl_form("\$b", "(make-p-box nil)");
-    push @$decls, "";
-    $declared{'$a'} = 1;
-    $declared{'$b'} = 1;
-    $forced_sort_var{'$a'} = 1;
-    $forced_sort_var{'$b'} = 1;
-  }
-
-  my %lex_foreach = %{$self->{_lexical_foreach_vars} // {}};
-
-  my @undeclared;
-  for my $var (sort keys %referenced) {
-    next if $declared{$var};
-    next if $runtime_vars{$var};
-    # __lex__ variables are renamed 'my' vars from _with_declarations: they must stay
-    # lexical (no defvar) so per-closure-call let-bindings are lexical not dynamic.
-    next if $let_bound{$var} && $var =~ /__lex__/;
-    # 'for my $var' is a Perl lexical — never defvar it as a package global.
-    # Safe to skip when it's foreach-only (not also bound by other let forms).
-    next if $lex_foreach{$var} && $foreach_let_bound{$var} && !$other_let_bound{$var};
-    next if $var =~ /^[\$\@\%]state__/;  # state vars use outer let binding, not defvar
-    push @undeclared, $var;
-  }
-
-  # Punctuation-named `#` globals ($#, @#, %#) that the word-char reference scan
-  # misses are registered explicitly by codegen when it emits them (see
-  # environment->register_punct_global), so we consume that set here rather than
-  # re-scanning generated text.  They arise from the removed `$#` magic taking a
-  # subscript: Perl parses `$#[0]` as element 0 of @# (verified vs perl:
-  # `@{"#"}=(10,20,30); $#[0]==10`).  An undeclared Perl global reads as
-  # empty/undef, so forward-declare them instead of crashing on an unbound
-  # symbol.  The runtime never provides @#/%#/$#, so nothing is shadowed.
-  for my $var (sort keys %{ $self->environment->punct_globals }) {
-    next if $declared{$var};
-    $declared{$var} = 1;
-    push @undeclared, $var;
-  }
-
-  # Emit defvars for cross-package variable references (e.g. o::$str used in
-  # overload handlers). These are declared in the global section 0 defvar block;
-  # CL defvar doesn't require the current package to match — pkg::$var works.
-  # Already-defvar'd vars are skipped (defvar is idempotent but avoid duplicates).
-  if (%cross_pkg_vars) {
-    my %already_cross_declared;
-    for my $section (@{$self->_sections}) {
-      for my $line (@{$section->{preamble}}, @{$section->{declarations}}) {
-        if ($line =~ /\(defvar\s+(?:(\w+)|\|([^|]+)\|)::([\$\@\%]\w+)\b/) {
-          my $pkg = defined($1) ? $1 : "|$2|";
-          $already_cross_declared{"$pkg\::$3"} = 1;
-        }
-      }
-    }
-    my @cross_decls;
-    for my $key (sort keys %cross_pkg_vars) {
-      next if $already_cross_declared{$key};
-      my ($pkg, $var) = @{$cross_pkg_vars{$key}};
-      my $sigil = substr($var, 0, 1);
-      if ($sigil eq '$') {
-        push @cross_decls, global_decl_form("$pkg\::$var", "(make-p-box nil)");
-      } elsif ($sigil eq '@') {
-        push @cross_decls, global_decl_form("$pkg\::$var", "(make-array 0 :adjustable t :fill-pointer 0)");
-      } elsif ($sigil eq '%') {
-        push @cross_decls, global_decl_form("$pkg\::$var", "(make-hash-table :test 'equal)");
-      }
-    }
-    if (@cross_decls) {
-      push @$decls, ";; Cross-package variable declarations (e.g. pkg::var used in closures).";
-      push @$decls, @cross_decls;
-      push @$decls, "";
-    }
-  }
-
-  # eval-string mode: the eval body's free variables become parameters of the
-  # wrapping (p-eval-thunk ...) lambda, so the runtime can bind them to the
-  # caller's in-scope lexicals (or fall back to the package global).
-  #
-  #  - Ordinary undeclared vars: do NOT defvar them — a defvar would proclaim
-  #    them globally special and turn the lambda parameter into a *dynamic*
-  #    binding, breaking lexical capture by closures built inside the eval.
-  #  - $a/$b that we force-declared above: KEEP the defvar (sort comparators
-  #    need them special) but ALSO list them as params when referenced, so a
-  #    caller's lexical `my $a`/`my $b` is captured.  Being special, the param
-  #    is a dynamic rebinding — a bare $a sees the caller's box, while `sort`
-  #    inside the eval can still rebind it.  (A pathological `my $a` masking a
-  #    sort block matches Perl only loosely; see docs/eval-lexical-capture.md.)
-  if ($self->eval_mode) {
-    # Scope-aware AST analysis (descends into named subs) is authoritative; union
-    # with the legacy file-scope @undeclared set for back-compat, then add the
-    # $a/$b special case.  The AST set is what makes a lexical referenced only
-    # inside a named sub body (the modifier idiom) become a captured param.
-    my $ast_free = $self->_eval_free_vars_from_ppi($self->ppi_doc);
-    my %free = (%$ast_free, map { $_ => 1 } @undeclared);
-    $free{$_} = 1 for grep { $referenced{$_} && $forced_sort_var{$_} } ('$a', '$b');
-    my @free = sort keys %free;
-    $self->{_eval_free_vars} = \@free if @free;
-    return;
-  }
-
-  return unless @undeclared;
-
-  # Push undeclared defvars into first section's declarations bucket.
-  # These will be assembled before any definitions or runtime code.
-  push @$decls, ";; Forward declarations for package variables used without my/our.";
-  push @$decls, ";; Perl globals auto-vivify as undef; CL needs defvar to avoid crashes.";
-  for my $var (@undeclared) {
-    my $sigil = substr($var, 0, 1);
-    if ($sigil eq '$') {
-      push @$decls, global_decl_form("$var", "(make-p-box nil)");
-    } elsif ($sigil eq '@') {
-      push @$decls, global_decl_form("$var", "(make-array 0 :adjustable t :fill-pointer 0)");
-    } elsif ($sigil eq '%') {
-      push @$decls, global_decl_form("$var", "(make-hash-table :test 'equal)");
-    }
-  }
-  push @$decls, "";
-}
 
 
 # Transform package-qualified variable names for CL
@@ -7328,22 +6943,20 @@ sub _process_foreach_loop {
 
 
 # Process subroutine declaration
-sub _process_sub_statement {
-  my $self = shift;
-  my $stmt = shift;
-
-  my $name = '';
-  my $prototype = '';
-  my $is_signature_syntax = 0;
-  my $block;
-
+# The HEAD of a named-sub statement: its name (PPI may split "main::::foo"
+# into "main::" + "::foo" — concatenated), the prototype text or signature
+# text, whether the latter is 5.20+ signature SYNTAX, and the body block.
+# ONE copy for the two readers: _process_sub_statement (the definition) and
+# the prototype-collection walk (task #391 — a facts walk over a use'd
+# module reads exactly this and nothing of the body).
+sub _sub_head {
+  my ($self, $stmt) = @_;
+  my ($name, $prototype, $is_signature_syntax, $block) = ('', '', 0, undef);
   for my $child ($stmt->children) {
     my $ref = ref($child);
-
     if ($ref eq 'PPI::Token::Word' && $child->content ne 'sub'
         && $child->content ne 'my' && $child->content ne 'our'
         && $child->content ne 'state') {
-      # Concatenate: PPI may split "main::::foo" into "main::" + "::foo"
       $name .= $child->content unless $block;
     }
     elsif ($ref eq 'PPI::Token::Prototype') {
@@ -7358,6 +6971,55 @@ sub _process_sub_statement {
       $block = $child;
     }
   }
+  return ($name, $prototype, $is_signature_syntax, $block);
+}
+
+# The sub's prototype RECORD (the sig_info every caller reads through
+# get_prototype), from its head.  Default: -1 = "unknown/list" — the sub
+# takes any number of args; only an explicit prototype/signature narrows it.
+# Signature syntax is ALWAYS parsed as a signature, never as an old-style
+# prototype — even all-anonymous forms like ($) or ($, $) that would
+# otherwise look like one.  Empty () => min 0.
+sub _sub_sig_info {
+  my ($self, $stmt, $prototype, $is_signature_syntax) = @_;
+  my $sig_info = { params => [], min_params => -1, is_proto => 0 };
+  if ($is_signature_syntax) {
+    my $inner = $prototype;
+    $inner =~ s/^\s*\(\s*//;
+    $inner =~ s/\s*\)\s*$//;
+    $sig_info = $self->_parse_signature($inner, $stmt);
+  } elsif ($prototype) {
+    $sig_info = $self->parse_prototype_or_signature($prototype, $stmt);
+  }
+  return $sig_info;
+}
+
+# Register a named sub's prototype record and its declaration site.  A
+# :prototype-attribute proto (from_attr, registered by
+# _extract_prototype_attributes) is applied at compile time in perl — keep it
+# when this definition carries no inline prototype/signature of its own.
+# The SITE goes with the declaration: a bareword call site decides
+# call-vs-string by asking whether the declaration is above it (task #266),
+# and an entry with no site is read as the old whole-file answer — so this
+# seam must supply one too, or a sub lowered through here would silently
+# neuter the position test for its own name.
+sub _register_sub_prototype {
+  my ($self, $stmt, $name, $sig_info, $prototype, $is_signature_syntax) = @_;
+  return unless $name;
+  my $prev = $self->environment->get_prototype($name);
+  if (!($prev && $prev->{from_attr} && !$prototype && !$is_signature_syntax)) {
+    $self->environment->add_prototype($name, $sig_info);
+  }
+  my $pkg = $self->environment->current_package();
+  $self->environment->add_declared_sub($name, $pkg,
+                                       Pl::PExpr::TokenUtils::decl_site($stmt));
+}
+
+sub _process_sub_statement {
+  my $self = shift;
+  my $stmt = shift;
+
+  my ($name, $prototype, $is_signature_syntax, $block) = $self->_sub_head($stmt);
 
   # At file scope, route named sub definitions to the DEFINITIONS bucket, in
   # SOURCE ORDER alongside use/BEGIN/require.  This reproduces Perl's compile-time
@@ -7402,21 +7064,8 @@ sub _process_sub_statement {
   $perl_code =~ s/\n/ /g;
   $self->_emit(";; $perl_code");
 
-  # Parse prototype/signature
-  # Default: -1 means "unknown/list" - sub takes any number of args
-  # Only explicit prototypes/signatures set specific min_params
-  my $sig_info = { params => [], min_params => -1, is_proto => 0 };
-  if ($is_signature_syntax) {
-    # Signature syntax (feature "signatures") is ALWAYS parsed as a signature,
-    # never as an old-style prototype — even all-anonymous forms like ($) or
-    # ($, $) that would otherwise look like a prototype.  Empty () => min 0.
-    my $inner = $prototype;
-    $inner =~ s/^\s*\(\s*//;
-    $inner =~ s/\s*\)\s*$//;
-    $sig_info = $self->_parse_signature($inner, $stmt);
-  } elsif ($prototype) {
-    $sig_info = $self->parse_prototype_or_signature($prototype, $stmt);
-  }
+  # Parse prototype/signature (the shared head reader; see _sub_sig_info).
+  my $sig_info = $self->_sub_sig_info($stmt, $prototype, $is_signature_syntax);
 
   # A real Perl signature (feature "signatures"), not an old-style prototype.
   # When set, args are flattened into @_, arity is checked with Perl's exact
@@ -7443,24 +7092,8 @@ sub _process_sub_statement {
   my $sig_hash_start = ($sig_slurpy && $sig_slurpy =~ /^\%/)
                      ? ($sig_min + scalar @sig_opt) : 'nil';
 
-  # Store in environment for later use by PExpr.  A :prototype-attribute
-  # proto (from_attr, registered by _extract_prototype_attributes) is
-  # applied at compile time in perl — keep it when this definition carries
-  # no inline prototype/signature of its own.
-  if ($name) {
-    my $prev = $self->environment->get_prototype($name);
-    if (!($prev && $prev->{from_attr} && !$prototype && !$is_signature_syntax)) {
-      $self->environment->add_prototype($name, $sig_info);
-    }
-    # Also record for forward declarations.  The SITE goes with it: a bareword
-    # call site decides call-vs-string by asking whether the declaration is
-    # above it (task #266), and an entry with no site is read as the old
-    # whole-file answer — so this seam must supply one too, or a sub lowered
-    # through here would silently neuter the position test for its own name.
-    my $pkg = $self->environment->current_package();
-    $self->environment->add_declared_sub($name, $pkg,
-                                         Pl::PExpr::TokenUtils::decl_site($stmt));
-  }
+  # Store in environment for later use by PExpr (+ the declaration site).
+  $self->_register_sub_prototype($stmt, $name, $sig_info, $prototype, $is_signature_syntax);
 
   # Build parameter list for defun
   my @param_names;
@@ -8655,9 +8288,6 @@ sub _extract_module_prototypes {
   my $module_path = $self->_find_module_file($module);
   return $cache->{$module} = undef unless $module_path;
 
-  my $doc = PPI::Document->new($module_path);
-  return $cache->{$module} = undef unless $doc;
-
   my $module_env = Pl::Environment->new();
 
   my $module_parser = Pl::Parser->new(
@@ -8668,13 +8298,20 @@ sub _extract_module_prototypes {
     collect_prototypes_only => 1,
   );
 
-  # parse() may recursively call _extract_module_prototypes() for any
-  # 'use' statements found in the module
-  eval { $module_parser->parse($doc) };
+  # ONE PPI parse (ppi_doc = _ppi_parse: the shared repairs + the :prototype
+  # attribute pre-pass); the walk may recursively call
+  # _extract_module_prototypes() for the module's own `use` statements.
+  my $doc = eval { $module_parser->ppi_doc };
+  return $cache->{$module} = undef unless $doc;
+  eval { $module_parser->collect_prototypes($doc) };
   if ($@) {
     warn "Failed to extract prototypes from $module: $@";
     return $cache->{$module} = undef;
   }
+  # PCL_PROTO_ORACLE=DIR (task #391 measurement): dump what this walk
+  # produced — the prototype records and the export names — one JSON file
+  # per module, so a facts-only walk can be diffed against it.
+  _dump_proto_oracle($module, $module_path, $module_env) if $ENV{PCL_PROTO_ORACLE};
 
   # Record @EXPORT/@EXPORT_OK names: _merge_module_prototypes imports exported
   # plain subs for their EXISTENCE (a bareword before a comma is a call only
@@ -8691,6 +8328,25 @@ sub _extract_module_prototypes {
   $module_env->export_names(\%exported);
 
   return $cache->{$module} = $module_env;
+}
+
+sub _dump_proto_oracle {
+  my ($module, $path, $env) = @_;
+  require JSON::PP;
+  (my $slug = $module) =~ s/[^\w.]+/_/g;
+  my $dir = $ENV{PCL_PROTO_ORACLE};
+  my %rec;
+  for my $name (sort keys %{ $env->prototypes }) {
+    my $p = $env->prototypes->{$name};
+    # default_cl carries compiled CL text (a signature default) — keep it, it
+    # is part of the record a caller receives.
+    $rec{$name} = $p;
+  }
+  my $out = { module => $module, path => $path, prototypes => \%rec,
+              export_names => [ sort keys %{ $env->export_names // {} } ] };
+  open my $o, '>:raw', "$dir/$slug.json" or die "$dir/$slug.json: $!";
+  print $o JSON::PP->new->utf8->canonical->pretty->encode($out);
+  close $o;
 }
 
 
@@ -8745,9 +8401,6 @@ sub _extract_file_prototypes {
   return undef if $self->_parsing_modules->{"file:$abs"};
   local $self->_parsing_modules->{"file:$abs"} = 1;
 
-  my $doc = PPI::Document->new($abs);
-  return $cache->{$abs} = undef unless $doc;
-
   my $file_env = Pl::Environment->new();
   my $file_parser = Pl::Parser->new(
     filename                => $abs,
@@ -8756,8 +8409,11 @@ sub _extract_file_prototypes {
     _parsing_modules        => $self->_parsing_modules,
     collect_prototypes_only => 1,
   );
-  eval { $file_parser->parse($doc) };
+  my $doc = eval { $file_parser->ppi_doc };
+  return $cache->{$abs} = undef unless $doc;
+  eval { $file_parser->collect_prototypes($doc) };
   return $cache->{$abs} = undef if $@;
+  _dump_proto_oracle("file:$abs", $abs, $file_env) if $ENV{PCL_PROTO_ORACLE};
   return $cache->{$abs} = $file_env;
 }
 

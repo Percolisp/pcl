@@ -725,6 +725,105 @@ END_MODULE
 
 # ============================================================
 diag "";
+diag "-------- The prototype-collection FACTS walk (task #391, s412):";
+# A use'd module's contribution is gathered by Pl::Parser::collect_prototypes,
+# a document walk that reads only sub heads / includes / `use constant` —
+# never the bodies (v1's whole-file walk in collect mode is gone).  Every
+# registration shape v1's walk found must still be found, in document order:
+# a sub inside a BEGIN block, inside a nested block, a NAMED sub nested in a
+# sub body, one declared inside an anon-sub body in an expression statement,
+# `use constant` (scalar and hash forms), a `:prototype` attribute, a
+# signature (in its own module — under `use feature 'signatures'` perl reads
+# `sub f (&@)` as a signature and dies, so prototypes and signatures never
+# share a file), and a TRANSITIVE `use` of another module (its exports merge in).
+{
+  open my $fh, '>', "$test_module_dir/FactsInner.pm" or die $!;
+  print $fh <<'END_MODULE';
+package FactsInner;
+use strict;
+our @EXPORT = qw(inner_plain inner_proto);
+sub inner_plain { 1 }
+sub inner_proto ($$) { 2 }
+1;
+END_MODULE
+  close $fh;
+  open $fh, '>', "$test_module_dir/FactsWalk.pm" or die $!;
+  print $fh <<'END_MODULE';
+package FactsWalk;
+use strict;
+use warnings;
+use FactsInner;
+use FactsSig;
+use constant PI => 3.14;
+use constant { ALPHA => 1, BETA => 2 };
+sub top_level (&@) { 1 }
+BEGIN { sub in_begin ($) { 1 } }
+{ sub in_block (\@) { 1 } }
+sub outer { sub nested_named (;$) { 1 } return 1 }
+my $anon = sub { sub in_anon_body ($$$) { 1 } };
+sub attr :prototype($;$) { 1 }
+1;
+END_MODULE
+  close $fh;
+  open $fh, '>', "$test_module_dir/FactsSig.pm" or die $!;
+  print $fh <<'END_MODULE';
+package FactsSig;
+use strict;
+use feature 'signatures';
+no warnings 'experimental::signatures';
+our @EXPORT = qw(sig);
+sub sig ($x, $y = 2) { $x + $y }
+1;
+END_MODULE
+  close $fh;
+
+  my $code = qq{
+    use lib "$test_module_dir";
+    use FactsWalk;
+    1;
+  };
+  my $parser = Pl::Parser2->new(code => $code);
+  my $env = $parser->environment;
+  eval { $parser->parse() };
+  ok(!$@, 'facts walk: the module parses') or diag $@;
+  # The MODULE's own record set (what the walk collected — memoized, so this
+  # is the same env the user's merge read):
+  my $menv = $parser->fallback_parser->_extract_module_prototypes('FactsWalk');
+  ok($menv, 'facts walk: FactsWalk was extracted') or diag 'no module env';
+  my %want = (top_level => '&@', in_begin => '$', in_block => '\@',
+              nested_named => ';$', in_anon_body => '$$$', attr => '$;$');
+  for my $name (sort keys %want) {
+    my $p = $menv && $menv->get_prototype($name);
+    ok($p && $p->{is_proto} && ($p->{proto_string} // '') eq $want{$name},
+       "facts walk: sub $name collected with prototype ($want{$name})")
+      or diag explain $p;
+  }
+  for my $c (qw(PI ALPHA BETA)) {
+    my $p = $menv && $menv->get_prototype($c);
+    ok($p && $p->{min_params} == 0 && !@{ $p->{params} // [] },
+       "facts walk: use constant $c collected as a zero-arg term") or diag explain $p;
+  }
+  my $sig = $menv && $menv->get_prototype('sig');
+  ok($sig && !$sig->{is_proto} && @{ $sig->{params} // [] } == 2,
+     'facts walk: a signature sub (exported by FactsSig, use\'d by FactsWalk) records its two params')
+    or diag explain $sig;
+  ok($menv && $menv->get_prototype('inner_plain'),
+     'facts walk: a TRANSITIVE use (FactsInner) merges its plain @EXPORT sub into the module env');
+  ok($menv && !$menv->get_prototype('BEGIN'),
+     'facts walk: a BEGIN block is not collected as a sub named BEGIN');
+  # …and what the USER receives through the merge policy (unchanged by the
+  # walk): the block-proto and scalar-proto subs (they change how calls
+  # parse), including the transitive prototyped export.
+  for my $name (qw(top_level in_begin attr inner_proto)) {
+    ok($env->get_prototype($name), "facts walk: user env sees $name after `use FactsWalk`");
+  }
+  unlink "$test_module_dir/FactsWalk.pm";
+  unlink "$test_module_dir/FactsInner.pm";
+  unlink "$test_module_dir/FactsSig.pm";
+}
+
+# ============================================================
+diag "";
 diag "-------- Cleanup:";
 
 # Cleanup extra test modules

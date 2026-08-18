@@ -32,8 +32,16 @@ is(to_flat(raw('(p-anything (already text))')),
 is(to_flat(['p-if', '$a', raw("(lambda ()\n  1)"), '2']),
    "(p-if \$a (lambda ()\n  1) 2)",
    'multi-line raw text embedded verbatim, not re-flattened');
-ok(!eval { to_flat(raw_wrap('(let ((x 1))', 1)); 1 },
-   'raw_wrap inside an expression form dies');
+# Phase C (s412): a raw_wrap inside an expression form RENDERS — its open
+# text, the body forms, exactly its closers — so a v1 `local` inside an
+# eval/do/sub body no longer sends the whole body to v1's text route.  (Until
+# s412 to_flat died here and embed_unsafe refused the shape outright.)
+is(to_flat(raw_wrap('(let ((x 1))', 1, '$x')), '(let ((x 1)) $x)',
+   'raw_wrap renders flat: open text, body, its closers');
+is(to_flat(raw_wrap("(let ((x 1)) ;; c", 1, '$x')), "(let ((x 1)) ;; c\n\$x)",
+   'raw_wrap: an open text ending in a comment gets the body on a fresh line');
+is(to_flat(raw_wrap('(progn', 2, raw('(f) ;; tail'))), "(progn (f) ;; tail\n))",
+   'raw_wrap: closers drop to a fresh line after a comment-ending body');
 
 # --- pilot conversion: gen_ternary emits via the form path ------------------
 
