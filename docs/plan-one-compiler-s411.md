@@ -404,9 +404,10 @@ Opus sessions, in order:
 1. **Phase R** (½) + **Phase A** (1–2) — R first, then A1–A3 in one
    session and A4 in the next if it does not fit; A carries the sweep.
 2. **Phase B** (1) — DONE s412.
-3. **Phase C** (½–1) — DONE s412 — + **#391** (the module prototype pre-scan as a
-   facts-only PPI walk — the last live entry into v1's file-level `parse()`
-   AND ~a quarter of compile time; bars in the task) + the first batch of
+3. **Phase C** (½–1) — DONE s412 — + **#391** — DONE s412 (`s412f`: the
+   facts walk `Pl::Parser::collect_prototypes`; v1's file-level `parse()`
+   DELETED; oracle-identical over 95 modules; compile time measured as the
+   sweep runs it 81 → 64 s, −21 %) — + the first batch of
    the duplicate worklist's EXTRACT items (`docs/dup-census-worklist-s411.md`
    §2, each corpus-diff IDENTICAL, cold code first, hot code with the
    timing).

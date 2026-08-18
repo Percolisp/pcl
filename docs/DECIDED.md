@@ -92,6 +92,34 @@ not-supported.md → only then probe.*
   the void regime, `(vector …)`-less single-element foreach lists, an
   unqualified cell spelling inside its own section).  Guard rows
   parser2-02.t (shape) + transpile-test-10.t (semantics, perl-probed).
+- **#391 DONE (`s412f`): the module prototype pre-scan is a FACTS WALK** —
+  `Pl::Parser::collect_prototypes($doc)` visits the document in order and
+  reads only sub HEADS (`_sub_head` / `_sub_sig_info` /
+  `_register_sub_prototype`, the same three helpers `_process_sub_statement`
+  now uses — one copy), `PPI::Statement::Include` (v1's own include
+  handler: `use constant`, `use lib`, `use Module LIST` extract+merge,
+  `require "file"`), and recurses into every other node (BEGIN blocks,
+  compounds, anon-sub bodies).  Both extractors call it; ONE PPI parse per
+  module (`ppi_doc`, the repaired document, also feeds the @EXPORT scan).
+  **v1's file-level `parse()` is DELETED** (+ `_assemble_output`,
+  `_insert_variable_forward_declarations`, the `output` attribute — 450
+  lines) — nothing constructs a whole-file v1 emission any more.  Proof of
+  identity: `PCL_PROTO_ORACLE=DIR` (kept: per-module JSON of `prototypes` +
+  `export_names`) diffed old walk vs new over the 24 modules/files the
+  corpus loads AND 95 modules (every lib/ shim, a 15-dist CPAN sample, core
+  modules) — identical (only the oracle's own path field differs).  Bars:
+  corpus-diff IDENTICAL, lib emission-ab SAME, gate, full sweep +0.
+  **Compile time, measured the way the sweep runs it (`pl2cl FILE`, so
+  `require './test.pl'` resolves): 81.0 s → 64.0 s (−21 %)** — the
+  `pl2cl < file` loop the plan quoted was blind to the pre-scan (no filename
+  → test.pl never found), which is why B1's cut looked like 1 %.
+- **Two measurement traps recorded** (memory `project_pcl_measurement_traps`):
+  corpus-diff transpiles via STDIN — module/file prototype facts from a
+  relative `require` do not apply there (the sweep passes the filename); and
+  `tail -N` on a gate output can hide the FIRST failing file — the Phase C
+  gate (`s412d`) went in with clform-01.t row 7 red (a shape row pinning the
+  deleted `to_flat` die), corrected in `s412f`; read gate summaries with
+  `grep -a Wstat`.
 - **Bash trap of the session**: a commit message written inline with
   backticks in a double-quoted string EXECUTES them (`local $p->{…}` ran as a
   shell command and left a file named `{_v2_embed}` in the tree).  Write

@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 412 (2026-08-18, Fable) — Phases B + C of the one-compiler plan: ONE seam function, the hook always answers, analysis parses compile nothing, the decline shapes 17 → 3
+## Session 412 (2026-08-18, Fable) — Phases B + C of the one-compiler plan + #391: ONE seam function, the hook always answers, analysis parses compile nothing, the decline shapes 17 → 3, the prototype pre-scan is a facts walk (v1 parse() gone, compile −21 %)
 
 Two commits, `719ef4c` (B1) and `97cc944` (B2+B3); plan
 `docs/plan-one-compiler-s411.md` §2 Phase B, task #385 → done.  Every step
@@ -107,6 +107,25 @@ stray file `{_v2_embed}` appeared) — write the message to a file (quoted
 heredoc) and `git commit -F`.  A `perl -0pi -e` script that dies mid-run
 leaves the target intact only by luck — write the edited text to a NEW path,
 verify, then `cp` (the standing rule; kept to it after the first slip).
+
+**Then #391 (`f5bb860`, `s412f`) — the module prototype pre-scan is a FACTS
+WALK, and v1's file-level `parse()` is gone.**  `Pl::Parser::collect_prototypes`
+walks the document in order reading sub heads (`_sub_head` / `_sub_sig_info`
+/ `_register_sub_prototype` — extracted from `_process_sub_statement`, one
+copy), includes (v1's own handler: `use constant`/`lib`/`Module`/`require
+"file"`), recursing everywhere else; ONE PPI parse per module.  `parse()`,
+`_assemble_output`, `_insert_variable_forward_declarations`, `output` deleted
+(450 lines).  Proof: `PCL_PROTO_ORACLE=DIR` per-module JSON, old walk vs
+new IDENTICAL over the 24 corpus modules/files (both test.pl's) and 95
+modules (every lib/ shim, 15 CPAN dists, ~40 core modules).  Bars: corpus
+IDENTICAL, lib SAME, gate, sweep TOTAL 18513 (+0).  **Compile time measured
+the way the sweep runs it (`pl2cl FILE`, so `require './test.pl'`
+resolves): 81.0 s → 64.0 s (−21 %).**  The stdin loop the plan quoted (and
+`tools/corpus-diff.pl` uses) never finds test.pl — a measurement trap now
+recorded, with a second one: `tail -N` of a prove summary hid clform-01.t's
+one red row in the Phase C gate (a shape row pinning the deleted `to_flat`
+die; corrected in `s412f` — read gate summaries with `grep -a Wstat`).
+Guard rows: prototype-01.t (19), clform-01.t (3).
 
 ---
 
