@@ -3992,7 +3992,18 @@ sub _expand_tr_escapes {
   return $str;
 }
 
-sub _process_tr_escape {
+# tr/// escapes are the dq table WITHOUT the case markers (`\U` in tr is a
+# plain U — perl-probed): the shared decoder alone.  (#387 family 44, s413:
+# the two decoders were 19 EXACT lines apart; their only real difference was
+# the `\b` bug, #393.)
+sub _process_tr_escape { return _decode_escape($_[0]) }
+
+# THE escape decoder shared by double-quoted context and tr/// (#387 family
+# 44): \n \t \r \a \e \f \b, `\\`, `\"`, \cX, \x{…} \xHH \x, \o{…},
+# \N{U+HHHH}, \NNN octal — and an unknown \X is X (which is also how `\$`,
+# `\@`, `\/`, `\0` come out right).  A dq context adds its case markers on
+# top (_process_dq_escape).
+sub _decode_escape {
   my $esc = shift;
   return "\n" if $esc eq 'n';
   return "\t" if $esc eq 't';
@@ -4003,28 +4014,34 @@ sub _process_tr_escape {
   return "\b" if $esc eq 'b';
   return "\\" if $esc eq '\\';
   return '"'  if $esc eq '"';
-  return '/'  if $esc eq '/';
-  return "\x00" if $esc eq '0';
+  # \cX - control character
   if ($esc =~ /^c(.)$/) {
     return chr(ord(uc($1)) ^ 64);
   }
+  # \x{HHHH} - hex with braces
   if ($esc =~ /^x\{([^}]*)\}$/) {
     return _hex_brace_escape($1);
   }
+  # \xHH - hex 1-2 digits
   if ($esc =~ /^x([0-9A-Fa-f]{1,2})$/) {
     return chr(hex($1));
   }
+  # \x alone - chr(0)
   return chr(0) if $esc eq 'x';
+  # \o{OOO} - octal with braces
   if ($esc =~ /^o\{([^}]*)\}$/) {
     return _octal_brace_escape($1);
   }
+  # \N{U+HHHH} - Unicode character by code point
   if ($esc =~ /^N\{U\+([0-9A-Fa-f]+)\}$/) {
     return chr(hex($1));
   }
+  # \NNN - octal digits (\0 included)
   if ($esc =~ /^([0-7]{1,3})$/) {
     return chr(oct($1));
   }
-  return $esc;  # unknown \X -> X
+  # Unknown escape: \X → X (Perl drops the backslash)
+  return $esc;
 }
 
 
@@ -4059,53 +4076,13 @@ sub _octal_brace_escape {
   return chr(oct($oct));
 }
 
-# Single-pass escape sequence processor for double-quoted strings
-# Handles all \X sequences including unknown ones (\. → .)
+# Single-pass escape sequence processor for double-quoted strings: the shared
+# decoder, plus the case-changing escapes kept as markers (`\U` `\L` `\u` `\l`
+# `\Q` `\F` `\E`) for _apply_case_escapes.
 sub _process_dq_escape {
   my $esc = shift;
-  return "\n" if $esc eq 'n';
-  return "\t" if $esc eq 't';
-  return "\r" if $esc eq 'r';
-  return "\a" if $esc eq 'a';
-  return "\e" if $esc eq 'e';
-  return "\f" if $esc eq 'f';
-  return "\b" if $esc eq 'b';   # backspace, as in perl (was 'b': task #393, s413)
-  return "\$" if $esc eq '$';
-  return '@'  if $esc eq '@';
-  return '"'  if $esc eq '"';
-  return "\\" if $esc eq '\\';
-  # \cX - control character
-  if ($esc =~ /^c(.)$/) {
-    return chr(ord(uc($1)) ^ 64);
-  }
-  # \x{HHHH} - hex with braces
-  if ($esc =~ /^x\{([^}]*)\}$/) {
-    return _hex_brace_escape($1);
-  }
-  # \xHH - hex 1-2 digits
-  if ($esc =~ /^x([0-9A-Fa-f]{1,2})$/) {
-    return chr(hex($1));
-  }
-  # \x alone - chr(0)
-  return chr(0) if $esc eq 'x';
-  # \o{OOO} - octal with braces
-  if ($esc =~ /^o\{([^}]*)\}$/) {
-    return _octal_brace_escape($1);
-  }
-  # \N{U+HHHH} - named Unicode character by code point
-  if ($esc =~ /^N\{U\+([0-9A-Fa-f]+)\}$/) {
-    return chr(hex($1));
-  }
-  # \NNN - octal digits
-  if ($esc =~ /^([0-7]{1,3})$/) {
-    return chr(oct($1));
-  }
-  # Case-changing escapes: preserve as markers for _apply_case_escapes
-  if ($esc =~ /^[ULulQFE]$/) {
-    return "\\$esc";  # keep as \U, \L, etc. for later processing
-  }
-  # Unknown escape: \X → X (Perl drops the backslash)
-  return $esc;
+  return "\\$esc" if $esc =~ /^[ULulQFE]$/;
+  return _decode_escape($esc);
 }
 
 # Apply \U, \L, \u, \l, \Q, \F ... \E case transformations to a string
