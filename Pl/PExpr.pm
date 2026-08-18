@@ -708,15 +708,7 @@ sub parse {
           my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
           my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str);
           # The interpolation returns a string_concat node, add its children
-          my $interp_node = $self->get_a_node($interp_id);
-          if ($self->is_internal_node_type($interp_node) && $interp_node->{type} eq 'string_concat') {
-            my $interp_kids = $self->get_node_children($interp_id);
-            for my $part_id (@$interp_kids) {
-              $self->add_child_to_node($node_id, $part_id);
-            }
-          } else {
-            $self->add_child_to_node($node_id, $interp_id);
-          }
+          $self->add_child_flattening($node_id, $interp_id, 'string_concat');
         } else {
           # Static pattern - store as literal string
           my $str_token = PPI::Token::Quote::Double->new(qq{"$inner"});
@@ -1247,14 +1239,8 @@ sub parse {
         $self->add_child_to_node($id, $pre_id);
         my @ix    = $nxt_2->children();
         my $ix_id = $self->_parse_subscript_ix(\@ix, $is_arr);
-        my $n     = $self->get_a_node($ix_id);
-        if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
-          # Flatten comma-separated indices/keys into separate children
-          my $kids = $self->get_node_children($ix_id);
-          $self->add_child_to_node($id, $_) for @$kids;
-        } else {
-          $self->add_child_to_node($id, $ix_id);
-        }
+        # Flatten comma-separated indices/keys into separate children
+        $self->add_child_flattening($id, $ix_id, 'progn');
         $e->[$i-1] = $node;
         splice @$e, $i, 3;  # Remove ->, Cast(@/%), and the subscript
         $i--;
@@ -1400,16 +1386,8 @@ sub parse {
 
       # Add index to arr or hash:
       if ($type =~ /^slice_/ || $type eq 'kv_slice_h_acc') {
-        my $n   = $self->get_a_node($ix_id);
-        if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
-          # Skip the 'progn' for slices:
-          my $kids = $self->get_node_children($ix_id);
-          for my $param_id (@$kids) {
-            $self->add_child_to_node($id, $param_id);
-          }
-        } else {
-          $self->add_child_to_node($id, $ix_id);
-        }
+        # Skip the 'progn' for slices:
+        $self->add_child_flattening($id, $ix_id, 'progn');
       } else {
         $self->add_child_to_node($id, $ix_id);
       }
@@ -1448,25 +1426,7 @@ sub parse {
         && !$self->is_internal_node_type($pre)
         && $self->is_var($pre)
         && $pre->content() =~ /^%/) {
-      my $pre_id = $self->parse([$pre]);
-      my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
-
-      my @ix    = $term->children();
-      my $ix_id = $self->parse(\@ix);
-
-      $self->add_child_to_node($id, $pre_id);
-
-      # Flatten progn children (comma-separated keys)
-      my $n = $self->get_a_node($ix_id);
-      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
-        my $kids = $self->get_node_children($ix_id);
-        for my $param_id (@$kids) {
-          $self->add_child_to_node($id, $param_id);
-        }
-      } else {
-        $self->add_child_to_node($id, $ix_id);
-      }
-
+      my $node = $self->_kv_slice_node('kv_slice_h_acc', $self->parse([$pre]), $term);
       $e->[$i-1] = $node;
       splice @$e, $i, 1;
       $i--;
@@ -1475,25 +1435,7 @@ sub parse {
 
     # Handle KV array slice: %arr[indices] - PPI gives Symbol '%arr' + Constructor '[...]'
     if ($is_kv_arr_constructor) {
-      my $pre_id = $self->parse([$pre]);
-      my($node, $id) = $self->make_node_insert('kv_slice_a_acc');
-
-      my @ix    = $term->children();
-      my $ix_id = $self->parse(\@ix);
-
-      $self->add_child_to_node($id, $pre_id);
-
-      # Flatten progn children (comma-separated indices)
-      my $n = $self->get_a_node($ix_id);
-      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
-        my $kids = $self->get_node_children($ix_id);
-        for my $param_id (@$kids) {
-          $self->add_child_to_node($id, $param_id);
-        }
-      } else {
-        $self->add_child_to_node($id, $ix_id);
-      }
-
+      my $node = $self->_kv_slice_node('kv_slice_a_acc', $self->parse([$pre]), $term);
       $e->[$i-1] = $node;
       splice @$e, $i, 1;
       $i--;
@@ -1503,25 +1445,7 @@ sub parse {
     # Handle KV array slice via block-deref: %{$ref}[indices]
     if ($is_kv_arr_deref_constructor) {
       my @block_kids = $e->[$i-1]->children();
-      my $ref_id = $self->parse(\@block_kids);
-      my($node, $id) = $self->make_node_insert('kv_slice_a_acc');
-
-      my @ix    = $term->children();
-      my $ix_id = $self->parse(\@ix);
-
-      $self->add_child_to_node($id, $ref_id);
-
-      # Flatten progn children (comma-separated indices)
-      my $n = $self->get_a_node($ix_id);
-      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
-        my $kids = $self->get_node_children($ix_id);
-        for my $param_id (@$kids) {
-          $self->add_child_to_node($id, $param_id);
-        }
-      } else {
-        $self->add_child_to_node($id, $ix_id);
-      }
-
+      my $node = $self->_kv_slice_node('kv_slice_a_acc', $self->parse(\@block_kids), $term);
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
       splice @$e, $i-1, 2;  # Remove Block and Constructor
       $i -= 2;
@@ -1532,25 +1456,7 @@ sub parse {
     # e.g., %{$h}{"c","d"} -> (p-kv-hslice $h "c" "d")
     if ($is_kv_hash_deref_block) {
       my @block_kids = $e->[$i-1]->children();
-      my $ref_id = $self->parse(\@block_kids);
-      my($node, $id) = $self->make_node_insert('kv_slice_h_acc');
-
-      my @ix    = $term->children();
-      my $ix_id = $self->parse(\@ix);
-
-      $self->add_child_to_node($id, $ref_id);
-
-      # Flatten progn children (comma-separated keys)
-      my $n = $self->get_a_node($ix_id);
-      if ($self->is_internal_node_type($n) && $n->{type} eq 'progn') {
-        my $kids = $self->get_node_children($ix_id);
-        for my $param_id (@$kids) {
-          $self->add_child_to_node($id, $param_id);
-        }
-      } else {
-        $self->add_child_to_node($id, $ix_id);
-      }
-
+      my $node = $self->_kv_slice_node('kv_slice_h_acc', $self->parse(\@block_kids), $term);
       $e->[$i-2] = $node;   # Replace Cast '%' position with node
       splice @$e, $i-1, 2;  # Remove Block and Block
       $i -= 2;
@@ -5553,6 +5459,38 @@ sub add_child_to_node {
 
   my $node_tree = $self->node_tree();
   $node_tree->add_child_id($node_id, $child_id);
+}
+
+# Attach the node at $child_id under $node_id — SPLICING ITS CHILDREN IN
+# instead when it is an internal node of $flat_type (a `progn` of
+# comma-separated slice keys/indices; a `string_concat` of interpolation
+# parts), so they become $node_id's own children.  The one copy of the
+# flatten idiom the postfix-`->` loop spelled seven times (#387 family 3,
+# s413); once per reduction, never per token.
+sub add_child_flattening {
+  my ($self, $node_id, $child_id, $flat_type) = @_;
+  my $n = $self->get_a_node($child_id);
+  if ($self->is_internal_node_type($n) && $n->{type} eq $flat_type) {
+    $self->add_child_to_node($node_id, $_) for @{ $self->get_node_children($child_id) };
+  } else {
+    $self->add_child_to_node($node_id, $child_id);
+  }
+  return;
+}
+
+# The KV-slice node for `%X[…]` / `%X{…}` and their `%{REF}[…]` / `%{REF}{…}`
+# twins: a $type node whose first child is the (already parsed) base and
+# whose remaining children are the parsed indices/keys of $term (Constructor
+# or Block), comma list flattened.  Returns the node; the caller splices it
+# into the operand list (the splice width differs per shape).  Same family.
+sub _kv_slice_node {
+  my ($self, $type, $base_id, $term) = @_;
+  my ($node, $id) = $self->make_node_insert($type);
+  my @ix    = $term->children();
+  my $ix_id = $self->parse(\@ix);
+  $self->add_child_to_node($id, $base_id);
+  $self->add_child_flattening($id, $ix_id, 'progn');
+  return $node;
 }
 
 
