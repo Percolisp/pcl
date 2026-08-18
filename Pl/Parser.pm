@@ -5526,21 +5526,13 @@ sub parse_hash_block_to_cl_string {
 
   my $result;
   eval {
-    my $expr_o = Pl::PExpr->new(
-      e           => \@raw,
-      environment => $self->environment,
-      parser      => $self,
-    );
+    my $expr_o = $self->_expr_parser(\@raw);
     my $pair_ids = $expr_o->parse_list(\@raw);
     my ($top_node, $top_id) = $expr_o->make_node_insert('hash_init');
     for my $id (@$pair_ids) {
       $expr_o->add_child_to_node($top_id, $id);
     }
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => 0,
-    );
+    my $gen = $self->_expr_generator($expr_o);
     $result = $gen->generate($top_id);
   };
   die $@ if $@ && $@ =~ /^PCL:/;
@@ -5560,21 +5552,13 @@ sub parse_hash_block_to_cl_form {
   }
   my $result;
   eval {
-    my $expr_o = Pl::PExpr->new(
-      e           => \@raw,
-      environment => $self->environment,
-      parser      => $self,
-    );
+    my $expr_o = $self->_expr_parser(\@raw);
     my $pair_ids = $expr_o->parse_list(\@raw);
     my ($top_node, $top_id) = $expr_o->make_node_insert('hash_init');
     for my $id (@$pair_ids) {
       $expr_o->add_child_to_node($top_id, $id);
     }
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => 0,
-    );
+    my $gen = $self->_expr_generator($expr_o);
     $result = $gen->gen_node_form($top_id);
   };
   die $@ if $@ && $@ =~ /^PCL:/;
@@ -8836,11 +8820,7 @@ sub _compile_constant_value {
   # Complex expression: use PExpr to parse
   my $result;
   eval {
-    my $expr_o = Pl::PExpr->new(
-      e           => $parts,
-      environment => $self->environment,
-      parser      => $self,
-    );
+    my $expr_o = $self->_expr_parser($parts);
     my ($node_id, $cdecls) = $expr_o->parse_expr_to_tree($parts);
     # An embedded `our $var` in the constant value (e.g. use constant K => \our
     # $v) is stripped by extract_declarations and otherwise lost: this value
@@ -8858,11 +8838,7 @@ sub _compile_constant_value {
         $self->environment->expression_our_vars->{ $self->_our_var_cl_name($pkg, $var) } = $1;
       }
     }
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => 0,
-    );
+    my $gen = $self->_expr_generator($expr_o);
     $result = $gen->generate($node_id);
   };
 
@@ -8899,12 +8875,7 @@ sub _parse_expression_internal {
   my @decls;
 
   eval {
-    my $expr_o = Pl::PExpr->new(
-      e           => $parts,
-      full_PPI    => $stmt,
-      environment => $self->environment,
-      parser      => $self,
-    );
+    my $expr_o = $self->_expr_parser($parts, $stmt);
 
     # Capture declarations in list context
     my ($node_id, $decl_list) = $expr_o->parse_expr_to_tree($parts);
@@ -8913,15 +8884,7 @@ sub _parse_expression_internal {
     # Annotate AST with context information (scalar/list)
     $expr_o->annotate_contexts($node_id, $context);
 
-    # indent_level 0: generate() prepends only the form's own indentation, and
-    # _emit re-applies the caller's base indent.  Passing $self->indent_level
-    # here double-counted it, pushing each emitted form far right of its ;;
-    # comment.  All other ExprToCL callsites already use 0.
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => 0,
-    );
+    my $gen = $self->_expr_generator($expr_o);
 
     $result = $gen->generate($node_id);
   };
@@ -8933,6 +8896,43 @@ sub _parse_expression_internal {
   }
 
   return ($result // ";; (no output)", \@decls);
+}
+
+# THE TWO CONSTRUCTIONS every expression entry in this file makes (#387
+# families 14 + 26 — six copies).  They stay two calls rather than one
+# "compile this" helper because what happens BETWEEN them differs at every
+# site: parse_hash_block_* assembles a hash_init top node, _compile_constant_value
+# registers embedded `our` declarations before generating, the two
+# _parse_expression entries annotate contexts.  The generator must see the
+# tree its own site built.
+#
+# full_PPI is passed only where the site passed it: it is never READ (grep
+# says so) — it exists to keep the PPI document alive so its tokens are not
+# collected mid-parse — so handing it undef would be a silent change of who
+# owns that reference.
+sub _expr_parser {
+  my ($self, $parts, $full_ppi) = @_;
+  return Pl::PExpr->new(
+    e           => $parts,
+    (defined $full_ppi ? (full_PPI => $full_ppi) : ()),
+    environment => $self->environment,
+    parser      => $self,
+  );
+}
+
+# indent_level 0 at every site: generate() prepends only the form's own
+# indentation and _emit re-applies the caller's base indent, so passing
+# $self->indent_level here double-counted it and pushed each emitted form far
+# right of its ;; comment.
+sub _expr_generator {
+  my ($self, $expr_o, %opt) = @_;
+  return Pl::ExprToCL->new(
+    expr_o       => $expr_o,
+    environment  => $self->environment,
+    indent_level => 0,
+    ($opt{sub_info} ? (sub_info => $opt{sub_info}) : ()),
+    ($opt{lexicals} ? (lexicals => $opt{lexicals}) : ()),
+  );
 }
 
 # Shared by _parse_expression_internal and _parse_expression_form.
@@ -9052,21 +9052,10 @@ sub _parse_expression_form {
 
   my $form;
   eval {
-    my $expr_o = Pl::PExpr->new(
-      e           => $parts,
-      full_PPI    => $stmt,
-      environment => $self->environment,
-      parser      => $self,
-    );
+    my $expr_o = $self->_expr_parser($parts, $stmt);
     my ($node_id) = $expr_o->parse_expr_to_tree($parts);
     $expr_o->annotate_contexts($node_id, $context);
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => 0,
-      ($opt{sub_info} ? (sub_info => $opt{sub_info}) : ()),
-      ($opt{lexicals} ? (lexicals => $opt{lexicals}) : ()),
-    );
+    my $gen = $self->_expr_generator($expr_o, %opt);
     $form = $gen->gen_node_form($node_id);
   };
 
@@ -9579,20 +9568,11 @@ sub _compile_default_expr {
 
     return undef unless @parts;
 
-    my $expr_o = Pl::PExpr->new(
-      e           => \@parts,
-      full_PPI    => $doc,
-      environment => $self->environment,
-      parser      => $self,
-    );
+    my $expr_o = $self->_expr_parser(\@parts, $doc);
 
     my $node_id = $expr_o->parse_expr_to_tree(\@parts);
 
-    my $gen = Pl::ExprToCL->new(
-      expr_o       => $expr_o,
-      environment  => $self->environment,
-      indent_level => 0,
-    );
+    my $gen = $self->_expr_generator($expr_o);
 
     $result = $gen->generate($node_id);
   };
