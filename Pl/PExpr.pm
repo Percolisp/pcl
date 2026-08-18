@@ -1148,9 +1148,8 @@ sub parse {
           $self->add_child_to_node($id, $kid_id);
         }
 
-        $e->[$i-1] = $node;
-        splice @$e, $i, 3;
-        $i--;
+        _reduce_pre($e, \$i, $node, 3);
+
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() eq '$'
@@ -1173,9 +1172,7 @@ sub parse {
           }
           $count++;  # also consume the params node
         }
-        $e->[$i-1] = $node;
-        splice @$e, $i, $count;
-        $i--;
+        _reduce_pre($e, \$i, $node, $count);
         next;
       } elsif ($self->is_word($nxt)) {
         # Case 1C: X->method (no parentheses)
@@ -1187,39 +1184,26 @@ sub parse {
         $self->add_child_to_node($id, $pre_id);  # Object
         $self->add_child_to_node($id, $meth_id); # Method name
 
-        $e->[$i-1] = $node;
-        splice @$e, $i, 2;  # Remove -> and method name
-        $i--;
+        _reduce_pre($e, \$i, $node, 2);  # Remove -> and method name
+
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() =~ /^([\$@%])\*$/) {
         # Postfix deref: X->$* (scalar), X->@* (array), X->%* (hash) — Perl 5.20+
         # Equivalent to $$X, @$X, %$X respectively.
-        my $sigil    = $1;
-        my $pre_id   = $self->parse([$pre]);
-        my $cast_tok = PPI::Token::Cast->new($sigil);
-        my ($node, $id) = $self->make_node_insert('prefix_op');
-        my $op_id    = $self->make_node($cast_tok);
-        $self->add_child_to_node($id, $op_id);   # Cast sigil ($, @, or %)
-        $self->add_child_to_node($id, $pre_id);  # Ref being dereferenced
-        $e->[$i-1] = $node;
-        splice @$e, $i, 2;  # Remove -> and Cast($*/\@*/\%*)
-        $i--;
+        my $sigil = $1;
+        my $node  = $self->_prefix_op_node(PPI::Token::Cast->new($sigil),   # Cast sigil ($, @, or %)
+                                           $self->parse([$pre]));           # Ref being dereferenced
+        _reduce_pre($e, \$i, $node, 2);  # Remove -> and Cast($*/\@*/\%*)
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() eq '$#*') {
         # Postfix deref: X->$#* — last index of an arrayref (Perl 5.20+).
         # Equivalent to $#{X}; build the same $# prefix_op the braced form uses
         # ($# op token + ref operand) so codegen emits (p-array-last-index X).
-        my $pre_id   = $self->parse([$pre]);
-        my $cast_tok = PPI::Token::Cast->new('$#');
-        my ($node, $id) = $self->make_node_insert('prefix_op');
-        my $op_id    = $self->make_node($cast_tok);
-        $self->add_child_to_node($id, $op_id);   # $# operator
-        $self->add_child_to_node($id, $pre_id);  # Arrayref being dereferenced
-        $e->[$i-1] = $node;
-        splice @$e, $i, 2;  # Remove -> and Cast($#*)
-        $i--;
+        my $node = $self->_prefix_op_node(PPI::Token::Cast->new('$#'),   # $# operator
+                                          $self->parse([$pre]));         # Arrayref being dereferenced
+        _reduce_pre($e, \$i, $node, 2);  # Remove -> and Cast($#*)
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
                && $nxt->content() =~ /^([@%])$/
@@ -1241,9 +1225,7 @@ sub parse {
         my $ix_id = $self->_parse_subscript_ix(\@ix, $is_arr);
         # Flatten comma-separated indices/keys into separate children
         $self->add_child_flattening($id, $ix_id, 'progn');
-        $e->[$i-1] = $node;
-        splice @$e, $i, 3;  # Remove ->, Cast(@/%), and the subscript
-        $i--;
+        _reduce_pre($e, \$i, $node, 3);  # Remove ->, Cast(@/%), and the subscript
         next;
       } elsif (!$self->is_internal_node_type($nxt)
                && $nxt->content() =~ /^\$/) {
@@ -1257,9 +1239,8 @@ sub parse {
         $self->add_child_to_node($id, $pre_id);  # Object
         $self->add_child_to_node($id, $meth_id); # Method (name in $variable)
 
-        $e->[$i-1] = $node;
-        splice @$e, $i, 2;  # Remove -> and $variable
-        $i--;
+        _reduce_pre($e, \$i, $node, 2);  # Remove -> and $variable
+
         next;
       } else {
         my $fn = eval { $self->parser->filename } // '(unknown)';
@@ -1427,18 +1408,14 @@ sub parse {
         && $self->is_var($pre)
         && $pre->content() =~ /^%/) {
       my $node = $self->_kv_slice_node('kv_slice_h_acc', $self->parse([$pre]), $term);
-      $e->[$i-1] = $node;
-      splice @$e, $i, 1;
-      $i--;
+      _reduce_pre($e, \$i, $node, 1);
       next;
     }
 
     # Handle KV array slice: %arr[indices] - PPI gives Symbol '%arr' + Constructor '[...]'
     if ($is_kv_arr_constructor) {
       my $node = $self->_kv_slice_node('kv_slice_a_acc', $self->parse([$pre]), $term);
-      $e->[$i-1] = $node;
-      splice @$e, $i, 1;
-      $i--;
+      _reduce_pre($e, \$i, $node, 1);
       next;
     }
 
@@ -1485,9 +1462,7 @@ sub parse {
       $self->add_child_to_node($id, $glob_id);
       # Slot: literal bareword (*name{CODE}), scalar var, string, or expression.
       $self->_attach_glob_slot($id, $node, $term);
-      $e->[$i-1] = $node;
-      splice @$e, $i, 1;
-      $i--;
+      _reduce_pre($e, \$i, $node, 1);
       next;
     }
 
@@ -1501,9 +1476,7 @@ sub parse {
       my $ix_id = $self->parse(\@ix);
       $self->add_child_to_node($id, $pre_id);
       $self->add_child_to_node($id, $ix_id);
-      $e->[$i-1] = $node;
-      splice @$e, $i, 1;
-      $i--;
+      _reduce_pre($e, \$i, $node, 1);
       next;
     }
 
@@ -1525,9 +1498,8 @@ sub parse {
       $self->add_child_to_node($id, $pre_id);
       $self->add_child_to_node($id, $ix_id);
 
-      $e->[$i-1] = $node;
-      splice @$e, $i, 1;
-      $i--;
+      _reduce_pre($e, \$i, $node, 1);
+
       next;
     }
   }
@@ -1820,10 +1792,7 @@ sub parse {
                              && ($post->{type} // '') eq 'tree_val') {
             $self->node_tree->set_metadata($id_term, 'backslash_paren_list', 1);
         }
-        my($node, $id) = $self->make_node_insert('prefix_op');
-        my $op_id      = $self->make_node($op);
-        $self->add_child_to_node($id, $op_id);     # Prefix operand
-        $self->add_child_to_node($id, $id_term);   # Expr.
+        my $node = $self->_prefix_op_node($op, $id_term);
 
         $e->[$hi_ix] = $node;
         splice @$e, $hi_ix+1, 1;
@@ -1931,10 +1900,7 @@ sub parse_list {
                 @$e_list[$not_ix + 1 .. $#$e_list]) {
       my @operand = @$e_list[$not_ix + 1 .. $#$e_list];
       my $id_term = $self->parse(\@operand);
-      my ($node, $id) = $self->make_node_insert('prefix_op');
-      my $op_id  = $self->make_node($e_list->[$not_ix]);
-      $self->add_child_to_node($id, $op_id);
-      $self->add_child_to_node($id, $id_term);
+      my $node    = $self->_prefix_op_node($e_list->[$not_ix], $id_term);
       splice @$e_list, $not_ix, scalar(@$e_list) - $not_ix, $node;
       # fall through to the ordinary comma split with the reduced tail
     }
@@ -5491,6 +5457,32 @@ sub _kv_slice_node {
   $self->add_child_to_node($id, $base_id);
   $self->add_child_flattening($id, $ix_id, 'progn');
   return $node;
+}
+
+# A `prefix_op` node: operator token $op_tok (a PPI token — a Cast, an
+# Operator, `not`) applied to the already-parsed operand at $operand_id.
+# Returns the node.  The operand is parsed BEFORE the call by every caller,
+# which keeps node-id allocation order — and so the emission — identical
+# to the hand-rolled sites this replaced (#387 family 4, s413).
+sub _prefix_op_node {
+  my ($self, $op_tok, $operand_id) = @_;
+  my ($node, $id) = $self->make_node_insert('prefix_op');
+  $self->add_child_to_node($id, $self->make_node($op_tok));   # operator
+  $self->add_child_to_node($id, $operand_id);                 # operand
+  return $node;
+}
+
+# THE reduction step of parse()'s postfix loop (#387 family 4, s413): the
+# operand list element BEFORE position $$i (the PRE of `PRE -> NXT …`) is
+# replaced by $node, the $width elements from $$i on are removed, and $$i
+# steps back onto the new node so the loop re-examines it — a postfix chain
+# (`$x->[0]->{k}->m()`) reduces one link per iteration.  The caller `next`s.
+sub _reduce_pre {
+  my ($e, $i, $node, $width) = @_;
+  $e->[$$i-1] = $node;
+  splice @$e, $$i, $width;
+  $$i--;
+  return;
 }
 
 
