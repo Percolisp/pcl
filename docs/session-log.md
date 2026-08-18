@@ -6,7 +6,7 @@ Append new entries at the top. One section per session.
 
 ## Session 412 (2026-08-18, Fable) — Phase B of the one-compiler plan: ONE seam function, the hook always answers, analysis parses compile nothing
 
-Two commits, `0db0360` (B1) and `97cc944` (B2+B3); plan
+Two commits, `719ef4c` (B1) and `97cc944` (B2+B3); plan
 `docs/plan-one-compiler-s411.md` §2 Phase B, task #385 → done.  Every step
 IDENTICAL by its bar (corpus-diff over 111 files, silent drops 13 = census;
 lib emission-ab SAME; gate 150 files / 5488 rows minus the 13 pclxs xs rows;
