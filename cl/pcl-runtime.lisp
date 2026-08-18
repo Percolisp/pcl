@@ -6115,6 +6115,19 @@
         ((%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
         (t *p-undef*)))))
 
+;;; Make index I valid in adjustable vector A: push nil HOLES (the deleted-
+;;; element marker — `exists` stays false, a read gives undef, the first write
+;;; boxes) up to and including I.  A no-op when I is in range; past the end of
+;;; a read-only array it dies as perl does (task #159).  Inline: this is the
+;;; element-write path.  (#387 family 37, s413 — the loop six writers spelled.)
+(declaim (inline %p-extend-to))
+(defun %p-extend-to (a i)
+  (when (>= i (length a))
+    (%p-check-array-writable a)
+    (loop repeat (- (1+ i) (length a))
+          do (vector-push-extend nil a)))
+  a)
+
 (defun (setf p-aref) (value arr idx)
   "Setf expander for p-aref - allows assignment to array elements.
    Auto-extends array if index is beyond current length (Perl semantics).
@@ -6135,14 +6148,10 @@
          (actual-idx (if (< i 0) (+ len i) i)))
     (if (and (vectorp a) (>= actual-idx 0))
         (progn
-          ;; Auto-extend array if needed (Perl autovivification)
-          ;; Intermediate slots get nil (deleted marker) so exists returns false for them.
-          (when (>= actual-idx len)
-            ;; …but never past the end of a read-only array: perl allows
-            ;; `$ro[0] = 9` (in bounds) and dies on `$ro[5] = 9` (task #159).
-            (%p-check-array-writable a)
-            (dotimes (n (1+ (- actual-idx len)))
-              (vector-push-extend nil a)))
+          ;; Auto-extend array if needed (Perl autovivification): holes, and
+          ;; never past the end of a read-only array — perl allows `$ro[0] = 9`
+          ;; (in bounds) and dies on `$ro[5] = 9` (task #159).
+          (%p-extend-to a actual-idx)
           ;; Get or create box at this index
           (let ((box (aref a actual-idx)))
             (unless (p-box-p box)
@@ -6168,10 +6177,7 @@
            (actual-idx (if (< i 0) (+ len i) i)))
       (when (and (vectorp a) (>= actual-idx 0))
         ;; Auto-extend array if needed (intermediate slots are nil = non-existent)
-        (when (>= actual-idx len)
-          (%p-check-array-writable a)          ; task #159
-          (dotimes (n (1+ (- actual-idx len)))
-            (vector-push-extend nil a)))
+        (%p-extend-to a actual-idx)
         ;; Ensure box exists at this index
         (let ((elem (aref a actual-idx)))
           (unless (p-box-p elem)
@@ -6276,9 +6282,7 @@
       ((> new-len cur-len)
        ;; Grow: extend with holes (nil), NOT boxes — see docstring.
        ;; `$#ro = 5` dies in perl (it extends a fixed-size AV) — task #159.
-       (%p-check-array-writable a)
-       (dotimes (i (- new-len cur-len))
-         (vector-push-extend nil a)))
+       (%p-extend-to a nli))
       ((< new-len cur-len)
        ;; Shrink: adjust fill-pointer (minimum 0).
        ;; Perl does NOT guard the shrinking case on a read-only array — `$#ro = 0`
@@ -6869,10 +6873,7 @@ create the key on a read-only call, which perl does not."
   (let* ((a (unbox arr))
          (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
-    (when (>= i (length a))
-      (%p-check-array-writable a)          ; task #159
-      (loop for j from (length a) to i
-            do (vector-push-extend nil a)))
+    (%p-extend-to a i)
     (let* ((stored (aref a i))
            ;; Unbox if element is a box
            (val (unbox stored)))
@@ -6889,10 +6890,7 @@ create the key on a read-only call, which perl does not."
   (let* ((a (unbox arr))
          (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
-    (when (>= i (length a))
-      (%p-check-array-writable a)          ; task #159
-      (loop for j from (length a) to i
-            do (vector-push-extend nil a)))
+    (%p-extend-to a i)
     (let* ((stored (aref a i))
            ;; Unbox if element is a box
            (val (unbox stored)))
@@ -6909,10 +6907,7 @@ create the key on a read-only call, which perl does not."
   (let* ((a (unbox arr))
          (i (truncate (to-number idx))))   ; to-number unboxes a boxed index ($a[$i]{..})
     ;; Extend array if needed; nil = slot exists but not assigned (like delete)
-    (when (>= i (length a))
-      (%p-check-array-writable a)          ; task #159
-      (loop for j from (length a) to i
-            do (vector-push-extend nil a)))
+    (%p-extend-to a i)
     ;; Get or create box at this index
     (let ((box (aref a i)))
       (unless (p-box-p box)
