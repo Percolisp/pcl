@@ -107,25 +107,14 @@ sub _build_fallback_parser {
     ($self->eval_mode         ? (eval_mode => 1)               : ()),
     (defined $self->eval_pkg  ? (eval_pkg  => $self->eval_pkg) : ()),
   );
-  # Minimal live state _parse_expression's helpers expect (mirrors parse()).
-  $p->_sections([]);
-  $p->_cur_bucket('runtime');
-  $p->_open_section('pcl');
   # The lexical registry lives HERE, on the owner (#153 chunk 0); the seam
   # parser reads it through lex_home.
   $self->{_let_bound_vars} //= {};
-  # Back-reference so the seam knows its sections are scratch: anything the
-  # v1 block-lowering HOISTS (a `use`, a BEGIN, an `our` defvar found inside a
-  # do{}/eval{}/anon-sub body) must land in THIS parser's buckets, not in the
-  # fallback's never-printed ones.  Weak, or parser and fallback keep each
-  # other alive for the life of the process.
-  $p->{_v2_owner} = $self;
-  Scalar::Util::weaken($p->{_v2_owner});
-  # Non-weak twin of _v2_owner: lex_home dies (instead of silently answering
-  # with an empty registry) if the owner has been GC'd out from under a still-
-  # live seam parser.
-  $p->{_v2_owned} = 1;
-  return $p;
+  # The seam's emission state and its (weak) owner back-reference are set by
+  # the parser itself (Pl::Parser::become_seam): v1 text is produced on it only
+  # inside capture_v1, whose drain hands the lines back by bucket name —
+  # Parser2 never touches the sections.
+  return $p->become_seam($self);
 }
 
 # EVAL MODE: the features the SITE told us about, in PPI's own shape, ready to
@@ -1524,7 +1513,17 @@ sub parse {
           # Statement::Sub branch in _lower_block), so v1's nested-named hoist
           # (`sub t152x` callable before `t152` runs) engages as in whole-file
           # v1.  signatures.t: 796+182, fail rows identical to v1.
-          my $sig_info = $self->fallback_parser->parse_prototype_or_signature($proto, $sub);
+          # FACTS ONLY.  v1's signature parser is a statement-level helper
+          # that also EMITS (an `our`/`state` inside a default declares its
+          # cell — _parse_signature); here only its prototype record is
+          # wanted, and the sub statement's own lowering (v1-routed: sub-with-
+          # signature is one of the 12 classes) emits those declarations in
+          # their place.  So the call runs inside capture_v1 and its drain is
+          # deliberately DISCARDED — the one such discard in Parser2; it goes
+          # when the class is ported (E5.3).
+          my $fp = $self->fallback_parser;
+          my $sig_info = $fp->capture_v1(
+            sub { $fp->parse_prototype_or_signature($proto, $sub) })->{result};
           $self->environment->add_prototype($sub->name, $sig_info);
           $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
                                              Pl::PExpr::TokenUtils::decl_site($sub));
@@ -1724,6 +1723,12 @@ sub parse {
   if (my ($miss) = sort keys %{ $self->{_pending_eval_caps} // {} }) {
     die "Parser2 TODO: promoted cell $miss never registered for eval capture\n";
   }
+
+  # Phase B3 backstop: v1 text is produced on the seam parser ONLY inside
+  # capture_v1, whose drain hands it back by bucket — its standing scratch
+  # section must be EMPTY here, or some emission was never drained (lost
+  # output, rule 12).
+  $self->fallback_parser->assert_seam_clean;
 
   # E3 eval-mode: single anonymous segment, head/body split, p-eval-thunk
   # wrap — no per-package section assembly.
@@ -8416,15 +8421,20 @@ sub _lower_bare_block {
 
 # ---------------------------------------- embedded blocks (task #78, E2)
 
-# Structured lowering of an expression-embedded map/grep/sort/eval{} block.
-# PExpr's block sites call this through the fallback parser's `_v2_embed`
-# slot — enabled ONLY around real lowering calls (never analysis parses) by
-# _embed_hook's install sites.  On
-# success the inline_lambda node carries `body_form` (an arrayref of CLForms
-# for the lambda body) instead of v1's `body_cl` text, and ExprToCL's
-# gen_inline_lambda_form emits the whole lambda structurally.  Any decline
-# (undef) keeps v1's parse_block_to_cl_string text for that block — files
-# never re-gate on this path.
+# lower_embedded_block — THE answer to "how is this expression-embedded block
+# compiled" while Parser2 is lowering (Phase B3 of
+# docs/plan-one-compiler-s411.md).  PExpr's block sites ask their parser
+# (Pl::Parser::embed_block), which forwards to this through the `_v2_embed`
+# hook that capture_v1 / _lower_expr install around every lowering parse.
+# The hook ALWAYS answers: the structural route when it can — the
+# inline_lambda node then carries `body_form` (an arrayref of CLForms for the
+# lambda body) and ExprToCL's gen_inline_lambda_form emits the whole lambda
+# structurally — and otherwise v1's text compile of the block, run HERE inside
+# capture_v1 (its hoists drained to _captured_decls at this one place) and
+# returned as ONE raw form.  Nothing declines to PExpr any more; a hook-less
+# parser (no Parser2 above it) answers with v1's text itself.
+# Kinds: 'map' | 'grep' | 'sort' | 'eval' answer BODY forms; 'do' | 'sub'
+# answer the whole LAMBDA form.
 # A tail Statement::Variable whose _lower_block value semantics are known
 # correct (the $decl_tail machinery): `state` (appends its cell, or dies →
 # clean decline via the eval), single-scalar `my` (any init shape), and
@@ -8479,8 +8489,68 @@ sub _tail_decl_convertible {
 }
 
 sub lower_embedded_block {
+  my ($self, $block, $kind) = @_;
+  my $forms = $kind eq 'sub' ? $self->_lower_embedded_anon($block)
+                             : $self->_lower_embedded_body($block, $kind);
+  if ($forms) {
+    # do{} is a plain 0-arg lambda; progn — not (block nil) — keeps it
+    # loop-transparent (an unlabeled last/next inside reaches the enclosing
+    # loop, as in perl).
+    return ['lambda', ['list'], ['progn', @$forms]] if $kind eq 'do';
+    return $forms;
+  }
+  return $self->_embed_via_v1($block, $kind);
+}
+
+# The v1 route for a block the structural lowering declined: v1's block
+# compiler runs on the seam parser inside capture_v1 — parse_block_as_function
+# pushes the hoists it finds inside the block (a `use`, a BEGIN, an `our`
+# defvar) into the current section, and the capture's drain hoists them to
+# _captured_decls = the section TOP, outside every lexical `let`.  A hoisted
+# body that references a lexical LIVE here would read an unbound global from
+# up there — the same conservative text scan _hoist_nested_sub uses; over-
+# firing only costs a die, never correctness.
+sub _embed_via_v1 {
+  my ($self, $block, $kind) = @_;
+  warn "pcl-raw\tdecl:hook-declined\t$kind\n" if $ENV{PCL_E2_RAW_CENSUS};
+  my $p = $self->fallback_parser;
+  my $cap = $p->capture_v1(sub { $p->embed_block_v1($block, $kind) },
+                           bucket => 'definitions', hook => $self->_embed_hook);
+  my @drained = (@{ $cap->{decls} }, @{ $cap->{defs} }, @{ $cap->{runtime} });
+  if (@drained && %{ $self->{_live_lex} // {} }) {
+    my $txt = join "\n", @drained;
+    for my $var (sort keys %{ $self->{_live_lex} }) {
+      (my $bare = $var) =~ s/^[\$\@\%]//;
+      die "Parser2 TODO: embedded block's hoisted text captures live lexical '$bare'\n"
+        if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+    }
+  }
+  push @{ $self->{_captured_decls} }, @drained;
+  return $cap->{result};
+}
+
+# The structural lowering of a map/grep/sort/eval/do block BODY: an arrayref
+# of CLForms, or undef to decline (the caller takes the v1 route).
+sub _lower_embedded_body {
   my ($self, $block, $for_func) = @_;
-  return $self->_lower_embedded_anon($block) if $for_func eq 'sub';
+  # `map { {k => $_} } …` / `map({k => $_}, LIST)`: the braces are one
+  # hash-constructor EXPRESSION, not a statement list — the form twin of the
+  # v1 helper suffices.  Only map/grep: perl reads `{ WORD => …` after them
+  # as an anon hash (the paren form); after eval/do/sub the braces are
+  # always a BLOCK whose statement is a LIST (`eval { k => 1 }` is (k, 1)),
+  # so the hash route is wrong there — it was applied to every kind until
+  # s412 (`sub { a => 1 }` printed a garbage lambda and crashed; `do { b => 2 }`
+  # gave a hashref).  A grep/map hash block that fails the form route falls
+  # to v1's text route below.
+  if (($for_func eq 'map' || $for_func eq 'grep')
+      && Pl::PExpr::_block_is_hash_constructor($block)) {
+    my $f = $self->fallback_parser->parse_hash_block_to_cl_form($block);
+    if (!$f || _embed_form_unsafe($f)) {
+      warn "pcl-raw\tdecl:hash-ctor\n" if $ENV{PCL_E2_RAW_CENSUS};
+      return undef;
+    }
+    return [$f];
+  }
   my @stmts = grep { ref $_ && $_->significant && !$_->isa('PPI::Statement::Null') }
               $block->schildren;
   return ['nil'] unless @stmts;
@@ -8686,26 +8756,16 @@ sub _lower_expr {
              : "$ctx" eq ':void'    ? 2
              :                        0;
   $self->_gate_seam_my_shadow(@parts);
-  # A block-form-prototype arg (`first { … } @list`, `reduce { … } …`) makes v1
-  # EMIT a top-level `(defun --anon-block-N-- …)` into its definitions bucket
-  # while the expression string only *references* `#'--anon-block-N--`.  Drain
-  # the fallback parser's buckets (as _fallback_stmt_capture does) so that defun
-  # reaches _captured_decls — otherwise the funcall names an undefined function.
-  # (Phase B folds this dance into ONE capture function.)
+  # ONE parse, ONE generator, no capture: nothing emits v1 text during an
+  # expression lowering any more — an embedded block the structural route
+  # declines is compiled by v1 INSIDE the hook (lower_embedded_block →
+  # _embed_via_v1, under its own capture_v1) — so this parse needs neither a
+  # scratch section nor a drain.  Parser2::parse asserts the seam parser's
+  # standing section is still empty at the end (assert_seam_clean).
   my $p = $self->fallback_parser;
-  my @sv = ($p->_sections, $p->_cur_bucket, $p->indent_level);
-  $p->_sections([]);
-  # Use the 'definitions' bucket so a block-form arg's anon-block defun (emitted
-  # via _emit to the CURRENT bucket during parsing) lands where the drain below
-  # hoists it (a self-contained --anon-block-N-- is safe at the section top).
-  $p->_cur_bucket('definitions');
-  $p->_open_section('pcl');
-  $p->_cur_bucket('definitions');
-  $p->indent_level(0);
   my $form = do {
-    # task #78: embedded map/grep/sort/eval{} blocks in this REAL lowering
-    # parse go structural (body_form via lower_embedded_block).  Analysis
-    # parses never see the hook.
+    # The embedded-block hook is live for this whole parse: every block
+    # PExpr meets is answered by lower_embedded_block.
     local $p->{_v2_embed} = $self->_embed_hook;
     # E2.final root flip: the form entry (gen_node_form) — the tree's raw
     # residue is only the genuinely-declining subtrees.  The two facts are
@@ -8714,28 +8774,6 @@ sub _lower_expr {
       sub_info => $self->_cur_sub_info,
       lexicals => $self->{_let_bound_vars} // {});
   };
-  my @drained;
-  for my $sec (@{ $p->_sections }) {
-    push @drained,
-      grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}}, @{$sec->{definitions}}, @{$sec->{runtime}};
-  }
-  $p->_sections($sv[0]);
-  $p->_cur_bucket($sv[1]);
-  $p->indent_level($sv[2]);
-  # Everything drained hoists to _captured_decls = the section TOP, outside
-  # every lexical `let`.  A block-form arg body that references a lexical LIVE
-  # here (`catch { $caught = $_ }` under a let-bound $caught) would read an
-  # unbound global from the hoisted defun.  Same conservative text scan as
-  # _hoist_nested_sub; over-firing only costs the v2 lowering, never correctness.
-  if (@drained && %{ $self->{_live_lex} // {} }) {
-    my $txt = join "\n", @drained;
-    for my $var (sort keys %{ $self->{_live_lex} }) {
-      (my $bare = $var) =~ s/^[\$\@\%]//;
-      die "Parser2 TODO: block-form arg body captures live lexical '$bare'\n"
-        if $txt =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
-    }
-  }
-  push @{ $self->{_captured_decls} }, @drained;
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $form;
   $self->_seam_lex_assign_fix($form);
@@ -9509,8 +9547,6 @@ sub _fallback_stmt_capture {
   my ($self, $stmt, %opt) = @_;
   $self->_seam_note_stmt($stmt) if _seam_census();
   my $p = $self->fallback_parser;
-  my @saved = ($p->_sections, $p->_cur_bucket, $p->indent_level,
-               $p->{_local_let_depth});
   # A Compound statement (for/foreach/while/if/bare block) confines every
   # `my` inside it — Perl scopes even a loop-head decl (`for (my $i = …;…)`)
   # to the statement.  v1's _process_element registers such decls in its
@@ -9528,9 +9564,8 @@ sub _fallback_stmt_capture {
   # (runtime `(p-require …)`) instead of being hoisted to the definitions bucket
   # as `(p-eval-always (p-require …))`.  Hoisting is fatal for a `require` guarded
   # by an enclosing `SKIP:`/`if` block (scalar.t's `require B` / `require threads`)
-  # — the module then loads unconditionally at top level and dies (XS).  The fresh
-  # capture context resets _block_depth to 0, so without this the nesting is lost.
-  my $saved_bd = $p->_block_depth;
+  # — the module then loads unconditionally at top level and dies (XS).  A fresh
+  # capture context would reset _block_depth to 0, so the nesting is passed in.
   my $in_block = 0;
   for (my $a = $stmt->parent; $a; $a = $a->parent) {
     ($in_block = 1), last if $a->isa('PPI::Structure::Block');
@@ -9548,19 +9583,15 @@ sub _fallback_stmt_capture {
     ($self->environment->current_package // 'main') ne ($self->cur_pkg // 'main');
   local $p->{_seam_outer_pkg} = $seam_pkg_region ? ($self->cur_pkg // 'main')
                                                  : $p->{_seam_outer_pkg};
-  $p->_block_depth(($in_block || $seam_pkg_region) ? 1 : 0);
-  $p->_sections([]);
-  $p->_cur_bucket('runtime');
-  $p->_open_section('pcl');
-  $p->indent_level(0);
-  $p->{_local_let_depth} = 0;
-  {
-    # task #78: embedded blocks inside a whole-statement fallback go
-    # structural too (same hook as _lower_expr's fallback branch).
-    local $p->{_v2_embed} = $self->_embed_hook;
-    $p->_process_element($stmt);
-  }
-  my $opens = $p->{_local_let_depth};
+  # THE seam call: v1 lowers the statement on the fallback parser inside
+  # Pl::Parser::capture_v1 (its emission state isolated, the embedded-block
+  # hook installed so blocks inside the statement go structural), and the
+  # capture hands back the drained buckets by name.
+  my $cap = $p->capture_v1(sub { $p->_process_element($stmt) },
+                           bucket      => 'runtime',
+                           block_depth => ($in_block || $seam_pkg_region) ? 1 : 0,
+                           hook        => $self->_embed_hook);
+  my $opens = $cap->{opens};
   # A BEGIN/END/… block's p-BEGIN lands in v1's `definitions` bucket, alongside
   # sub definitions.  v2 emits native sub defs to @defs and this fallback's
   # `definitions` to _captured_decls, which is assembled BEFORE @defs — so a
@@ -9570,20 +9601,10 @@ sub _fallback_stmt_capture {
   # BEGIN runs before the runtime code (matching v1/Perl).  preamble/
   # declarations (defvars from an inner `our`, etc.) still go to _captured_decls.
   my $defs_target = $opt{sched} ? $self->{_sched_defs} : $self->{_captured_decls};
-  my @runtime;
-  for my $sec (@{ $p->_sections }) {
-    push @{ $self->{_captured_decls} },
-      grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}};
-    my @d = grep { /\S/ } @{$sec->{definitions}};
-    push @$defs_target, @d;
-    push @{ $self->{_sched_lines} }, (_src_pos($stmt)) x @d if $opt{sched};
-    push @runtime, grep { /\S/ } @{$sec->{runtime}};
-  }
-  $p->_sections($saved[0]);
-  $p->_cur_bucket($saved[1]);
-  $p->indent_level($saved[2]);
-  $p->{_local_let_depth} = $saved[3];
-  $p->_block_depth($saved_bd);
+  push @{ $self->{_captured_decls} }, @{ $cap->{decls} };
+  push @$defs_target, @{ $cap->{defs} };
+  push @{ $self->{_sched_lines} }, (_src_pos($stmt)) x @{ $cap->{defs} } if $opt{sched};
+  my @runtime = @{ $cap->{runtime} };
   $self->{_let_bound_vars} = \%saved_lb if $confines;
   return (@runtime ? join("\n", @runtime) : undef, $opens);
 }

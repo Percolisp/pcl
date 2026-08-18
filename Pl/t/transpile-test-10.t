@@ -841,4 +841,21 @@ tie my $t, "Cnt";
 my ($p, $q) = ($t, 7); print "p=$p q=$q\n"; $p = 5; print "p=$p t=$t\n";
 ');
 
+# s412 (Phase B3): a `{ WORD => …` block after eval/do/sub is a BLOCK whose
+# statement is a LIST — perl reads (k, 1); the hash-constructor route belongs
+# to map/grep only (`map({k => $_}, LIST)`, where perl itself reads the braces
+# as an anon hash).  Until s412 the check applied to every kind: `sub { a => 1 }`
+# emitted a garbage lambda (run-time crash), `do { b => 2 }` and
+# `eval { k => 1 }` yielded a HASH ref.
+test_transpile('s412: `{ WORD => …` after eval/do/sub is a block returning a list; map/grep keep the hash-ctor route', '
+my $f = sub { a => 1 };      print "sub:", join(",", $f->()), "|", scalar(() = $f->()), "\n";
+my $d = do { b => 2 };       print "do:$d\n";
+my @d = do { b => 2 };       print "do-list:@d\n";
+my @x = eval { k => 1 };     print "eval-list:@x\n";
+my $y = eval { k => 2 };     print "eval-scalar:$y\n";
+my @m = map { {c => $_} } 1..2;      print "map:", ref($m[0]), $m[1]{c}, "\n";
+my @n = map({ k => $_ }, 1..2);      print "map-paren:", ref($n[0]), $n[1]{k}, "\n";
+my %h = map { $_ => 1 } qw(p q);     print "map-pairs:", join(",", sort keys %h), "\n";
+');
+
 done_testing();

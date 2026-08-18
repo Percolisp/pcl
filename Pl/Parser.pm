@@ -144,6 +144,26 @@ sub lex_home {
   return $self;
 }
 
+# Make this parser Pl::Parser2's SEAM: v1's machinery runs on it only through
+# capture_v1 (statements it has no arm for, embedded blocks the structural
+# route declines) and through the expression compiler (`_parse_expression_form`).
+# It is never parse()d, so its emission state is set here: one open scratch
+# section, so any v1 helper reached OUTSIDE a capture has a bucket to write to
+# (that text is never printed).  The owner back-reference is weak — a strong
+# one would keep owner and seam alive for the life of the process — and
+# _v2_owned is its non-weak twin so lex_home DIES instead of answering with an
+# empty registry when the owner is gone (see above).
+sub become_seam {
+  my ($self, $owner) = @_;
+  $self->_sections([]);
+  $self->_open_section('pcl');
+  $self->_cur_bucket('runtime');
+  $self->{_v2_owner} = $owner;
+  Scalar::Util::weaken($self->{_v2_owner});
+  $self->{_v2_owned} = 1;
+  return $self;
+}
+
 # (The lenient_ppi truncate-at-first-unparseable-line flag lived here until
 # E4.1 step 3 — it only ever worked by silently dropping code, was retired
 # by ruling in s356 (§5a.4: a PPI failure dies naming the file), and
@@ -1158,6 +1178,123 @@ sub _with_bucket {
   $self->_cur_bucket($bucket);
   $code->();
   $self->_cur_bucket($old);
+}
+
+# ---------------------------------------------------------------- the v2 seam
+#
+# capture_v1 — THE seam function (docs/plan-one-compiler-s411.md Phase B2;
+# E5.1 as a function, not an object).  Pl::Parser2 lowers a statement it has
+# no native arm for (the ~12 v1 classes + `local`) and an embedded block the
+# structural route declines by running v1's machinery ON THIS PARSER — whose
+# emission is text into the section buckets.  This function isolates that:
+# it saves the parser's emission state (sections, current bucket, indent,
+# open `local` depth, block depth), installs a fresh scratch section and the
+# caller's choices, runs $code, DRAINS every bucket of every scratch section
+# by name, restores the saved state and returns
+#
+#   { result  => what $code returned,
+#     runtime => [lines the statement itself emitted],
+#     decls   => [preamble + declarations lines — defvars, package forms],
+#     defs    => [definitions lines — hoisted sub/BEGIN definitions],
+#     opens   => open `local` let forms the runtime text leaves unclosed }
+#
+# %opt: bucket => the bucket _emit writes to during $code ('runtime' for a
+#       statement; 'definitions' for a block compile whose hoists must land
+#       at a section top), block_depth => v1's `_block_depth` for the run
+#       (several bucket decisions key on it — a `require` inside a block
+#       stays inline), hook => the `_v2_embed` block hook to install.
+# Parser2 never reads or writes those five fields itself: it calls this.
+sub capture_v1 {
+  my ($self, $code, %opt) = @_;
+  my @saved = ($self->_sections, $self->_cur_section, $self->_cur_bucket,
+               $self->indent_level, $self->{_local_let_depth}, $self->_block_depth);
+  my $bucket = $opt{bucket} // 'runtime';
+  $self->_block_depth($opt{block_depth}) if defined $opt{block_depth};
+  $self->_sections([]);
+  $self->_open_section('pcl');
+  $self->_cur_bucket($bucket);
+  $self->indent_level(0);
+  $self->{_local_let_depth} = 0;
+  my $result = do {
+    local $self->{_v2_embed} = $opt{hook} if $opt{hook};
+    $code->();
+  };
+  my %out = (result => $result, opens => $self->{_local_let_depth},
+             runtime => [], decls => [], defs => []);
+  for my $sec (@{ $self->_sections }) {
+    push @{ $out{decls} },   grep { /\S/ } @{$sec->{preamble}}, @{$sec->{declarations}};
+    push @{ $out{defs} },    grep { /\S/ } @{$sec->{definitions}};
+    push @{ $out{runtime} }, grep { /\S/ } @{$sec->{runtime}};
+  }
+  $self->_sections($saved[0]);
+  $self->_cur_section($saved[1]);
+  $self->_cur_bucket($saved[2]);
+  $self->indent_level($saved[3]);
+  $self->{_local_let_depth} = $saved[4];
+  $self->_block_depth($saved[5]);
+  return \%out;
+}
+
+
+# embed_block — how THIS parser compiles an expression-embedded block
+# (Phase B3: PExpr's block sites ask exactly this, one route).  $kind is
+# 'map' | 'grep' | 'sort' | 'eval' — the answer is an arrayref of BODY forms
+# for the inline lambda — or 'do' | 'sub' — the answer is the whole LAMBDA
+# form.  A parser serving as Pl::Parser2's seam carries Parser2's hook in
+# `_v2_embed` (installed by capture_v1 / _lower_expr around every lowering
+# parse), and the hook ALWAYS answers: structurally when it can, else through
+# embed_block_v1 below inside its own capture.  Without a hook (a parser with
+# no Parser2 above it — the prototype-collection walk of a use'd module,
+# v1's constant/default-expression compiles) the answer is v1's own text.
+sub embed_block {
+  my ($self, $block, $kind) = @_;
+  if (my $hook = $self->{_v2_embed}) {
+    return $hook->($block, $kind);
+  }
+  warn "pcl-raw\tdecl:no-hook\n" if $ENV{PCL_E2_RAW_CENSUS};
+  return $self->embed_block_v1($block, $kind);
+}
+
+# v1's text compile of an embedded block, as the forms embed_block promises:
+# the body kinds through parse_block_to_cl_string (a map/grep hash-constructor
+# block `map({k => $_}, …)` through its dedicated route), do{} and sub{} through
+# parse_block_as_function as a returned lambda — do{} is a plain 0-arg block
+# whose body is loop-transparent (an unlabeled last/next inside it reaches
+# the enclosing loop, as in perl); a sub receives call arguments via @_.
+# The text rides as ONE raw form (E2's residue rule).  parse_block_as_function
+# pushes the hoists it finds inside the block (a `use`, a BEGIN, an `our`
+# defvar) into the CURRENT section — a seam parser reaches this only inside
+# capture_v1, whose drain carries them to Parser2's _captured_decls.
+sub embed_block_v1 {
+  my ($self, $block, $kind) = @_;
+  if ($kind eq 'sub') {
+    return Pl::CLForm::raw($self->parse_block_as_function($block, [], 1, 1));
+  }
+  if ($kind eq 'do') {
+    return Pl::CLForm::raw($self->parse_block_as_function($block, [], 0, 1, 1));
+  }
+  # (map/grep only — after eval the braces are always a BLOCK; see
+  # Parser2::_lower_embedded_body.)
+  my $text = ($kind eq 'map' || $kind eq 'grep')
+             && Pl::PExpr::_block_is_hash_constructor($block)
+    ? $self->parse_hash_block_to_cl_string($block)
+    : $self->parse_block_to_cl_string($block, $kind);
+  return [Pl::CLForm::raw($text)];
+}
+
+# The seam's standing scratch section (become_seam) must be EMPTY at the end
+# of every Parser2 parse: v1 text is produced on a seam parser only inside
+# capture_v1, whose drain hands it back — a line left here is emission nobody
+# drained, i.e. silently lost output (rule 12).
+sub assert_seam_clean {
+  my ($self) = @_;
+  for my $sec (@{ $self->_sections }) {
+    for my $b (qw(preamble declarations definitions runtime)) {
+      my ($line) = grep { /\S/ } @{ $sec->{$b} };
+      die "PCL internal: v1 emission on the seam parser outside capture_v1 "
+        . "($b): $line\n" if defined $line;
+    }
+  }
 }
 
 # Assemble all sections into a flat ordered list of lines.

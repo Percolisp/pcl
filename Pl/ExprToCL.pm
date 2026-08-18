@@ -1706,12 +1706,11 @@ sub gen_funcall_form {
         return $wrap->(['p-eval-block', @body_forms]);
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
-        # task #78: a Parser2-lowered body arrives structured (body_form).
-        if (my $bf = $arg_node->{body_form}) {
-          return $wrap->(['p-eval-block', @$bf]);
-        }
-        my $body = $arg_node->{body_cl} // 'nil';
-        return $wrap->(['p-eval-block', Pl::CLForm::raw($body)]);
+        # The body is always forms (structural, or v1's text as one raw form
+        # — Phase B3); body-less = an analysis-only tree, never emitted.
+        my $bf = $arg_node->{body_form}
+          or die "PCL internal: analysis-only inline_lambda (eval) reached emission\n";
+        return $wrap->(['p-eval-block', @$bf]);
       }
       elsif ($arg_node->{type} eq 'func_ref') {
         my $func_ref = $self->gen_node_form($kids->[1]);
@@ -1806,16 +1805,13 @@ sub gen_funcall_form {
         return ['progn', @body_parts];
       }
       elsif ($arg_node->{type} eq 'inline_lambda') {
-        # do { BLOCK } parsed as inline_lambda.  A Parser2-lowered body
-        # arrives structured (body_form, task #78); a declined one keeps
-        # v1's body_cl text as a raw atom.  The funcall node itself is
-        # form-producing either way.
+        # do { BLOCK } parsed as inline_lambda: the body is always forms
+        # (structural, or v1's text as one raw form — Phase B3).
         my $ctx  = $self->expr_o->get_node_context($node_id);
-        my @body = ($arg_node->{body_form})
-                 ? @{ $arg_node->{body_form} }
-                 : (Pl::CLForm::raw($arg_node->{body_cl} // 'nil'));
-        return ['progn', @body] if $ctx == INHERIT_CTX;
-        return $self->_ctx_wrap_form(['progn', @body], $ctx);
+        my $bf = $arg_node->{body_form}
+          or die "PCL internal: analysis-only inline_lambda (do) reached emission\n";
+        return ['progn', @$bf] if $ctx == INHERIT_CTX;
+        return $self->_ctx_wrap_form(['progn', @$bf], $ctx);
       }
     }
   }
@@ -3481,14 +3477,13 @@ sub gen_glob_form {
 # arriving node hits gen_internal_node_text's rule-12 die instead of being
 # lowered as a binary operator named "anon_sub" — ruled s391.)
 
-# E2 form variant: \&foo → #'name atom.  A lambda_form is a Parser2-lowered
-# do{}/anon-sub lambda (task #78); a raw_lambda is v1's pre-generated CL
-# string, embedded as a raw atom.
+# E2 form variant: \&foo → #'name atom.  A lambda_form is the do{}/anon-sub
+# lambda the parser's embed_block answered with (structural, or v1's text as
+# one raw form).  A node with neither was built by an analysis-only parse
+# (PExpr `analysis_only`) — such a tree never reaches emission (rule 12).
 sub gen_func_ref_form {
   my ($self, $node, $node_id, $kids) = @_;
   return $node->{lambda_form} if $node->{lambda_form};
-  return Pl::CLForm::raw($node->{raw_lambda}) if $node->{raw_lambda};
-  # Body-less: built by an analysis-only parse (Phase B1) — never emitted.
   die "PCL internal: analysis-only func_ref reached emission\n"
     if !defined $node->{func_name};
   return "#'" . $node->{func_name};
@@ -3603,22 +3598,12 @@ sub gen_inline_lambda_form {
                 ['funcall', ['p-sort-get-fn', $scalar], @pair]]]]]];
   }
 
-  my $bf = $node->{body_form};
-  if (!$bf) {
-    # A node with NEITHER body was built by an analysis-only parse (PExpr
-    # `analysis_only`, Phase B1) — such a tree never reaches emission (rule 12).
-    die "PCL internal: analysis-only inline_lambda ($for_func) reached emission\n"
-      if !defined $node->{body_cl};
-    # A body v1 compiled to TEXT (a block that lower_embedded_block declined,
-    # or an expression inside a v1-routed statement): E2's residue rule —
-    # the text rides as ONE raw inside the structural lambda (Phase A4; the
-    # text lambda emitter is gone).  Still counted by the raw census.
-    if ($ENV{PCL_E2_RAW_CENSUS}) {
-      (my $snip = $node->{body_cl} // '') =~ s/\s+/ /g;
-      warn "pcl-raw\tlambda:$for_func:body_cl\t" . substr($snip, 0, 70) . "\n";
-    }
-    $bf = [Pl::CLForm::raw($node->{body_cl} // 'nil')];
-  }
+  # The body is ALWAYS forms since Phase B3 — the parser's embed_block answers
+  # with structural forms or with v1's text as ONE raw form (E2's residue
+  # rule); a node with no body was built by an analysis-only parse (PExpr
+  # `analysis_only`), and such a tree never reaches emission (rule 12).
+  my $bf = $node->{body_form}
+    or die "PCL internal: analysis-only inline_lambda ($for_func) reached emission\n";
   if ($for_func eq 'sort') {
     return ['lambda', $params, @decl,
             ['catch', ':p-return',

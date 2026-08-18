@@ -2605,78 +2605,21 @@ sub _attach_glob_slot {
   }
 }
 
-# task #78 (E2): structured lowering of a map/grep/sort/eval{} block body
-# through the v2 statement machinery.  The hook (a plain coderef in the
-# parser's `_v2_embed` slot) is installed by Parser2 around REAL v1 lowering
-# calls only; it returns an arrayref of CLForms for the lambda body, or
-# undef to decline — the caller then produces v1's `body_cl` text as before.
-# Hash-constructor blocks keep their dedicated text route.
-sub _v2_embedded_body {
-  my ($self, $block, $func_name) = @_;
-  my $census = $ENV{PCL_E2_RAW_CENSUS};
-  if (!$self->has_parser) {
-    warn "pcl-raw\tdecl:no-parser\n" if $census;
-    return undef;
-  }
-  my $hook = $self->parser->{_v2_embed};
-  if (!$hook) {
-    if ($census) {
-      my @st;
-      for my $i (1 .. 25) {
-        my @c = caller($i) or last;
-        push @st, "$c[3]" if $c[3] =~ /Parser2?::|PExpr::parse_expr/;
-      }
-      warn "pcl-raw\tdecl:no-hook\t" . join('<', @st[0..($#st > 8 ? 8 : $#st)]) . "\n";
-    }
-    return undef;
-  }
-  if (_block_is_hash_constructor($block)) {
-    # `map { {k=>$_} } …`: the block is one hash-constructor EXPRESSION —
-    # no statement lowering needed; the form twin of the v1 helper suffices.
-    my $f = $self->parser->parse_hash_block_to_cl_form($block);
-    if (!$f || Pl::CLForm::embed_unsafe($f)) {
-      warn "pcl-raw\tdecl:hash-ctor\n" if $census;
-      return undef;
-    }
-    return [$f];
-  }
-  my $r = $hook->($block, $func_name);
-  warn "pcl-raw\tdecl:hook-declined\n" if $census && !$r;
-  return $r;
+# An expression-embedded block (map/grep/sort/eval body, do{}, a &-proto
+# call's block, anon sub) is compiled by the PARSER — one call, one route
+# (Phase B3, docs/plan-one-compiler-s411.md): Pl::Parser::embed_block answers
+# through Parser2's `_v2_embed` hook when one is installed (structural forms,
+# or v1's text as one raw form when the structural route declines — decided
+# and captured there, never here) and with v1's own text otherwise (no
+# Parser2 above this parse).  $kind 'map'|'grep'|'sort'|'eval' → an arrayref
+# of BODY forms for an inline_lambda; 'do'|'sub' → the whole LAMBDA form for
+# a func_ref.  Under analysis_only the block is not compiled at all and the
+# node stays body-less (an emitter reaching it dies).
+sub _embedded_block {
+  my ($self, $block, $kind) = @_;
+  return undef if $self->analysis_only;
+  return $self->parser->embed_block($block, $kind);
 }
-
-# The body of an embedded map/grep/sort/eval block, as the inline_lambda
-# node carries it: (body_form, body_cl) — the structural route first, v1's
-# text compile of the block otherwise.  ONE copy for the two block sites
-# (the map/grep/sort operator form and the eval-family form).  Under
-# analysis_only both routes are skipped and the node gets no body at all.
-sub _embedded_lambda_body {
-  my ($self, $block, $func_name) = @_;
-  return () if $self->analysis_only;
-  my $body_form = $self->_v2_embedded_body($block, $func_name);
-  return ($body_form, undef) if $body_form;
-  return (undef, _block_is_hash_constructor($block)
-    ? $self->parser->parse_hash_block_to_cl_string($block)
-    : $self->parser->parse_block_to_cl_string($block, $func_name));
-}
-
-# Fill a func_ref node for a block that becomes a LAMBDA (do{}, a &-proto
-# call's block, anon sub): lambda_form from the structural route, else
-# raw_lambda = v1's parse_block_as_function text with the site's own
-# arguments.  $wrap (optional) turns the hook's body forms into the lambda —
-# do{} needs (lambda () (progn …)); the sub shapes get the whole lambda from
-# the hook already.  Under analysis_only the node stays body-less.
-sub _embedded_func_ref {
-  my ($self, $ref_node, $block, $for_func, $v1_args, $wrap) = @_;
-  return if $self->analysis_only;
-  my $form = $self->_v2_embedded_body($block, $for_func);
-  if ($form) {
-    $ref_node->{lambda_form} = $wrap ? $wrap->($form) : $form;
-    return;
-  }
-  $ref_node->{raw_lambda} = $self->parser->parse_block_as_function($block, @$v1_args);
-}
-
 
 sub _block_is_hash_constructor {
   my $block = shift;
@@ -3298,11 +3241,10 @@ sub handle_subcalls {
             # (A following `->` deref chain never reaches this branch: the
             # chunk-2 normalizer above re-routed the ctor-shaped spelling
             # and died on the block-shaped one.)
-            my ($body_form, $body_cl) = $self->_embedded_lambda_body($block, $func_name);
+            my $body_form = $self->_embedded_block($block, $func_name);
 
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
             $lambda_node->{params}    = $params;
-            $lambda_node->{body_cl}   = $body_cl;
             $lambda_node->{body_form} = $body_form if $body_form;
             $lambda_node->{for_func} = $func_name;
             $self->add_child_to_node($top_id, $lambda_id);
@@ -3458,54 +3400,35 @@ sub handle_subcalls {
             # died.  For eval/do the chain stays IN the token stream and is
             # bound onto the funcall node by the ordinary postfix machinery,
             # derefing the block's RESULT exactly as perl does.)
-            my ($body_form, $body_cl) = $self->_embedded_lambda_body($next, $func_name);
+            my $body_form = $self->_embedded_block($next, $func_name);
 
             # Create inline_lambda node
             my($lambda_node, $lambda_id) = $self->make_node_insert('inline_lambda');
             $lambda_node->{params}    = $params;
-            $lambda_node->{body_cl}   = $body_cl;
             $lambda_node->{body_form} = $body_form if $body_form;
             $lambda_node->{for_func} = $func_name;
             $self->add_child_to_node($top_id, $lambda_id);
           } elsif ($func_name eq 'do') {
-            # do { } : emit an INLINE lambda (return_lambda=1) rather than a
-            # named defun.  A defun side-effect would be written into the output
-            # stream at the current position, which corrupts a surrounding p-if
-            # when the do{} sits in an elsif condition (the defun lands between
-            # the p-if branches).  Unlike parse_block_to_cl_string, the
-            # return_lambda path runs the block through _process_block, so the
-            # bare-if tail-return semantics (`do { 1 if $x }` returns the
-            # condition value when the modifier suppresses the expression) are
-            # preserved.  do{} is a plain 0-arg block (is_anon_sub=0).  The
-            # loop_transparent flag (5th arg) wraps the body in (progn ...) not
-            # (block nil ...), so an unlabeled last/next/redo inside the do{}
-            # escapes to the enclosing loop, matching Perl.
-            # task #78: with the v2 hook, the body lowers structurally and the
-            # node carries lambda_form (same (funcall (lambda () (progn …)))
-            # shape); the progn — not (block nil) — keeps loop transparency.
+            # do { } : an INLINE lambda (funcall (lambda () (progn …))) — never
+            # a named defun, whose emission would land between the branches of
+            # a surrounding p-if when the do{} sits in an elsif condition.  The
+            # progn (not (block nil)) keeps it loop-transparent: an unlabeled
+            # last/next/redo inside the do{} escapes to the enclosing loop, as
+            # in perl.  The parser answers with the whole lambda form.
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-            $self->_embedded_func_ref($ref_node, $next, 'do', [[], 0, 1, 1],
-              sub { ['lambda', ['list'], ['progn', @{ $_[0] }]] });
+            $ref_node->{lambda_form} = $self->_embedded_block($next, 'do');
             $self->add_child_to_node($top_id, $ref_id);
           } else {
             # A &-prototype sub (e.g. try/catch, first/reduce) receives the
             # block as an anonymous sub: it must accept call arguments via @_,
             # since the caller may invoke it with args (Try::Tiny's catch
-            # passes $error).  task #78: with the v2 hook the whole lambda
-            # arrives as one CLForm IN PLACE (the same anon-sub wrapper), so
-            # it stays inside the enclosing lexical `let` and closes over it.
-            # v1's route instead emits a top-level `(defun --anon-block-N--)`
-            # that Parser2's seam then HOISTS out of that let — the bug the
-            # #26 gate guards against (fable-answers-s345.md §3).
-            # When the hook declines (or is absent — no Parser2 lowering above
-            # this parse), ask v1 for a LAMBDA
-            # ($return_lambda=1), not a defun: same in-place hosting, and no
-            # emitted `--anon-block-N--` left behind in the bucket for the
-            # seam to drain.  This is the sibling anon-`sub {…}` branch's own
-            # call below, with the block-proto params.
+            # passes $error).  The whole lambda arrives as one form IN PLACE
+            # (the same anon-sub wrapper as `sub {…}` below), so it stays
+            # inside the enclosing lexical `let` and closes over it — never a
+            # top-level `(defun --anon-block-N--)` hoisted out of that let,
+            # the bug the #26 gate guards against (fable-answers-s345.md §3).
             my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-            $self->_embedded_func_ref($ref_node, $next, 'sub',
-                                      [$params, $has_block_proto, 1]);
+            $ref_node->{lambda_form} = $self->_embedded_block($next, 'sub');
             $self->add_child_to_node($top_id, $ref_id);
           }
         } else {
@@ -3559,11 +3482,10 @@ sub handle_subcalls {
       if ($func_name eq 'sub') {
         # Use parser callback if available (handles multi-statement blocks)
         if ($self->has_parser) {
-          # Anonymous subs receive call arguments via @_ (like named subs).
-          # task #78: with the v2 hook, the whole lambda arrives as one
-          # CLForm (v1's exact wrapper shape); otherwise v1's text.
+          # Anonymous subs receive call arguments via @_ (like named subs);
+          # the parser answers with the whole lambda form.
           my($ref_node, $ref_id) = $self->make_node_insert('func_ref');
-          $self->_embedded_func_ref($ref_node, $next, 'sub', [[], 1, 1]);
+          $ref_node->{lambda_form} = $self->_embedded_block($next, 'sub');
 
           # Replace sub { } with the function reference (4-arg splice preserves comma)
           splice @$e, $i, 2, $ref_node;
