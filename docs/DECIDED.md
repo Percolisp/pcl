@@ -60,6 +60,23 @@ not-supported.md → only then probe.*
   `docs/plan-post-s408.md` §2: #281 items 1+2+6 → Option B phase 2 with
   Fable's operand grammar first → release), §4 the rules above.
 
+- **s414 (Opus): the runtime branch VERIFIED and fast-forwarded into `main`**
+  (task #395, tip `71d2506`).  Three legs, all measured on the branch tip:
+  gate 150 files / **5517 rows** (5516 + the #394 guard row), only the 13
+  pclxs xs rows red; bench A/B main-vs-branch over the five new runtime rows
+  + arrhash/collatz/strcat — every `pcl(s)` within noise (the largest
+  apparent move, `strcat`, was 1 ms at the resolution floor and REVERSED
+  direction at best-of-7: noise, not a regression); full sweep `--jobs 8`
+  **GATE clean, TOTAL 18513 (+0), 0 new / 0 fixed, LOST 0, drops 13 =
+  census**, with the 6 UNSTABLE rows in the same three crash-files
+  (postfixderef.t, ref.t, yadayada.t) the batch's own main-side sweep
+  reported.  The #394 fix added no perl-tests row — nothing in that
+  population takes a string index or `delete @a[RANGE]`; its guard is the
+  Pl/t row.  The branch was REBASED onto main's docs commit first, so the
+  merge was a true fast-forward and the six shas are main's: `4c88bd9`
+  (23), `8a7ffe8` (13), `c1f7142` (21 + #394), `a6bad40` (37), `637712b`
+  (42), `71d2506` (46–48).
+
 ## s412 (2026-08-18, Fable) — Phase B DONE: ONE seam function; the hook always answers; analysis parses compile nothing
 
 - **Phase B1 DONE (`s412a`): PExpr `analysis_only => 1`** — an ANALYSIS parse

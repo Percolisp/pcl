@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 414 (2026-08-19, Opus 5) — the s413 runtime branch verified and merged (#395)
+
+**Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six
+runtime dedup families 23, 13, 21 + fix #394, 37, 42, 46–48) was one commit
+BEHIND main's docs commit, so a `--ff-only` merge was impossible as handed
+over; the branch touches only `cl/pcl-runtime.lisp`, `Pl/t/transpile-test-10.t`
+and `tools/bench-exec.pl` while main's extra commit is docs-only, so it was
+REBASED onto main first (conflict-free) and every measurement below was taken
+on the rebased tip — which is what `main` now is.
+
+**The three legs (all on the tip, in a worktree with `PCLXS_DIR` set so the
+xs rows are not silently subtracted):**
+
+| leg | result |
+|---|---|
+| `tools/prove-core` | **150 files / 5517 rows**; the only failures are the 13 pclxs xs rows (xs-01 5, xs-02 4, xs-03 4).  5516 + 1 = the #394 guard row in `transpile-test-10.t`, which FAILS on main by design. |
+| `BENCH_K=3 tools/bench-exec.pl arrfill slices sliceasgn ovlsub symref arrhash collatz strcat`, same command in a worktree of main | every `pcl(s)` within noise: arrhash 0.2843 → 0.2833, collatz 0.7960 → 0.7948, arrfill 0.1947 → 0.1922, slices 0.3212 → 0.3213, sliceasgn 0.0731 → 0.0715, ovlsub 0.2772 → 0.2736, symref 0.1625 → 0.1630.  `strcat` read 0.0074 → 0.0085 — a 1 ms move at the resolution floor, so it was re-measured best-of-7 and REVERSED (main 0.0083, branch 0.0073): noise. |
+| `perl sweep-perl-tests.pl --jobs 8` | **GATE clean, TOTAL 18513 (+0), 0 new / 0 fixed, LOST 0, drops 13 = census**; 6 UNSTABLE + 10 unverified rows, all in the three crash-files (postfixderef.t, ref.t, yadayada.t) the batch's own main-side sweep reported identically. |
+
+`git merge --ff-only` then took main to `71d2506`; worktrees and branch
+removed.  The #394 fix added **no** perl-tests row — nothing in that
+population indexes a slice with a string or writes `delete @a[RANGE]` — so
+the Pl/t guard row is its only cover; that is expected, not a shortfall.
+
+**Independent read of the six commits (the reviewer's half).**  Families 23,
+13, 46–48 are macros whose expansion is byte-identical to the code they
+replace; 37 and 21 are `declaim inline` functions.  The two that change
+behaviour or could have: `%p-extend-to`'s use in the `$#a = N` grow arm is
+identical because `nli = new-len - 1` and the arm runs only when
+`new-len > cur-len`, so its `(>= i (length a))` guard is always true there
+(same writability check, same hole count); and `%p-symref-symbol`'s
+`create` flag reproduces both contracts exactly (writers had the
+unconditional `make-package`, the reader had none).  Family 21 is the one
+real semantic change (#394) and is perl-probed by its guard row.
+
 ## Session 413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387): 9 families on `main`, 6 on a branch for Opus; scope ruled compiler + runtime; three silent-wrongs found by the reviews; handoff
 
 **Context.** The previous session was cut off by network trouble (a hanging
