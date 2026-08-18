@@ -69,6 +69,34 @@ not-supported.md → only then probe.*
   its BOX, so `/g` position is recorded under the string object and read
   under the box; diagnosed at the emission and the runtime, fix not
   attempted) and **#397** (above, fixed here).
+- **The EXTRACT worklist's remaining in-scope families are DONE** (`s414c`,
+  `s414d`, `s414e`): Parser.pm's six `Pl::PExpr->new … Pl::ExprToCL->new`
+  pairs → `_expr_parser`/`_expr_generator` (14+26); InterpScan's FOUR (not
+  two) "read the name after the sigil" copies → `_name_event` (38); and the
+  `&`-mention family of `exists`/`defined`/`undef` → `_amp_sub_name` plus the
+  existing `_amp_cast_operand_id` that only `undef` had been using.  Each
+  corpus-diff IDENTICAL, emission-ab 23/23 SAME, gate green.
+- **`p-defined-fh` resolved filehandles ITS OWN WAY** — a raw `(gethash sym
+  *p-filehandles*)` — and so hit the `eq` miss that `p-get-stream`'s by-name
+  fallback exists for: the standard handles are keyed by the `:pcl` symbols
+  while generated code in a user package passes that package's own same-named
+  symbol.  **`defined STDIN` read FALSE.**  Fixed by going through
+  `p-get-stream` (`s414e`), the defun moved below it so no forward reference
+  is added (load-warning set unchanged at 48).  Residue **#398**: perl's
+  `defined BAREWORD` is not an openness test at all — without strict it is
+  `defined "NAME"` = true, under strict the bareword is a COMPILE ERROR, and
+  with a sub of that name it is a CALL — so a closed or never-opened handle
+  still diverges.  That one is a decision, not a patch.
+- **THE TAIL RULE IS SATISFIED — stop extracting.**  Re-running
+  `tools/dup-census.pl --min-lines 8` over `Pl/**` + `cl/pcl-runtime.lisp`
+  leaves SIX EXACT runs and every one is in code with a standing verdict:
+  four in `Pl/Parser.pm`'s `_process_block` / `_process_block_in_tail_context`
+  / `_process_scheduled_block` / `_process_local_declaration` /
+  `_process_tail_stmt` (LEAVE — DELETED-BY E5.3) and two in
+  `StringInterpolation.pm`'s subscript walkers (SUPERSEDED-BY the InterpScan
+  consumer-3 port, #388).  Everything else is SHAPE-only.  The queue moves to
+  `docs/plan-post-s408.md` §2 (I = #281 items 1+2+6 → J–L Option B phase 2 →
+  M–N release).
 
 ## s413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387); scope = compiler + runtime (USER); three silent-wrongs found by the family reviews; handoff to Opus
 

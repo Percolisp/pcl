@@ -99,6 +99,58 @@ and **#397**, fixed here.
 which FAIL on HEAD — verified by copying the file into a HEAD worktree), and
 the full sweep (the runtime changed).
 
+### #387 families 14 + 26, 38, and the tail — the EXTRACT worklist reaches its end
+
+`s414c` — **Parser.pm's six `Pl::PExpr->new … Pl::ExprToCL->new` pairs become
+`_expr_parser` / `_expr_generator`** (−20 net).  They stay TWO helpers, not one
+"compile this expression" call, because what happens between them differs at
+every site: the two `parse_hash_block_to_cl_*` assemble a `hash_init` top node,
+`_compile_constant_value` registers embedded `our` declarations BEFORE
+generating (so non-main packages qualify consistently), and the two
+`_parse_expression` entries annotate contexts.  `full_PPI` is passed only where
+the site passed it — it is never READ (it exists to keep the PPI document alive
+so its tokens are not collected mid-parse), so handing it undef would have been
+a silent change of who owns that reference.
+
+`s414d` — **`InterpScan::_name_event`**: the census said `_scan_dollar` and
+`_scan_snail` shared one copy each; there were FOUR (a deref and a plain one
+per sigil).  The rule they disagreed about only in spelling is now stated once:
+a DEREF (`$$name`, `@$name`) names the SCALAR holding the reference, so its
+canon carries a `$` whatever the outer sigil is, while an all-digit name is
+magic and has no canon.  Chain/postderef binding stays at the call sites, where
+the sigils genuinely differ.  Also dropped a `my $n = length $text;` that had
+been dead before this change (checked against HEAD, not assumed).
+
+`s414e` — **the `&`-mention family, and the second-copy bug under it.**
+`exists`, `defined` and `undef` each spelled "is the argument `&NAME` as one
+Symbol token?" and two of them ALSO open-coded the `&{EXPR}` walk that the
+third already had as `_amp_cast_operand_id`.  One `_amp_sub_name` now answers
+the first question; the two open-coded walks call the existing helper.  Probing
+the family against perl found the same pattern one level down in the runtime:
+**`p-defined-fh` resolved its own way** — a raw `(gethash sym *p-filehandles*)`
+— instead of through `p-get-stream`, THE resolver, and so hit exactly the `eq`
+miss that resolver's by-name fallback exists for: the standard handles are
+registered under the `:pcl` symbols while generated code in a user package
+passes that package's own same-named symbol.  **`defined STDIN` read false.**
+Fixed by routing through `p-get-stream` (which also keeps a socket handle from
+reaching `open-stream-p` as a raw socket object), and the defun moved below it
+so the change adds no forward reference — the runtime's load-warning set is
+unchanged at 48.  Guard row added; the residue is **#398**: perl's `defined
+BAREWORD` is not an openness test at all (without strict it is `defined
+"NAME"` = true, under strict it is a compile error, and with a sub of that name
+it is a CALL), so a closed or never-opened handle still diverges — a decision,
+not a patch.
+
+**The worklist's tail rule is now satisfied.**  Re-running
+`tools/dup-census.pl --min-lines 8` over `Pl/**` + `cl/pcl-runtime.lisp` leaves
+**six EXACT runs, and every one of them is in code with a standing verdict**:
+four in `Pl/Parser.pm`'s `_process_block` / `_process_block_in_tail_context` /
+`_process_scheduled_block` / `_process_local_declaration` / `_process_tail_stmt`
+(LEAVE — DELETED-BY E5.3) and two in `StringInterpolation.pm`'s subscript
+walkers (SUPERSEDED-BY the InterpScan consumer-3 port, #388).  What is left is
+SHAPE-only.  So the EXTRACT half of #387 is done under the s413 scope ruling,
+and the queue moves to `docs/plan-post-s408.md` §2.
+
 ## Session 413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387): 9 families on `main`, 6 on a branch for Opus; scope ruled compiler + runtime; three silent-wrongs found by the reviews; handoff
 
 **Context.** The previous session was cut off by network trouble (a hanging

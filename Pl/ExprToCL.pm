@@ -413,6 +413,20 @@ sub _amp_cast_operand_id {
 }
 
 
+# The SUB a `&`-MENTION names — `&NAME` / `&Pkg::NAME` as one Symbol token
+# (#387, s414: `exists`, `defined` and `undef` each spelled this).  Returns
+# the split package and name, or () when ARG is not that shape.  Its sibling
+# spelling, `&{EXPR}` / `&$cref`, is _amp_cast_operand_id above — which the
+# `undef` arm already used while `exists`/`defined` open-coded the same walk.
+sub _amp_sub_name {
+  my ($self, $arg_id) = @_;
+  my $node = $self->expr_o->get_a_node($arg_id);
+  return () unless ref($node) eq 'PPI::Token::Symbol';
+  my $sym = $node->content();
+  return () unless $sym =~ /^&(.+)$/;
+  return $self->_split_func_sym($1);
+}
+
 
 # Main entry point: generate CL code from AST
 sub generate {
@@ -1941,24 +1955,11 @@ sub gen_funcall_form {
 
   # exists on array/hash elements, refs, and sub/coderef existence.
   if ($func_name eq 'exists' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($arg_node) eq 'PPI::Token::Symbol') {
-      my $sym = $arg_node->content();
-      if ($sym =~ /^&(.+)$/) {
-        my ($pkg, $name) = $self->_split_func_sym($1);
-        return ['p-sub-exists', "\"$pkg\"", "\"$name\""];
-      }
+    if (my ($pkg, $name) = $self->_amp_sub_name($kids->[1])) {
+      return ['p-sub-exists', "\"$pkg\"", "\"$name\""];
     }
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'prefix_op') {
-      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids2 >= 2) {
-        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
-        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
-          my $inner = $self->gen_node_form($arg_kids2->[1]);
-          return ['p-coderef-exists-p', $inner];
-        }
-      }
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
+      return ['p-coderef-exists-p', $self->gen_node_form($amp_id)];
     }
     my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
     my %head = (
@@ -1972,25 +1973,14 @@ sub gen_funcall_form {
 
   # defined: sub/coderef defined check, and bareword-filehandle check.
   if ($func_name eq 'defined' && @$kids == 2) {
+    if (my ($pkg, $name) = $self->_amp_sub_name($kids->[1])) {
+      return ['p-sub-defined', "\"$pkg\"", "\"$name\""];
+    }
+    if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
+      return ['p-coderef-defined-p', $self->gen_node_form($amp_id)];
+    }
+    # …and the bareword-filehandle forms, which read the node itself
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($arg_node) eq 'PPI::Token::Symbol') {
-      my $sym = $arg_node->content();
-      if ($sym =~ /^&(.+)$/) {
-        my ($pkg, $name) = $self->_split_func_sym($1);
-        return ['p-sub-defined', "\"$pkg\"", "\"$name\""];
-      }
-    }
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'prefix_op') {
-      my $arg_kids2 = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids2 >= 2) {
-        my $cast_node = $self->expr_o->get_a_node($arg_kids2->[0]);
-        if (ref($cast_node) eq 'PPI::Token::Cast' && $cast_node->content() eq '&') {
-          my $inner = $self->gen_node_form($arg_kids2->[1]);
-          return ['p-coderef-defined-p', $inner];
-        }
-      }
-    }
     if (ref($arg_node) eq 'PPI::Token::Word') {
       my $name = $arg_node->content();
       if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
@@ -2014,13 +2004,8 @@ sub gen_funcall_form {
 
   # undef &funcname — undefine a sub (keeps it in the exists table).
   if ($func_name eq 'undef' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if (ref($arg_node) eq 'PPI::Token::Symbol') {
-      my $sym = $arg_node->content();
-      if ($sym =~ /^&(.+)$/) {
-        my ($pkg, $name) = $self->_split_func_sym($1);
-        return ['p-undef-sub', "\"$pkg\"", "\"$name\""];
-      }
+    if (my ($pkg, $name) = $self->_amp_sub_name($kids->[1])) {
+      return ['p-undef-sub', "\"$pkg\"", "\"$name\""];
     }
     # undef &{expr} / undef &$cref — the coderef mention, not a call.
     if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {

@@ -2272,16 +2272,6 @@
    For CL boolean contexts use %pcl-definedp instead."
   (if (%pcl-definedp val) 1 ""))
 
-(defun p-defined-fh (fh-sym)
-  "Check if a bareword filehandle or dirhandle (symbol) is open.
-   Used by codegen for defined(FILEHANDLE) expressions.
-   Checks *p-filehandles* (open files) and *p-dirhandles* (open dirs)."
-  (or (let ((stream (gethash fh-sym *p-filehandles*)))
-        (and stream (open-stream-p stream) t))
-      ;; *p-dirhandles* is defined later in this file; the forward reference
-      ;; is a compile-time warning only — at runtime the variable is bound.
-      (and (ignore-errors (gethash fh-sym *p-dirhandles*)) t)))
-
 (defun %p-true-p-slow (val)
   "Perl truthiness slow path: boxes, undef, aggregates, overloads.
 
@@ -8715,6 +8705,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    A socket handle is lazily wrapped in a cached bidirectional stream so that
    print/readline/read/eof/close all work through the normal stream paths."
   (%p-as-stream (%p-resolve-fh fh)))
+
+(defun p-defined-fh (fh-sym)
+  "Check if a bareword filehandle or dirhandle (symbol) is open — codegen's
+   defined(FILEHANDLE).  It resolves through p-get-stream, THE filehandle
+   resolver, and sits here so it can: its own (gethash fh-sym *p-filehandles*)
+   MISSED the standard handles, which are registered under the :pcl symbols
+   while generated code in a user package passes that package's own same-named
+   symbol, so `defined STDIN` answered false where perl says true (s414).
+   Going through p-get-stream also keeps a socket handle from reaching
+   open-stream-p as a raw socket object.  (*p-dirhandles* is defined later in
+   this file; that forward reference is a compile-time warning only.)"
+  (or (let ((stream (p-get-stream fh-sym)))
+        (and stream (open-stream-p stream) t))
+      (and (ignore-errors (gethash fh-sym *p-dirhandles*)) t)))
 
 (defun %p-get-socket (fh)
   "Resolve a Perl filehandle to its underlying sb-bsd-sockets socket object (for

@@ -972,4 +972,27 @@ my @b = (10,20,30,40); my @d = delete @b[1..2];
 print "still:@d | ", join(",", map { defined $_ ? $_ : "u" } @b), "\n";
 ');
 
+# `defined FILEHANDLE` resolved its own way — a raw (gethash sym
+# *p-filehandles*) — instead of through p-get-stream, THE filehandle
+# resolver, and so missed the standard handles: they are registered under the
+# :pcl symbols while generated code in a user package passes that package's
+# own same-named symbol, the exact `eq` miss p-get-stream's by-name fallback
+# exists for.  `defined STDIN` therefore read FALSE (found s414 probing the
+# &-mention family, #387).  NB perl's own rule for a bareword is looser still
+# (task #398): without strict, `defined NOPE` is `defined "NOPE"` = true, and
+# under strict any such bareword is a compile error — PCL answers "is this
+# handle open", which agrees with perl for an OPEN handle and not for a
+# closed or never-opened one.  This row pins the agreement.
+test_transpile('defined FILEHANDLE reaches the standard handles (STDIN/STDOUT/STDERR), an open user handle and a dirhandle', '
+print "std:", (defined STDIN ? 1 : 0), (defined STDOUT ? 1 : 0), (defined STDERR ? 1 : 0), "\n";
+open(FH, "<", "/etc/hostname") or die "open: $!";
+print "user:", (defined FH ? 1 : 0), "\n";
+close(FH);
+opendir(D, "/tmp") or die "opendir: $!";
+print "dir:", (defined D ? 1 : 0), "\n";
+closedir(D);
+sub named { 1 }
+print "sub:", (defined &named ? 1 : 0), " miss:", (defined &nope ? 1 : 0), "\n";
+');
+
 done_testing();
