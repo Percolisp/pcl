@@ -922,4 +922,54 @@ my @y = (1,2,3,4,5,6);
 my @kv = delete %y[1..2];   print "delkv:@kv | ", scalar(@y), "\n";
 ');
 
+# ---------------------------------------------------------------------------
+# ONE decomposition of an element/slice access for every builtin arm
+# (ExprToCL::_elem_container_key, #387 families 2+10).  The two rows below are
+# the DIFFERENCES the copies had, each of which was a bug (task #397 and the
+# empty-slice arity split) — probed against perl before unifying.
+# ---------------------------------------------------------------------------
+
+# tied/pos swapped the container's sigil UNCONDITIONALLY; exists/delete only
+# for a bare Symbol/Magic container, because _swap_elem_sigil's regex is
+# unanchored and otherwise rewrites the package-qualified INDEX inside a
+# nested access's text — `$a[$i]{$k}` with `our $i` emitted `Pkg::%i`, a
+# reference to a DIFFERENT variable (ac6fdc1 fixed exists/delete in s-June and
+# never reached the twins).  A shape row because both consumers are inert
+# today: pos() on an element always reads undef (#396) and `tie $a[0],…` is
+# unimplemented (#155) — the wrong variable cannot show itself in output yet.
+{
+    my $cl = transpile('package Pkg; our @a = ({k=>"x"}); our $i = 1; our $k = "k";'
+                       . ' my $p = pos($a[$i]{$k}); my $t = tied($a[$i]{$k});'
+                       . ' my $e = exists($a[$i]{$k});');
+    like($cl, qr/\(p-pos\s+\(p-gethash-box\s+\(p-aref\s+\@a\s+Pkg::\$i\)/,
+         '#397: pos() keeps a nested package-qualified index as $i (was Pkg::%i)');
+    like($cl, qr/\(p-tied\s+\(p-gethash-box\s+\(p-aref\s+\@a\s+Pkg::\$i\)/,
+         '#397: tied() keeps it too — the same guard exists/delete always had');
+    unlike($cl, qr/Pkg::%i/,
+           '#397: no arm mis-sigils the index of a nested access');
+}
+
+# The empty slice, [perl #29127].  p-delete-hash-slice returned undef for it,
+# but its three siblings disagreed: the two array-slice arms demanded a
+# subscript child, so `delete @a[()]` fell through to the SCALAR delete and
+# crashed on arity ("invalid number of arguments: 1"), and the KV runtimes had
+# no empty-slice rule at all (0, not undef).  Perl-probed, all four spellings,
+# both contexts — plus the read-only corner: perl allows `delete @ro[()]` and
+# dies only on a real index, so the emptiness check comes FIRST.
+test_transpile('#387 family 2: empty slice delete — all four spellings, scalar and list, per [perl #29127]', '
+my %h = (a=>1); my @a = (1,2,3); my %g = (b=>2); my @c = (4,5,6);
+my ($x1,$y1) = (1, scalar delete @h{()});  print "hslice:", (defined $y1 ? "def:$y1" : "undef"), "\n";
+my ($x2,$y2) = (1, scalar delete @a[()]);  print "aslice:", (defined $y2 ? "def:$y2" : "undef"), "\n";
+my ($x3,$y3) = (1, scalar delete %g{()});  print "kvh:",    (defined $y3 ? "def:$y3" : "undef"), "\n";
+my ($x4,$y4) = (1, scalar delete %c[()]);  print "kva:",    (defined $y4 ? "def:$y4" : "undef"), "\n";
+print "left:", scalar(keys %h), scalar(@a), scalar(keys %g), scalar(@c), "\n";
+my @r1 = delete @h{()}; my @r2 = delete @a[()]; my @r3 = delete %g{()}; my @r4 = delete %c[()];
+print "list:", scalar(@r1), scalar(@r2), scalar(@r3), scalar(@r4), "\n";
+my @ro = (1,2,3); Internals::SvREADONLY(@ro,1);
+print "ro-empty:", (eval { my @x = delete @ro[()]; 1 } ? "ok" : "died"), "\n";
+print "ro-real:",  (eval { my @x = delete @ro[0];  1 } ? "ok" : "died"), "\n";
+my @b = (10,20,30,40); my @d = delete @b[1..2];
+print "still:@d | ", join(",", map { defined $_ ? $_ : "u" } @b), "\n";
+');
+
 done_testing();

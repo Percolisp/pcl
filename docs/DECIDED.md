@@ -11,6 +11,65 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s414 (2026-08-19, Opus) — the s413 runtime branch merged (#395); #387 families 2+10 extracted, and the three differences between the copies were three bugs
+
+- **s414 (Opus): the runtime branch VERIFIED and fast-forwarded into `main`**
+  (task #395, tip `71d2506`).  Three legs, all measured on the branch tip:
+  gate 150 files / **5517 rows** (5516 + the #394 guard row), only the 13
+  pclxs xs rows red; bench A/B main-vs-branch over the five new runtime rows
+  + arrhash/collatz/strcat — every `pcl(s)` within noise (the largest
+  apparent move, `strcat`, was 1 ms at the resolution floor and REVERSED
+  direction at best-of-7: noise, not a regression); full sweep `--jobs 8`
+  **GATE clean, TOTAL 18513 (+0), 0 new / 0 fixed, LOST 0, drops 13 =
+  census**, with the 6 UNSTABLE rows in the same three crash-files
+  (postfixderef.t, ref.t, yadayada.t) the batch's own main-side sweep
+  reported.  The #394 fix added no perl-tests row — nothing in that
+  population takes a string index or `delete @a[RANGE]`; its guard is the
+  Pl/t row.  The branch was REBASED onto main's docs commit first, so the
+  merge was a true fast-forward and the six shas are main's: `4c88bd9`
+  (23), `8a7ffe8` (13), `c1f7142` (21 + #394), `a6bad40` (37), `637712b`
+  (42), `71d2506` (46–48).
+- **`ExprToCL::_elem_container_key` is THE decomposition of an element or
+  slice access** (`s414b`, #387 families 2+10): given a builtin's argument it
+  answers `($kind, $container, @keys)` or `()`, and the `tied` / `pos` /
+  `delete` / `exists` arms became a head table each — 201 lines → 62, corpus
+  emission IDENTICAL over 111 files, all 23 lib modules + `cl/pack-impl.pl`
+  byte-identical (no gen bump, no artifact regeneration).
+- **The three ways the copies disagreed were three bugs**, each probed
+  against perl 5.40.3 before unifying (the s413 census-as-bug-finder rule):
+  1. **#397** — `tied`/`pos` swapped the container's sigil UNCONDITIONALLY,
+     `exists`/`delete` only for a bare Symbol/Magic container.  The guard is
+     load-bearing: `_swap_elem_sigil`'s regex is unanchored, so on a nested
+     access's text it also rewrote the package-qualified INDEX —
+     `pos($a[$i]{$k})` with `our $i` emitted `Pkg::%i`, a reference to a
+     DIFFERENT variable (ac6fdc1 fixed the two in 2026-06 and never reached
+     the twins).  Masked today because `pos` on an element always reads undef
+     (#396) and `tie $a[0],…` is unimplemented (#155).
+  2. **The empty slice, [perl #29127]** — `slice_h_acc` and `kv_slice_a_acc`
+     accepted a one-child (no-subscript) node, `slice_a_acc` and
+     `kv_slice_h_acc` demanded a subscript and therefore fell through to the
+     SCALAR `delete`, which **crashed on arity**: `delete @a[()]` gave
+     "invalid number of arguments: 1" where perl gives undef.  One rule now:
+     a slice needs only its container.
+  3. **The runtime half of the same rule** — only `p-delete-hash-slice` had
+     the empty-slice → nil answer; the other three returned an empty vector,
+     i.e. **0** in scalar context.  All four now answer nil, and in the two
+     array functions the emptiness test runs BEFORE the read-only check,
+     because perl allows `delete @ro[()]` and dies only on `delete @ro[0]`
+     (probed).  `docs/ir-spec.md` gained the slice-delete row.
+- **A compiler warning is a TEST FAILURE, on a cold cache**: the first cut of
+  the arms compared an undef `$kind`, and `Pl/t/misc-fixes-01.t` t47 went red
+  — `use Data::Dump` transpiles the module INSIDE the running SBCL, so a
+  perl warning from ExprToCL lands in the PROGRAM's stdout (the same
+  mechanism as the s402 drop announcement).  It reproduces only cold, so
+  **clear `~/.pcl-cache` before believing a green gate on a compiler
+  change**, and scan the corpus transpile's stderr for new warnings.
+- **New tasks filed by these probes: #396** (`pos()` on an array/hash element
+  is ALWAYS undef — `=~` binds the element's VALUE while `pos`/`tied` bind
+  its BOX, so `/g` position is recorded under the string object and read
+  under the box; diagnosed at the emission and the runtime, fix not
+  attempted) and **#397** (above, fixed here).
+
 ## s413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387); scope = compiler + runtime (USER); three silent-wrongs found by the family reviews; handoff to Opus
 
 - **USER RULING (s413): duplicated-code extraction matters ONLY for the
@@ -59,23 +118,6 @@ not-supported.md → only then probe.*
   recipe, §3 the queue (remaining in-scope families 2+10, 14/26, 38 →
   `docs/plan-post-s408.md` §2: #281 items 1+2+6 → Option B phase 2 with
   Fable's operand grammar first → release), §4 the rules above.
-
-- **s414 (Opus): the runtime branch VERIFIED and fast-forwarded into `main`**
-  (task #395, tip `71d2506`).  Three legs, all measured on the branch tip:
-  gate 150 files / **5517 rows** (5516 + the #394 guard row), only the 13
-  pclxs xs rows red; bench A/B main-vs-branch over the five new runtime rows
-  + arrhash/collatz/strcat — every `pcl(s)` within noise (the largest
-  apparent move, `strcat`, was 1 ms at the resolution floor and REVERSED
-  direction at best-of-7: noise, not a regression); full sweep `--jobs 8`
-  **GATE clean, TOTAL 18513 (+0), 0 new / 0 fixed, LOST 0, drops 13 =
-  census**, with the 6 UNSTABLE rows in the same three crash-files
-  (postfixderef.t, ref.t, yadayada.t) the batch's own main-side sweep
-  reported.  The #394 fix added no perl-tests row — nothing in that
-  population takes a string index or `delete @a[RANGE]`; its guard is the
-  Pl/t row.  The branch was REBASED onto main's docs commit first, so the
-  merge was a true fast-forward and the six shas are main's: `4c88bd9`
-  (23), `8a7ffe8` (13), `c1f7142` (21 + #394), `a6bad40` (37), `637712b`
-  (42), `71d2506` (46–48).
 
 ## s412 (2026-08-18, Fable) — Phase B DONE: ONE seam function; the hook always answers; analysis parses compile nothing
 

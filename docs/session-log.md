@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 414 (2026-08-19, Opus 5) — the s413 runtime branch verified and merged (#395)
+## Session 414 (2026-08-19, Opus 5) — the s413 runtime branch verified and merged (#395); #387 families 2+10 extracted, three bugs found in the differences (#397, the empty-slice split, the runtime twin)
 
 **Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six
 runtime dedup families 23, 13, 21 + fix #394, 37, 42, 46–48) was one commit
@@ -38,6 +38,66 @@ identical because `nli = new-len - 1` and the arm runs only when
 `create` flag reproduces both contracts exactly (writers had the
 unconditional `make-package`, the reader had none).  Family 21 is the one
 real semantic change (#394) and is perl-probed by its guard row.
+
+### #387 families 2 + 10 — `ExprToCL::_elem_container_key`, and three bugs in the differences
+
+The `tied` / `pos` / `delete` / `exists` arms of `gen_funcall_form` each spelled
+"is the argument an element or slice access?  take its container and key, swap
+the sigil" — 201 lines of it.  They now ask ONE helper,
+`_elem_container_key($arg_id)` → `($kind, $container, @keys)` or `()`, and each
+arm is a head table: **201 lines → 62**.  Corpus emission IDENTICAL over 111
+files; all 23 `lib/**` modules plus `cl/pack-impl.pl` byte-identical
+(`tools/emission-ab.pl`), so no generation bump and no artifact regeneration.
+
+**Every way the copies disagreed was a bug** — the s413 rule, applied and paid
+off three times.  Probed against perl 5.40.3 before unifying:
+
+1. **#397, the sigil guard.**  `tied`/`pos` swapped the container's sigil
+   unconditionally; `exists`/`delete` only for a bare Symbol/Magic container.
+   `git log -S` found why: `ac6fdc1` (2026-06-07) added that guard because
+   `_swap_elem_sigil`'s `s/(^|::)\$/…/` is unanchored and also rewrites the
+   package-qualified INDEX inside a nested access's already-generated text.
+   The twins never got it, so today `pos($a[$i]{$k})` with `our $i` emits
+   `(p-aref @a Pkg::%i …)` — a read of a DIFFERENT variable.  It is masked
+   (pos on an element is always undef, `tie $a[0],…` is unimplemented), which
+   is why no row caught it; its guard row is therefore an emission-SHAPE
+   assertion, not an output one.
+2. **The empty slice, [perl #29127].**  Two arms accepted a one-child
+   (no-subscript) slice node and two demanded a subscript — and the two that
+   demanded one fell through to the SCALAR `delete`, which CRASHED on arity:
+   `delete @a[()]` gave "invalid number of arguments: 1" where perl gives
+   undef.  `delete @h{()}` is a real perl-tests row (delete.t:158), which is
+   how the split showed itself: the first unified `>= 2` rule made that row the
+   ONE corpus-diff difference of the whole change.  A slice needs only its
+   container.
+3. **The runtime half of the same rule.**  Only `p-delete-hash-slice` answered
+   nil for an empty slice; the other three returned an empty vector = **0** in
+   scalar context.  All four now answer nil, and in the two array functions the
+   emptiness test runs BEFORE the read-only check — probed: perl allows
+   `delete @ro[()]` on a read-only array and dies only on `delete @ro[0]`.
+   `docs/ir-spec.md` gained a slice-delete row for the family.
+
+**Trap worth the next session's time: a compiler WARNING is a test failure, and
+only on a cold cache.**  The first cut compared an undef `$kind`; the gate went
+red at `Pl/t/misc-fixes-01.t` t47 (Data::Dump), because `use Data::Dump`
+transpiles the module INSIDE the running SBCL, so a perl warning out of
+`Pl/ExprToCL.pm` lands in the PROGRAM's stdout — the same mechanism as the s402
+drop announcement.  Running the file alone passed (the first run had warmed the
+cache); `rm -rf ~/.pcl-cache/*` reproduced it in one go, and a worktree of HEAD
+under the same cold cache proved it was mine.  A stderr scan of the whole
+corpus transpile is the cheap follow-up (it found no other new warning).
+
+**Two tasks filed by the probes:** **#396** — `pos()` on an array/hash element
+is ALWAYS undef, because `=~` binds the element's VALUE (`p-aref`) while
+`pos`/`tied` bind its BOX (`p-aref-box`), so `/g` position is stored in
+`*p-match-pos*` under the string OBJECT and read under the box (which is also
+why `while ($a[0] =~ /X/g)` iterates correctly while `pos($a[0])` reads undef);
+and **#397**, fixed here.
+
+**Bar:** corpus-diff IDENTICAL ×2, emission-ab 23/23 SAME, gate 150 files /
+**5521 rows** (5517 + 4 new guard rows in `transpile-test-10.t`, all four of
+which FAIL on HEAD — verified by copying the file into a HEAD worktree), and
+the full sweep (the runtime changed).
 
 ## Session 413 (2026-08-18, Fable) — the first EXTRACT batch of the duplicate worklist (#387): 9 families on `main`, 6 on a branch for Opus; scope ruled compiler + runtime; three silent-wrongs found by the reviews; handoff
 

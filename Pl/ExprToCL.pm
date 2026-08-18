@@ -1907,148 +1907,36 @@ sub gen_funcall_form {
 
   # tied($a[i]) / tied($h{k}): needs the box for identity tracking.
   if ($func_name eq 'tied' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        my $idx = $self->gen_node_form($arg_kids->[1]);
-        $arr = _swap_elem_sigil($arr, q(@));
-        return ['p-tied', ['p-aref-box', $arr, $idx]];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash = $self->gen_node($arg_kids->[0]);
-        my $key  = $self->gen_node_form($arg_kids->[1]);
-        $hash = _swap_elem_sigil($hash, q(%));
-        return ['p-tied', ['p-gethash-box', $hash, $key]];
-      }
-    }
+    my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
+    $kind //= '';
+    return ['p-tied', ['p-aref-box',    $container, $keys[0]]] if $kind eq 'a_acc';
+    return ['p-tied', ['p-gethash-box', $container, $keys[0]]] if $kind eq 'h_acc';
   }
 
   # pos($a[i]) / pos($h{k}): needs the box for *p-match-pos* tracking.
   if ($func_name eq 'pos' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        my $idx = $self->gen_node_form($arg_kids->[1]);
-        $arr = _swap_elem_sigil($arr, q(@));
-        return ['p-pos', ['p-aref-box', $arr, $idx]];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash = $self->gen_node($arg_kids->[0]);
-        my $key  = $self->gen_node_form($arg_kids->[1]);
-        $hash = _swap_elem_sigil($hash, q(%));
-        return ['p-pos', ['p-gethash-box', $hash, $key]];
-      }
-    }
+    my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
+    $kind //= '';
+    return ['p-pos', ['p-aref-box',    $container, $keys[0]]] if $kind eq 'a_acc';
+    return ['p-pos', ['p-gethash-box', $container, $keys[0]]] if $kind eq 'h_acc';
   }
 
   # delete on array/hash elements and slices: pass container + key/index.
   if ($func_name eq 'delete' && @$kids == 2) {
-    my $arg_node = $self->expr_o->get_a_node($kids->[1]);
-    if ($self->expr_o->is_internal_node_type($arg_node) &&
-        $arg_node->{type} eq 'a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        my $arr = $self->gen_node($arg_kids->[0]);
-        if ((ref($arr_node) eq 'PPI::Token::Symbol'
-             || ref($arr_node) eq 'PPI::Token::Magic')) {
-          $arr = _swap_elem_sigil($arr, q(@));
-        }
-        my $idx = $self->gen_node_form($arg_kids->[1]);
-        return ['p-delete-array', $arr, $idx];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        my $hash = $self->gen_node($arg_kids->[0]);
-        if ((ref($hash_node) eq 'PPI::Token::Symbol'
-             || ref($hash_node) eq 'PPI::Token::Magic')) {
-          $hash = _swap_elem_sigil($hash, q(%));
-        }
-        my $key = $self->gen_node_form($arg_kids->[1]);
-        return ['p-delete', $hash, $key];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'slice_h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 1) {
-        my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
-        my $hash = $self->gen_node($arg_kids->[0]);
-        if (ref($hash_node) eq 'PPI::Token::Symbol' && $hash =~ /(?:^|::)\@/) {
-          $hash =~ s/(^|::)\@/${1}%/;
-        }
-        my @keys = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
-        return ['p-delete-hash-slice', $hash, @keys];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'slice_a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        my @indices = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
-        return ['p-delete-array-slice', $arr, @indices];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'kv_slice_h_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $hash = $self->gen_node($arg_kids->[0]);
-        my @keys = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
-        return ['p-delete-kv-hash-slice', $hash, @keys];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'kv_slice_a_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 1) {
-        my $arr = $self->gen_node($arg_kids->[0]);
-        $arr =~ s/(^|::)\%/${1}\@/;
-        my @indices = map { $self->gen_node_form($arg_kids->[$_]) } 1 .. $#$arg_kids;
-        return ['p-delete-kv-array-slice', $arr, @indices];
-      }
-    }
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'h_ref_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $ref = $self->gen_node_form($arg_kids->[0]);
-        my $key = $self->gen_node_form($arg_kids->[1]);
-        return ['p-delete', ['unbox', $ref], $key];
-      }
-    }
-    # Array-ref access: delete $ref->[i] / delete $$ref[i].  Without this the
-    # element lowered as a VALUE and delete got one argument — an arity crash,
-    # not a wrong answer.  exists has had both ref arms all along; delete had
-    # only the hash one.
-    elsif ($self->expr_o->is_internal_node_type($arg_node) &&
-           $arg_node->{type} eq 'a_ref_acc') {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        my $ref = $self->gen_node_form($arg_kids->[0]);
-        my $idx = $self->gen_node_form($arg_kids->[1]);
-        return ['p-delete-array', ['unbox', $ref], $idx];
-      }
-    }
+    my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
+    my %head = (
+      'a_acc'          => 'p-delete-array',
+      'h_acc'          => 'p-delete',
+      'a_ref_acc'      => 'p-delete-array',
+      'h_ref_acc'      => 'p-delete',
+      'slice_h_acc'    => 'p-delete-hash-slice',
+      'slice_a_acc'    => 'p-delete-array-slice',
+      'kv_slice_h_acc' => 'p-delete-kv-hash-slice',
+      'kv_slice_a_acc' => 'p-delete-kv-array-slice',
+    );
+    # Without the two ref arms the element lowered as a VALUE and delete got
+    # one argument — an arity crash, not a wrong answer.
+    return [$head{$kind}, $container, @keys] if $kind && $head{$kind};
   }
 
   # exists on array/hash elements, refs, and sub/coderef existence.
@@ -2072,41 +1960,14 @@ sub gen_funcall_form {
         }
       }
     }
-    if ($self->expr_o->is_internal_node_type($arg_node)) {
-      my $arg_kids = $self->expr_o->get_node_children($kids->[1]);
-      if (@$arg_kids >= 2) {
-        if ($arg_node->{type} eq 'a_acc') {
-          my $arr_node = $self->expr_o->get_a_node($arg_kids->[0]);
-          my $arr = $self->gen_node($arg_kids->[0]);
-          if ((ref($arr_node) eq 'PPI::Token::Symbol'
-               || ref($arr_node) eq 'PPI::Token::Magic')) {
-            $arr = _swap_elem_sigil($arr, q(@));
-          }
-          my $idx = $self->gen_node_form($arg_kids->[1]);
-          return ['p-exists-array', $arr, $idx];
-        }
-        elsif ($arg_node->{type} eq 'h_acc') {
-          my $hash_node = $self->expr_o->get_a_node($arg_kids->[0]);
-          my $hash = $self->gen_node($arg_kids->[0]);
-          if ((ref($hash_node) eq 'PPI::Token::Symbol'
-               || ref($hash_node) eq 'PPI::Token::Magic')) {
-            $hash = _swap_elem_sigil($hash, q(%));
-          }
-          my $key = $self->gen_node_form($arg_kids->[1]);
-          return ['p-exists', $hash, $key];
-        }
-        elsif ($arg_node->{type} eq 'h_ref_acc') {
-          my $ref = $self->gen_node_form($arg_kids->[0]);
-          my $key = $self->gen_node_form($arg_kids->[1]);
-          return ['p-exists', ['unbox', $ref], $key];
-        }
-        elsif ($arg_node->{type} eq 'a_ref_acc') {
-          my $ref = $self->gen_node_form($arg_kids->[0]);
-          my $idx = $self->gen_node_form($arg_kids->[1]);
-          return ['p-exists-array', ['unbox', $ref], $idx];
-        }
-      }
-    }
+    my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
+    my %head = (
+      'a_acc'     => 'p-exists-array',
+      'h_acc'     => 'p-exists',
+      'a_ref_acc' => 'p-exists-array',
+      'h_ref_acc' => 'p-exists',
+    );
+    return [$head{$kind}, $container, $keys[0]] if $kind && $head{$kind};
   }
 
   # defined: sub/coderef defined check, and bareword-filehandle check.
@@ -2896,10 +2757,73 @@ sub qualified_var_to_cl {
   return $name_in;
 }
 
+# The container and subscript(s) of an ELEMENT or SLICE access, decomposed
+# once for every builtin arm that needs them (#387 families 2 + 10).  Given
+# the node id of a builtin's single argument, answers
+#     ($kind, $container, @keys)
+# where $kind is the access node's type and $container is the form to hand
+# the runtime for the aggregate; () when ARG is not such an access, so the
+# caller falls through to the generic funcall path exactly as before.
+#
+# The container is built by the rule its kind needs:
+#   a_acc / h_acc        the container's TEXT with its scalar sigil swapped
+#                        for the aggregate one;
+#   a_ref_acc/h_ref_acc  (unbox FORM) — the container is a reference;
+#   slice_h_acc          @h{…} names the hash, so @ → %;
+#   kv_slice_a_acc       %a[…] names the array, so % → @;
+#   slice_a_acc / kv_slice_h_acc   the slice token already names the right
+#                        aggregate — no swap.
+#
+# A SIGIL SWAP HAPPENS ONLY FOR A BARE Symbol/Magic CONTAINER.  That guard is
+# load-bearing, not tidiness: _swap_elem_sigil's regex is unanchored, so on a
+# nested access's already-generated text it also rewrites a package-qualified
+# INDEX — `$a[$i]{$k}` with `our $i` emitted (p-aref @a Pkg::%i …), a
+# reference to a different variable (ac6fdc1).  exists/delete were guarded
+# then; tied/pos and the kv_slice_a_acc swap were not, and this unification
+# is what fixes them (task #397).
+sub _elem_container_key {
+  my ($self, $arg_id) = @_;
+  my $node = $self->expr_o->get_a_node($arg_id);
+  return () unless $self->expr_o->is_internal_node_type($node);
+  my $kind = $node->{type} // '';
+  my %swap = ('a_acc'          => [q($), q(@)],
+              'h_acc'          => [q($), q(%)],
+              'slice_h_acc'    => [q(@), q(%)],
+              'kv_slice_a_acc' => [q(%), q(@)]);
+  my $is_slice = $kind =~ /^(?:kv_)?slice_[ah]_acc$/;
+  return () unless $is_slice || $kind =~ /^[ah]_(?:ref_)?acc$/;
+
+  # A SLICE needs only its container: `scalar delete @h{()}` ([perl #29127])
+  # is a legal one-child node and must reach the slice runtime — the two
+  # siblings that demanded a subscript (slice_a_acc, kv_slice_h_acc) fell
+  # through to the scalar `delete`, which then CRASHED on arity: probed,
+  # `delete @a[()]` = "invalid number of arguments: 1" where perl gives undef.
+  my $kids = $self->expr_o->get_node_children($arg_id);
+  return () unless $kids && @$kids >= ($is_slice ? 1 : 2);
+
+  my $container;
+  if ($kind =~ /_ref_acc$/) {
+    $container = ['unbox', $self->gen_node_form($kids->[0])];
+  }
+  else {
+    my $c_node = $self->expr_o->get_a_node($kids->[0]);
+    $container = $self->gen_node($kids->[0]);
+    if ($swap{$kind}
+        && (ref($c_node) eq 'PPI::Token::Symbol'
+            || ref($c_node) eq 'PPI::Token::Magic')) {
+      $container = _swap_elem_sigil($container, $swap{$kind}[1], $swap{$kind}[0]);
+    }
+  }
+  my @keys = map { $self->gen_node_form($kids->[$_]) }
+             ($is_slice ? (1 .. $#$kids) : (1));
+  return ($kind, $container, @keys);
+}
+
 sub _swap_elem_sigil {
-  my ($sym, $sigil) = @_;
-  $sym =~ s/(^|::)\$/$1$sigil/
-    or $sym =~ s/^\|\$(.*)\|$/|$sigil$1|/;
+  my ($sym, $sigil, $from) = @_;
+  my $f = quotemeta(defined $from ? $from : q($));   # $ unless told otherwise
+  $sym =~ s/(^|::)$f/$1$sigil/
+    or $sym =~ s/^\|$f(.*)\|$/|$sigil$1|/;
   return $sym;
 }
 

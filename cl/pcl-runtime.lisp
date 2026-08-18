@@ -7382,10 +7382,12 @@ create the key on a read-only call, which perl does not."
 
 (defun p-delete-kv-hash-slice (hash &rest keys)
   "Perl delete for KV hash slices: delete %hash{k1, k2, ...}
-   Handles hash references (unboxes) and vector/list key arguments."
+   Handles hash references (unboxes) and vector/list key arguments.
+   Empty slice returns nil (undef) per [perl #29127], as the three siblings do."
   (let* ((h (unbox hash))
          (flat-keys (%p-flatten-slice-args keys))
          (result (make-array 0 :adjustable t :fill-pointer 0)))
+    (when (null flat-keys) (return-from p-delete-kv-hash-slice nil))
     ;; Wrong kind of referent: perl's fatal (task #154) — this loop calls
     ;; GETHASH directly rather than through p-gethash.
     (when (%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
@@ -7398,54 +7400,63 @@ create the key on a read-only call, which perl does not."
 
 (defun p-delete-array-slice (arr &rest indices)
   "Perl delete for array slices: delete @arr[i1, i2, ...]
-   Sets elements to nil (deleted marker), trims trailing nils, and returns old values."
-  (%p-check-array-writable (unbox arr))                  ; task #159
-  (let* ((a (unbox arr))
-         ;; a range / an interpolated @list arrives as ONE vector argument —
-         ;; flatten like every other slice function (task #394: this and the KV
-         ;; twin used the vector itself as an index, i.e. deleted element 0)
-         (indices (%p-flatten-slice-args indices))
-         (result (make-array (length indices) :adjustable t :fill-pointer 0)))
-    (dolist (idx indices)
-      (let* ((i (truncate (to-number idx)))
-             (len (if (vectorp a) (length a) 0))
-             (old-val (if (and (>= i 0) (< i len))
-                          (p-aref-unbox-elem (aref a i))
-                          *p-undef*)))
-        (when (and (vectorp a) (>= i 0) (< i len))
-          (setf (aref a i) nil))  ; nil = deleted marker
-        (vector-push-extend old-val result)))
-    ;; Trim trailing nil slots (Perl semantics: array shrinks when last elements deleted)
-    (when (vectorp a)
-      (loop while (and (> (fill-pointer a) 0)
-                       (null (aref a (1- (fill-pointer a)))))
-            do (decf (fill-pointer a))))
-    result))
+   Sets elements to nil (deleted marker), trims trailing nils, and returns old
+   values.  Empty slice returns nil (undef) per [perl #29127], as the hash twin
+   does — BEFORE the writability check, because perl allows `delete @ro[()]` on
+   a read-only array and dies only on `delete @ro[0]` (probed)."
+  ;; a range / an interpolated @list arrives as ONE vector argument — flatten
+  ;; like every other slice function (task #394: this and the KV twin used the
+  ;; vector itself as an index, i.e. deleted element 0)
+  (let ((indices (%p-flatten-slice-args indices)))
+    (when (null indices) (return-from p-delete-array-slice nil))
+    (%p-check-array-writable (unbox arr))                ; task #159
+    (let* ((a (unbox arr))
+           (result (make-array (length indices) :adjustable t :fill-pointer 0)))
+      (dolist (idx indices)
+        (let* ((i (truncate (to-number idx)))
+               (len (if (vectorp a) (length a) 0))
+               (old-val (if (and (>= i 0) (< i len))
+                            (p-aref-unbox-elem (aref a i))
+                            *p-undef*)))
+          (when (and (vectorp a) (>= i 0) (< i len))
+            (setf (aref a i) nil))  ; nil = deleted marker
+          (vector-push-extend old-val result)))
+      ;; Trim trailing nil slots (Perl: the array shrinks when its last
+      ;; elements are deleted)
+      (when (vectorp a)
+        (loop while (and (> (fill-pointer a) 0)
+                         (null (aref a (1- (fill-pointer a)))))
+              do (decf (fill-pointer a))))
+      result)))
 
 (defun p-delete-kv-array-slice (arr &rest indices)
   "Perl delete for KV array slices: delete %arr[i1, i2, ...]
-   Deletes elements at given indices and returns key-value pairs (index, value, ...)."
-  (%p-check-array-writable (unbox arr))                  ; task #159
-  (let* ((a (unbox arr))
-         (indices (%p-flatten-slice-args indices))       ; task #394, as above
-         (result (make-array 0 :adjustable t :fill-pointer 0)))
-    (dolist (idx indices)
-      (let* ((i (truncate (to-number idx)))
-             (len (if (vectorp a) (length a) 0))
-             (old-val (if (and (>= i 0) (< i len))
-                          (let ((elem (aref a i)))
-                            (if (p-box-p elem) elem *p-undef*))
-                          *p-undef*)))
-        (vector-push-extend (make-p-box i) result)
-        (vector-push-extend old-val result)
-        (when (and (vectorp a) (>= i 0) (< i len))
-          (setf (aref a i) nil))))
-    ;; Trim trailing nil slots (Perl semantics: array shrinks when last elements deleted)
-    (when (vectorp a)
-      (loop while (and (> (fill-pointer a) 0)
-                       (null (aref a (1- (fill-pointer a)))))
-            do (decf (fill-pointer a))))
-    result))
+   Deletes elements at given indices and returns key-value pairs (index, value,
+   ...).  Empty slice returns nil (undef) per [perl #29127], before the
+   writability check — as p-delete-array-slice above."
+  (let ((indices (%p-flatten-slice-args indices)))       ; task #394, as above
+    (when (null indices) (return-from p-delete-kv-array-slice nil))
+    (%p-check-array-writable (unbox arr))                ; task #159
+    (let* ((a (unbox arr))
+           (result (make-array 0 :adjustable t :fill-pointer 0)))
+      (dolist (idx indices)
+        (let* ((i (truncate (to-number idx)))
+               (len (if (vectorp a) (length a) 0))
+               (old-val (if (and (>= i 0) (< i len))
+                            (let ((elem (aref a i)))
+                              (if (p-box-p elem) elem *p-undef*))
+                            *p-undef*)))
+          (vector-push-extend (make-p-box i) result)
+          (vector-push-extend old-val result)
+          (when (and (vectorp a) (>= i 0) (< i len))
+            (setf (aref a i) nil))))
+      ;; Trim trailing nil slots (Perl: the array shrinks when its last
+      ;; elements are deleted)
+      (when (vectorp a)
+        (loop while (and (> (fill-pointer a) 0)
+                         (null (aref a (1- (fill-pointer a)))))
+              do (decf (fill-pointer a))))
+      result)))
 
 (defun %p-stash-add-child-namespaces (pkg-name h)
   "Add a \"<child>::\" key to stash hash H for every registered Perl package one
