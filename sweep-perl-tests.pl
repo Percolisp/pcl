@@ -32,6 +32,7 @@ use POSIX qw(:sys_wait_h _exit);
 use FindBin;
 use lib "$FindBin::RealBin/tools/lib";
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
+use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 
 my $JOBS    = 8;
 my $TIMEOUT = 90;  # seconds per test (first attempt)
@@ -287,90 +288,9 @@ sub mem_report {
     return sprintf("min MemAvailable during the run: %.1f GB", $min_mem_kb / 1048576);
 }
 
-# An SBCL child that used string eval spawns `pl2cl --server` (the persistent
-# transpiler).  When that SBCL is killed the server is REPARENTED TO INIT and
-# keeps running: its stdin has hit EOF, but the loop only notices between
-# requests, so a server that was mid-transpile grinds on.  Measured s396: two
-# such orphans sat at 4.8 GB and 4.6 GB for half an hour, competing with the
-# run that had outlived them — and MemAvailable is exactly what decides
-# whether a parallel sweep stays stable (task #215).
-#
-# Reap them between files.  PPID 1 is the whole test: a server whose SBCL is
-# alive has that SBCL as its parent, so a CONCURRENT run in another shell is
-# never touched.  Same helper in tools/run-perl-suite.pl.
-# ---- Per-file SESSION isolation (task #367) --------------------------------
-# The twin of tools/run-perl-suite.pl's; see the long note there for why the
-# SESSION, and not the process group, is the handle that reaches an
-# SBCL-spawned descendant.
-sub run_isolated {
-  my ($cmd) = @_;
-  my $pid = fork();
-  die "sweep: fork failed: $!\n" if !defined $pid;
-  if (!$pid) {
-    POSIX::setsid();
-    exec('/bin/sh', '-c', $cmd);
-    POSIX::_exit(127);
-  }
-  waitpid($pid, 0);
-  my $rc = $?;
-  return ($rc, reap_session($pid));
-}
-
-sub reap_session {
-  my ($sid) = @_;
-  my @doomed = _session_members($sid);
-  my $found  = @doomed;
-  return 0 if !$found;
-  kill 'TERM', @doomed;
-  for (1 .. 10) {
-    last if !(@doomed = _session_members($sid));
-    select undef, undef, undef, 0.1;
-  }
-  if (@doomed = _session_members($sid)) {
-    kill 'KILL', @doomed;
-    select undef, undef, undef, 0.2;
-  }
-  return $found;
-}
-
-sub _session_members {
-  my ($sid) = @_;
-  my @out;
-  opendir my $dh, '/proc' or return ();
-  for my $e (readdir $dh) {
-    next if $e !~ /^[0-9]+$/ || $e == $$;
-    open my $sf, '<', "/proc/$e/stat" or next;
-    my $line = <$sf>;
-    close $sf;
-    next if !defined $line;
-    my $tail = substr($line, rindex($line, ')') + 1);
-    my @f = split ' ', $tail;
-    push @out, $e if defined $f[3] && $f[3] == $sid;
-  }
-  closedir $dh;
-  return @out;
-}
-
-sub reap_orphan_transpilers {
-    # ORPHAN := its parent is a REAPER, not the SBCL that spawned it.  PID 1 is
-    # only one adoption target: on a systemd desktop login every orphan is
-    # adopted by the session's `systemd --user` (a subreaper), so a PPID==1
-    # test never fired on the machine it was written on (measured s397).  The
-    # reap stays conservative — a server whose parent is anything else (an
-    # sbcl, or a foreign harness) is never touched; the server's OWN
-    # getppid watchdog (pl2cl --server, s397) is the fix that covers every
-    # adoption target, this is the belt for a server stuck in one long op.
-    my @ps = `ps -eo pid,ppid,args 2>/dev/null`;
-    for my $l (@ps) {
-        next unless $l =~ m{^\s*(\d+)\s+(\d+)\s+\S*perl\S*\s+\S*\bpl2cl\s+--server\s*$};
-        my ($pid, $ppid) = ($1, $2);
-        my $pcomm = '';
-        if (open my $c, '<', "/proc/$ppid/comm") { $pcomm = <$c> // ''; chomp $pcomm }
-        next unless $ppid == 1 || $pcomm =~ /^(?:systemd|init)$/;
-        kill 'KILL', $pid;
-    }
-    return;
-}
+# Per-file SESSION isolation (task #367) + orphaned-transpiler reaping live in
+# tools/lib/PCLProc.pm — ONE copy shared with tools/run-perl-suite.pl (s413,
+# #387 family 6); the long notes on WHY the session is the handle are there.
 
 # Parallel dispatch.  A queue entry is [file, timeout]: a file that TIMEOUTs is
 # re-queued once at $RETRY x its timeout (task #176).  Because the retry goes on
