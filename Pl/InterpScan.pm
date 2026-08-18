@@ -233,10 +233,29 @@ sub _match_bracket {
   return $depth == 0 ? $i : 0;
 }
 
+# ONE "read the NAME after a sigil and build its event" (#387 family 38 — the
+# scanner's own four copies, a deref one and a plain one per sigil).  START is
+# where the name begins, POS where the event's span does.  DEREF ($$name,
+# @$name) names the SCALAR that holds the reference, so its canon carries a
+# '$' whatever the outer sigil is; otherwise an all-digit name ($1, @1) is
+# magic and has no canon.  Binding a subscript chain or a postderef to the
+# event afterwards is the caller's business — the two sigils differ there.
+sub _name_event {
+  my ($text, $pos, $start, $sigil, $deref) = @_;
+  my ($name, $name_end, $span_end) = _scan_name($text, $start);
+  return undef unless defined $name;
+  return _ev(sigil => $sigil,
+             form  => ($deref ? 'deref' : _digits($name) ? 'magic' : 'plain'),
+             name  => $name,
+             canon => ($deref ? '$' . $name
+                              : _digits($name) ? undef : $sigil . $name),
+             name_span => [$start, $name_end],
+             span      => [$pos, $span_end]);
+}
+
 # ── $-sigil forms ──────────────────────────────────────────────────────────
 sub _scan_dollar {
   my ($text, $pos, $opt) = @_;
-  my $n = length $text;
   my $next = substr($text, $pos + 1, 1);
 
   return _scan_braced_dollar($text, $pos, $opt) if $next eq '{';
@@ -244,11 +263,7 @@ sub _scan_dollar {
   # $$name (scalar deref) / bare $$ (pid)
   if ($next eq '$') {
     if (substr($text, $pos + 2, 1) =~ /\w/) {
-      my ($name, $name_end, $span_end) = _scan_name($text, $pos + 2);
-      return undef unless defined $name;
-      my $ev = _ev(sigil => '$', form => 'deref', name => $name,
-                   canon => '$' . $name, name_span => [$pos + 2, $name_end],
-                   span => [$pos, $span_end]);
+      my $ev = _name_event($text, $pos, $pos + 2, '$', 1) or return undef;
       _scan_chain($text, $ev, $opt);        # "$$r[0]" is $r->[0] (probed)
       _scan_postderef($text, $ev, $opt);
       return $ev;
@@ -293,14 +308,7 @@ sub _scan_dollar {
   }
 
   # Plain $name — the workhorse
-  my ($name, $name_end, $span_end) = _scan_name($text, $pos + 1);
-  return undef unless defined $name;
-  my $ev = _ev(sigil => '$',
-               form => (_digits($name) ? 'magic' : 'plain'),
-               name => $name,
-               canon => (_digits($name) ? undef : '$' . $name),
-               name_span => [$pos + 1, $name_end],
-               span => [$pos, $span_end]);
+  my $ev = _name_event($text, $pos, $pos + 1, '$') or return undef;
   _scan_chain($text, $ev, $opt);
   _scan_postderef($text, $ev, $opt);
   return $ev;
@@ -399,11 +407,7 @@ sub _scan_snail {
   # @$name — elements of the array referenced by $name
   if ($next eq '$') {
     return undef unless substr($text, $pos + 2, 1) =~ /\w/;
-    my ($name, $name_end, $span_end) = _scan_name($text, $pos + 2);
-    return undef unless defined $name;
-    my $ev = _ev(sigil => '@', form => 'deref', name => $name,
-                 canon => '$' . $name, name_span => [$pos + 2, $name_end],
-                 span => [$pos, $span_end]);
+    my $ev = _name_event($text, $pos, $pos + 2, '@', 1) or return undef;
     _scan_chain($text, $ev, $opt, 1);       # "@$r[0]" slices @$r (probed)
     return $ev;
   }
@@ -420,14 +424,7 @@ sub _scan_snail {
   }
 
   # @name — whole array, or a slice when a group follows
-  my ($name, $name_end, $span_end) = _scan_name($text, $pos + 1);
-  return undef unless defined $name;
-  my $ev = _ev(sigil => '@',
-               form => (_digits($name) ? 'magic' : 'plain'),
-               name => $name,
-               canon => (_digits($name) ? undef : '@' . $name),
-               name_span => [$pos + 1, $name_end],
-               span => [$pos, $span_end]);
+  my $ev = _name_event($text, $pos, $pos + 1, '@') or return undef;
   _scan_chain($text, $ev, $opt, 1);
   return $ev;
 }
