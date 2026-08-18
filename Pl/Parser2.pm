@@ -1936,26 +1936,11 @@ sub _pkgblock_shadows_file_lexical {
   return 0 unless %$pre;
   my ($block) = grep { $_->isa('PPI::Structure::Block') } $child->schildren;
   return 0 unless $block;
-  for my $w (@{ $block->find(sub { $_[1]->isa('PPI::Token::Word')
-                 && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
-    my ($p, $deep) = ($w->parent, 0);
-    while ($p && $p != $block) {
-      if ($p->isa('PPI::Structure::Block') || $p->isa('PPI::Statement::Sub')) {
-        $deep = 1; last;
-      }
-      $p = $p->parent;
-    }
-    next if $deep;
-    my $nx = $w->snext_sibling or next;
-    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-             : ();
-    for my $s (@syms) {
-      next unless $s->content =~ /^[\$\@\%]\w+$/;
-      (my $bare = $s->content) =~ s/^[\$\@\%]//;
-      return 1 if $pre->{$bare}
-        && $self->_lex_referenced_after($child, $s->content);
-    }
+  for my $d (_decl_syms_under($block, sub_bounds => 1, plain => 1)) {
+    my $s = $d->[1];
+    (my $bare = $s->content) =~ s/^[\$\@\%]//;
+    return 1 if $pre->{$bare}
+      && $self->_lex_referenced_after($child, $s->content);
   }
   return 0;
 }
@@ -2294,6 +2279,49 @@ sub _ref_shadowed {
   return 0;
 }
 
+# THE my/state declaration walk (#387 family 5, s413) — the one copy of what
+# eight predicates each hand-rolled: find every `my`/`state` word under $root,
+# locate its nearest enclosing Block AT OR BELOW $root, take the declarator
+# symbol(s) after the word (`my $x` → the Symbol; `my ($p, $q)` → the Symbols
+# in the List; anything else → none).  Returns [$word, $sym, $block] triples
+# in document order; $block is undef when no Block lies between $word and
+# $root (and $root is not itself a Block).  %opt:
+#   words  => 'my' | 'state' | 'my|state' (default: both)
+#   nested => 1 reports every declaration under $root (the rename blockers
+#             count re-shadows); 0 (default) SKIPS a declaration whose
+#             enclosing block is strictly below $root — it belongs to that
+#             block, not to $root's scope.
+#   sub_bounds => 1 also treats a PPI::Statement::Sub strictly below $root
+#             as a nesting boundary (the pkg-block shadow test).
+#   plain  => 1 keeps only `[$@%]\w+` symbols (drops `${...}` spellings).
+# One walk per call — the census's "no new scope walk" rule: every caller
+# below replaced its own find()+climb with this one, none added a second.
+sub _decl_syms_under {
+  my ($root, %opt) = @_;
+  my $words = $opt{words} // 'my|state';
+  my $rx    = qr/^(?:$words)$/;
+  my @out;
+  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
+                                  && $_[1]->content =~ $rx }) || [] }) {
+    my ($p, $block, $deep) = ($w->parent, undef, 0);
+    while ($p) {
+      if ($p->isa('PPI::Structure::Block')) { $block = $p; last }
+      last if $p == $root;
+      $deep = 1, last if $opt{sub_bounds} && $p->isa('PPI::Statement::Sub');
+      $p = $p->parent;
+    }
+    $deep = 1 if $block && $block != $root;
+    next if $deep && !$opt{nested};
+    my $nx = $w->snext_sibling or next;
+    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
+             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
+             : ();
+    @syms = grep { $_->content =~ /^[\$\@\%]\w+$/ } @syms if $opt{plain};
+    push @out, map { [$w, $_, $block] } @syms;
+  }
+  return @out;
+}
+
 # Does $stmt declare canonical $canon (sigil-qualified) via my/state?
 sub _stmt_declares_canon {
   my ($self, $stmt, $canon) = @_;
@@ -2312,20 +2340,7 @@ sub _stmt_declares_canon {
   # skipped by the nested-block climb.
   return 0 unless ref($stmt) eq 'PPI::Statement'
                || ref($stmt) eq 'PPI::Statement::Expression';
-  for my $w (@{ $stmt->find(sub {
-        $_[1]->isa('PPI::Token::Word') && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
-    my ($p, $nested) = ($w->parent, 0);
-    while ($p && $p != $stmt) {
-      if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
-      $p = $p->parent;
-    }
-    next if $nested;
-    my $nx = $w->snext_sibling or next;
-    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-             : ();
-    return 1 if grep { $_->content eq $canon } @syms;
-  }
+  return 1 if grep { $_->[1]->content eq $canon } _decl_syms_under($stmt);
   return 0;
 }
 
@@ -3959,6 +3974,17 @@ sub _has_code_brace_deref {
                 @{ _brace_name_refs($root) };
 }
 
+# How many `my`/`state` DECLARATION events of $name (sigil'd) sit anywhere
+# under $root — nested ones included: two is a re-shadow.  Counts the
+# declaring WORDS, so `my ($x, $x)` is one event, as the two blockers always
+# counted it.
+sub _count_decls_of {
+  my ($root, $name) = @_;
+  my %seen_word;
+  return scalar grep { $_->[1]->content eq $name && !$seen_word{ $_->[0] }++ }
+                _decl_syms_under($root, nested => 1);
+}
+
 # Reasons renaming `my $x` within $root is NOT safe; undef when safe.
 sub _shadow_rename_blocker {
   my ($self, $root, $sym, $eval_ok, $shadow_ok) = @_;
@@ -3970,15 +3996,7 @@ sub _shadow_rename_blocker {
   # renames SHADOW-AWARE ($shadow_ok, #254 B-ii): _rename_decl_within now
   # leaves an inner declaration's target and its scope alone, so the two
   # variables stay two variables.
-  my $decls = 0;
-  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                                  && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
-    my $nx = $w->snext_sibling or next;
-    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-             : ();
-    $decls++ if grep { $_->content eq $old } @syms;
-  }
+  my $decls = _count_decls_of($root, $old);
   return "multiple declarations" if $decls != 1 && !$shadow_ok;
   return "no declaration" if $decls == 0;
   # Interpolated uses ("$x" / /$x/ / "${x}" / heredoc / <$x>) are handled:
@@ -4013,15 +4031,7 @@ sub _state_container_blocker {
   my ($self, $root, $sym, $eval_ok) = @_;
   my $old = $sym->content;
   (my $bare = $old) =~ s/^[\@\%]//;
-  my $decls = 0;
-  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                 && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
-    my $nx = $w->snext_sibling or next;
-    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-             : ();
-    $decls++ if grep { $_->content eq $old } @syms;
-  }
+  my $decls = _count_decls_of($root, $old);
   return "multiple declarations" if $decls != 1;
   return "brace-deref" if _has_code_brace_deref($root, $bare);
   # $eval_ok (s299, __shadow__ renames only): the eval capture alist strips
@@ -5540,36 +5550,29 @@ sub _rename_exception_mys {
   my ($self, $seg) = @_;
   for my $top (@{ $seg->{stmts} }) {
     next unless ref $top && $top->isa('PPI::Node');
-    for my $w (@{ $top->find(sub { $_[1]->isa('PPI::Token::Word')
-                                   && $_[1]->content =~ /^(?:my|state)$/ }) || [] }) {
-      my $nx = $w->snext_sibling or next;
-      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-               : ();
-      for my $s (@syms) {
-        next unless $s->content =~ /^[\$\@\%]\w+$/;
-        next unless Pl::GlobalPartition::is_exception_global($s->content);
-        my ($root, $decl) = _lexical_decl_scope($w, $s);
-        next unless $root;
-        # A FILE-level decl in a file whose string eval sits inside a NAMED SUB
-        # is left to the capture/promotion machinery (task #296's second
-        # reproducer: `my $a = "FILE"; sub g { eval '$a' }`).  A named sub is
-        # HOISTED out of the file-level `let`, so the eval-site capture alist
-        # cannot carry the lexical to it — only promotion to a package cell
-        # reaches, and that pass finds the declaration by its PERL name in the
-        # eval text.  Renaming first hides it and strands the decl in a let.
-        # A file-level eval is not affected: the alist carries the name there
-        # (do.t/qr.t emit `(cons "$a" $a__excl__0)`), so those keep the rename
-        # — and a promoted cell is not a `let`, so this pass has nothing to fix
-        # in the skipped case anyway.
-        next if $root->isa('PPI::Document') && $self->{_str_eval_in_named_sub};
-        my $why = $s->content =~ /^\$/
-          ? $self->_shadow_rename_blocker($root, $s, 'eval_ok', 'shadow_ok')
-          : $self->_state_container_blocker($root, $s, 'eval_ok');
-        next if $why;
-        $self->_rename_decl_within($root, $s,
-          $s->content . '__excl__' . $self->{_excl_rename_counter}++, $decl);
-      }
+    for my $d (_decl_syms_under($top, nested => 1, plain => 1)) {
+      my ($w, $s) = @$d;
+      next unless Pl::GlobalPartition::is_exception_global($s->content);
+      my ($root, $decl) = _lexical_decl_scope($w, $s);
+      next unless $root;
+      # A FILE-level decl in a file whose string eval sits inside a NAMED SUB
+      # is left to the capture/promotion machinery (task #296's second
+      # reproducer: `my $a = "FILE"; sub g { eval '$a' }`).  A named sub is
+      # HOISTED out of the file-level `let`, so the eval-site capture alist
+      # cannot carry the lexical to it — only promotion to a package cell
+      # reaches, and that pass finds the declaration by its PERL name in the
+      # eval text.  Renaming first hides it and strands the decl in a let.
+      # A file-level eval is not affected: the alist carries the name there
+      # (do.t/qr.t emit `(cons "$a" $a__excl__0)`), so those keep the rename
+      # — and a promoted cell is not a `let`, so this pass has nothing to fix
+      # in the skipped case anyway.
+      next if $root->isa('PPI::Document') && $self->{_str_eval_in_named_sub};
+      my $why = $s->content =~ /^\$/
+        ? $self->_shadow_rename_blocker($root, $s, 'eval_ok', 'shadow_ok')
+        : $self->_state_container_blocker($root, $s, 'eval_ok');
+      next if $why;
+      $self->_rename_decl_within($root, $s,
+        $s->content . '__excl__' . $self->{_excl_rename_counter}++, $decl);
     }
   }
   return;
@@ -7406,21 +7409,7 @@ sub _lower_block {
 # authoritative.)
 sub _embedded_my_syms {
   my ($self, $stmt) = @_;
-  my @syms;
-  for my $w (@{ $stmt->find(sub {
-        $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'my' }) || [] }) {
-    my ($p, $nested) = ($w->parent, 0);
-    while ($p && $p != $stmt) {
-      if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
-      $p = $p->parent;
-    }
-    next if $nested;
-    my $nx = $w->snext_sibling or next;
-    push @syms, $nx->isa('PPI::Token::Symbol')   ? ($nx)
-              : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-              : ();
-  }
-  return grep { $_->content =~ /^[\$\@\%]\w+$/ } @syms;
+  return map { $_->[1] } _decl_syms_under($stmt, words => 'my', plain => 1);
 }
 
 # The same declarations, as a de-duplicated list of NAMES.
@@ -9470,32 +9459,21 @@ sub _gate_seam_my_shadow {
   return unless $live && %$live;
   for my $part (@parts) {
     next unless ref $part && $part->isa('PPI::Node');
-    my @words = @{ $part->find(sub {
-          $_[1]->isa('PPI::Token::Word') && $_[1]->content =~ /^(?:my|state)$/;
-        }) || [] };
-    for my $w (@words) {
-      my ($anc, $block) = ($w->parent, undef);
-      while ($anc) {
-        if ($anc->isa('PPI::Structure::Block')) { $block = $anc; last }
-        last if $anc == $part;   # stop at the fallback root (checked for Block above)
-        $anc = $anc->parent;
-      }
+    # nested => 1 and the triple's own $block: a `my` directly under a
+    # NON-block $part has no block and is skipped — that is the sanctioned
+    # same-level seam contract; the fallback root itself counts as a Block.
+    for my $d (_decl_syms_under($part, nested => 1)) {
+      my ($w, $s, $block) = @$d;
       next unless $block;
-      my $nx = $w->snext_sibling or next;
-      my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-               : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-               : ();
-      for my $s (@syms) {
-        next unless $live->{$s->content};
-        # `state` has per-instance semantics driven by state_var_renames —
-        # renaming the token would bypass that machinery; always gate.
-        my $why = $w->content eq 'state' ? 'state'
-                : $self->_shadow_rename_blocker($block, $s, 'eval_ok');
-        die "Parser2 TODO: my-shadow of live lexical " . $s->content
-          . " inside fallback block ($why)\n" if $why;
-        $self->_rename_decl_within($block, $s,
-          $s->content . '__shadow__' . $self->{_shadow_rename_counter}++);
-      }
+      next unless $live->{$s->content};
+      # `state` has per-instance semantics driven by state_var_renames —
+      # renaming the token would bypass that machinery; always gate.
+      my $why = $w->content eq 'state' ? 'state'
+              : $self->_shadow_rename_blocker($block, $s, 'eval_ok');
+      die "Parser2 TODO: my-shadow of live lexical " . $s->content
+        . " inside fallback block ($why)\n" if $why;
+      $self->_rename_decl_within($block, $s,
+        $s->content . '__shadow__' . $self->{_shadow_rename_counter}++);
     }
   }
 }
@@ -9795,27 +9773,13 @@ sub _cond_my_names {
   my ($self, @conds) = @_;
   my (@names, %seen);
   for my $cond (grep { defined } @conds) {
-    for my $t (@{ $cond->find('PPI::Token::Word') || [] }) {
-      next unless $t->content eq 'my';
-      # skip a `my` inside a nested block/anon-sub within the condition
-      my $p = $t->parent; my $nested = 0;
-      while ($p && $p != $cond) {
-        if ($p->isa('PPI::Structure::Block')) { $nested = 1; last }
-        $p = $p->parent;
-      }
-      next if $nested;
-      my $nx = $t->snext_sibling or next;
-      my @syms = $nx->isa('PPI::Token::Symbol')     ? ($nx)
-               : $nx->isa('PPI::Structure::List')   ? @{ $nx->find('PPI::Token::Symbol') || [] }
-               : ();
-      for my $s (@syms) {
-        # Scalar ($x) or container (@a / %h) — both scope to the whole construct
-        # and are wrapped in a fresh let by _wrap_cond_mys (_fresh_container picks
-        # the box/vector/table by sigil).
-        next unless $s->content =~ /^[\$\@\%]\w+$/;
-        next if $seen{$s->content}++;
-        push @names, $s->content;
-      }
+    # a `my` inside a nested block/anon-sub within the condition is skipped
+    # (nested => 0).  Scalar ($x) or container (@a / %h) — both scope to the
+    # whole construct and are wrapped in a fresh let by _wrap_cond_mys
+    # (_fresh_container picks the box/vector/table by sigil).
+    for my $d (_decl_syms_under($cond, words => 'my', plain => 1)) {
+      next if $seen{$d->[1]->content}++;
+      push @names, $d->[1]->content;
     }
   }
   return @names;
