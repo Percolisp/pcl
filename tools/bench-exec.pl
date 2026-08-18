@@ -64,6 +64,14 @@ my @benches = (
   # not codegen quality.  Small N accordingly.
   ['pack',      "$HN my \$s=0; for (1..\$n) { \$s += length(pack('N n C a3', \$_, \$_ % 65536, \$_ % 256, 'abc')) + length(pack('V d', \$_, \$_ * 1.5)) } print \"\$s\\n\";", 20_000, 0],
   ['packunpk',  "$HN my \$s=0; for (1..\$n) { my (\$x,\$y,\$z) = unpack('N n C', pack('N n C', \$_, \$_ % 65536, \$_ % 256)); \$s += \$x + \$z } print \"\$s\\n\";", 20_000, 0],
+  # The runtime paths the s413 Lisp de-duplication touched (#387 families 13,
+  # 21, 23, 37, 42, 46): array fill, slices, an overloaded binop, symbolic
+  # refs, slice assignment.  A/B these HEAD-vs-tree when editing those.
+  ['arrfill',   "$HN my \@a; my \$s=0; for (1..\$n) { \@a = (1..20, \$_); \$s += \@a } print \"\$s\\n\";", 200_000, 0],
+  ['slices',    "$HN my \@a = (1..50); my \%h = map { \$_ => \$_ } 1..50; my \@k = (1..10); my \$s=0; for (1..\$n) { my \@v = \@a[1..5]; my \@w = \@h{\@k}; \$s += \$v[0] + \$w[9] } print \"\$s\\n\";", 200_000, 0],
+  ['sliceasgn', "$HN my \@a = (1..20); my \%h; my \$s=0; for (1..\$n) { \@a[1..3] = (7,8,9); \@h{'a','b'} = (\$_, 2); \$s += \$a[2] + \$h{a} } print \"\$s\\n\";", 200_000, 0],
+  ['ovlsub',    "$HN package V; use overload '-' => sub { V->new(\$_[2] ? \$_[1] - \$_[0]{v} : \$_[0]{v} - (ref \$_[1] ? \$_[1]{v} : \$_[1])) }, '\"\"' => sub { \$_[0]{v} }; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$x = V->new(1000); my \$s = 0; for (1..\$n) { my \$y = \$x - 3; \$s += \"\$y\" } print \"\$s\\n\";", 100_000, 0],
+  ['symref',    "$HN no strict 'refs'; our \$g = 2; our \@ga = (1,2,3); my \$s=0; for (1..\$n) { \$s += \${'main::g'} + \${'g'} + scalar(\@{'main::ga'}) } print \"\$s\\n\";", 200_000, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------

@@ -2390,16 +2390,26 @@
 ;;; masked once at startup, see file top).  Everything else (boxes, strings,
 ;;; undef, overloaded objects) takes the out-of-line slow path, which checks
 ;;; the left operand's overload, then the right (reversed), then coerces.
+;;; THE binary-operator overload dispatch (#387 family 23, s413): try the LEFT
+;;; operand's `use overload` handler for OP-STR, then the RIGHT one (swapped
+;;; = t), else BODY — perl's rule for every binary op.  A macro, so the six
+;;; hand-written slow paths (- / % . <=> cmp), p-** and %def-overloaded-arith
+;;; expand to exactly the code they used to spell.  A and B are evaluated more
+;;; than once — pass variables (every use does).
+(defmacro %with-binary-overload ((op-str a b) &body body)
+  `(let ((ha (p-find-overload ,a ,op-str)))
+     (if ha (p-call-overload ha ,a ,b nil)
+         (let ((hb (p-find-overload ,b ,op-str)))
+           (if hb (p-call-overload hb ,b ,a t)
+               (progn ,@body))))))
+
 (defmacro %def-overloaded-arith (name op-str cl-op)
   (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
     `(progn
        (defun ,slow (a b)
          ,(format nil "Perl ~A slow path: use overload dispatch, then numeric coercion" op-str)
-         (let ((ha (p-find-overload a ,op-str)))
-           (if ha (p-call-overload ha a b nil)
-               (let ((hb (p-find-overload b ,op-str)))
-                 (if hb (p-call-overload hb b a t)
-                     (,cl-op (to-number a) (to-number b)))))))
+         (%with-binary-overload (,op-str a b)
+           (,cl-op (to-number a) (to-number b))))
        (declaim (inline ,name))
        (defun ,name (a &optional (b nil b-supplied-p))
          ,(format nil "Perl ~A with numberp fast path + use overload dispatch" op-str)
@@ -2439,12 +2449,8 @@
 
 (defun %p---slow (a b)
   "Perl binary subtraction slow path: use overload dispatch, then coercion."
-  ;; use overload "-": binary minus overload
-  (let ((ha (p-find-overload a "-")))
-    (if ha (p-call-overload ha a b nil)
-        (let ((hb (p-find-overload b "-")))
-          (if hb (p-call-overload hb b a t)
-              (- (to-number a) (to-number b)))))))
+  (%with-binary-overload ("-" a b)
+    (- (to-number a) (to-number b))))
 
 (declaim (inline p--))
 (defun p-- (a &optional b)
@@ -2457,16 +2463,12 @@
 
 (defun %p-/-slow (a b)
   "Perl division slow path: use overload dispatch, then coercion."
-  ;; use overload "/": division overload
-  (let ((ha (p-find-overload a "/")))
-    (if ha (p-call-overload ha a b nil)
-        (let ((hb (p-find-overload b "/")))
-          (if hb (p-call-overload hb b a t)
-              ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
-              ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
-              ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
-              (let ((r (/ (to-number a) (to-number b))))
-                (if (typep r 'ratio) (coerce r 'double-float) r)))))))
+  (%with-binary-overload ("/" a b)
+    ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
+    ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
+    ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
+    (let ((r (/ (to-number a) (to-number b))))
+      (if (typep r 'ratio) (coerce r 'double-float) r))))
 
 (declaim (inline p-/))
 (defun p-/ (a b)
@@ -2479,18 +2481,14 @@
 
 (defun %p-%-slow (a b)
   "Perl modulo slow path with use overload '%' dispatch"
-  ;; use overload "%": modulo overload
-  (let ((ha (p-find-overload a "%")))
-    (if ha (p-call-overload ha a b nil)
-        (let ((hb (p-find-overload b "%")))
-          (if hb (p-call-overload hb b a t)
-              (let ((na (to-number a)) (nb (to-number b)))
-                (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
-                        (and (floatp na) (sb-ext:float-infinity-p na))
-                        (and (floatp nb) (sb-ext:float-infinity-p nb))
-                        (zerop nb))
-                    (sb-kernel:make-double-float #x7FF80000 0)
-                    (mod (truncate na) (truncate nb)))))))))
+  (%with-binary-overload ("%" a b)
+    (let ((na (to-number a)) (nb (to-number b)))
+      (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
+              (and (floatp na) (sb-ext:float-infinity-p na))
+              (and (floatp nb) (sb-ext:float-infinity-p nb))
+              (zerop nb))
+          (sb-kernel:make-double-float #x7FF80000 0)
+          (mod (truncate na) (truncate nb))))))
 
 (declaim (inline p-%))
 (defun p-% (a b)
@@ -2502,12 +2500,8 @@
 
 (defun p-** (a b)
   "Perl exponentiation with use overload '**' dispatch"
-  ;; use overload "**": exponentiation overload
-  (let ((ha (p-find-overload a "**")))
-    (when ha (return-from p-** (p-call-overload ha a b nil)))
-    (let ((hb (p-find-overload b "**")))
-      (when hb (return-from p-** (p-call-overload hb b a t))))
-    ;; No overload: existing numeric path with Inf-on-overflow
+  (%with-binary-overload ("**" a b)
+    ;; No overload: numeric path with Inf-on-overflow
     (let ((na (to-number a))
           (nb (to-number b)))
       ;; Return exact bignum when both args are non-negative integers AND the
@@ -2653,12 +2647,8 @@
 
 (defun %p-.-slow (a b)
   "Perl string concatenation slow path with use overload '.' dispatch."
-  ;; use overload ".": check left operand then right (reversed)
-  (let ((ha (p-find-overload a ".")))
-    (if ha (p-call-overload ha a b nil)
-        (let ((hb (p-find-overload b ".")))
-          (if hb (p-call-overload hb b a t)
-              (concatenate 'string (to-string a) (to-string b)))))))
+  (%with-binary-overload ("." a b)
+    (concatenate 'string (to-string a) (to-string b))))
 
 (declaim (inline p-.))
 (defun p-. (a b)
@@ -5524,16 +5514,12 @@
 
 (defun %p-<=>-slow (a b)
   "Perl spaceship slow path with use overload '<=>' dispatch"
-  ;; use overload "<=>": check left operand then right (reversed)
-  (let ((ha (p-find-overload a "<=>")))
-    (if ha (p-call-overload ha a b nil)
-        (let ((hb (p-find-overload b "<=>")))
-          (if hb (p-call-overload hb b a t)
-              ;; IEEE 754: NaN comparisons always false → <=> returns undef
-              (let ((na (to-number a)) (nb (to-number b)))
-                (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
-                    *p-undef*
-                    (cond ((< na nb) -1) ((> na nb) 1) (t 0)))))))))
+  (%with-binary-overload ("<=>" a b)
+    ;; IEEE 754: NaN comparisons always false → <=> returns undef
+    (let ((na (to-number a)) (nb (to-number b)))
+      (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+          *p-undef*
+          (cond ((< na nb) -1) ((> na nb) 1) (t 0))))))
 
 (declaim (inline p-<=>))
 (defun p-<=> (a b)
@@ -5816,13 +5802,9 @@
 
 (defun %p-str-cmp-slow (a b)
   "Perl string comparison (cmp) slow path with use overload 'cmp' dispatch"
-  ;; use overload "cmp": check left operand then right (reversed)
-  (let ((ha (p-find-overload a "cmp")))
-    (if ha (p-call-overload ha a b nil)
-        (let ((hb (p-find-overload b "cmp")))
-          (if hb (p-call-overload hb b a t)
-              (let ((sa (to-string a)) (sb (to-string b)))
-                (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0))))))))
+  (%with-binary-overload ("cmp" a b)
+    (let ((sa (to-string a)) (sb (to-string b)))
+      (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0)))))
 
 (declaim (inline p-str-cmp))
 (defun p-str-cmp (a b)
