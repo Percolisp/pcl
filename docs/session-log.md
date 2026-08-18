@@ -4,6 +4,83 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 412 (2026-08-18, Fable) — Phase B of the one-compiler plan: ONE seam function, the hook always answers, analysis parses compile nothing
+
+Two commits, `0db0360` (B1) and `97cc944` (B2+B3); plan
+`docs/plan-one-compiler-s411.md` §2 Phase B, task #385 → done.  Every step
+IDENTICAL by its bar (corpus-diff over 111 files, silent drops 13 = census;
+lib emission-ab SAME; gate 150 files / 5488 rows minus the 13 pclxs xs rows;
+the s372 gate-SET scan over both populations, s411d vs tree: ZERO verdicts
+moved).  Whole-corpus compile time flat (54.3 s; HEAD 54.3 s in the same
+run, noise ±3 s).
+
+**B1 — `Pl::PExpr` `analysis_only => 1`.**  The five embedded-block sites
+build body-less lambda/func_ref nodes under it (no structural lowering, no
+v1 text compile); `VarAnnotator::_tw_expr_parse` and
+`Parser2::_expr_scalar_rooted` pass it; VarAnnotator's save/redirect/restore
+of the seam's buckets — the third copy of the bucket dance — is deleted; a
+body-less node reaching an emitter DIES (rule 12).  Corpus-diff: ONE COMMENT
+line in hash.t (the discarded analysis compile used to rewrite the shared
+PPI token `$h{k}`→`$h{"k"}` and leak it into a v1 source echo).  Raw census
+`decl:no-hook` 1384 → 162.  **Measured cut ≈ 1 % of compile time — not the
+plan's expected larger cut**: the ~900 discarded compiles were small blocks.
+**Where the time actually is: the module PROTOTYPE PRE-SCAN** —
+`_premerge_include_prototypes` → `_extract_module_prototypes` /
+`_extract_file_prototypes` runs v1's WHOLE-FILE `parse()`
+(`collect_prototypes_only`) over every use'd module and `require`d file
+(perl-tests: the 3 000-line test.pl, every transpile), 13.1 s of a 50 s
+12-file sample (26 %); its consumed output is `prototypes` + `export_names`
+only; every one of the 162 remaining no-hook events is under it.  **Filed
+#391** (facts-only PPI walk; also the last live entry into v1's file-level
+`parse()`), queued right after Phase C.
+
+**B2 — `Pl::Parser::capture_v1($code, %opt)`, THE seam function** (E5.1 as a
+function): saves the six emission-state fields, fresh scratch section,
+bucket / block_depth / `_v2_embed` hook, runs, drains by bucket name,
+restores, returns `{result, runtime, decls, defs, opens}`;
+`become_seam($owner)` replaces the three init lines + owner back-refs in
+`_build_fallback_parser`.  `_fallback_stmt_capture` and `_lower_expr` became
+callers; grep of the six fields in Parser2.pm = 0.
+
+**B3 — the hook ALWAYS answers.**  `Pl::Parser::embed_block($block, $kind)`
+(hook when installed, else `embed_block_v1` = v1's text as ONE raw form) is
+the one thing PExpr's five sites ask (`_embedded_block`, undef under
+analysis_only); `Parser2::lower_embedded_block` = dispatcher → structural
+(`_lower_embedded_body` / `_lower_embedded_anon`, undef = decline) →
+`_embed_via_v1` (v1 under its own `capture_v1`, bucket definitions, hoists →
+`_captured_decls` with the live-lexical scan — the ONE place); do{} answers
+the whole `(lambda () (progn …))`.  `body_cl`/`raw_lambda` dead as body
+carriers; ExprToCL's three text-body branches deleted.  `_lower_expr` has NO
+capture any more; `Parser2::parse` ends with `assert_seam_clean` — and that
+assertion FOUND the one out-of-capture emission on its first run: sub
+PRE-REGISTRATION's `parse_prototype_or_signature` (facts) reaches
+`_parse_signature`, which EMITS an `our`-in-default cell (signatures.t
+t125), silently lost until now (the v1-routed statement emits it again).  It
+runs inside a capture whose drain is deliberately DISCARDED, with a comment
+— the one documented discard in Parser2, gone with E5.3's port.
+
+**A pre-existing E2 silent-wrong fixed in the restructured code (rule
+7.1):** the hash-constructor route (`{ WORD => …` = one anon-hash
+expression) had applied to EVERY embedded kind since the E2 hook — perl
+reads the braces as an anon hash only after map/grep (`map({k => $_},
+LIST)`); after eval/do/sub they are a BLOCK whose statement is a LIST.
+`sub { a => 1 }` emitted `(|array| (|0X…|))` → run-time crash; `do { b => 2 }`
+and `eval { k => 1 }` gave a HASH ref.  map/grep only now, on both routes;
+guard row transpile-test-10.t (perl-probed, crashes on HEAD).
+
+**Not run, and why:** the full sweep — corpus-diff IDENTICAL + lib SAME +
+not a name-resolution change ⇒ the WHAT-TO-RUN-WHEN row says it cannot
+move; the gate-SET scan covered both populations for the new die.
+
+**Traps of the session:** a commit message written INLINE in double quotes
+executes its backticks (`local $p->{_v2_embed}` ran as a shell command; a
+stray file `{_v2_embed}` appeared) — write the message to a file (quoted
+heredoc) and `git commit -F`.  A `perl -0pi -e` script that dies mid-run
+leaves the target intact only by luck — write the edited text to a NEW path,
+verify, then `cp` (the standing rule; kept to it after the first slip).
+
+---
+
 ## Session 411 (2026-08-18, Fable) — #379: the one-compiler plan, the duplicate-code census, and the USER's reprioritisation
 
 **USER (start of session): "All work seems to be finding bugs and fixing

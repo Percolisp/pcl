@@ -11,6 +11,67 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s412 (2026-08-18, Fable) — Phase B DONE: ONE seam function; the hook always answers; analysis parses compile nothing
+
+- **Phase B1 DONE (`s412a`): PExpr `analysis_only => 1`** — an ANALYSIS parse
+  (VarAnnotator's tree walk, Parser2's `_expr_scalar_rooted`) builds its
+  embedded-block nodes with NO body: no structural lowering, no v1 text
+  compile — the ~900 discarded block compiles per corpus are gone, and with
+  them the third copy of the bucket dance (VarAnnotator's save/redirect/
+  restore).  A body-less lambda/func_ref node reaching an emitter DIES.
+  Corpus-diff: ONE comment line (hash.t — the discarded compile used to
+  REWRITE the shared token `$h{k}`→`$h{"k"}` and leak it into a source
+  echo).  Measured cut ≈ 1 % of compile time (the discarded compiles were
+  small) — NOT the plan's expected larger cut; see the next line.
+- **The plan's `_process_element 11.2 s` IS the module PROTOTYPE PRE-SCAN
+  (task #391)**: `Pl::Parser2::_premerge_include_prototypes` →
+  `_extract_module_prototypes` / `_extract_file_prototypes` runs v1's
+  WHOLE-FILE `parse()` (`collect_prototypes_only`) over every use'd module
+  and `require`d file, transitively, per pl2cl process — 13.1 s of a 50 s
+  12-file sample (26 %); the seam (`_fallback_stmt_capture`) is 0.9 s.  Its
+  consumed output is `prototypes` + `export_names` only.  After B1 every
+  remaining `decl:no-hook` census event (162/corpus) is under it.  Fix
+  shape = a facts-only PPI walk; it is also the LAST live entry into v1's
+  file-level `parse()`.  Filed, not done (structural first).
+- **Phase B2 DONE (`s412b`): `Pl::Parser::capture_v1($code, %opt)` is THE
+  seam function** — saves the six emission-state fields, fresh scratch
+  section, bucket / block_depth / hook installed, runs, drains by bucket
+  name, restores, returns `{result, runtime, decls, defs, opens}`;
+  `become_seam($owner)` sets the seam's standing state.  Parser2 reads NONE
+  of `_sections/_cur_bucket/indent_level/_local_let_depth/_block_depth/
+  _open_section` any more (grep = 0).  IDENTICAL.
+- **Phase B3 DONE (`s412b`): the embedded-block hook ALWAYS ANSWERS.**
+  `Pl::Parser::embed_block($block, $kind)` = the one thing PExpr's five block
+  sites ask (hook when installed, else v1's own text — `embed_block_v1`);
+  `Parser2::lower_embedded_block` = dispatcher → structural (`_lower_embedded_
+  body` / `_lower_embedded_anon`, undef = decline) → `_embed_via_v1` (v1's
+  text under its own `capture_v1`, drained hoists → `_captured_decls`, ONE
+  place).  Kinds map/grep/sort/eval answer BODY forms, do/sub the whole
+  LAMBDA form.  `body_cl`/`raw_lambda` are dead as body carriers; ExprToCL's
+  text-body branches deleted.  `_lower_expr` has NO capture, and
+  `Parser2::parse` ends with `assert_seam_clean` (rule 12: the seam's
+  standing section must be empty — emission nobody drained is lost output).
+  IDENTICAL; gate-SET scan over both populations: zero verdicts moved.
+- **The assertion found the ONE out-of-capture emission on its first run**:
+  Parser2's sub PRE-REGISTRATION calls v1's `parse_prototype_or_signature`
+  for facts, and `_parse_signature` EMITS (an `our` in a signature default
+  declares its cell) — silently lost, harmless only because the v1-routed
+  sub statement emits it again.  Now inside `capture_v1` with the drain
+  deliberately DISCARDED + a comment: the one documented discard in Parser2,
+  gone when E5.3 ports sub-with-signature.
+- **Hash-constructor route = map/grep ONLY (E2 silent-wrong fixed in place,
+  rule 7.1)**: `{ WORD => …` after eval/do/sub is a BLOCK whose statement is
+  a LIST (perl: `sub { a => 1 }` returns (a, 1); `do { b => 2 }` is 2;
+  `eval { k => 1 }` is (k, 1)); PCL emitted a garbage lambda (crash) / a
+  HASH ref since the E2 hook applied `_block_is_hash_constructor` to every
+  kind.  Guard row transpile-test-10.t.  perl reads the braces as an anon
+  hash only after map/grep (the `map({k => $_}, LIST)` paren form).
+- **Bash trap of the session**: a commit message written inline with
+  backticks in a double-quoted string EXECUTES them (`local $p->{…}` ran as a
+  shell command and left a file named `{_v2_embed}` in the tree).  Write
+  commit messages to a file with a quoted heredoc and `git commit -F`.
+
+
 ## s411 (2026-08-18, Fable) — #379: the one-compiler plan; the duplicate-code census; structural first (USER)
 
 - **STRUCTURAL FIRST, NOT AT ANY COST (USER 2026-08-18)** — the queue is

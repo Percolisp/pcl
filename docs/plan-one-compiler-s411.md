@@ -214,9 +214,44 @@ file; gate green (150/5487 minus the pclxs rows); full sweep TOTAL 18513
   the has_parser gates, the destructive `cleanup_for_parsing`); embedded
   blocks still reach v1 on the 12 decline shapes.
 
-### Phase B — one seam function, and no discarded block compiles (1 session, IDENTICAL)
+### Phase B — one seam function, and no discarded block compiles (1 session, IDENTICAL) — **DONE s412 (B1 `s412a`, B2+B3 `s412b`)**
 
 E5.1 as a function, not an object.
+
+**Done s412 (Fable), as measured.**  B1: PExpr `analysis_only => 1`; the
+five block sites build body-less nodes under it, VarAnnotator's
+`_tw_expr_parse` and `_expr_scalar_rooted` pass it, VarAnnotator's
+save/redirect/restore (the third bucket-dance copy) deleted; a body-less
+node reaching an emitter dies.  Corpus-diff: one COMMENT line (hash.t: the
+discarded compile used to rewrite the shared token `$h{k}`→`$h{"k"}` and
+leak it into a source echo).  **Measured cut ≈ 1 % of compile time, not the
+larger cut §3 expected** — the discarded compiles were small blocks
+(`_tw_expr_parse` 3.54 → 3.19 s, `_process_element` 11.61 → 11.41 s in the
+12-file census sample).  **The plan's `_process_element 11.2 s` is the module
+PROTOTYPE PRE-SCAN**: `_premerge_include_prototypes` → v1's whole-file
+`parse()` in `collect_prototypes_only` mode over every use'd module and
+`require`d file, 13.1 s of the 50 s sample (26 %); after B1 every remaining
+`decl:no-hook` census event (162/corpus) is under it.  Filed as **#391**
+(facts-only PPI walk; also the last live entry into v1's file-level
+`parse()`).  B2: `Pl::Parser::capture_v1` + `become_seam`; Parser2 reads none
+of the six emission-state fields (grep 0); IDENTICAL.  B3:
+`Pl::Parser::embed_block` (hook, else v1 text) is the one thing PExpr asks;
+`lower_embedded_block` = dispatcher → structural → `_embed_via_v1` (v1 under
+its own capture, hoists → `_captured_decls` at ONE place); do{} answers the
+whole lambda; `body_cl`/`raw_lambda` dead as body carriers, ExprToCL's three
+text-body branches deleted; `_lower_expr` has no capture; `Parser2::parse`
+ends with `assert_seam_clean` (rule 12).  The assertion found the one
+out-of-capture emission (sub pre-registration's `parse_prototype_or_signature`
+→ `_parse_signature` emits an `our`-in-default cell): now inside a capture
+whose drain is deliberately DISCARDED with a comment (gone with E5.3's
+sub-with-signature port).  A pre-existing E2 silent-wrong fixed in place
+(rule 7.1): the hash-constructor route applied to eval/do/sub blocks
+(`sub { a => 1 }` crashed, `do { b => 2 }` / `eval { k => 1 }` gave a HASH
+ref) — map/grep only now, guard row transpile-test-10.t.  Bars: corpus-diff
+IDENTICAL (drops 13), lib emission-ab SAME, gate 150/5488 minus the pclxs
+rows, gate-SET scan both populations zero moves, `PCL_E2_RAW_CENSUS`
+`decl:hook-declined` 17 (do 1, eval 11, sub 5), no `lambda:*:body_cl`
+events; whole-corpus compile 54.3 s (flat).
 
 - **B1** PExpr attribute `analysis_only => 1`: the three block sites
   (`:3248` map/grep/sort, `:3401` eval/do/&-proto, `:3537` anon sub) leave
@@ -281,7 +316,7 @@ and is still ~9 k lines; that is §4.
 | step | expected | why |
 |---|---|---|
 | Phase A | −9 % (68.4 → ≤ 62 s) | the discarded second parse of 88 % of expressions, measured with the attempt forced off |
-| Phase B1 | a further cut, size measured by the tool | ~900 v1 block compiles per corpus whose output is thrown away; `_process_element` is 22 % of compile time today |
+| Phase B1 | a further cut, size measured by the tool — **measured s412: ≈ 1 %** | ~900 v1 block compiles per corpus whose output is thrown away — but they were SMALL; the `_process_element` 22 % is the module prototype pre-scan (v1's whole-file `parse()` per use'd module, 26 % of the sample), task **#391** |
 | Phase B2/B3/C | neutral | refactors; drains move, they do not multiply |
 | Phase R | neutral (a hash lookup per gated site) | — |
 
@@ -348,10 +383,13 @@ Opus sessions, in order:
 
 1. **Phase R** (½) + **Phase A** (1–2) — R first, then A1–A3 in one
    session and A4 in the next if it does not fit; A carries the sweep.
-2. **Phase B** (1).
-3. **Phase C** (½–1) + the first batch of the duplicate worklist's
-   EXTRACT items (`docs/dup-census-worklist-s411.md` §2, each
-   corpus-diff IDENTICAL, cold code first, hot code with the timing).
+2. **Phase B** (1) — DONE s412.
+3. **Phase C** (½–1) + **#391** (the module prototype pre-scan as a
+   facts-only PPI walk — the last live entry into v1's file-level `parse()`
+   AND ~a quarter of compile time; bars in the task) + the first batch of
+   the duplicate worklist's EXTRACT items (`docs/dup-census-worklist-s411.md`
+   §2, each corpus-diff IDENTICAL, cold code first, hot code with the
+   timing).
 4. Then the previous queue resumes where it stood (`docs/plan-post-s408.md`
    §2): #281 items 1+2+6 (with the s410 7.7 (a) normalizer — it is the same
    tool Phase A's bar needs, so it likely already exists by then), Option B
