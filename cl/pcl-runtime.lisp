@@ -4189,6 +4189,29 @@
     ;; Anything else (scalar, hash-table, nil, …): return as-is
     (t src)))
 
+;;; ONE copy of the per-element rule of array filling (#387 family 13, s413):
+;;; how one ITEM of a list being assigned into an array lands in TARGET.  A
+;;; flatten marker and a raw hash-table (a %hash interpolated into a list
+;;; literal — `@a = (1, %h, 2)` emits (vector 1 %h 2) — perl flattens it to
+;;; its key/value pairs; task #170) and a nested vector recurse through
+;;; RECURSE (the enclosing walker), nil stays a hole (the deleted-element
+;;; marker, not undef-but-exists), anything else is stored as a scalar.  A
+;;; hash REFERENCE is a p-box, not a raw table, so it reaches the scalar arm
+;;; untouched.  A macro, so both walkers' vector and list loops expand to the
+;;; cond they used to spell four times over.  ITEM must be a variable.
+(defmacro %p-array-fill-item (item target recurse)
+  `(cond
+     ((p-flatten-marker-p ,item)
+      (,recurse (p-flatten-marker-array ,item)))
+     ((hash-table-p ,item)
+      (,recurse ,item))
+     ((and (vectorp ,item) (not (stringp ,item)))
+      (,recurse ,item))
+     ((null ,item)
+      (vector-push-extend nil ,target))
+     (t
+      (%p-array-store-scalar ,target ,item))))
+
 (defun p-array-fill (place value)
   "Clear adjustable array PLACE and refill it from VALUE: flatten nested vectors
    (but not strings), box elements, preserve nil holes.  Snapshots VALUE first so
@@ -4218,52 +4241,10 @@
                            src))
                  ((vectorp src)
                   (loop for item across src
-                        do (cond
-                             ((p-flatten-marker-p item)
-                              (add-items (p-flatten-marker-array item)))
-                             ;; A raw hash-table ELEMENT is a %hash interpolated
-                             ;; into a list literal — `@a = (1, %h, 2)` emits
-                             ;; (vector 1 %h 2) — and Perl flattens it to its
-                             ;; key/value pairs.  Without this it fell through to
-                             ;; the scalar branch and was stored as ONE element,
-                             ;; stringifying as HASH(0x..) and giving the wrong
-                             ;; element count (task #170).  Recurse into the
-                             ;; hash-table arm above rather than repeat it.
-                             ;; A hash REFERENCE is a p-box, not a raw table, so
-                             ;; it still reaches the scalar branch untouched.
-                             ((hash-table-p item)
-                              (add-items item))
-                             ((and (vectorp item) (not (stringp item)))
-                              (add-items item))
-                             ;; Preserve nil as deleted-element marker (not undef-but-exists)
-                             ((null item)
-                              (vector-push-extend nil place))
-                             (t
-                              (%p-array-store-scalar place item)))))
+                        do (%p-array-fill-item item place add-items)))
                  ((listp src)
                   (loop for item in src
-                        do (cond
-                             ((p-flatten-marker-p item)
-                              (add-items (p-flatten-marker-array item)))
-                             ;; A raw hash-table ELEMENT is a %hash interpolated
-                             ;; into a list literal — `@a = (1, %h, 2)` emits
-                             ;; (vector 1 %h 2) — and Perl flattens it to its
-                             ;; key/value pairs.  Without this it fell through to
-                             ;; the scalar branch and was stored as ONE element,
-                             ;; stringifying as HASH(0x..) and giving the wrong
-                             ;; element count (task #170).  Recurse into the
-                             ;; hash-table arm above rather than repeat it.
-                             ;; A hash REFERENCE is a p-box, not a raw table, so
-                             ;; it still reaches the scalar branch untouched.
-                             ((hash-table-p item)
-                              (add-items item))
-                             ((and (vectorp item) (not (stringp item)))
-                              (add-items item))
-                             ;; Preserve nil as deleted-element marker (not undef-but-exists)
-                             ((null item)
-                              (vector-push-extend nil place))
-                             (t
-                              (%p-array-store-scalar place item)))))
+                        do (%p-array-fill-item item place add-items)))
                  ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
                  (t
                   (when src
@@ -14274,50 +14255,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (add-items (p-flatten-marker-array x)))
                  ((and (vectorp x) (not (stringp x)))
                   (loop for item across x
-                        do (cond
-                             ((p-flatten-marker-p item)
-                              (add-items (p-flatten-marker-array item)))
-                             ;; A raw hash-table ELEMENT is a %hash interpolated
-                             ;; into a list literal — `@a = (1, %h, 2)` emits
-                             ;; (vector 1 %h 2) — and Perl flattens it to its
-                             ;; key/value pairs.  Without this it fell through to
-                             ;; the scalar branch and was stored as ONE element,
-                             ;; stringifying as HASH(0x..) and giving the wrong
-                             ;; element count (task #170).  Recurse into the
-                             ;; hash-table arm above rather than repeat it.
-                             ;; A hash REFERENCE is a p-box, not a raw table, so
-                             ;; it still reaches the scalar branch untouched.
-                             ((hash-table-p item)
-                              (add-items item))
-                             ((and (vectorp item) (not (stringp item)))
-                              (add-items item))
-                             ((null item)
-                              (vector-push-extend nil result))
-                             (t
-                              (%p-array-store-scalar result item)))))
+                        do (%p-array-fill-item item result add-items)))
                  ((listp x)
                   (loop for item in x
-                        do (cond
-                             ((p-flatten-marker-p item)
-                              (add-items (p-flatten-marker-array item)))
-                             ;; A raw hash-table ELEMENT is a %hash interpolated
-                             ;; into a list literal — `@a = (1, %h, 2)` emits
-                             ;; (vector 1 %h 2) — and Perl flattens it to its
-                             ;; key/value pairs.  Without this it fell through to
-                             ;; the scalar branch and was stored as ONE element,
-                             ;; stringifying as HASH(0x..) and giving the wrong
-                             ;; element count (task #170).  Recurse into the
-                             ;; hash-table arm above rather than repeat it.
-                             ;; A hash REFERENCE is a p-box, not a raw table, so
-                             ;; it still reaches the scalar branch untouched.
-                             ((hash-table-p item)
-                              (add-items item))
-                             ((and (vectorp item) (not (stringp item)))
-                              (add-items item))
-                             ((null item)
-                              (vector-push-extend nil result))
-                             (t
-                              (%p-array-store-scalar result item)))))
+                        do (%p-array-fill-item item result add-items)))
                  (t
                   (%p-array-store-scalar result x)))))
       (add-items raw))
