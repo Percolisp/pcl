@@ -230,6 +230,34 @@ concatenating, so an overloaded `.` never runs and `ref("a $obj b")` is empty
 where perl says the class ([perl #124160]).  That is precisely what
 concat.t:203 asserts; the row now runs and fails honestly.  Same family as
 #119.
+
+### The one that was wrong, and what caught it
+
+`s415c`'s repair keyed on `_ends_term`, the shared "is the previous token a
+complete term" predicate — which did not list a REGEXP.  So
+`join '-', (@args, (/X/ ~~ @a))` (t/op/smartmatch.t:169) was read as a
+term-initial `~~` and **split into two complements**: a silent wrong of exactly
+the kind #370 set out to remove.  The four must-not-fire probes that would have
+caught it all had a Symbol or a bracket on the left.
+
+**Re-measuring the drop census is what caught it** — t/op/smartmatch.t came back
+with 4 drops against a blessed row that says 0.  Nothing else in the batch's bar
+could have: `corpus-diff` reads perl-tests only and that file is perl's, no gate
+row has the shape, and the unit rows in `ruled-refusal-01.t` build a PPI
+document without running the repairs.  `f669d50` widens `_ends_term` with the
+tokens that yield a value and are not Symbols (match/substitution, heredoc,
+`` ` `` /qx…, `<FH>`) — correct for all four repairs, three of which carried the
+same latent hole — and adds an END-TO-END guard row.  Census re-measured after:
+**49 files / 165 drops, matching the blessed file exactly.**
+
+### Where the session leaves things
+
+Six commits (`4aeabd2`..`f669d50`).  Gate **151 files / 5564 rows**; sweep GATE
+clean at **TOTAL 18369**; companion buckets 87 OK / 29 NOTAP / **115 XDIFF** /
+1 FIXTURE / 291 UNEXPLAINED (from 102 / 304 — the newly registered refusals);
+drop census **378 → 165**.  Asks for the next Fable session are
+`docs/opus5-review-requests-s415.md` §7, and the queue continues at **#372
+(Track B1)**, which waits on the operand grammar.
 ## Session 414 (2026-08-19, Opus 5) — #395: the s413 runtime branch verified and merged; #387 CLOSED (families 2+10, 14/26, 38, the &-mention family; the tail rule satisfied) with four more bugs found in the differences; #281 items 1+2+6 WIP on branch `s414-ir-macros`
 
 **Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six
