@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 415 (2026-08-19/20, Opus 5) — #281 items 1+2+6 verified and merged (sweep, pack artifact, bench A/B, ir-spec normative); then Option B phase 2 Track A (#371): five families REFUSE instead of dropping, the format stripper and the hex-float pass are fixed, and the drop census halves (378 -> 177)
+## Session 415 (2026-08-19/20, Opus 5) — #281 items 1+2+6 verified and merged; Option B phase 2 Track A (#371) makes five families REFUSE; then #370, #369 and half of #401 put dropped statements BACK.  Drop census 378 -> 165, and four source-level silent-wrongs fixed along the way
 
 The session picked up exactly where s414 stopped: the branch `s414-ir-macros`
 (`7e56c4f`) was complete and gate-green, with four things still to run.  All
@@ -167,6 +167,69 @@ on a program PCL had mis-parsed.  The loud gate is the right answer until the
 two shapes land; #401 carries them with the 300 rows as its acceptance measure.
 The snapshot `docs/perl-suite-run.tsv` was NOT re-blessed (a `--quick` run does
 not measure the 11 skipped files).
+
+### Three more drop families, one of them a PPI bug: #370, #369, and half of #401
+
+With Track A's refusals in place the rest of the session went the other way —
+these three are all "the statement should COMPILE", not "the file should
+refuse".
+
+**#370 — a term-initial `~~` is two complements** (`s415c`).  PPI 1.291 lexes
+`~~` as one Operator token wherever it appears, but perl reads the smart match
+only where an operator may stand; where a TERM is expected it is `~(~$x)`, the
+numify idiom perl's own bop.t asserts twice.  PCL's main loop then saw a binary
+operator with no left operand and dropped the statement whole.
+`Parser2::_repair_term_initial_complement` is the sixth token repair, with the
+same negative condition as the others (`_ends_term` on the previous significant
+token); an infix `~~` is left for Track A to refuse.  Rule 13 obligations in
+the same commit: `docs/ppi-upstream-bugs.md` §21, bug 20 in
+`docs/ppi-bug-report.t`, three behaviour rows and the CANARY in
+`Pl/t/misc-fixes-02.t`.
+
+*And the classifier stopped asking the same question twice.*  s415b's
+`_has_infix_smartmatch` had a hand-rolled whitelist of term-enders; it missed
+`$o->method ~~ 1` (probed: that shape dropped instead of refusing).  With the
+repair upstream, anything still spelled `~~` at a drop site IS infix, so the
+arm now asks only whether the token is present — rule 11, one predicate in one
+place.  Sweep TOTAL 18367 → **18369**; census bop.t 2 → 0 in both populations.
+
+**#369 — every `qx` spelling is the backtick TERM** (`s415d`).  PPI gives the
+backtick form its own class and hands every `qx{}` / `qx()` / `qx[]` / `qx//` /
+`qx''` a `QuoteLike::Command`; PExpr's primary set accepted only the first, so
+`my $c = qx{echo hi}` had no primary and the statement was dropped — 8 drops
+over perl's own t/, and `$c` silently undef in any program that used it.  ONE
+primary arm now takes both, reading the body AND the interpolate-or-not answer
+from PPI's own section record, so no delimiter is spelled out and `qx'…'`
+(perl's literal form) travels as a single-quoted token rather than a
+double-quoted one that would re-interpolate the `$`.  `Pl/VarAnnotator.pm`'s two
+interpolating-leaf predicates learned the class too — a variable used only
+inside `qx{…}` was invisible to them, which is a raw-slot verdict taken on
+incomplete information.  All 8 drops gone; corpus-diff IDENTICAL; six guard
+rows in `Pl/t/system-block-01.t`, every one probed against perl first.
+
+**#401 half — two `state` rename refusals were obsolete** (`s415e`).  The
+`CORE::` pass working for the first time (above) made two companion files reach
+v2 state gates.  Both refusals predate the renamer they distrust:
+`_rename_decl_within` has been shadow-aware since #254 B-ii and region-limited
+since #296-B2, so the three orderings — an inner `my` in a nested block, a
+later `my` at the same level, a `my` BEFORE the state decl (which it shadows
+from its own point on) — all come out as perl reads them.  Probed, then dropped
+the expression route's my/our/local scan and passed the `shadow_ok` waiver the
+named-sub route's own blocker already had.  **t/opbasic/concat.t is back to C
+248/6**; guard rows 34–36 in `Pl/t/state-01.t`.
+
+What remains of #401 is `t/op/sub.t` (52 rows) and is NOT obsolete: a string
+eval captures lexicals by name through the site alist, and a state rename
+produces a defvar'd cell that never enters `_let_bound_vars`.  The fix has a
+precedent (the span-mangled file cells in `_eval_lexical_alist`) and a trap to
+answer first — `p-eval` caches by source+package, so a capture-dependent
+emission must key that cache.
+
+**Filed on the way: #402** — string interpolation STRINGIFIES instead of
+concatenating, so an overloaded `.` never runs and `ref("a $obj b")` is empty
+where perl says the class ([perl #124160]).  That is precisely what
+concat.t:203 asserts; the row now runs and fails honestly.  Same family as
+#119.
 ## Session 414 (2026-08-19, Opus 5) — #395: the s413 runtime branch verified and merged; #387 CLOSED (families 2+10, 14/26, 38, the &-mention family; the tail rule satisfied) with four more bugs found in the differences; #281 items 1+2+6 WIP on branch `s414-ir-macros`
 
 **Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six

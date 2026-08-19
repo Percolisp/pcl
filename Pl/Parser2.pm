@@ -5181,7 +5181,17 @@ sub _ends_term {
   return 1 if $t->isa('PPI::Token::Symbol')          # $x @a %h *glob, and Magic
            || $t->isa('PPI::Token::Number')
            || $t->isa('PPI::Token::Quote')           # '…' "…" q qq
-           || $t->isa('PPI::Token::QuoteLike::Words');
+           || $t->isa('PPI::Token::QuoteLike::Words')
+           # A match, a substitution, a heredoc, `…`/qx… and <FH> all YIELD a
+           # value, so what follows them is an operator (s415, found by the
+           # drop census: without the Regexp arm, #370's repair read
+           # `/X/ ~~ @a` as a term-initial `~~` and split perl's smart match
+           # into two complements — a silent wrong in t/op/smartmatch.t).
+           || $t->isa('PPI::Token::Regexp')
+           || $t->isa('PPI::Token::HereDoc')
+           || $t->isa('PPI::Token::QuoteLike::Backtick')
+           || $t->isa('PPI::Token::QuoteLike::Command')
+           || $t->isa('PPI::Token::QuoteLike::Readline');
   if ($t->isa('PPI::Token::Structure')) {
     return 1 if $t->content eq ')' || $t->content eq ']';
     return 1 if $t->content eq '}'

@@ -149,3 +149,4 @@ op/coreamp.t	not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::g
 op/smartmatch.t	not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)
 op/tie_fetch_count.t	not-supported.md §`given`/`when` / smart match (`~~`) — one infix `~~` statement; refused (task #371)
 op/defer.t	not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)
+class/threads.t	not-supported.md §Perl 5.38 class/field/method — the file also needs a threaded perl (NOTAP before s415; it now refuses at transpile like its siblings, task #371)

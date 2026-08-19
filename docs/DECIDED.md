@@ -11,7 +11,7 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
-## s415 (2026-08-19/20, Opus) — #281 items 1+2+6 VERIFIED and merged; then Track A of Option B phase 2 (#371): five families REFUSE instead of dropping, two source-preprocessing silent-wrongs fixed, census 378 -> 177
+## s415 (2026-08-19/20, Opus) — #281 items 1+2+6 merged; Track A (#371) refuses five families; then #370 (a PPI lexer bug), #369 (qx) and half of #401 put statements BACK; census 378 -> 165
 
 - **#281 items 1+2+6 are IN `main`** (`s414f`, verified s415).  The four bar
   items, all measured on the branch tip: full sweep `--jobs 8` **GATE clean,
@@ -116,6 +116,45 @@ not-supported.md → only then probe.*
   those rows passed on a program PCL had mis-parsed.  A loud
   `Parser2 TODO:` beats a silent wrong; #401 carries the two shapes with the
   300 rows as its acceptance measure.
+
+- **A TERM-INITIAL `~~` IS TWO COMPLEMENTS, and PPI says smart match** (#370,
+  `docs/ppi-upstream-bugs.md` §21).  Sixth member of the token-repair family:
+  `Parser2::_repair_term_initial_complement` splits a `~~` whose previous
+  significant token fails `_ends_term`; an infix one is left for Track A to
+  refuse.  bop.t's two rows now RUN (sweep 18367 → 18369).  **And the refusal
+  classifier stopped re-asking the same question** — its hand-rolled whitelist
+  missed `$o->method ~~ 1`, which `_ends_term` gets right; with the repair
+  upstream, any surviving `~~` at a drop site IS infix.
+- **EVERY `qx` SPELLING IS THE BACKTICK TERM** (#369): PPI hands `qx{}`/`qx()`/
+  `qx[]`/`qx//`/`qx''` a `QuoteLike::Command` and only backticks their own
+  class, so `my $c = qx{echo hi}` had no primary and the statement was dropped
+  — `$c` silently undef.  ONE primary arm takes both, with the body and the
+  interpolate-or-not answer read from **PPI's own section record** (a `''`
+  section is perl's literal form, so `qx'…'` must travel as a SINGLE-quoted
+  token — a double-quoted one would re-interpolate the `$`).  VarAnnotator's
+  two interpolating-leaf predicates learned the class too: a variable used only
+  inside `qx{…}` was invisible to them.
+- **TWO `state` RENAME REFUSALS WERE OBSOLETE** (#401 half): both predate
+  `_rename_decl_within` becoming shadow-aware (#254 B-ii) and region-limited
+  (#296-B2), and one of them was simply a caller not passing the `shadow_ok`
+  waiver its own blocker already took.  Probed in all three orderings — inner
+  `my` in a nested block, a later `my` at the same level, a `my` BEFORE the
+  state decl (which it shadows from its own point on) — all identical to perl.
+  **t/opbasic/concat.t recovered its 248 rows.**  What stays is the STRING-EVAL
+  refusal (t/op/sub.t, 52 rows): a state rename makes a defvar'd cell that
+  never enters `_let_bound_vars`, so an eval capturing by name would miss it —
+  real, not stale, and its fix must answer the p-eval source+package cache key
+  first.
+- **A REFUSAL THAT PREDATES A FIX IS A TAX NOBODY IS COLLECTING.**  Three of
+  the four refusals cleared this session were conservative guards written
+  against a renamer/predicate that has since been made correct, and the code
+  comments beside them SAID so ("which is why the callers' blocker refused the
+  shape outright").  When a blocker's stated reason names a mechanism, re-read
+  that mechanism before believing the blocker.
+- **#402 filed**: string interpolation STRINGIFIES instead of concatenating, so
+  an overloaded `.` never runs — `ref("a $obj b")` is empty where perl says the
+  class ([perl #124160], the thing t/opbasic/concat.t:203 asserts).  Same
+  family as #119.
 
 ## s414 (2026-08-19, Opus) — the s413 runtime branch merged (#395); #387 families 2+10 extracted, and the three differences between the copies were three bugs
 

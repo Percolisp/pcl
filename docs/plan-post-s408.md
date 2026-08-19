@@ -159,6 +159,15 @@ companion once (op/sub.t, op/current_sub.t, op/lexsub.t read per row), gate.
     plan-post-s400 §3 item 3).  #374 half (b) (a keyword-named lexical sub is
     a call only in TERM position — corrected in the task this session) and
     #365 (imported `()`-sub bareword) wait for `_reduce_term` here.
+    **#369 and #370 are DONE (s415)** — both were pulled forward because they
+    are pure gains (statements start compiling) and neither needs the operand
+    grammar: `qx` is one primary arm, `~~` is a token repair with
+    `docs/ppi-upstream-bugs.md` §21 + a canary.  Census after them: **49 files
+    / 165 drops** (from 378 at the session start).  What is left in this item
+    is the re-census and the flip, both of which want B1/B2 first.
+    **Also done s415: half of #401** (the two obsolete `state` rename
+    refusals; t/opbasic/concat.t recovered 248 companion rows).  Its string-eval
+    half is queued with the eval-capture work, not here.
 
 **Sessions M–N — release phase 3–5.**
 11. **#279** repo hygiene (USER ruled s401: docs stay AS-IS under `docs/`;

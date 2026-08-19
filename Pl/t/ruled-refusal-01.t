@@ -144,4 +144,20 @@ SKIP: {
        'and it is still announced as a drop');
 }
 
+
+# The repair must NOT fire when the left side is a term that is not a Symbol:
+# a match, a heredoc, `…`/qx…, <FH>.  This is end-to-end on purpose — the unit
+# rows above never run the repair, and the drop census is what caught the
+# regression (#370's first cut read `/X/ ~~ @a` as term-initial and split
+# perl's smart match into two complements, silently, in t/op/smartmatch.t).
+SKIP: {
+  skip "pl2cl not found", 2 unless -x $pl2cl;
+
+  my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $fh "my \@a = ('x');\nfor ('x') { my \$r = (/x/ ~~ \@a); print \$r }\n";
+  close $fh;
+  my (undef, $err, $rc) = PCLCore::transpile_raw("$pl2cl $pl");
+  isnt($rc, 0, 'a match on the left keeps `~~` INFIX (refused, not split)');
+  like($err, qr/^PCL: smart match/m, 'and the refusal is the smart-match one');
+}
 done_testing();

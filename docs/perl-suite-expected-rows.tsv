@@ -26,6 +26,7 @@ class/field.t	*no-log*
 class/inherit.t	*no-log*
 class/method.t	*no-log*
 class/phasers.t	*no-log*
+class/threads.t	*no-log*
 class/utf8.t	*no-log*
 cmd/for.t	[perl #78194] Lone C-style for in a block
 cmd/for.t	double destroy, x=1
