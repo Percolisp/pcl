@@ -37,7 +37,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 33;
+plan tests => 36;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -422,3 +422,31 @@ test_cl('\\substr on a state var writes through',
      sub f { state $s = "hello"; my $r = \substr($s, 0, 1); $$r = "J"; return $s }
      print f(), "\n";',
     "Jello\n");
+
+# Tests 34-36 (#401): the two rename REFUSALS that were obsolete.
+# _rename_decl_within has been shadow-aware since #254 B-ii and region-limited
+# since #296-B2 — it starts at the state declaration, leaves an inner
+# re-declaration's own scope alone, and stops at a LATER declaration of the
+# same name — so neither "multiple declarations" (the named-sub route) nor
+# "my re-declaration of $y in scope" (the expression route) has to refuse any
+# more.  Each row is the exact ordering perl was probed on.
+test_cl('state var with an inner my of the same name in a nested block',
+    'use feature "state"; no warnings;
+     sub g { state $y = 1; { my $y = 7; print "inner=$y " } print "state=$y "; $y++ }
+     g(); g(); print "\n";',
+    "inner=7 state=1 inner=7 state=2 \n");
+
+test_cl('a later my of the same name ends the state var\'s region',
+    'use feature "state"; no warnings;
+     for my $i (1..3) { print "v=", (state $c = 10), " " }
+     my $c = "later";
+     print "c=$c\n";',
+    "v=10 v=10 v=10 c=later\n");
+
+test_cl('a state decl shadows an earlier my from its own point on',
+    'use feature "state"; no warnings;
+     my $y = 1;
+     print "before=$y ";
+     print "s=", (state $y = 5), " ";
+     print "after=$y\n";',
+    "before=1 s=5 after=5\n");

@@ -5322,15 +5322,16 @@ sub _state_rw_blocker {
   my ($self, $root, $sym) = @_;
   my $old = $sym->content;
   (my $bare = $old) =~ s/^\$//;
-  for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
-                 && $_[1]->content =~ /^(?:my|our|local)$/ }) || [] }) {
-    my $nx = $w->snext_sibling or next;
-    my @syms = $nx->isa('PPI::Token::Symbol')   ? ($nx)
-             : $nx->isa('PPI::Structure::List') ? @{ $nx->find('PPI::Token::Symbol') || [] }
-             : ();
-    return $w->content . " re-declaration of $old in scope"
-      if grep { $_->content eq $old } @syms;
-  }
+  # NO `my`/`our`/`local` re-declaration refusal any more (s415, task #401).
+  # It existed because a positional rename of every `$y` in $root would merge
+  # two different variables, but _rename_decl_within has been SHADOW-AWARE
+  # since #254 B-ii and region-limited since #296-B2: it starts at the state
+  # declaration, leaves a nested re-declaration's own scope alone, and stops
+  # at a LATER declaration of the same name.  So the three orderings all come
+  # out as perl reads them (probed s415: an unrelated `my $y` later in the
+  # file, a `my $y` before the state decl, and an inner `my $y` inside a block
+  # under it).  Keeping the refusal cost t/opbasic/concat.t its whole run
+  # (248 rows) the moment `CORE::state` began normalising.
   return "brace-deref" if $root->content =~ /[\$\@\%]\{\s*\Q$bare\E\s*\}/;
   return undef;
 }
@@ -5503,7 +5504,7 @@ sub _rename_state_vars {
           && (@k == 2
               || ($k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='));
     my $why = $k[1]->content =~ /^\$/
-      ? $self->_shadow_rename_blocker($sub->block, $k[1])
+      ? $self->_shadow_rename_blocker($sub->block, $k[1], undef, 'shadow_ok')
       : $self->_state_container_blocker($sub->block, $k[1]);
     die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n" if $why;
     my $new = $k[1]->content . '__state__' . $self->_state_disambig
