@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 56 files, 177 drops -- 9 perl-tests files (12
-# drops), 47 companion files (165), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 54 files, 173 drops -- 8 perl-tests files (10
+# drops), 46 companion files (163), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -111,6 +111,14 @@
 #    0  WTF? :-) Expr starts with ->/brace??  <- FIXED s410 (#378; was 1)
 #    0  Can't locate object method "add_node" via package "Pl::PExpr"  <- an
 #       internal error, not a decline; FIXED s402 (was 1)
+#   s415  perl-tests/bop.t 2 -> 0 and t/op/bop.t 2 -> 0, rows REMOVED (#370):
+#         `is(~~$y, 3)` is TWO complements, not a smart match, but PPI lexes
+#         `~~` as one operator everywhere, so both statements were dropped
+#         whole.  Parser2::_repair_term_initial_complement splits the token
+#         when what precedes it does not end a term
+#         (docs/ppi-upstream-bugs.md §21); the two rows now RUN and pass
+#         (sweep TOTAL 18367 -> 18369).  Total after this edit: 54 files,
+#         173 drops.
 #
 # A drop is NOT always harmless: perl-tests/bless.t's single drop is the test
 # row `is ref $untied, "main", 'blessing through tied refs' or diag $@;` — an
@@ -150,7 +158,6 @@
 #         grammar shapes (a wide interpolation, an overload block).
 #      (e) Everything else is unchanged, row for row.
 perl-tests/bless.t	1	Bug. Fell through. Missing case: [ x1
-perl-tests/bop.t	2	Bug. Fell through. Missing case: [ x2
 perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
@@ -167,7 +174,6 @@ t/mro/basic_utf8.t	1	Bug. Fell through. Missing case: [ x1
 t/mro/package_aliases_utf8.t	2	Bug. Fell through. Missing case: [ x2
 t/op/alarm.t	1	Handle single node of unknown type. Dump: x1
 t/op/bless.t	1	Bug. Fell through. Missing case: [ x1
-t/op/bop.t	2	Bug. Fell through. Missing case: [ x2
 t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
 t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2

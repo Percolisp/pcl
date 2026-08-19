@@ -10,10 +10,14 @@
 # The classifier runs only where a statement was already lost, so the rows
 # below come in pairs: the shape that must now REFUSE, and the sibling shape
 # that must NOT — because the two directions are not symmetrical.  A missed
-# refusal leaves today's behaviour; a false one kills a whole file (the sharp
-# edge is `~~`: PPI lexes ONE Operator token for both the smart match and the
-# double bitwise complement, and `is(~~$y, 3)` in perl-tests/bop.t — 507 rows
-# — is the complement).
+# refusal leaves today's behaviour; a false one kills a whole file.
+#
+# The `~~` arm is the one that asks nothing itself: since #370 the infix/prefix
+# question is answered ONCE, upstream, by
+# Parser2::_repair_term_initial_complement (a term-initial `~~` is two
+# complements — `is(~~$y, 3)` in perl-tests/bop.t, 507 rows — and is split
+# before the parse).  Its guard rows and the PPI canary are in
+# Pl/t/misc-fixes-02.t.
 #
 # Most rows call the classifier directly on PPI tokens: no transpile, no SBCL.
 # Three end-to-end rows check that the refusal actually reaches the user (file
@@ -101,8 +105,12 @@ keeps_dropping('my $f = first { $_ > 1 } @a;',
 refuses('my $r = $x ~~ @y;', qr/^smart match/, 'infix ~~ after a symbol refuses');
 refuses('my $g = join q{-}, (@a, (/X/ ~~ @b));', qr/^smart match/,
         'infix ~~ after a match refuses');
-keeps_dropping('is(~~$y, 3);',    'prefix ~~ (double complement) keeps dropping');
-keeps_dropping('print ~~$y, 3;',  'prefix ~~ at argument start keeps dropping');
+# A PREFIX `~~` never reaches this classifier at all: since #370,
+# Parser2::_repair_term_initial_complement has already split it into two `~`
+# complements, so `is(~~$y, 3)` COMPILES (guard rows + the PPI canary are in
+# Pl/t/misc-fixes-02.t).  That is why the arm above asks nothing beyond "is
+# there a `~~` token" — one predicate, upstream, instead of a second one here.
+refuses('my $r = $x ~~ $y;', qr/^smart match/, 'infix ~~ between two scalars refuses');
 
 # --- the deliberate exclusion (Track A table, measured out — task #399) ---
 keeps_dropping('$foo = doit $object "FOO";',
@@ -128,11 +136,11 @@ SKIP: {
   skip "pl2cl not found", 2 unless -x $pl2cl;
 
   my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-  print $fh "my \$y = 3;\nprint ~~\$y, \"\\n\";\n";
+  print $fh "my \$foo;\nmy \$object = bless {}, 'C';\n\$foo = doit \$object \"FOO\";\n";
   close $fh;
   my (undef, $err, $rc) = PCLCore::transpile_raw("$pl2cl $pl");
   is($rc, 0, 'a non-ruled drop leaves pl2cl exiting 0');
-  like($err, qr/^PCL: statement dropped at .* line 2:/m,
+  like($err, qr/^PCL: statement dropped at .* line 3:/m,
        'and it is still announced as a drop');
 }
 

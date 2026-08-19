@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 117;
+plan tests => 121;
 
 sub run_cl {
     my ($code) = @_;
@@ -1142,4 +1142,24 @@ sub fact { my $n = shift; $n <= 1 ? 1 : $n * __SUB__->($n-1) }
 print fact(5), "\n";
 PERL
     like($out, qr/^120$/m, '#368: a NAMED sub still recurses through __SUB__');
+}
+
+# ── #370: a term-initial `~~` is TWO complements, not the smart match ─────────
+# PPI 1.291 lexes `~~` as one Operator wherever it appears, so `is(~~$y, 3)` —
+# perl's own bop.t asserts it twice — reached the main loop as a binary
+# operator with no left operand and the STATEMENT WAS DROPPED.
+# Pl::Parser2::_repair_term_initial_complement splits the token when what
+# precedes it does not end a term.  ppi-upstream-bugs.md §21.
+test_cl('term-initial ~~ is two complements, not smart match (#370)',
+        'my $y = 3; print ~~$y, "\n";', "3\n");
+test_cl('term-initial ~~ on a string (bop.t:285 shape)',
+        'my $y = "c"; print ~~$y, "\n";', "c\n");
+test_cl('term-initial ~~ as a call argument',
+        'sub f { $_[0] } my $x = 7; print f(~~$x), "\n";', "7\n");
+{
+    my $doc = PPI::Document->new(\'is(~~$y, 3);');
+    ok( (grep { $_->isa('PPI::Token::Operator') && $_->content eq '~~' } $doc->tokens),
+        'CANARY: PPI still lexes a term-initial `~~` as the smart-match '
+      . 'operator — if this FAILS, PPI is fixed: drop '
+      . '_repair_term_initial_complement (ppi-upstream-bugs.md §21)' );
 }

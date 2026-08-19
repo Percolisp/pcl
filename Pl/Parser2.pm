@@ -1011,6 +1011,7 @@ sub parse {
   $doc = $self->_repair_glob_multiply($doc);
   $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_word_x_call($doc);
+  $doc = $self->_repair_term_initial_complement($doc);
 
   # PPI LEXER BUG: a `finally { … }` block is not part of the try Compound PPI
   # built, and the orphan statement it starts swallows the rest of the block —
@@ -4930,6 +4931,36 @@ sub _repair_word_match {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
+
+# PPI LEXER BUG (task #370, docs/ppi-upstream-bugs.md §20).  `~~` is ONE token
+# to PPI and always the smart-match operator, but perl reads it that way only
+# where an OPERATOR may stand.  Where a TERM is expected it is two complements:
+#
+#     is(~~$y, 3);   perl: ~(~$y) — the classic "numify" idiom, bop.t asserts it
+#                    PPI:  Structure( … Operator(~~) Symbol($y) … )
+#
+# and the main loop then sees a binary operator with no left operand, so the
+# whole statement is DROPPED ("Fell through").  perl-tests/bop.t and t/op/bop.t
+# each carry two of them.
+#
+# THE CONDITION IS THE SAME NEGATIVE the other repairs use, and it is exact:
+# `~~` is the operator only after something that ENDS A TERM.  Nothing else can
+# follow a term-ending token here, and nothing else can precede a prefix
+# complement — perl has no third reading.  So an occurrence that is not after a
+# term becomes two `~` tokens and the ordinary prefix path handles it; an infix
+# one is left alone, and Track A (task #371) refuses it perl-shaped, because
+# smart match was removed in perl 5.42.
+sub _repair_term_initial_complement {
+  my ($self, $doc) = @_;
+  my $repaired = 0;
+  for my $op (@{ $doc->find('PPI::Token::Operator') || [] }) {
+    next unless $op->content eq '~~';
+    next if _ends_term(_prev_sig_token($op));
+    $op->set_content('~ ~');
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
 # PPI LEXER BUG (task #361, docs/ppi-upstream-bugs.md §19).  `x` is both an
 # operator and a legal sub name, and PPI decides which by looking at the token
 # before it — a Word counts as a complete term, so:

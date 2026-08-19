@@ -9087,24 +9087,21 @@ sub _class_feature_in_scope {
 # operator, a comma or nothing to its left is the prefix double complement.
 # The left side is a WHITELIST on purpose (see the header): an unrecognised
 # neighbour keeps today's drop.
+# A `~~` token that reaches a DROP is the smart match, and this asks nothing
+# else — because the infix/prefix question is already answered, once, upstream:
+# `Parser2::_repair_term_initial_complement` (task #370) splits every `~~` that
+# is NOT after a term into two `~` complements before the parse, using
+# `_ends_term`.  So anything still spelled `~~` here survived that repair and
+# is after a term.  Asking the question a second time here, with a second
+# predicate, is exactly the drift CLAUDE.md rule 11 is about — an earlier cut
+# of this file had a hand-rolled whitelist that missed `$o->method ~~ 1`,
+# which `_ends_term` gets right.
 sub _has_infix_smartmatch {
   my ($el) = @_;
   for my $e (@$el) {
     my @ops = $e->isa('PPI::Token::Operator')
             ? ($e) : @{ $e->isa('PPI::Node') ? ($e->find('PPI::Token::Operator') || []) : [] };
-    for my $op (@ops) {
-      next unless $op->content eq '~~';
-      my $prev = $op->sprevious_sibling or next;
-      return 1 if $prev->isa('PPI::Token::Symbol')
-               || $prev->isa('PPI::Token::Number')
-               || $prev->isa('PPI::Token::Quote')
-               || $prev->isa('PPI::Token::QuoteLike')
-               || $prev->isa('PPI::Token::Regexp')
-               || $prev->isa('PPI::Token::Magic')
-               || $prev->isa('PPI::Structure::List')
-               || $prev->isa('PPI::Structure::Constructor')
-               || $prev->isa('PPI::Structure::Subscript');
-    }
+    return 1 if grep { $_->content eq '~~' } @ops;
   }
   return 0;
 }

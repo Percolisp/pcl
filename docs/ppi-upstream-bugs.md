@@ -786,6 +786,52 @@ running perl, so a perl that changes them fails a row).
 
 ---
 
+## 21. A term-initial `~~` is lexed as the smart-match operator  [CONFIRMED 1.291]
+
+**Perl:** `~~` is the smart match only where an OPERATOR may stand.  Where a
+TERM is expected it is two complements, `~(~$x)` — the classic "numify /
+truncate to integer" idiom, which perl-tests/bop.t and t/op/bop.t both assert:
+
+```perl
+my $y = 3;
+print ~~$y, "\n";     # perl prints: 3
+is(~~$y, 3);          # bop.t:196
+is(~~$y, "c");        # bop.t:285, on a string
+```
+
+**PPI:** one `~~` token, always the operator:
+
+```
+PPI::Token::Word           [is]
+PPI::Token::Structure      [(]
+PPI::Token::Operator       [~~]      <- WRONG: two Operator [~] are meant here
+PPI::Token::Symbol         [$y]
+PPI::Token::Operator       [,]
+PPI::Token::Number         [3]
+PPI::Token::Structure      [)]
+PPI::Token::Structure      [;]
+```
+
+Expected: `… Structure(() Operator(~) Operator(~) Symbol($y) …`, which is what
+PPI produces for `~ ~$y` (with a space) and for every other prefix operator in
+that position.  The decision is the same one PPI already makes correctly for
+`x` (§19) and `/` (§11): does a complete TERM precede the token?
+
+**PPI version tested:** 1.291.
+
+**Repro + failing row:** Bug 20 in `docs/ppi-bug-report.t`.
+
+**Impact on PCL (task #370): the statement was DROPPED WHOLE.**  The main loop
+saw a binary operator with no left operand ("Fell through. Missing case"), so
+two rows of bop.t vanished in each population — silently, until the drop
+announcement (#339) started naming them.  `Pl::Parser2::_repair_term_initial_complement`
+splits a `~~` whose previous significant token does not satisfy `_ends_term`
+into two `~` tokens, and reparses; an INFIX `~~` is left alone, and PCL then
+refuses it perl-shaped (smart match was removed in perl 5.42 — task #371,
+`docs/not-supported.md`).  Guard rows + canary: `Pl/t/misc-fixes-02.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

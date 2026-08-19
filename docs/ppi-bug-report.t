@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 19;
+use Test::More tests => 20;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -323,4 +323,20 @@ PERL
     ok( !exists $mods->{signatures},
         "use experimental 'try' should say nothing about signatures" )
         or diag "got: " . join(', ', map { "$_=$mods->{$_}" } sort keys %$mods);
+}
+
+# ── Bug 20: a term-initial `~~` is lexed as the smart-match operator ─────────
+# `~~` is the smart match only where an operator may stand.  Where a TERM is
+# expected perl reads two complements — `~(~$x)`, the "numify" idiom that
+# perl's own t/op/bop.t asserts twice.  PPI gives one Operator token in every
+# position, so a statement that starts an argument with it has a binary
+# operator with no left operand.  (PPI already makes exactly this
+# term-or-not decision correctly for `x` and for `/PATTERN/`.)
+{
+    my $doc = PPI::Document->new(\'is(~~$y, 3);');
+    my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
+    ok( !(grep { $_->content eq '~~' } @ops),
+        'a `~~` with no term before it should lex as two `~` complements' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
 }
