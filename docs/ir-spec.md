@@ -635,19 +635,44 @@ The dynamic variable `*wantarray*` carries the calling context:
 | `nil` | scalar context |
 | `:void` | void context |
 
-**Call sites bind it** where the callee is context-sensitive:
-`(let ((*wantarray* t)) (pl-f …))`. `return EXPR` and sub-tail positions
-inherit the frame's context. `p-sub` snapshots the value at entry into
-`*pcl-caller-wantarray*` so nested binds inside the body don't lie to
-`(p-wantarray)`, which maps t→`1`, nil→`""`, :void→`undef`.
+**Call sites bind it** where the callee is context-sensitive, and the bind
+is **named** (s414, #281 item 1) — these four macros are the emitted
+spelling:
+
+| emitted form | expands to | meaning |
+|---|---|---|
+| `(p-list-ctx BODY…)` | `(let ((*wantarray* t)) BODY…)` | list context |
+| `(p-scalar-ctx BODY…)` | `(let ((*wantarray* nil)) BODY…)` | scalar context |
+| `(p-void-ctx BODY…)` | `(let ((*wantarray* :void)) BODY…)` | void context |
+| `(p-caller-ctx BODY…)` | `(let ((*wantarray* *pcl-caller-wantarray*)) BODY…)` | propagate the caller's context (`goto &sub`, tail call) |
+
+The expansion is exactly the `let` it replaces — same binding, same body,
+identical code after macroexpansion, no runtime cost. There is no fifth
+context: the compiler-side builder (`Pl::CLForm::ctx_bind`) dies on an
+unknown one.
+
+**A consumer must accept both spellings.** The bare
+`(let ((*wantarray* V)) …)` still appears wherever the context bind rides
+along with a second binding — the `sort $var LIST` comparator binds
+`*package*` alongside it — and in statement classes still emitted as v1
+text. Anything that pattern-matches through a context wrap must peel
+either form; the runtime does it with one `%p-strip-ctx` (used by
+`%p-fh-arg`'s bareword-filehandle recovery and `p-list-=`'s
+undef-placeholder test — a wrap those cannot see past silently changes
+behaviour).
+
+`return EXPR` and sub-tail positions inherit the frame's context. `p-sub`
+snapshots the value at entry into `*pcl-caller-wantarray*` so nested binds
+inside the body don't lie to `(p-wantarray)`, which maps t→`1`, nil→`""`,
+:void→`undef`.
 
 **Statement (void) position — the sub-body regime.** A sub body with more
 than one statement (or a single compound) is wrapped ONCE in
-`(let ((*wantarray* :void)) …)`; every non-tail statement inside then
+`(p-void-ctx …)`; every non-tail statement inside then
 trusts that ambient and emits no bind of its own.  The tail (implicit
 return) statement restores the caller's context at the innermost
-expression-statement level: `(let ((*wantarray* *pcl-caller-wantarray*))
-TAIL-FORM)` — a compound tail (if/elsif chain) carries the restore on each
+expression-statement level: `(p-caller-ctx TAIL-FORM)` — a compound tail
+(if/elsif chain) carries the restore on each
 branch's leaf value statement, never around the whole compound (its
 non-tail inner statements stay in the :void ambient).  Explicit `return`
 needs no restore: the `p-return` macro evaluates its values under
@@ -656,7 +681,7 @@ statement skips the regime entirely (no binds at all — the tail already
 inherits the caller's dynamic context).  `do{}`/`eval{}` blocks and
 map/grep/sort bodies are regime *boundaries*: they run in their own
 caller's context, so void statements inside them carry per-statement
-`(let ((*wantarray* :void)) …)` wraps.  Toplevel (non-sub) statement
+`(p-void-ctx …)` wraps.  Toplevel (non-sub) statement
 position emits per-statement binds only where the form is
 context-sensitive (user funcalls, g-modifier matches).
 
@@ -761,6 +786,39 @@ way out `p-return-value` adjusts the value:
 
 A sub body falling off the end returns its last evaluated form (the
 `catch`'s value).
+
+### 5.4 Comparator frames — `p-sort-cmp`
+
+A `sort` comparator is the one *block* that gets a return frame of its
+own, and since s414 (#281 item 6) it is named:
+
+```lisp
+(p-sort-cmp (PAIR…) [(declare …)…] BODY…)
+  ≡ (lambda (PAIR…) [(declare …)…] (catch :p-return (block nil BODY…)))
+```
+
+**Why the frame exists:** `return` inside a `sort` block exits the
+*comparator*, not the enclosing sub, so the comparator installs the same
+`:p-return` catch a `p-sub` does (§5.1). `block nil` is the ordinary CL
+exit target. Leading `(declare …)` forms stay at the lambda head, where CL
+requires them: a comparator inside a block-level `package X;` region binds
+the region's *qualified* pair (`X::$a` / `X::$b`, §1), whose `defvar`s have
+not yet been evaluated when the lambda is compiled, so without
+`(declare (special …))` the parameters would bind lexically and a
+comparator reading the global would see nothing.
+
+The body is emitted in scalar context, i.e. the full shape is
+`(p-sort-cmp ($a $b) … (p-scalar-ctx BODY…))`. All three comparator
+spellings share it: a literal block, `sort NAME LIST` (whose body is the
+call, with an `undefined-function` handler dispatching to `AUTOLOAD`, perl
+bug #30661), and `sort $var LIST` (resolved at runtime by
+`p-sort-get-fn`); the latter two also wrap the lambda in a `let` capturing
+`*package*` at creation time, so a *string* comparator name resolves in the
+user's package rather than in `:pcl`.
+
+`grep`/`map`/`eval` block bodies are plain `(lambda …)` with **neither**
+the catch nor the context bind — `return` inside them must propagate to the
+enclosing sub's frame.
 
 ## 6. Control flow
 
@@ -1354,6 +1412,7 @@ function's docstring states its Perl contract. The families:
 | compiled regex (qr) | `(pcl::p-qr "qr/pat/flags")` literal · `(pcl::p-regex-from-parts PAT "flags")` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
 | I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup |
 | introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` returns package but file/line are stubs (divergence) |
+| context & frames | `p-list-ctx p-scalar-ctx p-void-ctx p-caller-ctx` (§4) · `p-sort-cmp` (§5.4) | **names, not operations**: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else. They mark where the IR says "this runs in context C" / "this is a comparator frame" |
 
 Anything not covered: read the `p-NAME` docstring in
 `cl/pcl-runtime.lisp` — by project rule the runtime implements *real Perl
@@ -1389,10 +1448,15 @@ Generated CL (abridged):
 
 (let ((@who (make-array 0 :adjustable t :fill-pointer 0)))
   (p-array-= @who (vector "ann" "bob"))
-  (p-foreach ($w @who)
-    (p-print (let ((*wantarray* t)) (pl-greet $w)) "
+  (p-foreach ($w @who) :my t
+    (p-print (pl-greet $w) "
 ")))
 ```
+
+The call carries **no** context bind: `greet`'s body never observes
+`wantarray`, so the `insensitive-call` emission rule (`Pl/Passes.pm`) drops
+it. The general shape — what you see whenever the callee might look — is
+`(p-list-ctx (pl-greet $w))`, §4.
 
 Faithful JavaScript-flavored translation, applying this manual:
 

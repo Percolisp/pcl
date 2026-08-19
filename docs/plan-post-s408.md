@@ -49,8 +49,16 @@ statement's TAIL was being lost in both pipelines** (`our $ok++, return if …`
 is what op/sub.t:214's recursion terminates on), fixed in `03cc639` with the
 remainder filed as #380.
 
-**Session I:** item 5 (#342 piece 2) done in `1484246`; **item 6 (#281 items
-1+2+6) is where the next session starts** — it was begun and reverted
+**Session I is DONE** (s414 + s415): item 5 (#342 piece 2) in `1484246`, and
+**item 6 (#281 items 1+2+6) shipped in `s414f` and merged in s415** after its
+four-leg bar (full sweep GATE clean / TOTAL 18513 +0 / drops 13 = census;
+pack.t 5636/89 = baseline against the regenerated artifact; bench A/B no
+move; `docs/ir-spec.md` §4 / §5.4 / §10 / §12 normative).  **The queue is now
+at sessions J–L, Option B phase 2 — starting with #371** (Track A refusals);
+#372 still waits on Fable's B1 operand grammar.  The historical note below
+stands as the record of how item 6 was scoped.
+
+Item 6 — it was begun and reverted
 unfinished, and `docs/opus5-review-requests-s410.md` §6.2 has the full
 inventory (four macros not three, 31 string sites, 6 form sites, the two
 multi-binding lets that must stay lets) plus **a correction to item 2's

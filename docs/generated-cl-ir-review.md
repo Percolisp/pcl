@@ -562,3 +562,15 @@ is one of the three shapes), gate, sweep TOTAL/LOST, gen bump, the three
 artifacts regenerated, and `docs/ir-spec.md` updated normatively (§6.x for
 the context macros, the sort-comparator rule).  Items 4 and 5 are the
 design half of #281 and wait for the bench.
+
+**Items 1, 2 and 6 are DONE — shipped s414 (`s414f`), verified and merged
+s415.**  `p-list-ctx` / `p-scalar-ctx` / `p-void-ctx` / `p-caller-ctx`
+(four, not three: `:void` is 246 of sort.t's 665 binds), `p-sort-cmp`, and
+a `_forward_global_decls` dedupe keyed on **(package, name)** — item 2's
+premise above is corrected in place: sort.t's ten `(defvar $a …)` lines are
+ten different symbols, one per `in-package` section, so the `dupdv` counter
+above measured TEXT and a text-level fix would have been a silent wrong;
+the real repeats are 16 in sort.t, 4 in hash.t, 2 in closure.t.
+`docs/ir-spec.md` §4, §5.4, §10 and §12 carry the normative text.  What is
+left of this list for #281: item 4 (control characters in string literals)
+and item 5 (`p-cond`), both design + bench, both Fable's.

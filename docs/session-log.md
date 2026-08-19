@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 415 (2026-08-19, Opus 5) — #281 items 1+2+6 verified on their own bar and merged: sweep, pack artifact, bench A/B, and `ir-spec.md` made normative for the named context bind
+
+The session picked up exactly where s414 stopped: the branch `s414-ir-macros`
+(`7e56c4f`) was complete and gate-green, with four things still to run.  All
+four ran; the branch is `main`.
+
+**It needed a rebase first — for the second session running.**  s414's own
+docs commit (`49b9ced`) had landed on main *after* the branch commit, so
+`--ff-only` was impossible as parked; the branch is code and main's extra
+commit is docs, so the rebase was conflict-free (`0e26583`), and the tree
+below the docs is byte-identical to the one s414 gated.  The same thing
+happened to `s413-lisp-dedup` one session earlier.  Writing the docs commit
+BEFORE the branch commit avoids it.
+
+| leg | result |
+|---|---|
+| `perl sweep-perl-tests.pl --jobs 8` | **GATE clean, TOTAL 18513 (+0), 0 new / 0 fixed, LOST 0, drops 13 = census.**  6 UNSTABLE + 10 unverified rows, all in postfixderef.t / ref.t / yadayada.t — the same three crash-files, with the same counts, as s414's main-side sweep. |
+| `--jobs 1 --timeout 380 perl-tests/pack.t` + `sweep-diff.pl` | **5636 / 89 — the blessed numbers, 0 new**, against the regenerated `cl/pcl-pack.lisp`.  (It had already completed inside the full sweep at the same numbers; the standalone run is the artifact's own leg.) |
+| `BENCH_K=5 tools/bench-exec.pl`, same command in a worktree of main | **no move.**  Two rows looked like one: `cfor` +5.4 % and `gcdrec` +3.2 %.  At K=7 `cfor` REVERSED (main 0.0288 → branch 0.0277), and `gcdrec`'s two interleaved repeats read branch 0.0921 / main 0.0970 / branch 0.0990 / main 0.0911 — the within-tree spread is wider than the between-tree delta.  `perl(s)`, an identical binary, moved ±3 % across the same runs: that is the band. |
+| `docs/ir-spec.md` | §4, §5.4, §10, §12 — below. |
+
+**The structural argument outranks the bench, and it was checked directly**:
+the two trees' emission for the `gcdrec` bench differs in exactly two lines,
+both `(let ((*wantarray* …)) …)` → `(p-void-ctx …)` / `(p-caller-ctx …)`,
+plus the environment preamble — and the macros' expansion is asserted
+byte-equal to the forms they renamed by the `transpile-test-10.t` row s414
+added.  A macro that expands to the same form cannot cost time; the bench
+exists to catch the case where it does not.
+
+**`docs/ir-spec.md`, the normative half (item 3 of #281's bar):**
+
+- **§4** gains the four-row macro table and the rule a consumer actually
+  needs: **there are TWO legal spellings of the context bind.**  The bare
+  `let` remains where a second binding rides along (`sort $var LIST` binds
+  `*package*` beside the context) and in v1-emitted statement text, so
+  anything that pattern-matches through a wrap must peel both — which is what
+  the runtime's `%p-strip-ctx` does, and what the three matchers s414 found
+  had to learn.  The sub-body regime paragraphs now name the macros.
+- **§5.4 is new** — the sort comparator as a *frame*: `return` inside a sort
+  block exits the comparator, hence its own `(catch :p-return (block nil …))`;
+  the body is emitted in scalar context; leading `(declare (special …))` stays
+  at the lambda head because a block-level `package X;` region's qualified
+  pair has no top-level defvar yet when the lambda compiles; and
+  `grep`/`map`/`eval` bodies get NEITHER the catch nor the bind.
+- **§10** gains a "context & frames" family row saying these are *names, not
+  operations*: a translator implements the expansion and nothing else.
+- **§12's worked example was WRONG in a way this change exposed** — it showed
+  `(p-print (let ((*wantarray* t)) (pl-greet $w)) …)`, but the compiler emits
+  no bind at all there: `greet` never observes `wantarray`, so the
+  `insensitive-call` Kind-A rule drops it.  Fixed to the real emission, with
+  the general shape named beside it.
+
+`Pl/Passes.pm`'s `insensitive-call` registry description also stopped
+spelling the bind as a bare `let` (the string is a description; no test
+asserts it).
+
 ## Session 414 (2026-08-19, Opus 5) — #395: the s413 runtime branch verified and merged; #387 CLOSED (families 2+10, 14/26, 38, the &-mention family; the tail rule satisfied) with four more bugs found in the differences; #281 items 1+2+6 WIP on branch `s414-ir-macros`
 
 **Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six
@@ -157,6 +213,8 @@ The session ended here, so the work is on a branch with its bar written into
 the commit message.  It is complete and gate-green; what is missing is the
 full sweep, the pack-artifact re-check, the bench and the `ir-spec.md` update.
 **Next session: run those four, then `git merge --ff-only s414-ir-macros`.**
+*(Done in s415 — all four ran clean and the branch is merged; see that
+section.)*
 
 What it does — the three zero-runtime-cost items ranked in
 `docs/generated-cl-ir-review.md`'s s407 re-measurement:

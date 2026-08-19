@@ -49,7 +49,7 @@ our %KIND_A = (
   'raw-numeric'   => 'VarAnnotator B-regime freeze (docs/raw-numeric-verdict.md): use-proven eager coercion, %pcl-to-number-strict / %pcl-to-string-strict',
   'str-buffer'    => 'VarAnnotator S1 verdict: an append-only string slot holds a fill-pointer buffer, `.=` becomes in-place %pcl-str-append',
   'foreach-range' => 'Parser2 foreach: `for $v (A..B)` lowers to the counting macro p-foreach-range instead of materializing the range',
-  'insensitive-call' => 'ExprToCL funcall: a KNOWN user sub whose body never observes *wantarray* (Parser2::_sub_ctx_insensitive) is called without the (let ((*wantarray* X)) …) bind',
+  'insensitive-call' => 'ExprToCL funcall: a KNOWN user sub whose body never observes *wantarray* (Parser2::_sub_ctx_insensitive) is called without the context bind (the p-…-ctx wrap, ir-spec §4)',
   'elem-setf'      => 'ExprToCL `=`: `$h{k} = V` / `$a[i] = V` on a let-bound container with a pure key writes through CL setf instead of p-setf (no boundp auto-declare)',
 );
 

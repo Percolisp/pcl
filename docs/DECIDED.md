@@ -11,6 +11,52 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s415 (2026-08-19, Opus) — #281 items 1+2+6 VERIFIED and merged: the sweep, the pack artifact, the bench A/B, and `ir-spec.md` made normative for the named context bind
+
+- **#281 items 1+2+6 are IN `main`** (`s414f`, verified s415).  The four bar
+  items, all measured on the branch tip: full sweep `--jobs 8` **GATE clean,
+  TOTAL 18513 (+0), 0 new / 0 fixed, LOST 0, drops 13 = census** (the 6
+  UNSTABLE + 10 unverified rows are the same three crash-files — postfixderef.t,
+  ref.t, yadayada.t — as every recent run); pack.t alone at `--timeout 380`
+  **5636 / 89 = the blessed numbers, 0 new** against the regenerated
+  `cl/pcl-pack.lisp`; bench A/B main-vs-branch over all 15 rows **no move**;
+  and `docs/ir-spec.md` §4 / §5.4 / §10 / §12 rewritten normatively.
+- **THE CONTEXT BIND HAS TWO LEGAL SPELLINGS, and the manual says so.**
+  `(p-list-ctx …)` / `(p-scalar-ctx …)` / `(p-void-ctx …)` / `(p-caller-ctx …)`
+  are the named form, but the bare `(let ((*wantarray* V)) …)` REMAINS
+  wherever the context bind rides with a second binding (the `sort $var LIST`
+  comparator binds `*package*` alongside) and in v1-emitted statement text.
+  Anything matching through a context wrap must peel both — `%p-strip-ctx` in
+  the runtime, and see the s414 line above for the three matchers that broke.
+  `docs/ir-spec.md` §4 is the normative statement.
+- **A `sort` comparator is the one BLOCK with a return frame of its own**
+  (`p-sort-cmp`, ir-spec §5.4): `return` inside a sort block exits the
+  COMPARATOR, so it carries `(catch :p-return (block nil …))`, its body is
+  emitted in scalar context, and leading `(declare (special …))` stays at the
+  lambda head for a region's package-qualified `$a`/`$b`.  `grep`/`map`/`eval`
+  bodies get NEITHER — `return` there propagates to the enclosing sub.
+- **A call to a context-INSENSITIVE sub emits no bind at all**, which the
+  ir-spec worked example (§12) had been getting wrong since before the
+  `insensitive-call` Kind-A rule existed: `print greet($w)` emits
+  `(p-print (pl-greet $w) …)`, not a wrapped call.  The example now says so
+  and names the general shape beside it.
+- **A BENCH MOVE THAT REVERSES ON RE-MEASUREMENT IS NOISE — and the perl
+  column is the noise meter.**  The K=5 A/B showed `cfor` +5.4 % and `gcdrec`
+  +3.2 %; at K=7 `cfor` reversed and `gcdrec`'s two interleaved repeats gave
+  branch 0.0921 / main 0.0970 / branch 0.0990 / main 0.0911 — a within-tree
+  spread wider than the between-tree delta.  `perl(s)` moved ±3 % across the
+  same runs with an identical binary, which is what sets the band.  The
+  structural argument comes first, though: the two trees' emission for the
+  bench differs in exactly the `let`→`p-…-ctx` renames (diffed), and the
+  macros' expansion is asserted byte-equal by `Pl/t/transpile-test-10.t`.
+- **A PARKED BRANCH NEEDS A REBASE BEFORE `--ff-only` if main took any commit
+  meanwhile** — twice in two sessions now (s414's `s413-lisp-dedup`, s415's
+  `s414-ir-macros`), both times because the parking session's own docs commit
+  landed on main after the branch.  Rebase (the branch is code, main's extra
+  commit is docs — conflict-free), re-verify on the rebased tip, then
+  fast-forward.  Writing the docs commit BEFORE the branch commit would avoid
+  it entirely.
+
 ## s414 (2026-08-19, Opus) — the s413 runtime branch merged (#395); #387 families 2+10 extracted, and the three differences between the copies were three bugs
 
 - **s414 (Opus): the runtime branch VERIFIED and fast-forwarded into `main`**
