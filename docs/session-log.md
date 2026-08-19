@@ -4,7 +4,7 @@ Append new entries at the top. One section per session.
 
 ---
 
-## Session 415 (2026-08-19, Opus 5) — #281 items 1+2+6 verified on their own bar and merged: sweep, pack artifact, bench A/B, and `ir-spec.md` made normative for the named context bind
+## Session 415 (2026-08-19/20, Opus 5) — #281 items 1+2+6 verified and merged (sweep, pack artifact, bench A/B, ir-spec normative); then Option B phase 2 Track A (#371): five families REFUSE instead of dropping, the format stripper and the hex-float pass are fixed, and the drop census halves (378 -> 177)
 
 The session picked up exactly where s414 stopped: the branch `s414-ir-macros`
 (`7e56c4f`) was complete and gate-green, with four things still to run.  All
@@ -60,6 +60,113 @@ exists to catch the case where it does not.
 spelling the bind as a bare `let` (the string is a description; no test
 asserts it).
 
+
+### Option B phase 2, Track A (#371): five families stop dropping and REFUSE — and the measurement rewrote two thirds of the task
+
+The plan's Track A table lists seven shapes to convert from silent drops into
+perl-shaped refusals at the drop site.  Measuring *where those drops actually
+are* changed what shipped, in both directions.
+
+**The classifier** (`Pl/Parser.pm` `_ruled_refusal_for_drop`, asked once by
+`_announce_dropped_statement`, which both PARSE-ERROR emitters already call)
+runs ONLY where a statement was already lost, so it cannot break code that
+compiles.  Five families now die, each citing `docs/not-supported.md`:
+`given`/`when`/`default` (+`CORE::given`), the 5.38 `class`/`field`/`method`/
+`ADJUST` syntax, `format NAME =` that the stripper did not catch, `defer {`,
+and **infix** `~~`.  In string-eval mode the same text arrives in `$@`.
+
+Every branch is conservative, because the two directions are not symmetrical —
+a missed refusal keeps today's behaviour, a false one kills a whole file:
+
+* `~~` is recognised only with a TERM before it.  `is(~~$y, 3)` in
+  perl-tests/bop.t (507 rows) is a double bitwise complement, and PPI lexes
+  both spellings as one `~~` Operator.
+* `field`/`method`/`ADJUST` refuse only when the FILE says the feature is on
+  (`use feature 'class'` / `use experimental 'class'` / `use v5.38`+ / a
+  `class NAME` statement).  A Moose-style `method` must not be misdiagnosed —
+  and PPI reads `method m { 1 }` as a `m{...}` MATCH, which is correct for a
+  file without the feature, so no shape guard rides along.
+* `Pl/t/ruled-refusal-01.t` (27 rows, 1 s) pairs every refusing shape with the
+  sibling that must keep dropping.
+
+**INDIRECT OBJECT was dropped from the list, on measurement** (task #399).
+Its only two census drops are `perl-tests/ref.t:334` and
+`perl-tests/method.t:72` — files that contribute 191 and 97 passing rows —
+so refusing would have cost ~288 rows to convert 2 drops, the opposite trade
+from the other families.  It is also not a REMOVED feature: perl still parses
+it.  The same task records the silent wrong the boundary cannot reach: a bare
+`class Foo;` *parses*, as the indirect-object call `Foo->class`.
+
+**FORMAT was inverted: fix the mechanism, do not refuse it.**  The plan
+counted 6 format drops in files that turned out to be productive
+(t/op/closure.t alone has 267 passing rows), so the question became why the
+source-level format stripper — which exists precisely so a format block cannot
+eat the next statement — was missing them.  The answer is that its
+`($str_re)|` pass-through is not a weak guard but a WRONG one: any quote
+imbalance opens a "string" that swallows whatever follows.  A `"` inside a
+regex (`qr/Undefined format "…"/`), an apostrophe pair across two comments
+(`# doesn't` … `# that's`), a quote inside a format PICTURE line — each hides
+the next header.  **t/op/write.t stripped 39 of its 104 formats**; the 65
+survivors each ate a statement.
+
+So the stripper is now line-anchored (`_strip_format_blocks`): a header line
+ending at `=`, a body, a line holding just `.`, with a 500-line safety valve
+and removed lines replaced by EMPTY lines so every later line keeps its
+number.  The name may be anything up to the `=` (`format ::two =`,
+`format 'one =`, `format Ẋ =`, `format +x =`, bare `format =`).  Measured
+after: every real format in the population is stripped, and the one survivor
+is `format foo {` inside an `eval q||` — a deliberate syntax-error test.
+
+**The same defeat had two more victims, found by the corpus A/B.**  The skip
+alternative is shared by five other source-level passes, so it now also
+consumes comments (`(?<![\$\\])#[^\n]*`):
+
+* the HEX-FLOAT pass was rewriting hex-float text *inside string literals it
+  failed to skip* — `is(sprintf("%a",-0.0), "-0x0p+0", …)` had its EXPECTATION
+  turned into `"-0"`.  Fixing it moved **12 perl-tests rows from fail to
+  pass** and removed t/op/sprintf2.t's 19 drops.
+* `CORE::state $x = 42` (perl-tests/sub.t:244) now normalises, so it lowers
+  through the native `state` path instead of as a package assignment.
+
+**The bar.**  Gate 151 files / 5550 rows (only the 13 pclxs xs rows).
+corpus-diff: 4 of 111 files differ, each explained — state.t (the refusal),
+sprintf2.t and sub.t (the two fixes above), ref.t (`p-die :loc` line numbers
+now match perl's, because the stripper no longer deletes lines).  Full sweep
+**GATE clean: 0 new, 5 fixed, TOTAL 18367**.  Drop census re-measured over
+both populations: **73 files / 378 drops → 56 / 177**.
+
+**What it cost, stated plainly** (task #400): a transpile-time refusal yields
+no TAP at all, so `perl-tests/state.t` (158 passing rows, one `given` block at
+line 350 of 616) and its companion twin `t/op/state.t` (126) now contribute
+nothing.  Both rows left the baselines BY HAND with that cause.  This is not
+avoidable by ordering — at the end of phase 2 every remaining drop dies, and
+`given`/`when` will still not be implemented — and every other file the five
+families touch was already producing 0–27 rows.
+
+**The companion suite (`--all --quick --jobs 4`) — what moved, both ways.**
+The fifteen refused files are registered in `docs/perl-suite-expected.tsv` (six
+new rows; the ten `t/class/*.t` were already there) and their row baselines
+re-blessed, so they read **XDIFF TRANSPILE-FAIL** with their reason.  Four
+files gained:
+
+| file | before | after |
+|---|---|---|
+| t/op/sprintf2.t | 1525 ok / 13 | **1679 / 25** (the hex-float expectations) |
+| t/mro/package_aliases_utf8.t | 48 / 26 | **72 / 34** |
+| t/comp/parser.t | 63 / 111 | 64 / 111 |
+| t/op/rt119311.t | 4 / 1 | 4 / 2 |
+
+**And two files REGRESSED to TRANSPILE-FAIL — recorded, not reverted (task
+#401).**  `t/op/sub.t` (52 rows) and `t/opbasic/concat.t` (248) contain
+`CORE::state`, which the fixed pass now normalises to `state`; the v2 state
+rewrite then gates on two shapes it does not implement ("state $x in named sub
+(string eval)", "state $y rewrite (my re-declaration of $y in scope)").  Before
+the fix, `CORE::state $x = 42` lowered as a plain package assignment — a state
+declaration silently compiled into something else — so those rows were passing
+on a program PCL had mis-parsed.  The loud gate is the right answer until the
+two shapes land; #401 carries them with the 300 rows as its acceptance measure.
+The snapshot `docs/perl-suite-run.tsv` was NOT re-blessed (a `--quick` run does
+not measure the 11 skipped files).
 ## Session 414 (2026-08-19, Opus 5) — #395: the s413 runtime branch verified and merged; #387 CLOSED (families 2+10, 14/26, 38, the &-mention family; the tail rule satisfied) with four more bugs found in the differences; #281 items 1+2+6 WIP on branch `s414-ir-macros`
 
 **Task #395 (the handoff's §2), done.**  Branch `s413-lisp-dedup` (the six

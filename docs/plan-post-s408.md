@@ -139,6 +139,16 @@ companion once (op/sub.t, op/current_sub.t, op/lexsub.t read per row), gate.
    answers §3.4) are the smartmatch-infix arm: same verdict, but the `$@`
    text becomes the ruled `PCL: unsupported …` refusal naming the feature.
    Bar: census falls by the classified count, every remainder explained.
+   **DONE s415** — five families refuse (given/when, class, format-residue,
+   defer, infix `~~`); census **73 files / 378 drops → 56 / 177**.  TWO table
+   rows changed on measurement: **indirect object is OUT** (task #399 — its
+   two drops live in files worth 288 passing rows, and perl still parses it),
+   and **format was INVERTED** — its drops were in productive files, so the
+   source-level stripper was fixed instead (it is now line-anchored; its
+   `($str_re)|` pass-through had been defeated by any quote imbalance, which
+   also explains 12 newly-passing perl-tests rows in sprintf2.t).  Cost: the
+   two `state.t` files (#400) and, via the CORE:: pass finally working, two
+   companion files on unimplemented `state` shapes (#401).
 8. **Track B1 #372** — a named unary's operand may BEGIN with a named unary
    (stacked filetests `-f -d $x`); A/B by the fold recipe.  Fable designs
    the operand grammar first (§3 item 2) — Opus executes.

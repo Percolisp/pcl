@@ -321,18 +321,37 @@ commented out.
 
 **Perl behaviour:** `given`/`when` (the "switch" statement) and the `~~`
 smart-match operator were introduced experimentally in Perl 5.10
-(`use feature 'switch'`), deprecated in Perl 5.34, and **removed entirely
-in Perl 5.38**.
+(`use feature 'switch'`), deprecated through 5.34–5.38, and **removed in
+Perl 5.42** — a file using them no longer compiles at all.
 
-**PCL behaviour:** Not implemented.
+**PCL behaviour:** Not implemented, and since s415 (task #371) **PCL
+refuses such a file the way perl 5.42 does** rather than dropping the
+statement and running the rest:
 
-**Rationale:** The feature no longer exists in modern Perl (≥ 5.38).  No
-maintained CPAN module targets it.  PCL's goal is to run real CPAN code, so
-implementing a deleted construct would add complexity for zero practical gain.
+```
+PCL: given/when (feature 'switch') is not supported -- removed in perl 5.42, at FILE line N
+PCL: smart match (~~) is not supported -- removed in perl 5.42, at FILE line N
+```
 
-**Affected tests:** `perl-tests/switch.t` — entire file skipped.  The
-`~~` operator is also excluded from `perl-tests/cmpchain.t` (the few tests
-that used it are commented out).
+The refusal is decided at the drop site (`Pl/Parser.pm`
+`_ruled_refusal_for_drop`), so a statement that compiles never reaches it.
+In string-eval mode the same message arrives in `$@`, as perl's compile
+error does.  `~~` is recognised only as an **infix** operator: `~~$x` is a
+double bitwise complement (perl-tests/bop.t uses it), and PPI lexes both as
+one `~~` token.
+
+**Rationale:** The feature no longer exists in modern Perl.  No maintained
+CPAN module targets it.  PCL's goal is to run real CPAN code, so
+implementing a deleted construct would add complexity for zero practical
+gain — and running a *silently different* program is worse than refusing.
+
+**Affected tests:** `perl-tests/switch.t` — entire file skipped.
+`perl-tests/state.t` and `t/op/state.t` each contain one `given` block and
+therefore now refuse as a whole (their rows left the baselines in s415 with
+this cause).  `t/op/switch.t`, `t/op/smartmatch.t`, `t/op/coreamp.t` and
+`t/op/tie_fetch_count.t` register as expected divergences.  The `~~`
+operator is also excluded from `perl-tests/cmpchain.t` (the few tests that
+used it are commented out).
 
 ---
 
@@ -422,11 +441,21 @@ with Perl-like defaults (`$~`→`"STDOUT"`, `$^`→`"STDOUT_TOP"`, `$=`→60, `$
 values that Perl updates *as a side effect of writing* (e.g. `$-` lines-left)
 stay at their defaults.
 
+A header the stripper does not match — a quoted or package-qualified name
+(`format 'one =`, `format ::two =`, `format +x =`) — reaches the parser and
+loses its statement.  Since s415 (task #371) that case **refuses** instead:
+
+```
+PCL: format/write report formatting is not supported, at FILE line N
+```
+
 **Rationale:** Perl's report-formatting system is essentially unused in
 modern CPAN code.  No maintained module targets it.
 
 **Affected tests:** None in `perl-tests/`.  `t/io/defout.t` reaches 21/22 (the
 one fail is `$-`, which only changes once a real `write()` has run).
+`t/comp/parser.t`, `t/op/gv.t`, `t/uni/gv.t`, `t/op/closure.t`, `t/op/write.t`
+and `t/uni/write.t` carry the unstripped spellings and now refuse.
 
 ---
 
@@ -482,6 +511,32 @@ row now pass and are no longer in the skip registry.
 - `local *GLOB` — supported (sessions 75–79, via `p-local-glob`).
 
 **Affected tests:** `perl-tests/local.t` still fails due to `Tie::Array` dependency which causes a hang — not a `local` issue.
+
+---
+
+## `defer { … }` blocks  [DEFERRED — implementable, not rejected]
+
+**Perl behaviour:** Perl 5.36 added `defer BLOCK` (`use feature 'defer'`): the
+block runs when control leaves the enclosing block, in reverse order of
+declaration, however it leaves — fall-through, `return`, `last`, or `die`.
+
+**PCL behaviour:** Not implemented.  Since s415 (task #371) a `defer` block
+**refuses** rather than dropping the statement (which would silently skip the
+cleanup the program depends on):
+
+```
+PCL: defer blocks are not supported, at FILE line N
+```
+
+**Why deferred, not rejected:** the semantics are `unwind-protect` over the
+enclosing block's lowering, which PCL already emits for other unwinding
+(`p-try`'s `finally`, `local` restoration), so the work is a `Pl/Parser2.pm`
+lowering arm plus a runtime macro — the same shape `try`/`catch` took in s405.
+It is scheduled with Option B phase 2's Track C, not before, because no CPAN
+code targets it yet.
+
+**Affected tests:** `t/op/defer.t` (13 statements) — registered as an expected
+divergence.
 
 ---
 
@@ -1582,7 +1637,22 @@ declares inheritance.  Instances are opaque (not blessed hashes).
 
 **PCL behaviour:** Not implemented.  The `class`/`field`/`method` keywords are
 not recognized; a file using them mis-parses (PPI has only partial knowledge
-of the syntax) and the transpile fails.
+of the syntax — it reads `method m { 1 }` as a `m{...}` MATCH, which is what
+that text means in a Perl without the feature).  Since s415 (task #371) the
+transpile **refuses** such a file instead of dropping the statement:
+
+```
+PCL: feature 'class' is not supported, at FILE line N
+```
+
+`class NAME` is recognised on its own (a call would be followed by a list);
+`field`, `method` and `ADJUST` are refused only when the file itself says the
+feature is on — a `use feature 'class'` / `use experimental 'class'` / `use
+v5.38`-or-later line, or a `class NAME` statement — so a Moose-style `method`
+or a sub named `field` is never misdiagnosed.  One shape is still NOT covered
+and is a silent wrong today: a bare `class Foo;` statement *parses*, as the
+indirect-object call `Foo->class`, so it never reaches the drop site (task
+#399).
 
 **Why deferred, not rejected:** this is the future of Perl OO and PCL should
 support it in a **future version** — but it is a *self-contained surface

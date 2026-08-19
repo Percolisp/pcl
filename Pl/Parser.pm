@@ -207,11 +207,27 @@ sub _preprocess_source {
   # inside a quoted string (e.g. the string '0x1p+0' must stay '0x1p+0', not become
   # '1'). Each substitution therefore matches a quoted string as its FIRST alternative
   # and passes it through unchanged, so the float pattern is never seen inside a string.
-  # (A float pattern inside a comment is harmless to convert — PPI discards comments —
-  # so comments are not specially skipped.)
-  my $str_re = qr{'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"};
+  # A float pattern inside a comment is harmless to convert — PPI discards
+  # comments — but a comment must still be CONSUMED by the pass-through
+  # alternative, and that is not cosmetic (s415):
+  #
+  #   AN APOSTROPHE IN A COMMENT OPENS A STRING THAT NEVER CLOSES until the
+  #   next one, and everything between the two is passed through untouched.
+  #   `# it doesn't matter` … `# that's all` therefore hid a whole `format`
+  #   block from the stripper below — measured in t/op/closure.t (267 passing
+  #   rows), t/comp/parser.t, t/op/gv.t and t/uni/gv.t, where the unstripped
+  #   block then swallowed the following statement (the exact corruption the
+  #   stripper exists to prevent).  Every pass here has the same failure mode:
+  #   the rewrite it owes silently does not happen, and PPI mis-structures the
+  #   statement.
+  #
+  # So the skip alternative is strings OR a comment.  `$#array` and an escaped
+  # `\#` are not comment starts; a `#` inside a string is already covered
+  # because the string alternative is tried first at every position.
+  my $str_re  = qr{'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"};
+  my $skip_re = qr{$str_re|(?<![\$\\])#[^\n]*};
   # Hex float: 0x[hex_][.[hex_]]p[+-][decimal_]
-  $src =~ s{($str_re)|0x([0-9a-fA-F_]*)\.?([0-9a-fA-F_]*)[pP]([+-]?[\d_]+)}{
+  $src =~ s{($skip_re)|0x([0-9a-fA-F_]*)\.?([0-9a-fA-F_]*)[pP]([+-]?[\d_]+)}{
     if (defined $1) { $1 } else {
       my ($int_str, $frac_str, $exp_str) = ($2, $3, $4);
       $int_str  =~ s/_//g;
@@ -223,7 +239,7 @@ sub _preprocess_source {
     }
   }gex;
   # Binary float: 0b1.1p0, 0b10p-2
-  $src =~ s{($str_re)|0b([01_]+)(?:\.([01_]*))?[pP]([+-]?[\d_]+)}{
+  $src =~ s{($skip_re)|0b([01_]+)(?:\.([01_]*))?[pP]([+-]?[\d_]+)}{
     if (defined $1) { $1 } else {
       my ($int_str, $frac_str, $exp_str) = ($2, $3 // '', $4);
       $int_str  =~ s/_//g;
@@ -235,7 +251,7 @@ sub _preprocess_source {
     }
   }gex;
   # Octal float: 010.1p0, 00p0.  Lookbehind prevents matching digits inside a larger number.
-  $src =~ s{($str_re)|(?<!\w)0([0-7_]+)(?:\.([0-7_]*))?[pP]([+-]?[\d_]+)}{
+  $src =~ s{($skip_re)|(?<!\w)0([0-7_]+)(?:\.([0-7_]*))?[pP]([+-]?[\d_]+)}{
     if (defined $1) { $1 } else {
       my ($int_str, $frac_str, $exp_str) = ($2, $3 // '', $4);
       $int_str  =~ s/_//g;
@@ -256,7 +272,7 @@ sub _preprocess_source {
   # alternative passes quoted strings through untouched.  Symbolic uses of
   # tick names in STRINGS (`&{"x'y"}`) are normalised at runtime instead
   # (%p-tick-package-seps).  Bareword calls `x'y()` stay unsupported.
-  $src =~ s{($str_re)|\bsub(\s+)([A-Za-z_]\w*(?:'[A-Za-z_]\w*)+)}{
+  $src =~ s{($skip_re)|\bsub(\s+)([A-Za-z_]\w*(?:'[A-Za-z_]\w*)+)}{
     if (defined $1) { $1 } else {
       my ($ws, $name) = ($2, $3);
       $name =~ s/'/::/g;
@@ -280,22 +296,59 @@ sub _preprocess_source {
   # variable like `$CORE::my` intact (only a bare declarator word is a target),
   # and the lookahead requires the declarator context (whitespace then a sigil
   # or `(`), so only an actual `CORE::my $x` / `CORE::our (@a)` form is rewritten.
-  $src =~ s/($str_re)|(?<![\w\$\@\%:])CORE::(my|our|state|local)\b(?=\s*[\$\@\%\(])/ defined $1 ? $1 : $2 /ge;
-  # Remove `format NAME = ... .` report templates.  `format`/`write` are
-  # deliberately not-supported (docs/not-supported.md), but PPI does not
-  # recognise the keyword: it swallows the picture lines AND the following
-  # statement into one bogus PPI::Statement, so the `.` terminator surfaces as
-  # an unknown Operator and the next real statement is lost (a PARSE ERROR that
-  # corrupts the rest of the file).  Strip the whole block at the source level
-  # so the surrounding code parses cleanly; the format simply does nothing.
-  # The header is `format [NAME] =` on its own line; the body is terminated by a
-  # line containing only `.`.  The leading $str_re alternative passes quoted
-  # strings (incl. multi-line ones) through untouched so a format-like pattern
-  # inside a string literal is never stripped.
-  $src =~ s{($str_re)|^[ \t]*format(?:[ \t]+[A-Za-z_]\w*)?[ \t]*=[^\n]*\n.*?^\.[ \t]*$}{
-    defined $1 ? $1 : ''
-  }gems;
+  $src =~ s/($skip_re)|(?<![\w\$\@\%:])CORE::(my|our|state|local)\b(?=\s*[\$\@\%\(])/ defined $1 ? $1 : $2 /ge;
+  $src = _strip_format_blocks($src);
   return $src;
+}
+
+# Remove `format NAME = … .` report templates.  `format`/`write` are
+# deliberately not-supported (docs/not-supported.md), but PPI does not
+# recognise the keyword: it swallows the picture lines AND the following
+# statement into one bogus PPI::Statement, so the `.` terminator surfaces as an
+# unknown Operator and the next real statement is lost — the very corruption
+# this exists to prevent.
+#
+# LINE-ANCHORED, not a regex over the whole file (s415).  The regex version
+# tried to protect string literals with a leading `($str_re)|` alternative, and
+# that heuristic is not merely imperfect, it is WRONG at scale: a quote
+# character inside a regex (`qr/Undefined format "…"/`), inside a format
+# PICTURE line, or an apostrophe pair across two comments (`# doesn't` … `#
+# that's`) opens a "string" that swallows the next format header.  Measured
+# before this change: t/op/write.t stripped 39 of its 104 formats, and the 65
+# survivors each ate the statement after them; t/op/closure.t (267 passing
+# rows), t/comp/parser.t, t/op/gv.t and t/uni/gv.t each lost one the same way.
+#
+# perl's own rule is line-based — a header line ending at `=`, a body, a line
+# holding just `.` — so this reads it that way and cannot be confused by
+# quoting.  What it gives up is the one-line-string guard, which cost nothing
+# real: a header must OWN its line, so only a multi-line string containing a
+# line `format X =` AND a later line `.` could be touched; the safety valve
+# below (no terminator within 500 lines ⇒ leave everything alone) bounds even
+# that.  The NAME is anything up to the `=`: perl takes a qualified name in
+# either spelling and a non-ASCII one (`format ::two =`, `format 'one =`,
+# `format Ẋ =`, `format +x =`, and bare `format =` for STDOUT).
+#
+# Removed lines become EMPTY lines rather than disappearing, so every later
+# line keeps its number and a diagnostic points where perl would point.
+sub _strip_format_blocks {
+  my ($src) = @_;
+  return $src unless $src =~ /^[ \t]*format\b/m;
+  my @lines = split /^/, $src;
+  my $i = 0;
+  while ($i < @lines) {
+    unless ($lines[$i] =~ /^[ \t]*format(?:[ \t]+[^\n=]+)?[ \t]*=[ \t]*\r?\n?$/) {
+      $i++;
+      next;
+    }
+    my ($end, $limit) = (undef, $i + 500 < $#lines ? $i + 500 : $#lines);
+    for my $j ($i + 1 .. $limit) {
+      if ($lines[$j] =~ /^\.[ \t]*\r?\n?$/) { $end = $j; last }
+    }
+    if (!defined $end) { $i++; next }   # no terminator in sight: not a format
+    $lines[$_] = "\n" for $i .. $end;
+    $i = $end + 1;
+  }
+  return join '', @lines;
 }
 
 # PPI tokenizes `%-` / `%+` (the named-capture magic hashes) greedily, so `7%-3`
@@ -8955,6 +9008,157 @@ sub _shape_expr_error {
   return $error;
 }
 
+# ---------------------------------------------------------------------------
+# THE RULED REFUSALS AT THE DROP SITE (Option B phase 2 Track A, task #371;
+# spec docs/option-b-phase2-plan.md §2).
+#
+# A statement the compiler could not lower is replaced by `nil` and the
+# program runs on -- the #138 family, and silence is its sin (the announcement
+# above removes that).  For a handful of shapes, though, CONTINUING is wrong
+# too: the drop is not a compiler gap but a FEATURE PCL does not have, so the
+# program that results is not the program that was written, and no later fix
+# to the term grammar will change that.  perl agrees for two of them --
+# `given`/`when` and smart match were REMOVED in perl 5.42, so perl itself
+# refuses such a file at compile time rather than running part of it.
+#
+# The classifier below therefore runs ONLY where a statement was ALREADY lost
+# (a statement that compiles never reaches it, so it cannot break working
+# code) and DIES perl-shaped, citing docs/not-supported.md, for five families:
+# given/when, class/field/method/ADJUST, format, defer, and INFIX `~~`.
+# Everything else keeps dropping, announced, until the census is explained and
+# the emitters flip wholesale (fable-answers-s400.md §6.4, task #343).
+#
+# WHAT IS DELIBERATELY NOT HERE:
+#   * lvalue-sub assignment -- ruled to stay a loud DROP (§6.3): the drop
+#     costs one statement, a die costs every other row of substr.t and
+#     op/sub_lval.t.
+#   * INDIRECT OBJECT syntax (`doit $object "FOO"`) -- Track A's table lists
+#     it, but the measurement says it does not belong with the others: its
+#     only two census drops are perl-tests/ref.t:334 and perl-tests/method.t:72
+#     -- files that contribute 191 and 97 passing rows today -- and it is a
+#     syntax PCL could parse rather than a feature perl has removed.  Task
+#     #399 carries the measurement and the decision.
+#
+# EVERY BRANCH IS CONSERVATIVE, because the two directions are not
+# symmetrical: a missed refusal leaves today's behaviour, a false one kills a
+# whole file.  `~~` is the sharp edge -- PPI lexes ONE `~~` Operator token for
+# both the smart match and the double bitwise complement, and
+# `is(~~$y, 3)` (perl-tests/bop.t, 507 rows) is the latter.  So the smart
+# match is recognised only when the token has a TERM before it.
+sub _drop_lead_parts {
+  my ($src) = @_;
+  my @el = grep { ref $_ && $_->isa('PPI::Element') } @{ $src // [] };
+  return () unless @el;
+  # ONE path for the two callers of the announcer: it hands us either the
+  # statement itself or the token run that was being lowered.
+  return $el[0]->schildren
+    if @el == 1 && $el[0]->isa('PPI::Statement');
+  return grep { !$_->isa('PPI::Token::Whitespace')
+             && !$_->isa('PPI::Token::Comment') } @el;
+}
+
+# True when the file has told us the 5.38 object syntax is in play, so that a
+# `method`/`field`/`ADJUST` statement is that feature and not a sub of the
+# same name (Moose-style `method foo {...}` must NOT be misdiagnosed).
+sub _class_feature_in_scope {
+  my ($self, $el) = @_;
+  my $doc = eval { $el->top } or return 0;
+  return $self->{_class_feature_seen}{ refaddr $doc } //= do {
+    my $seen = 0;
+    for my $st (@{ $doc->find('PPI::Statement') || [] }) {
+      if ($st->isa('PPI::Statement::Include')) {
+        my $c = $st->content // '';
+        if ($c =~ /\b(?:feature|experimental)\b[^;]*['"]class['"]/
+            || ($c =~ /^\s*(?:use|require)\s+v?5\.0*(\d+)/ && $1 >= 38)) {
+          $seen = 1; last;
+        }
+        next;
+      }
+      my $w = $st->schild(0) or next;
+      next unless $w->isa('PPI::Token::Word') && $w->content eq 'class';
+      my $n = $w->snext_sibling;
+      if ($n && $n->isa('PPI::Token::Word')) { $seen = 1; last }
+    }
+    $seen;
+  };
+}
+
+# A `~~` that has a TERM to its left is the smart match; one that has an
+# operator, a comma or nothing to its left is the prefix double complement.
+# The left side is a WHITELIST on purpose (see the header): an unrecognised
+# neighbour keeps today's drop.
+sub _has_infix_smartmatch {
+  my ($el) = @_;
+  for my $e (@$el) {
+    my @ops = $e->isa('PPI::Token::Operator')
+            ? ($e) : @{ $e->isa('PPI::Node') ? ($e->find('PPI::Token::Operator') || []) : [] };
+    for my $op (@ops) {
+      next unless $op->content eq '~~';
+      my $prev = $op->sprevious_sibling or next;
+      return 1 if $prev->isa('PPI::Token::Symbol')
+               || $prev->isa('PPI::Token::Number')
+               || $prev->isa('PPI::Token::Quote')
+               || $prev->isa('PPI::Token::QuoteLike')
+               || $prev->isa('PPI::Token::Regexp')
+               || $prev->isa('PPI::Token::Magic')
+               || $prev->isa('PPI::Structure::List')
+               || $prev->isa('PPI::Structure::Constructor')
+               || $prev->isa('PPI::Structure::Subscript');
+    }
+  }
+  return 0;
+}
+
+# The refusal text for a dropped statement, or undef to keep dropping.
+# @$src is the announcer's own view of what was lost -- one list, one place.
+sub _ruled_refusal_for_drop {
+  my ($self, $src) = @_;
+  my @el = grep { ref $_ && $_->isa('PPI::Element') } @{ $src // [] };
+  return unless @el;
+  my @p   = _drop_lead_parts($src);
+  my $w   = @p && $p[0]->isa('PPI::Token::Word') ? $p[0]->content : '';
+  my $nx  = $p[1];
+
+  # given / when / default.  PPI has statement classes for the two block
+  # forms; `CORE::given` and a lowered token run arrive as words, and there
+  # the following List/Block is what makes the word the keyword.
+  return "given/when (feature 'switch') is not supported"
+       . " -- removed in perl 5.42"
+    if $el[0]->isa('PPI::Statement::Given')
+    || $el[0]->isa('PPI::Statement::When')
+    || ($w =~ /^(?:CORE::)?(?:given|when|default)$/
+        && $nx && ($nx->isa('PPI::Structure::List')
+                || $nx->isa('PPI::Structure::Block')));
+
+  # class / field / method / ADJUST (perl 5.38 object syntax).
+  # `class NAME` carries its own evidence (a call would be followed by a List,
+  # a fat-comma key by an Operator).  The other three are ordinary identifiers
+  # in every other Perl, so THE FILE has to say the feature is on — and that
+  # is the whole guard: no shape test rides along, because PPI does not know
+  # the feature either and lexes `method m { 1 }` as Word + a MATCH operator
+  # (`m { 1 }`), which is correct for a file without it.
+  return "feature 'class' is not supported"
+    if ($w eq 'class' && $nx && $nx->isa('PPI::Token::Word'))
+    || ($w =~ /^(?:field|method|ADJUST)$/
+        && $self->_class_feature_in_scope($el[0]));
+
+  # format NAME = ... .   (`format` alone takes STDOUT.)
+  return "format/write report formatting is not supported"
+    if $w eq 'format'
+    && $nx && (($nx->isa('PPI::Token::Word') && $p[2]
+                && $p[2]->isa('PPI::Token::Operator') && $p[2]->content eq '=')
+            || ($nx->isa('PPI::Token::Operator') && $nx->content eq '='));
+
+  # defer { ... } (perl 5.36).
+  return "defer blocks are not supported"
+    if $w eq 'defer' && $nx && $nx->isa('PPI::Structure::Block');
+
+  return "smart match (~~) is not supported -- removed in perl 5.42"
+    if _has_infix_smartmatch(\@el);
+
+  return;
+}
+
 # THE DROP ANNOUNCEMENT (task #339, ruled fable-answers-s400.md §6.2).
 # Both PARSE ERROR emitters above replace a whole statement with `nil` and let
 # the program run on — the #138 family, and the worst failure mode in this
@@ -9013,6 +9217,17 @@ sub _announce_dropped_statement {
   $text =~ s/^ //; $text =~ s/ $//;
   $text = substr($text, 0, 120) . '...' if length($text) > 123;
   $text = '(no source text)' unless length $text;
+
+  # A RULED REFUSAL COMES FIRST (Track A, #371): for the five families above
+  # this statement is not a compiler gap but a feature PCL does not have, and
+  # the honest answer is perl's -- refuse the file, in every mode, rather than
+  # run a program the author did not write.  The location is spelled like the
+  # announcement's so the two read alike; the message keeps its `PCL:` prefix
+  # so that in eval-string mode it travels the ruled refusal route into $@.
+  if (my $refusal = $self->_ruled_refusal_for_drop(\@src)) {
+    my $where = $self->eval_mode ? '(eval)' : $file;
+    die "PCL: $refusal, at $where line $line\n";
+  }
   # ONCE per statement: a statement can reach an emitter twice (the v2 seam
   # tries the form entry, a block body is lowered inside an outer lowering),
   # and op/switch.t measured 138 events for 112 emitted drops.  The COUNT of

@@ -16,6 +16,17 @@
 #   eval.t 127->128 and magic.t 149->150 GAINED: eval.t because an invalid
 #   construct in an eval now sets $@ as perl does, magic.t because of #375 —
 #   `qq < … >` had been keeping its delimiters in the string value.
+# s415 (#371, Option B phase 2 Track A): state.t 158 -> 0, status PARTIAL ->
+#   TRANSPILE_FAIL, EDITED BY HAND.  The file's one `given (state $spam = $spam)`
+#   block (line 350) is now a RULED REFUSAL rather than a silent drop --
+#   given/when was removed in perl 5.42, so PCL refuses the file as perl does,
+#   and a transpile-time refusal yields no TAP at all.  This trade was ruled
+#   with Track A (docs/option-b-phase2-plan.md §2) and is not avoidable by
+#   ordering: at the end of phase 2 EVERY remaining drop dies, and given/when
+#   will still not be implemented.  Measured cost, both populations: this file
+#   and t/op/state.t (126 rows) -- every other file the five refusal families
+#   touch was already producing 0-27 rows.  Task #400 carries the trade and the
+#   single condition that would reopen it.
 aassign.t	OK	173	15	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -109,8 +120,8 @@ sort.t	OK	203	1	205
 splice.t	OK	34	0	34
 split.t	OK	184	9	219
 sprintf.t	OK	532	25	559
-sprintf2.t	OK	1619	23	1678
-state.t	PARTIAL	158	0	166
+sprintf2.t	OK	1631	11	1678
+state.t	TRANSPILE_FAIL	0	0	166
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
 substr.t	OK	374	8	397

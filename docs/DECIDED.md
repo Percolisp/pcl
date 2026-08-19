@@ -11,7 +11,7 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
-## s415 (2026-08-19, Opus) — #281 items 1+2+6 VERIFIED and merged: the sweep, the pack artifact, the bench A/B, and `ir-spec.md` made normative for the named context bind
+## s415 (2026-08-19/20, Opus) — #281 items 1+2+6 VERIFIED and merged; then Track A of Option B phase 2 (#371): five families REFUSE instead of dropping, two source-preprocessing silent-wrongs fixed, census 378 -> 177
 
 - **#281 items 1+2+6 are IN `main`** (`s414f`, verified s415).  The four bar
   items, all measured on the branch tip: full sweep `--jobs 8` **GATE clean,
@@ -56,6 +56,66 @@ not-supported.md → only then probe.*
   commit is docs — conflict-free), re-verify on the rebased tip, then
   fast-forward.  Writing the docs commit BEFORE the branch commit would avoid
   it entirely.
+
+- **FIVE FAMILIES NOW REFUSE INSTEAD OF DROPPING** (#371, Track A of Option B
+  phase 2): `given`/`when`/`default` (+`CORE::given`), the 5.38
+  `class`/`field`/`method`/`ADJUST` syntax, an uncaught `format NAME =`,
+  `defer {`, and **infix** `~~`.  ONE classifier
+  (`Pl::Parser::_ruled_refusal_for_drop`) asked by the drop announcer that both
+  PARSE-ERROR emitters already call, so it runs only where a statement was
+  ALREADY lost and cannot break compiling code.  Guard file
+  `Pl/t/ruled-refusal-01.t` (27 rows, 1 s) pairs every refusing shape with the
+  sibling that must keep dropping.
+- **A REFUSAL CLASSIFIER IS ASYMMETRIC — a miss costs nothing, a false
+  positive costs a whole file.**  Hence: `~~` only with a TERM before it
+  (`is(~~$y, 3)` in bop.t, 507 rows, is a double bitwise complement and PPI
+  lexes both as ONE `~~` token); `field`/`method`/`ADJUST` only when the FILE
+  says the feature is on (`use feature 'class'` / `use experimental 'class'` /
+  `use v5.38`+ / a `class NAME` statement), with NO shape guard beside it,
+  because PPI reads `method m { 1 }` as a `m{…}` MATCH — correct for a file
+  without the feature.
+- **MEASURE WHERE THE DROPS ARE BEFORE CONVERTING THEM.**  Two of Track A's
+  seven table rows did not survive contact with `tools/drop-harvest.pl`:
+  **indirect object** was REMOVED from the list (its only two drops are in
+  perl-tests/ref.t and method.t, which contribute 191 and 97 passing rows —
+  ~288 rows to convert 2 drops, and perl still parses the syntax; task #399),
+  and **format was INVERTED** — the drops were in productive files
+  (t/op/closure.t has 267 passing rows), so the mechanism got fixed instead.
+- **THE `($str_re)|` PASS-THROUGH IDIOM IN `_preprocess_source` IS WRONG, not
+  merely imperfect.**  Any quote imbalance opens a "string" that swallows what
+  follows: a `"` inside a regex (`qr/Undefined format "…"/`), an apostrophe
+  pair across two comments (`# doesn't` … `# that's`), a quote in a format
+  PICTURE line.  Measured consequences: **t/op/write.t stripped 39 of its 104
+  formats** and each of the 65 survivors ate the statement after it; the
+  HEX-FLOAT pass rewrote hex-float text INSIDE string literals it failed to
+  skip, so `is(sprintf("%a",-0.0), "-0x0p+0", …)` had its EXPECTATION turned
+  into `"-0"`; `CORE::state $x = 42` stayed unnormalised.  The skip pattern now
+  also consumes comments, and **the format strip is line-anchored**
+  (`_strip_format_blocks`): header line ending at `=`, body, a line holding
+  just `.`, a 500-line safety valve, removed lines replaced by EMPTY lines so
+  later line numbers (and every `p-die :loc`) match perl's.  The name may be
+  anything up to the `=`.  Result: 12 perl-tests rows moved fail→pass, and the
+  drop census fell **73 files / 378 drops → 56 / 177**.
+- **A REFUSED FILE'S OTHER DROPS LEAVE THE CENSUS WITH IT** — t/op/coreamp.t's
+  4 lvalue-sub drops, t/op/tie_fetch_count.t's 3.  The census now falls faster
+  than the underlying problem; that is by design (the file is refused, not
+  fixed) and is written into the census header so the phase-2 exit criterion
+  is read with it in mind.
+- **THE COST, RECORDED, NOT HIDDEN** (task #400): a transpile-time refusal
+  yields no TAP, so `perl-tests/state.t` (158 rows) and `t/op/state.t` (126)
+  contribute nothing for one `given` block each.  Both left the baselines BY
+  HAND with the cause.  Not avoidable by ordering — at the end of phase 2
+  every remaining drop dies and given/when will still not be implemented — and
+  every other file the five families touch was already producing 0–27 rows.
+
+- **`CORE::state` NORMALISING FOR THE FIRST TIME COSTS TWO COMPANION FILES —
+  and that is the right answer** (task #401): `t/op/sub.t` (52 rows) and
+  `t/opbasic/concat.t` (248) now die on two v2 state gates instead of
+  transpiling.  Before, `CORE::state $x = 42` lowered as a plain PACKAGE
+  ASSIGNMENT — a state declaration silently compiled into something else — so
+  those rows passed on a program PCL had mis-parsed.  A loud
+  `Parser2 TODO:` beats a silent wrong; #401 carries the two shapes with the
+  300 rows as its acceptance measure.
 
 ## s414 (2026-08-19, Opus) — the s413 runtime branch merged (#395); #387 families 2+10 extracted, and the three differences between the copies were three bugs
 

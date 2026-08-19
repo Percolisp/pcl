@@ -18,34 +18,15 @@
 # (the file-level reason covers it wholesale, as before #185).  It must be
 # hand-placed and justified by a MEASUREMENT that the row set is
 # nondeterministic; --bless-rows never invents it and never overwrites it.
-class/accessor.t	*summary*
-class/class.t	*summary*
-class/construct.t	*summary*
-class/destruct.t	*summary*
-class/field.t	*summary*
-class/inherit.t	:isa attribute trims whitespace
-class/inherit.t	:isa() version test can throw
-class/inherit.t	@Testcase1B::ISA is set correctly
-class/inherit.t	Constructor params passed through to superclass
-class/inherit.t	Exception thrown from :isa version test
-class/inherit.t	Object has base class ADJUSTed field
-class/inherit.t	Object has base class initialised field
-class/inherit.t	Object has derived class ADJUSTed field
-class/inherit.t	Object has derived class initialised field
-class/inherit.t	Object is also its base class
-class/inherit.t	Object is its own class
-class/inherit.t	Testcase1B->can('adja')
-class/inherit.t	Testcase1B->can('inita')
-class/inherit.t	Testcase6B inherits Testcase6B
-class/inherit.t	Testcase6B sets VERSION
-class/inherit.t	Unit class syntax allows :isa
-class/inherit.t	__CLASS__ yields correct class name for subclass
-class/inherit.t	__CLASS__ yields runtime instance class name
-class/inherit.t	hierarchical base class loaded
-class/method.t	*summary*
-class/phasers.t	both ADJUST blocks run in order
-class/phasers.t	value of __CLASS__ in ADJUST block
-class/utf8.t	*summary*
+class/accessor.t	*no-log*
+class/class.t	*no-log*
+class/construct.t	*no-log*
+class/destruct.t	*no-log*
+class/field.t	*no-log*
+class/inherit.t	*no-log*
+class/method.t	*no-log*
+class/phasers.t	*no-log*
+class/utf8.t	*no-log*
 cmd/for.t	[perl #78194] Lone C-style for in a block
 cmd/for.t	double destroy, x=1
 cmd/for.t	freed value in iteration
@@ -844,8 +825,10 @@ op/const-optree.t	sub with simple lexical unmodified elsewhere has no :method at
 op/const-optree.t	sub with simple lexical unmodified elsewhere is inlinable
 op/const-optree.t	sub:method with constant is inlinable
 op/const-optree.t	sub:method with simple lexical is inlinable
+op/coreamp.t	*no-log*
 op/crypt.t	crypt turns off utf8 on its target
 op/current_sub.t	*summary*
+op/defer.t	*no-log*
 op/do.t	*extra* do subname() called
 op/do.t	*extra* do subname(arg) called
 op/do.t	*summary*
@@ -1204,6 +1187,10 @@ op/signatures.t	when does not swallow trailing comma
 op/signatures.t	write does not swallow trailing comma
 op/signatures.t	x does not swallow trailing comma
 op/sigsystem.t	*summary*
+op/smartmatch.t	*no-log*
+op/state.t	*no-log*
+op/switch.t	*no-log*
+op/tie_fetch_count.t	*no-log*
 op/ver.t	ASCII sprintf("%*vb", "\#\#", v1.22.333.4444)
 op/ver.t	ASCII sprintf("%vX", v1.22.333.4444)
 op/ver.t	ASCII sprintf("%vd", v1.22.333.4444 w/use bytes

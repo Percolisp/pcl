@@ -10,13 +10,15 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 73 files, 378 drops — 9 perl-tests files (12
-# drops), 64 companion files (366), ZERO in lib/.  (At the s399 measurement:
-# 72 files, 379 drops.  A count that RISES is not automatically a regression:
-# two files that used to die at transpile now emit CL, so their drops became
-# countable for the first time — see the s405 edits — and the s408 edit trades
-# 4 crash-forms for 4 counted drops.  Every rise is argued in its own edit
-# note; the runner still FAILS on any rise it has not been told about.)
+# TOTAL after the edits below: 56 files, 177 drops -- 9 perl-tests files (12
+# drops), 47 companion files (165), ZERO in lib/.  (At the s399 measurement:
+# 72 files, 379 drops; the s415 edit below is the largest single change and
+# more than halves both numbers.  A count that RISES is not automatically a
+# regression: a file that used to die at transpile can start emitting CL, so
+# its drops become countable for the first time -- see the s405 and s408 edits
+# -- and a file this census never listed can turn out to have been carrying a
+# drop all along (the two s415 (d) rows).  Every rise is argued in its own
+# edit note; the runner still FAILS on any rise it has not been told about.)
 # The total is the sum of the rows below — recomputed s408, which is how the
 # stale "382" this line used to carry was found.
 #
@@ -113,28 +115,51 @@
 # A drop is NOT always harmless: perl-tests/bless.t's single drop is the test
 # row `is ref $untied, "main", 'blessing through tied refs' or diag $@;` — an
 # assertion that never runs and never appears in any count.
+#
+#   s415  THE BIGGEST EDIT THIS FILE HAS TAKEN: 73 files / 378 drops -> 56
+#         files / 177 drops, from ONE session (task #371, Option B phase 2
+#         Track A + the source-preprocessing fixes it uncovered).  Re-measured
+#         with tools/drop-census.pl over the whole population; every change is
+#         one of these five, and NO file's count rose because of the change:
+#      (a) RULED REFUSALS (#371).  A statement whose leading shape is a feature
+#         PCL does not have now DIES perl-shaped instead of dropping, so the
+#         file emits no CL and has no drops to count: given/when (t/op/switch.t
+#         112, t/op/coreamp.t 7, t/op/state.t 1, perl-tests/state.t 1), the 5.38
+#         class syntax (the ten t/class/*.t, 29), defer (t/op/defer.t 13), and
+#         infix `~~` (t/op/smartmatch.t 4, t/op/tie_fetch_count.t 5).  NOTE what
+#         this metric now hides: a refused file's OTHER drops leave the census
+#         with it (t/op/coreamp.t's 4 lvalue-sub drops, t/op/tie_fetch_count.t's
+#         3).  The census falls faster than the underlying problem, by design --
+#         those files are refused, not fixed.
+#      (b) THE FORMAT STRIPPER, FIXED (s415).  Its `($str_re)|` pass-through was
+#         defeated by any quote imbalance -- a `"` inside a regex, an apostrophe
+#         pair across two comments, a quote in a format PICTURE line -- so it
+#         stripped 39 of t/op/write.t's 104 formats and the 65 survivors each
+#         swallowed the statement after them.  It is now line-anchored:
+#         t/comp/parser.t 8->5, t/op/gv.t 6->3, t/uni/gv.t 13->10,
+#         t/op/closure.t 3->2, t/op/write.t 2->1, t/uni/write.t 1->0,
+#         t/op/rt119311.t 1->0.
+#      (c) THE HEX-FLOAT PASS, FIXED by the same skip change: it was rewriting
+#         hex-float text INSIDE string literals it failed to skip, which is why
+#         t/op/sprintf2.t (19) dropped statements at all.  Now 0, and the
+#         perl-tests twin gained 12 passing rows.
+#      (d) t/op/numconvert.t 1 and t/op/postfixderef.t 1 are NEW ROWS for a
+#         file this census never listed -- and they are NOT this change: both
+#         measure 1 drop at HEAD too (checked in a worktree).  The blessed
+#         census was simply stale for them.  Their drops are ordinary term-
+#         grammar shapes (a wide interpolation, an overload block).
+#      (e) Everything else is unchanged, row for row.
 perl-tests/bless.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/bop.t	2	Bug. Fell through. Missing case: [ x2
 perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
+perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
 perl-tests/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
-perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1  [ADDED s411 Phase A4 under the s409 census-INCREASE rule: `"$_[$_[2]]"` — a NESTED array subscript inside a dq string loses its inner index (task #390, StringInterpolation → InterpScan consumer 3); the deleted text emitter used to print the empty Number leaf as `(p-aref @_ )` and the program CRASHED at run time (sb-int:simple-program-error) — the form emitter dies and the statement drops, announced]
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
-perl-tests/state.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
-t/class/accessor.t	2	Bug. Fell through. Missing case: [ x2
-t/class/class.t	5	Bug. Fell through. Missing case: [ x5
-t/class/construct.t	2	Bug. Fell through. Missing case: [ x2
-t/class/destruct.t	1	Bug. Fell through. Missing case: [ x1
-t/class/field.t	2	Bug. Fell through. Missing case: [ x2
-t/class/inherit.t	7	Bug. Fell through. Missing case: [ x7
-t/class/method.t	6	Bug. Fell through. Missing case: [ x6
-t/class/phasers.t	2	Bug. Fell through. Missing case: [ x2
-t/class/threads.t	1	Bug. Fell through. Missing case: [ x1
-t/class/utf8.t	1	Bug. Fell through. Missing case: [ x1
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
-t/comp/parser.t	8	Bug. Fell through. Missing case: [ x6 | Handle single node of unknown type. Dump: x2
+t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of unknown type. Dump: x1
 t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
 t/io/fflush.t	1	Handle single node of unknown type. Dump: x1
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
@@ -143,10 +168,8 @@ t/mro/package_aliases_utf8.t	2	Bug. Fell through. Missing case: [ x2
 t/op/alarm.t	1	Handle single node of unknown type. Dump: x1
 t/op/bless.t	1	Bug. Fell through. Missing case: [ x1
 t/op/bop.t	2	Bug. Fell through. Missing case: [ x2
-t/op/closure.t	3	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x1
-t/op/coreamp.t	7	Bug. Fell through. Missing case: [ x3 | PCL: Can't modify non-lvalue subroutine call in assignment x4
+t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
-t/op/defer.t	13	Bug. Fell through. Missing case: [ x13
 t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2
 t/op/die_unwind.t	4	Bug. Fell through. Missing case: [ x4
 t/op/filetest.t	19	Bug. Fell through. Missing case: [ x19
@@ -155,35 +178,30 @@ t/op/filetest_t.t	5	Bug. Fell through. Missing case: [ x5
 t/op/fork.t	2	Handle single node of unknown type. Dump: x2
 t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
-t/op/gv.t	6	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x4
+t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
 t/op/lexsub.t	12	Bug. Fell through. Missing case: [ x5 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
+t/op/numconvert.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 t/op/override.t	2	Handle single node of unknown type. Dump: x2
+t/op/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
-t/op/rt119311.t	1	Bug. Fell through. Missing case: [ x1
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
-t/op/smartmatch.t	4	Bug. Fell through. Missing case: [ x4
 t/op/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
-t/op/sprintf2.t	19	Bug. Fell through. Missing case: [ x19
 t/op/stat.t	3	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x1
-t/op/state.t	1	Bug. Fell through. Missing case: [ x1
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
-t/op/switch.t	112	Bug. Fell through. Missing case: [ x112
-t/op/tie_fetch_count.t	5	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x3
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/universal.t	1	Handle single node of unknown type. Dump: x1
 t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/utftaint.t	1	Bug. Fell through. Missing case: [ x1
-t/op/write.t	2	Handle single node of unknown type. Dump: x2
+t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	8	Bug. Fell through. Missing case: [] x5 | Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
 t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
 t/re/subst.t	3	Bug. Fell through. Missing case: [] x2 | Handle single node of unknown type. Dump: x1
 t/uni/caller.t	2	Bug. Fell through. Missing case: [ x2
-t/uni/gv.t	13	Bug. Fell through. Missing case: [ x9 | Handle single node of unknown type. Dump: x4
+t/uni/gv.t	10	Bug. Fell through. Missing case: [ x8 | Handle single node of unknown type. Dump: x2
 t/uni/method.t	2	Handle single node of unknown type. Dump: x2
 t/uni/readline.t	2	Handle single node of unknown type. Dump: x2
 t/uni/stash.t	4	Bug. Fell through. Missing case: [ x4
-t/uni/write.t	1	Handle single node of unknown type. Dump: x1
