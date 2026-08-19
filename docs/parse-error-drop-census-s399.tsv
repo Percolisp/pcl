@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 54 files, 173 drops -- 8 perl-tests files (10
-# drops), 46 companion files (163), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 49 files, 165 drops -- 8 perl-tests files (10
+# drops), 41 companion files (155), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -119,6 +119,16 @@
 #         (docs/ppi-upstream-bugs.md §21); the two rows now RUN and pass
 #         (sweep TOTAL 18367 -> 18369).  Total after this edit: 54 files,
 #         173 drops.
+#   s415  qx// IS THE BACKTICK TERM (#369): every spelling —
+#         qx{} qx() qx[] qx// qx## qx'' — arrives as a
+#         PPI::Token::QuoteLike::Command, and PExpr's primary set accepted only
+#         the Backtick class, so the statement had no term and was dropped
+#         (`my $c = qx{echo hi}` left $c undef, rc 0).  One primary arm now
+#         takes both, reading the body and the interpolate-or-not answer from
+#         PPI's own section record (a `''` section is perl's literal form).
+#         Rows REMOVED: t/io/fflush.t 1, t/op/alarm.t 1, t/op/fork.t 2,
+#         t/op/getpid.t 1, t/op/override.t 2; t/op/stat.t 3 -> 2.  Total after
+#         this edit: 49 files, 165 drops.
 #
 # A drop is NOT always harmless: perl-tests/bless.t's single drop is the test
 # row `is ref $untied, "main", 'blessing through tied refs' or diag $@;` — an
@@ -168,11 +178,9 @@ perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of unknown type. Dump: x1
 t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
-t/io/fflush.t	1	Handle single node of unknown type. Dump: x1
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/mro/basic_utf8.t	1	Bug. Fell through. Missing case: [ x1
 t/mro/package_aliases_utf8.t	2	Bug. Fell through. Missing case: [ x2
-t/op/alarm.t	1	Handle single node of unknown type. Dump: x1
 t/op/bless.t	1	Bug. Fell through. Missing case: [ x1
 t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
@@ -181,20 +189,17 @@ t/op/die_unwind.t	4	Bug. Fell through. Missing case: [ x4
 t/op/filetest.t	19	Bug. Fell through. Missing case: [ x19
 t/op/filetest_stack_ok.t	1	Bug. Fell through. Missing case: [ x1
 t/op/filetest_t.t	5	Bug. Fell through. Missing case: [ x5
-t/op/fork.t	2	Handle single node of unknown type. Dump: x2
-t/op/getpid.t	1	Handle single node of unknown type. Dump: x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
 t/op/lexsub.t	12	Bug. Fell through. Missing case: [ x5 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/numconvert.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
-t/op/override.t	2	Handle single node of unknown type. Dump: x2
 t/op/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
-t/op/stat.t	3	Bug. Fell through. Missing case: [ x2 | Handle single node of unknown type. Dump: x1
+t/op/stat.t	2	Bug. Fell through. Missing case: [ x2
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1

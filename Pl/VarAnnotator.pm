@@ -470,6 +470,7 @@ sub _tw_region_facts {
       elsif ($t->isa('PPI::Token::Quote::Double')
           || $t->isa('PPI::Token::Quote::Interpolate')
           || $t->isa('PPI::Token::QuoteLike::Backtick')
+          || $t->isa('PPI::Token::QuoteLike::Command')   # qx{…}, #369
           || $t->isa('PPI::Token::QuoteLike::Readline')
           || $t->isa('PPI::Token::QuoteLike::Regexp')
           || $t->isa('PPI::Token::Regexp')
@@ -1019,6 +1020,7 @@ sub _tw_walk {
           || $node->isa('PPI::Token::Quote::Double')
           || $node->isa('PPI::Token::Quote::Interpolate')
           || $node->isa('PPI::Token::QuoteLike::Backtick')
+          || $node->isa('PPI::Token::QuoteLike::Command')   # qx{…}, #369
           || $node->isa('PPI::Token::HereDoc'))) {
     _tw_scan_quote_leaf($ctx, $node);
   }

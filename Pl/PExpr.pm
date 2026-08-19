@@ -743,28 +743,39 @@ sub parse {
       return $node_id;
     }
 
-    # - - - Backtick command execution `command`?
-    if (ref($e1) eq 'PPI::Token::QuoteLike::Backtick') {
+    # - - - Command execution: `command` or its qx// spellings?
+    # PPI gives the backtick form its own token class and EVERY qx spelling a
+    # PPI::Token::QuoteLike::Command, so accepting only the first left
+    # `my $c = qx{echo hi}` with no primary at all — the statement was dropped
+    # whole (task #369: 8 drops over the companion population, and $c silently
+    # undef in any program that used the shape).  They are ONE term.
+    #
+    # The delimiter decides interpolation exactly as it does for q// vs qq//:
+    # `qx'…'` does NOT interpolate, every other delimiter does.  PPI records it
+    # in the token's section (`type` is the delimiter pair), which is where the
+    # body comes from too — no re-lexing of the content string.
+    if (ref($e1) eq 'PPI::Token::QuoteLike::Backtick'
+     || ref($e1) eq 'PPI::Token::QuoteLike::Command') {
       say "parse(): Found backtick command"         if 1 & DEBUG;
-      my $content = $e1->content;
-      # Extract the command from `...`
-      $content =~ /^`(.*)`$/s;
-      my $cmd = $1;
+      my ($cmd, $interpolating) = _command_body($e1);
 
       # Create a backtick node with the command as a string child
       my ($node, $node_id) = $self->make_node_insert('backtick');
 
-      # Backticks interpolate like double-quoted strings
-      my $str_token = PPI::Token::Quote::Double->new(qq{"$cmd"});
       my $cmd_id;
-
-      # Check if interpolation is needed (has $ or @)
-      if ($cmd =~ /[\$\@]/) {
+      # Backticks interpolate like double-quoted strings
+      if ($interpolating && $cmd =~ /[\$\@]/) {
         say "parse(): Backtick needs interpolation"  if 1 & DEBUG;
+        my $str_token = PPI::Token::Quote::Double->new(qq{"$cmd"});
         $cmd_id = $self->str_interpol->parse_interpolated_string($self,
 								 $str_token);
+      } elsif ($interpolating) {
+        $cmd_id = $self->make_node(PPI::Token::Quote::Double->new(qq{"$cmd"}));
       } else {
-        $cmd_id = $self->make_node($str_token);
+        # qx'…': the body is literal, so it must not travel as a double-quoted
+        # token — a `$` in it would be interpolated by whoever reads it next.
+        (my $esc = $cmd) =~ s/([\\'])/\\$1/g;
+        $cmd_id = $self->make_node(PPI::Token::Quote::Single->new("'$esc'"));
       }
       $self->add_child_to_node($node_id, $cmd_id);
 
@@ -5968,6 +5979,23 @@ sub id_of_internal_node {
 }
 
 
+
+# The command text of a `…` / qx…  token, and whether it interpolates.
+# The body comes from PPI's own section record (position/size within the
+# token), so every delimiter — qx{} qx() qx[] qx// qx## qx'' — is read the same
+# way and no delimiter has to be spelled here.  A `''` section is perl's
+# non-interpolating form (task #369).
+sub _command_body {
+  my ($tok) = @_;
+  if (ref($tok) eq 'PPI::Token::QuoteLike::Backtick') {
+    my ($body) = $tok->content =~ /^`(.*)`\z/s;
+    return ($body // '', 1);
+  }
+  my $sec = $tok->{sections} && $tok->{sections}[0]
+    or die "PCL internal: qx token without a section: " . $tok->content . "\n";
+  my $body = substr($tok->content, $sec->{position}, $sec->{size});
+  return ($body, (($sec->{type} // '') eq q{''}) ? 0 : 1);
+}
 1;
 
 __END__
