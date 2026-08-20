@@ -46,6 +46,24 @@ not-supported.md → only then probe.*
   while `print $fh - 3` is a subtraction on the glob.  PCL reads both as the
   subtraction.  Filed **#405** — the same adjacency question §22 answered for
   letters, unanswered for numbers.
+- **B2 (#343) IS A STALE INDEX, not a grammar gap** — MEASURED, not yet fixed
+  (`docs/b2-stale-operand-ceiling-s417.md`; Track B is Fable-designed).
+  `handle_subcalls` scans `@$e` RIGHT TO LEFT, saves `$last_low_prio_op = $i`
+  at an `and`/`or`/`xor`, then REDUCES words to its left — splicing `@$e` and
+  shifting that operator left without adjusting the saved index.  The
+  paren-less list operator's `$end_pars = $last_low_prio_op - 1` is therefore
+  computed from a stale position and its argument list swallows the operator.
+  The error is (elements the intervening reduction consumed − 1), so it is
+  **not always off-by-one**.
+- **THIS FAMILY HAS AN UNCOUNTED HALF**: with a shift ≥ 2 the statement does
+  not DROP, it RUNS wrong (`f ref $h{k} or g "fb"` — perl `f() g(fb)`, PCL
+  `g(fb) f(1)`).  The drop census can only ever see part of #343.
+- **Population scan (`PCL_B2_TRACE=1`, 658 files): 10 events, 3 sources** —
+  bless.t:179 (the census DROP), split.t:503 (a SILENT WRONG in no count),
+  reg_fold.t:165 (**stale but BENIGN**, probed identical to perl).  So a
+  stale-index disagreement is **necessary but not sufficient** for a
+  divergence — do not build a gate that assumes otherwise.  `map` and `eval`
+  fire too, so #343's "parenless USER-sub call" framing is too narrow.
 - Census after B1: **46 files / 139 drops** (was 49/165); gate **152 files /
   5579 rows**; cache generation **v2-160**, all three artifacts regenerated.
 

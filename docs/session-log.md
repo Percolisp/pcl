@@ -100,6 +100,26 @@ Cache generation v2-159 → **v2-160**, all three checked-in artifacts
 regenerated (only the `gen=` stamp moved in each — no source of theirs uses a
 stacked filetest).
 
+**Then the B2 (#343) measurement the plan asked for, taken.**  Track B2 said
+"Mechanism NOT yet located" and named the first diff to take; it is taken, and
+the mechanism is a STALE INDEX rather than a grammar gap.  `handle_subcalls`
+scans `@$e` right to left, saves `$last_low_prio_op` at an `and`/`or`/`xor`,
+then reduces words to its LEFT — splicing `@$e` and shifting that operator
+without adjusting the saved index — so `$end_pars = $last_low_prio_op - 1`
+comes from a position that no longer means what it meant.  Two findings the
+task did not have: the error is (elements consumed − 1), so it is **not always
+off-by-one**; and with a shift ≥ 2 the statement does not drop but **runs
+wrong** (`f ref $h{k} or g "fb"` — perl `f() g(fb)`, PCL `g(fb) f(1)`), which
+is a half of this family the drop census cannot see.  A population scan
+(`PCL_B2_TRACE=1`, the env-guarded probe added here, 658 files, 1m34s) found
+**10 events in 3 sources**: bless.t:179 (the census drop), split.t:503 (a
+silent wrong in no count — probed: perl runs the `or` branch, PCL does not)
+and reg_fold.t:165 (**stale but benign** — emission probed identical to perl,
+which is the caveat any future gate has to respect).  `map` and `eval` fire
+too, so the task's "parenless USER-sub call" framing is narrower than the
+mechanism.  Written up in `docs/b2-stale-operand-ceiling-s417.md` with the
+two open design questions; **no fix attempted — Track B is Fable-designed.**
+
 **Queue**: #372 is done, so next is **#343 (Track B2)** → the `class NAME ;` +
 #401-eval fillers → re-census → the announce→DIE flip, then M–N release.
 
