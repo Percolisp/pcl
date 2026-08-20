@@ -830,6 +830,57 @@ into two `~` tokens, and reparses; an INFIX `~~` is left alone, and PCL then
 refuses it perl-shaped (smart match was removed in perl 5.42 — task #371,
 `docs/not-supported.md`).  Guard rows + canary: `Pl/t/misc-fixes-02.t`.
 
+
+## 22. A filetest after a SCALAR filehandle is split into `-` + WORD  [CONFIRMED 1.291]
+
+**Perl:** in `print FILEHANDLE LIST` the handle may be a bareword, a scalar or
+a block, and a leading `-X` in the LIST is one filetest operator in all three.
+`perl -MO=Deparse` agrees, and it distinguishes the spaced form:
+
+```perl
+print $fh -e $f;      # deparse: print $fh -e $f       (one filetest)
+print $fh - e $f;     # deparse: print $fh -(e($f))    (minus, then a call)
+```
+
+Adjacency is the discriminator, and perl honours it.
+
+**PPI:** the BAREWORD handle lexes correctly and the SCALAR/BLOCK handle does
+not — the same `-e`, two answers:
+
+```
+# PPI::Document->new(\'print STDERR -e $f;')->tokens   -- CORRECT
+# PPI::Token::Word          print
+# PPI::Token::Word          STDERR
+# PPI::Token::Operator      -e         <-- one filetest operator
+# PPI::Token::Symbol        $f
+
+# PPI::Document->new(\'print $fh -e $f;')->tokens      -- WRONG
+# PPI::Token::Word          print
+# PPI::Token::Symbol        $fh
+# PPI::Token::Operator      -          <-- expected Operator '-e'
+# PPI::Token::Word          e          <--
+# PPI::Token::Symbol        $f
+```
+
+`print {$x} -e $f;` splits the same way.  The rule PPI appears to apply is
+"after a scalar variable a `-` must be binary minus", which is wrong here
+because the scalar is a FILEHANDLE, not a term — and, notably, `-e` cannot be
+a binary operator anywhere: `$n -e $b` is a perl SYNTAX ERROR (`syntax error
+near "$n -e "`), so there is no competing reading to protect.  PPI already
+makes exactly this term-or-not decision correctly for `x`, for `/PATTERN/`
+and for `~~` after a bareword handle.
+
+**Impact on PCL (task #372): silent-wrong, then a crash.**  PCL lowered
+`print $fh -e $f` to `(p-print (p-- $fh (pl-e $f)))` — a subtraction of a call
+to a sub named `e`, printed to STDOUT instead of to `$fh` — which dies at load
+with "The function main::pl-e is undefined" when no such sub exists.
+`Pl::PExpr::_fuse_print_filehandle_filetest` fuses the two tokens back into
+the `-X` Operator when they are ADJACENT (`next_sibling`, not
+`snext_sibling`), the head word is `print`/`printf`/`say`, the next element is
+a scalar or block filehandle, and the letter is in PExpr's `prefix` table — so
+the spaced form keeps its correct reading.  Guard rows:
+`Pl/t/filetest-stack-01.t`.
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting

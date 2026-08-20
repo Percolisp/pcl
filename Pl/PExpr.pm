@@ -482,6 +482,7 @@ sub parse {
   $self->_split_pid_magic_cast_run($e);
   $self->_fold_braced_punct_magic($e);
   $self->_retag_magic_array_index($e);
+  $self->_fuse_print_filehandle_filetest($e);
   $self->_default_filetest_operand($e);
   # Collapse dynamic typeglob-slot *{EXPR}{SLOT} into a single glob_slot node
   # BEFORE handle_subcalls, so a preceding named unary grabs the whole glob-slot
@@ -1803,7 +1804,8 @@ sub parse {
                              && ($post->{type} // '') eq 'tree_val') {
             $self->node_tree->set_metadata($id_term, 'backslash_paren_list', 1);
         }
-        my $node = $self->_prefix_op_node($op, $id_term);
+        my $node = $self->_filetest_prefix_node($op, $op_name, $post, $id_term)
+                // $self->_prefix_op_node($op, $id_term);
 
         $e->[$hi_ix] = $node;
         splice @$e, $hi_ix+1, 1;
@@ -4560,6 +4562,45 @@ sub _retag_magic_array_index {
   }
 }
 
+# PPI BUG (1.291, docs/ppi-upstream-bugs.md): after a SCALAR or BLOCK
+# filehandle, a leading filetest is split in two.
+#
+#     print $fh -e $f    →  Word(print) Symbol($fh) Operator(-) Word(e) Symbol($f)
+#     print STDERR -e $f →  Word(print) Word(STDERR) Operator(-e)  Symbol($f)
+#
+# The bareword form is right and the scalar/block form is wrong: perl reads
+# `-e` as ONE filetest in both (deparse agrees), and after a term `-e` cannot
+# be a binary minus at all — `$n -e $b` is a perl SYNTAX ERROR, so there is no
+# competing reading to protect.  Repair the tokens here and every consumer
+# downstream — the print-filehandle oracle, `_default_filetest_operand`, the
+# prefix-run reduction — sees the `-X` Operator PPI should have produced, with
+# no new case anywhere (rule 11).
+#
+# ADJACENCY is the discriminator and perl honours it too: `print $fh - e $f`
+# really is negation of a call to sub `e` (probed, deparse: `-(e('...'))`).
+# `next_sibling` — not `snext_sibling` — answers it: with a space between, the
+# dash's immediate sibling is the Whitespace token.
+sub _fuse_print_filehandle_filetest {
+  my ($self, $e) = @_;
+  for (my $i = 0; $i + 3 < scalar(@$e); $i++) {
+    my $word = $e->[$i];
+    next unless $self->is_word($word)
+             && $word->content =~ /^(?:print|printf|say)$/;
+    my $fh = $e->[$i + 1];
+    next unless (ref($fh) eq 'PPI::Token::Symbol' && $fh->content =~ /^\$/)
+             || ref($fh) eq 'PPI::Structure::Block';
+    my ($dash, $letter) = @$e[$i + 2, $i + 3];
+    next unless ref($dash) eq 'PPI::Token::Operator' && $dash->content eq '-';
+    next unless $self->is_word($letter) && $letter->content =~ /^[A-Za-z]$/;
+    # The prefix table IS the filetest list — no second copy of the letters.
+    next unless $self->prefix->{'-' . $letter->content};
+    next unless $dash->can('next_sibling')
+             && ($dash->next_sibling // 0) == $letter;
+    splice @$e, $i + 2, 2,
+           PPI::Token::Operator->new('-' . $letter->content);
+  }
+}
+
 sub _default_filetest_operand {
   my ($self, $e) = @_;
   for (my $i = 0; $i < scalar(@$e); $i++) {
@@ -4582,6 +4623,13 @@ sub _is_print_term_start {
   if ($ref eq 'PPI::Token::Operator') {
     my $op = $token->content;
     return 1 if $op eq '!' || $op eq '~' || $op eq 'not';
+    # A filetest `-X` is unary-only too, so it ALWAYS starts a term.  The
+    # letter is what discriminates: plain `-` is binary minus (`print $x - 3`)
+    # and must keep answering 0.  All three callers want perl's answer here —
+    # `print STDERR -e $f` reads STDERR as the handle BECAUSE `-e` starts a
+    # term, and `_default_filetest_operand` must not splice `$_` into the
+    # middle of a stacked run (`-f -d $x` is not `-f $_ -d $x`).
+    return 1 if $op =~ /^-[A-Za-z]$/;
     return 0;  # All others: , . + - * / == && || etc.
   }
 
@@ -5449,6 +5497,61 @@ sub _prefix_op_node {
   $self->add_child_to_node($id, $self->make_node($op_tok));   # operator
   $self->add_child_to_node($id, $operand_id);                 # operand
   return $node;
+}
+
+# STACKED FILETESTS are the `_`-chain, not a nest (perldoc -f -X):
+#
+#     -f -w -x $file   ==   -x $file && -w _ && -f _
+#
+# The RIGHTMOST test runs first on the real operand; each earlier test then
+# re-uses the stat buffer `_`, `&&`-short-circuited, so a false inner value IS
+# the result.  Nesting them instead (`-f` applied to `-d`'s "1"/undef) is
+# SILENT WRONG and answers the opposite of perl on the common case:
+# `-e -f "/etc/passwd"` is 1 in perl, undef nested.
+#
+# The prefix loop above already reduces a consecutive prefix run RIGHTMOST
+# first, so this is called once per outer filetest with the inner run already
+# reduced.  The discriminator is a mark on the node the inner reduction left:
+# only a filetest reduction of ours chains, so `-f $x` (nothing to chain to),
+# `! -e $f` (the `!` node is unmarked) and `-e $t` where `$t` merely holds a
+# filetest's VALUE all keep today's shape — which is what perl does too
+# (probed: `my $t = -f "/etc/passwd"; -e $t` is FALSE, no stacking).
+#
+# Returns the chain node, or undef when this is not a stacked filetest and the
+# caller should build the ordinary prefix node.
+sub _filetest_prefix_node {
+  my ($self, $op_tok, $op_name, $post, $operand_id) = @_;
+  return undef unless ($op_name // '') =~ /^-[A-Za-z]$/;
+
+  # Innermost filetest of a run: ordinary node, but marked so an enclosing
+  # filetest knows to chain onto it rather than consume its value.
+  if (! $self->_is_filetest_reduction($post)) {
+    my $node = $self->_prefix_op_node($op_tok, $operand_id);
+    $self->node_tree->set_metadata($self->id_of_internal_node($node),
+                                   'filetest_reduction', 1);
+    return $node;
+  }
+
+  # `INNER && -X _` — built by re-parsing the documented spelling, so the
+  # ordinary `&&` and filetest machinery lowers it (rule 11: no new emission
+  # case, and `p-&&`'s value semantics already carry the false value through).
+  # `_` is a PPI::Token::Magic, NOT a Word — that is how the lexer spells it
+  # (`PPI::Document->new(\"-f _")` gives Operator + Magic), and it is what
+  # makes the stat-cache filehandle emit as the bare symbol `_` instead of the
+  # string "_" that handle_subcalls turns an unknown bareword into.
+  my $chain_id = $self->parse([ $post,
+                                PPI::Token::Operator->new('&&'),
+                                PPI::Token::Operator->new($op_name),
+                                PPI::Token::Magic->new('_') ]);
+  $self->node_tree->set_metadata($chain_id, 'filetest_reduction', 1);
+  return $self->make_subtree_item($chain_id);
+}
+
+sub _is_filetest_reduction {
+  my ($self, $item) = @_;
+  return 0 unless defined $item && $self->is_internal_node_type($item);
+  return $self->node_tree->get_metadata($self->id_of_internal_node($item),
+                                        'filetest_reduction') ? 1 : 0;
 }
 
 # THE reduction step of parse()'s postfix loop (#387 family 4, s413): the

@@ -445,7 +445,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **149 test files, 5442 rows** with a built pclxs sibling (s409, measured
+- **152 test files, 5579 rows** (s417) with a built pclxs sibling (s409, measured
   COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
   work, user s394/s395: ignore XS rows); **5428 without** (arithmetic: minus
   the 14 xs rows).  **RULED s409: compare a gate count against a measurement
@@ -588,6 +588,23 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2b00. **Track B1 (#372) SHIPPED s417 — stacked filetests.**  `-f -d $x` is ONE
+term and lowers to perl's `_`-chain (`-x $f && -w _ && -f _`), never a nest
+(nesting is SILENT WRONG the other way: `-e -f "/etc/passwd"` is 1 in perl,
+undef nested).  It needed NO `_term_extent`/`_reduce_term`/`$end_pars` change —
+the operator loop already reduced prefix runs rightmost-first; the bug was one
+line in the SHARED oracle `_is_print_term_start`, which answered 0 for a `-X`
+Operator, so the `$_`-default pre-pass spliced `$_` into the MIDDLE of a run.
+Exposed a PPI bug (§22): after a SCALAR/BLOCK filehandle PPI splits `-e` into
+`-` + Word, so `print $fh -e $f` was a subtraction of a call to sub `e` —
+repaired on ADJACENCY (`next_sibling`), which is perl's own discriminator
+(`print $fh - e $f` IS `-(e($f))`).  Census 27 drops → 1; gate **152/5579**;
+generation **v2-160**.  Guard `Pl/t/filetest-stack-01.t`.  Residue filed:
+**#403** (a filetest's FALSE is a DEFINED `""` when the stat succeeded — the
+whole `p--*` family conflates it with undef; do NOT assert definedness on a
+filetest until it closes), **#404** (perl stacks through PARENS), **#405**
+(`print $fh -3` writes to `$fh`).  **Queue now: #343 (B2) → `class NAME ;` +
+#401-eval fillers → re-census → announce→DIE flip → M–N release.**
 2b0. **`docs/fable-answers-s415.md` + `docs/b1-operand-grammar-s416.md` — the s414+s415 batches RULED (s416, Fable, 2026-08-20) and THE B1 DESIGN.**  Both sessions APPROVED (gate/sweep/companion independently re-run; TOTAL 18369; 14 probes identical to perl); ONE review fix — parser2-02.t t60 was a stale twin guard of the refusal s415e removed, failing the gate since `829bcf5` (standing rule: grep Pl/t for a refusal's message text in the commit that removes it; gate rows now 5566).  Rulings: Track A deviations RATIFIED + drop-harvest-first standing; "refused is explained" IS the census intent; #401-eval → session L (cache-key leg mandatory); #402+#119 two tasks / one session / release phase 4; `class NAME ;` refusal AUTHORIZED, strict key only.  **B1 (#372) re-designed from measurement and UNBLOCKED — the b1 doc supersedes option-b-phase2-plan §2's sketch**: one predicate (`_is_print_term_start`: a `-X` Operator starts a term) + the print-argument leg + the `_`-chain desugaring (naive nesting is SILENT WRONG, probed); NO `_term_extent`/`$end_pars` changes.  **Queue: #372 → #343 → `class NAME ;` + #401-eval fillers → re-census → announce→DIE flip → M–N release.**
 2b. **`docs/opus5-handoff-s413.md` — THE HANDOFF (s413, Fable, 2026-08-18; Fable time short): read FIRST.**  §1 where the project is; §2 Opus's first job = task #395: verify (gate + bench A/B + full sweep on the tip) and `--ff-only` merge branch `s413-lisp-dedup` (the six runtime dedup families + fix #394, Fable-verified); §3 the queue (remaining in-scope dedup families 2+10, 14/26, 38 → plan-post-s408 §2); §4 rules: **dup-census scope = COMPILER + RUNTIME ONLY (USER s413; tools may be replaced; tests never optimized)**, the census is a bug finder (probe the DIFFERENCE between copies vs perl before unifying — #393, #394), one sweep covers an IDENTICAL batch, an interrupted tool call may have RUN.
 
@@ -646,7 +663,7 @@ Not relevant now:
 - `docs/v1-implementation-plan.md` - **V1 feature plan** (prioritized, with full implementation details for each item including `local $hash{key}`, bare-if return, string eval, etc.)
 - `docs/test-infrastructure.md` - **Test infra notes**: why SBCL startup is slow, `fresh_perl_is` limitations, saved-core optimisation
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
-- `docs/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 72 files / 379 drops over perl-tests + perl's t/ + lib, with the compiler's own message per file. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
+- `docs/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 46 files / 139 drops as of s417 (72/379 at the s399 measurement), with the compiler's own message per file.  Rows leave BY EDIT with their cause, never by re-blessing. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
 - `docs/tap-assertion-audit.md` - **What the TAP layer can and cannot claim** (#202, s330): the per-function inventory of reachable failure paths, the ten findings (unlike could not fail; eq_hash had never run; cmp_ok manufactured verdicts for `<=>`/`cmp`/`=~`/`!~`), the rule that **a claim that cannot be evaluated reports `not ok` naming the reason and only `plan()` dies**, why TAP descriptions must be Test::More's (they are join keys), and the two deliberate non-changes. Read before touching `cl/pcl-test.lisp`.
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.

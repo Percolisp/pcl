@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 121;
+plan tests => 122;
 
 sub run_cl {
     my ($code) = @_;
@@ -963,6 +963,13 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
     ok( $doc && grep { $_->isa('PPI::Token::Number') && $_->content eq '-1' } $doc->tokens,
         'CANARY: PPI still swallows `)-1` into a negative Number — if this '
       . 'FAILS, drop _fix_ppi_negative_number_bug (ppi-upstream-bugs.md §15)' );
+}
+{
+    my $doc = PPI::Document->new(\'print $fh -e $f;');
+    ok( $doc && !grep { $_->isa('PPI::Token::Operator') && $_->content eq '-e' } $doc->tokens,
+        'CANARY: PPI still splits a filetest after a SCALAR filehandle into '
+      . '`-` + Word — if this FAILS, drop _fuse_print_filehandle_filetest '
+      . '(ppi-upstream-bugs.md §22)' );
 }
 {
     # PPI's own answer, with NO callback attached — the state the feature table

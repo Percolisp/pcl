@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 49 files, 165 drops -- 8 perl-tests files (10
-# drops), 41 companion files (155), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 46 files, 139 drops -- 8 perl-tests files (10
+# drops), 38 companion files (129), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -98,8 +98,25 @@
 #         declines.  The file's verdict is unchanged (DIFF 7/10) — its next
 #         blocker is the INDIRECT-OBJECT call `h F` at line 91, which holds 139
 #         of perl's 156 rows: task #381.
+#   s417  t/op/filetest.t 19 -> 1 and t/op/filetest_stack_ok.t 1, t/op/filetest_t.t
+#         5, t/op/stat.t 2 -> 0, three rows REMOVED (#372, Track B1 — the design
+#         is docs/b1-operand-grammar-s416.md).  A STACKED filetest (`-f -d $x`)
+#         is one term in perl and PCL dropped the whole statement: the shared
+#         "does a term begin here?" oracle answered 0 for a `-X` Operator, so
+#         the `$_`-default pre-pass spliced `$_` into the MIDDLE of the run and
+#         the mangled token list fell through the operator loop.  With the
+#         oracle widened by one line the operator loop's existing prefix-run
+#         walk reduces the run, and the run LOWERS to perl's documented
+#         `_`-chain (`-f -d $x` == `-d $x && -f _`) rather than a nest, which
+#         would have been silent-wrong in the opposite direction.  26 of the 27
+#         drops go; the 1 left in filetest.t is `sub _ { … } is(-f _, …)`, a
+#         statement-BOUNDARY problem (PPI joins the two into one statement),
+#         not operand grammar.  Confirmed independently by the runner's DROPS
+#         column, which reported all four files as fixed; op/filetest.t's
+#         verdict moved 16/6 -> 25/11 and its old signature was
+#         `undef-fn:main::pl-f` — the silent-wrong this closes.
 # Causes, aggregated over files (re-counted from the rows below, s405):
-#   49  Bug. Fell through. Missing case: [        <- the dominant one
+#   46  Bug. Fell through. Missing case: [        <- the dominant one
 #   20  Handle single node of unknown type
 #    6  PCL: <a ruled refusal, swallowed into a drop instead of dying>
 #    5  Bug. Fell through. Missing case: []
@@ -186,9 +203,7 @@ t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
 t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2
 t/op/die_unwind.t	4	Bug. Fell through. Missing case: [ x4
-t/op/filetest.t	19	Bug. Fell through. Missing case: [ x19
-t/op/filetest_stack_ok.t	1	Bug. Fell through. Missing case: [ x1
-t/op/filetest_t.t	5	Bug. Fell through. Missing case: [ x5
+t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
@@ -199,7 +214,6 @@ t/op/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Tok
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
-t/op/stat.t	2	Bug. Fell through. Missing case: [ x2
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1

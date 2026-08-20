@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 20;
+use Test::More tests => 23;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -337,6 +337,42 @@ PERL
     my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
     ok( !(grep { $_->content eq '~~' } @ops),
         'a `~~` with no term before it should lex as two `~` complements' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+
+# ── Bug 21: a filetest after a SCALAR filehandle is split into `-` + WORD ────
+# `print FILEHANDLE LIST` takes a bareword, a scalar or a block as the handle,
+# and a leading `-X` in the LIST is ONE filetest operator in all three (perl
+# -MO=Deparse agrees).  PPI gets the bareword right and splits the scalar and
+# block forms into Operator('-') + Word('e') — a subtraction of a call.  There
+# is no competing reading to protect: `-e` cannot be a binary operator at all,
+# and `$n -e $b` is a perl syntax error.  Adjacency is the discriminator —
+# `print $fh - e $f` really IS `-(e($f))`, and perl honours the space.
+{
+    my $doc = PPI::Document->new(\'print $fh -e $f;');
+    my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
+    ok( (grep { $_->content eq '-e' } @ops),
+        'a filetest after a scalar filehandle should lex as one `-e` operator' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# The block-handle form splits the same way…
+{
+    my $doc = PPI::Document->new(\'print {$x} -e $f;');
+    my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
+    ok( (grep { $_->content eq '-e' } @ops),
+        'a filetest after a block filehandle should lex as one `-e` operator' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# …while the BAREWORD handle already lexes correctly — the inverse that shows
+# the two paths disagree about the same operator.
+{
+    my $doc = PPI::Document->new(\'print STDERR -e $f;');
+    my @ops = grep { $_->isa('PPI::Token::Operator') } $doc->tokens;
+    ok( (grep { $_->content eq '-e' } @ops),
+        'a filetest after a BAREWORD filehandle lexes as one `-e` (control)' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
 }

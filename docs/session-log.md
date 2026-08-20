@@ -4,6 +4,107 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 417 (2026-08-20) — Track B1 (#372) SHIPPED: stacked filetests parse and lower to the `_`-chain; a PPI bug logged; 27 census drops → 1
+
+Executed `docs/b1-operand-grammar-s416.md` unchanged.  Its central claim held
+under measurement: **the drop was never at the operand-taker**, so B1 needed no
+`_term_extent` / `_reduce_term` / `$end_pars` change and no new grammar
+production.  The operator loop's existing "adjacent prefix operators reduce
+INNER-first" walk already handles a stacked run; what broke it was one
+predicate upstream.
+
+**Piece 1 — the predicate.** `_is_print_term_start` answered 0 for every
+Operator except `!`/`~`/`not`, so `_default_filetest_operand` read the `-d` in
+`-f -d $x` as "no operand" and spliced `$_` into the MIDDLE of the run.  The
+mangled `-f $_ -d $x` then fell through the main loop.  One line widens the
+SHARED oracle — not scoped to the caller that had the bug, because all three
+call sites want perl's answer (`print STDERR -e $f` reads STDERR as the handle
+BECAUSE `-e` starts a term).
+
+**Piece 2 — the lowering, which is where the silent-wrong was.**  Naive nesting
+parses but means the opposite: `-e -f "/etc/passwd"` is 1 in perl and undef
+nested, because `-e` would be applied to `-f`'s *value*.  perldoc -f -X:
+`-f -w -x $file` == `-x $file && -w _ && -f _`.  `_filetest_prefix_node` marks
+each filetest reduction and, when an outer filetest finds a marked operand,
+builds the chain by RE-PARSING `INNER && -X _` — the ordinary `&&` and filetest
+machinery lowers it, so there is no new emission case.  A mixed run keeps
+per-op recursion around the filetest sub-run (`! -e $f`), and a variable
+holding a filetest's VALUE does not stack — which is what perl does too
+(probed: `my $t = -f $F; -e $t` is false).
+
+**Piece 3 — the print leg, which turned out to be a PPI bug.**  Widening the
+oracle exposed `print $fh -e $f`: PPI lexes `-e` as ONE Operator after a
+BAREWORD handle and splits it into Operator('-') + Word('e') after a SCALAR or
+BLOCK one, so PCL emitted a subtraction of a call to a sub named `e` and died
+at load with `main::pl-e is undefined`.  There is no competing reading to
+protect — **`$n -e $b` is a perl syntax error**, so `-e` is never binary — and
+ADJACENCY is the discriminator perl itself uses (`print $fh - e $f` really is
+`-(e($f))`, by deparse).  `_fuse_print_filehandle_filetest` re-fuses the two
+tokens when `next_sibling` (not `snext_sibling`) says they touch, and every
+consumer downstream then sees the `-X` PPI should have produced.  Logged per
+rule 13 in the same commit: `ppi-upstream-bugs.md` §22, three rows in
+`docs/ppi-bug-report.t` (plan 20 → 23, two failing + one passing control), and
+a canary in `Pl/t/misc-fixes-02.t` (121 → 122).
+
+**Two implementation notes worth keeping.**  `_` is a `PPI::Token::Magic`, not
+a Word — synthesizing it as a Word made it lower to the *string* `"_"`, because
+`handle_subcalls` turns an unknown bareword after a unary operator into a
+string.  Build the token the lexer builds.  And the filetest letters come from
+PExpr's existing `prefix` table rather than a fresh list, so `q`/`y`/`s` cannot
+drift apart from the operators that actually exist.
+
+**Measured** (a `PCL_B1` flag for the A/B, then flipped and DELETED in the same
+session, per the recipe):
+
+* emission A/B over FOUR populations, 1140 files — perl-tests 111 SAME / 0
+  DIFF, companion 601 SAME / **4 DIFF**, lib 22 SAME / 0 DIFF, cpan-tests 402
+  SAME / 0 DIFF.  Every one of the 4 diffs is a `;; PARSE ERROR` drop becoming
+  real code; nothing else in any population moved a byte.
+* gate-SET scan, BOTH populations, 638 files each — **5 verdict moves, all
+  improvements, no new dies**.  `tie_fetch_count.t` did not really move (still
+  refused for smart match), exactly as the design predicted.
+* a 30-row perl-oracle probe set — 29 match; the one that does not is a
+  pre-existing glob-numification divergence whose emission is byte-identical
+  before and after.
+* gate **152 files / 5579 rows** (s416's 5566 + 12 new B1 rows + 1 PPI canary), only the 13 pclxs
+  xs rows failing; full sweep **GATE clean, TOTAL 18369 (+0), drops 10 =
+  census**; companion `--all --quick` re-run, whose DROPS column independently
+  reported all four files fixed.
+* census **27 drops → 1**: op/filetest.t 19 → 1, filetest_stack_ok.t 1 → 0,
+  filetest_t.t 5 → 0, stat.t 2 → 0 (three rows removed by EDIT, 49/165 →
+  46/139).  op/filetest.t's verdict moved **16/6 → 25/11** and its old
+  signature was `undef-fn:main::pl-f` — the silent-wrong this closes.  The one
+  drop left in filetest.t is `sub _ { … } is(-f _, …)`, a statement BOUNDARY
+  problem, not operand grammar.
+
+**A process mistake worth recording.**  The design said the guard rows land in
+`Pl/t/reduce-term-01.t`, "new file, it does not exist yet".  It does exist —
+Option B phase 1's `_term_extent` unit tests, 127 rows — and it was overwritten
+before that was noticed.  It was restored from HEAD intact and the rows went to
+`Pl/t/filetest-stack-01.t` instead.  The tell was in plain sight and misread:
+the gate came back **151 files / 5451 rows** when s416 had left it at 151/5566,
+and the 127-row hole is exactly the clobbered file.  *A gate row count that
+falls is a finding, not noise* — and `git status` distinguishes `M` from `??`
+in one character.
+
+**Residue filed**: **#403** (perl's filetest FALSE is a DEFINED `""` when the
+stat succeeded and undef only when it failed — the whole `p--*` family
+conflates the two; the design's fidelity note, not one site, so filed with its
+reproducer per the note's other branch), **#404** (perl STACKS through
+parentheses: `-e (-f $x)` deparses to `-e -f $x`, PCL nests — pre-existing,
+byte-identical emission), **#405** (`print $fh -3` writes to `$fh` because an
+adjacent negative literal is a term; PCL reads `$fh - 3` — the same adjacency
+question §22 answered for letters).
+
+Cache generation v2-159 → **v2-160**, all three checked-in artifacts
+regenerated (only the `gen=` stamp moved in each — no source of theirs uses a
+stacked filetest).
+
+**Queue**: #372 is done, so next is **#343 (Track B2)** → the `class NAME ;` +
+#401-eval fillers → re-census → the announce→DIE flip, then M–N release.
+
+---
+
 ## Session 416 (2026-08-20, Fable) — the s414+s415 review: APPROVED with one stale guard row fixed; the five asks ruled; B1 (#372) re-designed from measurement and UNBLOCKED
 
 The review (`docs/fable-answers-s415.md`): cold gate, full sweep and a

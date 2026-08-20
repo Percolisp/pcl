@@ -11,6 +11,44 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s417 (2026-08-20) — Track B1 SHIPPED: stacked filetests parse, and lower to the `_`-chain
+
+- **`-f -d $x` IS ONE TERM and lowers to perl's `_`-chain, never a nest**
+  (#372, `docs/b1-operand-grammar-s416.md` is the design, shipped unchanged).
+  `-f -w -x $file` == `-x $file && -w _ && -f _`: RIGHTMOST test on the real
+  operand, each earlier one on the stat buffer, `&&`-short-circuited.  Nesting
+  is SILENT WRONG in the opposite direction — `-e -f "/etc/passwd"` is 1 in
+  perl and undef nested.  Guard `Pl/t/filetest-stack-01.t`.
+- **A `-X` Operator STARTS A TERM — one line in the SHARED oracle**
+  (`_is_print_term_start`), not scoped to the caller that had the bug.  All
+  three call sites want perl's answer; `print STDERR -e $f` reads STDERR as the
+  handle BECAUSE `-e` starts a term.  The `$_`-default pre-pass was splicing
+  `$_` into the MIDDLE of a stacked run, which is the whole story of the 27
+  census drops — **the operator loop's prefix-run walk already reduced the run
+  rightmost-first**, so B1 needed NO `_term_extent`/`_reduce_term`/`$end_pars`
+  change and no new grammar production.
+- **PPI SPLITS A FILETEST AFTER A SCALAR/BLOCK FILEHANDLE**
+  (`ppi-upstream-bugs.md` §22): `print $fh -e $f` lexes as Operator('-') +
+  Word('e') while `print STDERR -e $f` lexes correctly.  ADJACENCY is the
+  discriminator and perl honours it too (`print $fh - e $f` really is
+  `-(e($f))`, by deparse), so the repair keys on `next_sibling`.  There is no
+  competing reading to protect: **`$n -e $b` is a perl SYNTAX ERROR**, so `-e`
+  is never a binary operator.
+- **A FILETEST'S FALSE CARRIES INFORMATION** — perl gives a DEFINED `""` when
+  the stat succeeded and `undef` only when it FAILED (`-s` gives 0, `-e` is
+  1-or-undef).  PCL answers undef for both, for a plain `-f "/tmp"` too.
+  Filed **#403**; do not assert definedness on a filetest until it closes.
+- **perl STACKS THROUGH PARENTHESES**: `-e (-f $x)` deparses to `-e -f $x`,
+  but `my $t = -f $x; -e $t` does NOT stack — the rule is syntactic, not
+  "a filetest applied to a filetest's value".  PCL nests the paren form
+  (pre-existing, byte-identical emission).  Filed **#404**.
+- **`print $fh -3` writes to `$fh`** (an adjacent negative literal is a term)
+  while `print $fh - 3` is a subtraction on the glob.  PCL reads both as the
+  subtraction.  Filed **#405** — the same adjacency question §22 answered for
+  letters, unanswered for numbers.
+- Census after B1: **46 files / 139 drops** (was 49/165); gate **152 files /
+  5579 rows**; cache generation **v2-160**, all three artifacts regenerated.
+
 ## s416 (2026-08-20, Fable) — s414+s415 REVIEWED and APPROVED (one stale guard row fixed); the §7 asks ruled; B1 re-designed from measurement
 
 - **s414 + s415 APPROVED as shipped** (`docs/fable-answers-s415.md`): cold
