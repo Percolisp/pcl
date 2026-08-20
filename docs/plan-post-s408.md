@@ -248,12 +248,29 @@ its reproducer (this session: #376, #377).
   ExprToCL / Parser); one more that reuses the token-stream predicate is
   fine.  Full documents still have ONE construction site (`_ppi_new`).
 
-## 5. Decisions that are the USER's — still open (from plan-post-s400 §4)
+## 5. Decisions that were the USER's — ALL THREE SETTLED (s416, 2026-08-20)
 
-1. **Public name** — "PCL" collides; cheap to settle before #280.
-2. **pclxs bundling** — release PCL first, mention pclxs as the experimental
-   XS sibling; its GitHub push stays your call (#92).
-3. **Hosting / remote** — the repo has no remote; #283 (CI) waits on it.
+1. **Public name: "PCL" under the GitHub org "Percolisp"** — the org name
+   resolves the collision (Portable Common Loops, Point Cloud Library);
+   README spells it "PCL (Percolisp)".
+2. **pclxs: WAITS — not bundled with v0.1.**  Ruled after the s416 estimate:
+   the bridge has validated one real module end-to-end; 50 % of random
+   XS-with-deps is months away, with a permanent excluded class (B::,
+   parser plugins, Devel::*).  The release ships "pure-perl, XS
+   experimental"; the decision-relevant XS target is "top-20 XS hub modules
+   work", measured by running the top-10 through `pcl-xs-install` and
+   fitting the coverage curve.
+3. **Hosting: `https://github.com/Percolisp/pcl` — EXISTS**, with the user's
+   own curated 70-commit public history (5 stars, 0 forks; stale early-era
+   snapshot: 93 test files / "~95 %" README).  Local `origin` now points at
+   it (no push yet).  #283 (CI) is unblocked; #282 clones from it.  The
+   remaining sub-decision (user's): PUBLISH MODEL — force-push the full
+   1,197-commit local history (one source of truth; 0 forks, so nothing
+   breaks) vs continue curated snapshot pushes onto the public history.
+   Either way the TREE content is identical (docs stay as-is per s401), so
+   the choice is history granularity/provenance only.  #279 gains one item:
+   the tracked `.claude/settings.json` hook path is ABSOLUTE
+   (`/home/bernt/...`) — make it relative before the next public push.
 
 ## 6. Guardrails (unchanged from plan-post-s400 §5, restated for the reader)
 
