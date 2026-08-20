@@ -264,13 +264,18 @@ its reproducer (this session: #376, #377).
    own curated 70-commit public history (5 stars, 0 forks; stale early-era
    snapshot: 93 test files / "~95 %" README).  Local `origin` now points at
    it (no push yet).  #283 (CI) is unblocked; #282 clones from it.  The
-   remaining sub-decision (user's): PUBLISH MODEL — force-push the full
-   1,197-commit local history (one source of truth; 0 forks, so nothing
-   breaks) vs continue curated snapshot pushes onto the public history.
-   Either way the TREE content is identical (docs stay as-is per s401), so
-   the choice is history granularity/provenance only.  #279 gains one item:
-   the tracked `.claude/settings.json` hook path is ABSOLUTE
-   (`/home/bernt/...`) — make it relative before the next public push.
+   **PUBLISH MODEL SETTLED (USER, s416): FULL HISTORY** — "advantages for
+   other people to work with this, if the whole git environment was
+   visible."  Execution DEFERRED to the week of 2026-08-24 (user's call,
+   end of session): run **#279 first** — the mess is a TIP problem: root
+   junk incl. three `REF(0x…)` bug-artifact files, 24 loose planning .mds
+   → `docs/history/`, scratch scripts (`x.pl`, `test-simple.pl`,
+   `test-debug.pl`), the four tracked `.suitelog-*` dirs, `memory/`'s two
+   old session reports, and the ABSOLUTE hook path in tracked
+   `.claude/settings.json` (make relative); grep-pass the CLAUDE.md
+   references of every moved doc, then gate.  THEN preserve the old public
+   70-commit history as branch `snapshot-2026-05` and force-push local
+   `main`.  0 forks — nothing breaks; the stars stay.
 
 ## 6. Guardrails (unchanged from plan-post-s400 §5, restated for the reader)
 

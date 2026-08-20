@@ -50,8 +50,7 @@ not-supported.md → only then probe.*
   target is "top-20 hub modules", measured by coverage curve); hosting =
   **github.com/Percolisp/pcl** (exists, user's curated 70-commit public
   history, disjoint from the local 1,197; local `origin` wired, NO push
-  yet).  Open sub-decision: publish model (full history force-push vs
-  curated snapshots).  #279 gains: the tracked `.claude/settings.json` hook
+  yet).    PUBLISH MODEL SETTLED: FULL HISTORY, executed week of 2026-08-24 after #279 (plan-post-s408 §5 has the recipe).  #279 gains: the tracked `.claude/settings.json` hook
   path is absolute — make relative before the next public push.
 
 ## s415 (2026-08-19/20, Opus) — #281 items 1+2+6 merged; Track A (#371) refuses five families; then #370 (a PPI lexer bug), #369 (qx) and half of #401 put statements BACK; census 378 -> 165
