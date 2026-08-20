@@ -11,6 +11,26 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s418 (2026-08-20, Fable) — s417 RULED; the B2 fix DESIGNED; runpcl surfaces drop announcements
+
+- **s417 APPROVED as shipped** (`docs/fable-answers-s417.md`): gate re-run
+  COLD 153/5590 (only the 13 pclxs xs rows), sweep RE-RUN clean TOTAL 18369
+  (+0) drops 10 = census, 14 probes vs perl 5.40.3 all as documented,
+  reduce-term-01.t byte-identical to the s416 tree.
+- **B2 (#343) fix RULED: RECOMPUTE the ceiling at use; `$last_low_prio_op`
+  is DELETED** (`docs/b2-ceiling-fix-s418.md` is the design).  One rightward
+  scan of the CURRENT `@$e` from `$i+1` to the first same-level
+  `and`/`or`/`xor` — the probe's own `$actual`, validated over 658 files.
+  Adjust-on-splice REJECTED (bookkeeping at every reduction site = the bug's
+  shape, multiplied).  The `pexpr-term-parsing-review` region prohibition
+  does NOT apply — no new rule, the boundary's meaning is unchanged.  The
+  `PCL_B2_TRACE` probe is deleted with the fix and does NOT become a gate.
+- **`runpcl` forwarded NOTHING from a successful transpile's stderr** — the
+  #339 drop announcement was discarded in exactly the run context it exists
+  for.  Fixed (s418 review commit): `^PCL: ` lines are forwarded to stderr on
+  success; clean programs byte-identical; a difftest case that drops now
+  MISMATCHES instead of accidentally matching.
+
 ## s417 (2026-08-20) — Track B1 SHIPPED: stacked filetests parse, and lower to the `_`-chain
 
 - **`-f -d $x` IS ONE TERM and lowers to perl's `_`-chain, never a nest**

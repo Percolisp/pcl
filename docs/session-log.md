@@ -4,6 +4,37 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 418 (2026-08-20, Fable) — s417 RULED; B2 fix designed; runpcl surfaces drop announcements
+
+**Review: s417 APPROVED as shipped** (`docs/fable-answers-s417.md`).
+Independently re-verified: gate COLD (cache cleared) **153/5590**, failures
+exactly the 13 pclxs xs rows; full sweep RE-RUN **GATE clean, TOTAL 18369
+(+0)**, drops 10 = census; **14 probes vs perl 5.40.3** (eight filetest rows
+including the chain semantics, the value-variable no-stack, and both spellings
+of the `print $fh` adjacency; four `class` spellings; both B2 reproducers) —
+every one exactly as s417 documented; `Pl/t/reduce-term-01.t` byte-identical
+to the s416 tree, so the clobber was fully undone.
+
+**Rulings** (details in the answers doc): the B2 fix is **RECOMPUTE at use**
+— `$last_low_prio_op` is deleted and the ceiling derived from the CURRENT
+`@$e` by one rightward scan (the probe's own `$actual`, validated over 658
+files); adjust-on-splice rejected; the `pexpr-term-parsing-review` region
+prohibition does not apply (no new rule — the boundary's meaning is
+unchanged); the `PCL_B2_TRACE` probe is deleted with the fix and does not
+become a gate.  Design: **`docs/b2-ceiling-fix-s418.md`** with the
+equivalence argument, the must-not-change set (reg_fold.t byte-identical
+expected), the nine-row acceptance set (incl. #259/#335 expected NO change)
+and the s372 three-leg bar.
+
+**Review finding, fixed: `runpcl` swallowed the #339 drop announcement** —
+transpile stderr went to a temp file printed only on FAILURE, so a dropped
+statement looked like a program that printed nothing in the one run context
+the announcement was built for.  runpcl now forwards `^PCL: ` lines on
+success; clean output byte-identical; errno-01.t + regexp-subst-01.t pass;
+the SBCL command line untouched.
+
+---
+
 ## Session 417 (2026-08-20) — Track B1 (#372) SHIPPED: stacked filetests parse and lower to the `_`-chain; a PPI bug logged; 27 census drops → 1
 
 Executed `docs/b1-operand-grammar-s416.md` unchanged.  Its central claim held

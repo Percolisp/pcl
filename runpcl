@@ -45,6 +45,19 @@ if ($? != 0) {
     unlink $lisp, "/tmp/runpcl_$$.err";
     exit 1;
 }
+# A transpile can SUCCEED and still carry a diagnostic that must not be
+# swallowed — above all the #339 drop announcement ("PCL: statement dropped at
+# …"), whose whole point is that a deleted statement is never silent in a run
+# context.  Forward those lines to stderr; a probe comparing this runner's
+# output against perl must see them (s418 — before this, runpcl discarded the
+# announcement and a dropped statement looked like a program that printed
+# nothing).
+if (open(my $ef, '<', "/tmp/runpcl_$$.err")) {
+    while (my $line = <$ef>) {
+        print STDERR $line if $line =~ /^PCL: /;
+    }
+    close $ef;
+}
 
 # Run SBCL.
 # NB: we deliberately do NOT preload cl/pcl-test.lisp.  The test infrastructure
