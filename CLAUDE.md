@@ -627,8 +627,18 @@ compatibility page, `CHANGELOG.md`; NO v0.1 tag — precondition is #282 green
 + phase 4); **#283 authored** (`.github/workflows/ci.yml`, installer-based —
 activates at the deferred push, week of 2026-08-24); **#282**: no container
 runtime on this machine — the sanitized-fresh-HOME rehearsal ran instead, and
-the first green CI run is the container half.  **Queue: the M–N remainder
-(push + #282-in-CI) → then the flip unblock list / phase 4 bug hunt.**
+the first green CI run is the container half.  **Phase 4 OPENED in the same
+session: #119 + #402 SHIPPED** (the ruled pair, s416 §7.4 — the two
+stringify-instead-of-overload shortcuts: s///-and-tr/// match sources now run
+the `""` overload + tie FETCH; `p-string-concat` folds through the
+overload-aware `p-.` when a piece carries a `.` handler, RUNTIME-ONLY, perl's
+multiconcat probed byte-identical incl. the single-piece-stringifies rule).
+Gate **155/5600**; sweep GATE clean TOTAL 18363 (+0); opbasic/concat.t
+248/6 → 249/5 = the ONLY change-attributed mover ([perl #124160]).  Guard
+`Pl/t/overload-01.t`; filed #416 (s/// no-match `0` vs perl `""`).
+**Queue: the M–N remainder (push + #282-in-CI, user-scheduled) → phase 4
+continues (the bug hunt) → tag decision (see the schedule finding) → the
+flip unblock list.**
 2b0000. **#401 eval half SHIPPED (s418c, Fable, 2026-08-21) — `state` in a
 named sub reaches STRING EVAL; #401 CLOSED (both halves).**  The cell
 `$x__state__N` is a defvar, never let-bound, so the eval alist could not
