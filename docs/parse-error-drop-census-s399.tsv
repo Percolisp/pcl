@@ -199,6 +199,16 @@
 #         census was simply stale for them.  Their drops are ordinary term-
 #         grammar shapes (a wide interpolation, an overload block).
 #      (e) Everything else is unchanged, row for row.
+#   s419  THE FLIP RE-CENSUS (no edits — verification): tools/drop-census.pl
+#         at 7a03d93 reproduces this file ROW FOR ROW (42 files / 135 drops;
+#         diff of sorted non-comment rows empty).  Every drop is now
+#         CLASSIFIED with an owner in docs/drop-census-s419-flip-gate.md
+#         (14 families; tasks #410-#415 filed for the unowned ones).  The
+#         announce->DIE flip is BLOCKED by that doc's §4 arithmetic:
+#         82 of the 135 are genuine compiler gaps in productive files; only
+#         14 are flip-legal (test-deliberate/registered) and 39 are the
+#         permanently-exempt lvalue family (§6.3).  Re-run the census after
+#         the unblock list lands; do not flip before.
 perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1

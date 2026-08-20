@@ -11,6 +11,32 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s419 (2026-08-21, Fable) — the flip re-census: 135 drops ALL CLASSIFIED; the announce→DIE flip is BLOCKED
+
+- **The flip re-census is DONE and the verdict is BLOCKED — by the plan's own
+  bar, not a new judgment** (`docs/drop-census-s419-flip-gate.md`).
+  `tools/drop-census.pl` at `7a03d93` reproduces the blessed census ROW FOR
+  ROW (42 files / 135 drops); the harvest was read whole and every drop now
+  has an owner (14 families).  Arithmetic: 39 lvalue rows permanently exempt
+  (§6.3), 14 flip-legal (test-deliberate + registered), **82 genuine compiler
+  gaps in productive files** (ref.t 191 passing rows, closure.t 272,
+  method.t 97, …) — flipping would TRANSPILE-FAIL ~30 files, the state.t/#399
+  lesson at 10× scale.  Unblock list = tasks #410–#415 (new), #399, #374(b)/
+  #365, #259, #153-B3.  Re-run the census after they land; flip with the
+  s373 three-leg bar.
+- **The one UNBLOCKED flip increment: `pl2cl --module` mode** — a drop in a
+  USER's module at runtime is the last fully SILENT #138 member (announce
+  OFF by ruling s403, server stderr discarded).  Flipping module mode to
+  DIE touches no test population but WAITS for one measurement: a
+  cpan-board re-run counting board modules that carry drops (flip-gate doc
+  §5).
+- **`@?` is legal perl** (probed s419) — re/subst.t:346's drop is a real
+  punctuation-ARRAY gap (#415 item 1), not a torture row.
+- **`sub main::end(&)` — a package-qualified prototype declaration — is
+  invisible to the block-form prototype mechanism** (#413): die_unwind.t /
+  die_except.t's six `my $c = end { … }` drops are THIS, not a feature
+  absence.
+
 ## s418 (2026-08-20, Fable) — s417 RULED; the B2 fix DESIGNED **and SHIPPED**; runpcl surfaces drop announcements
 
 - **B2 (#343) SHIPPED in the same session** (`docs/b2-ceiling-fix-s418.md` §5's
