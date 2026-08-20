@@ -11,6 +11,38 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s416 (2026-08-20, Fable) — s414+s415 REVIEWED and APPROVED (one stale guard row fixed); the §7 asks ruled; B1 re-designed from measurement
+
+- **s414 + s415 APPROVED as shipped** (`docs/fable-answers-s415.md`): cold
+  gate, full sweep (TOTAL 18369 = baseline, GATE clean, drops = census) and
+  a `--quick` companion independently re-run; 14 probes vs perl 5.40.3 all
+  identical; the ten code commits read whole.  ONE review fix:
+  `Pl/t/parser2-02.t` t60 asserted the refusal s415e removed and had failed
+  the gate deterministically since `829bcf5` — the shape itself is CORRECT
+  (probed: `22`, = perl); the guard was stale.  Gate row count is now 5566.
+- **REMOVING/REWORDING A REFUSAL: grep Pl/t FOR ITS MESSAGE TEXT in the same
+  commit** — guard rows are twins and live in more than one file (t60 was
+  state-01.t's twin).  `fable-answers-s415.md` §2.
+- **Track A's two deviations RATIFIED** (indirect object OUT, format
+  INVERTED); **standing procedure: a refusal-family conversion runs
+  drop-harvest FIRST and re-decides per family on file productivity**
+  (§3/7.1).  **"Refused is explained" IS the census intent** — the census
+  counts SILENT drops, not remaining features; the flip's re-census lists
+  refused files as their own rows (§3/7.2).
+- **#401 string-eval half SCHEDULED session L** (cache-key leg mandatory,
+  sweep IS the gate); **#402+#119 = two tasks, one session, release phase 4**;
+  **`class NAME ;` refusal AUTHORIZED with the STRICT key** (explicit
+  feature/experimental 'class' or a class BLOCK in the file — never the
+  v5.38 bundle heuristic on compiling code) + full s372 bar (§3/7.3–7.5).
+- **B1 (#372) RE-DESIGNED FROM MEASUREMENT — `docs/b1-operand-grammar-s416.md`
+  supersedes the plan §2 sketch.**  The drop is in
+  `_default_filetest_operand`/`_is_print_term_start` (a `-X` Operator "is
+  not a term start" ⇒ `$_` spliced mid-run), NOT at the operand-taker; the
+  prefix-run walk already reduces rightmost-first.  B1 = one predicate line
+  + the print-argument leg it exposes + the `_`-chain DESUGARING (naive
+  nesting `(p--f (p--d $x))` is SILENT WRONG: perl defines `-f -d $x` as
+  `-d $x && -f _`, probed).  NO `_term_extent` change, NO `$end_pars` edits.
+
 ## s415 (2026-08-19/20, Opus) — #281 items 1+2+6 merged; Track A (#371) refuses five families; then #370 (a PPI lexer bug), #369 (qx) and half of #401 put statements BACK; census 378 -> 165
 
 - **#281 items 1+2+6 are IN `main`** (`s414f`, verified s415).  The four bar

@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 416 (2026-08-20, Fable) — the s414+s415 review: APPROVED with one stale guard row fixed; the five asks ruled; B1 (#372) re-designed from measurement and UNBLOCKED
+
+The review (`docs/fable-answers-s415.md`): cold gate, full sweep and a
+`--quick` companion independently re-run on the tip; 14 probes vs perl
+5.40.3, all identical; the ten code commits of both sessions read whole.
+**One finding**: `Pl/t/parser2-02.t` t60 asserted the exact refusal s415e
+removed and had failed the gate deterministically since `829bcf5` — the
+sessions' "red only on the xs rows" gate claims were false for that row.
+The SHAPE is right (probed `22` = perl); the guard was stale, and it is a
+TWIN — s415e updated state-01.t and never grepped for the message's other
+guard.  Fixed: t60 asserts the shape compiles + declares a state cell, and
+the "still gates" role moved to the string-eval refusal (#401's real half).
+Standing rule in DECIDED s416: grep Pl/t for a refusal's message text in the
+same commit that removes it.
+
+Rulings (§3 of the answers): Track A's two deviations RATIFIED +
+drop-harvest-first is standing procedure; "refused is explained" IS the
+census intent; #401-eval scheduled session L (cache-key leg mandatory);
+#402+#119 two tasks / one session / release phase 4; `class NAME ;` refusal
+AUTHORIZED with the strict key (never the v5.38 bundle on compiling code).
+
+**B1 measured, and the plan's premise was wrong**
+(`docs/b1-operand-grammar-s416.md` supersedes the plan §2 sketch; #372
+updated).  In a worktree at the tip: the stacked-filetest drop is
+`_default_filetest_operand` splicing `$_` mid-run because
+`_is_print_term_start` says an Operator never starts a term — the operator
+loop's prefix-run walk already reduces rightmost-first and lists filetests.
+ONE predicate line makes every acceptance shape parse (verified live).  What
+that exposes is the real work: naive nesting is SILENT WRONG (`-e -f
+"/etc/passwd"`: perl 1, nest undef) — perl defines the stack as the
+`_`-chain (`-d $x && -f _`, short-circuit), which PCL already runs correctly
+when spelled out.  Plus the print-argument leg (`print $fh -e "x"` mis-lowers
+to a call of sub `e` under the widened predicate) and a fidelity note
+(PCL `-f _` answers undef where perl answers "" defined-false).  No
+`_term_extent` change, no `$end_pars` edits.  **The queue's next item #372
+is UNBLOCKED for Opus.**
+
 ## Session 415 (2026-08-19/20, Opus 5) — #281 items 1+2+6 verified and merged; Option B phase 2 Track A (#371) makes five families REFUSE; then #370, #369 and half of #401 put dropped statements BACK.  Drop census 378 -> 165, and four source-level silent-wrongs fixed along the way
 
 The session picked up exactly where s414 stopped: the branch `s414-ir-macros`

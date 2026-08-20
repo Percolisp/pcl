@@ -354,11 +354,22 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   like($sp, qr/\(p-defcell \$k__state__0 /, 'state without init: cell declared');
   unlike($sp, qr/__init/, 'state without init: no once-flag');
 
-  # Out-of-subset shapes still gate.
+  # s415 (#401 half): a state shadowing a my in the same sub no longer gates —
+  # _rename_decl_within is shadow-aware (#254 B-ii) and region-limited
+  # (#296-B2), so the named-sub route passes shadow_ok and the shape lowers
+  # natively (probed vs perl 5.40.3: prints 22, the state masks the my).
   my $g1 = eval { Pl::Parser2->parse_code(
     q{use feature 'state'; sub s2 { my $n = 1; state $n = 2; return $n; } print s2();}) };
-  like($@, qr/state \$n in named sub \(multiple declarations\)/,
-       'state shadowing a my in the same sub gates to v1');
+  is($@, '', 'state shadowing a my in the same sub no longer gates');
+  like($g1, qr/\(p-defcell \$n__state__\d+ /,
+       'state shadowing a my: state cell declared');
+  # Out-of-subset shapes still gate: a string eval in the sub would capture
+  # lexicals by name, and the renamed state cell never enters the site alist
+  # (the REAL remaining half of #401).
+  my $g1b = eval { Pl::Parser2->parse_code(
+    q{use feature 'state'; sub s3 { state $n = 2; return eval q($n); } print s3();}) };
+  like($@, qr/state \$n in named sub \(string eval\)/,
+       'state + string eval in a named sub still gates');
   # s296: state OUTSIDE a named sub no longer gates — it lowers natively to a
   # package-cell defvar + __init once-guard (the classic-pass container/scalar
   # route).
