@@ -9060,16 +9060,32 @@ sub _drop_lead_parts {
 # True when the file has told us the 5.38 object syntax is in play, so that a
 # `method`/`field`/`ADJUST` statement is that feature and not a sub of the
 # same name (Moose-style `method foo {...}` must NOT be misdiagnosed).
+# TWO KEYS, deliberately, and the difference is what the statement costs if the
+# answer is wrong (RULED s416, `docs/fable-answers-s415.md` §7.5):
+#
+#   LOOSE (the default, drop sites) also accepts the `use v5.38+` BUNDLE as
+#     evidence.  At a drop site the statement is already lost, so a guess that
+#     names the feature is strictly better than "Fell through".
+#   STRICT ($strict, for a refusal on code that COMPILES) does NOT.  'class' is
+#     experimental and is in NO version bundle — `use v5.38; class Foo;` is a
+#     perl SYNTAX ERROR, probed — so a bundle can never be evidence about code
+#     that compiles.  Strict also requires a `class NAME {` BLOCK as the
+#     in-file evidence, never the statement form: `class NAME ;` cannot be its
+#     own reason for being refused.
+#
+# ONE scanner with a flag rather than two, so the two readings cannot drift.
 sub _class_feature_in_scope {
-  my ($self, $el) = @_;
+  my ($self, $el, $strict) = @_;
   my $doc = eval { $el->top } or return 0;
-  return $self->{_class_feature_seen}{ refaddr $doc } //= do {
+  my $key = $strict ? 'strict' : 'loose';
+  return $self->{_class_feature_seen}{$key}{ refaddr $doc } //= do {
     my $seen = 0;
     for my $st (@{ $doc->find('PPI::Statement') || [] }) {
       if ($st->isa('PPI::Statement::Include')) {
         my $c = $st->content // '';
         if ($c =~ /\b(?:feature|experimental)\b[^;]*['"]class['"]/
-            || ($c =~ /^\s*(?:use|require)\s+v?5\.0*(\d+)/ && $1 >= 38)) {
+            || (!$strict
+                && $c =~ /^\s*(?:use|require)\s+v?5\.0*(\d+)/ && $1 >= 38)) {
           $seen = 1; last;
         }
         next;
@@ -9077,10 +9093,40 @@ sub _class_feature_in_scope {
       my $w = $st->schild(0) or next;
       next unless $w->isa('PPI::Token::Word') && $w->content eq 'class';
       my $n = $w->snext_sibling;
-      if ($n && $n->isa('PPI::Token::Word')) { $seen = 1; last }
+      next unless $n && $n->isa('PPI::Token::Word');
+      if (!$strict) { $seen = 1; last }
+      # Strict: the BLOCK form only.  `class NAME { … }` is Word Word Block.
+      my $b = $n->snext_sibling;
+      if ($b && $b->isa('PPI::Structure::Block')) { $seen = 1; last }
     }
     $seen;
   };
+}
+
+# `class NAME ;` — the statement form of perl 5.38's object syntax — parses as
+# indirect-object notation, i.e. `NAME->class`, in PPI and in PCL and in PERL
+# ITSELF when the feature is off (probed: perl dies "Can't locate object method
+# \"class\" via package \"Foo\"").  So the reading is RIGHT by default and must
+# not change.  It is wrong only for a file that has actually switched the
+# feature on, and there PCL would silently run a method call where the author
+# declared a class.  Refuse those, perl-shaped, and leave every other file
+# exactly as it was (RULED s416 §7.5; `docs/not-supported.md`).
+#
+# Returns the refusal text, or undef to lower the statement as usual.
+sub class_statement_refusal {
+  my ($self, $stmt) = @_;
+  return undef unless ref $stmt && eval { $stmt->isa('PPI::Statement') };
+  return undef if $stmt->isa('PPI::Statement::Include');
+  my $w = $stmt->schild(0)                                  or return undef;
+  return undef unless $w->isa('PPI::Token::Word') && $w->content eq 'class';
+  my $n = $w->snext_sibling                                 or return undef;
+  return undef unless $n->isa('PPI::Token::Word');
+  # A BLOCK after the name is the block form, which is a different statement
+  # and not what this refusal is keyed on.
+  my $after = $n->snext_sibling;
+  return undef if $after && $after->isa('PPI::Structure::Block');
+  return undef unless $self->_class_feature_in_scope($stmt, 1);
+  return "feature 'class' is not supported";
 }
 
 # A `~~` that has a TERM to its left is the smart match; one that has an

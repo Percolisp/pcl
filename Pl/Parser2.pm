@@ -7616,6 +7616,19 @@ sub _lower_stmt {
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $stmt };
 
+  # `class NAME ;` in a file that has actually switched the feature on: the
+  # indirect-object reading PCL would otherwise emit is a silent method call
+  # where the author declared a class.  Refuse perl-shaped, like the Track A
+  # families — but on code that COMPILES, so the key is the STRICT one (no
+  # version-bundle evidence).  See Pl::Parser::class_statement_refusal.
+  if (my $refusal = $self->fallback_parser->class_statement_refusal($stmt)) {
+    my $where = $self->fallback_parser->eval_mode
+              ? '(eval)'
+              : ($self->fallback_parser->has_filename
+                   ? $self->fallback_parser->filename : '-');
+    die "PCL: $refusal, at $where line " . ($stmt->line_number // 0) . "\n";
+  }
+
   if ($stmt->isa('PPI::Statement::Compound')) {
     return $self->_lower_compound($stmt, $vi, $tail_ctx);
   }

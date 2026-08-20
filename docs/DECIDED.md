@@ -46,6 +46,19 @@ not-supported.md → only then probe.*
   while `print $fh - 3` is a subtraction on the glob.  PCL reads both as the
   subtraction.  Filed **#405** — the same adjacency question §22 answered for
   letters, unanswered for numbers.
+- **`class NAME ;` REFUSES only on EXPLICIT evidence** (#399 half b, RULED
+  s416 §7.5, shipped s417).  The statement form parses as the indirect-object
+  call `NAME->class` — in PPI, in PCL, and in PERL when the feature is off
+  (probed: perl dies "Can't locate object method \"class\"") — so the default
+  reading is RIGHT and must not change.  The refusal fires only for
+  `use feature 'class'`, `use experimental 'class'`, or a `class NAME { … }`
+  BLOCK elsewhere in the file.
+- **A VERSION BUNDLE IS NEVER EVIDENCE FOR AN EXPERIMENTAL FEATURE on code
+  that COMPILES** — `use v5.38; class Foo;` is a perl SYNTAX ERROR (probed),
+  so the bundle cannot mean the feature is on.  It stays acceptable at DROP
+  sites, where the statement is already lost.  Two keys, ONE scanner with a
+  `$strict` flag (`Pl::Parser::_class_feature_in_scope`), so they cannot drift.
+  Guard `Pl/t/class-refusal-01.t`.
 - **B2 (#343) IS A STALE INDEX, not a grammar gap** — MEASURED, not yet fixed
   (`docs/b2-stale-operand-ceiling-s417.md`; Track B is Fable-designed).
   `handle_subcalls` scans `@$e` RIGHT TO LEFT, saves `$last_low_prio_op = $i`

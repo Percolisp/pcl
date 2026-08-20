@@ -1649,10 +1649,25 @@ PCL: feature 'class' is not supported, at FILE line N
 `field`, `method` and `ADJUST` are refused only when the file itself says the
 feature is on — a `use feature 'class'` / `use experimental 'class'` / `use
 v5.38`-or-later line, or a `class NAME` statement — so a Moose-style `method`
-or a sub named `field` is never misdiagnosed.  One shape is still NOT covered
-and is a silent wrong today: a bare `class Foo;` statement *parses*, as the
-indirect-object call `Foo->class`, so it never reaches the drop site (task
-#399).
+or a sub named `field` is never misdiagnosed.
+
+**The statement form `class NAME ;` is covered too, since s417 (task #399),
+and it needs a STRICTER key** because it is a refusal on code that COMPILES.
+`class Foo;` *parses* — as the indirect-object call `Foo->class` — in PPI, in
+PCL, and in **perl itself** when the feature is off (probed: perl dies
+`Can't locate object method "class" via package "Foo"`).  The default reading
+is therefore RIGHT, and refusing every `class NAME;` would break files that
+work today.  So the refusal fires only when the file switched the feature on
+EXPLICITLY: `use feature 'class'`, `use experimental 'class'`, or a
+`class NAME { … }` BLOCK statement elsewhere in the file.  A version bundle is
+**never** evidence here — `class` is experimental and in no bundle, and
+`use v5.38; class Foo;` is a perl SYNTAX ERROR (probed) — though the bundle
+stays acceptable at the drop sites above, where the statement is already lost.
+The two readings share one scanner with a `$strict` flag
+(`Pl::Parser::_class_feature_in_scope`) so they cannot drift.  Guard rows:
+`Pl/t/class-refusal-01.t`, including the must-not-fire cases (`Foo->class`
+written directly, `class Foo;` with no pragma, a file with its own
+`sub class`, `use v5.38`, a `class` hash key).
 
 **Why deferred, not rejected:** this is the future of Perl OO and PCL should
 support it in a **future version** — but it is a *self-contained surface

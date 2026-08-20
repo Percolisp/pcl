@@ -120,6 +120,35 @@ too, so the task's "parenless USER-sub call" framing is narrower than the
 mechanism.  Written up in `docs/b2-stale-operand-ceiling-s417.md` with the
 two open design questions; **no fix attempted — Track B is Fable-designed.**
 
+**Then the `class NAME ;` filler, which s416 had already authorized** (§7.5,
+#399 half b).  It is a refusal on code that COMPILES, which is what makes its
+key stricter than the drop-site one.  Measured first: `class Foo;` parses as
+`Foo->class` in PPI, in PCL **and in perl** when the feature is off (perl dies
+"Can't locate object method \"class\""), so the default reading is right and
+refusing every `class NAME;` would break working files; while `use v5.38;
+class Foo;` is a perl **syntax error**, which is why a version bundle can never
+be evidence about experimental syntax in compiling code.  So the refusal fires
+only on `use feature 'class'`, `use experimental 'class'`, or a
+`class NAME { … }` BLOCK elsewhere — never the statement form itself, which
+would be circular.  `_class_feature_in_scope` gained a `$strict` flag instead
+of being copied, so the loose drop-site key and the strict one cannot drift.
+
+Bar met, all three legs plus probes: corpus-diff identical (111 files, drops
+10 unchanged); **gate-SET scan over both populations, 638 files each, ZERO
+differences** — the two population files using the statement form
+(`t/class/class.t`, `t/class/field.t`) already refused with the same message
+via their block form, which comes earlier in each; sweep GATE clean, TOTAL
+18369 (+0); and five before/after probes against a worktree of the base commit
+showing the two pragma spellings move from a silent `Foo->class` to a refusal
+while `class Foo;` alone, `use v5.38` and the block form are untouched.
+Guard `Pl/t/class-refusal-01.t` (11 rows, 1.4 s, transpile-only).  #399 stays
+OPEN for its other half (the indirect-object census drops).
+
+Filed **#406** from that probe set: `sub class {…} class Foo;` crashes on an
+undefined `pl-Foo` because a bareword ARGUMENT to a paren-less user sub call is
+emitted as a call — the #266 family, missed because that classifier keys on the
+previous token being an OPERATOR and here it is the called WORD.
+
 **Queue**: #372 is done, so next is **#343 (Track B2)** → the `class NAME ;` +
 #401-eval fillers → re-census → the announce→DIE flip, then M–N release.
 
