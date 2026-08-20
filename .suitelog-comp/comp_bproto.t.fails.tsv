@@ -1,7 +1,0 @@
-# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
-comp/bproto.t	1	ok	not ok	
-comp/bproto.t	2	ok	not ok	
-comp/bproto.t	3	ok	not ok	
-comp/bproto.t	4	ok	not ok	
-comp/bproto.t	5	ok	not ok	
-comp/bproto.t	6	ok	not ok	

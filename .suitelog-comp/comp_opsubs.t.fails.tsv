@@ -1,6 +1,0 @@
-# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
-comp/opsubs.t	2	ok	not ok	
-comp/opsubs.t	22	ok	not ok	qx('unqualified') is oper
-comp/opsubs.t	26	ok	not ok	s('unqualified') doesn't work
-comp/opsubs.t	30	ok	not ok	tr('unqualified') doesn't work
-comp/opsubs.t	34	ok	not ok	y('unqualified') doesn't work

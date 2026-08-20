@@ -8,7 +8,7 @@ bootstrap steps, CI, and the per-phase two-repo split are in
 **Implementer:** Opus 4.8 — this document is written to be executed phase by
 phase; every phase has an acceptance test. Read §2 (how XS really works) and
 §4 (the architecture decision) before writing any code.
-**Supersedes:** the sketch in `XS_BRIDGE_DESIGN.md` (kept for history; its
+**Supersedes:** the sketch in `docs/history/XS_BRIDGE_DESIGN.md` (kept for history; its
 "wrap CL objects in C structs" approach is rejected here — see §4.2).
 **Superseded ON STRUCTURE by `docs/xs-shim-repo-plan.md` (2026-07-12) and,
 since 2026-07-24, by the pclxs repo itself** (sibling checkout `../pclxs`,
@@ -311,7 +311,7 @@ against the *documented macro API*, not the struct layout.
 
 ### 4.2 Decision D2 — SVs are shim-owned structs holding host *handles*, not host pointers
 
-The old sketch (`XS_BRIDGE_DESIGN.md`) stored a `cl_object` pointer inside
+The old sketch (`docs/history/XS_BRIDGE_DESIGN.md`) stored a `cl_object` pointer inside
 each SV. That breaks under a moving GC and welds the shim to one host.
 Instead:
 

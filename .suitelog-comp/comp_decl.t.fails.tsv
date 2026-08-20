@@ -1,5 +1,0 @@
-# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
-comp/decl.t	0	(none)	renumbered	PCL's TAP numbering is offset from perl's for 1 row(s) — rows below are paired by description, not by number
-comp/decl.t	7	ok	(missing)	
-comp/decl.t	8	ok	(missing)	
-comp/decl.t	9	ok	(missing)	

@@ -611,6 +611,24 @@ skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
 **runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
 discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
 designed.
+2b00000. **s419 (Fable, 2026-08-21): the flip re-census DONE — the announce→DIE
+flip is BLOCKED by its own bar; release phases 3+5 executed.**
+`docs/drop-census-s419-flip-gate.md`: census re-verified ROW FOR ROW (42/135),
+every drop classified into 14 families with owners; 82 are compiler gaps in
+productive files (ref.t 191 rows, closure.t 272, …), so the flip waits on the
+unblock list (#410–#415 new, #399, #374(b)/#365, #259, #153-B3) — re-census
+after they land, flip with the s373 three-leg bar.  The one unblocked
+increment (module-mode DIE, the last fully-silent #138 member) waits for a
+cpan-board drop count (flip-gate §5).  **#279 DONE** (root junk deleted,
+24 planning .mds → `docs/history/`, CODEGEN/MOO_MOOSE designs → `docs/`,
+tracked `.suitelog-*` gone, hook path relative); **#280 DONE** (README
+refreshed with measured numbers, `docs/STATUS.md` = the user-facing
+compatibility page, `CHANGELOG.md`; NO v0.1 tag — precondition is #282 green
++ phase 4); **#283 authored** (`.github/workflows/ci.yml`, installer-based —
+activates at the deferred push, week of 2026-08-24); **#282**: no container
+runtime on this machine — the sanitized-fresh-HOME rehearsal ran instead, and
+the first green CI run is the container half.  **Queue: the M–N remainder
+(push + #282-in-CI) → then the flip unblock list / phase 4 bug hunt.**
 2b0000. **#401 eval half SHIPPED (s418c, Fable, 2026-08-21) — `state` in a
 named sub reaches STRING EVAL; #401 CLOSED (both halves).**  The cell
 `$x__state__N` is a defvar, never let-bound, so the eval alist could not
@@ -683,12 +701,12 @@ filetest until it closes), **#404** (perl stacks through PARENS), **#405**
 2z. `docs/fable-answers-s328.md` - **s328 asks ALL RULED (s329, 2026-08-02)**: rule-12 DIE-vs-ANNOUNCE = value-flows-onward test (gates #152); #201 File::Temp = probe the predicate, layer follows from who diverges; #202 first, then #204 (sweep TOTAL gate / LOST bucket), then #189; s329 review fixes: goto restores caller *wantarray*, veto exemption requires no free reference (residual → #205)
 2a. `docs/fable-answers-s323.md` - **s323 asks ALL RULED (2026-08-02), incl. the ordered pre-/post-R1 plan (§7)**: #189 approved-with-amendments, POST-R1, warning stays as backstop; #193 principle-9 reading CONFIRMED, pre-R1 attempt authorized with the #142 stop-rule; #191 deferred (loud, rare); snapshot rule = stale-marker at crash-fix time + regenerate at quote points; USER: R1 CPAN half = four-dist baseline only, dist fetches blanket-OK'd, **full suite run every 3rd–5th change, not per change**.
 2b. `docs/fable-answers-s321.md` - s321 asks ALL RULED (2026-08-02): #176 → (c) measurement fix now / bless post-R1; #177 → tainted registrations re-verify before R1 (backlog measured empty), per-row claims quote descriptions; XDIFF rows column approved post-R1. Previous rounds: `fable-answers-s318.md`, `fable-answers-s316v.md`
-3. `CODEGEN_DESIGN.md` - Code generation design notes
+3. `docs/CODEGEN_DESIGN.md` - Code generation design notes
 
 Not relevant now:
-1. `XS_BRIDGE_DESIGN.md` - superseded XS sketch; the active design is `docs/xs-shim-design.md` (libperlshim + host vtable, ready for implementation)
-2. `MOO_MOOSE_DESIGN.md` - Future Moo/Moose OO framework support plan
-2. `SESSION_SUMMARY.md` - Older detailed session history, use `docs/session-log.md` now
+1. `docs/history/XS_BRIDGE_DESIGN.md` - superseded XS sketch; the active design is `docs/xs-shim-design.md` (libperlshim + host vtable, ready for implementation)
+2. `docs/MOO_MOOSE_DESIGN.md` - Future Moo/Moose OO framework support plan
+2. `docs/history/SESSION_SUMMARY.md` - Older detailed session history, use `docs/session-log.md` now
 
 
 ### Semantic Deep-Dives (read before touching these areas)

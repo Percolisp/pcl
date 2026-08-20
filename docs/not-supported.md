@@ -569,7 +569,7 @@ skipped by the stub.
 
 **Rationale:** XS bridge support is a designed future phase (see
 `docs/xs-shim-design.md` — source-recompile against `libperlshim` shim
-headers; `XS_BRIDGE_DESIGN.md` is the superseded sketch).  Until the bridge
+headers; `docs/history/XS_BRIDGE_DESIGN.md` is the superseded sketch).  Until the bridge
 ships, POSIX and other XS modules must be stubbed in `lib/` by hand.
 
 Note (session 223c): individual XS *functions* can be bridged directly via

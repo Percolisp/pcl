@@ -1,8 +1,0 @@
-# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
-comp/our.t	1	ok	not ok	our $x has no runtime effect
-comp/our.t	2	ok	not ok	our ($x) has no runtime effect
-comp/our.t	3	ok	not ok	our %x has no runtime effect
-comp/our.t	4	ok	not ok	our (%x) has no runtime effect
-comp/our.t	5	ok	not ok	our @x has no runtime effect
-comp/our.t	6	ok	not ok	our (@x) has no runtime effect
-comp/our.t	7	ok	not ok	our shouldnt be visible until introduced

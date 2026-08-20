@@ -1,4 +1,4 @@
-# PCL — A Perl-to-Common-Lisp Compiler
+# PCL (Percolisp) — A Perl-to-Common-Lisp Compiler
 
 **PCL is a from-scratch source-to-source compiler that turns Perl into readable Common Lisp.** It parses Perl with [PPI](https://metacpan.org/pod/PPI), builds an AST with correct operator precedence, and generates CL that a Perl programmer can still read.
 
@@ -17,8 +17,6 @@ The `pcl` command runs one-liners directly, including `-M` imports of pure-Perl 
 $ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); @w = map { $_, ":", $_ ** $_ } @q; say dump \@w;'
 [1, ":", 1, 2, ":", 4, 3, ":", 27, 4, ":", 256, 5, ":", 3125]
 ```
-
-Right now, the compiler is being reworked a bit. Uploads would be messy, so they will wait for a few week or so.
 
 ### Why Common Lisp?
 
@@ -47,7 +45,7 @@ sbcl --eval '(ql:quickload :cl-ppcre)' --quit
 # Transpile and run
 echo 'print "Hello, World!\n";' | ./pl2cl | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'
 
-# Run the internal test suite (117 files, 4330 tests)
+# Run the internal test suite (155 files, ~5,600 assertions)
 prove -j8 Pl/t/
 
 # Faster: run it against a saved SBCL core (runtime pre-compiled in).
@@ -62,6 +60,18 @@ The two commands are equivalent in *what* they check — the core is purely a
 speed cache. Plain `prove -j8 Pl/t/` always works and stays the reference; the
 core path is opt-in via `tools/prove-core` (or by setting `PCL_TEST_CORE` to a
 core path yourself).
+
+### Installing
+
+`tools/install-pcl` copies the runtime tree to a prefix, writes `bin/`
+wrappers, and **compiles the runtime into a saved SBCL core at install
+time** (the XS model — never at first use), then refuses to finish unless
+the installed tools actually transpile and run a program:
+
+```bash
+tools/install-pcl --prefix ~/.local     # default prefix is $HOME/.local
+tools/install-pcl --no-core --dry-run   # show what it would do
+```
 
 ### Minimum SBCL version: 2.5.2
 
@@ -104,7 +114,7 @@ I am Rex and I bark
 A teaser across the big areas — most of Perl's day-to-day surface is in:
 
 - **Operators** — all 92 precedence levels, chained comparisons, string ops
-- **Control flow** — `if/unless`, `while/until`, `for/foreach` (aliasing `$_` to elements, incl. hash/array elements and `substr`/`pos`/`vec` lvalues), loop labels, `next/last/redo`
+- **Control flow** — `if/unless`, `while/until`, `for/foreach` (aliasing `$_` to elements, incl. hash/array elements and `substr`/`pos`/`vec` lvalues), loop labels, `next/last/redo`, perl 5.34 `try/catch/finally`
 - **Subroutines** — signatures, defaults, closures, `state` variables
 - **References** — `\$x`, `$$ref`, `$aref->[0]`, `@{$ref}`, anonymous constructors, postfix deref, and live lvalue refs (`\substr`, `\pos`, `\vec`, `\$#array`)
 - **OO** — `bless`, method calls, `@ISA` with C3 MRO, multiple inheritance, `SUPER::`, `AUTOLOAD`, `use overload`
@@ -114,7 +124,7 @@ A teaser across the big areas — most of Perl's day-to-day surface is in:
 - **`eval`** — block `eval { }` and string `eval "code"` (transpiled and run at runtime), with **lexical capture**: the eval'd code reads *and writes* the enclosing scope's `my` variables, and closures built inside the eval close over them
 - **`local`** — scalars, arrays, hashes, hash/array elements, typeglobs
 
-*See [`REMAINING.md`](REMAINING.md) for the full picture.*
+*See [`docs/STATUS.md`](docs/STATUS.md) for the measured compatibility state.*
 
 ## Not Supported
 
@@ -124,10 +134,16 @@ A few of the biggest items:
 - **`@_` argument aliasing** — args are copied into `@_`; `$_[0] = 42` does not write back to the caller.
 - **Exact error-message text** — PCL targets correct execution, not byte-for-byte error wording or the `" at FILE line N"` suffix.
 - **`DESTROY` on garbage collection** — CL's GC gives no deterministic finalizer timing.
-- **Removed Perl features** — `given`/`when`, the `~~` smart-match, and `?pattern?` (gone in Perl 5.38).
+- **Removed Perl features** — `given`/`when` and the `~~` smart-match (removed in Perl 5.42) are refused with a clear message; one-match `?pattern?` is not supported.
 - **`mro` pragma** — PCL always uses C3 (it is CLOS-backed); the DFS default, ordering switch, and most of the `mro::*` API are not emulated. A minimal C3-only `mro::get_linear_isa` is provided so modules that `require mro` load. Provisional — revisit if a module is shown to depend on the missing parts.
 
-*Full list and rationale: [`REMAINING.md`](REMAINING.md) and [`docs/not-supported.md`](docs/not-supported.md).*
+*Full list and rationale: [`docs/STATUS.md`](docs/STATUS.md) (summary tables) and [`docs/not-supported.md`](docs/not-supported.md) (every entry with its why).*
+
+A statement the compiler cannot lower is never silently lost: it is
+**announced on stderr** (`PCL: statement dropped at FILE line N: …`) in file
+mode, and in `eval STRING` it dies into `$@` the way perl's compile errors
+do. The count of such statements across the two test populations is tracked
+in-repo and gated ([`docs/parse-error-drop-census-s399.tsv`](docs/parse-error-drop-census-s399.tsv)).
 
 ## How It Is Tested
 
@@ -140,30 +156,32 @@ The safety net is the **skip-registry** ([`cl/skip-registry.lisp`](cl/skip-regis
 ## Architecture
 
 ```
-Perl Source → PPI → Pl::PExpr (AST) → Pl::ExprToCL → Common Lisp
-                          ↓                                ↓
-                  Pl::BlockAnalyzer               cl/pcl-runtime.lisp
-               (two-phase scope analysis)        (Perl semantics in CL)
+Perl Source → PPI → Pl::Parser2 (statement lowering) → Pl::CLForm → Common Lisp
+                        ↓                ↑                              ↓
+              Pl::VarAnnotator    Pl::PExpr → Pl::ExprToCL      cl/pcl-runtime.lisp
+             (scopes, captures)     (expression AST → forms)   (Perl semantics in CL)
 ```
 
 | Module | Purpose |
 |--------|---------|
-| `Pl/Parser.pm` | Statement-level parser |
+| `Pl/Parser2.pm` | Statement lowering (the v2 structured-emission pipeline) |
+| `Pl/VarAnnotator.pm` | Scope/capture analysis, lexical renaming |
 | `Pl/PExpr.pm` | Expression parser, operator precedence |
-| `Pl/BlockAnalyzer.pm` | Two-phase block analysis (declaration scoping) |
-| `Pl/ExprToCL.pm` | Code generator |
-| `cl/pcl-runtime.lisp` | Runtime library (~10,000 lines of CL) |
+| `Pl/ExprToCL.pm` | Expression code generator (forms) |
+| `Pl/CLForm.pm` | The emitted-form data structure and printer |
+| `Pl/Passes.pm` | The named optimization registry (`PCL_OPT`) |
+| `cl/pcl-runtime.lisp` | Runtime library (~17,000 lines of CL) |
 | `cl/pack-impl.pl` | `pack`/`unpack`, written in Perl and transpiled to CL |
 
 Generated code is intentionally readable: Perl variables keep their sigils (`$x`, `@array`, `%hash`), and built-ins map to `pl-`/`p-` prefixed names (`pl-print`, `p-push`, …). Today **every variable is a small data structure** (a "box") so it can carry both a numeric and a string value and be referenced — see the roadmap for where that goes next.
 
 ## Status
 
-With temporary access to Fable 5, it was used to plan the rewrite of the compiler. This has been going well.
+With temporary access to Fable 5, it was used to plan the rewrite of the compiler. This has been going well: the rewrite (the "v2" structured-emission pipeline) is complete and is now the only pipeline.
 
-This phase is about hashing out incompatibilities with Perl. It has been slow and at times painful, but the finish line now looks like weeks away, not months.
+Against Perl's own test suite, PCL currently passes **18,363 assertions (95.3 % of those it runs)** across 108 extracted test files, with **62 files passing completely** — tracked row-by-row against blessed baselines, so the number can only move honestly. Several pure-Perl CPAN modules run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process. The measured state, including what deliberately does not work, is [`docs/STATUS.md`](docs/STATUS.md).
 
-Against Perl's own test suite, PCL currently passes **~95% of the tests it runs** (excluding ones skipped for unsupported features), with **69 files passing completely**. Several pure-Perl CPAN modules now run unmodified through the full pipeline (e.g. `List::Util`, `Role::Tiny`, `Data::Dump`, and the core try/catch of `Try::Tiny`) — shaking out general compiler bugs in the process.
+XS is no longer purely an aspiration: a separate experimental sibling project, **pclxs**, implements a `libperl`-ABI shim that lets unmodified compiled XS modules call into PCL's runtime. Its 398-case conformance corpus passes against real perl as the oracle, and `Digest::MD5` works end-to-end (its own test file passes 256/256 under PCL). It is not bundled with this release.
 
 As an aside - Claude suggested doing "fuzzing", between PCL and Perl. It generated different expressions and evaluated them in both environments. It was valuable in finding bugs. (It seems to be standard procedure when building compilers. :-) )
 
@@ -179,7 +197,7 @@ These come *after* compatibility is solid:
 
 - **A smarter code generator.** Right now every variable is a boxed data structure (so it can hold a number, a string, and be referenced). With analysis, variables that are only ever numeric can be compiled to plain native numbers — and PCL could become genuinely fast.
 - **Cleaner intermediate code.** Lean on a small set of high-level CL macros for the generated output, making it an easy target for compiling Perl onward to *other* environments.
-- **The Eldorado: XS / C extensions.** Get compiled C (XS) working and the full CPAN ecosystem opens up on new platforms. Here I'd welcome help from people who know XS and CL internals better than I do.
+- **The Eldorado: XS / C extensions.** The experimental pclxs bridge (see Status above) proves the approach; getting a broad slice of CPAN's XS dists working is the long game. Here I'd welcome help from people who know XS and CL internals better than I do.
 
 ### Deferred language features — planned, not rejected
 

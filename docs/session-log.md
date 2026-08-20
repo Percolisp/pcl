@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 419 (2026-08-21, Fable) — flip re-census (BLOCKED verdict); release phases 3+5: #279 hygiene, #280 README/STATUS/CHANGELOG, #283 CI
+
+**The flip re-census (the queue's next item) is DONE and the verdict is
+BLOCKED — by the plan's own bar** (`docs/drop-census-s419-flip-gate.md`).
+`tools/drop-census.pl` at `7a03d93` reproduces the blessed census ROW FOR ROW
+(42 files / 135 drops; sorted-row diff empty), `tools/drop-harvest.pl`'s 133
+texts were read whole, and every drop is classified into 14 families with an
+owner.  Arithmetic: 39 lvalue rows permanently exempt (§6.3), 14 flip-legal
+(test-deliberate + registered), **82 genuine compiler gaps in productive
+files** — a flip today would TRANSPILE-FAIL ~30 files (ref.t 191 passing
+rows, closure.t 272, method.t 97, re/pat.t, uni/gv.t, …), the state.t/#399
+lesson at scale.  Tasks **#410–#415** filed (non-ASCII stash/glob/filehandle
+identifiers 21 — the largest family; call-of-call chains 8, blocked on #153;
+`$#{^CAPTURE}` 5; package-qualified prototype declarations `sub main::end(&)`
+6 — found by probe, NOT a feature absence; interpolation `Number:?` leaf 3;
+odd singles 9 with probe notes: `@?` IS legal perl, `any_tainted @_` does not
+reproduce isolated).  B3-residue list appended to #153.  The one UNBLOCKED
+increment — module-mode DIE, the last fully-silent #138 member — recorded in
+flip-gate §5, gated on a cpan-board drop count.
+
+**#279 (repo hygiene) DONE**: the three `REF(0x…)` junk files, `x.pl`,
+`test-simple.pl`, `test-debug.pl`, `test-pcl-test.pl` deleted; 24 root
+planning .mds + memory/'s two session reports → `docs/history/` (with a
+README saying nothing there is current); `CODEGEN_DESIGN.md` +
+`MOO_MOOSE_DESIGN.md` → `docs/`; the four tracked `.suitelog-*` dirs
+untracked; every reference grep-passed and updated (CLAUDE.md,
+xs-shim-design, not-supported, README); `.claude/settings.json`'s hook path
+now `$CLAUDE_PROJECT_DIR`-relative; `.gitignore` audited (no untracked noise
+existed).  Root is now: CLAUDE.md, README.md, LICENSE, CHANGELOG.md + the
+runners.
+
+**#280 DONE**: README refreshed to measured state (155/5598 gate; sweep
+18,363 pass / 906 fail = 95.3 %, 62 files fully green from today's
+`.faillog`; v2 architecture table; installer section; pclxs paragraph;
+stale "uploads will wait" note dropped); **`docs/STATUS.md`** is the new
+user-facing compatibility page (measured numbers + what deliberately does
+not work + sharp edges, no adjectives); **`CHANGELOG.md`** distilled from
+the session log.  **NO v0.1 tag** — its precondition (#282 green + the
+phase-4 bug hunt) is not met; R1 stays the internal name.
+
+**#283 authored**: `.github/workflows/ci.yml` — apt perl deps, pinned SBCL
+2.6.0 binary, Quicklisp+cl-ppcre, then `tools/install-pcl` (the installer IS
+the fresh-machine test), `prove tools/t/install-pcl.t`, `tools/prove-core`,
+and corpus-diff vs the PR base on PRs.  Inert until the deferred push (week
+of 2026-08-24, user's call).  **#282**: no container runtime on this machine
+(docker/podman/nspawn all absent), so the clean-VM half cannot run here; a
+**sanitized-fresh-HOME rehearsal ran GREEN end-to-end** — empty `$HOME` (no
+`.sbclrc`, no quicklisp, no `.pcl-cache`), quicklisp + cl-ppcre installed
+per the README quick start, `tools/install-pcl --prefix $FRESH/.local` built
+the 44 MB core and self-verified, and the INSTALLED `runpcl` ran a program
+from a foreign cwd.  Axes NOT covered by the rehearsal: system perl (lacks
+PPI here — the rehearsal used the dev perl) and the OS image; both are
+exactly what the CI workflow covers, so the container half of #282 = the
+first green CI run after the push.  Also prepared: `git fetch origin` +
+local branch **`snapshot-2026-05`** at the old public 70-commit history
+(the push-week recipe's preservation step; NOTHING pushed).
+
+Gate re-run after the moves: **155 files / 5598 rows**, failures exactly the
+13 pclxs xs rows (sibling present and mid-rework, user: ignore).  All three
+README examples re-verified by running them (outputs match the text).
+Sweep not re-run: docs moves only — the WHAT-CHANGED table's docs row.
+
+**Schedule finding for the USER**: the release plan's implicit chain was
+phase 2's flip → phase 4 bug hunt → v0.1 tag, but the flip is now blocked
+on a multi-session unblock list (flip-gate §4) that includes E5-adjacent
+naming work (#410) and B3 (#153).  Decision needed: either the v0.1 tag
+DECOUPLES from the flip (ship with announced drops as the documented sharp
+edge — `docs/STATUS.md` already words it that way), or v0.1 waits for the
+whole unblock list.  Recorded, not decided.
+
 ## Session 418 (2026-08-20, Fable) — s417 RULED; B2 fix designed; runpcl surfaces drop announcements
 
 **Review: s417 APPROVED as shipped** (`docs/fable-answers-s417.md`).

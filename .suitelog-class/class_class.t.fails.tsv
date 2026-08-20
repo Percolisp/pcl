@@ -1,2 +1,0 @@
-# file  test#  perl_result  pcl_result  description   [test# = PERL's number; rows paired by description, so PCL's own number may differ — it is shown when it does.  description = PERL's test line, values interpolated by perl — not PCL's output]
-class/class.t	0	ok*	(no TAP)	PCL produced no TAP output (crash:simple-error: Can't call method hello on an undefined value)
