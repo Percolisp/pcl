@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 23;
 
 sub run_cl {
     my ($code) = @_;
@@ -322,3 +322,38 @@ test_cl('"$ref" interpolation stringifies a reference',
      my $s = "$r";
      print(($s =~ /^ARRAY\(0x[0-9a-f]+\)$/ ? "ok" : "bad:$s"), "\n");',
     "ok\n");
+
+# ── #119: s///, tr/// match against the OVERLOADED string, not the raw ─────
+# print form.  do-regex-subst / do-tr used (to-string (unbox box)), which
+# skipped box-sv's "" dispatch, so an overloaded object matched against
+# "HASH(0x...)" and every substitution silently failed.
+test_cl('s/// and tr/// on an overloaded object use the "" overload (#119)',
+    'package Str;
+     use overload q("") => sub { "hello world" }, fallback => 1;
+     package main;
+     my $o = bless {}, "Str";
+     print(($o =~ s/world/perl/r), "\n");
+     my $t = bless {}, "Str";
+     print(($t =~ tr/lo/LO/r), "\n");
+     my $u = bless {}, "Str";
+     print(($u =~ tr/l//), "\n");',
+    "hello perl\nheLLO wOrLd\n3\n");
+
+# ── #402: interpolation concat consults the "." overload ([perl #124160]) ──
+# perl spells "a $o b" as chained '.', so a '.' handler participates and the
+# result need not be a string; a SINGLE "$o" piece is stringification only.
+test_cl('interpolation dispatches "." overload; one piece stringifies (#402)',
+    'package Keep;
+     use overload "." => sub { $_[0] }, fallback => 1;
+     package main;
+     my $k = bless [], "Keep";
+     my $cat = "a $k b";
+     print(ref($cat), "\n");
+     package Dot;
+     use overload "." => sub { my ($s, $x, $r) = @_; $r ? "$x<D" : "D>$x" },
+                  q("") => sub { "DSTR" }, fallback => 1;
+     package main;
+     my $d = bless [], "Dot";
+     print("$d", "\n");
+     print("a $d b", "\n");',
+    "Keep\nDSTR\na <D b\n");

@@ -36,6 +36,19 @@ not-supported.md → only then probe.*
   invisible to the block-form prototype mechanism** (#413): die_unwind.t /
   die_except.t's six `my $c = end { … }` drops are THIS, not a feature
   absence.
+- **#119 + #402 SHIPPED (the ruled phase-4 pair, s416 §7.4) — the two
+  stringify-instead-of-overload shortcuts are closed.**  #119: `do-regex-subst`
+  and `do-tr` read the match source as `(to-string (unbox box))`, skipping
+  box-sv's `""` dispatch — now `(to-string box)`, matching `do-regex-match`'s
+  existing fix.  #402: `p-string-concat` now folds left through the
+  overload-aware `p-.` when any piece carries a `.` handler — RUNTIME-ONLY
+  (the emission already passes pieces raw), so no gen bump; probed: perl's
+  multiconcat calls the handler once per object piece, left-to-right with the
+  reversed flag, a plain-string handler result makes the rest plain, and a
+  SINGLE `"$o"` piece is stringification (never `.`) — the fold with a
+  one-piece guard reproduces all of it byte-identically.  Guards in
+  `Pl/t/overload-01.t` (23 rows).  Filed **#416**: `s///` no-match returns
+  `0` where perl returns `""` (PL_sv_no) — pre-existing, found by the probe.
 
 ## s418 (2026-08-20, Fable) — s417 RULED; the B2 fix DESIGNED **and SHIPPED**; runpcl surfaces drop announcements
 

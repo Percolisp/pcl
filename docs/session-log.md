@@ -66,6 +66,38 @@ Gate re-run after the moves: **155 files / 5598 rows**, failures exactly the
 README examples re-verified by running them (outputs match the text).
 Sweep not re-run: docs moves only — the WHAT-CHANGED table's docs row.
 
+**Phase 4 opened with the ruled pair #119 + #402 (s416 §7.4: two tasks, one
+session)** — the two stringify-instead-of-overload shortcuts.  **#119**:
+`do-regex-subst`/`do-tr` built the match source with `(to-string (unbox
+box))`, which skips box-sv's `""` overload and tie FETCH, so an overloaded
+object matched against its raw print form (`HASH(0x…)`) and every
+substitution silently failed; fix = `(to-string box)`, the same one-line
+shape `do-regex-match` already had.  **#402**: interpolation built
+`(p-string-concat …)` with plain stringification, but perl spells `"a $o b"`
+as chained `.` so a `.` overload participates and the result need not be a
+string ([perl #124160]); fix is RUNTIME-ONLY — `p-string-concat` folds left
+through the overload-aware `p-.` when a piece carries a `.` handler (the
+emission already passes pieces raw, so no emission change and no gen bump).
+The perl multiconcat semantics were probed first: ONE handler call per
+object piece, left-to-right, reversed flag set when the object is on the
+right, a plain-string handler result makes the remaining concats plain, and
+a single `"$o"` piece is stringification only — the fold with a one-piece
+guard reproduces every row byte-identically, including the wild edge where
+a `.` handler swallows pattern pieces inside `m/a$p/`.  Probe set: 6+6 rows
++ tied scalar + regex-pattern path, all identical to perl 5.40.3.  Guards:
+`Pl/t/overload-01.t` +2 rows (23).  Bar: gate **155/5600** (only the 13 xs
+rows); full sweep **GATE clean, 0 new / 0 fixed, TOTAL 18363 (+0), drops 8
+= census**; companion legs t/re + t/opbasic + t/op/tr.t: **opbasic/concat.t
+248/6 → 249/5 — the [perl #124160] row, the ONLY change-attributed mover**
+(serial + parallel agree).  re/pat_advanced.t's 927/751 → 950/730 was
+verified PRE-EXISTING by running the file on a ba9045f worktree (same
+950/730 before the change — stale s392 snapshot row, s404-era repairs);
+re/overload.t / re/pat_psycho.t / re/speed.t differ in STATUS WORD only
+(TIMEOUT at the 90s default, rows identical to their spliced --timeout-300
+measurements).  Both snapshot rows edited with causes in
+`docs/perl-suite-run.tsv`.  Filed **#416**: `s///` no-match returns `0`
+where perl returns `""` (PL_sv_no) — pre-existing, probe-found.
+
 **Schedule finding for the USER**: the release plan's implicit chain was
 phase 2's flip → phase 4 bug hunt → v0.1 tag, but the flip is now blocked
 on a multi-session unblock list (flip-gate §4) that includes E5-adjacent

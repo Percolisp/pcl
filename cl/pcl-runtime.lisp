@@ -2477,7 +2477,7 @@
        (defun ,slow (a b)
          ,(format nil "Perl ~A slow path: use overload dispatch, then numeric coercion" op-str)
          (%with-binary-overload (,op-str a b)
-           (,cl-op (to-number a) (to-number b))))
+                                (,cl-op (to-number a) (to-number b))))
        (declaim (inline ,name))
        (defun ,name (a &optional (b nil b-supplied-p))
          ,(format nil "Perl ~A with numberp fast path + use overload dispatch" op-str)
@@ -2518,7 +2518,7 @@
 (defun %p---slow (a b)
   "Perl binary subtraction slow path: use overload dispatch, then coercion."
   (%with-binary-overload ("-" a b)
-    (- (to-number a) (to-number b))))
+                         (- (to-number a) (to-number b))))
 
 (declaim (inline p--))
 (defun p-- (a &optional b)
@@ -2532,11 +2532,11 @@
 (defun %p-/-slow (a b)
   "Perl division slow path: use overload dispatch, then coercion."
   (%with-binary-overload ("/" a b)
-    ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
-    ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
-    ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
-    (let ((r (/ (to-number a) (to-number b))))
-      (if (typep r 'ratio) (coerce r 'double-float) r))))
+                         ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
+                         ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
+                         ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
+                         (let ((r (/ (to-number a) (to-number b))))
+                           (if (typep r 'ratio) (coerce r 'double-float) r))))
 
 (declaim (inline p-/))
 (defun p-/ (a b)
@@ -2550,13 +2550,13 @@
 (defun %p-%-slow (a b)
   "Perl modulo slow path with use overload '%' dispatch"
   (%with-binary-overload ("%" a b)
-    (let ((na (to-number a)) (nb (to-number b)))
-      (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
-              (and (floatp na) (sb-ext:float-infinity-p na))
-              (and (floatp nb) (sb-ext:float-infinity-p nb))
-              (zerop nb))
-          (sb-kernel:make-double-float #x7FF80000 0)
-          (mod (truncate na) (truncate nb))))))
+                         (let ((na (to-number a)) (nb (to-number b)))
+                           (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
+                                   (and (floatp na) (sb-ext:float-infinity-p na))
+                                   (and (floatp nb) (sb-ext:float-infinity-p nb))
+                                   (zerop nb))
+                               (sb-kernel:make-double-float #x7FF80000 0)
+                               (mod (truncate na) (truncate nb))))))
 
 (declaim (inline p-%))
 (defun p-% (a b)
@@ -2569,21 +2569,21 @@
 (defun p-** (a b)
   "Perl exponentiation with use overload '**' dispatch"
   (%with-binary-overload ("**" a b)
-    ;; No overload: numeric path with Inf-on-overflow
-    (let ((na (to-number a))
-          (nb (to-number b)))
-      ;; Return exact bignum when both args are non-negative integers AND the
-      ;; result fits in ~1000 bits.  This matters for pack/unpack: 2**64 as
-      ;; double loses precision.  Guard prevents 9**(9**9) from hanging SBCL.
-      (when (and (integerp na) (integerp nb) (>= nb 0)
-                 (<= (* nb (max 1 (integer-length na))) 1000))
-        (return-from p-** (expt na nb)))
-      (handler-case
-          (expt (coerce na 'double-float) (coerce nb 'double-float))
-        (floating-point-overflow ()
-          (if (and (realp na) (minusp na) (integerp nb) (oddp (truncate nb)))
-              sb-ext:double-float-negative-infinity
-              sb-ext:double-float-positive-infinity))))))
+                         ;; No overload: numeric path with Inf-on-overflow
+                         (let ((na (to-number a))
+                               (nb (to-number b)))
+                           ;; Return exact bignum when both args are non-negative integers AND the
+                           ;; result fits in ~1000 bits.  This matters for pack/unpack: 2**64 as
+                           ;; double loses precision.  Guard prevents 9**(9**9) from hanging SBCL.
+                           (when (and (integerp na) (integerp nb) (>= nb 0)
+                                      (<= (* nb (max 1 (integer-length na))) 1000))
+                             (return-from p-** (expt na nb)))
+                           (handler-case
+                               (expt (coerce na 'double-float) (coerce nb 'double-float))
+                             (floating-point-overflow ()
+                               (if (and (realp na) (minusp na) (integerp nb) (oddp (truncate nb)))
+                                   sb-ext:double-float-negative-infinity
+                                   sb-ext:double-float-positive-infinity))))))
 
 (defun p-int (val)
   "Perl int - truncate toward zero. NaN and Inf return unchanged (Perl 5.36+)."
@@ -2716,7 +2716,7 @@
 (defun %p-.-slow (a b)
   "Perl string concatenation slow path with use overload '.' dispatch."
   (%with-binary-overload ("." a b)
-    (concatenate 'string (to-string a) (to-string b))))
+                         (concatenate 'string (to-string a) (to-string b))))
 
 (declaim (inline p-.))
 (defun p-. (a b)
@@ -2726,11 +2726,25 @@
       (%p-.-slow a b)))
 (declaim (notinline p-.))
 
+(defun %pcl-dot-overloaded-p (v)
+  "True when V is a box whose class registers a '.' overload handler."
+  (and (p-box-p v) (p-find-overload v ".") t))
+
 (defun p-string-concat (&rest args)
   "Perl string concatenation for string interpolation (\"$a $b\").
-   Does NOT dispatch the '.' overload — interpolation uses the '\"\"' overload
-   automatically via to-string -> box-sv."
-  (apply #'concatenate 'string (mapcar #'to-string args)))
+   perl spells \"a $o b\" as 'a ' . $o . ' b', so a '.' overload
+   participates and the result need not be a string ([perl #124160],
+   task #402; probed: perl's multiconcat calls the handler once per
+   object piece, left to right, with the reversed flag, and a handler's
+   plain-string result makes the remaining concats plain).  When a piece
+   carries a '.' handler, fold left through p-. -- exactly the spelled-out
+   concat.  A SINGLE piece is a stringification, never a concat (\"$o\"
+   uses '\"\"' alone), and pieces without a '.' handler keep the
+   all-at-once fast path, whose to-string runs the '\"\"' overload via
+   box-sv -- which is perl's fallback for '.' as well."
+  (if (and (cdr args) (some #'%pcl-dot-overloaded-p args))
+      (reduce #'p-. args)
+      (apply #'concatenate 'string (mapcar #'to-string args))))
 
 (defun p-str-x (str count)
   "Perl string repetition operator (x).
@@ -5028,30 +5042,30 @@
        ;; The assignment proper; a simple-symbol array is auto-declared first
        ;; (#387 family 46, s413: the body was spelled once per case).
        (let ((body
-               `(let* ((,src ,value)
-                       ;; Convert source to vector
-                       (,src-vec (cond
-                                   ((listp ,src) (coerce ,src 'vector))
-                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                   (t (vector ,src))))
-                       ;; Flatten indices (handle range operator returning vector or list)
-                       (,indices (let ((idx-list nil))
-                                   (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
-                                     (cond
-                                       ((listp idx)
-                                        (dolist (i idx) (push i idx-list)))
-                                       ((and (vectorp idx) (not (stringp idx)))
-                                        (loop for i across idx do (push i idx-list)))
-                                       (t (push idx idx-list)))))))
-                  ;; Assign each element
-                  (loop for i from 0 below (length ,indices)
-                        for idx in ,indices
-                        do (setf (p-aref ,arr idx)
-                                 (if (< i (length ,src-vec))
-                                     (aref ,src-vec i)
-                                     *p-undef*)))
-                  ;; Return the values that were assigned
-                  ,src-vec)))
+              `(let* ((,src ,value)
+                      ;; Convert source to vector
+                      (,src-vec (cond
+                                  ((listp ,src) (coerce ,src 'vector))
+                                  ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                                  (t (vector ,src))))
+                      ;; Flatten indices (handle range operator returning vector or list)
+                      (,indices (let ((idx-list nil))
+                                  (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
+                                    (cond
+                                      ((listp idx)
+                                       (dolist (i idx) (push i idx-list)))
+                                      ((and (vectorp idx) (not (stringp idx)))
+                                       (loop for i across idx do (push i idx-list)))
+                                      (t (push idx idx-list)))))))
+                 ;; Assign each element
+                 (loop for i from 0 below (length ,indices)
+                       for idx in ,indices
+                       do (setf (p-aref ,arr idx)
+                                (if (< i (length ,src-vec))
+                                    (aref ,src-vec i)
+                                    *p-undef*)))
+                 ;; Return the values that were assigned
+                 ,src-vec)))
          (if (symbolp arr)
              `(progn
                 (unless (boundp ',arr)
@@ -5070,26 +5084,26 @@
        ;; The assignment proper; a simple-symbol hash is auto-declared first
        ;; (#387 family 46, s413: the body was spelled once per case).
        (let ((body
-               `(let* ((,src ,value)
-                       (,src-vec (cond
-                                   ((listp ,src) (coerce ,src 'vector))
-                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                   (t (vector ,src))))
-                       (,keys (let ((key-list nil))
-                                (dolist (k (list ,@keys-exprs) (nreverse key-list))
-                                  (cond
-                                    ((listp k)
-                                     (dolist (kk k) (push kk key-list)))
-                                    ((and (vectorp k) (not (stringp k)))
-                                     (loop for kk across k do (push kk key-list)))
-                                    (t (push k key-list)))))))
-                  (loop for i from 0 below (length ,keys)
-                        for k in ,keys
-                        do (setf (p-gethash ,hash k)
-                                 (if (< i (length ,src-vec))
-                                     (aref ,src-vec i)
-                                     *p-undef*)))
-                  ,src-vec)))
+              `(let* ((,src ,value)
+                      (,src-vec (cond
+                                  ((listp ,src) (coerce ,src 'vector))
+                                  ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                                  (t (vector ,src))))
+                      (,keys (let ((key-list nil))
+                               (dolist (k (list ,@keys-exprs) (nreverse key-list))
+                                 (cond
+                                   ((listp k)
+                                    (dolist (kk k) (push kk key-list)))
+                                   ((and (vectorp k) (not (stringp k)))
+                                    (loop for kk across k do (push kk key-list)))
+                                   (t (push k key-list)))))))
+                 (loop for i from 0 below (length ,keys)
+                       for k in ,keys
+                       do (setf (p-gethash ,hash k)
+                                (if (< i (length ,src-vec))
+                                    (aref ,src-vec i)
+                                    *p-undef*)))
+                 ,src-vec)))
          (if (symbolp hash)
              `(progn
                 (unless (boundp ',hash)
@@ -5529,11 +5543,11 @@
 (defun %p-<=>-slow (a b)
   "Perl spaceship slow path with use overload '<=>' dispatch"
   (%with-binary-overload ("<=>" a b)
-    ;; IEEE 754: NaN comparisons always false → <=> returns undef
-    (let ((na (to-number a)) (nb (to-number b)))
-      (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
-          *p-undef*
-          (cond ((< na nb) -1) ((> na nb) 1) (t 0))))))
+                         ;; IEEE 754: NaN comparisons always false → <=> returns undef
+                         (let ((na (to-number a)) (nb (to-number b)))
+                           (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+                               *p-undef*
+                               (cond ((< na nb) -1) ((> na nb) 1) (t 0))))))
 
 (declaim (inline p-<=>))
 (defun p-<=> (a b)
@@ -5817,8 +5831,8 @@
 (defun %p-str-cmp-slow (a b)
   "Perl string comparison (cmp) slow path with use overload 'cmp' dispatch"
   (%with-binary-overload ("cmp" a b)
-    (let ((sa (to-string a)) (sb (to-string b)))
-      (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0)))))
+                         (let ((sa (to-string a)) (sb (to-string b)))
+                           (cond ((string< sa sb) -1) ((string> sa sb) 1) (t 0)))))
 
 (declaim (inline p-str-cmp))
 (defun p-str-cmp (a b)
@@ -9401,32 +9415,32 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   ;; which the #281 context macros would have silently defeated (probed: the
   ;; bareword then CALLS pl-NAME, an undefined function).
   (let ((fh-form (%p-strip-ctx fh-form)))
-   (cond
-    ;; Bare symbol without sigil — bareword filehandle: quote it
-    ((and (symbolp fh-form)
-          (let ((name (symbol-name fh-form)))
-            (and (plusp (length name))
-                 (not (member (char name 0) '(#\$ #\@ #\% #\*))))))
-     `',(intern (symbol-name fh-form)))
-    ;; (pl-NAME) pattern: codegen wrapped a bareword FH in a user-sub call.
-    ;; Extract the bare name and quote it instead of calling the nonexistent function.
-    ((and (listp fh-form)
-          (= (length fh-form) 1)
-          (symbolp (car fh-form))
-          (let ((name (symbol-name (car fh-form))))
-            (and (> (length name) 3)
-                 (string-equal (subseq name 0 3) "PL-"))))
-     ;; Recover the bareword FH name and intern the SAME symbol the direct
-     ;; bareword path produces.  A direct bareword `X` becomes
-     ;; (intern (%pcl-invert-case "X")) — the reader applies :invert.  Here we
-     ;; first un-invert the read symbol-name and strip the pl- prefix to get the
-     ;; original Perl name, then invert it again to match.  (Skipping the final
-     ;; invert mis-cased `eof(TST)`/`<TST>` derived FHs: "TST" vs the readline's
-     ;; "tst" — symbolic-FH open(\$TST="TST") then bareword use.)
-     `',(intern (%pcl-invert-case
-                 (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3))))
-    ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
-    (t fh-form))))
+    (cond
+      ;; Bare symbol without sigil — bareword filehandle: quote it
+      ((and (symbolp fh-form)
+            (let ((name (symbol-name fh-form)))
+              (and (plusp (length name))
+                   (not (member (char name 0) '(#\$ #\@ #\% #\*))))))
+       `',(intern (symbol-name fh-form)))
+      ;; (pl-NAME) pattern: codegen wrapped a bareword FH in a user-sub call.
+      ;; Extract the bare name and quote it instead of calling the nonexistent function.
+      ((and (listp fh-form)
+            (= (length fh-form) 1)
+            (symbolp (car fh-form))
+            (let ((name (symbol-name (car fh-form))))
+              (and (> (length name) 3)
+                   (string-equal (subseq name 0 3) "PL-"))))
+       ;; Recover the bareword FH name and intern the SAME symbol the direct
+       ;; bareword path produces.  A direct bareword `X` becomes
+       ;; (intern (%pcl-invert-case "X")) — the reader applies :invert.  Here we
+       ;; first un-invert the read symbol-name and strip the pl- prefix to get the
+       ;; original Perl name, then invert it again to match.  (Skipping the final
+       ;; invert mis-cased `eof(TST)`/`<TST>` derived FHs: "TST" vs the readline's
+       ;; "tst" — symbolic-FH open(\$TST="TST") then bareword use.)
+       `',(intern (%pcl-invert-case
+                   (subseq (%pcl-invert-case (symbol-name (car fh-form))) 3))))
+      ;; Everything else: evaluate as-is (e.g. $fh variable or complex expression)
+      (t fh-form))))
 
 (defun %p-tell-impl (&optional fh)
   "Perl tell - return current file position"
@@ -16074,7 +16088,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun do-regex-subst (string-box op)
   "Perform substitution on boxed string, return count of replacements.
    Also sets capture groups $1, $2, ... from the match."
-  (let* ((str (to-string (unbox string-box)))
+  ;; to-string on the BOX (not the unboxed value): box-sv runs the ""
+  ;; overload and tie FETCH, so an overloaded object substitutes against
+  ;; its overloaded string as perl does, never its raw print form (#119).
+  (let* ((str (to-string string-box))
          (pattern (perl-regex-to-ppcre (p-subst-op-pattern op)))
          (raw-replacement (p-subst-op-replacement op))
          (modifiers (p-subst-op-modifiers op))
@@ -16205,7 +16222,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun do-tr (string-box op)
   "Perform transliteration on boxed string.  Returns the count of matched chars,
    or (with /r) the transliterated copy without modifying STRING-BOX."
-  (let* ((str (to-string (unbox string-box)))
+  ;; to-string on the BOX, as in do-regex-subst just above (#119).
+  (let* ((str (to-string string-box))
          (modifiers (p-tr-op-modifiers op))
          (complement-p (and (member :c modifiers) t))
          (delete-p (and (member :d modifiers) t))

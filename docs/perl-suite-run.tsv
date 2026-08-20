@@ -1,4 +1,12 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s419 row edits: opbasic/concat.t 248/6 -> 249/5 (task #402 -- the [perl #124160]
+#   interpolation-'.'-overload row now passes; serial+parallel agree).
+#   re/pat_advanced.t 927/751 -> 950/730: PRE-EXISTING drift since this s392
+#   snapshot, verified by running the file on a ba9045f worktree (same 950/730
+#   before the s419 runtime change) -- attributed to the s404-era repairs, not
+#   to s419.  re/overload.t, re/pat_psycho.t, re/speed.t report TIMEOUT at the
+#   90s default with row counts IDENTICAL to their spliced --timeout-300
+#   measurements (status word only; rows unchanged).
 # taken-at: 582667e (full --all --jobs 6 run, s392, task #304); the 8 TIMEOUT
 #   rows re-measured in the same tree with --timeout 300 and spliced in (the
 #   s325/#195 method — a TIMEOUT row's C_ok is only "how far it got before
@@ -685,7 +693,7 @@ op/write.t	636	0	0	0	DIFF
 op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A
 opbasic/arith.t	183	0	183	0	OK	
 opbasic/cmp.t	13280	0	12078	0	DIFF	
-opbasic/concat.t	254	0	248	6	DIFF	
+opbasic/concat.t	254	0	249	5	DIFF	
 opbasic/magic_phase.t	7	0	0	5	DIFF	
 opbasic/qq.t	30	0	30	0	OK	
 re/alpha_assertions.t	2279	0	1784	74	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
@@ -705,7 +713,7 @@ re/no_utf8_pm.t	1	0	1	0	OK
 re/opt.t	639	17	0	0	XDIFF	undef-fn:re::pl-optimization | not-supported.md §re::optimization - the regex engine's internal optimizer report (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
 re/overload.t	87	0	3	0	DIFF	
 re/pat.t	1263	4	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
-re/pat_advanced.t	1678	0	927	751	DIFF	
+re/pat_advanced.t	1678	0	950	730	DIFF	
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
