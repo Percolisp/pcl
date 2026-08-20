@@ -33,6 +33,46 @@ the announcement was built for.  runpcl now forwards `^PCL: ` lines on
 success; clean output byte-identical; errno-01.t + regexp-subst-01.t pass;
 the SBCL command line untouched.
 
+**Then the B2 fix, EXECUTED in the same session** (the design's §5 bar, every
+leg).  The change is three edits in `handle_subcalls`: the cached
+`$last_low_prio_op` deleted, the ceiling recomputed from the CURRENT `@$e` at
+the point of use, the `PCL_B2_TRACE` probe deleted with its subject.
+
+* **All nine acceptance rows match perl** — the drop, the headline, the
+  shift-2 silent wrong (`f ref $h{k} or g "fb"` now runs in perl's order),
+  and/xor, two boundaries, two reductions before one boundary, the bless.t
+  and split.t row shapes on both branches, the eval/join benign shape.
+* **Emission A/B, four populations, 1139 files**: diffs ONLY bless.t and
+  split.t (both populations) — plus **Text::CSV_PP.pm:1566, an ELEVENTH
+  event in the cpan population the s417 scan never covered**
+  (`$c->{fltr} && grep m/\D/ => keys %{$c->{fltr}} and $hdrs ||= "auto"`:
+  grep swallowed the `and`, so the "auto" headers assignment was wrong —
+  probed both branches vs perl, now identical).  reg_fold.t byte-identical,
+  exactly as §3 predicted (the term walker, not the ceiling, bounds eval's
+  operand).  lib and the rest: zero diffs.
+* **Gate-SET scan, both populations, 638 files each**: exactly the 4
+  drop→OK verdict moves, nothing else.
+* **Gate 154 files / 5594 rows** (the new guard `Pl/t/listop-ceiling-01.t`,
+  4 rows 8 s), only the 13 pclxs xs rows.
+* **Sweep: GATE clean after row-by-row baseline edits, TOTAL 18369 →
+  18363** — and the −6 is the fix being honest.  bless.t's un-dropped
+  assertion runs for the first time and FAILS (`got='ARRAY'`): `bless $tied`
+  does not FETCH the tied scalar — get-magic missing on the bless operand,
+  filed **#408**, row added to fail-baseline by hand.  split.t's un-dropped
+  `my ($sp) = grep /\s/u, … or skip` takes the file's OWN skip branch
+  because PCL's `\s` under /u misses NBSP (filed **#407**): 3 baseline fails
+  become honest skips (removed by edit), and 6 rows that had been PASSING
+  ACCIDENTALLY — running with the dropped statement's undef `$sp` — now skip
+  too (pass-baseline 184/9 → 178/6, annotated in its header).  Census rows
+  removed for both populations' bless.t + split.t: 46 files / 139 → 42/135;
+  sweep drops 10 → 8 = census.
+* Generation v2-160 → **v2-161**, all three artifacts regenerated
+  (gen-stamp-only).  #259 and #335 probed post-fix: NO change, as designed —
+  both tasks annotated.  Companion `--quick` re-run clean (see below).
+
+**#343 CLOSED.**  Queue: #401-eval filler (session L, cache-key leg
+mandatory) → re-census → announce→DIE flip → M–N release.
+
 ---
 
 ## Session 417 (2026-08-20) — Track B1 (#372) SHIPPED: stacked filetests parse and lower to the `_`-chain; a PPI bug logged; 27 census drops → 1

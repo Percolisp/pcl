@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 46 files, 139 drops -- 8 perl-tests files (10
-# drops), 38 companion files (129), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 42 files, 135 drops -- 6 perl-tests files (8
+# drops), 36 companion files (127), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -98,6 +98,21 @@
 #         declines.  The file's verdict is unchanged (DIFF 7/10) — its next
 #         blocker is the INDIRECT-OBJECT call `h F` at line 91, which holds 139
 #         of perl's 156 rows: task #381.
+#   s418  FOUR rows REMOVED — bless.t and split.t in BOTH populations, each
+#         1 drop, all `Bug. Fell through` (#343, Track B2 — the stale
+#         argument-ceiling; design docs/b2-ceiling-fix-s418.md, mechanism
+#         docs/b2-stale-operand-ceiling-s417.md).  handle_subcalls cached the
+#         index of the low-precedence and/or/xor that ends a paren-less list
+#         operator's arguments, and its own reductions invalidated the index;
+#         the ceiling is now derived from the CURRENT @$e at the point of use.
+#         bless.t's row (`is ref $untied, "main", '…' or diag $@` — the
+#         assertion the header note below calls out as never running) and
+#         split.t's (`my ($sp) = grep …, map chr, … or skip …`) both emit real
+#         code now, probed against perl on both short-circuit branches.  The
+#         same fix closed an UNCOUNTED silent-wrong outside this census's
+#         population: Text::CSV_PP.pm:1566 (`… && grep m/\D/ => keys %{…} and
+#         $hdrs ||= "auto"`), where grep swallowed the `and`.  Guard
+#         Pl/t/listop-ceiling-01.t.  46 files / 139 -> 42 / 135.
 #   s417  t/op/filetest.t 19 -> 1 and t/op/filetest_stack_ok.t 1, t/op/filetest_t.t
 #         5, t/op/stat.t 2 -> 0, three rows REMOVED (#372, Track B1 — the design
 #         is docs/b1-operand-grammar-s416.md).  A STACKED filetest (`-f -d $x`)
@@ -184,12 +199,10 @@
 #         census was simply stale for them.  Their drops are ordinary term-
 #         grammar shapes (a wide interpolation, an overload block).
 #      (e) Everything else is unchanged, row for row.
-perl-tests/bless.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
-perl-tests/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
@@ -198,7 +211,6 @@ t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/mro/basic_utf8.t	1	Bug. Fell through. Missing case: [ x1
 t/mro/package_aliases_utf8.t	2	Bug. Fell through. Missing case: [ x2
-t/op/bless.t	1	Bug. Fell through. Missing case: [ x1
 t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
 t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2
@@ -213,7 +225,6 @@ t/op/numconvert.t	1	PCL internal: no form emitter for expression leaf PPI::Token
 t/op/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
-t/op/split.t	1	Bug. Fell through. Missing case: [bless({ id => 0, type => "funcall" }, "PPIreference"), undef] x1
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1

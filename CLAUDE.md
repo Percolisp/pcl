@@ -445,9 +445,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **153 test files, 5590 rows** (s417) with a built pclxs sibling (s409, measured
+- **154 test files, 5594 rows** (s418) with a built pclxs sibling (s409, measured
   COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
-  work, user s394/s395: ignore XS rows); **5428 without** (arithmetic: minus
+  work, user s394/s395: ignore XS rows); **5580 without** (arithmetic: minus
   the 14 xs rows).  **RULED s409: compare a gate count against a measurement
   of the SAME tree** — the xs files PRODUCE 0–14 rows depending on where
   pclxs\x27s current state aborts them, so a written-down total drifts on its
@@ -588,6 +588,30 @@ When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
 2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2b000. **s417 RULED + Track B2 (#343) SHIPPED (s418, Fable, 2026-08-20;
+`docs/fable-answers-s417.md` + `docs/b2-ceiling-fix-s418.md`).**  s417 APPROVED
+(gate COLD 153/5590; sweep re-run clean; 14 probes).  **B2 = the stale ceiling,
+FIXED by recomputing at use**: `$last_low_prio_op` DELETED; the paren-less
+list-operator argument ceiling is derived from the CURRENT `@$e` by one
+rightward scan to the first same-level `and`/`or`/`xor` (the probe's own
+`$actual`, validated over 658 files; the region prohibition does not apply —
+no new rule, the boundary's meaning is unchanged; the `PCL_B2_TRACE` probe is
+deleted, not a gate).  Emission A/B over the four populations: diffs ONLY
+bless.t + split.t (both populations) + **Text::CSV_PP.pm:1566 — an ELEVENTH
+uncounted silent-wrong in the cpan population** (`… && grep m/\D/ => keys %{…}
+and $hdrs ||= "auto"`, grep swallowed the `and`; probed both branches vs
+perl); reg_fold.t byte-identical as predicted.  Gate-SET scan 638×2: exactly
+the 4 drop→OK moves.  Sweep TOTAL 18369 → **18363** — bless.t's un-dropped
+assertion runs and FAILS HONESTLY (`bless` misses get-magic on a tied operand,
+**#408**), split.t's un-dropped `or skip` takes the file's own skip branch
+(PCL's `\s` under /u misses NBSP, **#407**): 3 baseline fails fixed, 6
+ACCIDENTAL passes (rows running on the dropped statement's undef `$sp`) now
+skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
+**154/5594**; generation **v2-161**.  Guard `Pl/t/listop-ceiling-01.t`.
+**runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
+discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
+designed.  **Queue now: #401-eval filler (session L, cache-key leg mandatory)
+→ re-census → announce→DIE flip → M–N release.**
 2b00. **Track B1 (#372) SHIPPED s417 — stacked filetests.**  `-f -d $x` is ONE
 term and lowers to perl's `_`-chain (`-x $f && -w _ && -f _`), never a nest
 (nesting is SILENT WRONG the other way: `-e -f "/etc/passwd"` is 1 in perl,

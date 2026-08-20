@@ -11,7 +11,22 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
-## s418 (2026-08-20, Fable) — s417 RULED; the B2 fix DESIGNED; runpcl surfaces drop announcements
+## s418 (2026-08-20, Fable) — s417 RULED; the B2 fix DESIGNED **and SHIPPED**; runpcl surfaces drop announcements
+
+- **B2 (#343) SHIPPED in the same session** (`docs/b2-ceiling-fix-s418.md` §5's
+  bar, all legs): emission A/B over the FOUR populations — diffs ONLY
+  bless.t/split.t (both populations) + **Text::CSV_PP.pm:1566, an ELEVENTH
+  uncounted silent-wrong in the cpan population the s417 scan never covered**
+  (grep swallowed `and $hdrs ||= "auto"`; probed both branches vs perl);
+  reg_fold.t byte-identical as predicted.  Gate-SET scan 638×2: exactly the 4
+  drop→OK moves.  Gate **154/5594**; census 46/139 → **42/135**; generation
+  **v2-161**; guard `Pl/t/listop-ceiling-01.t`.  Sweep TOTAL 18369 → **18363**
+  and the -6 is the fix being HONEST: bless.t's un-dropped assertion runs and
+  fails (bless misses get-magic on a tied operand, filed **#408**); split.t's
+  un-dropped `or skip` fires the file's own guard (PCL `\s` under /u misses
+  NBSP, filed **#407**), skipping 3 baseline fails and 6 ACCIDENTAL passes
+  that ran on the dropped statement's undef `$sp`.  Baselines edited row by
+  row.  #259/#335 probed post-fix: no change, as the design predicted.
 
 - **s417 APPROVED as shipped** (`docs/fable-answers-s417.md`): gate re-run
   COLD 153/5590 (only the 13 pclxs xs rows), sweep RE-RUN clean TOTAL 18369

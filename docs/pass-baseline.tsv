@@ -32,6 +32,12 @@
 #   operator, so both statements were DROPPED whole; the token repair
 #   Parser2::_repair_term_initial_complement splits it into the two complements
 #   perl reads (ppi-upstream-bugs.md §21).
+# s418 (#343): bless.t 106/0->106/1 and split.t 184/9->178/6 EDITED BY HAND, not re-blessed —
+#   the stale-ceiling fix un-dropped one statement in each.  bless.t: the assertion at :179 runs
+#   for the first time and FAILS honestly (bless misses get-magic on a tied operand; owner #408).
+#   split.t: the un-dropped `my ($sp) = grep ... or skip` now takes the file's own skip branch
+#   (PCL's \s under /u misses NBSP, owner #407), so 9 rows skip: 3 were baseline fails (fixed),
+#   6 were ACCIDENTAL passes running on the dropped statement's undef $sp.
 aassign.t	OK	173	15	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -41,7 +47,7 @@ arith2.t	OK	9	0	9
 array.t	OK	169	15	195
 assignwarn.t	OK	96	20	116
 auto.t	OK	47	0	47
-bless.t	OK	106	0	106
+bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
 bop.t	PARTIAL	253	256	510
@@ -123,7 +129,7 @@ signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	OK	203	1	205
 splice.t	OK	34	0	34
-split.t	OK	184	9	219
+split.t	OK	178	6	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
 state.t	TRANSPILE_FAIL	0	0	166

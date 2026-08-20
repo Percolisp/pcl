@@ -3560,20 +3560,19 @@ sub handle_subcalls {
   say "---- handle_subcalls: Before main loop. Has ", dump $e   if 8 & DEBUG;
 
   # - - - Look for remaining funcalls without () around parameters:
-  my $last_low_prio_op;       # Store index to lower prio op than ","
   for(my $i=scalar(@$e)-1; $i >= 0; $i--) {
     my $now     = $e->[$i];
 
-    # - - - Find lower prio op than "," -- that will end param list to fun:
+    # - - - A lower prio op than "," ends a param list to a fun:
     # foo a, b, c or d etc ==> foo(a,b,c) or d etc.
-
-    # XXXXX This is different for 1 param subs that are built in ops???
+    # Its position is derived at the point of use (see "Parse parameters"
+    # below), NEVER cached here: this loop's own reductions splice @$e and
+    # shift positions, so a saved index goes stale (#343).
     my $op_name = $self->is_token_operator($now);
     if (defined $op_name && ($op_name eq 'and'
                              || $op_name eq 'or'
                              || $op_name eq 'xor')) {
-      $last_low_prio_op = $i;
-      next;
+      next;   # a boundary operator, never a call word
     }
 
     # - - - Make certain it is a fun name:
@@ -3754,11 +3753,22 @@ sub handle_subcalls {
     }
 
     # - - - Parse parameters of fun:
+    # The argument list of a paren-less list operator ends before the nearest
+    # and/or/xor AT THIS LEVEL.  Derive that boundary from the CURRENT @$e,
+    # never from an index saved earlier in the scan: this loop's own
+    # reductions splice @$e and shift everything right of the reduction
+    # leftward, so a saved position no longer means what it meant — the
+    # arguments then swallow the operator that should end them (#343;
+    # docs/b2-stale-operand-ceiling-s417.md has the trace and the
+    # population scan, docs/b2-ceiling-fix-s418.md the equivalence argument).
     my $end_pars= scalar(@$e)-1;
-    $end_pars   = $last_low_prio_op-1
-        if defined $last_low_prio_op;
-    $self->_stale_low_prio_probe($e, $i, $sub_name, $last_low_prio_op, $end_pars)
-      if $ENV{PCL_B2_TRACE} && defined $last_low_prio_op;
+    for (my $j = $i + 1; $j <= $end_pars; $j++) {
+      my $jop = $self->is_token_operator($e->[$j]) // '';
+      if ($jop eq 'and' || $jop eq 'or' || $jop eq 'xor') {
+        $end_pars = $j - 1;
+        last;
+      }
+    }
 
     # A ternary ':' that closes an ENCLOSING ternary terminates this list
     # operator's argument list: `cond ? join "-", @a : $fb` must parse as
@@ -4601,46 +4611,6 @@ sub _fuse_print_filehandle_filetest {
     splice @$e, $i + 2, 2,
            PPI::Token::Operator->new('-' . $letter->content);
   }
-}
-
-# THE #343 (Track B2) DISCRIMINATING MEASUREMENT — `PCL_B2_TRACE=1`.
-#
-# `$last_low_prio_op` is an INDEX into @$e, recorded by handle_subcalls's
-# RIGHT-TO-LEFT scan when it passes an `and`/`or`/`xor`.  Any reduction the
-# same scan performs afterwards — i.e. at a position to its LEFT — splices
-# @$e and shifts that operator left, but the saved index is never adjusted.
-# So a paren-less list operator whose argument region contains a reduction
-# computes `$end_pars = $last_low_prio_op - 1` from a STALE index and its
-# argument list runs past the low-precedence operator that should have ended
-# it.  Measured (s417):
-#
-#   f ref $u or g "fb"      saved=3 actual=2  ->  end_pars lands ON the `or`
-#   f $u    or g "fb"       saved=2 actual=2  ->  correct (no reduction between)
-#
-# The size of the error is (elements the intervening reduction consumed - 1),
-# so it is not always off-by-one: `f ref $h{k} or g "fb"` is off by two, and
-# there the statement does not even DROP — it runs with the `or` swallowed,
-# which is the silent-wrong half of this family.
-#
-# This probe reports every site where the saved index disagrees with where the
-# operator actually is now.  Population scan at s417 (658 files, both
-# populations): 10 events in 3 distinct source files — bless.t's `is ref $x,
-# "main", "d" or diag $@` (the census's DROP), split.t's `my ($sp) = grep …,
-# map chr, reverse … or skip …` (a SILENT WRONG in NO count: perl runs the
-# `or` branch, PCL does not), and reg_fold.t's `eval join … or die $@` (the
-# index is stale but the emission is correct — probed).  A disagreement is
-# therefore necessary but not sufficient for a divergence; probe each site.
-sub _stale_low_prio_probe {
-  my ($self, $e, $i, $sub_name, $saved, $end_pars) = @_;
-  my $actual;
-  for (my $j = $i + 1; $j < scalar(@$e); $j++) {
-    my $jop = $self->is_token_operator($e->[$j]) // '';
-    if ($jop eq 'or' || $jop eq 'and' || $jop eq 'xor') { $actual = $j; last }
-  }
-  return unless defined $actual && $actual != $saved;
-  printf STDERR "B2STALE word=%s shift=%d saved=%d actual=%d end_pars=%d n=%d\n",
-                $sub_name, $saved - $actual, $saved, $actual, $end_pars,
-                scalar(@$e);
 }
 
 sub _default_filetest_operand {

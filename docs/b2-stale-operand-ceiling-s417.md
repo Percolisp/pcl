@@ -1,5 +1,14 @@
 # Option B phase 2, Track B2 (#343) — the mechanism, LOCATED and measured
 
+**FIXED s418** (`docs/b2-ceiling-fix-s418.md`, ruled `docs/fable-answers-s417.md`
+§2): the ceiling is recomputed from the CURRENT `@$e` at the point of use;
+`$last_low_prio_op` and the `PCL_B2_TRACE` probe are deleted.  The fix also
+closed an ELEVENTH event this file's 658-file scan could not see —
+Text::CSV_PP.pm:1566 in the cpan-tests population (`… && grep m/\D/ => keys
+%{…} and $hdrs ||= "auto"`, grep swallowed the `and`; probed vs perl on both
+branches).  Guard `Pl/t/listop-ceiling-01.t`.  This file remains the
+measurement record.
+
 (s417, 2026-08-20.  `docs/option-b-phase2-plan.md` §2 Track B2 said "Mechanism
 NOT yet located" and named the measurement to take first — the `@$e` dump at
 the "Fell through" die for `f ref $u, "m" or g "fb"` vs `f $u, "m" or g "fb"`.
