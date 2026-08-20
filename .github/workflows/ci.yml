@@ -1,0 +1,73 @@
+# CI (task #283): the fresh-machine test, running forever.
+#
+# This deliberately reuses tools/install-pcl (task #277) rather than a
+# hand-rolled build: CI runs on a machine with none of the dev conveniences,
+# so a green run here IS the #282 fresh-machine property for the ubuntu
+# image.  The Pl/t xs rows plan-skip (no pclxs sibling in CI).
+#
+# SBCL: ubuntu-latest packages an SBCL older than the 2.5.2 floor
+# (README "Minimum SBCL version"), so the official binary is installed
+# from sbcl.org's distribution point and pinned.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  SBCL_VERSION: "2.6.0"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # corpus-diff transpiles the PR base for comparison
+          fetch-depth: 0
+
+      - name: Install Perl dependencies (PPI, Moo)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -qy libppi-perl libmoo-perl
+          perl -MPPI -e 'print "PPI $PPI::VERSION\n"'
+          perl -MMoo -e 'print "Moo $Moo::VERSION\n"'
+
+      - name: Install SBCL ${{ env.SBCL_VERSION }} (binary from sbcl.org)
+        run: |
+          curl -fsSL -o /tmp/sbcl.tar.bz2 \
+            "https://downloads.sourceforge.net/project/sbcl/sbcl/${SBCL_VERSION}/sbcl-${SBCL_VERSION}-x86-64-linux-binary.tar.bz2"
+          tar -xjf /tmp/sbcl.tar.bz2 -C /tmp
+          ( cd /tmp/sbcl-${SBCL_VERSION}-x86-64-linux && INSTALL_ROOT=$HOME/sbcl sh install.sh )
+          echo "$HOME/sbcl/bin" >> "$GITHUB_PATH"
+          echo "SBCL_HOME=$HOME/sbcl/lib/sbcl" >> "$GITHUB_ENV"
+
+      - name: Install Quicklisp + cl-ppcre
+        run: |
+          curl -fsSL -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive --load /tmp/quicklisp.lisp \
+               --eval '(quicklisp-quickstart:install)' \
+               --eval '(ql-util:without-prompting (ql:add-to-init-file))'
+          sbcl --non-interactive --eval '(ql:quickload :cl-ppcre)'
+
+      - name: Fresh-machine install (tools/install-pcl, builds the saved core)
+        run: |
+          tools/install-pcl --prefix "$HOME/.local"
+          # The installer self-verifies (it refuses to finish unless the
+          # installed tools transpile and run a program), so reaching here
+          # is the fresh-machine property.
+
+      - name: Installer end-to-end test
+        run: prove tools/t/install-pcl.t
+
+      - name: Test gate (prove, fresh saved core)
+        run: tools/prove-core
+
+      - name: Emission diff vs PR base (corpus-diff)
+        if: github.event_name == 'pull_request'
+        run: |
+          tools/corpus-diff.pl "${{ github.event.pull_request.base.sha }}" \
+            || { echo "::error::emission differs from PR base -- every differing file must be explained in the PR"; exit 1; }
