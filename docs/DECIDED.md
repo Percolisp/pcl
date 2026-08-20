@@ -46,6 +46,26 @@ not-supported.md → only then probe.*
   success; clean programs byte-identical; a difftest case that drops now
   MISMATCHES instead of accidentally matching.
 
+## s418c (2026-08-21, Fable) — #401 eval half SHIPPED: a named sub's `state` cell reaches string eval
+
+- **A `state` cell joins eval-site capture alists via `_eval_state_captures`**
+  (#401, s418c): original→cell registered when the DECL STATEMENT lowers (so
+  visibility starts at perl's masking point — an eval before the decl sees
+  the outer name), scoped by `_lower_sub`'s save/restore WITHOUT the
+  `_let_bound_vars` wipe (an enclosing sub's state stays visible to a nested
+  sub's eval — op/sub.t's `predeclared`/`inside_predeclared`; the cells are
+  defvars, so the wipe's unbound-at-call-time hazard cannot apply).  Alist
+  order: let-bound pairs (a `my` shadow wins) → state pairs → span pairs.
+  Waived ONLY for a SCALAR decl at the top level of the sub's own block;
+  inner-block decls and containers keep the refusal.
+- **The p-eval cache needed NO new code for the capture-dependent emission —
+  #296-B1's key already carries the capture NAMES** and the alist VALUE
+  resolves at runtime; the mandatory leg was the discriminating probe (two
+  subs, same eval text, different cells → `ABA`, identical to perl).
+- t/op/sub.t TRANSPILE-FAIL → **DIFF 53/12**, one row better than its s410
+  snapshot; emission A/B: op/sub.t is the ONLY mover across 1139 files.
+  Guard `Pl/t/state-eval-01.t`.  #401 CLOSED (both halves).
+
 ## s417 (2026-08-20) — Track B1 SHIPPED: stacked filetests parse, and lower to the `_`-chain
 
 - **`-f -d $x` IS ONE TERM and lowers to perl's `_`-chain, never a nest**

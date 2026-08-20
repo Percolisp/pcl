@@ -110,6 +110,10 @@ sub _build_fallback_parser {
   # The lexical registry lives HERE, on the owner (#153 chunk 0); the seam
   # parser reads it through lex_home.
   $self->{_let_bound_vars} //= {};
+  # original-name → state-cell pairs for eval-site capture alists (s418,
+  # #401): populated when a state DECL statement lowers, scoped by
+  # _lower_sub's save/restore, read by _eval_lexical_alist.
+  $self->{_eval_state_captures} //= {};
   # The seam's emission state and its (weak) owner back-reference are set by
   # the parser itself (Pl::Parser::become_seam): v1 text is produced on it only
   # inside capture_v1, whose drain hands the lines back by bucket name —
@@ -1602,6 +1606,7 @@ sub parse {
     # lexicals are renamed (promotion passes / the seam's __lex__N) or gated,
     # so the per-iteration-closure hazard cannot reach this path.
     $self->{_let_bound_vars} = {};
+    $self->{_eval_state_captures} = {};
     # M-F: this segment's span-mangled cells, visible to string evals by
     # their ORIGINAL name via the capture alist (_eval_lexical_alist).
     # These per-site pairs cover CROSS-PACKAGE sites (the eval-time lookup
@@ -4012,8 +4017,10 @@ sub _shadow_rename_blocker {
   # waives this (M-F): the seam my-shadow rename produces a LET-BOUND
   # `$x__shadow__N`, which _eval_lexical_alist strips back to the original
   # key (innermost-first), so string eval — literal and dynamic — still
-  # reaches the shadow.  state/cond renames produce cells the alist does not
-  # carry, so they keep the refusal.
+  # reaches the shadow.  A top-level-of-sub SCALAR state rename waives it
+  # too (s418, #401): its cell rides the alist via _eval_state_captures.
+  # Other state/cond renames produce cells the alist does not carry, so
+  # they keep the refusal.
   unless ($eval_ok) {
     for my $w (@{ $root->find(sub { $_[1]->isa('PPI::Token::Word')
                                     && $_[1]->content eq 'eval' }) || [] }) {
@@ -5513,12 +5520,31 @@ sub _rename_state_vars {
           && $k[1]->content =~ /^[\$\@\%]\w+$/
           && (@k == 2
               || ($k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='));
+    # A SCALAR decl at the TOP LEVEL of the sub's own block waives the
+    # string-eval refusal (s418, #401): its cell joins eval-site capture
+    # alists under the ORIGINAL name (_eval_state_captures) — registered when
+    # the DECL STATEMENT lowers, so an eval lexically before the decl still
+    # resolves the outer name as perl reads it, and scoped by _lower_sub's
+    # save/restore, so the pair dies with the sub but stays visible to
+    # nested subs and closures (perl's pad chain; op/sub.t's
+    # `predeclared`/`inside_predeclared`).  The cell is a defvar'd box, so
+    # eval reads AND writes reach it — the span-cell rule
+    # (_eval_lexical_alist).  The capture NAMES are part of p-eval's cache
+    # key and the cell rides the alist VALUE, so two subs eval'ing the same
+    # text each see their own cell (#296-B1's key rule; probed).  A decl
+    # nested in an inner block keeps the refusal: its region ends with that
+    # block, which the sub-scoped map cannot express.
+    my $eval_cap_ok = $k[1]->content =~ /^\$/ && $stmt->parent == $sub->block;
     my $why = $k[1]->content =~ /^\$/
-      ? $self->_shadow_rename_blocker($sub->block, $k[1], undef, 'shadow_ok')
+      ? $self->_shadow_rename_blocker($sub->block, $k[1],
+                                      ($eval_cap_ok ? 'eval_ok' : undef),
+                                      'shadow_ok')
       : $self->_state_container_blocker($sub->block, $k[1]);
     die "Parser2 TODO: state " . $k[1]->content . " in named sub ($why)\n" if $why;
+    my $orig = $k[1]->content;
     my $new = $k[1]->content . '__state__' . $self->_state_disambig
             . $self->{_state_rename_counter}++;
+    $self->{_state_eval_capture_orig}{$new} = $orig if $eval_cap_ok;
     $self->_rename_decl_within($sub->block, $k[1], $new);
     $self->{_state_renamed}{$new} = @k > 2 ? 'init' : 'plain';
     # Both symbols are defvar'd via _captured_decls at lowering time; the
@@ -6152,10 +6178,18 @@ sub _lower_sub {
     { map { ($_ => 1) }
       grep { $self->{_eval_block_cells} && $self->{_eval_block_cells}{$_} }
       keys %saved_lb };
+  # State-cell eval pairs (s418, #401): saved and RESTORED — but NOT wiped.
+  # An enclosing sub's `state $x` stays visible to a nested sub's eval
+  # (perl's pad chain: op/sub.t's inside_predeclared), and the cells are
+  # defvars, so the M5 argument applies — the pair can never be the
+  # unbound-at-call-time crash the _let_bound_vars wipe defends against.
+  # The restore ends pairs minted by this body's own state decls.
+  my %saved_sc  = %{ $self->{_eval_state_captures} // {} };
   my $form = eval { $self->_lower_sub_inner($sub) };
   my $err = $@;
   $self->{_live_lex} = \%saved_lex;
   $self->{_let_bound_vars} = \%saved_lb;
+  $self->{_eval_state_captures} = \%saved_sc;
   $env->in_subroutine($env->in_subroutine - 1);
   die $err if $err;
   return $form;
@@ -6682,6 +6716,13 @@ sub _lower_block {
       my $name = $sk[1]->content;
       my $kind = $self->{_state_renamed}{$name}
         or die "Parser2 TODO: unrenamed state declaration: " . $first->content . "\n";
+      # Register the eval-capture pair HERE, not at rename time: visibility
+      # starts at the decl statement (perl: `state $x` masks from its
+      # declaration on, so an eval lexically before it resolves the outer
+      # name), and _lower_sub's restore ends it with the sub (s418, #401).
+      if (my $orig = $self->{_state_eval_capture_orig}{$name}) {
+        $self->{_eval_state_captures}{$orig} = $name;
+      }
       push @{ $self->{_captured_decls} },
         global_decl_form($name, _fresh_container($name));
       my @forms;

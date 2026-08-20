@@ -2264,7 +2264,8 @@ sub _eval_lexical_alist {
   # survives as the v1-SEAM rename only.)
   # `state` renames
   # (`__state__`) are deliberately NOT stripped: those are defvar'd cells, not
-  # let bindings, and never enter _let_bound_vars.
+  # let bindings, and never enter _let_bound_vars — their pairs arrive via
+  # _eval_state_captures below (s418, #401).
   my $skey = sub {
     my ($v) = @_;
     $v =~ s/__lex__\d+$//;
@@ -2282,6 +2283,19 @@ sub _eval_lexical_alist {
   for my $v (@vars) {
     my ($key) = $skey->($v);
     push @pairs, ['cons', "\"$key\"", $v];
+    $seen{$key} = 1;
+  }
+  # State cells (s418, #401): a `state $x` in a named sub is a defvar'd cell
+  # `$x__state__N`; the eval body names the ORIGINAL `$x`.  Parser2 registers
+  # original→cell when the decl statement lowers (_eval_state_captures,
+  # scoped by _lower_sub's save/restore).  APPENDED after the let-bound pairs
+  # so a live `my $x` shadow inside the sub wins, and BEFORE the span pairs —
+  # the state decl is sub-level, inner to any file-span cell of the name.
+  # The cell is a defvar'd box, so eval writes propagate like the span cells.
+  my $stcap = $parser->lex_home->{_eval_state_captures} // {};
+  for my $key (sort keys %$stcap) {
+    next if $seen{$key};
+    push @pairs, ['cons', "\"$key\"", $stcap->{$key}];
     $seen{$key} = 1;
   }
   # Span-mangled file cells (v2's _rename_spanning_lexicals): the eval body

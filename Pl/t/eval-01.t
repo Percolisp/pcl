@@ -451,13 +451,17 @@ SKIP: {
     skip "pl2cl not found", 3 unless -x $pl2cl;
     skip "sbcl not found",  3 unless `which sbcl 2>/dev/null`;
 
-    # The measured repro: the `f ref $u, "m" or g "fb";` statement was silently
-    # gone — PCL printed nothing for it and gave the eval's last value, 7.
+    # The reproducer is ANY statement the compiler still DROPS — the assertion
+    # is about drops-in-eval, not about one statement.  The original repro
+    # (`f ref $u, "m" or g "fb";`) was CLOSED by the #343 ceiling fix (s418),
+    # which made these three rows fail as stale guards; the current shape is
+    # #335's list-slice-of-call condition.  When #335 closes too, swap in
+    # another shape from docs/parse-error-drop-census-s399.tsv — and expect
+    # exactly this failure mode as the tell.
     my $out = run_pl(q{
         no warnings;
-        sub f { print "f(@_)\n" } sub g { print "g(@_)\n" }
-        my $u = "x";
-        my $r = eval q{ f ref $u, "m" or g "fb"; 7 };
+        sub f { return (0,1,2) }
+        my $r = eval q{ print "a\n" if (f())[1]; 7 };
         print "r=[", (defined $r ? $r : ""), "] err=[", ($@ ? "set" : "EMPTY"), "]\n";
         print "msg=[$@]\n";
     });
@@ -470,8 +474,8 @@ SKIP: {
     # FILE mode is deliberately unchanged: the same statement outside an eval
     # is still a drop the program survives (announced on stderr, rc 0).
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh qq{no warnings;\nsub f { print "f\\n" } sub g { print "g\\n" }\n}
-            . qq{my \$u = "x";\nf ref \$u, "m" or g "fb";\nprint "after\\n";\n};
+    print $fh qq{no warnings;\nsub f { return (0,1,2) }\n}
+            . qq{print "a\\n" if (f())[1];\nprint "after\\n";\n};
     close $fh;
     my (undef, $err, $rc) = PCLCore::transpile_raw(qq{$pl2cl --no-cache $pl_file});
     like($err, qr/PCL: statement dropped at \S+ line \d+/,

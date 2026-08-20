@@ -292,6 +292,14 @@
 #   NOT moves: op/utf8cache.t TIMEOUT 2/0 in parallel and DIFF 2/0 alone (the
 #   contention this file is already noted for above), and
 #   mro/package_aliases_utf8.t is the registered rows-unstable one.
+# s418 (#401 eval half shipped): op/sub.t 52/13 -> 53/12 DIFF, spliced in.
+#   The s415 CORE::state normalisation had made the file TRANSPILE-FAIL
+#   ("Parser2 TODO: state $x in named sub (string eval)" -- the honest die
+#   for what had been a silent mis-parse); with the state cell riding the
+#   eval-site capture alist (_eval_state_captures) the file transpiles
+#   again and comes back ONE ROW BETTER than its s410 snapshot, because
+#   the `eval q/$var/ in named sub in predeclared sub` row now PASSES.
+#   Measured parallel and serial, both 53/12 (task #366 re-run agrees).
 base/cond.t	4	0	4	0	OK	
 base/if.t	2	0	2	0	OK	
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -635,7 +643,7 @@ op/stat_errors.t	638	0	305	333	DIFF
 op/state.t	166	0	126	36	DIFF	
 op/study.t	43	0	43	0	OK	
 op/studytied.t	14	0	13	1	DIFF	
-op/sub.t	64	1	52	13	DIFF	
+op/sub.t	64	1	53	12	DIFF	
 op/sub_lval.t	211	0	12	58	DIFF	undef-fn:main::pl-rlv1t
 op/substr.t	400	0	376	24	DIFF	
 op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads

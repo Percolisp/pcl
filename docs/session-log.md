@@ -73,6 +73,59 @@ the point of use, the `PCL_B2_TRACE` probe deleted with its subject.
 **#343 CLOSED.**  Queue: #401-eval filler (session L, cache-key leg
 mandatory) → re-census → announce→DIE flip → M–N release.
 
+**Then session L itself — the #401 eval half, SHIPPED (s418c).**  `state $x`
+in a named sub is a defvar'd cell `$x__state__N`, which is not let-bound, so
+the eval-site capture alist could never carry it and `_rename_state_vars`
+refused any sub containing a string eval.  The fix is the task's own sketch,
+built on the M5 block-cell precedent: **Parser2 registers original→cell when
+the DECL STATEMENT lowers** (`_eval_state_captures` — so visibility starts at
+the decl, exactly perl's masking point) **scoped by `_lower_sub`'s
+save/restore** (saved and restored but NOT wiped — an enclosing sub's state
+stays visible to a nested sub's eval, which is op/sub.t's very shape, and the
+cells are defvars so the `_let_bound_vars` wipe's unbound-at-call-time hazard
+cannot apply), and `_eval_lexical_alist` **appends the pairs after the
+let-bound ones** (a live `my` shadow wins) **before the span pairs** (the
+state decl is sub-level, inner to a file-span cell).  The refusal is waived
+only for a SCALAR decl at the TOP LEVEL of the sub's own block — a decl
+nested in an inner block keeps it (its region ends with that block, which a
+sub-scoped map cannot express), and containers keep it.
+
+**The mandatory cache leg needed no new code — it needed the probe.**
+p-eval already keys its cache on (source, package, features, capture NAMES)
+(#296-B1) and resolves a captured name at runtime through the alist VALUE;
+the discriminating row is two subs eval'ing the SAME text (`sub a1 { state
+$v = "A"; eval '$v' }` / `b1` with "B") sharing one cached compile and each
+seeing their own cell — probed `ABA`, identical to perl.
+
+Measured: **eight probes vs perl 5.40.3, all identical on the first run**
+(the nested-sub shape with `$main::x` poisoning, same-sub read, the cache
+discriminator, eval-before-decl position, eval WRITES through the cell, no
+leak to a sibling sub, my-shadow wins, dynamic `eval $src`).
+**t/op/sub.t recovers: TRANSPILE-FAIL → DIFF 53/12** — one row better than
+its s410 snapshot 52/13, because the `eval q/$var/ in named sub` row itself
+now passes (spliced into `docs/perl-suite-run.tsv` with the note).
+corpus-diff IDENTICAL (111 files, drops 8 unchanged); emission A/B over
+companion + lib + cpan: **exactly one mover in 1028 files** — op/sub.t, rc
+2→0; gate-SET scan both populations: only op/sub.t's verdict moves; full
+sweep GATE clean TOTAL 18363 (+0); companion `--quick` clean.  Gate **155
+files / 5598 rows** (guard `Pl/t/state-eval-01.t`, 3 rows 8 s).  Generation
+v2-161 → **v2-162**, artifacts regenerated (gen-stamp-only).
+
+**Two Pl/t guards were STALE against this session's own fixes** — caught
+only because the gate was re-run with the failing-file LIST after a
+truncated first read; the s416 rule ("grep Pl/t for the shape a fix closes,
+in the closing commit") was in context and not applied, so it was paid
+twice: eval-01.t's three #363 drop-in-eval rows used `f ref $u, "m" or g
+"fb"` — the very statement the B2 fix un-dropped — as their "statement that
+drops" fixture (reproducer swapped to #335's `(f())[1]` condition, with a
+note to swap again when #335 closes); and parser2-02.t t62 asserted the
+"state + string eval" refusal #401 removed (now asserts the inner-block
+residue still gates, +1 row).  Both files re-run green; gate re-verified
+with the full failure list: 155/5598, only the 13 pclxs xs rows.
+
+**#401 CLOSED (both halves).**  Queue: re-census → announce→DIE flip →
+M–N release.
+
 ---
 
 ## Session 417 (2026-08-20) — Track B1 (#372) SHIPPED: stacked filetests parse and lower to the `_`-chain; a PPI bug logged; 27 census drops → 1

@@ -445,9 +445,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **154 test files, 5594 rows** (s418) with a built pclxs sibling (s409, measured
+- **155 test files, 5598 rows** (s418c) with a built pclxs sibling (s409, measured
   COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
-  work, user s394/s395: ignore XS rows); **5580 without** (arithmetic: minus
+  work, user s394/s395: ignore XS rows); **5584 without** (arithmetic: minus
   the 14 xs rows).  **RULED s409: compare a gate count against a measurement
   of the SAME tree** — the xs files PRODUCE 0–14 rows depending on where
   pclxs\x27s current state aborts them, so a written-down total drifts on its
@@ -610,8 +610,31 @@ skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
 **154/5594**; generation **v2-161**.  Guard `Pl/t/listop-ceiling-01.t`.
 **runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
 discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
-designed.  **Queue now: #401-eval filler (session L, cache-key leg mandatory)
-→ re-census → announce→DIE flip → M–N release.**
+designed.
+2b0000. **#401 eval half SHIPPED (s418c, Fable, 2026-08-21) — `state` in a
+named sub reaches STRING EVAL; #401 CLOSED (both halves).**  The cell
+`$x__state__N` is a defvar, never let-bound, so the eval alist could not
+carry it and the route refused any sub containing a string eval.  Fix (the
+task's sketch, on the M5 block-cell precedent): original→cell registered when
+the DECL STATEMENT lowers (`_eval_state_captures` — visibility starts at
+perl's masking point), scoped by `_lower_sub`'s save/restore WITHOUT the
+`_let_bound_vars` wipe (nested subs inherit — op/sub.t's very shape; defvars
+cannot be the wipe's unbound-at-call-time hazard); alist order = let-bound
+(my-shadow wins) → state → span.  Waiver ONLY for a scalar decl at the top
+level of the sub's own block; inner-block decls + containers keep the
+refusal.  **The mandatory cache leg needed NO code** — #296-B1's key already
+carries capture NAMES, the alist VALUE resolves at runtime; probed: two subs,
+same eval text, `ABA`.  t/op/sub.t TRANSPILE-FAIL → **DIFF 53/12** (one row
+better than s410's 52/13; spliced).  Eight probes identical to perl; emission
+A/B: op/sub.t the ONLY mover in 1139 files; gate-SET scan: only its verdict.
+Gate **155/5598** (guard `Pl/t/state-eval-01.t`); generation **v2-162**.
+**Two Pl/t guards were STALE against this session's own fixes and repaired
+in the same commit** (the s416 rule, missed once and now paid twice over):
+eval-01.t's #363 drop-in-eval rows used the very statement the B2 fix
+un-dropped (reproducer swapped to #335's shape, with a swap-again note),
+and parser2-02.t t62 asserted the refusal #401 removed (now asserts the
+inner-block residue still gates).  **Queue now: re-census → announce→DIE
+flip → M–N release (#279 → #280 → #282 → #283).**
 2b00. **Track B1 (#372) SHIPPED s417 — stacked filetests.**  `-f -d $x` is ONE
 term and lowers to perl's `_`-chain (`-x $f && -w _ && -f _`), never a nest
 (nesting is SILENT WRONG the other way: `-e -f "/etc/passwd"` is 1 in perl,

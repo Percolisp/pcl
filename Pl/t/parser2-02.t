@@ -363,13 +363,19 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   is($@, '', 'state shadowing a my in the same sub no longer gates');
   like($g1, qr/\(p-defcell \$n__state__\d+ /,
        'state shadowing a my: state cell declared');
-  # Out-of-subset shapes still gate: a string eval in the sub would capture
-  # lexicals by name, and the renamed state cell never enters the site alist
-  # (the REAL remaining half of #401).
+  # #401's eval half SHIPPED (s418c): a top-level-of-sub SCALAR state decl
+  # now rides the eval-site capture alist (_eval_state_captures), so THAT
+  # shape lowers — behavior guarded in Pl/t/state-eval-01.t.  What still
+  # gates is the out-of-subset residue: a decl nested in an INNER block
+  # (its region ends with the block, which the sub-scoped map cannot
+  # express) with a string eval in the sub.
   my $g1b = eval { Pl::Parser2->parse_code(
     q{use feature 'state'; sub s3 { state $n = 2; return eval q($n); } print s3();}) };
+  is($@, '', 'state + string eval in a named sub no longer gates (#401)');
+  my $g1c = eval { Pl::Parser2->parse_code(
+    q{use feature 'state'; sub s4 { { state $n = 2; } return eval q($n); } print s4();}) };
   like($@, qr/state \$n in named sub \(string eval\)/,
-       'state + string eval in a named sub still gates');
+       'inner-block state decl + string eval in the sub still gates');
   # s296: state OUTSIDE a named sub no longer gates — it lowers natively to a
   # package-cell defvar + __init once-guard (the classic-pass container/scalar
   # route).
