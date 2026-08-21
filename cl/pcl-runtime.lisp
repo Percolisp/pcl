@@ -125,6 +125,7 @@
    #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf #:p-crypt
    #:p-version-string
    #:p-pos
+   #:p-unrepresentable-char
    ;; Assignment
    #:p-setf #:p-incf #:p-decf
    #:p-pre++ #:p-post++ #:p-pre-- #:p-post--
@@ -1347,10 +1348,27 @@
       (force-output *error-output*)))
   nil)
 
-(defun %p-unsupported-value (site operand)
+(defun %p-unsupported-value (site operand &optional detail)
   "Perl-visible fatal for a VALUE-PRODUCING case SITE does not implement.
-   Never returns: the point is that no plausible-looking value escapes."
-  (error "PCL: ~A: ~A is not implemented" site operand))
+   Never returns: the point is that no plausible-looking value escapes.
+   DETAIL, when given, is appended the way %p-announce-unsupported appends it,
+   so the two halves of the family print the same shape."
+  (if detail
+      (error "PCL: ~A: ~A is not implemented — ~A" site operand detail)
+      (error "PCL: ~A: ~A is not implemented" site operand)))
+
+(defun p-unrepresentable-char (code)
+  "The value of a string literal that held CODE, a code point above U+10FFFF.
+   SBCL's CHAR-CODE-LIMIT is #x110000, so no CL character holds CODE and the
+   string simply cannot exist; perl's extended UTF-8 does hold it.  The
+   compiler emits this call IN PLACE of the character (Pl/ExprToCL.pm's
+   _cl_string_literal_form) so the emitted file still READS — writing the
+   character raw produced bytes SBCL's UTF-8 reader rejects, and that cost the
+   whole file, not the one expression (#419).  Never returns."
+  (%p-unsupported-value
+   "string literal"
+   (format nil "code point 0x~X" code)
+   "above SBCL's char-code-limit (U+10FFFF); see docs/not-supported.md \"Code points above U+10FFFF (perl's extended UTF-8)\""))
 
 
 (defun %p-array-set-readonly (a flag)
@@ -11791,7 +11809,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-163"
+(defparameter *pcl-cache-generation* "v2-164"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

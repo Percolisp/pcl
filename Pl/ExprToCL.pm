@@ -3594,9 +3594,10 @@ sub gen_substitution_form {
   # (perl reads both as backrefs in a replacement), and literal backslashes
   # are doubled because cl-ppcre's replacement parser treats \ specially.
   my $s = _unescape_subst_replacement($subst);
-  $s =~ s/\\/\\\\/g;    # CL string literal escaping
-  $s =~ s/"/\\"/g;
-  return ['p-subst', $match_form, qq{"$s"}, @mod_strs];
+  # CL string literal escaping — through the one writer, so a replacement
+  # holding a surrogate or an above-U+10FFFF code point is split out the same
+  # way a dq literal's is (#419) instead of being written raw.
+  return ['p-subst', $match_form, _cl_string_literal_form($s), @mod_strs];
 }
 
 # One dq-escape token starting at the backslash at position I of STR — the
@@ -4108,10 +4109,10 @@ sub convert_perl_string_form {
     $content = $1;
     $content =~ s/\\'/'/g;
     $content =~ s/\\\\/\\/g;
-    # For CL, escape backslashes and quotes
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{"$content"};
+    # One CL-literal writer for every quote form (#419): it does the same
+    # backslash/quote escaping, and additionally splits out the code points
+    # that cannot go into a UTF-8 source file or into a CL character at all.
+    return _cl_string_literal_form($content);
   }
   elsif ($str =~ /^"(.*)"$/s) {
     # Double-quoted: process Perl escapes
@@ -4131,18 +4132,13 @@ sub convert_perl_string_form {
     # q{}, q(), q[], q<> style - like single-quoted, no interpolation (optional whitespace)
     $content = $1;
     $content =~ s/\\\\/\\/g;    # only \\ is special in q{}
-    # For CL, escape backslashes and quotes
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{"$content"};
+    return _cl_string_literal_form($content);
   }
   elsif ($str =~ /^q\s*(.)(.*)(\1)$/s) {
     # q/.../ or q '...' style (optional whitespace between q and delimiter)
     $content = $2;
     $content =~ s/\\\\/\\/g;
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{"$content"};
+    return _cl_string_literal_form($content);
   }
   else {
     # Unknown format, return as-is
@@ -4166,28 +4162,48 @@ sub convert_perl_string_form {
 # ['code-char', N]] parts for the bad codepoints; the text entry is its
 # exact flat print (E2: gen_leaf_form embeds the form, text callers keep
 # their bytes).
+#
+# A code point ABOVE U+10FFFF is a third case and not an escaping problem at
+# all: SBCL's char-code-limit is #x110000, so no CL character holds it and
+# `(code-char N)` is NIL.  perl's own extended UTF-8 does hold it, and emitting
+# it raw wrote the pre-2003 five/six-byte form — bytes SBCL's UTF-8 reader
+# rejects, which killed the WHOLE FILE rather than the one expression (#419:
+# t/re/pat.t's 1263 perl rows measured as 0).  Such a part becomes
+# ['p-unrepresentable-char', N]: a form that READS, and dies where the value
+# would have been used, naming the code point (docs/not-supported.md
+# "Code points above U+10FFFF (perl's extended UTF-8)").
+#
+# The two classes are exact complements over the whole code-point range, so a
+# character is either in a $SAFE_CHARS run or gets its own part:
+#   $BAD_CHAR_RE  = surrogates | U+FFFE/U+FFFF | anything > U+10FFFF
+#   $SAFE_CHARS   = everything else
+our $BAD_CHAR_RE = qr/[\x{D800}-\x{DFFF}\x{FFFE}\x{FFFF}]|[^\x{0}-\x{10FFFF}]/;
+our $SAFE_CHARS  = qr/[\x{0}-\x{D7FF}\x{E000}-\x{FFFD}\x{10000}-\x{10FFFF}]/;
+use constant MAX_CL_CODEPOINT => 0x10FFFF;   # SBCL char-code-limit - 1
+
 sub _cl_string_literal { Pl::CLForm::to_flat(_cl_string_literal_form(shift)) }
 sub _cl_string_literal_form {
   my $content = shift;
   # Characters invalid in UTF-8: surrogates U+D800-U+DFFF, and non-chars U+FFFE/U+FFFF
   # (and the pattern repeats at every 0x10000 boundary: U+1FFFE, U+1FFFF, etc.)
-  my $bad_char_re = qr/[\x{D800}-\x{DFFF}]|[\x{FFFE}\x{FFFF}]/;
-  if ($content !~ $bad_char_re) {
+  if ($content !~ $BAD_CHAR_RE) {
     $content =~ s/\\/\\\\/g;
     $content =~ s/"/\\"/g;
     return qq{"$content"};
   }
   my @parts;
   while (length $content) {
-    if ($content =~ /\A((?:[^\x{D800}-\x{DFFF}\x{FFFE}\x{FFFF}])+)/s) {
+    if ($content =~ /\A((?:$SAFE_CHARS)+)/s) {
       my $safe = $1;
       $safe =~ s/\\/\\\\/g;
       $safe =~ s/"/\\"/g;
       push @parts, qq{"$safe"};
       $content = substr($content, length($1));
     } else {
-      my $ch = substr($content, 0, 1);
-      push @parts, ['string', ['code-char', ord($ch)]];
+      my $cp = ord(substr($content, 0, 1));
+      push @parts, $cp > MAX_CL_CODEPOINT
+        ? ['p-unrepresentable-char', $cp]
+        : ['string', ['code-char', $cp]];
       $content = substr($content, 1);
     }
   }

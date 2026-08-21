@@ -271,9 +271,37 @@ maximum using its own extended UTF-8 — `chr(0x110000)` encodes as
 `f4 90 80 80`, `chr(0x1FFFFF)` as `f7 bf bf bf`, and `chr(0x200000)` as the
 five-byte `f8 88 80 80 80`.
 
-**PCL behaviour:** the character is unrepresentable, and stringifies as
-`\x{FFFD}` (the Unicode replacement character) — which is already what perl
-itself gives for other unrepresentable arguments such as `chr(-1)`.
+**PCL behaviour** — two answers, because the two spellings are known at
+different times:
+
+* **`chr(N)` at run time** yields `\x{FFFD}` (the Unicode replacement
+  character) — which is already what perl itself gives for other
+  unrepresentable arguments such as `chr(-1)`.  `ord(chr(N))` round-trips the
+  number, because that box still carries the numeric value; once the value has
+  been *assigned* (`my $s = chr(0x4000000); ord($s)`) it is 65533, since the
+  string it was coerced to is all that survives (measured s422).
+* **A string LITERAL that contains such a code point** (`"\x{4000000}"`,
+  `"\N{U+4000000}"`, `qq{…}`, a heredoc, a `tr///` set, an `s///`
+  replacement, …) is a compile-time fact, and the compiler emits
+  `(p-unrepresentable-char N)` in the character's place: the form READS, and
+  **evaluating it dies** with
+
+  ```
+  PCL: string literal: code point 0x4000000 is not implemented — above SBCL's
+  char-code-limit (U+10FFFF); see docs/not-supported.md "Code points above
+  U+10FFFF (perl's extended UTF-8)"
+  ```
+
+  The die is a normal perl-visible death: `eval { }` traps it into `$@`, and
+  a literal in code that never runs costs nothing.
+
+  Emitting the character *raw* is what PCL used to do, and it cost the whole
+  FILE (task #419): perl's encoder writes `chr(0x4000000)` as the pre-2003
+  six-byte form `fc 84 80 80 80 80`, which is not valid UTF-8, so SBCL's
+  reader rejected the source file at the first buffer holding one and nothing
+  in it loaded.  `t/re/pat.t` — 1263 passing rows under perl, eight such
+  characters — measured as 0 rows.  The rule is the #138 rule: the failure
+  must be the size of the expression, not of the file.
 
 **Why:** Perl strings are SBCL character vectors, and SBCL's `char-code-limit`
 is 1114112 (`#x110000`) — measured, s319/s320 — so the largest character that
@@ -286,7 +314,10 @@ blessed gap in `docs/fable-answers-s318.md` §11.
 
 Affects `op/chr.t` tests 40-42.  (`ord` still round-trips the number — PCL
 carries the numeric value in the box — so only the *character/encoded* form
-is lost.)
+is lost.)  The literal spelling occurs in exactly two files of the four
+populations (measured s422 over perl-tests/, perl's `t/`, `lib/**` and
+cpan-tests/modules — 1205 files): `t/re/pat.t` (8) and `t/uni/variables.t`
+(1, `"\x{11_1111}"`); `perl-tests/`, `lib/` and the CPAN dists have none.
 
 ### `use vN` does not toggle default warnings
 

@@ -1,4 +1,18 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s422 row edit — ONE row, signature only.  re/pat.t 1263/4 C:0/0 keeps its
+#   numbers and LOSES its crash signature: task #419 made the emitted CL valid
+#   UTF-8 (the eight >U+10FFFF literals are now `(p-unrepresentable-char N)`
+#   forms that read and die on evaluation), so `sb-c::input-error-in-load` is
+#   gone and the file LOADS.  It still yields no TAP because SBCL's DEFAULT
+#   1 GB dynamic space is exhausted mid-run and the process dies hard, so the
+#   runner records an EMPTY signature and "PCL produced no TAP output".
+#   MEASURED the same session with `--dynamic-space-size 3072` (a
+#   measurement-only PCLSbcl edit, reverted): 225/140 — 365 rows are behind
+#   the heap — then `crash:simple-error: Failed to match at …/re/pat.t line N`.
+#   Both walls and the runner-level decision they need are task #424.
+#   uni/variables.t is the only other file whose emission #419 changed and it
+#   does NOT move (1248/319 on a a2ac578 worktree and after): it dies on
+#   `unbound:$}` before `load-as-source` ever reads the wide literal's form.
 # s421 (Fable review) — a full --all --quick --jobs 4 run: 15 files differ from
 #   this snapshot, every one re-run ALONE (all REAL by the runner's own test).
 #   Ten are XDIFF 0/0 refusals: the six Track-A files s420 already lists, plus
@@ -750,7 +764,7 @@ re/keep_tabs.t	14	0	14	0	OK
 re/no_utf8_pm.t	1	0	1	0	OK	
 re/opt.t	639	17	0	0	XDIFF	undef-fn:re::pl-optimization | not-supported.md §re::optimization - the regex engine's internal optimizer report (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
 re/overload.t	87	0	3	0	DIFF	
-re/pat.t	1263	4	0	0	DIFF	crash:sb-c::input-error-in-load: read error during load:
+re/pat.t	1263	4	0	0	DIFF	
 re/pat_advanced.t	1678	0	950	730	DIFF	
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 

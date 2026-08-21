@@ -4,6 +4,95 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 422 (2026-08-22, Opus) — #419 CLOSED: one `>U+10FFFF` literal no longer costs the whole FILE; the next wall behind `re/pat.t` measured (#424)
+
+**Task #419, `docs/plan-post-s420.md` item O1.1.**  `t/re/pat.t` measured 0 of
+perl's 1263 rows because the emitted CL was not valid UTF-8: PCL wrote a code
+point above U+10FFFF *raw*, and perl's encoder spells `chr(0x4000000)` as the
+pre-2003 six-byte form `fc 84 80 80 80 80`, which SBCL's reader rejects — so
+`load` died at the first buffer holding one and NOTHING in the file ran.  The
+#138 rule applies at full scale: the failure must be the size of the
+expression, not of the file.
+
+**The fix is one emission rule, in the one place string literals are
+written.**  `Pl/ExprToCL.pm`'s `_cl_string_literal_form` already split
+surrogates and U+FFFE/U+FFFF out of a literal as `(string (code-char N))`
+parts of a `(concatenate 'string …)`; the bad-character class now also covers
+everything above U+10FFFF, and such a part becomes
+`(p-unrepresentable-char N)` — a form that READS and dies when evaluated,
+naming the code point and citing `docs/not-supported.md`.  The runtime half is
+one function routed through the existing rule-12 family
+(`%p-unsupported-value`, which gained the `&optional detail` its announce twin
+already had; it had no other caller, so the runtime change cannot move
+anything).
+
+**Rule 11 made it four fewer copies, not one more.**  The `'…'`, `q{}`, `q//`
+and `s///`-replacement paths each did their own `s/\\/\\\\/g; s/"/\\"/g` and
+returned `qq{"$content"}` — four private string-literal writers the new rule
+would otherwise have had to be copied into.  They now call
+`_cl_string_literal_form`, which is byte-identical for clean content
+(corpus-diff IDENTICAL across 111 files) and closes the `s///`-replacement
+hole for free (`s/b/\x{4000000}/` broke the file too, through its own path).
+
+**Every spelling probed vs perl 5.40.3, before and after** (26 shapes, two
+files in the session scratchpad): dq, `qq{}`, `\N{U+…}`, heredoc,
+interpolated, `tr///`, `s///`, `s///e`, hash key, `use constant`, sub body,
+list element, `sprintf` format, `\U…\E`, concatenation, string `eval`, and
+DEAD CODE — all fourteen that used to kill the file now leave it readable, and
+the dead-code one costs nothing at all.  `"\x{10FFFF}"`, `"\x{10FFFE}"`,
+`"\x{FFFE}"` and `"\x{D800}"` are unchanged (a perl-oracle row).  The die is
+trappable: `eval { "\x{4000000}" }` leaves `$@ = PCL: string literal: code
+point 0x4000000 is not implemented — above SBCL's char-code-limit (U+10FFFF);
+see docs/not-supported.md …`.
+
+**The deliberate asymmetry is now written down.**  `chr(N)` at RUN time keeps
+answering U+FFFD (the s318 §11 blessed ruling) because there is no literal to
+refuse; a LITERAL is a compile-time fact and dies.  Both halves are guarded in
+the same file so neither can drift silently, and the choice is the one ask of
+`docs/opus5-review-requests-s422.md`.
+
+**Population cost of the gap: TWO files of 1205.**  A scan of `perl-tests/`,
+perl's `t/`, `lib/**` and `cpan-tests/modules` for `\x{}`/`\o{}`/`\N{U+}`
+above U+10FFFF and for raw extended-UTF-8 bytes found 13 candidate files; only
+two actually decode one into a literal — `t/re/pat.t` (8) and
+`t/uni/variables.t` (1, `"\x{11_1111}"`).  `perl-tests/`, `lib/` and the CPAN
+dists have NONE, which is why the sweep is blind to this.
+`tools/emission-ab.pl` over 1029 files (perl's `t/` + `lib` + cpan) = SAME
+1027, DIFF exactly those two.
+
+**#419 did NOT deliver pat.t's rows, and the next wall is measured (#424).**
+The file now LOADS, and then exhausts SBCL's DEFAULT 1 GB dynamic space
+mid-run; SBCL dies hard, so no TAP is flushed and the runner records
+`C: 0/0 DIFF` with an EMPTY signature instead of
+`crash:sb-c::input-error-in-load`.  With a measurement-only
+`--dynamic-space-size 3072` (the edit reverted in the same session) the same
+command gives **225 ok / 140 not ok** and then
+`crash:simple-error: Failed to match at …/re/pat.t line N` — a message that is
+in neither pat.t, perl's tree, the emitted CL, nor any `.lisp` source.
+Raising the heap is a RUNNER decision (`tools/lib/PCLSbcl.pm` builds all five
+command lines, the memory budget is shared, `--all --jobs 8` already OOMs the
+10 G scope), so it is filed with its options rather than taken.
+`uni/variables.t` does NOT move — 1248/319 on an `a2ac578` worktree and after:
+it dies on `unbound:$}` before `load-as-source` ever reads the wide literal's
+form.  `docs/perl-suite-run.tsv` spliced ROW BY ROW: pat.t's signature only,
+with the cause.
+
+**Also filed: #425** — a `>U+10FFFF` code point in a PATTERN leaks cl-ppcre's
+own `Regex syntax error` line instead of a `PCL:` announce.  The VALUE agrees
+with perl in every probed shape and cannot diverge on a match now that no PCL
+string can hold such a character.
+
+**Measurements.**  Gate **156 files / 5622 rows**, failures = exactly the 13
+pclxs xs rows (155/5614 + the new guard's 8).  Full sweep `--jobs 3`:
+GATE clean, TOTAL passing 18364 (+0), drops 7 = census (+0),
+0 new / 0 fixed (the 6 UNSTABLE and 10 DID-NOT-RUN rows are the usual
+PARTIAL-file noise: postfixderef, ref, yadayada, eval, magic, tr).  `tools/corpus-diff.pl` IDENTICAL, silent drops 7 unchanged.
+Generation **v2-164**, all three checked-in artifacts regenerated (each a
+one-line `gen=` change — the emission is unaffected).  Guard
+`Pl/t/wide-codepoint-01.t` (8 rows, 10.3 s).
+
+---
+
 ## Session 421 (2026-08-22, Fable) — s420 reviewed and APPROVED; five pre-existing findings filed (#420–#423, #418 widened); the queue is `docs/plan-post-s420.md`
 
 **Review: s420 APPROVED as shipped** (`docs/fable-answers-s420.md`).

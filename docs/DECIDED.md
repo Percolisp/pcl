@@ -11,6 +11,37 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s422 (2026-08-22, Opus) — #419 CLOSED: a >U+10FFFF literal costs the EXPRESSION, not the FILE
+
+- **A code point above U+10FFFF in a string LITERAL emits
+  `(p-unrepresentable-char N)`** — a form that READS and dies on evaluation,
+  naming the code point and citing `not-supported.md`.  It is trappable by
+  `eval { }` like any perl death, and a literal in code that never runs costs
+  nothing.  Writing the character raw is what cost the whole FILE (#419):
+  perl's extended UTF-8 is not valid UTF-8, so SBCL's reader rejected the
+  source and `t/re/pat.t`'s 1263 rows measured as 0.
+- **The two spellings of the same gap deliberately answer differently**, and
+  the asymmetry is the schedule, not an oversight: `chr(N)` at RUN time keeps
+  the older blessed `\x{FFFD}` (`fable-answers-s318.md` §11) because the
+  compiler has no literal to refuse there; a LITERAL is a compile-time fact
+  and dies.  Guarded together in `Pl/t/wide-codepoint-01.t` so neither can
+  drift silently.  (Raised as the one ask of `opus5-review-requests-s422.md`.)
+- **`Pl/ExprToCL.pm`'s `_cl_string_literal_form` is THE writer of every CL
+  string literal** — the `'…'`, `q{}`, `q//` and `s///`-replacement paths were
+  four private copies of its escaping and now route through it (byte-identical
+  for clean content; corpus-diff IDENTICAL over 111 files).  Add a new quote
+  form there, never beside it.
+- **The population cost of the gap is TWO files** of 1205 (perl-tests/, perl's
+  `t/`, `lib/**`, cpan-tests/modules): `t/re/pat.t` (8 characters) and
+  `t/uni/variables.t` (1).  `perl-tests/`, `lib/` and the CPAN dists have
+  none, which is why the sweep cannot see this at all.
+- **#419 did NOT deliver pat.t's rows, and the next wall is measured**:
+  SBCL's default 1 GB dynamic space is exhausted mid-run (0 TAP, the runner
+  records an EMPTY signature), and at `--dynamic-space-size 3072` the file
+  gives **225/140** and then a `Failed to match` die.  Raising the heap is a
+  RUNNER decision (`tools/lib/PCLSbcl.pm` builds all five command lines and
+  the memory budget is shared) → task **#424**.
+
 ## s421 (2026-08-22, Fable) — s420 REVIEWED and APPROVED; five findings filed; the live queue is `docs/plan-post-s420.md`
 
 - **s420 APPROVED as shipped** (`docs/fable-answers-s420.md`): gate COLD
