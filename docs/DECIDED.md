@@ -11,6 +11,49 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE differ by the EXISTING `is-ref` flag; no new slot
+
+- **MEASURED FIRST (the task's discriminating question): they DIFFER
+  structurally today** — `p-backslash` sets `is-ref` on a typeglob wrapper and
+  `box-set` propagates it, and **`box-nv` has always read it** (a bare glob
+  numifies to 0, a glob ref to its address).  Only the READERS on the string /
+  `ref()` side ignored it.  So fix shape (a); the s335 "no `ref-kind` slot"
+  ruling is **untouched** — nothing was added to the box.
+- **The typeglob is the ONE payload whose ref-ness lives on the BOX**, not on
+  the object (`\@a` is a ref because a vector cannot be a scalar value; a
+  typeglob CAN).  Normative in `docs/ir-spec.md` §2.5; the predicate is
+  `%p-glob-value-box-p` and every reader asks it (box-sv, p-ref,
+  `%p-ref-string`).  A **raw** typeglob outside a box is a glob VALUE — the
+  convention `stringify-value` already fixed for the string half (#316).
+- **Therefore every path that COPIES a scalar must carry the flag.**  Three
+  did not, and each silently demoted a glob REF to a glob VALUE:
+  `%p-flatten-list` (its preserve-list is a copy of box-set's and omitted
+  typeglobs — this is what broke `my $x = shift`), `%p-array-store-scalar`
+  (fresh container without the flag) and `p-aref-unbox-elem` (unboxed to the
+  raw glob).  **A copy path that drops a discriminator is the same bug class
+  as a reader that ignores it** — and the harder half to see, because the
+  readers are wrong on probe line 1 while the copiers only show up once the
+  readers are honest.
+- **Carrying a flag through a copy is NOT the same as keeping the source box.**
+  The first cut preserved the box in `%p-flatten-list`; a list assignment
+  snapshots its RHS, so `($g1,$g2) = ($g2,$g1)` collapsed to one glob (perl
+  swaps).  The snapshot must be a FRESH box carrying the flag.  Caught by the
+  probe-the-breaking-case rule, guarded in `Pl/t/ref-identity-01.t` t37–t39.
+- **`%p-ref-string` had no typeglob-referent arm**, so `our $r = \*STDOUT;
+  print "$r"` printed `SCALAR(0x…)` while the identical lexical printed
+  `GLOB(0x…)` — a missing case in a closed set that fell through to the
+  caller's fallback (rule-12 family, found by the probe table).
+- **s419d's op/gv.t regression is repaired at the cause**: `s///` and `tr///`
+  stay on the box path (the `""` overload + tie FETCH fix stands) and the box
+  path now gives a glob value its VALUE spelling.  op/gv.t 49/48 → 52/45.
+- Filed pre-existing, all found by the probe table, none fixed here:
+  **#436** (a lexical filehandle is a raw STREAM: `ref($fh)` is `""` where perl
+  says GLOB — same family, but widening it changes every IO path, so it needs
+  its own io/ leg), **#437** (`\*foo == \*foo` is FALSE: `p-make-typeglob`
+  mints a fresh struct per mention — #163's defect one level down), **#438**
+  (`*b = $pkgvar` holding `\*foo` installs the SCALAR slot — `p-scalar-=`'s
+  box-in-box shape is invisible to `%p-glob-assign-slots`).
+
 ## s421 (2026-08-22, Fable) — s420 REVIEWED and APPROVED; five findings filed; the live queue is `docs/plan-post-s420.md`
 
 - **s420 APPROVED as shipped** (`docs/fable-answers-s420.md`): gate COLD

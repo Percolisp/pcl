@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 22;
+plan tests => 39;
 
 # One SBCL launch for the whole family: each line prints one answer.
 # Every expectation below was taken from real perl running the same program.
@@ -113,6 +113,46 @@ print "t20:", $z, "\n";
 sub cf { 1 } my $c1 = \&cf; my $c2 = \&cf; my $cv = $c1->();
 print "t21:", ($c1 == $c2 ? "EQ" : "NE"), "\n";
 print "t22:", (0+$c2 > 0 ? "ADDR" : "ZERO"), "\n";
+
+# --- the GLOB member of the same family (task #423, s424).  A glob VALUE
+#     (`$g = *foo`) is not a reference at all — perl makes the SV a GV — while
+#     a glob REF (`\*foo`) is; PCL tells them apart by the SAME is-ref flag
+#     this file's rule is built on, and box-nv already read it (t25: the bare
+#     glob numifies to 0 while printing GLOB(0x1) — the word and the number
+#     disagreed).  Every copy path a scalar takes must carry the flag, or a
+#     glob ref degrades into a glob value on the way (t28-t31).
+sub foo { 42 }
+my $g = *main::foo; my $gr = \*main::foo;
+print "t23:", (ref($g) eq "" ? "NOTREF" : "ref=".ref($g)), ":", ref(\$g), "\n";
+print "t24:", ty($g), "\n";
+print "t25:", (0+$g), ":", (0+$gr > 0 ? "ADDR" : "ZERO"), "\n";
+print "t26:", ref($gr), ":", ty($gr), "\n";
+print "t27:", ref(\$gr), "\n";
+my @ga = ($gr, $g); my %gh = (r => $gr, v => $g);
+print "t28:", ref($ga[0]), ":", (ref($ga[1]) eq "" ? "NOTREF" : ref($ga[1])), "\n";
+print "t29:", ref($gh{r}), ":", (ref($gh{v}) eq "" ? "NOTREF" : ref($gh{v})), "\n";
+sub thru { my $x = shift; return ref($x) eq "" ? "NOTREF" : ref($x) }
+print "t30:", thru($gr), ":", thru($g), "\n";
+print "t31:", ty($ga[0]), ":", ty($ga[1]), "\n";
+our $og = \*main::foo;
+print "t32:", ref($og), ":", ty($og), "\n";
+my $bg = bless \*main::foo, "D";
+print "t33:", ref($bg), ":", ty($bg), "\n";
+print "t34:", ty(*main::foo), ":", (ref(*main::foo) eq "" ? "NOTREF" : ref(*main::foo)), "\n";
+my $sg = *main::foo; $sg =~ s/^\*//;
+print "t35:", $sg, ":", ref(\$sg), "\n";
+my $tg = *main::qux; $tg =~ tr/a-z/A-Z/;
+print "t36:", $tg, "\n";
+# INVERSE, and the case the first cut of the #423 fix BROKE: carrying the flag
+# must not carry the BOX — a list assignment snapshots its RHS, so preserving
+# the source box collapses ($g1,$g2) = ($g2,$g1) into one glob.
+sub bar { 43 }
+my $s1 = *main::foo; my $s2 = *main::bar; ($s1, $s2) = ($s2, $s1);
+print "t37:", ty($s1), ":", ty($s2), "\n";
+my $q1 = \*main::foo; my $q2 = \*main::bar; ($q1, $q2) = ($q2, $q1);
+print "t38:", ("$q1" eq "$q2" ? "COLLAPSED" : "distinct"), ":", ref($q1), ":", ref($q2), "\n";
+my $m1 = *main::foo; my $m2 = \*main::bar; ($m1, $m2) = ($m2, $m1);
+print "t39:", ref($m1), ":", (ref($m2) eq "" ? "NOTREF" : ref($m2)), ":", ty($m2), "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -159,3 +199,38 @@ like $out, qr/^t21:EQ$/m,
     '\\&f == \\&f when one side is a raw-numeric slot (#362: the raw numifier answered 0)';
 like $out, qr/^t22:ADDR$/m,
     'a code ref in a raw slot numifies to its address, not 0';
+
+like $out, qr/^t23:NOTREF:GLOB$/m,
+    'a glob VALUE is not a reference — ref($g) is "" and \\$g is a GLOB ref (#423)';
+like $out, qr/^\Qt24:*main::foo\E$/m,
+    'a glob value stringifies to its perl spelling, not GLOB(0x…)';
+like $out, qr/^t25:0:ADDR$/m,
+    'and the NUMBER agrees with the word: bare glob 0, glob ref its address';
+like $out, qr/^t26:GLOB:GLOB$/m,
+    'INVERSE: a glob REF still says GLOB and prints GLOB(0x…)';
+like $out, qr/^t27:REF$/m,
+    'INVERSE: a ref to a scalar holding a glob REF is REF, not GLOB';
+like $out, qr/^t28:GLOB:NOTREF$/m,
+    'the flag survives an array element (a copy that dropped it degraded the ref)';
+like $out, qr/^t29:GLOB:NOTREF$/m,
+    'the flag survives a hash value';
+like $out, qr/^t30:GLOB:NOTREF$/m,
+    'the flag survives @_ and shift (%p-flatten-list snapshotted the raw glob)';
+like $out, qr/^\Qt31:GLOB:*main::foo\E$/m,
+    'and the two print their own spellings out of an array element';
+like $out, qr/^t32:GLOB:GLOB$/m,
+    'a glob ref in a PACKAGE variable (box-in-box store) prints GLOB(0x…), not SCALAR(0x…)';
+like $out, qr/^t33:D:D=GLOB$/m,
+    'INVERSE: bless \\*foo keeps D=GLOB(0x…)';
+like $out, qr/^\Qt34:*main::foo:NOTREF\E$/m,
+    'a RAW typeglob is a glob VALUE by the same convention (#316)';
+like $out, qr/^t35:main::foo:SCALAR$/m,
+    's/// on a glob value matches its VALUE spelling (op/gv.t; the s419d regression)';
+like $out, qr/^\Qt36:*MAIN::QUX\E$/m,
+    'tr/// likewise rewrites the value spelling, not GLOB(0X…)';
+like $out, qr/^\Qt37:*main::bar:*main::foo\E$/m,
+    'INVERSE: ($g1,$g2) = ($g2,$g1) SWAPS two glob values (carrying the flag must not carry the box)';
+like $out, qr/^t38:distinct:GLOB:GLOB$/m,
+    'INVERSE: and swapping two glob REFS keeps them distinct';
+like $out, qr/^\Qt39:GLOB:NOTREF:*main::foo\E$/m,
+    'INVERSE: a mixed swap moves the ref-ness with the value, not with the slot';
