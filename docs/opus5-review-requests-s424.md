@@ -113,23 +113,57 @@ a mixed swap), all three perl-probed.
 
 | leg | result |
 |---|---|
-| Gate `tools/prove-core` (PCLXS_DIR set) | **155 files / 5628 rows**; failures = exactly the 13 pclxs xs rows (xs-01 5, xs-02 4, xs-03 4).  Baseline 155/5614 + the 14 new guard rows |
-| Full sweep `--jobs 3` | (§3.1) |
-| Companion op/ + io/ leg | (§3.2) |
-| Probes vs perl 5.40.3 | 5 files, ~60 shapes — p2/p3/guard **byte-identical to perl**; p1 differs in 2 rows, both pre-existing and filed (#436, glob slots) |
+| Gate `tools/prove-core` (PCLXS_DIR set) | **155 files / 5631 rows**; failures = exactly the 13 pclxs xs rows (xs-01 5, xs-02 4, xs-03 4).  Baseline 155/5614 + the 17 new guard rows |
+| Full sweep `--jobs 3` | **GATE clean**, TOTAL 18364 → **18365 (+1)**, drops **7 = census (+0)**, 0 new / 0 fixed, 7 UNSTABLE + 10 unverified = the usual above-abort-point noise on the same PARTIAL files as s421 (§3.1) |
+| Companion op/ + io/ leg | 12 files, `--jobs 2`: **op/gv.t 49/48 → 61/36**, **op/substr.t 376/24 → 377/23**, ten identical (§3.2) |
+| Probes vs perl 5.40.3 | 6 files, ~60 shapes — p2/p3/p6/guard **byte-identical to perl**, also under `PCL_OPT=none`; p1 differs in 2 rows and p4 in 3, every one A/B-verified pre-existing (§4) |
 | Artifacts | all three regenerated; diff vs the checked-in copies = **the `gen=` stamp line only** (the change is runtime-only, as expected) |
 | Generation | v2-163 → **v2-166** (this agent's private namespace; the merge renumbers) |
 | corpus-diff / emission-ab | **not run — nothing under `Pl/` changed**; the artifact byte-compare above is the emission evidence |
 
 ### §3.1  Full perl-tests sweep
 
-(filled below)
+Run twice (the first on an intermediate tree, before §2.1's correction) — both
+runs report **GATE clean, TOTAL 18365, drops 7 = census, 0 new / 0 fixed**, so
+the §2.1 correction is invisible to the sweep (no perl-tests file swaps two
+globs).  The one row: `perl-tests/substr.t` **374 → 375** —
+`is ref \$x, 'GLOB', '\substr does not coerce its glob arg just yet'` at
+substr.t:784, which is `my $x = *foo` verbatim.  Its fail count is unchanged
+(8) and its skip count unchanged (14): the row was previously producing
+nothing countable, and now passes.
 
-### §3.2  Companion
+The UNSTABLE/unverified buckets name exactly the files s421's run named
+(method/postfixderef/ref/yadayada above their abort points, eval/magic/ref/tr/
+yadayada unverified) with the same counts.
 
-(filled below)
+### §3.2  Companion (the leg the s421 ruling made mandatory for a `cl/`
+stringification change)
+
+Twelve files chosen by `grep -rlE '=\s*\\?\*[A-Za-z_:]'` over `t/op`, `t/io`,
+`t/re`, `t/uni`, `t/base`, `t/comp`, restricted to the ones with nonzero
+`C_ok` in the snapshot: op/gv, op/ref, op/magic, op/substr, op/stash,
+op/select, op/reset, op/readline, op/gmagic, io/open, io/argv, io/defout.
+
+| file | snapshot | this run | verdict |
+|---|---|---|---|
+| **op/gv.t** | 49/48 | **61/36** | mine — A/B on an `a2ac578` worktree measures **49/48** |
+| **op/substr.t** | 376/24 | **377/23** | mine — A/B measures **376/24** (same row as the sweep's) |
+| the other ten | — | identical | — |
+
+Both movers were re-run ALONE by the runner's own #366 rule and both runs
+agree.  op/gv.t recovers s419d's row and eleven more: the file is nothing but
+glob semantics, and `ref($glob)`/`ref(\$glob)`/`"$glob"` are now perl's
+answers.  Spliced into `docs/perl-suite-run.tsv` **with the cause**, per the
+s421 ruling.
 
 ## §4  Found and FILED, not fixed (all pre-existing, all from the probe table)
+
+Every one was A/B'd by restoring `a2ac578`'s `cl/pcl-runtime.lisp` into this
+worktree and re-running the probe files: `ref(\$fh)` `SCALAR`, `\*foo == \*foo`
+`diff`, the `*b = $pkgvar` crash and the `$n = \*foo; $n = "plain"` REF residue
+are **byte-identical at the base**.  The only p1/p4 row that CHANGED and is
+mine is `ref(*main::foo)`: `GLOB` at the base, `""` now — perl's answer, and
+ask 3 below.
 
 * **#436 — a lexical filehandle is not a GLOB to `ref()`.**
   `open my $fh, …; ref($fh)` is `""` and `ref(\$fh)` is `SCALAR`; perl says
@@ -176,3 +210,9 @@ a mixed swap), all three perl-probed.
    `ref(*foo)` staying wrong — is one line away.  I chose perl-correct because
    the sweep + companion + 60 probes found no stripping path left; flag if you
    want the belt.
+4. **Not a question, a note for the queue.**  #436 (the lexical filehandle) is
+   the same one-rule fix one payload kind over, and it is the last piece that
+   would make `ref`/`"$x"`/`0+$x` agree for every reference kind PCL has.  It
+   is a natural O3 filler *if* someone is willing to spend the io/ leg on it;
+   I did not fold it in because "it changes every IO path" is exactly the kind
+   of widening the filler rule says to size first.
