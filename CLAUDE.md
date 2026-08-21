@@ -445,9 +445,9 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **155 test files, 5598 rows** (s418c) with a built pclxs sibling (s409, measured
+- **155 test files, 5614 rows** (s420) with a built pclxs sibling (s409, measured
   COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
-  work, user s394/s395: ignore XS rows); **5584 without** (arithmetic: minus
+  work, user s394/s395: ignore XS rows); **5600 without** (arithmetic: minus
   the 14 xs rows).  **RULED s409: compare a gate count against a measurement
   of the SAME tree** — the xs files PRODUCE 0–14 rows depending on where
   pclxs\x27s current state aborts them, so a written-down total drifts on its
@@ -611,6 +611,39 @@ skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
 **runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
 discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
 designed.
+2b0000000. **s420 (Opus, 2026-08-22): four of the flip's unblock-list tasks
+SHIPPED — the drop census is 33 files / 106 drops** (was 42/135; edited row by
+row with causes, `docs/parse-error-drop-census-s399.tsv`).  **#414**: a CLONED
+PPI element does not keep its tokens alive — PPI's DESTROY empties every
+descendant, so a clone that is a NODE (the inner `[0]` of `"$x[$i[0]]"`) went
+HOLLOW between parse and emit and the leaf emitter died on `content` = undef
+(that is what the `…:?` meant).  One `_anchor` helper at all six
+StringInterpolation fragment sites; every nested interpolated subscript works
+now, and perl-tests/postfixderef.t's `.` overload handler stopped being
+dropped (**sweep TOTAL 18363 → 18364**, test 107 left `fail-baseline` by
+EDIT).  **#413**: the prototype table and `declared_subs` are keyed by the
+BARE name — the convention `_bareword_callable_here` already relied on — so a
+package-QUALIFIED declaration (`sub main::end(&)` from inside `package End`)
+was invisible; normalized at the `Pl::Environment` seam in BOTH directions
+(**perl applies a prototype on a QUALIFIED CALL too** — probed, the opposite
+of what the task guessed).  **#412**: `@{^CAPTURE}` implemented beside
+`@-`/`@+`, `%{^CAPTURE}`/`%{^CAPTURE_ALL}` mapped onto `%+`/`%-` (perl
+SYNONYMS), `$#{^CAPTURE}` collapsed by `_block_caret_name` (which also fixed
+the spaced `$ {^XY}`); a caret variable of ANY sigil must be pipe-quoted —
+bare all-caps reads DOWN-cased under `:invert`.  **#410**: PPI splits `$Ｘ`
+into Cast + Word (`ppi-upstream-bugs.md` §23, `Unknown.pm`'s `$` branch tests
+`/[a-z_]/i` where its siblings test `/[\w:]/`), and merging the tokens is not
+enough — the LEXER had already built the following `{…}` as a BLOCK, so
+`_merge_unicode_symbols` re-classes the postfix chain (uni/gv.t 37/38 →
+41/40).  Also **#417** (`$#+` is the pattern's group count, `$#-` stops at the
+last participant — PCL truncated both) and **#416** (`s///` no-match returns
+`""`, not `0`).  Gate **155/5614**; generation **v2-163**; gate-SET scan over
+both populations = exactly 8 files, all drop→OK; every companion mover
+verified PRE-EXISTING on a `47e0750` worktree and spliced into
+`docs/perl-suite-run.tsv`.  Filed: **#418** (a non-ASCII PACKAGE name
+mismatches at the CL reader — SBCL NFKC-normalizes and `:invert` down-cases;
+pipe-quoting defeats both) and **#419** (one `>0x10FFFF` literal makes the
+WHOLE emitted file unreadable — `t/re/pat.t` is 1263 perl rows behind it).
 2b00000. **s419 (Fable, 2026-08-21): the flip re-census DONE — the announce→DIE
 flip is BLOCKED by its own bar; release phases 3+5 executed.**
 `docs/drop-census-s419-flip-gate.md`: census re-verified ROW FOR ROW (42/135),
@@ -738,7 +771,7 @@ Not relevant now:
 - `docs/v1-implementation-plan.md` - **V1 feature plan** (prioritized, with full implementation details for each item including `local $hash{key}`, bare-if return, string eval, etc.)
 - `docs/test-infrastructure.md` - **Test infra notes**: why SBCL startup is slow, `fresh_perl_is` limitations, saved-core optimisation
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
-- `docs/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 46 files / 139 drops as of s417 (72/379 at the s399 measurement), with the compiler's own message per file.  Rows leave BY EDIT with their cause, never by re-blessing. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
+- `docs/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 33 files / 106 drops as of s420 (72/379 at the s399 measurement), with the compiler's own message per file.  Rows leave BY EDIT with their cause, never by re-blessing. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
 - `docs/tap-assertion-audit.md` - **What the TAP layer can and cannot claim** (#202, s330): the per-function inventory of reachable failure paths, the ten findings (unlike could not fail; eq_hash had never run; cmp_ok manufactured verdicts for `<=>`/`cmp`/`=~`/`!~`), the rule that **a claim that cannot be evaluated reports `not ok` naming the reason and only `plan()` dies**, why TAP descriptions must be Test::More's (they are join keys), and the two deliberate non-changes. Read before touching `cl/pcl-test.lisp`.
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.

@@ -288,6 +288,15 @@ my %SPECIAL_VARS = (
   '$^L' => '|$^L|',   # FORMAT_FORMFEED
   '$^A' => '|$^A|',   # ACCUMULATOR (for formline/write)
   '$^'  => '|$^|',    # FORMAT_TOP_NAME
+  # @{^CAPTURE} (5.26+) is the last match's capture VALUES; the runtime keeps
+  # it beside @-/@+ (set-capture-groups).  %{^CAPTURE} and %{^CAPTURE_ALL} are
+  # perl SYNONYMS for %+ and %- — the same variable, so they map onto those two
+  # rather than duplicating the state.  MUST be pipe-quoted: generated code
+  # loads under :invert, where a bare all-caps token reads DOWN-cased and the
+  # runtime's symbol is never found (task #412).
+  '@{^CAPTURE}'      => '|@{^CAPTURE}|',
+  '%{^CAPTURE}'      => '%+',
+  '%{^CAPTURE_ALL}'  => '%-',
   # ${^...} caret variables — stub implementations (return undef)
   '${^WARNING_BITS}' => ['p-undef'],   # warning bits bitmask (Perl internal)
   '${^LAST_FH}'      => ['p-undef'],   # last filehandle used (Perl internal)
@@ -442,6 +451,28 @@ sub generate {
 }
 
 
+# `$#arr` → the CONTAINER name to take the last index of.  Both leaf emitters
+# (form and text) carried their own copy of this; the copies also both missed
+# %SPECIAL_VARS, so a MAGIC container came out bare — and a bare all-caps token
+# reads DOWN-cased under :invert, so `$#{^CAPTURE}` aborted the load unbound
+# instead of answering -1 (task #412).
+#   $#arr      → @arr
+#   $#A::ISA   → A::@ISA        (the @ goes AFTER the package prefix)
+#   $#{^CAPTURE} → |@{^CAPTURE}|
+# state-renamed arrays follow their rename, as before.
+sub _array_index_container {
+  my ($self, $content) = @_;
+  $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/
+      || $content =~ s/^\$#/\@/;
+  if ($self->environment) {
+    my $renames = $self->environment->state_var_renames;
+    $content = $renames->{$content} if $renames && exists $renames->{$content};
+  }
+  my $special = $SPECIAL_VARS{$content};
+  return $special if defined $special && !ref $special;
+  return $content;
+}
+
 # Generate code for a single node
 sub gen_node {
   my ($self, $node_id) = @_;
@@ -554,14 +585,7 @@ sub gen_leaf_form {
   # only gen_leaf side effect is an idempotent state-var-rename lookup, so
   # re-deriving the transformed container atom here is safe.
   if ($ref eq 'PPI::Token::ArrayIndex') {
-    my $content = $node->content();
-    $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # $#A::ISA → A::@ISA
-        || $content =~ s/^\$#/\@/;            # $#arr    → @arr
-    if ($self->environment) {
-      my $renames = $self->environment->state_var_renames;
-      $content = $renames->{$content} if $renames && exists $renames->{$content};
-    }
-    return ['p-array-last-index', $content];
+    return ['p-array-last-index', $self->_array_index_container($node->content())];
   }
 
   if ($ref =~ /^PPI::Token::Number/) {
@@ -883,7 +907,10 @@ sub gen_symbol_form {
   # model live in %SPECIAL_VARS above; everything else degrades to a normal
   # global here rather than aborting the whole transpile. We register the
   # symbol so _insert_variable_forward_declarations emits a file-level defvar.
-  if ($content =~ /^\$\{\^/) {
+  # Any sigil: `@{^FOO}` and `%{^FOO}` are ordinary globals too, and emitting
+  # one BARE produced an unbound symbol under :invert — a load-time abort of
+  # the whole file rather than an undef read (found on @{^CAPTURE}, task #412).
+  if ($content =~ /^[\$\@\%]\{\^/) {
     my $sym = "|$content|";
     $self->environment->add_caret_global($sym) if $self->environment;
     return $sym;
@@ -904,17 +931,7 @@ sub gen_leaf {
 
   # Array last index ($#arr)
   if ($ref eq 'PPI::Token::ArrayIndex') {
-    my $content = $node->content();
-    # $#arr     -> (p-array-last-index @arr)
-    # $#Pkg::v  -> (p-array-last-index Pkg::@v)   — @ must go AFTER the pkg:: prefix
-    $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/  # qualified: $#A::ISA → A::@ISA
-        || $content =~ s/^\$#/\@/;            # simple: $#arr → @arr
-    # Check state var rename (e.g., state @x → @state__sub__x__N)
-    if ($self->environment) {
-      my $renames = $self->environment->state_var_renames;
-      $content = $renames->{$content} if $renames && exists $renames->{$content};
-    }
-    return "(p-array-last-index $content)";
+    return "(p-array-last-index " . $self->_array_index_container($node->content()) . ")";
   }
 
   # Number literal - convert Perl format to CL format

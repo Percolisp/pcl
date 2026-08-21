@@ -1,4 +1,25 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s420 row edits.  ONE row moved because of this session: uni/gv.t 38/37 ->
+#   41/40 (task #410 — eight `$NONASCII{…}` statements stopped dropping, so
+#   six more rows run; +4 passing on the A/B, the base worktree measures
+#   37/38).  Everything else that differed from this snapshot in the uni/,
+#   mro/, re/ and op/ legs was verified PRE-EXISTING by running the same file
+#   on a 47e0750 worktree, and is spliced here with that verdict:
+#     op/bless.t     111/5  -> 111/6   (s418 #408, honest fail after the un-drop)
+#     op/split.t     210/9  -> 213/6   (s418 #407)
+#     op/filetest.t   16/6  ->  25/11  (s417 #372, stacked filetests)
+#     op/bop.t       249/246-> 251/246
+#     op/gv.t         50/47 ->  49/48
+#     op/rt119311.t    4/1  ->   4/2
+#     op/sprintf2.t 1525/13 -> 1679/25
+#     mro/package_aliases_utf8.t 48/26 -> 72/34  (registered *rows-unstable*)
+#   The six XDIFF-0/0 files (op/coreamp.t, op/defer.t, op/smartmatch.t,
+#   op/state.t, op/switch.t, op/tie_fetch_count.t) are the Track A REFUSALS
+#   (#371/#399/#400) and their rows are left as the pre-refusal record.
+#   re/pat.t stays 0/0: the file does not LOAD at all — one `"\x{4000000}"`
+#   literal is emitted as the 6-byte pre-2003 extended UTF-8 form, which is
+#   not valid UTF-8, so SBCL's reader fails the whole file (task #419).  Its
+#   five #412 drops are gone but nothing can observe that yet.
 # s419 row edits: opbasic/concat.t 248/6 -> 249/5 (task #402 -- the [perl #124160]
 #   interpolation-'.'-overload row now passes; serial+parallel agree).
 #   re/pat_advanced.t 927/751 -> 950/730: PRE-EXISTING drift since this s392
@@ -462,7 +483,7 @@ mro/overload_c3.t	7	0	7	0	OK
 mro/overload_c3_utf8.t	7	0	0	0	XDIFF	crash:simple-error: Can't locate object method "ネᚹ" via package "읺ҎꀀḮṆᵷꜰ롬ᵕveŔŁoad엗텟 | not-supported.md §Unicode — utf8 package-name variant (non-utf8 twin passes)
 mro/overload_dfs.t	7	0	7	0	OK	
 mro/package_aliases.t	54	0	97	40	XDIFF	crash:simple-error: Can't locate object method "womp" via package "Childclass" at - line N. | not-supported.md §symbol-table hashes — glob package aliasing + isarev
-mro/package_aliases_utf8.t	52	0	48	26	XDIFF	timeout | rows NOT checked (*rows-unstable*) | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.
+mro/package_aliases_utf8.t	52	0	72	34	XDIFF	timeout | rows NOT checked (*rows-unstable*) | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.
 mro/pkg_gen.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 mro/pkg_gen_utf8.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 mro/recursion_c3.t	8	0	8	0	OK	
@@ -488,10 +509,10 @@ op/attrproto.t	48	0	17	28	DIFF
 op/attrs.t	157	2	28	61	DIFF	undef-fn:attributes::pl-_guess_stash
 op/auto.t	47	0	47	0	OK	
 op/avhv.t	40	0	38	2	DIFF	
-op/bless.t	116	2	111	5	DIFF	
+op/bless.t	116	2	111	6	DIFF	
 op/blocks.t	25	1	16	10	DIFF	
 op/bool.t	8	0	8	0	OK	
-op/bop.t	510	0	249	246	DIFF	crash:simple-error: Invalid type 'P' in pack
+op/bop.t	510	0	251	246	DIFF	crash:simple-error: Invalid type 'P' in pack
 op/caller.t	111	1	28	84	DIFF	
 op/catch.t	12	0	10	2	DIFF	
 op/chars.t	34	0	34	0	OK	
@@ -532,7 +553,7 @@ op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for inval
 op/exp.t	31	0	31	0	OK	
 op/fh.t	8	0	5	3	DIFF	
 op/filehandle.t	4	0	0	0	DIFF	crash:simple-error: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File
-op/filetest.t	436	0	16	6	DIFF	undef-fn:main::pl-f
+op/filetest.t	436	0	25	11	DIFF	undef-fn:main::pl-f
 op/filetest_stack_ok.t	136	0	71	65	DIFF	
 op/filetest_t.t	7	0	0	0	DIFF	crash:sb-int:simple-file-error: Error opening #P"/dev/tty": No such device or address
 op/flip.t	14	0	12	2	DIFF	
@@ -548,7 +569,7 @@ op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
 op/grent.t	3	0	3	0	OK	
 op/grep.t	77	0	71	6	DIFF	
 op/groups.t	4	0	4	0	OK	
-op/gv.t	304	0	50	47	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
+op/gv.t	304	0	49	48	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash.t	494	0	6	6	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
@@ -625,7 +646,7 @@ op/require_gh20577.t	9	0	4	5	DIFF
 op/require_override.t	10	0	7	3	DIFF	
 op/reset.t	45	0	25	19	DIFF	
 op/reverse.t	25	0	25	0	OK	
-op/rt119311.t	22	0	4	1	DIFF	crash:simple-error: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t
+op/rt119311.t	22	0	4	2	DIFF	crash:simple-error: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t
 op/runlevel.t	24	0	0	0	DIFF	
 op/select.t	9	0	3	6	DIFF	
 op/setpgrpstack.t	3	0	3	0	OK	
@@ -638,10 +659,10 @@ op/smartkve.t	18	0	3	15	DIFF
 op/smartmatch.t	353	0	44	309	DIFF	
 op/sort.t	205	0	181	24	DIFF	undef-fn:main::pl-revers
 op/splice.t	34	0	34	0	OK	
-op/split.t	219	0	210	9	DIFF	
+op/split.t	219	0	213	6	DIFF	
 op/split_unicode.t	147	0	107	40	DIFF	
 op/sprintf.t	559	0	534	25	DIFF	
-op/sprintf2.t	1704	0	1525	13	DIFF	undef-fn:main::pl-a8p
+op/sprintf2.t	1704	0	1679	25	DIFF	undef-fn:main::pl-a8p
 op/srand.t	10	0	8	2	DIFF	
 op/sselect.t	23	0	17	6	DIFF	
 op/stash.t	54	1	48	6	DIFF	undef-fn:main::pl-SUPER
@@ -810,7 +831,7 @@ uni/eval.t	5	0	5	0	OK
 uni/fold.t	19128	104	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).
 uni/greek.t	0	0	0	0	NOTAP	
-uni/gv.t	206	0	38	37	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.
+uni/gv.t	206	0	41	40	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.
 uni/labels.t	10	0	3	5	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (go :ここ) Compile-time error: attempt t
 uni/latin2.t	0	0	0	0	NOTAP	
 uni/lex_utf8.t	16	0	6	10	DIFF	

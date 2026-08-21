@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 10;
 
 sub run_cl {
     my ($code) = @_;
@@ -72,3 +72,36 @@ test_cl('trailing text after chain',
     q{my $h={a=>[5]}; print "val=$h->{a}[0]!end\n";}, "val=5!end\n");
 test_cl('spaced brace is literal',
     q{my $x=7; print "$x {literal}\n";}, "7 {literal}\n");
+
+# --- task #414: a SUBSCRIPT INSIDE an interpolated subscript ------------
+# "$x[$i[0]]" dropped the whole statement with "no form emitter for
+# expression leaf PPI::Token::Number:?".  Cause: the fragment parser cloned
+# the top-level parts but nothing held the clones, and PPI's DESTROY empties
+# every descendant — so the inner tokens went HOLLOW (content undef) between
+# the parse and the emit.  The clones are anchored now (_anchor).  One
+# program, one SBCL launch: every shape the census carried.
+test_cl('subscript inside an interpolated subscript',
+    q{my @x=(10,20,30); my @i=(0,1,2); my %h=(k=>1);
+      my @ops=('a','b','c'); my @cur=([1,2],[0]);
+      sub f { return "1:$_[$_[2]] plus 2:$_[!$_[2]]" }
+      print f(5,6,0), "\n";
+      print "A:$x[$i[0]]\n";
+      print "B:$x[!$i[0]]\n";
+      print "C:$x[$h{k}]\n";
+      print "D:$x[$i[$i[1]]]\n";
+      my $first=0; my $last=2;
+      print "E:@ops[$first,@{$cur[0]},$last]\n";
+      my @aoa=([1,2],[3,4]);
+      print "I:$aoa[$i[1]][$i[0]]\n";
+      print "J:$x[ $i[1] + 1 ]\n";},
+    "1:5 plus 2:6\nA:10\nB:20\nC:20\nD:20\nE:a b c c\nI:3\nJ:30\n");
+
+# the shape as it stands in t/op/postfixderef.t: the '.' overload handler
+# whose body interpolates $_[$_[2]] — the drop made the handler compile to
+# nil, so the overload silently returned undef.
+test_cl('interpolated subscript inside an overload handler',
+    q{package O; use overload fallback=>1, '""' => sub { $_[0][0] },
+        '.' => sub { bless [ "$_[$_[2]]"." plus "."$_[!$_[2]]" ] };
+      package main; my $o = bless ["X"], "O";
+      print "".($o . "Y"), "\n";},
+    " plus X plus Y\n");

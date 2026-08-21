@@ -42,7 +42,7 @@ sub run_bytes {
     return decode_utf8($output);
 }
 
-plan tests => 6;
+plan tests => 7;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -79,3 +79,21 @@ is(run_bytes(encode_utf8(
    . "}\n"
    . "print \"ok\\n\";\n")),
    "ok\n", 'utf8 package name in a nested block: @ISA is an ordinary cell (#313)');
+
+# Task #410 (21 census drops across uni/gv.t, uni/stash.t, uni/caller.t,
+# uni/method.t, uni/readline.t and the two mro utf8 files).  PPI's `$` branch
+# tests /[a-z_]/i where its `%`/`@`/`*`/`&` siblings test /[\w:]/, so `$Ｘ`
+# alone splits into Cast + Word (docs/ppi-upstream-bugs.md §23).  Merging the
+# two tokens back was not enough: the LEXER had already decided what the
+# following `{…}`/`[…]` was from the bareword it saw, making `$Ｘ{a}` a BLOCK
+# and `$Ｖ[0]` an anonymous-array CONSTRUCTOR — so the statement was dropped.
+# The postfix chain after a repaired symbol is re-classed now.
+is(run_bytes(encode_utf8(
+     "use utf8;\n"
+   . "our %\x{ff38}; our \@\x{ff36};\n"
+   . "\$\x{ff38}{a} = 1;\n"
+   . "\$\x{ff36}[0] = 7;\n"
+   . "my %\x{ff44} = (k => { x => [9] });\n"
+   . "my \$ref = \\%\x{ff38};\n"
+   . "print \$\x{ff38}{a}, \$\x{ff36}[0], \$\x{ff44}{k}{x}[0], \$ref->{a}, \"\\n\";\n")),
+   "1791\n", 'non-ASCII scalar name: hash, array and chained subscripts (#410)');

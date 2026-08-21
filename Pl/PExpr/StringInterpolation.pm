@@ -29,6 +29,21 @@ use Scalar::Util qw(refaddr);
 #
 # Returns:
 #   $node_id - ID of created node (string_concat or simple node)
+# PPI tears a document down RECURSIVELY when it goes out of scope: its DESTROY
+# walks the tree and empties every descendant hash, so any token the OpcodeTree
+# still points at goes HOLLOW — `content` returns undef and the leaf emitter
+# dies ("no form emitter for expression leaf …:?", task #414).  Cloning the
+# top-level parts is NOT enough: a clone that is a NODE (the inner `[0]` of
+# "$x[$i[0]]", the `{k}` of "$x[$h{k}]") is itself unreferenced the moment the
+# caller returns, and takes its own descendants down with it.  So anchor
+# everything handed to the parser for this object's lifetime — the same
+# `_ppi_docs` anchor the document-parsing sites in this file already use.
+sub _anchor {
+  my $self = shift;
+  push @{ $self->{_ppi_docs} //= [] }, @_;
+  return @_;
+}
+
 sub parse_interpolated_string {
   my $self      = shift;
   my $parser    = shift;  # Pl::PExpr object
@@ -868,9 +883,8 @@ sub parse_array_subscript {
     return ($var_id, $bracket_start);
   }
 
-  # Clone parts to preserve content after $doc goes out of scope
-  # (PPI tokens lose content when their parent document is garbage collected)
-  my @parts = map { $_->clone() } $stmts[0]->children();
+  # Clone the parts, and ANCHOR them: a clone alone does not survive — see _anchor.
+  my @parts = $self->_anchor(map { $_->clone() } $stmts[0]->children());
   my $index_id = $parser->parse(\@parts);
 
   # A leading '@' sigil means a slice: "@a[0,2]" interpolates to the joined
@@ -913,7 +927,7 @@ sub parse_array_subscript {
       my $doc2 = PPI::Document->new(\$idx2_str);
       my @stmts2 = $doc2->children();
       last unless @stmts2;
-      my @parts2 = map { $_->clone() } $stmts2[0]->children();
+      my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
       my $idx2_id = $parser->parse(\@parts2);
       my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('a_ref_acc');
       $parser->add_child_to_node($ref_acc_id, $cur_id);
@@ -936,7 +950,7 @@ sub parse_array_subscript {
       my $doc2 = PPI::Document->new(\$key2_str);
       my @stmts2 = $doc2->children();
       last unless @stmts2;
-      my @parts2 = map { $_->clone() } $stmts2[0]->children();
+      my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
       my $key2_id = $parser->parse(\@parts2);
       my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('h_ref_acc');
       $parser->add_child_to_node($ref_acc_id, $cur_id);
@@ -1017,8 +1031,8 @@ sub parse_hash_subscript {
       return ($var_id, $brace_start);
     }
 
-    # Clone parts to preserve content after $doc goes out of scope
-    my @parts = map { $_->clone() } $stmts[0]->children();
+    # Clone the parts, and ANCHOR them — see _anchor.
+    my @parts = $self->_anchor(map { $_->clone() } $stmts[0]->children());
     $key_id = $parser->parse(\@parts);
   }
   
@@ -1061,7 +1075,7 @@ sub parse_hash_subscript {
       my $doc2 = PPI::Document->new(\$idx2_str);
       my @stmts2 = $doc2->children();
       last unless @stmts2;
-      my @parts2 = map { $_->clone() } $stmts2[0]->children();
+      my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
       my $idx2_id = $parser->parse(\@parts2);
       my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('a_ref_acc');
       $parser->add_child_to_node($ref_acc_id, $cur_id);
@@ -1089,7 +1103,7 @@ sub parse_hash_subscript {
         my $doc2 = PPI::Document->new(\$key2_str);
         my @stmts2 = $doc2->children();
         last unless @stmts2;
-        my @parts2 = map { $_->clone() } $stmts2[0]->children();
+        my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
         $key2_id = $parser->parse(\@parts2);
       }
       my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('h_ref_acc');

@@ -4,6 +4,111 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 420 (2026-08-22, Opus) — four unblock-list tasks shipped: #414, #413, #412, #410 (+#416, #417); census 135 → 106
+
+The queue's next executable item after s419 was the flip's **unblock list**
+(`docs/drop-census-s419-flip-gate.md` §4).  Four of its tasks are closed, plus
+two bugs found on the way.  **The drop census is 33 files / 106 drops** (from
+42/135), edited row by row with causes; the flip itself stays BLOCKED — the
+remaining families (lvalue 39, #153-B3, #411, #399, #259, #415) are untouched.
+
+**#414 — a cloned PPI element is not enough to keep its tokens alive.**
+`"$x[$i[0]]"` (a subscript INSIDE an interpolated subscript) died with
+`no form emitter for expression leaf PPI::Token::Number:?`, and that `?` was
+the printed value of an UNDEF `content`.  The six fragment parsers in
+`StringInterpolation` cloned their mini-document's top-level parts precisely
+so the tokens would survive the document — but PPI's DESTROY walks the tree
+and empties every descendant hash, so a clone that is a NODE (the inner `[0]`)
+took its own tokens down the moment the caller returned.  One `_anchor`
+helper, used at all six sites; the document-parsing sites in the same file
+already anchored.  The shape is common, not exotic: `"$x[$h{k}]"`,
+`"$_[!$_[2]]"`, `"@ops[$first,@{$cur[0]},$last]"` — ten rows probed identical
+to perl.  perl-tests/postfixderef.t's `.` overload handler was one of the
+dropped statements, so **TOTAL passing 18363 → 18364** and test 107 leaves
+`fail-baseline.tsv` by EDIT.
+
+**#413 — a package-QUALIFIED declaration was invisible.**  `sub main::end(&)`
+written inside `package End` registered under the name `main::end`, so the
+`end { … }` call site in main found no prototype and its trailing block never
+became a block-form argument (die_unwind.t 4 drops, die_except.t 2).  The
+registry was ALREADY documented as keyed by BARE name — `_bareword_callable_here`
+splits a qualified CALL and matches the basename — so the fix is at the
+`Pl::Environment` seam, in both directions, where every producer (v1
+`_register_sub_prototype`, v2 `_scan_segment`, module extraction) meets it.
+**The task's guess about perl was wrong and the probe said so**: perl applies
+the prototype on a QUALIFIED CALL too (`Foo::g { "D" }` prints `g:D`), and PCL
+crashed on that shape before.  Rows do not move — the two files need refcount
+`DESTROY`, a registered non-support — but the statements lower.
+
+**#412 — `@{^CAPTURE}` and friends.**  Two independent halves: the array had
+no runtime variable at all (the emitter passed the name through BARE, and a
+bare all-caps token reads DOWN-cased under `:invert`, so the file aborted
+unbound), and `$#{^CAPTURE}` — the one spelling PPI hands over as Cast +
+Block — was dropped whole.  Shipped: the array beside `@-`/`@+`, filled by
+`set-capture-groups` with the group VALUES truncated after the last
+participating group; `%{^CAPTURE}`/`%{^CAPTURE_ALL}` mapped onto `%+`/`%-`
+(perl SYNONYMS — no new state); `_block_caret_name` for the Cast+Block
+spelling, which also fixed the SPACED `$ {^XY}` form in t/base/lex.t; and one
+shared container helper for the two ArrayIndex leaf emitters, which is where
+the missing `%SPECIAL_VARS` consultation lived.  re/pat.t 8 drops → 3.
+
+**#417 (found while doing #412) — `@-` and `@+` are sized differently.**
+`$#+` is the PATTERN's group count (a non-participant is a present undef),
+`$#-` stops after the last group that participated; PCL truncated both.
+`"ab" =~ /(a)(x)?(y)?/` gives perl `$#+ 3, $#- 1` and gave PCL `1, 1`.
+
+**#410 — non-ASCII identifiers, and a PPI bug (§23).**  `PPI/Token/Unknown.pm`'s
+`$` branch tests `/[a-z_]/i` where its `*`, `%`, `&`, `@` siblings test
+`/[\w:]/`, so `$Ｘ` alone splits into Cast + Word.  `_merge_unicode_symbols`
+already merged those tokens — what was missing is that the LEXER had by then
+decided what the following container was, from the bareword it saw: a
+`Structure::Block` for `$Ｘ{a}`, a `Structure::Constructor` for `$Ｖ[0]`.  The
+repair re-classes the postfix chain after a repaired symbol (an explicit `->`
+is stepped over — PPI gets that one right).  Census 21 → 6, five files
+cleared; companion **uni/gv.t 37/38 → 41/40** (+4 passing rows).  Logged as
+`docs/ppi-upstream-bugs.md` §23 with three rows in `docs/ppi-bug-report.t`
+(two fail = the bug, one control passes).
+
+**#416 — `s///` with no match returns `""`, not `0`** (perl's PL_sv_no).
+Nine shapes probed: `tr///` really does return a count of `0` there, `m//`
+already answered `""`, and every arithmetic/boolean consumer is unchanged.
+
+**Two findings filed, not fixed.**  **#418**: a non-ASCII PACKAGE name still
+mismatches at the CL READER — SBCL NFKC-normalizes symbol names (Ｆ → F) and
+`:invert` then down-cases, so `:ＦＯＯ` reads as `foo` while `(p-stash "ＦＯＯ")`
+keeps the fullwidth string; pipe-quoting defeats both (measured).  That is why
+`exists $ＦＯＯ::{bar}` answers 0 although the statement now lowers.
+**#419**: `t/re/pat.t` does not LOAD at all — one `"\x{4000000}"` literal is
+emitted as the six-byte pre-2003 extended UTF-8 form, which SBCL's reader
+rejects, so perl's 1263 rows there measure as 0.  SBCL cannot hold the
+character at all (`char-code-limit`), so the fix is to keep the FILE readable
+and make only that expression die.  Pre-existing (verified at HEAD).
+
+**Verification.**  Gate **155 files / 5614 rows**, failures exactly the 13
+pclxs xs rows (+14 guard rows this session: interp-chained-subscript 2,
+prototype-01 8, match-vars 3, utf8-source 1).  `corpus-diff`: 2 of 111 files
+differ — postfixderef.t (the un-dropped handler) and parent.t (`::is(…)` now
+finds Test::More's `($$;$)`, so its argument takes scalar context — the run is
+unchanged, 7/2 both ways).  `emission-ab` over all 21 lib modules: SAME.
+Full perl-tests sweep: **GATE clean, 0 new / 0 fixed, TOTAL 18363 → 18364**,
+and a per-file compare shows postfixderef.t is the ONLY file that moved.
+**Gate-SET scan over both populations (638 files × 2)** — required because the
+prototype fix widens what a checker sees: exactly 8 files differ, all of them
+drop-announcement → OK.  Companion legs re/ (no file differs from the
+snapshot), uni/ + mro/, op/: every one of the 14 op/ movers and
+mro/package_aliases_utf8.t was verified **PRE-EXISTING by re-running the file
+on a `47e0750` worktree**, and all nine verified rows are spliced into
+`docs/perl-suite-run.tsv` with that verdict.  Generation **v2-163**, all three
+artifacts regenerated (they differ only in the stamp).
+
+**One census row RISES and is argued in the census file**: op/lexsub.t 12 → 14.
+A lexical sub named `if` is renamed `if__lexsub__N`, and the call site in
+another package spells it `main::if__lexsub__N`; that qualified name missed the
+prototype table before, so `my $y = if if if;` compiled to nested calls that
+returned 44 by accident.  It now finds the `()` prototype, takes the same path
+its main-package twin has always taken, and drops loudly.  op/lexsub.t stays
+DIFF 7/10 — the file aborts long before those lines.
+
 ## Session 419 (2026-08-21, Fable) — flip re-census (BLOCKED verdict); release phases 3+5: #279 hygiene, #280 README/STATUS/CHANGELOG, #283 CI
 
 **The flip re-census (the queue's next item) is DONE and the verdict is

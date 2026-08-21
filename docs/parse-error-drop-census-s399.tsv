@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 42 files, 135 drops -- 6 perl-tests files (8
-# drops), 36 companion files (127), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 33 files, 106 drops -- 5 perl-tests files (7
+# drops), 28 companion files (99), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -209,9 +209,47 @@
 #         14 are flip-legal (test-deliberate/registered) and 39 are the
 #         permanently-exempt lvalue family (§6.3).  Re-run the census after
 #         the unblock list lands; do not flip before.
+#   s420  TWENTY-NINE drops REMOVED and NINE FILES CLEARED by four unblock-list
+#         tasks; one row RISES by 2 and is argued below.
+#      (a) #414 (the HOLLOW-TOKEN fix): perl-tests/postfixderef.t 1 -> 0,
+#         t/op/postfixderef.t 1 -> 0, t/op/numconvert.t 1 -> 0.  An
+#         interpolated subscript whose INDEX is itself a subscript
+#         ("$x[$i[0]]", "$_[!$_[2]]") was parsed from a fragment document whose
+#         top-level parts were CLONED but never anchored: PPI's DESTROY empties
+#         every descendant, so the inner tokens went hollow between the parse
+#         and the emit and the leaf emitter died on `content` = undef.  The
+#         clones are anchored now (StringInterpolation::_anchor).
+#      (b) #413 (package-QUALIFIED prototype declarations): t/op/die_unwind.t
+#         4 -> 0, t/op/die_except.t 2 -> 0.  `sub main::end(&)` declared from
+#         inside `package End` registered under the name `main::end`, so the
+#         `end { … }` call site in main found no prototype and the trailing
+#         block never became a block-form argument.  The registry is keyed by
+#         BARE name (the convention _bareword_callable_here relies on), so the
+#         qualifier is now stripped at the Environment seam, both on the way in
+#         and on the way out (perl applies the prototype on a qualified CALL
+#         too — probed).
+#      (c) #412 (@{^CAPTURE}): t/re/pat.t 8 -> 3.  `$#{^CAPTURE}` is the one
+#         spelling PPI hands over as Cast + Block, and the array behind it had
+#         no runtime variable at all.  The remaining 3 are families 4 and 8.
+#      (d) #410 (non-ASCII identifiers): t/uni/gv.t 10 -> 2, t/uni/stash.t
+#         4 -> 0, t/uni/caller.t 2 -> 0, t/mro/basic_utf8.t 1 -> 0,
+#         t/mro/package_aliases_utf8.t 2 -> 0.  PPI splits `$Ｘ` into Cast +
+#         Word (docs/ppi-upstream-bugs.md §23) and the LEXER then built the
+#         following `{…}` as a BLOCK; _merge_unicode_symbols re-classes that
+#         postfix chain now.  t/uni/gv.t's 2 remaining drops are family 4, and
+#         t/uni/method.t + t/uni/readline.t keep 2 each for the same reason —
+#         they were classified into family 2 by their FILE, but their message
+#         was always the family-4 one.
+#      (e) t/op/lexsub.t 12 -> 14, a RISE, caused by (b): a lexical sub named
+#         `if` is renamed to `if__lexsub__N`, and the call site in ANOTHER
+#         package spells it `main::if__lexsub__N`.  That qualified name missed
+#         the prototype table before, so `my $y = if if if;` compiled to nested
+#         calls that returned 44 by accident; it now finds the `()` prototype,
+#         takes the same path its main-package twin already took (line 210 has
+#         always dropped) and drops loudly.  Measured: op/lexsub.t stays
+#         DIFF 7/10 — the file aborts long before those lines.
 perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
-perl-tests/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
@@ -219,20 +257,14 @@ t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of unknown type. Dump: x1
 t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
-t/mro/basic_utf8.t	1	Bug. Fell through. Missing case: [ x1
-t/mro/package_aliases_utf8.t	2	Bug. Fell through. Missing case: [ x2
 t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
-t/op/die_except.t	2	Bug. Fell through. Missing case: [ x2
-t/op/die_unwind.t	4	Bug. Fell through. Missing case: [ x4
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
 t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	12	Bug. Fell through. Missing case: [ x5 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
+t/op/lexsub.t	14	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
-t/op/numconvert.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
-t/op/postfixderef.t	1	PCL internal: no form emitter for expression leaf PPI::Token::Number:? x1
 t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
@@ -242,12 +274,10 @@ t/op/universal.t	1	Handle single node of unknown type. Dump: x1
 t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/utftaint.t	1	Bug. Fell through. Missing case: [ x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
-t/re/pat.t	8	Bug. Fell through. Missing case: [] x5 | Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
+t/re/pat.t	3	Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
 t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
 t/re/subst.t	3	Bug. Fell through. Missing case: [] x2 | Handle single node of unknown type. Dump: x1
-t/uni/caller.t	2	Bug. Fell through. Missing case: [ x2
-t/uni/gv.t	10	Bug. Fell through. Missing case: [ x8 | Handle single node of unknown type. Dump: x2
+t/uni/gv.t	2	Handle single node of unknown type. Dump: x2
 t/uni/method.t	2	Handle single node of unknown type. Dump: x2
 t/uni/readline.t	2	Handle single node of unknown type. Dump: x2
-t/uni/stash.t	4	Bug. Fell through. Missing case: [ x4

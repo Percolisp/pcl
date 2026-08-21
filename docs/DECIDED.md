@@ -11,6 +11,53 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s420 (2026-08-22, Opus) — four of the flip's unblock-list tasks SHIPPED: census 135 → 106
+
+- **The drop census is 33 files / 106 drops** (was 42/135 at s419), measured
+  with `tools/drop-census.pl` and edited into
+  `docs/parse-error-drop-census-s399.tsv` row by row with causes.  Closed:
+  **#414** (3), **#413** (6), **#412** (5), **#410** (15 of 21).  The flip is
+  still BLOCKED — the remaining families are unchanged.
+- **A CLONED PPI element is NOT enough to keep its tokens alive** (#414).
+  PPI's DESTROY walks the tree and empties every descendant hash, so a clone
+  that is a NODE takes its own tokens down when the caller returns: the
+  OpcodeTree then holds HOLLOW tokens whose `content` is undef, and the leaf
+  emitter dies with `…:?` — that `?` IS the undef.  Anchor anything handed to
+  the parser (`StringInterpolation::_anchor`); the document-parsing sites in
+  that file already did.
+- **The prototype table and `declared_subs` are keyed by the BARE sub name**
+  — that was always the documented convention (`_bareword_callable_here`
+  splits a qualified CALL and matches the basename), but a qualified
+  DECLARATION broke it.  `Pl::Environment` now normalizes at the seam, in
+  BOTH directions.  **perl applies a prototype on a QUALIFIED CALL too**
+  (probed: `Foo::g { … }` takes the block form) — the opposite of what task
+  #413 guessed.
+- **`@{^CAPTURE}` / `%{^CAPTURE}` / `%{^CAPTURE_ALL}` are implemented**
+  (#412): the array lives beside `@-`/`@+` in the runtime; the two hashes are
+  perl SYNONYMS for `%+`/`%-` and map straight onto them.  A caret variable of
+  ANY sigil must be pipe-quoted in the emission — a bare all-caps token reads
+  DOWN-cased under `:invert` and aborts the load unbound.
+- **`@-` and `@+` are sized differently, and perl means it** (#417): `$#+` is
+  the pattern's GROUP COUNT (undef for a non-participant), `$#-` stops after
+  the last group that participated.  PCL truncated both.
+- **`s///` with no match returns `""`, not `0`** (#416) — perl's PL_sv_no.
+  `tr///` genuinely returns a count of `0` there (probed), and `m//` already
+  answered `""`.
+- **PPI splits `$Ｘ` into Cast + Word** — `Unknown.pm`'s `$` branch tests
+  `/[a-z_]/i` where its `*`/`%`/`&`/`@` siblings test `/[\w:]/`
+  (`docs/ppi-upstream-bugs.md` §23).  Merging the tokens is NOT enough: the
+  lexer had already built the following `{…}` as a BLOCK and `[…]` as a
+  CONSTRUCTOR, so `_merge_unicode_symbols` re-classes that postfix chain now.
+- **A non-ASCII PACKAGE name still mismatches at the CL reader** (#418, filed
+  with the measurement): SBCL NFKC-normalizes symbol names and `:invert`
+  down-cases them, so `:ＦＯＯ` reads as `foo` while the runtime string stays
+  `ＦＯＯ`.  Pipe-quoting defeats both.
+- **One `>0x10FFFF` codepoint in a literal costs the WHOLE file** (#419):
+  `t/re/pat.t` emits `"\x{4000000}"` as the six-byte pre-2003 extended form,
+  which is not valid UTF-8, so SBCL's reader rejects the file and perl's 1263
+  rows there measure as 0.  SBCL cannot hold the character (char-code-limit),
+  so the fix is to keep the FILE readable and make only that expression die.
+
 ## s419 (2026-08-21, Fable) — the flip re-census: 135 drops ALL CLASSIFIED; the announce→DIE flip is BLOCKED
 
 - **The flip re-census is DONE and the verdict is BLOCKED — by the plan's own

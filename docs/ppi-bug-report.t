@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 23;
+use Test::More tests => 26;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -375,4 +375,38 @@ PERL
         'a filetest after a BAREWORD filehandle lexes as one `-e` (control)' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
+}
+
+# ── Bug 22: a `$` scalar with a NON-ASCII name splits into Cast + Word ───────
+# perl has allowed unicode identifiers since 5.8.  PPI reads them for every
+# sigil except `$`: PPI/Token/Unknown.pm's `$` branch tests /[a-z_]/i where its
+# `*`, `%`, `&` and `@` siblings test /[\w:]/.  The name itself is fine — once
+# the token is classed Symbol, PPI::Token::Symbol consumes it with
+# m/\G([\w:\']+)/gc.
+{
+    my $doc = PPI::Document->new(\"use utf8;\n\$\x{ff38} = 1;\n");
+    my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+    ok( (grep { $_->content eq "\$\x{ff38}" } @sym),
+        'a scalar with a non-ASCII name should lex as one Symbol' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# The same name under `%` lexes correctly — the inverse that shows the two
+# paths disagree about the same identifier.
+{
+    my $doc = PPI::Document->new(\"use utf8;\n%\x{ff38} = ();\n");
+    my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+    ok( (grep { $_->content eq "%\x{ff38}" } @sym),
+        'a HASH with a non-ASCII name lexes as one Symbol (control)' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# Second-order: because the lexer sees a bareword, the subscript that follows
+# is built as a BLOCK (and `[…]` as an anonymous-array constructor), so the
+# statement is not a subscripted variable at all.
+{
+    my $doc = PPI::Document->new(\"use utf8;\n\$\x{ff38}{a} = 1;\n");
+    ok( scalar @{ $doc->find('PPI::Structure::Subscript') || [] },
+        'the `{…}` after a non-ASCII scalar should be a Subscript' )
+        or diag "got: " . join(' ', map { ref($_) } grep { $_->significant } $doc->tokens);
 }

@@ -824,6 +824,61 @@ END_MODULE
 
 # ============================================================
 diag "";
+diag "-------- Package-QUALIFIED prototype declarations (task #413):";
+
+# `sub main::end(&)` declared from inside another package installs `end` in
+# MAIN, and perl's call sites there see its (&) prototype — so `end { … }`
+# takes the block form (probed: die_unwind.t's own shape runs in perl).  The
+# registry is keyed by BARE name (the convention _bareword_callable_here
+# relies on), so the qualifier is stripped at the seam; before that the whole
+# statement was DROPPED (6 census rows across die_unwind.t + die_except.t).
+{
+  my $cl = transpile(<<'END_PERL');
+{ package End;
+  sub main::end(&) { my ($c) = @_; return bless(sub { $c->() }, "End"); }
+}
+my $c = end { print "cleanup" };
+END_PERL
+  unlike($cl, qr/PARSE ERROR/, 'qualified (&) decl: the call site is not dropped');
+  like($cl, qr/lambda/, 'qualified (&) decl: the trailing block became a lambda');
+}
+
+# the same declaration made from the package it names
+{
+  my $cl = transpile(<<'END_PERL');
+sub main::f(&) { my ($c) = @_; $c->() }
+my $r = f { 42 };
+END_PERL
+  unlike($cl, qr/PARSE ERROR/, 'qualified (&) decl in its own package: not dropped');
+  like($cl, qr/lambda/, 'qualified (&) decl in its own package: block became a lambda');
+}
+
+# a QUALIFIED CALL of an unqualified declaration — perl applies the prototype
+# there too (probed: `Foo::g { "D" }` prints g:D), so the lookup strips the
+# qualifier as well.
+{
+  my $cl = transpile(<<'END_PERL');
+{ package Foo; sub g(&) { my ($c) = @_; $c->() } }
+my $r = Foo::g { 7 };
+END_PERL
+  unlike($cl, qr/PARSE ERROR/, 'qualified CALL of a (&) sub: not dropped');
+  like($cl, qr/lambda/, 'qualified CALL of a (&) sub: block became a lambda');
+}
+
+# INVERSE GUARD: no prototype, no block form.  `h { a => 1 }` passes a HASHREF
+# in perl (probed), and must keep doing so — the qualified-name normalization
+# must not make every qualified sub swallow a following brace.
+{
+  my $cl = transpile(<<'END_PERL');
+{ package End; sub main::h { my ($r) = @_; return ref($r) } }
+my $x = h({ a => 1 });
+END_PERL
+  unlike($cl, qr/PARSE ERROR/, 'qualified decl with NO prototype: call not dropped');
+  unlike($cl, qr/lambda/, 'qualified decl with NO prototype: no block conversion');
+}
+
+# ============================================================
+diag "";
 diag "-------- Cleanup:";
 
 # Cleanup extra test modules

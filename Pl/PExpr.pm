@@ -2574,12 +2574,37 @@ sub _collapse_braced_bareword_derefs {
     my $blk = $e->[$i+1];
     next unless ref($blk) eq 'PPI::Structure::Block' && $blk->start() eq '{';
     my $bw = _block_sole_bareword($blk);
+    # `$#{^CAPTURE}`: a CARET name in the block.  PPI lexes `${^CAPTURE}` and
+    # `@{^CAPTURE}` as one Magic token but has no token for the `$#` spelling,
+    # so it alone arrives here as Cast + Block (task #412).
+    $bw = _block_caret_name($blk) if !defined $bw;
     next unless defined $bw;
     my $tok = $sigil eq '$#'
       ? PPI::Token::ArrayIndex->new('$#' . $bw)
       : PPI::Token::Symbol->new($sigil . $bw);
     splice @$e, $i, 2, $tok;
   }
+}
+
+
+# A caret-name deref block, `{^CAPTURE}` → the braced name.  Kept SEPARATE from
+# _block_sole_bareword on purpose: that predicate also drives the symbolic-ref
+# autoquote (`${foo}` → `${"foo"}`), where a caret name is not a package
+# variable name at all.  Returning the braced form lets the collapse build the
+# very `$#{^CAPTURE}` ArrayIndex token the ordinary `$#name` path already
+# lowers — no new emission case (rule 11).
+sub _block_caret_name {
+  my $block = shift;
+  my @ch = grep { ref($_) !~ /Whitespace|Comment/ } $block->children();
+  if (@ch == 1 && $ch[0]->isa('PPI::Statement')) {
+    @ch = grep { ref($_) !~ /Whitespace|Comment/ } $ch[0]->children();
+  }
+  return undef unless @ch == 2
+                   && ref($ch[0]) eq 'PPI::Token::Operator'
+                   && $ch[0]->content() eq '^'
+                   && ref($ch[1]) eq 'PPI::Token::Word';
+  my $w = $ch[1]->content();
+  return $w =~ /\A[A-Za-z_]\w*\z/ ? '{^' . $w . '}' : undef;
 }
 
 

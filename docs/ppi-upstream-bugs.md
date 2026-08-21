@@ -883,6 +883,72 @@ the spaced form keeps its correct reading.  Guard rows:
 
 ---
 
+## 23. A `$` scalar with a NON-ASCII name is split into Cast + Word — but `@`/`%`/`*`/`&` are not  [CONFIRMED 1.291]
+
+Perl has allowed unicode identifiers since 5.8 (`use utf8`), and PPI reads them
+correctly for every sigil except `$`:
+
+```perl
+perl -MPPI -CS -e 'use utf8; for my $c (q{$Ｘ}, q{%Ｘ}, q{@Ｘ}, q{*Ｘ}, q{&Ｘ}) {
+  my $d = PPI::Document->new(\$c);
+  print "$c => ", join(" ", map { ref($_) . "[" . $_->content . "]" } $d->tokens), "\n" }'
+
+$Ｘ => PPI::Token::Cast[$] PPI::Token::Word[Ｘ]        <-- WRONG
+%Ｘ => PPI::Token::Symbol[%Ｘ]
+@Ｘ => PPI::Token::Symbol[@Ｘ]
+*Ｘ => PPI::Token::Symbol[*Ｘ]
+&Ｘ => PPI::Token::Symbol[&Ｘ]
+```
+
+perl reads all five as variables (`$Ｘ = 1; print $Ｘ` prints 1).
+
+**The line.**  `PPI/Token/Unknown.pm`, the `$` branch of
+`__TOKENIZER__on_char`:
+
+```perl
+} elsif ( $c eq '$' ) {
+        ...
+        if ( $char =~ /[a-z_]/i ) {            # <-- ASCII-only
+                # Symbol
+                $t->{class} = $t->{token}->set_class( 'Symbol' );
+```
+
+Every sibling branch in the same function (`*`, `%`, `&`, `@`) tests
+`/[\w:]/`, which matches a unicode word character, and
+`PPI::Token::Symbol::__TOKENIZER__on_char` then consumes the rest of the name
+with `m/\G([\w:\']+)/gc` — also unicode-clean.  So the name only has to survive
+the first character test; `$` is the one sigil that does not use it.  (This is
+also why `$$Ｘ` works: the inner symbol is created by the `^\$\$\w` branch of
+`PPI::Token::Magic`, not by this test.)
+
+The proposed fix is to make the `$` branch match its siblings — `/[\w:]/`, with
+the existing "not after a Number" guard the others carry.
+
+**Second-order damage: the LEXER has already chosen.**  Merging the two tokens
+back into one Symbol is not enough, because by then the structure that follows
+was built against the bareword:
+
+```
+$Ｘ{a}   ⇒  Symbol($Ｘ)  PPI::Structure::Block        { a }        <-- expected Subscript
+$Ｖ[0]   ⇒  Symbol($Ｖ)  PPI::Structure::Constructor  [ 0 ]        <-- expected Subscript
+$Ｘ->{a} ⇒  Symbol($Ｘ)  Operator(->)  PPI::Structure::Subscript   <-- correct
+```
+
+so the enclosing statement is not a subscripted variable at all.
+
+**Impact on PCL (task #410): 21 dropped statements** across `t/uni/gv.t`,
+`t/uni/stash.t`, `t/uni/caller.t`, `t/uni/method.t`, `t/uni/readline.t`,
+`t/mro/basic_utf8.t` and `t/mro/package_aliases_utf8.t` — every one of them a
+`$NONASCII{…}` hash/stash element or a `$NONASCII[…]` array element.
+`Pl::Parser::_merge_unicode_symbols` (which already merged the tokens) now also
+re-classes the postfix chain that follows a repaired symbol: the `{…}`/`[…]`
+containers become `PPI::Structure::Subscript` and their inner `PPI::Statement`
+an `Expression`, which is what the lexer would have chosen had the symbol been
+whole.  Text and tokens are untouched; an explicit `->` is stepped over because
+PPI already got that one right.  Guard row: `Pl/t/utf8-source-01.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

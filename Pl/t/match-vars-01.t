@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 25;
+plan tests => 28;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -217,4 +217,40 @@ is run_cl(<<'END'), "7 8|3|A3B\n", 'ordinary @{$ref} and @{[expr]} are untouched
 my $r = [7,8];
 my @c = @{[1+2]};
 print "@{$r}|@c|", ("A3B" =~ /A@{[1+2]}B/ ? "A3B" : "no"), "\n";
+END
+
+# 26. @{^CAPTURE} (5.26+) and its two hash synonyms.  The array had no runtime
+# variable at all (the emission was a BARE symbol, which reads down-cased under
+# :invert and aborted the load unbound), and `$#{^CAPTURE}` — the one spelling
+# PPI hands over as Cast + Block — was dropped whole (task #412; 5 rows of
+# t/re/pat.t).  One program, every shape, all values perl-probed.
+is run_cl(<<'END'), "2 1 a|b\n0 -1 \n1 0 a\nx a x\n", '@{^CAPTURE} / $#{^CAPTURE} / %{^CAPTURE}';
+sub show { print scalar(@{^CAPTURE}), " ", $#{^CAPTURE}, " ",
+                 join("|", map { defined $_ ? $_ : "U" } @{^CAPTURE}), "\n" }
+"abc" =~ /(a)(b)/;   show();
+"abc" =~ /a/;        show();
+"abc" =~ /(a)(z)?/;  show();
+"abc" =~ /(?<x>a)/;
+print join(",", sort keys %{^CAPTURE}), " ", ${^CAPTURE}[0], " ",
+      join(",", sort keys %{^CAPTURE_ALL}), "\n";
+END
+
+# 27. @- and @+ are sized DIFFERENTLY, and perl means it (task #417): @- stops
+# after the last PARTICIPATING group, @+ runs to the pattern's group count.
+is run_cl(<<'END'), "3 1\n2 2\n0 0\n", '$#+ counts the groups, $#- the matched ones';
+"ab" =~ /(a)(x)?(y)?/; print "$#+ $#-\n";
+"ab" =~ /(a)(b)/;      print "$#+ $#-\n";
+"ab" =~ /a/;           print "$#+ $#-\n";
+END
+
+# 28. s/// with no match returns perl's FALSE — PL_sv_no, the ("",0) dualvar —
+# not the number 0, so it prints as nothing (task #416).  tr/// really does
+# return a count of 0 there (probed), and m// already answered "".
+is run_cl(<<'END'), "1:<> 0 T F\n2:<1>\n3:<0>\n4:<>\n", 's/// no-match returns "" (PL_sv_no)';
+my $q = "abc";
+my $n = ($q =~ s/zzz/x/);
+print "1:<$n> ", $n+0, " ", (defined $n ? "T" : "F"), " ", ($n ? "T" : "F"), "\n";
+my $m = ($q =~ s/b/B/);   print "2:<$m>\n";
+my $t = "abc"; my $c = ($t =~ tr/z/y/);  print "3:<$c>\n";
+my $u = ("abc" =~ /zzz/); print "4:<$u>\n";
 END

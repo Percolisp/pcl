@@ -425,7 +425,7 @@ sub get_prototype {
     my $self = shift;
     my $name = shift;
 
-    return $self->prototypes->{$name};
+    return $self->prototypes->{ _bare_sub_name($name) };
 }
 
 =head2 has_prototype($name)
@@ -440,7 +440,7 @@ sub has_prototype {
     my $self = shift;
     my $name = shift;
 
-    return exists $self->prototypes->{$name};
+    return exists $self->prototypes->{ _bare_sub_name($name) };
 }
 
 =head2 get_min_params($name)
@@ -456,7 +456,7 @@ sub get_min_params {
     my $self = shift;
     my $name = shift;
 
-    my $sig_info = $self->prototypes->{$name};
+    my $sig_info = $self->prototypes->{ _bare_sub_name($name) };
     return undef unless $sig_info;
     return $sig_info->{min_params};
 }
@@ -473,12 +473,32 @@ Adds or updates a subroutine signature info.
 
 =cut
 
+# The prototype table and declared_subs are keyed by the BARE sub name (the
+# convention PExpr::_bareword_callable_here documents and relies on: it splits
+# a qualified CALL into (package, basename) and matches the basename).  A
+# package-QUALIFIED DECLARATION — `sub main::end(&)` written from inside
+# another package (die_unwind.t), `sub Foo::g(&)` — broke that convention on
+# the way IN: the entry went in under `main::end`, so the `end { … }` call
+# site in main found no prototype and the trailing block was not parsed as a
+# block-form argument (task #413, 6 census drops).  Normalize at the SEAM, so
+# every producer (v1 _register_sub_prototype, v2 _scan_segment, module
+# extraction) and every consumer agrees: strip the qualifier on the way in,
+# and again on the way out for a qualified call site.  perl agrees with both
+# halves — probed: `sub main::f(&)` from main, `sub Foo::g(&)` called as
+# `Foo::g { … }`, and the die_unwind.t shape all take the block form.
+sub _bare_sub_name {
+    my $name = shift;
+    return $name unless defined $name;
+    $name =~ s/\A.*:://s;
+    return $name;
+}
+
 sub add_prototype {
     my $self     = shift;
     my $name     = shift;
     my $sig_info = shift;
 
-    $self->prototypes->{$name} = $sig_info;
+    $self->prototypes->{ _bare_sub_name($name) } = $sig_info;
 }
 
 =head2 is_filehandle($name)
@@ -808,6 +828,14 @@ caller must read as the old whole-file answer, never as "below".
 
 sub add_declared_sub {
     my ($self, $name, $package, $at) = @_;
+    # Same normalization as add_prototype, and for the same reason: a
+    # qualified declaration `sub main::end(&)` declares `end` in package
+    # `main`, not `main::end` in the enclosing package (task #413).  The
+    # NAME carries the package when it is qualified, and it wins — that is
+    # what perl installs.
+    if (defined $name && $name =~ /\A(.+)::([^:]+)\z/) {
+        ($package, $name) = ($1, $2);
+    }
     push @{$self->declared_subs}, { name => $name, package => $package,
                                     ($at ? %$at : ()) };
 }

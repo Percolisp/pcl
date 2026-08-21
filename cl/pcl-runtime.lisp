@@ -257,6 +257,7 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:$10 #:$11 #:$12 #:$13 #:$14 #:$15 #:$16 #:$17 #:$18 #:$19 #:$20
    #:|$&| #:|$`| #:|$'| #:|$+| #:|$^N| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
+   #:|@{^CAPTURE}|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[|
@@ -818,6 +819,14 @@
 ;; start/end of capture group N.  Non-participating groups hold undef (nil).
 (defvar |@-| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_START - match/group start offsets")
 (defvar |@+| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_END - match/group end offsets")
+;; @{^CAPTURE} (5.26+): the capture GROUP VALUES of the last successful match,
+;; 0-based -- element 0 is $1.  Truncated after the last participating group,
+;; exactly like @- / @+ (perl: "$#{^CAPTURE} is one less than $#-"), with undef
+;; for a non-participating group inside that range (t/re/pat.t asserts both).
+;; %{^CAPTURE} and %{^CAPTURE_ALL} are perl SYNONYMS for %+ and %-, so they get
+;; no state of their own -- the emitter maps them onto those two.
+(defvar |@{^CAPTURE}| (make-array 0 :adjustable t :fill-pointer 0)
+  "Regex @{^CAPTURE} - capture group values of the last successful match")
 
 ;;; Default variable ($_) - defined later after make-p-box (see Boxed special variables section)
 ;;; Process ID ($$) is likewise boxed and defined in that later section so
@@ -11782,7 +11791,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-162"
+(defparameter *pcl-cache-generation* "v2-163"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -15777,7 +15786,8 @@ buffer's fill-pointer; everything else falls back to file-length."
         $18 *p-undef* $19 *p-undef* $20 *p-undef*
         |$&| nil |$`| nil |$'| nil |$+| nil |$^N| nil)
   (clrhash %+)
-  (clrhash |%-|))
+  (clrhash |%-|)
+  (setf (fill-pointer |@{^CAPTURE}|) 0))
 
 (defun set-match-vars (str match-start match-end reg-starts reg-ends
                        &optional closers)
@@ -15809,9 +15819,12 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when (>= best 0)
         (setf |$^N| (subseq str (aref reg-starts best) (aref reg-ends best))))))
   ;; @- / @+ : offset arrays.  Element 0 is the whole-match start/end; element
-  ;; N (1-based) is capture group N's start/end (nil for groups that did not
-  ;; participate).  Perl truncates after the LAST participating group ($#- =
-  ;; last matched paren), so trailing non-participants are not pushed.
+  ;; N (1-based) is capture group N's start/end (undef for a group that did not
+  ;; participate).  THE TWO ARE SIZED DIFFERENTLY, and perl means it (task
+  ;; #417, probed: "ab" =~ /(a)(x)?(y)?/ gives $#+ 3 and $#- 1):
+  ;;   @- stops after the LAST PARTICIPATING group  ($#- = last matched paren)
+  ;;   @+ runs to the pattern's GROUP COUNT         ($#+ = number of groups)
+  ;; so a trailing non-participant is absent from @- and a present undef in @+.
   ;; Elements are boxed integers like any other array element.
   (when (and match-start match-end)
     (setf (fill-pointer |@-|) 0
@@ -15824,10 +15837,9 @@ buffer's fill-pointer; everything else falls back to file-length."
               when (aref reg-starts i)
               do (setf last-matched i) (return))
         (loop for i from 0 to last-matched
-              for rs = (aref reg-starts i)
-              for re = (aref reg-ends i)
-              do (vector-push-extend (make-p-box rs) |@-|)
-              (vector-push-extend (make-p-box re) |@+|))))))
+              do (vector-push-extend (make-p-box (aref reg-starts i)) |@-|))
+        (loop for i from 0 below (length reg-ends)
+              do (vector-push-extend (make-p-box (aref reg-ends i)) |@+|))))))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
@@ -15868,6 +15880,19 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when (> num-groups 17) (%set-cap $18 str reg-starts reg-ends 17))
       (when (> num-groups 18) (%set-cap $19 str reg-starts reg-ends 18))
       (when (> num-groups 19) (%set-cap $20 str reg-starts reg-ends 19))
+      ;; @{^CAPTURE} (5.26+): the group VALUES, 0-based, truncated after the
+      ;; last participating group -- one element shorter than @-, which is
+      ;; exactly what t/re/pat.t asserts ("$#{^CAPTURE} is one less than $#-").
+      ;; A non-participating group INSIDE that range is a present undef element.
+      (let ((last-matched -1))
+        (loop for i from (1- num-groups) downto 0
+              when (aref reg-starts i)
+              do (setf last-matched i) (return))
+        (loop for i from 0 to last-matched
+              for rs = (aref reg-starts i)
+              for re = (aref reg-ends i)
+              do (vector-push-extend (make-p-box (and rs re (subseq str rs re)))
+                                     |@{^CAPTURE}|)))
       ;; Populate %+ with named captures
       ;; reg-names is a list from cl-ppcre:create-scanner, e.g. ("year" "month" NIL)
       (when reg-names
@@ -16180,7 +16205,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                                 (p-box-sv-ok string-box) nil
                                 (p-box-nv-ok string-box) nil)
                           (warn "Cannot modify non-boxed value in s///")))
-                    count)))))
+                    ;; perl returns the COUNT on a match and PL_sv_no on a miss
+                    ;; -- the dualvar ("" , 0), so `print "<$n>"` shows <> and
+                    ;; not <0> (task #416).  "" is false and numifies to 0, so
+                    ;; every arithmetic and boolean consumer is unchanged; only
+                    ;; a STRING consumer could see the difference, and there
+                    ;; perl's answer is the empty string.
+                    (if (plusp count) count ""))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error in s///: ~A" e)
         0))))

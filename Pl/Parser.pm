@@ -1061,6 +1061,7 @@ sub _anon_signature_prologue {
 # and in valid perl a bareword never directly abuts a variable name.
 sub _merge_unicode_symbols {
   my ($doc) = @_;
+  my @repaired;
   for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
     next unless $cast->content =~ /^(?:[\$\@\%\&\*]|\$\#)$/;
     my $next = $cast->next_sibling;
@@ -1069,8 +1070,10 @@ sub _merge_unicode_symbols {
     $cast->insert_before($sym);
     $next->delete;
     $cast->delete;
+    push @repaired, $sym;
   }
   for my $sym (@{ $doc->find('PPI::Token::Symbol') || [] }) {
+    my $merged = 0;
     while (1) {
       my $next = $sym->next_sibling;
       last unless $next && $next->isa('PPI::Token::Word');
@@ -1079,9 +1082,44 @@ sub _merge_unicode_symbols {
                || $next->content =~ /^[^\x00-\x7F]/;
       $sym->add_content($next->content);
       $next->delete;
+      $merged = 1;
     }
+    push @repaired, $sym if $merged;
   }
+  _reclass_subscripts_after($_) for @repaired;
   return 1;
+}
+
+# The LEXER had already decided what the `{…}` / `[…]` after one of those
+# fragments was, and it decided it from the BAREWORD it saw there: `$Ｊ{a}`
+# came out as a BLOCK and `$Ｖ[0]` as an anonymous-array CONSTRUCTOR, never as
+# the SUBSCRIPT each one is (task #410; uni/gv.t, uni/stash.t, uni/caller.t and
+# the two mro utf8 files drop 21 statements on it).  Merging the tokens does not
+# move the tree, so re-class the postfix chain that follows a repaired symbol.
+# Text and tokens are untouched — only the two container CLASSES change, which
+# is exactly what PPI::Lexer would have chosen had the symbol been whole.
+# An explicit `->` was lexed correctly (PPI reads a subscript after an arrow
+# whatever precedes it), so it is stepped over, not re-classed.
+sub _reclass_subscripts_after {
+  my ($sym) = @_;
+  my $node = $sym;
+  while (1) {
+    my $next = $node->next_sibling or last;
+    if ($next->isa('PPI::Token::Operator') && $next->content eq '->') {
+      $node = $next;
+      next;
+    }
+    last unless $next->isa('PPI::Structure') && $next->start;
+    last unless $next->start->content eq '{' || $next->start->content eq '[';
+    if (!$next->isa('PPI::Structure::Subscript')) {
+      bless $next, 'PPI::Structure::Subscript';
+      for my $kid ($next->children) {
+        bless $kid, 'PPI::Statement::Expression' if ref($kid) eq 'PPI::Statement';
+      }
+    }
+    $node = $next;
+  }
+  return;
 }
 
 sub _build_ppi_doc {

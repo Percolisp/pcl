@@ -1,4 +1,12 @@
 # taken-at: 5323d9e 2026-08-15
+# s420 (#414, the hollow-token fix): postfixderef.t 94 -> 95 EDITED BY HAND.
+#   The file's `package o` block registers a '.' overload whose body interpolates
+#   "$_[$_[2]]"; that statement was DROPPED (the fragment parser's cloned tokens
+#   went hollow between parse and emit), so the handler compiled to nil and
+#   returned undef.  With the statement lowered, test 107 ("foo $s->$* bar does
+#   concat overloading") passes and leaves fail-baseline.tsv by EDIT.  It is the
+#   only row that moved in the whole sweep (per-file compare: every other file
+#   byte-identical); TOTAL passing 18363 -> 18364.
 # s399 (#323): assignwarn.t 116->96 and hashassign.t 309->305 EDITED BY HAND, not re-blessed —
 #   the three t/test.pl warning helpers stopped manufacturing a pass, so 24 rows became honest
 #   failures.  Cause for every one: PCL emits no warnings-gated diagnostic
@@ -111,7 +119,7 @@ ord.t	OK	38	0	38
 pack.t	OK	5636	89	14722
 parent.t	OK	7	2	9
 pos.t	OK	15	15	30
-postfixderef.t	PARTIAL	94	27	128
+postfixderef.t	PARTIAL	95	26	128
 pow.t	OK	268	0	268
 print.t	OK	2	1	3
 push.t	OK	32	0	32
