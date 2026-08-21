@@ -4,6 +4,85 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered
+
+**The measurement came first, and it answered the task's question with
+"different — by a flag box-nv has been reading since #163".**  `p-backslash`
+sets `is-ref` on a typeglob wrapper, `box-set` propagates it, and `box-nv` has
+always read it: a bare glob numifies to **0**, a glob ref to its address.  Only
+the string side and `ref()` ignored it — so `$g = *foo` printed `GLOB(0x1)`
+*while numifying to 0*, which is the #163 rule ("the word and the number
+agree") broken in place rather than a representation gap.  **Fix shape (a);
+nothing was added to the box, so the s335 no-`ref-kind`-slot ruling stands
+confirmed rather than re-raised.**
+
+**One rule, now normative in `docs/ir-spec.md` §2.5:** a typeglob is the ONE
+payload whose ref-ness lives on the BOX rather than on the object (a vector
+cannot be a scalar value; a typeglob can).  `is-ref` is the whole distinction,
+every reader asks it through the new `%p-glob-value-box-p`, and a RAW typeglob
+outside a box is a glob VALUE — the convention `stringify-value` already chose
+for the string half (#316).
+
+Three readers: **`box-sv`** (the value spelling for a bare glob, `GLOB(0x…)`
+for a ref — this is the arm s419d's `s///`/`tr///` reach, and the `""`-overload
+fix stands untouched); **`%p-ref-string`**, which had **no typeglob-referent
+arm at all** and fell through to the caller's `SCALAR(0x…)` fallback, so
+`our $r = \*STDOUT; print "$r"` printed `SCALAR(0x4)` where the identical `my`
+printed `GLOB(0x…)` (a closed-set dispatch with a hole — rule-12 family, found
+by the probe table); and **`p-ref`** (`""` for a glob value, `GLOB` for a
+referent box holding one — `perl-tests/substr.t 784` is exactly that assertion).
+
+**The half the task did not predict: three COPY paths drop the flag, and
+making the readers honest exposed every one of them.**  `%p-flatten-list`'s
+"snapshot what box-set will store" preserve-list is a copy of box-set's own
+reference list and omitted typeglobs, so `my $x = shift` on a glob ref
+snapshotted the raw glob and it arrived as a glob VALUE;
+`%p-array-store-scalar` shared the "fresh container, same object, same ref
+type" arm with array/hash/code/qr, whose reasoning is false for a glob;
+`p-aref-unbox-elem` unboxed a glob-ref element to the raw glob.  **A copy path
+that drops a discriminator is the same bug class as a reader that ignores it,
+and it is the harder half to see** — the readers were wrong on probe line 1,
+the copiers only once the readers became honest.
+
+**And the first cut of that half was itself wrong**, caught by the
+probe-the-breaking-case rule: preserving the source BOX in `%p-flatten-list`
+carries the flag but also aliases, so `($g1,$g2) = ($g2,$g1)` collapsed to one
+glob (perl swaps).  The snapshot must be a FRESH box carrying the flag — which
+is what `%p-array-store-scalar`'s arm does.  Guarded (t37–t39).
+
+**Numbers.**  Gate **155 files / 5631 rows** (5614 + 17 new guard rows in
+`Pl/t/ref-identity-01.t`, the #163 file this belongs to), failures = exactly the
+13 pclxs xs rows.  Full sweep `--jobs 3`: **GATE clean, TOTAL 18364 → 18365
+(+1)** — `perl-tests/substr.t` 374 → 375, the `\substr does not coerce its glob
+arg just yet` row — drops 7 = census (+0), 0 new / 0 fixed.  Companion leg
+(12 glob-carrying files of op/ and io/, `--jobs 2`): **two REAL MOVES, both
+gains** — **op/gv.t 49/48 → 61/36** (the s419d regression recovered and eleven
+rows past it) and **op/substr.t 376/24 → 377/23** (the same `\substr` row);
+the other ten files identical to the snapshot.  Both re-run ALONE by the
+runner's own #366 rule and both runs agree; both spliced into
+`docs/perl-suite-run.tsv` with this session as the cause.
+Probes: 6 files, ~60 shapes; p2/p3/p6/guard byte-identical to perl (also under
+`PCL_OPT=none`).  Generation v2-163 → **v2-166**; all three artifacts
+regenerated and byte-identical apart from the `gen=` stamp, which is the
+emission evidence for a runtime-only change (corpus-diff has nothing to say —
+nothing under `Pl/` changed).
+
+**Filed, all pre-existing, all found by the probe table, none fixed here:**
+**#436** — a lexical filehandle is a raw STREAM, so `ref($fh)` is `""` and
+`ref(\$fh)` is `SCALAR` where perl says GLOB/REF, while `"$fh"` already prints
+`GLOB(0x…)`: the same word-vs-string disagreement one payload kind over,
+deliberately not widened because it changes every IO path and needs its own io/
+leg.  **#437** — `\*foo == \*foo` is FALSE and the two print different
+addresses: `p-make-typeglob` mints a fresh struct per mention, #163's defect
+one level below where #163 fixed it.  **#438** — `*main::b = $pkgvar` holding
+`\*foo` installs the SCALAR slot and the sub never appears (crash);
+`%p-glob-assign-slots` dispatches on one `unbox` and never sees through
+`p-scalar-=`'s box-in-box shape — the same blind spot whose *stringification*
+half this session closed.
+
+Asks in `docs/opus5-review-requests-s424.md`: the scope of the copy-path half,
+the extra type test on `p-aref-unbox-elem`'s hot path, and whether `ref()` on a
+raw typeglob should keep the old lenient `GLOB` as a belt.
 ## Session 422 (2026-08-22, Opus) — #419 CLOSED: one `>U+10FFFF` literal no longer costs the whole FILE; the next wall behind `re/pat.t` measured (#424)
 
 **Task #419, `docs/plan-post-s420.md` item O1.1.**  `t/re/pat.t` measured 0 of

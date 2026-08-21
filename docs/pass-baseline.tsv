@@ -1,4 +1,9 @@
 # taken-at: 5323d9e 2026-08-15
+# s424 (#423, glob VALUE vs glob REF): substr.t 374 -> 375 EDITED BY HAND.
+#   `my $x = *foo; is ref \$x, 'GLOB', '\substr does not coerce its glob arg just yet'`
+#   (substr.t:784) — ref(\$x) answered REF (the box path treated every
+#   typeglob-holding box as a glob ref); it answers GLOB now.  The only row that
+#   moved in the s424 sweep (TOTAL 18364 -> 18365).
 # s420 (#414, the hollow-token fix): postfixderef.t 94 -> 95 EDITED BY HAND.
 #   The file's `package o` block registers a '.' overload whose body interpolates
 #   "$_[$_[2]]"; that statement was DROPPED (the fragment parser's cloned tokens
@@ -143,7 +148,7 @@ sprintf2.t	OK	1631	11	1678
 state.t	TRANSPILE_FAIL	0	0	166
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
-substr.t	OK	374	8	397
+substr.t	OK	375	8	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257

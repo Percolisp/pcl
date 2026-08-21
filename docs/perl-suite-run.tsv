@@ -1,4 +1,18 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s424 row edits — TWO rows moved, both because of this session (task #423, the
+#   glob VALUE vs glob REFERENCE distinction; a 12-file op/+io/ leg, each mover
+#   re-run ALONE by the #366 rule, both runs agreeing):
+#     op/gv.t      49/48  -> 61/36   s419d's regression recovered (a glob value
+#                  in a scalar stringifies *main::foo again, so the file's
+#                  s///, tr/// and ref() rows pass) plus eleven rows past it —
+#                  ref($glob) is "" and ref(\$glob) is GLOB as perl says.
+#                  A/B on an a2ac578 worktree measures 49/48.
+#     op/substr.t 376/24  -> 377/23  the `\substr does not coerce its glob arg
+#                  just yet` row (`my $x = *foo; is ref \$x, 'GLOB'`) — the
+#                  same row perl-tests/substr.t gained in the sweep (374->375).
+#   The other ten files in the leg (op/ref, op/magic, op/stash, op/select,
+#   op/reset, op/readline, op/gmagic, io/open, io/argv, io/defout) are
+#   IDENTICAL to this snapshot.
 # s422 row edit — ONE row, signature only.  re/pat.t 1263/4 C:0/0 keeps its
 #   numbers and LOSES its crash signature: task #419 made the emitted CL valid
 #   UTF-8 (the eight >U+10FFFF literals are now `(p-unrepresentable-char N)`
@@ -600,7 +614,7 @@ op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
 op/grent.t	3	0	3	0	OK	
 op/grep.t	77	0	71	6	DIFF	
 op/groups.t	4	0	4	0	OK	
-op/gv.t	304	0	49	48	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
+op/gv.t	304	0	61	36	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/hash.t	494	0	6	6	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
@@ -705,7 +719,7 @@ op/study.t	43	0	43	0	OK
 op/studytied.t	14	0	13	1	DIFF	
 op/sub.t	64	1	53	12	DIFF	
 op/sub_lval.t	211	0	12	58	DIFF	undef-fn:main::pl-rlv1t
-op/substr.t	400	0	376	24	DIFF	
+op/substr.t	400	0	377	23	DIFF	
 op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/svflags.t	16	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL

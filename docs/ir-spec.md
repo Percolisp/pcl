@@ -319,6 +319,21 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   one unwrap) — see `%p-scalar-referent-p`; that leniency exists only because
   the parser drops the outer level of `$$refref->{k}` (task #211), and goes
   away when that is fixed.
+- **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
+  object** (normative, task #423). Perl distinguishes a glob *value*
+  (`$g = *foo`, which turns the SV into a GV: `ref($g)` is `""`, `"$g"` is
+  `*main::foo`, `0+$g` is 0, and `\$g` is a **GLOB** ref) from a glob
+  *reference* (`$g = \*foo`: `ref($g)` is `GLOB`, `"$g"` is `GLOB(0x…)`,
+  `0+$g` is the address, and `\$g` is **REF**). Both hold the same
+  `p-typeglob` in the box, so **`is-ref` is the whole distinction** — every
+  reader asks it (`box-sv`, `box-nv`, `p-ref`, `%p-ref-string`, via
+  `%p-glob-value-box-p`), and every path that *copies* a scalar must carry it
+  (`box-set`, `%p-flatten-list`, `%p-array-store-scalar`, `p-aref-unbox-elem`,
+  `p-flatten-args`, `p-return-value`). A copy that drops the flag silently
+  demotes a glob reference to a glob value; a copy that keeps the *source box*
+  instead of a flag-carrying snapshot **aliases**, and `($g1,$g2) = ($g2,$g1)`
+  collapses to one glob. A **raw** `p-typeglob` outside a box is a glob VALUE
+  by the same convention `stringify-value` uses (#316).
 
 **Ref identity is a monotonic id, deliberately NOT a machine address**
 (`object-address`, `cl/pcl-runtime.lisp`). A translator must reproduce the

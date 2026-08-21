@@ -2274,9 +2274,19 @@
                              (%p-ref-shaped-p inner)
                              (p-box-class box))))
              (raw (cond
-                    ;; Blessed typeglob ref: stringify as GLOB(0xADDR) not *PKG::NAME
+                    ;; A typeglob payload is a glob REFERENCE (\*foo) only when the
+                    ;; box says so.  `is-ref` is that one discriminator — p-backslash
+                    ;; sets it, box-set propagates it, and box-nv has always read it
+                    ;; (a glob ref numifies to its address, a bare glob to 0).  Not
+                    ;; reading it here made the word and the number disagree (#163's
+                    ;; rule): `$g = *foo` printed GLOB(0x1) while numifying to 0, and
+                    ;; the raw path already prints the VALUE spelling for the same
+                    ;; typeglob (stringify-value, #316).  Blessed glob refs keep
+                    ;; C=GLOB(0x…) — a bless leaves is-ref alone.
                     ((p-typeglob-p inner)
-                     (format nil "GLOB(0x~(~X~))" (object-address inner)))
+                     (if (%p-glob-value-box-p box)
+                         (stringify-value inner)
+                         (format nil "GLOB(0x~(~X~))" (object-address inner))))
                     ;; A box holding a box is a reference.  Which box is the
                     ;; referent — INNER, or what INNER points at — is decided by
                     ;; %p-ref-referent (is-ref), never by counting levels: BOX is
@@ -4218,17 +4228,26 @@
           ;; box nesting encodes the reference type (SCALAR vs REF), so we must
           ;; NOT add or remove a box layer here.  Store the reference box as-is.
           ((p-box-p inner) (vector-push-extend item arr))
-          ;; Reference to a raw object (array-ref, hash-ref, code-ref, glob, qr//):
+          ;; Reference to a raw object (array-ref, hash-ref, code-ref, qr//; the
+          ;; glob is the arm just below):
           ;; copy the scalar CONTAINER while keeping the SAME underlying object.
           ;; Perl's [$x] / @a=($x) copies the scalar; if $x is later reassigned
           ;; (box-set mutates the original box in place) the stored copy must not
           ;; follow it.  A fresh box around the same object is a distinct container
           ;; pointing at the same referent — and does not change the ref type
           ;; (still ARRAY/HASH/CODE/…), since the object itself is unchanged.
+          ;; A typeglob takes the same fresh-container copy as its siblings, but
+          ;; the flag comes with it: for a glob the REF-ness lives on the
+          ;; container (is-ref), not on the object, so a copy that drops it
+          ;; turns `\*foo` into a bare glob (#423) — the one raw-object kind
+          ;; whose ref type is NOT decided by the object alone.
+          ((p-typeglob-p inner)
+           (let ((nb (make-p-box inner)))
+             (setf (p-box-is-ref nb) (p-box-is-ref item))
+             (vector-push-extend nb arr)))
           ((or (and (vectorp inner) (not (stringp inner)))
                (hash-table-p inner)
                (functionp inner)
-               (p-typeglob-p inner)
                (p-regex-match-p inner))
            (vector-push-extend (make-p-box inner) arr))
           ;; Dualvar ($!/Scalar::Util::dualvar): copy keeping both halves.
@@ -4521,6 +4540,19 @@
                                 (hash-table-p inner)  ; hash ref
                                 (%p-dualvar-box-p item))  ; $!/dualvar: keep both halves
                             item)   ; reference, blessed, or dualvar: preserve the box
+                           ;; A typeglob payload: glob REF vs glob VALUE is the
+                           ;; BOX's is-ref flag (#423), so the raw-value snapshot
+                           ;; below loses it and box-set re-boxes a `\*foo` as a
+                           ;; bare glob (`my $x = shift` on a glob ref printed
+                           ;; *main::foo).  Snapshot a FRESH box carrying the
+                           ;; flag — preserving ITEM instead would alias, and
+                           ;; ($g1,$g2) = ($g2,$g1) would collapse to one glob.
+                           ;; Coderefs need no such arm: a raw function is
+                           ;; unambiguously a reference.
+                           ((p-typeglob-p inner)
+                            (let ((nb (make-p-box inner)))
+                              (setf (p-box-is-ref nb) (p-box-is-ref item))
+                              nb))
                            ;; A MAGIC or TIED source (a defelem @_ alias, an
                            ;; arylen / substr / pos lvalue, a tied scalar):
                            ;; snapshot the VALUE it reads as NOW — perl
@@ -6138,6 +6170,11 @@
                 (hash-table-p v)                      ; hashref
                 (functionp v)                          ; coderef
                 (p-box-p v)                            ; scalar ref (box-in-box)
+                ;; glob REF: unlike every other raw referent, a typeglob's
+                ;; ref-ness is the BOX's is-ref flag, so unboxing here would
+                ;; hand back a bare glob (#423).  A glob VALUE element has no
+                ;; flag and unboxes as before.
+                (and (p-typeglob-p v) (p-box-p elem) (p-box-is-ref elem))
                 (%p-dualvar-box-p elem))               ; $!/dualvar: keep both halves
             elem   ; reference or dualvar: return the box so both halves survive
             v))))  ; scalar: return unboxed value
@@ -11809,7 +11846,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-164"
+(defparameter *pcl-cache-generation* "v2-166"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -13362,6 +13399,32 @@ buffer's fill-pointer; everything else falls back to file-length."
       (p-regex-match-p v)
       (and (vectorp v) (not (stringp v)))))
 
+(defun %p-glob-value-box-p (b)
+  "True when box B holds a typeglob VALUE (`$g = *foo`) rather than a glob
+   REFERENCE (`$g = \\*foo`).  perl turns such an SV into a GV, so it is not a
+   reference at all: ref($g) is \"\", \"$g\" is *pkg::name, and \\$g is a GLOB
+   ref (perl-tests/substr.t 784) — while the same three answers for a glob ref
+   are GLOB, GLOB(0x…) and REF.
+
+   `is-ref` is the ONE discriminator (task #163's rule applied to globs):
+   p-backslash sets it on the wrapper, box-set propagates it whenever the
+   assigned value is a typeglob, and box-nv has always read it.  Every reader
+   of a typeglob payload asks THIS, so the word, the number and ref() cannot
+   disagree.
+
+   A RAW typeglob (not in a box) is a glob VALUE — the convention
+   stringify-value already fixed for the string half (#316), and the reason
+   every path that COPIES a scalar must carry the flag rather than snapshot the
+   bare glob (%p-flatten-list, %p-array-store-scalar, p-aref-unbox-elem;
+   box-set, p-flatten-args, p-return-value and p-copy-scalar-arg already did).
+   Carrying the flag is not the same as keeping the source BOX: a list
+   assignment snapshots its RHS, so preserving the box collapses
+   ($g1,$g2) = ($g2,$g1) into one glob.  This predicate answers NIL for a raw
+   typeglob because there is no box to ask; callers spell that case out."
+  (and (p-box-p b)
+       (p-typeglob-p (p-box-value b))
+       (not (p-box-is-ref b))))
+
 (defun %p-ref-referent (val)
   "The object a reference POINTS AT — the SV whose address perl prints and
    whose identity `==` compares.  This is never the p-backslash wrapper: a
@@ -13415,6 +13478,10 @@ buffer's fill-pointer; everything else falls back to file-length."
             (format nil "LVALUE(0x~(~X~))" (object-address referent)))
            ((p-vstring-p rv)
             (format nil "VSTRING(0x~(~X~))" (object-address referent)))
+           ;; The referent scalar IS a glob (`$g = *foo` makes the SV a GV), so
+           ;; \$g is a GLOB ref, not a REF — same discrimination p-ref makes.
+           ((%p-glob-value-box-p referent)
+            (format nil "GLOB(0x~(~X~))" (object-address referent)))
            ((or (p-box-is-ref referent) (%scalar-holds-ref-p referent))
             (format nil "REF(0x~(~X~))" (object-address referent)))
            (t (format nil "SCALAR(0x~(~X~))" (object-address referent))))))
@@ -13424,6 +13491,14 @@ buffer's fill-pointer; everything else falls back to file-length."
        (format nil "HASH(0x~(~X~))" (object-address referent)))
       ((functionp referent)
        (format nil "CODE(0x~(~X~))" (object-address referent)))
+      ;; A raw typeglob referent: `our $r = \*foo` stores the p-backslash
+      ;; wrapper box-in-box (p-scalar-='s reference branch), so the referent
+      ;; here IS the typeglob.  Without this arm the walk fell off the end to
+      ;; NIL and box-sv printed the caller's SCALAR(0x…) fallback for a glob
+      ;; ref held in a package variable (a lexical, stored is-ref by box-set,
+      ;; never reached this path — which is why the two spellings disagreed).
+      ((p-typeglob-p referent)
+       (format nil "GLOB(0x~(~X~))" (object-address referent)))
       (t nil))))
 
 (defun %p-scalar-ref-referent (val)
@@ -13544,6 +13619,11 @@ buffer's fill-pointer; everything else falls back to file-length."
                ((p-regex-match-p referent) "REGEXP")
                ((functionp referent) "CODE")
                ((p-typeglob-p referent) "GLOB")
+               ;; The referent SCALAR holds a glob VALUE: `my $g = *foo` makes
+               ;; the SV a GV in perl, so \$g is a GLOB ref (substr.t 784 —
+               ;; '\substr does not coerce its glob arg just yet').  A referent
+               ;; holding a glob REFERENCE keeps is-ref and stays REF below.
+               ((%p-glob-value-box-p referent) "GLOB")
                ;; Ref-to-ref → "REF": the referent is itself a ref-wrapper (\\1)
                ;; or *holds* a reference (\$r, \$aref).  %scalar-holds-ref-p is
                ;; non-recursive so a self-referential scalar ($x=\$x) does not
@@ -13560,8 +13640,15 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
       ((functionp inner) "CODE")
-      ;; Typeglob reference
-      ((p-typeglob-p inner) "GLOB")
+      ;; Typeglob payload.  A glob VALUE is not a reference at all in perl —
+      ;; `$g = *foo` makes the SV a GV, and ref($g) is "" — so only an is-ref
+      ;; box answers GLOB.  A RAW typeglob is a glob VALUE by the same
+      ;; convention stringify-value uses for it (#316): every path that COPIES
+      ;; a scalar carries the flag (%p-flatten-list, %p-array-store-scalar,
+      ;; p-aref-unbox-elem, box-set, p-flatten-args, p-return-value).
+      ((p-typeglob-p inner) (if (and (p-box-p val) (p-box-is-ref val))
+                                "GLOB"
+                                ""))
       ;; Compiled regex (qr//) — ref() returns "Regexp"
       ((p-regex-match-p inner) "Regexp")
       ;; Not a reference
