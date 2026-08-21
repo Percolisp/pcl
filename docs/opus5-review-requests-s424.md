@@ -196,12 +196,15 @@ ask 3 below.
    the ir-spec paragraph.  Confirm, or say the flag-carrying belongs in its own
    task behind its own bar.
 2. **`p-aref-unbox-elem` is a hot path** and now carries one extra
-   `p-typeglob-p` test on the miss path (after four existing type tests, before
-   the more expensive `%p-dualvar-box-p`).  The gate's wall time moved 257 s →
-   343 s between my two runs, but those runs are not comparable (the second ran
-   against three concurrent agents), and pack.t — the compile/run time canary —
-   is unchanged in the sweep.  If a Fable review wants a real number, the A/B
-   is one `tools/prove-core` pair on a quiet machine.  I did not spend one.
+   `p-typeglob-p` test on the miss path (placed after the four existing type
+   tests, before the more expensive `%p-dualvar-box-p`).  I could not measure a
+   cost and I do not claim there is none: the gate's four runs this session
+   were 257 s (pre-change), 343 s, 333 s and **231 s (the final, committed
+   tree — the fastest of the four)**, a spread dominated by the two other
+   agents sharing this machine, so `tools/prove-core` cannot resolve it either
+   way.  pack.t, the compile/run canary, is unchanged in both sweeps (89 s /
+   5636 pass).  If the number matters, the A/B is one `prove-core` pair on a
+   quiet machine; I did not have one.
 3. **`ref()` on a RAW typeglob** (`ref(*main::foo)`, and any glob that reaches
    `ref()` without its box) now answers `""` (perl) where it used to answer
    `GLOB`.  That is right *given* §2 items 4–6; if a copy path I did not find
