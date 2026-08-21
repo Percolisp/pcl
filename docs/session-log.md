@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 421 (2026-08-22, Fable) — s420 reviewed and APPROVED; five pre-existing findings filed (#420–#423, #418 widened); the queue is `docs/plan-post-s420.md`
+
+**Review: s420 APPROVED as shipped** (`docs/fable-answers-s420.md`).
+Independently re-measured: gate COLD (cache cleared) **155/5614**, failures
+exactly the 13 pclxs xs rows (226 s); full sweep RE-RUN **GATE clean, TOTAL
+18364 (+0)**, drops 7 = census, the 6 UNSTABLE rows are the usual
+above-abort-point noise and every PARTIAL file's row counts equal the
+baselines; `tools/drop-census.pl` **33 files / 106 drops with an EMPTY
+sorted-row diff** against the blessed TSV; eight probe files vs perl 5.40.3
+— every shape the commit names (#414 ten shapes, #413 five, #412/#417 the
+capture arrays element-wise, #416 nine incl. the raw-numeric consumer, #410
+fifteen) identical.  **#390 CLOSED** — it was the #414 bug, still `pending`.
+The companion `--all --quick --jobs 4` ran as well: 15 snapshot differences,
+ten of them the known XDIFF-0/0 refusals (Track A + the s417c `class`
+refusal), op/utf8cache.t the registered contention TIMEOUT, and FOUR files
+that GAINED rows — A/B on a `47e0750` worktree: comp/parser.t +1 is s420's
+(#413: `is CORE::print::foo, 43`, a package-qualified declaration), the rest
+pre-date s420; spliced with those causes (`docs/perl-suite-run.tsv` s421 note;
+one STALE registered row deleted from perl-suite-expected-rows.tsv).
+
+**What the probes found — all PRE-EXISTING (A/B on a `47e0750` worktree),
+all filed.**  **#420**: a DEREF spelling with a trailing subscript inside a
+dq string is SILENT WRONG — `"$$r[1]"` prints `ARRAY(0x1)[1]`, `"$$h{k}"`,
+`"${$r}[i]"`, `"@$r[…]"`, `"@{$r}[i]"` likewise (the subscript stays literal);
+corpora near zero (perl-tests 0, lib 0, cpan-tests 2 in Carp's eval text,
+perl's t/ 8 in description strings) but `"$$self{name}"` is an old CPAN idiom;
+routed through #388 consumer 3 (s379: no new scanner fixes).  **#421**: the
+prototype table is keyed by the BARE name, so `sub A::f($)` + `sub B::f(&@)`
+collide (last wins — a silent wrong in one declaration order, a DROP in the
+other); rare (only op/lexsub.t and comp/redef.t carry same-name/different-proto
+in one file, neither a real collision).  **#418 WIDENED**: the reader's NFKC +
+`:invert` folding collides VARIABLES too — `%Ｘ` and `%X` are ONE symbol
+(`|%x|`): perl `1256`, PCL `2266`; the rule becomes "pipe-quote any emitted
+symbol carrying a non-ASCII character".  **#422** (umbrella): `"@{^CAPTURE}"`
+inside a string DROPS; `$Ｘ {a}` (whitespace before the subscript after a
+repaired symbol) is read as scalar + block and crashes; **PPI's lexer fails a
+whole document on a non-ASCII foreach variable** (`for my $Ｉ (1,2) {` →
+"Illegal state in 'foreach' compound statement", 1.291) — logged as
+`ppi-upstream-bugs.md` §23 addendum + a `ppi-bug-report.t` row (27 rows, 25
+fail = the bugs).
+
+**#423 — the one companion DECREASE s420 spliced as "pre-existing" now has a
+CAUSE.**  op/gv.t 50/47 → 49/48: `$a = *main::foo; $a =~ s/^\*//; print
+ref(\$a), "|$a"` is `SCALAR|main::foo` (= perl) at `98159c7` and
+`REF|GLOB(0x1)` from `47e0750` on — **s419d** (#119/#402) moved
+`do-regex-subst`/tr from `(to-string (unbox string-box))` to `(to-string
+string-box)` so the `""` overload and tie FETCH run, and `box-sv`'s typeglob
+branch prints EVERY box holding a typeglob as `GLOB(0x…)`: the box model does
+not distinguish a glob VALUE from a glob REF (pre-existing: `ref(\$a)` is REF,
+`"$a"` is `GLOB(0x1)` at all three trees).  Consistent now, but a row was
+lost; perl-tests has no gv.t so the sweep could not see it.  Two rulings:
+**"pre-existing" is a verdict about WHEN, not WHY** (splice a mover only with
+its cause or the named next measurement), and **a `cl/` coercion or
+stringification change runs the op/ companion leg**.
+
+**The plan** (`docs/plan-post-s420.md`, replaces plan-post-s408 §2): O1 =
+#419 (re/pat.t's 1263 perl rows behind one unreadable literal) + #418 (one
+quoting rule; the uni/ files); O2 = #423 (measure the glob representation
+first) + #388 consumer 3 with #420/#422.1 as its acceptance set; O3 =
+fillers (#415, #421, #422.2, the #399 shape count).  **Next Fable session =
+B3** (`_reduce_term`, #153) — the flip's long pole: ~40 of the ~53 remaining
+compiler-gap drops and three filed tasks wait on it.  USER decisions recorded:
+the v0.1 tag DECOUPLES from the flip (recommended YES: tag after the first
+green CI run + O1), B3 next (yes), indirect object #399/#381 (count first).
+Docs refreshed to the measured numbers (README, STATUS: 18,364/905, 33/106).
+
 ## Session 420 (2026-08-22, Opus) — four unblock-list tasks shipped: #414, #413, #412, #410 (+#416, #417); census 135 → 106
 
 The queue's next executable item after s419 was the flip's **unblock list**

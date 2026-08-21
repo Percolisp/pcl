@@ -11,6 +11,57 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s421 (2026-08-22, Fable) — s420 REVIEWED and APPROVED; five findings filed; the live queue is `docs/plan-post-s420.md`
+
+- **s420 APPROVED as shipped** (`docs/fable-answers-s420.md`): gate COLD
+  155/5614 (only the 13 pclxs xs rows), sweep TOTAL 18364 (+0) GATE clean,
+  drop census 33/106 with an EMPTY sorted-row diff against the blessed TSV,
+  eight probe files — every shape the commit names identical to perl 5.40.3.
+  **#390 CLOSED** (the same bug as #414, probe-verified).
+- **"PRE-EXISTING" is a verdict about WHEN, not WHY.**  A companion mover
+  verified on a base worktree is spliced into `docs/perl-suite-run.tsv` only
+  WITH its cause (a task or a commit) or the named next measurement.  s420's
+  op/gv.t 50/47 → 49/48 had neither; one three-way probe (HEAD / `47e0750` /
+  `98159c7`) attributed it to **s419d** (task #423).
+- **A `cl/` change to a COERCION or STRINGIFICATION path runs the op/
+  companion leg before it ships** — perl-tests has no gv.t, so the sweep
+  cannot see a glob row; s419d ran re/ only.
+- **A box holding a typeglob prints the REF spelling** (`GLOB(0x…)`) on the
+  box path (`box-sv`) and the VALUE spelling (`*main::foo`) on the raw path
+  (`stringify-value`): the box model does not distinguish `$a = *FOO` from
+  `$a = \*FOO` (`ref(\$a)` answers REF where perl says GLOB).  s419d moved
+  s///+tr/// from the raw to the box path — consistent with print, but op/gv.t
+  lost a row.  Measure the representation before choosing (#423); the s335
+  no-ref-kind ruling is re-raised WITH the measurement, never bypassed.
+- **A DEREF spelling with a trailing subscript inside a dq string is SILENT
+  WRONG** — `"$$r[1]"`, `"$$h{k}"`, `"${$r}[i]"`, `"@$r[…]"`, `"@{$r}[i]"`
+  leave the subscript as literal text (emission `(p-string-concat (p-cast-$
+  $r) "[1]")`); pre-existing, corpora near zero, but `"$$self{name}"` is a
+  common old CPAN idiom (#420).  Routed through #388 consumer 3 — s379's "no
+  new scanner fixes" stands.
+- **The prototype table's bare-name key collides ACROSS PACKAGES** (last
+  registration wins: `sub A::f($)` + `sub B::f(&@)` → `A::f 1, 2` parses with
+  `(&@)`; the other order DROPS the block-form call).  Pre-existing and rare
+  (#421); fix shape = (package, bare) with the bare table as fallback.
+- **The reader's NFKC + `:invert` folding collides VARIABLES too**:
+  `our %Ｘ=(a=>1); our %X=(a=>2)` are ONE symbol (`|%x|`) — #418 WIDENED: the
+  rule is "pipe-quote ANY emitted symbol carrying a non-ASCII character".
+- **PPI's LEXER fails a whole document on a non-ASCII foreach loop variable**
+  (`for my $Ｉ (…) {` → "Illegal state in 'foreach' compound statement";
+  `ppi-upstream-bugs.md` §23 addendum + `ppi-bug-report.t` row; no token-level
+  workaround exists — #422.3).  Also in #422: `"@{^CAPTURE}"` interpolation
+  drops (the `$#` and `${…}[i]` spellings work); `$Ｘ {a}` (whitespace before
+  the subscript after a repaired symbol) is read as scalar + block.
+- **The queue is `docs/plan-post-s420.md`** (replaces plan-post-s408 §2): O1 =
+  #419 + #418 (two emission rules, the biggest prizes: re/pat.t's 1263 perl
+  rows behind one literal; the uni/ files behind one quoting rule); O2 = #423
+  + #388 consumer 3 with #420/#422.1/#390's shape as the acceptance set; O3 =
+  fillers (#415, #421, #422.2; #399 shape count for the USER).  **Next Fable
+  session = B3 (`_reduce_term`, #153)** — the flip's long pole (~40 of the ~53
+  remaining compiler-gap drops).  USER decisions: the v0.1 tag DECOUPLES from
+  the flip (recommended YES — tag after the first green CI run + O1); B3 next
+  (yes); indirect object #399/#381 (count first).
+
 ## s420 (2026-08-22, Opus) — four of the flip's unblock-list tasks SHIPPED: census 135 → 106
 
 - **The drop census is 33 files / 106 drops** (was 42/135 at s419), measured

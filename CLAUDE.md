@@ -611,6 +611,30 @@ skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
 **runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
 discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
 designed.
+2b00000000. **s421 (Fable, 2026-08-22): s420 REVIEWED + APPROVED; THE LIVE
+QUEUE IS `docs/plan-post-s420.md`** (review record `docs/fable-answers-s420.md`).
+Independently re-measured: gate COLD 155/5614 (the 13 xs rows), sweep TOTAL
+18364 (+0) GATE clean, census 33/106 with an EMPTY row diff, eight probe
+files vs perl — every shape s420 names identical; #390 CLOSED (= #414).  Five
+PRE-EXISTING findings filed from the probes: **#420** (`"$$r[1]"` /
+`"$$h{k}"` / `"${$r}[i]"` / `"@$r[…]"` / `"@{$r}[i]"` inside a dq string leave
+the subscript LITERAL — silent wrong; routed through #388 consumer 3),
+**#421** (prototype table keyed by BARE name collides across packages),
+**#418 WIDENED** (NFKC + `:invert` makes `%Ｘ` ≡ `%X` — pipe-quote ANY
+non-ASCII symbol), **#422** (`"@{^CAPTURE}"` interpolation drops; `$Ｘ {a}`;
+PPI's LEXER fails a file on `for my $Ｉ (…)` — §23 addendum), and **#423**: the
+op/gv.t 50/47 → 49/48 mover s420 spliced as "pre-existing" is ATTRIBUTED to
+**s419d** by a three-way probe (the box path prints every typeglob-holding box
+as `GLOB(0x…)` — glob VALUE ≡ glob REF in the box model; s419d moved s///+tr
+onto that path).  Rulings: **"pre-existing" is WHEN, not WHY** — splice a
+companion mover only with its cause; **a `cl/` coercion/stringification change
+runs the op/ companion leg**.  Queue: O1 = #419 + #418 (two emission rules,
+the biggest prizes) → O2 = #423 (measure the glob representation first) +
+#388-consumer-3 with #420/#422.1 as acceptance → O3 fillers (#415, #421,
+#422.2, #399 count) → push week (USER, 2026-08-24) → first CI run → tag.
+**Next Fable session = B3 (`_reduce_term`, #153)** — the flip's long pole.
+USER decisions open: tag DECOUPLES from the flip (recommended yes), B3 next
+(yes), indirect object #399/#381.
 2b0000000. **s420 (Opus, 2026-08-22): four of the flip's unblock-list tasks
 SHIPPED — the drop census is 33 files / 106 drops** (was 42/135; edited row by
 row with causes, `docs/parse-error-drop-census-s399.tsv`).  **#414**: a CLONED

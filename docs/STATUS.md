@@ -9,7 +9,7 @@ re-runnable measurement; nothing is estimated.  Last full re-measure:
 | measurement | result | how to reproduce |
 |---|---|---|
 | PCL's own regression gate (`Pl/t/`) | **155 files, ~5,600 assertions, all passing** (the 14 XS-bridge rows run only with the experimental [pclxs](#xs) sibling built) | `tools/prove-core` (or `prove -j8 Pl/t/`) |
-| Perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.x `t/op`, `t/base`, …) | **18,363 assertions pass / 906 fail (95.3 %)**; **62 files pass completely** | `perl sweep-perl-tests.pl --jobs 8` |
+| Perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.x `t/op`, `t/base`, …) | **18,364 assertions pass / 905 fail (95.3 %)**; **62 files pass completely** | `perl sweep-perl-tests.pl --jobs 8` |
 | Perl's full `t/` tree, run in place (~520 files) | run per-directory as a bug-finder; verdicts tracked per file against blessed baselines | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | XS bridge conformance corpus (pclxs, 398 cases, real perl as oracle) | **398 pass / 0 fail**; `Digest::MD5`'s own `md5-aaa.t` passes 256/256 under PCL | `tools/pcl-conform` |
 | Pure-Perl CPAN modules (183-dist test board) | 65 PASS / 65 PARTIAL / 53 FAIL (dist granularity; a PARTIAL runs most of its suite) | internal board (`cpan-board14-*.tsv` snapshots); [`cpan-module-log.md`](cpan-module-log.md) records per-dist causes |
@@ -21,7 +21,7 @@ only move honestly.
 
 A statement the compiler cannot lower is **announced on stderr and
 dropped** (`PCL: statement dropped at FILE line N: …`).  These are counted:
-42 files of the two test populations carry 135 such drops, every one
+33 files of the two test populations carry 106 such drops (s420), every one
 classified with an owning task (`docs/parse-error-drop-census-s399.tsv`,
 `docs/drop-census-s419-flip-gate.md`).  Zero drops in PCL's own shipped
 module tree.

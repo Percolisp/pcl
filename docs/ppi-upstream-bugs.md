@@ -947,6 +947,17 @@ an `Expression`, which is what the lexer would have chosen had the symbol been
 whole.  Text and tokens are untouched; an explicit `->` is stepped over because
 PPI already got that one right.  Guard row: `Pl/t/utf8-source-01.t`.
 
+**Addendum (s421): the LEXER fails the WHOLE document on a non-ASCII foreach
+loop variable.**  `for my $Ｉ (1,2) { 1 }`, `foreach my $Ｉ (…)`, `for $Ｉ (…)`,
+`for my $Ｉ(…)` and `for my $Ｉ (@a)` all return undef from
+`PPI::Document->new` with `errstr` "Lexer failed: Illegal state in 'foreach'
+compound statement" (1.291), while `for (my $Ｉ=0; $Ｉ<2; $Ｉ++)`, `while (my $Ｉ =
+shift)` and `my $Ｉ = 1;` lex fine — the foreach-slot state machine expects a
+Symbol where the `$` split has put a Cast.  PCL cannot repair this at the
+token level (there are no tokens); it dies "PPI failed to tokenize".  Corpus
+cost: 0 files (only t/lib/warnings/pad, a data file).  Task #422 item 3;
+row in `docs/ppi-bug-report.t`.
+
 ---
 
 ## Possibly FIXED upstream — verify before trusting

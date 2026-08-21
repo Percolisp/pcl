@@ -1984,7 +1984,6 @@ run/fresh_perl.t	\# 20001210.003 (\#4893) mjd@plover.com
 run/fresh_perl.t	\# David Dyck
 run/fresh_perl.t	\# [ID 20001202.002 (\#4821)] and change \#8066 added...
 run/fresh_perl.t	\# core dump in 20000716.007 (\#3516)
-run/fresh_perl.t	\# fdopen from a system descriptor to a system desc...
 run/fresh_perl.t	for ("ABCDE") {
 run/fresh_perl.t	if (@ARGV) { print "" }
 run/fresh_perl.t	my $foo = Bar->new();

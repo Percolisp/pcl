@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 26;
+use Test::More tests => 27;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -409,4 +409,15 @@ PERL
     ok( scalar @{ $doc->find('PPI::Structure::Subscript') || [] },
         'the `{…}` after a non-ASCII scalar should be a Subscript' )
         or diag "got: " . join(' ', map { ref($_) } grep { $_->significant } $doc->tokens);
+}
+# Same bug, worse consequence: a non-ASCII FOREACH loop variable makes the LEXER
+# fail the whole document ("Illegal state in 'foreach' compound statement"),
+# because the foreach-slot state machine sees the Cast the `$` split produced
+# where it expects a Symbol.  `for (my $X=0;...)` and `while (my $X = ...)`
+# lex fine.  PPI::Document->new returns undef, so no repair is possible.
+{
+    my $doc = PPI::Document->new(\"use utf8;\nfor my \$\x{ff29} (1,2) { 1 }\n");
+    ok( defined $doc,
+        'a foreach with a non-ASCII loop variable should lex at all' )
+        or diag "errstr: " . (PPI::Document->errstr // '(none)');
 }
