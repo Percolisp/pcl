@@ -632,7 +632,7 @@ runs the op/ companion leg**.  Queue: O1 = #419 + #418 (two emission rules,
 the biggest prizes) → O2 = #423 (measure the glob representation first) +
 #388-consumer-3 with #420/#422.1 as acceptance → O3 fillers (#415, #421,
 #422.2, #399 count) → push week (USER, 2026-08-24) → first CI run → tag.
-**Next Fable session = B3 (`_reduce_term`, #153)** — the flip's long pole.
+**Next Fable session = B3 (`_reduce_term`, #153)** — the flip's long pole.  **Then three Opus agents ran in parallel (s422/#419 + s424/#423 MERGED, gate 156/5639; s423/#418 IN FLIGHT at session end — `docs/fable-answers-s422-s424.md` §B).**
 USER decisions open: tag DECOUPLES from the flip (recommended yes), B3 next
 (yes), indirect object #399/#381.
 2b0000000. **s420 (Opus, 2026-08-22): four of the flip's unblock-list tasks

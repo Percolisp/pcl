@@ -238,6 +238,15 @@ the v0.1 tag DECOUPLES from the flip (recommended YES: tag after the first
 green CI run + O1), B3 next (yes), indirect object #399/#381 (count first).
 Docs refreshed to the measured numbers (README, STATUS: 18,364/905, 33/106).
 
+**Then, at the USER's request, three Opus 5 agents were launched in parallel
+worktrees** (A = s422/#419, B = s423/#418 widened, C = s424/#423).  A and C
+finished and were reviewed + MERGED this session (`c84dd45`, `d655da6`; gate on
+the merged tree 156/5639, only the 13 xs rows); rulings in
+`docs/fable-answers-s422-s424.md` (A's asymmetry ratified, #424 = per-file heap
+allowance, C's three asks answered; #442 filed).  **B was still running at
+session end — its worktree is the first thing the next session looks at**
+(§B of that doc).  The generation stays v2-166 until B lands.
+
 ## Session 420 (2026-08-22, Opus) — four unblock-list tasks shipped: #414, #413, #412, #410 (+#416, #417); census 135 → 106
 
 The queue's next executable item after s419 was the flip's **unblock list**
