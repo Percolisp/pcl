@@ -298,15 +298,18 @@ will fold and invert, i.e. one no runtime string can spell.
 **1962 occurrences across 49 files at `a2ac578`; ZERO across 404 emitted files
 (uni/ mro/ op/ re/) after.**
 
-**MEASURED.**  `tools/emission-ab.pl --ref a2ac578` over `perl-tests/*.t` +
-`lib/**/*.pm` + every file of perl's own `t/` = **738 files, 686 SAME,
-RCDIFF 0**, and the 52 DIFF files are **exactly** the 52 whose base emission
-carried such a token (52 of 52; side B has none in any of the 738).
-`corpus-diff` identical, drops 7 unchanged.  Gate **156 files / 5653 rows**
-cold, failures exactly the 13 pclxs xs rows.  Full sweep (mandatory —
-`cl/pcl-runtime.lisp` changed): **GATE clean, TOTAL passing 18365 (+0), drops
-7 = census, 0 new / 0 fixed**, no baseline row edited.  28 probe programs vs
-perl 5.40.3.
+**MEASURED.**  `tools/emission-ab.pl` over `perl-tests/*.t` + `lib/**/*.pm` +
+every file of perl's own `t/` = **738 files, 686 SAME, RCDIFF 0**, and the 52
+DIFF files are **exactly** the 52 whose base emission carried such a token (52
+of 52; side B has none in any of the 738).  Run TWICE — against the branch
+point `a2ac578` and, after the rebase, against the current main `04ebd7b` —
+with identical numbers and an identical DIFF set, which says the rule is
+orthogonal to everything main did meanwhile.  `corpus-diff` identical, drops 7
+unchanged.  Gate **156 files / 5655 rows** cold, failures exactly the 13 pclxs
+xs rows.  Full sweep (mandatory — `cl/pcl-runtime.lisp` changed): **GATE clean,
+TOTAL passing 18365 (+0), drops 7 = census, 0 new / 0 fixed**, no baseline row
+edited.  28 probe programs vs perl 5.40.3.  Every one of these was re-run on
+the REBASED tree and is quoted at its post-rebase value.
 
 **Companion `uni/` + `mro/` (103 files; every mover re-run ALONE on this tree
 AND on a `463a8f8` base worktree, the two runs agreeing row for row): 16
@@ -325,10 +328,16 @@ different symbols, so the broken glob-local could not reach them.  Same family
 as the s418 bless.t / split.t un-drops.  Every row spliced into
 `docs/perl-suite-run.tsv` with its cause.
 
-Generation stays **v2-165** (the number the inherited diff had claimed; the
-three checked-in artifacts were regenerated on the rebased tree and came back
-byte-identical at that stamp — their sources are ASCII).  Guard
-`Pl/t/utf8-source-01.t`, 21 rows, two of them ASCII **inverse** rows.
+Generation **v2-171** — NOT the `v2-165` the session brief named, because main
+had moved to `v2-170` (s426) by the time the rebase happened and a generation
+lower than main's is a cache key a later tree could re-mint.  The three
+checked-in artifacts were regenerated on the rebased tree and came back
+byte-identical at that stamp (their sources are ASCII).  **s426 touched the
+same four slice emitters this task did**, and both changes belong: the sigil
+swap names the aggregate, `_slice_container_form` then dereferences it — the
+resolution is "both, in that order", and the second emission A/B is what
+proves it.  Guard `Pl/t/utf8-source-01.t`, 21 rows, two of them ASCII
+**inverse** rows.
 
 **Filed, not fixed** — all four reproduce identically with ASCII names, which
 is the evidence that #418 is closed rather than narrowed: **#430** (`keys

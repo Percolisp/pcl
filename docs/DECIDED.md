@@ -178,6 +178,11 @@ not-supported.md → only then probe.*
 - **A `|` in a name means it is ALREADY a CL spelling** (no perl identifier,
   package name or bareword can contain one), so `cl_sym`/`cl_pkg` return it
   unchanged and a double pass is a no-op instead of a corruption.
+- **The sigil swap and the slice DEREFERENCE are two different questions and
+  both apply** (s423 + s426, resolved at the rebase): `_swap_elem_sigil` names
+  the aggregate (`$Pkg::A[0]` -> `@A`, in either spelling), and
+  `_slice_container_form` then dereferences a container that is a scalar.  In
+  `gen_hash_slice_form` and `gen_kv_array_slice_form` they run in THAT order.
 - **`pl2cl`'s `build_eval_preamble` is the EVAL-MODE TWIN of
   `Parser::_cl_pkg_designator`** and must answer identically, or a string eval
   resolves its globals in a different CL package than the file that called it.

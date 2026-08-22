@@ -9,8 +9,9 @@ uncommitted diff (10 files, no commit).  §1 is the review of that inherited
 work — what it got right and the three seams it missed, each found by
 probing rather than by reading.  §2 is the rule as it now stands.  §3 the
 probe table.  §4 the measurements, including a new population-wide instrument
-that counts this bug directly.  §5 what was found and FILED, not fixed.
-§6 the asks.
+that counts this bug directly — and §4.8, the rebase onto main and the one
+code conflict (s426 touched the same four slice emitters).  §5 what was found
+and FILED, not fixed.  §6 the asks.
 
 ## §1  The inherited diff, reviewed
 
@@ -178,7 +179,13 @@ emission A/B below).
 | `a2ac578` | perl `t/uni/*.t` + `t/mro/*.t` | **49** | **1962** |
 | this branch | the same, plus `t/op/*.t` + `t/re/*.t` (404 emitted files) | **0** | **0** |
 
-### §4.2  The inverse guard: `tools/emission-ab.pl --ref a2ac578`
+### §4.2  The inverse guard: `tools/emission-ab.pl`
+
+Run TWICE — first against the branch point `a2ac578`, then, after the rebase
+(§4.8), against the current main `04ebd7b`.  **Both runs give the identical
+numbers and the identical 52-file DIFF set**, which is the strongest form of
+the inverse guard: the rule is orthogonal to everything main did meanwhile.
+
 
 Population: `perl-tests/*.t` + `lib/**/*.pm` + every file of perl's own `t/`
 — **738 files**.
@@ -203,18 +210,20 @@ emission identical to HEAD across 111 files
 
 ### §4.4  The gate
 
-`PCLXS_DIR=$HOME/pclxs tools/prove-core`, cold (generation `v2-165` is new,
-so no module cache existed):
+`PCLXS_DIR=$HOME/pclxs tools/prove-core`, cold (generation `v2-171` is new,
+so no module cache existed), on the REBASED tree:
 
 ```
-Files=156, Tests=5653, 359 wallclock secs
+Files=156, Tests=5655, 214 wallclock secs
 ```
 
 Failures are **exactly the 13 pclxs xs rows** (`xs-01.t` 5 of 6, `xs-02.t` 4,
 `xs-03.t` 4) — pclxs is under separate work, ignored per USER s394/s395.
-Arithmetic against main: main measures 156/**5639** with the same 14 xs rows
-produced; `Pl/t/utf8-source-01.t` goes 7 → 21 rows on this branch (+9 from the
-inherited diff, +5 here), and 5639 + 14 = **5653**.
+Arithmetic against main: main (`04ebd7b`) measures 156/**5641** with the same
+14 xs rows produced; `Pl/t/utf8-source-01.t` goes 7 → 21 rows on this branch
+(+9 from the inherited diff, +5 here), and 5641 + 14 = **5655**.  (The
+pre-rebase gate on `463a8f8` measured 5653; main gained 2 rows from s426's
+`interp-chained-subscript-01.t`.)
 
 `Pl/t/utf8-source-01.t` is 21 rows / 24 s wall, five of them added here: the
 eval-preamble package, the bareword filehandle, the qualified element sigil
@@ -310,13 +319,38 @@ bless.t / split.t un-drops.  Filed as **#433** with both reproducers.
 All three checked-in transpiled artifacts were **regenerated on the rebased
 tree** (`tools/rebuild-pack`; `./pl2cl --extension lib/mro.pm` and
 `… lib/warnings.pm` + `tools/tag-license` + `check-parens`) and each came back
-**byte-identical** to the file already in the tree at `gen=v2-165` — which is
+**byte-identical** to the file already in the tree at `gen=v2-171` — which is
 the expected result, since their sources are ASCII and ASCII emission is
 byte-identical.  `Pl/t/artifact-staleness-01.t` passes.
 
+### §4.8  The rebase onto `04ebd7b`, and the one code conflict
+
+Main moved twice while this session ran (`463a8f8` s425, then `c1983e1` s426 +
+`04ebd7b` s425b).  The branch is rebased onto **`04ebd7b`** so Fable can
+fast-forward; every measurement in §4.1-§4.6 was **re-run on the rebased
+tree** and is quoted at its post-rebase value.
+
+**s426 touched the same four slice emitters this task did**, and the conflict
+is real rather than textual — both changes belong:
+
+* `gen_hash_slice_form`: s423 replaced the inline `@`→`%` rewrite with
+  `_swap_elem_sigil` (which also knows the pipe-quoted spelling); s426 added
+  the `_slice_container_form` dereference after it.  Resolved as **both, in
+  that order** — the sigil swap names the aggregate, the container form
+  dereferences it.
+* `gen_kv_array_slice_form`: same shape — s423's `_swap_elem_sigil` for
+  `$arr`, then s426's `_slice_container_form` for `$arr_form` (s426 deleted
+  the `(unbox $r)` that stood there; s423 deleted the local `s///` copy of the
+  sigil swap).  Neither deletion undoes the other.
+
+The other two of the four (`gen_array_slice_form`, `gen_kv_hash_slice_form`)
+are s426's alone and merged clean.  The evidence that the resolution is right
+is §4.2 run a SECOND time against `04ebd7b`: the same 738/686/52, the same 52
+files, `RCDIFF=0`, and s426's own guard file plus the whole gate green.
+
 ## §5  Found and FILED, not fixed
 
-All three reproduce identically with ASCII names, so none is caused by #418.
+All FOUR reproduce identically with ASCII names, so none is caused by #418.
 
 * **#430** (filed by the previous agent, kept) — `keys %Pkg::` lists only
   SUBS; a package's scalar/array/hash globals never appear as stash keys, and
@@ -341,13 +375,16 @@ Task **#418 is closed** with the measurement in its notes.
 
 ## §6  Asks
 
-**Ask 1 — the generation number.**  This branch resolves the rebase conflict
-to **`v2-165`**, as the session brief instructed, which is *lower* than main's
-current `v2-166`.  v2-165 has never been used by any other tree, so it is a
-unique cache key and nothing can collide; but if Fable renumbers once at merge
-(the s422–s424 plan says `v2-167`), the three artifact stamps must move with
-it — they are byte-identical to a fresh regeneration, so a stamp-only edit is
-exactly right, and `Pl/t/artifact-staleness-01.t` is the arbiter.
+**Ask 1 — the generation number: I did NOT follow the brief, and this is the
+one place to check me.**  The brief said to resolve the rebase conflict to
+this branch's `v2-165`.  That was written when main stood at `v2-166`; by the
+time the rebase happened main was at **`v2-170`** (s426), so keeping `v2-165`
+would have shipped a generation *lower than main's* — a cache key that a
+future tree could legitimately re-mint.  The branch therefore uses **`v2-171`**,
+the next unused number, which is also exactly the "renumber ONCE at the end"
+the s422–s424 plan asks for.  The three artifact stamps moved with it and each
+regenerates **byte-identically** at that stamp; `Pl/t/artifact-staleness-01.t`
+is the arbiter and passes.  Say if you want a different number at merge.
 
 **Ask 2 — is the `is_filehandle` key the right gate for the bareword leaf?**
 `gen_leaf`'s Word branch is the one place a bareword becomes a CL token, but
