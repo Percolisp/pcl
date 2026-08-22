@@ -52,6 +52,7 @@ use v5.20;
 use strict;
 use warnings;
 use Exporter 'import';
+use Pl::CLForm ();
 our @EXPORT_OK = qw(is_exception_global partition_name global_decl_form);
 
 # Cause (b): word-shaped names that stay dynamically bound.  The magic half is
@@ -68,11 +69,12 @@ my %WORD_SHAPED_EXCEPTION = map { $_ => 1 } qw(
 #   $x  @arr  %h              unqualified
 #   Foo::$x   Foo::Bar::@a    package-qualified (the sigil sits after the ::)
 #   |Foo Bar|::$x             pipe-quoted package (a CL package name that
-#                             needs escaping) — the PACKAGE is quoted, the
-#                             variable part is not
-# A pipe-quoted VARIABLE (|$.|, |${^MPE}|), a bare punctuation name ($@, @#),
-# a (p-stash …) form or anything else returns () — "not word-shaped", which
-# the caller reads as EXCEPTION.
+#                             needs escaping)
+#   |$Ｘ|   |ＦＯＯ|::|@ｙ|    pipe-quoted VARIABLE — the #418 spelling for a
+#                             name carrying a non-ASCII character
+# A pipe-quoted PUNCTUATION name (|$.|, |${^MPE}|), a bare punctuation name
+# ($@, @#), a (p-stash …) form or anything else returns () — "not
+# word-shaped", which the caller reads as EXCEPTION.
 #
 # $ID is the identifier shape a package SEGMENT or a variable NAME has, in
 # the spelling the two emitters produce: one word character that is not a
@@ -94,6 +96,14 @@ sub _split_name {
   my $pkg;
   if ($rest =~ s/^\|([^|]*)\|:://)      { $pkg = $1 }
   elsif ($rest =~ s/^($ID(?:::$ID)*):://) { $pkg = $1 }
+  # A VARIABLE whose name carries a non-ASCII character is emitted pipe-quoted
+  # (#418, Pl::CLForm::cl_sym) — unquote before shape-matching, or every such
+  # global reads as "not word-shaped" = EXCEPTION and gets a `defvar` where the
+  # other emitter made a p-defcell symbol macro: the load-time collision this
+  # file's header warns about (the same shape as #313).  A quoted PUNCTUATION
+  # name (|$.|, |${^MPE}|) still fails the shape test below and stays an
+  # exception, which is what it was before.
+  $rest = Pl::CLForm::cl_unquote($rest) if $rest =~ /\A\|.*\|\z/s;
   return () if $rest !~ /^([\$\@\%])($ID)\z/;
   return ($pkg, "$1$2");
 }

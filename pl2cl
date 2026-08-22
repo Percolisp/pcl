@@ -29,6 +29,7 @@ binmode(STDERR, ":utf8");
 # Find Pl::Parser relative to this script, not cwd
 use lib dirname(abs_path($0));
 use Pl::Parser;
+use Pl::CLForm ();   # build_eval_preamble's designator rule (cl_pkg) — rule 11
 
 # v2 (Pl::Parser2 → Pl::CLForm structured emission) is the ONLY pipeline
 # (default since session 273/W9; the v1 escape hatch and the whole-file
@@ -204,12 +205,19 @@ sub build_preamble {
 # etc.) is already live in the running SBCL image.
 sub build_eval_preamble {
   my ($pkg_name) = @_;
-  # $pkg_name is the Perl package name (e.g. "main", "Foo", "Bar::Baz").  Apply
-  # the same single-vs-multi-segment designator rule as Parser::_cl_pkg_designator
-  # so the eval'd code lands in the SAME CL package the rest of the codegen uses:
-  # single-segment names stay bare (reader case-folds, :main -> MAIN, :Foo -> Foo),
-  # multi-segment names are pipe-quoted to preserve '::' and case.
-  my $desig = ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
+  # $pkg_name is the Perl package name (e.g. "main", "Foo", "Bar::Baz").  The
+  # designator rule lives in ONE place, Pl::CLForm::cl_pkg (rule 11), and this
+  # is the EVAL-mode twin of Parser::_cl_pkg_designator: it must answer
+  # identically or a string eval resolves its globals in a different CL package
+  # than the file that called it.  Single-segment ASCII names stay bare (the
+  # reader case-folds, :main -> MAIN, :Foo -> Foo); a multi-segment name is
+  # pipe-quoted to preserve '::' and case; and so is a name carrying a
+  # non-ASCII character (task #418 — a bare token is NFKC-normalized AND
+  # :invert-ed, so a fullwidth designator reads as an all-lowercase ASCII
+  # package name that no runtime string ever spells).  Measured s423: without
+  # the last rule, `our $z` inside `package <fullwidth>` read back undef from
+  # a string eval in that same package.
+  my $desig = ':' . Pl::CLForm::cl_pkg($pkg_name);
   return "(p-defpackage $desig)\n(in-package $desig)";
 }
 

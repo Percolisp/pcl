@@ -19,7 +19,7 @@ use File::Spec;
 use Cwd qw(abs_path);
 
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
-use Pl::CLForm ();
+use Pl::CLForm qw(cl_sym cl_pkg);
 use Pl::ExprToCL;
 use Pl::Environment;
 # THE global partition (task #289): every declaration this file emits, and the
@@ -1237,9 +1237,9 @@ sub _qualified_sub_to_cl {
     (my $cl_pkg = $self->_cl_pkg_designator($pkg)) =~ s/^://;
     # Register package so it gets pre-declared
     $self->environment->add_referenced_package($pkg) if $self->environment;
-    return "${cl_pkg}::pl-$bare";
+    return "${cl_pkg}::" . cl_sym("pl-$bare");
   }
-  return "pl-$name";
+  return cl_sym("pl-$name");
 }
 
 # ============================================================
@@ -1497,12 +1497,19 @@ sub _scan_lisp_lines {
 # `(p-if … (progn (go :X)))`) is wrapped together with its enclosing form,
 # never splitting parens.  Used for both top-level runtime lines and sub
 # bodies (lines may be indented).
+# The two spellings a LABEL token can have in emitted text: the bare ASCII
+# identifier, or the |…| quoted form a name carrying a non-ASCII character
+# takes (#418, Pl::CLForm::cl_sym).  This pass matches the emitted TEXT, so it
+# has to know both, or a `use utf8` label's goto/label pair goes unrecognised
+# and the tagbody wrap never happens (perl's own t/uni/labels.t).
+our $LABEL_TOK = qr/[A-Za-z][A-Za-z0-9_]*|\|[^|]*\|/;
+
 sub _wrap_runtime_labels {
   my $rt_ref = shift;
   my @rt = @$rt_ref;
 
   # Quick exit: no real label sentinels (allow leading indentation).
-  return @rt unless grep { /^\s*:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ } @rt;
+  return @rt unless grep { /^\s*:$LABEL_TOK\s*;; pcl-label/ } @rt;
 
   # Definition lines must stay outside any tagbody (eval-when etc. need
   # top-level context).  Allow leading indentation (sub bodies are indented).
@@ -1535,11 +1542,11 @@ sub _wrap_runtime_labels {
       # (paren depth 0).  A label nested inside a child form (depth > 0) is
       # handled by that child's own _process_block wrapping pass.
       if ($info->[$i]{depth} == 0
-          && $rt[$i] =~ /^\s*:([A-Za-z][A-Za-z0-9_]*)\s*;; pcl-label/) {
+          && $rt[$i] =~ /^\s*:($LABEL_TOK)\s*;; pcl-label/) {
         $label_first{$1} //= $fi;
       }
       next if $info->[$i]{in_lambda};   # goto inside a nested lambda → unreachable
-      while ($rt[$i] =~ /\(go\s+:([A-Za-z][A-Za-z0-9_]*)\)/g) {
+      while ($rt[$i] =~ /\(go\s+:($LABEL_TOK)\)/g) {
         my $lbl    = $1;
         my $prefix = substr($rt[$i], 0, $-[0]);
         next if $prefix =~ /\b(?:lambda|p-sub)\b/;  # opened+used on same line
@@ -1746,8 +1753,7 @@ sub _transform_pkg_var {
     my ($sigil, $pkg, $name) = ($1, $2, $3);
     # Empty package means main (e.g., $::foo = $main::foo)
     $pkg = 'main' if $pkg eq '';
-    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-    return "${cl_pkg}::${sigil}${name}";
+    return cl_pkg($pkg) . '::' . cl_sym("${sigil}${name}");
   }
   # Pipe-quote if the name contains characters CL can't read as a bare symbol
   # (e.g. $" → |$"|, $\ → |$\\|, $| → |$\||, $; → |$;|)
@@ -1755,7 +1761,7 @@ sub _transform_pkg_var {
     (my $inner = $var) =~ s/([|\\])/\\$1/g;
     return "|$inner|";
   }
-  return $var;
+  return cl_sym($var);
 }
 
 # Extract individual key/index token groups from a PPI::Structure::Subscript,
@@ -2608,8 +2614,7 @@ sub _our_var_cl_name {
   return $var if !defined($pkg) || $pkg eq 'main';
   return $var unless $var =~ /^([\$\@\%])(\w+)$/;
   my ($sigil, $name) = ($1, $2);
-  my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-  return "${cl_pkg}::${sigil}${name}";
+  return cl_pkg($pkg) . '::' . cl_sym("${sigil}${name}");
 }
 
 # Process 'our' variable declaration - package-level variable
@@ -3169,7 +3174,7 @@ sub _process_isa_declaration {
     # Foo::Bar -> |Foo::Bar|::foo--bar (pipe-quoting preserves :: in pkg name)
     my $parents_cl = join(' ', map {
       my $cls = $self->_pkg_to_clos_class($_);
-      my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
+      my $pkg_prefix = cl_pkg($_);
       "$pkg_prefix\:\:$cls"
     } @$parents);
 
@@ -3316,7 +3321,7 @@ sub _process_use_base {
   my $cl_class = $self->_pkg_to_clos_class($pkg);
   my $parents_cl = join(' ', map {
     my $cls = $self->_pkg_to_clos_class($_);
-    my $pkg_prefix = ($_ =~ /::/) ? "|$_|" : $_;
+    my $pkg_prefix = cl_pkg($_);
     "$pkg_prefix\:\:$cls"
   } @parents);
   $self->environment->set_isa($pkg, \@parents);
@@ -4251,7 +4256,7 @@ sub _process_compound_statement {
       # Standalone label statement: LABEL: → emit as tagbody tag.
       # The ;; pcl-label sentinel lets _wrap_runtime_labels distinguish
       # real generated labels from ":word" patterns inside string literals.
-      $self->_emit(":$label  ;; pcl-label");
+      $self->_emit(':' . cl_sym($label) . "  ;; pcl-label");
     } else {
       # Neither block nor keyword found - emit as comment
       my $perl_code = $stmt->content;
@@ -4314,24 +4319,24 @@ sub _process_bare_block {
     # Labeled bare block: use (block LABEL ...)
     # In Perl, a bare block is a single-iteration loop - last/next/redo all work.
     # With continue: wrap tagbody in catch for labeled next, then run continue after
-    $self->_emit("(block $label");
+    $self->_emit('(block ' . cl_sym($label));
     $self->indent_level($self->indent_level + 1);
     # Wrap contents in LAST-LABEL catch so p-last-dynamic can throw to exit the block.
     # Mirrors how p-next/p-redo use throw for dynamic (cross-function) labeled exits.
     # e.g. Test::More's skip() calls (last SKIP) from inside a called function.
-    $self->_emit("(catch (pcl::%pcl-loop-tag \"LAST\" '$label)");
+    $self->_emit("(catch (pcl::%pcl-loop-tag \"LAST\" '" . cl_sym($label) . ")");
     $self->indent_level($self->indent_level + 1);
     # Always wrap tagbody in NEXT-LABEL catch so that (p-next LABEL) works even
     # without a continue block.  When next LABEL is thrown from an inner function
     # (e.g. eval { next $label }), the throw lands here; when there is a continue
     # block it runs after the catch returns, just as in the continue case.
-    $self->_emit("(catch (pcl::%pcl-loop-tag \"NEXT\" '$label)");
+    $self->_emit("(catch (pcl::%pcl-loop-tag \"NEXT\" '" . cl_sym($label) . ")");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(tagbody");
     $self->indent_level($self->indent_level + 1);
     $self->_emit(":redo");
     # Use pcl:: prefix to match the package used by p-redo macro's throw
-    $self->_emit("(catch (pcl::%pcl-loop-tag \"REDO\" '$label)");
+    $self->_emit("(catch (pcl::%pcl-loop-tag \"REDO\" '" . cl_sym($label) . ")");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(progn");
     $self->indent_level($self->indent_level + 1);
@@ -5099,7 +5104,7 @@ sub _process_block {
     my $arr = $self->_sections->[$lbl_sec]{$lbl_bucket};
     my $end = $#$arr;
     if ($end >= $lbl_start
-        && grep { /^\s*:[A-Za-z][A-Za-z0-9_]*\s*;; pcl-label/ }
+        && grep { /^\s*:$LABEL_TOK\s*;; pcl-label/ }
                @{$arr}[$lbl_start .. $end]) {
       my @wrapped = _wrap_runtime_labels([ @{$arr}[$lbl_start .. $end] ]);
       splice @$arr, $lbl_start, ($end - $lbl_start + 1), @wrapped;
@@ -6452,7 +6457,7 @@ sub _process_while_statement {
   }
 
   # Build the loop form with optional label
-  my $label_arg = $label ? " :label $label" : "";
+  my $label_arg = $label ? ' :label ' . cl_sym($label) : "";
 
   # Use common helper to wrap with declarations
   $self->_with_declarations($cond, sub {
@@ -6618,7 +6623,7 @@ sub _process_c_style_for {
   }
 
   # Build label argument if present
-  my $label_arg = $label ? " :label $label" : "";
+  my $label_arg = $label ? ' :label ' . cl_sym($label) : "";
 
   # Use common helper - scan init and condition for declarations
   my @decl_sources = grep { defined } @statements[0..1];
@@ -6970,7 +6975,7 @@ sub _process_foreach_loop {
   $list_cl = _apply_foreach_alias_rewrite($list_cl, \@list_parts);
 
   # Build label argument if present
-  my $label_arg = $label ? " :label $label" : "";
+  my $label_arg = $label ? ' :label ' . cl_sym($label) : "";
   # `:my t` for `foreach my $x` — see the Parser2 foreach branch and
   # %p-cell-loop-var-p: the macro cannot see the declaration, so a package
   # variable of the same name would make it localize a cell where perl
@@ -7664,7 +7669,11 @@ sub _cl_pkg_designator {
   # `(defclass class ...)` collided with CL:CLASS; CLOS class names are now
   # plc-prefixed, so escaping the *package* name here is redundant and actually
   # caused a :|Class| vs CLASS mismatch.)
-  return ($pkg_name =~ /::/) ? ":|$pkg_name|" : ":$pkg_name";
+  # A name carrying a NON-ASCII character is quoted too (#418): a bare token's
+  # characters go through the reader's NFKC normalisation, so `:ＦＯＯ` names
+  # the package "foo" that no runtime string ever spells.  Pl::CLForm::cl_pkg
+  # is the one place that rule lives.
+  return ':' . cl_pkg($pkg_name);
 }
 
 # The package-qualified CL symbol for a package's @ISA array, e.g.
@@ -7778,7 +7787,11 @@ sub _pkg_to_clos_class {
   # naming discipline: builtins are `p-`, user subs `pl-`, classes `plc-`.
   # This subsumes the old ad-hoc pipe-escape list (class/method/error/...).
   # MUST stay in lock-step with `perl-pkg-to-clos-class` in cl/pcl-runtime.lisp.
-  return "plc-$class";
+  # cl_sym quotes the token when the package name carried a non-ASCII
+  # character (#418) — the runtime interns this name through
+  # %pcl-invert-case, which is likewise the identity on such a name, so the
+  # two sides land on the same class symbol.
+  return cl_sym("plc-$class");
 }
 
 
@@ -8747,7 +8760,7 @@ sub _process_use_vars {
                : $sigil eq '@' ? '(make-array 0 :adjustable t :fill-pointer 0)'
                :                 '(make-hash-table :test #\'equal)';
       $self->_emit("(p-eval-always");
-      $self->_emit("  " . global_decl_form("$cl_var", "$init") . ")");
+      $self->_emit("  " . global_decl_form(cl_sym($cl_var), "$init") . ")");
     }
     $self->_emit("");
   });

@@ -24,7 +24,8 @@ use v5.30;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_flat to_program ctx_bind);
+our @EXPORT_OK = qw(raw raw_wrap is_raw is_raw_wrap to_string to_flat to_program ctx_bind
+                    cl_sym cl_pkg cl_unquote needs_pipes);
 
 use Scalar::Util ();
 use constant ONE_LINE_MAX => 95;
@@ -55,6 +56,90 @@ sub ctx_bind {
          . (defined $ctx ? $ctx : 'undef')
          . "' (known: " . join(' ', sort keys %CTX_MACRO) . ")\n";
   return [$macro, @body];
+}
+
+# ── THE NAME-SPELLING RULE (task #418, s423) ──────────────────────────────
+# How a Perl NAME is spelled as a CL token.  ONE rule, one place: every
+# emitter that turns a package name, a variable name, a sub name, a CLOS
+# class name, a loop label or a bareword filehandle into CL text asks here.
+#
+# WHY.  SBCL's reader does TWO things to a BARE token before it becomes a
+# symbol name, and generated code is read under (readtable-case :invert):
+#   1. it NFKC-normalizes the characters — the fullwidth Ｘ (U+FF38) folds to
+#      an ASCII X, so `%Ｘ` and `%X` are the SAME symbol (measured s423:
+#      (read-from-string ":ＦＯＯ") has symbol-name "foo");
+#   2. it inverts the case — an all-uppercase token down-cases.
+# Neither happens to the runtime's side of the same name: `(p-stash "ＦＯＯ")`
+# carries the perl characters verbatim.  So a non-ASCII name that is emitted
+# BARE both collides with its ASCII twin and misses every runtime string
+# path.  Inside |…| the reader takes the characters exactly as written
+# (`:|ＦＯＯ|` → "ＦＯＯ"), which defeats both transforms at once.
+#
+# THE INVERSE HALF IS AS LOAD-BEARING: an ASCII name that is bare today MUST
+# stay bare.  Under :invert a bare `$foo` reads as the symbol `$FOO` while
+# `|$foo|` reads as `$foo` — quoting an ASCII name silently renames it.  So
+# cl_sym is the IDENTITY on ASCII, and the acceptance bar for this rule is
+# byte-identical emission over every ASCII file (tools/emission-ab.pl).
+#
+# The runtime half of the agreement is `%pcl-invert-case` in
+# cl/pcl-runtime.lisp, which is likewise the identity on a name carrying a
+# non-ASCII character — that is what makes "pipe-quoted" mean "verbatim" on
+# both sides of the seam.
+sub needs_pipes {
+  my ($name) = @_;
+  return 0 if !defined $name;
+  return $name =~ /[^\x00-\x7F]/ ? 1 : 0;
+}
+
+# A `|` in the input means the caller is holding a CL SPELLING, not a perl
+# name: no perl identifier, package name or bareword can contain one, while
+# the emitters routinely pass a token something already spelled — the
+# punctuation-variable rule (|$"|, |${^CAPTURE}|), and, less obviously, a
+# PPI Word whose content was rewritten in place to a qualified CL symbol
+# (|ＦＯＯ|::pl-two, from Parser::_qualified_sub_to_cl).  Spelling such a
+# token again names a DIFFERENT symbol — measured s423: the second pass
+# produced |\|ＦＯＯ|::pl-two| and the file no longer READ.  The test is
+# ASCII-neutral by construction: cl_sym only ever acts on a name carrying a
+# non-ASCII character, so nothing that is bare today can be caught by it.
+sub _already_cl { return index($_[0], '|') >= 0 }
+
+# The token for a NAME with no package half (a variable with its sigil, a
+# `pl-`/`plc-`-prefixed symbol, a label, a bareword filehandle).
+sub cl_sym {
+  my ($name) = @_;
+  return $name if !needs_pipes($name);
+  return $name if _already_cl($name);
+  return _pipe($name);
+}
+
+# The PACKAGE half of a qualified CL symbol (`Foo::$x`, `Foo::pl-bar`).  A
+# multi-segment name has always been quoted — the '::' would otherwise read
+# as a package marker — and the non-ASCII rule joins it.  Any colon counts:
+# a single stray ':' in a name reads as a package marker just as '::' does.
+sub cl_pkg {
+  my ($pkg) = @_;
+  return $pkg if !defined $pkg;
+  return $pkg if _already_cl($pkg);
+  return _pipe($pkg) if $pkg =~ /:/;
+  return cl_sym($pkg);
+}
+
+sub _pipe {
+  my ($s) = @_;
+  $s =~ s/([|\\])/\\$1/g;
+  return "|$s|";
+}
+
+# The inverse: the NAME a |…| token spells.  Used by the consumers that read
+# emitted text back (the global partition, the cross-package forward-decl
+# scanner) — they must see the same name the reader will.
+sub cl_unquote {
+  my ($tok) = @_;
+  return $tok if !defined $tok;
+  return $tok if $tok !~ /\A\|(.*)\|\z/s;
+  my $inner = $1;
+  $inner =~ s/\\(.)/$1/g;
+  return $inner;
 }
 
 sub raw {

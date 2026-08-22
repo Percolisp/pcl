@@ -13,7 +13,7 @@ use Moo;
 
 use Scalar::Util qw/looks_like_number/;
 use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
-use Pl::CLForm ();
+use Pl::CLForm qw(cl_sym cl_pkg);
 use Pl::InterpScan ();
 use Pl::Passes ();
 
@@ -357,8 +357,8 @@ sub cl_name {
     # Pipe-quote a package with ANY colon (Foo::Bar, but also the trailing-:
     # residue of odd names like a:::b) — a bare colon misreads as a package
     # marker and kills the whole file at load.
-    my $cl_pkg = $pkg =~ /:/ ? "|$pkg|" : $pkg;
-    return "${cl_pkg}::pl-${func}";
+    my $cl_pkg = cl_pkg($pkg);
+    return "${cl_pkg}::" . cl_sym("pl-${func}");
   }
 
   # Runtime built-in → p-prefix; user-defined sub → pl-prefix.
@@ -377,9 +377,9 @@ sub cl_name {
   # `온ꪵ::` from a unicode stash access PPI can't tokenize as one Symbol)
   # would misread as a package marker — pipe-quote the whole symbol so a bad
   # shape fails as ONE undefined-function, never a whole-file read error.
-  my $fn = $perl_name =~ /:/ ? "|pl-$perl_name|" : "pl-$perl_name";
+  my $fn = $perl_name =~ /:/ ? "|pl-$perl_name|" : cl_sym("pl-$perl_name");
   if ($cur_pkg && $cur_pkg ne 'main') {
-    my $cl_pkg = $cur_pkg =~ /:/ ? "|$cur_pkg|" : $cur_pkg;
+    my $cl_pkg = cl_pkg($cur_pkg);
     return "${cl_pkg}::${fn}";
   }
   return $fn;
@@ -885,7 +885,7 @@ sub gen_symbol_form {
   # Check if this var is a state variable that was renamed
   if ($self->environment) {
     my $renames = $self->environment->state_var_renames;
-    return $renames->{$content} if $renames && exists $renames->{$content};
+    return cl_sym($renames->{$content}) if $renames && exists $renames->{$content};
   }
   # Qualify `our` variables in non-main packages using the fully-qualified name.
   # When `our $var` is declared in `package Foo { }` the generated defvar uses
@@ -896,8 +896,7 @@ sub gen_symbol_form {
     my ($sigil, $name) = ($1, $2);
     my $pkg = $self->environment->current_package // 'main';
     if ($pkg ne 'main' && $self->environment->is_our_variable($pkg, $content)) {
-      my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-      return "${cl_pkg}::${sigil}${name}";
+      return cl_pkg($pkg) . '::' . cl_sym("${sigil}${name}");
     }
   }
   # Unknown ${^...} caret variables. Perl (perlvar: "alphanumeric strings
@@ -915,7 +914,11 @@ sub gen_symbol_form {
     $self->environment->add_caret_global($sym) if $self->environment;
     return $sym;
   }
-  return $content;
+  # THE plain variable token.  cl_sym is the identity on an ASCII name (which
+  # is what keeps every existing emission byte-identical) and pipe-quotes a
+  # name carrying a non-ASCII character (#418) — `%Ｘ` and `%X` are otherwise
+  # ONE symbol, because the reader NFKC-folds the fullwidth Ｘ to X.
+  return cl_sym($content);
 }
 
 sub gen_leaf {
@@ -1036,6 +1039,23 @@ sub gen_leaf {
       (my $escaped = $content) =~ s/"/\\"/g;
       return qq{"$escaped"};
     }
+    # A bareword the environment KNOWS to be a filehandle becomes a CL SYMBOL
+    # in the emitted call (`(p-open ＦＨ …)`, `(p-close ＦＨ)`, `p-binmode`,
+    # `p-eof`, …), so it takes the #418 spelling.  The `is_filehandle`
+    # registry is the mechanism that already tells the parser which barewords
+    # are handles (PExpr registers them at `open`), so keying on it covers
+    # every builtin that takes one, at once — rather than a per-builtin branch
+    # (rule 11).  Its SIBLINGS are gen_filehandle_form (`print ＦＨ …`) and
+    # gen_readline_form (`<ＦＨ>`), which quote the same name; before this,
+    # `open ＦＨ` registered the reader's NFKC-folded `FH` while those two used
+    # the pipe-quoted symbol, so the program wrote to one handle, read from
+    # another, and printed NOTHING (measured s423).
+    # NOT a blanket rule for every Word: this leaf also carries names that are
+    # fed BACK to cl_name as perl names (a qualified call's Word), and a
+    # `|ＦＯＯ::f|` there splits on `::` into the package `|ＦＯＯ` — an
+    # unbalanced token that kills the file at READ (measured s423).
+    return cl_sym($content)
+      if $self->environment && $self->environment->is_filehandle($content);
     return $content;
   }
 
@@ -1365,11 +1385,20 @@ sub gen_binary_op_form {
       # value first — with a pure key the order cannot be observed).
       return ['setf', $left, $right] if $self->_elem_setf_ok($left);
       return ['p-setf', $left, $right];
-    } elsif ($left_flat =~ /(?:^|::)@/) {
+    # The sigil tests read the EMITTED text, so they must see through the
+    # pipe-quoting a non-ASCII name carries (#418): `|@Ｘ|` and
+    # `|ＦＯＯ|::|@Ｘ|` are array targets exactly as `@x` and `Foo::@x` are.
+    # Without it the quoted name matched none of the three and fell to the
+    # generic p-setf tail — a DIFFERENT assignment operator (measured).
+    # The quoted alternative requires a WORD-SHAPED name after the sigil:
+    # `|$\||`, `|@#|`, `|${^WARNING_BITS}|` are the PUNCTUATION/caret magic
+    # globals, which have always taken the p-setf tail (their places have
+    # bespoke setf arms) and must keep taking it.
+    } elsif ($left_flat =~ /(?:^|::)(?:@|\|@(?=[^\W\d]))/) {
       return ['p-array-=', $left, $right];
-    } elsif ($left_flat =~ /(?:^|::)%/) {
+    } elsif ($left_flat =~ /(?:^|::)(?:%|\|%(?=[^\W\d]))/) {
       return ['p-hash-=', $left, $right];
-    } elsif ($left_flat =~ /(?:^|::)\$/) {
+    } elsif ($left_flat =~ /(?:^|::)(?:\$|\|\$(?=[^\W\d]))/) {
       return ['p-scalar-=', $left, $right];
     }
     # else: fall through to (p-setf $left $right) at the generic tail.
@@ -1770,7 +1799,7 @@ sub gen_funcall_form {
       if (@$arg_kids == 1) {
         my $label_node = $self->expr_o->get_a_node($arg_kids->[0]);
         if (ref($label_node) eq 'PPI::Token::Word') {
-          return [$cl_func, $label_node->content()];
+          return [$cl_func, cl_sym($label_node->content())];
         }
       }
     }
@@ -1809,7 +1838,7 @@ sub gen_funcall_form {
           if ($catch && $catch->{$label}) {
             return ['throw', $catch->{$label}, 'nil'];
           }
-          return ['go', ":$label"];
+          return ['go', ':' . cl_sym($label)];
         }
       }
     }
@@ -1923,14 +1952,14 @@ sub gen_funcall_form {
     my $head = $func_name eq 'readline' ? 'p-readline' : 'p-select';
     my $fh_node = $self->expr_o->get_a_node($kids->[1]);
     if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
-      return [$head, "'" . ($fh_node->content() // '')];
+      return [$head, "'" . cl_sym($fh_node->content() // '')];
     }
     if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
       my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
       if (@$fh_kids == 1) {
         my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
         if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
-          return [$head, "'" . ($word_node->content() // '')];
+          return [$head, "'" . cl_sym($word_node->content() // '')];
         }
       }
     }
@@ -2299,7 +2328,9 @@ sub _eval_lexical_alist {
   my (@pairs, %seen);
   for my $v (@vars) {
     my ($key) = $skey->($v);
-    push @pairs, ['cons', "\"$key\"", $v];
+    # KEY is the perl name (a STRING the eval body is matched against); the
+    # VALUE is the CL symbol, so it takes the #418 spelling.
+    push @pairs, ['cons', "\"$key\"", cl_sym($v)];
     $seen{$key} = 1;
   }
   # State cells (s418, #401): a `state $x` in a named sub is a defvar'd cell
@@ -2312,7 +2343,7 @@ sub _eval_lexical_alist {
   my $stcap = $parser->lex_home->{_eval_state_captures} // {};
   for my $key (sort keys %$stcap) {
     next if $seen{$key};
-    push @pairs, ['cons', "\"$key\"", $stcap->{$key}];
+    push @pairs, ['cons', "\"$key\"", cl_sym($stcap->{$key})];
     $seen{$key} = 1;
   }
   # Span-mangled file cells (v2's _rename_spanning_lexicals): the eval body
@@ -2765,10 +2796,12 @@ sub qualified_var_to_cl {
     my ($sigil, $pkg, $name) = ($1, $2, $3);
     $pkg = 'main' if $pkg eq '';
     $env->add_referenced_package($pkg) if $env;
-    my $cl_pkg = $pkg =~ /::/ ? "|$pkg|" : $pkg;
-    return "${cl_pkg}::${sigil}${name}";
+    return cl_pkg($pkg) . '::' . cl_sym("${sigil}${name}");
   }
-  return $name_in;
+  # An UNQUALIFIED name still needs the #418 spelling: this is the entry point
+  # the foreach loop variable and the try/catch variable use for their BINDING
+  # token, and the body's uses come through gen_symbol_form, which quotes.
+  return cl_sym($name_in);
 }
 
 # The container and subscript(s) of an ELEMENT or SLICE access, decomposed
@@ -2842,8 +2875,13 @@ sub _elem_container_key {
 sub _swap_elem_sigil {
   my ($sym, $sigil, $from) = @_;
   my $f = quotemeta(defined $from ? $from : q($));   # $ unless told otherwise
-  $sym =~ s/(^|::)$f/$1$sigil/
-    or $sym =~ s/^\|$f(.*)\|$/|$sigil$1|/;
+  # The sigil always opens the NAME, and the name has exactly two spellings:
+  # BARE (`$x`, `Foo::$x`) or #418 pipe-quoted (`|$Ｘ|`, `|ＦＯＯ|::|$Ｘ|`),
+  # which differ only by the `|` in front of the sigil.  ONE pattern with an
+  # optional `|` covers both — the older two-alternative form matched a whole
+  # `|$x|` token but not the QUALIFIED `Pkg::|$x|`, so `"$main::Ｌ[0]"` asked
+  # p-aref for the SCALAR `$Ｌ` and died in gethash (measured s423).
+  $sym =~ s/(^|::)(\|?)$f/$1$2$sigil/;
   return $sym;
 }
 
@@ -3019,9 +3057,12 @@ sub gen_hash_slice_form {
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol';
   my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
-  if ($is_bare && $hash =~ /(?:^|::)\@/) {
-    $hash =~ s/(^|::)\@/${1}%/;
-  }
+  # ONE swap helper (rule 11): _swap_elem_sigil also knows the PIPE-QUOTED
+  # spelling (|@Ｘ| → |%Ｘ|), which this local copy did not — a non-ASCII hash
+  # slice handed p-hslice the ARRAY of the same name and died "Not a HASH
+  # reference" (#418).  The `$is_bare` guard stays: on a nested access's
+  # already-generated text the unanchored swap would rewrite an index.
+  $hash = _swap_elem_sigil($hash, q(%), q(@)) if $is_bare;
   $hash = $self->_slice_container_form($kids->[0], $hash, 'p-cast-%');
   return $self->_slice_in_context_form(['p-hslice', $hash, $self->_slice_index_forms($kids)], $node_id);
 }
@@ -3039,8 +3080,9 @@ sub gen_kv_hash_slice_form {
 sub gen_kv_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
-  my $arr = $self->gen_node($kids->[0]);
-  $arr =~ s/(^|::)\%/${1}\@/;
+  # The sigil swap is _swap_elem_sigil's (rule 11, #418): it also knows the
+  # pipe-quoted spelling a non-ASCII name carries.
+  my $arr = _swap_elem_sigil($self->gen_node($kids->[0]), q(@), q(%));
   # `(unbox $r)` stood here — the shape-blind half of _slice_container_form's
   # rule, right for a single-boxed anon ref and one layer short of \@named.
   my $arr_form = $self->_slice_container_form($kids->[0], $arr, 'p-cast-@');
@@ -3096,7 +3138,12 @@ sub gen_readline_form {
   my $call;
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
-    $call = ['p-readline', ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) ? "'$fh" : $fh];
+    # The bareword test is UNICODE word-shape, not ASCII: `use utf8` source has
+    # real bareword filehandles like `<Fʜ>` (perl's own t/uni/readline.t).  It
+    # asks about the perl NAME, so it looks through the #418 pipe-quoting the
+    # leaf emitter already applied — the quoted token IS the spelling the
+    # runtime agrees on, so it is passed through unchanged.
+    $call = ['p-readline', _bareword_fh_p($fh) ? "'" . cl_sym($fh) : $fh];
   } else {
     $call = ['p-readline'];
   }
@@ -3111,9 +3158,20 @@ sub gen_filehandle_form {
   my ($self, $node, $node_id, $kids) = @_;
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
-    return ($fh =~ /^[A-Za-z_][A-Za-z0-9_]*$/) ? ":fh '$fh" : ":fh $fh";
+    # Unicode word-shape, quoted spelling included — see gen_readline_form.
+    return _bareword_fh_p($fh) ? ":fh '" . cl_sym($fh) : ":fh $fh";
   }
   return ':fh nil';
+}
+
+# Is TOKEN a bareword filehandle NAME, as opposed to `$fh` / an expression?
+# TOKEN is already-emitted text, so the question is asked of the perl name
+# underneath the #418 pipe-quoting a non-ASCII name carries (Pl::CLForm
+# spells it; this only reads it back).  The shape is perl's own \w+ under
+# `use utf8` — `<Fʜ>` in perl's t/uni/readline.t is a real bareword handle.
+sub _bareword_fh_p {
+  my ($tok) = @_;
+  return Pl::CLForm::cl_unquote($tok) =~ /^[^\W\d]\w*$/ ? 1 : 0;
 }
 
 # *glob{SLOT} → (p-glob-slot glob "SLOT") or computed (p-glob-slot glob EXPR).

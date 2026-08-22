@@ -472,8 +472,21 @@
 ;;; (or package name) from a Perl identifier *string* must apply this SAME
 ;;; transform so it lands on the symbol the reader produced.  (Replaces the old
 ;;; blanket string-upcase, which only agreed for all-lowercase names.)
+;;; A name carrying a NON-ASCII character is emitted PIPE-QUOTED (task #418,
+;;; Pl::CLForm::cl_sym), and inside |…| the reader applies neither its NFKC
+;;; normalisation nor :invert — the symbol's name is the perl name, character
+;;; for character.  So the runtime's transform must be the IDENTITY on exactly
+;;; those names, or the two sides of the seam disagree again in the other
+;;; direction: `(p-stash "ＦＯＯ")` would look for the down-cased fullwidth
+;;; "ｆｏｏ" while codegen wrote `:|ＦＯＯ|`.  This one guard is what makes
+;;; every %pcl-invert-case caller (symbolic refs, ->can, globs, stash keys,
+;;; caller, bareword filehandles, loop tags, sub names) agree at once.
+(defun %pcl-non-ascii-name-p (s)
+  (some (lambda (c) (> (char-code c) 127)) (string s)))
+
 (defun %pcl-invert-case (s)
   (let ((s (string s)) (has-upper nil) (has-lower nil))
+    (when (%pcl-non-ascii-name-p s) (return-from %pcl-invert-case s))
     (loop for c across s do
           (cond ((upper-case-p c) (setf has-upper t))
                 ((lower-case-p c) (setf has-lower t))))
@@ -11846,7 +11859,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-170"
+(defparameter *pcl-cache-generation* "v2-171"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -15051,7 +15064,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                                (> (length isa-val) 0)))
            (clos-class-name (perl-pkg-to-clos-class class-name))
            (clos-class (when (and pkg (not isa-non-empty))
-                         (find-class (intern (string-upcase clos-class-name) pkg) nil))))
+                         (find-class (intern (%pcl-invert-case clos-class-name) pkg) nil))))
 
       (if (and clos-class (not isa-non-empty))
           ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list.
@@ -15222,7 +15235,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Convert Perl package name to CLOS class name: Foo::Bar -> plc-foo-bar.
    The plc- prefix guarantees the upcased class symbol never lands on a locked
    COMMON-LISP/SBCL symbol (e.g. `package If` -> CL:IF would die in defclass).
-   MUST stay in lock-step with _pkg_to_clos_class in Pl/Parser.pm."
+   MUST stay in lock-step with _pkg_to_clos_class in Pl/Parser.pm.
+   The two CALLERS intern this name through %pcl-invert-case, not
+   string-upcase: for the all-lowercase ASCII name this builds those are the
+   same transform, and for a package whose name carries a non-ASCII character
+   (#418) only the former matches the pipe-quoted `|plc-ｆｏｏ|` codegen emits."
   (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
 
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
@@ -15259,7 +15276,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
          (isa-non-empty (and isa-val (vectorp isa-val) (> (length isa-val) 0)))
          (clos-class (when (and pkg (not isa-non-empty))
-                       (find-class (intern (string-upcase clos-class-name) pkg) nil))))
+                       (find-class (intern (%pcl-invert-case clos-class-name) pkg) nil))))
     (cond
       ((and clos-class (not isa-non-empty))
        ;; CLOS MRO path: walk MRO starting from parent of current class
