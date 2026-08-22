@@ -62,3 +62,83 @@ code and strings — a runtime `p-cast-$` / `p-*-deref` referent check, the
 own): the gate's #355 stderr-aware helper caught a scanner arm the port had
 not carried (`"@{+}"`) — the #314 shape — which is exactly what that helper
 was built for.
+
+## s423 — #418 widened, the B-finisher (`docs/opus5-review-requests-s423.md`): APPROVED as shipped, merged `f02fe2a` (fast-forward); two review fixes on top
+
+**Independently re-verified:** every diff hunk read (CLForm's `cl_sym`/`cl_pkg`
+— identity on ASCII, the correctness condition —, the runtime's
+`%pcl-invert-case` guard, the `pl2cl` eval-preamble twin, the `is_filehandle`
+leaf gate, the emission sites in ExprToCL/Parser/Parser2/GlobalPartition);
+B's 21-row guard passes in its tree; the registry edits are pure removals (0
+additions); a probe of my own vs perl 5.40.3 — NFKC ligature `$ﬁ` vs `$fi`,
+Greek case pair `$Φ`/`$φ`, Cyrillic scalar+hash, fullwidth subs called bare /
+`&{"…"}` / `\&` / `goto &`, methods via string class and `->$m`, `can`/`isa`,
+symrefs, stash `exists`, string eval inside the fullwidth package, `sub
+ＦＯＯ::ｅｖ` defined by eval, `local`, fullwidth label `next`/`last`, bareword
+`ＦＨ` open/print/readline/close, in-memory `$ｆｈ`, closures, heredoc, qualified
+`$main::Ｖ` — **22 of 24 lines identical** after the two fixes below; the two
+remaining lines are pre-existing and ASCII-identical.  (My first probe file
+could not be transpiled at all: a fullwidth `for my $ｉ (…)` variable is the
+known #422.3 PPI LEXER failure — pre-existing on both trees, F's item.)
+
+**The two pre-existing lines, attributed:** (1) `Foo->can("nope"); exists
+$Foo::{nope}` is 1 in perl (a failed method lookup VIVIFIES the stash entry)
+and 0 in PCL — perl-internals class, ASCII-identical, recorded on #430 (the
+stash-snapshot task) rather than filed anew.  (2) `"$Ｘ[$ｉ]"` — see #435.
+
+**Review fixes (mine, in the merge commit), both "a non-ASCII name behaves
+exactly like its ASCII twin" residues the probes found:**
+- **`_array_index_container` (ExprToCL) built the `$#NAME` array token BARE** —
+  `$#Ｘ` read back NFKC-folded as `@X` ("unbound") in code and strings alike
+  (the one emission site B's grep did not reach, because it builds the token
+  from `$#…` text instead of a Symbol).  Spelled through `cl_pkg`/`cl_sym`.
+  **Bonus, ASCII and pre-existing: `$#Foo::Bar::x` emitted `Foo::Bar::@x`,
+  which SBCL cannot READ — the file died at load.**  Now `|Foo::Bar|::@x`
+  like every other emitter; 0 files in the four populations carry the shape
+  (measured), single-segment/bare emission byte-identical.  Guard rows 23–24.
+- **The interpolated hash-key autoquote was ASCII-only** (`_interp_hash_key`:
+  `/^-?[a-zA-Z_]\w*$/`, the same class the OLD scanner had at three sites), so
+  `"$ｈ{ｋ}"` went to the expression path and CALLED sub `ｋ` while `$ｈ{ｋ}` in
+  code was right.  Widened to `[^\W\d]` — perl's own identifier class under
+  `use utf8`, which the code-side twin (any PPI Word) already accepts.  Guard
+  row 22.
+
+**Ask 1 — the generation (`v2-171`, not the brief's `v2-165`): ACCEPTED, and
+the reasoning is right** — a rebased branch must carry a number ABOVE main's,
+or the cache key is re-mintable.  The collision it caused is MINE: the launch
+brief gave F `v2-171` without foreseeing the rebase renumber; F was told to
+move to `v2-173` before its final gate.  **Standing rule for the next round:**
+the launcher reserves per-agent strings with a GAP above main (e.g. +10, +20,
++30), so a rebase renumber never lands on a sibling's key; the final merge
+still renumbers ONCE to a fresh string.
+
+**Ask 2 — the `is_filehandle` gate: the NARROW gate STANDS.**  The mixed
+leaf (a PPI Word whose content was overwritten in place with CL text and is
+later fed back to `cl_name` as a perl name) is the real defect and is
+E5/#243-shaped; filed as **#434** with the acceptance (the gate becomes a plain
+`cl_sym`; emission A/B byte-identical), to be done when that seam is touched,
+not as a filler.
+
+**Ask 3 — no `not-supported.md` entry: CONFIRMED.**  After this change a
+non-ASCII name behaves as its ASCII twin wherever the twin is right and
+wherever it is wrong; the remaining absences (#430, #431) are ASCII bugs with
+their own tasks.
+
+**Filed by the review, not fixed — #435:** the #410 PPI token repair
+(`_merge_unicode_symbols`, Cast+Word → Symbol) runs only on the DOCUMENT
+parse; every FRAGMENT re-parse (StringInterpolation `_interp_reparse` /
+`_parse_postfix_deref`, ExprToCL's regex consumer, the Parser/Parser2
+mini-parses — eleven `PPI::Document->new` sites) skips it, so a non-ASCII
+variable inside an interpolated subscript or `@{[ … ]}` is mis-read:
+`"$Ｘ[$ｉ]"` SILENTLY reads element 0, `"$Ｈ{$ｋ}"` is empty, `"$Ｘ[$ｉ+1]"` dies
+"undefined function pl-ｉ".  Pre-existing; one shared fragment-document helper
+that applies the repairs (rule 11); land AFTER F (#422.2 is in the same family).
+
+**The one companion loss — `uni/gv.t` 53/28 → 50/31 — is ACCEPTED as spliced**:
+three accidental passes on `local *Ｊ = *Ｊ` (PCL's `local *NAME` loses the
+glob's slots, ASCII-identical, **#433**); the same family as s418's bless.t /
+split.t un-drops, where a fix stops two wrongs from cancelling.  The fifteen
+gains (three mro utf8 files fully passing, four uni files running at all)
+are the row prize O1.2 was sized for.  **#431** (AUTOLOAD not consulted for a
+qualified call) and **#432** (runpcl's spurious blank line — a measurement
+trap) stay filed.

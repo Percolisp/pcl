@@ -470,7 +470,14 @@ sub _array_index_container {
   }
   my $special = $SPECIAL_VARS{$content};
   return $special if defined $special && !ref $special;
-  return $content;
+  # THE #418 SPELLING (s425 review fix): this site built the array token BARE —
+  # `@Ｘ` read back NFKC-folded as `@X` ("The variable @X is unbound", code
+  # and strings alike), and a MULTI-segment package, `$#Foo::Bar::x`, emitted
+  # `Foo::Bar::@x`, which the reader cannot even READ (the file died at load;
+  # ASCII, pre-existing).  cl_pkg/cl_sym spell both halves the way every other
+  # emitter does: `|Foo::Bar|::@x`, `|@Ｘ|`; identity on single-segment ASCII.
+  return cl_pkg($1) . '::' . cl_sym($2) if $content =~ /^(.*)::(\@.+)$/;
+  return cl_sym($content);
 }
 
 # Generate code for a single node

@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 21;
+plan tests => 24;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -234,3 +234,21 @@ is(run_file_bytes(encode_utf8(
   like($ascii,   qr/\(p-open FH /,  'ASCII bareword FH stays bare at open (#418 inverse)');
   unlike($ascii, qr/\|FH\|/,        'ASCII bareword FH is never pipe-quoted (#418 inverse)');
 }
+
+# (4) A NON-ASCII bareword HASH KEY inside a dq string autoquotes like its ASCII
+# twin (s425 review probe): the interpolation autoquote predicate had an
+# ASCII-only head class, so `"$ｈ{ｋ}"` went to the expression path and called
+# sub ｋ (undefined-function crash) while `$ｈ{ｋ}` in code was right.
+is(run_bytes(encode_utf8('use utf8; my %ｈ = (ｋ => "v", k => "w"); print "$ｈ{ｋ}$ｈ{k}|", $ｈ{ｋ}, "\n";')),
+   "vw|v\n", 'INTERPOLATED non-ASCII hash key autoquotes like its ASCII twin (#418 residue)');
+
+# (5) $#NAME — the ArrayIndex emitter built the array token BARE, bypassing the
+# #418 spelling (s425 review probe): `$#Ｘ` read back as the NFKC-folded `@X`
+# ("unbound") in code and in strings alike; and the same site emitted a
+# MULTI-segment package as `Foo::Bar::@x`, which SBCL cannot read (ASCII,
+# pre-existing: the whole file died at load).  Both halves now go through
+# cl_pkg/cl_sym like every other emitter.
+is(run_bytes(encode_utf8('use utf8; our @Ｘ = (1,2,3); print $#Ｘ, " ", $#{Ｘ}, " ", "$#Ｘ $#{Ｘ}\n";')),
+   "2 2 2 2\n", '$#NAME with a non-ASCII name, code and string (#418 residue)');
+is(run_bytes('package Foo::Bar; our @x=(1,2); package Foo; our @x=(1,2,3); our @z=(1,2,3,4); print $#Foo::Bar::x, " ", $#Foo::x, " ", $#z, " ", $#Foo::z, " ", "$#Foo::Bar::x $#Foo::x $#z $#Foo::z\n";'),
+   "1 2 3 3 1 2 3 3\n", '$#Pkg::Seg::name (multi-segment package) is readable; single-segment and bare unchanged (ASCII inverse)');

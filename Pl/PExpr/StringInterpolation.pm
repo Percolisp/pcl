@@ -488,7 +488,12 @@ sub _interp_leaf_of {
 # as the expression it is.
 sub _interp_hash_key {
   my ($self, $parser, $guts) = @_;
-  if ($guts =~ /^-?[a-zA-Z_]\w*$/) {
+  # The identifier class is perl's own `\w` under `use utf8` — `$h{ｋ}` autoquotes
+  # the fullwidth ｋ exactly as `$h{k}` does, and the code-side twin takes any
+  # PPI Word.  An ASCII-only head class here sent `"$ｈ{ｋ}"` to the expression
+  # path, where the bareword became a CALL to sub ｋ (s425 review probe of
+  # #418; pre-existing in the old scanner, which had the same class).
+  if ($guts =~ /^-?[^\W\d]\w*$/) {
     my $tok = PPI::Token::Quote::Double->new('"' . $guts . '"');
     $tok->{separator} = '"';
     return $parser->make_node($tok);

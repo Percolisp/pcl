@@ -143,7 +143,21 @@ reference emitter hole (`@$r[0,1]` silent-wrong in CODE) fixed by one
 helper; my own 52-shape probe 51/51 identical to perl; gate 156/5641 (the 13
 xs rows), sweep TOTAL 18365 +0, drops 7.  Ratified the in-scope emitter half
 as a standing rule; consumer 2 scheduled as O4; ir-spec §3.2b added.
-(B and F results appended below as they land.)
+**B (s423, the #418 finisher) MERGED** (`f02fe2a`, fast-forward): ONE rule in
+ONE helper (`Pl::CLForm::cl_sym`/`cl_pkg`, identity on ASCII) + one runtime
+guard (`%pcl-invert-case` is the identity on a non-ASCII name); three seams
+the inherited diff missed (the `pl2cl` eval-preamble copy, `open ＦＨ` emitted
+bare, the qualified quoted sigil swap); emission A/B 738 files = 52 DIFF, all
+52 carrying a bare non-ASCII token before, 0 after; gate 156/5655, sweep
+TOTAL 18365 +0; uni/+mro/ legs 16 movers, 15 gains (3 mro utf8 files fully
+passing), one accepted loss (#433).  My probe found two residues, fixed in the
+merge commit with guard rows 22–24: `$#Ｘ` built bare at the ArrayIndex site
+(and `$#Foo::Bar::x` was an ASCII READ ERROR), and the interpolated hash-key
+autoquote was ASCII-only (`"$ｈ{ｋ}"` called sub ｋ).  Filed #434 (the mixed
+Word leaf, B's ask 2), #435 (fragment re-parses skip the #410 repair —
+`"$Ｘ[$ｉ]"` silently reads element 0).  Generation collision (B took F's
+`v2-171` by rebasing) handled: F told to move to v2-173; launcher rule = a gap.
+(F result appended below when it lands.)
 
 
 ## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered
