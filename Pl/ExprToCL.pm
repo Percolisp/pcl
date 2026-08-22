@@ -4013,8 +4013,8 @@ sub gen_transliteration_form {
   my $mods = $node->get_modifiers;
 
   # Process tr escape sequences to actual characters, then build safe CL literals
-  my $from_cl = _cl_string_literal(_expand_tr_escapes($from));
-  my $to_cl   = _cl_string_literal(_expand_tr_escapes($to));
+  my $from_cl = cl_string_literal(_expand_tr_escapes($from));
+  my $to_cl   = cl_string_literal(_expand_tr_escapes($to));
 
   my @mod_strs = map { ":$_" } sort keys %$mods;
   return ['p-tr', $from_cl, $to_cl, @mod_strs];
@@ -4283,7 +4283,11 @@ our $BAD_CHAR_RE = qr/[\x{D800}-\x{DFFF}\x{FFFE}\x{FFFF}]|[^\x{0}-\x{10FFFF}]/;
 our $SAFE_CHARS  = qr/[\x{0}-\x{D7FF}\x{E000}-\x{FFFD}\x{10000}-\x{10FFFF}]/;
 use constant MAX_CL_CODEPOINT => 0x10FFFF;   # SBCL char-code-limit - 1
 
-sub _cl_string_literal { Pl::CLForm::to_flat(_cl_string_literal_form(shift)) }
+# PUBLIC (s435): the tree's ONE string-literal escaper, and the only code
+# that renders the uni/ corpus's unrepresentable characters.  Named without
+# the underscore because Pl/Parser.pm's drop form calls it across the module
+# boundary -- it escapes the dropped statement's own source text.
+sub cl_string_literal { Pl::CLForm::to_flat(_cl_string_literal_form(shift)) }
 sub _cl_string_literal_form {
   my $content = shift;
   # Characters invalid in UTF-8: surrogates U+D800-U+DFFF, and non-chars U+FFFE/U+FFFF

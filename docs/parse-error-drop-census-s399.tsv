@@ -1,7 +1,38 @@
 # parse-error-drop-census-s399.tsv — every file whose EMITTED CL contains a
 # `;; PARSE ERROR:` progn, i.e. a statement the compiler could not lower and
-# replaced with nil.  This is the #138 family (the silently deleted statement),
-# measured over the whole population for the first time (s399, task #343).
+# replaced.  This is the #138 family, measured over the whole population for
+# the first time (s399, task #343).
+#
+# SINCE s435 THESE DROPS ARE LOUD AT RUN TIME, not silent.  The flip (ruled
+# docs/fable-answers-s433.md §A.1, Option B phase 2's last step) replaced the
+# `nil` with a `p-die` carrying the file, line, source text and reason, so a
+# program that REACHES a dropped statement now dies there — perl-shaped and
+# trappable — instead of running on without it.  The `;; PARSE ERROR:` comment
+# is unchanged and still the key every counter reads, so this census means
+# exactly what it always did: the compiler's own list of what it cannot
+# lower.  What changed is the PRICE of a row — it is now paid by the program
+# that runs the file, which is the point: a row here is a gap someone will
+# notice.  (The counted drop is still not the whole #138 family: a statement
+# the compiler lowers WRONGLY is invisible to this file either way.)
+#
+# THE PRICE, MEASURED AT THE FLIP (s435): 55 rows across 4 perl-tests files.
+# The unit of the DECISION is the STATEMENT; the unit of the LOSS is the
+# enclosing TOP-LEVEL FORM -- and a file-level `my` compiles to one `let`
+# around the whole remainder of the file, so ONE drop can cost every row
+# after it (perl-tests/method.t: 1 drop, 39 unrun rows).  perl's own loss
+# unit for an untrapped run-time die is the whole remaining PROGRAM, and
+# both measurement runners' p-load-with-recovery (#467) already narrows
+# that to the one form, so PCL post-flip loses LESS than perl would given
+# the same program.  A file whose loss is out of proportion PROMOTES its
+# drop's owner task -- it does not bend the flip (ruled s435).
+#
+# A SIXTH POPULATION IS NOT COUNTED HERE: a drop inside a fresh_perl/
+# runperl CHILD program.  This census reads emitted .lisp files, and a
+# child is transpiled from a STRING at run time, so it appears in no
+# population above.  Two are known (perl-tests/split.t:682,
+# perl-tests/bop.t:701) and both surfaced only because the flip made the
+# child die instead of silently printing nothing.  Size unknown -- task
+# #472 is the instrument.
 #
 # Columns: <rel-path><TAB><drops in the file><TAB><the compiler's own message(s),
 # with a count each>.

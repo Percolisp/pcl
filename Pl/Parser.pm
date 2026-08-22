@@ -9046,7 +9046,7 @@ sub _parse_expression_internal {
   if ($@) {
     my $error = $self->_shape_expr_error($@);
     $self->_announce_dropped_statement($parts, $stmt, $error);
-    return ("(progn ;; PARSE ERROR: $error\n nil)", []);
+    return ($self->_dropped_statement_cl($parts, $stmt, $error), []);
   }
 
   return ($result // ";; (no output)", \@decls);
@@ -9302,11 +9302,75 @@ sub _ruled_refusal_for_drop {
 }
 
 # THE DROP ANNOUNCEMENT (task #339, ruled fable-answers-s400.md §6.2).
-# Both PARSE ERROR emitters above replace a whole statement with `nil` and let
-# the program run on — the #138 family, and the worst failure mode in this
-# codebase, because it is SILENT: perl-tests/bless.t drops a test row that then
-# appears in no count, in a file the sweep reports as passing.  So the one
-# place where the statement is actually lost says so, once, on stderr:
+# THE DROP SITE — file, line, source text — built in ONE place, because two
+# things must name the SAME statement: the transpile-time announcement below,
+# and the RUN-TIME die the two PARSE ERROR emitters now emit (rule 11).  The
+# @src elements come back too: the ruled-refusal classifier reads them.
+sub _drop_site {
+  my ($self, $parts, $stmt) = @_;
+  my $file = $self->has_filename ? $self->filename : '-';
+  # The statement is the best source text when the caller has it; otherwise the
+  # token list it was called with is exactly what could not be lowered.
+  my @src = (ref($stmt) && eval { $stmt->isa('PPI::Element') })
+          ? ($stmt)
+          : grep { ref($_) && eval { $_->isa('PPI::Element') } }
+                 (ref($parts) eq 'ARRAY' ? @$parts : ());
+  my $line = 0;
+  for my $s (@src) { $line = $s->line_number // 0; last if $line }
+  my $text = join '', map { $_->content // '' } @src;
+  $text =~ s/\s+/ /g;
+  $text =~ s/^ //; $text =~ s/ $//;
+  $text = substr($text, 0, 120) . '...' if length($text) > 123;
+  $text = '(no source text)' unless length $text;
+  return ($file, $line, $text, \@src);
+}
+
+# THE DROP FORM — the announce->DIE flip (Option B phase 2's last step; ruled
+# docs/fable-answers-s433.md §A.1, executed s435).
+#
+# A statement the compiler cannot lower is still REPLACED, and the
+# `;; PARSE ERROR: <reason>` comment stays BYTE-FOR-BYTE — it is what
+# tools/drop-census.pl, tools/corpus-diff.pl's SILENT-DROP counter and both
+# runners' `drops` column read, so the census stays the gap-finder and the
+# gate.  What takes the statement's place is no longer `nil`:
+#
+#   (progn ;; PARSE ERROR: <reason>
+#     (pcl:p-die "PCL: statement not supported at F line N: <text> -- <reason>\n"))
+#
+# ONE shape for every drop in every mode — no exempt/registered/deliberate/gap
+# classifier here.  That distinction is the CENSUS's (it owns the reasons and
+# their owners), and a classifier in the emitter would be asymmetric in the
+# dangerous direction: a MISS on a registered row would kill a whole file.
+#
+# The unit is the STATEMENT, which is what makes the flip affordable: every row
+# before it still runs, a program that never reaches the statement is
+# unaffected, and one that does gets perl's own `die` — trappable in `$@`,
+# assertable in a test row.  Module mode is covered by construction: the die is
+# IN the emission, so it survives the module cache and needs no announcement
+# (`pl2cl --module` still says nothing, ruled s403 — the statement now says it
+# itself, when it is reached).
+#
+# The message ends in "\n" so p-die does NOT append its " at FILE line N."
+# suffix: the location is already in the text, and it is the PERL file's line,
+# not the generated CL's.  The text goes through the string-literal escaper
+# (it carries quotes, backslashes and, in the uni/ corpus, characters CL cannot
+# spell bare).
+sub _dropped_statement_cl {
+  my ($self, $parts, $stmt, $error) = @_;
+  my ($file, $line, $text) = $self->_drop_site($parts, $stmt);
+  my $msg = "PCL: statement not supported at $file line $line: $text -- $error\n";
+  return "(progn ;; PARSE ERROR: $error\n "
+       . "(pcl:p-die " . Pl::ExprToCL::cl_string_literal($msg) . "))";
+}
+
+# Both PARSE ERROR emitters above replace a whole statement.  They USED to
+# replace it with `nil` and let the program run on — the #138 family, and the
+# worst failure mode in this codebase, because it was SILENT: perl-tests/
+# bless.t dropped a test row that then appeared in no count, in a file the
+# sweep reported as passing.  Since s435 the replacement is a `p-die`
+# (`_dropped_statement_cl` above), so the statement is loud twice: when the
+# file is COMPILED, by the announcement below, and when it is REACHED, by the
+# die.  This is what the announcement says, once, on stderr:
 #
 #   PCL: statement dropped at FILE line N: <source text> -- <reason>
 #
@@ -9315,10 +9379,13 @@ sub _ruled_refusal_for_drop {
 # here because pl2cl does `binmode(STDERR, ":utf8")`, so a raw UTF-8 em dash in
 # the source would be DOUBLE-encoded on the way out, and a `\x{2014}` character
 # would warn "Wide character" under any entry point without that layer.  Every
-# other diagnostic in this compiler is ASCII for the same reason.)  It is a TRANSPILE-time diagnostic — the runtime never sees a
-# drop — and pl2cl's exit status stays 0; a drop becomes a DIE only at the end
-# of Option B phase 2, when the census is explained and near zero (#343, ruled
-# §6.4).  In eval-string mode the transpile runs in the `pl2cl --server`
+# other diagnostic in this compiler is ASCII for the same reason.)  It is a
+# TRANSPILE-time diagnostic and pl2cl's exit status stays 0 — the RUN-time
+# half of a drop is the emitted die, which is a separate event with its own
+# wording (`statement not supported`, not `statement dropped`), deliberately:
+# an uncaught die prints to stderr too, and one shared verb would let a
+# run-time death be miscounted as a transpile announcement by the runners that
+# key on this prefix.  In eval-string mode the transpile runs in the `pl2cl --server`
 # subprocess, whose stderr the runtime discards (`:error nil`), so this line
 # is a file-mode diagnostic in practice.
 #
@@ -9345,20 +9412,10 @@ sub _announce_dropped_statement {
   return if !$self->eval_mode
          && !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
 
-  my $file = $self->has_filename ? $self->filename : '-';
-  # The statement is the best source text when the caller has it; otherwise the
-  # token list it was called with is exactly what could not be lowered.
-  my @src = (ref($stmt) && eval { $stmt->isa('PPI::Element') })
-          ? ($stmt)
-          : grep { ref($_) && eval { $_->isa('PPI::Element') } }
-                 (ref($parts) eq 'ARRAY' ? @$parts : ());
-  my $line = 0;
-  for my $s (@src) { $line = $s->line_number // 0; last if $line }
-  my $text = join '', map { $_->content // '' } @src;
-  $text =~ s/\s+/ /g;
-  $text =~ s/^ //; $text =~ s/ $//;
-  $text = substr($text, 0, 120) . '...' if length($text) > 123;
-  $text = '(no source text)' unless length $text;
+  # ONE builder for the site (above): this line and the emitted die must name
+  # the same statement, or the two halves of a drop read as two events.
+  my ($file, $line, $text, $src) = $self->_drop_site($parts, $stmt);
+  my @src = @$src;
 
   # A RULED REFUSAL COMES FIRST (Track A, #371): for the five families above
   # this statement is not a compiler gap but a feature PCL does not have, and
@@ -9421,7 +9478,7 @@ sub _parse_expression_form {
   if ($@) {
     my $error = $self->_shape_expr_error($@);
     $self->_announce_dropped_statement($parts, $stmt, $error);
-    return Pl::CLForm::raw("(progn ;; PARSE ERROR: $error\n nil)");
+    return Pl::CLForm::raw($self->_dropped_statement_cl($parts, $stmt, $error));
   }
 
   return $form // Pl::CLForm::raw(";; (no output)");

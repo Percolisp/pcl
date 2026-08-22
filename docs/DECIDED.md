@@ -11,6 +11,53 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s435 (2026-08-23, Opus 5) — Q2: THE FLIP is in the tree (a dropped statement DIES when reached, trappable); the loss unit is the TOP-LEVEL FORM, not the statement; Q2 NOT closed
+
+- **The flip shipped in the ruled shape** (`fable-answers-s433.md` §A.1): both
+  `PARSE ERROR` emitters replace the statement with a `p-die` naming file, line,
+  source text and reason.  The `;; PARSE ERROR:` comment is byte-identical — all
+  four counters key on that text, never on the `nil`.  One shape, every mode, no
+  classifier.  Guard `Pl/t/drop-die-01.t`; generation **v2-178**; gate 161/5715.
+- **`p-die`'s no-location branch was `(error msg)` — the message was a CL FORMAT
+  CONTROL string.**  Found in review.  This flip is the first emitter to feed
+  arbitrary user SOURCE TEXT through it, so any drop containing `~` (every `=~`)
+  raised an UNTRAPPABLE `sb-format:format-error` that killed the file.  Now
+  `(error "~A" msg)`.  **A perl die message is DATA; it never reaches a format
+  control position.**  All 12 internal callers with a `~` pre-resolve through an
+  inner `(format nil …)`, so none relied on directives — and several build their
+  message from user data, so the fix closes a latent hole for them too.
+- **THE COST MODEL (record this): the unit of the DECISION is the STATEMENT; the
+  unit of the LOSS is the enclosing TOP-LEVEL FORM.**  A file-level `my` compiles
+  to one `let` around the whole remainder of the file, so ONE drop can cost every
+  row after it (op/method.t: 1 drop, 39 unrun rows).  Not a regression against
+  perl: perl's loss unit for an untrapped die is the whole remaining PROGRAM, and
+  per-form recovery (#467) already narrows that to the form — PCL loses LESS.
+  **RULED s435: accept, no narrowing** (every narrowing re-creates the sin the
+  flip exists to kill).  **A file whose loss is out of proportion PROMOTES its
+  drop's owner task; it does not bend the flip.**
+- **Measured price.** perl-tests TOTAL 18366 → **18311 (-55)**, four files, both
+  baselines edited ROW BY ROW with causes naming each drop's `file:line` and
+  owner.  Companion `--all --quick`: **-117 C_ok over 11 files**, and every one of
+  the 13 non-TIMEOUT movers reproduces its SNAPSHOT value on a HEAD worktree, so
+  all are this change ("pre-existing is WHEN, not WHY").
+- **A SIXTH, UNCOUNTED drop population (#472)**: every instrument reads emitted
+  `.lisp` FILES, but a `fresh_perl`/`runperl` CHILD is transpiled from a string at
+  run time.  Two known (perl-tests/split.t:682, bop.t:701) — **both were rows
+  passing on nothing for years** (they assert the child prints nothing; PCL
+  dropped the child's only statement, so it did).  The flip exposed them.
+- **The compiler side has NO memory cap (#471)** — filed after a self-recursive
+  helper stub took 7.76 GB, exhausted swap and hung the machine into a global
+  OOM kill.  Under a cap the same bug dies in ~5 s naming itself; unbounded, the
+  depth-100 deep-recursion warning fired and changed nothing.  **A warning does
+  not stop an allocation.**  RULED: fix at the `pl2cl` seam (every compiler-side
+  tool spawns it), own filler commit.
+- `drop-census-s419-flip-gate.md`'s "lvalue family is permanently EXEMPT from the
+  flip" is **STRUCK** — §A.1 killed emitter-side classifiers; it stays a
+  REGISTERED absence, which is a census/doc fact, not an emission one.
+- **Q2 IS NOT CLOSED**: the four-population A/B, the three-dist board re-run, a
+  confirming sweep, and the `perl-suite-run.tsv` row edits are unrun (for time,
+  not blocked).  `docs/opus5-review-requests-s435.md` §6 is the list.
+
 ## s434 (2026-08-22, Opus 5) — Q1: the two instruments.  BOTH measurement runners load with RECOVERY; the drop census has FIVE populations; a snapshot hole is PRINTED, from both sides
 
 - **#467 DONE: `tools/run-perl-suite.pl` loads the emitted CL with

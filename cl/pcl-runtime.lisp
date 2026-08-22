@@ -8475,8 +8475,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; String exception
         (let ((msg (apply #'p-string-concat args)))
           (cond
-            ;; No location marker: exact legacy behavior.
-            ((null loc) (error msg))
+            ;; No location marker.  "~A", never (error msg): the message is
+            ;; DATA, and `(error msg)` would make it a format CONTROL string.
+            ;; Every perl die message can carry a `~` -- the drop form (s435)
+            ;; embeds arbitrary user SOURCE TEXT, so `f() = ($x =~ /b/)` fed
+            ;; `~ ` to the format engine and raised an untrappable
+            ;; sb-format:format-error that killed the whole file instead of
+            ;; setting $@.  The other branches below were already "~A"; this
+            ;; one was the last one that was not.  It is latent for the
+            ;; runtime's own callers too -- several build their message from
+            ;; user data (a method name, a module name) via an inner
+            ;; (format nil ...), and a `~` in THAT data lands here the same way.
+            ((null loc) (error "~A" msg))
             ;; Message ends in newline: Perl does NOT append a location.
             ((and (> (length msg) 0)
                   (char= (char msg (1- (length msg))) #\Newline))
@@ -11937,7 +11947,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-177"
+(defparameter *pcl-cache-generation* "v2-178"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

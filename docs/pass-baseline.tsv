@@ -1,4 +1,44 @@
 # taken-at: 5323d9e 2026-08-15
+# s435 (THE FLIP — Option B phase 2's last step; ruled fable-answers-s433.md
+#   §A.1, accept-the-price ruled in the s435 review): a statement the compiler
+#   cannot lower is no longer replaced by `nil` with the program running on —
+#   it is replaced by a `p-die`, so reaching it dies, perl-shaped and trappable.
+#   FOUR files lost rows, all EDITED BY HAND, none re-blessed.  TOTAL passing
+#   18366 -> 18311 (-55).  THE COST MODEL, recorded because it is what a future
+#   session will want: the unit of the DECISION is the STATEMENT, but the unit
+#   of the LOSS is the enclosing TOP-LEVEL FORM.  (perl's own loss unit for an
+#   untrapped run-time die is the whole remaining program; the sweep's
+#   p-load-with-recovery, #467, already narrows that to the one form — so PCL
+#   post-flip loses LESS than perl would given the same program.)  The lost
+#   rows are not a debt written off: each names a census owner below, and the
+#   rows return when that gap closes.
+#   substr.t 375 -> 347, status OK -> PARTIAL (ran 353 of 397).  Two drops,
+#     both the lvalue-sub refusal (`bar = "XXX"` substr.t:697 and
+#     `ta_tindex() = 23` substr.t:900) — census family 1, a REGISTERED absence
+#     (not-supported.md §Lvalue subroutines), no owner task because it is
+#     deliberate.  Drop 1 sits in a 190-line top-level form with 18 later
+#     test-calls in a loop, drop 2 in the file's last form with 4.  The old
+#     "OK" was a false OK — a file reported complete while missing two
+#     statements; PARTIAL is the honest status and the honest fix target.
+#   method.t 97 -> 72 (ran 124 of 163).  ONE drop — `is((method $obj "a","b",
+#     "c"), …)` at method.t:72, the indirect-object family, census family 10,
+#     owner **#399**.  It sits inside the top-level `(let (($obj …)) (let
+#     (($mname …)) …))` that a file-level `my` wraps around the whole rest of
+#     the file, so one drop costs 39 unrun rows.  This is the multiplier the
+#     ruling did not have: a file whose loss is out of proportion PROMOTES its
+#     drop's owner task, it does not bend the flip.
+#   split.t 178 -> 177 and bop.t 253 -> 252.  Both are the ACCIDENTAL-PASS kind
+#     and both are IMPROVEMENTS: a `fresh_perl_is(…, '')` whose child program's
+#     only statement is a drop.  The child used to print nothing, so the row
+#     matched '' and passed while testing nothing; the child now dies, so the
+#     row fails honestly and joins fail-baseline.tsv.  split.t:682 "scalar
+#     split stack overflow" (child `split//.0>60for"0000…"`); bop.t:701
+#     "[perl #17844] access beyond end of block" (child `formline X000n…`,
+#     the registered §format/write absence).  Attributed on a HEAD worktree,
+#     and each child probed alone vs perl — bop.t's other two children are
+#     unaffected.  NOTE: these two are the sixth population — a drop inside a
+#     fresh_perl/runperl CHILD is invisible to the drop census, which reads
+#     emitted .lisp files (task #472).
 # s432 (#456 half (a), the forward-declaration stub): sort.t 203 -> 202 EDITED BY
 #   HAND, and its status OK -> PARTIAL.  The lost row is `cmp_ok($answer,'eq',
 #   'good','bug 36430')` (sort.t:870), which was an ACCIDENTAL pass: the block's
@@ -78,7 +118,7 @@ auto.t	OK	47	0	47
 bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
-bop.t	PARTIAL	253	256	510
+bop.t	PARTIAL	252	257	510
 caller.t	PARTIAL	15	49	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
@@ -127,7 +167,7 @@ local.t	OK	303	13	319
 loopctl.t	OK	67	0	67
 lop.t	OK	47	0	47
 magic.t	PARTIAL	150	39	208
-method.t	PARTIAL	97	34	163
+method.t	PARTIAL	72	26	163
 min_local.t	OK	10	0	10
 multideref.t	PARTIAL	42	10	65
 my.t	OK	52	0	52
@@ -159,13 +199,13 @@ signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	PARTIAL	202	1	205
 splice.t	OK	34	0	34
-split.t	OK	178	6	219
+split.t	OK	177	7	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
 state.t	TRANSPILE_FAIL	0	0	166
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
-substr.t	OK	375	8	397
+substr.t	PARTIAL	347	3	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257

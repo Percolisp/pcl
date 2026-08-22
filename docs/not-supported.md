@@ -375,9 +375,14 @@ ways vs perl 5.40.3, task #381).
   `new Text::CSV`, `new HTML::Lint`; perl's own t/ 3 lines; perl-tests 0;
   lib/ 0) is one of these, and all probe identical to perl.
 * **The SCALAR / BLOCK invocant spelling does NOT**: `my $d = doit $c "FOO";`
-  is a #138-family **drop**, announced as
+  is a #138-family **drop**, announced at transpile time as
   `PCL: statement dropped at FILE line N: … -- Bug. Fell through. Missing case`
-  and the program continues without it.  The whole drop census carries
+  — and, since the s435 flip, the statement DIES when the program reaches it
+  (`PCL: statement not supported at FILE line N: … -- Bug. Fell through.
+  Missing case`, perl-shaped and trappable in `$@`).  It no longer vanishes
+  silently: the cost is the rest of the statement's own top-level form, which
+  both measurement runners recover from (`p-load-with-recovery`, #467), not
+  the file.  The whole drop census carries
   exactly two such rows — `perl-tests/ref.t:334` (`$foo = doit $object
   "FOO";`) and `perl-tests/method.t:72` (`is((method $obj "a","b","c"), …)`)
   plus their `t/op/` twins.  Its twin mis-read is **#381**: `WORD BAREWORD`
@@ -994,17 +999,28 @@ supported, both as direct assignment targets and as live references:
 Only user-defined `: lvalue` subs remain unsupported.
 
 **What happens to the assignment (ruled s401, `docs/fable-answers-s400.md`
-§6.3).**  perl refuses to compile the whole FILE; PCL is finer-grained and
-deliberately so.  In FILE mode PCL **drops the assignment statement** — it is
-replaced by `nil`, execution continues, and the drop ANNOUNCES itself on
-stderr at transpile time (`PCL: statement dropped at F line N: … -- PCL: Can't
-modify non-lvalue subroutine call in assignment`, task #339).  In EVAL-STRING
-mode the error propagates instead, so the `eval` returns undef and sets `$@`
-exactly as perl's compile error does — which is what a feature probe
-(`eval 'return 1; &_sub = 1'`) is asking.  The file-mode drop is kept
-deliberately: dying at transpile would take every other row of
-`perl-tests/substr.t` and `t/op/sub_lval.t` with it (the s329 boundary — the
-sin was the silence, and the announcement removes it).  33 of the 379 drops in
+§6.3; re-ruled `docs/fable-answers-s433.md` §A.1 and FLIPPED s435).**  perl
+refuses to compile the whole FILE; PCL is finer-grained and deliberately so.
+In FILE mode PCL replaces the assignment statement with a **run-time `die`**:
+the program runs normally until it REACHES the statement, and then dies with
+
+```
+PCL: statement not supported at F line N: bar = "XXX"; -- PCL: Can't modify non-lvalue subroutine call in assignment
+```
+
+which is perl-shaped and TRAPPABLE — `eval { … }; $@` sees it like any other
+`die`.  It is no longer replaced by `nil` with execution continuing: that was
+the #138 silent-drop family, and this flip is Option B phase 2's last step.
+The transpile-time announcement stays as well (`PCL: statement dropped at F
+line N: … -- PCL: Can't modify non-lvalue subroutine call in assignment`,
+task #339), so the drop is visible when the file is COMPILED and again when it
+is REACHED.  In EVAL-STRING mode the error still propagates at transpile time
+instead, so the `eval` returns undef and sets `$@` exactly as perl's compile
+error does — which is what a feature probe (`eval 'return 1; &_sub = 1'`) is
+asking.  Dying at TRANSPILE is still refused: that would take every other row
+of `perl-tests/substr.t` and `t/op/sub_lval.t` with it, whereas the run-time
+die costs only the rows at or after the statement inside its own top-level
+form (the s329 boundary — the sin was the silence).  39 of the 102 drops in
 `docs/parse-error-drop-census-s399.tsv` are this refusal.
 
 **Rationale:** Implementing user lvalue subs requires an "lvalue context"

@@ -1432,6 +1432,56 @@ too — it is the marker that tells a generated artifact apart from a
 hand-written source file, which is the difference between "this path is a
 bug" and "this path is a build-machine artifact of the emitter".
 
+### 9.3 The drop form: a statement the compiler could not lower (normative, s435)
+
+Where a statement of the source program could not be lowered, the emitter puts
+this in its place:
+
+```lisp
+(progn ;; PARSE ERROR: <reason>
+  (p-die "PCL: statement not supported at FILE line N: <source text> -- <reason>
+"))
+```
+
+**What it means at run time.** Reaching the form signals a Perl `die` carrying
+that message. Every statement before it has already run; every statement after
+it *in the same top-level form* does not. It is trappable exactly like any
+other `die` — `eval { … }; $@` sees it — because it is one. FILE and N name the
+**Perl** source, not the generated file; no `(:loc …)` marker is emitted, and
+the message ends in a newline, so no ` at FILE line N.` suffix is appended
+(§the `p-die` contract, and perl's own rule for newline-terminated messages).
+
+**The unit of the decision is the statement; the unit of the LOSS is the
+enclosing top-level form.** The compiler decides per statement, but a signalled
+condition unwinds to whatever handler the loader established, and that is one
+top-level form. A file-level `my` compiles to a `let` around the whole
+remainder of the file, so a drop under it costs every row after it in that
+form. This is not a regression against Perl: an untrapped run-time `die` at
+file scope costs perl the whole remaining program, so a translator that loads
+form-by-form with per-form recovery (as PCL's measurement runners do) loses
+strictly less. A translator that loads a generated file as ONE unit will lose
+the remainder, exactly as perl does.
+
+**What a translator must do: reproduce the die.** Do not lower it to a no-op.
+A silently discarded statement is the #138 family — the worst failure mode in
+this codebase — and this form exists to end it: the statement takes a test row
+or a side effect with it while every count still looks healthy.
+
+**One shape, every drop, every mode.** There is no classifier in the emitter
+that makes some drops die and others continue. The distinction between "a gap
+PCL intends to close" and "a feature PCL deliberately refuses" lives in
+`docs/parse-error-drop-census-s399.tsv` and `docs/not-supported.md`, never in
+the emission — a classifier here would be asymmetric in the dangerous
+direction, since one miss would kill a whole file. Module mode is covered by
+construction: the die is *in* the emission, so it survives the module cache
+(the transpile-time stderr announcement is suppressed there, ruled s403 —
+the statement now says so itself, when it is reached).
+
+**The comment is load-bearing to tooling, not to semantics.** PCL's census,
+`tools/corpus-diff.pl`'s SILENT-DROP counter and both measurement runners'
+`drops` column all find drops by the exact text `;; PARSE ERROR:`. A
+translator may discard the comment; PCL's emitter may not reword it.
+
 ## 10. Op inventory — family rules
 
 The full inventory is the export list of the runtime namespace (~500
