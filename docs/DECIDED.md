@@ -39,6 +39,20 @@ not-supported.md → only then probe.*
   PPI's LEXER failing a whole file on `for my $Ｉ (…)` — is upstream and
   already logged, `ppi-upstream-bugs.md` §23 addendum; it is unreachable from
   a token repair and stays PPI's.)
+- **A prototype belongs to the package that DECLARES the sub (#421)**.  The
+  `prototypes` table was one flat bare-name hash — the #413 convention — so
+  two packages declaring the same bare name with different prototypes
+  collided and the LAST registration won for every call site: a SILENT WRONG
+  in one declaration order (`package A; print f 1, 2` gave `A:1`, perl
+  `A:12`) and a DROP in the other (`print C::h { "y" } 7, 8` → "Missing
+  case: [").  A second table `pkg_prototypes` ({bare => {pkg => info}}) is
+  filled at the same seam and **consulted only when a bare name has more than
+  one declaring package** — with 0 or 1 the flat table IS that entry, so every
+  non-colliding program takes exactly the path it took before (corpus-diff
+  IDENTICAL, lib A/B SAME=22).  An unqualified call resolves in
+  `current_package`, a qualified one in its own qualifier, and **the flat
+  table stays the fallback** because that is how an IMPORTED prototype
+  reaches a call site.  Guard `Pl/t/prototype-01.t` (9 rows, beside #413's).
 
 ## s426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer; #420 + #422.1 CLOSED
 

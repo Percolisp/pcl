@@ -1529,7 +1529,11 @@ sub parse {
           my $fp = $self->fallback_parser;
           my $sig_info = $fp->capture_v1(
             sub { $fp->parse_prototype_or_signature($proto, $sub) })->{result};
-          $self->environment->add_prototype($sub->name, $sig_info);
+          # The DECLARING package goes with the prototype, exactly as it goes
+          # with the declaration below it: two packages may declare the same
+          # bare name with different prototypes (task #421).
+          $self->environment->add_prototype($sub->name, $sig_info,
+                                            $self->_effective_pkg($sub, $seg->{pkg}));
           $self->environment->add_declared_sub($sub->name, $self->_effective_pkg($sub, $seg->{pkg}),
                                              Pl::PExpr::TokenUtils::decl_site($sub));
           next;
@@ -1544,7 +1548,8 @@ sub parse {
         my $prev_proto = $self->environment->get_prototype($sub->name);
         if (!($prev_proto && $prev_proto->{from_attr})) {
           $self->environment->add_prototype($sub->name,
-                                            { params => [], min_params => -1, is_proto => 0 });
+                                            { params => [], min_params => -1, is_proto => 0 },
+                                            $self->_effective_pkg($sub, $seg->{pkg}));
         }
         # Forward declaration `sub foo;` (no block) reserves the name only — v1
         # emits (p-declare-sub) and no definition.  No sub_info: there is

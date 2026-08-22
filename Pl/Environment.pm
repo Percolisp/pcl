@@ -66,6 +66,18 @@ has prototypes => (
     default => sub { _builtin_prototypes() },
 );
 
+# The SAME entries, keyed by the DECLARING package: { bare => { pkg => info } }.
+# `prototypes` above is one flat bare-name table, so two packages declaring the
+# same sub name with different prototypes collide and the LAST registration
+# wins for every call site (task #421: a silent wrong in one declaration order,
+# a DROP in the other).  This table is consulted ONLY when a bare name has more
+# than one declaring package — with 0 or 1 the flat table IS that entry, so
+# every non-colliding program takes exactly the path it took before.
+has pkg_prototypes => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 # Names in the module's @EXPORT/@EXPORT_OK (set only on the throwaway env a
 # _extract_module_prototypes parse fills in).  Sub EXISTENCE is parse data:
 # a bareword before a comma is a call only for a KNOWN sub, so the caller's
@@ -425,7 +437,27 @@ sub get_prototype {
     my $self = shift;
     my $name = shift;
 
-    return $self->prototypes->{ _bare_sub_name($name) };
+    return $self->_proto_entry($name);
+}
+
+# THE one prototype lookup (task #421).  A qualified spelling names its own
+# package; an unqualified one is resolved in the CURRENT package, which is
+# what perl resolves it in.  The per-package table is consulted only when the
+# bare name actually has competing declarations — otherwise the flat table is
+# that same entry, and this stays a pure no-op.  When the current package has
+# no declaration of its own the flat table answers, because that is how an
+# IMPORTED sub's prototype reaches a call site (imports are recorded under the
+# exporting module's name, or under no package at all).
+sub _proto_entry {
+    my ($self, $name) = @_;
+    my $bare = _bare_sub_name($name);
+    my $per  = $self->pkg_prototypes->{$bare};
+    return $self->prototypes->{$bare} if !$per || keys(%$per) < 2;
+    my $pkg = (defined $name && $name =~ /\A(.+)::[^:]+\z/)
+            ? $1
+            : ($self->current_package // 'main');
+    return $per->{$pkg} if exists $per->{$pkg};
+    return $self->prototypes->{$bare};
 }
 
 =head2 has_prototype($name)
@@ -440,7 +472,7 @@ sub has_prototype {
     my $self = shift;
     my $name = shift;
 
-    return exists $self->prototypes->{ _bare_sub_name($name) };
+    return defined $self->_proto_entry($name);
 }
 
 =head2 get_min_params($name)
@@ -456,7 +488,7 @@ sub get_min_params {
     my $self = shift;
     my $name = shift;
 
-    my $sig_info = $self->prototypes->{ _bare_sub_name($name) };
+    my $sig_info = $self->_proto_entry($name);
     return undef unless $sig_info;
     return $sig_info->{min_params};
 }
@@ -493,12 +525,24 @@ sub _bare_sub_name {
     return $name;
 }
 
+# $package is the DECLARING package — the one perl installs the sub in.  A
+# qualified NAME carries it and wins (the #413 rule); otherwise the caller
+# supplies it (the sub pre-scan already computes it for add_declared_sub) and
+# the current package is the fallback.  The entry goes in BOTH tables: the
+# flat one keeps answering for imports and for every non-colliding name, the
+# per-package one settles a collision (task #421).
 sub add_prototype {
     my $self     = shift;
     my $name     = shift;
     my $sig_info = shift;
+    my $package  = shift;
 
-    $self->prototypes->{ _bare_sub_name($name) } = $sig_info;
+    my $bare  = _bare_sub_name($name);
+    my $owner = (defined $name && $name =~ /\A(.+)::[^:]+\z/) ? $1
+              : (defined $package ? $package : ($self->current_package // 'main'));
+
+    $self->prototypes->{$bare} = $sig_info;
+    $self->pkg_prototypes->{$bare}{$owner} = $sig_info;
 }
 
 =head2 is_filehandle($name)
@@ -869,11 +913,18 @@ sub merge {
     my $self  = shift;
     my $other = shift;
 
-    # Merge prototypes
+    # Merge prototypes — both tables, or a merged-in name would be invisible
+    # to the per-package lookup and a collision would resolve by the flat
+    # table alone (task #421).
     for my $name (keys %{$other->prototypes}) {
         $self->prototypes->{$name} = $other->prototypes->{$name};
     }
-    
+    for my $name (keys %{$other->pkg_prototypes}) {
+        my $per = $other->pkg_prototypes->{$name};
+        $self->pkg_prototypes->{$name}{$_} = $per->{$_} for keys %$per;
+    }
+
+
     # Merge filehandles
     for my $name (keys %{$other->filehandles}) {
         $self->filehandles->{$name} = 1;
@@ -905,6 +956,8 @@ sub clone {
 
     return Pl::Environment->new(
         prototypes       => { %{$self->prototypes} },
+        pkg_prototypes   => { map { ($_ => { %{ $self->pkg_prototypes->{$_} } }) }
+                              keys %{$self->pkg_prototypes} },
         filehandles      => { %{$self->filehandles} },
         filehandle_scope => { %{$self->filehandle_scope} },
         scope_level      => $self->scope_level,

@@ -822,6 +822,79 @@ END_MODULE
   unlink "$test_module_dir/FactsSig.pm";
 }
 
+
+# ============================================================
+diag "";
+diag "-------- Task #421: two packages, one bare name, different prototypes:";
+
+# The prototype table was ONE flat bare-name hash, so the LAST registration
+# won for every call site.  Probed vs perl 5.40.3 (both declaration orders):
+#
+#   { package A; sub f($)  {...} } { package B; sub f(&@) {...} }
+#   package A; print f 1, 2;        # perl A:12   PCL was A:1   (silent wrong)
+#   { package C; sub h(&@) {...} } { package D; sub h($) {...} }
+#   print C::h { "y" } 7, 8;        # perl C:y:7 8  PCL DROPPED the statement
+#
+# Entries are keyed by the DECLARING package now, with the flat table as the
+# fallback; the per-package table is consulted only when a bare name has more
+# than one declaring package, so nothing else can move.
+{
+  my $cl = transpile(<<'END_PERL');
+{ package A; sub f($)  { $_[0] } }
+{ package B; sub f(&@) { 1 } }
+package A;
+my @r = (f 1, 2);
+package B;
+my @s = (f { 3 } 4, 5);
+END_PERL
+  like($cl, qr/\(vector \(p-list-ctx \(A::pl-f 1\)\) 2\)/,
+       '#421: the ($) declaration in A ends the argument list after one term');
+  like($cl, qr/B::pl-f\s*\(lambda/,
+       '#421: the (&@) declaration in B still takes its block form');
+}
+
+# The other declaration order: the collision made this one a DROP, because the
+# ($) that won left no block-form parse for the `{ ... }`.
+{
+  my $cl = transpile(<<'END_PERL');
+{ package C; sub h(&@) { my $c = shift; $c->() } }
+{ package D; sub h($)  { $_[0] } }
+my $r = C::h { 7 } 8, 9;
+END_PERL
+  unlike($cl, qr/PARSE ERROR/,
+         '#421: the qualified block call is not dropped by the other package\'s ($)');
+  like($cl, qr/C::pl-h\s*\(lambda/,
+       '#421: and its block became a lambda');
+}
+
+# INVERSE GUARD: a bare name declared in exactly ONE package keeps taking the
+# flat table — that is the path an IMPORTED prototype reaches a call site by,
+# and it must not be narrowed to the declaring package.
+{
+  my $cl = transpile(<<'END_PERL');
+{ package Q; sub w(&) { my ($c) = @_; $c->() } }
+package main;
+my $r = Q::w { 1 };
+my $s = w { 2 };
+END_PERL
+  unlike($cl, qr/PARSE ERROR/,
+         '#421 inverse: a single-package prototype still reaches an outside call site');
+  my @lambdas = $cl =~ /pl-w\s*\(lambda/g;
+  is(scalar(@lambdas), 2,
+     '#421 inverse: BOTH the qualified and the unqualified call take the block form');
+}
+
+# The table itself: two declaring packages, both entries kept.
+{
+  my $env = get_prototype_info(<<'END_PERL');
+{ package A; sub f($)  { 1 } }
+{ package B; sub f(&@) { 2 } }
+END_PERL
+  my $per = $env->pkg_prototypes->{f};
+  is(scalar(keys %$per), 2, '#421: both declaring packages are recorded for `f`');
+  is($per->{A}{proto_string}, '$',  '#421: A::f keeps ($)');
+  is($per->{B}{proto_string}, '&@', '#421: B::f keeps (&@)');
+}
 # ============================================================
 diag "";
 diag "-------- Package-QUALIFIED prototype declarations (task #413):";

@@ -7096,10 +7096,12 @@ sub _register_sub_prototype {
   my ($self, $stmt, $name, $sig_info, $prototype, $is_signature_syntax) = @_;
   return unless $name;
   my $prev = $self->environment->get_prototype($name);
+  my $pkg  = $self->environment->current_package();
   if (!($prev && $prev->{from_attr} && !$prototype && !$is_signature_syntax)) {
-    $self->environment->add_prototype($name, $sig_info);
+    # The declaring package goes with the prototype as it goes with the
+    # declaration below (task #421).
+    $self->environment->add_prototype($name, $sig_info, $pkg);
   }
-  my $pkg = $self->environment->current_package();
   $self->environment->add_declared_sub($name, $pkg,
                                        Pl::PExpr::TokenUtils::decl_site($stmt));
 }
