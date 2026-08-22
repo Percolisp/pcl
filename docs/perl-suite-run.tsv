@@ -1,4 +1,29 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s427 row edits — THREE rows, two of them this session's and one PRE-EXISTING
+#   drift.  The companion leg was 18 files (op/ re/ io/ comp/ uni/ mro/, the
+#   dirs this batch touches), run A/B against a 753ecab worktree; the A/B diff
+#   is exactly these rows and nothing else.  Each mover was re-run ALONE by the
+#   #366 rule and both runs agreed.
+#     op/glob.t   13/4  -> 14/4   task #415: `ok <~>, '~ works'` (line 110) was
+#                 a DROPPED statement.  `<X>` is a readline only for a
+#                 filehandle (perlop's whitelist); `<~>` globs, PPI's `<` `~`
+#                 `>` split after a list-operator Word is rebuilt now that `~`
+#                 counts as a glob metacharacter, and p-glob expands a leading
+#                 tilde.  Drops 1 -> 0 (census row removed).
+#     io/argv.t   23/30 -> 27/26  task #415, the same rule: `<<>>` (perl 5.22's
+#                 double diamond) is a READLINE, and PPI hands it over as one
+#                 Readline token whose inner text is `<>`.  The old blacklist
+#                 rule emitted an unbound CL symbol `<>` — the file's own
+#                 failure note in this snapshot — and a whitelist without that
+#                 case would have globbed the string "<>" silently.  Four rows
+#                 gained.
+#     uni/gv.t    s427 measured 41/40 -> 53/28 as PRE-EXISTING (a 753ecab
+#                 worktree measures 53/28 too, and the s427 tree is
+#                 byte-identical to its base on that file).  SUPERSEDED by the
+#                 s423 bullet below, which re-blessed the row to 50/31 from a
+#                 463a8f8 base with its own A/B — a newer base and a measured
+#                 cause, so that number stands and this one is only the record
+#                 that s427 did not move it.
 # s423 row edits — SIXTEEN rows in the uni/ + mro/ legs, all from task #418 (a
 #   non-ASCII name is now spelled |…| everywhere, so it is the SAME symbol on
 #   both sides of every seam).  Each mover was re-run ALONE (#366) on this tree
@@ -460,7 +485,7 @@ comp/term.t	23	0	23	0	OK
 comp/uproto.t	32	0	13	21	DIFF	
 comp/use.t	87	0	42	45	DIFF	undef-fn:main::pl-true
 comp/utf.t	4216	0	12	4204	DIFF	
-io/argv.t	52	1	23	30	DIFF	unbound:main::<>
+io/argv.t	52	1	27	26	DIFF	
 io/binmode.t	9	0	9	0	OK	
 io/bom.t	3	0	0	3	DIFF	
 io/closepid.t	3	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N") Co
@@ -646,7 +671,7 @@ op/fork.t	28	0	1	0	DIFF
 op/fresh_perl_utf8.t	1	0	0	1	DIFF	
 op/getpid.t	0	0	0	1	NOTAP	crash:simple-error: Can't locate object method "new" via package "threads" at - line N.
 op/getppid.t	8	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w)) Compile-time error
-op/glob.t	18	0	13	4	DIFF	
+op/glob.t	18	0	14	4	DIFF	
 op/gmagic.t	78	0	0	0	DIFF	crash:simple-error: Can't call method FETCH on an undefined value
 op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
 op/grent.t	3	0	3	0	OK	

@@ -559,6 +559,7 @@ sub _ppi_parse {
   # the text unchanged, so a reparse would just re-create the Version tokens.
   _reclassify_bare_vwords($doc) if $doc;
   _merge_unicode_symbols($doc) if $doc;
+  _merge_punct_array_symbols($doc) if $doc;
   return $doc;
 }
 
@@ -1085,6 +1086,44 @@ sub _merge_unicode_symbols {
       $merged = 1;
     }
     push @repaired, $sym if $merged;
+  }
+  _reclass_subscripts_after($_) for @repaired;
+  return 1;
+}
+
+# PUNCTUATION-NAMED ARRAYS (`@?`, `@!`, `@.`, …).  perl lets any punctuation
+# character name a global, and `@?` is legal perl that real code writes
+# (`ok( ! @?, … )`, t/re/subst.t:346 — one of the #415 census drops).  PPI
+# has no Magic token for them and its Symbol regex is word-bounded, so `@?`
+# comes out as Cast('@') + Operator('?') and the statement was DROPPED
+# (docs/ppi-upstream-bugs.md §24).
+#
+# The merge is unambiguous: in valid perl a `@` CAST must be followed by `$`,
+# `{` or an identifier, so a Cast immediately abutting an OPERATOR can only
+# ever be a mis-lexed punctuation name.  Adjacency is still required, as in
+# _merge_unicode_symbols.
+#
+# %PUNCT_ARRAY_CHARS is the set this repair covers, and the boundary is the
+# CL SYMBOL SPELLING, not perl: these characters are CL constituents, so the
+# emitted symbol reads BARE the way the sibling `@#` already does.  The rest
+# of perl's punctuation names (`@,` `@;` `@|` `@'` `@"` `@(` — every CL macro
+# or escape character) would need a pipe-quoted spelling, which is its own
+# emission rule; they keep DROPPING, loudly, and are filed as task #449.
+my %PUNCT_ARRAY_CHARS = map { $_ => 1 } split //, q{?!./~^&%=<>};
+
+sub _merge_punct_array_symbols {
+  my ($doc) = @_;
+  my @repaired;
+  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
+    next unless $cast->content eq '@';
+    my $next = $cast->next_sibling;
+    next unless $next && $next->isa('PPI::Token::Operator');
+    next unless length($next->content) == 1 && $PUNCT_ARRAY_CHARS{$next->content};
+    my $sym = PPI::Token::Symbol->new('@' . $next->content);
+    $cast->insert_before($sym);
+    $next->delete;
+    $cast->delete;
+    push @repaired, $sym;
   }
   _reclass_subscripts_after($_) for @repaired;
   return 1;

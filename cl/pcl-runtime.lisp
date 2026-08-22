@@ -10961,9 +10961,37 @@ buffer's fill-pointer; everything else falls back to file-length."
     (dolist (path matches result)
       (vector-push (concatenate 'string dir-prefix (file-namestring path)) result))))
 
+(defun %p-glob-own-home ()
+  "This process's home directory from the passwd database — bsd_glob's
+   fallback when HOME is not set in the environment."
+  (handler-case
+      (let ((pw (sb-posix:getpwuid (sb-posix:getuid))))
+        (and pw (sb-posix:passwd-dir pw)))
+    (sb-posix:syscall-error () nil)))
+
+(defun %p-glob-expand-tilde (pat)
+  "bsd_glob's leading-tilde expansion, which perl's glob/<…> performs before
+   any wildcard matching: `~` and `~/rest` become $HOME, `~user[/rest]` that
+   user's home directory.  An UNKNOWN user leaves the pattern untouched —
+   that is what perl answers (probed: glob(\"~nosuchuser42\") is
+   \"~nosuchuser42\"), and so does a tilde anywhere but the first character
+   (`x~y` is a literal)."
+  (if (or (zerop (length pat)) (char/= (char pat 0) #\~))
+      pat
+      (let* ((slash (position #\/ pat))
+             (user  (subseq pat 1 (or slash (length pat))))
+             (rest  (if slash (subseq pat slash) ""))
+             (home  (if (string= user "")
+                        (or (sb-posix:getenv "HOME") (%p-glob-own-home))
+                        (handler-case
+                            (let ((pw (sb-posix:getpwnam user)))
+                              (and pw (sb-posix:passwd-dir pw)))
+                          (sb-posix:syscall-error () nil)))))
+        (if home (concatenate 'string home rest) pat))))
+
 (defun p-glob--expand (pat)
   "Expand glob pattern PAT and return a vector of matching filenames."
-  (let* ((expanded (expand-glob-char-ranges pat))
+  (let* ((expanded (expand-glob-char-ranges (%p-glob-expand-tilde pat)))
          (slash (position #\/ expanded :from-end t))
          (dir-prefix (if slash (subseq expanded 0 (1+ slash)) ""))
          (file-glob  (if slash (subseq expanded (1+ slash)) expanded)))

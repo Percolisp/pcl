@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 33 files, 106 drops -- 5 perl-tests files (7
-# drops), 28 companion files (99), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 32 files, 104 drops -- 5 perl-tests files (7
+# drops), 27 companion files (97), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -248,6 +248,29 @@
 #         takes the same path its main-package twin already took (line 210 has
 #         always dropped) and drops loudly.  Measured: op/lexsub.t stays
 #         DIFF 7/10 — the file aborts long before those lines.
+#   s427  TWO drops REMOVED, ONE FILE CLEARED, by task #415's two measured
+#         odd singles.  Verified by tools/gate-set-scan.pl over BOTH
+#         populations (638 files x 2): these two files are the ONLY verdicts
+#         that moved.
+#      (a) t/re/subst.t 3 -> 2: `ok( ! @?, … )` at line 346.  `@?` is legal
+#         perl (any punctuation character names a global) but PPI has Magic
+#         tokens only for the arrays perl documents, so it came out as
+#         Cast('@') + Operator('?') — docs/ppi-upstream-bugs.md §24.
+#         Pl::Parser::_merge_punct_array_symbols merges them back, and
+#         Parser2's punctuation forward-declaration bucket covers the whole
+#         family instead of `@#` alone.  The remaining 2 are `local *a = *1`.
+#      (b) t/op/glob.t 1 -> 0, ROW REMOVED: `ok <~>, '~ works'` at line 110.
+#         Two causes, both fixed: PExpr classified `<X>` as a readline unless
+#         X held a glob metacharacter, where perlop's rule is the inverse
+#         whitelist (a handle, a scalar, or empty — everything else globs), so
+#         `<~>` emitted `(p-readline ~)`, an unbound CL symbol that killed the
+#         whole file when it was the parsed form; and after a list-operator
+#         Word PPI lexes `<~>` as three operators (§14), which
+#         `_fix_ppi_glob_after_block` did not rebuild because `~` was not in
+#         its glob-metacharacter class — it is one, and it is less ambiguous
+#         than the `*` already there.  p-glob now expands a leading tilde
+#         (bsd_glob's rule), which is what makes the row PASS rather than
+#         merely run.
 perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
@@ -260,7 +283,6 @@ t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
 t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
-t/op/glob.t	1	Handle single node of unknown type. Dump: x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
 t/op/lexsub.t	14	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
@@ -277,7 +299,7 @@ t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	3	Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
 t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
-t/re/subst.t	3	Bug. Fell through. Missing case: [] x2 | Handle single node of unknown type. Dump: x1
+t/re/subst.t	2	Bug. Fell through. Missing case: [] x2
 t/uni/gv.t	2	Handle single node of unknown type. Dump: x2
 t/uni/method.t	2	Handle single node of unknown type. Dump: x2
 t/uni/readline.t	2	Handle single node of unknown type. Dump: x2

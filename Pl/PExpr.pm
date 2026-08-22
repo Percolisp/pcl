@@ -685,17 +685,40 @@ sub parse {
       $content =~ /^<(.*)>$/;
       my $inner = $1;
 
-      # Distinguish between readline and file glob:
-      # - Glob: contains *, ?, [, ], {, } or looks like a path with /
-      # - Readline: bareword filehandle (STDIN), variable ($fh), or empty
-      my $is_glob = 0;
-      if (defined $inner && $inner ne '') {
-        # Check for glob metacharacters or path-like content
-        if ($inner =~ /[\*\?\[\]\{\}]/ ||           # glob metacharacters
-            ($inner =~ /\// && $inner !~ /^\$/)) {  # path with / (not variable)
-          $is_glob = 1;
-        }
-      }
+      # Readline or file glob — perlop states the rule as a WHITELIST, and it
+      # is the readline side that is narrow: "If what's within the angle
+      # brackets is neither a filehandle nor a simple scalar variable
+      # containing a filehandle name, typeglob, or typeglob reference, it is
+      # interpreted as a filename pattern to be globbed."  So `<>` (ARGV), a
+      # bareword handle and `<$fh>` are readline; EVERYTHING else globs.
+      #
+      # This test used to be the inverse — a blacklist of glob metacharacters
+      # — so `<~>` was read as a readline on a filehandle named `~` and
+      # emitted `(p-readline ~)`, an unbound CL symbol that killed the whole
+      # file at load (task #415, t/op/glob.t:110 `ok <~>, '~ works'`), and so
+      # did `<foo.txt>` and every other metacharacter-free pattern.  perl
+      # agrees about the whitespace too: probed, `< $fh >` globs the string
+      # "GLOB(0x…)" rather than reading a line, so the spellings are compared
+      # untrimmed.
+      # The spelling tested here is the one in the token by the time PExpr
+      # runs, and Parser2's rename passes have already rewritten the symbol
+      # INSIDE it: perl-tests/scalar.t's `<$fh>` arrives as
+      # `<$main::fh__file__0>` once `$fh` is promoted to a file-level global.
+      # A package-QUALIFIED scalar is still a simple scalar to perl — probed,
+      # `<$main::fh>` reads a line — so the scalar test allows a qualifier.
+      # `<<>>` is perl 5.22's DOUBLE DIAMOND — `<>` without magic open — and
+      # PPI hands it over as one Readline token whose inner text is `<>`.  It
+      # is a readline, not a pattern: the old blacklist rule crashed on it
+      # (an unbound CL symbol `<>`, io/argv.t's first failure note) and a
+      # whitelist without this line would silently glob the string "<>".
+      # A handle NAME is a perl identifier, and under `use utf8` that means
+      # unicode word characters — `[^\W\d]\w*`, not `[A-Za-z_]\w*`.  An
+      # ASCII-only test reads `<ＦＨ>` as a filename pattern and silently
+      # globs it (caught by Pl/t/utf8-source-01.t's #418 bareword-filehandle
+      # row, which is exactly the case this rule change could break).
+      my $is_glob = defined $inner && $inner ne '' && $inner ne '<>'
+                 && $inner !~ /\A[^\W\d]\w*(?:::[^\W\d]\w*)*\z/       # bareword handle
+                 && $inner !~ /\A\$(?:[^\W\d]\w*::)*[^\W\d]\w*\z/;    # scalar handle
 
       if ($is_glob) {
         # File glob: <*.txt>, </path/*.log>, etc.
@@ -724,7 +747,10 @@ sub parse {
       # Create a readline node with the filehandle
       my ($node, $node_id) = $self->make_node_insert('readline');
 
-      if (defined $inner && $inner ne '') {
+      # `<<>>` (the double diamond) reads ARGV like `<>`; the only difference
+      # is that it does not honour a magic-open filename, which PCL's ARGV
+      # readline does not do either.  Same node as `<>`: no children.
+      if (defined $inner && $inner ne '' && $inner ne '<>') {
         # Has a filehandle - could be bareword (STDIN) or variable ($fh)
         if ($inner =~ /^\$/) {
           # Variable filehandle like $fh
@@ -5936,9 +5962,14 @@ sub _fix_ppi_glob_after_block {
         # Check for glob metacharacters — only count actual token content,
         # NOT the content of structure nodes (PPI::Structure::Subscript [1]
         # contains '[1]' which would falsely match \[ or \]).
+        # `~` is one of them: bsd_glob expands a leading tilde, which is the
+        # whole content of `<~>` (t/op/glob.t:110 `ok <~>, '~ works'`, a #415
+        # census drop).  It is LESS ambiguous than the `*` already in the
+        # class — a `~` can only be bitwise-not where a term is expected, and
+        # the guard below already refuses to rebuild after a simple value.
         $has_glob_chars = 1
             if ref($t) !~ /^PPI::Structure/
-            && $c =~ /[\*\?\[\]]/;
+            && $c =~ /[\*\?\[\]~]/;
 
         # Stop if we hit something that can't be part of a glob
         last if ref($t) eq 'PPI::Token::Operator' && $c =~ /^(==|!=|<=|>=|<=>|&&|\|\|)$/;

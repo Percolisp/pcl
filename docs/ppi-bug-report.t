@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 27;
+use Test::More tests => 29;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -420,4 +420,35 @@ PERL
     ok( defined $doc,
         'a foreach with a non-ASCII loop variable should lex at all' )
         or diag "errstr: " . (PPI::Document->errstr // '(none)');
+}
+
+# ── Bug 24: a PUNCTUATION-named array is split into Cast + Operator ───────────
+#
+# perl lets any punctuation character name a global, and real code writes them:
+# t/re/subst.t:346 is `ok( ! @?, 'parsing of split subst with comment' );`.
+# PPI has %MAGIC entries for the arrays perl documents (@-, @+, @*, @_, …) and
+# its Symbol name regex is word-bounded, so every OTHER punctuation name falls
+# through to the `@` CAST branch and the next character is tokenized alone.
+#
+# It is not a missing feature: in valid perl a `@` Cast is only ever followed by
+# `$`, `{` or an identifier, so `Cast + Operator` is a parse of no legal program
+# at all.  perl accepts @? @! @. @/ @~ @^ @& @% @= @< @> (probed, 5.40.3).
+{
+    my $doc = PPI::Document->new(\'@? = (1,2);');
+    my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+    ok( (grep { $_->content eq '@?' } @sym),
+        'a punctuation-named array `@?` should lex as one Symbol' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# The documented siblings prove the intent — @- and @+ ARE single Magic tokens,
+# so the name rule is an enumeration where perl has a character class.
+{
+    my $doc = PPI::Document->new(\'my $n = scalar(@!);');
+    my @sym = grep { $_->isa('PPI::Token::Symbol') || $_->isa('PPI::Token::Magic') }
+                   $doc->tokens;
+    ok( (grep { $_->content eq '@!' } @sym),
+        'a punctuation-named array `@!` should lex as one token, as `@-` does' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
 }

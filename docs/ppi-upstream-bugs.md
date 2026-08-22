@@ -960,6 +960,57 @@ row in `docs/ppi-bug-report.t`.
 
 ---
 
+## 24. A PUNCTUATION-named array `@?` is split into Cast + Operator  [CONFIRMED 1.291]
+
+perl lets any punctuation character name a global, and real code uses it —
+`t/re/subst.t:346` is `ok( ! @?, 'parsing of split subst with comment' );`.
+PPI has `PPI::Token::Magic` entries for the arrays perl documents (`@-`, `@+`,
+`@*`, `@_`, `@ARGV`, …) and its `Symbol` name regex is word-bounded, so every
+other punctuation name falls through to the `@` CAST branch and the character
+after it is tokenized on its own:
+
+```perl
+perl -MPPI -e 'for my $c (q{@?}, q{@!}, q{@.}, q{@-}, q{@+}) {
+  my $d = PPI::Document->new(\"my $n = scalar($c);");
+  print "$c => ", join(" ", map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                            grep { $_->significant } $d->tokens), "\n" }'
+
+@? => ... Cast[@] Operator[?] ...      <-- WRONG
+@! => ... Cast[@] Operator[!] ...      <-- WRONG
+@. => ... Cast[@] Operator[.] ...      <-- WRONG
+@- => ... Magic[@-] ...                (correct — it is in %MAGIC)
+@+ => ... Magic[@+] ...                (correct — it is in %MAGIC)
+```
+
+perl accepts all of them: `@? = (1,2); print scalar(@?)` prints 2, and so does
+every punctuation character except `@+`/`@-` (read-only) and `@{` (a syntax
+error).  Probed on perl 5.40.3.
+
+**Why it is a bug and not a missing feature.**  A `@` Cast is only ever
+followed by `$`, `{` or an identifier in valid perl, so `Cast + Operator` is
+not a parse of anything — the token stream describes no legal program.  The
+same holds for the `%` sigil, where PPI does not even produce a Cast: `%?`
+comes out as `Operator[%] Operator[?]`, i.e. a modulus.
+
+The proposed fix is the one `%MAGIC` already implies: after the sigil, accept
+a single punctuation character as the whole name (which is exactly perl's own
+rule in `toke.c`'s `scan_ident`), rather than enumerating the documented
+names.
+
+**Impact on PCL (task #415): one dropped statement** (`t/re/subst.t:346`) plus
+a LATENT CRASH the same family caused without any PPI bug at all — `$?[1]` is
+element 1 of `@?`, and PCL lowers it to `(p-aref @? 1)` through the machinery
+that also serves `$#[0]`/`@#`, but only `@#` was ever forward-declared, so a
+file containing `$?[…]` died at load with an unbound variable.
+`Pl::Parser::_merge_punct_array_symbols` merges the two tokens back into one
+`PPI::Token::Symbol`, and Parser2's punctuation forward-declaration bucket now
+covers the whole family instead of `@#` alone.  The repair is limited to the
+punctuation characters that are CL symbol constituents (`? ! . / ~ ^ & % = < >`)
+— the rest (`@,` `@;` `@|` `@'` `@"` `@(`) need a pipe-quoted CL spelling and
+keep dropping loudly (task #449).  Guard rows: `Pl/t/punct-array-glob-01.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

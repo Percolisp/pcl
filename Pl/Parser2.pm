@@ -6083,11 +6083,20 @@ sub _forward_global_decls {
     # that reached the scan would re-declare its own name, and for a renamed
     # cell that second declaration lands in the wrong bucket).
     next if $line =~ /^\s*\((?:defvar|p-defcell)\s/;
-    # The punctuation array `@#` (bare `$#` magic + subscript lowers to
-    # `(p-aref @# …)`) — the [A-Za-z_] scan below can't match it, same as the
-    # caret specials.  A genuine global, never a capturable lexical, so it is
-    # defvar'd even in eval mode (like %caret, unlike %seen).
-    $punct{'@#'} = 1 if $line =~ /(?<![\w:|])\@\#(?!\w)/;
+    # Punctuation-named arrays — `@#` (bare `$#` magic + subscript lowers to
+    # `(p-aref @# …)`) and its siblings `@?`, `@!`, … , which arrive both that
+    # way (`$?[1]` → `(p-aref @? 1)`) and now as source symbols (`@?` is legal
+    # perl; Pl::Parser::_merge_punct_array_symbols repairs PPI's split).  The
+    # [A-Za-z_] scan below can't match them, same as the caret specials.  A
+    # genuine global, never a capturable lexical, so it is defvar'd even in
+    # eval mode (like %caret, unlike %seen).
+    #
+    # `$?[1]` USED TO CRASH THE WHOLE FILE for want of this line being general
+    # (unbound `@?` at load): the `@#` spelling was declared and every sibling
+    # was not — a one-member fix of a family (task #415).  The character class
+    # is Pl::Parser's %PUNCT_ARRAY_CHARS plus `#`, which never appears in
+    # source (perl reads it as a comment) and is only ever synthesized.
+    $punct{"\@$1"} = 1 while $line =~ /(?<![\w:|])\@([#?!.\/~^&%=<>])(?!\w)/g;
     # Caret specials (${^MPE}, ${^WARNING_BITS}, …) compile to the pipe-delimited
     # CL symbol |${^MPE}| — the [A-Za-z_] scan below can't match the `{^`.  They
     # are user-writable globals; defvar any that appear.  Keyed on the full

@@ -53,6 +53,49 @@ not-supported.md → only then probe.*
   `current_package`, a qualified one in its own qualifier, and **the flat
   table stays the fallback** because that is how an IMPORTED prototype
   reaches a call site.  Guard `Pl/t/prototype-01.t` (9 rows, beside #413's).
+- **A PUNCTUATION-named array is a variable, and `@#` was one member of a
+  family (#415 item 1)**.  perl lets any punctuation character name a global
+  (`@? = (1,2)` works for every character but `@+`/`@-`, which are read-only);
+  PPI has Magic tokens only for the ones perl documents, so `@?` lexed as
+  Cast + Operator and the statement DROPPED (`ppi-upstream-bugs.md` §24 —
+  a `@` cast can never abut an operator in valid perl, so the merge is
+  unambiguous).  The second half needed no PPI bug at all: `$?[1]` is element
+  1 of `@?` and already lowered to `(p-aref @? 1)` through the machinery that
+  serves `$#[0]`, but ONLY `@#` was forward-declared, so a file containing
+  `$?[…]` died at LOAD with an unbound variable.  Both halves are general now;
+  the boundary is the **CL symbol spelling**, not perl — the repair covers
+  `? ! . / ~ ^ & % = < >` (CL constituents, so the symbol reads bare like
+  `@#`), and `@,` `@;` `@|` `@'` `@"` `@(` need a pipe-quoted spelling and
+  keep dropping loudly (**#449**).
+- **`<X>` is a READLINE only for a filehandle — perlop states it as a
+  whitelist and PCL had the inverse (#415 item 4)**.  The old test looked for
+  glob metacharacters, so `<~>` was a readline on a filehandle named `~` and
+  emitted the unbound CL symbol `~` (a dead FILE), and so did `<foo.txt>` and
+  every other metacharacter-free pattern.  The rule is now: empty, a bareword
+  handle, or a simple scalar (**possibly package-qualified** — Parser2's
+  rename passes rewrite the symbol INSIDE the token, so `<$fh>` arrives as
+  `<$main::fh__file__0>`; perl reads `<$main::fh>` as a readline too, probed)
+  → readline; everything else globs.  `~` joined
+  `_fix_ppi_glob_after_block`'s glob-metacharacter class (it IS one, and it is
+  less ambiguous than the `*` already there), and `p-glob` expands a leading
+  tilde the way bsd_glob does.  **`<<>>` (the double diamond) is the case the
+  whitelist would have got SILENTLY wrong** — PPI hands it over as a Readline
+  token whose inner text is `<>`, so the old blacklist rule crashed on an
+  unbound `<>` symbol (io/argv.t's own failure note) and a naive whitelist
+  would have globbed the string "<>" and returned nothing; it is named
+  explicitly and lowers like `<>` (io/argv.t 23/30 → 27/26).  Found by the
+  COMPANION A/B, not by the probe table.  Census: t/op/glob.t 1 → 0 (row removed),
+  t/re/subst.t 3 → 2; gate-SET scan over both populations = exactly those two
+  verdicts.  Guard `Pl/t/punct-array-glob-01.t` (11 rows, 17 s).
+- **#415's other five singles stay open, each measured**: op/utftaint.t does
+  not reproduce isolated (contextual trigger, unlocated); op/filetest.t:161 is
+  #403-family; `substr $x, 0, 1, = "Z"` and `{; @119797 }` are term-grammar
+  drops that lead into `_reduce_term` (B3) and are NOT filler-sized —
+  `{; @119797 }` also swallows the following statement into its drop;
+  op/sub_lval.t:970 is the lvalue file's torture row.
+- **`glob(PATTERN)` with no wildcard returns EMPTY where perl returns the
+  pattern** (`glob("/nope-xyz")`, `glob("/home/")`) — PRE-EXISTING, verified
+  identical on a 753ecab worktree, filed as **#450**.
 
 ## s426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer; #420 + #422.1 CLOSED
 
