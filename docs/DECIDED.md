@@ -144,6 +144,45 @@ not-supported.md → only then probe.*
   mints a fresh struct per mention — #163's defect one level down), **#438**
   (`*b = $pkgvar` holding `\*foo` installs the SCALAR slot — `p-scalar-=`'s
   box-in-box shape is invisible to `%p-glob-assign-slots`).
+## s423 (2026-08-22, Opus) — #418: a non-ASCII name is spelled `|…|` EVERYWHERE, or it is a different symbol
+
+- **THE NAME-SPELLING RULE lives in `Pl::CLForm::cl_sym` / `cl_pkg`** — a perl
+  NAME that becomes a CL TOKEN is spelled there (package designators, variables
+  of every sigil, sub names, CLOS class names, labels, goto tags, state cells,
+  bareword filehandles, the eval capture alist's VALUES); a perl name that stays
+  a STRING (`p-stash` keys, method names, hash keys, `p-register-pkg-name`'s
+  second argument) is untouched.  Rationale + the reader mechanism: the comment
+  block at the top of `Pl/CLForm.pm`; review record
+  `docs/opus5-review-requests-s423.md`.
+- **`cl_sym` is the IDENTITY on ASCII, and that is a CORRECTNESS condition, not
+  a convenience**: under `:invert` a bare `$x` reads as the symbol `$X` while
+  `|$x|` reads as `$x`, so pipe-quoting an ASCII name silently RENAMES it.  The
+  acceptance bar for any change to this rule is therefore byte-identical
+  emission over every ASCII file (`tools/emission-ab.pl`).
+- **The runtime half is ONE guard**: `%pcl-invert-case` returns a name carrying
+  a non-ASCII character unchanged.  Because essentially every intern site in
+  `cl/pcl-runtime.lisp` already goes through that function, the emitter and the
+  runtime agree everywhere at once.  Never add a second case-transform beside it.
+- **The instrument for this bug class: "a non-ASCII character in a BARE token"**
+  in the emitted CL (not inside `|…|`, a string literal, a `;`-comment or a
+  `#\c` char literal).  Every occurrence is a symbol the reader NFKC-folds and
+  case-inverts, i.e. one no runtime string can spell.  1962 occurrences / 49
+  files at `a2ac578`; 0 across 404 emitted files after.
+- **DO NOT put the rule on every `PPI::Token::Word` in `gen_leaf`.**  That leaf
+  is a MIXED site: it also carries text already rewritten to a qualified CL
+  symbol and fed BACK to `cl_name` as a perl name, where `|ＦＯＯ::f|` splits on
+  `::` into the package `|ＦＯＯ` and the file fails to READ.  The bareword
+  filehandle is spelled there keyed on the `is_filehandle` registry — the
+  mechanism that already answers "is this bareword a handle", so every builtin
+  taking one is covered at once.
+- **A `|` in a name means it is ALREADY a CL spelling** (no perl identifier,
+  package name or bareword can contain one), so `cl_sym`/`cl_pkg` return it
+  unchanged and a double pass is a no-op instead of a corruption.
+- **`pl2cl`'s `build_eval_preamble` is the EVAL-MODE TWIN of
+  `Parser::_cl_pkg_designator`** and must answer identically, or a string eval
+  resolves its globals in a different CL package than the file that called it.
+  It lives outside `Pl/`, which is why a `Pl/`-only grep misses it.
+
 ## s422 (2026-08-22, Opus) — #419 CLOSED: a >U+10FFFF literal costs the EXPRESSION, not the FILE
 
 - **A code point above U+10FFFF in a string LITERAL emits

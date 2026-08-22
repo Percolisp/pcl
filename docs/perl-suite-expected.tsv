@@ -107,13 +107,10 @@ mro/next_NEXT.t	not-supported.md §mro — next::method family (Tier 3, deferred
 mro/next_NEXT_utf8.t	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
 mro/next_edgecases.t	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
 mro/next_edgecases_utf8.t	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
-mro/overload_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant (non-utf8 twin passes)
 mro/package_aliases.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev
 mro/package_aliases_utf8.t	not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.
 mro/pkg_gen.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 mro/pkg_gen_utf8.t	not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
-mro/recursion_c3_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
-mro/recursion_dfs_utf8.t	not-supported.md §Unicode — utf8 package-name variant of recursion test (non-utf8 twin passes)
 op/current_sub.t	not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)
 op/const-optree.t	not-supported.md §Readouts of perl's own internals -> "Constant-folding / inlinability and the :method attribute readout" (53 of 58 rows: 28 "… is/is not inlinable", 25 "… has (no) :method attribute" — both are diagnostics ABOUT an optree PCL does not build) AND §Error compatibility for invalid Perl input / CLAUDE.md §9 (the other 5: "… now throws exception (RT 134138)", where perl REJECTS `sub () { $x }` for a lexical modified elsewhere and PCL compiles it). REGISTERED s408, after #337 fixed the 4 "retval of my sub …" rows that were the file's real fix target and kept it UNEXPLAINED — a fresh per-row read of all 58 was the precondition the s399 note set.
 op/cond.t	not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)

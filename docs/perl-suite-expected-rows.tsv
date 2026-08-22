@@ -177,11 +177,8 @@ mro/basic_05_dfs_utf8.t	... got the right MRO for Ｄiᚪၚd_D
 mro/basic_05_dfs_utf8.t	... got the right next::method dispatch path
 mro/basic_utf8.t	@main::ISA is magical
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 103]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 121]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 125]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 132]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 136]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 149]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 154]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 158]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 169]
@@ -246,8 +243,6 @@ mro/isa_c3.t	whamm isa thwacke
 mro/isa_c3.t	zzzzzwap isa UNIVERSAL
 mro/isa_c3.t	zzzzzwap isa kapow
 mro/isa_c3.t	zzzzzwap isa thwacke
-mro/isa_c3_utf8.t	@ISA for urḲḵｋ
-mro/isa_c3_utf8.t	@ISA for Ẁ함Ｍ
 mro/isa_c3_utf8.t	kഌoんḰ isa UNIVERSAL
 mro/isa_c3_utf8.t	urḲḵｋ isa UNIVERSAL
 mro/isa_c3_utf8.t	urḲḵｋ isa kഌoんḰ
@@ -274,8 +269,6 @@ mro/isa_dfs.t	whamm isa thwacke
 mro/isa_dfs.t	zzzzzwap isa UNIVERSAL
 mro/isa_dfs.t	zzzzzwap isa kapow
 mro/isa_dfs.t	zzzzzwap isa thwacke
-mro/isa_dfs_utf8.t	@ISA for urḲḵｋ
-mro/isa_dfs_utf8.t	@ISA for Ẁ함Ｍ
 mro/isa_dfs_utf8.t	kഌoんḰ isa UNIVERSAL
 mro/isa_dfs_utf8.t	urḲḵｋ isa UNIVERSAL
 mro/isa_dfs_utf8.t	urḲḵｋ isa kഌoんḰ
@@ -338,24 +331,13 @@ mro/method_caching.t	redef sub through glob alias via localisation unwinding
 mro/method_caching.t	redefining sub through glob alias via cv-to-glob assign
 mro/method_caching.t	redefining sub through glob alias via decl
 mro/method_caching.t	redefining sub through glob alias via stub vivification
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 40]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 41]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 42]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 43]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 44]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 46]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 47]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 48]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 49]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 51]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 52]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 53]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 54]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 55]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 56]
 mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 59]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 60]
-mro/method_caching_utf8.t	[at t/mro/method_caching_utf8.t line 61]
 mro/next_NEXT.t	... got the right value from Bar->foo
 mro/next_NEXT.t	... got the right value from Fuz->foo
 mro/next_NEXT.t	... got the right value using NEXT in a subclass of a C3 class
@@ -404,7 +386,6 @@ mro/next_skip_utf8.t	... quietly failed redispatch from D
 mro/next_skip_utf8.t	... redispatched D to C when it exists
 mro/next_skip_utf8.t	... skipped B & C and went to A correctly
 mro/next_skip_utf8.t	... skipped B and went to C correctly
-mro/overload_c3_utf8.t	*summary*
 mro/package_aliases.t	*extra* '
 mro/package_aliases.t	*extra* '
 mro/package_aliases.t	*extra* '
@@ -511,20 +492,6 @@ mro/package_aliases.t	the deleted stash is gone completely when freed
 mro/package_aliases_utf8.t	*rows-unstable*
 mro/pkg_gen.t	*summary*
 mro/pkg_gen_utf8.t	*summary*
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_c3_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
-mro/recursion_dfs_utf8.t	Graceful exception thrown
 mro/vulcan_c3.t	... got the right MRO for the Vulcan Dylan Example
 mro/vulcan_c3_utf8.t	... got the right MRO for the ቩᓪ찬 Dylan Example
 mro/vulcan_dfs.t	... got the right MRO for the Vulcan Dylan Example

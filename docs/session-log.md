@@ -225,6 +225,119 @@ half this session closed.
 Asks in `docs/opus5-review-requests-s424.md`: the scope of the copy-path half,
 the extra type test on `p-aref-unbox-elem`'s hot path, and whether `ref()` on a
 raw typeglob should keep the old lenient `GLOB` as a belt.
+## Session 423 (2026-08-22, Opus) — #418 CLOSED: a non-ASCII name is spelled `|…|` EVERYWHERE, or it is a different symbol
+
+*This session CONTINUES an earlier s423 agent that died leaving an uncommitted
+diff and no commit.  The inherited work is reviewed in
+`docs/opus5-review-requests-s423.md` §1 and kept; what follows is the whole
+result.*
+
+**The bug in one sentence: SBCL's reader does two things to a BARE token that
+it does not do to the runtime's string for the same name** — it NFKC-normalizes
+the characters, and generated code is read under `:invert`, which flips the
+case.  So the fullwidth `Ｘ` folded to an ASCII `X` and `%Ｘ` and `%X` were ONE
+symbol (perl `1256`, PCL `2266` — a silent wrong), while
+`(p-defpackage :ＦＯＯ)` named the package `"foo"` that no `(p-stash "ＦＯＯ")`
+ever spells.  Inside `|…|` the reader takes the characters verbatim, which
+defeats both at once.
+
+**THE RULE, in one place: `Pl::CLForm::cl_sym` / `cl_pkg`.**  Every emitter that
+turns a perl name into a CL token asks there — package designators, variables of
+every sigil, sub names, CLOS class names, loop labels, goto tags, state cells,
+bareword filehandles, the eval capture alist's values.  The four
+`$pkg =~ /::/ ? "|$pkg|" : $pkg` copies are folded into it (rule 11), and
+`p-stash` keys stay raw strings: they are perl names, not CL tokens.
+
+**`cl_sym` is the IDENTITY on ASCII, and that is a correctness condition, not a
+convenience.**  Under `:invert` a bare `$x` reads as the symbol `$X` while
+`|$x|` reads as `$x` — pipe-quoting an ASCII name would silently RENAME it.  So
+the acceptance bar for this whole class of change is byte-identical emission
+over every ASCII file.
+
+**The runtime half is ONE guard**: `%pcl-invert-case` returns a name carrying a
+non-ASCII character unchanged.  Because essentially every intern site in
+`cl/pcl-runtime.lisp` already goes through that function — symbolic refs,
+`->can`, globs, stash keys, `caller`, bareword filehandles, loop tags, sub names
+— the emitter and the runtime start agreeing everywhere at once.  The two
+`(intern (string-upcase clos-class-name) …)` method dispatchers moved onto it
+too: the same transform for the all-lowercase ASCII name they build, and the
+only matching one for a non-ASCII package.
+
+**Three seams the first pass missed, each found by PROBING a seam, not by
+reading the diff — and each the same failure: one side spelled the name and the
+other did not.**
+
+* **`pl2cl`'s `build_eval_preamble` had its own copy of the designator rule.**
+  The fifth copy, and outside `Pl/`, which is why the grep the task prescribed
+  did not reach it.  A string eval inside `package ＦＯＯ` opened the folded
+  package while the FILE used the quoted one, so the eval's free `$z` resolved
+  in a *different package* and read back undef.  It is the eval-mode twin of
+  `Parser::_cl_pkg_designator` and must answer identically.
+* **`open ＦＨ` / `close ＦＨ` emitted the bareword bare** while `print ＦＨ …`
+  and `<ＦＨ>` quoted it: the program wrote to one handle, read from another,
+  and printed **nothing**.  Fixed at the leaf emitter, keyed on the
+  `is_filehandle` registry — the mechanism that already tells the parser which
+  barewords are handles, so every builtin taking one is covered at once.
+* **`_swap_elem_sigil` knew `Foo::$x` and `|$Ｘ|` but not `Foo::|$Ｘ|`**, so
+  `"$main::Ｌ[0]"` handed `p-aref` the SCALAR and died in `gethash`.  One
+  pattern with an optional `|` covers all three spellings.
+
+**WHAT NOT TO RETRY: a blanket `cl_sym` on every `PPI::Token::Word` in
+`gen_leaf`.**  That was the first cut and the breaking-case probe killed it —
+the leaf is a MIXED site: it also carries text already rewritten to a qualified
+CL symbol and fed BACK to `cl_name` as a perl name, where `|ＦＯＯ::f|` splits
+on `::` into the package `|ＦＯＯ` and the whole file fails to READ.  The
+episode produced one hardening: `cl_sym`/`cl_pkg` treat any `|` in the input as
+"already a CL spelling" (no perl identifier can contain one), so a double pass
+is a no-op instead of a corruption.
+
+**A NEW INSTRUMENT that counts this bug directly**: *a non-ASCII character in a
+BARE token* in the emitted CL (not inside `|…|`, a string literal, a
+`;`-comment or a `#\c` char literal).  Every occurrence is a symbol the reader
+will fold and invert, i.e. one no runtime string can spell.
+**1962 occurrences across 49 files at `a2ac578`; ZERO across 404 emitted files
+(uni/ mro/ op/ re/) after.**
+
+**MEASURED.**  `tools/emission-ab.pl --ref a2ac578` over `perl-tests/*.t` +
+`lib/**/*.pm` + every file of perl's own `t/` = **738 files, 686 SAME,
+RCDIFF 0**, and the 52 DIFF files are **exactly** the 52 whose base emission
+carried such a token (52 of 52; side B has none in any of the 738).
+`corpus-diff` identical, drops 7 unchanged.  Gate **156 files / 5653 rows**
+cold, failures exactly the 13 pclxs xs rows.  Full sweep (mandatory —
+`cl/pcl-runtime.lisp` changed): **GATE clean, TOTAL passing 18365 (+0), drops
+7 = census, 0 new / 0 fixed**, no baseline row edited.  28 probe programs vs
+perl 5.40.3.
+
+**Companion `uni/` + `mro/` (103 files; every mover re-run ALONE on this tree
+AND on a `463a8f8` base worktree, the two runs agreeing row for row): 16
+movers, 15 of them gains.**  Three mro utf8 files are now FULLY PASSING and
+their `docs/perl-suite-expected.tsv` registrations were removed (the reason
+was literally "utf8 package-name variant — non-utf8 twin passes", i.e. the
+divergence WAS the name spelling); `docs/perl-suite-expected-rows.tsv` was
+re-blessed for four still-XDIFF mro files, **18 rows removed, 0 added**; four
+uni files that used to die at their first fullwidth method call now run 5-32
+rows each.  **The ONE loss is `uni/gv.t` 53/28 → 50/31, and it is three
+ACCIDENTAL passes**: rows 226-228 are perl's `local *Ｊ = *Ｊ; *Ｊ = sub{}`
+idiom, and PCL's `local *NAME` loses the glob's scalar/array/hash slots — a
+PRE-EXISTING bug that is identical for ASCII names (**#433**, probed on the
+base worktree).  Before #418 the fullwidth glob and the fullwidth cells were
+different symbols, so the broken glob-local could not reach them.  Same family
+as the s418 bless.t / split.t un-drops.  Every row spliced into
+`docs/perl-suite-run.tsv` with its cause.
+
+Generation stays **v2-165** (the number the inherited diff had claimed; the
+three checked-in artifacts were regenerated on the rebased tree and came back
+byte-identical at that stamp — their sources are ASCII).  Guard
+`Pl/t/utf8-source-01.t`, 21 rows, two of them ASCII **inverse** rows.
+
+**Filed, not fixed** — all four reproduce identically with ASCII names, which
+is the evidence that #418 is closed rather than narrowed: **#430** (`keys
+%Pkg::` lists only SUBS), **#431** (AUTOLOAD is not consulted for a plain
+qualified sub call `Foo::other()`, while `Foo->anything` works), **#432**
+(`./runpcl` can emit a spurious blank line and falsify a byte-compare against
+perl — a measurement trap that made one probe in this session's own table read
+DIFF) and **#433** (the `local *NAME` glob-slot loss above).
+
 ## Session 422 (2026-08-22, Opus) — #419 CLOSED: one `>U+10FFFF` literal no longer costs the whole FILE; the next wall behind `re/pat.t` measured (#424)
 
 **Task #419, `docs/plan-post-s420.md` item O1.1.**  `t/re/pat.t` measured 0 of
