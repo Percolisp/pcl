@@ -11,6 +11,23 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s427 (2026-08-22, Opus) — O3 fillers: #442, #421, #422.2, #415
+
+- **`chr(N)` above U+10FFFF keeps its NUMBER in every optimizer regime
+  (#442)**.  The raw-string slot's eager freeze `%pcl-to-string-strict` called
+  `to-string` on the `p-superchar` payload, so `my $c = chr(N); ord($c)`
+  answered 65533 under the default emission and N (perl's answer) under
+  `PCL_OPT=none`: **two answers for one value, chosen by a speed transform**.
+  The freeze now passes a superchar through (`%pcl-superchar-payload`, which
+  looks through a plain box but deliberately NOT through tie/magic — running
+  FETCH there would run it twice for one write).  The U+FFFD collapse still
+  happens, at `to-string`, which is where the boxed path makes it: **an
+  optimization may not pre-empt a decision the general form makes later** —
+  the optimization registry's own contract (`PCL_OPT=none` must RUN
+  identically).  `not-supported.md` "Code points above U+10FFFF" corrected
+  (s422's "once assigned it is 65533" was the bug, not the rule); guard
+  `Pl/t/wide-codepoint-01.t` rows 8-11.
+
 ## s426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer; #420 + #422.1 CLOSED
 
 - **Interpolation scanning now happens in `Pl::InterpScan` for the dq/heredoc

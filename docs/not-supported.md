@@ -274,12 +274,20 @@ five-byte `f8 88 80 80 80`.
 **PCL behaviour** — two answers, because the two spellings are known at
 different times:
 
-* **`chr(N)` at run time** yields `\x{FFFD}` (the Unicode replacement
-  character) — which is already what perl itself gives for other
-  unrepresentable arguments such as `chr(-1)`.  `ord(chr(N))` round-trips the
-  number, because that box still carries the numeric value; once the value has
-  been *assigned* (`my $s = chr(0x4000000); ord($s)`) it is 65533, since the
-  string it was coerced to is all that survives (measured s422).
+* **`chr(N)` at run time** yields a value whose *character* form is
+  `\x{FFFD}` (the Unicode replacement character) — which is already what perl
+  itself gives for other unrepresentable arguments such as `chr(-1)` — and
+  whose *number* survives: the value is a `p-superchar` payload, so `ord`
+  round-trips N through assignment, copying, array and hash elements, in
+  every optimizer regime (`ord(chr(N))`, `my $s = chr(N); ord($s)`, `my $t =
+  $s; ord($t)` are all N, as in perl).  The number is lost the moment a real
+  *string* operation runs on it (`ord(uc($s))`, `substr($s,0,1)`,
+  interpolation, a `.` concatenation) — that is where PCL must produce a CL
+  string and U+FFFD is what a CL string can hold.
+  (s422 measured the assigned case as 65533 and recorded it here; that was
+  the raw-string slot's eager freeze pre-empting the collapse, which made the
+  answer depend on an optimizer verdict — task **#442**, fixed s427.  Guard:
+  `Pl/t/wide-codepoint-01.t` rows 8-11.)
 * **A string LITERAL that contains such a code point** (`"\x{4000000}"`,
   `"\N{U+4000000}"`, `qq{…}`, a heredoc, a `tr///` set, an `s///`
   replacement, …) is a compile-time fact, and the compiler emits

@@ -21,10 +21,20 @@
 # character's place: it READS, and dies when evaluated, naming the code point
 # and citing docs/not-supported.md.
 #
-# Deliberate asymmetry guarded by the last row: `chr(N)` at RUN time keeps
-# answering U+FFFD (the older blessed ruling, docs/fable-answers-s318.md §11 /
-# not-supported.md "Code points above U+10FFFF"), because there the compiler
-# has no literal to refuse.
+# Deliberate asymmetry guarded by the last rows: `chr(N)` at RUN time does NOT
+# die — the compiler has no literal to refuse there — and its CHARACTER form
+# is still the blessed U+FFFD (docs/fable-answers-s318.md §11 /
+# not-supported.md "Code points above U+10FFFF").  What survives is the
+# NUMBER: `chr(N)` yields a p-superchar payload, so `ord` round-trips N.
+#
+# Task #442 (s427): that round-trip used to depend on an OPTIMIZER VERDICT.
+# `%pcl-to-string-strict`, the raw-string slot's eager freeze, called
+# `to-string` on the payload and answered `ord` 65533, while the general-form
+# compiler (PCL_OPT=none) kept the payload and answered N — two answers for
+# one value.  The freeze now passes a superchar through: the U+FFFD collapse
+# happens where the boxed path makes it (`to-string`), and nowhere earlier.
+# The last two rows are that property: the same program, both emissions, one
+# answer, and it is perl's.
 
 use v5.30;
 use strict;
@@ -43,7 +53,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -56,9 +66,18 @@ sub write_pl {
 
 sub emitted { return PCLCore::transpile("$pl2cl " . write_pl($_[0])) }
 
-sub run_cl {
-    my ($code) = @_;
-    my $cl_code = emitted($code);
+# The same source through the GENERAL-FORM compiler — every Kind-A speed
+# transform off (Pl/Passes.pm).  Its emission must RUN identically; task #442
+# was a case where it did not.
+sub emitted_general {
+    return PCLCore::transpile("PCL_OPT=none $pl2cl " . write_pl($_[0]));
+}
+
+sub run_cl         { return run_cl_code(emitted($_[0])) }
+sub run_cl_general { return run_cl_code(emitted_general($_[0])) }
+
+sub run_cl_code {
+    my ($cl_code) = @_;
     my ($cl_fh, $cl_file) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
     binmode($cl_fh, ':raw');
     print $cl_fh $cl_code;
@@ -157,17 +176,47 @@ PL
        'U+10FFFF, the noncharacters and a surrogate are unaffected (perl oracle)');
 }
 
-# ── 6. The deliberate asymmetry: chr() at RUN time is still U+FFFD ──────────
-# perl answers ord 67108864 here; PCL answers 65533.  That divergence is the
-# older blessed ruling (not-supported.md), NOT an oversight — the compiler has
-# no literal to refuse when the argument is computed, and making the runtime
-# die instead would be a second answer for one gap.  If this row ever needs to
-# change, change not-supported.md in the same commit.
-is(run_cl(<<'PL'), "A\n1:65533\nB\n",
+# ── 6. The deliberate asymmetry: chr() at RUN time does not die ─────────────
+# The literal spelling dies (row 2); the computed one does not, because the
+# compiler has no literal to refuse.  What it yields is a p-superchar payload:
+# one character long, `ord` gives the number back — which is perl's answer —
+# while its CHARACTER form is the blessed U+FFFD (row 6b).  If either row ever
+# needs to change, change not-supported.md in the same commit.
+{
+    my $prog = <<'PL';
 no warnings;
 print "A\n";
 my $s = chr(0x4000000);
 print length($s), ":", ord($s), "\n";
 print "B\n";
 PL
-   'chr(N) above U+10FFFF still yields U+FFFD at run time and does not die');
+    is(run_cl($prog), run_perl($prog),
+       'chr(N) above U+10FFFF does not die and ord round-trips it (perl oracle)');
+
+    # 6b: the character itself is still U+FFFD, so a real string operation on
+    # it loses the code point — the blessed gap, unchanged by #442.
+    is(run_cl(q{no warnings; my $s = chr(0x4000000); print ord(uc($s)), "\n";}),
+       "65533\n",
+       'the CHARACTER is still U+FFFD — a string op on it loses the number');
+}
+
+# ── 7. #442: the answer must not depend on an OPTIMIZER VERDICT ─────────────
+# `%pcl-to-string-strict` (the raw-string slot's eager freeze) used to call
+# to-string on the payload, so `my $c = chr(N); ord($c)` answered 65533 under
+# the default emission and N under PCL_OPT=none: two answers for one value,
+# chosen by a speed transform.  Both emissions must now give perl's answer.
+{
+    my $prog = <<'PL';
+no warnings;
+my $c = chr(0x4000000);
+print length($c), ":", ord($c), "\n";
+my $d = $c;
+print ord($d), "\n";
+my @a = (chr(0x4000000));
+print ord($a[0]), "\n";
+print ord(chr(0x4000000)), "\n";
+PL
+    my $oracle = run_perl($prog);
+    is(run_cl($prog),         $oracle, '#442: the raw-string slot keeps the superchar payload (perl oracle)');
+    is(run_cl_general($prog), $oracle, '#442: PCL_OPT=none gives the SAME answer — no optimizer-dependent value');
+}

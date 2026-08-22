@@ -2918,10 +2918,32 @@
    wrapper stays equivalent to the boxed write it replaces."
   (to-number (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "numeric")))
 
+(defun %pcl-superchar-payload (v)
+  "V's payload when V IS a super-Unicode character — `chr(N)` for
+   N > U+10FFFF, which has no CL character and is carried as a p-superchar
+   struct — either raw or inside a plain box; NIL otherwise.  Looks through
+   the box WITHOUT unbox's tie/magic dispatch on purpose: a tie proxy or a
+   magic cell is never a superchar, and running FETCH here would run it
+   twice for one write."
+  (let ((u (if (p-box-p v) (p-box-value v) v)))
+    (and (p-superchar-p u) u)))
+
 (defun %pcl-to-string-strict (v name)
   "Eager string freeze for a raw-string slot write (`. \"\"`); strict per
-   %pcl-raw-coerce-check.  Aggregate collapse as in %pcl-to-number-strict."
-  (to-string (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "string")))
+   %pcl-raw-coerce-check.  Aggregate collapse as in %pcl-to-number-strict.
+
+   A super-Unicode character (`chr(N)`, N > U+10FFFF) passes through
+   UNFROZEN (task #442).  It is the one payload whose CL string form is
+   LOSSY — to-string collapses it to U+FFFD, so freezing it here made the
+   raw-string slot answer `ord` 65533 where the general-form compiler
+   (PCL_OPT=none) answers N, which is perl's answer: two answers for one
+   value, chosen by an optimizer verdict.  Every consumer of a raw-string
+   slot goes through to-string, so the U+FFFD collapse still happens — at
+   the same point the boxed path makes it, and nowhere earlier.  The rule
+   is the registry's own contract: the optimized emission must RUN
+   identically to the general form."
+  (let ((c (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "string")))
+    (or (%pcl-superchar-payload c) (to-string c))))
 
 ;;; S1 str-buffer raw slots (task #62, docs/raw-numeric-verdict.md §S1):
 ;;; an accumulator whose only writes are plain roots + `.=` and whose every
