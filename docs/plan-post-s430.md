@@ -56,6 +56,19 @@ targeted-guard batch is what catches it, so run the batch); a filler is
 
 **Session P1 — the flip re-census, measured and classified (feeds the Fable
 design; NO flip code).**
+
+> **DONE s431 (Opus 5) — `docs/drop-census-s431-flip-gate.md`; asks in
+> `docs/opus5-review-requests-s431.md`.**  Census identical (27/82) on a cold
+> cache; all 82 classified (exempt 39 / registered 7 / deliberate 1 /
+> needs-a-ruling 4 / gap 31, every gap owned).  **Priced**: flip everything
+> 5300 rows over 27 files, exempt lvalue+indirect object 3022/19, also exempt
+> the registered absences 441/15, fix the 31 gaps first 0 — the decisive
+> number being that four REGISTERED absences sit in files worth 2581 rows.
+> Item 2's module count is NOT zero: 3 board modules (5 drops, one of them
+> Text::Balanced with 780 passing rows) + 9 cpan-tests modules (15), so the
+> module-mode increment goes behind its own unblock list.  Filed #457–#466 (three of them the minimised module drops);
+> #415 updated.  Fable's design question is Ask 1 of the review doc.
+
 1. Run `tools/drop-census.pl "$PWD" <out.tsv> 8` (both populations,
    `PCL_PERL_SUITE_T` set) on a COLD cache and diff against the blessed
    census — expect identity (27/82).  Then re-classify every row into the

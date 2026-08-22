@@ -4,6 +4,84 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 431 (2026-08-22, Opus 5) — P1: the flip re-census, PRICED — what the announce→DIE flip costs per option; no compiler change
+
+Session P1 of `docs/plan-post-s430.md`.  Deliverable:
+**`docs/drop-census-s431-flip-gate.md`** (row-level table + the price);
+asks in `docs/opus5-review-requests-s431.md`.
+
+**The census, COLD** (`rm ~/.pcl-cache/*.lisp`, `tools/drop-census.pl` at 8
+jobs, 1m16s): **27 files / 82 drops, row-for-row identical** to the blessed
+`docs/parse-error-drop-census-s399.tsv` — no edit owed.  `drop-harvest.pl`
+gave the 82 texts, and every row was classified into one of four verdicts:
+**exempt 39** (lvalue-sub assignment, ruled a permanent loud drop),
+**registered 7**, **deliberate 1**, **needs-a-ruling 4** (indirect object,
+#399), **gap-with-task 31** — every gap now owned (#458, #460, #461, #463 new;
+#415 holds 11).
+
+**The criterion that re-classified six s419 rows: a dropped statement inside a
+file `perl` itself compiles is VALID PERL by construction.**  Probed one by
+one — `t/io/open.t:267` (`ok LIST, || _diag $!`), `t/op/utf8cache.t:70`
+(4-arg `substr` with the comma; PCL prints `abc` where perl prints `Zbc` —
+silent wrong), `t/comp/parser.t`'s five, `t/op/lex.t:99`.  Exactly ONE row of
+the 82 is deliberately invalid Perl: `t/comp/final_line_num.t`'s `print 1+`.
+
+**THE PRICE** (rows lost; a file whose transpile DIEs contributes zero):
+flip everything **5300 / 27 files**; exempt lvalue+indirect object **3022 /
+19**; also exempt the registered absences **441 / 15**; fix the 31 gaps first
+**0**.  The decisive number is not the gaps — **four REGISTERED absences sit
+in files worth 2581 rows** (perl-tests/sprintf2.t 1631 for one hex-float
+block, t/re/pat_advanced.t 950 for four regex code blocks).  s419 counted
+those rows as flip-legal, which is true per ROW and false per FILE.  Also
+measured: a census row is a LOWER bound — several drops swallow the FOLLOWING
+statement, because PPI's mis-lex runs past the `;`.
+
+**The module populations, censused for the first time** (flip-gate §5's open
+number): board `lib/` 28 modules → **3 carry 5 drops** (Text::Balanced ×2 —
+780 passing board rows —, Sub::Uplevel, Mojo::DOM58::_Collection);
+`cpan-tests/modules` → **9 carry 15**, all in Test-Simple's Test2 stack.  So
+the module-mode DIE increment is the opposite of free.  And nothing measures
+that population: `drop-census.pl` is perl-tests + perl t/ + lib/,
+`corpus-diff.pl`'s SILENT-DROP counter is perl-tests only (**#462**).
+
+**Eight of the 20 module drops minimise to three one-line bugs**, probed this
+session: **#464** (a statement MODIFIER on two statement classes drops it —
+`require $m if 1;`, `local($\, $,) = (undef,"") if 1;`; right without the
+modifier), **#466** (`print $_ "x\n"` — `$_` in the FILEHANDLE slot; PPI gives
+it as `Token::Magic`), and on the same Test2 line **#465** (`$\` and `$,` are
+DEFINED in PCL, undef in perl — so `… if $\ || $,;` takes the branch perl
+skips).
+
+**#457, found by that measurement:** `length($dels)-length($escs)` — `)-WORD`
+with no space — is lexed by PPI as ONE `Word(-length)`, a negative bareword,
+so the whole statement DROPS.  It is the unrepaired third sibling of
+ppi-upstream-bugs §12 (`)*name`) and §15 (`)-1`), both repaired with the same
+`_ends_term` predicate.  A scan of all four in-repo populations (1139 files)
+with that predicate: **zero sites**; two in Text::Balanced.  That is why no
+census ever saw it.
+
+**Other findings filed:** **#458** (`_repair_word_match` declines when the
+pattern carries a quantifier — the closing `/` has been absorbed into a
+`Regexp::Match` token running to EOF; `ok /a*/, "d"` mis-compiles to division,
+`ok /a?/, "d"` drops and eats the next statement; owns t/re/pat.t:106),
+**#459** (a failed match in list context contributes `""` instead of the empty
+list in an ARGUMENT list — `sh(/nomatch/, "d")` gets 2 args, perl 1),
+**#460** (`{ my sub y {8} print y, "\n" }` prints 0, perl 8; bare `x;` drops),
+**#461** (#410 residue, 4 rows), **#463** (the glob-surgery / symbolic-ref
+family, 13 rows, orphaned when B3 closed without touching it).
+
+**Instrument fix:** `docs/perl-suite-run.tsv` had **523 rows for 528 files** —
+`comp/line_debug.t`, `op/goto.t`, `op/lex.t`, `op/require_errors.t`,
+`run/dtrace.t` had no row at all, so a regression in them could never read as
+a mover (#176 family).  Measured s431 (parallel + serial) and spliced with
+their first measurement, each marked; `op/goto.t` TRANSPILE-FAILs on the #314
+refusal, `run/dtrace.t` is NOTAP under perl itself.
+
+No `Pl/`, `cl/` or `lib/` change, so generation stays **v2-177** and no sweep
+or companion run was owed (s401 WHAT-TO-RUN table).
+
+---
+
 ## Session 430 (2026-08-22, Fable) — B3.3 / #374(b) SHIPPED: a keyword-named lexical sub is renamed POSITION-AWARE; B3 COMPLETE
 
 The third and last B3 widening (`docs/b3-operand-collapse-s428.md` §B3.3,

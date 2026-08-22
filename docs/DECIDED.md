@@ -11,6 +11,64 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s431 (2026-08-22, Opus 5) — the flip re-census is PRICED: what the announce→DIE flip costs in passing rows, per option
+
+- **Census re-verified on a COLD cache at `54e2d80`: 27 files / 82 drops,
+  row-for-row IDENTICAL to `docs/parse-error-drop-census-s399.tsv`.**  No
+  compiler change this session (P1 is measurement).  Full row-level table +
+  the price: **`docs/drop-census-s431-flip-gate.md`** (supersedes the s419
+  flip-gate doc as the current reading; s419 keeps the family numbering).
+- **The 82 by verdict: exempt 39 (lvalue), registered 7, deliberate 1,
+  needs-a-ruling 4 (indirect object #399), gap-with-task 31.**  Every gap now
+  has an owner: #458, #460, #461, #463 (all new), #415 (11 rows).
+- **A dropped statement in a file `perl` itself compiles is VALID PERL by
+  construction** — the criterion that re-classified six s419 rows.  Only
+  `t/comp/final_line_num.t`'s `print 1+` is a deliberate syntax error (s419
+  counted seven); `t/io/open.t:267`, `t/op/utf8cache.t:70` and
+  `t/comp/parser.t`'s five are gaps, probed against perl.
+- **THE PRICE (rows lost, since a file whose transpile DIEs contributes
+  zero): flip everything = 5300 rows / 27 files; exempt lvalue+indirect
+  object = 3022 / 19; also exempt the registered absences = 441 / 15; fix
+  the 31 gaps first = 0.**  The decisive number is not the gaps: **four
+  REGISTERED absences sit in files worth 2581 rows** (perl-tests/sprintf2.t
+  1631 for one hex-float block, t/re/pat_advanced.t 950 for four regex code
+  blocks).  s419 called those rows "flip-legal today" — true per ROW, false
+  per FILE, and the flip's unit is the file.
+- **A census row is a LOWER bound on a drop's cost**: several drops swallow
+  the FOLLOWING statement too, because PPI's mis-lex runs past the `;`
+  (measured for `ok /a?/, "d";`, `{ my sub x {7} x; print …; }`,
+  `sub _ {…} is(-f _, …)`).
+- **Module-mode DIE is NOT the free first increment** (`drop-census-s419-flip-gate.md`
+  §5 hoped it was): measured s431, **3 of the 28 board modules carry 5 drops**
+  (Text::Balanced ×2 — a dist with 780 passing board rows —, Sub::Uplevel,
+  Mojo::DOM58::_Collection) and **9 of the cpan-tests modules carry 15**, all
+  in Test-Simple's Test2 stack.  A module-mode DIE aborts every program that
+  loads them.
+- **Eight of the 20 module drops MINIMISE to three one-line bugs**, all
+  probed s431: **#464** a statement MODIFIER on two statement classes drops it
+  (`require $m if 1;`, `local($\, $,) = (undef,"") if 1;` — right without the
+  modifier, and `require strict if 1;` / `if (1) { require $m }` are right);
+  **#466** `print $_ "x\n"` — `$_` in the FILEHANDLE slot (PPI gives it as
+  `Token::Magic`, not `Symbol`); and on the same Test2 line, **#465** `$\` and
+  `$,` are DEFINED in PCL and undef in perl (`$/`, `$;`, `$!` agree), so
+  `… if $\ || $,;` takes the branch perl skips.
+- **The census instrument has a MODULE BLIND SPOT** (task #462):
+  `tools/drop-census.pl` = perl-tests + perl t/ + lib/; `corpus-diff.pl`'s
+  SILENT-DROP counter = perl-tests only.  Neither sees `cpan-tests/modules`
+  or the board dists — which is where #457 lived unseen.
+- **#457 (new, from that measurement): `f(...)-g(...)` with no space —
+  PPI lexes `-WORD` after a term-ending token as ONE Word (a negative
+  bareword), so the whole statement DROPS.**  Third sibling of
+  `ppi-upstream-bugs.md` §12 (`)*name`) and §15 (`)-1`), both already
+  repaired with the same `_ends_term` predicate.  ZERO sites in all four
+  in-repo populations (1139 files scanned), TWO in Text::Balanced.
+- **Five companion files had NO row in `docs/perl-suite-run.tsv`** (523 rows
+  for 528 files): `comp/line_debug.t`, `op/goto.t`, `op/lex.t`,
+  `op/require_errors.t`, `run/dtrace.t` — absent, not quarantined, so a
+  regression in them could never read as a mover (#176 family).  Measured
+  s431 and spliced with their FIRST measurement; `op/goto.t` TRANSPILE-FAILs
+  on the #314 refusal.
+
 ## s430 (2026-08-22, Fable) — B3.3 / #374(b): a keyword-named lexical sub is renamed POSITION-AWARE — the sub where a term is expected, the keyword where an operator is
 
 - **The live queue moved to `docs/plan-post-s430.md`** (P1 the flip re-census → P2 #456 → P3 #453+#365 → P4 #454/#435/#455 → P5 #451/#452/#449/#450 → push week → CI → v0.1 tag; Fable: the flip design from P1's table).

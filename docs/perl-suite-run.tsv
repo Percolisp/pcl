@@ -1,4 +1,14 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s431 (Opus 5) — FIVE files had NO ROW in this snapshot at all: comp/line_debug.t,
+#   op/goto.t, op/lex.t, op/require_errors.t, run/dtrace.t.  Not quarantined, not
+#   registered anywhere, simply absent — so a regression in any of them could never
+#   read as a mover (the #176 family: an unmeasured file's rows vanish invisibly).
+#   Found while pricing the announce->DIE flip, which needed op/lex.t's row.
+#   Measured s431 on 54e2d80 (parallel + serial) and spliced with their FIRST
+#   measurement, so none of them is a mover.  op/goto.t TRANSPILE-FAILs on the
+#   #314 refusal ("my-lexical 'count' spans a package boundary"); run/dtrace.t is
+#   NOTAP under perl itself, which says nothing about PCL.  Their rows carry a
+#   `# s431 first measurement` marker.
 # s427 row edits — THREE rows, two of them this session's and one PRE-EXISTING
 #   drift.  The companion leg was 18 files (op/ re/ io/ comp/ uni/ mro/, the
 #   dirs this batch touches), run A/B against a 753ecab worktree; the A/B diff
@@ -470,6 +480,8 @@ comp/final_line_num.t	1	0	0	0	DIFF
 comp/fold.t	35	0	15	8	DIFF	undef-fn:main::pl-INSTALL
 comp/form_scope.t	14	0	0	2	DIFF	
 comp/hints.t	31	0	15	14	DIFF	NOT fully registered: 2 unregistered diverging row(s): tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)
+# s431 first measurement (see the s431 note in the header)
+comp/line_debug.t	25	0	1	24	DIFF		0
 comp/multiline.t	6	0	6	0	OK	
 comp/opsubs.t	36	0	31	5	DIFF	
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL
@@ -673,6 +685,8 @@ op/getpid.t	0	0	0	1	NOTAP	crash:simple-error: Can't locate object method "new" v
 op/getppid.t	8	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w)) Compile-time error
 op/glob.t	18	0	14	4	DIFF	
 op/gmagic.t	78	0	0	0	DIFF	crash:simple-error: Can't call method FETCH on an undefined value
+# s431 first measurement (see the s431 note in the header)
+op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
 op/grent.t	3	0	3	0	OK	
 op/grep.t	77	0	71	6	DIFF	
@@ -701,6 +715,8 @@ op/kvhslice.t	39	0	18	20	DIFF
 op/lc.t	2716	0	2683	33	DIFF	
 op/leaky-magic.t	71	0	0	0	DIFF	crash:simple-error: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/
 op/length.t	49	0	35	12	DIFF	
+# s431 first measurement (see the s431 note in the header)
+op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF	
 # s430 (#374(b) keyword-named lexical sub, B3.3): op/lexsub.t 7/10 -> 9/8 — the
 #   `our sub if() {42} my $x = if if if` rows (lines 73, 76: 'lexical subs (even
@@ -763,6 +779,8 @@ op/ref.t	257	0	198	44	DIFF
 op/refstack.t	0	0	0	0	NOTAP	
 op/repeat.t	50	0	47	3	DIFF	
 op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
+# s431 first measurement (see the s431 note in the header)
+op/require_errors.t	73	0	3	70	DIFF		0
 op/require_gh20577.t	9	0	4	5	DIFF	
 op/require_override.t	10	0	7	3	DIFF	
 op/reset.t	45	0	25	19	DIFF	
@@ -919,6 +937,8 @@ re/uniprops09.t	29848	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/
 re/uniprops10.t	26334	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/user_prop_race_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 run/cloexec.t	22	0	16	6	DIFF
+# s431 first measurement (see the s431 note in the header)
+run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	14	3	DIFF	
 run/fresh_perl.t	91	0	56	35	XDIFF	unbound:main::H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.
 run/locale.t	44	0	0	0	DIFF	
