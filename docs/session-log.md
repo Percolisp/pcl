@@ -4,6 +4,108 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer (1216 → 664 lines); #420 and #422.1 closed
+
+**`docs/plan-post-s420.md` §1 item 4.**  `Pl/PExpr/StringInterpolation.pm` is
+now an InterpScan consumer, which is the standing rule
+(`var-handling-review-s379.md` §8) and — as the plan predicted — **the port
+IS the fix**: the s366 escape hatch was not taken.
+
+`parse_interpolated_variable` was 334 lines of hand-rolled scanning feeding
+four builders that carried the six-line brace-depth walk NINE times and one
+exact 36-line duplicate (the #1 family of the s411 dup census).  It is one
+`Pl::InterpScan::scan_one` call and a dispatch on (sigil, form, chain), with
+three lowering arms: **leaf tokens** (WHICH PPI token is the only open
+question — Symbol / Magic / ArrayIndex), the **element/slice accessor**
+(exactly one bracket group on a NAME, one builder instead of two 130-line
+functions), and — for every deref base, braced EXPRESSION, second group or
+explicit arrow — **the reference's own SOURCE TEXT through the ordinary
+expression pipeline**, the move `_parse_postfix_deref` and consumer 1's
+`_compile_ref_text_form` already make.  That last arm is what closes **#420**:
+the old scanner had no way to continue past a deref, so `"$$r[1]"` emitted
+`(p-string-concat (p-cast-$ $r) "[1]")` and printed `ARRAY(0x…)[1]`.
+`parse_braced_expression`, `parse_array_braced_interpolation`,
+`parse_array_subscript`, `parse_hash_subscript` and `_parse_subscript_chain`
+are deleted; divergences 3–7 of `docs/interp-scan.md`'s table go with them.
+
+**Two scanner facts were probed on perl 5.40.3 and added to
+`Pl/InterpScan.pm`.**  (i) *A braced NAME closes an interpolated reference; a
+braced EXPRESSION does not.*  The module said "braces CLOSE the reference"
+flatly, probed on the NAME form only — but `"${$r}[1]"` is 20, `"@{$r}[1]"` is
+20, `"@{$hr}{'a','b'}"` is a hash slice, `"${ $r }[1]"` is 20 with blanks,
+`"${$rr}->[1]"` binds the explicit arrow, and `"${\ $x}[0]"` dies *because it
+took the group*.  (ii) *`@{^NAME}` is the magic ARRAY of that name*, the twin
+of `${^NAME}`; without that arm the reference fell to form `expr` and
+`"@{^CAPTURE}"` was a whole-statement **DROP** — that is **#422 item 1**.  Also
+`$#-` / `$#+`, which #417 had shipped in the consumer only.
+
+**A braced PUNCTUATION name is the same rule, and the gate is what said so.**
+`"@{+}"` is `@+` (`Pl::PExpr::braced_punct_magic_name`, the rule the token
+pre-pass `_fold_braced_punct_magic` applies to the same spelling in code), and
+the first full gate caught the port dropping it: `Pl/t/match-vars-01.t` failed
+with the #355 stderr-aware helper's *"transpile DROPPED a statement"* row.  The
+old builder had a private branch for it; the scanner had none, so `+` went to
+form `expr` and was parsed as an expression on its own — the exact shape #314
+cost `re/pat_rt_report.t` its whole 2513 rows.  Caret and punctuation are one
+predicate now (`_braced_magic_name`), asked by both sigils; probed after:
+braces close for it too (`"@{+}[1]"` is `4 3 4[1]`, `"${+}[1]"` is `b[1]`).
+
+**The half the task did not know about.**  With the subscript finally reaching
+the parser, `"@$r[0,1]"` compiled correctly and printed nothing — because **a
+slice whose CONTAINER is a scalar is a slice through a REFERENCE, and all four
+slice emitters skipped the deref**.  Not a string bug: `my @s = @$r[0,1]` was
+`""` in ordinary code where perl says `10 20`, every hash spelling DIED
+(`@$hr{a,b}`, `%$hr{a}`, `delete @$hr{a}`), and `@$r[0,1] = (1,2)` was a
+silent no-op.  It looked like it worked because a single-boxed anon ref
+(`my $ao=[7,8,9]; @$ao[1]`) is right by luck and `\@named` is not.  ONE helper,
+`ExprToCL::_slice_container_form` — `p-cast-@` / `p-cast-%` unless the child
+node is a bare Symbol/Magic naming the aggregate — used by
+`gen_array_slice_form`, `gen_hash_slice_form`, `gen_kv_hash_slice_form`,
+`gen_kv_array_slice_form` and `_elem_container_key`'s slice arm.  It replaced
+`gen_kv_array_slice_form`'s `(unbox $r)`, which was the same rule written
+shape-blind (right for one box layer, wrong for two): the second copy rule 11
+names.  The ELEMENT accessors have always dereferenced (`p-aref-deref`); only
+the slices did not.
+
+**Measured.**  Ten-shape probe (56 rows, perl 5.40.3): **15 divergences before
+— two of them whole-statement DROPS and one a run-time CRASH — 0 after**, with
+25 inverse guards and the whole #390/#414 nested-subscript set among the
+unchanged rows.  Two companion probe files (24 + 9 rows) on the brace/arrow
+continuation rules; their residual differences are die-message text and the
+#443 leniency, and in every one of them the interpolation now answers exactly
+what the equivalent CODE answers — the port's contract.
+`tools/corpus-diff.pl` **6 of 111** files, silent drops **7 unchanged**; and
+with `Pl/ExprToCL.pm` restored from main in the working tree it is **0 of
+111** — a separate RUN, not an inference from the hunks: the port alone moves
+nothing in the corpus.  `tools/emission-ab.pl` over perl's own
+`t/` (605) + `lib/**` (22) + the cpan board (402) = **21 of 1029**, every one
+of them one of the two fixes: `mro/package_aliases{,_utf8}.t` are #420
+(`"$$_{code}"` → `p-gethash-deref`), the other 19 are the slice deref.
+Gate COLD **156 files / 5641 rows**, the only failures the 13 pclxs xs rows (main: 156/5639 — the two added rows are this session's guards).  Sweep GATE **clean** — TOTAL passing **18365** (baseline 18365, +0), drops **7 = census** (+0), 0 new / 0 fixed; the 7 UNSTABLE and 10 DID-NOT-RUN rows are the usual PARTIAL-file noise the tool labels as such.
+
+**A leaf-token dispatch must reproduce WHICH PPI token the old branch made.**
+`Pl/t/string-interp-01.t` is a white-box test of the interpolation node shapes:
+wrapping a bare `"@arr"` in `array_str_interp` is correct at run time (both
+`gen_string_concat` and `gen_array_str_interp` join with `$"`) and failed it —
+and would have put a second `(p-cast-@ …)` in front of every array
+interpolation in the corpus.  A digit-named array (`"@119797"`, t/op/sub_lval.t)
+comes back as form `magic` and needs the same bare-Symbol path; there is no
+magic `@1`.  Both were caught by measurement, not by reasoning.
+
+Filed, pre-existing, not fixed: **#443** (PCL is lenient where perl is FATAL on
+a wrong-kind deref — `${$aref}` hands the array back, `$$scalarref_to_aref[1]`
+answers undef; identical in code and in strings, which is why `"$$r->[1]"` now
+prints where perl dies) and **#444** (`"${ \"a\" }"` emits UNREADABLE CL and
+loses the whole file — the `@{ EXPR }` arm unescapes the block text and the
+`${ EXPR }` arm never has; the task carries the measurement showing a blanket
+unescape breaks `"${\ (2*3) }"`).  Guards:
+`Pl/t/interp-chained-subscript-01.t` rows 11–12.  Generation **v2-170**;
+the three artifacts regenerated.  **Consumer 2 (the Parser2 rename machinery,
+also the 1.65 s compile-time hot spot) is the last one open — #388/#237 stay
+in_progress for it.**  Review doc: `docs/opus5-review-requests-s426.md`.
+
+---
+
 ## Session 425 (2026-08-22, Fable) — the three USER decisions closed (indirect object = MAYBE LATER; tag decouples from the flip; next Fable = B3); second round of parallel Opus agents (finish #418, O2, O3)
 
 **State at open:** main `753ecab` clean.  A (s422/#419) + C (s424/#423)
@@ -33,6 +135,7 @@ original worktree (gen v2-165, ids 431–435); E = s426 = O2 (#388 consumer 3
 its final gate; Fable reviews, merges, renumbers the generation once per
 merge and regenerates the artifacts; one cold gate + one full sweep on the
 final tree.  (Merge results are appended below as they land.)
+
 
 ## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered
 

@@ -11,6 +11,65 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer; #420 + #422.1 CLOSED
+
+- **Interpolation scanning now happens in `Pl::InterpScan` for the dq/heredoc
+  parser too** (`docs/interp-scan.md` step 3, standing rule
+  `var-handling-review-s379.md` §8).  `parse_interpolated_variable` is a
+  `scan_one` dispatcher; `parse_braced_expression`,
+  `parse_array_braced_interpolation`, `parse_array_subscript`,
+  `parse_hash_subscript`, `_parse_subscript_chain` and their NINE brace-depth
+  walks are **deleted** (1216 → 664 lines).  Divergences 3–7 of the
+  interp-scan table are closed with them.  **Consumer 2 (the Parser2 rename
+  machinery, also the 1.65 s compile-time hot spot) is the last one open.**
+- **A braced NAME closes an interpolated reference; a braced EXPRESSION does
+  not.**  Probed on 5.40.3: `"${x}[0]"` is `$x` then literal, but `"${$r}[1]"`
+  is 20, `"@{$r}[1]"` is 20, `"@{$hr}{'a','b'}"` is a hash slice,
+  `"${ $r }[1]"` is 20 with blanks, `"${$rr}->[1]"` takes the explicit arrow,
+  and `"${\ $x}[0]"` dies *because it took the group*.  The scanner's flat
+  "braces CLOSE the reference" comment had been probed on the NAME form only.
+- **`@{^NAME}` is the magic ARRAY of that name**, the twin of `${^NAME}` —
+  without that arm the reference fell to form `expr` and `"@{^CAPTURE}"` was a
+  whole-statement DROP (#422 item 1).  Like every braced name it closes:
+  `"@{^CAPTURE}[0]"` is `a b[0]`.  `$#-` / `$#+` gained their scanner arm too
+  (#417 had shipped them in the consumer only).
+- **A braced PUNCTUATION name is the SAME rule** — `@{+}` is `@+`
+  (`Pl::PExpr::braced_punct_magic_name`, which the token pre-pass
+  `_fold_braced_punct_magic` already applies to the same spelling in code).
+  Caret and punctuation are one predicate (`InterpScan::_braced_magic_name`),
+  asked by both sigils; braces close for it too (`"@{+}[1]"` is `4 3 4[1]`,
+  `"${+}[1]"` is `b[1]`, probed).  **The Pl/t gate is what found this**: the
+  port had no branch for it, the drop-announcement helper (#355) failed
+  `Pl/t/match-vars-01.t`, and it is the exact shape #314 cost
+  `re/pat_rt_report.t` its whole file.
+- **A SLICE whose container is a SCALAR is a slice through a REFERENCE, and
+  all four slice emitters skipped the deref** (#420's emitter half, found when
+  the port finally delivered the subscript).  Not a string bug — `my @s =
+  @$r[0,1]` was `""` in ordinary code where perl says `10 20`, every hash
+  spelling DIED, and `@$r[0,1] = (1,2)` was a no-op.  It *looked* like it
+  worked because a single-boxed anon ref (`my $ao=[7,8,9]; @$ao[1]`) is right
+  by luck and `\@named` is not.  ONE helper, `ExprToCL::_slice_container_form`
+  (`p-cast-@` / `p-cast-%` unless the child is a bare Symbol/Magic naming the
+  aggregate), used by all four emitters **and** `_elem_container_key`'s slice
+  arm; it replaced `gen_kv_array_slice_form`'s `(unbox $r)`, the same rule
+  written shape-blind.  The ELEMENT accessors have always dereferenced
+  (`p-aref-deref`); only the slices did not.
+- **A leaf-token dispatch must reproduce WHICH PPI token the old branch made,
+  not just the right value.**  `Pl/t/string-interp-01.t` is a WHITE-BOX test of
+  the interpolation node shapes: wrapping a bare `"@arr"` in
+  `array_str_interp` (correct at run time — `gen_string_concat` and
+  `gen_array_str_interp` both join) failed it, and would have put a second
+  `(p-cast-@ …)` in front of every array interpolation in the corpus.  A
+  digit-named array (`"@119797"`, t/op/sub_lval.t) comes back as form `magic`
+  and needs the same bare-Symbol path — there is no magic `@1`.
+- **Two PRE-EXISTING bugs filed, not fixed: #443** (PCL is lenient where perl
+  is FATAL on a wrong-kind deref — `${$aref}` returns the array,
+  `$$scalarref_to_aref[1]` returns undef; identical in code and in strings,
+  which is why `"$$r->[1]"` now prints where perl dies) and **#444**
+  (`"${ \"a\" }"` emits UNREADABLE CL and loses the whole file: the `@{ EXPR }`
+  arm unescapes the block text, the `${ EXPR }` arm never has — and a blanket
+  unescape breaks `"${\ (2*3) }"`, whose backslash is the ref operator).
+
 ## s425 (2026-08-22, Fable) — the three open USER decisions CLOSED; second round of parallel Opus agents (finish #418, O2, O3)
 
 - **Indirect object syntax (#399/#381) = MAYBE LATER (USER)** — registered in
@@ -41,6 +100,7 @@ not-supported.md → only then probe.*
   generation ONCE per merge (v2-167 …) and regenerates the artifacts.
   **A dead agent's worktree is the first thing the next session reads**
   (memory `project_s421_opus_agents_inflight`).
+
 
 ## s424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE differ by the EXISTING `is-ref` flag; no new slot
 

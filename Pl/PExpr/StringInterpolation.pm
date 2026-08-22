@@ -15,6 +15,9 @@ use PPI;
 use PPI::Document;
 use Scalar::Util qw(refaddr);
 
+use Pl::InterpScan ();   # THE variable-reference scanner (#237/#388); see
+                         # docs/interp-scan.md — this file is consumer 3.
+
 # This module handles parsing of interpolated strings for Pl::PExpr
 # It takes a string token and returns a node ID for the parsed result
 
@@ -246,383 +249,251 @@ sub parse_interpolated_string {
 }
 
 
-# Parse a variable or expression within an interpolated string
-# Returns: ($node_id, $new_position) or (undef, $old_position)
+# ── The scanner seam: InterpScan consumer 3 (task #388, s426) ─────────────
+# Where a reference STARTS and how far it EXTENDS is `Pl::InterpScan`'s
+# answer, never a private walk here (standing rule
+# `docs/var-handling-review-s379.md` §8; wiring plan `docs/interp-scan.md`
+# step 3).  What stays in this file is the NODE BUILDING and the
+# case-mod/literal outer loop; what went away is the hand-rolled scanning —
+# the `\G` name grabs, the `$#`/`$::`/punct-magic branches, the six-line
+# brace-depth walks and the subscript-group counters.
+#
+# The port IS the fix for task #420: the old scanner stopped after a DEREF
+# spelling and left its subscript as literal string text, so `"$$r[1]"`
+# printed `ARRAY(0x…)[1]` where perl prints the element.  The event carries
+# the chain, so every deref/braced-expression base now continues into it.
+# Task #422 item 1 (`"@{^CAPTURE}"`, which used to DROP the statement) comes
+# from the same place: the scanner learned the braced caret name.
+#
+# Returns: ($node_id, $new_position) or (undef, $old_position) when the text
+# at $pos is not a reference and the sigil is literal.
 sub parse_interpolated_variable {
-  my $self      = shift;
-  my $parser    = shift;
-  my $content_ref = shift;  # Reference to string
-  my $pos       = shift;     # Position of $ or @
-  
-  my $content   = $$content_ref;
-  my $sigil     = substr($content, $pos, 1);
-  
-  say "parse_interpolated_variable: Starting at pos $pos, sigil: $sigil" 
+  my ($self, $parser, $content_ref, $pos) = @_;
+  my $content = $$content_ref;
+  my $ev = Pl::InterpScan::scan_one($content, $pos);
+  return (undef, $pos) unless $ev;
+
+  say "parse_interpolated_variable: $ev->{sigil} form=$ev->{form} "
+    . "name=" . (defined $ev->{name} ? $ev->{name} : '-')
+    . " span=$ev->{span}[0]..$ev->{span}[1] chain=" . scalar(@{$ev->{chain}})
       if $parser->DEBUG & 32;
-  
-  # Handle ${expr}
-  if ($sigil eq '$' && substr($content, $pos + 1, 1) eq '{') {
-    return $self->parse_braced_expression($parser, $content_ref, $pos);
-  }
 
-  # Handle @{expr} — array dereference/expression in string interpolation
-  # e.g. "@{[uc($_)]}" → (p-join |$"| (p-cast-@ (list (p-uc $_))))
-  if ($sigil eq '@' && substr($content, $pos + 1, 1) eq '{') {
-    return $self->parse_array_braced_interpolation($parser, $content_ref, $pos);
-  }
-
-  # Handle @$var — array dereference in string interpolation
-  # e.g. "@$ar" = "@{$ar}" = elements of the array referenced by $ar
-  if ($sigil eq '@' && substr($content, $pos + 1, 1) eq '$') {
-    my $after = substr($content, $pos + 2, 1);
-    if ($after =~ /\w/) {
-      pos($content) = $pos + 1;  # position at $
-      if ($content =~ /\G(\$\w+(?:::\w+)*)/gc) {
-        my $inner_var = $1;   # e.g. '$ar'
-        my $end_pos   = pos($content);
-        # Create a Symbol node for $inner_var, wrap in array_str_interp
-        my $var_token = PPI::Token::Symbol->new($inner_var);
-        my $var_id    = $parser->make_node($var_token);
-        my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
-        $parser->add_child_to_node($interp_id, $var_id);
-        return ($interp_id, $end_pos);
-      }
-    }
-  }
-
-  # Handle @- (@LAST_MATCH_START) and @+ (@LAST_MATCH_END) in interpolation.
-  # e.g. "@-" => (p-join |$"| @-).  These are the only punctuation-named arrays;
-  # a following [ or { would be a slice, so let those fall through.
-  if ($sigil eq '@' && substr($content, $pos + 1, 1) =~ /^[-+]$/
-      && substr($content, $pos + 2, 1) !~ /^[\[{]$/) {
-    my $punct     = substr($content, $pos + 1, 1);
-    my $var_token = PPI::Token::Symbol->new('@' . $punct);
-    my $var_id    = $parser->make_node($var_token);
-    my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
-    $parser->add_child_to_node($interp_id, $var_id);
-    return ($interp_id, $pos + 2);
-  }
-
-  # Set position for \G anchor
-  pos($content) = $pos;
-
-  # Handle special variable $$  (process ID) and $$var (scalar deref)
-  if ($sigil eq '$' && substr($content, $pos + 1, 1) eq '$') {
-    my $after = substr($content, $pos + 2, 1);
-    if ($after eq '' || $after !~ /\w/) {
-      # $$ alone = process ID
-      my $var_token = PPI::Token::Symbol->new('$$');
-      my $var_id = $parser->make_node($var_token);
-      return ($var_id, $pos + 2);
-    } else {
-      # $$varname = scalar dereference (e.g. "$$r1" = ${$r1})
-      pos($content) = $pos + 1;  # start at second $
-      if ($content =~ /\G(\$\w+(?:::\w+)*)/gc) {
-        my $inner_var = $1;   # e.g. '$r1'
-        my $end_pos   = pos($content);
-        # Parse via PPI so PExpr can handle Cast+Symbol (and any subscripts)
-        my $deref_str = '$' . $inner_var;  # '$$r1'
-        my $doc = PPI::Document->new(\$deref_str);
-        $self->{_ppi_docs} //= [];
-        push @{$self->{_ppi_docs}}, $doc;
-        my $stmt = $doc->find_first('PPI::Statement');
-        return (undef, $pos) unless $stmt;
-        my @parts = $stmt->children();
-        my $expr_id = $parser->parse(\@parts);
-        return ($expr_id, $end_pos);
-      }
-    }
-  }
-
-  # Handle magic variables starting with $
-  if ($sigil eq '$') {
-    my $next_char = substr($content, $pos + 1, 1);
-
-    # Handle caret variables FIRST: $^O, $^V, $^W, $^X, etc.
-    # (must check before single-punct to avoid matching just $^)
-    if ($next_char eq '^' && substr($content, $pos + 2, 1) =~ /^[A-Z]$/) {
-      my $caret_letter = substr($content, $pos + 2, 1);
-      my $var_token = PPI::Token::Magic->new('$^' . $caret_letter);
-      my $var_id = $parser->make_node($var_token);
-      return ($var_id, $pos + 3);
-    }
-
-    # Handle $#array (last index of @array) and $#{array} braced form
-    if ($next_char eq '#') {
-      # $#{expr} braced form
-      if (substr($content, $pos + 2, 1) eq '{') {
-        # Parse the braced content as an array name
-        my $brace_start = $pos + 3;
-        my $depth = 1;
-        my $i = $brace_start;
-        while ($i < length($content) && $depth > 0) {
-          my $ch = substr($content, $i, 1);
-          $depth++ if $ch eq '{';
-          $depth-- if $ch eq '}';
-          $i++;
-        }
-        if ($depth == 0) {
-          my $arr_name = substr($content, $brace_start, $i - $brace_start - 1);
-          if ($arr_name =~ /^\w+$/) {
-            # $#{name} with a bareword is $#name (the lexical/package @name),
-            # NOT a symbolic deref — drop the braces so codegen emits
-            # (p-array-last-index @name), not the bogus symbol @{name}.
-            my $var_token = PPI::Token::ArrayIndex->new('$#' . $arr_name);
-            my $var_id = $parser->make_node($var_token);
-            return ($var_id, $i);
-          }
-          # $#{EXPR} expression deref (e.g. "$#{$ar}") — last index of the
-          # array referenced by EXPR.  Parse via PPI so PExpr handles the
-          # Cast '$#' + Block and emits (p-array-last-index EXPR).
-          my $doc = PPI::Document->new(\('$#{' . $arr_name . '}'));
-          $self->{_ppi_docs} //= [];
-          push @{$self->{_ppi_docs}}, $doc;
-          my $stmt = $doc->find_first('PPI::Statement');
-          if ($stmt) {
-            my @parts = $stmt->children();
-            my $expr_id = $parser->parse(\@parts);
-            return ($expr_id, $i);
-          }
-        }
-      }
-      # $#$ar sigil form — last index of the array referenced by $ar.
-      if (substr($content, $pos + 2, 1) eq '$') {
-        pos($content) = $pos + 2;
-        if ($content =~ /\G(\$\w+(?:::\w+)*)/gc) {
-          my $end_pos = pos($content);
-          my $doc = PPI::Document->new(\('$#' . $1));
-          $self->{_ppi_docs} //= [];
-          push @{$self->{_ppi_docs}}, $doc;
-          my $stmt = $doc->find_first('PPI::Statement');
-          if ($stmt) {
-            my @parts = $stmt->children();
-            my $expr_id = $parser->parse(\@parts);
-            return ($expr_id, $end_pos);
-          }
-        }
-      }
-      # $#array bare form — package-qualified names included ("$#Tw::h"
-      # interpolates the FULL name in perl; the s305 container-span rewrite
-      # produces exactly this text), same name grammar as the $#$ar form.
-      pos($content) = $pos + 2;
-      if ($content =~ /\G(\w+(?:::\w+)*)/gc) {
-        my $arr_name = $1;
-        my $var_token = PPI::Token::ArrayIndex->new('$#' . $arr_name);
-        my $var_id = $parser->make_node($var_token);
-        return ($var_id, pos($content));
-      }
-      # `$#-` / `$#+` — the last index of a magic ARRAY.  Identical to the bare
-      # form above except that the name is punctuation, and @- / @+ are the
-      # only magic arrays there are, so the set is exactly those two (perl
-      # interpolates both; probed).  PPI would hand the CODE spelling over as a
-      # single Magic token the emitter has no case for, which is why
-      # Pl::PExpr::_retag_magic_array_index performs the same retag there.
-      if (substr($content, $pos + 2, 1) =~ /^[-+]$/) {
-        my $var_token = PPI::Token::ArrayIndex->new('$#' . substr($content, $pos + 2, 1));
-        my $var_id = $parser->make_node($var_token);
-        return ($var_id, $pos + 3);
-      }
-      # Standalone $# (deprecated output number format) — treat as literal
-    }
-
-    # Handle $::varname (main package) — must check before $: magic var
-    # e.g. "$::tests[1]" means $main::tests[1], NOT $: followed by :tests[1]
-    if ($sigil eq '$' && $next_char eq ':' && substr($content, $pos + 2, 1) eq ':') {
-      pos($content) = $pos + 3;
-      if ($content =~ /\G(\w+)/gc) {
-        my $var_name = $1;
-        my $full_var = '$::' . $var_name;
-        my $end_pos = pos($content);
-        if (substr($content, $end_pos, 1) eq '[') {
-          return $self->parse_array_subscript($parser, $content_ref, $pos, $full_var);
-        }
-        elsif (substr($content, $end_pos, 1) eq '{') {
-          return $self->parse_hash_subscript($parser, $content_ref, $pos, $full_var);
-        }
-        my $var_token = PPI::Token::Symbol->new($full_var);
-        my $var_id = $parser->make_node($var_token);
-        return ($var_id, $end_pos);
-      }
-      # $:: alone — treat as literal (main stash, not a simple variable)
-      return (undef, $pos);
-    }
-
-    # Handle single-punctuation magic variables: $! $? $. $@ $/ $\ $& $' $` $+
-    # $; $, $| $: $% $= $- $< $> $( $) $[ $] $~ $"
-    # Note: $^ alone (format top name) is rare, skip it to avoid ambiguity
-    if ($next_char =~ /^[!\?\.\@\/\\&\'\`\+;\,\|:\%=\-<>\(\)\[\]~"]$/) {
-      my $full_var = '$' . $next_char;
-      my $end_pos = $pos + 2;
-      # $+/$- with a subscript are the magic aggregate pairs: $+{k}/$-{k} are
-      # %+/%- elements (named captures), $+[i]/$-[i] are @+/@- elements
-      # (match offsets).  Perl interpolates all four as element accesses.
-      if ($next_char eq '+' || $next_char eq '-') {
-        my $follow = substr($content, $end_pos, 1);
-        if ($follow eq '{') {
-          return $self->parse_hash_subscript($parser, $content_ref, $pos, $full_var);
-        }
-        elsif ($follow eq '[') {
-          return $self->parse_array_subscript($parser, $content_ref, $pos, $full_var);
-        }
-      }
-      my $var_token = PPI::Token::Magic->new($full_var);
-      my $var_id = $parser->make_node($var_token);
-      return ($var_id, $end_pos);
-    }
-  }
-
-  # Handle simple variable name: $var or @var, including package-qualified $Pkg::var
-  if ($content =~ /\G[\$\@](\w+)/gc) {
-    my $var_name = $1;
-    # Extend for package-qualified names: $Pkg::bar or $Pkg::Sub::bar
-    while (substr($content, pos($content), 2) eq '::') {
-      pos($content) += 2;
-      if ($content =~ /\G(\w+)/gc) {
-        $var_name .= '::' . $1;
-      } else {
-        last;
-      }
-    }
-    my $full_var = "$sigil$var_name";
-    my $end_pos = pos($content);
-    
-    say "parse_interpolated_variable: Found simple var: $full_var" 
-        if $parser->DEBUG & 32;
-    
-    # Check for array/hash subscript: $var[...] or $var{...}
-    if (substr($content, $end_pos, 1) eq '[') {
-      my $chain = $self->_parse_subscript_chain($parser, $content_ref, $pos, $end_pos);
-      return @$chain if $chain;
-      return $self->parse_array_subscript($parser, $content_ref, $pos,
-					  $full_var);
-    }
-    elsif (substr($content, $end_pos, 1) eq '{') {
-      my $chain = $self->_parse_subscript_chain($parser, $content_ref, $pos, $end_pos);
-      return @$chain if $chain;
-      return $self->parse_hash_subscript($parser, $content_ref, $pos,
-					 $full_var);
-    }
-
-    # Check for arrow dereference: $var->[N] or $var->{key} (possibly chained)
-    # e.g. "$t->[2]", "$h->{key}", "$t->[0]->{name}"
-    if (length($content) > $end_pos + 1
-        && substr($content, $end_pos, 2) eq '->') {
-      my $arrow_pos = $end_pos + 2;
-      if ($arrow_pos < length($content)
-          && (substr($content, $arrow_pos, 1) eq '['
-              || substr($content, $arrow_pos, 1) eq '{')) {
-        # Collect the full expression: $var->[...]->{...} etc.  After the first
-        # subscript, Perl allows chained subscripts with an IMPLICIT arrow:
-        # "$h->{a}[1]" == $h->{a}->[1], "$a->[1][0]" == $a->[1]->[0],
-        # "$h->{a}{b}{c}" == $h->{a}->{b}->{c}.  So at each step accept either an
-        # explicit '->' before the next bracket, or a bracket directly.
-        my $expr_end = $end_pos;
-        while ($expr_end < length($content)) {
-          my $bracket_pos;
-          if (substr($content, $expr_end, 2) eq '->'
-              && ($expr_end + 2) < length($content)
-              && (substr($content, $expr_end + 2, 1) eq '['
-                  || substr($content, $expr_end + 2, 1) eq '{')) {
-            $bracket_pos = $expr_end + 2;   # explicit arrow: ->[ or ->{
-          } elsif (substr($content, $expr_end, 1) eq '['
-                   || substr($content, $expr_end, 1) eq '{') {
-            $bracket_pos = $expr_end;       # implicit arrow: chained [ or {
-          } else {
-            last;
-          }
-          my $bracket = substr($content, $bracket_pos, 1);
-          # Find matching closing bracket
-          my $close = ($bracket eq '[') ? ']' : '}';
-          my $depth = 1;
-          my $i = $bracket_pos + 1;
-          while ($i < length($content) && $depth > 0) {
-            my $ch = substr($content, $i, 1);
-            $depth++ if $ch eq $bracket;
-            $depth-- if $ch eq $close;
-            $i++;
-          }
-          last if $depth != 0;  # Unmatched bracket — give up
-          $expr_end = $i;       # After the closing bracket
-        }
-        if ($expr_end > $end_pos) {
-          # Build the full expression string and parse via PPI
-          my $expr_str = substr($content, $pos, $expr_end - $pos);
-          say "parse_interpolated_variable: arrow-deref expr: '$expr_str'"
-              if $parser->DEBUG & 32;
-          my $doc = PPI::Document->new(\$expr_str);
-          $self->{_ppi_docs} //= [];
-          push @{$self->{_ppi_docs}}, $doc;
-          my $stmt = $doc->find_first('PPI::Statement');
-          if ($stmt) {
-            my @parts = $stmt->children();
-            my $expr_id = $parser->parse(\@parts);
-            return ($expr_id, $expr_end) if defined $expr_id;
-          }
-        }
-      }
-    }
-
-    # Simple variable - create token and node
-    my $var_token = PPI::Token::Symbol->new($full_var);
-    my $var_id = $parser->make_node($var_token);
-
-    return ($var_id, $end_pos);
-  }
-
-  # Failed to parse
-  return (undef, $pos);
+  my ($id, $end) =
+      $ev->{sigil} eq '$#' ? $self->_interp_array_index($parser, $content, $ev)
+    : $ev->{sigil} eq '$'  ? $self->_interp_scalar($parser, $content, $ev)
+    :                        $self->_interp_array($parser, $content, $ev);
+  return (undef, $pos) unless defined $id;
+  return ($id, $end);
 }
 
-# A subscripted scalar whose chain CONTINUES past the first subscript —
-# "$_[0]->{error}", "$a[0]{k}", "$h{a}[1]" — interpolates the whole chain in
-# Perl (implicit arrows included).  The single-subscript parsers stop after
-# the first group, which left the tail LITERAL: "$_[0]->{error}" printed
-# `HASH(0x…)->{error}`, and inside Text::Balanced::ErrorMsg's overloaded '""'
-# that self-stringification recursed forever (04_extdel.t).  When (and only
-# when) a second group follows, parse the full chain via PPI — the same move
-# the explicit `$var->[…]` walker below makes; a lone `$var[…]`/`$var{…}`
-# keeps the legacy single-subscript path byte-for-byte.  `@`-sigil slices
-# never chain here.  Returns [node_id, end_pos] or undef.
-sub _parse_subscript_chain {
-  my ($self, $parser, $content_ref, $pos, $end_pos) = @_;
-  my $content = $$content_ref;
-  return undef unless substr($content, $pos, 1) eq '$';
-  my ($expr_end, $groups) = ($end_pos, 0);
-  while ($expr_end < length($content)) {
-    my $bracket_pos;
-    if (substr($content, $expr_end, 2) eq '->'
-        && substr($content, $expr_end + 2, 1) =~ /^[\[\{]$/) {
-      $bracket_pos = $expr_end + 2;
-    } elsif (substr($content, $expr_end, 1) =~ /^[\[\{]$/) {
-      $bracket_pos = $expr_end;
-    } else {
-      last;
-    }
-    my $bracket = substr($content, $bracket_pos, 1);
-    my $close   = $bracket eq '[' ? ']' : '}';
-    my $depth   = 1;
-    my $i       = $bracket_pos + 1;
-    while ($i < length($content) && $depth > 0) {
-      my $ch = substr($content, $i, 1);
-      $depth++ if $ch eq $bracket;
-      $depth-- if $ch eq $close;
-      $i++;
-    }
-    last if $depth != 0;
-    $expr_end = $i;
-    $groups++;
-  }
-  return undef if $groups < 2;
-  my $expr_str = substr($content, $pos, $expr_end - $pos);
-  my $doc = PPI::Document->new(\$expr_str);
-  $self->{_ppi_docs} //= [];
-  push @{$self->{_ppi_docs}}, $doc;
-  my $stmt = $doc && $doc->find_first('PPI::Statement');
+# The reference's own source text — what the ordinary expression pipeline
+# reads when a shape is easier to re-parse than to re-implement.
+sub _ev_src {
+  my ($content, $ev) = @_;
+  return substr($content, $ev->{span}[0], $ev->{span}[1] - $ev->{span}[0]);
+}
+
+# Is this reference written with braces right after the sigil?  ${^NAME} and
+# ${1} are the same scanner FORM as $^X and $1 but different PPI tokens.
+sub _ev_braced {
+  my ($content, $ev) = @_;
+  return substr($content, $ev->{span}[0] + 1, 1) eq '{';
+}
+
+# Compile one fragment of Perl source through the ordinary expression
+# pipeline — the move `_parse_postfix_deref` and ExprToCL's regex consumer
+# (`_compile_ref_text_form`) already make.  The document is ANCHORED, not
+# cloned: PPI's DESTROY empties every descendant, so the tokens must outlive
+# this call (task #414).  Returns a node id, or undef when PPI/PExpr cannot
+# read the fragment.
+sub _interp_reparse {
+  my ($self, $parser, $src) = @_;
+  my $doc = PPI::Document->new(\$src);
+  return undef unless $doc;
+  $self->_anchor($doc);
+  my $stmt = $doc->find_first('PPI::Statement');
   return undef unless $stmt;
   my @parts = $stmt->children();
-  my $expr_id = $parser->parse(\@parts);
-  return undef unless defined $expr_id;
-  return [$expr_id, $expr_end];
+  return undef unless @parts;
+  return $parser->parse(\@parts);
+}
+
+sub _interp_symbol {
+  my ($self, $parser, $text) = @_;
+  return $parser->make_node(PPI::Token::Symbol->new($text));
+}
+
+# A '@'-sigil reference yields a LIST: codegen joins it with $".
+sub _interp_join {
+  my ($self, $parser, $child_id) = @_;
+  return undef unless defined $child_id;
+  my (undef, $interp_id) = $parser->make_node_insert('array_str_interp');
+  $parser->add_child_to_node($interp_id, $child_id);
+  return $interp_id;
+}
+
+# ── $#… ───────────────────────────────────────────────────────────────────
+# $#name / $#{name} is the last index of the LEXICAL (or package) @name, not
+# a symbolic deref, so the braces are dropped and codegen sees
+# (p-array-last-index @name).  $#- / $#+ are the same shape with a
+# punctuation name (task #417) — PPI hands the CODE spelling over as a
+# single Magic token the emitter has no case for, which is why
+# Pl::PExpr::_retag_magic_array_index performs the same retag there.
+# $#$ref and $#{EXPR} are derefs: compiled from source.
+sub _interp_array_index {
+  my ($self, $parser, $content, $ev) = @_;
+  my $end = $ev->{span}[1];
+  if ($ev->{form} eq 'deref' || $ev->{form} eq 'expr') {
+    return ($self->_interp_reparse($parser, _ev_src($content, $ev)), $end);
+  }
+  my $tok = PPI::Token::ArrayIndex->new('$#' . $ev->{name});
+  return ($parser->make_node($tok), $end);
+}
+
+# ── $… ────────────────────────────────────────────────────────────────────
+sub _interp_scalar {
+  my ($self, $parser, $content, $ev) = @_;
+  my $end   = $ev->{span}[1];
+  my $chain = $ev->{chain};
+
+  # A base the element builder cannot name (a deref or a braced expression),
+  # a SECOND subscript group, or an explicit arrow: compile the reference's
+  # own source text.  `"$$r[1]"`, `"${$r}[1]"`, `"$h{a}{b}[1]"`,
+  # `"$r->[0]{k}"` all land here — one path, and it is the same pipeline the
+  # equivalent CODE goes through.
+  if ($ev->{form} eq 'deref' || $ev->{form} eq 'expr'
+      || @$chain > 1 || (@$chain && $chain->[0]{arrow})) {
+    return ($self->_interp_reparse($parser, _ev_src($content, $ev)), $end);
+  }
+  return $self->_interp_element($parser, $content, $ev) if @$chain;
+
+  # A bare name.  ${^NAME} reaches the parser as Cast+Block, so it goes
+  # through the pipeline; every other spelling is one leaf token, and WHICH
+  # token PPI would have made is the only thing this dispatch decides.
+  my $name   = $ev->{name};
+  my $braced = _ev_braced($content, $ev);
+  if ($ev->{form} eq 'magic' && $braced && $name !~ /^[0-9]+$/) {
+    return ($self->_interp_reparse($parser, _ev_src($content, $ev)), $end);
+  }
+  # ${1}, ${2} — the numbered capture variables, Magic in PPI (a bare $1 is
+  # a Symbol; PCL does not otherwise read a braced ${N} as $N).
+  return ($parser->make_node(PPI::Token::Magic->new('$' . $name)), $end)
+    if $ev->{form} eq 'magic' && $braced;
+  # $! $? $^X $+ … — punctuation and caret magic.  A digit name ($1) and the
+  # pid ($$) are Symbols, as PPI spells them.
+  return ($parser->make_node(PPI::Token::Magic->new('$' . $name)), $end)
+    if $ev->{form} eq 'magic' && $name !~ /^(?:[0-9]+|\$)$/;
+  return ($self->_interp_symbol($parser, '$' . $name), $end);
+}
+
+# ── @… ────────────────────────────────────────────────────────────────────
+sub _interp_array {
+  my ($self, $parser, $content, $ev) = @_;
+  my $end   = $ev->{span}[1];
+  my $chain = $ev->{chain};
+  my $form  = $ev->{form};
+
+  # @$r[0,1] / @{$r}[1] / @{$h}{'a','b'} — a slice of a dereferenced
+  # container.  Source text through the pipeline, then joined (task #420).
+  if (@$chain) {
+    return $self->_interp_element($parser, $content, $ev)
+      if $form eq 'plain' || $form eq 'magic';
+    my $id = $self->_interp_reparse($parser, _ev_src($content, $ev));
+    return ($self->_interp_join($parser, $id), $end);
+  }
+
+  # @{ EXPR } — "@{[ uc $_ ]}", "@{$ref}", "@{$h->{list}}".  The INNER
+  # expression is compiled and the join wraps it, so the emission stays
+  # (p-join |$"| (p-cast-@ EXPR)) with exactly one cast.  The guts are
+  # unescaped first: they were lifted out of a double-quoted string, where
+  # `\"` is still written with its backslash.
+  if ($form eq 'expr') {
+    my ($gs, $ge) = @{ $ev->{expr_span} };
+    my $src = $self->unescape_string(substr($content, $gs, $ge - $gs));
+    my $id  = $self->_interp_reparse($parser, $src);
+    return ($self->_interp_join($parser, $id), $end);
+  }
+
+  # @{^CAPTURE} and @{+} / @{-} — a braced caret or punctuation name is the
+  # magic ARRAY of that name, never an expression (task #422 item 1).  Both
+  # reach the parser as Cast+Block, which Pl::PExpr's pre-pass folds back
+  # into the Magic token PPI makes for the bare spelling.
+  if ($form eq 'magic' && _ev_braced($content, $ev)) {
+    my $id = $self->_interp_reparse($parser, _ev_src($content, $ev));
+    return ($self->_interp_join($parser, $id), $end);
+  }
+
+  # A bare `@name` is handed over as the Symbol itself: gen_string_concat
+  # joins an '@'-sigil Symbol with $" already, and wrapping it would put a
+  # second (p-cast-@ @name) in front of every array interpolation there is.
+  # An all-DIGIT name comes back as form 'magic' (the scanner's rule, for
+  # `$1`), but there is no magic `@1`: `"@119797"` in t/op/sub_lval.t is an
+  # ordinary array whose name happens to be digits, and it takes this path.
+  return ($self->_interp_symbol($parser, '@' . $ev->{name}), $end)
+    if $form eq 'plain'
+    || ($form eq 'magic' && $ev->{name} =~ /^[0-9]+\z/
+        && !_ev_braced($content, $ev));
+
+  # @{name} is the array @name itself — NOT a symbolic ref and NOT a call to
+  # name() — and @- / @+ are the two magic arrays.  @$ref's child is the
+  # SCALAR that holds the reference, which is what p-cast-@ wants.
+  my $text = ($form eq 'deref' ? '$' : '@') . $ev->{name};
+  my $id   = $self->_interp_symbol($parser, $text);
+  return ($self->_interp_join($parser, $id), $end);
+}
+
+# ── One named container, one bracket group ────────────────────────────────
+# $x[i] $x{k} $::x[i] $+{k} $-[i] @x[..] @h{..} @-[i] — the shapes whose
+# base is a NAME the accessor node can carry.  A '@' sigil makes it a slice
+# (gen_string_concat joins slice nodes with $" the same way it joins a bare
+# @array).  Everything else went through _interp_reparse above.
+sub _interp_element {
+  my ($self, $parser, $content, $ev) = @_;
+  my $grp = $ev->{chain}[0];
+  my ($gs, $ge) = @{ $grp->{guts_span} };
+  (my $guts = substr($content, $gs, $ge - $gs)) =~ s/\A\s+|\s+\z//g;
+  my $hash = $grp->{open} eq '{';
+
+  # An empty group is not a subscript: leave the brackets as literal text
+  # and stop the reference at the name (what the old scanner did too).
+  return ($self->_interp_leaf_of($parser, $ev), $grp->{span}[0])
+    if $guts eq '';
+
+  my $key_id = $hash ? $self->_interp_hash_key($parser, $guts)
+                     : $self->_interp_reparse($parser, $guts);
+  return ($self->_interp_leaf_of($parser, $ev), $grp->{span}[0])
+    unless defined $key_id;
+
+  my $type = $ev->{sigil} eq '@' ? ($hash ? 'slice_h_acc' : 'slice_a_acc')
+                                 : ($hash ? 'h_acc'       : 'a_acc');
+  my (undef, $acc_id) = $parser->make_node_insert($type);
+  $parser->add_child_to_node($acc_id,
+      $self->_interp_symbol($parser, $ev->{sigil} . $ev->{name}));
+  $parser->add_child_to_node($acc_id, $key_id);
+  return ($acc_id, $ev->{span}[1]);
+}
+
+# The reference read as a plain variable, with its subscript abandoned.
+sub _interp_leaf_of {
+  my ($self, $parser, $ev) = @_;
+  return $self->_interp_symbol($parser, $ev->{sigil} . $ev->{name});
+}
+
+# A hash subscript's guts.  A leading `-` is part of a BAREWORD key: perl
+# autoquotes `-BAREWORD`, so "$h{-f}" is the key "-f".  Without the `-?` the
+# key parsed as an EXPRESSION, and a single-letter one is PPI's filetest
+# operator — the interpolation then read `-f $_` and produced the empty
+# string (task #234).  The token-side twin of this rule is
+# Pl::PExpr::_subscript_autoquote_text; a digit key ("$h{-1}") still parses
+# as the expression it is.
+sub _interp_hash_key {
+  my ($self, $parser, $guts) = @_;
+  if ($guts =~ /^-?[a-zA-Z_]\w*$/) {
+    my $tok = PPI::Token::Quote::Double->new('"' . $guts . '"');
+    $tok->{separator} = '"';
+    return $parser->make_node($tok);
+  }
+  return $self->_interp_reparse($parser, $guts);
 }
 
 
@@ -708,414 +579,6 @@ sub _parse_postfix_deref {
     return ($interp_id, $end);
   }
   return ($expr_id, $end);
-}
-
-# Parse ${expression} in interpolated string
-sub parse_braced_expression {
-  my $self      = shift;
-  my $parser    = shift;
-  my $content_ref = shift;
-  my $pos       = shift;  # Position of $
-  
-  my $content   = $$content_ref;
-  
-  # Find matching }
-  my $brace_start = $pos + 2;  # After ${
-  my $depth = 1;
-  my $i = $brace_start;
-  
-  while ($i < length($content) && $depth > 0) {
-    my $ch = substr($content, $i, 1);
-    $depth++ if $ch eq '{';
-    $depth-- if $ch eq '}';
-    $i++;
-  }
-  
-  if ($depth != 0) {
-    # Unmatched braces
-    return (undef, $pos);
-  }
-  
-  my $expr_str = substr($content, $brace_start, $i - $brace_start - 1);
-  say "parse_braced_expression: expr_str: '$expr_str'" if $parser->DEBUG & 32;
-
-  # ${identifier} is equivalent to $identifier — create Symbol token directly
-  # (We can't use PPI::Document->new here because the document would be GC'd
-  # when this function returns, invalidating the token's content.)
-  if ($expr_str =~ /^[a-zA-Z_]\w*$/) {
-    my $sym = PPI::Token::Symbol->new('$' . $expr_str);
-    my $expr_id = $parser->make_node($sym);
-    return ($expr_id, $i);
-  }
-
-  # ${1}, ${2}, ... — numbered capture variables ($1, $2). These are Magic
-  # tokens in PPI, not Symbols; PCL doesn't treat bare ${N} as $N otherwise.
-  if ($expr_str =~ /^\d+$/) {
-    my $sym = PPI::Token::Magic->new('$' . $expr_str);
-    my $expr_id = $parser->make_node($sym);
-    return ($expr_id, $i);
-  }
-
-  # Complex expression — a scalar dereference. ${$ref}, ${\ EXPR} (the
-  # "interpolate an arbitrary expression" idiom), ${ [...]->[0] }, etc. all
-  # mean: evaluate the block to a reference and dereference it as a scalar.
-  # Parse the FULL ${ ... } text so the normal scalar-deref pipeline (p-cast-$)
-  # handles it — parsing just the inner EXPR would interpolate the ref itself
-  # (yielding "REF(0x..)"/"SCALAR(0x..)") instead of its referent.
-  my $deref_str = '${' . $expr_str . '}';
-  my $doc = PPI::Document->new(\$deref_str);
-  $self->{_ppi_docs} //= [];
-  push @{$self->{_ppi_docs}}, $doc;  # prevent GC
-  my @stmts = $doc->children();
-  if (@stmts == 0) {
-    return (undef, $pos);
-  }
-
-  my @parts = $stmts[0]->children();
-  my $expr_id = $parser->parse(\@parts);
-
-  return ($expr_id, $i);
-}
-
-
-# Parse @{expr} in an interpolated string: "@{[uc($_)]}", "@{$ref}", etc.
-# Generates an array_str_interp node wrapping the inner expression.
-# ExprToCL generates: (p-join |$"| (p-cast-@ EXPR))
-sub parse_array_braced_interpolation {
-  my ($self, $parser, $content_ref, $pos) = @_;
-  my $content = $$content_ref;
-
-  my $brace_start = $pos + 2;  # skip @{
-  my $depth = 1;
-  my $i = $brace_start;
-  while ($i < length($content) && $depth > 0) {
-    my $ch = substr($content, $i, 1);
-    $depth++ if $ch eq '{';
-    $depth-- if $ch eq '}';
-    $i++;
-  }
-  return (undef, $pos) if $depth != 0;
-
-  my $expr_str = substr($content, $brace_start, $i - $brace_start - 1);
-  # Unescape \"-style escapes that were raw in the containing string
-  $expr_str = $self->unescape_string($expr_str);
-
-  # @{foo} with a LONE bareword is the array @foo itself (the lexical, or the
-  # package array if no lexical) — NOT a symbolic ref and NOT a call to foo().
-  # Rewrite to the plain @foo Symbol so it resolves the lexical correctly.
-  # (A symbolic deref must be written @{"foo"}/@{$ref}; a sub call @{foo()} —
-  # both of which have non-bareword content and so skip this branch.)
-  if ($expr_str =~ /\A[a-zA-Z_]\w*(?:::\w+)*\z/) {
-    $expr_str = '@' . $expr_str;
-  }
-  # …and `@{+}` / `@{-}` with a PUNCTUATION name is likewise the array @+ / @-
-  # itself.  Same rule, same reason, and the same decision function the token
-  # pre-pass asks (Pl::PExpr::braced_punct_magic_name) — this path only ever
-  # holds the brace TEXT, so it cannot ask it at the token level.  Without
-  # this, the inner `+` was parsed as an expression on its own and died
-  # ("Handle single node of unknown type: PPI::Token::Operator"), which is
-  # what `qr/A@{+}B/` cost re/pat_rt_report.t: the whole file (#314).
-  elsif (defined(my $magic = Pl::PExpr::braced_punct_magic_name('@', $expr_str))) {
-    $expr_str = $magic;
-  }
-
-  my $doc = PPI::Document->new(\$expr_str);
-  $self->{_ppi_docs} //= [];
-  push @{$self->{_ppi_docs}}, $doc;
-  my @stmts = $doc->children();
-  return (undef, $pos) if @stmts == 0;
-
-  my @parts = $stmts[0]->children();
-  my $expr_id = $parser->parse(\@parts);
-
-  my ($interp_node, $interp_id) = $parser->make_node_insert('array_str_interp');
-  $parser->add_child_to_node($interp_id, $expr_id);
-
-  return ($interp_id, $i);
-}
-
-
-# Parse $var[index] in interpolated string
-sub parse_array_subscript {
-  my $self      = shift;
-  my $parser    = shift;
-  my $content_ref = shift;
-  my $pos       = shift;
-  my $var_name  = shift;  # e.g., "$foo"
-  
-  my $content   = $$content_ref;
-  my $bracket_start = index($content, '[', $pos);
-  
-  # Find matching ]
-  my $depth = 1;
-  my $i = $bracket_start + 1;
-  
-  while ($i < length($content) && $depth > 0) {
-    my $ch = substr($content, $i, 1);
-    $depth++ if $ch eq '[';
-    $depth-- if $ch eq ']';
-    $i++;
-  }
-  
-  if ($depth != 0) {
-    # Unmatched brackets - treat as simple variable
-    my $var_token = PPI::Token::Symbol->new($var_name);
-    my $var_id = $parser->make_node($var_token);
-    return ($var_id, $bracket_start);
-  }
-  
-  my $index_str = substr($content, $bracket_start+1, $i - $bracket_start - 2);
-  
-  # Trim whitespace
-  $index_str =~ s/^\s+//;
-  $index_str =~ s/\s+$//;
-  
-  say "parse_array_subscript: var=$var_name, index='$index_str'" 
-      if $parser->DEBUG & 32;
-  
-  # Parse index expression
-  my $doc = PPI::Document->new(\$index_str);
-  my @stmts = $doc->children();
-  if (@stmts == 0) {
-    # Empty index - treat as simple variable
-    my $var_token = PPI::Token::Symbol->new($var_name);
-    my $var_id = $parser->make_node($var_token);
-    return ($var_id, $bracket_start);
-  }
-
-  # Clone the parts, and ANCHOR them: a clone alone does not survive — see _anchor.
-  my @parts = $self->_anchor(map { $_->clone() } $stmts[0]->children());
-  my $index_id = $parser->parse(\@parts);
-
-  # A leading '@' sigil means a slice: "@a[0,2]" interpolates to the joined
-  # elements at those indices, NOT a single element.  Build a slice node so the
-  # comma list is flattened by p-aslice (which flattens vector indices).
-  if ($var_name =~ /^\@/) {
-    my ($slice_node, $slice_id) = $parser->make_node_insert('slice_a_acc');
-    my $sarr_id = $parser->make_node(PPI::Token::Symbol->new($var_name));
-    $parser->add_child_to_node($slice_id, $sarr_id);
-    $parser->add_child_to_node($slice_id, $index_id);
-    return ($slice_id, $i);
-  }
-
-  # Create array access node
-  my ($acc_node, $acc_id) = $parser->make_node_insert('a_acc');
-
-  my $arr_token = PPI::Token::Symbol->new($var_name);
-  my $arr_id = $parser->make_node($arr_token);
-
-  $parser->add_child_to_node($acc_id, $arr_id);
-  $parser->add_child_to_node($acc_id, $index_id);
-
-  # Handle chained subscripts: $a[0][1] or $a[0]{key}
-  # In Perl string interpolation, $a[0][1] = $a[0]->[1] (autoderef).
-  my $cur_id = $acc_id;
-  while ($i < length($content)) {
-    my $ch = substr($content, $i, 1);
-    if ($ch eq '[') {
-      # Parse the next [idx] subscript
-      my $depth2 = 1;
-      my $j = $i + 1;
-      while ($j < length($content) && $depth2 > 0) {
-        my $c2 = substr($content, $j, 1);
-        $depth2++ if $c2 eq '[';
-        $depth2-- if $c2 eq ']';
-        $j++;
-      }
-      last if $depth2 != 0;  # Unmatched - stop chaining
-      my $idx2_str = substr($content, $i+1, $j - $i - 2);
-      my $doc2 = PPI::Document->new(\$idx2_str);
-      my @stmts2 = $doc2->children();
-      last unless @stmts2;
-      my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
-      my $idx2_id = $parser->parse(\@parts2);
-      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('a_ref_acc');
-      $parser->add_child_to_node($ref_acc_id, $cur_id);
-      $parser->add_child_to_node($ref_acc_id, $idx2_id);
-      $cur_id = $ref_acc_id;
-      $i = $j;
-    }
-    elsif ($ch eq '{') {
-      # Parse the next {key} subscript
-      my $depth2 = 1;
-      my $j = $i + 1;
-      while ($j < length($content) && $depth2 > 0) {
-        my $c2 = substr($content, $j, 1);
-        $depth2++ if $c2 eq '{';
-        $depth2-- if $c2 eq '}';
-        $j++;
-      }
-      last if $depth2 != 0;
-      my $key2_str = substr($content, $i+1, $j - $i - 2);
-      my $doc2 = PPI::Document->new(\$key2_str);
-      my @stmts2 = $doc2->children();
-      last unless @stmts2;
-      my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
-      my $key2_id = $parser->parse(\@parts2);
-      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('h_ref_acc');
-      $parser->add_child_to_node($ref_acc_id, $cur_id);
-      $parser->add_child_to_node($ref_acc_id, $key2_id);
-      $cur_id = $ref_acc_id;
-      $i = $j;
-    }
-    else { last }
-  }
-
-  return ($cur_id, $i);
-}
-
-
-# Parse $hash{key} in interpolated string
-sub parse_hash_subscript {
-  my $self      = shift;
-  my $parser    = shift;
-  my $content_ref = shift;
-  my $pos       = shift;
-  my $var_name  = shift;  # e.g., "$foo"
-  
-  my $content   = $$content_ref;
-  my $brace_start = index($content, '{', $pos);
-  
-  # Find matching }
-  my $depth = 1;
-  my $i = $brace_start + 1;
-  
-  while ($i < length($content) && $depth > 0) {
-    my $ch = substr($content, $i, 1);
-    $depth++ if $ch eq '{';
-    $depth-- if $ch eq '}';
-    $i++;
-  }
-  
-  if ($depth != 0) {
-    # Unmatched braces - treat as simple variable
-    my $var_token = PPI::Token::Symbol->new($var_name);
-    my $var_id = $parser->make_node($var_token);
-    return ($var_id, $brace_start);
-  }
-  
-  my $key_str = substr($content, $brace_start + 1, $i - $brace_start - 2);
-  
-  # Trim whitespace
-  $key_str =~ s/^\s+//;
-  $key_str =~ s/\s+$//;
-  
-  say "parse_hash_subscript: var=$var_name, key='$key_str'" 
-      if $parser->DEBUG & 32;
-  
-  # Parse key - could be bareword, variable, or expression
-  my $key_id;
-  
-  # Check if it's a simple bareword (no quotes, no special chars).
-  # A leading `-` is part of it: perl autoquotes a `-BAREWORD` hash key, so
-  # "$h{-f}" is the key "-f".  Without the `-?` the key parsed as an
-  # EXPRESSION, and a single-letter one is PPI's filetest operator — the
-  # interpolation then read `-f $_` and produced the empty string (task #234;
-  # `-foo` survived only because unary minus on a bareword happens to give
-  # "-foo").  The token-side twin of this rule is
-  # Pl::PExpr::_subscript_autoquote_text; a digit key (`$h{-1}`) still parses
-  # as the expression it is.
-  if ($key_str =~ /^-?[a-zA-Z_]\w*$/) {
-    # Bareword key - convert to string
-    my $str_token = PPI::Token::Quote::Double->new('"' . $key_str . '"');
-    $str_token->{separator} = '"';
-    $key_id = $parser->make_node($str_token);
-  } else {
-    # Parse as expression
-    my $doc = PPI::Document->new(\$key_str);
-    my @stmts = $doc->children();
-    if (@stmts == 0) {
-      # Empty key - treat as simple variable
-      my $var_token = PPI::Token::Symbol->new($var_name);
-      my $var_id = $parser->make_node($var_token);
-      return ($var_id, $brace_start);
-    }
-
-    # Clone the parts, and ANCHOR them — see _anchor.
-    my @parts = $self->_anchor(map { $_->clone() } $stmts[0]->children());
-    $key_id = $parser->parse(\@parts);
-  }
-  
-  # A leading '@' sigil means a hash slice: "@h{a,b}" interpolates to the joined
-  # values for those keys, not a single value.  gen_hash_slice converts the @
-  # sigil to % for the container access.
-  if ($var_name =~ /^\@/) {
-    my ($slice_node, $slice_id) = $parser->make_node_insert('slice_h_acc');
-    my $shash_id = $parser->make_node(PPI::Token::Symbol->new($var_name));
-    $parser->add_child_to_node($slice_id, $shash_id);
-    $parser->add_child_to_node($slice_id, $key_id);
-    return ($slice_id, $i);
-  }
-
-  # Create hash access node
-  my ($acc_node, $acc_id) = $parser->make_node_insert('h_acc');
-
-  my $hash_token = PPI::Token::Symbol->new($var_name);
-  my $hash_id = $parser->make_node($hash_token);
-
-  $parser->add_child_to_node($acc_id, $hash_id);
-  $parser->add_child_to_node($acc_id, $key_id);
-
-  # Handle chained subscripts: $h{key}[0] or $h{a}{b}
-  # In Perl string interpolation, these are autoderef (as if -> were present).
-  my $cur_id = $acc_id;
-  while ($i < length($content)) {
-    my $ch = substr($content, $i, 1);
-    if ($ch eq '[') {
-      my $depth2 = 1;
-      my $j = $i + 1;
-      while ($j < length($content) && $depth2 > 0) {
-        my $c2 = substr($content, $j, 1);
-        $depth2++ if $c2 eq '[';
-        $depth2-- if $c2 eq ']';
-        $j++;
-      }
-      last if $depth2 != 0;
-      my $idx2_str = substr($content, $i+1, $j - $i - 2);
-      my $doc2 = PPI::Document->new(\$idx2_str);
-      my @stmts2 = $doc2->children();
-      last unless @stmts2;
-      my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
-      my $idx2_id = $parser->parse(\@parts2);
-      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('a_ref_acc');
-      $parser->add_child_to_node($ref_acc_id, $cur_id);
-      $parser->add_child_to_node($ref_acc_id, $idx2_id);
-      $cur_id = $ref_acc_id;
-      $i = $j;
-    }
-    elsif ($ch eq '{') {
-      my $depth2 = 1;
-      my $j = $i + 1;
-      while ($j < length($content) && $depth2 > 0) {
-        my $c2 = substr($content, $j, 1);
-        $depth2++ if $c2 eq '{';
-        $depth2-- if $c2 eq '}';
-        $j++;
-      }
-      last if $depth2 != 0;
-      my $key2_str = substr($content, $i+1, $j - $i - 2);
-      my $key2_id;
-      if ($key2_str =~ /^[a-zA-Z_]\w*$/) {
-        my $str_token2 = PPI::Token::Quote::Double->new('"' . $key2_str . '"');
-        $str_token2->{separator} = '"';
-        $key2_id = $parser->make_node($str_token2);
-      } else {
-        my $doc2 = PPI::Document->new(\$key2_str);
-        my @stmts2 = $doc2->children();
-        last unless @stmts2;
-        my @parts2 = $self->_anchor(map { $_->clone() } $stmts2[0]->children());
-        $key2_id = $parser->parse(\@parts2);
-      }
-      my ($ref_acc_node, $ref_acc_id) = $parser->make_node_insert('h_ref_acc');
-      $parser->add_child_to_node($ref_acc_id, $cur_id);
-      $parser->add_child_to_node($ref_acc_id, $key2_id);
-      $cur_id = $ref_acc_id;
-      $i = $j;
-    }
-    else { last }
-  }
-
-  return ($cur_id, $i);
 }
 
 

@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 sub run_cl {
     my ($code) = @_;
@@ -105,3 +105,52 @@ test_cl('interpolated subscript inside an overload handler',
       package main; my $o = bless ["X"], "O";
       print "".($o . "Y"), "\n";},
     " plus X plus Y\n");
+
+# --- task #420 (s426): a DEREF spelling with a trailing subscript --------
+# `"$$r[1]"` / `"$$h{k}"` / `"${$r}[i]"` / `"@$r[…]"` / `"@{$r}[i]"` used to
+# interpolate the deref and leave the subscript as LITERAL string text
+# (`ARRAY(0x…)[1]`).  The scanner (Pl::InterpScan) carries the chain now and
+# the reference is compiled from its own source text, so the interpolation
+# and the equivalent CODE give the same answer — perl's.  Probed vs 5.40.3.
+test_cl('deref spelling with a trailing subscript',
+    q{our @x=(10,20,30); our $r=\@x; our %h=(a=>'HA',b=>'HB'); our $hr=\%h;
+      our @i=(0,1,2); our $aoa=[[1,2],[3,4]]; our $sr=\"SVAL";
+      print "A:$$r[1]\n";
+      print "B:x $$r[1] y\n";
+      print "C:$$hr{b}\n";
+      print "D:${$r}[1]\n";
+      print "E:@$r[0,1]\n";
+      print "F:@{$r}[1]\n";
+      print "G:@{$hr}{'a','b'}\n";
+      print "H:$$r[$i[1]]\n";
+      print "I:$$aoa[0][1]\n";
+      print "J:${$aoa}[1][0]\n";
+      print "K:$$r[1]$$hr{b}\n";
+      print "L:$$sr\n";
+      print "M:@$r\n";
+      print "N:$$sr\[1]\n";
+      print "O:$$sr [1]\n";},
+    "A:20\nB:x 20 y\nC:HB\nD:20\nE:10 20\nF:20\nG:HA HB\nH:20\n"
+  . "I:2\nJ:3\nK:20HB\nL:SVAL\nM:10 20 30\nN:SVAL[1]\nO:SVAL [1]\n");
+
+# --- task #422 item 1 + the slice-through-a-reference family ------------
+# `"@{^CAPTURE}"` DROPPED the statement ("Bug. Fell through. Missing case").
+# A braced CARET name is the magic ARRAY of that name, not an expression —
+# and, like every braced NAME, it closes the reference (`"@{^CAPTURE}[0]"`
+# is the array then a literal `[0]`, probed).
+# The slice rows are the emitter half of #420: a slice whose container is a
+# SCALAR is a slice through a reference, so it must be dereferenced before
+# p-aslice/p-hslice index it.  `@$r[0,1]` came back all-undef (silent wrong)
+# and every hash spelling died "Not a HASH reference".
+test_cl('braced caret array + slices through a reference',
+    q{our @x=(10,20,30); our $r=\@x; our %h=(a=>'HA',b=>'HB'); our $hr=\%h;
+      "ab" =~ /(a)(b)/;
+      print "A:@{^CAPTURE}\n";
+      print "B:@{^CAPTURE}[0]\n";
+      print "C:$#{^CAPTURE}\n";
+      my @s = @$r[0,1];        print "D:@s\n";
+      my @t = @{$hr}{'a','b'}; print "E:@t\n";
+      my %k = %$hr{'a'};       print "F:", join(",", map {"$_=$k{$_}"} sort keys %k), "\n";
+      my @d = delete @$hr{'a'};print "G:@d\n";
+      @$r[0,1] = (1,2);        print "H:@x\n";},
+    "A:a b\nB:a b[0]\nC:1\nD:10 20\nE:HA HB\nF:a=HA\nG:HA\nH:1 2 30\n");

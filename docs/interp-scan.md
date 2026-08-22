@@ -1,12 +1,19 @@
 # Pl::InterpScan — the shared variable-reference event scanner (#237)
 
-**Status (s382f, Opus): CONSUMER 1 OF 3 IS WIRED — the regex-pattern
-interpolator, which IS #237.  `ExprToCL::_gen_interp_regex_pattern`'s private
-walk is DELETED (the ruled acceptance bar) and both it and the
-`_has_regex_interpolation` gate now go through `Pl::InterpScan::scan(…,
-in_regex => 1)`; guard rows in `Pl/t/regex-interp-01.t` (28 of them re-derived
-from live perl at test time + 5 emission shapes).  Consumers 2 (rename
-machinery) and 3 (StringInterpolation) are NOT wired — wiring plan below.**
+**Status (s426, Opus): CONSUMERS 1 AND 3 ARE WIRED.**  Consumer 1 (s382f) is
+the regex-pattern interpolator, which IS #237: `_gen_interp_regex_pattern`'s
+private walk is DELETED (the ruled acceptance bar) and both it and the
+`_has_regex_interpolation` gate go through `Pl::InterpScan::scan(…, in_regex
+=> 1)`; guard rows in `Pl/t/regex-interp-01.t`.  **Consumer 3 (s426) is
+`Pl/PExpr/StringInterpolation.pm`**: `parse_interpolated_variable` is a
+`scan_one` dispatcher, and the hand-rolled scanning it replaced —
+`parse_braced_expression`, `parse_array_braced_interpolation`,
+`parse_array_subscript`, `parse_hash_subscript`, `_parse_subscript_chain`,
+the `\G` name grabs, the `$#`/`$::`/punct branches and nine brace-depth
+walks — is deleted (1216 → 664 lines).  It closes divergences 3–7 below and
+tasks #420 / #422 item 1; guard rows in
+`Pl/t/interp-chained-subscript-01.t`.  **Consumer 2 (the rename machinery)
+is NOT wired — wiring plan below.**
 
 *(s382, Fable: the scanner core + intuit_more classifier + probe table —
 the ruled Fable half of #237, `docs/fable-answers-s378.md` §3 = b′, split
@@ -83,16 +90,21 @@ probe-and-guard (fix) or by clamping to the event subset it consumes today.
    `[0]` is literal.  A rename of `$x` must rewrite `${x}[`; a rename of
    `@x` must NOT.  Fixed for free when the fixer becomes a name_span splice.
 3. **`$$r[0]` / `@$r[0]` / `$#$r`** — perl chains/derefs
-   (`$r->[0]` / slice); StringInterpolation stops after the name, leaving
+   (`$r->[0]` / slice); StringInterpolation stopped after the name, leaving
    `[0]` literal.  Probed: dq `"$$ar[0]"` prints the element.
+   **CLOSED s426 by consumer 3** (task #420).
 4. **`@-[0]` / `@+[0]` in dq text** — perl slices; StringInterpolation
-   falls through to literal.  Probed: `"a@-[1]b"` prints the offset.
+   fell through to literal.  Probed: `"a@-[1]b"` prints the offset.
+   **CLOSED s426 by consumer 3.**
 5. **`${ x }` (blanks around a braced identifier)** — perl reads `$x`;
-   StringInterpolation takes its expression-deref path.
+   StringInterpolation took its expression-deref path.
+   **CLOSED s426 by consumer 3** (`_braced_ident` allows the blanks).
 6. **`$12abc`** — perl reads `${12} . "abc"` (digit names are digits-only);
-   StringInterpolation's `\w+` grabs `$12abc` as one name.
+   StringInterpolation's `\w+` grabbed `$12abc` as one name.
+   **CLOSED s426 by consumer 3** (`_scan_name`'s digits-only rule).
 7. **`$::a::b`** — perl reads the full `$main::a::b`;
-   StringInterpolation's `$::` branch stops after one segment.
+   StringInterpolation's `$::` branch stopped after one segment.
+   **CLOSED s426 by consumer 3.**
 8. **`$Foo::.`** — a dangling `::` is swallowed into the reference
    (probed: `"a$Foo::.b"` prints "a.b").  Scanner: span includes the `::`,
    `name`/`name_span` do not.
@@ -151,11 +163,33 @@ guard rows), then the rename machinery, then StringInterpolation:
    `_block_captures_name`, `ExprToCL2::_string_literal_form`, and
    VarAnnotator's three quote scans.  Gate per port: corpus-diff
    byte-identical + Pl/t gate (+ sweep when `lib/` shims are reachable).
-3. **StringInterpolation**: replace `parse_interpolated_variable`'s
-   low-level scanning with `scan_one` events, keeping node building and the
-   case-mod/literal outer loop.  Divergences 3–7 become behavior changes —
-   each needs its probe row (they exist above) and a guard; corpus-diff
-   flags any reachable movement.
+3. **StringInterpolation — DONE s426.**  `parse_interpolated_variable` is a
+   `scan_one` dispatcher over (sigil, form, chain); the node BUILDING and the
+   case-mod/literal outer loop stayed.  Four shapes are built as leaf tokens
+   because WHICH token PPI would have made is the only thing left to decide
+   (`$name`/`${name}` → Symbol, `$1`/`$$` → Symbol, `$!`/`$^X`/`${1}` →
+   Magic, `$#name`/`$#-` → ArrayIndex); one shape is the element/slice
+   accessor (`a_acc`/`h_acc`/`slice_*`, exactly one bracket group on a NAME);
+   everything else — every deref base, every braced EXPRESSION, a second
+   group, an explicit arrow — is **compiled from the reference's own source
+   text** through the ordinary expression pipeline, the move
+   `_parse_postfix_deref` and consumer 1's `_compile_ref_text_form` already
+   made.  That last arm IS the fix: the old scanner had no way to continue
+   past a deref, so `"$$r[1]"` printed `ARRAY(0x…)[1]`.
+   Two scanner facts were probed and added while wiring (s426, perl 5.40.3):
+   a braced **EXPRESSION** does not close the reference (`"${$r}[1]"` is 20,
+   `"@{$r}[1]"` is 20, `"@{$hr}{'a','b'}"` is a hash slice, `"${\ $x}[0]"`
+   dies *because it took the group*) though a braced **NAME** does; and
+   `@{^NAME}` is the magic array of that name, like `${^NAME}` (which is
+   what made `"@{^CAPTURE}"` a whole-statement DROP — task #422 item 1).
+   `$#-` / `$#+` gained their scanner arm (#417 had them only in the
+   consumer).
+   Corpus reach (`tools/corpus-diff.pl`): **0 of 111 files** — the port is
+   emission-identical on everything perl-tests exercises.  What DID move is
+   the emitter half of #420, below.
+   *Residue:* the `@{ EXPR }` arm still runs `unescape_string` on the block
+   text and the `${ EXPR }` arm still does not — the asymmetry the two old
+   builders had, preserved deliberately rather than changed unmeasured.
 
 Cache note for every wiring commit that changes emission: bump
 `*pcl-cache-generation*`.

@@ -2827,6 +2827,12 @@ sub _elem_container_key {
             || ref($c_node) eq 'PPI::Token::Magic')) {
       $container = _swap_elem_sigil($container, $swap{$kind}[1], $swap{$kind}[0]);
     }
+    # A SLICE through a reference (`delete @$h{a}`, `exists @$r[0]`) has a
+    # SCALAR container the swap cannot touch — the same hole the four slice
+    # emitters carried, and the same one-line answer (s426, task #420).
+    $container = $self->_slice_container_form($kids->[0], $container,
+                   $kind =~ /_a_acc$/ ? 'p-cast-@' : 'p-cast-%')
+      if $is_slice;
   }
   my @keys = map { $self->gen_node_form($kids->[$_]) }
              ($is_slice ? (1 .. $#$kids) : (1));
@@ -2971,11 +2977,38 @@ sub _slice_index_forms {
   return @forms;
 }
 
+# A slice whose CONTAINER is a scalar is a slice THROUGH A REFERENCE —
+# `@$r[0,1]`, `@{$r}[1]`, `@$h{a,b}`, `@{$h}{a,b}` — and the reference has
+# to be dereferenced before p-aslice/p-hslice index it.  The ELEMENT sibling
+# has always done this (`$$r[1]` lowers to p-aref-deref, `$$h{k}` to
+# p-gethash-deref); the slice emitters handed the raw box straight to the
+# slice runtime, which then indexed the REFERENCE.  What that cost depends
+# on how many box layers the ref carries, which is why it looked like it
+# worked: `my $ao=[7,8,9]; @$ao[1]` is right, `my $r=\@named; @$r[0,1]` came
+# back all-undef (SILENT WRONG) and every hash spelling DIED "Not a HASH
+# reference" (probed vs perl 5.40.3, s426 — task #420's `"@$r[0,1]"` row).
+# p-cast-@ / p-cast-% peel whichever layering is there and are the identity
+# on a container that is already the aggregate.
+#
+# A bare Symbol/Magic naming the aggregate (`@a`, `%h`, `@-`, `@{name}`) IS
+# the container; anything else in container position is a scalar value, and
+# a scalar there can only be a reference.
+sub _slice_container_form {
+  my ($self, $kid_id, $form, $cast) = @_;
+  my $node = $self->expr_o->get_a_node($kid_id);
+  my $r = ref $node;
+  if ($r eq 'PPI::Token::Symbol' || $r eq 'PPI::Token::Magic') {
+    return $form if ($node->content // '') =~ /^[\@\%]/;
+  }
+  return [$cast, $form];
+}
+
 # @a[i,j] → (p-aslice @a i j), context-wrapped.
 sub gen_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
-  my $arr = $self->gen_node_form($kids->[0]);
+  my $arr = $self->_slice_container_form($kids->[0],
+              $self->gen_node_form($kids->[0]), 'p-cast-@');
   return $self->_slice_in_context_form(['p-aslice', $arr, $self->_slice_index_forms($kids)], $node_id);
 }
 
@@ -2989,6 +3022,7 @@ sub gen_hash_slice_form {
   if ($is_bare && $hash =~ /(?:^|::)\@/) {
     $hash =~ s/(^|::)\@/${1}%/;
   }
+  $hash = $self->_slice_container_form($kids->[0], $hash, 'p-cast-%');
   return $self->_slice_in_context_form(['p-hslice', $hash, $self->_slice_index_forms($kids)], $node_id);
 }
 
@@ -2996,17 +3030,20 @@ sub gen_hash_slice_form {
 sub gen_kv_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
-  my $hash = $self->gen_node_form($kids->[0]);
+  my $hash = $self->_slice_container_form($kids->[0],
+               $self->gen_node_form($kids->[0]), 'p-cast-%');
   return ['p-kv-hslice', $hash, $self->_slice_index_forms($kids)];
 }
 
-# %a[i,j] → (p-kv-aslice @a i j)  (%→@ sigil rewrite; $ref base → (unbox …)).
+# %a[i,j] → (p-kv-aslice @a i j)  (%→@ sigil rewrite; $ref base derefed).
 sub gen_kv_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $arr = $self->gen_node($kids->[0]);
   $arr =~ s/(^|::)\%/${1}\@/;
-  my $arr_form = $arr =~ /^\$/ ? ['unbox', $arr] : $arr;
+  # `(unbox $r)` stood here — the shape-blind half of _slice_container_form's
+  # rule, right for a single-boxed anon ref and one layer short of \@named.
+  my $arr_form = $self->_slice_container_form($kids->[0], $arr, 'p-cast-@');
   return ['p-kv-aslice', $arr_form, $self->_slice_index_forms($kids)];
 }
 

@@ -32,9 +32,14 @@ package Pl::InterpScan;
 #   sigil     '$' | '@' | '$#'
 #   form      'plain'  $x, @x, $Foo::bar, $::x        (name = identifier)
 #             'braced' ${x}, @{x}, $#{x}, ${ x }      (identifier in braces)
-#             'magic'  $1, $!, $^W, ${^NAME}, $$, @-  (non-identifier name)
+#             'magic'  $1, $!, $^W, ${^NAME}, @{^NAME}, $$, @-, $#-
+#                                                    (non-identifier name)
 #             'deref'  $$x, @$x, $#$x                 (name = the ref SCALAR)
 #             'expr'   ${ EXPR }, @{ EXPR }, $#{EXPR} (no name; see expr_span)
+#             A braced NAME of any kind ('braced' and the braced 'magic'
+#             spellings) CLOSES the reference; a braced EXPRESSION does not
+#             — it takes a chain like `$name[` does.  Both probed; see
+#             _scan_braced_dollar.
 #   name      the bare name ('x', 'Foo::bar', '::x', '1', '!', '^W', '$');
 #             undef for form 'expr'
 #   canon     the container the reference READS, in source spelling:
@@ -188,6 +193,21 @@ sub _scan_name {
 # never rename targets.
 sub _digits { return $_[0] =~ /^[0-9]+$/ }
 
+# The body of a `${…}` / `@{…}` that names a MAGIC variable rather than an
+# identifier or an expression: a caret name (`^CAPTURE`, `^TAINT`) or a
+# single punctuation character (`@{+}` is `@+`, `@{-}` is `@-` — the
+# spelling re/pat_rt_report.t uses, #314).  `+` alone is not an expression,
+# so the reading is unambiguous.  Returns the bare name or ().
+# The punctuation rule is Pl::PExpr::braced_punct_magic_name's, which the
+# TOKEN-level pre-pass `_fold_braced_punct_magic` applies to the same
+# spelling in code — one rule, asked at both levels.
+sub _braced_magic_name {
+  my ($guts) = @_;
+  return $1 if $guts =~ /^(\^\w+)$/;
+  return $1 if $guts =~ /^\s*([^\w\s])\s*$/;
+  return ();
+}
+
 # Parse "{ blank* ident blank* }" with the brace at $pos.  Returns
 # (name, name_span, after) for an identifier body, (undef, undef, after)
 # for an expression body, or () when the brace is unbalanced.  What an
@@ -315,21 +335,31 @@ sub _scan_dollar {
 }
 
 # ${ ... } family: braced name, braced number, ${^NAME}, or an expression.
-# Braces CLOSE the reference — no subscript, no postderef, in either mode:
-# probed, "${x}[0]" prints $x then literal "[0]" (under strict, "${m}[0]"
-# dies "Global symbol $m" — the SCALAR, never @m), "${x}{k}" prints
-# 'SX{k}', and "${ar}->@*" stays literal even with postderef_qq on.
+# A braced NAME (or caret name) CLOSES the reference — no subscript, no
+# postderef, in either mode: probed, "${x}[0]" prints $x then literal "[0]"
+# (under strict, "${m}[0]" dies "Global symbol $m" — the SCALAR, never @m),
+# "${x}{k}" prints 'SX{k}', "${^CAPTURE}[1]" prints "[1]", and "${ar}->@*"
+# stays literal even with postderef_qq on.
 # (Consequence recorded in docs/interp-scan.md: _interp_fixer's
 # "${x}[ is @x-family" arm has the sigil family WRONG.)
+#
+# A braced EXPRESSION does NOT close it.  `${ EXPR }` is the deref of a
+# value and perl continues into a subscript chain exactly as `$name[` does
+# — probed on 5.40.3 (s426, task #420): "${$r}[1]" is 20, "${ $r }[1]" is
+# 20 with blanks, "${$aoa}[0][1]" is 2, "${$rr}->[1]" takes the explicit
+# arrow, and "${\ $x}[0]" dies "Not an ARRAY reference" (it took the
+# group, it did not leave it literal).  The asymmetry with the NAME forms
+# above is perl's own, not a simplification.
 sub _scan_braced_dollar {
   my ($text, $pos, $opt) = @_;
   my ($name, $name_span, $after) = _braced_ident($text, $pos + 1);
   return undef unless $after;
   my $guts_start = $pos + 2;
 
-  # ${^NAME} caret-string magic (no ws allowed, as in perl)
-  if (substr($text, $guts_start, $after - 1 - $guts_start) =~ /^(\^\w+)$/) {
-    return _ev(sigil => '$', form => 'magic', name => $1, canon => undef,
+  # ${^NAME} caret-string magic and ${+}-style punctuation magic
+  if (my ($magic) = _braced_magic_name(
+        substr($text, $guts_start, $after - 1 - $guts_start))) {
+    return _ev(sigil => '$', form => 'magic', name => $magic, canon => undef,
                name_span => [$guts_start, $after - 1],
                span => [$pos, $after]);
   }
@@ -344,16 +374,27 @@ sub _scan_braced_dollar {
                span => [$pos, $after]);
   }
   # ${ EXPR } — deref of the block's value; consumers re-parse expr_span
-  return _ev(sigil => '$', form => 'expr', name => undef, canon => undef,
-             expr_span => [$guts_start, $after - 1],
-             span => [$pos, $after]);
+  my $ev = _ev(sigil => '$', form => 'expr', name => undef, canon => undef,
+               expr_span => [$guts_start, $after - 1],
+               span => [$pos, $after]);
+  _scan_chain($text, $ev, $opt);          # "${$r}[1]" is $r->[1] (probed)
+  _scan_postderef($text, $ev, $opt);
+  return $ev;
 }
 
-# $#array / $#{array} / $#{EXPR} / $#$ref — last-index family.  No chain:
-# the value is a scalar and perl attaches no subscript to it.
+# $#array / $#{array} / $#{EXPR} / $#$ref / $#- / $#+ — last-index family.
+# No chain: the value is a scalar and perl attaches no subscript to it
+# (probed: `"$#{$r}[0]"` and `"$#$r[0]"` are perl SYNTAX ERRORS).
 sub _scan_array_index {
   my ($text, $pos, $opt) = @_;
   my $c2 = substr($text, $pos + 2, 1);
+  # $#- / $#+ — @- and @+ are the only magic ARRAYS, so this is the whole
+  # punctuation set (task #417: $#+ is the pattern's group count, $#- stops
+  # at the last participant).  StringInterpolation has always read them.
+  if ($c2 eq '-' || $c2 eq '+') {
+    return _ev(sigil => '$#', form => 'magic', name => $c2, canon => undef,
+               name_span => [$pos + 2, $pos + 3], span => [$pos, $pos + 3]);
+  }
   if ($c2 eq '{') {
     my ($name, $name_span, $after) = _braced_ident($text, $pos + 2);
     return undef unless $after;
@@ -387,21 +428,34 @@ sub _scan_snail {
   my ($text, $pos, $opt) = @_;
   my $next = substr($text, $pos + 1, 1);
 
-  # @{name} / @{ EXPR } — braces CLOSE the reference here too (probed:
-  # "@{x}[0]" prints the whole @x then literal "[0]").  A digit-led body
-  # (`@{12}`) is not an array name; it stays on the expression path.
+  # @{name} / @{^NAME} / @{ EXPR } — a braced NAME closes the reference
+  # (probed: "@{x}[0]" prints the whole @x then literal "[0]"), and so does
+  # a braced CARET name ("@{^CAPTURE}[0]" prints "a b[0]" — task #422.1);
+  # a braced EXPRESSION does not, exactly as on the '$' side above
+  # ("@{$r}[1]" is 20, "@{$hr}{'a','b'}" is a hash slice, "@{[1,2]}[0]" is
+  # 1 — all probed on 5.40.3, s426/#420).  A digit-led body (`@{12}`) is
+  # not an array name; it stays on the expression path.
   if ($next eq '{') {
     my ($name, $name_span, $after) = _braced_ident($text, $pos + 1);
     return undef unless $after;
+    my $guts_start = $pos + 2;
+    if (my ($magic) = _braced_magic_name(
+          substr($text, $guts_start, $after - 1 - $guts_start))) {
+      return _ev(sigil => '@', form => 'magic', name => $magic, canon => undef,
+                 name_span => [$guts_start, $after - 1],
+                 span => [$pos, $after]);
+    }
     if (defined $name && $name !~ /^[0-9]/) {
       return _ev(sigil => '@', form => 'braced', name => $name,
                  canon => '@' . $name,
                  name_span => $name_span,
                  span => [$pos, $after]);
     }
-    return _ev(sigil => '@', form => 'expr', name => undef, canon => undef,
-               expr_span => [$pos + 2, $after - 1],
-               span => [$pos, $after]);
+    my $ev = _ev(sigil => '@', form => 'expr', name => undef, canon => undef,
+                 expr_span => [$guts_start, $after - 1],
+                 span => [$pos, $after]);
+    _scan_chain($text, $ev, $opt, 1);       # "@{$r}[1]" slices @$r (probed)
+    return $ev;
   }
 
   # @$name — elements of the array referenced by $name
