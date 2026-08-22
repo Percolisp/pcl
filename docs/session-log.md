@@ -4,6 +4,120 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 427 (2026-08-22, Opus) — O3, the fillers: #442, #422.2, #421, #415 — two of the four were one-member fixes of a family with a latent crash next door
+
+**State at open:** agent F of the s425 fan-out, branch
+`worktree-agent-a1ef8cda8527aca2b`, generation **v2-173** (the assigned v2-171
+collided — see the closing paragraph), ids 449–454.  The
+worktree had been created from a stale commit (the `snapshot-2026-05` tip,
+1217 commits behind), so the first act was `git reset --hard` onto main's
+`753ecab`; rebased onto `463a8f8` (s425) before the final gate.
+
+**#442 — `chr(N)` above U+10FFFF had two answers, chosen by an OPTIMIZER.**
+Nine shapes probed against perl on both emissions first, and the measurement
+picked the fix: **the general-form compiler (`PCL_OPT=none`) was already right
+on all nine**; only the default diverged, and only where the scalar took the
+`raw-string` slot verdict.  So the bug belongs to the optimization, and it is
+what the registry forbids in so many words — the optimized emission must RUN
+identically.  `%pcl-to-string-strict` called `to-string` on the `p-superchar`
+payload, **pre-empting a decision the general path makes later**; it now passes
+a superchar through, so the U+FFFD collapse happens at `to-string`, where the
+boxed path makes it.  The predicate looks through a plain box but deliberately
+NOT through `unbox`'s tie/magic dispatch (a proxy is never a superchar, and
+FETCH would run twice for one write).  The first cut missed the box entirely
+(`my $d = $c` still gave 65533) — caught by the 15-shape probe, not by the
+task's reproducer.  Both emissions are now identical on all 15 shapes.
+`not-supported.md` corrected: s422's "once assigned it is 65533" recorded the
+bug as the rule.  Guard `Pl/t/wide-codepoint-01.t` rows 8–11.
+
+**#422.2 — a space before a repaired non-ASCII symbol's subscript.**
+`_reclass_subscripts_after` walked with `next_sibling`, so one Whitespace token
+stopped it and the lexer's bareword-derived guess stood: `print $Ｘ {a}` became
+a block-form FILEHANDLE spec and `print $Ｖ [1]` an anonymous array — SILENT
+WRONG, not a drop.  `snext_sibling` is the fix and PPI's own lexer is the
+specification: the ASCII `$h {a}` and `@h {qw(a b)}` dump as Subscripts under
+1.291.  Guard `Pl/t/utf8-source-01.t` row 8.
+
+**#421 — a prototype belongs to the package that DECLARES the sub.**  The flat
+bare-name table meant the LAST registration won for every call site: `package
+A; print f 1, 2` gave `A:1` where perl gives `A:12` (silent wrong), and the
+reversed declaration order made `print C::h { "y" } 7, 8` a DROP.  A second
+table `pkg_prototypes` is filled at the `Pl::Environment` seam #413 already
+normalizes at, and is **consulted only when a bare name has more than one
+declaring package** — with 0 or 1 the flat table IS that entry, so every
+non-colliding program keeps its old path (corpus-diff IDENTICAL).  The flat
+table stays the fallback, because that is how an IMPORTED prototype reaches a
+call site.  Guard `Pl/t/prototype-01.t`, 9 rows.
+
+**#415 — `@?` is a variable and `<~>` is a glob**, the two census singles the
+task had already measured, and both were one-member fixes of a family.
+`@?` is legal perl (probed: every punctuation character names an array except
+`@+`/`@-` and `@{`), PPI splits it into Cast + Operator
+(`ppi-upstream-bugs.md` §24 + two failing rows in `ppi-bug-report.t`), and the
+merge is licensed by the grammar — a `@` cast can only be followed by `$`, `{`
+or an identifier.  **The other half needed no PPI bug at all**: `$?[1]` is
+element 1 of `@?` and already lowered to `(p-aref @? 1)` through the machinery
+serving `$#[0]`, but only `@#` was forward-declared, so a file containing
+`$?[…]` died at LOAD — a crash the census cannot see.  The boundary of the
+repair is the CL SYMBOL SPELLING (`? ! . / ~ ^ & % = < >` are CL constituents);
+`@,` `@;` `@|` `@'` `@"` `@(` need pipe quoting and are **#449**.
+For `<X>`, perlop states the readline rule as a WHITELIST and PCL had the
+inverse — a blacklist of glob metacharacters — so `<~>` emitted the unbound CL
+symbol `~` and killed the whole file, as did `<foo.txt>`.  Three findings the
+rule alone does not give you: **corpus-diff** caught that Parser2's renames
+rewrite the symbol INSIDE the token (scalar.t's `<$fh>` arrives as
+`<$main::fh__file__0>`, and perl reads a qualified scalar as a readline too);
+PPI's `<` `~` `>` split after a list-operator Word needed `~` in
+`_fix_ppi_glob_after_block`'s metacharacter class (it IS one, and less
+ambiguous than the `*` already there); and **the COMPANION A/B** caught
+`<<>>`, whose inner text is `<>` — the old rule crashed on it and a naive
+whitelist would have globbed the string SILENTLY.  `p-glob` expands a leading
+tilde now (bsd_glob's rule).  A FOURTH finding came from the rebase onto
+s423/#418: a handle NAME is a perl IDENTIFIER, and under `use utf8` that means
+UNICODE word characters — the ASCII-only first cut globbed `<ＦＨ>` silently,
+and #418's own bareword-filehandle guard row is what caught it.  Guard
+`Pl/t/punct-array-glob-01.t`, a new file (13 rows, 13 s — `misc-fixes-02.t`
+measures 362 s under plain prove).
+
+**Measured.**  Gate COLD **157 files / 5661 rows**, failures = the 13 pclxs xs
+rows only.  Full sweep `--jobs 3`: **GATE clean, TOTAL 18365 (+0), drops 7 =
+census**, neither baseline edited.  corpus-diff IDENTICAL over 111 files and
+`emission-ab` SAME=22 over the lib shims, after every commit.  **Gate-SET scan
+over BOTH populations (638 × 2) vs a 753ecab worktree: exactly two verdicts
+move** — `t/op/glob.t` drop → OK, `t/re/subst.t` losing its `@?` drop.  Drop
+census **33/106 → 32/104**, edited row by row.  18-file companion leg A/B'd
+against the base: `op/glob.t` 13/4 → **14/4**, `io/argv.t` 23/30 → **27/26**,
+`re/subst.t` drops 3 → 2, everything else identical; spliced into
+`docs/perl-suite-run.tsv` with causes.  A third row, `uni/gv.t` 41/40 → 53/28,
+is **PRE-EXISTING** (the base measures 53/28 too) and is recorded with the next
+measurement named.  Generation v2-173, all three artifacts regenerated
+(byte-identical apart from the stamp).
+
+**Filed, not fixed:** **#449** (punctuation names needing a pipe-quoted CL
+symbol; take with #418) and **#450** (`glob(PATTERN)` with no wildcard returns
+EMPTY where perl returns the pattern — PRE-EXISTING, A/B'd).  **Skipped with
+measurements:** #415's other five singles — op/utftaint.t does not reproduce
+isolated, op/filetest.t:161 is #403-family, and `substr $x, 0, 1, = "Z"` /
+`{; @119797 }` / op/sub_lval.t:970 are term-grammar drops that lead into
+`_reduce_term` (B3).  Worth knowing: `{; @119797 }` swallows the FOLLOWING
+statement into its drop.
+
+**Generation collision.**  Agent B (#418) set `*pcl-cache-generation*` to
+v2-171 — this session's assigned string — in its own tree and ran its
+measurements under it.  `~/.pcl-cache` is shared and keyed by that string, so
+a cached module transpile could have come from either compiler.  On Fable's
+instruction this branch moved to **v2-173** (fresh) and RE-RAN the cold gate
+and the full sweep under it; both agreed with the v2-171 runs row for row
+(157/5661 then 157/5665 after the s426 rebase; sweep GATE clean, TOTAL 18365,
+drops 7, in both).  The artifact bodies are byte-identical between the two
+builds — only the stamp moved.
+
+**Review doc:** `docs/opus5-review-requests-s427.md` (three asks: the #442
+expectation rewrite, #421's narrowness, and a note that the companion leg is
+worth running for any TOKEN-family reclassification, not only for coercions).
+
+---
+
 ## Session 426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer (1216 → 664 lines); #420 and #422.1 closed
 
 **`docs/plan-post-s420.md` §1 item 4.**  `Pl/PExpr/StringInterpolation.pm` is

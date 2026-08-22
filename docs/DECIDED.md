@@ -86,7 +86,12 @@ not-supported.md → only then probe.*
   explicitly and lowers like `<>` (io/argv.t 23/30 → 27/26).  Found by the
   COMPANION A/B, not by the probe table.  Census: t/op/glob.t 1 → 0 (row removed),
   t/re/subst.t 3 → 2; gate-SET scan over both populations = exactly those two
-  verdicts.  Guard `Pl/t/punct-array-glob-01.t` (11 rows, 17 s).
+  verdicts.  **A handle NAME is a perl IDENTIFIER, so the whitelist is the
+  UNICODE word class** (`[^\W\d]\w*`, not `[A-Za-z_]\w*`): the ASCII-only
+  first cut read `<ＦＨ>` as a filename pattern and globbed it silently,
+  which #418's own bareword-filehandle guard row caught when the branches met
+  — the probe-the-case-it-would-BREAK rule, paid by a sibling's test.
+  Guard `Pl/t/punct-array-glob-01.t` (13 rows, 13 s).
 - **#415's other five singles stay open, each measured**: op/utftaint.t does
   not reproduce isolated (contextual trigger, unlocated); op/filetest.t:161 is
   #403-family; `substr $x, 0, 1, = "Z"` and `{; @119797 }` are term-grammar
@@ -96,6 +101,18 @@ not-supported.md → only then probe.*
 - **`glob(PATTERN)` with no wildcard returns EMPTY where perl returns the
   pattern** (`glob("/nope-xyz")`, `glob("/home/")`) — PRE-EXISTING, verified
   identical on a 753ecab worktree, filed as **#450**.
+- **A SHARED cache keyed by the generation string makes two agents with the
+  same string one compiler** (s427's own accident).  This session was assigned
+  v2-171 and agent B (#418) set the same string in its tree; because
+  `~/.pcl-cache` is keyed by it, a cached module transpile could have come
+  from either compiler.  The fix is the cheap one — move to a FRESH string and
+  re-run the measurements under it (this branch is **v2-173**; the gate and the
+  full sweep were re-run and agreed with the v2-171 runs row for row, and the
+  three artifact BODIES are byte-identical between the two builds).  The
+  standing rule from the s422–s424 round already says parallel agents "need
+  distinct cache generations"; what this adds is the recovery: **a collision is
+  not a re-do of the work, it is a re-run of the measurements under a new
+  string**, plus a doc note saying which run happened under which.
 
 ## s426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer; #420 + #422.1 CLOSED
 
