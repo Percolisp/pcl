@@ -94,6 +94,20 @@ design; NO flip code).**
    land.
 
 **Session P2 — #456 (silent empty from a `p-declare-sub` stub) — rule 12.**
+
+> **HALF (a) DONE s432 (Opus 5) — `docs/opus5-review-requests-s432.md`.**  The
+> stub no longer answers a value: it runs the package's AUTOLOAD if there is
+> one (perl's own order for a body-less sub — no @ISA walk, that is the method
+> rule), else dies with perl's message.  Gate 160/5705, sweep GATE clean TOTAL
+> 18366 (+0) after ONE accidental pass left `pass-baseline` by EDIT (sort.t
+> 203 → 202, bug 36430: both `A::min` calls reached the stub and `undef <=>
+> undef` left the list unsorted while the assertion checked only a flag).  In
+> the other direction, perl-tests/sort.t's `ok(1, "SKIP: stubborn AUTOLOAD …")`
+> was RESTORED to perl's own assertion and passes.  **HALF (b) (the hoist
+> order) stays OPEN in #456**, now measured: 75 of 722 files emit a
+> cross-section forward stub, and the fix shape (emit the DEF in the prologue
+> inside its own `(in-package :X)` pair) moves those 75 files' emission.
+
 3. `{ package Q; print main::nm(), "|\n"; } sub nm {"PKG"}` prints EMPTY.
    Two halves, same session: (a) the forward-declaration stub a
    `p-declare-sub` installs must DIE naming the sub when called before its

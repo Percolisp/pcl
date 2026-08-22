@@ -11,6 +11,61 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s432 (2026-08-22, Opus 5) — #456 half (a): a forward-declaration STUB that is CALLED runs AUTOLOAD, else DIES — it never answers a value again
+
+- **`p-declare-sub`'s stub body was `nil`** — so a call that reached it produced
+  perl's `undef` with no diagnostic.  It now calls `%p-call-of-undefined-sub`
+  (`cl/pcl-runtime.lisp`), which follows **perl's own order for a body-less sub**:
+  run the package's `AUTOLOAD` if it has one (`$AUTOLOAD` set to the qualified
+  name, original arguments, **no `@ISA` walk** — that is the METHOD rule), else
+  `p-die` with perl's message.  Rule 12: the stub's value flowed onward.
+- **Two ways a stub is reached, and perl gives neither a value**: the sub is
+  never defined (perl dies), or PCL ran the call BEFORE the definition — #456's
+  shape, a file-level `sub nm {…}` that lands after a block carrying a
+  `package Q;` switch, because that block becomes its own emission section.
+- **`\&foo` is unaffected**: `p-backslash-sub` returns a TRAMPOLINE that
+  re-reads `symbol-function` at call time, so a coderef taken on a stub still
+  reaches a body defined later.  `p-can` / `p-stash` / `p-coderef-defined-p`
+  already skipped `:stub`; only the stub's own body answered.
+- **A simplified test came back**: `perl-tests/sort.t`'s
+  `ok(1, "SKIP: stubborn AUTOLOAD …")` was RESTORED to perl's own assertion
+  (`sort stubbedsub split//, '04381091'` → `98431100`), which passes now that
+  the stub falls through to AUTOLOAD.
+- **Cost: exactly one sweep row, and it was an ACCIDENTAL pass** — `sort.t`
+  203 → 202 (OK → PARTIAL).  Bug 36430's `sort { A::min(@$a) <=> A::min(@$b) }`
+  runs before the `package A; sub min` in its own block; both calls reached the
+  stub, `undef <=> undef` is 0, the list came back unsorted, `$answer` was never
+  touched and the assertion only checked that flag.  Edited into
+  `docs/pass-baseline.tsv` by hand with its cause (the third of this kind after
+  s418's bless.t and split.t).
+- **KNOWN INTERACTION, recorded in #456**: in a package that HAS an AUTOLOAD,
+  #456's shape is now silently answered by AUTOLOAD instead of dying
+  (`sub AUTOLOAD {"AUTO"} { package Q; print main::nm(); } sub nm {"PKG"}` →
+  perl `PKG`, PCL `AUTO`).  PCL cannot tell "never defined" from "not yet
+  defined" at the call; perl's rule is right for the case that is actually
+  perl's.  Half (b) removes the dilemma.
+- **THE TWO RUNNERS DISAGREE ON RECOVERY, and it is worth 93 rows** (#467): the
+  perl-tests sweep loads the emitted CL with `p-load-with-recovery` (one
+  top-level form at a time, recovering from a die), `tools/run-perl-suite.pl`
+  with a plain `--load`.  The SAME change cost ONE row in the sweep and 94 in
+  the companion suite (op/method.t 96 → 44, op/sort.t 181 → 142, op/lexsub.t
+  9 → 6, op/gmagic.t 0 → 1; all four A/B-attributed against a `bc02000`
+  worktree and serial-confirmed), every lost row AFTER the dying form in a file
+  that already crashes.  **A companion row count is not comparable to a sweep
+  row count for any change that makes something die.**
+- **A companion `--quick` run's snapshot diff is mostly STALE ROWS, not movers**:
+  of 18 differing rows, 14 were byte-identical on both trees (the s415 Track A
+  refusal registrations moved six files to XDIFF/TRANSPILE-FAIL and nobody had
+  re-run four more).  All 18 were spliced with their attribution.
+- **Half (b) (the hoist order) is MEASURED, not fixed** — Parser2's
+  "Cross-section forward sub calls" block hoists the DECLARATION so the form is
+  readable and leaves the DEFINITION in its section.  **75 of 722 files emit
+  such a stub** (perl-tests + perl's t/ + lib/ + cpan-tests/modules), nearly all
+  tie/DESTROY/AUTOLOAD callbacks invoked after the file has loaded — exactly ONE
+  program in the whole sweep entered one.  The fix shape (emit the DEF in the
+  prologue inside its own `(in-package :X)` pair — `in-package` is read-time per
+  top-level form) and its bar are in #456.
+
 ## s431 (2026-08-22, Opus 5) — the flip re-census is PRICED: what the announce→DIE flip costs in passing rows, per option
 
 - **Census re-verified on a COLD cache at `54e2d80`: 27 files / 82 drops,

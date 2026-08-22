@@ -4,6 +4,76 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 432 (2026-08-22, Opus 5) — P2 / #456 half (a): a CALLED forward stub runs AUTOLOAD or DIES; it never answers a value again
+
+Session P2 of `docs/plan-post-s430.md`.  Runtime-only (`cl/pcl-runtime.lisp`),
+so the emission cannot move and the generation stays **v2-177**; the sweep is
+owed anyway (the WHAT-TO-RUN `cl/**` row).  Asks:
+`docs/opus5-review-requests-s432.md`.
+
+**The fix.**  `p-declare-sub`'s stub body was `nil`, so a call that reached it
+produced perl's `undef` with no diagnostic — the #456 silent wrong
+(`{ package Q; print main::nm(), "|\n"; } sub nm {"PKG"}` printed the empty
+string, because a block carrying a `package Q;` switch becomes its own emission
+section and the file-level sub is defined after it).  The stub now calls
+`%p-call-of-undefined-sub`, which follows **perl's own order for a body-less
+sub**: run the package's `AUTOLOAD` if it has one (`$AUTOLOAD` set to the
+qualified name, original arguments, and NO `@ISA` walk — that is the method
+rule), else `p-die` with perl's message.  Seven probes vs perl 5.40.3 (the
+table is in the review doc): the #456 shape now dies loudly and trappably, a
+never-defined sub gives perl's own `Undefined subroutine &main::nope called`,
+and `sub foo; sub AUTOLOAD {…} foo()` answers `AUTO(main::foo)` like perl
+instead of `undef`.  `\&foo` is unaffected — `p-backslash-sub` returns a
+trampoline that re-reads `symbol-function` at call time.
+
+**A simplified test came back.**  `perl-tests/sort.t` carried
+`ok(1, "SKIP: stubborn AUTOLOAD — forward-declared sort sub blocks AUTOLOAD
+dispatch in PCL")` in place of perl's own `is join("", sort stubbedsub
+split//, '04381091'), '98431100'`.  The AUTOLOAD fall-through is exactly that
+limitation, so the assertion was RESTORED and passes.
+
+**Cost: exactly one sweep row, and it was an ACCIDENTAL pass.**  `sort.t`
+203 → 202 (OK → PARTIAL): bug 36430's `sort { A::min(@$a) <=> A::min(@$b) }`
+runs before the `package A; sub min` in its own block, both calls reached the
+stub, `undef <=> undef` is 0, the list came back unsorted, `$answer` was never
+touched and the assertion only checked that flag.  Edited into
+`docs/pass-baseline.tsv` by hand with its cause — the third of this kind after
+s418's bless.t and split.t.
+
+**The companion leg (`--all --quick`, which a `cl/**` change owes): 522 of 523
+files, 18 rows differ from the snapshot, and an A/B against a `bc02000`
+worktree attributes exactly FOUR to this change** — op/method.t 96/30 → 44/7,
+op/sort.t 181/24 → 142/9, op/lexsub.t 9/8 → 6/6, op/gmagic.t 0/0 → 1/0
+(all four serial-confirmed REAL MOVEs).  All 94 lost rows sit AFTER the dying
+form in three files that already crash and never ran to completion.  The other
+14 are byte-identical on both trees — stale snapshot rows (the s415 Track A
+refusal registrations, and files nobody had re-run).  All 18 spliced with their
+attribution.  **Why one row in the sweep and 94 here: the runners disagree** —
+the sweep loads with `p-load-with-recovery` (per-form recovery), this one with
+a plain `--load`, so the first die ends the file.  Filed **#467**; the fix owes
+a snapshot re-bless.
+
+**Half (b), the hoist order: measured, not fixed** (the plan authorised the
+split).  Parser2's "Cross-section forward sub calls" block hoists the
+DECLARATION so an earlier section's call is readable and leaves the DEFINITION
+in its own section.  **75 of 722 files emit such a stub** (perl-tests + perl's
+t/ default dirs + lib/ + cpan-tests/modules), nearly all tie/DESTROY/AUTOLOAD
+callbacks invoked after the file has loaded — exactly ONE program in the whole
+sweep entered one.  Fix shape and bar are recorded in #456: emit the DEF in the
+prologue inside its own `(in-package :X)` … `(in-package :pcl)` pair, which
+moves 75 files' emission and therefore owes the four-population A/B.
+
+**Known interaction, recorded in #456 and Ask 1:** in a package that HAS an
+AUTOLOAD, #456's shape is now answered by AUTOLOAD instead of dying (perl would
+call the real sub).  PCL cannot tell "never defined" from "not yet defined" at
+the call; half (b) removes the dilemma.
+
+Guards: five new rows in `Pl/t/decl-ordering-02.t` (two assert the #456 shape
+fails LOUDLY, with a note to replace them with a `both_agree` when (b) lands;
+one inverse; two `both_agree` for the AUTOLOAD fall-through).
+
+---
+
 ## Session 431 (2026-08-22, Opus 5) — P1: the flip re-census, PRICED — what the announce→DIE flip costs per option; no compiler change
 
 Session P1 of `docs/plan-post-s430.md`.  Deliverable:

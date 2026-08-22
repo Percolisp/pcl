@@ -29,7 +29,7 @@ my $runtime = 'cl/pcl-runtime.lisp';
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 15;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -154,6 +154,51 @@ both_agree('mutual recursion', <<'PL');
 sub ev { my $n = shift; $n == 0 ? 1 : od($n-1) }
 sub od { my $n = shift; $n == 0 ? 0 : ev($n-1) }
 print ev(10), od(7), "\n";
+PL
+
+# ---- #456: an EARLIER section's call to a sub the file defines LATER ----
+# A block that switches package (`{ package Q; ... }`) becomes its own emission
+# section, so a file-level `sub nm {...}` written after it is DEFINED after that
+# section has already run.  Perl compiles every named sub before run time and
+# prints PKG.  PCL cannot yet (the hoist-order half of #456) -- but what it must
+# never do again is answer the forward STUB's value, which made this SILENT: the
+# program printed the empty string and exited 0.  s432 made the stub DIE
+# (CLAUDE.md rule 12), so the failure is loud and trappable.
+#
+# WHEN THE HOIST HALF OF #456 LANDS: delete these two rows and put the same
+# program through both_agree instead (it will then print PKG like perl).
+{
+    my $code = qq[{ package Q; print main::nm(), "|\\n"; } sub nm {"PKG"}\n];
+    my $out  = run_pcl($code);
+    like($out, qr/Undefined subroutine &main::nm called/,
+         '#456 cross-section forward call dies loudly');
+    unlike($out, qr/^\|/m,
+           '#456 ... and never answers the forward stub, which printed empty');
+}
+
+# The INVERSE, which must keep working: the same call with NO package switch in
+# the block -- one section, so the sub def is hoisted above the runtime forms.
+both_agree('#456 inverse: same call without the package switch', <<'PL');
+{ print main::nm(), "|\n"; } sub nm {"PKG"}
+PL
+
+# ---- the stub falls through to AUTOLOAD before it dies (#456 half (a)) ----
+# perl's order for a plain call to a name with no body: run the package's
+# AUTOLOAD with $AUTOLOAD set and the original arguments; only a package with no
+# AUTOLOAD makes it fatal.  PCL answered the forward stub's undef before s432.
+both_agree('forward-declared sub falls through to AUTOLOAD', <<'PL');
+sub foo;
+our $AUTOLOAD;
+sub AUTOLOAD { return "AUTO($AUTOLOAD)" }
+print foo(), "\n";
+PL
+
+# ... and the sort-comparator spelling of the same thing ([perl #30661], the
+# assertion perl-tests/sort.t carries).
+both_agree('forward-declared sort comparator reaches AUTOLOAD', <<'PL');
+AUTOLOAD { $b <=> $a }
+sub stubbedsub;
+print join("", sort stubbedsub split//, '04381091'), "\n";
 PL
 
 done_testing();

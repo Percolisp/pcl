@@ -1059,8 +1059,12 @@ fresh_perl_is
 # [perl #30661] autoloading
 AUTOLOAD { $b <=> $a }
 sub stubbedsub;
-## PCL: p-declare-sub creates a no-op stub that prevents undefined-function → AUTOLOAD dispatch
-ok(1, "SKIP: stubborn AUTOLOAD — forward-declared sort sub blocks AUTOLOAD dispatch in PCL");
+## PCL s432: RESTORED to perl's own assertion.  The limitation the skip named
+## (a p-declare-sub stub answering nil instead of falling through to AUTOLOAD)
+## is fixed — the stub now runs the package's AUTOLOAD, and dies only when
+## there is none (task #456 half (a), CLAUDE.md rule 12).
+is join("", sort stubbedsub split//, '04381091'), '98431100',
+    'stubborn AUTOLOAD';
 is join("", sort hopefullynonexistent split//, '04381091'), '98431100',
     'AUTOLOAD without stub';
 my $stubref = \&givemeastub;

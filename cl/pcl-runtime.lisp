@@ -311,6 +311,7 @@
                 %p-symref-array
                 p-scalar
                 %pcl-find-package %pcl-dispatch-autoload
+                %pcl-set-autoload-var
                 p-super-call
                 p-load-extension))
 (declaim (special *p-filehandles* *p-dirhandles*))
@@ -645,12 +646,39 @@
 ;;; Perl subs can be called before definition; CL resolves names at load time.
 ;;; Only creates the stub if the function isn't already defined.
 ;;; Marks the symbol as :stub in *p-declared-subs* for exists &sub support.
+;;; CALLING a stub is perl's fatal, never a value (CLAUDE.md rule 12: a missing
+;;; case that would produce a VALUE the program consumes must DIE).  It happens
+;;; two ways, and perl dies for both: the sub is never defined at all, or PCL
+;;; ran the call before the definition (task #456 — a file-level `sub nm {…}`
+;;; hoisted AFTER a preceding block that switches package).  Answering nil made
+;;; the second one silent: `{ package Q; print main::nm(); } sub nm {"PKG"}`
+;;; printed the empty string.  \&foo taken on a stub is unaffected — it is a
+;;; TRAMPOLINE that re-reads symbol-function at call time (p-backslash-sub), so
+;;; it still reaches a body defined later.
+(defun %p-call-of-undefined-sub (sym args)
+  ;; perl's own order: a plain sub call to a name with no body runs the
+  ;; package's AUTOLOAD (with $AUTOLOAD set to the qualified name and the
+  ;; original arguments) — and there is NO @ISA walk for a plain call, that is
+  ;; the method rule.  Only when the package has no AUTOLOAD is it fatal.
+  ;; Probed s432: `sub foo; sub AUTOLOAD {...} print foo()` prints AUTO(main::foo)
+  ;; under perl; PCL answered the stub's undef before this.
+  (let* ((pkg (symbol-package sym))
+         (al  (and pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
+    (if (and al (eq (symbol-package al) pkg) (fboundp al)
+             (not (eq (gethash al *p-declared-subs*) :stub)))
+        (progn
+          (%pcl-set-autoload-var (pcl-pkg-perl-name pkg) (%p-sub-perl-name sym))
+          (apply (symbol-function al) args))
+        (p-die (format nil "Undefined subroutine &~A called.~%"
+                       (%p-sub-perl-name sym))))))
+
 (defmacro p-declare-sub (name)
   `(progn
      (unless (gethash ',name *p-declared-subs*)
        (setf (gethash ',name *p-declared-subs*) :stub))
      (unless (fboundp ',name)
-       (defun ,name (&rest args) (declare (ignore args)) nil))))
+       (defun ,name (&rest args)
+         (%p-call-of-undefined-sub ',name args)))))
 
 ;;; p-eval-always: Wrap a form so it runs at compile time, load time, and
 ;;; execute time.  This is the CL idiom known as "eval-always".  In the

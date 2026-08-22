@@ -1,4 +1,29 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s432 (Opus 5, #456 half (a): a CALLED p-declare-sub stub now runs the package's
+#   AUTOLOAD, else DIES).  EIGHTEEN rows re-measured and spliced; each was
+#   re-run ALONE (task #366: parallel and serial agree on all 18) and A/B'd
+#   against a `bc02000` worktree, which splits them cleanly:
+#
+#   FOUR are CAUSED by this change (they differ between the two trees):
+#     op/method.t   96/30 -> 44/7   the file already crashed (undef-fn:main::pl-new);
+#                                   a stub call now dies EARLIER, so the plain
+#                                   `--load` this runner uses ends the file sooner.
+#     op/sort.t    181/24 -> 142/9  same shape, same crash signature.
+#     op/lexsub.t     9/8 -> 6/6    same; the crash is now PCL's own
+#                                   "Undefined subroutine &main::d called."
+#     op/gmagic.t     0/0 -> 1/0    +1: the die lets one row emit before the crash.
+#   All 94 lost rows sit AFTER the dying form in three files that never ran to
+#   completion.  The perl-tests sweep lost exactly ONE row for the same change
+#   because IT loads with p-load-with-recovery and this runner does not — the
+#   asymmetry is task #467, not PCL behaviour.
+#
+#   FOURTEEN are PRE-EXISTING (byte-identical on both trees): the snapshot rows
+#   predated their cause and nobody had re-run them.  op/state.t, op/switch.t,
+#   op/smartmatch.t, op/coreamp.t, op/defer.t, op/tie_fetch_count.t and the four
+#   class/*.t files went to XDIFF/TRANSPILE-FAIL with the s415 Track A refusal
+#   registrations; op/index.t (49/13 -> 94/13), op/avhv.t (38/2 -> 39/1),
+#   mro/package_aliases.t (XDIFF -> DIFF) and mro/package_aliases_utf8.t
+#   (66/32 -> 73/40) had drifted with no row edited since.
 # s431 (Opus 5) — FIVE files had NO ROW in this snapshot at all: comp/line_debug.t,
 #   op/goto.t, op/lex.t, op/require_errors.t, run/dtrace.t.  Not quarantined, not
 #   registered anywhere, simply absent — so a regression in any of them could never
@@ -457,14 +482,14 @@ base/term.t	7	0	7	0	OK
 base/translate.t	257	0	257	0	OK	
 base/while.t	4	0	4	0	OK	
 class/accessor.t	10	0	0	0	XDIFF	crash:simple-error: Can't call method s on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/class.t	10	0	0	1	XDIFF	crash:simple-error: Can't call method hello on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/class.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
 class/construct.t	10	0	0	0	XDIFF	crash:simple-error: Can't call method x on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 class/destruct.t	4	0	0	0	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 class/field.t	33	0	0	0	XDIFF	crash:simple-error: Can't call method incr on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/inherit.t	19	0	0	3	XDIFF	crash:simple-error: Can't call method initb on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
+class/inherit.t	19	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
 class/method.t	8	0	0	0	XDIFF	crash:simple-error: Can't call method retself on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/phasers.t	3	0	1	2	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/threads.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
+class/phasers.t	3	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/threads.t	0	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — the file also needs a threaded perl (NOTAP before s415; it now refuses at transpile like its siblings, task #371)	-1
 class/utf8.t	4	0	0	0	XDIFF	unbound:STDOUT | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 cmd/elsif.t	4	0	4	0	OK	
 cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)
@@ -602,8 +627,8 @@ mro/next_skip_utf8.t	10	0	0	1	XDIFF	crash:simple-error: Can't locate object meth
 mro/overload_c3.t	7	0	7	0	OK	
 mro/overload_c3_utf8.t	7	0	7	0	OK		0
 mro/overload_dfs.t	7	0	7	0	OK	
-mro/package_aliases.t	54	0	97	40	XDIFF	crash:simple-error: Can't locate object method "womp" via package "Childclass" at - line N. | not-supported.md §symbol-table hashes — glob package aliasing + isarev
-mro/package_aliases_utf8.t	52	0	66	32	XDIFF	timeout; reaped 5 orphan(s) | rows NOT checked (*rows-unstable*) | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.	0
+mro/package_aliases.t	54	0	97	40	DIFF	crash:simple-error: Can't locate object method "womp" via package "Childclass" at - line N. | NOT fully registered: 70 unregistered diverging row(s): *extra* '; *extra* '; *extra* '; +67 more | not-supported.md §symbol-table hashes — glob package aliasing + isarev	0
+mro/package_aliases_utf8.t	52	0	73	40	XDIFF	crash:simple-error: Can't locate object method "ວmᑊ" via package "C힐dᒡl았" at - line N. | rows NOT checked (*rows-unstable*) | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.	0
 mro/pkg_gen.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
 mro/pkg_gen_utf8.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
 mro/recursion_c3.t	8	0	8	0	OK	
@@ -628,7 +653,7 @@ op/attrhand.t	4	0	0	0	DIFF	crash:simple-error: Failed to transpile /home/bernt/p
 op/attrproto.t	48	0	17	28	DIFF	
 op/attrs.t	157	2	28	61	DIFF	undef-fn:attributes::pl-_guess_stash
 op/auto.t	47	0	47	0	OK	
-op/avhv.t	40	0	38	2	DIFF	
+op/avhv.t	40	0	39	1	DIFF		0
 op/bless.t	116	2	111	6	DIFF	
 op/blocks.t	25	1	16	10	DIFF	
 op/bool.t	8	0	8	0	OK	
@@ -645,14 +670,14 @@ op/concat2.t	4	0	4	0	OK
 op/cond.t	5	0	4	0	XDIFF	timeout | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
 op/const-optree.t	148	0	90	58	XDIFF	
 op/context.t	8	0	7	1	DIFF	
-op/coreamp.t	778	0	0	0	DIFF	undef-fn:|File::Spec|::pl-Functions
+op/coreamp.t	778	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also carries lvalue-sub drops (§Lvalue subroutines)	-1
 op/coresubs.t	1109	0	0	0	TRANSPILE	TRANSPILE-FAIL
 op/cproto.t	254	0	71	183	DIFF	
 op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).
 op/current_sub.t	22	0	0	0	XDIFF	crash:sb-int:simple-program-error: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)
 op/dbm.t	5	0	0	0	DIFF	
 op/decl-refs.t	402	0	42	165	DIFF	crash:simple-error: ParserN TODO: state outside a block-level declaration at (eval N) line N.
-op/defer.t	28	0	0	0	DIFF	undef-fn:main::pl-defer
+op/defer.t	28	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	-1
 op/defined.t	5	0	5	0	OK	
 op/defins.t	27	0	27	0	OK	
 op/delete.t	56	0	53	3	DIFF	
@@ -684,7 +709,7 @@ op/fresh_perl_utf8.t	1	0	0	1	DIFF
 op/getpid.t	0	0	0	1	NOTAP	crash:simple-error: Can't locate object method "new" via package "threads" at - line N.
 op/getppid.t	8	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w)) Compile-time error
 op/glob.t	18	0	14	4	DIFF	
-op/gmagic.t	78	0	0	0	DIFF	crash:simple-error: Can't call method FETCH on an undefined value
+op/gmagic.t	78	0	1	0	DIFF	crash:simple-error: Can't call method init on an undefined value	0
 # s431 first measurement (see the s431 note in the header)
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
@@ -703,7 +728,7 @@ op/inc.t	93	0	60	15	DIFF
 op/inccode-tie.t	89	0	0	0	DIFF	crash:simple-error: PCL: unsupported in string eval: multiple package sections at (eval N) line N.
 op/inccode.t	89	0	1	0	DIFF	crash:simple-error: coderef in @INC (the file COMPILES now, task #321)
 op/incfilter.t	153	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Filter::Util::Call in @INC
-op/index.t	415	0	49	13	DIFF	parse-error
+op/index.t	415	0	94	13	DIFF	undef-fn:main::pl-formline	0
 op/index_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/infnan.t	1112	0	1106	6	DIFF	
 op/int.t	19	0	19	0	OK	
@@ -724,7 +749,7 @@ op/lex_assign.t	353	0	350	3	DIFF
 #   `state`/`my sub if` twins (lines 211/214, 578/581) un-drop too but sit
 #   behind the file's abort (undef-fn:main::pl-F, unchanged).  Serial-confirmed
 #   REAL MOVE by tools/run-perl-suite.pl op/lexsub.t; census 12 -> 4.
-op/lexsub.t	156	0	9	8	DIFF	undef-fn:main::pl-F
+op/lexsub.t	156	0	6	6	DIFF	crash:simple-error: Undefined subroutine &main::d called.	4
 op/lfs.t	17	0	0	0	DIFF	
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|
@@ -735,7 +760,7 @@ op/lop.t	47	0	47	0	OK
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL
 op/magic-27839.t	2	0	2	0	OK	
 op/magic.t	207	1	168	39	DIFF	
-op/method.t	163	0	96	30	DIFF	undef-fn:main::pl-new
+op/method.t	163	0	44	7	DIFF	undef-fn:common-lisp:nil	1
 op/mkdir.t	17	0	17	0	OK	
 op/multideref.t	65	0	32	6	DIFF	crash:sb-int:simple-program-error: invalid number of arguments: N
 op/my.t	59	0	52	7	DIFF	
@@ -795,8 +820,8 @@ op/signatures.t	1245	1	920	326	XDIFF
 op/sigsystem.t	4	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.
 op/sleep.t	4	0	4	0	OK	
 op/smartkve.t	18	0	3	15	DIFF	
-op/smartmatch.t	353	0	44	309	DIFF	
-op/sort.t	205	0	181	24	DIFF	undef-fn:main::pl-revers
+op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
+op/sort.t	205	0	142	9	DIFF	undef-fn:main::pl-revers	0
 op/splice.t	34	0	34	0	OK	
 op/split.t	219	0	213	6	DIFF	
 op/split_unicode.t	147	0	107	40	DIFF	
@@ -808,7 +833,7 @@ op/stash.t	54	1	48	6	DIFF	undef-fn:main::pl-SUPER
 op/stash_parse_gv.t	5	0	5	0	OK	
 op/stat.t	108	3	0	0	DIFF	undef-fn:main::pl-is_linux_container
 op/stat_errors.t	638	0	305	333	DIFF	
-op/state.t	166	0	126	36	DIFF	
+op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one `given` block in an otherwise supported file; the refusal costs the file's rows, ruled with task #400	-1
 op/study.t	43	0	43	0	OK	
 op/studytied.t	14	0	13	1	DIFF	
 op/sub.t	64	1	53	12	DIFF	
@@ -817,14 +842,14 @@ op/substr.t	400	0	377	23	DIFF
 op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/svflags.t	16	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL
-op/switch.t	197	0	27	142	DIFF	undef-fn:main::pl-default
+op/switch.t	197	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)	-1
 op/symbolcache.t	8	0	0	0	DIFF	undef-fn:main::pl-removed
 op/sysio.t	45	0	45	0	OK	
 op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL
 op/threads-dirh.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/threads.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
 op/tie.t	94	1	0	0	DIFF	
-op/tie_fetch_count.t	343	0	84	74	DIFF	crash:simple-error: Undefined subroutine &main::N called at (eval N) line N.
+op/tie_fetch_count.t	343	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one infix `~~` statement; refused (task #371)	-1
 op/tiearray.t	75	0	36	39	DIFF	
 op/tiehandle.t	67	0	12	32	DIFF	
 op/tiehash.t	27	0	20	7	DIFF	

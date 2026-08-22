@@ -1,4 +1,19 @@
 # taken-at: 5323d9e 2026-08-15
+# s432 (#456 half (a), the forward-declaration stub): sort.t 203 -> 202 EDITED BY
+#   HAND, and its status OK -> PARTIAL.  The lost row is `cmp_ok($answer,'eq',
+#   'good','bug 36430')` (sort.t:870), which was an ACCIDENTAL pass: the block's
+#   `sort { A::min(@$a) <=> A::min(@$b) }` runs BEFORE the `package A; sub min`
+#   that follows it in the same block (PCL emits the package switch as its own
+#   section), so both calls reached the forward-declaration STUB.  The stub
+#   answered nil, undef <=> undef is 0, the list came back unsorted, $answer was
+#   never touched and the assertion passed while testing nothing.  The stub now
+#   DIES (CLAUDE.md rule 12), so the statement fails honestly and the sweep's
+#   p-load-with-recovery drops that one top-level form.  The row comes back for
+#   real when #456 half (b) lands (hoist a sub an EARLIER section calls).
+#   Same session, the opposite direction: perl-tests/sort.t's `ok(1, "SKIP:
+#   stubborn AUTOLOAD ...")` was RESTORED to perl's own assertion (`sort
+#   stubbedsub`), which passes now that the stub falls through to AUTOLOAD —
+#   so the row COUNT of that pair is unchanged and only its honesty moved.
 # s424 (#423, glob VALUE vs glob REF): substr.t 374 -> 375 EDITED BY HAND.
 #   `my $x = *foo; is ref \$x, 'GLOB', '\substr does not coerce its glob arg just yet'`
 #   (substr.t:784) — ref(\$x) answered REF (the box path treated every
@@ -142,7 +157,7 @@ reverse.t	OK	25	0	25
 scalar.t	OK	84	32	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
-sort.t	OK	203	1	205
+sort.t	PARTIAL	202	1	205
 splice.t	OK	34	0	34
 split.t	OK	178	6	219
 sprintf.t	OK	532	25	559
