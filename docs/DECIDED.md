@@ -11,6 +11,64 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s428 (2026-08-22, Fable) — s427 reviewed + APPROVED + merged (ff, `821f0bb`); generation v2-174 (`53dcd2e`); round 2 of the Opus fan-out complete
+
+- **s427 (O3: #442, #422.2, #421, #415 items 1+4) APPROVED as shipped**, merged
+  fast-forward at `821f0bb`; `53dcd2e` renumbered `*pcl-cache-generation*`
+  v2-173 → **v2-174** on the merged tree and regenerated the three artifacts
+  (bodies byte-identical, stamp only).  Rulings:
+  `docs/fable-answers-s423-s426-s427.md` §s427.
+- **The #442 expectation rewrite is CONFIRMED (ask 1)**: "the blessed answer is
+  U+FFFD" (s318 §11) is about the CHARACTER — what a CL string can hold — so a
+  box keeping its NUMBER through assignment is not a re-litigation of it, and
+  `Pl/t/wide-codepoint-01.t`'s rewrite meets the four s376 conjuncts.
+- **#421's narrow form ACCEPTED as shipped (ask 2)**: the per-package prototype
+  table is consulted only when a bare name has more than one declaring package;
+  the strict form is one line in `_proto_entry` if the queue ever wants it, and
+  no working program can tell the difference (perl dies "Undefined subroutine"
+  in the only distinguishing case).
+- **STANDING RULE (ask 3): a change that RECLASSIFIES A TOKEN FAMILY runs the
+  companion-suite leg** — `tools/run-perl-suite.pl` over the touched dirs, A/B
+  against a base worktree — not only a `cl/` coercion change (the s421 rule).
+  `<<>>` was found by that leg and by NOTHING else: the probe table,
+  corpus-diff, the gate-SET scan and the sweep were all silent; only
+  `io/argv.t`'s row counts moved.
+- **A generation-string COLLISION is re-measured, not redone** (ratified from
+  s427): when two agents take the same `*pcl-cache-generation*`, the branch
+  moves to a FRESH string and RE-RUNS the affected measurements under it —
+  `~/.pcl-cache` is keyed by that string, so the risk is a cached module
+  transpile from the wrong compiler, not a wrong fix.  Launcher side: reserve
+  per-agent strings with a GAP above main.
+- **Task-store JSON is written with `JSON::PP->new->utf8` to a `:raw` handle** —
+  #415/#421/#422/#442/#449/#450 had arrived DOUBLE-ENCODED (mojibake `â` runs,
+  `ï¼¸` for `Ｘ`) and were repaired in s428 (`reference_task_store_json`).
+- **Filed, pre-existing, not fixed: #451** — `"$?[1]"` inside a dq string prints
+  `0[1]` (the scalar `$?` interpolates and `[1]` stays literal; perl prints
+  element 1 of `@?`; the `"$-[0]"`/`"$+[0]"` twins work — the fix belongs in
+  `Pl/InterpScan.pm`); **#452** — `<main::FH2>`, a package-QUALIFIED bareword
+  handle in angle brackets, emits a BARE unquoted symbol and dies "The variable
+  FH2 is unbound" at load, where `readline(main::FH3)` emits `'main::FH3` and
+  works (A/B'd byte-identical on `ff0cd86`).
+- **B3 (`_reduce_term`, #153) SIZED from measurement — `docs/b3-operand-collapse-s428.md`.**
+  Its step-1 reachability inventory (`PCL_TERM_DECL`, BOTH populations: corpus 9,
+  perl-t 72) is **entirely by-design — every operand-site decline leads with a
+  Word, Operator or Cast** — so B3's DELETION half (steps 3–5's "delete the
+  unreachable branches") is already complete and the two rule-12 `die` guards
+  are proven safe over 715 files.  B3's remaining work is the WIDENING half:
+  `_term_extent` claiming #411 (a `(args)` List after a completed postfix step,
+  guarded by `$next > $i` = past the bare primary; 8 drops, first), #259
+  (parenless proto arity in operator position; 3, second), #374(b) (`WORD WORD
+  WORD` empty-proto lexsubs; 4, last).  ~15 of the census's 104 drops, not ~40 —
+  the rest are exempt/registered/#410/#399, NOT B3's to widen.  Each widening
+  lands alone behind the s373 three-leg bar, with §1a re-run as its regression
+  check (a new Symbol/Structure decline = a walker inconsistency).
+- **Measured on the merged tree:** cold gate **157 files / 5684 rows**, failures
+  = exactly the 13 pclxs xs rows, 218 s; full sweep `--jobs 8`: **GATE clean**,
+  TOTAL passing baseline 18365 / current **18365 (+0)**, drops census 7 /
+  current **7 (+0)**, 0 new / 0 fixed (7 unstable = crash-file noise, 10
+  unverified inside the same aborted files).  Neither baseline touched.
+
+
 ## s427 (2026-08-22, Opus) — O3 fillers: #442, #421, #422.2, #415
 
 - **`chr(N)` above U+10FFFF keeps its NUMBER in every optimizer regime

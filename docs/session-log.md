@@ -4,6 +4,138 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 428 (2026-08-22, Fable; Opus finisher for the sweep + docs) — s427 reviewed + APPROVED + merged; generation v2-174; cold gate 157/5684 + full sweep on the final tree; round 2 of the Opus fan-out COMPLETE, all worktrees pruned
+
+**State at open:** main `dbef93c` (s425's close), and agent F of the round-2
+fan-out — s427 = O3: #442, #422.2, #421, #415 items 1+4 — still alive in
+worktree `agent-a1ef8cda8527aca2b`.  Per the s425 checklist that worktree was
+the session's first read: six commits, fast-forward mergeable onto `dbef93c`,
+and `docs/opus5-review-requests-s427.md` whose §9 RUN LEDGER states in so many
+words which measurement had NOT run — the full perl-tests sweep on the FINAL
+tree (the one rebased onto `dbef93c`) — together with the four instruments that
+HAD been run on that tree and what each of them could and could not see.  A
+ledger that names its own hole is what made this review cheap; the hole itself
+became this session's last job.
+
+**The review.**  Every diff hunk read: `Pl/Environment.pm`'s second table
+`pkg_prototypes` and its `_proto_entry` resolver (unqualified → the
+`current_package`, qualified → its own qualifier, the flat bare-name table
+still the fallback, consulted at all only when a bare name has more than one
+declaring package); `Pl/PExpr.pm`'s readline/glob WHITELIST, the `<<>>` case,
+and `~` joining `_fix_ppi_glob_after_block`'s metacharacter class;
+`Pl/Parser.pm`'s `_merge_punct_array_symbols` and the `next_sibling` →
+`snext_sibling` one-word change in `_reclass_subscripts_after`;
+`Pl/Parser2.pm`'s widened punctuation forward-declaration bucket; the runtime's
+`%pcl-superchar-payload` and `%p-glob-expand-tilde`.  The one thing worth
+checking by hand was `has_prototype` moving from `exists` to `defined` —
+equivalent here, because every `add_prototype` call site stores a hashref.
+
+**Six probe files vs perl 5.40.3, all identical.**  The #421 prototype
+collision in BOTH declaration orders plus qualified calls; `chr(N)` above
+U+10FFFF in five shapes (assign, copy, `.=`, array element, the 0x10FFFF
+boundary); the inverse guards the two token-family changes could have broken
+(`@$r`, `@{$r}`, `@{[1+1]}`, `$a < ~$b`, `~0`, `<=>`, `%` as modulus, `"@w"`);
+the non-ASCII subscript family (`$Ｘ {a}`, `$Ｖ [1]`, `@Ｘ {qw(a)}`, `$ｒ ->{a}`,
+`if ($Ｖ [0])`, `<ＦＨ>` as readline); and readline-vs-glob over `<$fh>`,
+`<FH>`, `<*.pl>`, `<~>` (= `$HOME`), `<$h{x}>` (a glob) and `<p1.pl>` (returns
+the pattern).
+
+**Two PRE-EXISTING findings filed.**  **#451** — `"$?[1]"` INSIDE a
+double-quoted string prints `0[1]`: the interpolator takes the scalar `$?` and
+leaves `[1]` literal, where perl prints element 1 of `@?`.  The `"$-[0]"` /
+`"$+[0]"` twins work, so this is the *interpolation twin* of the code path
+#415 item 1 fixed, and the fix belongs in `Pl/InterpScan.pm`, not in the
+Parser2 forward-declaration bucket.  **#452** — `<main::FH2>`, a
+package-QUALIFIED bareword handle in angle brackets, emits `(p-readline
+main::FH2)` as a BARE unquoted symbol and dies "The variable FH2 is unbound" at
+load, while `readline(main::FH3)` emits `'main::FH3` and works; A/B'd
+byte-identical on `ff0cd86` (main before F), so the new whitelist is not its
+cause.
+
+**Verdict: s427 APPROVED as shipped**, merged fast-forward → **`821f0bb`**.
+Commit **`53dcd2e`** then renumbered `*pcl-cache-generation*` v2-173 →
+**v2-174** on the merged tree and regenerated the three artifacts
+(`cl/pcl-pack.lisp`, `cl/pcl-mro.lisp`, `cl/pcl-warnings.lisp`) — bodies
+byte-identical, only the stamp moved.
+
+**F's three asks, ruled.**  (1) **CONFIRMED**: the `Pl/t/wide-codepoint-01.t`
+expectation rewrite meets the four s376 conjuncts, and "the blessed answer is
+U+FFFD" (s318 §11) is about the CHARACTER — what a CL string can hold — so a
+box keeping its NUMBER through assignment is not a re-litigation of it.
+(2) **#421's narrow form ACCEPTED as shipped**: the per-package table is
+consulted only on a collision, the strict form is one line in `_proto_entry` if
+the queue ever wants it, and no working program can tell the difference (perl
+dies "Undefined subroutine" in the only distinguishing case).  (3) **ADOPTED as
+a standing rule**: the companion-suite leg (`tools/run-perl-suite.pl` over the
+touched dirs, A/B against a base worktree) runs for ANY change that
+RECLASSIFIES A TOKEN FAMILY — readline-vs-glob, cast merges, subscript
+re-class — not only for `cl/` coercion changes (the s421 rule).  `<<>>` was
+found by that leg and by nothing else: the probe table, corpus-diff, the
+gate-SET scan and the sweep were all silent, and only `io/argv.t`'s row counts
+showed it.
+
+**Measured on the merged tree.**  Cold gate (`rm -rf ~/.pcl-cache/*` then
+`tools/prove-core`, main checkout with the pclxs sibling present): **157 files /
+5684 rows**, failures = exactly the 13 pclxs xs rows (xs-01 5/6, xs-02 4/4,
+xs-03 4/4 — pclxs is under separate work; USER: ignore XS rows), 218 s wall —
+matching F's ledger row for the final tree.  Full sweep `--jobs 8`, the run F
+could not make: **GATE clean**, TOTAL passing baseline 18365 / current
+**18365 (+0)**, TOTAL dropped statements census 7 / current **7 (+0)**,
+`0 new, 0 fixed, 7 unstable (crash-file noise), 10 unverified (did not run)`
+(baseline 696 fails, current 693; 906 failing / 11981 skipped across 108 files,
+60 fully passing).  The 7 unstable rows are new fails ABOVE the abort points of
+four PARTIAL files (method.t 1, postfixderef.t 3, ref.t 1, yadayada.t 2) and
+the 10 unverified are baseline fails inside those same aborted files — the
+known crash-file noise, not movement.  min MemAvailable 4.1 GB, no OOM.
+**Neither baseline was touched.**
+
+**Bookkeeping.**  The task JSONs #415/#421/#422/#442/#449/#450 had arrived
+DOUBLE-ENCODED — F wrote UTF-8 through a non-raw handle, so the stored text
+carried mojibake (`â` runs, `ï¼¸` for `Ｘ`) — and were repaired; the rule is
+already in memory: write with `JSON::PP->new->utf8` to a `:raw` handle.  #451
+and #452 filed.  **ALL SIX worktrees pruned** after a look at each: F's
+`agent-a1ef8cda8527aca2b` (its untracked `.s427/` raw logs copied to the
+session scratchpad only — evidence, superseded by the s428 measurements), the
+merged round-1 `agent-a970c089570c5ce46` (A) and `agent-a5178ca3864cd0e12` (C),
+F's s427-base, the s201-era `agent-a228b3f7e9b55b5fd` (its only diff,
+`%p-snapshot-array-rhs`, is already on main at `cl/pcl-runtime.lisp:4323` —
+probed `@a=(1,@a,2)` identical to perl), and s381-review (its one unmerged
+commit `389e36f` was a 34-line session-log entry already on main at
+`docs/session-log.md:5076`); their branches deleted.  **#415 stays OPEN** with
+items 2/3/5/6/7; **#422 item 3** remains and is upstream (PPI's lexer fails the
+whole document on `for my $Ｉ (…)`).
+
+**B3 SIZED FROM MEASUREMENT (the Fable half of the session).**  With round 2
+closed, the next Fable track is **B3** (`_reduce_term`, task #153) — the flip's
+long pole.  Rather than open it blind, this session ran its step-1 measurement
+(the plan's own first B3 action, `docs/option-b-phase2-plan.md` §2 Track B) and
+wrote the design up as `docs/b3-operand-collapse-s428.md`.  The `PCL_TERM_DECL`
+reachability inventory over BOTH populations (corpus 9 declines, perl's own t/
+72) is now **entirely by-design — every operand-site decline leads with a Word,
+an Operator or a Cast**, so B3's deletion half (steps 3–5's "delete the
+unreachable branches") is already complete and the two `die` guards are proven
+safe.  What remains of B3 is the WIDENING half: teaching `_term_extent` to claim
+the three shapes that currently DROP — #411 (a `(args)` List after a completed
+postfix step, e.g. `$s2->()()`, `$subsubs[0]()(0)`, `(sub{})[0]()`; 8 drops,
+cleanest, ordered first), #259 (parenless prototyped list-op arity in operator
+position; 3), and #374(b) (`WORD WORD WORD` of declared empty-prototype lexsubs;
+4) — each with its acceptance rows and its risk in the design doc.  The census's
+other ~39 non-lvalue drops are exempt (lvalue-sub), registered, feature
+absences, PPI mis-lexes, or the family-4 glob-surgery by-design declines — NOT
+B3's to widen.  The B3 implementation itself is the next session's (Opus-sized
+per the plan, one widening at a time behind the s373 three-leg bar).
+
+**State at close / next:** main at `53dcd2e` plus this session's two docs
+commits, generation **v2-174**, round 2 of the Opus fan-out complete and every
+round-2 worktree gone.  Next Fable/Opus step = **B3 widening #411 first** from
+`docs/b3-operand-collapse-s428.md`.  Opus filler queue = **#435** (the fragment
+re-parse repair), then #451 / #452 / #449 / #450.  Then the push week (USER,
+2026-08-24) → the first CI run (#282's container half) → the v0.1 tag (DECIDED
+s425: the tag decouples from the flip).
+
+---
+
+
 ## Session 427 (2026-08-22, Opus) — O3, the fillers: #442, #422.2, #421, #415 — two of the four were one-member fixes of a family with a latent crash next door
 
 **State at open:** agent F of the s425 fan-out, branch
