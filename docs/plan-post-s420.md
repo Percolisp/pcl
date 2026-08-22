@@ -65,6 +65,15 @@ commit; write one even if it says "no asks".
    IDENTICAL outside the named shapes, the sweep (StringInterpolation is
    reached by every file).
 
+4b. **#388 consumer 2** (RULED s425, `docs/fable-answers-s423-s426-s427.md` s426
+   ask 3) — the Parser2 rename machinery's private interpolation-name walks
+   onto InterpScan; its own Opus session right after the O3 merge, in
+   parallel with B3.  Change class = name resolution: the full sweep IS the
+   gate + gate-SET scan over both populations + compile time before/after
+   (`_interp_names` 1.65 s is the metric).  Acceptance: the private walks are
+   DELETED (s379 direction B), `docs/interp-scan.md`'s consumer-2 rows close
+   one by one.
+
 **Session O3 — fillers, measured small.**
 5. **#415** items (two already measured: `@?` needs token repair + emission +
    defvar like `@#`; `<~>` is a CRASH, a dead file), **#421** (prototype table

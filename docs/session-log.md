@@ -134,7 +134,16 @@ original worktree (gen v2-165, ids 431–435); E = s426 = O2 (#388 consumer 3
 #421, #422.2, #442; gen v2-171, ids 449–454).  Each rebases onto main before
 its final gate; Fable reviews, merges, renumbers the generation once per
 merge and regenerates the artifacts; one cold gate + one full sweep on the
-final tree.  (Merge results are appended below as they land.)
+final tree.
+
+**E (s426) landed first and is MERGED** (`c1983e1`, fast-forward; rulings in
+`docs/fable-answers-s423-s426-s427.md`): StringInterpolation is a `scan_one`
+consumer (1216 → 664 lines), #420 + #422.1 closed, and the slice-through-a-
+reference emitter hole (`@$r[0,1]` silent-wrong in CODE) fixed by one
+helper; my own 52-shape probe 51/51 identical to perl; gate 156/5641 (the 13
+xs rows), sweep TOTAL 18365 +0, drops 7.  Ratified the in-scope emitter half
+as a standing rule; consumer 2 scheduled as O4; ir-spec §3.2b added.
+(B and F results appended below as they land.)
 
 
 ## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered

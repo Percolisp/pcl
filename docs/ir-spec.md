@@ -615,6 +615,35 @@ integers print exactly; floats print in Perl's `%.15g`-equivalent shortest
 form (`0.5` not `0.5d0`; integral floats print without `.0`); references →
 `"TYPE(0xADDR)"`; blessed references → `"Class=TYPE(0xADDR)"`.
 
+### 3.2b Interpolation extent — which text belongs to a `$`/`@` reference inside a dq string, regex or heredoc (normative, s426)
+
+ONE reader decides it — `Pl/InterpScan.pm` (`scan_one`), consumed by the
+regex-pattern interpolator (s382f) and by `Pl/PExpr/StringInterpolation.pm`
+(s426); the contract is `docs/interp-scan.md`.  A translator must reproduce
+these rules (every one probed on perl 5.40.3):
+
+- `$name` / `@name` continue into a subscript CHAIN — `"$x[1]"`,
+  `"$h{k}[0]"`, `"$r->[0]{k}"`, `"@x[0,1]"`, `"@h{'a','b'}"`; an arrow is
+  taken only when `[` or `{` follows it (`->@*` only under `postderef_qq`).
+- A DEREF base continues the same way: `"$$r[1]"` is `$r->[1]`, `"@$r[0,1]"`
+  is a slice, `"$$h{k}"` an element, `"${$r}[1]"` is `$r->[1]`.
+- A braced NAME **closes** the reference — `"${x}[0]"` is `$x` followed by a
+  literal `[0]`; so do the braced magic spellings `${^NAME}`, `@{^NAME}`,
+  `${+}`, `@{+}` (the magic arrays `@-`, `@+`, `@{^CAPTURE}` join with `$"`).
+- A braced EXPRESSION does **not** close it: `"${$r}[1]"` is 20,
+  `"@{$hr}{'a','b'}"` is a hash slice, `"@{[1,2]}[0]"` is 1, and
+  `"${\ $x}[0]"` dies "Not an ARRAY reference" — perl TOOK the group.
+- The `$#` family — `$#name`, `$#{name}`, `$#$r`, `$#{EXPR}`, `$#-`, `$#+` —
+  never chains (a following `[` is literal text; in code it is a syntax
+  error).
+- The VALUE of a reference is what the equivalent CODE gives: a deref base,
+  a braced expression, a second subscript group or an explicit arrow is
+  compiled from the reference's own source text through the ordinary
+  expression pipeline, so a string and the code it abbreviates cannot
+  disagree (the #443 wrong-kind-deref leniency is therefore shared with
+  code, not an interpolation bug).  Residue: the `@{ EXPR }` arm unescapes
+  the block text and the `${ EXPR }` arm does not (#444).
+
 ### 3.3 `p-true-p` (truthiness)
 
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,
