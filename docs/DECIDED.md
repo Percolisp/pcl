@@ -100,6 +100,13 @@ not-supported.md → only then probe.*
   generation ONCE per merge (v2-167 …) and regenerates the artifacts.
   **A dead agent's worktree is the first thing the next session reads**
   (memory `project_s421_opus_agents_inflight`).
+- **Round-2 outcome (s425 end): E + B MERGED (`c1983e1`, `f02fe2a` + review fixes
+  `dbef93c`), F STILL RUNNING at session end — the next session reads its
+  worktree first.**  Rulings `docs/fable-answers-s423-s426-s427.md`: the
+  in-scope second-mechanism rule (measured to its own bar + removes a copy);
+  consumer 2 = O4; the narrow `is_filehandle` gate stands (#434); #435 fragment
+  re-parses skip the #410 repair; **launcher rule: per-agent generation strings
+  get a GAP above main** (B's rebase renumber landed on F's key).
 
 
 ## s424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE differ by the EXISTING `is-ref` flag; no new slot

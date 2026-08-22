@@ -611,6 +611,29 @@ skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
 **runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
 discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
 designed.
+2b000000000. **s425 (Fable, 2026-08-22): the three USER decisions CLOSED and round 2
+of parallel Opus agents — E + B MERGED, F IN FLIGHT at session end.**  Decisions
+(`docs/plan-post-s420.md` §4, DECIDED s425): **indirect object = MAYBE LATER**
+(USER; `not-supported.md` entry after measuring that `new Foo`/`new Foo(LIST)`
+already WORK and the scalar-invocant spelling is 2 loud census drops — not
+refused, 288 rows); **the v0.1 tag DECOUPLES from the flip** (tag after the
+first green CI run + O1); **next Fable = B3**.  **E = s426 (#388 consumer 3 +
+#420 + #422.1) MERGED `c1983e1`**: StringInterpolation is an InterpScan
+`scan_one` consumer (1216 → 664 lines) and a slice through a reference
+(`@$r[0,1]`, silent-wrong in CODE) is fixed by one helper; ir-spec §3.2b.
+**B = s423 (#418 widened) MERGED `f02fe2a`**: one helper `Pl::CLForm::cl_sym`/
+`cl_pkg` (identity on ASCII) + the runtime `%pcl-invert-case` guard; uni/+mro/
+legs 15 gains; **Fable fixes on top `dbef93c`** (`$#NAME` ArrayIndex spelling —
+`$#Foo::Bar::x` was an ASCII READ ERROR; interpolated hash-key autoquote
+class).  Gate 156/5655, sweep TOTAL 18365 +0 (B's tree; the two fixes verified
+by guard rows + probes only).  Generation **v2-171** (B's; to be renumbered
+FRESH after F).  Filed: #434 (mixed Word leaf), #435 (fragment re-parses skip
+the #410 repair — `"$Ｘ[$ｉ]"` silently reads element 0), #443/#444 (E),
+#431–#433 (B).  Rulings: `docs/fable-answers-s423-s426-s427.md`; consumer 2
+scheduled as O4.  **F = s427 (O3 fillers) was STILL RUNNING — its worktree
+`agent-a1ef8cda8527aca2b` is the first thing the next session reads** (memory
+`project_s421_opus_agents_inflight`).  Launcher rule: per-agent generation
+strings get a GAP above main (a rebase renumber landed on a sibling's key).
 2b00000000. **s421 (Fable, 2026-08-22): s420 REVIEWED + APPROVED; THE LIVE
 QUEUE IS `docs/plan-post-s420.md`** (review record `docs/fable-answers-s420.md`).
 Independently re-measured: gate COLD 155/5614 (the 13 xs rows), sweep TOTAL

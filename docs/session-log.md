@@ -157,7 +157,12 @@ autoquote was ASCII-only (`"$ｈ{ｋ}"` called sub ｋ).  Filed #434 (the mixed
 Word leaf, B's ask 2), #435 (fragment re-parses skip the #410 repair —
 `"$Ｘ[$ｉ]"` silently reads element 0).  Generation collision (B took F's
 `v2-171` by rebasing) handled: F told to move to v2-173; launcher rule = a gap.
-(F result appended below when it lands.)
+**SESSION ENDED (USER) with F (s427) STILL RUNNING** — its worktree
+`.claude/worktrees/agent-a1ef8cda8527aca2b` is the next session's first read
+(told to commit WIP + note what ran).  Not done this session: F's review/merge,
+the final generation renumber + artifacts, the COLD gate + full sweep on the
+final tree (main's numbers are B's f02fe2a + two guard-verified fixes), the
+worktree pruning.  Checklist in memory `project_s421_opus_agents_inflight`.
 
 
 ## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered
