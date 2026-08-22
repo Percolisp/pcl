@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 24;
+plan tests => 25;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -252,3 +252,23 @@ is(run_bytes(encode_utf8('use utf8; our @Ｘ = (1,2,3); print $#Ｘ, " ", $#{Ｘ
    "2 2 2 2\n", '$#NAME with a non-ASCII name, code and string (#418 residue)');
 is(run_bytes('package Foo::Bar; our @x=(1,2); package Foo; our @x=(1,2,3); our @z=(1,2,3,4); print $#Foo::Bar::x, " ", $#Foo::x, " ", $#z, " ", $#Foo::z, " ", "$#Foo::Bar::x $#Foo::x $#z $#Foo::z\n";'),
    "1 2 3 3 1 2 3 3\n", '$#Pkg::Seg::name (multi-segment package) is readable; single-segment and bare unchanged (ASCII inverse)');
+
+# Task #422 item 2 (s427): WHITESPACE between a repaired non-ASCII symbol and
+# its subscript.  `_reclass_subscripts_after` walked with `next_sibling`, so it
+# stopped at the Whitespace token and left `{…}`/`[…]` as the LEXER had built
+# them — `print $Ｘ {a}` became a block-form FILEHANDLE spec and `print $Ｖ [1]`
+# an anonymous array.  PPI itself steps over whitespace here (the ASCII
+# `$h {a}` and `@h {qw(a b)}` dump as Subscripts, PPI 1.291), so the repair
+# mirrors it with `snext_sibling`.  The last two statements are the control: a
+# `{` that really is a BLOCK must stay one.
+is(run_bytes(encode_utf8(
+     "use utf8;\n"
+   . "my %\x{ff38} = (a => 1, b => 2); my \@\x{ff36} = (5, 6, 7);\n"
+   . "print \$\x{ff38} {a}, \$\x{ff36} [1], \"\\n\";\n"
+   . "my \@sl = \@\x{ff38} {qw(a b)};\n"
+   . "print \"\@sl\\n\";\n"
+   . "if (\$\x{ff36} [0]) { print \"blk\\n\" }\n"
+   . "my \@ms = map { \$_ } \@\x{ff36};\n"
+   . "print scalar(\@ms), \"\\n\";\n")),
+   "16\n1 2\nblk\n3\n",
+   'a space before the subscript of a repaired non-ASCII symbol (#422.2)');

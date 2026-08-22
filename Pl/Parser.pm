@@ -1100,11 +1100,18 @@ sub _merge_unicode_symbols {
 # is exactly what PPI::Lexer would have chosen had the symbol been whole.
 # An explicit `->` was lexed correctly (PPI reads a subscript after an arrow
 # whatever precedes it), so it is stepped over, not re-classed.
+# The walk steps over WHITESPACE (`snext_sibling`), because PPI's own lexer
+# does: `$h {a}` and `@h {qw(a b)}` are Subscripts in the ASCII spelling
+# (dumped, PPI 1.291), so the repaired spelling has to agree or `$Ｘ {a}`
+# reads as a BLOCK — which made `print $Ｘ {a}` a block-form FILEHANDLE spec
+# and `print $Ｖ [1]` an anonymous array (task #422 item 2).  The mirror is
+# exact: this pass only ever re-decides what PPI decided from a bareword it
+# should never have seen.
 sub _reclass_subscripts_after {
   my ($sym) = @_;
   my $node = $sym;
   while (1) {
-    my $next = $node->next_sibling or last;
+    my $next = $node->snext_sibling or last;
     if ($next->isa('PPI::Token::Operator') && $next->content eq '->') {
       $node = $next;
       next;

@@ -27,6 +27,18 @@ not-supported.md → only then probe.*
   identically).  `not-supported.md` "Code points above U+10FFFF" corrected
   (s422's "once assigned it is 65533" was the bug, not the rule); guard
   `Pl/t/wide-codepoint-01.t` rows 8-11.
+- **The non-ASCII subscript repair steps over WHITESPACE, because PPI does
+  (#422 item 2)**.  `_reclass_subscripts_after` (Pl/Parser.pm, the #410
+  repair) walked with `next_sibling`, so a space between the repaired symbol
+  and its subscript stopped it and the LEXER's bareword-derived guess stood:
+  `print $Ｘ {a}` was a block-form FILEHANDLE spec and `print $Ｖ [1]` an
+  anonymous array (both SILENT WRONG, not drops).  `snext_sibling` is the
+  exact mirror — the ASCII `$h {a}` / `@h {qw(a b)}` dump as Subscripts under
+  PPI 1.291, so the repair now decides what PPI would have decided had it
+  seen a whole symbol.  Guard `Pl/t/utf8-source-01.t` row 8.  (Item 3 —
+  PPI's LEXER failing a whole file on `for my $Ｉ (…)` — is upstream and
+  already logged, `ppi-upstream-bugs.md` §23 addendum; it is unreachable from
+  a token repair and stays PPI's.)
 
 ## s426 (2026-08-22, Opus) — #388 consumer 3: StringInterpolation is a `scan_one` consumer; #420 + #422.1 CLOSED
 
