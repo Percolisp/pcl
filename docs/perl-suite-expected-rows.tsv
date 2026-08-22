@@ -48,12 +48,30 @@ comp/hints.t	setting ${^WARNING_BITS} to its own value has no effect
 io/defout.t	$-
 io/msg.t	*summary*
 io/sem.t	*summary*
+io/shm.t	"$id" eq "2"
+io/shm.t	$id + 0 == 2
 io/shm.t	*summary*
-mro/basic.t	@main::ISA is magical
+io/shm.t	acquired shared mem
+io/shm.t	check we got back the expected
+io/shm.t	check we got back the expected (upgraded source)
+io/shm.t	read it back
+io/shm.t	read it back (upgraded source)
+io/shm.t	read(offs=0) correct
+io/shm.t	read(offs=0) returned ok
+io/shm.t	read(offs=1) correct
+io/shm.t	read(offs=1) returned ok
+io/shm.t	read(offs=4) correct
+io/shm.t	read(offs=4) returned ok
+io/shm.t	setup text
+io/shm.t	setup text (upgraded source)
+io/shm.t	shmread FETCH once
+io/shm.t	shmread STORE once
+io/shm.t	write(offs=0)
+io/shm.t	write(offs=0)
+io/shm.t	write(offs=1)
+io/shm.t	write(offs=4)
+mro/basic.t	*summary*
 mro/basic.t	Changes to UNIVERSAL::DESTROY invalidate DESTROY caches
-mro/basic.t	Q3->can('bar')
-mro/basic.t	Q3->can('foo')
-mro/basic.t	Q3->can('foo')
 mro/basic.t	[at t/mro/basic.t line 108]
 mro/basic.t	[at t/mro/basic.t line 112]
 mro/basic.t	[at t/mro/basic.t line 141]
@@ -62,9 +80,6 @@ mro/basic.t	[at t/mro/basic.t line 163]
 mro/basic.t	[at t/mro/basic.t line 167]
 mro/basic.t	[at t/mro/basic.t line 178]
 mro/basic.t	[at t/mro/basic.t line 179]
-mro/basic.t	[at t/mro/basic.t line 182]
-mro/basic.t	[at t/mro/basic.t line 183]
-mro/basic.t	[at t/mro/basic.t line 191]
 mro/basic.t	[at t/mro/basic.t line 196]
 mro/basic.t	[at t/mro/basic.t line 210]
 mro/basic.t	[at t/mro/basic.t line 210]
@@ -73,7 +88,6 @@ mro/basic.t	[at t/mro/basic.t line 210]
 mro/basic.t	[at t/mro/basic.t line 233]
 mro/basic.t	[at t/mro/basic.t line 237]
 mro/basic.t	[at t/mro/basic.t line 239]
-mro/basic.t	[at t/mro/basic.t line 286]
 mro/basic.t	[at t/mro/basic.t line 294]
 mro/basic.t	[at t/mro/basic.t line 33]
 mro/basic.t	[at t/mro/basic.t line 34]
@@ -84,25 +98,11 @@ mro/basic.t	[at t/mro/basic.t line 52]
 mro/basic.t	[at t/mro/basic.t line 55]
 mro/basic.t	[at t/mro/basic.t line 63]
 mro/basic.t	[at t/mro/basic.t line 71]
-mro/basic.t	a case with multiple refs to ISA
-mro/basic.t	a case with multiple refs to ISA
-mro/basic.t	a isa b after undef *a::ISA and @a::ISA modification
-mro/basic.t	autovivifying @ISA via *{@ISA}
-mro/basic.t	can bark now
-mro/basic.t	can't call foo method any longer
 mro/basic.t	delete $package::{ISA}
-mro/basic.t	don't crash when deleting ISA
 mro/basic.t	local *ISA
 mro/basic.t	local *ISA = []
-mro/basic.t	local *ISA unwinding
-mro/basic.t	local *ISA=[] unwinding
-mro/basic.t	localising gv-with-cv belonging to detached package
-mro/basic.t	magical *ISA = arrayref elements
-mro/basic.t	no bark method
-mro/basic.t	no crash when ISA contains nonexistent elements
 mro/basic.t	obliterating @ISA via glob assignment
 mro/basic.t	undef %package:: updates subclasses
-mro/basic.t	unmagicalize *ISA elements
 mro/basic_01_c3.t	... can(method) resolved itself as expected
 mro/basic_01_c3.t	... can(method) resolved itself as expected
 mro/basic_01_c3.t	... got the right MRO for Diamond_D
@@ -175,7 +175,7 @@ mro/basic_05_dfs.t	... got the right MRO for Diamond_D
 mro/basic_05_dfs.t	... got the right next::method dispatch path
 mro/basic_05_dfs_utf8.t	... got the right MRO for Ｄiᚪၚd_D
 mro/basic_05_dfs_utf8.t	... got the right next::method dispatch path
-mro/basic_utf8.t	@main::ISA is magical
+mro/basic_utf8.t	*summary*
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 103]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 132]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 136]
@@ -183,9 +183,6 @@ mro/basic_utf8.t	[at t/mro/basic_utf8.t line 154]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 158]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 169]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 170]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 173]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 174]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 182]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 187]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
@@ -194,8 +191,6 @@ mro/basic_utf8.t	[at t/mro/basic_utf8.t line 201]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 224]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 228]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 230]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 247]
-mro/basic_utf8.t	[at t/mro/basic_utf8.t line 278]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 286]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 29]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 30]
@@ -206,15 +201,8 @@ mro/basic_utf8.t	[at t/mro/basic_utf8.t line 48]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 53]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 62]
 mro/basic_utf8.t	[at t/mro/basic_utf8.t line 99]
-mro/basic_utf8.t	a isa b after undef *a::ISA and @a::ISA modification
-mro/basic_utf8.t	can ɓᛅƘ now
-mro/basic_utf8.t	can't call Ｆஓ method any longer
 mro/basic_utf8.t	delete $package::{ISA}
-mro/basic_utf8.t	no ɓᛅƘ method
 mro/basic_utf8.t	undef %package:: updates subclasses
-mro/basic_utf8.t	ㄑ3->can('ƚ')
-mro/basic_utf8.t	ㄑ3->can('Ｆஓ')
-mro/basic_utf8.t	ㄑ3->can('Ｆஓ')
 mro/complex_c3.t	next::method working ok
 mro/complex_c3_utf8.t	next::method working ok
 mro/complex_dfs.t	... got the right DFS merge order for Test::I
@@ -366,6 +354,7 @@ mro/next_method_utf8.t	... can(method) resolved itself as expected
 mro/next_method_utf8.t	... got the right MRO for Diӑmond_D
 mro/next_method_utf8.t	... method fಓ resolved itself as expected
 mro/next_method_utf8.t	... method resolved itself as expected
+mro/next_skip.t	*summary*
 mro/next_skip.t	... called B method, skipped C and went to A correctly
 mro/next_skip.t	... called D method dispatched to , different method correctly
 mro/next_skip.t	... can re-dispatch figured out correctly
@@ -376,6 +365,7 @@ mro/next_skip.t	... quietly failed redispatch from D
 mro/next_skip.t	... redispatched D to C when it exists
 mro/next_skip.t	... skipped B & C and went to A correctly
 mro/next_skip.t	... skipped B and went to C correctly
+mro/next_skip_utf8.t	*summary*
 mro/next_skip_utf8.t	... called B method, skipped C and went to A correctly
 mro/next_skip_utf8.t	... called D method dispatched to , different method correctly
 mro/next_skip_utf8.t	... can re-dispatch figured out correctly
@@ -795,7 +785,21 @@ op/const-optree.t	sub:method with constant is inlinable
 op/const-optree.t	sub:method with simple lexical is inlinable
 op/coreamp.t	*no-log*
 op/crypt.t	crypt turns off utf8 on its target
+op/current_sub.t	& in grep block in sub with forw decl
+op/current_sub.t	& in sort block in sub with forw decl
 op/current_sub.t	*summary*
+op/current_sub.t	__SUB__ returns undef in list context
+op/current_sub.t	__SUB__ returns undef outside of a subroutine
+op/current_sub.t	__SUB__ under use v5.16
+op/current_sub.t	anonymous sub(){__SUB__} returns self ref
+op/current_sub.t	anonymous sub(){eval ""; __SUB__} returns self ref
+op/current_sub.t	in BEGIN block
+op/current_sub.t	in BEGIN block via & (unoptimised)
+op/current_sub.t	in grep block in sub with forw decl
+op/current_sub.t	in sort block in sub with forw decl
+op/current_sub.t	sub named () { __SUB__ } returns self ref
+op/current_sub.t	sub(){__SUB__} anonymous closure returns self ref
+op/current_sub.t	sub(){__SUB__} under -d
 op/defer.t	*no-log*
 op/do.t	*extra* do subname() called
 op/do.t	*extra* do subname(arg) called

@@ -77,6 +77,16 @@
 # is built once per invocation (never stale, removed on exit); each test then
 # starts from the core (~0.003s) instead of recompiling the runtime (~1.2s).
 #
+# How the generated CL is LOADED (task #467): with pcl::p-load-with-recovery,
+# one top-level form at a time, continuing past an uncaught die in a single
+# form — the SAME load sweep-perl-tests.pl uses.  Both measurement runners
+# must agree on this: with a plain `--load` here, one dying form ended the
+# file, so the same compiler change cost the sweep 1 row and this runner 94
+# (s432).  A recovered form is COUNTED and PRINTED (`aborted-forms:N` in the
+# signature column) — never swallowed — so a file that dies mid-way can never
+# read as OK.  Programs (./runpcl) are a plain load: recovery is measurement
+# policy, not runtime semantics.
+#
 # Harness fixture (the shadow t/): tests using the classic idiom
 # `chdir 't' if -d 't'; require './test.pl'` are RUN, not skipped.  A shadow
 # copy of the t/ tree is built in the temp dir — every top-level entry of the
@@ -598,7 +608,21 @@ sub run_one {
     # -k: an SBCL wedged in a runaway compile ignores/defers TERM and lives on
     # PAST the run (s316h: two escaped SBCLs + their orphaned 6 GB pl2cl
     # --server eval process); SIGKILL 10s after the TERM guarantees reaping.
-    my $sbcl_cmd = "$sbcl --load \Q$lisp\E";
+    # RECOVERY LOAD, not `--load` (task #467): evaluate the generated file one
+    # top-level form at a time and continue past an uncaught die in any single
+    # form, exactly as sweep-perl-tests.pl does.  The two runners used to
+    # DISAGREE on this axis, and the disagreement is not visible in either
+    # report: measured s432, the SAME compiler change cost the sweep ONE row
+    # (the form that died) and cost this runner 94 (op/method.t 96 -> 44,
+    # op/sort.t 181 -> 142, op/lexsub.t 9 -> 6), every one of them a row AFTER
+    # the dying form in a file that already crashed.  So a per-file count from
+    # here was not comparable to one from the sweep for any change that makes
+    # something die — the same class of trap as #324 (one runner measuring on a
+    # 2 MB stack for months), and the reason the five runners share ONE SBCL
+    # command builder.  The load is the second axis they must share.
+    # Users (./runpcl) stay a plain load: recovery is a MEASUREMENT policy — it
+    # buys rows after a failure, which a harness wants and a program must not.
+    my $sbcl_cmd = "$sbcl --eval \Q(pcl::p-load-with-recovery \"$lisp\")\E";
     print STDERR "SBCL[run-perl-suite]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
     (my $rc, $k) = run_isolated("cd \Q$shadow\E && $childenv timeout -k 10 $to $sbcl_cmd"
                               . " > \Q$out\E 2>&1");
@@ -626,6 +650,46 @@ sub run_one {
     $msg =~ s/\s+/ /g;
     $msg =~ s/\t/ /g;
     $sig .= ": " . substr($msg, 0, 90);
+  }
+
+  # RECOVERED top-level forms (task #467), the second half of the recovery
+  # load above.  A die the recovery caught leaves no "Unhandled" / "debugger
+  # invoked" header, so the two crash rules above cannot see it — the
+  # `unbound:`/`undef-fn:` rules still fire (they read the condition TEXT,
+  # which the recovery prints), but a file that aborted a form would otherwise
+  # come back with no signature at all.  Count them, name the first, and
+  # ALWAYS append: a file that could not evaluate a top-level form has failed
+  # at something even when its remaining TAP happens to match perl's, and that
+  # is what keeps such a file from reading as OK.  Deliberately BEFORE the
+  # status decision — unlike the orphan note below, which is an observation
+  # about the RUN (#367) and must not turn a matching file into a DIFF.
+  my $aborted = () = $pcl =~ /; PCL recovery: top-level form aborted/g;
+  if ($aborted) {
+    # Up to three lines, like the crash subgroup above: SBCL's commonest
+    # report here — "The function\nMAIN::PL-NEW\nis undefined." — is wrapped
+    # over three, and a one-line capture reads "The function" and names
+    # nothing.  Stop at whatever the file printed next (TAP, or the next
+    # recovery line), or the signature swallows a test row.
+    my ($first) = $pcl =~ /; PCL recovery: top-level form aborted \(recovered\): ([^\n]*(?:\n[^\n]*){0,2})/;
+    $first //= '';
+    $first =~ s/\n(?:ok |not ok |1\.\.|#|;).*//s;
+    $first =~ s/[0-9]+/N/g;
+    $first =~ s/\s+/ /g;
+    $sig = join('; ', grep { length } $sig,
+                sprintf("aborted-forms:%d%s", $aborted,
+                        length $first ? ": " . substr($first, 0, 90) : ''));
+  }
+  # The recovery's OTHER exit: the READER gave up, so everything past that
+  # point in the file was never even read (the #419 shape — one `>0x10FFFF`
+  # literal makes the rest of an emitted file unreadable).  A plain `--load`
+  # reported that as a crash; the recovery prints and returns, so without this
+  # rule such a file would come back with no signature at all — the exact
+  # blind spot this block exists to close.
+  if ($pcl =~ /; PCL recovery: unreadable form, stopping: ([^\n]*)/) {
+    my $why = $1;
+    $why =~ s/[0-9]+/N/g;
+    $why =~ s/\s+/ /g;
+    $sig = join('; ', grep { length } $sig, "unreadable-form: " . substr($why, 0, 90));
   }
 
   $status = $terr != 0                                   ? 'TRANSPILE'
@@ -1166,6 +1230,48 @@ sub emit_report {
     print  "  re-run without --quick to measure them (docs/perl-suite-timeouts.tsv holds the allowances)\n";
   }
   print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
+
+  # SUITE FILES WITH NO SNAPSHOT ROW (s431 side finding, ruled s433 §A.4).
+  # docs/perl-suite-run.tsv carried 523 rows for 528 files and nobody noticed
+  # for months: five files were simply ABSENT — not quarantined, not
+  # registered, just missing — so a regression in any of them could never read
+  # as a mover, because rerun_movers_serially() compares against the snapshot
+  # and a file with no row has nothing to differ from.  That is the #176
+  # family: a hole inferred from an absence.  It was found by COUNTING two
+  # numbers by hand; it must not need counting again, so every run names it.
+  # Printed, never fatal: this is a fact about the BASELINE, not a measurement
+  # this run failed.  A row is added by splicing this run's FIRST measurement
+  # in with a `# sNNN first measurement` marker (see the snapshot's header).
+  {
+    my %snap = read_snapshot();
+    if (!%snap) {
+      print "SNAPSHOT: NOT CHECKED — no docs/perl-suite-run.tsv\n";
+    } else {
+      my @norow = grep { !$snap{$_} } sort keys %results;
+      printf "SNAPSHOT: %d of %d file(s) measured here have NO row in docs/perl-suite-run.tsv%s\n",
+        scalar(@norow), scalar(keys %results), (@norow ? ':' : ' — every file is covered');
+      printf "  no-snapshot-row  %s\n", $_ for @norow;
+      print "  splice each with its FIRST measurement (marker: # sNNN first measurement)"
+          . " — until then it can never read as a mover (#176 family)\n" if @norow;
+      # ... and the SAME hole from the other side, on a full scan only: a
+      # snapshot row for a file `--all` never even considers.  Found s434:
+      # the five rows s431 spliced in are all need-harness files (`BEGIN` +
+      # @INC), which the dir scan filters out — so they were measured by
+      # NAMING them and no default run has measured them since.  A row nothing
+      # refreshes cannot move either; it is a snapshot of one day, forever.
+      # Only on $all, because for a --dir run every other row is trivially
+      # "not covered" and the line would be pure noise.
+      if ($all) {
+        my @unrefreshed = grep { !$results{$_} } sort keys %snap;
+        printf "SNAPSHOT: %d row(s) for files this --all scan does not run%s\n",
+          scalar(@unrefreshed), (@unrefreshed ? ' (need-harness, or gone from t/):' : '');
+        printf "  never-refreshed  %s\n", $_ for @unrefreshed;
+        print "  re-measure by NAMING the file (tools/run-perl-suite.pl <rel>) — the scan\n"
+            . "  filters files that fiddle \@INC in BEGIN, so --all can never move these rows\n"
+          if @unrefreshed;
+      }
+    }
+  }
 
   # DROPS vs the census (task #343, ruled §6.5).  The companion half of the
   # sweep's DROPS bucket: this population owns 63 of the census's 72 files, and

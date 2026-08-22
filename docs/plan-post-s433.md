@@ -43,7 +43,7 @@ mechanism + gate-SET measured + new axes filed" (s366); **a companion row
 count is not comparable to a sweep row count for a change that makes
 something die, until Q1 lands** (s433).
 
-**Session Q1 — the two instruments: #467 + #462 (+ the missing-row report).  No product change.**
+**Session Q1 — the two instruments: #467 + #462 (+ the missing-row report).  No product change.**  **DONE s434** (`docs/opus5-review-requests-s434.md`, DECIDED §s434): both runners load with recovery and the snapshot is re-blessed (+2325 C_ok, 0 rows lost); the census has five populations and the blessed file gained the 12 module rows (39 files / 102 drops); the snapshot hole is printed from BOTH sides.  **Q2 is unblocked.**
 
 1. **#467**: `tools/run-perl-suite.pl` loads the emitted CL with
    `pcl::p-load-with-recovery` like the sweep does (one-line change at the

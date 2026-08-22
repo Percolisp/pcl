@@ -4,6 +4,51 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 434 (2026-08-22, Opus 5) — Q1: the two instruments (#467 + #462) and the snapshot-hole report.  No product change
+
+**Q1 of `docs/plan-post-s433.md`.**  `Pl/`, `cl/` and `lib/` untouched;
+generation stays **v2-177**.  Everything here is measurement machinery, which
+is the point: Q2 (the announce→DIE flip) and Q3 (#456 half (b)) are both
+measured through these instruments, and both make things die.
+
+**#467 — the companion runner loads with recovery.**  One option changed:
+`--load F` → `--eval (pcl::p-load-with-recovery "F")`, the load
+`sweep-perl-tests.pl` has always used.  Before/after on six named files, same
+tree: op/method.t 44/7 → **124/27**, op/sort.t 142/9 → **181/23**, op/lexsub.t
+6/6 → **76/63**, op/gmagic.t 1/0 → **4/2**; base/rs.t and op/join.t (which do
+not die mid-way) unchanged to the row.  A recovered form is COUNTED and PRINTED
+— `aborted-forms:N: <condition>`, placed before the status decision so such a
+file can never read as OK — and a reader stop gets `unreadable-form:`.
+
+**The re-bless** (same commit, one `--all --jobs 4` pass + the #366 discipline;
+the runner's own serial cap dropped 22 movers, which were re-run in a second
+`--jobs 1` pass): **52 files gained rows, 0 lost, TOTAL C_ok 74803 → 77128
+(+2325)**; 116 files changed only their signature; 2 status movers and one
+signature loss were shown PRE-EXISTING against a `4356e77` worktree, and
+uni/variables.t's flood attributed TO the change by the same A/B.  The parallel
+pass's scare — six #326 hang-set files down 300–400 rows — was contention:
+re-run alone twice they land at their blessed values.  Those six rows are
+stopwatch readings; the header says so.  `docs/perl-suite-expected-rows.tsv`
+was re-blessed for SIX registered files only (they now reach rows they used to
+die before), 1952 → 1956 rows, and the five files already DIFF were left alone.
+
+**#462 — the census's module blind spot.**  `tools/drop-census.pl` went from
+three populations to five; every `.pm` is transpiled with `--module` (the
+emission the runtime caches), the board is opt-in behind `--board` with its
+dists read from `docs/cpan-board14-s343.tsv`.  The 27 pre-existing rows come
+back byte-identical and the 12 new module rows reproduce the s431 hand
+measurement number for number: **39 files / 102 drops**, TOTAL line and row sum
+agreeing.  `lib/` also became a recursive glob — two shipped shims had never
+been in any census.
+
+**The snapshot's holes, both sides.**  Every run prints the files it measured
+that have no snapshot row; a full scan also prints the rows for files the scan
+never runs — which is how the five s431 rows turned out to be need-harness
+files that `--all` can never refresh (Ask 1).
+
+Gate **160 / 5705**, only the 13 pclxs xs rows.  Review doc:
+`docs/opus5-review-requests-s434.md`.
+
 ## Session 433 (2026-08-22, Fable) — s431 + s432 reviewed + APPROVED; the flip RULED as a run-time die at the drop site; #456(b) RULED as the phase model; `docs/plan-post-s433.md` is THE LIVE QUEUE
 
 **Review.**  Both Opus batches approved as shipped (`docs/fable-answers-s433.md`).

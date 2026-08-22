@@ -1,4 +1,77 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s434 (Opus 5, task #467) — THE WHOLE SNAPSHOT WAS RE-BLESSED, in one measured
+#   `--all --jobs 4` pass, because THE RUNNER CHANGED, not PCL.  This runner now
+#   loads the emitted CL with `pcl::p-load-with-recovery` — one top-level form at
+#   a time, continuing past an uncaught die in a single form — which is what
+#   sweep-perl-tests.pl has always done.  Nothing under Pl/, cl/ or lib/ moved
+#   (generation stays v2-177), so not one row here is a compiler change.
+#
+#   WHY: measured s432, the same compiler change (#456 half (a)) cost the sweep
+#   ONE row and this runner 94 — op/method.t 96/30 -> 44/7, op/sort.t 181/24 ->
+#   142/9, op/lexsub.t 9/8 -> 6/6 — because a plain `--load` ends the file at the
+#   first uncaught die.  A per-file count from here was therefore not comparable
+#   to one from the sweep for any change that makes something die, and the
+#   difference was the RUNNER.  Task #467; the rule is in
+#   docs/test-infrastructure.md.
+#
+#   WHAT MOVED (each file re-run ALONE where the two runs disagreed — task #366;
+#   the 22 movers over the runner's own cap were re-run alone in a second
+#   `--jobs 1` pass):
+#     * 52 files GAINED rows — every one a file that used to die mid-way.  The
+#       largest: op/filetest.t 36 -> 434 rows, op/tr.t 94 -> 314, op/lexsub.t
+#       12 -> 139, op/sub_lval.t 70 -> 194, op/method.t 51 -> 151, uni/fold.t
+#       0 -> 1160, re/subst.t 0 -> 272, op/write.t 0 -> 42, op/leaky-magic.t
+#       0 -> 71, uni/variables.t 1567 -> 29182 — that one A/B'd against the
+#       `4356e77` worktree (old runner: DIFF 1248/319), so its flood of honest
+#       failures after the aborted form IS this change; the count is a stopwatch
+#       reading too, since the file now runs to the timeout.  TOTAL
+#       C_ok over the population: 74803 -> 77128 (+2325 passing rows this runner
+#       could not see before).
+#     * 116 files changed only their SIGNATURE: a recovered die leaves no
+#       "Unhandled …" header, so `crash:…` became `aborted-forms:N: <condition>`
+#       (the runner counts recovered forms and refuses to call such a file OK).
+#     * 2 files changed only their STATUS, and BOTH ARE PRE-EXISTING, with their
+#       cause measured (the s421 rule: "pre-existing" is WHEN, not WHY).  A
+#       `4356e77` worktree — the OLD `--load` runner — gives re/overload.t
+#       TIMEOUT 3/0 and re/regexp_noamp.t TIMEOUT 796/109, i.e. exactly what this
+#       runner now reports.  Their blessed DIFF rows were stale: both files sit
+#       at the 90 s cutoff, so which side of it they land on is a stopwatch
+#       reading, not a verdict about PCL.
+#     * NO file lost rows.  The `--all --jobs 4` pass showed six #326 hang-set
+#       files down 300-400 rows (re/regexp*.t) and op/utf8cache.t / re/pat_psycho.t
+#       / io/pvbm.t moved; every one of them was re-run ALONE twice and came back
+#       at or above its blessed value (re/regexp.t 795/110 vs a blessed 793/112;
+#       io/pvbm.t 23/5 exactly; re/pat_psycho.t 11/0 exactly; op/utf8cache.t back
+#       to DIFF 2/0).  Those were CONTENTION.  Note what that means for the six
+#       hang-set rows: the file never finishes, so its C_ok is A STOPWATCH READING
+#       (how far it got in 90 s), not a measurement of PCL — the s325/#195 note
+#       below.  READ NO REGRESSION INTO THEM from a count alone.
+#     * re/pat_psycho.t kept its rows (11/0) and lost its `control-stack-exhausted`
+#       signature — ALSO PRE-EXISTING: the `4356e77` worktree with the old runner
+#       reports the same 11/0 with no signature.  (The tempting explanation, that
+#       per-form `eval` has a shallower host stack than `load`, is NOT what the
+#       A/B says; the blessed signature was simply older than the tree.)
+#     * SIX registered files (io/shm.t, mro/basic.t, mro/basic_utf8.t,
+#       mro/next_skip.t, mro/next_skip_utf8.t, op/current_sub.t) went XDIFF ->
+#       DIFF because they now REACH rows they used to die before, so their #185
+#       row baselines no longer matched.  docs/perl-suite-expected-rows.tsv was
+#       re-blessed for those six ONLY (`--bless-rows` over exactly those files;
+#       1952 -> 1956 rows: io/shm.t 1 -> 22, op/current_sub.t 1 -> 15, both
+#       next_skip 10 -> 11, and mro/basic.t 54 -> 33 + mro/basic_utf8.t 40 -> 28,
+#       which SHRANK because rows that used to diverge now agree with perl).  The
+#       five registered files that were already DIFF before this session
+#       (comp/hints.t, mro/inconsistent_c3.t, mro/next_ineval_utf8.t,
+#       mro/package_aliases.t, re/pat_re_eval.t) were deliberately NOT blessed.
+#       Re-measured after the bless: all six back to XDIFF, twice, alone.
+#   Files that do NOT die mid-way are unchanged to the row (verified before/after
+#   on base/rs.t and op/join.t, and by the 5 need-harness rows below being
+#   untouched).
+#
+#   NOT re-blessed here: the five rows for files `--all` does not run (see the
+#   s431 block below) — they are need-harness files, so no default run measures
+#   them, and this runner now PRINTS that as a named discrepancy at the end of
+#   every full-scan run.  op/lex.t's census drop is why this run reports 76
+#   drops against a 77-drop perl-t census; nothing is missing.
 # s432 (Opus 5, #456 half (a): a CALLED p-declare-sub stub now runs the package's
 #   AUTOLOAD, else DIES).  EIGHTEEN rows re-measured and spliced; each was
 #   re-run ALONE (task #366: parallel and serial agree on all 18) and A/B'd
@@ -472,327 +545,15 @@
 #   again and comes back ONE ROW BETTER than its s410 snapshot, because
 #   the `eval q/$var/ in named sub in predeclared sub` row now PASSES.
 #   Measured parallel and serial, both 53/12 (task #366 re-run agrees).
-base/cond.t	4	0	4	0	OK	
-base/if.t	2	0	2	0	OK	
-base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL
-base/num.t	56	0	56	0	OK	
-base/pat.t	2	0	2	0	OK	
-base/rs.t	41	0	26	15	DIFF	
-base/term.t	7	0	7	0	OK	
-base/translate.t	257	0	257	0	OK	
-base/while.t	4	0	4	0	OK	
-class/accessor.t	10	0	0	0	XDIFF	crash:simple-error: Can't call method s on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/class.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/construct.t	10	0	0	0	XDIFF	crash:simple-error: Can't call method x on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/destruct.t	4	0	0	0	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/field.t	33	0	0	0	XDIFF	crash:simple-error: Can't call method incr on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/inherit.t	19	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/method.t	8	0	0	0	XDIFF	crash:simple-error: Can't call method retself on an undefined value | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-class/phasers.t	3	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/threads.t	0	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — the file also needs a threaded perl (NOTAP before s415; it now refuses at transpile like its siblings, task #371)	-1
-class/utf8.t	4	0	0	0	XDIFF	unbound:STDOUT | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
-cmd/elsif.t	4	0	4	0	OK	
-cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)
-cmd/mod.t	15	0	15	0	OK	
-cmd/subval.t	36	0	26	2	DIFF	unbound:F
-cmd/switch.t	18	0	18	0	OK	
-comp/bproto.t	16	0	10	6	DIFF	
-comp/cmdopt.t	44	0	44	0	OK	
-comp/colon.t	25	0	15	10	DIFF	
-comp/decl.t	9	0	6	0	DIFF	
-comp/filter_exception.t	4	0	2	2	DIFF	
-comp/final_line_num.t	1	0	0	0	DIFF	
-comp/fold.t	35	0	15	8	DIFF	undef-fn:main::pl-INSTALL
-comp/form_scope.t	14	0	0	2	DIFF	
-comp/hints.t	31	0	15	14	DIFF	NOT fully registered: 2 unregistered diverging row(s): tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)
 # s431 first measurement (see the s431 note in the header)
-comp/line_debug.t	25	0	1	24	DIFF		0
-comp/multiline.t	6	0	6	0	OK	
-comp/opsubs.t	36	0	31	5	DIFF	
-comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL
-comp/package.t	14	0	0	0	DIFF	crash:sb-kernel::arg-count-error: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)
-comp/package_block.t	7	0	0	7	DIFF	
-comp/parser.t	191	0	65	110	DIFF	
-comp/parser_run.t	70	0	29	41	DIFF	unbound:main::$00
-comp/proto.t	216	0	47	14	DIFF	crash:simple-error: Undefined subroutine &main::N called at (eval N) line N.
-comp/redef.t	20	0	1	19	DIFF	
-comp/require.t	1750	0	909	835	DIFF	
-comp/retainedlines.t	109	0	18	91	DIFF	
-comp/term.t	23	0	23	0	OK	
-comp/uproto.t	32	0	13	21	DIFF	
-comp/use.t	87	0	42	45	DIFF	undef-fn:main::pl-true
-comp/utf.t	4216	0	12	4204	DIFF	
-io/argv.t	52	1	27	26	DIFF	
-io/binmode.t	9	0	9	0	OK	
-io/bom.t	3	0	0	3	DIFF	
-io/closepid.t	3	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N") Co
-io/crlf.t	16421	0	16412	6	DIFF	undef-fn:PerlIO::pl-get_layers
-io/crlf_through.t	942	0	942	0	OK	
-io/data.t	4	0	0	0	DIFF	
-io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented
-io/dup.t	29	0	4	0	DIFF	
-io/eintr.t	0	0	0	0	NOTAP	
-io/eintr_print.t	0	0	0	0	NOTAP	crash:simple-error: Can't locate loadable object for module Time::HiRes in @INC
-io/errno.t	16	0	16	0	OK	
-io/errnosig.t	1	0	0	1	DIFF	
-io/fflush.t	7	0	3	1	DIFF	undef-fn:main::pl-_create_runperl
-io/fs.t	61	0	56	2	DIFF	crash:sb-ext:delete-file-error: Could not delete the file "/tmp/pcl-test-N-N": Is a directory
-io/getcwd.t	0	0	0	0	NOTAP	
-io/inplace.t	8	0	2	6	DIFF	
-io/iofile.t	3	0	1	2	DIFF	
-io/iprefix.t	2	0	0	2	DIFF	
-io/layers.t	55	0	0	0	DIFF	unbound:STDIN
-io/msg.t	18	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
-io/nargv.t	7	0	11	2	DIFF	
-io/open.t	188	0	102	12	DIFF	unbound:STDOUT
-io/openpid.t	10	0	8	2	DIFF	
-io/paragraph_mode.t	80	0	80	0	OK	
-io/perlio.t	46	2	22	0	DIFF	crash:sb-int:simple-file-error: Error opening #P"/tmp/yNdYnKNAgM/t/": Is a directory
-io/perlio_fail.t	15	0	6	9	DIFF	
-io/perlio_leaks.t	8	4	0	0	DIFF	crash:simple-error: No such file or directory at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/io/p
-io/perlio_open.t	10	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-open (p-my $fh "+>" (let ((*wantarray* 
-io/pipe.t	27	0	8	0	DIFF	crash:sb-int:broken-pipe: Couldn't write to #<sb-sys:fd-stream for "descriptor N" {NCNEN}>: Broken pipe
-io/print.t	24	0	23	1	DIFF	
-io/pvbm.t	28	0	23	5	DIFF	
-io/read.t	2	0	2	0	OK	
-io/say.t	13	0	13	0	OK	
-io/scalar.t	128	0	96	32	DIFF	
-io/scalar_ungetc.t	19	0	1	1	DIFF	crash:simple-error: Can't locate object method "ungetc" via package "main" at - line N.
-io/sem.t	22	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
-io/semctl.t	2	0	0	0	DIFF	
-io/shm.t	21	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.
-io/socket.t	45	0	0	0	DIFF	
-io/socketpair.t	8	0	0	0	DIFF	
-io/tell.t	36	0	26	0	DIFF	crash:sb-int:simple-file-error: The path #P"/tmp/yNdYnKNAgM/t/>/tmp/pcl-test-N-N" does not exist.
-io/through.t	942	0	942	0	OK	
-io/utf8.t	62	0	13	14	DIFF	undef-fn:bytes::pl-length
-mro/basic.t	66	0	12	13	XDIFF	crash:simple-error: Inconsistent hierarchy during CN merge of 'ISACLEAR' | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
-mro/basic_01_c3.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hello" via package "Diamond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_01_c3_utf8.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_01_dfs.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hello" via package "Diamond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_01_dfs_utf8.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_02_c3.t	10	0	3	3	XDIFF	crash:simple-error: Can't locate object method "C_or_D" via package "Test::A" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_02_c3_utf8.t	10	0	3	3	XDIFF	crash:simple-error: Can't locate object method "ƈ_or_Ḋ" via package "텟ţ::ଅ" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_02_dfs.t	10	0	3	3	XDIFF	crash:simple-error: Can't locate object method "C_or_D" via package "Test::A" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_02_dfs_utf8.t	10	0	3	3	XDIFF	crash:simple-error: Can't locate object method "ƈ_or_Ḋ" via package "텟ţ::ଅ" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_03_c3.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "O_or_D" via package "Test::A" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_03_c3_utf8.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᴼ_or_Ḋ" via package "텟ţ::ଅ" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_03_dfs.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "O_or_D" via package "Test::A" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_03_dfs_utf8.t	4	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᴼ_or_Ḋ" via package "텟ţ::ଅ" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_04_c3.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_04_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_04_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_04_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_05_c3.t	2	0	0	1	XDIFF	crash:simple-error: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_05_c3_utf8.t	2	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_05_dfs.t	2	0	0	1	XDIFF	crash:simple-error: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_05_dfs_utf8.t	2	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/basic_utf8.t	53	0	13	12	XDIFF	crash:simple-error: Inconsistent hierarchy during CN merge of 'ᛁ앛ଌᛠ' | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/c3_with_overload.t	7	0	7	0	OK	
-mro/c3_with_overload_utf8.t	7	0	7	0	OK	
-mro/complex_c3.t	12	0	11	0	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/complex_c3_utf8.t	12	0	11	0	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/complex_dfs.t	11	0	9	2	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/complex_dfs_utf8.t	11	0	9	2	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/dbic_c3.t	1	0	1	0	OK	
-mro/dbic_c3_utf8.t	1	0	1	0	OK	
-mro/dbic_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/dbic_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/inconsistent_c3.t	1	0	0	1	DIFF	NOT fully registered: 1 unregistered diverging row(s): ... got the right error with an inconsistent hierarchy | not-supported.md §mro + §error-text — C3 merge-failure error wording differs
-mro/inconsistent_c3_utf8.t	1	0	1	0	OK	
-mro/isa_aliases.t	13	0	10	3	XDIFF	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes)
-mro/isa_aliases_utf8.t	12	0	10	2	XDIFF	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes, utf8)
-mro/isa_c3.t	35	0	22	13	XDIFF	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals
-mro/isa_c3_utf8.t	34	0	21	13	XDIFF	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals (utf8)	0
-mro/isa_dfs.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec tests (C3-only by design)
-mro/isa_dfs_utf8.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec tests (C3-only by design, utf8)	0
-mro/isarev.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally)
-mro/isarev_utf8.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally, utf8)
-mro/method_caching.t	36	0	21	15	XDIFF	not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)
-mro/method_caching_utf8.t	28	0	21	7	XDIFF	not-supported.md §mro — perl method-cache semantics (utf8)	0
-mro/next_NEXT.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "next::method" via package "Fuz" at - line N. | not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
-mro/next_NEXT_utf8.t	4	0	1	0	XDIFF	crash:simple-error: Can't locate object method "fಓ" via package "Fᶽ" (perhaps you forgot to load "Fᶽ"?)  | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
-mro/next_edgecases.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
-mro/next_edgecases_utf8.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
-mro/next_goto.t	4	0	0	0	XDIFF	undef-fn:next::pl-method | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_goto_utf8.t	4	0	0	0	XDIFF	crash:simple-error: Can't locate object method "ᕗ" via package "ᵗ톺" (perhaps you forgot to load "ᵗ톺" | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_inanon.t	2	0	0	0	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_inanon_utf8.t	2	0	0	0	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_ineval.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_ineval_utf8.t	1	0	0	1	DIFF	NOT fully registered: 1 unregistered diverging row(s): method resolved inside eval{} | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
-mro/next_method.t	5	0	0	1	XDIFF	crash:simple-error: Can't locate object method "hello" via package "Diamond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_method_utf8.t	5	0	0	1	XDIFF	crash:simple-error: Can't locate object method "헬ฬ" via package "Diӑmond_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_skip.t	10	0	0	1	XDIFF	crash:simple-error: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/next_skip_utf8.t	10	0	0	1	XDIFF	crash:simple-error: Can't locate object method "ᕘ" via package "Ｄiᚪၚd_D" at - line N. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/overload_c3.t	7	0	7	0	OK	
-mro/overload_c3_utf8.t	7	0	7	0	OK		0
-mro/overload_dfs.t	7	0	7	0	OK	
-mro/package_aliases.t	54	0	97	40	DIFF	crash:simple-error: Can't locate object method "womp" via package "Childclass" at - line N. | NOT fully registered: 70 unregistered diverging row(s): *extra* '; *extra* '; *extra* '; +67 more | not-supported.md §symbol-table hashes — glob package aliasing + isarev	0
-mro/package_aliases_utf8.t	52	0	73	40	XDIFF	crash:simple-error: Can't locate object method "ວmᑊ" via package "C힐dᒡl았" at - line N. | rows NOT checked (*rows-unstable*) | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.	0
-mro/pkg_gen.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
-mro/pkg_gen_utf8.t	7	0	0	0	XDIFF	undef-fn:mro::pl-get_pkg_gen | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
-mro/recursion_c3.t	8	0	8	0	OK	
-mro/recursion_c3_utf8.t	8	0	8	0	OK		0
-mro/recursion_dfs.t	8	0	8	0	OK	
-mro/recursion_dfs_utf8.t	8	0	8	0	OK		0
-mro/vulcan_c3.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/vulcan_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/vulcan_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-mro/vulcan_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)
-op/64bitint.t	425	0	425	0	OK	
-op/aassign.t	188	1	173	16	DIFF	
-op/alarm.t	5	0	5	0	OK	
-op/anonconst.t	7	0	1	6	DIFF	
-op/anonsub.t	14	1	1	5	DIFF	
-op/append.t	13	0	13	0	OK	
-op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.
-op/arith2.t	9	0	9	0	OK	
-op/array.t	195	0	169	26	DIFF	
-op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.
-op/attrhand.t	4	0	0	0	DIFF	crash:simple-error: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle
-op/attrproto.t	48	0	17	28	DIFF	
-op/attrs.t	157	2	28	61	DIFF	undef-fn:attributes::pl-_guess_stash
-op/auto.t	47	0	47	0	OK	
-op/avhv.t	40	0	39	1	DIFF		0
-op/bless.t	116	2	111	6	DIFF	
-op/blocks.t	25	1	16	10	DIFF	
-op/bool.t	8	0	8	0	OK	
-op/bop.t	510	0	251	246	DIFF	crash:simple-error: Invalid type 'P' in pack
-op/caller.t	111	1	28	84	DIFF	
-op/catch.t	12	0	10	2	DIFF	
-op/chars.t	34	0	34	0	OK	
-op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.
-op/chop.t	148	0	96	4	DIFF	
-op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — ALL 7 failing rows (38/7 vs perl 45/0) are two blessed subsections. t10-13 are the `### use bytes` block (t/op/chr.t lines 28-31: under the pragma `chr(-1)` must be the single byte "\xFF"; PCL has no byte view, so it keeps "\x{FFFD}"). t40-42 are `### Code points above U+10FFFF` (lines 80-82: chr(0x110000)/0x1FFFFF/0x200000 in perl's extended UTF-8) — measured s319/s320: SBCL's char-code-limit is 1114112, so a CL string physically cannot hold them and (code-char #x110000) yields no character. Blessed in fable-answers-s318.md §11; task #173.
-op/closure.t	281	1	267	3	DIFF	undef-fn:main::pl-ff
-op/cmpchain.t	1750	0	1521	229	XDIFF	
-op/concat2.t	4	0	4	0	OK	
-op/cond.t	5	0	4	0	XDIFF	timeout | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)
-op/const-optree.t	148	0	90	58	XDIFF	
-op/context.t	8	0	7	1	DIFF	
-op/coreamp.t	778	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also carries lvalue-sub drops (§Lvalue subroutines)	-1
-op/coresubs.t	1109	0	0	0	TRANSPILE	TRANSPILE-FAIL
-op/cproto.t	254	0	71	183	DIFF	
-op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).
-op/current_sub.t	22	0	0	0	XDIFF	crash:sb-int:simple-program-error: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)
-op/dbm.t	5	0	0	0	DIFF	
-op/decl-refs.t	402	0	42	165	DIFF	crash:simple-error: ParserN TODO: state outside a block-level declaration at (eval N) line N.
-op/defer.t	28	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	-1
-op/defined.t	5	0	5	0	OK	
-op/defins.t	27	0	27	0	OK	
-op/delete.t	56	0	53	3	DIFF	
-op/die.t	25	1	5	15	DIFF	
-op/die_except.t	12	0	12	0	OK	
-op/die_exit.t	17	0	17	0	OK	
-op/die_keeperr.t	24	0	15	9	DIFF	
-op/die_unwind.t	13	0	8	5	DIFF	
-op/do.t	71	0	66	7	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §DESTROY called by garbage collector — ALL 7 failing rows (66/7 vs perl 71/0) are two blessed categories, established row-by-row s321 after the TAP re-alignment (task #177) showed the old number-join had blamed two rows that PASS. (a) perl t63-t66 + PCL's 2 EXTRA rows: one `foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref()))` loop asserting `$@ =~ /\Asyntax error/`. `do SUBNAME(LIST)` was VALID Perl before 5.20 and meant call-the-sub; PCL keeps that historical semantics, so the assertions fail AND each test's `fail()` guard fires (those are the 2 PCL-only rows — the same divergence, not a second defect). Ruled no-fix in fable-answers-s318.md §4, task #158 :principle9. (b) perl t68 "RT 124248": `f(do { 1; !!(my $x = bless []) })` requires the blessed temp to be DESTROYed at do-block exit (FREETMPS) before f() runs — refcount-deterministic destruction, which PCL does not have; same family as op/args.t t23. NB t67 (delete-helem copied) and t70 ($@ false on do dir) PASS — probed s321 — and t71 ($! is EISDIR on do dir) was FIXED s321 (p-do now carries the OS errno into $!).
-op/dor.t	34	0	29	5	DIFF	
-op/dump.t	0	0	0	0	NOTAP	
-op/each.t	65	0	4	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/each_array.t	65	0	65	0	OK	
-op/eval.t	169	0	130	38	DIFF	undef-fn:main::pl-ARRAY
-op/evalbytes.t	9	0	5	4	DIFF	
-op/exec.t	41	0	13	1	DIFF	crash:simple-error: Couldn't execute "lskdfj": No such file or directory
-op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.
-op/exp.t	31	0	31	0	OK	
-op/fh.t	8	0	5	3	DIFF	
-op/filehandle.t	4	0	0	0	DIFF	crash:simple-error: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File
-op/filetest.t	436	0	25	11	DIFF	undef-fn:main::pl-f
-op/filetest_stack_ok.t	136	0	71	65	DIFF	
-op/filetest_t.t	7	0	0	0	DIFF	crash:sb-int:simple-file-error: Error opening #P"/dev/tty": No such device or address
-op/flip.t	14	0	12	2	DIFF	
-op/for-many.t	71	0	63	8	DIFF	
-op/for.t	148	1	0	0	TRANSPILE	TRANSPILE-FAIL
-op/fork.t	28	0	1	0	DIFF	
-op/fresh_perl_utf8.t	1	0	0	1	DIFF	
-op/getpid.t	0	0	0	1	NOTAP	crash:simple-error: Can't locate object method "new" via package "threads" at - line N.
-op/getppid.t	8	0	0	0	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w)) Compile-time error
-op/glob.t	18	0	14	4	DIFF	
-op/gmagic.t	78	0	1	0	DIFF	crash:simple-error: Can't call method init on an undefined value	0
 # s431 first measurement (see the s431 note in the header)
-op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-op/goto_xs.t	11	0	5	0	DIFF	undef-fn:common-lisp:nil
-op/grent.t	3	0	3	0	OK	
-op/grep.t	77	0	71	6	DIFF	
-op/groups.t	4	0	4	0	OK	
-op/gv.t	304	0	61	36	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N.
-op/hash-clear-placeholders.t	9	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/hash-rt85026.t	1	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/hash.t	494	0	6	6	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).
-op/hashwarn.t	20	0	5	15	DIFF	
-op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF
-op/hexfp.t	125	0	110	15	DIFF	
-op/inc.t	93	0	60	15	DIFF	
-op/inccode-tie.t	89	0	0	0	DIFF	crash:simple-error: PCL: unsupported in string eval: multiple package sections at (eval N) line N.
-op/inccode.t	89	0	1	0	DIFF	crash:simple-error: coderef in @INC (the file COMPILES now, task #321)
-op/incfilter.t	153	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Filter::Util::Call in @INC
-op/index.t	415	0	94	13	DIFF	undef-fn:main::pl-formline	0
-op/index_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-op/infnan.t	1112	0	1106	6	DIFF	
-op/int.t	19	0	19	0	OK	
-op/isa.t	14	0	14	0	OK	
-op/join.t	43	0	39	4	DIFF	
-op/kill0.t	9	0	6	3	DIFF	
-op/kvaslice.t	38	0	22	16	DIFF	
-op/kvhslice.t	39	0	18	20	DIFF	
-op/lc.t	2716	0	2683	33	DIFF	
-op/leaky-magic.t	71	0	0	0	DIFF	crash:simple-error: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/
-op/length.t	49	0	35	12	DIFF	
 # s431 first measurement (see the s431 note in the header)
-op/lex.t	53	0	13	39	DIFF	unbound:%0	1
-op/lex_assign.t	353	0	350	3	DIFF	
 # s430 (#374(b) keyword-named lexical sub, B3.3): op/lexsub.t 7/10 -> 9/8 — the
 #   `our sub if() {42} my $x = if if if` rows (lines 73, 76: 'lexical subs (even
 #   our) override all keywords', '…from other packages…') now run and PASS; the
 #   `state`/`my sub if` twins (lines 211/214, 578/581) un-drop too but sit
 #   behind the file's abort (undef-fn:main::pl-F, unchanged).  Serial-confirmed
 #   REAL MOVE by tools/run-perl-suite.pl op/lexsub.t; census 12 -> 4.
-op/lexsub.t	156	0	6	6	DIFF	crash:simple-error: Undefined subroutine &main::d called.	4
-op/lfs.t	17	0	0	0	DIFF	
-op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
-op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|
-op/localref.t	64	0	63	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t64 needs refcount-deterministic DESTROY at local-restore
-op/lock.t	5	0	0	0	DIFF	crash:sb-int:simple-program-error: invalid number of arguments: N
-op/loopctl.t	66	1	63	4	DIFF	
-op/lop.t	47	0	47	0	OK	
-op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL
-op/magic-27839.t	2	0	2	0	OK	
-op/magic.t	207	1	168	39	DIFF	
-op/method.t	163	0	44	7	DIFF	undef-fn:common-lisp:nil	1
-op/mkdir.t	17	0	17	0	OK	
-op/multideref.t	65	0	32	6	DIFF	crash:sb-int:simple-program-error: invalid number of arguments: N
-op/my.t	59	0	52	7	DIFF	
-op/my_stash.t	9	0	4	3	DIFF	undef-fn:Foo::pl-runperl
-op/mydef.t	2	0	0	2	DIFF	
-op/negate.t	48	0	48	0	OK	
-op/not.t	24	0	20	4	XDIFF	not-supported.md §Interned boolean constants (!0 / !1 identity) — t21/t22 "not 0/1 is read-only" need the shared read-only scalar; PCL returns a fresh mutable value per call
-op/numconvert.t	1446	0	0	0	DIFF	
-op/numify.t	32	0	21	11	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 11 diverging rows (21/11 vs perl 32/0) are `numifying '…' trigger a warning`, i.e. perl's `Argument "…" isn't numeric`. The VALUE each string numifies to is asserted separately and PCL passes those. Owner task #221; visible since s399 (#323).
-op/numify_chkflags.t	14	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/oct.t	79	0	79	0	OK	
-op/or.t	13	1	11	3	DIFF	
-op/ord.t	38	0	38	0	OK	
-op/overload_integer.t	2	0	2	0	OK	
-op/override.t	36	0	0	0	DIFF	undef-fn:Internals::pl-V
-op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed
-op/packagev.t	307	0	197	110	DIFF	
-op/pos.t	33	0	15	15	DIFF	
-op/postfixderef.t	128	0	80	26	DIFF	undef-fn:main::pl-foo
-op/pow.t	268	0	268	0	OK	
-op/print.t	3	0	2	1	XDIFF	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.
-op/protowarn.t	12	0	4	8	DIFF	
-op/push.t	32	0	32	0	OK	
-op/pwent.t	2	0	2	0	OK	
-op/qr.t	37	0	23	14	DIFF	
-op/quotemeta.t	60	0	58	2	DIFF	
-op/rand.t	263	0	263	0	OK	
-op/range.t	162	0	155	7	DIFF	
-op/read.t	2116	0	2116	0	OK	
-op/readdir.t	16	0	13	3	DIFF	
-op/readline.t	35	1	25	7	DIFF	undef-fn:PerlIO::pl-get_layers
-op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.
 # s428 (#411 elided-arrow call, B3.1): op/ref.t 197 -> 198 — `(sub{})[0]()` (line
 #   668) no longer DROPS; base b70ccaf measured 197/44 (matches this snapshot,
 #   no drift), current 198/44, serial-confirmed REAL MOVE.  The other three
@@ -800,221 +561,533 @@ op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding st
 #   op/lexsub.t (7/10) un-drop statements bounded by an earlier failure, and
 #   op/current_sub.t is 0/0 on BOTH trees (crashes on __SUB__, #378) — the drop
 #   removal is honest (0 PARSE ERRORs emitted) but adds no row.
-op/ref.t	257	0	198	44	DIFF
-op/refstack.t	0	0	0	0	NOTAP	
-op/repeat.t	50	0	47	3	DIFF	
-op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N
 # s431 first measurement (see the s431 note in the header)
+# s431 first measurement (see the s431 note in the header)
+base/cond.t	4	0	4	0	OK		0
+base/if.t	2	0	2	0	OK		0
+base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+base/num.t	56	0	56	0	OK		0
+base/pat.t	2	0	2	0	OK		0
+base/rs.t	41	0	26	15	DIFF		0
+base/term.t	7	0	7	0	OK		0
+base/translate.t	257	0	257	0	OK		0
+base/while.t	4	0	4	0	OK		0
+class/accessor.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/class.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/construct.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/destruct.t	4	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/field.t	33	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/inherit.t	19	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/method.t	8	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/phasers.t	3	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/threads.t	0	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — the file also needs a threaded perl (NOTAP before s415; it now refuses at transpile like its siblings, task #371)	-1
+class/utf8.t	4	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+cmd/elsif.t	4	0	4	0	OK		0
+cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)	0
+cmd/mod.t	15	0	15	0	OK		0
+cmd/subval.t	36	0	27	3	DIFF	unbound:F; aborted-forms:4: The variable F is unbound.	0
+cmd/switch.t	18	0	18	0	OK		0
+comp/bproto.t	16	0	10	6	DIFF		0
+comp/cmdopt.t	44	0	44	0	OK		0
+comp/colon.t	25	0	15	10	DIFF		0
+comp/decl.t	9	0	6	0	DIFF		0
+comp/filter_exception.t	4	0	2	2	DIFF		0
+comp/final_line_num.t	1	0	0	0	DIFF		1
+comp/fold.t	35	0	25	10	DIFF	aborted-forms:2: The function main::pl-INSTALL is undefined.	0
+comp/form_scope.t	14	0	0	2	DIFF		0
+comp/hints.t	31	0	15	14	DIFF	NOT fully registered: 2 unregistered diverging row(s): tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
+comp/line_debug.t	25	0	1	24	DIFF		0
+comp/multiline.t	6	0	6	0	OK		0
+comp/opsubs.t	36	0	31	5	DIFF		0
+comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)	0
+comp/package_block.t	7	0	0	7	DIFF		0
+comp/parser.t	191	0	65	110	DIFF	unbound:q�; aborted-forms:1: The function main::pl-EOV is undefined.; reaped 1 orphan(s)	5
+comp/parser_run.t	70	0	29	41	DIFF	unbound:$00	0
+comp/proto.t	216	0	47	14	DIFF	aborted-forms:1: Undefined subroutine &main::N called at (eval N) line N. 	0
+comp/redef.t	20	0	1	19	DIFF		0
+comp/require.t	1750	0	909	835	DIFF		0
+comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
+comp/term.t	23	0	23	0	OK		0
+comp/uproto.t	32	0	13	21	DIFF		0
+comp/use.t	87	0	42	45	DIFF	undef-fn:main::pl-true	0
+comp/utf.t	4216	0	12	4204	DIFF		0
+io/argv.t	52	1	27	26	DIFF		0
+io/binmode.t	9	0	9	0	OK		0
+io/bom.t	3	0	0	3	DIFF		0
+io/closepid.t	3	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-open $fhN "-|" $perl "-e" "sleep N")	0
+io/crlf.t	16421	0	16412	6	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
+io/crlf_through.t	942	0	942	0	OK		0
+io/data.t	4	0	0	0	DIFF		0
+io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented	0
+io/dup.t	29	0	4	0	DIFF		0
+io/eintr.t	0	0	0	0	NOTAP		0
+io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC	0
+io/errno.t	16	0	16	0	OK		0
+io/errnosig.t	1	0	0	1	DIFF		0
+io/fflush.t	7	0	3	1	DIFF	aborted-forms:1: The function main::pl-_create_runperl is undefined.	0
+io/fs.t	61	0	56	2	DIFF	aborted-forms:1: Could not delete the file "/tmp/pcl-test-N-N": Is a directory	0
+io/getcwd.t	0	0	0	0	NOTAP		0
+io/inplace.t	8	0	2	6	DIFF		0
+io/iofile.t	3	0	1	2	DIFF		0
+io/iprefix.t	2	0	0	2	DIFF		0
+io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
+io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
+io/nargv.t	7	0	11	2	DIFF		0
+io/open.t	188	0	108	13	DIFF	aborted-forms:1: The variable STDOUT is unbound.; reaped 1 orphan(s)	1
+io/openpid.t	10	0	8	2	DIFF		0
+io/paragraph_mode.t	80	0	80	0	OK		0
+io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
+io/perlio_fail.t	15	0	6	9	DIFF		0
+io/perlio_leaks.t	8	4	0	0	DIFF	aborted-forms:1: No such file or directory at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/io/p	0
+io/perlio_open.t	10	0	0	0	DIFF	aborted-forms:3: Execution of a form compiled with errors. Form: (p-open	0
+io/pipe.t	27	0	8	0	DIFF	aborted-forms:1: Couldn't write to #<sb-sys:fd-stream for "descriptor N" {NCNFN}>: Broken pipe	0
+io/print.t	24	0	23	1	DIFF		0
+io/pvbm.t	28	0	23	5	DIFF		0
+io/read.t	2	0	2	0	OK		0
+io/say.t	13	0	13	0	OK		0
+io/scalar.t	128	0	96	32	DIFF		0
+io/scalar_ungetc.t	19	0	1	1	DIFF	aborted-forms:1: Can't locate object method "ungetc" via package "main" at - line N. 	0
+io/sem.t	22	0	0	0	XDIFF	aborted-forms:2: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
+io/semctl.t	2	0	0	0	DIFF		0
+io/shm.t	21	0	0	2	XDIFF	aborted-forms:8: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
+io/socket.t	45	0	0	0	DIFF		0
+io/socketpair.t	8	0	0	0	DIFF		0
+io/tell.t	36	0	26	0	DIFF	aborted-forms:1: The path #P"/tmp/nKNTIilTqW/t/>/tmp/pcl-test-N-N" does not exist.	0
+io/through.t	942	0	942	0	OK		0
+io/utf8.t	62	0	13	14	DIFF	aborted-forms:1: The function bytes::pl-length is undefined.	0
+mro/basic.t	66	0	34	23	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ISACLEAR'  | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions	0
+mro/basic_01_c3.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_c3_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_dfs.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_01_dfs_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_c3.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "C_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_c3_utf8.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "ƈ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_dfs.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "C_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_02_dfs_utf8.t	10	0	3	3	XDIFF	aborted-forms:4: Can't locate object method "ƈ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_c3.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "O_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_c3_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "ᴼ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_dfs.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "O_or_D" via package "Test::A" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_03_dfs_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "ᴼ_or_Ḋ" via package "텟ţ::ଅ" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_04_c3.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_04_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_04_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_04_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_c3.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_c3_utf8.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::ᕘ found from Ｄiᚪၚd_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_dfs.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::foo found from Diamond_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_05_dfs_utf8.t	2	0	0	1	XDIFF	aborted-forms:1: No SUPER::ᕘ found from Ｄiᚪၚd_D | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/basic_utf8.t	53	0	26	18	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ᛁ앛ଌᛠ'  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/c3_with_overload.t	7	0	7	0	OK		0
+mro/c3_with_overload_utf8.t	7	0	7	0	OK		0
+mro/complex_c3.t	12	0	11	0	XDIFF	aborted-forms:1: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/complex_c3_utf8.t	12	0	11	0	XDIFF	aborted-forms:1: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/complex_dfs.t	11	0	9	2	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/complex_dfs_utf8.t	11	0	9	2	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/dbic_c3.t	1	0	1	0	OK		0
+mro/dbic_c3_utf8.t	1	0	1	0	OK		0
+mro/dbic_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/dbic_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/inconsistent_c3.t	1	0	0	1	DIFF	NOT fully registered: 1 unregistered diverging row(s): ... got the right error with an inconsistent hierarchy | not-supported.md §mro + §error-text — C3 merge-failure error wording differs	0
+mro/inconsistent_c3_utf8.t	1	0	1	0	OK		0
+mro/isa_aliases.t	13	0	10	3	XDIFF	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes)	0
+mro/isa_aliases_utf8.t	12	0	10	2	XDIFF	not-supported.md §symbol-table hashes — *Foo:: = *Bar:: package aliasing (stash writes, utf8)	0
+mro/isa_c3.t	35	0	22	13	XDIFF	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals	0
+mro/isa_c3_utf8.t	34	0	21	13	XDIFF	not-supported.md §symbol-table hashes + §mro — *ISA glob manipulation / ISA magic internals (utf8)	0
+mro/isa_dfs.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec tests (C3-only by design)	0
+mro/isa_dfs_utf8.t	34	0	21	13	XDIFF	not-supported.md §mro — DFS ordering spec tests (C3-only by design, utf8)	0
+mro/isarev.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally)	0
+mro/isarev_utf8.t	24	0	7	17	XDIFF	not-supported.md §mro — get_isarev needs live stash enumeration (returns [] provisionally, utf8)	0
+mro/method_caching.t	36	0	21	15	XDIFF	not-supported.md §mro — perl method-cache semantics (CLOS has no cache to invalidate)	0
+mro/method_caching_utf8.t	28	0	21	7	XDIFF	not-supported.md §mro — perl method-cache semantics (utf8)	0
+mro/next_NEXT.t	4	0	1	0	XDIFF	aborted-forms:3: Can't locate object method "next::method" via package "Fuz" at - line N.  | not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)	0
+mro/next_NEXT_utf8.t	4	0	1	0	XDIFF	aborted-forms:3: Can't locate object method "next::method" via package "Fᶽ" at - line N.  | not-supported.md §mro — next::method family (Tier 3, deferred, utf8)	0
+mro/next_edgecases.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)	0
+mro/next_edgecases_utf8.t	12	0	9	3	XDIFF	not-supported.md §mro — next::method family (Tier 3, deferred, utf8)	0
+mro/next_goto.t	4	0	0	0	XDIFF	aborted-forms:4: The function next::pl-method is undefined. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_goto_utf8.t	4	0	0	0	XDIFF	aborted-forms:4: The function next::pl-method is undefined. | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_inanon.t	2	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_inanon_utf8.t	2	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_ineval.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_ineval_utf8.t	1	0	0	1	DIFF	NOT fully registered: 1 unregistered diverging row(s): method resolved inside eval{} | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_method.t	5	0	0	1	XDIFF	aborted-forms:4: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_method_utf8.t	5	0	0	1	XDIFF	aborted-forms:4: Can't locate object method "헬ฬ" via package "Diӑmond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_skip.t	10	0	0	2	XDIFF	aborted-forms:8: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/next_skip_utf8.t	10	0	0	2	XDIFF	aborted-forms:8: Can't locate object method "method" via package "next" (perhaps you forgot to load "next"? | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/overload_c3.t	7	0	7	0	OK		0
+mro/overload_c3_utf8.t	7	0	7	0	OK		0
+mro/overload_dfs.t	7	0	7	0	OK		0
+mro/package_aliases.t	54	0	102	46	DIFF	aborted-forms:2: Can't locate object method "womp" via package "Childclass" at - line N.  | NOT fully registered: 66 unregistered diverging row(s): *extra* '; *extra* '; *extra* '; +63 more | not-supported.md §symbol-table hashes — glob package aliasing + isarev	0
+mro/package_aliases_utf8.t	52	0	73	40	XDIFF	aborted-forms:1: Can't locate object method "ວmᑊ" via package "C힐dᒡl았" at - line N.  | rows NOT checked (*rows-unstable*) | not-supported.md §symbol-table hashes — glob package aliasing + isarev (utf8).  ROWS NOT CHECKED (*rows-unstable*, s336): measured over three runs this file's divergence is nondeterministic in TWO ways — the number of PCL-only TAP rows after the crash varied 54 / 34 / 34, and one run came back TIMEOUT instead of DIFF.  The test tortures the stash with growing "인ንʵ::"-style names, so hash order decides where PCL gives up; the row set is not a baseline.  The other 107 registered files ARE row-checked.	0
+mro/pkg_gen.t	7	0	0	0	XDIFF	aborted-forms:2: The function mro::pl-get_pkg_gen is undefined. | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters	0
+mro/pkg_gen_utf8.t	7	0	0	0	XDIFF	aborted-forms:2: The function mro::pl-get_pkg_gen is undefined. | not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)	0
+mro/recursion_c3.t	8	0	8	0	OK		0
+mro/recursion_c3_utf8.t	8	0	8	0	OK		0
+mro/recursion_dfs.t	8	0	8	0	OK		0
+mro/recursion_dfs_utf8.t	8	0	8	0	OK		0
+mro/vulcan_c3.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/vulcan_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/vulcan_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+mro/vulcan_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
+op/64bitint.t	425	0	425	0	OK		0
+op/aassign.t	188	1	173	16	DIFF		0
+op/alarm.t	5	0	5	0	OK	reaped 12 orphan(s)	0
+op/anonconst.t	7	0	1	6	DIFF		0
+op/anonsub.t	14	1	1	5	DIFF		0
+op/append.t	13	0	13	0	OK		0
+op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.	0
+op/arith2.t	9	0	9	0	OK		0
+op/array.t	195	0	169	26	DIFF		0
+op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.	0
+op/attrhand.t	4	0	0	0	DIFF	aborted-forms:1: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle	0
+op/attrproto.t	48	0	17	28	DIFF		0
+op/attrs.t	157	2	37	67	DIFF	aborted-forms:2: The function attributes::pl-_guess_stash is undefined.	0
+op/auto.t	47	0	47	0	OK		0
+op/avhv.t	40	0	39	1	DIFF		0
+op/bless.t	116	2	111	6	DIFF		0
+op/blocks.t	25	1	16	10	DIFF		0
+op/bool.t	8	0	8	0	OK		0
+op/bop.t	510	0	251	246	DIFF	aborted-forms:1: Invalid type 'P' in pack 	0
+op/caller.t	111	1	28	84	DIFF		0
+op/catch.t	12	0	10	2	DIFF		0
+op/chars.t	34	0	34	0	OK		0
+op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.	0
+op/chop.t	148	0	96	4	DIFF		0
+op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — ALL 7 failing rows (38/7 vs perl 45/0) are two blessed subsections. t10-13 are the `### use bytes` block (t/op/chr.t lines 28-31: under the pragma `chr(-1)` must be the single byte "\xFF"; PCL has no byte view, so it keeps "\x{FFFD}"). t40-42 are `### Code points above U+10FFFF` (lines 80-82: chr(0x110000)/0x1FFFFF/0x200000 in perl's extended UTF-8) — measured s319/s320: SBCL's char-code-limit is 1114112, so a CL string physically cannot hold them and (code-char #x110000) yields no character. Blessed in fable-answers-s318.md §11; task #173.	0
+op/closure.t	281	1	273	3	DIFF	aborted-forms:1: The function main::pl-ff is undefined.	0
+op/cmpchain.t	1750	0	1521	229	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.	0
+op/concat2.t	4	0	4	0	OK		0
+op/cond.t	5	0	4	0	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
+op/const-optree.t	148	0	90	58	XDIFF	not-supported.md §Readouts of perl's own internals -> "Constant-folding / inlinability and the :method attribute readout" (53 of 58 rows: 28 "… is/is not inlinable", 25 "… has (no) :method attribute" — both are diagnostics ABOUT an optree PCL does not build) AND §Error compatibility for invalid Perl input / CLAUDE.md §9 (the other 5: "… now throws exception (RT 134138)", where perl REJECTS `sub () { $x }` for a lexical modified elsewhere and PCL compiles it). REGISTERED s408, after #337 fixed the 4 "retval of my sub …" rows that were the file's real fix target and kept it UNEXPLAINED — a fresh per-row read of all 58 was the precondition the s399 note set.	0
+op/context.t	8	0	7	1	DIFF		0
+op/coreamp.t	778	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also carries lvalue-sub drops (§Lvalue subroutines)	-1
+op/coresubs.t	1109	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+op/cproto.t	254	0	71	183	DIFF		0
+op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).	0
+op/current_sub.t	22	0	8	3	XDIFF	aborted-forms:3: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)	0
+op/dbm.t	5	0	0	0	DIFF		0
+op/decl-refs.t	402	0	42	165	DIFF	aborted-forms:2: ParserN TODO: state outside a block-level declaration at (eval N) line N. 	0
+op/defer.t	28	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	-1
+op/defined.t	5	0	5	0	OK		0
+op/defins.t	27	0	27	0	OK		0
+op/delete.t	56	0	53	3	DIFF		0
+op/die.t	25	1	5	15	DIFF		0
+op/die_except.t	12	0	12	0	OK		0
+op/die_exit.t	17	0	17	0	OK		0
+op/die_keeperr.t	24	0	15	9	DIFF		0
+op/die_unwind.t	13	0	8	5	DIFF		0
+op/do.t	71	0	66	7	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §DESTROY called by garbage collector — ALL 7 failing rows (66/7 vs perl 71/0) are two blessed categories, established row-by-row s321 after the TAP re-alignment (task #177) showed the old number-join had blamed two rows that PASS. (a) perl t63-t66 + PCL's 2 EXTRA rows: one `foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref()))` loop asserting `$@ =~ /\Asyntax error/`. `do SUBNAME(LIST)` was VALID Perl before 5.20 and meant call-the-sub; PCL keeps that historical semantics, so the assertions fail AND each test's `fail()` guard fires (those are the 2 PCL-only rows — the same divergence, not a second defect). Ruled no-fix in fable-answers-s318.md §4, task #158 :principle9. (b) perl t68 "RT 124248": `f(do { 1; !!(my $x = bless []) })` requires the blessed temp to be DESTROYed at do-block exit (FREETMPS) before f() runs — refcount-deterministic destruction, which PCL does not have; same family as op/args.t t23. NB t67 (delete-helem copied) and t70 ($@ false on do dir) PASS — probed s321 — and t71 ($! is EISDIR on do dir) was FIXED s321 (p-do now carries the OS errno into $!).	0
+op/dor.t	34	0	29	5	DIFF		0
+op/dump.t	0	0	0	0	NOTAP		0
+op/each.t	65	0	35	12	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
+op/each_array.t	65	0	65	0	OK		0
+op/eval.t	169	0	130	38	DIFF	undef-fn:main::pl-ARRAY	0
+op/evalbytes.t	9	0	5	4	DIFF		0
+op/exec.t	41	0	23	2	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
+op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
+op/exp.t	31	0	31	0	OK		0
+op/fh.t	8	0	5	3	DIFF		0
+op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
+op/filetest.t	436	0	183	251	DIFF	aborted-forms:1: The function main::pl-f is undefined.	1
+op/filetest_stack_ok.t	136	0	71	65	DIFF		0
+op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
+op/flip.t	14	0	12	2	DIFF		0
+op/for-many.t	71	0	63	8	DIFF		0
+op/for.t	148	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+op/fork.t	28	0	1	0	DIFF		0
+op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
+op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
+op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
+op/glob.t	18	0	14	4	DIFF		0
+op/gmagic.t	78	0	4	2	DIFF	aborted-forms:5: Can't call method init on an undefined value	0
+op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is undefined.	0
+op/grent.t	3	0	3	0	OK		0
+op/grep.t	77	0	71	6	DIFF		0
+op/groups.t	4	0	4	0	OK		0
+op/gv.t	304	0	130	69	DIFF	undef-fn:main::pl-fred; aborted-forms:3: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N. 	3
+op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
+op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
+op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
+op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).	0
+op/hashwarn.t	20	0	5	15	DIFF		0
+op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF	0
+op/hexfp.t	125	0	110	15	DIFF		0
+op/inc.t	93	0	60	15	DIFF		0
+op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
+op/inccode.t	89	0	13	28	DIFF	aborted-forms:4: The value #<function (lambda (&rest %_args) :in	0
+op/incfilter.t	153	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Filter::Util::Call in @INC	0
+op/index.t	415	0	94	13	DIFF	aborted-forms:1: The function main::pl-formline is undefined.	0
+op/index_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+op/infnan.t	1112	0	1106	6	DIFF		0
+op/int.t	19	0	19	0	OK		0
+op/isa.t	14	0	14	0	OK		0
+op/join.t	43	0	39	4	DIFF		0
+op/kill0.t	9	0	6	3	DIFF		0
+op/kvaslice.t	38	0	22	16	DIFF		0
+op/kvhslice.t	39	0	18	20	DIFF		0
+op/lc.t	2716	0	2683	33	DIFF		0
+op/leaky-magic.t	71	0	65	6	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/	0
+op/length.t	49	0	35	12	DIFF		0
+op/lex.t	53	0	13	39	DIFF	unbound:%0	1
+op/lex_assign.t	353	0	350	3	DIFF		0
+op/lexsub.t	156	0	76	63	DIFF	undef-fn:main::pl-foo; aborted-forms:12: Undefined subroutine &main::d called. 	4
+op/lfs.t	17	0	0	0	DIFF		0
+op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run	-1
+op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|	0
+op/localref.t	64	0	63	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t64 needs refcount-deterministic DESTROY at local-restore	0
+op/lock.t	5	0	0	0	DIFF	aborted-forms:5: invalid number of arguments: N	0
+op/loopctl.t	66	1	63	4	DIFF		0
+op/lop.t	47	0	47	0	OK		0
+op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+op/magic-27839.t	2	0	2	0	OK		0
+op/magic.t	207	1	168	39	DIFF		0
+op/method.t	163	0	124	27	DIFF	undef-fn:main::pl-new; aborted-forms:3: The function common-lisp:nil is undefined.	1
+op/mkdir.t	17	0	17	0	OK		0
+op/multideref.t	65	0	42	10	DIFF	undef-fn:main::pl-local; aborted-forms:1: invalid number of arguments: N	0
+op/my.t	59	0	52	7	DIFF		0
+op/my_stash.t	9	0	4	3	DIFF	aborted-forms:2: The function Foo::pl-runperl is undefined.	0
+op/mydef.t	2	0	0	2	DIFF		0
+op/negate.t	48	0	48	0	OK		0
+op/not.t	24	0	20	4	XDIFF	not-supported.md §Interned boolean constants (!0 / !1 identity) — t21/t22 "not 0/1 is read-only" need the shared read-only scalar; PCL returns a fresh mutable value per call	0
+op/numconvert.t	1446	0	0	0	DIFF		0
+op/numify.t	32	0	21	11	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 11 diverging rows (21/11 vs perl 32/0) are `numifying '…' trigger a warning`, i.e. perl's `Argument "…" isn't numeric`. The VALUE each string numifies to is asserted separately and PCL passes those. Owner task #221; visible since s399 (#323).	0
+op/numify_chkflags.t	14	0	0	0	DIFF	undef-fn:main::pl-Dump; aborted-forms:1: Can't locate loadable object for module this module in @INC	0
+op/oct.t	79	0	79	0	OK		0
+op/or.t	13	1	11	3	DIFF		0
+op/ord.t	38	0	38	0	OK		0
+op/overload_integer.t	2	0	2	0	OK		0
+op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/xN_N-linux/Confi	0
+op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
+op/packagev.t	307	0	197	110	DIFF		0
+op/pos.t	33	0	15	15	DIFF		0
+op/postfixderef.t	128	0	95	26	DIFF	aborted-forms:3: The function main::pl-foo is undefined.	0
+op/pow.t	268	0	268	0	OK		0
+op/print.t	3	0	2	1	XDIFF	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.	0
+op/protowarn.t	12	0	4	8	DIFF		0
+op/push.t	32	0	32	0	OK		0
+op/pwent.t	2	0	2	0	OK		0
+op/qr.t	37	0	23	14	DIFF		0
+op/quotemeta.t	60	0	58	2	DIFF		0
+op/rand.t	263	0	263	0	OK		0
+op/range.t	162	0	155	7	DIFF		0
+op/read.t	2116	0	2116	0	OK		0
+op/readdir.t	16	0	13	3	DIFF		0
+op/readline.t	35	1	25	7	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
+op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.	0
+op/ref.t	257	0	198	44	DIFF		1
+op/refstack.t	0	0	0	0	NOTAP		0
+op/repeat.t	50	0	47	3	DIFF		0
+op/require_37033.t	10	0	4	2	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N	0
 op/require_errors.t	73	0	3	70	DIFF		0
-op/require_gh20577.t	9	0	4	5	DIFF	
-op/require_override.t	10	0	7	3	DIFF	
-op/reset.t	45	0	25	19	DIFF	
-op/reverse.t	25	0	25	0	OK	
-op/rt119311.t	22	0	4	2	DIFF	crash:simple-error: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t
-op/runlevel.t	24	0	0	0	DIFF	
-op/select.t	9	0	3	6	DIFF	
-op/setpgrpstack.t	3	0	3	0	OK	
-op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNFNBNEBB.
-op/signame_canonical.t	15	0	0	0	DIFF	
-op/signatures.t	1245	1	920	326	XDIFF	
-op/sigsystem.t	4	0	0	0	XDIFF	crash:simple-error: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.
-op/sleep.t	4	0	4	0	OK	
-op/smartkve.t	18	0	3	15	DIFF	
+op/require_gh20577.t	9	0	4	5	DIFF		0
+op/require_override.t	10	0	7	3	DIFF		0
+op/reset.t	45	0	25	19	DIFF		0
+op/reverse.t	25	0	25	0	OK		0
+op/rt119311.t	22	0	9	2	DIFF	aborted-forms:2: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t	0
+op/runlevel.t	24	0	0	0	DIFF		0
+op/select.t	9	0	3	6	DIFF		0
+op/setpgrpstack.t	3	0	3	0	OK		0
+op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNBNEANEBB.	0
+op/signame_canonical.t	15	0	0	0	DIFF		0
+op/signatures.t	1245	1	920	326	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).	1
+op/sigsystem.t	4	0	0	0	XDIFF	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.	0
+op/sleep.t	4	0	4	0	OK		0
+op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
-op/sort.t	205	0	142	9	DIFF	undef-fn:main::pl-revers	0
-op/splice.t	34	0	34	0	OK	
-op/split.t	219	0	213	6	DIFF	
-op/split_unicode.t	147	0	107	40	DIFF	
-op/sprintf.t	559	0	534	25	DIFF	
-op/sprintf2.t	1704	0	1679	25	DIFF	undef-fn:main::pl-a8p
-op/srand.t	10	0	8	2	DIFF	
-op/sselect.t	23	0	17	6	DIFF	
-op/stash.t	54	1	48	6	DIFF	undef-fn:main::pl-SUPER
-op/stash_parse_gv.t	5	0	5	0	OK	
-op/stat.t	108	3	0	0	DIFF	undef-fn:main::pl-is_linux_container
-op/stat_errors.t	638	0	305	333	DIFF	
+op/sort.t	205	0	181	23	DIFF	undef-fn:main::pl-revers; aborted-forms:2: Undefined subroutine &OtherPack::foo called. 	0
+op/splice.t	34	0	34	0	OK		0
+op/split.t	219	0	213	6	DIFF		0
+op/split_unicode.t	147	0	107	40	DIFF		0
+op/sprintf.t	559	0	534	25	DIFF		0
+op/sprintf2.t	1704	0	1679	25	DIFF		0
+op/srand.t	10	0	8	2	DIFF		0
+op/sselect.t	23	0	17	6	DIFF		0
+op/stash.t	54	1	48	6	DIFF	undef-fn:main::pl-SUPER	0
+op/stash_parse_gv.t	5	0	5	0	OK		0
+op/stat.t	108	3	0	0	DIFF	aborted-forms:1: The function main::pl-is_linux_container is undefined.	0
+op/stat_errors.t	638	0	305	333	DIFF		0
 op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one `given` block in an otherwise supported file; the refusal costs the file's rows, ruled with task #400	-1
-op/study.t	43	0	43	0	OK	
-op/studytied.t	14	0	13	1	DIFF	
-op/sub.t	64	1	53	12	DIFF	
-op/sub_lval.t	211	0	12	58	DIFF	undef-fn:main::pl-rlv1t
-op/substr.t	400	0	377	23	DIFF	
-op/substr_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-op/svflags.t	16	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module this module in @INC
-op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL
+op/study.t	43	0	43	0	OK		0
+op/studytied.t	14	0	13	1	DIFF		0
+op/sub.t	64	1	53	12	DIFF		0
+op/sub_lval.t	211	0	67	127	DIFF	unbound:@119797; aborted-forms:4: invalid number of arguments: N	35
+op/substr.t	400	0	377	23	DIFF		2
+op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
+op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/switch.t	197	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)	-1
-op/symbolcache.t	8	0	0	0	DIFF	undef-fn:main::pl-removed
-op/sysio.t	45	0	45	0	OK	
-op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL
-op/threads-dirh.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-op/threads.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-op/tie.t	94	1	0	0	DIFF	
+op/symbolcache.t	8	0	4	3	DIFF	aborted-forms:1: The function main::pl-removed is undefined.	0
+op/sysio.t	45	0	45	0	OK		0
+op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
+op/tie.t	94	1	0	0	DIFF		0
 op/tie_fetch_count.t	343	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one infix `~~` statement; refused (task #371)	-1
-op/tiearray.t	75	0	36	39	DIFF	
-op/tiehandle.t	67	0	12	32	DIFF	
-op/tiehash.t	27	0	20	7	DIFF	
-op/time.t	72	0	72	0	OK	
-op/time_loop.t	2	0	2	0	OK	
-op/tr.t	317	0	92	2	DIFF	crash:simple-error: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i
-op/tr_latin1.t	2	0	1	1	DIFF	
-op/try.t	28	0	23	5	DIFF	
-op/undef.t	88	0	17	4	DIFF	undef-fn:main::pl-tcp
-op/universal.t	142	2	75	57	DIFF	crash:simple-error: No SUPER::isa found from RTN::B
-op/unlink.t	6	0	4	2	DIFF	crash:simple-error: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl
-op/unshift.t	19	0	19	0	OK	
-op/upgrade.t	64	0	64	0	OK	
-op/utf8cache.t	16	0	2	0	DIFF	
-op/utf8decode.t	710	0	620	90	DIFF	
-op/utf8magic.t	6	0	2	4	DIFF	
-op/utfhash.t	99	0	91	0	DIFF	
-op/utftaint.t	0	0	72	17	NOTAP	
-op/vec.t	78	0	73	5	DIFF	
-op/ver.t	54	0	47	7	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target
-op/waitpid.t	1	0	1	0	OK	
-op/wantarray.t	28	0	27	1	DIFF	
-op/warn.t	32	1	19	14	DIFF	
-op/while.t	26	0	20	6	DIFF	
-op/write.t	636	0	0	0	DIFF	
-op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A
-opbasic/arith.t	183	0	183	0	OK	
-opbasic/cmp.t	13280	0	12078	0	DIFF	
-opbasic/concat.t	254	0	249	5	DIFF	
-opbasic/magic_phase.t	7	0	0	5	DIFF	
-opbasic/qq.t	30	0	30	0	OK	
-re/alpha_assertions.t	2279	0	1784	74	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
-re/anyof.t	1187	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
-re/begin-once.t	2	0	1	1	DIFF	
-re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF	
-re/charset.t	8328	0	2776	2776	DIFF	
-re/fold_grind_8.t	213	0	0	0	DIFF	
-re/fold_grind_T.t	0	0	0	0	NOTAP	
-re/fold_grind_a.t	31	0	0	0	DIFF	
-re/fold_grind_aa.t	103	0	0	0	DIFF	
-re/fold_grind_d.t	31	0	0	0	DIFF	
-re/fold_grind_l.t	113	0	0	0	DIFF	
-re/fold_grind_u.t	213	0	0	0	DIFF	
-re/keep_tabs.t	14	0	14	0	OK	
-re/no_utf8_pm.t	1	0	1	0	OK	
-re/opt.t	639	17	0	0	XDIFF	undef-fn:re::pl-optimization | not-supported.md §re::optimization - the regex engine's internal optimizer report (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report
-re/overload.t	87	0	3	0	DIFF	
-re/pat.t	1263	4	0	0	DIFF	
-re/pat_advanced.t	1678	0	950	730	DIFF	
-re/pat_advanced_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_psycho.t	15	0	11	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
-re/pat_psycho_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_re_eval.t	527	0	64	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook
-re/pat_re_eval_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_rt_report.t	2513	1	2454	56	DIFF	
-re/pat_rt_report_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_special_cc.t	9	0	9	0	OK	
-re/pat_special_cc_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pat_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/pos.t	8	0	8	0	OK	
-re/qr-72922.t	14	0	14	0	OK	
-re/qr.t	4	0	3	1	DIFF	
-re/qr_gc.t	2	0	0	2	DIFF	
-re/qrstack.t	1	0	1	0	OK	
-re/recompile.t	48	0	0	48	DIFF	
-re/reg_60508.t	1	0	0	1	DIFF	
-re/reg_email.t	13	0	0	0	DIFF	
-re/reg_email_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/reg_eval.t	8	0	2	6	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t
-re/reg_eval_scope.t	48	1	0	0	TRANSPILE	TRANSPILE-FAIL
-re/reg_fold.t	6786	105	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
-re/reg_mesg.t	3348	0	0	0	DIFF	undef-fn:main::pl-display_rx
-re/reg_namedcapture.t	2	0	0	2	DIFF	
-re/reg_nc_tie.t	37	0	6	7	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-FETCH
-re/reg_nocapture.t	25	0	14	11	DIFF	
-re/reg_pmod.t	88	0	58	30	DIFF	
-re/reg_posixcc.t	2560	0	1544	7646	DIFF	
-re/regex_sets.t	96	0	4	84	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it
-re/regex_sets_compat.t	2167	2	1600	258	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
-re/regexp.t	2167	2	793	112	TIMEOUT	timeout
-re/regexp_noamp.t	2169	0	794	111	DIFF	unbound:$1y
-re/regexp_nonull.t	2167	2	0	0	DIFF	
-re/regexp_normal.t	2169	0	1850	8	DIFF	crash:simple-error: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (
-re/regexp_notrie.t	2167	2	793	112	TIMEOUT	timeout
-re/regexp_qr.t	2167	2	793	112	TIMEOUT	timeout
-re/regexp_qr_embed.t	2167	2	793	112	TIMEOUT	timeout
-re/regexp_qr_embed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/regexp_trielist.t	2167	2	793	112	TIMEOUT	timeout
-re/regexp_unicode_prop.t	1110	0	778	332	DIFF	
-re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/rt122747.t	3	0	3	0	OK	
-re/rxcode.t	42	0	26	15	DIFF	
-re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions — cl-ppcre has no (*script_run:…); LIFTED by the PCRE2 backend (task #71)
-re/speed.t	59	0	0	0	DIFF	crash:sb-kernel::control-stack-exhausted: Control stack exhausted (no more space for function call frames). This is probably due to 
-re/speed_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-re/stclass_threads.t	0	0	5	1	NOTAP	
-re/subst.t	281	0	0	0	DIFF	crash:type-error: The value #<hash-table :TEST equal :COUNT N {NDANFN}> is not of type pcl:p-typeglob
-re/substT.t	0	0	0	0	NOTAP	
-re/subst_amp.t	13	0	0	13	DIFF	
-re/subst_wamp.t	281	0	0	0	DIFF	
-re/uniprops01.t	39811	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops02.t	39961	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops03.t	39793	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops04.t	39759	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops05.t	17394	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops06.t	31724	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops07.t	29260	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops08.t	30492	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops09.t	29848	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/uniprops10.t	26334	0	0	0	XDIFF	crash:simple-error: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
-re/user_prop_race_thr.t	0	0	0	0	NOTAP	crash:simple-error: This Perl not built to support threads
-run/cloexec.t	22	0	16	6	DIFF
-# s431 first measurement (see the s431 note in the header)
+op/tiearray.t	75	0	36	39	DIFF		0
+op/tiehandle.t	67	0	12	32	DIFF		0
+op/tiehash.t	27	0	20	7	DIFF		0
+op/time.t	72	0	72	0	OK		0
+op/time_loop.t	2	0	2	0	OK		0
+op/tr.t	317	0	269	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i	0
+op/tr_latin1.t	2	0	1	1	DIFF		0
+op/try.t	28	0	23	5	DIFF		1
+op/undef.t	88	0	32	5	DIFF	undef-fn:main::pl-tcp; aborted-forms:1: The function main::pl-z is undefined.	0
+op/universal.t	142	2	79	59	DIFF	aborted-forms:6: No SUPER::isa found from RTN::B	1
+op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
+op/unshift.t	19	0	19	0	OK		0
+op/upgrade.t	64	0	64	0	OK		0
+op/utf8cache.t	16	0	2	0	DIFF		1
+op/utf8decode.t	710	0	620	90	DIFF		0
+op/utf8magic.t	6	0	2	4	DIFF		0
+op/utfhash.t	99	0	91	0	DIFF		0
+op/utftaint.t	0	0	72	17	NOTAP		0
+op/vec.t	78	0	73	5	DIFF		0
+op/ver.t	54	0	47	7	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target	0
+op/waitpid.t	1	0	1	0	OK		0
+op/wantarray.t	28	0	27	1	DIFF		0
+op/warn.t	32	1	19	14	DIFF		0
+op/while.t	26	0	20	6	DIFF		0
+op/write.t	636	0	18	24	DIFF	unbound:OUT; aborted-forms:19: The variable OUT is unbound.	1
+op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
+opbasic/arith.t	183	0	183	0	OK		0
+opbasic/cmp.t	13280	0	12078	0	DIFF		0
+opbasic/concat.t	254	0	249	5	DIFF		0
+opbasic/magic_phase.t	7	0	0	5	DIFF		0
+opbasic/qq.t	30	0	30	0	OK		0
+re/alpha_assertions.t	2279	0	1784	74	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
+re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
+re/begin-once.t	2	0	1	1	DIFF		0
+re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF		0
+re/charset.t	8328	0	2776	2776	DIFF		0
+re/fold_grind_8.t	213	0	0	0	DIFF		0
+re/fold_grind_T.t	0	0	0	0	NOTAP		0
+re/fold_grind_a.t	31	0	0	0	DIFF		0
+re/fold_grind_aa.t	103	0	0	0	DIFF	reaped 1 orphan(s)	0
+re/fold_grind_d.t	31	0	0	0	DIFF		0
+re/fold_grind_l.t	113	0	0	0	DIFF		0
+re/fold_grind_u.t	213	0	0	0	DIFF		0
+re/keep_tabs.t	14	0	14	0	OK		0
+re/no_utf8_pm.t	1	0	1	0	OK		0
+re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
+re/overload.t	87	0	3	0	TIMEOUT	timeout	0
+re/pat.t	1263	4	0	0	DIFF		3
+re/pat_advanced.t	1678	0	950	730	DIFF		4
+re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/pat_psycho.t	15	0	11	0	DIFF		0
+re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/pat_re_eval.t	527	0	64	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
+re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/pat_rt_report.t	2513	1	2454	56	DIFF		0
+re/pat_rt_report_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/pat_special_cc.t	9	0	9	0	OK		0
+re/pat_special_cc_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/pat_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/pos.t	8	0	8	0	OK		0
+re/qr-72922.t	14	0	14	0	OK		0
+re/qr.t	4	0	3	1	DIFF		0
+re/qr_gc.t	2	0	0	2	DIFF		0
+re/qrstack.t	1	0	1	0	OK		0
+re/recompile.t	48	0	0	48	DIFF		0
+re/reg_60508.t	1	0	0	1	DIFF		0
+re/reg_email.t	13	0	0	0	DIFF		0
+re/reg_email_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/reg_eval.t	8	0	2	6	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t	0
+re/reg_eval_scope.t	48	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+re/reg_fold.t	6786	105	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC PCL: Internals::SvREADONLY: a SCA	0
+re/reg_mesg.t	3348	0	0	0	DIFF	aborted-forms:1: The function main::pl-display_rx is undefined.	0
+re/reg_namedcapture.t	2	0	0	2	DIFF		2
+re/reg_nc_tie.t	37	0	14	18	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-STORE; aborted-forms:5: The function |Tie::Hash::NamedCapture|::pl-FETCH is undefined.	0
+re/reg_nocapture.t	25	0	14	11	DIFF		0
+re/reg_pmod.t	88	0	58	30	DIFF		0
+re/reg_posixcc.t	2560	0	1544	7646	DIFF		0
+re/regex_sets.t	96	0	4	84	XDIFF	not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); perl-only, so task #71 does NOT lift it	0
+re/regex_sets_compat.t	2167	2	1600	258	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
+re/regexp.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_noamp.t	2169	0	796	109	TIMEOUT	timeout	0
+re/regexp_nonull.t	2167	2	0	0	DIFF		0
+re/regexp_normal.t	2169	0	1850	8	DIFF	aborted-forms:2: end of file on #<dynamic-extent string-input-stream (unavailable) from ";;; pcl:..."> at (	0
+re/regexp_notrie.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_qr.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_qr_embed.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_qr_embed_thr.t	0	0	202	1656	NOTAP	aborted-forms:3: The function main::pl-useithreads is undefined.	0
+re/regexp_trielist.t	2167	2	795	110	TIMEOUT	timeout	0
+re/regexp_unicode_prop.t	1110	0	778	332	DIFF		0
+re/regexp_unicode_prop_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/rt122747.t	3	0	3	0	OK		0
+re/rxcode.t	42	0	26	15	DIFF		0
+re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions — cl-ppcre has no (*script_run:…); LIFTED by the PCRE2 backend (task #71)	0
+re/speed.t	59	0	1	0	TIMEOUT	timeout	0
+re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+re/stclass_threads.t	0	0	5	1	NOTAP		0
+re/subst.t	281	0	194	78	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
+re/substT.t	0	0	0	0	NOTAP		0
+re/subst_amp.t	13	0	0	13	DIFF		0
+re/subst_wamp.t	281	0	0	0	DIFF		0
+re/uniprops01.t	39811	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops02.t	39961	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops03.t	39793	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops04.t	39759	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops05.t	17394	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops06.t	31724	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops07.t	29260	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops08.t	30492	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops09.t	29848	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/uniprops10.t	26334	0	0	0	XDIFF	aborted-forms:1: Could not run lib/unicore/TestProp.pl: No such file or directory at /home/bernt/perlN/perl | not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)	0
+re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
+run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
-run/exit.t	17	0	14	3	DIFF	
-run/fresh_perl.t	91	0	56	35	XDIFF	unbound:main::H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.
-run/locale.t	44	0	0	0	DIFF	
-run/noswitch.t	3	0	2	1	DIFF	
-run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL
-run/runenv_hashseed.t	278	0	0	0	DIFF	crash:simple-error: Failed to extract seed: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/run/ru
-run/runenv_randseed.t	9	0	0	9	DIFF	
-run/script.t	3	0	3	0	OK	
-run/switch0.t	1	0	0	1	DIFF	
-run/switchC.t	15	0	4	11	DIFF	
-run/switchDx.t	0	0	0	0	NOTAP	
-run/switchF.t	2	0	0	1	DIFF	
-run/switchF1.t	5	0	5	0	OK	
-run/switchF2.t	5	0	5	0	OK	
-run/switchI.t	4	0	0	4	DIFF	
-run/switchM.t	5	0	2	3	DIFF	
-run/switcha.t	2	0	0	1	DIFF	
-run/switchd-78586.t	2	0	0	2	DIFF	
-run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY
-run/switches.t	140	0	6	99	DIFF	crash:simple-error: sbcl: Failed to open 'tmpswitches.bak': No such file or directory at /home/bernt/perlN/per
-run/switchn.t	3	0	1	1	DIFF	
-run/switchp.t	3	0	1	0	DIFF	
-run/switcht.t	0	0	9	4	NOTAP	
-run/switchx.t	8	0	0	3	DIFF	
-uni/attrs.t	35	0	8	26	DIFF	
-uni/bless.t	84	0	83	1	DIFF	
+run/exit.t	17	0	14	3	DIFF		0
+run/fresh_perl.t	91	0	56	35	XDIFF	unbound:H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
+run/locale.t	44	0	0	0	DIFF		0
+run/noswitch.t	3	0	2	1	DIFF		0
+run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
+run/runenv_hashseed.t	278	0	0	0	DIFF	aborted-forms:1: Failed to extract seed: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/run/ru	0
+run/runenv_randseed.t	9	0	0	9	DIFF		0
+run/script.t	3	0	3	0	OK		0
+run/switch0.t	1	0	0	1	DIFF		0
+run/switchC.t	15	0	4	11	DIFF		0
+run/switchDx.t	0	0	0	0	NOTAP		0
+run/switchF.t	2	0	0	1	DIFF		0
+run/switchF1.t	5	0	5	0	OK		0
+run/switchF2.t	5	0	5	0	OK		0
+run/switchI.t	4	0	0	4	DIFF		0
+run/switchM.t	5	0	2	3	DIFF		0
+run/switcha.t	2	0	0	1	DIFF		0
+run/switchd-78586.t	2	0	0	2	DIFF		0
+run/switchd.t	21	0	2	19	DIFF	undef-fn:main::pl-ARRAY	0
+run/switches.t	140	0	6	99	DIFF	aborted-forms:1: sbcl: Failed to open 'tmpswitches.bak': No such file or directory at /home/bernt/perlN/per	0
+run/switchn.t	3	0	1	1	DIFF		0
+run/switchp.t	3	0	1	0	DIFF		0
+run/switcht.t	0	0	9	4	NOTAP		0
+run/switchx.t	8	0	0	3	DIFF		0
+uni/attrs.t	35	0	8	26	DIFF		0
+uni/bless.t	84	0	83	1	DIFF		0
 uni/caller.t	18	0	7	12	DIFF		0
-uni/chomp.t	446	0	446	0	OK	
-uni/class.t	12	0	0	12	DIFF	
-uni/eval.t	5	0	5	0	OK	
-uni/fold.t	19128	104	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
-uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).
-uni/greek.t	0	0	0	0	NOTAP	
-uni/gv.t	206	0	50	31	DIFF	crash:simple-error: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N.	2
-uni/labels.t	10	0	3	5	DIFF	crash:sb-int:compiled-program-error: Execution of a form compiled with errors. Form: (go :ここ) Compile-time error: attempt t
-uni/latin2.t	0	0	0	0	NOTAP	
-uni/lex_utf8.t	16	0	6	10	DIFF	
-uni/lower.t	11720	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
-uni/method.t	62	0	23	9	DIFF	crash:simple-error: Can't locate object method "nÃ¨w" via package "Føø::Bær" at - line N.	2
-uni/opcroak.t	5	0	0	3	DIFF	crash:simple-error: PCL: unsupported in string eval: multiple package sections at (eval N) line N.
-uni/overload.t	191	2	177	14	DIFF	undef-fn:main::pl-todo_skip
+uni/chomp.t	446	0	446	0	OK		0
+uni/class.t	12	0	0	12	DIFF		0
+uni/eval.t	5	0	5	0	OK		0
+uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
+uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
+uni/greek.t	0	0	0	0	NOTAP		0
+uni/gv.t	206	0	51	37	DIFF	aborted-forms:1: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N. 	2
+uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (go :ここ)	0
+uni/latin2.t	0	0	0	0	NOTAP		0
+uni/lex_utf8.t	16	0	6	10	DIFF		0
+uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
+uni/method.t	62	0	28	21	DIFF	aborted-forms:2: Can't locate object method "nÃ¨w" via package "Føø::Bær" at - line N. 	2
+uni/opcroak.t	5	0	0	5	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
+uni/overload.t	191	2	178	14	DIFF	aborted-forms:1: The function main::pl-todo_skip is undefined.	0
 uni/package.t	18	0	8	10	DIFF		0
 uni/parser.t	58	0	26	32	DIFF		0
 uni/readline.t	7	0	4	1	DIFF		2
 uni/select.t	3	2	1	4	DIFF		0
-uni/sprintf.t	52	0	49	3	DIFF	
-uni/stash.t	48	1	43	6	DIFF	
-uni/tie.t	9	1	9	1	OK	
-uni/title.t	5936	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
-uni/tr_utf8.t	8	0	8	0	OK	
-uni/universal.t	90	0	1	0	DIFF	undef-fn:main::pl-Àlìcè
-uni/upper.t	6230	0	0	0	DIFF	crash:simple-error: Can't locate loadable object for module Storable in @INC
-uni/variables.t	66880	0	1248	319	DIFF	unbound:$}
-uni/write.t	8	0	0	8	DIFF	
+uni/sprintf.t	52	0	49	3	DIFF		0
+uni/stash.t	48	1	43	6	DIFF		0
+uni/tie.t	9	1	9	1	OK		0
+uni/title.t	5936	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
+uni/tr_utf8.t	8	0	8	0	OK		0
+uni/universal.t	90	0	31	49	DIFF	aborted-forms:2: The function main::pl-Àlìcè is undefined.	0
+uni/upper.t	6230	0	1	1	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
+uni/variables.t	66880	0	1248	27934	TIMEOUT	timeout; aborted-forms:1: PCL: string literal: code point NxN is not implemented — above SBCL's char-code-limit (U	0
+uni/write.t	8	0	0	8	DIFF		0

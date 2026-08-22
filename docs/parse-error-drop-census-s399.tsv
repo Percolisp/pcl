@@ -6,12 +6,18 @@
 # Columns: <rel-path><TAB><drops in the file><TAB><the compiler's own message(s),
 # with a count each>.
 #
-# Population: perl-tests/*.t (111) + perl's t/ default dirs (527, op/cond.t
-# excluded as always) + lib/**.pm (21).  Measured with
-# tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
+# Population (FIVE, since s434 / task #462): perl-tests/*.t (111) + perl's t/
+# default dirs (527, op/cond.t excluded as always) + lib/**.pm (22) +
+# cpan-tests/modules/**.pm (94) + the 14-dist CPAN board's own lib/**.pm (28).
+# Every `.pm` is transpiled with `--module` — the emission the runtime caches,
+# and therefore the one that runs.  The board lives OUTSIDE the checkout
+# (~/.cpan/build), so its rows are refreshed only by a run that passes
+# `--board`; a run without the flag leaves them alone and says so.  Measured
+# with tools/drop-census.pl at commit 4356e77; 1m31s at 8 jobs.
 #
-# TOTAL after the edits below: 27 files, 82 drops -- 4 perl-tests files (5
-# drops), 23 companion files (77), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 39 files, 102 drops -- 4 perl-tests files (5
+# drops), 23 companion files (77), 9 cpan-tests modules (15), 3 board modules
+# (5), ZERO in lib/.  (At the s399 measurement, over three populations:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -341,6 +347,35 @@
 #         in the session log.  The 4 that stay are the `x`-named lexical sub
 #         (lines 448/751/836/851: PPI lexes a sub named `x` as the repetition
 #         operator -- #361/#376 family, not B3).  Guard Pl/t/lexical-sub-02.t.
+#   s434  THE MODULE POPULATIONS JOIN THE CENSUS (task #462): +12 files, +20
+#         drops, and not one of them is NEW — they are the ones no instrument
+#         had ever counted.  `pl2cl --module` does not even announce a drop
+#         (ruled s403), so these are the last FULLY silent members of the #138
+#         family, and the announce->DIE flip reaches them.  Measured by hand in
+#         s431 (docs/drop-census-s431-flip-gate.md §5) and now by the tool,
+#         number for number: 9 cpan-tests modules / 15 drops, every one in
+#         Test-Simple-1.302199's Test2 stack, and 3 board modules / 5 drops
+#         (Text::Balanced x2 = #457, the dist behind 780 board rows;
+#         Sub::Uplevel x1; Mojo::DOM58::_Collection x2).  Eight of the 20
+#         minimise to #464 (a statement MODIFIER on `require SCALAR` / on a
+#         `local` LIST assignment), #466 (`print $_ LIST`) and, on the same
+#         Test2 line, #465.  The 27 pre-existing rows are BYTE-IDENTICAL in
+#         this run.  Two shipped shims (lib/File/Spec/Functions.pm,
+#         lib/Math/BigInt/Calc.pm) had never been in the population either —
+#         the old glob was two levels deep — and both measure zero.
+#         BOARD ROWS ARE OPT-IN: `tools/drop-census.pl . OUT 8 --board`.
+board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Bug. Fell through. Missing case: [ x2
+board/Sub-Uplevel-0.2800-0/lib/Sub/Uplevel.pm	1	Bug. Fell through. Missing case: [ x1
+board/Text-Balanced-2.07-0/lib/Text/Balanced.pm	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Context.pm	2	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x1
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Instance.pm	2	Handle single node of unknown type. Dump: x2
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult.pm	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	3	Bug. Fell through. Missing case: [ x2 | Can't call method "content" on an undefined value x1
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Formatter/TAP.pm	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/IPC/Driver/Files.pm	1	Handle single node of unknown type. Dump: x1
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Tools/Tiny.pm	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Util.pm	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/lib/Test/Builder/NoOutput.pm	2	Bug. Fell through. Missing case: [ x2
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1

@@ -161,3 +161,61 @@ perl run-perl-test.pl perl-tests/sort.t
 
 The sweep script passes `*pcl-skip-cache* t` to SBCL so module caching is
 bypassed, ensuring each run starts from a clean state.
+
+---
+
+## How a MEASUREMENT runner loads the generated CL (task #467, s434)
+
+**Rule: both measurement runners load the emitted CL with
+`pcl::p-load-with-recovery`; a program (`./runpcl`, a user's own SBCL) uses a
+plain load.**
+
+`p-load-with-recovery` (`cl/pcl-test.lisp`) reads and evaluates the generated
+file **one top-level form at a time** and continues past an uncaught error in
+any single form, instead of ending the file the way `LOAD` does. It is
+faithful to `LOAD` for PCL's output — the reader tracks `*package*` between
+forms, and every `eval-when` PCL emits includes `:execute` — so a file with no
+uncaught top-level die evaluates identically, form for form. Each caught error
+is PRINTED on `*error-output*`, never swallowed.
+
+Why it is a rule and not a preference: the two runners disagreed on exactly
+this axis until s434, and **the disagreement is invisible in either report**.
+`sweep-perl-tests.pl` had recovery; `tools/run-perl-suite.pl` used `--load`.
+Measured s432, the *same* compiler change (#456 half (a): a called
+forward-declaration stub dies instead of answering nil) cost
+
+* the sweep **one row** — the form that died;
+* the companion suite **94 rows** — op/method.t 96→44, op/sort.t 181→142,
+  op/lexsub.t 9→6 — every one of them a row *after* the dying form, in files
+  that already crashed.
+
+So a per-file row count from one population was not comparable to one from the
+other for any change that makes something die, and the difference was the
+RUNNER, not PCL. Same class of trap as #324 (one runner measuring PCL on a
+2 MB control stack for months), which is why the five SBCL-spawning runners
+share one command-line builder (`tools/lib/PCLSbcl.pm`). Recovery is the
+second axis they have to share.
+
+The trade is real and accepted: recovery lets a file report rows perl would
+never have reached either, so a hard failure can read as a partial pass. It is
+paid for by making the recovery LOUD — `tools/run-perl-suite.pl` counts the
+aborted forms and puts `aborted-forms:N: <first condition>` in the file's
+signature column, which keeps such a file out of status OK even when its
+remaining TAP happens to match perl's. `docs/perl-suite-run.tsv` was re-blessed
+in one measured `--all` pass when the change landed (see its s434 header
+block); a file that reported FEWER rows after the change would have been a
+finding, not a re-bless.
+
+Users stay on a plain load on purpose: recovery is a MEASUREMENT policy — it
+buys rows after a failure, which a harness wants and a program must not.
+
+### The snapshot's own hole
+
+`tools/run-perl-suite.pl` also prints, at the end of every run, how many of the
+files it measured have **no row in `docs/perl-suite-run.tsv`** (with their
+names). Five files had none for months (s431): a file with no snapshot row can
+never read as a mover, because the mover check compares against the snapshot —
+the #176 family, a hole inferred from an absence. It is printed, never fatal:
+it is a fact about the baseline, not a measurement this run failed. A row is
+added by splicing the run's FIRST measurement in with a `# sNNN first
+measurement` marker.

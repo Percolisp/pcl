@@ -11,6 +11,47 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s434 (2026-08-22, Opus 5) — Q1: the two instruments.  BOTH measurement runners load with RECOVERY; the drop census has FIVE populations; a snapshot hole is PRINTED, from both sides
+
+- **#467 DONE: `tools/run-perl-suite.pl` loads the emitted CL with
+  `pcl::p-load-with-recovery`**, like `sweep-perl-tests.pl`.  The rule is in
+  `docs/test-infrastructure.md`: **both MEASUREMENT runners load with recovery;
+  a program (`./runpcl`) uses a plain load** — recovery is measurement policy,
+  it buys rows after a failure, which a harness wants and a program must not.
+  A recovered form is COUNTED and PRINTED (`aborted-forms:N: <condition>` in the
+  signature), placed BEFORE the status decision so such a file can never read as
+  OK — the opposite placement from the #367 orphan note, which is an observation
+  about the RUN.  A reader stop gets its own `unreadable-form:` signature.
+- **`docs/perl-suite-run.tsv` re-blessed in the same commit** (one `--all`
+  pass + the #366 serial discipline; the 22 movers over the runner's own cap
+  re-run in a second `--jobs 1` pass): **52 files gained rows, 0 lost, TOTAL
+  C_ok 74803 → 77128 (+2325)**, 116 signature-only changes, 2 status movers
+  that a `4356e77` worktree proves PRE-EXISTING.  **The six #326 hang-set rows
+  are STOPWATCH READINGS** (the file never finishes; C_ok is how far it got in
+  90 s) — under load they drop 300–400 rows and re-measure at their blessed
+  value alone; never read a regression into them from a count.
+- **`docs/perl-suite-expected-rows.tsv` re-blessed for SIX files only** — the
+  registered XDIFF files that now REACH rows they used to die before (io/shm.t,
+  mro/basic.t, mro/basic_utf8.t, mro/next_skip.t, mro/next_skip_utf8.t,
+  op/current_sub.t).  The five registered files already DIFF before the session
+  were deliberately left alone.
+- **#462 DONE: `tools/drop-census.pl` has FIVE populations** — perl-tests, perl
+  t/, `lib/**.pm`, `cpan-tests/modules/**.pm` and (behind `--board`) the 14-dist
+  board's `lib/`.  **Every `.pm` is transpiled with `--module`**, the emission
+  the runtime caches; the board's dists are read from
+  `docs/cpan-board14-s343.tsv` and its build root from `$PCL_CPAN_BUILD` /
+  `$HOME/.cpan/build`, never written down.  The blessed census gained the s431
+  hand measurement, number for number: **+12 files / +20 drops → 39 files / 102
+  drops**, the 27 pre-existing rows byte-identical.  `lib/` also moved to a
+  RECURSIVE glob (two shims had never been in any census).
+- **A snapshot hole is now PRINTED, from both sides** (s433 §A.4): the files a
+  run measured that have NO row, and — on `--all` only — the rows for files the
+  scan never runs.  The second half found that all five rows s431 spliced in are
+  need-harness files, so `--all` cannot refresh them and they still cannot read
+  as movers; naming them is the fix for now (Ask 1 of
+  `docs/opus5-review-requests-s434.md`).
+- Queue unchanged: **Q2 = the flip** (`docs/plan-post-s433.md`), then Q3.
+
 ## s433 (2026-08-22, Fable) — s431 + s432 REVIEWED + APPROVED; THE FLIP HAS A SHAPE (a run-time die at the drop site, one shape, every mode); #456 half (b) = the PHASE model across sections; THE LIVE QUEUE IS `docs/plan-post-s433.md`
 
 - **Both Opus batches APPROVED as shipped** (`docs/fable-answers-s433.md`).

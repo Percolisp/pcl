@@ -30,8 +30,12 @@
 # name: it is the known memory hog (20k-deep ternary, MemoryMax guard) and is a
 # blessed non-participant in every measurement.
 #
-# Companion: tools/drop-census.pl, which reads the same populations but looks
-# at the emitted CL instead of stderr.
+# Companion: tools/drop-census.pl, which looks at the emitted CL instead of
+# stderr.  NOTE (s434, task #462): the census now covers FIVE populations —
+# these two plus lib/**.pm, cpan-tests/modules/**.pm and (with --board) the
+# 14-dist board's lib/ — all three of them transpiled with `--module`.  This
+# scan is still the two .t populations only; widening it is unclaimed work,
+# not a decision that it should stay narrow.
 use strict;
 use warnings;
 use File::Basename qw(basename);
