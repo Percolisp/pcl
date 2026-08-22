@@ -4,6 +4,70 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 428 (cont., 2026-08-22, Fable) — B3.1 / #411 SHIPPED: an elided-arrow call of a postfix result
+
+The B3 track (task #153, the last of Option B) that the session opened by SIZING
+(`docs/b3-operand-collapse-s428.md`) — its first widening landed the same session.
+
+**#411: a `(args)` list directly after a completed postfix element is an
+elided-arrow CALL of that result** — `$s2->()()`, `$subsubs[0]()(0)`,
+`(sub{})[0]()`, `$h{k}()`, `$r->{m}()`, `$a[0]()`.  perl lets you drop the `->`
+between chain links; PCL handed the trailing `(...)` to the arrow/subscript
+reducer as a bare List with no operator, and it fell through ("Missing case: [")
+— 8 census drops across op/closure.t, op/current_sub.t, op/ref.t and their
+perl-tests twins, plus two more found this session in op/lexsub.t.
+
+**What the measurement changed about the plan.**  The design sketch put the fix
+in `_term_extent` (a guard for when the walker stops short).  The walker DOES
+stop short for the subscript cases (`$a[0]()` ext=1) — but for `$s2->()()` /
+`$r->{m}()` it already claimed the full extent (ext=3) and the statement STILL
+dropped, so the real gap was in the REDUCTION, not the extent.  And `f()()`,
+listed in the design as a shape, is a perl SYNTAX ERROR (a paren-less call's
+result cannot be called without `->`) — dropped from the list.
+
+**The fix that shipped is smaller than the sketch and needs no `_term_extent`
+change.**  One normalizing pre-pass `Pl::PExpr::_insert_elided_call_arrows` (run
+beside the `_retag_*` passes, before `_fold_terms`) makes the elided arrow
+EXPLICIT — `$a[0]()` → `$a[0]->()` — so the ONE existing `-> ( args )` path
+(walker W2 + reduction Case 2, which already re-tags a following brace as an
+implicit-arrow subscript) handles every shape with no new reduction logic.
+Building a fresh token list makes the insertion CASCADE: `$subsubs[0]()(0)` →
+`$subsubs[0]->()->(0)`.  The discriminator is the token BEFORE the List — a
+Subscript, a `->()` call result (a List whose own predecessor is `->`), or a
+list-slice Constructor `[` preceded by a List/Condition/qw primary — never a bare
+Symbol/Word primary, so `$foo(1)`, `func(1,2)`, `$cr->(9)` are untouched.  This
+is the "reuse, don't duplicate" ideal: it normalizes PPI's elided arrow exactly
+as `_retag_list_slice_subscripts` normalizes its predecessor-classified braces.
+
+**Verification — the four-population bar + gate + sweep, all clean.**
+Guard `Pl/t/elided-call-01.t` (4/4); `reduce-term-01.t` still 127/127.
+**corpus-diff (perl-tests) vs `b70ccaf`: only closure.t + ref.t differ, each ONLY
+the previously-dropped statement now a `p-funcall-ref`, silent drops 7 → 5.**
+**perl's own t/ A/B: only op/closure.t, op/current_sub.t, op/ref.t, op/lexsub.t
+differ — every diff a #411 un-drop, and the "statements that STARTED dropping"
+set is EMPTY (no regression).**  **lib shims A/B SAME=20 / DIFF=0; cpan board A/B
+SAME=94 / DIFF=0.**  Cold gate **158 files / 5688 rows**, failures = exactly the
+13 pclxs xs rows.  Full sweep `--jobs 6`: **GATE clean, TOTAL passing 18365 →
+18367 (+2)** (the two un-dropped perl-tests statements now pass), **drops census
+7 → 5 (−2)**, 0 new / 0 fixed / no LOST.
+
+**Baselines edited ROW BY ROW with causes.**  `pass-baseline`: closure.t 272 →
+273, ref.t 191 → 192.  Drop census 32/104 → **29/94** (perl-tests closure.t and
+t/op closure.t + current_sub.t cleared; perl-tests/ref.t + t/op/ref.t 2 → 1, the
+remaining drop the indirect-object `doit $object "FOO"` #399; t/op/lexsub.t 14 →
+12).  `perl-suite-run.tsv`: op/ref.t 197 → 198 (base `b70ccaf` measured 197/44 —
+matches the snapshot, no drift — current 198/44, serial-confirmed REAL MOVE); the
+other three movers keep their row counts (op/current_sub.t is 0/0 on BOTH trees,
+crashing on `__SUB__` #378, so the drop removal is honest but adds no row).
+
+Generation bumped v2-174 → **v2-175**, the three artifacts regenerated
+(stamp-only, no shim carries the shape).  #411 CLOSED; it clears three of the
+flip's blockers.  **B3.2 (#259, parenless proto arity in operator position) and
+B3.3 (#374(b), `WORD WORD WORD` empty-proto lexsubs)** remain — the next
+widenings, from `docs/b3-operand-collapse-s428.md`.
+
+---
+
 ## Session 428 (2026-08-22, Fable; Opus finisher for the sweep + docs) — s427 reviewed + APPROVED + merged; generation v2-174; cold gate 157/5684 + full sweep on the final tree; round 2 of the Opus fan-out COMPLETE, all worktrees pruned
 
 **State at open:** main `dbef93c` (s425's close), and agent F of the round-2

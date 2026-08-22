@@ -491,6 +491,7 @@ sub parse {
   # trailing {EXPR}{SLOT} blocks and the parse would fall through.
   $self->_retag_braced_deref_subscript($e);
   $self->_retag_list_slice_subscripts($e);
+  $self->_insert_elided_call_arrows($e);
   $self->_precollapse_dyn_glob_slots($e);
   $self->handle_subcalls($e);
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
@@ -2436,6 +2437,60 @@ sub _retag_list_slice_subscripts {
     }
     $i = $j - 1;
   }
+}
+
+# #411 (task #153 / B3.1): a `(args)` list DIRECTLY after a completed postfix
+# element is an ELIDED-ARROW CALL of that element's result — perl lets you drop
+# the `->` between chain links, so `$a[0](1)`, `$s2->()()`, `(sub{})[0]()` and
+# `$r->{m}()` all call the coderef the left side yields.  PPI hands the trailing
+# `(...)` over as a plain Structure::List with no operator before it, so the
+# arrow/subscript reducer (Case 2, `X->(...)`) never fires and the statement
+# DROPPED ("Bug. Fell through. Missing case: [").  Rather than teach the reducer
+# a second call spelling, this pass makes the elided arrow EXPLICIT — exactly as
+# _retag_* normalize PPI's predecessor-classified braces — so the ONE existing
+# `-> ( args )` path (walker W2 + reduction Case 2) handles every shape.
+#
+# A List is an elided call iff its predecessor is a COMPLETED postfix element
+# that yields a value, never the bare primary: a Subscript (`$a[0]`, `$h{k}`,
+# `$x->{m}`), a `-> ( )` call result (a List whose own predecessor is `->`), or
+# a list-slice (a Constructor `[` preceded by a List/Condition/qw primary — the
+# same discriminator _retag_list_slice_subscripts and _term_extent W4 use).  A
+# List after a bare Symbol (`$foo(1)` — not a call in perl), a Word (`func(1)` —
+# the word's own args), an arrow (`$x->(1)` — already explicit) or a Cast is
+# left alone.  Building a fresh list makes the insertion cascade: `$a[0]()(0)`
+# becomes `$a[0]->()->(0)` because the `->` inserted before the first call is
+# the predecessor the second call's rule then sees.
+sub _insert_elided_call_arrows {
+  my ($self, $e) = @_;
+  my @out;
+  for my $t (@$e) {
+    if (ref($t) eq 'PPI::Structure::List' && $t->start && $t->start->content eq '('
+        && @out && $self->_is_elided_call_prev(\@out)) {
+      push @out, PPI::Token::Operator->new('->');
+    }
+    push @out, $t;
+  }
+  @$e = @out;
+}
+
+# Does the tail of the already-emitted run end in a completed postfix element a
+# following `(...)` would CALL?  (See _insert_elided_call_arrows.)
+sub _is_elided_call_prev {
+  my ($self, $out) = @_;
+  my $prev  = $out->[-1];
+  my $prev2 = @$out >= 2 ? $out->[-2] : undef;
+  my $rp = ref($prev);
+  return 1 if $rp eq 'PPI::Structure::Subscript';                 # $a[0](  $h{k}(  $x->{m}(
+  return 1 if $rp eq 'PPI::Structure::List'                       # $s2->()(
+           && $prev2 && $self->is_arrow_op($prev2);
+  if ($rp eq 'PPI::Structure::Constructor' && $prev->start        # (sub{})[0](
+      && $prev->start->content eq '[' && $prev2) {                #   a list-slice
+    my $r2 = ref($prev2);
+    return 1 if $r2 eq 'PPI::Structure::List'
+             || $r2 eq 'PPI::Structure::Condition'
+             || $r2 eq 'PPI::Token::QuoteLike::Words';
+  }
+  return 0;
 }
 
 sub _precollapse_dyn_glob_slots {

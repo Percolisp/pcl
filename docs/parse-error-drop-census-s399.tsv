@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 32 files, 104 drops -- 5 perl-tests files (7
-# drops), 27 companion files (97), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 29 files, 94 drops -- 4 perl-tests files (5
+# drops), 25 companion files (89), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -271,23 +271,38 @@
 #         than the `*` already there.  p-glob now expands a leading tilde
 #         (bsd_glob's rule), which is what makes the row PASS rather than
 #         merely run.
-perl-tests/closure.t	1	Bug. Fell through. Missing case: [ x1
+#   s428  TEN drops REMOVED, THREE FILES CLEARED, by task #411 (B3.1, Option B
+#         phase 2 Track B3): a `(args)` list DIRECTLY after a completed postfix
+#         element is an ELIDED-ARROW CALL of that result.  Fixed by ONE
+#         normalizing pre-pass Pl::PExpr::_insert_elided_call_arrows (makes the
+#         elided `->` explicit, so the existing `-> ( args )` path handles it);
+#         no _term_extent change, no new reduction logic.  32/104 -> 29/94.
+#         Verified over ALL FOUR populations vs b70ccaf: corpus-diff (only
+#         closure.t + ref.t differ), lib A/B SAME=20, perl-t A/B (only the four
+#         op/ files below), cpan A/B SAME=94 — every diff a #411 un-drop, ZERO
+#         new drops anywhere; cold gate clean, sweep GATE clean (+2 passing).
+#      (a) perl-tests/closure.t 1 -> 0 (ROW REMOVED) and t/op/closure.t 2 -> 0
+#         (ROW REMOVED): `$s2->()()` (`$x->()()`).
+#      (b) t/op/current_sub.t 3 -> 0 (ROW REMOVED): `$subsubs[N]()(0)`
+#         (`$a[i]()(0)`; the rows still need anon __SUB__ (#378) to PASS, but
+#         the DROP is gone).
+#      (c) perl-tests/ref.t 2 -> 1 and t/op/ref.t 2 -> 1: `(sub{})[0]()` un-drops;
+#         the remaining drop is the indirect-object `doit $object "FOO"` (#399).
+#      (d) t/op/lexsub.t 14 -> 12: two anon `}->()()` statements (lines 685, 871).
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
-perl-tests/ref.t	2	Bug. Fell through. Missing case: [ x2
+perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of unknown type. Dump: x1
 t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
-t/op/closure.t	2	Bug. Fell through. Missing case: [ x2
-t/op/current_sub.t	3	Bug. Fell through. Missing case: [ x3
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	14	Bug. Fell through. Missing case: [ x7 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
+t/op/lexsub.t	12	Bug. Fell through. Missing case: [ x5 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
-t/op/ref.t	2	Bug. Fell through. Missing case: [ x2
+t/op/ref.t	1	Bug. Fell through. Missing case: [ x1
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2

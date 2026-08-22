@@ -69,7 +69,8 @@ chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
 chop.t	PARTIAL	96	0	148
 chr.t	OK	38	0	42
-closure.t	OK	272	4	278
+# s428 (#411 elided-arrow call): closure.t 272 -> 273 EDITED BY HAND — `$s2->()()` (line 742) no longer DROPS.
+closure.t	OK	273	4	279
 cmpchain.t	OK	1476	0	1476
 concat.t	OK	234	0	225
 concat2.t	OK	4	0	4
@@ -134,7 +135,8 @@ quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
 readline.t	PARTIAL	23	5	36
 recurse.t	OK	27	1	28
-ref.t	PARTIAL	191	17	245
+# s428 (#411 elided-arrow call): ref.t 191 -> 192 EDITED BY HAND — `(sub{})[0]()` (line 674) no longer DROPS.
+ref.t	PARTIAL	192	17	245
 reset.t	PARTIAL	41	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	84	32	128

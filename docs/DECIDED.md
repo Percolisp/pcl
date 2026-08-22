@@ -11,6 +11,39 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s428 (cont., 2026-08-22, Fable) — B3.1 / #411: an elided-arrow call of a postfix result
+
+- **`$a[0]()`, `$s2->()()`, `(sub{})[0]()`, `$h{k}()`, `$r->{m}()` — a `(args)`
+  list directly after a completed postfix element is an ELIDED-ARROW CALL of that
+  result (#411, B3.1 of `docs/b3-operand-collapse-s428.md`).**  Fixed by ONE
+  normalizing pre-pass `Pl::PExpr::_insert_elided_call_arrows`: it makes the
+  elided `->` EXPLICIT so the existing `-> ( args )` path (walker W2 + reduction
+  Case 2) handles every shape — no `_term_extent` change, no new reduction logic.
+  The discriminator is the token BEFORE the list (a Subscript, a `->()` call
+  result, or a list-slice Constructor — never a bare Symbol/Word primary, so
+  `$foo(1)`/`func(1)`/`$cr->(9)` are untouched).  Reuse, don't duplicate: it
+  normalizes PPI's elided arrow exactly as `_retag_list_slice_subscripts`
+  normalizes its predecessor-classified braces.
+- **The measurement corrected the plan, twice.**  (i) The fix is REDUCTION-side,
+  not `_term_extent`: for `$s2->()()` / `$r->{m}()` the walker already claimed the
+  full extent (ext=3) yet the statement dropped, so the sketch's "widen the
+  walker" was aimed at the wrong layer.  (ii) `f()()` is a perl SYNTAX ERROR (a
+  paren-less call's result cannot be called without `->`), not a #411 shape.
+- **Un-dropping into a crash is not a regression when the file already crashed
+  there.**  op/current_sub.t is 0/0 on BOTH b70ccaf and this tree (it crashes on
+  `__SUB__`, #378); #411 removed its 3 drops (0 PARSE ERRORs emitted now) but the
+  file's row count is unchanged — the drop-census removal is honest and there is
+  no lost row.  Always A/B the file on the base tree before calling a companion
+  move yours (the s420 rule) — op/ref.t's 197 → 198 checked out because base
+  measured 197/44, matching the snapshot.
+- **Verified over ALL FOUR populations vs `b70ccaf`** — corpus-diff (only
+  closure.t + ref.t), perl-t A/B (only the four op/ files, zero new drops), lib
+  A/B SAME=20, cpan A/B SAME=94 — plus cold gate clean (158/5688, only the 13 xs
+  rows) and sweep GATE clean (TOTAL 18365 → 18367 +2, drops 7 → 5).  Baselines
+  edited row by row; census 32/104 → 29/94; gen v2-175; guard
+  `Pl/t/elided-call-01.t`.  #411 CLOSED; B3.2 (#259) and B3.3 (#374(b)) remain.
+
+
 ## s428 (2026-08-22, Fable) — s427 reviewed + APPROVED + merged (ff, `821f0bb`); generation v2-174 (`53dcd2e`); round 2 of the Opus fan-out complete
 
 - **s427 (O3: #442, #422.2, #421, #415 items 1+4) APPROVED as shipped**, merged

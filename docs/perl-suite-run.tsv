@@ -746,7 +746,14 @@ op/read.t	2116	0	2116	0	OK
 op/readdir.t	16	0	13	3	DIFF	
 op/readline.t	35	1	25	7	DIFF	undef-fn:PerlIO::pl-get_layers
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.
-op/ref.t	257	0	197	44	DIFF	
+# s428 (#411 elided-arrow call, B3.1): op/ref.t 197 -> 198 — `(sub{})[0]()` (line
+#   668) no longer DROPS; base b70ccaf measured 197/44 (matches this snapshot,
+#   no drift), current 198/44, serial-confirmed REAL MOVE.  The other three
+#   #411 movers do NOT change their row counts: op/closure.t (267/3) and
+#   op/lexsub.t (7/10) un-drop statements bounded by an earlier failure, and
+#   op/current_sub.t is 0/0 on BOTH trees (crashes on __SUB__, #378) — the drop
+#   removal is honest (0 PARSE ERRORs emitted) but adds no row.
+op/ref.t	257	0	198	44	DIFF
 op/refstack.t	0	0	0	0	NOTAP	
 op/repeat.t	50	0	47	3	DIFF	
 op/require_37033.t	10	0	3	0	DIFF	crash:simple-error: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N

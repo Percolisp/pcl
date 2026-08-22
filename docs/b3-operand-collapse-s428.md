@@ -72,43 +72,50 @@ four-population emission A/B (`tools/emission-ab.pl`, byte-identical except the
 explained diffs), then the gate + full sweep + the s373 three-leg bar
 (gate-SET scan over both populations, sweep TOTAL/LOST, corpus-diff).
 
-### B3.1 — a `(args)` List after a COMPLETED postfix step is a call (#411, first)
+### B3.1 — a `(args)` List after a COMPLETED postfix step is a call (#411) — SHIPPED s428
 
 PPI hands these over as (probed s428):
 
     $s2->()()        Symbol  Op(->)  List()   List()
     $subsubs[0]()(0) Symbol  Subscript[0]  List()  List(0)
     (sub{})[0]()     List(sub{})  Constructor[0]  List()
-    f()()            Word  List()  List()
     $x->{a}()        Symbol  Op(->)  Subscript{a}  List()
+    $a[0]()          Symbol  Subscript[0]  List()
+    $h{k}()          Symbol  Subscript{k}  List()
 
 perl allows an elided `->` between chain elements, so a `Structure::List`
 directly after a completed postfix element is a call of that element's result.
-The walker already claims `-> method ( args )` (step 4a); this is the
-arrow-less sibling.
+(`f()()` is NOT one of these — a paren-less call's result cannot be called
+without `->`, it is a perl SYNTAX ERROR; the design's earlier list was wrong.)
 
-**Design:** in the postfix loop, after `_extend_postfix_chain` returns `$next`,
-if `$next > $i` (at least one postfix step OR a word-call arg-list was taken —
-we are past the bare primary), `$e->[$next+1]` is a `Structure::List`, and
-`$e->[$next]` is not an arrow (the arrow-method case is handled above), consume
-the List and continue the chain.
+**What the measurement changed about the plan.**  The sketch above (a guard in
+`_term_extent`) was based on the assumption the walker STOPPED SHORT.  It does
+for the subscript cases (`$a[0]()` ext=1) but for `$s2->()()` / `$r->{m}()` the
+walker already claimed the full extent (ext=3) and the statement STILL dropped —
+so the real gap was in the REDUCTION (`parse()`), not the extent: the trailing
+`(...)` reached the arrow/subscript reducer as a bare List with no operator and
+fell through ("Missing case: [").
 
-**The load-bearing guard is `$next > $i`.**  It is what distinguishes a call of
-a *result* from `$foo(…)` / `$fh (LIST)` — a `Structure::List` right after the
-bare primary Symbol, where `$next == $i`, which perl does NOT treat as a call
-and which the indirect-object / filehandle machinery reads.  It also leaves
-`(1,2,3)()` (a List primary with no postfix step, `$next == $i`) declined, as
-perl rejects it.
+**The fix that shipped is smaller and needs no `_term_extent` change at all.**
+A single normalizing pre-pass `_insert_elided_call_arrows` (beside the other
+`_retag_*` passes, run before `_fold_terms`) makes the elided arrow EXPLICIT —
+`$a[0]()` → `$a[0]->()` — so the ONE existing `-> ( args )` path (walker W2 +
+reduction Case 2, which already re-tags following braces as implicit-arrow
+subscripts) handles every shape.  Building a fresh token list makes the
+insertion CASCADE: `$subsubs[0]()(0)` → `$subsubs[0]->()->(0)`.  The
+discriminator is on the token BEFORE the List: a Subscript (`$a[0]`, `$h{k}`,
+`$x->{m}`), a `-> ( )` call result (a List whose own predecessor is `->`), or a
+list-slice (a Constructor `[` preceded by a List/Condition/qw primary — the W4
+discriminator) — never a bare Symbol/Word primary (so `$foo(1)`, `func(1)`,
+`$cr->(9)` are untouched).
 
-**Acceptance rows** (perl-oracle): the five shapes above return the call
-result; the inverse guards `$foo(1,2)` (a scalar — perl error / not a call, the
-walker must still decline so the legacy path keeps its reading), `$fh (LIST)`
-(indirect filehandle, unaffected), `(1,2,3)()` (declined), `$o->m()[0]`
-(Constructor after a methodcall node — already deliberately NOT taken, W4), and
-`func(1,2)` (single List — the ordinary word-call, unchanged).  Population:
-closure.t (2+1), current_sub.t (3), ref.t (1+1) stop dropping — and current_sub
-also needs anon `__SUB__` (#378) for its rows to PASS, so measure DROP→OK not
-row-count there.
+**Verification (s428, tree vs base `b70ccaf`):** guard `Pl/t/elided-call-01.t`
+(4 rows, 4 s) + reduce-term-01.t still 127/127; **corpus-diff: only closure.t +
+ref.t differ, each ONLY the previously-dropped statement now emitting a
+`p-funcall-ref`, silent drops 7 → 5**; **lib A/B SAME=20 / DIFF=0**; cold gate +
+full sweep below.  Population: perl-tests closure.t + ref.t un-drop; perl's own
+t/ op/closure.t, op/current_sub.t, op/ref.t un-drop via the companion (current_sub
+also needs anon `__SUB__` #378 for its rows to PASS, so measure DROP→OK there).
 
 **Risk:** `_term_extent` feeds `_fold_terms`; a `Structure::List` after a term
 is the review doc's named regression zone (indirect object / filehandle).  The
