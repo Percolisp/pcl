@@ -365,3 +365,44 @@ The other five #415 singles, each probed:
    coercion change runs the companion leg earned its keep here on a `Pl/`
    change: the leg is worth running for any rule that reclassifies a TOKEN
    family, not only for coercions.
+
+---
+
+## §9  RUN LEDGER — exactly what was run, on which tree, under which generation
+
+Written at the session's forced end.  **All four items are DONE, committed and
+guarded; the branch is fast-forward mergeable onto `dbef93c`.**  What is
+incomplete is the FINAL re-verification pass on the final tree — read this
+table before trusting any number above.
+
+| run | tree | generation | result |
+|---|---|---|---|
+| cold gate | rebased onto `463a8f8` (after s426) | **v2-171** | 157 files / **5665 rows**, failures = the 13 pclxs xs rows only |
+| full sweep `--jobs 3` | same | **v2-171** | GATE clean, TOTAL 18365 (+0), drops 7 = census, 0 new / 0 fixed |
+| cold gate | same tree | **v2-173** | 157 / 5665, same 13 xs rows — the collision re-run Fable asked for |
+| full sweep `--jobs 3` | same tree | **v2-173** | GATE clean, TOTAL 18365 (+0), drops 7 = census — identical to the v2-171 run bucket for bucket |
+| cold gate | **final tree** (rebased onto `dbef93c`, after s423/#418) | v2-173 | **157 files / 5684 rows**, failures = the 13 pclxs xs rows only |
+| corpus-diff | final tree (rebased onto `dbef93c`, after s423/#418) | v2-173 | **IDENTICAL across 111 files**, silent drops 7 unchanged |
+| gate-SET scan, both populations (638 × 2) | final tree vs a `dbef93c` worktree | v2-173 | **exactly two verdicts move**: t/op/glob.t drop → OK, t/re/subst.t loses its `@?` drop |
+| companion leg, 18 files | final tree vs a `dbef93c` worktree | v2-173 | **exactly three rows move**: op/glob.t 13/4 → 14/4, io/argv.t 23/30 → 27/26, re/subst.t drops 3 → 2 |
+| `emission-ab` over the 22 lib shims | after every commit | both | SAME=22, DIFF=0 |
+| the three artifacts | final tree | v2-173 | regenerated; **bodies byte-identical**, only the stamp moved |
+| guard files, run directly on the final tree | final tree | v2-173 | `punct-array-glob-01.t` 13/13, `utf8-source-01.t` 25/25, `wide-codepoint-01.t` 11/11, `prototype-01.t` 137/137 |
+
+**THE ONE THING NOT RUN: the full perl-tests sweep on the FINAL tree** (the
+one rebased onto `dbef93c`).  The cold gate on that tree DID complete — 157 /
+5684, only the 13 xs rows — and the sweep was next when the session ended.
+What changed between the swept tree and the final one is the rebase onto
+s423/#418 plus ONE code line: the readline/glob whitelist widened from
+`[A-Za-z_]\w*` to `[^\W\d]\w*`, with its two guard rows.  That line was
+measured on the final tree by everything short of a full run — corpus-diff
+IDENTICAL over 111 files, the gate-SET scan over both populations showing only
+the two intended verdicts, the 18-file companion A/B showing only the three
+intended rows, and the four guard files green including #418's own
+bareword-filehandle row, which is what motivated the widening.  **A reviewer
+should run `perl sweep-perl-tests.pl --jobs 3` on the merged tree before
+blessing the numbers**; expected GATE clean, TOTAL 18365 (+0), drops 7.
+
+Raw logs of every run above are in the worktree's `.s427/` directory
+(`gate*.log`, `sweep*.log`, `comp-*.tsv`, `gs-*.tsv`), which is untracked on
+purpose — it is evidence, not repo content.
