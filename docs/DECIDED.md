@@ -13,6 +13,7 @@ not-supported.md → only then probe.*
 
 ## s430 (2026-08-22, Fable) — B3.3 / #374(b): a keyword-named lexical sub is renamed POSITION-AWARE — the sub where a term is expected, the keyword where an operator is
 
+- **The live queue moved to `docs/plan-post-s430.md`** (P1 the flip re-census → P2 #456 → P3 #453+#365 → P4 #454/#435/#455 → P5 #451/#452/#449/#450 → push week → CI → v0.1 tag; Fable: the flip design from P1's table).
 - **`my`/`state`/`our sub if () { 44 }` + `my $x = if if if` (t/op/lexsub.t
   lines 71/209/576): the renamed spellings DROPPED as three juxtaposed calls,
   the `our` one as the keyword parse (#374(b), B3.3 of

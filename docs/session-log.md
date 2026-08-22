@@ -52,7 +52,7 @@ at file level, returns EMPTY — the package-switch section is emitted before th
 hoisted definition and the `p-declare-sub` stub answers undef instead of
 dying.  **#374 CLOSED.  B3 COMPLETE.**  Next: the flip re-census
 (`docs/drop-census-s419-flip-gate.md` §4) and the Opus fillers (#453, #435,
-#454/#455, #456).
+#454/#455, #456).  **The Opus handoff is `docs/plan-post-s430.md`** (written at session end: P1–P5 + the release gate, recipes, the Fable queue).  The s416 stale-guard rule fired again this session (lexical-sub-01.t's #374 rows) — the targeted-guard batch caught it, which is why that batch runs.
 
 ## Session 429 (2026-08-22, Fable) — B3.2 / #259 SHIPPED: a declared sub's call parses by its PROTOTYPE'S SHAPE, never its minimum arity
 

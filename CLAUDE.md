@@ -611,6 +611,7 @@ skip; both baselines edited ROW BY ROW.  Census 46/139 → **42/135**; gate
 **runpcl now forwards `^PCL:` lines on a successful transpile** — it used to
 discard the #339 drop announcement.  #259/#335 probed post-fix: NO change, as
 designed.
+2b0000000000. **s430 (Fable, 2026-08-22): B3 COMPLETE (#153 CLOSED; B3.3 = #374(b), the keyword-named lexical sub renamed POSITION-AWARE) — THE LIVE QUEUE IS `docs/plan-post-s430.md`** (P1 flip re-census → P2 #456 → P3 #453+#365 → P4 #454/#435/#455 → P5 #451/#452/#449/#450 → push week → CI → v0.1 tag; recipes in its §3; Fable: the flip design from P1's table).  Record: DECIDED §s430, `docs/b3-operand-collapse-s428.md` §B3.3.
 2b000000000. **s425 (Fable, 2026-08-22): the three USER decisions CLOSED and round 2
 of parallel Opus agents — E + B MERGED, F IN FLIGHT at session end.**  Decisions
 (`docs/plan-post-s420.md` §4, DECIDED s425): **indirect object = MAYBE LATER**
