@@ -50,7 +50,7 @@ s399.tsv`, 32 files / 104 drops) → the statement text of every drop, classifie
 | lvalue-sub assignment (`f()=…`, `&$r(0)=…`, `keeze=64`, `continue{…}`) | 39 | **no** — permanently exempt, ruled `fable-answers-s400.md` §6.3 |
 | **#411 postfix call-of-call/subscript** (`$s2->()()`, `$subsubs[0]()(0)`, `(sub{})[0]()`) | 8 | **YES — the cleanest widening** |
 | **#374(b) `WORD WORD WORD` lexsubs** (`my $x = if__lexsub if__lexsub if__lexsub`) | 4 | **yes — hardest, last** |
-| **#259 parenless proto list-op arity** (`1 == a_hash 'a'`, `(unilist3 0 \|\| 5)`) | 3 | **yes — after #411** |
+| **#259 parenless proto list-op arity** (`1 == a_hash 'a'`, `(unilist3 0 \|\| 5)`) | 3 | **yes — after #411 — SHIPPED s429** |
 | family-4 glob/symbolic-ref surgery (`$${$_[0]}`, `*{;undef}=3`, `*X=*-`, `local *a=*1`, `*^R=*…`, `++${"23::foo"}`, `${no strict;\$_}`) | 12 | no — by-design walker decline + PPI mislex; #410/E5-adjacent |
 | non-ASCII stash/glob/readline names (`<Ạ>`, `++${"\xff::foo"}`) | ~6 | no — #410 naming |
 | indirect object (`method $obj "a"`, `doit $object "FOO"`) | 4 | no — #399, MAYBE LATER (USER s425) |
@@ -59,7 +59,7 @@ s399.tsv`, 32 files / 104 drops) → the statement text of every drop, classifie
 | `if if if` (unrenamed) / statement-`x` residue | ~3 | no — #374(a) done s408; the rest is lexer |
 
 **So of the 104 drops, exactly ~15 are B3-widenable term grammar** (#411 8,
-#259 3, #374(b) 4), not the ~40 the earlier estimate carried — that number
+#259 3 — four with t/op/utftaint.t's `(@)`, found s429, #374(b) 4), not the ~40 the earlier estimate carried — that number
 folded in family 4 (by-design declines) and the lexsub crashes.  The rest are
 exempt, registered, feature absences, or naming/lexer work with other owners.
 
@@ -123,17 +123,45 @@ is the review doc's named regression zone (indirect object / filehandle).  The
 out, but the four-population A/B is mandatory — byte-identical except the eight
 #411 sites.
 
-### B3.2 — parenless prototyped list-op arity in operator position (#259, second)
+### B3.2 — a declared sub's call parses by its PROTOTYPE'S SHAPE (#259) — SHIPPED s429
 
-`1 == a_hash 'a'` (`Number == Word Quote`) and `(unilist3 0 || 5) == 6`: a
-parenless user-sub call as the operand of a binary operator drops.  The
-prototype IS in the environment (`my $y = pi` proves the single-element path
-reads it), but the operator-loop term reading does not consult it — the #365 /
-#266 classifier ("a bare NAME is a CALL only where it is CALLABLE") asked at one
-more site.  This touches `handle_subcalls`'s parenless-argument extent, not just
-`_term_extent`, so it is riskier than B3.1 — order it second and alone.  Carry
-the discriminating measurement first: dump `@$e` at the "Fell through" die for
-`1 == a_hash 'a'` vs the working `a_hash('a') == 1`.
+`1 == a_hash 'a'` (`(%)`), `2 == a_hash 'a','b'`, `(unilist3 0 || 5) == 6`
+(`(;$;)`), and — found by the same measurement — `any_tainted @_` (`(@)`,
+t/op/utftaint.t), `taint_these @list[…]` (`:prototype(@)`, t/op/taint.t) and
+`f 5` for `sub f($x = 1)`: every `min 0` prototype and all-defaulted signature.
+
+**What the measurement changed about the plan.**  The sketch above guessed "the
+operator-loop term reading does not consult the prototype" and "touches
+`handle_subcalls`'s parenless-argument extent".  The `@$e` dump at the die said
+otherwise: `[funcall, node]` — the sub had become a ZERO-ARGUMENT call and its
+real arguments were left juxtaposed.  `Pl::PExpr::no_params_of_sub` returned
+the declared sub's `min_params` (an ARITY fact) and its callers read 0 as "takes
+no arguments" (Config's convention).  `($)` worked only because min = max = 1.
+The 16×10 matrix (prototype/signature shape × call context, vs perl) then
+showed the same misreading on the other side: `(*)` (min 1, `_proto_max_args`
+declines `*`) was a LIST op, and a 1-param / slurpy SIGNATURE was a NAMED UNARY.
+
+**The fix is ONE helper, no extent change.**  `Pl::PExpr::_proto_parse_spec`
+reads the prototype's shape the way perl's toke.c `just_a_word` does and
+answers in Config's convention (`()` → 0; after leading `;`s exactly one of
+`$ _ * +` or one `\X`/`\[…]` → 1, `[0,1]` when `;`-led; else → -1; a signature
+→ -1; builtin records keep Config's table); `no_params_of_sub` returns it for
+any DECLARED record; the s361 second look at the prototype at the
+strictly-single site is deleted (redundant).  `handle_subcalls`' argument
+extent is untouched: with the right class, the existing zero-arg / strictly-
+single / list branches already do the right thing.
+
+**Verification (s429, vs `374fcf7`):** matrix SAME 61 → 103 of 160, every change
+toward perl; corpus-diff IDENTICAL (111 files, drops 5); lib A/B SAME=22;
+perl-t A/B 602/604 SAME (proto.t + utftaint.t, only the un-drops); cpan A/B
+SAME=402; gate-SET scan exactly proto.t/utftaint.t drop→OK + taint.t's first
+line (its pre-existing s///e TRANSPILE-FAIL now first); companion rows
+unchanged (proto.t's three were ACCIDENTAL passes; per-row A/B: no move); cold
+gate 159/5693; census 29/94 → 27/90; guard `Pl/t/proto-parse-class-01.t`.
+Sweep not run (the s401 row: corpus-diff identical + lib byte-identical).
+Residue filed: #453 (user named-unary operand extent through `.`/`+` — the
+builtin site's `_extend_high_prec` is missing at the user site; the two
+operand sites should be ONE), #454, #455, #260's `(_)` row.
 
 ### B3.3 — `WORD WORD WORD` of declared empty-prototype lexsubs (#374(b), last)
 

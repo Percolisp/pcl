@@ -11,6 +11,59 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s429 (2026-08-22, Fable) — B3.2 / #259: a declared sub's call parses by its PROTOTYPE'S SHAPE, never by its minimum arity
+
+- **`1 == a_hash 'a'` (`(%)`), `(unilist3 0 || 5)` (`(;$;)`), `any_tainted @_`
+  (`(@)` inside `($)`), `f 5` for `sub f($x = 1)` — every `min 0` prototype and
+  every all-defaulted signature was called with ZERO arguments, its real
+  arguments left dangling, and the statement DROPPED (#259, B3.2 of
+  `docs/b3-operand-collapse-s428.md`).**  Cause: `Pl::PExpr::no_params_of_sub`
+  returned a declared sub's `min_params` — an ARITY fact — and its callers read 0
+  as "takes no arguments" (Config's convention).  Fix: ONE reading of the
+  prototype's SHAPE, `Pl::PExpr::_proto_parse_spec`, implementing perl's toke.c
+  `just_a_word` classes in Config's convention — `()` → 0 (a term); after the
+  leading `;`s exactly one of `$ _ * +` or one `\X` / `\[…]` → 1 (named unary),
+  `[0, 1]` when `;`-led; everything else, including `($;)` / `(;$;)` (a TRAILING
+  `;` keeps a list operator), → -1; a signature NEVER affects parsing (-1);
+  builtin records (no `min_params`) keep Config's table.  The s361 second look
+  at the prototype at the strictly-single site is DELETED as redundant (the spec
+  is 1 / [0, 1] exactly for the unary class).  Collateral, both perl-faithful:
+  `(*)` alone is a NAMED UNARY (was read as a list op), and a 1-param / slurpy
+  signature is a LIST OPERATOR (was read as a named unary — `f 'a', 'b'` for
+  `sub f($x, @r)` gave `f(a;) b`).
+- **The discriminating measurement was a 16×10 matrix (prototype/signature
+  shape × call context) vs perl**: SAME 61 → 103 of 160, every changed row
+  toward perl.  The remaining valid-program DIFFs are SEPARATE pre-existing
+  findings, FILED: **#453** (a user named unary's operand does not extend
+  through `.` / `+`: `f "a" . "b"` → `f(a)b` for `($)` / `(;$)` / `(*)` / `(_)`,
+  and `(*)`'s `f + 1, "\n"` swallows the comma — only the BUILTIN named-unary
+  site applies `_extend_high_prec`; the two operand sites should be one),
+  **#454** (a signature PARAMETER `$x` plus a later file-level `my $x` →
+  "file lexical 'x' captured by sub f" REFUSAL), **#455** (`use feature
+  "signatures"; sub f ($x, @r) {…}` on ONE LINE: `"@r"` warns "uninitialized
+  value in join" — the feature region looks line-based); **#260** gains the
+  `(_)` row (`f || 5` → perl `f($_)`, PCL `f()`).
+- **Verified over ALL FOUR populations vs `374fcf7`**: corpus-diff IDENTICAL
+  (111 files, drops 5 unchanged — the corpus has no file with the shape); lib
+  A/B SAME=22; perl-t A/B 602/604 SAME (t/comp/proto.t + t/op/utftaint.t, each
+  ONLY the un-drops); cpan A/B SAME=402 (94 .pm + 308 .t); gate-SET scan:
+  exactly proto.t + utftaint.t drop→OK, plus t/op/taint.t whose FIRST stderr
+  line was the same-family `taint_these @list[1,3,5,7,9]` (`:prototype(@)`)
+  drop and is now its pre-existing `s///e` TRANSPILE-FAIL (no CL either way).
+  Companion rows UNCHANGED (proto.t 47/14 DIFF — the three rows were ACCIDENTAL
+  passes, the dropped `print "not " unless …` left `ok N` printing; per-row A/B
+  vs the base tree: no row moved; utftaint.t 72/17 NOTAP).  Cold gate
+  159/5693, failures = the 13 xs rows.  **Sweep NOT run, by the s401
+  WHAT-TO-RUN row** (corpus-diff identical + lib byte-identical ⇒ it cannot
+  move).  Census 29/94 → 27/90; gen v2-176 (artifacts stamp-only); guard
+  `Pl/t/proto-parse-class-01.t`.  #259 CLOSED; B3.3 (#374(b)) remains.
+- **Rule (the s361 lesson, generalized): ARITY and PARSE CLASS are different
+  facts.**  `min_params` / `_proto_max_args` answer "how many arguments may the
+  call-time emitter see"; only `_proto_parse_spec` answers "how does a call to
+  this name PARSE" — never read one as the other.  Also: `lib/warnings.pm`'s
+  regen comment said plain `./pl2cl`; the artifacts are `--extension` builds
+  (#349) — comment fixed.
+
 ## s428 (cont., 2026-08-22, Fable) — B3.1 / #411: an elided-arrow call of a postfix result
 
 - **`$a[0]()`, `$s2->()()`, `(sub{})[0]()`, `$h{k}()`, `$r->{m}()` — a `(args)`

@@ -445,7 +445,7 @@ func => -12         # 1 param before list
 
 ## Test Status
 
-- **155 test files, 5614 rows** (s420) with a built pclxs sibling (s409, measured
+- **159 test files, 5693 rows** (s429) with a built pclxs sibling (s409, measured
   COLD; the 13 pclxs xs rows currently FAIL there — pclxs is under separate
   work, user s394/s395: ignore XS rows); **5600 without** (arithmetic: minus
   the 14 xs rows).  **RULED s409: compare a gate count against a measurement

@@ -13,7 +13,7 @@
 # `use warnings`.  `use warnings` itself never loads this file: PCL treats it
 # as a pragma (Parser skip list); the runtime exposes these subs via
 # always-available self-loading stubs (cl/pcl-warnings.lisp), same pattern
-# as mro.  Regenerate after editing:  ./pl2cl lib/warnings.pm > cl/pcl-warnings.lisp
+# as mro.  Regenerate after editing:  ./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp; tools/tag-license cl/pcl-warnings.lisp
 
 package warnings;
 use strict;

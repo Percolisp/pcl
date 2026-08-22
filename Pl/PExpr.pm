@@ -4011,28 +4011,12 @@ sub handle_subcalls {
         my $max = @positive ? (sort { $b <=> $a } @positive)[0] : 0;
         $is_strictly_single = ($max == 1);
       }
-      # A user OLD-STYLE PROTOTYPE answers this question itself, and its
-      # answer REPLACES the one above: `$no_pars` is `min_params` for a
-      # declared sub (no_params_of_sub), i.e. the MINIMUM arity — reading it
-      # as "exactly one" made `sub f ($;$) {…}; f $a, $b;` narrow to `f($a),
-      # $b` and silently DROP every argument after the first (probed s361
-      # against perl: `B3=x` vs perl's `B3=x y`).  Two prototype facts decide
-      # it, and only a prototype knows them:
-      #   - max args == 1  (`_proto_max_args`; undef for @/%/* protos), and
-      #   - no TRAILING `;`, which in perl gives the sub LIST-operator
-      #     precedence instead of named-unary — `sub unilist ($;)`, so
-      #     `unilist 0 || 5` is `unilist(0 || 5)`, not `unilist(0) || 5`
-      #     (perl's own t/comp/proto.t exercises all three spellings).
-      # Builtins are untouched: their Environment records carry no
-      # min_params, so `_proto_max_args` declines and the branch is skipped.
-      if ($self->has_environment) {
-        my $uproto = $self->environment->get_prototype($sub_name);
-        if ($uproto && $uproto->{is_proto} && defined $uproto->{min_params}) {
-          my $pmax = $self->_proto_max_args($uproto);
-          my $listop = (($uproto->{proto_string} // '') =~ /;\s*$/) ? 1 : 0;
-          $is_strictly_single = (defined $pmax && $pmax == 1 && !$listop) ? 1 : 0;
-        }
-      }
+      # For a DECLARED sub, $no_pars IS its parse class (no_params_of_sub →
+      # _proto_parse_spec): 1 / [0, 1] exactly for perl's named-unary
+      # prototypes (`($)`, `(;$)`, `(*)`, `(\@)`…), -1 for a list operator —
+      # so `($;$)`, `($;)`, `(;$;)`, `(@)` never narrow here (s361 probed
+      # `sub f ($;$)`: `f $a, $b` must stay f($a, $b); t/comp/proto.t's
+      # `unilist 0 || 5` is unilist(0 || 5)), and `(;$)` / `(*)` do.
       if ($is_strictly_single && !$self->is_named_unary($func_name_for_unary)) {
         # Only apply for non-named-unary 1-param functions
         # Named unary already handled above with proper term detection
@@ -4494,18 +4478,54 @@ sub find_matching_colon {
 # Note that if declares parameters like a '&', expects code block or
 # ref to a sub. So not the start of a hash. XXXXX This must change how
 # parameters are handled above!
+# The parser's ONE question about a name: how does a call to it PARSE?  The
+# answer is in known_no_of_params' convention (0 = a term that takes no
+# arguments, 1 = named unary, [0, 1] = named unary with an optional operand,
+# -1 = list operator, -2/-3 = builtin $_/@_ defaults).  A DECLARED sub —
+# prototype, signature, plain, `use constant` — answers from its record via
+# _proto_parse_spec; the environment's builtin records carry no min_params
+# and Config's table stays authoritative for those and for undeclared names.
+# It used to return a declared sub's min_params, an ARITY fact — and the
+# callers read 0 as "takes no arguments", so `(%)`, `(@)`, `(;$)`, `(;$;)`
+# subs and all-defaulted signatures were called with ZERO arguments and the
+# statement fell through and was dropped (task #259, t/comp/proto.t ×3).
 sub no_params_of_sub {
   my $self = shift;
   my $name = shift;
 
-  # First check environment for declared subs
   if ($self->has_environment) {
-    my $min = $self->environment->get_min_params($name);
-    return $min if defined $min;
+    my $rec = $self->environment->get_prototype($name);
+    return $self->_proto_parse_spec($rec)
+      if $rec && defined $rec->{min_params};
   }
 
-  # Fall back to built-in function table
   return $self->known_no_of_params->{$name} // -1;
+}
+
+# perl decides how a declared sub's call parses from its PROTOTYPE alone
+# (toke.c, just_a_word): an empty prototype makes a TERM that never takes
+# arguments; a prototype that is, after its leading `;`s, exactly one of
+# `$` `_` `*` `+` or one `\X` / `\[…]` group makes a NAMED UNARY operator
+# (optional operand when a `;` led); everything else — `($$)`, `(@)`, `(%)`,
+# `(&@)`, and `($;)` / `(;$;)`, whose TRAILING `;` keeps them list
+# operators — is a LIST operator.  A signature is not a prototype and does
+# not affect parsing; a plain sub is a list operator.  The `()` shape arrives
+# as is_proto 0 / min_params 0 / no params (parse_prototype_or_signature's
+# empty case, `use constant`'s registration) as well as is_proto 1 / '' —
+# both are the term.  This is THE one reading of a prototype's shape for the
+# parser; arity (min_params, _proto_max_args) is a different fact.
+sub _proto_parse_spec {
+  my ($self, $rec) = @_;
+  if (!$rec->{is_proto}) {
+    return (($rec->{min_params} // -1) == 0 && !@{ $rec->{params} // [] })
+      ? 0 : -1;
+  }
+  my $ps = $rec->{proto_string} // '';
+  $ps =~ s/\s+//g;
+  return 0 if $ps eq '';
+  my $optional = ($ps =~ s/\A;+//) ? 1 : 0;
+  return -1 if $ps !~ /\A(?:[\$_*+]|\\(?:[\$\@\%\&*]|\[[^\]]*\]))\z/;
+  return $optional ? [0, 1] : 1;
 }
 
 

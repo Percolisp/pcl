@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 29 files, 94 drops -- 4 perl-tests files (5
-# drops), 25 companion files (89), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 27 files, 90 drops -- 4 perl-tests files (5
+# drops), 23 companion files (85), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -289,13 +289,42 @@
 #      (c) perl-tests/ref.t 2 -> 1 and t/op/ref.t 2 -> 1: `(sub{})[0]()` un-drops;
 #         the remaining drop is the indirect-object `doit $object "FOO"` (#399).
 #      (d) t/op/lexsub.t 14 -> 12: two anon `}->()()` statements (lines 685, 871).
+#   s429  FOUR drops REMOVED, TWO FILES CLEARED, by task #259 (B3.2, Option B
+#         phase 2 Track B3): a parenless call of a DECLARED sub parsed by its
+#         MINIMUM ARITY -- Pl::PExpr::no_params_of_sub returned min_params and
+#         its callers read 0 as "takes no arguments", so every `min 0`
+#         prototype (`(%)`, `(@)`, `(;$)`, `(;$;)`, `(;@)`) and all-defaulted
+#         signature was called with ZERO arguments, its real arguments left
+#         dangling, and the statement fell through (`Missing case: [`).  Fixed
+#         by ONE reading of the prototype's SHAPE (perl's toke.c just_a_word
+#         classes: term / named unary / optional-operand unary / list op),
+#         Pl::PExpr::_proto_parse_spec, in known_no_of_params' convention; the
+#         s361 second look at the prototype at the strictly-single site is
+#         deleted as redundant.  `(*)` is now a named unary and a signature a
+#         list operator, as in perl.  29/94 -> 27/90.  Verified over ALL FOUR
+#         populations vs 374fcf7: corpus-diff IDENTICAL (111 files, drops 5),
+#         lib A/B SAME=22, perl-t A/B 602/604 SAME (the two below), cpan A/B
+#         SAME=402 (94 .pm + 308 .t); gate-SET scan: exactly the two rows
+#         below drop->OK plus t/op/taint.t, whose FIRST stderr line was the
+#         same-family `taint_these @list[1,3,5,7,9]` (`:prototype(@)`) drop
+#         and is now its pre-existing s///e TRANSPILE-FAIL (no CL either way,
+#         so never a census row).  Cold gate clean; sweep NOT run (corpus-diff
+#         identical + lib byte-identical, the s401 WHAT-TO-RUN row: it cannot
+#         move).  Guard Pl/t/proto-parse-class-01.t.
+#      (a) t/comp/proto.t 3 -> 0 (ROW REMOVED): `1 == a_hash 'a'` /
+#         `2 == a_hash 'a','b'` (`(%)`, lines 387/390) and `(unilist3 0 || 5)
+#         == 6` (`(;$;)`, line 847).  Companion row UNCHANGED at 47/14 DIFF --
+#         the three were ACCIDENTAL passes (the dropped `print "not " unless ...`
+#         left the `ok N` line printing); per-row A/B vs the base tree: no row
+#         moved.
+#      (b) t/op/utftaint.t 1 -> 0 (ROW REMOVED): `any_tainted @_` inside
+#         `sub tainted ($)` (`(@)`, line 17).  Companion row UNCHANGED 72/17 NOTAP.
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of unknown type. Dump: x1
-t/comp/proto.t	3	Bug. Fell through. Missing case: [ x3
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
@@ -309,7 +338,6 @@ t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/universal.t	1	Handle single node of unknown type. Dump: x1
 t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
-t/op/utftaint.t	1	Bug. Fell through. Missing case: [ x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	3	Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3

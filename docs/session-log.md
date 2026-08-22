@@ -4,6 +4,84 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 429 (2026-08-22, Fable) — B3.2 / #259 SHIPPED: a declared sub's call parses by its PROTOTYPE'S SHAPE, never its minimum arity
+
+The second B3 widening (`docs/b3-operand-collapse-s428.md` §B3.2, task #153's
+last track), landed alone behind the four-population bar like B3.1.
+
+**#259: `1 == a_hash 'a'` (`(%)`), `(unilist3 0 || 5) == 6` (`(;$;)`),
+`any_tainted @_` (`(@)` inside `($)`, t/op/utftaint.t), `taint_these @list[…]`
+(`:prototype(@)`, t/op/taint.t), and `f 5` for `sub f($x = 1)` — every `min 0`
+prototype and every all-defaulted signature was called with ZERO arguments, its
+real arguments left dangling, and the whole statement DROPPED** ("Bug. Fell
+through. Missing case: [").  The discriminating measurement the task asked for
+(dump `@$e` at the die) said `[funcall, node]` — the call had already been
+reduced WITHOUT its arguments — so the sketch's suspect ("the operator-loop term
+reading does not consult the prototype") was wrong: `Pl::PExpr::no_params_of_sub`
+returned the declared sub's `min_params` (an ARITY fact), and its callers read 0
+as "takes no arguments" (Config's convention).  `($)` worked only because min =
+max = 1.
+
+**The 16×10 matrix** (prototype/signature shape × call context, perl as oracle,
+160 one-statement files) widened the finding before the fix: `(*)` alone (min 1,
+`_proto_max_args` declines `*`) was read as a LIST operator where perl has a
+NAMED UNARY, and a 1-param / slurpy SIGNATURE was read as a named unary where
+perl has a list operator (`f 'a', 'b'` for `sub f($x, @r)` gave `f(a;) b`).
+
+**The fix is ONE helper and one deletion, no extent change.**
+`Pl::PExpr::_proto_parse_spec` reads the prototype's shape the way perl's toke.c
+`just_a_word` does and answers in `known_no_of_params`' convention: `()` → 0 (a
+term); after the leading `;`s exactly one of `$ _ * +` or one `\X` / `\[…]` → 1
+(named unary), `[0, 1]` when `;`-led; everything else — `($$)`, `(@)`, `(%)`,
+`(&@)`, and `($;)` / `(;$;)` whose TRAILING `;` keeps a list operator — → -1; a
+signature NEVER affects parsing (-1); builtin records (no `min_params`) keep
+Config's table.  `no_params_of_sub` returns it for any DECLARED record.  The
+s361 second look at the prototype at the strictly-single site (`pmax == 1 &&
+!trailing-;`) is DELETED as redundant — the spec is 1 / [0, 1] exactly for the
+unary class.  `handle_subcalls`' argument extent is untouched.
+
+**Matrix after: SAME 61 → 103 of 160, every changed row toward perl.**  The
+remaining valid-program DIFFs are SEPARATE pre-existing findings, FILED: **#453**
+(a user named unary's operand does not extend through `.` / `+`: `f "a" . "b"`
+→ `f(a)b` for `($)` / `(;$)` / `(*)` / `(_)`, and `(*)`'s `f + 1, "\n"`
+swallows the comma — only the BUILTIN named-unary site applies
+`_extend_high_prec`; the two operand sites should be one), **#454** (a
+signature PARAMETER `$x` plus a later file-level `my $x` → "Parser2 TODO: file
+lexical 'x' captured by sub f" REFUSAL), **#455** (`use feature "signatures";
+sub f ($x, @r) {…}` on ONE LINE: `"@r"` warns "Use of uninitialized value in
+join or string" — six-probe bisect: the trigger is the `sub` sharing the
+pragma's LINE, `no warnings` irrelevant; the feature region looks line-based),
+and **#260** gains the `(_)` row (`f || 5` → perl `f($_)`, PCL `f()`).
+
+**Verification — the four-population bar, all explained.**  Guard
+`Pl/t/proto-parse-class-01.t` (5 rows, every expectation perl-verified — two of
+my first drafts were NOT, caught by running the blocks through perl before
+trusting them); focused guards 12 files / 966 rows PASS.  **corpus-diff vs
+`374fcf7`: IDENTICAL across 111 files, silent drops 5 unchanged** (the corpus
+has no file with the shape).  **lib A/B SAME=22; perl-t A/B 602/604 SAME —
+t/comp/proto.t + t/op/utftaint.t, each ONLY the un-drops; cpan A/B SAME=402 (94
+.pm + 308 .t).**  **Gate-SET scan 638×2: exactly proto.t + utftaint.t drop→OK,
+plus t/op/taint.t** — its FIRST stderr line was the same-family `taint_these
+@list[1,3,5,7,9]` drop and is now its pre-existing `s///e` "cannot compile the
+replacement" TRANSPILE-FAIL (rc=2, no CL on either tree; verified directly on
+both).  **Companion rows UNCHANGED**: proto.t 47/14 DIFF at the same crash — the
+three un-dropped `print "not " unless …` were ACCIDENTAL passes (the `ok N` line
+still printed); per-row fails A/B vs the base tree: only a `CODE(0x…)` address
+differs; utftaint.t 72/17 NOTAP; taint.t TRANSPILE-FAIL.  No snapshot splice
+needed.  **Cold gate 159 files / 5693 rows, failures = exactly the 13 pclxs xs
+rows** (+1 file +5 rows = the guard).  **Sweep NOT run, by the s401 WHAT-TO-RUN
+row** (corpus-diff identical + lib byte-identical ⇒ it cannot move).
+
+**Bookkeeping.**  Drop census 29/94 → **27/90** (proto.t 3 → 0 and utftaint.t 1
+→ 0, rows removed BY EDIT with the s429 note); generation **v2-176**, three
+artifacts regenerated (bodies byte-identical, stamp only — and `lib/warnings.pm`'s
+regen comment said plain `./pl2cl` where the artifacts are `--extension` builds,
+fixed); CLAUDE.md test-status line 159/5693; DECIDED §s429; b3 doc §B3.2 marked
+SHIPPED with what the measurement changed.  #259 CLOSED.  **B3.3 (#374(b)) is
+the remaining B3 widening.**
+
+---
+
 ## Session 428 (cont., 2026-08-22, Fable) — B3.1 / #411 SHIPPED: an elided-arrow call of a postfix result
 
 The B3 track (task #153, the last of Option B) that the session opened by SIZING
