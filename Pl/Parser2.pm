@@ -4083,7 +4083,9 @@ sub _state_container_blocker {
 # construction the innermost one in scope there.
 #
 # DELIBERATELY unchanged (the last four registered in docs/not-supported.md):
-#   * `our sub` — that IS a package sub, and it already matches perl.
+#   * `our sub` — that IS a package sub, and it already matches perl.  (One
+#     exception: a keyword-NAMED `our sub if` — its bare uses are not callable
+#     by that name, see below.)
 #   * a body's call to its own name (`my sub rec { rec(…) }`): perl DIES
 #     there (a `my sub` is not in scope inside itself), PCL resolves it to
 #     the sub — principle 9, PCL is the more permissive one.
@@ -4093,23 +4095,30 @@ sub _state_container_blocker {
 #     the hoisted-CV residue of #347's "will not stay shared" family, sized
 #     separately; a rename cannot express it.
 #
-# A lexical sub named after a KEYWORD (`state sub if () { 44 }`, which perl
-# allows and t/op/lexsub.t asserts) IS renamed, and that turns `my $x = if if
-# if` from a keyword parse into three juxtaposed zero-arg calls the term
-# grammar cannot lower — an announced DROP where the keyword parse used to
-# emit a zero-argument `(p-if)`, i.e. the very form whose macroexpansion
-# error crashes that file.  A counted drop is the better of the two failures
-# and it is deliberate; the shape belongs to Option B phase 2's term-grammar
-# track (task #374), not here.
+# A lexical sub named after a STATEMENT-MODIFIER KEYWORD (`state sub if ()
+# { 44 }`, which perl allows and t/op/lexsub.t asserts with `my $x = if if if`)
+# is renamed POSITION-AWARE, because that is perl's own rule: toke.c looks a
+# bareword up as a lexical sub only when it is not in operator position
+# (`PL_expect != XOPERATOR`), so the statement deparses as `(my $x = if()) if
+# if()` — the first and third `if` are the sub, the middle one stays the
+# modifier.  Renaming all three (what this pass did through s428) made it
+# three juxtaposed calls no grammar can lower; renaming none (the keyword
+# parse) was a zero-condition `(p-if)`.  See _word_in_operator_position.  The
+# `our sub if` spelling is the same rule with a different callable name: perl
+# aliases the lexical `if` to `&main::if`, and PCL's bare `if` is the keyword
+# at every site, so its term-position uses are spelled `main::if` (the
+# declaration itself stays `our sub if` — it IS the package sub).  Task
+# #374(b), B3.3 of docs/b3-operand-collapse-s428.md.
 sub _rename_lexical_subs {
   my ($self, $doc) = @_;
   my @decls;
   for my $st (@{ $doc->find('PPI::Statement::Sub') || [] }) {
     next if $st->isa('PPI::Statement::Scheduled');
     my $type = $st->type // '';
-    next if $type ne 'my' && $type ne 'state';
     my $name = $st->name;
     next if !defined $name || $name !~ /^\w+\z/;      # never qualified
+    my $keyword = Pl::PExpr::Config::is_statement_modifier($name);
+    next if $type ne 'my' && $type ne 'state' && !($type eq 'our' && $keyword);
     # `my sub b;` declares the name but defines nothing — it OPENS a region
     # like a bodied declaration, and the `sub b {…}` that fills it in later is
     # renamed by _lexsub_renamable's package-sub arm, because that is what
@@ -4119,7 +4128,13 @@ sub _rename_lexical_subs {
     # (probed: `{ my sub c; sub c {"c1"} print c() } { my sub c; sub c {"c2"}
     # print c() }` — perl `c1 c2`, PCL `c2 c2`).  Task #376(a).
     my $scope = _lexsub_scope($st) or next;
-    push @decls, { st => $st, name => $name, scope => $scope };
+    push @decls, { st => $st, name => $name, scope => $scope,
+                   our => $type eq 'our' ? 1 : 0, keyword => $keyword,
+                   # a `()` prototype makes every call a TERM (the operator-
+                   # position question below) — the same answer
+                   # _scan_document_terms gives for a `sub NAME ()`.
+                   empty => (grep { $_->isa('PPI::Token::Prototype')
+                                    && $_->prototype =~ /^\s*\z/ } $st->schildren) ? 1 : 0 };
   }
   return if !@decls;
 
@@ -4129,7 +4144,10 @@ sub _rename_lexical_subs {
   for my $d (@decls) {
     $d->{start} = $idx{ refaddr( ($d->{st}->tokens)[0] ) };
     $d->{stop}  = $idx{ refaddr( _last_token($d->{scope}) ) };
-    $d->{new}   = sprintf '%s__lexsub__%d', $d->{name}, ++$self->{_lexsub_counter};
+    # `our sub if` keeps its name (it IS the package sub) — only the SPELLING
+    # of its uses changes, see _lexsub_spelling.
+    $d->{new}   = $d->{our} ? $d->{name}
+                : sprintf '%s__lexsub__%d', $d->{name}, ++$self->{_lexsub_counter};
   }
   # A sibling redeclaration in the SAME scope ends the earlier one's claim
   # (#296-B2).  It ends it AT the declarator, not after the statement: unlike
@@ -4159,13 +4177,18 @@ sub _rename_lexical_subs {
     return $win;
   };
 
+  # The ONE oracle for "is this bareword a term" the operator-position
+  # question needs (constants, `()` subs, 0-ary builtins — the repairs' own).
+  my $word_is_term = sub { $self->_word_is_term($_[0], $doc) };
+  my %call;   # refaddr of a Word this pass made a `()` CALL — it ends a term
   for my $t ($doc->tokens) {
     my ($name, $sigil) = _lexsub_use_name($t);
     if (defined $name) {
       next if !$by_name{$name};
       my $win = $covering->($name, $t, $idx{ refaddr $t }) or next;
       next if !_lexsub_renamable($t, $win->{st});
-      $t->set_content($sigil . _lexsub_spelling($win, $t));
+      _rewrite_lexsub_use($t, $sigil, $win, _lexsub_spelling($win, $t),
+                          \%call, $word_is_term);
       next;
     }
     next if !_interp_token_candidate($t);
@@ -4173,12 +4196,95 @@ sub _rename_lexical_subs {
     my %ren;
     for my $nm (keys %by_name) {
       my $win = $covering->($nm, $t, $i) or next;
-      $ren{$nm} = _lexsub_spelling($win, $t);
+      $ren{$nm} = { d => $win, new => _lexsub_spelling($win, $t) };
     }
     next if !%ren;
-    _fix_interp_token($t, sub { _fix_lexsub_interp($_[0], \%ren) });
+    _fix_interp_token($t, sub { _fix_lexsub_interp($_[0], \%ren, $word_is_term) });
   }
   return;
+}
+
+# One use of a lexical sub, rewritten to its new spelling — unless it is a
+# keyword-named sub's Word in OPERATOR position, where perl reads the keyword
+# (see _word_in_operator_position).  $call collects the Words this pass turned
+# into `()` calls, because the token AFTER such a call is in operator
+# position and the classifier must see that before the next token is read.
+# Shared by the token stream and the interpolated-code walk (rule 11: one
+# classifier).  Returns 1 if the token was rewritten.
+sub _rewrite_lexsub_use {
+  my ($t, $sigil, $d, $spelling, $call, $word_is_term) = @_;
+  if ($sigil eq '' && $d->{keyword}) {
+    return 0 if _word_in_operator_position($t, $call, $word_is_term);
+    $call->{ refaddr $t } = 1 if $d->{empty};
+    _reclass_keyword_call_site($t);
+  }
+  $t->set_content($sigil . $spelling);
+  return 1;
+}
+
+# perl's toke.c consults the pad for a lexical sub named by a bareword only
+# when `PL_expect != XOPERATOR`; in operator position the word is whatever
+# else it is — for the six statement modifiers, the keyword.  That is what
+# makes `my $x = if if if` read `(my $x = if()) if if()` (deparsed, perl
+# 5.40.3).  Operator position = the previous significant token ENDS A TERM:
+# _ends_term (the repairs' oracle: a value, `)`, `]`, a subscript's `}`), a
+# bareword TERM (a constant, a `()` sub, a 0-ary builtin — $word_is_term), or
+# a `()` call this very pass just produced ($call).  A previous Word that IS a
+# modifier keyword is an operator, never a term, whatever the document's
+# term set says about the name (the set is by NAME and cannot tell the two
+# positions apart).  The PPI statement class is NOT consulted: PPI makes a
+# Compound of any statement-initial keyword Word — `(unless, 2)` inside a
+# list, a bare `if;` — and perl reads both as the sub; a real `if (…) {…}`
+# in the sub's scope is a perl compile error ("Too many arguments for if"),
+# so valid input never has one to protect.
+# PPI lexed the KEYWORD, and three of its structural decisions are wrong for
+# the sub call the Word now is; they are repaired IN PLACE (no reparse — the
+# precedent is the label-merge repair in _normalize_anon_sub_attrs):
+#   * a statement-initial one opened a COMPOUND statement (`if;`, `map { if }
+#     …`, `(unless, 2)`) — it is an ordinary expression statement, of the
+#     class PPI gives the parent's other children;
+#   * PPI also ENDS that compound at the first token it cannot fit (`(for,
+#     for)` → Compound(for) + Expression(, for)) — the orphan sibling is the
+#     rest of the same expression and is joined back, unless a `;` really did
+#     end the statement;
+#   * a `(…)` right after it was built as a CONDITION (`my $w = if();`) — it is
+#     the call's argument list, the shape the term grammar has no case for
+#     ("Missing case: [", probed on both trees).
+sub _reclass_keyword_call_site {
+  my ($t) = @_;
+  my $par = $t->parent;
+  if ($par && ref($par) eq 'PPI::Statement::Compound'
+      && refaddr($par->schild(0)) == refaddr($t)) {
+    my $gp = $par->parent;
+    bless $par, ($gp && ($gp->isa('PPI::Structure::List')
+                      || $gp->isa('PPI::Structure::Condition')
+                      || $gp->isa('PPI::Structure::Constructor')))
+                ? 'PPI::Statement::Expression' : 'PPI::Statement';
+    my $last = ($par->schildren)[-1];
+    my $next = $par->snext_sibling;
+    if ($next && ref($next) =~ /^PPI::Statement(?:::Expression)?\z/
+        && !($last->isa('PPI::Token::Structure') && $last->content eq ';')) {
+      for my $c ($next->children) {
+        $next->remove_child($c);
+        $par->add_element($c);
+      }
+      $next->delete;
+    }
+  }
+  my $nx = $t->snext_sibling;
+  bless $nx, 'PPI::Structure::List'
+    if $nx && ref($nx) eq 'PPI::Structure::Condition';
+  return;
+}
+
+sub _word_in_operator_position {
+  my ($t, $call, $word_is_term) = @_;
+  my $pv = _prev_sig_token($t) or return 0;
+  return 1 if _ends_term($pv);
+  return 0 if !$pv->isa('PPI::Token::Word');
+  return 1 if $call->{ refaddr $pv };
+  return 0 if Pl::PExpr::Config::is_statement_modifier($pv->content);
+  return $word_is_term->($pv->content) ? 1 : 0;
 }
 
 # Interpolated CODE — `"@{[ f() ]}"`, `"${\ f() }"`, the same inside a heredoc
@@ -4194,7 +4300,7 @@ sub _rename_lexical_subs {
 #
 # Signature is _interp_fixer's: rewrite $_[0] in place, return a hit count.
 sub _fix_lexsub_interp {
-  my $ren = $_[1];                          # $_[0] is rewritten IN PLACE
+  my ($ren, $word_is_term) = @_[1, 2];      # $_[0] is rewritten IN PLACE
   return 0 if !grep { $_[0] =~ /\b\Q$_\E\b/ } keys %$ren;
   my @ev = grep { ($_->{form} // '') eq 'expr' && $_->{expr_span} }
            @{ Pl::InterpScan::scan($_[0]) };
@@ -4202,7 +4308,7 @@ sub _fix_lexsub_interp {
   my $hits = 0;
   for my $ev (reverse @ev) {                # right to left: spans stay valid
     my ($s, $e) = @{ $ev->{expr_span} };
-    my $new = _rename_lexsub_in_code(substr($_[0], $s, $e - $s), $ren);
+    my $new = _rename_lexsub_in_code(substr($_[0], $s, $e - $s), $ren, $word_is_term);
     next if !defined $new;
     substr($_[0], $s, $e - $s) = $new;
     $hits++;
@@ -4213,16 +4319,16 @@ sub _fix_lexsub_interp {
 # One embedded-code span, renamed.  Returns the new text, or undef when
 # nothing in it was a use of a lexical sub.
 sub _rename_lexsub_in_code {
-  my ($code, $ren) = @_;
+  my ($code, $ren, $word_is_term) = @_;
   my $mini = eval { PPI::Document->new(\$code) } or return undef;
   my $hit = 0;
+  my %call;
   for my $t ($mini->tokens) {
     my ($name, $sigil) = _lexsub_use_name($t);
     next if !defined $name;
-    my $new = $ren->{$name} or next;
-    next if !_lexsub_renamable($t, undef);
-    $t->set_content($sigil . $new);
-    $hit = 1;
+    my $r = $ren->{$name} or next;
+    next if !_lexsub_renamable($t, $r->{d}{st});
+    $hit = 1 if _rewrite_lexsub_use($t, $sigil, $r->{d}, $r->{new}, \%call, $word_is_term);
   }
   return $hit ? $mini->serialize : undef;
 }
@@ -4239,6 +4345,11 @@ sub _rename_lexsub_in_code {
 sub _lexsub_spelling {
   my ($d, $t) = @_;
   my $decl_pkg = _pkg_in_effect_at($d->{st});
+  # A keyword-named `our sub if`: the bare name is the keyword at EVERY site,
+  # so the only spelling that reaches the package sub is the qualified one —
+  # in the declaring package as well (probed: `our sub if() {42} my $z =
+  # main::if` is 42 in perl and in PCL).
+  return $decl_pkg . '::' . $d->{new} if $d->{our};
   return $d->{new} if $decl_pkg eq _pkg_in_effect_at($t);
   return $decl_pkg . '::' . $d->{new};
 }
@@ -4295,6 +4406,10 @@ sub _lexsub_renamable {
   my $pv = _prev_sig_token($t);
   if ($pv && $pv->isa('PPI::Token::Word')
       && $pv->content =~ /^(?:sub|package|require)\z/) {
+    # A keyword-named `our sub if` declaration — this one or a later `sub if`
+    # in its region — stays as written: it IS the package sub the uses are
+    # spelled to reach (the only `our` declaration this pass collects).
+    return 0 if $decl && ($decl->type // '') eq 'our';
     return 1 if $decl && $par && refaddr($par) == refaddr($decl);
     return 0 if $pv->content ne 'sub';      # `package NAME` / `require NAME`
     # A plain `sub NAME …` written INSIDE the region DEFINES THE LEXICAL in
@@ -5209,6 +5324,12 @@ sub _ends_term {
     return 1 if $t->content eq '}'
              && $t->parent && $t->parent->isa('PPI::Structure::Subscript');
   }
+  # A POSTFIX `++`/`--` ends the term it steps (`$i++ while …`, `$n++*foo`);
+  # the prefix spelling (`++$i`) opens one.  Which it is is the same question
+  # one token back: postfix follows a term, prefix does not (s430, found by the
+  # keyword-named lexical sub's operator-position classifier).
+  return _ends_term(_prev_sig_token($t))
+    if $t->isa('PPI::Token::Operator') && ($t->content eq '++' || $t->content eq '--');
   return 0;
 }
 

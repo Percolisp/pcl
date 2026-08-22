@@ -11,6 +11,72 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s430 (2026-08-22, Fable) — B3.3 / #374(b): a keyword-named lexical sub is renamed POSITION-AWARE — the sub where a term is expected, the keyword where an operator is
+
+- **`my`/`state`/`our sub if () { 44 }` + `my $x = if if if` (t/op/lexsub.t
+  lines 71/209/576): the renamed spellings DROPPED as three juxtaposed calls,
+  the `our` one as the keyword parse (#374(b), B3.3 of
+  `docs/b3-operand-collapse-s428.md` — the LAST B3 widening).**  perl's rule
+  (toke.c): a bareword is looked up as a lexical sub only when `PL_expect !=
+  XOPERATOR`, so the statement is `(my $x = if()) if if()` — the first and
+  third `if` are the sub, the middle one the modifier (deparsed, 5.40.3).
+  Fix in the RENAMER's classification, as s409 ruled — NOT the term grammar:
+  `Pl::Parser2::_rename_lexical_subs` asks `_word_in_operator_position` for
+  the six statement-modifier names (`Pl::PExpr::Config::is_statement_modifier`):
+  operator position = the previous significant token ENDS A TERM (`_ends_term`,
+  the repairs' oracle), a bareword TERM (`_word_is_term`: constant / `()` sub
+  / 0-ary builtin), or a `()` call this pass itself just produced; a previous
+  Word that IS a modifier keyword is an operator; the PPI statement class is
+  NOT consulted (PPI makes a Compound of every statement-initial keyword —
+  `(unless, 2)` inside a list, a bare `if;`, both the sub in perl; a real `if
+  (…) {…}` in the sub's scope is a perl compile error, so valid input never
+  has one).  **`our sub if` is the same rule with the qualified spelling**:
+  perl aliases the lexical `if` to `&main::if`, PCL's bare `if` is the keyword
+  at every site, so its term-position uses spell `main::if` (probed: 42 in perl
+  AND PCL; the declaration stays `our sub if` — it IS the package sub; the
+  only `our` declaration the pass collects).  The keyword-shaped structure PPI
+  built is RE-CLASSED IN PLACE (`_reclass_keyword_call_site`, the label-merge
+  precedent, no reparse): a statement-initial Compound (`if;`, `map { if } …`,
+  `(unless, 2)`) → the class the parent's other children have; the orphan
+  sibling PPI split off (`(for, for)` → Compound(for) + Expression(`, for`))
+  joined back unless a `;` really ended it; the Condition after `if()` → List
+  (`my $w = if();` dropped "Missing case: [" on BOTH trees).  ONE classifier
+  for the token stream and the interpolated-code walk (`_rewrite_lexsub_use`).
+- **`_ends_term` gained the POSTFIX `++`/`--` arm it was missing**: `$i++
+  while …` put `while` in operator position only once the classifier asked;
+  which `++` it is is the same question one token back (postfix follows a
+  term, prefix does not).  The #354 glob-multiply repair shares the predicate:
+  `$i++*foo` was lexed as a glob and DROPPED — now multiplication (guard row).
+- **Verified over ALL FOUR populations vs `0b56ff9`**: corpus-diff IDENTICAL
+  (111 files, drops 5); lib A/B SAME=22; perl-t A/B 603/604 (t/op/lexsub.t the
+  ONLY diff); cpan A/B SAME=402; gate-SET scan 638×2: exactly ONE row —
+  lexsub.t's first stderr line moves from the `if if if` drop to its next
+  (`x`); B3 §1a reachability re-run (`PCL_TERM_DECL`, both populations): corpus
+  9 declines all Word-led (unchanged), perl-t 72 declines (47 single + 25 unary), all Word-led — identical to s428.  Companion
+  op/lexsub.t 7/10 → 9/8 REAL MOVE (serial-confirmed; the two `our sub if`
+  rows PASS; the state/my twins un-drop behind the file's unchanged
+  `undef-fn:main::pl-F` abort).  Cold gate 160/5700, failures = the 13 pclxs xs rows.  Census 27/90 → 27/82
+  (lexsub.t 12 → 4; the 4 left are the `x`-named lexical sub — PPI lexes a sub
+  named `x` as the repetition operator, #361/#376 family, not B3).  gen v2-177
+  (artifacts stamp-only).  **Sweep NOT run, by the s401 row** (corpus-diff
+  identical + lib byte-identical).  Guards: `Pl/t/lexical-sub-02.t` (6
+  perl-oracle rows, 40+ shapes: my/state/our × same/other package, `if()`,
+  `&if`, `\&if`, `defined &if`, `if;`, `map { if }`, `(unless, 2)`, `3 +
+  unless`, `unless unless 0`, `print … if unless`, `"@{[ unless ]}"`, `$t +=
+  for for 1..2`, `(for, for)`, `$i++ while`, the non-keyword inverse, the
+  postfix-`++` arm); lexical-sub-01.t's #374 rows REWRITTEN from "the
+  statement is a counted DROP" to "it lowers" + a runtime row (the s416
+  stale-guard rule — caught by the targeted-guard batch, which is why that
+  batch runs).  **#374 CLOSED (both halves).  B3 — #153's last track — is
+  COMPLETE: B3.1 (s428), B3.2 (s429), B3.3 (s430).**  Next: the flip
+  re-census (`docs/drop-census-s419-flip-gate.md` §4; #410 and #399 are the
+  holdouts).
+- **Filed #456 (PRE-EXISTING, found by the guard probe)**: `{ package Q; print
+  main::nm(), "|\n"; } sub nm {"PKG"}` prints EMPTY (perl `PKG|`) — the block
+  with the package switch is emitted as its own section, the hoisted `(p-sub
+  pl-nm …)` lands AFTER it, and the forward `(p-declare-sub main::pl-nm)` stub
+  ANSWERS undef instead of dying (rule 12: the stub should name the sub).
+
 ## s429 (2026-08-22, Fable) — B3.2 / #259: a declared sub's call parses by its PROTOTYPE'S SHAPE, never by its minimum arity
 
 - **`1 == a_hash 'a'` (`(%)`), `(unilist3 0 || 5)` (`(;$;)`), `any_tainted @_`

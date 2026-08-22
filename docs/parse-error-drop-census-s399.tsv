@@ -10,8 +10,8 @@
 # excluded as always) + lib/**.pm (21).  Measured with
 # tools/drop-census.pl at commit c754abc; 3m36s at 8 jobs.
 #
-# TOTAL after the edits below: 27 files, 90 drops -- 4 perl-tests files (5
-# drops), 23 companion files (85), ZERO in lib/.  (At the s399 measurement:
+# TOTAL after the edits below: 27 files, 82 drops -- 4 perl-tests files (5
+# drops), 23 companion files (77), ZERO in lib/.  (At the s399 measurement:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -319,6 +319,28 @@
 #         moved.
 #      (b) t/op/utftaint.t 1 -> 0 (ROW REMOVED): `any_tainted @_` inside
 #         `sub tainted ($)` (`(@)`, line 17).  Companion row UNCHANGED 72/17 NOTAP.
+#   s430  EIGHT drops REMOVED from ONE file by task #374(b) (B3.3, the last
+#         B3 widening, docs/b3-operand-collapse-s428.md): t/op/lexsub.t 12 -> 4.
+#         A lexical sub NAMED AFTER A STATEMENT MODIFIER (`my`/`state`/`our
+#         sub if () {…}`, lines 71/209/576) made `my $x = if if if` either
+#         three juxtaposed calls (renamed, `Missing case: [` x4 -- lines
+#         210/213/577/580) or the keyword parse (`our`, not renamed,
+#         `statement keyword \`if\` used as a function` x4 -- lines 72/75, each
+#         counted twice by the emitter).  perl reads it `(my $x = if()) if
+#         if()` (toke.c looks a bareword up as a lexical sub only when
+#         PL_expect != XOPERATOR), so the rename is now POSITION-AWARE for the
+#         six modifier names and `our sub if` spells its term-position uses
+#         `main::if`; the keyword-shaped PPI structure (a Compound, a split
+#         sibling, a Condition after `if()`) is re-classed in place.  Fix in
+#         Pl/Parser2.pm's _rename_lexical_subs family (the RENAMER's
+#         classification, as s409 ruled -- not the term grammar); _ends_term
+#         gained the postfix `++`/`--` arm the classifier needed.  Verified
+#         over ALL FOUR populations vs 0b56ff9: corpus-diff IDENTICAL (111
+#         files, drops 5), lib A/B SAME=22, perl-t A/B 603/604 SAME (this file
+#         the only DIFF), cpan A/B SAME=402; gate-SET scan and companion row
+#         in the session log.  The 4 that stay are the `x`-named lexical sub
+#         (lines 448/751/836/851: PPI lexes a sub named `x` as the repetition
+#         operator -- #361/#376 family, not B3).  Guard Pl/t/lexical-sub-02.t.
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
@@ -329,7 +351,7 @@ t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
 t/op/gv.t	3	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x2
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	12	Bug. Fell through. Missing case: [ x5 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2 | statement keyword `if` used as a function x4
+t/op/lexsub.t	4	Bug. Fell through. Missing case: [ x1 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/ref.t	1	Bug. Fell through. Missing case: [ x1
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1

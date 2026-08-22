@@ -163,15 +163,54 @@ Residue filed: #453 (user named-unary operand extent through `.`/`+` — the
 builtin site's `_extend_high_prec` is missing at the user site; the two
 operand sites should be ONE), #454, #455, #260's `(_)` row.
 
-### B3.3 — `WORD WORD WORD` of declared empty-prototype lexsubs (#374(b), last)
+### B3.3 — a keyword-named lexical sub, renamed POSITION-AWARE (#374(b), last) — SHIPPED s430
 
-`my $x = if__lexsub__N if__lexsub__N if__lexsub__N` — three juxtaposed 0-arg
-declared-`()` sub calls (t/op/lexsub.t; #337 renamed the keyword `if` to a
-lexsub cell).  The walker declines bare words by design; claiming this needs "a
-Word that is a declared empty-prototype sub is a 0-arg call primary", which is a
-bareword-primary decision the walker has deliberately stayed out of (s364).
-Hardest and least corpus-supported (one file); do it last, possibly as its own
-sub-task, and only once B3.1/B3.2 have proven the widening method here.
+`my`/`state`/`our sub if () { 44 }` + `my $x = if if if` (t/op/lexsub.t lines
+71/209/576).  The sketch above ("three juxtaposed 0-arg calls; a bareword-
+primary decision for the walker") was the s408 reading; s409's review corrected
+it and s430 confirmed it by measurement: the statement is NOT `TERM TERM TERM`.
+perl deparses it `(my $x = if()) if if()` — toke.c consults the pad for a
+bareword lexical sub only when `PL_expect != XOPERATOR`, so the first and third
+`if` are the sub and the MIDDLE one is still the statement modifier.  #337's
+renamer rewrote all three, which is what made the statement unlowerable.
+
+**The fix is in the RENAMER's classification and needs NO walker / term-grammar
+change at all** — the third B3 widening in a row whose measured cause was not
+in `_term_extent`.  `_rename_lexical_subs` asks `_word_in_operator_position`
+for the six statement-modifier names (`is_statement_modifier`): operator
+position = the previous significant token ends a term (`_ends_term`, the
+repairs' oracle), a bareword term (`_word_is_term`), or a `()` call this pass
+just produced → leave the keyword; otherwise → the sub.  The PPI statement
+class is not consulted (PPI opens a Compound at ANY statement-initial keyword;
+`(unless, 2)` and a bare `if;` are both the sub in perl).  `our sub if` is the
+same rule with the qualified spelling `main::if` for term-position uses (perl
+aliases the lexical `if` to `&main::if`; the declaration stays `our sub if`).
+The keyword-shaped PPI structure is re-classed in place
+(`_reclass_keyword_call_site`, label-merge precedent): a statement-initial
+Compound, the orphan sibling PPI splits off at a `,` (`(for, for)`), and the
+Condition after `if()` (a shape that dropped on both trees).  `_ends_term`
+gained the postfix `++`/`--` arm the classifier needed — shared with the #354
+glob-multiply repair, which turned `$i++*foo` from a glob drop into
+multiplication.
+
+**Verification (s430, vs `0b56ff9`):** guard `Pl/t/lexical-sub-02.t` (6
+perl-oracle rows, 40+ shapes) + lexical-sub-01.t's #374 rows rewritten (they
+asserted the drop); corpus-diff IDENTICAL (111 files, drops 5); lib A/B
+SAME=22; perl-t A/B 603/604 (lexsub.t the only diff); cpan A/B SAME=402;
+gate-SET scan 638×2: exactly lexsub.t's first-line move; §1a reachability
+re-run: corpus 9 Word-led declines unchanged, perl-t 72 declines (47 single + 25 unary), all Word-led — identical to s428; companion
+op/lexsub.t 7/10 → 9/8 REAL MOVE; census 27/90 → 27/82 (lexsub.t 12 → 4 — the
+rest is the `x`-named lexsub, #361/#376 family); cold gate 160/5700, failures = the 13 pclxs xs rows; gen
+v2-177.  Residue filed: #456 (a qualified call into a later-defined file-level
+sub from a block-scoped package region answers EMPTY — the `p-declare-sub` stub
+should die).
+
+**B3 is COMPLETE** — B3.1 (s428), B3.2 (s429), B3.3 (s430) — and with it
+Option B phase 2's Track B (#153).  None of the three needed a `_term_extent`
+change: the walker's deletion half was already done (§1a) and each widening's
+cause sat in a pre-pass, a prototype reading, or the renamer.  The §1a
+reachability measurement stays the regression check for anyone who does touch
+the walker.
 
 ## 3. What B3 is NOT
 
@@ -185,7 +224,8 @@ walker's correct decline, the Xsub/fallback owns them).
 
 ## 4. The flip, after B3
 
-When B3.1–B3.3 land, re-run `docs/drop-census-s419-flip-gate.md`'s census.  The
+B3.1–B3.3 have landed (s428–s430); the next step is to re-run
+`docs/drop-census-s419-flip-gate.md`'s census.  The
 flip's precondition (that doc §4) is the unblock list #410 / #374(b)+#365 via
 B3 / #153-B3 residue / #411 / #413(done) / #412(done) / #399 / #259 / #414(done)
 / #415(items 1+4 done) — B3 clears #411, #259 and #374(b) from it; #410 (the

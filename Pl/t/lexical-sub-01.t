@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 32;
 
 my $PREAMBLE = "use feature 'lexical_subs';\nno warnings 'experimental::lexical_subs';\n";
 
@@ -202,17 +202,16 @@ print __PACKAGE__->can('f') ? "CAN" : "NOCAN", "\n";
 PERL
 
 # A lexical sub named after a KEYWORD (#374).  perl allows it and t/op/lexsub.t
-# asserts it; PCL's statement grammar owns those words, so `my $x = if if if`
-# cannot be lowered.  What matters is HOW it fails: it used to emit a
-# zero-argument `(p-if)` — the p-if MACRO called as a function, because `if` is
-# in ExprToCL's %RUNTIME_NAMES — and that form's macroexpansion error killed
-# the WHOLE FILE at load.  Now the statement is a counted, announced DROP and
-# the program runs on.
+# asserts it.  History: `my $x = if if if` used to emit a zero-argument `(p-if)`
+# — the p-if MACRO called as a function, because `if` is in ExprToCL's
+# %RUNTIME_NAMES — and that form's macroexpansion error killed the WHOLE FILE
+# at load (half (a), fixed s408: a counted, announced DROP).  Since s430 (half
+# (b), B3.3) the statement LOWERS: the rename is position-aware — the first
+# and third `if` are the sub, the middle one the modifier — and `our sub if`
+# spells its term-position uses `main::if`.  The full family is in
+# lexical-sub-02.t; these rows pin the three failure modes that must not come
+# back: the macro form, the parse-error drop, the announcement.
 {
-    # `our sub if` is a PACKAGE sub, so #337's rename deliberately leaves it
-    # alone and the words stay keywords — this is the half that used to reach
-    # the macro.  (`my`/`state sub if` renames, and then drops in the term
-    # grammar instead; both halves are #374, both are counted in the census.)
     my $pl_file = write_pl(<<'PERL');
 sub is { }
 { our sub if() { 42 }
@@ -224,11 +223,14 @@ PERL
     unlike($cl, qr/\(p-if\)/,
            '#374: a keyword-named sub never emits a zero-argument (p-if), whose '
          . 'macroexpansion error used to kill the whole file at load');
-    like($cl, qr/PARSE ERROR: statement keyword/,
-         '#374: …the statement is a counted DROP instead');
-    like($err, qr/PCL: statement dropped/,
-         '#374: …and the drop is announced, so it is not silent');
+    unlike($cl, qr/PARSE ERROR/,
+         '#374b: …and the statement is no longer a DROP — it lowers');
+    unlike($err, qr/PCL: statement dropped/,
+         '#374b: …so nothing is announced');
 }
+test_lexsub('#374b: `our sub if` — the statement runs and yields perl\'s value', <<'PERL');
+{ our sub if() { 42 } my $x = if if if; print "$x\n"; }
+PERL
 
 # ── #377: a lexical sub reading the enclosing sub's PARAMETER ────────────────
 #

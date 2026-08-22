@@ -4,6 +4,56 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 430 (2026-08-22, Fable) — B3.3 / #374(b) SHIPPED: a keyword-named lexical sub is renamed POSITION-AWARE; B3 COMPLETE
+
+The third and last B3 widening (`docs/b3-operand-collapse-s428.md` §B3.3,
+task #153's last track), landed alone behind the four-population bar like
+B3.1 and B3.2.
+
+**#374(b): `my`/`state`/`our sub if () { 44 }` + `my $x = if if if`
+(t/op/lexsub.t lines 71/209/576).**  The renamed spellings dropped as three
+juxtaposed zero-arg calls ("Missing case: ["), the `our` one as the keyword
+parse (half (a)'s counted drop).  perl reads it `(my $x = if()) if if()`:
+toke.c looks a bareword up as a lexical sub only when `PL_expect != XOPERATOR`,
+so the first and third `if` are the sub and the middle one stays the modifier.
+The fix is where s409 said it is — the RENAMER's classification, not the term
+grammar: `_rename_lexical_subs` is position-aware for the six statement-modifier
+names (`_word_in_operator_position`: after a term-ending token per `_ends_term`,
+a bareword term per `_word_is_term`, or a `()` call the pass itself just made →
+the keyword; otherwise → the sub).  `our sub if` is the same rule with the
+qualified spelling `main::if` for its term-position uses (perl aliases the
+lexical `if` to `&main::if`; PCL's bare `if` is the keyword everywhere; probed
+42 both sides; the declaration stays `our sub if`).  PPI's keyword-shaped
+structure is re-classed in place by `_reclass_keyword_call_site` (a Compound
+for a statement-initial use — `if;`, `map { if } …`, `(unless, 2)`; the orphan
+sibling it splits off — `(for, for)`; the Condition after `if()`, a shape that
+dropped on BOTH trees).  `_ends_term` gained the postfix `++`/`--` arm
+(`$i++ while …` asked for it; `$i++*foo` — the #354 repair — was a glob drop
+and is now multiplication).
+
+**Measurement, four populations vs `0b56ff9`.**  corpus-diff IDENTICAL (111
+files, drops 5); lib A/B SAME=22; perl-t A/B 603/604 (t/op/lexsub.t the only
+DIFF); cpan A/B SAME=402; gate-SET scan 638×2 = exactly one row (lexsub.t's
+first stderr line moves to its next drop); B3 §1a reachability (PCL_TERM_DECL)
+corpus 9 Word-led declines unchanged, perl-t 72 declines (47 single + 25 unary), all Word-led — identical to s428; companion
+op/lexsub.t 7/10 → 9/8 REAL MOVE (serial-confirmed; the two `our sub if` rows
+pass, the state/my twins un-drop behind the unchanged `undef-fn:main::pl-F`
+abort — row spliced into `docs/perl-suite-run.tsv`); cold gate 160/5700, failures = the 13 pclxs xs rows; census
+27/90 → 27/82 (lexsub.t 12 → 4, the rest is the `x`-named lexsub, #361/#376
+family); gen v2-177, three artifacts stamp-only; sweep NOT run (s401 row).
+Guards: NEW `Pl/t/lexical-sub-02.t` (6 perl-oracle rows, 40+ shapes incl. the
+inverse and the `++` arm) and lexical-sub-01.t's three #374 rows rewritten from
+the drop they asserted to the lowering (+1 runtime row) — the s416 stale-guard
+rule, caught by the targeted-guard batch.
+
+**Filed #456** (pre-existing, from the guard probe): a qualified
+`main::nm()` inside a block-scoped `package Q;` region, to a sub defined later
+at file level, returns EMPTY — the package-switch section is emitted before the
+hoisted definition and the `p-declare-sub` stub answers undef instead of
+dying.  **#374 CLOSED.  B3 COMPLETE.**  Next: the flip re-census
+(`docs/drop-census-s419-flip-gate.md` §4) and the Opus fillers (#453, #435,
+#454/#455, #456).
+
 ## Session 429 (2026-08-22, Fable) — B3.2 / #259 SHIPPED: a declared sub's call parses by its PROTOTYPE'S SHAPE, never its minimum arity
 
 The second B3 widening (`docs/b3-operand-collapse-s428.md` §B3.2, task #153's

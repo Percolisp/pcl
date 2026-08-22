@@ -702,7 +702,13 @@ op/lc.t	2716	0	2683	33	DIFF
 op/leaky-magic.t	71	0	0	0	DIFF	crash:simple-error: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/
 op/length.t	49	0	35	12	DIFF	
 op/lex_assign.t	353	0	350	3	DIFF	
-op/lexsub.t	156	0	7	10	DIFF	undef-fn:main::pl-F
+# s430 (#374(b) keyword-named lexical sub, B3.3): op/lexsub.t 7/10 -> 9/8 — the
+#   `our sub if() {42} my $x = if if if` rows (lines 73, 76: 'lexical subs (even
+#   our) override all keywords', '…from other packages…') now run and PASS; the
+#   `state`/`my sub if` twins (lines 211/214, 578/581) un-drop too but sit
+#   behind the file's abort (undef-fn:main::pl-F, unchanged).  Serial-confirmed
+#   REAL MOVE by tools/run-perl-suite.pl op/lexsub.t; census 12 -> 4.
+op/lexsub.t	156	0	9	8	DIFF	undef-fn:main::pl-F
 op/lfs.t	17	0	0	0	DIFF	
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|
