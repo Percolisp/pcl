@@ -4,6 +4,46 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 433 (2026-08-22, Fable) — s431 + s432 reviewed + APPROVED; the flip RULED as a run-time die at the drop site; #456(b) RULED as the phase model; `docs/plan-post-s433.md` is THE LIVE QUEUE
+
+**Review.**  Both Opus batches approved as shipped (`docs/fable-answers-s433.md`).
+Independently re-verified on `a5e1609`: cold gate (`rm ~/.pcl-cache/*.lisp;
+tools/prove-core`) 160 files / 5705 rows in 3m43, only the 13 pclxs xs rows
+fail; full sweep `perl sweep-perl-tests.pl --jobs 8` GATE clean, TOTAL passing
+18366 (+0), 0 new / 0 fixed, drops 5 = census.  Every s432 hunk read
+(`%p-call-of-undefined-sub` + the `p-declare-sub` body; the five
+decl-ordering-02 rows; the restored sort.t assertion; the pass-baseline and
+perl-suite-run splices).  Thirteen probe files vs perl 5.40.3.
+
+**Rulings (the short form; full text in the answers doc).**
+s431 Ask 1: **the flip is ONE shape — a perl-shaped trappable RUN-TIME die at
+the drop site, for every drop in every mode, no classifier** (the `;; PARSE
+ERROR` comment stays so the census instruments keep reading it; the stderr
+announcement, #363's eval die, `--module` silence and Track A's transpile
+refusals stay).  Its unit is the statement, so the 5300/3022/441-row prices
+of the transpile shape do not apply; it waits only for #467 + #462.  Ask 2:
+module-mode increment DISSOLVED — #457 → #464 → #466 → #465 are ordinary
+fillers.  Ask 3: #462 is part of the flip's bar (Q1).  Ask 4: the splice is
+the right form; the runner must print files with no snapshot row.
+s432 Ask 1: AUTOLOAD-before-die CONFIRMED.  Ask 2: guard shape RIGHT (one row
+turns red when (b) lands).  Ask 3: keep the die; the 94 rows are #467's.
+Ask 4: half (b) PROMOTED to Q3 and RULED as the PHASE model across sections —
+probe: `our $x = 5; { package Q; sub q1 {1} } BEGIN { print "B=[$main::x]" }`
+→ perl `B=[]`, PCL `B=[5]` (single-section inverse right); and the s432
+"hoist the def" sketch is unsafe because a hoisted body above its section's
+decls compiles a `p-defcell` symbol-macro as a free variable.
+
+**Filed (pre-existing, from the probes):** #468 (never-declared plain call:
+no AUTOLOAD, raw CL error — route through `%p-call-of-undefined-sub`), #469
+(the phase-order bug above; closes with #456(b)), #470 (identity-promoted
+file lexical ≡ same-named package variable: `my $y = 7; sub nm { $y } print
+"[$main::y]"` → perl `[]`, PCL `[7]`).  #456/#467/#462/#457 carry the
+rulings.
+
+**Docs:** `docs/fable-answers-s433.md`, `docs/plan-post-s433.md` (supersedes
+plan-post-s430 §1), DECIDED §s433, CLAUDE.md pointer, memory STATE line.  No
+code change; generation stays v2-177.
+
 ## Session 432 (2026-08-22, Opus 5) — P2 / #456 half (a): a CALLED forward stub runs AUTOLOAD or DIES; it never answers a value again
 
 Session P2 of `docs/plan-post-s430.md`.  Runtime-only (`cl/pcl-runtime.lisp`),

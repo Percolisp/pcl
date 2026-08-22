@@ -1,5 +1,10 @@
 # Plan after s430 (Fable, s430, 2026-08-22) — THE LIVE QUEUE for the Opus sessions that follow B3
 
+> **SUPERSEDED as the Opus queue by `docs/plan-post-s433.md` (s433, Fable):
+> P1 + P2(a) are DONE, the flip has a ruled SHAPE, #456(b) is promoted.  §2–§4
+> of this file still stand and are referenced from there (recipes, Fable
+> queue, USER decisions).**
+
 *Supersedes `docs/plan-post-s420.md` §1 as the Opus queue (its §4 USER
 decisions and §5 guardrails still stand).  Written at the end of s430, the
 session that closed B3 (task #153) — the compiler's structural track is DONE;

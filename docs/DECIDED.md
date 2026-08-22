@@ -11,6 +11,63 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s433 (2026-08-22, Fable) — s431 + s432 REVIEWED + APPROVED; THE FLIP HAS A SHAPE (a run-time die at the drop site, one shape, every mode); #456 half (b) = the PHASE model across sections; THE LIVE QUEUE IS `docs/plan-post-s433.md`
+
+- **Both Opus batches APPROVED as shipped** (`docs/fable-answers-s433.md`).
+  Independently re-verified: cold gate **160 / 5705** (only the 13 pclxs xs
+  rows), full sweep **GATE clean TOTAL 18366 (+0)**, drops 5 = census; every
+  s432 hunk read; thirteen probe files vs perl 5.40.3.
+- **THE FLIP'S SHAPE (s431 Ask 1), RULED: the `PARSE ERROR` emitters keep
+  their comment and replace `nil` with a perl-shaped, trappable RUN-TIME die**
+  `(pcl:p-die "PCL: statement not supported at F line N: <text> -- <reason>\n")`
+  — ONE shape for exempt / registered / deliberate / gap alike, in FILE and
+  MODULE mode alike; NO classifier in the emitter (the distinction is the
+  census's, and a classifier would be asymmetric in the dangerous direction —
+  a miss on a registered row dies a 1631-row file at transpile).  The
+  transpile-time stderr announcement, #363's eval-string die, `--module`'s
+  silence and the Track A transpile refusals all STAY.  The flip's unit
+  becomes the STATEMENT: every row before it survives, a program that never
+  reaches it is unaffected, one that does gets perl's own `die` in `$@`.
+  Nothing in s400 §6.4 required transpile time; P1's price table (2581 rows
+  for FOUR registered statements) is what decides the shape.  The s400 §6.3
+  lvalue sentence becomes "dies when the statement runs".  **The module-mode
+  increment is DISSOLVED** (a module with a drop still loads); #457/#464/#466/
+  #465 are ordinary fillers, #457 first.  **#462 is part of the flip's BAR**
+  (a price nobody can count is not a price) and lands before it with #467.
+- **#467 RULED: recovery in BOTH runners** (`p-load-with-recovery` in
+  `tools/run-perl-suite.pl` too; the `perl-suite-run.tsv` re-bless in the
+  SAME commit, one measured pass, every moved file explained); **until then a
+  companion row count is not comparable to a sweep row count for a change
+  that makes something die.**  The runner must also PRINT suite files with
+  no snapshot row (the five s431 rows were found by counting).
+- **s432 asks: AUTOLOAD-before-die CONFIRMED** (perl's own-package rule for a
+  body-less sub; the re-silencing is half (b)'s artefact); **the guard shape
+  is RIGHT** — the criterion is "one row turns RED the day the behaviour is
+  fixed" (row 1 does), never a TODO marker; **rule 12 at −94 rows CONFIRMED,
+  keep the die** (the 94 are the runner's, #467).
+- **#456 half (b) PROMOTED and RULED as the PHASE model** (#469 is the
+  general form, found by probe: `our $x = 5; { package Q; sub q1 {1} } BEGIN
+  { print "B=[$main::x]" }` — perl `B=[]`, PCL `B=[5]`; the single-section
+  inverse is right): emit every section's compile-phase forms (decls,
+  captured, defs, sched) before any section's run-phase forms, each group
+  under its own `(in-package …)` switches, MOVE never copy.  **"Hoist the
+  definition alone" is UNSAFE**: a body above its section's decls compiles a
+  `p-defcell` SYMBOL-MACRO (`main::$x`) as a plain free variable (probed on
+  the #456 shape with a captured lexical).
+- **Filed from the review probes (all PRE-EXISTING): #468** a plain call to a
+  NEVER-declared sub reaches no AUTOLOAD and dies with SBCL's raw
+  `undefined-function` (`%p-call-of-undefined-sub` is the ONE mechanism;
+  handler-vs-stub-emission by measurement); **#469** (above); **#470** a file
+  lexical promoted under its OWN name (the identity branch) aliases the
+  same-named package variable — `my $y = 7; sub nm { $y } print "[$main::y]"`
+  → perl `[]`, PCL `[7]`; the identity condition must also require no
+  package spelling of the name.
+- **Queue (`docs/plan-post-s433.md`): Q1 = #467 + #462 + the missing-row
+  report → Q2 = the flip (recipe in the plan) → Q3 = #456(b)/#469 → Q4 = #453
+  + #365 → Q5 = #454/#435/#455 → Q6 = #451/#452/#449/#450 → Q7 = #457 → #464
+  → #466 → #465 → #468 → #470 → the former flip-gap list.  The release gate
+  (push 2026-08-24 USER → CI → v0.1 tag) runs independently of Q1–Q3.**
+
 ## s432 (2026-08-22, Opus 5) — #456 half (a): a forward-declaration STUB that is CALLED runs AUTOLOAD, else DIES — it never answers a value again
 
 - **`p-declare-sub`'s stub body was `nil`** — so a call that reached it produced
