@@ -348,6 +348,55 @@ commented out.
 
 ---
 
+## Indirect object syntax with a SCALAR invocant (`method $obj LIST`)  [MAYBE LATER — USER decision s425]
+
+**Perl behaviour:** the pre-arrow method call syntax `METHOD INVOCANT LIST`
+— `new Foo(1, 2)`, `new Foo`, `doit $object "FOO"`, `method $obj "a", "b"`,
+`method {expr} LIST`.  Perl still parses all of it (only `no feature
+'indirect'` is the 5.36 default); the bareword after a callable word is an
+indirect OBJECT exactly when it is not itself a declared sub (probed both
+ways vs perl 5.40.3, task #381).
+
+**PCL behaviour — two halves:**
+
+* **The CLASS-NAME spellings WORK**: `new Foo`, `new Foo LIST`, `new Foo(LIST)`,
+  `ref(new Foo)` and the general `WORD ClassName …` form for a known class go
+  through the indirect-object pre-pass in `Pl/PExpr.pm` (the `new` pre-pass
+  and the general one next to it).  Measured s425: every occurrence of the
+  constructor shape in the corpora (cpan-tests 3 lines — `new Test::Builder;`,
+  `new Text::CSV`, `new HTML::Lint`; perl's own t/ 3 lines; perl-tests 0;
+  lib/ 0) is one of these, and all probe identical to perl.
+* **The SCALAR / BLOCK invocant spelling does NOT**: `my $d = doit $c "FOO";`
+  is a #138-family **drop**, announced as
+  `PCL: statement dropped at FILE line N: … -- Bug. Fell through. Missing case`
+  and the program continues without it.  The whole drop census carries
+  exactly two such rows — `perl-tests/ref.t:334` (`$foo = doit $object
+  "FOO";`) and `perl-tests/method.t:72` (`is((method $obj "a","b","c"), …)`)
+  plus their `t/op/` twins.  Its twin mis-read is **#381**: `WORD BAREWORD`
+  where WORD is a declared sub and BAREWORD is not (`print h F;` with
+  `sub F::h` and `our sub h`) — perl resolves `F->h`, PCL emits
+  `(pl-h (pl-F))` and dies *undefined function pl-F* (loud, but a
+  mis-compile, not a refusal; `t/op/lexsub.t`'s ~139 unmeasured rows sit
+  behind it).
+
+**Why "maybe later" and not "refused" (USER, 2026-08-22, s425):** refusing
+the spelling would turn 2 loud drops into the loss of the two files that
+carry them — ref.t and method.t contribute 191 + 97 passing rows today (the
+opposite trade from the Track A refusal families, whose files were already
+unproductive) — and implementing it is a `WORD $scalar TERM` extent
+question of exactly the shape Track B / B3 (`_reduce_term`, task #153) is
+built to answer, so it is cheapest AFTER B3.  It is not scheduled; the two
+drops stay loud and counted in `docs/parse-error-drop-census-s399.tsv`.
+
+**Revisit triggers:** (a) a CPAN board module whose tests use the scalar
+invocant spelling (the s425 count found none); (b) B3 lands — then the
+extent question is one walker rule and #381's discriminator (#266's
+callable classifier, "is there a sub of that name in scope") is already in
+the tree; (c) the two drops start blocking the announce→DIE flip's bar.
+Tasks: #399 (closed with this decision), #381 (open, the mis-compile).
+
+---
+
 ## `given`/`when` / smart match (`~~`)
 
 **Perl behaviour:** `given`/`when` (the "switch" statement) and the `~~`

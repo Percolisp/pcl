@@ -223,6 +223,12 @@ interpreter-internals items they are a matter of *when*, not *whether*:
   implicit `$self`, `ADJUST` ≈ constructor code, `:isa` ≈ `@ISA`/C3), so the
   work is chiefly parser desugaring. Deferred because almost no CPAN code
   targets it yet — see `docs/not-supported.md` §class for the sketch.
+- **Indirect object syntax with a scalar invocant (`method $obj LIST`).**
+  The class-name spellings (`new Foo`, `new Foo(@args)`) already work; the
+  scalar-invocant spelling is dropped with a loud message today (two
+  occurrences in the whole test corpus).  Parked as "maybe later" (s425):
+  not refused, because refusing would cost the files that carry it; cheapest
+  after the operand-grammar work (B3) lands.
 
 ## License
 

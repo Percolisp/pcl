@@ -106,20 +106,29 @@ the harness, or a `cl/` coercion/stringification path.
 4. Post-v0.1: boxed aggregates (design, do not start before), #221 (warnings
    model), E5.3 `local`.
 
-## 4. USER decisions (open; defaults in force until made)
+## 4. USER decisions (DECIDED s425, 2026-08-22 — the USER took 3 and delegated 1 and 2 to Fable)
 
-1. **Does the v0.1 tag DECOUPLE from the flip?**  Recommendation: **YES** — tag
-   after the first green CI run + O1 (#419, #418: cheap, visible, row-heavy).
+1. **Does the v0.1 tag DECOUPLE from the flip?  YES** (Fable, delegated).  Tag
+   after the first green CI run + O1 (#419 merged s421; #418 merging s425).
    The flip's remaining blocker is B3, an open-ended Fable design; the drops
-   are ANNOUNCED (loud) and `docs/STATUS.md` already words them as the sharp
-   edge.  The flip becomes v0.2's headline.  Default until decided: O1–O2 run
-   as the phase-4 hunt and the tag waits.
-2. **Is the next Fable session B3?**  Recommendation: yes (the queue's
-   critical path is Fable-bound; every Opus item above can run in parallel
-   with it).
-3. **Indirect object syntax (#399/#381): implement, or register as
-   not-supported with the 288-row cost stated?**  Opus brings the shape count
-   (O3.6) before this is decided.
+   are ANNOUNCED (loud), counted, each with an owning task, and
+   `docs/STATUS.md` already words them as the sharp edge.  The flip becomes
+   v0.2's headline.
+2. **Is the next Fable session B3?  YES** (Fable, delegated) — the queue's
+   critical path is Fable-bound; every Opus item above runs in parallel with
+   it (s425 launched O2 + O3 + the #418 finish as parallel agents).
+3. **Indirect object syntax (#399/#381): MAYBE LATER** (USER) — registered in
+   `docs/not-supported.md` ("Indirect object syntax with a SCALAR invocant"),
+   row in `docs/STATUS.md`.  Measured s425 before writing it: the CLASS-NAME
+   spellings (`new Foo`, `new Foo LIST`, `new Foo(LIST)`, `ref(new Foo)`)
+   already WORK through the PExpr pre-pass, and every corpus occurrence of the
+   constructor shape (cpan-tests 3 lines, perl t/ 3, perl-tests 0, lib 0) is
+   one of those; what is missing is the scalar-invocant spelling (2 loud
+   census drops: ref.t:334, method.t:72 + twins) and #381's `h F` mis-read.
+   Not refused (would cost ref.t + method.t = 288 passing rows), not
+   scheduled; cheapest after B3 (a `WORD $scalar TERM` extent question).
+   #399 CLOSED; #381 stays open as the mis-compile.  O3.6 (the count) is
+   therefore DONE and dropped from the O3 agent's list.
 
 ## 5. Guardrails (the ones this review added; the rest are DECIDED s401–s420)
 

@@ -11,6 +11,37 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s425 (2026-08-22, Fable) — the three open USER decisions CLOSED; second round of parallel Opus agents (finish #418, O2, O3)
+
+- **Indirect object syntax (#399/#381) = MAYBE LATER (USER)** — registered in
+  `docs/not-supported.md` ("Indirect object syntax with a SCALAR invocant"),
+  a row in `docs/STATUS.md`, a bullet in the README roadmap.  MEASURED first:
+  the CLASS-NAME spellings (`new Foo`, `new Foo LIST`, `new Foo(LIST)`,
+  `ref(new Foo)`) already WORK through the PExpr indirect-object pre-pass,
+  and every corpus occurrence of the constructor shape (cpan-tests 3 lines,
+  perl t/ 3, perl-tests 0, lib 0) is one of those; the missing half is the
+  SCALAR-invocant spelling (`doit $obj "FOO"` — a loud drop, exactly 2 census
+  rows: ref.t:334, method.t:72 + twins) and #381's `h F` mis-read (dies
+  undefined function).  NOT refused (ref.t + method.t = 288 passing rows), not
+  scheduled; cheapest after B3.  #399 CLOSED, #381 stays open.
+- **The v0.1 tag DECOUPLES from the announce→DIE flip — YES** (Fable, the
+  USER delegated it): tag after the first green CI run + O1; the flip is
+  v0.2's headline.  `docs/plan-post-s420.md` §4.1.
+- **Next Fable session = B3 (`_reduce_term`, #153) — YES** (delegated);
+  plan §3.1 / §4.2.
+- **Parallel Opus agents, round two (USER: "try sub processes")** — the s421
+  pattern (`docs/fable-answers-s422-s424.md` standing rule): a B-finisher
+  continues s423/#418 IN ITS ORIGINAL WORKTREE (the previous agent died with
+  the session leaving an uncommitted 10-file diff — probed first: the #418
+  reproducer already answers like perl there; a copy of the diff was saved
+  before the worktree was unlocked); E = s426 = O2 (#388 consumer 3 + #420 +
+  #422.1, gen v2-170, ids 443–448); F = s427 = O3 fillers (#415, #421,
+  #422.2, #442; gen v2-171, ids 449–454).  Each agent rebases onto main
+  before its final gate so the merge is a fast-forward; Fable renumbers the
+  generation ONCE per merge (v2-167 …) and regenerates the artifacts.
+  **A dead agent's worktree is the first thing the next session reads**
+  (memory `project_s421_opus_agents_inflight`).
+
 ## s424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE differ by the EXISTING `is-ref` flag; no new slot
 
 - **MEASURED FIRST (the task's discriminating question): they DIFFER

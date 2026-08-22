@@ -4,6 +4,36 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 425 (2026-08-22, Fable) — the three USER decisions closed (indirect object = MAYBE LATER; tag decouples from the flip; next Fable = B3); second round of parallel Opus agents (finish #418, O2, O3)
+
+**State at open:** main `753ecab` clean.  A (s422/#419) + C (s424/#423)
+merged, gate 156/5639 (the 13 pclxs xs rows), generation v2-166, artifacts
+matching.  B (s423/#418 widened) UNFINISHED — the agent died with s421
+leaving an UNCOMMITTED 10-file diff (+380/−125) in its worktree and no review
+doc.  Probed before anything else: the #418 reproducer (stash `exists`/
+`delete` on `ＦＯＯ` + the `%Ｘ`/`%X` collision) — perl `1 y 1256`, main
+`0 n 2266`, B's tree `1 y 1256`; B's widened guard `Pl/t/utf8-source-01.t`
+16/16 in its tree.  A copy of the diff was saved to the scratchpad before the
+worktree was unlocked.
+
+**The USER asked for the three open decisions to be EXPLAINED, then took 3
+and delegated 1 and 2** (`docs/plan-post-s420.md` §4, DECIDED s425):
+indirect object syntax = **MAYBE LATER** — registered in `not-supported.md`
+after measuring that the class-name spellings already work and the corpus
+count of the constructor shape is 6 lines all of which work; the scalar
+invocant spelling stays a loud 2-row drop, #381 stays filed; NOT refused
+(ref.t + method.t = 288 rows).  The v0.1 tag **DECOUPLES** from the flip
+(tag after the first green CI run + O1).  Next Fable session = **B3**.
+
+**Then three Opus 5 agents were launched in parallel** (USER: "try sub
+processes for the Opus 5 jobs"): a B-finisher continuing s423/#418 in its
+original worktree (gen v2-165, ids 431–435); E = s426 = O2 (#388 consumer 3
++ #420 + #422.1; gen v2-170, ids 443–448); F = s427 = O3 fillers (#415,
+#421, #422.2, #442; gen v2-171, ids 449–454).  Each rebases onto main before
+its final gate; Fable reviews, merges, renumbers the generation once per
+merge and regenerates the artifacts; one cold gate + one full sweep on the
+final tree.  (Merge results are appended below as they land.)
+
 ## Session 424 (2026-08-22, Opus) — #423 CLOSED: a glob VALUE and a glob REFERENCE are told apart by the `is-ref` flag that was already there; s419d's op/gv.t row recovered
 
 **The measurement came first, and it answered the task's question with

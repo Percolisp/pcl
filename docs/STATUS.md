@@ -46,6 +46,7 @@ observable difference is.  The big items:
 | exact error-message text | not a goal; error *behavior* (die/`$@`) is |
 | `DESTROY` at GC time | no deterministic finalizer timing on a GC'd host |
 | unicode identifiers in stashes/globs | not yet (tracked, task #410) |
+| indirect object syntax with a SCALAR invocant (`method $obj LIST`) | maybe later (USER, s425) — the `new Foo(…)` / `new Foo` class-name spellings work; `method $obj …` is dropped loudly; see `docs/not-supported.md` |
 
 ## Known sharp edges
 
