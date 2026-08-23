@@ -27,6 +27,7 @@
 #   --new REF        side B compiler = a worktree of REF (default: working tree)
 #   --env NAME=VAL   set NAME on side A's transpiles only (repeatable)
 #   --list FILE      input paths, one per line (repeatable; args are files too)
+#   --shapes         add the SHAPES population, Pl/t/shapes/*.pl (task #496)
 #   --jobs N         parallel pairs (default 8)
 #   --out DIR        keep both sides' outputs here (default: tempdir, removed)
 #   --timeout S      per-transpile timeout (default 300)
@@ -56,6 +57,7 @@ while (@ARGV) {
   elsif ($a eq '--new')     { $newref  = shift @ARGV }
   elsif ($a eq '--env')     { my ($k, $v) = split /=/, shift(@ARGV), 2; $env{$k} = $v // 1 }
   elsif ($a eq '--list')    { my $l = shift @ARGV; open my $f, '<', $l or die "$l: $!"; push @files, map { chomp; $_ } grep { /\S/ } <$f>; close $f }
+  elsif ($a eq '--shapes')  { push @files, sort glob("$root/Pl/t/shapes/*.pl") }
   elsif ($a eq '--jobs')    { $jobs    = shift @ARGV }
   elsif ($a eq '--out')     { $out     = shift @ARGV }
   elsif ($a eq '--timeout') { $timeout = shift @ARGV }

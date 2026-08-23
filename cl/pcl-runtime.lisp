@@ -10914,8 +10914,9 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (incf i)))))
     (coerce result 'string)))
 
-;;; Per-pattern iterator state for scalar-context glob.
-;;; Maps pattern string -> (index . results-vector) or :list-done (after list exhaustion).
+;;; Per-pattern iterator state for SCALAR-context glob only.
+;;; Maps pattern string -> (index . results-vector) or :scalar-done.  List context
+;;; keeps no state (see p-glob--list-context).
 (defvar *p-glob-iterators* (make-hash-table :test 'equal))
 
 (defun %p-glob-component-regex (glob)
@@ -11085,7 +11086,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.
-   In list context: first call returns all matches; second call with same pattern returns empty.
+   In list context: EVERY call returns all matches (perl: a list-context glob is
+   never stateful; the s440 fix -- `glob($p)` in a loop used to answer full, EMPTY,
+   full, ... -- task #499).
    In scalar context: returns one match per call, nil when exhausted; resets for next cycle.
    When *p-in-list-assign-rhs* is t (inside a p-list-= RHS) glob always uses scalar
    (iterator) mode, so `while (($x) = glob(...))` returns one file per iteration —
@@ -11096,16 +11099,16 @@ buffer's fill-pointer; everything else falls back to file-length."
         (p-glob--scalar-context pat))))
 
 (defun p-glob--list-context (pat)
-  "Glob in list context: first call returns all matches, second returns empty (then resets)."
-  (let ((state (gethash pat *p-glob-iterators*)))
-    (cond
-      ((eq state :list-done)
-       (remhash pat *p-glob-iterators*)
-       (make-array 0 :adjustable t :fill-pointer 0))
-      (t
-       (let ((vec (p-glob--expand pat)))
-         (setf (gethash pat *p-glob-iterators*) :list-done)
-         vec)))))
+  "Glob in list context: expand and return EVERY match, every call.
+   perl (perlfunc glob): list context returns the (possibly empty) list of
+   expansions; only scalar context iterates.  Until s440 this function kept a
+   :list-done mark per pattern and answered EMPTY on every second call of the
+   same pattern -- `for (1..3) { my @f = glob(\"*.c\") }` gave 2, 0, 2 and a sub
+   calling glob twice answered nothing the second time (task #499, found by
+   the shapes corpus).  List context touches no iterator state at all: perl
+   keys its scalar iterator by CALL SITE, PCL by pattern (#489), so a list
+   glob must not disturb a scalar loop over the same pattern elsewhere."
+  (p-glob--expand pat))
 
 (defun p-glob--scalar-context (pat)
   "Glob in scalar context: return one match per call, nil when exhausted.

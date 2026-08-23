@@ -52,6 +52,8 @@ world step through the installed wrapper on PATH.  README requirements row
 (PPI floor, "nothing else is non-core", the Data::Dump example is a CPAN
 module compiled on the fly), CLAUDE.md Dependencies, CHANGELOG.
 
+**CI GREEN on the fix**: run 32650698636 on `7e6d1eb` — all steps incl. the full gate on the stock runner; #282 + #283 DONE; v0.1 waits only on #494.
+
 **Thread B (USER, s439: "remove the fable answers and opus reviews from git.
 It doesn't seem necessary?") DONE**: `git rm` of the 85 files
 (`docs/fable-answers-*.md` 39, `docs/opus5-review-requests-*.md` 46; 1.1 MB) and, on
@@ -72,6 +74,29 @@ same license as Perl.") — set it to the README's first line, add topics
 (perl, common-lisp, sbcl, transpiler, compiler); the branch `snapshot-2026-05`
 (the old public history, kept reachable on purpose) and tag `R1` are there to
 keep or drop.
+
+**s440b — #496 the SHAPES corpus SHIPPED, and it paid on its first run (three
+findings, one fixed).**  `Pl/t/shapes/*.pl` — six families lifted from the
+s438 guard files (operand grammar, sub heads, imported term, punctuation
+arrays + glob, bareword handles, interpolation / non-ASCII), one block-scoped
+package per snippet, every file valid perl; `tools/corpus-diff.pl` runs them
+after the corpus verdict on ITS OWN line (`shapes: 6 files identical` /
+`SHAPES: k of 6 differ`, failing like a corpus diff; skipped for a file
+subset), `tools/emission-ab.pl --shapes` adds them; README with the admission
+rule.  Packaging the snippets side by side is what found: **#497** — the same
+sub NAME with a SIGNATURE in two packages: the second package's parameter is
+qualified as the package global (`;; sub f ($S02::x = 1)`, arity 0/0), so
+`f 5` drops and `f(5)` dies "Too many arguments" (#421's family, a bare-name
+key for signatures); **#498** — a punctuation ARRAY (`@?` …) written in
+package A is a different array in package B (perl forces them into main::);
+**#499 — FIXED**: a LIST-context glob answered full, EMPTY, full … per
+pattern (`for (1..3) { my @f = glob("*.c") }` → 2 0 2; a sub calling glob
+twice got nothing the second time; `while (my $f = glob(P)) { my @i =
+glob(P) }` was INFINITE) — `p-glob--list-context`'s `:list-done` mark, its
+own docstring's design since f92d2a4 (2026-04-11), pre-existing on 4a7c5a0;
+list context now expands every call and touches no iterator state.  Guard
+rows in `Pl/t/glob-01.t` (perl-probed, inverse-run: `2 0 2` + the infinite
+loop on the old tree).  Runtime change → the sweep runs with the s441 batch.
 
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org

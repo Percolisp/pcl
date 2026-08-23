@@ -45,6 +45,13 @@
 #     grep) — the cache generation string lives there and always differs
 #     across an emission-changing commit;
 #   - the temp worktree is always removed (END block), even on die.
+#
+# THE SHAPES POPULATION (task #496, s440): after the corpus verdict, the same
+# two compilers run over Pl/t/shapes/*.pl -- deliberately-awkward files that
+# exist only to exercise grammar no real population contains (lifted from the
+# s438 guard files; README there).  Reported on ITS OWN line, never mixed into
+# the corpus count; a shapes diff fails the run like a corpus diff.  A file
+# list given on the command line skips the shapes (a subset run is a probe).
 use strict;
 use warnings;
 use File::Temp   qw(tempdir);
@@ -176,7 +183,47 @@ if (@changed) {
     } else {
         print "(inspect: diff the normalized outputs; every changed file must be explained)\n";
     }
-    exit 1;
 }
-printf "emission identical to %s across %d files\n", $ref, scalar @files;
-exit 0;
+else {
+    printf "emission identical to %s across %d files\n", $ref, scalar @files;
+}
+
+# ---- the SHAPES population (own line; skipped when a file subset was given)
+my $shapes_differ = 0;
+if (!@ARGV) {
+    my @shapes = sort glob("Pl/t/shapes/*.pl");
+    make_path("$tmp/new-shapes", "$tmp/ref-shapes");
+    my %seen;
+    for my $f (@shapes) {
+        (my $base = $f) =~ s{.*/}{};
+        die "shapes: duplicate basename $base" if $seen{$base}++;
+        system("cd \Q$root\E && ./pl2cl < \Q$root/$f\E > \Q$tmp/new-shapes/$base\E.lisp 2>/dev/null");
+        system("cd \Q$wt\E   && ./pl2cl < \Q$root/$f\E > \Q$tmp/ref-shapes/$base\E.lisp 2>/dev/null");
+    }
+    my @sch = grep { $norm->("$tmp/new-shapes/$_.lisp") ne $norm->("$tmp/ref-shapes/$_.lisp") }
+              map { (my $b = $_) =~ s{.*/}{}; $b } @shapes;
+    if (@sch) {
+        $shapes_differ = 1;
+        printf "SHAPES: %d of %d files differ vs %s (Pl/t/shapes, task #496): %s\n",
+            scalar @sch, scalar @shapes, $ref, join(' ', @sch);
+        if (defined $show) {
+            for my $base (@sch) {
+                for my $side (qw(ref new)) {
+                    open my $sfh, '>', "$tmp/$side.norm" or die "write $side.norm: $!";
+                    print $sfh $norm->("$tmp/$side-shapes/$base.lisp");
+                    close $sfh;
+                }
+                my @lines = qx(diff -a -u \Q$tmp\E/ref.norm \Q$tmp\E/new.norm);
+                splice @lines, 0, 2;
+                my $nl = @lines;
+                splice @lines, $show if $show && $nl > $show;
+                print "\n=== shapes/$base (-ref +new, $nl diff lines"
+                    . ($show && $nl > $show ? ", first $show shown" : '') . ")\n";
+                print @lines;
+            }
+        }
+    } else {
+        printf "shapes: %d files identical (Pl/t/shapes)\n", scalar @shapes;
+    }
+}
+exit((@changed || $shapes_differ) ? 1 : 0);

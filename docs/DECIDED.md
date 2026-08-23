@@ -44,9 +44,20 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `cpanm PPI`, which today IS 1.291).  Ubuntu 24.04's `libppi-perl` is 1.277;
   CI installs PPI with `cpanm` and asserts the version.
   `tools/t/install-pcl.t` 15 rows (a fake PPI 1.277 is refused, nothing copied).
+- **CI GREEN: run 32650698636 on `7e6d1eb`** (all steps, full gate, stock runner) —
+  #282 + #283 DONE; the v0.1 tag waits only on #494 (doc refresh at tag time).
 - **CI diagnosability**: the job log is admin-only (API 403); `tools/ci-step`
   re-emits a failing step's tail as a `::error::` ANNOTATION (public API:
   `/check-runs/<id>/annotations`).  Every failing-capable step runs through it.
+- **#496 the SHAPES corpus SHIPPED (s440b)**: `Pl/t/shapes/*.pl` (six families, one
+  block-scoped package per lifted snippet, valid perl); `tools/corpus-diff.pl` prints
+  the shapes verdict on ITS OWN line (fails like a corpus diff; skipped for a file
+  subset); `tools/emission-ab.pl --shapes`.  Its first run found **#497** (same
+  signature-sub NAME in two packages: the second's parameter becomes a package
+  global — #421's family), **#498** (a punctuation ARRAY is package-qualified;
+  perl forces it into main::) and **#499 FIXED** (LIST-context glob was stateful
+  per pattern: full, EMPTY, full … — `p-glob--list-context` keeps no state now;
+  guard glob-01.t).
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

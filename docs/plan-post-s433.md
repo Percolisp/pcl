@@ -245,9 +245,11 @@ PPI ≥ 1.291 enforced by the installer and installed by CI with `cpanm`
 (apt's is 1.277); CPAN test fixtures (Data::Dump, Try::Tiny) skip-guarded and
 installed by CI; guard `Pl/t/core-deps-01.t`; `tools/ci-step` turns a failing
 step's tail into a public annotation.  Stock-machine gate 166/5780 green
-(bar the local xs rows); DECIDED §s440, session-log s440.  The fix commit's
-push starts the second CI run — its verdict is the next thing to read
-(`curl -s https://api.github.com/repos/Percolisp/pcl/actions/runs?per_page=3`).
+(bar the local xs rows); DECIDED §s440, session-log s440.  **THE SECOND CI RUN IS GREEN**: run 32650698636 on `7e6d1eb` (2026-08-23) — every
+step, including the full gate (`tools/prove-core`) on the stock runner.  That is
+**#282 (the fresh-machine property) DONE and #283 (CI) DONE**; the v0.1 tag now
+waits only on #494 (the doc refresh on the tagged tree).  Watch a run without
+`gh`: `curl -s https://api.github.com/repos/Percolisp/pcl/actions/runs?per_page=3`.
 
 Then: fix what CI finds, #494's doc refresh on the tagged tree, tag
 `v0.1.0` (`git tag -a v0.1.0 -m ... && git push origin v0.1.0`).

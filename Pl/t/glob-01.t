@@ -480,4 +480,42 @@ END_CODE
   like($output, qr/\b3\b/, 'bare glob defaults to \$_');
 }
 
+# Task #499 (s440, found by the SHAPES corpus, Pl/t/shapes/punct-arrays-glob.pl):
+# a LIST-context glob is never stateful -- perl returns the full list on EVERY
+# call (perlfunc glob; only scalar context iterates).  PCL kept a per-pattern
+# :list-done mark and answered full, EMPTY, full, ... so `glob($p)` in a loop
+# or in a sub called twice lost every second result.  Three call shapes, and
+# the expectation is the live perl answer for the same source (both_agree).
+{
+  my $code = <<"END_CODE";
+my \@n; for (1..3) { my \@f = glob("$tmpdir/*.txt"); push \@n, scalar(\@f); }
+sub cnt { my \@f = glob("$tmpdir/*.txt"); scalar \@f }
+my \@x = glob("$tmpdir/*.txt"); my \@y = glob("$tmpdir/*.txt");
+my \@v = <$tmpdir/*.txt>; my \@w = <$tmpdir/*.txt>;
+print "loop=\@n sub=", cnt(), cnt(), " sites=", scalar(\@x), scalar(\@y),
+      " angle=", scalar(\@v), scalar(\@w), "\\n";
+END_CODE
+  my ($pfh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $pfh $code; close $pfh;
+  my $perl = `perl $pl 2>&1`;
+  like($perl, qr/^loop=3 3 3 sub=33 sites=33 angle=33$/m, 'the oracle: perl answers the full list every time');
+  is(run_pcl($code), $perl, '#499: a list-context glob returns the full list on every call (loop, sub, two sites, <>)');
+}
+
+# ... and the SCALAR-context iterator is untouched by a list glob of the same
+# pattern in the loop body (perl keys the iterator by call site, #489; the
+# list call must not disturb it).
+{
+  my $code = <<"END_CODE";
+my \$c = 0; while (my \$f = glob("$tmpdir/*.txt")) { \$c++; my \@i = glob("$tmpdir/*.txt"); print scalar(\@i); }
+print " c=\$c\\n";
+END_CODE
+  my ($pfh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+  print $pfh $code; close $pfh;
+  my $perl = `perl $pl 2>&1`;
+  like($perl, qr/^333 c=3$/m, 'the oracle: perl iterates 3 times, the inner list glob is full each time');
+  is(run_pcl($code), $perl, '#499: a scalar-context glob loop survives a list glob of the same pattern inside it');
+}
+
+
 done_testing();
