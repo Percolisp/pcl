@@ -29,7 +29,7 @@ my $runtime = 'cl/pcl-runtime.lisp';
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 26;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -253,6 +253,78 @@ both_agree('forward-declared sort comparator reaches AUTOLOAD', <<'PL');
 AUTOLOAD { $b <=> $a }
 sub stubbedsub;
 print join("", sort stubbedsub split//, '04381091'), "\n";
+PL
+
+# ---- and the same for a NEVER-declared name (#468) ----------------------
+# The two rows above go through p-declare-sub's stub, which only exists for a
+# name the file DECLARED.  A plain call to a name nothing ever mentioned
+# emitted a direct `(pl-nope 1)` and reached SBCL's raw undefined-function:
+# AUTOLOAD was never consulted and `$@` read "The function main::pl-nope is
+# undefined."  Since s441c SBCL's `sb-kernel::restart-undefined` is
+# encapsulated so the same `%p-call-of-undefined-sub` answers at the CALL —
+# one mechanism, no emission change, every runner.
+
+both_agree('#468 never-declared call reaches AUTOLOAD, qualified and not', <<'PL');
+our $AUTOLOAD; sub AUTOLOAD { return "A($AUTOLOAD)[@_]" }
+print nope(1), "\n";
+print main::nope2(2,3), "\n";
+print "rv:", scalar(nope3()), "\n";
+PL
+
+# The message is perl's, not SBCL's.  Asserted by MATCHING inside the program
+# so the row compares a boolean: PCL cannot append perl's " at FILE line N."
+# (the emitted call carries no location) and that suffix is not a goal.
+both_agree('#468 no AUTOLOAD: eval {} sees perl\'s "Undefined subroutine"', <<'PL');
+my $r = eval { nope(1); 1 };
+print "ok=", ($r ? 1 : 0),
+      " msg=", ($@ =~ /^Undefined subroutine &main::nope called/ ? 1 : 0), "\n";
+PL
+
+# A plain call consults the sub's OWN package's AUTOLOAD and walks nothing —
+# that is the METHOD rule, not this one.  P2 has no AUTOLOAD, so P2::gone dies
+# even though P1 and main are reachable classes in perl's sense.
+both_agree('#468 AUTOLOAD is per-package for a plain call: no @ISA walk', <<'PL');
+package P1; our $AUTOLOAD; sub AUTOLOAD { return "P1($AUTOLOAD)" }
+package P2; sub go { return P2::gone(7) }
+package main;
+our $AUTOLOAD; sub AUTOLOAD { return "MAIN($AUTOLOAD)" }
+print "p1:", P1::missing(1), "\n";
+print "p2:", (eval { P2::go() } // "DIED"),
+      " msg=", ($@ =~ /^Undefined subroutine &P2::gone called/ ? 1 : 0), "\n";
+PL
+
+# `\&NAME` on a name that has no body anywhere: perl's coderef is late-bound to
+# the glob, so CALLING it asks the same question.  This branch of
+# p-backslash-sub was a SECOND COPY of the AUTOLOAD logic and disagreed with it
+# on five points (it looked AUTOLOAD up in the runtime *package*, interned
+# instead of find-symbol'ing, never set $AUTOLOAD, dropped the arguments, and
+# raised a raw CL error) — it now calls %p-call-of-undefined-sub.
+both_agree('#468 \\&NAME with no body reaches its own package\'s AUTOLOAD', <<'PL');
+package WA; our $AUTOLOAD; sub AUTOLOAD { "WA($AUTOLOAD)[@_]" }
+sub take { return \&WA::gone }
+package WB; sub take { return \&WB::gone }
+package main;
+print "auto:", WA::take()->(5,6), "\n";
+print "none:", (eval { WB::take()->(7) } // "DIED"),
+      " msg=", ($@ =~ /^Undefined subroutine &WB::gone called/ ? 1 : 0), "\n";
+# late binding still wins over the fallback
+my $r = \&later; sub later { "L(@_)" }
+print "late:", $r->(1), "\n";
+PL
+
+# INVERSE GUARD: nothing about a never-declared name's EXISTENCE changed, and a
+# missing METHOD keeps the method rule (\"Can't locate object method\"), which
+# is a different diagnostic from a plain call's.
+both_agree('#468 inverse: exists/defined/can and the method rule are untouched', <<'PL');
+package Thing; sub new { bless {}, shift }
+package main;
+print "de:", (defined &nope ? 1 : 0), (exists &nope ? 1 : 0),
+      (main->can('nope') ? 1 : 0), (Thing->can('new') ? 1 : 0), "\n";
+my $o = Thing->new;
+eval { $o->missing_method(1) };
+print "meth:", ($@ =~ /^Can't locate object method "missing_method"/ ? 1 : 0), "\n";
+eval { Thing->missing_class(1) };
+print "clsm:", ($@ =~ /^Can't locate object method "missing_class"/ ? 1 : 0), "\n";
 PL
 
 done_testing();

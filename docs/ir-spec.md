@@ -760,8 +760,30 @@ form is inside `eval-when`) and wraps the body so that at **every call**:
 4. the body runs inside `(catch :p-return …)` — the sub's return frame.
 
 `(p-declare-sub pl-NAME)` is a forward stub so earlier code can reference
-the name; calling a stub returns `nil` (it is always overwritten by the
-real `p-sub` before a semantically-valid program calls it).
+the name; it is normally overwritten by the real `p-sub` before anything
+calls it.
+
+**A plain call that reaches no body is never a value (normative, s432 +
+s441c).** Whether the sub was forward-declared and never defined, or never
+mentioned at all, the answer is perl's, in perl's order:
+
+1. if the *sub's own package* defines `AUTOLOAD` — that package's own symbol,
+   with a body, **no `@ISA` walk** (inheritance is the METHOD rule, §7) —
+   call it, with `$AUTOLOAD` set to the fully-qualified name and the original
+   arguments;
+2. otherwise die `Undefined subroutine &Pkg::name called` (trappable by
+   `eval {}` like any other die; PCL does not append perl's
+   `" at FILE line N."` because the emitted call carries no location).
+
+One runtime entry point implements it (`%p-call-of-undefined-sub`) and three
+paths reach it: the forward stub's body, the trampoline `p-backslash-sub`
+returns for `\&NAME` when the name has no body, and — for a name the file
+never declared, whose call the codegen emits as a direct `(pl-NAME …)` — an
+`undefined-function` handler that resumes through CL's `use-value` restart.
+A translator to another host needs the same three, or the equivalent of a
+per-package "no such function" hook: the decision belongs at the CALL, which
+is where perl makes it, and not at an error boundary, because `eval {}` must
+be able to see the AUTOLOAD *value*.
 
 ### 5.2 Arguments — two body shapes
 
@@ -863,8 +885,13 @@ comparator reading the global would see nothing.
 The body is emitted in scalar context, i.e. the full shape is
 `(p-sort-cmp ($a $b) … (p-scalar-ctx BODY…))`. All three comparator
 spellings share it: a literal block, `sort NAME LIST` (whose body is the
-call, with an `undefined-function` handler dispatching to `AUTOLOAD`, perl
-bug #30661), and `sort $var LIST` (resolved at runtime by
+call, wrapped in an `undefined-function` handler that used to dispatch to
+`AUTOLOAD` for perl bug #30661 — **that wrapper is now dead and a translator
+should not copy it**: since s432 a declared-but-bodyless NAME never signals
+(the stub answers) and since s441c a never-declared one is answered at the
+call by §5.1's rule, which also fixes the wrapper's silent-wrong — with no
+`AUTOLOAD` it returned `nil`, so `sort nonexistent LIST` quietly compared
+everything equal where perl dies), and `sort $var LIST` (resolved at runtime by
 `p-sort-get-fn`); the latter two also wrap the lambda in a `let` capturing
 `*package*` at creation time, so a *string* comparator name resolves in the
 user's package rather than in `:pcl`.

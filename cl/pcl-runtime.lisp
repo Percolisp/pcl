@@ -390,22 +390,29 @@
               ((string= n "MAIN") "main")
               (t n)))))
 
+(defun %p-sub-bare-name (name)
+  "The Perl sub name inside a codegen sub SYMBOL, or NIL when NAME is not one.
+   Reverses the :invert reader transform to recover the emitted `pl-<perlname>`
+   token (invert is its own inverse) and strips the now-lowercase prefix, so
+   PL-BAR -> bar, pl-Foo -> Foo, pl-FOO -> FOO, |pl-Ｆｏｏ| -> Ｆｏｏ.
+
+   ONE reading of that shape: %p-sub-perl-name (which spells the qualified
+   name for caller() and for die messages) and %p-pcl-sub-symbol-p (which
+   classifies an undefined-function condition, task #468) must never disagree
+   about what a Perl sub symbol looks like."
+  (and name (symbolp name)
+       (let ((inv (%pcl-invert-case (symbol-name name))))
+         (and (>= (length inv) 3)
+              (string= (subseq inv 0 3) "pl-")
+              (subseq inv 3)))))
+
 (defun %p-sub-perl-name (name)
   "Fully-qualified Perl name 'Pkg::subname' for a PCL sub symbol (Pkg::PL-SUBNAME).
    Strips the runtime's PL- prefix and uses the package's original-case Perl name.
    Recorded on *pcl-caller-subname-stack* at p-sub entry for (caller(N))[3]."
   (if (and name (symbolp name))
-      (let* ((sname (symbol-name name))
-             ;; Reverse the :invert reader transform to recover the emitted
-             ;; `pl-<perlname>` token (invert is its own inverse), then strip the
-             ;; now-lowercase prefix.  Recovers original sub-name case, e.g.
-             ;; PL-BAR -> bar, pl-Foo -> Foo, pl-FOO -> FOO.
-             (inv   (%pcl-invert-case sname))
-             (bare  (if (and (>= (length inv) 3)
-                             (string= (subseq inv 0 3) "pl-"))
-                        (subseq inv 3)
-                        sname)))
-        (concatenate 'string (pcl-pkg-perl-name (symbol-package name)) "::" bare))
+      (concatenate 'string (pcl-pkg-perl-name (symbol-package name)) "::"
+                   (or (%p-sub-bare-name name) (symbol-name name)))
       (and name (format nil "~A" name))))
 
 ;;; ── Global storage: cells vs specials (direction D, task #289) ───────────
@@ -683,6 +690,90 @@
      (unless (fboundp ',name)
        (defun ,name (&rest args)
          (%p-call-of-undefined-sub ',name args)))))
+
+;;; ── A call to a NEVER-declared sub (task #468) ──────────────────────────
+;;; The stub above only exists for a name the FILE declared or defined.  A
+;;; plain call to a name nothing ever mentioned — `print nope(1)` — emits a
+;;; direct `(pl-nope 1)` and reached SBCL's raw undefined-function: the
+;;; package's AUTOLOAD was never consulted (perl returns its value), and
+;;; inside `eval {}` `$@` read "The function main::pl-nope is undefined."
+;;; instead of perl's "Undefined subroutine &main::nope called".
+;;;
+;;; `%p-call-of-undefined-sub` is the ONE mechanism for "a plain call reached
+;;; no body"; the only question was WHERE to re-enter it.  Two routes were
+;;; measured (task #468):
+;;;
+;;;   (1) a handler at the program's dynamic extent.  MEASURED: the extent is
+;;;       not centralised — `runpcl`, `pl2cl`, `tools/install-pcl`'s wrapper,
+;;;       `p-load-with-recovery` (sweep + companion suite) and ~40 `Pl/t`
+;;;       files each issue their own `--load`, and a GLOBAL handler cluster
+;;;       does not survive to the next toplevel form (probed).  That is a new
+;;;       drifting-runner axis, so: rejected.
+;;;   (2) emitting `(p-declare-sub NAME)` for every called-but-undeclared
+;;;       name.  MEASURED: 8–37 such names per corpus file (`ref.t` 14,
+;;;       `sort.t` 37, `bless.t` 8), i.e. an emission diff in essentially
+;;;       every file of every population; it makes `exists &nope` answer 1
+;;;       where perl answers 0 (probed); and it multiplies s432's known
+;;;       interaction (in a package WITH an AUTOLOAD a stub answers instead
+;;;       of a later definition) across the whole corpus.  Rejected.
+;;;
+;;; What is left is perl's own layer — the CALL — reached without touching
+;;; emission or any runner: SBCL routes every undefined-function call through
+;;; `sb-kernel::restart-undefined`, which establishes the `use-value` restart
+;;; and then signals.  Encapsulating THAT puts our handler innermost at
+;;; signal time, so it runs before an enclosing `handler-case` (p-eval-block's
+;;; `eval {}`), from any depth, under every runner, with zero cost until an
+;;; undefined function is actually called.
+;;;
+;;; The handler DECLINES for anything that is not a generated Perl sub name,
+;;; so a genuine runtime bug (a missing `p-…` builtin) keeps its loud CL
+;;; error — this must never become a catch-all.
+
+(defun %p-pcl-sub-symbol-p (sym)
+  "True when SYM is a symbol the codegen would emit for a Perl sub call:
+   `pl-<name>` (%p-sub-bare-name — the SAME reading %p-sub-perl-name uses) in a
+   package that uses :PCL (every Perl package does; p-defpackage and all eight
+   runtime make-package sites pass (:cl :pcl)).  Runtime builtins are `p-…`, so
+   they never match, and a genuine CL bug keeps its own loud error."
+  (and (symbolp sym)
+       (symbol-package sym)
+       (member (find-package :pcl) (package-use-list (symbol-package sym)))
+       (%p-sub-bare-name sym)
+       t))
+
+(defun %p-undefined-sub-handler (condition)
+  "handler-bind handler for SBCL's undefined-function: if the missing name is
+   a Perl sub, resume through the USE-VALUE restart with perl's own order for
+   a body-less sub (`%p-call-of-undefined-sub`).  Returns normally — declining
+   the condition — for every other name."
+  (let ((sym (cell-error-name condition)))
+    (when (%p-pcl-sub-symbol-p sym)
+      (let ((restart (find-restart 'use-value condition)))
+        (when restart
+          (invoke-restart restart
+                          (lambda (&rest args)
+                            (%p-call-of-undefined-sub sym args))))))))
+
+(defun %p-install-undefined-sub-dispatch ()
+  "Route SBCL's undefined-function signal through %p-undefined-sub-handler.
+   Idempotent.  If this SBCL has no `sb-kernel::restart-undefined`, say so on
+   stderr and leave the raw CL error in place — the program still dies, loudly
+   (CLAUDE.md rule 12: the sin is the silence, not the fall-through)."
+  (let ((sym (find-symbol "RESTART-UNDEFINED" "SB-KERNEL")))
+    (cond
+      ((not (and sym (fboundp sym)))
+       (format *error-output*
+               "PCL: this SBCL has no SB-KERNEL::RESTART-UNDEFINED; a call to an~%~
+                PCL: undefined Perl sub will not reach AUTOLOAD (task #468).~%"))
+      ((sb-int:encapsulated-p sym 'pcl-undefined-sub) t)
+      (t
+       (sb-int:encapsulate
+        sym 'pcl-undefined-sub
+        (lambda (basic &rest args)
+          (handler-bind ((undefined-function #'%p-undefined-sub-handler))
+            (apply basic args))))))))
+
+(%p-install-undefined-sub-dispatch)
 
 ;;; p-eval-always: Wrap a form so it runs at compile time, load time, and
 ;;; execute time.  This is the CL idiom known as "eval-always".  In the
@@ -13234,16 +13325,25 @@ buffer's fill-pointer; everything else falls back to file-length."
      (let ((tramp (lambda (&rest args) (apply (symbol-function sym) args))))
        (setf (gethash tramp *p-lazy-coderef-target*) sym)
        tramp))
-    ;; Not declared at all: return a lambda that tries AUTOLOAD when called.
+    ;; Not declared at all: return a lambda that, when CALLED, is a plain call
+    ;; that reached no body — the same question `p-declare-sub`'s stub asks, so
+    ;; the same answer (task #468, CLAUDE.md rule 11).  It used to be a SECOND
+    ;; COPY of that logic and disagreed with it on four points, all measured:
+    ;; it looked AUTOLOAD up in the runtime `*package*` (whatever `in-package`
+    ;; last set while the file loaded — usually MAIN, so `\&WA::gone` never
+    ;; found WA::AUTOLOAD), it `intern`ed rather than `find-symbol`ed (so an
+    ;; INHERITED AUTOLOAD would answer), it never set `$AUTOLOAD`, it dropped
+    ;; the arguments, and with no AUTOLOAD it raised a raw CL undefined-function
+    ;; ("The function WB::pl-gone is undefined.") where perl dies "Undefined
+    ;; subroutine &WB::gone called".  Late binding is preserved: a body defined
+    ;; between `\&foo` and the call is found by the fboundp re-check.
     (t
-     (let* ((pkg *package*)
-            (fallback
-             (lambda (&rest args)
-               (declare (ignore args))
-               (let ((al (intern (%pcl-cl-sub-name "AUTOLOAD") pkg)))
-                 (if (fboundp al)
-                     (funcall (symbol-function al))
-                     (error 'undefined-function :name sym))))))
+     (let ((fallback
+            (lambda (&rest args)
+              (if (and (fboundp sym)
+                       (not (eq (gethash sym *p-declared-subs*) :stub)))
+                  (apply (symbol-function sym) args)
+                  (%p-call-of-undefined-sub sym args)))))
        (setf (gethash fallback *p-lazy-coderef-target*) sym)
        fallback))))
 
