@@ -65,7 +65,7 @@ All numbers are measured on named, re-runnable instruments; the table in
 | PCL's own regression gate (`Pl/t/`) | **166 files / 5,780 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
 | Perl's own test suite, extracted (`perl-tests/`, 108 files from perl's `t/op`, `t/base`, …) | **18,312 assertions pass / 894 fail (95.3 %)**; **62 files pass completely**; tracked row by row against blessed baselines, so the number can only move honestly | `perl sweep-perl-tests.pl --jobs 8` |
 | Perl's full `t/` tree, in place (528 files) | run per directory as a bug-finder; verdicts per file against a blessed snapshot | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| XS bridge conformance ([pclxs](#4-xs--c-extensions), 398 cases, real perl as oracle) | **398 pass / 0 fail**; `Digest::MD5`'s own `md5-aaa.t` passes 256/256 under PCL | `tools/pcl-conform` |
+| XS bridge ([pclxs](#4-xs--c-extensions), experimental sibling project) | conformance corpus **398 / 398** against real perl | `tools/pcl-conform` |
 | Pure-Perl CPAN modules (183-dist board) | 65 PASS / 65 PARTIAL / 53 FAIL at dist granularity (a PARTIAL runs most of its suite) | `tools/cpan-scoreboard.pl` |
 
 What is in: the expression grammar with all precedence levels and context
@@ -174,63 +174,26 @@ The output is meant to be *read by other tools*, not only loaded by SBCL:
 
 ### 3. Speed — beat perl
 
-The generated code compiles to native code, yet a naive translation is slower
-than perl, because perl is 30 years of hand-tuned C and the naive translation
-makes the machine do bookkeeping around every operation (every scalar a box
-that can be a number, a string and a reference at once; every operation
-coercing and checking context).  The plan is to **stop paying for generality a
-given line of code provably does not need**, with a boxed fallback whenever the
-proof is not available — a wrong analysis loses a speed-up, never
-correctness.
-
-* [`docs/where-the-time-goes.md`](docs/where-the-time-goes.md) — the four
-  "taxes" every emitted operation pays today, in plain language, with numbers.
-* [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md) —
-  the measured worklist: for each hot category, the emitted shape vs the
-  faster shape that computes the identical result, head to head (string
-  append ~2400×, method dispatch ~15×, boxed accumulator ~13×, …), and the
-  precondition each needs.
-* The optimisations are **named, switchable transforms** in
-  [`Pl/Passes.pm`](Pl/Passes.pm) — `PCL_OPT=none` is the general-form
-  compiler, `PCL_OPT=-str-buffer,-raw-numeric` turns named ones off — so
-  every speed change is measurable in isolation and the gate runs both ways.
-* `tools/bench-exec.pl` measures execution time against perl with startup
-  subtracted (best-of-3, 2026-08-23; ratio < 1 = PCL faster):
-
-  | bench | perl | PCL | PCL/perl |
-  |---|---:|---:|---:|
-  | `fib(27)` (recursion) | 1.47 s | 0.43 s | **0.29×** |
-  | C-style counting loop | 0.106 s | 0.027 s | **0.25×** |
-  | collatz (`while` + `%` `/` `*`) | 1.93 s | 0.78 s | **0.40×** |
-  | gcd, recursive | 0.187 s | 0.094 s | **0.50×** |
-  | `for (1..n) { $s += $_ }` | 0.065 s | 0.138 s | 2.1× |
-  | hash + array element writes | 0.129 s | 0.278 s | 2.2× |
-  | `$s .= 'x'` (string append) | 0.002 s | 0.008 s | 3.8× |
-  | array slices | 0.066 s | 0.316 s | 4.8× |
-  | overloaded-operator calls / symbolic refs | 0.03 s | 0.2 s | ~7× |
-  | `pack`/`unpack` (the compiled-from-Perl oracle) | 0.004 s | 4.9 s | ~1300× |
-
-  Calls, recursion and arithmetic loops already beat perl; element access,
-  slices, dispatch and the `pack` oracle are the gap, and each row of the
-  worklist above is one of them.  When readability of the output and speed
-  conflict, speed wins.
+The output compiles to native code, but a naive translation is slower than
+perl: every scalar is a box that may be a number, a string and a reference at
+once, and every operation pays for that generality.  The plan is to stop
+paying it where a line of code provably does not need it, with the general
+form as the fallback — a wrong analysis loses a speed-up, never correctness.
+Today calls, recursion and arithmetic loops already beat perl (2–4×); element
+access, slices and method dispatch do not yet.  Details, measurements and the
+worklist: [`docs/where-the-time-goes.md`](docs/where-the-time-goes.md),
+[`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md);
+the transforms are named and switchable ([`Pl/Passes.pm`](Pl/Passes.pm),
+`PCL_OPT`), and `tools/bench-exec.pl` measures against perl.
 
 ### 4. XS / C extensions
 
-The long game, and the one where help is most welcome.  A separate project,
-**pclxs**, implements a `libperl`-ABI shim: an unmodified compiled XS module
-is built once against the shim and calls into *any* host that provides the
-vtable — PCL is the first host.  It is real, not a sketch: pclxs's 398-case
-conformance corpus passes against real perl as the oracle, XS OO works
-(`Digest::MD5->new->add->hexdigest`), and the artifact cache and the
-install-time compile model are in place.  Design and status:
-[`docs/xs-shim-design.md`](docs/xs-shim-design.md),
-[`docs/xs-artifact-cache.md`](docs/xs-artifact-cache.md),
-[`docs/xs-blessed-ref-referent-bug.md`](docs/xs-blessed-ref-referent-bug.md)
-(XS OO, done), [`docs/xs-abi5-and-destroy.md`](docs/xs-abi5-and-destroy.md)
-(what is next).  The `io` capability group (filehandles crossing the bridge)
-is the remaining optional group; getting a broad slice of CPAN's XS dists
-working is the goal.
+Being looked at.  A separate experimental project, **pclxs**, implements a
+`libperl`-ABI shim so that unmodified compiled XS modules can call into PCL's
+runtime; it passes its conformance corpus against real perl and `Digest::MD5`
+works end to end, but it is not bundled and CPAN-wide XS is the long game —
+help from people who know XS and CL internals is welcome.  Design:
+[`docs/xs-shim-design.md`](docs/xs-shim-design.md).
 
 ## Architecture
 
