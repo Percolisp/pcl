@@ -232,3 +232,47 @@ the #176 family, a hole inferred from an absence. It is printed, never fatal:
 it is a fact about the baseline, not a measurement this run failed. A row is
 added by splicing the run's FIRST measurement in with a `# sNNN first
 measurement` marker.
+
+### Drops in what the run itself transpiles (`PCL_DROP_LOG`, task #472, s438)
+
+Every instrument that counts the #138 drop family — `tools/drop-census.pl`,
+`tools/corpus-diff.pl`'s SILENT-DROP counter, both measurement runners' `drops`
+column — finds drops by reading **emitted `.lisp` files**. A program run by
+`fresh_perl_is`/`runperl` is transpiled from a **string** at run time
+(`tools/pclperl-for-tests`), and a module the running program loads is
+transpiled on the fly, so neither is a file in any census population. A drop
+there was invisible to everything the project had, and the two that were known
+had been making rows **pass on nothing** for years (perl-tests/split.t:682,
+perl-tests/bop.t:701 — both surfaced only when the s435 flip made the child die
+instead of silently printing nothing).
+
+**The instrument is a side channel in the ONE announcer.**
+`Pl::Parser::_announce_dropped_statement` appends
+`FILE<TAB>LINE<TAB>TEXT<TAB>REASON` to the file named by `$PCL_DROP_LOG`, for
+every drop, **ungated by `PCL_DROP_ANNOUNCE`** (it must see module-mode drops
+too, which announce nothing by ruling). It is *not* routed to stderr, and that
+is the whole design: **the child's stderr IS the row's observed output**, which
+`fresh_perl_is` compares — an instrument that changes a verdict is not an
+instrument. It records the same thing the census counts (a statement lost from
+an emitted program), so it is deduplicated per statement, a ruled Track-A
+refusal is not logged (the file is refused, loudly, in every mode) and an
+eval-string drop is not either (it DIES at transpile, #363, and emits nothing).
+
+`sweep-perl-tests.pl` sets it **around the SBCL run only**, never around the
+file's own transpile — otherwise the file's own drops would be counted twice —
+and reports two numbers, because either alone lies:
+
+* the per-file **count** (also the `child-drops` column in `_status.tsv`): what
+  that file's run lost. It double-counts a drop in the harness, which every
+  file re-transpiles under `*pcl-skip-cache*`;
+* the **distinct sites** across the corpus, with how many test files reached
+  each. That is the census view: a harness drop reads as one site in many
+  files, not as many drops.
+
+REPORTED, NOT GATED (ruled `fable-answers-s437.md` §2 ask 5): rows are blessed
+by hand in `docs/parse-error-drop-census-s399.tsv`'s header after a measured
+run, and only then can a rise be a failure. The first measurement (s438, 108
+files) is 241 drops in 98 files across **ten** distinct sites.
+
+A test file that clears `%ENV` for its children hides them from this
+instrument — an undercount, never a miscount.

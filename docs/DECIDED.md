@@ -11,6 +11,74 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s438 (2026-08-23, Opus 5) — the two census instruments: the census gains a SIXTH population (#473) and a SEVENTH is measured for the first time (#472); the companion scan stops silently skipping need-harness files (s434 ask 1)
+
+- **#473 DONE — `cpan-tests/modules/**/t/**/*.t` is a census population,
+  PROGRAM mode** (289 files; `tools/drop-census.pl`).  **42 files / 83 drops**,
+  blessed into `docs/parse-error-drop-census-s399.tsv` (39/102 → **81 files /
+  185 drops**); the 36 non-board pre-existing rows come back BYTE-IDENTICAL.
+  The s436 A/B's "43 files / 92 drops" reconciles exactly: it scanned every
+  `.t` under `cpan-tests/modules`, which is these 42 plus
+  `examples/tools.t` (9 drops) — author/example tests, deliberately outside,
+  stated with their count in the census header beside `t/japh/` (1 file / 2
+  drops, ruled permanently outside s437).  **Nothing moved since s436**: an
+  `f702da3` worktree gives the same 42 files / 83 drops.
+- **The dist `.t` files are transpiled WITHOUT the dist's own `lib/`+`t/lib`
+  on @INC, and that is MEASURED, not assumed** — rows are identical either way
+  (`tools/run-dist-t.pl` adds them; the census stays uniform with its other
+  program-mode populations).  The one thing that differed was an absolute path
+  quoted INSIDE a compiler message, so the census tool now strips the repo root
+  from message text: a row must not depend on how ROOT was spelled.
+- **79 of the 83 new drops are ONE mechanism (task #478): the prototype
+  pre-scan skips every `Test2::`/`Test::` module BY NAME**
+  (`_extract_module_prototypes`), so a block-form call to a dist-declared
+  `(&)` sub is not a block-form call.  Discriminating probe: two modules
+  identical but for the package name — `Test2::Fake` drops, `My::Blk2` runs.
+  **The no-semicolon spelling of the same call is SILENTLY mis-parsed
+  instead** (`blk { 42 }` → `(pl-blk 42)`, the block's value where perl passes
+  a code ref).  Residue filed: #480 (`$_.2` — PPI lexes `.2` as a float, no
+  concat operator in the stream), #481 (a fat comma autoquotes a METHOD NAME:
+  `is $csv->module => 'M'`), #482 (`$obj->state` — a keyword-named method dies
+  inside the compiler).
+- **#472 DONE — `PCL_DROP_LOG` is a side channel in the ONE announcer**
+  (`Pl::Parser::_announce_dropped_statement`): `FILE<TAB>LINE<TAB>TEXT<TAB>
+  REASON`, appended for every drop, **ungated by `PCL_DROP_ANNOUNCE`**, never
+  routed to stderr — the child's stderr IS the row's observed output.  It
+  records what the census records: deduplicated per statement, no ruled
+  refusal (the file is refused, loudly), no eval-string drop (it DIES and
+  emits nothing).  `sweep-perl-tests.pl` sets it around the RUN only (never
+  around the file's own transpile), carries a `child-drops` column in
+  `_status.tsv` and prints BOTH a per-file count and the DISTINCT sites.
+  REPORTED, NOT GATED until rows are blessed by hand.  No emission change, so
+  **no generation bump** (corpus-diff identical over 111 files).
+- **FIRST MEASUREMENT of the seventh population: 241 drops in 98 files —
+  and only TEN distinct sites.**  98 of 98 files reach the SAME two, in **our
+  own harness**: `perl-tests/t/test.pl:179-180`, `open(my $f,'<',$out) ? <$f>
+  // '' : ''` (**task #479** — and that line is ALSO wrong in real perl: `my
+  $f` in a ternary's condition is not in scope in its branches, so
+  `runperl_and_capture` returns ('','') for a file that plainly has content).
+  Six sites are one-off fresh_perl/runperl child programs (four of them
+  programs perl itself rejects).  **One is a real gap in a real module**: core
+  `Devel/Peek.pm:59` `$num |= (1<<index($D_flags,$_)) for split //, $on;` —
+  **PPI lexes `<<index` as a HEREDOC**, so every unspaced left-shift by a call
+  drops (**task #483**; `1 << index(...)` with spaces lowers).
+- **Two numbers, deliberately** (the report prints both): the per-file COUNT
+  says what that file's run lost and double-counts the harness, which every
+  file re-transpiles under `*pcl-skip-cache*` (closure.t alone: 38 of the 241,
+  all `test.pl`); the SITE list is the census view.
+- **s434 ask 1 DONE — the companion scan runs need-harness files**
+  (`tools/run-perl-suite.pl`).  A `BEGIN`-`@INC` file used to be dropped from
+  the dir scan SILENTLY, which is how five files got snapshot rows nothing
+  could ever refresh.  All five were measured by naming them and all five
+  produce a verdict, so they join `--all`: **the file count is 528, not 523**.
+  The rule survives as DATA — `%NEED_HARNESS_NOT_RUN`, empty by measurement —
+  feeding the live `%not_run` NOT-RUN path (#345's shape), so a future
+  unmeasurable file is COUNTED on every run instead of inferred from a total.
+- **A gate row count is only comparable to a measurement of the SAME tree**
+  (the s409 rule, worth restating): s437's `163/5739` was taken BEFORE its own
+  review fix added two `decl-ordering-02.t` rows.  HEAD and this session both
+  measure **163 files / 5741 rows**, only the 13 pclxs xs rows failing.
+
 ## s437 (2026-08-23, Fable) — s434 + s435 + s436 REVIEWED + APPROVED; Q1–Q3 DONE; `package NAME VERSION` sets `$VERSION` at the HEAD of its section's compile phase (review fix); #475–#477 filed
 
 - **All three sessions APPROVED as shipped** (`docs/fable-answers-s437.md`).

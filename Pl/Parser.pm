@@ -9401,21 +9401,69 @@ sub _dropped_statement_cl {
 # (Data::Dump.pm has one).
 our $ANNOUNCE_DROPS = 1;
 my %announced_drop;   # "file:line:text" seen this process — announce ONCE
+my %logged_drop;      # same key, for the PCL_DROP_LOG side channel (#472)
+
+# THE SIDE CHANNEL (task #472, ruled fable-answers-s437 §2 ask 5).  A program
+# run by fresh_perl_is/runperl is transpiled from a STRING at run time
+# (tools/pclperl-for-tests), so its emission is never a .lisp FILE and no
+# instrument the project has can see a drop in it — tools/drop-census.pl,
+# tools/corpus-diff.pl's SILENT-DROP counter and both runners' `drops` column
+# all count by reading emitted CL.  Two such drops are known, and BOTH were
+# rows that had been passing for years on nothing (perl-tests/split.t:682,
+# perl-tests/bop.t:701, exposed by the s435 flip); the size of the population
+# was unknown until this arm.
+#
+# WHY A FILE AND NOT STDERR: the child's stderr IS the row's observed output
+# — fresh_perl_is compares it — so routing the announcement there would change
+# verdicts, which is the one thing an instrument may not do.  The caller names
+# the file in PCL_DROP_LOG; every drop appends one line
+# `FILE<TAB>LINE<TAB>TEXT<TAB>REASON`, append-mode so parallel children on one
+# file cannot truncate each other.
+#
+# WHAT IT COUNTS, exactly: the same thing the census counts — a statement lost
+# from an EMITTED program.  So it is deduplicated per statement like the
+# announcement (a statement can reach an emitter twice), a ruled refusal is not
+# a drop (the file is refused, loudly, in every mode), and an eval-string drop
+# is not one either: it DIES at transpile (#363) and emits nothing, so it never
+# appears in the census's population and must not appear in this one.
+sub _log_dropped_statement {
+  my ($file, $line, $text, $reason) = @_;
+  my $path = $ENV{PCL_DROP_LOG};
+  return if !defined $path || !length $path;
+  return if $logged_drop{"$file:$line:$text"}++;
+  # Never let the instrument break the transpile it is measuring.
+  open(my $lh, '>>', $path) or return;
+  print $lh join("\t", $file, $line, $text, $reason), "\n";
+  close $lh;
+  return;
+}
+
 sub _announce_dropped_statement {
   my ($self, $parts, $stmt, $reason) = @_;
   # Prototype-extraction parses throw their output away (_emit is a no-op), so
   # a drop there costs the program nothing and would only double the line.
   return if $self->collect_prototypes_only;
+
+  # ONE builder for the site (below): this line, the emitted die and the
+  # PCL_DROP_LOG record must name the same statement, or the halves of a drop
+  # read as separate events.
+  my ($file, $line, $text, $src) = $self->_drop_site($parts, $stmt);
+  my @src = @$src;
+  # Computed here rather than at its own site below because the log arm must
+  # not record a refusal as a drop; the DIE it produces stays below the stderr
+  # gate, so module mode is as silent as it was (ruled s403).
+  my $refusal = $self->_ruled_refusal_for_drop(\@src);
+
+  # UNGATED BY `PCL_DROP_ANNOUNCE` (#472): the side channel is a measurement,
+  # not a diagnostic, and it must count module-mode drops too.
+  _log_dropped_statement($file, $line, $text, $reason)
+    if !$refusal && !$self->eval_mode;
+
   # (The eval-mode DIE below is decided before this gate, deliberately: what
   # `PCL_DROP_ANNOUNCE` controls is a diagnostic, not whether a statement may
   # vanish from a program.)
   return if !$self->eval_mode
          && !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
-
-  # ONE builder for the site (above): this line and the emitted die must name
-  # the same statement, or the two halves of a drop read as two events.
-  my ($file, $line, $text, $src) = $self->_drop_site($parts, $stmt);
-  my @src = @$src;
 
   # A RULED REFUSAL COMES FIRST (Track A, #371): for the five families above
   # this statement is not a compiler gap but a feature PCL does not have, and
@@ -9423,7 +9471,7 @@ sub _announce_dropped_statement {
   # run a program the author did not write.  The location is spelled like the
   # announcement's so the two read alike; the message keeps its `PCL:` prefix
   # so that in eval-string mode it travels the ruled refusal route into $@.
-  if (my $refusal = $self->_ruled_refusal_for_drop(\@src)) {
+  if ($refusal) {
     my $where = $self->eval_mode ? '(eval)' : $file;
     die "PCL: $refusal, at $where line $line\n";
   }

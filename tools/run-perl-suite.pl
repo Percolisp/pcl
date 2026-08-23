@@ -101,9 +101,12 @@
 # layer (cl/pcl-test.lisp: plan/is/ok/skip/...) is compiled into the saved
 # core, mirroring the sweep's `--load` of it.
 #
-# Still skipped as need-harness: files that fiddle @INC in BEGIN — they pull
-# build-tree modules from ../lib that PCL cannot load.  That is now the ONLY
-# filter, and dir scans report its count, so coverage is visible.
+# NEED-HARNESS files — those that fiddle @INC in a BEGIN to pull build-tree
+# modules from ../lib — used to be dropped from the scan here, silently.  Since
+# s438 they are SCANNED like every other file (all five in perl 5.40's t/ were
+# measured to produce a verdict; the scan line reports the count), and a future
+# one that genuinely cannot be measured goes in %NEED_HARNESS_NOT_RUN for a
+# NOT-RUN row.  There is no silent filter left.
 #
 # Harness-fixture artifacts — a THIRD category, and not not-support:
 #   docs/perl-suite-fixture.tsv maps `rel<TAB>rows<TAB>cause` for rows that
@@ -298,6 +301,23 @@ push @dirs, @DEFAULT_DIRS if $all;
 # always report; a file being in both this run and the sweep is harmless
 # duplication.  (Re-syncing the drifted copies themselves is part 2, post-R1:
 # it churns the blessed fail-baseline.)
+# NEED-HARNESS FILES ARE SCANNED TOO, since s438 (ruled fable-answers-s437 §2
+# ask 1(b), "narrowed by measurement").  A file that fiddles @INC in a BEGIN
+# was SKIPPED here on the theory that it needs perl's build tree — silently,
+# which is how five of them ended up with snapshot rows that nothing could ever
+# refresh (s431 spliced them in by hand; s434 printed the hole from both
+# sides).  All five were then MEASURED by naming them, and all five produce a
+# verdict against real perl (comp/line_debug.t DIFF 1/24, op/goto.t
+# TRANSPILE-FAIL, op/lex.t DIFF 13/39, op/require_errors.t DIFF 3/68,
+# run/dtrace.t NOTAP), so the exclusion was costing coverage and buying
+# nothing.  They now join the scan and the file count is 528, not 523.
+#
+# The rule is kept as DATA, not deleted: a need-harness file that genuinely
+# cannot be measured belongs in %NEED_HARNESS_NOT_RUN below, where it gets a
+# NOT-RUN row naming the rule (the #345 shape) and stays UNEXPLAINED — counted
+# on every run instead of inferred from a file count.  The registry is empty
+# today because the measurement says it should be.
+my %need_harness;
 for my $d (@dirs) {
   my ($n_all, $n_harness) = (0, 0);
   for my $f (sort glob "$tdir/$d/*.t") {
@@ -305,12 +325,12 @@ for my $d (@dirs) {
     my $base = basename($f);
     open my $fh, '<', $f or next;
     local $/; my $src = <$fh>; close $fh;
-    # Skip files pulling build-tree modules via @INC fiddling in BEGIN.
+    # Files pulling build-tree modules via @INC fiddling in BEGIN.
     # (`require './test.pl'` and `chdir 't'` files run via the shadow t/.)
-    if ($src =~ m{BEGIN[^\n]*\@INC}) { $n_harness++; next }
+    if ($src =~ m{BEGIN[^\n]*\@INC}) { $n_harness++; $need_harness{"$d/$base"} = 1 }
     push @files, "$d/$base";
   }
-  printf STDERR "scan t/%-8s %3d files: %3d runnable, %3d need-harness\n",
+  printf STDERR "scan t/%-8s %3d files: %3d self-contained, %3d need-harness (run too, since s438)\n",
     $d, $n_all, $n_all - $n_harness, $n_harness;
 }
 @files or die "no files (give t-relative paths, --dir <subdir>, or --all)\n";
@@ -373,9 +393,18 @@ my %QUICK_SKIP = (
 );
 my $QUICK_CAP = 120;   # seconds; a registered allowance above this is not run
 
+# A need-harness file (BEGIN-@INC, see the scan above) that cannot be measured
+# at all.  EMPTY by measurement, s438: all five in perl 5.40's t/ produce a
+# verdict.  A future one goes here with WHAT was measured, never on suspicion.
+my %NEED_HARNESS_NOT_RUN = (
+);
+
 my %not_run;
 for my $rel (@files) {
   if ($QUARANTINE{$rel}) { $not_run{$rel} = "QUARANTINED: $QUARANTINE{$rel}"; next }
+  if ($need_harness{$rel} && $NEED_HARNESS_NOT_RUN{$rel}) {
+    $not_run{$rel} = "NEED-HARNESS: $NEED_HARNESS_NOT_RUN{$rel}"; next
+  }
   next unless $quick;
   if ($QUICK_SKIP{$rel}) { $not_run{$rel} = "QUICK-SKIP: $QUICK_SKIP{$rel}"; next }
   my $e = $file_timeout{$rel} or next;
@@ -384,6 +413,10 @@ for my $rel (@files) {
     if $e->{secs} > $QUICK_CAP;
 }
 my @quarantined    = grep { ($not_run{$_} // '') =~ /^QUARANTINED/  } @files;
+my @need_harness_nr= grep { ($not_run{$_} // '') =~ /^NEED-HARNESS/ } @files;
+printf STDERR "need-harness: %d file(s) scanned, %d not run — listed NOT-RUN below\n",
+  scalar(grep { $need_harness{$_} } @files), scalar(@need_harness_nr)
+  if %need_harness;
 my @quick_skipped  = grep { ($not_run{$_} // '') =~ /^QUICK-SKIP/   } @files;
 my @quick_capped   = grep { ($not_run{$_} // '') =~ /^QUICK-CAPPED/ } @files;
 printf STDERR "quick mode: %d file(s) not run (%d hang-set, %d allowance > %ds) — listed NOT-RUN below\n",

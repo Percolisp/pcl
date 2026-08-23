@@ -22,7 +22,8 @@
 # appears in no count, in a file the sweep reports as passing.  Task #343 has
 # the analysis and the minimised trigger.
 #
-# FIVE POPULATIONS (task #462, s434).  The census used to cover perl-tests +
+# SIX POPULATIONS (task #462, s434; the sixth added s438, task #473).  The
+# census used to cover perl-tests +
 # perl's t/ + the shipped lib/ shims, and NOTHING covered the two module
 # populations — which is where the last FULLY silent members of the #138 family
 # live, because `pl2cl --module` does not even announce a drop (ruled s403).
@@ -35,7 +36,18 @@
 #   perl-t       $PCL_PERL_SUITE_T/<default dirs>/*.t program mode
 #   lib          lib/**.pm                            MODULE mode
 #   cpan-tests   cpan-tests/modules/**/*.pm           MODULE mode
+#   cpan-t       cpan-tests/modules/**/t/**/*.t       program mode
 #   board        the 14-dist CPAN board's own lib/**  MODULE mode, --board only
+#
+# THE SIXTH, `cpan-t` (task #473, s438): a dist's own test suite.  They are
+# PROGRAMS -- that is what a `.t` is -- so they are transpiled without
+# `--module`, unlike the dist's `.pm` files beside them.  They were outside
+# every population until the s436 four-population emission A/B (a DIFFERENT
+# instrument: it byte-compares two compilers over a file LIST, so it sees
+# every file a change touches whatever the census defines) reported 43 files
+# / 92 drop sites in them -- 92 sites the flip's price sheet did not carry.
+# `xt/` and `examples/` are deliberately NOT in it: they are author/release
+# tests, not the dist's suite, and nothing here runs them.
 #
 # A `.pm` is transpiled with `--module`, because that is the emission the
 # runtime caches and therefore the one that runs.  (The shipped lib/ shims
@@ -51,6 +63,13 @@
 # ~3.5 minutes at 8 jobs for the three original populations (658 files);
 # op/cond.t excluded, as in every measurement.
 #
+# t/japh/ IS NOT A POPULATION AND WILL NOT BECOME ONE (ruled s437): the
+# companion population is exactly tools/run-perl-suite.pl's @DEFAULT_DIRS,
+# where `japh` is excluded as obfuscated -- nothing runs those files, so they
+# are not a measurement population.  t/japh/abigail.t carries 2 drops of the
+# family-1 `1 while -f ++$file` shape; that count is stated in the census
+# header and is not re-measured here.
+#
 # Companion: tools/gate-set-scan.pl, same populations, reads stderr instead.
 use strict;
 use warnings;
@@ -58,6 +77,7 @@ use File::Find;
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 use PCLPaths qw(perl_suite_t);
+use Cwd qw(abs_path);
 
 my ($board, $board_dir, @pos);
 while (@ARGV) {
@@ -71,6 +91,7 @@ while (@ARGV) {
 my $root = shift @pos or die "usage: drop-census.pl ROOT OUT [JOBS] [--board] [--board-dir DIR]\n";
 my $out  = shift @pos or die "usage: drop-census.pl ROOT OUT [JOBS] [--board] [--board-dir DIR]\n";
 my $jobs = shift(@pos) || 8;
+my $abs_root = abs_path($root) // $root;
 # perl's own t/ — derived (PCL_PERL_SUITE_T, else the perlbrew build tree of
 # the running perl), never hard-coded: task #278.
 my $tdir = perl_suite_t();
@@ -88,6 +109,8 @@ for my $d (qw(base cmd comp opbasic op mro class run uni re io)) {
 # adding the module populations).
 push @files, [$_, 'lib', rel_repo($_), 1] for pm_under("$root/lib");
 push @files, [$_, 'cpan-tests', rel_repo($_), 1] for pm_under("$root/cpan-tests/modules");
+# PROGRAM mode, and only under a `t/` directory: a dist's own test suite.
+push @files, [$_, 'cpan-t', rel_repo($_), 0] for dist_t_under("$root/cpan-tests/modules");
 if ($board) {
   my $build = $board_dir // $ENV{PCL_CPAN_BUILD} // "$ENV{HOME}/.cpan/build";
   my @dists = board_dists("$root/docs/cpan-board14-s343.tsv");
@@ -116,6 +139,20 @@ sub pm_under {
          wanted => sub { push @pm, $File::Find::name if -f $File::Find::name && /\.pm$/ } },
        $dir);
   return sort @pm;
+}
+# Every `.t` at any depth under a `t/` directory (Test-Simple's suite nests
+# four levels).  `xt/` and `examples/` are excluded by the `/t/` test itself.
+sub dist_t_under {
+  my ($dir) = @_;
+  return () unless -d $dir;
+  my @t;
+  find({ no_chdir => 1,
+         wanted => sub {
+           push @t, $File::Find::name
+             if -f $File::Find::name && /\.t$/ && m{/t/};
+         } },
+       $dir);
+  return sort @t;
 }
 # The board is 14 dists, and its definition lives in the board's own survey —
 # deriving it here keeps ONE list (task #278's spirit: never write down what
@@ -150,6 +187,13 @@ sub reap {
   my %seen;
   for my $h (@hits) {
     $h =~ s/\s+$//;
+    # A few compiler messages quote the FILE they were raised in (PExpr's
+    # "unhandled postfix '->' term in F: ..."), so the row would otherwise
+    # depend on how ROOT was spelled on the command line -- `.` and an
+    # absolute path produced different bytes for the same drop, and the diff
+    # against the blessed census would read as a change.  Strip both spellings.
+    $h =~ s{\Q$abs_root\E/}{}g;
+    $h =~ s{\Q$root\E/}{}g;
     $h = substr($h, 0, 110);
     $seen{$h}++;
   }
@@ -183,7 +227,7 @@ my $total = 0; $total += (split /\t/, $_)[1] for @rows;
 printf STDERR "drop-census: %-11s %4d files  %3d with drops  %4d drops%s\n",
   $_, $pop_files{$_} // 0, $pop_hit{$_} // 0, $pop_drops{$_} // 0,
   ($_ eq 'board' ? '   (outside the checkout — only with --board)' : '')
-  for grep { $pop_files{$_} } qw(perl-tests perl-t lib cpan-tests board);
+  for grep { $pop_files{$_} } qw(perl-tests perl-t lib cpan-tests cpan-t board);
 printf STDERR "drop-census: %d files carry a PARSE ERROR drop, %d drops total -> %s\n",
   scalar(@rows), $total, $out;
 print STDERR "drop-census: --board NOT given: the board rows in the blessed census"

@@ -26,46 +26,77 @@
 # the same program.  A file whose loss is out of proportion PROMOTES its
 # drop's owner task -- it does not bend the flip (ruled s435).
 #
-# A SIXTH POPULATION IS NOT COUNTED HERE: a drop inside a fresh_perl/
-# runperl CHILD program.  This census reads emitted .lisp files, and a
-# child is transpiled from a STRING at run time, so it appears in no
-# population above.  Two are known (perl-tests/split.t:682,
-# perl-tests/bop.t:701) and both surfaced only because the flip made the
-# child die instead of silently printing nothing.  Size unknown -- task
-# #472 is the instrument.
+# A SEVENTH POPULATION IS STILL NOT COUNTED IN THE ROWS BELOW, but it is no
+# longer unmeasured: everything transpiled DURING a run -- a fresh_perl/
+# runperl CHILD program (transpiled from a STRING, so it is never a .lisp
+# file) and any module the running program loads.  Task #472's instrument
+# shipped s438: the compiler appends `FILE<TAB>LINE<TAB>TEXT<TAB>REASON` to
+# $PCL_DROP_LOG for every drop, sweep-perl-tests.pl sets it around the RUN
+# (never around the file's own transpile) and reports a per-file
+# `child-drops` count plus the DISTINCT sites.  It is REPORTED, NOT GATED --
+# rows are blessed by hand after the first measured run, like every other
+# population here.
 #
-# TWO MORE ARE OUTSIDE THE POPULATION LIST BELOW, measured s436 (task #473)
-# by the Q2 four-population emission A/B -- a DIFFERENT instrument, which
-# byte-compares two compilers over a file LIST and therefore sees every file
-# the flip touched, whatever this census defines:
-#   * cpan-tests/modules/**/t/*.t -- 43 files, 92 drops.  The `cpan-tests`
-#     population below is `**/*.pm` only (module mode, the emission the
-#     runtime caches); a dist's own TEST files are programs and are not read.
-#     The A/B's 9 `.pm` DIFFs reproduce the 9 rows below count for count, so
-#     the gap is exactly the `.t` half.
-#   * t/japh/abigail.t -- 1 file, 2 drops.  The companion population follows
-#     run-perl-suite.pl's @DEFAULT_DIRS, where `japh` is excluded as
-#     obfuscated; nothing runs it.  Its two drops are the same
+# FIRST MEASUREMENT of that population (s438, full sweep, 108 files):
+# **241 drops in 98 files -- but only TEN distinct SITES**, and the two
+# numbers say different things.  98 of the 98 files reach the SAME two, in
+# perl-tests/t/test.pl lines 179-180 (`open(my $f,'<',$out) ? <$f> // '' : ''`,
+# task #479), which every file re-transpiles because the sweep runs with
+# *pcl-skip-cache*; closure.t alone accounts for 38 of the 241 by loading
+# test.pl nineteen times.  The other eight sites are one file each:
+#   * SIX fresh_perl/runperl child PROGRAMS, and six is the whole population:
+#     bop.t's `formline X000n^\0,\0^\0for\0,0..10` and split.t's
+#     `split//.0>60for"0000000000000000"` (the two known from the s435 flip),
+#     blocks.t's two `BEGIN(){1} ...` shapes, lex.t's `sub ub(){0} ub ub`
+#     (runperl) and `flock _$`, magic.t's bare `]`.  All but the first two are
+#     programs perl itself rejects -- the row asserts perl's error -- so a drop
+#     there is close to the honest answer already.
+#   * ONE RUN-TIME MODULE LOAD, and it is a real gap in a real module: the
+#     system perl's Devel/Peek.pm:59 `$num |= (1<<index($D_flags,$_)) for
+#     split //, $on;` (loaded by undef.t) -- PPI lexes `<<index` as a HEREDOC,
+#     task #483.
+# So the seventh population is SMALL and its rows are OWNED (#479, #483); what
+# it is not is unmeasured, which is what it was until s438.
+#
+# WHAT IS DELIBERATELY OUTSIDE THE POPULATION LIST BELOW, and its measured
+# size -- so a hole is a number here, never an inference:
+#   * t/japh/ -- 1 file (abigail.t), 2 drops.  RULED PERMANENTLY OUTSIDE
+#     (s437): the companion population IS run-perl-suite.pl's @DEFAULT_DIRS,
+#     where `japh` is excluded as obfuscated, so nothing runs those files and
+#     they are not a measurement population.  Its two drops are the same
 #     `1 while -f ++$file` shape as the rest of family 1.
-# Neither is a regression -- both were dropping silently before the flip --
-# but post-flip those 94 sites DIE when reached, so the price is real and
-# uncounted.  #473 decides whether the `.t` half becomes a population.
+#   * cpan-tests/modules/**/xt/**.t and **/examples/**.t -- 1 file
+#     (Test-Simple's examples/tools.t), 9 drops, measured s438.  Author and
+#     release tests, not the dist's suite; nothing here runs them.  All 9 are
+#     the Test2 block-form family (task #478), same as the population's own.
+# (The `.t` half of cpan-tests IS a population now -- see `cpan-t` below.
+# The s436 A/B that found it reported 43 files / 92 drops over ALL `.t` under
+# cpan-tests/modules; that is exactly these 42 rows plus examples/tools.t,
+# and the split was re-measured on an f702da3 worktree, where the same 42
+# files carry the same 83 drops -- nothing moved, the population is narrower.)
 #
 # Columns: <rel-path><TAB><drops in the file><TAB><the compiler's own message(s),
 # with a count each>.
 #
-# Population (FIVE, since s434 / task #462): perl-tests/*.t (111) + perl's t/
-# default dirs (527, op/cond.t excluded as always) + lib/**.pm (22) +
-# cpan-tests/modules/**.pm (94) + the 14-dist CPAN board's own lib/**.pm (28).
+# Population (SIX, since s438 / task #473; five since s434 / task #462):
+# perl-tests/*.t (111) + perl's t/ default dirs (527, op/cond.t excluded as
+# always) + lib/**.pm (22) + cpan-tests/modules/**.pm (94) +
+# cpan-tests/modules/**/t/**/*.t (289) + the 14-dist CPAN board's own
+# lib/**.pm (28).
 # Every `.pm` is transpiled with `--module` — the emission the runtime caches,
-# and therefore the one that runs.  The board lives OUTSIDE the checkout
-# (~/.cpan/build), so its rows are refreshed only by a run that passes
-# `--board`; a run without the flag leaves them alone and says so.  Measured
-# with tools/drop-census.pl at commit 4356e77; 1m31s at 8 jobs.
+# and therefore the one that runs.  Every `.t` is transpiled as a PROGRAM,
+# which is what it is.  The dist `.t` files are transpiled WITHOUT the dist's
+# own lib/ and t/lib on @INC, unlike tools/run-dist-t.pl, because it was
+# MEASURED not to matter: the same 42 files carry the same 83 drops either way
+# (the one difference was the absolute path inside one message, which the tool
+# now normalises).  The board lives OUTSIDE the checkout (~/.cpan/build), so
+# its rows are refreshed only by a run that passes `--board`; a run without the
+# flag leaves them alone and says so.  Measured with tools/drop-census.pl at
+# commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 39 files, 102 drops -- 4 perl-tests files (5
-# drops), 23 companion files (77), 9 cpan-tests modules (15), 3 board modules
-# (5), ZERO in lib/.  (At the s399 measurement, over three populations:
+# TOTAL after the edits below: 81 files, 185 drops -- 4 perl-tests files (5
+# drops), 23 companion files (77), 9 cpan-tests modules (15), 42 cpan-tests
+# dist test files (83), 3 board modules (5), ZERO in lib/.  (At the s399 measurement, over three populations:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -78,6 +109,31 @@
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
+#   s438  +42 files / +83 drops, the whole `cpan-t` population arriving at
+#         once (task #473, ruled s437).  NOT a regression and not new: these
+#         sites have been dropping since before the flip -- an f702da3
+#         worktree gives the identical 42 files / 83 drops -- they were simply
+#         in no population.  Where they came from:
+#           79 of 83 are ONE mechanism, task #478: the prototype pre-scan
+#              SKIPS every Test2::/Test:: module BY NAME, so a block-form call
+#              to a dist-declared `(&)` sub (intercept 53, exception 8,
+#              capture 7, warnings 4, no_context 3, context_do 2, Text::CSV's
+#              try/async 2) is not a block-form call.  The discriminating
+#              probe is two identical modules differing only in the package
+#              NAME.  The no-semicolon spelling of the same call does not drop
+#              -- it mis-parses SILENTLY -- which is why this row group is
+#              worth more than its count.
+#            2 task #481: `is $csv->module => 'M'` -- the fat comma autoquotes
+#              the METHOD NAME (Text-CSV t/01_is_pp.t x2).
+#            1 task #480: `$_.2` -- PPI lexes `.2` as a float, so there is no
+#              concatenation operator in the token stream (78_fragment.t).
+#            1 task #482: `$one->state` -- a method named after a keyword dies
+#              inside the compiler (Test2 API/InterceptResult.t).
+#         TWO of the 289 files produce no rows because they REFUSE to
+#         transpile (a louder event than a drop, and not one this census
+#         counts): Test-Simple t/Legacy/fail-more.t ("Parser2 TODO: my-lexical
+#         'Total' spans a package boundary") and Text-CSV t/90_csv.t
+#         ("Parser2 TODO: file lexical 'aoa' captured by sub getrowa").
 #   s402  t/comp/parser.t 10 -> 8: the `add_node` internal error is FIXED
 #         (Pl/PExpr.pm's zero-arg-prototype branch called a method PExpr does
 #         not have, so it ALWAYS died and the statement was dropped —
@@ -423,7 +479,49 @@ cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Formatter/TAP.pm	2	Bug. Fell t
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/IPC/Driver/Files.pm	1	Handle single node of unknown type. Dump: x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Tools/Tiny.pm	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Util.pm	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Bugs/629.t	3	Handle single node of unknown type. Dump: x3
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Regression/637.t	1	WTF? :-) Expr starts with ->/brace?? x1
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Regression/6_cmp_ok.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Test2/Subtest.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy/subtest/events.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy_And_Test2/diag_event_on_ok.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Legacy_And_Test2/hidden_warnings.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Formatter.t	3	Bug. Fell through. Missing case: [ x3
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_buffer_formatter.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_events.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_plan.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_todo.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/ipc_wait_timeout.t	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/special_names.t	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/subtest_bailout.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/trace_signature.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/trace_stamps.t	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/uuid.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/legacy/TAP.t	3	Bug. Fell through. Missing case: [ x3
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API.t	4	Bug. Fell through. Missing case: [ x4
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/Context.t	4	Bug. Fell through. Missing case: [ x4
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/InterceptResult.t	9	Bug. Fell through. Missing case: [ x8 | Can't call method "content" on an undefined value x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Event.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Event/Plan.t	4	Bug. Fell through. Missing case: [ x4
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Event/V2.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/IPC/Driver/Files.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Tools/Tiny.t	10	Bug. Fell through. Missing case: [ x10
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Util/Facets2Legacy.t	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/regression/693_ipc_ordering.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/regression/746-forking-subtest.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/t/lib/Test/Builder/NoOutput.pm	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/regression/642_persistent_end.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/regression/684-nested_todo_diag.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/regression/694_note_diag_return_values.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/regression/696-intercept_skip_all.t	3	Bug. Fell through. Missing case: [ x3
+cpan-tests/modules/Test-Simple-1.302199/t/regression/721-nested-streamed-subtest.t	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/regression/812-todo.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/regression/817-subtest-todo.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/regression/buffered_subtest_plan_buffered.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/regression/errors_facet.t	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/t/regression/inherit_trace.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t	2	PExpr: unhandled postfix '->' term in cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t: term=bless({ _location => x2
+cpan-tests/modules/Text-CSV-2.04/t/78_fragment.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1

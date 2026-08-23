@@ -4,6 +4,71 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 438 (2026-08-23, Opus 5) — the two census instruments (#473 + #472) + the companion scan's silent filter (s434 ask 1); six findings filed, four of them silent-wrongs
+
+The session the s437 queue opens with: no product change, three instruments,
+and the instruments immediately paid for themselves.  Index: DECIDED §s438;
+asks: `docs/opus5-review-requests-s438.md`.
+
+**#473 — the census gains a SIXTH population**: `cpan-tests/modules/**/t/**/*.t`
+(289 files) in PROGRAM mode, because that is what a dist's `.t` is.  **42 files
+/ 83 drops**, blessed with causes; the census is now 81 files / 185 drops and
+its 36 non-board pre-existing rows came back byte-identical.  The s436 A/B's
+"43 / 92" reconciles exactly — it scanned every `.t` under `cpan-tests`, i.e.
+these 42 plus `examples/tools.t` (9), which is an EXAMPLE, not the suite, and
+is named with its count in the header beside `t/japh/`.  Re-measured on an
+`f702da3` worktree: the same 42 / 83, so nothing moved since s436.  Two
+measured decisions worth keeping: the dist `.t` files transpile WITHOUT the
+dist's own `lib/`+`t/lib` (identical rows either way — measured, not assumed),
+and the tool now strips the repo root out of message TEXT, because one message
+quotes the file it was raised in and the row otherwise depended on how ROOT was
+spelled on the command line.
+
+**79 of those 83 drops are one mechanism, and it is a NAME LIST in the
+compiler** (**#478**): `_extract_module_prototypes` skips every
+`Test2::`/`Test::` module by name, so Test2's `intercept`/`exception`/
+`capture`/`warnings` — all `(&)`-prototyped — are not block-form calls.  The
+discriminating probe is two modules identical but for the package name.  The
+half that does NOT drop is worse: `blk { 42 }` (no semicolon) emits
+`(pl-blk 42)`, the block's VALUE where perl passes a code ref.  Residue filed:
+**#480** (`$_.2` — PPI lexes `.2` as a float, so there is no concatenation
+operator in the stream at all), **#481** (a fat comma autoquotes a METHOD
+NAME), **#482** (`$obj->state`, a keyword-named method, dies inside the
+compiler).
+
+**#472 — the SEVENTH population is measurable now**: `PCL_DROP_LOG`, one arm
+in the one announcer, appending `FILE/LINE/TEXT/REASON` for every drop,
+ungated by `PCL_DROP_ANNOUNCE` and deliberately NOT on stderr — the child's
+stderr is the row's observed output, and an instrument that moves a verdict is
+not an instrument.  The sweep sets it around the RUN only, carries a
+`child-drops` column and prints both a per-file count and the distinct SITES.
+First measurement: **241 drops in 98 files, TEN distinct sites**.  Two of them
+are ours and every single file reaches them — `perl-tests/t/test.pl:179-180`,
+where `runperl_and_capture` is dropped by PCL **and wrong in real perl**
+(`my $f` declared in a ternary's condition is not in scope in its branches, so
+the function returns ('','') for a file with content): **#479**.  One is a real
+gap in a real module: core `Devel/Peek.pm:59`, where **PPI lexes `<<index` as
+a HEREDOC**, so every unspaced left-shift by a call drops (**#483**).  The
+other six are one-off child programs, four of them programs perl itself
+rejects.
+
+**s434 ask 1 — the companion scan stops filtering silently.**  A `BEGIN`-`@INC`
+file was dropped from the dir scan without a word, which is how five files came
+to have snapshot rows nothing could refresh.  All five were measured by naming
+them, all five produce a verdict, so they join `--all`: the scan is **528
+files, not 523**.  The rule stays as data (`%NEED_HARNESS_NOT_RUN`, empty by
+measurement) feeding the existing NOT-RUN path, so the next unmeasurable file
+is counted, not inferred.
+
+**Bar**: gate **163/5741** (only the 13 pclxs xs rows — and the +2 over s437's
+number are s437's OWN review-fix rows, which its 5739 was taken before);
+`corpus-diff` emission IDENTICAL over 111 files with the silent-drop count
+unchanged, so no generation bump; full sweep **TOTAL 18312 (+0), 0 new / 0
+fixed, drops 5 = census, GATE clean**; companion `--all --quick --jobs 4` for
+the runner change.
+
+---
+
 ## Session 437 (2026-08-23, Fable) — s434 + s435 + s436 reviewed + APPROVED; one review fix (`package NAME VERSION` at the head of the compile phase); #475–#477 filed
 
 The three sessions since s433 as one batch: Q1 the instruments, Q2 the flip

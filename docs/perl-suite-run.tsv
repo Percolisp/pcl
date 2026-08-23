@@ -1,4 +1,27 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s438 (Opus 5) — the scan is 528 FILES, not 523, and ONE ROW EDITED BY HAND.
+#   `--all` used to drop the five BEGIN-@INC "need-harness" files from the dir
+#   scan silently (comp/line_debug.t, op/goto.t, op/lex.t, op/require_errors.t,
+#   run/dtrace.t), which is how they came to have rows nothing could refresh
+#   (spliced by hand in s431; printed as a hole from both sides in s434).  All
+#   five were measured by naming them and all five produce a verdict, so they
+#   join the scan (fable-answers-s437 §2 ask 1(b)).  Four of the five match
+#   their s431 row to the row.  The fifth:
+#
+#     op/require_errors.t   C_notok 70 -> 68   (C_ok unchanged at 3)
+#
+#   and it is PRE-EXISTING and ATTRIBUTED, not a mover of this session: 3/70 on
+#   a 4356e77 worktree and on 9138404 (s434), 3/68 on f702da3 (s435) and on
+#   d0b52e9 (HEAD) — so THE FLIP is the cause, measured, not inferred.  The two
+#   rows are TAP 55 "should fail to load" and 56 "check the second attempt also
+#   fails"; both were `not ok` before and are `(missing)` now, because a drop in
+#   a module this file requires DIES when reached and takes the rest of its
+#   top-level form with it.  Nothing that PASSED was lost.  That is the flip's
+#   own documented price, and this row is the first place it could be seen —
+#   which is the argument for closing the never-refreshed hole.
+#   io/pvbm.t read 20/8 in the parallel AND the #366 serial pass and 23/5 ALONE
+#   again (the FIFTH time) — NOT edited.  io/open.t contention, uni/variables.t
+#   the known unstable TIMEOUT flood.
 # s437 (Fable review) — ONE ROW EDITED BY HAND: op/utf8cache.t DIFF 2/0 ->
 #   TIMEOUT 2/0.  C_ok is unchanged; the STATUS moved because the #467 recovery
 #   load (s434) carries the file past its first dying form into the "quadratic
@@ -975,7 +998,7 @@ op/ref.t	257	0	198	44	DIFF		1
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
 op/require_37033.t	10	0	4	2	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N	0
-op/require_errors.t	73	0	3	70	DIFF		0
+op/require_errors.t	73	0	3	68	DIFF		0
 op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	25	19	DIFF		0

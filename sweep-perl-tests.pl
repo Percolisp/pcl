@@ -131,6 +131,18 @@ sub run_one_test {
     # already transpiles the file, and tools/sweep-diff.pl compares it against
     # the blessed census.  -1 means NOT MEASURED (no CL was produced), never 0.
     my $drops = -1;
+    # CHILD DROPS (task #472): drops in the programs this file's
+    # fresh_perl_is/runperl rows spawn.  A child is transpiled from a STRING at
+    # run time (tools/pclperl-for-tests), so its emission is never a .lisp file
+    # and the `drops` count above -- which reads THIS file's CL -- cannot see
+    # it.  Two are known and BOTH were rows that passed for years on nothing
+    # (split.t:682, bop.t:701), found only when the s435 flip made the child
+    # die instead of silently printing nothing.  The compiler appends one line
+    # per drop to PCL_DROP_LOG; we set it around the RUN only, never around
+    # this file's own transpile, or the file's drops would be counted twice.
+    my $child_drops = 0;
+    my $child_log = "$log_dir/$name.childdrops";
+    unlink $child_log;
 
     eval {
         local $SIG{ALRM} = sub { die "TIMEOUT\n" };
@@ -178,13 +190,22 @@ sub run_one_test {
         # burned a core for the rest of the session.  setpgrp does not change
         # the SESSION, so that is the handle that still reaches every
         # descendant.  `timeout` stays inside, so the timing is unchanged.
-        my ($rc, $reaped) = run_isolated("timeout $timeout $sbcl_cmd >$tmp_out 2>&1");
+        # PCL_DROP_LOG reaches the child transpiles by inheritance: the sweep
+        # -> /bin/sh -> SBCL -> run-program -> pclperl-for-tests -> pl2cl.  It
+        # is NOT set around the transpile above, so only CHILD drops land here.
+        # (A test file that clears %ENV for a child hides its own children from
+        # this instrument -- an undercount, never a miscount.)
+        my ($rc, $reaped) = do {
+            local $ENV{PCL_DROP_LOG} = $child_log;
+            run_isolated("timeout $timeout $sbcl_cmd >$tmp_out 2>&1");
+        };
         warn "sweep: $name left $reaped orphan(s), reaped\n" if $reaped;
         my $sbcl_exit = $rc >> 8;
         my $out = do { local $/; my $f; open($f, '<', $tmp_out) ? do { my $c = <$f>; $c // '' } : '' };
         unlink $tmp_out;
         if ($sbcl_exit == 124) { die "TIMEOUT\n" }
         alarm(0);
+        $child_drops = count_child_drops($child_log);
 
         chdir $orig;
 
@@ -255,11 +276,31 @@ sub run_one_test {
         ($pass, $fail, $skip) = (0, 0, 0);
     }
 
+    # A file that TIMEOUTs or crashes still ran children up to that point, and
+    # what they dropped is a fact about the corpus, not about the verdict.
+    $child_drops = count_child_drops($child_log) if !$child_drops;
+
     # Write tab-separated result (skip + planned added between fail and status;
-    # drops after planned — the free-form snippet stays last)
+    # drops after planned, child-drops after drops — the free-form snippet
+    # stays last)
     open(my $rf, '>', $result_file) or die;
-    print $rf join("\t", $name, $pass, $fail, $skip, $planned, $drops, $status, $snippet) . "\n";
+    print $rf join("\t", $name, $pass, $fail, $skip, $planned, $drops,
+                   $child_drops, $status, $snippet) . "\n";
     close $rf;
+}
+
+# One line per drop, `FILE<TAB>LINE<TAB>TEXT<TAB>REASON`, appended by
+# Pl::Parser::_announce_dropped_statement.  The file is left in place: the
+# COUNT is the instrument, but the identities are what a census of this
+# population is made from, and re-running one file to get them back costs a
+# whole SBCL run.
+sub count_child_drops {
+    my ($path) = @_;
+    open my $lh, '<', $path or return 0;
+    my $n = 0;
+    $n++ while <$lh>;
+    close $lh;
+    return $n;
 }
 
 # Min MemAvailable seen during the run (task #215).  A LOST report has two
@@ -357,13 +398,13 @@ while (@queue || %children) {
         $warm_first = 0;   # the cache is populated (or the first file failed) — fan out
 
         # Read result file
-        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0, status => 'NO_RESULT', snippet => '' };
         if (open my $rf, '<', $info->{result_file}) {
             chomp(my $line = <$rf>);
             close $rf;
-            my ($n, $p, $f, $sk, $pl, $dr, $s, $snip) = split /\t/, $line, 8;
+            my ($n, $p, $f, $sk, $pl, $dr, $cdr, $s, $snip) = split /\t/, $line, 9;
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
-                   drops => $dr // -1,
+                   drops => $dr // -1, child_drops => $cdr // 0,
                    status => $s // 'OK', snippet => $snip // '' };
         }
 
@@ -421,7 +462,7 @@ while (@queue || %children) {
                 printf "  KILLED %-22s TIMEOUT - re-queued at %ds\n",
                        $info->{name}, $info->{timeout} * $RETRY;
             } else {
-                $results{$info->{name}} = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1,
+                $results{$info->{name}} = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0,
                                             status => 'TIMEOUT', snippet => "(killed)" };
                 printf "  KILLED %-22s TIMEOUT\n", $info->{name};
                 $finished++;
@@ -505,18 +546,81 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
     printf "  %-22s %d\n", $_, $results{$_}{drops} for sort { $results{$b}{drops} <=> $results{$a}{drops} || $a cmp $b } @with;
 }
 
+# CHILD DROPS headline (task #472).  THE SIXTH POPULATION: everything the
+# compiler transpiles DURING the run — the programs fresh_perl_is/runperl
+# spawn (from a STRING, so their emission is never a .lisp file) and the
+# modules the running program loads (perl-tests/t/test.pl itself, re-transpiled
+# per file because the sweep runs with *pcl-skip-cache*).  Neither is in any
+# population tools/drop-census.pl reads, so until this instrument nothing could
+# count them: the two known cases were rows that had passed for years on
+# nothing.  Reported, NOT gated — the ruling (fable-answers-s437 §2 ask 5) is
+# measure first, bless the rows by hand, gate after one blessed run.
+#
+# TWO NUMBERS, because one alone lies in a different direction each way.  The
+# per-file COUNT (also the _status.tsv column) says what that file's run lost;
+# it double-counts a drop in the harness, which every file re-transpiles.  The
+# SITE list says what is distinct across the corpus — that is the census — with
+# the number of test files that reached it, so a harness drop reads as one
+# site in many files instead of as many drops.
+{
+    my @with = grep { ($results{$_}{child_drops} // 0) > 0 } keys %results;
+    my $sum = 0; $sum += $results{$_}{child_drops} for @with;
+    printf "\nCHILD DROPS (statements lost in transpiles during the run): %d in %d file(s)\n",
+        $sum, scalar(@with);
+    printf "  %-22s %d\n", $_, $results{$_}{child_drops}
+        for sort { $results{$b}{child_drops} <=> $results{$a}{child_drops} || $a cmp $b } @with;
+
+    # The distinct sites.  A fresh_perl child's source is a temp file whose
+    # NAME changes every run, so the site key drops the directory for those —
+    # the identity of that drop is its text, not the path it was written to.
+    my (%site, %site_files);
+    for my $name (sort keys %results) {
+        open my $lh, '<', "$log_dir/$name.childdrops" or next;
+        my %here;
+        while (my $line = <$lh>) {
+            chomp $line;
+            my ($file, $lno, $text, $reason) = split /\t/, $line, 4;
+            next unless defined $reason;
+            # A fresh_perl child is a temp file whose name changes every run,
+            # so the path is not part of that drop's identity — its TEXT is.
+            $file = '(child program)' if $file =~ m{/pcl_fp_\d+\.pl$}
+                                      || $file =~ m{/pcl_rc_};
+            $file =~ s{^\Q$project_root\E/}{};
+            $file =~ s{/\./}{/}g;
+            my $key = "$file:$lno\t$text\t$reason";
+            $site{$key}++;
+            $here{$key} = 1;
+        }
+        close $lh;
+        $site_files{$_}{$name} = 1 for keys %here;
+    }
+    printf "  -- %d distinct site(s):\n", scalar(keys %site) if %site;
+    for my $key (sort { keys(%{$site_files{$b}}) <=> keys(%{$site_files{$a}}) || $a cmp $b }
+                 keys %site) {
+        my ($where, $text, $reason) = split /\t/, $key, 3;
+        printf "     %-46s in %2d file(s)  %s -- %s\n",
+            $where, scalar(keys %{$site_files{$key}}),
+            (length($text) > 60 ? substr($text, 0, 57) . '...' : $text), $reason;
+    }
+}
+
 # Per-file run status, written alongside the failure log so tools/sweep-diff.pl
 # can tell a file that CRASHED/PARTIAL/TIMEOUT (and therefore did not run its
 # remaining assertions) apart from one that genuinely passed.  Without this, a
 # flaky -j8 crash (e.g. pack.t's transient SIMPLE-FILE-ERROR) makes every
 # baseline failure in that file look "FIXED".  One line per file:
-#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> drops <TAB> note
+#   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> drops
+#        <TAB> child-drops <TAB> note
 # where `note` carries the crash-localization snippet (# ABORTED after test N ...)
 # for CRASH/PARTIAL files, and `drops` is the #138-family count (task #343):
 # how many statements the compiler replaced with nil in this file's CL, or -1
 # when no CL was produced.  The pass baseline blessed by `sweep-diff.pl
 # save-status` has only the first five columns — a reader that finds no drops
-# column must treat it as UNKNOWN, never as zero.
+# column must treat it as UNKNOWN, never as zero.  `child-drops` (task #472)
+# is the same count for the programs this file's fresh_perl/runperl rows
+# spawn; 0 there means "no child dropped anything", including "this file
+# spawns no child", and it is REPORTED, not gated (sweep-diff.pl reads the
+# first six columns and ignores it).
 sub write_status_file {
     open my $sf, '>', "$log_dir/_status.tsv" or return;
     for my $name (sort keys %results) {
@@ -525,7 +629,7 @@ sub write_status_file {
         $note =~ s/[\t\n]/ /g;
         print $sf join("\t", $name, $r->{status} // 'OK',
                        $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1,
-                       $r->{drops} // -1, $note) . "\n";
+                       $r->{drops} // -1, $r->{child_drops} // 0, $note) . "\n";
     }
     close $sf;
 }
@@ -586,13 +690,13 @@ sub rerun_serially {
         die "fork: $!" unless defined $pid;
         if ($pid == 0) { run_one_test($file, $result_file, $TIMEOUT * $RETRY); _exit(0) }
         waitpid($pid, 0);
-        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, status => 'NO_RESULT', snippet => '' };
+        my $r = { pass => 0, fail => 0, skip => 0, planned => -1, drops => -1, child_drops => 0, status => 'NO_RESULT', snippet => '' };
         if (open my $in, '<', $result_file) {
             chomp(my $line = <$in>);
             close $in;
-            my ($n, $p, $f, $sk, $pl, $dr, $s, $snip) = split /\t/, $line, 8;
+            my ($n, $p, $f, $sk, $pl, $dr, $cdr, $s, $snip) = split /\t/, $line, 9;
             $r = { pass => $p // 0, fail => $f // 0, skip => $sk // 0, planned => $pl // -1,
-                   drops => $dr // -1,
+                   drops => $dr // -1, child_drops => $cdr // 0,
                    status => $s // 'OK', snippet => $snip // '' };
         }
         printf "  serial %-22s pass=%d fail=%d planned=%s status=%s  [%ds]  (parallel run: pass=%d status=%s)\n",
