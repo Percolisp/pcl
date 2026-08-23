@@ -233,6 +233,32 @@ in 98 files → 9 in 6** (the rest: six one-off child programs + Devel/Peek.pm
 --quick` is owed and runs with the batch legs after D merges.  The compiler
 half (`$ok ? <$f> // "" : ""`) stays an Opus filler.
 
+**s442d (Opus agent D, launched s440 after C merged, MERGED ff
+`d2424aa`+`6c928dd`+`5d72ddd` after review) — #500 + #501 + #503.**  **#500**:
+`say` appends `"\n"` INSTEAD of `$\` — ONE writer `%p-write-list` (`$,`
+between, then the caller's terminator: print passes `$\`, say `"\n"`, printf
+nothing) and ONE `:fh` splitter `%p-out-target` for the three list operators;
+NOT a rebinding of `$\` (probed: perl does not localize it over say — an
+overload handler stringifying an argument still reads the program's `$\`).
+**#501**: the dead `sort NAME` AUTOLOAD wrapper in ExprToCL DELETED (verified
+dead first — byte-identical behaviour before/after with #468 in place; perl
+DOES reach AUTOLOAD for a comparator name, #30661, and
+`%p-call-of-undefined-sub` produces it); corpus-diff = sort.t only (32 sites,
+one family); gen v2-200.  **#503**: an unqualified SYMBOLIC sub name resolves
+in `*pcl-current-package*` (the PERL-level current package) — never
+`(package-name *package*)` (the CL READER's, = MAIN after a file's last
+`in-package`) — in the ONE resolver `%p-resolve-sub-symbol`; `p-get-coderef`
+was a THIRD copy (routed), `p-funcall-ref`'s die message de-duplicated, a
+body-less symbolic call routed to `%p-call-of-undefined-sub`, `p-eval-thunk`
+binds it for a `package X;` region.  Also fixed, pre-existing and loud: `sort
+$string_cmp` inside a package CRASHED the file; a `package X;` string eval's
+symbolic call died.  Gate on its tree 171/5846 (+6 = its rows).  Findings
+FILED: **#514** `sort NAME` resolves LATE (perl: at entry), **#515** an anon
+sub does not rebind the current package, **#516** `(sub {…})->()` emits
+`(p-funcall-ref (vector …))` and dies (whole file), **#517** `\&$s` on a
+body-less name is a SCALAR ref.  **Generation renumbered ONCE on the merged
+tree: v2-201**, artifacts regenerated (stamp-only).
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,

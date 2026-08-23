@@ -78,6 +78,12 @@ those two files and the live plan doc directly -- no new review-doc families.*
   split is ONE shared helper pair, four callers; `local … for` keeps dropping
   loudly by design); census recounted 73/167 at the merge; filed #508–#513;
   gate-SET scan owed (detectors widened).
+- **s442d (agent D) MERGED: #500** (say appends "\n" INSTEAD of `$\` — one writer, one
+  `:fh` splitter), **#501** (the dead `sort NAME` AUTOLOAD wrapper deleted; perl DOES
+  reach AUTOLOAD for a comparator, via the one mechanism), **#503** (a symbolic sub
+  name resolves in `*pcl-current-package*`, never the CL reader's `*package*`; one
+  resolver, a third copy removed); filed #514–#517.  **Generation v2-201 on the merged
+  tree.**
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)
