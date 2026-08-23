@@ -29,7 +29,7 @@ my $runtime = 'cl/pcl-runtime.lisp';
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 21;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -214,6 +214,20 @@ both_agree('#469 inverse: CHECK/INIT still bracket the phase boundary', <<'PL');
 package Q; INIT { print "initQ\n" } CHECK { print "checkQ\n" }
 package main; INIT { print "initM\n" }
 print "run\n";
+PL
+# ---- s437 review fix: `package NAME VERSION;` sets $VERSION as the package
+# statement is COMPILED -- before any BEGIN, `use` or sub of that section.
+# s436 assigned it at the END of the section's compile phase (and before the
+# phase model, at the front of the run phase), so a BEGIN in the same section
+# read undef where perl reads 1.5.  Both spellings, against live perl.
+both_agree('package NAME VERSION is set before the section\'s own BEGIN runs', <<'PL');
+package Foo 1.5; BEGIN { print "V=[$Foo::VERSION]\n" } sub ver { $Foo::VERSION }
+package main; print "run=", Foo::ver(), "\n";
+PL
+
+both_agree('package NAME VERSION BLOCK: same, block form', <<'PL');
+package Foo 1.5 { BEGIN { print "V=[$Foo::VERSION]\n" } }
+print "run=$Foo::VERSION\n";
 PL
 
 # The INVERSE, which must keep working: the same call with NO package switch in

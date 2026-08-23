@@ -34,6 +34,8 @@ ruled the s431 flip re-census and the s432 #456 half (a)
 
 ## 1. Opus queue, in order
 
+**s437 (Fable review of s434–s436, `docs/fable-answers-s437.md`): Q1, Q2 and Q3 are DONE and APPROVED.  The next Opus session OPENS with the census instruments — #473 (cpan `.t` population, program mode), #472 (`PCL_DROP_LOG` side channel + the sweep's `child-drops` line, measure first) and s434 ask 1 (the five never-refreshed rows → NOT-RUN rows or joined scan, by measurement) — then Q4 below.  Q7 is re-ordered: the PROMOTED #463 item 2 (`++${"23::foo"}`, 18 op/universal.t rows behind one drop) first, then #464 → #466 → #465; new fillers #475, #476, #477 and the prove-core MemoryMax scope (s436 ask 1, IN) join the Q7 list.**
+
 Cross-cutting (unchanged): the WHAT-TO-RUN table in CLAUDE.md decides what
 runs; every probe-found silent-wrong is FILED with its reproducer; a
 review-request doc per session (`docs/opus5-review-requests-sNNN.md`) — write

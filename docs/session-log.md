@@ -4,6 +4,55 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 437 (2026-08-23, Fable) — s434 + s435 + s436 reviewed + APPROVED; one review fix (`package NAME VERSION` at the head of the compile phase); #475–#477 filed
+
+The three sessions since s433 as one batch: Q1 the instruments, Q2 the flip
+(shipped s435, closed s436), Q3 the phase model.  Record:
+`docs/fable-answers-s437.md`; index: DECIDED §s437.
+
+**Re-measured, COLD, this tree**: gate 163/5739 (only the 13 pclxs xs rows);
+sweep TOTAL 18312 (+0), 0 new / 0 fixed, drops 5 = census, GATE clean;
+companion `--all --quick --jobs 4` 523 files and ZERO real movers — io/open.t
+contention, uni/variables.t the known unstable TIMEOUT, io/pvbm.t 20/8 in the
+parallel AND #366 serial pass but 23/5 alone (the fourth time that file has
+fooled the serial re-run), op/utf8cache.t DIFF → TIMEOUT at C_ok 2 because the
+recovery load now reaches its "quadratic pos" loop — which PCL runs
+QUADRATICALLY (**#477**, Target A: 100k chars 4 s, 200k 15.7 s, perl 1M in
+0.09 s; the match is the cost, not pos()).  lib A/B vs the pre-phase-model
+commit re-walked with my own line-multiset script: 21 pure permutation + 1
+`(in-package …)`.  42 probes vs perl across the phase model (16), `)-name`
+(12), the flip (3), #474 exposure (5), the memory cap (6).
+
+**The one review fix — ask 6 of s436 was a real bug**: `package Foo 1.5;
+BEGIN { print $Foo::VERSION }` printed the empty string on HEAD (assignment at
+the END of the section's compile phase) and on the base (front of the run
+phase); perl prints 1.5 because `$VERSION` is set as the `package` statement
+is compiled.  The assignment now follows its defvar at the HEAD of the section's
+compile phase; `@ver_run` is gone.  Two `decl-ordering-02.t` rows (both fail
+on the pre-fix tree); corpus identical over 111, lib 22/22, the one population
+file with the spelling SAME; generation v2-181, artifacts stamp-only;
+ir-spec §9 names the placement.
+
+**Filed from the probes, both PRE-EXISTING on the `4356e77` base**: #475 (a
+FILE-level `our` alias is not requalified across a TOP-level `package`
+statement — silent wrong; the in-block spelling works) and #476 (`-NAME` with
+a DECLARED sub is a negated call in perl, the string in PCL).
+
+**Rulings**: prove-core MemoryMax scope IN (tools filler); #473 YES (cpan `.t`
+population, program mode; japh a header sentence); #472 = `PCL_DROP_LOG` side
+channel in the one announcer + the sweep's `child-drops` line, measure first;
+ir-spec §9.3 carries the load-time-call half; a promoted fix may ride in the
+promoting session under the s366 filler rule; #474 FOLD; the stub block
+stays; s434's six-file `--bless-rows` RATIFIED after reading the rows
+(standing: say per file that the new rows fall under the registered reason);
+the five never-refreshed rows become NOT-RUN rows or join the scan, by
+measurement.
+
+**Queue**: the next Opus session opens with the census instruments (#473 +
+#472 + the never-refreshed rows), then Q4 = #453 + #365, Q5, Q6; Q7
+re-ordered with the promoted #463 item 2 first.  `docs/plan-post-s433.md` §1
+carries the pointer.
+
 ## Session 436 part 2 (2026-08-23, Opus 5) — Q3: the PHASE MODEL (#456 half (b) + #469), closed together
 
 Commit **`b95ad91`**.  Perl compiles the WHOLE FILE before it runs a line of

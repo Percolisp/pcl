@@ -1209,7 +1209,10 @@ statement, no matter where in the file they sit. A generated file reproduces
 that with two groups of top-level forms, in this order:
 
 1. **compile phase**, one group per package section in source order — the
-   section's package preamble and `(in-package …)`, its declarations, its
+   section's package preamble and `(in-package …)`, its declarations, a
+   `package NAME VERSION` section's `$VERSION` assignment (perl sets it as
+   the `package` statement is COMPILED, so it precedes every `BEGIN`, `use`
+   and sub of the section — s437), its
    captured `use`/`require`/`BEGIN` declarations, and its sub definitions and
    scheduled blocks interleaved by SOURCE POSITION (so a `BEGIN` sees exactly
    the subs written above it and none below);
@@ -1505,7 +1508,12 @@ the emission — a classifier here would be asymmetric in the dangerous
 direction, since one miss would kill a whole file. Module mode is covered by
 construction: the die is *in* the emission, so it survives the module cache
 (the transpile-time stderr announcement is suppressed there, ruled s403 —
-the statement now says so itself, when it is reached).
+the statement now says so itself, when it is reached).  A module whose drop sits
+in a sub BODY loads; its load-time code is a run phase like any other, so a
+load-time CALL into that sub dies at `require` time — trappable by the `use`'s
+own `eval`, as perl's compile error would be (measured s436: Text::Balanced's
+`gen_delimited_pat`, called from the module's top level, took all 958 board
+rows until #457 closed the drop; ruled s437).
 
 **The comment is load-bearing to tooling, not to semantics.** PCL's census,
 `tools/corpus-diff.pl`'s SILENT-DROP counter and both measurement runners'

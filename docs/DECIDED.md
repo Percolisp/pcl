@@ -11,6 +11,64 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s437 (2026-08-23, Fable) — s434 + s435 + s436 REVIEWED + APPROVED; Q1–Q3 DONE; `package NAME VERSION` sets `$VERSION` at the HEAD of its section's compile phase (review fix); #475–#477 filed
+
+- **All three sessions APPROVED as shipped** (`docs/fable-answers-s437.md`).
+  Independently re-measured on a COLD cache: gate **163/5739** (only the 13
+  pclxs xs rows); sweep **TOTAL 18312 (+0), 0 new / 0 fixed, drops 5 = census,
+  GATE clean**; companion `--all --quick --jobs 4` **523 files, zero real
+  movers** (io/open.t contention, uni/variables.t the known unstable TIMEOUT,
+  io/pvbm.t + op/utf8cache.t re-run alone — below); lib A/B vs `f332682`
+  re-walked: 21 pure permutation + 1 `(in-package …)`; `ppi-bug-report.t`
+  row 30 fails / 31 passes on 1.291; 42 probes vs perl 5.40.3.
+- **REVIEW FIX — `package NAME VERSION;` sets `$VERSION` as the package
+  statement is COMPILED, before every BEGIN/`use`/sub of the section**
+  (`Pl::Parser2::parse`, the `@ver_run` list is gone; the assignment follows
+  its own defvar at the head of the section's compile phase).  s436's
+  end-of-compile-phase placement and the pre-phase-model front-of-run
+  placement BOTH read undef from `package Foo 1.5; BEGIN { print
+  $Foo::VERSION }` (perl 1.5).  Guard `Pl/t/decl-ordering-02.t` (two
+  `both_agree` rows, statement + block form; both FAIL on the pre-fix tree).
+  Corpus identical over 111; lib 22/22; the one population file with the
+  spelling (`t/comp/package_block.t`) SAME.  Generation **v2-181**, artifacts
+  stamp-only.  ir-spec §9 load model says where the assignment sits.
+- **`io/pvbm.t` fooled the #366 serial re-run for the FOURTH time** (20/8 in
+  the parallel pass AND serial, 23/5 alone — s435, s436 ×2, s437).  Standing:
+  a fresh_perl-driving file's serial verdict is a signal, not a proof; re-run
+  it alone before editing its row.
+- **op/utf8cache.t DIFF 2/0 → TIMEOUT 2/0 is the RECOVERY load (#467)
+  reaching the file's "quadratic pos" loop, and PCL runs it QUADRATICALLY —
+  #477 (Target A)**: `while ($x =~ /./g) {}` over 100k chars 4.1 s net, 200k
+  15.7 s, perl 1M in 0.09 s; the cost is the MATCH (pos() and wide chars ruled
+  out by probe).  Snapshot row left as the measured TIMEOUT with this cause.
+- **Filed from the review probes, both PRE-EXISTING on the `4356e77` base**:
+  **#475** a FILE-level `our` alias is not requalified across a TOP-level
+  `package` statement (`our $t = "m"; package A; $t .= "A"` → PCL m, perl mA;
+  the in-block spelling works, #239/#251 — scoping ⇒ sweep is the gate);
+  **#476** `-NAME` with a DECLARED sub is a negated CALL in perl (`sub foo {8}
+  print -foo` → -8), the string `-foo` in PCL.
+- **Rulings on the asks** (`fable-answers-s437.md` §2): prove-core under a
+  `systemd-run` MemoryMax scope is IN (tools filler; measure the gate's peak
+  first, announce when systemd-run is absent); **#473 YES** — `cpan-tests/
+  modules/**/t/*.t` joins the census in PROGRAM mode, `t/japh` = a header
+  sentence; **#472** = a `PCL_DROP_LOG` append-file side channel in the ONE
+  announcer + the sweep's `child-drops` line, MEASURE first, gate after a
+  blessed run; ir-spec §9.3 carries the load-time-call sentence; **a promoted
+  owner's fix may ride in the promoting session under the s366 filler rule**
+  (same mechanism + own bar met + new axes filed; a NEW mechanism waits);
+  **#474 FOLD** into the next scheduled-block-emission change (five exposure
+  probes, none diverges today); the on-demand stub block STAYS; s434's
+  six-file `--bless-rows` RATIFIED after READING the rows (**standing: a bless
+  after an instrument change states per file that the new rows fall under
+  the registered reason**); the five never-refreshed snapshot rows → NOT-RUN
+  rows or joined scan, BY MEASUREMENT (op/lex.t runs when named).
+- **Queue**: next Opus session OPENS with the census instruments (#473 +
+  #472 + the never-refreshed rows), then **Q4 = #453 + #365**, Q5, Q6; Q7
+  re-ordered with the PROMOTED #463 item 2 (`++${"23::foo"}`, 18
+  op/universal.t rows behind one drop) first, then #464 → #466 → #465, #468,
+  #470, the prove-core scope, #474 when folded, #475, #476, #477.  Fable:
+  review at Q4.
+
 ## s436b (2026-08-23, Opus 5) — Q3: #456 half (b) / #469, the PHASE MODEL across sections.  perl compiles the whole file before it runs a line of it, and now so does PCL
 
 - **The assembly runs in TWO PASSES over the same sections** (`Pl::Parser2::parse`):

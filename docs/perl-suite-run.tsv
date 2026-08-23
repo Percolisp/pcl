@@ -1,4 +1,15 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s437 (Fable review) — ONE ROW EDITED BY HAND: op/utf8cache.t DIFF 2/0 ->
+#   TIMEOUT 2/0.  C_ok is unchanged; the STATUS moved because the #467 recovery
+#   load (s434) carries the file past its first dying form into the "quadratic
+#   pos" test (`"\x{100}" x 1000000` + `while ($x =~ /./g) { pos($x) }`), which
+#   PCL runs QUADRATICALLY (task #477: 100k chars 4 s, 200k 15.7 s, perl 1M in
+#   0.09 s — the match is the cost, not pos()).  Measured TIMEOUT 2/0 in the
+#   parallel pass, in #366's serial re-run and ALONE on a quiet machine, three
+#   times; it is not a timeouts.tsv allowance case because no allowance short of
+#   ~400 s reaches the next row — the fix is #477, after which the row returns
+#   to DIFF by EDIT.  io/pvbm.t read 20/8 in the parallel AND serial pass again
+#   and 23/5 alone (the fourth time) — NOT edited.
 # s436 part 2 (Q3 = #456 half (b) / #469, the PHASE MODEL) — 6 ROWS EDITED BY
 #   HAND.  Every section's COMPILE phase (defs, BEGINs, captured use/require)
 #   now precedes every section's RUN phase, as perl's own model has always
@@ -1022,7 +1033,7 @@ op/universal.t	142	2	61	48	DIFF	aborted-forms:7: PCL: statement not supported at
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
-op/utf8cache.t	16	0	2	0	DIFF		1
+op/utf8cache.t	16	0	2	0	TIMEOUT	timeout	1
 op/utf8decode.t	710	0	620	90	DIFF		0
 op/utf8magic.t	6	0	2	4	DIFF		0
 op/utfhash.t	99	0	91	0	DIFF		0

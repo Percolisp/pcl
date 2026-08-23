@@ -1809,17 +1809,22 @@ sub parse {
       $reader = $cl_pkg;
     }
     push @body, @{ $sec->{decls} };
-    # Versioned `package Foo 1.5;`: $VERSION defvar in decls, assignment at the
-    # front of run (v1's _emit_package_version — set in source order, not BEGIN).
-    my @ver_run;
+    # Versioned `package Foo 1.5;`: $VERSION defvar, then its assignment —
+    # HERE, at the head of the section's compile phase.  perl sets $VERSION
+    # as it COMPILES the `package NAME VERSION` statement, i.e. before any
+    # sub, `use` or BEGIN of the section: `package Foo 1.5; BEGIN { print
+    # $Foo::VERSION }` prints 1.5 (probed s437).  It used to ride at the end of
+    # the compile phase (s436) and, before the phase model, at the front of the
+    # run phase (v1's _emit_package_version) — both read undef from a BEGIN in
+    # the same section.  Guard: Pl/t/decl-ordering-02.t.
     if (defined $sec->{version}) {
       (my $prefix = $cl_pkg) =~ s/^://;
       my $sym    = "$prefix\::\$VERSION";
       my $ver_cl = ($sec->{version} =~ /^\d+(?:\.\d+)?$/) ? $sec->{version}
                                                           : "\"$sec->{version}\"";
       push @body, "(eval-when (:compile-toplevel :load-toplevel :execute)",
-                  "  " . global_decl_form($sym, '(make-p-box nil)') . ")";
-      @ver_run = ("(p-scalar-= $sym $ver_cl)", '');
+                  "  " . global_decl_form($sym, '(make-p-box nil)') . ")",
+                  "(p-scalar-= $sym $ver_cl)", '';
     }
     # Per-package $a/$b specials: once per package (not on reopen — duplicate
     # defvars are noisy).
@@ -1845,11 +1850,6 @@ sub parse {
     # introspection: chdir.t).  Index tie-break keeps the merge stable for
     # entries with equal positions.
     push @body, map { ($_, '') } $self->_interleaved_defs($sec);
-    # `package Foo 1.5;` sets $VERSION at COMPILE time in perl, so the
-    # assignment belongs at the end of this section's compile phase — which is
-    # also where it has always been relative to the phase boundary and to
-    # every run form (v1's _emit_package_version: source order, not BEGIN).
-    push @body, @ver_run;
     # This section's RUN phase, held back until every section has compiled.
     push @run_groups, [$i, $pkg, $cl_pkg, $sec->{run}];
   }
