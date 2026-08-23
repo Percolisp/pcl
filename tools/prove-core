@@ -15,6 +15,12 @@
 # The core is rebuilt on EVERY invocation (into a fresh temp file, removed on
 # exit) so the suite can never run against a stale image — correctness first.
 #
+# Since s439 every runner ALSO gets a content-keyed CACHED core by default
+# (tools/lib/PCLSbcl.pm: named by a hash of the runtime + the SBCL version,
+# so it cannot be stale either), which is why plain `prove -j8 Pl/t/` now
+# runs at this script's speed.  This script stays as belt and braces: a
+# fresh image, no cache consulted.
+#
 # Usage:
 #   tools/prove-core                 # == prove -j8 Pl/t/
 #   tools/prove-core Pl/t/foo-01.t   # any prove args

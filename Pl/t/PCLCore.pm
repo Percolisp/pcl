@@ -11,12 +11,13 @@ package PCLCore;
 # dominates the gate.  A saved core (an SBCL image with the runtime already
 # compiled in) drops that to ~0.003s.
 #
-# This module is a pure CONSUMER: it never builds a core.  The core is built
-# FRESH, once per run, by tools/prove-core, which points PCL_TEST_CORE at it.
-# Building every run (rather than caching one across runs) is deliberate — a
-# stale core would silently run tests against OLD runtime code.  As a second
-# guard, sbcl_prefix refuses a core older than the runtime and falls back to
-# source-load, so a hand-set PCL_TEST_CORE can never mask a runtime edit.
+# This module is a pure CONSUMER: it never builds a core itself.  Two cores
+# can serve it: PCL_TEST_CORE, built FRESH once per run by tools/prove-core
+# (sbcl_prefix refuses one older than the runtime, so a hand-set stale core
+# can never mask an edit), and -- since s439, the DEFAULT when PCL_TEST_CORE
+# is unset -- the CACHED core tools/lib/PCLSbcl.pm builds on first use and
+# names by a hash of the runtime source + SBCL version (content-keyed, so it
+# cannot be stale either).  Plain `prove -j8 Pl/t/` runs at prove-core speed.
 use strict;
 use warnings;
 use File::Basename qw(dirname);

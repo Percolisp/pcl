@@ -11,6 +11,45 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s439b (2026-08-23, Fable, USER) — THE RUNTIME IS KEPT COMPILED AND CACHED BY DEFAULT: every runner starts SBCL from a content-keyed saved core built on first use
+
+- **USER ruling: "by default the CL runtime is kept compiled and cached."**
+  Implemented in the ONE SBCL command builder, `tools/lib/PCLSbcl.pm`: when
+  no explicit core / `PCL_TEST_CORE` / installed `<root>/pcl.core` applies, a
+  runner gets `~/.pcl-cache/core/pcl-<path8>-<content12>.core`, built on
+  first use (`flock`ed, tmp+rename) from `cl/pcl-runtime.lisp` and NAMED by a
+  hash of the runtime's absolute path + its source + `sbcl --version` +
+  `~/.sbclrc` size/mtime + a format version.  **No mtime comparison anywhere:
+  an edit, an SBCL upgrade or a second checkout produces a different NAME**,
+  so the stale-core failure `tools/prove-core`'s per-run rebuild was designed
+  against cannot occur; older cores for the same path are pruned.  The
+  extensions (pack/mro/warnings/xs) load LAZILY from `*pcl-runtime-directory*`
+  and are NOT in the core — which is why the key hashes one file and why the
+  PATH is in it (a core captures that directory at build time).
+- **Knobs**: `PCL_NO_CORE=1` = never build/use the cached core (an installed
+  core still counts — it is an install's product, not a cache); `PCL_SHOW_SBCL=1`
+  prints which core; `pcl --make-core` forces the build early; `pcl
+  --clear-cache` removes cores and cached modules; a FAILED build announces
+  itself, falls back to source and leaves `<core>.failed` for an hour so
+  parallel runners do not each pay a failing build.  The first-run progress
+  line prints only when stderr is a terminal (or `PCL_SHOW_SBCL`) — a caller
+  capturing a runner's stderr (the installer's smoke test was the catch) must
+  not see it.  **`./pcl` now goes through PCLSbcl too** (it was a sixth runner
+  hand-writing its command line); `tools/install-pcl --no-core` installs now
+  fall back to the per-user cache rather than source.
+- **Measured**: plain `prove -j8 Pl/t/` **224 s wall, 166/5780** (was ~5+
+  min; `tools/prove-core` 233–236 s today — it stays as the fresh-image
+  belt); `./pcl -E 'say 6*7'` 0.145 s end to end; full sweep on the new
+  runner IDENTICAL (TOTAL 18312 +0, GATE clean) in **2:10 wall instead of
+  ~10 min** — every fresh_perl child recompiled the runtime before.
+  `tools/t/sbcl-prefix.t` 17 → 27 rows (the
+  cached-core block builds a real core from a tiny runtime in a temp cache
+  dir; the content-change row resolves in a CHILD process because a process
+  memoises its answer per runtime); `tools/t/install-pcl.t` 11/11.
+- Notes written: README quick start, CLAUDE.md quick reference,
+  `docs/test-infrastructure.md` (the "not yet implemented" section is now the
+  implemented one), `Pl/t/PCLCore.pm` + `tools/prove-core` headers.
+
 ## s439 (2026-08-23, Fable) — s438 → s438i REVIEWED + APPROVED (instruments, Q4, Q5, Q6); one review fix (#455's `qw()` spelling); #491–#496 filed; THE DISTANCE TO v0.1 IS FIVE STEPS (`docs/fable-answers-s439.md` §4)
 
 - **All nine commits APPROVED as shipped** (`docs/fable-answers-s439.md`).

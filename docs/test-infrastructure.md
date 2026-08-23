@@ -112,7 +112,28 @@ strings will mostly fail.  See `docs/not-supported.md` for details.
 
 ---
 
-## The saved-core optimisation (not yet implemented)
+## The saved-core optimisation — IMPLEMENTED, and the DEFAULT since s439
+
+**Status (s439, USER ruling "by default the CL runtime is kept compiled and
+cached"):** `tools/lib/PCLSbcl.pm` — the ONE SBCL command builder every
+runner shares — resolves a core in this order: an explicit `core` argument;
+`PCL_TEST_CORE` (the gate's contract, mtime-fresh); the INSTALLED
+`<root>/pcl.core` (`tools/install-pcl`'s product); **the CACHED core**
+`~/.pcl-cache/core/pcl-<path8>-<content12>.core`, built on first use from
+`cl/pcl-runtime.lisp` and named by a hash of the runtime's absolute path,
+its source, `sbcl --version`, `~/.sbclrc`'s size+mtime and a format version
+— an edit, an SBCL upgrade or a second checkout produces a different name,
+so there is no stale-core case; source mode last (`PCL_NO_CORE=1` forces it,
+a failed build falls back to it loudly and leaves a one-hour `.failed`
+marker).  The extensions (`cl/pcl-pack.lisp`, `pcl-mro`, `pcl-warnings`,
+`pcl-xs`) are loaded lazily from `*pcl-runtime-directory*` and are NOT in
+the core; `cl/pcl-test.lisp` and the skip registry are `--load`ed by the
+callers after the prefix, as before.  Concurrent first spawns take an
+`flock`; the build is tmp+rename.  Measured: plain `prove -j8 Pl/t/` 224 s
+wall (s439) — the same as `tools/prove-core`, which still rebuilds a fresh
+temp core per run as belt and braces.  Test: `tools/t/sbcl-prefix.t`.
+
+The original note, kept for the reasoning:
 
 The standard SBCL way to amortise startup cost is to save a **Lisp image**
 (core) with the runtime already loaded:

@@ -288,7 +288,7 @@ if ($opt{core}) {
         if !$opt{'dry-run'} && -f "$libdir/pcl.core";
 }
 else {
-    say_step("skipping the saved core (--no-core): every run will recompile the runtime");
+    say_step("skipping the saved core (--no-core): runs use the per-user cached core instead (built on first use under ~/.pcl-cache/core; source mode if that fails)");
 }
 
 unless ($opt{'dry-run'}) {

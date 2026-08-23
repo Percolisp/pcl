@@ -6,10 +6,11 @@
 package PCLSbcl;
 # The ONE place that builds the SBCL command line a PCL runner spawns.
 #
-# WHY THIS EXISTS (task #344, found by #324 in s399).  FOUR runners start SBCL
-# to run transpiled code — the gate (Pl/t/PCLCore.pm), the sweep
-# (sweep-perl-tests.pl), the companion suite (tools/run-perl-suite.pl) and
-# ./runpcl — and each used to hand-write its own option string.  They must
+# WHY THIS EXISTS (task #344, found by #324 in s399).  The runners that start
+# SBCL to run transpiled code — the gate (Pl/t/PCLCore.pm), the sweep
+# (sweep-perl-tests.pl), the companion suite (tools/run-perl-suite.pl),
+# ./runpcl, tools/pclperl-for-tests and (since s439) ./pcl — each used to
+# hand-write its own option string.  They must
 # agree about everything that changes what PCL *is* while a test runs (stack
 # size, which libraries are loaded, the cache setting), and they agreed only by
 # hand.  When one drifts, the difference reads as a PCL bug in whichever
@@ -32,7 +33,11 @@ package PCLSbcl;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(sbcl_prefix sbcl_prefix_str);
+use Cwd        qw(abs_path);
+use Digest::SHA qw(sha1_hex);
+use Fcntl      qw(:flock);
+use File::Path qw(make_path);
+our @EXPORT_OK = qw(sbcl_prefix sbcl_prefix_str cached_core core_cache_dir clear_cached_cores);
 
 # Control stack, MB.  PCL recurses deeply in both the compiler and the runtime;
 # SBCL's 2 MB default is not enough (#324).  Changing the value is a decision
@@ -50,6 +55,16 @@ our $STACK_MB = 512;
 #               than the runtime (the gate's contract — a hand-set stale core
 #               can never mask a runtime edit).  An explicit `core` wins.
 #   stack_mb => override $STACK_MB for this call
+#
+# RESOLUTION ORDER for the core (first hit wins):
+#   1. an explicit `core`                      (the caller knows best)
+#   2. $ENV{PCL_TEST_CORE}, when `env_core`    (the gate's contract, freshness-checked)
+#   3. the INSTALLED core <root>/pcl.core      (tools/install-pcl's product, below)
+#   4. the CACHED core                          (built once per runtime change, below)
+#   5. source mode: --load <runtime>            (the fallback; PCL_NO_CORE=1 forces it)
+# PCL_NO_CORE=1 skips 4 — no cache is built or used; a checkout then runs the
+# runtime from source — and leaves the explicit asks and the INSTALLED core
+# alone (that one is an install's product, not a cache).
 #
 # THE INSTALLED CORE (task #277).  `tools/install-pcl` compiles the runtime
 # into <installed-root>/pcl.core at install time — the USER-ruled model, the
@@ -70,6 +85,8 @@ sub sbcl_prefix {
         $core = $c if $c && $c ne '1' && -f $c && _fresh($c, $o{runtime});
     }
     $core = _installed_core($o{runtime}) unless defined $core && length $core;
+    $core = cached_core($o{runtime})
+        unless $ENV{PCL_NO_CORE} || (defined $core && length $core);
     return ('--core', $core, @base) if defined $core && length $core;
     return (@base, defined $o{runtime} ? ('--load', $o{runtime}) : ());
 }
@@ -104,6 +121,129 @@ sub sbcl_prefix_str {
     }
     return join ' ', 'sbcl',
         map { $quote && $is_path{$_} ? quotemeta($args[$_]) : $args[$_] } 0 .. $#args;
+}
+
+# THE CACHED CORE (USER, s439): by default the runtime is kept COMPILED and
+# CACHED.  `--load`ing cl/pcl-runtime.lisp compiles ~17k lines on EVERY sbcl
+# spawn (~1.2 s); a saved core loads in ~3 ms.  tools/prove-core and
+# tools/install-pcl already built cores for the gate and for an install; this
+# makes the same thing the DEFAULT for every runner, in a checkout, with no
+# step to remember: the first spawn builds the core, every later spawn uses it.
+#
+# WHY IT CANNOT GO STALE — the core's file NAME is its key:
+#   <cache>/core/pcl-<path8>-<content12>.core
+# where <path8> hashes the runtime's ABSOLUTE PATH (a core captures
+# *pcl-runtime-directory* at load time, so two checkouts — main and a
+# worktree — must never share one even when their runtimes are byte-identical),
+# and <content12> hashes the runtime SOURCE plus `sbcl --version` (a core only
+# starts on the SBCL that built it), ~/.sbclrc's size+mtime (it is what makes
+# Quicklisp's cl-ppcre visible inside the image) and a format version.  Edit
+# the runtime, upgrade SBCL, touch .sbclrc: the name changes and the next spawn
+# builds a new core; the previous ones for that path are pruned.  Nothing is
+# compared by mtime, so no "stale core masks a runtime edit" case exists —
+# the failure tools/prove-core's per-run rebuild was designed against.
+#
+# What is IN the core: cl/pcl-runtime.lisp and what its load pulls in
+# (cl-ppcre).  The extensions (pcl-pack / pcl-mro / pcl-warnings / pcl-xs) are
+# loaded LAZILY at first use from *pcl-runtime-directory*, so they are read
+# fresh from the tree and never need to invalidate the core; cl/pcl-test.lisp
+# and cl/skip-registry.lisp are --load'ed by the callers after the prefix, as
+# before.  That is also why the key hashes ONE file.
+#
+# Concurrency: eight gate files starting at once on a cold cache take an
+# flock on one lock per path; the first builds (~2 s), the rest wait and find
+# the core.  The build is atomic (tmp + rename): a half-written core is never
+# a core.  A FAILED build leaves a .failed marker so the next spawns do not
+# each pay a failing build — it expires after an hour, and `pcl --make-core`
+# (`cached_core(..., force => 1)`) ignores it.  Failure = source mode, once
+# announced.  PCL_SHOW_SBCL=1 shows which core a runner spawns, as always.
+our $CORE_KEY_VERSION = 1;    # bump when the key's ingredients change
+
+sub core_cache_dir {
+    return ($ENV{PCL_CACHE_DIR} // "$ENV{HOME}/.pcl-cache") . "/core";
+}
+
+my %CORE_FOR;          # abs runtime path -> core path (or '' = none), per process
+my $SBCL_IDENTITY;     # `sbcl --version`, per process
+
+sub cached_core {
+    my ($runtime, %opt) = @_;
+    return undef unless defined $runtime && -f $runtime;
+    my $abs = abs_path($runtime) // return undef;
+    return $CORE_FOR{$abs} || undef if exists $CORE_FOR{$abs} && !$opt{force};
+    my $ident = _sbcl_identity();
+    return $CORE_FOR{$abs} = '' unless defined $ident;     # no sbcl: nothing to build with
+    my $content = do { local $/; open my $fh, '<:raw', $abs or return undef; <$fh> };
+    my $pathkey = substr(sha1_hex($abs), 0, 8);
+    my $ckey    = substr(sha1_hex(join "\0", $content, $ident, _sbclrc_stamp(),
+                                              $ENV{SBCL_HOME} // '', $CORE_KEY_VERSION), 0, 12);
+    my $dir  = core_cache_dir();
+    my $core = "$dir/pcl-$pathkey-$ckey.core";
+    if (-f $core && !$opt{force}) { return $CORE_FOR{$abs} = $core }
+    my $built = _build_cached_core($abs, $dir, $pathkey, $core, $opt{force});
+    $CORE_FOR{$abs} = $built // '';
+    return $built;
+}
+
+sub _sbcl_identity {
+    return $SBCL_IDENTITY if defined $SBCL_IDENTITY;
+    my $v = qx{sbcl --version 2>/dev/null};
+    return undef if $? != 0 || !defined $v || $v !~ /\S/;
+    $v =~ s/\s+\z//;
+    return $SBCL_IDENTITY = $v;
+}
+
+sub _sbclrc_stamp {
+    my $rc = "$ENV{HOME}/.sbclrc";
+    return 'none' unless -f $rc;
+    my @st = stat $rc;
+    return "$st[7]:$st[9]";
+}
+
+sub _build_cached_core {
+    my ($runtime, $dir, $pathkey, $core, $force) = @_;
+    eval { make_path($dir) unless -d $dir; 1 } or return undef;
+    my $failed = "$core.failed";
+    if (!$force && -f $failed && (time - (stat $failed)[9]) < 3600) { return undef }
+    open my $lk, '>>', "$dir/pcl-$pathkey.lock" or return undef;
+    flock($lk, LOCK_EX) or do { close $lk; return undef };
+    if (-f $core && !$force) { close $lk; return $core }   # a sibling built it while we waited
+    my $tmp = "$core.tmp.$$";
+    # Progress for a HUMAN (the first spawn pauses ~2 s): only when stderr is a
+    # terminal, or on request -- a caller capturing the runner's stderr (the
+    # installer's smoke test, a probe diffing output) must not see it.  The
+    # FAILURE below is unconditional.
+    print STDERR "PCL: compiling the runtime into a cached core (once per runtime change): $core\n"
+        if -t STDERR || $ENV{PCL_SHOW_SBCL};
+    my $cmd = join ' ', 'sbcl', '--noinform', '--non-interactive',
+                        '--load', quotemeta($runtime),
+                        '--eval', quotemeta(qq{(sb-ext:save-lisp-and-die "$tmp" :executable nil)});
+    my $out = qx{$cmd 2>&1};
+    if ($? != 0 || !-f $tmp) {
+        unlink $tmp;
+        if (open my $mf, '>', $failed) { print $mf $out; close $mf }
+        close $lk;
+        print STDERR "PCL: cached core build FAILED — running the runtime from source "
+                   . "(details in $failed; retried after an hour or on `pcl --make-core`)\n";
+        return undef;
+    }
+    unless (rename $tmp, $core) { unlink $tmp; close $lk; return undef }
+    unlink $failed;
+    for my $old (glob("\Q$dir\E/pcl-$pathkey-*.core")) {   # this runtime's older cores
+        unlink $old unless $old eq $core;
+    }
+    close $lk;
+    return $core;
+}
+
+# Remove every cached core (and marker); the next spawn rebuilds.  Returns the
+# number of files removed.  `pcl --clear-cache` calls this.
+sub clear_cached_cores {
+    my $dir = core_cache_dir();
+    my @files = (glob("\Q$dir\E/pcl-*.core"), glob("\Q$dir\E/pcl-*.failed"),
+                 glob("\Q$dir\E/pcl-*.lock"));
+    %CORE_FOR = ();
+    return @files ? unlink(@files) : 0;
 }
 
 # A core is usable only if it is at least as new as the runtime it must reflect.

@@ -9,11 +9,16 @@
 #   pcl script.pl [args...]      run a script
 #   pcl -e 'code'  [args...]     run inline code   (-E is an alias of -e)
 #   pcl -c script.pl             syntax-check only
-#   pcl --clear-cache            wipe the cached compiled modules, then exit
-#   pcl --make-core              snapshot the loaded runtime for fast startup, then exit
+#   pcl --clear-cache            wipe the cached compiled modules AND the cached runtime cores, then exit
+#   pcl --make-core              (re)build the cached runtime core now, then exit
 #
 # A "core" is a memory image of SBCL with the PCL runtime preloaded; running
-# from it skips re-loading the runtime (~1s → ~0.1s). It's a pure speed cache.
+# from it skips re-loading the runtime (~1s → ~0.1s).  It is a pure speed
+# cache, and since s439 it is the DEFAULT: the first run compiles the runtime
+# into ~/.pcl-cache/core/ and every later run uses it; the core's name is a
+# hash of the runtime source + the SBCL version, so an edit or an upgrade
+# simply produces a new one (tools/lib/PCLSbcl.pm, the ONE SBCL command
+# builder every PCL runner shares).  --make-core only forces that build early.
 # (Compiling/running a script as a standalone .fasl is not supported yet —
 # Phase 6.) See `pcl --help` for the user-facing summary.
 #
@@ -29,6 +34,9 @@ use Getopt::Long qw(:config pass_through require_order no_ignore_case bundling);
 use File::Basename qw(dirname basename);
 use Cwd qw(abs_path);
 use File::Temp qw(tempfile);
+use FindBin;
+use lib "$FindBin::RealBin/tools/lib";
+use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344; cached core s439)
 
 my $ROOT    = dirname(abs_path($0));
 my $PL2CL   = "$ROOT/pl2cl";
@@ -173,16 +181,19 @@ sub exec_sbcl {
          . qq{ (load #P"$file"}.')))';
   };
 
-  # SBCL splits argv into RUNTIME options and TOPLEVEL options: every runtime
-  # option (--core, --control-stack-size, --noinform) must precede the first
-  # toplevel option (--non-interactive, --eval, --load), or SBCL aborts with
-  # "C runtime option --core in the middle of Lisp options."  So --core goes
-  # up front with the other runtime options, not after --non-interactive.
-  my $core = find_core();
-  my @cmd = ('sbcl');
-  push @cmd, '--core', $core if $core;
-  push @cmd, '--control-stack-size', '512', '--noinform', '--non-interactive';
-  push @cmd, '--eval', $quiet_load->($RUNTIME) unless $core;
+  # The prefix (--core placement, stack size, banner flags) comes from
+  # tools/lib/PCLSbcl.pm like every other PCL runner's: an explicit $PCL_CORE
+  # wins, else the installed or the CACHED core (built on first use), else the
+  # runtime is loaded from source.  In that last case the --load is swapped for
+  # this tool's quiet load so compile notes do not reach the user's terminal —
+  # the same file, the same flags, only muffled.
+  my @cmd = ('sbcl', PCLSbcl::sbcl_prefix(runtime => $RUNTIME, core => $ENV{PCL_CORE}));
+  for my $i (0 .. $#cmd - 1) {
+    if ($cmd[$i] eq '--load' && $cmd[$i + 1] eq $RUNTIME) {
+      splice @cmd, $i, 2, '--eval', $quiet_load->($RUNTIME);
+      last;
+    }
+  }
   push @cmd, '--eval', $argv_form;
   push @cmd, '--eval', $quiet_load->($lisp);
 
@@ -190,30 +201,22 @@ sub exec_sbcl {
   exec { $cmd[0] } @cmd or die "pcl: cannot exec sbcl: $!\n";
 }
 
-# A saved core is used automatically when present and newer than the runtime.
-sub find_core {
-  my $c = $ENV{PCL_CORE} // "$cache_dir/pcl.core";
-  return undef unless -f $c;
-  return undef unless -f $RUNTIME && (stat $c)[9] >= (stat $RUNTIME)[9];
-  return $c;
-}
-
+# Build (or rebuild) the cached runtime core now.  The same core every run
+# picks up by itself on first use; this only does it early and says where.
 sub make_core {
-  my $c = $ENV{PCL_CORE} // "$cache_dir/pcl.core";
-  mkdir $cache_dir, 0755 unless -d $cache_dir;
-  say "pcl: building core $c";
-  my $rc = run('sbcl', '--noinform', '--non-interactive',
-               '--load', $RUNTIME,
-               '--eval', qq{(sb-ext:save-lisp-and-die "$c" :executable nil)});
-  die "pcl: core build failed\n" if $rc != 0;
-  say "pcl: done — startup should now be much faster";
+  my $c = PCLSbcl::cached_core($RUNTIME, force => 1)
+    or die "pcl: core build failed (see the .failed marker in " . PCLSbcl::core_cache_dir() . ")\n";
+  say "pcl: cached runtime core is $c";
 }
 
 sub clear_cache {
-  # Remove cached .fasl/.lisp; leave pcl.core (rebuild with --make-core).
+  # Remove cached compiled modules (.fasl/.lisp) AND the cached runtime cores;
+  # the next run rebuilds the core it needs.
   my @files = (glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
   my $n = @files ? unlink(@files) : 0;
-  say "pcl: cleared $n cached file(s) from $cache_dir";
+  my $k = PCLSbcl::clear_cached_cores();
+  say "pcl: cleared $n cached module file(s) from $cache_dir and $k runtime core file(s) from "
+    . PCLSbcl::core_cache_dir();
 }
 
 # ---- small utilities -----------------------------------------------------
@@ -295,16 +298,16 @@ Options:
   -v, --verbose  print the underlying sbcl command pcl runs
   -h, --help     this message
 
-Faster startup (optional):
-  --make-core    Build a "saved core" once, then exit. A core is a memory image
-                 of SBCL with the PCL runtime already loaded; later runs start
-                 from it instead of re-loading the runtime, cutting startup from
-                 ~1s to ~0.1s. pcl uses the core automatically when present and
-                 rebuilds it as needed when the runtime changes. It's purely a
-                 speed cache — safe to delete (pcl just loads the runtime again).
-  --clear-cache  Delete PCL's internal module cache — the compiled files it
-                 makes for `use`/`require`d modules — then exit. The saved core
-                 is kept (rebuild it with --make-core).
+Startup cache:
+  --make-core    Build the cached runtime core now, then exit.  A core is a memory
+                 image of SBCL with the PCL runtime already compiled in; running
+                 from one cuts startup from ~1 s to ~0.1 s.  Every run builds and
+                 uses one BY DEFAULT (first use compiles; the core is named by a
+                 hash of the runtime + the SBCL version, so an edit or an upgrade
+                 makes a new one) — this flag only does the build early.
+  --clear-cache  Remove the cached compiled modules (the .fasl/.lisp files pcl
+                 makes for `use`/`require`d modules) and the cached runtime
+                 cores, then exit.  The next run rebuilds what it needs.
 
 Notes:
   * Every run transpiles your script fresh; there is no way yet to compile a
@@ -314,6 +317,7 @@ Notes:
 
 Environment:
   PCL_CACHE_DIR  where the core and module cache live (default ~/.pcl-cache)
-  PCL_CORE       explicit path to the saved core (default <cache>/pcl.core)
+  PCL_CORE       use THIS saved core instead of the cached one
+  PCL_NO_CORE=1  never build or use the cached core (an installed core still counts)
 USAGE
 }

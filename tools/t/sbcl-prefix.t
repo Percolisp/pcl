@@ -11,11 +11,17 @@
 # the harness.  Run it directly:  prove tools/t/sbcl-prefix.t
 use strict;
 use warnings;
-use Test::More tests => 17;
+use Test::More tests => 27;
 use File::Temp qw(tempdir);
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
-use PCLSbcl qw(sbcl_prefix sbcl_prefix_str);
+use PCLSbcl qw(sbcl_prefix sbcl_prefix_str cached_core core_cache_dir clear_cached_cores);
+
+# The rows up to the CACHED-core block describe the resolution order WITHOUT
+# the cached core (explicit > PCL_TEST_CORE > installed > source), so they run
+# with the cache switched off; the fake runtimes below are not loadable Lisp
+# and must never trigger a build.  The cached core has its own block at the end.
+$ENV{PCL_NO_CORE} = 1;
 
 my $dir = tempdir(CLEANUP => 1);
 my $rt  = "$dir/pcl-runtime.lisp";
@@ -131,4 +137,54 @@ is(sbcl_prefix_str(runtime => '/a/rt.lisp', quote => 0),
     open my $lf, '>', $loose or die $!; print $lf "x\n"; close $lf;
     ok( !grep({ $_ eq '--core' } sbcl_prefix(runtime => $loose)),
         'installed core: the lookup requires the <root>/cl/ layout' );
+}
+
+# --- the CACHED core (USER s439): compiled once, kept, keyed by content -----
+# The default for every runner in a checkout.  A real (tiny) runtime is used so
+# sbcl can actually build the core; the cache dir is a tempdir.
+SKIP: {
+    skip 'sbcl not on PATH', 10 unless `sbcl --version 2>/dev/null` =~ /SBCL/;
+    delete local $ENV{PCL_NO_CORE};
+    local $ENV{PCL_CACHE_DIR} = tempdir(CLEANUP => 1);
+    my $cdir = core_cache_dir();
+    is($cdir, "$ENV{PCL_CACHE_DIR}/core", 'core_cache_dir honours PCL_CACHE_DIR');
+
+    my $rdir = tempdir(CLEANUP => 1);
+    my $rrt  = "$rdir/pcl-runtime.lisp";
+    my $write = sub { open my $fh, '>', $rrt or die $!; print $fh $_[0]; close $fh };
+    $write->("(defvar cl-user::*pcl-fake-runtime* 1)\n");
+
+    my @p = sbcl_prefix(runtime => $rrt);
+    is($p[0], '--core', 'default: a runtime with no installed core gets a CACHED core');
+    like($p[1], qr{^\Q$cdir\E/pcl-[0-9a-f]{8}-[0-9a-f]{12}\.core$},
+         'the core lives under <cache>/core/, named by path hash + content hash');
+    ok(-s $p[1] > 1_000_000, 'and it is a real saved core, not a marker');
+    my $first = $p[1];
+    my $mtime = (stat $first)[9];
+
+    # A second resolution (new process state simulated by a forced re-read) is
+    # the same file, not a rebuild.
+    is(cached_core($rrt), $first, 'second resolution returns the same core');
+    is((stat $first)[9], $mtime, '...without rebuilding it');
+
+    # Edit the runtime: the key changes, a new core is built, the old one pruned.
+    # Resolved in a CHILD process — a process memoises its answer per runtime
+    # (a runtime does not change under a running gate file), so the cross-run
+    # behaviour is what must be tested: a new process, new content, new key.
+    $write->("(defvar cl-user::*pcl-fake-runtime* 2)\n");
+    my $second = `perl -I\Q$RealBin\E/../lib -MPCLSbcl -e 'print PCLSbcl::cached_core(\$ARGV[0])' \Q$rrt\E 2>/dev/null`;
+    isnt($second, $first, 'an edited runtime gets a DIFFERENT core (content-keyed)');
+    ok(!-e $first, 'the previous core for that runtime path is pruned');
+
+    # PCL_NO_CORE=1 is source mode even when a core exists.
+    {
+        local $ENV{PCL_NO_CORE} = 1;
+        is_deeply([ sbcl_prefix(runtime => $rrt) ],
+                  ['--control-stack-size', 512, '--noinform', '--non-interactive',
+                   '--load', $rrt],
+                  'PCL_NO_CORE=1: the runtime is loaded from source');
+    }
+
+    ok(clear_cached_cores() >= 1 && !glob("\Q$cdir\E/pcl-*.core"),
+       'clear_cached_cores removes every cached core');
 }

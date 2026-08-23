@@ -80,6 +80,21 @@ links to the design docs, the SBCL ≥ 2.5.2 requirement kept, a reading
 guide; every command shown was run and every link checked.  `docs/STATUS.md`
 and `CHANGELOG.md` keep the s419 numbers until #494 (tag time).
 
+**s439b — USER: "by default the CL runtime is kept compiled and cached"
+(DECIDED §s439b).**  Done in `tools/lib/PCLSbcl.pm`, the one SBCL command
+builder: after the explicit core, `PCL_TEST_CORE` and the installed core, a
+runner gets a CACHED core under `~/.pcl-cache/core/`, built on first use
+and named `pcl-<path8>-<content12>.core` by a hash of the runtime's path,
+source, `sbcl --version` and `~/.sbclrc` — content-keyed, so nothing can be
+stale; the extensions are lazily loaded and stay outside the core.  `./pcl`
+joins the shared builder (`--make-core` forces the build, `--clear-cache`
+also clears cores); `PCL_NO_CORE=1` is source mode; a failed build is loud,
+falls back, and leaves a one-hour `.failed` marker.  The first-run progress
+line is terminal-only — the installer's smoke test caught it in a capture.
+Plain `prove -j8 Pl/t/` 224 s / 166/5780 (prove-core's speed); `pcl -E`
+0.145 s; `tools/t/sbcl-prefix.t` 27 rows; `tools/t/install-pcl.t` 11/11;
+full sweep on the new runner IDENTICAL (TOTAL 18312 +0, 0 new / 0 fixed, drops 5 = census, child drops 241/98, GATE clean) in **2 min 10 s wall instead of ~10** — every fresh_perl child used to recompile the runtime too.  Notes in README, CLAUDE.md, test-infrastructure.md.
+
 ## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
 
 Three of P5's four.  Index: DECIDED §s438g+h+i.

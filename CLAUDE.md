@@ -173,10 +173,19 @@ retargeted the task at filing).
 # Run all tests (from project root) — always use -j8 for parallel execution
 prove -j8 Pl/t/
 
-# ~3.4x faster (8:18 -> 2:30): run against a saved SBCL core (runtime
-# pre-compiled in). tools/prove-core rebuilds a FRESH core every run (never
-# stale) then runs prove. Identical results; core is purely a speed cache.
-tools/prove-core                 # == prove -j8 Pl/t/
+# THE RUNTIME IS KEPT COMPILED AND CACHED (USER s439): every runner that
+# spawns SBCL through tools/lib/PCLSbcl.pm (the gate, the sweep, the companion
+# suite, runpcl, pclperl-for-tests, pcl) starts from a saved core of
+# cl/pcl-runtime.lisp under ~/.pcl-cache/core/, built on first use and NAMED
+# by a hash of the runtime source + `sbcl --version` + ~/.sbclrc + the
+# runtime's absolute path (a worktree gets its own) -- so it cannot be stale:
+# an edit makes a new core and prunes the old.  Extensions (pack/mro/warnings/
+# xs) load lazily from the tree and are NOT in the core.  Plain `prove -j8
+# Pl/t/` therefore runs at prove-core speed (~3:45 wall, measured s439).
+# PCL_NO_CORE=1 = source mode; PCL_SHOW_SBCL=1 prints which core; `pcl
+# --clear-cache` removes the cores; a failed build leaves <core>.failed (one
+# hour) and falls back to source, LOUDLY.  tools/t/sbcl-prefix.t is its test.
+tools/prove-core                 # == prove -j8 Pl/t/ on a FRESH temp core (belt and braces)
 tools/prove-core Pl/t/foo-01.t   # any prove args
 
 # Test single file
@@ -272,7 +281,7 @@ under `Pl/` changed, `tools/corpus-diff.pl` (~2 min — READ its SILENT-DROP
 line) + `tools/emission-ab.pl --ref <base> --list lib/**/*.pm` (seconds);
 plus the targeted files the change names.
 
-| what changed | full perl-tests sweep (~10 min) | companion suite (`--quick` ~15–25 min; full `--all` 30–60) | also |
+| what changed | full perl-tests sweep (~2–3 min since s439b's cached core; was ~10) | companion suite (`--quick` ~15–25 min; full `--all` 30–60) | also |
 |---|---|---|---|
 | `Pl/**`, corpus-diff IDENTICAL, lib byte-identical, NOT a name-resolution change | **NO — it cannot move; do not run it "to be safe"** | no | — |
 | `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | the dirs whose files carry the shape (`grep -a`); `--quick` once if broad | gen bump + `tools/rebuild-pack` (staleness gate enforces it) |

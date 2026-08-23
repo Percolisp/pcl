@@ -114,8 +114,16 @@ tools/prove-core                      # the regression gate against a fresh save
 prove -j8 Pl/t/                       # the same gate, plain (the reference; slower)
 ```
 
-`tools/prove-core` and `prove -j8 Pl/t/` check the same thing — the core is a
-speed cache rebuilt fresh on every run, never a stale image.
+**The runtime is compiled once and cached.**  Every PCL runner (`runpcl`,
+`pcl`, the test gate, the sweeps) starts SBCL from a saved core holding the
+compiled runtime: the first run after a checkout or a runtime edit builds it
+(~2 s, under `~/.pcl-cache/core/`), every later run loads it in milliseconds.
+The core's file name is a hash of the runtime source and the SBCL version, so
+it cannot go stale — an edit or an upgrade simply produces a new one.
+`PCL_NO_CORE=1` runs from source; `pcl --clear-cache` removes the cached
+cores and modules; `PCL_SHOW_SBCL=1` shows which core a runner spawns.
+`tools/prove-core` additionally rebuilds a fresh core for the gate every
+run (belt and braces); `prove -j8 Pl/t/` now runs at the same speed.
 
 ### Example
 
@@ -174,13 +182,12 @@ The output is meant to be *read by other tools*, not only loaded by SBCL:
 
 ### 3. Speed — beat perl
 
-The output compiles to native code, but a naive translation is slower than
-perl: every scalar is a box that may be a number, a string and a reference at
-once, and every operation pays for that generality.  The plan is to stop
-paying it where a line of code provably does not need it, with the general
-form as the fallback — a wrong analysis loses a speed-up, never correctness.
-Today calls, recursion and arithmetic loops already beat perl (2–4×); element
-access, slices and method dispatch do not yet.  Details, measurements and the
+The output compiles to Common Lisp, as a naive translation. It is slower than
+perl, since every scalar is a box, so a reference to it can be taken. It is
+making the CL compiler slow. This isn't that hard to optimize in the next
+phase.
+
+Details, measurements and the
 worklist: [`docs/where-the-time-goes.md`](docs/where-the-time-goes.md),
 [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md);
 the transforms are named and switchable ([`Pl/Passes.pm`](Pl/Passes.pm),
@@ -188,11 +195,7 @@ the transforms are named and switchable ([`Pl/Passes.pm`](Pl/Passes.pm),
 
 ### 4. XS / C extensions
 
-Being looked at.  A separate experimental project, **pclxs**, implements a
-`libperl`-ABI shim so that unmodified compiled XS modules can call into PCL's
-runtime; it passes its conformance corpus against real perl and `Digest::MD5`
-works end to end, but it is not bundled and CPAN-wide XS is the long game —
-help from people who know XS and CL internals is welcome.  Design:
+Being looked at, preliminary.
 [`docs/xs-shim-design.md`](docs/xs-shim-design.md).
 
 ## Architecture
@@ -222,24 +225,7 @@ The target shape of the compiler and the gap to it:
 
 ## How it is tested
 
-* **Perl is the oracle.**  `perl-tests/` (perl's `t/op`, `t/base`, … extracted)
-  and the full `t/` tree are compiled and run; a differential fuzzer
-  (`tools/difftest-*.pl`) evaluates generated expressions in both engines;
-  CPAN dists' own suites run through the full pipeline.
-* **Baselines move only honestly.**  Every failing row is blessed with its
-  cause; a change that breaks a passing row fails the sweep; the sweep also
-  reports rows that *vanished* (a file aborting earlier) and statements the
-  compiler dropped.
-* **Not-supported is declared, not hidden.**  The skip registry
-  ([`cl/skip-registry.lisp`](cl/skip-registry.lisp),
-  [`docs/test-skip-registry.md`](docs/test-skip-registry.md)) keys on the
-  test description, cites the reason, still runs the assertion, and flags
-  itself stale the moment a skipped test starts passing.  Crashing tests are
-  never auto-skipped.
-* **Emission is diffed, not trusted.**  `tools/corpus-diff.pl` and
-  `tools/emission-ab.pl` A/B the generated CL over ~1,100 files before a
-  change is called done; `tools/drop-census.pl` counts what the compiler
-  could not translate.
+* Perl's own test suite is used.
 * The procedure: [`docs/test-debugging-runbook.md`](docs/test-debugging-runbook.md).
 
 ## Roadmap
@@ -279,8 +265,8 @@ The compiler was planned and largely written with Claude (Anthropic's
 Fable/Opus models) — the rewrite of the compiler core into the present
 single pipeline included; my own Common Lisp is from long ago, so that side
 is essentially all Claude.  Two things worth passing on: differential fuzzing
-between PCL and perl found real bugs cheaply and is standard compiler
-practice; and `pack` was easiest to get right by writing it *in Perl* and
+between PCL and perl found real bugs cheaply
+and `pack` was easiest to get right by writing it *in Perl* and
 letting PCL compile it — eating our own dog food.  PCL will go on CPAN once it
 is closer to ready.
 
