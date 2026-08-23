@@ -11,6 +11,63 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s438b + s438c (2026-08-23, Opus 5) — Q4: the two operand sites become ONE (#453), and an imported `()`-prototype sub is a TERM (#365)
+
+- **#453 DONE — `is_named_unary` answers for a DECLARED sub too.**  perl decides
+  from the prototype alone: after its leading `;`s, a prototype that is exactly
+  one of `$` `_` `*` `+` or one `\X`/`\[…]` group is a NAMED UNARY OPERATOR.
+  `Pl::PExpr::_declared_named_unary` reads `_proto_parse_spec` (1 or [0,1] is
+  exactly that set), so a user `($)`/`(;$)`/`(*)`/`(_)` sub now takes the
+  named-unary operand site — which runs `_extend_high_prec` — instead of the
+  strictly-single one, which stops at the first term.  ONE predicate fixes both
+  halves, because it is also the strictly-single site's own guard:
+  `f "a" . "b"` was f("a")."b" and is f("ab"); `f $x + 1` was 1 and is f(6);
+  `g + 1, "\n"` for `(*)` was g(1,"\n") and is g(1).
+- **`known_no_of_params` is deliberately NOT the second source** — its 1 covers
+  Config builtins (shift, close, fileno, eof) that are NOT named unaries and
+  must keep the strictly-single site, whose bareword-filehandle branch is why
+  it still exists.  Config's table is asked FIRST, so a builtin's name keeps
+  meaning the builtin.
+- **#365 DONE, and NOT where the task pointed — the finding is the difference.**
+  The task said the prototypes are known and the operator-loop term reading
+  does not ask.  Measured: `_bareword_callable_here` IS asked (23 times for
+  `pi`) and answers `no`, because `has_prototype('pi')` is FALSE — **the
+  prototype never crossed the `use`**.  `_merge_module_prototypes` imported a
+  prototype only for a block arg, a parameter SLOT (`$`/`\X`/`@`/`%`), or a
+  name the export scan listed; a `()` prototype has no slots, so it rode
+  entirely on that scan, which reads literal `qw()` — and Math::Complex (where
+  `pi` is defined; Math::Trig re-exports it) builds `@EXPORT` from a variable
+  (`my @trig = qw(pi …); our @EXPORT = (qw(…), @trig)`).  An empty prototype is
+  a PARSE fact, so it now crosses a `use` on the same footing as
+  `has_block_arg`, independent of the export scan.
+- **`is_proto` does NOT identify the `()` shape** — `sub pi ()` arrives as
+  is_proto 0 (parse_prototype_or_signature's empty case and `use constant`
+  register it that way).  A first attempt keyed on `is_proto` and changed
+  nothing; the record shape is min_params 0 with no params.
+- **ONE predicate, `Pl::Environment::proto_is_zero_arg`** (rule 11): the record
+  test lived in `PExpr::_is_zero_arg_func` and nowhere in the merge, which is
+  exactly how the two disagreed.  Both ask it now.
+- **A shape that occurs in NO corpus is guarded by rows, not by a sweep**
+  (s371, minus-word-01.t's precedent, applied twice here): both changes are
+  emission-IDENTICAL over all four populations — corpus-diff 111 files, and
+  `tools/emission-ab.pl` over lib/**.pm + cpan-tests/** + perl's own t/ = **951
+  files SAME / 0 DIFF / 0 RCDIFF**, twice.  RCDIFF 0 is also the die-scan.
+  Guards `Pl/t/user-unary-01.t` (12 rows) and `Pl/t/imported-term-01.t` (7
+  rows), both `both_agree` against live perl, both inverse-guarded on a
+  `fe46c7b` worktree (7 of 12 and 4 of 7 fail there).
+- **A guard fixture should reproduce the MECHANISM, not the module.**
+  imported-term-01.t builds its own module whose `@EXPORT` comes from a
+  variable, the way Math::Complex does, so the row cannot pass by accident if
+  one CPAN module's spelling changes.
+- Gate **165 files / 5760 rows** (only the 13 pclxs xs rows); sweep **TOTAL
+  18312 (+0), 0 new / 0 fixed, drops 5 = census, GATE clean**; child drops 241
+  in 98 files, unchanged.
+- **#484 filed, pre-existing, and it corrects #365's own guess**: `pi / 2 + pi
+  / 4` is still repaired to a match and dropped.  The classifier CAN be reached
+  from the #351 repair — `_repair_word_match` already asks `_word_is_term` —
+  but that predicate reads only THIS document's terms, and
+  `_premerge_include_prototypes` runs AFTER the repair block.
+
 ## s438 (2026-08-23, Opus 5) — the two census instruments: the census gains a SIXTH population (#473) and a SEVENTH is measured for the first time (#472); the companion scan stops silently skipping need-harness files (s434 ask 1)
 
 - **#473 DONE — `cpan-tests/modules/**/t/**/*.t` is a census population,

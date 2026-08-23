@@ -38,6 +38,8 @@ ruled the s431 flip re-census and the s432 #456 half (a)
 
 **s438 (Opus) DID the census instruments: #473 (a sixth census population — `cpan-tests/modules/**/t/**/*.t`, 42 files / 83 drops, blessed), #472 (`PCL_DROP_LOG` — the seventh population measured for the first time: 241 drops in 98 files, TEN sites) and s434 ask 1 (the companion `--all` scan is 528 files, not 523; both SNAPSHOT holes now read zero).  No product change; six findings filed (#478–#483).  Record: DECIDED §s438, `docs/opus5-review-requests-s438.md`.  THE NEXT SESSION IS Q4 = #453 + #365 (P3 of plan-post-s430: the two named-unary operand sites become one; the `()`-prototype bareword).**
 
+**s438b + s438c (Opus) DID Q4: #453 (the two named-unary operand sites become ONE — `is_named_unary` answers for a declared sub whose prototype is perl's named-unary class) and #365 (an imported `()`-prototype sub is a TERM — the prototype crosses the `use` on its own shape, not on the literal-`qw()` export scan).  Both emission-IDENTICAL over the four populations (951 files A/B, 0 DIFF, twice), so the guards ARE the bar: `Pl/t/user-unary-01.t` + `Pl/t/imported-term-01.t`, inverse-guarded.  Gate 165/5760; sweep TOTAL 18312 (+0) GATE clean; companion 528 files, ZERO real movers.  #484 filed (the #351 repair cannot see an IMPORTED term — the pre-merge runs after the repairs).  Record: DECIDED §s438b+c.  **NEXT IS Q5 (P4: #454, #435, #455)**, then Q6, then the Q7 fillers.**
+
 Cross-cutting (unchanged): the WHAT-TO-RUN table in CLAUDE.md decides what
 runs; every probe-found silent-wrong is FILED with its reproducer; a
 review-request doc per session (`docs/opus5-review-requests-sNNN.md`) — write

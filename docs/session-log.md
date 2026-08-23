@@ -4,6 +4,58 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 438b + 438c (2026-08-23, Opus 5) — Q4: the two operand sites become one (#453), and an imported `()`-prototype sub is a TERM (#365)
+
+The queue item s437 named after the instruments.  Both changes are in PExpr's
+operand/term region — the one B3 was built to own — and both turned out to be
+guarded by ROWS rather than by a corpus, because neither shape occurs in any
+population we measure.  Index: DECIDED §s438b+c.
+
+**#453.**  perl decides from the prototype alone whether a sub is a named unary
+operator, and `_proto_parse_spec` was already this file's one reading of that
+shape.  `is_named_unary` now consults it for a DECLARED sub, so a user
+`($)`/`(;$)`/`(*)`/`(_)` sub takes the named-unary operand site — the one that
+runs `_extend_high_prec` — rather than the strictly-single site, which stops at
+the first term.  One predicate fixes both halves the task reported, because it
+is also the strictly-single site's own guard.  `known_no_of_params` is
+deliberately not a second source: its 1 covers `shift`/`close`/`fileno`, which
+are not named unaries and whose bareword-filehandle branch is the reason the
+other site still exists.
+
+**#365 — and the finding is that the task pointed at the wrong place.**  It
+said the prototypes are known and the term reading does not ask.  Measured:
+the classifier IS asked, 23 times for `pi`, and answers `no` because the
+prototype never crossed the `use`.  `_merge_module_prototypes` imported a
+prototype only for a block arg, a parameter slot, or a name the export scan
+listed — and a `()` prototype has no slots, so it rode entirely on a scan that
+reads literal `qw()`.  Math::Complex, where `pi` is actually defined, builds
+`@EXPORT` from a variable.  Isolating that took two fixtures: a local module
+with a literal export list is right today, and so is a two-level re-export
+chain, which is what left the scan as the only suspect.  An empty prototype is
+a parse fact, so it now crosses a `use` on its own shape.
+
+Two smaller things worth keeping.  `is_proto` does NOT identify a `()`
+prototype — `sub pi ()` arrives as is_proto 0 — and a first attempt keyed on it
+changed nothing; the shape is min_params 0 with no params.  And that record
+test existed in one place and was missing from the other, which is exactly how
+they disagreed: it is now `Pl::Environment::proto_is_zero_arg`, asked by both.
+
+**Bar.**  Emission is IDENTICAL over all four populations for BOTH changes —
+corpus-diff 111 files, and emission-ab over lib/**.pm + cpan-tests/** + perl's
+own t/ = 951 files SAME / 0 DIFF / 0 RCDIFF, run twice (RCDIFF 0 is also the
+die-scan).  So the s371 rule applies and the guards are the bar:
+`Pl/t/user-unary-01.t` (12 rows) and `Pl/t/imported-term-01.t` (7 rows), both
+`both_agree` against live perl, both inverse-guarded on a `fe46c7b` worktree.
+Five of the twelve and three of the seven are NEGATIVES.  Gate 165/5760; sweep
+TOTAL 18312 (+0), GATE clean, drops 5 = census.
+
+**#484 filed**, pre-existing, correcting #365's own guess: `pi / 2 + pi / 4` is
+still repaired to a match and dropped.  The classifier *can* be reached from
+the #351 repair — it already asks `_word_is_term` — but that reads only this
+document's terms, and the prototype pre-merge runs after the repair block.
+
+---
+
 ## Session 438 (2026-08-23, Opus 5) — the two census instruments (#473 + #472) + the companion scan's silent filter (s434 ask 1); six findings filed, four of them silent-wrongs
 
 The session the s437 queue opens with: no product change, three instruments,

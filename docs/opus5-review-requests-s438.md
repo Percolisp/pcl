@@ -171,3 +171,106 @@ as well as dropped in PCL, and it is OUR line, not perl's.  Fixing it is a
 harness change with the full both-population bar.  Ride it with the compiler
 fix (one commit, one bar), or fix the harness alone first so the compiler fix
 can be measured against a harness that works?
+
+---
+
+# Part 2 — Q4 (s438b + s438c): #453 and #365
+
+The queue item after the instruments.  Both changes are in PExpr's
+operand/term region, and both turned out to be guarded by ROWS rather than by a
+corpus: the shapes occur in no population we measure.
+
+## §8  #453 — the two operand sites become one
+
+`Pl::PExpr::handle_subcalls` had two operand sites and only the named-unary one
+(Config's BUILTIN table) ran `_extend_high_prec`.  A user `($)`/`(;$)`/`(*)`/`(_)`
+sub took the other, which stops at the first term:
+
+| | was | now / perl |
+|---|---|---|
+| `sub f ($)` … `f "a" . "b"` | `f(a)b` | `f(ab)` |
+| `sub f ($)` … `f $x + 1` | `1` | `f(6)` |
+| `sub g (*)` … `print "R=", g + 1, "\n"` | `g(1,\n)` | `g(1)` |
+
+`is_named_unary` now answers for a declared sub whose `_proto_parse_spec` is 1
+or [0,1] — exactly perl's named-unary set.  ONE predicate fixes both halves,
+because it is also the strictly-single site's own guard.  `known_no_of_params`
+is deliberately NOT a second source: its 1 covers `shift`/`close`/`fileno`,
+which are not named unaries and whose bareword-filehandle branch is why that
+site still exists.
+
+## §9  #365 — the task pointed at the wrong place, and that is the finding
+
+#365 said the prototypes are known to the environment and the operator-loop
+term reading does not ask.  **Measured: it IS asked** — `_bareword_callable_here`
+runs 23 times for `pi` in the reported program — **and answers `no`, because
+`has_prototype('pi')` is FALSE.**  The prototype never crossed the `use`.
+
+`_merge_module_prototypes` imported a prototype only for a block arg, a
+parameter SLOT (`$`/`\X`/`@`/`%`), or a name `export_names` listed.  A `()`
+prototype has no slots, so it rode entirely on that scan — and the scan reads
+literal `qw()` out of `@EXPORT`/`@EXPORT_OK`, which real modules build from
+variables:
+
+```perl
+my @trig = qw( pi tan … );                    # Math::Complex, where pi lives
+our @EXPORT = (qw( i Re Im … atan2 ), @trig); # Math::Trig re-exports from here
+```
+
+Two fixtures isolated it: a local module with a literal export list is right
+today, and so is a two-level re-export chain.  The fix keys on the PROTOTYPE —
+an empty one is a parse fact, so it crosses a `use` like a block prototype —
+rather than on interpreting the module's own code.
+
+Two things worth keeping: **`is_proto` does not identify the `()` shape**
+(`sub pi ()` arrives as is_proto 0; a first attempt keyed on it and changed
+nothing), and the record test lived in `PExpr::_is_zero_arg_func` and *nowhere*
+in the merge, which is how they disagreed — it is now one predicate,
+`Pl::Environment::proto_is_zero_arg`, asked by both (rule 11).
+
+## §10  The bar for Q4
+
+| leg | #453 | #365 |
+|---|---|---|
+| `corpus-diff` (111) | identical, silent drops 5 unchanged | identical, same |
+| emission A/B vs the previous commit, lib + cpan-tests + perl t/ | **951 SAME / 0 DIFF / 0 RCDIFF** | **951 SAME / 0 DIFF / 0 RCDIFF** |
+| probes vs live perl | the s429 matrix, 3 files, all identical | the #365 table, 7 rows, all identical |
+| guard rows | `Pl/t/user-unary-01.t` 12 (5 negatives) | `Pl/t/imported-term-01.t` 7 (3 inverses/negative) |
+| inverse guard on a `fe46c7b` worktree | rows 1-7 FAIL there | rows 1-4 FAIL there |
+| gate | 164/5753 | **165/5760** |
+
+Batch legs: full sweep **TOTAL 18312 (+0), 0 new / 0 fixed, drops 5 = census,
+GATE clean**; companion `--all --quick --jobs 4` **528 files, ZERO real
+movers** (io/pvbm.t 20/8 in parallel AND serial, 23/5 alone — the SIXTH time;
+op/utf8cache.t contention; uni/variables.t the known flood), both SNAPSHOT
+holes zero, DROPS with no `+`/`-` line.  RCDIFF 0 over 951 files twice is also
+the die-scan.
+
+## §11  Asks (Q4)
+
+**Ask 5 — the over-import trade in #365, stated so it can be rejected.**  A
+`()` prototype now crosses a `use` whether or not the using file imported that
+name, so a bareword sharing the name of a module's non-exported `()` sub
+becomes a call where perl keeps the string.  That is the same over-import the
+parameter-slot rule has always done, and it moves nothing in 951 measured
+files — but it IS a widening of what the compiler believes.  Accept as is, or
+should the merge cross-check the export scan when it HAS one (import only when
+`export_names` is empty or lists the name)?
+
+**Ask 6 — #484's ordering question.**  The #351 `WORD /` repair asks
+`_word_is_term`, which reads only this document's terms, and
+`_premerge_include_prototypes` runs AFTER the repair block.  Moving the
+pre-merge earlier is a seam move (it would walk an unrepaired document, and a
+repair can `_reparse_doc`); extraction is memoized by module name, so a second
+post-repair merge should be free.  Is "pre-merge, repairs, pre-merge again" the
+shape to measure, or should `_word_is_term` get a lazy per-name path instead?
+
+**Ask 7 — two probe-found pre-existing shapes, filed nowhere yet.**  A BAREWORD
+operand to a user prototyped sub emits as an unbound CL symbol for `(*)`
+(`fh FOO` → `(pl-fh FOO)`, an unbound-variable crash) and as a call to an
+undeclared sub for `($)` (`one BAR` → `(pl-one (pl-BAR))`), where perl gives
+the string "FOO"/"BAR"; and `close G ? "a" : "b"` is read as
+`close(G ? …)` because the strictly-single bareword branch only narrows before
+a comma or end-of-run.  Both are unchanged by Q4 (verified on a worktree).
+Worth their own tasks now, or do they belong to the #266 classifier campaign
+that #481/#482 already point at?
