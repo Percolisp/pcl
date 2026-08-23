@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 11;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -132,3 +132,31 @@ both_agree('use T438::Konst; print kname(), "\n";',
 
 both_agree('use T438::Konst; print "x=", nosuchword, "\n";',
            'an UNKNOWN bareword stays the string (no strict subs)');
+
+# ---- task #484: the TOKEN REPAIRS ask the same question -------------------
+#
+# perl reads `/` after a bareword as DIVISION only when the word is a TERM, and
+# `_repair_word_match` (the #351 `WORD /` repair) already asked exactly that —
+# but through `_word_is_term`, which scanned only THIS DOCUMENT's `use
+# constant`s and `sub NAME ()`.  An imported term is in neither: its prototype
+# crossed the `use` into the shared Environment, and the pre-merge that fills
+# that table ran AFTER the repair block.  So `kpi / 2 + kpi / 4` was repaired
+# into `kpi m/ 2 + kpi /` and the statement DROPPED (announced, and fatal when
+# reached since s435) where perl computes 2.4375.
+#
+# The fix runs the pre-merge before the repairs as well (it is idempotent —
+# extraction memoizes by module name) and lets the term predicate read the
+# Environment.  `_repair_word_x_call` asks the same predicate, so the last row
+# below is the same fact in the other repair: `kpi x 2` is REPETITION in perl
+# because kpi is a term, and the repair must not turn it into a call to `x`.
+both_agree('use T438::Konst; my $q = kpi / 2 + kpi / 4; print "$q\n";',
+           'an IMPORTED term keeps DIVISION: the statement is not repaired away (#484)');
+
+both_agree('use T438::Konst; my $x = kpi / 2; print "$x\n";',
+           '... one slash: no closing delimiter, the repair declined already');
+
+both_agree('use T438::Konst; $_ = "foobar"; print "r=", (kname /foo/), "\n";',
+           'the NEGATIVE: a non-term imported sub still gets the match repair');
+
+both_agree('use T438::Konst; sub x { "X" } print kpi x 2, "\n";',
+           'the x repair asks the same predicate: `kpi x 2` stays repetition');

@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 28;
+plan tests => 30;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -304,3 +304,32 @@ is(run_bytes('our @X = (1,2,3); our %H = (k => 8); my $i = 1; my $k = "k";'
            . ' print "$X[$i] $H{$k} $X[$i+1] @{[ $X[0] + 1 ]}\n";'),
    "2 8 3 2\n",
    'the ASCII inverse: identical shapes, untouched by the fragment repairs');
+
+# Task #492 (s443g): the s/// REPLACEMENT side.  Deciding whether a
+# replacement interpolates was a PRIVATE `(?<!\\)[\$\@][a-zA-Z_{]` class in
+# ExprToCL, ASCII where the rest of the pipeline is Unicode-aware — so with
+# `use utf8` in force `s/Ｘ/$ｉ/` answered NO and the replacement went out as
+# the LITERAL text `$ｉ`.  Silent wrong, and inconsistent three ways: the
+# braced `${ｉ}` spelling was right (the `{` was in the class), the identical
+# dq string `"$ｉ"` was right (the rows above), and the PATTERN side was right
+# (it already asked Pl::InterpScan).  The replacement text reaches that site
+# DECODED — measured, utf8 flag on and ord 65353 — so the class was the whole
+# bug; the gate now asks the same one scanner.
+is(run_bytes(encode_utf8(
+     "use utf8;\n"
+   . "my \@\x{ff38} = (10,20,30); my \$\x{ff49} = 1;\n"
+   . "my \$u = \"a\x{ff38}b\"; \$u =~ s/\x{ff38}/\$\x{ff49}/;\n"
+   . "my \$t = \"a\x{ff38}b\"; \$t =~ s/\x{ff38}/\$\x{ff38}[1]/;\n"
+   . "my \$v = \"a\x{ff38}b\"; \$v =~ s/\x{ff38}/\$\{\x{ff49}}/;\n"
+   . "my \$w = \"a\x{ff38}b\"; \$w =~ s/\x{ff38}/\@\x{ff38}/;\n"
+   . "print \"\$u \$t \$v \$w\\n\";\n")),
+   "a1b a20b a1b a10 20 30b\n",
+   'a non-ASCII name in an s/// REPLACEMENT interpolates (#492)');
+
+is(run_bytes('my @X = (10,20,30); my $i = 1;'
+           . ' my $s = "aXb"; $s =~ s/X/$X[$i]/;'
+           . ' my $r = "aXb"; $r =~ s/X/${i}/;'
+           . ' my $q = "aXb"; $q =~ s/X/@X/;'
+           . ' print "$s $r $q\n";'),
+   "a20b a1b a10 20 30b\n",
+   'the ASCII inverse: the same three s/// replacement spellings, unchanged');

@@ -242,4 +242,43 @@ PL
            '... and emits no nil replacement thunk');
 }
 
+# ============================================================
+# Task #492 (s443g): WHICH REPLACEMENTS INTERPOLATE IS THE SCANNER'S ANSWER.
+#
+# `_replacement_interpolates` used to ask a private
+# `(?<!\\)[\$\@][a-zA-Z_{]` of its own instead of Pl::InterpScan, and every
+# spelling that class could not see went out as LITERAL TEXT — silently.  The
+# reported one is the non-ASCII identifier (`s/Ｘ/$ｉ/`, guarded in
+# Pl/t/utf8-source-01.t because it needs `use utf8`); these three are the same
+# bug in ASCII, each probed against perl 5.40.3:
+#
+#   $::qq     a qualified name — `:` is not in the class          (was [$::qq])
+#   $#arr     the last-index sigil — `#` is not in the class      (was [$#arr])
+#   \\$x      an ESCAPED BACKSLASH before a sigil — the lookbehind
+#             read the second `\` as escaping the `$`             (was [\$x])
+#
+# The magic names below are NOT in this fix and must stay literal: $1..$9 are
+# served by the runtime's own backref rewrite (that is the gate's deliberate
+# narrowness), and the punctuation magics are a separate open hole.
+{
+    my $root = "$RealBin/../..";
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'PL';
+our $qq = "Q";
+my @arr = (1,2,3);
+my $x = "V";
+my $a = "mAn"; $a =~ s/A/[$::qq]/;
+my $b = "mAn"; $b =~ s/A/[$#arr]/;
+my $c = "mAn"; $c =~ s/A/[\\$x]/;
+my $d = "mAn"; $d =~ s/A/[\$x]/;
+my $e = "mAn"; $e =~ s/(A)/[$1]/;
+print "$a $b $c $d $e\n";
+PL
+    close $fh;
+    my $want = `perl $file`;
+    chomp(my $got = `$root/runpcl $file 2>&1`);
+    chomp(my $exp = $want);
+    is($got, $exp, "s/// replacement: \$::name, \$#array and \\\\\$x agree with perl (#492; perl: $exp)");
+}
+
 done_testing();

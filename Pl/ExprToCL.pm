@@ -711,11 +711,37 @@ sub _has_regex_interpolation {
   return scalar @{ Pl::InterpScan::scan($pattern, in_regex => 1) };
 }
 
-# Does an s/// REPLACEMENT need the interpolating (lambda) path?  This is the
-# pre-scanner predicate, kept deliberately: see gen_substitution_form.
+# Does an s/// REPLACEMENT need the interpolating (lambda) path?
+#
+# WHERE THE TEXT MENTIONS A VARIABLE IS THE SCANNER'S ANSWER — Pl::InterpScan,
+# the one every interpolation consumer shares (task #237; standing rule
+# docs/var-handling-review-s379.md §8).  This site used to ask a private
+# `(?<!\\)[\$\@][a-zA-Z_{]` of its own, and that class is ASCII where the rest
+# of the pipeline is Unicode-aware, so with `use utf8` in force `s/Ｘ/$ｉ/`
+# answered NO and emitted the LITERAL text `$ｉ` (#492) — silent wrong, while
+# the braced `${ｉ}` and the identical dq string `"$ｉ"` were both right.  The
+# replacement text reaches here DECODED (measured: utf8 flag on, ord 65353), so
+# the class was the whole bug.  The same one scanner also answers for `$::qq`,
+# `$#arr` and a `\\`-escaped sigil, which the private class read as literal
+# text too (all three probed against perl 5.40.3).
+#
+# THE GATE STAYS DELIBERATELY NARROW where gen_substitution_form's comment says
+# it is: a bare MAGIC name is not this gate's business.  $1..$9 are served by
+# the runtime's native $N rewrite (no lambda call per match) and the
+# punctuation magics ($& $` $' $+ $! $$) are a separate, still-open hole — they
+# emit literally today, and $` / $' are ALSO wrong on the lambda path, so
+# routing them here would trade one wrong answer for another.  A BRACED
+# spelling always takes the lambda path, which is what the `{` in the old class
+# meant and is what keeps `${^NAME}` working.
 sub _replacement_interpolates {
   my ($subst) = @_;
-  return $subst =~ /(?<!\\)\$[a-zA-Z_{]|(?<!\\)\@[a-zA-Z_{]/;
+  return 0 if $subst !~ /[\$\@]/;
+  for my $ev (@{ Pl::InterpScan::scan($subst) }) {
+    return 1 if substr($subst, $ev->{span}[0] + length($ev->{sigil}), 1) eq '{';
+    next if $ev->{form} eq 'magic';
+    return 1;
+  }
+  return 0;
 }
 
 # Build a CLForm that evaluates to the interpolated pattern string: a "…"

@@ -21,6 +21,48 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s443g (2026-08-24, Opus agent G) — a TOKEN REPAIR asks the same term question the compiler does, so the prototype pre-merge runs BEFORE the repairs (#484); which s/// REPLACEMENTS interpolate is the SCANNER's answer, not a private ASCII class (#492)
+
+- **#484 CLOSED, shape (a) as ruled (task #493).**  `_premerge_include_
+  prototypes` now runs TWICE — once before the `_repair_*` block, once where
+  it always was.  The repairs ask "is this bareword a TERM" and an imported
+  `()`-prototype sub is one (#365), but the table that carries it across a
+  `use` was filled AFTER them, so `use Math::Trig; my $q = pi / 2 + pi / 4;`
+  was repaired into `pi m/ 2 + pi /` and DROPPED.  **Both calls are needed**:
+  the early one walks an UNREPAIRED document (a `use` swallowed by a PPI
+  mis-lex is invisible to it), the late one sees the reparsed one.  Running it
+  twice is free — `_extract_module_prototypes` memoizes by module name in a
+  `state` cache and `add_prototype` is idempotent; the `use lib` seeding now
+  skips a path already on the list, which is what makes the sub re-entrant.
+  `_word_is_declared_term` reads the Environment through the ONE record test
+  `Pl::Environment::proto_is_zero_arg` (rule 11 — the same one
+  `PExpr::_is_zero_arg_func` asks).  Guard `Pl/t/imported-term-01.t` 7 → 11.
+- **A `die`'s EXIT STATUS is `$!`** — so a pass that probes for a missing file
+  changes the exit code of a refusal that happens later.  Measured: moving the
+  pre-merge turned `t/op/lvref.t`'s `Parser2 TODO:` from rc 255 into rc 2
+  (ENOENT) with byte-identical output and an identical message.  Contained
+  with `local $!` in the pre-merge, where the expected misses are made.  The
+  general fragility stands (any filesystem probe before any `die`).
+- **#492 CLOSED.**  `ExprToCL::_replacement_interpolates` asked a private
+  `(?<!\\)[\$\@][a-zA-Z_{]` — ASCII where the rest of the pipeline is
+  Unicode-aware — so `use utf8; s/Ｘ/$ｉ/` emitted the LITERAL `$ｉ` while the
+  braced `${ｉ}`, the dq string `"$ｉ"` and the PATTERN side were all right.
+  **The text arrives DECODED (measured: utf8 flag on, ord 65353), so the class
+  was the whole bug** — the "undecoded bytes" hypothesis in the task is KILLED.
+  The gate now asks `Pl::InterpScan::scan` (standing rule §8) and keeps its
+  deliberate narrowness explicitly: a BRACED spelling always takes the lambda
+  path (what the `{` meant, and what keeps `${^NAME}` working), a bare MAGIC
+  name never does.  Three ASCII spellings the private class could not see are
+  fixed with it, each probed vs perl 5.40.3: `$::qq`, `$#arr`, and a `\\`-
+  escaped sigil.  Guards `Pl/t/utf8-source-01.t` 28 → 30 + one row in
+  `Pl/t/regexp-subst-01.t`.
+- **Still open, all PRE-EXISTING and verified on the pre-fix tree**: the
+  punctuation magics in an s/// replacement (`$&` `` $` `` `$'` `$+` `$!` `$$`)
+  emit LITERALLY, and `` $` ``/`$'` are ALSO empty on the lambda path — so that
+  hole needs both halves fixed at once, which is why the gate was not widened
+  to them here.  `s/A/${\ "L"}/` emits an unreadable form
+  (`(p-backslash (p-backslash "L\"}))`) and kills the whole file at LOAD; the
+  `@{[ "L" ]}` twin is fine, so it is the `${\ …}` re-parse and the `"`.
 ## s443e (2026-08-24, Opus 5) — the IDENTITY promotion of a file lexical requires that the file never SPELLS the package variable of that name (#470)
 
 - **A file lexical promoted under its OWN name is the package variable of

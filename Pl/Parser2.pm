@@ -883,6 +883,15 @@ sub _premerge_glob_const_prototypes {
 
 sub _premerge_include_prototypes {
   my ($self, $doc) = @_;
+  # A MISSING MODULE FILE IS NORMAL CONTROL FLOW HERE — most `use`d modules
+  # have no shim to read — but `_find_module_file`'s failed probes leave errno
+  # set, and perl's `die` takes its EXIT STATUS from errno when it is nonzero.
+  # So the exit code of a ruled refusal downstream depended on whether this
+  # pass had probed for a file: measured at #484, moving this call before the
+  # token repairs turned t/op/lvref.t's `Parser2 TODO:` refusal from rc 255
+  # into rc 2 (ENOENT) with byte-identical output and an identical message.
+  # Contain it where the noise is made.
+  local $!;
   my $fp = $self->fallback_parser;
   # Modules v1's use-branch short-circuits BEFORE its extraction call —
   # never extract these (v1 order: version pragma / overload / base+parent /
@@ -899,17 +908,23 @@ sub _premerge_include_prototypes {
   # unshifts onto inc_paths as it walks); this pre-pass runs before any
   # statement, so seed it here.  Literal strings and qw() only — an
   # interpolated path is runtime-computed (the #235 family) and stays out.
+  # A path already on the list is SKIPPED, which is what makes this whole sub
+  # safe to call twice (#484 runs it before the token repairs as well).
+  my $seed = sub {
+    my %have = map { $_ => 1 } @{ $fp->inc_paths };
+    unshift @{ $fp->inc_paths }, grep { !$have{$_} } @_;
+  };
   for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
     next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'lib';
     for my $child ($inc->schildren) {
       if ($child->isa('PPI::Token::Quote')) {
         my $path = $child->string;
-        unshift @{ $fp->inc_paths }, $path
+        $seed->($path)
           if $path !~ /[\$\@]/ || $child->isa('PPI::Token::Quote::Single');
       } elsif ($child->isa('PPI::Token::QuoteLike::Words')) {
         (my $c = $child->content) =~ s/^qw\s*[\(\[\{<]//;
         $c =~ s/[\)\]\}>]$//;
-        unshift @{ $fp->inc_paths }, grep { length } split /\s+/, $c;
+        $seed->(grep { length } split /\s+/, $c);
       }
     }
   }
@@ -1039,6 +1054,24 @@ sub parse {
   $doc = $self->_repair_nary_foreach($doc);
   $doc = $self->_repair_alias_foreach($doc);
 
+  # THE REPAIRS BELOW ASK "IS THIS BAREWORD A TERM", AND PERL ANSWERS THAT FROM
+  # THE WHOLE COMPILE-TIME ENVIRONMENT — including a `()`-prototype sub that
+  # arrived through a `use` (#484).  `_word_is_declared_term` reads the shared
+  # Environment's prototype table for exactly that, so the table has to be
+  # FILLED before the repairs run: with the pre-merge left where it was (below,
+  # after the whole repair block), every imported name answered "not a term",
+  # and `use Math::Trig; my $q = pi / 2 + pi / 4;` was repaired into
+  # `pi m/ 2 + pi /` and dropped whole.
+  #
+  # It runs TWICE, and both runs are needed.  This one walks an UNREPAIRED
+  # document, so a `use` that a PPI mis-lex has swallowed into a mangled
+  # statement is invisible here; the second run (after the repairs, where it
+  # always was) sees the reparsed document and catches it.  Running it twice is
+  # free: `_extract_module_prototypes` memoizes by module name in a `state`
+  # cache, `add_prototype` is idempotent, and the `use lib` seeding below skips
+  # a path already on the list.
+  $self->_premerge_include_prototypes($doc);
+
   # PPI LEXER BUGS in the OPERATOR-vs-TERM decision, each of which eats a whole
   # statement: `)*name` lexed as a glob (#354), `)-name` lexed as a negative
   # bareword (#457), `/PATTERN/` after a paren-less call lexed as division
@@ -1110,6 +1143,11 @@ sub parse {
   # pack.t s289).  Mirror v1's two extraction sites up front; extraction is
   # memoized and add_prototype idempotent, so the later statement-fallback
   # re-merge is harmless.
+  #
+  # SECOND RUN (#484): the first is above, before the token repairs, because
+  # they ask whether a bareword is a TERM and an imported `()` sub is one.
+  # This one stays because it is the only one that sees the document the
+  # repairs (and the state pre-pass) reparsed.
   $self->_premerge_include_prototypes($doc);
 
   # `use strict` must be visible BEFORE the ahead-of-stream parses for the
@@ -5711,7 +5749,16 @@ sub _word_is_declared_term {
   my $zero = $self->_zero_arity_builtins;
   return 1 if $zero->{$name};
   my $terms = $self->_doc_term_words($doc);
-  return $terms->{$name} ? 1 : 0;
+  return 1 if $terms->{$name};
+  # An IMPORTED term — `use Math::Trig; pi / 2` — is in no token of this
+  # document at all: its empty prototype crossed the `use` into the shared
+  # Environment (#365), which is why the pre-merge now runs before the repairs
+  # that ask this question (#484).  ONE reading of that record shape
+  # (Pl::Environment::proto_is_zero_arg), the same one PExpr::_is_zero_arg_func
+  # uses to decide the bareword is a term — the two must never disagree.
+  my $env = $self->environment or return 0;
+  return 0 unless $env->has_prototype($name);
+  return $env->proto_is_zero_arg($env->get_prototype($name)) ? 1 : 0;
 }
 
 # The two per-document name sets ONE token walk produces (_scan_document_terms):
