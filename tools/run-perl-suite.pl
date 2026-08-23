@@ -675,6 +675,17 @@ sub run_one {
     $first =~ s/\n(?:ok |not ok |1\.\.|#|;).*//s;
     $first =~ s/[0-9]+/N/g;
     $first =~ s/\s+/ /g;
+    # Collapse a DEEP absolute path to its basename.  The signature is 90
+    # characters and exists to NAME the condition; since the s435 flip the
+    # commonest one starts
+    #   "PCL: statement not supported at /home/…/perl-N.N.N/t/op/substr.t line N: …"
+    # and the directory prefix alone overran the budget — every drop-caused
+    # abort came back as "…/perl-N.N.N/t/o", naming nothing.  Two or more
+    # directory components, and only where a path can START (whitespace or an
+    # opening quote/paren), so a substitution in the quoted SOURCE TEXT
+    # (`s/a/b/`) and a shallow "/dev/tty" are left alone.  Cosmetic by
+    # construction: read_snapshot compares status + counts, never $sig.
+    $first =~ s{(?<=[\s"'(])/(?:[^\s/"']+/){2,}}{}g;
     $sig = join('; ', grep { length } $sig,
                 sprintf("aborted-forms:%d%s", $aborted,
                         length $first ? ": " . substr($first, 0, 90) : ''));

@@ -34,6 +34,23 @@
 # child die instead of silently printing nothing.  Size unknown -- task
 # #472 is the instrument.
 #
+# TWO MORE ARE OUTSIDE THE POPULATION LIST BELOW, measured s436 (task #473)
+# by the Q2 four-population emission A/B -- a DIFFERENT instrument, which
+# byte-compares two compilers over a file LIST and therefore sees every file
+# the flip touched, whatever this census defines:
+#   * cpan-tests/modules/**/t/*.t -- 43 files, 92 drops.  The `cpan-tests`
+#     population below is `**/*.pm` only (module mode, the emission the
+#     runtime caches); a dist's own TEST files are programs and are not read.
+#     The A/B's 9 `.pm` DIFFs reproduce the 9 rows below count for count, so
+#     the gap is exactly the `.t` half.
+#   * t/japh/abigail.t -- 1 file, 2 drops.  The companion population follows
+#     run-perl-suite.pl's @DEFAULT_DIRS, where `japh` is excluded as
+#     obfuscated; nothing runs it.  Its two drops are the same
+#     `1 while -f ++$file` shape as the rest of family 1.
+# Neither is a regression -- both were dropping silently before the flip --
+# but post-flip those 94 sites DIE when reached, so the price is real and
+# uncounted.  #473 decides whether the `.t` half becomes a population.
+#
 # Columns: <rel-path><TAB><drops in the file><TAB><the compiler's own message(s),
 # with a count each>.
 #

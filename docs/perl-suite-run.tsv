@@ -1,4 +1,61 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s436 (Opus 5, Q2 leg 4) — 13 ROWS EDITED BY HAND, never re-blessed: the price
+#   of the s435 announce->DIE flip on this population.  A dropped statement now
+#   DIES when reached, and this runner loads with recovery (#467), so the loss
+#   unit is the enclosing TOP-LEVEL FORM — one file-level `my` wraps the rest of
+#   the file in a single `let`, which is why ONE drop can cost 25 rows.  Ruled
+#   accept, no narrowing (DECIDED s435); a loss out of proportion PROMOTES its
+#   drop's owner task, it does not bend the flip.
+#
+#   Each row below was measured THREE times — once in s435's `--all --quick`
+#   pass, twice here with `--jobs 1` over exactly these 13 files — and every
+#   count agreed.  The 10 files the runner re-ran ALONE (#366) all came back
+#   "REAL MOVE (both runs agree)".
+#
+#     file                    C_ok        cause (drops in the file)
+#     op/substr.t             377 -> 347  2 lvalue-substr drops, census family 1
+#     op/method.t             124 ->  99  1 indirect-object drop, owner #399
+#     op/universal.t           79 ->  61  1 `++${"N::foo"}` drop  -- 18 rows for
+#                                         ONE drop: owner PROMOTED
+#     op/sub_lval.t            67 ->  50  35 lvalue-sub drops (registered absence)
+#     comp/parser.t            65 ->  49  5 drops, the family-6 deliberate
+#                                         parse-error torture rows
+#     op/signatures.t         920 -> 915  1 lvalue drop; XDIFF -> DIFF (see below)
+#     op/split.t              213 -> 212  0 drops: a fresh_perl CHILD drop (#472)
+#     op/stash.t               48 ->  47  0 drops: same, child program
+#     re/reg_eval.t             2 ->   1  0 drops: same; XDIFF -> DIFF
+#     op/lexsub.t / op/try.t / run/runenv_randseed.t  C_ok FLAT, 1 / 2 / 5 rows
+#                                         VANISHED (the fail count fell) — rows
+#                                         that used to run ON a dropped
+#                                         statement's undef
+#     io/pvbm.t                23 ->  23  NO MOVE.  s435's `--all --quick` read
+#                                         it as -3; three serial runs give the
+#                                         blessed 23/5.  It was CONTENTION, and
+#                                         the row is re-stated here unchanged.
+#   TOTAL over the 13: C_ok 2017 -> 1903, i.e. **-114** (s435's -117 counted
+#   io/pvbm.t's contention).
+#
+#   TWO STATUS MOVERS, both XDIFF -> DIFF, and both are DELIBERATE: a registered
+#   file must diverge on EXACTLY its blessed row multiset (#185), and the flip
+#   changed WHICH rows diverge — op/signatures.t gains 5 unregistered diverging
+#   rows, re/reg_eval.t 1.  They are NOT re-blessed into
+#   docs/perl-suite-expected-rows.tsv: those rows are lost to an aborted form,
+#   not to the registered not-supported reason, and blessing them would hide the
+#   flip's price behind an "expected divergence" label.  The DIFF is the debt.
+#   (Contrast s434, where six files went XDIFF -> DIFF because they REACHED more
+#   rows, and re-blessing was right.)
+#
+#   THE SIGNATURE COLUMN CHANGED SHAPE in the same commit.  Since the flip the
+#   commonest aborted-form condition starts "PCL: statement not supported at
+#   /home/.../perl-N.N.N/t/op/substr.t line N: ..." and the directory prefix
+#   alone overran the 90-character budget, so every drop-caused abort came back
+#   as ".../perl-N.N.N/t/o" — naming nothing, which is the one thing the
+#   signature exists to do.  run-perl-suite.pl now collapses a DEEP absolute
+#   path to its basename (two or more components, only where a path can start),
+#   so these rows read "at substr.t line N: bar = "XXX"; -- PCL: Can't modify...".
+#   Cosmetic by construction: read_snapshot compares status + C_ok + C_notok and
+#   never $sig.  The ~40 OTHER rows that carry a path still show the pre-s436
+#   text; they refresh at the next full bless.
 # s434 (Opus 5, task #467) — THE WHOLE SNAPSHOT WAS RE-BLESSED, in one measured
 #   `--all --jobs 4` pass, because THE RUNNER CHANGED, not PCL.  This runner now
 #   loads the emitted CL with `pcl::p-load-with-recovery` — one top-level form at
@@ -602,7 +659,7 @@ comp/opsubs.t	36	0	31	5	DIFF		0
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)	0
 comp/package_block.t	7	0	0	7	DIFF		0
-comp/parser.t	191	0	65	110	DIFF	unbound:q�; aborted-forms:1: The function main::pl-EOV is undefined.; reaped 1 orphan(s)	5
+comp/parser.t	191	0	49	49	DIFF	undef-fn:main::pl-FOO; aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through. 	5
 comp/parser_run.t	70	0	29	41	DIFF	unbound:$00	0
 comp/proto.t	216	0	47	14	DIFF	aborted-forms:1: Undefined subroutine &main::N called at (eval N) line N. 	0
 comp/redef.t	20	0	1	19	DIFF		0
@@ -831,7 +888,7 @@ op/leaky-magic.t	71	0	65	6	DIFF	aborted-forms:16: Can't locate tests.pm in @INC 
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
-op/lexsub.t	156	0	76	63	DIFF	undef-fn:main::pl-foo; aborted-forms:12: Undefined subroutine &main::d called. 	4
+op/lexsub.t	156	0	76	62	DIFF	undef-fn:main::pl-foo; aborted-forms:16: Undefined subroutine &main::d called. 	4
 op/lfs.t	17	0	0	0	DIFF		0
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run	-1
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|	0
@@ -842,7 +899,7 @@ op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	168	39	DIFF		0
-op/method.t	163	0	124	27	DIFF	undef-fn:main::pl-new; aborted-forms:3: The function common-lisp:nil is undefined.	1
+op/method.t	163	0	99	26	DIFF	undef-fn:main::pl-new; aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
 op/mkdir.t	17	0	17	0	OK		0
 op/multideref.t	65	0	42	10	DIFF	undef-fn:main::pl-local; aborted-forms:1: invalid number of arguments: N	0
 op/my.t	59	0	52	7	DIFF		0
@@ -890,20 +947,20 @@ op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
 op/sigdispatch.t	29	0	24	3	DIFF	crash:sb-sys:interactive-interrupt: Interactive interrupt at #xNBNEANEBB.	0
 op/signame_canonical.t	15	0	0	0	DIFF		0
-op/signatures.t	1245	1	920	326	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).	1
+op/signatures.t	1245	1	915	296	DIFF	aborted-forms:1: PCL: statement not supported at signatures.t line N: f() = "X"; -- PCL: Can't modify non-l | NOT fully registered: 5 unregistered diverging row(s): No warnings emitted within scope of no warnings "experime...; Signatured subroutine permits attributed scalar; `\&SUB` warns of experimental @_; +2 more | not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error message text and format — 357 of 360 residual rows (s316o; state-in-default fixed s316r): 262 "X does not swallow trailing comma" + t939/947/1219-1222 etc. are `isnt $@ ""` on evals that must FAIL to parse (invalid-syntax detection); 56 exact-error/arity-message text; 19+4 experimental-@_ / warning-line fidelity; t1/2/4/5 = §Signature syntax is read as a signature even with the feature off. All former fix-target rows are FIXED: t151/152/156 parenless list-op swallow (t017, s316s) + t021-family. t276-296 state-in-default re-init FIXED (task #134, s316r).	1
 op/sigsystem.t	4	0	0	0	XDIFF	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.	0
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
 op/sort.t	205	0	181	23	DIFF	undef-fn:main::pl-revers; aborted-forms:2: Undefined subroutine &OtherPack::foo called. 	0
 op/splice.t	34	0	34	0	OK		0
-op/split.t	219	0	213	6	DIFF		0
+op/split.t	219	0	212	7	DIFF		0
 op/split_unicode.t	147	0	107	40	DIFF		0
 op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
 op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	17	6	DIFF		0
-op/stash.t	54	1	48	6	DIFF	undef-fn:main::pl-SUPER	0
+op/stash.t	54	1	47	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	0	0	DIFF	aborted-forms:1: The function main::pl-is_linux_container is undefined.	0
 op/stat_errors.t	638	0	305	333	DIFF		0
@@ -911,8 +968,8 @@ op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / 
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
-op/sub_lval.t	211	0	67	127	DIFF	unbound:@119797; aborted-forms:4: invalid number of arguments: N	35
-op/substr.t	400	0	377	23	DIFF		2
+op/sub_lval.t	211	0	50	49	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	35
+op/substr.t	400	0	347	7	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -931,9 +988,9 @@ op/time.t	72	0	72	0	OK		0
 op/time_loop.t	2	0	2	0	OK		0
 op/tr.t	317	0	269	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i	0
 op/tr_latin1.t	2	0	1	1	DIFF		0
-op/try.t	28	0	23	5	DIFF		1
+op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	32	5	DIFF	undef-fn:main::pl-tcp; aborted-forms:1: The function main::pl-z is undefined.	0
-op/universal.t	142	2	79	59	DIFF	aborted-forms:6: No SUPER::isa found from RTN::B	1
+op/universal.t	142	2	61	48	DIFF	aborted-forms:7: PCL: statement not supported at universal.t line N: ++${"N::foo"}; -- Handle single node o	1
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
@@ -992,7 +1049,7 @@ re/recompile.t	48	0	0	48	DIFF		0
 re/reg_60508.t	1	0	0	1	DIFF		0
 re/reg_email.t	13	0	0	0	DIFF		0
 re/reg_email_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/reg_eval.t	8	0	2	6	XDIFF	not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t	0
+re/reg_eval.t	8	0	1	7	DIFF	NOT fully registered: 1 unregistered diverging row(s): RT \#129199: | not-supported.md §regex-code-blocks — all 8 cases drive (?{...})/(??{...}) through fresh_perl_is; same family as pat_re_eval.t	0
 re/reg_eval_scope.t	48	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 re/reg_fold.t	6786	105	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC PCL: Internals::SvREADONLY: a SCA	0
 re/reg_mesg.t	3348	0	0	0	DIFF	aborted-forms:1: The function main::pl-display_rx is undefined.	0
@@ -1043,7 +1100,7 @@ run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 run/runenv_hashseed.t	278	0	0	0	DIFF	aborted-forms:1: Failed to extract seed: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/run/ru	0
-run/runenv_randseed.t	9	0	0	9	DIFF		0
+run/runenv_randseed.t	9	0	0	4	DIFF	aborted-forms:1: PCL: statement not supported at test.pl line N: open(my $f, '<', $out) ? <$f> // '' : '' -	0
 run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	0	1	DIFF		0
 run/switchC.t	15	0	4	11	DIFF		0

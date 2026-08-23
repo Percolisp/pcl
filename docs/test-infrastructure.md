@@ -209,6 +209,19 @@ finding, not a re-bless.
 Users stay on a plain load on purpose: recovery is a MEASUREMENT policy — it
 buys rows after a failure, which a harness wants and a program must not.
 
+**The signature has a 90-character budget, and a path can eat all of it.**
+Since the s435 announce→DIE flip the commonest aborted-form condition is the
+drop's own message, which begins with an absolute file name — and every such
+signature came back as `…/perl-N.N.N/t/o`, naming nothing, which is the one
+thing a signature exists to do. `tools/run-perl-suite.pl` therefore collapses a
+DEEP absolute path to its basename before truncating (two or more directory
+components, and only where a path can start, so a substitution in the quoted
+source text and a shallow `"/dev/tty"` are left alone). This is cosmetic **by
+construction**: `read_snapshot` compares status + `C_ok` + `C_notok` and never
+the signature, so no verdict can move with it. Keep it that way — the moment a
+comparison reads `$sig`, every random tmpdir in a condition string becomes a
+phantom mover.
+
 ### The snapshot's own hole
 
 `tools/run-perl-suite.pl` also prints, at the end of every run, how many of the
