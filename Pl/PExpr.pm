@@ -17,6 +17,10 @@ use Scalar::Util qw/looks_like_number/;
 use PPI;
 use PPI::Dumper;
 use Pl::CLForm ();
+# For fh_bareword_shape — THE shape test for a bareword filehandle name, asked
+# by four parse sites here and by the `defined FH` emitter.  Pl::Environment
+# has no Pl:: dependencies of its own, so this cannot be circular.
+use Pl::Environment ();
 
 use Data::Dumper ();
 
@@ -3713,6 +3717,14 @@ sub handle_subcalls {
     }
     my $node_id = $self->make_node($now);
 
+    # A bareword in a `*` slot means the same thing with parens as without —
+    # `star(FOO, sub{…})` and `star FOO, sub{…}` are one call in perl and both
+    # pass "FOO" (t/comp/proto.t asserts it).  The paren form used to get the
+    # right answer only by ACCIDENT: the paren-less site registered FOO as a
+    # handle, and the leaf emitter then spelled every later FOO as a bareword.
+    $self->_read_star_slot_bareword($func_name, $c_ids)
+      if @$c_ids && $self->has_environment;
+
     $self->add_child_to_node($top_id, $node_id);
     if (defined $paren_fh_id) {
       $self->add_child_to_node($top_id, $paren_fh_id);
@@ -3808,7 +3820,11 @@ sub handle_subcalls {
     # open FH, ...; print STDERR "hello" - FH/STDERR are filehandles, not functions
     # Functions like open, close have * as first param prototype.
     # print/say/printf are handled specially (no prototype) but also take filehandles.
-    if ($i > 0 && $sub_name =~ /^[A-Z][A-Z0-9_]*$/) {
+    # The shape is asked of the NAME, so a package-qualified spelling is a
+    # handle here too (#491): this scan runs RIGHT to LEFT, so without it
+    # `print Foo::H1 "x"` reduced `Foo::H1` to a funcall before `print` was
+    # ever looked at, and the `:fh` site downstream never saw a Word.
+    if ($i > 0 && Pl::Environment::fh_bareword_shape($sub_name)) {
       my $prev = $e->[$i - 1];
       if ($self->is_word($prev)) {
         my $prev_name = $prev->content;
@@ -4136,22 +4152,28 @@ sub handle_subcalls {
         } elsif ($self->is_word($next_term)) {
           # A STANDALONE bareword next-term to a strictly-single (max-1-arg)
           # function is a single argument — typically a bareword filehandle:
-          # `close F, ...` / `fileno F, ...` / `eof FH, ...`.  The function
-          # consumes ONLY the filehandle, so stop before any following comma
-          # (which belongs to the enclosing list, e.g. `ok(close F, 'desc')`),
-          # matching Perl's `(;*)`-prototype close/fileno/eof.
-          # Guard: only treat the bareword as the sole arg when it is followed by
-          # a comma or nothing.  A following parens-list makes it a funcall term
-          # (`close foo()` → i+2); a following OPERATOR means the bareword is part
-          # of a larger expression (`exit FOO + 1`) — leave $end_pars untouched.
-          my $after = $e->[$i + 2];
-          if (defined $after && ref($after) eq 'PPI::Structure::List') {
-            $end_pars = $i + 2;
-          } elsif (!defined $after
-                   || (ref($after) eq 'PPI::Token::Operator'
-                       && $after->content eq ',')) {
-            $end_pars = $i + 1;
-          }
+          # `close F, ...` / `fileno F, ...` / `eof FH, ...`.  The operand ends
+          # where perl says it ends, and perl's answer is PRECEDENCE, not a
+          # token list: `close`/`fileno`/`eof` are named unary operators, so
+          # the operand runs through everything that binds TIGHTER than named
+          # unary (`.` `+` `x` `->`) and stops at everything looser (`,` `?`
+          # `<` `==` `&&` `and`).  `_extend_high_prec` is that rule, and it is
+          # the SAME helper the named-unary operand site uses — which is the
+          # point: this site had a hand-rolled three-case list (Structure::List
+          # → i+2, comma-or-nothing → i+1, any other operator → leave the
+          # operand at the CEILING) and the third case was wrong.  Measured vs
+          # perl 5.40.3 (#495 shape (c)): `print close G ? "a" : "b"` is
+          # `close(G) ? …` in perl and was `close(G ? …)` here, so PCL passed
+          # the ternary's VALUE to close and read an unbound `G`; while
+          # `close G . "x"` really is `close(G . "x")` in perl, which a
+          # "stop at any operator" rule would have broken.  The two surviving
+          # cases fall out of the same walk: a Structure::List is not an
+          # operator so it is consumed (`close foo()`), and `,`/end-of-run
+          # stop it.
+          # Clamped to the existing ceiling — the argument-run boundary
+          # (#343/B2) is computed for this call and can only shrink the answer.
+          my $ext = $self->_extend_high_prec($e, $i + 1);
+          $end_pars = $ext if $ext < $end_pars;
         } elsif (ref($next_term) ne 'PPI::Token::Operator') {
           # Unreachable by construction — see the named-unary site's `die` for
           # the argument (a decline on any other shape would mean the term
@@ -4230,7 +4252,13 @@ sub handle_subcalls {
         # constant, because that is the only reading that can be intended.
         my $registered_fh = $self->has_environment
                          && $self->environment->is_filehandle($fh_name);
-        if (($fh_name =~ /^[A-Z][A-Z0-9_]*$/ || $registered_fh)
+        # A package-QUALIFIED spelling is the same handle, so the ALL-CAPS
+        # shape is asked of the NAME, not of the qualifier (#491): perl reads
+        # `print main::STDOUT "a"` and `print Foo::H1 "x"` as handles, and
+        # PCL read them as CALLS to undefined subs.  The lower-case negative
+        # is unchanged and is perl's own: `sub main::f {…}; print main::f "a"`
+        # CALLS f (probed), because `f` fails this test either way.
+        if ((Pl::Environment::fh_bareword_shape($fh_name) || $registered_fh)
             && ($registered_fh || !$self->_is_zero_arg_func($fh_name))) {
           # Not a filehandle if followed by -> (class method call: Foo->bar())
           my $after_fh = $e->[$fh_end + 1];
@@ -4392,34 +4420,13 @@ sub handle_subcalls {
     my $node_id = $self->make_node($e->[$i]);
 
     # - - - Post-process for * (filehandle) prototype:
-    # If first arg is a zero-param funcall of uppercase bareword, it's a filehandle
-    if (@$c_ids && $self->has_environment) {
-      my $proto = $self->environment->get_prototype($sub_name);
-      if ($proto && $proto->{is_proto} && @{$proto->{params}}) {
-        my $first_param_type = $proto->{params}[0]{proto_type} // '';
-        if ($first_param_type eq '*') {
-          my $first_arg_id = $c_ids->[0];
-          my $first_arg = $self->get_a_node($first_arg_id);
-          # Check if it's a funcall (zero-param bareword becomes funcall)
-          if ($self->is_internal_node_type($first_arg) && $first_arg->{type} eq 'funcall') {
-            my $arg_kids = $self->get_node_children($first_arg_id);
-            # Zero-param funcall has exactly 1 child (the function name)
-            if (@$arg_kids == 1) {
-              my $name_node = $self->get_a_node($arg_kids->[0]);
-              if (ref($name_node) eq 'PPI::Token::Word') {
-                my $name = $name_node->content;
-                if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
-                  # It's a bareword filehandle - replace funcall with just the word node
-                  $c_ids->[0] = $arg_kids->[0];
-                  # Register as filehandle
-                  $self->environment->add_filehandle($name);
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+    # A bareword in a `*` slot is a HANDLE NAME, not a call.  It reaches here
+    # in one of two shapes — a zero-param funcall (the usual classification of
+    # an unplaceable bareword) or a plain Word (when the name is already a
+    # REGISTERED handle, which `handle_subcalls` leaves alone) — and both are
+    # the same fact, so both are read here.
+    $self->_read_star_slot_bareword($sub_name, $c_ids)
+      if @$c_ids && $self->has_environment;
 
     $self->add_child_to_node($top_id, $node_id);
     # Add filehandle as first parameter if present
@@ -4936,8 +4943,9 @@ sub _extract_paren_filehandle {
   # The first token must look like a filehandle, and the second must start a
   # new term (no separating comma → not a normal argument list).
   my $is_fh = 0;
-  if ($self->is_word($first) && $first->content =~ /^[A-Z][A-Z0-9_]*$/) {
-    $is_fh = 1;            # bareword: print(STDERR ...)
+  if ($self->is_word($first)
+      && Pl::Environment::fh_bareword_shape($first->content)) {
+    $is_fh = 1;            # bareword: print(STDERR ...), print(main::STDOUT ...)
   }
   elsif ($self->_is_scalar_fh_token($first)) {
     $is_fh = 1;            # scalar: print($fh ...)
@@ -5637,6 +5645,82 @@ sub _bareword_callable_here {
   # qualified name (it is keyed bare), so a qualified unknown is a string.
   return 'yes' if !defined $pkg && $env->has_prototype($name);
   return 'no';
+}
+
+# THE reading of a bareword in the `*` (filehandle) slot of a prototyped call
+# — `open FH, …`, `opendir DH, …`, and a user `sub fh (*) {…}` alike.
+#
+# perl's rule, probed against 5.40.3 — and the two halves of the `*` family do
+# NOT agree, which is the whole reason this reads the prototype record and not
+# just the word:
+#   * for a BUILTIN handle slot the bareword is ALWAYS the handle, even when a
+#     sub of that name is declared: `sub FILE1 () {42}; tell FILE1` is -1, the
+#     unopened handle, not 42 (t/comp/parser.t's very shape);
+#   * for a USER `(*)` sub a DECLARED name is CALLED (`sub FOO {…}; fh FOO`
+#     is `fh("FOO-called")`), and any other bareword arrives as its NAME in a
+#     plain string — even when the handle is open (`open(G,…); fh G` is
+#     SCALAR "G", never a glob).
+#
+# The two also differ in what PCL must EMIT, because the consumers differ: a
+# builtin slot is a runtime macro that quotes the bareword itself
+# (`%p-fh-arg`), so the node stays a Word and the name is registered as a
+# handle; a USER sub's argument list quotes nothing, so the bareword reached
+# SBCL as an unbound variable and killed the run (#495 shape (a)) — it becomes
+# the string perl passes.  The discriminator is `min_params`, which only a
+# DECLARED prototype carries (Pl::Environment's builtin table has none — the
+# same test `_proto_max_args` uses).
+sub _read_star_slot_bareword {
+  my ($self, $sub_name, $c_ids) = @_;
+
+  my $proto = $self->environment->get_prototype($sub_name);
+  return if !$proto || !$proto->{is_proto} || !@{$proto->{params}};
+  return if ($proto->{params}[0]{proto_type} // '') ne '*';
+
+  # The bareword arrives either as a plain Word — which happens when the name
+  # is ALREADY a registered handle, so `handle_subcalls` left it alone — or
+  # wrapped in a zero-param funcall (exactly one child, the name), the usual
+  # classification of a bareword the compiler cannot place.
+  my $first = $self->get_a_node($c_ids->[0]);
+  my ($name_id, $name_node, $from_funcall);
+  if (ref($first) eq 'PPI::Token::Word') {
+    ($name_id, $name_node, $from_funcall) = ($c_ids->[0], $first, 0);
+  } elsif ($self->is_internal_node_type($first) && $first->{type} eq 'funcall') {
+    my $kids = $self->get_node_children($c_ids->[0]);
+    return if @$kids != 1;
+    my $n = $self->get_a_node($kids->[0]);
+    return if ref($n) ne 'PPI::Token::Word';
+    ($name_id, $name_node, $from_funcall) = ($kids->[0], $n, 1);
+  } else {
+    return;
+  }
+
+  my $name = $name_node->content;
+  # ALL-CAPS is asked of the NAME, not of the qualifier (#491) — the same
+  # widening the print `:fh` site takes.  Without it `opendir main::DH, …`
+  # stayed a funcall and reached the runtime as the STRING "main::DH" while
+  # `readdir(main::DH)` reached it as a SYMBOL: the dirhandle was registered
+  # under one key and read under another, so readdir silently returned nothing
+  # (probed vs perl s443f; the PARENTHESISED `opendir(…)` spelling arrives by
+  # a different route and is NOT fixed here).
+  return if !Pl::Environment::fh_bareword_shape($name);
+
+  if (defined $proto->{min_params}) {
+    # perl CALLS a declared name in a USER sub's `*` slot — the builtin half
+    # below must NOT ask this (see the probe in the header).
+    return if $self->_bareword_callable_here($name, $name_node) eq 'yes';
+    my $str = PPI::Token::Quote::Single->new("'$name'");
+    $c_ids->[0] = $self->make_node($str);
+  } elsif ($from_funcall) {
+    # A builtin handle slot, and the word was classified as a CALL: unwrap it
+    # to the bareword the runtime's `%p-fh-arg` quotes, and register the name.
+    # An arg that is ALREADY a Word needs neither — and must not be
+    # re-registered, because `add_filehandle` re-stamps the SCOPE LEVEL and a
+    # `{ close WRITER; }` inside a block would then take the handle out of the
+    # table when the block pops (measured: io/pipe.t's later `pipe(READER,
+    # WRITER)`).
+    $c_ids->[0] = $name_id;
+    $self->environment->add_filehandle($name);
+  }
 }
 
 sub _bareword_subscript_autoquotes {

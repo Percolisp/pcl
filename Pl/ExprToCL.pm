@@ -16,6 +16,7 @@ use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm qw(cl_sym cl_pkg);
 use Pl::InterpScan ();
 use Pl::Passes ();
+use Pl::Environment ();   # fh_bareword_shape — see Pl/PExpr.pm's note
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
 my $g_flipflop_count = 0;
@@ -1090,7 +1091,9 @@ sub gen_leaf {
     # fed BACK to cl_name as perl names (a qualified call's Word), and a
     # `|ＦＯＯ::f|` there splits on `::` into the package `|ＦＯＯ` — an
     # unbalanced token that kills the file at READ (measured s423).
-    return cl_sym($content)
+    # A package-QUALIFIED handle name goes out QUOTED and registers its
+    # package — see _fh_designator (#491).
+    return $self->_fh_designator($content)
       if $self->environment && $self->environment->is_filehandle($content);
     return $content;
   }
@@ -1983,19 +1986,23 @@ sub gen_funcall_form {
     return [$cl_func, $target, @items];
   }
 
-  # readline(BAREWORD) / select(BAREWORD): the arg is a filehandle name.
+  # readline(BAREWORD) / select(BAREWORD): the arg is a filehandle name — and
+  # it goes out through `_fh_sym`, the ONE handle-name emitter, or this site
+  # spells a name the `open` beside it does not: `readline(main::FH2)` used to
+  # keep its qualifier while `open(main::FH2, …)` canonicalised to `FH2`, which
+  # is two symbols for one handle and a read that finds nothing (#491).
   if (($func_name eq 'readline' || $func_name eq 'select') && @$kids == 2) {
     my $head = $func_name eq 'readline' ? 'p-readline' : 'p-select';
     my $fh_node = $self->expr_o->get_a_node($kids->[1]);
     if (ref($fh_node) eq 'PPI::Token::Word' && $fh_node->can('content')) {
-      return [$head, "'" . cl_sym($fh_node->content() // '')];
+      return [$head, "'" . $self->_fh_sym($fh_node->content() // '')];
     }
     if ($self->expr_o->is_internal_node_type($fh_node) && $fh_node->{type} eq 'funcall') {
       my $fh_kids = $self->expr_o->get_node_children($kids->[1]);
       if (@$fh_kids == 1) {
         my $word_node = $self->expr_o->get_a_node($fh_kids->[0]);
         if (ref($word_node) eq 'PPI::Token::Word' && $word_node->can('content')) {
-          return [$head, "'" . cl_sym($word_node->content() // '')];
+          return [$head, "'" . $self->_fh_sym($word_node->content() // '')];
         }
       }
     }
@@ -2061,12 +2068,14 @@ sub gen_funcall_form {
     if (defined(my $amp_id = $self->_amp_cast_operand_id($kids->[1]))) {
       return ['p-coderef-defined-p', $self->gen_node_form($amp_id)];
     }
-    # …and the bareword-filehandle forms, which read the node itself
+    # …and the bareword-filehandle forms, which read the node itself.  The
+    # shape test is the one every other handle site asks (#491), so
+    # `defined main::FH` is the handle `FH` here as it is at open/print.
     my $arg_node = $self->expr_o->get_a_node($kids->[1]);
     if (ref($arg_node) eq 'PPI::Token::Word') {
       my $name = $arg_node->content();
-      if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
-        return ['p-defined-fh', "'$name"];
+      if (Pl::Environment::fh_bareword_shape($name)) {
+        return ['p-defined-fh', "'" . $self->_fh_sym($name)];
       }
     }
     if ($self->expr_o->is_internal_node_type($arg_node) &&
@@ -2076,8 +2085,8 @@ sub gen_funcall_form {
         my $fn_node = $self->expr_o->get_a_node($arg_kids2->[0]);
         if (ref($fn_node) eq 'PPI::Token::Word') {
           my $name = $fn_node->content();
-          if ($name =~ /^[A-Z][A-Z0-9_]*$/) {
-            return ['p-defined-fh', "'$name"];
+          if (Pl::Environment::fh_bareword_shape($name)) {
+            return ['p-defined-fh', "'" . $self->_fh_sym($name)];
           }
         }
       }
@@ -2459,6 +2468,16 @@ sub gen_methodcall_form {
     } else {
       $obj = $self->gen_node_form($kids->[0]);
     }
+  } elsif (ref($obj_node) eq 'PPI::Token::Word'
+           && $self->environment
+           && $self->environment->is_filehandle($obj_node->content())) {
+    # A registered bareword HANDLE in invocant position is a NAME, exactly as
+    # in the funcall branch above (#491).  PExpr leaves a REGISTERED handle as
+    # a plain Word instead of a funcall, so this slot would otherwise take the
+    # leaf emitter's handle DESIGNATOR — a CL symbol — and p-method-call would
+    # resolve it against the wrong package (`Colour::H1->getline` reported
+    # "via package main").  Same form, same string, either way the word came.
+    $obj = ['p-resolve-invocant', '"' . $obj_node->content() . '"'];
   } elsif ($self->_is_paren_scalar_base($kids->[0])) {
     $obj = $self->_gen_scalar_deref_base_form($kids->[0]);
   } else {
@@ -3190,7 +3209,7 @@ sub gen_readline_form {
     # asks about the perl NAME, so it looks through the #418 pipe-quoting the
     # leaf emitter already applied — the quoted token IS the spelling the
     # runtime agrees on, so it is passed through unchanged.
-    $call = ['p-readline', _bareword_fh_p($fh) ? "'" . cl_sym($fh) : $fh];
+    $call = ['p-readline', _bareword_fh_p($fh) ? "'" . $self->_fh_sym($fh) : $fh];
   } else {
     $call = ['p-readline'];
   }
@@ -3206,7 +3225,7 @@ sub gen_filehandle_form {
   if (@$kids) {
     my $fh = $self->gen_node($kids->[0]);
     # Unicode word-shape, quoted spelling included — see gen_readline_form.
-    return _bareword_fh_p($fh) ? ":fh '" . cl_sym($fh) : ":fh $fh";
+    return _bareword_fh_p($fh) ? ":fh '" . $self->_fh_sym($fh) : ":fh $fh";
   }
   return ':fh nil';
 }
@@ -3235,6 +3254,64 @@ sub gen_filehandle_form {
 sub _bareword_fh_p {
   my ($tok) = @_;
   return Pl::CLForm::cl_unquote($tok) =~ /^[^\W\d]\w*(?:::[^\W\d]\w*)*$/ ? 1 : 0;
+}
+
+# THE handle-NAME emitter (task #491).  Every site that turns a bareword
+# filehandle NAME into a CL symbol goes through here, because a package-
+# QUALIFIED name has two requirements an unqualified one does not:
+#
+#   (1) it must be READABLE — `(p-open Foo::H1 …)` is a read error, and the
+#       error kills the WHOLE file, when no `package Foo` in the source made
+#       the CL package exist.  A qualified CALL already registers its package
+#       so the pre-pass emits `(pcl:p-defpackage :Foo)` at the top; a handle
+#       name is the same fact about the same document, so it registers the
+#       same way rather than growing a second mechanism (rule 11).
+#   (2) it must KEEP its package.  `%p-fh-arg` re-interns an UNQUOTED bareword
+#       symbol's name in the current package (that is how `open FH` and
+#       `print FH` meet), which silently re-homes `P::FH2` opened from main
+#       into main — so the `<P::FH2>` read, which quotes and keeps package P,
+#       found nothing and returned empty.  A QUOTED designator falls through
+#       `%p-fh-arg` untouched, so the reader's package choice survives.
+#
+# The name is CANONICALISED first (Pl::Environment::canon_filehandle_name), so
+# the two spellings of one handle emit ONE symbol instead of two that have to
+# find each other through %p-resolve-fh's by-name fallback: `open(main::FH,…)`
+# and `print FH "x"` both emit `FH`.
+#
+# Unqualified names keep their unquoted spelling: byte-identical emission for
+# every handle in every corpus, and `%p-fh-arg`'s re-intern is the identity
+# there (the reader interned the same symbol in the same package).
+sub _fh_sym {
+  my ($self, $name) = @_;
+  my $perl = Pl::CLForm::cl_unquote($name);
+  # A PARTLY-quoted token (`|ＦＯＯ|::x`) is a CL SPELLING the caller already
+  # built; naming it again would name a different symbol (CLForm's _already_cl
+  # note).  cl_unquote only unwraps a WHOLE `|…|`, so "a pipe survived it" is
+  # exactly that case.
+  return $name if $perl eq $name && index($name, '|') >= 0;
+  $perl = $self->environment->canon_filehandle_name($perl) if $self->environment;
+  if ($perl =~ /\A(.+)::([^:]+)\z/ && $1 ne 'main') {
+    # `Foo::STDOUT` is NOT `STDOUT` (perl: it writes nothing and returns undef,
+    # probed).  A CL symbol `|Foo|::|stdout|` would be, because %p-resolve-fh
+    # falls back to find-symbol on the SHORT name in :pcl — which is where
+    # exactly these eight handles live.  Spelling the whole perl name as ONE
+    # pipe-quoted symbol keeps it out of that fallback and needs no package.
+    return Pl::CLForm::cl_whole_sym($perl)
+      if Pl::Environment::fh_forced_main_name($2);
+    $self->environment->add_referenced_package($1) if $self->environment;
+  }
+  return cl_sym($perl);
+}
+
+# The designator for a slot the RUNTIME quotes itself (`%p-fh-arg`: open,
+# close, eof, binmode, fileno, seek, tell …).  Sites that quote the name
+# themselves (`<FH>`, the print `:fh` marker) call _fh_sym directly.
+sub _fh_designator {
+  my ($self, $name) = @_;
+  my $sym = $self->_fh_sym($name);
+  # The CANONICAL spelling decides, not the one written: `main::FH` canonicalises
+  # to `FH` and must then emit exactly what a written `FH` emits.
+  return Pl::CLForm::cl_unquote($sym) =~ /::/ ? "'$sym" : $sym;
 }
 
 # *glob{SLOT} → (p-glob-slot glob "SLOT") or computed (p-glob-slot glob EXPR).

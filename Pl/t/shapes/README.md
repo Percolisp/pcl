@@ -33,7 +33,7 @@ which is how both tools invoke `pl2cl`).
 | `sub-heads.pl` | signatures vs file lexicals, the feature region's own line, bundles (#454, #455) | `Pl/t/sig-param-shadow-01.t` |
 | `imported-term.pl` | an imported `()`-prototype sub is a TERM (#365), `@EXPORT` from a variable | `Pl/t/imported-term-01.t` (+ `lib/T438/Konst.pm`) |
 | `punct-arrays-glob.pl` | punctuation arrays (#415, #451), `<~>`, the glob word model (#450) | `Pl/t/punct-array-glob-01.t` |
-| `bareword-handles.pl` | package-qualified bareword handles (#452), punctuation-array interpolation | `Pl/t/punct-array-glob-01.t` |
+| `bareword-handles.pl` | package-qualified bareword handles (#452, #491), the `*` prototype slot and the strictly-single operand (#495), punctuation-array interpolation | `Pl/t/punct-array-glob-01.t`, `Pl/t/user-unary-01.t` |
 | `interpolation-nonascii.pl` | non-ASCII identifiers and their ASCII twins (#418, #422.2, #435) | `Pl/t/utf8-source-01.t` |
 
 Known divergences the corpus currently carries on purpose: none at the moment.

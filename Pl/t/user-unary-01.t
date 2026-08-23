@@ -46,7 +46,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 21;
 
 sub write_pl {
     my ($code) = @_;
@@ -126,3 +126,66 @@ both_agree('sub trail ($;) { "trail($_[0])" } my $s = trail "a" . "b";'
 both_agree('open(F, "<", "/etc/hostname") or die; my $ok = close F;'
          . ' print "ok=$ok\n"; print length "ab" . "cd", "\n";',
            'close FILEHANDLE keeps the strictly-single site; length is unchanged');
+
+# ---- task #495: what a BAREWORD means in an operand position --------------
+#
+# (a) A bareword in a `(*)` slot is the handle/class NAME as a plain string —
+#     probed against perl 5.40.3 with `sub fh (*) { ref(\$_[0]) }`: FOO, an
+#     OPEN handle G and STDOUT all arrive as SCALAR "FOO"/"G"/"STDOUT", never
+#     a glob.  PCL emitted the bareword NODE, which a user sub's argument list
+#     has nothing to quote, so it reached SBCL as an unbound variable and
+#     killed the run.
+both_agree('sub fh (*) { "fh($_[0])" } print fh FOO; print "\n";',
+           '(*) slot: a bareword is its NAME as a string');
+
+both_agree('sub fh (*) { "fh($_[0])" } open(G, "<", "/etc/hostname") or die;'
+         . ' print fh G; print "\n";',
+           '(*) slot: an OPEN handle is still the name, not a glob');
+
+both_agree('sub fh (*) { "fh($_[0])" } print fh(FOO); print "\n";',
+           '(*) slot: the PAREN form gives the same answer as the paren-less one');
+
+# The inverse, and it is the reason the rule reads the classifier and not the
+# word: perl CALLS a name that is callable here, `(*)` slot or not.
+both_agree('sub FOO { "FOO-called" } sub fh (*) { "fh($_[0])" }'
+         . ' print fh FOO; print "\n";',
+           '(*) inverse: a DECLARED name in the slot is CALLED, not stringified');
+
+# The OTHER inverse, which is the half the two `*` families do NOT share: for
+# a BUILTIN handle slot the bareword is always the handle, even when a sub of
+# that name exists — `sub FILE1 () {42}; tell FILE1` is -1, not 42 (that is
+# t/comp/parser.t:540's shape).
+both_agree('sub FILE1 () { 42 } print "t=", (tell FILE1), "\n";',
+           'builtin (*) inverse: `tell FILE1` is the HANDLE even with sub FILE1');
+
+# (c) The strictly-single bareword operand ends where perl's precedence says,
+#     and `close`/`eof`/`fileno` are named unary operators: their operand runs
+#     through everything tighter than named unary and stops at everything
+#     looser.  `?` is looser, so `close G ? "a" : "b"` is `close(G) ? …`; PCL
+#     read it as `close(G ? …)`, passed the ternary's value to close and died
+#     on an unbound `G`.
+both_agree('open(G, "<", "/etc/hostname") or die; print close G ? "a" : "b";'
+         . ' print "\n";',
+           'the bareword operand of `close` ENDS at `?` (#495 shape (c))');
+
+both_agree('open(H, "<", "/etc/hostname") or die; print eof H ? "y" : "n";'
+         . ' print "\n";',
+           '... and of `eof`, from the same walk');
+
+both_agree('open(F, "<", "/etc/hostname") or die;'
+         . ' sub note2 { "note2(" . join("|", @_) . ")" }'
+         . ' print note2(close F, "desc"), "\n";',
+           '... and still at the comma, which is the case that branch existed for');
+
+# The inverse of (c): `.` binds TIGHTER than a named unary, so perl really does
+# read `close G . "x"` as `close("Gx")` — it returns "" for the handle that is
+# not open (probed).  A "stop at any operator" rule would have broken it, so
+# the operand extent is asserted on the emitted SHAPE (PCL cannot RUN this one
+# yet: a registered handle Word inside an expression still emits a bare CL
+# symbol, filed as residue).
+{
+    my $cl = PCLCore::transpile("$pl2cl "
+        . write_pl('open(G, "<", "/etc/hostname") or die; my $r = close G . "x";'));
+    like($cl, qr/\(p-close \(p-\. /,
+         '#495 inverse: `close G . "x"` keeps the `.` INSIDE the operand (perl: close("Gx"))');
+}

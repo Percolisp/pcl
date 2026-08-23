@@ -570,6 +570,99 @@ sub add_prototype {
     $self->pkg_prototypes->{$bare}{$owner} = $sig_info;
 }
 
+=head2 fh_bareword_shape($name)
+
+THE shape test for a bareword FILEHANDLE name — the ALL-CAPS convention every
+parse site uses to guess "handle" for a word it has not seen opened (task
+#491).  A plain sub, not a method: the parse sites that ask it do not all have
+an Environment, and the answer does not depend on one.
+
+It is asked of the NAME, never of the qualifier: C<main::STDOUT> and
+C<Foo::H1> are handle spellings exactly as C<STDOUT> and C<H1> are, and perl
+reads all four the same way.  Testing the whole spelling made every qualified
+handle fail, and the four sites then disagreed with each other — the print
+C<:fh> slot said "not a handle" (a CALL to an undefined sub) while
+C<readline>, which quotes the name itself, said "handle".
+
+=cut
+
+sub fh_bareword_shape {
+    my $name = shift;
+
+    return 0 if !defined $name;
+    $name =~ s/\A.*:://;
+    return $name =~ /\A[A-Z][A-Z0-9_]*\z/ ? 1 : 0;
+}
+
+# The handles perl resolves in main:: whatever package names them unqualified
+# (gv.c's forced-main list, handle members).  A qualifier on one of these is
+# therefore NOT the same glob as the bare name — see canon_filehandle_name.
+my %FORCED_MAIN_HANDLE = map { $_ => 1 }
+    qw(STDIN STDOUT STDERR ARGV ARGVOUT ENV INC _);
+
+=head2 fh_forced_main_name($name)
+
+True when C<$name> (unqualified) is one of the handles perl resolves in
+C<main::> from every package.  The same fact C<canon_filehandle_name> uses,
+asked separately by C<Pl::ExprToCL::_fh_sym>: these are the only handle names
+the RUNTIME can find by their short name (they are the ones interned in the
+C<:pcl> package, which is what C<%p-resolve-fh>'s by-name fallback searches),
+so a qualified spelling of one must not be emitted as a symbol carrying that
+short name — or C<print Foo::STDOUT "x"> silently reaches main's STDOUT where
+perl writes nothing.
+
+=cut
+
+sub fh_forced_main_name {
+    my $name = shift;
+    return defined $name && $FORCED_MAIN_HANDLE{$name} ? 1 : 0;
+}
+
+=head2 canon_filehandle_name($name)
+
+THE canonical registry key AND emitted spelling for a bareword filehandle NAME
+(task #491).
+
+Perl names a bareword handle by its GLOB, so one handle has more than one
+spelling: C<main::FH> IS C<FH> in package main, and a qualifier equal to the
+CURRENT package is the same glob as the unqualified spelling (C<package P;
+open(P::FH,...)> and C<open(FH,...)> are one handle).  The registry used to be
+keyed by the literal spelling, so C<open(main::FH, ...)> registered "main::FH"
+while the later C<print FH "x"> asked about "FH" — the two never met, and the
+print was emitted as a CALL to an undefined sub.
+
+Both C<is_filehandle> and C<add_filehandle> ask this, so the registry cannot
+disagree with itself, and C<Pl::ExprToCL::_fh_sym> asks it too, so the emitted
+CL symbol for the two spellings is one symbol rather than two that have to
+find each other at run time.
+
+A qualifier naming some OTHER package (C<Foo::H1> from main) is a different
+handle and keeps its qualifier — perl's stash autovivifies, so C<Foo::H1> is a
+handle whether or not a C<package Foo> statement exists.
+
+THE ASYMMETRY, probed: the standard handles are forced into C<main::> from
+ANY package, so the UNQUALIFIED spelling is main's from everywhere — but an
+explicit qualifier still names that package's own glob.  Inside
+C<package Foo>, C<print STDOUT "x"> prints and C<print Foo::STDOUT "x">
+prints NOTHING and returns undef.  So the C<$pkg eq $here> collapse, which is
+right for a user handle (C<package Foo; open(H2,…)> IS C<Foo::H2>, probed),
+would be wrong for those eight names.
+
+=cut
+
+sub canon_filehandle_name {
+    my $self = shift;
+    my $name = shift;
+
+    return $name if !defined $name || index($name, '::') < 0;
+    return $name if $name !~ /\A(.+)::([^:]+)\z/;
+    my ($pkg, $short) = ($1, $2);
+    return $pkg eq 'main' ? $short : $name if $FORCED_MAIN_HANDLE{$short};
+    my $here = $self->current_package // 'main';
+    return $short if $pkg eq 'main' || $pkg eq $here;
+    return $name;
+}
+
 =head2 is_filehandle($name)
 
 Returns true if $name is a known filehandle.
@@ -581,8 +674,8 @@ Returns true if $name is a known filehandle.
 sub is_filehandle {
     my $self = shift;
     my $name = shift;
-    
-    return exists $self->filehandles->{$name};
+
+    return exists $self->filehandles->{ $self->canon_filehandle_name($name) };
 }
 
 =head2 add_filehandle($name)
@@ -597,6 +690,7 @@ sub add_filehandle {
     my $self = shift;
     my $name = shift;
 
+    $name = $self->canon_filehandle_name($name);
     $self->filehandles->{$name} = 1;
     $self->filehandle_scope->{$name} = $self->scope_level;
 }

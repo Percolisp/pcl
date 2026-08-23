@@ -112,17 +112,23 @@ sub cl_sym {
   return _pipe($name);
 }
 
-# The PACKAGE half of a qualified CL symbol (`Foo::$x`, `Foo::pl-bar`).  A
-# multi-segment name has always been quoted — the '::' would otherwise read
-# as a package marker — and the non-ASCII rule joins it.  Any colon counts:
-# a single stray ':' in a name reads as a package marker just as '::' does.
-sub cl_pkg {
-  my ($pkg) = @_;
-  return $pkg if !defined $pkg;
-  return $pkg if _already_cl($pkg);
-  return _pipe($pkg) if $pkg =~ /:/;
-  return cl_sym($pkg);
+# The token for a name that must read as ONE symbol even though it contains a
+# package marker.  A multi-segment name has always been quoted — the '::'
+# would otherwise read as a package marker, naming the symbol `STDOUT` in the
+# package `FOO`, which is a different object from the symbol whose NAME is
+# "Foo::STDOUT" — and the non-ASCII rule joins it.  Any colon counts: a single
+# stray ':' in a name reads as a package marker just as '::' does.
+sub cl_whole_sym {
+  my ($name) = @_;
+  return $name if !defined $name;
+  return $name if _already_cl($name);
+  return _pipe($name) if $name =~ /:/;
+  return cl_sym($name);
 }
+
+# The PACKAGE half of a qualified CL symbol (`Foo::$x`, `Foo::pl-bar`) — the
+# same rule, named for the caller that has always had it.
+sub cl_pkg { return cl_whole_sym($_[0]) }
 
 sub _pipe {
   my ($s) = @_;

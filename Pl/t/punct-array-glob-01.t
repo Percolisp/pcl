@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 31;
 
 sub write_pl {
     my ($code) = @_;
@@ -261,12 +261,116 @@ is(emitted(q{while (<<>>) { print }}), emitted(q{while (<>) { print }}),
     # The `open` matters: PCL decides `print NAME LIST` is a filehandle print
     # from what the file has DECLARED as a handle, so without it the same text
     # is a call to a sub named main::FH5 — which is perl's reading too.
+    #
+    # #491 STRENGTHENED THESE TWO ROWS, and they used to read 'main::FH2 /
+    # 'main::FH5: #452 made the qualified spelling QUOTED like the unqualified
+    # one, and #491 makes it the SAME TOKEN — `main::FH2` IS `FH2` in package
+    # main, so the registry keys on one name and every consumer emits one
+    # symbol.  Two symbols that only found each other through
+    # `%p-resolve-fh`'s by-name fallback are now one, which is what makes the
+    # `open(main::FH)` / `print FH` pair below meet at all.
     my $cl = emitted('open(main::FH5, ">", "/dev/null");'
                    . ' my $l = <main::FH2>; print main::FH5 "x";');
-    like($cl, qr/\(p-readline 'main::FH2\)/,
-         '#452: a qualified handle in <> is QUOTED, like the unqualified one');
-    like($cl, qr/:fh 'main::FH5/,
-         '#452: ... and in the print filehandle slot, from the same predicate');
+    like($cl, qr/\(p-readline 'FH2\)/,
+         '#491: `main::X` canonicalises to `X` in <>, one token for one handle');
+    like($cl, qr/:fh 'FH5/,
+         '#491: ... and in the print filehandle slot, from the same seam');
+    unlike($cl, qr/main::FH/,
+           '#491: ... and the qualified spelling is gone from the emission');
+}
+
+# Task #491 (s443f): the three spellings #452 left.  The handle NAME was never
+# canonicalised, so one handle had as many identities as it had spellings:
+# `print main::STDOUT "a"` was a CALL to an undefined sub, `open(Foo::H1,…)`
+# emitted a BARE `Foo::H1` that killed the file at READ ("Package Foo does not
+# exist"), and `open(main::FH)` registered "main::FH" while `print FH` asked
+# about "FH".  perl's rule, probed: the standard handles are forced into
+# `main::` from every package, every other bareword handle is qualified with
+# the CURRENT package, and a qualifier naming main (or the package you are in)
+# is the same glob as the bare name.
+{
+    my $prog = <<'PL';
+print main::STDOUT "a\n";
+printf main::STDOUT "%s\n", "b";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#491: `print`/`printf main::STDOUT` write to STDOUT (perl oracle)');
+}
+{
+    # A handle in a package that does not exist as a package: perl's stash
+    # autovivifies, so `Foo::H1` is simply a handle.  PCL emits it as a QUOTED
+    # symbol and registers the CL package, because an unquoted `Foo::H1` is a
+    # READ error that loses the whole file.
+    my $prog = <<'PL';
+my $f = "/tmp/pcl-agentF-h1-$$.txt";
+open(Foo::H1, ">", $f) or die "open: $!";
+print Foo::H1 "hello\n";
+close(Foo::H1);
+open(Foo::H1, "<", $f) or die;
+my $l = <Foo::H1>;
+close(Foo::H1);
+unlink $f;
+print "got:$l";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#491: `open(Foo::H1)` with no `package Foo` round-trips (perl oracle)');
+}
+{
+    # The registry used to key on the SPELLING, so these two never met.
+    my $prog = <<'PL';
+my $f = "/tmp/pcl-agentF-h3-$$.txt";
+open(main::FH, ">", $f) or die;
+print FH "x\n";
+close(FH);
+open(FH, "<", $f) or die;
+my $l = <main::FH>;
+close(main::FH);
+unlink $f;
+print "got:$l";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#491: `open(main::FH)` and `print FH` are one handle (perl oracle)');
+}
+{
+    # The DIRHANDLE family reaches the same seam: `opendir(main::D)` used to
+    # emit the STRING "main::D" while `readdir(main::D)` emitted a SYMBOL, so
+    # readdir silently returned nothing.
+    my $prog = <<'PL';
+opendir(main::D, "/etc") or die "opendir: $!";
+my @e = grep { $_ eq "hostname" } readdir(main::D);
+closedir(D);
+print "n:", scalar(@e), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#491: `opendir(main::D)` / `readdir(main::D)` / `closedir(D)` agree');
+}
+# THE INVERSE, and it is the half that says the rule is perl's and not a
+# convenience: only the EIGHT forced-main handles collapse across packages,
+# and an explicit qualifier still names THAT package's glob.  `Foo::STDOUT` is
+# an unopened handle — perl writes nothing and returns undef — so PCL must not
+# let it reach main's STDOUT through the runtime's by-name fallback.
+{
+    my $prog = <<'PL';
+my $r = print Foo::STDOUT "x\n";
+print STDOUT "r=", (defined $r ? $r : 'undef'), "\n";
+package Foo;
+my $r2 = print Foo::STDOUT "y\n";
+print STDOUT "r2=", (defined $r2 ? $r2 : 'undef'), "\n";
+print STDOUT "plain=", (print STDOUT ""), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#491 inverse: `Foo::STDOUT` is NOT STDOUT, in main or in package Foo');
+}
+{
+    # And the lower-case negative is perl's own: a qualified name that is not
+    # handle-SHAPED stays a call, so `print main::f "a"` calls f.
+    my $prog = <<'PL';
+sub main::f { return "f(" . join(",", @_) . ")" }
+print main::f "a";
+print "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#491 inverse: `print main::f LIST` with a declared `f` is a CALL');
 }
 
 # The inverses: a LEXICAL handle is a form to evaluate, not a name to quote,
