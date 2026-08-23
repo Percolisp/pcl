@@ -259,6 +259,26 @@ sub does not rebind the current package, **#516** `(sub {…})->()` emits
 body-less name is a SCALAR ref.  **Generation renumbered ONCE on the merged
 tree: v2-201**, artifacts regenerated (stamp-only).
 
+**s440f — THE FINAL TREE (all four agents merged, generation v2-201) and
+the release.**  Cold gate **171 files / 5846 rows** (only the 13 pclxs xs
+rows); sweep **TOTAL 18313 (+0), GATE clean, drops 5 = census, child drops 9
+in 6 files**; companion #1 (A+B+C+harness): four real movers, all EDITED BY
+HAND with causes (`op/glob.t` 13/5 → 14/4 #499; `op/sort.t` 182/23 → 183/22
+#468; `run/runenv_hashseed.t` 0/0 → 8/0 and `run/runenv_randseed.t` 0/4 →
+2/7 #479 harness; io/pvbm.t the known noise, ninth time, not edited);
+companion #2 on the tag tree (D's io/op legs) — verdict below.  **One review
+fix on D's merge**: the final sweep LOST method.t's two `like qr/called at /`
+rows (72 → 70) — the one-mechanism die ended in `.~%`, so `$@` never got the
+runtime's placeholder location; the old p-funcall-ref path had satisfied the
+rows with a hard-coded fake `(eval 1) line 1`; the message is now
+`Undefined subroutine &NAME called` (no period, no newline) and a caught one
+reads `… called at (eval 0) line 0.` like every other runtime die (ir-spec
+§5.1 corrected); re-swept: TOTAL 18313 (+0), GATE clean.  **#494 DONE** on
+this tree (README / STATUS / CHANGELOG: 171/5,846; 18,313 / 893 = 95.4 %; 61
+fully passing; 528 companion files; the drop paragraph says "dies when
+reached"; release-status lines name v0.1.0).  Filed this session: #497–#517
+(21 tasks), of which #497 #498 #499 #500 #501 #503 are DONE.
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
