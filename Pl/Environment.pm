@@ -493,6 +493,31 @@ sub get_min_params {
     return $sig_info->{min_params};
 }
 
+=head2 proto_is_zero_arg($sig_info)
+
+True when a prototype RECORD is one of perl's zero-argument TERMS — an empty
+prototype (`sub pi () {…}`), a `use constant`, an all-defaulted signature.
+The record shape is min_params 0 with no parameter slots; `is_proto` does NOT
+distinguish it, because the `()` spelling arrives both ways (is_proto 1 with an
+empty proto_string from a prototype, is_proto 0 from parse_prototype_or_
+signature's empty case and from `use constant`'s registration).
+
+    $env->proto_is_zero_arg($env->get_prototype('pi'))   # 1
+
+Callable as a class method: it reads only the record.  It is THE one reading
+of that shape — PExpr::_is_zero_arg_func (does this bareword parse as a term?)
+and Parser::_merge_module_prototypes (must this prototype cross a `use`?) both
+ask it, and they used to carry the test inline.
+
+=cut
+
+sub proto_is_zero_arg {
+    my ($self, $sig_info) = @_;
+    return 0 unless $sig_info && defined $sig_info->{min_params};
+    return ($sig_info->{min_params} == 0
+            && @{ $sig_info->{params} || [] } == 0) ? 1 : 0;
+}
+
 =head2 add_prototype($name, $sig_info)
 
 Adds or updates a subroutine signature info.

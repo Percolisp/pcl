@@ -253,9 +253,12 @@ sub is_internal_node_type { shift->token_utils->is_internal_node_type(@_) }
 sub _is_zero_arg_func {
   my ($self, $name) = @_;
   return 0 unless $self->has_environment && $self->environment->has_prototype($name);
-  my $sig = $self->environment->get_prototype($name);
-  return 0 unless $sig && defined $sig->{min_params};
-  return ($sig->{min_params} == 0 && @{ $sig->{params} || [] } == 0) ? 1 : 0;
+  # ONE reading of the record shape (Pl::Environment::proto_is_zero_arg): the
+  # same question decides whether a module's prototype crosses a `use`
+  # (Parser::_merge_module_prototypes), and the two tests had drifted apart
+  # into a bug — see #365.
+  return $self->environment->proto_is_zero_arg(
+           $self->environment->get_prototype($name));
 }
 
 # The maximal run of Cast tokens immediately before position $p in @$e.

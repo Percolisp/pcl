@@ -8619,6 +8619,33 @@ sub _merge_module_prototypes {
     # use before a comma (`catfile(updir, ...)`) reads as a string.
     $needs_import = 1 if $module_env->export_names->{$name};
 
+    # An EMPTY prototype is a PARSE fact, not an arity one, so it is imported
+    # on the same footing as has_block_arg above and NOT through the export
+    # scan (task #365).  `sub pi ()` makes the bareword `pi` a TERM: perl
+    # reads `2 * pi` as 2 * pi() and `pi + 1` as pi() + 1.  Without the
+    # prototype PCL has no name knowledge at that site, so `pi` is the STRING
+    # "pi" after an operator or a comma (`print pi, "\n"` printed `pi`;
+    # `2 * pi` was 0) and a LIST OPERATOR at the head of one (`pi + 1` parsed
+    # as pi(+1)) — the #266 classifier answering from an absence.
+    #
+    # WHY THE EXPORT SCAN CANNOT DO IT: `export_names` reads literal `qw()`
+    # lists out of the module's `@EXPORT`/`@EXPORT_OK` statements, and real
+    # modules build those from variables.  Math::Complex is the measured case:
+    #   my @trig = qw( pi tan … );
+    #   our @EXPORT = (qw( i Re Im … atan2 ), @trig);
+    # so `pi` reaches @EXPORT through @trig and the scan never sees it (and
+    # Math::Trig re-exports it from there, which is how `use Math::Trig;
+    # print pi` printed the string).  Following that would mean interpreting
+    # the module's own code; keying on the PROTOTYPE instead is the same
+    # layering rule the `$`/`\X` slots above already follow.
+    #
+    # THE TRADE, stated: this imports a `()` sub the using file did not ask
+    # for, so a bareword that happens to share the name of a module's
+    # non-exported `()` sub becomes a call where perl keeps the string.  That
+    # is the same over-import the parameter-slot rule above has always done,
+    # and measured over the four populations it moves nothing (s438c).
+    $needs_import = 1 if $module_env->proto_is_zero_arg($proto);
+
     if ($needs_import) {
       $add->($name, $proto);
     }
