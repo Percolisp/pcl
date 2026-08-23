@@ -84,6 +84,11 @@ those two files and the live plan doc directly -- no new review-doc families.*
   name resolves in `*pcl-current-package*`, never the CL reader's `*package*`; one
   resolver, a third copy removed); filed #514–#517.  **Generation v2-201 on the merged
   tree.**
+- **v0.1.0 TAGGED** (`29c2cf3`, 2026-08-23): CI green on the tip, gate 171/5846, sweep
+  18313 (+0) clean, companion blessed (io/open.t = the ALONE value, load-sensitive,
+  not a batch mover), #494 done.  **Round 4 agents**: E #470 (v2-205), F #491+#495
+  (v2-210), G #485+#484+#492 (v2-215); the next rounds H–K are listed in the session
+  log s440g.
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

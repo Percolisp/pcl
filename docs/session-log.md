@@ -279,6 +279,24 @@ fully passing; 528 companion files; the drop paragraph says "dies when
 reached"; release-status lines name v0.1.0).  Filed this session: #497–#517
 (21 tasks), of which #497 #498 #499 #500 #501 #503 are DONE.
 
+**s440g — v0.1.0 TAGGED (`29c2cf3`, annotated, pushed) and ROUND 4 of Opus
+agents launched.**  Companion #2 on the tag tree: `io/open.t` 108/13 → 127/34
+is NOT a batch mover — the same file run ALONE on the pre-batch tree
+(9bc7ef3) also reads 127/34 and under parallel load it reads the snapshot's
+108/13 (a test steals a file descriptor and the loader's own stream hits
+end-of-file earlier or later) — the row now holds the ALONE value with that
+note; io/pvbm.t and uni/variables.t the known noise.  CI green on the tip
+(eb13691, 05a529b).  The tag message carries the measured numbers.  **Round
+4 (USER: "run Opus 5 tasks as subjobs")**: **E** = #470 (identity promotion
+vs a package spelling; gen v2-205; the sweep IS its gate + gate-SET scan on
+merge), **F** = #491 + #495 (qualified bareword handles; bareword operand of
+a prototyped sub; v2-210), **G** = #485 + #484(a) + #492 (signature default
+capture; `WORD /` repair vs an imported term; s/// replacement vs non-ASCII;
+v2-215).  Next rounds: H = #502 + #516 + #515; I = #508–#513 (agent B's
+local/`%INC`/`$0`/dup findings, grouped: #508+#509+#510 local; #511 `%INC`;
+#512 `$0`; #513 dup); J = #505–#507 + #514 + #517; K = #463 items 3–5 + #479
+compiler half + #478 measured; #504 tool fix; #486–#489 residues.
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
