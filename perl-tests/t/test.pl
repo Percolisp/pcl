@@ -176,8 +176,19 @@ sub runperl_and_capture {
     } sort keys %$env);
     my $argstr = join(' ', map { my $a = $_; $a =~ s/'/'\\''/g; "'$a'" } @$args);
     system("$envstr $perl $argstr > $out 2> $err");
-    my $so = do { local $/; open(my $f, '<', $out) ? <$f> // '' : '' };
-    my $se = do { local $/; open(my $f, '<', $err) ? <$f> // '' : '' };
+    # A `my $f` declared in a ternary's CONDITION is not in scope in its
+    # branches (a `my` takes effect at the NEXT statement), so the old
+    # `open(my $f, ...) ? <$f> // '' : ''` read the unopened package handle and
+    # returned ("", "") for a file that plainly had text -- in real perl too;
+    # and PCL could not lower that branch at all (task #479).  perl's own
+    # t/test.pl shape: the handle declared in an `if` condition IS in scope in
+    # its block.
+    my ($so, $se) = ('', '');
+    {
+        local $/;
+        if (open(my $f, '<', $out)) { $so = <$f> // '' }
+        if (open(my $g, '<', $err)) { $se = <$g> // '' }
+    }
     unlink $out, $err;
     return ($so, $se);
 }
