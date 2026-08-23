@@ -538,8 +538,10 @@ sub _binding_at {
   # `_head_binding`, the seam's arity) saw the rewritten text: `{ package S;
   # use feature "signatures"; sub g ($x = 1) {…} }` came out as
   # `sub g ($S::x = 1)`, arity 0/0, body reading the global (#497, found by
-  # the shapes corpus).  A symbol inside a DEFAULT is a use and falls through.
-  return 'lex' if _symbol_is_signature_param($node);
+  # the shapes corpus).  A symbol inside a DEFAULT is a USE — bound here only
+  # when a parameter to the LEFT of its part declares it (#485); otherwise it
+  # falls through to the scope walk, where it is an ordinary outer reference.
+  return 'lex' if _signature_binds($node, $canon);
   my $child = $node;
   for (my $p = $node->parent; $p; $child = $p, $p = $p->parent) {
     next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
@@ -2392,7 +2394,12 @@ sub _ref_shadowed {
   # package B; sub f ($x) {…}`) used to rename the parameter itself to
   # `$A::x`, after which the body's own shadow test read the rewritten
   # signature and renamed the body too: `sub f ($A::x) { "g($A::x)" }`.
-  return 1 if _symbol_is_signature_param($sym);
+  # A use inside a DEFAULT is shadowed by a parameter to the LEFT of its own
+  # part and by nothing else in the signature (#485): `my $p = 'FILE';
+  # sub n3 ($p, $q = $p) {…}` must leave that `$p` alone — before this, every
+  # rewriter that renamed the file lexical renamed the default with it, and
+  # the parameter's value was lost (probed: `n3(P,)` where perl says n3(P,P)).
+  return 1 if _signature_binds($sym, $canon);
   my $node = $sym;
   while (my $parent = $node->parent) {
     my $at_seg = defined $seg_parent && $parent == $seg_parent;
@@ -2481,6 +2488,20 @@ sub _signature_param_canons {
   my ($text) = @_;
   return () unless defined $text;
   return () unless Pl::Parser::proto_text_has_named_params($text);
+  my @canon;
+  for my $p (_signature_parts($text)) {
+    push @canon, $1 if $p =~ /^\s*([\$\@\%]\w+)/;
+  }
+  return @canon;
+}
+
+# THE top-level split of a signature's TEXT into its comma-separated PARTS,
+# in order — the one copy every textual signature reader here shares.  Only
+# depth-0 commas separate: a default may carry commas of its own
+# (`sub f ($x = g(1,2), $y)` is TWO parts).  The `(…)` wrapper is stripped.
+sub _signature_parts {
+  my ($text) = @_;
+  return () unless defined $text;
   (my $inner = $text) =~ s/^\s*\(\s*//;
   $inner =~ s/\s*\)\s*$//;
   my @parts;
@@ -2493,11 +2514,77 @@ sub _signature_param_canons {
     $cur .= $ch;
   }
   push @parts, $cur;
-  my @canon;
-  for my $p (@parts) {
-    push @canon, $1 if $p =~ /^\s*([\$\@\%]\w+)/;
+  return @parts;
+}
+
+# Each part as [ parameter canon | undef, DEFAULT expression text | undef ].
+# The three default operators are perl's own (`=`, `//=`, `||=` — the set
+# Pl::Parser::_signature_param_specs reads); anything else means no default.
+sub _signature_part_defaults {
+  my ($text) = @_;
+  my @out;
+  for my $p (_signature_parts($text)) {
+    my ($canon, $rest) = (undef, $p);
+    if ($p =~ /^\s*([\$\@\%]\w+)(.*)$/s) { ($canon, $rest) = ($1, $2) }
+    my $default;
+    if    ($rest =~ m{^\s*(?://=|\|\|=)\s*(.*)$}s) { $default = $1 }
+    elsif ($rest =~ m{^\s*=\s*(.*)$}s)             { $default = $1 }
+    push @out, [$canon, $default];
   }
-  return @canon;
+  return @out;
+}
+
+# The parameter canons a use inside a signature DEFAULT sees FROM THE
+# SIGNATURE: the parameters of the parts strictly BEFORE its own.  Probed vs
+# perl 5.40.3: `my $x = 'OUT'; sub s1 ($x = $x) {…}` prints OUT — a parameter
+# is NOT in scope in its own default — and `sub s2 ($p = $q, $q = 'PARAM')`
+# reads the outer $q, so a LATER part never counts either.  () when $tok is
+# not inside a PPI::Structure::Signature (the Token::Prototype spelling of the
+# same source, #455, offers no tokens to ask about at all).
+sub _signature_left_params {
+  my ($tok) = @_;
+  return () unless ref $tok;
+  my $sig;
+  for (my $p = $tok->parent; $p; $p = $p->parent) {
+    last if $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
+    if ($p->isa('PPI::Structure::Signature')) { $sig = $p; last }
+  }
+  return () unless $sig;
+  my ($start, $finish) = ($sig->start, $sig->finish);
+  my @left;
+  my ($depth, $at_start) = (0, 1);
+  for my $t ($sig->tokens) {
+    last if $t == $tok;
+    next if $start  && $t == $start;
+    next if $finish && $t == $finish;
+    if ($t->isa('PPI::Token::Structure')) {
+      my $c = $t->content;
+      $depth++ if $c =~ /^[\(\[\{]$/;
+      $depth-- if $c =~ /^[\)\]\}]$/;
+      next;
+    }
+    next if $t->isa('PPI::Token::Whitespace') || $t->isa('PPI::Token::Comment');
+    if ($depth == 0 && $t->isa('PPI::Token::Operator') && $t->content eq ',') {
+      $at_start = 1;
+      next;
+    }
+    next unless $at_start;
+    push @left, $t->symbol if $t->isa('PPI::Token::Symbol');
+    $at_start = 0;
+  }
+  return @left;
+}
+
+# Is $tok's binding the SIGNATURE's own?  Either the token IS a parameter
+# (its declaration — #497) or it sits in a DEFAULT and $canon is declared by
+# a parameter to the LEFT of that default's part (#485).  The one predicate
+# `_binding_at` and `_ref_shadowed` share, so the resolver, the three
+# rewriters and the capture gates cannot disagree about a signature.
+sub _signature_binds {
+  my ($tok, $canon) = @_;
+  return 1 if _symbol_is_signature_param($tok);
+  return 0 unless defined $canon;
+  return scalar grep { $_ eq $canon } _signature_left_params($tok);
 }
 
 # The signature of a Statement::Sub, in EITHER of the two shapes PPI produces
@@ -2648,6 +2735,73 @@ sub _is_pure_prototype {
 # interpolation is now implemented in Pl/PExpr/StringInterpolation.pm —
 # lexically feature-scoped, shared by both pipelines.)
 
+# DOES THIS SUB CAPTURE THE OUTER BARE NAME $bare?  The one resolver the
+# three capture questions share — the file-lexical GATE
+# (`_check_sub_captures`), the PROMOTER's test (`_captured_in_subs`) and the
+# nested-sub hoist gate (`_hoist_nested_sub`).  A sub is its BLOCK *and* its
+# SIGNATURE, and until #485 every one of them looked at the block alone:
+#
+#     my $y = 5;  sub f ($x = $y) { $x }   print f();   # perl 5, PCL empty
+#
+# A signature DEFAULT is an expression evaluated inside the sub, so `$y` there
+# is a genuine capture of the file lexical — it just is not in the block, of
+# which the signature is a SIBLING.  Nobody saw it, so the lexical was never
+# promoted to a package cell and the default read an unbound name.
+sub _sub_captures_name {
+  my ($self, $sub, $bare, $canons) = @_;
+  return 1 if $self->_signature_captures_name($sub, $bare, $canons);
+  # A SIGNATURE parameter is the sub's own declaration, so a BODY use of that
+  # canon is the parameter and never the outer lexical (#454).  Only the
+  # canons the signature declares are discounted: a file `my @x` with a `($x)`
+  # parameter still gates on the sub's `@x`.
+  my %sig = map { $_ => 1 } _sub_signature_canons($sub);
+  my $cs  = $canons;
+  if (%sig && $cs) {
+    my %left = map { $_ => $cs->{$_} } grep { !$sig{$_} } keys %$cs;
+    # Every canon of this bare name is a parameter: the block can only be
+    # talking about the parameters.
+    return 0 unless %left;
+    $cs = \%left;
+  }
+  # (%sig && !$cs: no canon information — the mention is unattributable and
+  # stays conservatively a capture, as before #454.)
+  return $self->_block_captures_name($sub->block, $bare, $cs);
+}
+
+# The DEFAULT half of `_sub_captures_name`.  Textual, because PPI hands the
+# same source over as a Structure::Signature or as one Token::Prototype
+# depending on where the feature pragma sits (#455) and only the text is
+# common to both.  Shadowing inside a signature is the left-parameter rule
+# `_signature_left_params` states, applied part by part; the patterns that
+# decide what a mention of the name LOOKS like are the shared
+# `_canon_text_patterns`, so this scan and the block scan cannot drift.
+sub _signature_captures_name {
+  my ($self, $sub, $bare, $canons) = @_;
+  return 0 unless ref $sub && $sub->can('schildren');
+  my ($sig) = grep { _is_signature_node($_) } $sub->schildren;
+  return 0 unless $sig;
+  my $text = $sig->content;
+  return 0 unless Pl::Parser::proto_text_has_named_params($text);
+  return 0 unless $text =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/;    # cheap early-out
+  my @left;
+  for my $part (_signature_part_defaults($text)) {
+    my ($canon, $default) = @$part;
+    if (defined $default && $default =~ /(?:[\$\@\%]|\$\#)\Q$bare\E\b/) {
+      return 1 unless $canons;             # unattributable → conservatively a capture
+      my %shadow = map { $_ => 1 } @left;
+      my %live   = map { $_ => 1 } grep { !$shadow{$_} } keys %$canons;
+      if (%live) {
+        my $pat = _canon_text_patterns($bare, \%live);
+        for my $c (sort keys %$pat) {
+          return 1 if $default =~ $pat->{$c};
+        }
+      }
+    }
+    push @left, $canon if defined $canon;
+  }
+  return 0;
+}
+
 sub _check_sub_captures {
   my ($self, $stmts) = @_;
   my (%lex, %canons);
@@ -2676,25 +2830,9 @@ sub _check_sub_captures {
       # promotions record '@x__file__N'/'%x__file__N', and every promotion
       # path guarantees the bare name denotes only that one variable.
       next if grep { $self->{_file_lex_renamed}{"$_$bare"} } '$', '@', '%';
-      # A SIGNATURE parameter is the sub's own declaration, so a body use of
-      # that canon is the parameter and never the file lexical (#454).  Only
-      # the canons the signature declares are discounted: a file `my @x` with
-      # a `($x)` parameter still gates on the sub's `@x`.
-      my %sig = map { $_ => 1 } _sub_signature_canons($child);
-      my $cs  = $canons{$bare};
-      if (%sig && $cs) {
-        my %left = map { $_ => $cs->{$_} } grep { !$sig{$_} } keys %$cs;
-        next unless %left;
-        $cs = \%left;
-      } elsif (%sig && !$cs) {
-        # No canon information: the mention is unattributable and would be
-        # conservatively a capture.  With a parameter of that bare name in
-        # scope the conservative answer is the WRONG one often enough to
-        # matter, but not provably right either — leave the old behaviour.
-        $cs = $canons{$bare};
-      }
+      # Block AND signature, through the one resolver (#454 + #485).
       die "Parser2 TODO: file lexical '$bare' captured by sub " . $child->name . "\n"
-        if $self->_block_captures_name($child->block, $bare, $cs);
+        if $self->_sub_captures_name($child, $bare, $canons{$bare});
     }
   }
 }
@@ -2722,15 +2860,16 @@ sub _check_sub_captures {
 # single-quoted '$x…' no longer gates a file whose only lexical is @x (my.t).
 # Whitespace is allowed before the subscript bracket: interpolation never has
 # it, but eval-fed single-quoted code can — over-fire keeps the gate (safe).
-sub _block_captures_name {
-  my ($self, $block, $bare, $canons) = @_;
-  my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
-  # Per-CANON text patterns, so a string/heredoc/regex mention can be
-  # attributed to one canonical variable and shadow-checked like a Symbol
-  # use (M-F: `eval('$zzz')` under the sub's own preceding `my $zzz` refers
-  # to the shadow — the eval capture alist binds it let-bound-first — not a
-  # capture of the file lexical).  Without canon info the mention stays
-  # unattributable and is conservatively a capture, as before.
+# THE per-CANON text patterns for a bare name — the one copy, so the block
+# scan and the SIGNATURE scan (_signature_captures_name, #485) agree on what
+# a mention of `$x` / `@x` / `%x` looks like in text.  A mention can then be
+# attributed to one canonical variable and shadow-checked like a Symbol use
+# (M-F: `eval('$zzz')` under the sub's own preceding `my $zzz` refers to the
+# shadow — the eval capture alist binds it let-bound-first — not a capture of
+# the file lexical).  Without canon info the mention stays unattributable and
+# is conservatively a capture, as before.
+sub _canon_text_patterns {
+  my ($bare, $canons) = @_;
   my %canon_pat;
   if ($canons) {
     if ($canons->{"\$$bare"}) {
@@ -2751,8 +2890,16 @@ sub _block_captures_name {
       $canon_pat{"\%$bare"} = qr/$u/;
     }
   } else {
-    $canon_pat{''} = $re;   # canon unknown → unattributable, never discounted
+    # canon unknown → unattributable, never discounted
+    $canon_pat{''} = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
   }
+  return \%canon_pat;
+}
+
+sub _block_captures_name {
+  my ($self, $block, $bare, $canons) = @_;
+  my $re = qr/(?:[\$\@\%]|\$\#)\Q$bare\E\b/;
+  my %canon_pat = %{ _canon_text_patterns($bare, $canons) };
   my @heredocs = @{ $block->find('PPI::Token::HereDoc') || [] };
   # Cheap early-out: the bare name appears nowhere in the text (common case).
   return 0 unless $block->content =~ $re
@@ -4040,6 +4187,18 @@ sub _promote_captured {
     $self->{_file_lex_renamed}{$canon} = 1;
     return 1;
   }
+  # From here on the promotion RENAMES, and a signature that PPI handed over
+  # as ONE TOKEN (Token::Prototype — the feature pragma on the sub's own
+  # line, #455) carries no Symbol for `_rewrite_var_uses` to rename: a
+  # capture through such a signature's DEFAULT would keep reading the old
+  # name, silently.  Refuse instead, exactly like the `${x}` deref-block text
+  # shape below.  The identity branch above renames nothing, so it is safe
+  # for both PPI spellings and has already returned.
+  for my $psub (@psubs) {
+    next unless grep { $_->isa('PPI::Token::Prototype') } $psub->schildren;
+    return if $self->_signature_captures_name($psub, $bare, { $canon => 1 })
+      && _caprefuse($canon, 'signature default in an unrewritable Token::Prototype');
+  }
   # Sole HARD declaration of the bare name in this extent: only a same-level
   # (extent top-level) re-decl, or one the shadow machinery cannot scope (a
   # Compound head like `foreach my $x`), blocks the rename.  For a SCALAR
@@ -4175,8 +4334,10 @@ sub _captured_in_subs {
     # promoted names, and the sub then WROTE THE FILE LEXICAL: state leaked
     # across calls and the outer variable was clobbered (#265, silent wrong).
     # Deleting the blind loops makes the promoter and the gate agree, which
-    # is the standing rule (detector and rewriter share one resolver).
-    return 1 if $self->_block_captures_name($sub->block, $bare, { $canon => 1 });
+    # is the standing rule (detector and rewriter share one resolver) — and
+    # since #485 they agree through ONE function, so the promoter also sees
+    # the signature DEFAULTS and discounts the signature PARAMETERS.
+    return 1 if $self->_sub_captures_name($sub, $bare, { $canon => 1 });
   }
   return 0;
 }
@@ -6923,7 +7084,7 @@ sub _hoist_nested_sub {
     # IDENTITY (the name keeps its spelling), so both are looked up.
     next if grep { $self->{_file_lex_renamed}{"$_$bare"} } '$', '@', '%';
     die "Parser2 TODO: lexical '$bare' possibly captured by nested sub " . $sub->name . "\n"
-      if $self->_block_captures_name($sub->block, $bare, $by_bare{$bare});
+      if $self->_sub_captures_name($sub, $bare, $by_bare{$bare});
   }
   push @{ $self->{_hoisted_decls} },
     ['p-declare-sub', $self->_sub_name_for_emission($sub->name)];

@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 26;
 
 sub write_pl {
     my ($code) = @_;
@@ -189,6 +189,132 @@ PL
 both_agree(<<'PL', '#497 inverse: different names in two block packages, parenthesised and not');
 { package S01; use feature "signatures"; sub f ($x) { "f($x)" } print f(5), "\n"; }
 { package S02; use feature "signatures"; sub g ($x = 1) { "g($x)" } my $y = g 5; print "$y\n"; }
+PL
+
+# ---- #485: a signature DEFAULT is part of the sub's CAPTURE SET -----------
+#
+# The other half of the top-level-comma split above.  A default is an
+# expression evaluated INSIDE the sub, so `my $y = 5; sub f ($x = $y)` really
+# does capture the file lexical — and every capture question here scanned the
+# BLOCK, of which the signature is a SIBLING.  Nobody saw it: no refusal, no
+# promotion to a package cell, and the default read an unbound name (`f()`
+# where perl says `f(5)`).  `_sub_captures_name` is now the one resolver the
+# gate, the promoter and the nested-sub hoist share, and it asks the block AND
+# the signature.
+#
+# Shadowing INSIDE a signature is the left-parameter rule, probed vs perl
+# 5.40.3: a parameter is not in scope in its OWN default (`sub s1 ($x = $x)`
+# reads the outer $x) and a LATER parameter never is either.
+
+both_agree(<<'PL', '#485: a signature default reading a file lexical (the reproducer)');
+use feature "signatures";
+my $y = 5;
+sub f ($x = $y) { "f($x)" }
+print f(), "\n";
+print f(9), "\n";
+PL
+
+both_agree(<<'PL', '#485: ... spelled `//=` (perl 5.38+), including an explicit undef');
+use feature "signatures";
+my $y = 5;
+sub g ($x //= $y) { "g(" . (defined $x ? $x : "U") . ")" }
+print g(), "\n", g(0), "\n", g(undef), "\n";
+PL
+
+both_agree(<<'PL', '#485: ... spelled `||=`');
+use feature "signatures";
+my $y = 5;
+sub h ($x ||= $y) { "h($x)" }
+print h(), "\n", h(0), "\n", h(7), "\n";
+PL
+
+both_agree(<<'PL', '#485: TWO defaults, two file lexicals, the second reading the first param');
+use feature "signatures";
+my $y = 5;
+my $z = 11;
+sub m2 ($a = $y, $b = $z + $a) { "m2($a,$b)" }
+print m2(), "\n", m2(1), "\n", m2(1,2), "\n";
+PL
+
+both_agree(<<'PL', '#485: a default that CALLS a sub reading the lexical (already worked — the sub body is the capture)');
+use feature "signatures";
+my $y = 5;
+sub base { $y * 2 }
+sub k ($x = base()) { "k($x)" }
+print k(), "\n", k(1), "\n";
+PL
+
+both_agree(<<'PL', '#485: a parameter is NOT in scope in its OWN default — it reads the outer lexical');
+use feature "signatures";
+my $x = "OUT";
+sub s1 ($x = $x) { "s1($x)" }
+print s1(), "\n", s1("P"), "\n";
+PL
+
+both_agree(<<'PL', '#485: a LATER parameter is not in scope in an earlier default either');
+use feature "signatures";
+my $q = "OUT";
+sub s2 ($p = $q, $q = "PARAM") { "s2($p,$q)" }
+print s2(), "\n", s2("A"), "\n", s2("A","B"), "\n";
+PL
+
+# The REWRITER half, and it was silently wrong on its own: with a file lexical
+# of the parameter's name in scope, every rewriter that renamed that lexical
+# renamed the default's `$p` with it, because `_ref_shadowed` saw only the
+# parameter TOKEN as a declaration and not the parts to its left.  PCL printed
+# `n3(P,)` where perl prints `n3(P,P)`.  The `$a` spelling is the same bug
+# through a different rename (Pl::GlobalPartition's `__excl__` pass).
+both_agree(<<'PL', '#485: an EARLIER PARAMETER default, with a same-named file lexical (rewriter half)');
+use feature "signatures";
+my $p = "FILE";
+sub n3 ($p, $q = $p) { "n3($p,$q)" }
+print n3("P"), "\n", n3("P","Q"), "\n", "p=$p\n";
+PL
+both_agree(<<'PL', '#485: ... the same through the $a/$b exception rename');
+use feature "signatures";
+my $a = "FILE";
+sub n2 ($a, $b = $a) { "n2($a,$b)" }
+print n2("P"), "\n", n2("P","Q"), "\n", "a=$a\n";
+PL
+
+# A BLOCK extent promotes under a MANGLED name ($y__file__N), so this row is
+# the one that proves the rename reaches INTO the signature.
+both_agree(<<'PL', '#485: two block-scoped lexicals, two subs — the mangled promotion reaches the default');
+use feature "signatures";
+{ my $y = 5; sub f11 ($x = $y) { "f11($x)" } }
+{ my $y = 9; sub g11 ($x = $y) { "g11($x)" } }
+print f11(), "\n", g11(), "\n", f11(1), "\n";
+PL
+
+# ... and the SAME shape in the Token::Prototype spelling, where the signature
+# is ONE token with no Symbol for the rename to reach.  `_promote_captured`
+# refuses that combination outright rather than renaming the declaration and
+# leaving the default on the old name (which is what it did before the
+# refusal: `f12()` for perl's `f12(5)`).
+both_agree('use feature "signatures"; no warnings;' . "\n"
+         . '{ my $y = 5;' . "\n"
+         . '  use feature "signatures"; sub f12 ($x = $y) { "f12($x)" } }' . "\n"
+         . 'print f12(), "\n", f12(1), "\n";',
+           '#485: ... and in the Token::Prototype spelling of the same signature');
+
+# INVERSES: a default that names nothing lexical must not promote anything,
+# and `our`/`state` inside a default (v1's _parse_signature declares the cell)
+# must keep working.
+both_agree(<<'PL', '#485 inverse: a literal default and a default reading a GLOBAL of the same name');
+use feature "signatures";
+our $y = "GLOBAL";
+sub lit ($x = 42) { "lit($x)" }
+sub glob2 ($x = $main::y) { "glob2($x)" }
+print lit(), "\n", lit(1), "\n", glob2(), "\n";
+PL
+both_agree(<<'PL', '#485 inverse: `our` and `state` declarations INSIDE a default still work');
+use feature "signatures", "state";
+our $Z = "ZED";
+my $y = "FILE";
+sub d1 ($x = our $Z) { "d1($x)" }
+sub d2 ($x = state $n = "ST") { "d2($x)" }
+sub d3 ($x = $y, $w = $x) { "d3($x,$w)" }
+print d1(), "\n", d2(), "\n", d3(), "\n", d3("A"), "\n";
 PL
 
 # THE NEGATIVE THIS FILE DOES NOT ASSERT, and why: `sub t000 ($a)` written
