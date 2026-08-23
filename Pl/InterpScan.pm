@@ -117,6 +117,25 @@ my %KEYWORDS = map { $_ => 1 } qw(
 # (vetoed at the reference start, as perl's scan_const does).
 my $PUNCT_MAGIC = '!?.@/\\&\'`+;,|:%=-<>()[]~"';
 
+# The punctuation names whose `[` starts a SUBSCRIPT of the punctuation ARRAY,
+# rather than ending the reference (task #451).  perl's rule is the one that
+# makes `$-[0]` and `$+[0]` element-of-@-/@+ — it is not special to those two,
+# and `@?`/`@!`/`@.` … subscript the same way.  Probed one character at a time
+# against perl 5.40.3: `@X = (11,22,33); print "$X[1]"` gives 22 for every
+# character below, in the string AND in code.
+#
+# `^` IS DELIBERATELY ABSENT, and it is the reason this is its own set rather
+# than a reference to Pl::Parser's %PUNCT_ARRAY_CHARS.  That set is about the
+# CL SYMBOL SPELLING (which characters can be emitted bare), and `@^` is a
+# perfectly good array; this one is about perl's SUBSCRIPT rule, and `"$^[1]"`
+# does NOT read as an element — `$^` is the format-top-of-page name and the
+# `[` after it is not a subscript (probed).  Two sets, two questions.
+#
+# The CL-unsafe punctuation names (`@,` `@;` `@|` `@'` `@"` …) are absent for
+# the reason task #449 records: they need a pipe-quoted emission that does not
+# exist yet, so they must keep dropping loudly rather than start half-working.
+my $PUNCT_ARRAY_SUBSCRIPT = '?!./~&%=<>';
+
 # ── Whole-text driver ──────────────────────────────────────────────────────
 # Walk $text emitting an event per variable reference.  Escape skipping
 # mirrors the tokenizer: a backslash hides the next char from reference
@@ -323,7 +342,11 @@ sub _scan_dollar {
     my $ev = _ev(sigil => '$', form => 'magic', name => $next,
                  canon => undef, name_span => [$pos + 1, $pos + 2],
                  span => [$pos, $pos + 2]);
-    _scan_chain($text, $ev, $opt) if $next eq '+' || $next eq '-';
+    # `$+`/`$-` are %+/%-/@+/@- elements; the rest of the punctuation ARRAY
+    # family subscripts the same way (#451) — the set above says which.
+    _scan_chain($text, $ev, $opt)
+      if $next eq '+' || $next eq '-'
+      || index($PUNCT_ARRAY_SUBSCRIPT, $next) >= 0;
     return $ev;
   }
 

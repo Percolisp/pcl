@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 19;
 
 sub write_pl {
     my ($code) = @_;
@@ -277,4 +277,35 @@ is(emitted(q{while (<<>>) { print }}), emitted(q{while (<>) { print }}),
          '#452 inverse: a lexical handle is passed through, never quoted');
     like($cl, qr/\(p-readline 'FH6\)/,
          '#452 inverse: an unqualified bareword handle is unchanged');
+}
+
+# Task #451 (s438h): the INTERPOLATION twin of s427's punctuation-array work.
+# perl's rule — a `[` after a punctuation name subscripts the punctuation
+# ARRAY — is the one that makes `$-[0]` and `$+[0]` elements of @-/@+, and it
+# is not special to those two.  Pl::InterpScan's `$` arm continued into a
+# subscript chain for `+` and `-` only, so `"$?[1]"` left the subscript
+# LITERAL and printed `0[1]` — silent, with the scalar `$?` in front of it.
+#
+# THE SET WAS PROBED ONE CHARACTER AT A TIME against perl 5.40.3, and it is
+# NOT Pl::Parser's %PUNCT_ARRAY_CHARS: `^` is in that set (because `@^` is a
+# legal array and the character is CL-safe) but `"$^[1]"` does NOT subscript
+# in perl — `$^` is the format-top-of-page name.  Two sets, two questions.
+{
+    my $out = run_cl(join "\n",
+        '@? = (11,22,33); @. = (1,2,3); @/ = (4,5,6);',
+        'print "A:$?[1] B:$.[2] C:$/[0]\n";',
+        '"abc" =~ /b/; print "D:$-[0]:$+[0]\n";',
+        '@x = (); print "E:[$?[9]]\n";',
+        '');
+    is($out, "A:22 B:3 C:4\nD:1:2\nE:[]\n",
+       '#451: a punctuation ARRAY element interpolates (and @-/@+ still do)');
+}
+
+# The inverses.  A SPACE before the bracket ends the reference, so the scalar
+# is interpolated and `[1]` stays literal — perl prints "0 [1]" for `"$? [1]"`
+# with $? unset.  And `$^` keeps its old reading.
+{
+    my $out = run_cl(qq{\@? = (11,22,33);\nprint "F:\$? [1]\\n";\n});
+    is($out, "F:0 [1]\n",
+       '#451 inverse: a space ends the reference; the subscript stays literal');
 }
