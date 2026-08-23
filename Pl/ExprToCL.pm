@@ -798,7 +798,10 @@ sub _compile_ref_text_form {
   my $form = eval {
     require PPI::Document;
     require Pl::PExpr;
-    my $doc = PPI::Document->new(\$src);
+    # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
+    # `use` would be circular; a runtime require is a %INC lookup once loaded.
+    require Pl::Parser;
+    my $doc = Pl::Parser::fragment_doc($src);
     return undef if !$doc;
     my @stmts = grep { !$_->isa('PPI::Token::Whitespace') } $doc->children;
     return undef if !@stmts || !$stmts[0]->can('children');
@@ -3936,7 +3939,10 @@ sub _try_compile_subst_e {
   eval {
     require PPI::Document;
     require Pl::PExpr;
-    my $doc = PPI::Document->new(\$expr);
+    # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
+    # `use` would be circular; a runtime require is a %INC lookup once loaded.
+    require Pl::Parser;
+    my $doc = Pl::Parser::fragment_doc($expr);
 
     # Significant (non-whitespace) top-level statements
     my @stmts = grep { !$_->isa('PPI::Token::Whitespace') } $doc->children;

@@ -563,6 +563,37 @@ sub _ppi_parse {
   return $doc;
 }
 
+# THE FRAGMENT DOCUMENT (task #435).  Everywhere in this compiler that
+# re-parses a piece of source — an interpolated subscript, a `@{[ … ]}` block,
+# a spliced-in prologue, a renamed embedded span — builds its own
+# PPI::Document, and none of them ran the in-place token REPAIRS that
+# `_ppi_parse` applies to a whole file.  So a repair shipped at document level
+# was silently absent from every fragment: `"$Ｘ[$ｉ]"` read element `$ｉ` as
+# the symbolic reference ${"ｉ"} (undef → index 0, a SILENT WRONG) and
+# `"$Ｘ[$ｉ+1]"` died calling an undefined sub `ｉ`, because PPI splits `$ｉ`
+# into Cast + Word (ppi-upstream-bugs.md §23) and only `_merge_unicode_symbols`
+# puts it back together.
+#
+# The three passes below are exactly the ones `_ppi_parse` runs AFTER any
+# serialize+reparse: they swap token CLASSES in place and leave the text
+# untouched, which is what makes them safe on a fragment — a fragment is not a
+# program, so the passes that rewrite structure (signature desugaring,
+# prototype attributes, `__SUB__`) must NOT run here, and do not.
+#
+# NOT routed through here, deliberately: `_normalize_signature_text`, which
+# re-serialises token TEXT and drops comments.  These passes cannot change what
+# it produces (they preserve text exactly), so routing it would buy nothing and
+# cost a walk on a guarded path.
+sub fragment_doc {
+  my ($src, %opt) = @_;
+  my $doc = %opt ? _ppi_new($src, %opt) : PPI::Document->new(\$src);
+  return undef unless $doc;
+  _reclassify_bare_vwords($doc);
+  _merge_unicode_symbols($doc);
+  _merge_punct_array_symbols($doc);
+  return $doc;
+}
+
 # Drop trailing whitespace the PARSE invented (see the note in _ppi_parse).
 # Bounded and byte-exact: it stops the moment the document is no longer longer
 # than the source it came from, and only ever deletes WHITESPACE, so a document
@@ -691,7 +722,7 @@ sub _rewrite_current_sub {
 # Replace one element with the elements a fragment mini-parse produces.
 sub _replace_element {
   my ($el, $text) = @_;
-  my $ndoc = PPI::Document->new(\$text) or return 0;
+  my $ndoc = fragment_doc($text) or return 0;
   my @new = map { $_->isa('PPI::Statement') ? $_->children : $_ }
             $ndoc->children;
   $_->remove for @new;
@@ -813,7 +844,7 @@ sub _extract_prototype_attributes {
       }
       _delete_attribute_and_colon($attr);
       my $text = " __pcl_set_prototype(\\&$name, '$quoted');";
-      my $ndoc = PPI::Document->new(\$text) or next;
+      my $ndoc = fragment_doc($text) or next;
       my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
                $ndoc->children;
       $_->remove for @el;
@@ -849,7 +880,7 @@ sub _extract_prototype_attributes {
       }
       my $text = "__pcl_set_prototype("
                . join('', map { $_->content } @span) . ", '$quoted')";
-      my $ndoc = PPI::Document->new(\$text) or next;
+      my $ndoc = fragment_doc($text) or next;
       my @el = map { $_->isa('PPI::Statement') ? $_->children : $_ }
                $ndoc->children;
       $_->remove for @el;
@@ -957,7 +988,7 @@ sub _desugar_anon_signatures_once {
     my $prologue = $self->_anon_signature_prologue($text);
     next unless defined $prologue;
 
-    my $pdoc = PPI::Document->new(\$prologue) or next;
+    my $pdoc = fragment_doc($prologue) or next;
     my @pel  = $pdoc->children;
     next unless @pel;
     $_->remove for @pel;
@@ -10119,7 +10150,7 @@ sub _compile_default_expr {
 
   my $result;
   eval {
-    my $doc = PPI::Document->new(\$expr);
+    my $doc = fragment_doc($expr);
     my @stmts = $doc->children;
     return undef unless @stmts;
 

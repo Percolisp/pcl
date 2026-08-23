@@ -308,7 +308,10 @@ sub _ev_braced {
 # read the fragment.
 sub _interp_reparse {
   my ($self, $parser, $src) = @_;
-  my $doc = PPI::Document->new(\$src);
+  # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
+  # `use` would be circular; a runtime require is a %INC lookup once loaded.
+  require Pl::Parser;
+  my $doc = Pl::Parser::fragment_doc($src);
   return undef unless $doc;
   $self->_anchor($doc);
   my $stmt = $doc->find_first('PPI::Statement');
@@ -570,7 +573,10 @@ sub _parse_postfix_deref {
     $end = $i;
   }
   my $expr_text = substr($content, $expr_start, $end - $expr_start);
-  my $doc = PPI::Document->new(\$expr_text);
+  # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
+  # `use` would be circular; a runtime require is a %INC lookup once loaded.
+  require Pl::Parser;
+  my $doc = Pl::Parser::fragment_doc($expr_text);
   $self->{_ppi_docs} //= [];
   push @{$self->{_ppi_docs}}, $doc;
   my $stmt = $doc && $doc->find_first('PPI::Statement');

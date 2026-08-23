@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 25;
+plan tests => 28;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -272,3 +272,35 @@ is(run_bytes(encode_utf8(
    . "print scalar(\@ms), \"\\n\";\n")),
    "16\n1 2\nblk\n3\n",
    'a space before the subscript of a repaired non-ASCII symbol (#422.2)');
+
+# Task #435 (s438f): EVERY FRAGMENT RE-PARSE now runs the in-place token
+# repairs, via Pl::Parser::fragment_doc.  The document-level repair
+# (_merge_unicode_symbols, #410) shipped in s420 and put `$ｉ` — which PPI
+# splits into Cast + Word, ppi-upstream-bugs.md §23 — back together for a whole
+# FILE; every interpolated subscript, `@{[ … ]}` block and spliced prologue
+# built its own PPI::Document and got none of it.  So a non-ASCII name INSIDE
+# a re-parsed fragment read as the symbolic reference ${"ｉ"} (undef → index 0,
+# a SILENT WRONG) or died calling an undefined sub of that name.
+#
+# The last two rows are the ASCII inverse: the repairs preserve text exactly
+# and are no-ops on ASCII, so the same shapes must be untouched.
+is(run_bytes(encode_utf8(
+     "use utf8;\n"
+   . "our \@\x{ff38} = (1,2,3); our %\x{ff28} = (k => 8); our \$\x{ff36} = 1;\n"
+   . "my \$\x{ff49} = 1; my \$\x{ff4b} = 'k';\n"
+   . "print \"\$\x{ff38}\[\$\x{ff49}]\", \" \", \"\$\x{ff28}\{\$\x{ff4b}}\", \"\\n\";\n")),
+   "2 8\n",
+   'a non-ASCII name as the SUBSCRIPT of an interpolated element (#435)');
+
+is(run_bytes(encode_utf8(
+     "use utf8;\n"
+   . "our \@\x{ff38} = (1,2,3); our \$\x{ff36} = 1;\n"
+   . "my \$\x{ff49} = 1;\n"
+   . "print \"\$\x{ff38}\[\$\x{ff49}+1]\", \" \", \"\@\{[ \$\x{ff38}\[0] + \$\x{ff36} ]}\", \"\\n\";\n")),
+   "3 2\n",
+   '... in an expression subscript and inside an embedded block (#435: both used to die)');
+
+is(run_bytes('our @X = (1,2,3); our %H = (k => 8); my $i = 1; my $k = "k";'
+           . ' print "$X[$i] $H{$k} $X[$i+1] @{[ $X[0] + 1 ]}\n";'),
+   "2 8 3 2\n",
+   'the ASCII inverse: identical shapes, untouched by the fragment repairs');

@@ -4471,7 +4471,10 @@ sub _fix_lexsub_interp {
 # nothing in it was a use of a lexical sub.
 sub _rename_lexsub_in_code {
   my ($code, $ren, $word_is_term) = @_;
-  my $mini = eval { PPI::Document->new(\$code) } or return undef;
+  # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
+  # `use` would be circular; a runtime require is a %INC lookup once loaded.
+  require Pl::Parser;
+  my $mini = eval { Pl::Parser::fragment_doc($code) } or return undef;
   my $hit = 0;
   my %call;
   for my $t ($mini->tokens) {
