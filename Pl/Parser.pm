@@ -2260,81 +2260,13 @@ sub _process_expression_statement {
     my @expr_parts = @parts[0 .. $modifier_idx - 1];
     my @cond_parts = @parts[$modifier_idx + 1 .. $#parts];
 
-    # Unwrap PPI::Structure::Condition to get the inner expression children.
-    # PPI wraps postfix-if conditions in Condition nodes: `if ($x > 1)` → Condition(...)
-    if (@cond_parts == 1 && ref($cond_parts[0]) eq 'PPI::Structure::Condition') {
-      @cond_parts = grep {
-        ref($_) ne 'PPI::Token::Whitespace'
-      } $cond_parts[0]->children;
-    }
-
     my $expr_cl = $self->_parse_expression(\@expr_parts, $stmt, VOID_CTX);
     # Drop inline-leading indent: expr/cond are spliced onto the same line as
     # "(p-if "/"(p-foreach " below, so a leading prefix makes a weird gap.
     $expr_cl =~ s/^[ \t]+// if defined $expr_cl;
 
-    # Generate appropriate control structure
-    # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
-    # not p-for (C-style for loop)
-    my $cl_modifier = $modifier;
-    if ($modifier eq 'for' || $modifier eq 'foreach') {
-      $cl_modifier = 'foreach';
-      # The list must be in LIST_CTX (= 1) so split() returns elements not count
-      # An all-single-scalar list takes the `(vector …)` shape at every k, not
-      # the run-time flattener — Parser.pm's _foreach_scalar_elements has the
-      # rule.  Same decision as the block-form site in Parser2, one resolver.
-      my @el = _foreach_scalar_elements(\@cond_parts);
-      my $cond_cl;
-      if (@el > 1) {
-        # Each element run is lowered exactly once; the whole list never is.
-        # Alias VERDICTS come off the untouched tokens BEFORE any lowering
-        # (PExpr's cleanup mutates them), then map onto the lowered elements
-        # by position — the sole-element rewrite, applied k times.
-        my @hd = map { [ _foreach_alias_rewrite($_) ] } @el;
-        my @forms;
-        for my $i (0 .. $#el) {
-          my $f = $self->_parse_expression($el[$i], $stmt, 1);
-          $f =~ s/^[ \t]+// if defined $f;
-          $f = _apply_alias_head($f, @{ $hd[$i] })
-            // die "foreach alias: element head "
-                 . $hd[$i][0] . " not outermost in: $f\n"
-            if @{ $hd[$i] };
-          push @forms, $f;
-        }
-        $cond_cl = '(vector ' . join(' ', @forms) . ')';
-      }
-      else {
-        $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
-        $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
-        # `$_ = "w" for ($h{k})` aliases the live element exactly as the block
-        # form does — same rewrite, same helper (#263).
-        $cond_cl = _apply_foreach_alias_rewrite($cond_cl, \@cond_parts);
-        $cond_cl = "(vector $cond_cl)" if @el;
-      }
-      $cl_code = "(p-foreach (\$_ $cond_cl) $expr_cl)";
-    }
-    else {
-      my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
-      # Strip leading indent BEFORE the ^\(p-... auto-defined regexes below,
-      # which are anchored and would miss a space-prefixed cond.
-      $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
-      # Apply Perl's auto-defined() insertion for while-modifier loops.
-      # while ($x = readdir/each/readline/glob) terminates on undef, not on false.
-      $cond_cl = $self->_auto_defined_cond($cond_cl) if $cl_modifier eq 'while';
-      # `do BLOCK while/until COND` is a POST-test loop in Perl: BLOCK always
-      # runs at least once and the condition is tested afterwards.  Detect the
-      # `do { ... }` expression (Word 'do' + Structure::Block) and emit the
-      # post-test macro instead of the pre-test p-while/p-until.
-      if (($cl_modifier eq 'while' || $cl_modifier eq 'until')
-          && @expr_parts == 2
-          && ref($expr_parts[0]) eq 'PPI::Token::Word'
-          && $expr_parts[0]->content eq 'do'
-          && ref($expr_parts[1]) eq 'PPI::Structure::Block') {
-        $cl_code = "(p-do-$cl_modifier $cond_cl $expr_cl)";
-      } else {
-        $cl_code = "(p-$cl_modifier $cond_cl $expr_cl)";
-      }
-    }
+    $cl_code = $self->_wrap_statement_modifier($expr_cl, $modifier, \@cond_parts,
+                                               $stmt, \@expr_parts);
   }
   else {
     # No modifier - bare expression statement; result is normally discarded
@@ -3477,27 +3409,141 @@ sub _extract_parent_classes {
   return grep { defined $_ && $_ ne '' } @parents;
 }
 
-# Process 'local' variable declaration - dynamic scoping
-# Emits a (let ...) that stays open until block end
-# Split a trailing `if`/`unless` statement modifier off the RHS parts of a
-# `local LHS = RHS if/unless COND` declaration.  A bare `if`/`unless` Word can
-# only be the statement modifier here (ternaries use `?:`, hash keys live inside
-# a Subscript), so the first one ends the value expression.  Truncates
-# @$rhs_parts to just the value and returns ($modifier, \@cond_parts); ('', [])
-# when there is no modifier.
-sub _split_local_init_modifier {
-  my ($self, $rhs_parts) = @_;
-  for my $i (0 .. $#$rhs_parts) {
-    my $p = $rhs_parts->[$i];
-    if (ref($p) eq 'PPI::Token::Word' && $p->content =~ /^(?:if|unless)$/) {
-      my $mod  = $p->content;
-      my @cond = @$rhs_parts[$i + 1 .. $#$rhs_parts];
-      splice(@$rhs_parts, $i);
-      return ($mod, \@cond);
-    }
+# ── THE STATEMENT-MODIFIER FAMILY (task #464) ────────────────────────────────
+# `EXPR if COND` is the same construct whatever STATEMENT CLASS carries it, so
+# the two halves of handling one live here, in one copy each: SPLIT the trailing
+# modifier off a token run, and WRAP an already-lowered form in it.
+#
+# They exist because the split used to live INSIDE
+# _process_expression_statement, while every per-class handler that slices its
+# statement's tokens by position (`require` + everything after it; `local(LHS)
+# = ` + everything after the `=`) handed the modifier straight to
+# _parse_expression.  The expression parser then had a bare `if` Word with no
+# operator around it and answered "Bug. Fell through. Missing case: [" — the
+# WHOLE statement dropped, silently in module mode:
+#     require $m if delete $INC{$m};              (Sub::Uplevel)
+#     require $file unless $INC{$file};           (Test2::API::Context)
+#     local($\, $,) = (undef, '') if $\ || $,;    (Test2::Formatter::TAP)
+# while `require $m;`, `require Foo if COND;` (the BAREWORD spelling, which had
+# its own copy in _include_statement_modifier) and `local $x = V if COND;` (the
+# single-variable branch, which had this splitter) all worked.
+
+# Split a trailing statement modifier off a token run.  Truncates @$parts to the
+# part BEFORE the modifier and returns ($modifier, \@cond_parts); ('', []) when
+# there is none.  A bare modifier Word can only be the statement modifier in the
+# runs this is called on (ternaries use `?:`, hash keys live inside a Subscript,
+# a compound `if (…) {…}` is a different PPI statement class), so the FIRST one
+# ends the expression.
+#
+# $accept is the set of modifier words the CALLER can lower, and a modifier
+# outside it reads as "no modifier" — the run stays whole and the caller behaves
+# exactly as it did before.  That is not laziness: `local $x = 5 for (1,2)`
+# localizes and RESTORES once per iteration (probed 5.40.3 — the value does not
+# survive the statement), which the open-let shape `local` compiles to cannot
+# express, so stripping the `for` there would turn a loud drop into a silent
+# wrong.  Default: if/unless only.
+sub _split_trailing_modifier {
+  my ($self, $parts, $accept) = @_;
+  $accept ||= { if => 1, unless => 1 };
+  for my $i (0 .. $#$parts) {
+    my $p = $parts->[$i];
+    next unless ref($p) eq 'PPI::Token::Word';
+    next unless Pl::PExpr::Config::is_statement_modifier($p->content);
+    return ('', []) unless $accept->{ $p->content };
+    my $mod  = $p->content;
+    my @cond = @$parts[$i + 1 .. $#$parts];
+    splice(@$parts, $i);
+    return ($mod, \@cond);
   }
   return ('', []);
 }
+
+# All six modifier words — for a caller that can lower every one of them.
+sub _all_statement_modifiers {
+  return { map { $_ => 1 } qw(if unless while until for foreach) };
+}
+
+# Wrap an already-lowered statement form in its trailing statement modifier and
+# return the CL text.  $expr_parts is the modifier-free token run when the
+# caller has one; only the `do BLOCK while COND` post-test detection reads it,
+# so a caller without a token run passes undef.
+sub _wrap_statement_modifier {
+  my ($self, $expr_cl, $modifier, $cond_parts, $stmt, $expr_parts) = @_;
+  my @cond_parts = @$cond_parts;
+  $expr_parts ||= [];
+
+  # Unwrap PPI::Structure::Condition to get the inner expression children.
+  # PPI wraps postfix-if conditions in Condition nodes: `if ($x > 1)` → Condition(...)
+  if (@cond_parts == 1 && ref($cond_parts[0]) eq 'PPI::Structure::Condition') {
+    @cond_parts = grep {
+      ref($_) ne 'PPI::Token::Whitespace'
+    } $cond_parts[0]->children;
+  }
+
+  # Generate appropriate control structure
+  # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
+  # not p-for (C-style for loop)
+  my $cl_modifier = $modifier;
+  if ($modifier eq 'for' || $modifier eq 'foreach') {
+    $cl_modifier = 'foreach';
+    # The list must be in LIST_CTX (= 1) so split() returns elements not count
+    # An all-single-scalar list takes the `(vector …)` shape at every k, not
+    # the run-time flattener — Parser.pm's _foreach_scalar_elements has the
+    # rule.  Same decision as the block-form site in Parser2, one resolver.
+    my @el = _foreach_scalar_elements(\@cond_parts);
+    my $cond_cl;
+    if (@el > 1) {
+      # Each element run is lowered exactly once; the whole list never is.
+      # Alias VERDICTS come off the untouched tokens BEFORE any lowering
+      # (PExpr's cleanup mutates them), then map onto the lowered elements
+      # by position — the sole-element rewrite, applied k times.
+      my @hd = map { [ _foreach_alias_rewrite($_) ] } @el;
+      my @forms;
+      for my $i (0 .. $#el) {
+        my $f = $self->_parse_expression($el[$i], $stmt, 1);
+        $f =~ s/^[ \t]+// if defined $f;
+        $f = _apply_alias_head($f, @{ $hd[$i] })
+          // die "foreach alias: element head "
+               . $hd[$i][0] . " not outermost in: $f\n"
+          if @{ $hd[$i] };
+        push @forms, $f;
+      }
+      $cond_cl = '(vector ' . join(' ', @forms) . ')';
+    }
+    else {
+      $cond_cl = $self->_parse_expression(\@cond_parts, $stmt, 1);
+      $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
+      # `$_ = "w" for ($h{k})` aliases the live element exactly as the block
+      # form does — same rewrite, same helper (#263).
+      $cond_cl = _apply_foreach_alias_rewrite($cond_cl, \@cond_parts);
+      $cond_cl = "(vector $cond_cl)" if @el;
+    }
+    return "(p-foreach (\$_ $cond_cl) $expr_cl)";
+  }
+
+  my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
+  # Strip leading indent BEFORE the ^\(p-... auto-defined regexes below,
+  # which are anchored and would miss a space-prefixed cond.
+  $cond_cl =~ s/^[ \t]+// if defined $cond_cl;
+  # Apply Perl's auto-defined() insertion for while-modifier loops.
+  # while ($x = readdir/each/readline/glob) terminates on undef, not on false.
+  $cond_cl = $self->_auto_defined_cond($cond_cl) if $cl_modifier eq 'while';
+  # `do BLOCK while/until COND` is a POST-test loop in Perl: BLOCK always
+  # runs at least once and the condition is tested afterwards.  Detect the
+  # `do { ... }` expression (Word 'do' + Structure::Block) and emit the
+  # post-test macro instead of the pre-test p-while/p-until.
+  if (($cl_modifier eq 'while' || $cl_modifier eq 'until')
+      && @$expr_parts == 2
+      && ref($expr_parts->[0]) eq 'PPI::Token::Word'
+      && $expr_parts->[0]->content eq 'do'
+      && ref($expr_parts->[1]) eq 'PPI::Structure::Block') {
+    return "(p-do-$cl_modifier $cond_cl $expr_cl)";
+  }
+  return "(p-$cl_modifier $cond_cl $expr_cl)";
+}
+
+# Process 'local' variable declaration - dynamic scoping
+# Emits a (let ...) that stays open until block end
 
 # Build the init form for a conditional `local LHS = RHS if/unless COND`.
 # Perl localizes only when the condition selects RHS; otherwise the slot keeps
@@ -3581,25 +3627,20 @@ sub _process_local_declaration {
     my $has_init = grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '=' } @non_ws;
     if ($has_init) {
       my @rhs_parts;
-      my @cond_parts;
-      my $modifier;        # 'if' / 'unless' statement modifier, if present
       my $past_eq = 0;
       for my $p (@non_ws) {
         if (!$past_eq && ref($p) eq 'PPI::Token::Operator' && $p->content eq '=') {
           $past_eq = 1;
           next;
         }
-        next unless $past_eq;
-        # A trailing `if`/`unless` bareword is the statement modifier (it cannot
-        # appear inside a value expression): `local *_ = RHS if COND`.
-        if (!$modifier && ref($p) eq 'PPI::Token::Word'
-            && $p->content =~ /^(?:if|unless)$/) {
-          $modifier = $p->content;
-          next;
-        }
-        if ($modifier) { push @cond_parts, $p; }
-        else           { push @rhs_parts,  $p; }
+        push @rhs_parts, $p if $past_eq;
       }
+      # A trailing `if`/`unless` bareword is the statement modifier (it cannot
+      # appear inside a value expression): `local *_ = RHS if COND`.  One
+      # splitter for every `local` shape — see _split_trailing_modifier.
+      my ($modifier, $cond_parts) = $self->_split_trailing_modifier(\@rhs_parts);
+      $modifier = undef if $modifier eq '';
+      my @cond_parts = @$cond_parts;
       my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
       if ($modifier) {
         # Conditional local (`local *foo = RHS if COND`): only localize+assign
@@ -3736,7 +3777,7 @@ sub _process_local_declaration {
       # Strip a trailing `if`/`unless` statement modifier from the RHS so it does
       # not leak into the value parse (which fell through to a "Missing case" die).
       my ($ld_mod, $ld_cond) = $has_init
-        ? $self->_split_local_init_modifier(\@rhs_parts) : ('', []);
+        ? $self->_split_trailing_modifier(\@rhs_parts) : ('', []);
       # Slice form (multiple keys): the RHS is a list assignment — parse it in
       # LIST_CTX so a literal (a, b) emits (vector a b), not a scalar progn.
       # (The old runtime (if *wantarray* …) shape hid this; gen_progn now
@@ -3959,13 +4000,37 @@ sub _process_local_declaration {
   my @bindings;
   my $use_let_star = 0;
   my $local_tail_cl;          # #138: `local $x = A, B` — B, emitted in the let
+
+  # `local(LHS, …) = RHS if/unless COND` — the LIST-assignment shape (task
+  # #464).  The single-variable branch below has stripped its modifier since
+  # #197; this one never did, so the modifier stayed in the RHS token run, the
+  # expression parser was asked to read `(undef, "") if $\ || $,`, and the
+  # WHOLE statement was dropped (Test2::Formatter::TAP, silently in module
+  # mode).  The split has to happen HERE, before the bindings are built,
+  # because the CONDITION decides what each localized slot starts out holding
+  # — see the modifier arm of the bare/multiple branch below.
+  my ($mmod, $mcond, @mrhs) = ('', []);
+  if ($init_idx >= 0 && @vars > 1) {
+    @mrhs = grep { ref($_) ne 'PPI::Token::Whitespace' }
+                 @$parts[($init_idx + 1) .. $#$parts];
+    ($mmod, $mcond) = $self->_split_trailing_modifier(\@mrhs);
+  }
+  # ONE evaluation of the condition, in a temporary the RHS binding and the
+  # gated assignment both read: perl evaluates a statement modifier's condition
+  # exactly once, and `local($a,$b) = f() if g()` runs g() before f() (probed).
+  my $mcond_tmp;
+  if ($mmod) {
+    $self->{_local_counter} //= 0;
+    $mcond_tmp = "pcl-local-cond-" . $self->{_local_counter}++;
+  }
+
   if ($init_idx >= 0 && @vars == 1) {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
 
     # Strip a trailing `if`/`unless` statement modifier (see element branch).
-    my ($lmod, $lcond) = $self->_split_local_init_modifier(\@rhs_parts);
+    my ($lmod, $lcond) = $self->_split_trailing_modifier(\@rhs_parts);
 
     # #138: `local $x = A, B;` is `(local $x = A), B` — assignment binds
     # tighter than `,`/`=>`/`or`/`and`/`xor`, so the tail is NOT part of the
@@ -4048,21 +4113,37 @@ sub _process_local_declaration {
   else {
     # Bare local or multiple vars - just shadow with nil/empty.
     # Skip undef markers (they are skip slots, not real variables).
+    #
+    # …EXCEPT under a false `if`/`unless` modifier, where perl does not execute
+    # the statement at all and the slot must therefore keep the value it
+    # already has.  PCL's `local` is an always-open let / p-local-cell, so
+    # "do not localize" is spelled "localize to a COPY OF THE CURRENT VALUE and
+    # skip the assignment" — observationally identical, since a slot saved and
+    # restored unchanged is a slot nothing happened to.  Under a TRUE condition
+    # the gated (p-list-= …) below overwrites every element anyway (a short RHS
+    # writes undef, as perl does), so the starting value is unobservable there.
+    # Same trick as the single-variable branch's _conditional_local_init, in
+    # the shape a LIST assignment needs (there is no single rvalue to compare).
+    my $keep = $mmod ? 1 : 0;
     for my $var (@vars) {
       next if $var eq '(p-undef)';  # undef slot: no binding needed
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($var eq '$!' || $var eq '|$!|') {
         # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
-        push @bindings, ["pcl::*p-stored-errno*", "0"];
+        push @bindings, ["pcl::*p-stored-errno*",
+                         $keep ? "pcl::*p-stored-errno*" : "0"];
       }
       elsif ($sigil eq '@') {
-        push @bindings, ["$var", "(make-array 0 :adjustable t :fill-pointer 0)"];
+        push @bindings, ["$var", $keep ? "(p-copy-array $var)"
+                                       : "(make-array 0 :adjustable t :fill-pointer 0)"];
       }
       elsif ($sigil eq '%') {
-        push @bindings, ["$var", "(make-hash-table :test 'equal)"];
+        push @bindings, ["$var", $keep ? "(p-copy-hash $var)"
+                                       : "(make-hash-table :test 'equal)"];
       }
       else {
-        push @bindings, ["$var", "(make-p-box nil)"];
+        push @bindings, ["$var", $keep ? "(p-box-for-local (unbox $var))"
+                                       : "(make-p-box nil)"];
       }
     }
   }
@@ -4074,13 +4155,26 @@ sub _process_local_declaration {
   # Use let* with the RHS as the first binding, then the fresh variable slots.
   my ($rhs_tmp_cl);
   if ($init_idx >= 0 && @vars > 1) {
-    my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
-    @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
-    my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt, 1) // 'nil';  # 1 = LIST_CTX
+    # @mrhs is the RHS run with any if/unless modifier already split off above.
+    my $rhs_cl = $self->_parse_expression(\@mrhs, $stmt, 1) // 'nil';  # 1 = LIST_CTX
     $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
+    # Under a modifier the RHS must not run when the condition is false: perl
+    # never reaches the statement, so its side effects never happen (probed —
+    # `local($a,$b) = r() if 0` does not call r()).
+    $rhs_cl = "(if $mcond_tmp $rhs_cl nil)" if $mmod;
     $self->{_local_counter} //= 0;
     $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;
     unshift @bindings, ["$rhs_tmp_cl", "$rhs_cl"];
+    # …and the condition itself is evaluated FIRST, once, while every localized
+    # slot still holds its old value.
+    if ($mmod) {
+      my $cond_cl = $self->_parse_expression($mcond, $stmt) // 'nil';
+      $cond_cl =~ s/^[ \t]+//;
+      unshift @bindings, [$mcond_tmp,
+                          $mmod eq 'unless' ? "(not (p-true-p $cond_cl))"
+                                            : "(p-true-p $cond_cl)"];
+      $use_let_star = 1;
+    }
   }
 
   # Split by the partition (task #289).  ORDINARY package globals live in a
@@ -4163,7 +4257,11 @@ sub _process_local_declaration {
 
   if ($rhs_tmp_cl) {
     my $lhs_cl = "(vector " . join(" ", @vars) . ")";
-    $self->_emit("(p-list-= $lhs_cl $rhs_tmp_cl)");
+    my $assign = "(p-list-= $lhs_cl $rhs_tmp_cl)";
+    # A false modifier condition means the statement did not run: the slots
+    # were localized to their own current values above, so skipping the
+    # assignment leaves every one of them exactly as it was.
+    $self->_emit($mmod ? "(when $mcond_tmp $assign)" : $assign);
   }
   elsif ($init_idx >= 0 && @vars == 1) {
     # Single array/hash local with init: emit the var as the default return value.
@@ -8054,6 +8152,27 @@ sub _process_include_statement {
     shift @tokens while @tokens && $tokens[0]->isa('PPI::Token::Whitespace');
     pop @tokens while @tokens && $tokens[-1]->isa('PPI::Token::Whitespace');
 
+    # A trailing statement modifier belongs to the STATEMENT, not to the
+    # require's ARGUMENT (task #464).  Splitting it off here — before any of
+    # the three shapes below reads @tokens — is what stops `require $m if
+    # delete $INC{$m}` from asking the expression parser to make sense of
+    # `$m if delete $INC{$m}`, which it cannot: the statement was DROPPED.
+    # All six modifiers are lowerable here because `require` is an ordinary
+    # runtime op with no scope of its own, so the wrapper's p-if / p-unless /
+    # p-while / p-until / p-foreach say exactly what perl says (unlike
+    # `local`, whose let must stay open past the modifier — see
+    # _split_trailing_modifier).  The BAREWORD spelling `require Foo if COND`
+    # is handled earlier, by _include_statement_modifier, which must look for
+    # the LAST if/unless because `use if COND, MODULE` names a real pragma.
+    my ($rmod, $rcond) =
+      $self->_split_trailing_modifier(\@tokens, $self->_all_statement_modifiers);
+    my $wrap = sub {
+      my ($form) = @_;
+      return $rmod
+        ? $self->_wrap_statement_modifier($form, $rmod, $rcond, $stmt)
+        : $form;
+    };
+
     if (@tokens) {
       # Version number (require 5.007, require v5.10, require 10.0.2): a
       # runtime check that dies when the version exceeds the running perl's.
@@ -8062,7 +8181,7 @@ sub _process_include_statement {
                                && $tokens[0]->content =~ /^v\d/))) {
         my $lit = $tokens[0]->content;
         $lit =~ s/(["\\])/\\$1/g;
-        $self->_emit("(p-require-version \"$lit\")");
+        $self->_emit($wrap->("(p-require-version \"$lit\")"));
         $self->_emit("");
         return;
       }
@@ -8074,7 +8193,11 @@ sub _process_include_statement {
       # when the quote does not interpolate (single-quoted / q{}) OR has no
       # sigils; otherwise fall through to the runtime expression path below,
       # which lowers the interpolation to (p-string-concat ...).
-      if (@tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
+      # A modifier makes it a RUNTIME conditional/loop, so the compile-time
+      # (p-eval-always …) reading is wrong for it — `require "f.pl" if COND`
+      # falls through to the expression path below, where a non-interpolating
+      # Quote lowers to the same string literal and the wrapper gates it.
+      if (!$rmod && @tokens == 1 && $tokens[0]->isa('PPI::Token::Quote')) {
         my $q = $tokens[0];
         my $interpolating = $q->isa('PPI::Token::Quote::Double')
                          || $q->isa('PPI::Token::Quote::Interpolate');
@@ -8098,8 +8221,11 @@ sub _process_include_statement {
       # Use the parser's _parse_expression method
       my $expr_cl = $self->_parse_expression(\@tokens);
       if ($expr_cl) {
+        # Only when it is about to be spliced onto a `(p-if …` line: the
+        # unwrapped emission stays byte-for-byte what it always was.
+        $expr_cl =~ s/^[ \t]+// if $rmod;
         $self->_emit(";; $perl_code");
-        $self->_emit("(p-require-file $expr_cl)");
+        $self->_emit($wrap->("(p-require-file $expr_cl)"));
         $self->_emit("");
         return;
       }

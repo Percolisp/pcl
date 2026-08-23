@@ -94,11 +94,9 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 78 files, 178 drops -- 4 perl-tests files (5
-# drops), 20 companion files (70), 9 cpan-tests modules (15), 42 cpan-tests
-# TOTAL after the edits below: 80 files, 183 drops -- 4 perl-tests files (5
-# drops), 23 companion files (77), 8 cpan-tests modules (13), 42 cpan-tests
-# dist test files (83), 3 board modules (5), ZERO in lib/.  (At the s399 measurement, over three populations:
+# TOTAL after the edits below: 76 files, 174 drops -- 4 perl-tests files (5
+# drops), 23 companion files (77), 6 cpan-tests modules (7), 42 cpan-tests
+# dist test files (83), 1 board module (2), ZERO in lib/.  (At the s399 measurement, over three populations:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
@@ -139,6 +137,41 @@
 #         files shows exactly these two DIFF, corpus-diff IDENTICAL over 111,
 #         lib A/B SAME=21, and a text scan of all six populations finds the
 #         shape in no other file.  Rows: t/op/universal.t C_ok 61 -> 79.
+#   s441b NINE drops REMOVED and FOUR FILES CLEARED, by task #464: a trailing
+#         STATEMENT MODIFIER on a statement class whose lowering slices the
+#         statement's tokens by position.  ONE cause: the modifier split lived
+#         inside _process_expression_statement, so `require` + everything after
+#         it, and `local(LHS) =` + everything after the `=`, handed the
+#         modifier straight to the expression parser -- which then had a bare
+#         `if` Word with no operator around it and answered "Bug. Fell through.
+#         Missing case: [".  Two shared halves now, one copy each in
+#         Pl/Parser.pm: _split_trailing_modifier (take it off, with the set of
+#         words THIS caller can lower) + _wrap_statement_modifier (wrap the
+#         lowered form).  `require` accepts all six modifiers -- it is an
+#         ordinary runtime op, so p-if/p-unless/p-while/p-until/p-foreach say
+#         exactly what perl says; `local` accepts only if/unless, because perl
+#         restores a `local ... for (1,2)` at the end of each iteration and
+#         PCL's open let cannot express that, so a loop modifier there keeps
+#         DROPPING (loudly) rather than becoming a silent wrong.
+#           Test2/API/Context.pm            2 -> 1   (line 20, require unless)
+#           Test2/API/InterceptResult.pm    1 -> 0
+#           Test2/API/InterceptResult/Event.pm 3 -> 1 (lines 90 + 138)
+#           Test2/Formatter/TAP.pm          2 -> 0   (lines 111 + 155, local LIST)
+#           board Sub/Uplevel.pm            1 -> 0   (line 49, require if)
+#         Verified over ALL FOUR populations vs 61ea4b5: corpus-diff IDENTICAL
+#         (111 files, drops 5), lib A/B SAME=22, perl-t A/B SAME=528, cpan A/B
+#         402 files with exactly those four as the DIFFs (RCDIFF=0 throughout).
+#         Guard Pl/t/stmt-modifier-01.t (12 rows; every expectation re-run under
+#         real perl, and one row asserts the loop-modifier drop is still loud),
+#         inverse-run on the base Pl/Parser.pm = 22 failing rows.  80/183 ->
+#         76/174.
+#         TWO ROWS IN THIS EDIT ARE NOT THIS CHANGE'S, and are named so nobody
+#         attributes them to it: board Text/Balanced.pm's 2 drops (#457) were
+#         ALREADY ZERO at 7e6d1eb -- measured with the base Pl/Parser.pm in
+#         place -- so they left in one of s438b..s438i and were never
+#         re-measured because the board population is opt-in; and
+#         Text-CSV t/01_is_pp.t's message TEXT changed with s440's Data::Dump
+#         -> Data::Dumper switch in the diagnostics (its count is unmoved at 2).
 #   s441b TWO drops REMOVED, ONE FILE CLEARED, by task #466: a MAGIC scalar in
 #         the FILEHANDLE slot of print/printf/say.  perl's grammar is
 #         `listop: LSTOP indirob listexpr` with `indirob: WORD | scalar |
@@ -519,13 +552,9 @@
 #         the old glob was two levels deep — and both measure zero.
 #         BOARD ROWS ARE OPT-IN: `tools/drop-census.pl . OUT 8 --board`.
 board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Bug. Fell through. Missing case: [ x2
-board/Sub-Uplevel-0.2800-0/lib/Sub/Uplevel.pm	1	Bug. Fell through. Missing case: [ x1
-board/Text-Balanced-2.07-0/lib/Text/Balanced.pm	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Context.pm	2	Bug. Fell through. Missing case: [ x1 | Handle single node of unknown type. Dump: x1
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Context.pm	1	Handle single node of unknown type. Dump: x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Instance.pm	2	Handle single node of unknown type. Dump: x2
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult.pm	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	3	Bug. Fell through. Missing case: [ x2 | Can't call method "content" on an undefined value x1
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Formatter/TAP.pm	2	Bug. Fell through. Missing case: [ x2
+cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	1	Can't call method "content" on an undefined value x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/IPC/Driver/Files.pm	1	Handle single node of unknown type. Dump: x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Tools/Tiny.pm	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Util.pm	1	Bug. Fell through. Missing case: [ x1
@@ -569,7 +598,7 @@ cpan-tests/modules/Test-Simple-1.302199/t/regression/817-subtest-todo.t	1	Bug. F
 cpan-tests/modules/Test-Simple-1.302199/t/regression/buffered_subtest_plan_buffered.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/t/regression/errors_facet.t	2	Bug. Fell through. Missing case: [ x2
 cpan-tests/modules/Test-Simple-1.302199/t/regression/inherit_trace.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t	2	PExpr: unhandled postfix '->' term in cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t: term=bless({ _location => x2
+cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t	2	PExpr: unhandled postfix '->' term in cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t: term=bless( { x2
 cpan-tests/modules/Text-CSV-2.04/t/78_fragment.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
