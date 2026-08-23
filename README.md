@@ -77,7 +77,7 @@ reasons): `@_` aliasing, deterministic `DESTROY`, exact error-message text,
 `given`/`when`/`~~` (removed in perl 5.42), the `mro` switch, and a short list
 of internals-introspection features — [`docs/not-supported.md`](docs/not-supported.md).
 
-A statement the compiler cannot lower is **never silently lost**: it is
+A statement the compiler cannot translate is **never silently lost**: it is
 announced at compile time (`PCL: statement dropped at FILE line N: …`) and
 **dies, perl-shaped and trappable, when the program reaches it**.  The count of
 such statements over every test population is tracked and gated in-repo
@@ -235,7 +235,7 @@ working is the goal.
 ## Architecture
 
 ```
-Perl source → PPI → Pl::Parser2 (statement lowering) → Pl::CLForm → Common Lisp
+Perl source → PPI → Pl::Parser2 (statement translation) → Pl::CLForm → Common Lisp
                         ↓                ↑                               ↓
               Pl::VarAnnotator    Pl::PExpr → Pl::ExprToCL        cl/pcl-runtime.lisp
              (scopes, captures)   (expression AST → forms)       (Perl semantics in CL)
@@ -243,7 +243,7 @@ Perl source → PPI → Pl::Parser2 (statement lowering) → Pl::CLForm → Comm
 
 | component | purpose |
 |---|---|
-| [`Pl/Parser2.pm`](Pl/Parser2.pm) | statement lowering — the one pipeline |
+| [`Pl/Parser2.pm`](Pl/Parser2.pm) | statement translation — the one pipeline |
 | [`Pl/VarAnnotator.pm`](Pl/VarAnnotator.pm) | scope and capture analysis, lexical renaming |
 | [`Pl/PExpr.pm`](Pl/PExpr.pm) | the expression parser (precedence, terms, prototypes) |
 | [`Pl/ExprToCL.pm`](Pl/ExprToCL.pm) | expression code generation (forms) |
@@ -276,7 +276,7 @@ The target shape of the compiler and the gap to it:
 * **Emission is diffed, not trusted.**  `tools/corpus-diff.pl` and
   `tools/emission-ab.pl` A/B the generated CL over ~1,100 files before a
   change is called done; `tools/drop-census.pl` counts what the compiler
-  could not lower.
+  could not translate.
 * The procedure: [`docs/test-debugging-runbook.md`](docs/test-debugging-runbook.md).
 
 ## Roadmap
