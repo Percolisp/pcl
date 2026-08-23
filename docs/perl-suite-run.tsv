@@ -1,4 +1,13 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s440 (Fable) — ONE MORE ROW EDITED BY HAND after the final companion run on the
+#   v0.1.0 tree: io/open.t C 108/13 -> 127/34.  NOT a mover of the batch: the
+#   same file run ALONE on the pre-batch tree (9bc7ef3, before agent D) also
+#   reads 127/34, and under the parallel load of the first s440 companion run it
+#   read the snapshot's 108/13 — the file is LOAD-SENSITIVE (a test steals a
+#   file descriptor and the loader's own stream hits end-of-file earlier or
+#   later), the same class as op/utf8cache.t (s439 listed both as the known
+#   contention files).  The row now holds the ALONE value, which is what the
+#   #366 serial re-run measures.
 # s440 (Fable) — FOUR ROWS EDITED BY HAND after the s440 batch (agents A/B/C
 #   merged + the #479 harness half), `--all --quick --jobs 4`, every mover
 #   confirmed by the #366 serial re-run:
@@ -828,7 +837,7 @@ io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	11	2	DIFF		0
-io/open.t	188	0	108	13	DIFF	aborted-forms:1: The variable STDOUT is unbound.; reaped 1 orphan(s)	1
+io/open.t	188	0	127	34	DIFF	aborted-forms:2: The variable STDOUT is unbound.; unreadable-form: end of file on the loader stream	1
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
