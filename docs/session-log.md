@@ -4,6 +4,75 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 436 (2026-08-23, Opus 5) — Q2 CLOSED; #471 the compiler-side memory cap; #457 PROMOTED and fixed (958 rows back)
+
+Three commits.  **`3d289f8` #471**, **`3916d4b` Q2 legs 1/3/4**, **`f332682`
+Q2 leg 2 + #457**.  Gate cold **163/5734** (only the 13 pclxs xs rows);
+generation **v2-179**.
+
+**Q2's four unrun legs are run, and none of them moves the flip.**  The
+four-population emission A/B (`--ref 9138404`) gives lib 0/22, cpan-tests
+52/402 (107 sites), perl's t/ 24/604 (79 sites), plus corpus-diff's 4
+perl-tests files — and every DIFF was shape-checked MECHANICALLY (a walker
+that requires the two sides to agree line for line except the flip's own
+substitution): **186 sites, 76 files, 0 unexplained lines**.  The confirming
+sweep reproduces s435 exactly: TOTAL 18311 (+0), 0 new / 0 fixed, drops 5 =
+census, GATE clean.  13 snapshot rows edited by hand.
+
+**Two corrections came out of doing the legs.**  s435's companion price was
+−117 C_ok over 11 files; it is **−114 over 9** — io/pvbm.t does not move, and
+three serial runs prove the `--all --quick` −3 was contention.  And the A/B,
+which is a different instrument from the census, found **#473**: 43
+cpan-tests `.t` files (92 sites) and t/japh/abigail.t (2) are in no census
+population, so 94 sites that now DIE are uncounted.
+
+**The board leg found the flip's real worst case.**  Base-worktree-vs-HEAD on
+the three dists with censused drops: Mojo-DOM58 and Sub-Uplevel byte-identical,
+**Text-Balanced 958 passing rows → 0** — not test rows, `use Text::Balanced`
+itself died, because `Balanced.pm:118` sits in `gen_delimited_pat` and the
+module's own top level calls it at line 308.  That refines the s433 sentence
+"a module with a drop still loads": the load is fine; a load-time call into a
+sub whose body carries a drop takes the module with it.
+
+**So #457 was PROMOTED out of Q7 and fixed** — the standing rule says a loss
+out of proportion promotes its drop's owner.  `_repair_minus_word` beside
+`_repair_glob_multiply`: after a token that `_ends_term`, PPI's
+`Word('-name')` is split back into `- name` and the document reparsed.  The
+condition is a NEGATIVE, which is what makes it safe; every legitimate `-word`
+spelling follows `(`, `{` or `,`.  A/B: **0 diffs in all four repo
+populations** — the shape is in none of them, so `Pl/t/minus-word-01.t` IS the
+guard.  Board: Text-Balanced back row for row.  PPI §25 + `ppi-bug-report.t`
+rows in the same commit.
+
+**#471** closes the hole that hung the machine in s435: `pl2cl` re-execs ONCE
+through `sh -c 'ulimit -v N; exec …'` before PPI loads, replaying
+`/proc/self/cmdline` so perl's own `-I` survives.  Default 4096 MB, measured
+against a ~140 MB peak for the heaviest legitimate transpile.  A real runaway
+(scratch tree, self-recursive helper) now dies in **3.9 s** naming the sub and
+the line, swap untouched; cost 2.276 s vs 2.287 s over 20 transpiles.
+Residue: the ~40 `Pl/t` files that load the compiler IN PROCESS are still
+uncapped (ask 1).
+
+Asks: `docs/opus5-review-requests-s436.md`.
+
+---
+
+## Session 435 (2026-08-23, Opus 5) — Q2: THE FLIP.  A dropped statement DIES when reached
+
+*(Entry written in s436 — s435 left none.  Its own record is
+`docs/opus5-review-requests-s435.md` and DECIDED §s435.)*  Both `PARSE ERROR`
+emitters replace the statement with a perl-shaped, trappable `p-die` naming
+file, line, source text and reason; the `;; PARSE ERROR:` comment stays
+byte-identical, because all four counters key on that text.  **`p-die`'s
+no-location branch was `(error msg)`** — a perl die message became a CL FORMAT
+CONTROL string, so any drop containing `~` was untrappable and killed the file;
+now `(error "~A" msg)`.  Cost model: the unit of the DECISION is the statement,
+the unit of the LOSS is the enclosing TOP-LEVEL FORM (op/method.t: 1 drop, 39
+unrun rows) — ruled accept, no narrowing.  perl-tests TOTAL 18366 → **18311**;
+gate 161/5715; generation v2-178.  Q2 left four bar legs unrun; s436 ran them.
+
+---
+
 ## Session 434 (2026-08-22, Opus 5) — Q1: the two instruments (#467 + #462) and the snapshot-hole report.  No product change
 
 **Q1 of `docs/plan-post-s433.md`.**  `Pl/`, `cl/` and `lib/` untouched;

@@ -11,6 +11,80 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s436 (2026-08-23, Opus 5) — Q2 CLOSED (its four unrun legs are run and clean); #471 the compiler-side memory cap; #457 PROMOTED and fixed — 958 rows back
+
+- **Q2's four-population emission A/B is CLEAN and mechanically shape-checked.**
+  `emission-ab --ref 9138404`: lib 0/22, cpan-tests 52/402 (107 sites), perl's
+  t/ 24/604 (79 sites), plus corpus-diff's 4 perl-tests files.  A walker over
+  every DIFF pair requires the two sides to agree line for line except where A
+  has ` nil<closers><suffix>` and B the `p-die` ending `")<closers><suffix>` —
+  **186 sites, 76 files, 0 unexplained lines**.  Trap for the next such
+  checker: the `nil` can carry a TAIL (`1 while …` emits ` nil) 1)`).
+- **#473 NEW — the A/B and the census disagree, and the A/B is right.**  The 9
+  cpan `.pm` DIFFs and the 24 suite DIFFs reproduce the census row for row,
+  count for count; **43 cpan-tests `.t` files / 92 sites** and
+  **t/japh/abigail.t / 2** are in no census population (`drop-census.pl`'s
+  cpan population is `**/*.pm`; the suite population is the runner's
+  `@DEFAULT_DIRS`, where japh is excluded).  Not a regression — they were
+  dropping silently — but 94 sites that now DIE are uncounted.
+- **Confirming sweep: TOTAL 18311 (+0), 0 new / 0 fixed, drops 5 = census,
+  GATE clean.**  s435's hand-edited baselines reproduce exactly.
+- **`docs/perl-suite-run.tsv`: 13 rows edited BY HAND**, each measured three
+  times.  **CORRECTION to s435: the companion price is −114 C_ok over 9 files,
+  not −117 over 11** — `io/pvbm.t` does not move (three serial runs give its
+  blessed 23/5; the `--all --quick` −3 was CONTENTION).  op/signatures.t and
+  re/reg_eval.t go XDIFF → DIFF and are deliberately NOT re-blessed into
+  `perl-suite-expected-rows.tsv`: those rows are lost to an ABORTED FORM, not
+  to the registered not-supported reason, and blessing them would hide the
+  flip's price behind an "expected divergence" label.  (Contrast s434, where
+  six files went XDIFF → DIFF because they REACHED more rows — there
+  re-blessing was right.)
+- **A signature is useless when a path eats its budget.**  Since the flip the
+  commonest aborted-form condition starts with an absolute file name and every
+  one came back as `…/perl-N.N.N/t/o`.  `run-perl-suite.pl` now collapses a
+  DEEP absolute path to its basename before truncating.  **Verdict-neutral by
+  construction**: `read_snapshot` compares status + C_ok + C_notok and never
+  `$sig`.  Rule in `docs/test-infrastructure.md`.
+- **THE FLIP'S REAL WORST CASE, and the second half of "a module with a drop
+  still loads" (s433 §A.1).**  The load IS fine — but a load-time CALL into a
+  sub whose body carries a drop takes the module with it.  Board A/B (base
+  worktree vs HEAD, because the blessed board file is far older than the tree):
+  Mojo-DOM58 and Sub-Uplevel byte-identical; **Text-Balanced every test file
+  PASS/PARTIAL → FAIL, 958 passing rows → 0**, because `Text/Balanced.pm:118`
+  sits in `gen_delimited_pat` and the module's own top level calls it at line
+  308.  The largest single price the flip has anywhere, from ONE PPI token.
+- **#457 PROMOTED out of Q7 by the standing rule (a loss out of proportion
+  promotes its drop's owner) and FIXED**: `Pl::Parser2::_repair_minus_word`,
+  beside `_repair_glob_multiply`, same `_ends_term` predicate — after a token
+  that ends a term, `Word('-name')` is split back into `- name` and the
+  document reparsed.  The condition is a NEGATIVE, which is what makes it safe
+  (`(-foo => 1)`, `foo(-bar)`, `$h{-x}`, `1, -bar`, `"x" . -foo` all follow a
+  token that does not end a term; every one probed vs perl).  PPI §25 +
+  `ppi-bug-report.t` rows in the same commit (rule 13); guard
+  `Pl/t/minus-word-01.t`.  A/B: **0 diffs in all four repo populations** — the
+  shape occurs nowhere in them, which is why the guard file IS the guard —
+  and Text-Balanced back to 958.
+- **#471 DONE: the compiler side runs under a memory cap.**  `pl2cl` re-execs
+  ONCE through `sh -c 'ulimit -v N; exec …'` before PPI loads, replaying
+  `/proc/self/cmdline` so perl's own switches survive (`$^X, $0, @ARGV`
+  silently drops the `-I<root>` the suite runner spawns it with).  Default 4096
+  MB, MEASURED: the heaviest legitimate transpiles peak at ~140 MB of address
+  space, so ~30x headroom; `PCL_MEM_CAP_MB` / `PCL_NO_MEM_CAP` /
+  `PCL_SHOW_MEM_CAP`.  Acceptance run for real: a scratch tree with a
+  self-recursive helper dies in **3.9 s** naming the sub and the line, swap
+  untouched.  Cost unmeasurable (20 transpiles: 2.276 s vs 2.287 s).  Exempt:
+  `--bundle`/`--executable` (they spawn SBCL, which RESERVES address space).
+  Guard `Pl/t/mem-cap-01.t`.  **RESIDUE: the ~40 `Pl/t` files that `use
+  Pl::Parser` in process are still uncapped** — ask 1 of
+  `docs/opus5-review-requests-s436.md`.
+- **NEVER EDIT THE COMPILER WHILE A MEASUREMENT RUNS.**  A `--jobs 1` companion
+  pass overlapped the in-flight #471 edit and reported TRANSPILE-FAIL for all
+  13 files; the run was worthless and had to be repeated.  Same family as "an
+  interrupted tool call may have RUN".
+- Gate cold **163 files / 5734 tests** (only the 13 pclxs xs rows); pack.t
+  5636/89 = blessed; generation **v2-179**, all three artifacts regenerated
+  (stamp only).
+
 ## s435 (2026-08-23, Opus 5) — Q2: THE FLIP is in the tree (a dropped statement DIES when reached, trappable); the loss unit is the TOP-LEVEL FORM, not the statement; Q2 NOT closed
 
 - **The flip shipped in the ruled shape** (`fable-answers-s433.md` §A.1): both
