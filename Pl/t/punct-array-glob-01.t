@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 13;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -247,4 +247,34 @@ is(emitted(q{while (<<>>) { print }}), emitted(q{while (<>) { print }}),
          '#415: a NON-ASCII bareword filehandle is still a readline');
     like($cl, qr/\(p-glob "\Q$f_letter\E\.txt"\)/,
          '#415: the same letters with a dot are a filename pattern');
+}
+
+# Task #452 (s438g): a PACKAGE-QUALIFIED bareword handle.  `_bareword_fh_p`
+# tested a plain identifier, so `main::FH2` failed it and `<main::FH2>` emitted
+# `(p-readline main::FH2)` — a BARE CL symbol — which died at LOAD with "The
+# variable FH2 is unbound" and took the whole file with it.  The same predicate
+# serves the print/say/printf `:fh` marker, so `print main::FH5 "x"` died the
+# same way; only `readline(main::FH3)`, which goes through the BUILTIN path and
+# quotes the name itself, was right.  One spelling of one thing, answered three
+# ways.  perl-tests/method.t:672 (`while (<Colour::H1>)`) is the live case.
+{
+    # The `open` matters: PCL decides `print NAME LIST` is a filehandle print
+    # from what the file has DECLARED as a handle, so without it the same text
+    # is a call to a sub named main::FH5 — which is perl's reading too.
+    my $cl = emitted('open(main::FH5, ">", "/dev/null");'
+                   . ' my $l = <main::FH2>; print main::FH5 "x";');
+    like($cl, qr/\(p-readline 'main::FH2\)/,
+         '#452: a qualified handle in <> is QUOTED, like the unqualified one');
+    like($cl, qr/:fh 'main::FH5/,
+         '#452: ... and in the print filehandle slot, from the same predicate');
+}
+
+# The inverses: a LEXICAL handle is a form to evaluate, not a name to quote,
+# and an unqualified bareword is unchanged.
+{
+    my $cl = emitted(q{open(my $fh, "<", "/etc/hostname"); my $a = <$fh>; my $b = <FH6>;});
+    like($cl, qr/\(p-readline \$fh\)/,
+         '#452 inverse: a lexical handle is passed through, never quoted');
+    like($cl, qr/\(p-readline 'FH6\)/,
+         '#452 inverse: an unqualified bareword handle is unchanged');
 }

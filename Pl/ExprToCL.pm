@@ -3179,9 +3179,25 @@ sub gen_filehandle_form {
 # underneath the #418 pipe-quoting a non-ASCII name carries (Pl::CLForm
 # spells it; this only reads it back).  The shape is perl's own \w+ under
 # `use utf8` — `<Fʜ>` in perl's t/uni/readline.t is a real bareword handle.
+# A BAREWORD FILEHANDLE NAME, qualified or not (task #452).  The name is
+# QUOTED into the call — `(p-readline (quote FH))`, `:fh (quote FH)` — because
+# a handle is a name the runtime looks up, not a variable to read; anything
+# else (a lexical `$fh`, an expression) is passed through as the form it is.
+#
+# THE `::` HALF WAS MISSING, and it cost a whole file each time: `main::FH2`
+# failed this test, so `<main::FH2>` emitted `(p-readline main::FH2)` — a BARE
+# CL symbol — and died at LOAD with "The variable FH2 is unbound".  The same
+# predicate serves the print/say/printf `:fh` marker, so `print main::FH5 "x"`
+# died the same way.  `readline(main::FH3)` was always right, because the
+# BUILTIN path quotes the name itself: one spelling of one thing, answered
+# three different ways by two predicates and a builtin.
+#
+# UNICODE word-shape, not ASCII: `use utf8` source has real bareword handles
+# (perl's own t/uni/readline.t).  It asks about the perl NAME, so it looks
+# through the #418 pipe-quoting the leaf emitter already applied.
 sub _bareword_fh_p {
   my ($tok) = @_;
-  return Pl::CLForm::cl_unquote($tok) =~ /^[^\W\d]\w*$/ ? 1 : 0;
+  return Pl::CLForm::cl_unquote($tok) =~ /^[^\W\d]\w*(?:::[^\W\d]\w*)*$/ ? 1 : 0;
 }
 
 # *glob{SLOT} → (p-glob-slot glob "SLOT") or computed (p-glob-slot glob EXPR).
