@@ -17,7 +17,7 @@ $ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); say dump [ map { $_, ":", $_ ** $_ } 
 
 | | |
 |---|---|
-| **Status** | pre-release; v0.1.0 is the first tag (see [Roadmap](#roadmap)) |
+| **Status** | **v0.1.0** (2026-08-23) — the first tag; see [Roadmap](#roadmap) |
 | **Measured compatibility** | [`docs/STATUS.md`](docs/STATUS.md) — every number re-runnable |
 | **What deliberately does not work** | [`docs/not-supported.md`](docs/not-supported.md) — each entry with its reason |
 | **Changes** | [`CHANGELOG.md`](CHANGELOG.md) |
@@ -63,8 +63,8 @@ All numbers are measured on named, re-runnable instruments; the table in
 
 | measurement | result (2026-08-23) | reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **166 files / 5,780 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
-| Perl's own test suite, extracted (`perl-tests/`, 108 files from perl's `t/op`, `t/base`, …) | **18,312 assertions pass / 894 fail (95.3 %)**; **62 files pass completely**; tracked row by row against blessed baselines, so the number can only move honestly | `perl sweep-perl-tests.pl --jobs 8` |
+| PCL's own regression gate (`Pl/t/`) | **171 files / 5,846 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
+| Perl's own test suite, extracted (`perl-tests/`, 108 files from perl's `t/op`, `t/base`, …) | **18,313 assertions pass / 893 fail (95.4 %)**; **61 files pass completely**; tracked row by row against blessed baselines, so the number can only move honestly | `perl sweep-perl-tests.pl --jobs 8` |
 | Perl's full `t/` tree, in place (528 files) | run per directory as a bug-finder; verdicts per file against a blessed snapshot | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | XS bridge ([pclxs](#4-xs--c-extensions), experimental sibling project) | conformance corpus **398 / 398** against real perl | `tools/pcl-conform` |
 | Pure-Perl CPAN modules (183-dist board) | 65 PASS / 65 PARTIAL / 53 FAIL at dist granularity (a PARTIAL runs most of its suite) | `tools/cpan-scoreboard.pl` |
@@ -231,9 +231,10 @@ The target shape of the compiler and the gap to it:
 
 ## Roadmap
 
-* **v0.1.0 — the first tag** (imminent): the repository's public push, the
-  first green CI run (`.github/workflows/ci.yml` installs from scratch and runs
-  the gate), then the tag.  What ships is what the tables above measure.
+* **v0.1.0 — the first tag** (2026-08-23): the repository's public push, the
+  first green CI run (`.github/workflows/ci.yml` installs from scratch on a stock
+  Ubuntu runner and runs the gate), then the tag.  What ships is what the
+  tables above measure.
 * **v0.2**: the compatibility phase continues — the drop census worked down to
   its explained floor, the remaining perl `t/` families, more of the CPAN
   board.

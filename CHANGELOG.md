@@ -3,7 +3,7 @@
 Distilled from the development log (`docs/session-log.md`, 400+ working
 sessions); dates are development-time, not release-time.
 
-## v0.1.0 — unreleased (first public version, pending)
+## v0.1.0 — 2026-08-23 (first public version)
 
 Initial release of PCL (Percolisp): a from-scratch Perl 5 → Common Lisp
 compiler with a CL runtime that reproduces Perl's semantics.
@@ -33,9 +33,10 @@ compiler with a CL runtime that reproduces Perl's semantics.
   captures, `%+`/`$1…`, modifier semantics; `use utf8` source decoding.
 - Refaliasing (`use feature 'refaliasing'`), postfix deref, lvalue refs
   (`\substr`, `\pos`, `\vec`, `\$#array`).
-- A statement the compiler cannot lower is **announced and dropped**, never
-  silently lost; the population-wide drop census is tracked in-repo and
-  gated (`docs/drop-census-s419-flip-gate.md`).
+- A statement the compiler cannot translate is **announced at compile time and
+  dies, perl-shaped and trappable, when reached** — never silently lost; the
+  population-wide census is tracked in-repo and gated
+  (`docs/parse-error-drop-census-s399.tsv`).
 - Named optimization registry (`PCL_OPT`): every speed transform is a
   named, fact-licensed emission that can be switched off
   (`PCL_OPT=none` = the general-form compiler, verified to run
@@ -53,6 +54,13 @@ compiler with a CL runtime that reproduces Perl's semantics.
   shipped pure-Perl shims for core modules (List::Util, Scalar::Util,
   Data::Dumper family, File::* basics, Carp, …) transpiled like user code.
 - `caller()` with correct package reporting; `mro::get_linear_isa` (C3).
+- Landed for the tag (2026-08-23): a call to a never-declared sub reaches the
+  package's `AUTOLOAD` or dies perl's death; `$\` and `$,` are undef until
+  set; `say` appends `"\n"` instead of `$\`; a symbolic sub name resolves in
+  the current package; punctuation arrays (`@?` …) are `main::` everywhere;
+  a list-context `glob` returns the full list on every call; `++${"name"}`,
+  `$${EXPR}`, `print $_ LIST`, `require $m if …`, `local(LIST) = … if …`
+  and a signature sub of the same name in two packages all lower.
 
 ### Tooling
 - `pl2cl` (transpiler, with `--server` mode used by runtime string eval),
@@ -68,7 +76,7 @@ compiler with a CL runtime that reproduces Perl's semantics.
 - CI (GitHub Actions, `.github/workflows/ci.yml`): a stock Ubuntu runner
   installs PCL with `tools/install-pcl` and runs the full gate — the
   fresh-machine test, on every push.
-- Test infrastructure: 155-file regression gate with a fresh-core runner
+- Test infrastructure: 171-file regression gate with a fresh-core runner
   (`tools/prove-core`), Perl-suite sweep runners with blessed row-level
   baselines, a drop census, an emission A/B differ, and a differential
   fuzzer (PCL vs perl).
