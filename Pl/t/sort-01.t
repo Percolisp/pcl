@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 21;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -178,3 +178,55 @@ test_cl('sort {block} $ar->@* (block comparator + postfix-deref list)',
     'my $ar = [[3],[1],[2]];
      print join(",", map { $_->[0] } sort { $a->[0] <=> $b->[0] } $ar->@*), "\n";',
     "1,2,3\n");
+
+# ── Tests 19-21: `sort NAME LIST` is a PLAIN CALL (task #501) ───────────────
+# The named-comparator lowering used to wrap the call in its own AUTOLOAD
+# dispatch — `handler-case` + `(intern "PL-AUTOLOAD" |sort--pkg|)`, citing
+# [perl #30661] — a THIRD copy of the "a call reached no body" rule whose
+# no-AUTOLOAD arm returned nil, so `sort nonexistent LIST` compared everything
+# EQUAL where perl dies.  It could not even fire: "PL-AUTOLOAD" is not the
+# symbol %pcl-cl-sub-name produces for AUTOLOAD.  Since task #468 the CALL
+# answers the question, in perl's own order (the sub's own package's AUTOLOAD
+# with $AUTOLOAD set, else perl's die), so the wrapper is gone.
+# Tests 19-20 are the INVERSE guard: both fail on a tree that still emits it.
+{
+    my $cl = transpile('sub cmpx { $a <=> $b } my @s = sort cmpx (3,1,2);');
+    unlike($cl, qr/PL-AUTOLOAD/,
+           'sort NAME LIST: no AUTOLOAD wrapper in the emission (#501)');
+    like($cl, qr/p-sort-cmp \(\$a \$b\)\s*\(p-scalar-ctx\s*\(pl-cmpx\)\)/s,
+         'sort NAME LIST: the comparator is a plain call');
+}
+
+# Test 21: every `sort NAME` shape, one program, all probed against perl
+# 5.40.3 (s442d).  perl agrees line for line except the die TEXT, which is
+# "Undefined sort subroutine \"main::nope_cmp\" called at F line N." — PCL
+# carries no location and uses the one message its call path has (message
+# fidelity is not a goal, memory: project_error_message_fidelity_not_required).
+# `nosub:` and `fwd:` are the rows the deleted wrapper got WRONG: before #468
+# they were LIVED with the list unsorted.  `autoload:` is perl's own answer —
+# a sort comparator name DOES reach the package's AUTOLOAD.
+test_cl('sort NAME: named / ($$) / reverse / qualified / no-sub dies / fwd-decl dies / AUTOLOAD',
+    'my @l = (3,1,2,10);
+     sub by_num { $a <=> $b }
+     sub by_p ($$) { $_[0] <=> $_[1] }
+     sub fwd_cmp;
+     print "named:",  join(",", sort by_num @l), "\n";
+     print "proto:",  join(",", sort by_p @l), "\n";
+     print "rev:",    join(",", reverse sort by_num @l), "\n";
+     package Other; sub by_len { length($main::a) <=> length($main::b) }
+     package main;
+     print "qual:",   join(",", sort Other::by_len @l), "\n";
+     my $ok = eval { my @s = sort nope_cmp @l; 1 };
+     print "nosub:", ($ok ? "LIVED" : "DIED"), ":",
+           ($@ =~ /Undefined subroutine &main::nope_cmp called/
+              ? "msg-ok" : "msg=[$@]"), "\n";
+     my $ok2 = eval { my @s = sort fwd_cmp @l; 1 };
+     print "fwd:", ($ok2 ? "LIVED" : "DIED"), "\n";
+     package P;
+     our $AUTOLOAD;
+     sub AUTOLOAD { our ($a, $b); return $a <=> $b }
+     sub run { my @m = (5,4,6); return join(",", sort auto_cmp @m) }
+     package main;
+     print "autoload:", P::run(), "\n";',
+    "named:1,2,3,10\nproto:1,2,3,10\nrev:10,3,2,1\nqual:3,1,2,10\n"
+  . "nosub:DIED:msg-ok\nfwd:DIED\nautoload:4,5,6\n");

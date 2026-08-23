@@ -3596,9 +3596,18 @@ sub gen_inline_lambda_form {
   my @decl     = @spec ? (['declare', ['special', @spec]]) : ();
 
   # Named comparator (sort NAME LIST) — form twin of the text branch:
-  # $a/$b dynamic bindings, ($$)-prototype subs get them as args too, and
-  # an undefined comparator dispatches to AUTOLOAD (Perl #30661) in the
-  # package captured at lambda creation.
+  # $a/$b dynamic bindings, and a ($$)-prototype sub gets the pair as
+  # arguments as well.  It is a PLAIN CALL: "the comparator has no body" is
+  # answered where perl answers it, at the call itself (task #468 —
+  # %p-call-of-undefined-sub: the sub's OWN package's AUTOLOAD, with
+  # $AUTOLOAD set, else perl's die).  This branch used to wrap the call in a
+  # THIRD copy of that dispatch (`handler-case` + `intern "PL-AUTOLOAD"` in
+  # the package captured at lambda creation, citing [perl #30661]) whose
+  # no-AUTOLOAD arm returned nil — so `sort nonexistent LIST` compared
+  # everything EQUAL where perl dies, and the arm could never fire anyway
+  # ("PL-AUTOLOAD" is not the symbol %pcl-cl-sub-name "AUTOLOAD" produces).
+  # Deleted in task #501; perl's AUTOLOAD-for-a-sort-name behaviour is
+  # probed and preserved by the one mechanism (Pl/t/sort-01.t).
   if ($for_func eq 'sort' && $node->{comparator_name}) {
     my $cl_func = $self->cl_name($node->{comparator_name});
     my $proto;
@@ -3611,17 +3620,7 @@ sub gen_inline_lambda_form {
     my $call = ($proto && $proto->{is_proto}
                 && ($proto->{proto_string} // '') eq '$$')
              ? [$cl_func, @pair] : [$cl_func];
-    return
-      ['let', ['list', ['list', '|sort--pkg|', '*package*']],
-        ['p-sort-cmp', $params, @decl,
-          Pl::CLForm::ctx_bind('nil',
-            ['handler-case', $call,
-              ['undefined-function', ['list'],
-                ['let', ['list',
-                         ['list', 'al',
-                          ['intern', '"PL-AUTOLOAD"', '|sort--pkg|']]],
-                  ['when', ['fboundp', 'al'],
-                    ['funcall', ['symbol-function', 'al']]]]]])]];
+    return ['p-sort-cmp', $params, @decl, Pl::CLForm::ctx_bind('nil', $call)];
   }
 
   # Scalar comparator (sort $var LIST) — resolved at runtime by

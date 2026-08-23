@@ -884,17 +884,29 @@ comparator reading the global would see nothing.
 
 The body is emitted in scalar context, i.e. the full shape is
 `(p-sort-cmp ($a $b) … (p-scalar-ctx BODY…))`. All three comparator
-spellings share it: a literal block, `sort NAME LIST` (whose body is the
-call, wrapped in an `undefined-function` handler that used to dispatch to
-`AUTOLOAD` for perl bug #30661 — **that wrapper is now dead and a translator
-should not copy it**: since s432 a declared-but-bodyless NAME never signals
-(the stub answers) and since s441c a never-declared one is answered at the
-call by §5.1's rule, which also fixes the wrapper's silent-wrong — with no
-`AUTOLOAD` it returned `nil`, so `sort nonexistent LIST` quietly compared
-everything equal where perl dies), and `sort $var LIST` (resolved at runtime by
-`p-sort-get-fn`); the latter two also wrap the lambda in a `let` capturing
-`*package*` at creation time, so a *string* comparator name resolves in the
-user's package rather than in `:pcl`.
+spellings share it: a literal block, `sort NAME LIST` — whose body is
+**just the call**, `(p-sort-cmp ($a $b) (p-scalar-ctx (pl-NAME)))`, with the
+pair passed as arguments as well when NAME has a `($$)` prototype — and
+`sort $var LIST` (resolved at runtime by `p-sort-get-fn`, and the only one
+that still wraps the lambda in a `let` capturing `*package*` at creation
+time, so a *string* comparator name resolves in the user's package rather
+than in `:pcl`).
+
+**`sort NAME LIST` has no comparator-specific undefined-sub handling, and a
+translator must not add any** (s442d, task #501). Until then the named form
+wrapped its call in an `undefined-function` handler that dispatched to
+`AUTOLOAD` for perl bug #30661; it was a third copy of §5.1's rule, its
+no-`AUTOLOAD` arm returned `nil` — so `sort nonexistent LIST` quietly
+compared everything equal where perl dies — and it could never fire (it
+interned `"PL-AUTOLOAD"`, not the symbol `%pcl-cl-sub-name` produces).
+§5.1's rule at the CALL covers every case, and matches perl measurably: a
+sort comparator name **does** reach the package's `AUTOLOAD` (probed on
+5.40.3), and with no `AUTOLOAD` it dies. One divergence remains, and it is
+about *when*: perl resolves the sort sub on entry, so `sort nonexistent (7)`
+and even `sort nonexistent ()` die although the comparator is never called,
+while PCL resolves it at the first comparison and those two spellings
+succeed (found and filed s442d; the die itself is right, only its *timing*
+is late).
 
 `grep`/`map`/`eval` block bodies are plain `(lambda …)` with **neither**
 the catch nor the context bind — `return` inside them must propagate to the
