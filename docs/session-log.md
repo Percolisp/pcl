@@ -218,6 +218,21 @@ scan is owed on the merged batch (Fable).**  Findings FILED: **#508** bare
 not writable, **#513** `open($fh,'>&',…)` dup fails; #457's board row was
 already zero on main (stale since s438).
 
+**s440e — the batch measured so far (A + B + C merged; D in flight).**  Gate
+on the merged tree **171 files / 5840 rows** (only the 13 pclxs xs rows);
+gate-SET scan over BOTH populations (base `1a0f566` vs main, 638 × 2): exactly
+TWO verdict moves, `t/op/universal.t` and `t/uni/method.t` drop → OK (agent
+A's item 2) — agent B's two widened detectors moved NO verdict; sweep on
+main **TOTAL 18313 (+0), GATE clean, drops 5 = census** (A and B moved no
+sweep row, as both predicted).  **#479 harness half DONE, alone**:
+`runperl_and_capture` reads its two files perl's own way (`if (open(my $f
+…)) {…}` — a `my` in a ternary CONDITION is not in scope in its branches,
+probed in real perl); sweep TOTAL 18313 (+0), GATE clean, **CHILD DROPS 241
+in 98 files → 9 in 6** (the rest: six one-off child programs + Devel/Peek.pm
+#483).  The companion uses this file as its shadow-t/ stub, so `--all
+--quick` is owed and runs with the batch legs after D merges.  The compiler
+half (`$ok ? <$f> // "" : ""`) stays an Opus filler.
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
