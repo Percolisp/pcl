@@ -222,7 +222,7 @@ never have reached either, so a hard failure can read as a partial pass. It is
 paid for by making the recovery LOUD — `tools/run-perl-suite.pl` counts the
 aborted forms and puts `aborted-forms:N: <first condition>` in the file's
 signature column, which keeps such a file out of status OK even when its
-remaining TAP happens to match perl's. `docs/perl-suite-run.tsv` was re-blessed
+remaining TAP happens to match perl's. `baselines/perl-suite-run.tsv` was re-blessed
 in one measured `--all` pass when the change landed (see its s434 header
 block); a file that reported FEWER rows after the change would have been a
 finding, not a re-bless.
@@ -246,7 +246,7 @@ phantom mover.
 ### The snapshot's own hole
 
 `tools/run-perl-suite.pl` also prints, at the end of every run, how many of the
-files it measured have **no row in `docs/perl-suite-run.tsv`** (with their
+files it measured have **no row in `baselines/perl-suite-run.tsv`** (with their
 names). Five files had none for months (s431): a file with no snapshot row can
 never read as a mover, because the mover check compares against the snapshot —
 the #176 family, a hole inferred from an absence. It is printed, never fatal:
@@ -291,7 +291,7 @@ and reports two numbers, because either alone lies:
   files, not as many drops.
 
 REPORTED, NOT GATED (ruled `fable-answers-s437.md` §2 ask 5): rows are blessed
-by hand in `docs/parse-error-drop-census-s399.tsv`'s header after a measured
+by hand in `baselines/parse-error-drop-census-s399.tsv`'s header after a measured
 run, and only then can a rise be a failure. The first measurement (s438, 108
 files) is 241 drops in 98 files across **ten** distinct sites.
 

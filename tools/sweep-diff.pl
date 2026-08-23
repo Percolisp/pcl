@@ -44,7 +44,7 @@
 # runs on (the #138 family), which no bucket above can see: the row simply is
 # not there.  The sweep now records a per-file `drops` count in _status.tsv and
 # this tool compares it against the blessed census
-# docs/parse-error-drop-census-s399.tsv (override: --drop-census PATH).  A file
+# baselines/parse-error-drop-census-s399.tsv (override: --drop-census PATH).  A file
 # with MORE drops than the census fails the run like a NEW failure; FEWER is a
 # fix, and the census row leaves by EDIT — never by re-blessing the file.
 #
@@ -83,7 +83,7 @@ sub read_status_file {
 }
 
 # ── The DROPS baseline: the #138-family census (task #343, ruled §6.5) ───────
-# docs/parse-error-drop-census-s399.tsv, whose rows are
+# baselines/parse-error-drop-census-s399.tsv, whose rows are
 #   <rel-path> <TAB> <drops> <TAB> <the compiler's own message(s)>
 # over BOTH populations.  The sweep only measures perl-tests/*.t, so only those
 # rows are comparable here; the companion half is compared by
@@ -99,7 +99,7 @@ sub load_drop_census {
         my $dir = -d $base_path ? $base_path : ($base_path =~ s{/[^/]*$}{}r);
         $dir = '.' if !length $dir;
         @try = ("$dir/parse-error-drop-census-s399.tsv",
-                'docs/parse-error-drop-census-s399.tsv');
+                'baselines/parse-error-drop-census-s399.tsv');
     }
     for my $p (@try) {
         next unless -e $p;
@@ -397,7 +397,7 @@ if (@drop_up || @drop_down) {
 if (!%$census) {
     print "DROPS: NOT CHECKED — no drop census found",
           (defined $drop_census_opt ? " at $drop_census_opt" : ''),
-          " (re-bless with: tools/drop-census.pl . docs/parse-error-drop-census-s399.tsv)\n";
+          " (re-bless with: tools/drop-census.pl . baselines/parse-error-drop-census-s399.tsv)\n";
 } elsif (!%$cur_status) {
     print "DROPS: NOT CHECKED — the current run has no _status.tsv (needs a live .faillog directory)\n";
 } else {
@@ -421,7 +421,7 @@ if (!%$census) {
 if (!%$pass_base) {
     print "LOST: NOT CHECKED — no pass baseline found",
           (defined $pass_baseline_opt ? " at $pass_baseline_opt" : ''),
-          " (bless one with: $0 save-status .faillog docs/pass-baseline.tsv)\n";
+          " (bless one with: $0 save-status .faillog baselines/pass-baseline.tsv)\n";
 } elsif (!%$cur_status) {
     print "LOST: NOT CHECKED — the current run has no _status.tsv (needs a live .faillog directory)\n";
 } else {

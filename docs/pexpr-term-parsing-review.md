@@ -165,7 +165,7 @@ every operator — instead of N call sites to update.
 Validation path (same safety net as Option A):
 1. `prove -j8 Pl/t/` — full gate (3285+ tests).
 2. `perl sweep-perl-tests.pl --jobs 8` + `tools/sweep-diff.pl diff
-   docs/fail-baseline.tsv .faillog` — zero new regressions.
+   baselines/fail-baseline.tsv .faillog` — zero new regressions.
 3. The feature matrices in `/tmp/refmatrix*.pl` / postfix probes from session 237b
    (reference & deref family) re-diffed against Perl 5.40.
 

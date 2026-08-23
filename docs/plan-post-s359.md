@@ -49,7 +49,7 @@
 > **The #153 FOLD stays Fable's, its own session.**
 
 > **UPDATED s365 (Opus).**  Fable's s364 queue is DONE end to end.  In order:
-> the required registration (`docs/perl-suite-timeouts.tsv` + runner support),
+> the required registration (`baselines/perl-suite-timeouts.tsv` + runner support),
 > then **#263**, **A-iv**, **A-i**, **A-iii**, **B-ii** — measurements per file
 > in `docs/e41-suite-families-s365.md`.  Headline: **io/through.t is OK 942/0**
 > (fully passing, at snapshot), op/attrproto.t at snapshot 17/28, op/while.t

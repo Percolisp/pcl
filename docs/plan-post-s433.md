@@ -62,7 +62,7 @@ something die, until Q1 lands** (s433).
 1. **#467**: `tools/run-perl-suite.pl` loads the emitted CL with
    `pcl::p-load-with-recovery` like the sweep does (one-line change at the
    sbcl command, ~line 601; the runner already loads `cl/pcl-test.lisp`,
-   where the function lives).  Then RE-BLESS `docs/perl-suite-run.tsv` in
+   where the function lives).  Then RE-BLESS `baselines/perl-suite-run.tsv` in
    ONE measured pass (`--all`, not `--quick`, once — the files that died
    mid-way are exactly the ones that change) and land the re-bless in the
    SAME commit, every moved file explained in the header block (expected:
@@ -117,7 +117,7 @@ something die, until Q1 lands** (s433).
    with the A/B attribution recipe (plan-post-s430 §3); the board re-run for
    the three dists with drops (Text::Balanced's rows will move where line
    118/397 is reached — that is #457's price; explain per row); gate; DECIDED
-   line.  Then update `docs/parse-error-drop-census-s399.tsv`'s header note:
+   line.  Then update `baselines/parse-error-drop-census-s399.tsv`'s header note:
    the census now counts LOUD-AT-RUN drops.
 
 **Session Q3 — #456 half (b) = #469, the PHASE model across sections (fable-answers-s433 §B.4).**

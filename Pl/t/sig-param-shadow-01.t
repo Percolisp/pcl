@@ -196,7 +196,7 @@ PL
 # which perl IGNORES — so `$a` in the body is the package variable and
 # `&t000(456)` is 123.  PCL answers 456 on BOTH paths, because the
 # old-prototype lowering binds a named prototype`s names as parameters too.
-# That is a blessed baseline failure (`docs/fail-baseline.tsv`,
+# That is a blessed baseline failure (`baselines/fail-baseline.tsv`,
 # signatures.t "() not signature when not enabled") and task #486 — it is
 # NOT what the boundary repair above changes (emission over the 111-file
 # corpus is identical), so asserting it here would add a knowingly-failing row.

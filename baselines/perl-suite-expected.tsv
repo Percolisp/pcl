@@ -7,7 +7,7 @@
 # Do NOT add rows for unexplained crashes: those stay triage targets.
 #
 # THE ROWS ARE MACHINE-CHECKED (task #185, s336).  A reason here excuses only
-# the rows blessed in docs/perl-suite-expected-rows.tsv — the generated
+# the rows blessed in baselines/perl-suite-expected-rows.tsv — the generated
 # multiset of this file's diverging TAP rows, keyed by PERL's description.  A
 # divergence that grows a row not in that baseline keeps the file DIFF and
 # names the intruder; a row that stops diverging makes the file STALE.  So

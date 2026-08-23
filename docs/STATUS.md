@@ -15,7 +15,7 @@ re-runnable measurement; nothing is estimated.  Last full re-measure:
 | Pure-Perl CPAN modules (183-dist test board) | 65 PASS / 65 PARTIAL / 53 FAIL (dist granularity; a PARTIAL runs most of its suite) | internal board (`cpan-board14-*.tsv` snapshots); [`cpan-module-log.md`](cpan-module-log.md) records per-dist causes |
 
 Failures are tracked row-by-row in blessed baselines
-(`docs/fail-baseline.tsv`, `docs/pass-baseline.tsv`) — a change that breaks
+(`baselines/fail-baseline.tsv`, `baselines/pass-baseline.tsv`) — a change that breaks
 a previously-passing assertion fails the sweep, so the numbers above can
 only move honestly.
 
@@ -24,7 +24,7 @@ compile time** (`PCL: statement dropped at FILE line N: …`) **and dies, perl-s
 and trappable, when the program reaches it** (since s435; in `eval STRING` the
 die lands in `$@`).  These are counted over six test populations: 73 files
 carry 167 such statements (s440; the two perl-test populations: 24 files / 75),
-every one classified with an owning task (`docs/parse-error-drop-census-s399.tsv`,
+every one classified with an owning task (`baselines/parse-error-drop-census-s399.tsv`,
 `docs/drop-census-s419-flip-gate.md`).  Zero drops in PCL's own shipped
 module tree.
 

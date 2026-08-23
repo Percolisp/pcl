@@ -3,11 +3,11 @@
 Continues `docs/e41-suite-families-measurement-s363.md` (the measurement) and
 executes the order Fable ruled in `fable-answers-s363.md` §5–§7.  Everything
 below is measured, per file, against the ratified bar — the file's own
-`docs/perl-suite-run.tsv` snapshot row (the v1-era C_ok).
+`baselines/perl-suite-run.tsv` snapshot row (the v1-era C_ok).
 
 ## 0. The registration (required before any further #254 fix)
 
-**`docs/perl-suite-timeouts.tsv` is new**, and `tools/run-perl-suite.pl`
+**`baselines/perl-suite-timeouts.tsv` is new**, and `tools/run-perl-suite.pl`
 honours it: `rel<TAB>seconds<TAB>cause`, effective timeout = `max(seconds,
 --timeout)`, and every allowance in effect for a run is printed to the journal
 AND to stderr, so it can never be a silent property of a file nobody reads.
@@ -169,8 +169,8 @@ was a TIMEOUT).**
   fully-passing files, with the standing crash-file noise only (6 UNSTABLE / 4
   unverified across method.t, postfixderef.t, ref.t, tr.t — all already
   PARTIAL, same set as s341).  min MemAvailable 3.8 GB.
-* Suite `--all` run recorded in `docs/perl-suite-run-s365.tsv` (the v1-era bar
-  in `docs/perl-suite-run.tsv` is left untouched — it is what #254 measures
+* Suite `--all` run recorded in `baselines/perl-suite-run-s365.tsv` (the v1-era bar
+  in `baselines/perl-suite-run.tsv` is left untouched — it is what #254 measures
   against).
 
 **Gotcha worth writing down**: do NOT run the gate under `nohup` — nohup

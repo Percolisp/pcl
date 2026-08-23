@@ -3,7 +3,7 @@
 Last updated: 2026-07-20 (session 301) — header/totals only; the
 per-category analysis below is a session-156 snapshot.  **Current
 per-file status lives in `.faillog/_status.tsv` (regression watchdog
-baseline: `docs/fail-baseline.tsv`, re-blessed s301) and the bug
+baseline: `baselines/fail-baseline.tsv`, re-blessed s301) and the bug
 groupings in `docs/sweep-bug-catalog.md`.**
 Sweep total: **18386 passing / 666 failing**, 66 fully-passing files
 (incl. closure.t 257+0/258 as of s301; E1 complete, census 111/0).

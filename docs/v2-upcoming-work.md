@@ -38,7 +38,7 @@ value — or silently *delete code* — start matching perl.
 
 No structural changes.  Fix whatever the release checks surface, and
 keep harvesting near-green files from the perl-suite snapshot
-(`docs/perl-suite-run.tsv`).  Likely next: `lib/Tie/Hash.pm` +
+(`baselines/perl-suite-run.tsv`).  Likely next: `lib/Tie/Hash.pm` +
 `lib/Tie/Scalar.pm` shims (`Tie::StdHash`/`Tie::StdScalar` — clears
 `op/avhv.t`, `op/warn.t`), an `Internals::getcwd` shim
 (`io/getcwd.t`).  Shim files only — no compiler changes.

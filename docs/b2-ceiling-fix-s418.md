@@ -104,11 +104,11 @@ already did).  The 50 % compile budget is trivially met.
   base worktree; every diff explained per file against §3's prediction.
 * **gate-SET scan** (`tools/gate-set-scan.pl`) over BOTH populations vs base.
 * **full sweep**: GATE verdict + TOTAL/LOST read.  Census: the bless.t drop
-  rows (perl-tests + t/op) leave `docs/parse-error-drop-census-s399.tsv` BY
+  rows (perl-tests + t/op) leave `baselines/parse-error-drop-census-s399.tsv` BY
   EDIT with cause; the sweep's own drops count moves 10 → 9 (verify).  If the
   newly-running bless.t row FAILS (it tests blessing through tied refs), it
-  enters `docs/fail-baseline.tsv` BY EDIT with its cause; split.t rows probed
-  and edited row-by-row; `docs/pass-baseline.tsv` likewise.
+  enters `baselines/fail-baseline.tsv` BY EDIT with its cause; split.t rows probed
+  and edited row-by-row; `baselines/pass-baseline.tsv` likewise.
 * **companion `--quick` once** — the affected shapes live in t/op/ and t/re/.
 * **generation bump v2-160 → v2-161** + the three checked-in artifacts
   regenerated (expect gen-stamp-only — none of their sources uses the shape).

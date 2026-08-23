@@ -82,7 +82,7 @@ A statement the compiler cannot translate is **never silently lost**: it is
 announced at compile time (`PCL: statement dropped at FILE line N: …`) and
 **dies, perl-shaped and trappable, when the program reaches it**.  The count of
 such statements over every test population is tracked and gated in-repo
-([`docs/parse-error-drop-census-s399.tsv`](docs/parse-error-drop-census-s399.tsv)).
+([`baselines/parse-error-drop-census-s399.tsv`](baselines/parse-error-drop-census-s399.tsv)).
 
 ## Quick start
 

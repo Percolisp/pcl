@@ -10,7 +10,7 @@ CENSUS TEXT rather than from the parser, and the answer changes the plan.*
 ## 1. The measurement
 
 `tools/drop-census.pl` at `e79f0a6`: **73 files / 373 drops** (blessed
-`docs/parse-error-drop-census-s399.tsv`, now edited to match — the one stale
+`baselines/parse-error-drop-census-s399.tsv`, now edited to match — the one stale
 row was `t/re/pat_advanced.t` 11 → 4, s404's #351 repair).  The new
 `tools/drop-harvest.pl` then transpiled every census file with
 `PCL_DROP_ANNOUNCE=all` and collected the announced statement TEXT: 369 rows

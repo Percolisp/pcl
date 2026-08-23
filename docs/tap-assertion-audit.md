@@ -97,7 +97,7 @@ Now Test::More's wording, which names what the thing is (`An object of class
 'Foo' isa 'Bar'` / `A reference of type 'ARRAY' …` / `The class (or
 class-like) 'X' …` / `undef isa 'Bar'`), with matching diagnostics.  No
 baseline row keys on the old text (checked: zero hits in
-`docs/fail-baseline.tsv`).
+`baselines/fail-baseline.tsv`).
 
 **F6 — `can_ok`'s degenerate calls said nothing useful.**  `can_ok('Foo')`
 printed `->can(...)` (no class — `p-ref` of a string is `""`) and the diag
@@ -157,7 +157,7 @@ harness was reporting on a number that used to be a reference.
   18462 / 925) — **+7 passing**, all from F10; fully-passing files **66**,
   unchanged.  `sweep-diff` **0 new / 0 fixed** after the baseline edit below
   (the two UNSTABLE rows and the one unverified row are the crash-file noise
-  `docs/fail-baseline.tsv` already carries for postfixderef.t and ref.t).
+  `baselines/fail-baseline.tsv` already carries for postfixderef.t and ref.t).
 - **Baseline edits** (by hand, never by re-blessing a run): the 7 rows F10
   fixed were removed; ONE row added — `array.t` t128 "undef preserves
   identity in array [perl #109726]".  That row used to PASS *because* of the

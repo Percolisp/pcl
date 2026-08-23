@@ -10,7 +10,7 @@ DIE in file mode?**
 
 * `tools/drop-census.pl . census-s419.tsv 8` at `7a03d93`: **42 files /
   135 drops — row-for-row IDENTICAL to the blessed
-  `docs/parse-error-drop-census-s399.tsv`** (diff of sorted non-comment
+  `baselines/parse-error-drop-census-s399.tsv`** (diff of sorted non-comment
   rows: empty).  The blessed census needs no edit.
 * `tools/drop-harvest.pl` over those 42 files: 133 statement texts (2
   same-line duplicates deduplicated by the announcer, as designed).

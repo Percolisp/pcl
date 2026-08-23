@@ -11,7 +11,7 @@
 #
 #   <census-rel-path><TAB><line><TAB><statement text><TAB><compiler reason>
 #
-#   tools/drop-harvest.pl docs/parse-error-drop-census-s399.tsv out.tsv [jobs]
+#   tools/drop-harvest.pl baselines/parse-error-drop-census-s399.tsv out.tsv [jobs]
 #
 # WHY: a count says how many statements were lost; only the text says WHAT
 # family they are (a missing feature such as given/when, a term-grammar shape,

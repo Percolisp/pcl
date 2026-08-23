@@ -404,7 +404,7 @@ opposite trade from the Track A refusal families, whose files were already
 unproductive) — and implementing it is a `WORD $scalar TERM` extent
 question of exactly the shape Track B / B3 (`_reduce_term`, task #153) is
 built to answer, so it is cheapest AFTER B3.  It is not scheduled; the two
-drops stay loud and counted in `docs/parse-error-drop-census-s399.tsv`.
+drops stay loud and counted in `baselines/parse-error-drop-census-s399.tsv`.
 
 **Revisit triggers:** (a) a CPAN board module whose tests use the scalar
 invocant spelling (the s425 count found none); (b) B3 lands — then the
@@ -1026,7 +1026,7 @@ asking.  Dying at TRANSPILE is still refused: that would take every other row
 of `perl-tests/substr.t` and `t/op/sub_lval.t` with it, whereas the run-time
 die costs only the rows at or after the statement inside its own top-level
 form (the s329 boundary — the sin was the silence).  39 of the 102 drops in
-`docs/parse-error-drop-census-s399.tsv` are this refusal.
+`baselines/parse-error-drop-census-s399.tsv` are this refusal.
 
 **Rationale:** Implementing user lvalue subs requires an "lvalue context"
 that propagates through the call, returns a settable location, and then
@@ -1274,7 +1274,7 @@ not-implemented and gets its own entry instead.
 
 **Counting the class:** every suite registration that cites *this section name*
 is a member, so `grep -c 'Readouts of perl.s own internals'
-docs/perl-suite-expected.tsv` IS the population (ruled s397,
+baselines/perl-suite-expected.tsv` IS the population (ruled s397,
 `docs/fable-answers-s396.md` §4).
 
 ### `re::optimization` — the regex engine's internal optimizer report
@@ -1330,7 +1330,7 @@ Of the **62** diverging rows at the s399 reading:
   **Task #337, FIXED s408** — the file went 86/62 → 90/58, and those four rows
   are why it could not be registered for nine sessions.
 
-All-or-nothing (the `docs/perl-suite-expected.tsv` header rule): those four
+All-or-nothing (the `baselines/perl-suite-expected.tsv` header rule): those four
 kept the file UNEXPLAINED, because a registration would have silenced them.
 
 ---
@@ -1795,7 +1795,7 @@ syntax yet (it went stable only in recent perls), so it blocks nothing
 today.
 
 **Affected tests:** `t/class/*.t` (9 files) — registered as expected
-divergences in `docs/perl-suite-expected.tsv`.  Revisit as a feature project
+divergences in `baselines/perl-suite-expected.tsv`.  Revisit as a feature project
 (parser desugaring + a `docs/class-feature-plan.md`) once the v2 endgame
 lands.
 
@@ -2111,7 +2111,7 @@ script-run assertion, so the pattern fails to compile and every assertion built
 on it diverges.
 
 **Cost, measured (s395):** `t/re/script_run.t` is 185 rows, all of them.  The
-file is registered as XDIFF (`docs/perl-suite-expected.tsv`) — it still runs
+file is registered as XDIFF (`baselines/perl-suite-expected.tsv`) — it still runs
 and still prints its row count every sweep, so the number stays visible as a
 fix target.  Its rows were never passing: before #202 made `unlike()` able to
 fail, a pattern cl-ppcre refused to compile was reported as a PASS, which is
@@ -2378,7 +2378,7 @@ needs a call-site identity the emission does not carry today (`(p-glob PAT
 :site N)` from a compile-time counter, at every glob emitter: the `<*.c>`
 form, the builtin path, the readline/glob split).  That is an emission change
 with the full bar, queued behind the v0.1 release under **#489**; the one
-visible row (op/glob.t 18, edited 14/4 → 13/5 in `docs/perl-suite-run.tsv`
+visible row (op/glob.t 18, edited 14/4 → 13/5 in `baselines/perl-suite-run.tsv`
 s438i) carries this entry as its cause.  It surfaced only when #450 made
 metacharacter-free patterns return themselves — the row had been passing on
 two undefs (runbook §4b).

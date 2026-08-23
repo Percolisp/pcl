@@ -1580,7 +1580,7 @@ or a side effect with it while every count still looks healthy.
 **One shape, every drop, every mode.** There is no classifier in the emitter
 that makes some drops die and others continue. The distinction between "a gap
 PCL intends to close" and "a feature PCL deliberately refuses" lives in
-`docs/parse-error-drop-census-s399.tsv` and `docs/not-supported.md`, never in
+`baselines/parse-error-drop-census-s399.tsv` and `docs/not-supported.md`, never in
 the emission — a classifier here would be asymmetric in the dangerous
 direction, since one miss would kill a whole file. Module mode is covered by
 construction: the die is *in* the emission, so it survives the module cache

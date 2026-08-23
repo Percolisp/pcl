@@ -27,7 +27,7 @@
 #   --all              scan the default dir set (see @DEFAULT_DIRS)
 #   --jobs N           parallel workers (default 8)
 #   --timeout N        per-file SBCL timeout seconds (default 90); a file
-#                      registered in docs/perl-suite-timeouts.tsv gets the
+#                      registered in baselines/perl-suite-timeouts.tsv gets the
 #                      LARGER of its allowance and this (see that file)
 #   --quick            the DEFAULT companion form (task #345): do not run the
 #                      files that spend a whole timeout to produce nothing new
@@ -52,7 +52,7 @@
 #                      writes one summary row.
 #
 # Expected divergences — marking not-supported dependencies:
-#   docs/perl-suite-expected.tsv maps `rel<TAB>reason` (reason should cite the
+#   baselines/perl-suite-expected.tsv maps `rel<TAB>reason` (reason should cite the
 #   docs/not-supported.md section, and the plan doc when one exists).  A
 #   divergent file with a row becomes status XDIFF — still runs, still prints
 #   its row + reason, but does not fail the exit code.  If an expected file
@@ -63,7 +63,7 @@
 #   UNEXPLAINED stays a fix/triage target.
 #
 #   XDIFF IS GRANTED PER ROW, all-or-nothing (task #185), exactly like FIXTURE:
-#   docs/perl-suite-expected-rows.tsv holds the blessed multiset of diverging
+#   baselines/perl-suite-expected-rows.tsv holds the blessed multiset of diverging
 #   rows for each registered file, keyed by PERL's test DESCRIPTION (#177 —
 #   numbers are the unstable coordinate).  A file whose divergence grows a row
 #   that is not in the baseline stays DIFF and names the intruder; a row that
@@ -109,7 +109,7 @@
 # NOT-RUN row.  There is no silent filter left.
 #
 # Harness-fixture artifacts — a THIRD category, and not not-support:
-#   docs/perl-suite-fixture.tsv maps `rel<TAB>rows<TAB>cause` for rows that
+#   baselines/perl-suite-fixture.tsv maps `rel<TAB>rows<TAB>cause` for rows that
 #   diverge because the two sides run in different trees, not because PCL
 #   lacks anything.  (Worked example, task #172: the shadow t/ SYMLINKS op/,
 #   and getcwd(3) returns the PHYSICAL path, so op/chdir.t's `"$Cwd/op"` can
@@ -189,10 +189,10 @@ my ($all, $no_core, $tsv_file);
 my $jobs = 8;
 my $timeout = 90;
 my $faillog = "$root/.suitelog";
-my $expected_tsv = "$root/docs/perl-suite-expected.tsv";
-my $expected_rows_tsv = "$root/docs/perl-suite-expected-rows.tsv";
-my $fixture_tsv  = "$root/docs/perl-suite-fixture.tsv";
-my $timeouts_tsv = "$root/docs/perl-suite-timeouts.tsv";
+my $expected_tsv = "$root/baselines/perl-suite-expected.tsv";
+my $expected_rows_tsv = "$root/baselines/perl-suite-expected-rows.tsv";
+my $fixture_tsv  = "$root/baselines/perl-suite-fixture.tsv";
+my $timeouts_tsv = "$root/baselines/perl-suite-timeouts.tsv";
 my $bless_rows;
 my $quick;
 my (@dirs, @files);
@@ -247,7 +247,7 @@ if (open my $rf, '<', $expected_rows_tsv) {
 }
 
 # Fixture-artifact registry: rel -> { rows => {n=>1}, cause => text }.
-# A DIFFERENT category from %expected — see docs/perl-suite-fixture.tsv and
+# A DIFFERENT category from %expected — see baselines/perl-suite-fixture.tsv and
 # the FIXTURE paragraph in the header comment.  Keyed per ROW, not per file.
 my %fixture;
 if (open my $ff, '<', $fixture_tsv) {
@@ -371,7 +371,7 @@ my %QUARANTINE = (
 #
 # MEMBERSHIP IS MEASURED, never assumed: a file belongs here only when a
 # LARGER budget returns the SAME rows (task #326's own test).  A file that
-# merely needs longer belongs in docs/perl-suite-timeouts.tsv instead — that
+# merely needs longer belongs in baselines/perl-suite-timeouts.tsv instead — that
 # registry's promise is "give it the time and it finishes", and a file which
 # never finishes would make the promise false.
 my %QUICK_SKIP = (
@@ -386,7 +386,7 @@ my %QUICK_SKIP = (
   # Two of the three files task #345 called "the tail", measured s404 at 90 s,
   # 300 s and 900 s: 10x the default budget buys nothing, so an allowance would
   # be a lie.  (The third, re/pat_psycho.t, IS merely slow — it completed at
-  # 300 s with 11 rows — so it is registered in docs/perl-suite-timeouts.tsv
+  # 300 s with 11 rows — so it is registered in baselines/perl-suite-timeouts.tsv
   # instead, and the allowance cap below keeps it out of a quick run anyway.)
   're/overload.t'           => 'HANG measured s404 — 3 of perl\'s 87 rows at 90 s, at 300 s (s398) and at 900 s',
   're/speed.t'              => 'HANG measured s404 — 1 of perl\'s 59 rows at 300 s AND at 900 s (pathological patterns it times; #326 family)',
@@ -589,7 +589,7 @@ sub run_one {
   # compiler could not lower and replaced with nil in this file's CL.  They are
   # invisible in the TAP comparison — the statement simply is not there — so
   # the count rides along with the transpile this run already does, and is
-  # compared per file against docs/parse-error-drop-census-s399.tsv in the
+  # compared per file against baselines/parse-error-drop-census-s399.tsv in the
   # summary.  -1 = NOT MEASURED (no CL produced), never 0.
   my $drops = -1;
   my $f = "$tdir/$rel";
@@ -612,7 +612,7 @@ sub run_one {
   $p_ok    = () = $perl =~ /^ok /mg;
   $p_notok = () = $perl =~ /^not ok /mg;
 
-  my $to = timeout_for($rel);   # per-file allowance (docs/perl-suite-timeouts.tsv)
+  my $to = timeout_for($rel);   # per-file allowance (baselines/perl-suite-timeouts.tsv)
   (my $safe = $rel) =~ s{/}{_}g;
   my $lisp = "$tmpdir/$safe.lisp";
   # Transpile with CWD = shadow so `require './test.pl'` prototype extraction
@@ -870,7 +870,7 @@ while (@queue || %children) {
     #
     # XDIFF is granted per ROW, all-or-nothing (task #185), exactly like
     # FIXTURE: the file's diverging rows must MATCH the blessed multiset in
-    # docs/perl-suite-expected-rows.tsv.  An unregistered diverging row keeps
+    # baselines/perl-suite-expected-rows.tsv.  An unregistered diverging row keeps
     # the file DIFF and is named — so a new bug landing inside a file whose
     # feature gap is blessed can never hide behind the file-level reason.  A
     # registered row that stopped diverging is STALE, same as a whole file
@@ -966,10 +966,10 @@ sub rerun_movers_serially {
   return;
 }
 
-# docs/perl-suite-run.tsv, the blessed per-file snapshot: name -> counts.
+# baselines/perl-suite-run.tsv, the blessed per-file snapshot: name -> counts.
 sub read_snapshot {
   my %s;
-  open my $fh, '<', "$root/docs/perl-suite-run.tsv" or return ();
+  open my $fh, '<', "$root/baselines/perl-suite-run.tsv" or return ();
   while (my $l = <$fh>) {
     next if $l =~ /^#/ || $l !~ /\S/;
     chomp $l;
@@ -1072,7 +1072,7 @@ sub row_list_excerpt {
                           length($s) > 60 ? substr($s, 0, 57) . '...' : $s } @show);
 }
 
-# --bless-rows: rewrite docs/perl-suite-expected-rows.tsv from THIS run.  Only
+# --bless-rows: rewrite baselines/perl-suite-expected-rows.tsv from THIS run.  Only
 # files this run actually measured are touched — a partial run must never erase
 # the baseline for files it did not look at (same reasoning as the sweep's
 # save-status).  A registered file that came back OK loses its rows here, which
@@ -1107,7 +1107,7 @@ sub bless_expected_rows {
   print $out <<'HDR';
 # perl-suite-expected-rows.tsv — the ROW baseline behind XDIFF (task #185).
 # GENERATED: `tools/run-perl-suite.pl --bless-rows` rewrites the files that run
-# measured.  Do not hand-edit; edit docs/perl-suite-expected.tsv (the reasons)
+# measured.  Do not hand-edit; edit baselines/perl-suite-expected.tsv (the reasons)
 # and re-bless.
 #
 # One line per DIVERGING ROW of a registered file: <rel-path><TAB><rowkey>.
@@ -1171,7 +1171,7 @@ sub classify_result {
       }
     } elsif ($r->[5] eq 'OK') {
       $r->[5] = 'STALE';
-      $r->[6] = "expected-divergence row now PASSES — remove it from docs/perl-suite-expected.tsv";
+      $r->[6] = "expected-divergence row now PASSES — remove it from baselines/perl-suite-expected.tsv";
     }
   }
   # Fixture-artifact registry (task #172): per-ROW, and only ever applied to
@@ -1194,7 +1194,7 @@ sub classify_result {
       }
     } elsif ($r->[5] eq 'OK') {
       $r->[5] = 'STALE';
-      $r->[6] = "fixture-artifact row now PASSES — remove it from docs/perl-suite-fixture.tsv";
+      $r->[6] = "fixture-artifact row now PASSES — remove it from baselines/perl-suite-fixture.tsv";
     }
   }
   return;
@@ -1246,7 +1246,7 @@ sub emit_report {
       ($st eq 'OK' ? '' : ':  ' . join(', ', @f));
   }
   my $n_bad = grep { $results{$_}[5] !~ /^(?:OK|NOTAP|XDIFF|FIXTURE)$/ } keys %results;
-  printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see docs/perl-suite-expected.tsv), %d FIXTURE (harness artifact, see docs/perl-suite-fixture.tsv), %d UNEXPLAINED\n",
+  printf "%d files: %d OK, %d NOTAP, %d XDIFF (expected, see baselines/perl-suite-expected.tsv), %d FIXTURE (harness artifact, see baselines/perl-suite-fixture.tsv), %d UNEXPLAINED\n",
     scalar(keys %results), scalar(@{ $by_status{OK} // [] }),
     scalar(@{ $by_status{NOTAP} // [] }), scalar(@{ $by_status{XDIFF} // [] }),
     scalar(@{ $by_status{FIXTURE} // [] }), $n_bad;
@@ -1271,12 +1271,12 @@ sub emit_report {
     printf "  QUICK-SKIP    %-24s %s\n", $_, short_cause($QUICK_SKIP{$_}) for @quick_skipped;
     printf "  QUICK-CAPPED  %-24s allowance %ds (%s)\n",
       $_, $file_timeout{$_}{secs}, short_cause($file_timeout{$_}{cause}) for @quick_capped;
-    print  "  re-run without --quick to measure them (docs/perl-suite-timeouts.tsv holds the allowances)\n";
+    print  "  re-run without --quick to measure them (baselines/perl-suite-timeouts.tsv holds the allowances)\n";
   }
   print "failure log: $faillog/*.fails.tsv\n" if grep { -f $_ } glob "$faillog/*.fails.tsv";
 
   # SUITE FILES WITH NO SNAPSHOT ROW (s431 side finding, ruled s433 §A.4).
-  # docs/perl-suite-run.tsv carried 523 rows for 528 files and nobody noticed
+  # baselines/perl-suite-run.tsv carried 523 rows for 528 files and nobody noticed
   # for months: five files were simply ABSENT — not quarantined, not
   # registered, just missing — so a regression in any of them could never read
   # as a mover, because rerun_movers_serially() compares against the snapshot
@@ -1289,10 +1289,10 @@ sub emit_report {
   {
     my %snap = read_snapshot();
     if (!%snap) {
-      print "SNAPSHOT: NOT CHECKED — no docs/perl-suite-run.tsv\n";
+      print "SNAPSHOT: NOT CHECKED — no baselines/perl-suite-run.tsv\n";
     } else {
       my @norow = grep { !$snap{$_} } sort keys %results;
-      printf "SNAPSHOT: %d of %d file(s) measured here have NO row in docs/perl-suite-run.tsv%s\n",
+      printf "SNAPSHOT: %d of %d file(s) measured here have NO row in baselines/perl-suite-run.tsv%s\n",
         scalar(@norow), scalar(keys %results), (@norow ? ':' : ' — every file is covered');
       printf "  no-snapshot-row  %s\n", $_ for @norow;
       print "  splice each with its FIRST measurement (marker: # sNNN first measurement)"
@@ -1324,7 +1324,7 @@ sub emit_report {
   # silent drop; FEWER = a fix, and the census row leaves by EDIT.
   {
     my %census;
-    my $census_path = "$root/docs/parse-error-drop-census-s399.tsv";
+    my $census_path = "$root/baselines/parse-error-drop-census-s399.tsv";
     if (open my $cf, '<', $census_path) {
       while (my $l = <$cf>) {
         chomp $l;
@@ -1365,11 +1365,11 @@ sub emit_report {
     print $tf "# file  P_ok  P_notok  C_ok  C_notok  status  sig  drops   [P=PERL, C=PCL]\n";
     print $tf "# drops = statements the compiler could not lower, replaced by nil in the\n";
     print $tf "#   emitted CL (#138 family, task #343); -1 = NOT MEASURED (no CL produced).\n";
-    print $tf "#   Baseline: docs/parse-error-drop-census-s399.tsv.  Rows written before s402\n";
+    print $tf "#   Baseline: baselines/parse-error-drop-census-s399.tsv.  Rows written before s402\n";
     print $tf "#   have no drops column — that is UNKNOWN, not zero.\n";
     print $tf "# NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)\n";
-    print $tf "# XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)\n";
-    print $tf "# FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)\n";
+    print $tf "# XDIFF = expected divergence, baselines/perl-suite-expected.tsv (a blessed not-supported.md gap)\n";
+    print $tf "# FIXTURE = harness artifact, baselines/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)\n";
     print $tf "# NOT-RUN with QUARANTINED = deliberately not run this session; UNMEASURED, never passing\n";
     print $tf "# INCOMPLETE RUN — KILLED/NOT-RUN rows are unmeasured, not passing\n" if @lost;
     print $tf join("\t", @{ $results{$_} }), "\n" for sort keys %results;

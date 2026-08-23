@@ -13,7 +13,7 @@ thing s419 could not: **what each option COSTS in passing rows.**
 
 * `tools/drop-census.pl "$PWD" census-s431.tsv 8` at `54e2d80` on a COLD cache
   (`rm ~/.pcl-cache/*.lisp` first): **27 files / 82 drops, row-for-row
-  IDENTICAL** to the blessed `docs/parse-error-drop-census-s399.tsv` (diff of
+  IDENTICAL** to the blessed `baselines/parse-error-drop-census-s399.tsv` (diff of
   the sorted non-comment rows: empty).  The blessed census needs no edit.
   1m16s at 8 jobs.
 * `tools/drop-harvest.pl` over it: **82 statement texts**, one per drop — the
@@ -23,7 +23,7 @@ thing s419 could not: **what each option COSTS in passing rows.**
   `perl` (a mis-classified row is a mis-priced flip), and because eight of the
   module drops minimised to three one-line bugs.
 * Per-file row costs: `.faillog/_status.tsv` (the s428 sweep, TOTAL 18367) for
-  the four `perl-tests` files and `docs/perl-suite-run.tsv` for the 23
+  the four `perl-tests` files and `baselines/perl-suite-run.tsv` for the 23
   companion files.  **`t/op/lex.t` had no snapshot row at all** — see §6.
 
 Since s419 the census has gone **135 → 82** (42 → 27 files).  Closed in
@@ -256,7 +256,7 @@ module populations at all** (`drop-census.pl` = perl-tests + perl t/ + lib/;
 
 ## 6. Side finding: five companion files had no snapshot row
 
-`docs/perl-suite-run.tsv` carried 523 rows for 528 files.  Absent — not
+`baselines/perl-suite-run.tsv` carried 523 rows for 528 files.  Absent — not
 quarantined, not registered, simply missing, so a regression in them could
 never read as a mover (the #176 family): `comp/line_debug.t`, `op/goto.t`,
 `op/lex.t`, `op/require_errors.t`, `run/dtrace.t`.  Measured s431 and spliced

@@ -185,7 +185,7 @@
 #   file must diverge on EXACTLY its blessed row multiset (#185), and the flip
 #   changed WHICH rows diverge — op/signatures.t gains 5 unregistered diverging
 #   rows, re/reg_eval.t 1.  They are NOT re-blessed into
-#   docs/perl-suite-expected-rows.tsv: those rows are lost to an aborted form,
+#   baselines/perl-suite-expected-rows.tsv: those rows are lost to an aborted form,
 #   not to the registered not-supported reason, and blessing them would hide the
 #   flip's price behind an "expected divergence" label.  The DIFF is the debt.
 #   (Contrast s434, where six files went XDIFF -> DIFF because they REACHED more
@@ -257,7 +257,7 @@
 #     * SIX registered files (io/shm.t, mro/basic.t, mro/basic_utf8.t,
 #       mro/next_skip.t, mro/next_skip_utf8.t, op/current_sub.t) went XDIFF ->
 #       DIFF because they now REACH rows they used to die before, so their #185
-#       row baselines no longer matched.  docs/perl-suite-expected-rows.tsv was
+#       row baselines no longer matched.  baselines/perl-suite-expected-rows.tsv was
 #       re-blessed for those six ONLY (`--bless-rows` over exactly those files;
 #       1952 -> 1956 rows: io/shm.t 1 -> 22, op/current_sub.t 1 -> 15, both
 #       next_skip 10 -> 11, and mro/basic.t 54 -> 33 + mro/basic_utf8.t 40 -> 28,
@@ -349,7 +349,7 @@
 #     mro/overload_c3_utf8.t   0/0 -> 7/0    now FULLY PASSING; its
 #     mro/recursion_c3_utf8.t  1/7 -> 8/0    "utf8 package-name variant"
 #     mro/recursion_dfs_utf8.t 1/7 -> 8/0    registrations were REMOVED from
-#                  docs/perl-suite-expected.tsv (their non-utf8 twins always
+#                  baselines/perl-suite-expected.tsv (their non-utf8 twins always
 #                  passed — the divergence WAS the name spelling).
 #     mro/method_caching_utf8.t 10/0 -> 21/7  \  still XDIFF, but 18 registered
 #     mro/basic_utf8.t         10/10 -> 13/12 |  rows stopped diverging;
@@ -468,8 +468,8 @@
 #   both return to XDIFF.  That clears the audit's LIVE CRASH entry; the
 #   #314 (TRANSPILE cluster) and #315 (14 undiagnosed) rows still stand.
 # NOTAP = PERL produced no TAP (row not comparable; says nothing bad about PCL)
-# XDIFF = expected divergence, docs/perl-suite-expected.tsv (a blessed not-supported.md gap)
-# FIXTURE = harness artifact, docs/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)
+# XDIFF = expected divergence, baselines/perl-suite-expected.tsv (a blessed not-supported.md gap)
+# FIXTURE = harness artifact, baselines/perl-suite-fixture.tsv (the MEASUREMENT differs, not PCL)
 # NOT-RUN with QUARANTINED = deliberately not run this session; UNMEASURED, never passing
 # s395 (#314 F-B fixed): `our NAMES <non-assignment tail>` lowers -- op/inccode.t
 #   and op/repeat.t re-measured in the fixed tree and spliced.  op/repeat.t
@@ -505,7 +505,7 @@
 #   re-measured alone gives its snapshot value EXACTLY in every case:
 #   comp/require.t 909 (--timeout 300), re/regexp.t 793 and re/regexp_noamp.t
 #   794 (--timeout 400).  Those six re/regexp*.t files and comp/require.t have
-#   no docs/perl-suite-timeouts.tsv row -- the #176 hole, still open.
+#   no baselines/perl-suite-timeouts.tsv row -- the #176 hole, still open.
 # s396 (#325/#327/#329 refaliasing + the n-at-a-time foreach): FIVE rows
 #   re-measured in the fixed tree and spliced.  op/const-optree.t
 #   TRANSPILE-FAIL -> 86/62 and op/for-many.t TRANSPILE-FAIL -> 63/8 are the
@@ -560,7 +560,7 @@
 #     re/pat_rt_report.t  2431/39 CRASH -> 2454/56, runs to the end
 #     op/utf8cache.t         0/2  CRASH ->    2/0
 #   The other two now RUN instead of crashing but are SLOW, so they need a
-#   docs/perl-suite-timeouts.tsv decision before their rows are comparable
+#   baselines/perl-suite-timeouts.tsv decision before their rows are comparable
 #   (measured at --timeout 300: re/pat_psycho.t 11/0, re/speed.t 1/0; both
 #   TIMEOUT at the 90 s default).  Their rows are left as they were, still
 #   carrying the crash signature, deliberately — see task #324.
@@ -686,7 +686,7 @@
 #   divergences and are why it stayed UNEXPLAINED for nine sessions; a fresh
 #   per-row read of the 58 that remain (28 inlinable + 25 :method readouts,
 #   5 RT 134138) met the all-or-nothing bar, so the file is REGISTERED in
-#   docs/perl-suite-expected.tsv with both reasons and its rows blessed.
+#   baselines/perl-suite-expected.tsv with both reasons and its rows blessed.
 #   Confirmed by a SOLO re-run, not just the --quick run.  The same run's only
 #   other movers were mro/package_aliases_utf8.t (registered rows-unstable —
 #   72/34 this time, 54/34/34 before) and op/utf8cache.t (TIMEOUT under load,

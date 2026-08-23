@@ -194,6 +194,6 @@ span detector and the eligibility check disagree about what counts as a use.
    work competes with E5, which rebuilds this layer.
 6. **A-iii**, **B-ii** — singles, last.
 
-Row counts are the snapshot C_ok values from task #254 / `docs/perl-suite-run.tsv`;
+Row counts are the snapshot C_ok values from task #254 / `baselines/perl-suite-run.tsv`;
 taint.t's is unmeasured (it has never transpiled) and is the reason the family
 is worth ~12k rows on paper.

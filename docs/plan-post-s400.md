@@ -13,7 +13,7 @@ marked Fable, and one letter is roughly one session.
 |---|---|---|
 | Gate `tools/prove-core` | **143 files / 5278 rows**, PASS except the 13 pclxs xs rows | user: ignore xs rows while pclxs is on ABI 8 |
 | Full perl-tests sweep | **GATE clean, 0 new / 0 fixed, TOTAL 18516 = baseline**, 2 UNSTABLE (crash-file noise), 8 unverified | re-run this session, `--jobs 8` |
-| Companion suite snapshot (`docs/perl-suite-run.tsv`, s400) | 523 rows: 86 OK, 106 XDIFF, 280 DIFF, 30 NOTAP, 12 TRANSPILE, 5 TIMEOUT, 2 NOT-RUN | #324's verification finished s400; 9 TIMEOUT-shaped files not comparable across runs |
+| Companion suite snapshot (`baselines/perl-suite-run.tsv`, s400) | 523 rows: 86 OK, 106 XDIFF, 280 DIFF, 30 NOTAP, 12 TRANSPILE, 5 TIMEOUT, 2 NOT-RUN | #324's verification finished s400; 9 TIMEOUT-shaped files not comparable across runs |
 | Cache generation | v2-148, all three artifacts stamped v2-148 | `artifact-staleness-01.t` green |
 | CPAN board (s344 last measured) | 65 PASS / 65 PARTIAL / 53 FAIL of 183 | re-bless waits for #208 |
 | XS conformance | 398/398 (s339) | not in the gate |
@@ -51,7 +51,7 @@ measurement cheaper).**
 2. **#343 pieces**: the `add_node` internal-error drop (one probe, one
    file); the **DROPS runner column** — the sweep records per-file drop
    counts in `.faillog/_status.tsv`, `sweep-diff.pl` gains a DROPS bucket vs
-   `docs/parse-error-drop-census-s399.tsv` (the census is the baseline; a
+   `baselines/parse-error-drop-census-s399.tsv` (the census is the baseline; a
    drop leaves by EDIT), `run-perl-suite.pl` records the same column.  Add
    the one sentence to `not-supported.md` §lvalue subs (6.3).
 3. **`ir-spec.md`**: the gen-stamp promise (7.3) — one paragraph; the two

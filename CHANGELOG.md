@@ -36,7 +36,7 @@ compiler with a CL runtime that reproduces Perl's semantics.
 - A statement the compiler cannot translate is **announced at compile time and
   dies, perl-shaped and trappable, when reached** — never silently lost; the
   population-wide census is tracked in-repo and gated
-  (`docs/parse-error-drop-census-s399.tsv`).
+  (`baselines/parse-error-drop-census-s399.tsv`).
 - Named optimization registry (`PCL_OPT`): every speed transform is a
   named, fact-licensed emission that can be switched off
   (`PCL_OPT=none` = the general-form compiler, verified to run

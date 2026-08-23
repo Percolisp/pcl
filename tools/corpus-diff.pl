@@ -31,7 +31,7 @@
 # `(progn ;; PARSE ERROR: … nil)` forms, i.e. statements the compiler could
 # not lower and replaced with nil.  They are invisible at run time, so a
 # change that adds one otherwise shows up nowhere; task #343 and
-# docs/parse-error-drop-census-s399.tsv have the population-wide census.
+# baselines/parse-error-drop-census-s399.tsv have the population-wide census.
 #
 # What it gets right that ad-hoc reruns keep getting wrong (s287):
 #   - the SAME input files (this tree's perl-tests/) are fed to BOTH
@@ -139,7 +139,7 @@ for my $f (@files) {
 # (perl-tests/bless.t carries one today and it is a test row that never runs,
 # in a file the sweep reports as passing).  Both emissions are already in
 # hand here, so counting them is free; the population-wide version is
-# tools/drop-census.pl against docs/parse-error-drop-census-s399.tsv.
+# tools/drop-census.pl against baselines/parse-error-drop-census-s399.tsv.
 my $drops = sub {
     my ($dir) = @_;
     my $n = 0;

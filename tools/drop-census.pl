@@ -12,7 +12,7 @@
 #
 # Output: <rel-path><TAB><drops in the file><TAB><the compiler's own message(s)
 # with a count each>.  The blessed census is
-# docs/parse-error-drop-census-s399.tsv; diff a fresh run against it to see
+# baselines/parse-error-drop-census-s399.tsv; diff a fresh run against it to see
 # whether a change added or removed drops.
 #
 # WHY IT EXISTS: a drop is silent at RUN time — the statement simply is not
@@ -56,7 +56,7 @@
 #
 # --board reaches OUTSIDE the checkout (~/.cpan/build), so it is opt-in and its
 # rows are only refreshed by a run that passes it — see the census header.  The
-# 14 dists are read from docs/cpan-board14-s343.tsv (the board's own
+# 14 dists are read from baselines/cpan-board14-s343.tsv (the board's own
 # definition), never written down here; the build root is $PCL_CPAN_BUILD, else
 # $HOME/.cpan/build, else --board-dir DIR.
 #
@@ -113,7 +113,7 @@ push @files, [$_, 'cpan-tests', rel_repo($_), 1] for pm_under("$root/cpan-tests/
 push @files, [$_, 'cpan-t', rel_repo($_), 0] for dist_t_under("$root/cpan-tests/modules");
 if ($board) {
   my $build = $board_dir // $ENV{PCL_CPAN_BUILD} // "$ENV{HOME}/.cpan/build";
-  my @dists = board_dists("$root/docs/cpan-board14-s343.tsv");
+  my @dists = board_dists("$root/baselines/cpan-board14-s343.tsv");
   my $found = 0;
   for my $dist (@dists) {
     next unless -d "$build/$dist/lib";

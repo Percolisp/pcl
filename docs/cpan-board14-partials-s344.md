@@ -2,7 +2,7 @@
 
 Companion to `docs/cpan-board14-survey-s343.md`, which classified the 53 FAILs
 (41 real, in ~4 causes). This is the other half — task **#231**. Data:
-`docs/cpan-board14-partial-causes-s344.tsv` (one line per PARTIAL file: family,
+`baselines/cpan-board14-partial-causes-s344.tsv` (one line per PARTIAL file: family,
 perl-oracle verdict, ok/not-ok counts, the FIRST not-ok row and its diagnostic).
 
 Measured at `191f35d` / gen v2-105, same board as s343.

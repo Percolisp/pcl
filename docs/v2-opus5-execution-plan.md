@@ -81,7 +81,7 @@ has an answer in `docs/fable-answers-s316v.md` (s317) or `docs/DECIDED.md`.
    b. `tools/prove-core` — full gate (131 files / 4595 with a built pclxs
       sibling), not a subset;
    c. full sweep `perl sweep-perl-tests.pl --jobs 8 --timeout 380` then
-      `perl tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog` —
+      `perl tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog` —
       0 new (pack.t needs the 380; at 150 it TIMEOUTs even idle);
    d. `perl tools/v2-census.pl` — still 111/111.
    **Never run two sweeps concurrently — a sweep CLEARS `.faillog` at
@@ -178,7 +178,7 @@ Only the §1b ledger items still need a human.
 > worklist at the end of `docs/fable-answers-s318.md`.  Where we are:
 >
 > - **S1 (gate hygiene) — DONE, commit `0758d5a`.**  FIXTURE status +
->   `docs/perl-suite-fixture.tsv` (per-ROW, all-or-nothing, both inverse
+>   `baselines/perl-suite-fixture.tsv` (per-ROW, all-or-nothing, both inverse
 >   guards probed); op/chr.t → XDIFF; #158 closed no-fix; op/list.t +
 >   op/pack.t QUARANTINED as NOT-RUN-with-reason; #155 aggregate tie now
 >   announces itself on stderr.
@@ -190,7 +190,7 @@ Only the §1b ledger items still need a human.
 >   had to precede S2 because the FIXTURE registry matches per-ROW against
 >   that log.  op/do.t went XDIFF once the pairing was honest, after fixing
 >   its one real bug (`do DIR` now reports `$!` = EISDIR).
-> - **S2 (the full `docs/perl-suite-run.tsv` regeneration, which GATES R1)
+> - **S2 (the full `baselines/perl-suite-run.tsv` regeneration, which GATES R1)
 >   — running.**  Per-dir foreground chunks, `--jobs 3`, each with its own
 >   faillog.  On completion: install the merged snapshot, then run the #177
 >   cross-check (files whose log carries a `renumbered` marker AND a
@@ -220,7 +220,7 @@ release checks surface divergences, triage those first, per
    `tools/run-perl-suite.pl` (tooling only; part 2 re-sync is post-R1).
 5. **#149 — error-text skip category** (pre-authorized, see task).
 6. **More near-green DIFF families** from the refreshed
-   `docs/perl-suite-run.tsv` (the s310–s316t pattern: fix the family at
+   `baselines/perl-suite-run.tsv` (the s310–s316t pattern: fix the family at
    the right layer).
 7. No structural work in this window.  #66 (forward-decl scan false
    positives) is W1-eligible if the queue empties: it is a contained,

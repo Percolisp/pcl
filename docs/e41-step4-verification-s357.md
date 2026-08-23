@@ -21,7 +21,7 @@ load-noise caveat (#215).
 ## 2. The full perl suite — the finding: 28 files lost to the flip
 
 Run per-dir (`tools/run-perl-suite.pl --dir D --jobs 8`, 11 dirs,
-523 rows — the same file set as `docs/perl-suite-run.tsv`).
+523 rows — the same file set as `baselines/perl-suite-run.tsv`).
 
 **93 rows moved vs the snapshot.**  Most is 13 sessions of ordinary drift
 (the snapshot is `# taken-at: 1e7c4d7`, s323e/s325, 2026-08-02), including
@@ -143,11 +143,11 @@ That belongs beside the existing `PCL_V2_AUDIT_LOG` note in memory.
 ## 4. Also surfaced by the suite run
 
 - **`mro/inconsistent_c3_utf8.t` is STALE** — a blessed expected-divergence
-  row now PASSES, so it must come out of `docs/perl-suite-expected.tsv`.
+  row now PASSES, so it must come out of `baselines/perl-suite-expected.tsv`.
   The runner already fails the run for this (by design, #185).
 - **`comp/hints.t` and `mro/inconsistent_c3.t` XDIFF → DIFF** — their
   blessed row sets grew rows that are not in
-  `docs/perl-suite-expected-rows.tsv`.
+  `baselines/perl-suite-expected-rows.tsv`.
 
 ## 5. The verdict, and the ask
 

@@ -1,4 +1,4 @@
-# s343: first-cause line per FAIL file of the 14-dist board (docs/cpan-board14-s343.tsv),
+# s343: first-cause line per FAIL file of the 14-dist board (baselines/cpan-board14-s343.tsv),
 # joined with what REAL PERL does with the same file (the discriminator: a file
 # perl skips or cannot run is not a PCL failure).
 # dist <TAB> t-file <TAB> perl-verdict <TAB> pcl-cause

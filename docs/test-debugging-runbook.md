@@ -8,7 +8,7 @@ is the *procedure* to follow.
 ```sh
 perl sweep-perl-tests.pl --jobs 8            # writes .faillog/*.fails.tsv (Pass/Fail/Skip)
 tools/sweep-diff.pl .faillog                 # per-file fail counts (where to work)
-tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog   # what changed since baseline
+tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # what changed since baseline
 ```
 `Fail` is the only number that matters (skips are documented; crashes are separate). Guard
 the **Fully-passing** count — if it drops, find the regression before anything else.
@@ -89,7 +89,7 @@ places see it now:
   `PCL: statement dropped at FILE line N: <source text> -- <reason>` (task #339;
   `PCL_DROP_ANNOUNCE=all` also turns it on for the runtime's module transpiles);
 - the sweep records a per-file `drops` count and `tools/sweep-diff.pl` compares
-  it against `docs/parse-error-drop-census-s399.tsv` — **more drops than the
+  it against `baselines/parse-error-drop-census-s399.tsv` — **more drops than the
   census fails the run**, fewer is a fix and the census row leaves by EDIT.
   `tools/run-perl-suite.pl` prints the same comparison for perl's own t/.
 
@@ -100,7 +100,7 @@ Since s435 (the flip) a dropped statement DIES when it is reached — a
 perl-shaped, trappable run-time die at the drop site — so the rows AFTER it
 in the same top-level form are lost too.  Those show up in the LOST bucket,
 and a lost row is accepted only with that cause, edited into
-`docs/pass-baseline.tsv` row by row.
+`baselines/pass-baseline.tsv` row by row.
 
 ## 4b. A fix that makes a value REAL exposes rows that were passing on NOTHING (s439, ask 12)
 Three fixes in a row (the s435 flip twice, #450 once) moved a passing row to a
@@ -132,8 +132,8 @@ Do a few files, then a full sweep + `sweep-diff diff` to confirm no net regressi
 ## 6. After intended changes: re-bless the baseline
 ```sh
 perl sweep-perl-tests.pl --jobs 8
-tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog   # review NEW (must be empty) + FIXED
-tools/sweep-diff.pl save .faillog docs/fail-baseline.tsv    # commit the new baseline
+tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # review NEW (must be empty) + FIXED
+tools/sweep-diff.pl save .faillog baselines/fail-baseline.tsv    # commit the new baseline
 ```
 Re-bless **only from a clean sweep** — a file that flaky-crashes under `-j8` (transient
 `SIMPLE-FILE-ERROR`; pack.t/join.t/anonsub.t seen) contributes 0 failures that run. As of

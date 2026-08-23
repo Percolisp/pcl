@@ -28,7 +28,7 @@ Command (`--no-dist-lib` must precede Scalar-List-Utils and applies to every
 dist after it):
 
 ```
-perl tools/cpan-scoreboard.pl --jobs 4 --timeout 120 --tsv docs/cpan-scoreboard.tsv \
+perl tools/cpan-scoreboard.pl --jobs 4 --timeout 120 --tsv baselines/cpan-scoreboard.tsv \
   ~/.cpan/build/Try-Tiny-0.32-0 ~/.cpan/build/Role-Tiny-2.002004-0 \
   ~/.cpan/build/Sub-Uplevel-0.2800-0 --no-dist-lib ~/.cpan/build/Scalar-List-Utils-1.70-0
 ```
@@ -36,7 +36,7 @@ perl tools/cpan-scoreboard.pl --jobs 4 --timeout 120 --tsv docs/cpan-scoreboard.
 **The per-dist tally is too coarse to be a gate, so it is no longer the
 baseline.**  A PARTIAL file can lose rows and keep its status: the whole
 class "this dist still fails the same number of *files*, but 4 more
-*assertions*" was invisible.  `docs/cpan-scoreboard.tsv` (new, `--tsv`) is now
+*assertions*" was invisible.  `baselines/cpan-scoreboard.tsv` (new, `--tsv`) is now
 the artifact — one sorted line per t-file, `dist file status ok notok rc`,
 diffed with plain `diff`.  Same reasoning as #185 for the perl suite.
 (The committed s322 TSV was converted from this run's stdout, field for field,
@@ -113,8 +113,8 @@ Under s322 `file_which.t` CRASHED after its first assertion, which the
 classifier reads as PASS ("at least one ok, zero not-ok").  It now runs 19
 assertions with 7 honest failures.  Getting further LOWERED its grade.
 
-Causes for the remaining 48: `docs/cpan-widen-causes-s323.tsv`
-(supersedes the s322 file).  Per-file baseline: `docs/cpan-widen-scoreboard.tsv`.
+Causes for the remaining 48: `baselines/cpan-widen-causes-s323.tsv`
+(supersedes the s322 file).  Per-file baseline: `baselines/cpan-widen-scoreboard.tsv`.
 
 | n | cause | reading |
 |---|-------|---------|

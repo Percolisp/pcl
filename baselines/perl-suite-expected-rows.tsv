@@ -1,6 +1,6 @@
 # perl-suite-expected-rows.tsv — the ROW baseline behind XDIFF (task #185).
 # GENERATED: `tools/run-perl-suite.pl --bless-rows` rewrites the files that run
-# measured.  Do not hand-edit; edit docs/perl-suite-expected.tsv (the reasons)
+# measured.  Do not hand-edit; edit baselines/perl-suite-expected.tsv (the reasons)
 # and re-bless.
 #
 # One line per DIVERGING ROW of a registered file: <rel-path><TAB><rowkey>.

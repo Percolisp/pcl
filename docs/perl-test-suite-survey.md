@@ -517,7 +517,7 @@ Import the highest-signal ones the same way.
 
 ### Post-snapshot registrations (the tsv drifts from the registries)
 
-`docs/perl-suite-run.tsv` is a point-in-time artifact, taken at **b32825d**.
+`baselines/perl-suite-run.tsv` is a point-in-time artifact, taken at **b32825d**.
 Registrations made *after* it change a row's STATUS without re-measuring
 anything, so the file and the registries can disagree.  Do NOT hand-edit the
 snapshot to patch this — partial edits to a release signal are exactly what
@@ -590,7 +590,7 @@ core built per invocation (prove-core pattern, ~1.2s/file → ~0.003s), and
 `--all`/`--dir` scans exclude files already copied into the sweep corpus
 (matched by basename + head content — several `t/` files share a basename with
 a corpus file from another dir).  `--include-copied` overrides; `--tsv FILE`
-writes a per-file snapshot.  **`docs/perl-suite-run.tsv` is the R1 RELEASE SNAPSHOT, regenerated in full at s321** (523 rows, all 11 dirs, one session, per-dir foreground chunks) — see the fable-answers-s318.md §6 rule: one full regeneration, partial regeneration forbidden.
+writes a per-file snapshot.  **`baselines/perl-suite-run.tsv` is the R1 RELEASE SNAPSHOT, regenerated in full at s321** (523 rows, all 11 dirs, one session, per-dir foreground chunks) — see the fable-answers-s318.md §6 rule: one full regeneration, partial regeneration forbidden.
 
 **Failure log + not-supported marking (s302b).**  Every DIFF/TIMEOUT file
 writes a per-test log to `.suitelog/<rel>.fails.tsv`
@@ -604,7 +604,7 @@ a `renumbered` marker row says the streams drifted.  Re-syncing happens only on
 evidence (an exact description match ahead, confirmed by the next row), so
 unnamed and value-interpolated descriptions fall back to positional pairing.
 Divergences *explained by* `docs/not-supported.md` are marked in
-**`docs/perl-suite-expected.tsv`** (`rel<TAB>reason`, reason cites the §):
+**`baselines/perl-suite-expected.tsv`** (`rel<TAB>reason`, reason cites the §):
 those files become status **XDIFF** — they still run and print, but don't fail
 the exit code — and if one starts matching perl the row is flagged **STALE**
 and fails the run (skip-registry philosophy: an expectation can never hide a
@@ -614,7 +614,7 @@ targets.  Seeded s302b: 41 `mro/*` (§mro), 10 `re/uniprops*` (§Unicode
 
 **Harness-fixture artifacts — a THIRD category (s320).**  When the divergence
 comes from the MEASUREMENT SETUP rather than from PCL, the row belongs in
-**`docs/perl-suite-fixture.tsv`** (`rel<TAB>rows<TAB>cause`) and the file
+**`baselines/perl-suite-fixture.tsv`** (`rel<TAB>rows<TAB>cause`) and the file
 becomes status **FIXTURE**.  It is deliberately not `perl-suite-expected.tsv`:
 that file's bar is "explained by a blessed `not-supported.md` section", so
 filing an artifact there would claim PCL lacks a feature it has.  Matching is

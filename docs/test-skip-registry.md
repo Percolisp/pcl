@@ -8,7 +8,7 @@ how crashing/aborting tests are characterized. Introduced session 216.
 There are **two separate databases**, built two different ways. **Neither is built by
 diffing our test files against upstream Perl.**
 
-| | **Skip-registry** (`cl/skip-registry.lisp`) | **Fail-baseline** (`docs/fail-baseline.tsv`) |
+| | **Skip-registry** (`cl/skip-registry.lisp`) | **Fail-baseline** (`baselines/fail-baseline.tsv`) |
 |---|---|---|
 | What it is | hand-curated allow-list of *not-supported* failures | auto-captured snapshot of *all current* failures |
 | How it's built | **manually, entry by entry** — a human reads each `not ok` and decides not-supported vs real bug, then writes one `(regex category reason)` line citing `not-supported.md`. No automation, no diff. | **automatically** — the sweep's failure log (`.faillog/*.fails.tsv`) snapshotted by `tools/sweep-diff.pl save` |
@@ -164,7 +164,7 @@ compile/run (e.g. `(?{code})` regex won't compile; Tie::Array hang). For those:
 | `runt` | loads the registry + sets `*current-test-file*` for single-file runs; inherits `PCL_TEST_LOG_DIR` if exported |
 | `sweep-perl-tests.pl` | same wiring; 3-column Pass/Fail/Skip reporting; auto-sets `PCL_TEST_LOG_DIR=.faillog` (cleared each run) |
 | `tools/sweep-diff.pl` | regression watchdog over the failure log (summary / diff / save) |
-| `docs/fail-baseline.tsv` | committed known-fail baseline (560 keys) for `sweep-diff diff` |
+| `baselines/fail-baseline.tsv` | committed known-fail baseline (560 keys) for `sweep-diff diff` |
 | `.faillog/*.fails.tsv` | generated per-file failure DB (gitignored) |
 | `docs/not-supported.md` | the rationale each registry entry cites |
 
@@ -199,7 +199,7 @@ var unset there is **zero overhead** (the stream is never opened) — normal run
   `cl/pcl-test.lisp`; call site in `test-ok`'s `not ok` branch.
 
 ### 2. Baseline-diff regression watchdog — BUILT (`tools/sweep-diff.pl`)
-A committed baseline `docs/fail-baseline.tsv` records the known fail set. `sweep-diff.pl`
+A committed baseline `baselines/fail-baseline.tsv` records the known fail set. `sweep-diff.pl`
 compares a fresh `.faillog` to it **keyed on `(file, description)`** — NOT the test number,
 so it is robust to the TAP-number shifts PCL keeps hitting — and prints only **NEW fails**
 (regressions, with got/expected) and **FIXED** (newly passing). Replaces the manual "run
@@ -209,9 +209,9 @@ session-216 preprocessing change) with "2 tests changed: both newly passing."
 ```sh
 perl sweep-perl-tests.pl --jobs 8                       # writes .faillog/*, THEN runs the gate itself
 tools/sweep-diff.pl .faillog                            # summary: per-file fail counts
-tools/sweep-diff.pl diff docs/fail-baseline.tsv .faillog # NEW + FIXED + LOST (exit!=0 if NEW or LOST)
-tools/sweep-diff.pl save .faillog docs/fail-baseline.tsv        # re-bless the FAIL baseline
-tools/sweep-diff.pl save-status .faillog docs/pass-baseline.tsv # re-bless the PASS baseline
+tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog # NEW + FIXED + LOST (exit!=0 if NEW or LOST)
+tools/sweep-diff.pl save .faillog baselines/fail-baseline.tsv        # re-bless the FAIL baseline
+tools/sweep-diff.pl save-status .faillog baselines/pass-baseline.tsv # re-bless the PASS baseline
 ```
 
 A **full** sweep (no file arguments) ends by running that `diff` itself and exits
@@ -240,7 +240,7 @@ that makes a file **stop earlier**: passing rows vanish, no failing row appears,
 the headline says `0 new, 0 fixed`.  Measured live in s328 — a `die` in `goto LABEL`
 took `perl-tests/state.t` from 157 to 69 passing rows while the diff stayed clean.
 
-`docs/pass-baseline.tsv` (blessed with `save-status` from a clean run) records
+`baselines/pass-baseline.tsv` (blessed with `save-status` from a clean run) records
 `name⇥status⇥pass⇥fail⇥planned` per file.  `diff` compares the current run's pass
 counts against it and prints **LOST** — per file, baseline passing rows this run did
 not produce — plus a `TOTAL passing: baseline N, current M (+/-D)` line on **every**

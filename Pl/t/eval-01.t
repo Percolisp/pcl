@@ -456,7 +456,7 @@ SKIP: {
     # (`f ref $u, "m" or g "fb";`) was CLOSED by the #343 ceiling fix (s418),
     # which made these three rows fail as stale guards; the current shape is
     # #335's list-slice-of-call condition.  When #335 closes too, swap in
-    # another shape from docs/parse-error-drop-census-s399.tsv — and expect
+    # another shape from baselines/parse-error-drop-census-s399.tsv — and expect
     # exactly this failure mode as the tell.
     my $out = run_pl(q{
         no warnings;

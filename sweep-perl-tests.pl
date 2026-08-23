@@ -659,7 +659,7 @@ print "\n" . mem_report() . "\n";
 # a regression, not noise.
 sub run_gate {
     my ($fail_base, $differ, $label) = @_;
-    print "\n" . ("=" x 72) . "\nGATE$label: tools/sweep-diff.pl vs docs/fail-baseline.tsv + docs/pass-baseline.tsv\n"
+    print "\n" . ("=" x 72) . "\nGATE$label: tools/sweep-diff.pl vs baselines/fail-baseline.tsv + baselines/pass-baseline.tsv\n"
         . ("=" x 72) . "\n";
     my $cmd = join(' ', map { quotemeta } ($^X, $differ, 'diff', $fail_base, $log_dir));
     my $out = `$cmd 2>&1`;
@@ -709,7 +709,7 @@ sub rerun_serially {
 }
 
 if ($full_sweep && $GATE) {
-    my $fail_base = "$project_root/docs/fail-baseline.tsv";
+    my $fail_base = "$project_root/baselines/fail-baseline.tsv";
     my $differ    = "$project_root/tools/sweep-diff.pl";
     if (-e $fail_base && -x $differ) {
         my ($code, $lost) = run_gate($fail_base, $differ, '');

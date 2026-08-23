@@ -151,7 +151,7 @@ session, every item:
    - **`--jobs 1` sweep parity** (`perl sweep-perl-tests.pl --jobs 1 <files>`)
      of every changed/de-gated file, HEAD vs new.  *A de-gate that loses even
      one test vs the v1 fallback is a regression, not a win* (bop.t, s283).
-     Compare against `.faillog/` / `docs/fail-baseline.tsv`: a de-gated file
+     Compare against `.faillog/` / `baselines/fail-baseline.tsv`: a de-gated file
      matching v1's OLD failures exactly (same test numbers) is parity.
    - **Full gate**: `tools/prove-core` (== `prove -j8 Pl/t/`, ~2:30).
 2. **Bump `*pcl-cache-generation*`** (`cl/pcl-runtime.lisp`) on every

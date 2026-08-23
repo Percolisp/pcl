@@ -1,8 +1,8 @@
 # The 14-dist CPAN board — where it stands (s343, measured)
 
 First survey of the **whole** widened board in one run, on `9615196`
-(gen v2-105). Data: `docs/cpan-board14-s343.tsv` (per t-file status) and
-`docs/cpan-board14-fail-causes-s343.tsv` (per-FAIL cause **plus what real perl
+(gen v2-105). Data: `baselines/cpan-board14-s343.tsv` (per t-file status) and
+`baselines/cpan-board14-fail-causes-s343.tsv` (per-FAIL cause **plus what real perl
 does with the same file**).
 
 Unfinished: the 65 PARTIAL files were not cause-classified — that is the next
@@ -87,7 +87,7 @@ boundary, and `subtest`.
 ## Next step — DONE in s344
 
 The 65 PARTIAL files are classified in **`docs/cpan-board14-partials-s344.md`**
-(data: `docs/cpan-board14-partial-causes-s344.tsv`): 635 of the 674 rows, in
+(data: `baselines/cpan-board14-partial-causes-s344.tsv`): 635 of the 674 rows, in
 eight families, three of which carry 85% of them — Text-Balanced 300,
 Sub-Uplevel/`caller` 127, Scalar-List-Utils 110. New tasks #232–#239.
 

@@ -205,7 +205,7 @@ differential vs real perl where possible:
 6. **C7**: `BEGIN { our $r = \&later } sub later { 7 } … $r->()` resolves to 7.
 7. **C2 regression**: keep the existing `local`/dynamic-scope cases green.
 8. Re-run the full `Pl/t` gate **and** a `perl-tests` sweep; compare against
-   `docs/fail-baseline.tsv` with `tools/sweep-diff.pl` (R1 detector).
+   `baselines/fail-baseline.tsv` with `tools/sweep-diff.pl` (R1 detector).
 
 Acceptance: gate green, sweep shows 0 new failures (fixes welcome), and the Moo
 role repro (`/tmp/moo_role.pl`) prints `Hello from Person` + `does=yes`.

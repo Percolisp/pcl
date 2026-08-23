@@ -1,6 +1,6 @@
 # Companion-suite snapshot audit (task #304, s392)
 
-`docs/perl-suite-run.tsv` was stamped `1e7c4d7 (s323e)` — **191 commits
+`baselines/perl-suite-run.tsv` was stamped `1e7c4d7 (s323e)` — **191 commits
 stale**, and taken BEFORE E4.1 (#242, s356) turned v1 gates into hard errors
 and retired `--lenient-ppi`.  So it measured a compiler with a silent v1
 fallback; today's has none.  This file is the per-file audit that had to

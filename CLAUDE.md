@@ -240,7 +240,7 @@ tools/pcl-conform                # whole corpus
 tools/pcl-conform 96-flags       # one case-set file
 
 # perl's OWN t/ suite (the companion sweep).  A file that legitimately needs
-# longer than the 90s default is registered in docs/perl-suite-timeouts.tsv
+# longer than the 90s default is registered in baselines/perl-suite-timeouts.tsv
 # (rel<TAB>seconds<TAB>cause; effective timeout = max(row, --timeout), and the
 # allowances in effect are printed per run) — never left to TIMEOUT into "no
 # rows at all", which is how a file's passing rows vanish invisibly (#176).
@@ -482,11 +482,11 @@ func => -12         # 1 param before list
   each test file spawns a new SBCL process)
 - **The full sweep RUNS ITS OWN GATE (s330, #204)**: `perl sweep-perl-tests.pl
   --jobs 8` with no file arguments ends by running `tools/sweep-diff.pl diff
-  docs/fail-baseline.tsv .faillog` and **exits with that verdict** (`--no-gate`
+  baselines/fail-baseline.tsv .faillog` and **exits with that verdict** (`--no-gate`
   opts out; a sweep of named files stays informational).  The diff now has a
   **fourth bucket, LOST** — baseline PASSING rows the run did not produce,
-  compared against `docs/pass-baseline.tsv` (`sweep-diff.pl save-status .faillog
-  docs/pass-baseline.tsv` re-blesses it).  The first three buckets read failing
+  compared against `baselines/pass-baseline.tsv` (`sweep-diff.pl save-status .faillog
+  baselines/pass-baseline.tsv` re-blesses it).  The first three buckets read failing
   rows only, so a change that makes a file abort EARLIER used to report
   `0 new / 0 fixed` while coverage evaporated (s328: state.t 157 → 69).  Every
   run prints `TOTAL passing: baseline N, current M`, and when no pass baseline
@@ -497,7 +497,7 @@ func => -12         # 1 param before list
   a file the sweep calls passing).  The sweep records a per-file `drops` count
   in `.faillog/_status.tsv` (columns: name, status, pass, fail, planned,
   **drops**, note) and `sweep-diff.pl` compares it against
-  `docs/parse-error-drop-census-s399.tsv` — **the census IS the baseline**, a
+  `baselines/parse-error-drop-census-s399.tsv` — **the census IS the baseline**, a
   drop leaves it by EDIT; more drops than the census fails the run like a NEW
   failure.  `tools/run-perl-suite.pl` prints the same comparison for perl's
   own t/, and every transpile now announces a drop as it happens:
@@ -509,7 +509,7 @@ func => -12         # 1 param before list
   files, GATE clean, drops 12 = census — identical to s405 in every bucket
   (closure.t stays OK 272/4, pack.t OK 5636/89).  The one row above the s399
   number is `ref.t` 190 → 191,
-  edited into `docs/pass-baseline.tsv` by hand with its cause (s404l's
+  edited into `baselines/pass-baseline.tsv` by hand with its cause (s404l's
   blank-line fix in `tools/pclperl-for-tests`, attributed by bisection in a
   worktree).  The s399 measurement it sits on: **704 blessed fails**,
   **64 files fully passing**, TOTAL passing 18516 across 108 files.  The
@@ -519,9 +519,9 @@ func => -12         # 1 param before list
   honest failures with ONE cause — PCL emits no warnings-gated diagnostic
   (`not-supported.md` "Warnings-gated diagnostics are absent", owner #221).
   Both baselines were edited ROW BY ROW, never re-blessed, and
-  `docs/pass-baseline.tsv` carries a header note saying so.
+  `baselines/pass-baseline.tsv` carries a header note saying so.
   Historical baseline text follows.
-- Full `perl-tests/` sweep: **679 blessed fails** in `docs/fail-baseline.tsv`,
+- Full `perl-tests/` sweep: **679 blessed fails** in `baselines/fail-baseline.tsv`,
   **65 files fully passing**, 18499 passing / 910 failing across 108 files
   (re-measured s356 at the E4.1 flip; GATE clean, +0.  The flip moved three
   files, all pre-authorized and edited into the baselines with their causes:
@@ -532,12 +532,12 @@ func => -12         # 1 param before list
   §2.3; **lex.t 46 → 45** — the #228 `[perl #129069]` registration, whose pass
   was an accident of `--lenient-ppi` truncating NUL source to nothing.
   (re-measured s341 on a COLD cache; `sweep-diff.pl diff
-  docs/fail-baseline.tsv .faillog` = **0 new / 0 fixed / 0 LOST**, plus 2 rows
+  baselines/fail-baseline.tsv .faillog` = **0 new / 0 fixed / 0 LOST**, plus 2 rows
   the tool
   itself flags UNSTABLE — new fails ABOVE the abort point of postfixderef.t and
   ref.t, both already PARTIAL, so they are crash-file noise, not regressions.
   **Both baselines were re-hygiened in s341 (#223)**: the two now-passing
-  scalar.t rows edited out of the fail baseline, and `docs/pass-baseline.tsv`
+  scalar.t rows edited out of the fail baseline, and `baselines/pass-baseline.tsv`
   re-blessed from that run after a per-file audit — it had been blessed at
   s337b from a run OLDER than its own commit, which is why every later session
   read a phantom `+8`.  `save-status` now stamps `# taken-at: <sha> <date>` so
@@ -567,10 +567,12 @@ func => -12         # 1 param before list
   `_rewrite_var_uses`, not the regenerated artifact the task suspected.  The
   retry stays as the backstop for contention.
   **CORRECTION (s322): the earlier claim here that "pack.t has NO rows in the
-  blessed baseline" was FALSE** — `docs/fail-baseline.tsv` has always carried
+  blessed baseline" was FALSE** — `baselines/fail-baseline.tsv` has always carried
   its 58 pack.t rows.  The claim came from `grep`ping that file, which
   contains NUL bytes: grep then treats it as binary and prints nothing.  Use
-  `grep -a`, or perl, on any `.tsv` under `.faillog/` or `docs/`.
+  `grep -a`, or perl, on any `.tsv` under `.faillog/` or `baselines/` (the
+  blessed baselines moved from `docs/` to `baselines/` in s440 — USER: docs/
+  must stay browsable).
   See `docs/sweep-bug-catalog.md`
 - v2 pipeline census: 111 files v2-native / 0 gated to v1 — E1 complete
   (`perl tools/v2-census.pl` for the live numbers)
@@ -635,7 +637,7 @@ designed.
 
 2b00000000000000. **s438b + s438c (Opus, 2026-08-23): Q4 — the two named-unary OPERAND SITES become ONE (#453), and an imported `()`-prototype sub is a TERM (#365).**  **#453**: perl decides a named unary from the PROTOTYPE alone, and `_proto_parse_spec` was already the one reading of that shape, so `is_named_unary` now answers for a DECLARED sub whose spec is 1 / [0,1] (`(1000 4 24 27 30 46 100 115 1000` `(;1000 4 24 27 30 46 100 115 1000` `(*)` `(_)` `(\@)`) — which routes it to the site that runs `_extend_high_prec` and, because the same predicate is the strictly-single site's guard, out of the site that stops at the first term: `f "a" . "b"` was f(a)b, `f $x + 1` was 1, `(*)`'s `g + 1, "\n"` was g(1,"\n").  `known_no_of_params` is NOT a second source (its 1 covers shift/close/fileno, which must keep the strictly-single site and its bareword-filehandle branch).  **#365 — NOT where the task pointed, and that is the finding**: the classifier IS asked (23 times for `pi`) and answers `no` because **the prototype never crossed the `use`** — `_merge_module_prototypes` imported only block args, parameter SLOTS and names the export scan listed, and that scan reads literal `qw()` while Math::Complex builds `` from a variable (`my  = qw(pi …); our  = (qw(…), )`).  An empty prototype is a PARSE fact and now crosses a `use` on its own shape; `is_proto` does NOT identify it (`sub pi ()` arrives as is_proto 0 — a first attempt keyed on it changed nothing).  **ONE predicate `Pl::Environment::proto_is_zero_arg`** — the record test was in `PExpr::_is_zero_arg_func` and nowhere in the merge, which is how they disagreed (rule 11).  **Both changes are emission-IDENTICAL over the four populations** (corpus-diff 111 + emission-ab 951 files SAME / 0 DIFF / 0 RCDIFF, twice — RCDIFF 0 is also the die-scan), so the s371 rule applies and the GUARDS are the bar: `Pl/t/user-unary-01.t` (12 rows, 5 negatives) + `Pl/t/imported-term-01.t` (7 rows; its fixture builds `@EXPORT` from a VARIABLE so it tests the mechanism, not one module's spelling), both inverse-guarded on a `fe46c7b` worktree.  Gate **165/5760**; sweep TOTAL **18312 (+0)** GATE clean; companion **528 files, ZERO real movers** (io/pvbm.t alone 23/5 — the SIXTH time).  **#484 filed**: the #351 `WORD /` repair CAN reach a classifier (`_word_is_term`) but that reads only THIS document's terms and the prototype pre-merge runs AFTER the repairs, so `pi / 2 + pi / 4` is still repaired to a match and dropped.  **NEXT = Q5 (P4: #454, #435, #455).**
 
-2b0000000000000. **s438 (Opus, 2026-08-23): the two CENSUS INSTRUMENTS — the drop census gains a SIXTH population (#473) and a SEVENTH is measured for the first time (#472); the companion scan stops filtering silently (s434 ask 1).  NO product change; six findings filed.**  **#473**: `cpan-tests/modules/**/t/**/*.t` (289 files, PROGRAM mode) is a census population — **42 files / 83 drops**, blessed with causes (`docs/parse-error-drop-census-s399.tsv` 39/102 -> **81 files / 185 drops**; the 36 non-board pre-existing rows byte-identical).  The s436 A/B's "43/92" reconciles exactly: these 42 + `examples/tools.t` (9 drops), an EXAMPLE, named in the header with its count beside `t/japh/`; an `f702da3` worktree gives the same 42/83, so nothing moved.  Measured, not assumed: the dist `.t` files transpile WITHOUT the dist's own `lib/`+`t/lib` (identical rows), and the tool now strips the repo root out of message TEXT (one message quotes its own file, so a row depended on how ROOT was spelled).  **79 of the 83 are ONE mechanism — #478: `_extract_module_prototypes` skips every `Test2::`/`Test::` module BY NAME, so a `(&)` block-form call is not parsed** (probe: two modules identical but for the package name); the no-semicolon spelling is SILENTLY mis-parsed instead (`blk { 42 }` -> `(pl-blk 42)`, the block's value where perl passes a code ref).  Residue #480 (`$_.2` — PPI lexes `.2` as a float), #481 (a fat comma autoquotes a METHOD NAME), #482 (`$obj->state` dies in the compiler).  **#472**: `PCL_DROP_LOG` is one arm in the ONE announcer (`FILE/LINE/TEXT/REASON`, ungated by `PCL_DROP_ANNOUNCE`, never on stderr — the child's stderr IS the row's observed output); the sweep sets it around the RUN only, carries a `child-drops` column in `_status.tsv` and prints a per-file count AND the distinct SITES; REPORTED, NOT GATED.  **First measurement: 241 drops in 98 files, TEN sites** — two of them OURS, `perl-tests/t/test.pl:179-180` reached by 98 of 98 files (**#479**, and that line is wrong in REAL PERL too: `my $f` in a ternary's condition is not in scope in its branches), six one-off child programs, and **one real gap in a real module: core `Devel/Peek.pm:59`, where PPI lexes `<<index` as a HEREDOC (#483)**.  **s434 ask 1**: the companion `--all` scan is **528 files, not 523** — a `BEGIN`-`@INC` file was dropped silently, which is how five rows came to be unrefreshable; all five measured, all five produce a verdict, and `%NEED_HARNESS_NOT_RUN` (empty by measurement) feeds the existing NOT-RUN path.  ONE snapshot row edited: `op/require_errors.t` C_notok 70 -> 68, bisected to **the flip** (3/70 at 4356e77 and 9138404, 3/68 at f702da3 and HEAD), two rows that were failing and are now missing with their form.  Bar: gate **163/5741** (the +2 over s437's 5739 are s437's OWN review-fix rows), corpus-diff IDENTICAL over 111 (no generation bump), sweep TOTAL **18312 (+0)** GATE clean, companion 528 files with both SNAPSHOT holes at zero.  Asks: `docs/opus5-review-requests-s438.md`.
+2b0000000000000. **s438 (Opus, 2026-08-23): the two CENSUS INSTRUMENTS — the drop census gains a SIXTH population (#473) and a SEVENTH is measured for the first time (#472); the companion scan stops filtering silently (s434 ask 1).  NO product change; six findings filed.**  **#473**: `cpan-tests/modules/**/t/**/*.t` (289 files, PROGRAM mode) is a census population — **42 files / 83 drops**, blessed with causes (`baselines/parse-error-drop-census-s399.tsv` 39/102 -> **81 files / 185 drops**; the 36 non-board pre-existing rows byte-identical).  The s436 A/B's "43/92" reconciles exactly: these 42 + `examples/tools.t` (9 drops), an EXAMPLE, named in the header with its count beside `t/japh/`; an `f702da3` worktree gives the same 42/83, so nothing moved.  Measured, not assumed: the dist `.t` files transpile WITHOUT the dist's own `lib/`+`t/lib` (identical rows), and the tool now strips the repo root out of message TEXT (one message quotes its own file, so a row depended on how ROOT was spelled).  **79 of the 83 are ONE mechanism — #478: `_extract_module_prototypes` skips every `Test2::`/`Test::` module BY NAME, so a `(&)` block-form call is not parsed** (probe: two modules identical but for the package name); the no-semicolon spelling is SILENTLY mis-parsed instead (`blk { 42 }` -> `(pl-blk 42)`, the block's value where perl passes a code ref).  Residue #480 (`$_.2` — PPI lexes `.2` as a float), #481 (a fat comma autoquotes a METHOD NAME), #482 (`$obj->state` dies in the compiler).  **#472**: `PCL_DROP_LOG` is one arm in the ONE announcer (`FILE/LINE/TEXT/REASON`, ungated by `PCL_DROP_ANNOUNCE`, never on stderr — the child's stderr IS the row's observed output); the sweep sets it around the RUN only, carries a `child-drops` column in `_status.tsv` and prints a per-file count AND the distinct SITES; REPORTED, NOT GATED.  **First measurement: 241 drops in 98 files, TEN sites** — two of them OURS, `perl-tests/t/test.pl:179-180` reached by 98 of 98 files (**#479**, and that line is wrong in REAL PERL too: `my $f` in a ternary's condition is not in scope in its branches), six one-off child programs, and **one real gap in a real module: core `Devel/Peek.pm:59`, where PPI lexes `<<index` as a HEREDOC (#483)**.  **s434 ask 1**: the companion `--all` scan is **528 files, not 523** — a `BEGIN`-`@INC` file was dropped silently, which is how five rows came to be unrefreshable; all five measured, all five produce a verdict, and `%NEED_HARNESS_NOT_RUN` (empty by measurement) feeds the existing NOT-RUN path.  ONE snapshot row edited: `op/require_errors.t` C_notok 70 -> 68, bisected to **the flip** (3/70 at 4356e77 and 9138404, 3/68 at f702da3 and HEAD), two rows that were failing and are now missing with their form.  Bar: gate **163/5741** (the +2 over s437's 5739 are s437's OWN review-fix rows), corpus-diff IDENTICAL over 111 (no generation bump), sweep TOTAL **18312 (+0)** GATE clean, companion 528 files with both SNAPSHOT holes at zero.  Asks: `docs/opus5-review-requests-s438.md`.
 
 2b000000000000. **s437 (Fable, 2026-08-23): s434 + s435 + s436 REVIEWED + APPROVED — Q1 (instruments) + Q2 (THE FLIP) + Q3 (THE PHASE MODEL) are DONE; NEXT = the two census instruments (#473 + #472 + s434 ask 1), then Q4 (#453 + #365)** (rulings `docs/fable-answers-s437.md`).  Independently re-measured COLD: gate 163/5739 (only the 13 pclxs xs rows), sweep TOTAL 18312 (+0) GATE clean drops 5 = census, companion `--all --quick` 523 files with ZERO real movers (io/pvbm.t read 20/8 in the parallel AND the #366 serial pass and 23/5 alone — the FOURTH time; op/utf8cache.t DIFF→TIMEOUT at C_ok 2 is the recovery load reaching its "quadratic pos" loop, which PCL runs QUADRATICALLY — **#477**, a Target-A runtime bug: 100k chars 4 s, 200k 15.7 s, perl 1M in 0.09 s), lib A/B 21 permutation + 1 in-package, 42 probes vs perl.  **ONE REVIEW FIX (ask 6 was a real bug): `package NAME VERSION` now sets `$VERSION` at the HEAD of its section's compile phase** — a BEGIN in the same section read undef (perl 1.5) on HEAD and on the base alike; one line moves, corpus identical over 111, two `decl-ordering-02.t` rows, gen **v2-181**.  Filed from probes, both PRE-EXISTING: **#475** (a FILE-level `our` alias is not requalified across a TOP-level `package` statement — `our $t="m"; package A; $t.="A"` prints m; the in-block spelling works), **#476** (`-NAME` with a DECLARED sub is a negated CALL in perl, the string in PCL).  Rulings: prove-core MemoryMax scope IN (tools filler, measure the gate's peak first); #473 YES (cpan `.t` population, program mode; japh = header sentence); #472 = `PCL_DROP_LOG` side channel in the ONE announcer + the sweep's `child-drops` line, measure first; a promoted fix may ride in the promoting session under the s366 filler rule; #474 FOLD; the stub block stays; s434's six-file `--bless-rows` RATIFIED after READING the rows (standing: a bless after an instrument change says per file that the new rows fall under the registered reason); never-refreshed rows → NOT-RUN rows / joined scan by measurement.  Q7 re-ordered: the PROMOTED #463 item 2 (`++${"23::foo"}`, 18 rows behind one drop) first.
 2b00000000000. **s433 (Fable, 2026-08-22): s431 + s432 REVIEWED + APPROVED — THE LIVE QUEUE IS `docs/plan-post-s433.md`** (rulings `docs/fable-answers-s433.md`).  Re-verified cold gate 160/5705 + sweep TOTAL 18366 GATE clean.  **The announce→DIE flip has a SHAPE: a perl-shaped, trappable RUN-TIME die at the drop site — ONE shape for every drop in every mode, no classifier** (the `;; PARSE ERROR` comment stays for the census; the stderr announcement, #363, `--module` silence and Track A stay); its unit is the statement, so the s431 file prices do not apply and the module-mode increment is DISSOLVED; it waits only for the two instruments (#467 recovery in both runners + re-bless; #462 module census).  **#456 half (b) PROMOTED and RULED as the PHASE model across sections** (#469: a later section's BEGIN runs after an earlier section's run-time code — probed; "hoist the def alone" is UNSAFE, symbol-macro cells).  Filed #468 (never-declared plain call: no AUTOLOAD, raw CL error), #469, #470 (identity-promoted file lexical ≡ `$main::y`).  Queue: Q1 #467+#462 → Q2 the flip → Q3 #456(b) → Q4 #453+#365 → Q5 → Q6 → Q7 module fillers (#457 first) + #468/#470; release gate independent.
@@ -690,7 +692,7 @@ USER decisions open: tag DECOUPLES from the flip (recommended yes), B3 next
 (yes), indirect object #399/#381.
 2b0000000. **s420 (Opus, 2026-08-22): four of the flip's unblock-list tasks
 SHIPPED — the drop census is 33 files / 106 drops** (was 42/135; edited row by
-row with causes, `docs/parse-error-drop-census-s399.tsv`).  **#414**: a CLONED
+row with causes, `baselines/parse-error-drop-census-s399.tsv`).  **#414**: a CLONED
 PPI element does not keep its tokens alive — PPI's DESTROY empties every
 descendant, so a clone that is a NODE (the inner `[0]` of `"$x[$i[0]]"`) went
 HOLLOW between parse and emit and the leaf emitter died on `content` = undef
@@ -717,7 +719,7 @@ last participant — PCL truncated both) and **#416** (`s///` no-match returns
 `""`, not `0`).  Gate **155/5614**; generation **v2-163**; gate-SET scan over
 both populations = exactly 8 files, all drop→OK; every companion mover
 verified PRE-EXISTING on a `47e0750` worktree and spliced into
-`docs/perl-suite-run.tsv`.  Filed: **#418** (a non-ASCII PACKAGE name
+`baselines/perl-suite-run.tsv`.  Filed: **#418** (a non-ASCII PACKAGE name
 mismatches at the CL reader — SBCL NFKC-normalizes and `:invert` down-cases;
 pipe-quoting defeats both) and **#419** (one `>0x10FFFF` literal makes the
 WHOLE emitted file unreadable — `t/re/pat.t` is 1263 perl rows behind it).
@@ -848,7 +850,7 @@ Not relevant now:
 - `docs/v1-implementation-plan.md` - **V1 feature plan** (prioritized, with full implementation details for each item including `local $hash{key}`, bare-if return, string eval, etc.)
 - `docs/test-infrastructure.md` - **Test infra notes**: why SBCL startup is slow, `fresh_perl_is` limitations, saved-core optimisation
 - `docs/test-skip-registry.md` - **Marking not-supported tests**: declarative skip-registry (`cl/skip-registry.lisp`) instead of editing `perl-tests/*.t`; keyed on description (or test-number for unnamed); stale-detector; failure log + `tools/sweep-diff.pl`; crash/PARTIAL stay as fix targets, never auto-skipped
-- `docs/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 33 files / 106 drops as of s420 (72/379 at the s399 measurement), with the compiler's own message per file.  Rows leave BY EDIT with their cause, never by re-blessing. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
+- `baselines/parse-error-drop-census-s399.tsv` - **The #138 family, counted**: every file whose emitted CL contains a `;; PARSE ERROR:` progn (a statement the compiler could not lower, replaced by nil and execution continuing) — 33 files / 106 drops as of s420 (72/379 at the s399 measurement), with the compiler's own message per file.  Rows leave BY EDIT with their cause, never by re-blessing. A drop is NOT cosmetic: bless.t's is a test row that never runs, in a file the sweep reports as passing. Task #343 has the minimised trigger and says the fix belongs in Option B phase 2, not in the `$end_pars` region in place.
 - `docs/tap-assertion-audit.md` - **What the TAP layer can and cannot claim** (#202, s330): the per-function inventory of reachable failure paths, the ten findings (unlike could not fail; eq_hash had never run; cmp_ok manufactured verdicts for `<=>`/`cmp`/`=~`/`!~`), the rule that **a claim that cannot be evaluated reports `not ok` naming the reason and only `plan()` dies**, why TAP descriptions must be Test::More's (they are join keys), and the two deliberate non-changes. Read before touching `cl/pcl-test.lisp`.
 - `docs/test-debugging-runbook.md` - **HOW-TO procedure**: the faillog-driven inner loop, the FIX-vs-REGISTER decision tree, the skip-migration steps, baseline re-blessing. Read this before triaging perl-tests failures.
 - `docs/xs-artifact-cache.md` - **XS artifact cache + XSLoader::load**: where a shim-built .so lives (`~/.pcl-cache/xs/abi-N/auto/...`), why the key is the pclxs ABI encoded in the PATH, why the compile is at install time, and what would change each decision. Written as decisions-with-alternatives because this is new ground.

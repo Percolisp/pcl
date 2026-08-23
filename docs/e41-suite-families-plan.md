@@ -66,7 +66,7 @@ first.
 ## 3. Verification (per the s358-ratified rules)
 
 - Per-family: re-run the affected suite files per-dir
-  (`tools/run-perl-suite.pl --dir D`) against `docs/perl-suite-run.tsv` —
+  (`tools/run-perl-suite.pl --dir D`) against `baselines/perl-suite-run.tsv` —
   a fixed file must reach its snapshot C_ok, not merely transpile.
 - Per-session: the quadruple (corpus-diff explained-or-identical, gate,
   sweep gate, census) + generation bump on emission changes.
@@ -75,7 +75,7 @@ first.
 ## 4. The residue (15 files, ~? rows) — proposal, needs user sign-off
 
 Register the 15 with their family causes in the suite expected/registry
-mechanism and re-bless `docs/perl-suite-run.tsv` (rows edited in with
+mechanism and re-bless `baselines/perl-suite-run.tsv` (rows edited in with
 causes, per the #223 hygiene rule — never re-blessed wholesale from a
 run).  Two of them deserve named tasks rather than registration:
 `op/lexsub.t` (dies in v1's still-live EXPRESSION seam — that seam is

@@ -32,7 +32,7 @@
 # Files are read as BYTES and matched with a plain regex: `grep` prints
 # nothing at all for a file it decides is binary, which is exactly how the
 # s399 #323 census missed three of perl's regex test files (see
-# docs/perl-suite-run.tsv's s400 header note).  A guard must not have that
+# baselines/perl-suite-run.tsv's s400 header note).  A guard must not have that
 # blind spot.
 
 use v5.30;

@@ -97,7 +97,7 @@ also why the sweep logs only ONE F6 event for two evals: the second one, at
 
 So the flip's F6 bill is: `RT #132608 len=0xa000` and `… count` move from
 passing to a loud `$@`, in a file that is already PARTIAL and stops there
-anyway.  Two rows to edit into `docs/fail-baseline.tsv` with their cause at
+anyway.  Two rows to edit into `baselines/fail-baseline.tsv` with their cause at
 the step-2 commit, plus the `docs/not-supported.md` entry §5a.3 requires.
 
 `$RUN_FORM_MAX` is not raised — unchanged, per the ruling.
@@ -226,7 +226,7 @@ every real capture** (the acceptance row `my $x = 5; eval 'package Cap; sub f
 actually redirects are the ones that miss — 50 phantom `$method`s on the
 board, 0 on the sweep.  The BODY-side effect, by contrast, applies to all 108.
 
-Board drift vs `docs/cpan-board14-s343.tsv`: 3 files, all **gains**
+Board drift vs `baselines/cpan-board14-s343.tsv`: 3 files, all **gains**
 (`role-basic-composition` 8/0 → 10/3, `role-basic-exceptions` 2/0 → 4/0,
 `140-lvalue` 4/3 → 6/3, `reduce` 21/11 → 23/9) — the #208 drift plus the s346b
 "read ROWS not labels" case.  Nothing regressed; the instrumentation is inert.

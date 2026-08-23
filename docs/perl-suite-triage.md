@@ -2,7 +2,7 @@
 
 **s316g re-runs (433 files, post-s316f then post-$^N/$10/display, gen
 v2-74): 45 OK, 31 NOTAP, 94 XDIFF, 20 TIMEOUT, 263 UNEXPLAINED** —
-snapshot in `docs/perl-suite-run.tsv` (the clean second run).  Moves vs
+snapshot in `baselines/perl-suite-run.tsv` (the clean second run).  Moves vs
 s316b: io/errno.t and the s316d trio (stash_parse_gv/tr_latin1/switchF2)
 → OK; fresh_perl/reg_eval/sigsystem → XDIFF rows; the $^N + $10..$20
 unlock (s316g) turned three early-crash files into full runs —
@@ -19,7 +19,7 @@ GOTCHA: a parallel run at a fresh cache generation can flake a row
 re-run before believing a single-file drop.
 
 **s316b re-run (433 files): 43 OK, 31 NOTAP, 91 XDIFF, 268 UNEXPLAINED**
-— snapshot in `docs/perl-suite-run.tsv`.  Per-file against the s309 row
+— snapshot in `baselines/perl-suite-run.tsv`.  Per-file against the s309 row
 set: 372 unchanged, 39 DIFF→XDIFF (expected-tsv rows added since), 4
 DIFF→OK (the s310 fixes: mro/recursion_c3+dfs, op/groups, op/mkdir), 7
 OK→DIFF.  Of those 7, **five already failed at s315d** (A/B'd in a

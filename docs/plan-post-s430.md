@@ -19,7 +19,7 @@ order first (DECIDED.md → not-supported.md → runbook → probe), then this.*
   says 6; user-deferred, ignore); full sweep **TOTAL 18367, GATE clean**
   (s428 — not re-run since: every later commit was corpus-diff IDENTICAL +
   lib byte-identical, the s401 WHAT-TO-RUN row); drop census **27 files /
-  82 drops** (`docs/parse-error-drop-census-s399.tsv` — the census IS the
+  82 drops** (`baselines/parse-error-drop-census-s399.tsv` — the census IS the
   baseline; a row leaves by EDIT with its cause).
 * **ONE compiler, ONE pipeline, B3 COMPLETE.**  B1 (#372) s417, B2 (#343)
   s418, B3.1 (#411) s428, B3.2 (#259) s429, B3.3 (#374(b)) s430 — none of the
@@ -90,7 +90,7 @@ design; NO flip code).**
    keep them as announced drops while everything else DIES.  That is Fable's
    design (§2.1); Opus measures the file cost of each option (which files
    TRANSPILE-FAIL, how many passing rows each contributes today —
-   `docs/perl-suite-run.tsv` + the sweep's `_status.tsv` have the numbers).
+   `baselines/perl-suite-run.tsv` + the sweep's `_status.tsv` have the numbers).
 2. The module-mode increment (flip-gate §5): re-run the cpan board with the
    census instrument on (a module-mode DIE aborts the program at the first
    cold-cache transpile of a dropping module) and bring the count of board
@@ -204,7 +204,7 @@ session with nothing rows-shaped.
   worktree.
 * **A companion row**: `tools/run-perl-suite.pl op/foo.t` (parallel + serial
   confirm; it prints "REAL MOVE" or not) → splice the row into
-  `docs/perl-suite-run.tsv` with a `# sNNN` cause comment ABOVE it (see the
+  `baselines/perl-suite-run.tsv` with a `# sNNN` cause comment ABOVE it (see the
   s428/s430 blocks there).  A mover is "pre-existing" only with its CAUSE
   (s421).
 * **The census**: `tools/drop-census.pl`; edit the row AND the TOTAL line

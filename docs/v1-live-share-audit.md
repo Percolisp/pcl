@@ -131,7 +131,7 @@ Four-dist CPAN board (Try-Tiny, Role-Tiny, Sub-Uplevel, Scalar-List-Utils):
   statuses identical to the s343 snapshot except S-L-U `reduce.t`
   21 ok/11 → **23 ok/9** (t25 "reduce in list context yields only final
   answer", t32 "missing SMG rt#121992" — both v1 defects, both agree with perl
-  now).  `docs/cpan-scoreboard.tsv` edited for that one row.
+  now).  `baselines/cpan-scoreboard.tsv` edited for that one row.
 - **F6 is NARROWED (s346b): its one event is NOT a file-level transpile.**
   Transpiling all 111 `perl-tests/*.t` with `PCL_V2_AUDIT_LOG` set produced
   **zero** v1 routes of any family (the log file is not even created; the

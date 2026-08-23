@@ -167,7 +167,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   #266's family; **#496** the SHAPES corpus (ask 10); **#494** the v0.1
   doc refresh AT TAG TIME.  **#277** corrected to completed (shipped s405c).
 - **Rulings on the asks** (answers §2): child-drop sites → OWN file
-  `docs/child-drop-sites-sNNN.tsv`, gate = SITE SET only, files-reached
+  `baselines/child-drop-sites-sNNN.tsv`, gate = SITE SET only, files-reached
   reported not gated, bless AFTER #479's harness half; **`run-perl-suite.pl`
   gets `PCL_DROP_LOG`** in the same session (the companion is where
   `runperl_and_capture` has callers: `t/run/runenv*.t`); **#478 MEASURE,
@@ -317,7 +317,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   the block, and a default is not in the block), **#486** (an old-style
   prototype with NAMES binds them as parameters on BOTH lowering paths, so
   `sub t000 ($a)` outside a signature region answers 456 where perl answers
-  123 — already blessed in `docs/fail-baseline.tsv`), and #484 from Q4.
+  123 — already blessed in `baselines/fail-baseline.tsv`), and #484 from Q4.
 
 ## s438b + s438c (2026-08-23, Opus 5) — Q4: the two operand sites become ONE (#453), and an imported `()`-prototype sub is a TERM (#365)
 
@@ -380,7 +380,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 
 - **#473 DONE — `cpan-tests/modules/**/t/**/*.t` is a census population,
   PROGRAM mode** (289 files; `tools/drop-census.pl`).  **42 files / 83 drops**,
-  blessed into `docs/parse-error-drop-census-s399.tsv` (39/102 → **81 files /
+  blessed into `baselines/parse-error-drop-census-s399.tsv` (39/102 → **81 files /
   185 drops**); the 36 non-board pre-existing rows come back BYTE-IDENTICAL.
   The s436 A/B's "43 files / 92 drops" reconciles exactly: it scanned every
   `.t` under `cpan-tests/modules`, which is these 42 plus
@@ -579,7 +579,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   dropping silently — but 94 sites that now DIE are uncounted.
 - **Confirming sweep: TOTAL 18311 (+0), 0 new / 0 fixed, drops 5 = census,
   GATE clean.**  s435's hand-edited baselines reproduce exactly.
-- **`docs/perl-suite-run.tsv`: 13 rows edited BY HAND**, each measured three
+- **`baselines/perl-suite-run.tsv`: 13 rows edited BY HAND**, each measured three
   times.  **CORRECTION to s435: the companion price is −114 C_ok over 9 files,
   not −117 over 11** — `io/pvbm.t` does not move (three serial runs give its
   blessed 23/5; the `--all --quick` −3 was CONTENTION).  op/signatures.t and
@@ -693,7 +693,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   signature), placed BEFORE the status decision so such a file can never read as
   OK — the opposite placement from the #367 orphan note, which is an observation
   about the RUN.  A reader stop gets its own `unreadable-form:` signature.
-- **`docs/perl-suite-run.tsv` re-blessed in the same commit** (one `--all`
+- **`baselines/perl-suite-run.tsv` re-blessed in the same commit** (one `--all`
   pass + the #366 serial discipline; the 22 movers over the runner's own cap
   re-run in a second `--jobs 1` pass): **52 files gained rows, 0 lost, TOTAL
   C_ok 74803 → 77128 (+2325)**, 116 signature-only changes, 2 status movers
@@ -701,7 +701,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   are STOPWATCH READINGS** (the file never finishes; C_ok is how far it got in
   90 s) — under load they drop 300–400 rows and re-measure at their blessed
   value alone; never read a regression into them from a count.
-- **`docs/perl-suite-expected-rows.tsv` re-blessed for SIX files only** — the
+- **`baselines/perl-suite-expected-rows.tsv` re-blessed for SIX files only** — the
   registered XDIFF files that now REACH rows they used to die before (io/shm.t,
   mro/basic.t, mro/basic_utf8.t, mro/next_skip.t, mro/next_skip_utf8.t,
   op/current_sub.t).  The five registered files already DIFF before the session
@@ -710,7 +710,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   t/, `lib/**.pm`, `cpan-tests/modules/**.pm` and (behind `--board`) the 14-dist
   board's `lib/`.  **Every `.pm` is transpiled with `--module`**, the emission
   the runtime caches; the board's dists are read from
-  `docs/cpan-board14-s343.tsv` and its build root from `$PCL_CPAN_BUILD` /
+  `baselines/cpan-board14-s343.tsv` and its build root from `$PCL_CPAN_BUILD` /
   `$HOME/.cpan/build`, never written down.  The blessed census gained the s431
   hand measurement, number for number: **+12 files / +20 drops → 39 files / 102
   drops**, the 27 pre-existing rows byte-identical.  `lib/` also moved to a
@@ -805,7 +805,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   runs before the `package A; sub min` in its own block; both calls reached the
   stub, `undef <=> undef` is 0, the list came back unsorted, `$answer` was never
   touched and the assertion only checked that flag.  Edited into
-  `docs/pass-baseline.tsv` by hand with its cause (the third of this kind after
+  `baselines/pass-baseline.tsv` by hand with its cause (the third of this kind after
   s418's bless.t and split.t).
 - **KNOWN INTERACTION, recorded in #456**: in a package that HAS an AUTOLOAD,
   #456's shape is now silently answered by AUTOLOAD instead of dying
@@ -838,7 +838,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 ## s431 (2026-08-22, Opus 5) — the flip re-census is PRICED: what the announce→DIE flip costs in passing rows, per option
 
 - **Census re-verified on a COLD cache at `54e2d80`: 27 files / 82 drops,
-  row-for-row IDENTICAL to `docs/parse-error-drop-census-s399.tsv`.**  No
+  row-for-row IDENTICAL to `baselines/parse-error-drop-census-s399.tsv`.**  No
   compiler change this session (P1 is measurement).  Full row-level table +
   the price: **`docs/drop-census-s431-flip-gate.md`** (supersedes the s419
   flip-gate doc as the current reading; s419 keeps the family numbering).
@@ -886,7 +886,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `ppi-upstream-bugs.md` §12 (`)*name`) and §15 (`)-1`), both already
   repaired with the same `_ends_term` predicate.  ZERO sites in all four
   in-repo populations (1139 files scanned), TWO in Text::Balanced.
-- **Five companion files had NO row in `docs/perl-suite-run.tsv`** (523 rows
+- **Five companion files had NO row in `baselines/perl-suite-run.tsv`** (523 rows
   for 528 files): `comp/line_debug.t`, `op/goto.t`, `op/lex.t`,
   `op/require_errors.t`, `run/dtrace.t` — absent, not quarantined, so a
   regression in them could never read as a mover (#176 family).  Measured
@@ -1430,7 +1430,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   eight probe files — every shape the commit names identical to perl 5.40.3.
   **#390 CLOSED** (the same bug as #414, probe-verified).
 - **"PRE-EXISTING" is a verdict about WHEN, not WHY.**  A companion mover
-  verified on a base worktree is spliced into `docs/perl-suite-run.tsv` only
+  verified on a base worktree is spliced into `baselines/perl-suite-run.tsv` only
   WITH its cause (a task or a commit) or the named next measurement.  s420's
   op/gv.t 50/47 → 49/48 had neither; one three-way probe (HEAD / `47e0750` /
   `98159c7`) attributed it to **s419d** (task #423).
@@ -1477,7 +1477,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 
 - **The drop census is 33 files / 106 drops** (was 42/135 at s419), measured
   with `tools/drop-census.pl` and edited into
-  `docs/parse-error-drop-census-s399.tsv` row by row with causes.  Closed:
+  `baselines/parse-error-drop-census-s399.tsv` row by row with causes.  Closed:
   **#414** (3), **#413** (6), **#412** (5), **#410** (15 of 21).  The flip is
   still BLOCKED — the remaining families are unchanged.
 - **A CLONED PPI element is NOT enough to keep its tokens alive** (#414).
@@ -2617,7 +2617,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   DIFFERENT measurement, not a cheaper one.  → task #345, CLAUDE.md.
 - **Hang vs slow is a MEASUREMENT, and the two go to different registries.**
   Run the file at a LARGER budget (task #326's test): same rows ⇒ HANG ⇒
-  `%QUICK_SKIP` in the runner; more rows ⇒ SLOW ⇒ `docs/perl-suite-timeouts.tsv`,
+  `%QUICK_SKIP` in the runner; more rows ⇒ SLOW ⇒ `baselines/perl-suite-timeouts.tsv`,
   whose promise is "give it the time and it finishes".  Measured s404:
   re/overload.t and re/speed.t are hangs, re/pat_psycho.t is slow (completes at
   300 s) — so s400 §7.4 held for one of its two files.
@@ -2704,7 +2704,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **DROPS is the sweep's FIFTH bucket and a runner COLUMN** —
   `.faillog/_status.tsv` gains `drops` (col 6; note moves to 7; `-1` = NOT
   MEASURED, never 0), `sweep-diff.pl` compares it against
-  `docs/parse-error-drop-census-s399.tsv` (the census IS the baseline; a drop
+  `baselines/parse-error-drop-census-s399.tsv` (the census IS the baseline; a drop
   leaves by EDIT) and FAILS the run on a new drop;
   `tools/run-perl-suite.pl` records the same column (field 8) and prints the
   same comparison for perl's t/.  → task #343, CLAUDE.md Test Status.
@@ -2974,7 +2974,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 
 ## Test / triage infrastructure
 
-- **`docs/perl-suite-run.tsv` columns**: `P`=PERL, `C`=PCL (C for CL);
+- **`baselines/perl-suite-run.tsv` columns**: `P`=PERL, `C`=PCL (C for CL);
   `NOTAP` means PERL produced no TAP (row not comparable — says nothing
   bad about PCL) → legend at top of the tsv; source
   `tools/run-perl-suite.pl`.
@@ -2993,7 +2993,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `not-supported.md` section — partially-explained files stay UNEXPLAINED
   → `perl-suite-expected.tsv` header, `fable-answers-s316v.md` §6f.
   **And the claim is MACHINE-CHECKED per row since s336 (task #185)**: the
-  reason excuses only the rows blessed in `docs/perl-suite-expected-rows.tsv`
+  reason excuses only the rows blessed in `baselines/perl-suite-expected-rows.tsv`
   (generated by `run-perl-suite.pl --bless-rows`, keyed by PERL's test
   DESCRIPTION per #177).  An unregistered diverging row keeps the file DIFF
   and is named; a row that stops diverging makes it STALE.  Escape hatch
@@ -3072,7 +3072,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **Fixture artifacts get a FIXTURE status + registry in the runner** (not
   `perl-suite-expected.tsv` — a harness artifact is not a language gap):
   #151 stub-cp, #167 splitpath-skip, #172 shadow-symlink getcwd →
-  `fable-answers-s318.md` §10.  SHIPPED s320: `docs/perl-suite-fixture.tsv`
+  `fable-answers-s318.md` §10.  SHIPPED s320: `baselines/perl-suite-fixture.tsv`
   (`file<TAB>rows<TAB>cause`), matched per TEST NUMBER and all-or-nothing —
   one unregistered failing row keeps the file DIFF and names it, a
   fully-passing registered file is STALE.  #151/#167 were FIXED, not
@@ -3199,7 +3199,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   next regeneration adds a `# taken-at: <commit>` header
   → `fable-answers-s323.md` §4.
 - **USER (2026-08-02): R1's CPAN half gates on the FOUR-DIST baseline only**
-  (`docs/cpan-scoreboard.tsv`, no regressions); the widened board is the
+  (`baselines/cpan-scoreboard.tsv`, no regressions); the widened board is the
   post-R1 worklist, `IO`/`IO::Handle` shim first (23 of 48 FAILs)
   → `fable-answers-s323.md` §5.
 - **USER (2026-08-02): fetching/unpacking CPAN dists for measurement is
@@ -3242,7 +3242,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   sweep-diff 0 new / 0 fixed vs the 689-row baseline; four-dist CPAN board
   zero regressions (one improvement, Try-Tiny `00-report-prereqs.t`
   FAIL→PASS via #193, baseline advanced); suite snapshot current and
-  stamped (`# taken-at:` in `docs/perl-suite-run.tsv`; the 7 TIMEOUT rows
+  stamped (`# taken-at:` in `baselines/perl-suite-run.tsv`; the 7 TIMEOUT rows
   re-verified at `--timeout 300`, task #195); artifacts regenerated at gen
   v2-95 (bodies byte-identical) → numbers in `docs/session-log.md` s325.
   **The post-R1 backlog is now ACTIVE in its ruled order**
@@ -3441,7 +3441,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   vector and is never boxed, so a box holding a vector is unambiguously a
   ref; the hash branch already carried that guard.  +7 sweep rows; array.t
   t128 was passing only because both sides flattened to undef (blessed, with
-  the cause, into `docs/fail-baseline.tsv`; 689 → 683).
+  the cause, into `baselines/fail-baseline.tsv`; 689 → 683).
 - **FILED**: #206 `UNIVERSAL::isa` ignores the reftype rule (gate on #163);
   #207 `which_perl`/`run_perl` are unverified stubs; #208 the CPAN board
   `.tsv` baselines drifted since s322 (verified NOT from this session — a
@@ -3451,7 +3451,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 
 - **`tools/sweep-diff.pl` has a fourth bucket, LOST**: per file, baseline
   PASSING rows the current run did not produce, read from a blessed
-  `docs/pass-baseline.tsv` (`save-status` writes it).  Non-empty LOST = the
+  `baselines/pass-baseline.tsv` (`save-status` writes it).  Non-empty LOST = the
   run is NOT clean, same exit code as NEW.  Every run prints
   `TOTAL passing: baseline N, current M`.
 - **A FULL sweep runs the gate itself and exits with its verdict**
@@ -3632,7 +3632,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `fable-answers-s339.md` §5, s340.
 - **The `+8` was a STALE BLESS, not drift (#223 executed s341).**  Measured,
   not inferred: at `73d43ac` — the commit that installed
-  `docs/pass-baseline.tsv` — the six drifting files already produced the
+  `baselines/pass-baseline.tsv` — the six drifting files already produced the
   CURRENT numbers, so the blessed `_status.tsv` came from a run older than its
   own commit.  Attribution: push.t/unshift.t +1 each = **#159** read-only
   arrays (measured across `1b0a7e4`, where the row goes SKIP→PASS); scalar.t
@@ -3703,7 +3703,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   lone multi-switch event; the CPAN board clean after #251/M7, its only
   remaining TODO being the ruled true-multi-switch.  §5a.2's precondition
   for the E4.1 flip is satisfied.  Also recorded: **the board has no blessed
-  Moo baseline** — `docs/cpan-board14-s343.tsv` covers Role-Tiny but not Moo.
+  Moo baseline** — `baselines/cpan-board14-s343.tsv` covers Role-Tiny but not Moo.
 - **An `our` alias runs to the end of its block OR to the next declaration
   of the same name — so a re-declaration ENDS the requalification, it does
   not defeat it** (#251/M7, s355, `_requalify_block_our_after_pkg_switch`).
@@ -4004,7 +4004,7 @@ Detail: `docs/eval-region-measurements-s350.md`.  No behaviour change; gate
   form.  `parse_code`, so the s346 §2.3 branch applies: **no pre-flip fix,
   ruled refusal.**  `$RUN_FORM_MAX` unchanged.  **Flip cost MEASURED: 2 tr.t
   rows** (241→239 passing; the file already aborts at exactly those rows) —
-  edit them into `docs/fail-baseline.tsv` with their cause, plus the
+  edit them into `baselines/fail-baseline.tsv` with their cause, plus the
   not-supported entry, IN THE E4.1 STEP-2 COMMIT (never earlier: rephrasing a
   `Parser2 TODO:` before then turns a silent retry into a user-visible die).
 - **#230 is closed** — F3 was already routed through #78 (s345) and the #26
@@ -4286,7 +4286,7 @@ E4.1's pre-work is now done.
   never sees EOF, and **`timeout N` cannot kill it** (SBCL catches SIGTERM; the
   handler cannot run while blocked on the pipe).  Check `.faillog/_status.tsv`'s
   row count + mtime before believing a sweep is still running; reproduce the
-  verdict from disk with `tools/sweep-diff.pl diff docs/fail-baseline.tsv
+  verdict from disk with `tools/sweep-diff.pl diff baselines/fail-baseline.tsv
   .faillog`.
 
 ## s369 (2026-08-09, Fable) — s368 asks RULED; #267 sizing decided
@@ -4418,7 +4418,7 @@ E4.1's pre-work is now done.
 
 ## s365 (2026-08-08, Opus) — #254's registration + A-iv/A-i/A-iii/B-ii, and #263
 
-- **A per-file TIMEOUT ALLOWANCE registry exists**: `docs/perl-suite-timeouts.tsv`
+- **A per-file TIMEOUT ALLOWANCE registry exists**: `baselines/perl-suite-timeouts.tsv`
   (`rel<TAB>seconds<TAB>cause`), honoured by `tools/run-perl-suite.pl` as
   `max(seconds, --timeout)` and printed per run.  A file that needs longer than
   the default is registered WITH ITS CAUSE, never left to TIMEOUT into "no rows"
@@ -4833,7 +4833,7 @@ E4.1's pre-work is now done.
   and how many of the 1554 rows need only a NAME versus the exotic
   NUL/newline/latin-1 stash names.  Bring the answer back before writing.
 - **The CPAN board gets a fresh baseline, but only after a PER-FILE audit**
-  (#208) — the s376 whole-board run is saved as `docs/cpan-board14-s376.tsv`
+  (#208) — the s376 whole-board run is saved as `baselines/cpan-board14-s376.tsv`
   (2053 ok / 483 not-ok at beb4187).  Same discipline as #223's sweep
   pass-baseline: a blanket refresh absorbs a loss silently.  Read ROWS, not
   the PASS/PARTIAL label; the one known LOSS (Role-Tiny extend-role-tiny.t,
@@ -5511,7 +5511,7 @@ Full rulings in `docs/fable-answers-s376.md`.  Gate independently re-verified
   clusters as s336 (`**` exact-bignum ×3, `ctx-count split` ×1), each with its
   `not-supported.md` section.  No new divergence from the direction-D flip or
   #291.
-- **Companion suite vs `docs/perl-suite-run.tsv`: 44 C_ok decreases and 36
+- **Companion suite vs `baselines/perl-suite-run.tsv`: 44 C_ok decreases and 36
   status changes — NONE of them #291.**  21 files flipped to TRANSPILE-fail
   (`opbasic/cmp.t` alone 12078 → 0).  Discriminating measurement: transpile
   each of the 21 at `66bdb93` (main immediately BEFORE #291) and compare the
@@ -5853,7 +5853,7 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   regex tests), so ~7500 rows are unmeasured.  **The last TAP row names the
   offending pattern** — never bisect by adding exits to perl's own `.t` files.
   comp/require.t is the genuinely SLOW one (909 at `--timeout 300`, 350 at 90 s)
-  and wants a `docs/perl-suite-timeouts.tsv` row.
+  and wants a `baselines/perl-suite-timeouts.tsv` row.
 
 ## s396 (2026-08-15, Opus) — #325 refaliasing: the assignment forms
 
@@ -5967,7 +5967,7 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   rather than assuming one.
 - **The full sweep is what found it, and the Pl/t gate could not have.**  Both
   gates were green with the bug present; only the per-file row audit against
-  `docs/pass-baseline.tsv` showed the two assertions had ceased to exist.
+  `baselines/pass-baseline.tsv` showed the two assertions had ceased to exist.
 
 ## s396e — "already a vector" and "spreads under `\(…)`" are two questions
 
@@ -6117,7 +6117,7 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   in perl too.  → s399b `bf3fe69`, task #332, guard `Pl/t/refaliasing-01.t`.
 - **"Readouts of perl's own internals" is ONE not-supported section** (`B::`
   optree inspection, `re::optimization`, `XS::APItest`), and citing its name in
-  `docs/perl-suite-expected.tsv` IS the population (`grep -c`).  Its
+  `baselines/perl-suite-expected.tsv` IS the population (`grep -c`).  Its
   "what would lift it" line is *nothing*.  → s399c `f8ffd56`, ruling
   `fable-answers-s396.md` §4.
 - **op/const-optree.t does NOT register, and the ruling's premise was wrong** —
@@ -6162,7 +6162,7 @@ Session log entry has the per-file numbers; tasks #321–#324 filed.
   container name inside a list decl needs the DECL LOWERING, which knows only
   the no-init single-container shape.  → task #338.
 - **The #138 silent-drop family is 72 files / 379 drops, measured for the first
-  time** (`docs/parse-error-drop-census-s399.tsv`, task #343): 9 perl-tests
+  time** (`baselines/parse-error-drop-census-s399.tsv`, task #343): 9 perl-tests
   files, 63 companion, ZERO in lib/; 56 of them one message ("Bug. Fell
   through. Missing case: [").  A drop is NOT cosmetic — bless.t's is the test
   row `is ref $untied, "main", '…' or diag $@;`, which never runs and appears
