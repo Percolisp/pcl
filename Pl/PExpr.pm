@@ -127,10 +127,53 @@ sub control_flow_ops   { shift->config->control_flow_ops }
 sub statement_keywords { shift->config->statement_keywords }
 sub named_unary { shift->config->named_unary }
 
+# A NAMED UNARY OPERATOR, in perl's sense (toke.c): an operator whose operand
+# is one term, binding LOOSER than the high-precedence binary ops and TIGHTER
+# than comparison — so `f $x + 1` is f($x + 1) and `f "a" . "b"` is f("ab").
+#
+# TWO SOURCES, and they answer about different things (task #453):
+#   * Config's `named_unary` table — the BUILTIN named unaries (defined, ref,
+#     length, lc, uc, …).  Authoritative, and asked first: a builtin's name
+#     means the builtin here even where a sub of that name is also declared,
+#     which is the routing this site has always had.
+#   * a DECLARED sub whose PROTOTYPE makes it one.  perl decides that from the
+#     prototype alone, and `_proto_parse_spec` is already this file's ONE
+#     reading of that shape: 1 for `($)`/`(*)`/`(_)`/`(\@)`, [0,1] for the
+#     `;`-led `(;$)` — exactly perl's named-unary set — and -1 for every list
+#     operator (`($;$)`, `(@)`, `($;)`, a signature, a plain sub).
+#
+# Before #453 the second source did not exist here, so a user `($)` sub took
+# the strictly-single operand site instead — which stops at the first term and
+# has no `_extend_high_prec`.  `f "a" . "b"` was therefore f("a")."b" and
+# (for `(*)`, whose `_proto_max_args` declines to narrow) `g + 1, "\n"` was
+# g(1, "\n").  Routing the unary-class prototypes here makes the two operand
+# sites ONE mechanism for the shape they share, and leaves the strictly-single
+# site to Config's non-named-unary 1-arg builtins (shift, close, fileno, eof),
+# whose bareword-filehandle branch is the reason it still exists.
+#
+# The environment record is the ONLY second source: `known_no_of_params` is
+# NOT consulted, because its 1 covers Config builtins (shift, close…) that are
+# deliberately not named unaries.
 sub is_named_unary {
   my $self = shift;
   my $name = shift;
-  return $self->named_unary->{$name};
+  return 1 if $name && $self->named_unary->{$name};
+  return $self->_declared_named_unary($name);
+}
+
+# The declared half of is_named_unary: a sub whose prototype's parse class is
+# perl's named-unary one.  Kept separate so the two sources stay legible and
+# so a caller that must ask only about BUILTINS can still read `named_unary`.
+sub _declared_named_unary {
+  my ($self, $name) = @_;
+  return 0 if !defined $name || !length $name || !$self->has_environment;
+  my $rec = $self->environment->get_prototype($name);
+  return 0 if !$rec || !defined $rec->{min_params};
+  my $spec = $self->_proto_parse_spec($rec);
+  return 1 if !ref($spec) && $spec == 1;                       # ($) (*) (_) (\@)
+  return 1 if ref($spec) eq 'ARRAY' && @$spec == 2
+           && $spec->[0] == 0 && $spec->[1] == 1;              # (;$)
+  return 0;
 }
 
 # True if TOKEN is an operator that acts as a unary PREFIX operator: the prefix
