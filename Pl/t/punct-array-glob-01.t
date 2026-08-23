@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 19;
+plan tests => 21;
 
 sub write_pl {
     my ($code) = @_;
@@ -308,4 +308,34 @@ is(emitted(q{while (<<>>) { print }}), emitted(q{while (<>) { print }}),
     my $out = run_cl(qq{\@? = (11,22,33);\nprint "F:\$? [1]\\n";\n});
     is($out, "F:0 [1]\n",
        '#451 inverse: a space ends the reference; the subscript stays literal');
+}
+
+# Task #450 (s438i): perl's glob returns a pattern with no METACHARACTER as
+# ITSELF, whether or not anything of that name exists — `glob("/nope-xyz")` is
+# "/nope-xyz", `glob("/home/")` is "/home/", `glob("~/")` is the expanded home.
+# PCL went to the filesystem unconditionally and answered EMPTY for all three.
+# The same fix gives PCL perl's WORD model: a glob pattern is a
+# whitespace-separated LIST of patterns, so `glob("a b")` is two results.
+{
+    my $out = run_cl(<<'PL');
+for my $p ('/nope-xyz', '/home/', 'x~y', '~nosuchuser42', 'aa bb') {
+    my @g = glob($p);
+    print scalar(@g), ":", join("|", @g), "\n";
+}
+PL
+    is($out, "1:/nope-xyz\n1:/home/\n1:x~y\n1:~nosuchuser42\n2:aa|bb\n",
+       '#450: a metacharacter-free pattern is itself, and words split');
+}
+
+# The inverses: a real wildcard still reaches the filesystem, and an all-blank
+# pattern has no words at all (perl gives an empty list for both `""` and
+# `"   "`).
+{
+    my $out = run_cl(<<'PL');
+my @c = glob("/etc/host*");
+print((grep { $_ eq "/etc/hostname" } @c) ? "found\n" : "missing\n");
+print scalar(glob("")), ":", scalar(my @e = glob("   ")), "\n";
+PL
+    is($out, "found\n0:0\n",
+       '#450 inverse: a wildcard still globs; a blank pattern has no words');
 }

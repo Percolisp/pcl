@@ -308,14 +308,27 @@ END_CODE
   like($output, qr/1/, 'glob with literal filename returns 1 match');
 }
 
-# Test: No wildcards - nonexistent file
+# Test: No wildcards - nonexistent file.
+#
+# EXPECTATION REWRITTEN s438i (task #450), because it asserted PCL's old
+# behaviour rather than perl's.  perl returns a pattern that holds no glob
+# METACHARACTER as ITSELF, whether or not anything of that name exists —
+# probed on 5.40.3:
+#
+#     perl -e 'my @f = </tmp/nonexistent-xyz.txt>; print scalar(@f), " @f"'
+#     1 /tmp/nonexistent-xyz.txt
+#
+# so `count:0` was the one answer perl never gives.  The row now asserts the
+# COUNT and the VALUE, which is strictly more than it asserted before.
 {
   my $output = run_pcl(<<"END_CODE");
 my \@files = <$tmpdir/nonexistent.txt>;
-print "count:" . scalar(\@files);
+print "count:" . scalar(\@files) . " [\@files]";
 END_CODE
 
-  like($output, qr/count:0/, 'glob with nonexistent literal file returns empty');
+  my $want = "count:1 [$tmpdir/nonexistent.txt]";
+  like($output, qr/\Q$want\E/,
+       'glob with a nonexistent LITERAL file returns the pattern itself (perl)');
 }
 
 # Test: Glob used directly in foreach

@@ -11027,18 +11027,61 @@ buffer's fill-pointer; everything else falls back to file-length."
                           (sb-posix:syscall-error () nil)))))
         (if home (concatenate 'string home rest) pat))))
 
+(defun %p-glob--split-words (pat)
+  "perl's glob takes a WHITESPACE-SEPARATED LIST of patterns, not one pattern:
+   `glob(\"a b\")` is two results and `glob(\"/etc/pass* /nope\")` is three
+   (probed).  bsd_glob is invoked once per word, which is what makes the
+   no-wildcard rule below a per-WORD rule.  An empty or all-blank pattern has
+   no words and yields nothing, as perl does."
+  (let ((words nil) (start nil) (n (length pat)))
+    (dotimes (i n)
+      (let ((blank (member (char pat i) '(#\Space #\Tab #\Newline #\Return #\Page))))
+        (cond ((and blank start) (push (subseq pat start i) words) (setf start nil))
+              ((and (not blank) (null start)) (setf start i)))))
+    (when start (push (subseq pat start n) words))
+    (nreverse words)))
+
+(defun %p-glob--wildcard-p (s)
+  "Does S hold a glob METACHARACTER?  `{` counts even though PCL does not
+   implement csh brace expansion yet (task #488): counting it keeps
+   `glob(\"{a,b}\")` OUT of the literal rule below, where it would answer
+   `{a,b}` — further from perl's `a`, `b` than the empty result it gives now."
+  (find-if (lambda (c) (member c '(#\* #\? #\[ #\{))) s))
+
+(defun %p-glob--expand-one (pat)
+  "One whitespace-separated word of a glob pattern."
+  (let ((tilde (%p-glob-expand-tilde pat)))
+    ;; NO METACHARACTER: perl returns the pattern ITSELF, whether or not
+    ;; anything of that name exists — glob(\"/nope-xyz\") is \"/nope-xyz\",
+    ;; glob(\"/home/\") is \"/home/\", glob(\"~/\") is the expanded home
+    ;; (task #450, probed against perl 5.40.3).  PCL went to the filesystem
+    ;; unconditionally, so all three answered EMPTY.  Doing it here, after the
+    ;; tilde expansion, is what makes the trailing-slash and unknown-user cases
+    ;; fall out: `~nosuchuser` stays literal because the tilde pass leaves it
+    ;; alone, and `/home/` needs no directory read at all.
+    (if (not (%p-glob--wildcard-p tilde))
+        (let ((v (make-array 1 :adjustable t :fill-pointer 1)))
+          (setf (aref v 0) tilde)
+          v)
+        (let* ((expanded (expand-glob-char-ranges tilde))
+               (slash (position #\/ expanded :from-end t))
+               (dir-prefix (if slash (subseq expanded 0 (1+ slash)) ""))
+               (file-glob  (if slash (subseq expanded (1+ slash)) expanded)))
+          (if (or (string= file-glob "")
+                  (find-if (lambda (c) (member c '(#\* #\? #\[))) dir-prefix))
+              ;; Wildcard in the directory portion (rare): old pathname behaviour.
+              (%p-glob--expand-pathname expanded pat)
+              ;; Common case: fixed directory, wildcard last component.
+              (%p-glob--expand-dir dir-prefix file-glob))))))
+
 (defun p-glob--expand (pat)
-  "Expand glob pattern PAT and return a vector of matching filenames."
-  (let* ((expanded (expand-glob-char-ranges (%p-glob-expand-tilde pat)))
-         (slash (position #\/ expanded :from-end t))
-         (dir-prefix (if slash (subseq expanded 0 (1+ slash)) ""))
-         (file-glob  (if slash (subseq expanded (1+ slash)) expanded)))
-    (if (or (string= file-glob "")
-            (find-if (lambda (c) (member c '(#\* #\? #\[))) dir-prefix))
-        ;; Wildcard in the directory portion (rare): old pathname behaviour.
-        (%p-glob--expand-pathname expanded pat)
-        ;; Common case: fixed directory, wildcard last component.
-        (%p-glob--expand-dir dir-prefix file-glob))))
+  "Expand glob pattern PAT and return a vector of matching filenames.
+   PAT is perl's whitespace-separated LIST of patterns; each word expands on
+   its own and the results concatenate in order."
+  (let ((out (make-array 0 :adjustable t :fill-pointer 0)))
+    (dolist (word (%p-glob--split-words pat) out)
+      (let ((v (%p-glob--expand-one word)))
+        (loop for x across v do (vector-push-extend x out))))))
 
 (defun p-glob (&optional pattern)
   "Perl glob / <*.txt> - expand file glob pattern.

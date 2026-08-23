@@ -1,4 +1,23 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s438i (Opus 5, task #450) — ONE ROW EDITED BY HAND: op/glob.t C_ok 14 -> 13,
+#   C_notok 4 -> 5.  perl's glob returns a pattern with no METACHARACTER as
+#   ITSELF (`glob("/nope-xyz")` is "/nope-xyz"), and PCL went to the filesystem
+#   unconditionally and answered empty; #450 fixes that, and #450 also gives
+#   PCL perl's WORD model (a pattern is a whitespace-separated list).
+#
+#   The row that moves is 18, "Make sure the presence of the CORE::GLOBAL::glob
+#   typeglob does not affect whether File::Glob::csh_glob is called".  It
+#   compares `$output1 eq $output2` from TWO separate `eval q{ glob(q(./"TEST"))
+#   }` call sites, and it was PASSING ON NOTHING: both sides were undef, because
+#   that pattern has no wildcard and matched nothing.  With the values real, two
+#   pre-existing gaps become visible and the row fails HONESTLY:
+#     #489  the scalar-context iterator is keyed by PATTERN, not by CALL SITE,
+#           so the second call answers undef where perl answers the value again;
+#     #490  glob does not strip csh quotes, so the value is `./"TEST"` where
+#           perl gives `./TEST`.
+#   Nothing that was testing anything stopped passing.  Measured alone and in
+#   the parallel pass, both 13/5.  io/pvbm.t read 20/8 in both passes and 23/5
+#   ALONE again — the SEVENTH time — and is NOT edited.
 # s438 (Opus 5) — the scan is 528 FILES, not 523, and ONE ROW EDITED BY HAND.
 #   `--all` used to drop the five BEGIN-@INC "need-harness" files from the dir
 #   scan silently (comp/line_debug.t, op/goto.t, op/lex.t, op/require_errors.t,
@@ -917,7 +936,7 @@ op/fork.t	28	0	1	0	DIFF		0
 op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
-op/glob.t	18	0	14	4	DIFF		0
+op/glob.t	18	0	13	5	DIFF		0
 op/gmagic.t	78	0	30	3	DIFF	aborted-forms:5: Can't call method init on an undefined value	0
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is undefined.	0
