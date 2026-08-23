@@ -16,6 +16,77 @@
 use v5.20;
 use strict;
 use warnings;
+
+# ---- THE COMPILER SIDE'S MEMORY CAP (task #471) ----------------------------
+#
+# Before this, a runaway anywhere in Pl/** cost the MACHINE, not the run.
+# Measured 2026-08-23: an in-flight edit left one helper calling itself, perl
+# has no tail-call elimination, and the process climbed to 7.76 GB anon RSS /
+# 9.7 GB VM, exhausted the 4 GB swap and hung the desktop until the kernel's
+# global OOM killer took it.  Under a cap the SAME bug dies in ~5 s naming
+# itself ("Deep recursion on subroutine …" + "Out of memory in perl").  Note
+# that the deep-recursion WARNING fired unbounded too, at depth 100, scrolled
+# past and changed nothing: A WARNING DOES NOT STOP AN ALLOCATION.  A cap is
+# also the only guard that covers the runaways no warning exists for — a
+# growing string, an unterminated parse loop.
+#
+# WHY HERE: every compiler-side tool spawns ./pl2cl (the gate, the sweep, the
+# suite runner, corpus-diff, drop-census, gate-set-scan, emission-ab, and the
+# runtime's own p-transpile-file), so this file is the perl-side analogue of
+# tools/lib/PCLSbcl.pm — the ONE seam (ruled s435).  perl cannot lower its own
+# RLIMIT_AS without BSD::Resource (not core), so the cap is a one-time re-exec
+# through `sh -c 'ulimit -v N; exec …'`, before PPI is loaded.  Cost when
+# nothing is wrong: one sh fork against a ~1 s transpile, and the cap itself
+# is free — it only fires on a runaway.
+#
+#   PCL_MEM_CAP_MB=N   change the cap (default 4096, matching the ulimit
+#                      tools/run-perl-suite.pl already puts on its children)
+#   PCL_NO_MEM_CAP=1   run uncapped (a deliberate big compile)
+#   PCL_SHOW_MEM_CAP=1 print the cap actually in force, like PCL_SHOW_SBCL
+#
+# THE NUMBER IS MEASURED, not guessed: the heaviest legitimate transpiles peak
+# at ~140 MB of address space (perl-tests/signatures.t 140 MB, re/pat.t 103,
+# perl-tests/pack.t 96, cl/pack-impl.pl 86), so 4 GB is ~30x headroom.
+#
+# NOT applied to --bundle/--executable: those spawn SBCL, which RESERVES a
+# multi-gigabyte address space up front, and `ulimit -v` counts reservations.
+# RESIDUE: the ~40 Pl/t files that `use Pl::Parser` IN PROCESS are not covered
+# by this seam (they never spawn pl2cl); see #471.
+BEGIN { CAP: {
+  last CAP if $ENV{PCL_MEM_CAPPED} || $ENV{PCL_NO_MEM_CAP};
+  my $mb = $ENV{PCL_MEM_CAP_MB} // 4096;
+  last CAP if $mb !~ /^[0-9]+$/ || $mb == 0 || !-x '/bin/sh';
+  last CAP if grep { $_ eq q{--bundle} || $_ eq '--executable' } @ARGV;
+  # Re-exec the ORIGINAL argv, so perl's own switches (-I, -w, …) survive; the
+  # naive ($^X, $0, @ARGV) form silently drops them, and the suite runner
+  # spawns us as `perl -I<root> pl2cl …`.
+  my @cmd;
+  if (open my $c, '<', '/proc/self/cmdline') {
+    local $/; my $s = <$c> // ''; close $c;
+    @cmd = grep { length } split /\0/, $s;
+  }
+  @cmd = ($^X, $0, @ARGV) if !@cmd;
+  $ENV{PCL_MEM_CAPPED} = 1;
+  # `or do {…}` rather than a statement after exec(): the latter is what perl
+  # warns "Statement unlikely to be reached" about, on every single transpile.
+  exec('/bin/sh', '-c', 'ulimit -v "$1" 2>/dev/null; shift; exec "$@"',
+       'pcl-mem-cap', $mb * 1024, @cmd)
+    or do {
+      # exec failed: transpiling uncapped beats not transpiling at all.
+      delete $ENV{PCL_MEM_CAPPED};
+      warn "pl2cl: memory cap NOT applied (exec /bin/sh: $!)\n";
+    };
+} }
+if ($ENV{PCL_SHOW_MEM_CAP}) {
+  my $lim = 'unknown';
+  if (open my $l, '<', '/proc/self/limits') {
+    while (<$l>) { $lim = $1 eq 'unlimited' ? 'none' : "$1 bytes"
+                     if /^Max address space\s+(\S+)/ }
+    close $l;
+  }
+  warn "pl2cl: memory cap = $lim\n";
+}
+
 use Getopt::Long;
 use File::Spec;
 use File::Basename;
