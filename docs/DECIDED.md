@@ -68,6 +68,11 @@ those two files and the live plan doc directly -- no new review-doc families.*
   re-entered at the CALL by encapsulating `sb-kernel::restart-undefined` — both other
   routes measured and rejected, DO NOT RETRY; ir-spec §5.1).  Filed #500–#504 from its
   report; agent D (s442d) on #500 + #501 + #503.
+- **s441a+b (agent A) MERGED: #463 items 2 + 1** — a Cast IS a prefix operator
+  (`_is_prefix_op_token`; `++`/`--` at 92 outranked the cast at 90), `$${EXPR}`'s
+  braces re-blessed Subscript → Block; `${"name"} += 2` was a SILENT NO-OP
+  (`%p-accessor-place-p` omitted `p-cast-$`), `p-pre--` numifies; op/universal.t
+  61 → 79; filed #505–#507.  Items 3–5 = a `*`-sigil token repair (Fable measured).
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

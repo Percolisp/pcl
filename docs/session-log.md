@@ -161,6 +161,31 @@ equal), **#502** `use English` dies at transpile (`*LAST_PAREN_MATCH = *+`),
 gate **168/5805** (only the 13 pclxs xs rows).  Agent D (s442d) launched on
 #500 + #501 + #503 (gen v2-200).
 
+**s441a + s441b (Opus agent A, launched s440, MERGED ff `f588276`+`bf4f367`+
+`94ae44d` after review) — #463 items 2 and 1.**  Item 2 (`++${"23::foo"}`,
+18 op/universal.t rows behind one drop) was a PRECEDENCE ACCIDENT, not a
+missing feature: `op_info` calls every PPI Cast a one-operand prefix operator
+at 90, and `++`/`--` (92) are the only prefix operators above it, so the loop
+reduced the increment first and handed it the bare `$` cast as its operand
+(every other prefix op is AT 90, where ties resolve rightmost — hence `\$$r`,
+`!$$r`, `-$$r` always worked).  ONE predicate, `_is_prefix_op_token`, now
+answers YES for a Cast and the pair rides the existing inner-first walk; the
+family was `++$$r`, `++${$r}`, `++${$n}`, `++${"main::z"}`, `++$$$rr`,
+`++${\ $l}` and every `--` twin.  Two runtime defects rode with it:
+`%p-accessor-place-p` omitted `p-cast-$`/`p-$` while the ++/-- macros listed
+all six, so **`${"name"} += 2` was a SILENT NO-OP**; `p-pre--`'s arm was
+`(decf place)` where `p-pre++` numifies.  Item 1 (`$${EXPR}`) was TWO stacked
+PPI errors — the PID Magic AND the braces as a Structure::Subscript — the
+pre-pass now re-blesses the braces to a Block (ppi-upstream-bugs §1b, report
+.t 32 rows).  Measured: 528-file companion A/B DIFF = exactly op/universal.t,
+uni/method.t, op/gv.t, uni/gv.t (a PARSE ERROR becoming code); corpus-diff
+identical over 111 + shapes; **op/universal.t C_ok 61 → 79**; census 81/185 →
+78/178 by edit; guard `Pl/t/prefix-incr-deref-01.t` (12 rows, 6 inverses).
+Findings FILED: **#505** `${NUMBER}` not a symbolic ref, **#506** `$$ {EXPR}`
+(a space) → unbound `%$` at load (the #449 family), **#507** `$$$_` still
+dropped (Magic after `$$`).  Items 3–5 remain (Fable measured: parse, not
+representation).
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
