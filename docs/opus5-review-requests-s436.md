@@ -198,3 +198,118 @@ so perl's own switches survive (`$^X, $0, @ARGV` silently drops the
 * `docs/cpan-board14-*.tsv` is not re-blessed — the board A/B was run against a
   worktree, not against the stale s378 file, and re-blessing the whole board
   needs the 14-dist run.
+
+---
+
+# s436 part 2 — Q3: #456 half (b) / #469, the PHASE MODEL across sections
+
+Shipped in the same session, after Q2 closed.  Perl compiles the WHOLE FILE
+before it runs a line of it; PCL emitted one package section at a time — decls,
+defs, BEGINs, **run** — so a later section's compile phase landed after an
+earlier section's run-time code.  `Pl::Parser2::parse`'s assembly now runs in
+two passes over the same sections: every section's compile phase (source order
+kept within and across sections), `(p-run-compile-phase-blocks)` once, then
+every section's run phase.  Nothing is compiled twice; the forms MOVE.
+
+## 8. The diff class was verified mechanically, over all four populations
+
+`emission-ab --ref f332682` plus a walker that reduces each pair to a LINE
+MULTISET and reports exactly what was added or removed:
+
+| population | files | DIFF | pure permutation | permutation + added lines |
+|---|---:|---:|---:|---:|
+| perl-tests | 111 | 36 | 1 | 35 |
+| `lib/**.pm` | 22 | 22 | 21 | 1 |
+| cpan-tests/modules | 402 | 127 | 90 | 37 |
+| perl's `t/` | 604 | 159 | 1 | 158 |
+
+**344 changed files; ZERO removed lines; every added line is an
+`(in-package …)` or a `(p-set-current-package …)`.**  That is the predicted
+"ordering only" class, and it is now a claim a script checked rather than a
+claim I read.  A one-section file — the overwhelming majority — is
+byte-identical (verified directly as well).
+
+## 9. The one thing the A/B could not see, and how it showed up
+
+The first sweep came back **TOTAL 18311 → 18310, one LOST file: caller.t
+15 → 13**, reproduced serially and attributed on a HEAD worktree.  Cause, and
+it is worth recording as a rule:
+
+**`p-BEGIN` sets the runtime current package on ENTRY and never restores it.**
+That was invisible while a section's BEGINs ran immediately before that same
+section's run forms.  Under the phase model every BEGIN runs first, so the
+package left current when the run phase starts is the LAST BEGIN's — in
+caller.t, `{ package RT129239; BEGIN {…} }` at line 369, which made the
+`eval 'pb()'` at line 129 transpile in RT129239 and answer undef.
+
+Fixed where the assumption lived: **every run group now states its own package**
+(`(p-set-current-package …)` at its head, section 0 included), *when the file
+has more than one section* — so a one-section file reorders nothing and keeps
+its byte-identical emission.  caller.t is back to 15/49.  The underlying
+p-BEGIN asymmetry is filed as **#474** with its fix shape (bind, don't setf),
+because it can still bite an INIT/CHECK closure or a runtime `require`.
+
+## 10. The rest of the bar
+
+* **Sweep: TOTAL passing 18311 → 18312 (+1), GATE clean**, 0 new / 0 fixed,
+  drops census 5 = current 5.  The +1 is exactly the row the s432 note in
+  `pass-baseline.tsv` promised back: sort.t's `cmp_ok($answer,'eq','good','bug
+  36430')` now passes for the reason the test intends, because `package A; sub
+  min` is defined before the earlier block's comparator runs.  sort.t
+  202 → 203 and PARTIAL → OK, edited by hand with that cause.
+* **Probes**: the two bug reproducers (#456's and #469's) plus **ten inverses**
+  against live perl — same-section forward call, sub-first, a BEGIN that DOES
+  see an earlier section's sub, a BEGIN that must NOT see a sub below it,
+  `__PACKAGE__` across sections, END order, an `our` read across sections, a
+  package block with a closed-over lexical, CHECK/INIT, and a `use` in a later
+  section.  All ten already passed before the change and still do; the two
+  reproducers were the only movers.
+* **Guards**: the two `decl-ordering-02.t` rows that asserted the loud death
+  become six `both_agree` rows (the two reproducers + four inverses).
+* **A STALE GUARD WAS FOUND AND REPAIRED IN THE SAME COMMIT** (the s416 rule):
+  `begin-end-01.t`'s "BEGIN can access package variable from other package" set
+  `our $value = 100;` as a RUN-TIME statement in an earlier section and asserted
+  a later BEGIN saw 100. **Perl prints the empty string** (probed) — the row was
+  encoding the very bug #469 fixes, and PCL passed it only because of that bug.
+  Split into two rows, both perl's answer: a COMPILE-time assignment is visible
+  across packages (which is what the test means), a run-time one is not.
+* **Companion suite (`--all --quick --jobs 4`, on the #467 runner): NET +36
+  C_ok over five files, NOTHING LOST.**  op/gmagic.t **4 → 30** (its helper
+  packages are now defined before the code that calls them), op/gv.t 130 → 134,
+  uni/gv.t 51 → 55, comp/hints.t 15 → 16, op/sort.t 181 → 182; op/cond.t (the
+  quarantined 20k-ternary file) C_ok unchanged, C_notok 0 → 1.  **Every gainer
+  was re-measured ALONE on a `f332682` worktree and on HEAD**, and the base
+  reproduces its blessed value exactly, so all five are this change.  Six rows
+  edited by hand in `docs/perl-suite-run.tsv`.
+* **io/pvbm.t is a trap worth writing down.**  It read 20/8 in the parallel pass
+  AND in the runner's own #366 serial re-run, but three later runs of it alone —
+  on HEAD and on the base worktree — give its blessed 23/5 every time.  A
+  fresh_perl-driving file can lose rows even to the "serial" re-run when the
+  machine is otherwise busy: #366's serial verdict is a strong signal, not a
+  proof.  s435 reached the same conclusion about the same file.
+* **Compile time: within noise.**  Five multi-section files, three runs each:
+  head 7.41 / 7.60 / 7.64 s, base 7.44 / 6.87 / 7.38 s — the forms MOVE, so the
+  only new work is one array and a few pushes.
+* Generation **v2-180**; all three artifacts regenerated (`pcl-mro.lisp` and
+  `pcl-warnings.lisp` carry the reordering, `pcl-pack.lisp` only the stamp);
+  `docs/ir-spec.md` §9 gains the normative load-model ordering.
+* #456 and #469 close together.
+
+## 11. ASKS (part 2)
+
+6. **`@ver_run` placement.**  `package Foo 1.5;` sets `$VERSION` at COMPILE
+   time in perl, so I put the assignment at the end of its section's compile
+   phase — where it has always been relative to the phase boundary and to every
+   run form, and now also relative to later sections.  **No file in any of the
+   four populations uses that spelling** (one does, `t/comp/package_block.t`,
+   and it fails identically before and after), so the choice is unmeasured.
+   Say if it should instead ride in the run group.
+7. **#474 (p-BEGIN does not restore the package)** — worth its own filler, or
+   fold into whatever next touches the scheduled-block emission?  The run-group
+   fix makes it unmeasurable again today, which is exactly how it stayed hidden
+   until now.
+8. **The on-demand cross-section stub block is now partly redundant** — an
+   earlier section's RUN-TIME call to a later section's sub no longer needs a
+   `p-declare-sub` stub, because the def has already loaded.  I left the block
+   untouched (it still serves an earlier section's BEGIN, and narrowing it would
+   have added a diff class to this change).  Worth a follow-up, or leave it?

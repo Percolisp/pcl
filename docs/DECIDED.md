@@ -11,6 +11,65 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s436b (2026-08-23, Opus 5) — Q3: #456 half (b) / #469, the PHASE MODEL across sections.  perl compiles the whole file before it runs a line of it, and now so does PCL
+
+- **The assembly runs in TWO PASSES over the same sections** (`Pl::Parser2::parse`):
+  every section's COMPILE phase (package preamble, decls, captured
+  use/require/BEGIN, defs and scheduled blocks interleaved by SOURCE POSITION —
+  order kept within and across sections), then `(p-run-compile-phase-blocks)`
+  once, then every section's RUN phase.  Nothing is compiled twice; the forms
+  MOVE.  A run group is preceded by an `(in-package …)` because `in-package` is
+  READ-time and pass 1 leaves the reader in the LAST section's package.
+- **The diff class was verified MECHANICALLY, not read**: a walker reduces each
+  A/B pair to a LINE MULTISET.  Over all four populations — perl-tests 36/111,
+  lib 22/22, cpan-tests 127/402, perl's t/ 159/604 — **344 changed files, ZERO
+  removed lines, and every added line is an `(in-package …)` or a
+  `(p-set-current-package …)`.**  A one-section file is byte-identical.
+- **`p-BEGIN` SETS the runtime current package on entry and NEVER RESTORES it
+  (#474).**  Invisible before, because a section's BEGINs ran immediately
+  before that same section's run forms.  Under the phase model every BEGIN runs
+  first, so the package left current at the start of the run phase is the LAST
+  BEGIN's — measured: perl-tests/caller.t 15 → 13, because
+  `{ package RT129239; BEGIN {…} }` at line 369 made the `eval 'pb()'` at line
+  129 transpile in RT129239.  **Fixed where the assumption lived: every run
+  group states its own package**, section 0 included, whenever the file has
+  more than one section.  A one-section file reorders nothing and keeps its
+  byte-identical emission.  The p-BEGIN asymmetry itself is #474.
+- **Sweep TOTAL 18311 → 18312 (+1), GATE clean**, 0 new / 0 fixed, drops
+  census 5 = current 5.  The +1 is the row the s432 `pass-baseline.tsv` note
+  promised back: sort.t's `cmp_ok($answer,'eq','good','bug 36430')` passes for
+  the reason the test intends, because `package A; sub min` is now defined
+  before the earlier block's comparator runs.  sort.t 202 → 203, PARTIAL → OK,
+  edited BY HAND.
+- **A STALE GUARD WAS ENCODING THE BUG** (the s416 rule, paid in the same
+  commit): `Pl/t/begin-end-01.t`'s "BEGIN can access package variable from
+  other package" assigned `our $value = 100;` as a RUN-TIME statement in an
+  earlier section and asserted a later BEGIN saw 100.  **Perl prints the empty
+  string** — the row was asserting PCL's bug.  Split in two, both perl's
+  answer: a COMPILE-time assignment IS visible across packages, a run-time one
+  is not.
+- Ten inverse probes vs perl (same-section forward call, sub-first, a BEGIN
+  that DOES see an earlier section's sub, a BEGIN that must NOT see a sub below
+  it, `__PACKAGE__` across sections, END order, cross-section `our`, a package
+  block with a closed-over lexical, CHECK/INIT, a `use` in a later section) all
+  passed BEFORE the change and still do; only the two bug reproducers moved.
+- Guards: `Pl/t/decl-ordering-02.t`'s two "dies loudly" rows become six
+  `both_agree` rows.  `docs/ir-spec.md` §9 gains the normative load-model
+  ordering, including why "hoist the definition alone" is unsafe.  Gate cold
+  **163/5739**; generation **v2-180**; all three artifacts regenerated
+  (`pcl-mro.lisp`/`pcl-warnings.lisp` carry the reordering).  **#456 and #469
+  close together.**
+- **Companion suite (#467 runner): NET +36 C_ok over five files, nothing lost** —
+  op/gmagic.t **4 → 30**, op/gv.t 130 → 134, uni/gv.t 51 → 55, comp/hints.t
+  15 → 16, op/sort.t 181 → 182 (op/cond.t C_notok 0 → 1, C_ok unchanged); every
+  gainer re-measured ALONE on a `f332682` worktree, which reproduces the blessed
+  value.  Six `perl-suite-run.tsv` rows edited by hand.  **io/pvbm.t read low in
+  the parallel pass AND in #366's serial re-run and is still CONTENTION** —
+  three later alone-runs on both trees give its blessed 23/5.  A #366 serial
+  verdict is a strong signal, not a proof, for a fresh_perl-driving file.
+- Compile time within noise (five multi-section files, three runs each: head
+  7.41/7.60/7.64 s vs base 7.44/6.87/7.38 s) — the forms MOVE.
+
 ## s436 (2026-08-23, Opus 5) — Q2 CLOSED (its four unrun legs are run and clean); #471 the compiler-side memory cap; #457 PROMOTED and fixed — 958 rows back
 
 - **Q2's four-population emission A/B is CLEAN and mechanically shape-checked.**

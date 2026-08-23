@@ -1,4 +1,32 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s436 part 2 (Q3 = #456 half (b) / #469, the PHASE MODEL) — 6 ROWS EDITED BY
+#   HAND.  Every section's COMPILE phase (defs, BEGINs, captured use/require)
+#   now precedes every section's RUN phase, as perl's own model has always
+#   been, so a sub or a BEGIN written after a `package` switch is in place
+#   before earlier run-time code needs it.  This population GAINED:
+#
+#     op/gmagic.t     C_ok   4 -> 30   (+26)   the file's helper packages are
+#                                              defined before the code that
+#                                              calls them
+#     op/gv.t              130 -> 134  (+4)
+#     uni/gv.t              51 -> 55   (+4)
+#     comp/hints.t          15 -> 16   (+1)
+#     op/sort.t            181 -> 182  (+1)    the perl-tests twin of the
+#                                              bug-36430 row (see pass-baseline)
+#     op/cond.t     C_notok   0 -> 1   the quarantined 20k-ternary file; C_ok
+#                                      unchanged at 4, XDIFF either way
+#   NET +36 C_ok, and NOTHING LOST.  Each of the five gainers was measured
+#   alone on a `f332682` worktree (the commit before the change) and on HEAD,
+#   and the base reproduces the blessed value exactly — so all five are this
+#   change, not drift.
+#
+#   NOT EDITED, and worth knowing why: io/pvbm.t and io/open.t both read low in
+#   the parallel pass, and io/pvbm.t read low AGAIN in the runner's own #366
+#   serial re-run (20/8 vs its blessed 23/5) — but three later runs of it
+#   ALONE, on both HEAD and the base worktree, give 23/5 every time.  A
+#   fresh_perl-driving file can lose rows even to the "serial" re-run when the
+#   machine is otherwise busy, so #366's serial verdict is a strong signal, not
+#   a proof.  s435 reached the same conclusion about the same file.
 # s436 (Opus 5, Q2 leg 4) — 13 ROWS EDITED BY HAND, never re-blessed: the price
 #   of the s435 announce->DIE flip on this population.  A dropped statement now
 #   DIES when reached, and this runner loads with recovery (#467), so the loss
@@ -652,7 +680,7 @@ comp/filter_exception.t	4	0	2	2	DIFF		0
 comp/final_line_num.t	1	0	0	0	DIFF		1
 comp/fold.t	35	0	25	10	DIFF	aborted-forms:2: The function main::pl-INSTALL is undefined.	0
 comp/form_scope.t	14	0	0	2	DIFF		0
-comp/hints.t	31	0	15	14	DIFF	NOT fully registered: 2 unregistered diverging row(s): tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
+comp/hints.t	31	0	16	13	DIFF	NOT fully registered: 3 unregistered diverging row(s): #15; tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
 comp/line_debug.t	25	0	1	24	DIFF		0
 comp/multiline.t	6	0	6	0	OK		0
 comp/opsubs.t	36	0	31	5	DIFF		0
@@ -814,7 +842,7 @@ op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — AL
 op/closure.t	281	1	273	3	DIFF	aborted-forms:1: The function main::pl-ff is undefined.	0
 op/cmpchain.t	1750	0	1521	229	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.	0
 op/concat2.t	4	0	4	0	OK		0
-op/cond.t	5	0	4	0	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
+op/cond.t	5	0	4	1	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
 op/const-optree.t	148	0	90	58	XDIFF	not-supported.md §Readouts of perl's own internals -> "Constant-folding / inlinability and the :method attribute readout" (53 of 58 rows: 28 "… is/is not inlinable", 25 "… has (no) :method attribute" — both are diagnostics ABOUT an optree PCL does not build) AND §Error compatibility for invalid Perl input / CLAUDE.md §9 (the other 5: "… now throws exception (RT 134138)", where perl REJECTS `sub () { $x }` for a lexical modified elsewhere and PCL compiles it). REGISTERED s408, after #337 fixed the 4 "retval of my sub …" rows that were the file's real fix target and kept it UNEXPLAINED — a fresh per-row read of all 58 was the precondition the s399 note set.	0
 op/context.t	8	0	7	1	DIFF		0
 op/coreamp.t	778	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also carries lvalue-sub drops (§Lvalue subroutines)	-1
@@ -856,13 +884,13 @@ op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
 op/glob.t	18	0	14	4	DIFF		0
-op/gmagic.t	78	0	4	2	DIFF	aborted-forms:5: Can't call method init on an undefined value	0
+op/gmagic.t	78	0	30	3	DIFF	aborted-forms:5: Can't call method init on an undefined value	0
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is undefined.	0
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	130	69	DIFF	undef-fn:main::pl-fred; aborted-forms:3: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/gv.t line N. 	3
+op/gv.t	304	0	134	65	DIFF	undef-fn:main::pl-fred; aborted-forms:3: Died at gv.t line N. 	3
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
@@ -952,7 +980,7 @@ op/sigsystem.t	4	0	0	0	XDIFF	aborted-forms:1: Can't locate loadable object for m
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
-op/sort.t	205	0	181	23	DIFF	undef-fn:main::pl-revers; aborted-forms:2: Undefined subroutine &OtherPack::foo called. 	0
+op/sort.t	205	0	182	23	DIFF	undef-fn:main::pl-revers	0
 op/splice.t	34	0	34	0	OK		0
 op/split.t	219	0	212	7	DIFF		0
 op/split_unicode.t	147	0	107	40	DIFF		0
@@ -1127,7 +1155,7 @@ uni/eval.t	5	0	5	0	OK		0
 uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
 uni/greek.t	0	0	0	0	NOTAP		0
-uni/gv.t	206	0	51	37	DIFF	aborted-forms:1: Died at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/uni/gv.t line N. 	2
+uni/gv.t	206	0	55	33	DIFF	aborted-forms:1: Died at gv.t line N. 	2
 uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (go :ここ)	0
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0

@@ -4,6 +4,42 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 436 part 2 (2026-08-23, Opus 5) — Q3: the PHASE MODEL (#456 half (b) + #469), closed together
+
+Commit **`b95ad91`**.  Perl compiles the WHOLE FILE before it runs a line of
+it; PCL emitted one package section at a time — decls, defs, BEGINs, **run** —
+so a later section's compile phase landed after an earlier section's run-time
+code.  `Pl::Parser2::parse`'s assembly now runs **two passes** over the same
+sections: every section's compile phase (source order kept within and across
+sections), `(p-run-compile-phase-blocks)` once, then every section's run phase.
+Nothing is compiled twice; the forms MOVE.
+
+**The diff class was checked by a script.**  A walker reduces each A/B pair to
+a LINE MULTISET: over all four populations — perl-tests 36/111, lib 22/22,
+cpan-tests 127/402, perl's t/ 159/604 — **344 changed files, ZERO removed
+lines, every added line an `(in-package …)` or a `(p-set-current-package …)`**.
+A one-section file is byte-identical.
+
+**The one thing the A/B could not see cost the first sweep a row.**  `p-BEGIN`
+sets the runtime current package on entry and never restores it — invisible
+while a section's BEGINs ran immediately before its own run forms.  Under the
+phase model the package left current is the LAST BEGIN's: caller.t 15 → 13,
+because `{ package RT129239; BEGIN {…} }` at line 369 made the `eval 'pb()'`
+at line 129 transpile in RT129239.  Fixed where the assumption lived — **every
+run group states its own package**, section 0 included, when the file has more
+than one section.  The p-BEGIN asymmetry itself is **#474**.
+
+**Result.**  Sweep TOTAL 18311 → **18312 (+1)**, GATE clean — the +1 is
+sort.t's `bug 36430` row, which the s432 pass-baseline note promised back.
+Companion **net +36 C_ok over five files, nothing lost** (op/gmagic.t **4 →
+30**), each gainer attributed alone on a `f332682` worktree.  Gate cold
+**163/5739**; generation **v2-180**.  A STALE GUARD in `begin-end-01.t` was
+encoding the bug (it asserted a later BEGIN sees an earlier section's RUN-TIME
+assignment; perl prints the empty string) and was split into two perl-correct
+rows in the same commit.
+
+---
+
 ## Session 436 (2026-08-23, Opus 5) — Q2 CLOSED; #471 the compiler-side memory cap; #457 PROMOTED and fixed (958 rows back)
 
 Three commits.  **`3d289f8` #471**, **`3916d4b` Q2 legs 1/3/4**, **`f332682`
