@@ -207,13 +207,24 @@ sub _declared_named_unary {
 }
 
 # True if TOKEN is an operator that acts as a unary PREFIX operator: the prefix
-# set (! ~ \ ++ -- and the file-test ops -e/-f/-d/…) — i.e. operators whose
-# operand is to their right.  Used to reduce a run of adjacent prefix operators
-# inner-first (`!-e $x` => `!(-e $x)`).
+# set (! ~ \ ++ -- the DEREF CASTS $ @ % & * and the file-test ops -e/-f/-d/…)
+# — i.e. operators whose operand is to their right.  Used to reduce a run of
+# adjacent prefix operators inner-first (`!-e $x` => `!(-e $x)`).
+#
+# A Cast is one of them (#463 item 2).  op_info already calls every Cast a
+# right-associative one-operand operator of precedence 90, and `\` — a Cast
+# token too — has always answered YES here through the prefix table.  The
+# other casts answered NO, so the ONE prefix op that outranks a cast (`++` /
+# `--`, precedence 92) was reduced FIRST and then took the bare `$` cast token
+# as its whole operand: `parse([Cast])` has no case for a lone cast, so the
+# term walker declined and the STATEMENT WAS DROPPED (`++$$r`, `++${$r}`,
+# `++${"name"}` and their `--` twins; every other prefix operator is at 90 and
+# ties resolve rightmost, which is why `\$$r` / `!$$r` / `-$$r` always worked).
 sub _is_prefix_op_token {
   my ($self, $tok) = @_;
   my $name = $self->is_token_operator($tok);
   return 0 unless defined $name;
+  return 1 if ref($tok) eq 'PPI::Token::Cast';  # $ @ % & * \ — a deref cast
   my $info = $self->op_info($tok);
   return 0 unless $info && ($info->{no} // 0) == 1;
   return 1 if exists $self->prefix->{$name};   # ! ~ \ ++ -- -e -f …

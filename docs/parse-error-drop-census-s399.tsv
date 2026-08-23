@@ -94,8 +94,8 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 81 files, 185 drops -- 4 perl-tests files (5
-# drops), 23 companion files (77), 9 cpan-tests modules (15), 42 cpan-tests
+# TOTAL after the edits below: 79 files, 182 drops -- 4 perl-tests files (5
+# drops), 21 companion files (74), 9 cpan-tests modules (15), 42 cpan-tests
 # dist test files (83), 3 board modules (5), ZERO in lib/.  (At the s399 measurement, over three populations:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
@@ -109,6 +109,20 @@
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
+#   s441a -2 files / -3 drops (task #463 item 2): prefix `++`/`--` on a
+#         SCALAR DEREF parses now, so `t/op/universal.t` (1) and
+#         `t/uni/method.t` (2) leave.  `op_info` calls every PPI Cast a
+#         one-operand prefix operator of precedence 90 and `++`/`--` are the
+#         only prefix operators ABOVE that (92), so the operator loop reduced
+#         the increment FIRST and handed it the bare `$` cast token as its
+#         whole operand -- `parse([Cast])` has no case for a lone cast, the
+#         term walker declined, and the statement went.  One predicate
+#         (`_is_prefix_op_token`) now answers YES for a Cast, which routes the
+#         pair through the loop's existing "adjacent prefix operators reduce
+#         INNER-first" walk.  Measured: emission A/B over all 528 companion
+#         files shows exactly these two DIFF, corpus-diff IDENTICAL over 111,
+#         lib A/B SAME=21, and a text scan of all six populations finds the
+#         shape in no other file.  Rows: t/op/universal.t C_ok 61 -> 79.
 #   s438  +42 files / +83 drops, the whole `cpan-t` population arriving at
 #         once (task #473, ruled s437).  NOT a regression and not new: these
 #         sites have been dropping since before the flip -- an f702da3
@@ -539,7 +553,6 @@ t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x
 t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
-t/op/universal.t	1	Handle single node of unknown type. Dump: x1
 t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	3	Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
@@ -547,5 +560,4 @@ t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: 
 t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
 t/re/subst.t	2	Bug. Fell through. Missing case: [] x2
 t/uni/gv.t	2	Handle single node of unknown type. Dump: x2
-t/uni/method.t	2	Handle single node of unknown type. Dump: x2
 t/uni/readline.t	2	Handle single node of unknown type. Dump: x2

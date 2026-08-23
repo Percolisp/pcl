@@ -1,4 +1,22 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s441a (Opus 5, task #463 item 2) — TWO ROWS EDITED BY HAND, both because a
+#   DROP became real code: prefix `++`/`--` on a scalar DEREF (`++${"23::foo"}`)
+#   used to take the whole statement with it.
+#
+#     op/universal.t   C_ok 61 -> 79, C_notok 48 -> 59, drops 1 -> 0
+#     uni/method.t     rows unchanged at 28/21, drops 2 -> 0
+#
+#   universal.t's drop is line 112, `++${"23::foo"};`, whose only job is to
+#   autovivify the package `23` — every row after it that asks whether "23" can
+#   a method depended on it, and the file died there.  It now runs on to
+#   aborted-forms:6 ("No SUPER::isa found from RTN::B"), 18 rows further.  The
+#   11 new C_notok are rows the file never reached before, and they fail for
+#   ONE pre-existing cause each (the UNIVERSAL::isa loop at line 106 and the
+#   glob/IO `can` rows) — nothing that passed stopped passing.
+#   uni/method.t's two drops are the same shape in a BEGIN block; the file
+#   still aborts at exactly the same place with exactly the same signature, so
+#   only its drops column moves.  Both measured in the parallel pass AND alone
+#   (#366 serial re-run: 79/59 both ways).
 # s438i (Opus 5, task #450) — ONE ROW EDITED BY HAND: op/glob.t C_ok 14 -> 13,
 #   C_notok 4 -> 5.  perl's glob returns a pattern with no METACHARACTER as
 #   ITSELF (`glob("/nope-xyz")` is "/nope-xyz"), and PCL went to the filesystem
@@ -1071,7 +1089,7 @@ op/tr.t	317	0	269	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated 
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	32	5	DIFF	undef-fn:main::pl-tcp; aborted-forms:1: The function main::pl-z is undefined.	0
-op/universal.t	142	2	61	48	DIFF	aborted-forms:7: PCL: statement not supported at universal.t line N: ++${"N::foo"}; -- Handle single node o	1
+op/universal.t	142	2	79	59	DIFF	aborted-forms:6: No SUPER::isa found from RTN::B	0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
@@ -1213,7 +1231,7 @@ uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with er
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
 uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
-uni/method.t	62	0	28	21	DIFF	aborted-forms:2: Can't locate object method "nÃ¨w" via package "Føø::Bær" at - line N. 	2
+uni/method.t	62	0	28	21	DIFF	aborted-forms:2: Can't locate object method "nÃ¨w" via package "Føø::Bær" at - line N. 	0
 uni/opcroak.t	5	0	0	5	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 uni/overload.t	191	2	178	14	DIFF	aborted-forms:1: The function main::pl-todo_skip is undefined.	0
 uni/package.t	18	0	8	10	DIFF		0
