@@ -7117,16 +7117,21 @@ sub _process_foreach_loop {
 # _sub_head came to disagree with the other three.
 # Is the `signatures` feature on at this statement?  Only the same-line case
 # is ever asked (see _sub_head): PPI answers every other position by handing
-# over a Structure::Signature.  An enabling pragma is `use feature` naming
-# signatures, `use experimental 'signatures'`, or a `use v5.36`+ bundle (the
-# version that made signatures non-experimental and on by default).  Line
-# order decides, with the column breaking a tie on the shared line — perl
-# enables the feature for the REST of the line, so `use feature "signatures";
-# sub f ($x) {…}` is a signature and the reverse order is not.
+# over a Structure::Signature.  An enabling pragma is `use feature` /
+# `use experimental` naming `signatures` in ANY quoting (`'signatures'`,
+# `qw(say signatures)`, `qw/signatures/`), a `use feature ':5.NN'` bundle
+# with NN ≥ 36, or `use v5.36`+ (the version that made signatures
+# non-experimental and on by default).  Line order decides, with the column
+# breaking a tie on the shared line — perl enables the feature for the REST
+# of the line, so `use feature "signatures"; sub f ($x) {…}` is a signature
+# and the reverse order is not.  (s439 review fix: the first cut matched a
+# QUOTED `'signatures'` only, so the `qw()` spelling on the pragma's own line
+# still took the old-prototype lowering — PCL `-u|2 3-2`, perl `0-u|2-2`.)
 #
 # NOT a lexical scope walk: `no feature "signatures"` in an inner block would
 # fool it.  That is deliberately out of scope here — this predicate exists to
-# recover PPI's one missing line, and PPI owns every other position.
+# recover PPI's one missing line, and PPI owns every other position.  A `no
+# feature …` statement is never an ENABLING site, though, so it is skipped.
 sub _signatures_enabled_at {
   my ($self, $stmt) = @_;
   my $doc = eval { $stmt->top } or return 0;
@@ -7136,8 +7141,13 @@ sub _signatures_enabled_at {
     my @sites;
     for my $st (@{ $doc->find('PPI::Statement::Include') || [] }) {
       my $c = $st->content // '';
-      next unless $c =~ /\b(?:feature|experimental)\b[^;]*['"]signatures['"]/
-               || ($c =~ /^\s*use\s+v?5\.0*(\d+)/ && $1 >= 36);
+      next if $c =~ /^\s*no\b/;
+      my $enables =
+           ($c =~ /^\s*use\s+(?:feature|experimental)\b/
+              && ($c =~ /\bsignatures\b/
+                  || ($c =~ /:5\.0*(\d+)/ && $1 >= 36)))
+        || ($c =~ /^\s*use\s+v?5\.0*(\d+)/ && $1 >= 36);
+      next unless $enables;
       push @sites, [ $st->line_number // 0, $st->column_number // 0 ];
     }
     \@sites;

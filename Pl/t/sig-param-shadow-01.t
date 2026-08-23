@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub write_pl {
     my ($code) = @_;
@@ -152,9 +152,17 @@ both_agree('use feature "signatures"; sub f ($x, @r) { "[@r]" }' . "\n"
          . 'print f(0), "\n";',
            'a sub on the pragma\'s OWN line is a signature (no spurious warning)');
 
-# THE NEGATIVE THIS FILE DOES NOT ASSERT, and why: `sub t000 ()` written
+# s439 review fix: the enabling pragma in its `qw()` spelling.  The first cut of
+# `_signatures_enabled_at` matched a QUOTED 'signatures' only, so this row
+# took the old-prototype lowering (PCL `-u|2 3-2`, perl `0-u|2-2`).  Any
+# quoting of the word, a `:5.NN` bundle >= 36 and `use v5.36`+ all enable.
+both_agree('use feature qw(signatures say); sub f ($x, @r) { scalar(@r) . "-" . ($r[0] // "u") }' . "\n"
+         . 'print f(1), "|", f(1,2,3), "\n";',
+           'the same-line pragma spelled `use feature qw(signatures say)` enables too');
+
+# THE NEGATIVE THIS FILE DOES NOT ASSERT, and why: `sub t000 ($a)` written
 # where the feature is NOT yet on is an old-style (illegal) PROTOTYPE in perl,
-# which perl IGNORES — so `` in the body is the package variable and
+# which perl IGNORES — so `$a` in the body is the package variable and
 # `&t000(456)` is 123.  PCL answers 456 on BOTH paths, because the
 # old-prototype lowering binds a named prototype`s names as parameters too.
 # That is a blessed baseline failure (`docs/fail-baseline.tsv`,
