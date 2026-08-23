@@ -298,11 +298,14 @@ local/`%INC`/`$0`/dup findings, grouped: #508+#509+#510 local; #511 `%INC`;
 compiler half + #478 measured; #504 tool fix; #486–#489 residues.
 
 **s440h — STOPPED at the USER's request (break; "we restart everything
-later").  RESUME POINT:** four Opus agents were RUNNING in
-`.claude/worktrees/agent-*` (E #470 gen v2-205, F #491+#495 v2-210, G
-#485+#484+#492 v2-215, H #516+#515+#511 v2-220); whether they finished is in
-each worktree's `git log` / `git status` — read those FIRST (a dead agent's
-uncommitted diff is the deliverable), then the merge recipe in memory
+later").  RESUME POINT:** the four Opus agents were STOPPED (TaskStop) at
+the USER's request, worktrees KEPT in `.claude/worktrees/agent-*`: E #470
+(v2-205) no commit, 5 files dirty (Parser2, closure-01.t, parser2-01.t, ir-spec,
+not-supported); F #491+#495 (v2-210) no commit, 3 dirty (Environment, ExprToCL,
+PExpr); G #485 COMMITTED `e3449f7`, clean (#484 #492 not started); H #516
+COMMITTED `57c9859`, 2 dirty (Parser, Parser2) — read each worktree FIRST (a
+stopped agent's uncommitted diff is the deliverable; the two commits may be
+mergeable as they stand), then the merge recipe in memory
 `project_s421_opus_agents_inflight`: review, `git rebase main` in the
 worktree, `--ff-only` merge, renumber the generation ONCE above every agent
 string (next free: v2-221), regenerate the three artifacts, cold gate, ONE
