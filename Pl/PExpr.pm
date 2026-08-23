@@ -25,11 +25,29 @@ use Data::Dumper ();
 # installed (the installer, CI, a user machine) -- Data::Dump is not core.
 sub _dd {
   local $Data::Dumper::Terse    = 1;
-  local $Data::Dumper::Indent   = 1;
+  local $Data::Dumper::Indent   = 0;   # ONE line: a drop announcement keeps only the first line of its reason
   local $Data::Dumper::Sortkeys = 1;
-  my $s = Data::Dumper::Dumper(@_);
+  my $s = Data::Dumper::Dumper(map { _dd_compact($_) } @_);
   chomp $s;
   return $s;
+}
+
+# A PPI element dumps as `Class<content>` instead of its whole blessed hash
+# (locations, separators ...): the token stream IS the diagnosis, the rest is
+# noise in a `;; PARSE ERROR` comment.  One level into arrays and hashes, which
+# is the shape every die() here hands over (the operand list being parsed).
+sub _dd_compact {
+  my ($v) = @_;
+  return $v unless ref $v;
+  if (Scalar::Util::blessed($v) && $v->isa('PPI::Element')) {
+    (my $c = ref $v) =~ s/^PPI:://;
+    my $txt = $v->can('content') ? $v->content : '';
+    $txt = substr($txt, 0, 60) . '...' if length($txt) > 63;
+    return "$c<$txt>";
+  }
+  return [ map { _dd_compact($_) } @$v ] if ref $v eq 'ARRAY';
+  return { map { $_ => _dd_compact($v->{$_}) } keys %$v } if ref $v eq 'HASH';
+  return $v;
 }
 
 use Pl::OpcodeTree;

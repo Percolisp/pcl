@@ -36,7 +36,7 @@ which is how both tools invoke `pl2cl`).
 | `bareword-handles.pl` | package-qualified bareword handles (#452), punctuation-array interpolation | `Pl/t/punct-array-glob-01.t` |
 | `interpolation-nonascii.pl` | non-ASCII identifiers and their ASCII twins (#418, #422.2, #435) | `Pl/t/utf8-source-01.t` |
 
-Known divergences the corpus currently carries on purpose (the A/B will show
-their fixes as diffs here): #497 (`sub-heads.pl`: the same signature sub name
-in two packages).  #498 (`punct-arrays-glob.pl`: `@?` written in one package,
-read in another) was found here and fixed the same session (s440c).
+Known divergences the corpus currently carries on purpose: none at the moment.
+#497 (`sub-heads.pl`: the same signature sub name in two packages) and #498
+(`punct-arrays-glob.pl`: `@?` written in one package, read in another) were
+both found here and fixed the same session (s440c, s440d).

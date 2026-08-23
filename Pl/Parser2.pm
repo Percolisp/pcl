@@ -527,6 +527,19 @@ sub _requalify_region {
 # the block is in scope inside it.
 sub _binding_at {
   my ($self, $node, $canon) = @_;
+  # The token IS a signature parameter — the leading symbol of a top-level
+  # part of a `PPI::Structure::Signature` (`sub f ($x = 1, @r) {…}` when the
+  # feature is in force from an earlier LINE; on the pragma's own line PPI
+  # gives one Token::Prototype and no Symbol is ever offered).  That is the
+  # DECLARATION, bound 'lex' by definition; the scope walk below cannot see it
+  # because the signature is a sibling of the body, not its ancestor.  Without
+  # this the block-package requalifier rewrote the parameter itself to
+  # `$Pkg::x` — and every later reader of the head (the body's own
+  # `_head_binding`, the seam's arity) saw the rewritten text: `{ package S;
+  # use feature "signatures"; sub g ($x = 1) {…} }` came out as
+  # `sub g ($S::x = 1)`, arity 0/0, body reading the global (#497, found by
+  # the shapes corpus).  A symbol inside a DEFAULT is a use and falls through.
+  return 'lex' if _symbol_is_signature_param($node);
   my $child = $node;
   for (my $p = $node->parent; $p; $child = $p, $p = $p->parent) {
     next unless $p->isa('PPI::Structure::Block') || $p->isa('PPI::Document');
@@ -547,6 +560,24 @@ sub _binding_at {
     return $b if defined $b;
   }
   return undef;
+}
+
+# True iff $tok is a PARAMETER of a PPI::Structure::Signature: a Symbol whose
+# parent is the signature's expression and whose previous significant sibling
+# is nothing or a top-level comma.  `($x = $y, $z)`: $x and $z are parameters,
+# $y (after `=`) is a use; a comma INSIDE a default's call `f(1,2)` is inside
+# a Structure::List and never a sibling here.  The same "leading symbol of a
+# top-level part" rule _signature_param_canons applies to the TEXT.
+sub _symbol_is_signature_param {
+  my ($tok) = @_;
+  return 0 unless ref $tok && $tok->isa('PPI::Token::Symbol');
+  my $expr = $tok->parent or return 0;
+  my $sig  = $expr->parent or return 0;
+  return 0 unless $sig->isa('PPI::Structure::Signature');
+  my $prev = $tok->sprevious_sibling;
+  return 1 if !$prev;
+  return 1 if $prev->isa('PPI::Token::Operator') && $prev->content eq ',';
+  return 0;
 }
 
 # The binding a STATEMENT at scope level contributes (see _binding_at).
@@ -2335,6 +2366,14 @@ sub _symbol_is_declarator {
 # gate still fires (soundness: never wrongly clear a genuine span).
 sub _ref_shadowed {
   my ($self, $sym, $canon, $stmts, $seg_parent) = @_;
+  # The token IS a signature parameter: a declaration, its own shadow (#497,
+  # the same predicate `_binding_at` uses).  The sibling walk below cannot
+  # see it — the parameter sits INSIDE the Structure::Signature, not before
+  # it — so a spanning file lexical of the same name (`package A; my $x = …;
+  # package B; sub f ($x) {…}`) used to rename the parameter itself to
+  # `$A::x`, after which the body's own shadow test read the rewritten
+  # signature and renamed the body too: `sub f ($A::x) { "g($A::x)" }`.
+  return 1 if _symbol_is_signature_param($sym);
   my $node = $sym;
   while (my $parent = $node->parent) {
     my $at_seg = defined $seg_parent && $parent == $seg_parent;

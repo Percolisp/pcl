@@ -113,6 +113,27 @@ siblings, statement form through three packages, the NAMED-array inverse);
 ir-spec §2b "Punctuation names are main:: everywhere".  Runtime + emission
 → the sweep runs with the s441 batch.
 
+**s440d — #497 FIXED: a signature PARAMETER is a declaration to EVERY rewriter.**
+Not a name-keyed registry after all — the NAME only decided whether a second
+block-package region or a spanning file lexical of the parameter's name
+existed.  PPI hands `($x = 1)` over as a `Structure::Signature` when the
+feature is in force from an earlier line, and the parameter's own Symbol was
+then offered to two rewriters that asked a scope walk which cannot see a
+signature (a sibling of the body, not its ancestor): the block-package
+requalifier via `_binding_at` and the file-lexical span renamer via
+`_ref_shadowed`.  Either rewrote the parameter itself (`sub f ($S02::x = 1)`,
+arity 0/0, body reading the global), so `f 5` dropped and `f(5)` died.  ONE
+predicate `_symbol_is_signature_param` (the leading Symbol of a top-level part
+of a Structure::Signature; a Symbol after `=` is a use) now answers both
+resolvers first.  Guards: `sig-param-shadow-01.t` +4 (three positives fail on a
+HEAD worktree).  Also: the s440 `_dd` renders PPI tokens compactly on ONE line
+(`['Token::Symbol<$obj>','Token::Quote::Double<"a">']`) — the first cut's
+multi-line Dumper left only `[` in a drop announcement (and Data::Dump had
+done the same); corpus-diff shows that text in 3 files' drop comments
+(method.t, ref.t, sprintf2.t; census counts unchanged), plus the predicted
+sub-heads.pl shape fix; lib A/B 22 SAME; generation **v2-183**.  Gate runs
+once on the tree merged with agent C.
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,

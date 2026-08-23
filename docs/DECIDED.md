@@ -59,7 +59,10 @@ those two files and the live plan doc directly -- no new review-doc families.*
   per pattern: full, EMPTY, full … — `p-glob--list-context` keeps no state now;
   guard glob-01.t).  **#498 FIXED s440c**: the twelve punctuation arrays are
   runtime-owned (defvar + export from :pcl, the `@-`/`@+` way) and the compiler
-  declares them no more (gen v2-182; ir-spec §2b); guards punct-array-glob-01.t.
+  declares them no more (gen v2-182; ir-spec §2b); guards punct-array-glob-01.t.  **#497 FIXED
+  s440d**: a signature PARAMETER token is a declaration to BOTH resolvers
+  (`_symbol_is_signature_param` asked first by `_binding_at` and `_ref_shadowed`);
+  `_dd` renders tokens compactly on one line; gen v2-183; guards sig-param-shadow-01.t.
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

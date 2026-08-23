@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -159,6 +159,37 @@ both_agree('use feature "signatures"; sub f ($x, @r) { "[@r]" }' . "\n"
 both_agree('use feature qw(signatures say); sub f ($x, @r) { scalar(@r) . "-" . ($r[0] // "u") }' . "\n"
          . 'print f(1), "|", f(1,2,3), "\n";',
            'the same-line pragma spelled `use feature qw(signatures say)` enables too');
+
+# ---- #497 (s440, found by the SHAPES corpus): a signature PARAMETER is a
+# declaration to EVERY rewriter, not only to the capture detector.  PPI hands
+# `($x = 1)` over as a Structure::Signature when the feature is in force from
+# an earlier line, and then the parameter's own Symbol was offered to (a) the
+# block-package requalifier, which asked `_binding_at` (a scope walk that
+# cannot see a signature, a sibling of the body) and rewrote it to `$Pkg::x`;
+# (b) the file-lexical span renamer, which asked `_ref_shadowed` (same blind
+# spot) when a `my $x` in an earlier package spans into the sub's section.
+# Either way the head came out as `sub f ($S02::x = 1)` / `($S01::x)`, arity
+# 0/0, body reading the global: `f 5` dropped, `f(5)` died "Too many
+# arguments".  One predicate (_symbol_is_signature_param) now answers both
+# resolvers.  The rows are the four shapes, perl the oracle.
+both_agree(<<'PL', '#497: the same signature sub NAME in two block-scoped packages');
+{ package S01; use feature "signatures"; sub f ($x) { "f($x)" } my $x = f 5; print "$x\n"; }
+{ package S02; use feature "signatures"; sub f ($x = 1) { "g($x)" } my $x = f 5; print "$x\n"; }
+PL
+both_agree(<<'PL', '#497: ... statement-form packages, a spanning file `my $x` with the parameter name');
+package S01; use feature "signatures"; sub f ($x) { "f($x)" } my $x = f 5; print "$x\n";
+package S02; use feature "signatures"; sub f ($x = 1) { "g($x)" } my $y = f 5; print "$y\n";
+PL
+both_agree(<<'PL', '#497: ... three packages, a slurpy, the feature enabled once at the top');
+use feature "signatures";
+{ package S01; sub f ($x) { "f($x)" } my $x = f 5; print "$x\n"; }
+{ package S02; sub f ($x = 1) { "g($x)" } my $x = f 5; print "$x\n"; }
+{ package S03; sub f ($x, @r) { "h($x|@r)" } my $x = f 5, 6; print "$x\n"; }
+PL
+both_agree(<<'PL', '#497 inverse: different names in two block packages, parenthesised and not');
+{ package S01; use feature "signatures"; sub f ($x) { "f($x)" } print f(5), "\n"; }
+{ package S02; use feature "signatures"; sub g ($x = 1) { "g($x)" } my $y = g 5; print "$y\n"; }
+PL
 
 # THE NEGATIVE THIS FILE DOES NOT ASSERT, and why: `sub t000 ($a)` written
 # where the feature is NOT yet on is an old-style (illegal) PROTOTYPE in perl,
