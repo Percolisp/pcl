@@ -1011,6 +1011,67 @@ keep dropping loudly (task #449).  Guard rows: `Pl/t/punct-array-glob-01.t`.
 
 ---
 
+## 25. `-name` after a token that ENDS A TERM is lexed as one negative-bareword Word  [CONFIRMED 1.291]
+
+The third sibling of §12 (`)*name` read as a glob) and §15 (`)-1`), and the one
+that was still unrepaired when the s435 announce→DIE flip made it fatal.
+
+**Perl:** after a `)` a term has ENDED, so `-` is binary minus.  The
+negative-bareword string form (`-foo` ⇒ `"-foo"`) can only start where a TERM
+can.  `perl -MO=Deparse` on the reproducer gives
+`length('abc') - length('a')`.
+
+```perl
+my $z = length("abc")-length("a");   # perl: 2
+```
+
+**PPI:** the `-` is glued to the following identifier and the pair becomes one
+`PPI::Token::Word`:
+
+```
+# PPI::Document->new(\'my $z = length("abc")-length("a");')->tokens  -- WRONG
+# PPI::Token::Word          length
+# PPI::Token::Structure     (
+# PPI::Token::Quote::Double "abc"
+# PPI::Token::Structure     )
+# PPI::Token::Word          -length     <-- expected Operator('-') Word('length')
+# PPI::Token::Structure     (
+# PPI::Token::Quote::Double "a"
+# PPI::Token::Structure     )
+```
+
+A SPACE fixes it (`) - length(`), and a NUMBER on the right is already handled
+(`)-1` is §15).  PPI makes the same operator-vs-term decision correctly for
+`x` after a list operator and for `/PATTERN/` after a bareword, so the machinery
+exists — this position is simply not asking it.
+
+**Impact on PCL (task #457): silent-wrong, then an unloadable module.**  PExpr
+has no case for `Word(-length) List`, so the WHOLE STATEMENT was dropped (#138
+family).  Measured over five populations: **zero** sites in `lib/` (22 files),
+`cpan-tests/modules` (402), `perl-tests` (111) and perl's own `t/` (604), and
+**two** in one board dist — `Text-Balanced-2.07-0/lib/Text/Balanced.pm` lines
+118 and 397:
+
+```perl
+$escs .= substr($escs,-1) x (length($dels)-length($escs));   # line 118
+$closetagpos = pos($$textref)-length($1);                    # line 397
+```
+
+Line 118 is inside `gen_delimited_pat`, which the module's own top level CALLS
+at line 308 — so once a dropped statement started DYING when reached (s435),
+`use Text::Balanced` died and the dist went from **958 passing rows to zero**.
+Before the flip the same bug was silent: `$escs` kept its initial `'\\'` and
+the generated pattern was quietly wrong.
+
+`Pl::Parser2::_repair_minus_word` splits the token back into `-` + WORD on the
+raw stream when the previous significant token `_ends_term`, and reparses —
+the same predicate and the same shape as `_repair_glob_multiply`.  The
+condition is a NEGATIVE, which is what makes it safe: `(-f => 4)`,
+`foo(-bar)`, `$h{-key}` and `1, -bar` all follow `(`, `{` or `,`, none of which
+ends a term (all probed against perl).  Guard rows: `Pl/t/minus-word-01.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

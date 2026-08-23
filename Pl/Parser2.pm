@@ -1007,12 +1007,15 @@ sub parse {
   $doc = $self->_repair_alias_foreach($doc);
 
   # PPI LEXER BUGS in the OPERATOR-vs-TERM decision, each of which eats a whole
-  # statement: `)*name` lexed as a glob (#354), `/PATTERN/` after a paren-less
-  # call lexed as division (#351), and a call to a sub named `x` after a list
-  # operator lexed as the repetition operator (#361).  All three are repaired
-  # on the raw token stream with perl's own rule — the word before must not be
-  # a TERM — see _repair_glob_multiply, _repair_word_match, _repair_word_x_call.
+  # statement: `)*name` lexed as a glob (#354), `)-name` lexed as a negative
+  # bareword (#457), `/PATTERN/` after a paren-less call lexed as division
+  # (#351), and a call to a sub named `x` after a list operator lexed as the
+  # repetition operator (#361).  All four are repaired on the raw token stream
+  # with perl's own rule — the token before must not END A TERM — see
+  # _repair_glob_multiply, _repair_minus_word, _repair_word_match,
+  # _repair_word_x_call.
   $doc = $self->_repair_glob_multiply($doc);
+  $doc = $self->_repair_minus_word($doc);
   $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_word_x_call($doc);
   $doc = $self->_repair_term_initial_complement($doc);
@@ -5003,6 +5006,42 @@ sub _repair_glob_multiply {
     my ($name) = $sym->content =~ /^\*(\w+(?:::\w+)*)\z/ or next;
     next unless _ends_term(_prev_sig_token($sym));
     $sym->set_content("* $name");
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# PPI LEXER BUG (task #457, docs/ppi-upstream-bugs.md §25) — the THIRD sibling
+# of §12 (`)*name` → glob) and §15 (`)-1`), and the one that was still
+# unrepaired.  After a token that ENDS A TERM, `-name` written with no space is
+# lexed as ONE Word — the negative-bareword string — instead of the subtraction
+# it can only be:
+#
+#     my $z = length("abc")-length("a");  =>  … ) Word(-length) ( … )
+#     my $z = length("abc") - length("a");  =>  … ) Operator(-) Word(length) …
+#
+# PExpr has no case for that shape, so the WHOLE STATEMENT is dropped.
+#
+# WHY IT MATTERS OUT OF PROPORTION (measured s436): the shape occurs in ZERO
+# files of all four in-repo populations and TWICE in ONE board dist —
+# Text-Balanced-2.07-0, at lines 118 and 397.  Line 118 is inside
+# `gen_delimited_pat`, which the module's own top level CALLS at line 308, so
+# after the s435 announce→DIE flip `use Text::Balanced` DIED and the dist went
+# from 958 passing rows to zero.  Silent-wrong before the flip, unloadable
+# after it — the same one-token bug either way.
+#
+# The predicate is perl's own and it is a NEGATIVE: `-bareword` (the string
+# form) can only start where a TERM can, so a previous token that ends a term
+# rules it out.  Every spelling that legitimately writes `-word` — `(-f => 4)`,
+# `foo(-bar)`, `$h{-key}`, `1, -bar` — has a previous token (`(`, `{`, `,`)
+# that does NOT end a term, so none of them is touched (all probed vs perl).
+sub _repair_minus_word {
+  my ($self, $doc) = @_;
+  my $repaired = 0;
+  for my $w (@{ $doc->find('PPI::Token::Word') || [] }) {
+    my ($name) = $w->content =~ /^-(\w+(?:::\w+)*)\z/ or next;
+    next unless _ends_term(_prev_sig_token($w));
+    $w->set_content("- $name");
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;

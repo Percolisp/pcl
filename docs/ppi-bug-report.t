@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 29;
+use Test::More tests => 31;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -451,4 +451,26 @@ PERL
         'a punctuation-named array `@!` should lex as one token, as `@-` does' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
+}
+
+# ── Bug 25: `-name` after a token that ENDS A TERM is one negative-bareword ───
+#
+# The third sibling of bugs 12 (`)*name`) and 15 (`)-1`).  After a `)` a term
+# has ended, so `-` is binary minus; the negative-bareword string form can only
+# start where a TERM can.  perl -MO=Deparse gives `length('abc') - length('a')`.
+# A space fixes the lexing, and PPI already makes exactly this operator-vs-term
+# decision correctly for `x` and for `/PATTERN/`.
+{
+    my $doc = PPI::Document->new(\'my $z = length("abc")-length("a");');
+    ok( !(grep { $_->isa('PPI::Token::Word') && $_->content eq '-length' } $doc->tokens),
+        '`)-length` should lex as Operator(-) + Word(length), not one Word' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# The spaced spelling proves the intent: the SAME source with one blank added
+# lexes the way perl reads both of them.
+{
+    my $doc = PPI::Document->new(\'my $z = length("abc") - length("a");');
+    ok( (grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' } $doc->tokens),
+        '`) - length` lexes as a minus operator (the control)' );
 }
