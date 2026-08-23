@@ -94,9 +94,12 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 76 files, 174 drops -- 4 perl-tests files (5
-# drops), 23 companion files (77), 6 cpan-tests modules (7), 42 cpan-tests
-# dist test files (83), 1 board module (2), ZERO in lib/.  (At the s399 measurement, over three populations:
+# TOTAL after the edits below: 73 files, 167 drops -- 4 perl-tests files (5
+# drops), 20 companion files (70), 6 cpan-tests modules (7), 42 cpan-tests
+# dist test files (83), 1 board module (2), ZERO in lib/.  (s440 merge of agents
+# A (#463 items 1+2: -3 companion files / -7 drops) and B (#466, #464: -4 cpan
+# modules / -11 drops, -1 board): the two edit sets are disjoint; recounted
+# from the rows at the merge.)  (At the s399 measurement, over three populations:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
 # regression: a file that used to die at transpile can start emitting CL, so
