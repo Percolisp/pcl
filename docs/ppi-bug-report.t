@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 31;
+use Test::More tests => 32;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -33,6 +33,21 @@ sub toks {
     ok( !grep(/^PPI::Token::Magic=\$\$$/, @t),
         '$$$ref should NOT tokenize as the PID variable $$ (it is a triple deref)' )
         or diag "got: @t";
+}
+
+# ── Bug 1b: $${EXPR} — the same mis-lex, plus a STRUCTURE error on the braces ──
+#
+# $${$ref} means ${ ${$ref} }.  PPI emits Magic '$$' again, and then — because
+# the braces follow what it believes is a variable — structures them as a
+# PPI::Structure::Subscript, i.e. a hash key.  Compare ${$ref}, which PPI
+# correctly gives as Cast '$' + PPI::Structure::Block.  A consumer that repairs
+# only the Magic still has a subscript with no base in front of it.
+{
+    my $doc = PPI::Document->new(\'$${$ref}');
+    my ($sub) = @{ $doc->find('PPI::Structure::Subscript') || [] };
+    ok( !$sub,
+        '$${$ref}: the braces are a deref BLOCK, not a Subscript' )
+        or diag 'got a Subscript: ' . $sub->content;
 }
 
 # ── Bug 2: C99 hex-float literal 0x1.8p+1 is split into 5 tokens ───────────────

@@ -36,6 +36,15 @@
 #     drifted apart.
 #
 # Rows behind it: t/op/universal.t 61→79 C_ok, t/uni/method.t 2 drops → 0.
+#
+# Rows 10-11 are task #463 ITEM 1, the other half of the same task and the
+# same PPI mis-lex family: `$${EXPR}` is `${ ${EXPR} }`, but PPI hands over the
+# PID Magic plus a SUBSCRIPT.  The Magic→two-casts pre-pass (#305) had been
+# repairing the token since s390 and leaving the braces a Subscript, which is a
+# hash-element access with no base — declined, statement dropped.  The pre-pass
+# now re-classes those braces to the deref BLOCK `${EXPR}` arrives as.
+# docs/ppi-upstream-bugs.md §1b has the repro; adjacency is perl's own rule
+# (`$$ {$r}` with a space is an element of `%$`, probed).
 
 use v5.30;
 use strict;
@@ -54,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 12;
 
 sub write_pl {
     my ($code) = @_;
@@ -214,4 +223,49 @@ PL
     my $cl = emitted("no warnings;\nmy \$x = ++\${^MPE};\nprint \"v=\$x\\n\";\n");
     unlike($cl, qr/PARSE ERROR/,
            '#463(2) inverse: `++${^CARET}` still lowers without a drop');
+}
+
+# ── 10. #463 item 1: `$${EXPR}` is `${ ${EXPR} }`, not a subscript ──────────
+# PPI lexes the `$$` as the PID Magic (bug 1, docs/ppi-upstream-bugs.md §1)
+# AND structures the braces as a Subscript — so repairing only the Magic left
+# `Cast Cast Subscript`, a hash-element access with no base, which the term
+# walker declined: the statement was dropped.  t/op/gv.t:911-912 and
+# t/uni/gv.t:805-806 are a tie class whose FETCH/STORE are exactly this.
+{
+    my $prog = <<'PL';
+no strict 'refs'; no warnings;
+my $x = 5; my $r = \$x; my $rr = \$r;
+sub g { $${$_[0]} }
+print "1 ", g($rr), "\n";
+print "2 ", $${$rr}, "\n";
+print "3 ", $$$rr, "\n";
+print "4 ", ${$$rr}, "\n";
+my @rs = ($rr); print "5 ", $${$rs[0]}, "\n";
+my %hh = (a => $rr); print "6 ", $${$hh{a}}, "\n";
+$${$rr} = 11;    print "7 $x\n";
+my %h = (k => 7); my $hr = \%h; my $rh = \$hr;
+print "8 ", $${$rh}{k}, "\n";
+print "9 ", scalar(keys %{$$rh}), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#463(1): `$${EXPR}` reads, writes and carries a subscript (perl oracle)');
+}
+
+# ── 11. INVERSE for item 1: `$$` is the PID and `$$x{k}` is a hash element ──
+# The repair fires only on SOURCE ADJACENCY, which is perl's own rule: `$$ {…}`
+# with a space is an element of `%$`, not a double deref (probed on 5.40.3).
+{
+    my $prog = <<'PL';
+my %h = (k => 7); my $hr = \%h;
+my @a = (3,4);    my $ar = \@a;
+print "1 ", $$hr{k}, "\n";
+print "2 ", $$ar[1], "\n";
+print "3 ", $$hr{k} + $$ar[0], "\n";
+my $h2 = { z => 8 }; print "4 ", $$h2{z}, "\n";
+print "5 ", (("$$" =~ /^\d+$/) ? "pid" : "notpid"), "\n";
+print "6 ", (($$ == $$) ? "eq" : "ne"), "\n";
+my @p = ($$, $$); print "7 ", ($p[0] == $p[1] ? "same" : "differ"), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#463(1) inverse: a bare `$$` is the PID and `$$x{k}` is still an element');
 }

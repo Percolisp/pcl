@@ -62,6 +62,48 @@ literal prefix.  Three such statements were being dropped inside
 `perl-tests/ref.t`.  Guard rows: `Pl/t/transpile-test-10.t` (`#305` × 3,
 including the inverse that bare `$$` is still the PID).
 
+### 1b. `$${EXPR}` — the same mis-lex, plus a STRUCTURE error on the braces  [CONFIRMED 1.291]
+
+**Perl:** `$${$ref}` is `${ ${$ref} }`, and `$$ {$ref}` — with a space — is
+something else entirely (an element of the hash `%$`), so the two spellings
+must not be conflated.  Probed on 5.40.3: the adjacent form prints the
+double-deref value, the spaced form prints undef.
+
+**PPI:** the adjacent form gives `Magic '$$'` as in bug 1, and then structures
+the braces as a **`PPI::Structure::Subscript`** — a hash key — because they
+follow what it believes is a variable.  The correct structure is the one PPI
+already produces for `${$ref}`: `Cast '$'` + `PPI::Structure::Block`.
+
+```perl
+use PPI;
+my $d = PPI::Document->new(\'$${$ref}');
+print ref($_), "  [", $_->content, "]\n" for $d->schild(0)->schildren;
+# PPI::Token::Magic          [$$]
+# PPI::Structure::Subscript  [{$ref}]
+#
+# vs.  PPI::Document->new(\'${$ref}')  ->
+# PPI::Token::Cast           [$]
+# PPI::Structure::Block      [{$ref}]
+```
+
+The child statement differs too: the Subscript wraps a
+`PPI::Statement::Expression`, the Block a plain `PPI::Statement`.
+
+**Impact:** repairing only the `Magic` (bug 1's fix) is not enough — a consumer
+is then left with `Cast, Cast, Subscript` and a subscript that has no base in
+front of it.
+
+**WORKED AROUND IN PCL (s441b, #463 item 1):** the same pre-pass,
+`Pl::PExpr::_split_pid_magic_cast_run`, now also re-blesses that
+`Structure::Subscript` to `Structure::Block` (and its
+`Statement::Expression` child to `Statement`) — exactly the shape `${$ref}`
+arrives in — whenever it is the token that made the `$$` two casts.  The
+adjacency test that already guards the split keeps the spaced form out, which
+is what perl does.  Guard rows: `Pl/t/prefix-incr-deref-01.t` (`#463(1)`, with
+the PID and `$$h{k}` inverses).  Unblocked: `t/op/gv.t:911-912` and
+`t/uni/gv.t:805-806` (a tie class whose `FETCH`/`STORE` are `$${$_[0]}`), four
+dropped statements.
+
 ---
 
 ## 2. C99 hex-float literal `0x1.8p+1` split into 5 tokens  [CONFIRMED 1.291]

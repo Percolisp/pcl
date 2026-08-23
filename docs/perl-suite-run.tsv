@@ -1,4 +1,19 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s441b (Opus 5, task #463 item 1) — TWO ROWS' DROPS COLUMN EDITED BY HAND,
+#   nothing else: op/gv.t 3 -> 1 and uni/gv.t 2 -> 0.  `$${$_[0]}` (gv.t:911,
+#   912 and uni/gv.t:805, 806) is `${ ${$_[0]} }`; PPI lexes it as the PID
+#   Magic plus a SUBSCRIPT, and the repair now re-classes those braces to the
+#   deref BLOCK they are.  Both files' ROWS are unchanged (134/65 and 55/33)
+#   with the same abort signatures — they die earlier for unrelated reasons,
+#   so the four un-dropped statements are simply never reached.  Measured
+#   parallel and alone.
+#
+#   op/gv.t's SIGNATURE also loses its `undef-fn:main::pl-fred; ` prefix in the
+#   same row, and that half is NOT this session's: it is s441c/#468 on main (a
+#   plain call to a never-declared sub now reaches AUTOLOAD and dies perl's
+#   death, so the runner records no undefined-function note).  Rows are
+#   unchanged at 134/65 either way; the sig is refreshed here only because this
+#   session is editing the row anyway.
 # s441a (Opus 5, task #463 item 2) — TWO ROWS EDITED BY HAND, both because a
 #   DROP became real code: prefix `++`/`--` on a scalar DEREF (`++${"23::foo"}`)
 #   used to take the whole statement with it.
@@ -961,7 +976,7 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	134	65	DIFF	undef-fn:main::pl-fred; aborted-forms:3: Died at gv.t line N. 	3
+op/gv.t	304	0	134	65	DIFF	aborted-forms:3: Died at gv.t line N. 	1
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
@@ -1226,7 +1241,7 @@ uni/eval.t	5	0	5	0	OK		0
 uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
 uni/greek.t	0	0	0	0	NOTAP		0
-uni/gv.t	206	0	55	33	DIFF	aborted-forms:1: Died at gv.t line N. 	2
+uni/gv.t	206	0	55	33	DIFF	aborted-forms:1: Died at gv.t line N. 	0
 uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (go :ここ)	0
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
