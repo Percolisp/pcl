@@ -9488,6 +9488,7 @@ sub _lower_embedded_anon {
     return ['lambda', ['list', '&rest', '%_args'],
             ['let', ['list',
                      ['list', '@_', ['p-flatten-args', '%_args']],
+                     $self->_anon_home_pkg_binding,
                      ['list', '*pcl-caller-wantarray*', '*wantarray*']],
              ['catch', ':p-return',
               ['block', 'nil',
@@ -9547,9 +9548,42 @@ sub _lower_embedded_anon {
   return ['lambda', ['list', '&rest', '%_args'],
           ['let', ['list',
                    ['list', '@_', ['p-flatten-args', '%_args']],
+                   $self->_anon_home_pkg_binding,
                    ['list', '*pcl-caller-wantarray*', '*wantarray*']],
            ['catch', ':p-return',
             ['block', 'nil', @$forms]]]];
+}
+
+# The `(*pcl-current-package* "Pkg")` binding an anon sub's wrapper carries
+# (task #515).  A sub's home package is the package it was COMPILED in, and
+# every "unqualified name → current package" rule that runs at RUN time reads
+# `*pcl-current-package*` (ir-spec §7.1, s442d) — the symbolic sub resolver
+# %p-resolve-sub-symbol above all.  A NAMED sub gets this from p-sub, which
+# rebinds per call to `(pcl-pkg-perl-name (symbol-package ',name))`; an anon
+# lambda has no name to read a package off, so the emitter supplies the same
+# fact as a compile-time constant.
+#
+# Without it the wrapper simply inherited whatever binding the CALLER had,
+# and that is wrong in BOTH directions, which is why it is not a near-miss:
+# `package X; our $c = sub { &{"xf"}() }` called from main resolved main::xf
+# (perl: X::xf), and a closure built in main and handed to `X::run` resolved
+# X::xf (perl: main::xf).  It also fixes `caller` one frame in: p-sub pushes
+# the value of *pcl-current-package* as the caller's package, so a named sub
+# called from an X closure reported main.
+#
+# This is the SAME binding p-sub makes and NOT a second mechanism; it goes in
+# the wrapper's existing parallel `let` (it depends on none of the others).
+# ONLY `sub {…}` literals get it: a map/grep/sort BLOCK is not a sub in perl
+# and runs in the package that is current at the call, which is what the
+# unbound lambda already does (probed — `package M; @r = map { &{"mf"}() } (1)`
+# was already right).  The v1 text twin of this wrapper is
+# Pl::Parser::parse_block_as_function's $is_anon_sub arm, which emits the same
+# binding — the two spellings of one wrapper must not drift.
+sub _anon_home_pkg_binding {
+  my ($self) = @_;
+  my $pkg = ($self->environment && $self->environment->current_package)
+            ? $self->environment->current_package : 'main';
+  return ['list', '*pcl-current-package*', '"' . $pkg . '"'];
 }
 
 # Embed-safety scan — shared implementation lives in Pl::CLForm (PExpr's

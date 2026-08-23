@@ -5397,7 +5397,18 @@ sub parse_block_as_function {
   $self->indent_level($self->indent_level + 1);
 
   if ($is_anon_sub) {
+    # The anon sub's HOME package (task #515) — the twin of
+    # Pl::Parser2::_anon_home_pkg_binding, which carries the reasoning.  A
+    # sub's home package is the package it was compiled in, and every
+    # run-time "unqualified name → current package" rule reads
+    # *pcl-current-package* (ir-spec §7.1); p-sub rebinds it per call for a
+    # NAMED sub, and an anon lambda has no name to read one off.  This route
+    # is reached only when the structural lowering declined the block, so the
+    # two spellings must agree or the fix would be decline-shaped.
+    my $home_pkg = ($self->environment && $self->environment->current_package)
+                   ? $self->environment->current_package : 'main';
     $self->_emit("(let ((\@_ (p-flatten-args %_args))");
+    $self->_emit("      (*pcl-current-package* \"$home_pkg\")");
     $self->_emit("      (*pcl-caller-wantarray* *wantarray*))");
     $self->indent_level($self->indent_level + 1);
     $self->_emit("(catch :p-return");
@@ -8062,6 +8073,39 @@ my %PCL_SYMBOLS = map { $_ => 1 } qw(
 );
 
 
+# The modules a `use`/`no`/`require` names whose .pm PCL NEVER loads: the
+# lexical pragmas (PCL models no $^H / ${^WARNING_BITS} bitmask, so loading
+# strict.pm would only die on `STRICT::$^H unbound`) plus the two XS loaders.
+# ONE list, read by the `use` arm and the `no` arm below — they used to be a
+# regex in one place and nothing in the other, which is how `no strict` and
+# `use strict` came to disagree about %INC.  It is deliberately NOT the whole
+# specially-handled set: `constant`/`vars`/`lib`/`base`/`parent`/`overload`
+# are handled without a load too, but they are not this predicate's question.
+my $NEVER_LOADED_PRAGMA = qr/^(?:strict|warnings|warnings::register|feature
+                              |utf8|open|bytes|locale|integer|builtin
+                              |overloading|XSLoader|DynaLoader|re)$/x;
+sub _never_loaded_pragma { defined $_[0] && $_[0] =~ $NEVER_LOADED_PRAGMA }
+
+# The %INC entry perl WOULD have made for a module PCL does not load (task
+# #511): `use strict` sets $INC{"strict.pm"} to strict.pm's real path, and
+# programs read that (`require Foo unless $INC{"Foo.pm"}`, `if.pm`'s string
+# require).  Placement follows the general use/require arms below, because
+# it follows perl: `use`/`no` are compile-time (`BEGIN { require … }`) and go
+# to the definitions bucket inside p-eval-always; `require` runs where it
+# stands (task #350) and is emitted in place.  p-note-inc LOADS NOTHING — it
+# records the key and resolves the value through @INC — so it cannot satisfy
+# p-use's already-loaded guard for a module that still has to arrive.
+sub _emit_inc_note {
+  my ($self, $module, $type) = @_;
+  if (($type // '') eq 'require') {
+    $self->_emit("(p-note-inc \"$module\")");
+  } else {
+    $self->_with_bucket('definitions', sub {
+      $self->_emit("(p-eval-always (p-note-inc \"$module\"))");
+    });
+  }
+}
+
 # Process use/require statements
 sub _process_include_statement {
   my $self = shift;
@@ -8120,6 +8164,12 @@ sub _process_include_statement {
       }
     }
     $self->_emit(";; $perl_code (no-op)");
+    # `no strict 'refs'` is `BEGIN { require strict; strict->unimport(...) }`,
+    # so perl populates %INC here exactly as `use strict` does (task #511).
+    # Only for a pragma PCL will never load: recording a module PCL might
+    # still have to load (`no Moose` — perl requires it) would satisfy
+    # p-use's already-loaded guard and the module would never arrive.
+    $self->_emit_inc_note($module, $type) if _never_loaded_pragma($module);
     $self->_emit("");
     return;
   }
@@ -8257,7 +8307,7 @@ sub _process_include_statement {
   }
 
   # Handle pragmas - emit as comment (no CL equivalent)
-  if ($module =~ /^(strict|warnings|warnings::register|feature|utf8|open|bytes|locale|integer|builtin|overloading|XSLoader|DynaLoader|re)$/) {
+  if (_never_loaded_pragma($module)) {
     # 'use integer' - enable integer pragma in current scope
     if ($module eq 'integer') {
       $self->environment->set_pragma('use_integer', 1);
@@ -8270,6 +8320,11 @@ sub _process_include_statement {
       }
     }
     $self->_emit(";; $perl_code (pragma)");
+    # The pragma itself is a no-op, but its %INC entry is not: perl LOADS
+    # strict.pm and programs read $INC{"strict.pm"} (task #511).  See
+    # _emit_inc_note — `use` records at compile time like the general `use`
+    # below, `require` in place like the general `require`.
+    $self->_emit_inc_note($module, $type);
     $self->_emit("");
     return;
   }

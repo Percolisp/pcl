@@ -29,7 +29,7 @@ my $runtime = 'cl/pcl-runtime.lisp';
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 28;
+plan tests => 30;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -381,6 +381,77 @@ sub from_y { my $r = \&{"X::xf"};
 package main;
 print "y:", Y::from_y(), "\n";
 print "m:", &{"X::xf"}(3), "\n";
+PL
+
+# ── #515: an ANON sub's home package is the package it was COMPILED in ──────
+# #503's rule (above) reaches a NAMED sub through p-sub, which rebinds
+# *pcl-current-package* per call.  An anon lambda has no name to read a home
+# package off, so it used to run with whatever the CALLER's binding was: a
+# closure built in X and invoked from main resolved main::xf, and — the other
+# direction, which is why "inherit the caller" is not a near-miss but the
+# wrong rule — a closure built in main and invoked from inside X resolved
+# X::xf.  The emitter now supplies the home package as a compile-time
+# constant in the lambda's own wrapper (ir-spec §7.1).  Seven of the ten
+# conjuncts below fail on a base tree (simple/nested/viaref/sorter/closed give
+# main's sub, caller gives main, and intoX gives X's); `pkgnam` was already
+# right (__PACKAGE__ is resolved at compile time, not through the binding),
+# and `def`/`blk` are the two that must NOT move.
+both_agree('#515 an anon sub resolves symbolic names in its DEFINING package', <<'PL');
+no strict 'refs';
+package X;
+sub xf   { return "X::xf(@_)" }
+sub xcmp { return length($X::a) <=> length($X::b) }
+sub make { return sub { my $s = "xf"; return &$s("inner") } }
+sub run  { my $cb = shift; return $cb->() }
+our $simple = sub { my $s = "xf";  return &$s(1) };
+our $nested = sub { my $in = sub { my $s = "xf"; &$s(2) }; return $in->() };
+our $viaref = sub { my $s = "xf";  my $r = \&$s; return $r->(3) };
+our $sorter = sub { my $c = "xcmp"; return join(",", sort $c ("aaa","b","cc")) };
+our $pkgnam = sub { return __PACKAGE__ };
+our $callit = sub { return main::whose_caller() };
+package main;
+sub xf   { return "main::xf(@_)" }
+sub xcmp { return length($main::b) <=> length($main::a) }
+sub whose_caller { my @c = caller; return $c[0] }
+my $from_main = sub { my $s = "xf"; return &$s(4) };
+print "simple:", $X::simple->(), "\n";
+print "nested:", $X::nested->(), "\n";
+print "viaref:", $X::viaref->(), "\n";
+print "sorter:", $X::sorter->(), "\n";
+print "closed:", X::make()->(), "\n";
+print "pkgnam:", $X::pkgnam->(), "\n";
+print "caller:", $X::callit->(), "\n";
+print "def   :", $from_main->(), "\n";
+print "intoX :", X::run($from_main), "\n";
+print "blk   :", join(",", map { my $s = "xf"; &$s(5) } (1)), "\n";
+PL
+
+# The BOUNDARY of #515: what the wrapper binding must NOT reach, and what
+# must still override it.
+#   blocks — a map/grep/sort BLOCK is NOT a sub in perl: it has no home
+#     package of its own and keeps resolving wherever it RUNS (here M, from
+#     the enclosing named sub).  This half passes on a base tree too — it is
+#     the row's true inverse, and it is why the fix is in the anon-sub
+#     wrapper only and not in `lower_embedded_block`.
+#   switch — a `package Y;` INSIDE the body still wins for the rest of the
+#     body ("$a2" is Y::yf on a base tree as well); the wrapper only supplies
+#     the package in force at the `sub {` itself, so "$a1" is Z::yf, and THAT
+#     half moves with the fix (base: main::yf).
+both_agree('#515 boundary: map/grep blocks, and an in-body package switch wins', <<'PL');
+no strict 'refs';
+package M;
+sub mf { return "M::mf" }
+sub blocks { return join(",", (map { my $s = "mf"; &$s() } (1)),
+                              (grep { my $s = "mf"; &$s() ne "" } (1))) }
+package Y; sub yf { return "Y::yf" }
+package Z; sub yf { return "Z::yf" }
+our $switch = sub { my $a1 = &{"yf"}(); package Y; my $a2 = &{"yf"}();
+                    return "$a1/$a2" };
+package main;
+sub mf { return "main::mf" }
+sub yf { return "main::yf" }
+print "blocks:", M::blocks(), "\n";
+print "switch:", $Z::switch->(), "\n";
 PL
 
 done_testing();

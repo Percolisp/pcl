@@ -570,9 +570,15 @@ EOF
   like($hc, qr/\(p-map \(lambda \(\$_\) \(make-p-box \(p-hash "k" \$_\)\)\)/,
        '#78: hash-constructor map block body is structural');
 
+  # The wrapper's THIRD binding is the anon sub's home package (task #515):
+  # an anon lambda has no name to read one off, so the emitter supplies the
+  # package in force at the `sub {` as a compile-time constant — the same
+  # thing p-sub rebinds per call for a NAMED sub.  Asserted here as part of
+  # the wrapper's shape, and differentially against perl in
+  # Pl/t/decl-ordering-02.t.
   my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
   like($an,
-       qr/\(lambda \(&rest %_args\)\s+\(let \(\(\@_ \(p-flatten-args %_args\)\) \(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(catch :p-return \(block nil 42\)\)\)\)/,
+       qr/\(lambda \(&rest %_args\)\s+\(let\s+\(\(\@_ \(p-flatten-args %_args\)\)\s+\(\*pcl-current-package\* "main"\)\s+\(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(catch :p-return \(block nil 42\)\)\)\)/,
        '#78: anon sub emits v1 wrapper shape as one structured form');
   # Layout is no longer the v1-vs-native discriminator (the structural printer
   # breaks lines too); v1's text body is marked by its `;; <src>` echo lines.

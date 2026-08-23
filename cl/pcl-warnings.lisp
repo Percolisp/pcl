@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-215
+;;; pcl: pipeline=v2 gen=v2-220
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -38,6 +38,8 @@
 (p-defcell warnings::$VERSION (make-p-box nil))
 
 (p-defcell $VERSION (make-p-box nil))
+
+(p-eval-always (p-note-inc "strict"))
 
 (p-sub pl-import (&rest %_args) (p-args-body (block nil)))
 

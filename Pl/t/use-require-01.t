@@ -30,20 +30,48 @@ note "-------- Transpilation Tests:";
 
 # A pragma is consumed at COMPILE time — the load-bearing fact behind v1's
 # ";; use strict (pragma)" comment echo (v2 emits no source echoes, #132):
-# no runtime module load may be emitted for it.
+# no runtime module load may be emitted for it.  What IS emitted is the %INC
+# entry perl would have made (task #511) — p-note-inc records the key and
+# resolves the value through @INC, and loads nothing, so the fact above is
+# unchanged.  `use`/`no` record at compile time (perl's BEGIN), `require`
+# where it stands (#350).
 {
   my $result = Pl::Parser2->parse_code('use strict;');
-  unlike($result, qr/p-use|p-require/, 'use strict is pragma comment');
+  unlike($result, qr/p-use|p-require\b/, 'use strict is pragma comment');
+  like($result, qr/\(p-eval-always \(p-note-inc "strict"\)\)/,
+       '... and records $INC{"strict.pm"} at compile time');
 }
 
 {
   my $result = Pl::Parser2->parse_code('use warnings;');
-  unlike($result, qr/p-use|p-require/, 'use warnings is pragma comment');
+  unlike($result, qr/p-use|p-require\b/, 'use warnings is pragma comment');
+}
+
+{
+  my $result = Pl::Parser2->parse_code('no strict "refs";');
+  unlike($result, qr/p-use|p-require\b/, 'no strict is a no-op');
+  like($result, qr/\(p-eval-always \(p-note-inc "strict"\)\)/,
+       '... and records $INC{"strict.pm"} too — perl requires strict.pm for `no`');
+}
+
+{
+  my $result = Pl::Parser2->parse_code('require strict;');
+  like($result, qr/^\(p-note-inc "strict"\)$/m,
+       'require strict records %INC in place, not hoisted (#350 placement)');
+}
+
+# `no Module` for a module PCL may still have to LOAD must NOT get an entry:
+# a %INC key satisfies p-use's already-loaded guard, and the module would
+# then never arrive.  Only the never-loaded pragmas are routed.
+{
+  my $result = Pl::Parser2->parse_code('no Moo;');
+  unlike($result, qr/p-note-inc/, 'no Module (loadable) records no %INC entry');
 }
 
 {
   my $result = Pl::Parser2->parse_code('use v5.30;');
-  unlike($result, qr/p-use|p-require/, 'use v5.30 is pragma comment');
+  unlike($result, qr/p-use|p-require\b/, 'use v5.30 is pragma comment');
+  unlike($result, qr/p-note-inc/, '... and sets no %INC entry — perl does not either');
 }
 
 # Test: use Module generates p-use
@@ -852,6 +880,97 @@ PL
        'a runtime `push @INC` is visible to the file-top require after it (#350)');
 
   unlink $pl_file, $cl_file;
+}
+
+# ============================================================
+# #511: %INC is populated by EVERY successful use/require
+# ============================================================
+# Perl records the loaded file in %INC whatever the module is, and programs
+# read that — the `require Foo unless $INC{"Foo.pm"}` idiom, `if.pm`'s string
+# require, IO/Handle.pm's `!$INC{"IO/File.pm"}`.  PCL deliberately does not
+# LOAD three classes of module (a lexical pragma, an XS-only module, one whose
+# interface PCL supplies itself), and each used to leave %INC empty.  The
+# entry's VALUE is perl's too: the file that would have been loaded.
+#
+# Differential against real perl.  The one thing filtered out is PCL's own
+# "# PCL Test library loaded" banner, which the TAP layer prints on demand —
+# perl prints nothing there; it is pre-existing stdout noise, not part of what
+# these rows assert.
+sub inc_agrees {
+  my ($name, $code) = @_;
+  my ($fh, $pl_file) = tempfile(SUFFIX => '.pl');
+  print $fh $code;
+  close $fh;
+  my $expected = `perl $pl_file 2>&1`;
+  my $got = run_pl($code);
+  $got =~ s/^# PCL Test library loaded\n//m;
+  chomp $expected; chomp $got;
+  unlink $pl_file;
+  is($got, $expected, $name) or diag "perl=[$expected] pcl=[$got]";
+}
+
+# The three no-load classes, one line each: does the key exist, and does the
+# value look like the file perl would have opened?
+inc_agrees('#511 %INC for a pragma, an XS loader and a PCL-provided module', <<'PL');
+sub shape { my $k = shift;
+            return exists $INC{$k} ? (($INC{$k} // "") =~ m{^/.*\Q$k\E$} ? "abs" : "odd:".($INC{$k}//"undef"))
+                                   : "MISSING" }
+use strict;
+use warnings;
+no feature 'say';
+require XSLoader;
+require Test::More;
+print "strict:",   shape("strict.pm"), "\n";
+print "warnings:", shape("warnings.pm"), "\n";
+print "feature:",  shape("feature.pm"), "\n";
+print "xsloader:", shape("XSLoader.pm"), "\n";
+print "testmore:", shape("Test/More.pm"), "\n";
+PL
+
+# The value is the FILE, not the key: a string require must not overwrite the
+# absolute path the bareword machinery just recorded.
+inc_agrees('#511 a string require keeps the absolute path as the %INC value', <<'PL');
+sub shape { my $k = shift;
+            return exists $INC{$k} ? (($INC{$k} // "") =~ m{^/.*\Q$k\E$} ? "abs" : "odd:".($INC{$k}//"undef"))
+                                   : "MISSING" }
+require "File/Basename.pm";
+require "strict.pm";
+print "fb:", shape("File/Basename.pm"), "\n";
+print "st:", shape("strict.pm"), "\n";
+PL
+
+# INVERSE: the shapes that were already right must stay right — an ordinary
+# module (shim-backed and core), a no-import `use`, and a FAILED require,
+# which leaves %INC untouched in perl and must here.
+inc_agrees('#511 inverse: ordinary modules, use M (), and a failed require', <<'PL');
+sub shape { my $k = shift;
+            return exists $INC{$k} ? (($INC{$k} // "") =~ m{^/.*\Q$k\E$} ? "abs" : "odd:".($INC{$k}//"undef"))
+                                   : "MISSING" }
+use POSIX ();
+require File::Basename;
+my $before = scalar keys %INC;
+eval { require No::Such::Module511 };
+print "posix:",  shape("POSIX.pm"), "\n";
+print "fb:",     shape("File/Basename.pm"), "\n";
+print "died:",   ($@ ? 1 : 0), "\n";
+print "stable:", ((scalar keys %INC) == $before ? 1 : 0), "\n";
+print "absent:", (exists $INC{"No/Such/Module511.pm"} ? 1 : 0), "\n";
+PL
+
+# A user module reached through `use lib`: the key is the path used, the value
+# is the file under the added directory.
+{
+  my $dir = tempdir(CLEANUP => 1);
+  mkdir "$dir/My511" or die "mkdir: $!";
+  open my $mfh, '>', "$dir/My511/Mod.pm" or die "write module: $!";
+  print $mfh "package My511::Mod;\nsub hi { 'hi' }\n1;\n";
+  close $mfh;
+  inc_agrees('#511 a user module via `use lib` records its own path', <<"PL");
+use lib "$dir";
+require My511::Mod;
+print "key:", (exists \$INC{"My511/Mod.pm"} ? 1 : 0), "\\n";
+print "val:", ((\$INC{"My511/Mod.pm"} // "") eq "$dir/My511/Mod.pm" ? "the-file" : "[".(\$INC{"My511/Mod.pm"}//"undef")."]"), "\\n";
+PL
 }
 
 done_testing();

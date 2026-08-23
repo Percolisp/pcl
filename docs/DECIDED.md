@@ -21,6 +21,38 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s443h (2026-08-24, Opus agent H) — an ANON sub's home package; `%INC` for a module PCL does not load
+
+- **`(EXPR)->(...)`** — a `->` postfix on a PARENTHESISED expression
+  dereferences ONE scalar value, in every context.  `->(` is the fourth
+  member of ExprToCL's paren-scalar-base family (`->m`, `->[i]`, `->{k}` were
+  already there); before #516 the group lowered to a `(vector …)` in LIST
+  context and the file died at load with "Not a CODE reference".  A
+  MULTI-element paren base (`(1,2,$r)->[1]`) is still wrong for all four —
+  `_is_paren_scalar_base` requires exactly one child where perl's rule is the
+  comma operator's LAST element (task #516's commit names it).
+- **An ANONYMOUS sub's home package is the package it was COMPILED in**
+  (#515, `docs/ir-spec.md` §7.1).  `p-sub` rebinds `*pcl-current-package*`
+  per call for a NAMED sub; the anon lambda's wrapper now carries the same
+  binding as a compile-time constant, so a closure built in `X` and called
+  from `main` resolves symbolic names in `X` — and one built in `main` and
+  called from inside `X` resolves in `main`.  A `map`/`grep`/`sort` BLOCK is
+  NOT a sub and gets no wrapper (it keeps resolving where it runs); a
+  `package Y;` inside the body still switches for the rest of the body.
+- **`%INC` records every successful `use`/`require`, including the three
+  classes PCL never loads** (#511, `docs/ir-spec.md` §9 head): a lexical
+  pragma, an XS-only module, and one PCL supplies itself.  Codegen emits
+  `(p-note-inc "strict")`; `p-use` records the other two on its no-load
+  exits; the VALUE is the file that would have been loaded, resolved through
+  `@INC`.  **`p-note-inc` must never be emitted for a module that might still
+  have to LOAD** — the entry satisfies `p-use`'s already-loaded guard, so
+  `no Moose` is deliberately not routed through it.
+- **The unqualified symbolic VARIABLE resolver is the one exception to
+  "reads `*pcl-current-package*`"** — `%p-symref-symbol` reads `*package*`,
+  so `${"n"}` resolves in `main` where perl uses the current package, in a
+  named sub as much as an anon one.  The typeglob paths already read
+  `*pcl-current-package*`, so `*{"n"}` and `${"n"}` disagree today.  Found by
+  the #515 probes, NOT fixed here (task filed in the s443h report).
 ## s443g (2026-08-24, Opus agent G) — a TOKEN REPAIR asks the same term question the compiler does, so the prototype pre-merge runs BEFORE the repairs (#484); which s/// REPLACEMENTS interpolate is the SCANNER's answer, not a private ASCII class (#492)
 
 - **#484 CLOSED, shape (a) as ruled (task #493).**  `_premerge_include_

@@ -218,7 +218,7 @@
    ;; Environment
    #:%ENV #:p-env-get #:p-env-set
    ;; Module system
-   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version
+   #:@INC #:%INC #:%SIG #:@ARGV #:$ARGV #:@_ #:%_args #:p-use #:p-require #:p-require-parent #:p-require-file #:p-require-version #:p-note-inc
    ;; Functions
    ;; Reference aliasing (use feature 'refaliasing'): p-setf's \-cast place
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
@@ -12139,7 +12139,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-215"
+(defparameter *pcl-cache-generation* "v2-220"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -12613,6 +12613,37 @@ buffer's fill-pointer; everything else falls back to file-length."
         (load path))))
   (setf *pcl-test-lib-loaded* t))
 
+;;; --- %INC for a module perl loads and PCL does not (task #511) ------------
+;;; Perl populates %INC on EVERY successful use/require, and programs read it:
+;;; the `require Foo unless $INC{"Foo.pm"}` idiom, `if.pm`'s string require,
+;;; IO/Handle.pm's `!$INC{"IO/File.pm"}` test.  PCL deliberately does not LOAD
+;;; three classes of module — a lexical pragma (no $^H bitmask to set), an
+;;; XS-only module, and one whose interface PCL supplies itself (Test::More's
+;;; TAP layer) — and each of those used to leave %INC empty, so the key perl
+;;; guarantees was simply absent.
+;;;
+;;; The VALUE is perl's: the file that WOULD have been loaded, resolved through
+;;; @INC, falling back to the relative path when @INC does not hold it (a
+;;; pragma whose .pm is missing; a module only PCL provides).
+;;;
+;;; ONLY the no-load paths may call this.  Recording a module PCL might still
+;;; have to load would poison p-use's own already-loaded guard below and the
+;;; module would never load at all — which is why `no Moose` (perl requires it)
+;;; is NOT routed here.
+(defun %p-note-inc-path (rel-path)
+  "Record REL-PATH (`strict.pm`, `Test/More.pm`) in %INC if it is not already
+   there, and return the value.  Never overwrites: an entry already present was
+   written by an actual load and names the real file."
+  (or (gethash rel-path *p-inc-table*)
+      (setf (gethash rel-path *p-inc-table*)
+            (or (p-find-module-in-inc rel-path) rel-path))))
+
+(defun p-note-inc (module-name)
+  "%INC entry for MODULE-NAME (`strict`, `Test::More`) — the module-name face
+   of %p-note-inc-path.  Emitted by codegen for the `use`/`no`/`require` of a
+   pragma, which PCL drops at parse time and so never reaches p-use."
+  (%p-note-inc-path (p-module-to-path module-name)))
+
 (defun p-use (module-name &key (import-args :default) (do-import t) into)
   "Perl use - load module at compile time and import symbols.
    MODULE-NAME: 'Foo::Bar' or 'Foo/Bar.pm'
@@ -12628,6 +12659,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    explicitly there."
   ;; Skip XS-only modules that cannot be transpiled
   (when (member module-name *p-xs-only-modules* :test #'string=)
+    (p-note-inc module-name)
     (return-from p-use t))
   ;; Modules PCL provides internally (Test::More TAP API): don't load the real
   ;; .pm; load PCL's TAP layer on demand instead (no-op if already loaded).
@@ -12640,11 +12672,13 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; and it is only loadable once p-ensure-test-lib has run.
     (when (and do-import (not (eq import-args :default)))
       (funcall (intern "%TEST-IMPORT" :pcl) import-args))
+    (p-note-inc module-name)
     (return-from p-use t))
   ;; Lexical pragmas (strict/warnings/feature/...): never load the core .pm —
   ;; PCL doesn't model the hint bitmasks they touch.  Reached only via a string
   ;; require (the `if` pragma) or an explicit `require strict`.
   (when (member module-name *p-pragma-modules* :test #'string-equal)
+    (p-note-inc module-name)
     (return-from p-use t))
   (let ((rel-path (p-module-to-path module-name))
         (caller-pkg (or (and into (%pcl-find-package into)) *package*)))
@@ -12760,8 +12794,13 @@ buffer's fill-pointer; everything else falls back to file-length."
                                          (write-char ch s))))))
         (p-require module-name)
         ;; p-use already records the rel-path (= path-str for a .pm) in %INC;
-        ;; set it too so the guard above fires on a literal repeat.
-        (setf (gethash path-str *p-inc-table*) path-str)
+        ;; note it too so the guard above fires on a literal repeat.  NOT a
+        ;; plain (setf … path-str): that overwrote the ABSOLUTE path p-use had
+        ;; just stored with the relative one, so `require "File/Basename.pm"`
+        ;; left $INC{"File/Basename.pm"} = "File/Basename.pm" where perl has
+        ;; the file (task #511).  The guard needs the KEY; %INC's contract is
+        ;; the VALUE.
+        (%p-note-inc-path path-str)
         (return-from p-require-file t)))
     ;; Non-.pm: literal file load (e.g. ./test.pl), cwd-relative, @INC fallback.
     (let ((abs-path (if (char= (char path-str 0) #\/)

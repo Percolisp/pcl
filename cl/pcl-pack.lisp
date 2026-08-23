@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-215
+;;; pcl: pipeline=v2 gen=v2-220
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -189,6 +189,10 @@
 (p-defcell $CAN_SHRIEK (make-p-box nil))
 (p-defcell $MAX_GROUP_DEPTH (make-p-box nil))
 (p-defcell $pcl_pack_comma_warned (make-p-box nil))
+
+(p-eval-always (p-note-inc "strict"))
+
+(p-eval-always (p-note-inc "warnings"))
 
 (p-sub pl-_pack_type_info
   (&rest %_args)
@@ -917,6 +921,8 @@
                                                                 (let
                                                                   ((@_
                                                                       (p-flatten-args %_args))
+                                                                    (*pcl-current-package*
+                                                                      "main")
                                                                     (*pcl-caller-wantarray*
                                                                       *wantarray*))
                                                                   (catch :p-return
@@ -2174,6 +2180,7 @@
                                                 (lambda (&rest %_args)
                                                   (let
                                                     ((@_ (p-flatten-args %_args))
+                                                      (*pcl-current-package* "main")
                                                       (*pcl-caller-wantarray* *wantarray*))
                                                     (catch :p-return
                                                       (block nil
@@ -2971,6 +2978,7 @@
                                 (lambda (&rest %_args)
                                   (let
                                     ((@_ (p-flatten-args %_args))
+                                      (*pcl-current-package* "main")
                                       (*pcl-caller-wantarray* *wantarray*))
                                     (catch :p-return
                                       (block nil (p-incf $checksum (p-aref @_ 0))))))
@@ -2990,6 +2998,7 @@
                                     (lambda (&rest %_args)
                                       (let
                                         ((@_ (p-flatten-args %_args))
+                                          (*pcl-current-package* "main")
                                           (*pcl-caller-wantarray* *wantarray*))
                                         (catch :p-return
                                           (block nil (p-push @result (p-aref @_ 0))))))
@@ -3002,7 +3011,9 @@
                         (p-backslash $si)
                         (lambda (&rest %_args)
                           (let
-                            ((@_ (p-flatten-args %_args)) (*pcl-caller-wantarray* *wantarray*))
+                            ((@_ (p-flatten-args %_args))
+                              (*pcl-current-package* "main")
+                              (*pcl-caller-wantarray* *wantarray*))
                             (catch :p-return (block nil (p-push @result (p-aref @_ 0))))))
                         0
                         0

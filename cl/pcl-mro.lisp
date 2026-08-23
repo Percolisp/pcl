@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-215
+;;; pcl: pipeline=v2 gen=v2-220
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -52,6 +52,10 @@
 
 (p-defcell $VERSION (make-p-box nil))
 
+(p-eval-always (p-note-inc "strict"))
+
+(p-eval-always (p-note-inc "warnings"))
+
 (p-sub pl-import (&rest %_args) (p-args-body (block nil)))
 
 (p-sub pl-unimport (&rest %_args) (p-args-body (block nil)))
@@ -78,6 +82,8 @@
           t
           (p-if (p-str-eq $u $class) (p-return 1)))
         (p-return 0)))))
+
+(p-eval-always (p-note-inc "strict"))
 
 (p-sub pl-invalidate_all_method_caches (&rest %_args) (p-args-body (block nil (p-return))))
 
@@ -148,6 +154,8 @@
                       (p-if (p-&& (p-cast-@ $seq) (p-str-eq (p-aref-deref $seq 0) $cand))
                         (p-shift (p-cast-@ $seq))))))
                 (p-return (p-backslash @result))))))))))
+
+(p-eval-always (p-note-inc "strict"))
 
 (p-run-compile-phase-blocks)
 

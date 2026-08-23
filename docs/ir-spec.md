@@ -1195,10 +1195,26 @@ it is looked up in the current package". Reading `*package*` there resolved
 `package NA; sub p { my $s = "nafun"; &$s(3) }` in `main` (task #503). The
 *compile-time* symbolic paths (a name the emitter itself qualifies) are
 unaffected, and a string containing `::` always names its own package.
-The residual gap: an **anonymous** sub does not rebind
-`*pcl-current-package*`, so a symbolic call inside one that is invoked from
-another package resolves in the caller's package, where perl uses the
-package the closure was compiled in.
+An **anonymous** sub has no name to read a home package off, so its wrapper
+carries the package in force at the `sub {` as a compile-time constant —
+`(let ((@_ …) (*pcl-current-package* "X") …) …)`, the same binding `p-sub`
+makes and not a second mechanism (task #515). A closure built in `X` and
+invoked from `main` therefore resolves in `X`, and one built in `main` and
+invoked from inside `X` resolves in `main` — perl's rule is the *defining*
+package in both directions, so inheriting the caller's binding was wrong
+both ways. A `package Y;` statement inside the body still switches for the
+rest of that body (it emits its own binding). A `map`/`grep`/`sort` **block**
+is not a sub in perl and gets no such wrapper: it keeps resolving in the
+package current where it runs.
+
+One run-time resolver is the *exception* to "reads `*pcl-current-package*`",
+and it is a known divergence: `%p-symref-symbol` — the name resolver behind
+the symbolic **variable** refs `${"n"}`, `@{"n"}`, `%{"n"}` — reads
+`*package*`, so an unqualified symbolic variable name resolves in `main`
+rather than the current package, in a named sub as much as in an anonymous
+one. The typeglob paths (`*{"n"}`, `p-dynamic-typeglob`) already read
+`*pcl-current-package*`, so today `*{"n"}` and `${"n"}` disagree about which
+stash `n` is in.
 
 ### 7.2 Package variables and `local`
 
@@ -1278,6 +1294,25 @@ match leaves `$1` from the previous successful match intact.
 Generated files are loaded form-by-form; a `use`/`require` triggers
 transpilation (or cache lookup) of the target module and loads it inline,
 recursively.
+
+**`%INC` records every successful `use`/`require`, including the ones PCL
+does not actually load (normative, s443h/task #511).** Perl's key is the
+relative path (`strict.pm`, `File/Basename.pm`) and its value is the file
+that was opened; programs read both (`require Foo unless $INC{"Foo.pm"}`,
+`if.pm`'s string require, `IO/Handle.pm`'s `!$INC{"IO/File.pm"}`). PCL
+deliberately loads no `.pm` for three classes — a lexical pragma (there is no
+`$^H` bitmask to set), an XS-only module, and one whose interface PCL
+supplies itself (`Test::More` → the TAP layer) — and each still gets its
+`%INC` entry, whose value is the file that *would* have been loaded,
+resolved through `@INC` (falling back to the relative path when `@INC` does
+not hold it). Codegen emits `(p-note-inc "strict")` for a pragma `use`/`no`
+(compile phase, since perl's is a `BEGIN`) or `require` (in place); `p-use`
+records the other two on its own no-load exits. `p-note-inc` **loads
+nothing**, so it must never be emitted for a module that might still have to
+arrive — an entry satisfies `p-use`'s already-loaded guard, and `no Moose`
+(which perl requires) is deliberately not routed through it. Not yet
+recorded: `use constant` / `vars` / `lib` / `base` / `parent` / `overload`,
+which PCL also handles without a load.
 
 **The COMPILE PHASE of the whole file precedes the RUN PHASE of any of it
 (normative, s436).** Perl compiles a file before it runs a line of it: every
