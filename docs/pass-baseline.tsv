@@ -39,6 +39,14 @@
 #     unaffected.  NOTE: these two are the sixth population — a drop inside a
 #     fresh_perl/runperl CHILD is invisible to the drop census, which reads
 #     emitted .lisp files (task #472).
+# s440 (agent s441c, task #468 -- a NEVER-declared sub call reaches the package's
+#   AUTOLOAD, through the ONE %p-call-of-undefined-sub mechanism re-entered at
+#   the call by encapsulating SBCL's restart-undefined): sort.t 203 -> 204 and
+#   1 -> 0 fails, EDITED BY HAND.  The row is sort.t 177 "AUTOLOAD without stub"
+#   (`sort.t:880`-ish: a comparator NAME with no body in a package with an
+#   AUTOLOAD), which the fail baseline carried since its first bless and which
+#   left that file by EDIT in the same commit.  The ONLY mover of the interim
+#   s440 sweep (TOTAL 18312 -> 18313, GATE clean, 0 new, drops 5 = census).
 # s436 (#456 half (b) / #469, the PHASE MODEL): sort.t 202 -> 203 and PARTIAL ->
 #   OK, EDITED BY HAND — the row the s432 note below promised back.  PCL now
 #   emits every section's COMPILE phase (defs, BEGINs) before any section's RUN
@@ -206,7 +214,7 @@ reverse.t	OK	25	0	25
 scalar.t	OK	84	32	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
-sort.t	OK	203	1	205
+sort.t	OK	204	0	205
 splice.t	OK	34	0	34
 split.t	OK	177	7	219
 sprintf.t	OK	532	25	559
