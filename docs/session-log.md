@@ -108,6 +108,8 @@ remote (the key that authenticates as Percolisp/pcl) moved onto `~/pcl`
 remove.  Push recipe written: plan-post-s433 §4a (snapshot branch first,
 then `--force-with-lease`), DECIDED §s439c.
 
+**PUSHED (USER: "it is ready to push? Please do so")**: `snapshot-2026-05` → GitHub at `54b2aa4`, `main` forced `54b2aa4` → `917e1a9` with `--force-with-lease`, tag `R1`; secrets scan and big-blob scan clean first.  The first CI run started on the push (run 32648385694).  **CI RED** (run 32648385694): steps 1-5 green (PPI/Moo, sbcl.org 2.6.0, Quicklisp+cl-ppcre), step 6 `tools/install-pcl` failed in ~3 s exit 2 BEFORE the core build; log needs repo-admin to read (403).  NOT reproduced locally (installer PASSES with apt PPI 1.277 + fresh Quicklisp in a sanitized HOME) -> CI-image-specific, prime suspect the sbcl.org tarball binary + its SBCL_HOME making cl-ppcre invisible to the runtime's asdf:load-system.  Reproduction with the sbcl.org binary was the next step (interrupted for a break).
+
 ## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
 
 Three of P5's four.  Index: DECIDED §s438g+h+i.

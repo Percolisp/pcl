@@ -216,6 +216,25 @@ git push --force-with-lease=main:origin/main origin main   # the rewrite becomes
 git push origin R1                                      # the R1 tag (optional)
 ```
 
-Then: watch the first CI run (#283; `.github/workflows/ci.yml` activates on
-the push), fix what it finds, #494's doc refresh on the tagged tree, tag
+**PUSHED 2026-08-23 (s439c, on the USER's instruction, a day ahead of the
+planned week)**: `snapshot-2026-05` created on GitHub at `54b2aa4`; `main`
+force-updated `54b2aa4` → `917e1a9` (with `--force-with-lease`, origin
+verified unchanged first); tag `R1` pushed.  Pre-push scan: no secrets in
+the tracked tree, no blob over 2 MB in the whole history.  The first CI run
+started on the push: https://github.com/Percolisp/pcl/actions/runs/32648385694
+(#283 / #282's container half).  **CI RESULT: RED (run 32648385694, conclusion failure).**  Steps 1-5 GREEN
+(apt PPI/Moo, sbcl.org 2.6.0 binary, Quicklisp+cl-ppcre); step 6
+"Fresh-machine install (tools/install-pcl)" FAILED in ~3 s with exit code 2 —
+BEFORE the core build (too fast for it), and the three later steps skipped.
+The log is not readable without repo-admin auth (`403 Must have admin
+rights`), so the exact error is not yet in hand.  NOT reproduced locally: the
+installer PASSES with system perl + apt PPI 1.277 + a fresh Quicklisp in a
+sanitized HOME (measured s439c), so the blocker is CI-image-specific.  Prime
+suspect = the sbcl.org TARBALL binary + its `SBCL_HOME=$HOME/sbcl/lib/sbcl`
+(a fresh Quicklisp `.sbclrc` may not make cl-ppcre visible to the runtime's
+`asdf:load-system` under that binary, which the core build needs) — the exact
+reproduction (install the sbcl.org 2.6.0 binary, not the debian one) was the
+next step, interrupted for a break.  #494 stays behind a green run.
+
+Then: fix what CI finds, #494's doc refresh on the tagged tree, tag
 `v0.1.0` (`git tag -a v0.1.0 -m ... && git push origin v0.1.0`).
