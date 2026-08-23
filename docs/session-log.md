@@ -4,6 +4,75 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 439 (2026-08-23, Fable) — the s438 batch (s438 → s438i) REVIEWED + APPROVED; one review fix (#455's `qw()` spelling); #491–#496 filed; the distance to v0.1 written down
+
+The nine Opus commits since s437 — the two census instruments, then Q4, Q5
+and Q6 of `docs/plan-post-s433.md` — reviewed as one batch.  Record:
+`docs/fable-answers-s439.md`; index DECIDED §s439.
+
+**Verdict: APPROVED as shipped, all nine.**  Independently re-measured on a
+COLD cache (`rm ~/.pcl-cache/*.lisp`): gate **166 files / 5779 rows**, the
+only failures the 13 pclxs xs rows; full sweep **TOTAL 18312 (+0), 0 new /
+0 fixed, drops 5 = census, CHILD DROPS 241 in 98 files, GATE clean**;
+companion `--all --quick --jobs 4` **528 files, ZERO real movers — the four known noise files only (io/open.t + op/utf8cache.t contention, serial matches the snapshot; uni/variables.t the known unstable TIMEOUT; io/pvbm.t 20/8 in parallel AND serial vs 23/5 alone — the EIGHTH time, not edited); both SNAPSHOT holes zero; DROPS with no +/- line**.  61 probes vs
+perl 5.40.3 across the nine changes: every shape each task names is
+identical; the per-character punctuation-array probe reproduces Opus's set
+(and `$^[1]` IS a syntax error in perl, so `^` is rightly out); glob's 12
+shapes identical except the two Opus filed (#488 braces, #490 quotes).
+
+**What the probes found — one review fix, four pre-existing residues.**
+`use feature qw(signatures say); sub f ($x, @r) {…}` on ONE line still took
+the old-prototype lowering (PCL `-u|2 3-2`, perl `0-u|2-2`): #455's
+`_signatures_enabled_at` matched a QUOTED `'signatures'` only.  Widened to
+the word in any quoting, a `:5.NN` bundle ≥ 36, `use v5.36`+, and `no
+feature` is never an enabling site; guard row in `sig-param-shadow-01.t`
+(8 → 9); corpus identical over 111 (the shape occurs in no population — the
+row is the bar).  Pre-existing, all identical on a `d0b52e9` worktree:
+**#491** — three spellings of a qualified bareword handle that #452 did not
+reach (`print main::STDOUT "a"` is a CALL; `open(Foo::H1, …)` with no
+`package Foo` is a CL READ error at load, whole file; `open(main::FH)` +
+`print FH` do not meet — the registry is keyed by SPELLING; one fix:
+canonicalise the perl handle NAME at the Environment seam); **#492** — the
+s/// REPLACEMENT side does not interpolate a non-ASCII identifier at all
+(`s/Ｘ/$ｉ/` writes the literal; `${ｉ}` and the dq string are right — the
+replacement text most likely reaches InterpScan as bytes); **#476** widened
+(`-pi` with `use Math::Trig` prints 0: the IMPORTED spelling of the
+`-NAME` bug); the `(_)` call-site `$_` default is **#260**, unchanged.
+**#493** is a pointer record for those three so Q7 does not re-derive.
+
+**The twelve asks, ruled** (answers doc §2): child-drop sites get their OWN
+file, gated on the SITE SET only, blessed after #479's harness half (ask 1);
+the companion runner gets `PCL_DROP_LOG` in the same session as that harness
+fix (ask 2); #478's `Test::`/`Test2::` name skip is MEASURED and goes unless
+the cost is real — then a BUDGET on the walk, never a name (ask 3); #479 =
+harness first and alone (it is wrong in perl, has no callers in perl-tests,
+four in the companion; removes 196 of 241 child drops), compiler gap as its
+own filler (ask 4); #365's over-import accepted AS IS, the export-scan
+cross-check rejected because it would re-break the measured case (ask 5);
+#484 = measure shape (a), a second post-repair pre-merge (ask 6); ask 7's
+two shapes = ONE task **#495** in #266's family; #486 out of scope as a
+compiler item, in as a cheap filler now that the predicate exists (ask 8);
+#485 PROMOTE, do not refuse (ask 9); ask 10 YES — a SHAPES corpus the A/B
+tools accept as a population, **#496**; #489 accepted divergence for v0.1
+with a not-supported entry, the `:site` fix queued behind the release (ask
+11); ask 12 = runbook §4b, written.
+
+**Where the release is (answers doc §4).**  Q1–Q6 are done; nothing in Q7
+is a precondition.  v0.1 = (1) the USER's force-push of `main` (week of
+2026-08-24; origin holds the OLD history, 69 commits; local main the
+rewritten 1261) → (2) the first CI run (#283, authored; fix image breakage)
+→ (3) #282 = that green run → (4) **#494**: refresh README / STATUS /
+CHANGELOG ON THE TAGGED TREE — numbers (155/5600 → 166/5779; 18364 → 18312,
+95.3 %, 62 fully passing) AND the drop paragraph ("loud but not fatal" is
+FALSE since the s435 flip) → (5) tag v0.1.0.  #281 recommendation: items
+1+2+6 + ir-spec (merged s415) ARE the v0.1 IR pass; items 4/5 post-v0.1.
+#277's record corrected to completed (shipped s405c).
+
+**Queue**: Opus = Q7 in the ruled order (#463 item 2 first, #464 → #466 →
+#465, #468, #470), then the s439 fillers as they pay (#479+ask 2, #478
+measured, #491, #485, #492, #484(a), #495, #496), #494 at tag time.  Fable:
+rule the asks; post-v0.1 the boxed-aggregates design.  USER: the push.
+
 ## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
 
 Three of P5's four.  Index: DECIDED §s438g+h+i.

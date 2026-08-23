@@ -96,6 +96,26 @@ places see it now:
 To see the whole population at once (not just what a run touched):
 `tools/drop-census.pl . /tmp/drops.tsv` then diff against the blessed census.
 
+Since s435 (the flip) a dropped statement DIES when it is reached — a
+perl-shaped, trappable run-time die at the drop site — so the rows AFTER it
+in the same top-level form are lost too.  Those show up in the LOST bucket,
+and a lost row is accepted only with that cause, edited into
+`docs/pass-baseline.tsv` row by row.
+
+## 4b. A fix that makes a value REAL exposes rows that were passing on NOTHING (s439, ask 12)
+Three fixes in a row (the s435 flip twice, #450 once) moved a passing row to a
+FAILING one without touching what the row was about: the row compared TWO
+results of the same builtin (`is($out1, $out2)`, `ok($a eq $b)`, two
+`eval q{ glob(...) }` call sites) and both sides had been EMPTY, so it passed
+while testing nothing.  The baselines catch the move, but only say "moved".
+So, when a fix turns an empty/undef answer into a real one, BEFORE the run:
+`grep -a` the populations (`perl-tests/`, `$PCL_PERL_SUITE_T`) for rows that
+compare two results of the changed builtin; those are the candidates, and
+their new failure is HONEST — file the gap it exposes (as #489/#490 were for
+glob), edit the row into the baseline with that cause, and say so in the
+commit.  A row that was passing on nothing is not a regression; a row that
+was passing on something is.
+
 ## 5. The migration (remaining work): un-mutate the ~14 inline-skipped files
 Files with inline `ok(1,'SKIP…')` / commented-out tests (sort.t, state.t, reset.t, lex.t,
 quotemeta.t, each.t, join.t, range.t, splice.t, sub.t, loopctl.t, local.t, time.t,

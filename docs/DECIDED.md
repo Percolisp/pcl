@@ -11,6 +11,67 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s439 (2026-08-23, Fable) — s438 → s438i REVIEWED + APPROVED (instruments, Q4, Q5, Q6); one review fix (#455's `qw()` spelling); #491–#496 filed; THE DISTANCE TO v0.1 IS FIVE STEPS (`docs/fable-answers-s439.md` §4)
+
+- **All nine commits APPROVED as shipped** (`docs/fable-answers-s439.md`).
+  Independently re-measured on a COLD cache: gate **166/5779** (only the 13
+  pclxs xs rows); sweep **TOTAL 18312 (+0), 0 new / 0 fixed, drops 5 =
+  census, child drops 241/98, GATE clean**; companion `--all --quick --jobs
+  4` **528 files, ZERO real movers — the four known noise files only (io/open.t + op/utf8cache.t contention, serial matches the snapshot; uni/variables.t the known unstable TIMEOUT; io/pvbm.t 20/8 in parallel AND serial vs 23/5 alone — the EIGHTH time, not edited); both SNAPSHOT holes zero; DROPS with no +/- line**; 61 probes vs perl 5.40.3 (the Q4 operand
+  matrix, the imported term in seven positions, the sub-head shapes, the
+  per-character punctuation-array set, 12 glob shapes, the handle spellings).
+- **REVIEW FIX — `_signatures_enabled_at` recognises every enabling
+  spelling.**  It matched only a QUOTED `'signatures'`, so `use feature
+  qw(signatures say); sub f ($x, @r) {…}` on ONE line still took the
+  old-prototype lowering (PCL `-u|2 3-2`, perl `0-u|2-2`).  Now: the word
+  `signatures` in ANY quoting after `use feature`/`use experimental`, a
+  `:5.NN` bundle with NN ≥ 36, `use v5.36`+; a `no feature …` statement is
+  never an enabling site.  Guard `Pl/t/sig-param-shadow-01.t` 8 → 9; corpus
+  identical over 111 (no population has the same-line spelling — the row is
+  the bar).
+- **Filed from the probes, all PRE-EXISTING on `d0b52e9`**: **#491** the
+  qualified handle NAME is never canonicalised (`print main::STDOUT` is a
+  CALL; `open(Foo::H1)` with no `package Foo` is a CL READ error, whole
+  file; `open(main::FH)`/`print FH` do not meet) — one fix at the
+  Environment seam; **#492** the s/// REPLACEMENT side leaves a non-ASCII
+  identifier literal (`s/Ｘ/$ｉ/`; `${ｉ}` and dq strings are right);
+  **#493** pointer record (`-pi` → #476 widened; `(_)` default → #260; #484
+  → shape (a)); **#495** ask 7's bareword-operand shapes as ONE task in
+  #266's family; **#496** the SHAPES corpus (ask 10); **#494** the v0.1
+  doc refresh AT TAG TIME.  **#277** corrected to completed (shipped s405c).
+- **Rulings on the asks** (answers §2): child-drop sites → OWN file
+  `docs/child-drop-sites-sNNN.tsv`, gate = SITE SET only, files-reached
+  reported not gated, bless AFTER #479's harness half; **`run-perl-suite.pl`
+  gets `PCL_DROP_LOG`** in the same session (the companion is where
+  `runperl_and_capture` has callers: `t/run/runenv*.t`); **#478 MEASURE,
+  default = the `Test::`/`Test2::` name list GOES** (CLAUDE.md 9a hard stop;
+  79 of 83 drops in a shipped-for population) — if the cost is real the
+  mechanism is a BUDGET on the recursive walk, never a name; **#479 harness
+  FIRST and ALONE** (wrong in perl too, probed; no perl-tests callers;
+  removes 196 of 241 child drops), compiler gap a filler with a `Pl/t` row;
+  **#365's over-import ACCEPTED AS IS** — the export-scan cross-check would
+  re-break the measured Math::Complex case (standing trade: a `()`
+  prototype crosses a `use` on its shape); **#484 = measure shape (a)** (a
+  second, memoised post-repair pre-merge; NOT a lazy path in
+  `_word_is_term`, rule 11); **#486** out of scope as a compiler item,
+  cheap filler now that `_signatures_enabled_at` exists; **#485 PROMOTE**
+  the outer lexical a default reads, never refuse; **#489 = accepted
+  divergence for v0.1**, `not-supported.md` entry, `:site` counter fix
+  queued behind the release; **runbook §4b** (a fix that makes a value
+  REAL: grep for rows comparing TWO results of the changed builtin before
+  the run).
+- **THE DISTANCE TO v0.1 (answers §4)**: (1) USER force-pushes `main`
+  (origin = the OLD history) → (2) first CI run (#283 authored; fix image
+  breakage) → (3) #282 = that green run → (4) **#494** refresh README /
+  STATUS / CHANGELOG on the TAGGED tree — numbers AND the drop paragraph
+  ("loud but not fatal" is false since the s435 flip) → (5) tag v0.1.0.
+  Nothing in Q7 is a precondition.  **#281 recommendation: items 1+2+6 +
+  ir-spec (merged s415) ARE the v0.1 IR pass; items 4/5 post-v0.1.**
+- **Queue**: Opus = Q7 in the ruled order (#463 item 2 first, #464 → #466 →
+  #465, #468, #470), then the s439 fillers (#479+ask 2, #478 measured,
+  #491, #485, #492, #484(a), #495, #496), #494 at tag time.  Fable: rule the
+  asks; post-v0.1 boxed aggregates.  USER: the push.
+
 ## s438g + s438h + s438i (2026-08-23, Opus 5) — Q6: three of P5's four (#452, #451, #450); #449 stays with #418 by its own ruling
 
 - **#452 DONE — a PACKAGE-QUALIFIED bareword filehandle is a NAME.**

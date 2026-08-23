@@ -2351,3 +2351,29 @@ subs), a plain `sub NAME {…}` written inside the region — which DEFINES the
 lexical in perl, and creates no package sub — and a use from code under
 another `package NAME;`, since a lexical is scoped to the file, not to a
 package.
+
+---
+
+## `glob` in SCALAR context: the iterator is keyed by the PATTERN, perl keys it by the CALL SITE  [ACCEPTED DIVERGENCE for v0.1 — task #489]
+
+**Perl behaviour:** each `glob(PAT)` / `<PAT>` *op* owns its own iterator.
+Two different call sites with the same pattern each start from the first
+match; the same call site called again continues.  `t/op/glob.t` row 18
+compares two separate `eval q{ glob(q(./"TEST")) }` call sites and expects
+both to answer the value.
+
+**PCL behaviour:** the scalar-context iterator is keyed by the pattern
+STRING, so the second call site with the same pattern continues the first
+one's iteration and answers `undef` once the first exhausted it.  The shape
+that matters — `while (my $f = glob("*.c")) { … }`, one site looping — is
+identical to perl.
+
+**Why accepted (s439, Fable, `docs/fable-answers-s439.md` ask 11):** the fix
+needs a call-site identity the emission does not carry today (`(p-glob PAT
+:site N)` from a compile-time counter, at every glob emitter: the `<*.c>`
+form, the builtin path, the readline/glob split).  That is an emission change
+with the full bar, queued behind the v0.1 release under **#489**; the one
+visible row (op/glob.t 18, edited 14/4 → 13/5 in `docs/perl-suite-run.tsv`
+s438i) carries this entry as its cause.  It surfaced only when #450 made
+metacharacter-free patterns return themselves — the row had been passing on
+two undefs (runbook §4b).
