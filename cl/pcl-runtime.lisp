@@ -5389,10 +5389,19 @@
      expanders — so a compound assignment must write them back with SETF, not
      BOX-SET (which silently no-ops on a non-box).  Mirrors the place test in
      p-incf/p-decf so every compound-assignment operator works on $a[i]/$h{k}
-     and their deref forms, e.g. Math::BigInt::Calc's `$xv->[0] *= $yv->[0]`."
+     and their deref forms, e.g. Math::BigInt::Calc's `$xv->[0] *= $yv->[0]`.
+
+     p-$ and p-cast-$ are in the list because they answer the SAME question
+     (the ++/-- macros have always listed all six), and the two readings had
+     drifted into a silent wrong: `${\"name\"} += 2` read the symbolic ref's
+     VALUE, then BOX-SET a number and no-opped, so the statement did nothing
+     at all — while `$$r += 2` happened to work, because p-cast-$ hands back
+     the referent BOX for a hard ref.  SETF is right for both (its p-cast-$
+     writer resolves ref-vs-symbolic itself)."
     (and (consp place)
          (member (car place)
-                 '(p-gethash p-aref p-gethash-deref p-aref-deref)))))
+                 '(p-gethash p-aref p-gethash-deref p-aref-deref
+                   p-$ p-cast-$)))))
 
 (defmacro %p-store-back (place new)
   "Write NEW into PLACE for a read-modify-write compound assignment: SETF for
@@ -5582,10 +5591,20 @@
        (let ((box (gensym "BOX")))
          `(let* ((,box ,real-place))
             (box-set ,box (1- (to-number ,box))))))
-      ;; Traditional setf-able places (p-aref, p-gethash, etc)
+      ;; Traditional setf-able places (p-aref, p-gethash, etc).  Same shape as
+      ;; p-pre++'s arm, deliberately: `(decf place)` expands to `(- place 1)`,
+      ;; and these readers do NOT always hand back a number — p-cast-$ returns
+      ;; the referent BOX for a hard ref, p-gethash returns *p-undef* for an
+      ;; absent key, and any of them can hold a numeric STRING.  perl numifies
+      ;; first, so to-number is the read.  (Unreachable until #463 item 2 let
+      ;; `--$$r` / `--${"name"}` parse at all: it died "#S(p-box …) is not of
+      ;; type number".)
       ((and (listp real-place)
             (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
-       `(decf ,real-place))
+       (let ((tmp (gensym "TMP")))
+         `(let ((,tmp (1- (to-number ,real-place))))
+            (setf ,real-place ,tmp)
+            ,tmp)))
       ;; Boxed scalar
       (t `(box-set ,real-place (1- (to-number ,real-place)))))))
 
