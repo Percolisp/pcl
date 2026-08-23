@@ -63,6 +63,11 @@ those two files and the live plan doc directly -- no new review-doc families.*
   s440d**: a signature PARAMETER token is a declaration to BOTH resolvers
   (`_symbol_is_signature_param` asked first by `_binding_at` and `_ref_shadowed`);
   `_dd` renders tokens compactly on one line; gen v2-183; guards sig-param-shadow-01.t.
+- **s441c (agent C) MERGED: #465** (`$\` and `$,` undef until set — ir-spec §8) and
+  **#468** (a never-declared call reaches AUTOLOAD / perl's die via the ONE mechanism,
+  re-entered at the CALL by encapsulating `sb-kernel::restart-undefined` — both other
+  routes measured and rejected, DO NOT RETRY; ir-spec §5.1).  Filed #500–#504 from its
+  report; agent D (s442d) on #500 + #501 + #503.
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

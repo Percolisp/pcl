@@ -134,6 +134,33 @@ done the same); corpus-diff shows that text in 3 files' drop comments
 sub-heads.pl shape fix; lib A/B 22 SAME; generation **v2-183**.  Gate runs
 once on the tree merged with agent C.
 
+**s441c (Opus agent C, launched s440, MERGED ff `f6faeb0` + `76f5de7` after
+review) — #465 + #468.**  **#465**: `$\` and `$,` initialise to `*p-undef*`
+(perl: undef until set); the write path is byte-identical (p-print's readers
+test non-empty string, never defined) — probed across `$,`/`$\`/printf/local/
+restore/`$"`; guard `Pl/t/sep-vars-01.t` (4 oracle rows, 3 fail on base);
+ir-spec §8 records the asymmetry.  **#468**: a plain call to a NEVER-declared
+sub now reaches perl's order — own-package AUTOLOAD with `$AUTOLOAD` set, else
+`Undefined subroutine &Pkg::name called` — through the ONE mechanism
+`%p-call-of-undefined-sub`, re-entered at the CALL by encapsulating SBCL's
+`sb-kernel::restart-undefined` (`%p-install-undefined-sub-dispatch`, once at
+load, idempotent, announces if the internal disappears, DECLINES for any
+non-`pl-` symbol).  Both listed routes were MEASURED and rejected (the dynamic
+extent is not centralised — five runners + ~40 Pl/t files; stub emission =
+8–37 names per corpus file and `exists &nope` → 1): the record is the runtime
+comment.  `p-backslash-sub`'s "not declared" branch was a SECOND COPY
+disagreeing on five points — routed through the one function; `%p-sub-bare-
+name` extracted and shared.  Guards `decl-ordering-02.t` 21 → 26 (4 fail on
+base); ir-spec §5.1 "a plain call that reaches no body is never a value".
+Its report found five pre-existing items, FILED: **#500** `say` appends `$\`
+(perl uses "\n" instead), **#501** the dead `sort NAME` AUTOLOAD wrapper in
+ExprToCL (`sort nonexistent LIST` was SILENT WRONG — compared everything
+equal), **#502** `use English` dies at transpile (`*LAST_PAREN_MATCH = *+`),
+**#503** a symbolic sub-ref call resolves in main not the current package,
+**#504** runpcl's stderr merge leaves blank lines on an SBCL note.  Merged
+gate **168/5805** (only the 13 pclxs xs rows).  Agent D (s442d) launched on
+#500 + #501 + #503 (gen v2-200).
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
