@@ -190,3 +190,32 @@ nothing rows-shaped.
 None new.  Standing: the push week (2026-08-24, USER executes); the tag
 after the first green CI run (DECIDED s425); indirect object MAYBE LATER
 (USER s425).
+
+### 4a. The push — ONE checkout, and the exact commands (s439c, 2026-08-23)
+
+**`~/pcl` is the repository of record and the only checkout that needs to
+exist.**  `~/testgit/pcl` was a second clone of the OLD public history
+(tip `54b2aa4` = today's `origin/main`) with nine uncommitted files — all
+nine byte-identical to `~/pcl` at `74cf2b1` (2026-07-04 21:50), so it holds
+nothing `~/pcl` does not.  Its one useful property — the SSH remote
+(`git@github.com:Percolisp/pcl.git`, the key that authenticates as
+Percolisp/pcl) — was moved onto `~/pcl` in s439c (`git remote set-url`;
+`git fetch` verified).  `~/testgit/pcl` can be removed.
+
+The two histories share `059c0cb` and DIVERGE there: `origin/main` has 69
+summary commits on top of it, local `main` 1270 detailed ones.  `~/pcl`'s
+branch `snapshot-2026-05` IS `54b2aa4`, the old public tip, so pushing it
+keeps the old history reachable on GitHub after the force-push.  Repo size:
+pack 13.8 MiB, 1237 files, three fixture tarballs (cpan-tests/modules, 0.5 MB).
+
+```bash
+cd ~/pcl
+git fetch origin                                        # origin/main must still be 54b2aa4
+git push origin snapshot-2026-05                        # old public history stays reachable as a branch
+git push --force-with-lease=main:origin/main origin main   # the rewrite becomes main; refuses if origin moved
+git push origin R1                                      # the R1 tag (optional)
+```
+
+Then: watch the first CI run (#283; `.github/workflows/ci.yml` activates on
+the push), fix what it finds, #494's doc refresh on the tagged tree, tag
+`v0.1.0` (`git tag -a v0.1.0 -m ... && git push origin v0.1.0`).

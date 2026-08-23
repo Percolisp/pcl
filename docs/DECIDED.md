@@ -11,6 +11,8 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s439c (2026-08-23, Fable, USER) — ONE checkout: `~/pcl` is the repository of record; `~/testgit/pcl` (old public history + nine dirty files = `74cf2b1`, verified byte-identical) holds nothing unique and can go; `~/pcl`'s origin is now the SSH URL that authenticates; the push recipe is `docs/plan-post-s433.md` §4a
+
 ## s439b (2026-08-23, Fable, USER) — THE RUNTIME IS KEPT COMPILED AND CACHED BY DEFAULT: every runner starts SBCL from a content-keyed saved core built on first use
 
 - **USER ruling: "by default the CL runtime is kept compiled and cached."**

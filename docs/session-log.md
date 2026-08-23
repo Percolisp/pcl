@@ -98,6 +98,16 @@ full sweep on the new runner IDENTICAL (TOTAL 18312 +0, 0 new / 0 fixed, drops 5
 cut to a few lines; 277 lines) — that edit rode in `30c26a7` with the
 cached-core commit.**
 
+**s439c — USER: "the directory connected to GitHub is `~/testgit/pcl`; one
+directory?"  YES.**  Measured: `~/testgit/pcl` is a clone of the old public
+history (tip `54b2aa4` = `origin/main` = `~/pcl`'s `snapshot-2026-05`) with
+nine uncommitted files, every one byte-identical to `~/pcl` at `74cf2b1`
+(2026-07-04, the same minute as its last commit) — nothing unique.  Its SSH
+remote (the key that authenticates as Percolisp/pcl) moved onto `~/pcl`
+(`git remote set-url`, `git fetch` verified); `~/testgit/pcl` is the user's to
+remove.  Push recipe written: plan-post-s433 §4a (snapshot branch first,
+then `--force-with-lease`), DECIDED §s439c.
+
 ## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
 
 Three of P5's four.  Index: DECIDED §s438g+h+i.
