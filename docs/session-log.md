@@ -4,6 +4,67 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 438d + 438e + 438f (2026-08-23, Opus 5) — Q5: #454, #455, #435, and one gate catch the populations could not see
+
+Three items, all in the same neighbourhood — how a sub's HEAD is read — and
+all three emission-identical over every population we measure, so all three are
+guarded by rows.  Index: DECIDED §s438d+e+f.
+
+**#454.**  A signature parameter is a declaration inside the sub, so PCL's
+"file lexical captured by sub" refusal was wrong for every signature that
+shared a name with a later file `my`.  Two questions were blind to it and they
+are the detector/rewriter pair the project keeps one resolver for: the detector
+scans the sub's BLOCK, and a signature is not in the block; the rewriter walks
+the Statement::Sub's preceding siblings, of which the signature is one.  Fixing
+only the first would have replaced a loud refusal with a silent wrong — the
+body's `$x` renamed to the file lexical's cell — so both moved together.  The
+subtlety is that a DEFAULT is an expression evaluated in the sub, so only the
+leading symbol of each top-level comma-separated part counts as declared.
+
+**#455**, which the first #454 attempt walked straight into: PPI hands the same
+source over as a Structure::Signature or a Token::Prototype depending on
+whether the feature is in force, and its tracking starts at the line AFTER the
+pragma.  A sub on the pragma's own line therefore took the old-prototype
+lowering, its params became a raw CL lambda list, and an empty slurpy
+interpolated as undef.  A purely textual repair looked obvious and was WRONG —
+corpus-diff caught it against perl-tests/signatures.t, which asserts that
+`sub t000 ($a)` before the pragma is an old-style prototype and `$a` is the
+package variable.  So the repair is the boundary: named params AND an enabling
+pragma at or before this statement.
+
+Along the way the textual "does this prototype name parameters" test turned out
+to exist in four copies — one of them an absence, which is exactly how
+`_sub_head` came to disagree with the other three.  One function now, like
+`proto_is_zero_arg` earlier the same day: **when two predicates answer the same
+question about the same record and disagree, that is the bug.**
+
+**#435.**  One `fragment_doc` helper, and every fragment re-parse routed
+through it, so the in-place token repairs a whole FILE gets now reach an
+interpolated subscript, an `@{[ … ]}` block, a spliced prologue and a renamed
+span.  Before it, a non-ASCII name inside a fragment read as a symbolic
+reference (index 0 — silent) or died calling an undefined sub.
+
+**The catch worth remembering** is #435's first version: it called the helper
+fully-qualified from three other files, and two `Pl/t` files died at "Undefined
+subroutine" because they load StringInterpolation WITHOUT Pl::Parser.  Under
+pl2cl the call always resolves — so corpus-diff, the 951-file A/B and the full
+sweep were all clean while the gate lost 97 rows.  The populations and the gate
+answer different questions, and this is the shape of the difference.
+
+**Bar**, per change: corpus-diff identical over the 111; emission-ab 951 files
+SAME / 0 DIFF / 0 RCDIFF; gate; full sweep TOTAL 18312 (+0) GATE clean.  #454
+also ran the gate-SET scan over both populations (638 files each side,
+identical) — mandatory when a refusal stops firing.  Guards
+`Pl/t/sig-param-shadow-01.t` (8 rows) and three added to
+`Pl/t/utf8-source-01.t`, all inverse-guarded on a worktree.  Gate 166/5771.
+
+Filed, all pre-existing and verified on a worktree: **#485** (a signature
+DEFAULT that reads an outer lexical gets undef) and **#486** (an old-style
+prototype with NAMES binds them as parameters on both paths — already a blessed
+baseline fail).
+
+---
+
 ## Session 438b + 438c (2026-08-23, Opus 5) — Q4: the two operand sites become one (#453), and an imported `()`-prototype sub is a TERM (#365)
 
 The queue item s437 named after the instruments.  Both changes are in PExpr's

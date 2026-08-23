@@ -274,3 +274,86 @@ the string "FOO"/"BAR"; and `close G ? "a" : "b"` is read as
 a comma or end-of-run.  Both are unchanged by Q4 (verified on a worktree).
 Worth their own tasks now, or do they belong to the #266 classifier campaign
 that #481/#482 already point at?
+
+---
+
+# Part 3 — Q5 (s438d + s438e + s438f): #454, #455, #435
+
+All three are about how a sub's HEAD is read, and all three are
+emission-identical over every population we measure — so all three are guarded
+by rows, inverse-guarded on a worktree.
+
+## §12  What shipped
+
+| task | was | now |
+|---|---|---|
+| **#454** | `sub f ($x) {…}` + a later `my $x` → "Parser2 TODO: file lexical 'x' captured by sub f", the whole file refused | perl's answer; the DETECTOR and the REWRITER both ask `_signature_param_canons` |
+| **#455** | a sub on the pragma's OWN line took the old-prototype lowering — raw CL lambda list, empty slurpy interpolating as undef | the feature region includes the pragma's own line, by COLUMN |
+| **#435** | a non-ASCII name inside a re-parsed fragment was a symbolic reference (index 0, silent) or died calling an undefined sub | one `fragment_doc`, nine sites routed |
+
+## §13  Two things measurement decided, against what reading suggested
+
+**#455's repair is the BOUNDARY, not the TEXT.**  The obvious fix — "a
+prototype token that names parameters is a signature" — is wrong, and
+corpus-diff caught it: `perl-tests/signatures.t:17` is
+`sub t000 ($a) { $a || "z" }` with `use feature "signatures"` only at line 32,
+and line 20 asserts `&t000(456) == 123`, because perl reads `($a)` as an
+old-style prototype where the feature is off.  So the flag needs
+`_signatures_enabled_at($stmt)` as well.
+
+**#454 had to move the REWRITER too, or the fix would have been worse than the
+bug.**  The refusal and the rename read the same scope question from two
+predicates; narrowing only the refusal would have let the body's `$x` be
+renamed to the file lexical's promoted cell — a silent wrong where there had
+been a loud refusal.  The gate-SET scan over both populations (638 files each
+side, IDENTICAL) is the leg that proves nothing else stopped refusing.
+
+## §14  The gate catch the populations could not see
+
+#435's first version called `Pl::Parser::fragment_doc` fully-qualified from
+three other files.  `Pl/t/string-interp-01.t` and `Pl/t/regexp-subst-01.t` died
+at "Undefined subroutine" — they load `Pl::PExpr::StringInterpolation` WITHOUT
+`Pl::Parser`.  Under `pl2cl` the call always resolves (Parser is loaded first),
+so **corpus-diff, the 951-file four-population A/B and the full sweep were all
+clean while the gate lost 97 rows.**  A compile-time `use` would be circular
+(Parser → PExpr → StringInterpolation → Parser), so each cross-file site does a
+runtime `require`.  Worth a line in the WHAT-TO-RUN table's reasoning: the
+populations measure the COMPILER as pl2cl assembles it; the gate measures the
+modules as anyone else may load them.
+
+## §15  The bar, per change
+
+| leg | #454 | #455 | #435 |
+|---|---|---|---|
+| corpus-diff (111) | identical | identical (the textual attempt moved signatures.t) | identical |
+| emission A/B, 951 files | SAME 951 / 0 / 0 | SAME 951 / 0 / 0 | SAME 951 / 0 / 0 |
+| gate-SET scan, both populations | **IDENTICAL (638×2)** | — | — |
+| gate | 166/5767 | 166/5768 | **166/5771** |
+| full sweep | TOTAL 18312 (+0), GATE clean | same | same |
+| guard | `sig-param-shadow-01.t` 8 rows | 2 of those rows | `utf8-source-01.t` 25 → 28 |
+
+## §16  Asks (Q5)
+
+**Ask 8 — #486 is a blessed baseline failure with a known cause now, and the
+fix is one predicate away.**  An old-style prototype with NAMES (`sub t000
+($a)` where the signatures feature is off) binds its names as parameters on
+BOTH lowering paths, so perl's "an illegal prototype is ignored" is lost and
+`&t000(456)` answers 456 instead of 123 (signatures.t row, blessed).
+`_signatures_enabled_at` — added by #455 — is exactly the predicate the
+lowering needs to stop binding.  Worth doing next, or does the "assume valid
+Perl input" principle make an illegal prototype out of scope?
+
+**Ask 9 — #485's decision.**  A signature DEFAULT that reads an outer lexical
+gets undef, because the capture gate scans the BLOCK and a default is not in
+it.  Refuse it like every other capture, or promote the file lexical (the
+machinery exists) so the default simply works?  It occurs in zero files of the
+four populations, so a refusal costs nothing measurable today.
+
+**Ask 10 — the "no corpus can guard it" pattern is now five changes old.**
+#453, #365, #454, #455 and #435 were each emission-identical over all four
+populations, and each is guarded only by `both_agree` rows plus an inverse run
+on a worktree.  That is the s371 rule working as intended, but it also means
+five real bugs lived in shapes no measurement population contains.  Is a
+population gap worth naming as its own task — a small corpus of
+deliberately-awkward shapes the census could carry — or is "probes plus guard
+rows" the permanent answer?

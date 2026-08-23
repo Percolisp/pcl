@@ -11,6 +11,72 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s438d + s438e + s438f (2026-08-23, Opus 5) — Q5: signature parameters are declarations (#454), the feature region includes the pragma's own line (#455), and every fragment re-parse runs the token repairs (#435)
+
+- **#454 DONE — a SIGNATURE PARAMETER shadows a same-named file lexical.**
+  `sub f ($x) {…}` desugars to `my $x = $_[0]` inside the sub, so PCL's
+  "Parser2 TODO: file lexical 'x' captured by sub f" refusal was wrong for
+  `($x)`, `($x = 1)` and `($x, @r)` alike.  Both scope questions now ask
+  `_signature_param_canons`: the DETECTOR (`_check_sub_captures`, which scans
+  the sub's BLOCK — a signature is not in it) and the REWRITER
+  (`_ref_shadowed` → `_stmt_declares_canon`, which walks the Statement::Sub's
+  preceding siblings — the signature is one).  **Fixing only the detector
+  would have turned the refusal into a SILENT WRONG** (the body's `$x` renamed
+  to the file lexical's promoted cell), which is why the pair moves together.
+- **ONLY THE PARAMETER NAMES**: a default is an expression evaluated in the
+  sub, so `sub f ($x = $y)` really does read the outer `$y`.  The helper splits
+  on TOP-LEVEL commas and takes each part's leading symbol; the detector
+  discounts only the canons the signature declares, so a file `my @x` with a
+  `($x)` parameter still gates on the sub's `@x`.
+- **PPI PRODUCES BOTH SHAPES FOR THE SAME SOURCE, and a reader that knows one
+  is half a reader.**  With the feature in force `($x)` is a
+  `PPI::Structure::Signature`; on the pragma's own line, and in a file that
+  never enables it, the identical text is a `PPI::Token::Prototype`.  This cost
+  #454 its first attempt and IS #455.
+- **#455 DONE — the repair is the BOUNDARY, not the TEXT, and that was
+  MEASURED.**  A first attempt made the flag textual (named params ⇒ signature)
+  and corpus-diff caught it: `perl-tests/signatures.t:17` has
+  `sub t000 ($a) { $a || "z" }` with the feature not on until line 32, and line
+  20 asserts `&t000(456) == 123` — perl reads `($a)` as an old-style prototype
+  there.  So a Token::Prototype is signature syntax only with named params AND
+  `_signatures_enabled_at($stmt)` (an enabling pragma at an earlier line, or
+  the same line at an earlier column).  Deliberately NOT a lexical scope walk:
+  it recovers PPI's one missing line, and PPI owns every other position.
+- **RULE 11, twice in one session.**  The textual "named params" test was in
+  FOUR copies (one of them an absence) → `Pl::Parser::proto_text_has_named_params`.
+  Same shape as #365's `proto_is_zero_arg` earlier the same day: **when two
+  predicates answer the same question about the same record and disagree, that
+  IS the bug.**
+- **#435 DONE — ONE fragment document.**  `Pl::Parser::fragment_doc` builds the
+  document and runs the three passes `_ppi_parse` applies after any
+  serialize+reparse (`_reclassify_bare_vwords`, `_merge_unicode_symbols`,
+  `_merge_punct_array_symbols`) — exactly the ones that swap token CLASSES in
+  place and leave text untouched, which is what makes them safe on a fragment.
+  Nine sites routed; `_normalize_signature_text` deliberately not (it
+  re-serialises token TEXT, which these passes cannot change).
+- **THE POPULATIONS AND THE GATE ANSWER DIFFERENT QUESTIONS** (#435's near
+  miss, worth keeping): the first version called the helper fully-qualified
+  from three other files, and two `Pl/t` files died at "Undefined subroutine"
+  because they load `Pl::PExpr::StringInterpolation` WITHOUT `Pl::Parser`.
+  Under pl2cl the call always resolves, so corpus-diff, the 951-file A/B and
+  the full sweep were ALL clean while the gate lost 97 rows.  A compile-time
+  `use` would be circular, so each cross-file site does a runtime `require`.
+- **All three changes are emission-IDENTICAL over the four populations** —
+  corpus-diff 111 files and emission-ab 951 files SAME / 0 DIFF / 0 RCDIFF,
+  once per change — so the s371 rule applies again and the guards are the bar:
+  `Pl/t/sig-param-shadow-01.t` (8 rows) and three rows added to
+  `Pl/t/utf8-source-01.t` (25 → 28), all inverse-guarded on a worktree.
+  #454 also ran the **gate-SET scan over BOTH populations (638 files each
+  side): IDENTICAL** — mandatory there, because a refusal that stops firing is
+  how a silent wrong gets in.  Gate **166 / 5771**; sweep **TOTAL 18312 (+0),
+  GATE clean** after each.
+- **Three pre-existing findings filed, each verified on a worktree**: **#485**
+  (a signature DEFAULT that reads an outer lexical gets undef — the gate scans
+  the block, and a default is not in the block), **#486** (an old-style
+  prototype with NAMES binds them as parameters on BOTH lowering paths, so
+  `sub t000 ($a)` outside a signature region answers 456 where perl answers
+  123 — already blessed in `docs/fail-baseline.tsv`), and #484 from Q4.
+
 ## s438b + s438c (2026-08-23, Opus 5) — Q4: the two operand sites become ONE (#453), and an imported `()`-prototype sub is a TERM (#365)
 
 - **#453 DONE — `is_named_unary` answers for a DECLARED sub too.**  perl decides
