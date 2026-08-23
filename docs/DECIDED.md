@@ -73,6 +73,11 @@ those two files and the live plan doc directly -- no new review-doc families.*
   braces re-blessed Subscript → Block; `${"name"} += 2` was a SILENT NO-OP
   (`%p-accessor-place-p` omitted `p-cast-$`), `p-pre--` numifies; op/universal.t
   61 → 79; filed #505–#507.  Items 3–5 = a `*`-sigil token repair (Fable measured).
+- **s441b (agent B) MERGED: #466** (a Magic scalar IS a scalar in the filehandle
+  slot — `_is_scalar_fh_token`, three sites) and **#464** (the statement-modifier
+  split is ONE shared helper pair, four callers; `local … for` keeps dropping
+  loudly by design); census recounted 73/167 at the merge; filed #508–#513;
+  gate-SET scan owed (detectors widened).
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

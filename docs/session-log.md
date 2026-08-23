@@ -186,6 +186,38 @@ Findings FILED: **#505** `${NUMBER}` not a symbolic ref, **#506** `$$ {EXPR}`
 dropped (Magic after `$$`).  Items 3–5 remain (Fable measured: parse, not
 representation).
 
+**s441b (Opus agent B, launched s440, MERGED ff `c003571`+`b81142b` after
+review, rebased over agent A; census TOTAL recounted from the rows at the
+merge: 73 files / 167 drops) — #466 + #464.**  **#466**: `PPI::Token::Magic`
+IS a subclass of `PPI::Token::Symbol`, and all three filehandle-slot tests
+were exact-class `ref($t) eq 'PPI::Token::Symbol'` — so `print $_ "x\n"`
+extracted no handle and the leftover run dropped; perl's `indirob: WORD |
+scalar | block` takes ANY scalar.  ONE predicate `_is_scalar_fh_token` at the
+three sites (operator-loop print path, the `print $fh -e $f` repair, the paren
+form); `_is_print_term_start` untouched (the negatives `print $_ . "\n"`,
+`$_, "\n"`, `$_ x 2` … stay arguments); guard `Pl/t/print-fh-magic-01.t`
+(11 rows, 3 through a real FILE, 4 negatives).  **#464**: ONE cause — the
+modifier split lived inside `_process_expression_statement`, so every
+per-class handler that slices tokens by position handed the modifier to
+`_parse_expression`; now two shared halves, one copy each
+(`_split_trailing_modifier($parts, $accept)` — the caller declares which of
+the six words it can lower, so `local … for (1,2)` keeps dropping LOUDLY
+because perl restores per iteration — and `_wrap_statement_modifier`), four
+callers (`require EXPR` all six modifiers; `local(LIST) = RHS` if/unless with
+the condition evaluated ONCE before the RHS and each slot bound to a COPY of
+its value; `local *glob = RHS if C` whose inline fourth copy is deleted).
+Measured: corpus-diff IDENTICAL, lib/perl-t A/B SAME, cpan A/B 402 with
+exactly the carrying files DIFF (NoOutput.pm; Test2 Context / InterceptResult
+/ Event / Formatter::TAP, Sub::Uplevel), RCDIFF 0; census 81/185 → 76/174 by
+edit; guard `Pl/t/stmt-modifier-01.t` (12 rows, each program re-run under
+perl; inverse on base = 22 failures).  **Two detectors widen → the gate-SET
+scan is owed on the merged batch (Fable).**  Findings FILED: **#508** bare
+`local X if COND` ignores the modifier, **#509** element/slice targets in a
+`local` LIST never assigned, **#510** `$!` in a `local` LIST never assigned,
+**#511** `%INC` not populated by a bareword `require`/`use`, **#512** `$0`
+not writable, **#513** `open($fh,'>&',…)` dup fails; #457's board row was
+already zero on main (stale since s438).
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
