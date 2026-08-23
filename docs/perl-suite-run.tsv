@@ -1,4 +1,27 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s440 (Fable) — FOUR ROWS EDITED BY HAND after the s440 batch (agents A/B/C
+#   merged + the #479 harness half), `--all --quick --jobs 4`, every mover
+#   confirmed by the #366 serial re-run:
+#   op/glob.t C 13/5 -> 14/4 — task #499 (Fable): a LIST-context glob was
+#         stateful per pattern (full, EMPTY, full ...); list context keeps no
+#         state now, so the row that globbed a pattern a second time passes.
+#   op/sort.t C 182/23 -> 183/22, signature `undef-fn:main::pl-revers` GONE —
+#         task #468 (agent C): a plain call to a never-declared sub reaches
+#         perl's order (AUTOLOAD / perl's die) instead of SBCL's raw
+#         undefined-function, so the sort-comparator-by-name row passes and the
+#         aborted form is gone.
+#   run/runenv_hashseed.t C 0/0 -> 8/0, run/runenv_randseed.t C 0/4 -> 2/7 —
+#         task #479 harness half (Fable): `runperl_and_capture` in the shadow
+#         t/test.pl stub read its two files through a `my $f` declared in a
+#         ternary CONDITION (never in scope in the branches, in perl too) and
+#         the `<$f> // ''` branch did not lower; it now reads them perl's own
+#         way, so the four companion callers see the child's real output:
+#         hashseed gains 8 rows and then aborts on "Failed to munge seed"
+#         (the PCL child's hash-seed line differs from perl's — a new, honest
+#         abort further in), randseed's former "statement not supported at
+#         test.pl" abort is gone and its rows compare honestly (2/7).
+#   io/pvbm.t 20/8 in parallel AND serial vs the snapshot's 23/5 — the known
+#         unstable file (NINTH time); NOT edited, per the s437/s439 precedent.
 # s441b (Opus 5, task #463 item 1) — TWO ROWS' DROPS COLUMN EDITED BY HAND,
 #   nothing else: op/gv.t 3 -> 1 and uni/gv.t 2 -> 0.  `$${$_[0]}` (gv.t:911,
 #   912 and uni/gv.t:805, 806) is `${ ${$_[0]} }`; PPI lexes it as the PID
@@ -969,7 +992,7 @@ op/fork.t	28	0	1	0	DIFF		0
 op/fresh_perl_utf8.t	1	0	0	1	DIFF		0
 op/getpid.t	0	0	0	1	NOTAP	aborted-forms:1: Can't locate object method "new" via package "threads" at - line N. 	0
 op/getppid.t	8	0	0	0	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (p-pipe (vector $r $w))	0
-op/glob.t	18	0	13	5	DIFF		0
+op/glob.t	18	0	14	4	DIFF		0
 op/gmagic.t	78	0	30	3	DIFF	aborted-forms:5: Can't call method init on an undefined value	0
 op/goto.t	132	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is undefined.	0
@@ -1066,7 +1089,7 @@ op/sigsystem.t	4	0	0	0	XDIFF	aborted-forms:1: Can't locate loadable object for m
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
-op/sort.t	205	0	182	23	DIFF	undef-fn:main::pl-revers	0
+op/sort.t	205	0	183	22	DIFF		0
 op/splice.t	34	0	34	0	OK		0
 op/split.t	219	0	212	7	DIFF		0
 op/split_unicode.t	147	0	107	40	DIFF		0
@@ -1213,8 +1236,8 @@ run/fresh_perl.t	91	0	56	35	XDIFF	unbound:H | not-supported.md §Error message t
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-run/runenv_hashseed.t	278	0	0	0	DIFF	aborted-forms:1: Failed to extract seed: at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/run/ru	0
-run/runenv_randseed.t	9	0	0	4	DIFF	aborted-forms:1: PCL: statement not supported at test.pl line N: open(my $f, '<', $out) ? <$f> // '' : '' -	0
+run/runenv_hashseed.t	278	0	8	0	DIFF	aborted-forms:1: Failed to munge seed 'NxdNdNbNbNaNbNfNaNeNcaNcdNeNecNcadaNfN' at runenv_hashseed.t line N.	0
+run/runenv_randseed.t	9	0	2	7	DIFF		0
 run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	0	1	DIFF		0
 run/switchC.t	15	0	4	11	DIFF		0
