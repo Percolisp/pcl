@@ -308,7 +308,10 @@ worktree, `--ff-only` merge, renumber the generation ONCE above every agent
 string (next free: v2-221), regenerate the three artifacts, cold gate, ONE
 sweep (+ gate-SET scan for E and any widened classifier), companion legs,
 file each report's findings, record in DECIDED + this log + the plan.  main
-is `23e3005`+ (v0.1.0 = `29c2cf3`); CI green; nothing uncommitted.
+is `23e3005`+ (v0.1.0 = `29c2cf3`); CI green; nothing uncommitted.  **CI: run 32659444457
+(23e3005) failed ONLY glob-01.t row 29 in a 662-s gate; the runs before and
+after passed — filed #518 (the row's run_pcl is source-mode sbcl; start
+there); the USER asked that the restart look at it.**
 
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
