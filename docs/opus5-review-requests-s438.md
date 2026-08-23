@@ -357,3 +357,74 @@ five real bugs lived in shapes no measurement population contains.  Is a
 population gap worth naming as its own task — a small corpus of
 deliberately-awkward shapes the census could carry — or is "probes plus guard
 rows" the permanent answer?
+
+---
+
+# Part 4 — Q6 (s438g + s438h + s438i): #452, #451, #450
+
+Three of P5's four.  #449 is deliberately not done — see §19.
+
+## §17  What shipped
+
+| task | was | now |
+|---|---|---|
+| **#452** | `<main::FH2>` emitted a BARE CL symbol → "The variable FH2 is unbound" at LOAD, whole file lost; `print main::FH5 "x"` the same | one predicate widened; both sites quote the name, as `readline(main::FH3)` always did |
+| **#451** | `"$?[1]"` printed `0[1]` — the scalar, then literal text, silently | the punctuation ARRAY subscripts in strings, as `$-[0]`/`$+[0]` always did |
+| **#450** | `glob("/nope-xyz")`, `glob("/home/")`, `glob("~/")` all empty | a metacharacter-free pattern is itself, and a pattern is perl's whitespace-separated LIST |
+
+## §18  Two things worth carrying forward
+
+**A fix that makes values real exposes what was passing on nothing.**
+t/op/glob.t row 18 compares `$output1 eq $output2` from two separate
+`eval q{ glob(q(./"TEST")) }` call sites.  Both were undef — that pattern has
+no wildcard and matched nothing — so the row passed while testing nothing.
+With real values it fails honestly, on two pre-existing gaps: **#489** (the
+scalar-context glob iterator is keyed by PATTERN, where perl keys it by CALL
+SITE, so the second call answers undef) and **#490** (glob does not strip csh
+quotes, so the value is `./"TEST"` where perl gives `./TEST`).  Same shape as
+the two rows the s435 flip exposed.  Snapshot row edited by hand 14/4 → 13/5.
+
+**A `Pl/t` expectation can encode the old bug.**  `glob-01.t` asserted "glob
+with nonexistent literal file returns empty" — `count:0`, which is the one
+answer perl never gives.  Rewritten under the s377 four-conjunct rule: the
+probe is in the comment, and the row now asserts the count AND the value, which
+is strictly more than it asserted before.
+
+## §19  Why #449 is not done
+
+Its own task says the CL-unsafe punctuation arrays (`@,` `@;` `@|` `@'` `@"` …)
+need a pipe-quoted symbol spelling, that this is a separate emission rule, and
+that it sits in #418's territory and should be taken WITH that work rather than
+beside it.  They keep DROPPING loudly, which is the right failure while the
+emission rule is missing.  #451 keeps them out of the interpolation set for the
+same reason — a half-working punctuation array would be worse than a loud drop.
+
+## §20  The bar
+
+| leg | #452 | #451 | #450 |
+|---|---|---|---|
+| corpus-diff (111) | **1 DIFF**: method.t:672, the exact shape | identical | n/a (a `cl/` change is invisible to it) |
+| emission A/B, 951 files | SAME 950 / **DIFF 1** (t/op/method.t, the companion twin) | SAME 951 / 0 / 0 | n/a |
+| full sweep | TOTAL 18312 (+0), GATE clean | same | same — and here the sweep IS the gate |
+| companion | — | — | io/ + op/: movers io/pvbm.t (23/5 alone, SEVENTH time) and op/glob.t (§18) |
+| gate | 166/5775 | 166/5777 | **166/5779** |
+
+Guards: `Pl/t/punct-array-glob-01.t` 13 → 21 rows — four for #452, two for
+#451, two for #450, half of them INVERSES — inverse-guarded on a cf0076c
+worktree.
+
+## §21  Asks (Q6)
+
+**Ask 11 — #489 needs a call-site identity the emission does not have.**  The
+scalar-context glob iterator is keyed by the pattern string; perl keys it by
+the OP.  The fix shape is `(p-glob PAT :site N)` with a compile-time counter,
+which touches every glob emitter (the `<*.c>` form, the builtin path, the
+readline/glob split).  Worth doing, or is a pattern-keyed iterator an accepted
+divergence given that `while (my $f = glob("*.c"))` — the shape that matters —
+works either way?
+
+**Ask 12 — three fixes in a row now have "and it exposed an accidental pass".**
+The s435 flip found two, #450 found one more.  Each time the row was comparing
+two things that were both empty.  Is that worth a standing note in the runbook
+— when a fix makes previously-empty values real, GREP the populations for rows
+that compare two of them — or is it just what the baselines are for?

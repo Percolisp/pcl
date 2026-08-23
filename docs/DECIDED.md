@@ -11,6 +11,60 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s438g + s438h + s438i (2026-08-23, Opus 5) — Q6: three of P5's four (#452, #451, #450); #449 stays with #418 by its own ruling
+
+- **#452 DONE — a PACKAGE-QUALIFIED bareword filehandle is a NAME.**
+  `_bareword_fh_p` tested a plain identifier, so `main::FH2` failed it and the
+  token was passed through UNQUOTED: `(p-readline main::FH2)`, a bare CL
+  symbol, died at LOAD ("The variable FH2 is unbound") and took the whole file.
+  ONE predicate, TWO sites, both broken the same way — `<main::FH2>` and
+  `print main::FH5 "x"` — while `readline(main::FH3)` was right because the
+  BUILTIN path quotes the name itself.  corpus-diff: 1 of 111, `method.t:672`
+  (`while (<Colour::H1>)`), exactly the shape; A/B 951 files, 1 DIFF, its
+  companion twin.
+- **#451 DONE — a punctuation ARRAY element interpolates**, in
+  `Pl/InterpScan.pm` as standing rule §8 requires.  The `$` arm continued into
+  a subscript chain for `+` and `-` only, so `"$?[1]"` printed `0[1]` — the
+  scalar followed by literal text, silently.
+- **THE INTERP SUBSCRIPT SET IS NOT `Pl::Parser`'s `%PUNCT_ARRAY_CHARS`, and
+  the difference is the point**: `^` is in that set (it asks which characters
+  can be EMITTED bare as a CL symbol, and `@^` is a legal array) but `"$^[1]"`
+  does NOT subscript in perl — `$^` is the format-top-of-page name.  Probed one
+  character at a time; two sets, two questions, documented at both ends.
+- **After #451 NINE of the ten agree with perl in BOTH paths.  The tenth is
+  `!`, wrong in the CODE path too** (`$![1]` emits
+  `(p-aref (p-errno-string) 1)` — the SCALAR `$!`, indexed): pre-existing,
+  filed **#487**.  Before the fix the two paths disagreed, so only the string
+  half looked broken; now they agree, and agree wrongly.
+- **#450 DONE — a metacharacter-free glob pattern is ITSELF**, and with it
+  **perl's WORD model**: a glob pattern is a whitespace-separated LIST of
+  patterns, one bsd_glob call per word.  The word model is not optional — the
+  literal rule is a per-word rule, and without it `glob("a b")` would answer
+  the single string "a b".  `{` counts as a metacharacter although PCL has no
+  brace expansion (**#488**), because answering `{a,b}` literally is further
+  from perl's `a`, `b` than the empty result.
+- **A FIX THAT MAKES VALUES REAL EXPOSES WHAT WAS PASSING ON NOTHING** (the
+  s435-flip pattern, now in a second place): t/op/glob.t row 18 compared
+  `$output1 eq $output2` from two `eval q{ glob(q(./"TEST")) }` call sites,
+  both undef, both times.  With real values it fails honestly on **#489** (the
+  scalar-context glob iterator is keyed by PATTERN, not by CALL SITE, so the
+  second call answers undef) and **#490** (glob does not strip csh quotes).
+  Snapshot row edited by hand 14/4 → 13/5 with that cause.
+- **A Pl/t EXPECTATION MAY ENCODE THE OLD BUG**, and `glob-01.t` did: "glob
+  with nonexistent literal file returns empty" asserted `count:0`, the one
+  answer perl never gives.  Rewritten under the s377 four-conjunct rule — the
+  probe is in the comment, and the row now asserts the count AND the value,
+  strictly more than before.
+- **#449 NOT DONE, by its own ruling**: the CL-unsafe punctuation arrays
+  (`@,` `@;` `@|` `@'` `@"` …) need a pipe-quoted emission that does not exist
+  yet, and the task says to take it WITH #418's work rather than beside it.
+  They keep dropping LOUDLY, which is the right failure while the emission
+  rule is missing.
+- Gate **166 / 5779**; sweep **TOTAL 18312 (+0), GATE clean** after each;
+  companion io/ + op/ for the `cl/` change.  Guards: `Pl/t/punct-array-glob-01.t`
+  13 → 21 (four for #452, two for #451, two for #450, half of them INVERSES),
+  inverse-guarded on a cf0076c worktree.
+
 ## s438d + s438e + s438f (2026-08-23, Opus 5) — Q5: signature parameters are declarations (#454), the feature region includes the pragma's own line (#455), and every fragment re-parse runs the token repairs (#435)
 
 - **#454 DONE — a SIGNATURE PARAMETER shadows a same-named file lexical.**

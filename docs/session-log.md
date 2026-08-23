@@ -4,6 +4,60 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
+
+Three of P5's four.  Index: DECIDED §s438g+h+i.
+
+**#452** is the smallest fix of the day and the clearest reuse win: one
+predicate, `_bareword_fh_p`, tested a plain identifier, so a package-qualified
+handle failed it and was emitted as a BARE CL symbol — `<main::FH2>` died at
+load with "The variable FH2 is unbound" and took the file with it.  The same
+predicate serves the print filehandle slot, so `print main::FH5 "x"` died the
+same way; only `readline(main::FH3)` was right, because the builtin path quotes
+the name itself.  One spelling of one thing, answered three ways.
+
+**#451** is the interpolation twin of s427's punctuation-array work.  The
+scanner's `$` arm continued into a subscript chain for `+` and `-` only, so
+`"$?[1]"` printed `0[1]` — the scalar, then literal text.  The set was probed
+one character at a time, and it deliberately is NOT the token repair's set:
+`^` belongs there (that set asks which characters can be emitted bare) and not
+here (perl does not subscript `$^`).  Afterwards nine of the ten agree with
+perl in both paths; the tenth, `!`, is wrong in the CODE path too and is now
+#487 — before the fix the two paths disagreed, so only the string half looked
+broken.
+
+**#450** turned out to be two rules, not one.  perl returns a
+metacharacter-free pattern as itself, and that is a per-WORD rule, because a
+glob pattern is perl's whitespace-separated LIST of patterns.  Implementing the
+literal rule without the word model would have answered the single string
+"a b" for `glob("a b")`.
+
+Two things this session is worth remembering for:
+
+**A fix that makes values real exposes what was passing on nothing.**
+t/op/glob.t row 18 compares two `eval q{ glob(q(./"TEST")) }` call sites; both
+were undef, so it passed.  With real values it fails honestly, on two
+pre-existing gaps — the scalar-context iterator is keyed by PATTERN where perl
+keys it by CALL SITE (#489), and glob does not strip csh quotes (#490).  Same
+shape as the two rows the s435 flip exposed.
+
+**A Pl/t expectation can encode the old bug.**  `glob-01.t` asserted that a
+nonexistent literal file globs to `count:0` — the one answer perl never gives.
+Rewritten under the s377 four-conjunct rule, with the probe in the comment and
+the row now asserting the count AND the value.
+
+#449 is deliberately not done: the CL-unsafe punctuation arrays need a
+pipe-quoted emission that does not exist yet, and its own task says to take it
+with #418's work.  They keep dropping loudly, which is the right failure while
+the emission rule is missing.
+
+**Bar**: gate 166/5779; sweep TOTAL 18312 (+0) GATE clean after each (a `cl/`
+change is invisible to corpus-diff, so the sweep is the gate there); companion
+io/ + op/ for #450.  Guards in `Pl/t/punct-array-glob-01.t`, 13 → 21 rows, half
+of them inverses, inverse-guarded on a worktree.
+
+---
+
 ## Session 438d + 438e + 438f (2026-08-23, Opus 5) — Q5: #454, #455, #435, and one gate catch the populations could not see
 
 Three items, all in the same neighbourhood — how a sub's HEAD is read — and
