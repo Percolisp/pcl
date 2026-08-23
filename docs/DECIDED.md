@@ -21,6 +21,30 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s444 (2026-08-24, Fable) — round 4 REVIEWED + MERGED (E #470, G #485+#484a+#492, H #516+#515+#511, F #491+#495ac); #518 fixed; every merged-tree leg clean
+
+- **All four round-4 agents APPROVED and ff-merged** (final tree `c42cc8a`,
+  gen **v2-221** = F's post-rebase renumber adopted as the batch renumber —
+  above every agent string; artifacts regenerated on exactly this tree).
+  Legs: cold gate **171/5924** (only the 13 pclxs xs rows); sweep **TOTAL
+  18313 (+0), GATE clean, drops 5 = census, child drops 9/6**; gate-SET scan
+  vs `c76875a` **638×2 ZERO diff**; companion 528 files with TWO rows edited
+  by cause (`cmd/subval.t` 31/4, `op/leaky-magic.t` 66/5 — both s443f) and
+  the three known-noise files left alone.  Record: session-log §444.
+- **A rebased agent whose assigned generation string falls BELOW main's must
+  renumber ABOVE main before measuring** (F: v2-210 < v2-220 would have
+  served pre-rebase transpiles from the shared cache).  Launcher rule
+  amended: assign agent strings above the highest PLANNED main, or expect
+  this.
+- **#495 shape (b) waits for the #266 classifier BY MEASUREMENT**: the two
+  ALL-CAPS escapes in `handle_subcalls` are load-bearing — widening them
+  regresses the imported-constant `Foo::BAR` case (probed).  Do not patch
+  per-site.
+- **#518**: glob-01.t joins the cached-core prefix; its row 29 asserts EXACT
+  output.  CI half of the bar (green twice) rides the next push.
+- Tasks closed #470 #484 #485 #491 #492 #511 #515 #516; FILED **#519–#532**
+  (each carries its probes and bar; #520 is TWO-SIDED — runtime half first).
+
 ## s443f (2026-08-24, Opus agent F) — a bareword filehandle NAME has ONE canonical spelling; a bareword in a `*` slot is that name; the strictly-single operand ends by PRECEDENCE
 
 - **A bareword filehandle NAME is CANONICALISED at the `Pl::Environment` seam**

@@ -788,7 +788,10 @@ class/utf8.t	4	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/f
 cmd/elsif.t	4	0	4	0	OK		0
 cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)	0
 cmd/mod.t	15	0	15	0	OK		0
-cmd/subval.t	36	0	27	3	DIFF	unbound:F; aborted-forms:4: The variable F is unbound.	0
+# s444: cmd/subval.t 27/3 -> 31/4 EDITED BY HAND — s443f (#495 (c) + #491): the
+#   unbound-F handle aborts are gone (aborted-forms 4 -> 1), five more rows run;
+#   predicted by agent F's emission A/B.  Both the parallel and #366 serial pass agree.
+cmd/subval.t	36	0	31	4	DIFF	aborted-forms:1: Can't close: at subval.t line N. 	0
 cmd/switch.t	18	0	18	0	OK		0
 comp/bproto.t	16	0	10	6	DIFF		0
 comp/cmdopt.t	44	0	44	0	OK		0
@@ -1030,7 +1033,11 @@ op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	22	16	DIFF		0
 op/kvhslice.t	39	0	18	20	DIFF		0
 op/lc.t	2716	0	2683	33	DIFF		0
-op/leaky-magic.t	71	0	65	6	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/	0
+# s444: op/leaky-magic.t 65/6 -> 66/5 EDITED BY HAND — row 3 (`<foo::ARGV> does not
+#   iterate through STDIN`) passes since s443f #491: a QUALIFIED spelling of a
+#   forced-main handle names that package's own glob, no longer aliasing main::ARGV.
+#   Attributed by running the file ALONE on a c76875a worktree (65/6) vs main (66/5).
+op/leaky-magic.t	71	0	66	5	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/	0
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0

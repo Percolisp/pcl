@@ -4,6 +4,109 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 444 (2026-08-24, Fable) — round 4 RESTARTED at the USER's word, all four agents finished, reviewed and MERGED; #518 fixed; the merged-tree legs all clean
+
+**The restart (USER: "restart where the Opus four clients were; when they are
+done, review the results").**  Each stopped agent resumed as a fresh Opus
+agent in its KEPT worktree, told what its uncommitted diff was; every diff
+was finished, none redone.  One stop-record premise was wrong the right way:
+H's two dirty files were not a "v1 text twin" of #516 but the START of #515 —
+the agent read the diff first, as instructed, and finished it as #515.
+
+**#518 first (the USER asked the restart to look at it): FIXED on main
+(`c76875a`).**  glob-01.t was the ONE Pl/t file still loading the runtime
+from source (~1.2 s recompile per row — the exact timing exposure of the CI
+flake); it now takes `PCLCore::sbcl_prefix` like its ~40 siblings (45 s →
+5 s) and row 29 asserts `is($output, "1")` instead of `qr/1/`, so a
+recurrence prints what the output WAS.  File green 4× locally; the CI half
+of the bar (green twice) lands with the next push.
+
+**The four merges, each reviewed with my own probes vs perl 5.40.3 before
+its ff (20 probe files this session):**
+- **E = #470** (`37bd6f2`): the identity promotion requires the file never
+  SPELL the package variable of the promoted name (`_scan_pkg_global_spellings`,
+  computed before the first rename, sigil-exact, glob marks all three); `our`
+  masks in `_ref_shadowed` via `_stmt_binding`.  Twelve silent-wrong shapes
+  fixed; ONE explained costless mover (local.t over-refusal, 303/13 both
+  trees).  Residue filed **#519** (the no-capture `my $y; { our $y; }` whole-file
+  refusal, pre-existing).
+- **G = #485 + #484(a) + #492** (`9c5e983` + `a31aad4`): a signature DEFAULT
+  is part of the capture set with left-parameters-only shadows, ONE resolver
+  (`_sub_captures_name`) for the gate/promoter/hoist; the prototype pre-merge
+  runs BEFORE the token repairs (twice, re-entrant, `local $!`) and the
+  repair's term question reads `Pl::Environment::proto_is_zero_arg` —
+  `pi / 2 + pi / 4` computes; the s/// replacement gate asks
+  `Pl::InterpScan::scan` (the task's undecoded-bytes hypothesis KILLED by
+  measurement — the private ASCII class was the whole bug).  Findings filed
+  **#520–#524** (punctuation magics in replacements are TWO-SIDED — the
+  lambda path lacks prematch/postmatch, do not widen the gate first; the
+  `${\ "L"}` load-killer; `\U`/`\L`/`\E` literal in replacements; `%SIG`
+  blind to an INHERITED disposition — G's own `nohup`'d first gate paid for
+  that one; errno-dependent die exit codes).
+- **H = #516 + #515 + #511** (`8d468b7` + `8cdaeef`): `->(` joins the
+  paren-scalar-base family; an anon sub binds `*pcl-current-package*` to its
+  DEFINING package (p-sub's own binding as a compile-time constant, both
+  wrapper spellings; map/grep blocks excluded — probed both directions wrong
+  before); `%INC` records the use/require of a module PCL never loads
+  (`%p-note-inc-path` records-if-absent + resolves through @INC;
+  `p-require-file` NOTES instead of clobbering; ONE `_never_loaded_pragma`
+  predicate where the `use`/`no` arms used to disagree).  My one failing
+  probe spelling was attributed to **#475** (pre-existing, identical on the
+  pre-H tree).  Findings filed **#525–#528** (`${"n"}`/`*{"n"}` DISAGREE
+  about the stash — the symbolic VARIABLE resolver reads `*package*`;
+  `# PCL Test library loaded` leaks onto a non-test program's stdout;
+  multi-element paren base silent-wrong `(1,2,$r)->[1]` = 2 not 20; the
+  pragma-family `%INC` residue).
+- **F = #491 + #495(a)(c)** (`4c32128` + `c42cc8a`): a bareword handle NAME
+  is canonicalised at ONE seam (`Pl::Environment::canon_filehandle_name`;
+  `fh_bareword_shape` replaces four regex copies) with the probed ASYMMETRY —
+  forced-main handles resolve in main:: UNQUALIFIED from every package, but
+  an explicit qualifier names that package's own glob (`print Foo::STDOUT` is
+  undef and now emits pipe-quoted, unreachable by the short-name fallback);
+  a `*` slot's two halves read apart (a BUILTIN slot takes the bareword as
+  the handle even over a declared sub — `tell FILE1` = -1; a USER `(*)` sub
+  CALLS a declared name, else gets the NAME as a plain string); the
+  strictly-single bareword operand ends where PRECEDENCE says
+  (`_extend_high_prec`, clamped to the #343 ceiling) — `close G ? "a" : "b"`
+  fixed while `close G . "x"` (= `close("Gx")`) is preserved.  **Shape (b)
+  stays open ON PURPOSE**: the two ALL-CAPS escapes are load-bearing (an
+  imported constant the export scan cannot see must stay a funcall — probed
+  that widening regresses `Foo::BAR`); it is #266's ruled asymmetry and
+  waits for the classifier, recorded in #495.  F ran the gate-SET scan
+  itself (638×2, clean) and took gen **v2-221** deliberately (its assigned
+  v2-210 fell BELOW main's v2-220 after the rebase — under the shared cache
+  that would have served pre-rebase transpiles to the new tree; the batch
+  renumber adopted F's).  Residues filed **#529–#532** (fileno of a closed
+  handle -1 vs undef; a registered handle as a WORD in an expression is an
+  unbound CL variable; `STDOUT->autoflush` needs the IO::Handle bridge;
+  declared-sub-AND-handle in a user `(*)` slot).
+
+**The merged-tree legs, all run this session on the final tree (`c42cc8a`,
+gen v2-221, artifacts regenerated by F on exactly this tree):**
+- **Cold gate** (module cache wiped): **171 files / 5924 rows**, the only
+  failures the 13 pclxs xs rows (+78 guard rows over s440's 5846).
+- **Full sweep**: **TOTAL passing 18313 (+0), 0 new / 0 fixed, GATE clean,
+  drops 5 = census, child drops 9 in 6 files** (the blessed set); the
+  UNSTABLE/DID-NOT-RUN lines are the tool's own crash-file noise.
+- **Gate-SET scan** vs a `c76875a` worktree, BOTH populations (E's
+  `our`-mask widening + G's repair widening): **638×2, ZERO diff lines**.
+- **Companion `--all --quick --jobs 4`**: 528 files, snapshot fully covered.
+  TWO rows edited by hand with causes: `cmd/subval.t` 27/3 → **31/4**
+  (s443f — the unbound-F aborts gone, predicted by F's A/B) and
+  `op/leaky-magic.t` 65/6 → **66/5** (row 3 `<foo::ARGV>` passes since #491;
+  attributed by running the file ALONE on a `c76875a` worktree, 65/6 there).
+  NOT edited: `io/pvbm.t` 20/8 (the EIGHTH time), `uni/variables.t`
+  (rows-unstable TIMEOUT), `op/utf8cache.t` (TIMEOUT↔DIFF flips with load at
+  identical rows 2/0 — alone it reads TIMEOUT 2/0 again; #477).
+
+**Task store: closed #470 #484 #485 #491 #492 #511 #515 #516 (+ #518's
+local half noted); #495 narrowed to shape (b); FILED #519–#532.**  Round 4
+is DONE; the plan's next rounds stand: #502, I = #508–#510 + #512 + #513,
+J = #505–#507 + #514 + #517, K = #463 items 3–5 + #479 compiler half + #478;
+plus the new #519–#532 fillers ordered by what they block.  The four agent
+worktrees and branches removed after the merges; the USER's push (week of
+2026-08-24) picks up everything including #518's CI half.
+
 ## Session 440 (2026-08-23, Fable) — CI RED diagnosed and fixed (`Data::Dump`, a non-core import; the PPI floor); the stock-machine rehearsal; the review docs removed from git (USER)
 
 **The CI failure (run 32648385694, step 6 `tools/install-pcl`, ~3 s, exit 2,
