@@ -1269,6 +1269,44 @@ In a **fork child**, `END` blocks inherited from the parent still run at
 the child's exit (as in Perl); test-harness plan-checking is pid-guarded
 separately and is not an IR concern.
 
+### 7.5 Bareword filehandle NAMES (normative, s443f)
+
+A bareword handle is a **name**, and the emitted CL carries it as a symbol
+(`(p-open FH …)`, `(p-close FH)`, `(p-readline 'FH)`, `(p-print :fh 'FH …)`;
+the `%p-fh-arg` family quotes an unquoted bareword itself, the other two
+quote it in the emission). Perl names the handle by its *glob*, so one
+handle has more than one spelling, and **the emitter canonicalises the name
+so that one handle is one symbol** — a translator that keys handles by the
+spelling as written will make two handles out of one:
+
+* the eight handles perl forces into `main::` from every package — `STDIN`
+  `STDOUT` `STDERR` `ARGV` `ARGVOUT` `ENV` `INC` `_` — resolve in `main`
+  wherever they are named **unqualified**, so `main::STDOUT` ≡ `STDOUT`;
+* every other bareword handle belongs to the package that names it, so
+  `main::FH` ≡ `FH` in `main`, and `package P; open(P::FH,…)` ≡
+  `open(FH,…)`;
+* **but an explicit qualifier always names that package's own glob.**
+  `Foo::STDOUT` is NOT `STDOUT` — inside `package Foo`, `print STDOUT "x"`
+  writes and `print Foo::STDOUT "x"` writes nothing and returns undef. The
+  collapse in the second bullet therefore does not apply to the eight names
+  in the first.
+
+A qualifier PCL cannot collapse stays in the name. Since a host symbol
+`Foo::H1` needs the namespace `Foo` to exist at read time, the emitter
+registers that namespace (the same `p-defpackage` a qualified call emits)
+and quotes the designator so the reader's namespace choice survives
+`%p-fh-arg`; a qualified spelling of one of the eight is emitted as a single
+`|Foo::STDOUT|` symbol instead, so it cannot be found by the runtime's
+resolve-by-short-name fallback. Perl's stash autovivifies, so `Foo::H1` is a
+usable handle whether or not the program contains `package Foo`.
+
+**In an argument slot, a bareword handle is its NAME as a plain string.**
+A `*`-prototype slot of a *user* sub receives `"FOO"` — and `"G"` even when
+`G` is an open handle, never a glob — while a name that is *callable* at
+that point is called instead. The **builtin** handle slots do not follow
+that second rule: there the bareword is always the handle, even when a sub
+of the same name is declared (`sub FILE1 () {42}; tell FILE1` is `-1`).
+
 ## 8. Magic globals
 
 All are dynamically-scoped boxes exported from the runtime namespace:

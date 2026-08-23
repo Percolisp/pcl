@@ -21,6 +21,58 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s443f (2026-08-24, Opus agent F) — a bareword filehandle NAME has ONE canonical spelling; a bareword in a `*` slot is that name; the strictly-single operand ends by PRECEDENCE
+
+- **A bareword filehandle NAME is CANONICALISED at the `Pl::Environment` seam**
+  (#491).  perl names a handle by its GLOB, so one handle has several
+  spellings: `main::FH` IS `FH` in package main, `package P; open(P::FH,…)` IS
+  `open(FH,…)`, and the EIGHT forced-main handles (`STDIN STDOUT STDERR ARGV
+  ARGVOUT ENV INC _`) resolve in `main::` from every package.  **The inverse is
+  the load-bearing half: an explicit qualifier still names THAT package's glob**
+  — inside `package Foo`, `print STDOUT "x"` prints and `print Foo::STDOUT "x"`
+  prints NOTHING and returns undef (probed), so the "qualifier equals the
+  current package" collapse must NOT apply to those eight names.
+  `canon_filehandle_name` is that answer; `is_filehandle`, `add_filehandle` and
+  `Pl::ExprToCL::_fh_sym` all ask it, so the registry cannot disagree with
+  itself and the two spellings emit ONE CL symbol instead of two that had to
+  find each other through `%p-resolve-fh`'s by-name fallback.  A qualified
+  forced-main name (`Foo::STDOUT`) is emitted as one pipe-quoted symbol
+  (`Pl::CLForm::cl_whole_sym`, which `cl_pkg` now is) precisely so it CANNOT
+  reach that fallback.
+- **The ALL-CAPS handle convention is asked of the NAME, never of the
+  qualifier** — `Pl::Environment::fh_bareword_shape`, replacing four hand-written
+  copies of the same regex (the print `:fh` site, the skip for a word after a
+  `*`-prototype function, `_extract_paren_filehandle`, `defined FH`).  The
+  `readline`/`select` builtin emitters, which spelled the name themselves, were
+  the last site that could disagree and now go through `_fh_sym` too.
+- **The `*` (filehandle) prototype slot has TWO halves and perl reads them
+  DIFFERENTLY** (#495 (a), one helper `Pl::PExpr::_read_star_slot_bareword`,
+  asked by the paren-less AND the paren call sites).  For a **BUILTIN** handle
+  slot the bareword is ALWAYS the handle, even when a sub of that name is
+  declared — `sub FILE1 () {42}; tell FILE1` is -1, not 42 (probed;
+  `t/comp/parser.t:540`).  For a **USER** `(*)` sub a DECLARED name is CALLED
+  and anything else arrives as its NAME in a plain string — `sub fh (*)` gets
+  SCALAR `"FOO"`, and SCALAR `"G"` even when `G` is an OPEN handle, never a
+  glob (probed).  PCL emitted the bareword NODE into the user sub's argument
+  list, which quotes nothing, so it reached SBCL as an unbound variable and
+  killed the run.  The discriminator between the halves is `min_params`, which
+  only a DECLARED prototype carries.
+- **The strictly-single bareword operand ends where PRECEDENCE says, not where
+  a token list says** (#495 (c)).  `close`/`eof`/`fileno` are named unary
+  operators: the operand runs through everything tighter (`.` `+` `x` `->`) and
+  stops at everything looser (`,` `?` `<` `&&`).  That rule already existed as
+  `_extend_high_prec` — the helper the named-unary site uses — so the site calls
+  it (clamped to the #343 argument ceiling) instead of its own three-case list,
+  whose third case ("any other operator: leave the operand at the ceiling") made
+  `print close G ? "a" : "b"` into `close(G ? …)`.  **A "stop at any operator"
+  rule would have been wrong the other way**: `close G . "x"` really is
+  `close("Gx")` in perl.
+- Guards `Pl/t/punct-array-glob-01.t` (31) + `Pl/t/user-unary-01.t` (21), every
+  row the live perl answer, inverse-run on a `29c2cf3` worktree; the two #452
+  emission rows were rewritten under the s377 four-conjunct rule (they asserted
+  the two-symbols-for-one-handle this closes).  Shapes corpus gains S04/S05.
+  Session log s443f.
+
 ## s443h (2026-08-24, Opus agent H) — an ANON sub's home package; `%INC` for a module PCL does not load
 
 - **`(EXPR)->(...)`** — a `->` postfix on a PARENTHESISED expression
