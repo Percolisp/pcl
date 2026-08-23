@@ -4309,30 +4309,24 @@
 
 (defun p-printf (&rest args)
   "Perl printf - formatted print (with optional filehandle)"
-  (let ((fh (%p-default-out))
-        (fmt nil)
-        (fmt-args nil))
-    ;; Check for :fh keyword.  Same rules as p-print, including the bail: a
-    ;; named-but-unopened handle resolves to nil, and (princ … nil) would print
-    ;; to *standard-output* — output silently going to the wrong place.  perl
-    ;; sets EBADF, prints nothing and returns false.
-    (when (and (>= (length args) 2) (eq (first args) :fh))
-      (let ((desig (second args)))
-        (setf args (cddr args))
-        (let ((resolved (%p-out-fh-or-fail desig "printf")))
-          (unless resolved (return-from p-printf *p-undef*))
-          (setf fh resolved))))
+  ;; The :fh keyword is split off by the shared %p-out-target (defined with the
+  ;; print family below).  Same rules as p-print, including the bail: a
+  ;; named-but-unopened handle resolves to nil, and (princ … nil) would print to
+  ;; *standard-output* — output silently going to the wrong place.  perl sets
+  ;; EBADF, prints nothing and returns false.  printf never appends $\.
+  (multiple-value-bind (fh list-args) (%p-out-target args "printf")
+    (unless fh (return-from p-printf *p-undef*))
     ;; printf takes a LIST (FORMAT, LIST): flatten raw @array/%hash args so the
     ;; format comes from the first flattened element, e.g. `printf @a` where
     ;; @a = ("%d\n", 5).  A p-box-wrapped ref stays scalar (printf "%s", $aref).
-    (setf args (coerce (p-flatten-args args) 'list))
-    ;; First remaining arg is format, rest are format args
-    (setf fmt (first args))
-    (setf fmt-args (rest args))
-    (let ((*p-sprintf-caller* "printf"))
-      (princ (apply #'p-sprintf fmt fmt-args) fh))
-    (%p-maybe-autoflush fh)
-    1))
+    ;; First flattened arg is the format, the rest are its arguments.
+    (let* ((flat (coerce (p-flatten-args list-args) 'list))
+           (fmt (first flat))
+           (fmt-args (cdr flat)))
+      (let ((*p-sprintf-caller* "printf"))
+        (princ (apply #'p-sprintf fmt fmt-args) fh))
+      (%p-maybe-autoflush fh)
+      1)))
 
 ;;; ============================================================
 ;;; Assignment and Mutation
@@ -8439,53 +8433,57 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
      (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
      nil)))
 
+(defun %p-out-target (args site)
+  "Split the optional leading `:fh DESIG` off a print/printf/say ARGS list,
+   SITE naming which.  Returns (values STREAM REST-ARGS); STREAM is NIL when an
+   explicit handle cannot be written to — %p-out-fh-or-fail has already done
+   what perl does (EBADF, no output, false) and the caller returns without
+   writing.  ONE splitter for the three list operators (CLAUDE.md 11): each
+   carried its own copy, and p-say's copy did not even strip the keyword."
+  (if (and (>= (length args) 2) (eq (first args) :fh))
+      (values (%p-out-fh-or-fail (second args) site) (cddr args))
+      (values (%p-default-out) args)))
+
+(defun %p-write-list (fh args ors)
+  "Write ARGS — a print/say LIST — to FH: $, between successive elements, then
+   ORS when it is a non-empty string.  `print` passes the current $\\; `say`
+   passes \"\\n\", because perl's say appends a newline INSTEAD of $\\, never as
+   well as it (task #500, probed s442d: `$\\ = \"<O>\"; say \"x\"` prints \"x\\n\").
+   perl does NOT localize $\\ over say — an overload/tie handler that runs while
+   say stringifies an argument still reads the program's $\\ (probed) — which is
+   why say passes its terminator here instead of rebinding the variable.
+
+   The bare-form $_ default (`print;` / `print FH;` / `say;` / `printf;`) is
+   supplied EXPLICITLY by the codegen (ExprToCL gen_funcall emits `(p-print …
+   $_)`), so the generated CL is self-describing and there is no hidden runtime
+   default here.  A genuinely empty LIST (`print @empty` / `say @empty`) prints
+   nothing but the terminator, exactly as perl does.
+   Flatten raw @array / %hash args (both take a LIST): a bare vector/hash
+   spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar (so
+   `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening."
+  (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
+        (firstp t))
+    (dolist (arg (coerce (p-flatten-args args) 'list))
+      (when (and ofs (not firstp)) (princ ofs fh))
+      (setf firstp nil)
+      (princ (to-string arg) fh)))
+  (when (and (stringp ors) (plusp (length ors)))
+    (princ ors fh))
+  (%p-maybe-autoflush fh)
+  t)
+
 (defun p-print (&rest args)
   "Perl print - prints args then appends $\\ (output record separator)"
-  (let ((fh (%p-default-out)))
-    ;; Check for :fh keyword
-    (when (and (>= (length args) 2) (eq (first args) :fh))
-      (let ((desig (second args)))
-        (setf args (cddr args))
-        (let ((resolved (%p-out-fh-or-fail desig "print")))
-          ;; NIL = perl already warned (or died); the write does not happen.
-          (unless resolved (return-from p-print *p-undef*))
-          (setf fh resolved))))
-    ;; The bare-form $_ default (`print;` / `print FH;` / `say;` / `printf;`)
-    ;; is supplied EXPLICITLY by the codegen (ExprToCL gen_funcall emits
-    ;; `(p-print … $_)`), so the generated CL is self-describing and there is no
-    ;; hidden runtime default here.  A genuinely empty LIST (`print @empty`)
-    ;; correctly prints nothing — it never reaches this function with null args.
-    ;; Flatten raw @array / %hash args (print takes a LIST): a bare vector/hash
-    ;; spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar
-    ;; (so `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
-    ;; $, (output field separator) is printed BETWEEN successive arguments.
-    (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
-          (firstp t))
-      (dolist (arg (coerce (p-flatten-args args) 'list))
-        (when (and ofs (not firstp)) (princ ofs fh))
-        (setf firstp nil)
-        (princ (to-string arg) fh)))
-    ;; Append output record separator $\ if set
-    (let ((ors (unbox |$\\|)))
-      (when (and (stringp ors) (plusp (length ors)))
-        (princ ors fh)))
-    (%p-maybe-autoflush fh)
-    t))
+  (multiple-value-bind (fh rest) (%p-out-target args "print")
+    ;; NIL = perl already warned (or died); the write does not happen.
+    (unless fh (return-from p-print *p-undef*))
+    (%p-write-list fh rest (unbox |$\\|))))
 
 (defun p-say (&rest args)
-  "Perl say (print with newline)"
-  (let ((fh (%p-default-out)))
-    ;; Resolve the target handle once (same rules as p-print); bail with EBADF
-    ;; on a named-but-unopened handle so we don't emit a stray newline.
-    (when (and (>= (length args) 2) (eq (first args) :fh))
-      (let ((desig (second args)))
-        (let ((resolved (%p-out-fh-or-fail desig "say")))
-          (unless resolved (return-from p-say *p-undef*))
-          (setf fh resolved))))
-    (apply #'p-print args)
-    (terpri fh)
-    (%p-maybe-autoflush fh)
-    t))
+  "Perl say - print with \"\\n\" appended INSTEAD of $\\ (task #500)"
+  (multiple-value-bind (fh rest) (%p-out-target args "say")
+    (unless fh (return-from p-say *p-undef*))
+    (%p-write-list fh rest (string #\Newline))))
 
 (defun p-warn-is-reference (val)
   "Check if val is a Perl reference (hash, array ref, blessed object, etc.)"

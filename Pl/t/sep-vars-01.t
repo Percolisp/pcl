@@ -38,7 +38,7 @@ my @sbcl_rt      = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 sub write_pl {
     my ($code) = @_;
@@ -135,4 +135,35 @@ printf("defaulty=%s", defaulty());
 $, = ""; $\ = "";
 print "after-set: tapish=", tapish(), " def=",
       (defined($\) ? "d" : "u"), (defined($,) ? "d" : "u"), "\n";
+PL
+
+# ── 5. say appends "\n" INSTEAD of `$\` (task #500) ────────────────────────
+# perldoc -f say: "acts just like print except it implicitly appends a newline
+# ... $\ is ignored".  PCL's p-say was `print` + `terpri`, so a set `$\` came
+# out BEFORE the newline — `$\ = "<O>"; say "said"` printed "said<O>\n".
+# `$,` is unaffected (it separates say's arguments exactly as print's), and
+# perl does NOT localize `$\` over the call: an overload handler that runs
+# while say stringifies an argument still reads the program's `$\` (probed
+# s442d, and that is why the fix passes the terminator instead of rebinding).
+both_agree('#500 say uses "\\n" INSTEAD of $\\, keeps $,, and leaves $\\ readable', <<'PL');
+use feature 'say';
+package O;
+use overload '""' => sub { "OBJ(" . (defined($\) ? $\ : "u") . ")" }, fallback => 1;
+sub new { return bless {}, shift }
+package main;
+$\ = "<O>"; $, = "-";
+say "said";
+say "a", "b";
+print "p", "q";
+print "\n";
+my @e;
+say @e;
+$_ = "topic"; say;
+say STDOUT "fh";
+say O->new;
+printf("%s", "pf"); print "\n";
+print "still=", (defined($\) ? $\ : "u"), (defined($,) ? $, : "u"), "\n";
+$\ = undef; $, = undef;
+say "plain";
+say "x", "y";
 PL
