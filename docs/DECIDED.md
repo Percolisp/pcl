@@ -57,7 +57,9 @@ those two files and the live plan doc directly -- no new review-doc families.*
   global — #421's family), **#498** (a punctuation ARRAY is package-qualified;
   perl forces it into main::) and **#499 FIXED** (LIST-context glob was stateful
   per pattern: full, EMPTY, full … — `p-glob--list-context` keeps no state now;
-  guard glob-01.t).
+  guard glob-01.t).  **#498 FIXED s440c**: the twelve punctuation arrays are
+  runtime-owned (defvar + export from :pcl, the `@-`/`@+` way) and the compiler
+  declares them no more (gen v2-182; ir-spec §2b); guards punct-array-glob-01.t.
 - **The review-doc families are GONE from the tree** (USER s439: "remove the
   fable answers and opus reviews from git.  It doesn't seem necessary?"):
   `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)

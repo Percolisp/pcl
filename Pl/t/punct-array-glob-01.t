@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 24;
 
 sub write_pl {
     my ($code) = @_;
@@ -308,6 +308,44 @@ is(emitted(q{while (<<>>) { print }}), emitted(q{while (<>) { print }}),
     my $out = run_cl(qq{\@? = (11,22,33);\nprint "F:\$? [1]\\n";\n});
     is($out, "F:0 [1]\n",
        '#451 inverse: a space ends the reference; the subscript stays literal');
+}
+
+# Task #498 (s440, found by the SHAPES corpus): perl forces every punctuation
+# name into package main, so `@?` written in package A IS `@?` read in package
+# B.  PCL forward-declared the #415 arrays per PACKAGE (`(in-package :A)
+# (defvar @? …)` / `(in-package :B) (defvar @? …)` = two symbols); they are
+# runtime-owned and exported now, like `@-`/`@+`.  Block and statement forms,
+# all eleven siblings + the element spelling; the perl oracle is the
+# expectation.  INVERSE: a NAMED array in two packages stays two arrays.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+{ package A; @? = (1, 2, 3); @! = (4); @. = (5); @/ = (6); @~ = (7); @^ = (8);
+             @& = (9); @% = (10); @= = (11); @< = (12); @> = (13); }
+{ package B; print "e:$?[1] n:", scalar(@?), " sibs:", scalar(@!), scalar(@.), scalar(@/),
+             scalar(@~), scalar(@^), scalar(@&), scalar(@%), scalar(@=), scalar(@<), scalar(@>), "\n"; }
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#498: a punctuation array written in package A is read in package B (block form)');
+}
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+package A; @? = (1, 2, 3);
+package B; print "e:$?[1] n:", scalar(@?), "\n"; $?[0] = 9;
+package main; print "m:@?\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#498: ... and in the statement form, through three packages');
+}
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+{ package A; @x = (1, 2, 3); }
+{ package B; print "B:", scalar(@x), " A:", scalar(@A::x), "\n"; }
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#498 inverse: a NAMED array in two packages stays two arrays');
 }
 
 # Task #450 (s438i): perl's glob returns a pattern with no METACHARACTER as

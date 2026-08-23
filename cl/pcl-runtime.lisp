@@ -258,6 +258,10 @@
    #:$_ #:$1 #:$2 #:$3 #:$4 #:$5 #:$6 #:$7 #:$8 #:$9 #:%+
    #:$10 #:$11 #:$12 #:$13 #:$14 #:$15 #:$16 #:$17 #:$18 #:$19 #:$20
    #:|$&| #:|$`| #:|$'| #:|$+| #:|$^N| #:|@-| #:|@+| #:|%-| #:|$^H| #:|%^H|
+   ;; The punctuation ARRAYS (`@?` `@!` `@.` `@/` `@~` `@^` `@&` `@%` `@=` `@<` `@>`, and
+   ;; the synthesized `@#`): perl forces every punctuation name into main::, so
+   ;; they are ONE symbol for every user package -- owned here, like @- (#498)
+   #:|@?| #:|@!| #:|@.| #:|@/| #:|@~| #:|@^| #:|@&| #:|@%| #:|@=| #:|@<| #:|@>| #:|@#|
    #:|@{^CAPTURE}|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
@@ -861,6 +865,27 @@
 ;; start/end of capture group N.  Non-participating groups hold undef (nil).
 (defvar |@-| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_START - match/group start offsets")
 (defvar |@+| (make-array 0 :adjustable t :fill-pointer 0) "Regex @LAST_MATCH_END - match/group end offsets")
+;; The punctuation ARRAYS -- `@?` `@!` `@.` `@/` `@~` `@^` `@&` `@%` `@=` `@<`
+;; `@>` (legal perl, no special meaning) and `@#` (never in source: perl reads
+;; `#` as a comment; the compiler synthesizes it for `$#[...]`).  perlvar:
+;; punctuation names are forced into package main, so a write in package A and
+;; a read in package B meet.  Until s440 the compiler forward-declared them per
+;; PACKAGE (`(in-package :A) (defvar @? ...)` / `(in-package :B) (defvar @? ...)`
+;; = two symbols), so `{ package A; @? = (1,2,3) } { package B; print $?[1] }`
+;; printed nothing (#498).  Owned here and EXPORTED, they are one symbol
+;; everywhere, the @- / @+ way.
+(defvar |@?| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@!| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@.| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@/| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@~| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@^| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@&| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@%| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@=| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@<| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@>| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@#| (make-array 0 :adjustable t :fill-pointer 0))
 ;; @{^CAPTURE} (5.26+): the capture GROUP VALUES of the last successful match,
 ;; 0-based -- element 0 is $1.  Truncated after the last participating group,
 ;; exactly like @- / @+ (perl: "$#{^CAPTURE} is one less than $#-"), with undef
@@ -11993,7 +12018,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-181"
+(defparameter *pcl-cache-generation* "v2-182"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

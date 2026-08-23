@@ -454,6 +454,15 @@ everything not word-shaped (punctuation and caret magic — `$@`, `$1`, `$!`,
 and mixing the two declarers on one symbol is a load-time error in SBCL —
 loud, never silent.
 
+**Punctuation names are `main::` everywhere** (perlvar: "forced to be in package
+main").  The punctuation SCALARS and the regex arrays/hashes (`$_ $0 $! $, $\
+@- @+ %+ %-` …) are runtime symbols exported from `:pcl`, so every user
+package (which `(:use :pcl)`) reads the same symbol; since s440 (#498) the
+punctuation ARRAYS `@? @! @. @/ @~ @^ @& @% @= @< @>` and the synthesized
+`@#` are owned the same way — the compiler emits the bare name and declares
+nothing, so `@?` written under `package A` and read under `package B` is one
+array.  A per-package `(defvar @? …)` was the old emission and made them two.
+
 ### 2b.2 The declaration forms
 
 | Perl | v2 emission |

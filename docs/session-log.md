@@ -98,6 +98,21 @@ list context now expands every call and touches no iterator state.  Guard
 rows in `Pl/t/glob-01.t` (perl-probed, inverse-run: `2 0 2` + the infinite
 loop on the old tree).  Runtime change → the sweep runs with the s441 batch.
 
+**s440c — #498 FIXED at the right layer: the twelve punctuation arrays are
+RUNTIME-OWNED.**  perl forces every punctuation name into main::; PCL's
+`_forward_global_decls` declared the #415 arrays per PACKAGE (`(in-package :A)
+(defvar @? …)` / `(in-package :B) (defvar @? …)` — two symbols, read-time
+`in-package`), so a write in A and a read in B never met.  Now `@? @! @. @/
+@~ @^ @& @% @= @< @>` + the synthesized `@#` are defvar'd and EXPORTED from
+`:pcl` exactly like `@-`/`@+` (one symbol in every user package), and the
+compiler's %punct bucket is gone (emission change: generation **v2-182**,
+artifacts regenerated).  corpus-diff: the 111 IDENTICAL; shapes: only the
+removed `defvar` lines (punct-arrays-glob.pl, bareword-handles.pl); lib A/B 22
+SAME.  Guards in `punct-array-glob-01.t` (+3: block form with all eleven
+siblings, statement form through three packages, the NAMED-array inverse);
+ir-spec §2b "Punctuation names are main:: everywhere".  Runtime + emission
+→ the sweep runs with the s441 batch.
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,

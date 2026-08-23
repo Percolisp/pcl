@@ -6387,27 +6387,22 @@ sub _forward_global_decls {
   # that question.
   my $lb = $free_out ? ($seg_lex // {}) : {};
   my %skip_pkg = map { $_ => 1 } qw(ENV INC SIG pcl);
-  my (%seen, %cross, %caret, %punct);
+  my (%seen, %cross, %caret);
   for my $line (split /\n/, $text) {
     next if $line =~ /^\s*;;/;
     # A declaration line is not a USE — skip both spellings (a p-defcell line
     # that reached the scan would re-declare its own name, and for a renamed
     # cell that second declaration lands in the wrong bucket).
     next if $line =~ /^\s*\((?:defvar|p-defcell)\s/;
-    # Punctuation-named arrays — `@#` (bare `$#` magic + subscript lowers to
-    # `(p-aref @# …)`) and its siblings `@?`, `@!`, … , which arrive both that
-    # way (`$?[1]` → `(p-aref @? 1)`) and now as source symbols (`@?` is legal
-    # perl; Pl::Parser::_merge_punct_array_symbols repairs PPI's split).  The
-    # [A-Za-z_] scan below can't match them, same as the caret specials.  A
-    # genuine global, never a capturable lexical, so it is defvar'd even in
-    # eval mode (like %caret, unlike %seen).
-    #
-    # `$?[1]` USED TO CRASH THE WHOLE FILE for want of this line being general
-    # (unbound `@?` at load): the `@#` spelling was declared and every sibling
-    # was not — a one-member fix of a family (task #415).  The character class
-    # is Pl::Parser's %PUNCT_ARRAY_CHARS plus `#`, which never appears in
-    # source (perl reads it as a comment) and is only ever synthesized.
-    $punct{"\@$1"} = 1 while $line =~ /(?<![\w:|])\@([#?!.\/~^&%=<>])(?!\w)/g;
+    # Punctuation-named arrays — `@#` (synthesized for `$#[…]`) and its
+    # siblings `@?`, `@!`, … (legal perl; Pl::Parser::_merge_punct_array_symbols
+    # repairs PPI's split) — are RUNTIME-OWNED since s440 (#498): perl forces
+    # every punctuation name into main::, so they are defvar'd and exported
+    # from :pcl like `@-`/`@+`, ONE symbol in every user package.  This pass
+    # used to declare them here per PACKAGE (task #415 made the `@#`-only
+    # declaration general), which made `@?` written in package A a different
+    # array from `@?` read in package B.  The [A-Za-z_] scan below cannot
+    # match them, so nothing here declares them any more.
     # Caret specials (${^MPE}, ${^WARNING_BITS}, …) compile to the pipe-delimited
     # CL symbol |${^MPE}| — the [A-Za-z_] scan below can't match the `{^`.  They
     # are user-writable globals; defvar any that appear.  Keyed on the full
@@ -6458,9 +6453,9 @@ sub _forward_global_decls {
     $free_out->{$_} = 1 for keys %seen;
     %seen = ();
   }
-  return () if !(%seen || %cross || %caret || %punct);
-  # Every one of the four buckets goes through Pl::GlobalPartition, which
-  # decides defvar-vs-p-defcell (task #289 direction D).  %punct and %caret are
+  return () if !(%seen || %cross || %caret);
+  # Every one of the three buckets goes through Pl::GlobalPartition, which
+  # decides defvar-vs-p-defcell (task #289 direction D).  %caret is
   # all-exception by construction — routed anyway, so the partition stays the
   # single authority and a future caret name that IS word-shaped cannot drift.
   # ONE declaration per (package, name) per FILE (#281 item 2, s414).  These
@@ -6486,7 +6481,6 @@ sub _forward_global_decls {
     push @decls, global_decl_form($name, $init);
   };
   $emit->($_, _fresh_container($_))            for sort keys %seen;
-  $emit->($_, _fresh_container($_))            for sort keys %punct;
   $emit->($_, _fresh_container(substr($_, 1))) for sort keys %caret;
   for my $qv (sort keys %cross) {
     (my $var = $qv) =~ s/^.*:://;

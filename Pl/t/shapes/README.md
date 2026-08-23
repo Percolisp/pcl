@@ -38,5 +38,5 @@ which is how both tools invoke `pl2cl`).
 
 Known divergences the corpus currently carries on purpose (the A/B will show
 their fixes as diffs here): #497 (`sub-heads.pl`: the same signature sub name
-in two packages), #498 (`punct-arrays-glob.pl`: `@?` written in one package,
-read in another).
+in two packages).  #498 (`punct-arrays-glob.pl`: `@?` written in one package,
+read in another) was found here and fixed the same session (s440c).
