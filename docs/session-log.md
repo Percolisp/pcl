@@ -73,6 +73,13 @@ FALSE since the s435 flip) → (5) tag v0.1.0.  #281 recommendation: items
 measured, #491, #485, #492, #484(a), #495, #496), #494 at tag time.  Fable:
 rule the asks; post-v0.1 the boxed-aggregates design.  USER: the push.
 
+**README rewritten (USER ask, `16a52ff`)**: what Percolisp is, where it
+stands (this session's cold numbers + a fresh `tools/bench-exec.pl`
+table), the compiler-toolkit plan (correctness → the IR → speed → XS) with
+links to the design docs, the SBCL ≥ 2.5.2 requirement kept, a reading
+guide; every command shown was run and every link checked.  `docs/STATUS.md`
+and `CHANGELOG.md` keep the s419 numbers until #494 (tag time).
+
 ## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
 
 Three of P5's four.  Index: DECIDED §s438g+h+i.

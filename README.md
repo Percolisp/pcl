@@ -141,7 +141,7 @@ I am Rex and I bark
 
 ## The plan: a compiler toolkit
 
-PCL is built to be more than one translator.  Three product targets, in the
+PCL is built to be more than one translator.  Four targets, in the
 order they are being pursued; each has a design document and a measurement.
 
 ### 1. Correctness first — run real CPAN code
