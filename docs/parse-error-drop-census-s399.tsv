@@ -96,6 +96,8 @@
 #
 # TOTAL after the edits below: 78 files, 178 drops -- 4 perl-tests files (5
 # drops), 20 companion files (70), 9 cpan-tests modules (15), 42 cpan-tests
+# TOTAL after the edits below: 80 files, 183 drops -- 4 perl-tests files (5
+# drops), 23 companion files (77), 8 cpan-tests modules (13), 42 cpan-tests
 # dist test files (83), 3 board modules (5), ZERO in lib/.  (At the s399 measurement, over three populations:
 # 72 files, 379 drops; the s415 edit below is the largest single change and
 # more than halves both numbers.  A count that RISES is not automatically a
@@ -137,6 +139,26 @@
 #         files shows exactly these two DIFF, corpus-diff IDENTICAL over 111,
 #         lib A/B SAME=21, and a text scan of all six populations finds the
 #         shape in no other file.  Rows: t/op/universal.t C_ok 61 -> 79.
+#   s441b TWO drops REMOVED, ONE FILE CLEARED, by task #466: a MAGIC scalar in
+#         the FILEHANDLE slot of print/printf/say.  perl's grammar is
+#         `listop: LSTOP indirob listexpr` with `indirob: WORD | scalar |
+#         block`, and `scalar` is ANY scalar variable -- so `print $_ "x\n"`
+#         is a write to the handle $_ holds, exactly like `print $fh "x\n"`.
+#         PPI hands the punctuation/digit/caret spellings over as
+#         PPI::Token::Magic, a SUBCLASS of PPI::Token::Symbol, and all three
+#         of PCL's filehandle-slot tests were exact-class `ref($t) eq
+#         'PPI::Token::Symbol'`: they answered "not a scalar", no filehandle
+#         was extracted, and the leftover `$_ "x\n"` run had two terms with no
+#         operator between them -- the whole statement fell through.  ONE
+#         predicate now answers for all three sites (Pl::PExpr::
+#         _is_scalar_fh_token: the operator-loop print path, the
+#         `print $fh -e $f` filetest repair, the paren form `print($fh ...)`).
+#         Verified over ALL FOUR populations vs 7e6d1eb: corpus-diff IDENTICAL
+#         (111 files, drops 5), lib A/B SAME=22, perl-t A/B SAME=528, cpan A/B
+#         402 files with NoOutput.pm the ONLY DIFF (RCDIFF=0 either way).
+#         Guard Pl/t/print-fh-magic-01.t (11 rows, 4 of them negatives),
+#         inverse-run with the old exact-class test = 14 failures.  81/185 ->
+#         80/183.
 #   s438  +42 files / +83 drops, the whole `cpan-t` population arriving at
 #         once (task #473, ruled s437).  NOT a regression and not new: these
 #         sites have been dropping since before the flip -- an f702da3
@@ -537,7 +559,6 @@ cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Tools/Tiny.t	10	Bug. Fel
 cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Util/Facets2Legacy.t	2	Bug. Fell through. Missing case: [ x2
 cpan-tests/modules/Test-Simple-1.302199/t/Test2/regression/693_ipc_ordering.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/t/Test2/regression/746-forking-subtest.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/lib/Test/Builder/NoOutput.pm	2	Bug. Fell through. Missing case: [ x2
 cpan-tests/modules/Test-Simple-1.302199/t/regression/642_persistent_end.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/t/regression/684-nested_todo_diag.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/t/regression/694_note_diag_return_values.t	1	Bug. Fell through. Missing case: [ x1

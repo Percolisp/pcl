@@ -4253,8 +4253,7 @@ sub handle_subcalls {
       # Check for variable filehandle: print $scalar TERM
       # Only SIMPLE scalars can be filehandles (not $hash{key}, $arr[0])
       # Complex expressions need block form: print {$expr} LIST
-      elsif (ref($maybe_fh) eq 'PPI::Token::Symbol'
-             && $maybe_fh->content =~ /^\$/) {
+      elsif ($self->_is_scalar_fh_token($maybe_fh)) {
         if ($fh_end + 1 <= $end_pars) {
           my $after = $e->[$fh_end + 1];
           $is_fh = $self->_is_print_term_start($after);
@@ -4830,7 +4829,7 @@ sub _fuse_print_filehandle_filetest {
     next unless $self->is_word($word)
              && $word->content =~ /^(?:print|printf|say)$/;
     my $fh = $e->[$i + 1];
-    next unless (ref($fh) eq 'PPI::Token::Symbol' && $fh->content =~ /^\$/)
+    next unless $self->_is_scalar_fh_token($fh)
              || ref($fh) eq 'PPI::Structure::Block';
     my ($dash, $letter) = @$e[$i + 2, $i + 3];
     next unless ref($dash) eq 'PPI::Token::Operator' && $dash->content eq '-';
@@ -4855,6 +4854,33 @@ sub _default_filetest_operand {
     splice @$e, $i + 1, 0, PPI::Token::Symbol->new('$_');
     $i++;   # skip the token we just inserted
   }
+}
+
+# A SCALAR VARIABLE in the filehandle slot of print/printf/say — the other
+# half of the `print $fh LIST` decision, whose second half is
+# _is_print_term_start (does what follows begin a new term?).  ONE predicate,
+# three call sites: the operator-loop print path, the `print $fh -e $f` filetest
+# repair, and the paren form `print($fh LIST)` (#466).
+#
+# perl's grammar is `listop: LSTOP indirob listexpr` with
+# `indirob: WORD | scalar | block`, and `scalar` is ANY scalar variable — a
+# punctuation or digit one as readily as a named one.  Probed 5.40.3:
+# `local $_ = \*STDOUT; print $_ "x\n"` writes x to STDOUT, `$0 = "STDOUT";
+# print $0 "x\n"` writes through the symbolic handle named by $0, and
+# `print $, "x\n"` is the same reading.  PPI hands the punctuation/digit/caret
+# spellings over as PPI::Token::Magic, which IS a subclass of
+# PPI::Token::Symbol — so the old exact-class `ref eq 'PPI::Token::Symbol'`
+# test answered "not a scalar" for every one of them, no filehandle was
+# extracted, and the leftover `$_ "x\n"` run had no operator between its two
+# terms: the WHOLE statement was dropped ("Bug. Fell through. Missing case").
+# Test::Builder::NoOutput's `print $_ @_ for @$self;` is the wild case.
+# ->isa is the test; the `$` guard is what keeps `@_`/`%ENV` out, and
+# $#array is a PPI::Token::ArrayIndex (not a Symbol subclass), so it stays out
+# by construction.
+sub _is_scalar_fh_token {
+  my ($self, $tok) = @_;
+  return 0 unless ref($tok) && $tok->isa('PPI::Token::Symbol');
+  return $tok->content =~ /^\$/ ? 1 : 0;
 }
 
 sub _is_print_term_start {
@@ -4913,7 +4939,7 @@ sub _extract_paren_filehandle {
   if ($self->is_word($first) && $first->content =~ /^[A-Z][A-Z0-9_]*$/) {
     $is_fh = 1;            # bareword: print(STDERR ...)
   }
-  elsif (ref($first) eq 'PPI::Token::Symbol' && $first->content =~ /^\$/) {
+  elsif ($self->_is_scalar_fh_token($first)) {
     $is_fh = 1;            # scalar: print($fh ...)
   }
   elsif (ref($first) eq 'PPI::Structure::Block') {
