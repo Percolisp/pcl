@@ -45,8 +45,12 @@ sub run_pcl {
     is($out, "3\n", '-MPOSIX with no import list still loads the module');
 }
 
-# The original report: Data::Dump=dump.
-{
+# The original report: Data::Dump=dump.  The SUBJECT is the real CPAN module
+# (transpiled from @INC) -- a fixture, not a PCL dependency; the row SKIPS
+# where it is not installed (a stock perl has only PPI and Moo).
+SKIP: {
+    skip "Data::Dump not installed (the CPAN module is this row's fixture)", 1
+        if !eval { require Data::Dump; 1 };
     my $out = run_pcl(q{-MData::Dump=dump -E 'dump({a=>1,b=>[2,3]})'});
     like($out, qr/\{ a => 1, b => \[2, 3\] \}/,
          '-MData::Dump=dump imports dump()');

@@ -12,6 +12,7 @@ $ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' | ./runpcl
 
 $ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); say dump [ map { $_, ":", $_ ** $_ } @q ];'
 [1, ":", 1, 2, ":", 4, 3, ":", 27, 4, ":", 256, 5, ":", 3125]
+# (Data::Dump is a CPAN module -- `cpanm Data::Dump` -- that PCL compiles from @INC on the fly)
 ```
 
 | | |
@@ -89,7 +90,7 @@ such statements over every test population is tracked and gated in-repo
 
 | what | version | notes |
 |---|---|---|
-| Perl | 5.20+ | with [PPI](https://metacpan.org/pod/PPI) ≥ 1.291 and [Moo](https://metacpan.org/pod/Moo): `cpanm PPI Moo` |
+| Perl | 5.20+ | with [PPI](https://metacpan.org/pod/PPI) **≥ 1.291** and [Moo](https://metacpan.org/pod/Moo): `cpanm PPI Moo`.  Distribution packages of PPI lag (Ubuntu 24.04 ships 1.277); PCL's parser repairs are keyed on 1.291's token stream and the installer refuses an older one.  Nothing else — every other Perl module PCL uses is core. |
 | **SBCL** | **≥ 2.5.2 — hard minimum** | the runtime uses SBCL-internal APIs (`sb-unicode`, float bit accessors, …) and is validated on 2.5.2 and 2.6.0.  Its first form checks the version and warns loudly on an older host.  Distribution packages that qualify: Debian 13 "trixie", Ubuntu 25.10 / 26.04 LTS.  Debian 12 (2.2.9), Ubuntu 24.04 LTS (2.2.9) and 22.04 LTS (2.1.11) do **not** — install the current binary from [sbcl.org](https://www.sbcl.org/platform-table.html); a home-directory install needs no root. |
 | cl-ppcre | any current | via Quicklisp: `sbcl --eval '(ql:quickload :cl-ppcre)' --quit` |
 

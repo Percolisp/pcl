@@ -16,7 +16,6 @@ use warnings;
 
 use lib ".";
 
-use Data::Dump qw/dump/;
 
 use PPI;
 use PPI::Dumper;

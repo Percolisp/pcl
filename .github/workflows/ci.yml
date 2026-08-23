@@ -5,9 +5,22 @@
 # so a green run here IS the #282 fresh-machine property for the ubuntu
 # image.  The Pl/t xs rows plan-skip (no pclxs sibling in CI).
 #
+# Perl modules: PPI comes from CPAN because PCL's token repairs are keyed on
+# PPI 1.291's stream (README "Requirements"; the installer checks the floor)
+# and ubuntu-latest's libppi-perl is 1.277.  Moo is version-insensitive, so
+# apt's is fine.  Data::Dump and Try::Tiny are NOT PCL dependencies -- they are
+# the FIXTURES of a few gate rows (a transpile subject, a perl-oracle module),
+# which skip without them; CI installs both so those rows run.  The gate's own
+# guard for this is Pl/t/core-deps-01.t.
+#
 # SBCL: ubuntu-latest packages an SBCL older than the 2.5.2 floor
 # (README "Minimum SBCL version"), so the official binary is installed
 # from sbcl.org's distribution point and pinned.
+#
+# Diagnosability: the job log is readable only with admin rights on the
+# repository, while check-run ANNOTATIONS are public API.  So every step that
+# can fail runs through `tools/ci-step`, which on failure re-emits the tail
+# of the step's output as a `::error::` annotation.
 
 name: CI
 
@@ -18,6 +31,7 @@ on:
 
 env:
   SBCL_VERSION: "2.6.0"
+  PPI_MIN: "1.291"
 
 jobs:
   gate:
@@ -29,12 +43,17 @@ jobs:
           # corpus-diff transpiles the PR base for comparison
           fetch-depth: 0
 
-      - name: Install Perl dependencies (PPI, Moo)
+      - name: Install Perl dependencies (PPI from CPAN, Moo; Data::Dump + Try::Tiny as test fixtures)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -qy libppi-perl libmoo-perl
-          perl -MPPI -e 'print "PPI $PPI::VERSION\n"'
+          sudo apt-get install -qy cpanminus libppi-perl libmoo-perl libdata-dump-perl libtry-tiny-perl
+          # apt's PPI brings the dependencies; cpanm then puts the current
+          # PPI (>= PPI_MIN) in /usr/local, which precedes /usr/share in @INC.
+          sudo cpanm --notest --quiet PPI
+          perl -MPPI -e 'print "PPI $PPI::VERSION\n"; exit($PPI::VERSION >= $ENV{PPI_MIN} ? 0 : 1)'
           perl -MMoo -e 'print "Moo $Moo::VERSION\n"'
+          perl -MData::Dump -e 'print "Data::Dump $Data::Dump::VERSION (test fixture)\n"'
+          perl -MTry::Tiny -e 'print "Try::Tiny $Try::Tiny::VERSION (test fixture)\n"'
 
       - name: Install SBCL ${{ env.SBCL_VERSION }} (binary from sbcl.org)
         run: |
@@ -52,22 +71,29 @@ jobs:
                --eval '(quicklisp-quickstart:install)' \
                --eval '(ql-util:without-prompting (ql:add-to-init-file))'
           sbcl --non-interactive --eval '(ql:quickload :cl-ppcre)'
+          sbcl --version
 
       - name: Fresh-machine install (tools/install-pcl, builds the saved core)
+        # The installer self-verifies (it refuses to finish unless the
+        # installed tools transpile and run a program), so a green step IS
+        # the fresh-machine property.
+        run: tools/ci-step tools/install-pcl --prefix "$HOME/.local"
+
+      - name: Installed tools on PATH transpile and run a program
         run: |
-          tools/install-pcl --prefix "$HOME/.local"
-          # The installer self-verifies (it refuses to finish unless the
-          # installed tools transpile and run a program), so reaching here
-          # is the fresh-machine property.
+          export PATH="$HOME/.local/bin:$PATH"
+          printf 'my @w = map { uc } qw(pcl works); print "@w\\n";\n' > /tmp/hello.pl
+          tools/ci-step runpcl /tmp/hello.pl
+          runpcl /tmp/hello.pl | grep -qx 'PCL WORKS'
 
       - name: Installer end-to-end test
-        run: prove tools/t/install-pcl.t
+        run: tools/ci-step prove tools/t/install-pcl.t
 
       - name: Test gate (prove, fresh saved core)
-        run: tools/prove-core
+        run: tools/ci-step tools/prove-core
 
       - name: Emission diff vs PR base (corpus-diff)
         if: github.event_name == 'pull_request'
         run: |
-          tools/corpus-diff.pl "${{ github.event.pull_request.base.sha }}" \
+          tools/ci-step tools/corpus-diff.pl "${{ github.event.pull_request.base.sha }}" \
             || { echo "::error::emission differs from PR base -- every differing file must be explained in the PR"; exit 1; }

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Copyright (c) 2025-2026 the PCL authors
+# This is free software; you can redistribute it and/or modify it under the
+# same terms as the Perl 5 programming language system itself.
+# SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
+
+# ci-step — run one CI step; if it fails, re-emit the tail of its output as
+# a GitHub Actions `::error::` annotation.
+#
+# Why: a workflow's job LOG is readable only by repository admins (the API
+# answers 403 to everyone else), while check-run ANNOTATIONS are public.  The
+# first CI run of this repository (s439) failed in a step whose log nobody
+# without admin rights could read; with this, the cause is on the run page
+# and in `GET /repos/OWNER/REPO/check-runs/ID/annotations`.
+#
+# Usage (in .github/workflows/ci.yml):   tools/ci-step COMMAND [ARGS...]
+# Outside GitHub Actions it is a transparent wrapper with the same exit status
+# (the annotation line is just a line of output there).
+set -uo pipefail
+log="${RUNNER_TEMP:-/tmp}/ci-step.$$.log"
+"$@" 2>&1 | tee "$log"
+status=${PIPESTATUS[0]}
+if [ "$status" -ne 0 ]; then
+    # One annotation, the last ~40 lines, newlines encoded the way the
+    # workflow-command syntax wants them.  GitHub truncates very long
+    # messages, so the tail is capped.
+    tail=$(tail -n 40 "$log" | tail -c 3000 | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')
+    echo "::error title=${1##*/} failed (exit $status)::${tail}"
+fi
+rm -f "$log"
+exit "$status"

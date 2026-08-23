@@ -4,6 +4,11 @@ This document lists Perl behaviours that PCL intentionally does not emulate,
 along with the rationale.  Tests covering these features are commented out in
 the `perl-tests/` files.
 
+> **Citations of `docs/fable-answers-sNNN.md`** below name a ruling record that was
+> removed from the tree in s440 (USER decision); the ruling is indexed in
+> `docs/DECIDED.md`, and the record is readable from history with
+> `git show 959bf43:docs/fable-answers-sNNN.md`.
+
 > **Deferred vs. permanent.** Most items here are *permanent* design decisions
 > (they replicate a Perl interpreter implementation detail with no payoff for
 > real CPAN code).  A few, however, are merely **deferred until after the

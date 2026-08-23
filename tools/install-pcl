@@ -98,10 +98,19 @@ sub check_deps {
     if ($] < $perl_min) { push @missing, "perl >= 5.20 (this is $])" }
     else                { push @found,   sprintf("perl %vd", $^V) }
 
+    # PPI has a FLOOR: PCL's token repairs are keyed on the stream PPI 1.291
+    # produces (docs/ppi-upstream-bugs.md -- `-` glued to an identifier, the
+    # glob disambiguation, `~~`, ...), and the gate is validated on it.  Distro
+    # packages lag (Ubuntu 24.04 ships 1.277), so the floor is checked, with
+    # the same remedy the README gives: `cpanm PPI`.
+    my %min = (PPI => 1.291);
     for my $m (qw(PPI Moo Test::More File::Temp)) {
         my $v = module_version($m);
-        if (defined $v) { push @found, "$m $v" }
-        else            { push @missing, "$m (perl module)" }
+        if (!defined $v)            { push @missing, "$m (perl module)" }
+        elsif ($min{$m} && $v < $min{$m}) {
+            push @missing, "$m >= $min{$m} (this is $v; `cpanm $m` installs the current one)";
+        }
+        else                        { push @found, "$m $v" }
     }
 
     my $sbcl = qx{sbcl --version 2>/dev/null};

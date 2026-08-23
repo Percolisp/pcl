@@ -59,6 +59,15 @@ compiler with a CL runtime that reproduces Perl's semantics.
   `runpcl` (transpile-and-run), `pcl` (perl-like CLI: `-e`/`-E`/`-M`).
 - `tools/install-pcl`: installs the runtime tree and compiles a saved SBCL
   core at install time (the XS model — never at first use).
+  It checks the dependencies first — perl ≥ 5.20, **PPI ≥ 1.291**, Moo,
+  SBCL ≥ 2.5.2 — and refuses to install until they are present.
+- Dependencies are exactly PPI and Moo; every other Perl module PCL uses is
+  core (the gate guards this: `Pl/t/core-deps-01.t`).  A non-core
+  `Data::Dump` import in the compiler's debug dumps, invisible on a dev
+  machine, broke the first CI run and was removed (s440).
+- CI (GitHub Actions, `.github/workflows/ci.yml`): a stock Ubuntu runner
+  installs PCL with `tools/install-pcl` and runs the full gate — the
+  fresh-machine test, on every push.
 - Test infrastructure: 155-file regression gate with a fresh-core runner
   (`tools/prove-core`), Perl-suite sweep runners with blessed row-level
   baselines, a drop census, an emission A/B differ, and a differential

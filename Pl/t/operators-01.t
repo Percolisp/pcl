@@ -12,7 +12,6 @@ use warnings;
 
 use lib ".";
 
-use Data::Dump qw/dump/;
 use PPI;
 use PPI::Dumper;
 use Test::More tests => 41;

@@ -236,5 +236,18 @@ suspect = the sbcl.org TARBALL binary + its `SBCL_HOME=$HOME/sbcl/lib/sbcl`
 reproduction (install the sbcl.org 2.6.0 binary, not the debian one) was the
 next step, interrupted for a break.  #494 stays behind a green run.
 
+**s440 (2026-08-23): CAUSE FOUND AND FIXED — not SBCL.**  The installed `pl2cl`
+died at compile: `Can't locate Data/Dump.pm` — three `Pl/*.pm` files imported
+the non-core module for debug dumps, which every dev perl here has and a stock
+runner lacks (reproduced on a bare perl 5.38.2 + `cpanm PPI Moo`; the
+sbcl.org + Quicklisp setup PASSES).  Removed (core `Data::Dumper` helpers);
+PPI ≥ 1.291 enforced by the installer and installed by CI with `cpanm`
+(apt's is 1.277); CPAN test fixtures (Data::Dump, Try::Tiny) skip-guarded and
+installed by CI; guard `Pl/t/core-deps-01.t`; `tools/ci-step` turns a failing
+step's tail into a public annotation.  Stock-machine gate 166/5780 green
+(bar the local xs rows); DECIDED §s440, session-log s440.  The fix commit's
+push starts the second CI run — its verdict is the next thing to read
+(`curl -s https://api.github.com/repos/Percolisp/pcl/actions/runs?per_page=3`).
+
 Then: fix what CI finds, #494's doc refresh on the tagged tree, tag
 `v0.1.0` (`git tag -a v0.1.0 -m ... && git push origin v0.1.0`).

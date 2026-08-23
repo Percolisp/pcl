@@ -18,7 +18,19 @@ use PPI;
 use PPI::Dumper;
 use Pl::CLForm ();
 
-use Data::Dump qw/dump/;
+use Data::Dumper ();
+
+# Diagnostic dumper for die() texts and DEBUG traces.  Core Data::Dumper, not
+# Data::Dump: the compiler must run on a stock perl where only PPI and Moo were
+# installed (the installer, CI, a user machine) -- Data::Dump is not core.
+sub _dd {
+  local $Data::Dumper::Terse    = 1;
+  local $Data::Dumper::Indent   = 1;
+  local $Data::Dumper::Sortkeys = 1;
+  my $s = Data::Dumper::Dumper(@_);
+  chomp $s;
+  return $s;
+}
 
 use Pl::OpcodeTree;
 use Pl::PExpr::Config;
@@ -541,7 +553,7 @@ sub parse {
   $self->_precollapse_dyn_glob_slots($e);
   $self->handle_subcalls($e);
   say "parse: //////  After calling handle_subcalls, in param:"  if 1 & DEBUG;
-  say dump($e)      if 1 & DEBUG;
+  say _dd($e)      if 1 & DEBUG;
 
   # Empty expression: () or empty list — generate an empty progn node.
   # In list context this becomes (vector), in scalar context (progn).
@@ -932,7 +944,7 @@ sub parse {
     # decline actually costs the program a statement: Pl/Parser.pm's two
     # `PARSE ERROR` emitters (_announce_dropped_statement) say so there, with
     # the file, line and source text this site does not have.
-    die "Handle single node of unknown type. Dump:\n" . dump($e1);
+    die "Handle single node of unknown type. Dump:\n" . _dd($e1);
   }
 
 
@@ -1112,7 +1124,7 @@ sub parse {
         && !$is_typeglob_slot
         && !$is_dyn_typeglob_slot;
 
-    die "WTF? :-) Expr starts with ->/brace??\n" . dump($e) . "\n"
+    die "WTF? :-) Expr starts with ->/brace??\n" . _dd($e) . "\n"
         if $i == 0;
 
     my $pre     = $e->[$i-1];
@@ -1330,8 +1342,8 @@ sub parse {
       } else {
         my $fn = eval { $self->parser->filename } // '(unknown)';
         die "PExpr: unhandled postfix '->' term in $fn: "
-          . "term=" . dump($term) . " next=" . dump($nxt)
-          . " next2=" . dump($nxt_2) . "\n";
+          . "term=" . _dd($term) . " next=" . _dd($nxt)
+          . " next2=" . _dd($nxt_2) . "\n";
       }
     }
 
@@ -1536,7 +1548,7 @@ sub parse {
     if ($is_dyn_typeglob_slot) {
       die "PCL: internal: dynamic glob-slot *{EXPR}{SLOT} reached the arrow "
         . "loop unreduced (pre-pass missed it): "
-        . dump([ @$e[$i-2 .. $i] ]) . "\n";
+        . _dd([ @$e[$i-2 .. $i] ]) . "\n";
     }
 
     # Handle typeglob slot access: *name{SLOT} — PPI gives Symbol '*name' + Block '{SLOT}'
@@ -1735,7 +1747,7 @@ sub parse {
       # else: single isolated chained op — fall through to binary node
     }
 
-# say dump $e; say "---"; say dump $op_info; say dump $self->node_tree; exit 0;
+# say _dd $e; say "---"; say _dd $op_info; say _dd $self->node_tree; exit 0;
 
 
     if ($no_pars == 2) {
@@ -1760,8 +1772,8 @@ sub parse {
       my $id_aft= $self->parse([$post]);
 
       say "=========   OP replace 2 params for ", $op->content(),
-          ", ix $hi_ix.\nParam before:", dump($prev),
-          "\nParam after:", dump($post), "\n======"
+          ", ix $hi_ix.\nParam before:", _dd($prev),
+          "\nParam after:", _dd($post), "\n======"
                                                      if 2 & DEBUG;
       my $n_id  = $self->make_node($op);
 
@@ -1779,7 +1791,7 @@ sub parse {
       my $colon_pos = $self->find_matching_colon($e, $hi_ix + 1);
 
       if (!defined $colon_pos) {
-        die "Ternary operator: Found '?' but no matching ':'\n" . dump($e);
+        die "Ternary operator: Found '?' but no matching ':'\n" . _dd($e);
       }
 
       # Find cond start: scan backwards from ? to find lower-prec op or ':'
@@ -1887,7 +1899,7 @@ sub parse {
 
     }
 
-    die "Unknown. Bug. op=" . dump($op) . " info=" . dump($op_info);
+    die "Unknown. Bug. op=" . _dd($op) . " info=" . _dd($op_info);
   }
 
   if (scalar(@$e) == 1 && $self->is_internal_node_type($e->[0])) {
@@ -1899,7 +1911,7 @@ sub parse {
     return $self->make_node($e->[0]);
   }
 
-  die "Bug. Fell through. Missing case: " . dump($e);
+  die "Bug. Fell through. Missing case: " . _dd($e);
 }
 
 
@@ -1993,18 +2005,18 @@ sub parse_list {
   }
 
   # 1. Split into list with ","-separated. Eval them
-  say "Parts in list:\n", dump $e_list         if 4 & DEBUG;
+  say "Parts in list:\n", _dd $e_list         if 4 & DEBUG;
   my $parts     = $self->parse_comma_separated_list($e_list);
-  say "Split into list:\n", dump $parts        if 4 & DEBUG;
+  say "Split into list:\n", _dd $parts        if 4 & DEBUG;
 
   # 2. Call the parts recursively to parse()
   my @node_ids;
   for my $e_part (@$parts) {
     # Skip empty parts (can happen with leading commas)
     next if !@$e_part;
-    say "Parse this:", dump $e_part            if 4 & DEBUG;
+    say "Parse this:", _dd $e_part            if 4 & DEBUG;
     my $id      = $self->parse($e_part);
-    say "  ==> id: ", dump $id                 if 4 & DEBUG;
+    say "  ==> id: ", _dd $id                 if 4 & DEBUG;
     push @node_ids, $id;
   }
 
@@ -2780,7 +2792,7 @@ sub handle_subcalls {
   my $e          = shift;
   my $in_arglist = shift // 0;  # 1 when called from parse_list (inside explicit parens)
 
-  say "---- handle_subcalls. Incoming expr:\n", dump($e)     if 8 & DEBUG;
+  say "---- handle_subcalls. Incoming expr:\n", _dd($e)     if 8 & DEBUG;
 
   # - - - Pre-pass: normalize CORE::<builtin> to the bare builtin name.
   # `CORE::foo` explicitly names Perl's builtin (bypassing any override).  PCL
@@ -3038,7 +3050,7 @@ sub handle_subcalls {
   for(my $i=0; $i < scalar(@$e)-1; $i++) {
     my $now     = $e->[$i];
     my $next    = $e->[$i+1];
-    say "handle_subcalls: Look for subname(..) in:\n", dump $now  if 8 & DEBUG;
+    say "handle_subcalls: Look for subname(..) in:\n", _dd $now  if 8 & DEBUG;
 
     # Handle &funcname( list ) - direct function call with & sigil
     # e.g., &foo(1, 2) -> (pl-foo 1 2), &Pkg::foo(1,2) -> (Pkg::pl-foo 1 2)
@@ -3138,7 +3150,7 @@ sub handle_subcalls {
     }
 
     say "handle_subcalls() Look for subname(..), was word. Is next list ",
-        ($self->is_list($next) ? "Yes" : "No"), ". Dump:", dump $next
+        ($self->is_list($next) ? "Yes" : "No"), ". Dump:", _dd $next
         if 8 & DEBUG;
 
     # Handle grep/map( { BLOCK } LIST ) — paren form
@@ -3709,7 +3721,7 @@ sub handle_subcalls {
     splice @$e, $i+1, 1;        # Remove parameters.
   }
 
-  say "---- handle_subcalls: Before main loop. Has ", dump $e   if 8 & DEBUG;
+  say "---- handle_subcalls: Before main loop. Has ", _dd $e   if 8 & DEBUG;
 
   # - - - Look for remaining funcalls without () around parameters:
   for(my $i=scalar(@$e)-1; $i >= 0; $i--) {
@@ -5435,7 +5447,7 @@ sub get_a_node {
   my $node_tree = $self->node_tree();
   # say "---- get_a_node(): Before calling node_data()";
   my $node      = $node_tree->node_data($node_id);
-  # say "---- get_a_node(): After calaling node_data()"; say dump  $node;
+  # say "---- get_a_node(): After calaling node_data()"; say _dd  $node;
   return  $node;
 }
 

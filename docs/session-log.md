@@ -4,6 +4,82 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 440 (2026-08-23, Fable) — CI RED diagnosed and fixed (`Data::Dump`, a non-core import; the PPI floor); the stock-machine rehearsal; the review docs removed from git (USER)
+
+**The CI failure (run 32648385694, step 6 `tools/install-pcl`, ~3 s, exit 2,
+log admin-only): NOT the sbcl.org binary.**  s439's prime suspect was wrong —
+the installer passes with the sbcl.org 2.6.0 tarball + a fresh Quicklisp in a
+sanitized HOME exactly as the workflow builds them.  What the sanitized HOME
+could not show is a PERL fact: `Pl/Parser.pm`, `Pl/PExpr.pm`, `Pl/OpcodeTree.pm`
+imported **`Data::Dump`**, a non-core module that every dev perl here has (a
+distro package / the perlbrew site lib) and a stock runner does not.  So the
+INSTALLED `pl2cl` died at compile time (`Can't locate Data/Dump.pm … at
+Pl/Parser.pm line 16`), the installer's smoke test failed, `die` exited with
+perl's 2.  **Reproduced exactly** by building a bare perl 5.38.2 (the
+runner's) into the scratchpad with `cpanm PPI Moo` and nothing else: the
+pre-fix tree fails in 2 s / exit 2 with that message; the fixed tree installs,
+runs `PCL WORKS` through the wrapper, passes `tools/t/install-pcl.t` 11/11 and
+the full gate (`tools/prove-core`: 166 files / 5780 rows; the only failures the
+13 local pclxs xs rows + the three rows fixed below).  Dev-machine bar after all edits: `tools/prove-core` **167 files / 5785 rows** (the 5 new = core-deps-01.t), only the 13 pclxs xs rows; corpus-diff IDENTICAL over 111, drops 5 unchanged; `tools/t/install-pcl.t` 15/15 (4 new rows: a fake PPI 1.277 on PERL5LIB is refused, naming floor + remedy, nothing installed).
+
+**Fixes.**  (1) `Data::Dump` GONE from `Pl/` — its 26 sites in PExpr.pm were all
+diagnostic (DEBUG traces, `die` texts) and become `Pl::PExpr::_dd` over core
+`Data::Dumper`; Parser.pm/OpcodeTree.pm imported it and never used it; the 20
+gate files: 16 imported without using (line deleted), 4 debug-print with it
+(`Pl/t/PCLDump.pm`, a core-only `dump()` export).  corpus-diff IDENTICAL over
+111 (diagnostic-only, as it must be).  (2) Three gate rows use a CPAN module
+as a FIXTURE — the transpile SUBJECT (`misc-fixes-01.t`, `pcl-dash-m-01.t`:
+Data::Dump) or the perl ORACLE's module (`transpile-test-07.t`,
+`feature-pragma-01.t`: Try::Tiny) — and now SKIP, naming it, where it is not
+installed; CI installs both so they run.  (3) `feature-pragma-01.t`'s three
+`use v5.40` rows have no oracle on a 5.38 host (Ubuntu 24.04 = the runner):
+`test_src` takes a literal PROBED on perl 5.40.3 and compares against it, so
+the #360 shape stays asserted on every host instead of being skipped.
+(4) **Installer: PPI ≥ 1.291 is enforced** (`check_deps`, with the README's
+remedy `cpanm PPI`) — Ubuntu noble's `libppi-perl` is 1.277, and PCL's token
+repairs are keyed on 1.291's stream; CI now installs PPI with `cpanm`
+(CPAN's latest IS 1.291) and asserts the version.  (5) **Guard
+`Pl/t/core-deps-01.t`** (0.4 s): loads the compiler + the runners' imports and
+asserts every `%INC` file is repo / core / PPI+Moo closure (PPI, PPI::Dumper
++ a Moo class exercising has/new/with/extends); flags a test's `use X` of an
+installed-but-non-core X unless the file carries the fixture guard `eval {
+require X; 1 }`.  Inverse on a 959bf43 worktree: names Data::Dump AND
+Try::Tiny.  (6) **`tools/ci-step`**: the job log is admin-only (API 403) but
+check-run ANNOTATIONS are public — every failing step re-emits its tail as a
+`::error::` annotation, so the next failure is readable from the run page and
+from `GET /repos/Percolisp/pcl/check-runs/<id>/annotations`.  (7) A hello-
+world step through the installed wrapper on PATH.  README requirements row
+(PPI floor, "nothing else is non-core", the Data::Dump example is a CPAN
+module compiled on the fly), CLAUDE.md Dependencies, CHANGELOG.
+
+**Thread B (USER, s439: "remove the fable answers and opus reviews from git.
+It doesn't seem necessary?") DONE**: `git rm` of the 85 files
+(`docs/fable-answers-*.md` 39, `docs/opus5-review-requests-*.md` 46; 1.1 MB) and, on
+the USER's follow-up, the six session handoffs (`docs/*handoff-s*.md`).
+The ~350 citations in DECIDED.md / session-log / CLAUDE.md / not-supported /
+code comments are left as what they are — references to a record — and each
+place a reader looks (DECIDED.md header, CLAUDE.md key-files item 2,
+not-supported.md header) says where it went: `git show 959bf43:docs/<file>`
+(959bf43 = the last commit holding all 85).  Standing from here: a review
+session writes its rulings into DECIDED.md + the session log + the live plan
+doc; no new review-doc family.  `docs/session-state-s439.md` (the consumed
+resume point) removed too.
+
+**What the USER must do on GitHub (needs the web UI / a token; no `gh` here):**
+the repository DESCRIPTION is the old project's ("For Perl, a PPI addition to
+parse expressions to an AST. Also, a Perl => Common Lisp compiler. It use the
+same license as Perl.") — set it to the README's first line, add topics
+(perl, common-lisp, sbcl, transpiler, compiler); the branch `snapshot-2026-05`
+(the old public history, kept reachable on purpose) and tag `R1` are there to
+keep or drop.
+
+**Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
+5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
+tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
+PERL5LIB/PERLBREW_* unset; ~10 min end to end.  **Lesson: a sanitized HOME
+with the DEV perl is not a stock machine — only a bare perl shows a missing
+module.**
+
 ## Session 439 (2026-08-23, Fable) — the s438 batch (s438 → s438i) REVIEWED + APPROVED; one review fix (#455's `qw()` spelling); #491–#496 filed; the distance to v0.1 written down
 
 The nine Opus commits since s437 — the two census instruments, then Q4, Q5

@@ -11,6 +11,50 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+*The per-session review records this index points at -- `docs/fable-answers-sNNN.md`
+(the rulings) and `docs/opus5-review-requests-sNNN.md` (the asks) -- were REMOVED
+from the tree in s440 on the USER's decision ("it doesn't seem necessary").  A
+line below that cites one still names the authoritative text; read it from
+history: `git show 959bf43:docs/fable-answers-s439.md` (959bf43 = the last
+commit holding all 85, and the six session HANDOFF docs `docs/*handoff-s*.md`
+removed with them).  The settled content lives HERE and in
+`docs/session-log.md`; since s440 a review session writes its rulings into
+those two files and the live plan doc directly -- no new review-doc families.*
+
+## s440 (2026-08-23, Fable) — CI RED = a NON-CORE perl import (`Data::Dump`), not SBCL; PCL's dependencies are EXACTLY PPI ≥ 1.291 + Moo; the review-doc families removed from git (USER)
+
+- **The first CI run's failure** (run 32648385694, `tools/install-pcl` exit 2
+  in 3 s) was `Can't locate Data/Dump.pm` in the INSTALLED `pl2cl`:
+  `Pl/Parser.pm`, `Pl/PExpr.pm`, `Pl/OpcodeTree.pm` imported a non-core module
+  for debug dumps.  Reproduced on a BARE perl 5.38.2 + `cpanm PPI Moo`; the
+  s439 suspect (sbcl.org tarball / Quicklisp visibility) was wrong — that
+  setup passes.  **A sanitized HOME with the dev perl is not a stock machine.**
+  Fixed: core `Data::Dumper` helpers (`Pl::PExpr::_dd`, `Pl/t/PCLDump.pm`);
+  corpus-diff IDENTICAL.  Session log s440.
+- **Dependency rule (standing): PCL depends on PPI ≥ 1.291 and Moo and on
+  NOTHING else that is not core perl.**  Guard `Pl/t/core-deps-01.t` (loads
+  compiler + runners, asserts repo/core/PPI+Moo closure; a test's `use X` of an
+  installed non-core X needs the fixture guard `eval { require X; 1 }`).  A
+  CPAN module used as a test FIXTURE (transpile subject / perl-oracle module:
+  Data::Dump, Try::Tiny) makes its rows SKIP, naming it, where absent; CI
+  installs the fixtures so the rows run.  A perl-oracle row whose program needs
+  a newer perl than the host compares against a PROBED literal
+  (`feature-pragma-01.t` `test_src`), never skips.
+- **PPI floor = 1.291, ENFORCED by the installer** (`check_deps`; remedy
+  `cpanm PPI`, which today IS 1.291).  Ubuntu 24.04's `libppi-perl` is 1.277;
+  CI installs PPI with `cpanm` and asserts the version.
+  `tools/t/install-pcl.t` 15 rows (a fake PPI 1.277 is refused, nothing copied).
+- **CI diagnosability**: the job log is admin-only (API 403); `tools/ci-step`
+  re-emits a failing step's tail as a `::error::` ANNOTATION (public API:
+  `/check-runs/<id>/annotations`).  Every failing-capable step runs through it.
+- **The review-doc families are GONE from the tree** (USER s439: "remove the
+  fable answers and opus reviews from git.  It doesn't seem necessary?"):
+  `docs/fable-answers-*.md` (39) + `docs/opus5-review-requests-*.md` (46)
+  `git rm`'d, and the six session HANDOFF docs (`docs/*handoff-s*.md`, USER
+  s440) with them; citations stay as references; `git show 959bf43:docs/<file>`
+  reads one.  **From s440 a review session writes its rulings into THIS
+  index + the session log + the live plan doc; no new review-doc family.**
+
 ## s439c (2026-08-23, Fable, USER) — ONE checkout: `~/pcl` is the repository of record; `~/testgit/pcl` (old public history + nine dirty files = `74cf2b1`, verified byte-identical) holds nothing unique and can go; `~/pcl`'s origin is now the SSH URL that authenticates; the push recipe is `docs/plan-post-s433.md` §4a
 
 ## s439b (2026-08-23, Fable, USER) — THE RUNTIME IS KEPT COMPILED AND CACHED BY DEFAULT: every runner starts SBCL from a content-keyed saved core built on first use

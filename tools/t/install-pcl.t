@@ -28,7 +28,7 @@ my $inst = "$root/tools/install-pcl";
 
 plan skip_all => "install-pcl not executable" unless -x $inst;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
-plan tests => 11;
+plan tests => 15;
 
 my $prefix = tempdir(CLEANUP => 1);
 
@@ -37,6 +37,23 @@ my $dry = `$inst --prefix $prefix --dry-run 2>&1`;
 is($?, 0, 'dry run exits 0');
 like($dry, qr/checking dependencies/, 'dry run reports the dependency check');
 ok(!-e "$prefix/bin", 'dry run created nothing');
+
+# --- the dependency FLOOR refuses, loudly, before copying anything ----------
+# A fake PPI that claims 1.277 (Ubuntu 24.04's package) shadows the real one
+# through PERL5LIB; the installer must name the floor and the remedy and
+# install nothing (the first CI run had no floor check: s440).
+{
+    my $fake = tempdir(CLEANUP => 1);
+    open my $fh, '>', "$fake/PPI.pm" or die $!;
+    print $fh "package PPI; our \$VERSION = '1.277'; 1;\n";
+    close $fh;
+    local $ENV{PERL5LIB} = $fake . (defined $ENV{PERL5LIB} ? ":$ENV{PERL5LIB}" : '');
+    my $old = `$inst --prefix $prefix 2>&1`;
+    isnt($?, 0, 'an old PPI is refused') or diag($old);
+    like($old, qr/missing dependencies/, 'the refusal is the dependency report');
+    like($old, qr/PPI >= 1\.291 \(this is 1\.277; `cpanm PPI`/, 'the refusal names the floor and the remedy');
+    ok(!-e "$prefix/bin" && !-e "$prefix/lib", 'the refusal installed nothing');
+}
 
 # --- the real install -------------------------------------------------------
 my $out = `$inst --prefix $prefix --no-core 2>&1`;

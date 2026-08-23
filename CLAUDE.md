@@ -596,7 +596,14 @@ Example: `*wantarray*` must be in the `:export` list, otherwise `(let ((*wantarr
 When resuming work:
 0. `docs/DECIDED.md` - **One-grep index of settled questions** (grep it before probing or designing anything — see the lookup order at the top of this file)
 1. `docs/session-log.md` - Session history (compact, newest first)
-2. `docs/fable-answers-s316v.md` - Current design/policy rulings (answers to `opus5-review-requests-s316v.md`)
+2. **The per-session review records -- `docs/fable-answers-sNNN.md` (rulings) and
+   `docs/opus5-review-requests-sNNN.md` (asks) -- were REMOVED from the tree in s440
+   (USER: "it doesn't seem necessary").**  Their rulings are indexed in `docs/DECIDED.md`,
+   summarised in the items below (2a–2z, kept as the compressed record) and narrated in
+   `docs/session-log.md`; a cited file is readable from history:
+   `git show 959bf43:docs/fable-answers-s439.md` (959bf43 = the last commit holding all
+   85, and the six session HANDOFF docs `docs/*handoff-s*.md` removed with them).  **Since s440 a review session writes its rulings into DECIDED.md + the session log
+   + the live plan doc directly; do not start a new review-doc family.**
 2b000. **s417 RULED + Track B2 (#343) SHIPPED (s418, Fable, 2026-08-20;
 `docs/fable-answers-s417.md` + `docs/b2-ceiling-fix-s418.md`).**  s417 APPROVED
 (gate COLD 153/5590; sweep re-run clean; 14 probes).  **B2 = the stale ceiling,
@@ -783,7 +790,7 @@ whole `p--*` family conflates it with undef; do NOT assert definedness on a
 filetest until it closes), **#404** (perl stacks through PARENS), **#405**
 (`print $fh -3` writes to `$fh`).  **Queue now: #343 (B2 — mechanism measured s417, `docs/b2-stale-operand-ceiling-s417.md`, FIX NEEDS A FABLE DESIGN) → #401-eval filler → re-census → announce→DIE flip → M–N release.**  (`class NAME ;` DONE s417.)
 2b0. **`docs/fable-answers-s415.md` + `docs/b1-operand-grammar-s416.md` — the s414+s415 batches RULED (s416, Fable, 2026-08-20) and THE B1 DESIGN.**  Both sessions APPROVED (gate/sweep/companion independently re-run; TOTAL 18369; 14 probes identical to perl); ONE review fix — parser2-02.t t60 was a stale twin guard of the refusal s415e removed, failing the gate since `829bcf5` (standing rule: grep Pl/t for a refusal's message text in the commit that removes it; gate rows now 5566).  Rulings: Track A deviations RATIFIED + drop-harvest-first standing; "refused is explained" IS the census intent; #401-eval → session L (cache-key leg mandatory); #402+#119 two tasks / one session / release phase 4; `class NAME ;` refusal AUTHORIZED, strict key only.  **B1 (#372) re-designed from measurement and UNBLOCKED — the b1 doc supersedes option-b-phase2-plan §2's sketch**: one predicate (`_is_print_term_start`: a `-X` Operator starts a term) + the print-argument leg + the `_`-chain desugaring (naive nesting is SILENT WRONG, probed); NO `_term_extent`/`$end_pars` changes.  **Queue: #372 → #343 → `class NAME ;` + #401-eval fillers → re-census → announce→DIE flip → M–N release.**
-2b. **`docs/opus5-handoff-s413.md` — THE HANDOFF (s413, Fable, 2026-08-18; Fable time short): read FIRST.**  §1 where the project is; §2 Opus's first job = task #395: verify (gate + bench A/B + full sweep on the tip) and `--ff-only` merge branch `s413-lisp-dedup` (the six runtime dedup families + fix #394, Fable-verified); §3 the queue (remaining in-scope dedup families 2+10, 14/26, 38 → plan-post-s408 §2); §4 rules: **dup-census scope = COMPILER + RUNTIME ONLY (USER s413; tools may be replaced; tests never optimized)**, the census is a bug finder (probe the DIFFERENCE between copies vs perl before unifying — #393, #394), one sweep covers an IDENTICAL batch, an interrupted tool call may have RUN.
+2b. **(`docs/opus5-handoff-s413.md` — the s413 handoff, REMOVED s440 with the other handoffs; `git show 959bf43:docs/opus5-handoff-s413.md`; its queue is long since executed — kept here as the compressed record.)**  §1 where the project is; §2 Opus's first job = task #395: verify (gate + bench A/B + full sweep on the tip) and `--ff-only` merge branch `s413-lisp-dedup` (the six runtime dedup families + fix #394, Fable-verified); §3 the queue (remaining in-scope dedup families 2+10, 14/26, 38 → plan-post-s408 §2); §4 rules: **dup-census scope = COMPILER + RUNTIME ONLY (USER s413; tools may be replaced; tests never optimized)**, the census is a bug finder (probe the DIFFERENCE between copies vs perl before unifying — #393, #394), one sweep covers an IDENTICAL batch, an interrupted tool call may have RUN.
 
 2c. **`docs/plan-one-compiler-s411.md` + `docs/dup-census-worklist-s411.md` — THE LIVE QUEUE since s411 (Fable, 2026-08-18; USER: "structural first, but not at any cost")**: the answer to #379, sized from measurements — the two generators differ in exactly TWO emission rules, the native attempt costs 9 % of compile time, `lower_embedded_block` declines 12 of 1 064 blocks, ~1 500 embedded blocks per corpus are compiled by v1 text and DISCARDED.  Phases **R** (`Pl/Passes.pm` + `PCL_OPT`, the optimization registry, #383) → **A** (one expression compiler: port the two rules, ONE parse, delete ExprToCL2, one dialect, #384) → **B** (one seam function `capture_v1`, PExpr `analysis_only`, hook-only blocks, #385) → **C** (the 12 decline shapes, #386) = 3–5 sessions to the release shape, replacing E5.1–E5.5's 9–17; E5.3 (`local` first) post-release; the extraction worklist #387 (`tools/dup-census.pl` + `tools/sub-call-census.pl`; verdicts EXTRACT / LEAVE / DELETED-BY / SUPERSEDED-BY) and the InterpScan consumers 2+3 port #388 interleave.  Standing rules: a found silent-wrong is FILED and jumps the queue only if it regresses a baseline or blocks a phase; a fix in code a phase deletes is wasted; Fable sessions rule asks + do structure.  `docs/fable-answers-s410.md` = the s410 asks, ruled short.  The plan-post-s408 queue resumes after Phase C (§6).
 
@@ -856,9 +863,18 @@ Not relevant now:
   2026-05-31 — and on 2.6.0, the current one; the runtime uses some
   SBCL-internal symbols, so the supported floor is whatever the suite is
   actually validated against, not a guessed range)
-- PPI (Perl parser)
+- PPI >= 1.291 (Perl parser; the token repairs are keyed on 1.291's stream and
+  the gate is validated on it -- `tools/install-pcl` enforces the floor; Ubuntu
+  24.04's package is 1.277, so CI installs it with `cpanm PPI`)
 - Moo (OO framework)
-- Test::More
+- Test::More (core)
+- **Nothing else that is not core perl** (s440): `Data::Dump` was a non-core
+  import in three `Pl/*.pm` files and 20 gate tests and broke the first CI run
+  ("Can't locate Data/Dump.pm" in the installed `pl2cl`).  Diagnostics use
+  core `Data::Dumper` (`Pl::PExpr::_dd`, `Pl/t/PCLDump.pm`); the two gate rows
+  whose transpile SUBJECT is the CPAN module skip when it is not installed.
+  Before adding a `use`, check `Module::CoreList::is_core` -- CI is a stock
+  machine with exactly PPI, Moo, Data::Dump (fixture).
 
 ## Common Tasks
 

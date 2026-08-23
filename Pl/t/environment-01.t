@@ -12,7 +12,6 @@ use warnings;
 
 use lib ".";
 
-use Data::Dump qw/dump/;
 
 use Test::More tests => 56;
 BEGIN { use_ok('Pl::Environment') };

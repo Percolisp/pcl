@@ -19,7 +19,6 @@ use Moo;
 use PPI;
 use PPI::Dumper;
 
-use Data::Dump qw/dump/;
 
 
 has nodes => (

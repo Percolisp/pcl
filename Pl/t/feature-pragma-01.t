@@ -119,20 +119,42 @@ sub run_cl {
     return $out;
 }
 
+# The ORACLE is the host perl.  Two facts about the HOST, not about PCL, can
+# leave a row without one (the stock-machine rehearsal, s440: CI's perl is
+# 5.38): the program's `use v5.NN` is newer than the host perl, or the
+# program's CPAN fixture (Try::Tiny) is not installed.  A row that needs a
+# newer perl carries the output PROBED on one ($probed, perl 5.40.3, s440)
+# and is compared against that -- the #360 shape stays asserted on every
+# host; a row whose fixture is missing SKIPS, naming the module (CI installs
+# the fixture, so the row runs there).
 sub test_src {
-    my ($name, $code) = @_;
+    my ($name, $code, $probed) = @_;
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $code;
     close $fh;
     my $perl_out = `perl $pl_file 2>&1`;
-    my $cl_out   = run_cl($pl_file);
-    is($cl_out, $perl_out, $name) or diag("perl: [$perl_out]\nPCL:  [$cl_out]");
+    my $expected = $perl_out;
+    my $via      = 'perl';
+    if ($perl_out =~ /^Perl v([\d.]+) required--this is only v([\d.]+)/m) {
+        if (!defined $probed) {
+            SKIP: { skip "$name: the host perl is $2, the program needs $1, and no probed output is given", 1 }
+            return;
+        }
+        ($expected, $via) = ($probed, "the output probed on perl >= $1 (host perl is $2)");
+    }
+    elsif ($perl_out =~ /^Can't locate (\S+)\.pm in \@INC/m) {
+        (my $mod = $1) =~ s{/}{::}g;
+        SKIP: { skip "$name: $mod not installed (the CPAN module is this row's oracle fixture)", 1 }
+        return;
+    }
+    my $cl_out = run_cl($pl_file);
+    is($cl_out, $expected, $name) or diag("$via: [$expected]\nPCL:  [$cl_out]");
 }
 
 my $TRY = qq{try { die "boom\\n" } catch (\$e) { print "caught: \$e" }\nprint "after\\n";\n};
 
 test_src('use v5.40 + try/catch — the #360 shape, a whole-statement DROP before',
-    qq{use v5.40;\nno warnings;\n$TRY});
+    qq{use v5.40;\nno warnings;\n$TRY}, "caught: boom\nafter\n");
 test_src('use experimental "try" + try/catch',
     qq{use experimental 'try';\nno warnings;\n$TRY});
 test_src('use feature "try" + try/catch (the spelling that already worked)',
@@ -145,7 +167,7 @@ test_src('no pragma at all: Try::Tiny keeps working', $TINY);
 test_src('use v5.36: try is NOT in that bundle, so Try::Tiny keeps working',
     qq{use v5.36;\n$TINY});
 test_src('no feature "try" after use v5.40 turns it back off',
-    qq{use v5.40;\nno feature 'try';\n$TINY});
+    qq{use v5.40;\nno feature 'try';\n$TINY}, "caught: boom\nafter\n");
 test_src('signatures still come from the bundle',
     qq{use v5.36;\nsub add (\$x, \$y) { \$x + \$y }\nprint add(2,3), "\\n";\n});
 
@@ -163,7 +185,7 @@ my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };
 print "r=[$r] err=[$@]\n";
 PERL
 
-test_src('…and inherits it from a version bundle', <<'PERL');
+test_src('…and inherits it from a version bundle', <<'PERL', "r=[caught:boom\n] err=[]\n");
 use v5.40;
 no warnings;
 my $r = eval q{ try { die "boom\n" } catch ($e) { "caught:$e" } };

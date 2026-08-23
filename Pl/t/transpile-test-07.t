@@ -362,6 +362,13 @@ print( (eval { t086(1,2,3) } // "die-many"), "\n");
 # inside finally are warned not propagated), $@ is untouched after try, and
 # try/catch keep their context split.  Upstream runs finallys from a
 # DESTROY scope guard PCL cannot fire.
+# The perl ORACLE needs the real CPAN Try::Tiny (run_perl has no -Ilib); the
+# PCL side uses the shim.  The CPAN module is this row's FIXTURE, not a PCL
+# dependency: the row SKIPS where it is not installed (a stock perl has only
+# PPI and Moo); CI installs it so the row runs there.
+SKIP: {
+    skip "Try::Tiny not installed (the CPAN module is this row's oracle fixture)", 1
+        if !eval { require Try::Tiny; 1 };
 test_transpile("Try::Tiny shim: finally direct-call semantics", '
 use Try::Tiny;
 my @log;
@@ -382,6 +389,7 @@ push @log, "rethrow:$@" if !$out;
 }
 print map { s/\n/./gr . "\n" } @log;
 ');
+}
 
 # Task #131 (defelem arg-aliasing): a hash/array ELEMENT passed to a user
 # sub aliases through @_ — writes to $_[0] reach the caller's element, an

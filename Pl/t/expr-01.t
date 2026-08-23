@@ -12,7 +12,9 @@ use warnings;
 
 use lib ".";
 
-use Data::Dump qw/dump/;
+use FindBin qw($RealBin);
+use lib $RealBin;
+use PCLDump qw(dump);   # core-only dump(); Data::Dump is not core
 
 use PPI;
 use PPI::Dumper;

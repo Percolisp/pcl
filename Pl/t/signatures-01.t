@@ -14,7 +14,6 @@ use warnings;
 
 use lib ".";
 
-use Data::Dump qw/dump/;
 
 use Test::More tests => 34;
 BEGIN { use_ok('Pl::Parser2') };

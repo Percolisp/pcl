@@ -13,7 +13,6 @@ use Moo;
 
 use PPI;
 use Scalar::Util qw(refaddr);
-use Data::Dump qw/dump/;
 use File::Basename;
 use File::Spec;
 use Cwd qw(abs_path);

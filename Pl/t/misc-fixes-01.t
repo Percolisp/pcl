@@ -409,10 +409,17 @@ test_cl('&sub via local $_ assignment threads @_',
     "\"hi\"\n");
 
 # Data::Dump end-to-end: string values must survive the str/quote chain.
-test_cl('Data::Dump dumps strings and nested structures',
-    'use Data::Dump qw(dump);
-     print dump({x=>[1,2], y=>"hi"}), "\n";',
-    "{ x => [1, 2], y => \"hi\" }\n");
+# The SUBJECT is the real CPAN module, transpiled from @INC -- a fixture, not
+# a PCL dependency; the row SKIPS (never silently passes) where it is not
+# installed (a stock perl has only PPI and Moo).
+SKIP: {
+    skip "Data::Dump not installed (the CPAN module is this row's fixture)", 1
+        if !eval { require Data::Dump; 1 };
+    test_cl('Data::Dump dumps strings and nested structures',
+        'use Data::Dump qw(dump);
+         print dump({x=>[1,2], y=>"hi"}), "\n";',
+        "{ x => [1, 2], y => \"hi\" }\n");
+}
 
 # ── do {} loop-control transparency (Perl semantics) ─────────────────────
 # do{} is not a loop; an unlabeled last/next/redo inside it must escape to
