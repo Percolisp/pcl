@@ -17,6 +17,10 @@ use PCLCore;
 
 my $pl2cl = './pl2cl';
 my $runtime = 'cl/pcl-runtime.lisp';
+# Cached-core prefix (#518): loading the runtime SOURCE per row recompiles it
+# (~1.2 s per spawn) and is the one variable the CI flake pointed at — every
+# sibling runs the saved core through this same one-place prefix.
+my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 # Create temp directory with test files
 my $tmpdir = tempdir(CLEANUP => 1);
@@ -43,7 +47,7 @@ sub run_pcl {
   print $cl_fh $cl_code;
   close $cl_fh;
 
-  my $output = `sbcl --noinform --non-interactive --load $runtime --load $cl_file 2>&1`;
+  my $output = `sbcl @sbcl_rt --load $cl_file 2>&1`;
 
   # Filter SBCL noise
   $output =~ s/^;.*\n//gm;
@@ -387,8 +391,10 @@ my \@files = grep { /\\/a\\.txt\$/ } <$tmpdir/*.txt>;
 print scalar(\@files);
 END_CODE
 
-  # Should match only a.txt (ends with /a.txt)
-  like($output, qr/1/, 'glob result can be filtered with grep');
+  # Should match only a.txt (ends with /a.txt).  EXACT assertion (#518): the
+  # CI flake showed qr/1/ can only say "some 1 appeared somewhere in
+  # stdout+stderr" — when it failed there was no telling what the output WAS.
+  is($output, "1", 'glob result can be filtered with grep');
 }
 
 # Test: Character range in brackets (now expanded by p-glob)
