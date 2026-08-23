@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-179
+;;; pcl: pipeline=v2 gen=v2-180
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -149,9 +149,9 @@
                         (p-shift (p-cast-@ $seq))))))
                 (p-return (p-backslash @result))))))))))
 
-(p-set-current-package :mro "mro")
-
 (p-run-compile-phase-blocks)
+
+(p-set-current-package :mro "mro")
 
 (p-scalar-= mro::$VERSION "1.29_01")
 

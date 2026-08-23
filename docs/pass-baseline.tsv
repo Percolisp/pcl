@@ -39,6 +39,15 @@
 #     unaffected.  NOTE: these two are the sixth population — a drop inside a
 #     fresh_perl/runperl CHILD is invisible to the drop census, which reads
 #     emitted .lisp files (task #472).
+# s436 (#456 half (b) / #469, the PHASE MODEL): sort.t 202 -> 203 and PARTIAL ->
+#   OK, EDITED BY HAND — the row the s432 note below promised back.  PCL now
+#   emits every section's COMPILE phase (defs, BEGINs) before any section's RUN
+#   phase, as perl does, so `package A; sub min` is defined before the earlier
+#   block's `sort { A::min(@$a) <=> A::min(@$b) }` runs: the comparator calls
+#   the real sub, the list sorts, and `cmp_ok($answer,'eq','good','bug 36430')`
+#   passes for the reason the test intends.  The file also stops aborting a
+#   top-level form, hence OK.  It is the ONLY row the phase model moved in this
+#   population (sweep TOTAL 18311 -> 18312, GATE clean, 0 new / 0 fixed).
 # s432 (#456 half (a), the forward-declaration stub): sort.t 203 -> 202 EDITED BY
 #   HAND, and its status OK -> PARTIAL.  The lost row is `cmp_ok($answer,'eq',
 #   'good','bug 36430')` (sort.t:870), which was an ACCIDENTAL pass: the block's
@@ -197,7 +206,7 @@ reverse.t	OK	25	0	25
 scalar.t	OK	84	32	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
-sort.t	PARTIAL	202	1	205
+sort.t	OK	203	1	205
 splice.t	OK	34	0	34
 split.t	OK	177	7	219
 sprintf.t	OK	532	25	559

@@ -1748,9 +1748,43 @@ sub parse {
   # wrap — no per-package section assembly.
   return $self->_assemble_eval_mode($sections[0], $doc) if $self->eval_mode;
 
-  # ---- Assemble the sections.
-  my @body;
-  my $phase_boundary_emitted = 0;
+  # ---- Assemble the sections, in perl's PHASE ORDER (#469, = #456 half (b)).
+  #
+  # Perl compiles the WHOLE FILE before it runs any of it: every named sub is
+  # defined and every BEGIN has run before the first run-time statement,
+  # wherever in the file they sit.  PCL used to emit one section at a time —
+  # decls, captured, defs, sched, RUN — so a `package` switch anywhere in the
+  # file put a later section's compile-phase forms AFTER an earlier section's
+  # run-time code.  Two shapes of the same bug, both probed against perl:
+  #
+  #   our $x = 5;
+  #   { package Q; sub q1 { 1 } }
+  #   BEGIN { print "B=[$main::x]\n" }      # perl B=[], PCL B=[5]  (SILENT)
+  #
+  #   { package Q; print main::nm(), "|\n"; } sub nm {"PKG"}
+  #                                          # perl PKG, PCL died (#456)
+  #
+  # So the loop below runs in TWO PASSES over the same sections: every
+  # section's COMPILE-phase forms (its package preamble, decls, captured,
+  # defs/sched interleave — source order kept within and across sections),
+  # then `(p-run-compile-phase-blocks)` once, then every section's RUN-phase
+  # forms.  Nothing is compiled twice: the forms MOVE.
+  #
+  # The run groups keep their own order and their own
+  # `(p-set-current-package …)`, so the runtime package sequence during the
+  # run phase is exactly what it was.  What each run group needs and did not
+  # need before is an `(in-package …)`: `in-package` is READ-time and pass 1
+  # now leaves the reader in the LAST section's package.  `$reader` tracks it
+  # so a single-section file — the overwhelming majority — emits not one byte
+  # more than before.  Section 0 is always `main` (`$root_pkg` is 'main' in
+  # file mode; eval mode returned above), which is where pl2cl's preamble
+  # leaves the reader, hence the initial value.
+  #
+  # NOT "hoist the definition alone" (ruled s433): a sub body emitted above
+  # its own section's decls compiles that section's `p-defcell` symbol-macro
+  # as a plain free variable.  Whole compile phase or nothing.
+  my (@body, @run_groups);
+  my $reader = $self->fallback_parser->_cl_pkg_designator('main');
   for my $i (0 .. $#sections) {
     my $sec = $sections[$i];
     my $pkg = $sec->{pkg};
@@ -1766,11 +1800,13 @@ sub parse {
                   "(in-package $cl_pkg)",
                   "(defclass $cl_class () ())",
                   "(p-register-pkg-name $cl_pkg \"$pkg\")", '';
+      $reader = $cl_pkg;
     } elsif ($i > 0) {
       # Reopened (return) section: the package's section already exists, so
       # just put the CL reader back into it (v1's block-form return branch).
       push @body, ";;; back to package $pkg",
                   "(in-package $cl_pkg)", '';
+      $reader = $cl_pkg;
     }
     push @body, @{ $sec->{decls} };
     # Versioned `package Foo 1.5;`: $VERSION defvar in decls, assignment at the
@@ -1809,20 +1845,44 @@ sub parse {
     # introspection: chdir.t).  Index tie-break keeps the merge stable for
     # entries with equal positions.
     push @body, map { ($_, '') } $self->_interleaved_defs($sec);
-    # Runtime current-package tracking (caller()/__PACKAGE__) in execution
-    # order — after this section's definitions load, before its code runs.
-    push @body, "(p-set-current-package $cl_pkg \"$pkg\")", '' if $i > 0;
+    # `package Foo 1.5;` sets $VERSION at COMPILE time in perl, so the
+    # assignment belongs at the end of this section's compile phase — which is
+    # also where it has always been relative to the phase boundary and to
+    # every run form (v1's _emit_package_version: source order, not BEGIN).
     push @body, @ver_run;
-    # The compile->run boundary: UNITCHECK/CHECK (reverse) then INIT (source
-    # order) run once before the first runtime code — perl's phase order
-    # (v1's _assemble_output emits the same call at the same seam).
-    if (!$phase_boundary_emitted && grep { /\S/ } @{ $sec->{run} }) {
-      push @body, "(p-run-compile-phase-blocks)", '';
-      $phase_boundary_emitted = 1;
-    }
-    push @body, map { ($_, '') } @{ $sec->{run} };
+    # This section's RUN phase, held back until every section has compiled.
+    push @run_groups, [$i, $pkg, $cl_pkg, $sec->{run}];
   }
-  push @body, "(p-run-compile-phase-blocks)", '' unless $phase_boundary_emitted;
+  # The compile->run boundary: UNITCHECK/CHECK (reverse) then INIT (source
+  # order) run once, after the whole file has compiled and before the first
+  # runtime code — perl's phase order (v1's _assemble_output emits the same
+  # call at the same seam).  A file with no run forms at all still ends with
+  # it, exactly as before.
+  push @body, "(p-run-compile-phase-blocks)", '';
+  for my $g (@run_groups) {
+    my ($i, $pkg, $cl_pkg, $run) = @$g;
+    next unless $i > 0 || grep { /\S/ } @$run;
+    # READ-time: pass 1 left the reader in the last section's package.
+    if ($reader ne $cl_pkg) {
+      push @body, "(in-package $cl_pkg)", '';
+      $reader = $cl_pkg;
+    }
+    # Runtime current-package tracking (caller()/__PACKAGE__) in execution
+    # order — after every definition has loaded, before this section's code
+    # runs.  SECTION 0 NOW NEEDS ONE TOO, whenever the file has more than one
+    # section: `main` used to be current by construction at that point, and
+    # under the phase model it is not.  A `p-BEGIN` sets the runtime package on
+    # entry and does not restore it, so once every section's BEGINs run in the
+    # compile phase the package left over is the LAST one's — measured, and it
+    # cost perl-tests/caller.t two rows (`{ package RT129239; BEGIN {…} }` at
+    # line 369 left RT129239 current, so the `eval 'pb()'` at line 129
+    # transpiled in the wrong package and answered undef).  No run group may
+    # assume a package it did not state.  A ONE-section file reorders nothing
+    # ahead of its own run forms, so it keeps its byte-identical emission.
+    push @body, "(p-set-current-package $cl_pkg \"$pkg\")", ''
+      if $i > 0 || @sections > 1;
+    push @body, map { ($_, '') } @$run;
+  }
 
   my @out = ('(in-package :pcl)', '');
   # Pre-declare every package a later section opens or a qualified symbol

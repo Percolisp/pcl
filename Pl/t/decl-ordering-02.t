@@ -29,7 +29,7 @@ my $runtime = 'cl/pcl-runtime.lisp';
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 19;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -156,25 +156,65 @@ sub od { my $n = shift; $n == 0 ? 0 : ev($n-1) }
 print ev(10), od(7), "\n";
 PL
 
-# ---- #456: an EARLIER section's call to a sub the file defines LATER ----
+# ---- #456 half (b) / #469: perl's PHASE MODEL, across package sections ----
 # A block that switches package (`{ package Q; ... }`) becomes its own emission
-# section, so a file-level `sub nm {...}` written after it is DEFINED after that
-# section has already run.  Perl compiles every named sub before run time and
-# prints PKG.  PCL cannot yet (the hoist-order half of #456) -- but what it must
-# never do again is answer the forward STUB's value, which made this SILENT: the
-# program printed the empty string and exited 0.  s432 made the stub DIE
-# (CLAUDE.md rule 12), so the failure is loud and trappable.
-#
-# WHEN THE HOIST HALF OF #456 LANDS: delete these two rows and put the same
-# program through both_agree instead (it will then print PKG like perl).
-{
-    my $code = qq[{ package Q; print main::nm(), "|\\n"; } sub nm {"PKG"}\n];
-    my $out  = run_pcl($code);
-    like($out, qr/Undefined subroutine &main::nm called/,
-         '#456 cross-section forward call dies loudly');
-    unlike($out, qr/^\|/m,
-           '#456 ... and never answers the forward stub, which printed empty');
-}
+# section.  PCL used to emit one section at a time — decls, defs, BEGINs, RUN —
+# so a file-level `sub nm {...}` written after such a block was DEFINED only
+# after that block had already run, and the call died on the forward stub.
+# Perl compiles the WHOLE FILE first: every named sub is defined and every
+# BEGIN has run before the first run-time statement, wherever they sit.  s436
+# emits every section's compile phase before any section's run phase, so these
+# now agree with perl instead of diverging (the two rows this replaces asserted
+# the loud death that was the best PCL could do before).
+both_agree('#456(b) cross-section forward call — perl compiles the file first', <<'PL');
+{ package Q; print main::nm(), "|\n"; } sub nm {"PKG"}
+PL
+
+# #469, the same bug through a BEGIN instead of a sub: a BEGIN in a LATER
+# section must NOT see an EARLIER section's RUN-TIME assignment.  This was
+# SILENT WRONG (PCL printed 5, perl prints the empty string) — the compile
+# phase running after run-time code is visible in both directions.
+both_agree('#469 a later section\'s BEGIN does not see earlier run-time state', <<'PL');
+our $x = 5;
+{ package Q; sub q1 { 1 } }
+BEGIN { print "B=[$main::x]\n" }
+print "end\n";
+PL
+
+# The INVERSES that pin the phase model down, all four probed against perl:
+# source order INSIDE the compile phase is kept (a BEGIN sees the subs above it
+# and none below), and a later section's compile phase does see an earlier
+# section's compile phase.
+both_agree('#469 inverse: a BEGIN sees an EARLIER section\'s sub', <<'PL');
+sub early { "E" }
+package Q;
+BEGIN { print "B=", main::early(), "\n" }
+package main;
+print "end\n";
+PL
+
+both_agree('#469 inverse: a BEGIN does NOT see a sub defined below it', <<'PL');
+package Q;
+BEGIN { print "B=", (defined &main::late ? "yes" : "no"), "\n" }
+package main;
+sub late { "L" }
+print "end\n";
+PL
+
+# The run phase keeps its own package sequence: __PACKAGE__ and the runtime
+# current-package tracking must survive the reordering.
+both_agree('#469 inverse: __PACKAGE__ across sections in the run phase', <<'PL');
+package Q; sub who { return __PACKAGE__ }
+package R; sub who { return __PACKAGE__ }
+package main;
+print Q::who(), R::who(), __PACKAGE__, "\n";
+PL
+
+both_agree('#469 inverse: CHECK/INIT still bracket the phase boundary', <<'PL');
+package Q; INIT { print "initQ\n" } CHECK { print "checkQ\n" }
+package main; INIT { print "initM\n" }
+print "run\n";
+PL
 
 # The INVERSE, which must keep working: the same call with NO package switch in
 # the block -- one section, so the sub def is hoisted above the runtime forms.

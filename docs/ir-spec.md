@@ -1202,6 +1202,36 @@ Generated files are loaded form-by-form; a `use`/`require` triggers
 transpilation (or cache lookup) of the target module and loads it inline,
 recursively.
 
+**The COMPILE PHASE of the whole file precedes the RUN PHASE of any of it
+(normative, s436).** Perl compiles a file before it runs a line of it: every
+named sub is defined and every `BEGIN` has run before the first run-time
+statement, no matter where in the file they sit. A generated file reproduces
+that with two groups of top-level forms, in this order:
+
+1. **compile phase**, one group per package section in source order — the
+   section's package preamble and `(in-package …)`, its declarations, its
+   captured `use`/`require`/`BEGIN` declarations, and its sub definitions and
+   scheduled blocks interleaved by SOURCE POSITION (so a `BEGIN` sees exactly
+   the subs written above it and none below);
+2. `(p-run-compile-phase-blocks)` — UNITCHECK and CHECK in reverse
+   registration order, then INIT in source order (§the phase boundary);
+3. **run phase**, one group per section in source order — an `(in-package …)`
+   to put the READER back where that section's symbols resolve, a
+   `(p-set-current-package …)` for `caller()`/`__PACKAGE__`, then the
+   section's run-time forms.
+
+A section is a top-level `package` switch, so a single-package file has one of
+each group and the split is invisible. The rule is load-bearing exactly when a
+file has more than one: emitting a whole section at a time — its run phase
+included — puts a LATER section's compile phase after an EARLIER section's
+run-time code, which perl never does (tasks #456, #469; the two shapes are a
+cross-section forward call and a `BEGIN` that could see a run-time
+assignment). A translator that emits sections whole reproduces the bug.
+
+Note what may NOT be done instead: hoisting a definition on its own, above its
+own section's declarations, compiles that section's `p-defcell` symbol-macro
+as a plain free variable. The unit is the whole compile phase.
+
 **Declarations are define-once.** Both declarers initialize a variable only
 when it is not already bound — `defvar` by definition, `p-defcell` by an
 explicit `boundp` guard. This is load-bearing, not tidiness: the same name

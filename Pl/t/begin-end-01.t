@@ -335,10 +335,23 @@ END_CODE
 }
 
 # Test: BEGIN with package variable from different package
+#
+# THE EXPECTATION HERE WAS WRONG UNTIL s436, and PCL passed it only because of
+# the bug #469 fixed.  The original program assigned `our $value = 100;` as a
+# RUN-TIME statement in an earlier package section and asserted that a BEGIN in
+# a later section saw 100 — but perl runs every BEGIN at COMPILE time, before
+# any run-time statement anywhere in the file, and prints the EMPTY STRING for
+# it (probed, perl 5.40.3).  PCL agreed with the row only while it emitted one
+# section at a time, run phase and all.
+#
+# So the row is split in two, and both halves are perl's answer: a compile-time
+# assignment IS visible across packages (which is what this test means to
+# cover), and a run-time one is NOT.
 {
   my $output = run_pcl(<<'END_CODE');
 package Config;
-our $value = 100;
+our $value;
+BEGIN { $value = 100; }
 
 package main;
 my $result;
@@ -347,6 +360,20 @@ print $result;
 END_CODE
 
   like($output, qr/100/, 'BEGIN can access package variable from other package');
+}
+{
+  my $output = run_pcl(<<'END_CODE');
+package Config;
+our $value = 100;
+
+package main;
+my $result;
+BEGIN { $result = $Config::value; }
+print defined $result ? "[$result]" : "[undef]";
+END_CODE
+
+  like($output, qr/\[undef\]/,
+       '... and does NOT see an earlier section\'s RUN-TIME assignment (#469)');
 }
 
 # Test: Sub defined in BEGIN is callable later
