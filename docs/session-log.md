@@ -94,6 +94,9 @@ line is terminal-only — the installer's smoke test caught it in a capture.
 Plain `prove -j8 Pl/t/` 224 s / 166/5780 (prove-core's speed); `pcl -E`
 0.145 s; `tools/t/sbcl-prefix.t` 27 rows; `tools/t/install-pcl.t` 11/11;
 full sweep on the new runner IDENTICAL (TOTAL 18312 +0, 0 new / 0 fixed, drops 5 = census, child drops 241/98, GATE clean) in **2 min 10 s wall instead of ~10** — every fresh_perl child used to recompile the runtime too.  Notes in README, CLAUDE.md, test-infrastructure.md.
+**The USER simplified README.md further by hand (speed / XS / testing paragraphs
+cut to a few lines; 277 lines) — that edit rode in `30c26a7` with the
+cached-core commit.**
 
 ## Session 438g + 438h + 438i (2026-08-23, Opus 5) — Q6: #452, #451, #450; #449 stays where its own task put it
 

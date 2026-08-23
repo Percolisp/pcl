@@ -111,7 +111,7 @@ tools/install-pcl --prefix ~/.local   # install: copies the runtime tree, writes
 tools/install-pcl --no-core --dry-run # show what it would do
 
 tools/prove-core                      # the regression gate against a fresh saved core (~4 min)
-prove -j8 Pl/t/                       # the same gate, plain (the reference; slower)
+prove -j8 Pl/t/                       # the same gate, plain (the reference)
 ```
 
 **The runtime is compiled once and cached.**  Every PCL runner (`runpcl`,
