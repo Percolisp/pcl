@@ -1228,6 +1228,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `%SIG` | signal handlers. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
 | `$.` | line number of the last-read filehandle (per-handle) |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
+| `$\`, `$,` | output record / field separator. **Both are UNDEF until the program sets one** (task #465) — the separator defaults are asymmetric and a translator must copy the asymmetry, not normalize it: `$/` is `"\n"`, `$;` is `"\034"`, `$"` is `" "`, `$!` is the errno dualvar, all DEFINED. An empty string here is invisible on the write side and wrong on the read side (`defined($,)`, `$\ // ","`, `length($\)`), which is what made it silent. `print` treats undef as "print nothing between/after": its readers test *non-empty string*, never `defined`. |
 
 Regex match state is *global-with-dynamic-save*, exactly Perl: a failed
 match leaves `$1` from the previous successful match intact.

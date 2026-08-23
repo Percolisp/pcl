@@ -1632,8 +1632,13 @@
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
 (defvar |$/| (make-p-box (string #\Newline)) "Input record separator")
-;;; Output record separator ($\)
-(defvar |$\\| (make-p-box "") "Output record separator")
+;;; Output record separator ($\) — perl's default is UNDEF, not "" (task #465).
+;;; The difference is invisible on the WRITE side (both print nothing after the
+;;; list) and decisive on the READ side: `defined($\)`, `if ($\)`, `$\ // ","`.
+;;; Test2::Formatter::TAP's `local($\, $,) = (undef, '') if $\ || $,;` took the
+;;; branch perl skips.  p-print's reader tests `stringp` + non-empty, so undef
+;;; flows through it unchanged.
+(defvar |$\\| (make-p-box *p-undef*) "Output record separator (perl: undef until set)")
 ;;; List separator ($")
 (defvar |$"| (make-p-box " ") "List separator for array interpolation")
 ;;; Output autoflush ($|) — magic: every write clamps to 1/0 by truthiness
@@ -1697,8 +1702,9 @@
              (remhash ,s *p-autoflush-handles*))))))
 ;;; Subscript separator ($;)
 (defvar |$;| (make-p-box (string (code-char #x1C))) "Subscript separator (default SUBSEP)")
-;;; Output field separator ($,)
-(defvar |$,| (make-p-box "") "Output field separator for print")
+;;; Output field separator ($,) — perl's default is UNDEF, not "" (task #465,
+;;; same family as |$\\| above).
+(defvar |$,| (make-p-box *p-undef*) "Output field separator for print (perl: undef until set)")
 ;;; Perl version number ($])
 (defvar |$]| (make-p-box "5.030000") "Perl version number")
 ;;; Format/write special variables (rarely used in modern code)
