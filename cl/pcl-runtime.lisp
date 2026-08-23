@@ -8763,11 +8763,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    *package* is bound to X's CL package around BOTH the free-name resolution
    and the body.  That is what makes an unqualified package global land in X —
    the lookup's miss path, %p-symref-box and its siblings, p-use's import
-   target, p-bless's default class and the symbolic-funcall resolvers all read
-   *package* for exactly this question.  The eval TEXT was already read in the
-   caller's package, so the lambda's own symbols are unaffected."
+   target and p-bless's default class all read *package* for exactly this
+   question.  The eval TEXT was already read in the caller's package, so the
+   lambda's own symbols are unaffected.
+   *pcl-current-package* — the PERL-level current package, which p-eval itself
+   distinguishes from *package* — is bound to X's original-case name for the
+   same extent (task #503): the symbolic-sub resolver reads THAT, and without
+   this binding an unqualified `&{'foo'}()` inside the region would resolve in
+   the eval's CALLER instead of in X."
   (if region-pkg
-      (let ((*package* (%p-eval-region-package region-pkg)))
+      (let* ((pkg (%p-eval-region-package region-pkg))
+             (*package* pkg)
+             (*pcl-current-package* (pcl-pkg-perl-name pkg)))
         (apply fn (mapcar #'p-eval-lex-lookup free-names)))
       (apply fn (mapcar #'p-eval-lex-lookup free-names))))
 
@@ -13116,21 +13123,44 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (write-char ch s))))
       name))
 
+(defun %p-sub-symbol-in (perl-pkg bare-name)
+  "The sub SYMBOL for BARE-NAME in Perl package PERL-PKG, interning it, or NIL
+   when that package does not exist (nothing can be defined there, so there is
+   nothing to call and no AUTOLOAD to reach).  Same spelling rule as
+   %p-resolve-sub-symbol's find-symbol — one place, so a symbolic call and its
+   diagnostic cannot name different symbols."
+  (let ((cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
+    (when cl-pkg (intern (%pcl-cl-sub-name bare-name) cl-pkg))))
+
 (defun %p-resolve-sub-symbol (name)
   "Resolve a Perl sub-name string (\"foo\" or \"Pkg::foo\") to its CL symbol
    PKG::PL-FOO, or NIL if the package/symbol does not exist.  Shared by the
-   symbolic-code-ref paths: &{$name}(...), defined/exists &{$name}.  An
-   unqualified name resolves against the current CL package (MAIN -> main)."
+   symbolic-code-ref paths: &{$name}(...), defined/exists &{$name}, and the
+   stash write-through.  Returns (values SYM PERL-PKG BARE-NAME) so a caller's
+   diagnostic names the package this resolution actually used — the split was
+   in TWO copies (here and in p-funcall-ref's die message) and they had to
+   agree by hand.
+
+   **An unqualified name resolves in the PERL-level current package** —
+   perlmod: \"If the string is unqualified, it is looked up in the current
+   package\" — which is `*pcl-current-package*`, the name codegen sets at each
+   `package` statement and p-sub rebinds per call to the sub's home package.
+   NOT `(package-name *package*)`: that is the CL READER's package, which is
+   MAIN for every form the loader reads after the file's last `(in-package
+   …)`, so `package NA; sub p { my $s = \"nafun\"; &$s(3) }` looked
+   `main::nafun` up and died (task #503).  p-eval had already drawn this
+   distinction for the same reason — its comment says \"*package* may be MAIN
+   here even when the Perl current package is Foo\"; two answers to one
+   question is the bug.  A string eval's `package X;` REGION binds both (see
+   p-eval-thunk), so #240's rule still holds."
   (let* ((name (%p-tick-package-seps (to-string name)))
          (sep-pos (search "::" name :from-end t))
-         (perl-pkg (if sep-pos
-                       (subseq name 0 sep-pos)
-                       (let ((cpkg (package-name *package*)))
-                         (if (string= cpkg "MAIN") "main" cpkg))))
+         (perl-pkg (if sep-pos (subseq name 0 sep-pos) *pcl-current-package*))
          (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
          (cl-pkg (find-package (perl-pkg-to-cl-pkg-name perl-pkg))))
-    (when cl-pkg
-      (find-symbol (%pcl-cl-sub-name bare-name) cl-pkg))))
+    (values (when cl-pkg (find-symbol (%pcl-cl-sub-name bare-name) cl-pkg))
+            perl-pkg
+            bare-name)))
 
 (defun p-funcall-ref (ref &rest args)
   "Call a code reference or a symbolic sub name (no-strict-refs semantics)."
@@ -13151,22 +13181,32 @@ buffer's fill-pointer; everything else falls back to file-length."
           ;; Resolution is %p-resolve-sub-symbol's job — the ONE resolver all
           ;; symbolic-code-ref paths share (it had the multi-segment package
           ;; rule this function's inline copy lacked: |aa::bb| keeps case,
-          ;; single-segment upcases).  The pkg/name split here only feeds the
-          ;; die message.
-          (let* ((name (%p-tick-package-seps (to-string fn)))
-                 (sep-pos (search "::" name :from-end t))
-                 (perl-pkg (if sep-pos
-                               (subseq name 0 sep-pos)
-                               (let ((cpkg (package-name *package*)))
-                                 (if (string= cpkg "MAIN") "main" cpkg))))
-                 (bare-name (if sep-pos (subseq name (+ sep-pos 2)) name))
-                 (sym (%p-resolve-sub-symbol name))
-                 (fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
-            (if fn-val
-                (apply fn-val args)
-                (p-die (format nil
-                               "Undefined subroutine &~A::~A called at (eval 1) line 1.~%"
-                               perl-pkg bare-name))))))))
+          ;; single-segment upcases).  It also reports the package/name split
+          ;; it USED, so the die message cannot disagree with the lookup — this
+          ;; function used to re-derive that split from *package* and, since
+          ;; task #503, the two would have named different packages.
+          (multiple-value-bind (sym perl-pkg bare-name)
+              (%p-resolve-sub-symbol fn)
+            (let ((fn-val (when (and sym (fboundp sym)) (symbol-function sym))))
+              (if fn-val
+                  (apply fn-val args)
+                  ;; No body at that name: this is "a plain call reached no
+                  ;; body" and gets the ONE answer — the sub's own package's
+                  ;; AUTOLOAD with $AUTOLOAD set, else perl's die (task #468,
+                  ;; ir-spec §5.1).  perl DOES reach AUTOLOAD through a
+                  ;; symbolic call: probed, `package WA; sub AUTOLOAD {…} my
+                  ;; $s = "gone"; &$s(1)` runs WA::AUTOLOAD with $AUTOLOAD =
+                  ;; "WA::gone".  The symbol may not exist yet, so intern it
+                  ;; in the resolved package — unbound and statusless, which
+                  ;; is what `exists`/`defined &{…}` already answer NO for.
+                  ;; No such package at all: nothing can define AUTOLOAD there,
+                  ;; so die with perl's message directly.
+                  (let ((target (or sym (%p-sub-symbol-in perl-pkg bare-name))))
+                    (if target
+                        (%p-call-of-undefined-sub target args)
+                        (p-die (format nil
+                                       "Undefined subroutine &~A::~A called.~%"
+                                       perl-pkg bare-name)))))))))))
 
 ;;; ============================================================
 ;;; Type Functions
@@ -13373,33 +13413,22 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
    Handles 'Pkg::name' format, converting to CL naming convention (PL- prefix).
-   Returns NIL if the function cannot be found."
+   Returns NIL if the function cannot be found (callers rely on that: `undef
+   &$x`, p-sort-get-fn and the prototype registry all test it).
+
+   The name → symbol step is %p-resolve-sub-symbol's, the ONE resolver (rule
+   11).  This function used to carry a THIRD copy of it, which `intern`ed
+   instead of find-symbol'ing and — the bug, task #503 — resolved an
+   unqualified name in the CL reader's `*package*` (MAIN after the loader has
+   read the file's last in-package), so `package NA; … \\&$s` with $s = \"nafun\"
+   found nothing and `\\&$s` came back as a SCALAR ref to nil, which then died
+   with an EMPTY sub name.  perl looks an unqualified name up in the current
+   package, which is what the resolver now answers."
   (let ((v (unbox name-val)))
-    (cond
-      ;; Already a function reference - return directly
-      ((functionp v) v)
-      ;; String - look up by Perl function name
-      (t
-       (let* ((s (%p-tick-package-seps (stringify-value v)))
-              (last-sep (search "::" s :from-end t)))
-         (if last-sep
-             ;; Package-qualified: "Pkg::name" -> Pkg::PL-NAME.  Multi-segment
-             ;; packages (Foo::Bar) keep their case (|Foo::Bar|); single-segment
-             ;; is upcased — via perl-pkg-to-cl-pkg-name, the same rule the other
-             ;; symbolic-ref paths use.  Plain string-upcase gave DATA::DUMP for a
-             ;; multi-seg name, missed the |Data::Dump| package, and returned nil
-             ;; (so \&{"Data::Dump::pp"} came back as a SCALAR ref to nil).
-             (let* ((pkg-str (perl-pkg-to-cl-pkg-name (subseq s 0 last-sep)))
-                    (func-str (subseq s (+ last-sep 2)))
-                    (cl-func-name (%pcl-cl-sub-name func-str))
-                    (pkg (find-package pkg-str)))
-               (when pkg
-                 (let ((sym (intern cl-func-name pkg)))
-                   (and (fboundp sym) (symbol-function sym)))))
-             ;; Unqualified: "name" -> PL-NAME in current package
-             (let* ((cl-func-name (%pcl-cl-sub-name s))
-                    (sym (intern cl-func-name *package*)))
-               (and (fboundp sym) (symbol-function sym)))))))))
+    (if (functionp v)
+        v
+        (let ((sym (%p-resolve-sub-symbol (stringify-value v))))
+          (and sym (fboundp sym) (symbol-function sym))))))
 
 (defun %p-glob-slot-place (glob sigil init)
   "The value bound to GLOB's SIGIL slot symbol (\"@\" array / \"%\" hash),

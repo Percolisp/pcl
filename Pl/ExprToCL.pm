@@ -3624,8 +3624,14 @@ sub gen_inline_lambda_form {
   }
 
   # Scalar comparator (sort $var LIST) — resolved at runtime by
-  # p-sort-get-fn; *package* rebound to the creation-time package so string
-  # sub names resolve in USER code, not :pcl (p-sort's own package).
+  # p-sort-get-fn; *package* rebound to the value it has where the lambda is
+  # built, so a symbolic READ inside the comparator body (${"name"} and its
+  # siblings, which all consult *package*) sees the user's package rather than
+  # p-sort's.  It is NOT what resolves a string COMPARATOR NAME any more: that
+  # goes through %p-resolve-sub-symbol, which reads the Perl-level current
+  # package (*pcl-current-package*, task #503) — this binding could not do that
+  # job, because it captures *package* at CALL time, where the loader has long
+  # since left the file's own (in-package …) and it reads MAIN.
   if ($for_func eq 'sort' && $node->{scalar_cmp}) {
     my $scalar = ($kids && @$kids) ? $self->gen_node_form($kids->[0]) : 'nil';
     return

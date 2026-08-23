@@ -775,12 +775,15 @@ mentioned at all, the answer is perl's, in perl's order:
    `eval {}` like any other die; PCL does not append perl's
    `" at FILE line N."` because the emitted call carries no location).
 
-One runtime entry point implements it (`%p-call-of-undefined-sub`) and three
+One runtime entry point implements it (`%p-call-of-undefined-sub`) and four
 paths reach it: the forward stub's body, the trampoline `p-backslash-sub`
-returns for `\&NAME` when the name has no body, and — for a name the file
+returns for `\&NAME` when the name has no body, a SYMBOLIC call whose name
+resolves to no body (`&$name(…)` / `$name->(…)` / `&{"name"}(…)`, in the
+package §7.1's rule picks — perl reaches AUTOLOAD through those too, probed
+s442d), and — for a name the file
 never declared, whose call the codegen emits as a direct `(pl-NAME …)` — an
 `undefined-function` handler that resumes through CL's `use-value` restart.
-A translator to another host needs the same three, or the equivalent of a
+A translator to another host needs the same four, or the equivalent of a
 per-package "no such function" hook: the decision belongs at the CALL, which
 is where perl makes it, and not at an error boundary, because `eval {}` must
 be able to see the AUTOLOAD *value*.
@@ -1171,6 +1174,29 @@ via `(p-register-pkg-name :Animal "Animal")` — string-level lookups
 (method dispatch, `ref`) go through that registry. Multi-segment names
 (`File::Basename`) keep their exact spelling as `|File::Basename|`.
 A qualified Perl variable `$Foo::x` is the symbol `$x` in namespace `FOO`.
+
+**Two "current packages", and a translator must not confuse them
+(normative, s442d):** the host's own reader package (`*package*` in CL) is
+set by the emitted `(in-package …)` forms *as the file is read*, so once
+loading is past a file's last one it is `MAIN` for the rest of the run —
+it says nothing about which Perl package a running form was written in.
+The Perl-level current package is `*pcl-current-package*`: codegen sets it
+at every `package` statement, `p-sub` rebinds it per call to the sub's home
+package, `p-require`/`p-use`/`p-eval` rebind it around a load, and
+`p-eval-thunk` binds it (with `*package*`) to a string eval's `package X;`
+region. **Every "unqualified name → current package" rule that runs at
+RUN time reads that one** — notably the symbolic sub-name resolver
+(`&$name(…)`, `$name->(…)`, `&{"name"}(…)`, `\&$name`, `goto &$name`,
+`sort $name LIST`, `defined`/`exists &{…}`, all through
+`%p-resolve-sub-symbol`), which is perlmod's "if the string is unqualified
+it is looked up in the current package". Reading `*package*` there resolved
+`package NA; sub p { my $s = "nafun"; &$s(3) }` in `main` (task #503). The
+*compile-time* symbolic paths (a name the emitter itself qualifies) are
+unaffected, and a string containing `::` always names its own package.
+The residual gap: an **anonymous** sub does not rebind
+`*pcl-current-package*`, so a symbolic call inside one that is invoked from
+another package resolves in the caller's package, where perl uses the
+package the closure was compiled in.
 
 ### 7.2 Package variables and `local`
 

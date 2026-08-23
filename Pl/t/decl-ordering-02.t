@@ -29,7 +29,7 @@ my $runtime = 'cl/pcl-runtime.lisp';
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 28;
 
 # Run a Perl snippet through PCL and return filtered stdout.
 sub run_pcl {
@@ -325,6 +325,62 @@ eval { $o->missing_method(1) };
 print "meth:", ($@ =~ /^Can't locate object method "missing_method"/ ? 1 : 0), "\n";
 eval { Thing->missing_class(1) };
 print "clsm:", ($@ =~ /^Can't locate object method "missing_class"/ ? 1 : 0), "\n";
+PL
+
+# ── #503: an UNQUALIFIED symbolic sub name resolves in the CURRENT package ──
+# perlmod: "If the string is unqualified, it is looked up in the current
+# package."  PCL's resolver read the CL reader's *package* — MAIN for every
+# form the loader reads after the file's last (in-package …) — so `package NA;
+# sub p { my $s = "nafun"; &$s(3) }` looked up main::nafun.  Every conjunct
+# below fails on a base tree, and three of them fail LOUDLY: `sort $string`
+# inside a package CRASHED the whole file ((funcall nil …)), `\&$s` came back
+# as a ref to nil, and a `package X;` string eval resolved in the caller.
+# The die MESSAGE is matched inside the program (as the #468 rows do): PCL
+# cannot append perl's " at FILE line N.".
+both_agree('#503 an unqualified symbolic sub name resolves in the current package', <<'PL');
+no strict 'refs';
+package Third; sub tfun { return "Third::tfun(@_)" }
+package main;  sub mfun { return "main::mfun(@_)" }
+package NA;
+sub nafun { return "NA::nafun(@_)" }
+sub p1 { my $s = "nafun";      return &$s(1) }
+sub p2 { my $s = "nafun";      return $s->(2) }
+sub p3 {                       return &{"nafun"}(3) }
+sub p4 { my $s = "main::mfun"; return &$s(4) }
+sub p5 { my $s = "nafun"; my $r = \&$s; return $r->(5) }
+sub p6 { my $s = "mfun";  my $ok = eval { &$s(6) };
+         return defined($ok) ? "LIVED"
+              : ($@ =~ /^Undefined subroutine &NA::mfun called/ ? "DIED-NA" : "DIED?$@") }
+package WA; our $AUTOLOAD; sub AUTOLOAD { return "WA($AUTOLOAD)[@_]" }
+sub w1 { my $s = "gone_sym"; return &$s(7) }
+package X;
+sub xf   { return "X::xf(@_)" }
+sub xcmp { return $X::a <=> $X::b }
+sub run_sort { my $c = "xcmp"; return join(",", sort $c (3,1,2)) }
+package main;
+print join("|", NA::p1(), NA::p2(), NA::p3(), NA::p4(), NA::p5(), NA::p6()), "\n";
+print "auto:", WA::w1(), "\n";
+print "sort:", X::run_sort(), "\n";
+my $ev = eval q{ package X; my $s = "xf"; &$s(8) };
+print "eval:", (defined $ev ? $ev : "undef:$@"), "\n";
+PL
+
+# INVERSE GUARD for #503: a QUALIFIED string still names its own package from
+# anywhere, and the defined/exists answers are unchanged — the fix must not
+# turn "Pkg::name" into a current-package lookup, nor make a missing name
+# exist.  Passes on a base tree too.
+both_agree('#503 inverse: qualified strings, defined/exists and \\&{"Pkg::name"}', <<'PL');
+no strict 'refs';
+package X; sub xf { return "X::xf(@_)" }
+package Y;
+sub from_y { my $r = \&{"X::xf"};
+             return join(",", $r->(1), &{"X::xf"}(2),
+                         (defined &{"X::nope"} ? 1 : 0),
+                         (exists  &{"X::xf"}   ? 1 : 0),
+                         (defined &{"xf"}      ? 1 : 0)) }
+package main;
+print "y:", Y::from_y(), "\n";
+print "m:", &{"X::xf"}(3), "\n";
 PL
 
 done_testing();
