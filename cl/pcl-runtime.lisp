@@ -680,7 +680,7 @@
         (progn
           (%pcl-set-autoload-var (pcl-pkg-perl-name pkg) (%p-sub-perl-name sym))
           (apply (symbol-function al) args))
-        (p-die (format nil "Undefined subroutine &~A called.~%"
+        (p-die (format nil "Undefined subroutine &~A called"
                        (%p-sub-perl-name sym))))))
 
 (defmacro p-declare-sub (name)
@@ -13205,7 +13205,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                     (if target
                         (%p-call-of-undefined-sub target args)
                         (p-die (format nil
-                                       "Undefined subroutine &~A::~A called.~%"
+                                       "Undefined subroutine &~A::~A called"
                                        perl-pkg bare-name)))))))))))
 
 ;;; ============================================================

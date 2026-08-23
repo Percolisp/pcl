@@ -772,8 +772,10 @@ mentioned at all, the answer is perl's, in perl's order:
    call it, with `$AUTOLOAD` set to the fully-qualified name and the original
    arguments;
 2. otherwise die `Undefined subroutine &Pkg::name called` (trappable by
-   `eval {}` like any other die; PCL does not append perl's
-   `" at FILE line N."` because the emitted call carries no location).
+   `eval {}` like any other die; the message carries no location of its own —
+   the emitted call has none — so a CAUGHT one reads `… called at (eval 0) line
+   0.` through `%p-caught-perl-value`, the placeholder every runtime die gets,
+   and an uncaught one prints `… called` — s440).
 
 One runtime entry point implements it (`%p-call-of-undefined-sub`) and four
 paths reach it: the forward stub's body, the trampoline `p-backslash-sub`
