@@ -2382,3 +2382,42 @@ visible row (op/glob.t 18, edited 14/4 → 13/5 in `baselines/perl-suite-run.tsv
 s438i) carries this entry as its cause.  It surfaced only when #450 made
 metacharacter-free patterns return themselves — the row had been passing on
 two undefs (runbook §4b).
+
+## A SYMBOLIC spelling of a package variable does not demote an identity-promoted lexical (#470)
+
+**The rule it qualifies:** a file lexical the compiler promotes to a package
+cell keeps its own name (`p-defcell $x`) only when the file never spells that
+package variable another way — see `docs/ir-spec.md` §2b.3's `$x__file__N`
+row, and `Pl::Parser2::_scan_pkg_global_spellings`, which is that scan.
+
+**What the scan cannot see** — three spellings, all measured against perl
+5.40.3 and all still ONE cell in PCL:
+
+1. a SYMBOLIC reference — `${"main::y"}`, `${"y"}`, `*{"y"} = …`, `$$name`
+   where `$name` holds `"main::y"`.  These are names computed at RUN time; no
+   static scan of a file can find them.
+2. the qualified BRACE spelling `${main::y}` in code — a PPI shape the
+   brace-reference helper (`_brace_name_refs`) reads unqualified only,
+   because an unqualified `${x}` IS the lexical's own spelling.
+3. the qualified name inside a NON-interpolating string, which reaches the
+   package variable when that string is `eval`ed: `eval '$main::y = 3'`.
+   The scan reads interpolating tokens only (`_interp_token_text`), so a
+   single-quoted literal is invisible to it.
+
+```perl
+my $y = 7;  sub nm { $y }  ${"main::y"} = 3;   print nm();   # perl 7, PCL 3
+my $y = 7;  sub nm { $y }  ${main::y}   = 3;   print nm();   # perl 7, PCL 3
+my $y = 7;  sub nm { $y }  eval '$main::y = 3';  print nm(); # perl 7, PCL 3
+```
+
+**Why accepted:** the ordinary spellings (`$main::y`, `$::y`, `our $y`, an
+interpolated `"$main::y"` in a string / heredoc / regex, `*main::y`,
+`$#main::a`) are all seen and demote the promotion to the `$y__file__N`
+mangle, which is the general path — so what is left is the shapes where the
+name is not written as a name.  Closing (1) would mean giving up the identity
+promotion whenever a file contains any symbolic reference at all — the
+promotion that keeps string eval and interpolation resolving.  (2) is a small
+widening of `_brace_name_refs`, and (3) a widening of the token walk to
+non-interpolating quote text; both are pure over-refusal (cost: a mangle) and
+are worth doing if a real case turns up — no population measured for #470
+contains one.

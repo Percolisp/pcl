@@ -350,4 +350,51 @@ my $r = bumpfs(); $fs = 50; my $s = bumpfs();
 print "$r $s\n";
 ', "4001 51\n");
 
+# #470: a captured file lexical promoted under its OWN name shared its cell
+# with the PACKAGE variable of that name, so `$main::y` read the lexical and a
+# write through any package spelling clobbered it.  All three spellings in one
+# run (each row costs an SBCL launch): a qualified write, an `our` alias that
+# masks the lexical for the rest of its block, and a root-qualified read.
+# Expected text taken from perl 5.40.3, which prints [3!] [7] [3!].
+test_io("#470: a promoted lexical is NOT the package variable of its name", '
+my $y = 7;
+sub nm { $y }
+$main::y = 3;
+{ our $y; $y .= "!"; }
+print "[", (defined $main::y ? $main::y : "undef"), "]\n";
+print "[", nm(), "]\n";
+print "[", (defined $::y ? $::y : "undef"), "]\n";
+', "[3!]\n[7]\n[3!]\n");
+
+# The same for a lexical that SPANS a package boundary (the other identity
+# branch), and for a container.  perl: [undef] [7] / [0] [2].
+test_io("#470: a spanning lexical is not the package variable either", '
+my $y = 7;
+package Foo;
+sub nm { $y }
+package main;
+print "[", (defined $main::y ? $main::y : "undef"), "]\n";
+print "[", Foo::nm(), "]\n";
+', "[undef]\n[7]\n");
+
+test_io("#470: a promoted ARRAY is not the package array of its name", '
+my @a = (1, 2);
+sub cnt { scalar @a }
+print "[", scalar(@main::a), "]\n";
+print "[", cnt(), "]\n";
+', "[0]\n[2]\n");
+
+# INVERSE: with no package spelling in the file the identity promotion is
+# untouched — the sub and the file code share the one box (this is the row
+# above, spelled for the #470 scan) — and a qualified OTHER SIGIL is a
+# different cell, so it must not disturb the scalar.  perl: 8 8 / 1 0.
+test_io("#470 inverse: no package spelling, and a foreign sigil, change nothing", '
+my $u = 8;
+sub getu { $u }
+print getu(), " ", $u, "\n";
+my $v = 1;
+sub getv { $v }
+print getv(), " ", scalar(@main::v), "\n";
+', "8 8\n1 0\n");
+
 done_testing();

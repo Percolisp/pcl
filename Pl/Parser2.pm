@@ -1452,6 +1452,14 @@ sub parse {
     # LOWERCASE sub name, is wrong IDENTICALLY under v1 — so the fallback was
     # buying nothing.  That divergence is task #246, not a v1 dependency.)
   }
+  # #470: which bare names the FILE also spells as a package global.  Both
+  # promotion passes' identity branch (promote under the variable's OWN name)
+  # asks it — a lexical promoted that way SHARES the cell with every such
+  # spelling.  Computed HERE, before the first rename: the span rename itself
+  # writes qualified `$Pkg::name` tokens into later segments, and those are
+  # this compiler's spelling of the promoted LEXICAL, not a package global the
+  # source named.
+  $self->{_file_pkg_global} = $self->_scan_pkg_global_spellings(\@segments);
   $self->_rename_spanning_lexicals(\@segments) if @segments > 1;
   $self->_check_my_spanning(\@segments) if @segments > 1;
 
@@ -2358,12 +2366,23 @@ sub _symbol_is_declarator {
   return 0;
 }
 
-# Is the reference $sym (canonical $canon) shadowed by an earlier `my`/`state`
-# declaration of $canon in an enclosing block of the SAME segment?  Same-
-# segment is the crux: under flattening a `my` in an earlier segment sharing
-# the PPI block parent is the span SOURCE, not a shadow (method.t's `my $o`).
+# Is the reference $sym (canonical $canon) shadowed by an earlier declaration
+# of $canon in an enclosing block of the SAME segment?  Same-segment is the
+# crux: under flattening a `my` in an earlier segment sharing the PPI block
+# parent is the span SOURCE, not a shadow (method.t's `my $o`).
 # Only the clear case returns true; when unsure it returns false so the span
 # gate still fires (soundness: never wrongly clear a genuine span).
+#
+# `our $x` MASKS TOO (#470): from that statement to the end of its scope the
+# name is the PACKAGE variable, so a reference there is not the outer lexical
+# and must keep its original spelling.  The sibling walk therefore asks
+# `_stmt_binding` — the resolver that already answers 'lex' for my/state and
+# the PACKAGE for an `our` alias — instead of the my/state-only
+# `_stmt_declares_canon`; any defined answer means "not the outer lexical".
+# Without it a promoted `my $y` renamed the `our $y` scope's uses along with
+# its own (`my $y = 7; sub nm {$y} { our $y; $y = 3 }` wrote the LEXICAL),
+# which is the same one-cell-for-two-variables confusion #470 is about,
+# spelled with a declaration instead of a qualified name.
 sub _ref_shadowed {
   my ($self, $sym, $canon, $stmts, $seg_parent) = @_;
   # The token IS a signature parameter: a declaration, its own shadow (#497,
@@ -2383,7 +2402,7 @@ sub _ref_shadowed {
         last if $sib == $node;
         # At the shared parent, only THIS segment's own declarations shadow.
         next if $at_seg && !grep { $_ == $sib } @$stmts;
-        return 1 if $self->_stmt_declares_canon($sib, $canon);
+        return 1 if defined $self->_stmt_binding($sib, $canon);
       }
     }
     last if $at_seg;                     # do not climb above the segment
@@ -3000,6 +3019,91 @@ sub _scan_lex_facts {
   }
 }
 
+# ── #470: the PACKAGE-GLOBAL SPELLING set ──────────────────────────────────
+#
+# Both promotion passes (_rename_spanning_lexicals and _promote_captured) have
+# an IDENTITY branch: a lexical whose name has exactly ONE binding file-wide is
+# promoted to the PLAIN package cell `$Pkg::name` instead of a fresh
+# `$name__file__N`, because there is no sibling `let` for the defvar to poison
+# and the unchanged name keeps interpolation, `${x}` and string eval resolving.
+# That reasoning is about OTHER LEXICALS only; it forgot the package variable
+# of the same name.  When the file also names THAT cell, the two are one
+# variable here and two in Perl:
+#
+#     my $y = 7;  sub nm { $y }  print "[$main::y]";   # perl []  PCL [7]
+#     my $y = 7;  sub nm { $y }  $main::y = 3;         # perl 7   PCL 3
+#
+# — a read that sees the lexical, and a write that clobbers it.  So the
+# identity condition asks this set too, and a name in it takes the
+# `$name__file__N` mangle exactly like the non-unique case (the mangle brings
+# its eval guard with it, as the branch comments say).
+#
+# SIGIL-EXACT, like every other resolver in this file: `@main::a` names a
+# different cell from `$a`.  The one exception is a GLOB mention (`*main::y`):
+# a typeglob aliases every slot, so it marks all three sigils.
+#
+# NAME-based, not package-resolved.  `package Foo; my $y; … $main::y` is two
+# cells in the emission and would be safe, but which package the promoted cell
+# lands in depends on the declaring segment and on which pass promotes it,
+# while over-refusing costs only a mangle — the general path.
+#
+# WHAT IT CANNOT SEE (accepted; docs/not-supported.md): a SYMBOLIC reference
+# (`${"main::y"}`, `*{"y"}`), and the qualified BRACE spelling `${main::y}` in
+# code (_brace_name_refs reads unqualified names only — those are the
+# lexical's own).  Both are invisible to any static scan of the names.
+sub _scan_pkg_global_spellings {
+  my ($self, $segments) = @_;
+  my %pg;
+  # A canonical symbol carrying a package qualification: `$main::y`, `$::y`
+  # (PPI and InterpScan both spell that with the empty package), `@main::a`
+  # (from `$main::a[0]`), `%Foo::h`, `*main::gl`.
+  my $QUAL = qr/^([\$\@\%\*\&])(?:\w+(?:::\w+)*)?::(\w+)$/;
+  my $mark = sub {
+    my ($sigil, $bare) = @_;
+    return if $sigil eq '&';                 # the CODE slot is not a variable
+    if ($sigil eq '*') { $pg{$_ . $bare} = 1 for ('$', '@', '%'); return }
+    $pg{$sigil . $bare} = 1;
+  };
+  for my $seg (@$segments) {
+    for my $stmt (@{ $seg->{stmts} }) {
+      next unless ref $stmt && $stmt->isa('PPI::Node');
+      # `our $y` — an alias to the package variable under the BARE name.
+      my @vs = $stmt->isa('PPI::Statement::Variable') ? ($stmt) : ();
+      push @vs, @{ $stmt->find('PPI::Statement::Variable') || [] };
+      for my $v (@vs) {
+        my $kw = ($v->schildren)[0];
+        next unless $kw && $kw->isa('PPI::Token::Word') && $kw->content eq 'our';
+        for my $dn ($self->_declared_names($v)) {
+          $mark->($1, $2) if $dn =~ /^([\$\@\%\*])(\w+)$/;
+        }
+      }
+      # ONE token walk for the three token-level spellings.
+      for my $t (@{ $stmt->find('PPI::Token') || [] }) {
+        if ($t->isa('PPI::Token::Symbol')) {
+          $mark->($1, $2) if $t->symbol =~ $QUAL;
+          next;
+        }
+        if ($t->isa('PPI::Token::ArrayIndex')) {     # `$#main::a`
+          $mark->('@', $1)
+            if $t->content =~ /^\$\#(?:\w+(?:::\w+)*)?::(\w+)$/;
+          next;
+        }
+        # The qualified spelling INTERPOLATED in a string/regex/heredoc — a
+        # read of the same cell that no Symbol token covers.  Pl::InterpScan
+        # is THE interpolation scanner (standing rule §8); its `canon` is
+        # sigil-resolved ("$main::h{k}" → %main::h) and covers `$#`.
+        my $txt = _interp_token_text($t);
+        next unless defined $txt && index($txt, '::') >= 0;
+        for my $e (@{ Pl::InterpScan::scan($txt) }) {
+          my $c = $e->{canon};
+          $mark->($1, $2) if defined $c && $c =~ $QUAL;
+        }
+      }
+    }
+  }
+  return \%pg;
+}
+
 # W10: my-lexical spanning a package boundary (see the parse() comment).
 # Subset (anything outside it keeps the _check_my_spanning gate → v1):
 #   - exactly ONE my/state declaration of the bare name in the whole file,
@@ -3232,7 +3336,11 @@ sub _rename_spanning_lexicals {
     # is unnecessary here (a cross-package eval matches v1, which likewise
     # defvars file lexicals — not a regression).  Only the NON-unique case
     # must mangle (to protect the sibling `let`) and therefore keep the guard.
-    my $unique = (($cf->{decl_count}{$bare} // 0) == 1);
+    # #470: … and the file must not ALSO spell the name as a package global
+    # ($main::x / $::x / our $x / an interpolated qualified read), or the
+    # identity cell would be shared by two Perl variables.  Sigil-exact.
+    my $unique = (($cf->{decl_count}{$bare} // 0) == 1)
+      && !$self->{_file_pkg_global}{"\$$bare"};
     my $refuse = sub {
       warn "SPANREFUSE $bare\@seg$di: $_[0]\n" if $ENV{PCL_SPAN_DEBUG};
       return 1;
@@ -3454,6 +3562,11 @@ sub _rename_spanning_lexicals {
     my ($di, $cd) = @$ci;
     my ($decl, $csym) = @$cd;              # $csym e.g. '%methods' / '@list'
     next unless ($f->{canon_decl_count}{$csym} // 0) == 1;   # sole binding of THIS canon
+    # #470: this path is identity-ONLY (a container span has no mangled
+    # spelling), so a package-global spelling of the same canon does not
+    # demote it — it disqualifies the promotion, and _check_my_spanning then
+    # says so loudly.  Sharing the cell would be the silent-wrong.
+    next if $self->{_file_pkg_global}{$csym};
     my $hi = _blk_extent($segments, $di);
     # Canon-exact span test (%spanning is bare-keyed TEXT — a sibling `$x`
     # in a later segment must not promote an un-spanning @x): promote only
@@ -3917,7 +4030,13 @@ sub _promote_captured {
   # (exactly v1's defvar-under-original-name model).  Block-extent decls stay
   # on the mangled path: an identity defvar would outlive the block and
   # capture post-block package-global uses of the name.
-  if (!$extent && ($self->{_file_decl_count}{$bare} // 0) == 1) {
+  # #470: "no other declaration" was never the whole condition — the file must
+  # not name the PACKAGE variable of that name either ($main::x / $::x /
+  # our $x / an interpolated qualified read), or the promoted lexical and the
+  # package variable share one cell.  Sigil-exact; when it fires the decl
+  # takes the `$name__file__N` mangle below, eval guard included.
+  if (!$extent && ($self->{_file_decl_count}{$bare} // 0) == 1
+      && !$self->{_file_pkg_global}{$canon}) {
     $self->{_file_lex_renamed}{$canon} = 1;
     return 1;
   }
@@ -6119,25 +6238,34 @@ sub _interp_names {
   my ($node, $disq, $sigils) = @_;
   $sigils //= '\$';   # default: scalar-sigil forms ($name, ${name}, $name[…])
   for my $t (@{ $node->find('PPI::Token') || [] }) {
-    my $c;
-    if ($t->isa('PPI::Token::HereDoc')) {
-      next if Pl::PExpr::TokenUtils::heredoc_is_raw($t);  # #301: THE shared predicate
-      $c = join '', $t->heredoc;
-    } elsif ($t->isa('PPI::Token::Quote::Double')
-          || $t->isa('PPI::Token::Quote::Interpolate')
-          || $t->isa('PPI::Token::QuoteLike::Backtick')
-          || $t->isa('PPI::Token::QuoteLike::Command')
-          || $t->isa('PPI::Token::QuoteLike::Regexp')      # qr/$x/
-          || $t->isa('PPI::Token::QuoteLike::Readline')    # <$fh>
-          || $t->isa('PPI::Token::Regexp::Match')
-          || $t->isa('PPI::Token::Regexp::Substitute')) {
-      $c = $t->content;
-    } else {
-      next;
-    }
+    my $c = _interp_token_text($t);
+    next unless defined $c;
     while ($c =~ /(?<!\\)[$sigils]\{?\s*([A-Za-z_]\w*)/g) { $disq->{$1} = 1 }
   }
   return;
+}
+
+# The interpolating TEXT of one token, or undef when the token does not
+# interpolate.  ONE answer to "which tokens interpolate, and what is their
+# text": _interp_names (bare-name facts) and _scan_pkg_global_spellings
+# (#470, the qualified-name scan) both ask it, and a shape added here is
+# seen by both.  Single quotes, q(), qw() and tr/// are not on the list.
+sub _interp_token_text {
+  my ($t) = @_;
+  if ($t->isa('PPI::Token::HereDoc')) {
+    return undef if Pl::PExpr::TokenUtils::heredoc_is_raw($t);  # #301: THE shared predicate
+    return join '', $t->heredoc;
+  }
+  return $t->content
+    if $t->isa('PPI::Token::Quote::Double')
+    || $t->isa('PPI::Token::Quote::Interpolate')
+    || $t->isa('PPI::Token::QuoteLike::Backtick')
+    || $t->isa('PPI::Token::QuoteLike::Command')
+    || $t->isa('PPI::Token::QuoteLike::Regexp')      # qr/$x/
+    || $t->isa('PPI::Token::QuoteLike::Readline')    # <$fh>
+    || $t->isa('PPI::Token::Regexp::Match')
+    || $t->isa('PPI::Token::Regexp::Substitute');
+  return undef;
 }
 
 # True when $node is lexically inside a NAMED sub's body (so a `my` there is

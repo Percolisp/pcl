@@ -306,6 +306,58 @@ is($@, '', 'interpolated captured lexical lowers natively (identity promotion)')
 like($capt_i, qr/\(p-defcell \$n \(make-p-box/, 'identity promotion: declared under the ORIGINAL name');
 like($capt_i, qr/\(p-scalar-= \$n 1\)/, 'identity promotion: assigned in place, no mangle');
 
+# --- #470: the identity branch also requires that the FILE never spells the
+# name as a PACKAGE global.  `my $n` and `$main::n` are two variables in Perl;
+# promoting the lexical under its own name made them ONE cell, so a qualified
+# read saw the lexical (`my $y=7; sub nm{$y} print "[$main::y]"` printed 7
+# where perl prints nothing) and a qualified WRITE clobbered it.  Every
+# spelling below demotes the promotion to the ordinary `$n__file__N` mangle —
+# which is what a non-unique name has always taken.
+for my $case (
+  ['qualified read'        => q{my $n = 1; sub bump { $n + 1 } print $main::n;}],
+  ['root-qualified $::n'   => q{my $n = 1; sub bump { $n + 1 } print $::n;}],
+  ['our alias in a block'  => q{my $n = 1; sub bump { $n + 1 } { our $n; print $n; }}],
+  ['interpolated $main::n' => q{my $n = 1; sub bump { $n + 1 } print "$main::n";}],
+) {
+  my ($what, $src) = @$case;
+  my $cl = Pl::Parser2->parse_code($src);
+  like($cl, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\)\)/,
+       "#470: $what demotes the captured lexical to a mangled cell");
+  # …and the declaration's own initialisation writes THAT cell, not `$n` —
+  # the `our` case still emits a plain `$n` cell, which is the package
+  # variable's, so the discriminator is where the LEXICAL's value lands.
+  like($cl, qr/\(p-scalar-= \$n__file__\d+ 1\)/,
+       "#470: $what — the lexical's value lands in its own cell");
+}
+my $capt_q = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print $main::n;});
+unlike($capt_q, qr/\(p-defcell \$n \(make-p-box/,
+       '#470: a qualified read leaves NO unqualified cell for the two to share');
+# INVERSE 1: no package spelling at all — the identity promotion is untouched
+# (the rows above this block are that case; this one pins it against the new
+# scan).  INVERSE 2: the scan is SIGIL-EXACT — `@main::n` names a different
+# cell from `$n`, so it must NOT demote the scalar.
+my $capt_ok = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump();});
+like($capt_ok, qr/\(p-defcell \$n \(make-p-box nil\)\)/,
+     '#470 inverse: with no package spelling the identity promotion stands');
+my $capt_sig = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print "@main::n";});
+like($capt_sig, qr/\(p-defcell \$n \(make-p-box nil\)\)/,
+     '#470 inverse: a qualified OTHER sigil (@main::n) does not demote $n');
+# The span pass carries the same identity branch and the same amendment.
+my $span_q = Pl::Parser2->parse_code(
+  qq{my \$x = 1;\npackage Foo;\nprint \$x;\nprint \$main::x;\n});
+like($span_q, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\)\)/,
+     '#470: a qualified read demotes the SPANNING lexical too');
+like($span_q, qr/main::\$x__file__\d+/,
+     '#470: the later section reads the mangled cell, qualified');
+# `our $x` MASKS the outer lexical from its statement on, so the promotion's
+# rewrite must leave that scope's uses under the ORIGINAL name — they are the
+# package variable (`_ref_shadowed` asks `_stmt_binding`, which knows `our`).
+my $our_mask = Pl::Parser2->parse_code(
+  q{my $n = 1; sub bump { $n + 1 } { our $n; $n = 3; } print bump();});
+like($our_mask, qr/\(p-scalar-= \$n 3\)/,
+     '#470: the `our` scope writes the PACKAGE cell, not the renamed lexical');
+like($our_mask, qr/\$n__file__\d+/, '#470: …while the lexical keeps the mangle');
+
 # …and two declarations of the same name (shadowing) stay gated.
 my $capt_sh = eval { Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } my $n = 2; print $n;}) };
 like($@, qr/captured by sub/, 'shadowed captured lexical still dies to v1');

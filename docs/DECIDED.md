@@ -21,6 +21,38 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s443e (2026-08-24, Opus 5) — the IDENTITY promotion of a file lexical requires that the file never SPELLS the package variable of that name (#470)
+
+- **A file lexical promoted under its OWN name is the package variable of
+  that name** — that was the whole bug.  Both promotion passes
+  (`_rename_spanning_lexicals`, `_promote_captured`) kept the plain name
+  (`p-defcell $y`) when the bare name had exactly ONE `my`/`state` binding
+  file-wide; the condition counted DECLARATIONS only, so `$main::y` / `$::y` /
+  `our $y` / `"$main::y"` / `*main::y` / `$#main::a` in the same file landed
+  on the same cell.  Twelve shapes measured silent-wrong against perl 5.40.3
+  (a qualified READ saw the lexical, a qualified WRITE clobbered it); all
+  twelve agree now.  The identity condition gained one conjunct — the file
+  must not spell the package variable — computed ONCE by
+  `Pl::Parser2::_scan_pkg_global_spellings` BEFORE the first rename (the span
+  rename itself writes qualified `$Pkg::name` tokens, which are the
+  compiler's spelling of the promoted LEXICAL, not a source-named global).
+  Name-based and sigil-exact, a glob marking all three sigils; over-refusal
+  costs only the `$name__file__N` mangle, which is the general path.
+- **`our $x` MASKS an outer lexical, so `_ref_shadowed` asks `_stmt_binding`**
+  (the resolver that already answers `'lex'` for my/state and the PACKAGE for
+  an `our` alias) instead of the my/state-only `_stmt_declares_canon`.
+  Without it the mangled rename rewrote the `our` scope's uses too — the same
+  one-cell-for-two-variables confusion, spelled with a declaration.
+- **Three spellings stay invisible and are ACCEPTED**: a symbolic reference
+  (`${"main::y"}`), the qualified brace form `${main::y}` in code, and a
+  qualified name inside a NON-interpolating string that is then `eval`ed.
+  `docs/not-supported.md` "A SYMBOLIC spelling of a package variable does not
+  demote an identity-promoted lexical (#470)" has all three with probes; the
+  normative rule (when the promoted name is fresh, and what a translator may
+  assume from `p-defcell $x` vs `$x__file__N`) is `docs/ir-spec.md` §2b.3's
+  `$x__file__N` row.  Guards: `Pl/t/parser2-01.t` (+12 rows, inverse-guarded)
+  and `Pl/t/closure-01.t` (+4, one of them the inverse).
+
 ## s440 (2026-08-23, Fable) — CI RED = a NON-CORE perl import (`Data::Dump`), not SBCL; PCL's dependencies are EXACTLY PPI ≥ 1.291 + Moo; the review-doc families removed from git (USER)
 
 - **The first CI run's failure** (run 32648385694, `tools/install-pcl` exit 2
