@@ -7077,6 +7077,54 @@ sub _process_foreach_loop {
 # ONE copy for the two readers: _process_sub_statement (the definition) and
 # the prototype-collection walk (task #391 — a facts walk over a use'd
 # module reads exactly this and nothing of the body).
+# NAMED PARAMETERS, textually — perl's own discriminator between a signature
+# and an old-style prototype, and the ONE copy of it (task #455).  A sigil
+# followed by an identifier character means named params: `($x, @r)` is a
+# signature, `($;$)`, `(&@)`, `()` are prototypes.  Four sites asked this and
+# each spelled it out again — `_sub_head` below, parse_prototype_or_signature,
+# Parser2's _is_pure_prototype and _signature_param_canons — which is how
+# _sub_head came to disagree with the other three.
+# Is the `signatures` feature on at this statement?  Only the same-line case
+# is ever asked (see _sub_head): PPI answers every other position by handing
+# over a Structure::Signature.  An enabling pragma is `use feature` naming
+# signatures, `use experimental 'signatures'`, or a `use v5.36`+ bundle (the
+# version that made signatures non-experimental and on by default).  Line
+# order decides, with the column breaking a tie on the shared line — perl
+# enables the feature for the REST of the line, so `use feature "signatures";
+# sub f ($x) {…}` is a signature and the reverse order is not.
+#
+# NOT a lexical scope walk: `no feature "signatures"` in an inner block would
+# fool it.  That is deliberately out of scope here — this predicate exists to
+# recover PPI's one missing line, and PPI owns every other position.
+sub _signatures_enabled_at {
+  my ($self, $stmt) = @_;
+  my $doc = eval { $stmt->top } or return 0;
+  my $line = eval { $stmt->line_number } // return 0;
+  my $col  = eval { $stmt->column_number } // 0;
+  my $on = $self->{_sig_feature_sites}{ refaddr $doc } //= do {
+    my @sites;
+    for my $st (@{ $doc->find('PPI::Statement::Include') || [] }) {
+      my $c = $st->content // '';
+      next unless $c =~ /\b(?:feature|experimental)\b[^;]*['"]signatures['"]/
+               || ($c =~ /^\s*use\s+v?5\.0*(\d+)/ && $1 >= 36);
+      push @sites, [ $st->line_number // 0, $st->column_number // 0 ];
+    }
+    \@sites;
+  };
+  for my $s (@$on) {
+    return 1 if $s->[0] < $line || ($s->[0] == $line && $s->[1] < $col);
+  }
+  return 0;
+}
+
+sub proto_text_has_named_params {
+  my ($text) = @_;
+  return 0 unless defined $text;
+  (my $inner = $text) =~ s/^\s*\(\s*//;
+  $inner =~ s/\s*\)\s*$//;
+  return $inner =~ /[\$\@\%]\w/ ? 1 : 0;
+}
+
 sub _sub_head {
   my ($self, $stmt) = @_;
   my ($name, $prototype, $is_signature_syntax, $block) = ('', '', 0, undef);
@@ -7089,6 +7137,30 @@ sub _sub_head {
     }
     elsif ($ref eq 'PPI::Token::Prototype') {
       $prototype = $child->content;
+      # PPI GIVES THE SAME SOURCE BOTH SHAPES (task #455): with
+      # `use feature "signatures"` in force it lexes `($x, @r)` as a
+      # PPI::Structure::Signature, otherwise the identical text is a
+      # PPI::Token::Prototype.  That distinction is perl's own and PPI is
+      # RIGHT to make it — `perl-tests/signatures.t:17` asserts it directly:
+      #
+      #     sub t000 ($a) { $a || "z" }        # line 17, feature NOT yet on
+      #     is &t000(456), 123, "(\$a) not signature when not enabled";
+      #
+      # with `use feature "signatures"` only at line 32, so `$a` in that body
+      # is the package `our $a = 123`, NOT a parameter.  A purely textual rule
+      # here breaks that row — measured, which is why this is not one.
+      #
+      # What PPI gets wrong is only the BOUNDARY: its feature tracking starts
+      # at the line AFTER the pragma, so a sub sharing the pragma's own line
+      # comes back as a Token::Prototype and was emitted through the
+      # old-prototype path — the params became a raw CL lambda list
+      # (`($x &rest @r)`) instead of arity-checked bindings from @_, and an
+      # empty slurpy then interpolated as an uninitialized value where perl is
+      # silent.  So the repair is exactly that boundary: named params, and an
+      # enabling pragma at or before this statement.
+      $is_signature_syntax = 1
+        if proto_text_has_named_params($prototype)
+        && $self->_signatures_enabled_at($stmt);
     }
     elsif ($ref eq 'PPI::Structure::Signature') {
       # Perl 5.20+ signature (when 'use feature "signatures"' is used)
@@ -9621,10 +9693,8 @@ sub parse_prototype_or_signature {
 
   return { params => [], min_params => 0, is_proto => 0 } if $proto_str eq '';
 
-  # Detect if this is an old-style prototype (no variable names, just sigils)
-  # Old-style: ($$), (\@$), ($;$@)
-  # New-style: ($x, $y), ($x = 10)
-  my $is_proto = ($proto_str !~ /[\$\@\%]\w/);
+  # Old-style: ($$), (\@$), ($;$@).  New-style: ($x, $y), ($x = 10).
+  my $is_proto = !proto_text_has_named_params($proto_str);
 
   if ($is_proto) {
     return $self->_parse_old_prototype($proto_str);

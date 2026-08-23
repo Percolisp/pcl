@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 7;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -134,3 +134,30 @@ PL
     like($err, qr/file lexical 'x' captured by sub g/,
          'a DIFFERENT-sigil use of the same bare name is still a capture');
 }
+
+# ---- task #455: the pragma's OWN LINE is inside the feature's region ------
+#
+# PPI's feature tracking starts at the line AFTER `use feature "signatures"`,
+# so a sub sharing that line came back as a Token::Prototype and was emitted
+# through the OLD-prototype path — the params became a raw CL lambda list
+# instead of arity-checked bindings from @_, and an empty slurpy then
+# interpolated as an uninitialized value where perl is silent.
+#
+# THE REPAIR IS THE BOUNDARY, NOT THE TEXT, and the second row is why: perl
+# reads `($a)` as an old-style PROTOTYPE where the feature is not yet on, so
+# `$a` in that body is the package variable.  perl-tests/signatures.t:17
+# asserts exactly that, and a purely textual rule broke it (measured).
+
+both_agree('use feature "signatures"; sub f ($x, @r) { "[@r]" }' . "\n"
+         . 'print f(0), "\n";',
+           'a sub on the pragma\'s OWN line is a signature (no spurious warning)');
+
+# THE NEGATIVE THIS FILE DOES NOT ASSERT, and why: `sub t000 ()` written
+# where the feature is NOT yet on is an old-style (illegal) PROTOTYPE in perl,
+# which perl IGNORES — so `` in the body is the package variable and
+# `&t000(456)` is 123.  PCL answers 456 on BOTH paths, because the
+# old-prototype lowering binds a named prototype`s names as parameters too.
+# That is a blessed baseline failure (`docs/fail-baseline.tsv`,
+# signatures.t "() not signature when not enabled") and task #486 — it is
+# NOT what the boundary repair above changes (emission over the 111-file
+# corpus is identical), so asserting it here would add a knowingly-failing row.

@@ -2422,9 +2422,9 @@ sub _decl_syms_under {
 sub _signature_param_canons {
   my ($text) = @_;
   return () unless defined $text;
+  return () unless Pl::Parser::proto_text_has_named_params($text);
   (my $inner = $text) =~ s/^\s*\(\s*//;
   $inner =~ s/\s*\)\s*$//;
-  return () if $inner eq '' || $inner !~ /[\$\@\%]\w/;   # pure prototype
   my @parts;
   my $cur   = q{};
   my $depth = 0;
@@ -2583,9 +2583,7 @@ sub _is_pure_prototype {
   return 0 if grep { $_->isa('PPI::Structure::Signature') } $sub->children;
   my $p = $sub->prototype;
   return 0 unless defined $p;
-  (my $inner = $p) =~ s/^\s*\(\s*//;
-  $inner =~ s/\s*\)\s*$//;
-  return $inner !~ /[\$\@\%]\w/;
+  return !Pl::Parser::proto_text_has_named_params($p);
 }
 
 # (The s280 `_check_interp_postderef` gate was removed in s299: postderef_qq
