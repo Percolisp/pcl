@@ -297,6 +297,19 @@ local/`%INC`/`$0`/dup findings, grouped: #508+#509+#510 local; #511 `%INC`;
 #512 `$0`; #513 dup); J = #505–#507 + #514 + #517; K = #463 items 3–5 + #479
 compiler half + #478 measured; #504 tool fix; #486–#489 residues.
 
+**s440h — STOPPED at the USER's request (break; "we restart everything
+later").  RESUME POINT:** four Opus agents were RUNNING in
+`.claude/worktrees/agent-*` (E #470 gen v2-205, F #491+#495 v2-210, G
+#485+#484+#492 v2-215, H #516+#515+#511 v2-220); whether they finished is in
+each worktree's `git log` / `git status` — read those FIRST (a dead agent's
+uncommitted diff is the deliverable), then the merge recipe in memory
+`project_s421_opus_agents_inflight`: review, `git rebase main` in the
+worktree, `--ff-only` merge, renumber the generation ONCE above every agent
+string (next free: v2-221), regenerate the three artifacts, cold gate, ONE
+sweep (+ gate-SET scan for E and any widened classifier), companion legs,
+file each report's findings, record in DECIDED + this log + the plan.  main
+is `23e3005`+ (v0.1.0 = `29c2cf3`); CI green; nothing uncommitted.
+
 **Stock-machine recipe** (memory `project_ci_stock_machine`): bare perl
 5.38.2 built into the scratchpad + `cpanm --notest PPI Moo` + sbcl.org
 tarball + Quicklisp in a sanitized HOME; `PATH` = those + `/usr/bin:/bin`,
