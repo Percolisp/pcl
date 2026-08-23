@@ -2516,7 +2516,18 @@ sub gen_methodcall_form {
 # fully.  Same ctx-wrap discipline as gen_methodcall_form / gen_funcall_form.
 sub gen_ref_funcall_form {
   my ($self, $node, $node_id, $kids) = @_;
-  my $ref  = $self->gen_node_form($kids->[0]);
+  # `->(` is the FOURTH member of the paren-scalar-base family — the invocant
+  # of a postfix arrow is a single scalar value, whatever the surrounding
+  # context (perl evaluates it in scalar context; `(sub{…})->()` is a call, not
+  # a one-element list).  The other three members (`->method`, `->[i]`, `->{k}`)
+  # already ask _is_paren_scalar_base; this one did not, so in LIST context the
+  # paren group lowered to `(vector (lambda …))` and p-funcall-ref rejected the
+  # vector — "Not a CODE reference", fatal, whole file (task #516).  In SCALAR
+  # context the progn collapsed on its own, which is why `my $s = (sub{…})->()`
+  # always worked and the same expression inside a `print` list did not.
+  my $ref = $self->_is_paren_scalar_base($kids->[0])
+            ? $self->_gen_scalar_deref_base_form($kids->[0])
+            : $self->gen_node_form($kids->[0]);
   # A coderef call is always user code — element args alias through @_
   # (defelem, #131), same as the named-user-sub tail in gen_funcall_form;
   # 'argbox' only when the arg itself is an element access.
