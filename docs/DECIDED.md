@@ -58,6 +58,45 @@ those two files and the live plan doc directly -- no new review-doc families.*
   **#582**.  **#518 recurred locally under a loaded gate** (rows 29 *and* 30,
   41 rows reported) — load-dependent, not CI-specific; noted in that task.
 
+## s446l (2026-08-25, Opus agent L) — `use English` works, through a lib/ shim built on the two aliasing mechanisms PCL HAS
+
+- **#502 CLOSED by `lib/English.pm`, not by the glob-value family.**  Core
+  English.pm's right-hand sides are punctuation GLOBS (`*+`, `*^N`,
+  `*-{ARRAY}`), which PCL cannot lower, so the module died at TRANSPILE and
+  every English name was unreachable.  A module's behaviour belongs in lib/
+  (rule 9a); the shim reproduces the same aliases with two mechanisms PCL
+  already has, and the **choice between them is a property of the RUNTIME's
+  representation, measured name by name**:
+  - `*NAME = \$PUNCT` (a SCALAR-slot alias) is LIVE IN BOTH DIRECTIONS —
+    `$ORS = "!"` changes `$\` — for every punctuation variable PCL keeps in an
+    ordinary p-box cell.  That is most of them (39 of 45 probed).
+  - It is a FROZEN SNAPSHOT for the six that are not cells: `$&`, `` $` ``,
+    `$'`, `$+`, `$^N` are raw-string globals `set-match-vars` REBINDS on every
+    match, and `$!` is `(p-errno-string)` — a call into C errno, not a
+    variable at all.  Those get `tie`, whose FETCH reads the variable at each
+    access.  `$ARG` is tied for a third reason: perl's shared glob tracks the
+    DYNAMIC `$_` that foreach/map/grep bind, and a value alias cannot (`\$_`
+    misses the loop in perl too — probed both).
+- **`tie` on a package scalar survives Exporter's glob copy** (probed): the
+  SCALAR-slot copy carries the tied box, so a tied name exports like any other.
+  This is the general mechanism for aliasing anything PCL does not hold in a
+  cell.
+- **The ONE gap is `@ARG` inside a sub** — perl swaps the AV in `*main::_` per
+  call, PCL binds `@_` per call, and a tied array's FETCH runs in its own
+  frame, so no pure-Perl mechanism reaches the caller's copy.  Written up in
+  `docs/not-supported.md` ("`use English` — everything works except `@ARG`
+  inside a sub"), asserted as a canary in `Pl/t/english-01.t`, and closed only
+  by true glob-to-glob aliasing (`*A = *B` sharing one entry, not copying
+  slots).
+- The shim is INERT for every population: no file in `perl-tests/`,
+  `cpan-tests/`, `Pl/t/`, `lib/`, `examples/` or perl's own `t/` says
+  `use English` (measured), so it can move no row.
+- Filed from the probes, all PRE-EXISTING: **#570** (`my (undef, $x) = @_;` in
+  a sub binds `$_[0]` — the params fast path DROPS undef placeholders, silent
+  wrong), **#571** (`$^E`/`$^C` have no runtime variable: naming either aborts
+  unbound), **#572** (`$0` is `sbcl`, not the script path), **#573** (`$:`
+  defaults to `" n-"` where perl has `" \n-"`).
+
 ## s444 (2026-08-24, Fable) — round 4 REVIEWED + MERGED (E #470, G #485+#484a+#492, H #516+#515+#511, F #491+#495ac); #518 fixed; every merged-tree leg clean
 
 - **All four round-4 agents APPROVED and ff-merged** (final tree `c42cc8a`,

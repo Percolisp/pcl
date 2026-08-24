@@ -503,6 +503,44 @@ guarded by `Pl/t/writes-args-01.t`.
 
 ---
 
+## `use English` — everything works except `@ARG` inside a sub
+
+**Perl behaviour:** `English.pm` aliases each English name to its punctuation
+variable with a whole-GLOB assignment (`*ARG = *_ ;`), so the two names share
+one symbol-table entry.  For `@ARG` that matters: perl swaps the AV in the
+`*main::_` glob on every sub call, so `@ARG` inside a sub is that sub's `@_`.
+
+**PCL behaviour (task #502, s446l):** `lib/English.pm` is a shim.  Core
+English.pm cannot be transpiled at all — its right-hand sides are punctuation
+GLOBS (`*+`, `*^N`, `*-{ARRAY}`), the glob-value family PCL does not lower
+(#463 items 3–5) — so before the shim, `use English` died at transpile and
+every English name was unreachable.  The shim supplies the same aliases with
+the two mechanisms PCL has: a SCALAR-slot alias (`*ORS = \$\ ;`), which is
+live in both directions, for every punctuation variable PCL keeps in an
+ordinary cell; and `tie` for the ones it does not — `$&`, `` $` ``, `$'`,
+`$+`, `$^N` (raw globals the runtime rebinds on every match) and `$!` (a call
+into C errno, not a variable at all).  `$ARG` is tied too, because perl's
+shared glob tracks the *dynamic* `$_` that `foreach`/`map`/`grep` bind and a
+value alias cannot.
+
+**The one gap: `@ARG` is not the running sub's `@_`.**  PCL binds `@_` per
+call, no pure-Perl mechanism can reach the caller's copy (a tied array's
+`FETCH` runs in its own frame), so `@ARG` holds what perl's `@main::_` holds
+outside a sub — nothing.  Probed: `sub f { scalar @ARG }` called as `f("A","B")`
+is 2 in perl and 0 in PCL; every other English name in the module, read and
+written, is byte-identical to perl (`Pl/t/english-01.t`).  Use `@_` directly,
+which works.  Closing this needs true glob-to-glob aliasing (`*A = *B` sharing
+one entry rather than copying slots) — the glob-value family's own work.
+
+**Two adjacent PCL gaps the shim routes around, both filed:** `$^E` and `$^C`
+have no runtime variable (naming either directly aborts with an unbound
+variable), so `$EXTENDED_OS_ERROR` is served by the errno tie — which is what
+perl gives on POSIX, probed identical — and `$COMPILING` is set to the 0 perl
+reports at run time.  `$PROGRAM_NAME` is `$0`, which PCL answers as `sbcl`
+rather than the script path; that is `$0`'s own bug, not English's.
+
+---
+
 ## Regex code blocks: `(?{code})` and `(??{code})`
 
 **Perl behaviour:** `(?{code})` runs arbitrary Perl code during pattern
