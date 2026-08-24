@@ -3,6 +3,23 @@
 Distilled from the development log (`docs/session-log.md`, 400+ working
 sessions); dates are development-time, not release-time.
 
+## Unreleased
+
+- Speed: method dispatch no longer re-finalizes the CLOS class on every
+  call (2.2× on a method-call loop; overload-heavy bench 7.27× → 4.98× of
+  perl).  Counting loops, recursion and integer math beat perl
+  (`docs/faster-codegen-suggestions.md` §0.1 is the current measured table).
+- Correctness (the s444 batch): bareword filehandle names canonicalised at
+  one seam (qualified handles, the `*` prototype slot's two halves);
+  identity-promoted file lexicals no longer alias a spelled package
+  variable; signature defaults join the capture set; s/// replacement-side
+  fixes for non-ASCII identifiers; an anon sub binds its *defining*
+  package; `%INC` records modules PCL resolves but never loads.
+- The regression gate grew to 171 files / 5,924 assertions; CI runs the
+  full gate on a stock Ubuntu runner (green).
+- Docs refreshed to current measurements (`README`, `docs/STATUS.md`,
+  the two speed docs, `docs/extensions.md`).
+
 ## v0.1.0 — 2026-08-23 (first public version)
 
 Initial release of PCL (Percolisp): a from-scratch Perl 5 → Common Lisp

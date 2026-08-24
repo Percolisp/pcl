@@ -1,103 +1,95 @@
 # PCL Extensions
 
-PCL supports optional extension modules — CL files that implement Perl built-ins
-too large or complex to embed directly in `pcl-runtime.lisp`. The first extension
-is `cl/pcl-pack.lisp` (the `pack`/`unpack` implementation).
+*(Rewritten 2026-08-25 to match the current tree; the 2026-05 version of
+this file described an eager-load model that no longer exists.)*
 
-## How extensions are loaded
+PCL supports optional extension modules — CL files that implement Perl
+built-ins too large or too specialised to live in `cl/pcl-runtime.lisp`
+itself.  The current set:
 
-`pcl-runtime.lisp` provides two mechanisms:
+| extension | file | source of truth | what it provides |
+|---|---|---|---|
+| `pcl-pack` | `cl/pcl-pack.lisp` | **transpiled** from `cl/pack-impl.pl` (Perl) + a hand-written appendix | `pack` / `unpack` |
+| `pcl-mro` | `cl/pcl-mro.lisp` | **transpiled** from `lib/mro.pm` | the always-available `mro::` API (`get_linear_isa`, …) |
+| `pcl-warnings` | `cl/pcl-warnings.lisp` | **transpiled** from `lib/warnings.pm` | the `warnings::` query/emit API (`enabled`, `warnif`, …) |
+| `pcl-xs` | `cl/pcl-xs.lisp` | hand-written CL | the pclxs XS-bridge host side (`XSLoader::load` path) |
 
-### Eager load at startup (current default)
+Three of the four are **written in Perl and compiled by PCL** — the checked-in
+`.lisp` files are build artifacts (see "Regenerating", below).
 
-At the end of `pcl-runtime.lisp`, each known extension is loaded via
-`p-load-extension`:
+## How extensions are loaded: lazily, via self-loading stubs
 
-```lisp
-;; pcl-runtime.lisp (bottom)
-(p-load-extension "pcl-pack")   ; loads cl/pcl-pack.lisp if present
+There are **no eager loads**.  Every public entry point of an extension has a
+*self-loading stub* in `pcl-runtime.lisp`: the first call loads the
+extension's `.lisp` file and then delegates to the real definition the load
+just installed over the stub.  `p-pack`/`p-unpack` are hand-written stubs;
+the `mro::`/`warnings::` families use the `%pcl-def-ext-stub` macro.
+
+`p-load-extension NAME` does the actual work: it looks for `NAME.lisp` in
+`*pcl-runtime-directory*` (the directory `pcl-runtime.lisp` was loaded from),
+loads it once, and records it in `*pcl-loaded-extensions*` so later calls are
+no-ops.  It returns `nil` (and the stub signals a clear error) when the file
+is absent.
+
+Two consequences of the lazy model:
+
+* **Extensions are NOT baked into the saved runtime core.**  Every runner
+  starts SBCL from a content-keyed saved core of `pcl-runtime.lisp` alone
+  (`~/.pcl-cache/core/`, USER s439); extensions load from the tree at first
+  use.  A program that never calls `pack` never pays for it.
+* **An extension may install definitions and nothing else.**  It is `load`ed
+  *into a running program*, so a PROGRAM preamble (the `@INC` reset, the
+  `*pcl-pl2cl-path*` setup) would clobber that program's state — that was
+  task #349's silent bug.  `pl2cl --extension` therefore emits no preamble,
+  and `p-load-extension` **dies** (rule 12) on an artifact that carries one
+  (`%pcl-check-extension-clean`).
+
+## Regenerating the transpiled artifacts
+
+The three transpiled artifacts are checked into the tree and stamped on line
+1 with the `gen=` cache generation that built them.  **After any
+emission-changing commit they must be regenerated**, or they keep running on
+the old codegen — `Pl/t/artifact-staleness-01.t` (in the gate) compares each
+stamp against `*pcl-cache-generation*` and fails the same session.
+
+```bash
+tools/rebuild-pack                                  # cl/pcl-pack.lisp (pack-impl.pl + appendix)
+./pl2cl --extension lib/mro.pm      > cl/pcl-mro.lisp      && tools/tag-license cl/pcl-mro.lisp
+./pl2cl --extension lib/warnings.pm > cl/pcl-warnings.lisp && tools/tag-license cl/pcl-warnings.lisp
 ```
 
-`p-load-extension` looks for `NAME.lisp` relative to `*pcl-runtime-directory*`
-(the directory where `pcl-runtime.lisp` itself lives), loads it once, and records
-it in `*pcl-loaded-extensions*` so subsequent calls are no-ops.
-
-### Self-loading stubs (lazy fallback)
-
-`p-pack` and `p-unpack` in `pcl-runtime.lisp` are **self-loading stubs**: if
-pcl-pack.lisp was not loaded at startup (e.g. the file is absent, or the runtime
-directory is unknown), the first call to `pack()` or `unpack()` will attempt to
-load `pcl-pack.lisp` automatically and then delegate to the real implementation.
+(The license tag lands on line 2; the gen stamp stays line 1.
+`Pl/t/license-tag-01.t` fails without the tag.)
 
 ## Adding a new extension
 
-1. Implement the extension in `cl/pcl-EXT.lisp` (or transpile a Perl source).
-2. The file must start with `(in-package :pcl)` and export all symbols via the
-   `:pcl` package's export list.
-3. Add an eager-load line at the bottom of `pcl-runtime.lisp`:
-   ```lisp
-   (p-load-extension "pcl-EXT")
-   ```
-4. Add self-loading stubs for any public entry-points so lazy loading works
-   even if the eager load is removed later.
+1. Implement it — in Perl under `lib/` (preferred; transpile with
+   `pl2cl --extension`) or hand-written CL.  The file must be loadable into
+   the `:pcl` package world (`(in-package :pcl)` for hand-written CL;
+   transpiled output handles this itself).
+2. Add self-loading stubs for the public entry points in
+   `pcl-runtime.lisp` — one `%pcl-def-ext-stub` line per function (create
+   the package first with `p-defpackage` if it is a new `Foo::` namespace).
+3. Run `tools/tag-license` on any new file; keep the paren checker green
+   (`sbcl --script tools/check-parens.lisp FILE.lisp`).
 
-## Distribution: standalone binary
+## Distribution
 
-To ship a PCL-compiled program as a **standalone SBCL binary** (no external
-files needed at runtime), load everything into SBCL and save an image:
+`tools/install-pcl` copies the whole runtime tree (including `cl/*.lisp`
+extensions) in its repo-relative shape and builds the saved core at install
+time, so the lazy loads find their files on the installed machine exactly as
+in a checkout.
 
-```bash
-sbcl \
-  --load cl/pcl-runtime.lisp \
-  --load myapp.lisp \          # generated by pl2cl; pcl-runtime eagerly loads pcl-pack.lisp
-  --eval "(sb-ext:save-lisp-and-die \"myapp\" :executable t :toplevel #'|main::pl-main|)"
-```
+For a **standalone binary** (`sb-ext:save-lisp-and-die :executable t`), note
+the lazy model: an extension is in the image only if something already
+called into it (or you `(pcl::p-load-extension "pcl-pack")` explicitly)
+before saving.  Load the extensions your program needs before the save, or
+ship the `cl/` directory beside the binary so the stubs can find the files.
 
-`pcl-runtime.lisp` loads `pcl-pack.lisp` (and any other registered extensions)
-at startup, so the saved binary contains all extension code. On the target
-machine, no `.lisp` files are needed — the binary is self-contained.
+## See also
 
-`*pcl-loaded-extensions*` tracks what is already loaded; `p-load-extension`
-is a no-op for any extension already in the image, so the self-loading stubs
-do not re-load anything.
-
-## Distribution: FASL files (fast-load)
-
-Compile each source file to a `.fasl` for faster loading:
-
-```bash
-sbcl --eval '(compile-file "cl/pcl-runtime.lisp")'   # produces pcl-runtime.fasl
-sbcl --eval '(compile-file "myapp.lisp")'             # produces myapp.fasl
-```
-
-Distribute `pcl-runtime.fasl`, `cl/pcl-pack.lisp`, and `myapp.fasl` together.
-When `pcl-runtime.fasl` loads it will eager-load `pcl-pack.lisp` from the same
-directory (`*pcl-runtime-directory*` is resolved relative to the `.fasl` file's
-location).
-
-## Controlling which extensions load
-
-To make an extension **optional** (don't load at startup, only when called):
-
-1. Remove the eager `(p-load-extension "pcl-EXT")` from `pcl-runtime.lisp`.
-2. Rely on the self-loading stubs.
-
-To make startup **fully lazy** for pack/unpack (saves ~50ms per SBCL invocation
-for programs that don't use `pack`/`unpack`):
-
-```lisp
-;; pcl-runtime.lisp — remove or comment out:
-;; (p-load-extension "pcl-pack")
-```
-
-The stubs will then load pcl-pack.lisp on the first `pack()` or `unpack()` call.
-
-## See also: the module provider registry
-
-Extensions are the **engine** behind CL-backed module overrides, but *which*
-`use Foo` maps to which extension is a separate, higher-level concern. That
-mapping — plus the `lib/` (pure-Perl) vs `cl/modules/` (CL-backed) split and the
-`use`-resolution order — is specified in `docs/shipped-modules.md`. The planned
-`*pcl-module-providers*` registry there folds the eager-load list, the
-`*p-xs-only-modules*` skip-list, and the (currently sweep-only) `Test::More`
-loading into one table. See `docs/pcl-rollout-plan.md` Phase 3 for the build step.
+* `docs/shipped-modules.md` — how `use Foo` decides between a `lib/` pure-Perl
+  shim (transpiled like user code) and CL-backed functionality; extensions
+  are the engine behind the CL-backed side.
+* `docs/xs-artifact-cache.md` / `docs/xs-shim-design.md` — the `pcl-xs`
+  extension's own world.

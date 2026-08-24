@@ -13,6 +13,66 @@ nice-to-have (Perl-like names where free), not a constraint.
 
 ---
 
+## Status update (2026-08-25) — what has shipped since this was written
+
+This document's body is the July 2026 analysis and is kept as written; the
+numbers in §1–§3 describe the tree of that date.  Since then:
+
+* **The measured worklist moved to `docs/faster-codegen-suggestions.md`**
+  (per-construct variant experiments, 2026-07-19), and every speed transform
+  became a **named, switchable emission** in the optimization registry
+  `Pl/Passes.pm` (`PCL_OPT`, s411).  Registered so far: `raw-slot`,
+  `raw-numeric`, `str-buffer`, `foreach-range`, `insensitive-call`,
+  `elem-setf`.
+* **§5.1 (FPU modes) and §5.2 (R1 inline ops)** shipped 2026-07-02, as noted
+  inline below.
+* **§5.6's core landed for scalars (task #62, DONE):** the `raw-slot` /
+  `raw-numeric` verdicts (unshared `my` scalars become raw slots; use-proven
+  eager coercion) and the **`str-buffer`** append verdict (S1: `.=` into a
+  fill-pointer buffer — the O(n²) class is gone).
+* **§5.8 (per-call-site inline caches) is REJECTED in that form** (USER,
+  s444, 2026-08-24).  Profiling (`sb-sprof`) showed the measured ~15× method
+  dispatch gap was **not lookup-dominated**: ~45% was `p-method-call` calling
+  `sb-mop:finalize-inheritance` on *every* call (re-finalizing the CLOS class
+  under a recursive lock), ~15–20% per-call string manufacture, only ~10–15%
+  the actual package walk.  The **finalize-once guard shipped** (2.2× on a
+  2M-call method loop; the `ovlsub` bench 7.27× → 5.28×).  The remainder is a
+  cache-free plan in task #73: stash-in-box at bless (perl's own SvSTASH
+  shape) → own-package fast path → pre-built `pl-NAME` from codegen; a
+  per-CLASS stash table only if inherited dispatch still lags — never a
+  per-call-site cell.
+* **Boxed aggregates** (§5.7) are a parked design item (post-v0.1, Fable).
+
+**Current whole-program numbers** (`tools/bench-exec.pl`, 2026-08-25,
+startup subtracted, best-of-5; ratio < 1 = PCL faster than perl):
+
+```
+bench          perl(s)     pcl(s)  pcl/perl
+intloop+=       0.0666     0.1377     2.07x
+intloop=        0.0662     0.3218     4.86x
+cfor            0.1064     0.0257     0.24x   <- 4.1x FASTER
+arrhash         0.1327     0.2816     2.12x
+fib(27)x        1.4728     0.4439     0.30x   <- 3.3x FASTER
+gcdrec          0.1945     0.0952     0.49x   <- 2.0x FASTER
+collatz         1.9829     0.7987     0.40x   <- 2.5x FASTER
+strcat          0.0012     0.0068     5.71x   (was 756x -- O(n^2) gone)
+pack            0.0035     5.0354  1432.92x   (#74: template re-parse)
+packunpk        0.0040     5.1136  1270.47x   (#74)
+arrfill         0.0500     0.1972     3.94x
+slices          0.0704     0.3276     4.65x
+sliceasgn       0.0264     0.0760     2.88x
+ovlsub          0.0417     0.2078     4.98x   (#73: method dispatch)
+symref          0.0215     0.1601     7.44x
+```
+
+The §1 sentence "currently 5–10× slower than interpreted Perl" is history:
+counting loops, recursion and `collatz` now **beat perl** (0.24×–0.49×).
+What remains slow is concentrated and owned: the pack/unpack oracle's
+per-call template re-parse (task #74), the method-dispatch remainder
+(task #73), and aggregate/slice traffic (the boxed-aggregate design).
+
+---
+
 ## 1. The puzzle, stated honestly
 
 PCL compiles Perl to native machine code via SBCL — and the result is
@@ -242,7 +302,7 @@ store **raw values** in the table/vector, skip per-element envelopes and key
 re-stringification. **Expected: recovers the hash 6.4× and much of the array
 15× rows; medium effort once Phase 4 machinery exists.**
 
-### 5.8 ★ Method-dispatch inline caches (no sealing needed)
+### 5.8 ★ Method-dispatch inline caches (no sealing needed) — **superseded: see the status update at the top (s444: cache-free plan in task #73; per-call-site cells rejected)**
 `$obj->name` currently does a string-keyed package walk every call.
 Cache, *at each call site*, the last seen class and the resolved function
 (one cons or a two-slot vector patched at runtime): next call with the same

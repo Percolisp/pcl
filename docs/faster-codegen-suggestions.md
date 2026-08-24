@@ -5,6 +5,23 @@
 > beat Perl"; acceptance criteria + sequencing there).  Tier-1 items are
 > filed: S1+N1(+N2) = task #62, M1 = #73, P1 = #74; the Target-B rule
 > applies — every new fast shape ships wrapped in its named macro.
+>
+> **Status (2026-08-25):** Tier 1 is half done, and every shipped transform
+> is a **named, switchable emission** in the registry `Pl/Passes.pm`
+> (`PCL_OPT`; s411): `raw-slot`, `raw-numeric`, `str-buffer`,
+> `foreach-range`, `insensitive-call`, `elem-setf`.
+> **#62 (S1 + N1) is DONE** — `str-buffer` killed the O(n²) append class
+> (`strcat` 756× → 5.7×) and `raw-numeric`/`raw-slot` put the counting
+> loops and `collatz` **ahead of perl** (see the re-measured §0.1 table).
+> **M1's per-call-site inline cache is REJECTED** (USER, s444): profiling
+> showed the ~15× was mostly `finalize-inheritance` running on *every*
+> call, not the lookup — the finalize-once guard shipped (2.2× on the
+> method loop; `ovlsub` 7.27× → 5.28×), and #73's remainder is a
+> **cache-free** plan (stash-in-box at bless → own-package fast path →
+> pre-built `pl-NAME` from codegen; a per-CLASS stash table only if
+> inherited dispatch still lags — never a per-call-site cell; the measured
+> breakdown lives in task #73).  **P1 (#74) is still open** and is now the
+> largest single loss on the board.
 
 **Written:** 2026-07-19 (Opus 4.8), against the v2 default pipeline.
 **Method.** Two layers of measurement:
@@ -45,6 +62,38 @@ packunpk        0.0030     4.6899  1587.26x    transpiled oracle
 
 Recursion/calls already beat Perl. The losses are four specific things, and
 the variant experiments below pin the cause and the fix for each.
+
+## 0.1 Re-measured baseline (2026-08-25, after #62 + the #73 first cut)
+
+Same instrument (`perl tools/bench-exec.pl`, best-of-5, startup subtracted);
+the suite has grown five rows since §0 (arrfill, slices, sliceasgn, ovlsub,
+symref).
+
+```
+bench          perl(s)     pcl(s)  pcl/perl
+intloop+=       0.0666     0.1377     2.07x    (was 3.11x)
+intloop=        0.0662     0.3218     4.86x
+cfor            0.1064     0.0257     0.24x    <- was 1.52x SLOWER; now 4.1x FASTER
+arrhash         0.1327     0.2816     2.12x
+fib(27)x        1.4728     0.4439     0.30x    <- 3.3x FASTER
+gcdrec          0.1945     0.0952     0.49x    <- 2.0x FASTER
+collatz         1.9829     0.7987     0.40x    <- was 1.96x SLOWER; now 2.5x FASTER
+strcat          0.0012     0.0068     5.71x    (was 756x -- S1 killed the O(n^2) class)
+pack            0.0035     5.0354  1432.92x    (P1 #74 -- still the big loss)
+packunpk        0.0040     5.1136  1270.47x    (P1 #74)
+arrfill         0.0500     0.1972     3.94x
+slices          0.0704     0.3276     4.65x
+sliceasgn       0.0264     0.0760     2.88x
+ovlsub          0.0417     0.2078     4.98x    (was 7.27x before the #73 finalize-once guard)
+symref          0.0215     0.1601     7.44x
+```
+
+What moved and why: `raw-numeric`/`raw-slot` (#62/N1) fixed the counting
+loops and `collatz`; `str-buffer` (#62/S1) removed the append complexity
+class; the s444 finalize-once guard took the first bite out of dispatch.
+Left, in order of size: the pack/unpack template re-parse (#74), method
+dispatch's remainder (#73, cache-free plan in the task), aggregate/slice
+traffic (boxed-aggregate design, post-v0.1), symbolic refs.
 
 ---
 
@@ -283,6 +332,17 @@ Real transpiled loops, identical work (`$o->v()` vs `getv($o)`), N = 2,000,000:
 bind, every call) is **~15× slower than the equivalent plain sub call** — far
 more than the "2–5×" folklore. This is the dominant cost in Moo/Moose CPAN
 code and the highest-value OO change.
+
+> **Superseded (s444, 2026-08-24).** `sb-sprof` on the 2M-call loop showed
+> the ~15× was **not lookup-dominated**: ~45% was `p-method-call` calling
+> `sb-mop:finalize-inheritance` on every call, ~15–20% per-call string
+> manufacture, only ~10–15% the package walk.  The finalize-once guard
+> shipped (2.2× on the loop); the USER ruled **cache-free first** and
+> rejected the per-call-site cell below.  The live plan is in task #73:
+> stash-in-box at bless → own-package fast path → pre-built `pl-NAME` from
+> codegen; a per-CLASS stash table (perl's own shape, invalidated at the
+> mutation points) only if inherited dispatch still lags.  M1 as written
+> below is kept for the record only.
 
 ### Suggestions
 - **M1. Polymorphic inline cache.** At each `$o->m` call site, cache
@@ -559,10 +619,15 @@ my $s = sprintf("%05d-%s", $i, $name);   # constant format in a loop
 
 **Tier 1 — measured huge, mostly local:**
 1. **S1 `raw-string` append buffer** — ~2400× on `.=` (a complexity class).
+   **DONE (#62, the `str-buffer` pass).**
 2. **M1 method inline cache** — ~15× on OO dispatch; pure runtime, no analysis.
+   **Superseded s444 — see §7: cache-free plan in task #73; first cut
+   (finalize-once) shipped.**
 3. **N1 `raw-numeric` verdict** (+`+=` as arith write) — ~13× on boxed-accum
    loops; fixes `intloop+=`/`intloop=`/`collatz`/`cfor` from one design.
-4. **P1 pack template memoization** — the 1000×+ oracle rows.
+   **DONE (#62, the `raw-numeric`/`raw-slot` passes).**
+4. **P1 pack template memoization** — the 1000×+ oracle rows.  **OPEN (#74) —
+   now the largest single loss in §0.1.**
 
 **Tier 2 — needs the type-flow / Phase-4 spine:**
 5. **A1/A3 single-lookup + fill-pointer aggregates** (arrhash, push loops).

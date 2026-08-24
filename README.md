@@ -61,9 +61,9 @@ $ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); say dump [ map { $_, ":", $_ ** $_ } 
 All numbers are measured on named, re-runnable instruments; the table in
 [`docs/STATUS.md`](docs/STATUS.md) is the authoritative copy.
 
-| measurement | result (2026-08-23) | reproduce |
+| measurement | result (2026-08-25) | reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **171 files / 5,846 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
+| PCL's own regression gate (`Pl/t/`) | **171 files / 5,924 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
 | Perl's own test suite, extracted (`perl-tests/`, 108 files from perl's `t/op`, `t/base`, …) | **18,313 assertions pass / 893 fail (95.4 %)**; **61 files pass completely**; tracked row by row against blessed baselines, so the number can only move honestly | `perl sweep-perl-tests.pl --jobs 8` |
 | Perl's full `t/` tree, in place (528 files) | run per directory as a bug-finder; verdicts per file against a blessed snapshot | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | XS bridge ([pclxs](#4-xs--c-extensions), experimental sibling project) | conformance corpus **398 / 398** against real perl | `tools/pcl-conform` |
@@ -183,16 +183,22 @@ The output is meant to be *read by other tools*, not only loaded by SBCL:
 
 ### 3. Speed — beat perl
 
-The output compiles to Common Lisp, as a naive translation. It is slower than
-perl, since every scalar is a box, so a reference to it can be taken. It is
-making the CL compiler slow. This isn't that hard to optimize in the next
-phase.
+A naive translation is slower than perl (every scalar lives in a "box" so a
+reference to it can be taken), so PCL's code generator proves, per variable,
+where the generality is not needed and emits the narrow form.  Each such
+transform is a named, switchable pass ([`Pl/Passes.pm`](Pl/Passes.pm),
+`PCL_OPT`), and `tools/bench-exec.pl` measures against perl (execution time,
+startup subtracted, best-of-5).  As of 2026-08-25, PCL **beats perl** on
+recursion, counting loops and integer math (`fib` 3.3×, `cfor` 4.1×,
+`collatz` 2.5×, `gcdrec` 2.0× faster), and string-append's O(n²) class is
+gone; the measured remaining losses are concentrated in `pack`/`unpack`
+(template re-parse), method dispatch (in progress — the first cut landed
+2.2×), and aggregate/slice traffic (design pending).
 
 Details, measurements and the
 worklist: [`docs/where-the-time-goes.md`](docs/where-the-time-goes.md),
-[`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md);
-the transforms are named and switchable ([`Pl/Passes.pm`](Pl/Passes.pm),
-`PCL_OPT`), and `tools/bench-exec.pl` measures against perl.
+[`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md)
+(§0.1 is the current bench table).
 
 ### 4. XS / C extensions
 

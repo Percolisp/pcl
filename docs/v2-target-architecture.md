@@ -12,6 +12,17 @@ Status: design target (s316t).  Sections marked **[today]** describe
 what already exists and is kept; **[E5.x]** marks the step that builds
 the rest.
 
+*Progress note (2026-08-25):* since this was written, the target's two
+biggest structural planks have landed — there is **one pipeline** (the
+whole-file v1 fallback was deleted, s356) and **one expression compiler**
+(`ExprToCL2` and its discarded second parse deleted; the two emission
+rules it carried became named passes — s411, Phase A of
+`docs/plan-one-compiler-s411.md`), and the **pass registry this document
+specifies exists** as `Pl/Passes.pm` (`PCL_OPT`; Kind-A facts-licensed
+emissions live, Kind-B CLForm passes still empty).  The E5 step numbering
+below is superseded by `docs/plan-one-compiler-s411.md`; the live work
+queue is `docs/plan-post-s433.md`.
+
 ---
 
 ## 1. The pipeline as data transformations

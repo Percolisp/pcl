@@ -4,6 +4,40 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 445 (2026-08-25, Fable) — CI GREEN on the push; the README-referenced docs refreshed to measured state (USER ask) and pushed
+
+**CI verdict on `0cede82` (the s444 evening push): GREEN** (run completed
+success, checked via the public API) — the first of #518's "green twice in a
+row"; the second is the run this session's push starts.
+
+**The doc refresh (USER: "check our documents referenced by README.md …
+e.g. the speed measurements"), every number re-measured on this tree today:**
+- `tools/bench-exec.pl` re-run (best-of-5): cfor 0.24×, fib 0.30×, collatz
+  0.40×, gcdrec 0.49× — **PCL beats perl on recursion, counting loops and
+  integer math**; strcat 5.71× (the 756× O(n²) class gone); the losses left
+  are pack/packunpk (~1300–1400×, #74), ovlsub 4.98× (#73 remainder),
+  slices/arrfill/symref (aggregates design).  Table added as
+  `docs/faster-codegen-suggestions.md` **§0.1**; status headers there updated
+  (#62 DONE; M1's per-call-site cache marked superseded by the s444
+  cache-free ruling, in §7 and §12 too, so no future session re-derives it).
+- `docs/where-the-time-goes.md` (was 2026-07-02): a dated **status update**
+  section at the top — what shipped since (registry, #62, the s444 #73
+  profile + finalize-once guard, the 5.8 rejection), the current bench
+  table, and the note that §1's "5–10× slower" is history.
+- `docs/extensions.md` (was 2026-05-31): **rewritten** — it described an
+  eager-load model that no longer exists.  Now: the four extensions, the
+  lazy self-loading-stub model (`%pcl-def-ext-stub`), NOT baked into the
+  saved core, the `--extension` no-preamble rule (#349) with
+  `p-load-extension` dying on a preamble artifact (rule 12), regeneration
+  commands + the staleness gate, install/standalone-binary notes.
+- `docs/v2-target-architecture.md`: progress note (one pipeline s356, one
+  expression compiler + the registry s411; E5 numbering superseded).
+- README / `docs/STATUS.md`: gate row updated to the re-measured
+  **171 files / 5,924 assertions** (cold `tools/prove-core` this session,
+  xs-only failures) and the speed section rewritten from placeholder text
+  to the measured state; `CHANGELOG.md` gains an Unreleased section
+  (s444 batch + #73 first cut + gate growth).
+
 ## Session 444 (2026-08-24, Fable) — round 4 RESTARTED at the USER's word, all four agents finished, reviewed and MERGED; #518 fixed; the merged-tree legs all clean
 
 **The restart (USER: "restart where the Opus four clients were; when they are
