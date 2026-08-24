@@ -66,6 +66,21 @@ TOMORROW's first check (`gh` is now installed on this machine; the old
 "no gh here" note is obsolete).  A green run is the first of #518's
 "twice in a row".**
 
+**s445 (Fable, 2026-08-25) — CI on `0cede82` GREEN (first of #518's two);
+the README-referenced docs refreshed to measured state and pushed
+(`ad6553d`); ROUND 5 LAUNCHED off `ad6553d`** — five Opus agents in
+worktrees: **I** = #508 + #509 + #510 + #512 + #513 (gen v2-230, new-task
+IDs 540–549), **J** = #505 + #506 + #507 + #514 + #517 (v2-235, 550–559),
+**K** = #463 items 3–5 + #479 compiler half + #478 (v2-240, 560–569),
+**L** = #502 English shim + #504 (+#525 if room) (v2-245, 570–579),
+**M** = #73 remainder cache-free + #533 (v2-250, 580–589; USER s444 routed
+#73 to this round).  Standing rules as rounds 3–4: agents run no sweeps and
+write no review-request docs; the merge review owes ONE full sweep +
+companion legs (op/+io/ for I; mro/+class/+method for M; the sweep is
+NON-OPTIONAL for L's lib/ change; gate-SET where a refusal/drop stops
+firing — K), generation renumbered ONCE above v2-250 + artifacts
+regenerated on the merged tree.
+
 Cross-cutting (unchanged): the WHAT-TO-RUN table in CLAUDE.md decides what
 runs; every probe-found silent-wrong is FILED with its reproducer; a
 review-request doc per session (`docs/opus5-review-requests-sNNN.md`) — write
