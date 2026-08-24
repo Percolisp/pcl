@@ -60,8 +60,11 @@ ROUND (USER): stash-in-box at bless → own-package fast path → pre-built
 pl-NAME from codegen; a per-CLASS stash table (perl's own shape) only if
 inherited dispatch still lags — NEVER a per-call-site cell.  The measured
 breakdown and plan are in task #73.  #533 filed (p-super-call has no
-UNIVERSAL fallback).  #518's CI half + the push remain the USER's morning
-items.**
+UNIVERSAL fallback).  **The push HAPPENED the same evening (USER):
+`e9cc3a7..0cede82`, 12 commits — CI runs on `0cede82` and its verdict is
+TOMORROW's first check (`gh` is now installed on this machine; the old
+"no gh here" note is obsolete).  A green run is the first of #518's
+"twice in a row".**
 
 Cross-cutting (unchanged): the WHAT-TO-RUN table in CLAUDE.md decides what
 runs; every probe-found silent-wrong is FILED with its reproducer; a
