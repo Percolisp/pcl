@@ -16,12 +16,15 @@
 > **M1's per-call-site inline cache is REJECTED** (USER, s444): profiling
 > showed the ~15× was mostly `finalize-inheritance` running on *every*
 > call, not the lookup — the finalize-once guard shipped (2.2× on the
-> method loop; `ovlsub` 7.27× → 5.28×), and #73's remainder is a
-> **cache-free** plan (stash-in-box at bless → own-package fast path →
-> pre-built `pl-NAME` from codegen; a per-CLASS stash table only if
-> inherited dispatch still lags — never a per-call-site cell; the measured
-> breakdown lives in task #73).  **P1 (#74) is still open** and is now the
-> largest single loss on the board.
+> method loop; `ovlsub` 7.27× → 5.28×).  **#73 is now DONE cache-free**
+> (s446m): the own-package fast path + the stash/`pl-NAME` memos took the
+> monomorphic loop to **2.62× of perl** and the inherited one to **4.74×**
+> (`ovlsub` 3.44×); the two remaining steps of its plan (stash-in-box,
+> codegen-supplied `pl-NAME`) were **measured at 7 % / 0 % and closed
+> unshipped** — §7 has the table, task #73 the record, #582 the one
+> remaining lever (a per-CLASS method cache, blocked on `@ISA`-write
+> invalidation).  **P1 (#74) is still open** and is now the largest single
+> loss on the board.
 
 **Written:** 2026-07-19 (Opus 4.8), against the v2 default pipeline.
 **Method.** Two layers of measurement:
@@ -91,6 +94,10 @@ symref          0.0215     0.1601     7.44x
 What moved and why: `raw-numeric`/`raw-slot` (#62/N1) fixed the counting
 loops and `collatz`; `str-buffer` (#62/S1) removed the append complexity
 class; the s444 finalize-once guard took the first bite out of dispatch.
+
+> **`ovlsub` moved again in s446m: 4.98× → 3.44×** (0.2078 → 0.1620 s; the
+> other rows re-measured within noise on the same run — intloop+= 2.07×,
+> arrhash 2.20×, fib 0.29×).  That is #73's cache-free remainder, §7.
 Left, in order of size: the pack/unpack template re-parse (#74), method
 dispatch's remainder (#73, cache-free plan in the task), aggregate/slice
 traffic (boxed-aggregate design, post-v0.1), symbolic refs.
@@ -338,11 +345,43 @@ code and the highest-value OO change.
 > `sb-mop:finalize-inheritance` on every call, ~15–20% per-call string
 > manufacture, only ~10–15% the package walk.  The finalize-once guard
 > shipped (2.2× on the loop); the USER ruled **cache-free first** and
-> rejected the per-call-site cell below.  The live plan is in task #73:
-> stash-in-box at bless → own-package fast path → pre-built `pl-NAME` from
-> codegen; a per-CLASS stash table (perl's own shape, invalidated at the
-> mutation points) only if inherited dispatch still lags.  M1 as written
-> below is kept for the record only.
+> rejected the per-call-site cell below.  M1 as written below is kept for
+> the record only.
+>
+> **DONE, cache-free (s446m, 2026-08-25).** Measured on the same instrument
+> (2M calls, startup+compile subtracted, best-of-5; perl ≈ 0.145 s):
+>
+> | loop | s444 (after finalize-once) | s446m | of perl |
+> |---|---:|---:|---|
+> | monomorphic `$o->v()` | 1.2537 | **0.3802** | 9.05× → **2.62×** |
+> | inherited through `@ISA` | 1.8567 | **0.7115** | 13.29× → **4.74×** |
+> | the same call as `C::v($o)` | 0.2091 | 0.2020 | control, unchanged |
+>
+> What did it, in order of size: the **own-package fast path** (a plain
+> method name found in the invocant's own class package returns at once —
+> the same function both slow paths would reach, since each starts its walk
+> at the class itself); **the stash table** (`%pcl-find-package` memoized —
+> perl resolves a stash by name through one hash, `gv_stashpv`, and only
+> successful resolutions are recorded, so no entry can go stale);
+> **`%pcl-cl-sub-name` memoized and hoisted** (M2, generalised: the
+> `pl-NAME` string was rebuilt for every class a walk visited);
+> `(declare (type string method-name))` — 12 % on its own; the `@ISA` walk
+> **starting at the parents** when the fast path already missed; and three
+> per-call allocations removed (the `SUPER::` prefix `subseq`, the
+> qualified-name `search` on names with no colon, the `plc-NAME` symbol
+> built when the CLOS branch cannot be taken).
+>
+> **Steps (2) and (4) of task #73 are closed as not worth it, by
+> measurement.** Making *both* remaining lookups free — the stash pointer in
+> the box, and codegen passing the pre-built `pl-NAME` — is worth
+> 0.3802 → 0.3534 s on the monomorphic loop (**7 %**) and nothing measurable
+> on the inherited one (bounded with a one-element eq cache in front of each,
+> applied to the tree and reverted).  Neither earns a box-representation
+> change (~40 class-slot reads woven through `ref()`/stringification) or an
+> emission change (a new IR shape + generation bump + three artifacts).
+> **The one remaining lever on inherited dispatch is a per-CLASS method
+> cache — task #582, whose blocker is invalidation on `@ISA` writes, not the
+> cache.**
 
 ### Suggestions
 - **M1. Polymorphic inline cache.** At each `$o->m` call site, cache

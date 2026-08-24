@@ -21,6 +21,43 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s446m (2026-08-25, Opus agent M) — #73's remainder is MEASURED: the fast path + the stash/sub-name memos are the win; stash-in-box and the codegen pre-built name are NOT (7 % and 0 %)
+
+- **#73 method dispatch, cache-free, SHIPPED**: the own-package FAST PATH
+  (step 3), `%pcl-find-package` memoized (THE STASH TABLE — perl's
+  `gv_stashpv` shape), `%pcl-cl-sub-name` memoized **and** hoisted out of
+  every walk (M2), the `@ISA` walk starting at the PARENTS when the fast path
+  already missed, and `(declare (type string method-name))`.  Measured on 2M
+  calls: monomorphic `$o->v()` **1.2537 → 0.3802 s** (9.05× → 2.62× of perl),
+  inherited **1.8567 → 0.7115 s** (13.29× → 4.74×), `ovlsub` **4.98× →
+  3.44×**.  Runtime-only — no emission change, no generation bump.
+- **#73 steps (2) stash-in-box and (4) codegen pre-built `pl-NAME` are CLOSED
+  as not worth it, by measurement** — bounded with a one-element eq cache in
+  front of each lookup (applied and reverted): together **7 % of the
+  monomorphic loop and nothing measurable on the inherited one**.  Do not
+  re-derive: a box-representation change touches ~40 class-slot reads woven
+  through `ref()`/stringification, and PCL's `ref()` must keep the spelling
+  the program blessed with.  Full record in task #73.
+- **A method-resolution CACHE stays unshipped, and its blocker is named**:
+  #582 — the per-CLASS table needs a generation bump on every `@ISA` WRITE,
+  and `@ISA` is an ordinary array box with no magic, so there is no single
+  place a write passes through (perl makes `@ISA` magical).  A missed
+  mutation point is a silently wrong dispatch.
+- **Dispatch stays cache-free and that is testable**: `Pl/t/method-dispatch-01.t`
+  (new, 6 rows) — @ISA rewritten between calls, a method glob-assigned then
+  REdefined after its first dispatch, rebless, class name in a scalar,
+  bless-only package, builtin-named methods, qualified spellings.
+- **#533 DONE**: a `SUPER::` call finishes its lookup like any other method
+  call — UNIVERSAL and UNIVERSAL's own `@ISA`, the isa/can/DOES built-ins,
+  import/unimport as no-ops, AUTOLOAD in the **parents** (with `$AUTOLOAD` =
+  `Current::SUPER::method`, perl's spelling), then a trappable perl-shaped
+  die naming the CURRENT class.  All three arms of `p-super-call` share it.
+- Filed **#580** (`bless {}, "main::Bar"` keeps the literal where perl answers
+  the existing stash's name), **#581** (`isa()` compares class names
+  case-INSENSITIVELY — `Foo->new->isa("FOO")` is true in PCL, false in perl),
+  **#582**.  **#518 recurred locally under a loaded gate** (rows 29 *and* 30,
+  41 rows reported) — load-dependent, not CI-specific; noted in that task.
+
 ## s444 (2026-08-24, Fable) — round 4 REVIEWED + MERGED (E #470, G #485+#484a+#492, H #516+#515+#511, F #491+#495ac); #518 fixed; every merged-tree leg clean
 
 - **All four round-4 agents APPROVED and ff-merged** (final tree `c42cc8a`,

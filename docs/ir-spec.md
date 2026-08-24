@@ -1249,8 +1249,22 @@ var ⇒ plain lexical binding, no localization at all).
   defining the method wins. Method-name string → function mapping goes
   through the `%pcl-cl-sub-name` registry (case-preserving).
 - `SUPER::name` dispatches starting *after* the current sub's home
-  package in the linearization. `$obj->$coderef(@a)` calls the code ref
-  directly with the invocant prepended.
+  package in the linearization, and **finishes the lookup exactly like an
+  ordinary method call** (s446m, #533): UNIVERSAL and UNIVERSAL's own
+  `@ISA`, then the `isa`/`can`/`DOES` built-ins, then `import`/`unimport`
+  as no-ops, then `AUTOLOAD` searched **from the parents** (never the
+  current class's own) with `$AUTOLOAD` set to `Current::SUPER::method`,
+  and only then a trappable `Can't locate object method … via package
+  "CURRENT"` — perl names the current class there, not the parent.
+  `$obj->$coderef(@a)` calls the code ref directly with the invocant
+  prepended.
+- **Dispatch resolves per call — nothing about the resolution is cached**
+  (the USER's cache-free ruling, s444; measured in s446m). A method
+  glob-assigned or redefined after an object has already dispatched, and a
+  runtime `@ISA` rewrite, must be visible on the very next call. What *is*
+  memoized is name→package (the stash table, perl's `gv_stashpv` shape)
+  and name→`pl-NAME`, both pure functions of a name. Guard:
+  `Pl/t/method-dispatch-01.t`.
 - `AUTOLOAD` is honored (walks `@ISA`, skips `DESTROY`). `can`/`isa` work.
   `DESTROY` is **never called by GC** (documented divergence).
 - PCL always linearizes with C3 (stock Perl defaults to DFS; documented
