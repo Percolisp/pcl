@@ -142,6 +142,19 @@ those two files and the live plan doc directly -- no new review-doc families.*
   UNTERMINATED CL string — the escape is not undone before the block body is
   re-parsed, so `\"` reads as perl's reference operator and the whole FILE
   fails to read: #419's severity class).
+- **A MEASUREMENT HAZARD of the fan-out pattern, evidenced and filed as #576**:
+  parallel agents share ONE `~/.pcl-cache`, and `p-compute-cache-path` keys a
+  cached module transpile on `ABS-PATH | generation`.  A file inside a worktree
+  has a per-worktree path and cannot collide — but a CORE module does not:
+  `…/lib/5.40.3/Exporter.pm` is one path for everybody, and the generation
+  string separates two agents only AFTER the one with an emission change has
+  bumped it, which is not until it has already run gates with a modified
+  emitter.  Measured live: the cache held `gen=v2-221` (main's) beside v2-230
+  and v2-235.  One `prove-core` run failed `english-01.t`'s first six rows
+  (which reach core `Exporter.pm` through `use English`) and passed 7–13; the
+  same tree passed the file three times standalone and two later FULL gates,
+  and 8-way cold-cache stress would not reproduce it.  **A one-off failure in
+  an agent's gate can be another agent's cache entry, not a regression.**
 
 ## s444 (2026-08-24, Fable) — round 4 REVIEWED + MERGED (E #470, G #485+#484a+#492, H #516+#515+#511, F #491+#495ac); #518 fixed; every merged-tree leg clean
 
