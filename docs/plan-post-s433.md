@@ -50,6 +50,19 @@ ruled the s431 flip re-census and the s432 #456 half (a)
 
 **s444 (Fable, 2026-08-24) — ROUND 4 DONE: all four agents restarted in their kept worktrees, finished, REVIEWED and ff-MERGED (E #470; G #485 + #484(a) + #492; H #516 + #515 + #511; F #491 + #495 shapes (a)+(c), (b) waits for #266 by measurement).**  Final tree `c42cc8a`, gen **v2-221** (F's post-rebase renumber adopted — above every agent string; artifacts regenerated on exactly this tree).  Legs all clean: cold gate 171/5924 (13 xs rows), sweep TOTAL 18313 (+0) GATE clean drops 5 = census child 9/6, gate-SET 638x2 ZERO diff, companion 528 files (subval + leaky-magic edited by cause, both s443f; pvbm/variables/utf8cache the known noise).  #518 fixed (`c76875a`, cached-core prefix + exact row; CI half rides the push).  Closed #470 #484 #485 #491 #492 #511 #515 #516; FILED **#519–#532**.  **Queue now: #502, I = #508 + #509 + #510 + #512 + #513, J = #505–#507 + #514 + #517, K = #463 items 3–5 + #479 compiler half + #478; #504; the #519–#532 fillers slot by what they block (#525 is one line + sweep; #527 is measured and shaped; #520 runtime half first).**  Record: session-log §444, DECIDED §s444.
 
+**s444 evening (USER rulings before the break): Target A opened a crack —
+#73 was PROFILED (sb-sprof: ~45% of a hot method loop was re-FINALIZING the
+CLOS class per call under a lock; only ~10–15% the package lookup) and the
+USER ruled CACHE-FREE FIRST.  The finalize-once guard SHIPPED (`81c17ea`,
+both sites, 2.2× on the loop, ovlsub 7.27×→5.28×, sweep +0, companion
+mro/class/method legs identical).  #73's REMAINDER JOINS THE NEXT AGENT
+ROUND (USER): stash-in-box at bless → own-package fast path → pre-built
+pl-NAME from codegen; a per-CLASS stash table (perl's own shape) only if
+inherited dispatch still lags — NEVER a per-call-site cell.  The measured
+breakdown and plan are in task #73.  #533 filed (p-super-call has no
+UNIVERSAL fallback).  #518's CI half + the push remain the USER's morning
+items.**
+
 Cross-cutting (unchanged): the WHAT-TO-RUN table in CLAUDE.md decides what
 runs; every probe-found silent-wrong is FILED with its reproducer; a
 review-request doc per session (`docs/opus5-review-requests-sNNN.md`) — write

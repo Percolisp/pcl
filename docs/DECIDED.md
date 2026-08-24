@@ -44,6 +44,14 @@ those two files and the live plan doc directly -- no new review-doc families.*
   output.  CI half of the bar (green twice) rides the next push.
 - Tasks closed #470 #484 #485 #491 #492 #511 #515 #516; FILED **#519–#532**
   (each carries its probes and bar; #520 is TWO-SIDED — runtime half first).
+- **#73 method dispatch: CACHE-FREE FIRST (USER, s444 evening).**  Profiled:
+  ~45% of a hot method loop was re-finalizing the CLOS class PER CALL — the
+  finalize-once guard SHIPPED (`81c17ea`, 2.2× on the loop, all legs clean);
+  the remainder (stash-in-box at bless / own-package fast path / pre-built
+  pl-NAME) is the NEXT ROUND's spec, in task #73.  A per-call-site cache
+  cell is REJECTED; if inherited dispatch still lags after those, the
+  fallback is perl's own per-CLASS stash table invalidated at the mutation
+  points.  #533 = p-super-call's missing UNIVERSAL fallback.
 
 ## s443f (2026-08-24, Opus agent F) — a bareword filehandle NAME has ONE canonical spelling; a bareword in a `*` slot is that name; the strictly-single operand ends by PRECEDENCE
 

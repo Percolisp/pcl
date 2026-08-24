@@ -107,6 +107,33 @@ plus the new #519–#532 fillers ordered by what they block.  The four agent
 worktrees and branches removed after the merges; the USER's push (week of
 2026-08-24) picks up everything including #518's CI half.
 
+**s444 evening — the USER asked about speed, #73 was PROFILED, and its
+first cut SHIPPED (`81c17ea`) on the USER's word ("ship the one-line fix,
+then #73 to the next round").**  Live bench-exec on the merged tree first:
+counting loops and collatz now BEAT perl (cfor 0.24×, collatz 0.40× — the
+#62 raw-numeric verdict paying), recursion holds (fib 0.28×), strcat's
+756× O(n²) is gone (3.9×); the losses left are pack (#74, template
+re-parsed per call), method dispatch (#73) and boxed aggregates (parked
+design).  Then the USER asked whether #73 could be solved WITHOUT another
+cache — sb-sprof answered: **~45% of a 2M-call method loop was
+sb-pcl::update-class under a recursive lock — p-method-call called
+finalize-inheritance on EVERY call**; ~15–20% per-call string manufacture
+(%pcl-invert-case, "pl-NAME" per MRO element, SUPER::/:: scans); only
+~10–15% the actual package lookup.  The finalize-once guard
+(class-finalized-p, both sites — p-super-call is the identical twin)
+shipped after the full bar: loop 2.7 s → 1.2 s (2.2×), ovlsub 5.28×
+(was 7.27×), sweep GATE clean 18313 (+0), companion mro/ + class/ + method
+legs (87 files) byte-identical to snapshot, gate 171/5924 xs-only, OO Pl/t
+subset 430 rows PASS.  Runtime-only — no generation bump.  **#73's
+remainder goes to the next agent round with the measured plan in the task**
+(stash-in-box at bless — perl's own SvSTASH shape; own-package fast path
+before any SUPER::/qualified/CLOS machinery; pre-built pl-NAME from
+codegen; a per-CLASS stash table only if inherited dispatch still lags —
+never a per-call-site cell).  **#533 filed** (p-super-call lacks the
+UNIVERSAL fallback — `$obj->SUPER::isa(...)` from an @ISA-less package dies
+where perl finds UNIVERSAL::isa; verified pre-existing head-to-head).
+`git gc` on the USER's ask: .git 128 MB → 18 MB.
+
 ## Session 440 (2026-08-23, Fable) — CI RED diagnosed and fixed (`Data::Dump`, a non-core import; the PPI floor); the stock-machine rehearsal; the review docs removed from git (USER)
 
 **The CI failure (run 32648385694, step 6 `tools/install-pcl`, ~3 s, exit 2,
