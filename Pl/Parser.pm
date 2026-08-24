@@ -3553,6 +3553,128 @@ sub _wrap_statement_modifier {
 # saved and restored unchanged), and reuses the ordinary local-init machinery —
 # no special macro (cf. p-local-glob-if, which a glob needs because it has no
 # single rvalue).  $lhs_rval_cl reads the LHS as an rvalue (old value).
+# The SETF PLACE of a subscripted `local` target, from its container form and
+# its already-lowered key expressions.  One reading of "what does `$h{k}` /
+# `@h{k1,k2}` / `$a[i]` / `@a[i,j]` name", shared by the conditional-init
+# rvalue (a false modifier localizes to the slot's CURRENT value) and by the
+# LIST-assignment lowering (task #509), which needs exactly the place an
+# ordinary `($p, $h{a}) = …` would produce.
+sub _elem_place_cl {
+  my ($open, $cl_var, $key_cls) = @_;
+  return @$key_cls == 1
+    ? ($open eq '{' ? "(p-gethash $cl_var $key_cls->[0])"
+                    : "(p-aref $cl_var $key_cls->[0])")
+    : ($open eq '{' ? "(p-hslice $cl_var " . join(' ', @$key_cls) . ")"
+                    : "(p-aslice $cl_var " . join(' ', @$key_cls) . ")");
+}
+
+# Replace THIS statement with the standard drop form — loud when the file is
+# compiled, a perl-shaped `die` when the statement is reached.
+#
+# A v1 STATEMENT handler cannot simply `die` for a shape it cannot lower: only
+# the EXPRESSION entries (_parse_expression / _parse_expression_form) catch and
+# convert, so a die from here escapes to pl2cl and takes the WHOLE FILE with it
+# — measured s446i, and that is the one failure mode worse than the silent
+# wrong it was meant to replace.
+sub _drop_this_statement {
+  my ($self, $parts, $stmt, $reason) = @_;
+  $self->_announce_dropped_statement($parts, $stmt, $reason);
+  $self->_emit($self->_dropped_statement_cl($parts, $stmt, $reason));
+  $self->_emit("");
+  return;
+}
+
+# The LHS targets of a `local (…)` list, one structured item each (task #509).
+# The parenthesised run is split on top-level commas exactly as an ordinary
+# list-assignment LHS is, and each part classified — because `local` names
+# SLOTS as well as variables and the two need different lowerings.
+sub _local_list_items {
+  my ($self, $list, $stmt) = @_;
+  my @toks;
+  for my $child ($list->children) {
+    my $cr = ref($child);
+    next if $cr eq 'PPI::Token::Whitespace';
+    next if $cr eq 'PPI::Token::Structure';       # the ( )
+    if ($cr =~ /^PPI::Statement/) {
+      for my $gc ($child->children) {
+        next if ref($gc) eq 'PPI::Token::Whitespace';
+        push @toks, $gc;
+      }
+    } else {
+      push @toks, $child;
+    }
+  }
+  my (@groups, @cur);
+  for my $t (@toks) {
+    if (ref($t) eq 'PPI::Token::Operator' && $t->content =~ /^(?:,|=>)$/) {
+      push @groups, [@cur] if @cur;
+      @cur = ();
+    } else {
+      push @cur, $t;
+    }
+  }
+  push @groups, [@cur] if @cur;
+  return map { $self->_local_target_item($_, $stmt) } @groups;
+}
+
+# ONE `local` target, as { kind, cl, place, … }:
+#   kind 'skip'  an `undef` placeholder — no storage, one RHS slot consumed
+#   kind 'var'   a plain variable;  cl = its storage name, place = its setf place
+#   kind 'elem'  a subscripted slot; cl = the CONTAINER, keys/open/macro* = how
+#                to save and restore it, place = its setf place
+#
+# cl and place are asked of DIFFERENT authorities on purpose: storage is
+# _transform_pkg_var's question ($! is stored in *p-stored-errno*), the setf
+# place is the expression lowering's ($! writes through (p-errno-string)), and
+# a magic name is exactly where the two answers differ — task #510, where the
+# list assignment wrote to a box nothing reads.  Measured over every magic
+# name PCL knows: only $! diverges, so this asks the lowering just for the
+# Magic tokens and leaves every other spelling byte-identical.
+#
+# Rule 12: a target shape with no lowering DIES here rather than being
+# silently flattened to whatever Symbol it happens to contain (which is what
+# turned `local($p,$h{a})` into a phantom `local $h`).
+sub _local_target_item {
+  my ($self, $g, $stmt) = @_;
+  if (@$g == 1 && ref($g->[0]) eq 'PPI::Token::Word'
+      && $g->[0]->content eq 'undef') {
+    return { kind => 'skip', cl => '(p-undef)', place => '(p-undef)' };
+  }
+  if (@$g == 1 && (ref($g->[0]) eq 'PPI::Token::Symbol'
+                   || ref($g->[0]) eq 'PPI::Token::Magic')) {
+    my $cl = $self->_transform_pkg_var($g->[0]->content);
+    my $place = $cl;
+    if (ref($g->[0]) eq 'PPI::Token::Magic') {
+      my $p = $self->_parse_expression([$g->[0]], $stmt);
+      if (defined $p) { $p =~ s/^\s+|\s+$//g; $place = $p if length $p }
+    }
+    return { kind => 'var', cl => $cl, place => $place };
+  }
+  if (@$g == 2 && ref($g->[0]) eq 'PPI::Token::Symbol'
+      && ref($g->[1]) eq 'PPI::Structure::Subscript') {
+    my $open      = $g->[1]->start()->content();          # '{' or '['
+    my $base      = substr($g->[0]->content, 1);
+    my $new_sigil = ($open eq '{') ? '%' : '@';
+    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    my @key_groups = $self->_subscript_key_groups($g->[1]);
+    die "Parser2 TODO: empty subscript in a `local` target\n" unless @key_groups;
+    my $sub_ctx = ($open eq '[') ? 1 : 0;
+    my @keys = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) }
+                   @key_groups;
+    return {
+      kind  => 'elem',
+      cl    => $cl_var,
+      open  => $open,
+      keys  => \@keys,
+      macro      => ($open eq '{') ? 'p-local-hash-elem'     : 'p-local-array-slice',
+      macro_init => ($open eq '{') ? 'p-local-hash-elem-init': 'p-local-array-elem-init',
+      place => _elem_place_cl($open, $cl_var, \@keys),
+    };
+  }
+  die "Parser2 TODO: unsupported `local` target: "
+    . join('', map { $_->content // '' } @$g) . "\n";
+}
+
 sub _conditional_local_init {
   my ($self, $modifier, $cond_cl, $rhs_cl, $lhs_rval_cl) = @_;
   my $test = "(p-true-p $cond_cl)";
@@ -3566,6 +3688,38 @@ sub _process_local_declaration {
   my $stmt = shift;
   my $parts = shift;
   my $perl_code = shift;
+
+  # ── THE trailing statement modifier, split ONCE for every `local` shape
+  # (task #508).  It used to be split by each RHS-carrying branch out of its
+  # own slice of the run, so the branches with NO right-hand side — a bare
+  # `local $x if COND`, `local ($a,$b) unless COND` — never saw it and
+  # localized unconditionally, where perl does not execute the statement at
+  # all when the condition is false.  This is the one place every shape passes
+  # through (rule 11); the branches below read $lmod/$lcond instead of
+  # re-splitting their own slice.
+  #
+  # The ACCEPT set depends on the shape.  WITH an assignment a loop modifier
+  # must keep reading as "no modifier" so the RHS parse chokes and the
+  # statement drops LOUDLY: `local $x = 5 for (1,2)` localizes and RESTORES
+  # once per iteration, which the open-let shape `local` compiles to cannot
+  # express (see _split_trailing_modifier).  With NO assignment there is
+  # nothing to restore differently — the localized slot never changes — so all
+  # six lower exactly: run the loop with an EMPTY body and localize nothing
+  # (probed 5.40.3: `our $p=1; { local $p for (1,2); print $p }` prints 1, and
+  # `local $p while $i++ < 2` leaves $p alone while still running the loop).
+  my $has_assign = grep {
+    ref($_) eq 'PPI::Token::Operator' && $_->content eq '='
+  } @$parts;
+  my ($lmod, $lcond) = $self->_split_trailing_modifier(
+    $parts, $has_assign ? undef : $self->_all_statement_modifiers);
+  $lmod = '' if !defined $lmod;
+
+  if ($lmod ne '' && $lmod !~ /^(?:if|unless)$/) {
+    $self->_emit(";; $perl_code");
+    $self->_emit($self->_wrap_statement_modifier('nil', $lmod, $lcond, $stmt));
+    $self->_emit("");
+    return;
+  }
 
   # Handle local *foo and local *foo = RHS (typeglob localization)
   # Use p-local-glob which saves/restores all slots via unwind-protect.
@@ -3635,12 +3789,10 @@ sub _process_local_declaration {
         }
         push @rhs_parts, $p if $past_eq;
       }
-      # A trailing `if`/`unless` bareword is the statement modifier (it cannot
-      # appear inside a value expression): `local *_ = RHS if COND`.  One
-      # splitter for every `local` shape — see _split_trailing_modifier.
-      my ($modifier, $cond_parts) = $self->_split_trailing_modifier(\@rhs_parts);
-      $modifier = undef if $modifier eq '';
-      my @cond_parts = @$cond_parts;
+      # The trailing `if`/`unless` modifier of `local *_ = RHS if COND` was
+      # already taken off the whole run at the head of this sub (task #508).
+      my $modifier = $lmod ne '' ? $lmod : undef;
+      my @cond_parts = @$lcond;
       my $rhs_cl = $self->_parse_expression(\@rhs_parts, $stmt) // 'nil';
       if ($modifier) {
         # Conditional local (`local *foo = RHS if COND`): only localize+assign
@@ -3672,6 +3824,18 @@ sub _process_local_declaration {
         $self->{_local_let_depth} //= 0;
         $self->{_local_let_depth} += 2;
       }
+    } elsif ($lmod ne '') {
+      # `local *foo if COND` — no RHS (task #508).  Perl clears the glob only
+      # when the condition holds and leaves the outer slots alone otherwise;
+      # the same macro says that, with `:none` in the value slot (it then only
+      # clears, and there is no RHS to evaluate).
+      my $cond_cl = $self->_parse_expression($lcond, $stmt) // 'nil';
+      my $test = $lmod eq 'unless'
+               ? "(not (p-true-p $cond_cl))" : "(p-true-p $cond_cl)";
+      $self->_emit("(p-local-glob-if $test \"$pkg\" \"$name\" :none");
+      $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth} //= 0;
+      $self->{_local_let_depth}++;
     } else {
       $self->_emit("(p-local-glob \"$pkg\" \"$name\"");
       $self->indent_level($self->indent_level + 1);
@@ -3693,6 +3857,10 @@ sub _process_local_declaration {
   if (@non_ws && ref($non_ws[0]) eq 'PPI::Token::ArrayIndex') {
     $self->_emit(";; $perl_code");
     my $cl = $self->_parse_expression(\@non_ws, $stmt) // 'nil';
+    # …and a statement modifier just gates it (task #508): there is no
+    # save/restore here to make conditional, so the ordinary wrap is exact.
+    $cl = $self->_wrap_statement_modifier($cl, $lmod, $lcond, $stmt)
+      if $lmod ne '';
     $self->_emit($cl);
     return;
   }
@@ -3774,10 +3942,9 @@ sub _process_local_declaration {
           last;
         }
       }
-      # Strip a trailing `if`/`unless` statement modifier from the RHS so it does
-      # not leak into the value parse (which fell through to a "Missing case" die).
-      my ($ld_mod, $ld_cond) = $has_init
-        ? $self->_split_trailing_modifier(\@rhs_parts) : ('', []);
+      # The trailing `if`/`unless` modifier came off the whole run at the head
+      # of this sub (task #508), so it never leaks into the value parse.
+      my ($ld_mod, $ld_cond) = ($lmod, $lcond);
       # Slice form (multiple keys): the RHS is a list assignment — parse it in
       # LIST_CTX so a literal (a, b) emits (vector a b), not a scalar progn.
       # (The old runtime (if *wantarray* …) shape hid this; gen_progn now
@@ -3799,11 +3966,7 @@ sub _process_local_declaration {
       # installed by the *-init macro).
       if ($ld_mod && defined $init_cl) {
         my $cond_cl = $self->_parse_expression($ld_cond, $stmt) // 'nil';
-        my $lhs_rval = @key_cls == 1
-          ? ($open eq '{' ? "(p-gethash $cl_var $key_cls[0])"
-                          : "(p-aref $cl_var $key_cls[0])")
-          : ($open eq '{' ? "(p-hslice $cl_var " . join(' ', @key_cls) . ")"
-                          : "(p-aslice $cl_var " . join(' ', @key_cls) . ")");
+        my $lhs_rval = _elem_place_cl($open, $cl_var, \@key_cls);
         $init_cl = $self->_conditional_local_init($ld_mod, $cond_cl, $init_cl, $lhs_rval);
       }
 
@@ -3842,6 +4005,38 @@ sub _process_local_declaration {
         } else {
           $self->_emit("(let ((*wantarray* t)) (p-setf (p-aslice $cl_var $keys_str) $tmp))");
         }
+      } elsif ($ld_mod ne '') {
+        # No initializer, but a statement modifier (task #508): perl does not
+        # execute the statement at all when the condition is false, so each
+        # slot must keep the value it already has.  An element has no `let`
+        # binding to make conditional, so the *-init macro carries the choice
+        # — undef (what `local $h{k}` installs) when the condition holds, the
+        # slot's CURRENT value otherwise, which is a save+restore of an
+        # unchanged slot = observationally "nothing happened".  The condition
+        # is evaluated ONCE, in a wrapping let, before any slot is touched.
+        my $range = grep {
+          my $g = $_;
+          grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '..' } @$g;
+        } @key_groups;
+        return $self->_drop_this_statement($parts, $stmt,
+          "`local` of an array-slice RANGE under a statement modifier")
+          if $range;
+        my $cond_cl = $self->_parse_expression($ld_cond, $stmt) // 'nil';
+        $cond_cl =~ s/^[ \t]+//;
+        $self->{_local_counter} //= 0;
+        my $ctmp = "pcl-local-cond-" . $self->{_local_counter}++;
+        my $test = $ld_mod eq 'unless' ? "(not (p-true-p $cond_cl))"
+                                       : "(p-true-p $cond_cl)";
+        $self->_emit("(let (($ctmp $test))");
+        $self->indent_level($self->indent_level + 1);
+        $self->{_local_let_depth} //= 0;
+        $self->{_local_let_depth}++;
+        for my $key_cl (@key_cls) {
+          my $cur = _elem_place_cl($open, $cl_var, [$key_cl]);
+          $self->_emit("($macro_init $cl_var $key_cl (if $ctmp (p-undef) $cur)");
+          $self->indent_level($self->indent_level + 1);
+          $self->{_local_let_depth}++;
+        }
       } else {
         # No initializer: emit one macro call per key (nested open forms)
         for my $key_cl (@key_cls) {
@@ -3868,6 +4063,11 @@ sub _process_local_declaration {
       && $non_ws[0]->content =~ /^[\$\@%]$/
       && (ref($non_ws[1]) eq 'PPI::Structure::Block'
           || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
+    # A statement modifier has no conditional spelling here — the deref macros
+    # save and restore unconditionally and take no init form — so it is a
+    # compiler gap, and a gap says so (rule 12) instead of localizing anyway.
+    return $self->_drop_this_statement($parts, $stmt,
+      "`local` through a deref under a statement modifier") if $lmod ne '';
     my $sigil = $non_ws[0]->content;
     my $ref_cl;
     if (ref($non_ws[1]) eq 'PPI::Token::Symbol') {
@@ -3931,28 +4131,45 @@ sub _process_local_declaration {
     });
   }
 
-  # Find variable and optional initializer
-  my @vars;
+  # Find the LHS targets and the optional initializer.  A target is a
+  # STRUCTURED item (task #509), because `local`'s two halves need DIFFERENT
+  # forms for a subscripted one: the localization half needs the CONTAINER and
+  # its keys (p-local-hash-elem / p-local-array-slice save and restore a SLOT),
+  # the assignment half needs the setf PLACE an ordinary `($p, $h{a}) = …`
+  # produces.  The old scan built neither — it flattened `$h{a}` to the bare
+  # Symbol `$h`, so `local($p,$h{a}) = (5,6)` localized and assigned a phantom
+  # SCALAR $h and left $h{a} untouched (perl-tests/readline.t:285's
+  # `local($SIG{__WARN__},$^W) = (sub {…}, 1)` never installed its handler).
+  my @items;
   my $init_idx = -1;
 
-  for my $i (0 .. $#$parts) {
-    my $p = $parts->[$i];
-    my $ref = ref($p);
+  # A target shape with no lowering makes the classifier die (rule 12); here it
+  # becomes the statement's DROP, never an escaping die — see
+  # _drop_this_statement.
+  eval {
+    for my $i (0 .. $#$parts) {
+      my $p = $parts->[$i];
+      my $ref = ref($p);
 
-    if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
-      push @vars, $self->_transform_pkg_var($p->content);
+      if ($ref eq 'PPI::Token::Symbol' || $ref eq 'PPI::Token::Magic') {
+        push @items, $self->_local_target_item([$p], $stmt);
+      }
+      elsif ($ref eq 'PPI::Structure::List') {
+        # Undef-aware, so local(undef, $a, undef, $b) keeps its skip markers.
+        push @items, $self->_local_list_items($p, $stmt);
+      }
+      elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
+        $init_idx = $i;
+        last;
+      }
     }
-    elsif ($ref eq 'PPI::Structure::List') {
-      # Use undef-aware extraction so local(undef, $a, undef, $b) keeps skip markers
-      push @vars, $self->_find_symbols_and_undefs_in_list($p);
-    }
-    elsif ($ref eq 'PPI::Token::Operator' && $p->content eq '=') {
-      $init_idx = $i;
-      last;
-    }
-  }
+    1;
+  } or do {
+    my $err = $self->_shape_expr_error($@);
+    return $self->_drop_this_statement($parts, $stmt, $err);
+  };
 
-  return unless @vars;
+  return unless @items;
 
   # Whole-stash local — `local %Pkg::` (and `local *Pkg::`) — is stash
   # localization, which PCL does not support (see not-supported.md "Live
@@ -3960,11 +4177,12 @@ sub _process_local_declaration {
   # form, which is NOT a valid let-binding place (it crashed the SBCL compile,
   # aborting the whole file).  Drop such vars; if that leaves nothing to
   # localize, run the body unshadowed.
-  if (grep { /^\(p-stash / } @vars) {
-    @vars = grep { !/^\(p-stash / } @vars;
+  if (grep { $_->{cl} =~ /^\(p-stash / } @items) {
+    @items = grep { $_->{cl} !~ /^\(p-stash / } @items;
     $self->_emit(";; $perl_code (whole-stash local — not supported, skipped)");
-    return unless @vars;
+    return unless @items;
   }
+  my @vars = map { $_->{cl} } @items;
 
   $self->_emit(";; $perl_code");
 
@@ -4002,35 +4220,34 @@ sub _process_local_declaration {
   my $local_tail_cl;          # #138: `local $x = A, B` — B, emitted in the let
 
   # `local(LHS, …) = RHS if/unless COND` — the LIST-assignment shape (task
-  # #464).  The single-variable branch below has stripped its modifier since
-  # #197; this one never did, so the modifier stayed in the RHS token run, the
-  # expression parser was asked to read `(undef, "") if $\ || $,`, and the
-  # WHOLE statement was dropped (Test2::Formatter::TAP, silently in module
-  # mode).  The split has to happen HERE, before the bindings are built,
-  # because the CONDITION decides what each localized slot starts out holding
-  # — see the modifier arm of the bare/multiple branch below.
-  my ($mmod, $mcond, @mrhs) = ('', []);
-  if ($init_idx >= 0 && @vars > 1) {
+  # #464), and since #508 the modifier of every bare/multiple shape too: the
+  # CONDITION decides what each localized slot starts out holding (see the
+  # modifier arm of the bare/multiple branch below), which is why it is read
+  # here, before the bindings are built.  The split itself happened at the head
+  # of this sub, over the whole run.
+  my ($mmod, $mcond) = ($lmod, $lcond);
+  my @mrhs;
+  if ($init_idx >= 0 && @items > 1) {
     @mrhs = grep { ref($_) ne 'PPI::Token::Whitespace' }
                  @$parts[($init_idx + 1) .. $#$parts];
-    ($mmod, $mcond) = $self->_split_trailing_modifier(\@mrhs);
   }
-  # ONE evaluation of the condition, in a temporary the RHS binding and the
-  # gated assignment both read: perl evaluates a statement modifier's condition
-  # exactly once, and `local($a,$b) = f() if g()` runs g() before f() (probed).
+  # ONE evaluation of the condition, in a temporary the RHS binding, the slot
+  # inits and the gated assignment all read: perl evaluates a statement
+  # modifier's condition exactly once, and `local($a,$b) = f() if g()` runs
+  # g() before f() (probed).  It is the FIRST binding, so every slot still
+  # holds its old value when the condition runs.
   my $mcond_tmp;
-  if ($mmod) {
+  if ($mmod ne '' && !($init_idx >= 0 && @items == 1)) {
     $self->{_local_counter} //= 0;
     $mcond_tmp = "pcl-local-cond-" . $self->{_local_counter}++;
   }
 
-  if ($init_idx >= 0 && @vars == 1) {
+  if ($init_idx >= 0 && @items == 1) {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
 
-    # Strip a trailing `if`/`unless` statement modifier (see element branch).
-    my ($lmod, $lcond) = $self->_split_trailing_modifier(\@rhs_parts);
+    # (The trailing `if`/`unless` modifier came off at the head of this sub.)
 
     # #138: `local $x = A, B;` is `(local $x = A), B` — assignment binds
     # tighter than `,`/`=>`/`or`/`and`/`xor`, so the tail is NOT part of the
@@ -4124,26 +4341,38 @@ sub _process_local_declaration {
     # writes undef, as perl does), so the starting value is unobservable there.
     # Same trick as the single-variable branch's _conditional_local_init, in
     # the shape a LIST assignment needs (there is no single rvalue to compare).
-    my $keep = $mmod ? 1 : 0;
-    for my $var (@vars) {
-      next if $var eq '(p-undef)';  # undef slot: no binding needed
+    #
+    # Since #508 the choice is made at RUN TIME, from the condition temporary,
+    # rather than statically: a modifier with NO assignment (`local $p if 0`)
+    # makes the starting value observable — a true condition must still install
+    # a FRESH slot, which the old always-keep spelling could not say because
+    # there was no gated assignment behind it to overwrite it.
+    my $fresh = sub {
+      my ($new, $cur) = @_;
+      return defined $mcond_tmp ? "(if $mcond_tmp $new $cur)" : $new;
+    };
+    for my $it (@items) {
+      next if $it->{kind} eq 'skip';    # undef slot: no binding needed
+      next if $it->{kind} eq 'elem';    # localized by its own macro open below
+      my $var = $it->{cl};
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($var eq '$!' || $var eq '|$!|') {
         # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
         push @bindings, ["pcl::*p-stored-errno*",
-                         $keep ? "pcl::*p-stored-errno*" : "0"];
+                         $fresh->("0", "pcl::*p-stored-errno*")];
       }
       elsif ($sigil eq '@') {
-        push @bindings, ["$var", $keep ? "(p-copy-array $var)"
-                                       : "(make-array 0 :adjustable t :fill-pointer 0)"];
+        push @bindings, ["$var",
+          $fresh->("(make-array 0 :adjustable t :fill-pointer 0)",
+                   "(p-copy-array $var)")];
       }
       elsif ($sigil eq '%') {
-        push @bindings, ["$var", $keep ? "(p-copy-hash $var)"
-                                       : "(make-hash-table :test 'equal)"];
+        push @bindings, ["$var",
+          $fresh->("(make-hash-table :test 'equal)", "(p-copy-hash $var)")];
       }
       else {
-        push @bindings, ["$var", $keep ? "(p-box-for-local (unbox $var))"
-                                       : "(make-p-box nil)"];
+        push @bindings, ["$var",
+          $fresh->("(make-p-box nil)", "(p-box-for-local (unbox $var))")];
       }
     }
   }
@@ -4154,27 +4383,28 @@ sub _process_local_declaration {
   # Example: local (undef, @bee) = @bee  — @bee on RHS must see old @bee.
   # Use let* with the RHS as the first binding, then the fresh variable slots.
   my ($rhs_tmp_cl);
-  if ($init_idx >= 0 && @vars > 1) {
+  if ($init_idx >= 0 && @items > 1) {
     # @mrhs is the RHS run with any if/unless modifier already split off above.
     my $rhs_cl = $self->_parse_expression(\@mrhs, $stmt, 1) // 'nil';  # 1 = LIST_CTX
     $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
     # Under a modifier the RHS must not run when the condition is false: perl
     # never reaches the statement, so its side effects never happen (probed —
     # `local($a,$b) = r() if 0` does not call r()).
-    $rhs_cl = "(if $mcond_tmp $rhs_cl nil)" if $mmod;
+    $rhs_cl = "(if $mcond_tmp $rhs_cl nil)" if $mmod ne '';
     $self->{_local_counter} //= 0;
     $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;
     unshift @bindings, ["$rhs_tmp_cl", "$rhs_cl"];
-    # …and the condition itself is evaluated FIRST, once, while every localized
-    # slot still holds its old value.
-    if ($mmod) {
-      my $cond_cl = $self->_parse_expression($mcond, $stmt) // 'nil';
-      $cond_cl =~ s/^[ \t]+//;
-      unshift @bindings, [$mcond_tmp,
-                          $mmod eq 'unless' ? "(not (p-true-p $cond_cl))"
-                                            : "(p-true-p $cond_cl)"];
-      $use_let_star = 1;
-    }
+  }
+  # …and the condition itself is evaluated FIRST, once, while every localized
+  # slot still holds its old value — for the bare shapes too since #508, where
+  # the slot inits read it.
+  if (defined $mcond_tmp) {
+    my $cond_cl = $self->_parse_expression($mcond, $stmt) // 'nil';
+    $cond_cl =~ s/^[ \t]+//;
+    unshift @bindings, [$mcond_tmp,
+                        $mmod eq 'unless' ? "(not (p-true-p $cond_cl))"
+                                          : "(p-true-p $cond_cl)"];
+    $use_let_star = 1;
   }
 
   # Split by the partition (task #289).  ORDINARY package globals live in a
@@ -4251,19 +4481,45 @@ sub _process_local_declaration {
     $self->{_local_let_depth}++;
   }
 
+  # The SUBSCRIPTED targets of a `local` LIST (task #509): a slot, not a
+  # variable, so it has no binding — the same save/restore macros the
+  # single-element shapes above use, one open per key, nested inside the let
+  # (which holds the RHS temporary, evaluated while every slot is still
+  # intact).  Under a modifier the slot's starting value is the condition's
+  # choice, exactly as the variable bindings' $fresh is.
+  for my $it (grep { $_->{kind} eq 'elem' } @items) {
+    my $mi = $it->{macro_init};
+    for my $key_cl (@{ $it->{keys} }) {
+      if (defined $mcond_tmp) {
+        my $cur = _elem_place_cl($it->{open}, $it->{cl}, [$key_cl]);
+        $self->_emit(
+          "($mi $it->{cl} $key_cl (if $mcond_tmp (p-undef) $cur)");
+      } else {
+        $self->_emit("($it->{macro} $it->{cl} $key_cl");
+      }
+      $self->indent_level($self->indent_level + 1);
+      $self->{_local_let_depth} //= 0;
+      $self->{_local_let_depth}++;
+    }
+  }
+
   # #138: the comma tail of `local $x = A, B;` — a plain statement that runs
   # with the localization in effect, before the rest of the block.
   $self->_emit($local_tail_cl) if defined $local_tail_cl;
 
   if ($rhs_tmp_cl) {
-    my $lhs_cl = "(vector " . join(" ", @vars) . ")";
+    # The assignment is an ORDINARY list assignment over the targets' PLACES —
+    # the same forms `($p, $h{a}, $!) = …` produces, which is why an element,
+    # a slice and a magic name whose storage differs from its place all land
+    # where perl puts them (tasks #509 / #510).
+    my $lhs_cl = "(vector " . join(" ", map { $_->{place} } @items) . ")";
     my $assign = "(p-list-= $lhs_cl $rhs_tmp_cl)";
     # A false modifier condition means the statement did not run: the slots
     # were localized to their own current values above, so skipping the
     # assignment leaves every one of them exactly as it was.
-    $self->_emit($mmod ? "(when $mcond_tmp $assign)" : $assign);
+    $self->_emit($mmod ne '' ? "(when $mcond_tmp $assign)" : $assign);
   }
-  elsif ($init_idx >= 0 && @vars == 1) {
+  elsif ($init_idx >= 0 && @items == 1) {
     # Single array/hash local with init: emit the var as the default return value.
     # local @arr = EXPR as last expression in a sub should return the assigned list.
     # Subsequent statements override this as the actual return value.

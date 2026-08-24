@@ -5058,6 +5058,44 @@
                      collect-forms)
                (push dyn-n dyn-vars)))
 
+            ;; Hash slice on LHS: (@h{'a','b'}) in a list assignment — the twin
+            ;; of the array-slice arm above, and its ABSENCE was a silent wrong
+            ;; (found s446i probing task #509): without it an hslice fell to the
+            ;; generic arm below, which consumed ONE rhs slot and handed the
+            ;; whole slice a single value, so `($p, @h{'a','b'}) = (5,6,7)` set
+            ;; $h{a}=6 and $h{b}=undef and left the 7 unread.  A slice consumes
+            ;; one slot PER KEY, and the key list is only known at run time
+            ;; (a range or a list flattens into it), so the offset it adds is a
+            ;; dynamic skip exactly as the array arm's is.
+            ((and (listp var) (symbolp (car var))
+                  (string= (symbol-name (car var)) "P-HSLICE"))
+             (let* ((hash-form (cadr var))
+                    (raw-key-forms (cddr var))
+                    (flat-keys (gensym "FLAT-KEYS"))
+                    (dyn-n (gensym "SLICE-N"))
+                    (loop-i (gensym "HSLICE-I"))
+                    (loop-j (gensym "HSLICE-J"))
+                    (prev-offset (cur-idx)))
+               (push `(,flat-keys (coerce (%p-flatten-slice-args
+                                           (list ,@raw-key-forms))
+                                          'vector))
+                     extra-lets)
+               (push `(,dyn-n (length ,flat-keys)) extra-lets)
+               (push `(dotimes (,loop-i ,dyn-n)
+                        (setf (p-gethash ,hash-form (aref ,flat-keys ,loop-i))
+                              (if (< (+ ,prev-offset ,loop-i) (length ,src-vec))
+                                  (aref ,src-vec (+ ,prev-offset ,loop-i))
+                                  *p-undef*)))
+                     forms)
+               (push `(dotimes (,loop-j ,dyn-n)
+                        (vector-push-extend
+                         (if (< (+ ,prev-offset ,loop-j) (length ,src-vec))
+                             (aref ,src-vec (+ ,prev-offset ,loop-j))
+                             *p-undef*)
+                         ,result-var))
+                     collect-forms)
+               (push dyn-n dyn-vars)))
+
             ;; Other lvalue (hash/array access, etc.) — no collect
             (t
              (let ((idx (cur-idx)))
@@ -14712,15 +14750,22 @@ buffer's fill-pointer; everything else falls back to file-length."
    are untouched), but only clear+assign when COND is true.  RHS-FORM is
    evaluated while the slots are still intact — so an RHS that reads @_ (which
    *foo's localization would otherwise clear) sees the pre-local @_.  COND-FORM
-   is already a CL boolean (the codegen wraps it in p-true-p / its negation)."
+   is already a CL boolean (the codegen wraps it in p-true-p / its negation).
+
+   RHS-FORM :none is the ASSIGNMENT-LESS spelling `local *foo if COND` (task
+   #508): there is no value, so the true branch only CLEARS.  A keyword marker
+   rather than a second macro — the save/restore and the conditional clear are
+   the same mechanism, and only the value half differs."
   (let ((cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
         (sv (gensym "SAVED")) (rv (gensym "RHS")))
     `(multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms ,pkg-str ,name-str)
        (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
          (when ,cond-form
-           (let ((,rv ,rhs-form))
-             (%p-glob-clear ,cs ,ss ,as ,hs)
-             (p-glob-assign ,pkg-str ,name-str ,rv)))
+           ,(if (eq rhs-form :none)
+                `(%p-glob-clear ,cs ,ss ,as ,hs)
+                `(let ((,rv ,rhs-form))
+                   (%p-glob-clear ,cs ,ss ,as ,hs)
+                   (p-glob-assign ,pkg-str ,name-str ,rv))))
          (unwind-protect (progn ,@body)
            (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
 

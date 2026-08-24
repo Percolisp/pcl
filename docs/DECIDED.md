@@ -207,6 +207,43 @@ those two files and the live plan doc directly -- no new review-doc families.*
   same tree passed the file three times standalone and two later FULL gates,
   and 8-way cold-cache stress would not reproduce it.  **A one-off failure in
   an agent's gate can be another agent's cache entry, not a regression.**
+## s446i (2026-08-25, Opus agent I) — `local`: ONE modifier split, and a TARGET is a structured item (#508 / #509 / #510)
+
+- **The trailing statement modifier of a `local` is split ONCE, at the head of
+  `_process_local_declaration`, over the WHOLE token run** (#508).  It used to
+  be split by each RHS-carrying branch out of its own slice, so the shapes with
+  no right-hand side — `local $x if COND`, `local ($a,$b) unless COND`,
+  `local $h{k} if COND`, `local *g if COND` — never saw it and localized
+  unconditionally.  ACCEPT set still depends on the shape: WITH an assignment
+  only if/unless (a loop modifier must keep dropping loudly — `local $x = 5 for
+  (1,2)` restores per iteration, which an open let cannot say); with NO
+  assignment all six lower exactly, because nothing survives the statement —
+  the loop runs with an EMPTY body and nothing is localized (probed 5.40.3).
+- **A `local` TARGET is a structured item, not a Symbol** (#509,
+  `_local_target_item` / `_local_list_items`): `cl` = the STORAGE the
+  save/restore uses, `place` = the setf PLACE the assignment uses.  The two
+  differ for a subscripted target (container + keys vs `(p-gethash …)`) and for
+  `$!` alone among magic names (`*p-stored-errno*` vs `(p-errno-string)`,
+  #510) — measured over every magic name PCL emits, only `$!` diverges.  The
+  old scan flattened `$h{a}` to the bare Symbol `$h`, so
+  `local($p,$h{a}) = (5,6)` localized and assigned a PHANTOM SCALAR `$h`
+  (perl-tests/readline.t:285's `local($SIG{__WARN__},$^W) = (sub {…},1)` never
+  installed its handler — the one corpus mover).
+- **`p-list-=` had an array-slice arm and no HASH-slice twin**, so an hslice
+  fell to the generic arm, consumed ONE rhs slot and got a single value:
+  `($p, @h{'a','b'}) = (5,6,7)` set `$h{a}=6`, `$h{b}=undef` — a silent wrong
+  in PLAIN list assignment, not only under `local`.  The twin is there now.
+- **A v1 STATEMENT handler must never `die` for an unlowerable shape**: only
+  the expression entries (`_parse_expression*`) catch and convert, so a die
+  from a statement handler escapes to `pl2cl` and takes the WHOLE FILE with it
+  (measured).  `Pl::Parser::_drop_this_statement` is the route — announce +
+  `_dropped_statement_cl`, the ordinary drop.
+- Guard `Pl/t/stmt-modifier-01.t` (12 → 21 rows; its header's three "still
+  broken" notes are now the fixed list).  Residue filed: **#540** (a chained
+  subscript `$h{a}{b}` as a `local` target localizes only the FIRST level —
+  the single spelling CRASHES, the list spelling now drops loudly), **#541**
+  (a WRITE inside a false-conditioned `local`'s scope does not survive the
+  block).
 
 ## s444 (2026-08-24, Fable) — round 4 REVIEWED + MERGED (E #470, G #485+#484a+#492, H #516+#515+#511, F #491+#495ac); #518 fixed; every merged-tree leg clean
 

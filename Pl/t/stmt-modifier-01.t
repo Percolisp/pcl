@@ -36,14 +36,28 @@
 # statement (probed).  An open let cannot express that, so a loop modifier on
 # `local` keeps DROPPING, loudly; row 9 is that promise.
 #
-# NOT asserted here, and deliberately, all three PRE-EXISTING and filed:
-#   * a BARE `local $x if 0;` (no initializer) still localizes where perl does
-#     not run the statement at all — a different branch, untouched here;
+# The three residues this file used to record as unfixed are FIXED — s446i,
+# tasks #508 / #509 / #510, rows 13-19 below:
+#   * a BARE `local $x if 0;` (no initializer) used to localize anyway, where
+#     perl does not run the statement at all.  The split now happens ONCE at
+#     the head of _process_local_declaration, over the whole token run, so the
+#     branches with no RHS see it too; and with no assignment all six modifiers
+#     lower (a loop one runs its loop with an EMPTY body and localizes nothing,
+#     which is exactly perl, because the slot is restored per iteration).
 #   * an ELEMENT or SLICE target inside a `local` LIST (`local($p,$h{a}) =
-#     (5,6)`) is localized and restored but never ASSIGNED, with or without a
-#     modifier;
-#   * `$!` inside a `local` LIST assignment is likewise never assigned
-#     (`local $! = 3` alone is right).
+#     (5,6)`) was localized and restored but never ASSIGNED — the scan
+#     flattened `$h{a}` to the bare Symbol `$h`.  A target is a structured item
+#     now: the CONTAINER for the save/restore macro, the setf PLACE for the
+#     assignment.
+#   * `$!` inside a `local` LIST assignment was likewise never assigned,
+#     because storage and place differ for it alone (*p-stored-errno* vs
+#     (p-errno-string)) and the list took the storage name.
+#
+# STILL divergent, pre-existing, filed: a WRITE inside the scope of a
+# false-conditioned `local` does not survive the block (`local $p if 0; $p = 9`
+# — perl keeps 9, PCL restores), because "do not localize" is spelled
+# "localize to the current value" and a save+restore is only invisible while
+# nothing writes.
 
 use v5.30;
 use strict;
@@ -62,7 +76,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 21;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -223,3 +237,108 @@ like(emitted(q{my $m = "x.pm"; require $m unless $INC{$m};}),
 like(emitted(q{our ($p,$q); local($p,$q) = (7,8) if 1;}),
      qr/\(when pcl-local-cond-\d+ \(p-list-=/,
      'a conditional local LIST gates the assignment on one condition temporary');
+
+# ── 5. task #508 — a BARE `local` (no initializer) takes its modifier ────────
+# `s1()` is called from inside the block, so no row can pass by shadowing
+# lexically: what it prints is what a CALLED SUB sees.  Every expectation is
+# the live `perl` answer (probed s446i, 5.40.3); on the pre-fix parser every
+# `if 0` / `unless 1` row below read U instead of the value.
+is(run_cl(<<'PL'), "t1:U\nt1:out:1\nt0:1\nt0:out:1\nu1:1\nu1:out:1\nu0:U\nu0:out:1\na0:2\na1:0\nh0:1\nh1:0\n",
+our ($p,@z,%h);
+sub s1 { my $t = shift; print "$t:", defined($p) ? $p : 'U', "\n" }
+$p=1; { local $p if 1;      s1("t1"); } print "t1:out:$p\n";
+$p=1; { local $p if 0;      s1("t0"); } print "t0:out:$p\n";
+$p=1; { local $p unless 1;  s1("u1"); } print "u1:out:$p\n";
+$p=1; { local $p unless 0;  s1("u0"); } print "u0:out:$p\n";
+@z=(4,5); { local @z if 0; print "a0:", scalar(@z), "\n"; }
+@z=(4,5); { local @z if 1; print "a1:", scalar(@z), "\n"; }
+%h=(k=>4); { local %h if 0; print "h0:", scalar(keys %h), "\n"; }
+%h=(k=>4); { local %h if 1; print "h1:", scalar(keys %h), "\n"; }
+PL
+   'bare `local $x/@a/%h if|unless COND` localizes only when the condition holds');
+
+is(run_cl(<<'PL'), "l0:1,2\nl1:U,U\nout:1,2\nsub:1\n",
+our ($p,$q); $p=1; $q=2;
+{ local ($p,$q) if 0; print "l0:$p,$q\n"; }
+{ local ($p,$q) if 1;
+  print "l1:", defined($p)?$p:'U', ",", defined($q)?$q:'U', "\n"; }
+print "out:$p,$q\n";
+sub f { local $p if 0; return defined($p) ? $p : 'U' }
+print "sub:", f(), "\n";
+PL
+   'bare `local (LIST) if COND`, and the same inside a sub');
+
+# A LOOP modifier on a bare `local` is lowerable exactly: perl restores the
+# localization at the end of each implicit iteration, so nothing survives the
+# statement and the only observable effect is the loop's own evaluation.  The
+# `seen` row proves the list IS evaluated (it is not simply skipped).
+is(run_cl(<<'PL'), "for:1\nwhile:1,c=3\nseen:7 8\nout:1\n",
+our $p; $p = 1;
+my @seen;
+{ local $p for (1,2,3); print "for:", defined($p)?$p:'U', "\n"; }
+my $c = 0;
+{ local $p while $c++ < 2; print "while:", defined($p)?$p:'U', ",c=$c\n"; }
+{ local $p foreach (grep { push @seen, $_; 1 } 7,8);
+  print "seen:@seen\n"; }
+print "out:$p\n";
+PL
+   'a LOOP modifier on a bare `local` runs the loop and localizes nothing');
+
+# The two other no-RHS branches: a hash ELEMENT and a GLOB.
+is(run_cl(<<'PL'), "e0:1\ne1:U\neout:1\ng0:1\ngout:1\n",
+our %h; our $w; $h{a} = 1; $w = 0;
+{ local $h{a} if 0; print "e0:", defined($h{a})?$h{a}:'U', "\n"; }
+{ local $h{a} if 1; print "e1:", defined($h{a})?$h{a}:'U', "\n"; }
+print "eout:$h{a}\n";
+sub tgt { 1 }
+{ local *tgt if 0; print "g0:", tgt(), "\n"; }
+print "gout:", tgt(), "\n";
+PL
+   'a bare `local $h{k}` / `local *glob` under a modifier is conditional too');
+
+# ── 6. task #509 / #510 — ELEMENT, SLICE and $! targets in a `local` LIST ────
+# s2() is called from inside the block: a `local` a called sub cannot see is
+# not a `local`.  Pre-fix every element read its OLD value inside the block
+# (the assignment went to a phantom scalar $h) — perl-tests/readline.t:285's
+# `local($SIG{__WARN__},$^W) = (sub {…}, 1)` never installed its handler.
+is(run_cl(<<'PL'), "in:5,6,7,8\nout:0,1,2,1\nsl:9,10,11\nslout:0,1,2\n",
+our %h; our @a; our $p;
+$h{a}=1; $h{b}=2; @a=(1,2); $p=0;
+sub s2 { print "in:$p,$h{a},$h{b},$a[0]\n" }
+{ local ($p, $h{a}, $h{b}, $a[0]) = (5,6,7,8); s2(); }
+print "out:$p,$h{a},$h{b},$a[0]\n";
+{ local ($p, @h{'a','b'}) = (9,10,11); print "sl:$p,$h{a},$h{b}\n"; }
+print "slout:$p,$h{a},$h{b}\n";
+PL
+   'element, array-element and hash-SLICE targets in a local LIST are assigned and restored');
+
+is(run_cl(<<'PL'), "m0:0,1\nm1:5,6\nout:0,1\n",
+our %h; our $p; $h{a}=1; $p=0;
+{ local ($p, $h{a}) = (5,6) if 0; print "m0:$p,$h{a}\n"; }
+{ local ($p, $h{a}) = (5,6) if 1; print "m1:$p,$h{a}\n"; }
+print "out:$p,$h{a}\n";
+PL
+   'an element target in a local LIST under a modifier: assigned only when the condition holds');
+
+is(run_cl(<<'PL'), "in:3,4\nout:2\nswap:6,5\nout2:2\n",
+our $p; $p = 0; $! = 2;
+sub s3 { print "in:", ($!+0), ",$p\n" }
+{ local ($!, $p) = (3,4); s3(); }
+print "out:", ($!+0), "\n";
+{ local ($p, $!) = (5,6); print "swap:", ($!+0), ",$p\n"; }
+print "out2:", ($!+0), "\n";
+PL
+   '$! in a local LIST is assigned in either slot, and restored (task #510)');
+
+# Rule 12: a target shape with no lowering is a DROP — loud at compile time
+# and a perl-shaped die when reached — never the old silent flattening to
+# whatever Symbol it happened to contain.  (A `local` statement handler cannot
+# just die: nothing above it catches, so the whole FILE would be lost.)
+{
+    my ($cl, $err, $rc) = PCLCore::transpile_raw("$pl2cl " . write_pl(
+        q{our %h; our $p; $h{a}={b=>1}; local ($p, $h{a}{b}) = (5,6);}));
+    like($err, qr/^PCL: statement dropped.*unsupported `local` target/m,
+         'a chained-subscript target in a local LIST drops loudly (rule 12)');
+    like($cl, qr/PARSE ERROR: .*unsupported `local` target/,
+         '…and the file still compiles: only that statement is replaced');
+}
