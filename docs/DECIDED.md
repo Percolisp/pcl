@@ -114,11 +114,34 @@ those two files and the live plan doc directly -- no new review-doc families.*
   against the old script, 5 of 8 fail.  `runt` and `tools/run-dist-t.pl` still
   merge on purpose (TAP plus interleaved diagnostics for eyeballing); `pcl`
   `exec`s and never had the bug.
+- **#525 CLOSED: the "unqualified name → current package" rule is now WITHOUT
+  EXCEPTION.**  `%p-symref-symbol` — behind `${"n"}` / `@{"n"}` / `%{"n"}` and
+  their assignment forms — read `*package*`, the CL READER's package, so
+  `package X; our $v="X"; sub g { ${"v"} }` called from main read `$main::v`
+  and a WRITE through the same spelling created `$main::w` while leaving
+  `$X::w` alone.  It reads `*pcl-current-package*` now, which is #503's ruling
+  (ir-spec §7.1) applied to the other half of the same question: the typeglob
+  paths and the symbolic SUB resolver already read it, so `${"n"}` and
+  `*{"n"}` disagreed about the stash.  **A LEADING `::` is perl's ROOT stash**
+  — `${"::v"}` IS `$main::v` — and used to name no package at all (the split
+  saw an empty prefix) and read undef.  32 shapes probed vs perl across three
+  files, all identical after; guard `Pl/t/symref-package-01.t` (6 rows, 2.9 s,
+  the last an inverse guard), inverse-run on the base runtime: 5 of 6 fail.
+  ir-spec §7.1 rewritten — it used to record this resolver AS the exception.
+  A `cl/` change with no emission change, so no generation bump; the sweep +
+  the companion legs the runtime row calls for are the merge review's.
 - Filed from the probes, all PRE-EXISTING: **#570** (`my (undef, $x) = @_;` in
   a sub binds `$_[0]` — the params fast path DROPS undef placeholders, silent
   wrong), **#571** (`$^E`/`$^C` have no runtime variable: naming either aborts
   unbound), **#572** (`$0` is `sbcl`, not the script path), **#573** (`$:`
-  defaults to `" n-"` where perl has `" \n-"`).
+  defaults to `" n-"` where perl has `" \n-"`), **#574** (`local ${"n"} = V`
+  SILENTLY DROPS the initializer — `Pl/Parser.pm` emits the macro from the
+  Cast+Block pair and returns, discarding the `=` and its expression;
+  `local-symref-01.t` spells every row without an initializer, which is why
+  nothing caught it), **#575** (an interpolated `"${\"name\"}"` emits an
+  UNTERMINATED CL string — the escape is not undone before the block body is
+  re-parsed, so `\"` reads as perl's reference operator and the whole FILE
+  fails to read: #419's severity class).
 
 ## s444 (2026-08-24, Fable) — round 4 REVIEWED + MERGED (E #470, G #485+#484a+#492, H #516+#515+#511, F #491+#495ac); #518 fixed; every merged-tree leg clean
 

@@ -1207,14 +1207,21 @@ rest of that body (it emits its own binding). A `map`/`grep`/`sort` **block**
 is not a sub in perl and gets no such wrapper: it keeps resolving in the
 package current where it runs.
 
-One run-time resolver is the *exception* to "reads `*pcl-current-package*`",
-and it is a known divergence: `%p-symref-symbol` — the name resolver behind
-the symbolic **variable** refs `${"n"}`, `@{"n"}`, `%{"n"}` — reads
-`*package*`, so an unqualified symbolic variable name resolves in `main`
-rather than the current package, in a named sub as much as in an anonymous
-one. The typeglob paths (`*{"n"}`, `p-dynamic-typeglob`) already read
-`*pcl-current-package*`, so today `*{"n"}` and `${"n"}` disagree about which
-stash `n` is in.
+**The rule is now without exception (s446l, task #525).** `%p-symref-symbol`
+— the name resolver behind the symbolic **variable** refs `${"n"}`, `@{"n"}`,
+`%{"n"}` and their assignment forms — used to read `*package*`, so an
+unqualified symbolic variable name resolved in `main` rather than the current
+package, in a named sub as much as in an anonymous one, while the typeglob
+paths (`*{"n"}`, `p-dynamic-typeglob`) and the sub resolver already read
+`*pcl-current-package*`: `*{"n"}` and `${"n"}` disagreed about which stash `n`
+was in. It reads `*pcl-current-package*` too now, so every run-time
+"unqualified name → current package" resolution in the IR asks one question of
+one variable. A **leading `::`** on a symbolic name is perl's ROOT stash —
+`${"::v"}` IS `$main::v` — and resolves in `main` whatever the current package
+is.
+
+A residual gap in the same area, filed and not fixed: `local ${"n"} = …`
+does not localise the cell an unqualified symbolic read then sees (task #574).
 
 ### 7.2 Package variables and `local`
 

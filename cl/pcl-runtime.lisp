@@ -13583,18 +13583,34 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; The last `::` splits package from variable; perl-pkg-to-cl-pkg-name keeps a
 ;;; multi-segment package case-preserved to match its CL package |Foo::Bar|
 ;;; (a plain string-upcase gave FOO::BAR, no such package) and upcases a
-;;; single segment; an unqualified name lives in *package*.  With CREATE the
-;;; package and the symbol are made (and the symbol's storage ensured) when
-;;; missing — the writers' contract; without it the reader gets NIL for an
-;;; unknown package or an unknown symbol.
+;;; single segment.  With CREATE the package and the symbol are made (and the
+;;; symbol's storage ensured) when missing — the writers' contract; without it
+;;; the reader gets NIL for an unknown package or an unknown symbol.
+;;;
+;;; **An UNQUALIFIED name resolves in the PERL-level current package** —
+;;; `*pcl-current-package*`, which codegen sets at each `package` statement and
+;;; p-sub rebinds per call to the sub's home package.  NOT `*package*`, the CL
+;;; READER's package, which is whatever the file's last `(in-package …)` left
+;;; behind — so `package X; our $v = "X"; sub g { ${"v"} }` called from main
+;;; read $main::v (task #525).  This is task #503's ruling applied to the other
+;;; half of the same question: the TYPEGLOB paths (p-glob-assign-dynamic,
+;;; p-dynamic-typeglob) and the symbolic SUB lookup (%p-symref-sub-symbol) all
+;;; read *pcl-current-package* already, so `${"n"}` and `*{"n"}` disagreed
+;;; about the stash whenever the two packages differed.  A string eval's
+;;; `package X;` REGION binds both (p-eval-thunk), so #240's rule still holds.
+;;;
+;;; A LEADING `::` is perl's ROOT stash: `${"::v"}` IS `$main::v` (probed).
+;;; The split finds it as an empty package prefix, which used to name no
+;;; package at all and read undef.
 (defun %p-symref-symbol (name-str sigil create)
   (let* ((pos (search "::" name-str :from-end t))
-         (pkg-str (if pos (perl-pkg-to-cl-pkg-name (subseq name-str 0 pos)) nil))
+         (pkg-str (perl-pkg-to-cl-pkg-name
+                   (cond ((null pos)  *pcl-current-package*)
+                         ((zerop pos) "main")
+                         (t (subseq name-str 0 pos)))))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
-         (pkg (if pkg-str
-                  (or (find-package pkg-str)
-                      (and create (make-package pkg-str :use '(:cl :pcl))))
-                  *package*)))
+         (pkg (or (find-package pkg-str)
+                  (and create (make-package pkg-str :use '(:cl :pcl))))))
     (when pkg
       (let ((sym-name (concatenate 'string sigil (%pcl-invert-case var-str))))
         (if create

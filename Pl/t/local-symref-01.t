@@ -8,6 +8,20 @@
 # variable) saves/restores that package variable; `local` through a *hard*
 # reference dies with "Can't localize through a reference".
 # Covers local ${...}, $$x, @{...}, @$x, %{...}, %$x  (op/localref.t).
+#
+# HARNESS NOTE (s446l, task #525).  `Pl::Parser2->parse_code` emits a bare
+# `(in-package :pcl)` and NOT the `(p-defpackage :main) (in-package :main)`
+# preamble `pl2cl` writes, so the program's globals used to be interned in the
+# PCL package rather than in `main` — a package layout no real PCL program ever
+# has.  That did not matter until the symbolic-ref resolver started answering
+# perl's question ("an unqualified name resolves in the PERL-level current
+# package", which is `main` here) instead of reading the CL reader's
+# `*package*`: the direct `$aa` and the symbolic `${"aa"}` then named two
+# different variables and `local` restored the one nobody read.  Through
+# `./pl2cl` — every real program — the two always agreed, and still do (probed
+# vs perl: this file's whole scalar/array/hash snippet is byte-identical).
+# `run_pl` therefore switches to `main` before the program, which is what the
+# real pipeline does.  The assertions below are UNCHANGED.
 
 use v5.30;
 use strict;
@@ -21,7 +35,10 @@ use Pl::Parser2;
 
 sub run_pl {
     my $code = shift;
-        my $cl_code = Pl::Parser2->parse_code($code);
+    my $cl_code = Pl::Parser2->parse_code($code);
+    # Run the program in `main`, as pl2cl's preamble does (see HARNESS NOTE).
+    $cl_code =~ s/\A\Q(in-package :pcl)\E/(in-package :pcl)\n(p-defpackage :main)\n(in-package :main)/
+        or die "run_pl: parse_code output no longer starts with (in-package :pcl)";
 
     my ($fh, $filename) = tempfile(SUFFIX => '.lisp');
     print $fh $cl_code;
