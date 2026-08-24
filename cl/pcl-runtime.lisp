@@ -15419,7 +15419,13 @@ buffer's fill-pointer; everything else falls back to file-length."
       (if (and clos-class (not isa-non-empty))
           ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list.
           ;; Only used when @ISA is empty (no runtime inheritance set).
-          (let ((mro (progn (sb-mop:finalize-inheritance clos-class)
+          ;; Finalize ONLY when not already finalized (#73, measured s444):
+          ;; unconditional finalize-inheritance recomputed the CPL under a
+          ;; recursive lock on EVERY method call — ~45% of a hot loop's whole
+          ;; runtime.  A defclass redefinition un-finalizes the class, so the
+          ;; guard re-finalizes exactly when the CPL could have changed.
+          (let ((mro (progn (unless (sb-mop:class-finalized-p clos-class)
+                              (sb-mop:finalize-inheritance clos-class))
                             (sb-mop:class-precedence-list clos-class))))
             (dolist (cls mro)
               (let* (;; Recover the user package directly from the CLOS class
@@ -15630,7 +15636,9 @@ buffer's fill-pointer; everything else falls back to file-length."
     (cond
       ((and clos-class (not isa-non-empty))
        ;; CLOS MRO path: walk MRO starting from parent of current class
-       (let* ((mro (progn (sb-mop:finalize-inheritance clos-class)
+       ;; (finalize-once guard: same reasoning as p-method-call's, #73 s444)
+       (let* ((mro (progn (unless (sb-mop:class-finalized-p clos-class)
+                            (sb-mop:finalize-inheritance clos-class))
                           (sb-mop:class-precedence-list clos-class)))
               (parent-mro (cdr mro)))
          (dolist (cls parent-mro)
