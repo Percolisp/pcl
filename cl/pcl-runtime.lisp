@@ -527,8 +527,23 @@
 ;;; "pl-" prefix participates in the case-uniformity test, so it must be
 ;;; lower-case and inverted together with NAME (NOT "PL-" + upcase NAME, which
 ;;; mis-resolves any non-lowercase method such as DESTROY / AUTOLOAD / Foo).
+;;; MEMOIZED (#73, s446m): the transform is pure (a name maps to one symbol
+;;; name forever), the distinct names in a program are few, and building the
+;;; answer conses two strings — which sb-sprof measured at ~20 % of a hot
+;;; method loop, since every dispatch, can() and SUPER:: walk asks for it.
+(defvar *pcl-cl-sub-name-table* (make-hash-table :test 'equal))
+
+(defun %pcl-memo-key (name)
+  "A key safe to KEEP in a memo table: a Perl string can be a fill-pointer
+   buffer the `str-buffer` transform appends to in place (#62/S1), and a stored
+   key that changes content afterwards would answer for a name it no longer
+   spells.  Looking up by content is unaffected — only the stored key is copied."
+  (if (stringp name) (coerce name 'simple-string) name))
+
 (defun %pcl-cl-sub-name (name)
-  (%pcl-invert-case (concatenate 'string "pl-" (string name))))
+  (or (gethash name *pcl-cl-sub-name-table*)
+      (setf (gethash (%pcl-memo-key name) *pcl-cl-sub-name-table*)
+            (%pcl-invert-case (concatenate 'string "pl-" (string name))))))
 
 ;;; %pcl-loop-tag: catch/throw tag for a labeled loop or block.  PREFIX is the
 ;;; literal "LAST"/"NEXT"/"REDO" (a string, so readtable-case never touches it);
@@ -15255,12 +15270,21 @@ buffer's fill-pointer; everything else falls back to file-length."
         (subseq s 6)
         s)))
 
-(defun %pcl-find-package (pkg-str)
-  "Find CL package for Perl package name PKG-STR.
-   Tries upcase first (single-word packages defined via :Foo keyword), then
-   exact case (multi-level packages defined via :|Foo::Bar| notation).
-   A leading `main::` is Perl's root-stash prefix: `main::Foo` names the very
-   same package as `Foo` (e.g. `\"main::Alice\"->new`), so retry without it."
+;;; THE STASH TABLE (#73, s446m).  A Perl class's stash is, in PCL, its CL
+;;; package, and resolving one from the NAME costs up to three FIND-PACKAGE
+;;; calls plus two freshly consed strings (PERL-PKG-TO-CL-PKG-NAME and
+;;; %PCL-INVERT-CASE) — which sb-sprof measured as the largest single share of
+;;; a hot method loop, since every dispatch, isa, can and SUPER:: walk asks.
+;;; Perl itself resolves a stash by name through one hash (gv_stashpv), so PCL
+;;; does the same, keyed by the name exactly as the program spells it.
+;;;
+;;; Why an entry cannot go stale: a CL package is never renamed or deleted
+;;; here, and only a SUCCESSFUL resolution is recorded — a name whose package
+;;; does not exist yet (one `package`, `require` or `bless` away) records
+;;; nothing and is resolved again on the next call.
+(defvar *pcl-stash-table* (make-hash-table :test 'equal))
+
+(defun %pcl-find-package-1 (pkg-str)
   (or (find-package (perl-pkg-to-cl-pkg-name pkg-str))
       (find-package (%pcl-invert-case pkg-str))
       (find-package pkg-str)
@@ -15268,13 +15292,58 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (string= (subseq pkg-str 0 6) "main::"))
         (%pcl-find-package (subseq pkg-str 6)))))
 
+(defun %pcl-find-package (pkg-str)
+  "Find CL package for Perl package name PKG-STR.
+   Tries upcase first (single-word packages defined via :Foo keyword), then
+   exact case (multi-level packages defined via :|Foo::Bar| notation).
+   A leading `main::` is Perl's root-stash prefix: `main::Foo` names the very
+   same package as `Foo` (e.g. `\"main::Alice\"->new`), so retry without it.
+   Memoized through *pcl-stash-table* — see its comment."
+  (or (gethash pkg-str *pcl-stash-table*)
+      (let ((pkg (%pcl-find-package-1 pkg-str)))
+        (when pkg (setf (gethash (%pcl-memo-key pkg-str) *pcl-stash-table*) pkg))
+        pkg)))
+
+(declaim (inline %pcl-string-prefix-p))
+(defun %pcl-string-prefix-p (prefix s)
+  "T when S starts with PREFIX.  The naive (string= (subseq s 0 n) prefix)
+   conses a fresh string per test, which is measurable on the dispatch path
+   (#73, s446m) — this one does not."
+  (let ((n (length prefix)))
+    (and (>= (length s) n) (string= prefix s :end2 n))))
+
+;;; A class name as Perl's root stash spells it (#73, s446m).  ONE reading of
+;;; the three root-stash spellings: "" is main, "::" is main::, and a leading
+;;; "::" names the root stash, so "::Foo::Bar" is "Foo::Bar".  p-method-call
+;;; used to spell this inline; the stash resolver below must agree with it or
+;;; the two would answer different packages for the same object.
+(defun %pcl-normalize-class-name (c)
+  (cond
+    ((string= c "")   "main")
+    ((string= c "::") "main::")
+    ((and (>= (length c) 2) (char= (char c 0) #\:) (char= (char c 1) #\:))
+     (subseq c 2))
+    (t c)))
+
+(defun %pcl-own-method (class-name sub-name)
+  "The function a plain (unqualified) method call resolves to when CLASS-NAME's
+   own package defines SUB-NAME — the monomorphic case, and the answer BOTH
+   slow paths would reach anyway: the CLOS MRO and the @ISA walk each start at
+   the class itself, so a method local to the class always wins there too.
+   CLASS-NAME is already root-stash-normalized by the caller, and the `local to
+   this package` test is the walks' own (eq (symbol-package …) pkg)."
+  (let* ((pkg (%pcl-find-package class-name))
+         (sym (and pkg (find-symbol sub-name pkg))))
+    (when (and sym (eq (symbol-package sym) pkg) (fboundp sym))
+      (symbol-function sym))))
+
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
   ;; Method argument lists flatten like any Perl call: $o->m(@a, %h) spreads its
   ;; arrays/hashes.  The codegen passes raw @arrays straight through, so flatten
   ;; here once — built-in methods (p-isa/p-can) take fixed scalar args, and user
   ;; methods re-flatten their already-flat %_args harmlessly.
-  (setf args (coerce (p-flatten-args args) 'list))
+  (when args (setf args (coerce (p-flatten-args args) 'list)))
   ;; $obj->$coderef(@args): when the method slot holds a CODE ref (rather than a
   ;; method-name string), Perl invokes it directly as $coderef->($obj, @args),
   ;; bypassing package/MRO lookup.  Used by Safe::Isa ($_isa/$_can) and any
@@ -15290,17 +15359,26 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (unbox (%p-tie-fetch obj (p-box-value obj)))
                            obj))
          (raw-class (%pcl-invocant-class resolved-obj))
-         ;; Perl treats "" as "main" and "::" as "main::" in package/method contexts.
-         ;; Leading "::" on a class name refers to the root stash (same as no prefix).
-         (class-name (let ((c (or raw-class "")))
-                       (cond
-                         ((string= c "")   "main")
-                         ((string= c "::") "main::")
-                         ;; "::Foo::Bar" → "Foo::Bar" (strip leading root-stash "::")
-                         ((and (>= (length c) 2)
-                               (string= (subseq c 0 2) "::"))
-                          (subseq c 2))
-                         (t c)))))
+         ;; Perl treats "" as "main" and "::" as "main::" in package/method
+         ;; contexts, and a leading "::" names the root stash — the one reading
+         ;; of that is %pcl-normalize-class-name, shared with the stash resolver.
+         (class-name (%pcl-normalize-class-name (or raw-class "")))
+         ;; The `pl-NAME` symbol name this method is looked up under, built ONCE
+         ;; (#73/M2, s446m): it used to be rebuilt — two fresh strings each —
+         ;; for every class the MRO / @ISA / UNIVERSAL walks visited.
+         (sub-name (%pcl-cl-sub-name method-name))
+         ;; Asked ONCE: a qualified spelling (SUPER::/PKG::/CORE::) is answered
+         ;; below, and only an unqualified name can take the fast path.
+         (colon-pos (position #\: method-name)))
+    ;; FAST PATH (#73): a plain method name defined in the invocant's OWN class
+    ;; package — the monomorphic case, and the same function both slow paths
+    ;; would reach (each starts its walk at the class itself).  It shares this
+    ;; prologue rather than repeating it, so declining costs one failed
+    ;; FIND-SYMBOL; everything else (SUPER::, qualified names, inheritance,
+    ;; UNIVERSAL, AUTOLOAD, the diagnostics) stays below.
+    (when (and raw-class (null colon-pos))
+      (let ((own (%pcl-own-method class-name sub-name)))
+        (when own (return-from p-method-call (apply own resolved-obj args)))))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
 
@@ -15328,9 +15406,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 
     ;; Dynamic SUPER:: dispatch: $obj->$method where $method = "SUPER::foo"
     ;; Perl treats this as calling SUPER's foo from the object's own package.
-    (when (and (stringp method-name)
+    (when (and colon-pos
                (> (length method-name) 7)
-               (string= (subseq method-name 0 7) "SUPER::"))
+               (%pcl-string-prefix-p "SUPER::" method-name))
       (let ((real-method (subseq method-name 7)))
         (return-from p-method-call
           (apply #'p-super-call resolved-obj real-method class-name args))))
@@ -15338,7 +15416,8 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; Qualified method dispatch: $obj->PKG::method(args) calls PKG::method($obj, args)
     ;; directly, bypassing normal MRO. E.g. Foo->UNIVERSAL::can("x").
     ;; Also handles PKG::SUPER::method (call method from PKG's parent).
-    (let ((first-sep (search "::" method-name)))
+    ;; (A name with no colon at all cannot be qualified — asked once, above.)
+    (let ((first-sep (and colon-pos (search "::" method-name))))
       (when first-sep
         ;; Split at the first "::" first, then check for PKG::SUPER::method pattern.
         ;; For multi-level names like "E::D::foo", use the LAST "::" as the split
@@ -15412,9 +15491,14 @@ buffer's fill-pointer; everything else falls back to file-length."
            (isa-non-empty (and isa-val
                                (vectorp isa-val) (not (stringp isa-val))
                                (> (length isa-val) 0)))
-           (clos-class-name (perl-pkg-to-clos-class class-name))
+           ;; The plc-NAME class symbol is built only when the CLOS branch can
+           ;; actually be taken: with @ISA non-empty the walk below never looks
+           ;; at it, and building it conses three strings per call (#73, s446m).
            (clos-class (when (and pkg (not isa-non-empty))
-                         (find-class (intern (%pcl-invert-case clos-class-name) pkg) nil))))
+                         (find-class (intern (%pcl-invert-case
+                                              (perl-pkg-to-clos-class class-name))
+                                             pkg)
+                                     nil))))
 
       (if (and clos-class (not isa-non-empty))
           ;; Walk MRO (Method Resolution Order) using CLOS class-precedence-list.
@@ -15434,7 +15518,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                      (pkg-name (package-name (symbol-package (class-name cls))))
                      (pkg (find-package pkg-name)))
                 (when pkg
-                  (let ((fn (find-symbol (%pcl-cl-sub-name method-name) pkg)))
+                  (let ((fn (find-symbol sub-name pkg)))
                     ;; Only dispatch to methods LOCAL to this class package.
                     ;; Inherited symbols (e.g. pcl:p-push) must be ignored so
                     ;; that a class without a PUSH method doesn't accidentally
@@ -15449,7 +15533,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (return-from find-in-u nil))
                          (let* ((pkg2 (%pcl-find-package cls-str))
                                 (fn2 (when pkg2
-                                       (find-symbol (%pcl-cl-sub-name method-name)
+                                       (find-symbol sub-name
                                                     pkg2))))
                            (if (and fn2 (eq (symbol-package fn2) pkg2) (fboundp fn2))
                                (return-from p-method-call (apply fn2 resolved-obj args))
@@ -15489,7 +15573,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                            (return-from p-method-call (apply fn resolved-obj args)))))
                      (let* ((pkg (%pcl-find-package cls-str))
                             (fn  (when pkg
-                                   (find-symbol (%pcl-cl-sub-name method-name)
+                                   (find-symbol sub-name
                                                 pkg))))
                        (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
                            (return-from p-method-call (apply fn resolved-obj args))
@@ -15622,6 +15706,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    (covers the common case where @ISA is set at runtime and defclass puts
    the class symbol in the MAIN package rather than the class's own package)."
   (let* ((method-name (to-string method))
+         ;; Built ONCE for the whole walk, like p-method-call's (#73/M2).
+         (sub-name (%pcl-cl-sub-name method-name))
          (clos-class-name (perl-pkg-to-clos-class current-class))
          ;; %pcl-find-package, NOT (find-package (string-upcase ...)):
          ;; multi-segment packages are case-preserved (|Moo::Object|), so the
@@ -15645,7 +15731,7 @@ buffer's fill-pointer; everything else falls back to file-length."
            (let* ((pkg-name (package-name (symbol-package (class-name cls))))
                   (cpkg (find-package pkg-name)))
              (when cpkg
-               (let ((fn (find-symbol (%pcl-cl-sub-name method-name) cpkg)))
+               (let ((fn (find-symbol sub-name cpkg)))
                  (when (and fn (fboundp fn))
                    (return-from p-super-call (apply fn obj args)))))))
          (error "No SUPER::~A found from ~A" method-name current-class)))
@@ -15655,7 +15741,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (unless (member cls-str visited :test #'equal)
                     (let* ((cpkg (%pcl-find-package cls-str))
                            (fn (when cpkg
-                                 (find-symbol (%pcl-cl-sub-name method-name)
+                                 (find-symbol sub-name
                                               cpkg))))
                       (if (and fn (eq (symbol-package fn) cpkg) (fboundp fn))
                           (return-from p-super-call (apply fn obj args))
