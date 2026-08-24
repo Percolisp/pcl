@@ -58,7 +58,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
   **#582**.  **#518 recurred locally under a loaded gate** (rows 29 *and* 30,
   41 rows reported) — load-dependent, not CI-specific; noted in that task.
 
-## s446l (2026-08-25, Opus agent L) — `use English` works, through a lib/ shim built on the two aliasing mechanisms PCL HAS
+## s446l (2026-08-25, Opus agent L) — `use English` works through a lib/ shim; `runpcl` stops merging stderr into stdout
 
 - **#502 CLOSED by `lib/English.pm`, not by the glob-value family.**  Core
   English.pm's right-hand sides are punctuation GLOBS (`*+`, `*^N`,
@@ -91,6 +91,29 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - The shim is INERT for every population: no file in `perl-tests/`,
   `cpan-tests/`, `Pl/t/`, `lib/`, `examples/` or perl's own `t/` says
   `use English` (measured), so it can move no row.
+- **#504 CLOSED: `runpcl` keeps the two streams APART.**  It captured the child
+  with `2>&1` and then stripped `^;` lines from the merged text — but SBCL
+  writes a compilation NOTE as a BLOCK (one EMPTY line, then a run of `;`
+  lines), so the strip took the `;` lines and left the empty one wedged into
+  the program's stdout: `print "1\n"; eval { my $x = 1/0 }; print "2\n"` gave
+  `1\n\n2\n` through the runner and `1\n2\n` when the emitted CL ran directly.
+  **ALL of SBCL's output goes to `*error-output*`** — banner, notes, style
+  warnings, backtraces, and the runtime's own "PCL Runtime loaded" (measured in
+  both cached-core and `PCL_NO_CORE=1` source mode) — so stdout is now printed
+  VERBATIM and is the program's, byte for byte.  On the stderr side a note
+  block is dropped WHOLE (opening blank line included) but only when it carries
+  an SBCL header (`; file:`, `; in:`, `; caught …`, `; compiling …`,
+  `; wrote …`): the old blanket `^;` strip also ate a `;`-line the PROGRAM
+  wrote, which falsifies a stderr compare in the other direction.
+  **The spawn is byte-identical** (only the redirection changed —
+  `PCL_SHOW_SBCL` diffed before/after), and the `^PCL: ` drop-announcement
+  forwarding (s418) still fires.  A merged `2>&1` now reads stderr-then-stdout,
+  which is what `perl … 2>&1 | …` gives too (perl's stderr is unbuffered, its
+  stdout block-buffered under a pipe).  Guard `tools/t/runpcl-streams.t`
+  (8 rows, 0.7 s, NOT in the Pl/t gate — it measures a runner); inverse-run
+  against the old script, 5 of 8 fail.  `runt` and `tools/run-dist-t.pl` still
+  merge on purpose (TAP plus interleaved diagnostics for eyeballing); `pcl`
+  `exec`s and never had the bug.
 - Filed from the probes, all PRE-EXISTING: **#570** (`my (undef, $x) = @_;` in
   a sub binds `$_[0]` — the params fast path DROPS undef placeholders, silent
   wrong), **#571** (`$^E`/`$^C` have no runtime variable: naming either aborts

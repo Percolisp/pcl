@@ -74,18 +74,65 @@ my $sbcl_cmd = PCLSbcl::sbcl_prefix_str(runtime => "$root/cl/pcl-runtime.lisp", 
 # one out (task #324: the companion suite ran on a 2 MB stack).  This makes the
 # comparison a one-liner instead of an investigation.
 print STDERR "SBCL[runpcl]: $sbcl_cmd\n" if $ENV{PCL_SHOW_SBCL};
-my $raw = `$sbcl_cmd 2>&1`;
+
+# THE TWO STREAMS STAY APART (task #504).  This used to be `2>&1`, and the
+# merge is what falsified byte-compares against perl: SBCL writes a
+# compilation NOTE as a BLOCK — one blank line, then a run of `;`-prefixed
+# lines — and the filter below removed the `;` lines but not the blank one, so
+# every note left an empty line wedged into the middle of the program's stdout.
+#     print "1\n"; eval { my $x = 1/0 }; print "2\n";
+# printed "1\n\n2\n" through this runner while the emitted CL run directly
+# printed "1\n2\n".  Nothing in the program was wrong; the runner was.
+#
+# Splitting the streams removes the whole class, because ALL of SBCL's own
+# output goes to *error-output*: the banner, the compilation notes, the style
+# warnings, an unhandled condition's backtrace, and the runtime's own
+# "PCL Runtime loaded" line (cl/pcl-runtime.lisp writes it to *error-output*).
+# Measured in both modes — cached-core and PCL_NO_CORE=1 source — SBCL puts
+# NOTHING on stdout.  So stdout below is printed VERBATIM: it is the program's
+# stdout, byte for byte, including blank lines and lines that begin with `;`.
+my $errfile = "/tmp/runpcl_$$.runerr";
+my $out = `$sbcl_cmd 2>$errfile`;
+my $err = '';
+if (open(my $ef, '<', $errfile)) { local $/; $err = <$ef> // ''; close $ef }
 
 # Cleanup
-unlink $lisp, "/tmp/runpcl_$$.err";
+unlink $lisp, "/tmp/runpcl_$$.err", $errfile;
 
-# Filter SBCL noise and print.  Strip only LEADING blank lines (the banner
-# region) — a blanket s/^\s*\n//gm deleted every blank line the PROGRAM
-# printed, so byte-compares against perl were silently wrong for any output
-# containing "\n\n" (s386).
-$raw =~ s/^;[^\n]*\n//gm;
-$raw =~ s/^PCL (?:Runtime|Test)[^\n]*\n//gm;
-$raw =~ s/^STYLE-WARNING[^\n]*\n//gm;
-$raw =~ s/\A(?:\s*\n)+//;
+# stdout: the program's, unfiltered.
+print $out;
 
-print $raw;
+# stderr: the program's, with SBCL's noise removed.  A note is taken out WHOLE
+# — the empty line that opens the block goes with the `;` lines, so no
+# separator is left behind on this side either.  The block must carry an SBCL
+# HEADER (`; file:`, `; in:`, `; caught …`, `; compiling …`, `; wrote …`) to be
+# dropped: a blanket `^;` strip also ate a line the PROGRAM wrote — perl prints
+# `print STDERR "; x\n"`, so this runner has to as well, or a stderr compare is
+# falsified in the other direction.  What survives is what the program wrote,
+# plus any `PCL: …` diagnostic the runtime emits during the run (the #339 drop
+# announcement above all), which must never be swallowed.
+sub strip_sbcl_notes {
+    my @lines = split /^/, shift;   # split keeps each line's newline
+    my (@out, $i);
+    for ($i = 0; $i < @lines; ) {
+        my $start = $i;
+        my $k = $i;
+        $k++ if $lines[$k] eq "\n";                 # optional opening blank line
+        if ($k < @lines && $lines[$k] =~ /^;/) {
+            my $j = $k;
+            $j++ while $j < @lines && $lines[$j] =~ /^;/;
+            if (grep { /^;\s*(?:file:|in:|caught|compiling|wrote|processing|loading)\b/ }
+                     @lines[$k .. $j - 1]) {
+                $i = $j;                            # SBCL's — drop the block
+                next;
+            }
+        }
+        push @out, $lines[$start];
+        $i = $start + 1;
+    }
+    return join '', @out;
+}
+$err = strip_sbcl_notes($err);
+$err =~ s/^PCL (?:Runtime|Test)[^\n]*\n//gm;
+$err =~ s/^STYLE-WARNING[^\n]*\n//gm;
+print STDERR $err;

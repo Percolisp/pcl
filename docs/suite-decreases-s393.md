@@ -34,12 +34,14 @@ scanner error is a `not ok` naming the error, which is why the file now reads
 underlying gap (cl-ppcre lacks script-run assertions) is a regex-engine parity
 item, in the same family as #196 and #71.
 
-*Verification note for whoever re-checks this: `./runpcl` merges stderr into
-stdout (`2>&1` in the script), so the cl-ppcre warning LOOKS like it is
-polluting the TAP stream.  It is not — run sbcl directly with the streams
-separated and the warning is on stderr, where the announce policy puts it.
-The suite runner's own `> out 2>&1` merge is what puts it in the captured
-file; the rows are still parsed, and they are honest `not ok`s.*
+*Verification note for whoever re-checks this: `./runpcl` USED TO merge stderr
+into stdout (`2>&1` in the script), so the cl-ppcre warning LOOKED like it was
+polluting the TAP stream.  It was not — the warning is on stderr, where the
+announce policy puts it.  **Since task #504 (s446l) runpcl keeps the two
+streams apart**, so the warning now appears on runpcl's stderr and the TAP
+stream is clean; the suite runner's own `> out 2>&1` merge is what still puts
+it in the captured file, where the rows are parsed all the same and are honest
+`not ok`s.*
 
 ---
 
