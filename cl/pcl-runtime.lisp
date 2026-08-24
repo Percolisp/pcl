@@ -15369,7 +15369,15 @@ buffer's fill-pointer; everything else falls back to file-length."
          (sub-name (%pcl-cl-sub-name method-name))
          ;; Asked ONCE: a qualified spelling (SUPER::/PKG::/CORE::) is answered
          ;; below, and only an unqualified name can take the fast path.
-         (colon-pos (position #\: method-name)))
+         (colon-pos (position #\: method-name))
+         ;; T once the fast path has looked SUB-NAME up in the class's own
+         ;; package and not found it — so the inheritance walk below can start
+         ;; at the PARENTS instead of asking the same package again.  Cleared
+         ;; by the require below, which may define the method after the fact.
+         (own-missed nil))
+    ;; to-string always answers a string; saying so lets the scans above and
+    ;; below compile to string code instead of generic sequence calls.
+    (declare (type string method-name))
     ;; FAST PATH (#73): a plain method name defined in the invocant's OWN class
     ;; package — the monomorphic case, and the same function both slow paths
     ;; would reach (each starts its walk at the class itself).  It shares this
@@ -15378,7 +15386,9 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; UNIVERSAL, AUTOLOAD, the diagnostics) stays below.
     (when (and raw-class (null colon-pos))
       (let ((own (%pcl-own-method class-name sub-name)))
-        (when own (return-from p-method-call (apply own resolved-obj args)))))
+        (if own
+            (return-from p-method-call (apply own resolved-obj args))
+            (setf own-missed t))))
     (unless class-name
       (error "Can't call method ~A on non-blessed reference" method-name))
 
@@ -15402,6 +15412,9 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; `SomeModule->method` without an explicit `use`, we attempt a require here
     ;; so the package can be found during dispatch.
     (when (null (%pcl-find-package class-name))
+      ;; The require may DEFINE the method in the class's own package, so what
+      ;; the fast path learned about that package no longer holds.
+      (setf own-missed nil)
       (handler-case (p-require class-name) (error () nil)))
 
     ;; Dynamic SUPER:: dispatch: $obj->$method where $method = "SUPER::foo"
@@ -15605,7 +15618,17 @@ buffer's fill-pointer; everything else falls back to file-length."
                   ;; Package unknown (never blessed into, never declared): add "perhaps" hint
                   (t (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" (perhaps you forgot to load \"~A\"?) at - line 1.~%"
                                     method-name class-name class-name))))))
-            (find-in-class class-name nil)
+            ;; The class's OWN package was already asked for this method by the
+            ;; fast path (own-missed), and this branch has already read its
+            ;; @ISA — so start the walk at the PARENTS rather than paying for
+            ;; the same FIND-PACKAGE, FIND-SYMBOL and @ISA read a second time.
+            ;; (CORE is excluded: find-in-class gives that virtual namespace an
+            ;; arm of its own, which the fast path knows nothing about.)
+            (if (and own-missed isa-non-empty
+                     (not (string-equal class-name "CORE")))
+                (loop for parent across isa-val
+                      do (find-in-class (to-string parent) (list class-name)))
+                (find-in-class class-name nil))
             ;; UNIVERSAL is an implicit parent of all Perl classes.
             ;; After exhausting the class's own @ISA chain, try UNIVERSAL's @ISA
             ;; (e.g. package UNIVERSAL; @ISA = 'LASTCHANCE' makes LASTCHANCE methods
