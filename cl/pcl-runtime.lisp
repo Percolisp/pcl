@@ -15705,6 +15705,66 @@ buffer's fill-pointer; everything else falls back to file-length."
    (#418) only the former matches the pipe-quoted `|plc-ｆｏｏ|` codegen emits."
   (concatenate 'string "plc-" (string-downcase (substitute #\- #\: name))))
 
+(defun %pcl-find-method-in-chain (cls-str sub-name &optional visited)
+  "The function SUB-NAME names in CLS-STR's own package or, failing that,
+   anywhere in its @ISA chain (depth first, cycle-guarded); NIL when nothing in
+   the chain defines it.  Only methods LOCAL to a class's package count — an
+   inherited CL symbol (a pcl built-in the user package :uses) is not a method,
+   which is the same test every dispatch walk makes."
+  (unless (member cls-str visited :test #'equal)
+    (let* ((pkg (%pcl-find-package cls-str))
+           (fn  (and pkg (find-symbol sub-name pkg))))
+      (if (and fn (eq (symbol-package fn) pkg) (fboundp fn))
+          (symbol-function fn)
+          (let* ((isa-sym (and pkg (find-symbol "@isa" pkg)))
+                 (isa-val (and isa-sym (boundp isa-sym) (symbol-value isa-sym))))
+            (when (and isa-val (vectorp isa-val) (not (stringp isa-val)))
+              (loop for parent across isa-val
+                    for hit = (%pcl-find-method-in-chain (to-string parent) sub-name
+                                                         (cons cls-str visited))
+                    when hit return hit)))))))
+
+(defun %pcl-super-autoload (obj method-name current-class parents args)
+  "AUTOLOAD for a SUPER:: call, searched from the PARENTS only — SUPER:: skips
+   the current class, its own AUTOLOAD included.  $AUTOLOAD is set to the name
+   perl sets, `Current::SUPER::method` (probed, perl 5.40).  Returns
+   (values result t) on a hit so the caller can tell a NIL result from a miss."
+  (unless (string-equal method-name "DESTROY")
+    (loop for parent across (or parents #())
+          for info = (%pcl-find-autoload-in-isa (to-string parent))
+          when info
+          do (progn
+               (%pcl-set-autoload-var
+                (car info) (format nil "~A::SUPER::~A" current-class method-name))
+               (return-from %pcl-super-autoload
+                 (values (apply (cdr info) obj args) t)))))
+  (values nil nil))
+
+(defun %pcl-super-fallback (obj method-name sub-name current-class parents args)
+  "What a SUPER:: call resolves to once the parent chain is exhausted.  Perl
+   finishes a SUPER:: lookup exactly like any other method lookup (#533,
+   probed): UNIVERSAL and UNIVERSAL's own @ISA, then the UNIVERSAL built-ins
+   isa/can/DOES, then import/unimport as no-ops, then AUTOLOAD in the parent
+   chain — and only then `Can't locate object method`, naming the CURRENT
+   class, as a perl-shaped trappable die (it used to be a raw CL error saying
+   `No SUPER::isa found from Solo`, which no eval could recognise)."
+  (let ((fn (%pcl-find-method-in-chain "UNIVERSAL" sub-name)))
+    (when fn (return-from %pcl-super-fallback (apply fn obj args))))
+  (cond
+    ((string-equal method-name "isa")  (apply #'p-isa obj args))
+    ((string-equal method-name "DOES") (apply #'p-isa obj args))
+    ((string-equal method-name "can")  (apply #'p-can obj args))
+    ((or (string-equal method-name "import") (string-equal method-name "unimport"))
+     (if (eq *wantarray* t)
+         (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
+         nil))
+    (t (multiple-value-bind (result found)
+           (%pcl-super-autoload obj method-name current-class parents args)
+         (if found
+             result
+             (p-die (format nil "Can't locate object method \"~A\" via package \"~A\" at - line 1.~%"
+                            method-name current-class)))))))
+
 ;;; Indirect-object SUPER:: dispatch: SUPER::m{@a} where @a[0] is the invocant
 (defun %pcl-super-indirect (method cur-pkg &rest inv-args)
   "Handle SUPER::method{@array} indirect-object syntax, incl. the trailing-
@@ -15757,7 +15817,10 @@ buffer's fill-pointer; everything else falls back to file-length."
                (let ((fn (find-symbol sub-name cpkg)))
                  (when (and fn (fboundp fn))
                    (return-from p-super-call (apply fn obj args)))))))
-         (error "No SUPER::~A found from ~A" method-name current-class)))
+         ;; Nothing in the parent chain: finish the lookup the way perl does
+         ;; (UNIVERSAL, the built-ins, then a perl-shaped die) — #533.  There
+         ;; are no @ISA parents on this path, so no AUTOLOAD chain to search.
+         (%pcl-super-fallback obj method-name sub-name current-class nil args)))
       ((and isa-val (vectorp isa-val))
        ;; @ISA walk path: start from parents of current-class (skip current-class itself)
        (labels ((walk (cls-str visited)
@@ -15775,25 +15838,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                                     do (walk (to-string p) (cons cls-str visited))))))))))
          (loop for parent across isa-val
                do (walk (to-string parent) (list current-class)))
-         ;; Method not found via direct lookup — try AUTOLOAD in the parent chain
-         (labels ((find-al (cls-str visited)
-                    (unless (member cls-str visited :test #'equal)
-                      (let* ((cpkg (%pcl-find-package cls-str))
-                             (al (when cpkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") cpkg))))
-                        (if (and al (eq (symbol-package al) cpkg) (fboundp al))
-                            (progn
-                              (%pcl-set-autoload-var cls-str method-name)
-                              (return-from p-super-call (apply al obj args)))
-                            (let* ((isa2 (when cpkg (find-symbol "@isa" cpkg)))
-                                   (isa2v (when (and isa2 (boundp isa2)) (symbol-value isa2))))
-                              (when (and isa2v (vectorp isa2v))
-                                (loop for p across isa2v
-                                      do (find-al (to-string p) (cons cls-str visited))))))))))
-           (loop for parent across isa-val
-                 do (find-al (to-string parent) (list current-class))))
-         (error "No SUPER::~A found from ~A" method-name current-class)))
+         ;; Nothing in the parent chain: UNIVERSAL, the built-ins, AUTOLOAD in
+         ;; the parents, then a perl-shaped die — perl's own order (#533).  The
+         ;; AUTOLOAD walk used to live here and set $AUTOLOAD to the bare method
+         ;; name; perl sets `Current::SUPER::method` (probed).
+         (%pcl-super-fallback obj method-name sub-name current-class isa-val args)))
       (t
-       (error "Can't find class ~A for SUPER:: call" current-class)))))
+       ;; No CLOS class and no @ISA — the class has no parents at all, so the
+       ;; call is decided entirely by the fallback (a bare `Can't find class`
+       ;; CL error here used to hide even SUPER::isa).
+       (%pcl-super-fallback obj method-name sub-name current-class nil args)))))
 
 (defun %pcl-isa-ancestry (class-name)
   "Linearized class ancestry for CLASS-NAME: the class itself, then its @ISA
