@@ -104,6 +104,14 @@ wrappers below pass the right flags.
 ./runpcl prog.pl                      # transpile + run a program
 echo 'print 1+2, "\n"' | ./runpcl     # … or from stdin
 ./pl2cl prog.pl > prog.lisp           # transpile only (readable CL)
+sbcl --noinform --non-interactive \
+     --load cl/pcl-runtime.lisp --load prog.lisp    # … and run that output with plain SBCL
+
+# the same, as one pipeline:
+echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' | ./pl2cl \
+  | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'
+# 2,4,6,8,10
+
 ./pcl -MList::Util=sum -E 'say sum 1..10'   # one-liners, -M imports of pure-Perl modules
 
 tools/install-pcl --prefix ~/.local   # install: copies the runtime tree, writes bin/ wrappers,
