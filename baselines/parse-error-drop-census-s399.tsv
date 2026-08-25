@@ -554,7 +554,8 @@
 #         lib/Math/BigInt/Calc.pm) had never been in the population either —
 #         the old glob was two levels deep — and both measure zero.
 #         BOARD ROWS ARE OPT-IN: `tools/drop-census.pl . OUT 8 --board`.
-#   s446k FORTY-ONE drops REMOVED and THIRTY-NINE FILES CLEARED by three tasks,
+#   s446k SEVENTY-EIGHT drops REMOVED and THIRTY-NINE FILES CLEARED by three
+#         tasks -- the file total goes 73 rows / 167 drops -> 34 / 89 --
 #         all edited ROW BY ROW against a fresh `tools/drop-census.pl . OUT 8`
 #         (no --board, so the board rows below were NOT re-measured and stay).
 #         #478 -- the Test::/Test2:: name list in _extract_module_prototypes is

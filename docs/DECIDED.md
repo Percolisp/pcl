@@ -80,6 +80,11 @@ those two files and the live plan doc directly -- no new review-doc families.*
   legal and is not the same thing (probed).  Without it, un-dropping
   `*{;undef} = 3` (t/op/gv.t:1020, which asserts the message) would have
   traded a loud drop for a silent no-op.
+- **Census**: 73 files / 167 drops → **34 / 89** (the 2 board drops are in both
+  and were not re-measured) — 39 files cleared, **78 drops removed**, every row
+  edited BY EDIT with its cause in the census header.  NOT cleared,
+  deliberately: `local *1 = sub {…}`, which is not a census row at all because
+  the `local` fall-through swallows it with no `;; PARSE ERROR` (**#564**).
 - **Bar**: gate **177/5997** (the 3 pclxs xs files `skip_all` in a worktree);
   corpus-diff vs `8600556` IDENTICAL over 111 files, silent drops 5 unchanged,
   shapes 6 identical; lib A/B SAME=22; perl-t A/B 605 files DIFF=4 (exactly
