@@ -8972,17 +8972,29 @@ sub _extract_module_prototypes {
                     utf8|bytes|overload|mro|B::|POSIX|File::(?!Spec)|IO::|Data::Dumper)/x) {
     return $cache->{$module} = undef;
   }
-  # Skip the heavy Test2 stack and Test:: internals — EXCEPT Test::More, whose
-  # tiny lib/Test/More.pm shim declares the assertion prototypes (is($$;$),
-  # ok($;$), like($$;$), …) that child_context needs to impose SCALAR context on
-  # their arguments.  The shim wins in @INC, so we read the prototype stub, never
-  # the real Test2 stack.  (Test::Simple has no scalar-forcing prototypes — its
-  # only export, ok, is satisfied by the internal TAP layer — so it is skipped
-  # like every other Test:: module.)
-  if (($module =~ /^Test2::/ || $module =~ /^Test::/)
-      && $module !~ /^Test::More$/) {
-    return $cache->{$module} = undef;
-  }
+  # (There used to be a second skip here, of `Test2::*` and `Test::*` BY NAME —
+  # everything but Test::More.  It was a compile-time cost measure and it cost
+  # CORRECTNESS: a `(&)` prototype such a module declares never reached the
+  # block-form parser, so `blk { 42; }` was DROPPED and `blk { 42 }` was
+  # silently mis-parsed into `(pl-blk 42)` — the block's VALUE where perl
+  # passes a code ref.  That was 79 of the 83 drops in the cpan-t census
+  # population, and a CPAN-module name inside Pl/ is CLAUDE.md 9a's hard stop
+  # besides.  Removed s446k (task #478, ruled s439).
+  #
+  # THE COST IT WAS BUYING, measured over that population (289 files, one
+  # pl2cl process each): 65.5 s / 83 drops with the skip, 281.3 s / 11 drops
+  # without it — 4.3x, because a `use Test2::API` walk is 27 modules and
+  # 242 KB of PPI parsing and every process pays it again.  The ruling's
+  # fallback was a BUDGET on the recursive walk; it was implemented and
+  # measured and is NOT here, because its cost curve is not monotone: a
+  # partial walk cannot go in the process-wide memo (a truncated env would
+  # make file 2's emission depend on file 1's leftover budget), so a cut
+  # forces re-walks and 128 KB measured SLOWER (51.6 s / 40 files) than no
+  # budget at all (37.9 s).  Only the extreme — read the file's own includes
+  # and never recurse — was faster (23.8 s), and that one breaks a genuine
+  # re-export chain (`use Encode` in perl-tests/tr.t reaches Storable at
+  # depth 2).  The real fix for the cost is to memoize the FACTS across
+  # processes (task #560); until then the honest price is paid.
 
   # Cycle detection
   return undef if $self->_parsing_modules->{$module};
