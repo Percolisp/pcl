@@ -1270,6 +1270,27 @@ elements, typeglobs and the magic cells (`$.`, `$|`, `$!`). Every flavor
 restores through a non-local exit as well as a normal one. Restore also
 invalidates the box caches.
 
+**`local (TARGET, …) = LIST` is two independent halves** (task #509), and a
+translator must keep them apart: every target is SAVED and RESTORED by the
+mechanism its storage kind dictates (a binding for a variable, the element
+macros for a subscripted slot), and then the values are written by an
+ORDINARY LIST ASSIGNMENT over the targets' *places* — the same forms
+`($p, $h{a}, $!) = …` would produce. The two halves ask different questions
+of the same target and get different answers for two kinds of name: a
+subscripted target's storage is its CONTAINER plus keys while its place is
+the element accessor, and a magic name can have a storage cell that is not
+its place (`$!` is stored in `*p-stored-errno*` and written through
+`(p-errno-string)`). Building the assignment out of the STORAGE names is
+what made `local($p,$h{a}) = (5,6)` write a phantom scalar `$h`. The RHS is
+evaluated BEFORE any target is localized, so it reads the old values.
+
+A `local` under a false statement modifier must leave every slot exactly as
+it was: PCL's `local` is an always-open scope, so "do not localize" is
+spelled "localize to the slot's current value", chosen at run time from one
+condition temporary that is evaluated first and once. A localized NAME need
+not be BOUND (a magic name qualified into a module's package is declared
+nowhere), so that keep-branch read is guarded.
+
 `foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
 the body and everything it calls see the current element, and the old
 value is restored on exit, including via `last`/`die`. The loop macros
@@ -1359,6 +1380,18 @@ that point is called instead. The **builtin** handle slots do not follow
 that second rule: there the bareword is always the handle, even when a sub
 of the same name is declared (`sub FILE1 () {42}; tell FILE1` is `-1`).
 
+**A dup-open's SOURCE is a handle DESIGNATOR, not a string** (task #513).
+`open FH, ">&", SRC` accepts every spelling the resolver accepts — a
+bareword or string NAME, a typeglob or a ref to one, a lexical handle, a
+stream, or a raw fd NUMBER — so a translator must hand the dup path the
+*value*, not its stringification (a glob ref stringifies to `GLOB(0x…)`,
+which names no handle, and that is the whole bug the task recorded). The two
+FAILURE shapes are different and perl distinguishes them by what the
+designator IS, not by whether it resolved: a NAME that names no open handle
+is FATAL (`Bad filehandle: NOSUCH`), a literal `undef` is fatal (`Can't use
+an undefined value as filehandle reference`), while a CLOSED lexical handle
+or a bad fd number is a plain false with `$!` set.
+
 ## 8. Magic globals
 
 All are dynamically-scoped boxes exported from the runtime namespace:
@@ -1369,7 +1402,7 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `@_` | current sub's args (lexical per `p-args-body`, §5.2) |
 | `$@` | last eval error (§6.3) |
 | `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl |
-| `$0`, `@ARGV`, `%ENV` | program name, args, environment (`%ENV` writes through to the process) |
+| `$0`, `@ARGV`, `%ENV` | program name, args, environment (`%ENV` writes through to the process).  **`$0` is an ORDINARY WRITABLE box** (task #512), initialised by the program preamble to the script the compiler was given — not to `argv[0]`, which under a CL host is the lisp binary and is what no Perl program means by `$0`.  A translator must make it assignable: `$0 = "X"` is a plain scalar store whose value every later read sees, `local $0` saves and restores it, and because a SCALAR in the filehandle slot naming a handle IS that handle (§7.5), `$0 = "H"; print $0 LIST` writes through the handle named `H`.  What PCL does not do — and a host without argv-area access cannot — is the OS-level process rename `ps` reports; see `not-supported.md`. |
 | `$!` | last OS error (dualvar: numifies to errno, stringifies to message) |
 | `%SIG` | signal handlers. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
 | `$.` | line number of the last-read filehandle (per-handle) |

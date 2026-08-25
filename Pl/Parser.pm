@@ -3545,14 +3545,6 @@ sub _wrap_statement_modifier {
 # Process 'local' variable declaration - dynamic scoping
 # Emits a (let ...) that stays open until block end
 
-# Build the init form for a conditional `local LHS = RHS if/unless COND`.
-# Perl localizes only when the condition selects RHS; otherwise the slot keeps
-# its current value.  We always localize and make the *value* conditional:
-# `COND ? RHS : <current value of LHS>` (swapped for `unless`).  Localizing to
-# the current value is observationally identical to not localizing (it is
-# saved and restored unchanged), and reuses the ordinary local-init machinery —
-# no special macro (cf. p-local-glob-if, which a glob needs because it has no
-# single rvalue).  $lhs_rval_cl reads the LHS as an rvalue (old value).
 # The SETF PLACE of a subscripted `local` target, from its container form and
 # its already-lowered key expressions.  One reading of "what does `$h{k}` /
 # `@h{k1,k2}` / `$a[i]` / `@a[i,j]` name", shared by the conditional-init
@@ -3675,6 +3667,14 @@ sub _local_target_item {
     . join('', map { $_->content // '' } @$g) . "\n";
 }
 
+# Build the init form for a conditional `local LHS = RHS if/unless COND`.
+# Perl localizes only when the condition selects RHS; otherwise the slot keeps
+# its current value.  We always localize and make the *value* conditional:
+# `COND ? RHS : <current value of LHS>` (swapped for `unless`).  Localizing to
+# the current value is observationally identical to not localizing (it is
+# saved and restored unchanged), and reuses the ordinary local-init machinery —
+# no special macro (cf. p-local-glob-if, which a glob needs because it has no
+# single rvalue).  $lhs_rval_cl reads the LHS as an rvalue (old value).
 sub _conditional_local_init {
   my ($self, $modifier, $cond_cl, $rhs_cl, $lhs_rval_cl) = @_;
   my $test = "(p-true-p $cond_cl)";
