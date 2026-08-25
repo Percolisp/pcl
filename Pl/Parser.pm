@@ -4348,8 +4348,22 @@ sub _process_local_declaration {
     # a FRESH slot, which the old always-keep spelling could not say because
     # there was no gated assignment behind it to overwrite it.
     my $fresh = sub {
-      my ($new, $cur) = @_;
-      return defined $mcond_tmp ? "(if $mcond_tmp $new $cur)" : $new;
+      my ($var, $new, $cur) = @_;
+      return $new if !defined $mcond_tmp;
+      # A `local`ized NAME need not be BOUND.  `local %^H if COND` inside a
+      # module qualifies the magic name into the module's package
+      # (|Moo::_Utils|::%^H — Moo/_Utils.pm:112 is the live instance), and
+      # nothing declares that symbol: the old always-fresh init never read it,
+      # so the `let` simply bound it.  The keep branch DOES read it, and a free
+      # reference to an unbound special is an error at load time — it cost the
+      # gate all 15 moo-01.t rows before this guard.  An unbound name has no
+      # current value to keep, and the fresh container is what a read of it
+      # would have produced anyway.  Only the dynamic-binding half needs the
+      # test: an ORDINARY package global reaches here through p-defcell and is
+      # bound by construction.
+      my $keep = is_exception_global($var) ? "(if (boundp '$var) $cur $new)"
+                                           : $cur;
+      return "(if $mcond_tmp $new $keep)";
     };
     for my $it (@items) {
       next if $it->{kind} eq 'skip';    # undef slot: no binding needed
@@ -4359,20 +4373,22 @@ sub _process_local_declaration {
       if ($var eq '$!' || $var eq '|$!|') {
         # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
         push @bindings, ["pcl::*p-stored-errno*",
-                         $fresh->("0", "pcl::*p-stored-errno*")];
+                         $fresh->("pcl::*p-stored-errno*", "0",
+                                  "pcl::*p-stored-errno*")];
       }
       elsif ($sigil eq '@') {
         push @bindings, ["$var",
-          $fresh->("(make-array 0 :adjustable t :fill-pointer 0)",
+          $fresh->($var, "(make-array 0 :adjustable t :fill-pointer 0)",
                    "(p-copy-array $var)")];
       }
       elsif ($sigil eq '%') {
         push @bindings, ["$var",
-          $fresh->("(make-hash-table :test 'equal)", "(p-copy-hash $var)")];
+          $fresh->($var, "(make-hash-table :test 'equal)",
+                   "(p-copy-hash $var)")];
       }
       else {
         push @bindings, ["$var",
-          $fresh->("(make-p-box nil)", "(p-box-for-local (unbox $var))")];
+          $fresh->($var, "(make-p-box nil)", "(p-box-for-local (unbox $var))")];
       }
     }
   }

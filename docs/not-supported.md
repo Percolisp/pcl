@@ -650,6 +650,28 @@ row now pass and are no longer in the skip registry.
 
 ---
 
+## Assigning `$0` does not change the OS process name
+
+**Perl behaviour:** writing `$0` sets both the value read back AND, best effort
+on the platform, the name `ps` and `/proc/PID/cmdline` report — perl rewrites
+the argv area the kernel exposes.
+
+**PCL behaviour (s446i, task #512):** `$0` is an ordinary writable scalar: the
+write is kept, `local $0` saves and restores it, it starts out as the script
+`pl2cl` was given, and `$0 = "H"; print $0 LIST` reaches the handle named H.
+What does NOT happen is the OS-level rename: `/proc/$$/cmdline` and `ps` keep
+reporting the SBCL process, because SBCL exposes no way to rewrite the argv
+area the kernel reads (`sb-ext:*posix-argv*` is a copy).
+
+**Affected tests:** `perl-tests/magic.t` test 204 (`altering $0 is effective
+(testing with /proc/)`) and the `ps` row beside it.  Test 204 **used to pass by
+accident** — `$0` was not writable, so it still held the process name and the
+comparison was one unchanged value against itself; making the write real made
+it an honest failure, in exchange for tests 104/105/110 (`compare $0 to
+UTF8-flagged` and friends), which now pass.  Net magic.t 150/39 → 152/37.
+
+---
+
 ## `defer { … }` blocks  [DEFERRED — implementable, not rejected]
 
 **Perl behaviour:** Perl 5.36 added `defer BLOCK` (`use feature 'defer'`): the

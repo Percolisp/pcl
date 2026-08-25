@@ -219,6 +219,17 @@ sub build_preamble {
   # Set pl2cl path for dynamic requires
   push @lines, "(setf pcl::*pcl-pl2cl-path* #P\"$script_path\")";
 
+  # $0 — the program name, which is the script AS GIVEN, exactly as perl
+  # reports it (task #512).  The runtime's own default is argv[0], i.e. the
+  # SBCL binary, which no Perl program means by $0; a program read from stdin
+  # is "-", as under `perl` with no file.  This is a PROGRAM preamble only —
+  # `--module` and `--extension` skip it, so loading a module cannot clobber
+  # the program's $0.
+  my $dollar0 = (defined $source_file && length $source_file) ? $source_file : '-';
+  $dollar0 =~ s/\\/\\\\/g;
+  $dollar0 =~ s/"/\\"/g;
+  push @lines, "(pcl::box-set pcl::\$0 \"$dollar0\")";
+
   # Cache settings
   push @lines, "(setf pcl::*pcl-skip-cache* t)" if $no_cache;
   push @lines, "(setf pcl::*pcl-cache-fasl* nil)" if $cache_lisp;

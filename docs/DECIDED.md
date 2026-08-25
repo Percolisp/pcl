@@ -207,6 +207,39 @@ those two files and the live plan doc directly -- no new review-doc families.*
   same tree passed the file three times standalone and two later FULL gates,
   and 8-way cold-cache stress would not reproduce it.  **A one-off failure in
   an agent's gate can be another agent's cache entry, not a regression.**
+## s446i (2026-08-25, Opus agent I) — `$0` is an ordinary writable scalar (#512); a dup-open's SOURCE goes through the one filehandle resolver (#513)
+
+- **`$0` is a WRITABLE p-box** (#512), moved to the runtime's "Boxed special
+  variables" section beside `$$`/`$_`/`$@`.  It was a bare CL string, and a bare
+  string is not a place: `$0 = "X"` lowered to the ordinary `(p-scalar-= $0 "X")`
+  whose `box-set` is a silent no-op on a non-box, so every write vanished.  The
+  VALUE is set by **pl2cl's PROGRAM preamble** to the script pl2cl was given
+  (`-` for stdin), which is what perl reports; `--module`/`--extension` skip the
+  preamble, so loading a module cannot clobber the program's `$0`.  The
+  consequence #466 was widened for now works: `$0 = "H"; print $0 LIST` writes
+  through the handle NAMED by `$0`.  What is still absent — the OS-level
+  rename — is a `not-supported.md` entry: **magic.t 150/39 → 152/37**, three
+  rows fixed and test 204 (`/proc/` comparison) an honest failure where it used
+  to compare an unchanged value with itself.
+- **A dup-open's SOURCE is resolved by `%p-resolve-fh`, from the RAW third
+  argument** (#513).  `%p-open-impl` stringified it before the dup path saw it,
+  and a glob ref stringifies to `GLOB(0x…)` — so `open($d,">&",\*STDOUT)`,
+  perldoc's own spelling, failed EBADF in every glob-ref / lexical-handle /
+  stream form while `">&STDOUT"`, `">&","STDOUT"` and `">&",1` all worked.
+  The raw value now travels beside the string and the one resolver answers.
+- **perl's two dup FAILURE shapes are different, and the discriminator is what
+  the designator IS** (probed 5.40.3): a NAME — bareword, glob, glob ref or
+  string — that names no open handle is FATAL (`Bad filehandle: NOSUCH`), a
+  literal `undef` is fatal (`Can't use an undefined value as filehandle
+  reference`), while a CLOSED lexical handle or a bad fd NUMBER is a plain
+  false with `$!` set.  `%p-dup-src-name` is that discriminator; an empty BOX
+  is a closed handle, never the fatal `undef`.
+- Guard `Pl/t/print-fh-magic-01.t` (11 → 18 rows; its header's two "still
+  broken" notes are now the fixed list).  Residue filed: **#542** (writes
+  through a dup and through its source INTERLEAVE differently — perl
+  block-buffers a non-tty STDOUT, PCL line-buffers it), **#543** (`open $fh,
+  '+<&', $src` — the `+<&`/`+>&` dup modes reach the unknown-mode `warn`).
+
 ## s446i (2026-08-25, Opus agent I) — `local`: ONE modifier split, and a TARGET is a structured item (#508 / #509 / #510)
 
 - **The trailing statement modifier of a `local` is split ONCE, at the head of
@@ -238,8 +271,22 @@ those two files and the live plan doc directly -- no new review-doc families.*
   from a statement handler escapes to `pl2cl` and takes the WHOLE FILE with it
   (measured).  `Pl::Parser::_drop_this_statement` is the route — announce +
   `_dropped_statement_cl`, the ordinary drop.
+- **A `local`ized NAME need not be BOUND, and only the gate could see it.**
+  `local %^H if _WORK_AROUND_HINT_LEAKAGE` (Moo/_Utils.pm:112 — the live
+  corpus instance of #508) qualifies the magic name into the module's package
+  as `|Moo::_Utils|::%^H`, which nothing declares: the old always-fresh init
+  never READ it, the new keep branch does, and a free reference to an unbound
+  special is a load-time error.  corpus-diff, the 22-file lib A/B and 42
+  probes were ALL clean while `Pl/t/moo-01.t` lost all 15 rows — the s438
+  lesson again (the populations and the gate answer different questions).
+  The keep branch is `(if (boundp 'NAME) …)` for the dynamic half only; an
+  ORDINARY package global reaches `local` through `p-defcell` and is bound by
+  construction.
 - Guard `Pl/t/stmt-modifier-01.t` (12 → 21 rows; its header's three "still
-  broken" notes are now the fixed list).  Residue filed: **#540** (a chained
+  broken" notes are now the fixed list).  `Pl/t/punct-array-glob-01.t` row 11
+  compares two WHOLE emissions and now strips the `$0` preamble line from
+  both: since #512 the preamble names the script, and two `emitted()` calls
+  are two temp files.  Residue filed: **#540** (a chained
   subscript `$h{a}{b}` as a `local` target localizes only the FIRST level —
   the single spelling CRASHES, the list spelling now drops loudly), **#541**
   (a WRITE inside a false-conditioned `local`'s scope does not survive the

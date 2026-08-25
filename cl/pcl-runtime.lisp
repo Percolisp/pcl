@@ -1085,8 +1085,8 @@
 
 ;;; Input line number ($.) - defined later after make-p-box (see Boxed special variables section)
 
-;;; Program name ($0)
-(defvar $0 (or (car sb-ext:*posix-argv*) "perl") "Program name")
+;;; Program name ($0) - defined later after make-p-box (see Boxed special
+;;; variables section), so that Perl-side `$0 = "X"` works (task #512).
 
 ;;; Eval error ($@) - defined later after make-p-box (see Boxed special variables section)
 
@@ -1686,6 +1686,17 @@
 ;;; hook above.  (fork re-sets $$ in the child separately.)
 (push (lambda () (box-set $$ (sb-posix:getpid)))
       sb-ext:*init-hooks*)
+;;; Program name ($0) — an ordinary WRITABLE box, like every other assignable
+;;; scalar (task #512).  It used to be a bare string, and a bare string is not
+;;; a place: `$0 = "X"` lowers to the ordinary (p-scalar-= $0 "X"), whose
+;;; box-set is a silent no-op on a non-box, so the write vanished and every
+;;; reader kept seeing the SBCL binary's name.  That also killed the symbolic
+;;; handle spelling perl allows — `$0 = "STDOUT"; print $0 "K\n"` prints K
+;;; (probed 5.40.3), because a scalar in the filehandle slot naming a handle
+;;; IS that handle.  The VALUE is set by pl2cl's preamble to the script pl2cl
+;;; was given, which is what perl puts there; this initial form is what a
+;;; runtime with no preamble (a bare sbcl + the runtime) sees.
+(defvar $0 (make-p-box (or (car sb-ext:*posix-argv*) "perl")) "Program name")
 ;;; Input line number ($.) — Perl's $. is not a plain scalar: it reflects the
 ;;; line counter (IoLINES) of the *last-accessed* filehandle.  Reading $.
 ;;; returns that handle's counter; writing $. sets it; `tell`/`seek`/`eof`/a
@@ -9578,19 +9589,60 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (when (sb-sys:fd-stream-p s)
       (sb-sys:fd-stream-fd s))))
 
-(defun %p-open-dup (fh mode-str src-name)
+(defun %p-dup-src-name (have-val val name-str)
+  "The handle NAME a dup-open's source designator spells, when it spells one:
+   a bareword/string name, a typeglob, or a ref to one.  :UNDEF for an
+   undefined (or empty) designator; NIL when the designator is not a name at
+   all — a lexical handle (open or closed), a number, a reference to something
+   else.
+
+   That distinction is perl's, probed 5.40.3: a NAME that names no open handle
+   is FATAL (`Bad filehandle: NOSUCH`), an undefined designator is fatal
+   (`Can't use an undefined value as filehandle reference`), while a CLOSED
+   lexical handle (`open $d,'>&',$closed`) or a bad fd NUMBER (`'>&',99`) is a
+   plain false with $! set.  It is what the designator IS, not whether it
+   resolved."
+  (let* ((v0    (if have-val val name-str))
+         (boxed (p-box-p v0))
+         (v     (if boxed (p-box-value v0) v0)))
+    (cond
+      ;; p-make-typeglob stores the name %pcl-invert-case'd; invert back so the
+      ;; message names the handle the way the program spelled it.
+      ((p-typeglob-p v) (%pcl-invert-case (p-typeglob-name v)))
+      ((and (stringp v) (plusp (length v))) v)
+      ;; An EMPTY box is a lexical handle that was closed (PCL empties the box),
+      ;; which perl answers with a plain false — only a designator that was
+      ;; never a variable at all (a literal `undef`) is the fatal one.
+      ((and (not boxed)
+            (or (null v) (eq v *p-undef*) (and (stringp v) (zerop (length v)))))
+       :undef)
+      (t nil))))
+
+(defun %p-open-dup (fh mode-str src-name &optional (src-val nil src-val-p))
   "Dup-open (#70): open FH, \">&SRC\" / \"<&SRC\" — FH becomes a duplicate of
    SRC's file descriptor.  The \"=\" forms (\">&=SRC\", \">&=N\") are
    fdopen-style: same fd (or a stream alias), no dup.  SRC may be a handle name
    or a raw fd number.  When FH is a standard handle (STDOUT/STDERR/STDIN)
    the dup goes ONTO its well-known fd via dup2 and the CL stream is rebuilt,
    so in-process prints AND exec'd children both see the redirect (the
-   closure.t child shape).  Any other FH gets a fresh dup'd fd as a new stream."
+   closure.t child shape).  Any other FH gets a fresh dup'd fd as a new stream.
+
+   SRC-VAL is the UNSTRINGIFIED third argument, when there was one (task #513).
+   `open($d, \">&\", \\*STDOUT)` is the spelling perldoc gives, and a glob ref
+   does not survive to-string: it arrives here as \"GLOB(0x…)\", which names no
+   handle, so every three-argument dup with a glob ref, a lexical handle or a
+   stream in the source slot failed EBADF while the two-argument `\">&STDOUT\"`,
+   the string name and the raw fd number all worked.  %p-resolve-fh is THE
+   filehandle resolver and already knows every one of those shapes — ask it
+   about the VALUE first, and fall back to the name string (which is what the
+   two-argument form and a bare fd number arrive as)."
   (let* ((eq-form (char= (char mode-str (1- (length mode-str))) #\=))
          (fd-num  (and (plusp (length src-name))
                        (every #'digit-char-p src-name)
                        (parse-integer src-name)))
-         (src     (and (not fd-num) (%p-resolve-fh src-name)))
+         (src     (and (not fd-num)
+                       (or (and src-val-p src-val (%p-resolve-fh src-val))
+                           (%p-resolve-fh src-name))))
          (src-fd  (or fd-num (and src (%p-fd-of-stream src)))))
     (unless src-fd
       ;; No OS fd behind SRC.  An in-memory (PerlIO :scalar-alike) handle has
@@ -9601,6 +9653,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       (when (streamp src)
         (%p-install-fh fh src)
         (return-from %p-open-dup t))
+      ;; A NAMED source that names no open handle is FATAL in perl, not a false
+      ;; return (task #513) — see %p-dup-src-name for the discriminator and the
+      ;; probes behind it.
+      (let ((name (%p-dup-src-name src-val-p src-val src-name)))
+        (cond ((eq name :undef)
+               (p-die "Can't use an undefined value as filehandle reference"))
+              (name (p-die (format nil "Bad filehandle: ~A" name)))))
       (setf *p-stored-errno* 9)          ; EBADF
       (return-from %p-open-dup nil))
     ;; A raw fd NUMBER must be OPEN.  perl's dup/fdopen fails EBADF on a closed
@@ -9712,8 +9771,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                                   (when (plusp (length file-str))
                                     (list file-str)))))
             ((member mode-str '(">&" "<&" ">&=" "<&=") :test #'string=)
-             ;; Dup-open (#70): install/redirect handled inside.
-             (return-from %p-open-impl (%p-open-dup fh mode-str file-str)))
+             ;; Dup-open (#70): install/redirect handled inside.  The RAW third
+             ;; argument goes along with its stringification — a glob ref, a
+             ;; lexical handle or a stream says nothing once to-string has had
+             ;; it (task #513).
+             (return-from %p-open-impl
+               (%p-open-dup fh mode-str file-str filename)))
             (t
              (warn "Unknown open mode: ~A" mode-str)
              nil))))
@@ -12266,7 +12329,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-235"
+(defparameter *pcl-cache-generation* "v2-255"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

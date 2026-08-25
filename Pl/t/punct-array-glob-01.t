@@ -226,7 +226,19 @@ PL
 like(emitted(q{while (<<>>) { print }}), qr/\(p-readline\)/,
      '#415: `<<>>` is the ARGV readline, exactly like `<>`');
 
-is(emitted(q{while (<<>>) { print }}), emitted(q{while (<>) { print }}),
+# This row compares two WHOLE emissions, which means it also compares the
+# preamble — and since s446i (task #512) the preamble carries `$0`, the script
+# pl2cl was given, so two calls to emitted() differ by their two temp-file
+# names.  Strip exactly that one line from both sides: the claim is about the
+# FORM the two spellings produce, and the program name is the harness's, not
+# the spelling's.
+sub emitted_no_argv0 {
+    my $cl = emitted($_[0]);
+    $cl =~ s/^\(pcl::box-set pcl::\$0 "[^"]*"\)\n//m;
+    return $cl;
+}
+is(emitted_no_argv0(q{while (<<>>) { print }}),
+   emitted_no_argv0(q{while (<>) { print }}),
    '#415: `<<>>` and `<>` emit the same form');
 
 # A handle NAME is a perl IDENTIFIER, and under `use utf8` that means unicode
