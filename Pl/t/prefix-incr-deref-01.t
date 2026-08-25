@@ -63,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 17;
 
 sub write_pl {
     my ($code) = @_;
@@ -268,4 +268,120 @@ my @p = ($$, $$); print "7 ", ($p[0] == $p[1] ? "same" : "differ"), "\n";
 PL
     is(run_cl($prog), run_perl($prog),
        '#463(1) inverse: a bare `$$` is the PID and `$$x{k}` is still an element');
+}
+
+# ── 12. Task #507 (s446j): a MAGIC scalar is a scalar in a cast run ─────────
+# `$$$_` comes through as Magic($$) + Magic($_), and the repair above tested
+# `ref() eq 'PPI::Token::Symbol'` — which a Magic is not, by `ref`, though it
+# IS one by `isa`.  So the run was left unrepaired and the whole statement
+# DROPPED, while the one-cast spelling `$$_` (Cast + Magic) always worked.
+{
+    my $prog = <<'PL';
+no strict 'refs'; no warnings;
+my $x = 5; my $r = \$x; my $rr = \$r;
+$_ = $rr;
+print "1 ", $$$_, "\n";
+my %h = (k => 9); my $hr = \%h; my $hrr = \$hr;
+$_ = $hrr;
+print "2 ", $$$_{k}, "\n";
+my @a = (7,8); my $ar = \@a; my $arr = \$ar;
+$_ = $arr;
+print "3 ", $$$_[1], "\n";
+my $r3 = \$rr;
+$_ = $r3;
+print "4 ", $$$$_, "\n";
+"zz" =~ /(zz)/;
+print "5 ", (defined($$$1) ? "[".$$$1."]" : "UNDEF"), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#507: `$$$_` and the magic-scalar cast run (perl oracle)');
+}
+
+# INVERSE for #507: the repair fires on source ADJACENCY only, so a bare `$$`
+# is still the PID — including `$$ . $_`, where perl reads the PID and a
+# separate `$_` (`$$@_` is a syntax error in perl, so the `^\$` half of the
+# test keeps its meaning).
+{
+    my $prog = <<'PL';
+$_ = "TAIL";
+my $j = $$ . $_;
+print "1 ", (($j =~ /^\d+TAIL$/) ? "pid-concat" : "bad"), "\n";
+print "2 ", (($$ > 0) ? "pid" : "bad"), "\n";
+my $v = 3; $_ = \$v;
+print "3 ", $$_, "\n";
+my @p = ($$, $$); print "4 ", ($p[0] == $p[1] ? "same" : "differ"), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#507 inverse: `$$` with a space, and the one-cast `$$_`, are untouched');
+}
+
+# ── 13. Task #505 (s446j): a symbolic ref reaches the MAGIC scalars ─────────
+# `${"1"}` is $1 in perl, and `${"&"}` is $&.  PCL's symbolic-ref reader only
+# ever looked for a package CELL (a box), while the runtime keeps every magic
+# scalar RAW in its symbol — so all of them read as undef.  Writing one is
+# perl's "Modification of a read-only value attempted", even for a group the
+# last match never had, and `${"007"}` is an ordinary (writable) variable
+# because a capture name has no leading zero.  All probed on 5.40.3.
+{
+    my $prog = <<'PL';
+no strict 'refs'; no warnings;
+"abcdefghijk" =~ /(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)/;
+print "1 ", (defined(${"1"}) ? "[".${"1"}."]" : "UNDEF"), "\n";
+print "2 ", (defined(${"10"}) ? "[".${"10"}."]" : "UNDEF"), "\n";
+print "3 ", (defined(${"&"}) ? "[".${"&"}."]" : "UNDEF"), "\n";
+print "4 ", (defined(${"007"}) ? "[".${"007"}."]" : "UNDEF"), "\n";
+my $nm = "5";
+print "5 ", (defined(${$nm}) ? "[".${$nm}."]" : "UNDEF"), "\n";
+print "6 ", (defined($$nm) ? "[".$$nm."]" : "UNDEF"), "\n";
+my $ok = eval { ${"11"} = 3; 1 };
+print "7 ", ($ok ? "no-die" : "die"), "\n";
+my $ok2 = eval { ${"7"} = 3; 1 };
+print "8 ", ($ok2 ? "no-die" : "die"), "\n";
+my $ok3 = eval { ${"&"} = "x"; 1 };
+print "9 ", ($ok3 ? "no-die" : "die"), "\n";
+my $ok4 = eval { ${"007"} = "w"; 1 };
+print "10 ", ($ok4 ? "no-die" : "die"), " ", ${"007"}, "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#505: a symbolic ref reads the magic scalars, and writing a capture dies');
+}
+
+# CANARY for the half that is NOT fixed (task #551).  perl resolves a NUMBER
+# through its string form too, so `my $n = 5; ${$n}` is $5 — but PCL's box
+# model loses the reference wrapper on the way out of a container
+# (%p-hash-unbox-elem hands back the referent box), so `\42` read from a hash
+# element arrives at p-cast-$ as box(42) with is-ref NIL — byte for byte what
+# `my $n = 42` is.  Answering "symbolic ref" would make `${$h{k}}` read $5
+# instead of 5 in real code, so a NUMBER keeps its old answer, the number
+# itself.  When #551 closes this row FAILS, which is the signal to update it.
+{
+    my $out = run_cl(<<'PL');
+no strict 'refs'; no warnings;
+"abcde" =~ /(a)(b)(c)(d)(e)/;
+my $n5 = 5;
+print "1 ", (defined(${$n5}) ? "[".${$n5}."]" : "UNDEF"), "\n";
+print "2 ", (defined($$n5) ? "[".$$n5."]" : "UNDEF"), "\n";
+PL
+    is($out, "1 [5]\n2 [5]\n",
+       '#551 canary: a NUMERIC symbolic-ref name still answers the number (perl: $5)');
+}
+
+# INVERSE for #505: a HARD reference — including `\5`, whose referent is a raw
+# number — is unchanged, and so is a symbolic ref to an ordinary NAME.
+{
+    my $prog = <<'PL';
+no strict 'refs'; no warnings;
+my $x = 42; my $r = \$x;
+print "1 ", ${$r}, "\n";
+print "2 ", ${\ 5}, "\n";
+${$r} = 43; print "3 $x\n";
+our $foo = "F"; my $nm = "foo";
+print "4 ", ${$nm}, "\n";
+${$nm} = "G"; print "5 $foo\n";
+my $v = 7; my $obj = bless \$v, 'K';
+$$obj = 3; print "6 ", $$obj, " ", $v, "\n";
+print "7 ", ${"0"} eq $0 ? "prog" : "other", "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#505 inverse: hard refs, `\\5`, a named symbolic ref and $0 are unchanged');
 }

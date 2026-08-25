@@ -341,6 +341,17 @@ sub cl_name {
   # Leading :: means main:: (e.g. ::is → main::is)
   $perl_name =~ s/^::/main::/;
 
+  # perl's PERL-4 package separator: `A'B` IS `A::B` (still valid in 5.40, the
+  # oracle; deprecated in 5.38).  The runtime already reads a SYMBOLIC name
+  # that way (%p-tick-package-seps) and the compiler has to agree, or the tick
+  # ends up INSIDE a CL symbol — where `'` is the reader's quote character and
+  # terminates the token: `pl-main'Backwards` reads as `(pl-main 'Backwards)`,
+  # a call of an undefined sub, and in a quoted position it silently becomes
+  # two arguments (task #550, found by #514's guard on perl-tests/sort.t:240).
+  # An apostrophe in a perl identifier can only ever BE the separator, so the
+  # rewrite is the whole rule; the lookahead is perl's own toker test.
+  $perl_name =~ s/'(?=\w)/::/g;
+
   # Check for package-qualified name (Foo::bar or Foo::Bar::baz)
   if ($perl_name =~ /^(.+)::(.+)$/) {
     my ($pkg, $func) = ($1, $2);
@@ -2621,7 +2632,11 @@ sub gen_prefix_op_form {
       $self->lvalue_context(1);
       my $inner = $self->gen_node_form($amp_id);
       $self->lvalue_context($saved);
-      return ['p-backslash', ['p-get-coderef', $inner]];
+      # p-backslash-sub-ref, not (p-backslash (p-get-coderef …)): a NAME with
+      # no body is late-bound exactly as `\&NAME` is (task #517).  p-get-coderef
+      # answers NIL there, and the \-wrap made that a SCALAR ref whose call
+      # reached AUTOLOAD with an empty name.
+      return ['p-backslash-sub-ref', $inner];
     }
     # \(LIST) — the distribute-over-elements family.  Mirrors the text
     # emitter branch for branch: single-scalar tree_val → (p-backslash …),
@@ -3734,7 +3749,14 @@ sub gen_inline_lambda_form {
     my $call = ($proto && $proto->{is_proto}
                 && ($proto->{proto_string} // '') eq '$$')
              ? [$cl_func, @pair] : [$cl_func];
-    return ['p-sort-cmp', $params, @decl, Pl::CLForm::ctx_bind('nil', $call)];
+    # The NAME rides along (task #514): perl resolves a named comparator at
+    # sort ENTRY and dies for a body-less one even when the list is empty or
+    # one element long, so the check cannot live in the comparator body.  It
+    # belongs to p-sort rather than to this form, because this form is an
+    # ARGUMENT — evaluated BEFORE the list, whose own side effects perl runs
+    # first (probed).
+    return ['p-sort-named', "'$cl_func",
+            ['p-sort-cmp', $params, @decl, Pl::CLForm::ctx_bind('nil', $call)]];
   }
 
   # Scalar comparator (sort $var LIST) — resolved at runtime by

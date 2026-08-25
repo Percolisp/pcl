@@ -30,7 +30,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 23;
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -198,10 +198,13 @@ test_cl('sort {block} $ar->@* (block comparator + postfix-deref list)',
 }
 
 # Test 21: every `sort NAME` shape, one program, all probed against perl
-# 5.40.3 (s442d).  perl agrees line for line except the die TEXT, which is
-# "Undefined sort subroutine \"main::nope_cmp\" called at F line N." — PCL
-# carries no location and uses the one message its call path has (message
-# fidelity is not a goal, memory: project_error_message_fidelity_not_required).
+# 5.40.3 (s442d).  perl agrees line for line except the die's LOCATION, which
+# is " at F line N." — PCL carries none (message fidelity is not a goal,
+# memory: project_error_message_fidelity_not_required).  The message itself
+# became perl's own in s446j: the resolution now happens where perl does it,
+# at sort ENTRY (task #514), so it is the sort-specific diagnostic and not
+# the generic "Undefined subroutine &main::nope_cmp called" the first
+# comparison used to raise.
 # `nosub:` and `fwd:` are the rows the deleted wrapper got WRONG: before #468
 # they were LIVED with the list unsorted.  `autoload:` is perl's own answer —
 # a sort comparator name DOES reach the package's AUTOLOAD.
@@ -218,7 +221,7 @@ test_cl('sort NAME: named / ($$) / reverse / qualified / no-sub dies / fwd-decl 
      print "qual:",   join(",", sort Other::by_len @l), "\n";
      my $ok = eval { my @s = sort nope_cmp @l; 1 };
      print "nosub:", ($ok ? "LIVED" : "DIED"), ":",
-           ($@ =~ /Undefined subroutine &main::nope_cmp called/
+           ($@ =~ /Undefined sort subroutine "main::nope_cmp" called/
               ? "msg-ok" : "msg=[$@]"), "\n";
      my $ok2 = eval { my @s = sort fwd_cmp @l; 1 };
      print "fwd:", ($ok2 ? "LIVED" : "DIED"), "\n";
@@ -230,3 +233,43 @@ test_cl('sort NAME: named / ($$) / reverse / qualified / no-sub dies / fwd-decl 
      print "autoload:", P::run(), "\n";',
     "named:1,2,3,10\nproto:1,2,3,10\nrev:10,3,2,1\nqual:3,1,2,10\n"
   . "nosub:DIED:msg-ok\nfwd:DIED\nautoload:4,5,6\n");
+
+# ── Tests 22-23: `sort NAME LIST` resolves on ENTRY (task #514) ─────────────
+# perl resolves the comparator when the sort STARTS, not at the first
+# comparison: `sort nonexistent (7)` and even `sort nonexistent ()` die
+# although no pair is ever compared.  PCL built a lambda that called the name
+# and only died once it ran, so both short-list spellings quietly succeeded —
+# a die-TIMING divergence, invisible to any test with three elements.
+# The AUTOLOAD rows are perl's own answer at the SAME two list sizes (perl
+# #30661), and they are why the check asks "body OR the package's AUTOLOAD",
+# never fboundp alone.
+test_cl('sort NAME: entry resolution — short lists die, AUTOLOAD does not',
+    'our ($a, $b);
+     sub by_num { $a <=> $b }
+     sub fwd_only;
+     for my $t (["one", sub { my @s = sort nope1 (7); "@s" }],
+                ["zero", sub { my @s = sort nope2 (); "@s" }],
+                ["two", sub { my @s = sort nope3 (1,2); "@s" }],
+                ["fwd", sub { my @s = sort fwd_only (7); "@s" }],
+                ["ok1", sub { my @s = sort by_num (7); "@s" }],
+                ["ok3", sub { my @s = sort by_num (3,1,2); "@s" }],
+                ["al1", sub { my @s = sort AL::cmp1 (7); "@s" }],
+                ["al3", sub { my @s = sort AL::cmp1 (3,1,2); "@s" }]) {
+       my ($nm, $c) = @$t;
+       my $r = eval { $c->() };
+       print "$nm:", (defined $r ? "[$r]" : "DIED"), "\n";
+     }
+     package AL; sub AUTOLOAD { return $main::a <=> $main::b }',
+    "one:DIED\nzero:DIED\ntwo:DIED\nfwd:DIED\n"
+  . "ok1:[7]\nok3:[1 2 3]\nal1:[7]\nal3:[1 2 3]\n");
+
+# perl runs the LIST first and dies afterwards (probed with $|=1), which is
+# why the check belongs to p-sort and not to the comparator form — that form
+# is an ARGUMENT, evaluated BEFORE the list.
+test_cl('sort NAME: the LIST runs before the entry die',
+    '$| = 1;
+     our ($a, $b);
+     sub side { print "LIST\n"; return (3,1) }
+     my $ok = eval { my @s = sort nope_ord (side()); 1 };
+     print "died:", ($ok ? 0 : 1), "\n";',
+    "LIST\ndied:1\n");

@@ -224,7 +224,7 @@
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
    #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
    #:p-alias-array-elements
-   #:p-backslash #:p-backslash-sub #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
+   #:p-backslash #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -239,7 +239,7 @@
    #:p-local-deref-scalar #:p-local-deref-array #:p-local-deref-hash
    #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack #:p-load-extension
-   #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-reverse
+   #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-sort-named #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$
@@ -262,6 +262,14 @@
    ;; the synthesized `@#`): perl forces every punctuation name into main::, so
    ;; they are ONE symbol for every user package -- owned here, like @- (#498)
    #:|@?| #:|@!| #:|@.| #:|@/| #:|@~| #:|@^| #:|@&| #:|@%| #:|@=| #:|@<| #:|@>| #:|@#|
+   ;; ... and the rest of them, plus the punctuation HASHES (#506): perl allows
+   ;; a punctuation name for every one of these, and an unowned one is a DEAD
+   ;; FILE (a read is a bare symbol nobody declared), not a wrong value
+   #:|@"| #:|@$| #:|@'| #:|@(| #:|@)| #:|@*| #:|@,| #:|@:| #:|@;| #:|@@| #:|@[|
+   #:|@]| #:|@`| #:|@\|| #:|@\\|
+   #:|%"| #:|%$| #:|%%| #:|%&| #:|%'| #:|%(| #:|%)| #:|%*| #:|%,| #:|%.| #:|%/|
+   #:|%:| #:|%;| #:|%<| #:|%=| #:|%>| #:|%?| #:|%@| #:|%[| #:|%]| #:|%^| #:|%`|
+   #:|%\|| #:|%~| #:|%\\|
    #:|@{^CAPTURE}|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
@@ -681,6 +689,21 @@
 ;;; printed the empty string.  \&foo taken on a stub is unaffected — it is a
 ;;; TRAMPOLINE that re-reads symbol-function at call time (p-backslash-sub), so
 ;;; it still reaches a body defined later.
+(defun %p-sub-has-body-p (sym)
+  "True when SYM names a Perl sub with a BODY: fbound, and not one of
+   p-declare-sub's forward-declaration stubs (which ARE fbound).  The ONE
+   reading of that question — `\\&foo`, the never-declared-call fallback, the
+   package sub scan and `sort NAME`'s entry check all ask it."
+  (and (fboundp sym) (not (eq (gethash sym *p-declared-subs*) :stub))))
+
+(defun %p-autoload-symbol (sym)
+  "The AUTOLOAD sub that SYM's OWN package would run for a body-less plain
+   call, or NIL.  perl walks no @ISA here — that is the method rule — and a
+   forward-declared AUTOLOAD stub is not a body."
+  (let* ((pkg (symbol-package sym))
+         (al  (and pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
+    (and al (eq (symbol-package al) pkg) (%p-sub-has-body-p al) al)))
+
 (defun %p-call-of-undefined-sub (sym args)
   ;; perl's own order: a plain sub call to a name with no body runs the
   ;; package's AUTOLOAD (with $AUTOLOAD set to the qualified name and the
@@ -688,12 +711,11 @@
   ;; the method rule.  Only when the package has no AUTOLOAD is it fatal.
   ;; Probed s432: `sub foo; sub AUTOLOAD {...} print foo()` prints AUTO(main::foo)
   ;; under perl; PCL answered the stub's undef before this.
-  (let* ((pkg (symbol-package sym))
-         (al  (and pkg (find-symbol (%pcl-cl-sub-name "AUTOLOAD") pkg))))
-    (if (and al (eq (symbol-package al) pkg) (fboundp al)
-             (not (eq (gethash al *p-declared-subs*) :stub)))
+  (let ((al (%p-autoload-symbol sym)))
+    (if al
         (progn
-          (%pcl-set-autoload-var (pcl-pkg-perl-name pkg) (%p-sub-perl-name sym))
+          (%pcl-set-autoload-var (pcl-pkg-perl-name (symbol-package sym))
+                                 (%p-sub-perl-name sym))
           (apply (symbol-function al) args))
         (p-die (format nil "Undefined subroutine &~A called"
                        (%p-sub-perl-name sym))))))
@@ -992,6 +1014,59 @@
 (defvar |@<| (make-array 0 :adjustable t :fill-pointer 0))
 (defvar |@>| (make-array 0 :adjustable t :fill-pointer 0))
 (defvar |@#| (make-array 0 :adjustable t :fill-pointer 0))
+;; The REST of the punctuation arrays (#506, s446j).  The twelve above were the
+;; set ONE repair happened to cover; perl accepts a punctuation name for every
+;; character here (measured char by char on 5.40.3 — only `$^[0]` is a syntax
+;; error, because `$^` wants a letter, and `#` starts a comment).  An unowned
+;; one is not a wrong VALUE but a dead FILE: a read compiles to a bare CL
+;; symbol nobody declared (a write auto-vivifies through p-setf, so only the
+;; read-first spelling shows it) and the load dies "The variable @$ is unbound"
+;; before line 1 runs.  `@$` is the array twin of `%$`, this task's own shape.
+(defvar |@"| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@$| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@'| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@(| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@)| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@*| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@,| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@:| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@;| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@@| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@[| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@]| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@`| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@\|| (make-array 0 :adjustable t :fill-pointer 0))
+(defvar |@\\| (make-array 0 :adjustable t :fill-pointer 0))
+;; The punctuation HASHES, the same family and the same rule (#506): `$$ {EXPR}`
+;; with a SPACE is an element of `%$` (perl's own adjacency rule — without the
+;; space it is the double deref `${${EXPR}}`), and reading one killed the file
+;; at load.  `%+` and `%-` (named captures) and `%^H` are owned above; `%!` is
+;; the errno hash and `%_` is an ordinary word name, so neither is here.
+(defvar |%"| (make-hash-table :test 'equal))
+(defvar |%$| (make-hash-table :test 'equal))
+(defvar |%%| (make-hash-table :test 'equal))
+(defvar |%&| (make-hash-table :test 'equal))
+(defvar |%'| (make-hash-table :test 'equal))
+(defvar |%(| (make-hash-table :test 'equal))
+(defvar |%)| (make-hash-table :test 'equal))
+(defvar |%*| (make-hash-table :test 'equal))
+(defvar |%,| (make-hash-table :test 'equal))
+(defvar |%.| (make-hash-table :test 'equal))
+(defvar |%/| (make-hash-table :test 'equal))
+(defvar |%:| (make-hash-table :test 'equal))
+(defvar |%;| (make-hash-table :test 'equal))
+(defvar |%<| (make-hash-table :test 'equal))
+(defvar |%=| (make-hash-table :test 'equal))
+(defvar |%>| (make-hash-table :test 'equal))
+(defvar |%?| (make-hash-table :test 'equal))
+(defvar |%@| (make-hash-table :test 'equal))
+(defvar |%[| (make-hash-table :test 'equal))
+(defvar |%]| (make-hash-table :test 'equal))
+(defvar |%^| (make-hash-table :test 'equal))
+(defvar |%`| (make-hash-table :test 'equal))
+(defvar |%\|| (make-hash-table :test 'equal))
+(defvar |%~| (make-hash-table :test 'equal))
+(defvar |%\\| (make-hash-table :test 'equal))
 ;; @{^CAPTURE} (5.26+): the capture GROUP VALUES of the last successful match,
 ;; 0-based -- element 0 is $1.  Truncated after the last participating group,
 ;; exactly like @- / @+ (perl: "$#{^CAPTURE} is one less than $#-"), with undef
@@ -7859,16 +7934,15 @@ create the key on a read-only call, which perl does not."
          (h (make-hash-table :test 'equal)))
     (when pkg
       (do-symbols (sym pkg)
+        ;; Skip forward-declaration STUBS (p-declare-sub).  A stub is fboundp
+        ;; but not a real definition; Perl would not have it in the symbol
+        ;; table yet.  Including it makes use-time package introspection
+        ;; (Moo::Role's make_role via _all_subs) see subs that are only
+        ;; *declared*, not yet defined — exactly the bug in
+        ;; docs/declaration-ordering-fix-plan.md.  A real definition flips the
+        ;; entry to :defined, so this only hides pure stubs.
         (when (and (eq (symbol-package sym) pkg)
-                   (fboundp sym)
-                   ;; Skip forward-declaration STUBS (p-declare-sub).  A stub is
-                   ;; fboundp but not a real definition; Perl would not have it in
-                   ;; the symbol table yet.  Including it makes use-time package
-                   ;; introspection (Moo::Role's make_role via _all_subs) see subs
-                   ;; that are only *declared*, not yet defined — exactly the bug
-                   ;; in docs/declaration-ordering-fix-plan.md.  A real definition
-                   ;; flips the entry to :defined, so this only hides pure stubs.
-                   (not (eq (gethash sym *p-declared-subs*) :stub)))
+                   (%p-sub-has-body-p sym))
           (let* ((name (symbol-name sym))
                  (n (length name)))
             ;; PL-xxx → Perl sub "xxx".  Reverse the :invert reader transform
@@ -12154,7 +12228,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-221"
+(defparameter *pcl-cache-generation* "v2-235"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -12914,26 +12988,69 @@ buffer's fill-pointer; everything else falls back to file-length."
                  (t (vector-push-extend (%p-map-copy-scalar r) result)))))
     result))
 
+(defun %p-glob-code (glob)
+  "The CODE slot of typeglob GLOB, unboxed, or NIL."
+  (let ((code (p-glob-slot glob "CODE")))
+    (and code (unbox code))))
+
+(defun %p-denoted-code (val)
+  "Two values: the code a scalar holds DIRECTLY — a function, a \\&foo double
+   box, a typeglob *foo or a glob ref \\*foo — and a flag saying VAL was one of
+   those shapes at all (a glob with an empty CODE slot is (values NIL T); a
+   NAME is (values NIL NIL)).  ONE reading, two tails: p-sort-get-fn resolves a
+   name through p-get-coderef (NIL on a miss, which its callers test), while
+   `\\&$name` must be LATE-BOUND like `\\&NAME` (task #517)."
+  (let ((v (unbox val)))
+    (cond
+      ((functionp v) (values v t))
+      ((and (p-box-p v) (functionp (p-box-value v))) (values (p-box-value v) t))
+      ((p-typeglob-p v) (values (%p-glob-code v) t))
+      ((and (p-box-p v) (p-typeglob-p (p-box-value v)))
+       (values (%p-glob-code (p-box-value v)) t))
+      (t (values nil nil)))))
+
 (defun p-sort-get-fn (val)
   "Get a CL function from a Perl scalar sort comparator (coderef, string, glob, or glob ref).
    Handles: \\&foo (double-boxed fn), *foo (typeglob), \\*foo (box of typeglob), 'name' (string)."
-  (let ((v (unbox val)))
-    (cond
-      ;; Direct function (unboxed code ref)
-      ((functionp v) v)
-      ;; Box containing function: \&foo stores box(box(fn)) after p-backslash
-      ((and (p-box-p v) (functionp (p-box-value v)))
-       (p-box-value v))
-      ;; Typeglob *foo — extract CODE slot
-      ((p-typeglob-p v)
-       (let ((code (p-glob-slot v "CODE")))
-         (and code (unbox code))))
-      ;; Box containing typeglob: \*foo stores box(box(typeglob))
-      ((and (p-box-p v) (p-typeglob-p (p-box-value v)))
-       (let ((code (p-glob-slot (p-box-value v) "CODE")))
-         (and code (unbox code))))
-      ;; String or anything else — look up sub by name in current package
-      (t (p-get-coderef val)))))
+  (multiple-value-bind (fn direct) (%p-denoted-code val)
+    (if direct
+        fn
+        ;; String or anything else — look up sub by name in current package
+        (p-get-coderef val))))
+
+;;; `sort NAME LIST` resolves its comparator on ENTRY (task #514).  perl dies
+;;; "Undefined sort subroutine "main::nm" called" for a name with no body even
+;;; when the list is EMPTY or one element long — i.e. even when no comparison
+;;; ever happens — and it dies AFTER evaluating the LIST (probed: the list's
+;;; own prints come out first).  PCL used to resolve at the first comparison,
+;;; so both short-list spellings quietly succeeded.  Carrying the name to
+;;; p-sort (rather than checking where the lambda is built, which is an
+;;; ARGUMENT and therefore evaluated BEFORE the list) is what keeps that order.
+(defstruct (p-named-cmp (:constructor %make-p-named-cmp (sym fn)))
+  "A `sort NAME LIST` comparator: the lambda, plus the sub SYMBOL perl
+   resolves at sort entry."
+  sym fn)
+
+(defun p-sort-named (sym fn)
+  "The comparator form `sort NAME LIST` emits: FN with the NAME attached."
+  (%make-p-named-cmp sym fn))
+
+(defun %p-sort-comparator-check (sym)
+  "perl's sort-entry resolution of a named comparator.  An AUTOLOAD in the
+   sub's own package satisfies it (perl #30661 — probed: `sort AL::x (3,1,2)`
+   and `sort AL::x (7)` both run AUTOLOAD), a forward declaration with no body
+   does NOT."
+  (unless (or (%p-sub-has-body-p sym) (%p-autoload-symbol sym))
+    (p-die (format nil "Undefined sort subroutine \"~A\" called"
+                   (%p-sub-perl-name sym)))))
+
+(defun %p-sort-resolve-comparator (val)
+  "p-sort's first argument, unboxed: a named comparator answers its lambda
+   after perl's entry check; anything else is itself."
+  (if (p-named-cmp-p val)
+      (progn (%p-sort-comparator-check (p-named-cmp-sym val))
+             (p-named-cmp-fn val))
+      val))
 
 (defun p-sort (&rest args)
   "Perl sort - sort a list with optional comparator function.
@@ -12942,7 +13059,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    (p-sort a b c ...)    - sort concatenated multi-arg list lexically"
   (if (null args)
       (make-array 0 :adjustable t :fill-pointer 0)
-      (let* ((first-val (unbox (first args)))
+      (let* ((first-val (%p-sort-resolve-comparator (unbox (first args))))
              (has-fn (functionp first-val)))
         (if has-fn
             ;; Comparator form: (p-sort fn list...)
@@ -13430,7 +13547,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl \\&funcname — return a code ref, dispatching to AUTOLOAD if not defined."
   (cond
     ;; Real definition exists: return it directly (stable coderef identity).
-    ((and (fboundp sym) (not (eq (gethash sym *p-declared-subs*) :stub)))
+    ((%p-sub-has-body-p sym)
      (symbol-function sym))
     ;; Only a forward-declaration STUB exists (p-declare-sub).  Perl's \\&foo is
     ;; late-bound to the glob slot, so taking it before `sub foo {...}` and then
@@ -13457,12 +13574,38 @@ buffer's fill-pointer; everything else falls back to file-length."
     (t
      (let ((fallback
             (lambda (&rest args)
-              (if (and (fboundp sym)
-                       (not (eq (gethash sym *p-declared-subs*) :stub)))
+              (if (%p-sub-has-body-p sym)
                   (apply (symbol-function sym) args)
                   (%p-call-of-undefined-sub sym args)))))
        (setf (gethash fallback *p-lazy-coderef-target*) sym)
        fallback))))
+
+(defun p-backslash-sub-ref (val)
+  "Perl \\&$name / \\&{EXPR} — the same thing `\\&NAME` is, for a name computed
+   at run time (task #517).  It used to be (p-backslash (p-get-coderef VAL)),
+   and p-get-coderef answers NIL for a name with no body: `\\&$s` then came back
+   as a SCALAR ref to nil, ref() said SCALAR where perl says CODE, and calling
+   it reached AUTOLOAD with an EMPTY $AUTOLOAD (\"main::\").  A name goes to
+   p-backslash-sub, the ONE late-binding path (rule 11), so a body defined
+   after the ref is taken is still found and a body-less name reaches its own
+   package's AUTOLOAD with the full name.  A value that already IS code keeps
+   its old shape — perl's `\\&$coderef` is that same coderef."
+  (multiple-value-bind (fn direct) (%p-denoted-code val)
+    (if direct
+        (p-backslash fn)
+        (multiple-value-bind (sym perl-pkg bare)
+            (%p-resolve-sub-symbol (stringify-value (unbox val)))
+          (let ((s (or sym (%p-sub-symbol-in perl-pkg bare))))
+            (if s
+                (p-backslash-sub s)
+                ;; The package does not exist, so there is no symbol to be
+                ;; late-bound to and no AUTOLOAD to reach — but perl still
+                ;; hands back a CODE ref and dies only when it is CALLED.
+                (let ((full (format nil "~A::~A" perl-pkg bare)))
+                  (lambda (&rest args)
+                    (declare (ignore args))
+                    (p-die (format nil "Undefined subroutine &~A called"
+                                   full))))))))))
 
 (defun p-get-coderef (name-val)
   "Get a CL function from a Perl function name string or existing coderef.
@@ -13661,9 +13804,64 @@ buffer's fill-pointer; everything else falls back to file-length."
       (setf (symbol-value sym) (make-hash-table :test 'equal)))
     (symbol-value sym)))
 
+;;; A symbolic scalar reference reaches more than the package cells
+;;; %p-symref-box knows about: the runtime keeps perl's magic scalars RAW in
+;;; their symbol ($1..$20, $&, $`, $', $+, $0, $?, …), never in a box, so the
+;;; box reader alone answered undef for every one of them — while in perl
+;;; ${"1"} IS $1 (task #505, s446j).
+(defun %p-symref-scalar-value (name-str)
+  "The value the symbolic scalar reference ${NAME-STR} reads: the package
+   cell's value, or — for the magic scalars the runtime stores unboxed — the
+   symbol's own value.  NIL (perl undef) when the name has no variable."
+  (when (find #\Nul name-str) (return-from %p-symref-scalar-value nil))
+  (let ((sym (%p-symref-symbol name-str "$" nil)))
+    (when (and sym (boundp sym))
+      (let* ((raw (symbol-value sym))
+             (v (if (p-box-p raw) (p-box-value raw) raw)))
+        ;; Same rule as p-cast-$'s hard-ref arm: a magic cell answers through
+        ;; its getter, never as the raw struct.
+        (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v)))))
+
+(defun %p-symref-read-only-p (name-str)
+  "Perl's read-only scalars, by NAME (no sigil): the regex-result family.  A
+   capture group is all digits with no leading zero — ${\"007\"} is an ordinary
+   variable and IS writable, and ${\"0\"} is $0, writable too (both probed) —
+   and it is read-only even when the group never participated (${\"7\"} = 1
+   dies with no match at all)."
+  (or (and (plusp (length name-str))
+           (char/= (char name-str 0) #\0)
+           (every #'digit-char-p name-str))
+      (member name-str '("&" "`" "'" "+") :test #'string=)))
+
+(defun %p-symref-scalar-set (name-str new-value)
+  "Write NEW-VALUE through the symbolic scalar reference ${NAME-STR},
+   vivifying the package cell.  Perl's read-only magic dies instead."
+  (when (%p-symref-read-only-p name-str) (%p-readonly-modification))
+  (let ((box (or (%p-symref-box name-str)
+                 (let ((b (make-p-box nil)))
+                   (setf (%p-symref-box name-str) b)
+                   b))))
+    (box-set box new-value)))
+
+;;; WHY THE NUMERIC SPELLING IS NOT HERE (task #505, measured s446j).
+;;; perl resolves ${EXPR} through the value's STRING form for a NUMBER too, so
+;;; `my $n = 5; ${$n}` reads $5 — undef and read-only.  PCL cannot tell that
+;;; apart from a hard reference, because the box model LOSES the ref wrapper
+;;; on the way out of a container: %p-hash-unbox-elem returns the referent box
+;;; for a scalar ref, so `\42` read back out of a hash element arrives here as
+;;; box(42) with is-ref NIL — byte for byte what `my $n = 42` is.  Probed with
+;;; a live pair; the is-ref flag does NOT separate them (that is #154's
+;;; referent-kind question, ruled s335: no new box slot).  Answering "symbolic
+;;; ref" would then make `${$h{k}}` on a ref-to-a-number read $5 instead of 5,
+;;; in real code (Moo's local-hash-elem idiom is exactly this shape and it IS
+;;; a gate row) — a silent wrong traded for a quirk perl programs do not
+;;; write.  So a NUMBER keeps falling through to the (t inner) arm, and the
+;;; STRING spelling — `${"5"}`, `${$n}` with $n = "5", every magic name — is
+;;; fixed below, which is the reachable half.  Residue: task #551.
+
 (defun p-cast-$ (val)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
-   If val unboxes to a string, treat as symbolic reference."
+   If val unboxes to a string or a number, treat as symbolic reference."
   (let ((inner (unbox val)))
     (cond
       ((p-box-p inner)
@@ -13674,9 +13872,9 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((v (p-box-value inner)))
          (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v)))
       ((stringp inner)
-       ;; Symbolic reference: ${"varname"}
-       (let ((box (%p-symref-box inner)))
-         (if box (p-box-value box) nil)))
+       ;; Symbolic reference: ${"varname"} — see the note above %p-symref-
+       ;; scalar-value for why a NUMBER is not one here (task #505/#551).
+       (%p-symref-scalar-value inner))
       ;; ${qr//}: perl's REGEXP sv stringifies as "(?^:...)" and numifies
       ;; through that string (0).  PCL merges the Regexp ref and its referent
       ;; into one struct (which numifies as an address, correct for the REF
@@ -13704,12 +13902,10 @@ buffer's fill-pointer; everything else falls back to file-length."
              (box-set target new-value)    ; normal scalar ref: set the target
              (box-set inner new-value))))  ; inner is the scalar container
       ((stringp inner)
-       ;; Symbolic reference: ${"varname"} = val
-       (let ((box (or (%p-symref-box inner)
-                      (let ((b (make-p-box nil)))
-                        (setf (%p-symref-box inner) b)
-                        b))))
-         (box-set box new-value)))
+       ;; Symbolic reference: ${"varname"} = val.  A NUMERIC name is NOT one
+       ;; here either — same ambiguity, same reason (task #505/#551): the
+       ;; (p-box-p val) arm below is the collapsed hard ref's write path.
+       (%p-symref-scalar-set inner new-value))
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))

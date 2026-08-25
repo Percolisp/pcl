@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 34;
 
 sub write_pl {
     my ($code) = @_;
@@ -480,4 +480,67 @@ print scalar(glob("")), ":", scalar(my @e = glob("   ")), "\n";
 PL
     is($out, "found\n0:0\n",
        '#450 inverse: a wildcard still globs; a blank pattern has no words');
+}
+
+# ── Task #506 (s446j): the punctuation HASHES, and the REST of the arrays ───
+# `$$ {EXPR}` — the PID magic, a SPACE, then braces — is an element of the
+# hash `%$` (perl's own adjacency rule: without the space it is the double
+# deref `${${EXPR}}`, probed).  PCL emitted a bare `%$` that nothing declared,
+# so the file died at LOAD before line 1 ran.  Measured char by char on
+# 5.40.3: perl accepts a punctuation name for EVERY character here, and PCL
+# was unbound for 25 of the hashes and 15 more of the arrays — the twelve of
+# #415 were the set one repair happened to cover, not the set perl allows.
+# Only a READ shows it: a write auto-vivifies through p-setf.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+my $x = 5; my $r = \$x; my $rr = \$r;
+print "1:[", (defined($$ {$rr}) ? $$ {$rr} : ""), "]\n";
+$$ {"k"} = "V";
+print "2:[", $$ {"k"}, "] exists:", (exists $$ {"k"} ? 1 : 0), "\n";
+print "3:[", (defined($$ [0]) ? $$ [0] : ""), "]\n";
+$$ [1] = "A1";
+print "4:[", $$ [1], "]\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#506: `$$ {EXPR}` is an element of %$ (and `$$ [0]` of @$), read-first');
+}
+
+# perlvar: a punctuation name is forced into package main, so a write in one
+# package and a read in another meet — the #498 rule, now for the containers
+# that were never declared at all.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+{ package P1; $, {"x"} = "one"; $; [0] = "two"; }
+{ package P2; print "cross:", $, {"x"}, ",", $; [0], "\n"; }
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#506: a punctuation container written in one package reads in another');
+}
+
+# The READ-FIRST spelling of the characters measured unbound, in one program:
+# before the fix any ONE of these lines killed the whole file at load.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+print "start\n";
+my $n = 0;
+$n++ if defined $$ {"q"}; $n++ if defined $% {"q"};
+$n++ if defined $& {"q"}; $n++ if defined $( {"q"};
+$n++ if defined $) {"q"}; $n++ if defined $* {"q"}; $n++ if defined $, {"q"};
+$n++ if defined $. {"q"}; $n++ if defined $/ {"q"}; $n++ if defined $: {"q"};
+$n++ if defined $; {"q"}; $n++ if defined $< {"q"}; $n++ if defined $= {"q"};
+$n++ if defined $> {"q"}; $n++ if defined $? {"q"}; $n++ if defined $@ {"q"};
+$n++ if defined $[ {"q"}; $n++ if defined $] {"q"}; $n++ if defined $^ {"q"};
+$n++ if defined $| {"q"}; $n++ if defined $~ {"q"};
+$n++ if defined $$ [0];
+$n++ if defined $( [0]; $n++ if defined $) [0]; $n++ if defined $* [0];
+$n++ if defined $, [0]; $n++ if defined $: [0]; $n++ if defined $; [0];
+$n++ if defined $@ [0]; $n++ if defined $[ [0]; $n++ if defined $] [0];
+$n++ if defined $| [0];
+print "defined:$n\nend\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#506: reading any punctuation hash or array first no longer kills the file');
 }

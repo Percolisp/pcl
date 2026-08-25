@@ -4719,8 +4719,14 @@ sub _split_pid_magic_cast_run {
     next unless ref($tok) eq 'PPI::Token::Magic' && $tok->content eq '$$';
     my $nxt = $tok->next_sibling;
     next if !$nxt || $nxt->isa('PPI::Token::Whitespace');
+    # A MAGIC scalar is a scalar (#507, the #466 finding again): `$$$_` comes
+    # through as Magic($$) Magic($_) and `ref() eq 'Symbol'` answered no for
+    # the second half, so the run was left unrepaired and the whole statement
+    # dropped — while the one-cast spelling `$$_` (Cast + Magic) always worked.
+    # PPI::Token::Magic IS-A PPI::Token::Symbol, so `isa` is the whole fix; the
+    # `^\$` test still keeps `@_` out (`$$@_` is a syntax error in perl).
     next unless ref($nxt) eq 'PPI::Token::Cast'
-             || (ref($nxt) eq 'PPI::Token::Symbol' && $nxt->content =~ /^\$/)
+             || ($nxt->isa('PPI::Token::Symbol') && $nxt->content =~ /^\$/)
              || (ref($nxt) eq 'PPI::Structure::Block'    && $nxt->start eq '{')
              || (ref($nxt) eq 'PPI::Structure::Subscript' && $nxt->start eq '{');
     splice @$e, $i, 1, PPI::Token::Cast->new('$'), PPI::Token::Cast->new('$');

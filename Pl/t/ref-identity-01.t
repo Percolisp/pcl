@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 39;
+plan tests => 47;
 
 # One SBCL launch for the whole family: each line prints one answer.
 # Every expectation below was taken from real perl running the same program.
@@ -153,6 +153,30 @@ my $q1 = \*main::foo; my $q2 = \*main::bar; ($q1, $q2) = ($q2, $q1);
 print "t38:", ("$q1" eq "$q2" ? "COLLAPSED" : "distinct"), ":", ref($q1), ":", ref($q2), "\n";
 my $m1 = *main::foo; my $m2 = \*main::bar; ($m1, $m2) = ($m2, $m1);
 print "t39:", ref($m1), ":", (ref($m2) eq "" ? "NOTREF" : ref($m2)), ":", ty($m2), "\n";
+
+# --- \&$name (task #517): the SYMBOLIC spelling of \&NAME is the same
+#     late-bound CODE ref, not a SCALAR ref to p-get-coderef's NIL.  Every
+#     line here was taken from perl 5.40.3.
+{ package L; sub AUTOLOAD { our $AUTOLOAD; return "AUTO($AUTOLOAD)" } }
+my $bl = "L::gone";
+print "t40:", ref(\&$bl), ":", ref(\&{"L::gone"}), ":", ref(\&L::gone), "\n";
+print "t41:", (\&$bl)->(7), ":", (\&L::gone)->(7), "\n";
+my $ln = "M::later"; my $lref = \&$ln;
+print "t42:", ref($lref), "\n";
+{ package M; sub later { "BODY(@_)" } }
+print "t43:", $lref->(9), "\n";                 # body defined AFTER the ref
+my $none = "NoSuchPkg42::x"; my $nref = \&$none;
+print "t44:", ref($nref), ":",
+      (eval { $nref->(); 1 } ? "LIVED"
+        : ($@ =~ /Undefined subroutine &NoSuchPkg42::x called/ ? "msg-ok" : "msg=[$@]")), "\n";
+# INVERSE: a value that already IS code, or a glob, keeps its old answer, and
+# `defined &$name` still distinguishes a body from a name.
+my $anon = sub { "ANON(@_)" }; my $ac = \&$anon;
+print "t45:", ref($ac), ":", $ac->(1), ":", ($ac == $anon ? "same" : "differ"), "\n";
+my $gref = \*main::foo; my $gc = \&$gref;
+print "t46:", ref($gc), ":", $gc->(), "\n";
+print "t47:", (defined(&$bl) ? "def" : "undef"), ":",
+              (defined(&$ln) ? "def" : "undef"), "\n";
 EOF
 
 my $out = run_cl($prog);
@@ -234,3 +258,20 @@ like $out, qr/^t38:distinct:GLOB:GLOB$/m,
     'INVERSE: and swapping two glob REFS keeps them distinct';
 like $out, qr/^\Qt39:GLOB:NOTREF:*main::foo\E$/m,
     'INVERSE: a mixed swap moves the ref-ness with the value, not with the slot';
+
+like $out, qr/^t40:CODE:CODE:CODE$/m,
+    '\\&$name on a body-less name is CODE, like \\&NAME and \\&{"name"} (#517)';
+like $out, qr/^\Qt41:AUTO(L::gone):AUTO(L::gone)\E$/m,
+    '...and calling it reaches the package AUTOLOAD with the FULL name (it was empty)';
+like $out, qr/^t42:CODE$/m,
+    '\\&$name taken before the body exists is CODE';
+like $out, qr/^\Qt43:BODY(9)\E$/m,
+    '...and is LATE-BOUND: the body defined afterwards is the one that runs';
+like $out, qr/^t44:CODE:msg-ok$/m,
+    'a name in a package that does not exist is still CODE, and dies perl\'s death when called';
+like $out, qr/^\Qt45:CODE:ANON(1):same\E$/m,
+    'INVERSE: \\&$coderef is that same coderef';
+like $out, qr/^t46:CODE:42$/m,
+    'INVERSE: \\&$globref still reaches the glob\'s CODE slot';
+like $out, qr/^t47:undef:def$/m,
+    'INVERSE: `defined &$name` still tells a body from a bare name';
