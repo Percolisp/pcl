@@ -1042,6 +1042,11 @@ sub parse {
   # identical there (same decl scope, tie applied to the same variable).
   $doc = $self->_normalize_tie_my($doc);
 
+  # `${;EXPR}` / `*{;EXPR}` — perl's brace-is-a-BLOCK disambiguator leaves an
+  # empty statement PPI keeps and the walker had no case for; see
+  # _normalize_null_statements.
+  $doc = $self->_normalize_null_statements($doc);
+
   # PPI LEXER BUG: an anon sub with an ATTRIBUTE at the START of an expression
   # is tokenized as a LABEL — see _normalize_anon_sub_attrs.
   $doc = $self->_normalize_anon_sub_attrs($doc);
@@ -1081,10 +1086,18 @@ sub parse {
   # _repair_glob_multiply, _repair_minus_word, _repair_word_match,
   # _repair_word_x_call.
   $doc = $self->_repair_glob_multiply($doc);
+  # …and its INVERSE: a punctuation- or digit-named GLOB (`*X = *-`,
+  # `local *1 = sub {…}`) that PPI hands over as two operator tokens — see
+  # _repair_punct_glob_name (task #463).
+  $doc = $self->_repair_punct_glob_name($doc);
   $doc = $self->_repair_minus_word($doc);
   $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_word_x_call($doc);
   $doc = $self->_repair_term_initial_complement($doc);
+  # And the CASCADE of §14's readline mis-lex: with `>` read as an operator the
+  # following `/` becomes a match and swallows the rest of the statement — see
+  # _repair_readline_cascade (task #479).
+  $doc = $self->_repair_readline_cascade($doc);
 
   # PPI LEXER BUG: a `finally { … }` block is not part of the try Compound PPI
   # built, and the orphan statement it starts swallows the rest of the block —
@@ -5156,6 +5169,49 @@ sub _reparse_doc {
   return $new;
 }
 
+# `${;EXPR}` — perl's own way to say "this brace is a BLOCK, not a hash
+# subscript" (perlref: "you can always use a `;` to force the block reading").
+# The leading `;` is an empty statement and carries no value, but PPI keeps it
+# as a PPI::Statement::Null child and the expression walker had no case for a
+# two-child deref block, so `*{;undef} = 3`, `${;"a"}` and `@{;"z"}` were all
+# DROPPED — one message, three sigils (task #463 item 5).
+#
+# Deleting the Null is most of the fix, and it is safe by PPI's own
+# classification: a Null statement is INSIGNIFICANT (`significant` is false,
+# which is exactly why `schildren` cannot see it — a first version guarded on
+# `schildren > 1` and changed nothing) and it carries no value.
+#
+# BUT THE `;` MEANS MORE THAN "THIS IS A BLOCK", and deleting it alone was a
+# SILENT WRONG.  Inside a forced block a lone bareword is an EXPRESSION, where
+# in a plain deref it is the NAME — probed, perl 5.40.3, `sub foo { "bar" }
+# our $bar = 5; our $foo = 9`:
+#
+#     ${foo}   -> 9      the variable $foo          (a NAME)
+#     ${;foo}  -> 5      == ${ foo() } == $bar      (a CALL)
+#     *{foo}   -> *main::foo        *{;foo} -> *main::bar
+#
+# so `*{;undef} = 3` (t/op/gv.t:1020, which asserts the DIE) had been emitting
+# `(p-glob-assign-dynamic "undef" 3)` — the glob literally named "undef".  The
+# bareword is therefore made an explicit call before the `;` goes, and the
+# document is reparsed so every consumer sees the call.
+sub _normalize_null_statements {
+  my ($self, $doc) = @_;
+  my $rewrote = 0;
+  for my $null (@{ $doc->find('PPI::Statement::Null') || [] }) {
+    my $p = $null->parent or next;
+    next unless $p->isa('PPI::Structure::Block');
+    $null->delete;
+    my @kids = $p->schildren;
+    next unless @kids == 1 && $kids[0]->isa('PPI::Statement');
+    my @t = $kids[0]->schildren;
+    next unless @t == 1 && $t[0]->isa('PPI::Token::Word')
+             && $t[0]->content =~ /\A[^\W\d]\w*\z/;
+    $t[0]->set_content($t[0]->content . '()');
+    $rewrote = 1;
+  }
+  return $rewrote ? $self->_reparse_doc($doc) : $doc;
+}
+
 # `tie my $y, ARGS;` → `my $y; tie $y, ARGS;` (see the parse() comment).
 sub _normalize_tie_my {
   my ($self, $doc) = @_;
@@ -5519,6 +5575,95 @@ sub _repair_glob_multiply {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
+# PPI LEXER BUG (task #463 items 3+4, docs/ppi-upstream-bugs.md §26) — the
+# INVERSE of §12 above.  perl lets any punctuation character or digit run name a
+# glob, exactly as it names a scalar; PPI's Symbol regex is word-bounded, so it
+# hands those over as two ordinary operator tokens and the statement is DROPPED:
+#
+#     *X = *-;            Symbol(*X) Operator(=) Operator(*) Operator(-)
+#     local *a = *1;      Word(local) Symbol(*a) Operator(=) Operator(*) Number(1)
+#     local *1 = sub {…}; Word(local) Operator(*) Number(1) Operator(=) …
+#
+# and the compiler's own message for the first is "Got op '-', not postfix.  But
+# there is nothing after it??".  perl means the punctuation globals by them:
+# `*X = *-` makes `%X` the named-capture hash, `local *a = *1` makes `$a` the
+# first capture group.
+#
+# THE REPAIR SPELLS THE GLOB THE WAY THE COMPILER ALREADY LOWERS ONE:
+# `*-` becomes `*{'-'}`, the symbolic form, and the document is reparsed.  The
+# two are the same glob in perl even inside a package — probed, both reach the
+# forced-main punctuation globals, and both give `ell` for `*{"1"}` after a
+# match — and `p-glob-assign-dynamic` already implements that path.
+#
+# THE CONDITION IS A WHITELIST, not `_ends_term`'s negative, and that asymmetry
+# is deliberate (memory: a refusal classifier is asymmetric — a miss is free, a
+# false positive kills a file).  A `*` can only OPEN a glob name where a term
+# can start, and the term-start positions a glob is written in are few:
+# statement/block/list start, after `=`, `,` or `=>`, after `return`.
+# Everything the population's term-position `*` sites actually are —
+# a glob PATTERN inside a `<…>` run PPI derailed (`<op/*.t>`, `<*>`), a regex
+# body in a file PPI mis-lexed whole (t/re/pat.t), and `@{$h} * (…)` where
+# `_ends_term` wrongly says the term has not ended because a deref block's `}`
+# is not a subscript's — has a previous token OUTSIDE that list, so none of them
+# can be touched.  Measured over all four populations: 1329 files, 23
+# term-position `*` sites, and the whitelist selects exactly the 8 glob ones.
+#
+# `^` is deliberately NOT a name here: `*^R` is the glob named chr(18) (the
+# caret convention), not the one named `^`, so it needs the #412 caret-name
+# machinery and is filed as task #562 with `*]`.
+my %PUNCT_GLOB_CHARS = map { $_ => 1 } split //, q{-!+./\\,:?=<>~&%|};
+
+sub _repair_punct_glob_name {
+  my ($self, $doc) = @_;
+  my @tok = grep { $_->significant } $doc->tokens;
+  my $repaired = 0;
+  for my $i (0 .. $#tok - 1) {
+    my ($star, $next) = @tok[$i, $i + 1];
+    next unless $star->isa('PPI::Token::Operator') && $star->content eq '*';
+    next unless _glob_name_position($i ? $tok[$i - 1] : undef);
+    my $name;
+    if ($next->isa('PPI::Token::Number') && $next->content =~ /\A[0-9]+\z/) {
+      $name = $next->content;
+    }
+    elsif ($next->isa('PPI::Token::Operator') && length($next->content) == 1
+           && $PUNCT_GLOB_CHARS{ $next->content }) {
+      $name = $next->content;
+    }
+    next unless defined $name;
+    (my $q = $name) =~ s/([\\'])/\\$1/g;
+    $star->set_content("*{'$q'}");
+    $next->delete;
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# Where a `*` may OPEN a glob name — see _repair_punct_glob_name.
+#
+# `}` is not in the list on purpose: it is the one token that is a statement end
+# in one reading (`sub f {…} *bar = …`) and a term end in the other (`$h{a}*2`),
+# and a punctuation glob at that position is a miss, which costs nothing.
+#
+# NEITHER IS `local`, and that one is measured: `local *1 = sub {…}`
+# (t/op/method.t:38) would be repaired into `local *{'1'} = sub {…}`, and
+# `_process_local_declaration`'s typeglob branch matches a Token::Symbol only —
+# a Cast + Block target falls through and the statement VANISHES with no
+# announcement (task #564; the `local *{"1"}` spelling loses it at HEAD too).
+# Trading a loud drop for a silent one is the wrong direction, so that shape
+# keeps dropping until #564 closes.  `local *a = *1` is unaffected: its `*1` is
+# on the RIGHT of the `=`.
+sub _glob_name_position {
+  my ($prev) = @_;
+  return 1 unless $prev;                                     # document start
+  return $prev->content =~ /\A[;{(\[]\z/ ? 1 : 0
+    if $prev->isa('PPI::Token::Structure');
+  return $prev->content =~ /\A(?:=|,|=>)\z/ ? 1 : 0
+    if $prev->isa('PPI::Token::Operator');
+  return $prev->content eq 'return' ? 1 : 0
+    if $prev->isa('PPI::Token::Word');
+  return 0;
+}
+
 # PPI LEXER BUG (task #457, docs/ppi-upstream-bugs.md §25) — the THIRD sibling
 # of §12 (`)*name` → glob) and §15 (`)-1`), and the one that was still
 # unrepaired.  After a token that ENDS A TERM, `-name` written with no space is
@@ -5635,6 +5780,63 @@ sub _repair_term_initial_complement {
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
+
+# PPI LEXER BUG (task #479, docs/ppi-upstream-bugs.md §14, the CASCADE half).
+# §14 is the readline `<…>` read as `<` … `>` in term position, and PCL has
+# lived with it since s404 because `Pl::PExpr::_fix_ppi_glob_after_block`
+# rebuilds the token afterwards.  That workaround cannot reach ONE consequence,
+# because the damage is not in the three tokens it repairs: with the `>` taken
+# for an operator, the NEXT `/` is in term position too, so PPI reads it as a
+# MATCH and swallows whatever follows —
+#
+#     my $so = $ok ? <$f> // "" : "";
+#         => … Operator(?) Operator(<) Symbol($f) Operator(>)
+#                          Regexp::Match(//) Quote::Double("") …
+#     my $so = $ok ? <$f> / 2 : "";
+#         => …           Operator(>) Regexp::Match(/ 2 : "";)      <- the REST
+#
+# By the time PExpr rebuilds `<$f>` the `//` is a Regexp token where an
+# operator belongs, and the statement is DROPPED (#138).  It is our own
+# harness's shape: `perl-tests/t/test.pl`'s runperl_and_capture, re-transpiled
+# by every sweep file, was the first thing the #472 child-drop instrument found.
+#
+# The cascade cannot be undone token by token (`/ 2 : "";` is ONE token now),
+# so this repair works at SOURCE level like _rewrite_state_prepass: it spells
+# the diamond as the call perlop says it is — `<$f>` is `readline($f)` — and
+# reparses, after which PPI tokenizes the whole statement correctly.  The two
+# spellings are interchangeable in every context this can fire in (probed vs
+# perl: scalar and list context, a bareword handle, an undef handle with `//`).
+#
+# THE CONDITION IS THE FAMILY'S NEGATIVE plus the cascade itself, which is what
+# keeps it narrow: the `<` must be in TERM position (`_ends_term` says no —
+# `$a < $b > /x/` keeps its comparisons), the body must be exactly what perlop
+# calls a readline (empty is left out: `<>` is ARGV magic, and PExpr's rebuild
+# skips it too), and the token after the `>` must be the Regexp the mis-lex
+# created.  Nothing else in the document is touched, so a shape PPI got right
+# cannot be disturbed — measured: ZERO sites in all four populations, which is
+# why `Pl/t/readline-ternary-01.t` is the guard.
+sub _repair_readline_cascade {
+  my ($self, $doc) = @_;
+  my @tok = grep { $_->significant } $doc->tokens;
+  my $repaired = 0;
+  for my $i (2 .. $#tok - 1) {
+    my ($lt, $body, $gt, $nx) = @tok[$i - 2, $i - 1, $i, $i + 1];
+    next unless $gt->isa('PPI::Token::Operator')  && $gt->content eq '>';
+    next unless $lt->isa('PPI::Token::Operator')  && $lt->content eq '<';
+    next unless $nx->isa('PPI::Token::Regexp')    && $nx->content =~ m{\A/};
+    my $name = $body->content;
+    next unless ($body->isa('PPI::Token::Symbol')
+                 && $name =~ /\A\$(?:[^\W\d]\w*::)*[^\W\d]\w*\z/)   # <$fh>
+              || ($body->isa('PPI::Token::Word')
+                 && $name =~ /\A[^\W\d]\w*(?:::[^\W\d]\w*)*\z/);    # <FH>
+    next if _ends_term(_prev_sig_token($lt));
+    $lt->set_content('readline(');
+    $gt->set_content(')');
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
 # PPI LEXER BUG (task #361, docs/ppi-upstream-bugs.md §19).  `x` is both an
 # operator and a legal sub name, and PPI decides which by looking at the token
 # before it — a Word counts as a complete term, so:

@@ -12329,7 +12329,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-255"
+(defparameter *pcl-cache-generation* "v2-290"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -14538,6 +14538,18 @@ buffer's fill-pointer; everything else falls back to file-length."
         (uname (%pcl-invert-case name-str)))
     (%p-glob-assign-slots pkg uname rhs)))
 
+(defun %p-check-symbol-reference (name-box)
+  "perl: `*{EXPR}` with an UNDEF EXPR is a fatal error, on both sides of an
+   assignment — `*{undef()} = 3` and `my $x = *{undef()}` both die with
+   \"Can't use an undefined value as a symbol reference\".  An EMPTY STRING is
+   NOT the same thing and is legal (probed, perl 5.40.3), so the test is
+   definedness, never emptiness.  Without this a glob assignment through undef
+   installed into a package with an empty name and said nothing — the silent
+   half of the #138 family, and op/gv.t:1020 asserts the message."
+  (unless (%pcl-definedp name-box)
+    (p-die "Can't use an undefined value as a symbol reference"))
+  (values))
+
 (defun p-glob-assign-dynamic (name-box rhs)
   "Dynamic typeglob assignment: *{EXPR} = val.  EXPR is either a NAME string
    (\"Pkg::name\") or a glob REFERENCE (\\*{...}) — the form Moo's _install_coderef
@@ -14545,6 +14557,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    to a p-typeglob; assign straight into its slots rather than stringifying it
    (which would yield GLOB(0x..) and install nothing)."
   (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
+    (%p-check-symbol-reference name-box)
     (if (p-typeglob-p inner)
         (%p-glob-assign-slots (p-typeglob-package inner) (p-typeglob-name inner) rhs)
         (let* ((name-str (to-string name-box))
@@ -14565,6 +14578,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    or a glob REFERENCE (\\*{...}); a glob ref unboxes to a p-typeglob, which we
    return as-is (e.g. *{$glob}{CODE} where $glob = \\*{...})."
   (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
+    (%p-check-symbol-reference name-box)
     (if (p-typeglob-p inner)
         inner
         (let* ((name-str (to-string name-box))

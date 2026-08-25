@@ -618,6 +618,55 @@ the `/` inside a derailed `<op/*>` run as a match, so it skips a `/` whose
 Word is preceded by `<` — i.e. this bug's damage is what that guard is keyed
 on.  If PPI is fixed, both come out together.
 
+### 14b. THE CASCADE — a `/` after the mis-read `>` becomes a MATCH  (task #479)
+
+The claim above that the impact is "none today" was true only of the three
+tokens the rebuild reaches.  Once `>` has been taken for an operator, the
+tokenizer is in OPERATOR-just-seen state, so the **next `/` is read as the
+start of a match** — and PExpr's rebuild cannot undo that, because by then the
+`/` and everything it swallowed are ONE token:
+
+```
+my $so = $ok ? <$f> // "" : "";
+  Operator(?) Operator(<) Symbol($f) Operator(>) Regexp::Match(//) Quote::Double("") …
+                                                 ^^^^^^^^^^^^^^^^^ should be Operator(//)
+
+my $so = $ok ? <$f> / 2 : "";
+  Operator(?) Operator(<) Symbol($f) Operator(>) Regexp::Match(/ 2 : "";)
+                                                 ^^^ the REST OF THE STATEMENT
+```
+
+perl reads both as one would expect (`<$f>` is a term, so `/` and `//` are
+operators):
+
+```
+$ printf 'hello\n' > /tmp/x
+$ perl -e 'open(my $f,"<","/tmp/x"); my $s = 1 ? <$f> // "" : ""; print $s'
+hello
+```
+
+**Impact on PCL: a DROPPED STATEMENT (#138 family) — and it was in our own
+harness.** `perl-tests/t/test.pl`'s `runperl_and_capture` had two of them, so
+every one of the 108 sweep files re-transpiled a file with two dropped
+statements; it was the first thing the #472 child-drop instrument found.  The
+`/ 2` spelling is worse: the swallowed text takes the rest of the statement
+with it, so the drop message quotes code from three lines further down.
+
+**Workaround (s446k):** `Pl::Parser2::_repair_readline_cascade`.  The cascade
+cannot be undone token by token, so the repair works at SOURCE level like
+`_rewrite_state_prepass`: it spells the diamond as the call perlop says it is
+(`<$f>` → `readline($f)`) and reparses, after which PPI tokenizes the whole
+statement correctly.  It fires only where the cascade actually happened — the
+`<` must be in term position (`_ends_term`), the body must be a readline body
+(a simple scalar or a bareword handle; `<>` is left alone) and a `Regexp` token
+must follow the `>`.  `readline(...)` rather than `(<$f>)` because parenthesing
+would create perl's `print (...) interpreted as function` gotcha for
+`print <$f> // ""`.
+
+**Repro + failing rows:** Bugs 13 and 14 in `docs/ppi-bug-report.t`.  Guard:
+`Pl/t/readline-ternary-01.t` (the shape occurs in ZERO files of all four
+in-repo populations, so those rows are the only guard there can be).
+
 ---
 
 ## 15. `)` followed by `-1` — the operator is swallowed into a negative NUMBER  [CONFIRMED 1.291]
@@ -1111,6 +1160,58 @@ the same predicate and the same shape as `_repair_glob_multiply`.  The
 condition is a NEGATIVE, which is what makes it safe: `(-f => 4)`,
 `foo(-bar)`, `$h{-key}` and `1, -bar` all follow `(`, `{` or `,`, none of which
 ends a term (all probed against perl).  Guard rows: `Pl/t/minus-word-01.t`.
+
+---
+
+## 26. A glob whose NAME is punctuation or a digit run is split into two operators  [CONFIRMED 1.291]
+
+**Perl:** a glob is named by whatever names a variable, and punctuation and
+digits name variables (`$-`, `$!`, `$1`), so `*-`, `*!` and `*1` are globs.
+Real perl test code writes them:
+
+```
+*X = *-;            t/re/reg_namedcapture.t:18   makes %X the named-capture hash
+*Y = *!;            t/re/reg_namedcapture.t:25   makes %Y the errno hash
+local *a = *1;      t/re/subst.t:951             makes $a the first capture
+local *1 = sub {…}; t/op/method.t:38             installs main::1
+```
+
+**PPI:** `PPI::Token::Symbol`'s name is word-bounded, so only `*word` is a
+Symbol.  The rest come out as two ordinary tokens:
+
+```
+our %X; *X = *-;      Symbol(*X) Operator(=) Operator(*) Operator(-)
+local *a = *1;        Word(local) Symbol(*a) Operator(=) Operator(*) Number(1)
+*^R = *g;             Operator(*) Operator(^) Word(R) Operator(=) Symbol(*g)
+```
+
+This is the same class as §24 (`@?` → Cast + Operator), one sigil over — but
+NOT the same repair, because `*` is also multiplication and a glob pattern's
+metacharacter, so a `Cast` never appears and adjacency cannot decide it.
+
+**Impact on PCL: the statement was DROPPED** (#138 family), with the compiler's
+own message `Got op '-', not postfix.  But there is nothing after it??` for the
+punctuation forms and `Bug. Fell through. Missing case: []` for the digits.
+
+**Workaround (s446k, task #463):** `Pl::Parser2::_repair_punct_glob_name`
+rewrites the name into the symbolic spelling the compiler already lowers —
+`*-` → `*{'-'}` — and reparses.  The two are the same glob in perl even inside
+a package (probed: both reach the forced-`main` punctuation globals).  Its
+condition is a WHITELIST of the positions where a `*` can OPEN a glob name
+(statement/list start, after `=`, `,` or `return`), not `_ends_term`'s
+negative, because a false positive turns working multiplication into a glob:
+measured over all four populations, 1329 files hold 23 term-position `*` sites
+and only 8 are globs — the rest are glob PATTERNS inside a `<…>` run PPI
+derailed (§14), regex bodies in a file PPI mis-lexed whole, and `@{$h} * (…)`,
+where `_ends_term` itself wrongly says the term has not ended because a deref
+block's `}` is not a subscript's.
+
+**Not covered, and filed:** `*^R` (three tokens — `^R` is the caret convention
+for chr(18), not the glob named `^`) and `*]` (PPI makes the `]` a Structure
+token) — task #562.
+
+**Repro + failing rows:** Bugs 15 and 16 in `docs/ppi-bug-report.t`.  Guard:
+`Pl/t/punct-glob-name-01.t`.
 
 ---
 

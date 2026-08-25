@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 32;
+use Test::More tests => 36;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -223,6 +223,26 @@ sub toks {
     my @t = toks('sort <STDIN>;');
     ok( grep(/^PPI::Token::QuoteLike::Readline=/, @t),
         '<STDIN> after a list operator should be a readline, as it is after a comma' )
+        or diag "got: @t";
+}
+#
+# THE CASCADE, which is the expensive half: once `>` has been taken for an
+# operator, the NEXT `/` is in term position too, so it starts a match — and
+# an unterminated one swallows the rest of the statement.
+#
+#   $ perl -e 'open(my $f,"<","/etc/hostname"); my $x = 1 ? <$f> // "" : ""; print $x'
+#   <the first line of /etc/hostname>
+#
+{
+    my @t = toks('my $x = $ok ? <$f> // "" : "";');
+    ok( !grep(/^PPI::Token::Regexp::Match=/, @t),
+        '`<$f> // ""` in a ternary branch: the // is defined-or, not an empty match' )
+        or diag "got: @t";
+}
+{
+    my @t = toks('my $x = $ok ? <$f> / 2 : 0;');
+    ok( !grep(m{^PPI::Token::Regexp::Match=/ 2 : 0;$}, @t),
+        '`<$f> / 2` in a ternary branch: the / is division, and must not eat the statement' )
         or diag "got: @t";
 }
 
@@ -488,4 +508,32 @@ PERL
     my $doc = PPI::Document->new(\'my $z = length("abc") - length("a");');
     ok( (grep { $_->isa('PPI::Token::Operator') && $_->content eq '-' } $doc->tokens),
         '`) - length` lexes as a minus operator (the control)' );
+}
+
+# ── Bug 26: a glob named by PUNCTUATION or DIGITS is split into two tokens ────
+#
+# perl names a glob with whatever names a variable, and punctuation and digits
+# name variables, so `*-`, `*!` and `*1` are globs.  perl's own test suite
+# writes them: `*X = *-;` (t/re/reg_namedcapture.t:18) aliases the
+# named-capture hash, `local *a = *1;` (t/re/subst.t:951) aliases $1.
+#
+#   $ perl -e '"X"=~/(?<X>X)/; our %X; *X = *-; print keys %X'
+#   X
+#
+# PPI::Token::Symbol's name is word-bounded, so only `*word` is a Symbol; the
+# rest arrive as Operator('*') + Operator/Number.  Same class as bug 24
+# (`@?` → Cast + Operator), one sigil over.
+{
+    my $doc = PPI::Document->new(\'our %X; *X = *-;');
+    ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*-' } $doc->tokens),
+        '`*-` should lex as one Symbol, as `*foo` does' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+{
+    my $doc = PPI::Document->new(\'local *a = *1;');
+    ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*1' } $doc->tokens),
+        '`*1` should lex as one Symbol — a digit run names a glob too' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
 }
