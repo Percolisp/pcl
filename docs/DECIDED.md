@@ -80,6 +80,16 @@ those two files and the live plan doc directly -- no new review-doc families.*
   legal and is not the same thing (probed).  Without it, un-dropping
   `*{;undef} = 3` (t/op/gv.t:1020, which asserts the message) would have
   traded a loud drop for a silent no-op.
+- **Bar**: gate **177/5997** (the 3 pclxs xs files `skip_all` in a worktree);
+  corpus-diff vs `8600556` IDENTICAL over 111 files, silent drops 5 unchanged,
+  shapes 6 identical; lib A/B SAME=22; perl-t A/B 605 files DIFF=4 (exactly
+  the four whose drops moved) RCDIFF=0; cpan A/B 402 files DIFF=99 RCDIFF=0
+  (every one the #478 prototype effect — spot-checked: `intercept { … }` goes
+  from a dropped statement to `(pl-intercept (lambda …))`); census 33
+  files/87 drops, verified row for row against the edited baseline.
+  Generation **v2-290** — the assigned v2-240 was BELOW main by the time this
+  branch rebased (main had reached v2-255), the launcher rule's known failure
+  mode; Fable renumbers the batch once at merge.
 ## s446j (2026-08-25, Opus agent J) — #506 + #507 + #514 + #517 SHIPPED, #505 in part; the punctuation containers are ALL runtime-owned; a NUMERIC symbolic ref is BLOCKED by the box model
 
 - **Every punctuation container perl allows is RUNTIME-OWNED** (#506): the
