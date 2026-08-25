@@ -2,21 +2,20 @@
 
 [![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 
-Percolisp (PCL) compiles Perl 5 to Common Lisp, and the result runs as native
-code under [SBCL](https://www.sbcl.org/).  Nothing of perl's own C runtime is linked or
-reimplemented: a runtime library written in Common Lisp supplies Perl's
-semantics instead.
+Percolisp (PCL) compiles Perl 5 to Common Lisp, and the result runs as
+native code under [SBCL](https://www.sbcl.org/).  Nothing of perl's own C
+runtime is linked or reimplemented: a runtime library written in Common Lisp
+supplies Perl's semantics instead.
 
-This might end up as a faster Perl.  SBCL is an optimizing native compiler,
-and where PCL can prove that a piece of Perl does not need Perl's
-flexibility, it emits plain machine code.  Recursion, counting loops and
-integer arithmetic already run several times faster than under perl.  Other
-things are still slower, and the measurements below report the losses as well
-as the wins.
+The target is a faster Perl.  SBCL is an optimizing native compiler, and
+where PCL can prove that a piece of Perl does not need Perl's flexibility, it
+emits plain machine code.  Recursion, counting loops and integer arithmetic
+already run several times faster than under perl.  Other things are still
+slower, and the measurements below report the losses as well as the wins.
 
-The second aim is a compiler toolkit.  Common Lisp is easy to parse, so the
-generated code is meant to double as an intermediate form — something another
-compiler could take on to a different platform.
+The second target is a compiler toolkit.  Common Lisp is easy to parse, so
+the generated code is meant to double as an intermediate form — something
+another compiler could take on to a different platform.
 
 **Maturity: early.**  v0.1.0 is the first tag.  Pure-Perl code works well;
 modules that need compiled C (XS) do not work at all.  See
