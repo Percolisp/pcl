@@ -10,7 +10,7 @@ session s444/s445; execution benchmarks re-run 2026-08-25 —
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **171 files, 5,924 assertions, all passing** (the 14 XS-bridge rows run only with the experimental [pclxs](#xs) sibling built) | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| PCL's own regression gate (`Pl/t/`) | **177 files, 6,011 assertions, all passing** (the 14 XS-bridge rows run only with the experimental [pclxs](#xs) sibling built) | `tools/prove-core` (or `prove -j8 Pl/t/`) |
 | Perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.x `t/op`, `t/base`, …) | **18,313 assertions pass / 893 fail (95.4 %)**; **61 files pass completely** | `perl sweep-perl-tests.pl --jobs 8` |
 | Perl's full `t/` tree, run in place (528 files) | run per-directory as a bug-finder; verdicts tracked per file against blessed baselines | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | XS bridge conformance corpus (pclxs, 398 cases, real perl as oracle) | **398 pass / 0 fail**; `Digest::MD5`'s own `md5-aaa.t` passes 256/256 under PCL | `tools/pcl-conform` |

@@ -81,7 +81,29 @@ NON-OPTIONAL for L's lib/ change; gate-SET where a refusal/drop stops
 firing — K), generation renumbered ONCE above v2-250 + artifacts
 regenerated on the merged tree.
 
-Cross-cutting (unchanged): the WHAT-TO-RUN table in CLAUDE.md decides what
+**s445 later (Fable, 2026-08-25) — ROUND 5 COMPLETE: all five agents
+reviewed with independent probes and ff-MERGED; final tree `f95fa97`, gen
+v2-290; every batch leg run and clean** (full sweep ×2 GATE clean TOTAL
+18319 +4, both baselines edited row by row; gate-SET vs `ad6553d` = exactly
+2 drop→OK lines; companion op/io/re/mro/class with NINE movers each
+re-measured alone and spliced with causes; cold gate on main; narrative in
+session-log §445).  Shipped: #73-remainder cache-free (2.62×/4.74× of
+perl) + #533 (M); #502 English + #504 runpcl streams + #525 (L); #506 +
+#507 + #514 + #517 + #505-part (J); #508 + #509 + #510 + #512 + #513 (I);
+#463 items 3–5 + #479 both halves + #478 with the census 73/167 → 34/89
+(K).  Closed also #572 (dup of #512).  **Queue now — the filler pool by
+what it blocks: #543 (~6 lines, wants the next sweep), #535 (the
+STDOUT-restore half #513 exposed — io/open.t's 9 rows sit behind it),
+#534 (import/unimport empty-list family), #560 (the #478 cost mitigation:
+disk-cached prototype facts — new cache family, Fable-sized), #561
+(punct-magic glob alias empty slot — op/gv.t's 4 rows), #551 (numeric
+symbolic-ref, needs a design ruling), #541 (false-conditioned local
+write-through, needs a design ruling), then the older #519–#532 / #504
+leftovers (#527 measured and shaped; #520 runtime half first) and
+#540/#542/#550/#562–#565/#570–#576/#580–#581.  #582 post-v0.1.  The
+remaining plan-post-s433 queue (Q7 fillers #457/#464–#466/#468/#470 — some
+now overtaken by this round; re-check each against the task store before
+scheduling) stands after those.
 runs; every probe-found silent-wrong is FILED with its reproducer; a
 review-request doc per session (`docs/opus5-review-requests-sNNN.md`) — write
 one even if it says "no asks"; grep `Pl/t` for the message text of ANY

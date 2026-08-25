@@ -1,4 +1,27 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s445 (Fable) — NINE ROWS EDITED BY HAND after the round-5 batch (agents M/L/J/I/K
+#   merged, tree f95fa97), companion legs op/io/re/mro/class --quick, every mover
+#   re-measured ALONE (--jobs 1, the #366 serial verdict):
+#     io/open.t          127/34 -> 118/3   #513 fixed the TEN dup rows (46-51,94,95,112,114)
+#                                          and EXPOSED the missing STDOUT-restore half —
+#                                          fd 1 breaks mid-file, task #535 (mechanism
+#                                          established by recovery-loading the byte-identical
+#                                          emission on both runtimes)
+#     op/gv.t            134/65 -> 130/61  K un-drops the glob-alias statement; it now RUNS
+#                                          and dies on #561 (empty punct-magic slot), one
+#                                          more aborted form (3 -> 4)
+#     op/dor.t            29/5  -> 31/3    K #479 (readline-in-ternary compiles)
+#     op/join.t           39/4  -> 41/2    s446i local-LIST assignment (separator rows 9/10)
+#     op/magic.t         168/39 -> 170/37  I #512 ($0 writable)
+#     op/postfixderef.t   95/26 -> 96/25   J #517 (ref(\&{""}) is CODE); sig text now
+#                                          perl-shaped ("Undefined subroutine &main::foo")
+#     op/ref.t           198/44 -> 199/43  J #517; sig now records the PRE-EXISTING
+#                                          indirect-object die (#476/#399 family)
+#     op/sub_lval.t       50/49 -> 51/48   K un-drop (drops 35 -> 34)
+#     op/universal.t      79/59 -> 80/64   M #533: SUPER:: resolves/dies trappably, so SIX
+#                                          more rows reach a verdict (1 new ok, 5 honest
+#                                          fails); the "No SUPER::isa" raw-error sig is gone
+#   NOT edited: io/pvbm.t read 20 under load (the NINTH time) — the known noise file.
 # s440 (Fable) — ONE MORE ROW EDITED BY HAND after the final companion run on the
 #   v0.1.0 tree: io/open.t C 108/13 -> 127/34.  NOT a mover of the batch: the
 #   same file run ALONE on the pre-batch tree (9bc7ef3, before agent D) also
@@ -840,7 +863,7 @@ io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	11	2	DIFF		0
-io/open.t	188	0	127	34	DIFF	aborted-forms:2: The variable STDOUT is unbound.; unreadable-form: end of file on the loader stream	1
+io/open.t	188	0	118	3	DIFF	aborted-forms:3: The variable STDOUT is unbound.; unreadable-form: end of file on the loader stream	1
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
@@ -983,7 +1006,7 @@ op/die_exit.t	17	0	17	0	OK		0
 op/die_keeperr.t	24	0	15	9	DIFF		0
 op/die_unwind.t	13	0	8	5	DIFF		0
 op/do.t	71	0	66	7	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §DESTROY called by garbage collector — ALL 7 failing rows (66/7 vs perl 71/0) are two blessed categories, established row-by-row s321 after the TAP re-alignment (task #177) showed the old number-join had blamed two rows that PASS. (a) perl t63-t66 + PCL's 2 EXTRA rows: one `foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref()))` loop asserting `$@ =~ /\Asyntax error/`. `do SUBNAME(LIST)` was VALID Perl before 5.20 and meant call-the-sub; PCL keeps that historical semantics, so the assertions fail AND each test's `fail()` guard fires (those are the 2 PCL-only rows — the same divergence, not a second defect). Ruled no-fix in fable-answers-s318.md §4, task #158 :principle9. (b) perl t68 "RT 124248": `f(do { 1; !!(my $x = bless []) })` requires the blessed temp to be DESTROYed at do-block exit (FREETMPS) before f() runs — refcount-deterministic destruction, which PCL does not have; same family as op/args.t t23. NB t67 (delete-helem copied) and t70 ($@ false on do dir) PASS — probed s321 — and t71 ($! is EISDIR on do dir) was FIXED s321 (p-do now carries the OS errno into $!).	0
-op/dor.t	34	0	29	5	DIFF		0
+op/dor.t	34	0	31	3	DIFF		0
 op/dump.t	0	0	0	0	NOTAP		0
 op/each.t	65	0	35	12	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
 op/each_array.t	65	0	65	0	OK		0
@@ -1011,7 +1034,7 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	134	65	DIFF	aborted-forms:3: Died at gv.t line N. 	1
+op/gv.t	304	0	130	61	DIFF	aborted-forms:4: Died at gv.t line N. 	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
@@ -1028,7 +1051,7 @@ op/index_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support thr
 op/infnan.t	1112	0	1106	6	DIFF		0
 op/int.t	19	0	19	0	OK		0
 op/isa.t	14	0	14	0	OK		0
-op/join.t	43	0	39	4	DIFF		0
+op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	22	16	DIFF		0
 op/kvhslice.t	39	0	18	20	DIFF		0
@@ -1051,7 +1074,7 @@ op/loopctl.t	66	1	63	4	DIFF		0
 op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
-op/magic.t	207	1	168	39	DIFF		0
+op/magic.t	207	1	170	37	DIFF		0
 op/method.t	163	0	99	26	DIFF	undef-fn:main::pl-new; aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
 op/mkdir.t	17	0	17	0	OK		0
 op/multideref.t	65	0	42	10	DIFF	undef-fn:main::pl-local; aborted-forms:1: invalid number of arguments: N	0
@@ -1071,7 +1094,7 @@ op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/pe
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
 op/packagev.t	307	0	197	110	DIFF		0
 op/pos.t	33	0	15	15	DIFF		0
-op/postfixderef.t	128	0	95	26	DIFF	aborted-forms:3: The function main::pl-foo is undefined.	0
+op/postfixderef.t	128	0	96	25	DIFF	aborted-forms:3: Undefined subroutine &main::foo called	0
 op/pow.t	268	0	268	0	OK		0
 op/print.t	3	0	2	1	XDIFF	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.	0
 op/protowarn.t	12	0	4	8	DIFF		0
@@ -1085,7 +1108,7 @@ op/read.t	2116	0	2116	0	OK		0
 op/readdir.t	16	0	13	3	DIFF		0
 op/readline.t	35	1	25	7	DIFF	aborted-forms:1: The function PerlIO::pl-get_layers is undefined.	0
 op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.	0
-op/ref.t	257	0	198	44	DIFF		1
+op/ref.t	257	0	199	43	DIFF	aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
 op/require_37033.t	10	0	4	2	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N	0
@@ -1121,7 +1144,7 @@ op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / 
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
-op/sub_lval.t	211	0	50	49	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	35
+op/sub_lval.t	211	0	51	48	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	347	7	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
@@ -1143,7 +1166,7 @@ op/tr.t	317	0	269	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated 
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	32	5	DIFF	undef-fn:main::pl-tcp; aborted-forms:1: The function main::pl-z is undefined.	0
-op/universal.t	142	2	79	59	DIFF	aborted-forms:6: No SUPER::isa found from RTN::B	0
+op/universal.t	142	2	80	64	DIFF		0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0

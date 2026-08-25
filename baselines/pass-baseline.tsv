@@ -155,7 +155,9 @@ delete.t	OK	53	3	56
 die.t	OK	3	0	3
 die_exit.t	OK	17	0	17
 do.t	OK	65	3	73
-dor.t	OK	29	3	34
+# s445/s446k (#479): the readline-in-ternary cascade repair makes <FOO> // and <$foo> // compile —
+# dor.t rows 21+22 left fail-baseline.tsv by EDIT (row 23, -f //, still fails: filed residue).
+dor.t	OK	31	1	34
 each.t	OK	51	0	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
@@ -183,7 +185,10 @@ lex.t	OK	45	0	53
 local.t	OK	303	13	319
 loopctl.t	OK	67	0	67
 lop.t	OK	47	0	47
-magic.t	PARTIAL	150	39	208
+# s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
+# fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
+# argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
+magic.t	PARTIAL	152	37	208
 method.t	PARTIAL	72	26	163
 min_local.t	OK	10	0	10
 multideref.t	PARTIAL	42	10	65

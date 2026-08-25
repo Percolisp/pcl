@@ -63,7 +63,7 @@ All numbers are measured on named, re-runnable instruments; the table in
 
 | measurement | result (2026-08-25) | reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **171 files / 5,924 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
+| PCL's own regression gate (`Pl/t/`) | **177 files / 6,011 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
 | Perl's own test suite, extracted (`perl-tests/`, 108 files from perl's `t/op`, `t/base`, …) | **18,313 assertions pass / 893 fail (95.4 %)**; **61 files pass completely**; tracked row by row against blessed baselines, so the number can only move honestly | `perl sweep-perl-tests.pl --jobs 8` |
 | Perl's full `t/` tree, in place (528 files) | run per directory as a bug-finder; verdicts per file against a blessed snapshot | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | XS bridge ([pclxs](#4-xs--c-extensions), experimental sibling project) | conformance corpus **398 / 398** against real perl | `tools/pcl-conform` |

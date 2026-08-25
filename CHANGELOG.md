@@ -9,6 +9,28 @@ sessions); dates are development-time, not release-time.
   call (2.2× on a method-call loop; overload-heavy bench 7.27× → 4.98× of
   perl).  Counting loops, recursion and integer math beat perl
   (`docs/faster-codegen-suggestions.md` §0.1 is the current measured table).
+- Speed, round 5: dispatch is now cache-free-fast — an own-package fast
+  path plus stash/name memos take a monomorphic method loop to 2.62× of
+  perl (was 9×) and inherited dispatch to 4.74×; the overload-heavy bench
+  is 3.44×.
+- `use English` works (a pure-Perl shim with live aliases, `-no_match_vars`
+  included); `SUPER::` calls finish their lookup exactly like ordinary
+  method calls (UNIVERSAL, the builtins, parent AUTOLOAD, perl-shaped die).
+- `local` fixes: a statement-modifier on a bare `local` is honored; an
+  element or slice target in a `local` LIST is localized *and* assigned
+  (`$!` included); hash slices in plain list assignment get their values.
+- `$0` is writable (and names the script); `open($fh, ">&", \*STDOUT)`
+  filehandle dup works in every spelling with perl's failure shapes.
+- Symbolic refs read the magic scalars (`${"1"}`); every punctuation
+  container is defined; `sort NAME` resolves the comparator on entry;
+  `\&$name` on a not-yet-defined sub is a late-bound CODE ref; the perl-4
+  `'` package separator parses.
+- The compiler's dropped-statement census fell from 167 statements in 73
+  files to 89 in 34: block-prototype calls from Test::/Test2:: dists now
+  parse (the name-based scan skip is gone), `<$fh> //` in a ternary
+  compiles, and glob aliases to punctuation globs (`*X = *-`) lower.
+- `runpcl` keeps program stdout and stderr apart (byte-compares against
+  perl are honest).
 - Correctness (the s444 batch): bareword filehandle names canonicalised at
   one seam (qualified handles, the `*` prototype slot's two halves);
   identity-promoted file lexicals no longer alias a spelled package
