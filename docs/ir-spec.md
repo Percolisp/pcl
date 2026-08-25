@@ -462,6 +462,19 @@ punctuation ARRAYS `@? @! @. @/ @~ @^ @& @% @= @< @>` and the synthesized
 `@#` are owned the same way — the compiler emits the bare name and declares
 nothing, so `@?` written under `package A` and read under `package B` is one
 array.  A per-package `(defvar @? …)` was the old emission and made them two.
+Since s446j (#506) that ownership covers **every punctuation container perl
+allows, hash and array alike** — measured character by character on 5.40.3,
+which takes a punctuation name for all of `" $ % & ' ( ) * + , - . / : ; < =
+> ? @ [ ] ^ _ \` | ~ \` (only `$^[0]` is a syntax error, because `$^` wants a
+letter, and `#` starts a comment).  The CL-unsafe ones are pipe-quoted on both
+sides (`|%;|`, `|@\|`|, `|%\\|`).  A container the runtime does not own is not
+a wrong value but a **dead file**: the read compiles to a bare CL symbol
+nobody declared and the load dies before line 1 (a write auto-vivifies through
+`p-setf`, so only the read-first spelling shows it).  Two related spellings are
+still open: `$$ {EXPR}` — PID magic, a SPACE, then braces — is an element of
+`%$` (without the space it is the double deref `${${EXPR}}`, perl's own
+adjacency rule), and the WHOLE-container spellings (`keys %$`, `%? = (…)`)
+still drop, because PPI lexes `%?` as two operators (task #550).
 
 ### 2b.2 The declaration forms
 
@@ -777,12 +790,19 @@ mentioned at all, the answer is perl's, in perl's order:
    0.` through `%p-caught-perl-value`, the placeholder every runtime die gets,
    and an uncaught one prints `… called` — s440).
 
-One runtime entry point implements it (`%p-call-of-undefined-sub`) and four
+One runtime entry point implements it (`%p-call-of-undefined-sub`; its two
+questions — "does this symbol have a body" and "does its package have an
+AUTOLOAD" — are the single readings `%p-sub-has-body-p` and
+`%p-autoload-symbol`, which `\&NAME` and `sort NAME` §5.4 ask too) and four
 paths reach it: the forward stub's body, the trampoline `p-backslash-sub`
-returns for `\&NAME` when the name has no body, a SYMBOLIC call whose name
-resolves to no body (`&$name(…)` / `$name->(…)` / `&{"name"}(…)`, in the
-package §7.1's rule picks — perl reaches AUTOLOAD through those too, probed
-s442d), and — for a name the file
+returns for `\&NAME` **and for `\&$name` / `\&{EXPR}`, which are the same
+late-bound thing** (s446j, task #517: a code ref taken on a body-less name is
+`CODE`, its call reaches that package's `AUTOLOAD` with the FULL name, and a
+body defined *after* the ref was taken is the one that runs; a name whose
+package does not exist is still `CODE` and dies only when called), a SYMBOLIC
+call whose name resolves to no body (`&$name(…)` / `$name->(…)` /
+`&{"name"}(…)`, in the package §7.1's rule picks — perl reaches AUTOLOAD
+through those too, probed s442d), and — for a name the file
 never declared, whose call the codegen emits as a direct `(pl-NAME …)` — an
 `undefined-function` handler that resumes through CL's `use-value` restart.
 A translator to another host needs the same four, or the equivalent of a
@@ -890,8 +910,9 @@ comparator reading the global would see nothing.
 The body is emitted in scalar context, i.e. the full shape is
 `(p-sort-cmp ($a $b) … (p-scalar-ctx BODY…))`. All three comparator
 spellings share it: a literal block, `sort NAME LIST` — whose body is
-**just the call**, `(p-sort-cmp ($a $b) (p-scalar-ctx (pl-NAME)))`, with the
-pair passed as arguments as well when NAME has a `($$)` prototype — and
+**just the call**, wrapped since s446j (#514) in the name-carrying
+`(p-sort-named 'pl-NAME (p-sort-cmp ($a $b) (p-scalar-ctx (pl-NAME))))`, with
+the pair passed as arguments as well when NAME has a `($$)` prototype — and
 `sort $var LIST` (resolved at runtime by `p-sort-get-fn`, and the only one
 that still wraps the lambda in a `let` capturing `*package*` at creation
 time, so a *string* comparator name resolves in the user's package rather
@@ -906,12 +927,22 @@ compared everything equal where perl dies — and it could never fire (it
 interned `"PL-AUTOLOAD"`, not the symbol `%pcl-cl-sub-name` produces).
 §5.1's rule at the CALL covers every case, and matches perl measurably: a
 sort comparator name **does** reach the package's `AUTOLOAD` (probed on
-5.40.3), and with no `AUTOLOAD` it dies. One divergence remains, and it is
-about *when*: perl resolves the sort sub on entry, so `sort nonexistent (7)`
-and even `sort nonexistent ()` die although the comparator is never called,
-while PCL resolves it at the first comparison and those two spellings
-succeed (found and filed s442d; the die itself is right, only its *timing*
-is late).
+5.40.3), and with no `AUTOLOAD` it dies.
+
+**Entry resolution (s446j, task #514).** perl resolves the sort sub when the
+sort *starts*, not at the first comparison: `sort nonexistent (7)` and even
+`sort nonexistent ()` die `Undefined sort subroutine "main::nonexistent"
+called` although no pair is ever compared — and they die **after** the LIST
+has been evaluated (probed with `$|=1`: the list's own output comes first).
+That ordering is what puts the check inside `p-sort` rather than in the
+comparator form, which is an *argument* and therefore evaluated before the
+list: `p-sort-named` builds a `p-named-cmp` struct carrying the symbol, and
+`p-sort` resolves it on entry (`%p-sort-resolve-comparator`).  The check asks
+**"a body, or the package's own `AUTOLOAD`"** — never `fboundp` alone, because
+a forward declaration with no body IS `fboundp` and perl dies for it, while an
+`AUTOLOAD`-only name works at every list size.  A translator that keeps the
+resolution lazy is wrong only in *when* it dies; one that keys it on `fboundp`
+is wrong about *whether*.
 
 `grep`/`map`/`eval` block bodies are plain `(lambda …)` with **neither**
 the catch nor the context bind — `return` inside them must propagate to the
@@ -1347,6 +1378,21 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 
 Regex match state is *global-with-dynamic-save*, exactly Perl: a failed
 match leaves `$1` from the previous successful match intact.
+
+**A SYMBOLIC scalar reference reaches the magic globals** (normative, s446j /
+task #505).  `${"1"}` is `$1`, `${"10"}` is `$10`, `${"&"}` is `$&` — perl
+names them like any other package variable, and the value is undef only when
+the variable is.  This is a rule about *storage*, which is why it was missed:
+a runtime that keeps its magic scalars RAW in their symbol (as PCL does — the
+capture groups are not boxes) must not answer a symbolic-ref read from the
+box table alone.  **Writing one dies** `Modification of a read-only value
+attempted` for the regex-result family — a name that is all digits with no
+leading zero, plus `&`, `` ` ``, `'`, `+` — *even for a group the last match
+never had* (`${"7"} = 1` dies with no match at all, probed); `${"0"}` (the
+program name) and `${"007"}` (an ordinary variable — a capture name has no
+leading zero) are writable.  A NUMERIC-valued name (`my $n = 5; ${$n}`) is
+perl's same rule, but PCL cannot implement it while the box model drops the
+reference wrapper on a container read — task #551 has the measurement.
 
 ## 9. The load model and string eval
 

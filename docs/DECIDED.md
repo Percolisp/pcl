@@ -21,6 +21,58 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s446j (2026-08-25, Opus agent J) — #506 + #507 + #514 + #517 SHIPPED, #505 in part; the punctuation containers are ALL runtime-owned; a NUMERIC symbolic ref is BLOCKED by the box model
+
+- **Every punctuation container perl allows is RUNTIME-OWNED** (#506): the
+  twelve arrays #498 declared were the set one repair happened to cover, not
+  the set perl allows — measured char by char on 5.40.3, perl takes a
+  punctuation name for all 29 (only `$^[0]` is a syntax error and `#` starts a
+  comment).  25 hashes + 15 more arrays were unbound, and a READ of one killed
+  the whole file at LOAD (a write auto-vivifies, which is why only the
+  read-first spelling shows it).  `$$ {EXPR}` — PID magic, SPACE, braces — is
+  an element of `%$`; without the space it is `${${EXPR}}` (perl's own
+  adjacency rule).  Guard `Pl/t/punct-array-glob-01.t`.
+- **#449's stated blocker is GONE**: the emitter already pipe-quotes the
+  CL-unsafe container names (`|@,|`, `|%;|`, `|%\|`|), so widening
+  `%PUNCT_ARRAY_CHARS` is a token-repair question only.  The HASH twin is
+  **#550** and is the harder half: `@` can only be a sigil, `%` is also modulo,
+  so `keys %?` needs a position rule (PPI lexes it Operator+Operator).
+- **A MAGIC scalar is a scalar — again** (#507, the #466 finding): PPI's
+  `Token::Magic` IS-A `Token::Symbol`, so a `ref() eq` test excludes it and an
+  `isa` test does not.  `$$$_` (Magic + Magic) was left unrepaired and DROPPED
+  while `$$_` (Cast + Magic) always worked.  `$$@_` is a syntax error in perl,
+  so the `^\$` half of the test still carries its meaning.
+- **`sort NAME LIST` resolves at ENTRY, and the die follows the LIST** (#514):
+  perl dies `Undefined sort subroutine "main::nm" called` for an empty or
+  one-element list, AFTER the list's own side effects (probed with `$|=1`) —
+  so the check cannot live where the comparator lambda is BUILT (an argument,
+  evaluated before the list).  `p-sort-named` carries the symbol to `p-sort`.
+  The check asks **body OR the package's own AUTOLOAD**, never `fboundp`
+  alone: perl reaches AUTOLOAD for a comparator (perl #30661) and a forward
+  declaration with no body dies.
+- **perl's PERL-4 tick separator is a COMPILER rule too** (found by #514's
+  guard, fixed with it): `A'B` is `A::B`, and `cl_name` emitted the tick INSIDE
+  the CL symbol, where `'` is the reader's quote — `pl-main'Backwards` read as
+  `(pl-main 'Backwards)`, a call of an undefined sub, silently wrong since
+  forever (`perl-tests/sort.t:240`).  The runtime already read it that way
+  (`%p-tick-package-seps`); the two now agree.
+- **`\&$name` is the SAME late-bound CODE ref as `\&NAME`** (#517): the
+  symbolic spelling went through `p-get-coderef`, which answers NIL for a
+  body-less name, so `\`-wrapping it gave a SCALAR ref whose call reached
+  AUTOLOAD with an EMPTY name.  `p-backslash-sub-ref` routes the NAME arm
+  through `p-backslash-sub`; `%p-denoted-code` is the shared front it and
+  `p-sort-get-fn` ask.  Movers: `ref.t` 192→193, `postfixderef.t` 95→96 (the
+  `ref(\&{""})` row, [perl #94476]), both baselines edited row by row.
+- **A NUMERIC symbolic-ref name CANNOT be told from a hard ref today** (#505
+  residue → **#551**): `%p-hash-unbox-elem` hands back the REFERENT box for a
+  scalar ref, so `\42` read out of a container arrives at `p-cast-$` as
+  box(42) with is-ref NIL — byte for byte `my $n = 42` (probed live).  The
+  fix was implemented and WITHDRAWN: it made Moo's `local $self->{captures}`
+  idiom silently wrong (a gate row).  A "treat it as a name only when $N is
+  bound" heuristic is WORSE ($1..$20 are always bound) — do not retry.  The
+  STRING spelling (`${"5"}`, `${"&"}`, every magic name) IS fixed, and the
+  write side dies perl's read-only death for the regex-result family.
+
 ## s446m (2026-08-25, Opus agent M) — #73's remainder is MEASURED: the fast path + the stash/sub-name memos are the win; stash-in-box and the codegen pre-built name are NOT (7 % and 0 %)
 
 - **#73 method dispatch, cache-free, SHIPPED**: the own-package FAST PATH
