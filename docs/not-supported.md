@@ -1,22 +1,157 @@
-# PCL: Features Deliberately Not Supported
+# What PCL deliberately does not do
 
-This document lists Perl behaviours that PCL intentionally does not emulate,
-along with the rationale.  Tests covering these features are commented out in
-the `perl-tests/` files.
+Perl behaviours PCL does not reproduce, each with the reason and the
+observable difference.  If a `perl-tests/` assertion fails and the cause is
+listed here, that is by design — **grep this file before investigating a
+failure.**
 
-> **Citations of `docs/fable-answers-sNNN.md`** below name a ruling record that was
-> removed from the tree in s440 (USER decision); the ruling is indexed in
-> `docs/DECIDED.md`, and the record is readable from history with
-> `git show 959bf43:docs/fable-answers-sNNN.md`.
+Nothing here is hidden at run time: the assertions that cover these
+behaviours still run, matched by the declarative skip registry
+(`cl/skip-registry.lisp`), which is why `perl-tests/*.t` stays
+byte-identical to perl's own test files ([`test-skip-registry.md`](test-skip-registry.md)).
 
-> **Deferred vs. permanent.** Most items here are *permanent* design decisions
-> (they replicate a Perl interpreter implementation detail with no payoff for
-> real CPAN code).  A few, however, are merely **deferred until after the
-> compatibility phase** — implementable, planned, and tracked in the README
-> roadmap ("Deferred language features — planned, not rejected").  These are
-> marked **[DEFERRED — see roadmap]** below: live symbol-table hashes
-> (`%main::`), `__SUB__` outside string `eval`, and richer `caller()`
-> (package/sub-name depth).
+## How to read an entry
+
+Every entry has the same shape: **Perl behaviour** → **PCL behaviour** →
+**Rationale**, usually followed by **Affected tests**.  A tag in the heading
+says how permanent it is:
+
+| tag in the heading | meaning |
+|---|---|
+| *(no tag)* | **permanent.** Replicating it would mean copying an interpreter implementation detail with no payoff for real code. |
+| **[DEFERRED]**, **[MAYBE LATER]** | **planned.** Implementable, not rejected — tracked in the README roadmap. |
+| **[PARTIAL]**, **[INTERIM]** | **half there.** The common spelling works; the entry says which one does not. |
+| **[RESOLVED]**, **[IMPLEMENTED]** | **no longer a limitation.** Kept so the history and the test rows stay traceable. |
+
+> **A note on citations.** Entries that cite `docs/fable-answers-sNNN.md` name
+> a design-review record removed from the tree in s440; the ruling itself is
+> indexed in [`DECIDED.md`](DECIDED.md), and the record is readable from
+> history (`git show 959bf43:docs/fable-answers-sNNN.md`).  `sNNN` names a
+> working session, `#NNN` an internal task.
+
+## The short list
+
+The handful most likely to matter to a program that is otherwise portable:
+
+* [`@_` argument aliasing](#_-argument-aliasing--partial-plain-my-lexicals-only) — arguments are copies, so `$_[0] = 42` does not write back.
+* [`tie` on an ARRAY or HASH](#tie-on-an-array-or-hash--interim--announced-not-silent-scalar-tie-works) — scalar `tie` works; the other two are announced, not silent.
+* [Regex code blocks `(?{…})`](#regex-code-blocks-code-and-code) — CL-PPCRE has no equivalent.
+* [`DESTROY` at GC time](#destroy-called-by-garbage-collector) — no deterministic finalizer timing on a GC'd host.
+* [Warnings-gated diagnostics](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled) — `use warnings` is not modelled yet.
+* [Error message text](#error-message-text-and-format) — die/`$@` *behaviour* matches; the wording is not a goal.
+* [`format` / `write`](#format--write-report-formatting) and [source filters](#source-filters-filterutilcall-filtersimple-use-switch-).
+* [Live symbol-table hashes `%Foo::`](#live-symbol-table-hashes-main-foo--deferred--see-roadmap) — reads of subs work, writes are lost.
+
+## Index
+
+### Values, scalars and the data model
+
+* [Interned boolean constants (`!0` / `!1` identity)](#interned-boolean-constants-0--1-identity)
+* [A LITERAL in a `foreach` list is writable, not read-only](#a-literal-in-a-foreach-list-is-writable-not-read-only)
+* [Read-only constants via `\undef` stash tricks](#read-only-constants-via-undef-stash-tricks)
+* [Scalar copy does not preserve reference/SV identity](#scalar-copy-does-not-preserve-referencesv-identity)
+* [Sparse arrays (holes), element aliasing, and SV identity](#sparse-arrays-holes-element-aliasing-and-sv-identity)
+* [`**` returns an exact integer where Perl returns a float (NV)](#-returns-an-exact-integer-where-perl-returns-a-float-nv)
+* [`use integer` — large shift / overflow edge cases](#use-integer--large-shift--overflow-edge-cases)
+* [Hex floating-point literals (`0x1.8p+1`)](#hex-floating-point-literals-0x18p1)
+
+### Strings and Unicode
+
+* [Unicode semantics differences](#unicode-semantics-differences) — and its four sub-cases:
+  [`use bytes`](#use-bytes--byte-view-of-upgraded-strings),
+  [code points above U+10FFFF](#code-points-above-u10ffff-perls-extended-utf-8),
+  [`use vN` and default warnings](#use-vn-does-not-toggle-default-warnings),
+  [control-character glob names](#control-character-glob-names-mordor-v-strings)
+* [NUL bytes (and other control characters) in identifiers](#nul-bytes-and-other-control-characters-in-identifiers)
+
+### Regexes
+
+* [Regex code blocks: `(?{code})` and `(??{code})`](#regex-code-blocks-code-and-code)
+* [Regex encoding modifiers (`/a`, `/d`, `/l`, `/u`)](#regex-encoding-modifiers-a-d-l-u)
+* [Regex `/n` modifier — non-capturing groups](#regex-n-modifier--non-capturing-groups)
+* [Regex script-run assertions `(*script_run:…)`](#regex-script-run-assertions-script_run--sr-and-the-atomic-pair)
+* [Regex extended character classes `(?[ … ])`](#regex-extended-character-classes---)
+* [`reset()` for one-match `?pattern?` and named captures](#reset-for-one-match-pattern-and-named-captures)
+
+### Subroutines, arguments and closures
+
+* [`@_` argument aliasing — PARTIAL](#_-argument-aliasing--partial-plain-my-lexicals-only)
+* [Lvalue subroutines](#lvalue-subroutines)
+* [`prototype()` — only registered prototypes](#prototype--returns-only-registered-prototypes-attribute--subutil)
+* [Signature syntax is read as a signature even with the feature off](#signature-syntax-is-read-as-a-signature-even-with-the-feature-off)
+* [`:prototype(...)` on an anonymous sub at the START of an expression](#prototype-on-an-anonymous-sub-at-the-start-of-an-expression)
+* [Attributes on a variable declaration (`my $x : shared`)](#attributes-on-a-variable-declaration-my-x--shared-my-a--foo1)
+* [`__SUB__` (current sub reference) — PARTIAL](#__sub__-current-sub-reference--partial--in-a-sub-it-works-outside-one-it-dies)
+* [A NAMED sub whose captured lexical is re-created per call or per iteration](#a-named-sub-whose-captured-lexical-is-re-created-per-call-or-per-iteration-perls-will-not-stay-shared)
+* [A lexical sub (`my sub NAME`) reached from outside the token stream](#a-lexical-sub-my-sub-name-reached-from-a-place-that-is-not-the-token-stream)
+* [Lazy argument evaluation / `$SIG{__WARN__}` side effects during argument build](#lazy-argument-evaluation--sig__warn__-side-effects-during-argument-build)
+
+### Control flow
+
+* [Computed goto (`goto EXPR`)](#computed-goto-goto-expr)
+* [`given`/`when` / smart match (`~~`)](#givenwhen--smart-match-)
+* [`defer { … }` blocks — DEFERRED](#defer----blocks--deferred--implementable-not-rejected)
+
+### Objects and OO
+
+* [`DESTROY` called by garbage collector](#destroy-called-by-garbage-collector)
+* [Perl 5.38 `class` / `field` / `method` syntax — DEFERRED](#perl-538-class--field--method-syntax--deferred--future-version)
+* [Indirect object syntax with a SCALAR invocant — MAYBE LATER](#indirect-object-syntax-with-a-scalar-invocant-method-obj-list--maybe-later--user-decision-s425)
+* [`tie` on an ARRAY or HASH — INTERIM](#tie-on-an-array-or-hash--interim--announced-not-silent-scalar-tie-works)
+* [`mro` pragma — DFS default, ordering switch, full API](#mro-pragma--dfs-default-ordering-switch-and-full-api)
+
+### Packages, globs and the symbol table
+
+* [Live symbol-table hashes (`%main::`, `%Foo::`) — DEFERRED](#live-symbol-table-hashes-main-foo--deferred--see-roadmap)
+* [`local` on hash/array elements and typeglobs](#local-on-hasharray-elements-and-typeglobs)
+* [Value of a block whose LAST statement is a `package` declaration](#value-of-a-block-whose-last-statement-is-a-package-declaration)
+* [`sort` comparator `$a`/`$b` re-homing after an inline `package` switch](#sort-comparator-ab-re-homing-after-an-inline-package-switch)
+* [An `our` alias whose requalified region contains a nested `package`](#an-our-alias-whose-requalified-region-contains-a-nested-package-statement-or-an-inner-scope-re-declaration)
+* [A SYMBOLIC spelling of a package variable does not demote an identity-promoted lexical](#a-symbolic-spelling-of-a-package-variable-does-not-demote-an-identity-promoted-lexical-470)
+
+### The compile model, `eval` and pragmas
+
+* [Context propagation into string eval](#context-propagation-into-string-eval)
+* [String eval with multiple package sections](#string-eval-with-multiple-package-sections)
+* [String eval ending in an unconvertible declaration](#string-eval-ending-in-an-unconvertible-declaration)
+* [A single generated top-level form above 64k characters](#a-single-generated-top-level-form-above-64k-characters)
+* [Pathological expression nesting depth (≥ ~10k) — DEFERRED](#pathological-expression-nesting-depth--10k--deferred--revisit-after-release-1)
+* [Lexical compile-time hints (`$^H` / `%^H` scoping)](#lexical-compile-time-hints-h--h-scoping)
+* [Source filters (`Filter::Util::Call`, `Filter::Simple`, …)](#source-filters-filterutilcall-filtersimple-use-switch-)
+
+### Errors, warnings and diagnostics
+
+* [Error message text and format](#error-message-text-and-format)
+* [Error messages: no "at FILE line N" location info](#error-messages-no-at-file-line-n-location-info)
+* [Error compatibility for invalid Perl input](#error-compatibility-for-invalid-perl-input)
+* [`$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation](#sig__die__-and-sig__warn__-handler-invocation)
+* [Warnings-gated diagnostics are absent (`use warnings` is not modelled)](#warnings-gated-diagnostics-are-absent-use-warnings-is-not-modelled)
+
+### Built-ins, I/O and the OS
+
+* [`format` / `write` report formatting](#format--write-report-formatting)
+* [Assigning `$0` does not change the OS process name](#assigning-0-does-not-change-the-os-process-name)
+* [`fork` — supported, with two narrow caveats](#fork--supported-with-two-narrow-caveats-not-a-general-gap)
+* [Runtime `$ENV{TZ}` changes not reflected in `localtime`](#runtime-envtz-changes-not-reflected-in-localtime)
+* [`glob` in SCALAR context — iterator keyed by pattern, not call site](#glob-in-scalar-context-the-iterator-is-keyed-by-the-pattern-perl-keys-it-by-the-call-site--accepted-divergence-for-v01--task-489)
+* [`split` implicit LHS-arity limit](#split-implicit-lhs-arity-limit-my-ab--split-----split-)
+* [`pack`/`unpack` — pointer types (`p`/`P`) and 80-bit long double (`D`)](#packunpack--pointer-types-pp-and-80-bit-long-double-d)
+* [`Hash::Util` bucket statistics](#hashutil-bucket-statistics)
+* [`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`](#max_nested_eval_begin_blocks)
+* [`use English` — everything works except `@ARG` inside a sub](#use-english--everything-works-except-arg-inside-a-sub)
+
+### Perl's own internals, and C extensions
+
+* [`Internals::*` C-level introspection](#internals-c-level-introspection)
+* [Readouts of perl's own internals: `B::`, `re::optimization`, `XS::APItest`](#readouts-of-perls-own-internals-b-optree-inspection-reoptimization-xsapitest)
+* [DynaLoader / XS binary extensions](#dynaloader--xs-binary-extensions)
+* [`caller()` filename and line number — DEFERRED](#caller-filename-and-line-number--deferred--see-roadmap)
+
+### No longer limitations — kept for the record
+
+* [Bare `if` with empty true branch — RESOLVED](#bare-if-with-empty-true-branch--resolved-on-the-default-v2-pipeline)
+* [Ref aliasing (`use feature 'refaliasing'`) — IMPLEMENTED](#ref-aliasing-use-feature-refaliasing---implemented-s396-325)
+* [Triple (and higher) dereference without braces: `$$$ref` — RESOLVED](#triple-and-higher-dereference-without-braces-ref---resolved-s390-305)
 
 ---
 

@@ -1,19 +1,55 @@
-# PPI bugs/limitations hit by PCL — candidates to report upstream
+# PPI bugs PCL works around — the upstream report
 
-PPI is the Perl parser PCL relies on (`PPI::Document`). A handful of PCL's
-"not-supported" items are actually PPI tokenizer bugs, not PCL design choices.
-This file collects the ones worth filing upstream, with **minimal repros** and the
-**PPI version tested**, so they can be sent to the PPI maintainers.
+PPI is the Perl parser PCL is built on (`PPI::Document`).  Some of what looks
+like a PCL limitation is really a PPI tokenizer or lexer bug, and this file is
+where each one is written down: a **minimal repro**, the actual token dump
+against the expected one, the **PPI version tested**, and the workaround PCL
+carries.  It is meant to be sendable to the PPI maintainers as it stands.
 
-- Upstream: <https://github.com/Perl-Critic/PPI> (issues), or rt.cpan.org / PPI.
-- **PPI version tested: 1.291** (perl 5.40.3). Re-run the repros before filing in
-  case a newer PPI already fixed one.
+* Upstream: <https://github.com/Perl-Critic/PPI> (issues), or rt.cpan.org / PPI.
+* **PPI version tested: 1.291** (perl 5.40.3).  Re-run a repro before filing it —
+  a newer PPI may have fixed it.
+* `docs/ppi-bug-report.t` is the same list as a runnable `Test::More` file:
+  every row FAILS on the current PPI, so a passing row means the bug is gone.
 
-> Scope note: NOT every PCL parse quirk is a PPI bug. Counter-example —
-> `$$ref->()` mis-association is **PCL's**, not PPI's: PPI emits a faithful flat
-> token stream (`Cast '$'`, `Symbol '$r'`, `Op '->'`, `List '()'`) and leaves
-> operator precedence to the consumer; PCL's PExpr orders it wrong. Only put
-> things here that PPI itself tokenizes/structures incorrectly.
+> **Scope.**  Not every PCL parse problem is a PPI bug.  Counter-example:
+> `$$ref->()` mis-association is *PCL's* — PPI emits a faithful flat token
+> stream (`Cast '$'`, `Symbol '$r'`, `Op '->'`, `List '()'`) and leaves
+> precedence to the consumer; PCL's expression parser orders it wrongly.  Only
+> things PPI itself tokenizes or structures incorrectly belong here.
+
+## The list
+
+| # | what PPI gets wrong | status |
+|---|---|---|
+| [1](#1-ref-triple-dereference-tokenized-as---ref--confirmed-1291) | `$$$ref` (triple dereference) tokenized as `$$` + `$ref` | CONFIRMED 1.291 |
+| [2](#2-c99-hex-float-literal-0x18p1-split-into-5-tokens--confirmed-1291) | C99 hex-float literal `0x1.8p+1` split into 5 tokens | CONFIRMED 1.291 |
+| [3](#3--expr--comparison-chain-misread-as-a-globreadline--fixed-in-ppi) | `< EXPR >` comparison chain misread as a glob/readline | FIXED in PPI |
+| [4](#4-7-3-tokenized-as-the-magic-hash---modulo-lost--confirmed-1291) | `7%-3` tokenized as the magic hash `%-` (modulo lost) | CONFIRMED 1.291 |
+| [5](#5--literal----anon-hash-comma-separated-misclassified-as-a-block--confirmed-1291) | `{ LITERAL , ... }` (anon hash, comma-separated) misclassified as a Block | CONFIRMED 1.291 |
+| [6](#6-for-f-list----lexer-dies-illegal-state-in-for-compound-statement--confirmed-1291) | `for ${*$f} (LIST) { }` — LEXER DIES: "Illegal state in 'for' compound statement" | CONFIRMED 1.291 |
+| [7](#7-sub-lvalue-----an-anon-subs-attribute-at-expression-start-becomes-a-label--confirmed-1291) | `(sub :lvalue { … })` — an anon sub's ATTRIBUTE at expression start becomes a LABEL | CONFIRMED 1.291 |
+| [8](#8-a-variable-declarations-attribute-is-not-a-tokenattribute--confirmed-1291) | A variable declaration's ATTRIBUTE is not a `Token::Attribute` | CONFIRMED 1.291 |
+| [9](#9--punctuation--is-a-variable-but-lexes-as-cast--block--confirmed-1291) | `${ PUNCTUATION }` is a variable, but lexes as Cast + Block | CONFIRMED 1.291 |
+| [10](#10-for-accepts-only-my-scalar-as-its-loop-variable--and-mis-lexes-the-rest-of-the-file--confirmed-1291) | `for` accepts only `[my] $scalar` as its loop variable — and mis-lexes the rest of the FILE | CONFIRMED 1.291 |
+| [11](#11-pattern-after-a-paren-less-word-is-tokenized-as-division--confirmed-1291) | `/PATTERN/` after a paren-less WORD is tokenized as division | CONFIRMED 1.291 |
+| [12](#12-name--a--after-a-term-is-lexed-as-a-glob-not-multiplication--confirmed-1291) | `)*name` — a `*` after a term is lexed as a GLOB, not multiplication | CONFIRMED 1.291 |
+| [13](#13-tokenization-of-a-trailing-__end____data__-section-depends-on---confirmed-1291) | Tokenization of a trailing `__END__`/`__DATA__` section depends on `$/` | CONFIRMED 1.291 |
+| [14](#14-fh--glob-after-a-list-operator-or-a-block-is-lexed-as-----confirmed-1291) | `<FH>` / `<glob>` after a list operator or a block is lexed as `<` … `>` | CONFIRMED 1.291 |
+| [15](#15--followed-by--1--the-operator-is-swallowed-into-a-negative-number--confirmed-1291) | `)` followed by `-1` — the operator is swallowed into a negative NUMBER | CONFIRMED 1.291 |
+| [16](#16-perl-540s--logical-xor-is-tokenized-as-two--operators--confirmed-1291) | perl 5.40's `^^` (logical XOR) is tokenized as two `^` operators | CONFIRMED 1.291 |
+| [17](#17-a-subscript-after-a-deref-or-a-kv-slice-is-structured-as-something-else--confirmed-1291) | A SUBSCRIPT after a deref or a KV slice is structured as something else | CONFIRMED 1.291 |
+| [18](#18-finally----is-not-part-of-the-try-statement--and-eats-the-next-one--confirmed-1291) | `finally { … }` is not part of the `try` statement — and eats the next one | CONFIRMED 1.291 |
+| [19](#19-a-call-to-a-sub-named-x-after-a-list-operator-is-lexed-as-the-repetition-operator--confirmed-1291) | A call to a sub named `x` after a list operator is lexed as the repetition operator | CONFIRMED 1.291 |
+| [20](#20-two-of-perls-three-ways-to-enable-try-are-not-recognised-so-the-construct-mis-lexes--confirmed-1291) | Two of perl's three ways to enable `try` are not recognised, so the construct mis-lexes | CONFIRMED 1.291 |
+| [21](#21-a-term-initial--is-lexed-as-the-smart-match-operator--confirmed-1291) | A term-initial `~~` is lexed as the smart-match operator | CONFIRMED 1.291 |
+| [22](#22-a-filetest-after-a-scalar-filehandle-is-split-into----word--confirmed-1291) | A filetest after a SCALAR filehandle is split into `-` + WORD | CONFIRMED 1.291 |
+| [23](#23-a--scalar-with-a-non-ascii-name-is-split-into-cast--word--but--are-not--confirmed-1291) | A `$` scalar with a NON-ASCII name is split into Cast + Word — but `@`/`%`/`*`/`&` are not | CONFIRMED 1.291 |
+| [24](#24-a-punctuation-named-array--is-split-into-cast--operator--confirmed-1291) | A PUNCTUATION-named array `@?` is split into Cast + Operator | CONFIRMED 1.291 |
+| [25](#25--name-after-a-token-that-ends-a-term-is-lexed-as-one-negative-bareword-word--confirmed-1291) | `-name` after a token that ENDS A TERM is lexed as one negative-bareword Word | CONFIRMED 1.291 |
+| [26](#26-a-glob-whose-name-is-punctuation-or-a-digit-run-is-split-into-two-operators--confirmed-1291) | A glob whose NAME is punctuation or a digit run is split into two operators | CONFIRMED 1.291 |
+
+Also below: [possibly fixed upstream](#possibly-fixed-upstream--verify-before-trusting) (verify before trusting), and [how to add to this list](#how-to-add-to-this-list).
 
 ---
 

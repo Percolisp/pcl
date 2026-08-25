@@ -1,219 +1,182 @@
 # Percolisp (PCL) — a Perl-to-Common-Lisp compiler
 
-**PCL compiles Perl 5 source to Common Lisp, and a CL runtime reproduces
-Perl's semantics** — so the result runs as native code under
-[SBCL](https://www.sbcl.org/).  It is a from-scratch source-to-source
-compiler: Perl in, Common Lisp out.  No Perl interpreter, no bytecode engine,
-nothing of perl's C runtime is linked or reimplemented.
+[![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 
-```bash
-$ echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' | ./runpcl
-2,4,6,8,10
+Percolisp (PCL) compiles Perl 5 to Common Lisp, and the result runs as native
+code under [SBCL](https://www.sbcl.org/).  Nothing of perl's own C runtime is linked or
+reimplemented: a runtime library written in Common Lisp supplies Perl's
+semantics instead.
 
-$ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); say dump [ map { $_, ":", $_ ** $_ } @q ];'
-[1, ":", 1, 2, ":", 4, 3, ":", 27, 4, ":", 256, 5, ":", 3125]
-# (Data::Dump is a CPAN module -- `cpanm Data::Dump` -- that PCL compiles from @INC on the fly)
-```
+This might end up as a faster Perl.  SBCL is an optimizing native compiler,
+and where PCL can prove that a piece of Perl does not need Perl's
+flexibility, it emits plain machine code.  Recursion, counting loops and
+integer arithmetic already run several times faster than under perl.  Other
+things are still slower, and the measurements below report the losses as well
+as the wins.
 
-| | |
-|---|---|
-| **Status** | **v0.1.0** (2026-08-23) — the first tag; see [Roadmap](#roadmap) |
-| **Measured compatibility** | [`docs/STATUS.md`](docs/STATUS.md) — every number re-runnable |
-| **What deliberately does not work** | [`docs/not-supported.md`](docs/not-supported.md) — each entry with its reason |
-| **Changes** | [`CHANGELOG.md`](CHANGELOG.md) |
-| **License** | same terms as Perl itself — [`LICENSE`](LICENSE) |
+The second aim is a compiler toolkit.  Common Lisp is easy to parse, so the
+generated code is meant to double as an intermediate form — something another
+compiler could take on to a different platform.
 
----
-
-## Contents
-
-1. [Why compile Perl to Common Lisp](#why-compile-perl-to-common-lisp)
-2. [Where it stands](#where-it-stands)
-3. [Quick start](#quick-start) — requirements, **minimum SBCL 2.5.2**, install, test
-4. [The plan: a compiler toolkit](#the-plan-a-compiler-toolkit) — the IR, speed, XS
-5. [Architecture](#architecture)
-6. [How it is tested](#how-it-is-tested)
-7. [Roadmap](#roadmap)
-8. [Reading guide](#reading-guide)
-
----
-
-## Why compile Perl to Common Lisp
-
-* **A high-level target keeps the compiler tractable.**  CL is expressive
-  enough to model Perl's data model and control flow directly, so PCL stays a
-  compiler of manageable size instead of growing into a second interpreter.
-* **Perl's run-time *magic* runs at run time.**  Much of Perl only exists
-  while the program executes (context, coercion, `local`, ties, overloads,
-  string `eval`).  PCL does not try to decide those statically: the CL runtime
-  ([`cl/pcl-runtime.lisp`](cl/pcl-runtime.lisp)) reproduces them with the
-  same semantics, and the compiler emits calls into it.
-* **Lisp is trivial to parse, so the output is a usable IR.**  The generated
-  CL is specified ([`docs/ir-spec.md`](docs/ir-spec.md)) and readable —
-  sigils kept (`$x`, `@a`, `%h`), built-ins as `pl-`/`p-` names — which makes
-  it a stepping stone for compiling Perl onward to other environments.
-* **SBCL is a real optimizing compiler.**  Once the code generator proves
-  where Perl's generality is not needed, the same loop runs as plain native
-  code — that is the speed plan below.
-
-## Where it stands
-
-All numbers are measured on named, re-runnable instruments; the table in
-[`docs/STATUS.md`](docs/STATUS.md) is the authoritative copy.
-
-| measurement | result (2026-08-25) | reproduce |
-|---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **177 files / 6,011 assertions**, all passing (the 14 XS-bridge rows need the `pclxs` sibling) | `tools/prove-core` |
-| Perl's own test suite, extracted (`perl-tests/`, 108 files from perl's `t/op`, `t/base`, …) | **18,313 assertions pass / 893 fail (95.4 %)**; **61 files pass completely**; tracked row by row against blessed baselines, so the number can only move honestly | `perl sweep-perl-tests.pl --jobs 8` |
-| Perl's full `t/` tree, in place (528 files) | run per directory as a bug-finder; verdicts per file against a blessed snapshot | `tools/run-perl-suite.pl --all --quick --jobs 4` |
-| XS bridge ([pclxs](#4-xs--c-extensions), experimental sibling project) | conformance corpus **398 / 398** against real perl | `tools/pcl-conform` |
-| Pure-Perl CPAN modules (183-dist board) | 65 PASS / 65 PARTIAL / 53 FAIL at dist granularity (a PARTIAL runs most of its suite) | `tools/cpan-scoreboard.pl` |
-
-What is in: the expression grammar with all precedence levels and context
-propagation; closures and `state`; `local` on scalars, aggregates, elements and
-typeglobs; OO with C3 MRO, `SUPER::`, `AUTOLOAD`, `use overload`; block and
-string `eval` **with lexical capture**; regexes via CL-PPCRE; `pack`/`unpack`;
-`tie`; signatures; perl 5.34 `try`/`catch`.  What is deliberately out (with the
-reasons): `@_` aliasing, deterministic `DESTROY`, exact error-message text,
-`given`/`when`/`~~` (removed in perl 5.42), the `mro` switch, and a short list
-of internals-introspection features — [`docs/not-supported.md`](docs/not-supported.md).
-
-A statement the compiler cannot translate is **never silently lost**: it is
-announced at compile time (`PCL: statement dropped at FILE line N: …`) and
-**dies, perl-shaped and trappable, when the program reaches it**.  The count of
-such statements over every test population is tracked and gated in-repo
-([`baselines/parse-error-drop-census-s399.tsv`](baselines/parse-error-drop-census-s399.tsv)).
+**Maturity: early.**  v0.1.0 is the first tag.  Pure-Perl code works well;
+modules that need compiled C (XS) do not work at all.  See
+[What works](#what-works) before investing in it.
 
 ## Quick start
 
-### Requirements
-
-| what | version | notes |
-|---|---|---|
-| Perl | 5.20+ | with [PPI](https://metacpan.org/pod/PPI) **≥ 1.291** and [Moo](https://metacpan.org/pod/Moo): `cpanm PPI Moo`.  Distribution packages of PPI lag (Ubuntu 24.04 ships 1.277); PCL's parser repairs are keyed on 1.291's token stream and the installer refuses an older one.  Nothing else — every other Perl module PCL uses is core. |
-| **SBCL** | **≥ 2.5.2 — hard minimum** | the runtime uses SBCL-internal APIs (`sb-unicode`, float bit accessors, …) and is validated on 2.5.2 and 2.6.0.  Its first form checks the version and warns loudly on an older host.  Distribution packages that qualify: Debian 13 "trixie", Ubuntu 25.10 / 26.04 LTS.  Debian 12 (2.2.9), Ubuntu 24.04 LTS (2.2.9) and 22.04 LTS (2.1.11) do **not** — install the current binary from [sbcl.org](https://www.sbcl.org/platform-table.html); a home-directory install needs no root. |
-| cl-ppcre | any current | via Quicklisp: `sbcl --eval '(ql:quickload :cl-ppcre)' --quit` |
-
-Do not load the runtime with `sbcl --script`: that flag skips `~/.sbclrc`, so a
-Quicklisp-installed cl-ppcre becomes invisible and the load fails.  The
-wrappers below pass the right flags.
-
-### Run, transpile, install, test
-
 ```bash
-./runpcl prog.pl                      # transpile + run a program
-echo 'print 1+2, "\n"' | ./runpcl     # … or from stdin
-./pl2cl prog.pl > prog.lisp           # transpile only (readable CL)
-sbcl --noinform --non-interactive \
-     --load cl/pcl-runtime.lisp --load prog.lisp    # … and run that output with plain SBCL
+git clone https://github.com/Percolisp/pcl.git
+cd pcl
 
-# the same, as one pipeline:
-echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' | ./pl2cl \
-  | sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'
-# 2,4,6,8,10
+cpanm PPI Moo                                # PPI must be ≥ 1.291
+sbcl --eval '(ql:quickload :cl-ppcre)' --quit # SBCL ≥ 2.5.2, via Quicklisp
 
-./pcl -MList::Util=sum -E 'say sum 1..10'   # one-liners, -M imports of pure-Perl modules
-
-tools/install-pcl --prefix ~/.local   # install: copies the runtime tree, writes bin/ wrappers,
-                                      # COMPILES the runtime into a saved SBCL core at install time
-                                      # (never at first use), then self-verifies by running a program
-tools/install-pcl --no-core --dry-run # show what it would do
-
-tools/prove-core                      # the regression gate against a fresh saved core (~4 min)
-prove -j8 Pl/t/                       # the same gate, plain (the reference)
+echo 'my @a=(1..5); print join(",", map { $_*2 } @a), "\n";' > demo.pl
+./runpcl demo.pl
 ```
 
-**The runtime is compiled once and cached.**  Every PCL runner (`runpcl`,
-`pcl`, the test gate, the sweeps) starts SBCL from a saved core holding the
-compiled runtime: the first run after a checkout or a runtime edit builds it
-(~2 s, under `~/.pcl-cache/core/`), every later run loads it in milliseconds.
-The core's file name is a hash of the runtime source and the SBCL version, so
-it cannot go stale — an edit or an upgrade simply produces a new one.
-`PCL_NO_CORE=1` runs from source; `pcl --clear-cache` removes the cached
-cores and modules; `PCL_SHOW_SBCL=1` shows which core a runner spawns.
-`tools/prove-core` additionally rebuilds a fresh core for the gate every
-run (belt and braces); `prove -j8 Pl/t/` now runs at the same speed.
+```console
+2,4,6,8,10
+```
 
-### Example
+If that works, you have everything.  [Requirements](#requirements) covers the
+two minimum versions — both stricter than most distributions ship — and
+assumes [Quicklisp](https://www.quicklisp.org/) is installed for the third
+line.
+
+To put `pcl`, `pl2cl` and `runpcl` on your `PATH`:
+
+```bash
+tools/install-pcl --prefix ~/.local
+```
+
+## Usage
+
+```bash
+./runpcl prog.pl                            # compile and run a Perl program
+echo 'print 1+2, "\n"' | ./runpcl           # … or from stdin
+
+./pcl -MList::Util=sum -E 'say sum 1..10'   # one-liners, like perl
+
+./pl2cl prog.pl > prog.lisp                 # compile only — readable CL
+sbcl --noinform --non-interactive \
+     --load cl/pcl-runtime.lisp --load prog.lisp     # … then run that output
+
+./pl2cl < prog.pl | sbcl --noinform --non-interactive \
+     --load cl/pcl-runtime.lisp --eval '(load *standard-input*)'   # … or as a pipeline
+
+tools/prove-core                            # run PCL's own test suite
+```
+
+Modules are compiled the same way as the program that uses them:
+
+```console
+$ cpanm Data::Dump
+$ ./pcl -MData::Dump=dump -E '@q=(1 .. 5); say dump [ map { $_, ":", $_ ** $_ } @q ];'
+[1, ":", 1, 2, ":", 4, 3, ":", 27, 4, ":", 256, 5, ":", 3125]
+```
+
+PCL finds `Data::Dump` in `@INC` and compiles it along with the program, the
+same as any other Perl source.
+
+The compiled form is meant to be legible.  This Perl —
 
 ```perl
-# input.pl
-package Animal;
-sub new   { bless { name => $_[1] }, $_[0] }
-sub speak { "I am " . $_[0]->{name} }
-
-package Dog;
-our @ISA = ('Animal');
-sub speak { $_[0]->SUPER::speak() . " and I bark" }
-
-package main;
-my $d = Dog->new("Rex");
-print $d->speak(), "\n";
+my $n  = shift // 10;
+my @sq = map { $_ * $_ } 1 .. $n;
 ```
 
-```bash
-$ ./runpcl input.pl
-I am Rex and I bark
+becomes this Common Lisp:
+
+```lisp
+(let (($n (make-p-box nil)))
+  (p-my-= $n (p-// (p-shift @ARGV) 10))
+  (let ((@sq (make-array 0 :adjustable t :fill-pointer 0)))
+    (p-array-= @sq (p-list-ctx (p-map (lambda ($_) (p-* $_ $_)) (p-.. 1 $n))))
+    …))
 ```
 
-## The plan: a compiler toolkit
+## What works
 
-PCL is built to be more than one translator.  Four targets, in the
-order they are being pursued; each has a design document and a measurement.
+Most of the language.  Every operator and precedence level is there, and
+scalar and list context propagate correctly.  So do closures, `state`,
+`local` in all its forms, signatures, `try`/`catch`, regexes, `pack`/`unpack`,
+and objects with C3 method resolution and `use overload`.  String `eval`
+works too, and sees the enclosing lexicals.
 
-### 1. Correctness first — run real CPAN code
+**XS modules do not work.**  Anything implemented in compiled C fails to
+load — `DBI` and `JSON::XS` from CPAN, and core modules such as `Storable`.
+That rules out a large part of what people actually `use`.
+Where a common XS module has a pure-Perl equivalent, PCL ships one and uses
+it automatically ([`lib/`](lib)).  A separate project, pclxs, is exploring
+support for real XS binaries.
 
-The current phase.  The oracle is Perl itself: perl's own `t/` suite and CPAN
-dists' test suites are compiled and run, perl's expectations are the
-assertions, and every failure is a row in a blessed baseline that a change
-may only move with an explanation.  Module-specific behaviour lives in
-pure-Perl shims under `lib/` that PCL compiles like user code — the compiler
-and runtime hold language mechanisms only
-([`docs/shipped-modules.md`](docs/shipped-modules.md)).
+Other deliberate divergences: `@_` aliasing, deterministic `DESTROY`,
+`given`/`when`, the exact wording of error messages, and a handful of
+interpreter internals.  [`docs/not-supported.md`](docs/not-supported.md)
+gives the reason for each.
 
-### 2. The generated CL is a specified intermediate representation
+A statement the compiler cannot translate is reported at compile time, and
+the program dies there if it reaches it, as an ordinary Perl exception that
+`eval` can catch.  Nothing is skipped silently.
 
-The output is meant to be *read by other tools*, not only loaded by SBCL:
+### Measured
 
-* [`docs/ir-spec.md`](docs/ir-spec.md) — the normative manual: the data model
-  (the "box"), coercion and truthiness tables, the context protocol, the
-  calling convention, control flow and non-local exits, OO dispatch, the load
-  model and string `eval`.  A translator to another target reads this and
-  the runtime as reference.
-* The emission is a small **named vocabulary** of macros (`p-list-ctx`,
-  `p-sort-cmp`, `p-try`, …) over plain CL, so the structure of a Perl
-  program survives into the output instead of being expanded away.
-* [`docs/generated-cl-ir-review.md`](docs/generated-cl-ir-review.md) — what
-  a consumer may rely on, and the friction list still being worked down.
-* Extensions written *in Perl* and compiled by PCL ship as part of the
-  runtime — `pack`/`unpack` ([`cl/pack-impl.pl`](cl/pack-impl.pl)),
-  `mro`, `warnings` — see [`docs/extensions.md`](docs/extensions.md).
+[`docs/STATUS.md`](docs/STATUS.md) has these numbers in more detail, with the
+failure breakdowns.
 
-### 3. Speed — beat perl
+| measurement | result (2026-08-25) | reproduce |
+|---|---|---|
+| PCL's own regression suite | **177 files / 6,011 assertions**, all passing | `tools/prove-core` |
+| perl's test suite, extracted (108 files) | **18,313 pass / 893 fail (95.4 %)**; 61 files complete | `perl sweep-perl-tests.pl --jobs 8` |
+| perl's full `t/` tree, in place (528 files) | per-file results against a recorded snapshot | `tools/run-perl-suite.pl --all --quick --jobs 4` |
+| pure-Perl CPAN distributions (183 of them) | 65 run their whole suite, 65 most of it, 53 fail | `tools/cpan-scoreboard.pl` |
 
-A naive translation is slower than perl (every scalar lives in a "box" so a
-reference to it can be taken), so PCL's code generator proves, per variable,
-where the generality is not needed and emits the narrow form.  Each such
-transform is a named, switchable pass ([`Pl/Passes.pm`](Pl/Passes.pm),
-`PCL_OPT`), and `tools/bench-exec.pl` measures against perl (execution time,
-startup subtracted, best-of-5).  As of 2026-08-25, PCL **beats perl** on
-recursion, counting loops and integer math (`fib` 3.3×, `cfor` 4.1×,
-`collatz` 2.5×, `gcdrec` 2.0× faster), and string-append's O(n²) class is
-gone; the measured remaining losses are concentrated in `pack`/`unpack`
-(template re-parse), method dispatch (in progress — the first cut landed
-2.2×), and aggregate/slice traffic (design pending).
+### Speed
 
-Details, measurements and the
-worklist: [`docs/where-the-time-goes.md`](docs/where-the-time-goes.md),
-[`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md)
-(§0.1 is the current bench table).
+PCL beats perl at recursion, counting loops and integer arithmetic: `fib` by
+3.3×, `cfor` by 4.1×, `collatz` by 2.5×.  It is slower at `pack`/`unpack`,
+at method dispatch, and at moving data in and out of arrays and hashes.  The
+current benchmark table, and the work queue behind it, are in
+[`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).
 
-### 4. XS / C extensions
+## Requirements
 
-Being looked at, preliminary.
-[`docs/xs-shim-design.md`](docs/xs-shim-design.md).
+PCL targets the semantics of perl 5.40, which is the perl its test suites
+come from.  Linux is what it is developed and tested on; other Unixes should
+work but are untested.
 
-## Architecture
+* **Perl 5.20 or later**, with [PPI](https://metacpan.org/pod/PPI) 1.291 or
+  later and [Moo](https://metacpan.org/pod/Moo): `cpanm PPI Moo`.  Nothing
+  else is needed; every other module PCL uses is core.  Distributions ship
+  older PPI (Ubuntu 24.04 has 1.277) and the installer refuses those.
+* **SBCL 2.5.2 or later.**  The runtime uses SBCL's internal APIs, so older
+  versions will not work — and Debian 12, Ubuntu 24.04 and Ubuntu 22.04 all
+  ship an older one.  A current binary from
+  [sbcl.org](https://www.sbcl.org/platform-table.html) installs without root.
+* **cl-ppcre**, from Quicklisp:
+  `sbcl --eval '(ql:quickload :cl-ppcre)' --quit`.
+
+Compiling needs perl; running a compiled program needs SBCL.  A program that
+uses string `eval` compiles code as it runs, so it needs both.
+
+Use the wrappers rather than `sbcl --script`.  That flag skips `~/.sbclrc`,
+so SBCL never sees a Quicklisp-installed cl-ppcre and the load fails.
+
+The wrappers also keep the runtime compiled.  The first run builds a saved
+SBCL core under `~/.pcl-cache/core/`, and later runs start from it in
+milliseconds.  The core is named after a hash of the runtime source, so it
+can never be stale.  `PCL_NO_CORE=1` runs from source instead.
+
+Your own program is compiled every time you run it, so a large script pays a
+noticeable delay before its first line executes — about five seconds for 800
+statements on this machine.  Modules it loads are cached after their first
+compile.
+
+## How it works
+
+PCL reads Perl source, builds a tree of its statements and expressions, and
+writes out the equivalent Common Lisp.
 
 ```
 Perl source → PPI → Pl::Parser2 (statement translation) → Pl::CLForm → Common Lisp
@@ -222,72 +185,72 @@ Perl source → PPI → Pl::Parser2 (statement translation) → Pl::CLForm → C
              (scopes, captures)   (expression AST → forms)       (Perl semantics in CL)
 ```
 
-| component | purpose |
-|---|---|
-| [`Pl/Parser2.pm`](Pl/Parser2.pm) | statement translation — the one pipeline |
-| [`Pl/VarAnnotator.pm`](Pl/VarAnnotator.pm) | scope and capture analysis, lexical renaming |
-| [`Pl/PExpr.pm`](Pl/PExpr.pm) | the expression parser (precedence, terms, prototypes) |
-| [`Pl/ExprToCL.pm`](Pl/ExprToCL.pm) | expression code generation (forms) |
-| [`Pl/CLForm.pm`](Pl/CLForm.pm) | the emitted-form data structure and printer |
-| [`Pl/Passes.pm`](Pl/Passes.pm) | the named optimisation registry (`PCL_OPT`) |
-| [`cl/pcl-runtime.lisp`](cl/pcl-runtime.lisp) | the runtime: Perl semantics in CL (~17k lines) |
-| `cl/pcl-pack.lisp`, `cl/pcl-mro.lisp`, `cl/pcl-warnings.lisp` | extensions written in Perl, compiled by PCL, checked in |
-| `lib/` | pure-Perl shims of core/CPAN modules the compiler reads like user code |
-| `pl2cl`, `runpcl`, `pcl`, `tools/install-pcl` | the entry points |
+Much of what Perl does happens while a program runs, not while it is being
+compiled: context, coercion, `local`, ties, overloading, string `eval`.  PCL
+implements that magic in Common Lisp, in
+[`cl/pcl-runtime.lisp`](cl/pcl-runtime.lisp), and the compiled program calls
+into it at run time, exactly as perl would.
 
-The target shape of the compiler and the gap to it:
-[`docs/v2-target-architecture.md`](docs/v2-target-architecture.md).
+Common Lisp already provides what Perl needs underneath: dynamic types,
+closures, dynamic binding, non-local jumps and garbage collection.  PCL uses
+those directly instead of building its own machinery for each of them.
 
-## How it is tested
+The compiler and the runtime implement the language itself and nothing
+module-specific.  A module that needs its own behaviour gets it from `lib/`,
+as ordinary Perl that PCL compiles like user code.  Three parts of the
+runtime are written that way as well: `pack` and `unpack`, `mro`, and
+`warnings`.
 
-* Perl's own test suite is used.
-* The procedure: [`docs/test-debugging-runbook.md`](docs/test-debugging-runbook.md).
+One goal is that the generated code stays readable to a Perl programmer.
+Variables keep their sigils (`$x`, `@a`, `%h`), and Perl's built-ins keep
+their names behind a `pl-` or `p-` prefix.  What each construct means is
+specified in [`docs/ir-spec.md`](docs/ir-spec.md), which also documents the
+calling convention if you want to call compiled Perl from your own Lisp.
 
 ## Roadmap
 
-* **v0.1.0 — the first tag** (2026-08-23): the repository's public push, the
-  first green CI run (`.github/workflows/ci.yml` installs from scratch on a stock
-  Ubuntu runner and runs the gate), then the tag.  What ships is what the
-  tables above measure.
-* **v0.2**: the compatibility phase continues — the drop census worked down to
-  its explained floor, the remaining perl `t/` families, more of the CPAN
-  board.
-* **Then, in order:** the speed plan (target 3 above — the boxed-aggregate
-  design and the raw-numeric transforms, measured per shape with the bench);
-  the IR vocabulary completed (target 2); XS breadth (target 4).
-* **Deferred language features — a matter of *when*, not *whether*:** live
-  symbol-table hashes (`%Foo::`), richer `caller()` (file/line), perl 5.38
-  `class`/`field`/`method`, indirect-object syntax with a scalar invocant, a
-  `use warnings` model.  Each has its entry and sketch in
+* **v0.2** continues the compatibility work: fewer untranslatable statements,
+  more of perl's `t/` tree, more CPAN distributions running clean.
+* **After that**, in order: speed, then the generated code as a documented
+  target for other tools, then wider XS support.
+* **Planned, not rejected:** live symbol-table hashes (`%Foo::`), a fuller
+  `caller()`, perl 5.38 classes, indirect object syntax with a scalar
+  invocant, and a `use warnings` model.  Each is sketched in
   [`docs/not-supported.md`](docs/not-supported.md).
 
-## Reading guide
+## Documentation
 
-| if you want to… | read |
+| | |
 |---|---|
-| know what runs and what does not | [`docs/STATUS.md`](docs/STATUS.md), [`docs/not-supported.md`](docs/not-supported.md) |
-| translate the generated CL to something else | [`docs/ir-spec.md`](docs/ir-spec.md), then [`docs/generated-cl-ir-review.md`](docs/generated-cl-ir-review.md) |
-| understand the speed plan | [`docs/where-the-time-goes.md`](docs/where-the-time-goes.md), [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md) |
-| work on XS | [`docs/xs-shim-design.md`](docs/xs-shim-design.md) and the `pclxs` repository |
-| add or fix a module shim | [`docs/shipped-modules.md`](docs/shipped-modules.md) |
-| debug a failing perl test | [`docs/test-debugging-runbook.md`](docs/test-debugging-runbook.md), [`docs/test-skip-registry.md`](docs/test-skip-registry.md) |
-| see how a question was settled | [`docs/DECIDED.md`](docs/DECIDED.md) (one-line index), [`docs/session-log.md`](docs/session-log.md) (history) |
-| see PPI bugs PCL works around | [`docs/ppi-upstream-bugs.md`](docs/ppi-upstream-bugs.md) |
-| contribute | [`CLAUDE.md`](CLAUDE.md) is the working rulebook (principles, the test cadence, what runs when) |
+| [`docs/STATUS.md`](docs/STATUS.md) | what runs, measured |
+| [`docs/not-supported.md`](docs/not-supported.md) | what does not, and why |
+| [`docs/ir-spec.md`](docs/ir-spec.md) | what the generated Common Lisp means |
+| [`docs/`](docs) | ~140 design notes and measurements; start from `STATUS.md` |
 
-### Background
+## Contributing
 
-The compiler was planned and largely written with Claude (Anthropic's
-Fable/Opus models) — the rewrite of the compiler core into the present
-single pipeline included; my own Common Lisp is from long ago, so that side
-is essentially all Claude.  Two things worth passing on: differential fuzzing
-between PCL and perl found real bugs cheaply
-and `pack` was easiest to get right by writing it *in Perl* and
-letting PCL compile it — eating our own dog food.  PCL will go on CPAN once it
-is closer to ready.
+Issues and pull requests are welcome at
+<https://github.com/Percolisp/pcl>.  `tools/prove-core` runs the test suite
+and must stay green; CI runs the same suite on a clean Ubuntu machine.
+[`CLAUDE.md`](CLAUDE.md) records the working rules the project follows.  It
+is written as instructions for the AI sessions that do much of the
+development, so it is dense reading — but it is an honest account of how
+changes are made and verified here.
+
+## Background
+
+PCL was planned and largely written with Claude, Anthropic's Fable and Opus
+models.  That includes the rewrite of the compiler's core into its present
+form.  My own Common Lisp is from long ago, so that side is essentially all
+Claude's.
+
+Two things are worth passing on.  Differential fuzzing against perl found
+real bugs cheaply.  And `pack` turned out to be easiest to get right by
+writing it in Perl and letting PCL compile it.
+
+PCL will go on CPAN once it is closer to ready.
 
 ## License
 
-This library is free software; you can redistribute it and/or modify it under
-the same terms as Perl itself — dual-licensed under the Artistic License 1.0
-or the GNU GPL v1-or-later.  See [`LICENSE`](LICENSE).
+Free software, under the same terms as Perl itself: the Artistic License 1.0
+or the GNU GPL v1 or later.  See [`LICENSE`](LICENSE).

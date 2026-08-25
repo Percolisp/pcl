@@ -1,22 +1,35 @@
-# PCL IR Manual — Semantics of the Generated CL
+# PCL IR Manual — semantics of the generated Common Lisp
 
-**Status:** normative. Where this document and the runtime disagree, the
-runtime (`cl/pcl-runtime.lisp`) is the reference implementation and this
-document has a bug — please fix it.
-**Audience:** anyone (person or AI) consuming PCL's generated Common Lisp:
-translating it to another target environment, building tooling on it, or
-debugging it. You should be able to reimplement the semantics from this
-document without reading Lisp.
-**Companion:** `docs/generated-cl-ir-review.md` (what the output looks like,
-its friction points, and the improvement roadmap). This manual covers what
-the constructs *mean*.
-**Verified against:** full per-claim verification at cache generation
-v2-7 (2026-07-06); maintained incrementally since (each semantic
-emission/runtime change updates its section — standing rule), last
-section-level review at **v2-44, 2026-07-20 (s303: §2.2 freeze-licensed raw
-slots — B-regime strict coercers); previously v2-43 (s302: §2.2 raw compound-assign
-`-raw` twins, task #62 step 1)**. Section references
-name the defining function so you can re-verify against the runtime.
+**What this is.** The normative description of what PCL's output *means*.
+Read it to translate that output to another target, to build tooling on it,
+or to debug it — you should be able to reimplement the semantics from this
+document without reading any Lisp.
+
+| | |
+|---|---|
+| **Status** | normative.  Where this document and the runtime disagree, [`cl/pcl-runtime.lisp`](../cl/pcl-runtime.lisp) is the reference implementation and *this document has a bug* — please fix it. |
+| **Companion** | [`generated-cl-ir-review.md`](generated-cl-ir-review.md) — what the output *looks like*, its friction points and the roadmap.  This manual covers what the constructs *mean*. |
+| **Verified against** | every claim verified at cache generation v2-7 (2026-07-06), maintained per-change since; last section-level review at v2-44 (2026-07-20).  Section headings name the defining runtime function, so any claim can be re-checked at the source. |
+
+Sections marked *(normative, sNNN)* were added or revised by a specific
+design ruling; `sNNN` names an internal working session.
+
+## Contents
+
+* [0. The one-paragraph model](#0-the-one-paragraph-model) — start here
+* [1. Reading the output](#1-reading-the-output) — file shape, naming conventions
+* [2. The data model](#2-the-data-model) — [undef](#21-undef) · [scalars and raw slots](#22-scalars-boxes-and-raw-slots) · [tied scalars](#22b-tied-scalars--the-raw-slot-behind-the-magic) · [arrays](#23-arrays) · [hashes](#24-hashes) · [references](#25-references) · [blessed objects](#26-blessed-objects-strings-numbers)
+* [2b. Declarations, scoping, and the rename families](#2b-declarations-scoping-and-the-rename-families) — [the tension](#2b1-the-fundamental-tension) · [declaration forms](#2b2-the-declaration-forms) · [rename families](#2b3-the-rename-families) · [guard rails](#2b4-the-guard-rails-when-renaming-refuses)
+* [3. Coercion](#3-coercion--the-heart-of-perl-semantics) — [numification](#31-to-number-numification) · [stringification](#32-to-string-stringification) · [interpolation extent](#32b-interpolation-extent--which-text-belongs-to-a--reference-inside-a-dq-string-regex-or-heredoc-normative-s426) · [truthiness](#33-p-true-p-truthiness) · [what ops return](#34-what-ops-return)
+* [4. Context (scalar / list / void)](#4-context-scalar--list--void)
+* [5. Calling convention](#5-calling-convention) — [definition](#51-definition) · [arguments](#52-arguments--two-body-shapes) · [return](#53-return) · [comparator frames](#54-comparator-frames--p-sort-cmp)
+* [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
+* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f)
+* [8. Magic globals](#8-magic-globals)
+* [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules)
+* [11. What a translator may ignore](#11-what-a-translator-may-ignore)
+* [12. Worked example](#12-worked-example)
 
 ---
 
@@ -464,10 +477,15 @@ nothing, so `@?` written under `package A` and read under `package B` is one
 array.  A per-package `(defvar @? …)` was the old emission and made them two.
 Since s446j (#506) that ownership covers **every punctuation container perl
 allows, hash and array alike** — measured character by character on 5.40.3,
-which takes a punctuation name for all of `" $ % & ' ( ) * + , - . / : ; < =
-> ? @ [ ] ^ _ \` | ~ \` (only `$^[0]` is a syntax error, because `$^` wants a
-letter, and `#` starts a comment).  The CL-unsafe ones are pipe-quoted on both
-sides (`|%;|`, `|@\|`|, `|%\\|`).  A container the runtime does not own is not
+which takes a punctuation name for every one of these:
+
+```
+" $ % & ' ( ) * + , - . / : ; < = > ? @ [ ] ^ _ ` | ~
+```
+
+(Only `$^[0]` is a syntax error, because `$^` wants a letter, and `#` starts a
+comment.)  The CL-unsafe ones are pipe-quoted on both
+sides (``|%;|``, ``|@\||``, ``|%\\|``).  A container the runtime does not own is not
 a wrong value but a **dead file**: the read compiles to a bare CL symbol
 nobody declared and the load dies before line 1 (a write auto-vivifies through
 `p-setf`, so only the read-first spelling shows it).  Two related spellings are

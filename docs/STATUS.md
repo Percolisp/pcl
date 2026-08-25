@@ -1,10 +1,14 @@
-# PCL Status — what runs, what doesn't
+# PCL status — what runs, what does not
 
-Measured compatibility state.  Every number below comes from a named,
-re-runnable measurement; nothing is estimated.  Last full re-measure:
-2026-08-25 (gate and sweep re-measured on the post-v0.1.0 tree, internal
-session s444/s445; execution benchmarks re-run 2026-08-25 —
-`docs/faster-codegen-suggestions.md` §0.1).
+The measured compatibility state.  Every number below comes from a named,
+re-runnable measurement; nothing here is estimated.
+
+**Last full re-measure: 2026-08-25** — the gate and the sweep on the
+post-v0.1.0 tree, execution benchmarks the same day
+([`faster-codegen-suggestions.md`](faster-codegen-suggestions.md) §0.1 is the
+bench table).
+
+**Contents:** [what runs](#what-runs) · [what deliberately does not](#what-deliberately-does-not-work) · [known sharp edges](#known-sharp-edges) · [XS](#xs)
 
 ## What runs
 
@@ -27,8 +31,8 @@ and trappable, when the program reaches it** (since s435; in `eval STRING` the
 die lands in `$@`).  These are counted over six test populations: **34 files
 carry 89 such statements** (s445 — down from 73 / 167 at s440, most of the
 drop being block-prototype calls from Test::/Test2:: dists that now parse),
-every one classified with an owning task (`baselines/parse-error-drop-census-s399.tsv`,
-`docs/drop-census-s419-flip-gate.md`).  Zero drops in PCL's own shipped
+every one classified with an owning task ([the census](../baselines/parse-error-drop-census-s399.tsv),
+[`drop-census-s419-flip-gate.md`](drop-census-s419-flip-gate.md)).  Zero drops in PCL's own shipped
 module tree.
 
 ## What deliberately does not work
@@ -51,7 +55,7 @@ observable difference is.  The big items:
 | exact error-message text | not a goal; error *behavior* (die/`$@`) is |
 | `DESTROY` at GC time | no deterministic finalizer timing on a GC'd host |
 | unicode identifiers in stashes/globs | not yet (tracked, task #410) |
-| indirect object syntax with a SCALAR invocant (`method $obj LIST`) | maybe later (USER, s425) — the `new Foo(…)` / `new Foo` class-name spellings work; `method $obj …` is dropped loudly; see `docs/not-supported.md` |
+| indirect object syntax with a SCALAR invocant (`method $obj LIST`) | maybe later (USER, s425) — the `new Foo(…)` / `new Foo` class-name spellings work; `method $obj …` is dropped loudly; see [`not-supported.md`](not-supported.md) |
 
 ## Known sharp edges
 

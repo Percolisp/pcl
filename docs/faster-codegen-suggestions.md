@@ -1,49 +1,57 @@
-# Generating Faster CL — measured variants, per category
+# Generating faster CL — measured variants, per category
 
-> **Status (s301, 2026-07-20):** this catalogue is now the measured basis of
-> **Target A** in `docs/v2-endgame-plan.md` §6 ("general program speed must
-> beat Perl"; acceptance criteria + sequencing there).  Tier-1 items are
-> filed: S1+N1(+N2) = task #62, M1 = #73, P1 = #74; the Target-B rule
-> applies — every new fast shape ships wrapped in its named macro.
->
-> **Status (2026-08-25):** Tier 1 is half done, and every shipped transform
-> is a **named, switchable emission** in the registry `Pl/Passes.pm`
-> (`PCL_OPT`; s411): `raw-slot`, `raw-numeric`, `str-buffer`,
-> `foreach-range`, `insensitive-call`, `elem-setf`.
-> **#62 (S1 + N1) is DONE** — `str-buffer` killed the O(n²) append class
-> (`strcat` 756× → 5.7×) and `raw-numeric`/`raw-slot` put the counting
-> loops and `collatz` **ahead of perl** (see the re-measured §0.1 table).
-> **M1's per-call-site inline cache is REJECTED** (USER, s444): profiling
-> showed the ~15× was mostly `finalize-inheritance` running on *every*
-> call, not the lookup — the finalize-once guard shipped (2.2× on the
-> method loop; `ovlsub` 7.27× → 5.28×).  **#73 is now DONE cache-free**
-> (s446m): the own-package fast path + the stash/`pl-NAME` memos took the
-> monomorphic loop to **2.62× of perl** and the inherited one to **4.74×**
-> (`ovlsub` 3.44×); the two remaining steps of its plan (stash-in-box,
-> codegen-supplied `pl-NAME`) were **measured at 7 % / 0 % and closed
-> unshipped** — §7 has the table, task #73 the record, #582 the one
-> remaining lever (a per-CLASS method cache, blocked on `@ISA`-write
-> invalidation).  **P1 (#74) is still open** and is now the largest single
-> loss on the board.
+**What this is.** A catalogue of PCL's hot constructs.  For each one: the
+Common Lisp PCL emits today, an alternative shape that computes the identical
+result, and a head-to-head timing of the two.  Every entry says concretely
+*"emit shape B instead of shape A, it is N× faster"*.
 
-**Written:** 2026-07-19 (Opus 4.8), against the v2 default pipeline.
-**Method.** Two layers of measurement:
-1. `perl tools/bench-exec.pl` — whole-program, execution-only, startup
-   subtracted, best-of-5, vs Perl (the §0 table).
-2. **Variant experiments** — for each hot category I took the *actual emitted
-   CL*, hand-wrote alternative CL that computes the identical result, and timed
-   them head-to-head against a fresh runtime core (same big-N−small-N,
-   best-of-5 method). These say concretely *"emit shape B instead of shape A,
-   it is N× faster"* — the §2–§8 tables. Harness + all variant `.lisp` files
-   are reproducible; the recipe is in §9.
-**Companions (the *why* and the soundness proofs):**
-`docs/where-the-time-goes.md` (the four taxes), `docs/raw-numeric-verdict.md`
-(use-proven eager coercion), `docs/bench-exec-investigation.md` (counting
-loop), `docs/ir-spec.md` §2.2 (the box/raw invariant).
-**Policy:** CLAUDE.md §2 — speed wins over readable CL. Every change below is
-opt-in narrowing with a **boxed fallback**: if the analysis can't prove the
-precondition, emit today's code unchanged. A wrong analysis loses a speed-up,
-never correctness.
+It is the measured basis of **Target A** — general program speed must beat
+Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
+
+**Written** 2026-07-19 against the v2 pipeline; §0.1 re-measured 2026-08-25.
+
+## Where this stands (2026-08-25)
+
+Every shipped transform is a **named, switchable emission** in the
+optimization registry [`Pl/Passes.pm`](../Pl/Passes.pm) (`PCL_OPT`):
+`raw-slot`, `raw-numeric`, `str-buffer`, `foreach-range`, `insensitive-call`,
+`elem-setf`.  Tier 1 is half done:
+
+| tier-1 item | task | state |
+|---|---|---|
+| **S1 + N1** — string buffer, raw numerics | #62 | **done.**  `str-buffer` killed the O(n²) append class (`strcat` 756× → 5.7×); `raw-numeric`/`raw-slot` put the counting loops and `collatz` *ahead of perl*.  See the re-measured [§0.1 table](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut). |
+| **M1** — method dispatch | #73 | **done, cache-free.**  The per-call-site inline cache was *rejected* (USER, s444): profiling showed the ~15× was mostly `finalize-inheritance` running on every call, not the lookup.  The own-package fast path plus the stash/`pl-NAME` memos took a monomorphic loop to **2.62× of perl** and an inherited one to **4.74×** (`ovlsub` 3.44×).  Two further steps measured 7 % and 0 % and were closed unshipped — [§7](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) has the table.  One lever remains: a per-CLASS cache (#582), blocked on `@ISA`-write invalidation. |
+| **P1** — `sprintf` / `pack` | #74 | **open**, and now the largest single loss on the board. |
+
+## How the numbers were taken
+
+1. **Whole-program:** `perl tools/bench-exec.pl` — execution only, startup
+   subtracted, best-of-5, against perl.  That is the [§0](#0-whole-program-baseline-vs-perl-this-session)
+   and [§0.1](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) tables.
+2. **Variant experiments:** for each hot category, the *actual emitted CL* was
+   taken, alternative CL computing the identical result was hand-written, and
+   the two were timed head-to-head against a fresh runtime core (same
+   big-N−small-N, best-of-5 method).  That is [§2](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling)–[§8](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants).
+   The harness and every variant `.lisp` file are reproducible —
+   [§9](#9-how-to-reproduce--extend-the-variant-experiments) is the recipe.
+
+**Policy** (CLAUDE.md §2): speed wins over readable CL.  Every change proposed
+here is an opt-in narrowing with a **boxed fallback** — if the analysis cannot
+prove its precondition, today's code is emitted unchanged, so a wrong analysis
+costs a speed-up and never correctness.  Every new fast shape ships wrapped in
+its named macro (the Target-B rule).
+
+**Companions — the *why* and the soundness proofs:**
+[`where-the-time-goes.md`](where-the-time-goes.md) (the four taxes),
+[`raw-numeric-verdict.md`](raw-numeric-verdict.md) (use-proven eager
+coercion), [`bench-exec-investigation.md`](bench-exec-investigation.md) (the
+counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
+
+## Contents
+
+* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
+* **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
+* **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort)
 
 ---
 
@@ -98,6 +106,7 @@ class; the s444 finalize-once guard took the first bite out of dispatch.
 > **`ovlsub` moved again in s446m: 4.98× → 3.44×** (0.2078 → 0.1620 s; the
 > other rows re-measured within noise on the same run — intloop+= 2.07×,
 > arrhash 2.20×, fib 0.29×).  That is #73's cache-free remainder, §7.
+
 Left, in order of size: the pack/unpack template re-parse (#74), method
 dispatch's remainder (#73, cache-free plan in the task), aggregate/slice
 traffic (boxed-aggregate design, post-v0.1), symbolic refs.
