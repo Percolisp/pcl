@@ -554,6 +554,36 @@
 #         lib/Math/BigInt/Calc.pm) had never been in the population either —
 #         the old glob was two levels deep — and both measure zero.
 #         BOARD ROWS ARE OPT-IN: `tools/drop-census.pl . OUT 8 --board`.
+#   s446k FORTY-ONE drops REMOVED and THIRTY-NINE FILES CLEARED by three tasks,
+#         all edited ROW BY ROW against a fresh `tools/drop-census.pl . OUT 8`
+#         (no --board, so the board rows below were NOT re-measured and stay).
+#         #478 -- the Test::/Test2:: name list in _extract_module_prototypes is
+#         GONE, so a dist-declared `(&)` prototype reaches the block-form
+#         parser: 36 cpan-t files clear entirely and three lose most of their
+#         drops (API/InterceptResult.t 9 -> 2, Test2/modules/API.t and
+#         IPC/Driver/Files.t re-counted).  cpan-t as a population goes 42 files
+#         / 83 drops -> 6 / 11.  It is NOT free: the same population's
+#         transpile time goes 65.5 s -> 281.3 s, because the walk is memoized
+#         per PROCESS -- task #560, and the ruled BUDGET fallback was
+#         implemented, measured and rejected (its cost curve is not monotone;
+#         see the task).
+#         #463 items 3+4 -- a punctuation- or digit-named GLOB is repaired into
+#         the symbolic spelling (`*-` -> `*{'-'}`): t/re/reg_namedcapture.t 2
+#         and t/re/subst.t 2 clear.  reg_namedcapture.t now produces two HONEST
+#         `not ok` rows where it used to abort at the drop (%! is not
+#         implemented -- task #561).
+#         #463 item 5 -- perl's `;` deref-block disambiguator leaves a
+#         PPI::Statement::Null the walker had no case for: t/op/gv.t 1 clears
+#         and t/op/sub_lval.t 35 -> 34 (its `{; @119797 }` bare block at line
+#         1066).  The `;` also makes a lone bareword an EXPRESSION rather than
+#         a name, so the normalizer rewrites it to a call -- deleting the Null
+#         alone was a silent wrong (see DECIDED §s446k).
+#         NOT cleared, deliberately: `local *1 = sub {…}` (t/op/method.t:38,
+#         t/op/tie_fetch_count.t:203) keeps its behaviour, because
+#         `local *{EXPR}` loses the statement SILENTLY (task #564) and trading
+#         a loud failure for a silent one is the wrong direction.  That one is
+#         not a census row at all today -- the `local` fall-through swallows it
+#         without a `;; PARSE ERROR`, which is exactly what #564 is about.
 board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Bug. Fell through. Missing case: [ x2
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Context.pm	1	Handle single node of unknown type. Dump: x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Instance.pm	2	Handle single node of unknown type. Dump: x2
@@ -561,46 +591,10 @@ cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/IPC/Driver/Files.pm	1	Handle single node of unknown type. Dump: x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Tools/Tiny.pm	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Util.pm	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Bugs/629.t	3	Handle single node of unknown type. Dump: x3
 cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Regression/637.t	1	WTF? :-) Expr starts with ->/brace?? x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Regression/6_cmp_ok.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Test2/Subtest.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy/subtest/events.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy_And_Test2/diag_event_on_ok.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy_And_Test2/hidden_warnings.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Formatter.t	3	Bug. Fell through. Missing case: [ x3
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_buffer_formatter.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_events.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_plan.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/Subtest_todo.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/ipc_wait_timeout.t	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/special_names.t	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/subtest_bailout.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/trace_signature.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/trace_stamps.t	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/behavior/uuid.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/legacy/TAP.t	3	Bug. Fell through. Missing case: [ x3
 cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API.t	4	Bug. Fell through. Missing case: [ x4
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/Context.t	4	Bug. Fell through. Missing case: [ x4
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/InterceptResult.t	9	Bug. Fell through. Missing case: [ x8 | Can't call method "content" on an undefined value x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Event.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Event/Plan.t	4	Bug. Fell through. Missing case: [ x4
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Event/V2.t	1	Bug. Fell through. Missing case: [ x1
+cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/InterceptResult.t	2	Can't call method "content" on an undefined value x1 | WTF? :-) Expr starts with ->/brace?? x1
 cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/IPC/Driver/Files.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Tools/Tiny.t	10	Bug. Fell through. Missing case: [ x10
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/Util/Facets2Legacy.t	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/regression/693_ipc_ordering.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/regression/746-forking-subtest.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/642_persistent_end.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/684-nested_todo_diag.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/694_note_diag_return_values.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/696-intercept_skip_all.t	3	Bug. Fell through. Missing case: [ x3
-cpan-tests/modules/Test-Simple-1.302199/t/regression/721-nested-streamed-subtest.t	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/t/regression/812-todo.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/817-subtest-todo.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/buffered_subtest_plan_buffered.t	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/t/regression/errors_facet.t	2	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/t/regression/inherit_trace.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t	2	PExpr: unhandled postfix '->' term in cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t: term=bless( { x2
 cpan-tests/modules/Text-CSV-2.04/t/78_fragment.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
@@ -611,19 +605,16 @@ t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of unknown type. Dump: x1
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
-t/op/gv.t	1	Bug. Fell through. Missing case: [ x1
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
 t/op/lexsub.t	4	Bug. Fell through. Missing case: [ x1 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/ref.t	1	Bug. Fell through. Missing case: [ x1
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
-t/op/sub_lval.t	35	Bug. Fell through. Missing case: [ x2 | PCL: Can't modify non-lvalue subroutine call in assignment x33
+t/op/sub_lval.t	34	Bug. Fell through. Missing case: [ x1 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	3	Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
-t/re/reg_namedcapture.t	2	Got op '!', not postfix. But there is nothing after it?? x1 | Got op '-', not postfix. But there is nothing after it?? x1
-t/re/subst.t	2	Bug. Fell through. Missing case: [] x2
 t/uni/readline.t	2	Handle single node of unknown type. Dump: x2

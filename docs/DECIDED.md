@@ -21,6 +21,65 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s446k (2026-08-25, Opus, round 5 agent K) — #479 compiler half, #478 (the name list GOES, budget measured and REJECTED), #463 items 3–5
+
+- **#479 — PPI's `<FH>` mis-lex has a CASCADE, and only a source-level rewrite
+  can undo it** (`ppi-upstream-bugs.md` §14b).  §14 (a term-position `<$f>` read
+  as `< $f >`) has been covered since s404 by `Pl::PExpr::_fix_ppi_glob_after_block`
+  rebuilding the token — but once `>` is an operator the NEXT `/` is in term
+  position too, so PPI makes it a MATCH: `$ok ? <$f> // "" : ""` drops, and
+  `$ok ? <$f> / 2 : ""` swallows the rest of the statement into one
+  `Regexp::Match` token.  A token-level rebuild cannot reach that.
+  `Pl::Parser2::_repair_readline_cascade` spells the diamond as the call perlop
+  says it is (`<$f>` → `readline($f)`) and reparses.  **`readline(...)`, not
+  `(<$f>)`** — parenthesising would create perl's `print (…) interpreted as
+  function` gotcha for `print <$f> // ""`.  It fires only where the cascade
+  happened (term position + a readline body + a `Regexp` after the `>`), and the
+  shape occurs in **ZERO of 1329 files** across the four populations, so
+  `Pl/t/readline-ternary-01.t` (12 rows) IS the guard.
+- **#478 — the `Test::`/`Test2::` name list in `_extract_module_prototypes` is
+  GONE, and the ruled BUDGET fallback was implemented, measured and NOT
+  shipped.**  The list cost correctness: a `(&)` prototype never reached the
+  block-form parser, so `blk { 42; }` DROPPED and `blk { 42 }` was silently
+  mis-parsed to `(pl-blk 42)` — the block's VALUE where perl passes a code ref.
+  Measured over the cpan-t census population (289 files, one process each):
+  **65.5 s / 83 drops with the list, 281.3 s / 11 drops without** — the cost is
+  real (4.3×) and it is intrinsic, because the modules that must be read ARE
+  the expensive ones (`use Test2::API qw/intercept/` is a direct include).
+  **A budget on the recursive walk does not fix it**: a truncated walk cannot
+  go in the process-wide memo (file 2's emission would depend on file 1's
+  leftover budget), so a cut forces re-walks and the cost curve is NOT
+  monotone — 128 KB measured 51.6 s / 40 files vs 37.9 s with no budget at
+  all; only the extreme (own includes, never recurse) was faster (23.8 s) and
+  that one breaks a real re-export chain (`use Encode` in perl-tests/tr.t
+  reaches Storable at depth 2).  The real fix is cross-PROCESS memoisation of
+  the facts — **task #560**.  Guard `Pl/t/module-prototype-scan-01.t` (8 rows,
+  fixture modules differing only in package name).
+- **#463 items 3–5 — a glob named by punctuation or digits** (`ppi-upstream-bugs.md`
+  §26).  `Pl::Parser2::_repair_punct_glob_name` rewrites `*-` → `*{'-'}`, the
+  symbolic spelling the compiler already lowers (probed: the same glob in perl
+  even inside a package).  **Its condition is a WHITELIST, not `_ends_term`'s
+  negative** — a false positive turns working multiplication into a glob, and
+  `_ends_term` is itself wrong here (`@{$h} * (…)` reads as term position
+  because a deref block's `}` is not a subscript's).  Measured: 1329 files, 23
+  term-position `*` sites, the whitelist selects exactly the 8 globs.  `local`
+  is deliberately NOT in the whitelist: `local *{EXPR}` loses the statement
+  SILENTLY (**#564**), and trading a loud drop for a silent one is the wrong
+  direction.
+- **perl's `;` deref-block disambiguator does MORE than force the block
+  reading, and deleting it alone is a silent wrong.**  Inside a forced block a
+  lone bareword is an EXPRESSION; in a plain deref it is the NAME — probed:
+  `${foo}` is `$foo`, `${;foo}` is `${ foo() }`.  So
+  `Pl::Parser2::_normalize_null_statements` deletes the `PPI::Statement::Null`
+  (invisible to `schildren` — it is INSIGNIFICANT, which is why a first version
+  guarded on `schildren > 1` and changed nothing) **and** makes a lone bareword
+  an explicit call before reparsing.  Fixes `${;EXPR}`, `@{;EXPR}` and
+  `*{;EXPR}` in one place.
+- **`*{EXPR}` with an UNDEF EXPR now DIES** (`%p-check-symbol-reference`,
+  rule 12), on both sides of an assignment, as perl does — an EMPTY STRING is
+  legal and is not the same thing (probed).  Without it, un-dropping
+  `*{;undef} = 3` (t/op/gv.t:1020, which asserts the message) would have
+  traded a loud drop for a silent no-op.
 ## s446j (2026-08-25, Opus agent J) — #506 + #507 + #514 + #517 SHIPPED, #505 in part; the punctuation containers are ALL runtime-owned; a NUMERIC symbolic ref is BLOCKED by the box model
 
 - **Every punctuation container perl allows is RUNTIME-OWNED** (#506): the
