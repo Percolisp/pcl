@@ -24,8 +24,9 @@ only move honestly.
 A statement the compiler cannot translate is **announced on stderr at
 compile time** (`PCL: statement dropped at FILE line N: …`) **and dies, perl-shaped
 and trappable, when the program reaches it** (since s435; in `eval STRING` the
-die lands in `$@`).  These are counted over six test populations: 73 files
-carry 167 such statements (s440; the two perl-test populations: 24 files / 75),
+die lands in `$@`).  These are counted over six test populations: **34 files
+carry 89 such statements** (s445 — down from 73 / 167 at s440, most of the
+drop being block-prototype calls from Test::/Test2:: dists that now parse),
 every one classified with an owning task (`baselines/parse-error-drop-census-s399.tsv`,
 `docs/drop-census-s419-flip-gate.md`).  Zero drops in PCL's own shipped
 module tree.
