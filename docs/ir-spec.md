@@ -332,6 +332,16 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   one unwrap) — see `%p-scalar-referent-p`; that leniency exists only because
   the parser drops the outer level of `$$refref->{k}` (task #211), and goes
   away when that is fixed.
+- **The invocant of a postfix `->` is ONE scalar value, whatever the group
+  around it looks like** (normative, s443h/#516 + s448p/#527). A
+  parenthesised base — `($r//0)->[i]`, `(1,2,$r)->[1]`, `(1,2,$h)->{k}`,
+  `(1,2,$cr)->(…)`, `(1,2,$o)->m` — lowers in SCALAR context, so a
+  multi-element group is the comma operator: **every element is evaluated,
+  the LAST one is the reference**. It emits a `progn`, never a `(vector …)`.
+  The look-alike `(LIST)[i]` — and its `qw(a b c)[i]` spelling — is a
+  different operator, a LIST SLICE; PExpr marks both `list_ctx_subscript`
+  and the array emitter keeps their base a list. The postfix-deref
+  spellings (`->@*`, `->$*`) are NOT yet in this family (task #612).
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
   object** (normative, task #423). Perl distinguishes a glob *value*
   (`$g = *foo`, which turns the SV into a GV: `ref($g)` is `""`, `"$g"` is
@@ -1335,6 +1345,14 @@ var ⇒ plain lexical binding, no localization at all).
   "CURRENT"` — perl names the current class there, not the parent.
   `$obj->$coderef(@a)` calls the code ref directly with the invocant
   prepended.
+- **A no-op `import`/`unimport` returns the EMPTY LIST in list context and
+  `undef` otherwise** (s448p, #534) — one helper, `%pcl-no-op-import-result`,
+  answers for every arm that reaches the question (the three inside
+  `p-method-call` and `%pcl-super-fallback`). The empty list is an empty
+  **vector**, the value `sub { return () }` yields; it must NOT be a
+  `p-flatten-marker`, which only the argument-spreading walkers recognise —
+  a bare one reaching a list-assign, a `foreach` list, a hash init or a
+  `print` is stored as ONE element and stringifies as the struct.
 - **Dispatch resolves per call — nothing about the resolution is cached**
   (the USER's cache-free ruling, s444; measured in s446m). A method
   glob-assigned or redefined after an object has already dispatched, and a

@@ -1602,6 +1602,15 @@ sub parse {
     if ($is_qw_subscript) {
       my $pre_id = $self->parse([$pre]);
       my($node, $id) = $self->make_node_insert('a_ref_acc');
+      # `qw(a b c)[2]` IS the list slice `(LIST)[i]`, not a deref of a scalar
+      # base — the same marker the paren spelling sets below, and the one
+      # ExprToCL's gen_array_ref_access_form reads to keep the base a LIST.
+      # It used to be left unset and the shape got by on the base "happening"
+      # to be a multi-child node; the moment #527 taught
+      # _is_paren_scalar_base that a multi-element paren group IS a scalar
+      # base, all four qw-slice sites in the corpus (array.t, context.t,
+      # flip.t, list.t) started dereferencing the LAST WORD instead.
+      $self->node_tree->set_metadata($id, 'list_ctx_subscript', 1);
       my @ix = $term->children();
       my $ix_id = $self->parse(\@ix);
       $self->add_child_to_node($id, $pre_id);

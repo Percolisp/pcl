@@ -20,7 +20,7 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
 
-use Test::More tests => 40;
+use Test::More tests => 54;
 BEGIN { use_ok('Pl::PExpr') };
 
 my $code;
@@ -267,3 +267,105 @@ both_agree('print "[", (sub{ "A" }, sub{ "B" })[1]->(), "]\n";',
     unlike($cl, qr/\(p-funcall-ref\s*\(vector/,
            '#516 shape: the invocant of ->( is never wrapped in a (vector ...)');
 }
+
+diag "";
+diag "-------- task #527: a MULTI-element paren base, for all four members";
+
+# #516's residue.  _is_paren_scalar_base required EXACTLY ONE child, but perl's
+# rule for the invocant of a postfix `->` is the comma operator's LAST element
+# in scalar context -- every element still evaluated, for its side effects.  So
+# `(1,2,$r)->[1]` was 2 (the group lowered as a LIST and the subscript indexed
+# IT: silent wrong), while `->{k}` / `->(...)` / `->method` died "Not a HASH
+# reference" / "Not a CODE reference" / "on unblessed reference".  The first
+# FIVE rows diverged on the base tree (verified by an inverse run, s448p); the
+# rest are the shapes that were already right and must stay right -- in
+# particular the LIST SLICE `(1,2,3)[1]`, a different operator that never
+# reaches this predicate (PExpr marks it list_ctx_subscript), and the
+# SCALAR-context spelling, where the progn already collapsed on its own.
+
+my $R = 'my $r = [10,20]; my $h = {a=>"HA"}; my $cr = sub { "CR(@_)" };' . "\n"
+      . 'package O1; sub new { bless {n=>"obj"}, shift } sub m1 { "M1:" . $_[0]{n} }'
+      . "\npackage main; my \$o = O1->new;\n";
+
+both_agree($R . 'print "[", (1,2,$r)->[1], "]\n";',
+           '#527 the repro: a multi-element paren base of ->[i]');
+
+both_agree($R . 'print "[", (1,2,$h)->{a}, "]\n";',
+           '#527 ... of ->{k}');
+
+both_agree($R . 'print "[", (1,2,$cr)->(4), "]\n";',
+           '#527 ... of ->(...)');
+
+both_agree($R . 'print "[", (1,2,$o)->m1(), "]\n";',
+           '#527 ... of ->method');
+
+# perl evaluates EVERY element of the comma expression, not just the last.
+# Spelled in LIST context (inside a print list) — that is the position the bug
+# lived in; the SCALAR spelling `my $v = (f(),g(),$r)->[0]` collapsed the progn
+# on its own and was already right, exactly as #516's inverse rows record.
+both_agree('my @log; sub f { push @log, "f"; 1 } sub g { push @log, "g"; 2 }
+            my $r = [10,20];
+            print "[", (f(),g(),$r)->[0], " ", join(",",@log), "]\n";',
+           '#527 ... and every element is evaluated for its side effects');
+
+both_agree('my @log; sub f { push @log, "f"; 1 } sub g { push @log, "g"; 2 }
+            my $r = [10,20];
+            my $v = (f(),g(),$r)->[0];
+            print "[$v ", join(",",@log), "]\n";',
+           '#527 inverse: the SCALAR-context spelling was already right');
+
+# ---- the inverses: already right before the fix, must stay right ----------
+
+both_agree($R . 'print "[", ($r)->[1], " ", ($h)->{a}, " ", ($cr)->(9), " ", ($o)->m1(), "]\n";',
+           '#527 inverse: the SINGLE-element paren base of all four');
+
+both_agree($R . 'print "[", ($r//0)->[0], "]\n";',
+           '#527 inverse: a single-element base that is an expression');
+
+both_agree('print "[", ((1,2,3)[1]), " ", join(",", (10,20,30)[0,2]), "]\n";',
+           '#527 inverse: the LIST SLICE (LIST)[i] is a different operator');
+
+# ... and its qw spelling.  `qw(a b c)[2]` IS `(LIST)[2]`, but PExpr's
+# qw-subscript branch never set the `list_ctx_subscript` marker its paren twin
+# sets -- the shape got by on the base "happening" to be a multi-child node.
+# The moment #527 taught _is_paren_scalar_base that a multi-element group IS a
+# scalar base, all FOUR qw-slice sites in perl-tests (array.t, context.t,
+# flip.t, list.t) started dereferencing the LAST WORD; setting the marker is
+# the fix, and it also closes the single-word spelling, which answered EMPTY
+# on the base tree where perl says the word (measured s448p).
+both_agree('print "[", qw(foo bar snorfle)[2], " ", join("", qw(a b c)[2,0,1]),
+                  " ", qw(only)[0], " ", join(",", qw(x y z)[0..1]), "]\n";',
+           '#527 the qw-slice spelling of (LIST)[i], including a ONE-word list');
+
+both_agree('sub cx { my $c = qw[void scalar list][wantarray + defined wantarray]; $c }
+            my @l = cx(); my $s = cx();
+            my @sl = qw(a b)[2,3];
+            print "[$l[0] $s ", scalar(@sl), "]\n";',
+           '#527 ... the corpus shapes: a wantarray-indexed qw slice and an out-of-range one');
+
+# The BRACED spelling of the same base, `${ EXPR }[i]` -- t/op/gmagic.t:109 and
+# :114, and the only diff the 1036-file A/B found for this fix.  Same rule: the
+# block's value in scalar context, so a multi-element group is the comma
+# operator.  All four rows below were EMPTY on the base tree; the first two are
+# LVALUES.
+both_agree('my $r = [1,2,3]; my $s = \$r; my $true = 1; my $h = {a=>"HA"};
+            ${ (), $$s }[0] = 73;
+            ( ! $true ? undef : $$s )->[0] = 74;
+            print "[", $$s->[0], " ", ${ (), $$s }[1], " ", ${ 0, $$s }[2],
+                  " ", ${ (), $h }{a}, "]\n";',
+           '#527 the braced ${ EXPR }[i] spelling, as an lvalue and as a read');
+
+both_agree('my @plain = (1,2,3); my @nested = ((1,2,3));
+            print "[", scalar(@plain), scalar(@nested), "]\n";',
+           '#527 inverse: a paren list with NO arrow stays a list');
+
+# What the fix newly makes reachable: the base as an LVALUE, a chained arrow
+# off it, a class NAME in it, and void context.  All four died on the base tree.
+both_agree('package C9; sub hi { "HI" }
+            package main;
+            my $r = [10,20]; my $h = {a=>"HA"}; my $deep = { x => [5,6] };
+            (1,2,$r)->[0] = 99;
+            (0,$h)->{a} = "NEW";
+            (1,2,$r)->[1];
+            print "[$$r[0] $h->{a} ", (1,$deep)->{x}[1], " ", (1,2,"C9")->hi, "]\n";',
+           '#527 the multi-element base as an lvalue, chained, a class name, and in void context');

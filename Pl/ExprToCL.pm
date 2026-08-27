@@ -2967,9 +2967,21 @@ sub _swap_elem_sigil {
 }
 
 
-# True when NODE is a parenthesised single-value base — a tree_val or progn with
-# exactly one child, e.g. the `($r//0)` in `($r//0)->[i]`. Such a base is a
-# scalar REF being dereferenced, not a list.
+# True when NODE is a PARENTHESISED base of a postfix `->` — a tree_val or
+# progn, e.g. the `($r//0)` in `($r//0)->[i]`.  The invocant of an arrow is ONE
+# scalar value in every context, so such a base is a scalar REF being
+# dereferenced, not a list.
+#
+# A MULTI-element group is the same case (#527): perl's rule is the comma
+# operator's LAST element in scalar context, so `(1,2,$r)->[1]` is 20 — every
+# element is still evaluated for its side effects, which is exactly what the
+# scalar-context progn this licenses already does.  Requiring exactly one child
+# made `(1,2,$r)->[1]` answer 2 (silent wrong — the group lowered as a list and
+# the subscript indexed IT), and made `->{k}` / `->(…)` / `->method` die "Not a
+# HASH reference" / "Not a CODE reference" / "on unblessed reference".
+# The LIST-SLICE spelling `(1,2,$r)[1]` is a different operator and never
+# arrives here — PExpr marks it `list_ctx_subscript` and gen_array_ref_access_form
+# refuses the scalar base for it.
 sub _is_paren_scalar_base {
   my ($self, $node_id) = @_;
   my $node = $self->expr_o->get_a_node($node_id);
@@ -2977,7 +2989,7 @@ sub _is_paren_scalar_base {
   my $type = $node->{type} // '';
   return 0 unless $type eq 'tree_val' || $type eq 'progn';
   my $kids = $self->expr_o->get_node_children($node_id);
-  return $kids && @$kids == 1;
+  return $kids && @$kids >= 1;
 }
 
 # E2 form twin: same scalar-context/lvalue dance, structural child.
