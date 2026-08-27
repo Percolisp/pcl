@@ -4,6 +4,68 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 448p (2026-08-28, Opus, round 6 agent P) — three shaped silent-wrongs: #570, #527 (+ the qw-slice marker it exposed), #534
+
+Worktree `agent-ac469dc6e95699baa` off `922675a`; generation **v2-320**.
+
+**#570 — the params fast path DROPPED `undef` placeholders.**  `sub f { my
+(undef, $x) = @_ }` bound `$_[0]`, not `$_[1]`, because `_extract_params`
+built its POSITIONAL list by grepping the Symbol tokens out of the
+declaration.  The fix is the task's conservative shape: decline any list that
+is not exactly scalar names and commas, and let the ordinary `my (LIST) = @_`
+path lower it — the path that already handled placeholders, which is exactly
+why the same list after any other statement was right.  Insignificant tokens
+(whitespace, comments) and perl-flattened nested parens carry no slot and stay
+allowed, so `my (($a), $b) = @_` keeps the fast path.  Corpus IDENTICAL over
+111; emission-ab over 1036 files (lib/ + perl 5.40.3 t/ + cpan-tests/ +
+shapes) = 1035 SAME / 1 DIFF / 0 RCDIFF, and the diff IS the bug —
+`t/op/inccode.t:293`'s `fake_module` @INC hook was reading the CODEREF perl
+passes as `$_[0]`.  Its companion verdict does not move (C 13/28 DIFF, the
+snapshot's signature).  Guard `Pl/t/aassign-01.t` 11 → 18, four rows failing
+on the base.
+
+**#527 — a MULTI-element paren base of a postfix `->`.**  `(1,2,$r)->[1]` was
+2 where perl says 20 (silent), and the `->{k}` / `->(…)` / `->method` members
+DIED.  `_is_paren_scalar_base`'s `== 1` → `>= 1`; the scalar-context progn it
+licenses already answers the comma operator's last element and evaluates the
+earlier ones.  The 1036-file A/B found exactly one diff, and it is another
+instance of the same bug: `t/op/gmagic.t:109`'s BRACED spelling
+`${ (), $$s }[0] = 73`, silently EMPTY before, correct after — as an lvalue and
+as a read.  Neither companion file moves its verdict (op/gmagic.t stays C 30/3,
+op/inccode.t C 13/28: both abort earlier), so no suite movement is expected
+from either commit.
+
+**...and the regression that widening exposed, which is the session's lesson:
+READ EVERY CORPUS DIFF.**  corpus-diff came back with four files (array.t,
+context.t, flip.t, list.t), all one shape: `qw(a b c)[2]`.  PExpr's
+qw-subscript branch never set the `list_ctx_subscript` marker its paren twin
+sets — the shape had been getting by on its base *happening* to be a
+multi-child node, and the moment a multi-child node became a scalar base they
+all started dereferencing the LAST WORD.  Setting the marker (rule 11: ONE
+marker for "this subscript is a list slice") restores all four byte-for-byte
+and also fixes `qw(only)[0]`, which answered EMPTY on the base tree where perl
+says the word.  Re-run corpus-diff: IDENTICAL over 111.  Guard
+`Pl/t/anon-sub-01.t` 40 → 53, beside #516's family, five rows failing on the
+base.
+
+**#534 — the no-op `import`/`unimport` result.**  The task's DISCRIMINATING
+MEASUREMENT was taken first and killed both of its suspects: instrumenting all
+four arms to print `*wantarray*` shows `t` at every list-context call site, so
+the context read was never wrong.  The VALUE was: a `p-flatten-marker` is
+recognised only by the argument-SPREADING walkers, so a bare one reaching a
+list-assign, a `my (LIST)`, a `foreach` list, a hash init, `join` or `print`
+was stored as ONE element — and `print Foo->import` printed
+`#S(p-flatten-marker :array #())`.  Seven consumer shapes diverged, not the
+two the task listed.  ONE helper `%pcl-no-op-import-result` returns an empty
+VECTOR (the value `sub { return () }` already yields) for all four arms.
+Guard `Pl/t/method-dispatch-01.t` 6 → 8.
+
+Filed, all PRE-EXISTING: **#610** (`my (undef) = LIST` refuses the whole
+file), **#611** (a NESTED paren arrow base keeps LIST context), **#612**
+(`->@*` / `->$*` are not in the paren-scalar-base family).
+
+---
+
 ## Session 445 (2026-08-25, Fable) — CI GREEN on the push; the README-referenced docs refreshed to measured state (USER ask) and pushed; ROUND 5 launched, reviewed and ALL FIVE MERGED
 
 **CI verdict on `0cede82` (the s444 evening push): GREEN** (run completed

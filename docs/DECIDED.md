@@ -21,6 +21,55 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s448p (2026-08-28, Opus, round 6 agent P) — three shaped silent-wrongs: the params placeholder (#570), the multi-element paren arrow base (#527), the no-op import result (#534)
+
+- **#570 — a parameter list is POSITIONAL, so a token in it that is not a name
+  is not free to be ignored.**  `Pl::Parser2::_extract_params` built the fast
+  path's list by GREPPING the Symbol tokens, so an `undef` placeholder (a PPI
+  Word) vanished and every later name moved one slot LEFT: `sub f { my (undef,
+  $x) = @_ }` bound `$_[0]`.  It now DECLINES any list that is not exactly
+  scalar names and commas (whitespace, comments and perl-flattened nested
+  parens still allowed — they carry no slot), and the statement lowers through
+  the ordinary `my (LIST) = @_` path, which was always right.  The
+  discriminator that says declining is a FIX and not a workaround: the same
+  list after any other statement, or with any other RHS, already worked.
+  `_leading_shift_params` (the W14 twin) is structurally immune — it matches
+  `my $x = shift`, whose k[1] is a Token::Symbol.  Guard
+  `Pl/t/aassign-01.t` 11 → 18.  Corpus IDENTICAL; the 1036-file A/B's ONE diff
+  is the bug itself, `t/op/inccode.t`'s `fake_module` @INC hook.
+- **#527 — the invocant of a postfix `->` is ONE scalar value, and a
+  MULTI-element paren group is that same case** (`docs/ir-spec.md` §2.5):
+  perl's rule is the comma operator's LAST element in scalar context, every
+  element still evaluated.  `_is_paren_scalar_base` required exactly one child,
+  so `(1,2,$r)->[1]` answered 2 (silent wrong) and `->{k}` / `->(…)` /
+  `->method` DIED.  `== 1` → `>= 1`.  The BRACED spelling of the same base,
+  `${ (), $$s }[0]` (`t/op/gmagic.t:109`, and the only diff the 1036-file A/B
+  found), was silently EMPTY and is right for the same reason — as an lvalue
+  too.
+- **A LIST SLICE is marked, not inferred — and `qw(a b c)[i]` is a list slice.**
+  The `>= 1` widening exposed that PExpr's qw-subscript branch never set the
+  `list_ctx_subscript` metadata its paren twin sets: the shape had been getting
+  by on its base *happening* to be a multi-child node, and all four qw-slice
+  sites in perl-tests (array.t, context.t, flip.t, list.t) started dereferencing
+  the LAST WORD.  Setting the marker restores them byte-for-byte AND fixes the
+  one-word spelling `qw(only)[0]`, which answered EMPTY on the base tree.  Read
+  every corpus diff: this one was four lines of output and a regression.
+  Guard `Pl/t/anon-sub-01.t` 40 → 53, beside #516's family.
+- **#534 — a no-op `import`/`unimport` returns the EMPTY LIST, and the empty
+  list is a VECTOR, never a `p-flatten-marker`** (`docs/ir-spec.md` §7.3).  The
+  task suspected the context read; the instrumented arms print `*wantarray* = t`
+  at every one of them, so the VALUE was the bug.  A marker is recognised only
+  by the argument-SPREADING walkers, so a bare one reaching a list-assign, a
+  `foreach` list, a hash init, `join` or `print` was stored as ONE element and
+  stringified as `#S(p-flatten-marker :array #())`.  ONE helper
+  `%pcl-no-op-import-result` for all four arms (rule 11).  Guard
+  `Pl/t/method-dispatch-01.t` 6 → 8.
+- Filed from the probes, all PRE-EXISTING: **#610** (`my (undef) = LIST` — a
+  list declaring NO variable — refuses the WHOLE FILE), **#611** (a NESTED paren
+  arrow base keeps LIST context: `((0,$h))->{k}` dies; scalar context is not
+  propagated through a transparent paren layer), **#612** (`->@*` / `->$*` are
+  not in the paren-scalar-base family: `(1,2,$r)->@*` yields the whole list).
+
 ## s446k (2026-08-25, Opus, round 5 agent K) — #479 compiler half, #478 (the name list GOES, budget measured and REJECTED), #463 items 3–5
 
 - **#479 — PPI's `<FH>` mis-lex has a CASCADE, and only a source-level rewrite
