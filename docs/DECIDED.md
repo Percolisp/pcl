@@ -70,6 +70,18 @@ those two files and the live plan doc directly -- no new review-doc families.*
   propagated through a transparent paren layer), **#612** (`->@*` / `->$*` are
   not in the paren-scalar-base family: `(1,2,$r)->@*` yields the whole list).
 
+## s448o (2026-08-28, Opus, round 6 agent O) — the caret/punctuation magic-variable family
+
+- **#565 — a magic scalar a program may ASSIGN to must be a `p-box`, never a
+  raw defvar value.**  `$^R` was `(defvar |$^R| nil)`, so `$^R = 7` reached
+  `box-set` with a non-box place, which returns silently by design (that is how
+  `undef = $x` is a no-op) — the store vanished and the read answered undef.
+  **The spelling was NOT the cause** (the cheap discriminating measurement the
+  task named: the assignment and the read both emit `|$^R|`).  The defvar moves
+  down beside `$^P`/`$^D`/`$^F`/`$^I`/`$^M`, which is where the boxed specials
+  live because `make-p-box` is not defined yet where `$^R` used to sit.  Guard
+  `Pl/t/caret-vars-01.t`.
+
 ## s446k (2026-08-25, Opus, round 5 agent K) — #479 compiler half, #478 (the name list GOES, budget measured and REJECTED), #463 items 3–5
 
 - **#479 — PPI's `<FH>` mis-lex has a CASCADE, and only a source-level rewrite

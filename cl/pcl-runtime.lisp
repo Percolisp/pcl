@@ -1145,8 +1145,11 @@
 ;;; Taint mode flag (${^TAINT}) - always off in transpiled code
 (defvar |${^TAINT}| nil "Taint mode is not enabled")
 
-;;; Regex code-block result ($^R) - result of last successful (?{...}) eval
-(defvar |$^R| nil "Result of last successful (?{...}) regex code block")
+;;; NB: $^R lives with the other BOXED specials further down (search |$^R|) —
+;;; it has to, because a magic scalar a program can ASSIGN to must be a p-box:
+;;; box-set silently ignores a non-box place, so a raw-value defvar makes the
+;;; assignment a no-op (task #565).  make-p-box is not defined yet at this point
+;;; in the file.
 
 ;;; Interpreter state ($^S): 0 at runtime, 1 while executing an eval body
 ;;; (p-eval-block / p-eval rebind it), undef during BEGIN — PCL runs BEGIN
@@ -1846,6 +1849,11 @@
 (defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
 (defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
 (defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
+;;; Regex code-block result ($^R) — the value of the last successful (?{...})
+;;; block.  PCL does not run regex code blocks, so nothing ever sets it, but a
+;;; program may read and WRITE it, so it is a box like its siblings and starts
+;;; undef, which is what perl reads before the first code block (task #565).
+(defvar |$^R| (make-p-box *p-undef*) "Result of last successful (?{...}) regex code block")
 (defvar |$^| (make-p-box "STDOUT_TOP") "FORMAT_TOP_NAME - top-of-page format name (defaults to <handle>_TOP, like Perl)")
 ;; Signal names and numbers, in Perl's own order (Config's sig_name/sig_num on
 ;; Linux/glibc).  ONE table serves both consumers: the pre-populated %SIG keys
