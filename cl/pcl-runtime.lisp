@@ -15671,6 +15671,30 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (and sym (eq (symbol-package sym) pkg) (fboundp sym))
       (symbol-function sym))))
 
+(defun %pcl-no-op-import-result ()
+  "The value of a `->import` / `->unimport` that resolves to NO method.  Perl
+   defines neither, and calling a missing one of those two names is a
+   documented no-op: the EMPTY LIST in list context, undef otherwise.
+
+   The empty list is an empty VECTOR — the same shape every other empty-list
+   producer yields — and NOT a p-flatten-marker (#534).  A marker is
+   recognised only by the argument-SPREADING walkers (push/unshift/
+   p-flatten-args/%p-collect-list); every other list consumer reaches its
+   scalar arm, so a bare one stored as ONE element: `my @r = Foo->import` was
+   1 element where perl says 0, `my ($p) = Foo->import` bound a defined value,
+   a foreach ran one iteration, `my %h = (Foo->import)` gained a key — and
+   `print Foo->import` printed `#S(p-flatten-marker :array #())`.  A raw
+   vector spreads in all of those AND in the spreading walkers, so this one
+   value is right in every consumer.  Measured: *wantarray* IS t at each of
+   the four arms, so the context read was never the bug.
+
+   All four sites that answer this question (p-method-call's three — MRO
+   exhausted, unknown package, @ISA walk exhausted — and %pcl-super-fallback)
+   call it; they used to spell the same four lines each."
+  (if (eq *wantarray* t)
+      (make-array 0 :adjustable t :fill-pointer 0)
+      nil))
+
 (defun p-method-call (obj method &rest args)
   "Perl method call - looks up p-METHOD function in object's package and walks MRO for inheritance"
   ;; Method argument lists flatten like any Perl call: $o->m(@a, %h) spreads its
@@ -15894,13 +15918,10 @@ buffer's fill-pointer; everything else falls back to file-length."
             (cond
               ((string-equal method-name "isa") (apply #'p-isa resolved-obj args))
               ((string-equal method-name "can") (apply #'p-can resolved-obj args))
-              ;; Perl special case: ->import and ->unimport with no method return nothing.
-              ;; In list context: p-flatten-marker with empty array (contributes 0 items).
-              ;; In scalar/void context: nil (undef).
+              ;; Perl special case: ->import and ->unimport with no method return
+              ;; nothing — the empty list in list context, undef otherwise.
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
-               (if (eq *wantarray* t)
-                   (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
-                   nil))
+               (%pcl-no-op-import-result))
               (t (multiple-value-bind (result found)
                      (%pcl-dispatch-autoload class-name method-name resolved-obj args)
                    (if found result
@@ -15938,9 +15959,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   ;; ->import / ->unimport on unknown packages return nothing.
                   ((or (string-equal method-name "import") (string-equal method-name "unimport"))
                    (return-from p-method-call
-                     (if (eq *wantarray* t)
-                         (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
-                         nil)))
+                     (%pcl-no-op-import-result)))
                   ;; UNIVERSAL methods (can/isa/DOES) are valid on ANY class name,
                   ;; even one never declared: `Foo->can("x")` is undef, `Foo->isa(...)`
                   ;; is false — NOT a "can't locate" error.  Fall through to the
@@ -15976,9 +15995,7 @@ buffer's fill-pointer; everything else falls back to file-length."
               ((string-equal method-name "can") (apply #'p-can resolved-obj args))
               ;; Perl special case: ->import and ->unimport with no method return nothing
               ((or (string-equal method-name "import") (string-equal method-name "unimport"))
-               (if (eq *wantarray* t)
-                   (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
-                   nil))
+               (%pcl-no-op-import-result))
               (t (multiple-value-bind (result found)
                      (%pcl-dispatch-autoload class-name method-name resolved-obj args)
                    (if found result
@@ -16089,9 +16106,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     ((string-equal method-name "DOES") (apply #'p-isa obj args))
     ((string-equal method-name "can")  (apply #'p-can obj args))
     ((or (string-equal method-name "import") (string-equal method-name "unimport"))
-     (if (eq *wantarray* t)
-         (make-p-flatten-marker :array (make-array 0 :adjustable t :fill-pointer 0))
-         nil))
+     (%pcl-no-op-import-result))
     (t (multiple-value-bind (result found)
            (%pcl-super-autoload obj method-name current-class parents args)
          (if found

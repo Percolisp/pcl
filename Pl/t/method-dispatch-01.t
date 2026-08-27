@@ -59,7 +59,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 6;
+plan tests => 8;
 
 # ── 1. dispatch stays live under runtime redefinition (#73) ───────────────
 # One SBCL launch: each line is one requirement the fast path must not break.
@@ -184,3 +184,51 @@ print "3 ", Solo2->new->t, "\n";
 EOF
 is(run_cl($super_rest), "1 parent-isa\n2 auto[K3::SUPER::zork]\n3 last\n",
    "a parent's own isa wins over UNIVERSAL's; parent-chain AUTOLOAD answers with \$AUTOLOAD = Current::SUPER::method; UNIVERSAL's own \@ISA is searched");
+
+# ── 3. the no-op import/unimport RESULT is the EMPTY LIST (#534) ───────────
+# All four arms that answer "no such import/unimport method" (p-method-call's
+# three -- MRO exhausted, unknown package, @ISA walk exhausted -- and
+# %pcl-super-fallback) used to return a p-flatten-marker wrapping an empty
+# array.  A marker is recognised only by the argument-SPREADING walkers
+# (push/unshift/p-flatten-args/%p-collect-list); EVERY other list consumer
+# reaches its scalar arm, so a bare one was stored as ONE element.  The
+# discriminating measurement (an instrumented arm printing *wantarray*) said
+# `t` at every one of them: the context read was never the bug, the VALUE was.
+# One shared helper now answers all four with an empty VECTOR -- the shape
+# `sub { return () }` yields, which spreads correctly in every consumer.
+# Every expected string is real perl 5.40.3's output for the same program.
+my $import_empty = <<'EOF';
+package Q4; sub new { bless {}, shift }
+package main;
+my @r = Q4->import;              print "1 ", scalar(@r), "\n";
+my @s = Q4->new->unimport;       print "2 ", scalar(@s), "\n";
+my ($p) = Q4->import;            print "3 ", (defined $p ? "def" : "undef"), "\n";
+my $v = Q4->import;              print "4 ", (defined $v ? "def" : "undef"), "\n";
+my $n = 0; for my $q (Q4->import) { $n++ }  print "5 ", $n, "\n";
+my %h = (Q4->import);            print "6 ", scalar(keys %h), "\n";
+print "7 [", join(",", Q4->import), "]\n";
+print "8 [", Q4->import, "]\n";
+sub relay { return Q4->import } my @g = relay();  print "9 ", scalar(@g), "\n";
+my @u = (Q4->import, "z");       print "10 ", scalar(@u), " @u\n";
+my @e; push @e, Q4->import;      print "11 ", scalar(@e), "\n";
+EOF
+is(run_cl($import_empty),
+   "1 0\n2 0\n3 undef\n4 undef\n5 0\n6 0\n7 []\n8 []\n9 0\n10 1 z\n11 0\n",
+   '#534 a no-op ->import/->unimport is the EMPTY LIST in every list consumer, undef in scalar');
+
+# The other three arms: an UNKNOWN package, the @ISA-walk exhaustion, and
+# %pcl-super-fallback (`$self->SUPER::import` with nothing above).
+my $import_arms = <<'EOF';
+package Base9; sub new { bless {}, shift }
+package Kid9;  our @ISA = ('Base9');
+sub si { my $s = shift; my @r = $s->SUPER::import();   return scalar(@r) }
+sub su { my $s = shift; my @r = $s->SUPER::unimport(); return scalar(@r) }
+package main;
+my @a = Never::Heard::Of::It->import;     print "1 ", scalar(@a), "\n";
+my @b = Never::Heard::Of::It->unimport;   print "2 ", scalar(@b), "\n";
+print "3 ", Kid9->new->si, "\n";
+print "4 ", Kid9->new->su, "\n";
+my @c = Base9->import(qw(x y));           print "5 ", scalar(@c), "\n";
+EOF
+is(run_cl($import_arms), "1 0\n2 0\n3 0\n4 0\n5 0\n",
+   '#534 the unknown-package, @ISA-exhausted and SUPER:: arms answer the same empty list');
