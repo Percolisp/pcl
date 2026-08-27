@@ -5,6 +5,19 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- IO, round 6: the standard handles are names for descriptors 0/1/2 —
+  `open(STDOUT, …)` moves descriptor 1 (plain print, `print STDOUT` and
+  exec'd children all follow), `close(STDOUT)` frees the descriptor (a
+  pipe-open no longer hangs on close); the read-write dup modes
+  `+<&`/`+>&` (and `=` forms) work in both argument forms; `fileno` on a
+  handle that is not open is undef, as in perl.
+- The caret magic variables, round 6: `$^R` round-trips, `$^E` and `$^C`
+  exist (`$^E` is `$!` on POSIX), `$:`'s default gets its newline back;
+  `*^R` and `*]` glob names parse.
+- Compiler silent-wrongs, round 6: `my (undef, $x) = @_` binds the right
+  slot; a multi-element paren base takes the comma operator's last element
+  (`(1,2,$r)->[1]` is 20, and `qw(only)[0]` is the word); a no-op
+  `->import`/`->unimport` returns the empty list in every consumer.
 - Speed: method dispatch no longer re-finalizes the CLOS class on every
   call (2.2× on a method-call loop; overload-heavy bench 7.27× → 4.98× of
   perl).  Counting loops, recursion and integer math beat perl

@@ -221,7 +221,7 @@ recurse.t	OK	27	1	28
 ref.t	PARTIAL	193	16	245
 reset.t	PARTIAL	41	0	45
 reverse.t	OK	25	0	25
-scalar.t	OK	84	32	128
+scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	OK	204	0	205

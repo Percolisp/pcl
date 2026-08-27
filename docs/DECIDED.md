@@ -21,6 +21,45 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s448 (2026-08-28, Fable) — ROUND 6 reviewed and ALL THREE MERGED; batch legs clean; the JS-target sketch saved
+
+- **Round 6 merged** (P `c9dd01d` → O `7a2bc37` → N `866830c` = main), every
+  agent's diff read and independently probed vs perl (~40 probes, all
+  byte-identical); worktrees pruned.  Generation **v2-321** (O's renumber;
+  N is emission-silent), artifacts regenerated on the merged tree.
+- **Legs on `866830c`**: full sweep TOTAL 18319 → **18321 (+2)**, only mover
+  scalar.t (the `+<&` pair); drops 5 = census; three baseline rows edited by
+  hand (pass-baseline scalar.t 86/30; the two fail-baseline rows whose
+  DESCRIPTION held the stale dup errno text) and scalar.t verified to join
+  clean; the seven unstable/unverified files re-run SERIALLY, all
+  byte-identical to baseline (load noise); magic.t's 2 child-drops verified
+  pre-existing on a 922675a worktree.  **Gate-SET scan vs 922675a, both
+  populations, 638×2: ZERO moved lines.**  Companion io/+re/+op `--quick`:
+  nine movers, four A/B'd against the base worktree, EIGHT snapshot rows
+  edited with row-level causes (header block in `baselines/perl-suite-run.tsv`
+  — io/dup +6 #543, io/open 136/25 now DETERMINISTIC #535/#593, io/scalar +2
+  #543, op/fh row 1 #529, op/require_37033 row 7 #535, re/pat_rt_report +4
+  #565 Bug-36909 rows; perlio_leaks = stale row, op/write = pre-existing
+  drift, pvbm not edited — tenth sighting).  Cold gate **179/6054**, xs-only.
+- **Fable filings from review probes** (both PRE-EXISTING): **#620** (`my
+  @arr = LIST if COND` drops — the ARRAY declaration + statement-modifier
+  arm; scalar form works), **#621** (dup from an unknown source name p-dies
+  "Bad filehandle" where perl returns undef+EINVAL — family behaviour).
+  Confirmed deliberate, NOT filed: the concatenation-operand position
+  (`"" . *-`) is outside the s446k punct-glob whitelist on base too, loud.
+- **The JS-target sketch is SAVED as `docs/js-target-sketch.md`** (USER:
+  "look into for fun"; task #622): second backend over the IR, boxes survive
+  (Perl has variable references; raw-slot facts still license unboxing),
+  `local`/context compile to try/finally (JS has no dynamic binding), the
+  CL-specific symbol pain vanishes, hard pair = regex + string-eval
+  architecture; pclxs ports via the same vtable/ABI with the conformance
+  corpus as the host-independent bar.
+- **The coming-sessions queue is written into `docs/plan-post-s433.md`
+  §s448** (design rulings #561/#551/#541/#542/#560 first, then rounds 7–8
+  over the shaped backlog, then #560-build + Target-A residue + census push;
+  v0.2 headline = USER decision, recommended "census to zero + compile speed
+  + %!/errno completeness").
+
 ## s448p (2026-08-28, Opus, round 6 agent P) — three shaped silent-wrongs: the params placeholder (#570), the multi-element paren arrow base (#527), the no-op import result (#534)
 
 - **#570 — a parameter list is POSITIONAL, so a token in it that is not a name

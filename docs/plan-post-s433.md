@@ -112,6 +112,50 @@ mechanism + gate-SET measured + new axes filed" (s366); **a companion row
 count is not comparable to a sweep row count for a change that makes
 something die, until Q1 lands** (s433).
 
+**s448 (Fable, 2026-08-27/28) — ROUND 6 COMPLETE: three Opus agents (N =
+#543 + #535 + #529 io/dup + std descriptors; O = #565 + #562 + #571 + #573
+caret magics; P = #570 + #527 + #534 compiler silent-wrongs) reviewed with
+independent probes and ff-merged; final tree `866830c`, gen v2-321; every
+batch leg clean** (sweep TOTAL 18321 (+2), gate-SET 638×2 ZERO, companion
+nine movers all attributed row-level, cold gate 179/6054 xs-only; records in
+DECIDED §s448 + session-log §448).  Filed this round: #590–#594 (N),
+#600–#602 (O), #610–#612 (P), #620–#621 (Fable review).  `docs/
+js-target-sketch.md` saved (fun/parked, #622).
+
+**THE QUEUE FOR THE COMING SESSIONS (written s448):**
+
+1. **Fable design session(s)** — the five rulings damming the pool:
+   **#561** (where COMPUTED magics `$!`/`%!` live in the box model so glob
+   aliases reach them; decides `%!` the errno hash — reg_namedcapture.t sits
+   on it; O's #602 slot-clearing folds into the same design), **#551**
+   (numeric symbolic-ref vs hard ref), **#541** (false-conditioned `local`
+   write-through), **#542** (stdio buffering policy — isatty-dependent,
+   global, own sweep price), **#560** (disk-cached prototype facts — design
+   here, Opus builds).
+2. **Opus round 7** (3 agents + merge review): *io residue* #591 + #621 +
+   #590 (+#592 if the fcntl shape is settled); *scoping* **#593** (`my`
+   before an in-block `package NAME;` loses the lexical — the io/open.t
+   nondeterminism root cause; sweep IS the gate) + #594 + #530/#532 (the
+   bareword-handle-in-expression family); *parser fillers* #563 + #564 +
+   #550.
+3. **Opus round 8**: the s/// replacement family #520 + #521 + #522 (one
+   bundle); P's residue #610 + #620 + #611/#612; implementations of the
+   step-1 rulings — #561/%! and #542 (each its own session-sized change,
+   #542 with the full-sweep price).
+4. **Then**: #560 BUILT (the compile-speed lever — the pre-scan is 4.3×
+   intrinsic); Target-A residue #477 (quadratic pos) + #582 (per-class
+   stash cache, only if inherited dispatch still lags); the census push
+   toward zero (34 files / 88 drops, all owned; child-drop sites #483,
+   #480–#482); re-check the old Q7 leftovers (#457, #464–#466, #468, #470)
+   against the task store — several overtaken by rounds 5–6.
+5. **Parked on standing rulings**: boxed aggregates (Fable design first),
+   #221 warnings model, E5.3 `local`, indirect object (USER: maybe later),
+   #622 JS target (fun).
+6. **USER decision open: the v0.2 headline** — the flip shipped BEFORE the
+   v0.1 tag, so v0.2's story is unclaimed; recommendation: "census to zero
+   + compile speed (#560) + %!/errno completeness" = what items 1–4
+   produce.
+
 **Session Q1 — the two instruments: #467 + #462 (+ the missing-row report).  No product change.**  **DONE s434** (`docs/opus5-review-requests-s434.md`, DECIDED §s434): both runners load with recovery and the snapshot is re-blessed (+2325 C_ok, 0 rows lost); the census has five populations and the blessed file gained the 12 module rows (39 files / 102 drops); the snapshot hole is printed from BOTH sides.  **Q2 is unblocked.**
 
 1. **#467**: `tools/run-perl-suite.pl` loads the emitted CL with

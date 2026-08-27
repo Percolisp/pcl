@@ -4,6 +4,88 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 448 (2026-08-27/28, Fable) — ROUND 6 launched, reviewed and ALL THREE MERGED; every batch leg run and clean
+
+**Round 6 (three Opus agents in worktrees off `922675a`, the s421 pattern;
+the filler pool from plan-post-s433 §s445, bundled by mechanism; the
+design-ruling tasks #551/#541/#561/#542/#560 deliberately EXCLUDED):**
+
+- **P = #570 + #527 + #534** (s448p, `c9dd01d`, merged first): the params
+  fast path DECLINES any list that is not purely scalar names and commas
+  (`my (undef, $x) = @_` bound `$_[0]` — the A/B found a real @INC hook in
+  t/op/inccode.t receiving the coderef as its filename); a multi-element
+  paren base of `->` takes the comma operator's LAST element (perl's rule),
+  and the widening exposed that `qw(a b c)[2]` had been passing by accident —
+  fixed properly with the same `list_ctx_subscript` marker the paren slice
+  sets (also fixing `qw(only)[0]`, previously empty); no-op
+  `->import`/`->unimport` returns a true empty VECTOR via ONE helper for all
+  four runtime arms (the discriminating measurement: `*wantarray*` was
+  always right, the bare flatten-marker was the bug — SEVEN consumer shapes
+  diverged, not two).  Filed #610–#612.
+- **O = #565 + #562 + #571 + #573** (s448o, `7a2bc37`): `$^R` was a raw
+  defvar that `box-set` silently ignored — now a p-box; `$^E` maps onto the
+  same errno accessor as `$!` (probed both directions), `$^C` gets a real
+  cell; `$:` gets its newline back (a CL string literal has no `\n` escape);
+  `*^R` repairs to the CONTROL-CHARACTER name chr(18) with one runtime
+  meeting point (`%p-slot-name`) — which also unified `${"\cR"}` and `$^R`
+  into one cell as in perl; `*]` claimed only when PPI parks the bracket in
+  an UnmatchedBrace.  Census t/re/pat.t 3 → 2 by edit.  Gen renumbered
+  **v2-321** above P's at rebase.  Filed #600–#602.
+- **N = #543 + #535 + #529** (s448n, `866830c`, merged last; cl/-only, no
+  gen bump): the `+<&`/`+>&` dup modes in BOTH argument forms — the 2-arg
+  spelling was a second silent half (`open FH,"+>&SRC"` parsed as mode `+>`
+  on a file literally named `&SRC`, and CREATED it); **the standard handles
+  are NAMES FOR DESCRIPTORS 0/1/2** — `open(STDOUT,…)` now dup2's onto
+  descriptor 1 so plain print, `print STDOUT` and exec'd children agree,
+  `close(STDOUT)` frees fd 1 (it used to HANG a pipe-open), and #535's filed
+  diagnosis was WRONG (the Broken-pipe aborts were a forked child racing a
+  lost lexical — root cause filed as **#593**); `fileno` on any non-open
+  handle is undef (perl's two negative answers are different facts).  Filed
+  #590–#594.
+
+**Review (this session): every diff read; ~40 own probes vs perl 5.40.3
+across the three trees, all byte-identical; guard files re-run (P 80 rows,
+O 18, N 28).**  Two Fable filings from probe misfires, both PRE-EXISTING on
+main: **#620** (`my @arr = LIST if COND` — the ARRAY declaration +
+statement-modifier shape drops; the scalar form works) and **#621** (a dup
+from an unknown source name p-dies "Bad filehandle" where perl returns
+undef + EINVAL — family behaviour, N's change just extended it to `+`
+spellings).  One probe boundary confirmed deliberate, not filed: the
+concatenation-operand position (`"" . *-`) is outside the whole s446k
+punct-glob whitelist on base too, and drops loudly.
+
+**The batch legs, all on `866830c`:**
+- **Full sweep: GATE explained, TOTAL 18319 → 18321 (+2)** — the only mover
+  is scalar.t 84/32 → 86/30 (the `+<&` pair), plus the two fail-baseline
+  rows whose DESCRIPTION text held the stale dup errno (`Bad file
+  descriptor` → current text); all three baseline rows edited by hand,
+  scalar.t verified to join clean afterwards.  Drops 5 = census.  The
+  parallel run's 7 unstable + 10 unverified rows: ALL seven files re-run
+  serially, byte-identical to their baseline rows — load noise.  magic.t's
+  2 child-drops (orphan-`]` site) verified PRE-EXISTING on a 922675a
+  worktree.
+- **Gate-SET scan vs `922675a`, both populations (638 × 2): ZERO moved
+  lines.**
+- **Companion legs io/ + re/ + op/ `--quick`: NINE movers, every one
+  re-measured ALONE and the four unexplained ones A/B'd against the base
+  worktree** — attributions in the snapshot header: io/dup.t +6 (#543),
+  io/open.t 118/3 → 136/25 and now DETERMINISTIC (#535; the old flapping
+  was #593's racing child), io/scalar.t +2 (#543), op/fh.t +1 (#529, row 1),
+  op/require_37033.t +1 (#535, close(STDIN) frees fd 0),
+  re/pat_rt_report.t +4 (#565 — the "should not lose $^R; Bug 36909" rows),
+  io/perlio_leaks.t 0/12 = STALE snapshot row (identical on base),
+  op/write.t 18/23 = pre-existing drift (identical alone on both trees),
+  io/pvbm.t low the TENTH time (not edited).  Eight snapshot rows edited
+  with causes.
+- **Cold gate on the final tree: see DECIDED §s448.**  Generation
+  **v2-321** (O's, artifacts regenerated on what became the merged tree; N
+  is emission-silent).
+
+**Net effect of the round:** +2 sweep rows, +10 companion C_ok (and
+io/open.t's honest-coverage jump), 43 new guard rows, ten silent-wrongs
+fixed that no suite row sat on, twelve new reproducers filed (#590–#594,
+#600–#602, #610–#612, #620–#621).
+
 ## Session 448o (2026-08-28, Opus, round 6 agent O) — the caret/punctuation magic-variable family: #565, #571, #573, #562
 
 Worktree `agent-af4431ac3fc5d6778` off `922675a`, rebased onto `c9dd01d`;

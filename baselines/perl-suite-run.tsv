@@ -1,4 +1,26 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s448 (Fable) — EIGHT ROWS EDITED BY HAND after the round-6 batch (agents N/O/P
+#   merged, tree 866830c), companion legs io/re/op --quick; every mover
+#   re-measured ALONE (--jobs 1), the four unexplained ones A/B’d against a
+#   922675a base worktree (#366 serial verdicts):
+#     io/dup.t            4/0  -> 10/0    N #543 (the +<& dup family works; the file now runs
+#                                         further and stops at a dup-to-string row instead)
+#     io/open.t          118/3 -> 136/25  N #535 (std descriptor moves) — and the file is now
+#                                         DETERMINISTIC: the old flapping was a forked child
+#                                         racing the loader (root cause #593); rows behind
+#                                         #592/#594 fail honestly now
+#     io/scalar.t        96/32 -> 98/30   N #543 (the in-memory +<& dup pair, scalar.t:87-88)
+#     io/perlio_leaks.t   0/0  -> 0/12    STALE snapshot row — identical on the 922675a base
+#                                         (verified twice); NOT a round-6 change
+#     op/fh.t             5/3  -> 6/2     N #529 (row 1 “initial file handle is undefined”:
+#                                         fileno on an unopened handle is undef)
+#     op/require_37033.t  4/2  -> 5/1     N #535 (row 7: close(STDIN) frees fd 0, the fresh
+#                                         open reuses it); sig @INC spelling churn only
+#     op/write.t         18/24 -> 18/23   PRE-EXISTING drift — identical alone on BOTH trees;
+#                                         NOT a round-6 change
+#     re/pat_rt_report.t 2454/56 -> 2458/52  O #565 (rows 200/203/206/209 “(?:...)? should
+#                                         not lose $^R; Bug 36909” — $^R is a real box now)
+#   NOT edited: io/pvbm.t read 20/8 under load again (the TENTH time) — known noise.
 # s445 (Fable) — NINE ROWS EDITED BY HAND after the round-5 batch (agents M/L/J/I/K
 #   merged, tree f95fa97), companion legs op/io/re/mro/class --quick, every mover
 #   re-measured ALONE (--jobs 1, the #366 serial verdict):
@@ -849,7 +871,7 @@ io/crlf.t	16421	0	16412	6	DIFF	aborted-forms:1: The function PerlIO::pl-get_laye
 io/crlf_through.t	942	0	942	0	OK		0
 io/data.t	4	0	0	0	DIFF		0
 io/defout.t	22	0	21	1	XDIFF	not-supported.md §format / write report formatting — t7 $- (FORMAT_LINES_LEFT) is only nonzero after a real write(); $- is a static 0 because formats are not implemented	0
-io/dup.t	29	0	4	0	DIFF		0
+io/dup.t	29	0	10	0	DIFF	aborted-forms:1: Cannot dup to string 'N': Bad file descriptor at dup.t line N. 	0
 io/eintr.t	0	0	0	0	NOTAP		0
 io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC	0
 io/errno.t	16	0	16	0	OK		0
@@ -863,19 +885,19 @@ io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	11	2	DIFF		0
-io/open.t	188	0	118	3	DIFF	aborted-forms:3: The variable STDOUT is unbound.; unreadable-form: end of file on the loader stream	1
+io/open.t	188	0	136	25	DIFF	aborted-forms:2: The variable STDOUT is unbound.	1
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
 io/perlio_fail.t	15	0	6	9	DIFF		0
-io/perlio_leaks.t	8	4	0	0	DIFF	aborted-forms:1: No such file or directory at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/io/p	0
+io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	0	0	DIFF	aborted-forms:3: Execution of a form compiled with errors. Form: (p-open	0
 io/pipe.t	27	0	8	0	DIFF	aborted-forms:1: Couldn't write to #<sb-sys:fd-stream for "descriptor N" {NCNFN}>: Broken pipe	0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	23	5	DIFF		0
 io/read.t	2	0	2	0	OK		0
 io/say.t	13	0	13	0	OK		0
-io/scalar.t	128	0	96	32	DIFF		0
+io/scalar.t	128	0	98	30	DIFF		0
 io/scalar_ungetc.t	19	0	1	1	DIFF	aborted-forms:1: Can't locate object method "ungetc" via package "main" at - line N. 	0
 io/sem.t	22	0	0	0	XDIFF	aborted-forms:2: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/semctl.t	2	0	0	0	DIFF		0
@@ -1015,7 +1037,7 @@ op/evalbytes.t	9	0	5	4	DIFF		0
 op/exec.t	41	0	23	2	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
 op/exp.t	31	0	31	0	OK		0
-op/fh.t	8	0	5	3	DIFF		0
+op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
 op/filetest.t	436	0	183	251	DIFF	aborted-forms:1: The function main::pl-f is undefined.	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
@@ -1111,7 +1133,7 @@ op/recurse.t	28	0	27	1	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding st
 op/ref.t	257	0	199	43	DIFF	aborted-forms:1: PCL: statement not supported at ref.t line N: $foo = doit $object "FOO"; -- Bug. Fell thro	1
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
-op/require_37033.t	10	0	4	2	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N	0
+op/require_37033.t	10	0	5	1	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
 op/require_errors.t	73	0	3	68	DIFF		0
 op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
@@ -1181,7 +1203,7 @@ op/waitpid.t	1	0	1	0	OK		0
 op/wantarray.t	28	0	27	1	DIFF		0
 op/warn.t	32	1	19	14	DIFF		0
 op/while.t	26	0	20	6	DIFF		0
-op/write.t	636	0	18	24	DIFF	unbound:OUT; aborted-forms:19: The variable OUT is unbound.	1
+op/write.t	636	0	18	23	DIFF	unbound:OUT; aborted-forms:21: The variable OUT is unbound.	1
 op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
 opbasic/arith.t	183	0	183	0	OK		0
 opbasic/cmp.t	13280	0	12078	0	DIFF		0
@@ -1211,7 +1233,7 @@ re/pat_psycho.t	15	0	11	0	DIFF		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_re_eval.t	527	0	64	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/pat_rt_report.t	2513	1	2454	56	DIFF		0
+re/pat_rt_report.t	2513	1	2458	52	DIFF		0
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_special_cc.t	9	0	9	0	OK		0
 re/pat_special_cc_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
