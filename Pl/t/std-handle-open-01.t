@@ -34,6 +34,10 @@
 #     companion suite's recovery loader, where it raced its parent on the
 #     shared file offset and truncated t/io/open.t at a random form.
 #
+# Rows 6 and 7 are the same question one step further out — what `fileno`
+# answers about a handle that is NOT open (task #529, found by probing the
+# close above): undef, never -1.
+#
 # Every expectation below is the live `perl` answer (probed s448n, 5.40.3).
 
 use v5.30;
@@ -53,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 7;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -150,3 +154,46 @@ my $got = do { local $/; <$in> }; close $in;
 print "err:[$got]";
 PL
    'open(STDERR,">",F) moves descriptor 2 — warn lands in the file, and a dup restores it');
+
+# ── 6/7. task #529 — fileno: NO OPEN HANDLE IS UNDEF, and -1 means something ─
+# else entirely.  perl's two answers are different facts and `defined` is how a
+# program tells them apart: undef when the handle is not open (never opened,
+# closed, an empty lexical, a closed glob), and -1 only for an OPEN in-memory
+# handle, which has no descriptor to name.  PCL answered -1 to both, so
+# `defined(fileno(W))` after `close(W)` was TRUE.
+# The real fd is folded to "fd": its NUMBER is not perl's (SBCL holds
+# descriptors of its own), and the number is not what these rows are about.
+is(run_cl($FIX . <<'PL'), "never=undef;open=fd;closed=undef;lex-open=fd;lex-closed=undef;undef-lex=undef;\n",
+sub show { my ($t, $v) = @_; print "$t=", (defined $v ? $v : "undef"), ";" }
+show("never", fileno(NEVEROPENED));
+open(W, ">", $O) or die "open: $!\n";
+show("open", (fileno(W) > 2 ? "fd" : fileno(W)));
+close(W);
+show("closed", fileno(W));
+open(my $lex, "<", $O) or die "open2: $!\n";
+show("lex-open", (fileno($lex) > 2 ? "fd" : fileno($lex)));
+close($lex);
+show("lex-closed", fileno($lex));
+my $u;
+show("undef-lex", fileno($u));
+print "\n";
+PL
+   'fileno is UNDEF for a never-opened, a closed and an empty handle — bareword and lexical');
+
+is(run_cl($FIX . <<'PL'), "mem-open=-1;mem-closed=undef;glob=fd;globref=fd;glob-closed=undef;stdout=1;\n",
+sub show { my ($t, $v) = @_; print "$t=", (defined $v ? $v : "undef"), ";" }
+open(my $mk, ">", $O) or die "mk: $!\n"; print $mk "x\n"; close $mk;
+my $buf = "abc";
+open(my $mem, "<", \$buf) or die "mem: $!\n";
+show("mem-open", fileno($mem));
+close($mem);
+show("mem-closed", fileno($mem));
+open(G, "<", $O) or die "g: $!\n";
+show("glob", (fileno(*G) > 2 ? "fd" : fileno(*G)));
+show("globref", (fileno(\*G) > 2 ? "fd" : fileno(\*G)));
+close(G);
+show("glob-closed", fileno(*G));
+show("stdout", fileno(STDOUT));
+print "\n";
+PL
+   'fileno is -1 only for an OPEN in-memory handle; a closed one is undef, and a glob answers like its name');

@@ -10991,10 +10991,23 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-fileno-impl (fh)
   "Perl fileno - get file descriptor number.  Real fd via the fd-stream
    behind the handle (following synonym streams); the std streams keep
-   their well-known numbers even when wrapped; -1 for in-memory handles
-   (perl's answer for scalar filehandles)."
+   their well-known numbers even when wrapped.
+
+   NO OPEN HANDLE IS UNDEF, NOT -1 (task #529).  Perl's two answers are
+   different facts and `defined` is how programs tell them apart (probed
+   5.40.3): **undef** for a handle that is not open — never opened, closed,
+   an empty lexical, a closed glob, a closed name — and **-1** only for an
+   OPEN in-memory (scalar) handle, which has no descriptor to name.  PCL
+   answered -1 to both, so `defined(fileno(W))` after `close(W)` was TRUE.
+
+   A DIRHANDLE keeps answering -1: perl gives the real dirfd there, and PCL
+   has none, so -1 preserves the definedness perl's callers test even though
+   the value is not perl's."
   (let ((stream (p-get-stream fh)))
     (cond
+      ((null stream)
+       (if (ignore-errors (gethash fh *p-dirhandles*)) -1 *p-undef*))
+      ((not (open-stream-p stream)) *p-undef*)
       ((%p-fd-of-stream stream))
       ((eq stream *standard-input*) 0)
       ((eq stream *standard-output*) 1)

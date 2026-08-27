@@ -126,6 +126,21 @@ those two files and the live plan doc directly -- no new review-doc families.*
   It is the same shortcoming `not-supported.md` names in the English.pm section
   — that gap and this one are one piece of work.
 
+## s448n (2026-08-27, Opus, round 6 agent N) — `fileno`: no open handle is UNDEF (#529)
+
+- **`fileno` has TWO negative answers in perl and they are different facts**
+  (probed 5.40.3): **undef** when the handle is not open — never opened,
+  closed, an empty lexical, a closed glob, a closed name — and **-1** only for
+  an OPEN in-memory (scalar) handle, which has no descriptor to name.  PCL
+  answered -1 to both, so `defined(fileno(W))` after `close(W)` was TRUE and
+  `IO::Handle::opened` (literally `defined fileno($_[0])`) could never say no.
+  `%p-fileno-impl` now asks `open-stream-p` first.
+- A DIRHANDLE keeps answering -1: perl gives the real dirfd, PCL has none, and
+  -1 preserves the definedness perl's callers test.
+- Guard `Pl/t/std-handle-open-01.t` rows 6–7 (the whole matrix in two rows; the
+  real fd is folded to `fd` because its NUMBER is not perl's — SBCL holds
+  descriptors of its own).  Costs nothing in either population.
+
 ## s448n (2026-08-27, Opus, round 6 agent N) — STDIN/STDOUT/STDERR are NAMES FOR DESCRIPTORS (#535)
 
 - **An open onto a standard handle MOVES the descriptor** (#535).  PCL merely
