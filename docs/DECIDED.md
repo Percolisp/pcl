@@ -81,6 +81,23 @@ those two files and the live plan doc directly -- no new review-doc families.*
   down beside `$^P`/`$^D`/`$^F`/`$^I`/`$^M`, which is where the boxed specials
   live because `make-p-box` is not defined yet where `$^R` used to sit.  Guard
   `Pl/t/caret-vars-01.t`.
+- **#571 — `$^E` maps onto `$!`'s OWN accessor, not onto a cell of its own.**
+  Both were missing from `%SPECIAL_VARS` (`Pl/ExprToCL.pm`), so naming either
+  emitted a bare `$^E` token which, under `:invert`, reads DOWN-cased and
+  aborted the file with "The variable `$^e` is unbound".  On POSIX perl's `$^E`
+  IS `$!` — probed in BOTH directions (set `$!`, read `$^E`; set `$^E`, read
+  `$!`) — so the entry is the same `['p-errno-string']` the `$!` entry uses; an
+  inert cell would read `""` after a failed syscall, which is a silent wrong,
+  not a stub.  `$^C` is a `(make-p-box 0)`: perl reports 0 for it at run time
+  and PCL has no `-c`.  `lib/English.pm`'s `$COMPILING` becomes an ordinary
+  `\$^C` alias; `$EXTENDED_OS_ERROR` KEEPS its errno tie, because `$^E` is an
+  accessor and `\$^E` would reference a temporary box instead of aliasing.
+- **#573 — a CL string literal has no `\n` escape.**  `(make-p-box " \n-")` is
+  the three characters space, letter *n*, hyphen: the reader takes a backslash
+  as "the next character, literally".  `$:` now spells its default the way
+  `|$/|` spells its own, with `#\Newline`.  A scan of every string literal in
+  `cl/*.lisp` for a backslash before an alphanumeric finds no second instance
+  (`\\`-escaped regex sources are the only other hits).
 
 ## s446k (2026-08-25, Opus, round 5 agent K) — #479 compiler half, #478 (the name list GOES, budget measured and REJECTED), #463 items 3–5
 

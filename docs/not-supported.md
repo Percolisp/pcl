@@ -667,12 +667,13 @@ written, is byte-identical to perl (`Pl/t/english-01.t`).  Use `@_` directly,
 which works.  Closing this needs true glob-to-glob aliasing (`*A = *B` sharing
 one entry rather than copying slots) — the glob-value family's own work.
 
-**Two adjacent PCL gaps the shim routes around, both filed:** `$^E` and `$^C`
-have no runtime variable (naming either directly aborts with an unbound
-variable), so `$EXTENDED_OS_ERROR` is served by the errno tie — which is what
-perl gives on POSIX, probed identical — and `$COMPILING` is set to the 0 perl
-reports at run time.  `$PROGRAM_NAME` is `$0`, which PCL answers as `sbcl`
-rather than the script path; that is `$0`'s own bug, not English's.
+`$EXTENDED_OS_ERROR` is served by the errno tie rather than by perl's
+`*EXTENDED_OS_ERROR = \$^E` alias: `$^E` exists since task #571, but it is the
+errno ACCESSOR, not a cell, so `\$^E` would take a reference to a temporary box
+instead of aliasing.  The tie gives the value perl gives on POSIX, probed
+identical.  `$COMPILING` is an ordinary `\$^C` alias (also #571).
+`$PROGRAM_NAME` is `$0`, which PCL answers as `sbcl` rather than the script
+path; that is `$0`'s own bug, not English's.
 
 ---
 

@@ -199,12 +199,13 @@ tie $EXTENDED_OS_ERROR,    'English::_Errno';
 	*EXECUTABLE_NAME			= \$^X	;
 	*OSNAME					= \$^O	;
 
-# $^C (COMPILING) has no cell in PCL, and PCL has no compile-only mode, so the
-# value perl reports at run time -- 0 -- is the only one it can ever hold.
-# (A program that names $^C directly still dies unbound; that is PCL's gap,
-# filed separately, not English's to paper over.)
+# $^C got its cell in task #571 (it was one of the two caret names with no
+# runtime variable at all), so COMPILING is an ordinary alias like its
+# neighbours instead of the plain `our $COMPILING = 0` that stood in for it.
+# The VALUE is unchanged: PCL has no compile-only mode, so 0 -- what perl
+# itself reports at run time -- is the only value it can ever hold.
 
-our $COMPILING = 0;
+	*COMPILING				= \$^C	;
 
 # ------------------------------------------------------------------
 # Exports -- core English.pm's lists, verbatim.

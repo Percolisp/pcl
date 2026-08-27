@@ -273,7 +273,7 @@
    #:|@{^CAPTURE}|
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
-   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[|
+   #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[| #:|$^C|
    ;; Context — the variable and the four macros that name its bindings (#281)
    #:*wantarray*
    #:p-list-ctx #:p-scalar-ctx #:p-void-ctx #:p-caller-ctx
@@ -1816,7 +1816,12 @@
 (defvar |$=| (make-p-box 60) "FORMAT_LINES_PER_PAGE - page length for write")
 (defvar |$-| (make-p-box 0) "FORMAT_LINES_LEFT - lines left on page for write")
 (defvar |$%| (make-p-box 0) "FORMAT_PAGE_NUMBER - current page number for write")
-(defvar |$:| (make-p-box " \n-") "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
+;;; NB the spelling: a CL string literal has NO \n escape — the reader takes a
+;;; backslash as "the next character, literally" — so `" \n-"` is the THREE
+;;; characters space, letter n, hyphen, which is what PCL read here until #573.
+;;; perl's default is space, NEWLINE, hyphen, spelled the way |$/| spells its.
+(defvar |$:| (make-p-box (concatenate 'string " " (string #\Newline) "-"))
+  "FORMAT_LINE_BREAK_CHARACTERS - word-break chars for write")
 (defvar |$^L| (make-p-box (string #\Page)) "FORMAT_FORMFEED - formfeed char for write")
 (defvar |$^A| (make-p-box "") "ACCUMULATOR - for formline/write output")
 ;;; Process credentials ($< $> $( $)).  The GID forms are perl's
@@ -1849,6 +1854,11 @@
 (defvar |$^F| (make-p-box 2)  "SYSTEM_FD_MAX - max file descriptor for subprocesses")
 (defvar |$^I| (make-p-box *p-undef*) "INPLACE_EDIT - in-place edit extension")
 (defvar |$^M| (make-p-box *p-undef*) "emergency memory pool")
+;;; $^C (COMPILING) — perl's compile-phase flag.  PCL has no -c, and perl
+;;; itself reports 0 for it at RUN time, so a box holding 0 is exact rather
+;;; than a stub.  ($^E is NOT here: on POSIX it IS $!, so ExprToCL maps it
+;;; onto (p-errno-string) — the same accessor $! uses.  Task #571.)
+(defvar |$^C| (make-p-box 0) "COMPILING - 0 at run time, as in perl")
 ;;; Regex code-block result ($^R) — the value of the last successful (?{...})
 ;;; block.  PCL does not run regex code blocks, so nothing ever sets it, but a
 ;;; program may read and WRITE it, so it is a box like its siblings and starts
@@ -12337,7 +12347,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-320"
+(defparameter *pcl-cache-generation* "v2-321"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

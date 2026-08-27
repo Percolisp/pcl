@@ -314,6 +314,12 @@ my %SPECIAL_VARS = (
   '$^F' => '|$^F|',   # SYSTEM_FD_MAX
   '$^M' => '|$^M|',   # emergency memory pool
   '$^R' => '|$^R|',   # last (?{...}) result
+  # $^E is $! on POSIX — the SAME variable, probed in both directions (set $!,
+  # read $^E; set $^E, read $!), so it maps onto the errno accessor rather than
+  # onto a cell of its own.  An inert cell would read "" after a failed syscall
+  # where perl reads the strerror text: silent wrong, not a stub (task #571).
+  '$^E' => ['p-errno-string'],
+  '$^C' => '|$^C|',   # COMPILING — 0 at run time (PCL has no -c)
   '$^N' => '|$^N|',   # most-recently-closed participating capture group
   '$^W' => '|$^W|',   # global warnings flag (inert 0)
   '$['  => '|$[|',    # array base (always 0 since 5.30; inert)
