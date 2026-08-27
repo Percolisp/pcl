@@ -7367,10 +7367,25 @@ sub _extract_params {
     && $k[1]->isa('PPI::Structure::List')
     && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '='
     && $k[3]->isa('PPI::Token::Magic') && $k[3]->content eq '@_';
-  my @params = map { $_->content }
-               grep { $_->isa('PPI::Token::Symbol') }
-               map { $_->tokens } $k[1];
-  return undef unless @params && !grep { !/^\$\w+$/ } @params;
+  # The fast path is POSITIONAL — the Nth name binds @_[N-1] — so a token in
+  # the list that is NOT a name is not free to be ignored: dropping it shifts
+  # every later name one slot LEFT.  #570: `my (undef, $x) = @_` bound $_[0],
+  # and `my ($a, $h{k}) = @_` collected `$h` as a second parameter.  Decline
+  # the whole shape unless the list is exactly names and commas; the statement
+  # then lowers as an ordinary `my (LIST) = @_` in the body, which binds
+  # placeholders and element lvalues correctly (measured: the same list with
+  # any other RHS, or after any other statement, is already right).
+  # Insignificant tokens (whitespace, comments) and nested parens — which perl
+  # flattens — do not carry a slot and are allowed through.
+  my @params;
+  for my $t ($k[1]->tokens) {
+    next if $t->isa('PPI::Token::Whitespace') || $t->isa('PPI::Token::Comment');
+    next if $t->isa('PPI::Token::Structure') && $t->content =~ /^[()]$/;
+    next if $t->isa('PPI::Token::Operator')  && $t->content =~ /^(?:,|=>)$/;
+    return undef unless $t->isa('PPI::Token::Symbol') && $t->content =~ /^\$\w+$/;
+    push @params, $t->content;
+  }
+  return undef unless @params;
   return \@params;
 }
 

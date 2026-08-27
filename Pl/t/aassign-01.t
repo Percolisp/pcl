@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 18;
 
 sub run_cl {
     my ($code) = @_;
@@ -119,3 +119,68 @@ test_cl('our (...) self-assign snapshots RHS',
 test_cl('&& propagates list context to its value operand',
     'our ($x,$y,$z) = (1..3); my $t = 1; (our $y, our $z) = $t && ($x,$y); print "$x $y $z\n";',
     "1 1 2\n");
+
+# ── #570: an `undef` PLACEHOLDER in a sub's leading `my (LIST) = @_` ───────────
+# The signature fast path (Parser2::_extract_params) is POSITIONAL — the Nth
+# name binds @_[N-1] — and it used to build the list by GREPPING the Symbol
+# tokens out of it.  An `undef` placeholder is a Word, so it vanished and every
+# later name moved one slot LEFT: `my (undef, $x) = @_` bound $_[0].  Silent
+# wrong, and only in that one position: the same list with any other RHS, or
+# after any other statement, was already right (rows 4-6 below).  The fix makes
+# _extract_params DECLINE a list that is not exactly names and commas, so the
+# statement lowers through the ordinary `my (LIST) = @_` path.
+# Every expected string is real perl 5.40.3's output for the same program;
+# rows 1-3 print A / A/B / A on the base tree (measured before the fix).
+
+test_cl('#570 leading undef placeholder binds $_[1]',
+    'sub f { my (undef, $x) = @_; return $x }
+     print f(qw(A B)), "\n";',
+    "B\n");
+
+test_cl('#570 interior + repeated placeholders',
+    'sub f2 { my ($a, undef, $c) = @_; return "$a/$c" }
+     sub f3 { my (undef, undef, $z) = @_; return $z }
+     sub f4 { my (undef, $x, undef, $y) = @_; return "$x$y" }
+     print f2(qw(A B C)), " ", f3(qw(A B C)), " ", f4(qw(A B C D)), "\n";',
+    "A/C C BD\n");
+
+test_cl('#570 the placeholder does not disturb @_ or a later write',
+    'sub g { my (undef, $x) = @_; $x .= "!"; return "$x:" . scalar(@_) . ":$_[0]" }
+     print g(qw(A B)), "\n";',
+    "B!:2:A\n");
+
+# The shapes that were ALREADY right and must stay right (the discriminator:
+# these prove the general list-assign path handles placeholders, which is why
+# declining is a correct fix rather than a workaround).
+
+test_cl('#570 regression: no placeholder, trailing placeholder, other RHS',
+    'sub h1 { my ($a, $b) = @_; return "$a-$b" }
+     sub h2 { my ($p, undef) = @_; return $p }
+     sub h3 { my @c = @_; my (undef, $x) = @c; return $x }
+     sub h4 { my (undef, $x) = @_[0..1]; return $x }
+     print h1(qw(A B)), " ", h2(qw(A B)), " ", h3(qw(A B)), " ", h4(qw(A B)), "\n";',
+    "A-B A B B\n");
+
+test_cl('#570 insignificant tokens keep the fast path (nested parens, comment)',
+    'sub k1 { my (($a), $b) = @_; return "$a$b" }
+     sub k2 { my ($a, # a comment
+                   $b) = @_; return "$a$b" }
+     sub k3 { my ($a => $b) = @_; return "$a$b" }
+     sub k4 { my ($a, $b,) = @_; return "$a$b" }
+     print k1(qw(A B)), " ", k2(qw(A B)), " ", k3(qw(A B)), " ", k4(qw(A B)), "\n";',
+    "AB AB AB AB\n");
+
+# The EMISSION shape: the ordinary two-name list still takes the fast path (the
+# decline must not fire on it), and the placeholder list must not.
+{
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh "sub ok1 { my (\$p, \$q) = \@_; return \$p }\n"
+            . "sub no1 { my (undef, \$x) = \@_; return \$x }\n"
+            . "print ok1(1,2), no1(1,2), \"\\n\";\n";
+    close $fh;
+    my $cl = `$pl2cl $pl 2>/dev/null`;
+    like($cl, qr/p-raw-params \(\$p \$q\)/,
+         '#570 shape: a plain name list still takes the params fast path');
+    unlike($cl, qr/p-raw-params \(\$x\)/,
+           '#570 shape: a placeholder list does NOT reach p-raw-params');
+}
