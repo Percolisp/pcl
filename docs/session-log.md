@@ -4,6 +4,86 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 448o (2026-08-28, Opus, round 6 agent O) — the caret/punctuation magic-variable family: #565, #571, #573, #562
+
+Worktree `agent-af4431ac3fc5d6778` off `922675a`, rebased onto `c9dd01d`;
+generation **v2-310 → v2-321** (renumbered above main's v2-320 at the rebase,
+three artifacts regenerated).
+
+**#565 — the discriminating measurement the task named came back NEGATIVE, and
+that was the answer.**  `$^R = 7; print $^R` printed empty, and the task's two
+candidates were "no store at all" and "a store into a cell the read does not
+consult".  Neither: the transpile shows `(p-setf |$^R| 7)` and `|$^R|` — ONE
+spelling.  The cell was `(defvar |$^R| nil)`, a RAW value, and `box-set`
+returns silently when its place is not a p-box (by design — that is how a write
+to `*p-undef*` is a no-op).  So a magic scalar a program may ASSIGN to has to
+be a box, like `$^P`/`$^D`/`$^F`/`$^I`/`$^M`, and the defvar moves ~700 lines
+down to sit with them, because `make-p-box` is not defined yet where it was.
+
+**#571 — `$^E` maps onto `$!`'s OWN accessor.**  Both `$^E` and `$^C` were
+missing from `%SPECIAL_VARS`, so each emitted a bare token that reads
+DOWN-cased under `:invert` and aborted the file at "The variable `$^e` is
+unbound".  On POSIX perl's `$^E` IS `$!` — re-probed in both directions before
+shipping — so the entry is the same `['p-errno-string']` the `$!` entry uses;
+an inert cell would read `""` after a failed syscall, a silent wrong dressed as
+a stub.  `$^C` is `(make-p-box 0)`.  `lib/English.pm`'s `$COMPILING` becomes
+the ordinary `\$^C` alias its neighbours already are, while
+`$EXTENDED_OS_ERROR` KEEPS its errno tie — `$^E` is an accessor, so perl's
+`\$^E` spelling would reference a temporary box instead of aliasing.
+
+**#573 — a CL string literal has no `\n` escape.**  `(make-p-box " \n-")` is
+space, LETTER n, hyphen: the reader takes a backslash as "the next character,
+literally".  Scanned every string literal in `cl/*.lisp` for a backslash before
+an alphanumeric (a small parser, since a grep drowns in docstrings) — one hit,
+this one.  A single slip, not a family.
+
+**#562 — a CARET-named glob is named by a CONTROL CHARACTER, and the two
+spellings meet in the RUNTIME.**  `*^R` is not the glob named `^`; probed:
+`*^R = *g` aliases `$^R` to `$g` slot for slot, `${"\cR"}` IS `$^R` while
+`${"^R"}` is a different variable, and `"" . *^R` is `*main::` + chr(18).  So
+`_repair_punct_glob_name` gains an arm emitting the control character, and a
+new `%p-slot-name` maps a one-control-character glob name onto PCL's `$^R`
+spelling at the ONE step that turns a glob NAME into a slot SYMBOL name — never
+at the typeglob name, which perl hands back as the control character.  Bonus:
+`${"\cR"}` and `$^R` were two cells and are now one, as in perl.  The `*]` half
+got the discriminator the task asked for FROM PPI: a bracket closing a real
+structure is that structure's `finish`, an orphan is parked in a
+`PPI::Statement::UnmatchedBrace` — measured over subscripts, slices, anon
+constructors, list slices and `($x)[0]`, and a `(*)` PROTOTYPE never reaches
+the arm at all.  Only closers `]` `)` `}`: `*{` is the deref-block spelling,
+an opener is never orphaned, and deleting a `;` takes the terminator with it.
+
+**Bar.**  Gate 178 files / **6030** rows PASS on the rebased tree (the 14 xs
+rows skip — a worktree has no pclxs sibling).  corpus-diff vs main IDENTICAL
+over 111, silent drops 5 unchanged, shapes 6 identical.  Emission A/B vs main
+over perl's t/ + cpan-tests (988 files): SAME=979 DIFF=9 RCDIFF=0, every hunk
+read — five `$^E` → `(p-errno-string)`, three `$^C` → `|$^C|`, and `t/re/pat.t`
+whose one hunk is the `*^R` drop becoming a glob assignment.  lib A/B 28/29
+SAME with `lib/English.pm` the only DIFF.  Census `t/re/pat.t` 3 → 2, edited
+row by row (34/89 → 34/88), and the header's stale pre-s446k total recomputed
+from the rows.  Guards `Pl/t/caret-vars-01.t` (new, 6 rows) and
+`Pl/t/punct-glob-name-01.t` 8 → 12, the latter inverse-run twice.
+`ppi-upstream-bugs.md` §26 extended; `docs/ppi-bug-report.t` 36 → 38 rows.
+
+**Filed from the probes, all PRE-EXISTING:** **#600** (`local $^P = 5` is a
+silent no-op — the `local` let binds the BARE symbol while every read emits the
+pipe-quoted one; `_local_target_item` takes the storage name from
+`_transform_pkg_var` and the setf place from the lowering, and the #510 comment
+saying "only `$!` diverges" missed the caret family), **#601** (perl's `$^C`
+STORE is `(bool)SvIV`, so `$^C = 5` reads 1 there and 5 here), **#602** (`*A =
+*B` does not CLEAR the slots B lacks — perl replaces the glob, PCL copies bound
+slots only; the same shortcoming `not-supported.md` names for English's
+`@ARG`).
+
+**What the merge review owes:** a gate-SET scan (a drop stopped firing), the
+`re/` and `op/` companion legs, and the full sweep for the `cl/` half.
+Expected sweep/companion movement: `t/re/pat.t` gains a statement that runs
+(its own `is $^R, 42` still cannot pass — it needs `(?{…})`), the five perl-t
+files naming `$^E` stop being able to abort on their error branches, and
+`t/op/tie_fetch_count.t` does not move at all (refused whole at `~~`).
+
+---
+
 ## Session 448p (2026-08-28, Opus, round 6 agent P) — three shaped silent-wrongs: #570, #527 (+ the qw-slice marker it exposed), #534
 
 Worktree `agent-ac469dc6e95699baa` off `922675a`; generation **v2-320**.
