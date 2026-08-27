@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 12;
 
 sub write_pl {
     my ($code) = @_;
@@ -173,4 +173,72 @@ our $g2 = "GEE"; our $p2; *p2 = *g2; print "2=[$p2]\n";
 *{"n2"} = \$g2; print "3=[", ${"n2"}, "]\n";
 my @f = sort <*.no-such-suffix>;
 print "4=[", scalar(@f), "]\n";
+PL
+
+# ---- task #562: the two spellings the s446k repair deliberately left alone --
+#
+# `*^R` (t/re/pat.t:1715) is NOT the glob named `^`.  perl's caret convention
+# means the glob named chr(18) — the one `$^R` reads — so `*{'^'}R` would have
+# been a silent wrong, and the repair spells the CONTROL CHARACTER instead.
+# PCL spells the same variable `$^R` (a pipe-quoted CL symbol, task #412), and
+# the two spellings meet in the runtime at %p-slot-name.  Probed: `${"\cR"}` IS
+# `$^R` in perl, while `${"^R"}` is a different variable, and `"" . *^R` is
+# `*main::` + chr(18).
+
+both_agree(<<'PL', 'a CARET glob name: *^R aliases the caret variable (t/re/pat.t:1715)');
+no strict 'refs';
+no warnings 'once';
+our $caretsrc = "SCALARVAL"; our @caretsrc = (1,2,3);
+$^R = "before";
+print "1=[$^R]\n";
+*^R = *caretsrc;
+print "2=[$^R]\n";
+$^R = "written-through";
+print "3=[$caretsrc]\n";
+print "4=[@{\"\cR\"}]\n";
+PL
+
+# The control-character name is the ONE name, whichever way it is written, and
+# it is forced to main from inside a package exactly as perl forces it.
+both_agree(<<'PL', 'a caret glob is the same variable as its control-character name');
+no strict 'refs';
+no warnings 'once';
+our $csrc = "FROMPKG";
+package Foo;
+*^R = *main::csrc;
+package main;
+print "1=[$^R]\n";
+print "2=[", ${"\cR"}, "]\n";
+$^R = "back";
+print "3=[$csrc]\n";
+PL
+
+# `*]` (t/op/tie_fetch_count.t:189).  PPI hands `]` over as a Token::Structure,
+# so it needs its own arm — and that arm must not claim a bracket that is
+# CLOSING something.  The negatives below are the shapes it must leave alone.
+both_agree(<<'PL', 'a CLOSING-BRACKET glob name: *] is the glob holding $]');
+package main;
+sub TIESCALAR { my $p = shift; my $v = shift; bless \$v, $p }
+sub FETCH { my $s = shift; return $$s }
+no strict 'refs';
+{
+    tie my $var4 => 'main', *];
+    my $g = $var4;
+    print "1=[$g]\n";
+}
+my $bkt = *];
+print "2=[$bkt]\n";
+print "3=", ((${*{']'}{SCALAR}} == $]) ? 1 : 0), "\n";
+PL
+
+both_agree(<<'PL', 'negative: every closing bracket that IS closing something');
+my @arr = (10,20,30);
+print "1=[", $arr[1], "] 2=[", join(",", @arr[0,2]), "]\n";
+my $ref = [1,2];
+print "3=[", scalar(@$ref), "] 4=[", (sort { $a <=> $b } 5,3)[0], "]\n";
+my %h = (k => 7);
+print "5=[", $h{k}, "] 6=[", $h{k}*2, "]\n";
+sub proto (*) { return "proto:$_[0]" }
+print "7=[", proto("z"), "]\n";
+my $hr = {n=>6}; print "8=[", ${$hr}{n}*3, "]\n";
 PL

@@ -98,6 +98,33 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `|$/|` spells its own, with `#\Newline`.  A scan of every string literal in
   `cl/*.lisp` for a backslash before an alphanumeric finds no second instance
   (`\\`-escaped regex sources are the only other hits).
+- **#562 — a CARET-named glob is the glob named by a CONTROL CHARACTER, and the
+  two spellings meet in the runtime, not in the parser** (`ppi-upstream-bugs.md`
+  §26).  `*^R` is not the glob named `^`: perl's caret convention means chr(18),
+  the name `$^R` reads (probed: `${"\cR"}` IS `$^R`, `${"^R"}` is a different
+  variable, `"" . *^R` is `*main::` + chr(18)).  So `_repair_punct_glob_name`
+  gains an arm that emits the CONTROL CHARACTER — `*{'<chr18>'}` — and
+  `%p-slot-name` in the runtime maps a one-control-character glob name onto
+  PCL's `$^R` spelling at the ONE step that turns a glob NAME into a slot
+  SYMBOL name.  **Never at the typeglob's own name**, which perl hands back to
+  the program as the control character.  Bonus: `${"\cR"}` and `$^R` are now
+  the same variable, as in perl.  Only a Word of ONE upper-case letter is
+  taken — PPI gives `*^Rfoo` as `Word("Rfoo")`, which is `*^R` then `foo`.
+- **#562's `*]` half — PPI itself supplies the discriminator for a
+  Structure-token glob name.**  A bracket that closes a real subscript, list or
+  constructor is the `finish` of a `PPI::Structure`; an orphan is parked in a
+  `PPI::Statement::UnmatchedBrace` (measured over subscripts, slices, anon
+  constructors, list slices, `($x)[0]`).  Only CLOSERS `]` `)` `}` are in the
+  set: `*{` is the deref-block spelling, an opener is never orphaned, and
+  deleting a `;` would take the statement terminator with it.  A `(*)`
+  PROTOTYPE never reaches the arm — PPI lexes it as one `Token::Prototype`.
+  It changes NO census row: `t/op/tie_fetch_count.t` is refused whole at line
+  169 (`~~`), so it emits nothing and has never had one.
+- **A PROBE FINDING that is NOT caret-shaped: `*A = *B` does not clear the slots
+  B lacks** (#602).  perl replaces the glob, PCL copies slot by slot under
+  `boundp`, so `*x = *neverdefined` leaves `$x` alone where perl makes it undef.
+  It is the same shortcoming `not-supported.md` names in the English.pm section
+  — that gap and this one are one piece of work.
 
 ## s446k (2026-08-25, Opus, round 5 agent K) — #479 compiler half, #478 (the name list GOES, budget measured and REJECTED), #463 items 3–5
 

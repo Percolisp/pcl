@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 36;
+use Test::More tests => 38;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -534,6 +534,29 @@ PERL
     my $doc = PPI::Document->new(\'local *a = *1;');
     ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*1' } $doc->tokens),
         '`*1` should lex as one Symbol — a digit run names a glob too' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# Two more spellings of the same bug.  `*^R` is perl's caret convention for the
+# glob named chr(18) — the one `$^R` reads — so it is three tokens, not two:
+#
+#   $ perl -e 'our $s = "V"; *^R = *s; print $^R'
+#   V
+#
+# and `*]` (t/op/tie_fetch_count.t:189) is the glob whose scalar slot is `$]`,
+# where PPI hands the bracket over as a Token::Structure parked in a
+# PPI::Statement::UnmatchedBrace.
+{
+    my $doc = PPI::Document->new(\'*^R = *g;');
+    ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*^R' } $doc->tokens),
+        '`*^R` should lex as one Symbol — the caret convention names a glob too' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+{
+    my $doc = PPI::Document->new(\'tie my $v => "main", *];');
+    ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*]' } $doc->tokens),
+        '`*]` should lex as one Symbol — a closing bracket names the glob holding $]' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
 }

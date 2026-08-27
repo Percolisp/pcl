@@ -1242,9 +1242,33 @@ derailed (§14), regex bodies in a file PPI mis-lexed whole, and `@{$h} * (…)`
 where `_ends_term` itself wrongly says the term has not ended because a deref
 block's `}` is not a subscript's.
 
-**Not covered, and filed:** `*^R` (three tokens — `^R` is the caret convention
-for chr(18), not the glob named `^`) and `*]` (PPI makes the `]` a Structure
-token) — task #562.
+**The two remaining spellings, covered s448o (task #562)** — same PPI bug, two
+more token shapes, repaired in the same walk:
+
+```
+*^R = *g;             Operator(*) Operator(^) Word(R) Operator(=) Symbol(*g)
+tie my $v=>'m', *];   … Operator(,) Operator(*) Structure(])
+```
+
+* **`*^R` is three tokens, and the name is NOT `^`.**  perl's caret convention
+  means the glob named chr(18) — the one `$^R` reads — so `*{'^'}R` would have
+  been a silent wrong.  The repair emits the CONTROL CHARACTER, `*{'<chr18>'}`,
+  which is what perl means by it (probed: `*^R = *g` aliases `$^R` to `$g`;
+  `${"\cR"}` IS `$^R` while `${"^R"}` is a different variable; `"" . *^R` is
+  `*main::` followed by chr(18)).  Only a Word of ONE upper-case letter is
+  taken: PPI hands the whole following word over as one token, so `*^Rfoo` is
+  `Word("Rfoo")` — `*^R` followed by `foo`, not a glob name — and a longer Word
+  keeps dropping loudly.
+* **`*]` needs a Structure-aware arm, and PPI itself supplies the
+  discriminator.**  A bracket that closes a real subscript, list or constructor
+  is the `finish` of a `PPI::Structure`; an orphan is parked in a
+  `PPI::Statement::UnmatchedBrace`.  Measured over subscripts, slices, anon
+  constructors, list slices and `($x)[0]`, that test separates them exactly.  A
+  `(*)` PROTOTYPE never reaches the arm at all — PPI lexes it as one
+  `Token::Prototype`.  Only CLOSERS (`]`, `)`, `}`) are in the set: `*{` is the
+  deref-block spelling and must never be claimed, an opener is never orphaned
+  so the test could not protect it, and deleting a `;` would take the statement
+  terminator with it.
 
 **Repro + failing rows:** Bugs 15 and 16 in `docs/ppi-bug-report.t`.  Guard:
 `Pl/t/punct-glob-name-01.t`.

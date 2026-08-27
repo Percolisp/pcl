@@ -13874,7 +13874,10 @@ buffer's fill-pointer; everything else falls back to file-length."
          (pkg (or (find-package pkg-str)
                   (and create (make-package pkg-str :use '(:cl :pcl))))))
     (when pkg
-      (let ((sym-name (concatenate 'string sigil (%pcl-invert-case var-str))))
+      ;; %p-slot-name: a symbolic name that is one control character is a CARET
+      ;; variable — `${"\cR"}` IS `$^R` in perl (probed) — so it must reach
+      ;; PCL's caret cell rather than a control-character symbol of its own.
+      (let ((sym-name (%p-slot-name sigil (%pcl-invert-case var-str))))
         (if create
             (let ((sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
               (%p-ensure-storage sym)
@@ -14493,6 +14496,36 @@ buffer's fill-pointer; everything else falls back to file-length."
   package   ; CL package object
   name)     ; upcased Perl name string, e.g. "FOO"
 
+;;; THE TWO SPELLINGS OF A CARET VARIABLE, and the one step where they meet.
+;;;
+;;; perl names a caret variable by a CONTROL CHARACTER: $^R IS ${"\cR"} and its
+;;; glob IS *{"\cR"} — probed, `*^R = *g` aliases $^R to $g, and the stash key
+;;; is chr(18).  PCL spells the same variable `$^R`, a pipe-quoted CL symbol,
+;;; because generated code loads under :invert (task #412).  Somewhere the two
+;;; spellings have to meet, or `*^R = *g` writes a symbol nothing ever reads.
+;;;
+;;; They meet HERE, at the one step that turns a glob NAME into a slot SYMBOL
+;;; name — and deliberately NOT at the typeglob's own name, which perl hands
+;;; back to the program as the control character (probed: `"" . *^R` is
+;;; `*main::` followed by chr(18), eight characters).  So the struct keeps
+;;; perl's name and only the interning is translated.
+;;;
+;;; Nothing else can collide: a perl identifier cannot contain a control
+;;; character, so the map fires for exactly the caret names and is the identity
+;;; on every ordinary one.
+(defun %p-caret-uname (uname)
+  "A glob/symref NAME that is one control character (1-26) is a CARET variable;
+   answer PCL's spelling for it (chr(18) -> \"^R\").  Identity otherwise."
+  (if (and (= (length uname) 1)
+           (<= 1 (char-code (char uname 0)) 26))
+      (concatenate 'string "^" (string (code-char (+ 64 (char-code (char uname 0))))))
+      uname))
+
+(defun %p-slot-name (sigil uname)
+  "CL symbol NAME for the SIGIL slot of glob UNAME — the one place a glob name
+   becomes a variable name, so the one place %p-caret-uname has to be applied."
+  (concatenate 'string sigil (%p-caret-uname uname)))
+
 (defun p-make-typeglob (pkg-str name-str)
   "Create a typeglob object for *Pkg::Name."
   (let ((pkg (or (%pcl-find-package pkg-str)
@@ -14522,17 +14555,17 @@ buffer's fill-pointer; everything else falls back to file-length."
 
       ;; *foo = \$scalar — SCALAR slot (inner is the p-box = the variable itself)
       ((p-box-p inner)
-       (setf (symbol-value (intern (concatenate 'string "$" uname) pkg))
+       (setf (symbol-value (intern (%p-slot-name "$" uname) pkg))
              inner))
 
       ;; *foo = \@array — ARRAY slot (inner is the adjustable vector)
       ((and (vectorp inner) (adjustable-array-p inner))
-       (setf (symbol-value (intern (concatenate 'string "@" uname) pkg))
+       (setf (symbol-value (intern (%p-slot-name "@" uname) pkg))
              inner))
 
       ;; *foo = \%hash — HASH slot (inner is the hash-table)
       ((hash-table-p inner)
-       (setf (symbol-value (intern (concatenate 'string "%" uname) pkg))
+       (setf (symbol-value (intern (%p-slot-name "%" uname) pkg))
              inner))
 
       ;; *foo = 'name' — symbolic alias: copy slots from *pkg::name
@@ -14623,19 +14656,19 @@ buffer's fill-pointer; everything else falls back to file-length."
           (setf (gethash dst-sym *p-declared-subs*)
                 (or (gethash src-sym *p-declared-subs*) :defined)))))
     ;; SCALAR
-    (let ((src-sym (intern (concatenate 'string "$" sn) sp)))
+    (let ((src-sym (intern (%p-slot-name "$" sn) sp)))
       (when (boundp src-sym)
-        (setf (symbol-value (intern (concatenate 'string "$" dst-uname) dst-pkg))
+        (setf (symbol-value (intern (%p-slot-name "$" dst-uname) dst-pkg))
               (symbol-value src-sym))))
     ;; ARRAY
-    (let ((src-sym (intern (concatenate 'string "@" sn) sp)))
+    (let ((src-sym (intern (%p-slot-name "@" sn) sp)))
       (when (boundp src-sym)
-        (setf (symbol-value (intern (concatenate 'string "@" dst-uname) dst-pkg))
+        (setf (symbol-value (intern (%p-slot-name "@" dst-uname) dst-pkg))
               (symbol-value src-sym))))
     ;; HASH
-    (let ((src-sym (intern (concatenate 'string "%" sn) sp)))
+    (let ((src-sym (intern (%p-slot-name "%" sn) sp)))
       (when (boundp src-sym)
-        (setf (symbol-value (intern (concatenate 'string "%" dst-uname) dst-pkg))
+        (setf (symbol-value (intern (%p-slot-name "%" dst-uname) dst-pkg))
               (symbol-value src-sym))))
     ;; IO (filehandle): copy the open-stream registration so *DST = *SRC
     ;; aliases the filehandle — e.g. `*FH = shift` in a sub that then reads
@@ -14654,7 +14687,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
         (when (fboundp sym) (fmakunbound sym)))
       (dolist (prefix (list "$" "@" "%"))
-        (let ((sym (intern (concatenate 'string prefix uname) pkg)))
+        (let ((sym (intern (%p-slot-name prefix uname) pkg)))
           (when (boundp sym)
             (set sym (cond ((string= prefix "$")
                             (make-p-box *p-undef*))
@@ -14672,7 +14705,7 @@ buffer's fill-pointer; everything else falls back to file-length."
     (flet ((find-sym (prefix)
              ;; Use find-symbol (not intern) to locate inherited symbols,
              ;; e.g. @_ is pcl::@_ inherited into main — intern would create main::@_.
-             (let ((nm (if (string= prefix "PL-") (%pcl-uname-to-sub uname) (concatenate 'string prefix uname)))) (or (find-symbol nm pkg) (intern nm pkg)))))
+             (let ((nm (if (string= prefix "PL-") (%pcl-uname-to-sub uname) (%p-slot-name prefix uname)))) (or (find-symbol nm pkg) (intern nm pkg)))))
       (cond
         ((string= slot-s "CODE")
          (let ((sym (find-sym "PL-")))

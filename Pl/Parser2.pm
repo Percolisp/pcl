@@ -5608,10 +5608,35 @@ sub _repair_glob_multiply {
 # can be touched.  Measured over all four populations: 1329 files, 23
 # term-position `*` sites, and the whitelist selects exactly the 8 glob ones.
 #
-# `^` is deliberately NOT a name here: `*^R` is the glob named chr(18) (the
-# caret convention), not the one named `^`, so it needs the #412 caret-name
-# machinery and is filed as task #562 with `*]`.
+# `^` is NOT in the punctuation set, and that is the third shape (task #562):
+# `*^R` — PPI Operator(*) Operator(^) Word(R) — is not the glob named `^` but
+# perl's CARET CONVENTION for the glob named chr(18), the one `$^R` reads.
+# `*{'^'}R` would be a silent wrong.  It is repaired in the same walk, into the
+# same symbolic spelling with the CONTROL CHARACTER as the name, which is what
+# perl means by it (probed: `*^R = *g` aliases $^R to $g, `"" . *^R` is
+# `*main::` + chr(18), and `${"\cR"}` IS `$^R` while `${"^R"}` is a different
+# variable).  The runtime meets it at %p-slot-name.
+#
+# ONE UPPER-CASE LETTER ONLY.  PPI hands the whole following word over as one
+# token, so `*^Rfoo` arrives as Word("Rfoo") — which is `*^R` followed by
+# `foo`, not a glob name — and a longer Word therefore keeps dropping loudly
+# rather than being rewritten into something perl never meant.
+# A CLOSING BRACKET can name a glob too — `*]` is the glob whose scalar slot is
+# `$]`, and `tie my $var4 => 'main', *];` (t/op/tie_fetch_count.t:189) is the one
+# occurrence in the population.  PPI hands `]` over as a Token::Structure, not an
+# Operator, so it needs its own arm — and that arm has to be sure the bracket is
+# not CLOSING something.  PPI answers that itself: a bracket that closes a real
+# subscript, list or constructor is the `finish` of a PPI::Structure, while an
+# orphan is parked in a PPI::Statement::UnmatchedBrace (measured over subscripts,
+# slices, anon constructors, list slices and `($x)[0]`).  A `(*)` PROTOTYPE never
+# reaches here at all — PPI lexes it as one Token::Prototype.
+#
+# OPENERS (`[`, `(`, `{`) are deliberately absent: `*{` is the deref-block
+# spelling and must never be claimed, and an opener is never orphaned, so the
+# UnmatchedBrace test could not protect them.  So is `;`: deleting it would take
+# the statement terminator with it, and `*;` occurs nowhere.
 my %PUNCT_GLOB_CHARS = map { $_ => 1 } split //, q{-!+./\\,:?=<>~&%|};
+my %PUNCT_GLOB_CLOSERS = map { $_ => 1 } split //, '])}';
 
 sub _repair_punct_glob_name {
   my ($self, $doc) = @_;
@@ -5621,7 +5646,7 @@ sub _repair_punct_glob_name {
     my ($star, $next) = @tok[$i, $i + 1];
     next unless $star->isa('PPI::Token::Operator') && $star->content eq '*';
     next unless _glob_name_position($i ? $tok[$i - 1] : undef);
-    my $name;
+    my ($name, $letter);
     if ($next->isa('PPI::Token::Number') && $next->content =~ /\A[0-9]+\z/) {
       $name = $next->content;
     }
@@ -5629,9 +5654,21 @@ sub _repair_punct_glob_name {
            && $PUNCT_GLOB_CHARS{ $next->content }) {
       $name = $next->content;
     }
+    elsif ($next->isa('PPI::Token::Structure')
+           && $PUNCT_GLOB_CLOSERS{ $next->content }
+           && $next->parent
+           && $next->parent->isa('PPI::Statement::UnmatchedBrace')) {
+      $name = $next->content;
+    }
+    elsif ($next->isa('PPI::Token::Operator') && $next->content eq '^'
+           && $i + 2 <= $#tok && $tok[$i + 2]->isa('PPI::Token::Word')
+           && (($letter) = $tok[$i + 2]->content =~ /\A([A-Z])\z/)) {
+      $name = chr(ord($letter) - 64);
+    }
     next unless defined $name;
     (my $q = $name) =~ s/([\\'])/\\$1/g;
     $star->set_content("*{'$q'}");
+    $tok[$i + 2]->delete if defined $letter;
     $next->delete;
     $repaired = 1;
   }

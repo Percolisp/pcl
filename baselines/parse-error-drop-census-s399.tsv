@@ -94,7 +94,11 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 73 files, 167 drops -- 4 perl-tests files (5
+# TOTAL after the edits below: 34 files, 88 drops (recounted from the rows,
+# s448o -- this line still read the pre-s446k "73 files, 167 drops", which that
+# session's own edit note had already superseded; the ROWS are the authority
+# and the sum is what the runner compares against).  The s440-era split was 4
+# perl-tests files (5
 # drops), 20 companion files (70), 6 cpan-tests modules (7), 42 cpan-tests
 # dist test files (83), 1 board module (2), ZERO in lib/.  (s440 merge of agents
 # A (#463 items 1+2: -3 companion files / -7 drops) and B (#466, #464: -4 cpan
@@ -112,6 +116,23 @@
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
+#   s448o -1 drop (task #562, the residue s446k left): t/re/pat.t 3 -> 2, so
+#         the file total goes 34 rows / 89 drops -> 34 / 88 (the row stays, it
+#         keeps two).  `*^R = *caretRglobwithnoscalar;` (pat.t:1715) is not the
+#         glob named `^` -- perl's caret convention means the glob named
+#         chr(18), the one `$^R` reads -- so `*{'^'}R` would have been a silent
+#         wrong and s446k left it dropping on purpose.  The repair now spells
+#         the CONTROL CHARACTER (`*{'<chr18>'}`), which is what perl means, and
+#         the runtime's %p-slot-name maps a one-control-character glob name
+#         onto PCL's `$^R` spelling, so the alias actually takes instead of
+#         writing a symbol nothing reads.  Measured: the arms disabled give
+#         pat.t 3 and enabled give 2; emission A/B over perl's t/ + cpan-tests
+#         (988 files) has pat.t as the ONLY DIFF, RCDIFF 0; corpus-diff
+#         IDENTICAL over 111 with silent drops 5 unchanged; lib A/B 29/29 SAME.
+#         The task's OTHER shape, `*]` (t/op/tie_fetch_count.t:189), is fixed
+#         in the same walk but changes NO row here: that file is refused whole
+#         at line 169 (`~~`), so it emits nothing and has never had a census
+#         row.  Guard Pl/t/punct-glob-name-01.t 8 -> 12 rows.
 #   s441b -1 file / -4 drops (task #463 item 1): `$${EXPR}`.  PPI lexes the
 #         `$$` as the PID Magic and the braces as a SUBSCRIPT (they follow a
 #         variable token); perl reads `${ ${EXPR} }`.  The Magic->two-casts
@@ -616,6 +637,6 @@ t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
-t/re/pat.t	3	Handle single node of unknown type. Dump: x2 | Ternary operator: Found '?' but no matching ':' x1
+t/re/pat.t	2	Handle single node of unknown type. Dump: x1 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
 t/uni/readline.t	2	Handle single node of unknown type. Dump: x2
