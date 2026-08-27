@@ -68,10 +68,11 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 21;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
+my $FIXD = qq{my \$D = "$dir";\n};
 
 sub write_pl {
     my ($code) = @_;
@@ -300,3 +301,59 @@ my $ok = eval { my $x = open(my $d2, ">&", $f); print "closed:", (defined $x && 
 print(($ok && $@ eq '') ? "closed-no-die\n" : "closed-died:[$@]\n");
 PL
    'an unknown source NAME dies "Bad filehandle: N"; a closed handle is a plain false');
+
+# ── 9. task #543 — the READ-WRITE dup modes `+<&` / `+>&` and their `=` forms ─
+# They were absent from the runtime's dup-mode list, so the three-argument
+# spelling reached the `Unknown open mode` arm (warn + undef, perl-tests/
+# scalar.t:84's shape) and the TWO-argument spelling was worse: "+>&SRC" was
+# read as mode "+>" on a FILE literally named "&SRC", which it then CREATED.
+# Every expectation below is the live `perl` answer (probed s448n, 5.40.3).
+is(run_cl($FIX . <<'PL'), "+<&:hello\n+>&:hello\n+<&=:hello\n+>&=:hello\n",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "hello\n"; close $c;
+for my $m ('+<&', '+>&', '+<&=', '+>&=') {
+    open(my $fh, '+<', $O) or die "src: $!\n";
+    my $r = open(my $dup, $m, $fh);
+    my $l = $r ? <$dup> : undef;
+    print "$m:", (defined $l ? $l : "UNDEF\n");
+    close $dup if $r;
+    close $fh;
+}
+PL
+   'all four read-write dup modes open, and the dup READS the source file');
+
+# The `+` is not decoration: the dup must be WRITABLE too (the old two-way
+# direction test read every `+` mode as `<`).  And a `+>&` dup does NOT
+# truncate — the `>` spells a direction, not an open-for-write of a file.
+is(run_cl($FIX . <<'PL'), "after-write:[XYllo\n]after-plusgt:[XYllo\n]",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "hello\n"; close $c;
+open(my $fh, '+<', $O) or die "src: $!\n";
+open(my $dup, '+<&', $fh) or die "dup: $!\n";
+print $dup "XY";
+close $dup; close $fh;
+open(my $in, '<', $O) or die "re: $!\n"; my $got = do { local $/; <$in> }; close $in;
+print "after-write:[$got]";
+open(my $f2, '+<', $O) or die "src2: $!\n";
+open(my $d2, '+>&', $f2) or die "dup2: $!\n";
+close $d2; close $f2;
+open(my $i2, '<', $O) or die "re2: $!\n"; my $g2 = do { local $/; <$i2> }; close $i2;
+print "after-plusgt:[$g2]";
+PL
+   'a `+<&` dup is WRITABLE, and `+>&` does not truncate the file');
+
+# The two-argument spellings, and the stray-file check that is the silent-wrong
+# this closes: `stray:00` says no file named "&SRC" / "&SRC2" was created.
+is(run_cl($FIXD . <<'PL'), "d1:hello\nd2:hello\nstray:00\n",
+chdir $D or die "chdir: $!\n";
+open(my $c, '>', "src.txt") or die "mk: $!\n"; print $c "hello\n"; close $c;
+open(SRC, '+<', "src.txt") or die "src: $!\n";
+open(my $d1, '+<&SRC') or die "2arg-lt: $!\n";
+my $l1 = <$d1>; close $d1;
+open(SRC2, '+<', "src.txt") or die "src2: $!\n";
+open(my $d2, '+>&SRC2') or die "2arg-gt: $!\n";
+my $l2 = <$d2>; close $d2;
+close SRC; close SRC2;
+print "d1:", (defined $l1 ? $l1 : "UNDEF\n");
+print "d2:", (defined $l2 ? $l2 : "UNDEF\n");
+print "stray:", (-e "&SRC" ? 1 : 0), (-e "&SRC2" ? 1 : 0), "\n";
+PL
+   'two-arg "+<&SRC" / "+>&SRC" are DUPS, not opens of a file named "&SRC"');

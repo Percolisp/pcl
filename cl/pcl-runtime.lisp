@@ -9254,11 +9254,35 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   (let ((v (%p-resolve-fh fh)))
     (and (%p-socket-p v) v)))
 
+(defparameter +p-open-dup-modes+
+  '("+<&=" "+>&=" ">&=" "<&=" "+<&" "+>&" ">&" "<&")
+  "THE set of dup/fdopen open modes, LONGEST FIRST so a prefix scan cannot stop
+   at \"+<&\" inside \"+<&=\".  Read-only (\"<&\"), write-only (\">&\") and
+   READ-WRITE (\"+<&\", \"+>&\") — the `+` spellings were missing, so
+   `open my $dup, '+<&', $fh` reached the `Unknown open mode` arm and, in the
+   two-argument form, `+>&SRC` was parsed as mode \"+>\" on a FILE literally
+   named \"&SRC\" — which it then created (task #543).
+   ONE list: %p-open-parse-2arg's prefix scan and %p-open-impl's dispatch are
+   the two places that must agree on what a dup mode is.")
+
+(defun %p-open-dup-mode-prefix (s)
+  "The dup mode +P-OPEN-DUP-MODES+ spells at the head of the 2-arg open string
+   S, or nil.  Longest-first, so \"+<&=FH\" is the fdopen form, not \"+<&\"."
+  (find-if (lambda (m) (and (>= (length s) (length m))
+                            (string= m (subseq s 0 (length m)))))
+           +p-open-dup-modes+))
+
 (defun %p-open-parse-2arg (expr)
   "Parse a 2-arg open expression into (mode . filename).
    E.g. '>file.txt' -> ('>' . 'file.txt'), 'file.txt' -> ('<' . 'file.txt')"
-  (let ((s (to-string expr)))
+  (let* ((s   (to-string expr))
+         (dup (%p-open-dup-mode-prefix s)))
     (cond
+      ;; Dup-opens FIRST: ">&FH" / "<&FH" / "+<&FH" duplicate FH's file
+      ;; descriptor, and the "=" forms (">&=FH", "+<&=N") are fdopen-style —
+      ;; same fd, no dup (#70, #543).  This must precede the "+<"/"+>" arms:
+      ;; they are prefixes of the read-write dup spellings and used to win.
+      (dup (cons dup (string-left-trim " " (subseq s (length dup)))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) ">>"))
        (cons ">>" (string-left-trim " " (subseq s 2))))
       ((and (>= (length s) 2) (string= (subseq s 0 2) "+<"))
@@ -9276,16 +9300,6 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       ((and (>= (length s) 1)
             (char= (char s (1- (length s))) #\|))
        (cons "-|" (string-right-trim " " (subseq s 0 (1- (length s))))))
-      ;; Dup-opens: ">&FH" / "<&FH" duplicate FH's file descriptor; the
-      ;; "=" forms (">&=FH" / ">&=N") are fdopen-style — same fd, no dup (#70).
-      ((and (>= (length s) 3) (string= (subseq s 0 3) ">&="))
-       (cons ">&=" (string-left-trim " " (subseq s 3))))
-      ((and (>= (length s) 3) (string= (subseq s 0 3) "<&="))
-       (cons "<&=" (string-left-trim " " (subseq s 3))))
-      ((and (>= (length s) 2) (string= (subseq s 0 2) ">&"))
-       (cons ">&" (string-left-trim " " (subseq s 2))))
-      ((and (>= (length s) 2) (string= (subseq s 0 2) "<&"))
-       (cons "<&" (string-left-trim " " (subseq s 2))))
       ((and (>= (length s) 1) (char= (char s 0) #\>))
        (cons ">" (string-left-trim " " (subseq s 1))))
       ((and (>= (length s) 1) (char= (char s 0) #\<))
@@ -9636,6 +9650,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        :undef)
       (t nil))))
 
+(defun %p-dup-make-stream (fd mode-str)
+  "Make the CL stream for a dup-opened FD, in the direction MODE-STR spells.
+   THREE-valued, not two: a leading `+` (`+<&`, `+>&` and their `=` forms) is
+   perl's READ-WRITE dup and needs a bidirectional stream (task #543) — the old
+   two-way test read every `+` mode as `<` and handed back a read-only stream.
+   `>` is write-only, `<` read-only.  Anything else means %p-open-impl's dup
+   dispatch and this function disagree about the mode set, and says so (rule 12)."
+  (let ((c (char mode-str 0)))
+    (cond
+      ((char= c #\+)
+       (sb-sys:make-fd-stream fd :input t :output t :external-format :utf-8))
+      ((char= c #\>)
+       (sb-sys:make-fd-stream fd :output t :external-format :utf-8))
+      ((char= c #\<)
+       (sb-sys:make-fd-stream fd :input t :external-format :utf-8))
+      (t (error "PCL: unhandled dup open mode ~S" mode-str)))))
+
 (defun %p-open-dup (fh mode-str src-name &optional (src-val nil src-val-p))
   "Dup-open (#70): open FH, \">&SRC\" / \"<&SRC\" — FH becomes a duplicate of
    SRC's file descriptor.  The \"=\" forms (\">&=SRC\", \">&=N\") are
@@ -9733,12 +9764,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               ;; ("<&=3") has no stream to share and still gets a fresh one.
               (if (and eq-form (streamp src))
                   (progn (%p-install-fh fh src) t)
-                  (let* ((new-fd  (if eq-form src-fd (sb-posix:dup src-fd)))
-                         (stream  (if (char= (char mode-str 0) #\>)
-                                      (sb-sys:make-fd-stream new-fd :output t
-                                                             :external-format :utf-8)
-                                      (sb-sys:make-fd-stream new-fd :input t
-                                                             :external-format :utf-8))))
+                  (let* ((new-fd (if eq-form src-fd (sb-posix:dup src-fd)))
+                         (stream (%p-dup-make-stream new-fd mode-str)))
                     (%p-install-fh fh stream)
                     t)))
         (error () (%pcl-save-errno) nil)))))
@@ -9788,7 +9815,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                (%p-open-fork-pipe fh mode-str
                                   (when (plusp (length file-str))
                                     (list file-str)))))
-            ((member mode-str '(">&" "<&" ">&=" "<&=") :test #'string=)
+            ((member mode-str +p-open-dup-modes+ :test #'string=)
              ;; Dup-open (#70): install/redirect handled inside.  The RAW third
              ;; argument goes along with its stringification — a glob ref, a
              ;; lexical handle or a stream says nothing once to-string has had

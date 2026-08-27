@@ -126,6 +126,36 @@ those two files and the live plan doc directly -- no new review-doc families.*
   It is the same shortcoming `not-supported.md` names in the English.pm section
   — that gap and this one are one piece of work.
 
+## s448n (2026-08-27, Opus, round 6 agent N) — the READ-WRITE dup modes (#543)
+
+- **A dup open mode is THREE-valued, and the mode set lives in ONE list**
+  (#543, `+p-open-dup-modes+`).  `%p-open-impl`'s dup dispatch listed only
+  `>& <& >&= <&=`, so `open my $dup, '+<&', $fh` — perl's read-write dup,
+  `perl-tests/scalar.t:84`'s own spelling — reached the `Unknown open mode`
+  warn and returned undef.  `%p-open-dup`'s direction test was `(if (char= …
+  #\>) :output :input)`, two-valued, which reads every `+` mode as `<`; it is
+  now `%p-dup-make-stream`, which answers `+` → bidirectional, `>` → output,
+  `<` → input and DIES on anything else (rule 12 — the die is the only thing
+  that can catch the two sites disagreeing about the mode set).
+- **The TWO-argument spelling was the worse half, and it was silent**: the
+  `+<`/`+>` arms of `%p-open-parse-2arg` sit above the dup arms and are
+  PREFIXES of `+<&`/`+>&`, so `open FH, "+>&SRC"` parsed as mode `+>` on a
+  file literally named `&SRC` — and CREATED it (probed; the stray file is what
+  `Pl/t/print-fh-magic-01.t`'s `stray:00` row asserts against).  The four
+  hand-written dup arms are replaced by one longest-first prefix scan over the
+  same list, so the two sites cannot drift.
+- Probed 5.40.3: all four `+` spellings open; a `&` dup gets a NEW fd, a `&=`
+  fdopen shares the source's; `+>&` does NOT truncate; the dup is writable and
+  its writes land in the source's file.  Guard `Pl/t/print-fh-magic-01.t`
+  (18 → 21 rows).  `perl-tests/scalar.t` 84/32 → **86/30** — the in-memory
+  `+<&` dup pair at scalar.t:87–88 now passes.
+- Filed from the probes, both PRE-EXISTING and visible on the UNTOUCHED `>&`
+  and `<&` modes: **#590** (a write to a dup of a read-only fd reports success
+  and the failure surfaces as an unhandled SBCL stream error at close — perl
+  fails the `print` and returns false) and **#591** (a dup does not sync the
+  source's BUFFERED read position to the fd, so the dup starts at EOF where
+  perl continues at the next line).
+
 ## s446k (2026-08-25, Opus, round 5 agent K) — #479 compiler half, #478 (the name list GOES, budget measured and REJECTED), #463 items 3–5
 
 - **#479 — PPI's `<FH>` mis-lex has a CASCADE, and only a source-level rewrite
