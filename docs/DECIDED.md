@@ -126,6 +126,44 @@ those two files and the live plan doc directly -- no new review-doc families.*
   It is the same shortcoming `not-supported.md` names in the English.pm section
   — that gap and this one are one piece of work.
 
+## s448n (2026-08-27, Opus, round 6 agent N) — STDIN/STDOUT/STDERR are NAMES FOR DESCRIPTORS (#535)
+
+- **An open onto a standard handle MOVES the descriptor** (#535).  PCL merely
+  registered the new stream under the name, so `open(STDOUT,'>',$f); print "x"`
+  printed to the TERMINAL while `print STDOUT "x"` reached the file, and an
+  exec'd child never followed at all.  ONE place knows the rule now —
+  `%p-std-slot` / `%p-rebind-std` / `%p-std-rebuild` — and `%p-install-fh`
+  consults it, so EVERY opener follows (plain, in-memory, fork-pipe, socket,
+  accept, pipe).  `%p-open-dup`'s standard-handle branch held the only copy of
+  the rebuild and now shares it.  An in-memory handle has no descriptor to
+  move: the CL global points at the Gray stream and descriptor 1 is left alone
+  (`not-supported.md`; perl refuses that open outright).
+- **`close(STDOUT)` did not free descriptor 1, and that is a SYNONYM-STREAM
+  fact**: the handle is a synonym stream over `sb-sys:*stdout*`, and CL `close`
+  on a synonym stream does not close its target.  Probed: after the close a
+  fresh open got fd 1 in perl and fd 6 in PCL.  `%p-close-maybe-pipe` now
+  closes `%p-stream-target`'s stream.  It is not cosmetic — it is what made
+  `open(STDOUT,'|-',CMD); print …; close(STDOUT)` **HANG**, the parent still
+  holding the pipe's write end.
+- **A THREE-argument open with an EMPTY command is perl's ERROR, not the bare
+  fork-open** (probed 5.40.3: undef, `$!` = Broken pipe; the bare fork is the
+  TWO-argument `open(F,"-|")`).  PCL forked for both, so the CHILD went on
+  running the whole program.  `%p-open-impl` takes the argument count from the
+  `p-open` macro; nothing else can tell the two apart.
+- **THE s445 DIAGNOSIS IN #535 WAS WRONG, and the correction is the finding**:
+  the "`Couldn't write to descriptor 1: Broken pipe`" aborts were not a lost
+  STDOUT restore — they were that forked child, writing to a pipe nobody reads.
+  Its trigger is **#593**, a `my` declared before an in-block `package NAME;`
+  that is not visible after it, which handed `open(…,'-|',$p)` an EMPTY command.
+  `t/io/open.t` was therefore NON-DETERMINISTIC (118/3, 136/25, 137/24 on one
+  tree: the forked child raced its parent on the recovery loader's shared file
+  offset).  It is deterministic again at **136/25** — snapshot 118/3, +18 ok.
+- Guard `Pl/t/std-handle-open-01.t` (5 rows, every expectation probed 5.40.3).
+  Filed: **#592** (no FD_CLOEXEC on any descriptor PCL opens, and `fcntl` is
+  absent — perl's own inheritance rows now fail honestly), **#593**, **#594**
+  (a BAREWORD in the dup SOURCE slot emits an unbound CL symbol — the site
+  #452/#491 did not reach).
+
 ## s448n (2026-08-27, Opus, round 6 agent N) — the READ-WRITE dup modes (#543)
 
 - **A dup open mode is THREE-valued, and the mode set lives in ONE list**

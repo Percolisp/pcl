@@ -136,6 +136,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`glob` in SCALAR context — iterator keyed by pattern, not call site](#glob-in-scalar-context-the-iterator-is-keyed-by-the-pattern-perl-keys-it-by-the-call-site--accepted-divergence-for-v01--task-489)
 * [`split` implicit LHS-arity limit](#split-implicit-lhs-arity-limit-my-ab--split-----split-)
 * [`pack`/`unpack` — pointer types (`p`/`P`) and 80-bit long double (`D`)](#packunpack--pointer-types-pp-and-80-bit-long-double-d)
+* [An IN-MEMORY handle opened onto STDOUT/STDERR/STDIN](#an-in-memory-handle-opened-onto-stdoutstderrstdin)
 * [`Hash::Util` bucket statistics](#hashutil-bucket-statistics)
 * [`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`](#max_nested_eval_begin_blocks)
 * [`use English` — everything works except `@ARG` inside a sub](#use-english--everything-works-except-arg-inside-a-sub)
@@ -805,6 +806,33 @@ accident** — `$0` was not writable, so it still held the process name and the
 comparison was one unchanged value against itself; making the write real made
 it an honest failure, in exchange for tests 104/105/110 (`compare $0 to
 UTF8-flagged` and friends), which now pass.  Net magic.t 150/39 → 152/37.
+
+---
+
+## An IN-MEMORY handle opened onto STDOUT/STDERR/STDIN
+
+**Perl behaviour (probed 5.40.3):** `open(STDOUT, '>', \my $buf)` **FAILS** —
+it returns undef with `$!` set to `Bad file descriptor`.  PerlIO's `:scalar`
+layer has no file descriptor, and perl will not attach it to a standard handle.
+
+**PCL behaviour (s448n, task #535):** the open SUCCEEDS and the capture works:
+`print` with no filehandle, `print STDOUT` and `warn` (for STDERR) all land in
+the scalar, and a later `open(STDOUT, '>&', $saved)` restores.  This is PCL
+being MORE permissive than perl, not less, and it was already true before #535
+made the default `print` follow — what #535 added is that the two spellings now
+agree.
+
+**The one thing PCL does not do:** perl's `open` on an already-open handle
+closes it first, so on the (hypothetical) perl where this worked, descriptor 1
+would be released.  PCL leaves descriptor 1 open, because closing it out from
+under the image is a worse failure than a forked child seeing the old stdout.
+`fileno(STDOUT)` therefore still answers 1 while the in-memory handle is
+installed, where perl would answer -1.
+
+**Why this is not a fix target:** perl-compatible code cannot reach the state
+at all (perl refuses the open), so no perl program depends on either answer.
+Capturing STDOUT portably is done with a dup and a temp file, which PCL matches
+exactly — that is what `Pl/t/std-handle-open-01.t` rows 1 and 5 assert.
 
 ---
 

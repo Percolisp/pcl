@@ -9418,14 +9418,146 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (setf (gethash stream *p-open-output-streams*) t))
   stream)
 
+;;; --- The standard handles are NAMES FOR DESCRIPTORS 0/1/2 (task #535) ------
+;;; `open(STDOUT, …)` in perl re-points descriptor 1 itself, which is why the
+;;; idiom works at all: an argument-less `print`, an exec'd child and anything
+;;; reading fd 1 all follow.  PCL used to merely register the new stream under
+;;; the name, so `open(STDOUT,'>',$f); print "x"` printed to the TERMINAL and
+;;; the file got nothing, while `print STDOUT "x"` did reach the file — the two
+;;; spellings disagreed.  These three helpers are the one place that knows the
+;;; rule; %p-open-dup's standard-handle branch (which had the only copy of the
+;;; rebuild) now shares them.
+
+;; Parent-side pipe stream → child PID.  p-close consults this to waitpid the
+;; child and set $? (Perl: close on a pipe returns true only on exit status 0).
+;; Declared here because %p-rebind-std must carry the entry over when it
+;; replaces a pipe stream that was opened onto a standard handle.
+(defvar *p-pipe-pids* (make-hash-table :test 'eq))
+
+(defun %p-stream-target (v)
+  "The stream V actually stands for — synonym streams peeled.
+   `*standard-output*` and friends are synonym streams over `sb-sys:*stdout*`
+   & co., and CLOSE on a synonym stream does NOT close what it points at.
+   That is why `close(STDOUT)` used to leave descriptor 1 open where perl frees
+   it (probed: after close, a fresh open gets fd 1 in perl, fd 6 in PCL), and
+   why `open(STDOUT,'|-',CMD); print …; close(STDOUT)` HUNG — the child read a
+   pipe whose write end the parent still held (task #535)."
+  (let ((s v))
+    (loop while (typep s 'synonym-stream)
+          do (setf s (symbol-value (synonym-stream-symbol s))))
+    s))
+
+(defun %p-fd-of-stream (v)
+  "Underlying file descriptor of stream V, following synonym streams; nil when
+   V has no OS fd (string streams etc.)."
+  (let ((s (%p-stream-target v)))
+    (when (sb-sys:fd-stream-p s)
+      (sb-sys:fd-stream-fd s))))
+
+(defun %p-std-slot (fh)
+  "The standard descriptor the filehandle designator FH NAMES — 0 STDIN,
+   1 STDOUT, 2 STDERR — or nil when it names none.
+   Both spellings that reach a bareword name answer: the symbol generated code
+   passes (read under the :invert readtable, `STDOUT` is |stdout| — hence
+   string-equal) and the symbolic-filehandle box (`my $x = \"STDOUT\";
+   open($x,…)` opens the STDOUT glob in perl), keyed exactly as %p-install-fh
+   keys such a box."
+  (let ((name (cond ((and fh (symbolp fh)) (symbol-name fh))
+                    ((and (p-box-p fh) (stringp (p-box-value fh))
+                          (plusp (length (p-box-value fh))))
+                     (let* ((nm  (p-box-value fh))
+                            (sep (search "::" nm :from-end t)))
+                       (if sep (subseq nm (+ sep 2)) nm)))
+                    (t nil))))
+    (and name
+         (cond ((string-equal name "STDIN")  0)
+               ((string-equal name "STDOUT") 1)
+               ((string-equal name "STDERR") 2)))))
+
+(defun %p-std-rebuild (slot)
+  "Rebuild the CL stream standing for standard descriptor SLOT after the
+   descriptor itself has been re-pointed, and re-register it under the handle
+   name.  Returns the new stream.  ecase, not case: a slot outside 0/1/2 means
+   %p-std-slot and this function disagree, and that must say so (rule 12)."
+  (ecase slot
+    (0 (setf sb-sys:*stdin*
+             (sb-sys:make-fd-stream 0 :input t :external-format :utf-8))
+       (setf *standard-input* (make-synonym-stream 'sb-sys:*stdin*))
+       (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
+    (1 (setf sb-sys:*stdout*
+             (sb-sys:make-fd-stream 1 :output t :buffering :line
+                                    :external-format :utf-8))
+       (setf *standard-output* (make-synonym-stream 'sb-sys:*stdout*))
+       (setf (gethash 'STDOUT *p-filehandles*)
+             (%p-register-open-stream *standard-output*)))
+    (2 (setf sb-sys:*stderr*
+             (sb-sys:make-fd-stream 2 :output t :buffering :line
+                                    :external-format :utf-8))
+       (setf *error-output* (make-synonym-stream 'sb-sys:*stderr*))
+       (setf (gethash 'STDERR *p-filehandles*)
+             (%p-register-open-stream *error-output*)))))
+
+(defun %p-rebind-std (slot stream)
+  "Bind STREAM to the standard handle for descriptor SLOT the way perl does:
+   the NAME keeps denoting the DESCRIPTOR, so the new stream is moved ONTO it
+   with dup2 and the CL globals are rebuilt there.  Always true (the caller's
+   open already succeeded).
+
+   An in-memory handle (`open(STDOUT,'>',\\$buf)`) has no OS descriptor, so
+   there is nothing to dup2: the CL global and the name point at the Gray
+   stream and descriptor SLOT is left ALONE.  Perl closes it; PCL does not,
+   because closing descriptor 1 out from under the image is a worse failure
+   than a child seeing the old stdout — noted in docs/not-supported.md.
+
+   A pipe stream (`open(STDOUT,'|-',CMD)`) is replaced by the rebuilt one, so
+   its *p-pipe-pids* entry moves with it — otherwise close(STDOUT) would stop
+   reaping the child and $? would go stale."
+  (let ((fd  (%p-fd-of-stream stream))
+        (pid (gethash stream *p-pipe-pids*)))
+    (if (null fd)
+        (ecase slot
+          (0 (setf *standard-input* stream)
+             (setf (gethash 'STDIN *p-filehandles*) stream))
+          (1 (setf *standard-output* stream)
+             (setf (gethash 'STDOUT *p-filehandles*) stream))
+          (2 (setf *error-output* stream)
+             (setf (gethash 'STDERR *p-filehandles*) stream)))
+        (progn
+          ;; Flush what the OLD standard stream still holds before it goes; it
+          ;; may already be closed (close(STDOUT) then reopen), hence ignore.
+          (ecase slot
+            (0)
+            (1 (ignore-errors (finish-output *standard-output*)))
+            (2 (ignore-errors (finish-output *error-output*))))
+          (unless (= fd slot)
+            (sb-posix:dup2 fd slot)
+            ;; Releases FD; SLOT holds the copy.  Buffered output would flush
+            ;; to the same file, and the open is fresh, so nothing is lost.
+            (ignore-errors (close stream))
+            (remhash stream *p-open-output-streams*))
+          (let ((new (%p-std-rebuild slot)))
+            (when pid
+              (remhash stream *p-pipe-pids*)
+              (setf (gethash new *p-pipe-pids*) pid)))))
+    t))
+
 (defun %p-install-fh (fh stream)
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
    Symbolic filehandle: when FH is a box already holding a non-empty handle-NAME
    string (e.g. $TST = \"TST\"; open($TST, ...)), Perl opens the named glob (*TST)
    and leaves $fh holding the string — it does NOT autovivify a lexical handle.
    Register under the by-name :pcl symbol so BOTH the bareword form (<TST>/eof(TST))
-   and the scalar form (<$TST>) resolve it via %p-resolve-fh."
+   and the scalar form (<$TST>) resolve it via %p-resolve-fh.
+
+   STDIN/STDOUT/STDERR are not ordinary names: they stand for descriptors
+   0/1/2, so %p-rebind-std moves the stream onto the descriptor instead of
+   registering a second stream beside it (task #535).  Every opener reaches
+   this one function — plain open, in-memory open, fork-pipe, socket, accept,
+   pipe — so they all follow, which is why the rule lives HERE and not in
+   %p-open-impl."
   (%p-register-open-stream stream)
+  (let ((std (%p-std-slot fh)))
+    (when std (return-from %p-install-fh (%p-rebind-std std stream))))
   (cond ;; The box holds a GLOB (Symbol::gensym, \*FH, IO::Handle->new — often
     ;; blessed).  Perl attaches the stream to the glob's IO slot and leaves
     ;; the scalar itself alone; overwriting the box with the stream
@@ -9530,9 +9662,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       (t (warn "Unsupported in-memory open mode: ~A" mode-str) nil))))
 
 ;;; --- Fork-pipe opens: open FH, "|-" / "-|" [, CMD] (#70) -------------------
-;; Parent-side pipe stream → child PID.  p-close consults this to waitpid the
-;; child and set $? (Perl: close on a pipe returns true only on exit status 0).
-(defvar *p-pipe-pids* (make-hash-table :test 'eq))
+;;; (*p-pipe-pids* is declared up with the standard-handle helpers, which have
+;;; to carry an entry over when a pipe is opened onto STDOUT/STDIN.)
 
 (defun %p-open-fork-pipe (fh mode-str cmd-args)
   "Perl fork-pipe open.  MODE-STR is \"|-\" (parent writes to the child's
@@ -9598,9 +9729,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 (defun %p-close-maybe-pipe (v)
   "Close stream V; if it is the parent end of a fork-pipe, reap the child and
    set $?.  Returns Perl's close truth: for a pipe, true only when the child
-   exited 0; for a plain stream, true."
+   exited 0; for a plain stream, true.
+   The stream CLOSED is %p-stream-target's — a synonym stream's close leaves
+   the descriptor behind it open, and perl's close frees the descriptor (see
+   that function; task #535).  The pipe-pid lookup stays on V, which is the
+   object the opener registered."
   (let ((pid (gethash v *p-pipe-pids*)))
-    (close v)
+    (close (%p-stream-target v))
     (if (null pid)
         t
         (progn
@@ -9611,15 +9746,6 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                 (setf $? status)
                 (if (zerop status) t nil))
             (error () (%pcl-save-errno) nil))))))
-
-(defun %p-fd-of-stream (v)
-  "Underlying file descriptor of stream V, following synonym streams; nil when
-   V has no OS fd (string streams etc.)."
-  (let ((s v))
-    (loop while (typep s 'synonym-stream)
-          do (setf s (symbol-value (synonym-stream-symbol s))))
-    (when (sb-sys:fd-stream-p s)
-      (sb-sys:fd-stream-fd s))))
 
 (defun %p-dup-src-name (have-val val name-str)
   "The handle NAME a dup-open's source designator spells, when it spells one:
@@ -9723,38 +9849,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                  (error () t)))
       (setf *p-stored-errno* 9)          ; EBADF
       (return-from %p-open-dup nil))
-    (let ((std (and (symbolp fh)
-                    ;; string-equal: the generated code passes the handle
-                    ;; symbol under :invert readtable case (|stdout|).
-                    (cond ((string-equal (symbol-name fh) "STDOUT") 1)
-                          ((string-equal (symbol-name fh) "STDERR") 2)
-                          ((string-equal (symbol-name fh) "STDIN")  0)))))
+    (let ((std (%p-std-slot fh)))
       (handler-case
           (if std
+              ;; The standard handles ARE descriptors 0/1/2: dup ONTO the
+              ;; descriptor so in-process prints AND exec'd children both see
+              ;; the redirect (the closure.t child shape).  Same two helpers an
+              ;; ordinary `open(STDOUT, …)` uses — this branch used to hold the
+              ;; only copy of the rebuild (task #535).
               (progn
-                (case std
-                  (1 (finish-output *standard-output*))
-                  (2 (finish-output *error-output*)))
+                (ecase std
+                  (0)
+                  (1 (ignore-errors (finish-output *standard-output*)))
+                  (2 (ignore-errors (finish-output *error-output*))))
                 (sb-posix:dup2 src-fd std)
-                (case std
-                  (0 (setf sb-sys:*stdin*
-                           (sb-sys:make-fd-stream 0 :input t
-                                                  :external-format :utf-8))
-                     (setf *standard-input*
-                           (make-synonym-stream 'sb-sys:*stdin*))
-                     (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
-                  (1 (setf sb-sys:*stdout*
-                           (sb-sys:make-fd-stream 1 :output t :buffering :line
-                                                  :external-format :utf-8))
-                     (setf *standard-output*
-                           (make-synonym-stream 'sb-sys:*stdout*))
-                     (setf (gethash 'STDOUT *p-filehandles*) *standard-output*))
-                  (2 (setf sb-sys:*stderr*
-                           (sb-sys:make-fd-stream 2 :output t :buffering :line
-                                                  :external-format :utf-8))
-                     (setf *error-output*
-                           (make-synonym-stream 'sb-sys:*stderr*))
-                     (setf (gethash 'STDERR *p-filehandles*) *error-output*)))
+                (%p-std-rebuild std)
                 t)
               ;; ">&=SRC" is fdopen, NOT dup: the new handle IS the same fd.  When
               ;; SRC is a handle we already have a stream for, share that stream
@@ -9770,8 +9879,14 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                     t)))
         (error () (%pcl-save-errno) nil)))))
 
-(defun %p-open-impl (fh mode filename)
-  "Implementation of Perl open"
+(defun %p-open-impl (fh mode filename &optional three-arg-p)
+  "Implementation of Perl open.  THREE-ARG-P says the program wrote the mode and
+   the target as SEPARATE arguments; it is the only thing that distinguishes
+   perl's bare fork-open `open(F,\"-|\")` — two arguments, no command, both
+   processes go on running the program — from `open(F,'-|',$cmd)` with $cmd
+   EMPTY, which is an error (probed 5.40.3: undef, $! = Broken pipe).  PCL
+   forked for both, so an empty command made the CHILD carry on running the
+   whole program beside its parent (task #535)."
   ;; In-memory filehandle: the target is a SCALAR ref (a box whose value is a box),
   ;; e.g. open my $fh, '>', \$s.  Dispatch before the filename is stringified.
   (when (and (p-box-p filename) (p-box-p (p-box-value filename)))
@@ -9808,13 +9923,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              (open file-str :direction :io :if-exists :supersede
                    :if-does-not-exist :create :external-format ef))
             ((or (string= mode-str "|-") (string= mode-str "-|"))
-             ;; Fork-pipe open (#70): bare when no command text, else the
-             ;; child execs the command.  Returns pid/0/undef directly —
-             ;; the filehandle install happens inside (parent only).
-             (return-from %p-open-impl
-               (%p-open-fork-pipe fh mode-str
-                                  (when (plusp (length file-str))
-                                    (list file-str)))))
+             ;; Fork-pipe open (#70): bare (the TWO-argument spelling, no
+             ;; command) when there is no command text, else the child execs
+             ;; the command.  Returns pid/0/undef directly — the filehandle
+             ;; install happens inside (parent only).
+             (let ((cmd (when (plusp (length file-str)) (list file-str))))
+               ;; An empty command in the THREE-argument form is perl's error,
+               ;; not the bare fork (see this function's docstring, task #535).
+               (when (and three-arg-p (null cmd))
+                 (setf *p-stored-errno* 32)   ; EPIPE, which is what perl sets
+                 (return-from %p-open-impl nil))
+               (return-from %p-open-impl
+                 (%p-open-fork-pipe fh mode-str cmd))))
             ((member mode-str +p-open-dup-modes+ :test #'string=)
              ;; Dup-open (#70): install/redirect handled inside.  The RAW third
              ;; argument goes along with its stringification — a glob ref, a
@@ -9840,9 +9960,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "Perl open - open file with given mode.
    2-arg: (p-open FH expr) - mode is parsed from expr
    3-arg: (p-open FH mode filename)
-   Bareword FH is quoted; lexical $fh is passed as evaluated box."
+   Bareword FH is quoted; lexical $fh is passed as evaluated box.
+   The argument COUNT is passed on: it is what tells perl's bare fork-open
+   `open(F,\"-|\")` from a three-argument open whose command is empty."
   (if filename
-      `(%p-open-impl (%p-fh-arg ,fh) ,mode ,filename)
+      `(%p-open-impl (%p-fh-arg ,fh) ,mode ,filename t)
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
          (%p-open-impl (%p-fh-arg ,fh) (car %parsed) (cdr %parsed)))))
 
