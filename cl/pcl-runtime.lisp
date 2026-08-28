@@ -1775,6 +1775,25 @@
              (gethash stream *p-autoflush-handles*))
     (ignore-errors (finish-output stream))))
 
+(defmacro %p-guarded-write (&body body)
+  "Run BODY — a write to a filehandle — and answer the way PERL answers a write
+   the OS refuses: FALSE with $! set.  Never a CL condition (task #590).
+
+   SBCL signals `stream-error` for a refused write, and BUFFERING decides WHEN:
+   two bytes onto a read-only descriptor are swallowed and the EBADF surfaces at
+   the flush — which is how an unguarded `close` used to ABORT THE WHOLE PROGRAM
+   long after the print that caused it.  A 100 000-byte write to /dev/full
+   signals inside the print instead.  Perl answers false at the print in both
+   cases, and its `close` merely returns false.
+
+   Only `stream-error` is caught, deliberately: a `p-die` raised by an overload
+   or tie handler while an argument stringifies is the PROGRAM's exception and
+   must keep travelling.  The one write failure SBCL reports as a plain
+   `type-error` — princ to a stream that is not an output stream — never gets
+   here, because %p-out-fh-or-fail answers false for such a handle first."
+  `(handler-case (progn ,@body)
+     (stream-error () (%pcl-save-errno) *p-undef*)))
+
 (defvar |$\|| (make-p-box
                (make-p-magic-cell
                 :getter (lambda ()
@@ -4442,10 +4461,11 @@
     (let* ((flat (coerce (p-flatten-args list-args) 'list))
            (fmt (first flat))
            (fmt-args (cdr flat)))
-      (let ((*p-sprintf-caller* "printf"))
-        (princ (apply #'p-sprintf fmt fmt-args) fh))
-      (%p-maybe-autoflush fh)
-      1)))
+      (%p-guarded-write
+       (let ((*p-sprintf-caller* "printf"))
+         (princ (apply #'p-sprintf fmt fmt-args) fh))
+       (%p-maybe-autoflush fh)
+       1))))
 
 ;;; ============================================================
 ;;; Assignment and Mutation
@@ -8547,6 +8567,23 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; I/O Functions
 ;;; ============================================================
 
+(defun %p-writable-stream (v)
+  "V when it can be WRITTEN to, NIL when it is a stream that cannot.
+
+   Perl answers a print on a read-only handle with false and $! = EBADF —
+   `print $ro \"x\"` where $ro came from `open($ro,'<',…)`, and equally a dup
+   whose DESCRIPTOR is read-only (task #590; probed 5.40.3: false, errno 9, and
+   the handle still READS afterwards).  PCL had no such answer: SBCL signals a
+   plain TYPE-ERROR (\"is not a character output stream\") rather than a
+   stream-error, so it escaped the write guard and killed the program.  Asking
+   the question BEFORE the write is both cheaper and closer to perl, whose
+   check is IoOFP — a slot, not an attempted syscall.
+
+   Non-stream handles (a socket object, a value p-get-stream could not resolve)
+   are passed straight through: this function's job is the direction, and the
+   callers' existing arms answer for everything else."
+  (if (and (streamp v) (not (output-stream-p v))) nil v))
+
 (defun %p-out-fh-or-fail (desig site)
   "Resolve DESIG — the explicit filehandle of print/printf/say, SITE naming
    which — to a stream, or return NIL after doing what PERL does with a handle
@@ -8583,7 +8620,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     ;; `:fh nil` is the EMPTY filehandle node (bare `print`), not an undef
     ;; scalar — it means the currently-selected handle.
     ((null desig) (%p-default-out))
-    ((p-get-stream desig))
+    ((%p-writable-stream (p-get-stream desig)))
     (t
      (setf *p-stored-errno* 9)                                 ; EBADF (Linux)
      (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
@@ -8617,16 +8654,17 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    Flatten raw @array / %hash args (both take a LIST): a bare vector/hash
    spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar (so
    `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening."
-  (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
-        (firstp t))
-    (dolist (arg (coerce (p-flatten-args args) 'list))
-      (when (and ofs (not firstp)) (princ ofs fh))
-      (setf firstp nil)
-      (princ (to-string arg) fh)))
-  (when (and (stringp ors) (plusp (length ors)))
-    (princ ors fh))
-  (%p-maybe-autoflush fh)
-  t)
+  (%p-guarded-write
+   (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
+         (firstp t))
+     (dolist (arg (coerce (p-flatten-args args) 'list))
+       (when (and ofs (not firstp)) (princ ofs fh))
+       (setf firstp nil)
+       (princ (to-string arg) fh)))
+   (when (and (stringp ors) (plusp (length ors)))
+     (princ ors fh))
+   (%p-maybe-autoflush fh)
+   t))
 
 (defun p-print (&rest args)
   "Perl print - prints args then appends $\\ (output record separator)"
@@ -9325,11 +9363,20 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
     (p-string-stream-mixin sb-gray:fundamental-character-output-stream)
   ())
 
-;; Read+write handle: open my $fh, "+<", \$s   /   "+>", \$s
+;; Read-only handle: open my $fh, "<", \$s.  Its own class since task #590:
+;; perl refuses a print on a read handle (false, $! = EBADF) and PCL used to
+;; open EVERY in-memory read handle as read+write, so `print $ro "x"` reported
+;; success and OVERWROTE the first character the next read would have returned.
+;; %p-writable-stream is what turns "this stream cannot be written" into perl's
+;; answer, and it can only do that if the class says so.
+(defclass p-string-input-stream
+    (p-string-stream-mixin sb-gray:fundamental-character-input-stream)
+  ())
+
+;; Read+write handle: open my $fh, "+<", \$s   /   "+>", \$s.  Built ON the
+;; read-only class so the read methods below have one specialiser.
 (defclass p-string-io-stream
-    (p-string-stream-mixin
-     sb-gray:fundamental-character-input-stream
-     sb-gray:fundamental-character-output-stream)
+    (p-string-input-stream sb-gray:fundamental-character-output-stream)
   ())
 
 (defun %psos-buf (s)
@@ -9383,15 +9430,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                    (t      position)))
            t)))
 
-;; --- read side of a bidirectional in-memory handle ("+<" / "+>") ----------
-(defmethod sb-gray:stream-read-char ((s p-string-io-stream))
+;; --- read side of a readable in-memory handle ("<", "+<", "+>") -----------
+(defmethod sb-gray:stream-read-char ((s p-string-input-stream))
   (let ((buf (%psos-buf s))
         (p   (psos-pos s)))
     (if (< p (fill-pointer buf))
         (progn (setf (psos-pos s) (1+ p)) (char buf p))
         :eof)))
 
-(defmethod sb-gray:stream-unread-char ((s p-string-io-stream) ch)
+(defmethod sb-gray:stream-unread-char ((s p-string-input-stream) ch)
   (declare (ignore ch))
   (when (> (psos-pos s) 0) (decf (psos-pos s)))
   nil)
@@ -9681,11 +9728,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              (p-box-sv-ok target-box) nil (p-box-nv-ok target-box) nil)
        (%p-install-fh fh (make-instance 'p-string-io-stream :target target-box))
        t)
-      ;; Read: the bidirectional stream positioned at the start.  (Using the
-      ;; same class as "+<" gives uniform seek/tell/SEEK_END; PCL does not
-      ;; enforce read-only-ness on the handle, matching its general stance.)
+      ;; Read: an INPUT-ONLY stream positioned at the start, over a snapshot of
+      ;; the scalar.  It shares the mixin, so seek/tell/SEEK_END are the same
+      ;; code; what it does not share is the write side — perl refuses a print
+      ;; on a read handle, and the read+write class used to accept it and
+      ;; overwrite the character the next read would have returned (task #590).
       ((string= mode-str "<")
-       (%p-install-fh fh (make-instance 'p-string-io-stream
+       (%p-install-fh fh (make-instance 'p-string-input-stream
                                         :target (let ((b (make-p-box
                                                           (%p-fresh-adjustable-string cur))))
                                                   b)))
@@ -9765,17 +9814,27 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    the descriptor behind it open, and perl's close frees the descriptor (see
    that function; task #535).  The pipe-pid lookup stays on V, which is the
    object the opener registered."
-  (let ((pid (gethash v *p-pipe-pids*)))
-    (close (%p-stream-target v))
+  (let ((pid (gethash v *p-pipe-pids*))
+        (flushed t))
+    ;; perl's close returns FALSE when the final flush failed, and frees the
+    ;; descriptor anyway.  SBCL SIGNALS instead, and buffering means the signal
+    ;; lands HERE for a write the OS refused several statements ago — which is
+    ;; how a close used to abort the whole program (task #590).  :abort t on the
+    ;; retry discards the unwritable buffer so the descriptor still goes.
+    (handler-case (close (%p-stream-target v))
+      (stream-error ()
+        (%pcl-save-errno)
+        (setf flushed nil)
+        (ignore-errors (close (%p-stream-target v) :abort t))))
     (if (null pid)
-        t
+        flushed
         (progn
           (remhash v *p-pipe-pids*)
           (handler-case
               (multiple-value-bind (rpid status) (sb-posix:waitpid pid 0)
                 (declare (ignore rpid))
                 (setf $? status)
-                (if (zerop status) t nil))
+                (if (and flushed (zerop status)) t nil))
             (error () (%pcl-save-errno) nil))))))
 
 (defun %p-dup-src-name (have-val val name-str)
@@ -9812,22 +9871,62 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        :undef)
       (t nil))))
 
-(defun %p-dup-make-stream (fd mode-str)
-  "Make the CL stream for a dup-opened FD, in the direction MODE-STR spells.
-   THREE-valued, not two: a leading `+` (`+<&`, `+>&` and their `=` forms) is
-   perl's READ-WRITE dup and needs a bidirectional stream (task #543) — the old
-   two-way test read every `+` mode as `<` and handed back a read-only stream.
-   `>` is write-only, `<` read-only.  Anything else means %p-open-impl's dup
-   dispatch and this function disagree about the mode set, and says so (rule 12)."
+(defconstant +p-o-accmode+ #b11
+  "O_ACCMODE.  sb-posix exports o-rdonly/o-wronly/o-rdwr but NOT the mask
+   (measured: `find-symbol \"O-ACCMODE\"` is NIL in both SB-POSIX and SB-UNIX),
+   and it is 3 on Linux — the low two bits of the F_GETFL flags.")
+
+(defun %p-fd-directions (fd)
+  "(values READABLE WRITABLE) for descriptor FD, read from its OPEN FLAGS.
+   Both true when the flags cannot be read, so an unexpected descriptor keeps
+   the caller's nominal direction rather than losing one."
+  (handler-case
+      (let ((acc (logand (sb-posix:fcntl fd sb-posix:f-getfl) +p-o-accmode+)))
+        (values (or (= acc sb-posix:o-rdonly) (= acc sb-posix:o-rdwr))
+                (or (= acc sb-posix:o-wronly) (= acc sb-posix:o-rdwr))))
+    (error () (values t t))))
+
+(defun %p-dup-mode-directions (mode-str)
+  "(values WANTS-INPUT WANTS-OUTPUT) for a dup open MODE-STR.  THREE-valued, not
+   two: a leading `+` (`+<&`, `+>&` and their `=` forms) is perl's READ-WRITE
+   dup (task #543) — the old two-way test read every `+` mode as `<`.  Anything
+   else means %p-open-impl's dup dispatch and this function disagree about the
+   mode set, and says so (rule 12)."
   (let ((c (char mode-str 0)))
-    (cond
-      ((char= c #\+)
-       (sb-sys:make-fd-stream fd :input t :output t :external-format :utf-8))
-      ((char= c #\>)
-       (sb-sys:make-fd-stream fd :output t :external-format :utf-8))
-      ((char= c #\<)
-       (sb-sys:make-fd-stream fd :input t :external-format :utf-8))
-      (t (error "PCL: unhandled dup open mode ~S" mode-str)))))
+    (cond ((char= c #\+) (values t t))
+          ((char= c #\>) (values nil t))
+          ((char= c #\<) (values t nil))
+          (t (error "PCL: unhandled dup open mode ~S" mode-str)))))
+
+(defun %p-dup-make-stream (fd mode-str)
+  "Make the CL stream for a dup-opened FD.  The direction is NOT the mode
+   letter alone — it is perl's model, probed 5.40.3 over the four combinations
+   (task #590):
+
+       read  is allowed iff the DESCRIPTOR is readable — the mode letter does
+             not gate it: `open($d,'>&',$readonly)` then `<$d>` reads the file;
+       write is allowed iff the MODE asks for it AND the descriptor is writable.
+
+   (Perl's own reason: IoIFP is the PerlIO handle, set for every mode, while a
+   write needs IoOFP, which only a write mode creates.)  Getting this wrong is
+   what made `print $dup \"ZZ\"` on a dup of a read-only fd report SUCCESS and
+   then abort the program at the close, when perl fails the print and closes
+   cleanly.
+
+   If that leaves no direction at all — `<&` of a write-only descriptor, where
+   perl's handle reads undef and writes false — the stream is still built, as
+   an input one: perl's handle exists, and PCL's read path already answers
+   undef on a refused read while %p-writable-stream answers false for a
+   non-output handle."
+  (multiple-value-bind (want-in want-out) (%p-dup-mode-directions mode-str)
+    ;; WANT-IN is deliberately not consulted — see the docstring's first rule;
+    ;; the call is still what validates the mode set (rule 12).
+    (declare (ignore want-in))
+    (multiple-value-bind (can-read can-write) (%p-fd-directions fd)
+      (let* ((out (and want-out can-write t))
+             (in  (or (and can-read t) (not out))))
+        (sb-sys:make-fd-stream fd :input in :output out
+                               :external-format :utf-8)))))
 
 (defun %p-open-dup (fh mode-str src-name three-arg-p
                     &optional (src-val nil src-val-p))

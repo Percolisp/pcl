@@ -1422,11 +1422,35 @@ bareword or string NAME, a typeglob or a ref to one, a lexical handle, a
 stream, or a raw fd NUMBER — so a translator must hand the dup path the
 *value*, not its stringification (a glob ref stringifies to `GLOB(0x…)`,
 which names no handle, and that is the whole bug the task recorded). The two
-FAILURE shapes are different and perl distinguishes them by what the
-designator IS, not by whether it resolved: a NAME that names no open handle
-is FATAL (`Bad filehandle: NOSUCH`), a literal `undef` is fatal (`Can't use
-an undefined value as filehandle reference`), while a CLOSED lexical handle
-or a bad fd number is a plain false with `$!` set.
+FAILURE shapes are different, and the FIRST discriminator is the ARGUMENT
+FORM (task #621).  In the **three-argument** spelling perl then distinguishes
+by what the designator IS, not by whether it resolved: a NAME that names no
+open handle is FATAL (`Bad filehandle: NOSUCH`), a literal `undef` is fatal
+(`Can't use an undefined value as filehandle reference`), while a CLOSED
+lexical handle or a bad fd number is a plain false with `$!` set.  The
+**two-argument** spelling `open FH, "<&SRC"` never dies: every source it
+cannot find — unknown name, empty name, qualified name, a lexical handle that
+stringified to `GLOB(0x…)` — is a plain false with `$!` = EINVAL, and a bad fd
+NUMBER is EBADF there too.
+
+**A dup's DIRECTION is the descriptor's, not the mode letter's** (task #590,
+probed 5.40.3): the handle READS iff the descriptor is readable — `open $d,
+'>&', $readonly` then `<$d>` reads the file — and WRITES iff the mode asks for
+a write AND the descriptor allows one.  Before the dup, the source handle is
+FLUSHED (task #591): a buffered read handle has pulled the file past the
+program's logical position and a buffered write handle has not yet reached the
+descriptor, so without the flush the dup starts at EOF, or its writes overtake
+the source's.  A flush of a read handle also discards its buffer, which is why
+perl's source handle reads undef after the dup consumed the rest.
+
+**A write the OS refuses is a FALSE `print`, never an exception** (task #590),
+and a `close` whose final flush failed returns false while still freeing the
+descriptor.  Buffering decides only WHEN the failure is noticed, never
+whether: a translator on a host that signals (SBCL does) must convert the
+signal at both the write and the close.  A handle that cannot be written at
+all — a read-only file handle, an in-memory `<` handle, a dup of a read-only
+descriptor — answers false with `$!` = EBADF without attempting the write, and
+goes on READING normally.
 
 ## 8. Magic globals
 

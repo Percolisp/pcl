@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 25;
+plan tests => 29;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -424,3 +424,91 @@ close $pd if $ok; close $p;
 print "first:[$l]open:", ($ok ? 1 : 0), " next:[", (defined $n ? $n : "UNDEF"), "]\n";
 PL
    'a dup of an UNSEEKABLE source (a pipe) is left alone, as in perl');
+
+# ── 11. task #590 — a write the OS refuses is a FALSE print, not a condition ──
+# `print $dup "ZZ"` on a dup of a read-only descriptor reported SUCCESS (SBCL
+# buffered it) and the EBADF surfaced at the CLOSE as an unhandled stream error
+# that killed the whole program.  Two halves, and both are needed: the direction
+# of a dup stream is perl's model (read iff the DESCRIPTOR is readable — the
+# mode letter does not gate it; write iff the MODE asks AND the descriptor
+# allows), and any write error that does escape becomes perl's false + $!.
+# Every expectation is the live `perl` answer, probed s449q 5.40.3.
+#
+# THE DIRECTION TABLE is the row that pins the model, negatives included: the
+# `>&` dup of a read-only fd still READS (perl does), and the `<&` dup of a
+# write-only fd does neither.
+is(run_cl($FIX . <<'PL'), "1:r=hello\n1:w=undef\n2:r=UNDEF\n2:w=undef\n3:r=hello\n3:w=undef\n4:r=hello\n4:w=1\n5:w=undef\n5:r=hello\n",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "hello\nworld\n"; close $c;
+sub sh { my ($t,$v) = @_; print "$t=", (defined $v ? ($v ? $v : "F") : "undef"), (($t =~ /r$/) ? "" : "\n") }
+sub shr { my ($t,$v) = @_; print "$t=", (defined $v ? $v : "UNDEF\n") }
+open(my $ro, '<', $O) or die; open(my $d1, '>&', $ro) or die "d1: $!\n";
+shr("1:r", scalar <$d1>); sh("1:w", print($d1 "z")); close $d1; close $ro;
+open(my $wo, '>>', $O) or die; open(my $d2, '<&', $wo) or die "d2: $!\n";
+shr("2:r", scalar <$d2>); sh("2:w", print($d2 "z")); close $d2; close $wo;
+open(my $r3, '<', $O) or die; open(my $d3, '+<&', $r3) or die "d3: $!\n";
+shr("3:r", scalar <$d3>); sh("3:w", print($d3 "z")); close $d3; close $r3;
+open(my $rw, '+<', $O) or die; open(my $d4, '+<&', $rw) or die "d4: $!\n";
+shr("4:r", scalar <$d4>); sh("4:w", print($d4 "Z")); close $d4; close $rw;
+open(my $r5, '<', $O) or die;
+sh("5:w", print($r5 "z")); shr("5:r", scalar <$r5>); close $r5;
+PL
+   'a dup reads iff its DESCRIPTOR can, and writes iff the mode AND the descriptor can');
+
+# The task's own reproducer: the print is false, $! is set, and — the point —
+# the program SURVIVES the close, which used to abort it.
+is(run_cl($FIX . <<'PL'), "open:1 print:F errno:9\nclose:1\nsource-reads:[hello\n]\nalive\n",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "hello\n"; close $c;
+open(my $ro, '<', $O) or die "ro: $!\n";
+my $r = open(my $d, '>&', $ro);
+$! = 0;
+my $ok = print $d "ZZ";
+print "open:", ($r?1:0), " print:", (defined $ok ? ($ok?1:"F") : "F"), " errno:", $!+0, "\n";
+my $cl = close $d;
+print "close:", ($cl?1:0), "\n";
+print "source-reads:[", scalar(<$ro>), "]\n";
+close $ro;
+print "alive\n";
+PL
+   'a write to a dup of a READ-ONLY fd is false, and the close no longer aborts');
+
+# An in-memory READ handle is the same question with no descriptor in it: PCL
+# opened every `<` scalar handle read+write, so the print silently OVERWROTE the
+# character the next read would have returned.
+is(run_cl(<<'PL'), "print:F\nread:[abc\n]\nsrc:[abc\n]\n",
+my $src = "abc\n";
+open(my $mi, '<', \$src) or die "mem: $!\n";
+my $ok = print $mi "x";
+print "print:", (defined $ok ? ($ok?1:"F") : "F"), "\n";
+print "read:[", scalar(<$mi>), "]\n";
+close $mi;
+print "src:[$src]\n";
+PL
+   'an in-memory READ handle refuses a print instead of overwriting its own buffer');
+
+# The OTHER half of #590 — the write that is legitimately attempted and fails at
+# the OS.  /dev/full is the only portable way to make one: a small write is
+# BUFFERED, so the ENOSPC lands at the close, which is exactly the deferred
+# failure that used to abort the program.  perl: the small print is TRUE (it
+# only buffered), the big one is undef, and both closes are false.
+# The expectation adapts to a machine without /dev/full, and the CL side prints
+# the same token, so the row still runs there.
+{
+    my $have = (-w "/dev/full") ? 1 : 0;
+    my $want = $have ? "big:F close:F\nsmall:1 close:F\nalive\n"
+                     : "skip\nskip\nalive\n";
+    is(run_cl(<<'PL'), $want,
+if (-w "/dev/full" and open(my $fu, '>', "/dev/full")) {
+    my $p = print $fu ("x" x 200000);
+    my $c = close $fu;
+    print "big:", (defined $p ? ($p?1:"F") : "F"), " close:", ($c?1:"F"), "\n";
+    open(my $f2, '>', "/dev/full") or die "full2: $!\n";
+    my $p2 = print $f2 "tiny";
+    my $c2 = close $f2;
+    print "small:", (defined $p2 ? ($p2?1:"F") : "F"), " close:", ($c2?1:"F"), "\n";
+} else {
+    print "skip\nskip\n";
+}
+print "alive\n";
+PL
+       'a write that fails at the OS is a false print and a false close, never a crash');
+}

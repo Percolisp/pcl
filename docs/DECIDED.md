@@ -21,6 +21,43 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449q (2026-08-29, Opus, round 7 agent Q) — a refused write is a FALSE print, and a dup's DIRECTION is its descriptor's (#590)
+
+- **A write the OS refuses is perl's false + `$!`, never a CL condition.**  The
+  runtime had no such layer at all: SBCL signals `stream-error`, buffering
+  decides WHEN, and two bytes onto a read-only descriptor surfaced as an
+  unhandled error at the CLOSE — killing the whole program several statements
+  after the print that caused it.  One macro `%p-guarded-write` wraps the three
+  writers (`%p-write-list` for print/say, `p-printf`), and `%p-close-maybe-pipe`
+  turns a failed final flush into perl's false close (`:abort t` on the retry so
+  the descriptor still goes).  **Only `stream-error` is caught** — a `p-die`
+  from an overload or tie handler stringifying an argument is the PROGRAM's
+  exception and must keep travelling.
+- **A handle that cannot be written answers BEFORE the write** (`%p-writable-stream`,
+  consulted by the one splitter `%p-out-fh-or-fail`): perl's check is IoOFP, a
+  slot, and SBCL reports that case as a plain `type-error`, which no
+  stream-error guard would have caught.  `print $ro "x"` is now false + EBADF,
+  exactly perl.
+- **A dup's DIRECTION is perl's model, not the mode letter** — probed 5.40.3
+  over the four combinations: **read iff the DESCRIPTOR is readable** (the mode
+  does not gate it: `open $d,'>&',$readonly` then `<$d>` READS), **write iff the
+  MODE asks AND the descriptor allows**.  (perl's own reason: IoIFP exists for
+  every mode, a write needs IoOFP.)  `%p-dup-make-stream` intersects, which is
+  what makes the failing print false AT THE PRINT, as perl has it, and lets the
+  close succeed.  All ten values of the five-shape table are byte-identical.
+- **An in-memory `<` handle is the same question with no descriptor**: PCL
+  opened every scalar read handle read+write ("PCL does not enforce
+  read-only-ness", said the comment), so `print $mi "x"` reported success and
+  OVERWROTE the character the next read would have returned.  New class
+  `p-string-input-stream`, with `p-string-io-stream` built on it so the read
+  methods keep ONE specialiser.
+- Cost measured, not assumed: 400 000 prints, 0.42–0.44 s with the guard vs
+  0.44–0.45 s without — below run-to-run noise.
+- Guard `Pl/t/print-fh-magic-01.t` 25 → 29 (the direction table with its two
+  negatives, the task's reproducer, the in-memory handle, and a /dev/full row
+  for the DEFERRED failure — the only portable way to make one; each of the
+  three code changes was inverse-verified by disabling it).
+
 ## s449q (2026-08-29, Opus, round 7 agent Q) — a dup-open's FAILURE SHAPE is the ARGUMENT FORM (#621)
 
 - **The two dup failure shapes are told apart by how the program WROTE the
