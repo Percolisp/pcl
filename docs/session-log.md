@@ -4,6 +4,63 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 449q (2026-08-29, Opus, round 7 agent Q) — the io/dup residue: #591, #621, #590, #592
+
+**Four tasks, all shipped; five findings filed (#630–#634).**  Every behaviour
+probed against perl 5.40.3 before and after — 47 probe rows across nine scratch
+programs, all byte-identical after the fixes except the differences named below.
+Cold gate **179/6064** (the 13 pclxs xs failures only, user-deferred); generation
+**v2-340** with all three checked-in artifacts regenerated (gen stamp only —
+`corpus-diff` identical over 111 files).
+
+- **#591 — a dup-open FLUSHES the source, in BOTH directions.**  The task named
+  the read side; the write side turned out to be an uncounted silent-wrong
+  (perl `one\ntwo`, PCL **`two\none`** — the source's buffered text had never
+  reached the descriptor, so the dup's write landed first).  One helper
+  `%p-sync-fd-position`; `(file-position s (file-position s))` is not a no-op in
+  SBCL — it flushes, DISCARDS the input buffer and lseeks, which is exactly
+  perl's flush, consequences included.  Keyed on the STREAM, never the fd:
+  `open($d,'<&=',fileno($s))` names no source handle and perl does not sync
+  that one either.
+- **#621 — the dup FAILURE SHAPE is the ARGUMENT FORM.**  Probed over nineteen
+  shapes: `open($x,'<&','NOSUCH')` is fatal, `open($x,"<&NOSUCH")` is undef +
+  EINVAL and the program runs on.  The s446i ruling stated the three-argument
+  rule as the whole rule; DECIDED narrows rather than replaces it.
+- **#590 — a refused write is a FALSE print, and a dup's DIRECTION is its
+  descriptor's.**  Four pieces: `%p-guarded-write` (stream-error only — a
+  `p-die` from an overload handler must keep travelling), a guarded close,
+  `%p-writable-stream` answering BEFORE the write (SBCL reports that case as a
+  plain type-error no stream guard would catch), and `%p-dup-make-stream`
+  intersecting with the descriptor.  perl's model, probed: **read iff the
+  DESCRIPTOR is readable** (`open $d,'>&',$readonly` then `<$d>` READS),
+  **write iff the MODE asks AND the descriptor allows**.  An in-memory `<`
+  handle was the same bug with no descriptor in it (the print OVERWROTE the
+  character the next read would return) → new class `p-string-input-stream`.
+  Cost measured: 400 000 prints, 0.42–0.44 s guarded vs 0.44–0.45 s not.
+- **#592 — `fcntl` implemented, FD_CLOEXEC set, and the premise corrected.**
+  Piece (b) first: perl's three answers including `"0 but true"`; the packed-
+  struct forms DIE (rule 12's value-flows-onward boundary) with a
+  not-supported entry.  Piece (a) on `%p-install-fh`, before its standard-handle
+  branch so `%p-rebind-std`'s dup2 clears the flag on 0/1/2 for free; an fdopen
+  passes `cloexec nil`.  **Measured with the flag disabled: a PCL-spawned child
+  sees fds 0,1,2 and nothing else** — `sb-ext:run-program` closes the rest — so
+  t/io/open.t's ok_cloexec rows were already answering "0" and the `$^F`-raising
+  idiom cannot work at all (**#633**).
+- **A gate row of mine was racing a fork-pipe child** and failed once under
+  `prove -j8`: it read one line and asserted what the dup sees next.  It drains
+  to EOF now; five runs each side.
+- Filed: **#630** (a FAILED open on an already-open handle leaves the old handle
+  open and READABLE — perl closes first; general `open`), **#631** (a two-arg
+  dup from a CLOSED bareword handle answers EINVAL, perl EBADF), **#632** (a
+  false `close` is undef where perl's is a defined empty string), **#633**,
+  **#634** (no IO::Handle METHOD works on a plain lexical handle —
+  `$fh->autoflush` dies; the glob spellings work).
+- Guard `Pl/t/print-fh-magic-01.t` 21 → 31 rows; each code change
+  inverse-verified by disabling it.  `docs/ir-spec.md` §7.5 gains the dup
+  direction, the flush and the refused-write rules.
+
+---
+
 ## Session 449 (2026-08-29, Fable) — the five design rulings shipped; ROUND 7 launched
 
 **The queue's item 1 (the rulings damming the filler pool) DONE, item 2
