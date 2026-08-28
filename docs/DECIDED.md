@@ -21,6 +21,29 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449q (2026-08-29, Opus, round 7 agent Q) — a dup-open FLUSHES the source (#591)
+
+- **A buffered stream and its DESCRIPTOR disagree in both directions, and perl's
+  flush before a dup is what reconciles them** (#591, `%p-sync-fd-position`,
+  called from `%p-open-dup` once the source stream is resolved).  A read handle
+  that consumed one line has already pulled the whole file into its buffer, so
+  the descriptor sat at EOF: the dup read undef where perl reads `bbb`.  A write
+  handle holds text the descriptor has never seen, so the dup's writes landed
+  FIRST — probed `one\ntwo` in perl, **`two\none`** in PCL, an uncounted
+  silent-wrong the task had only guessed at.
+- **`(file-position s (file-position s))` is not a no-op in SBCL** — the setter
+  flushes pending output, DISCARDS the input buffer and lseeks, which is
+  precisely perl's flush.  Its consequence is asserted too: after the dup
+  consumes the rest, perl's SOURCE handle reads undef, because its buffer went
+  with the flush.
+- **Keyed on the STREAM, never on the fd.**  `open($d,'<&=',fileno($s))` names
+  no source handle and perl does NOT sync that one either (probed: both undef) —
+  so the fd-number path is left alone.  An unseekable source (a pipe) answers
+  nil to getter and setter and is skipped, which is also perl's answer.
+- Eleven probe rows A–N identical to perl 5.40.3; guard
+  `Pl/t/print-fh-magic-01.t` 21 → 24 (rows 22/23 fail without the fix, 24 is
+  the pipe negative that must pass either way).
+
 ## s449 (2026-08-29, Fable) — the five pool-damming design rulings; ROUND 7 launched
 
 - **#561 computed magics DESIGNED** — `docs/computed-magic-design-s449.md`

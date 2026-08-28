@@ -9454,6 +9454,37 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (when (sb-sys:fd-stream-p s)
       (sb-sys:fd-stream-fd s))))
 
+(defun %p-sync-fd-position (v)
+  "Bring the OS file offset of stream V's descriptor into line with the position
+   the PROGRAM has logically reached — what perl does when it flushes a handle's
+   PerlIO layer before handing the descriptor on (task #591).
+
+   It matters because a buffered stream and its descriptor disagree in BOTH
+   directions.  A read handle that has consumed one line has already pulled the
+   whole file into its buffer, so the descriptor sits at EOF while `tell`
+   correctly answers 4 — a dup of it read undef where perl reads the next line.
+   A write handle holds text the descriptor has never seen, so a dup's writes
+   reached the file FIRST (probed: perl `one\\ntwo`, PCL `two\\none`).
+
+   Setting file-position to the value it already reports is not a no-op in SBCL:
+   the setter flushes pending output, DISCARDS the input buffer and lseeks.
+   That is exactly perl's flush, down to the consequence — after a dup consumes
+   the rest of the file, perl's SOURCE handle reads undef, because its buffer
+   went with the flush (probed 5.40.3).  An unseekable descriptor (a pipe)
+   answers nil to both getter and setter and is left alone, which is also what
+   perl does there.
+
+   Keyed on the STREAM, never on the fd: `open($d,'<&=',fileno($s))` names no
+   source handle, and perl does not sync that one either (probed — both read
+   undef)."
+  (let ((s (%p-stream-target v)))
+    (when (sb-sys:fd-stream-p s)
+      (when (output-stream-p s) (ignore-errors (finish-output s)))
+      (ignore-errors
+        (let ((pos (file-position s)))
+          (when pos (file-position s pos))))))
+  v)
+
 (defun %p-std-slot (fh)
   "The standard descriptor the filehandle designator FH NAMES — 0 STDIN,
    1 STDOUT, 2 STDERR — or nil when it names none.
@@ -9849,6 +9880,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                  (error () t)))
       (setf *p-stored-errno* 9)          ; EBADF
       (return-from %p-open-dup nil))
+    ;; Perl flushes the source's layer before duping its descriptor, and the two
+    ;; disagree in both directions until it does — see %p-sync-fd-position.
+    (when (streamp src) (%p-sync-fd-position src))
     (let ((std (%p-std-slot fh)))
       (handler-case
           (if std

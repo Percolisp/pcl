@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 24;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -357,3 +357,46 @@ print "d2:", (defined $l2 ? $l2 : "UNDEF\n");
 print "stray:", (-e "&SRC" ? 1 : 0), (-e "&SRC2" ? 1 : 0), "\n";
 PL
    'two-arg "+<&SRC" / "+>&SRC" are DUPS, not opens of a file named "&SRC"');
+
+# ── 10. task #591 — the dup starts where the PROGRAM is, not where the buffer
+# left the descriptor.  A read handle that consumed one line has already pulled
+# the whole file into its buffer, so the descriptor sat at EOF and the dup read
+# undef; a write handle holds text the descriptor has never seen, so the dup's
+# writes reached the file FIRST.  %p-sync-fd-position is the one flush, and its
+# CONSEQUENCE is asserted too: perl's source handle reads undef afterwards,
+# because its buffer went with the flush.  Probed s449q, 5.40.3.
+is(run_cl($FIX . <<'PL'), "first:[aaa\n]dup:[bbb\n]src:[UNDEF]\n",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "aaa\nbbb\nccc\n"; close $c;
+open(my $s, '<', $O) or die "src: $!\n";
+my $first = <$s>;
+open(my $d, '<&', $s) or die "dup: $!\n";
+my $next = <$d>;
+my $after = <$s>;
+close $d; close $s;
+print "first:[$first]dup:[$next]src:[", (defined $after ? $after : "UNDEF"), "]\n";
+PL
+   'a `<&` dup continues at the source handle\'s logical position');
+
+is(run_cl($FIX . <<'PL'), "order:[one\ntwo\n]\n",
+open(my $o, '>', $O) or die "mk: $!\n";
+print $o "one\n";
+open(my $od, '>&', $o) or die "dup: $!\n";
+print $od "two\n";
+close $od; close $o;
+open(my $in, '<', $O) or die "re: $!\n"; my $got = do { local $/; <$in> }; close $in;
+print "order:[$got]\n";
+PL
+   'a buffered write source is FLUSHED before the dup, so program order holds');
+
+# The negative: an UNSEEKABLE source (a pipe) has no position to sync, and perl
+# answers undef there because its buffer swallowed the rest.  The flush must
+# leave it alone rather than dying — file-position answers nil both ways.
+is(run_cl(<<'PL'), "first:[hi\n]open:1 next:[UNDEF]\n",
+open(my $p, '-|', "echo hi; echo there") or die "pipe: $!\n";
+my $l = <$p>;
+my $ok = open(my $pd, '<&', $p);
+my $n = $ok ? <$pd> : undef;
+close $pd if $ok; close $p;
+print "first:[$l]open:", ($ok ? 1 : 0), " next:[", (defined $n ? $n : "UNDEF"), "]\n";
+PL
+   'a dup of an UNSEEKABLE source (a pipe) is left alone, as in perl');
