@@ -2409,14 +2409,12 @@ sub _symbol_is_declarator {
   my $kw = ($stmt->schildren)[0];
   return 0 unless $kw && $kw->isa('PPI::Token::Word')
     && $kw->content =~ $kw_rx;
-  # Declared names occupy the tokens BEFORE the statement's top-level `=`.
-  for my $child ($stmt->schildren) {
-    last if $child->isa('PPI::Token::Operator') && $child->content eq '=';
-    return 1 if $child == $sym;                              # my $x
-    return 1 if $child->isa('PPI::Structure::List')          # my ($x, $y)
-      && grep { $_ == $sym } @{ $child->find('PPI::Token::Symbol') || [] };
-  }
-  return 0;
+  # WHICH tokens the statement declares is _declarator_syms' question, not a
+  # second hand-rolled walk (rule 11).  The old "every Symbol before the
+  # top-level `=`" loop answered YES for every argument of
+  # `open(my $f, "<", $p)` — PPI wraps that paren list in a
+  # Statement::Variable, there is no `=` to stop at, and `$p` is a USE (#593).
+  return scalar grep { $_ == $sym } _declarator_syms($stmt);
 }
 
 # Is the reference $sym (canonical $canon) shadowed by an earlier declaration
@@ -6727,18 +6725,36 @@ sub _inside_named_sub {
   return 0;
 }
 
+# THE declarator SYMBOLS a `my`/`state`/`our`/`local` statement binds: the
+# leading Symbol, or the Symbols of its parenthesised list.  Everything to
+# their right is an ORDINARY EXPRESSION — perl declares only VAR in
+# `my $f, "<", $p` (it warns "Parenthesize"), so that `$p` is a package
+# variable or an outer lexical, never a declaration.
+#
+# ONE resolver, TWO consumers (CLAUDE.md 11): `_declared_names` (which spells
+# them) and `_symbol_is_declarator` (which asks whether THIS token is one).
+# They used to disagree, and that disagreement was #593: PPI wraps the paren
+# list of `open(my $f, "<", $p)` in a Statement::Variable, and the latter's
+# hand-rolled "every Symbol before the top-level `=`" loop then called EVERY
+# argument a declaration — so the span machinery saw no USE of `$p`, refused
+# the rename ("scalar does not cross the boundary"), and the `my` declared
+# before an in-block `package NAME;` switch was left in a `let` that could not
+# reach the next section's free read.
+sub _declarator_syms {
+  my ($v) = @_;
+  my @k = _strip_semi($v->schildren);
+  return () unless @k >= 2 && $k[0]->isa('PPI::Token::Word');
+  return $k[1] if $k[1]->isa('PPI::Token::Symbol');
+  return grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1]
+    if $k[1]->isa('PPI::Structure::List');
+  return ();
+}
+
 # The LHS names a `my`/`state`/`our`/`local` statement DECLARES (before `=`) —
 # a bare Symbol or the Symbols of a parenthesised list.  Excludes RHS uses.
 sub _declared_names {
   my ($self, $v) = @_;
-  my @k = _strip_semi($v->schildren);
-  return () unless @k >= 2 && $k[0]->isa('PPI::Token::Word');
-  return $k[1]->content if $k[1]->isa('PPI::Token::Symbol');
-  if ($k[1]->isa('PPI::Structure::List')) {
-    return map { $_->content }
-           grep { $_->isa('PPI::Token::Symbol') } map { $_->tokens } $k[1];
-  }
-  return ();
+  return map { $_->content } _declarator_syms($v);
 }
 
 # v2 twin of v1's _insert_variable_forward_declarations, with the key v2
