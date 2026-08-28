@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 34;
+plan tests => 39;
 
 sub write_pl {
     my ($code) = @_;
@@ -77,8 +77,10 @@ sub run_perl { my $f = write_pl($_[0]); return scalar `perl $f 2>&1` }
 # ── 1. `@?` and its ten siblings, against the perl oracle ───────────────────
 # The census row's own shape (`! @?` on the empty array) plus a write, a read,
 # an element and an interpolation.  Every character here is a CL symbol
-# CONSTITUENT — that is the boundary of the repair, not perl's, and the rest
-# (`@,` `@;` `@|` `@'` `@"` `@(`) still drop loudly (task #449).
+# CONSTITUENT — which USED to be the boundary of the repair, not perl's.  It no
+# longer is (task #449, closed s449s): `Pl::CLForm::needs_pipes` pipe-quotes a
+# name carrying a CL-unsafe character, so `@,`, `@|`, `@@` and `@\` join them
+# below.  What still drops is decided by PPI, not by CL — see the #550 section.
 {
     my $prog = <<'PL';
 no warnings; no strict;
@@ -555,4 +557,100 @@ print "defined:$n\nend\n";
 PL
     is(run_cl($prog), run_perl($prog),
        '#506: reading any punctuation hash or array first no longer kills the file');
+}
+
+# ── #550 + #449: the WHOLE-CONTAINER spellings ──────────────────────────────
+#
+# Since #506 the ELEMENT spellings ($X{k} / $X[0]) all work; the CONTAINER
+# spellings (`keys %?`, `%? = (…)`, `@, = (…)`) are this section.  Two things
+# had to move: the CL-unsafe characters needed the pipe-quoted emission (#449 —
+# `@,` read as two tokens and `@|` opened a quoted symbol, so the FILE failed to
+# read), and the `%` sigil needed a POSITION test, because `%` is also modulo
+# and PPI hands the sigil over as a bare Operator when it reads it that way.
+#
+# perl's own rule is the position one, and it is not the obvious answer:
+# `sub f { 7 } print f % 3, "\n"` prints `7` with NO newline, because perl read
+# `%3, "\n"` as the hash `%3` and passed it to `f`.  So the test is "a term is
+# expected here" — `_ends_term` plus the declared-term test for a Word.
+
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+$?{"k"} = "V";
+my @k = keys %?;
+print "keys:", scalar(@k), " v:", $?{"k"}, "\n";
+%? = (a => 1, b => 2);
+print "assigned:", scalar(keys %?), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#550: `keys %?` and `%? = (…)` — the task repro (perl oracle)');
+}
+
+# Every hash character the repair covers, in one program.  `!` is left out on
+# purpose: perl refuses to assign to `%!` ("ERRNO hash is read-only"), which is
+# a divergence of its own and not what this row is about.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+%? = (a=>1); %. = (a=>1,b=>2); %~ = (a=>1); %^ = (a=>1);
+%& = (a=>1); %% = (a=>1); %= = (a=>1); %< = (a=>1);
+%> = (a=>1); %, = (a=>1); %| = (a=>1); %_ = (a=>1);
+print "counts:", scalar(keys %?), scalar(keys %.), scalar(keys %~),
+                 scalar(keys %^), scalar(keys %&), scalar(keys %%),
+                 scalar(keys %=), scalar(keys %<), scalar(keys %>),
+                 scalar(keys %,), scalar(keys %|), scalar(keys %_), "\n";
+print "sorted:", join(",", sort keys %.), "\n";
+print "exists:", (exists $?{a} ? 1 : 0), " values:", join("", values %?), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#550: every punctuation HASH the repair covers (perl oracle)');
+}
+
+# The characters #449 was blocked on: `,` and `|` need |…| quoting, and `@`/`\`
+# are the two sigil-shaped ones PPI hands over as a second Cast.
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+@, = (1,2); @| = (1,2,3); @@ = (1,2,3,4); @\ = (1,2,3,4,5);
+print "n:", scalar(@,), scalar(@|), scalar(@@), scalar(@\), "\n";
+my @c = @|;
+print "copy:", scalar(@c), "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#449: the CL-unsafe punctuation ARRAYS (@, @| @@ @\\) (perl oracle)');
+}
+
+# THE BLOCK FORM IS THE REWRITE TARGET, and it must be strict-safe: perlref's
+# `%{ NAME }` is the VARIABLE, not a symbolic reference, so this program is
+# legal under `use strict 'refs'` where `%{'?'}` would die.
+{
+    my $prog = <<'PL';
+use strict; use warnings; no warnings 'once';
+%? = (a=>1, b=>2);
+my @k = sort keys %?;
+print "strict:", scalar(@k), ":@k\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#550: the container spelling is legal under `use strict refs` (perl oracle)');
+}
+
+# ── #550 negatives: every `%` that is MODULO ────────────────────────────────
+# The repair fires only where a TERM is expected, so each of these must keep
+# its arithmetic.  `$#a` and `${$r}` are here because they are the two shapes
+# `_ends_term` was wrong about (s449s, found by #563's breaking case).
+{
+    my $prog = <<'PL';
+no strict; no warnings;
+my $x = 17; my $y = 5; my %h = (k=>5); my @a = (1,2,3); my $r = \5;
+sub f { 17 }
+use constant N => 17;
+print "1:", $x % $y, " 2:", 17 % 5, " 3:", $x%5, "\n";
+print "4:", $x % $h{k}, " 5:", $x % @a, " 6:", f() % 5, "\n";
+print "7:", N % 5, " 8:", (time % 100 >= 0 ? "y" : "n"), "\n";
+my $z = $x; $z %= 5; print "9:", $z, "\n";
+print "10:", $#a % 2, " 11:", ${$r} % 3, "\n";
+print "12:", $x % $y % 3, "\n";
+PL
+    is(run_cl($prog), run_perl($prog),
+       '#550 negative: every spelling of MODULO keeps its arithmetic (perl oracle)');
 }

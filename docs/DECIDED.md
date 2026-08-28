@@ -21,6 +21,56 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449s (2026-08-29, Opus, round 7 agent S) — the punctuation CONTAINERS: `%` needs a POSITION rule, and #449's CL-spelling blocker is GONE (#550 + #449)
+
+- **#449 CLOSED at the emission rule**: `Pl::CLForm::needs_pipes` has a SECOND
+  arm — a name carrying a character the CL READER cannot read bare
+  (`, ; | ' " ` # ( ) \` and whitespace) is pipe-quoted, exactly as a non-ASCII
+  one is.  It cannot collide with the "ASCII stays bare" half by ARITHMETIC: no
+  perl identifier, package name or bareword can contain those characters, so
+  the only names it reaches are punctuation variables, which carry no letters.
+  `_already_cl` was refined with it — **WHERE the pipe is decides, not whether
+  there is one**: a CL spelling's pipe opens a token (start of string, or right
+  after `::`), while `@|` and `%|` are perl NAMES whose pipe is the name, and
+  the old "contains a pipe" test handed them back BARE.
+- **`%PUNCT_ARRAY_CHARS` → `%PUNCT_CONTAINER_CHARS`, widened to perl's set**:
+  `,` `|` `@` `\` join it, and the boundary is now PPI's, not CL's.  Measured
+  one character at a time (`@X = (1,2)` and `%X = (a=>1)` vs perl): the array
+  container works for 17 of 29 characters, up from 13.
+- **The HASH twin needed a POSITION rule, and perl's answer is not the obvious
+  one**: `%` is also modulo, and PPI hands the sigil over as a bare Operator
+  when it reads it that way — but `sub f { 7 } print f % 3, "\n"` prints `7`
+  with NO newline, because perl read `%3, "\n"` as the HASH `%3` and passed it
+  to `f` (probed; `f() % 3`, `use constant N => 7; N % 3` and `time % 100` are
+  all modulo).  So `Pl::Parser2::_repair_punct_hash_name` keys on `_ends_term`
+  plus the declared-term test for a Word — the same pair #563's repair uses —
+  and lives in Parser2 because that is where the position machinery is, while
+  `Pl::Parser` keeps the SET (`punct_container_chars`).  ONE set, two arms.
+  Hash containers now work for 12 characters, up from ONE (`%_`).
+- **A repair in Parser2's chain must change the TEXT** (measured, and it cost a
+  wrong first version): `_reparse_doc` SERIALIZES and re-parses, so a spliced
+  node whose text is unchanged is re-split by the next repair's reparse.  The
+  rewrite target is perl's own BLOCK spelling of a name, `%?` → `%{?}`, which
+  is also why it is legal under `use strict 'refs'` where `%{'?'}` would die.
+- Emission A/B over 921 files: **3 DIFF, all from the pipe-quoting arm, all
+  improvements** — `t/comp/package.t`'s `$'b` and Text-CSV's `45_eol.t` /
+  `46_eol_si.t` `$\` loop variable were emitted as BARE tokens that DID NOT
+  READ (verified by running the HEAD-side emission: `$\` became the symbol
+  `|$ |` because the backslash escaped the newline, and `$'b` made
+  `p-scalar-=` see too many elements).  corpus-diff IDENTICAL over 111; **the
+  drop census is UNCHANGED** (fresh run 33 files / 86 drops = the blessed rows
+  minus the board row it does not measure) — the shape occurs in ZERO files of
+  all four populations (scanned), so the guard rows are the bar:
+  `Pl/t/punct-array-glob-01.t` 34 → 39.
+- Residue task **#653**, measured by cause and NOT folded: the
+  quote-swallowing names (`@"` `@'` "@\`" `@#`), the Structure-named ones
+  (`@(` `@)` `@[` `@]` `@;`), `%/` (derails into a Regexp), `%@`/`%\` (PCL
+  drops the `%{@}` target — a gap in the §9 fold, not a PPI bug), `@:`/`%:`
+  (PPI makes them a Symbol, so they REACH emission and are a CL READ ERROR
+  there), `$x %$y` (a hash DEREF in perl, modulo in PCL — perl decides that one
+  by SPACING), and the interpolated subscript `"$,[1]"` for the four new
+  characters.  `docs/ppi-upstream-bugs.md` **§24b**; report row 35.
+
 ## s449s (2026-08-29, Opus, round 7 agent S) — `local *{EXPR}` is a glob named at RUN TIME, and the empty-target `return` was the silent half (#564)
 
 - **#564 — the statement VANISHED**: `local *{"1"} = sub {…}` (and `local *$n`)

@@ -85,10 +85,30 @@ sub ctx_bind {
 # cl/pcl-runtime.lisp, which is likewise the identity on a name carrying a
 # non-ASCII character — that is what makes "pipe-quoted" mean "verbatim" on
 # both sides of the seam.
+# THE SECOND REASON A NAME CANNOT BE BARE (task #449, s449s): a character the
+# CL READER does not read as part of a token.  A punctuation-named container —
+# `@,`, `@;`, `@|`, `%(` — is a perl global like any other, but `,` ends a
+# token, `|` opens a quoted symbol, `;` `#` start a comment, `(` `)` `'` "`"
+# `"` and `\` are all reader macros or escapes, so a BARE `@,` is not a symbol
+# at all: `(p-array-= @, (vector 1 2))` fails to READ, taking the whole file
+# with it (measured; that is what #449 recorded as "the CL-unsafe punctuation
+# arrays need a pipe-quoted emission").  Inside |…| every one of them is an
+# ordinary character.
+#
+# It CANNOT collide with the inverse half above, and the reason is arithmetic:
+# a perl identifier, package name, bareword filehandle or `pl-`-prefixed sub
+# name cannot contain any of these characters, so the only names this arm can
+# reach are punctuation variables — which carry no letters, so bare and quoted
+# would read as the same symbol even if one existed.  `:` is deliberately NOT
+# in the set: it is the package marker, `cl_whole_sym` already owns it, and
+# `cl_sym`'s callers pass qualified names it must not swallow.
+my $CL_UNSAFE = qr/[,;|'"`#()\\\s]/;
+
 sub needs_pipes {
   my ($name) = @_;
   return 0 if !defined $name;
-  return $name =~ /[^\x00-\x7F]/ ? 1 : 0;
+  return 1 if $name =~ /[^\x00-\x7F]/;
+  return $name =~ $CL_UNSAFE ? 1 : 0;
 }
 
 # A `|` in the input means the caller is holding a CL SPELLING, not a perl
@@ -101,7 +121,14 @@ sub needs_pipes {
 # produced |\|ＦＯＯ|::pl-two| and the file no longer READ.  The test is
 # ASCII-neutral by construction: cl_sym only ever acts on a name carrying a
 # non-ASCII character, so nothing that is bare today can be caught by it.
-sub _already_cl { return index($_[0], '|') >= 0 }
+# WHERE the pipe is decides, not whether there is one (s449s): a CL spelling's
+# pipe always OPENS a token — at the start of the string, or right after the
+# `::` that ends the package half (`|$"|`, `|ＦＯＯ|::pl-two`).  A perl
+# PUNCTUATION NAME can contain one too, and there it is the name: `@|` and `%|`
+# are globals like `@?` and `%?`, and with the old "contains a pipe" test they
+# were handed back BARE and the file failed to read (task #449).  `$|` never
+# hit it because its CL spelling is written out in %SPECIAL_VARS.
+sub _already_cl { return $_[0] =~ /\A\||::\|/ ? 1 : 0 }
 
 # The token for a NAME with no package half (a variable with its sigil, a
 # `pl-`/`plc-`-prefixed symbol, a label, a bareword filehandle).

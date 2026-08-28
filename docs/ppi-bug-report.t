@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 41;
+use Test::More tests => 42;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -506,6 +506,22 @@ PERL
                    $doc->tokens;
     ok( (grep { $_->content eq '@!' } @sym),
         'a punctuation-named array `@!` should lex as one token, as `@-` does' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# The `%` sigil is worse, because there is no Cast to notice: `keys %?` comes
+# out as Word(keys) Operator(%) Operator(?), i.e. a modulus of nothing.  perl
+# decides by POSITION, and the surprise is which way it goes:
+#
+#   $ perl -e 'sub f { 7 } print f % 3, "\n"'
+#   7                        # `%3, "\n"` is the HASH %3, passed to f
+#   $ perl -e 'sub f { 7 } print f() % 3, "\n"'
+#   1                        # after `)` a term has ended: modulo
+{
+    my $doc = PPI::Document->new(\'my @k = keys %?;');
+    my @sym = grep { $_->isa('PPI::Token::Symbol') } $doc->tokens;
+    ok( (grep { $_->content eq '%?' } @sym),
+        'a punctuation-named hash `%?` should lex as one Symbol after `keys`' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
 }

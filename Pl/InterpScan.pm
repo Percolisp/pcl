@@ -131,9 +131,16 @@ my $PUNCT_MAGIC = '!?.@/\\&\'`+;,|:%=-<>()[]~"';
 # does NOT read as an element — `$^` is the format-top-of-page name and the
 # `[` after it is not a subscript (probed).  Two sets, two questions.
 #
-# The CL-unsafe punctuation names (`@,` `@;` `@|` `@'` `@"` …) are absent for
-# the reason task #449 records: they need a pipe-quoted emission that does not
-# exist yet, so they must keep dropping loudly rather than start half-working.
+# The CL-unsafe punctuation names (`@,` `@;` `@|` `@'` `@"` …) were absent for
+# the reason task #449 recorded: they needed a pipe-quoted emission that did
+# not exist.  IT EXISTS SINCE s449s (`Pl::CLForm::needs_pipes` pipes a name
+# carrying a CL-unsafe character), so that reason is GONE — but the set is not
+# widened here, because this is the SUBSCRIPT question and it has its own
+# answer per character.  Measured s449s: `@, = (11,22,33); print "$,[1]"` is
+# 22 in perl and the literal `[1]` in PCL for `,`, `|`, `@` and `\` — four
+# silent wrongs, and the `\` one needs the escape rule thought through (this
+# scanner hides the character after a backslash from reference detection, while
+# perl consumes the `\` into the variable NAME first).  Task #653.
 my $PUNCT_ARRAY_SUBSCRIPT = '?!./~&%=<>';
 
 # ── Whole-text driver ──────────────────────────────────────────────────────

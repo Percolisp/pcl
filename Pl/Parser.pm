@@ -1133,13 +1133,44 @@ sub _merge_unicode_symbols {
 # ever be a mis-lexed punctuation name.  Adjacency is still required, as in
 # _merge_unicode_symbols.
 #
-# %PUNCT_ARRAY_CHARS is the set this repair covers, and the boundary is the
-# CL SYMBOL SPELLING, not perl: these characters are CL constituents, so the
-# emitted symbol reads BARE the way the sibling `@#` already does.  The rest
-# of perl's punctuation names (`@,` `@;` `@|` `@'` `@"` `@(` — every CL macro
-# or escape character) would need a pipe-quoted spelling, which is its own
-# emission rule; they keep DROPPING, loudly, and are filed as task #449.
-my %PUNCT_ARRAY_CHARS = map { $_ => 1 } split //, q{?!./~^&%=<>};
+# %PUNCT_CONTAINER_CHARS is the set this repair covers.  Its OLD boundary was
+# the CL SYMBOL SPELLING — the characters that are CL constituents and so read
+# BARE, the way the sibling `@#` already does — and the rest (`@,` `@;` `@|`,
+# every CL macro or escape character) kept dropping as task #449.  That
+# boundary is GONE since s449s: `Pl::CLForm::needs_pipes` pipe-quotes a name
+# carrying a CL-unsafe character, so the set is now perl's, not CL's.
+#
+# What is NOT in it is decided by PPI, not by perl (measured, one probe per
+# character, `my $z = @X;` and `my $z = %X;`):
+#   * `* + - _` for `@` and `! + - _` for `@`/`%` — PPI ALREADY makes those one
+#     Magic/Symbol token, so there is nothing to repair;
+#   * `" ' ` #` — the token PPI built SWALLOWED the rest of the line (a string,
+#     a backtick command, a comment), so the name cannot be recovered from the
+#     token stream at all;
+#   * `$` — `@$`/`%$` is the deref spelling, and PPI hands `$;` over as Magic;
+#   * `:` — PPI makes `@:` a Symbol already, so it REACHES emission (it is a CL
+#     read error there, a different bug);
+#   * `( ) [ ] ;` — PPI hands those over as a Token::Structure, and consuming
+#     one means deleting a bracket the LEXER has already built a Structure
+#     around;
+#   * `/` and `=` for the `%` sigil only — `%/` derails into a Regexp and `%=`
+#     is lexed as ONE compound-assignment operator.
+# The residue is task #653.
+my %PUNCT_CONTAINER_CHARS = map { $_ => 1 } split //, q{?!./~^&%=<>,|@\\};
+
+# THE SIGILS DIFFER IN ONE THING: whether the sigil token is ambiguous.
+# A `@` Cast can only ever be a sigil, so adjacency alone decides it.  A `%` is
+# ALSO the modulo operator — and PPI hands the sigil over as a bare
+# Operator('%') there, not a Cast — so the `%` arm needs perl's own rule for
+# which one it is: `%` opens a HASH where a TERM is expected.  perl agrees
+# exactly (probed 5.40.3: `sub f { 7 } print f % 3, "\n"` prints `7` with NO
+# newline, because perl read `%3, "\n"` as the hash `%3` and passed it to `f`;
+# `f() % 3`, `use constant N => 7; N % 3` and `time % 100` are all modulo).
+# That question is `Pl::Parser2::_ends_term` plus the declared-term test for a
+# Word, which is why the `%` arm lives THERE, next to the same disambiguation
+# for `*` (_repair_punct_glob_name) — this file has the SET, that file has the
+# POSITION.  One set, two arms, no third copy.
+sub punct_container_chars { return \%PUNCT_CONTAINER_CHARS }
 
 sub _merge_punct_array_symbols {
   my ($doc) = @_;
@@ -1147,8 +1178,9 @@ sub _merge_punct_array_symbols {
   for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
     next unless $cast->content eq '@';
     my $next = $cast->next_sibling;
-    next unless $next && $next->isa('PPI::Token::Operator');
-    next unless length($next->content) == 1 && $PUNCT_ARRAY_CHARS{$next->content};
+    next unless $next && ($next->isa('PPI::Token::Operator')
+                          || $next->isa('PPI::Token::Cast'));
+    next unless length($next->content) == 1 && $PUNCT_CONTAINER_CHARS{$next->content};
     my $sym = PPI::Token::Symbol->new('@' . $next->content);
     $cast->insert_before($sym);
     $next->delete;

@@ -1189,10 +1189,60 @@ that also serves `$#[0]`/`@#`, but only `@#` was ever forward-declared, so a
 file containing `$?[…]` died at load with an unbound variable.
 `Pl::Parser::_merge_punct_array_symbols` merges the two tokens back into one
 `PPI::Token::Symbol`, and Parser2's punctuation forward-declaration bucket now
-covers the whole family instead of `@#` alone.  The repair is limited to the
-punctuation characters that are CL symbol constituents (`? ! . / ~ ^ & % = < >`)
-— the rest (`@,` `@;` `@|` `@'` `@"` `@(`) need a pipe-quoted CL spelling and
-keep dropping loudly (task #449).  Guard rows: `Pl/t/punct-array-glob-01.t`.
+covers the whole family instead of `@#` alone.  Guard rows:
+`Pl/t/punct-array-glob-01.t`.
+
+### 24b. The `%` twin, and why it needed a POSITION rule  (tasks #550 + #449, s449s)
+
+The array repair above was first limited to the punctuation characters that are
+CL symbol CONSTITUENTS (`? ! . / ~ ^ & % = < >`); the rest (`@,`, `@|`, `@@`,
+`@\`) were left dropping as task #449 because a bare `@,` is not a CL symbol at
+all — `,` ends a token, `|` opens a quoted one — so the emitted file failed to
+READ.  That is now `Pl::CLForm::needs_pipes`' second arm: a name carrying a
+CL-unsafe character is pipe-quoted, exactly as a non-ASCII one is (#418).  It
+cannot collide with the "ASCII stays bare" half, because no perl identifier,
+package name or bareword can contain those characters — the only names it
+reaches are punctuation variables, which carry no letters.
+
+**The HASH twin is a different repair, and PPI's own output says why:**
+
+```
+my @k = keys %?;    Word(keys) Operator(%) Operator(?)     <- no Cast at all
+%? = (a => 1);      Operator(%) Operator(?) Operator(=) …
+@? = (1, 2);        Cast(@)     Operator(?) …
+```
+
+An `@` Cast can only ever be a sigil, so the array repair decides on ADJACENCY
+alone.  `%` is also the MODULO operator, and PPI hands the sigil over as a bare
+`Operator` when it reads it that way, so the hash repair needs perl's rule for
+which one it is — and perl's rule is POSITION, `%` opening a hash where a TERM
+is expected.  It is not the obvious answer (probed 5.40.3):
+
+```
+$ perl -e 'sub f { 7 } print f % 3, "\n"'
+7$                       # `%3, "\n"` is the HASH %3, passed to f
+$ perl -e 'sub f { 7 } print f() % 3, "\n"'
+1                        # after `)` a term has ended: modulo
+```
+
+**Workaround (s449s):** `Pl::Parser2::_repair_punct_hash_name` (plus its Cast
+sibling for `%%` / `%*`), keyed on `_ends_term` and the declared-term test for
+a Word — the same pair §14c's repair uses for the term-position `<`.  The
+CHARACTER SET is the array repair's (`Pl::Parser::punct_container_chars`): one
+set, two arms, this file's half supplying the position.  The rewrite is
+TEXTUAL, into perl's own BLOCK spelling of a name — `%?` → `%{?}` — for two
+reasons: a repair in Parser2's chain is undone by the next repair's
+`_reparse_doc` unless it changes the TEXT (measured), and perlref's `%{ NAME }`
+is the VARIABLE, so the block form is legal under `use strict 'refs'` where the
+symbolic `%{'?'}` would die.
+
+What still drops is decided by PPI, not by CL, and each was measured one
+character at a time: `" ' \` #` (the token PPI built SWALLOWED the rest of the
+line), `$` (the deref spelling; PPI hands `$;` over as Magic), `( ) [ ] ;` (a
+`Token::Structure` the lexer has already built a Structure around), `%/` (PPI
+derails it into a Regexp) and `%@` / `%\` (PCL drops the `%{@}` target).  `@:`
+and `%:` are a different bug — PPI makes those a Symbol, so they REACH emission
+and fail there.  All of it is task #653.
 
 ---
 

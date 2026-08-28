@@ -1095,6 +1095,12 @@ sub parse {
   # `local *1 = sub {…}`) that PPI hands over as two operator tokens — see
   # _repair_punct_glob_name (task #463).
   $doc = $self->_repair_punct_glob_name($doc);
+  # …and the HASH twin of §24's punctuation-named ARRAY, which needs the same
+  # position question because `%` is also modulo — see _repair_punct_hash_name
+  # (task #550; the array half is Pl::Parser::_merge_punct_array_symbols, and
+  # the two share ONE character set).
+  $doc = $self->_repair_punct_hash_cast($doc);
+  $doc = $self->_repair_punct_hash_name($doc);
   $doc = $self->_repair_minus_word($doc);
   $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_word_x_call($doc);
@@ -5696,6 +5702,114 @@ sub _repair_punct_glob_name {
     (my $q = $name) =~ s/([\\'])/\\$1/g;
     $star->set_content("*{'$q'}");
     $tok[$i + 2]->delete if defined $letter;
+    $next->delete;
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# PPI LEXER BUG (task #550, docs/ppi-upstream-bugs.md §24b) — the HASH twin of
+# §24's punctuation-named array, and the reason it needed its own arm rather
+# than one more character in `Pl::Parser::_merge_punct_array_symbols`:
+#
+#     my @k = keys %?;   Word(keys) Operator(%) Operator(?)
+#     %? = (a => 1);     Operator(%) Operator(?) Operator(=) …
+#
+# An `@` CAST can only ever be a sigil, so the array repair decides on
+# ADJACENCY alone.  `%` is also the MODULO operator, and PPI hands the sigil
+# over as a bare Operator when it reads it that way — so this arm needs perl's
+# own rule for which one it is, and perl's rule is POSITION: `%` opens a hash
+# where a TERM is expected.  Probed 5.40.3, and the answer is not the obvious
+# one — `sub f { 7 } print f % 3, "\n"` prints `7` with NO newline, because
+# perl read `%3, "\n"` as the hash `%3` and passed it to `f`; `f() % 3`,
+# `use constant N => 7; N % 3` and `time % 100` are all modulo.  That is
+# exactly `_ends_term` plus the declared-term test for a Word — the same pair
+# `_repair_glob_pattern_cascade` uses for the term-position `<`.
+#
+# THE CHARACTER SET IS THE ARRAY REPAIR'S (Pl::Parser::punct_container_chars):
+# one set, two arms, and this file supplies only the POSITION.  Two characters
+# are dropped from it here because PPI hands the `%` spelling over differently:
+# `%/` derails into a Regexp that swallows the rest of the line, and `%=` is
+# lexed as ONE compound-assignment operator.  A `Cast('%')` is accepted as the
+# sigil token too — PPI produces one when the following character is itself a
+# sigil (`%%`, `%*`, `%@`).
+#
+# ADJACENCY is required as in the array twin: `$x % $y` and `$x % 3` cannot be
+# reached anyway (a Symbol or Number is not in the set), but `$x %~$y` could
+# be, and a space says the author meant the operator.
+# THE REWRITE IS A TEXT ONE, and that is not a style choice.  The array twin
+# splices a Symbol NODE in, which works because it runs inside `_ppi_parse` and
+# is therefore re-applied after every reparse.  A repair in THIS chain cannot
+# do that: `_reparse_doc` SERIALIZES the document and re-parses it, so a node
+# whose text is unchanged is simply re-split (measured — the first version
+# spliced `%?` in and the statement still dropped, because the very next
+# repair's reparse undid it).  So the `%` arms rewrite the TEXT into perl's own
+# BLOCK spelling of a variable name, `%{?}`, exactly as `_repair_punct_glob_name`
+# rewrites `*-` into `*{'-'}`.
+#
+# `%{X}` rather than `%{'X'}`: perlref's `${ NAME }` is the VARIABLE, not a
+# symbolic reference, so the block form works under `use strict 'refs'` where
+# the quoted form dies — probed under strict for every character in the set.
+# Two characters are left out of the target for the same reason, measured not
+# assumed: PCL drops `%{@}` and `%{\}` (inside the block PPI makes a sigil
+# character a Cast with nothing to cast), so those keep dropping LOUDLY.  `%/`
+# is out too — PPI derails it into a Regexp that swallows the line, so there
+# are no two tokens to see.  Residue: task #653.
+my %NO_PCT_REPAIR = map { $_ => 1 } split //, q{/@\\};
+
+sub _punct_hash_char {
+  my ($tok, $chars) = @_;
+  return undef unless $tok
+                   && ($tok->isa('PPI::Token::Operator')
+                       || $tok->isa('PPI::Token::Cast'));
+  my $c = $tok->content;
+  return undef unless length($c) == 1 && $chars->{$c} && !$NO_PCT_REPAIR{$c};
+  return $c;
+}
+
+sub _repair_punct_hash_name {
+  my ($self, $doc) = @_;
+  my $chars = Pl::Parser::punct_container_chars();
+  my $repaired = 0;
+  for my $op (@{ $doc->find('PPI::Token::Operator') || [] }) {
+    my ($sigil, $name, $eat) = ($op->content, undef, undef);
+    if ($sigil eq '%') {
+      $eat  = $op->next_sibling;            # adjacency, as in the array twin
+      $name = _punct_hash_char($eat, $chars);
+    }
+    elsif ($sigil eq '%=') {
+      # ONE token to PPI, the compound-assignment operator — but in TERM
+      # position there is no left operand for it to assign to, so it can only
+      # be the hash named `=`.
+      $name = '=' if $chars->{'='};
+    }
+    next unless defined $name;
+    my $prev = _prev_sig_token($op);
+    next if _ends_term($prev);
+    next if $prev && $prev->isa('PPI::Token::Word')
+                  && $self->_word_is_declared_term($prev->content, $doc);
+    $op->set_content('%{' . $name . '}');
+    $eat->delete if $eat;
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# The spelling where PPI made the sigil a CAST — `%%`, `%*`, where the
+# character after it is itself operator-shaped enough that PPI saw a sigil.  A
+# Cast can only ever BE a sigil, so this half needs no position test at all; it
+# is the array twin's rule with one sigil changed, and it lives here so the two
+# `%` spellings stay together.
+sub _repair_punct_hash_cast {
+  my ($self, $doc) = @_;
+  my $chars = Pl::Parser::punct_container_chars();
+  my $repaired = 0;
+  for my $cast (@{ $doc->find('PPI::Token::Cast') || [] }) {
+    next unless $cast->content eq '%';
+    my $next = $cast->next_sibling;
+    my $name = _punct_hash_char($next, $chars);
+    next unless defined $name;
+    $cast->set_content('%{' . $name . '}');
     $next->delete;
     $repaired = 1;
   }
