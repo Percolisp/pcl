@@ -9790,7 +9790,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    (`Can't use an undefined value as filehandle reference`), while a CLOSED
    lexical handle (`open $d,'>&',$closed`) or a bad fd NUMBER (`'>&',99`) is a
    plain false with $! set.  It is what the designator IS, not whether it
-   resolved."
+   resolved.
+
+   ALL OF THAT IS THE THREE-ARGUMENT FORM ONLY (task #621).  The TWO-argument
+   spelling `open($x,\"<&NOSUCH\")` never dies — it fails the open with
+   $! = EINVAL — so %p-open-dup asks this function only when the program wrote
+   the source as its own argument."
   (let* ((v0    (if have-val val name-str))
          (boxed (p-box-p v0))
          (v     (if boxed (p-box-value v0) v0)))
@@ -9824,7 +9829,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
        (sb-sys:make-fd-stream fd :input t :external-format :utf-8))
       (t (error "PCL: unhandled dup open mode ~S" mode-str)))))
 
-(defun %p-open-dup (fh mode-str src-name &optional (src-val nil src-val-p))
+(defun %p-open-dup (fh mode-str src-name three-arg-p
+                    &optional (src-val nil src-val-p))
   "Dup-open (#70): open FH, \">&SRC\" / \"<&SRC\" — FH becomes a duplicate of
    SRC's file descriptor.  The \"=\" forms (\">&=SRC\", \">&=N\") are
    fdopen-style: same fd (or a stream alias), no dup.  SRC may be a handle name
@@ -9841,7 +9847,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    the string name and the raw fd number all worked.  %p-resolve-fh is THE
    filehandle resolver and already knows every one of those shapes — ask it
    about the VALUE first, and fall back to the name string (which is what the
-   two-argument form and a bare fd number arrive as)."
+   two-argument form and a bare fd number arrive as).
+
+   THREE-ARG-P is the discriminator for the FAILURE shape, and it is the
+   argument FORM, not the designator kind (task #621, probed 5.40.3 across
+   nineteen shapes).  `open($x,'<&','NOSUCH')` is fatal — `Bad filehandle:
+   NOSUCH` — because a separate source argument is a filehandle designator and
+   perl refuses to make one out of a name it cannot find.  `open($x,\"<&NOSUCH\")`
+   is NOT: perl fails the open with $! = EINVAL and the program runs on, and
+   the same goes for every unfindable two-argument source — an empty name, a
+   qualified one, a lexical handle that stringified to \"GLOB(0x…)\".  PCL
+   p-died on all of them, which killed the whole program.
+   A bad fd NUMBER stays EBADF in both forms (it never reaches here)."
   (let* ((eq-form (char= (char mode-str (1- (length mode-str))) #\=))
          (fd-num  (and (plusp (length src-name))
                        (every #'digit-char-p src-name)
@@ -9861,12 +9878,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         (return-from %p-open-dup t))
       ;; A NAMED source that names no open handle is FATAL in perl, not a false
       ;; return (task #513) — see %p-dup-src-name for the discriminator and the
-      ;; probes behind it.
-      (let ((name (%p-dup-src-name src-val-p src-val src-name)))
-        (cond ((eq name :undef)
-               (p-die "Can't use an undefined value as filehandle reference"))
-              (name (p-die (format nil "Bad filehandle: ~A" name)))))
-      (setf *p-stored-errno* 9)          ; EBADF
+      ;; probes behind it.  ONLY in the three-argument form, though: the
+      ;; two-argument spelling fails the open with EINVAL and runs on (#621).
+      (when three-arg-p
+        (let ((name (%p-dup-src-name src-val-p src-val src-name)))
+          (cond ((eq name :undef)
+                 (p-die "Can't use an undefined value as filehandle reference"))
+                (name (p-die (format nil "Bad filehandle: ~A" name))))))
+      ;; The two-argument source is ALWAYS a name (the mode string was split
+      ;; into one), and perl reports EINVAL for a name it cannot find.  EBADF
+      ;; is the descriptor-shaped failure the three-argument form falls through
+      ;; to: a closed lexical handle, a designator that is not a name at all.
+      (setf *p-stored-errno* (if three-arg-p 9 22))   ; EBADF / EINVAL
       (return-from %p-open-dup nil))
     ;; A raw fd NUMBER must be OPEN.  perl's dup/fdopen fails EBADF on a closed
     ;; descriptor (probed: `open($t,"<&=37")` and `"<&37"` and `">&=37"` all
@@ -9975,7 +9998,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              ;; lexical handle or a stream says nothing once to-string has had
              ;; it (task #513).
              (return-from %p-open-impl
-               (%p-open-dup fh mode-str file-str filename)))
+               (%p-open-dup fh mode-str file-str three-arg-p filename)))
             (t
              (warn "Unknown open mode: ~A" mode-str)
              nil))))

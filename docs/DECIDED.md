@@ -21,6 +21,33 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449q (2026-08-29, Opus, round 7 agent Q) — a dup-open's FAILURE SHAPE is the ARGUMENT FORM (#621)
+
+- **The two dup failure shapes are told apart by how the program WROTE the
+  open, not by what the designator is** (#621; corrects the s446i line below,
+  which stated the three-argument rule as if it were the whole rule).  Probed
+  5.40.3 over nineteen shapes: `open($x,'<&','NOSUCH')` is FATAL
+  (`Bad filehandle: NOSUCH`) — a separate source argument is a filehandle
+  designator and perl refuses to make one from a name it cannot find — while
+  `open($x,"<&NOSUCH")` merely **fails the open with `$! = EINVAL` and the
+  program runs on**.  Every unfindable two-argument source is EINVAL: an
+  unknown name, an empty one (`"<&"`), a package-qualified one, a lexical
+  handle that stringified to `GLOB(0x…)`.  A bad fd NUMBER stays EBADF in both
+  forms (it never reaches the name branch).
+- `%p-open-dup` takes `three-arg-p` — `%p-open-impl` already had it, from the
+  `p-open` macro's argument count — and asks `%p-dup-src-name` only in the
+  three-argument form.  PCL used to p-die on all of them, which killed the
+  whole program at an open perl returns undef from.
+- Residues filed, both PRE-EXISTING: **#630** (a FAILED open on an already-open
+  handle leaves the old handle open and READABLE — perl closes first, so the
+  handle is closed; general `open`, not dup) and **#631** (a two-argument dup
+  from a CLOSED bareword handle answers EINVAL where perl answers EBADF —
+  `%p-forget-fh` remhashes the name, so a closed name and an unknown one look
+  identical; carries the two candidate fixes and why neither is worth it alone).
+- Guard `Pl/t/print-fh-magic-01.t` row 24 (five shapes + an `alive` line);
+  the existing three-argument die row keeps its assertion and gains the form
+  qualifier in its description.
+
 ## s449q (2026-08-29, Opus, round 7 agent Q) — a dup-open FLUSHES the source (#591)
 
 - **A buffered stream and its DESCRIPTOR disagree in both directions, and perl's
@@ -607,7 +634,9 @@ those two files and the live plan doc directly -- no new review-doc families.*
   literal `undef` is fatal (`Can't use an undefined value as filehandle
   reference`), while a CLOSED lexical handle or a bad fd NUMBER is a plain
   false with `$!` set.  `%p-dup-src-name` is that discriminator; an empty BOX
-  is a closed handle, never the fatal `undef`.
+  is a closed handle, never the fatal `undef`.  **NARROWED s449q (#621): all of
+  that is the THREE-argument form.  The two-argument spelling never dies —
+  every unfindable source there is undef + EINVAL.**
 - Guard `Pl/t/print-fh-magic-01.t` (11 → 18 rows; its header's two "still
   broken" notes are now the fixed list).  Residue filed: **#542** (writes
   through a dup and through its source INTERLEAVE differently — perl

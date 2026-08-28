@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 25;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -290,8 +290,10 @@ print "source-still-open\n";
 PL
    'closing a dup leaves the source handle open');
 
-# The failure shapes are perl's, and they are NOT the same shape: a NAME that
-# names no open handle is FATAL, a CLOSED lexical handle is a plain false.
+# The failure shapes are perl's, and they are NOT the same shape: in the
+# THREE-argument form a NAME that names no open handle is FATAL, a CLOSED
+# lexical handle is a plain false.  (The two-argument form never dies at all —
+# task #621, the row below this one.)
 is(run_cl(<<'PL'), "ret:undef\nerr:ok\nclosed:0\nclosed-no-die\n",
 my $r = eval { open(my $d, ">&", "NOSUCHHANDLE"); 1 };
 print "ret:", (defined $r ? $r : "undef"), "\n";
@@ -300,7 +302,29 @@ open(my $f, '<', "/etc/hostname") or die "o: $!\n"; close $f;
 my $ok = eval { my $x = open(my $d2, ">&", $f); print "closed:", (defined $x && $x ? 1 : 0), "\n"; 1 };
 print(($ok && $@ eq '') ? "closed-no-die\n" : "closed-died:[$@]\n");
 PL
-   'an unknown source NAME dies "Bad filehandle: N"; a closed handle is a plain false');
+   'a 3-arg unknown source NAME dies "Bad filehandle: N"; a closed handle is a plain false');
+
+# task #621 — the same designator in the TWO-argument spelling is NOT fatal.
+# perl fails the open with $! = EINVAL and runs on; PCL p-died, which killed the
+# whole program at an `open(my $x, "<&NOSUCH")` that perl merely returns undef
+# from.  The discriminator is the argument FORM, not the designator kind
+# (probed s449q, 5.40.3, over nineteen shapes): every unfindable two-argument
+# source is EINVAL — an unknown name, an empty one, a package-qualified one, a
+# lexical handle that stringified to "GLOB(0x…)" — while a bad fd NUMBER stays
+# EBADF in BOTH forms.  The last two lines are the point of the row: the
+# statements after the failed open still run.
+is(run_cl(<<'PL'), "unknown:undef/22\nempty:undef/22\nqual:undef/22\nglob:undef/22\nfd99:undef/9\nalive\n",
+sub shape { my ($tag, $r) = @_; printf "%s:%s/%d\n", $tag, (defined $r ? $r : "undef"), $!+0 }
+open(my $good, '<', "/etc/hostname") or die "o: $!\n";
+shape("unknown", open(my $a, "<&NOSUCHHANDLE"));
+shape("empty",   open(my $b, "<&"));
+shape("qual",    open(my $c, "<&main::NOSUCHHANDLE"));
+shape("glob",    open(my $d, "<&$good"));
+shape("fd99",    open(my $e, "<&99"));
+close $good;
+print "alive\n";
+PL
+   'a 2-arg dup from an unfindable source is undef+EINVAL, not a die (#621)');
 
 # ── 9. task #543 — the READ-WRITE dup modes `+<&` / `+>&` and their `=` forms ─
 # They were absent from the runtime's dup-mode list, so the three-argument
