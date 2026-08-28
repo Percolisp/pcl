@@ -703,6 +703,64 @@ would create perl's `print (...) interpreted as function` gotcha for
 `Pl/t/readline-ternary-01.t` (the shape occurs in ZERO files of all four
 in-repo populations, so those rows are the only guard there can be).
 
+### 14c. THE CASCADE with a GLOB PATTERN — the `>` is swallowed too  (task #563)
+
+§14b is the cascade when the body is a *readline* body, where the `>` still
+stands as an operator and only the token after it is mis-lexed.  When the body
+is a **glob pattern**, the `/` that starts the match is *inside* the diamond, so
+the `>` goes with it — and the match then runs on to the next `/`, which is
+normally lines away:
+
+```
+my @f = sort <./nope-*-xyz>;
+  Word(sort) Operator(<) Operator(.) Regexp::Match(/nope-*-xyz>;)
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ the `>` is in here
+
+my @f = sort <./a-*>; print "y"; print "z";
+  Word(sort) Operator(<) Operator(.) Regexp::Match(/a-*>; print "y"; print "z";)
+```
+
+and it does not stop at end of line: `sort <./a-*>;` followed by three more
+statements is FOUR tokens, the last of them a Regexp holding all three.  perl
+reads the diamond as a glob and the rest of the file as itself:
+
+```
+$ perl -e 'my @f = sort <./nope-*-xyz>; print "n=", scalar(@f), "\n"'
+n=0
+```
+
+The trigger is the *first* character of the pattern: `.` and `~` are operators
+to PPI, so a term is expected when the `/` arrives.  A pattern whose `/` count
+happens to close the match survives (`<./x/*>`, `<./a/b/*>`), and one with no
+leading `.` never derails at all (`<op/*.t>`) — which is why this went unnoticed
+while §14's rebuild carried the family.
+
+**Impact on PCL: an UNBOUNDED dropped statement (#138 family).**
+`Pl::PExpr::_fix_ppi_glob_after_block` cannot reach it, because its rebuild
+needs the `<` … `>` run to still be a run, and `_repair_readline_cascade`'s
+body test is perlop's readline whitelist.
+
+**Workaround (s449s):** `Pl::Parser2::_repair_glob_pattern_cascade`, which runs
+FIRST of the repair block precisely because this damage is the widest.  It
+rewrites the diamond into the `glob("PATTERN")` perlop says it is (`<…>` and
+`glob` interpolate identically, so only a `"` needs escaping) and reparses.
+Its conditions: the `<` is in TERM position, the first `>` is found *inside* a
+`PPI::Token::Regexp` (when the `>` survived, the run was not derailed and the
+existing rebuild owns it), and the pattern is one contiguous word.
+
+**What it cost to make the term test honest** — two real gaps in PCL's
+`_ends_term` oracle, both found by looking for the case the repair would
+break, and both shared by the other repairs in this family: `$#a` is a
+`PPI::Token::ArrayIndex`, not a Symbol, and a **deref block's** `}` is a
+`PPI::Structure::Block`, not a Subscript (that second one was already known —
+§12's repair works around it with a whitelist).  Without them
+`$#a<3&&$s=~/a>b/` and `${$x}<3&&$s=~/a>b/`, both valid Perl, transpiled to
+`$#aglob("3&&$s=~/a")b/`.
+
+**Repro + failing rows:** Bugs 15 and 16 in `docs/ppi-bug-report.t`.  Guard:
+`Pl/t/readline-ternary-01.t` (like §14b, ZERO sites in every population —
+emission-ab over 921 files was SAME 921 — so the rows are the only guard).
+
 ---
 
 ## 15. `)` followed by `-1` — the operator is swallowed into a negative NUMBER  [CONFIRMED 1.291]

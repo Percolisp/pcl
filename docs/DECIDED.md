@@ -21,6 +21,46 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449s (2026-08-29, Opus, round 7 agent S) — a term-position `<` IS a diamond, and `_ends_term` had two gaps (#563)
+
+- **#563 — the §14 cascade with a GLOB PATTERN**: `my @f = sort <./nope-*-xyz>;`
+  derails into `Word(sort) Operator(<) Operator(.) Regexp::Match(/nope-*-xyz>;)`,
+  because with the body a glob pattern the `/` that starts the match is INSIDE
+  the diamond, so the `>` is swallowed too and the match runs to the next `/` —
+  **lines away**: `sort <./a-*>;` plus three statements is FOUR tokens, the last
+  a Regexp holding all three.  `_fix_ppi_glob_after_block` cannot reach it (its
+  rebuild needs the `< … >` run to still be a run) and `_repair_readline_cascade`
+  cannot (its body test is perlop's readline whitelist).  Fix:
+  `Pl::Parser2::_repair_glob_pattern_cascade`, FIRST of the repair block because
+  its damage is the widest, rewriting the diamond into the `glob("PATTERN")`
+  perlop says it is (both spellings interpolate as a dq string, so only `"` is
+  escaped) and reparsing.  `docs/ppi-upstream-bugs.md` **§14c**; report rows
+  Bugs 15+16 in `docs/ppi-bug-report.t` (38 → 40).
+- **A `<` where a TERM is expected IS a diamond — perl does the same thing**
+  (probed 5.40.3: `sub foo{3} if (foo < 5) { $s =~ s/a/->b/ }` is a SYNTAX ERROR
+  quoting `< 5) { $s =~ s/a/->b`).  So under principle 9 the only question is
+  where the diamond ENDS, and perl's answer — the first `>` — is the repair's.
+- **`_ends_term` had TWO real gaps, both found by hunting the breaking case, and
+  both shared by every repair in the family**: `$#a` is a `PPI::Token::ArrayIndex`,
+  not a Symbol; a **deref block's** `}` is a `PPI::Structure::Block`, not a
+  Subscript (that one was already known — §12's `_repair_punct_glob_name` works
+  around it with a whitelist, and its comment names `@{$h} * (…)`).  Without them
+  `$#a<3&&$s=~/a>b/` and `${$x}<3&&$s=~/a>b/`, both valid perl, transpiled to
+  `$#aglob("3&&$s=~/a")b/` and dropped.  PPI marks the deref block itself: the
+  block's `previous_sibling` is the Cast, which is what keeps `map { … } <op/*>`
+  a diamond.
+- **The repair also requires the pattern to be ONE CONTIGUOUS WORD** — the belt
+  to `_ends_term`'s braces.  Relaxing it needs a fresh search for the breaking
+  case (task **#650**, which also carries the SILENT WRONG on the non-derailed
+  path: `<./a/*.t ./a/b.t>` rebuilds as one pattern with the space deleted).
+  Task **#651** = a glob whose only metacharacter is a bracket class
+  (`<./gd/[ab].t>`) still drops: `_fix_ppi_glob_after_block` counts
+  metacharacters in non-Structure tokens only.
+- Emission **IDENTICAL** over all populations (corpus-diff 111 + emission-ab 921
+  files SAME/0 DIFF/0 RCDIFF, incl. lib shims, perl's t/, cpan `.t`, shapes), so
+  the s371 rule applies and the GUARD ROWS are the bar:
+  `Pl/t/readline-ternary-01.t` 12 → 23 (six positives, three neighbours, three
+  negatives — the two `_ends_term` gaps and a zero-arity builtin).
 ## s449r (2026-08-29, Opus round-7 agent R) — the scoping + bareword-handle-in-expression family
 
 - **A `my` before an in-block `package NAME;` switch (#593) was hidden from the

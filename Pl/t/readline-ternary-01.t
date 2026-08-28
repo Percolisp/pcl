@@ -4,7 +4,8 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
-# readline-ternary-01.t — task #479: the CASCADE of PPI's `<FH>` mis-lex.
+# readline-ternary-01.t — tasks #479 and #563: the CASCADE of PPI's `<FH>`
+# mis-lex, in both of its shapes.
 #
 # docs/ppi-upstream-bugs.md §14: in TERM position PPI 1.291 reads `<$f>` as
 # `Operator(<) Symbol($f) Operator(>)`.  PCL has lived with that since s404
@@ -31,12 +32,25 @@
 # the cascade itself (a Regexp token must follow the `>`), so a genuine
 # comparison chain and a genuine match must come through untouched.  Every
 # expectation below is the live `perl` answer.
+#
+# THE SECOND HALF (task #563, §14c) is the same cascade one step further out.
+# When the body is a GLOB PATTERN rather than a readline body, the `/` inside
+# the pattern starts the match, so the `>` is swallowed TOO:
+#
+#     my @f = sort <./nope-*-xyz>;
+#         -> Word(sort) Operator(<) Operator(.) Regexp::Match(/nope-*-xyz>;)
+#
+# and the Regexp then eats until the next `/` — which is usually lines away, so
+# this member takes whole statements, sometimes the rest of the file, with it.
+# `Pl::Parser2::_repair_glob_pattern_cascade` rewrites the diamond as the
+# `glob("...")` perlop says it is.  It too occurs in ZERO files of every
+# population (emission-ab over 921: SAME 921), so these rows are its only guard.
 
 use v5.30;
 use strict;
 use warnings;
 use Test::More;
-use File::Temp qw(tempfile);
+use File::Temp qw(tempfile tempdir);
 use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
@@ -49,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 23;
 
 sub write_pl {
     my ($code) = @_;
@@ -169,3 +183,90 @@ both_agree('my $s = "abc"; my $n = 2; print(($n > 1 && $s =~ /b/) ? "y" : "n"); 
 
 both_agree('my $q = 10; my $ok = 1; print $ok ? $q / 2 : 0; print "\n";',
            'negative: division after an ordinary term');
+
+# ---- #563: the GLOB-PATTERN half of the same cascade ------------------------
+
+# One fixture directory with two files, and every snippet chdir()s into it, so
+# perl's run and PCL's run glob the same relative patterns whatever cwd prove
+# was started from.
+my $globdir = tempdir(CLEANUP => 1);
+for my $n (qw(a b)) {
+    open my $fh, '>', "$globdir/g-$n.t" or die "create: $!";
+    close $fh;
+}
+
+sub agree_in_globdir {
+    my ($body, $desc) = @_;
+    both_agree(qq{chdir "$globdir" or die "chdir: \$!";\n} . $body, $desc);
+}
+
+agree_in_globdir(<<'PL', 'the #563 shape: a `./`-relative pattern after sort');
+my @f = sort <./g-*.t>;
+print "[@f]\n";
+PL
+
+agree_in_globdir(<<'PL', 'the task repro: the pattern matches nothing');
+my @f = sort <./nope-*-xyz>;
+print "n=", scalar(@f), "\n";
+PL
+
+agree_in_globdir(<<'PL', 'as a list-operator argument: print <./g-*.t>');
+print sort <./g-*.t>;
+print "\n";
+PL
+
+agree_in_globdir(<<'PL', 'after a BLOCK, the other §14 trigger');
+my @f = grep { 1 } <./g-*.t>;
+print scalar(@f), "\n";
+PL
+
+agree_in_globdir(<<'PL', 'after reverse, and the pattern interpolates a scalar');
+my $d = ".";
+my @f = reverse sort <$d/g-*.t>;
+print "[@f]\n";
+PL
+
+# The Regexp the mis-lex creates eats until the next `/`, which is normally
+# LINES away — so this row is about the two prints, not about the glob.
+agree_in_globdir(<<'PL', 'the swallow: the statements AFTER the diamond still run');
+my @f = sort <./g-*.t>;
+print "one\n";
+print "two\n";
+PL
+
+# ---- #563 neighbours: shapes PExpr's rebuild already owned ------------------
+
+agree_in_globdir(<<'PL', 'neighbour: the `>` survives (no leading `./`) — PExpr rebuilds');
+my @f = sort <g-*.t>;
+print "[@f]\n";
+PL
+
+# NOT here, deliberately: `sort < ./g-*.t >`.  perl's diamond may contain
+# whitespace (it is a LIST of patterns), but the repair requires the pattern to
+# be ONE CONTIGUOUS WORD — the belt to `_ends_term`'s braces — so the spaced
+# spelling keeps dropping LOUDLY, as it did before this repair existed.  Task
+# #650 has it, with the `<a b>` sibling that is silently wrong on the
+# non-derailed path.
+
+agree_in_globdir(<<'PL', 'neighbour: after `=`, where PPI gets the Readline token right');
+my @f = sort(<./g-*.t>);
+print "[@f]\n";
+PL
+
+# ---- #563 negatives: a `<` that is really less-than ------------------------
+
+# `$#a` is a VALUE, so this `<` is a comparison — but it is not a
+# PPI::Token::Symbol, which is how it fell out of `_ends_term` (s449s).  Spelled
+# with NO whitespace, because the repair's contiguity guard would otherwise hide
+# the miss: without the `_ends_term` arm this transpiled to
+# `my $r=($#aglob("3&&$s=~/a")b/)?"y":"n";` and dropped.
+both_agree('my @a=(1,2);my $s="a>b";my $r=($#a<3&&$s=~/a>b/)?"y":"n";print "$r\n";',
+           'negative: $#a ENDS A TERM, so `<` is less-than (match holds a `>`)');
+both_agree('my @a=(1,2,3,4,5);my $s="a>b";my $r=($#a<3&&$s=~/a>b/)?"y":"n";print "$r\n";',
+           'negative: the same comparison the other way round');
+
+# A zero-arity builtin is a TERM after which `<` compares — the same predicate
+# `_repair_word_x_call` uses, and the reason an ALL-CAPS word is NOT consulted
+# (before a diamond it is a filehandle, not a constant).
+both_agree('my $r = (time < 2 && "ab" =~ /a>b/) ? "y" : "n"; print "$r\n";',
+           'negative: `time` is a term, so `time < 2` is a comparison');

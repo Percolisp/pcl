@@ -1085,6 +1085,11 @@ sub parse {
   # with perl's own rule — the token before must not END A TERM — see
   # _repair_glob_multiply, _repair_minus_word, _repair_word_match,
   # _repair_word_x_call.
+  # FIRST of the block, because it is the one whose damage is UNBOUNDED: a glob
+  # pattern in term position derails into a Regexp that can swallow the rest of
+  # the FILE, so every repair below would otherwise be reading garbage tokens —
+  # see _repair_glob_pattern_cascade (task #563).
+  $doc = $self->_repair_glob_pattern_cascade($doc);
   $doc = $self->_repair_glob_multiply($doc);
   # …and its INVERSE: a punctuation- or digit-named GLOB (`*X = *-`,
   # `local *1 = sub {…}`) that PPI hands over as two operator tokens — see
@@ -5872,6 +5877,80 @@ sub _repair_readline_cascade {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
+# PPI LEXER BUG (task #563, docs/ppi-upstream-bugs.md §14c) — the same §14
+# cascade one step further out, and the worst member of the family.
+# `_repair_readline_cascade` above repairs the case where the `>` SURVIVED as
+# an operator and only the token after it was mis-lexed.  When the body is a
+# GLOB PATTERN rather than a readline body, the `/` inside the pattern itself
+# starts the match, so the `>` is swallowed too:
+#
+#     my @f = sort <./nope-*-xyz>;
+#         => Word(sort) Operator(<) Operator(.) Regexp::Match(/nope-*-xyz>;)
+#
+# and the Regexp keeps eating until it finds a closing `/` — which is usually
+# LINES away, so this one drop takes whole statements, sometimes the rest of
+# the file, with it (measured: `sort <./a-*>; print "y"; print "z";` is FOUR
+# tokens, the last of them a Regexp holding both prints).
+# `Pl::PExpr::_fix_ppi_glob_after_block` cannot reach it, because its rebuild
+# needs the `<` … `>` run to still be a run.
+#
+# WHY A TERM-POSITION `<` MAY BE REWRITTEN AT ALL: perl does exactly the same
+# thing.  Probed 5.40.3 — `sub foo { 3 } if (foo < 5) { $s =~ s/a/->b/ }` is a
+# SYNTAX ERROR ("Bareword found where operator expected … near `< 5) { $s =~
+# s/a/->b`"), i.e. perl also reads the `<` as a diamond and scans to the first
+# `>`.  So under principle 9 (valid Perl input) a `<` where a term is expected
+# IS a diamond, and the only question is where it ends: perl says the first
+# `>`, and so does this repair.  The one reading that is NOT a diamond is a `<`
+# after a bareword perl already knows is a TERM (`use constant N => 5; N < 9`,
+# or a zero-arity builtin like `time`), which is why the same predicate
+# `_repair_word_x_call` uses guards this — the ALL-CAPS-free half, because an
+# ALL-CAPS word before a diamond is a FILEHANDLE (`print STDERR <./a-*>`).
+#
+# THE DERAIL PROOF is that the first `>` is found INSIDE a Regexp token: when
+# the `>` is still an Operator the run was not derailed and the existing rebuild
+# handles it (`<./x/*>` and `<op/*.t>` both transpile correctly today and are
+# left alone here).  The rewrite is perlop's own equivalence — `<PATTERN>` is
+# `glob("PATTERN")`, the contents being subject to double-quote interpolation in
+# both spellings, so the only character that needs escaping is `"` — and it goes
+# through `_reparse_doc` like the other source-level repairs, after which PPI
+# tokenizes the whole region correctly.
+sub _repair_glob_pattern_cascade {
+  my ($self, $doc) = @_;
+  my $repaired = 0;
+  for my $lt (@{ $doc->find('PPI::Token::Operator') || [] }) {
+    next if $lt->content ne '<';
+    my $prev = _prev_sig_token($lt);
+    next if _ends_term($prev);
+    next if $prev && $prev->isa('PPI::Token::Word')
+                  && $self->_word_is_declared_term($prev->content, $doc);
+    my ($pat, $close, @blank) = ('', undef);
+    for (my $t = $lt->next_token; $t; $t = $t->next_token) {
+      my $c = $t->content;
+      $c = '' if !defined $c;
+      my $k = index($c, '>');
+      if ($k >= 0) { $close = $t; $pat .= substr($c, 0, $k); last }
+      $pat .= $c;
+      push @blank, $t;
+    }
+    # Derailed, and bounded: the closing `>` is inside the Regexp the mis-lex
+    # created (a `/` in the pattern started it — when the `>` survived as an
+    # operator the run was NOT derailed and PExpr's rebuild owns it), and the
+    # pattern is ONE CONTIGUOUS WORD.  The contiguity is the belt to
+    # `_ends_term`'s braces: perl's own glob patterns are written that way, and
+    # the shapes a wrong "term position" could otherwise reach — `$#a < 3 && $s
+    # =~ /a>b/` was the breaking case — all have spaces in them.
+    next unless $close && $close->isa('PPI::Token::Regexp')
+             && $close->content =~ m{\A/};
+    next if $pat eq '' || $pat =~ /[\s<]/;
+    (my $esc = $pat) =~ s/"/\\"/g;
+    $lt->set_content('glob("' . $esc . '")');
+    $_->set_content('') for @blank;
+    $close->set_content(substr($close->content, index($close->content, '>') + 1));
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
 # PPI LEXER BUG (task #361, docs/ppi-upstream-bugs.md §19).  `x` is both an
 # operator and a legal sub name, and PPI decides which by looking at the token
 # before it — a Word counts as a complete term, so:
@@ -6099,6 +6178,15 @@ sub _ends_term {
   return 0 unless $t;
   return 1 if _is_method_name_word($t);              # $o->w*w(): multiplication
   return 1 if $t->isa('PPI::Token::Symbol')          # $x @a %h *glob, and Magic
+           # `$#a` is a VALUE and is NOT a Symbol to PPI — it has its own class,
+           # which is how it fell out of this list (s449s, found by the #563
+           # repair's breaking case: `$#a < 3 && $s =~ /a>b/` is valid perl, and
+           # without this arm the `<` reads as a term-position diamond).  Every
+           # caller asks the same question in the same direction, so the arm can
+           # only stop a repair from firing on a term — `$#a*f()` (§12),
+           # `$#a-name` (§25), `$#a ~~ @b` (§21) are all right for the same
+           # reason.
+           || $t->isa('PPI::Token::ArrayIndex')
            || $t->isa('PPI::Token::Number')
            || $t->isa('PPI::Token::Quote')           # '…' "…" q qq
            || $t->isa('PPI::Token::QuoteLike::Words')
@@ -6116,6 +6204,18 @@ sub _ends_term {
     return 1 if $t->content eq ')' || $t->content eq ']';
     return 1 if $t->content eq '}'
              && $t->parent && $t->parent->isa('PPI::Structure::Subscript');
+    # A DEREF BLOCK yields a value too — `${$x}`, `@{$h}`, `%{$h}`, `*{$n}` —
+    # and the gap was already known: `_repair_punct_glob_name`'s comment names
+    # `@{$h} * (…)` as a site where "`_ends_term` wrongly says the term has not
+    # ended because a deref block's `}` is not a subscript's", and works around
+    # it with a whitelist.  PPI marks the difference itself: a deref block's
+    # previous sibling is the Cast, a map/grep/sort block's is not — which is
+    # what keeps `map { … } <op/*>` a diamond (s449s, found by the #563
+    # repair's breaking case `${$x}<3&&$s=~/a>b/`).
+    if ($t->content eq '}' && $t->parent && $t->parent->isa('PPI::Structure::Block')) {
+      my $ps = $t->parent->previous_sibling;
+      return 1 if $ps && $ps->isa('PPI::Token::Cast');
+    }
   }
   # A POSTFIX `++`/`--` ends the term it steps (`$i++ while …`, `$n++*foo`);
   # the prefix spelling (`++$i`) opens one.  Which it is is the same question

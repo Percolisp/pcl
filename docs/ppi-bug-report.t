@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 38;
+use Test::More tests => 40;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -243,6 +243,28 @@ sub toks {
     my @t = toks('my $x = $ok ? <$f> / 2 : 0;');
     ok( !grep(m{^PPI::Token::Regexp::Match=/ 2 : 0;$}, @t),
         '`<$f> / 2` in a ternary branch: the / is division, and must not eat the statement' )
+        or diag "got: @t";
+}
+#
+# THE CASCADE IS WORSE WHEN THE BODY IS A GLOB PATTERN, because the `/` that
+# starts the match is INSIDE the diamond — so the closing `>` is swallowed too,
+# and the match runs on to the next `/`, which is usually lines away:
+#
+#   $ ls ./nope-*-xyz ; perl -e 'my @f = sort <./nope-*-xyz>; print "ok\n"'
+#   ok
+#
+# `sort <./nope-*-xyz>; print "y"; print "z";` is FOUR tokens to PPI, the last
+# of them a Regexp::Match holding both prints.
+{
+    my @t = toks('my @f = sort <./nope-*-xyz>;');
+    ok( grep(/^PPI::Token::QuoteLike::Readline=/, @t),
+        '`sort <./nope-*-xyz>` — a `.`-relative glob pattern should be a readline token' )
+        or diag "got: @t";
+}
+{
+    my @t = toks('my @f = sort <./a-*>; print "y";');
+    ok( !grep(m{^PPI::Token::Regexp::Match=/a-\*>; print "y";$}, @t),
+        'the glob-pattern cascade must not swallow the statements that follow' )
         or diag "got: @t";
 }
 
