@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 449 (2026-08-29, Fable) — the five design rulings shipped; ROUND 7 launched
+
+**The queue's item 1 (the rulings damming the filler pool) DONE, item 2
+(round 7) IN FLIGHT.**
+
+**Rulings (all recorded in DECIDED §s449 + the task JSONs; #561 gets the
+design doc):**
+- **#561 + #602 — `docs/computed-magic-design-s449.md`.**  The code read
+  found the design nearly finished already: glob slots ARE the `|$N|`
+  symbols and `p-glob-copy` shares the p-box, so scalar aliasing needs ZERO
+  glob-path work — `$!` fails only because `|$!|` was never bound (emission
+  is the accessor).  Ruling: canonical magic boxes (`|$!|`, `|$^E|`) beside
+  the existing `|$.|` precedent, getter/setter = `p-errno-string` and its
+  setf; `%!` = a REAL hash whose values are magic-cell boxes over a new
+  `*p-errno-table*`, one new arm in `%p-hash-unbox-elem` (the sibling of
+  `p-aref-unbox-elem`'s existing one); `lib/Errno.pm` shim follows at the
+  module layer.  #602 = clear-then-copy shape (a), glob-to-glob arm only,
+  destination-bound slots only; shape (b) one-GV → boxed-aggregate family.
+  One round-8 session, cl/-only.
+- **#551 PARKED** behind the boxed-aggregates design (post-v0.1): the
+  unblocker (container reads keep the scalar-ref wrapper) is that family's
+  representation change; canary row + ir-spec §8 record stand.
+- **#541 APPROVED** as the task's sketch: conditional SAVE/RESTORE
+  (`p-local-cell-if` + progv with computed lists), RHS conditional too,
+  unconditional spellings byte-identical in corpus-diff.  Round 8.
+- **#542 APPROVED, own session**: perl's buffering policy via ONE shared
+  policy function (STDOUT line iff isatty(1) else full; STDERR
+  probe-and-match; `$|` overrides); every exit path flushes, incl.
+  p-die→exit; sweep + io/ price accepted row-by-row.  Round 8.
+- **#560 APPROVED**: per-module disk cache of the prototype-walk FACTS
+  under `~/.pcl-cache/proto/` (key path+mtime+size+generation, echoed in
+  the JSON; atomic rename; PCL_PROTO_ORACLE record shape; state memo = L1);
+  corpus-diff IDENTICAL first leg; the budget stays rejected.  Opus builds.
+- **#592's fcntl shape SETTLED** (the round-7 entry condition), assigned to
+  agent Q: piece (b) `fcntl` builtin first, then FD_CLOEXEC above `$^F`.
+
+**Round 7 (three Opus agents in worktrees off `c8a8311`, the s421 pattern):
+Q = io residue #591 + #621 + #590 + #592 (s449q, new-task IDs 630–639,
+v2-340 only if emission moves); R = scoping #593 + #594 + #530 + #532
+(s449r, IDs 640–649, v2-330) — #593 is the io/open.t nondeterminism root
+cause; S = parser fillers #563 + #564 + #550 + (#620 bonus) (s449s, IDs
+650–659, v2-335).**  Standing rules as rounds 5–6: agents run no sweeps and
+write no review docs; asks in task JSONs + final reports; rebase onto main
+before the final gate.  The merge review owes: ONE full sweep, io/ leg for
+Q, gate-SET scan where R/S stop a refusal or drop from firing, generation
+renumber ONCE above v2-340 + artifact regen on the merged tree.
+
 ## Session 448 (2026-08-27/28, Fable) — ROUND 6 launched, reviewed and ALL THREE MERGED; every batch leg run and clean
 
 **Round 6 (three Opus agents in worktrees off `922675a`, the s421 pattern;

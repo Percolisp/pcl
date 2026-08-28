@@ -122,6 +122,19 @@ DECIDED §s448 + session-log §448).  Filed this round: #590–#594 (N),
 #600–#602 (O), #610–#612 (P), #620–#621 (Fable review).  `docs/
 js-target-sketch.md` saved (fun/parked, #622).
 
+**s449 (Fable, 2026-08-29) — queue item 1 DONE, item 2 IN FLIGHT.**  The
+five rulings are recorded (DECIDED §s449; #561's design doc =
+`docs/computed-magic-design-s449.md`; the others in their task JSONs):
+#561+#602 designed (round 8, one cl/-only session), #551 PARKED to the
+boxed-aggregates design, #541 approved as sketched (round 8), #542 approved
+as its OWN session (round 8), #560 approved (Opus builds), #592's fcntl
+shape settled (joined round 7).  **Round 7 LAUNCHED off `c8a8311`**: Q = io
+residue #591+#621+#590+#592 (s449q), R = scoping #593+#594+#530+#532
+(s449r), S = parser fillers #563+#564+#550+(#620) (s449s).  **Round 8 is
+now concrete**: the #561+#602 session; the #541 session (may bundle #520 +
+#521 + #522, the s/// replacement family, if sized); the #542 session
+(alone); the #560 build; then P's residue #610/#611/#612 and item 4 below.
+
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 
 1. **Fable design session(s)** — the five rulings damming the pool:
