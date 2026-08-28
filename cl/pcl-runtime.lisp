@@ -9897,6 +9897,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       ;; p-make-typeglob stores the name %pcl-invert-case'd; invert back so the
       ;; message names the handle the way the program spelled it.
       ((p-typeglob-p v) (%pcl-invert-case (p-typeglob-name v)))
+      ;; A QUOTED SYMBOL is how the compiler spells a bareword handle NAME
+      ;; everywhere else — `(p-readline 'FH)`, `:fh 'FH`, and since task #594
+      ;; `(p-open $d ">&" 'STDOUT)`.  %p-resolve-fh already knows that shape,
+      ;; so the RESOLUTION worked without this; what was missing is the same
+      ;; statement about what the designator IS, which is what keeps a name
+      ;; that names no open handle perl's fatal "Bad filehandle: NAME"
+      ;; instead of a silent false.  Read back through %pcl-invert-case like
+      ;; the typeglob arm, so the message names the handle as written.
+      ((and v (symbolp v) (not (keywordp v)))
+       (%pcl-invert-case (symbol-name v)))
       ((and (stringp v) (plusp (length v))) v)
       ;; An EMPTY box is a lexical handle that was closed (PCL empties the box),
       ;; which perl answers with a plain false — only a designator that was

@@ -2159,11 +2159,26 @@ sub gen_funcall_form {
                          && $ref_params[$param_idx] eq '$');
     $self->expr_o->set_node_context($kids->[$i], SCALAR_CTX) if $impose_scalar;
 
+    # open(FH, DUP-MODE, BAREWORD): the THIRD argument of a DUP open is a
+    # filehandle DESIGNATOR, not a filename, so a bareword there is a handle
+    # NAME and goes out through `_fh_sym` like readline's above (task #594).
+    # `open(my $d, ">&", STDOUT)` used to emit the BARE CL symbol and die
+    # "The variable STDOUT is unbound", taking the whole top-level form with
+    # it — the third site of one family: #452 fixed `<FH>` and print's `:fh`
+    # slot, #491 the qualified spellings, and neither reached here.
+    #
+    # An ARGUMENT override rather than an arm of its own above, so the
+    # generic tail's CONTEXT WRAP still applies: an early return dropped the
+    # `(p-list-ctx …)` around `ok(open(F, ">&", STDOUT))` — measured on
+    # t/io/dup.t, and the kind of shape change an emission A/B is for.
+    my $dup_src = ($func_name eq 'open' && @$kids == 4 && $i == 3)
+                ? $self->_dup_source_handle($kids->[2], $kids->[3]) : undef;
+
     my $saved_lvalue = $self->lvalue_context;
     if    ($needs_lvalue)               { $self->lvalue_context(1) }
     elsif (index($cl_func, 'pl-') >= 0
            && $self->_is_elem_arg($kids->[$i])) { $self->lvalue_context('argbox') }
-    my $arg = $self->gen_node_form($kids->[$i]);
+    my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
 
     if ($impose_scalar) {
@@ -3287,6 +3302,48 @@ sub gen_filehandle_form {
 sub _bareword_fh_p {
   my ($tok) = @_;
   return Pl::CLForm::cl_unquote($tok) =~ /^[^\W\d]\w*(?:::[^\W\d]\w*)*$/ ? 1 : 0;
+}
+
+# The handle NAME a DUP open's SOURCE slot spells — as the quoted CL symbol
+# every other bareword-handle site emits — or undef when this open's third
+# argument is not one (task #594; see the call site for the mode gate).
+#
+# A DECLARED SUB IN THAT SLOT IS CALLED, probed 5.40.3: `sub SRC {"STDERR"}
+# open(my $d, ">&", SRC)` dups STDERR, and it wins even when a handle of that
+# name is open.  That is the same three-valued question
+# `PExpr::_read_star_slot_bareword` asks for a user `(*)` slot, so it is asked
+# through the same classifier rather than a fresh name test (rule 11).
+# ALL-CAPS is NOT required here: `open(lch,…); open(my $d,">&",lch)` dups in
+# perl, and the slot admits no other reading of a non-callable bareword.
+sub _dup_source_handle {
+  my ($self, $mode_id, $src_id) = @_;
+  my $mode = $self->expr_o->get_a_node($mode_id);
+  return undef unless ref($mode) && $mode->isa('PPI::Token::Quote')
+                   && $mode->can('string');
+  my $text = eval { $mode->string };
+  return undef unless defined $text && index($text, '&') >= 0;
+  my $word = $self->_bareword_arg_word($src_id);
+  return undef unless $word;
+  my $name = $word->content // '';
+  return undef if $name eq '';
+  return undef if $self->expr_o->_bareword_callable_here($name, $word) eq 'yes';
+  return "'" . $self->_fh_sym($name);
+}
+
+# A bareword ARGUMENT node: a plain Word, or the one-child `funcall` wrapper
+# the bareword classifier builds for a name it cannot place — the same two
+# shapes the readline/select arm accepts, and for the same reason (whether a
+# bareword arrives wrapped depends on what else the file declares).
+sub _bareword_arg_word {
+  my ($self, $id) = @_;
+  my $n = $self->expr_o->get_a_node($id);
+  return $n if ref($n) eq 'PPI::Token::Word';
+  return undef unless $self->expr_o->is_internal_node_type($n)
+                   && ($n->{type} // '') eq 'funcall';
+  my $kids = $self->expr_o->get_node_children($id);
+  return undef if @$kids != 1;
+  my $w = $self->expr_o->get_a_node($kids->[0]);
+  return ref($w) eq 'PPI::Token::Word' ? $w : undef;
 }
 
 # THE handle-NAME emitter (task #491).  Every site that turns a bareword

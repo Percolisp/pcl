@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 37;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -562,3 +562,75 @@ printf "src-untouched:%d\n", (fcntl($fh, 1, 0) & 1 ? 1 : 0);
 close $d; close $fh;
 PL
    'FD_CLOEXEC goes on what PCL OPENS, above $^F only, and an fdopen keeps the source\'s');
+
+# ── 13. task #594 — a BAREWORD in the dup SOURCE slot ───────────────────────
+# `open(my $d, ">&", STDOUT)` used to emit the BARE CL symbol STDOUT and die
+# "The variable STDOUT is unbound", taking the whole top-level form with it
+# (perl's own t/io/open.t test 115, whose block is headed `use strict; # the
+# below should not warn`).  The THIRD argument of a DUP open is a filehandle
+# DESIGNATOR, so a bareword there is a handle NAME: it goes out through
+# `_fh_sym`, the ONE handle-name emitter `<FH>` (#452) and the qualified
+# spellings (#491) already use, and the runtime's `%p-dup-src-name` learned
+# the quoted-symbol shape so an unknown name stays perl's fatal.
+#
+# Every expectation is the live `perl` answer (probed s449r, 5.40.3).
+is(run_cl($FIX . <<'PL'), "user:[dup-user\n]qual:[dup-qual\n]\n",
+open(USRC, '>', $O) or die "mk: $!\n";
+open(my $d2, '>&', USRC) or die "d2: $!\n";
+print $d2 "dup-user\n"; close $d2; close USRC;
+open(my $r2, '<', $O) or die; my $g2 = do { local $/; <$r2> }; close $r2;
+open(main::QSRC, '>', $O) or die "mk3: $!\n";
+open(my $d3, '>&', main::QSRC) or die "d3: $!\n";
+print $d3 "dup-qual\n"; close $d3; close main::QSRC;
+open(my $r3, '<', $O) or die; my $g3 = do { local $/; <$r3> }; close $r3;
+print "user:[$g2]qual:[$g3]\n";
+PL
+   'a BAREWORD dup source is a handle NAME, plain and qualified (#594)');
+
+# The STANDARD handles are the shape the task is named for, and the one the
+# `use strict` block in t/io/open.t writes.  One print, through the dup only,
+# so nothing depends on how two handles onto the same fd interleave.
+is(run_cl(<<'PL'), "via-stdout-dup\n",
+open(my $d, '>&', STDOUT) or die "d: $!\n";
+print $d "via-stdout-dup\n";
+close $d;
+PL
+   'a dup of STDOUT through the bareword reaches stdout (#594)');
+
+# THE NEGATIVES.  A bareword is a handle there only because the MODE names a
+# dup and because nothing DECLARES the name as a sub — both probed:
+#   * `sub PICK {…} open(my $d, ">&", PICK)` CALLS PICK and dups what it
+#     returns (perl's rule for this slot, unlike a BUILTIN handle slot, where
+#     a declared sub of the name is ignored — see _read_star_slot_bareword);
+#   * a plain (non-dup) open's third argument is a FILENAME and must keep
+#     whatever reading it had.
+is(run_cl($FIX . <<'PL'), "called:[from-the-sub\n]\n",
+open(my $out, '>', $O) or die "mk: $!\n";
+sub PICK { return $main::WANT }
+$main::WANT = $out;
+open(my $d, '>&', PICK) or die "dup: $!\n";
+print $d "from-the-sub\n"; close $d; close $out;
+open(my $in, '<', $O) or die; my $got = do { local $/; <$in> }; close $in;
+print "called:[$got]\n";
+PL
+   'a DECLARED sub in the dup source slot is CALLED, not read as a handle');
+
+# An unknown NAME there is perl's FATAL "Bad filehandle: N", not a false —
+# the discriminator %p-dup-src-name already made for the string and glob
+# spellings, now made for the bareword too.
+is(run_cl(<<'PL'), "died:badfh\n",
+my $ok = eval { open(my $d, ">&", NOSUCHHANDLEXYZ); 1 };
+print "died:", ($ok ? "no" : ($@ =~ /Bad filehandle/ ? "badfh" : "other")), "\n";
+PL
+   'an unknown BAREWORD dup source is perl\'s fatal "Bad filehandle: N"');
+
+# Transpile shape: the name is QUOTED (a designator), and only under a dup
+# mode — the mode gate is what keeps a plain open's third argument a filename.
+{
+    my $cl = emitted(qq{open(my \$d, ">&", STDOUT);\n});
+    like($cl, qr/\(p-open \S+ ">&" 'STDOUT\)/,
+         'the dup source bareword emits as a QUOTED handle name');
+    my $plain = emitted(qq{open(my \$d, "<", "/etc/hostname");\n});
+    unlike($plain, qr/'\S*hostname/,
+           'a plain open\'s third argument is untouched by the dup rule');
+}
