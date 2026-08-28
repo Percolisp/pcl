@@ -4,6 +4,87 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 449s (2026-08-29, Opus, round 7 agent S) — the parser fillers: #563, #564, #550 + #449
+
+**Three tasks shipped, one bonus diagnosed; four findings filed (#650–#653).**
+Every behaviour probed against perl 5.40.3 before and after — ~70 probe rows,
+plus a 29-character matrix run twice for the punctuation containers.  Final
+gate **179/6075** on the rebased tree (xs skipped in a worktree); generation
+**v2-345** (renumbered above main's v2-340 at the rebase, with a gap), all
+three artifacts regenerated (BODIES byte-identical to main's; stamp only).
+
+- **#563 — the §14 cascade with a GLOB PATTERN.**  `sort <./nope-*-xyz>` derails
+  into `Operator(<) Operator(.) Regexp::Match(/nope-*-xyz>;)`: with the body a
+  glob pattern the `/` that starts the match is INSIDE the diamond, so the `>`
+  goes with it and the match runs to the next `/` — usually LINES away
+  (`sort <./a-*>;` plus three statements is FOUR tokens, the last a Regexp
+  holding all three).  `_repair_glob_pattern_cascade` runs FIRST of the repair
+  block, because its damage is the widest, and rewrites the diamond into the
+  `glob("PATTERN")` perlop says it is.  **perl reads a term-position `<` the
+  same way** — `sub foo{3} if (foo < 5) { $s =~ s/a/->b/ }` is a syntax error
+  quoting `< 5) { $s =~ s/a/->b` — so principle 9 leaves only "where does it
+  end", and perl's answer is the first `>`.  Hunting the BREAKING case found
+  **two real gaps in `_ends_term`**, shared by every repair in the family:
+  `$#a` is a `Token::ArrayIndex`, not a Symbol, and a deref block's `}` is a
+  `Structure::Block`, not a Subscript (that one was already known — §12's
+  repair works around it with a whitelist).  Without them
+  `$#a<3&&$s=~/a>b/` and `${$x}<3&&$s=~/a>b/`, both valid perl, became
+  `$#aglob("3&&$s=~/a")b/`.  §14c logged; guard `readline-ternary-01.t` 12→23.
+- **#564 — `local *{EXPR}` VANISHED, and the empty-target `return` was why.**
+  `local *{"1"} = sub {…}` is Cast(*) + Block, which no branch of
+  `_process_local_declaration` matched, so the run reached `return unless
+  @items` and emitted NOTHING — no announcement, no `;; PARSE ERROR`, no census
+  row.  Two halves: that `return` is now a loud drop (rule 12, and it is what
+  should have made this visible), and the target has a lowering,
+  `p-local-glob-dynamic`, whose name goes through the runtime's ONE
+  dynamic-glob resolver so a `local` cannot resolve the name differently from
+  the assignment beside it.  With the lowering in place **`local` joins
+  `_glob_name_position`'s whitelist** — exactly what it was held out for — and
+  a SIGIL character names a glob too (`local *@;` is Cast(*) + Cast(@), §26b).
+  The emission A/B exposed **two pre-existing silent wrongs**: `local *$alias =
+  []` (op/gv.t:918, `[perl #77926]`) localized the SCALAR `$alias` (measured on
+  HEAD: `ARRAY(0x1)` where perl says `3`), and `local *{ref(tied $@) .
+  "::STORE"} = sub {}` (op/warn.t) was lost whole.  `%p-glob-save`/`-restore`
+  now carry the CODE symbol's `*p-declared-subs*` status, because `defined
+  &foo` reads THAT and never fboundp — the static twin was wrong too.
+  Sweep of the two corpus movers: **method.t 72/26 → 76/22**, local.t unchanged.
+- **#550 + #449 — the punctuation CONTAINERS.**  #449's blocker was real and is
+  now gone at the emission rule: `needs_pipes` pipe-quotes a name carrying a
+  CL-unsafe character, and `_already_cl` was refined with it — WHERE the pipe
+  is decides, not whether there is one (`@|` is a perl NAME whose pipe IS the
+  name).  The char set becomes perl's, not CL's: array containers work for 17
+  of 29 characters, up from 13.  The HASH twin needed a POSITION rule, because
+  `%` is also modulo — and **perl's answer is not the obvious one**:
+  `sub f { 7 } print f % 3, "\n"` prints `7` with NO newline, because perl read
+  `%3, "\n"` as the HASH `%3`.  So `_repair_punct_hash_name` keys on
+  `_ends_term` + the declared-term test, lives in Parser2 (the position) and
+  reads the SET from `Pl::Parser` — one set, two arms.  Hash containers now
+  work for 12 characters, up from ONE.  **A repair in Parser2's chain must
+  change the TEXT** (measured: `_reparse_doc` serializes, so a spliced node is
+  re-split by the next repair) — hence the rewrite into perl's block spelling
+  `%{?}`, which is also strict-safe where `%{'?'}` would die.  §24b logged;
+  guard `punct-array-glob-01.t` 34→39 with the modulo negatives.
+- **#620 (bonus) DIAGNOSED, not fixed** — narrowed to one line and written into
+  the task: the CONTAINER branch of `_lower_block` hands the whole `my @a = …
+  if COND` run to `_lower_expr`, where the SCALAR branch 112 lines earlier
+  splits the modifier off first.  Six call sites share the run, so the split
+  belongs where `@k` is built.
+- **Filed**: **#650** (whitespace in a diamond — the spaced form drops, the
+  multi-pattern form is silently ONE pattern), **#651** (a bracket class is not
+  counted as a glob metacharacter), **#652** (`local ${EXPR} = RHS` drops the
+  ASSIGNMENT silently — the branch next door to #564's), **#653** (the
+  punctuation-container residue, measured by cause: quote-swallowing names,
+  Structure-named names, `%/`, `%@`/`%\`, `@:`/`%:` as a CL READ ERROR,
+  `$x %$y` as a deref in perl, and the interpolated subscript `"$,[1]"`).
+- **Bar**: corpus-diff IDENTICAL over 111 for all three; emission-ab over 921
+  files (lib shims + perl's t/ + cpan `.t` + shapes) = **8 DIFF, every one
+  explained and probed** (five from #564, three from #550, all improvements);
+  the drop census UNCHANGED (fresh 33 files / 86 drops = the blessed rows minus
+  the board row a non-`--board` run does not measure).  **NO sweep, NO
+  companion** (round rule) — the expected movements are enumerated in the
+  agent's report; the `cl/` runtime change (#564) is invisible to corpus-diff
+  and needs Fable's sweep, and `_glob_name_position` / `needs_pipes` both WIDEN
+  what a checker sees, so the gate-SET scan is owed.
 ## Session 449r (2026-08-29, Opus round-7 agent R) — the scoping + bareword-handle-in-expression family: #593, #594, #532 shipped; #530 attempted and backed out
 
 Worktree off `c8a8311`, rebased onto `cf49f95` (s449q); generation **v2-350**
