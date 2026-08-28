@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 40;
+use Test::More tests => 41;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -579,6 +579,20 @@ PERL
     my $doc = PPI::Document->new(\'tie my $v => "main", *];');
     ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*]' } $doc->tokens),
         '`*]` should lex as one Symbol — a closing bracket names the glob holding $]' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# And the SIGIL spelling, where NEITHER token is an Operator: `$@` is a
+# variable, so `*@` is the glob that holds it — but `@` is also a sigil, so PPI
+# makes both tokens Casts.  perl-tests/local.t:828 is `local *@;`.
+#
+#   $ perl -e 'eval { die "b\n" }; { local *@; } print "kept=[$@]"'
+#   kept=[b
+#   ]
+{
+    my $doc = PPI::Document->new(\'local *@;');
+    ok( (grep { $_->isa('PPI::Token::Symbol') && $_->content eq '*@' } $doc->tokens),
+        '`*@` should lex as one Symbol — a sigil character names a glob too' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
 }

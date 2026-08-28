@@ -230,7 +230,8 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
-   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if #:p-local-dot
+   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
+   #:p-local-glob-dynamic #:p-local-dot
    #:p-defcell #:p-local-cell
    #:p-local-pipe
    #:p-local-hash-elem #:p-local-array-elem
@@ -12762,7 +12763,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-350"
+(defparameter *pcl-cache-generation* "v2-355"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -15016,28 +15017,50 @@ buffer's fill-pointer; everything else falls back to file-length."
     (p-die "Can't use an undefined value as a symbol reference"))
   (values))
 
+(defun %p-glob-dynamic-name (name-box)
+  "Split the NAME STRING of a dynamic glob designator `*{EXPR}` into
+   (values package-string bare-name).
+
+   An UNQUALIFIED symbolic name resolves in the package in effect, not in main
+   — `*{\"_IS_\\U$_\"} = …` inside `package File::Path` installs
+   File::Path::_IS_MSWIN32.  A hardcoded \"main\" put it in the wrong stash, and
+   the very next line of that BEGIN block (`!(_IS_MSWIN32())`) then died with
+   \"The function |File::Path|::pl-_IS_MSWIN32 is undefined\".
+
+   ONE reading of that rule, shared by every dynamic-glob entry point
+   (p-glob-assign-dynamic, p-dynamic-typeglob, p-local-glob-dynamic): a `local`
+   that resolved the name differently from the assignment beside it would save
+   one glob and write another."
+  (let* ((name-str (to-string name-box))
+         (sep-pos  (search "::" name-str :from-end t)))
+    (values (if sep-pos (subseq name-str 0 sep-pos) *pcl-current-package*)
+            (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))))
+
+(defun %p-glob-dynamic-target (name-box)
+  "The glob a dynamic designator `*{EXPR}` names, as (values package-object
+   uname) — the two things every slot symbol is built from.  EXPR is either a
+   NAME string (\"Pkg::name\") or a glob REFERENCE (\\*{...}) — the form Moo's
+   _install_coderef uses (_getglob returns \\*{$name}, then *{$glob} = $code).
+   A glob ref unboxes to a p-typeglob, whose name is ALREADY case-inverted, so
+   it must not go through %pcl-invert-case again (that function is its own
+   inverse, not idempotent)."
+  (%p-check-symbol-reference name-box)
+  (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
+    (if (p-typeglob-p inner)
+        (values (p-typeglob-package inner) (p-typeglob-name inner))
+        (multiple-value-bind (pkg-str bare-str) (%p-glob-dynamic-name name-box)
+          (values (or (%pcl-find-package pkg-str)
+                      (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))
+                  (%pcl-invert-case bare-str))))))
+
 (defun p-glob-assign-dynamic (name-box rhs)
   "Dynamic typeglob assignment: *{EXPR} = val.  EXPR is either a NAME string
-   (\"Pkg::name\") or a glob REFERENCE (\\*{...}) — the form Moo's _install_coderef
-   uses (_getglob returns \\*{$name}, then *{$glob} = $code).  A glob ref unboxes
-   to a p-typeglob; assign straight into its slots rather than stringifying it
-   (which would yield GLOB(0x..) and install nothing)."
-  (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
-    (%p-check-symbol-reference name-box)
-    (if (p-typeglob-p inner)
-        (%p-glob-assign-slots (p-typeglob-package inner) (p-typeglob-name inner) rhs)
-        (let* ((name-str (to-string name-box))
-               (sep-pos (search "::" name-str :from-end t))
-               ;; An UNQUALIFIED symbolic name resolves in the package in
-               ;; effect, not in main — `*{"_IS_\U$_"} = …` inside
-               ;; `package File::Path` installs File::Path::_IS_MSWIN32.  A
-               ;; hardcoded "main" put it in the wrong stash, and the very next
-               ;; line of that BEGIN block (`!(_IS_MSWIN32())`) then died with
-               ;; "The function |File::Path|::pl-_IS_MSWIN32 is undefined".
-               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos)
-                             *pcl-current-package*))
-               (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str)))
-          (p-glob-assign pkg-str bare-str rhs)))))
+   or a glob REFERENCE; %p-glob-dynamic-target owns that distinction, and
+   assigning straight into the referenced glob's slots is what keeps
+   `*{$glob} = $code` from stringifying it (which would yield GLOB(0x..) and
+   install nothing)."
+  (multiple-value-bind (pkg uname) (%p-glob-dynamic-target name-box)
+    (%p-glob-assign-slots pkg uname rhs)))
 
 (defun p-dynamic-typeglob (name-box)
   "Rvalue *{EXPR} — return a typeglob object.  EXPR is a NAME string (\"Pkg::name\")
@@ -15047,15 +15070,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     (%p-check-symbol-reference name-box)
     (if (p-typeglob-p inner)
         inner
-        (let* ((name-str (to-string name-box))
-               (sep-pos (search "::" name-str :from-end t))
-               ;; Unqualified → the package in effect, as in p-glob-assign-dynamic.
-               (pkg-str  (if sep-pos (subseq name-str 0 sep-pos)
-                             *pcl-current-package*))
-               (bare-str (if sep-pos (subseq name-str (+ sep-pos 2)) name-str))
-               (pkg (or (%pcl-find-package pkg-str)
-                        (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
-          (make-p-typeglob pkg (%pcl-invert-case bare-str))))))
+        ;; Unqualified → the package in effect: %p-glob-dynamic-name, the one
+        ;; reading every dynamic-glob path shares.
+        (multiple-value-bind (pkg-str bare-str) (%p-glob-dynamic-name name-box)
+          (let ((pkg (or (%pcl-find-package pkg-str)
+                         (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
+            (make-p-typeglob pkg (%pcl-invert-case bare-str)))))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
   "Copy all slots from src-glob into dst (pkg, uname)."
@@ -15159,24 +15179,39 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; die — so this default IS the Perl semantics, not a swallowed case.
         (t *p-undef*)))))
 
+(defun %p-glob-syms-in (pkg uname)
+  "The four slot symbols of a typeglob, from the PACKAGE OBJECT and the
+   ALREADY-CASE-INVERTED name — the pair every glob resolution ends at, whether
+   the name was written in the source (%p-glob-syms) or computed at run time
+   (%p-glob-dynamic-target).  Returns (values code-sym scalar-sym array-sym
+   hash-sym)."
+  (values (intern (%pcl-uname-to-sub uname) pkg)
+          (intern (concatenate 'string "$"   uname) pkg)
+          (intern (concatenate 'string "@"   uname) pkg)
+          (intern (concatenate 'string "%"   uname) pkg)))
+
 (defun %p-glob-syms (pkg-str name-str)
   "Resolve the four slot symbols of typeglob *PKG::NAME (creating the package if
    needed).  Returns (values code-sym scalar-sym array-sym hash-sym)."
-  (let* ((pkg   (or (%pcl-find-package pkg-str)
-                    (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl))))
-         (uname (%pcl-invert-case name-str)))
-    (values (intern (%pcl-uname-to-sub uname) pkg)
-            (intern (concatenate 'string "$"   uname) pkg)
-            (intern (concatenate 'string "@"   uname) pkg)
-            (intern (concatenate 'string "%"   uname) pkg))))
+  (%p-glob-syms-in (or (%pcl-find-package pkg-str)
+                       (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))
+                   (%pcl-invert-case name-str)))
 
 (defun %p-glob-save (code-sym scalar-sym array-sym hash-sym)
   "Snapshot the four glob slots for a later local restore.  Returns an opaque
-   vector of had-bound flags + saved values."
+   vector of had-bound flags + saved values.
+
+   Slot 8 is the CODE symbol's *p-declared-subs* status, and it is part of the
+   glob's state because `defined &foo` reads THAT, never fboundp (a forward
+   stub is fbound too).  Without it a `local *foo = sub {…}` left the name
+   permanently :defined after the scope — restoring the function slot but not
+   the answer to the question the function slot exists for (s449s; the static
+   and the run-time-named spellings were both wrong, probed vs perl)."
   (vector (fboundp code-sym)   (when (fboundp code-sym)   (fdefinition code-sym))
           (boundp scalar-sym)  (when (boundp scalar-sym)  (symbol-value scalar-sym))
           (boundp array-sym)   (when (boundp array-sym)   (symbol-value array-sym))
-          (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))))
+          (boundp hash-sym)    (when (boundp hash-sym)    (symbol-value hash-sym))
+          (gethash code-sym *p-declared-subs*)))
 
 (defun %p-glob-clear (code-sym scalar-sym array-sym hash-sym)
   "Reset the four glob slots to fresh empties (Perl: local *foo starts fresh)."
@@ -15189,6 +15224,8 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Restore the four glob slots from a %p-glob-save snapshot."
   (if (aref saved 0) (setf (fdefinition code-sym) (aref saved 1))
       (when (fboundp code-sym) (fmakunbound code-sym)))
+  (if (aref saved 8) (setf (gethash code-sym *p-declared-subs*) (aref saved 8))
+      (remhash code-sym *p-declared-subs*))
   (if (aref saved 2) (setf (symbol-value scalar-sym) (aref saved 3)) (makunbound scalar-sym))
   (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
   (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
@@ -15311,6 +15348,38 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (p-glob-assign ,pkg-str ,name-str ,rv))))
          (unwind-protect (progn ,@body)
            (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))
+
+(defmacro p-local-glob-dynamic (name-form cond-form rhs-form &body body)
+  "`local *{EXPR}` and `local *{EXPR} = RHS` — the typeglob is NAMED AT RUN TIME
+   (task #564).  p-local-glob / p-local-glob-if are the static-name twins, and
+   the only difference is where the four slot symbols come from, so the
+   save/clear/assign/restore is theirs; the two markers are theirs too:
+   RHS-FORM :none is the assignment-less spelling, and COND-FORM `t` is the
+   unconditional one (the conditional idiom `local *foo = RHS if COND` does not
+   localize at all when COND is false — we always save and restore, which is a
+   no-op on untouched slots, and clear+assign only when it holds).
+
+   NAME-FORM is evaluated exactly ONCE, and BEFORE anything is saved: the
+   localization and the assignment have to name the same glob, and perl
+   evaluates the designator once too (probed).  RHS-FORM is evaluated before
+   the slots are cleared, for the reason p-local-glob's codegen binds it in a
+   wrapping let: localizing *_ clears the @_ slot, so an RHS that reads @_ must
+   see the old one."
+  (let ((pk (gensym "PKG")) (un (gensym "UNAME"))
+        (cs (gensym "CS")) (ss (gensym "SS")) (as (gensym "AS")) (hs (gensym "HS"))
+        (sv (gensym "SAVED")) (rv (gensym "RHS")))
+    `(multiple-value-bind (,pk ,un) (%p-glob-dynamic-target ,name-form)
+       (let ((,rv ,(if (eq rhs-form :none) nil rhs-form)))
+         (declare (ignorable ,rv))
+         (multiple-value-bind (,cs ,ss ,as ,hs) (%p-glob-syms-in ,pk ,un)
+           (let ((,sv (%p-glob-save ,cs ,ss ,as ,hs)))
+             (when ,cond-form
+               (%p-glob-clear ,cs ,ss ,as ,hs)
+               ,@(if (eq rhs-form :none)
+                     nil
+                     `((%p-glob-assign-slots ,pk ,un ,rv))))
+             (unwind-protect (progn ,@body)
+               (%p-glob-restore ,sv ,cs ,ss ,as ,hs))))))))
 
 ;;; Helper functions for p-local-hash-elem macros.
 ;;; Delegating to functions keeps macro expansions compact, preventing heap

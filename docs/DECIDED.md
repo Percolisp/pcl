@@ -21,6 +21,54 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449s (2026-08-29, Opus, round 7 agent S) — `local *{EXPR}` is a glob named at RUN TIME, and the empty-target `return` was the silent half (#564)
+
+- **#564 — the statement VANISHED**: `local *{"1"} = sub {…}` (and `local *$n`)
+  is `Cast(*) + Block/Symbol`, which no branch of
+  `Pl::Parser::_process_local_declaration` matched, so the run reached
+  `return unless @items` — emitting NOTHING, with no announcement, no
+  `;; PARSE ERROR` and no census row.  The #138 family member no instrument
+  counts.  (Without `local` the same statement has always worked, through
+  `p-glob-assign-dynamic`, which is why the loss read as a runtime bug:
+  "Undefined subroutine &main::1 called".)
+- **Two halves, and the rule-12 half is the one that should have made it
+  visible**: the empty-`@items` `return` is now a loud drop, and the target has
+  a lowering — `p-local-glob-dynamic`, the run-time-named twin of
+  `p-local-glob`.  Its name is resolved by the runtime's ONE dynamic-glob
+  resolver (`%p-glob-dynamic-target`, extracted so
+  `p-glob-assign-dynamic` / `p-dynamic-typeglob` / the new macro cannot
+  disagree — a `local` that resolved the name differently from the assignment
+  beside it would save one glob and write another).  NAME evaluated exactly
+  ONCE (probed with a counting sub); RHS before the clear; `t` in the cond slot
+  is the unconditional spelling, so `local *{EXPR} = RHS if COND` lowers like
+  `p-local-glob-if`.
+- **`local` JOINS `_glob_name_position`'s whitelist**, which was the whole
+  reason it was held out: `local *1 = sub {…}` (t/op/method.t:38) repairs into
+  the Cast+Block shape, and until this it would have traded a loud drop for a
+  silent one.
+- **A SIGIL character names a glob, and PPI makes BOTH tokens CASTS** —
+  `local *@;` is `Word(local) Cast(*) Cast(@)`, the third token shape of §26
+  (`ppi-upstream-bugs.md` **§26b**, report row 41).  `_repair_punct_glob_name`
+  gained the arm; its extra condition is the token AFTER the second Cast, since
+  a real deref cast applies to something (`@$r`, `%$h`, `@{$r}`, `&$cr`) and a
+  glob name does not.
+- **Two PRE-EXISTING silent wrongs the emission A/B exposed, both now right**:
+  `local *$alias = []` (t/op/gv.t:918, uni/gv.t, `[perl #77926]`) localized the
+  SCALAR `$alias` — measured on HEAD: `ARRAY(0x1)` where perl says `3`; and
+  `local *{ref(tied $@) . "::STORE"} = sub {}` (t/op/warn.t) was lost whole.
+- **`%p-glob-save`/`%p-glob-restore` now carry the CODE symbol's
+  `*p-declared-subs*` status** (slot 8), because `defined &foo` reads that and
+  never `fboundp`.  The STATIC `local *foo = sub {…}` left the name permanently
+  `:defined` after its scope too — one line, both twins, probed vs perl.
+- Populations: corpus-diff **local.t + method.t** (both the fix), emission-ab
+  921 files **5 DIFF** (op/gv.t, uni/gv.t, op/method.t, op/local.t, op/warn.t —
+  every one a lost or wrongly-lowered `local *`).  Sweep, two named files:
+  **method.t 72/26 → 76/22** (the four rows of `t/op/method.t:38`'s loop),
+  **local.t 303/13 unchanged**.  Generation **v2-335**, three artifacts
+  regenerated (gen-line only — their emission is byte-identical).
+  Guard `Pl/t/punct-glob-name-01.t` 12 → 21.  Residue filed: **#652**
+  (`local ${EXPR} = RHS` drops the ASSIGNMENT silently — the branch next door).
+
 ## s449s (2026-08-29, Opus, round 7 agent S) — a term-position `<` IS a diamond, and `_ends_term` had two gaps (#563)
 
 - **#563 — the §14 cascade with a GLOB PATTERN**: `my @f = sort <./nope-*-xyz>;`

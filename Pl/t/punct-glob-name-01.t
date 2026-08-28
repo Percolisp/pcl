@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 21;
 
 sub write_pl {
     my ($code) = @_;
@@ -140,15 +140,104 @@ PL
                     . ($perl =~ s/\n/\\n/gr) . ")");
 }
 
-# A digit glob as an ASSIGNMENT TARGET, in the spelling the repair does cover:
-# at statement start.  (`local *1 = sub {…}`, t/op/method.t:38, is deliberately
-# NOT covered — `local *{EXPR}` loses the statement silently, task #564 — so it
-# keeps dropping loudly until that closes.)
+# A digit glob as an ASSIGNMENT TARGET, in the spelling the repair covers:
+# at statement start.
 both_agree(<<'PL', 'a DIGIT glob as an assignment TARGET installs the sub');
 no strict 'refs';
 my $one = "1";
 *1 = sub { 123 };
 print "res=[", &$one(), "]\n";
+PL
+
+# ---- #564: `local` joins the whitelist, because the target now LOWERS -------
+#
+# `local *1 = sub {…}` (t/op/method.t:38) repairs into `local *{'1'} = sub {…}`,
+# and until #564 that Cast + Block shape fell through _process_local_declaration
+# and the statement VANISHED — no announcement, no `;; PARSE ERROR`, no census
+# row.  So the repair was held back rather than trade a loud drop for a silent
+# one.  p-local-glob-dynamic is the lowering; `local` is in the whitelist; these
+# rows are both halves.
+
+both_agree(<<'PL', 'the #564 shape: local *{EXPR} = sub {…} installs and RESTORES');
+no strict 'refs';
+my $one = "1";
+{ local *{"1"} = sub { 123 }; print "in=[", &$one(), "]\n"; }
+print "after=[", (defined &{"1"} ? "def" : "undef"), "]\n";
+PL
+
+both_agree(<<'PL', 'the repaired spelling: local *1 = sub {…} (t/op/method.t:38)');
+no strict 'refs';
+my $one = "1";
+{ local *1 = sub { 123 }; print "in=[", &$one(), "]\n"; }
+print "after=[", (defined &{"1"} ? "def" : "undef"), "]\n";
+PL
+
+# A SIGIL character names a glob too, and PPI hands BOTH tokens over as CASTS
+# there — the third spelling of §26.  perl-tests/local.t:828 is this line.
+both_agree(<<'PL', 'a SIGIL glob name: local *@ localizes $@ (perl-tests/local.t:828)');
+eval { die "boom\n" };
+print "err=[$@]";
+{ local *@; print " in=[$@]"; eval { 1 }; }
+print " out=[$@]\n";
+PL
+
+both_agree(<<'PL', 'a SIGIL glob name as an assignment TARGET: *@ = *x');
+no strict 'refs';
+our $x = "XV";
+*@ = *x;
+print "at=[$@]\n";
+PL
+
+# The name is an EXPRESSION, evaluated exactly once and in the package in
+# effect — the same resolver the assignment path uses.
+both_agree(<<'PL', 'the name is an expression, evaluated ONCE');
+no strict 'refs';
+my $c = 0;
+sub nm { $c++; "zz" }
+{ local *{nm()} = sub { 9 }; print "in=[", &{"zz"}(), "][c=$c]\n"; }
+print "after=[", (defined &{"zz"} ? "def" : "undef"), "][c=$c]\n";
+PL
+
+both_agree(<<'PL', 'a QUALIFIED run-time name, and the other three slots');
+no strict 'refs';
+our @zz = (1,2); our %zz = (a=>1); our $zz = "S";
+my $n = "zz"; my @new = (7,8);
+{ local *{$n} = \@new; print "arr-in=[@zz]\n"; }
+print "arr-out=[@zz]\n";
+{ local *{"main::zz"}; print "cleared=[@zz][", (defined $zz ? $zz : "undef"), "]\n"; }
+print "restored=[@zz][$zz]\n";
+PL
+
+# The deprecated conditional idiom, in the run-time-named spelling: perl does
+# not localize at all when the condition is false.
+both_agree(<<'PL', 'local *{EXPR} = RHS if COND, both ways');
+no strict 'refs';
+our $q = "Q"; my $n = "q";
+for my $c (1, 0) {
+  { local *{$n} = \"Z" if $c; print "c=$c in=[$q]\n"; }
+  print "c=$c out=[$q]\n";
+}
+PL
+
+# `local *$x` where $x holds a GLOB REF, the shape Moo's _install_coderef
+# writes — and the shape op/gv.t:918 ([perl #77926]) reaches through a tie.
+# It used to bind the SCALAR $g: a silent wrong, not a drop.
+both_agree(<<'PL', 'local *$x through a GLOB REF localizes the glob, not the scalar');
+no strict 'refs';
+our $vv = "V";
+my $g = \*vv;
+{ local *{$g} = \"NEW"; print "in=[$vv]\n"; }
+print "out=[$vv]\n";
+PL
+
+# ---- #564 negatives: the deref casts the `*` arm must not claim ------------
+
+both_agree(<<'PL', 'negative: ordinary @/%/& derefs are not glob names');
+my $r = [1,2]; print "1=[@$r]\n";
+my $h = {a=>1}; print "2=[", join(",", %$h), "]\n";
+my @c = @{$r}; print "3=[@c]\n";
+sub cf { 42 } my $cr = \&cf; print "4=[", &$cr(), "]\n";
+my $n = 3; print "5=[", $n*2, "]\n";
 PL
 
 # ---- the negatives ---------------------------------------------------------

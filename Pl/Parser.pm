@@ -3683,6 +3683,30 @@ sub _conditional_local_init {
     : "(if $test $rhs_cl $lhs_rval_cl)";
 }
 
+# The significant elements INSIDE a deref block — the `EXPR` of `${EXPR}`,
+# `*{EXPR}`, `@{EXPR}`.  PPI wraps the contents in a Statement when they are an
+# expression and leaves them bare when they are one token, and both `local`
+# deref branches need the same flattening (rule 11: it was written out twice
+# the moment the second one arrived).
+sub _deref_block_inner {
+  my ($self, $block) = @_;
+  my @inner;
+  for my $child ($block->children) {
+    my $cr = ref($child);
+    next if $cr eq 'PPI::Token::Whitespace';
+    next if $cr eq 'PPI::Token::Structure';   # the { }
+    if ($cr =~ /^PPI::Statement/) {
+      for my $gc ($child->children) {
+        next if ref($gc) eq 'PPI::Token::Whitespace';
+        push @inner, $gc;
+      }
+    } else {
+      push @inner, $child;
+    }
+  }
+  return @inner;
+}
+
 sub _process_local_declaration {
   my $self = shift;
   my $stmt = shift;
@@ -4052,6 +4076,56 @@ sub _process_local_declaration {
     }
   }
 
+  # ── local *{EXPR} / local *$x — a typeglob NAMED AT RUN TIME (task #564).
+  # PPI gives Cast('*') + Block/Symbol, which the Token::Symbol test of the
+  # static branch above cannot match, and this whole sub used to fall through
+  # it to `return unless @items` — the statement VANISHED, with no drop
+  # announcement, no `;; PARSE ERROR` and no census row.  (The `= sub {…}`
+  # spelling WITHOUT `local` has always worked, through p-glob-assign-dynamic,
+  # which is why the loss looked like a runtime bug: "Undefined subroutine".)
+  #
+  # It is the run-time-named twin of the static branch, so it is the same
+  # save/clear/assign/restore — p-local-glob-dynamic — and the name resolution
+  # is the runtime's one dynamic-glob resolver, shared with the assignment path
+  # (%p-glob-dynamic-target).  Written above the `[$@%]` deref branch because
+  # the shape test is the same and only the sigil tells them apart.
+  if (@non_ws >= 2
+      && ref($non_ws[0]) eq 'PPI::Token::Cast'
+      && $non_ws[0]->content eq '*'
+      && (ref($non_ws[1]) eq 'PPI::Structure::Block'
+          || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
+    my $name_cl = ref($non_ws[1]) eq 'PPI::Token::Symbol'
+      ? ($self->_parse_expression([$non_ws[1]], $stmt) // 'nil')
+      : ($self->_parse_expression([$self->_deref_block_inner($non_ws[1])], $stmt) // 'nil');
+    my @rhs_parts;
+    my $past_eq = 0;
+    for my $p (@non_ws[2 .. $#non_ws]) {
+      if (!$past_eq && ref($p) eq 'PPI::Token::Operator' && $p->content eq '=') {
+        $past_eq = 1;
+        next;
+      }
+      push @rhs_parts, $p if $past_eq;
+    }
+    # A trailing `if`/`unless` came off the whole run at the head of this sub
+    # (task #508); the macro carries it in the same slot p-local-glob-if uses,
+    # so the deprecated `local *{EXPR} = RHS if COND` localizes only when the
+    # condition holds — `t` is the unconditional spelling.
+    my $cond_cl = 't';
+    if ($lmod ne '') {
+      my $c = $self->_parse_expression($lcond, $stmt) // 'nil';
+      $cond_cl = $lmod eq 'unless' ? "(not (p-true-p $c))" : "(p-true-p $c)";
+    }
+    my $rhs_cl = $past_eq ? ($self->_parse_expression(\@rhs_parts, $stmt) // 'nil')
+                          : ':none';
+    $self->_emit(";; $perl_code");
+    $self->_emit("(p-local-glob-dynamic $name_cl $cond_cl $rhs_cl");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+    $self->_emit("");
+    return;
+  }
+
   # ── local on a deref / symbolic ref: local ${EXPR}, local $$x, @{…}, %$x, …
   # PPI gives Cast($/@/%) followed by either a Block ({EXPR}) or a Symbol ($x).
   # Only the *symbolic* (string) ref form is localizable; localizing through a
@@ -4075,20 +4149,7 @@ sub _process_local_declaration {
       $ref_cl = $self->_parse_expression([$non_ws[1]], $stmt) // 'nil';
     } else {
       # ${EXPR} — extract the block's inner expression
-      my @inner;
-      for my $child ($non_ws[1]->children) {
-        my $cr = ref($child);
-        next if $cr eq 'PPI::Token::Whitespace';
-        next if $cr eq 'PPI::Token::Structure';   # the { }
-        if ($cr =~ /^PPI::Statement/) {
-          for my $gc ($child->children) {
-            next if ref($gc) eq 'PPI::Token::Whitespace';
-            push @inner, $gc;
-          }
-        } else {
-          push @inner, $child;
-        }
-      }
+      my @inner = $self->_deref_block_inner($non_ws[1]);
       if (@inner == 1 && ref($inner[0]) eq 'PPI::Token::Word') {
         # ${aa} — a bareword names the package variable; route as a symbolic ref.
         my $name = $inner[0]->content;
@@ -4169,7 +4230,14 @@ sub _process_local_declaration {
     return $self->_drop_this_statement($parts, $stmt, $err);
   };
 
-  return unless @items;
+  # Rule 12: no items means NO target shape above knew what it was looking at,
+  # and the statement has to say so.  It used to `return` — emitting NOTHING,
+  # with no announcement, no `;; PARSE ERROR` and no census row: the #138
+  # family member no instrument counts.  `local *{EXPR} = sub {…}` came out
+  # here and simply vanished (task #564, which also gave it its lowering);
+  # anything else that ever arrives here is now a loud drop.
+  return $self->_drop_this_statement($parts, $stmt,
+    "unsupported `local` target shape") unless @items;
 
   # Whole-stash local — `local %Pkg::` (and `local *Pkg::`) — is stash
   # localization, which PCL does not support (see not-supported.md "Live

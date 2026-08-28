@@ -1328,6 +1328,33 @@ tie my $v=>'m', *];   … Operator(,) Operator(*) Structure(])
   so the test could not protect it, and deleting a `;` would take the statement
   terminator with it.
 
+### 26b. A SIGIL-named glob is two CASTS, not two operators  (task #564, s449s)
+
+The third token shape, and the one the two arms above could not reach, because
+neither token is an Operator:
+
+```
+local *@;             Word(local) Cast(*) Cast(@)          perl-tests/local.t:828
+*@ = *x;              Cast(*) Cast(@) Operator(=) Symbol(*x)
+my $z = *@;           … Operator(=) Cast(*) Cast(@)
+```
+
+`$@`, `$$`, `$%` and `$&` are variables, so `*@`, `*$`, `*%` and `*&` are the
+globs that hold them — but `@`/`$`/`%`/`&` are also sigils, so PPI classifies
+each as a `Token::Cast` rather than an Operator, and the `*` in front of one
+becomes a Cast too.
+
+**Impact on PCL: the statement was LOST, silently** — `local *@;` fell through
+every branch of `_process_local_declaration` to a bare `return`.
+
+**Workaround (s449s):** the same walk, one more arm.  Its extra condition is
+the token AFTER the second Cast: a real deref cast applies to *something* (a
+Symbol, a `{` block, another Cast), while a glob name is followed by whatever
+ends or continues the statement — so `@$r`, `%$h`, `@{$r}` and `&$cr` cannot be
+claimed.  The lowering the repaired `*{'@'}` reaches is `p-local-glob-dynamic`
+(task #564), which is why the `local` position could only be whitelisted once
+that existed.
+
 **Repro + failing rows:** Bugs 15 and 16 in `docs/ppi-bug-report.t`.  Guard:
 `Pl/t/punct-glob-name-01.t`.
 

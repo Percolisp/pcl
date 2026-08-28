@@ -5638,6 +5638,16 @@ sub _repair_glob_multiply {
 # spelling and must never be claimed, and an opener is never orphaned, so the
 # UnmatchedBrace test could not protect them.  So is `;`: deleting it would take
 # the statement terminator with it, and `*;` occurs nowhere.
+# A SIGIL CHARACTER names a glob too — `*@` is the glob whose scalar slot is
+# `$@`, and `local *@;` is perl-tests/local.t:828 — and it is the THIRD
+# spelling of this bug, because PPI hands BOTH tokens over as CASTS there
+# (`Cast(*) Cast(@)`), never as the two Operators the arms above repair.  The
+# `*` is a Cast exactly where a term is expected, so the position test is the
+# same one; what the sigil arm needs on top is the certainty that the second
+# Cast is not a real DEREF cast, and that is the token AFTER it: a deref
+# applies to something (a Symbol, a `{` block, another Cast), a glob name is
+# followed by whatever ends or continues the statement.
+my %SIGIL_GLOB_CHARS = map { $_ => 1 } split //, q{$@%&};
 my %PUNCT_GLOB_CHARS = map { $_ => 1 } split //, q{-!+./\\,:?=<>~&%|};
 my %PUNCT_GLOB_CLOSERS = map { $_ => 1 } split //, '])}';
 
@@ -5647,10 +5657,24 @@ sub _repair_punct_glob_name {
   my $repaired = 0;
   for my $i (0 .. $#tok - 1) {
     my ($star, $next) = @tok[$i, $i + 1];
-    next unless $star->isa('PPI::Token::Operator') && $star->content eq '*';
+    next unless $star->content eq '*'
+             && ($star->isa('PPI::Token::Operator') || $star->isa('PPI::Token::Cast'));
     next unless _glob_name_position($i ? $tok[$i - 1] : undef);
     my ($name, $letter);
-    if ($next->isa('PPI::Token::Number') && $next->content =~ /\A[0-9]+\z/) {
+    if ($star->isa('PPI::Token::Cast')) {
+      # The sigil-named glob; see %SIGIL_GLOB_CHARS above.  A Cast `*` before
+      # anything else is the ordinary `*{EXPR}` / `*$name` deref and is left
+      # alone — those already lower.
+      next unless $next->isa('PPI::Token::Cast')
+               && $SIGIL_GLOB_CHARS{ $next->content };
+      my $after = $tok[$i + 2];
+      next if $after && ($after->isa('PPI::Token::Symbol')
+                      || $after->isa('PPI::Token::Cast')
+                      || ($after->isa('PPI::Token::Structure')
+                          && $after->content eq '{'));
+      $name = $next->content;
+    }
+    elsif ($next->isa('PPI::Token::Number') && $next->content =~ /\A[0-9]+\z/) {
       $name = $next->content;
     }
     elsif ($next->isa('PPI::Token::Operator') && length($next->content) == 1
@@ -5684,14 +5708,14 @@ sub _repair_punct_glob_name {
 # in one reading (`sub f {…} *bar = …`) and a term end in the other (`$h{a}*2`),
 # and a punctuation glob at that position is a miss, which costs nothing.
 #
-# NEITHER IS `local`, and that one is measured: `local *1 = sub {…}`
-# (t/op/method.t:38) would be repaired into `local *{'1'} = sub {…}`, and
-# `_process_local_declaration`'s typeglob branch matches a Token::Symbol only —
-# a Cast + Block target falls through and the statement VANISHES with no
-# announcement (task #564; the `local *{"1"}` spelling loses it at HEAD too).
-# Trading a loud drop for a silent one is the wrong direction, so that shape
-# keeps dropping until #564 closes.  `local *a = *1` is unaffected: its `*1` is
-# on the RIGHT of the `=`.
+# `local` IS in the list since s449s, and the history is why the list is
+# measured rather than guessed: `local *1 = sub {…}` (t/op/method.t:38,
+# t/op/tie_fetch_count.t:203) repairs into `local *{'1'} = sub {…}`, and until
+# #564 that Cast + Block target fell through `_process_local_declaration` and
+# the statement VANISHED with no announcement — so the repair was held back
+# rather than trade a loud drop for a silent one.  #564 gave the shape its
+# lowering (p-local-glob-dynamic), so the repair may fire.  `local *a = *1` was
+# never affected either way: its `*1` is on the RIGHT of the `=`.
 sub _glob_name_position {
   my ($prev) = @_;
   return 1 unless $prev;                                     # document start
@@ -5699,7 +5723,7 @@ sub _glob_name_position {
     if $prev->isa('PPI::Token::Structure');
   return $prev->content =~ /\A(?:=|,|=>)\z/ ? 1 : 0
     if $prev->isa('PPI::Token::Operator');
-  return $prev->content eq 'return' ? 1 : 0
+  return $prev->content =~ /\A(?:return|local)\z/ ? 1 : 0
     if $prev->isa('PPI::Token::Word');
   return 0;
 }
