@@ -422,6 +422,7 @@ has known_no_of_params => (
       # "telldir", "truncate", "warn", "write"
       binmode    => [1, 2],       # binmode FH or binmode FH, LAYER
       eof        => [0, 1],       # eof or eof FH
+      fcntl      => 3,            # fcntl FH, FUNCTION, SCALAR
       fileno     => 1,            # fileno FH
       getc       => [0, 1],       # getc or getc FH
       read       => [3, 4],       # read FH, SCALAR, LENGTH [, OFFSET]

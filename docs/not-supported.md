@@ -2645,3 +2645,36 @@ widening of `_brace_name_refs`, and (3) a widening of the token walk to
 non-interpolating quote text; both are pure over-refusal (cost: a mangle) and
 are worth doing if a real case turns up — no population measured for #470
 contains one.
+
+## `fcntl` with a packed-structure argument (`F_GETLK`, `F_SETLK`, …)
+
+`fcntl FILEHANDLE, FUNCTION, SCALAR` is implemented for the INTEGER argument
+forms — `F_GETFD`, `F_SETFD`, `F_GETFL`, `F_SETFL`, `F_DUPFD` and anything else
+whose third argument is a number — and those answer exactly as perl does: the
+result when it is non-zero, the string `"0 but true"` when the result is 0, and
+undef with `$!` set on failure (task #592).
+
+The POINTER forms do not work.  Perl's rule is that a third argument which is a
+STRING is passed as a pointer to that string's buffer, and the kernel writes the
+answer back into it — that is how `F_GETLK` returns a lock description.  PCL
+cannot hand out a pointer into a Lisp string, so those calls **die** rather than
+pass a silent 0:
+
+```perl
+my $lock = pack('s s l l i', F_WRLCK, 0, 0, 0, 0);
+fcntl($fh, F_GETLK, $lock);   # PCL: dies, "fcntl with a packed-structure
+                              #       argument is not implemented"
+```
+
+**Why a die and not a false return** (CLAUDE.md rule 12, the s329 boundary):
+the whole purpose of the pointer form is to write a VALUE back into the scalar
+which the program then reads.  Answering 0 or undef would let the program go on
+and unpack whatever was already in `$lock` — a silent wrong.  The die is
+perl-shaped and trappable.
+
+The discriminator is the argument's shape, plus the one Perl string that IS a
+number: `"0 but true"`, which is what a successful `fcntl` RETURNS, so feeding a
+result straight back in is not mistaken for a struct.
+
+`ioctl` is not implemented at all, for the same reason plus the absence of any
+constant table.

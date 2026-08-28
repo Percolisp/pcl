@@ -68,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 29;
+plan tests => 31;
 
 my $dir = tempdir(CLEANUP => 1);
 my $FIX = qq{my \$O = "$dir/out.txt";\n};
@@ -512,3 +512,49 @@ print "alive\n";
 PL
        'a write that fails at the OS is a false print and a false close, never a crash');
 }
+
+# ── 12. task #592 — `fcntl`, and FD_CLOEXEC on every descriptor PCL opens ────
+# `fcntl` did not exist at all ("Undefined subroutine &main::fcntl"), so nothing
+# could even ASSERT the flag.  Its three answers are perl's: the result when it
+# is non-zero, the string "0 but true" when the result is 0 (so a successful
+# F_SETFD is TRUE and numerically 0), undef + $! on failure.  Probed s449q,
+# 5.40.3; F_GETFD is 1, F_SETFD 2, FD_CLOEXEC 1, F_GETFL 3.
+is(run_cl($FIX . <<'PL'), "getfd:1\nsetfd0:'0 but true'\nafter:0\nsetfd1:1\naccmode:0\nbad:undef/22\nclosed:undef/9\n",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "x\n"; close $c;
+open(my $fh, '<', $O) or die "o: $!\n";
+printf "getfd:%d\n", (fcntl($fh, 1, 0) & 1 ? 1 : 0);
+my $r = fcntl($fh, 2, 0);
+print "setfd0:'$r'\n";
+printf "after:%d\n", (fcntl($fh, 1, 0) & 1 ? 1 : 0);
+fcntl($fh, 2, 1) or die "set: $!\n";
+printf "setfd1:%d\n", (fcntl($fh, 1, 0) & 1 ? 1 : 0);
+printf "accmode:%d\n", (fcntl($fh, 3, 0) & 3);
+$! = 0; my $b = fcntl($fh, 99999, 0);
+printf "bad:%s/%d\n", (defined $b ? $b : "undef"), $!+0;
+close $fh;
+$! = 0; my $cl = fcntl($fh, 1, 0);
+printf "closed:%s/%d\n", (defined $cl ? $cl : "undef"), $!+0;
+PL
+   'fcntl answers perl\'s three ways, and F_SETFD/F_GETFD round-trip');
+
+# THE THRESHOLD IS THE POINT, and it is a NEGATIVE: perl's rule is `> $^F`, so
+# 0/1/2 stay inheritable — a guard asserting cloexec on STDOUT would be WRONG.
+# The dup rules ride along: a `&` dup opens a NEW descriptor and gets the flag,
+# a `&=` fdopen opens none and keeps whatever the source had.
+is(run_cl($FIX . <<'PL'), "std:000\nSYSTEM_FD_MAX:2\nfile:1\ndup:1\nfdopen-keeps:0\nsrc-untouched:0\n",
+open(my $c, '>', $O) or die "mk: $!\n"; print $c "x\n"; close $c;
+printf "std:%d%d%d\n", (fcntl(\*STDIN,1,0) & 1 ? 1:0),
+                       (fcntl(\*STDOUT,1,0) & 1 ? 1:0),
+                       (fcntl(\*STDERR,1,0) & 1 ? 1:0);
+print "SYSTEM_FD_MAX:$^F\n";
+open(my $fh, '<', $O) or die "o: $!\n";
+printf "file:%d\n", (fcntl($fh, 1, 0) & 1 ? 1 : 0);
+fcntl($fh, 2, 0) or die "clear: $!\n";
+open(my $d, '<&', $fh) or die "dup: $!\n";
+printf "dup:%d\n", (fcntl($d, 1, 0) & 1 ? 1 : 0);
+open(my $e, '<&=', $fh) or die "fdopen: $!\n";
+printf "fdopen-keeps:%d\n", (fcntl($e, 1, 0) & 1 ? 1 : 0);
+printf "src-untouched:%d\n", (fcntl($fh, 1, 0) & 1 ? 1 : 0);
+close $d; close $fh;
+PL
+   'FD_CLOEXEC goes on what PCL OPENS, above $^F only, and an fdopen keeps the source\'s');

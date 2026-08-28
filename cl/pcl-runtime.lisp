@@ -198,7 +198,7 @@
    ;; `_` — perl's stat-cache filehandle (`-e $f and -f _`).  A bare CL symbol,
    ;; deliberately: that is exactly what the emitter produces for the bareword.
    #:_ #:*pcl-stat-cache-path*
-   #:p-unlink #:p-lock #:p-fileno #:p-getc #:p-readline #:*p-filehandles*
+   #:p-unlink #:p-lock #:p-fileno #:p-fcntl #:p-getc #:p-readline #:*p-filehandles*
    ;; Directory I/O
    #:p-opendir #:p-readdir #:p-closedir #:p-rewinddir
    ;; File glob
@@ -9465,6 +9465,33 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (setf (gethash stream *p-open-output-streams*) t))
   stream)
 
+(defconstant +p-fd-cloexec+ 1
+  "FD_CLOEXEC.  sb-posix exports f-getfd/f-setfd but NOT the flag itself
+   (measured: `find-symbol \"FD-CLOEXEC\"` is NIL there), and it is 1 — the only
+   bit F_GETFD has ever returned.")
+
+(defun %p-set-cloexec (stream)
+  "Give STREAM's descriptor FD_CLOEXEC, which is what perl does for every
+   descriptor IT opens (task #592): an exec'd child inherits 0, 1 and 2 and
+   nothing else, so a program cannot accidentally hand a file to a subprocess.
+
+   perl's threshold is `> $^F` (SYSTEM_FD_MAX, default 2), and honouring it is
+   not decoration — it is what keeps the STANDARD descriptors inheritable, and
+   with them a fork-pipe child's rewired stdin/stdout.  The child's other end is
+   safe for a second reason too: dup2 CLEARS the flag on the copy, and the flag
+   is set on the PARENT's end anyway, after the fork.
+
+   Silent when there is no descriptor (an in-memory handle) or the OS refuses
+   the call: the open has already succeeded and perl's own failure here is
+   invisible to the program."
+  (let ((fd (%p-fd-of-stream stream)))
+    (when (and fd (> fd (to-number (unbox |$^F|))))
+      (ignore-errors
+        (sb-posix:fcntl fd sb-posix:f-setfd
+                        (logior (sb-posix:fcntl fd sb-posix:f-getfd)
+                                +p-fd-cloexec+)))))
+  stream)
+
 ;;; --- The standard handles are NAMES FOR DESCRIPTORS 0/1/2 (task #535) ------
 ;;; `open(STDOUT, …)` in perl re-points descriptor 1 itself, which is why the
 ;;; idiom works at all: an argument-less `print`, an exec'd child and anything
@@ -9619,7 +9646,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               (setf (gethash new *p-pipe-pids*) pid)))))
     t))
 
-(defun %p-install-fh (fh stream)
+(defun %p-install-fh (fh stream &optional (cloexec t))
   "Bind STREAM to the filehandle FH (a box, or a bareword symbol).
    Symbolic filehandle: when FH is a box already holding a non-empty handle-NAME
    string (e.g. $TST = \"TST\"; open($TST, ...)), Perl opens the named glob (*TST)
@@ -9632,8 +9659,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    registering a second stream beside it (task #535).  Every opener reaches
    this one function — plain open, in-memory open, fork-pipe, socket, accept,
    pipe — so they all follow, which is why the rule lives HERE and not in
-   %p-open-impl."
+   %p-open-impl.  FD_CLOEXEC rides on the same fact and for the same reason
+   (task #592) — and it runs BEFORE the standard-handle branch on purpose:
+   %p-rebind-std dup2s the descriptor onto 0/1/2, and dup2 clears the flag on
+   the copy, which is exactly perl's `> $^F` outcome.
+
+   CLOEXEC nil is for the ONE case that does not open a descriptor: the
+   fdopen forms `<&=` / `>&=`, where the handle IS the source's descriptor and
+   perl leaves whatever flag that descriptor already carried."
   (%p-register-open-stream stream)
+  (when cloexec (%p-set-cloexec stream))
   (let ((std (%p-std-slot fh)))
     (when std (return-from %p-install-fh (%p-rebind-std std stream))))
   (cond ;; The box holds a GLOB (Symbol::gensym, \*FH, IO::Handle->new — often
@@ -10027,11 +10062,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               ;; otherwise two buffers race and interleaved writes come out
               ;; reordered (perl keeps program order here).  A raw fd number
               ;; ("<&=3") has no stream to share and still gets a fresh one.
+              ;;
+              ;; An fdopen opens no DESCRIPTOR, so it must not set FD_CLOEXEC:
+              ;; the descriptor is the source's and keeps whatever flag the
+              ;; source had (task #592).  A `&` dup does create one, and gets
+              ;; the flag like every other open.
               (if (and eq-form (streamp src))
-                  (progn (%p-install-fh fh src) t)
+                  (progn (%p-install-fh fh src nil) t)
                   (let* ((new-fd (if eq-form src-fd (sb-posix:dup src-fd)))
                          (stream (%p-dup-make-stream new-fd mode-str)))
-                    (%p-install-fh fh stream)
+                    (%p-install-fh fh stream (not eq-form))
                     t)))
         (error () (%pcl-save-errno) nil)))))
 
@@ -11173,6 +11213,53 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defmacro p-fileno (fh)
   "Perl fileno — bareword filehandle is auto-quoted."
   `(%p-fileno-impl (%p-fh-arg ,fh)))
+
+(defun %p-fcntl-int-arg-p (v)
+  "Whether V is fcntl's INTEGER third argument rather than its packed-struct
+   one.  Perl's own discriminator is the scalar's numeric-vs-string flag; here
+   it is the value's shape, plus the one Perl string that IS a number —
+   \"0 but true\", which is what a successful fcntl RETURNS, so a program that
+   feeds a result straight back in must not be read as passing a struct."
+  (or (null v) (eq v *p-undef*) (numberp v)
+      (and (stringp v) (or (looks-like-number v) (string= v "0 but true")))))
+
+(defun %p-fcntl-impl (fh func arg)
+  "Perl `fcntl FILEHANDLE, FUNCTION, SCALAR` (task #592).
+
+   Three answers, all perl's (probed 5.40.3): the RESULT when it is non-zero,
+   the string \"0 but true\" when the result is 0 — so `fcntl($fh,F_SETFD,0)` is
+   TRUE while its numeric value is 0 — and undef with $! set on failure,
+   including EBADF for a handle that is not open.
+
+   FUNCTION is a raw command number; the Fcntl constants (F_GETFD 1, F_SETFD 2,
+   F_GETFL 3 …) come from the `Fcntl` shim, not from here — this is the
+   MECHANISM, and a table of command names in the runtime would be the wrong
+   layer (CLAUDE.md 9a).
+
+   The pointer/packed-struct forms (F_GETLK and friends) DIE rather than pass a
+   silent 0: their whole purpose is to write a value back into the SCALAR, which
+   the program then reads — the rule-12 boundary between dying and announcing.
+   docs/not-supported.md carries the entry."
+  (let* ((stream (p-get-stream fh))
+         (fd     (and stream (%p-fd-of-stream stream)))
+         (v      (unbox arg)))
+    (cond
+      ((null fd) (setf *p-stored-errno* 9) *p-undef*)         ; EBADF
+      ((not (%p-fcntl-int-arg-p v))
+       (p-die "PCL: fcntl with a packed-structure argument is not implemented"))
+      (t
+       (handler-case
+           (let ((r (sb-posix:fcntl fd (truncate (to-number func))
+                                    (truncate (to-number v)))))
+             (if (zerop r) "0 but true" r))
+         (sb-posix:syscall-error (e)
+           (setf *p-stored-errno* (sb-posix:syscall-errno e))
+           *p-undef*)
+         (error () (%pcl-save-errno) *p-undef*))))))
+
+(defmacro p-fcntl (fh func arg)
+  "Perl fcntl — bareword filehandle is auto-quoted, like fileno's."
+  `(%p-fcntl-impl (%p-fh-arg ,fh) ,func ,arg))
 
 (defun %p-getc-impl (&optional fh)
   "Perl getc - read single character"
@@ -12665,7 +12752,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-321"
+(defparameter *pcl-cache-generation* "v2-340"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

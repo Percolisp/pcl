@@ -21,6 +21,53 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449q (2026-08-29, Opus, round 7 agent Q) — `fcntl`, FD_CLOEXEC, and the premise that did not hold (#592)
+
+- **`fcntl` is IMPLEMENTED** (piece b, done first because nothing could assert
+  piece a without it): `%p-fcntl-impl` + the `p-fcntl` macro that auto-quotes a
+  bareword handle like `p-fileno`'s, `fcntl => 3` in `Config.pm`, `fcntl` in
+  `ExprToCL`'s `%RUNTIME_NAMES`.  Perl's THREE answers, probed 5.40.3: the
+  result when non-zero, the string **`"0 but true"`** when the result is 0 (so a
+  successful `F_SETFD` is true AND numerically 0), undef + `$!` on failure —
+  EBADF for a handle that is not open, EINVAL for a bad command.  The Fcntl
+  CONSTANTS already existed in the shim; the runtime takes a raw command number
+  and holds no table of names (rule 9a).
+- **The packed-struct forms DIE** rather than pass a silent 0 — the pointer
+  form's whole purpose is to write a value back into the SCALAR the program
+  then reads, which is the s329 rule-12 boundary.  Keyed on the argument's
+  shape, plus the one Perl string that IS a number: `"0 but true"`, so feeding a
+  result straight back in is not read as a struct.  `not-supported.md` entry.
+- **FD_CLOEXEC** (piece a) rides on `%p-install-fh`, the ONE function every
+  opener reaches, and runs BEFORE its standard-handle branch on purpose: perl's
+  threshold is `> $^F` (2), and `%p-rebind-std`'s dup2 CLEARS the flag on the
+  copy, so descriptors 0/1/2 stay inheritable for free.  An fdopen (`<&=`,
+  `>&=`) opens no descriptor and passes `cloexec nil` — perl leaves that fd's
+  flag alone (probed: clear the source's flag, fdopen, still clear; a `&` dup
+  gets the flag and the SOURCE stays clear).
+- **THE TASK'S PREMISE DOES NOT HOLD HERE, and that is the finding (#633).**
+  #592 said the ok_cloexec rows fail because a PCL child INHERITS the
+  descriptor.  Measured with the flag deliberately disabled: a child spawned
+  from a PCL parent sees fds 0,1,2 and nothing else — every `system`/backtick/
+  `open '-|'` path goes through `sb-ext:run-program`, which closes descriptors
+  above 2 unless `:preserve-fds` names them.  So those rows were already
+  answering "0", and the OPPOSITE idiom — deliberately passing an fd to a child
+  by raising `$^F`, which is what `t/run/cloexec.t`'s test_inherited half does —
+  cannot work at all.  Filed as **#633** with the fix shape.
+- **A real-perl child IS a valid oracle and a PCL child is not**: SBCL holds the
+  `--load` script at fd 3/4, so a PCL child can answer "inherited" about a
+  descriptor number it merely happens to occupy (measured: parent fd 3 → child
+  `+<&=3` succeeds, and `/proc/self/fd/3` is the .lisp file).
+- Filed: **#634** (no IO::Handle METHOD works on a plain lexical handle —
+  `$fh->autoflush`, `$fh->fileno` both die; the glob spellings work, so it is
+  the box-holds-a-raw-stream representation, pre-existing and general).  The
+  `fcntl` builtin's arrival also fixed `IO::Handle::fcntl`, whose body called
+  `fcntl(...)` and emitted `pl-fcntl` — a call to ITSELF; the only emission diff
+  in the four-population A/B.  Generation **v2-340**, three artifacts
+  regenerated (gen stamp only — emission byte-identical).
+- Guard `Pl/t/print-fh-magic-01.t` 29 → 31: the three fcntl answers with the
+  F_SETFD/F_GETFD round trip, and the THRESHOLD row whose negatives are the
+  point (`std:000` — a guard asserting cloexec on STDOUT would be WRONG).
+
 ## s449q (2026-08-29, Opus, round 7 agent Q) — a refused write is a FALSE print, and a dup's DIRECTION is its descriptor's (#590)
 
 - **A write the OS refuses is perl's false + `$!`, never a CL condition.**  The
