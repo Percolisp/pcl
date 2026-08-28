@@ -3857,9 +3857,27 @@ sub handle_subcalls {
     }
 
     # - - - Check if this is a known filehandle:
-    if ($self->has_environment && $self->environment->is_filehandle($sub_name)) {
-      # Leave as bareword - don't treat as funcall
-      # It will be emitted as-is by ExprToCL
+    # Leave as bareword — don't treat as funcall.  It will be emitted as-is
+    # by ExprToCL.
+    #
+    # UNLESS THE NAME IS ALSO CALLABLE HERE (task #532).  perl's registry of
+    # open handles says nothing about what a bareword MEANS: `sub FILE2 {43}
+    # tell FILE2; sub fh(*){…} fh FILE2` passes 43 — the sub is CALLED, and
+    # it wins in a user `(*)` slot even though FILE2 is an open handle (the
+    # asymmetry `_read_star_slot_bareword` documents: only a BUILTIN handle
+    # slot lets the handle win).  Taking this exit for a callable name left a
+    # plain Word that `_read_star_slot_bareword` then declined, so the leaf
+    # emitted the registered handle's CL SYMBOL — an unbound variable that
+    # killed the run, in the `(*)` slot AND in an `open`'s dup source (#594).
+    #
+    # Falling through instead classifies it the ordinary way, and the two
+    # slots where the HANDLE must still win are unaffected: the paren-less
+    # filehandle slot returns above (the `$is_fh_func` skip), and the paren
+    # form is unwrapped back to a Word by `_read_star_slot_bareword`'s
+    # builtin half — which is exactly how `tell(FILE1)` with `sub FILE1`
+    # declared already reaches -1 rather than 42.
+    if ($self->has_environment && $self->environment->is_filehandle($sub_name)
+        && $self->_bareword_callable_here($sub_name, $now) ne 'yes') {
       next;
     }
 

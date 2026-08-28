@@ -46,7 +46,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 27;
 
 sub write_pl {
     my ($code) = @_;
@@ -182,10 +182,56 @@ both_agree('open(F, "<", "/etc/hostname") or die;'
 # not open (probed).  A "stop at any operator" rule would have broken it, so
 # the operand extent is asserted on the emitted SHAPE (PCL cannot RUN this one
 # yet: a registered handle Word inside an expression still emits a bare CL
-# symbol, filed as residue).
+# symbol — task #530, measured s449r: the fix needs the "which argument slots
+# are HANDLE slots" question answered once, which no site can answer from a
+# token run alone).
 {
     my $cl = PCLCore::transpile("$pl2cl "
         . write_pl('open(G, "<", "/etc/hostname") or die; my $r = close G . "x";'));
     like($cl, qr/\(p-close \(p-\. /,
          '#495 inverse: `close G . "x"` keeps the `.` INSIDE the operand (perl: close("Gx"))');
 }
+
+# ---- task #532: a name that is BOTH a declared sub and an open handle ------
+#
+# perl's open-handle registry says nothing about what a bareword MEANS.  In a
+# USER `(*)` slot a DECLARED SUB is CALLED and it WINS over the handle —
+# `sub FILE2 {43} tell FILE2; sub fh(*){…} fh FILE2` passes 43 — which is the
+# opposite of the BUILTIN handle slot, where the handle wins even against a
+# declared sub (`sub FILE1 () {42}; tell FILE1` is -1, t/comp/parser.t:540).
+# PCL took the "already a registered handle, leave the Word alone" exit in
+# handle_subcalls without asking whether the name is CALLABLE here, so
+# `_read_star_slot_bareword` was handed a plain Word it then declined, and the
+# leaf emitted the handle's CL SYMBOL: an UNBOUND VARIABLE that killed the run
+# — here, and in an `open`'s dup SOURCE slot (#594).  One condition, both.
+#
+# Emission is IDENTICAL over every measured population (corpus-diff's 111 plus
+# 1036 A/B pairs of lib/**.pm + cpan-tests + perl's own t/), so — the s371 rule
+# again — these rows ARE the guard.  Expectations are the live perl answers.
+
+both_agree('sub FILE2 {43} tell FILE2; sub fh (*) { "fh(@_)" } print fh FILE2, "\n";',
+           '#532: a declared sub in a USER (*) slot is CALLED, handle or not');
+
+# The dup SOURCE slot, #594's site, with the same collision.  The `open` comes
+# BEFORE the `sub` on purpose: perl compiles top-down, so the handle slot of
+# that `open` really is a handle slot there, and only the LATER dup source sees
+# a declared name.
+both_agree('open(SRC, ">", "/dev/null") or die; sub SRC { "STDOUT" }'
+         . ' my $r = open(my $d, ">&", SRC);'
+         . ' print $d "dup-both\n" if $r; close $d if $r; close SRC;',
+           '... and in an open\'s dup SOURCE slot too (#594\'s site)');
+
+# THE NEGATIVES: the three readings that must not change.
+both_agree('open(G, "<", "/etc/hostname") or die;'
+         . ' sub fh (*) { "fh(@_)" } print fh G, "\n"; close G;',
+           '#532 inverse: a handle that is NOT a declared sub stays its NAME');
+
+both_agree('sub fh (*) { "fh(@_)" } print fh HH, "\n";',
+           '#532 inverse: a bareword that is neither is its NAME');
+
+both_agree('sub FILE1 () {42} print "tell=", tell(FILE1), "\n";',
+           '#532 inverse: a BUILTIN handle slot ignores the declared sub');
+
+both_agree('sub G {99} open(G, "<", "/etc/hostname") or die;'
+         . ' print "c=", (close(G) ? 1 : 0), " t=", tell(G), "\n";',
+           '#532 inverse: close/tell keep the HANDLE when a sub G is declared');
