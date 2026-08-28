@@ -21,6 +21,47 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s449r (2026-08-29, Opus round-7 agent R) — the scoping + bareword-handle-in-expression family
+
+- **A `my` before an in-block `package NAME;` switch (#593) was hidden from the
+  span detector by ONE predicate, not by the section model.**  PPI wraps the
+  parenthesised argument list of `open(my $f, "<", $p)` in a
+  `PPI::Statement::Variable` (it begins with `my`), and
+  `Pl::Parser2::_symbol_is_declarator` called every Symbol before a top-level
+  `=` a declarator — an argument list has no `=`, so every argument came back
+  as a DECLARATION and `$p` was never seen as a USE.  perl declares only the
+  leading name (`my $f, "<", $p` warns "Parenthesize"), which is what
+  `_declared_names` already said: TWO predicates, ONE question.  Fix = one
+  resolver, `_declarator_syms`, read by both.  Emission moved in exactly ONE
+  file of 1036 (`t/io/open.t`); companion io/open.t 136/25 → 137/24, the moved
+  row being "open -| magic" itself.  Guard `Pl/t/pkg-switch-lexical-01.t`.
+- **A bareword in an `open`'s DUP SOURCE slot is a handle NAME (#594)** — the
+  third site of the #452/#491 family.  THE MODE IS THE DISCRIMINATOR and it is
+  not optional: `open($d,"<",NOSUCHFILEBW)` is a plain false on a FILE of that
+  name, `open($d,">&",NOSUCHHANDLE)` is FATAL "Bad filehandle" (probed).  The
+  compiler gate asks the DEFINING question (does the mode carry `&`) instead of
+  repeating the runtime's `+p-open-dup-modes+` list.  A DECLARED SUB there is
+  CALLED and wins over an open handle of the name.  Runtime half: a QUOTED
+  SYMBOL is a NAME to `%p-dup-src-name` (`%p-resolve-fh` already knew it), which
+  is what keeps the unknown-name case perl-fatal.  Guard rows in
+  `Pl/t/print-fh-magic-01.t` §10.
+- **The open-handle REGISTRY is not a fact about what a bareword MEANS (#532).**
+  `handle_subcalls`' "already a registered handle, leave the Word alone" exit
+  now also asks `_bareword_callable_here`: a declared sub is CALLED in a USER
+  `(*)` slot and in a dup source, while a BUILTIN handle slot keeps the handle
+  (`tell FILE1` = -1 with `sub FILE1 () {42}` declared).  Emission identical
+  over all 1036 A/B pairs + the 111 corpus files, so the guard rows in
+  `Pl/t/user-unary-01.t` ARE the bar (s371 rule).
+- **#530 stays OPEN, attempted and backed out — see task #641 for the record.**
+  The leaf emits a registered handle's CL SYMBOL because the handle SLOTS want
+  one; marking it a string at the registry exit and letting
+  `_read_star_slot_bareword` claim it back fixed five crashing spellings and
+  broke six handle slots, because at that exit the token run for `close(G)` and
+  for `my $s = G` are the SAME.  **The discriminator is the PARENT slot, which
+  no token-run scan has** — so #530 needs a slot table (the #594 mechanism), a
+  uniform quoted-symbol emission plus a `to-string` rule, or #266/#495's
+  operand grammar.  #640 filed: a declared sub also beats the handle in perl's
+  `print FH` and `<FH>` slots, where PCL still sides with the builtin rule.
 ## s449q (2026-08-29, Opus, round 7 agent Q) — `fcntl`, FD_CLOEXEC, and the premise that did not hold (#592)
 
 - **`fcntl` is IMPLEMENTED** (piece b, done first because nothing could assert

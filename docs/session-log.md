@@ -4,6 +4,59 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 449r (2026-08-29, Opus round-7 agent R) — the scoping + bareword-handle-in-expression family: #593, #594, #532 shipped; #530 attempted and backed out
+
+Worktree off `c8a8311`, rebased onto `cf49f95` (s449q); generation **v2-350**
+(renumbered above main's v2-340 at the rebase, artifacts regenerated there);
+three product commits.
+
+- **#593** — `{ package p73626; …; tie my $p, 'p73626'; package main;
+  open(my $f,'-|',$p) }` read an EMPTY cell where perl reads the tie's FETCH
+  (perl's own t/io/open.t test 118, "open -| magic").  v2 splits such a block
+  into per-package SECTIONS, so a lexical crossing the switch is PROMOTED to a
+  package cell by `_rename_spanning_lexicals` — and that pass never fired,
+  because the span detector asks whether the LATER segment REFERENCES `$p` and
+  `_symbol_is_declarator` answered "no, that is a DECLARATION".  PPI wraps
+  `open(my $f, "<", $p)`'s paren list in a `PPI::Statement::Variable`, and that
+  predicate's hand-rolled "every Symbol before the top-level `=`" walk has no
+  `=` to stop at, so EVERY argument was a declaration.  `_declared_names`
+  already had the right answer (`my $f, "<", $p` declares only `$f`; perl warns
+  "Parenthesize"), so the fix is ONE resolver `_declarator_syms` read by both.
+  corpus-diff IDENTICAL; A/B over four populations 1035 SAME / 1 DIFF — the DIFF
+  being io/open.t's p73626 block; companion io/open.t **136/25 → 137/24**,
+  attributed to the row by running the two emissions' TAP side by side (its only
+  differing line).  Guard `Pl/t/pkg-switch-lexical-01.t` (8 rows, 4 negatives).
+- **#594** — `open(my $d, ">&", STDOUT)` emitted the bare CL symbol and died
+  "The variable STDOUT is unbound".  The dup SOURCE is a filehandle DESIGNATOR,
+  so a bareword there is a NAME; the MODE is the discriminator (a bareword in a
+  PLAIN open's third slot is a filename — probed both ways), and a DECLARED SUB
+  in the slot is CALLED, winning even over an open handle of the name.  Two
+  halves: an ARGUMENT OVERRIDE in the funcall arg loop routed through `_fh_sym`
+  (an early return of the whole call DROPPED the `p-list-ctx` around
+  `ok(open(F,">&",STDOUT))` — caught by the A/B), and one arm in
+  `%p-dup-src-name` so a quoted symbol counts as a NAME and an unknown one stays
+  perl's fatal.  A/B 1034 SAME / 2 DIFF, both one token; companion io/open.t
+  **137/24 → 141/24**, io/dup.t unchanged.  Guard: 6 rows in
+  `Pl/t/print-fh-magic-01.t` (21 → 27).
+- **#532** — a name that is BOTH a declared sub and a registered handle crashed
+  in a user `(*)` slot and (after #594) in a dup source.  ONE condition: the
+  "already a registered handle, leave the Word alone" exit in `handle_subcalls`
+  never asked whether the name is CALLABLE here.  The two slots where the handle
+  must still win are untouched (the paren-less `$is_fh_func` skip returns
+  earlier; the paren form is unwrapped by `_read_star_slot_bareword`'s builtin
+  half).  Emission IDENTICAL over all four populations, so the six guard rows in
+  `Pl/t/user-unary-01.t` (21 → 27, four of them negatives) are the bar.
+- **#530 attempted and BACKED OUT** — record in task **#641**, note appended to
+  #530: the leaf emits a registered handle's CL symbol because the SLOTS want
+  one, and no site can tell a slot from an operand, because at the registry exit
+  the token run for `close(G)` and for `my $s = G` are identical.  The attempt
+  fixed five crashing spellings and broke six handle slots.
+- **Filed**: #640 (a declared sub also beats the handle in perl's `print FH` and
+  `<FH>` slots — PCL sides with the builtin rule there; PRE-EXISTING, verified
+  on a c8a8311 worktree), #641.  Cold gate **180/6060** PASS.
+
+---
+
 ## Session 449q (2026-08-29, Opus, round 7 agent Q) — the io/dup residue: #591, #621, #590, #592
 
 **Four tasks, all shipped; five findings filed (#630–#634).**  Every behaviour
