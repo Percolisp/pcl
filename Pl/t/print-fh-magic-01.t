@@ -412,16 +412,20 @@ print "order:[$got]\n";
 PL
    'a buffered write source is FLUSHED before the dup, so program order holds');
 
-# The negative: an UNSEEKABLE source (a pipe) has no position to sync, and perl
-# answers undef there because its buffer swallowed the rest.  The flush must
-# leave it alone rather than dying — file-position answers nil both ways.
-is(run_cl(<<'PL'), "first:[hi\n]open:1 next:[UNDEF]\n",
+# The negative: an UNSEEKABLE source (a pipe) has no position to sync — the
+# flush must leave it alone rather than dying, since file-position answers nil
+# to getter and setter alike.  The source is DRAINED first on purpose: a row
+# that read one line and asked what the dup sees next would be racing the
+# child's second write, and it is (it failed once under `prove -j8` and passed
+# alone).  After EOF the answer is undef in both, every time.
+is(run_cl(<<'PL'), "lines:2 open:1 next:[UNDEF]\n",
 open(my $p, '-|', "echo hi; echo there") or die "pipe: $!\n";
-my $l = <$p>;
+my @all = <$p>;
 my $ok = open(my $pd, '<&', $p);
 my $n = $ok ? <$pd> : undef;
 close $pd if $ok; close $p;
-print "first:[$l]open:", ($ok ? 1 : 0), " next:[", (defined $n ? $n : "UNDEF"), "]\n";
+print "lines:", scalar(@all), " open:", ($ok ? 1 : 0),
+      " next:[", (defined $n ? $n : "UNDEF"), "]\n";
 PL
    'a dup of an UNSEEKABLE source (a pipe) is left alone, as in perl');
 
