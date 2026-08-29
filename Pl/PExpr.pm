@@ -881,32 +881,7 @@ sub parse {
      || ref($e1) eq 'PPI::Token::QuoteLike::Command') {
       say "parse(): Found backtick command"         if 1 & DEBUG;
       my ($cmd, $interpolating) = _command_body($e1);
-
-      # Create a backtick node with the command as a string child
-      my ($node, $node_id) = $self->make_node_insert('backtick');
-
-      my $cmd_id;
-      # Backticks interpolate like double-quoted strings
-      if ($interpolating && $cmd =~ /[\$\@]/) {
-        say "parse(): Backtick needs interpolation"  if 1 & DEBUG;
-        my $str_token = PPI::Token::Quote::Double->new(qq{"$cmd"});
-        # $e1 as ORIGIN — same reason as the glob arm above (task #694): the
-        # command body is RAW, so `` `${\"hello"}` `` must NOT have its `\"`
-        # un-escaped, and the feature lookup wants the document position.
-        $cmd_id = $self->str_interpol->parse_interpolated_string($self,
-								 $str_token, $e1);
-      } elsif ($interpolating) {
-        $cmd_id = $self->make_node(PPI::Token::Quote::Double->new(qq{"$cmd"}));
-      } else {
-        # qx'…': the body is literal, so it must not travel as a double-quoted
-        # token — a `$` in it would be interpolated by whoever reads it next.
-        (my $esc = $cmd) =~ s/([\\'])/\\$1/g;
-        $cmd_id = $self->make_node(PPI::Token::Quote::Single->new("'$esc'"));
-      }
-      $self->add_child_to_node($node_id, $cmd_id);
-
-      say "parse(): Made backtick node $node_id"     if 1 & DEBUG;
-      return $node_id;
+      return $self->_make_command_node($cmd, $interpolating, $e1);
     }
 
     # - - - Bareword (like filehandle FH, constant, or other bareword)?
@@ -950,6 +925,13 @@ sub parse {
     # - - - Heredoc <<'EOF' or <<"EOF" or <<EOF
     if (ref($e1) eq 'PPI::Token::HereDoc') {
       say "parse(): Found heredoc"                   if 1 & DEBUG;
+      # A COMMAND heredoc (<<`TAG`) is `readpipe` with a heredoc body: the
+      # text interpolates like <<"TAG" and is then RUN.  It used to fall
+      # through to the plain interpolating arm below, so the value was the
+      # command LINE, silently (task #702).  Same node as `` `…` ``/qx.
+      if (Pl::PExpr::TokenUtils::heredoc_is_command($e1)) {
+        return $self->_make_command_node(join('', $e1->heredoc()), 1, $e1);
+      }
       # For interpolated heredocs (<<"..." or <<BARE but not any of the raw
       # single-quoted spellings), route through the string interpolation system
       # so $var/@arr are expanded.  heredoc_is_raw is THE shared predicate —
@@ -6499,6 +6481,59 @@ sub _command_body {
     or die "PCL internal: qx token without a section: " . $tok->content . "\n";
   my $body = substr($tok->content, $sec->{position}, $sec->{size});
   return ($body, (($sec->{type} // '') eq q{''}) ? 0 : 1);
+}
+
+# THE one lowering for every command-capture spelling: `` `CMD` ``, every
+# `qx` delimiter, and the command HEREDOC `` <<`TAG` `` (task #702, which used
+# to reach the plain heredoc arm and hand back the un-run command TEXT).
+# $origin is the PPI token the body came from — passed to the interpolation
+# parser so lexical feature lookup sees the right document position.
+#
+# perl spells all of these `readpipe EXPR`, and `readpipe` is one of the
+# builtins a package may DISPLACE with `use subs` ([perl #115330], t/op/exec.t
+# rows 31-32).  When the current package has done so, the term is an ordinary
+# CALL to that sub with the interpolated string as its only argument — built
+# as a plain funcall node so it travels the normal user-sub path and gets
+# call-site context (readpipe is list-sensitive) for free.  Everything else
+# lowers to the `backtick` node, which is `p-backtick`.
+sub _make_command_node {
+  my ($self, $cmd, $interpolating, $origin) = @_;
+
+  my $cmd_id;
+  # A command body interpolates like a double-quoted string, except qx'…'.
+  if ($interpolating && $cmd =~ /[\$\@]/) {
+    say "parse(): Backtick needs interpolation"  if 1 & DEBUG;
+    my $str_token = PPI::Token::Quote::Double->new(qq{"$cmd"});
+    # $origin is the REAL token (task #694): the command body is RAW, so
+    # `` `${\"hello"}` `` must NOT have its `\"` un-escaped, and the lexical
+    # feature lookup wants the document position.
+    $cmd_id = $self->str_interpol->parse_interpolated_string($self, $str_token,
+                                                             $origin);
+  } elsif ($interpolating) {
+    $cmd_id = $self->make_node(PPI::Token::Quote::Double->new(qq{"$cmd"}));
+  } else {
+    # qx'…': the body is literal, so it must not travel as a double-quoted
+    # token — a `$` in it would be interpolated by whoever reads it next.
+    (my $esc = $cmd) =~ s/([\\'])/\\$1/g;
+    $cmd_id = $self->make_node(PPI::Token::Quote::Single->new("'$esc'"));
+  }
+
+  my $pkg = $self->has_environment
+          ? ($self->environment->current_package // 'main') : 'main';
+  if ($self->has_environment
+      && $self->environment->builtin_is_overridden($pkg, 'readpipe')) {
+    my ($cnode, $call_id) = $self->make_node_insert('funcall');
+    $self->add_child_to_node($call_id,
+      $self->make_node(PPI::Token::Word->new("${pkg}::readpipe")));
+    $self->add_child_to_node($call_id, $cmd_id);
+    say "parse(): Made overridden readpipe call $call_id" if 1 & DEBUG;
+    return $call_id;
+  }
+
+  my ($node, $node_id) = $self->make_node_insert('backtick');
+  $self->add_child_to_node($node_id, $cmd_id);
+  say "parse(): Made backtick node $node_id"     if 1 & DEBUG;
+  return $node_id;
 }
 1;
 

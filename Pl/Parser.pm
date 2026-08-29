@@ -8532,6 +8532,18 @@ sub _process_include_statement {
     }
   }
 
+  # `use subs LIST` PREDECLARES the names in the CURRENT package, and that
+  # predeclaration is the only thing that lets a name displace a core builtin
+  # there — a plain `sub readpipe {...}` does not (probed s451z, task #703).
+  # Record it so the term lowerings that HAVE a builtin form can ask
+  # `builtin_is_overridden`; the statement itself still falls through to the
+  # general `use` arm below, which loads subs.pm and gets %INC right.
+  if ($type eq 'use' && $module eq 'subs') {
+    my $pkg = $self->environment->current_package // 'main';
+    $self->environment->add_builtin_override($pkg, $_)
+      for $self->_parse_use_import_list($stmt);
+  }
+
   # Handle 'use constant' specially
   if ($module eq 'constant') {
     $self->_process_use_constant($stmt, $perl_code);
@@ -9543,6 +9555,14 @@ sub _parse_use_import_list {
       # only handled ([{< and silently passed e.g. qw/%Config/ through as the
       # literal token "qw/%Config/", breaking `use Config qw/%Config/`.
       push @imports, $child->literal;
+    }
+    elsif ($child->isa('PPI::Token::Quote')) {
+      # The UNPARENTHESISED single-name form: `use subs "readpipe";`,
+      # `use POSIX ":sys_wait_h";`.  PPI hands the quote over as a direct
+      # child of the Include statement, so the two arms above never saw it
+      # and the list came back EMPTY — which reads as "no import list" to
+      # every caller (task #703).
+      push @imports, $child->string;
     }
     elsif ($child->isa('PPI::Structure::List')) {
       # ('foo', 'bar') import list

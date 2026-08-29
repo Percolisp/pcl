@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 11;
+plan tests => 22;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -95,3 +95,94 @@ is run_cl('my $w = "yes"; my $c = qx{/bin/echo $w}; print "c=$c";'), "c=yes\n",
    'qx{} interpolates like the backtick form';
 is run_cl(q{my $w = "yes"; my $c = qx'/bin/echo $w'; print "c=$c";}), "c=\n",
    q{qx'' does NOT interpolate (perl-probed: the shell sees a literal $w)};
+
+# ── #702: a COMMAND heredoc (<<`TAG`) is RUN, not returned as text ───────────
+# `<<`TAG`` is readpipe with a heredoc body: the text interpolates like
+# <<"TAG" and is then executed, and the value is the child's stdout.  PCL's
+# heredoc arm never looked at the terminator's QUOTING, so every spelling
+# lowered exactly like <<"TAG" and the COMMAND LINE came back as the value --
+# silently (perl-probed 5.40.3: `<<`H`` with body `echo hi $w` is "hi world",
+# PCL gave "echo hi world").  heredoc_is_command is the sibling predicate of
+# heredoc_is_raw and carries the same spelling latitude (#301): `~` and
+# whitespace may sit between `<<` and the quoted terminator.
+my $HD_PLAIN = <<'PL';
+my $w = "hi";
+print "A=[", <<`H`, "]";
+/bin/echo $w
+H
+PL
+is run_cl($HD_PLAIN), "A=[hi\n]", '<<`TAG` runs the command and returns its output';
+
+my $HD_TILDE = <<'PL';
+my $w = "ti";
+print "A=[", <<~`H`, "]";
+    /bin/echo $w
+    H
+PL
+is run_cl($HD_TILDE), "A=[ti\n]", '<<~`TAG` (indented) runs the command';
+
+my $HD_SPACED = <<'PL';
+my $w = "sp";
+print "A=[", << `H`, "]";
+/bin/echo $w
+H
+PL
+is run_cl($HD_SPACED), "A=[sp\n]", '<< `TAG` (spaced) runs the command';
+
+like transpile($HD_PLAIN), qr/\(p-backtick\b/,
+     '<<`TAG` lowers to the same p-backtick node as ``/qx';
+
+# The inverses: an ordinary heredoc must NOT gain an execution.
+my $HD_DQ = <<'PL';
+my $w = "dq";
+print "A=[", <<"H", "]";
+/bin/echo $w
+H
+PL
+is run_cl($HD_DQ), "A=[/bin/echo dq\n]", '<<"TAG" is still plain interpolated text';
+
+my $HD_SQ = <<'PL';
+my $w = "sq";
+print "A=[", <<'H', "]";
+/bin/echo $w
+H
+PL
+is run_cl($HD_SQ), 'A=[/bin/echo $w' . "\n]", "<<'TAG' is still raw text";
+
+# ── #703: `use subs "readpipe"` displaces the builtin for ``/qx/<<`` ─────────
+# perl spells every command capture `readpipe EXPR`, and readpipe is one of the
+# builtins a package may displace with a compile-time PREDECLARATION
+# ([perl #115330] / [perl #119827], t/op/exec.t rows 31-32).  PCL always ran the
+# shell.  Probed 5.40.3: the override is PACKAGE-scoped, not lexical -- a later
+# `package Other;` in the same scope stops seeing it -- and a plain
+# `sub readpipe {...}` with NO `use subs` does NOT override.
+is run_cl(q{package o; use subs "readpipe"; sub readpipe { "OVR:" . pop }}
+        . q{ print "r=[", `simple`, "]";}),
+   "r=[OVR:simple]",
+   'use subs "readpipe" makes `` call the sub';
+
+is run_cl(q{package o; use subs "readpipe"; sub readpipe { "OVR:" . pop }}
+        . q{ my $v = "iv"; print "r=[", qx{q$v}, "]";}),
+   "r=[OVR:qiv]",
+   'the overridden call still gets the INTERPOLATED command string';
+
+my $HD_OVR = <<'PL';
+package o;
+use subs "readpipe";
+sub readpipe { "OVR:" . pop }
+my $v = "hv";
+print "r=[", <<`H`, "]";
+cmd $v
+H
+PL
+is run_cl($HD_OVR), "r=[OVR:cmd hv\n]", '<<`TAG` respects the readpipe override';
+
+is run_cl(q{package o; use subs "readpipe"; sub readpipe { "OVR:" . pop }}
+        . q{ package other; print "r=[", `/bin/echo shell`, "]";}),
+   "r=[shell\n]",
+   'a SECOND package in the same file still runs the shell';
+
+is run_cl(q{package n; sub readpipe { "OVR:" . pop }}
+        . q{ print "r=[", `/bin/echo noverride`, "]";}),
+   "r=[noverride\n]",
+   'a plain `sub readpipe` without `use subs` does NOT override (perl-probed)';

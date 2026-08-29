@@ -377,6 +377,26 @@ has our_variables => (
     default => sub { {} },
 );
 
+=head2 overridden_builtins
+
+Core builtins a package has displaced with C<use subs>.
+Keys are "Package::name", values are 1.
+
+    overridden_builtins => { 'o::readpipe' => 1 }
+
+perl only lets a compile-time PREDECLARATION (C<use subs>, or an import) take
+a builtin's name; a plain C<sub readpipe {...}> in the package does NOT
+override (probed s451z, task #703).  The effect is PACKAGE-scoped, not
+lexical: C<package Other;> in the same file stops seeing it and re-entering
+the declaring package brings it back.
+
+=cut
+
+has overridden_builtins => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 =head2 isa_declarations
 
 Hash of @ISA declarations per package.
@@ -959,6 +979,27 @@ Returns true if $var was declared with 'our' in $pkg.
 sub is_our_variable {
     my ($self, $pkg, $var) = @_;
     return exists $self->our_variables->{"${pkg}::${var}"};
+}
+
+=head2 add_builtin_override($pkg, $name) / builtin_is_overridden($pkg, $name)
+
+Records / asks whether C<$pkg> displaced the core builtin C<$name> with a
+C<use subs> predeclaration.  See the C<overridden_builtins> attribute.
+
+    $env->add_builtin_override('o', 'readpipe');
+    if ($env->builtin_is_overridden($env->current_package, 'readpipe')) { ... }
+
+=cut
+
+sub add_builtin_override {
+    my ($self, $pkg, $name) = @_;
+    $self->overridden_builtins->{"${pkg}::${name}"} = 1;
+}
+
+sub builtin_is_overridden {
+    my ($self, $pkg, $name) = @_;
+    return 0 if !defined $pkg || !defined $name;
+    return exists $self->overridden_builtins->{"${pkg}::${name}"} ? 1 : 0;
 }
 
 =head2 set_isa($pkg, \@parents)

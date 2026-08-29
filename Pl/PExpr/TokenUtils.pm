@@ -337,6 +337,21 @@ sub heredoc_is_raw {
   return (($t->{_heredoc_content} // $t->content) =~ /^<<~?\s*'/) ? 1 : 0;
 }
 
+# Is this heredoc a COMMAND heredoc (`<<`TAG``)?  Same shape question as
+# heredoc_is_raw and the same spelling latitude: perl allows `~` and
+# whitespace between `<<` and the quoted terminator, so `` <<`E` ``,
+# `` << `E` `` and `` <<~`E` `` are all one.  A backtick-terminated heredoc is
+# `readpipe` with a heredoc body: the text INTERPOLATES like `<<"E"` and is
+# then RUN, and its value is the child's stdout.  PCL used to lower it exactly
+# like `<<"E"` — the command line itself came back as the value, silently
+# (task #702).
+sub heredoc_is_command {
+  my ($t) = @_;
+  return 0 unless ref($t) && Scalar::Util::blessed($t)
+               && $t->isa('PPI::Token::HereDoc');
+  return (($t->{_heredoc_content} // $t->content) =~ /^<<~?\s*`/) ? 1 : 0;
+}
+
 # Does site A sit at or before site B?  1 / 0, or undef when the two are not
 # comparable (either site unknown, or they come from different documents).
 sub site_precedes {
