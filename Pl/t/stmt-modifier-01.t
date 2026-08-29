@@ -79,7 +79,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 30;
+plan tests => 39;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -434,4 +434,113 @@ PL
          'the UNCONDITIONAL spelling still emits plain p-local-cell');
     unlike($plain, qr/p-local-cell-if|p-local-maybe/,
            '…with no conditional wrapper anywhere');
+}
+
+# ── 5. `my @a = (1,2) if COND` — the CONTAINER declaration (task #620) ───────
+# The same family, one branch further: `Pl::Parser2::_lower_block`'s container
+# arm handed the WHOLE token run both to `_multi_decl` (which then saw `if`
+# where it wanted `=` and reported "not a declaration" — the WHOLE-FILE
+# `Parser2 TODO: unsupported declaration` die for the no-init spelling) and to
+# the expression machinery (which answered "Bug. Fell through. Missing case"
+# — the statement DROPPED, a run-time die since the flip).  The single-SCALAR
+# branch has always split the modifier and `our` gets it from
+# `Pl::Parser::_process_our_declaration`; only the container arm never did.
+#
+# The DISCRIMINATOR that made it one arm and not the modifier: `my $x = 1 if
+# 0`, `our @a = (1,2) if 1` and `@t = (1,2) if COND` (no `my`) all worked.
+#
+# Perl's semantics, probed (5.40.3): the container is DECLARED whatever the
+# condition says, and only the assignment is guarded — a false condition
+# leaves it declared and EMPTY and does not evaluate the RHS at all.
+# (The `my $x = EXPR if COND` retain-across-calls behaviour is perl's
+# documented "do not rely" territory; nothing here depends on it — row 4 asks
+# only that a fresh call sees a fresh, correct value.)
+
+is(run_cl(<<'PL'), "a1:[] 0\na2:[1 2] 2\nh1: 0\nh2:a=1 1\nu1:[]\nu2:[1 2]\n",
+no warnings;
+{ my @t = (1,2) if 0; print "a1:[@t] ", scalar(@t), "\n"; }
+{ my @t = (1,2) if 1; print "a2:[@t] ", scalar(@t), "\n"; }
+{ my %h = (a=>1) if 0; print "h1:", join(",", map {"$_=$h{$_}"} sort keys %h), " ", scalar(keys %h), "\n"; }
+{ my %h = (a=>1) if 1; print "h2:", join(",", map {"$_=$h{$_}"} sort keys %h), " ", scalar(keys %h), "\n"; }
+{ my @t = (1,2) unless 1; print "u1:[@t]\n"; }
+{ my @t = (1,2) unless 0; print "u2:[@t]\n"; }
+PL
+   '#620 array and hash containers, if and unless, both truth values');
+
+is(run_cl(<<'PL'), "calls:0 []\ncalls:1 [5 6]\nlist1:[1][2 3]\nlist0:[U][]\n",
+no warnings;
+our $n; my @t;
+sub g2 { $n++; return (5,6) }
+{ $n = 0; my @t = g2() if 0; print "calls:$n [@t]\n"; }
+{ $n = 0; my @t = g2() if 1; print "calls:$n [@t]\n"; }
+{ my ($p, @q) = (1,2,3) if 1; print "list1:[$p][@q]\n"; }
+{ my ($p, @q) = (1,2,3) if 0; print "list0:[", defined($p)?$p:'U', "][@q]\n"; }
+PL
+   '#620 a false condition does not evaluate the RHS; the mixed LIST form too');
+
+# A no-init container decl under a modifier used to die the WHOLE FILE
+# (`_multi_decl` refused the shape).  Nothing is assigned, but the CONDITION
+# still RUNS — perl evaluates it for its side effects.
+is(run_cl(<<'PL'), "c1:1 0\nc2:1 0\nc3:1\n",
+no warnings;
+our $c;
+sub cc { $c++; 1 }
+{ $c = 0; my @a if cc(); print "c1:$c ", scalar(@a), "\n"; }
+{ $c = 0; my %h if cc(); print "c2:$c ", scalar(keys %h), "\n"; }
+{ $c = 0; my $x if cc(); print "c3:$c\n"; }
+PL
+   '#620 a NO-INIT container decl under a modifier: declared, condition runs');
+
+# The container is a real lexical: a named sub capturing it, a package-scoped
+# one, and the string-eval route all see the assigned value.
+is(run_cl(<<'PL'), "cap:[1 2]\neval:[5 6]\nsub:[7 8]\n",
+no warnings;
+my @cv = (1,2) if 1;
+sub cap { return "@cv" }
+print "cap:[", cap(), "]\n";
+my $s = eval 'my @e = (5,6) if 1; "@e"';
+print "eval:[", (defined $s ? $s : "ERR:$@"), "]\n";
+our @outer; @outer = (7,8);
+sub sub1 { my @a = @outer if 1; return "@a" }
+print "sub:[", sub1(), "]\n";
+PL
+   '#620 the captured-by-a-named-sub, string-eval and in-sub routes');
+
+# The inverses.  `_split_modifier` scans the statement's TOP-LEVEL children, so
+# a low-precedence tail is not a modifier and a hash key spelled `if` is not
+# either — the container arm's own comment already drew that distinction.
+is(run_cl(<<'PL'), "t4:[2 2]\nt5:[1 2 3]\n",
+no warnings;
+{ my @a = map { $_ * 2 } (1,1) if 1; print "t4:[@a]\n"; }
+{ my @a = sort { $a <=> $b } (3,1,2) if 1; print "t5:[@a]\n"; }
+PL
+   '#620 a BLOCK-taking list operator in the RHS, under a modifier');
+
+# The inverses: `_split_modifier` scans the statement's TOP-LEVEL children, so
+# a low-precedence tail is not a modifier, a paren-less list operator's
+# arguments are not either, and a hash key spelled `if` is not — the container
+# arm's own comment already drew that distinction.  This row passes on the
+# BASE tree (it contains no conditional container declaration).
+is(run_cl(<<'PL'), "t1:[1 2]\nt2:[1 2]\nt3:if=1,unless=2\nt6:[1 2]\n",
+no warnings;
+sub ff { return @_ }
+{ my @a = (1,2), 3; print "t1:[@a]\n"; }
+{ my @a = (ff 1, 2); print "t2:[@a]\n"; }
+{ my %h = (if => 1, unless => 2); print "t3:", join(",", map {"$_=$h{$_}"} sort keys %h), "\n"; }
+{ my @a; @a = (1,2) if 1; print "t6:[@a]\n"; }
+PL
+   '#620 inverse: a low-precedence tail, a paren-less list op and a key named `if`');
+
+# The EMISSION promise: only the ASSIGNMENT is conditional — the `let` that
+# declares the container is not, which is why a false condition still leaves it
+# declared and empty.  And the unconditional spelling is untouched.
+{
+    my $cond = emitted(q{my @t = (1,2) if 0; print scalar(@t);});
+    like($cond, qr/\(let \(\(\@t \(make-array 0 /,
+         '#620 shape: the let still binds the container unconditionally');
+    like($cond, qr/\(p-if 0 \(p-array-= \@t/,
+         '#620 shape: only the assignment is wrapped in the condition');
+    my $plain = emitted(q{my @t = (1,2); print scalar(@t);});
+    unlike($plain, qr/p-if/,
+           '#620 shape: the UNCONDITIONAL spelling gains no p-if');
 }

@@ -8290,8 +8290,44 @@ sub _lower_block {
       return ($self->_lower_expr([@kd], $first),
               $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
-    my ($vars, $has_init) = $self->_multi_decl($first);
+    # `my @a = (1,2) if COND` (#620): a trailing statement MODIFIER is not part
+    # of the declaration and not part of the expression, and this branch hands
+    # the WHOLE run `@k` both to `_multi_decl` (which then saw `if` where it
+    # wanted `=` and reported "not a declaration" → the WHOLE-FILE die below)
+    # and to the expression machinery (which answered "Bug. Fell through.
+    # Missing case" → the statement DROPPED, a run-time die since the flip).
+    # The single-SCALAR branch above has always split it, and `our` gets it
+    # from `Pl::Parser::_process_our_declaration`; only the CONTAINER branch
+    # never did.  Split ONCE, here, before either consumer — a per-site split
+    # would be six copies of the same rule (this branch calls
+    # `_lower_expr([@k], …)` at five of them).
+    #
+    # The `let` is NOT conditional: perl DECLARES the container whatever the
+    # modifier says, and only the ASSIGNMENT is guarded — probed vs perl
+    # 5.40.3, `my @t = (1,2) if 0` leaves @t declared and EMPTY and does not
+    # evaluate the RHS at all, which is exactly what a fresh container plus a
+    # `p-if` around the assignment gives.
+    my @k = _strip_semi($first->schildren);
+    my ($kmod, $kcond);
+    {
+      my $kexpr;
+      ($kexpr, $kmod, $kcond) = _split_modifier(\@k);
+      # while/until/for/foreach on a declaration go to v1's whole-statement
+      # path, exactly as the single-scalar branch sends them.
+      return ($self->_fallback_stmt($first),
+              $self->_lower_block(\@rest, $vi, $tail_ctx))
+        if _modifier_needs_fallback($kmod);
+      @k = @$kexpr if defined $kmod;
+    }
+    my ($vars, $has_init) = $self->_multi_decl($first, \@k);
     die "Parser2 TODO: unsupported declaration: " . $first->content unless $vars;
+    # A no-init decl has nothing to guard, but the CONDITION still RUNS —
+    # perl evaluates it for its side effects, and in VOID, before the let (the
+    # OUTER variable is what it sees: `my`-visibility starts after the
+    # statement).  Same rule and same shape as the scalar branch's
+    # @declmod_eval.
+    my @kmod_eval = ($kmod && !$has_init)
+      ? ($self->_lower_expr($kcond, $first, ':void')) : ();
     # A single container promoted to a package cell by a rename pass
     # (spanning OR captured-by-named-sub) lowers as `our` does: a defvar'd
     # container hoisted to the section top (so a hoisted named sub that captures
@@ -8299,12 +8335,16 @@ sub _lower_block {
     # init form (`my %h__file__N = (…)`) stays as a write-through assignment
     # via the whole-statement expression machinery (same form the multi-decl
     # branch below emits).
-    my @k = _strip_semi($first->schildren);
+    # The assignment form the five `[@k]` sites all want, with the modifier
+    # applied.  `_apply_modifier` is the same helper the scalar branch uses.
+    my $assign_form = sub {
+      _apply_modifier($self->_lower_expr([@k], $first), $kmod, $kcond, $self, $first);
+    };
     if (@$vars == 1 && $self->{_file_lex_renamed}{$vars->[0]}) {
       push @{ $self->{_captured_decls} },
         global_decl_form($vars->[0], _fresh_container($vars->[0]));
-      my @assign = $has_init ? ($self->_lower_expr([@k], $first)) : ();
-      return (@assign, $self->_lower_block(\@rest, $vi, $tail_ctx));
+      my @assign = $has_init ? ($assign_form->()) : ();
+      return (@kmod_eval, @assign, $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
     if ($has_init) {
       # Self-referential init (`my @a = (@a, 1)` — RHS must see the OUTER
@@ -8321,6 +8361,23 @@ sub _lower_block {
       # v1's fuller machinery → fall back the whole file.
       my ($eq_i) = grep { $k[$_]->isa('PPI::Token::Operator') && $k[$_]->content eq '=' } 0 .. $#k;
       my @rhs     = @k[$eq_i + 1 .. $#k];
+      # A statement MODIFIER on a SELF-REFERENTIAL init is the one combination
+      # the two self-ref shapes below cannot express (#620 residue, task #722):
+      # the RHS has to read the OUTER variable — which is why it is fused into
+      # the `let` BINDING — and a false condition has to leave the container
+      # EMPTY, i.e. one `let` would need two different binding values.  Doing
+      # it correctly needs the condition bound to a temp and tested twice, and
+      # the shape occurs in NO population (measured s451y).  So put the
+      # modifier BACK and let this statement drop exactly as it did before —
+      # LOUD (the #339 announcement, a run-time die since the flip) rather
+      # than a silent wrong false-condition value.
+      if (defined $kmod
+          && do { my $t = join ' ', map { $_->content } @rhs;
+                  grep { $t =~ _reads_name_rx($_) } @$vars }) {
+        @k   = _strip_semi($first->schildren);
+        @rhs = @k[$eq_i + 1 .. $#k];
+        undef $kmod;
+      }
       # Chained declarators (`my @bee = my @bee = qw(…)`, `my (@bim) = my(@bee)
       # = LIST`, array.t): a nested `my` in the RHS declares its names in the
       # SAME enclosing scope (perl warns "masks earlier declaration" for a
@@ -8353,7 +8410,7 @@ sub _lower_block {
             || (grep { $self->{_file_lex_renamed}{$_} } @all);
           $self->_reg_lex(@all);
           return (['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @all],
-                   $self->_lower_expr([@k], $first),
+                   $assign_form->(),
                    $self->_lower_block(\@rest, $vi, $tail_ctx)]);
         }
       }
@@ -8394,7 +8451,7 @@ sub _lower_block {
           push @binds, ['list', cl_sym($v), $init];
         }
         return (['let', ['list', @binds],
-                 $self->_lower_expr([@k], $first),
+                 $assign_form->(),
                  $self->_lower_block(\@rest, $vi, $tail_ctx)]);
       }
     }
@@ -8412,9 +8469,11 @@ sub _lower_block {
       my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture(@renamed) : ();
       my @unren  = grep { !$self->{_file_lex_renamed}{$_} } @$vars;
       $self->_reg_lex(@unren);
-      my @assign = $has_init ? ($self->_lower_expr([@k], $first)) : ();
-      return (@assign, @reg, $self->_lower_block(\@rest, $vi, $tail_ctx)) unless @unren;
-      return (['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @unren],
+      my @assign = $has_init ? ($assign_form->()) : ();
+      return (@kmod_eval, @assign, @reg, $self->_lower_block(\@rest, $vi, $tail_ctx))
+        unless @unren;
+      return (@kmod_eval,
+              ['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @unren],
                @assign, @reg,
                $self->_lower_block(\@rest, $vi, $tail_ctx)]);
     }
@@ -8433,8 +8492,9 @@ sub _lower_block {
                : $k[1]->isa('PPI::Structure::List')
                  ? ($self->_lower_expr([$k[1]], $first, 'inherit')) : ();
     }
-    return (['let', ['list', @binds],
-             ($has_init ? ($self->_lower_expr([@k], $first)) : ()),
+    return (@kmod_eval,
+            ['let', ['list', @binds],
+             ($has_init ? ($assign_form->()) : ()),
              $self->_lower_block(\@rest, $vi, $tail_ctx),
              @tailval]);
   }
@@ -10821,9 +10881,13 @@ sub _lower_our_decl {
 }
 
 # `my @a` / `my %h` / `my ($p, @q)` [= INIT] → (\@var_names, $has_init); else ().
+# $KTOKS (#620) lets a caller that has already split a trailing statement
+# modifier off the run pass the DECLARATION half in: `my @a = (1,2) if $c`
+# declares exactly what `my @a = (1,2)` declares, but the raw token run puts
+# `if` where this matcher wants `=`.  Callers that do not split are unchanged.
 sub _multi_decl {
-  my ($self, $stmt) = @_;
-  my @k = _strip_semi($stmt->schildren);
+  my ($self, $stmt, $ktoks) = @_;
+  my @k = $ktoks ? @$ktoks : _strip_semi($stmt->schildren);
   return () unless @k >= 2
     && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my';
   my @vars;

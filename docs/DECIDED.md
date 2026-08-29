@@ -21,6 +21,34 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451y (2026-08-29, Opus, round 10 agent Y) — a CONTAINER declaration under a statement modifier (#620)
+
+- **The modifier comes off the token run ONCE, before either consumer.**
+  `Pl::Parser2::_lower_block`'s container arm handed the WHOLE run of
+  `my @t = (1,2) if 0` both to `_multi_decl` (which wanted `=` where `if`
+  stood, so the no-init spelling `my %h if 1` was a WHOLE-FILE
+  "unsupported declaration" die) and to the expression machinery (which
+  answered "Bug. Fell through" — the statement DROPPED, a run-time die since
+  the flip).  The single-SCALAR branch has always split it and `our` gets it
+  from `Pl::Parser::_process_our_declaration`; only this arm never did.  The
+  arm calls `_lower_expr([@k], …)` at FIVE sites, so a per-site split would
+  have been five copies of one rule — hence one split plus one `$assign_form`
+  closure, and `_multi_decl` gained an optional token-list argument.
+- **The `let` is NOT conditional — only the ASSIGNMENT is.**  Probed: perl
+  DECLARES the container whatever the modifier says, a false condition leaves
+  it declared and EMPTY, and the RHS is not evaluated at all.  A no-init decl
+  has nothing to guard but its CONDITION STILL RUNS, in void, before the let
+  (the scalar branch's `@declmod_eval` rule).
+- **The one shape it deliberately does NOT cover is a SELF-REFERENTIAL init
+  under a modifier** (`my @a = (@a,3) if COND`, task #722): those two shapes
+  work by fusing the RHS into the `let` BINDING (the only position where the
+  name still means the OUTER variable), and a modifier would need TWO binding
+  values.  The fix puts the modifier BACK on the run there, so it keeps
+  DROPPING loudly instead of answering a wrong false-condition value.
+- Emission IDENTICAL over all four populations (corpus-diff 111 + a 1007-file
+  A/B), so the shape occurs in no corpus and the guard rows are the bar:
+  `Pl/t/stmt-modifier-01.t` 30 → 39.
+
 ## s451y (2026-08-29, Opus, round 10 agent Y) — a `my` list that declares NO NAME still ASSIGNS (#610)
 
 - **`my (undef) = LIST` is not `my ()`.**  `_is_empty_my_decl` (the #227 no-op)
