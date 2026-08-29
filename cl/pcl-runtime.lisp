@@ -9855,6 +9855,25 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (1 (%p-output-buffering 1))
     (2 :none)))
 
+(defun %p-carry-autoflush (old new)
+  "Move $|'s flag from stream OLD to stream NEW, and return NEW.
+
+   $| is a property of the HANDLE, not of the stream object behind it: perl's
+   `$|=1; open(STDOUT,'>&',…)` still flushes every write after the reopen
+   (probed 5.40.3 with an external observer — a partial line reaches the pipe
+   at 0.00 s).  PCL keys the flag on the CL stream, and every standard-handle
+   rebuild makes a new one, so the flag has to travel with the handle.
+
+   That was already wrong before #542 and invisible, because a line-buffered
+   STDOUT flushed anyway.  With perl's block buffering it is not: t/io/dup.t
+   sets `$|` on STDOUT, reopens it from a saved dup, prints `ok 8` — and the
+   row was LOST, because a later close of an fdopen'd `>&=1` handle took
+   descriptor 1 with it before the exit flush could run."
+  (when (gethash old *p-autoflush-handles*)
+    (remhash old *p-autoflush-handles*)
+    (setf (gethash new *p-autoflush-handles*) t))
+  new)
+
 (defun %p-std-rebuild (slot &optional buffering)
   "Rebuild the CL stream standing for standard descriptor SLOT after the
    descriptor itself has been re-pointed, and re-register it under the handle
@@ -9871,22 +9890,26 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
              (sb-sys:make-fd-stream 0 :input t :external-format :utf-8))
        (setf *standard-input* (make-synonym-stream 'sb-sys:*stdin*))
        (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
-    (1 (setf sb-sys:*stdout*
-             (sb-sys:make-fd-stream 1 :output t
-                                    :buffering (or buffering
-                                                   (%p-std-buffering 1))
-                                    :external-format :utf-8))
-       (setf *standard-output* (make-synonym-stream 'sb-sys:*stdout*))
-       (setf (gethash 'STDOUT *p-filehandles*)
-             (%p-register-open-stream *standard-output*)))
-    (2 (setf sb-sys:*stderr*
-             (sb-sys:make-fd-stream 2 :output t
-                                    :buffering (or buffering
-                                                   (%p-std-buffering 2))
-                                    :external-format :utf-8))
-       (setf *error-output* (make-synonym-stream 'sb-sys:*stderr*))
-       (setf (gethash 'STDERR *p-filehandles*)
-             (%p-register-open-stream *error-output*)))))
+    (1 (let ((old *standard-output*))
+         (setf sb-sys:*stdout*
+               (sb-sys:make-fd-stream 1 :output t
+                                      :buffering (or buffering
+                                                     (%p-std-buffering 1))
+                                      :external-format :utf-8))
+         (setf *standard-output* (make-synonym-stream 'sb-sys:*stdout*))
+         (%p-carry-autoflush old *standard-output*)
+         (setf (gethash 'STDOUT *p-filehandles*)
+               (%p-register-open-stream *standard-output*))))
+    (2 (let ((old *error-output*))
+         (setf sb-sys:*stderr*
+               (sb-sys:make-fd-stream 2 :output t
+                                      :buffering (or buffering
+                                                     (%p-std-buffering 2))
+                                      :external-format :utf-8))
+         (setf *error-output* (make-synonym-stream 'sb-sys:*stderr*))
+         (%p-carry-autoflush old *error-output*)
+         (setf (gethash 'STDERR *p-filehandles*)
+               (%p-register-open-stream *error-output*))))))
 
 (defun %p-apply-std-buffering ()
   "Put descriptors 1 and 2 under %p-std-buffering.  Called at load time AND
@@ -9919,12 +9942,16 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   (let ((fd  (%p-fd-of-stream stream))
         (pid (gethash stream *p-pipe-pids*)))
     (if (null fd)
+        ;; %p-carry-autoflush for the same reason %p-std-rebuild does it: $| is
+        ;; the HANDLE's flag and must survive a reopen of that handle.
         (ecase slot
           (0 (setf *standard-input* stream)
              (setf (gethash 'STDIN *p-filehandles*) stream))
-          (1 (setf *standard-output* stream)
+          (1 (%p-carry-autoflush *standard-output* stream)
+             (setf *standard-output* stream)
              (setf (gethash 'STDOUT *p-filehandles*) stream))
-          (2 (setf *error-output* stream)
+          (2 (%p-carry-autoflush *error-output* stream)
+             (setf *error-output* stream)
              (setf (gethash 'STDERR *p-filehandles*) stream)))
         (progn
           ;; Flush what the OLD standard stream still holds before it goes; it
