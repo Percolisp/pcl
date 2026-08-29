@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 24;
 
 sub run_cl {
     my ($code) = @_;
@@ -184,3 +184,61 @@ test_cl('#570 insignificant tokens keep the fast path (nested parens, comment)',
     unlike($cl, qr/p-raw-params \(\$x\)/,
            '#570 shape: a placeholder list does NOT reach p-raw-params');
 }
+
+# ── #610: `my (undef) = LIST` — a list that declares NO NAME ──────────────────
+# #570's residue, and a LOUD one: `Pl::Parser2::_multi_decl` reports "no names"
+# for an all-placeholder list and `_lower_block`'s
+# `die "Parser2 TODO: unsupported declaration"` took the WHOLE FILE, anywhere in
+# the program.  The MIXED list is fine (that is #570 above), so the refusal was
+# exactly "this list declares nothing".
+#
+# `my (undef) = LIST` declares nothing and evaluates LIST — once, in LIST
+# context — discarding it; it is perl's idiomatic "consume and ignore".  It is
+# NOT the `my ()` no-op (task #227), which has no RHS to run.  Every expected
+# string below is real perl 5.40.3's output for the same program.
+
+test_cl('#610 the three repro shapes: all-placeholder my-lists',
+    'sub f7 { my (undef) = @_; return defined($_[0]) ? "def" : "undef" }
+     sub g7 { my (undef, undef) = @_; "g" }
+     my (undef) = (1,2);
+     print f7(qw(A B)), " ", g7(1,2), " ok\n";',
+    "def g ok\n");
+
+# The RHS is a real list assignment: it RUNS, exactly once, in LIST context.
+test_cl('#610 the RHS is evaluated ONCE, in LIST context',
+    'my $n = 0; my @seen;
+     sub h7 { $n++; push @seen, (wantarray ? "LIST" : defined(wantarray) ? "SCALAR" : "VOID"); return (7,8,9) }
+     my (undef) = h7();
+     print "$n @seen\n";',
+    "1 LIST\n");
+
+test_cl('#610 the statement value in SCALAR context is the RHS count',
+    'sub v7 { my (undef) = (10,20,30) }
+     sub w7 { my (undef, undef) = @_; return scalar(@_) }
+     print v7(), " ", w7(1,2,3), "\n";',
+    "3 3\n");
+
+# `my (undef)` reaches STRING EVAL too — the refusal used to escape as $@.
+test_cl('#610 ... and inside a string eval',
+    'my $r = eval "my (undef) = (1,2,3); q(ok)";
+     print defined($r) ? $r : "ERR:$@", "\n";',
+    "ok\n");
+
+test_cl('#610 an ARRAY on the RHS is read, not consumed',
+    'my @a = (1,2,3);
+     my (undef) = @a;
+     my %h = (a=>1);
+     my (undef) = %h;
+     print "@a ", join(",", map {"$_=$h{$_}"} sort keys %h), "\n";',
+    "1 2 3 a=1\n");
+
+# The inverses: the mixed list (#570), the `my ()` no-op (#227) and a
+# placeholder list with NO initialiser must all be untouched.  (No
+# all-placeholder decl WITH an init here — that is the positive shape above;
+# this row must pass on the base tree.)
+test_cl('#610 inverse: mixed list, my (), and a no-init placeholder list',
+    'sub m7 { my (undef, $x) = @_; return $x }
+     sub n7 { my ($y, undef) = @_; return $y }
+     my (); my (undef);
+     print m7(qw(A B)), " ", n7(qw(A B)), "\n";',
+    "B A\n");

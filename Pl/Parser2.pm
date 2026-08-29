@@ -8274,6 +8274,22 @@ sub _lower_block {
       return ($self->_lower_block(\@rest, $vi, $tail_ctx),
               ($decl_tail ? ('(progn)') : ()));
     }
+    # `my (undef) = RHS` / `my (undef, undef) = RHS` — a declaration list that
+    # declares NO NAME.  Legal and idiomatic perl ("consume and ignore"), and
+    # NOT the `my ()` no-op above: nothing is declared, but the RHS is still a
+    # list assignment and is EVALUATED — once, in LIST context (probed vs perl
+    # 5.40.3: the RHS sub reports wantarray true and is called exactly once).
+    # So the lowering is the statement MINUS nothing: the whole `my (undef) =
+    # RHS` run goes through the expression machinery exactly as the multi-decl
+    # branch below does for `my (undef, $x) = RHS` (#570's shape) — the only
+    # difference there is the `let` of the names, and there are none.  Without
+    # this arm `_multi_decl` reports "no names" and the die below took the
+    # WHOLE FILE (#610).
+    if (_is_no_name_my_decl($first)) {
+      my @kd = _strip_semi($first->schildren);
+      return ($self->_lower_expr([@kd], $first),
+              $self->_lower_block(\@rest, $vi, $tail_ctx));
+    }
     my ($vars, $has_init) = $self->_multi_decl($first);
     die "Parser2 TODO: unsupported declaration: " . $first->content unless $vars;
     # A single container promoted to a package cell by a rename pass
@@ -9802,6 +9818,21 @@ sub _is_empty_my_decl {
       && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
       && $k[1]->isa('PPI::Structure::List')
       && !@{ $k[1]->find('PPI::Token::Symbol') || [] };
+}
+
+# `my (undef) = RHS` — the same "declares no name" list, but WITH an
+# initialiser, so it is NOT the `my ()` no-op: the RHS is a real list
+# assignment that runs (#610).  Sibling of _is_empty_my_decl and deliberately
+# disjoint from it (that one requires exactly two children, i.e. no `=`).
+# `find` returns 0, not undef, when nothing matches — hence the `|| []`.
+sub _is_no_name_my_decl {
+  my ($stmt) = @_;
+  my @k = _strip_semi($stmt->schildren);
+  return @k >= 3
+      && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my'
+      && $k[1]->isa('PPI::Structure::List')
+      && !@{ $k[1]->find('PPI::Token::Symbol') || [] }
+      && $k[2]->isa('PPI::Token::Operator') && $k[2]->content eq '=';
 }
 
 sub _tail_decl_convertible {

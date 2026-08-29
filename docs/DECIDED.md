@@ -21,6 +21,27 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451y (2026-08-29, Opus, round 10 agent Y) — a `my` list that declares NO NAME still ASSIGNS (#610)
+
+- **`my (undef) = LIST` is not `my ()`.**  `_is_empty_my_decl` (the #227 no-op)
+  requires exactly two children, i.e. no `=`; `_multi_decl` greps the Symbol
+  tokens and reports "no names" for an all-placeholder list, and
+  `_lower_block`'s `die "Parser2 TODO: unsupported declaration"` then took the
+  WHOLE FILE, anywhere in the program — string eval included.  The MIXED list
+  (`my (undef, $x) = @_`, #570) was already fine, so the refusal was exactly
+  "this list declares nothing".
+- **The lowering is the statement, unchanged, through the expression
+  machinery** — the same `_lower_expr([@k], $stmt)` the multi-decl branch runs
+  beside its `let`, and there are simply no names to `let`.  Perl evaluates the
+  RHS ONCE in LIST context (probed: the callee reports wantarray true, called
+  once) and the statement's scalar value is the RHS count; both fall out of
+  reusing that path.
+- Filed **#721** from the probes: a list assignment used as a VALUE in LIST
+  context returns the scalar COUNT where perl returns the LHS lvalues
+  (`sub f { my ($a,undef) = (10,20,30) }` in list context is `(10,20)` in perl
+  and `(3)` in PCL).  PRE-EXISTING and family-wide — the `() = LIST` countof
+  idiom is the one spelling PCL gets right.
+
 ## s451y (2026-08-29, Opus, round 10 agent Y) — the DEREF family is the postfix `->` invocant, in two spellings (#612)
 
 - **`EXPR->@*` IS `@{ EXPR }`** — `Pl::PExpr` lowers the postfix deref onto the
