@@ -1473,6 +1473,22 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 Regex match state is *global-with-dynamic-save*, exactly Perl: a failed
 match leaves `$1` from the previous successful match intact.
 
+**`$&`, `` $` `` and `$'` are DERIVED, not stored** (normative, s450u / task
+#477).  A successful match records the subject string and two offsets; the
+three variables are cut from them the first time a program reads one, and the
+cut is memoised until the next successful match.  This is perl's own rule and
+it is not an optimisation a translator may skip: building them eagerly makes
+every scalar-context `m//g` loop QUADRATIC, because each of the N matches
+copies the whole subject twice (measured before the change: `while ($x =~
+/./g) {}` over 100 000 chars 3.4 s, 200 000 chars 12.8 s, where perl does
+1 000 000 in 0.09 s).  Two consequences for a translator: a deferred cut is
+only correct in a runtime whose string writers COPY (PCL's do — lvalue and
+4-arg `substr`, `tr///`, `chop`, `vec`, the magic increment all build a new
+string, so `$x =~ /cd/; substr($x,0,1) = "Z"` still answers from the subject
+as it was at match time); and the three names then hold no value in their
+symbol at all, so the symbolic-reference rule below has to reach them through
+their getter rather than through storage.
+
 **A SYMBOLIC scalar reference reaches the magic globals** (normative, s446j /
 task #505).  `${"1"}` is `$1`, `${"10"}` is `$10`, `${"&"}` is `$&` — perl
 names them like any other package variable, and the value is undef only when

@@ -975,9 +975,82 @@
 (defvar $18 *p-undef* "Regex capture group 18")
 (defvar $19 *p-undef* "Regex capture group 19")
 (defvar $20 *p-undef* "Regex capture group 20")
-(defvar |$&| nil "Regex MATCH - the whole matched string")
-(defvar |$`| nil "Regex PREMATCH - everything before the match")
-(defvar |$'| nil "Regex POSTMATCH - everything after the match")
+;;; $&, $` and $' — MATCH, PREMATCH, POSTMATCH — are CUT ON DEMAND (task #477).
+;;;
+;;; They are O(length-of-subject) strings, and a successful match used to build
+;;; all three eagerly.  That makes every scalar-context m//g loop QUADRATIC,
+;;; because each of the N matches copies the whole subject twice: measured
+;;; `while ($x =~ /./g) {}` over 100 000 chars 3.4 s, 200 000 chars 12.8 s (4x
+;;; for 2x the data), where perl does 1 000 000 in 0.09 s.  sb-sprof put 94 %
+;;; of the run in set-match-vars and 74 % in vector-subseq.
+;;;
+;;; perl keeps the OFFSETS and materialises a copy only when the program reads
+;;; the variable, and so does this: a match stores three fixnums, and the three
+;;; names are symbol macros over accessors that cut (and memoise) the string
+;;; the first time it is read.  A read costs what it always did; a match that
+;;; nobody asks costs nothing.
+;;;
+;;; WHY SYMBOL MACROS and not a p-magic-cell box (the $. mechanism): every use
+;;; site would then hold the same box, so `push @a, $&` would alias — every
+;;; element reading the CURRENT match.  A symbol macro keeps the VALUE an
+;;; ordinary string at every site, which is what all the readers expect.
+;;; `boundp`/`symbol-value` no longer answer for these three, so the one place
+;;; that reads a magic scalar through its symbol (%p-symref-scalar-value, the
+;;; ${"&"} spelling) consults *computed-magic-getters* — see there.
+;;;
+;;; WHAT A DEFERRED CUT RELIES ON: that the subject string is never mutated in
+;;; place between the match and the read, or `$x =~ /cd/; substr($x,0,1) = "Z"`
+;;; would answer from the NEW contents where perl answers from the old.  Every
+;;; string-writing primitive in this runtime builds a new string (copy-seq /
+;;; concatenate) — p-vec-set, the magic string increment, lvalue and 4-arg
+;;; substr, tr///, chop — and all of those spellings are probed against perl in
+;;; Pl/t/match-vars-01.t.  A future in-place writer must force the pending cut
+;;; (read the three accessors) before it mutates.
+(defvar *match-subject* nil
+  "Subject string of the last successful match, or NIL when there is none (or
+   when $& was set directly, which is the s///e path).")
+(defvar *match-beg* 0 "Start offset of the last successful match.")
+(defvar *match-end* 0 "End offset of the last successful match.")
+(defvar *match-whole* nil "Memo/override for $&.")
+(defvar *match-pre*   nil "Memo/override for $`.")
+(defvar *match-post*  nil "Memo/override for $'.")
+
+(defun %match-whole ()
+  (or *match-whole*
+      (and *match-subject*
+           (setf *match-whole* (subseq *match-subject* *match-beg* *match-end*)))))
+(defun %match-pre ()
+  (or *match-pre*
+      (and *match-subject*
+           (setf *match-pre* (subseq *match-subject* 0 *match-beg*)))))
+(defun %match-post ()
+  (or *match-post*
+      (and *match-subject*
+           (setf *match-post* (subseq *match-subject* *match-end*)))))
+;; Writers: the s///e callback sets $& directly, and generated code can name
+;; any of the three as an assignment target (perl makes that a run-time error,
+;; but the emission must still COMPILE — a reader error would lose the file).
+;; A write wins over the offsets, exactly like a memo already computed.
+(defun (setf %match-whole) (val) (setf *match-whole* val))
+(defun (setf %match-pre)   (val) (setf *match-pre* val))
+(defun (setf %match-post)  (val) (setf *match-post* val))
+
+(define-symbol-macro |$&| (%match-whole))    ; Regex MATCH
+(define-symbol-macro |$`| (%match-pre))      ; Regex PREMATCH
+(define-symbol-macro |$'| (%match-post))     ; Regex POSTMATCH
+
+(defvar *computed-magic-getters* (make-hash-table :test 'eq)
+  "Magic scalars whose value is COMPUTED, not stored in the symbol: symbol ->
+   getter.  %p-symref-scalar-value reads it, because `boundp` is false for a
+   symbol macro and ${\"&\"} must still answer $&.")
+(setf (gethash '|$&| *computed-magic-getters*) #'%match-whole
+      (gethash '|$`| *computed-magic-getters*) #'%match-pre
+      (gethash '|$'| *computed-magic-getters*) #'%match-post)
+
+(defun %clear-match-strings ()
+  "Forget the last match: the three offsets AND any memo/override."
+  (setf *match-subject* nil *match-beg* 0 *match-end* 0
+        *match-whole* nil *match-pre* nil *match-post* nil))
 (defvar |$+| nil "Regex - last (highest-numbered) capture group that matched")
 (defvar |$^N| nil
   "Perl $^N - the participating capture group whose closing parenthesis is
@@ -14487,6 +14560,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    symbol's own value.  NIL (perl undef) when the name has no variable."
   (when (find #\Nul name-str) (return-from %p-symref-scalar-value nil))
   (let ((sym (%p-symref-symbol name-str "$" nil)))
+    ;; $& / $` / $' hold no value in their symbol at all — they are computed
+    ;; from the last match's offsets (task #477), so `boundp` is false and
+    ;; ${"&"} would answer undef.  Ask their getter instead.
+    (let ((getter (and sym (gethash sym *computed-magic-getters*))))
+      (when getter (return-from %p-symref-scalar-value (funcall getter))))
     (when (and sym (boundp sym))
       (let* ((raw (symbol-value sym))
              (v (if (p-box-p raw) (p-box-value raw) raw)))
@@ -17474,7 +17552,10 @@ buffer's fill-pointer; everything else falls back to file-length."
         $10 *p-undef* $11 *p-undef* $12 *p-undef* $13 *p-undef*
         $14 *p-undef* $15 *p-undef* $16 *p-undef* $17 *p-undef*
         $18 *p-undef* $19 *p-undef* $20 *p-undef*
-        |$&| nil |$`| nil |$'| nil |$+| nil |$^N| nil)
+        |$+| nil |$^N| nil)
+  ;; $& / $` / $' are computed from the last match's offsets (task #477), so
+  ;; clearing them means forgetting the match, not assigning nil.
+  (%clear-match-strings)
   (clrhash %+)
   (clrhash |%-|)
   (setf (fill-pointer |@{^CAPTURE}|) 0))
@@ -17485,10 +17566,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    $` (PREMATCH), $' (POSTMATCH), $+ (last capture that matched) and
    $^N (rightmost-closing participating capture, from the CLOSERS vector
    cached by %pcl-create-scanner; without it, falls back to $+'s rule)."
+  ;; OFFSETS ONLY (task #477): the three strings are cut on demand.  Copying
+  ;; the subject twice here is what made a scalar-context m//g loop quadratic.
   (when (and match-start match-end)
-    (setf |$&| (subseq str match-start match-end)
-          |$`| (subseq str 0 match-start)
-          |$'| (subseq str match-end)))
+    (setf *match-subject* str
+          *match-beg* match-start
+          *match-end* match-end
+          *match-whole* nil *match-pre* nil *match-post* nil))
   ;; $+ = highest-numbered capture group that actually participated
   (when (and reg-starts reg-ends)
     (loop for i from (1- (length reg-starts)) downto 0

@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 28;
+plan tests => 31;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -253,4 +253,41 @@ print "1:<$n> ", $n+0, " ", (defined $n ? "T" : "F"), " ", ($n ? "T" : "F"), "\n
 my $m = ($q =~ s/b/B/);   print "2:<$m>\n";
 my $t = "abc"; my $c = ($t =~ tr/z/y/);  print "3:<$c>\n";
 my $u = ("abc" =~ /zzz/); print "4:<$u>\n";
+END
+
+# 29-31: $&/$`/$' are CUT ON DEMAND from the last match's offsets (task #477 —
+# building them eagerly made every scalar-context m//g loop quadratic: 100k
+# chars 3.4 s, 200k 12.8 s, where perl does 1M in 0.09 s).  These three rows
+# are the invariants a deferred cut can break; every expectation is perl
+# 5.40.3's own output.
+
+# 29. THE ONE A LAZY CUT COULD GET WRONG: the subject is MUTATED between the
+# match and the read.  perl answers from the string as it was AT MATCH TIME,
+# and so must this — which holds because every string writer in the runtime
+# builds a new string rather than mutating one (lvalue substr, 4-arg substr,
+# tr///, chop probed here; see the set-match-vars comment).
+is run_cl(<<'END'), "1:[ab][cd][ef] Zbcdef\n2:[ab][cd][ef] zbcdef\n3:[ab][cd][ef] aQcde\n",
+   '$`/$&/$\' answer from the subject AS IT WAS AT MATCH TIME';
+my $m = "abcdef"; $m =~ /cd/; substr($m, 0, 1) = "Z";
+print "1:[$`][$&][$'] $m\n";
+my $t = "abcdef"; $t =~ /cd/; $t =~ tr/a/z/;
+print "2:[$`][$&][$'] $t\n";
+my $c = "abcdef"; $c =~ /cd/; chop $c; substr($c, 1, 1, "Q");
+print "3:[$`][$&][$'] $c\n";
+END
+
+# 30. The symbolic spelling ${"&"} (task #505) still answers.  A computed magic
+# scalar holds NO value in its symbol, so the `boundp`/`symbol-value` route
+# that serves ${NAME} has to know about it.
+is run_cl(<<'END'), "[f][oob][ar]\n", '${"&"} / ${"`"} / ${"\'"} read the computed match vars';
+"foobar" =~ /oob/;
+print "[", ${"`"}, "][", ${"&"}, "][", ${"'"}, "]\n";
+END
+
+# 31. A read MEMOISES the cut; the next match must not answer from the memo.
+is run_cl(<<'END'), "[y][y][q][p][r]\n", 'a new match invalidates the memoised $&';
+"xyz" =~ /y/;
+my $a1 = $&; my $a2 = $&;
+"pqr" =~ /q/;
+print "[$a1][$a2][$&][$`][$']\n";
 END

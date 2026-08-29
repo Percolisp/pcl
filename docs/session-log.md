@@ -76,6 +76,54 @@ regenerated (bodies byte-identical; stamp only).
   drop the errno ties).
 
 ---
+## Session 450u (2026-08-29, Opus, round 8 agent U) — the two performance items: #560 (prototype facts on disk) and #477 (a lazy `$&`/`` $` ``/`$'`)
+
+**Both shipped; four findings filed (#680–#683).**  Neither touches emission,
+so the generation stays **v2-355** and no artifact is regenerated: #560 is
+emission-identical by construction (its bar) and #477 is `cl/`-only.
+Rulings and the full numbers in `docs/DECIDED.md` §s450u.
+
+- **#560 — `Pl/ProtoCache.pm`.**  `_extract_module_prototypes` walks a module
+  and, recursively, everything it `use`s, for the parse facts a using file
+  needs; the memo was a `state` hash, so every `pl2cl` re-parsed the same
+  242 KB of Test2 through PPI.  Now memoized on DISK, one entry per module,
+  consulted before the walk recurses.  **289 cpan-t files, one process each,
+  serial: 226.6 s → 62.3 s warm; 99.0 % hit rate** (a COLD population pass is
+  already 78.0 s — file 1 warms the other 288).  The bar was emission
+  identity and it is met four ways: corpus-diff identical over 111 + 6
+  shapes, `emission-ab --ref e2a7567` 500 files SAME / 0 DIFF / 0 RCDIFF, 23
+  lib shims SAME, and `pl2cl --server` byte-identical for the same fragment
+  in two orders and alone, cache on and off.
+  - Three things the pinned key does not carry and which are silent wrongs
+    without them, all argued in the module's POD: a **compiler stamp** (the
+    facts are a function of the code that derived them — and it is what keeps
+    two worktrees sharing a generation string apart, `PCLSbcl`'s rule for a
+    core); the **dependency list** the walk resolved, re-resolved and
+    re-stat'ed on every hit (the facts are dependency-inclusive, and a dist's
+    `t/lib` can move a name); and **never storing a walk whose answer depends
+    on where the process started** — a cycle-truncated one, or one that
+    changed `@INC` under itself.  Measured, the cycle taint fires for exactly
+    `Encode` + `Encode::Alias` (they use each other) in 3 of 289 files.
+  - Guard `Pl/t/proto-cache-01.t`, 12 rows, no SBCL: cold/warm identity, a
+    corrupted entry, a key mismatch, a touched module, a touched dependency.
+- **#477 — the quadratic `m//g`.**  sb-sprof answered in one run: 94.2 % of
+  the loop was `set-match-vars` and 73.7 % `vector-subseq`, because every
+  match built `$&`, `` $` `` and `$'` eagerly and two of those copy the whole
+  subject.  perl keeps offsets and cuts on demand; so does PCL now, through
+  symbol macros over three accessors.  **200k chars 12.80 s → 0.72 s, 1M
+  2.83 s** (perl 0.09 s), and `t/op/utf8cache.t` goes **TIMEOUT 2/0 → DIFF
+  14/0** — the file whose "quadratic pos" test is the whole point.
+  - The representation question was the interesting part.  The `p-magic-cell`
+    box (`$.`'s mechanism) is a shared container, so `push @a, $&` would push
+    the box; probing that on `$.` itself found a live silent wrong (`push
+    @lines, $.` gives `3 3 3` where perl gives `1 2 3`, **#683**).  Symbol
+    macros keep the value an ordinary string at every use site; the price is
+    that `boundp` no longer answers, so the one place that reads a magic
+    scalar through its symbol (`${"&"}`, #505) consults a getter table.
+  - What a deferred cut relies on — that the subject is never mutated in
+    place between match and read — is now stated in `ir-spec.md` §8 and
+    probed for lvalue `substr`, 4-arg `substr`, `tr///` and `chop` in
+    `match-vars-01.t` (28 → 31 rows).  13 probes identical to perl 5.40.3.
 
 ## Session 449s (2026-08-29, Opus, round 7 agent S) — the parser fillers: #563, #564, #550 + #449
 

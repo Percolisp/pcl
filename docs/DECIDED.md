@@ -69,6 +69,80 @@ those two files and the live plan doc directly -- no new review-doc families.*
   21 → 26.  Filed: **#670** (`%!` residue: absent key `""` vs undef,
   `scalar(%!)` 1 vs 134), **#671**, **#672** (`%-` values must be arrayrefs),
   **#673** (`lib/Errno.pm` shim), **#674** (English.pm may drop the errno ties).
+## s450u (2026-08-29, Opus, round 8 agent U) — the two performance items: the prototype facts go on DISK (#560), and `$&`/`` $` ``/`$'` are CUT ON DEMAND (#477)
+
+- **#560 SHIPPED — `Pl/ProtoCache.pm`, the L2 memo for
+  `_extract_module_prototypes`.**  Built to the s449 design pins: one entry per
+  MODULE under `~/.pcl-cache/proto/`, consulted before the walk recurses (a hit
+  prunes the whole branch), key = module path + mtime + size + generation,
+  hashed into the filename AND repeated inside the JSON, value = the
+  `PCL_PROTO_ORACLE` record shape, atomic temp+rename, the `state` memo kept as
+  L1.  **Measured over the 289-file cpan-t population, one `pl2cl` per file,
+  serial: 226.6 s → 62.3 s warm** (in one interleaved A/B run: no-cache 209.9 s
+  vs cached 68.4 s, 287 files byte-SAME / 0 DIFF).  A COLD population pass is
+  already 78.0 s, because file 1 warms the other 288.  Hit rate **99.0 %** warm
+  (608 hits / 6 misses / 0 stores, stable across two passes), 85.3 % cold.
+- **THE BAR: emission IDENTICAL, cost only.**  `corpus-diff` identical over 111
+  + 6 shapes with the drop count unchanged; `emission-ab --ref e2a7567` **500
+  files SAME / 0 DIFF / 0 RCDIFF** (cpan `.pm` + cpan-t + perl-tests + shapes)
+  and 23 lib shims SAME; `pl2cl --server` gives the same bytes for the same
+  fragment in forward order, reverse order and alone, cache on and cache off.
+- **THREE STRENGTHENINGS of the pinned key, each of which is a silent wrong
+  without it** (all in the module's POD): the key also carries a **COMPILER
+  stamp** (the `Pl/` directory's absolute path + every `Pl/**.pm`'s mtime+size)
+  — the facts are a function of the code that derived them, and this is also
+  what stops two worktrees sharing a generation string from reading each
+  other's entries (`PCLSbcl`'s rule for a saved core); the entry records every
+  **DEPENDENCY the walk resolved** (name, resolved path, mtime, size) and a hit
+  re-resolves and re-stats each one, because the facts an entry holds are
+  dependency-INCLUSIVE and a dist's `t/lib` can make a name resolve elsewhere;
+  and a walk whose result depends on WHERE THE PROCESS STARTED is **never
+  stored** — a cycle-truncated walk (taint propagates to every frame on the
+  stack and through the L1 memo) or one that changed `@INC` under itself
+  (`use lib` inside a module, detected by comparing the list across the walk).
+  **Measured over the whole cpan-t population: taint fires for exactly TWO
+  modules, `Encode` and `Encode::Alias`** — they `use` each other, so whichever
+  one the process reached first is the one whose facts are complete — in 3 of
+  289 files.  Those 6 lookups ARE the warm pass's 6 misses; every other module
+  caches.
+- Guard `Pl/t/proto-cache-01.t` (12 rows, no SBCL): cold/warm byte-identity, a
+  **corrupted** entry ignored and rebuilt, a key mismatch ignored, a touched
+  module and a touched DEPENDENCY both invalidating.  `PCL_NO_PROTO_CACHE=1` is
+  the A/B switch, `PCL_PROTO_STATS=1|2` the hit-rate instrument, `pcl
+  --clear-cache` removes the entries and says how many.  **The BUDGET stays
+  rejected** (task #560's own measured table).
+- **#477 SHIPPED — `$&`, `` $` `` and `$'` are DERIVED from the last match's
+  offsets, not built eagerly.**  sb-sprof on the 100k `while ($x =~ /./g) {}`
+  shape put **94.2 % of the run in `set-match-vars` and 73.7 % in
+  `vector-subseq`**: each of the N matches copied the whole subject twice.  A
+  match now stores the subject and two fixnums; the three names are symbol
+  macros over accessors that cut (and memoise) on the first read.  **Linear:**
+  50k 1.08 → 0.37 s, 100k 3.37 → 0.48 s, 200k 12.80 → 0.72 s, 400k 1.26 s,
+  **1M 2.83 s** (was projected ~400 s; perl 0.09 s).  `t/op/utf8cache.t`
+  **TIMEOUT 2/0 → DIFF 14/0** — its "quadratic pos" loop is the acceptance.
+- **WHY SYMBOL MACROS, not the `p-magic-cell` box `$.` uses**: a magic-cell box
+  is a SHARED CONTAINER, so `push @a, $&` would push the box and every element
+  would read the CURRENT match.  Probed live on `$.`, which HAS that
+  representation: `push @lines, $.` gives `3 3 3` where perl gives `1 2 3` —
+  filed as **#683**, pre-existing.  A symbol macro keeps the value an ordinary
+  string at every use site; the cost is that `boundp`/`symbol-value` no longer
+  answer, so `%p-symref-scalar-value` (the `${"&"}` spelling, #505) consults a
+  three-entry getter table.  A `let` of a symbol-macro name is legal in SBCL
+  (measured), so the `local $&` emission still compiles.
+- **WHAT A DEFERRED CUT RELIES ON** (normative, `ir-spec.md` §8): the subject is
+  never mutated in place between the match and the read.  Every string writer
+  in the runtime builds a new string (`copy-seq`/`concatenate` — `p-vec-set`,
+  the magic increment, lvalue and 4-arg `substr`, `tr///`, `chop`), and all of
+  those spellings are probed against perl in `Pl/t/match-vars-01.t` (28 → 31
+  rows).  A future in-place writer must force the pending cut first.
+- Filed: **#680** (the residual Target-A gap — 2.6 µs per match vs perl's
+  0.09 µs, with the profile recipe and the three suspects), **#681**
+  (`_extract_file_prototypes` — the `require './test.pl'` walk — is still
+  per-process; measure before doing), **#682** (the proto cache has no pruning;
+  reuse the runtime's own max-age policy), **#683** (the `$.` alias above).
+- **NO generation bump for either**: #560 is emission-identical by design (and
+  the cache key already carries the generation — bumping it would only
+  invalidate module caches), #477 is `cl/`-only.
 
 ## s449s (2026-08-29, Opus, round 7 agent S) — the punctuation CONTAINERS: `%` needs a POSITION rule, and #449's CL-spelling blocker is GONE (#550 + #449)
 
