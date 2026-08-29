@@ -8834,6 +8834,8 @@ sub _process_include_statement {
       my $module_env = $self->_extract_module_prototypes($module);
       if ($module_env) {
         $self->_merge_module_prototypes($module_env, \@imports);
+        # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
+        $self->_merge_bare_quote_imports($stmt, $module_env, scalar @imports);
       }
 
       # Perl: `use Module LIST` makes LIST a normal list that is evaluated and
@@ -9611,6 +9613,38 @@ sub _use_import_arg_tokens {
 # arrives and every `is(...)` argument loses scalar context (three
 # cpan-tests/Test-Simple files moved).  Only a caller that KNOWS every
 # argument is a name may ask for it; `use subs` is such a caller.
+# The UNPARENTHESISED single-quote import list (`use Perl::OSType 'os_type';`)
+# — task #733, RULED s451: the reading comes from the MODULE, never from the
+# syntax, because `use Test::More 'no_plan'` is the identical shape and
+# 'no_plan' is an ARGUMENT.
+#
+# TWO measurements shaped this (both re-taken s452ab, see the task):
+#
+#  1. WHICH module fact.  The ruling named the @EXPORT/@EXPORT_OK scan, but
+#     that scan reads LITERAL `qw()` only and BOTH modules build their export
+#     list from a variable — `export_names` is EMPTY for Perl::OSType AND for
+#     Test::More — so keying on it would decide nothing at all.  The fact that
+#     does decide is the module's own declared subs, which
+#     `_extract_module_prototypes` already collects: Perl::OSType's records
+#     carry `os_type`, Test::More's do NOT carry `no_plan` (it is a plan
+#     keyword, not a sub).  Same rule, stronger data.
+#
+#  2. NON-RESTRICTING, which is what makes it safe.  The s451z damage was not
+#     the READING but the RESTRICTION: a non-empty import list makes
+#     _merge_module_prototypes import ONLY those names, so Test::More's
+#     `is($$;$)` never arrived and every `is(...)` argument lost scalar
+#     context.  So this runs as a SECOND merge on top of the ordinary one
+#     (the same function, restricted to the bare names) instead of replacing
+#     it — a name the module does not declare adds nothing, and a name it
+#     does adds one prototype and takes none away.
+sub _merge_bare_quote_imports {
+  my ($self, $stmt, $module_env, $had_imports) = @_;
+  return if $had_imports || !$module_env;
+  my @bare = grep { $module_env->get_prototype($_) }
+             $self->_parse_use_import_list($stmt, bare_quote => 1);
+  $self->_merge_module_prototypes($module_env, \@bare) if @bare;
+}
+
 sub _parse_use_import_list {
   my ($self, $stmt, %opt) = @_;
   my @imports;

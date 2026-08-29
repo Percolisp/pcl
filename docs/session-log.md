@@ -124,6 +124,43 @@ the `Pl/t` guards are the bar, not exec.t.  Gate **184/6234**; the three
 artifacts regenerate identically.  Guards `Pl/t/system-block-01.t` 24 → 31,
 all seven failing on `0dd7434`.
 
+**#733 — the unparenthesised import name, RULED s451, with two measurements
+that refine the ruling.**  `use Perl::OSType 'os_type';` left the bareword as
+the STRING "os_type".  (a) The ruling named the `@EXPORT`/`@EXPORT_OK` scan as
+the decider, but that scan reads literal `qw()` only, and BOTH modules in the
+question build their export list from a variable — `export_names` is EMPTY for
+Perl::OSType *and* for Test::More — so keying on it would have decided
+nothing at all.  The fact that does decide is the module's own DECLARED SUBS,
+which `_extract_module_prototypes` already collects: Perl::OSType's records
+carry `os_type`, Test::More's do not carry `no_plan` (a plan keyword, not a
+sub).  Same rule, stronger data.  (b) The s451z damage was the RESTRICTION,
+not the reading — a non-empty import list makes the merge import ONLY those
+names — so `_merge_bare_quote_imports` runs a SECOND, restricted merge on top
+of the ordinary one instead of replacing it: a name the module does not
+declare adds nothing and takes nothing away.
+
+That the guard actually catches the naive form was measured, not assumed: the
+s451z change (the bare-quote arm made unconditional) was rebuilt in a
+`0dd7434` worktree, and there the option-word row prints `LIST|x` for perl's
+`SCALAR|x` and `Test-Simple/t/Legacy/Builder/try.t` loses `is`'s scalar-context
+imposition — both of which this form leaves alone.  (A first attempt at the
+counter-check patched only `Pl::Parser`'s call site and showed NO damage; the
+damage needs Parser2's PRE-MERGE restricted too.  Recorded so the next reader
+does not conclude the guard is inert.)
+
+Emission A/B over 1030 files: **ONE line in ONE file** — filetest.t's
+`(p-str-ne "os_type" "Unix")` → `(p-str-ne (p-scalar-ctx (pl-os_type)) "Unix")`;
+corpus-diff IDENTICAL over 111.  Gate **184/6237**.  Guards
+`Pl/t/imported-term-01.t` 15 → 18 (row 16 fails on `0dd7434`, rows 17–18 pass).
+
+**It moves `op/filetest.t` 183/251 → 181/250, and that is the s438h shape
+again**: the `SKIP` block gated on `os_type` had never run — it skipped on the
+string — and running it honestly reaches `-l \*foo`, where PCL dies in SBCL's
+pathname parser because the filename contains a `*`.  Three `skip` rows that
+counted as passes are replaced by an abort two rows earlier.  Filed as
+**#755**, and it is general and much bigger than this row: `open my $fh, ">",
+"/tmp/a_*_b"` is enough to kill PCL, where perl just makes the file.
+
 Filed from the probes, all PRE-EXISTING and none touched: **#750** (a
 DEREFERENCED array/hash in a list LHS is not greedy — `($x, @$r) = (1,2,3)`
 leaves `@$r` empty, silent wrong), **#751** (`sub f { my ($x) = @_ }` returns
@@ -132,7 +169,15 @@ the entry-time argument count is not reachable inside the macro, which is why
 it was filed rather than folded in), **#752** (an EMPTY-bodied signature sub
 returns its synthesized unpack's value where perl returns `()` — the
 `signatures.t` A/B diff; those subs are only ever called for their die, so no
-row moves).
+row moves), **#754** (a `${\ EXPR }` interpolation calls EXPR in SCALAR
+context where perl propagates LIST through the backslash) and **#755** above.
+
+**Expected movements for the batch sweep/companion legs** (with causes):
+`op/filetest.t` 183/251 → 181/250 (#733 + #755, above); nothing else in the
+companion or the sweep is predicted — the `cl/**` halves of #720 (`p-cast-%`
+autovivification) and #731 (the list-context split) are invisible to
+corpus-diff, so their legs are op/ + io/ and the full sweep.  op/exec.t was
+measured on BOTH trees and does not move.
 
 ---
 

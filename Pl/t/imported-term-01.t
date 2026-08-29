@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 15;
+plan tests => 18;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -201,3 +201,81 @@ both_agree('sub K { 4 }' . "\n"
          . 'sub p3 { my ($s,$i)=@_; return substr($s, $i - K + 1, K) }' . "\n"
          . 'print "[", p3("/tmp/XXXXXXXXXX", 14), "]\n";',
            '#711 inverse: a PLAIN sub of the same shape still takes arguments');
+
+# ---- task #733: the UNPARENTHESISED single-quote import list ---------------
+#
+# `use Perl::OSType 'os_type';` — PPI hands the quote over as a DIRECT CHILD
+# of the Include statement, so `_parse_use_import_list` returned an EMPTY
+# list, the merge took its import-everything branch, and that branch imports a
+# plain sub only when the `@EXPORT` scan lists it.  Real modules build their
+# export list from a variable (Perl::OSType: `our @EXPORT_OK = @{ $EXPORT_TAGS
+# {all} }`), so the scan sees nothing and the bareword `os_type` was emitted as
+# the STRING "os_type" (t/op/filetest.t:112).
+#
+# THE ONE-LINE FIX IS WRONG, MEASURED (s451z): `use Test::More 'no_plan'` is
+# the identical shape and 'no_plan' is an ARGUMENT, and a non-empty import
+# list makes the merge import ONLY those names — so Test::More's `is($$;$)`
+# stopped arriving and every `is(...)` argument lost scalar context (three
+# cpan-tests/Test-Simple files moved).
+#
+# So the reading comes from the MODULE (does it declare a sub of that name?),
+# and — this is what makes it safe — it NEVER RESTRICTS: it runs as a SECOND,
+# restricted merge on top of the ordinary one, so a name the module does not
+# declare adds nothing and takes nothing away.  Rows 2 and 3 are that inverse.
+
+my $vlib = tempdir(CLEANUP => 1);
+make_path("$vlib/T733");
+open(my $vfh, '>', "$vlib/T733/Var.pm") or die "fixture: $!";
+print $vfh <<'PM';
+package T733::Var;
+use strict; use warnings;
+require Exporter;
+our @ISA = qw(Exporter);
+my @names = qw( vfun );
+our @EXPORT_OK = @names;
+sub vfun { "VFUN" }
+1;
+PM
+close $vfh;
+
+# A module whose import ALSO accepts option words that are not subs — the
+# Test::More 'no_plan' shape — and whose exported sub carries a ($$)
+# prototype, which is the thing the s451z damage lost.
+open(my $ofh, '>', "$vlib/T733/Opt.pm") or die "fixture: $!";
+print $ofh <<'PM';
+package T733::Opt;
+use strict; use warnings;
+require Exporter;
+our @EXPORT = qw( oshow );
+sub import { my $c = shift; local @_ = ($c); goto &Exporter::import }
+our @ISA = qw(Exporter);
+sub oshow ($$) { print "$_[0]|$_[1]\n" }
+1;
+PM
+close $ofh;
+
+sub both_agree_v {
+    my ($code, $desc) = @_;
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh "use lib '$vlib';\n$code";
+    close $fh;
+    my $perl = `perl $pl 2>&1`;
+    my $cl_code = PCLCore::transpile("$pl2cl $pl");
+    my ($cfh, $cl) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
+    print $cfh $cl_code;
+    close $cfh;
+    my $pcl = `sbcl @sbcl_rt --load $cl 2>&1`;
+    $pcl =~ s/^;.*\n//gm;
+    $pcl =~ s/^PCL Runtime loaded\n//gm;
+    $pcl =~ s/^\s*\n//gm;
+    is($pcl, $perl, "$desc (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
+}
+
+both_agree_v(q{use T733::Var 'vfun'; print "[", vfun, "]\n";},
+             '#733 an unparenthesised import NAME makes the bareword a call');
+
+both_agree_v(q{use T733::Opt 'quiet'; sub cx { wantarray ? "LIST" : "SCALAR" } oshow(cx(), "x");},
+             '#733 inverse: an option WORD does not restrict the prototype merge');
+
+both_agree_v(q{use T733::Var qw(vfun); print "[", vfun, "]\n";},
+             '#733 inverse: the qw() spelling is unchanged');

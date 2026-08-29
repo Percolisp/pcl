@@ -85,6 +85,35 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `child_context`'s named-unary list (its prototype is `$`).  Guards
   `Pl/t/system-block-01.t` 24 → 31; all seven fail on `0dd7434`.
 
+- **THE UNPARENTHESISED IMPORT NAME IS READ FROM THE MODULE, AND IT NEVER
+  RESTRICTS (#733, implementing the s451 ruling with two measurements that
+  refine it).**  `use Perl::OSType 'os_type';` — PPI hands the quote over as a
+  DIRECT CHILD of the Include statement, so the import list came back empty
+  and the bareword `os_type` was emitted as the STRING (t/op/filetest.t:112).
+  **(a) WHICH module fact**: the ruling named the `@EXPORT`/`@EXPORT_OK` scan,
+  but that scan reads literal `qw()` only and BOTH modules build their export
+  list from a variable — `export_names` is EMPTY for Perl::OSType *and* for
+  Test::More — so keying on it would decide nothing.  The fact that decides is
+  the module's own DECLARED SUBS, which `_extract_module_prototypes` already
+  collects: Perl::OSType's records carry `os_type`, Test::More's do not carry
+  `no_plan`.  Same rule, stronger data.  **(b) NON-RESTRICTING is what makes
+  it safe**: the s451z damage was the RESTRICTION, not the reading — a
+  non-empty import list makes the merge import only those names, so
+  Test::More's `is($$;$)` stopped arriving.  So `_merge_bare_quote_imports`
+  runs a SECOND, restricted merge on top of the ordinary one (the same
+  function; a name the module does not declare adds nothing and takes nothing
+  away).  Verified by rebuilding the naive form in a base worktree: it makes
+  the guard's option-word row print `LIST|x` for perl's `SCALAR|x` and moves
+  `Test-Simple/t/Legacy/Builder/try.t`; this form leaves both alone.
+  Emission A/B over 1030 files: **ONE line in ONE file**, `(p-str-ne "os_type"
+  …)` → `(p-str-ne (p-scalar-ctx (pl-os_type)) …)`.  Guards
+  `Pl/t/imported-term-01.t` 15 → 18.
+  **Movement it causes: `op/filetest.t` 183/251 → 181/250** — its `SKIP` block
+  now RUNS instead of skipping on the string, reaches `-l \*foo`, and dies in
+  SBCL's pathname parser on the `*` (**#755**: any perl filename containing a
+  wildcard character kills PCL — general, pre-existing, `open my $fh,">",
+  "/tmp/a_*_b"` is enough).
+
 ## s452aa (2026-08-29, Opus agent AA, round 11) — the %ENV/%INC marker on the LIST paths (#736), the TAP glue KILLED (#723), sysopen (#730), `exit` in an END block (#738)
 
 - **A `%ENV`/`%INC` MARKER is a HASH everywhere, not just on the keyed
