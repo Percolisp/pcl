@@ -3295,6 +3295,30 @@ sub gen_kv_array_slice_form {
 
 # --- E2 form variants: progn + the small I/O nodes --------------------------
 
+# #611 — the SCALAR_CTX counterpart of the LIST_CTX push-down in
+# gen_progn_form / gen_tree_val_form.  `annotate_contexts` gives a progn's
+# children LIST_CTX unconditionally (`child_context`: "progn (comma operator)
+# forces list context"), and a tree_val's children inherit the parent's
+# context, so a scalar context that arrives AFTER annotation never reached
+# them.  The one producer of such a context is `_gen_scalar_deref_base_form`,
+# which forces the base of a postfix `->` scalar at emit time — so through a
+# TRANSPARENT paren layer (`((0,$h))->{k}`) the inner group still lowered as a
+# list and the arrow dereferenced a `(vector …)`.
+#
+# It is an EXPLICIT annotation that licenses the push-down, never the
+# `get_node_context` default: an UNannotated node also reads SCALAR_CTX, and
+# forcing scalar on those changed three unrelated corpus files (a `do{}` block
+# under `x`, an `@{…}` cast operand, a `return` in an if-body).  Hence
+# get_node_context_raw.
+#
+# Only the LAST child moves: the comma operator in scalar context yields its
+# last element; the earlier ones are evaluated for their effects.
+sub _scalar_ctx_pushdown {
+  my ($self, $node_id) = @_;
+  my $raw = $self->expr_o->get_node_context_raw($node_id);
+  return defined($raw) && $raw == SCALAR_CTX;
+}
+
 # Comma/list expression.  AST-level classification (_node_is_definitely_scalar
 # / _is_array_expr_node), no generated-text inspection.  EMPTY () declines: the
 # text emitter's "(vector )" / "(progn )" carry a trailing space a form cannot
@@ -3307,6 +3331,9 @@ sub gen_progn_form {
   return $ctx == 1 ? ['vector'] : ['progn'] unless @$kids;
   if ($ctx == 1) {  # LIST_CTX
     $self->expr_o->set_node_context($_, 1) for @$kids;
+  }
+  elsif ($self->_scalar_ctx_pushdown($node_id)) {
+    $self->expr_o->set_node_context($kids->[-1], SCALAR_CTX);
   }
   my @forms = map { $self->gen_node_form($_) } @$kids;
   if ($ctx == 1) {
@@ -3721,8 +3748,16 @@ sub gen_tree_val_form {
   return $ctx == LIST_CTX ? ['vector'] : ['progn'] unless @$kids;
 
   if (scalar(@$kids) == 1) {
+    # SCALAR_CTX joins the push-down (#611): a single-child paren layer is
+    # TRANSPARENT and collapses to its child's form, so a scalar context that
+    # arrives after annotate_contexts (the emit-time override in
+    # _gen_scalar_deref_base_form) has to reach the child or the inner group
+    # still lowers as a list.  One child IS the last child.
     if ($ctx == LIST_CTX || $ctx == INHERIT_CTX) {
       $self->expr_o->set_node_context($kids->[0], $ctx);
+    }
+    elsif ($self->_scalar_ctx_pushdown($node_id)) {
+      $self->expr_o->set_node_context($kids->[0], SCALAR_CTX);
     }
     my $child_is_list = ($ctx == LIST_CTX) && $self->_is_list_node_for_refgen($kids->[0]);
     my $child = $self->gen_node_form($kids->[0]);
@@ -3735,6 +3770,10 @@ sub gen_tree_val_form {
     return $child;
   }
 
+  # Multi-child = the comma operator; in scalar context its value is the LAST
+  # element, evaluated in scalar context (#611, same rule as gen_progn_form).
+  $self->expr_o->set_node_context($kids->[-1], SCALAR_CTX)
+    if $self->_scalar_ctx_pushdown($node_id);
   my @forms = map { $self->gen_node_form($_) } @$kids;
   if ($ctx == LIST_CTX) {
     return ['vector', @forms];

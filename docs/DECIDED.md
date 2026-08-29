@@ -21,6 +21,29 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451y (2026-08-29, Opus, round 10 agent Y) — a TRANSPARENT paren layer must pass the scalar context on (#611)
+
+- **The context an emitter forces at EMIT time has to be pushed down, because
+  `annotate_contexts` ran BEFORE it.**  `_gen_scalar_deref_base_form` forces
+  SCALAR_CTX on the base of a postfix `->`, but `child_context` had already
+  stamped every child of a comma group LIST_CTX ("progn (comma operator)
+  forces list context"), and a single-child paren layer COLLAPSES to its
+  child's form — so `((0,$h))->{k}` dereferenced a `(vector 0 $h)` and died
+  while the depth-1 `(0,$h)->{k}` was right.  One predicate
+  `ExprToCL::_scalar_ctx_pushdown` + the SCALAR arm in `gen_progn_form` and
+  `gen_tree_val_form`, **LAST CHILD ONLY** (the comma operator's value).
+- **The licence is an EXPLICIT annotation, never the `get_node_context`
+  default.**  An UNannotated node reads SCALAR_CTX too; keying on that moved
+  three corpus files for unrelated reasons, so the predicate asks
+  `get_node_context_raw`.  That is the whole difference between a 3-file and
+  a 9-file A/B.
+- **Six of the nine A/B movers are OTHER instances of the same missing
+  push-down, all in the right direction**: `(Class->new)->isa(…)` (op/ +
+  uni/universal.t) is the bug itself; `${ (), $sub->() } = 4` (op/sub_lval.t)
+  and the `undef` branch of a ternary arrow base (op/gmagic.t) lose a wrong
+  LIST bind; `$h{$_} xor ($_ =~ /…/)` (re/pat.t) stops evaluating the MATCH
+  in list context, where it returns the CAPTURES; `close($fh) or …`
+  (porting/podcheck.t) drops a pointless `p-list-ctx`.  ir-spec §2.5.
 ## s451w (2026-08-29, Opus agent W, round 10) — the round-9 review regressions: #685, #663, #694
 
 - **#685 CLOSED — a FOREIGN-qualified symbolic name never reaches main's

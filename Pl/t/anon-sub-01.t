@@ -20,7 +20,7 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
 
-use Test::More tests => 54;
+use Test::More tests => 59;
 BEGIN { use_ok('Pl::PExpr') };
 
 my $code;
@@ -369,3 +369,43 @@ both_agree('package C9; sub hi { "HI" }
             (1,2,$r)->[1];
             print "[$$r[0] $h->{a} ", (1,$deep)->{x}[1], " ", (1,2,"C9")->hi, "]\n";',
            '#527 the multi-element base as an lvalue, chained, a class name, and in void context');
+
+diag "";
+diag "-------- task #611: the scalar context must reach through a NESTED paren";
+
+# #527's residue.  `_gen_scalar_deref_base_form` forces SCALAR_CTX on the base
+# of a postfix `->` at EMIT time, but `annotate_contexts` had already stamped
+# the whole subtree -- and `child_context` gives a progn's children LIST_CTX
+# unconditionally ("progn (comma operator) forces list context").  A base that
+# is itself a TRANSPARENT paren layer collapses to its child's form, so the
+# inner group still lowered as `(vector 0 $h)` and the arrow dereferenced the
+# vector: `((0,$h))->{k}` DIED "Not a HASH reference" while the depth-1
+# spelling `(0,$h)->{k}` was right.  The fix is the SCALAR_CTX counterpart of
+# the LIST_CTX push-down in gen_progn_form / gen_tree_val_form, applied to the
+# LAST child only -- the comma operator's value in scalar context.
+#
+# Rows 1-2 diverged on the base tree (`->[i]` was a silent wrong, the other
+# three died); rows 3-4 are the inverses that were already right.
+
+my $N = 'my $r = [10,20,30]; my $h = {k=>"HK"}; my $cr = sub { "CR(@_)" };' . "\n"
+      . 'package O6; sub new { bless {}, shift } sub m1 { "M1" }'
+      . "\npackage main; my \$o = O6->new;\n";
+
+both_agree($N . 'print "[", ((0,$r))->[1], " ", ((0,$h))->{k}, " ",
+                        ((0,$cr))->("x"), " ", ((0,$o))->m1, "]\n";',
+           '#611 the repro: one transparent paren layer, all four members');
+
+both_agree($N . 'print "[", (((0,$r)))->[1], " ", (((0,$h)))->{k}, "]\n";',
+           '#611 ... and two layers deep');
+
+both_agree('my @log; sub s6 { push @log, $_[0]; return $_[1] }
+            my $h = {k=>"HK"};
+            print "[", ((s6(1,0), s6(2,$h)))->{k}, " ", join(",",@log), "]\n";',
+           '#611 ... every element still evaluated, in order');
+
+both_agree('print "[", join("|", ((1,2,3))[1]), " ", join("|", (1,2,3)[1,2]), "]\n";',
+           '#611 inverse: a nested LIST SLICE is still a list slice');
+
+both_agree('my @n = ((1,2,3)); my $c = ((1,2,3));
+            print "[", scalar(@n), " $c]\n";',
+           '#611 inverse: a nested paren list with NO arrow keeps its own context');

@@ -342,6 +342,14 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   different operator, a LIST SLICE; PExpr marks both `list_ctx_subscript`
   and the array emitter keeps their base a list. The postfix-deref
   spellings (`->@*`, `->$*`) are NOT yet in this family (task #612).
+  **The scalar context reaches through TRANSPARENT paren layers**
+  (normative, s451y/#611): `((0,$h))->{k}` is `(0,$h)->{k}`, and any depth
+  of nesting is the same value. Contexts are annotated top-down before
+  emission (`PExpr::annotate_contexts`), and a comma group's children are
+  annotated LIST unconditionally, so an emitted-time scalar context — the
+  one the arrow's base gets — has to be pushed down as the group lowers:
+  the LAST child only, which is the comma operator's value; the earlier
+  ones are still evaluated, for their effects.
 - **A TYPEGLOB is the one payload whose ref-ness lives on the box, not on the
   object** (normative, task #423). Perl distinguishes a glob *value*
   (`$g = *foo`, which turns the SV into a GV: `ref($g)` is `""`, `"$g"` is
