@@ -215,7 +215,13 @@ sub clear_cache {
   my @files = (glob("\Q$cache_dir\E/*.fasl"), glob("\Q$cache_dir\E/*.lisp"));
   my $n = @files ? unlink(@files) : 0;
   my $k = PCLSbcl::clear_cached_cores();
-  say "pcl: cleared $n cached module file(s) from $cache_dir and $k runtime core file(s) from "
+  # …and the transpile-time prototype facts (task #560), which live under the
+  # same root and are keyed the same way.
+  require lib; lib->import("$ROOT");
+  require Pl::ProtoCache;
+  my $p = Pl::ProtoCache::clear();
+  say "pcl: cleared $n cached module file(s) from $cache_dir, $p prototype entr(y|ies) from "
+    . Pl::ProtoCache::cache_dir() . " and $k runtime core file(s) from "
     . PCLSbcl::core_cache_dir();
 }
 

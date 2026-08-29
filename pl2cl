@@ -101,6 +101,7 @@ binmode(STDERR, ":utf8");
 use lib dirname(abs_path($0));
 use Pl::Parser;
 use Pl::CLForm ();   # build_eval_preamble's designator rule (cl_pkg) — rule 11
+use Pl::ProtoCache ();  # the ONE reader of *pcl-cache-generation* (task #560)
 
 # v2 (Pl::Parser2 → Pl::CLForm structured emission) is the ONLY pipeline
 # (default since session 273/W9; the v1 escape hatch and the whole-file
@@ -138,6 +139,12 @@ sub parse_source {
   my %known = (eval_mode => 1, eval_pkg => 1, eval_captures => 1, eval_features => 1);
   my @unknown = sort grep { !$known{$_} } keys %opts;
   die "pl2cl: unknown transpile mode(s): @unknown\n" if @unknown;
+  # One process can transpile many sources (`--server` answers every string
+  # eval of a whole run), and a transpile that DIES could leave the prototype
+  # walk's frame stack half-unwound — after which the next transpile's
+  # dependency bookkeeping would be recorded against a dead walk.  Start each
+  # source from an empty stack (task #560).
+  Pl::ProtoCache::reset_walks();
   return pipeline_marker(v2 => Pl::Parser2->$method($args[0], %opts));
 }
 
@@ -146,23 +153,9 @@ sub parse_source {
 # mix of a corpus — and of ~/.pcl-cache — is auditable.  gen= is read from the
 # runtime's *pcl-cache-generation* (the single source of truth; do NOT
 # duplicate the string here — a wrong gen in the marker would be worse than
-# none when debugging stale-cache problems).
-my $CACHE_GEN;
-sub cache_generation {
-  return $CACHE_GEN if defined $CACHE_GEN;
-  $CACHE_GEN = 'unknown';
-  my $rt = dirname(abs_path($0)) . '/cl/pcl-runtime.lisp';
-  if (open my $fh, '<', $rt) {
-    while (my $line = <$fh>) {
-      if ($line =~ /\(defparameter\s+\*pcl-cache-generation\*\s+"([^"]+)"/) {
-        $CACHE_GEN = $1;
-        last;
-      }
-    }
-    close $fh;
-  }
-  return $CACHE_GEN;
-}
+# none when debugging stale-cache problems).  ONE reader: Pl::ProtoCache keys
+# its entries by the same string and does the reading (task #560).
+sub cache_generation { return Pl::ProtoCache::generation() }
 
 sub pipeline_marker {
   my ($pipeline, $out) = @_;

@@ -21,6 +21,7 @@ use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm qw(cl_sym cl_pkg);
 use Pl::ExprToCL;
 use Pl::Environment;
+use Pl::ProtoCache;
 # THE global partition (task #289): every declaration this file emits, and the
 # `local` lowering below, ask the same function whether a name keeps today's
 # defvar + dynamic-let or becomes a symbol-macro cell.
@@ -9053,11 +9054,23 @@ sub _find_module_file {
 sub _extract_module_prototypes {
   my ($self, $module) = @_;
 
-  # Memoization cache (persists across all calls)
+  # L1 — the in-process memo (persists across all calls).  L2 is the on-disk
+  # one below (Pl::ProtoCache, task #560): this one dies with the process, and
+  # every `pl2cl` was therefore paying the whole transitive PPI walk again.
   state $cache = {};
+  # What the walk for each module RESOLVED (its transitive dependency list) and
+  # whether its result depended on where the process started.  An L1 hit must
+  # report both to the walk that is asking, exactly as a fresh walk would.
+  state $walk  = {};
+  # Set (possibly to undef) only for modules that reached path resolution — a
+  # module the skip list answers for is not a dependency of anything.
+  state $paths = {};
 
   # Return cached result if already parsed
-  return $cache->{$module} if exists $cache->{$module};
+  if (exists $cache->{$module}) {
+    _note_module_dep($module, $paths, $walk);
+    return $cache->{$module};
+  }
 
   # Skip known core modules that don't have prototypes affecting codegen.
   # (List::Util is intentionally NOT skipped: its shim declares block
@@ -9093,15 +9106,71 @@ sub _extract_module_prototypes {
   # budget at all (37.9 s).  Only the extreme — read the file's own includes
   # and never recurse — was faster (23.8 s), and that one breaks a genuine
   # re-export chain (`use Encode` in perl-tests/tr.t reaches Storable at
-  # depth 2).  The real fix for the cost is to memoize the FACTS across
-  # processes (task #560); until then the honest price is paid.
+  # depth 2).  The fix for the cost was to memoize the FACTS across processes
+  # — Pl::ProtoCache, the L2 lookup below (task #560).
 
-  # Cycle detection
-  return undef if $self->_parsing_modules->{$module};
+  # Cycle detection.  A walk cut short here produced facts that depend on
+  # WHICH module the process reached first, so nothing on the stack may be
+  # written to the on-disk cache (Pl::ProtoCache's POD says why).
+  if ($self->_parsing_modules->{$module}) {
+    Pl::ProtoCache::taint();
+    return undef;
+  }
   local $self->_parsing_modules->{$module} = 1;
 
   my $module_path = $self->_find_module_file($module);
+  # Both answers are facts the enclosing walk used — "resolves to this file"
+  # and "does not resolve at all" (a dist's t/lib can change either).
+  $paths->{$module} = $module_path;
+  Pl::ProtoCache::note_dep('mod', $module, $module_path);
   return $cache->{$module} = undef unless $module_path;
+
+  # L2 — the on-disk memo.  A hit prunes the whole branch: the entry already
+  # holds what the recursive walk below would have merged, and its recorded
+  # dependencies have just been re-resolved and re-stat'ed.
+  if (my $hit = Pl::ProtoCache::load($module, $module_path,
+                                     sub { $self->_find_module_file($_[0]) })) {
+    $walk->{$module} = { deps => $hit->{deps}, taint => 0 };
+    Pl::ProtoCache::note_deps($hit->{deps});
+    return $cache->{$module} = $hit->{env};
+  }
+
+  # A `use lib` inside a module mutates the inc_paths list every later
+  # resolution in this process reads, so a walk that changed it is not a fact
+  # about the module either.  Compared across the walk, so it stays true
+  # however the mutation is spelled.
+  my $inc_before = join "\0", @{ $self->inc_paths };
+  Pl::ProtoCache::begin_walk();
+  my $module_env = $self->_walk_module_prototypes($module, $module_path);
+  Pl::ProtoCache::taint() if join("\0", @{ $self->inc_paths }) ne $inc_before;
+  my $frame = Pl::ProtoCache::end_walk();
+  $walk->{$module} = $frame;
+  Pl::ProtoCache::note_deps($frame->{deps});
+  # store() is the ONE place that decides whether this walk may be written —
+  # a tainted frame leaves no entry, and says so in the stats.
+  Pl::ProtoCache::store($module, $module_path, $module_env, $frame)
+    if $module_env;
+
+  return $cache->{$module} = $module_env;
+}
+
+# Report a module the enclosing walk has just consulted through the L1 memo:
+# the same dependency facts a fresh walk would have recorded.
+sub _note_module_dep {
+  my ($module, $paths, $walk) = @_;
+  Pl::ProtoCache::note_dep('mod', $module, $paths->{$module})
+    if exists $paths->{$module};
+  my $w = $walk->{$module} or return;
+  Pl::ProtoCache::note_deps($w->{deps});
+  Pl::ProtoCache::taint() if $w->{taint};
+  return;
+}
+
+# THE walk itself: one PPI parse of the module and the fact collection over it.
+# Split out of _extract_module_prototypes so the cache bookkeeping brackets
+# exactly one call (every failure path below leaves through the same return).
+sub _walk_module_prototypes {
+  my ($self, $module, $module_path) = @_;
 
   my $module_env = Pl::Environment->new();
 
@@ -9117,11 +9186,11 @@ sub _extract_module_prototypes {
   # attribute pre-pass); the walk may recursively call
   # _extract_module_prototypes() for the module's own `use` statements.
   my $doc = eval { $module_parser->ppi_doc };
-  return $cache->{$module} = undef unless $doc;
+  return undef unless $doc;
   eval { $module_parser->collect_prototypes($doc) };
   if ($@) {
     warn "Failed to extract prototypes from $module: $@";
-    return $cache->{$module} = undef;
+    return undef;
   }
   # PCL_PROTO_ORACLE=DIR (task #391 measurement): dump what this walk
   # produced — the prototype records and the export names — one JSON file
@@ -9142,7 +9211,7 @@ sub _extract_module_prototypes {
   }
   $module_env->export_names(\%exported);
 
-  return $cache->{$module} = $module_env;
+  return $module_env;
 }
 
 sub _dump_proto_oracle {
@@ -9175,6 +9244,7 @@ sub _dump_proto_oracle {
 sub _extract_file_prototypes {
   my ($self, $path) = @_;
   state $cache = {};
+  state $walk  = {};   # what each walk resolved — see _extract_module_prototypes
 
   # Resolve the path: relative to cwd first, then to the source file's dir,
   # then walking UP the source file's ancestors.  The ancestor walk handles
@@ -9210,12 +9280,35 @@ sub _extract_file_prototypes {
 
   require Cwd;
   my $abs = Cwd::abs_path($resolved) // $resolved;
-  return $cache->{$abs} if exists $cache->{$abs};
+  # This file is an input of whatever walk is asking (a module may `require`
+  # one), whether it is parsed now or answered from the memo.  Not cached to
+  # disk itself: a path-required file is resolved relative to the REQUIRING
+  # file and to the cwd, so it is not keyed by a module name (task #560).
+  Pl::ProtoCache::note_dep('file', $abs, $abs);
+  if (exists $cache->{$abs}) {
+    Pl::ProtoCache::note_deps($walk->{$abs}{deps}) if $walk->{$abs};
+    Pl::ProtoCache::taint() if $walk->{$abs} && $walk->{$abs}{taint};
+    return $cache->{$abs};
+  }
 
   # Cycle detection (shared across the require chain)
-  return undef if $self->_parsing_modules->{"file:$abs"};
+  if ($self->_parsing_modules->{"file:$abs"}) {
+    Pl::ProtoCache::taint();
+    return undef;
+  }
   local $self->_parsing_modules->{"file:$abs"} = 1;
 
+  Pl::ProtoCache::begin_walk();
+  my $file_env = $self->_walk_file_prototypes($abs);
+  my $frame = Pl::ProtoCache::end_walk();
+  $walk->{$abs} = $frame;
+  Pl::ProtoCache::note_deps($frame->{deps});
+  return $cache->{$abs} = $file_env;
+}
+
+# THE walk for a path-required file — see _walk_module_prototypes.
+sub _walk_file_prototypes {
+  my ($self, $abs) = @_;
   my $file_env = Pl::Environment->new();
   my $file_parser = Pl::Parser->new(
     filename                => $abs,
@@ -9225,11 +9318,11 @@ sub _extract_file_prototypes {
     collect_prototypes_only => 1,
   );
   my $doc = eval { $file_parser->ppi_doc };
-  return $cache->{$abs} = undef unless $doc;
+  return undef unless $doc;
   eval { $file_parser->collect_prototypes($doc) };
-  return $cache->{$abs} = undef if $@;
+  return undef if $@;
   _dump_proto_oracle("file:$abs", $abs, $file_env) if $ENV{PCL_PROTO_ORACLE};
-  return $cache->{$abs} = $file_env;
+  return $file_env;
 }
 
 
