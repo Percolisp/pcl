@@ -183,7 +183,7 @@
    #:*p-eval-lex-alist*
    #:p-exception #:p-exception-object
    ;; File I/O
-   #:p-open #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
+   #:p-open #:p-sysopen #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
@@ -10614,6 +10614,69 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
       `(let ((%parsed (%p-open-parse-2arg ,mode)))
          (%p-open-impl (%p-fh-arg ,fh) (car %parsed) (cdr %parsed)))))
 
+;;; ---------------------------------------------------------------------------
+;;; sysopen (task #730)
+;;; ---------------------------------------------------------------------------
+;;; `sysopen FH, PATH, FLAGS [, PERMS]` is perl's raw open(2): the mode is an
+;;; O_* BITMASK, not a mode string, and there is no PerlIO layer stack to parse.
+;;; It is what File::Temp's DEFAULT `tempfile()` uses (O_CREAT|O_EXCL|O_RDWR),
+;;; so with it missing the whole modern temp-file idiom died at
+;;; "Undefined subroutine &File::Temp::sysopen".
+;;;
+;;; The DIRECTION comes from the access bits (O_ACCMODE = 3) and nothing else;
+;;; the BUFFERING comes from %p-output-buffering, the one reading of perl's
+;;; policy (#542) — asked here directly rather than through
+;;; %p-line-buffer-if-tty, because that helper exists to REBUILD a stream CL
+;;; `open` already made with the wrong buffering, and here the fd-stream is
+;;; ours to build correctly the first time.
+
+(defun %p-sysopen-direction (flags)
+  "The CL stream direction for an O_* FLAGS word: perl reads the access mode
+   out of the low two bits and so does this.  A value of 3 is not a legal
+   access mode (rule 12: say so rather than pick one)."
+  (case (logand flags 3)
+    (0 :input)
+    (1 :output)
+    (2 :io)
+    (t (error "PCL: sysopen: illegal access mode ~D in flags ~D"
+              (logand flags 3) flags))))
+
+(defun %p-sysopen-impl (fh path flags &optional perms)
+  "Perl sysopen: open(2) with an O_* bitmask, install the handle, return 1 on
+   success.  On failure perl returns FALSE and sets $! — so does this, from the
+   syscall's own errno rather than a later reading of the C global."
+  (let* ((path-str (to-string path))
+         (flag-word (truncate (to-number flags)))
+         ;; Perl's default PERMS is 0666; the umask applies either way, because
+         ;; it is applied by open(2) itself.
+         (mode (if (or (null perms) (eq perms *p-undef*))
+                   #o666
+                   (truncate (to-number perms))))
+         (dir (%p-sysopen-direction flag-word))
+         (fd (handler-case (sb-posix:open path-str flag-word mode)
+               (sb-posix:syscall-error (e)
+                 (setf *p-stored-errno* (sb-posix:syscall-errno e))
+                 nil))))
+    (when (null fd)
+      (return-from %p-sysopen-impl nil))
+    (let ((stream (sb-sys:make-fd-stream
+                   fd
+                   :input  (member dir '(:input :io))
+                   :output (member dir '(:output :io))
+                   :buffering (if (eq dir :input)
+                                  :full
+                                  (%p-output-buffering fd))
+                   :external-format :utf-8
+                   :name path-str
+                   :auto-close nil)))
+      (%p-install-fh fh stream)
+      1)))
+
+(defmacro p-sysopen (fh path flags &optional perms)
+  "Perl sysopen - open(2) with O_* flags.  Bareword FH is auto-quoted, exactly
+   as p-open does it."
+  `(%p-sysopen-impl (%p-fh-arg ,fh) ,path ,flags ,perms))
+
 (defun %p-close-socket (sock)
   "Close a socket: close its cached stream (which closes the fd) if one was made,
    else socket-close the object directly.  Drop it from the stream cache."
@@ -13211,7 +13274,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-395"
+(defparameter *pcl-cache-generation* "v2-400"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

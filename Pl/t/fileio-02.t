@@ -67,7 +67,7 @@ sub test_io {
     is($cl_out, $perl_out, $name) or diag("Perl: $perl_out\nCL:   $cl_out");
 }
 
-plan tests => 34;
+plan tests => 40;
 
 # --- Test 1: Bareword write + read (baseline) ---
 {
@@ -635,5 +635,106 @@ open(my \$g, "<&=\$n") or die "dup: \$!";
 my \$line = <\$g>;
 print "got=[\$line]";
 close \$g;
+PERL
+}
+
+# --- Tests 35-40: sysopen (task #730) ---------------------------------------
+# `sysopen FH, PATH, FLAGS [, PERMS]` is perl's raw open(2): the mode is an O_*
+# bitmask, not a mode string.  It was ABSENT, so the bareword lowered to an
+# ordinary sub call and died "Undefined subroutine &Pkg::sysopen" — which is
+# what File::Temp's DEFAULT `tempfile()` runs into (row 40 is that end-to-end
+# check, and it is why the row exists here rather than only in a shim test).
+# Every row is compared against perl by test_io, so the O_* numbers, the umask
+# interaction and the errno all come from perl, not from this file.
+
+# 35: create + write + read back, with explicit PERMS (the mode bits land).
+{
+    test_io('sysopen: O_WRONLY|O_CREAT|O_TRUNC writes, PERMS 0600 lands', <<'PERL');
+use Fcntl;
+my $f = "/tmp/pcl-fileio02-sysopen-a-$$.tmp";
+unlink $f;
+my $ok = sysopen(my $fh, $f, O_WRONLY|O_CREAT|O_TRUNC, 0600);
+print "ok=", ($ok ? 1 : 0), "\n";
+print $fh "hello\n";
+close $fh;
+open(my $r, '<', $f) or die "reopen: $!";
+print "read=", scalar(<$r>);
+close $r;
+my @st = stat($f);
+printf "mode=%04o\n", $st[2] & 07777;
+unlink $f;
+PERL
+}
+
+# 36: BAREWORD handle — the same first-argument slot `open` registers.
+{
+    test_io('sysopen: bareword handle, O_RDONLY', <<'PERL');
+use Fcntl;
+my $f = "/tmp/pcl-fileio02-sysopen-b-$$.tmp";
+open(my $w, '>', $f) or die; print $w "bee\n"; close $w;
+my $ok = sysopen(SYSBW, $f, O_RDONLY);
+print "ok=", ($ok ? 1 : 0), " got=", scalar(<SYSBW>);
+close SYSBW;
+unlink $f;
+PERL
+}
+
+# 37: O_APPEND does not truncate.
+{
+    test_io('sysopen: O_APPEND appends', <<'PERL');
+use Fcntl;
+my $f = "/tmp/pcl-fileio02-sysopen-c-$$.tmp";
+open(my $w, '>', $f) or die; print $w "one\n"; close $w;
+sysopen(my $fh, $f, O_WRONLY|O_APPEND) or die "sysopen: $!";
+print $fh "two\n";
+close $fh;
+open(my $r, '<', $f) or die; my @l = <$r>; close $r;
+print "lines=", scalar(@l), " [", join('|', map { my $x = $_; chomp $x; $x } @l), "]\n";
+unlink $f;
+PERL
+}
+
+# 38: the FAILURE contract — false, and $! is the syscall's errno.
+{
+    test_io('sysopen: O_CREAT|O_EXCL on an existing file is false, $! = EEXIST', <<'PERL');
+use Fcntl;
+my $f = "/tmp/pcl-fileio02-sysopen-d-$$.tmp";
+open(my $w, '>', $f) or die; close $w;
+my $ok = sysopen(my $fh, $f, O_WRONLY|O_CREAT|O_EXCL, 0600);
+print "defined=", (defined $ok ? 1 : 0), " errno=", ($! + 0), "\n";
+my $ok2 = sysopen(my $g, "/tmp/pcl-fileio02-sysopen-nope-$$/x", O_RDONLY);
+print "defined2=", (defined $ok2 ? 1 : 0), " errno2=", ($! + 0), "\n";
+unlink $f;
+PERL
+}
+
+# 39: O_RDWR is ONE handle read and written through.
+{
+    test_io('sysopen: O_RDWR round-trips through one handle', <<'PERL');
+use Fcntl;
+my $f = "/tmp/pcl-fileio02-sysopen-e-$$.tmp";
+unlink $f;
+sysopen(my $fh, $f, O_RDWR|O_CREAT, 0644) or die "sysopen: $!";
+print $fh "abc\n";
+seek($fh, 0, 0);
+print "back=", scalar(<$fh>);
+close $fh;
+unlink $f;
+PERL
+}
+
+# 40: what #730 was filed FOR — File::Temp's default tempfile() needs sysopen.
+{
+    test_io('sysopen: File::Temp tempfile() (the DEFAULT, OPEN => 1) works', <<'PERL');
+use File::Temp qw(tempfile);
+my ($fh, $f) = tempfile();
+print "named=", (defined $f && length $f ? 1 : 0), "\n";
+print $fh "tmp\n";
+close $fh;
+open(my $r, '<', $f) or die "reopen: $!";
+print "content=", scalar(<$r>);
+close $r;
+print "exists=", (-e $f ? 1 : 0), "\n";
+unlink $f;
 PERL
 }

@@ -3654,10 +3654,12 @@ sub handle_subcalls {
     next
         if ref($next) eq 'PPI::Structure::List' && $next->{_pcl_decl_list};
 
-    # - - - open
-    # Special handling: register bareword filehandle BEFORE parsing args
+    # - - - open / sysopen
+    # Special handling: register bareword filehandle BEFORE parsing args.
+    # `sysopen` takes its handle in the SAME first slot (task #730), so the two
+    # share this registration rather than growing a second copy of it.
     my $func_name = $now->can('content') ? $now->content() : '';
-    if ($func_name eq 'open' && $self->has_environment) {
+    if (($func_name eq 'open' || $func_name eq 'sysopen') && $self->has_environment) {
       # Peek at first argument - if it's a bareword, register it as filehandle
       my @list_children = $next->children();
       if (@list_children) {

@@ -339,6 +339,7 @@ has known_no_of_params => (
       '__PACKAGE__' => 0,
 
       open       => [1, 2, 3, -1],  # 1-arg reopen, 2-arg mode+file, 3-arg, 4+ for pipe
+      sysopen    => [3, 4],         # sysopen FH, PATH, O_FLAGS [, PERMS] (#730)
       close      => [0, 1],         # close or close FH
       pos        => [0, 1, -2],  # pos or pos SCALAR (defaults to $_)
       grep       => -12,        # grep BLOCK|EXPR, LIST (1 before list)

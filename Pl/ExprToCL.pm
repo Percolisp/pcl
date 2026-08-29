@@ -156,7 +156,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
   grep hash hash-= hex hslice if incf index int isa join keys kv-aslice kv-hslice last last-dynamic lc
   link symlink readlink chown utime lock
   lcfirst length let list-= list-x local-glob localtime log lstat make-typeglob map method-call
-  alarm mkdir my my-= next not oct open opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
+  alarm mkdir my my-= next not oct open sysopen opendir or or-assign ord our pack pipe pop pos post++ post-- pre++
   pre-- print printf prototype push quotemeta rand read readdir readline redo ref reftype regex
   rename require require-file reset resolve-invocant return reverse rewinddir rindex rmdir say
   evalbytes scalar scalar-= seek select set-array-length set_up_inc setf shift sin sleep sort splice split

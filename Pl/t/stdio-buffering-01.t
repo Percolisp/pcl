@@ -138,17 +138,17 @@ PL
 }
 
 # ── 4. A dup of a FILE handle: both writes land ────────────────────────────
-# The scratch path is built from $$ rather than File::Temp, and STAYS that way.
-# #711 (the OPEN => 0 spelling dying on a template that does end in ten X) is
-# CLOSED — it was a compiler bug, not a shim one — but the DEFAULT `tempfile()`
-# still needs a handle, and `sysopen` is not implemented, so the call dies for a
-# second, unrelated reason (task #730).  A guard row must fail for its own
-# reason or not at all.
+# The scratch file is File::Temp's DEFAULT `tempfile()` again (restored s452aa):
+# #711 (the OPEN => 0 spelling dying on a template that does end in ten X) was a
+# compiler bug and closed first; the default spelling needs a HANDLE, i.e.
+# `sysopen`, which task #730 implemented.  Until then this block built its path
+# from $$, and the comment said so — a guard row must fail for its own reason or
+# not at all.  Now the row is BOTH: the dup-buffer assertion, and the one gate
+# row that runs `tempfile()` end to end.
 {
     my $prog = <<'PL';
-my $f = "/tmp/pcl-stdio-buffering-01-$$.tmp";
-unlink $f;
-open(my $fh, ">", $f) or die "open: $!";
+use File::Temp qw(tempfile);
+my ($fh, $f) = tempfile();
 open(my $dup, ">&", $fh) or die "dup: $!";
 print $fh "A\n";
 print $dup "B\n";
