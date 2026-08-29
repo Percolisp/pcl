@@ -1365,6 +1365,26 @@
 (defvar *check-blocks* nil "CHECK thunks (push = LIFO = perl's reverse order)")
 (defvar *init-blocks* nil "INIT thunks (pushed; run in reverse-of-LIFO = source order)")
 
+;;; `exit` INSIDE an END block (task #738).  Perl: it ends THAT block only —
+;;; every remaining END block still runs, `$?` carries the status into them,
+;;; and the process finally exits with it (probed 5.40.3: three END blocks,
+;;; the middle one `exit 7`, output C / B / "A code=7", rc 7).
+;;;
+;;; PCL runs the ENDs from an sb-ext exit hook, so a plain `sb-ext:exit` in
+;;; there is a NESTED exit — measured on SBCL 2.6.0: it goes straight to the
+;;; OS with the new code and the REST OF THE RUNNING HOOK NEVER EXECUTES.
+;;; That silently dropped the remaining END blocks AND the
+;;; %p-flush-all-output that follows them, so with #542's block-buffered
+;;; STDOUT everything the ENDs had printed was lost with the buffer
+;;; (t/op/rt119311.t: two TAP rows, which is how the loss was found — before
+;;; #542 a line-buffered STDOUT had already pushed them out).
+(defvar *p-in-end-phase* nil
+  "True while the exit hook is running END blocks, in the process that
+   started them (a fork CHILD inherits the binding and must still exit for
+   real — hence the pid, not just the flag).")
+(defvar *p-end-phase-pid* nil "The pid that entered the END phase.")
+(defvar *p-end-exit-code* nil "Status set by an `exit` inside an END block.")
+
 (defvar *p-compile-phase-done* nil
   "True once the main program's compile->run boundary has been crossed.
    p-exit consults it: exit during the compile phase must still drain
@@ -1407,11 +1427,22 @@
 ;; SBCL makes the first case an abort, that row fails instead of the sweep
 ;; quietly losing thousands of rows.
 (pushnew (lambda ()
-           (dolist (fn *end-blocks*)
-             (handler-case (funcall fn)
-               (error (e)
-                 (format *error-output* "Error in END block: ~A~%" e))))
-           (%p-flush-all-output))
+           (let ((*p-in-end-phase* t)
+                 (*p-end-phase-pid* (sb-posix:getpid)))
+             (dolist (fn *end-blocks*)
+               (handler-case
+                   ;; The catch is per BLOCK: `exit` inside one ends that
+                   ;; block and the loop goes on, which is perl (task #738).
+                   (catch '%p-end-exit (funcall fn))
+                 (error (e)
+                   (format *error-output* "Error in END block: ~A~%" e)))))
+           (%p-flush-all-output)
+           ;; Only now, with every END run and every handle flushed, does the
+           ;; status an END block asked for become the process's.  A nested
+           ;; sb-ext:exit aborts the rest of this hook — which is exactly why
+           ;; it is the LAST thing here.
+           (when *p-end-exit-code*
+             (sb-ext:exit :code *p-end-exit-code*)))
          sb-ext:*exit-hooks*)
 
 ;;; ============================================================
@@ -13038,7 +13069,18 @@ buffer's fill-pointer; everything else falls back to file-length."
    — perl's phase semantics; INIT and main are skipped.  Once per program,
    so the flag check costs nothing."
   (unless *p-compile-phase-done* (%p-drain-compile-blocks))
-  (sb-ext:exit :code (if code (truncate (to-number code)) 0)))
+  (let ((n (if code (truncate (to-number code)) 0)))
+    ;; Inside an END block this ends the BLOCK, not the process (task #738):
+    ;; perl runs every remaining END and only then exits with this status,
+    ;; which the later blocks read as `$?`.  The pid guard is for a fork
+    ;; CHILD created by an END block — it inherits the binding but must exit
+    ;; for real.
+    (when (and *p-in-end-phase*
+               (eql *p-end-phase-pid* (sb-posix:getpid)))
+      (setf *p-end-exit-code* n)
+      (setf $? n)
+      (throw '%p-end-exit nil))
+    (sb-ext:exit :code n)))
 
 (defun p-system (&rest args)
   "Perl system - execute a shell command.

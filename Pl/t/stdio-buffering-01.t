@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 13;
 
 sub write_pl {
     my ($code) = @_;
@@ -253,4 +253,37 @@ print "file:[", join("|", @l), "]\n";
 PL
     is(cl_merged($prog), pl_merged($prog),
        '#710 inverse: a plain open onto a FILE is unchanged (perl oracle)');
+}
+
+# ── 9. `exit` INSIDE an END block (task #738) ──────────────────────────────
+# perl ends that BLOCK only: every remaining END still runs, sees the status as
+# $?, and the process finally exits with it.  PCL ran the ENDs from an sb-ext
+# exit hook, so the nested sb-ext:exit went straight to the OS and the REST OF
+# THE HOOK never ran — the remaining END blocks AND the flush that follows
+# them.  Invisible while STDOUT was line-buffered; with #542 it took the whole
+# buffer with it (t/op/rt119311.t lost two TAP rows that way).
+# Through a PIPE on purpose: that is where the buffer is what carries the text.
+{
+    my $prog = <<'PL';
+print "main\n";
+END { print "END-A code=$?\n" }
+END { print "END-B exiting\n"; exit 7 }
+END { print "END-C\n" }
+PL
+    is(cl_merged($prog), pl_merged($prog),
+       '#738: exit inside an END block ends the BLOCK — the rest still run and flush');
+}
+
+# ── 10. …and a top-level exit is still a real exit (the inverse guard) ─────
+# The interception is scoped to the END phase; anywhere else `exit` must stop
+# the program where it stands, ENDs and flush included.
+{
+    my $prog = <<'PL';
+print "before\n";
+END { print "END-ran\n" }
+exit 0;
+print "after\n";
+PL
+    is(cl_merged($prog), pl_merged($prog),
+       '#738 inverse: a top-level exit still stops the program (perl oracle)');
 }
