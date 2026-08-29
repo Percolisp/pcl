@@ -242,6 +242,31 @@ before the final gate.  The merge review owes: ONE full sweep, io/ leg for
 Q, gate-SET scan where R/S stop a refusal or drop from firing, generation
 renumber ONCE above v2-340 + artifact regen on the merged tree.
 
+**ROUND 7 COMPLETE the same session — all three reviewed with independent
+probes and ff-merged (Q `cf49f95` → R `f0dda81` → S `46325f9`), one review
+fix (`2d0da65`: the glob-cascade repair runs to fixpoint — one derail hides
+the next), generation v2-355 (S's, adopted per the round-5 precedent);
+every batch leg run and clean.**  Sweep ×2 GATE clean TOTAL 18321 → 18325
+(+4 = method.t's `local *1` loop, #564; pass-baseline row edited by hand,
+verified serially on both trees); serial re-runs of all seven noisy files
+byte-identical to baseline; gate-SET 638×2 byte-identical; companion
+io/+op/+uni/ with SIX real movers all attributed by base-worktree A/B and
+spliced with causes (io/open 141/24 R, io/pipe 18/14 Q's #590 un-aborting
+the Broken-pipe form, op/method 103/22 + op/gv 131/60 + uni/gv 56/32 all S)
+— and ONE stale row hiding a ROUND-5 REGRESSION: uni/parser.t 26/32 → 18/5,
+bisected agent-by-agent to s446k's #463 glob-value range, the glob-element
+read `${*$a{SCALAR}}` dying where perl reads the slot — **#663**, with a
+5-line ASCII repro (uni/ had been out of the companion legs since s444;
+rounds touching glob/name machinery must include uni/).  Fable filings from
+review probes: #660 (slurp-at-EOF first read is DEFINED "" in perl), #661
+(fcntl on a never-opened lexical dies in perl — survey the family), #662
+(`f % 3` = perl's hash %3 outside #550's set), #663.  Net effect of the
+round: +4 sweep rows, +21 companion C_ok (io/pipe's honest-coverage jump
+included), ~85 new guard rows across four Pl/t files, a dozen silent-wrongs
+fixed that no suite row sat on, 15 new reproducers filed (#630–#634,
+#640–#641, #650–#653, #660–#663), four PPI bug sections logged upstream
+(§14c, §24b, §26b + ppi-bug-report.t 38 → 42).
+
 ## Session 448 (2026-08-27/28, Fable) — ROUND 6 launched, reviewed and ALL THREE MERGED; every batch leg run and clean
 
 **Round 6 (three Opus agents in worktrees off `922675a`, the s421 pattern;

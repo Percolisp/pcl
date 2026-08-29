@@ -189,7 +189,12 @@ lop.t	OK	47	0	47
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
 # argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
 magic.t	PARTIAL	152	37	208
-method.t	PARTIAL	72	26	163
+# s449 (#564, agent S): `local *{EXPR} = sub {…}` has a lowering, so the four rows of the
+# `local *1 = sub {123}` loop at method.t:38 PASS — 72/26 -> 76/22, verified SERIALLY on both
+# this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
+# unrecorded pre-existing `$pvlv_glob->method`).  No fail-baseline rows leave: the four were
+# among this PARTIAL file's unrecorded churn rows, never blessed.
+method.t	PARTIAL	76	22	163
 min_local.t	OK	10	0	10
 multideref.t	PARTIAL	42	10	65
 my.t	OK	52	0	52

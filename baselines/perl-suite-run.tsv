@@ -885,14 +885,22 @@ io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	11	2	DIFF		0
-io/open.t	188	0	136	25	DIFF	aborted-forms:2: The variable STDOUT is unbound.	1
+# s449: io/open.t 136/25 -> 141/24 EDITED BY HAND — s449r: #593 (+1: PCL row 115 "open -| magic",
+#   the tie-crossing-package-switch lexical now promoted) and #594 (+4: the STDOUT-unbound
+#   aborts are gone; abort reason is now the pre-existing #138 indirect-object drop at line 267).
+#   Parallel and #366 serial agree; predicted row-for-row by agent R's emission A/B.
+io/open.t	188	0	141	24	DIFF	aborted-forms:2: PCL: statement not supported at open.t line N: ok open($stdin, "<&", $N), 'open ... "<&", 	1
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
 io/perlio_fail.t	15	0	6	9	DIFF		0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	0	0	DIFF	aborted-forms:3: Execution of a form compiled with errors. Form: (p-open	0
-io/pipe.t	27	0	8	0	DIFF	aborted-forms:1: Couldn't write to #<sb-sys:fd-stream for "descriptor N" {NCNFN}>: Broken pipe	0
+# s449: io/pipe.t 8/0 -> 18/14 EDITED BY HAND — s449q #590: the Broken-pipe abort that ended
+#   the file at row 8 is now perl's FALSE print, so ten more rows run and fourteen fail
+#   HONESTLY (base c8a8311 alone: 8/0 with the abort; main serial: 18/14).  Parallel/serial
+#   wobble one row (17/13 vs 18/14) — SIGPIPE timing; serial recorded.
+io/pipe.t	27	0	18	14	DIFF		0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	23	5	DIFF		0
 io/read.t	2	0	2	0	OK		0
@@ -1056,7 +1064,11 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	130	61	DIFF	aborted-forms:4: Died at gv.t line N. 	0
+# s449: op/gv.t 130/61 -> 131/60 EDITED BY HAND — s449s #564: row 139 "Constant has correct
+#   value" passes (the *p-declared-subs* status now travels with a glob CODE-slot copy — the
+#   "static twin" fix).  Still failing at R's tip f0dda81, passing at S's 46325f9.  The
+#   [perl #77926] row stays MISSING on both trees (its form aborts earlier), unchanged.
+op/gv.t	304	0	131	60	DIFF	aborted-forms:4: Died at gv.t line N. 	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
@@ -1097,7 +1109,11 @@ op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	170	37	DIFF		0
-op/method.t	163	0	99	26	DIFF	undef-fn:main::pl-new; aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
+# s449: op/method.t 99/26 -> 103/22 EDITED BY HAND — s449s #564: the four rows of the
+#   `local *1 = sub {123}` loop (the companion twin of perl-tests/method.t's +4 in the same
+#   batch sweep).  Measured by agent S in a two-file sweep and re-measured here, parallel
+#   and serial agreeing.
+op/method.t	163	0	103	22	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
 op/mkdir.t	17	0	17	0	OK		0
 op/multideref.t	65	0	42	10	DIFF	undef-fn:main::pl-local; aborted-forms:1: invalid number of arguments: N	0
 op/my.t	59	0	52	7	DIFF		0
@@ -1325,7 +1341,10 @@ uni/eval.t	5	0	5	0	OK		0
 uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
 uni/greek.t	0	0	0	0	NOTAP		0
-uni/gv.t	206	0	55	33	DIFF	aborted-forms:1: Died at gv.t line N. 	0
+# s449: uni/gv.t 55/33 -> 56/32 EDITED BY HAND — s449s #564: row 89 "Prototype for a constant
+#   subroutine is empty" passes (same declared-subs carry as op/gv.t row 139; still failing at
+#   f0dda81, passing at 46325f9).
+uni/gv.t	206	0	56	32	DIFF	aborted-forms:1: Died at gv.t line N. 	0
 uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (go :ここ)	0
 uni/latin2.t	0	0	0	0	NOTAP		0
 uni/lex_utf8.t	16	0	6	10	DIFF		0
@@ -1334,7 +1353,12 @@ uni/method.t	62	0	28	21	DIFF	aborted-forms:2: Can't locate object method "nÃ¨w
 uni/opcroak.t	5	0	0	5	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 uni/overload.t	191	2	178	14	DIFF	aborted-forms:1: The function main::pl-todo_skip is undefined.	0
 uni/package.t	18	0	8	10	DIFF		0
-uni/parser.t	58	0	26	32	DIFF		0
+# s449: uni/parser.t 26/32 -> 18/5 EDITED BY HAND — NOT round 7: the row was STALE (uni/ last
+#   measured s444).  REGRESSED by s446k (round-5 agent K, 8600556..f95fa97, bisected across the
+#   round-5 merge order): the glob-ELEMENT read `${*$a{SCALAR}}` dies "Can't use an undefined
+#   value as a symbol reference" where perl reads the slot — task #663 has the 5-line ASCII
+#   repro; identical on base c8a8311 and main, parallel and serial.
+uni/parser.t	58	0	18	5	DIFF	aborted-forms:1: Can't use an undefined value as a symbol reference	0
 uni/readline.t	7	0	4	1	DIFF		2
 uni/select.t	3	2	1	4	DIFF		0
 uni/sprintf.t	52	0	49	3	DIFF		0

@@ -122,18 +122,34 @@ DECIDED §s448 + session-log §448).  Filed this round: #590–#594 (N),
 #600–#602 (O), #610–#612 (P), #620–#621 (Fable review).  `docs/
 js-target-sketch.md` saved (fun/parked, #622).
 
-**s449 (Fable, 2026-08-29) — queue item 1 DONE, item 2 IN FLIGHT.**  The
+**s449 (Fable, 2026-08-29) — queue item 1 DONE, item 2 DONE.**  The
 five rulings are recorded (DECIDED §s449; #561's design doc =
 `docs/computed-magic-design-s449.md`; the others in their task JSONs):
 #561+#602 designed (round 8, one cl/-only session), #551 PARKED to the
 boxed-aggregates design, #541 approved as sketched (round 8), #542 approved
-as its OWN session (round 8), #560 approved (Opus builds), #592's fcntl
-shape settled (joined round 7).  **Round 7 LAUNCHED off `c8a8311`**: Q = io
-residue #591+#621+#590+#592 (s449q), R = scoping #593+#594+#530+#532
-(s449r), S = parser fillers #563+#564+#550+(#620) (s449s).  **Round 8 is
-now concrete**: the #561+#602 session; the #541 session (may bundle #520 +
-#521 + #522, the s/// replacement family, if sized); the #542 session
-(alone); the #560 build; then P's residue #610/#611/#612 and item 4 below.
+as its OWN session (round 8+), #560 approved (Opus builds), #592's fcntl
+shape settled (joined round 7).  **Round 7 COMPLETE the same session**
+(Q = #591+#621+#590+#592; R = #593+#594+#532, #530 measured-and-backed-out
+into #641; S = #563+#564+#550+#449, #620 diagnosed): all three ff-merged,
+one review fix (cascade fixpoint), gen v2-355, sweep ×2 clean TOTAL 18325
+(+4), gate-SET 638×2 identical, companion movers all attributed — records
+in DECIDED §s449 + session-log §449.  **#663 filed**: uni/parser.t's stale
+snapshot row hid a round-5 regression (s446k, the glob-element read
+`${*$a{SCALAR}}` dies) — rounds touching glob/name machinery include uni/
+in the companion legs from now on.  Pushed to GitHub after the batch
+(USER); v0.1.0 stands, CI green expected on the push.
+**ROUND 8 (USER-approved shape, optimizations in): T = #561 + #602
+(the computed-magic design implemented, cl/-only; the %! payoff —
+reg_namedcapture.t sits on it); U = #560 build + #477 (the two
+optimization items: per-module prototype-fact disk cache — corpus-diff
+IDENTICAL is its first bar leg — and the quadratic-pos runtime fix);
+V = #541 + #520 + #521 + #522 (conditional local save/restore + the s///
+replacement family).  #542 stays SOLO for a later session (its own
+sweep-wide price, ruled).  Merge review owes: ONE sweep, op/+re/+uni/ legs
+(T touches errno/glob — include uni/ per the #663 lesson), the io/ leg if V
+touches buffering-adjacent paths, corpus-diff-IDENTITY specifically
+asserted for U's cache.  Then: P's residue #610/#611/#612, #663, and item 4
+below.
 
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 
