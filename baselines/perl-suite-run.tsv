@@ -1042,7 +1042,12 @@ op/each.t	65	0	35	12	DIFF	aborted-forms:1: Can't locate loadable object for modu
 op/each_array.t	65	0	65	0	OK		0
 op/eval.t	169	0	130	38	DIFF	undef-fn:main::pl-ARRAY	0
 op/evalbytes.t	9	0	5	4	DIFF		0
-op/exec.t	41	0	23	2	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
+# s450 (round 9): op/exec.t 23/2 -> 22/3 EDITED BY HAND — perl row 17 (the $! sanity check
+#   after the aborted `system {}` form) flipped with s450v's s/// commit (bisected: pre-V and
+#   #541-only both 23/2; the s/// commit 22/3; parallel=serial).  Mechanism NOT yet isolated —
+#   task #694 carries every measurement taken and the next discriminator (capture the row's
+#   own diag under recovery on both trees).
+op/exec.t	41	0	22	3	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
@@ -1089,7 +1094,10 @@ op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	22	16	DIFF		0
 op/kvhslice.t	39	0	18	20	DIFF		0
-op/lc.t	2716	0	2683	33	DIFF		0
+# s450 (round 9): op/lc.t 2683/33 -> 2685/31 EDITED BY HAND — s450v #522: \U/\L/\E in an
+#   s/// replacement route through the dq case-shift compiler.  Predicted by agent V's A/B
+#   (worktree vs 3c7c6ec), parallel and serial agree.
+op/lc.t	2716	0	2685	31	DIFF		0
 # s444: op/leaky-magic.t 65/6 -> 66/5 EDITED BY HAND — row 3 (`<foo::ARGV> does not
 #   iterate through STDIN`) passes since s443f #491: a QUALIFIED spelling of a
 #   forced-main handle names that package's own glob, no longer aliasing main::ARGV.
@@ -1303,7 +1311,10 @@ re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions
 re/speed.t	59	0	1	0	TIMEOUT	timeout	0
 re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/stclass_threads.t	0	0	5	1	NOTAP		0
-re/subst.t	281	0	194	78	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
+# s450 (round 9): re/subst.t 194/78 -> 200/72 EDITED BY HAND — s450v #520: the s///
+#   replacement lambda now sets the FULL match state through the shared setters ($`/$'/$+/
+#   $^N// were empty on that path).  Predicted by agent V's A/B, parallel and serial agree.
+re/subst.t	281	0	200	72	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
 re/substT.t	0	0	0	0	NOTAP		0
 re/subst_amp.t	13	0	0	13	DIFF		0
 re/subst_wamp.t	281	0	0	0	DIFF		0

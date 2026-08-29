@@ -150,12 +150,15 @@ asserted for U's cache, the 289-file timing A/B for #560.
 §s450 + session-log §450.  Filed at review: #684 (block-scoped match-var
 restore), #685 (qualified-foreign symref inherits exported magic — the
 leaky-magic family, fix shape ruled, HEADS the next filler slot).**
-**ROUND 9**: V = #541 + #520 + #521 + #522 (conditional local save/restore
-+ the s/// replacement family) — **LAUNCHED s450 (agent V, s450v, off
-`3c7c6ec`, gen v2-375, IDs 690–699)**; then **#685** + #663 (the two
-review-found regressions, one bundle — both single-resolver runtime fixes);
-#542 SOLO (its own sweep-wide price, ruled); then P's residue
-#610/#611/#612 and item 4 below.
+**ROUND 9 (V) DONE (s450b): #541 + #520/#522/#521 merged, legs clean,
+records in DECIDED §s450b** (companion +8 spliced; #694 filed for the one
+bisected-but-unisolated exec.t row).  **NEXT: the regression/residue
+bundle #685 + #663 + #694** (three review-found rows, all with the
+diagnosis or measurements already in the task — one agent); #542 SOLO (its
+own sweep-wide price, ruled); then P's residue #610/#611/#612 and item 4
+below.  USER rulings now standing: #74's pack half waits on pclxs; ONE
+perf-shaped agent per round max (interleave, never displace); prose/doc
+tasks may run on Sonnet via the Agent model override.
 
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 

@@ -21,7 +21,48 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s450b (2026-08-29, Fable) — ROUND 9 agent V reviewed and MERGED (#541 + the s/// replacement family); legs clean; one row filed
+
+- **V merged** (`9d5c468`; ff after Fable patch-saved its own uncommitted
+  DECIDED rulings — lesson: commit rulings before a merge, a dirty tree
+  aborts `--ff-only` AFTER the branch delete succeeded; the ref was pinned
+  from the reflog and nothing was lost).  Gen **v2-375**, artifacts
+  content-identical.  17 Fable probes byte-identical to perl (conditional
+  local: write-through, called sub, RHS gating, `$/`, element; s///: `$&`,
+  `` $` ``/`$'`, `\U$1\E`, `${\ "L"}` + the inner-`\t` row, single-quoted
+  inverse, `$+`, `@-`, s///e); guards 67 rows.
+- **#541's progv deviation RATIFIED**: `p-local-maybe`'s conditional `let`
+  of the defvar in the localizer slot IS the conditional dynamic bind — a
+  dynamic binding is visible through the flet call; `dynamic-extent` keeps
+  it allocation-free; `p-local-cell-if` keeps the body in place for the
+  lexical-rebinding case.  Cleaner than the ruled progv sketch.
+- **Legs**: sweep GATE clean **TOTAL 18325 (+0)** (V's +9 rows are all
+  companion-side, as its per-file byte-identity predicted); companion
+  re/+op/: **op/lc.t 2683/33 → 2685/31** (#522) and **re/subst.t 194/78 →
+  200/72** (#520), both predicted and spliced; re/pat_advanced.t matched
+  its snapshot (V's +1 was against its own A/B conditions, not spliced).
+- **op/exec.t 23/2 → 22/3 — one row, filed #694 with its bisection**: perl
+  row 17 (the `$!` sanity check after the aborted `system {}` form) flipped
+  with the s/// commit (pre-V and #541-only both clean); plain s/// does
+  NOT clobber `$!` (probed); the mechanism needs the row's own diag
+  captured under recovery — the task carries every measurement and the next
+  discriminator.
+
 ## s450 (2026-08-29, Fable) — ROUND 8 reviewed and BOTH MERGED; batch legs clean; the perf pair measured
+
+- **USER RULING: #74's PACK half WAITS ON PCLXS** — if the bridge proves
+  out, wrap perl's own C implementation (pp_pack.c) as an XS module through
+  pclxs rather than optimizing the transpiled pack oracle.  Do not start
+  pack-oracle optimization.  The SPRINTF half (constant-format formatter,
+  ~5×, core language — no XS story) stays in scope as its own item.
+  Recorded in task #74.
+- **USER-RATIFIED (2026-08-29, "let's keep it like that for now"):
+  optimization work INTERLEAVES, never displaces** — at most one
+  optimization-shaped agent per round beside correctness agents (the
+  round-8 shape: T correctness, U perf), every transform a named,
+  switchable Kind-A/Kind-B registry entry with `PCL_OPT=none` behavioral
+  identity enforced (passes-01.t); the representation-level item (boxed
+  aggregates / A4) stays behind its Fable design.
 
 - **Round 8 merged** (T `5e2f498` → U `3c7c6ec` = main; Fable rebased U's
   branch over T — doc-section conflicts only, both kept), every diff read,

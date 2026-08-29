@@ -4,6 +4,24 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 450b (2026-08-29, Fable) — round-9 agent V merged (#541 + #520/#522/#521); legs clean; pushed
+
+V reviewed (17 probes byte-identical to perl; guards 67 rows; artifacts
+content-identical at v2-375) and ff-merged at `9d5c468`.  The #541 progv
+deviation RATIFIED (the conditional `let` in `p-local-maybe`'s localizer
+slot IS the conditional dynamic bind).  Legs: sweep GATE clean TOTAL 18325
+(+0); companion re/+op/ with both predicted movers spliced (op/lc.t
+2685/31 #522, re/subst.t 200/72 #520); ONE unpredicted row bisected to the
+s/// commit and filed with its measurements (**#694** — op/exec.t's `$!`
+check after the aborted `system {}` form; mechanism needs the diag
+captured under recovery).  V filed #690–#693; four tasks closed
+(#541/#520/#521/#522).  Merge-process lesson recorded in DECIDED §s450b
+(commit rulings before an --ff-only merge).  USER rulings this stretch:
+#74's pack half WAITS ON PCLXS (wrap pp_pack.c as XS if the bridge proves
+out; sprintf half stays); the interleave cadence (one perf agent per
+round, max) RATIFIED; prose/doc tasks may run on cheaper models (Sonnet)
+via the Agent model override.
+
 ## Session 450 (2026-08-29, Fable) — ROUND 8 merged (T+U) and legs run; round 9 agent V launched
 
 Round 8 ran as TWO agents (USER).  Both reviewed with independent probes
