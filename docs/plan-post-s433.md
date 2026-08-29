@@ -138,18 +138,17 @@ snapshot row hid a round-5 regression (s446k, the glob-element read
 `${*$a{SCALAR}}` dies) — rounds touching glob/name machinery include uni/
 in the companion legs from now on.  Pushed to GitHub after the batch
 (USER); v0.1.0 stands, CI green expected on the push.
-**ROUND 8 (USER-approved shape, optimizations in): T = #561 + #602
+**ROUND 8 (USER: TWO agents, optimizations in): T = #561 + #602
 (the computed-magic design implemented, cl/-only; the %! payoff —
 reg_namedcapture.t sits on it); U = #560 build + #477 (the two
 optimization items: per-module prototype-fact disk cache — corpus-diff
-IDENTICAL is its first bar leg — and the quadratic-pos runtime fix);
-V = #541 + #520 + #521 + #522 (conditional local save/restore + the s///
-replacement family).  #542 stays SOLO for a later session (its own
-sweep-wide price, ruled).  Merge review owes: ONE sweep, op/+re/+uni/ legs
-(T touches errno/glob — include uni/ per the #663 lesson), the io/ leg if V
-touches buffering-adjacent paths, corpus-diff-IDENTITY specifically
-asserted for U's cache.  Then: P's residue #610/#611/#612, #663, and item 4
-below.
+IDENTICAL is its first bar leg — and the quadratic-pos runtime fix).
+Merge review owes: ONE sweep, op/+re/+uni/ legs (T touches errno/glob —
+include uni/ per the #663 lesson), corpus-diff-IDENTITY specifically
+asserted for U's cache, the 289-file timing A/B for #560.
+**ROUND 9**: V = #541 + #520 + #521 + #522 (conditional local save/restore
++ the s/// replacement family); #542 SOLO (its own sweep-wide price,
+ruled); then P's residue #610/#611/#612, #663, and item 4 below.
 
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 
