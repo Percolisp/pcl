@@ -6054,6 +6054,24 @@ sub _repair_readline_cascade {
 # tokenizes the whole region correctly.
 sub _repair_glob_pattern_cascade {
   my ($self, $doc) = @_;
+  # TO FIXPOINT, because one derail HIDES the next (s449 review fix): the first
+  # glob's runaway Regexp swallows everything to the next `/` — which, in a file
+  # with two glob statements, is the SECOND glob's own pattern, so that `<` is
+  # not an Operator token until the first repair's reparse frees it.  A single
+  # pass fixed glob one and left glob two to drop (measured: two `sort <./x-*>`
+  # statements with no other `/` between them).  Each iteration repairs at
+  # least one `<` or stops, and the `<` characters in a file are finite; the
+  # count bound is a belt, not the argument.
+  for my $round (1 .. 20) {
+    my $pass = $self->_repair_glob_pattern_cascade_pass($doc);
+    last if !$pass;
+    $doc = $pass;
+  }
+  return $doc;
+}
+
+sub _repair_glob_pattern_cascade_pass {
+  my ($self, $doc) = @_;
   my $repaired = 0;
   for my $lt (@{ $doc->find('PPI::Token::Operator') || [] }) {
     next if $lt->content ne '<';
@@ -6086,7 +6104,7 @@ sub _repair_glob_pattern_cascade {
     $close->set_content(substr($close->content, index($close->content, '>') + 1));
     $repaired = 1;
   }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
+  return $repaired ? $self->_reparse_doc($doc) : undef;
 }
 
 # PPI LEXER BUG (task #361, docs/ppi-upstream-bugs.md §19).  `x` is both an

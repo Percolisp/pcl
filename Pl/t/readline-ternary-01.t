@@ -63,7 +63,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 24;
 
 sub write_pl {
     my ($code) = @_;
@@ -232,6 +232,16 @@ agree_in_globdir(<<'PL', 'the swallow: the statements AFTER the diamond still ru
 my @f = sort <./g-*.t>;
 print "one\n";
 print "two\n";
+PL
+
+# TWO glob statements, no other `/` between them: the first derail's Regexp
+# swallows the second glob's own `/`, so that `<` is not even a token until
+# the first repair's reparse frees it — a single-pass repair fixed glob one
+# and dropped glob two (s449 review fix: the repair runs to FIXPOINT).
+agree_in_globdir(<<'PL', 'a second cascade REVEALED by the first repair is repaired too');
+my @f = sort <./g-*.t>;
+my @g = sort <./nope-*-xyz>;
+print "n1=", scalar(@f), " n2=", scalar(@g), " alive\n";
 PL
 
 # ---- #563 neighbours: shapes PExpr's rebuild already owned ------------------
