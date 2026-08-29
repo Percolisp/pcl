@@ -4,6 +4,47 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 451w (2026-08-29, Opus agent W, round 10) — the three round-9 review regressions: #685, #663, #694
+
+Three commits on `718db6b`, gate 183/6151 PASS (xs skipped — worktree).
+
+**#685** (`d67d6d0`, `cl/`-only).  Every Perl package PCL makes is
+`(:use :cl :pcl)`, so each sigil-named symbol the runtime EXPORTS is
+INHERITED into it — which is what makes the UNQUALIFIED spelling right and
+what made the qualified one wrong.  `%p-symref-symbol` now treats an
+`:INHERITED` answer as NOT FOUND for a name explicitly qualified into a
+package other than `main`, and the create path `cl:shadow`s before
+interning.  12 specials probed vs perl: every `foo::` spelling separate,
+every `main::` one shared.  It also stopped `%{"foo::ENV"}` DESTROYING the
+process environment.  `t/op/leaky-magic.t` **65/6 → 70/1**.
+
+**#663** (`d79a8a5`, gen **v2-380**).  The filed cause was wrong: it is
+PPI's `->symbol` answering `%a` for the `$a` in `*$a{SCALAR}` — the `*`
+cast is missing from its trumps-braces set (`ppi-upstream-bugs.md` §27).
+ONE wrong answer, TWO failures: the `my $a` exception rename skipped the
+token (`t/uni/parser.t` **18/5 with an aborted form → 28/30, 58 rows**),
+and with a MAGIC symbol it reached the expression compiler, so `*$_{HASH}`
+emitted a typeglob of a phantom `%_`'s element — a SILENT WRONG live in
+core `Carp.pm`.  Fixed where all ~40 `->symbol` consumers pass through:
+one repair pass braces the Symbol's text so the reparse gives
+`*{$x}{SLOT}`.  The negative is PPI's own — `8 *$Config{sizesize}` lexes
+its `*` as an Operator.
+
+**#694** (`477fc93`).  Neither suspect in the task was the mechanism (not
+`*p-stored-errno*`, not the case-shift pattern).  s450v's `_undelimit` ran
+on EVERY lifted fragment; it is right only where the source really was
+`"`-delimited.  A heredoc / `qq{…}` / backtick / glob arrives wrapped in a
+SYNTHETIC `"…"` over RAW text, so `${\"L"}` lost its reference operator and
+interpolated EMPTY.  The un-escape is now asked of `$origin_tok`.
+`op/exec.t` **22/3 → 23/2**.  Instrument added: `PCL_SUITE_KEEP=DIR`.
+
+Filed: **#700** (the literal `%foo::SIG` leaks through the CL READER),
+**#701** (`%{"main::ENV"}` replaces the `%ENV` marker with an empty hash),
+**#702** (a backtick HEREDOC is never executed), **#703** (`use subs
+"readpipe"` does not override backticks/qx).  Reported for Fable:
+`re/pat_advanced.t` reads **673/223** against a snapshot of 950/730 on a
+`718db6b` tree too — an unspliced s450v move.
+
 ## Session 450b (2026-08-29, Fable) — round-9 agent V merged (#541 + #520/#522/#521); legs clean; pushed
 
 V reviewed (17 probes byte-identical to perl; guards 67 rows; artifacts
