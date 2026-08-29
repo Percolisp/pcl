@@ -15077,42 +15077,75 @@ buffer's fill-pointer; everything else falls back to file-length."
                          (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
             (make-p-typeglob pkg (%pcl-invert-case bare-str)))))))
 
+(defun %p-glob-empty-slot (prefix)
+  "The EMPTY value a cleared glob slot holds, for slot sigil PREFIX.  ONE
+   reading, shared by `undef *foo` (p-glob-undef-name) and by the clear half
+   of a glob-to-glob assignment (p-glob-copy, task #602).  Rule 12: an
+   unknown sigil is a compiler/runtime inconsistency, never a silent nil."
+  (cond ((string= prefix "$") (make-p-box *p-undef*))
+        ((string= prefix "@") (make-array 0 :adjustable t :fill-pointer 0))
+        ((string= prefix "%") (make-hash-table :test 'equal))
+        (t (error "%p-glob-empty-slot: no empty for glob slot sigil ~S" prefix))))
+
+(defun %p-glob-copy-var-slot (prefix sp sn dst-pkg dst-uname)
+  "One VARIABLE slot ($ / @ / %) of a glob-to-glob assignment.
+
+   perl's `*A = *B` REPLACES A's glob — A becomes another name for B's entry —
+   so a slot B does NOT have is a slot A no longer has (probed: `our $x = 5;
+   *x = *neverdefined` leaves $x undef, and `*a2 = *b2` with only an array on
+   b2 empties $a2 and %a2).  Copying bound slots only left the destination's
+   old value in place: task #602, and the reason t/re/pat.t:1715's
+   `*^R = *caretRglobwithnoscalar` did not make $^R undef.
+
+   The clear fires ONLY when the destination slot is already BOUND: `*A = *B`
+   never CREATES a variable perl would not (probed: `defined $c3` is false
+   after `*c3 = *neverdefined`, and no $c3 comes into being)."
+  (let ((src-sym (intern (%p-slot-name prefix sn) sp))
+        (dst-sym (intern (%p-slot-name prefix dst-uname) dst-pkg)))
+    (cond ((boundp src-sym) (setf (symbol-value dst-sym) (symbol-value src-sym)))
+          ((boundp dst-sym) (set dst-sym (%p-glob-empty-slot prefix))))))
+
+(defun %p-glob-copy-code-slot (sp sn dst-pkg dst-uname)
+  "The CODE slot of a glob-to-glob assignment.  The alias inherits the
+   source's declared/defined status (default :defined for an
+   untracked-but-fbound source), so `defined &dst` matches `defined &src`
+   (task #83); a source with no CODE slot UNDEFINES the destination's, which
+   is what `defined &x` answers in perl after `*x = *neverdefined` (#602)."
+  (let ((src-sym (intern (%pcl-uname-to-sub sn) sp))
+        (dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
+    (cond ((fboundp src-sym)
+           (setf (fdefinition dst-sym) (fdefinition src-sym))
+           (setf (gethash dst-sym *p-declared-subs*)
+                 (or (gethash src-sym *p-declared-subs*) :defined)))
+          ((fboundp dst-sym)
+           (fmakunbound dst-sym)
+           (remhash dst-sym *p-declared-subs*)))))
+
+(defun %p-glob-copy-io-slot (sp sn dst-pkg dst-uname)
+  "The IO slot of a glob-to-glob assignment: the open-stream registration, so
+   `*DST = *SRC` aliases the filehandle (`*FH = shift` in a sub that then
+   reads <FH>).  Keyed in *p-filehandles* by the bareword symbol, the same
+   naming convention the variable slots use.  A source with no handle
+   DEREGISTERS the destination's, the #602 rule for this slot."
+  (let ((src-sym (intern sn sp))
+        (dst-sym (intern dst-uname dst-pkg)))
+    (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
+      (if present
+          (setf (gethash dst-sym *p-filehandles*) stream)
+          (remhash dst-sym *p-filehandles*)))))
+
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
-  "Copy all slots from src-glob into dst (pkg, uname)."
+  "`*DST = *SRC` — REPLACE dst's glob with src's, slot for slot (task #602).
+   Every slot is copied when the source has it and emptied when it does not;
+   the per-slot helpers carry the rules.  This is the glob-to-glob arm only:
+   `*foo = \\&sub` and the other reference forms go through
+   %p-glob-assign-slots' typed arms and touch exactly one slot, as perl does."
   (let ((sp (p-typeglob-package src-glob))
         (sn (p-typeglob-name src-glob)))
-    ;; CODE — the alias inherits the source's declared/defined status
-    ;; (default :defined for an untracked-but-fbound source), so
-    ;; `defined &dst` matches `defined &src` (task #83).
-    (let ((src-sym (intern (%pcl-uname-to-sub sn) sp)))
-      (when (fboundp src-sym)
-        (let ((dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
-          (setf (fdefinition dst-sym) (fdefinition src-sym))
-          (setf (gethash dst-sym *p-declared-subs*)
-                (or (gethash src-sym *p-declared-subs*) :defined)))))
-    ;; SCALAR
-    (let ((src-sym (intern (%p-slot-name "$" sn) sp)))
-      (when (boundp src-sym)
-        (setf (symbol-value (intern (%p-slot-name "$" dst-uname) dst-pkg))
-              (symbol-value src-sym))))
-    ;; ARRAY
-    (let ((src-sym (intern (%p-slot-name "@" sn) sp)))
-      (when (boundp src-sym)
-        (setf (symbol-value (intern (%p-slot-name "@" dst-uname) dst-pkg))
-              (symbol-value src-sym))))
-    ;; HASH
-    (let ((src-sym (intern (%p-slot-name "%" sn) sp)))
-      (when (boundp src-sym)
-        (setf (symbol-value (intern (%p-slot-name "%" dst-uname) dst-pkg))
-              (symbol-value src-sym))))
-    ;; IO (filehandle): copy the open-stream registration so *DST = *SRC
-    ;; aliases the filehandle — e.g. `*FH = shift` in a sub that then reads
-    ;; <FH>.  The handle is keyed in *p-filehandles* by the bareword symbol,
-    ;; same naming convention as the scalar/array/hash slots above.
-    (let ((src-sym (intern sn sp)))
-      (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
-        (when present
-          (setf (gethash (intern dst-uname dst-pkg) *p-filehandles*) stream))))))
+    (%p-glob-copy-code-slot sp sn dst-pkg dst-uname)
+    (dolist (prefix '("$" "@" "%"))
+      (%p-glob-copy-var-slot prefix sp sn dst-pkg dst-uname))
+    (%p-glob-copy-io-slot sp sn dst-pkg dst-uname)))
 
 (defun p-glob-undef-name (pkg-str name-str)
   "undef *foo — clear all slots."
@@ -15121,14 +15154,10 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when pkg
       (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
         (when (fboundp sym) (fmakunbound sym)))
-      (dolist (prefix (list "$" "@" "%"))
+      (dolist (prefix '("$" "@" "%"))
         (let ((sym (intern (%p-slot-name prefix uname) pkg)))
           (when (boundp sym)
-            (set sym (cond ((string= prefix "$")
-                            (make-p-box *p-undef*))
-                           ((string= prefix "@")
-                            (make-array 0 :adjustable t :fill-pointer 0))
-                           (t (make-hash-table :test 'equal))))))))))
+            (set sym (%p-glob-empty-slot prefix))))))))
 
 (defun p-glob-slot (glob slot)
   "Read *foo{SLOT}."

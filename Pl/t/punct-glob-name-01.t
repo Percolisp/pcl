@@ -51,7 +51,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 26;
 
 sub write_pl {
     my ($code) = @_;
@@ -330,4 +330,58 @@ print "5=[", $h{k}, "] 6=[", $h{k}*2, "]\n";
 sub proto (*) { return "proto:$_[0]" }
 print "7=[", proto("z"), "]\n";
 my $hr = {n=>6}; print "8=[", ${$hr}{n}*3, "]\n";
+PL
+
+# ---- #602: `*A = *B` REPLACES A's glob, it does not merge into it ----------
+#
+# perl's glob-to-glob assignment makes A another name for B's entry, so a slot
+# B does NOT have is a slot A no longer has.  PCL copied slot by slot behind a
+# `boundp` guard, so an unset SOURCE slot left the destination's old value in
+# place — `our $x = 5; *x = *neverdefined` printed 5 where perl prints nothing.
+# p-glob-copy is now CLEAR-THEN-COPY.  The negatives matter as much: the
+# reference forms (`*dst = \&sub`, `*dst = \$scalar`) go through
+# %p-glob-assign-slots' typed arms, touch ONE slot, and must keep every other
+# slot — that is the import path, and a clear firing there would empty a live
+# variable.  Every expectation is the live `perl` answer.
+
+both_agree(<<'PL', '#602: a glob-to-glob assign EMPTIES the slots the source lacks');
+our $x = 5; our @x = (9); our %x = (k => 1); sub x { 42 }
+*x = *neverdefinedglob;
+print "1 s=[$x] a=[@x] def=", (defined $x ? 1 : 0),
+      " h=", scalar(keys %x), " code=", (defined &x ? 1 : 0), "\n";
+PL
+
+both_agree(<<'PL', '#602: source has SOME slots, destination has others');
+our $a2 = 'as'; our @a2 = ('aa'); our %a2 = (ak => 1);
+our @b2 = ('ba');
+*a2 = *b2;
+print "1 s=[", (defined $a2 ? $a2 : 'U'), "] a=[@a2] h=", scalar(keys %a2), "\n";
+PL
+
+both_agree(<<'PL', '#602: the clear never CREATES a variable perl would not');
+no strict 'refs';
+*c3 = *neverdefinedglob2;
+print "1 defined-c3=", (defined $c3 ? 1 : 0), "\n";
+PL
+
+both_agree(<<'PL', '#602 negative: the REFERENCE forms touch one slot (the import path)');
+sub srcsub { "S" }
+our $d4 = 'keepme'; our @d4 = ('keeparr');
+*d4 = \&srcsub;
+print "1 code=", d4(), " s=[", (defined $d4 ? $d4 : 'U'), "] a=[@d4]\n";
+our $f6 = 'old'; our @f6 = ('oldarr'); my $newsc = 'new';
+*f6 = \$newsc;
+print "2 s=[$f6] a=[@f6]\n";
+sub e5src { "E" }
+our $e5 = 'gone5'; our @e5 = ('gonearr5');
+*e5 = *e5src;
+print "3 code=", e5(), " s=[", (defined $e5 ? $e5 : 'U'), "] a=[@e5]\n";
+PL
+
+both_agree(<<'PL', '#602: t/re/pat.t:1715 — *^R = *<glob with no scalar> makes $^R undef');
+no warnings 'once';
+$^R = 'oldR';
+our @caretRglobwithnoscalar = (1,2);
+*^R = *caretRglobwithnoscalar;
+print "1 caretR=[", (defined $^R ? $^R : 'UNDEF'), "]\n";
 PL
