@@ -1392,12 +1392,26 @@
 ;; handle — perl closes (hence flushes) all handles at exit, so a program that
 ;; prints to a handle and never closes it must still see its output.  The flush
 ;; runs AFTER the END blocks because an END block may still print.
+;;
+;; THIS IS ALSO THE die PATH, and since #542 made STDOUT block-buffered under a
+;; pipe it is load-bearing: perl flushes at exit even on die, so
+;; `print "row\n"; die` must still show the row — and in the sweep that is
+;; every row a crashing file produced, not one.  MEASURED on SBCL 2.6.0, all
+;; three cases, because the answer is not obvious from the option names:
+;;   * an UNHANDLED error under --non-interactive runs these hooks (the
+;;     disabled-debugger quit is a normal exit, not an abort);
+;;   * so does SIGTERM, which is what `timeout` sends the sweep's children;
+;;   * (sb-ext:exit … :abort t) does NOT — PCL calls that in exactly two
+;;     places (p-exec, the fork-pipe exec failure) and both flush by hand.
+;; Pl/t/stdio-buffering-01.t's die-after-print row is the guard: if a future
+;; SBCL makes the first case an abort, that row fails instead of the sweep
+;; quietly losing thousands of rows.
 (pushnew (lambda ()
            (dolist (fn *end-blocks*)
              (handler-case (funcall fn)
                (error (e)
                  (format *error-output* "Error in END block: ~A~%" e))))
-           (%p-flush-open-streams))
+           (%p-flush-all-output))
          sb-ext:*exit-hooks*)
 
 ;;; ============================================================
@@ -9673,6 +9687,23 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (setf (gethash stream *p-open-output-streams*) t))
   stream)
 
+(defun %p-flush-all-output ()
+  "perl's PerlIO_flush(NULL): the standard handles AND every registered open
+   one.  perl runs it at program exit and at PERL_FLUSHALL_FOR_CHILD — before
+   fork, system, exec, backticks and a pipe open — which is why
+   `print \"a\\n\"; system(\"echo MARK\")` prints a, MARK even though a piped
+   STDOUT is block-buffered (probed 5.40.3).  Since #542 made PCL's STDOUT
+   block-buffered too, every one of those sites has to say so explicitly; they
+   all say it HERE (rule 11).
+
+   The standard three come first and by name: they are rebuilt by
+   %p-std-rebuild, so the registry's weak entry for a REPLACED synonym stream
+   is not the one the program is writing to now."
+  (ignore-errors (finish-output *standard-output*))
+  (ignore-errors (finish-output *error-output*))
+  (%p-flush-open-streams))
+
+
 (defconstant +p-fd-cloexec+ 1
   "FD_CLOEXEC.  sb-posix exports f-getfd/f-setfd but NOT the flag itself
    (measured: `find-symbol \"FD-CLOEXEC\"` is NIL there), and it is 1 — the only
@@ -9787,28 +9818,88 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                ((string-equal name "STDOUT") 1)
                ((string-equal name "STDERR") 2)))))
 
-(defun %p-std-rebuild (slot)
+(defun %p-isatty (fd)
+  "True when descriptor FD is a terminal.  sb-posix does NOT export isatty
+   (measured: `find-symbol \"ISATTY\"` is NIL there); SB-UNIX:UNIX-ISATTY does,
+   and answers 1/0."
+  (handler-case (= 1 (sb-unix:unix-isatty fd))
+    (error () nil)))
+
+(defun %p-output-buffering (fd)
+  "perl's stdio buffering POLICY for an OUTPUT handle on descriptor FD (task
+   #542): LINE-buffered on a terminal, BLOCK-buffered anywhere else.  THE one
+   reading of that policy — boot, every standard-handle rebuild and every dup
+   ask here, because a second copy is how PCL's STDOUT came to be line-buffered
+   under a pipe where perl block-buffers it, which reorders a program's own
+   writes against a dup of the same descriptor and against its children.
+
+   Probed 5.40.3 with the discriminator that does NOT involve a child (perl
+   runs PERL_FLUSHALL_FOR_CHILD before fork/system/exec, so `system` cannot
+   tell the modes apart): `open($d,'>&',\\*STDOUT); print $d \"one\";
+   print \"two\"; print $d \"three\"` answers `one three two` through a pipe
+   (STDOUT's \"two\" waits for exit) and `one two three` on a pty.  The rule is
+   per DESCRIPTOR, not inherited: a dup of STDERR onto a pipe is BLOCK
+   buffered, not unbuffered (probed with an external observer)."
+  (if (%p-isatty fd) :line :full))
+
+(defun %p-std-buffering (slot)
+  "%p-output-buffering plus perl's ONE exception: STDERR is UNBUFFERED, on a
+   terminal and off it alike.  Probed with an external observer — a child
+   writes a PARTIAL line, sleeps 3 s, then a full one; through a pipe STDERR's
+   first byte arrives at 0.00 s where STDOUT's arrives at 3.00 s.
+
+   ecase over the two OUTPUT slots: descriptor 0 is an input stream and has no
+   business here, so asking is a disagreement between this function and its
+   caller and must say so (rule 12)."
+  (ecase slot
+    (1 (%p-output-buffering 1))
+    (2 :none)))
+
+(defun %p-std-rebuild (slot &optional buffering)
   "Rebuild the CL stream standing for standard descriptor SLOT after the
    descriptor itself has been re-pointed, and re-register it under the handle
    name.  Returns the new stream.  ecase, not case: a slot outside 0/1/2 means
-   %p-std-slot and this function disagree, and that must say so (rule 12)."
+   %p-std-slot and this function disagree, and that must say so (rule 12).
+
+   BUFFERING overrides %p-std-buffering for the one caller whose descriptor
+   perl does NOT re-decide: a fork-pipe child dup2s the pipe onto descriptor 1
+   under the SAME PerlIO handle, so the child keeps the parent's mode (probed —
+   see %p-open-fork-pipe).  Every other caller is a re-OPEN of the standard
+   handle, which perl decides afresh from the new descriptor."
   (ecase slot
     (0 (setf sb-sys:*stdin*
              (sb-sys:make-fd-stream 0 :input t :external-format :utf-8))
        (setf *standard-input* (make-synonym-stream 'sb-sys:*stdin*))
        (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
     (1 (setf sb-sys:*stdout*
-             (sb-sys:make-fd-stream 1 :output t :buffering :line
+             (sb-sys:make-fd-stream 1 :output t
+                                    :buffering (or buffering
+                                                   (%p-std-buffering 1))
                                     :external-format :utf-8))
        (setf *standard-output* (make-synonym-stream 'sb-sys:*stdout*))
        (setf (gethash 'STDOUT *p-filehandles*)
              (%p-register-open-stream *standard-output*)))
     (2 (setf sb-sys:*stderr*
-             (sb-sys:make-fd-stream 2 :output t :buffering :line
+             (sb-sys:make-fd-stream 2 :output t
+                                    :buffering (or buffering
+                                                   (%p-std-buffering 2))
                                     :external-format :utf-8))
        (setf *error-output* (make-synonym-stream 'sb-sys:*stderr*))
        (setf (gethash 'STDERR *p-filehandles*)
              (%p-register-open-stream *error-output*)))))
+
+(defun %p-apply-std-buffering ()
+  "Put descriptors 1 and 2 under %p-std-buffering.  Called at load time AND
+   from sb-ext:*init-hooks*, because THE DECISION IS PER PROCESS: a saved core
+   (tools/prove-core, ~/.pcl-cache/core, an installed pcl.core) would otherwise
+   freeze the isatty answer of the machine that BUILT it — the same reason $$
+   and the FP modes are refreshed there."
+  (%p-std-rebuild 1)
+  (%p-std-rebuild 2)
+  nil)
+
+(%p-apply-std-buffering)
+(push (lambda () (%p-apply-std-buffering)) sb-ext:*init-hooks*)
 
 (defun %p-rebind-std (slot stream)
   "Bind STREAM to the standard handle for descriptor SLOT the way perl does:
@@ -9995,21 +10086,32 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    processes continue running the program, the parent gets the child PID and
    the child gets 0 with the filehandle NOT installed (Perl semantics).
    The child's standard stream is rewired onto the pipe via dup2 so both
-   in-process reads/writes and a later exec see it."
+   in-process reads/writes and a later exec see it.
+
+   THE CHILD KEEPS THE PARENT'S BUFFERING MODE, which is not the same answer
+   %p-std-buffering would give the new descriptor: perl's my_popen dup2s at the
+   FD level under the same PerlIO handle, so a child of a TTY parent
+   line-buffers onto the pipe.  Probed 5.40.3 with a child that prints, sleeps
+   3 s and prints again: on a pty the parent's first read returns at once, on a
+   pipe it waits for the child to exit."
   (handler-case
       (multiple-value-bind (read-fd write-fd) (sb-posix:pipe)
-        (finish-output *standard-output*)
-        (finish-output *error-output*)
-        (let ((pid (sb-posix:fork)))
+        ;; PERL_FLUSHALL_FOR_CHILD: every handle, not just the standard ones,
+        ;; or a block-buffered buffer is DUPLICATED into both processes.
+        (%p-flush-all-output)
+        (let* ((out-buffering (when (sb-sys:fd-stream-p sb-sys:*stdout*)
+                                (sb-impl::fd-stream-buffering sb-sys:*stdout*)))
+               (pid (sb-posix:fork)))
           (cond
             ((> pid 0)                    ; ---- parent
              (let ((stream
                     (if (string= mode-str "|-")
                         (progn
                           (sb-posix:close read-fd)
-                          (sb-sys:make-fd-stream write-fd :output t
-                                                 :buffering :full
-                                                 :external-format :utf-8))
+                          (sb-sys:make-fd-stream
+                           write-fd :output t
+                           :buffering (%p-output-buffering write-fd)
+                           :external-format :utf-8))
                         (progn
                           (sb-posix:close write-fd)
                           (sb-sys:make-fd-stream read-fd :input t
@@ -10025,26 +10127,19 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                    (unless (= read-fd 0)
                      (sb-posix:dup2 read-fd 0)
                      (sb-posix:close read-fd))
-                   (setf sb-sys:*stdin*
-                         (sb-sys:make-fd-stream 0 :input t
-                                                :external-format :utf-8))
-                   (setf *standard-input* (make-synonym-stream 'sb-sys:*stdin*))
-                   (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
+                   (%p-std-rebuild 0))
                  (progn                   ; child WRITES its rewired STDOUT
                    (sb-posix:close read-fd)
                    (unless (= write-fd 1)
                      (sb-posix:dup2 write-fd 1)
                      (sb-posix:close write-fd))
-                   ;; :line buffering — the parent typically consumes the
-                   ;; child's output (TAP lines) incrementally.
-                   (setf sb-sys:*stdout*
-                         (sb-sys:make-fd-stream 1 :output t :buffering :line
-                                                :external-format :utf-8))
-                   (setf *standard-output*
-                         (make-synonym-stream 'sb-sys:*stdout*))
-                   (setf (gethash 'STDOUT *p-filehandles*) *standard-output*)))
+                   ;; The SAME rebuild every standard-handle re-point uses
+                   ;; (rule 11), carrying the parent's mode over — see the
+                   ;; docstring: this dup2 is not a re-open.
+                   (%p-std-rebuild 1 out-buffering)))
              (when cmd-args
                (apply #'p-exec cmd-args)  ; returns only on exec failure
+               (%p-flush-all-output)      ; :abort t skips the exit hooks
                (sb-ext:exit :code 127 :abort t))
              0))))
     (error () (%pcl-save-errno) *p-undef*)))
@@ -10178,7 +10273,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (multiple-value-bind (can-read can-write) (%p-fd-directions fd)
       (let* ((out (and want-out can-write t))
              (in  (or (and can-read t) (not out))))
+        ;; The dup gets its OWN buffer, and its MODE is decided from its own
+        ;; descriptor by the same policy every other handle uses (task #542):
+        ;; on a pty `print $d "one"; print "two"; print $d "three"` must come
+        ;; out in program order, which SBCL's :full default broke.
         (sb-sys:make-fd-stream fd :input in :output out
+                               :buffering (%p-output-buffering fd)
                                :external-format :utf-8)))))
 
 (defun %p-open-dup (fh mode-str src-name three-arg-p
@@ -12748,7 +12848,11 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-system (&rest args)
   "Perl system - execute a shell command.
    system(CMD) or system(PROG, ARGS...).
-   Sets $? to wait status (exit_code << 8), returns same value."
+   Sets $? to wait status (exit_code << 8), returns same value.
+   Perl's PERL_FLUSHALL_FOR_CHILD runs first: with a block-buffered STDOUT
+   (#542) `print \"a\\n\"; system(\"echo MARK\")` would otherwise print MARK
+   first (probed 5.40.3: perl prints a, MARK)."
+  (%p-flush-all-output)
   (if (null args)
       -1
       (let* ((cmd (to-string (car args)))
@@ -12780,9 +12884,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    child.  (Caveat: PCL cannot fork+continue a program that has spawned CL
    threads — only the forking thread survives in the child — but ordinary
    single-threaded Perl fork/exec and fork/exit works.)"
-  (finish-output *standard-output*)
-  (finish-output *error-output*)
-  (%p-flush-open-streams)                ; perl flushes EVERY handle, not just the std three
+  (%p-flush-all-output)                  ; perl flushes EVERY handle, not just the std three
   (handler-case (sb-posix:fork)          ; 0 in child, >0 in parent
     (error ()
       (%pcl-save-errno)
@@ -12886,9 +12988,14 @@ buffer's fill-pointer; everything else falls back to file-length."
    PCL runs the program with inherited stdio (so file descriptors set up before
    exec, e.g. after a pipe/dup in a forked child, carry through) and then exits
    with its status — like exec, this call never returns on success.  With a
-   single string containing shell metacharacters it goes through /bin/sh -c."
+   single string containing shell metacharacters it goes through /bin/sh -c.
+
+   PERL_FLUSHALL_FOR_CHILD first, and BEFORE the child runs: the exec'd program
+   writes to the same descriptors, so anything still in PCL's buffers would
+   come out after its output instead of before it."
   (when (null args)
     (setf *p-stored-errno* 2) (return-from p-exec *p-undef*))  ; ENOENT
+  (%p-flush-all-output)
   (let* ((strs (mapcar (lambda (a) (to-string (if (p-box-p a) (unbox a) a))) args))
          (shell-p (and (= (length strs) 1)
                        (find-if (lambda (c) (find c "|&;<>()$`\\\"'*?[]{}~ "))
@@ -12900,8 +13007,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                         (sb-ext:run-program (first strs) (rest strs)
                                             :search t :input t :output t
                                             :error t :wait t))))
-          (finish-output *standard-output*)
-          (finish-output *error-output*)
+          (%p-flush-all-output)          ; :abort t skips the exit hooks
           (sb-ext:exit :code (or (sb-ext:process-exit-code proc) 0) :abort t))
       (error ()
         (%pcl-save-errno)
@@ -12909,7 +13015,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-backtick (cmd)
   "Perl backticks - execute shell command and capture output.
-   Returns the stdout output as a string. Uses latin-1 so binary output won't crash."
+   Returns the stdout output as a string. Uses latin-1 so binary output won't crash.
+   PERL_FLUSHALL_FOR_CHILD first — my_popen runs it, and the child inherits
+   STDERR, so a block-buffered handle must not hold text across the fork."
+  (%p-flush-all-output)
   (let* ((proc (sb-ext:run-program "/bin/sh" (list "-c" (to-string cmd))
                                    :input nil
                                    :output :stream
