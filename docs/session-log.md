@@ -4,6 +4,107 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 451y (2026-08-29, Opus agent Y, round 10) — the agent-P residue: two context bugs and two declaration arms (#611, #612, #610, #620)
+
+Four commits on `2264a3c` (rebased; main's generation was v2-380, mine is
+**v2-390**), gate **184/6191 PASS** (xs skipped — worktree; the three
+guard files add 31 rows).
+
+**#611** (`963f5c5`) — **the context an emitter forces at EMIT time has to be
+pushed DOWN, because `annotate_contexts` ran before it.**
+`_gen_scalar_deref_base_form` forces SCALAR_CTX on the base of a postfix `->`,
+but `child_context` had already stamped every child of a comma group LIST_CTX
+("progn (comma operator) forces list context"), and a single-child paren layer
+COLLAPSES to its child's form — so `((0,$h))->{k}` dereferenced a
+`(vector 0 $h)` and died, while the depth-1 `(0,$h)->{k}` was right and
+`((0,$r))->[1]` was a silent wrong.  One predicate `_scalar_ctx_pushdown` and
+a SCALAR arm in `gen_progn_form` + both branches of `gen_tree_val_form`, **LAST
+CHILD ONLY** (the comma operator's value).  **The licence is an EXPLICIT
+annotation, never `get_node_context`'s SCALAR default** — an unannotated node
+reads scalar too, and keying on that moved three unrelated corpus files; hence
+`get_node_context_raw`.  That is the difference between a 3-file and a 9-file
+A/B.  **Six of the nine A/B movers are other instances of the same missing
+push-down, all in the right direction**: `(Class->new)->isa(…)` (op/ +
+uni/universal.t) is the bug itself; `${ (), $sub->() } = 4` (op/sub_lval.t) and
+a ternary arrow base's `undef` branch (op/gmagic.t) lose a wrong LIST bind;
+`$h{$_} xor ($_ =~ /…/)` (re/pat.t) stops running the MATCH in list context,
+where it returns the CAPTURES; `close($fh) or …` (porting/podcheck.t) drops a
+pointless `p-list-ctx`.  The three corpus movers (op/do.t, op/multideref.t,
+op/sub.t) are verdict-neutral — 65/3, 42/10, 62/2, the blessed baseline.
+
+**#612** (`8b71893`) — **`EXPR->@*` IS `@{ EXPR }`.**  `Pl::PExpr` lowers every
+postfix deref onto the prefix cast and every postfix slice onto the slice node
+types, so the base rule is the arrow's: ONE scalar value.  None of those
+emitters asked `_is_paren_scalar_base`; `(1,2,$r)->@*` was `1,2,ARRAY(0x…)`,
+`->$#*` the GROUP's last index, the hash spellings DIED, **and the
+single-element base `($r)->@*` was wrong too** — `->%*` and the scalar-context
+`->@*` answering right is not "half of it works".  One helper
+`_paren_deref_base_form` at six sites (the sigil cast, `$#`, four slice
+emitters).  **A DEREF base keeps its emitter's LVALUE context where the four
+`->` members force rvalue**: `@{ ($h{k}) } = (7,8)` autovivifies (probed).
+`->&*` and `->**` were not parsed at all — a whole-statement drop — and now
+lower onto the `&`/`*` prefix casts that already existed.  34 probes: 22
+disagreed before, 0 after.  **A fix that makes a value real exposes what was
+passing on nothing** (the s438h lesson, again): `perl-tests/postfixderef.t`
+96/25 → **100/21**, six rows fixed and rows 72/73 (`ok(!eval q{ $pvbm->** })`)
+now failing HONESTLY — they passed because the statement DROPPED and the eval
+died, and PCL has no PVBM.  Filed **#720** (an lvalue slice through an
+autovivified element writes nowhere — pre-existing; the paren is a red
+herring, the plain spelling fails identically).
+
+**#610** (`81d212c`) — **`my (undef) = LIST` is not `my ()`.**  `_multi_decl`
+greps the Symbol tokens and reports "no names" for an all-placeholder list, so
+`_lower_block`'s `die "Parser2 TODO: unsupported declaration"` took the WHOLE
+FILE, anywhere in the program, string eval included; the MIXED list (#570) was
+already fine.  One sibling predicate `_is_no_name_my_decl` beside
+`_is_empty_my_decl` (which requires exactly two children, i.e. no `=`, and has
+nothing to run) plus one arm that lowers the statement UNCHANGED through the
+expression machinery — the same `_lower_expr([@k], $stmt)` the multi-decl
+branch runs beside its `let`, with no names to `let`.  Perl evaluates the RHS
+ONCE in LIST context (probed) and the scalar value is the RHS count; both fall
+out of the reuse.  Emission IDENTICAL over all four populations.  Filed **#721**
+(a list assignment used as a VALUE in LIST context returns the scalar COUNT
+where perl returns the LHS lvalues — family-wide and pre-existing; the
+`() = LIST` countof idiom is the one spelling PCL gets right).
+
+**#620** (`f01d639`) — **the modifier comes off the run ONCE, before either
+consumer.**  Agent S's s449 diagnosis was exactly right about the site; it also
+has to precede `_multi_decl`, because the NO-INIT spelling `my %h if 1` was a
+WHOLE-FILE die and not a drop.  One split plus one `$assign_form` closure for
+the arm's five `_lower_expr([@k], …)` sites; `_multi_decl` gained an optional
+token-list argument.  **The `let` is not conditional — only the assignment
+is**: perl DECLARES the container whatever the modifier says, a false condition
+leaves it declared and EMPTY, and the RHS is not evaluated at all (probed).  A
+no-init decl has nothing to guard but its CONDITION still runs, in void, before
+the let — and that local must be NAMED APART from the scalar branch's
+`@declmod_eval`, or perl's shadow warning on stderr fails a gate row (which is
+how it was caught).  Emission IDENTICAL over all four populations.  Filed
+**#722** as the deliberate residue: a SELF-REFERENTIAL init under a modifier
+keeps DROPPING, because those two shapes fuse the RHS into the `let` BINDING —
+the only position where the name still means the OUTER variable — and a
+modifier would need two binding values; the fix puts the modifier BACK on the
+run there rather than answer a wrong false-condition value.
+
+**Bar.**  Gate 184/6191 PASS on the rebased tree.  `tools/corpus-diff.pl` vs
+`2264a3c`: 3 of 111, all explained, silent drops 5 unchanged.
+`tools/emission-ab.pl` over lib/ + perl's t/ + the cpan-tests board (1007
+files): SAME 998 / DIFF 9 / RCDIFF 0 — `lib/` and the cpan population
+BYTE-IDENTICAL, every diff in perl's own t/ and every one explained above.
+Drop census (six populations, `--board`): 34 files / 90 drops, **every count
+identical to the blessed census**.  Guards: `anon-sub-01.t` 54 → 70,
+`aassign-01.t` 18 → 24, `stmt-modifier-01.t` 30 → 39, each inverse-run against
+a HEAD copy of the changed compiler files.  Baselines untouched.
+
+**Two census discrepancies REPORTED, not edited** (both pre-existing on plain
+`718db6b`, verified by transpiling there): the board row
+`Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm` reads **2** in
+`baselines/parse-error-drop-census-s399.tsv` and measures **4**; and the
+census's MESSAGE column is stale tree-wide since s440 swapped `Data::Dump` for
+`Data::Dumper` in `Pl::PExpr::_dd` (every row's text is truncated at `[`
+where a fresh run carries the full dump).
+
+---
+
 ## Session 451w (2026-08-29, Opus agent W, round 10) — the three round-9 review regressions: #685, #663, #694
 
 Three commits on `718db6b`, gate 183/6151 PASS (xs skipped — worktree).
