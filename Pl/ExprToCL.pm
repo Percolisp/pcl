@@ -664,8 +664,8 @@ sub gen_leaf_form {
   # side effects — the /e sub-compile — run exactly once).
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
     my $content = $node->content();
-    my ($pattern, $flags) = _parse_regex_content($content, 1);
-    if (_has_regex_interpolation($pattern)) {
+    my ($pattern, $flags, $delim) = _parse_regex_content($content, 1);
+    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
       my $pat_form = $self->_gen_interp_regex_pattern($pattern);
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
@@ -680,8 +680,8 @@ sub gen_leaf_form {
     if $ref eq 'PPI::Token::Regexp::Transliterate';
   if ($ref =~ /^PPI::Token::Regexp/) {
     my $content = $node->content();
-    my ($pattern, $flags) = _parse_regex_content($content, 0);
-    if (_has_regex_interpolation($pattern)) {
+    my ($pattern, $flags, $delim) = _parse_regex_content($content, 0);
+    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
       my $pat_form = $self->_gen_interp_regex_pattern($pattern);
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
@@ -713,7 +713,33 @@ sub _parse_regex_content {
   my $end_pos = rindex($content, $close_ch);
   my $pattern = substr($content, $prefix_len + 1, $end_pos - $prefix_len - 1);
   my $flags = substr($content, $end_pos + 1);
-  return ($pattern, $flags);
+  return ($pattern, $flags, $open_ch);
+}
+
+# Does a quote-like construct with this OPENING DELIMITER interpolate?
+# A SINGLE-QUOTED one does not, and that is a delimiter fact, not a content
+# fact: `m'$x'`, `qr'$x'` and `s'$x'$y'` are literal in perl exactly as '…' is
+# (probed 5.40.3 — `'m$xn' =~ s'$x'Q'` leaves the string alone, and `s'(A)'$1'`
+# writes the two characters `$1`).  One predicate for every gate, so the three
+# regex sites and the s/// replacement cannot disagree about it.
+sub _delim_interpolates {
+  my ($open_ch) = @_;
+  return (defined $open_ch && $open_ch eq "'") ? 0 : 1;
+}
+
+# The two delimiters of an s/// token, as the interpolation question: perl
+# takes them separately, so `s{A}'[$x]'` has a dq-like PATTERN and a literal
+# REPLACEMENT (probed).  PPI's get_delimiters returns the pair as two 2-char
+# strings ("//" , "''"); a bracketing form gives "{}".
+sub _subst_delims {
+  my ($node) = @_;
+  my @d = eval { $node->get_delimiters };
+  return (undef, undef) if $@ || @d < 1;
+  my $m = defined $d[0] ? substr($d[0], 0, 1) : undef;
+  # A bracketing match delimiter is followed by its own opening delimiter for
+  # the replacement; the one-delimiter forms reuse the match's.
+  my $r = @d > 1 && defined $d[1] ? substr($d[1], 0, 1) : $m;
+  return ($m, $r);
 }
 
 # Does a raw regex pattern interpolate?  The scanner answers — the same one
@@ -743,21 +769,55 @@ sub _has_regex_interpolation {
 # `$#arr` and a `\\`-escaped sigil, which the private class read as literal
 # text too (all three probed against perl 5.40.3).
 #
-# THE GATE STAYS DELIBERATELY NARROW where gen_substitution_form's comment says
-# it is: a bare MAGIC name is not this gate's business.  $1..$9 are served by
-# the runtime's native $N rewrite (no lambda call per match) and the
-# punctuation magics ($& $` $' $+ $! $$) are a separate, still-open hole — they
-# emit literally today, and $` / $' are ALSO wrong on the lambda path, so
-# routing them here would trade one wrong answer for another.  A BRACED
-# spelling always takes the lambda path, which is what the `{` in the old class
-# meant and is what keeps `${^NAME}` working.
+# THE ONE NAME THIS GATE STILL SKIPS IS A NUMBERED BACKREF.  `$1`..`$N` are
+# served by the runtime's native $N rewrite (no lambda call per match), which is
+# the gate's deliberate narrowness.  Every OTHER magic goes down the lambda
+# path since task #520: `$&`, `` $` ``, `$'`, `$+`, `$^N`, `$!`, `$$`, `$0`,
+# `$,`, `@-`, `@+` … all used to emit as LITERAL TEXT (`s/A/[$&]/` on "xAy"
+# gave `x[$&]y`).  An earlier attempt widened only this gate and found `` $` ``
+# and `$'` coming back EMPTY on the lambda path; that was the OTHER half of the
+# bug and is fixed in p-subst — the replacement lambda now gets its match state
+# from the same `set-capture-groups` + `set-match-vars` pair the m// path uses,
+# so all six magics are live inside it.  `$0` is NOT a backref (it is the
+# program name, probed), so only `[1-9][0-9]*` is skipped.  A BRACED spelling
+# always takes the lambda path, which is what the `{` in the old class meant and
+# is what keeps `${^NAME}` working.
+#
+# CASE-SHIFT ESCAPES are the second reason to take this path (task #522).  `\U`
+# `\L` `\u` `\l` `\Q` `\E` are dq-string operators, not interpolation, so no
+# scanner event names them and `s/(A)/[\U$1\E]/` used to emit the escapes
+# LITERALLY.  The dq-string compiler already implements them (probed), so the
+# fix is to route the replacement there — never a second copy (rule 11).  This
+# reason can fire with no sigil in the text at all (`s/A/[\Uab\E]/`), which is
+# why it is tested BEFORE the `[\$\@]` pre-filter.
 sub _replacement_interpolates {
   my ($subst) = @_;
+  return 1 if _replacement_case_shifts($subst);
   return 0 if $subst !~ /[\$\@]/;
   for my $ev (@{ Pl::InterpScan::scan($subst) }) {
     return 1 if substr($subst, $ev->{span}[0] + length($ev->{sigil}), 1) eq '{';
-    next if $ev->{form} eq 'magic';
+    next if $ev->{form} eq 'magic'
+         && defined $ev->{name} && $ev->{name} =~ /^[1-9][0-9]*\z/;
     return 1;
+  }
+  return 0;
+}
+
+# Does the replacement carry a dq case-shift / quotemeta escape?  Walks the
+# escapes rather than pattern-matching, so `\\U` (an escaped backslash followed
+# by a plain U) is not one — the same pair-skipping rule
+# _unescape_subst_replacement and _subst_backrefs_to_dollars use.
+sub _replacement_case_shifts {
+  my ($subst) = @_;
+  my $n = length $subst;
+  my $i = 0;
+  while ($i < $n) {
+    if (substr($subst, $i, 1) eq '\\') {
+      return 1 if substr($subst, $i + 1, 1) =~ /^[ULQEul]\z/;
+      $i += 2;
+      next;
+    }
+    $i++;
   }
   return 0;
 }
@@ -1048,8 +1108,8 @@ sub gen_leaf {
   # Compiled regex qr// (check before Quote to avoid catching QuoteLike::Regexp)
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
     my $content = $node->content();
-    my ($pattern, $flags) = _parse_regex_content($content, 1);
-    if (_has_regex_interpolation($pattern)) {
+    my ($pattern, $flags, $delim) = _parse_regex_content($content, 1);
+    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
       my $pat_expr = Pl::CLForm::to_flat($self->_gen_interp_regex_pattern($pattern));
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
@@ -1136,8 +1196,8 @@ sub gen_leaf {
   # Match regex m// or //
   if ($ref =~ /^PPI::Token::Regexp/) {
     my $content = $node->content();
-    my ($pattern, $flags) = _parse_regex_content($content, 0);
-    if (_has_regex_interpolation($pattern)) {
+    my ($pattern, $flags, $delim) = _parse_regex_content($content, 0);
+    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
       my $pat_expr = Pl::CLForm::to_flat($self->_gen_interp_regex_pattern($pattern));
       (my $esc_flags = $flags) =~ s/"/\\"/g;
       return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
@@ -3924,10 +3984,15 @@ sub gen_substitution_form {
 
   my @mod_strs = map { ":$_" } sort keys %$mods;
 
+  # perl takes the two DELIMITERS separately, and a single-quoted one turns
+  # interpolation off for its half alone: `s{A}'[$x]'` has a dq-like pattern and
+  # a literal replacement (probed).
+  my ($mdelim, $rdelim) = _subst_delims($node);
+
   # Pattern: a string literal atom, or the interpolation form ("…"/$var/
   # (p-string-concat …)) evaluated to the pattern string at runtime.
   my $match_form;
-  if (_has_regex_interpolation($match)) {
+  if (_delim_interpolates($mdelim) && _has_regex_interpolation($match)) {
     $match_form = $self->_gen_interp_regex_pattern($match);
   } else {
     (my $m = $match) =~ s/\\/\\\\/g;
@@ -3943,11 +4008,23 @@ sub gen_substitution_form {
             @mod_strs];
   }
 
-  # Replacement with variable interpolation: wrap in a lambda so $varname/$1..$9
-  # evaluate at match time.  Deliberately NOT the scanner gate: a replacement
-  # is dq text, not a pattern, and a bare `$1`/`$2` replacement is served
-  # better by the runtime's native backref substitution (no lambda call per
-  # match) than by the interpolation path.  Widening this gate is its own
+  # A SINGLE-QUOTED replacement is literal text — no interpolation, no case
+  # shifts, and no backrefs either: `s'(A)'$1'` writes the two characters `$1`
+  # and `s'(A)'\1'` the two characters `\1` (probed).  It is emitted as a
+  # LAMBDA returning a constant rather than as the string p-subst hands to
+  # cl-ppcre, because that path is exactly the one that would read `$1`/`\1` as
+  # a register reference.  Only `\'` and `\\` are unescaped, as in '…'.
+  if (!_delim_interpolates($rdelim)) {
+    return ['p-subst', $match_form,
+            ['lambda', ['list'], _cl_string_literal_form(_unescape_sq($subst))],
+            @mod_strs];
+  }
+
+  # Replacement with variable interpolation (or a case-shift escape): wrap in a
+  # lambda so $varname / the magics evaluate at match time and `\U…\E` reaches
+  # the dq-string compiler.  A bare `$1`/`$2` replacement is deliberately NOT
+  # routed here — it is served better by the runtime's native backref
+  # substitution (no lambda call per match).  Widening this gate is its own
   # measured change (docs/interp-scan.md §wiring).
   if (_replacement_interpolates($subst)) {
     return ['p-subst', $match_form,
@@ -3978,6 +4055,27 @@ sub _take_dq_escape {
     return (_process_dq_escape($tok), 1 + length($tok));
   }
   return ('\\', 1);   # lone trailing backslash
+}
+
+# Escape-process a SINGLE-QUOTED s/// replacement: only `\'` and `\\` mean
+# anything, everything else — `\t`, `\n`, `\1` — is the backslash and the
+# character (probed 5.40.3).  Same rule '…' itself follows.
+sub _unescape_sq {
+  my ($str) = @_;
+  my $out = '';
+  my $i = 0;
+  my $n = length $str;
+  while ($i < $n) {
+    my $c = substr($str, $i, 1);
+    if ($c eq '\\' && $i + 1 < $n && substr($str, $i + 1, 1) =~ /^['\\]\z/) {
+      $out .= substr($str, $i + 1, 1);
+      $i += 2;
+      next;
+    }
+    $out .= $c;
+    $i++;
+  }
+  return $out;
 }
 
 # Escape-process a NON-interpolated s/// replacement (dq semantics).  \1-\9

@@ -891,6 +891,27 @@ value" warning is the backstop there) and deref-element args
 `$a[0] =~ s/…/…/` emits `(p-=~ (p-aref-box @a 0) (p-subst …))`, not
 `p-aref`.  A plain match is a read and keeps `p-aref`.
 
+**An `s///` REPLACEMENT is one of three things**, and which one is a
+compile-time decision:
+
+* a plain STRING, when the text is literal or names only numbered backrefs
+  (`$1`…`$N`) — the runtime rewrites those for the regex engine, with no
+  per-match call;
+* a `(lambda () …)`, when the text interpolates ANYTHING ELSE — a variable, a
+  punctuation magic (`$&`, `` $` ``, `$'`, `$+`, `$^N`, `@-`, …), or a
+  dq case-shift escape (`\U` `\L` `\u` `\l` `\Q` `\E`).  The replacement is
+  compiled by the ORDINARY double-quoted-string compiler, so it has exactly dq
+  semantics; `/e` produces the same shape from Perl code.  **Inside that lambda
+  the full match state is live** — the runtime sets it with the same pair of
+  calls a plain `m//` makes, so every §8 magic reads the CURRENT match;
+* a `(lambda () "…")` over a CONSTANT, when the replacement is SINGLE-QUOTED
+  (`s'A'$1'`).  A single-quoted half interpolates nothing at all — not a
+  variable, not a magic, not a case shift, and not a backref — and the constant
+  goes through a lambda precisely so the engine's own `$N`/`\N` rewrite cannot
+  see it.  Whether a half interpolates is the DELIMITER's answer, taken
+  separately for the two halves: `s{A}'[$x]'` has a dq-like pattern and a
+  literal replacement.
+
 **`&`-sigil calls without an argument list** re-use the caller's `@_`
 (Perl's `&foo;` rule).  Named form: `&foo;` → `(pl-foo @_)`.  Deref forms:
 `&$ref;` / `&{expr};` / `&{"name"};` → `(p-funcall-ref EXPR @_)`;

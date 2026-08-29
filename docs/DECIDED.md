@@ -58,6 +58,60 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **The perf headlines, measured at review**: population compile 226.6 s →
   62–78 s (warm hit 99.0 %; single Test2 file 0.70 → 0.13 s); the m//g
   loop linear (200k 12.8 → 0.5 s; 1M 2.83 s vs perl 0.09 — residue #680).
+## s450v (2026-08-29, Opus, round 9 agent V) — the s/// REPLACEMENT is one path, and it was missing three things (#520 + #522 + #521)
+
+- **#520 was TWO-SIDED, and the runtime half is the one that made the gate half
+  possible.**  The punctuation magics emitted as LITERAL TEXT (`s/A/[$&]/` on
+  "xAy" gave `x[$&]y`); the earlier attempt widened the gate alone and found
+  `` $` `` / `$'` EMPTY on the lambda path.  **Re-probed after #477 and still
+  empty** — because `p-subst`'s lambda arm called cl-ppcre with
+  `:simple-calls t`, which hands over only the matched STRINGS, so that arm had
+  its own hand-rolled `$1..$9` + `%+`/`%-` block and could set nothing built
+  from OFFSETS.  It now uses the NON-simple call form and the same
+  `clear-capture-groups` + `set-capture-groups` + `set-match-vars` trio the
+  `m//` path beside it always used (rule 11) — which also gives the replacement
+  `$10..$20` and `@{^CAPTURE}`, which the copy never had.  The gate then skips
+  only `[1-9][0-9]*` (`$0` is the PROGRAM NAME, not a backref — probed).
+- **#522: `\U` `\L` `\u` `\l` `\Q` `\E` are DQ-STRING OPERATORS, not
+  interpolation**, so no scanner event names them and they stayed literal.  The
+  dq compiler already implements them, so the replacement is routed there
+  (rule 11).  The reason can fire with NO sigil in the text, so it is tested
+  before the `[\$\@]` pre-filter.
+- **#521 IS NOT s///-SPECIFIC — the same unreadable form comes out of a plain
+  dq string** (`print "s=${\ \"L\"}\n"`), which the task's narrowing missed.  A
+  fragment lifted out of a dq construct still carries the ESCAPED DELIMITER,
+  and **perl undoes THAT ONE ESCAPE AND NOTHING ELSE**: `\\` stays a pair and
+  `\t` stays a backslash and a t, because the fragment is CODE and a string
+  inside it does its own escape processing (probed row by row).  `_undelimit`
+  in `_interp_reparse` — the ONE place a lifted fragment is read — is the fix.
+  The `@{…}` consumer had been running the FULL dq `unescape_string` over its
+  guts instead, which is how `"@{[ &attributes::get(\&utf8::valid) ]}"` lost
+  the `\` and became a CALL (t/op/sub_lval.t, a silent wrong the A/B found).
+- **THE INVERSE THE WIDENING WOULD HAVE BROKEN, and a PRE-EXISTING silent wrong
+  with it: a SINGLE-QUOTED half interpolates NOTHING.**  `s'A'[$x]'`,
+  `s'(A)'$1'`, `s'(A)'\1'` and `s'$x'Q'` were all wrong before this session;
+  `\U` and `$&` would have joined them.  Interpolation is the DELIMITER's
+  answer (`_delim_interpolates`), taken separately for the two halves
+  (`s{A}'[$x]'` — probed), and a single-quoted replacement is emitted as a
+  LAMBDA over a constant, because the string path is exactly the one that would
+  read its `$1`/`\1` as a register.  Only `\'` and `\\` are unescaped there.
+- Emission A/B vs `3c7c6ec` over 792 files: 26 DIFF, **every one explained**
+  (20 are #541's conditional-`local`; the 6 new are `re/subst.t`,
+  `re/subst_amp.t`, `op/lc.t`, `re/pat_advanced.t`, `t/bigmem/subst.t` and the
+  `sub_lval.t` `\&` fix).  perl-tests corpus IDENTICAL over 111.  Companion
+  A/B on both trees: **op/lc.t +2, re/subst.t +6, re/pat_advanced.t +1, no
+  regressions** — the snapshot movers to splice.  Six perl-tests files
+  (lc/split/tr/substr/quotemeta/sprintf2) byte-identical status on both trees.
+- Filed: **#691** (the `raw-slot` verdict is blind to a DEREF use inside a
+  replacement — `s/A/${$r}/` writes the empty string; `PCL_OPT=-raw-slot` is
+  the discriminator), **#692** (a NESTED case shift around an interpolated
+  variable does not pop — `"\LX\U$t\E Y\E"`; constant-only spans are right),
+  **#693** (the loud residue of #521: an already-escaped `\"` inside a `${…}`
+  block in a replacement survives a LOSSY escape round trip and drops).
+- Guard `Pl/t/regexp-subst-01.t` +7 rows (four perl-oracle programs + three
+  emission shapes, both directions).  ir-spec §7's "an s/// replacement is one
+  of three things" paragraph is the normative record.
+
 ## s450v (2026-08-29, Opus, round 9 agent V) — a false-conditioned `local` does not save, so a WRITE inside its scope SURVIVES (#541)
 
 - **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task

@@ -257,9 +257,10 @@ PL
 #   \\$x      an ESCAPED BACKSLASH before a sigil — the lookbehind
 #             read the second `\` as escaping the `$`             (was [\$x])
 #
-# The magic names below are NOT in this fix and must stay literal: $1..$9 are
-# served by the runtime's own backref rewrite (that is the gate's deliberate
-# narrowness), and the punctuation magics are a separate open hole.
+# $1..$9 stay literal in the EMISSION: they are served by the runtime's own
+# backref rewrite, which is the gate's one remaining deliberate narrowness.
+# (The punctuation magics this comment used to call "a separate open hole" are
+# fixed — task #520, §520 below.)
 {
     my $root = "$RealBin/../..";
     my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
@@ -280,5 +281,103 @@ PL
     chomp(my $exp = $want);
     is($got, $exp, "s/// replacement: \$::name, \$#array and \\\\\$x agree with perl (#492; perl: $exp)");
 }
+
+# ============================================================
+# Tasks #520 / #522 / #521 (s450v): THE THREE THINGS AN s/// REPLACEMENT
+# COULD NOT SAY.  Every row runs the same program under real perl and under
+# PCL and compares — perl is the expectation, so a row cannot encode a wrong
+# answer of ours.
+#
+#   #520  the PUNCTUATION MAGICS came out as literal text: `s/A/[$&]/` on
+#         "xAy" gave `x[$&]y`.  TWO-SIDED — widening the gate alone puts them
+#         on the lambda path, where `$\`` / `$'` / `$+` / `$^N` / `@-` were
+#         EMPTY because that path set only `$&` and `$1..$9` by hand.  The
+#         runtime half (p-subst calls the shared set-capture-groups +
+#         set-match-vars, as the m// path always did) is what makes the gate
+#         half correct.
+#   #522  `\U` `\L` `\u` `\l` `\Q` `\E` stayed literal.  They are dq-string
+#         operators, so the replacement is routed to the dq compiler that
+#         already implements them (rule 11) — including with no variable in
+#         the text at all.
+#   #521  `s/A/${\ "L"}/` emitted an unreadable form and killed the whole
+#         file at LOAD.  A fragment lifted out of a dq construct carries the
+#         ESCAPED DELIMITER, and only that escape is undone.
+#
+# And the INVERSE, which the #520/#522 widening would otherwise have broken:
+# a SINGLE-QUOTED replacement interpolates NOTHING — not a variable, not a
+# magic, not a case shift, and not even `$1`/`\1`.
+sub subst_agrees {
+    my ($program, $desc) = @_;
+    my $root = "$RealBin/../..";
+    my ($fh, $file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $program;
+    close $fh;
+    chomp(my $exp = `perl $file`);
+    chomp(my $got = `$root/runpcl $file 2>&1`);
+    is($got, $exp, "$desc (perl: $exp)");
+}
+
+subst_agrees(<<'PL', 's/// replacement: the punctuation magics are live (#520)');
+my $a = "xAy";  $a =~ s/A/[$&]/;
+my $b = "xAy";  $b =~ s/A/[$`|$']/;
+my $c = "xAy";  $c =~ s/(A)/[$+]/;
+my $d = "xbyc"; $d =~ s/(b)|(c)/-$^N/g;
+my $e = "x1y";  $! = 2; $e =~ s/1/[$!]/;
+my $f = "x123y"; $f =~ s/(1)(2)(3)/$#- (@-)/;
+my $g = "aXbXc"; $g =~ s/X/($`|$')/g;
+print "$a $b $c $d $e $f $g\n";
+PL
+
+subst_agrees(<<'PL', 's/// replacement: the case-shift escapes are the dq ones (#522)');
+my $a = "mAn";  $a =~ s/(A)/[\U$1\E]/;
+my $b = "mABn"; $b =~ s/(AB)/[\L$1\E]/;
+my $c = "mabn"; $c =~ s/(ab)/[\u$1]/;
+my $d = "mABn"; $d =~ s/(AB)/[\l$1]/;
+my $e = "mAn";  $e =~ s/A/[\Uab\E]/;
+my $f = "mAn";  $f =~ s/A/[\Eab]/;
+my $g = "mAn";  $g =~ s/(A)/\Q$1.b\E/;
+my $h = "mabcn"; $h =~ s/(a)(bc)/[\U$1\E$2]/;
+print "$a $b $c $d $e $f $g $h\n";
+PL
+
+subst_agrees(<<'PL', 'a ${ EXPR } block in a replacement or a dq string (#521)');
+my $a = "mAn"; $a =~ s/A/${\ "L"}/;
+my $b = "mAn"; $b =~ s/A/${\ 7}/;
+my $c = "mAn"; $c =~ s/A/${\ q(L)}/;
+my $d = "mAn"; $d =~ s/A/${\ uc("l")}/;
+my $e = "mAn"; $e =~ s/A/@{[ "L" ]}/;
+my $f = "X${\ \"L\"}Y";
+my $g = "X${\ \"a\\tb\"}Y";
+my $h = "X@{[ \"a\\tb\" ]}Y";
+print "$a $b $c $d $e $f $g $h\n";
+PL
+
+subst_agrees(<<'PL', "a SINGLE-QUOTED s''' interpolates nothing, on either side");
+my $x = "V";
+my $a = "mAn"; $a =~ s'A'[$x]';
+my $b = "mAn"; $b =~ s'(A)'[$1]';
+my $c = "mAn"; $c =~ s'(A)'[\1]';
+my $d = "mAn"; $d =~ s'A'[\Uab\E]';
+my $e = "mAn"; $e =~ s'A'[$&]';
+my $f = "mAn"; $f =~ s'A'a\tb';
+my $g = "mAn"; $g =~ s'A'a\'b';
+my $h = "mAn"; $h =~ s{A}'[$x]';
+my $i = 'm$xn'; $i =~ s'$x'Q';
+print "$a $b $c $d $e $f $g $h $i\n";
+PL
+
+# The emission promises, in both directions: a `$1`-only replacement stays a
+# STRING (the runtime's backref rewrite, no lambda per match), and a
+# single-quoted one is a lambda over a constant — never that string, because
+# the string path is exactly what would read its `$1` as a register.
+test_codegen('s/(a)/[$1]/',
+             '(p-=~ $_ (p-subst "(a)" "[$1]"))',
+             'a $1-only replacement is still emitted as a plain string');
+test_codegen(q{s'(a)'[$1]'},
+             '(p-=~ $_ (p-subst "(a)" (lambda () "[$1]")))',
+             "a single-quoted replacement is a lambda over the literal text");
+test_codegen('s/(a)/[$&]/',
+             '(p-=~ $_ (p-subst "(a)" (lambda () (p-string-concat "[" |$&| "]"))))',
+             'a punctuation magic takes the lambda path (#520)');
 
 done_testing();

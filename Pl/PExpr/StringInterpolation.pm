@@ -300,9 +300,49 @@ sub _ev_braced {
   return substr($content, $ev->{span}[0] + 1, 1) eq '{';
 }
 
+# A fragment lifted out of a double-quoted construct still carries the ESCAPED
+# DELIMITER: `"${\ \"L\"}"` hands the block over as `\ \"L\"`.  Perl undoes that
+# one escape when it re-lexes the block, AND NOTHING ELSE — `\\` stays a pair
+# and `\t` stays a backslash and a t, because the fragment is CODE and a string
+# inside it does its own escape processing.  Probed 5.40.3 (task #521):
+#
+#   "X${\ \"a\tb\"}Y"      Xa<TAB>Y   (the INNER dq string's \t)
+#   "X${\ \"a\\tb\"}Y"     Xa\tbY     (so \\ was NOT unescaped here)
+#   "X${\ \"a\\\\b\"}Y"    Xa\\bY
+#
+# Without this the `"` closed the fragment's string early and the leftovers —
+# including the block's own `}` — landed inside it: `s/A/${\ "L"}/` emitted
+# `(p-cast-$ (p-backslash (p-backslash "L\"})))`, which SBCL cannot even READ,
+# so the whole file died at load.  (The s/// replacement reaches this the same
+# way: _gen_interp_replacement wraps it in a manufactured `"…"` token, escaping
+# the quotes exactly as a dq token has them.)  The delimiter handled here is
+# `"`; `\}` in a `qq{…}` block is the same rule with another character and has
+# no case yet.
+sub _undelimit {
+  my ($src) = @_;
+  return $src if index($src, '\\') < 0;
+  my $out = '';
+  my $i = 0;
+  my $n = length $src;
+  while ($i < $n) {
+    my $c = substr($src, $i, 1);
+    if ($c eq '\\' && $i + 1 < $n) {
+      my $next = substr($src, $i + 1, 1);
+      if ($next eq '"') { $out .= '"'; $i += 2; next }
+      $out .= $c . $next;            # every other escape stays a PAIR
+      $i += 2;
+      next;
+    }
+    $out .= $c;
+    $i++;
+  }
+  return $out;
+}
+
 # Compile one fragment of Perl source through the ordinary expression
 # pipeline — the move `_parse_postfix_deref` and ExprToCL's regex consumer
-# (`_compile_ref_text_form`) already make.  The document is ANCHORED, not
+# (`_compile_ref_text_form`) already make.  The fragment is un-escaped first
+# (_undelimit).  The document is ANCHORED, not
 # cloned: PPI's DESTROY empties every descendant, so the tokens must outlive
 # this call (task #414).  Returns a node id, or undef when PPI/PExpr cannot
 # read the fragment.
@@ -311,7 +351,7 @@ sub _interp_reparse {
   # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
   # `use` would be circular; a runtime require is a %INC lookup once loaded.
   require Pl::Parser;
-  my $doc = Pl::Parser::fragment_doc($src);
+  my $doc = Pl::Parser::fragment_doc(_undelimit($src));
   return undef unless $doc;
   $self->_anchor($doc);
   my $stmt = $doc->find_first('PPI::Statement');
@@ -408,12 +448,13 @@ sub _interp_array {
   # @{ EXPR } — "@{[ uc $_ ]}", "@{$ref}", "@{$h->{list}}".  The INNER
   # expression is compiled and the join wraps it, so the emission stays
   # (p-join |$"| (p-cast-@ EXPR)) with exactly one cast.  The guts are
-  # unescaped first: they were lifted out of a double-quoted string, where
-  # `\"` is still written with its backslash.
+  # un-escaped by _interp_reparse, the ONE place a lifted fragment is read
+  # (task #521); this arm used to run the full dq `unescape_string` over them
+  # instead, which also turned an inner `\t` into a TAB — a `\\` the block's own
+  # string literal was supposed to keep (probed against perl).
   if ($form eq 'expr') {
     my ($gs, $ge) = @{ $ev->{expr_span} };
-    my $src = $self->unescape_string(substr($content, $gs, $ge - $gs));
-    my $id  = $self->_interp_reparse($parser, $src);
+    my $id = $self->_interp_reparse($parser, substr($content, $gs, $ge - $gs));
     return ($self->_interp_join($parser, $id), $end);
   }
 

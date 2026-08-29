@@ -17990,35 +17990,30 @@ buffer's fill-pointer; everything else falls back to file-length."
             (let* ((count 0)
                    (result nil))
               (if eval-p
-                  ;; s///e: call lambda per match, setting $1..$9 from capture groups
-                  ;; :simple-calls t → function receives (match g1 g2 ...) as strings
-                  (let ((rep-fn (lambda (whole-match &rest groups)
+                  ;; s///e (and an interpolated replacement, which is compiled to
+                  ;; the same lambda): call it per match with the match state in
+                  ;; place.  cl-ppcre's NON-simple call form hands over the
+                  ;; OFFSETS, which is what the match variables are made of —
+                  ;; :simple-calls t gave only the matched strings, so this arm
+                  ;; had its own hand-rolled $1..$9 + %+/%- block and could set
+                  ;; nothing else: `$\`` / `$'` / `$+` / `$^N` / `@-` / `@+` were
+                  ;; all EMPTY inside an s/// replacement (task #520), while the
+                  ;; m// path beside it had been calling the shared setters all
+                  ;; along.  One pair of calls now, the same two the m// path
+                  ;; makes (rule 11) — and they cover $10..$20 and @{^CAPTURE}
+                  ;; too, which the copy never did.
+                  (let ((rep-fn (lambda (target start end match-start match-end
+                                         reg-starts reg-ends)
+                                  (declare (ignore start end))
                                   (incf count)
                                   (clear-capture-groups)
-                                  (setf |$&| whole-match)
-                                  (when (>= (length groups) 1) (setf $1 (or (nth 0 groups) *p-undef*)))
-                                  (when (>= (length groups) 2) (setf $2 (or (nth 1 groups) *p-undef*)))
-                                  (when (>= (length groups) 3) (setf $3 (or (nth 2 groups) *p-undef*)))
-                                  (when (>= (length groups) 4) (setf $4 (or (nth 3 groups) *p-undef*)))
-                                  (when (>= (length groups) 5) (setf $5 (or (nth 4 groups) *p-undef*)))
-                                  (when (>= (length groups) 6) (setf $6 (or (nth 5 groups) *p-undef*)))
-                                  (when (>= (length groups) 7) (setf $7 (or (nth 6 groups) *p-undef*)))
-                                  (when (>= (length groups) 8) (setf $8 (or (nth 7 groups) *p-undef*)))
-                                  (when (>= (length groups) 9) (setf $9 (or (nth 8 groups) *p-undef*)))
-                                  ;; Populate %+/%- from named groups using reg-names from outer scope
-                                  (clrhash %+)
-                                  (clrhash |%-|)
-                                  (when reg-names
-                                    (loop for name in reg-names
-                                          for i from 0
-                                          when (and name (< i (length groups)))
-                                          do (let ((val (nth i groups)))
-                                               (when val (setf (gethash name %+) val))
-                                               (%pcl-push-named-buffer name (or val *p-undef*)))))
+                                  (set-capture-groups target reg-starts reg-ends reg-names)
+                                  (set-match-vars target match-start match-end
+                                                  reg-starts reg-ends closers)
                                   (to-string (funcall raw-replacement)))))
                     (setf result (if global-p
-                                     (cl-ppcre:regex-replace-all scanner str rep-fn :simple-calls t)
-                                     (cl-ppcre:regex-replace scanner str rep-fn :simple-calls t))))
+                                     (cl-ppcre:regex-replace-all scanner str rep-fn)
+                                     (cl-ppcre:regex-replace scanner str rep-fn))))
                   ;; Normal s///: string replacement
                   (progn
                     ;; First, set capture groups from the match
