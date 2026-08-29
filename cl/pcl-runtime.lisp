@@ -7470,6 +7470,18 @@ create the key on a read-only call, which perl does not."
                (setf (gethash k h) box))
              (box-set box value)))))))
 
+;;; %ENV and %INC are NOT hash tables: the runtime binds each to a MARKER
+;;; symbol, and every hash primitive has an arm that talks to the real process
+;;; environment / the %INC table instead.  "Is this value one of those
+;;; markers?" is asked from several places, and ONE predicate answers it
+;;; (rule 11) — the copies drifted once already: %p-symref-hash asked
+;;; `hash-table-p` alone and so REPLACED the %ENV marker with a fresh empty
+;;; table, i.e. `%{"main::ENV"}` destroyed the process environment for the
+;;; rest of the run (task #701).
+(defun %p-hash-marker-p (h)
+  "True when H is one of the runtime's marker symbols for a non-table hash."
+  (or (eq h '%ENV-MARKER%) (eq h '%INC-MARKER%)))
+
 (defun p-gethash-box (hash key)
   "Get the BOX at hash key (for l-value operations like chop, ++).
    Creates box if needed (autovivification). Returns the box itself."
@@ -7479,7 +7491,7 @@ create the key on a read-only call, which perl does not."
     (when (eq h *p-undef*)
       (return-from p-gethash-box (make-p-box *p-undef*)))
     ;; Special markers don't support boxing
-    (when (or (eq h '%ENV-MARKER%) (eq h '%INC-MARKER%))
+    (when (%p-hash-marker-p h)
       (return-from p-gethash-box (make-p-box *p-undef*)))
     ;; Get or create box at this key
     (multiple-value-bind (existing found) (gethash k h)
@@ -7907,7 +7919,7 @@ create the key on a read-only call, which perl does not."
                  (make-p-box key))))))
     ;; %ENV / %INC special hashes: iterate a keys snapshot, iterator state
     ;; keyed by the marker symbol itself.
-    ((member (unbox collection) '(%ENV-MARKER% %INC-MARKER%))
+    ((%p-hash-marker-p (unbox collection))
      (let ((marker (unbox collection)))
        (multiple-value-bind (remaining exists-p) (gethash marker *hash-iterators*)
          (unless exists-p
@@ -14702,6 +14714,10 @@ buffer's fill-pointer; everything else falls back to file-length."
    Returns the adjustable vector."
   (when (find #\Nul name-str) (return-from %p-symref-array
                                 (make-array 0 :adjustable t :fill-pointer 0)))
+  ;; NB the hash twin below carries a marker arm and a rule-12 error (task
+  ;; #701); this one deliberately does not, because the runtime keeps no
+  ;; MARKER-valued array — every `@`-sigil global is a real vector.  If one
+  ;; ever appears, this is its other half.
   (let ((sym (%p-symref-symbol name-str "@" t)))
     (unless (and (boundp sym)
                  (vectorp (symbol-value sym))
@@ -14717,9 +14733,26 @@ buffer's fill-pointer; everything else falls back to file-length."
   (when (find #\Nul name-str) (return-from %p-symref-hash
                                 (make-hash-table :test 'equal)))
   (let ((sym (%p-symref-symbol name-str "%" t)))
-    (unless (and (boundp sym) (hash-table-p (symbol-value sym)))
-      (setf (symbol-value sym) (make-hash-table :test 'equal)))
-    (symbol-value sym)))
+    (if (boundp sym)
+        (let ((v (symbol-value sym)))
+          (cond
+            ((hash-table-p v) v)
+            ;; %ENV / %INC are MARKERS, not tables — the marker IS the hash,
+            ;; and every consumer knows it (p-cast-% hands it on unchanged).
+            ;; Replacing it here made `%{"main::ENV"}` destroy the process
+            ;; environment for the rest of the run (task #701).
+            ((%p-hash-marker-p v) v)
+            ;; Nothing there yet: an undef/NIL binding is storage without a
+            ;; value, so vivifying is right (perl autovivifies here too).
+            ((or (null v) (eq v *p-undef*))
+             (setf (symbol-value sym) (make-hash-table :test 'equal)))
+            ;; Rule 12: the resolver and the binding disagree about what this
+            ;; symbol holds, and the value replacing it would DISCARD is the
+            ;; one the caller then consumes.  Say so instead.
+            (t (error "PCL internal: %~A is bound to a ~A, which is neither a~
+                       hash table nor a known hash marker"
+                      name-str (type-of v)))))
+        (setf (symbol-value sym) (make-hash-table :test 'equal)))))
 
 ;;; A symbolic scalar reference reaches more than the package cells
 ;;; %p-symref-box knows about: the runtime keeps perl's magic scalars RAW in
