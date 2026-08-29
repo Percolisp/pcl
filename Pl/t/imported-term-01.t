@@ -57,7 +57,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 11;
+plan tests => 15;
 
 # A module whose @EXPORT is built from a VARIABLE, like Math::Complex's.
 my $libdir = tempdir(CLEANUP => 1);
@@ -160,3 +160,44 @@ both_agree('use T438::Konst; $_ = "foobar"; print "r=", (kname /foo/), "\n";',
 
 both_agree('use T438::Konst; sub x { "X" } print kpi x 2, "\n";',
            'the x repair asks the same predicate: `kpi x 2` stays repetition');
+
+# ---- task #711: the file's OWN `use constant`, seen from a SUB BODY -------
+#
+# Same fact, other seam.  A named sub's BODY is lowered before the in-stream
+# `use constant` statement reaches the emitter that registers the name, so
+# inside a sub the constant was not known to be zero-arg and swallowed the
+# rest of the expression as ARGUMENTS:
+#
+#     use constant K => 4;
+#     sub p { substr($_[0], $_[1] - K + 1, K) }
+#
+# emitted `(p-substr $s (p-- $start (pl-K 1 (pl-K))))` — K(+1, K) — so substr
+# got TWO arguments and answered 5 characters where perl gives 4.  That is
+# what made `File::Temp::tempfile(OPEN => 0)` die "The template must end with
+# at least 4 'X' characters" on a template ending in ten X.  The registration
+# now happens in a PRE-PASS (Parser2::_premerge_use_constant_prototypes),
+# beside the one that does it for the `*NAME = sub () {…}` idiom.
+#
+# Rows 3 and 4 are the inverses: at TOP LEVEL this was always right (the
+# statement had already lowered), and a plain sub of the same shape must keep
+# swallowing its arguments — the fix keys on the constant, not on the shape.
+
+both_agree('use constant K => 4;' . "\n"
+         . 'sub p { my ($s,$i)=@_; return substr($s, $i - K + 1, K) }' . "\n"
+         . 'print "[", p("/tmp/XXXXXXXXXX", 14), "]\n";',
+           '#711 a `use constant` name inside a SUB BODY is a term, not a list op');
+
+both_agree('use constant { KA => 4, KB => 2 };' . "\n"
+         . 'sub q2 { my ($s,$i)=@_; return substr($s, $i - KA + 1, KB) }' . "\n"
+         . 'print "[", q2("/tmp/XXXXXXXXXX", 14), "]\n";',
+           '#711 ... and the HASH form declares them the same way');
+
+both_agree('use constant K => 4;' . "\n"
+         . 'my $s = "/tmp/XXXXXXXXXX";' . "\n"
+         . 'print "[", substr($s, 14 - K + 1, K), "]\n";',
+           '#711 inverse: at TOP LEVEL it was already right and stays right');
+
+both_agree('sub K { 4 }' . "\n"
+         . 'sub p3 { my ($s,$i)=@_; return substr($s, $i - K + 1, K) }' . "\n"
+         . 'print "[", p3("/tmp/XXXXXXXXXX", 14), "]\n";',
+           '#711 inverse: a PLAIN sub of the same shape still takes arguments');

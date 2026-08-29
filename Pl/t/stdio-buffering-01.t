@@ -136,9 +136,12 @@ PL
 }
 
 # ── 4. A dup of a FILE handle: both writes land ────────────────────────────
-# The scratch path is built from $$ rather than File::Temp: a `tempfile` call
-# inside the transpiled program hits an unrelated shim bug (task #711), and a
-# guard row must fail for its own reason or not at all.
+# The scratch path is built from $$ rather than File::Temp, and STAYS that way.
+# #711 (the OPEN => 0 spelling dying on a template that does end in ten X) is
+# CLOSED — it was a compiler bug, not a shim one — but the DEFAULT `tempfile()`
+# still needs a handle, and `sysopen` is not implemented, so the call dies for a
+# second, unrelated reason (task #730).  A guard row must fail for its own
+# reason or not at all.
 {
     my $prog = <<'PL';
 my $f = "/tmp/pcl-stdio-buffering-01-$$.tmp";

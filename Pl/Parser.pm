@@ -9719,6 +9719,59 @@ sub _process_use_vars {
 
 
 # Process 'use constant' declarations
+# The NAMES a `use constant` statement declares, in both spellings:
+#   use constant PI => 3.14;                 -> ("PI")
+#   use constant { PI => 3.14, E => 2.71 };  -> ("PI", "E")
+# ONE reading of that question (rule 11): the emitting walks below pair each
+# name with its VALUE and cannot answer it without also compiling the value,
+# which the pre-pass (Parser2::_premerge_use_constant_prototypes) must not do.
+sub use_constant_names {
+  my ($stmt) = @_;
+  my @children = grep { $_->significant } $stmt->children;
+  my $i = 0;
+  $i++ while $i < @children && $children[$i]->content ne 'constant';
+  $i++;                                     # skip `constant` itself
+  return () if $i >= @children;
+  my $next = $children[$i];
+  if ($next->isa('PPI::Structure::Constructor')) {
+    # Hash form — the SAME walk _process_constant_hash makes, with the value
+    # half skipped instead of compiled: name, `=>`, value tokens up to the
+    # next top-level comma, comma, repeat.
+    my @names;
+    for my $content ($next->schildren) {
+      next unless $content->isa('PPI::Statement::Expression');
+      my @parts = $content->schildren;
+      my $i = 0;
+      while ($i < @parts) {
+        my $name_tok = $parts[$i];
+        last unless $name_tok && $name_tok->isa('PPI::Token::Word');
+        push @names, $name_tok->content;
+        $i++;
+        $i++ while $i < @parts && $parts[$i]->isa('PPI::Token::Operator')
+                                && $parts[$i]->content eq '=>';
+        $i++ while $i < @parts && !($parts[$i]->isa('PPI::Token::Operator')
+                                    && $parts[$i]->content eq ',');
+        $i++ if $i < @parts;                # the comma
+      }
+    }
+    return @names;
+  }
+  return ($next->content) if $next->isa('PPI::Token::Word');
+  return ();
+}
+
+# THE record a constant's name gets: a zero-arg prototype, so a bareword use
+# is a CALL and never a list operator.  Written once and called from both the
+# emitter and the pre-pass.
+sub register_constant_prototype {
+  my ($self, $name) = @_;
+  $self->environment->add_prototype($name, {
+    params     => [],
+    min_params => 0,
+    is_proto   => 0,
+  });
+}
+
 sub _process_use_constant {
   my $self      = shift;
   my $stmt      = shift;
@@ -9845,11 +9898,9 @@ sub _emit_constant {
   $self->_emit("(p-sub $cl_sub_name (&rest %_args) (progn %_args $cl_value))");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
-  $self->environment->add_prototype($name, {
-    params     => [],
-    min_params => 0,
-    is_proto   => 0,
-  });
+  # (ONE spelling of that record — see register_constant_prototype, which the
+  # #711 pre-pass calls before any sub body is lowered).
+  $self->register_constant_prototype($name);
 }
 
 

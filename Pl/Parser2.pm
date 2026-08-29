@@ -840,6 +840,31 @@ sub _premerge_strict_pragma {
 # contract to learn.  `local *NAME = ...` is skipped (temporary rebind, not a
 # declaration).  Package-qualified targets register under the bare name too:
 # PExpr's known-word checks look up the spelling at the call site.
+# A file's OWN `use constant` names, registered as zero-arg prototypes before
+# any body is lowered (see the parse() call site) — the same service
+# _premerge_glob_const_prototypes performs for the `*NAME = sub () {…}` idiom,
+# and needed for the same reason: a named sub's BODY is lowered before the
+# in-stream `use constant` statement reaches v1's _emit_constant, so inside a
+# sub the name was not known to be zero-arg and swallowed the rest of the
+# expression as ARGUMENTS.  Measured (task #711):
+#
+#     use constant K => 4;
+#     sub p { substr($_[0], $_[1] - K + 1, K) }     # perl: 4 chars
+#
+# emitted `(p-substr $s (p-- $start (pl-K 1 (pl-K))))` — K(+1, K), so substr
+# got TWO arguments and answered 5 characters.  That is what made
+# `File::Temp::tempfile(OPEN => 0)` die "The template must end with at least 4
+# 'X' characters" on a template ending in ten X.
+sub _premerge_use_constant_prototypes {
+  my ($self, $doc) = @_;
+  my $fp = $self->fallback_parser;
+  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'constant';
+    $fp->register_constant_prototype($_)
+      for Pl::Parser::use_constant_names($inc);
+  }
+}
+
 sub _premerge_glob_const_prototypes {
   my ($self, $doc) = @_;
   for my $stmt (@{ $doc->find('PPI::Statement') || [] }) {
@@ -1238,6 +1263,12 @@ sub parse {
   # without it `_cnum + 1` swallowed the operand (`_cnum(+1)`) and
   # `X =~ _cnst ? ...` strung the bareword (E4.0 fuzzer, axis 19/22).
   $self->_premerge_glob_const_prototypes($doc);
+
+  # …and so must the file's OWN `use constant` names, for the same reason
+  # (task #711): a sub body is lowered before the include statement that
+  # declares them, and an unregistered constant name parses as a LIST
+  # OPERATOR that swallows the rest of the expression.
+  $self->_premerge_use_constant_prototypes($doc);
 
   # `use subs LIST` must be visible before the ahead-of-stream parses for the
   # same reason as the two above: a named sub's BODY is lowered before the
