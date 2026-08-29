@@ -15,11 +15,13 @@
 # %p-output-buffering (+ %p-std-buffering for STDERR's exception), asked by
 # boot, by every standard-handle rebuild and by every dup.
 #
-# EVERY ROW HERE RUNS THROUGH A PIPE, which is the point: a pipe is where perl
-# block-buffers, so a row that agrees with the perl oracle here is a row that
-# would have disagreed before the fix.  (The pty leg of the measurement — where
-# perl line-buffers and the same programs come out in program order — is not a
-# gate row: it needs a controlling terminal.  It is in the session record.)
+# EVERY #542 ROW HERE RUNS THROUGH A PIPE, which is the point: a pipe is where
+# perl block-buffers, so a row that agrees with the perl oracle here is a row
+# that would have disagreed before the fix.
+#
+# Row 10 (task #710) is the ONE exception and needs to be: the OTHER half of
+# the same policy is what happens on a TERMINAL, and only a pty can show it.
+# It runs under `script`, and skips when script(1) is absent.
 #
 # The die row is the OTHER half of the change and the one with the sweep-sized
 # consequence: block buffering turns a mid-file abort into invisible row loss
@@ -45,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 9;
+plan tests => 11;
 
 sub write_pl {
     my ($code) = @_;
@@ -189,4 +191,66 @@ die "boom\n";
 PL
     is(cl_stdout($prog), pl_stdout($prog),
        '#542: output printed before an uncaught die is still flushed (perl oracle)');
+}
+
+# ── 7. task #710: a plain `open` onto a TERMINAL is LINE buffered ──────────
+# #542's policy is one function, %p-output-buffering, and it reached the
+# standard handles, the dups and the fork-pipe ends but NOT `open FH,'>',path`:
+# CL `open` takes no :buffering argument and always builds a :FULL fd-stream.
+# So a handle onto /dev/tty block-buffered and its whole buffer arrived at
+# `close`, out of order with STDOUT's line-buffered writes.
+#
+# This row needs a controlling terminal, which the gate does not have — `script`
+# provides one.  It is the ONE row here that is not a pipe, and that is the
+# point: it is the only place the tty half of the policy is observable.
+SKIP: {
+    my $script = `which script 2>/dev/null`;
+    chomp $script;
+    skip "no script(1) — the tty leg needs a controlling terminal", 1
+        unless $script && -x $script;
+    my $prog = <<'PL';
+open(my $t, ">", "/dev/tty") or die "tty: $!";
+print $t "a\n";
+print STDOUT "S\n";
+print $t "b\n";
+close $t;
+PL
+    my $pl = write_pl($prog);
+    my $cl = cl_file($prog);
+    # `pcl` is not used: the runner must EXEC so the program's STDOUT really is
+    # the pty.  sbcl is exec'd by the shell `script` starts, as perl is.
+    my $want = scalar `$script -qec 'perl $pl' /dev/null 2>/dev/null`;
+    my $got  = scalar `$script -qec 'sbcl @sbcl_rt --load $cl' /dev/null 2>/dev/null`;
+    $_ = strip_noise($_ // '') for $want, $got;
+    # A pty turns \n into \r\n; compare the LINE ORDER, which is the claim.
+    s/\r//g for $want, $got;
+    my @wl = grep { /^[abS]$/ } split /\n/, $want;
+    my @gl = grep { /^[abS]$/ } split /\n/, $got;
+    is(join("|", @gl), join("|", @wl),
+       "#710: a handle onto a TERMINAL is line-buffered (perl oracle: "
+       . join("|", @wl) . ")");
+}
+
+# ── 8. …and the FILE case is untouched ────────────────────────────────────
+# The fix rebuilds the stream ONLY when the descriptor is a tty, so a plain
+# open onto a file must stay :full on both sides — its buffer arrives at close,
+# after STDOUT's line-buffered write on a tty and before it through a pipe.
+# Same shape as row 7 with a file instead of the terminal; through a PIPE, so
+# it also pins that this row's answer did not move with #710.
+{
+    my $prog = <<'PL';
+my $f = "/tmp/pcl-stdio-buffering-01-file-$$.tmp";
+unlink $f;
+open(my $o, ">", $f) or die "open: $!";
+print $o "A\n";
+print STDOUT "S\n";
+print $o "B\n";
+close $o;
+open(my $r, "<", $f) or die "reopen: $!";
+my @l = <$r>; close $r; unlink $f;
+chomp @l;
+print "file:[", join("|", @l), "]\n";
+PL
+    is(cl_merged($prog), pl_merged($prog),
+       '#710 inverse: a plain open onto a FILE is unchanged (perl oracle)');
 }

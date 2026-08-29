@@ -9854,6 +9854,40 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    buffered, not unbuffered (probed with an external observer)."
   (if (%p-isatty fd) :line :full))
 
+(defun %p-line-buffer-if-tty (stream)
+  "perl decides an OUTPUT handle's buffering by isatty and nothing else, and
+   %p-output-buffering is that policy — but CL `open` takes no :buffering
+   argument and always builds a :FULL fd-stream, so the policy reached the
+   standard handles, the dups and the fork-pipe ends and MISSED
+   `open FH, '>', <a terminal>` (task #710).  Measured on a pty:
+   `print $t \"a\"; print STDOUT \"S\"; print $t \"b\"` is `a S b` in perl and
+   was `S a b` here, $t's whole buffer arriving at its close.
+
+   BOUNDED on purpose: only when the descriptor turns out to be a TTY is the
+   stream rebuilt.  Every other target — the overwhelmingly common file — is
+   handed back untouched, so the file case stays byte for byte what CL `open`
+   produced.
+
+   The rebuild DUPS the descriptor, builds the fd-stream on the dup, and
+   CLOSES the original stream — it never merely drops it.  The hazard that
+   shape avoids is a later GC finalizing the replaced stream and closing the
+   descriptor out from under the replacement.  MEASURED s451z on SBCL 2.6.0,
+   and the measurement did NOT show it: an output fd-stream dropped without
+   `close` still had a live descriptor after two `(gc :full t)`s, and a dup
+   outlives its original's close.  So this is not a bug being worked around —
+   it is the deterministic shape, chosen because the other one depends on a
+   finalizer's timing for its correctness."
+  (let ((fd (and (typep stream 'sb-sys:fd-stream)
+                 (sb-sys:fd-stream-fd stream))))
+    (if (and fd (%p-isatty fd))
+        (let ((dup (sb-posix:dup fd))
+              (ef  (stream-external-format stream)))
+          (close stream)
+          (sb-sys:make-fd-stream dup :input nil :output t
+                                 :buffering (%p-output-buffering dup)
+                                 :external-format ef))
+        stream)))
+
 (defun %p-std-buffering (slot)
   "%p-output-buffering plus perl's ONE exception: STDERR is UNBUFFERED, on a
    terminal and off it alike.  Probed with an external observer — a child
@@ -10463,12 +10497,18 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             ((string= mode-str "<")
              (open file-str :direction :input :if-does-not-exist nil
                    :external-format ef))
+            ;; The two OUTPUT opens ask %p-line-buffer-if-tty (task #710): CL
+            ;; `open` takes no :buffering, so a handle onto a TERMINAL was
+            ;; block-buffered where perl line-buffers it.  A non-tty target is
+            ;; handed straight back, untouched.
             ((string= mode-str ">")
-             (open file-str :direction :output :if-exists :supersede
-                   :if-does-not-exist :create :external-format ef))
+             (%p-line-buffer-if-tty
+              (open file-str :direction :output :if-exists :supersede
+                    :if-does-not-exist :create :external-format ef)))
             ((string= mode-str ">>")
-             (open file-str :direction :output :if-exists :append
-                   :if-does-not-exist :create :external-format ef))
+             (%p-line-buffer-if-tty
+              (open file-str :direction :output :if-exists :append
+                    :if-does-not-exist :create :external-format ef)))
             ((string= mode-str "+<")
              (open file-str :direction :io :if-exists :overwrite
                    :if-does-not-exist nil :external-format ef))
