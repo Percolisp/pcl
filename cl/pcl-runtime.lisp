@@ -272,6 +272,10 @@
    #:|%:| #:|%;| #:|%<| #:|%=| #:|%>| #:|%?| #:|%@| #:|%[| #:|%]| #:|%^| #:|%`|
    #:|%\|| #:|%~| #:|%\\|
    #:|@{^CAPTURE}|
+   ;; The COMPUTED magics' canonical boxes and the errno hash (#561): $! and
+   ;; $^E are read through an ACCESSOR by ordinary emission, so their glob
+   ;; slots have to exist as variables too or `*Y = *!` copies nothing.
+   #:|$!| #:|$^E| #:|%!| #:*p-errno-table*
    ;; Special variables
    #:$$ #:$? #:|$.| #:$0 #:$@ #:|$^O| #:|$^V| #:|$^X| #:|$^T| #:|$^H| #:|%^H| #:|${^TAINT}| #:|$/| #:|$\\| #:|$"| #:|$\|| #:|$;| #:|$,| #:|$]| #:|$<| #:|$>| #:|$(| #:|$)|
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[| #:|$^C|
@@ -1042,7 +1046,9 @@
 ;; with a SPACE is an element of `%$` (perl's own adjacency rule — without the
 ;; space it is the double deref `${${EXPR}}`), and reading one killed the file
 ;; at load.  `%+` and `%-` (named captures) and `%^H` are owned above; `%!` is
-;; the errno hash and `%_` is an ordinary word name, so neither is here.
+;; the errno hash (task #561 — a REAL table of magic values, built with the
+;; other computed magics further down, where make-p-box exists) and `%_` is an
+;; ordinary word name, so neither is here.
 (defvar |%"| (make-hash-table :test 'equal))
 (defvar |%$| (make-hash-table :test 'equal))
 (defvar |%%| (make-hash-table :test 'equal))
@@ -1733,6 +1739,128 @@
    the pointer reverts on exit)."
   `(let ((*p-last-read-handle* *p-last-read-handle*))
      ,@body))
+
+;;; ------------------------------------------------------------
+;;; THE COMPUTED MAGICS: $!, $^E and %!   (task #561)
+;;; ------------------------------------------------------------
+;;; A GLOB SLOT IS A CL VARIABLE.  `*Y = *!` copies the SCALAR slot of glob
+;;; `!` — which p-glob-copy spells (intern "$!" pkg) — and a scalar slot's
+;;; value IS the p-box, so a glob alias is box aliasing and needs no per-name
+;;; case anywhere in the glob path.  What $! lacked was the VARIABLE: ordinary
+;;; emission reads it through an ACCESSOR (%SPECIAL_VARS: '$!' =>
+;;; ['p-errno-string']), so no |$!| was ever defvar'd, `boundp` failed, and
+;;; the copy skipped the slot — `*Y = *!; print $Y` printed "" where perl
+;;; prints the strerror text.
+;;;
+;;; The answer is the shape |$.| already has (just above): a defvar'd box
+;;; whose value is a p-magic-cell, dispatched at the scalar chokepoints
+;;; (unbox, box-set, box-nv, box-sv).  THE ACCESSOR IS THE GETTER —
+;;; p-errno-string and its setf, verbatim — so the box and the accessor read
+;;; ONE state and cannot disagree.  Plain `$!` still compiles to
+;;; (p-errno-string); the box exists for the paths emission does not cover:
+;;; glob aliasing, symbolic access ${"!"}, and \$! through an alias.
+;;;
+;;; BOUNDARY, probed on perl 5.40.3 and accepted: perl's `*! = *src` REPLACES
+;;; the glob, so afterwards $! is src's plain scalar and the magic is gone;
+;;; PCL's plain $! keeps computing, because its emission never reads the slot.
+;;; See docs/ir-spec.md §8.
+(defvar |$!| (make-p-box (make-p-magic-cell :getter #'p-errno-string
+                                            :setter #'(setf p-errno-string)))
+  "Perl $! as a canonical MAGIC BOX, so a glob alias reaches the errno dualvar.")
+(defvar |$^E| (make-p-box (make-p-magic-cell :getter #'p-errno-string
+                                             :setter #'(setf p-errno-string)))
+  "Perl $^E — on POSIX the same STATE as $! (task #571); its own GV.")
+
+;;; %! — the errno hash.  perl's is Errno's tied hash; PCL's is a REAL hash
+;;; table whose VALUES carry the magic, one p-magic-cell per errno name.  So
+;;; keys / values / each / exists / scalar are ordinary hash operations on a
+;;; real table and only the element READ is computed — which needs exactly one
+;;; new arm, the one %p-hash-unbox-elem gains below (p-aref-unbox-elem has had
+;;; it since the @_-hole alias).  An %ENV-style marker VALUE would instead
+;;; need an arm at every hash chokepoint, and `*Y = *!; keys %Y` would still
+;;; find nothing; the real table is shared by the existing HASH-slot copy.
+;;;
+;;; Each value answers PERL's answer, probed: $!{NAME} is the errno NUMBER
+;;; when $! holds that errno and 0 otherwise — never 1, and always defined.
+;;; A STORE is fatal in perl ("ERRNO hash is read only!"), so the setter dies
+;;; rather than quietly installing an ordinary value.
+;;;
+;;; The names are C-library facts, so each number comes from sb-posix wherever
+;;; sb-posix exposes the constant.  The eleven glibc names it does not export
+;;; (ECANCELED EHWPOISON EISNAM EKEYEXPIRED EKEYREJECTED EKEYREVOKED ENOKEY
+;;; ENOTRECOVERABLE ENOTSUP EOWNERDEAD ERFKILL) keep the number listed here —
+;;; the way *p-signal-numbers* carries Linux/glibc's signal table — so that
+;;; `keys %!` is perl's own key set rather than sb-posix's subset.  Measured:
+;;; the 123 sb-posix DOES export agree with perl's Errno to the number.
+(defparameter *p-errno-name-numbers*
+  '(("E2BIG" . 7) ("EACCES" . 13) ("EADDRINUSE" . 98) ("EADDRNOTAVAIL" . 99)
+    ("EADV" . 68) ("EAFNOSUPPORT" . 97) ("EAGAIN" . 11) ("EALREADY" . 114)
+    ("EBADE" . 52) ("EBADF" . 9) ("EBADFD" . 77) ("EBADMSG" . 74)
+    ("EBADR" . 53) ("EBADRQC" . 56) ("EBADSLT" . 57) ("EBFONT" . 59)
+    ("EBUSY" . 16) ("ECANCELED" . 125) ("ECHILD" . 10) ("ECHRNG" . 44)
+    ("ECOMM" . 70) ("ECONNABORTED" . 103) ("ECONNREFUSED" . 111)
+    ("ECONNRESET" . 104) ("EDEADLK" . 35) ("EDEADLOCK" . 35)
+    ("EDESTADDRREQ" . 89) ("EDOM" . 33) ("EDOTDOT" . 73) ("EDQUOT" . 122)
+    ("EEXIST" . 17) ("EFAULT" . 14) ("EFBIG" . 27) ("EHOSTDOWN" . 112)
+    ("EHOSTUNREACH" . 113) ("EHWPOISON" . 133) ("EIDRM" . 43)
+    ("EILSEQ" . 84) ("EINPROGRESS" . 115) ("EINTR" . 4) ("EINVAL" . 22)
+    ("EIO" . 5) ("EISCONN" . 106) ("EISDIR" . 21) ("EISNAM" . 120)
+    ("EKEYEXPIRED" . 127) ("EKEYREJECTED" . 129) ("EKEYREVOKED" . 128)
+    ("EL2HLT" . 51) ("EL2NSYNC" . 45) ("EL3HLT" . 46) ("EL3RST" . 47)
+    ("ELIBACC" . 79) ("ELIBBAD" . 80) ("ELIBEXEC" . 83) ("ELIBMAX" . 82)
+    ("ELIBSCN" . 81) ("ELNRNG" . 48) ("ELOOP" . 40) ("EMEDIUMTYPE" . 124)
+    ("EMFILE" . 24) ("EMLINK" . 31) ("EMSGSIZE" . 90) ("EMULTIHOP" . 72)
+    ("ENAMETOOLONG" . 36) ("ENAVAIL" . 119) ("ENETDOWN" . 100)
+    ("ENETRESET" . 102) ("ENETUNREACH" . 101) ("ENFILE" . 23)
+    ("ENOANO" . 55) ("ENOBUFS" . 105) ("ENOCSI" . 50) ("ENODATA" . 61)
+    ("ENODEV" . 19) ("ENOENT" . 2) ("ENOEXEC" . 8) ("ENOKEY" . 126)
+    ("ENOLCK" . 37) ("ENOLINK" . 67) ("ENOMEDIUM" . 123) ("ENOMEM" . 12)
+    ("ENOMSG" . 42) ("ENONET" . 64) ("ENOPKG" . 65) ("ENOPROTOOPT" . 92)
+    ("ENOSPC" . 28) ("ENOSR" . 63) ("ENOSTR" . 60) ("ENOSYS" . 38)
+    ("ENOTBLK" . 15) ("ENOTCONN" . 107) ("ENOTDIR" . 20) ("ENOTEMPTY" . 39)
+    ("ENOTNAM" . 118) ("ENOTRECOVERABLE" . 131) ("ENOTSOCK" . 88)
+    ("ENOTSUP" . 95) ("ENOTTY" . 25) ("ENOTUNIQ" . 76) ("ENXIO" . 6)
+    ("EOPNOTSUPP" . 95) ("EOVERFLOW" . 75) ("EOWNERDEAD" . 130)
+    ("EPERM" . 1) ("EPFNOSUPPORT" . 96) ("EPIPE" . 32) ("EPROTO" . 71)
+    ("EPROTONOSUPPORT" . 93) ("EPROTOTYPE" . 91) ("ERANGE" . 34)
+    ("EREMCHG" . 78) ("EREMOTE" . 66) ("EREMOTEIO" . 121) ("ERESTART" . 85)
+    ("ERFKILL" . 132) ("EROFS" . 30) ("ESHUTDOWN" . 108)
+    ("ESOCKTNOSUPPORT" . 94) ("ESPIPE" . 29) ("ESRCH" . 3) ("ESRMNT" . 69)
+    ("ESTALE" . 116) ("ESTRPIPE" . 86) ("ETIME" . 62) ("ETIMEDOUT" . 110)
+    ("ETOOMANYREFS" . 109) ("ETXTBSY" . 26) ("EUCLEAN" . 117)
+    ("EUNATCH" . 49) ("EUSERS" . 87) ("EWOULDBLOCK" . 11) ("EXDEV" . 18)
+    ("EXFULL" . 54))
+  "errno NAME . glibc number — perl's own %! key set (134 names on Linux).")
+
+(defvar *p-errno-table*
+  (let ((h (make-hash-table :test 'equal)))
+    (dolist (entry *p-errno-name-numbers* h)
+      (let ((sym (find-symbol (car entry) "SB-POSIX")))
+        (setf (gethash (car entry) h)
+              (if (and sym (boundp sym) (integerp (symbol-value sym)))
+                  (symbol-value sym)
+                  (cdr entry))))))
+  "errno NAME -> number ON THIS PLATFORM: sb-posix's constant where it has one.")
+
+(defun %p-errno-hash-store (val)
+  "Perl's %! is Errno's tied hash and a STORE is fatal; so is this one."
+  (declare (ignore val))
+  (p-die "ERRNO hash is read only!"))
+
+(defun %p-errno-cell-box (n)
+  "The %! value for errno number N: a magic box that reads N when $! holds N
+   and 0 otherwise (perl's own answer — never 1, and always defined)."
+  (make-p-box (make-p-magic-cell
+               :getter (lambda () (if (eql n *p-stored-errno*) n 0))
+               :setter #'%p-errno-hash-store)))
+
+(defvar |%!|
+  (let ((h (make-hash-table :test 'equal)))
+    (maphash (lambda (name n) (setf (gethash name h) (%p-errno-cell-box n)))
+             *p-errno-table*)
+    h)
+  "Perl %! — one magic value per errno name; true only for the current errno.")
+
 ;;; Eval error ($@) - p-box so it can hold references (e.g. $@ = [])
 (defvar $@ (make-p-box "") "Error from last eval")
 ;;; Input record separator ($/)
@@ -6561,10 +6689,16 @@
    blessed objects, unblessed hash-refs (hash-table), and array-refs (non-string vector).
    Code-refs (raw functions) and scalar-refs (inner p-box) are returned unboxed,
    matching the old (unbox slot) behaviour for those types.
-   Also handles raw (non-box) slot values stored directly in hashes (e.g. %+ captures)."
+   Also handles raw (non-box) slot values stored directly in hashes (e.g. %+ captures).
+   A slot holding a p-magic-cell is read through its GETTER, exactly as
+   p-aref-unbox-elem reads one — the arm %! needs (task #561), and the one
+   place values/each/gethash all funnel through, so value-level magic costs a
+   single dispatch rather than an arm at every hash chokepoint."
   (if (null elem)
       *p-undef*
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
+        (when (p-magic-cell-p v)
+          (setf v (funcall (p-magic-cell-getter v))))
         (if (or (and (p-box-p elem) (p-box-class elem))  ; blessed object
                 (hash-table-p v)                          ; hash-ref
                 (and (vectorp v) (not (stringp v)))       ; array-ref
@@ -12763,7 +12897,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-355"
+(defparameter *pcl-cache-generation* "v2-365"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

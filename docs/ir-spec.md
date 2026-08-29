@@ -1463,7 +1463,8 @@ All are dynamically-scoped boxes exported from the runtime namespace:
 | `$@` | last eval error (§6.3) |
 | `$1`…`$N`, `%+` | capture groups; set by the most recent successful match (`p-=~` family); dynamically saved/restored around scopes like Perl |
 | `$0`, `@ARGV`, `%ENV` | program name, args, environment (`%ENV` writes through to the process).  **`$0` is an ORDINARY WRITABLE box** (task #512), initialised by the program preamble to the script the compiler was given — not to `argv[0]`, which under a CL host is the lisp binary and is what no Perl program means by `$0`.  A translator must make it assignable: `$0 = "X"` is a plain scalar store whose value every later read sees, `local $0` saves and restores it, and because a SCALAR in the filehandle slot naming a handle IS that handle (§7.5), `$0 = "H"; print $0 LIST` writes through the handle named `H`.  What PCL does not do — and a host without argv-area access cannot — is the OS-level process rename `ps` reports; see `not-supported.md`. |
-| `$!` | last OS error (dualvar: numifies to errno, stringifies to message) |
+| `$!` | last OS error (dualvar: numifies to errno, stringifies to message).  **Also a CANONICAL MAGIC BOX** — see the rule below. |
+| `%!` | the errno hash: one key per platform errno NAME, each value magic.  `$!{NAME}` is the errno NUMBER when `$!` holds that errno and `0` otherwise — never `1`, and always defined; a STORE is fatal (`ERRNO hash is read only!`), as Errno's tied hash is.  `keys`/`values`/`each`/`exists` are ordinary hash reads of a REAL table. |
 | `%SIG` | signal handlers. **Pre-populated at load with every platform signal name, values undef** (`*p-signal-numbers*`, Config's sig_name order; 67 keys on Linux, `ZERO` excluded exactly as perl does), so `exists $SIG{HUP}` is true before any handler is installed — pragmas like `sigtrap` probe it that way. `__WARN__`/`__DIE__` are *not* keys until assigned. The same table resolves `kill`'s name designators. |
 | `$.` | line number of the last-read filehandle (per-handle) |
 | `$a`, `$b` | sort comparator operands (per-package defvars) |
@@ -1486,6 +1487,27 @@ program name) and `${"007"}` (an ordinary variable — a capture name has no
 leading zero) are writable.  A NUMERIC-valued name (`my $n = 5; ${$n}`) is
 perl's same rule, but PCL cannot implement it while the box model drops the
 reference wrapper on a container read — task #551 has the measurement.
+
+**A COMPUTED MAGIC GETS A CANONICAL BOX** (normative, s450t / task #561).  A
+magic scalar whose *emission* is an ACCESSOR CALL rather than a variable
+reference — today `$!` and `$^E`, both `(p-errno-string)` — must ALSO exist as
+the variable its glob slot names (`|$!|`, `|$^E|`), holding a magic cell whose
+getter and setter ARE that accessor and its `setf`.  The reason is structural:
+**a glob slot IS a variable, and a scalar slot's value IS the p-box**, so
+`*Y = *!` is box aliasing and needs no per-name case in the glob path — but a
+slot with no variable behind it copies nothing, and `$Y` then reads `""` where
+perl reads the strerror text.  One state, two doors: the box and the accessor
+read the same place and cannot disagree.  The same rule gives `${"!"}` and
+`\$!`-through-an-alias their values.
+
+*Boundary (accepted, probed):* perl's `*! = *src` REPLACES the glob, so
+afterwards `$!` is `src`'s plain scalar and the magic is gone; PCL's plain
+`$!` keeps computing, because its emission never reads the slot.
+
+**Element access names the AGGREGATE, so the sigil swap precedes the magic
+table.**  `$!{ENOENT}` is an element of `%!`, not a subscript on the errno
+accessor; a container whose scalar spelling renders as a compound FORM is
+re-rendered from its `%`/`@` spelling instead (`Pl::ExprToCL::_bare_container_sym`).
 
 ## 9. The load model and string eval
 

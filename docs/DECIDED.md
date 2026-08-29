@@ -21,6 +21,55 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s450t (2026-08-29, Opus, round 8 agent T) — a COMPUTED magic gets a CANONICAL BOX, `%!` is a real hash of magic values, and `*A = *B` CLEARS (#561 + #602)
+
+- **A magic scalar whose EMISSION is an accessor call must ALSO exist as the
+  variable its glob slot names** — normative, `docs/ir-spec.md` §8.  `|$!|` and
+  `|$^E|` are now defvar'd boxes holding a `p-magic-cell` whose getter/setter
+  ARE `p-errno-string` and its `setf`, beside the `|$.|` precedent.  Emission is
+  unchanged (`$!` still compiles to `(p-errno-string)`); the box exists for the
+  paths emission does not cover — glob aliasing, `${"!"}`, `\$!` through an
+  alias.  **ZERO glob-path changes were needed**: a scalar glob slot's value IS
+  the p-box, so `*Y = *!` is box aliasing once the variable exists.  Design:
+  `docs/computed-magic-design-s449.md` §3.
+- **BOUNDARY (probed, accepted, not fixed):** perl's `*! = *src` REPLACES the
+  glob and `$!` becomes src's plain scalar; PCL's plain `$!` keeps computing,
+  because its emission never reads the slot.
+- **`%!` is a REAL hash table whose VALUES are magic** (not an `%ENV`-style
+  marker — that would need an arm at every hash chokepoint).  Keys = the 134
+  POSIX/glibc errno names, numbers resolved through `sb-posix` where it exposes
+  the constant and carried in `*p-errno-name-numbers*` for the eleven it does
+  not (the `*p-signal-numbers*` precedent; the 123 sb-posix DOES export agree
+  with perl's Errno to the number).  `$!{NAME}` is the errno NUMBER when `$!`
+  holds it and `0` otherwise — **never 1, and always defined** (probed) — and a
+  STORE dies `ERRNO hash is read only!` as Errno's tied hash does.  ONE new arm:
+  `%p-hash-unbox-elem` gained the magic-cell dispatch `p-aref-unbox-elem` had;
+  `p-values`/`p-each`/`p-gethash` already funnel through it.
+- **`$!{ENOENT}` needed the ONE emission change (v2-355 → v2-365):** an element
+  access names the AGGREGATE, so the sigil swap must precede the magic table.
+  PCL swapped the sigil in the RENDERED scalar, which works for every name that
+  renders as a symbol and not for the four `%SPECIAL_VARS` names that render as
+  a compound FORM (`$!`, `$^E`, the two `['p-undef']` caret stubs) — `$!{ENOENT}`
+  subscripted the errno STRING and answered undef, silently.
+  `Pl::ExprToCL::_bare_container_sym` re-renders those from the `%`/`@` spelling.
+  Measured: corpus-diff IDENTICAL over 111; A/B over lib + perl's own t/ +
+  shapes = **1 real diff in 634 files**, `t/op/require_errors.t`'s `$!{ENOENT}`.
+- **`*A = *B` is CLEAR-THEN-COPY (#602, shape (a)):** perl REPLACES A's glob, so
+  a slot B lacks is a slot A no longer has.  Glob-to-glob arm ONLY (the
+  reference/import forms keep their typed one-slot arms), and the clear fires
+  only on a slot already BOUND on the destination — `*A = *B` never CREATES a
+  variable perl would not.  `%p-glob-empty-slot` is the ONE reading of "what an
+  empty slot holds", shared with `undef *foo`.  Shape (b) — two names, one entry
+  — stays with the boxed-aggregate/glob-value family, post-v0.1, and is still
+  what English.pm's `@ARG` gap waits on.
+- Movers: `t/re/reg_namedcapture.t` C 0 ok/2 notok → **1 ok/1 notok** (the
+  remaining row is #671, a glob-slot subscript DROP);
+  `t/op/require_errors.t` gains a real `$!{ENOENT}` read.
+  Guards: `Pl/t/errno-magic-01.t` (new, 8 rows) + `Pl/t/punct-glob-name-01.t`
+  21 → 26.  Filed: **#670** (`%!` residue: absent key `""` vs undef,
+  `scalar(%!)` 1 vs 134), **#671**, **#672** (`%-` values must be arrayrefs),
+  **#673** (`lib/Errno.pm` shim), **#674** (English.pm may drop the errno ties).
+
 ## s449s (2026-08-29, Opus, round 7 agent S) — the punctuation CONTAINERS: `%` needs a POSITION rule, and #449's CL-spelling blocker is GONE (#550 + #449)
 
 - **#449 CLOSED at the emission rule**: `Pl::CLForm::needs_pipes` has a SECOND

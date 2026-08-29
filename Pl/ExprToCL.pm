@@ -879,8 +879,11 @@ sub _compile_ref_text_form {
 sub gen_symbol_form {
   my $self = shift;
   my $node = shift;
+  # NAME OVERRIDE (task #561): the element-access container asks this renderer
+  # for the AGGREGATE spelling of the node's name — see _bare_container_sym.
+  my $override = shift;
 
-  my $content = $node->content() // '';
+  my $content = $override // $node->content() // '';
   # Normalize Perl 4 package separator: $pkg'var -> $pkg::var
   $content =~ s/^([\$\@\%\*&])([a-zA-Z_]\w*)'/$1$2::/;
   # Handle magic/special variables via dispatch table
@@ -2864,7 +2867,7 @@ sub gen_array_access_form {
   my $arr = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
   my $idx = $self->gen_node_form($kids->[1]);
   if ($is_bare) {
-    $arr = _swap_elem_sigil($arr, q(@));
+    $arr = $self->_bare_container_sym($arr_node, $arr, q(@));
     return ['p-undef'] if $arr =~ /^@\d+$/;
     $self->environment->register_punct_global($arr)
       if $self->environment && $arr eq '@#';
@@ -2960,7 +2963,8 @@ sub _elem_container_key {
     if ($swap{$kind}
         && (ref($c_node) eq 'PPI::Token::Symbol'
             || ref($c_node) eq 'PPI::Token::Magic')) {
-      $container = _swap_elem_sigil($container, $swap{$kind}[1], $swap{$kind}[0]);
+      $container = $self->_bare_container_sym($c_node, $container,
+                                              $swap{$kind}[1], $swap{$kind}[0]);
     }
     # A SLICE through a reference (`delete @$h{a}`, `exists @$r[0]`) has a
     # SCALAR container the swap cannot touch — the same hole the four slice
@@ -2972,6 +2976,32 @@ sub _elem_container_key {
   my @keys = map { $self->gen_node_form($kids->[$_]) }
              ($is_slice ? (1 .. $#$kids) : (1));
   return ($kind, $container, @keys);
+}
+
+# The BARE CONTAINER of an element access, as symbol TEXT.  Perl swaps the
+# sigil on the NAME — `$h{k}` reads %h — and PCL swaps it on the RENDERED
+# scalar, which is exactly right for every name whose render IS a symbol:
+# `$h` → `%h`, `|$-|` → `|@-|`, `|Foo|::$h` → `|Foo|::%h`.
+#
+# It is not right for a %SPECIAL_VARS name that renders as a compound FORM.
+# `$!` is `(p-errno-string)`, and no sigil swap reaches inside a call, so
+# `$!{ENOENT}` emitted (p-gethash (p-errno-string) "ENOENT") — a symbolic hash
+# whose NAME was the strerror text — and answered undef, silently, instead of
+# reading %! (task #561).  The four such names today are `$!`, `$^E` and the
+# two `['p-undef']` caret stubs; for those, and only those, the container is
+# re-rendered from the AGGREGATE spelling through this same one renderer, so
+# `%!`/`@!` and `%{^LAST_FH}` come out the way every other container does.
+# Every other name keeps the text swap and its bytes.
+sub _bare_container_sym {
+  my ($self, $node, $rendered, $to, $from) = @_;
+  $from = q($) unless defined $from;
+  my $content = $node->content() // '';
+  if (ref $SPECIAL_VARS{$content}) {
+    (my $agg = $content) =~ s/^\Q$from\E/$to/;
+    return Pl::CLForm::to_flat($self->gen_symbol_form($node, $agg))
+      if $agg ne $content;
+  }
+  return _swap_elem_sigil($rendered, $to, $from);
 }
 
 sub _swap_elem_sigil {
@@ -3055,7 +3085,7 @@ sub gen_hash_access_form {
   my $key = $self->_hash_key_form($kids->[1]);
 
   if ($is_bare) {
-    $hash = _swap_elem_sigil($hash, q(%));
+    $hash = $self->_bare_container_sym($hash_node, $hash, q(%));
     $self->environment->register_punct_global($hash)
       if $self->environment && $hash eq '%#';
     if ($self->environment) {

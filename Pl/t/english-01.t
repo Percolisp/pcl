@@ -21,8 +21,12 @@
 #                     punctuation variable PCL keeps in an ordinary cell.
 #   tie $NAME, ...    for the six that are not cells: $& $` $' $+ $^N are raw
 #                     globals the runtime REBINDS on every match (set-match-
-#                     vars), so a value alias freezes at load time, and $! is
-#                     a call into C errno, not a variable.  $ARG is tied for
+#                     vars), so a value alias freezes at load time, and $!
+#                     was a call into C errno with no variable behind it.
+#                     ($! and $^E gained canonical magic boxes in task #561,
+#                     so their tie is now a CHOICE — swapping it for a
+#                     scalar-slot alias is a lib/ change with its own sweep.)
+#                     $ARG is tied for
 #                     the same reason — perl's shared glob tracks the DYNAMIC
 #                     $_ that foreach/map/grep bind, and `\$_` does not (that
 #                     is true in perl too: `*A = \$_` misses the loop there).
@@ -148,7 +152,7 @@ eval { $MATCH = "x"; 1 } or $e = "died";
 print "match-write=[$e]\n";
 PL
 
-# ---- $! is a CALL into errno, so the alias has to be a tie ----------------
+# ---- $! reaches errno through a tie (task #561 made an alias possible too) --
 
 both_agree(<<'PL', '$OS_ERROR/$ERRNO follow errno, in string AND numeric context');
 use English;

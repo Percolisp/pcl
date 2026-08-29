@@ -4,6 +4,79 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 450t (2026-08-29, Opus, round 8 agent T) — the computed magics: #561 + #602
+
+**Both tasks shipped from the s449 design (`docs/computed-magic-design-s449.md`),
+plus the one emission rule the design did not foresee.**  ~30 probe programs
+against perl 5.40.3, before and after.  Gate **181 files / 6109 rows** PASS (xs
+skipped in a worktree); generation **v2-355 → v2-365**, all three artifacts
+regenerated (bodies byte-identical; stamp only).
+
+- **#561, the scalar half — a COMPUTED magic gets a CANONICAL BOX.**  `$!`
+  worked, but nothing was behind its glob slot: emission reads it through an
+  accessor (`%SPECIAL_VARS: '$!' => ['p-errno-string']`), so no `|$!|` variable
+  ever existed, `p-glob-copy`'s `boundp` said no, and `*Y = *!; print $Y`
+  printed `""` where perl prints the strerror text.  `|$!|` and `|$^E|` are now
+  defvar'd boxes holding a `p-magic-cell` whose getter/setter ARE
+  `p-errno-string` and its `setf` — the shape `|$.|` has had all along, and the
+  reason the box and the accessor cannot disagree.  **ZERO glob-path changes**:
+  a scalar glob slot's value IS the p-box, so the alias was box aliasing as soon
+  as the variable existed.  Probed identical to perl in ten shapes incl. the
+  dualvar through the alias (`$Y+0` = 13, `"$Y"` = "Permission denied"), a write
+  through the alias reaching C errno, `\$Y` through the alias, and `local $!`
+  still restoring.
+- **#561, the `%!` half — a REAL hash whose VALUES are magic.**  134 keys (perl's
+  own set, first five byte-identical), numbers resolved through `sb-posix` where
+  it has the constant and listed for the eleven it does not — measured: the 123
+  it does export agree with perl's `Errno` to the number.  Each value is a box
+  holding a magic cell answering **the errno NUMBER when `$!` holds that errno
+  and 0 otherwise** — probed first, because the obvious guess (1/"") is wrong in
+  both halves — and a STORE dies `ERRNO hash is read only!`, as Errno's tied
+  hash does.  ONE new arm: `%p-hash-unbox-elem` gained the magic-cell dispatch
+  `p-aref-unbox-elem` has had since the `@_`-hole alias; `p-values`, `p-each`
+  and `p-gethash` were verified to funnel through it, so nothing else moved.
+- **The one thing the design did not foresee: `$!{ENOENT}` was NOT reading `%!`.**
+  An element access names the AGGREGATE (`$h{k}` reads `%h`), and PCL performs
+  that swap on the RENDERED scalar — right for every name that renders as a
+  symbol (`$h` → `%h`, `|$-|` → `|@-|`, `|Foo|::$h` → `|Foo|::%h`) and wrong for
+  the four `%SPECIAL_VARS` names that render as a compound FORM, because no
+  sigil swap reaches inside a call.  `$!{ENOENT}` emitted
+  `(p-gethash (p-errno-string) "ENOENT")` — a symbolic hash whose NAME was the
+  strerror text — and answered undef, silently.  `_bare_container_sym` re-renders
+  those four from the aggregate spelling through the same one renderer.  The
+  blast radius was measured, not argued: corpus-diff IDENTICAL over 111 files,
+  and an A/B over `lib/` + all 605 files of perl's own `t/` + the shapes corpus
+  gave **1 real diff in 634**, `t/op/require_errors.t`'s own `$!{ENOENT}`.
+- **#602 — `*A = *B` REPLACES A's glob, so `p-glob-copy` CLEARS the slots B
+  lacks.**  Copying bound slots only left the destination's old value in place:
+  `our $x = 5; *x = *neverdefinedglob` printed 5.  Three short per-slot helpers
+  plus one shared `%p-glob-empty-slot` that `undef *foo` now reads too (rule 11;
+  rule 12 makes an unknown sigil an error, not a nil).  Two rules the probes
+  fixed rather than the design: the clear fires on the GLOB-TO-GLOB arm only
+  (`*dst = \&sub` / `*dst = \$scalar` keep their typed one-slot arms — that is
+  the import path, probed identical before and after), and only on a slot
+  already BOUND on the destination (`*A = *B` never creates a variable perl
+  would not).  Seven-shape probe identical to perl except `exists $main::{c3}`,
+  a pre-existing stash-modelling difference verified unchanged.
+- **Movers to expect:** `t/re/reg_namedcapture.t` **0 ok / 2 notok → 1 ok / 1
+  notok** (measured alone; snapshot row left for the review to splice).  The
+  remaining row is not this work — `*X{HASH}{X}` is a compiler DROP, filed as
+  **#671**, and even un-dropped it needs **#672** (`%-` values must be
+  ARRAYREFS; PCL stores the string).  `t/op/require_errors.t` gains a real
+  `$!{ENOENT}` read where it had an undef.
+- **Guards:** `Pl/t/errno-magic-01.t` (new, 8 rows, every expectation the live
+  `perl` answer) and `Pl/t/punct-glob-name-01.t` 21 → 26.  **Stale text
+  repaired in the same commits** (the s416 rule): `docs/not-supported.md`'s
+  English.pm section said `$!` is "a call into C errno, not a variable at all"
+  and that `\$^E` "would take a reference to a temporary box" — both false now —
+  and `Pl/t/english-01.t`'s header comment said the same.
+- **Filed:** #670 (`%!` residue: an absent key is `""`-and-DEFINED in perl vs
+  undef here; `scalar(%!)` is 1 vs 134 — both truthy), #671, #672, #673
+  (`lib/Errno.pm` shim, the design's named follow-on), #674 (English.pm may now
+  drop the errno ties).
+
+---
+
 ## Session 449s (2026-08-29, Opus, round 7 agent S) — the parser fillers: #563, #564, #550 + #449
 
 **Three tasks shipped, one bonus diagnosed; four findings filed (#650–#653).**
