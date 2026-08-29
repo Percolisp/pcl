@@ -3,6 +3,10 @@
 #   dropped statements run: 6 rows fixed, renumbered survivors, rows 72/73 honest
 #   PVBM fails); reset.t 41->40 + tr.t 239->238 = the #723 TAP-glue landing moved
 #   from a skip row to a pass row (#542 buffering; pre-existing glue, probed both trees).
+# s452 (round 11, edited ROW BY ROW): reset.t 41 + tr.t 239 RESTORED (the #723
+#   glue fix landed — the two hidden rows returned, identities verified);
+#   aassign.t 173->175 + magic.t 152->158 = AB #721/#731 (2 blessed fails fixed
+#   by edit; magic gains attributed by an AA-tip single-file run).
 # s435 (THE FLIP — Option B phase 2's last step; ruled fable-answers-s433.md
 #   §A.1, accept-the-price ruled in the s435 review): a statement the compiler
 #   cannot lower is no longer replaced by `nil` with the program running on —
@@ -127,7 +131,7 @@
 #   split.t: the un-dropped `my ($sp) = grep ... or skip` now takes the file's own skip branch
 #   (PCL's \s under /u misses NBSP, owner #407), so 9 rows skip: 3 were baseline fails (fixed),
 #   6 were ACCIDENTAL passes running on the dropped statement's undef $sp.
-aassign.t	OK	173	15	189
+aassign.t	OK	175	15	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
 args.t	OK	22	1	23
@@ -192,7 +196,7 @@ lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
 # argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
-magic.t	PARTIAL	152	37	208
+magic.t	PARTIAL	158	37	208
 # s449 (#564, agent S): `local *{EXPR} = sub {…}` has a lowering, so the four rows of the
 # `local *1 = sub {123}` loop at method.t:38 PASS — 72/26 -> 76/22, verified SERIALLY on both
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
@@ -228,7 +232,7 @@ recurse.t	OK	27	1	28
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
 ref.t	PARTIAL	193	16	245
-reset.t	PARTIAL	40	0	45
+reset.t	PARTIAL	41	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
@@ -243,7 +247,7 @@ study.t	OK	43	0	43
 sub.t	OK	62	2	65
 substr.t	PARTIAL	347	3	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	238	3	317
+tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257
 undef.t	OK	30	0	35
 unshift.t	OK	19	0	19

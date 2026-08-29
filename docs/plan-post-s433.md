@@ -186,6 +186,43 @@ stdio buffering policy is perl's.  **NEXT (the queue as it now stands):**
    producing "census to zero + errno/%ENV completeness + the buffering
    policy"; recommendation unchanged.
 
+**THE PLAN FROM ROUND 12 ON (s452, USER-RATIFIED 2026-08-30: "performance
+work in parallel") — TWO TRACKS PER ROUND, INTERLEAVED.**  The former
+one-perf-agent-per-round CAP becomes a standing SLOT: every round now runs
+ONE perf agent beside one-to-two correctness agents, until both v0.2 halves
+are presentable.  Fable launches, reviews, merges, runs the batch legs and
+pushes per round, as rounds 5–11.
+
+*Perf track (Target A — beat perl; worklist `docs/faster-codegen-suggestions.md`):*
+1. **Round 12 perf agent**: re-measure the #73 bench numbers on the current
+   tree FIRST (the buffering/dispatch/proto work since s445 moved the
+   ground), then **#680** (the residual Target-A gap the #477 fix exposed —
+   profile before touching) and the **#582 discriminating measurement**
+   (per-class stash cache ONLY if inherited dispatch still lags — the task's
+   own condition).
+2. Then the tier list in order (T1 #77 return-family transfer next), one
+   agent per round.  #74's pack half stays BLOCKED on pclxs (USER).
+3. Discipline: every perf change carries before/after wall numbers on the
+   same bench + the PCL_OPT registry rules (an emission-changing transform
+   is a NAMED Kind-A/B gate in Pl/Passes.pm, never an unconditional edit);
+   corpus/PCL_OPT=none equivalence per the s411 rules.
+
+*Correctness track (the v0.2 census half):*
+1. **Round 12**: the census's biggest owned families (34 files / 90 drops)
+   + **#755** (promoted: wildcard filenames, one seam) + **#732**
+   (gate-SET-sized: builtin-named subs).
+2. **Round 13**: census remainder + #684 + the Q7 leftover re-check
+   (#457 #464–#466 #468 #470 — several likely overtaken) + child-drop
+   sites #483/#480–#482.
+3. Fillers (#722, #737, #740, #750–#754, AB/AA residue) ride as
+   same-mechanism budget fillers, never displacing the census.
+
+*The v0.2 gate (both tracks met):* census = 0 (or every survivor
+USER-blessed in not-supported.md), the filler pool down to
+gate-SET-sized items, AND a measured perl-relative perf story
+(the #73-family bench re-run + whatever the perf slot lands).  USER picks
+the headline then — correctness-led or speed-led.
+
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 
 1. **Fable design session(s)** — the five rulings damming the pool:

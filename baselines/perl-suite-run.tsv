@@ -989,7 +989,7 @@ mro/vulcan_c3_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: 
 mro/vulcan_dfs.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/vulcan_dfs_utf8.t	1	0	0	1	XDIFF	not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 op/64bitint.t	425	0	425	0	OK		0
-op/aassign.t	188	1	173	16	DIFF		0
+op/aassign.t	188	1	175	14	DIFF		0
 op/alarm.t	5	0	5	0	OK	reaped 12 orphan(s)	0
 op/anonconst.t	7	0	1	6	DIFF		0
 op/anonsub.t	14	1	1	5	DIFF		0
@@ -1052,7 +1052,7 @@ op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for inval
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
-op/filetest.t	436	0	183	251	DIFF	aborted-forms:1: The function main::pl-f is undefined.	1
+op/filetest.t	436	0	181	250	DIFF	aborted-forms:1: The function main::pl-f is undefined.	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
 op/flip.t	14	0	12	2	DIFF		0
@@ -1121,7 +1121,7 @@ op/loopctl.t	66	1	63	4	DIFF		0
 op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
-op/magic.t	207	1	170	37	DIFF		0
+op/magic.t	207	1	176	31	DIFF		0
 # s449: op/method.t 99/26 -> 103/22 EDITED BY HAND — s449s #564: the four rows of the
 #   `local *1 = sub {123}` loop (the companion twin of perl-tests/method.t's +4 in the same
 #   batch sweep).  Measured by agent S in a two-file sweep and re-measured here, parallel
@@ -1166,9 +1166,9 @@ op/require_37033.t	10	0	5	1	DIFF	aborted-forms:2: Can't locate test_use_N.pm in 
 op/require_errors.t	73	0	5	68	DIFF		0
 op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
-op/reset.t	45	0	25	19	DIFF		0
+op/reset.t	45	0	26	19	DIFF		0
 op/reverse.t	25	0	25	0	OK		0
-op/rt119311.t	22	0	9	0	DIFF	aborted-forms:2: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t	0
+op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t	0
 op/runlevel.t	24	0	0	0	DIFF		0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
@@ -1187,7 +1187,7 @@ op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
 op/srand.t	10	0	8	2	DIFF		0
 op/sselect.t	23	0	17	6	DIFF		0
-op/stash.t	54	1	47	7	DIFF	undef-fn:main::pl-SUPER	0
+op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	0	0	DIFF	aborted-forms:1: The function main::pl-is_linux_container is undefined.	0
 op/stat_errors.t	638	0	305	333	DIFF		0
@@ -1195,7 +1195,7 @@ op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / 
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
-op/sub_lval.t	211	0	53	48	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
+op/sub_lval.t	211	0	54	47	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	347	7	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
@@ -1213,7 +1213,7 @@ op/tiehandle.t	67	0	12	32	DIFF		0
 op/tiehash.t	27	0	20	7	DIFF		0
 op/time.t	72	0	72	0	OK		0
 op/time_loop.t	2	0	2	0	OK		0
-op/tr.t	317	0	269	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i	0
+op/tr.t	317	0	270	45	DIFF	aborted-forms:1: PCL: unsupported: a single generated top-level form of N chars exceeds the N-char limit (i	0
 op/tr_latin1.t	2	0	1	1	DIFF		0
 op/try.t	28	0	23	3	DIFF	aborted-forms:1: PCL: statement not supported at try.t line N: fscalar = N; -- PCL: Can't modify non-lvalue	1
 op/undef.t	88	0	32	5	DIFF	undef-fn:main::pl-tcp; aborted-forms:1: The function main::pl-z is undefined.	0

@@ -21,6 +21,39 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s452 (2026-08-29/30, Fable) — ROUND 11 merged with one review fix; THE INTERLEAVED PLAN (USER: performance in parallel)
+
+- **ROUND 11 (AA #736+#723+#730+#738; AB #721+#720+#731+#734+#733) MERGED**
+  (final `b3d1ef3` after the review fix; gen **v2-405**).  Legs: sweep GATE
+  clean TOTAL **18337** (+10, every gainer attributed); companion 528 files,
+  10 movers all attributed (AA-tip run splits AA/AB; the #723 un-glue
+  reaches the COMPANION capture too — op/reset + op/tr + op/stash);
+  cold gate 184/6260 xs-only.
+- **REVIEW FIX `b3d1ef3` — the sweep caught what agent gates missed**:
+  #736's marker arm REPLACED `%p-flatten-list`'s cons-splice arm instead of
+  joining it (an LHS slice consumed ONE RHS value; range.t row 4).  Standing
+  reminder: when adding an arm to a dispatch, DIFF THE DELETED LINES of the
+  commit — every removed arm must reappear as a widened one (this one
+  didn't); guard aassign-01.t row 36.
+- **THE PLAN, USER-RATIFIED ("performance work in parallel"), plan-post-s433
+  §s452**: from round 12 every round runs ONE perf agent (re-measure #73
+  bench → #680 + #582's discriminating measurement → the
+  faster-codegen-suggestions tier list) beside 1–2 correctness agents
+  (census families + #755 + #732 → remainder + Q7 re-check + child-drop
+  sites).  **v0.2 gate = census 0 (or USER-blessed survivors) + filler pool
+  ≤ gate-SET-sized + a measured perl-relative perf story**; the USER picks
+  the v0.2 headline then.
+- Rulings: **#755 PROMOTED** (general wildcard-filename runtime gap, one
+  seam — heads the round-12 correctness slot with the census); AB's
+  unconditional `_restore_caller_wa` RATIFIED (uniform tail rule beats a
+  head-name exemption); **#733 refinement accepted** — the module's
+  DECLARED SUBS decide the unparenthesised import name (the @EXPORT scan
+  cannot: it reads literal qw only and is empty for both probe modules),
+  and the reading NEVER restricts the ordinary prototype merge.
+- Round-10 correction recorded in place: re/charset.t's −1 is NOT the #723
+  glue class (zero glued rows on the fixed tree, count unchanged) — X's
+  #542 capture family, mechanism unnamed.
+
 ## s452ab (2026-08-29, Opus round 11, agent AB)
 
 - **A LIST ASSIGNMENT USED AS A VALUE IS TWO-FACED, AND A DECLARATION IS ONE

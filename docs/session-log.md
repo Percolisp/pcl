@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 452 (2026-08-29/30, Fable) — ROUND 11: AA + AB reviewed and merged with ONE review fix; TOTAL 18337 (+10); THE INTERLEAVED PLAN ratified (USER: performance in parallel from round 12)
+
+Round 11 = TWO agents (USER: "two opus jobs"): AA (#736 %ENV marker
+flatten/referent + #723 TAP-glue + #730 sysopen + #738 exit-in-END) and AB
+(#721 list-assign-as-value + #720 slice vivification + #731/#734 command
+capture + #733).  Both reviewed with independent probe files vs perl
+(AA: 3 files + rc SAME; AB: 4 files SAME, 3 inverse-DIFF on the base),
+ff-merged (AA `008b364`, AB `e6342d7`, gen **v2-405** = AB's, artifacts on
+the final tree).
+
+**ONE REVIEW FIX (`b3d1ef3`), and the sweep caught what every agent gate
+missed**: #736's marker arm in `%p-flatten-list` REPLACED the cons-splice
+arm instead of joining it, so a spliced value group collapsed to one
+element — `($a,@bcd[0..2],$e) = (…)` fed the LHS slice ONE value
+(perl-tests/range.t row 4, `a:b:::c` for `a:b:c:d:e`).  Bisected
+base→AA→commit; every other deletion in that commit verified a legitimate
+predicate widening; guard `aassign-01.t` 35→36.  The lesson is old but
+newly paid: an agent's own gate + named files are not the sweep.
+
+**Legs (post-fix tree `b3d1ef3`):** sweep GATE **clean**, TOTAL 18327 →
+**18337** (+10: aassign +2 = AB #721's two GH rows out of fail-baseline by
+edit; magic +6 = AB, pinned by an AA-tip run; reset +1 + tr +1 = the #723
+glue rows RETURNED, identities verified — pass-baseline restored with the
+note updated).  Companion `--all --quick` (mandatory: #723 is a harness
+change) 528 files, **10 movers all attributed**: rt119311 9/0→**11/2**
+(AA #738, predicted to the row), filetest 183/251→**181/250** (AB #733
+reaching #755 — promoted), aassign 175/14 + magic 176/31 + sub_lval 54/47
+(AB), reset 26/19 + tr 270/45 + stash 48/7 (AA — the #723 un-glue reaches
+the companion capture too; split by an AA-tip run), pvbm (14th) +
+uni/variables the known noise.  8 snapshot rows spliced.  Cold gate
+**184/6260 xs-only** (6245 + 14 xs + 1 review-guard row, exact).  The
+round-10 charset cause CORRECTED in place (not #723 — X's #542 family,
+mechanism unnamed).
+
+**THE PLAN (USER-ratified): performance in parallel from round 12** —
+plan-post-s433 §s452: every round = one PERF agent (first: re-measure the
+#73 bench, then #680 + the #582 discriminating measurement, then the tier
+list) beside one-to-two CORRECTNESS agents (census families + #755 + #732,
+then remainder + Q7 re-check).  v0.2 gate = census 0 + filler pool down to
+gate-SET-sized + a measured perl-relative perf story; USER picks the
+headline.  Rulings this round: #755 PROMOTED (general wildcard-filename
+gap, one seam); AB's unconditional `_restore_caller_wa` RATIFIED
+(uniformity over a head-name exemption); #733's refinement accepted (the
+DECLARED-SUBS fact decides, the reading never restricts).
+
+---
+
 ## Session 452ab (2026-08-29, Opus round 11, agent AB) — #721 (list assignment as a VALUE), #720, #731, #734, #733
 
 Base `0dd7434` (main after round 10), generation **v2-405**.
@@ -348,7 +395,10 @@ merge point** (identical at every later point): the child-flush/capture
 family — coverage GAINS attrs 37/108 (+41 honest rows run past the old
 stall), attrproto 17/31 (+3), require_errors 5/68 (+2), uni/stash 44/6,
 pat_re_eval 65/462; charset 2776/2775 = a #723 glue-mangled row (its
-description text is cut mid-line with "warning:" glued); and ONE 2-row
+description text is cut mid-line with "warning:" glued) [CORRECTED s452:
+NOT the #723 class — AA measured zero glued rows on the glue-fixed tree
+with charset unchanged at 2775; the mover stays in X's #542 capture family
+with its mechanism unnamed]; and ONE 2-row
 coverage LOSS, **rt119311 9/0 — filed #738** (rows 10/11, exit-in-format
 DESTROY, the file now stops at row 9; discriminator in the task).  All 17
 snapshot rows spliced with these causes.  X's "nothing should move"
