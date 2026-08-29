@@ -3699,6 +3699,16 @@ sub _local_list_items {
 # Rule 12: a target shape with no lowering DIES here rather than being
 # silently flattened to whatever Symbol it happens to contain (which is what
 # turned `local($p,$h{a})` into a phantom `local $h`).
+# The CL text a FOREIGN-QUALIFIED runtime global's container renders as, or
+# undef when NAME is not one (task #700).  ONE reading of that question lives
+# in Pl::ExprToCL::_foreign_runtime_global_form; this is its flat spelling for
+# the `local` machinery, which passes container text around.
+sub _foreign_runtime_container {
+  my ($self, $name) = @_;
+  my $f = Pl::ExprToCL::_foreign_runtime_global_form($name) or return undef;
+  return Pl::CLForm::to_flat($f);
+}
+
 sub _local_target_item {
   my ($self, $g, $stmt) = @_;
   if (@$g == 1 && ref($g->[0]) eq 'PPI::Token::Word'
@@ -3707,6 +3717,24 @@ sub _local_target_item {
   }
   if (@$g == 1 && (ref($g->[0]) eq 'PPI::Token::Symbol'
                    || ref($g->[0]) eq 'PPI::Token::Magic')) {
+    # A FOREIGN-QUALIFIED runtime global has no CL symbol of its own to bind
+    # (task #700): `foo::%SIG` reads as the symbol INHERITED from :pcl, so a
+    # `let` of it localizes MAIN's %SIG while every read of `%foo::SIG` now
+    # goes through the symbolic resolver.  Localize the same way the symbolic
+    # spelling `local %{"foo::SIG"}` already does — the p-local-deref-* macros
+    # resolve and save/restore the very container the reads see.
+    if (my $place = $self->_foreign_runtime_container($g->[0]->content)) {
+      my $sigil = substr($g->[0]->content, 0, 1);
+      (my $name = $g->[0]->content) =~ s/^[\$\@\%]//;
+      return {
+        kind  => 'deref',
+        cl    => "\"$name\"",
+        macro => $sigil eq '@' ? 'p-local-deref-array'
+               : $sigil eq '%' ? 'p-local-deref-hash'
+               :                 'p-local-deref-scalar',
+        place => $place,
+      };
+    }
     my $cl = $self->_transform_pkg_var($g->[0]->content);
     my $place = $cl;
     if (ref($g->[0]) eq 'PPI::Token::Magic') {
@@ -3720,7 +3748,11 @@ sub _local_target_item {
     my $open      = $g->[1]->start()->content();          # '{' or '['
     my $base      = substr($g->[0]->content, 1);
     my $new_sigil = ($open eq '{') ? '%' : '@';
-    my $cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    # The container of a FOREIGN-QUALIFIED runtime global is the resolver
+    # form, not a CL symbol (task #700) — the p-local-*-elem macros evaluate
+    # their container argument, so a form travels.
+    my $cl_var    = ($self->_foreign_runtime_container("${new_sigil}${base}")
+                     // $self->_transform_pkg_var("${new_sigil}${base}"));
     my @key_groups = $self->_subscript_key_groups($g->[1]);
     die "Parser2 TODO: empty subscript in a `local` target\n" unless @key_groups;
     my $sub_ctx = ($open eq '[') ? 1 : 0;
@@ -4013,7 +4045,10 @@ sub _process_local_declaration {
     my $open      = $ld_sub->start()->content();    # '{' or '['
     my $base      = substr($sym, 1);               # "hash" or "arr"
     my $new_sigil = ($open eq '{') ? '%' : '@';
-    $ld_cl_var    = $self->_transform_pkg_var("${new_sigil}${base}");
+    # A FOREIGN-QUALIFIED runtime global's container is the resolver form, not
+    # a CL symbol (task #700) — the p-local-*-elem macros evaluate it.
+    $ld_cl_var    = ($self->_foreign_runtime_container("${new_sigil}${base}")
+                     // $self->_transform_pkg_var("${new_sigil}${base}"));
     # Stash slice/element: $Pkg::{key} — stash manipulation is not supported.
     if ($ld_cl_var =~ /^\(p-stash /) {
       $self->_emit(";; $perl_code (stash element local — not supported, running body only)");
@@ -4315,6 +4350,12 @@ sub _process_local_declaration {
     return unless @items;
   }
   my @vars = map { $_->{cl} } @items;
+  # A `deref` target has no CL binding name at all (task #700): its `cl` is the
+  # NAME STRING the p-local-deref-* macro resolves.  So the single-variable
+  # `local $x = V` shortcut below cannot serve it — route it through the LIST
+  # assignment path, which writes through `place` (the same `(p-cast-% "…")`
+  # form every read of the name now uses).
+  my $solo_binding = (@items == 1 && ($items[0]{kind} // '') ne 'deref');
 
   $self->_emit(";; $perl_code");
 
@@ -4365,7 +4406,7 @@ sub _process_local_declaration {
   # of this sub, over the whole run.
   my ($mmod, $mcond) = ($lmod, $lcond);
   my @mrhs;
-  if ($init_idx >= 0 && @items > 1) {
+  if ($init_idx >= 0 && !$solo_binding) {
     @mrhs = grep { ref($_) ne 'PPI::Token::Whitespace' }
                  @$parts[($init_idx + 1) .. $#$parts];
   }
@@ -4380,7 +4421,7 @@ sub _process_local_declaration {
     $mcond_tmp = "pcl-local-cond-" . $self->{_local_counter}++;
   }
 
-  if ($init_idx >= 0 && @items == 1) {
+  if ($init_idx >= 0 && $solo_binding) {
     # local $x = value
     my @rhs_parts = @$parts[($init_idx + 1) .. $#$parts];
     @rhs_parts = grep { ref($_) ne 'PPI::Token::Whitespace' } @rhs_parts;
@@ -4477,6 +4518,7 @@ sub _process_local_declaration {
     for my $it (@items) {
       next if $it->{kind} eq 'skip';    # undef slot: no binding needed
       next if $it->{kind} eq 'elem';    # localized by its own macro open below
+      next if $it->{kind} eq 'deref';   # ditto (p-local-deref-*, task #700)
       my $var = $it->{cl};
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($var eq '$!' || $var eq '|$!|') {
@@ -4501,7 +4543,7 @@ sub _process_local_declaration {
   # Example: local (undef, @bee) = @bee  — @bee on RHS must see old @bee.
   # Use let* with the RHS as the first binding, then the fresh variable slots.
   my ($rhs_tmp_cl);
-  if ($init_idx >= 0 && @items > 1) {
+  if ($init_idx >= 0 && !$solo_binding) {
     # @mrhs is the RHS run with any if/unless modifier already split off above.
     my $rhs_cl = $self->_parse_expression(\@mrhs, $stmt, 1) // 'nil';  # 1 = LIST_CTX
     $rhs_cl = "(let ((*wantarray* t) (*p-in-list-assign-rhs* t)) $rhs_cl)";
@@ -4641,6 +4683,16 @@ sub _process_local_declaration {
     }
   }
 
+  # A FOREIGN-QUALIFIED runtime global (task #700): no CL symbol of its own to
+  # bind, so it localizes through the symbolic-ref macros — the same open shape
+  # as the subscripted targets above, with the NAME in place of a key.
+  for my $it (grep { $_->{kind} eq 'deref' } @items) {
+    $self->_emit($self->_local_open_form("$it->{macro} $it->{cl}", $mcond_tmp));
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+  }
+
   # #138: the comma tail of `local $x = A, B;` — a plain statement that runs
   # with the localization in effect, before the rest of the block.
   $self->_emit($local_tail_cl) if defined $local_tail_cl;
@@ -4652,12 +4704,22 @@ sub _process_local_declaration {
     # where perl puts them (tasks #509 / #510).
     my $lhs_cl = "(vector " . join(" ", map { $_->{place} } @items) . ")";
     my $assign = "(p-list-= $lhs_cl $rhs_tmp_cl)";
+    # p-list-= is a MACRO that reads its LHS forms syntactically (a bare `@x`
+    # symbol is its greedy-array marker), so a `deref` target's PLACE — a
+    # `(p-cast-% "foo::SIG")` CALL — cannot travel through it.  A solo deref
+    # takes the assignment the SYMBOLIC spelling already emits (task #700).
+    if (@items == 1 && ($items[0]{kind} // '') eq 'deref') {
+      my $sig = substr($items[0]{macro}, length('p-local-deref-'), 1);
+      my $fn  = $sig eq 'h' ? 'p-hash-deref-='
+              : $sig eq 'a' ? 'p-array-deref-=' : 'p-setf';
+      $assign = "($fn $items[0]{place} $rhs_tmp_cl)";
+    }
     # A false modifier condition means the statement did not run: nothing above
     # localized anything, so skipping the assignment leaves every slot exactly
     # as it was — including any write the rest of the block makes to it.
     $self->_emit($mmod ne '' ? "(when $mcond_tmp $assign)" : $assign);
   }
-  elsif ($init_idx >= 0 && @items == 1) {
+  elsif ($init_idx >= 0 && $solo_binding) {
     # Single array/hash local with init: emit the var as the default return value.
     # local @arr = EXPR as last expression in a sub should return the assigned list.
     # Subsequent statements override this as the actual return value.
@@ -8532,17 +8594,11 @@ sub _process_include_statement {
     }
   }
 
-  # `use subs LIST` PREDECLARES the names in the CURRENT package, and that
-  # predeclaration is the only thing that lets a name displace a core builtin
-  # there — a plain `sub readpipe {...}` does not (probed s451z, task #703).
-  # Record it so the term lowerings that HAVE a builtin form can ask
-  # `builtin_is_overridden`; the statement itself still falls through to the
-  # general `use` arm below, which loads subs.pm and gets %INC right.
-  if ($type eq 'use' && $module eq 'subs') {
-    my $pkg = $self->environment->current_package // 'main';
-    $self->environment->add_builtin_override($pkg, $_)
-      for $self->_parse_use_import_list($stmt);
-  }
+  # NB `use subs LIST` is recorded in a PRE-PASS (Parser2::_premerge_use_subs,
+  # task #703) — a named sub's body is lowered before the in-stream include
+  # statement is reached, so recording it here missed every backtick inside a
+  # sub.  This statement still falls through to the general `use` arm below,
+  # which loads subs.pm and gets %INC right.
 
   # Handle 'use constant' specially
   if ($module eq 'constant') {
@@ -9543,9 +9599,20 @@ sub _use_import_arg_tokens {
   return @args;
 }
 
-# Parse import list from use statement (e.g., qw(foo bar) or ('foo', 'bar'))
+# Parse import list from use statement (e.g., qw(foo bar) or ('foo', 'bar')).
+#
+# `bare_quote => 1` also reads the UNPARENTHESISED single-name spelling
+# (`use subs "readpipe";`), which PPI hands over as a direct child of the
+# Include statement.  It is OFF by default and that is a MEASURED decision
+# (s451z): syntactically `use Test::More 'no_plan'` and
+# `use Perl::OSType 'os_type'` are the same shape, and only the module knows
+# which is an import name — reading the first as an import list makes
+# _merge_module_prototypes restrict to it, so Test::More's `is($$;$)` never
+# arrives and every `is(...)` argument loses scalar context (three
+# cpan-tests/Test-Simple files moved).  Only a caller that KNOWS every
+# argument is a name may ask for it; `use subs` is such a caller.
 sub _parse_use_import_list {
-  my ($self, $stmt) = @_;
+  my ($self, $stmt, %opt) = @_;
   my @imports;
 
   for my $child ($stmt->schildren) {
@@ -9556,12 +9623,10 @@ sub _parse_use_import_list {
       # literal token "qw/%Config/", breaking `use Config qw/%Config/`.
       push @imports, $child->literal;
     }
-    elsif ($child->isa('PPI::Token::Quote')) {
-      # The UNPARENTHESISED single-name form: `use subs "readpipe";`,
-      # `use POSIX ":sys_wait_h";`.  PPI hands the quote over as a direct
-      # child of the Include statement, so the two arms above never saw it
-      # and the list came back EMPTY — which reads as "no import list" to
-      # every caller (task #703).
+    elsif ($opt{bare_quote} && $child->isa('PPI::Token::Quote')) {
+      # `use subs "readpipe";` — the UNPARENTHESISED single-name form; PPI
+      # hands the quote over as a direct child of the Include statement, so
+      # the two arms above never see it.  Opt-in only: see the note above.
       push @imports, $child->string;
     }
     elsif ($child->isa('PPI::Structure::List')) {

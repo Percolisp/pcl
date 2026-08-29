@@ -480,6 +480,15 @@ sub generate {
 # state-renamed arrays follow their rename, as before.
 sub _array_index_container {
   my ($self, $content) = @_;
+  # A FOREIGN-qualified runtime global (task #700): `$#foo::INC` is the last
+  # index of foo's @INC, and the CL-ordered `foo::@INC` below would read the
+  # symbol INHERITED from :pcl — main's.  Answer the same form the aggregate
+  # spelling emits, flattened, so both callers (form element and text) work.
+  if ($content =~ /^\$#(.+)$/) {
+    if (my $f = _foreign_runtime_global_form('@' . $1)) {
+      return Pl::CLForm::to_flat($f);
+    }
+  }
   $content =~ s/^\$#(.*)::(.+)$/$1\::\@$2/
       || $content =~ s/^\$#/\@/;
   if ($self->environment) {
@@ -952,6 +961,7 @@ sub gen_symbol_form {
   # Perl: $Config::debug  ->  CL: Config::$debug
   # Also: $::foo means $main::foo (empty package = main)
   if ($content =~ /^[\$\@\%].*::[^:]+$/) {
+    if (my $sym = _foreign_runtime_global_form($content)) { return $sym }
     return qualified_var_to_cl($content, $self->environment);
   }
   # Handle package stash typeglob: *Pkg:: (no variable name) -> (p-stash "Pkg")
@@ -2963,6 +2973,40 @@ sub gen_array_access_form {
 # gen_symbol_form and by both pipelines' loop-variable bindings, which take
 # the name from raw token content (a raw `$main::x` binding is UNREADABLE —
 # the CL reader parses `$MAIN` as a package; comp/require.t s309).
+# THE FOURTH name table (task #700).  Its question: "would interning this
+# name in a FOREIGN package's CL package find the symbol :pcl EXPORTS instead
+# of that package's own?"  Every Perl package PCL makes is `(:use :cl :pcl)`,
+# so the CL reader answers an INHERITED symbol for a sigil-named export — and
+# `%foo::SIG` then WAS main's %SIG: 68 keys where perl has 0, and a write
+# through it clobbered main's (probed s451z, both directions).
+#
+# Read `docs/DECIDED.md` §s451z and the note above Parser2's
+# %PKG_SWITCH_IMMUNE_VARS before editing: there are now FOUR tables with the
+# same membership and four different questions, deliberately NOT derived from
+# each other.  `Pl/t/global-partition-01.t` pins the coincidence, so a
+# divergence fails a row instead of drifting.
+#
+# Only WORD-SHAPED names are here: the punctuation exports cannot be written
+# in a literally-qualified spelling at all (`$foo::!` is a perl SYNTAX ERROR,
+# probed), so they reach a foreign package only through the SYMBOLIC form,
+# which #685 already fixed in the runtime.
+my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
+  qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG);
+
+# `%foo::SIG` → `(p-cast-% "foo::SIG")` — the SAME form `%{"foo::SIG"}`
+# already lowers to, so the fix is one emission rule over the resolver #685
+# corrected, not a second mechanism.  Returns () for everything else.
+sub _foreign_runtime_global_form {
+  my ($content) = @_;
+  my ($sigil, $pkg, $base) = $content =~ /^([\$\@\%])(.*)::([^:]+)$/ or return;
+  # `$::x` and `$main::x` ARE main's — the leak is only what perl says lives
+  # somewhere else.
+  return if $pkg eq '' || $pkg eq 'main';
+  return unless $PCL_EXPORTED_GLOBALS{"$sigil$base"};
+  my %cast = (q($) => 'p-cast-$', q(@) => 'p-cast-@', q(%) => 'p-cast-%');
+  return [ $cast{$sigil}, "\"${pkg}::${base}\"" ];
+}
+
 sub qualified_var_to_cl {
   my ($name_in, $env) = @_;
   if ($name_in =~ /^([\$\@\%])(.*)::([^:]+)$/) {
@@ -3060,14 +3104,23 @@ sub _elem_container_key {
 # re-rendered from the AGGREGATE spelling through this same one renderer, so
 # `%!`/`@!` and `%{^LAST_FH}` come out the way every other container does.
 # Every other name keeps the text swap and its bytes.
+#
+# A FOREIGN-QUALIFIED runtime global is the same case for the same reason
+# (task #700): `%foo::SIG` renders as `(p-cast-% "foo::SIG")`, so the text
+# swap on `foo::$SIG` produced `foo::%SIG` — the symbol INHERITED from :pcl,
+# i.e. main's %SIG — and `$foo::SIG{B} = 1` wrote there (probed: perl leaves
+# main's %SIG clean).  Re-render from the aggregate spelling, as above.
 sub _bare_container_sym {
   my ($self, $node, $rendered, $to, $from) = @_;
   $from = q($) unless defined $from;
-  my $content = $node->content() // '';
-  if (ref $SPECIAL_VARS{$content}) {
-    (my $agg = $content) =~ s/^\Q$from\E/$to/;
-    return Pl::CLForm::to_flat($self->gen_symbol_form($node, $agg))
-      if $agg ne $content;
+  # The kv-array-slice site hands over whatever its child node is, and an
+  # INTERNAL node (`['a'..'z']->%[…]`) is a plain hashref with no ->content.
+  my $content = (ref($node) && Scalar::Util::blessed($node)
+                 && $node->can('content')) ? ($node->content() // '') : '';
+  (my $agg = $content) =~ s/^\Q$from\E/$to/;
+  if ($agg ne $content
+      && (ref $SPECIAL_VARS{$content} || _foreign_runtime_global_form($agg))) {
+    return Pl::CLForm::to_flat($self->gen_symbol_form($node, $agg));
   }
   return _swap_elem_sigil($rendered, $to, $from);
 }
@@ -3301,7 +3354,11 @@ sub gen_hash_slice_form {
   # slice handed p-hslice the ARRAY of the same name and died "Not a HASH
   # reference" (#418).  The `$is_bare` guard stays: on a nested access's
   # already-generated text the unanchored swap would rewrite an index.
-  $hash = _swap_elem_sigil($hash, q(%), q(@)) if $is_bare;
+  # _bare_container_sym IS that swap plus the two re-render cases (a compound
+  # %SPECIAL_VARS name, and a foreign-qualified runtime global — task #700:
+  # `@foo::SIG{…}` swapped to `foo::%SIG`, the symbol INHERITED from :pcl, so
+  # the slice read and WROTE main's %SIG).
+  $hash = $self->_bare_container_sym($hash_node, $hash, q(%), q(@)) if $is_bare;
   $hash = $self->_slice_container_form($kids->[0], $hash, 'p-cast-%');
   return $self->_slice_in_context_form(['p-hslice', $hash, $self->_slice_index_forms($kids)], $node_id);
 }
@@ -3320,12 +3377,14 @@ sub gen_kv_hash_slice_form {
 sub gen_kv_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
-  # The sigil swap is _swap_elem_sigil's (rule 11, #418): it also knows the
-  # pipe-quoted spelling a non-ASCII name carries.
+  # The sigil swap is _bare_container_sym's (rule 11, #418 + #700): it knows
+  # the pipe-quoted spelling a non-ASCII name carries, and re-renders the two
+  # names whose aggregate spelling is a FORM rather than a symbol.
   # #612: a parenthesised base is lowered structurally (the sigil swap is a
   # rewrite of a BARE container's NAME and has nothing to swap here).
   my $arr = $self->_paren_deref_base_form($kids->[0], 1)
-            // _swap_elem_sigil($self->gen_node($kids->[0]), q(@), q(%));
+            // $self->_bare_container_sym($self->expr_o->get_a_node($kids->[0]),
+                                          $self->gen_node($kids->[0]), q(@), q(%));
   # `(unbox $r)` stood here — the shape-blind half of _slice_container_form's
   # rule, right for a single-boxed anon ref and one layer short of \@named.
   my $arr_form = $self->_slice_container_form($kids->[0], $arr, 'p-cast-@');

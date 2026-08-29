@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 22;
+plan tests => 24;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -186,3 +186,19 @@ is run_cl(q{package n; sub readpipe { "OVR:" . pop }}
         . q{ print "r=[", `/bin/echo noverride`, "]";}),
    "r=[noverride\n]",
    'a plain `sub readpipe` without `use subs` does NOT override (perl-probed)';
+
+# The override is recorded in a PRE-PASS keyed on SOURCE POSITION, because a
+# named sub's BODY is lowered before the in-stream `use` statement is reached
+# (recording it at the statement made this row run the shell) — and because
+# perl decides at each use site's parse, so a backtick BEFORE the `use subs`
+# is still the builtin.  Both halves probed against 5.40.3.
+is run_cl(q{package z; use subs "readpipe"; sub readpipe { "OVR:" . pop }}
+        . q{ sub g { return `/bin/echo insub` } print "r=[", g(), "]";}),
+   "r=[OVR:/bin/echo insub]",
+   'the override reaches a backtick inside a named SUB body';
+
+is run_cl(q{package z; print "b=[", `/bin/echo pre`, "]";}
+        . q{ use subs "readpipe"; sub readpipe { "OVR:" . pop }}
+        . q{ print "a=[", `/bin/echo post`, "]";}),
+   "b=[pre\n]a=[OVR:/bin/echo post]",
+   'a backtick BEFORE the `use subs` is still the builtin (perl-probed)';

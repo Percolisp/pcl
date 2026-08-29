@@ -881,6 +881,48 @@ sub _premerge_glob_const_prototypes {
   }
 }
 
+# Which package does this element compile in?  A `package NAME;` statement
+# governs its following siblings; a `package NAME { … }` block governs its
+# contents.  Walk out through the enclosing nodes, checking the preceding
+# siblings at each level and then the parent itself.
+sub _package_of_element {
+  my ($el) = @_;
+  for (my $n = $el; $n; $n = $n->parent) {
+    for (my $p = $n->sprevious_sibling; $p; $p = $p->sprevious_sibling) {
+      return $p->namespace
+        if ref $p && $p->isa('PPI::Statement::Package') && $p->namespace;
+    }
+    my $par = $n->parent or last;
+    return $par->namespace
+      if $par->isa('PPI::Statement::Package') && $par->namespace;
+  }
+  return 'main';
+}
+
+# `use subs LIST` PREDECLARES the names in the package it appears in, and that
+# predeclaration is the ONLY thing that lets a name displace a core builtin
+# there — a plain `sub readpipe {…}` does not (probed 5.40.3, task #703).  The
+# effect is PACKAGE-scoped, not lexical: `package Other;` in the same scope
+# stops seeing it and re-entering the declaring package brings it back.
+#
+# Records the SOURCE POSITION too, because perl decides this at each use site's
+# parse: a backtick BEFORE the `use subs` is still the builtin.  See
+# Pl::Environment::builtin_is_overridden.
+sub _premerge_use_subs {
+  my ($self, $doc) = @_;
+  my $fp = $self->fallback_parser;
+  for my $inc (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    next unless ($inc->type // '') eq 'use' && ($inc->module // '') eq 'subs';
+    my $pkg = _package_of_element($inc);
+    my $loc = $inc->location || [0, 0];
+    # bare_quote: every argument of `use subs` IS a name, so the
+    # unparenthesised `use subs "readpipe";` spelling counts here — which it
+    # must not for a general module (see _parse_use_import_list's note).
+    $self->environment->add_builtin_override($pkg, $_, $loc->[0], $loc->[1])
+      for $fp->_parse_use_import_list($inc, bare_quote => 1);
+  }
+}
+
 sub _premerge_include_prototypes {
   my ($self, $doc) = @_;
   # A MISSING MODULE FILE IS NORMAL CONTROL FLOW HERE — most `use`d modules
@@ -1196,6 +1238,14 @@ sub parse {
   # without it `_cnum + 1` swallowed the operand (`_cnum(+1)`) and
   # `X =~ _cnst ? ...` strung the bareword (E4.0 fuzzer, axis 19/22).
   $self->_premerge_glob_const_prototypes($doc);
+
+  # `use subs LIST` must be visible before the ahead-of-stream parses for the
+  # same reason as the two above: a named sub's BODY is lowered before the
+  # in-stream `use` statement is reached, so recording the override when the
+  # include statement processes made `sub f { `cmd` }` in an overriding
+  # package silently run the shell while the same backtick at the package's
+  # top level called the sub (task #703, probed).
+  $self->_premerge_use_subs($doc);
 
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
   # comparator counts: "Can't goto out of a pseudo block") — when no such

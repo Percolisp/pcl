@@ -380,9 +380,10 @@ has our_variables => (
 =head2 overridden_builtins
 
 Core builtins a package has displaced with C<use subs>.
-Keys are "Package::name", values are 1.
+Keys are "Package::name", values are the C<[line, column]> of the earliest
+declaration.
 
-    overridden_builtins => { 'o::readpipe' => 1 }
+    overridden_builtins => { 'o::readpipe' => [12, 5] }
 
 perl only lets a compile-time PREDECLARATION (C<use subs>, or an import) take
 a builtin's name; a plain C<sub readpipe {...}> in the package does NOT
@@ -981,25 +982,39 @@ sub is_our_variable {
     return exists $self->our_variables->{"${pkg}::${var}"};
 }
 
-=head2 add_builtin_override($pkg, $name) / builtin_is_overridden($pkg, $name)
+=head2 add_builtin_override($pkg, $name, $line, $col) / builtin_is_overridden($pkg, $name, $line, $col)
 
 Records / asks whether C<$pkg> displaced the core builtin C<$name> with a
 C<use subs> predeclaration.  See the C<overridden_builtins> attribute.
 
-    $env->add_builtin_override('o', 'readpipe');
-    if ($env->builtin_is_overridden($env->current_package, 'readpipe')) { ... }
+perl decides this at each use site's PARSE, so a use site BEFORE the
+C<use subs> still gets the builtin — hence the source position on both calls.
+The earliest declaration for a name wins (a package may say it twice); a query
+without a position asks only whether the package declared it at all.
+
+    $env->add_builtin_override('o', 'readpipe', 12, 5);
+    if ($env->builtin_is_overridden('o', 'readpipe', $line, $col)) { ... }
 
 =cut
 
 sub add_builtin_override {
-    my ($self, $pkg, $name) = @_;
-    $self->overridden_builtins->{"${pkg}::${name}"} = 1;
+    my ($self, $pkg, $name, $line, $col) = @_;
+    my $key = "${pkg}::${name}";
+    my $at  = [ $line // 0, $col // 0 ];
+    my $old = $self->overridden_builtins->{$key};
+    return if $old && ($old->[0] < $at->[0]
+                       || ($old->[0] == $at->[0] && $old->[1] <= $at->[1]));
+    $self->overridden_builtins->{$key} = $at;
 }
 
 sub builtin_is_overridden {
-    my ($self, $pkg, $name) = @_;
+    my ($self, $pkg, $name, $line, $col) = @_;
     return 0 if !defined $pkg || !defined $name;
-    return exists $self->overridden_builtins->{"${pkg}::${name}"} ? 1 : 0;
+    my $at = $self->overridden_builtins->{"${pkg}::${name}"} or return 0;
+    return 1 if !defined $line;
+    return 0 if $line < $at->[0];
+    return 0 if $line == $at->[0] && defined $col && $col < $at->[1];
+    return 1;
 }
 
 =head2 set_isa($pkg, \@parents)

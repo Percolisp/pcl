@@ -6520,8 +6520,11 @@ sub _make_command_node {
 
   my $pkg = $self->has_environment
           ? ($self->environment->current_package // 'main') : 'main';
+  my $at  = ($origin && ref($origin) && $origin->can('location'))
+          ? ($origin->location || undef) : undef;
   if ($self->has_environment
-      && $self->environment->builtin_is_overridden($pkg, 'readpipe')) {
+      && $self->environment->builtin_is_overridden($pkg, 'readpipe',
+                                                   $at ? @$at[0,1] : ())) {
     my ($cnode, $call_id) = $self->make_node_insert('funcall');
     $self->add_child_to_node($call_id,
       $self->make_node(PPI::Token::Word->new("${pkg}::readpipe")));
