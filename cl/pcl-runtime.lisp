@@ -14623,6 +14623,41 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; A LEADING `::` is perl's ROOT stash: `${"::v"}` IS `$main::v` (probed).
 ;;; The split finds it as an empty package prefix, which used to name no
 ;;; package at all and read undef.
+;;;
+;;; **A FOREIGN-QUALIFIED name never reaches the magic** (task #685).  A Perl
+;;; package PCL makes is `(:use :cl :pcl)`, so every sigil-named symbol the
+;;; runtime EXPORTS — the punctuation / caret / magic set, `|$!|`, `|%!|`,
+;;; `%SIG`, `%ENV`, `@INC`, `|$<| |$>| |$(| |$)|`, … — is INHERITED into it.
+;;; find-symbol then answered main's magic for `%{"foo::!"}` (main's 134-key
+;;; errno table where perl says foo's `!` glob has no hash at all), and the
+;;; hash/array writers went further: they REPLACED the inherited binding, so
+;;; `%{"foo::ENV"}` destroyed the process environment.  Probed across twelve
+;;; word- and punctuation-named specials: perl answers "separate" for EVERY
+;;; `foo::`-qualified spelling and "shared" for every `main::`-qualified one,
+;;; so the rule is exactly "explicitly qualified into a package other than
+;;; main ⇒ an :INHERITED answer is NOT FOUND".  The unqualified spelling is
+;;; untouched (perl forces an unqualified special into main, which is what
+;;; inheritance already gives).  t/op/leaky-magic.t rows 4, 48, 67–70.
+(defun %p-symref-foreign-p (pos pkg-str)
+  "True when the symbolic name was EXPLICITLY qualified (POS = its last `::`)
+   into a package other than main — the case where a symbol INHERITED from
+   :pcl is a leak of main's magic rather than the variable perl names."
+  (and pos (not (string= pkg-str (perl-pkg-to-cl-pkg-name "main")))))
+
+(defun %p-symref-find (pkg sym-name foreign)
+  "The PKG symbol named SYM-NAME, or NIL.  Under FOREIGN an :INHERITED answer
+   counts as not found."
+  (multiple-value-bind (sym status) (find-symbol sym-name pkg)
+    (and sym (not (and foreign (eq status :inherited))) sym)))
+
+(defun %p-symref-intern (pkg sym-name foreign)
+  "Find-or-make PKG's own symbol named SYM-NAME.  Under FOREIGN, an inherited
+   symbol is SHADOWED first, so the vivified variable is the foreign package's
+   and a write through it cannot reach main's magic."
+  (or (%p-symref-find pkg sym-name foreign)
+      (progn (when (find-symbol sym-name pkg) (shadow sym-name pkg))
+             (intern sym-name pkg))))
+
 (defun %p-symref-symbol (name-str sigil create)
   (let* ((pos (search "::" name-str :from-end t))
          (pkg-str (perl-pkg-to-cl-pkg-name
@@ -14630,6 +14665,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                          ((zerop pos) "main")
                          (t (subseq name-str 0 pos)))))
          (var-str (if pos (subseq name-str (+ pos 2)) name-str))
+         (foreign (%p-symref-foreign-p pos pkg-str))
          (pkg (or (find-package pkg-str)
                   (and create (make-package pkg-str :use '(:cl :pcl))))))
     (when pkg
@@ -14638,10 +14674,10 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; PCL's caret cell rather than a control-character symbol of its own.
       (let ((sym-name (%p-slot-name sigil (%pcl-invert-case var-str))))
         (if create
-            (let ((sym (or (find-symbol sym-name pkg) (intern sym-name pkg))))
+            (let ((sym (%p-symref-intern pkg sym-name foreign)))
               (%p-ensure-storage sym)
               sym)
-            (find-symbol sym-name pkg))))))
+            (%p-symref-find pkg sym-name foreign))))))
 
 (defun %p-symref-box (name-str)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.

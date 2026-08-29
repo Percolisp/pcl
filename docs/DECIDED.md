@@ -21,6 +21,32 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451w (2026-08-29, Opus agent W, round 10) — the round-9 review regressions: #685, #663, #694
+
+- **#685 CLOSED — a FOREIGN-qualified symbolic name never reaches main's
+  magic.**  Every Perl package PCL makes is `(:use :cl :pcl)`, so each
+  sigil-named symbol the runtime EXPORTS (`|$!|`, `|%!|`, `%SIG`, `%ENV`,
+  `@INC`, `$_`, `|$<| |$>| |$(| |$)|`, the punctuation arrays/hashes) is
+  INHERITED into it — which is exactly what makes the UNQUALIFIED spelling
+  right (perl forces an unqualified special into main) and exactly what made
+  the qualified one wrong.  `%p-symref-symbol` now treats an `:INHERITED`
+  answer as NOT FOUND for a name explicitly qualified into a package other
+  than `main`, and the create path `cl:shadow`s before interning so a write
+  lands in the named package (`%p-symref-foreign-p` / `-find` / `-intern`,
+  one resolver, all five call sites).  **12 specials probed vs perl: every
+  `foo::` spelling separate, every `main::` spelling shared.**  It also
+  stopped `%{"foo::ENV"}` from DESTROYING the process environment (the
+  writers replaced the inherited binding).  `t/op/leaky-magic.t` **65/6 →
+  70/1** (rows 48 + 67–70 + the `%foo::SIG` symbolic twin), parallel = serial.
+  Guard `Pl/t/symref-package-01.t` 6 → 9 rows; ir-spec §7.1.  `cl/`-only, no
+  generation bump.
+- Residue filed from the same probes: **#700** (the LITERAL `%foo::SIG`
+  reaches the inherited symbol through the CL READER, not this resolver — the
+  ONE leaky-magic row left; an EMISSION-side fix, shape and the rejected
+  runtime alternative in the task) and **#701** (`%{"main::ENV"}` REPLACES the
+  `%ENV-MARKER%` binding with an empty hash and destroys the environment for
+  the rest of the process — PRE-EXISTING on the base tree, rule-12 shaped).
+
 ## s451x (2026-08-29, Opus agent X) — #542 DONE: perl's stdio buffering policy, and the flushes that make it survivable
 
 - **ONE policy function, `%p-output-buffering (fd)`: an output handle is

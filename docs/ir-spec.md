@@ -1300,8 +1300,30 @@ one variable. A **leading `::`** on a symbolic name is perl's ROOT stash —
 `${"::v"}` IS `$main::v` — and resolves in `main` whatever the current package
 is.
 
-A residual gap in the same area, filed and not fixed: `local ${"n"} = …`
-does not localise the cell an unqualified symbolic read then sees (task #574).
+**And a FOREIGN-qualified name never reaches the magic (s451w, task #685).**
+The host namespaces PCL makes for Perl packages `:use` the runtime package, so
+every sigil-named symbol the runtime exports — the punctuation/caret/magic set
+(`|$!|`, `|%!|`, `|$<|`, `|@+|`, …) plus the word-named specials `%SIG`,
+`%ENV`, `@INC`, `%INC`, `@ARGV`, `$_` — is *inherited* into each of them, and
+inheritance is exactly what makes the UNQUALIFIED spelling right (perl forces
+an unqualified special into `main`). It is wrong for an explicitly qualified
+one: `%{"foo::!"}` is a distinct, empty hash in perl, and PCL answered main's
+errno table (`t/op/leaky-magic.t` rows 4, 48, 67–70), while the array/hash
+writers *replaced* the inherited binding, so `%{"foo::ENV"}` destroyed the
+process environment. So: **a name explicitly qualified into a package other
+than `main` treats an inherited answer as NOT FOUND**, and the create path
+shadows before interning, so a write lands in the named package. Twelve
+specials probed vs perl: every `foo::`-qualified spelling is separate, every
+`main::`-qualified one shared. A translator whose host has no
+namespace-inheritance has nothing to do here; one that does must reproduce the
+asymmetry, not the inheritance.
+
+Residual gaps in the same area, filed and not fixed: `local ${"n"} = …` does
+not localise the cell an unqualified symbolic read then sees (task #574); the
+LITERAL spelling `%foo::SIG` reaches the inherited symbol through the host
+READER rather than through this resolver, so it still leaks (task #700); and
+`%{"main::ENV"}` / `%{"ENV"}` overwrite the `%ENV` marker binding with a plain
+empty hash (task #701).
 
 ### 7.2 Package variables and `local`
 

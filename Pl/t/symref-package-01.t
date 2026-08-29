@@ -34,6 +34,22 @@
 # exception).  A residual gap in the same area is task #574: `local ${"n"} = …`
 # does not localise the cell an unqualified symbolic read then sees — it fails
 # on a base tree too, so it is not this fix's residue.
+#
+# ---------------------------------------------------------------------------
+# Rows 7–9, task #685: the SAME resolver's other half — a FOREIGN-qualified
+# name never reaches main's magic.  A Perl package PCL makes is
+# `(:use :cl :pcl)`, so every sigil-named symbol the runtime exports (`|$!|`,
+# `|%!|`, `%SIG`, `$_`, `|$<|`, the punctuation arrays …) is INHERITED into it
+# and find-symbol answered main's variable for `%{"foo::!"}` — 134 errno keys
+# where perl says foo's `!` glob has no hash at all — while the hash/array
+# writers REPLACED that inherited binding, so `%{"foo::ENV"}` destroyed the
+# process environment.  Twelve specials were probed vs perl: every
+# `foo::`-qualified spelling is separate, every `main::`-qualified one shared.
+# Row 9 is the INVERSE guard (main-qualified + unqualified keep the magic).
+#
+# NOT covered here, and not this fix's residue: the LITERAL spelling
+# `%foo::SIG` reaches the same symbol through the CL READER, not through this
+# resolver, so it still leaks — task #700, an emission-side fix.
 
 use v5.30;
 use strict;
@@ -52,7 +68,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 9;
 
 sub write_pl {
     my ($code) = @_;
@@ -182,4 +198,51 @@ package main;
 print join("|", X::qual(), X::mainqual(), X::inev(), mainhome(), Y::reach_main(), ${"v"}), "\n";
 { package X; print "inX:", ${"v"}, "\n"; }
 print "inmain:", ${"v"}, "\n";
+PL
+
+# ---- #685: a FOREIGN-qualified magic name is its own variable -----------
+
+both_agree('#685 a foo::-qualified magic name does not see main\'s magic', <<'PL');
+no strict 'refs';
+$! = 2;
+$SIG{__WARN__} = sub { };
+$_ = "underscore";
+print "h:",   scalar(keys %{"foo::!"}), "\n";
+print "s:",   (defined ${"foo::!"} ? "def" : "undef"), "\n";
+print "sig:", scalar(keys %{"foo::SIG"}), "\n";
+print "u:",   (defined ${"foo::_"} ? "def" : "undef"), "\n";
+print "lt:",  (defined ${"foo::<"} ? "def" : "undef"), "\n";
+print "arr:", scalar(@{"foo::+"}), "\n";
+print "deep:", (defined ${"Deep::Pkg::,"} ? "def" : "undef"), "\n";
+PL
+
+# ---- #685: and a WRITE through it cannot reach main's ------------------
+
+both_agree('#685 a write through a foo::-qualified magic name stays in foo', <<'PL');
+no strict 'refs';
+$! = 2;
+%{"foo::!"} = (aaa => 1);
+${"foo::,"} = "ZORK";
+@{"foo::+"} = (1,2,3);
+print "own-h:", scalar(keys %{"foo::!"}), "\n";
+print "main-h:", (exists $!{aaa} ? "leaked" : "clean"), "\n";
+print "own-s:", ${"foo::,"}, "\n";
+print "main-s:", (defined $, ? "leaked" : "clean"), "\n";
+print "own-a:", scalar(@{"foo::+"}), " main-a:", scalar(@+), "\n";
+PL
+
+# ---- #685 INVERSE: main-qualified and unqualified keep the magic -------
+
+both_agree('#685 inverse: ${"main::!"} and ${"!"} still ARE the magic', <<'PL');
+no strict 'refs';
+$! = 2;
+$SIG{__WARN__} = sub { };
+$_ = "underscore";
+print "mq-h:", (scalar(keys %{"main::!"}) > 0 ? "many" : "zero"), "\n";
+print "mq-s:", ${"main::!"} + 0, "\n";
+print "uq-s:", ${"!"} + 0, "\n";
+print "uq-h:", (scalar(keys %{"!"}) > 0 ? "many" : "zero"), "\n";
+print "mq-sig:", (exists ${"main::SIG"}{__WARN__} ? "shared" : "separate"), "\n";
+print "mq-u:", (defined ${"main::_"} ? ${"main::_"} : "undef"), "\n";
+print "root-u:", (defined ${"::_"} ? ${"::_"} : "undef"), "\n";
 PL
