@@ -53,11 +53,14 @@
 #     because storage and place differ for it alone (*p-stored-errno* vs
 #     (p-errno-string)) and the list took the storage name.
 #
-# STILL divergent, pre-existing, filed: a WRITE inside the scope of a
-# false-conditioned `local` does not survive the block (`local $p if 0; $p = 9`
-# — perl keeps 9, PCL restores), because "do not localize" is spelled
-# "localize to the current value" and a save+restore is only invisible while
-# nothing writes.
+# The last divergence of the family is FIXED — s450v, task #541, rows 22-28
+# below: a WRITE inside the scope of a false-conditioned `local` now survives
+# the block, because the SAVE AND RESTORE are conditional, never the value.
+# "Do not localize" used to be spelled "localize to a COPY OF THE CURRENT
+# VALUE", which is observationally identical only while nothing WRITES the
+# slot: a save and restore of an unchanged slot is invisible, a save and
+# restore AROUND A WRITE is not, and perl (which never ran the statement)
+# keeps the write.
 
 use v5.30;
 use strict;
@@ -76,7 +79,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 21;
+plan tests => 30;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -341,4 +344,94 @@ PL
          'a chained-subscript target in a local LIST drops loudly (rule 12)');
     like($cl, qr/PARSE ERROR: .*unsupported `local` target/,
          '…and the file still compiles: only that statement is replaced');
+}
+
+# ── 7. task #541 — the SAVE AND RESTORE are conditional, never the value ────
+# Every expectation below is the live `perl` answer (probed s450v, 5.40.3).
+# The rows all WRITE the localized slot inside the block, which is the only
+# thing that can tell "did not localize" from "localized to the current
+# value": under the old spelling every `if 0` row below restored the write.
+
+is(run_cl(<<'PL'), "s0:9\ns0out:9\ns1:9\ns1out:1\nu1out:9\nu0out:1\na0out:9\na1out:1 2\nh0out:z\nh1out:k\n",
+our $p; our @a; our %h;
+sub w { $p = 9 }
+$p=1; { local $p if 0; w(); print "s0:$p\n"; } print "s0out:$p\n";
+$p=1; { local $p if 1; w(); print "s1:$p\n"; } print "s1out:$p\n";
+$p=1; { local $p unless 1; w(); } print "u1out:$p\n";
+$p=1; { local $p unless 0; w(); } print "u0out:$p\n";
+@a=(1,2); { local @a if 0; @a=(9); } print "a0out:@a\n";
+@a=(1,2); { local @a if 1; @a=(9); } print "a1out:@a\n";
+%h=(k=>1); { local %h if 0; %h=(z=>9); } print "h0out:", join(",",sort keys %h), "\n";
+%h=(k=>1); { local %h if 1; %h=(z=>9); } print "h1out:", join(",",sort keys %h), "\n";
+PL
+   'a write from a CALLED SUB survives a false-conditioned scalar/array/hash local');
+
+is(run_cl(<<'PL'), "e0:9,8\ne1:1,1\nenv0:nine\n",
+our $p; our %h; our @a;
+sub w2 { $h{k} = 9; $a[0] = 8 }
+$h{k}=1; @a=(1,2);
+{ local $h{k} if 0; local $a[0] if 0; w2(); } print "e0:$h{k},$a[0]\n";
+$h{k}=1; @a=(1,2);
+{ local $h{k} if 1; local $a[0] if 1; w2(); } print "e1:$h{k},$a[0]\n";
+$ENV{PCLT541} = "one";
+{ local $ENV{PCLT541} if 0; $ENV{PCLT541} = "nine"; } print "env0:$ENV{PCLT541}\n";
+PL
+   'ELEMENT targets (hash, array, %ENV) under a modifier save only when it holds');
+
+is(run_cl(<<'PL'), "l0:9,8\nRHS\nl1:1,2\ns0:9\n",
+our ($p,$q);
+sub r { print "RHS\n"; (5,6) }
+($p,$q)=(1,2);
+{ local ($p,$q) = r() if 0; ($p,$q) = (9,8); } print "l0:$p,$q\n";
+($p,$q)=(1,2);
+{ local ($p,$q) = r() if 1; ($p,$q) = (9,8); } print "l1:$p,$q\n";
+$p=1;
+{ local $p = r() if 0; $p = 9; } print "s0:$p\n";
+PL
+   'the `local(LIST) = RHS if 0` twin: no localization, and the RHS never runs');
+
+is(run_cl(<<'PL'), "sep:X\npipe:1\nderef:9\nderefin:u\nderefout:9\n",
+our $p; $p = 1;
+{ local $/ if 0; $/ = "X"; } print "sep:", (defined $/ ? $/ : "u"), "\n";
+$| = 0;
+{ local $| if 0; $| = 1; } print "pipe:$|\n";
+our $zz; $zz = 1; my $n = "zz";
+{ local ${$n} if 0; $zz = 9; } print "deref:$zz\n";
+{ local ${$n} if 1; print "derefin:", (defined $zz ? $zz : "u"), "\n"; } print "derefout:$zz\n";
+PL
+   'the three OTHER lowerings under a modifier: a magic defvar, $|, a symbolic deref');
+
+# `local @a[1..2]` is the range spelling: one key GROUP whose value is a
+# vector.  p-local-array-slice used to demand an ADJUSTABLE vector and p-..
+# builds a simple one, so the whole slice collapsed onto index 0 — which is
+# why the modifier form used to drop rather than emit it.
+is(run_cl(<<'PL'), "r0:1 8 9 4\nr1in:1   4\nr1:1 2 3 4\nr2in:1   4\nr2:1 2 3 4\nhs0:8,9\nhs1in:5,6\nhs1:1,2\n",
+our @a; our %h;
+@a=(1,2,3,4); { local @a[1..2] if 0; @a[1..2] = (8,9); } print "r0:@a\n";
+@a=(1,2,3,4); { local @a[1..2] if 1; print "r1in:@a\n"; } print "r1:@a\n";
+@a=(1,2,3,4); { local @a[1..2]; print "r2in:@a\n"; } print "r2:@a\n";
+%h=(a=>1,b=>2); { local @h{'a','b'} if 0; @h{'a','b'} = (8,9); } print "hs0:$h{a},$h{b}\n";
+%h=(a=>1,b=>2); { local @h{'a','b'} = (5,6) if 1; print "hs1in:$h{a},$h{b}\n"; } print "hs1:$h{a},$h{b}\n";
+PL
+   'SLICE targets: a range and a key list, conditional and not');
+
+# The emission promise this fix was measured against: the UNCONDITIONAL
+# spellings are byte-identical to what they always emitted (corpus-diff over
+# the 111-file corpus showed only the two files that contain a conditional
+# `local`), and only the conditional ones take the new forms.
+{
+    my $cond = emitted(q{our $p; our %h; { local $p if 0; local $h{k} if 0; }});
+    like($cond, qr/\(p-local-cell-if pcl-local-cond-\d+ \$p /,
+         'a conditional local on an ordinary global emits p-local-cell-if');
+    # An element with ONE key reads the condition once, so it is inlined
+    # rather than bound to a temporary (which the multi-key shapes need).
+    like($cond, qr/\(p-local-maybe \(p-true-p 0\) \(p-local-hash-elem /,
+         '…and a conditional local on an element emits p-local-maybe');
+}
+{
+    my $plain = emitted(q{our $p; our %h; { local $p; local $h{k}; }});
+    like($plain, qr/\(p-local-cell \$p /,
+         'the UNCONDITIONAL spelling still emits plain p-local-cell');
+    unlike($plain, qr/p-local-cell-if|p-local-maybe/,
+           '…with no conditional wrapper anywhere');
 }

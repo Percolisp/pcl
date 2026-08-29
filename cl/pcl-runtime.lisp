@@ -232,7 +232,7 @@
    #:p-dynamic-typeglob #:p-glob-copy
    #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
    #:p-local-glob-dynamic #:p-local-dot
-   #:p-defcell #:p-local-cell
+   #:p-defcell #:p-local-cell #:p-local-cell-if #:p-local-maybe
    #:p-local-pipe
    #:p-local-hash-elem #:p-local-array-elem
    #:p-local-hash-elem-init #:p-local-array-elem-init
@@ -12970,7 +12970,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-365"
+(defparameter *pcl-cache-generation* "v2-375"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -15551,6 +15551,74 @@ buffer's fill-pointer; everything else falls back to file-length."
              (makunbound ',sym)
              (setf (sb-ext:symbol-global-value ',sym) ,old))))))
 
+;;; ── `local TARGET if COND` — the SAVE AND RESTORE are conditional ──────────
+;;; (task #541.)  perl does not execute the statement AT ALL when the modifier's
+;;; condition is false, so nothing is saved and nothing is restored — and a
+;;; WRITE inside the scope must therefore SURVIVE the block.  PCL used to spell
+;;; "do not localize" as "localize to a COPY OF THE CURRENT VALUE", which is
+;;; observationally identical only while nothing writes the slot: a save and
+;;; restore of an unchanged slot is invisible, a save and restore AROUND A
+;;; WRITE is not (`our $p=1; { local $p if 0; $p=9 } print $p` — perl 9, PCL 1).
+;;; The two macros below make the localization itself conditional; the value is
+;;; never conditional any more.
+
+(defmacro p-local-cell-if (cond-form sym init &body body)
+  "p-local-cell whose save/install/restore happen only when COND-FORM holds —
+   the lowering of `local $ORDINARY-GLOBAL if COND` (task #541).  COND-FORM is
+   already a CL boolean (the codegen wraps it in p-true-p / its negation) and is
+   evaluated exactly ONCE, before anything is saved; INIT runs only in the true
+   arm; the restore happens only if this form did the saving.
+
+   BODY is written ONCE and stays in place lexically, which is why this is a
+   twin of p-local-cell rather than a use of p-local-maybe: p-local-cell rebinds
+   SYM LEXICALLY around its body (see its docstring — the string-eval thunk
+   passes free names as lambda PARAMETERS), and a body moved into a local
+   function would not see that.  The rebinding is kept in BOTH arms: when the
+   condition is false it aliases the box the cell already holds, which is what
+   the body would have read anyway."
+  (let ((c (gensym "COND")) (old (gensym "OLD")))
+    `(let* ((,c ,cond-form)
+            (,old (if ,c
+                      (if (boundp ',sym) (sb-ext:symbol-global-value ',sym) '%p-cell-unbound)
+                      nil)))
+       (when ,c (setf (sb-ext:symbol-global-value ',sym) ,init))
+       (unwind-protect (let ((,sym (sb-ext:symbol-global-value ',sym)))
+                         (declare (ignorable ,sym))
+                         ,@body)
+         (when ,c
+           (if (eq ,old '%p-cell-unbound)
+               (makunbound ',sym)
+               (setf (sb-ext:symbol-global-value ',sym) ,old)))))))
+
+(defmacro p-local-maybe (cond-form localizer &body body)
+  "Run BODY inside LOCALIZER when COND-FORM holds, and BARE otherwise — the
+   lowering of `local TARGET if COND` for every target whose localizer
+   establishes no LEXICAL binding the body reads (task #541).
+
+   LOCALIZER is one `local` open form with its BODY SLOT EMPTY:
+   (p-local-pipe), (p-local-hash-elem-init %h \"k\" INIT), (p-local-deref-scalar
+   R), (let ((|$/| INIT))) — anything whose last argument is its body.  BODY is
+   spliced in as that body in the true arm.
+
+   BODY is written ONCE, in a local function called from both arms, so a `local`
+   that wraps a thousand-line block does not double the code.  That is also the
+   restriction: a DYNAMIC binding (a defvar `let`, p-local-dot's rebinding) is
+   visible through the call and is fine, a LEXICAL one would not be — the one
+   localizer that makes one is p-local-cell, and it has its own twin,
+   p-local-cell-if.  Non-local exits (`go` to the enclosing tagbody, `return-from`
+   an enclosing block) cross the call unchanged: the tagbody/block is still
+   active, which is all CL requires.
+
+   COND-FORM is already a CL boolean (p-true-p / its negation) and is evaluated
+   exactly ONCE, before anything is saved; the localizer's own init form runs
+   only in the true arm."
+  (let ((b (gensym "LOCAL-BODY")))
+    `(flet ((,b () ,@body))
+       (declare (dynamic-extent (function ,b)))
+       (if ,cond-form
+           (,@localizer (,b))
+           (,b)))))
+
 (defmacro p-local-glob (pkg-str name-str &body body)
   "Save all slots of *pkg::name, clear them (Perl local *foo = fresh glob),
    execute body, restore on exit."
@@ -15854,11 +15922,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defmacro p-local-array-slice (arr-var idx-form &body body)
   "Localize array elements by index or range. idx-form may be a scalar index or
-   an adjustable non-string vector (result of p-.. range)."
+   a non-string vector (the result of a p-.. range, or an explicit key list).
+
+   The vector test used to demand `adjustable-array-p` as well, and p-.. builds
+   a NUMERIC range with (coerce … 'vector) — a SIMPLE vector — so every
+   `local @a[1..2]` fell through to the single-element arm, where the vector
+   coerces to index 0: perl localizes elements 1 and 2, PCL localized element 0
+   (task #541's probes; the list spelling `local @a[1,2]` was always right
+   because the emitter nests one open per key).  Adjustability was never the
+   question — a scalar index is a number or a box, never a vector, and a string
+   index is excluded by name."
   (let ((g-idx (gensym "IDX")))
     `(let ((,g-idx ,idx-form))
        (if (and (vectorp ,g-idx)
-                (adjustable-array-p ,g-idx)
                 (not (stringp ,g-idx)))
            (%p-local-array-slice-nested ,arr-var ,g-idx 0 (lambda () ,@body))
            (p-local-array-elem ,arr-var ,g-idx ,@body)))))

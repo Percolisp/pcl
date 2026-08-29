@@ -1312,12 +1312,27 @@ its place (`$!` is stored in `*p-stored-errno*` and written through
 what made `local($p,$h{a}) = (5,6)` write a phantom scalar `$h`. The RHS is
 evaluated BEFORE any target is localized, so it reads the old values.
 
-A `local` under a false statement modifier must leave every slot exactly as
-it was: PCL's `local` is an always-open scope, so "do not localize" is
-spelled "localize to the slot's current value", chosen at run time from one
-condition temporary that is evaluated first and once. A localized NAME need
-not be BOUND (a magic name qualified into a module's package is declared
-nowhere), so that keep-branch read is guarded.
+**`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
+#541). Perl does not execute the statement at all when the condition is
+false, so nothing is saved and nothing is restored — and a WRITE to the slot
+inside the scope therefore SURVIVES the block. "Localize to the slot's
+current value" (what PCL emitted before) is observationally identical only
+while nothing writes it: a save and restore of an unchanged slot is
+invisible, a save and restore *around a write* is not.
+
+Two conditional forms carry it, and the split between them is **lexical
+binding**: `p-local-cell-if` is the ordinary-global twin of `p-local-cell`
+and keeps the body IN PLACE, because `p-local-cell` rebinds its name
+lexically around the body; `p-local-maybe COND (LOCALIZER…) BODY` carries
+every other shape (element, slice, `$.`, `$|`, symbolic deref, and the
+exception set's dynamic `let`) by writing BODY once into a local function
+called from both arms — a dynamic binding is visible through that call, a
+lexical one would not be. The condition is evaluated FIRST and exactly once
+(in a temporary when more than one form reads it); the localizer's init form,
+and a list assignment's RHS, run only in the true arm — perl evaluates
+neither when the condition fails. *Porter mapping:* any host can spell this
+as "if COND then (save; install; unwind-protect BODY (restore)) else BODY",
+with BODY emitted once.
 
 `foreach $pkgvar (LIST)` is an *implicit* `local` of the loop variable —
 the body and everything it calls see the current element, and the old

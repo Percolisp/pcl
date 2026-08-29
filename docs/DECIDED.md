@@ -58,6 +58,46 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **The perf headlines, measured at review**: population compile 226.6 s →
   62–78 s (warm hit 99.0 %; single Test2 file 0.70 → 0.13 s); the m//g
   loop linear (200k 12.8 → 0.5 s; 1M 2.83 s vs perl 0.09 — residue #680).
+## s450v (2026-08-29, Opus, round 9 agent V) — a false-conditioned `local` does not save, so a WRITE inside its scope SURVIVES (#541)
+
+- **`local TARGET if COND` gates the SAVE AND RESTORE, never the value** (task
+  #541, RULED s449).  "Do not localize" used to be spelled "localize to a COPY
+  OF THE CURRENT VALUE", which is observationally identical only while nothing
+  WRITES the slot: a save and restore of an unchanged slot is invisible, a save
+  and restore AROUND a write is not, and perl — which never ran the statement —
+  keeps the write (`our $p=1; { local $p if 0; $p=9 } print $p`: perl 9, PCL 1).
+- **TWO new runtime macros, and the split between them is LEXICAL BINDING.**
+  `p-local-cell-if` is the ordinary-global twin of `p-local-cell`: it keeps the
+  body IN PLACE because `p-local-cell` rebinds its name lexically around it (the
+  string-eval thunk passes free names as lambda PARAMETERS).  `p-local-maybe
+  COND (LOCALIZER…) BODY` carries every OTHER shape — element, slice, `$.`,
+  `$|`, symbolic deref, and the exception-set `let` — by writing BODY ONCE into
+  a local function called from both arms.  A DYNAMIC binding is visible through
+  that call, which is why `(let ((|$/| INIT)))` may sit in the localizer slot;
+  a lexical one would not be.  (The ruling's `progv` sketch for the exception
+  half is therefore unnecessary — the `let` in the localizer slot IS the
+  conditional dynamic bind, with no runtime name list.)
+- **The bar's first leg held: the UNCONDITIONAL spellings are BYTE-IDENTICAL.**
+  corpus-diff 109 of 111 files identical (ref.t + sprintf2.t differ, and only in
+  their `local $::TODO = … if $^O eq …` statements); emission A/B over
+  lib/ + perl's t/ + cpan-t + shapes = 792 files, 772 SAME / 20 DIFF / 0 RCDIFF,
+  and every one of the 20 diffs is a conditional-`local` hunk (checked line by
+  line against the source).
+- **TWO drops became correct emission** (no census rows existed for either):
+  ``local` through a deref under a statement modifier` and ``local` of an
+  array-slice RANGE under a statement modifier`.
+- **PRE-EXISTING, found by the range probe and fixed here**: `p-local-array-slice`
+  demanded an ADJUSTABLE vector for its slice arm and `p-..` builds a numeric
+  range with `(coerce … 'vector)` — a SIMPLE vector — so every `local @a[1..2]`
+  fell through to the single-element arm and localized index 0.  Adjustability
+  was never the question: a scalar index is a number or a box, never a vector.
+- Still open: **#690** — `local @a[RANGE] = LIST` (the range-with-initializer
+  spelling) treats the range group as ONE element and assigns the last value to
+  index 0.  Unconditional and conditional alike; the emitter should route a
+  RANGE key group through the slice branch.
+- Guard `Pl/t/stmt-modifier-01.t` 21 → 30 rows (§7), including the emission
+  promise (`p-local-cell` unchanged, no conditional wrapper) in both directions.
+  Its header's "STILL divergent, pre-existing" note is now the fix's record.
 
 ## s450t (2026-08-29, Opus, round 8 agent T) — a COMPUTED magic gets a CANONICAL BOX, `%!` is a real hash of magic values, and `*A = *B` CLEARS (#561 + #602)
 

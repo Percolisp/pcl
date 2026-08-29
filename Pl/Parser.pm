@@ -3691,8 +3691,7 @@ sub _local_target_item {
       cl    => $cl_var,
       open  => $open,
       keys  => \@keys,
-      macro      => ($open eq '{') ? 'p-local-hash-elem'     : 'p-local-array-slice',
-      macro_init => ($open eq '{') ? 'p-local-hash-elem-init': 'p-local-array-elem-init',
+      macro => ($open eq '{') ? 'p-local-hash-elem' : 'p-local-array-slice',
       place => _elem_place_cl($open, $cl_var, \@keys),
     };
   }
@@ -3700,20 +3699,32 @@ sub _local_target_item {
     . join('', map { $_->content // '' } @$g) . "\n";
 }
 
-# Build the init form for a conditional `local LHS = RHS if/unless COND`.
-# Perl localizes only when the condition selects RHS; otherwise the slot keeps
-# its current value.  We always localize and make the *value* conditional:
-# `COND ? RHS : <current value of LHS>` (swapped for `unless`).  Localizing to
-# the current value is observationally identical to not localizing (it is
-# saved and restored unchanged), and reuses the ordinary local-init machinery —
-# no special macro (cf. p-local-glob-if, which a glob needs because it has no
-# single rvalue).  $lhs_rval_cl reads the LHS as an rvalue (old value).
-sub _conditional_local_init {
-  my ($self, $modifier, $cond_cl, $rhs_cl, $lhs_rval_cl) = @_;
-  my $test = "(p-true-p $cond_cl)";
-  return $modifier eq 'unless'
-    ? "(if $test $lhs_rval_cl $rhs_cl)"
-    : "(if $test $rhs_cl $lhs_rval_cl)";
+# The CL boolean of a `local`'s trailing `if`/`unless` modifier — ONE reading of
+# it (rule 11: every branch that lowers a conditional `local` had spelled the
+# p-true-p / (not (p-true-p …)) pair out for itself).
+sub _local_cond_test {
+  my ($self, $modifier, $cond_parts, $stmt) = @_;
+  my $cond_cl = $self->_parse_expression($cond_parts, $stmt) // 'nil';
+  $cond_cl =~ s/^[ \t]+//;
+  return $modifier eq 'unless' ? "(not (p-true-p $cond_cl))"
+                               : "(p-true-p $cond_cl)";
+}
+
+# One `local` OPEN form — conditional or not (task #541).  $inner is the
+# localizer WITHOUT its body, i.e. the text between its parens
+# (`p-local-pipe`, `p-local-hash-elem-init %h "k" INIT`, `let ((|$/| INIT))`).
+# With no modifier that is the open form itself; under one it goes inside
+# p-local-maybe, which saves and restores only when the condition holds — perl
+# does not execute the statement at all when it is false, so a WRITE inside the
+# scope must survive the block.  Either way the caller is left with exactly ONE
+# unclosed paren, which is what _local_let_depth counts.
+#
+# The ORDINARY-global target does not come through here: p-local-cell rebinds
+# its name LEXICALLY around the body, so it needs the body in place and has its
+# own twin, p-local-cell-if.
+sub _local_open_form {
+  my ($self, $inner, $test) = @_;
+  return defined $test ? "(p-local-maybe $test ($inner)" : "($inner";
 }
 
 # The significant elements INSIDE a deref block — the `EXPR` of `${EXPR}`,
@@ -3857,9 +3868,7 @@ sub _process_local_declaration {
         # slots.  p-local-glob-if always saves/restores but evaluates RHS (while
         # the slots are still intact, so it can read @_) and clears+assigns only
         # when COND holds.  Push truthiness into a p-true-p test here.
-        my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt) // 'nil';
-        my $test = $modifier eq 'unless'
-                 ? "(not (p-true-p $cond_cl))" : "(p-true-p $cond_cl)";
+        my $test = $self->_local_cond_test($modifier, \@cond_parts, $stmt);
         $self->_emit("(p-local-glob-if $test \"$pkg\" \"$name\" $rhs_cl");
         $self->indent_level($self->indent_level + 1);
         $self->{_local_let_depth} //= 0;
@@ -3886,9 +3895,7 @@ sub _process_local_declaration {
       # when the condition holds and leaves the outer slots alone otherwise;
       # the same macro says that, with `:none` in the value slot (it then only
       # clears, and there is no RHS to evaluate).
-      my $cond_cl = $self->_parse_expression($lcond, $stmt) // 'nil';
-      my $test = $lmod eq 'unless'
-               ? "(not (p-true-p $cond_cl))" : "(p-true-p $cond_cl)";
+      my $test = $self->_local_cond_test($lmod, $lcond, $stmt);
       $self->_emit("(p-local-glob-if $test \"$pkg\" \"$name\" :none");
       $self->indent_level($self->indent_level + 1);
       $self->{_local_let_depth} //= 0;
@@ -4018,86 +4025,73 @@ sub _process_local_declaration {
       my $sub_ctx = ($open eq '[') ? 1 : 0;
       my @key_cls = map { $self->_subscript_key_expr($_, $open, $stmt, $sub_ctx) } @key_groups;
 
-      # Conditional `local $h{k} = V if COND`: make the value conditional on COND,
-      # falling back to the element's current value (read before the fresh box is
-      # installed by the *-init macro).
-      if ($ld_mod && defined $init_cl) {
-        my $cond_cl = $self->_parse_expression($ld_cond, $stmt) // 'nil';
-        my $lhs_rval = _elem_place_cl($open, $cl_var, \@key_cls);
-        $init_cl = $self->_conditional_local_init($ld_mod, $cond_cl, $init_cl, $lhs_rval);
-      }
-
       # Choose the macro based on subscript type.
       # p-local-array-slice handles both scalar and vector (range) indices.
       my $macro      = ($open eq '{') ? 'p-local-hash-elem'      : 'p-local-array-slice';
       my $macro_init = ($open eq '{') ? 'p-local-hash-elem-init'  : 'p-local-array-elem-init';
+
+      # A statement modifier makes the SAVE AND RESTORE conditional, never the
+      # value (task #541): perl does not execute the statement at all when the
+      # condition is false, so a WRITE to the slot inside the scope must survive
+      # the block — which "install the slot's CURRENT value and restore it"
+      # (what this branch used to emit) cannot say, because the -init macros
+      # install a FRESH box and the restore puts the old one back.  An element
+      # needs no lexical rebinding, so p-local-maybe carries every shape here.
+      # The condition is evaluated exactly ONCE: inline when one open reads it,
+      # in a temporary when several do.
+      my ($etest, $ectmp);
+      if ($ld_mod ne '') {
+        $etest = $self->_local_cond_test($ld_mod, $ld_cond, $stmt);
+        if (@key_cls > 1) {
+          $self->{_local_counter} //= 0;
+          $ectmp = "pcl-local-cond-" . $self->{_local_counter}++;
+          $self->_emit("(let (($ectmp $etest))");
+          $self->indent_level($self->indent_level + 1);
+          $self->{_local_let_depth} //= 0;
+          $self->{_local_let_depth}++;
+          $etest = $ectmp;
+        }
+      }
 
       if (defined $init_cl && @key_cls == 1) {
         # Single element with initializer: use the *-init macro which evaluates
         # init-form BEFORE installing the fresh box, preventing stale-read bugs
         # like local($a[2]) = $a[2] reading the fresh undef box.
         my $key_cl = $key_cls[0];
-        $self->_emit("($macro_init $cl_var $key_cl $init_cl");
+        $self->_emit(
+          $self->_local_open_form("$macro_init $cl_var $key_cl $init_cl", $etest));
         $self->indent_level($self->indent_level + 1);
         $self->{_local_let_depth} //= 0;
         $self->{_local_let_depth}++;
       } elsif (defined $init_cl) {
         # Slice with initializer: pre-evaluate RHS before any macros open,
         # then emit nested macro opens, then assign using the saved value.
+        # Under a modifier the RHS runs only when the condition holds (perl
+        # never reaches the statement otherwise) and so does the assignment,
+        # but the temporary is bound EITHER WAY — the assignment below is
+        # inside the conditional opens and must still read a bound name.
         $self->{_local_counter} //= 0;
         my $tmp = "pcl-local-init-" . $self->{_local_counter}++;
         my $ctx = "(let ((*wantarray* t)) ";
         my $ctx_close = ")";
-        $self->_emit("(let (($tmp ${ctx}$init_cl${ctx_close}))");
+        my $tmp_init = "${ctx}$init_cl${ctx_close}";
+        $tmp_init = "(if $etest $tmp_init nil)" if defined $etest;
+        $self->_emit("(let (($tmp $tmp_init))");
         $self->indent_level($self->indent_level + 1);
         $self->{_local_let_depth}++;
         for my $key_cl (@key_cls) {
-          $self->_emit("($macro $cl_var $key_cl");
+          $self->_emit($self->_local_open_form("$macro $cl_var $key_cl", $etest));
           $self->indent_level($self->indent_level + 1);
           $self->{_local_let_depth}++;
         }
         my $keys_str = join(' ', @key_cls);
-        if ($open eq '{') {
-          $self->_emit("(let ((*wantarray* t)) (p-setf (p-hslice $cl_var $keys_str) $tmp))");
-        } else {
-          $self->_emit("(let ((*wantarray* t)) (p-setf (p-aslice $cl_var $keys_str) $tmp))");
-        }
-      } elsif ($ld_mod ne '') {
-        # No initializer, but a statement modifier (task #508): perl does not
-        # execute the statement at all when the condition is false, so each
-        # slot must keep the value it already has.  An element has no `let`
-        # binding to make conditional, so the *-init macro carries the choice
-        # — undef (what `local $h{k}` installs) when the condition holds, the
-        # slot's CURRENT value otherwise, which is a save+restore of an
-        # unchanged slot = observationally "nothing happened".  The condition
-        # is evaluated ONCE, in a wrapping let, before any slot is touched.
-        my $range = grep {
-          my $g = $_;
-          grep { ref($_) eq 'PPI::Token::Operator' && $_->content eq '..' } @$g;
-        } @key_groups;
-        return $self->_drop_this_statement($parts, $stmt,
-          "`local` of an array-slice RANGE under a statement modifier")
-          if $range;
-        my $cond_cl = $self->_parse_expression($ld_cond, $stmt) // 'nil';
-        $cond_cl =~ s/^[ \t]+//;
-        $self->{_local_counter} //= 0;
-        my $ctmp = "pcl-local-cond-" . $self->{_local_counter}++;
-        my $test = $ld_mod eq 'unless' ? "(not (p-true-p $cond_cl))"
-                                       : "(p-true-p $cond_cl)";
-        $self->_emit("(let (($ctmp $test))");
-        $self->indent_level($self->indent_level + 1);
-        $self->{_local_let_depth} //= 0;
-        $self->{_local_let_depth}++;
-        for my $key_cl (@key_cls) {
-          my $cur = _elem_place_cl($open, $cl_var, [$key_cl]);
-          $self->_emit("($macro_init $cl_var $key_cl (if $ctmp (p-undef) $cur)");
-          $self->indent_level($self->indent_level + 1);
-          $self->{_local_let_depth}++;
-        }
+        my $slice = ($open eq '{') ? 'p-hslice' : 'p-aslice';
+        my $assign = "(let ((*wantarray* t)) (p-setf ($slice $cl_var $keys_str) $tmp))";
+        $self->_emit(defined $etest ? "(when $etest $assign)" : $assign);
       } else {
         # No initializer: emit one macro call per key (nested open forms)
         for my $key_cl (@key_cls) {
-          $self->_emit("($macro $cl_var $key_cl");
+          $self->_emit($self->_local_open_form("$macro $cl_var $key_cl", $etest));
           $self->indent_level($self->indent_level + 1);
           $self->{_local_let_depth} //= 0;
           $self->{_local_let_depth}++;
@@ -4144,10 +4138,7 @@ sub _process_local_declaration {
     # so the deprecated `local *{EXPR} = RHS if COND` localizes only when the
     # condition holds — `t` is the unconditional spelling.
     my $cond_cl = 't';
-    if ($lmod ne '') {
-      my $c = $self->_parse_expression($lcond, $stmt) // 'nil';
-      $cond_cl = $lmod eq 'unless' ? "(not (p-true-p $c))" : "(p-true-p $c)";
-    }
+    $cond_cl = $self->_local_cond_test($lmod, $lcond, $stmt) if $lmod ne '';
     my $rhs_cl = $past_eq ? ($self->_parse_expression(\@rhs_parts, $stmt) // 'nil')
                           : ':none';
     $self->_emit(";; $perl_code");
@@ -4170,11 +4161,6 @@ sub _process_local_declaration {
       && $non_ws[0]->content =~ /^[\$\@%]$/
       && (ref($non_ws[1]) eq 'PPI::Structure::Block'
           || ref($non_ws[1]) eq 'PPI::Token::Symbol')) {
-    # A statement modifier has no conditional spelling here — the deref macros
-    # save and restore unconditionally and take no init form — so it is a
-    # compiler gap, and a gap says so (rule 12) instead of localizing anyway.
-    return $self->_drop_this_statement($parts, $stmt,
-      "`local` through a deref under a statement modifier") if $lmod ne '';
     my $sigil = $non_ws[0]->content;
     my $ref_cl;
     if (ref($non_ws[1]) eq 'PPI::Token::Symbol') {
@@ -4194,8 +4180,13 @@ sub _process_local_declaration {
     my $macro = $sigil eq '@' ? 'p-local-deref-array'
               : $sigil eq '%' ? 'p-local-deref-hash'
               :                 'p-local-deref-scalar';
+    # A statement modifier used to DROP here — the deref macros save and restore
+    # unconditionally and take no init form, so there was nothing to make
+    # conditional.  p-local-maybe is that spelling (task #541): the localizer
+    # runs, or the body runs bare.
+    my $dtest = $lmod ne '' ? $self->_local_cond_test($lmod, $lcond, $stmt) : undef;
     $self->_emit(";; $perl_code");
-    $self->_emit("($macro $ref_cl");
+    $self->_emit($self->_local_open_form("$macro $ref_cl", $dtest));
     $self->indent_level($self->indent_level + 1);
     $self->{_local_let_depth} //= 0;
     $self->{_local_let_depth}++;
@@ -4291,8 +4282,13 @@ sub _process_local_declaration {
   # localizing it must save/restore (current handle, its line counter), not
   # rebind a plain box (which would read undef inside the scope).  p-local-dot
   # wraps the rest of the block; closed by _local_let_depth at block end.
+  # A statement modifier makes the save/restore itself conditional (task #541).
+  # Parsed lazily, in the branch that uses it: the condition run must be handed
+  # to _parse_expression exactly ONCE per statement, and the @items path below
+  # parses it for its own condition temporary.
   if (@vars == 1 && ($vars[0] eq '$.' || $vars[0] eq '|$.|') && $init_idx < 0) {
-    $self->_emit("(p-local-dot");
+    my $ltest = $lmod ne '' ? $self->_local_cond_test($lmod, $lcond, $stmt) : undef;
+    $self->_emit($self->_local_open_form('p-local-dot', $ltest));
     $self->indent_level($self->indent_level + 1);
     $self->{_local_let_depth} //= 0;
     $self->{_local_let_depth}++;
@@ -4303,7 +4299,8 @@ sub _process_local_declaration {
   # 0/1), so localizing must rebind the underlying dynamic value, not shadow
   # the box (which would drop the clamp inside the scope).
   if (@vars == 1 && ($vars[0] eq '$|' || $vars[0] eq '|$\\||') && $init_idx < 0) {
-    $self->_emit("(p-local-pipe");
+    my $ltest = $lmod ne '' ? $self->_local_cond_test($lmod, $lcond, $stmt) : undef;
+    $self->_emit($self->_local_open_form('p-local-pipe', $ltest));
     $self->indent_level($self->indent_level + 1);
     $self->{_local_let_depth} //= 0;
     $self->{_local_let_depth}++;
@@ -4338,7 +4335,7 @@ sub _process_local_declaration {
   # g() before f() (probed).  It is the FIRST binding, so every slot still
   # holds its old value when the condition runs.
   my $mcond_tmp;
-  if ($mmod ne '' && !($init_idx >= 0 && @items == 1)) {
+  if ($mmod ne '') {
     $self->{_local_counter} //= 0;
     $mcond_tmp = "pcl-local-cond-" . $self->{_local_counter}++;
   }
@@ -4379,13 +4376,10 @@ sub _process_local_declaration {
     my $rhs_ctx = ($sigil eq '@' || $sigil eq '%') ? 1 : 0;
     my $init_cl = $self->_parse_expression(\@rhs_parts, $stmt, $rhs_ctx) // 'nil';
 
-    # Conditional `local $x = V if COND`: value is COND ? RHS : current value, so
-    # a false condition localizes to (and restores) the unchanged current value.
-    if ($lmod) {
-      my $cond_cl  = $self->_parse_expression($lcond, $stmt) // 'nil';
-      my $lhs_rval = $sigil eq '$' ? "(unbox $var)" : $var;
-      $init_cl = $self->_conditional_local_init($lmod, $cond_cl, $init_cl, $lhs_rval);
-    }
+    # (`local $x = V if COND` needs nothing here since task #541: the whole
+    # localization is conditional, so the init form is the plain RHS and runs
+    # only in the true arm — perl does not evaluate the RHS at all when the
+    # condition is false, probed.)
 
     if ($var eq '$!' || $var eq '|$!|') {
       # local $! = N: bind *p-stored-errno* (auto-restored by let) and set C errno
@@ -4411,7 +4405,7 @@ sub _process_local_declaration {
           # Different-var: bind BOTH vars so CL saves/restores each independently.
           $self->{_local_counter} //= 0;
           my $tmp = "pcl-local-inner-" . $self->{_local_counter}++;
-          unshift @bindings, ["$tmp", "(let ((*wantarray* t)) $inner_rhs)"];
+          unshift @bindings, ["$tmp", "(let ((*wantarray* t)) $inner_rhs)", 1];
           push @bindings, ["$mutated_var", "(p-copy-array $tmp)"];
           push @bindings, ["$var", "(p-copy-array $tmp)"];
           $use_let_star = 1;
@@ -4432,40 +4426,14 @@ sub _process_local_declaration {
     # Bare local or multiple vars - just shadow with nil/empty.
     # Skip undef markers (they are skip slots, not real variables).
     #
-    # …EXCEPT under a false `if`/`unless` modifier, where perl does not execute
-    # the statement at all and the slot must therefore keep the value it
-    # already has.  PCL's `local` is an always-open let / p-local-cell, so
-    # "do not localize" is spelled "localize to a COPY OF THE CURRENT VALUE and
-    # skip the assignment" — observationally identical, since a slot saved and
-    # restored unchanged is a slot nothing happened to.  Under a TRUE condition
-    # the gated (p-list-= …) below overwrites every element anyway (a short RHS
-    # writes undef, as perl does), so the starting value is unobservable there.
-    # Same trick as the single-variable branch's _conditional_local_init, in
-    # the shape a LIST assignment needs (there is no single rvalue to compare).
-    #
-    # Since #508 the choice is made at RUN TIME, from the condition temporary,
-    # rather than statically: a modifier with NO assignment (`local $p if 0`)
-    # makes the starting value observable — a true condition must still install
-    # a FRESH slot, which the old always-keep spelling could not say because
-    # there was no gated assignment behind it to overwrite it.
-    my $fresh = sub {
-      my ($var, $new, $cur) = @_;
-      return $new if !defined $mcond_tmp;
-      # A `local`ized NAME need not be BOUND.  `local %^H if COND` inside a
-      # module qualifies the magic name into the module's package
-      # (|Moo::_Utils|::%^H — Moo/_Utils.pm:112 is the live instance), and
-      # nothing declares that symbol: the old always-fresh init never read it,
-      # so the `let` simply bound it.  The keep branch DOES read it, and a free
-      # reference to an unbound special is an error at load time — it cost the
-      # gate all 15 moo-01.t rows before this guard.  An unbound name has no
-      # current value to keep, and the fresh container is what a read of it
-      # would have produced anyway.  Only the dynamic-binding half needs the
-      # test: an ORDINARY package global reaches here through p-defcell and is
-      # bound by construction.
-      my $keep = is_exception_global($var) ? "(if (boundp '$var) $cur $new)"
-                                           : $cur;
-      return "(if $mcond_tmp $new $keep)";
-    };
+    # The starting value is UNCONDITIONAL since task #541, including under an
+    # `if`/`unless` modifier: what the modifier gates is the SAVE AND RESTORE
+    # (the p-local-cell-if / p-local-maybe opens below), never the value.  It
+    # used to gate the value instead — "do not localize" spelled as "localize to
+    # a COPY OF THE CURRENT VALUE" — which is observationally identical only
+    # while nothing WRITES the slot inside the scope: a save and restore of an
+    # unchanged slot is invisible, a save and restore AROUND A WRITE is not, and
+    # perl (which never ran the statement) keeps the write.
     for my $it (@items) {
       next if $it->{kind} eq 'skip';    # undef slot: no binding needed
       next if $it->{kind} eq 'elem';    # localized by its own macro open below
@@ -4473,23 +4441,16 @@ sub _process_local_declaration {
       my ($sigil) = ($var =~ /::([%\@\$])/) ? ($1) : (substr($var, 0, 1));
       if ($var eq '$!' || $var eq '|$!|') {
         # bare local $!: save/restore *p-stored-errno*, clear to 0 (Perl undef $! = 0)
-        push @bindings, ["pcl::*p-stored-errno*",
-                         $fresh->("pcl::*p-stored-errno*", "0",
-                                  "pcl::*p-stored-errno*")];
+        push @bindings, ["pcl::*p-stored-errno*", "0"];
       }
       elsif ($sigil eq '@') {
-        push @bindings, ["$var",
-          $fresh->($var, "(make-array 0 :adjustable t :fill-pointer 0)",
-                   "(p-copy-array $var)")];
+        push @bindings, ["$var", "(make-array 0 :adjustable t :fill-pointer 0)"];
       }
       elsif ($sigil eq '%') {
-        push @bindings, ["$var",
-          $fresh->($var, "(make-hash-table :test 'equal)",
-                   "(p-copy-hash $var)")];
+        push @bindings, ["$var", "(make-hash-table :test 'equal)"];
       }
       else {
-        push @bindings, ["$var",
-          $fresh->($var, "(make-p-box nil)", "(p-box-for-local (unbox $var))")];
+        push @bindings, ["$var", "(make-p-box nil)"];
       }
     }
   }
@@ -4510,17 +4471,14 @@ sub _process_local_declaration {
     $rhs_cl = "(if $mcond_tmp $rhs_cl nil)" if $mmod ne '';
     $self->{_local_counter} //= 0;
     $rhs_tmp_cl = "pcl-local-rhs-" . $self->{_local_counter}++;
-    unshift @bindings, ["$rhs_tmp_cl", "$rhs_cl"];
+    unshift @bindings, ["$rhs_tmp_cl", "$rhs_cl", 1];
   }
   # …and the condition itself is evaluated FIRST, once, while every localized
   # slot still holds its old value — for the bare shapes too since #508, where
   # the slot inits read it.
   if (defined $mcond_tmp) {
-    my $cond_cl = $self->_parse_expression($mcond, $stmt) // 'nil';
-    $cond_cl =~ s/^[ \t]+//;
     unshift @bindings, [$mcond_tmp,
-                        $mmod eq 'unless' ? "(not (p-true-p $cond_cl))"
-                                          : "(p-true-p $cond_cl)"];
+                        $self->_local_cond_test($mmod, $mcond, $stmt), 1];
     $use_let_star = 1;
   }
 
@@ -4540,6 +4498,20 @@ sub _process_local_declaration {
   my @let_b  = grep {  is_exception_global($_->[0]) } @bindings;
   my @cell_b = grep { !is_exception_global($_->[0]) } @bindings;
 
+  # Under a statement modifier the localization is CONDITIONAL (task #541), and
+  # the generated TEMPORARIES are not part of it: the condition and the RHS are
+  # computed either way (the condition always, the RHS gated inside its own
+  # binding), while the localized NAMES move into p-local-maybe / p-local-cell-if
+  # opens that save and restore only when the condition holds.  Marked at the
+  # push site (third field) rather than re-derived from the name — a temporary
+  # is a temporary because THIS sub made it, not because of how it is spelled.
+  my @outer_b = @let_b;
+  my @cond_b  = ();
+  if ($mmod ne '') {
+    @outer_b = grep {  $_->[2] } @let_b;
+    @cond_b  = grep { !$_->[2] } @let_b;
+  }
+
   my $let_form = ($rhs_tmp_cl || $use_let_star) ? "let*" : "let";
   # "Top level" = this `local` wraps the REST OF THE FILE (see the notinline
   # comment below).  Under Parser2's seam every v1-routed statement is
@@ -4553,8 +4525,8 @@ sub _process_local_declaration {
   my $at_top_level = ($self->environment->in_subroutine == 0
                       && $self->indent_level == 0
                       && !$self->_block_depth);
-  if (@let_b) {
-    my $bindings_str = join("\n        ", map { "($_->[0] $_->[1])" } @let_b);
+  if (@outer_b) {
+    my $bindings_str = join("\n        ", map { "($_->[0] $_->[1])" } @outer_b);
     $self->_emit("($let_form ($bindings_str)");
     $self->indent_level($self->indent_level + 1);
     $self->{_local_let_depth} //= 0;
@@ -4588,11 +4560,27 @@ sub _process_local_declaration {
     $self->_emit(_notinline_ops_decl());
   }
 
+  # The EXCEPTION-SET names under a modifier (task #541): one p-local-maybe open
+  # holding the whole `let`, so the dynamic bindings happen only when the
+  # condition holds.  A dynamic binding is visible through p-local-maybe's body
+  # call, which is why the `let` may sit in the localizer slot; a p-local-cell
+  # could not (see p-local-maybe's docstring).
+  if (@cond_b) {
+    my $bindings_str = join("\n        ", map { "($_->[0] $_->[1])" } @cond_b);
+    $self->_emit("(p-local-maybe $mcond_tmp (let ($bindings_str))");
+    $self->indent_level($self->indent_level + 1);
+    $self->{_local_let_depth} //= 0;
+    $self->{_local_let_depth}++;
+  }
+
   # The ORDINARY globals: one `p-local-cell` open each, nested inside the let
   # (and inside each other), every one counting toward _local_let_depth exactly
-  # as the let does — the block end closes them all.
+  # as the let does — the block end closes them all.  Under a modifier the twin
+  # p-local-cell-if saves and restores only when the condition holds.
   for my $b (@cell_b) {
-    $self->_emit("(p-local-cell $b->[0] $b->[1]");
+    $self->_emit($mmod ne ''
+      ? "(p-local-cell-if $mcond_tmp $b->[0] $b->[1]"
+      : "(p-local-cell $b->[0] $b->[1]");
     $self->indent_level($self->indent_level + 1);
     $self->{_local_let_depth} //= 0;
     $self->{_local_let_depth}++;
@@ -4602,18 +4590,11 @@ sub _process_local_declaration {
   # variable, so it has no binding — the same save/restore macros the
   # single-element shapes above use, one open per key, nested inside the let
   # (which holds the RHS temporary, evaluated while every slot is still
-  # intact).  Under a modifier the slot's starting value is the condition's
-  # choice, exactly as the variable bindings' $fresh is.
+  # intact).  Under a modifier the save/restore itself is conditional (#541).
   for my $it (grep { $_->{kind} eq 'elem' } @items) {
-    my $mi = $it->{macro_init};
     for my $key_cl (@{ $it->{keys} }) {
-      if (defined $mcond_tmp) {
-        my $cur = _elem_place_cl($it->{open}, $it->{cl}, [$key_cl]);
-        $self->_emit(
-          "($mi $it->{cl} $key_cl (if $mcond_tmp (p-undef) $cur)");
-      } else {
-        $self->_emit("($it->{macro} $it->{cl} $key_cl");
-      }
+      $self->_emit($self->_local_open_form(
+        "$it->{macro} $it->{cl} $key_cl", $mcond_tmp));
       $self->indent_level($self->indent_level + 1);
       $self->{_local_let_depth} //= 0;
       $self->{_local_let_depth}++;
@@ -4631,9 +4612,9 @@ sub _process_local_declaration {
     # where perl puts them (tasks #509 / #510).
     my $lhs_cl = "(vector " . join(" ", map { $_->{place} } @items) . ")";
     my $assign = "(p-list-= $lhs_cl $rhs_tmp_cl)";
-    # A false modifier condition means the statement did not run: the slots
-    # were localized to their own current values above, so skipping the
-    # assignment leaves every one of them exactly as it was.
+    # A false modifier condition means the statement did not run: nothing above
+    # localized anything, so skipping the assignment leaves every slot exactly
+    # as it was — including any write the rest of the block makes to it.
     $self->_emit($mmod ne '' ? "(when $mcond_tmp $assign)" : $assign);
   }
   elsif ($init_idx >= 0 && @items == 1) {
