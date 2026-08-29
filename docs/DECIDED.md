@@ -21,6 +21,50 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451x (2026-08-29, Opus agent X) — #542 DONE: perl's stdio buffering policy, and the flushes that make it survivable
+
+- **ONE policy function, `%p-output-buffering (fd)`: an output handle is
+  `:line` iff `isatty(fd)`, else `:full`; `%p-std-buffering` adds perl's one
+  exception, STDERR is `:none`.**  Asked by boot (load-time AND an
+  `*init-hooks*` call — the isatty answer is PER PROCESS and a saved core
+  would freeze the build machine's), by `%p-std-rebuild` (every
+  standard-handle re-point, the #535 dup2 family included), by
+  `%p-dup-make-stream`, and by the fork-pipe parent's write end.
+  Normative text: **`docs/ir-spec.md` §7.6**.
+- **The fork-pipe CHILD does NOT re-decide** — perl's `my_popen` dup2s under
+  the same PerlIO handle, so the child keeps the parent's mode (probed: a
+  child of a pty parent line-buffers onto the pipe).  `%p-std-rebuild` takes
+  a buffering override for that one caller, and the call replaces an inline
+  copy of the rebuild.
+- **`$|` is the HANDLE's flag and SURVIVES a reopen** (probed) — PCL keyed it
+  on the CL stream, which every rebuild replaces, so it was silently dropped.
+  Pre-existing and invisible while STDOUT was line-buffered; `%p-carry-autoflush`
+  now moves it, from both re-point sites.  This was t/io/dup.t's lost `ok 8`.
+- **Every child path runs `PERL_FLUSHALL_FOR_CHILD`** through one helper,
+  `%p-flush-all-output` (std handles + the registered ones): fork, fork-pipe,
+  system, exec (BEFORE the child — it was after), backticks.  This is a
+  measured GAIN: `t/io/fflush.t` 3/1 → **4/0**, its test 1 (flush on
+  fork/exec) now passes.
+- **THE EXIT PATH WAS MEASURED, NOT ASSUMED (SBCL 2.6.0): an unhandled error
+  under `--non-interactive` DOES run `sb-ext:*exit-hooks*`, and so does
+  SIGTERM** (what `timeout` sends the sweep's children).  Only
+  `(sb-ext:exit … :abort t)` skips them — PCL calls that in exactly two places
+  (`p-exec`, the fork-pipe exec failure) and both flush by hand.  So the die
+  path needs no debugger hook; a first version wrapped
+  `*invoke-debugger-hook*` and was DELETED — it is redundant AND it made the
+  merged order worse (stdout before the diagnostic, where perl has the
+  diagnostic first).  Guard row: `Pl/t/stdio-buffering-01.t`'s die row.
+- **A `*invoke-debugger-hook*` wrapper cannot be installed from a core or from
+  `*init-hooks*` anyway**: `--non-interactive` becomes an ordered
+  `(sb-ext:disable-debugger)` in SBCL's option list and overwrites the hook
+  unconditionally (measured).  Do not retry that shape.
+- Residue filed: **#710** (a plain `open` onto a TERMINAL block-buffers where
+  perl line-buffers — `cl:open` takes no `:buffering`), **#711** (`File::Temp`
+  shim: `tempfile(OPEN => 0)` dies "template must end with at least 4 'X'"
+  on a template that does).
+- Gate **183/6149** (xs skipped in a worktree); cl/-only, **no generation
+  bump**; io/ leg: only `io/fflush.t` moves (Fable edits the snapshot row).
+
 ## s450b (2026-08-29, Fable) — ROUND 9 agent V reviewed and MERGED (#541 + the s/// replacement family); legs clean; one row filed
 
 - **V merged** (`9d5c468`; ff after Fable patch-saved its own uncommitted

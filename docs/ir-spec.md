@@ -24,7 +24,7 @@ design ruling; `sNNN` names an internal working session.
 * [4. Context (scalar / list / void)](#4-context-scalar--list--void)
 * [5. Calling convention](#5-calling-convention) — [definition](#51-definition) · [arguments](#52-arguments--two-body-shapes) · [return](#53-return) · [comparator frames](#54-comparator-frames--p-sort-cmp)
 * [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
-* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f)
+* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
 * [10. Op inventory — family rules](#10-op-inventory--family-rules)
@@ -1487,6 +1487,40 @@ signal at both the write and the close.  A handle that cannot be written at
 all — a read-only file handle, an in-memory `<` handle, a dup of a read-only
 descriptor — answers false with `$!` = EBADF without attempting the write, and
 goes on READING normally.
+
+### 7.6 stdio buffering (normative, s451)
+
+Buffering is not an implementation detail once a program can observe it, and
+it can: two handles on one descriptor, a child process, or an abort all make
+the mode visible.  perl's policy, probed 5.40.3 and implemented by
+`%p-output-buffering` / `%p-std-buffering`:
+
+* an **output handle is LINE-buffered iff its descriptor is a terminal**, and
+  BLOCK-buffered otherwise.  The rule is per DESCRIPTOR and is not inherited:
+  a dup of STDERR onto a pipe is block-buffered, not unbuffered;
+* **STDERR is UNBUFFERED**, on a terminal and off it alike — the one
+  exception, and it survives a reopen of the handle;
+* **`$|` is the HANDLE's flag and overrides the policy**, per handle, and it
+  **survives a reopen of that handle** (`$|=1; open(STDOUT,'>&',DUP)` still
+  flushes every write);
+* a **dup gets its OWN buffer** (its writes and the source's interleave by
+  flush, not by program order) but its own descriptor's MODE;
+* a **fork-pipe child keeps the PARENT's mode**: `open(FH,'-|')` dup2s at the
+  descriptor level under the same handle, so a child of a terminal-attached
+  parent line-buffers onto the pipe.
+
+The decision is **per process**, never per build: a host that saves an image
+(PCL's cached core) must re-ask `isatty` when the image boots.
+
+Two consequences a translator must implement or lose output:
+
+* **every child path flushes every handle first** — perl's
+  `PERL_FLUSHALL_FOR_CHILD`, at `fork`, `system`, `exec`, backticks and a pipe
+  open.  Without it `print "a\n"; system("echo MARK")` prints MARK first;
+* **every exit path flushes, INCLUDING the die path.**  perl flushes at exit
+  even on an uncaught die, so `print "row\n"; die` still shows the row; a host
+  whose abort path skips its exit hooks turns a mid-file abort into silent row
+  loss, which for a test file is every row it had produced.
 
 ## 8. Magic globals
 
