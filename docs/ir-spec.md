@@ -340,8 +340,16 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   the LAST one is the reference**. It emits a `progn`, never a `(vector …)`.
   The look-alike `(LIST)[i]` — and its `qw(a b c)[i]` spelling — is a
   different operator, a LIST SLICE; PExpr marks both `list_ctx_subscript`
-  and the array emitter keeps their base a list. The postfix-deref
-  spellings (`->@*`, `->$*`) are NOT yet in this family (task #612).
+  and the array emitter keeps their base a list. **The DEREF family is the
+  same base** (normative, s451y/#612): a sigil cast, a `$#`, and a slice
+  container take ONE scalar value too, and each has two spellings that mean
+  the same op — the postfix `EXPR->@*` / `->%*` / `->$*` / `->&*` / `->**` /
+  `->$#*` / `->@[…]` / `->@{…}` / `->%[…]` / `->%{…}` and the prefix
+  `@{ EXPR }` / `%{ EXPR }` / `${ EXPR }` / `$#{ EXPR }` / `@{ EXPR }[…]` —
+  because `Pl::PExpr` lowers the postfix form ONTO the prefix one. The one
+  way it differs from the four `->` members: a deref base is kept in its
+  emitter's LVALUE context, because `@{ ($h{k}) } = (7,8)` AUTOVIVIFIES
+  `$h{k}`, where an arrow invocant is read as a value.
   **The scalar context reaches through TRANSPARENT paren layers**
   (normative, s451y/#611): `((0,$h))->{k}` is `(0,$h)->{k}`, and any depth
   of nesting is the same value. Contexts are annotated top-down before

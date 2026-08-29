@@ -21,6 +21,33 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451y (2026-08-29, Opus, round 10 agent Y) — the DEREF family is the postfix `->` invocant, in two spellings (#612)
+
+- **`EXPR->@*` IS `@{ EXPR }`** — `Pl::PExpr` lowers the postfix deref onto the
+  prefix cast (`_prefix_op_node`) and the postfix slice onto the slice node
+  types — so the base rule is the arrow's: ONE scalar value.  ONE predicate
+  (`_is_paren_scalar_base`) and ONE helper (`_gen_scalar_deref_base_form`, via
+  `_paren_deref_base_form`) at six sites: the sigil cast, `$#`, and the four
+  slice emitters.  `(1,2,$r)->@*` was `1,2,ARRAY(0x…)`, `->$#*` the group's
+  last index, the hash spellings DIED, and **the SINGLE-element base was wrong
+  too** (`($r)->@*`) — do not read `->%*` and the scalar-context `->@*`
+  answering right as "half of it works".
+- **A DEREF base keeps its emitter's LVALUE context; an arrow invocant does
+  not.**  `@{ ($h{k}) } = (7,8)` autovivifies `$h{k}` (probed), so forcing
+  rvalue — which is right for `->[i]` — would take the autovivification away.
+  That is the `$keep_lvalue` flag, and it is the whole difference.
+- **`->&*` and `->**` were not parsed at all** (a whole-statement DROP at
+  "unhandled postfix '->' term"); they lower onto the `&`/`*` prefix casts that
+  already exist, so the arm is two characters wider in the two places that
+  know the postfix grammar.
+- **THE FIX EXPOSED TWO ROWS THAT WERE PASSING ON THE DROP**:
+  `perl-tests/postfixderef.t` 72/73 assert `!eval q{ $pvbm->** }`, and the eval
+  used to fail because the statement DROPPED.  PCL has no PVBM, so they now
+  fail honestly (the s438h lesson again).  File 96/25 → 100/21.
+- Filed **#720**: an lvalue SLICE through an AUTOVIVIFIED element
+  (`@{ $h{k} }[0,1] = (11,12)`) writes nowhere — PRE-EXISTING, and the paren is
+  a red herring (the plain spelling fails identically).  ir-spec §2.5.
+
 ## s451y (2026-08-29, Opus, round 10 agent Y) — a TRANSPARENT paren layer must pass the scalar context on (#611)
 
 - **The context an emitter forces at EMIT time has to be pushed down, because

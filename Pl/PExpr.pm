@@ -1325,9 +1325,12 @@ sub parse {
 
         next;
       } elsif (ref($nxt) eq 'PPI::Token::Cast'
-               && $nxt->content() =~ /^([\$@%])\*$/) {
-        # Postfix deref: X->$* (scalar), X->@* (array), X->%* (hash) — Perl 5.20+
-        # Equivalent to $$X, @$X, %$X respectively.
+               && $nxt->content() =~ /^([\$@%&*])\*$/) {
+        # Postfix deref: X->$* (scalar), X->@* (array), X->%* (hash),
+        # X->&* (code, called with the current @_), X->** (glob) — Perl 5.20+.
+        # Equivalent to $$X, @$X, %$X, &$X, *$X respectively, and lowered onto
+        # exactly those prefix casts (#612: `&*` and `**` used to fall through
+        # to the "unhandled postfix '->' term" die, i.e. a whole statement DROP).
         my $sigil = $1;
         my $node  = $self->_prefix_op_node(PPI::Token::Cast->new($sigil),   # Cast sigil ($, @, or %)
                                            $self->parse([$pre]));           # Ref being dereferenced
@@ -2112,8 +2115,8 @@ sub _extend_postfix_chain {
     if (ref($after) eq 'PPI::Structure::Subscript') {
       $end += 2;                                    # -> [..] / -> {..}
     } elsif (ref($after) eq 'PPI::Token::Cast'
-             && $after->content() =~ /^[\$\@%]\*$/) {
-      $end += 2;                                    # -> @* / %* / $*
+             && $after->content() =~ /^[\$\@%&*]\*$/) {
+      $end += 2;                                    # -> @* / %* / $* / &* / ** (#612)
     } elsif (ref($after) eq 'PPI::Token::Cast'
              && $after->content() =~ /^[\@%]$/
              && $end + 3 < $n

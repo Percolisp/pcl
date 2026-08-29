@@ -2786,9 +2786,12 @@ sub gen_prefix_op_form {
     return ["p-pre$op", $operand];
   }
 
-  # $#{ array } — last index of array (braced form of $#array).
+  # $#{ array } — last index of array (braced form of $#array, and the lowering
+  # of `EXPR->$#*`).  #612: a parenthesised operand is the deref family's base.
   if ($op eq '$#') {
-    return ['p-array-last-index', $self->gen_node_form($kids->[1])];
+    return ['p-array-last-index',
+            $self->_paren_deref_base_form($kids->[1], 1)
+              // $self->gen_node_form($kids->[1])];
   }
 
   # ${expr}++ / @{expr}-- shunting-yard fixup: prefix_op($, postfix_op(X, ++))
@@ -2837,7 +2840,12 @@ sub gen_prefix_op_form {
   my $needs_lvalue = ($op eq '@');
   my $saved_lvalue = $self->lvalue_context;
   $self->lvalue_context(1) if $needs_lvalue;
-  my $operand = $self->gen_node_form($kids->[1]);
+  # #612: a PARENTHESISED deref operand — `@{ (1,2,$r) }`, and the postfix
+  # `(1,2,$r)->@*` that lowers onto it — is ONE scalar value (the comma
+  # operator's last element), never the list it looks like.  Keeping the
+  # lvalue setting the cast just chose is the point: the base autovivifies.
+  my $operand = $self->_paren_deref_base_form($kids->[1], 1)
+                // $self->gen_node_form($kids->[1]);
   $self->lvalue_context($saved_lvalue);
 
   my $cl_op = $self->cl_name($op);
@@ -3104,16 +3112,40 @@ sub _is_paren_scalar_base {
 }
 
 # E2 form twin: same scalar-context/lvalue dance, structural child.
+#
+# $KEEP_LVALUE (#612) is for the DEREF family — a sigil cast (`@$r`, `@{…}`,
+# `->@*`), a `$#`, a slice container.  Those bases can be AUTOVIVIFIED
+# (`@{ ($h{k}) } = (7,8)` makes $h{k} an ARRAY ref, probed vs perl 5.40.3), so
+# they need the box their emitter already asked for; forcing rvalue would take
+# the autovivification away.  The four `->` MEMBERS keep the rvalue force: an
+# arrow invocant is read as a value.
 sub _gen_scalar_deref_base_form {
-  my ($self, $base_id) = @_;
+  my ($self, $base_id, $keep_lvalue) = @_;
   my $saved_ctx = $self->expr_o->get_node_context($base_id);
   $self->expr_o->set_node_context($base_id, 0);   # SCALAR_CTX
   my $saved_lv = $self->lvalue_context;
-  $self->lvalue_context(0);
+  $self->lvalue_context(0) unless $keep_lvalue;
   my $f = $self->gen_node_form($base_id);
   $self->lvalue_context($saved_lv);
   $self->expr_o->set_node_context($base_id, $saved_ctx);
   return $f;
+}
+
+# #612 — the base of a DEREF is the same thing as the invocant of a postfix
+# `->`: ONE scalar value, whatever the group around it looks like.  It reaches
+# the compiler in two spellings that mean the same op — the postfix
+# `EXPR->@*` / `->%*` / `->$*` / `->&*` / `->**` / `->$#*` / `->@[…]` / `->@{…}`
+# and the prefix `@{ EXPR }` / `%{ EXPR }` / `${ EXPR }` / `$#{ EXPR }` /
+# `@{ EXPR }[…]` — because `Pl::PExpr` lowers the postfix form ONTO the prefix
+# one (`_prefix_op_node` / the slice node types).  So this is ONE predicate and
+# ONE helper for both, exactly the pair the four `->` members use.
+#
+# Returns the lowered base when NODE is a parenthesised base, and undef when it
+# is not, so each call site keeps its own ordinary path unchanged.
+sub _paren_deref_base_form {
+  my ($self, $base_id, $keep_lvalue) = @_;
+  return undef unless $self->_is_paren_scalar_base($base_id);
+  return $self->_gen_scalar_deref_base_form($base_id, $keep_lvalue);
 }
 
 # The KEY of a hash element (#387 family 20, s413 — the half that was
@@ -3250,7 +3282,8 @@ sub gen_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $arr = $self->_slice_container_form($kids->[0],
-              $self->gen_node_form($kids->[0]), 'p-cast-@');
+              $self->_paren_deref_base_form($kids->[0], 1)
+                // $self->gen_node_form($kids->[0]), 'p-cast-@');
   return $self->_slice_in_context_form(['p-aslice', $arr, $self->_slice_index_forms($kids)], $node_id);
 }
 
@@ -3260,7 +3293,9 @@ sub gen_hash_slice_form {
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol';
-  my $hash = $is_bare ? $self->gen_node($kids->[0]) : $self->gen_node_form($kids->[0]);
+  my $hash = $is_bare ? $self->gen_node($kids->[0])
+                      : ($self->_paren_deref_base_form($kids->[0], 1)   # #612
+                         // $self->gen_node_form($kids->[0]));
   # ONE swap helper (rule 11): _swap_elem_sigil also knows the PIPE-QUOTED
   # spelling (|@Ｘ| → |%Ｘ|), which this local copy did not — a non-ASCII hash
   # slice handed p-hslice the ARRAY of the same name and died "Not a HASH
@@ -3276,7 +3311,8 @@ sub gen_kv_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash = $self->_slice_container_form($kids->[0],
-               $self->gen_node_form($kids->[0]), 'p-cast-%');
+               $self->_paren_deref_base_form($kids->[0], 1)             # #612
+                 // $self->gen_node_form($kids->[0]), 'p-cast-%');
   return ['p-kv-hslice', $hash, $self->_slice_index_forms($kids)];
 }
 
@@ -3286,7 +3322,10 @@ sub gen_kv_array_slice_form {
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   # The sigil swap is _swap_elem_sigil's (rule 11, #418): it also knows the
   # pipe-quoted spelling a non-ASCII name carries.
-  my $arr = _swap_elem_sigil($self->gen_node($kids->[0]), q(@), q(%));
+  # #612: a parenthesised base is lowered structurally (the sigil swap is a
+  # rewrite of a BARE container's NAME and has nothing to swap here).
+  my $arr = $self->_paren_deref_base_form($kids->[0], 1)
+            // _swap_elem_sigil($self->gen_node($kids->[0]), q(@), q(%));
   # `(unbox $r)` stood here — the shape-blind half of _slice_container_form's
   # rule, right for a single-boxed anon ref and one layer short of \@named.
   my $arr_form = $self->_slice_container_form($kids->[0], $arr, 'p-cast-@');

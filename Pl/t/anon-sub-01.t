@@ -20,7 +20,7 @@ use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
 
-use Test::More tests => 59;
+use Test::More tests => 70;
 BEGIN { use_ok('Pl::PExpr') };
 
 my $code;
@@ -409,3 +409,97 @@ both_agree('print "[", join("|", ((1,2,3))[1]), " ", join("|", (1,2,3)[1,2]), "]
 both_agree('my @n = ((1,2,3)); my $c = ((1,2,3));
             print "[", scalar(@n), " $c]\n";',
            '#611 inverse: a nested paren list with NO arrow keeps its own context');
+
+diag "";
+diag "-------- task #612: the DEREF family joins the paren-scalar-base family";
+
+# The base of a DEREF is the same thing as the invocant of a postfix `->`: ONE
+# scalar value.  It arrives in two spellings that mean the same op -- the
+# postfix `EXPR->@*` / `->%*` / `->$*` / `->&*` / `->**` / `->$#*` / `->@[…]` /
+# `->@{…}` and the prefix `@{ EXPR }` / `%{ EXPR }` / `${ EXPR }` / `$#{ EXPR }`
+# -- because PExpr lowers the postfix form ONTO the prefix one.  None of those
+# emitters asked _is_paren_scalar_base, so the group flattened INTO the result:
+# `(1,2,$r)->@*` was `1,2,ARRAY(0x1)` and `@{ (1,2,$r) }` the same, `->$#*` was
+# the group's last index, and the hash spellings DIED.
+#
+# Two of the ten spellings were NOT parsed at all: `->&*` and `->**` fell
+# through to "unhandled postfix '->' term", i.e. a whole-statement DROP that
+# now DIES at run time.  They lower onto the `&`/`*` prefix casts that already
+# exist, so the arm is two characters wider.
+#
+# The SINGLE-element base was wrong too (`($r)->@*` was ARRAY(0x…)) -- do not
+# read the two spellings that happened to answer right (`->%*` and the
+# scalar-context `->@*`) as "half of it worked".
+
+my $P = 'my $r = [10,20]; my $h = {a=>1,b=>2}; my $s = \"SV";' . "\n"
+      . 'my $c = sub { "C(@_)" };' . "\n";
+
+both_agree('use v5.24; no warnings;' . "\n" . $P .
+           'print "[", join(",", (1,2,$r)->@*), " ",
+                       join(",", sort keys +(1,$h)->%*), " ",
+                       (1,$s)->$*, " ", (1,2,$r)->$#*, "]\n";',
+           '#612 the repro: ->@* / ->%* / ->$* / ->$#* on a multi-element base');
+
+both_agree('use v5.24; no warnings;' . "\n" . $P .
+           'print "[", join(",", (1,$r)->@[0,1]), " ",
+                       join(",", (1,$h)->@{qw(a b)}), " ",
+                       join(",", (1,$r)->%[0,1]), " ",
+                       join(",", (1,$h)->%{qw(a)}), "]\n";',
+           '#612 ... the four postfix SLICE spellings');
+
+both_agree('use v5.24; no warnings;' . "\n" . $P .
+           'print "[", join(",", @{ (1,2,$r) }), " ",
+                       join(",", sort keys %{ (1,$h) }), " ",
+                       ${ (1,$s) }, " ", $#{ (1,2,$r) }, "]\n";',
+           '#612 ... and the BRACED PREFIX twin of each, which is the same op');
+
+both_agree('use v5.24; no warnings;' . "\n" . $P .
+           'print "[", join(",", ($r)->@*), " ",
+                       join(",", sort keys +($h)->%*), " ", ($s)->$*, "]\n";',
+           '#612 ... the SINGLE-element base was wrong too');
+
+# `->&*` calls with the CURRENT @_ (it is `&$c`, not `$c->()`), and `->**` is
+# `*$g`.  Both were whole-statement drops.
+both_agree('use v5.24; no warnings; my $c = sub { "C:@_" };
+            { local @_ = ("z"); print "[", (1,2,$c)->&*, " ", $c->&*, "]\n"; }',
+           '#612 ->&* parses at all, on a paren base and a plain one');
+
+both_agree('use v5.24; no warnings; our @arr=(1,2); my $g = \*arr;
+            print "[", join(",", @{ (1,$g)->** }), " ", scalar(@{ $g->** }), "]\n";',
+           '#612 ->** parses at all, on a paren base and a plain one');
+
+# ---- the inverses: every ordinary deref and slice must be untouched --------
+
+both_agree('my @a=(1,2,3); my %h=(a=>1,b=>2);
+            print "[", join(",", @a[0,2]), " ", join(",", @h{qw(a b)}), " ",
+                  join(",", %h{"a"}), " ", join(",", %a[1]), "]\n";',
+           '#612 inverse: the four PLAIN slice spellings');
+
+both_agree('my @named=(4,5,6); my $r=\@named; my %nh=(a=>7); my $hr=\%nh;
+            print "[", join(",", @$r[0,1]), " ", join(",", @{$r}[1,2]), " ",
+                  join(",", @$hr{"a"}), " ", join(",", @{$hr}{"a"}), "]\n";',
+           '#612 inverse: slices THROUGH a reference (#420 s426 family)');
+
+both_agree('my $r=[1,2,3]; sub g7 { return [7,8,9] } my %hk=(k=>[1,2]); my $t=1;
+            print "[", join(",", @{[ 4,5,6 ]}), " ", $#$r, " ", $#{$r}, " ",
+                  join(",", @{ g7() }), " ", join(",", @{ $hk{k} }), " ",
+                  join(",", @{ $t ? $r : [] }), "]\n";',
+           '#612 inverse: anon-ref, $#, a call, an element and a ternary as the base');
+
+# The base can be AUTOVIVIFIED through the paren, so the deref family keeps the
+# lvalue context its emitter chose -- the one place it differs from the four
+# `->` members, which read their invocant as a value.
+both_agree('use v5.24; no warnings; my %h1; my %h2; my $rr=[0,0]; my $r2=[1,2,3];
+            @{ ($h1{k}) } = (7,8);
+            (1, $h2{k})->@* = (5,6);
+            ($rr)->@* = (3,4);
+            ${ (0,$r2) }[1] = 99;
+            print "[", join(",", @{$h1{k}}), " ", ref($h1{k}), " ",
+                  join(",", @{$h2{k}}), " ", join(",", @$rr), " ",
+                  join(",", @$r2), "]\n";',
+           '#612 the paren base as an LVALUE: it still autovivifies');
+
+both_agree('use v5.24; no warnings; my $r=[10,20]; my @log;
+            sub s7 { push @log, $_[0]; $_[1] }
+            print "[", join(",", (s7(1,0), s7(2,$r))->@*), " ", join(",",@log), "]\n";',
+           '#612 ... every element still evaluated, in order');
