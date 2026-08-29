@@ -21,6 +21,51 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s452aa (2026-08-29, Opus agent AA, round 11) — the %ENV/%INC marker on the LIST paths (#736), the TAP glue KILLED (#723), sysopen (#730), `exit` in an END block (#738)
+
+- **A `%ENV`/`%INC` MARKER is a HASH everywhere, not just on the keyed
+  primitives (#736).**  `%p-marker-pairs` expands it through the SAME walk
+  `keys`/`each` use (`p-keys` + `p-gethash`), and every pair-expanding
+  consumer asks it: `%p-flatten-list`, `p-flatten-args`, `p-array-fill` +
+  `%p-array-fill-item` (two walkers by design — the second preserves holes),
+  `p-array-init`, `p-hash-deref-=` (which routes to `p-hash-fill`, whose
+  PLACE arms already replace the environment).  Every arm sits AFTER the
+  aggregate fast paths.  REFERENT half: `p-backslash` wraps a marker like a
+  table (so `\%ENV == \%ENV` — the symbol is EQ, its address as stable as a
+  table's), `p-cast-%`/`p-ensure-hashref` pass it through, and
+  `p-ref`/`%p-ref-string`/`stringify-value`/`%scalar-holds-ref-p`/
+  `%p-wrong-referent-p` answer HASH for it.  30 probes vs perl.  Session log
+  §s452aa.
+- **THE TAP GLUE (#723) IS FIXED, and the writer is NAMED**: SBCL's own
+  `While evaluating the form starting at line N…of #P"…":` context note,
+  printed by a `handler-bind` on ERROR inside `sb-impl::load-as-source` when
+  an eval'd form LOADs a cached module transpile — so it fires even when a
+  perl-level `eval {}` handles the error and nothing else is printed, and its
+  trailing newline is a SEPARATE write from the text.  Fix (harness-only):
+  `p-load-with-recovery` binds `*error-output*` to a line-atomic Gray stream
+  for the whole load; `force-output`/`finish-output` deliberately do NOT
+  flush a partial line.  **Do not re-derive the mechanism — and do not
+  attribute a ±1 PARTIAL-file pass-baseline move to it any more.**
+- **`sysopen` is implemented (#730)**: `%p-sysopen-impl` + `p-sysopen` beside
+  `p-open`; DIRECTION from `O_ACCMODE` (a value of 3 DIES — rule 12),
+  BUFFERING from `%p-output-buffering` (#542's one policy), failure = false
+  with `$!` from the syscall's own errno.  `sysopen` SHARES `open`'s
+  bareword-filehandle registration in PExpr rather than copying it.  This is
+  what File::Temp's DEFAULT `tempfile()` needs; 12 probes vs perl.
+- **`exit` inside an END block ends the BLOCK, not the process (#738)** —
+  perl runs every remaining END, they read the status as `$?`, and the
+  process exits with it.  PCL ran the ENDs from an `sb-ext` exit hook, where
+  a NESTED `sb-ext:exit` goes straight to the OS and **the rest of the
+  running hook never executes** (measured, SBCL 2.6.0) — taking the
+  remaining ENDs AND `%p-flush-all-output` with it, which under #542's block
+  buffering silently lost everything the ENDs had printed.  op/rt119311.t
+  9/0 → **11/2**.  The interception is scoped to the END phase AND the pid
+  that entered it (a fork child must still exit for real).
+- **Filed**: **#740** (`-s` on an existing EMPTY file: PCL undef, perl a
+  defined 0 — the numeric member of #403's family) and **#741** (`./runpcl`
+  always exits 0; the emitted CL is right, the wrapper drops the status —
+  so never read a program's exit status through runpcl).
+
 ## s451 (2026-08-29, Fable) — ROUND 10 reviewed and merged (X/W/Y/Z); the TAP-glue family named; six rulings
 
 - **Round 10 = X #542, W #685+#663+#694, Y #610+#620+#611+#612, Z

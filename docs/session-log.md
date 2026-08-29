@@ -4,6 +4,113 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 452aa (2026-08-29, Opus agent AA, round 11) — #736 the %ENV/%INC marker reaches the LIST paths; #723 the TAP glue is gone; #730 sysopen; #738 `exit` inside an END block
+
+Round-11 agent AA, the `cl/`-runtime + harness lane, off `0dd7434`.  Four tasks,
+four commits, generation **v2-400** (the #730 name entry is the only
+emission-affecting change; the three artifacts regenerated — their BODIES came
+back byte-identical, only the `gen=` stamps moved).
+
+**#736 — `%ENV` / `%INC` are markers, and the PAIR-EXPANDING consumers did not
+know it.**  Every KEYED primitive had a marker arm (exists / keys / each /
+delete / element read+write); every consumer that expands a hash into PAIRS did
+not, so `my %d = %ENV` produced ONE bogus pair (the marker's own symbol name,
+undef value), `foo(%ENV)` passed one argument where perl passes 2×N, and
+`\%ENV` was double-boxed into something `%$r` rejected with `Not a HASH
+reference`.  ONE new helper — `%p-marker-pairs`, which walks the marker through
+`p-keys` + `p-gethash`, i.e. the walk `keys`/`each` already use (rule 11) — and
+one arm per consumer: `%p-flatten-list`, `p-flatten-args`, `p-array-fill`'s own
+walker and `%p-array-fill-item` (p-array-fill is a SECOND walker by design — it
+preserves holes and stores into PLACE — so the arm is spelled in both, beside
+the sibling `hash-table-p` arms), plus `p-array-init` (`[%ENV]`, `@{[%ENV]}`)
+and `p-hash-deref-=` (`%$envref = (…)` was a silent no-op; it now routes to
+`p-hash-fill`, whose two PLACE arms already know how to replace the process
+environment).  **Every marker arm sits AFTER the aggregate fast paths** — two
+`eq`s on the scalar fallthrough, nothing on the hot path.
+The REFERENT half is the other four sites: `p-backslash` wraps a marker the way
+it wraps a hash table (so `\%ENV == \%ENV` — the marker symbol is EQ across
+calls, which makes its address as stable as a table's), `p-cast-%` and
+`p-ensure-hashref` pass it through (so `$$r{k}` writes the real environment),
+and `p-ref` / `%p-ref-string` / `stringify-value` / `%scalar-holds-ref-p` /
+`%p-wrong-referent-p` answer HASH for it — the last one is what makes `@$envref`
+die `Not an ARRAY reference` as perl does.  **30 probes vs perl 5.40.3, all
+identical**; before the fix 15 of 17 in the first set and 3 of 13 in the second
+diverged.  The #701 rule-12 die in `%p-symref-hash` is untouched and still fires
+only on the impossible state.
+
+**#723 — the TAP glue, and the writer is SBCL's own context note.**  The sweep
+and the companion capture the child as `>$tmp 2>&1`: descriptor 2 is UNBUFFERED
+(#542's policy, which is perl's) and descriptor 1 empties in 8 KB slabs, so a
+slab landing between two pieces of one stderr line costs exactly one TAP row its
+column-0 anchor.  MEASURED writer: `While evaluating the form starting at line N,
+column C~%  of #P"…":~%`, printed by a `handler-bind` on ERROR inside
+`sb-impl::load-as-source` — reached when an eval'd form LOADs a cached module
+transpile from `~/.pcl-cache` — so it fires as the condition goes by even though
+a perl-level `eval {}` handles it and nothing further is ever printed; its
+trailing `~%` is a separate write from the text, and that is the gap the slab
+fell into.  FIX (harness-only, `cl/pcl-test.lisp`): `p-load-with-recovery` binds
+`*error-output*` to a line-atomic Gray stream for the whole load — buffer until
+a newline, emit the line in ONE `write-string` + `finish-output`, flush any
+partial line TERMINATED at each form boundary and at the end.  `force-output` /
+`finish-output` deliberately do NOT flush a partial line; that is the one thing
+the stream exists to prevent.  The binding covers the recovery diagnostics too,
+so they cannot glue either.  **A/B by the s451 manual child recipe** (replicate
+the sweep child command, grep for a mid-line `ok N`): `reset.t` 1 glued row → 0,
+anchored rows 44 → 45 (the returning row is `ok 35 - no crash if package is
+effectively renamed before op is freed`); `tr.t` 1 → 0, 314 → 315 (`ok 223 -
+RT #36622 y/// at end of file`).  Both identities are exactly the ones #723
+predicted.
+
+**#730 — `sysopen`, which is what File::Temp's DEFAULT `tempfile()` runs.**  It
+was absent from the runtime AND from `known_no_of_params`, so the bareword
+lowered to an ordinary sub call and died `Undefined subroutine
+&File::Temp::sysopen`.  Runtime: `%p-sysopen-impl` + the `p-sysopen` macro
+beside `p-open`, taking the DIRECTION from the access bits (`O_ACCMODE`, and a
+value of 3 DIES naming it — rule 12) and the BUFFERING from `%p-output-buffering`
+(#542's one policy, asked directly rather than through `%p-line-buffer-if-tty`,
+which exists to rebuild a stream CL `open` already made wrong).  Failure returns
+false and sets `$!` from the syscall's own errno.  Emission: one
+`known_no_of_params` row (`[3,4]`), one `%RUNTIME_NAMES` entry, and the
+bareword-filehandle registration in `PExpr` — which `sysopen` SHARES with `open`
+rather than copying, because the handle is in the same first slot.  **12 probes
+vs perl identical** (create/trunc/append/excl/rdwr, explicit and default PERMS
+under umask, both failure modes with their errno, `tempfile()` bare and with a
+template).  Guards: `Pl/t/fileio-02.t` 34 → 40 rows, and
+`Pl/t/stdio-buffering-01.t`'s row 4 goes back to the `tempfile()` spelling its
+comment had been pointing at this task for.
+
+**#738 — `exit` inside an END block took the flush with it.**  perl ends that
+BLOCK only: the remaining ENDs still run, read the status as `$?`, and the
+process finally exits with it (probed: three ENDs, the middle one `exit 7`,
+output `C`/`B`/`A code=7`, rc 7).  PCL runs the ENDs from an `sb-ext` exit hook,
+so a nested `sb-ext:exit` in there went STRAIGHT TO THE OS and the rest of the
+running hook never executed — the remaining END blocks AND the
+`%p-flush-all-output` that follows them (measured on SBCL 2.6.0 with a
+standalone probe).  Invisible while STDOUT was line-buffered; with #542 it took
+the whole buffer, which is how `t/op/rt119311.t` came to lose two TAP rows.
+`p-exit` now, in the END phase and in the process that entered it (a fork CHILD
+must still exit for real — hence the pid, not just the flag), records the status,
+sets `$?` and throws to a per-block catch; the hook exits with the recorded
+status as its LAST act, after the flush.  op/rt119311.t **9/0 → 11/2**: the two
+not-oks come back with the flush, and rows 12/13 are NEW passes from the
+remaining-ENDs semantics.  Guards: `Pl/t/stdio-buffering-01.t` 11 → 13 rows
+(the END-exit row and its top-level-exit inverse).
+
+**Bar:** cold gate green; corpus-diff IDENTICAL over 111 files + shapes;
+`emission-ab` 23 lib shims SAME/0 DIFF/0 RCDIFF; `pack.t` 5636/89 = baseline
+after the artifact rebuild; named sweep files (chdir/each/local/magic) EXACTLY
+their pass-baseline rows; twelve named companion files (op/magic, op/gmagic,
+op/die_exit, op/coreamp, op/cproto, op/taint, op/lfs, op/leaky-magic, op/local,
+uni/stash, io/dup, io/open) ALL SAME as their snapshot rows; `re/charset.t`
+2776/2775 = its snapshot with ZERO glued rows, so #723 does not move it.
+
+**Filed:** **#740** (`-s` on an existing EMPTY file is undef in PCL, a defined 0
+in perl — the numeric member of #403's family, found because the sysopen bar
+tripped on it) and **#741** (`./runpcl` always exits 0; the emitted CL is right,
+the wrapper drops the status).
+
+---
+
 ## Session 451 (2026-08-29, Fable) — ROUND 10: four Opus agents launched, reviewed and merged (X #542 / W #685+#663+#694 / Y #610+#620+#611+#612 / Z #702+#703+#700+#701+#711+#710); batch legs run; TOTAL 18327 (+2)
 
 Round 10 ran off `718db6b` under the USER's 3-Opus cap, with Z added mid-round
