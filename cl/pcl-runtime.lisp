@@ -5101,6 +5101,15 @@
                  ;; that must drop) — both are indistinguishable raw nils, so the
                  ;; real fix is a distinct hole marker at the (setf p-aref) source.
                  ((null item) nil)
+                 ;; A cons is a spliced VALUE GROUP (an LHS slice's absorbed
+                 ;; run, among others) — flatten it recursively.  RESTORED
+                 ;; s452 review: the #736 marker arm below accidentally
+                 ;; REPLACED this arm instead of joining it, and every
+                 ;; cons-carried group collapsed to ONE scalar element —
+                 ;; `($a,@b[0..2],$e) = (…)` fed the slice one value
+                 ;; (perl-tests/range.t row 4, the sweep's catch).
+                 ((consp item)
+                  (loop for x in item do (add x)))
                  ;; %ENV / %INC: the marker IS the hash (see %p-marker-pairs,
                  ;; task #736).  Placed here, one arm above the scalar
                  ;; fallthrough it used to take, so the aggregate fast paths

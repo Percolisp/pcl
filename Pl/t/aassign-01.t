@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 35;
+plan tests => 36;
 
 sub run_cl {
     my ($code) = @_;
@@ -391,3 +391,14 @@ test_cl('#720 inverse: ref, undef-scalar, bare and whole-aggregate containers',
      print "bare=", join(",",@bare), " bh=", join(",", map {"$_=$bh{$_}"} sort keys %bh), "\n";
      print "w=", join(",",@{$w{k}}), ":", ref($w{k}), "\n";',
     "r=51,52 u=61,62:ARRAY\nhr=x=7,y=8\nbare=71,72,0 bh=a=81,b=82\nw=5,6:ARRAY\n");
+
+# ── A SLICE inside a list-assignment LHS absorbs its width (s452 review fix) ──
+# The #736 marker arm in %p-flatten-list accidentally REPLACED the cons-splice
+# arm, so a spliced value group collapsed to ONE element and the slice consumed
+# one RHS value instead of three (perl-tests/range.t row 4 caught it: got
+# a:b:::c for a:b:c:d:e).  Differential against real perl by construction.
+test_cl("LHS slice absorbs its width in a list assignment",
+    'my ($a, @bcd, $e);
+     ($a, @bcd[0..2], $e) = ("a","b","c","d","e");
+     print join(":", $a, @bcd[0..2], $e), "\n";',
+    "a:b:c:d:e\n");
