@@ -66,6 +66,40 @@ those two files and the live plan doc directly -- no new review-doc families.*
   regenerated (gen stamp only, content-identical); `pack.t` 5636/89 =
   baseline.  Guard `Pl/t/glob-slot-operand-01.t` (6 rows, 1.1 s; inverse-run:
   rows 1–2 fail without the pass).
+- **#694 CLOSED — WHICH construct's delimiter decides whether a lifted `${…}`
+  fragment is un-escaped.**  s450v's #521 `_undelimit` (a fragment carries the
+  ESCAPED delimiter, so `\"` → `"`) ran on EVERY fragment.  It is right only
+  where the source really was `"`-delimited: the dq string, and the
+  manufactured `"…"` token an s/// replacement travels in.  A **heredoc, a
+  `qq{…}`, a backtick command and a `<…>` glob** reach the same code wrapped in
+  a SYNTHETIC `"…"` token over their RAW text, where `\"` is the reference
+  operator followed by a string — so `` `${\"hello"}` ``, `qq{X${\"L"}Y}` and
+  `<<"H"` with `${\"L"}` had the `\` eaten, became the symbolic ref
+  `${ "L" }`, and interpolated EMPTY.  `t/op/exec.t` row 32 (`ls` → `l`) was
+  the visible one; the `qq{}`/heredoc/qx spellings were silent-wrong and
+  nothing had measured them.  **The un-escape is now asked of `$origin_tok`,
+  the ORIGINAL document token** — which is what that parameter's own comment
+  has always claimed it is; the glob and backtick sites were passing their
+  synthetic wrapper instead and now pass the real token, which is also what
+  the `postderef_qq` feature lookup beside it wants.  ONE predicate,
+  `_delim_escapes_dquote`.  **op/exec.t 22/3 → 23/2** (the pre-regression
+  value; Fable restores the snapshot row).  corpus-diff IDENTICAL; emission
+  A/B over 1036 files = exactly ONE diff, op/exec.t's two `${\"…"}` sites
+  regaining their `(p-backslash …)`.  Guard `Pl/t/regexp-subst-01.t` +1 row
+  (8 shapes, escaped and raw sides; 718db6b answers `XY` for three of them).
+- **The instrument: `PCL_SUITE_KEEP=DIR`** in `tools/run-perl-suite.pl` keeps
+  a file's four run artifacts (perl TAP, emitted CL, transpile stderr, PCL raw
+  output) out of the deleted tempdir.  The report joins the two sides by
+  description and keeps only ok / not ok, so a `diag` a failing row printed —
+  often the whole measurement — never left the tempdir.  Inert unless set;
+  op/exec.t gives the same verdict with and without it.
+- Residue filed from the same probes, both PRE-EXISTING on 718db6b and on
+  f937afd: **#702** (a BACKTICK HEREDOC ``<<`H` `` is never executed — PCL
+  returns its interpolated TEXT where perl returns the command's output;
+  silent wrong) and **#703** (`use subs "readpipe"` does not override
+  backticks/qx — PCL always runs the shell).  **t/op/exec.t row 32 passes only
+  because those two cancel**: PCL returns the interpolated text and the file's
+  override is the identity.
 - Residue filed from the same probes: **#700** (the LITERAL `%foo::SIG`
   reaches the inherited symbol through the CL READER, not this resolver — the
   ONE leaky-magic row left; an EMISSION-side fix, shape and the rejected

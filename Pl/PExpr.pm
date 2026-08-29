@@ -822,7 +822,11 @@ sub parse {
           # Contains variable - needs interpolation at runtime
           # Create a fake double-quoted string token for the interpolation parser
           my $fake_str = PPI::Token::Quote::Double->new(qq{"$inner"});
-          my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str);
+          # $e1 as ORIGIN: the wrapper is synthetic and holds the glob's RAW
+          # text, where a `"` carries no backslash — the delimiter question
+          # (task #694) and the postderef_qq feature lookup both have to ask
+          # the real document token.
+          my $interp_id = $self->str_interpol->parse_interpolated_string($self, $fake_str, $e1);
           # The interpolation returns a string_concat node, add its children
           $self->add_child_flattening($node_id, $interp_id, 'string_concat');
         } else {
@@ -886,8 +890,11 @@ sub parse {
       if ($interpolating && $cmd =~ /[\$\@]/) {
         say "parse(): Backtick needs interpolation"  if 1 & DEBUG;
         my $str_token = PPI::Token::Quote::Double->new(qq{"$cmd"});
+        # $e1 as ORIGIN — same reason as the glob arm above (task #694): the
+        # command body is RAW, so `` `${\"hello"}` `` must NOT have its `\"`
+        # un-escaped, and the feature lookup wants the document position.
         $cmd_id = $self->str_interpol->parse_interpolated_string($self,
-								 $str_token);
+								 $str_token, $e1);
       } elsif ($interpolating) {
         $cmd_id = $self->make_node(PPI::Token::Quote::Double->new(qq{"$cmd"}));
       } else {

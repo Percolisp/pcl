@@ -366,6 +366,34 @@ my $i = 'm$xn'; $i =~ s'$x'Q';
 print "$a $b $c $d $e $f $g $h $i\n";
 PL
 
+# Task #694: WHICH construct's delimiter decides.  #521's un-escape is right
+# only where the source really was `"`-delimited — the dq string and the
+# manufactured `"…"` token an s/// replacement travels in.  A heredoc, a
+# `qq{…}`, a backtick command and a `<…>` glob reach the same code wrapped in
+# a SYNTHETIC `"…"` token over their RAW text, where `\"` is the reference
+# operator followed by a string, not an escaped quote — un-escaping it made
+# `${\"L"}` into the symbolic ref `${ "L" }` and the interpolation came out
+# EMPTY (t/op/exec.t row 32, `ls` → `l`).  Rows a/b/c are the escaped side and
+# must not move; d–h are the raw side.  Measured on 718db6b: d, e, h and the
+# qx row answer `XY`.
+subst_agrees(<<'PL', 'the ORIGINAL delimiter decides whether a ${…} fragment is un-escaped (#694)');
+my $a = "mAn"; $a =~ s/A/${\"L"}/;
+my $b = "mAn"; $b =~ s/A/${\ "L"}/;
+my $c = "X${\ \"L\"}Y";
+my $d = qq{X${\"L"}Y};
+my $e = <<"H";
+X${\"L"}Y
+H
+chomp $e;
+my $f = <<'H';
+X${\"L"}Y
+H
+chomp $f;
+my $g = qq{X${\ "L"}Y};
+my $h = `echo X${\"L"}Y`; chomp $h;
+print "a=$a b=$b c=$c d=$d e=$e f=$f g=$g h=$h\n";
+PL
+
 # The emission promises, in both directions: a `$1`-only replacement stays a
 # STRING (the runtime's backref rewrite, no lambda per match), and a
 # single-quoted one is a lambda over a constant — never that string, because

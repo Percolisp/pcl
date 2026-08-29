@@ -60,6 +60,11 @@ sub parse_interpolated_string {
   # postderef_qq ("$ref->@*" interpolation) is lexically scoped in Perl;
   # resolve it once per string from the token's enclosing blocks.
   $self->{_postderef_qq} = _postderef_qq_active_for($origin_tok);
+  # Does a `"` inside this construct's source carry a backslash?  Only the
+  # ORIGINAL token can say (task #694) — a heredoc/backtick/glob arrives here
+  # wrapped in a synthetic `"…"` over RAW text.  Read once per string, used by
+  # _interp_reparse for every fragment lifted out of it.
+  $self->{_delim_escapes_dq} = _delim_escapes_dquote($origin_tok);
 
   my $content   = $str_token->content();
 
@@ -318,6 +323,34 @@ sub _ev_braced {
 # the quotes exactly as a dq token has them.)  The delimiter handled here is
 # `"`; `\}` in a `qq{…}` block is the same rule with another character and has
 # no case yet.
+#
+# **IT IS THE ORIGINAL CONSTRUCT'S DELIMITER THAT DECIDES, NOT THE TOKEN THIS
+# FILE IS HANDED** (task #694).  A heredoc, a backtick command and a `<…>` glob
+# reach `parse_interpolated_string` wrapped in a MANUFACTURED `"…"` token over
+# their RAW text, where a `"` is written plainly and a `\` is perl's reference
+# operator — so `` `${\"hello"}` `` and
+#
+#     print <<`H`;
+#     l${\"s"}
+#     H
+#
+# hand the block over as `\"s"`, and un-escaping it produced `""s"`, which does
+# not parse: the interpolation silently became EMPTY (`ls` → `l`, t/op/exec.t
+# row 32).  So the un-escape is asked of `$origin_tok`, the ORIGINAL document
+# token, which is what its parameter has always claimed to be — and the two
+# sites that were passing their synthetic wrapper instead now pass the real
+# token, which is also what the postderef_qq feature lookup beside it wants.
+sub _delim_escapes_dquote {
+  my ($tok) = @_;
+  return 0 unless ref $tok;
+  return 1 if $tok->isa('PPI::Token::Quote::Double');            # "…", and the
+                                                                 # manufactured
+                                                                 # s/// wrapper
+  return 1 if $tok->isa('PPI::Token::Quote::Interpolate')
+           && $tok->content =~ /\Aqq\s*"/;                       # qq"…"
+  return 0;
+}
+
 sub _undelimit {
   my ($src) = @_;
   return $src if index($src, '\\') < 0;
@@ -342,7 +375,8 @@ sub _undelimit {
 # Compile one fragment of Perl source through the ordinary expression
 # pipeline — the move `_parse_postfix_deref` and ExprToCL's regex consumer
 # (`_compile_ref_text_form`) already make.  The fragment is un-escaped first
-# (_undelimit).  The document is ANCHORED, not
+# (_undelimit) — but ONLY when the enclosing construct was `"`-delimited, see
+# _delim_escapes_dquote.  The document is ANCHORED, not
 # cloned: PPI's DESTROY empties every descendant, so the tokens must outlive
 # this call (task #414).  Returns a node id, or undef when PPI/PExpr cannot
 # read the fragment.
@@ -351,7 +385,8 @@ sub _interp_reparse {
   # Lazy: this file is loaded FROM Pl::Parser, so a compile-time
   # `use` would be circular; a runtime require is a %INC lookup once loaded.
   require Pl::Parser;
-  my $doc = Pl::Parser::fragment_doc(_undelimit($src));
+  $src = _undelimit($src) if $self->{_delim_escapes_dq};
+  my $doc = Pl::Parser::fragment_doc($src);
   return undef unless $doc;
   $self->_anchor($doc);
   my $stmt = $doc->find_first('PPI::Statement');

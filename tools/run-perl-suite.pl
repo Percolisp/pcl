@@ -148,6 +148,8 @@ use strict;
 use warnings;
 use File::Basename qw(basename dirname);
 use File::Temp qw(tempfile tempdir);
+use File::Path qw(make_path);
+use File::Copy qw(copy);
 use Cwd qw(abs_path);
 use POSIX qw(:sys_wait_h _exit);
 use FindBin;
@@ -283,6 +285,24 @@ sub timeout_for {
   my ($rel) = @_;
   my $e = $file_timeout{$rel} or return $timeout;
   return $e->{secs} > $timeout ? $e->{secs} : $timeout;
+}
+
+# PCL_SUITE_KEEP=DIR — copy a file's run artifacts out of the (deleted)
+# tempdir so they can be READ: the perl side's raw TAP, the emitted CL, the
+# transpile stderr, and the PCL side's raw output.  The last is the one that
+# pays: the report joins the two sides by TAP description and keeps only ok /
+# not ok, so a `diag` a failing row printed — which is often the whole
+# measurement — never leaves the tempdir.  Named `<safe-rel>.<what>`.
+sub keep_artifacts {
+  my ($safe, @src) = @_;
+  my $dir = $ENV{PCL_SUITE_KEEP} or return;
+  make_path($dir) unless -d $dir;
+  for my $s (@src) {
+    next unless defined $s && -f $s;
+    (my $what = $s) =~ s{^.*/\Q$safe\E}{};
+    copy($s, "$dir/$safe" . ($what eq '' ? '.out' : $what));
+  }
+  return;
 }
 
 -d $tdir or die "perl t/ tree not found: $tdir (pass --tdir)\n";
@@ -665,6 +685,16 @@ sub run_one {
     $c_ok    = () = $pcl =~ /^ok /mg;
     $c_notok = () = $pcl =~ /^not ok /mg;
   }
+
+  # PCL_SUITE_KEEP=DIR — keep this file's four artifacts for reading (task
+  # #694).  The runner joins the two sides by TAP description and reports only
+  # the verdict, so a file's own `diag` (the value a row PRINTS when it fails)
+  # is thrown away with $tmpdir — and for a row like op/exec.t's `$!` sanity
+  # check after an aborted form, that diag IS the measurement.  Inert unless
+  # the variable is set; four plain copies, no other behaviour, so a run WITH
+  # it must produce the same verdicts as one without.
+  keep_artifacts($safe, $poutf, $lisp, "$lisp.err", "$tmpdir/$safe.out")
+    if $ENV{PCL_SUITE_KEEP};
 
   $sig = (($terr >> 8) == 124 ? "transpile-timeout" : "TRANSPILE-FAIL") if $terr != 0;
   $sig ||= "timeout"          if $sbcl_exit == 124;
