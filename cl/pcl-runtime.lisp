@@ -5214,7 +5214,26 @@
                   (setf (symbol-value ',lvar) (make-p-box nil)))
                 (box-set ,lvar (if (< ,idx-expr (length ,src-vec))
                                    (aref ,src-vec ,idx-expr)
-                                   *p-undef*)))))
+                                   *p-undef*))))
+           (collect-src (idx-expr &optional (n 1))
+             ;; The list-context result for a target that is NOT a nameable
+             ;; box: N consecutive RHS slots starting at IDX-EXPR, or undef
+             ;; past the end.  Perl's list assignment yields the LHS lvalues,
+             ;; and the value that landed in such a slot IS what reading that
+             ;; lvalue gives — the same rule (and the same expression) the
+             ;; array-slice / hash-slice arms below already collect with.
+             (if (eql n 1)
+                 `(vector-push-extend (if (< ,idx-expr (length ,src-vec))
+                                          (aref ,src-vec ,idx-expr)
+                                          *p-undef*)
+                                      ,result-var)
+                 (let ((i (gensym "COLLECT-I")))
+                   `(dotimes (,i ,n)
+                      (vector-push-extend
+                       (if (< (+ ,idx-expr ,i) (length ,src-vec))
+                           (aref ,src-vec (+ ,idx-expr ,i))
+                           *p-undef*)
+                       ,result-var))))))
 
         (dolist (var vars)
           (cond
@@ -5272,8 +5291,14 @@
                     (all-undef (every #'is-undef-form inner-vars))
                     (inner-len (length inner-vars)))
                (cond
-                 ;; All undef, static count: pure skip (original behaviour)
+                 ;; All undef, static count: pure skip (original behaviour).
+                 ;; It still CONSUMES slots, and a consumed slot is an lvalue
+                 ;; perl hands back in list context (#721) — collect the values
+                 ;; it swallowed, exactly as the single-undef arm below does.
                  ((and all-undef (numberp count-form))
+                  (let ((base (cur-idx))
+                        (n (* count-form inner-len)))
+                    (push (collect-src base n) collect-forms))
                   (incf static-idx (* count-form inner-len)))
 
                  ;; All undef, dynamic count: bind gensym for runtime skip amount
@@ -5285,21 +5310,32 @@
                     (push `(,dyn-var ,count-expr) extra-lets)
                     (push dyn-var dyn-vars)))
 
-                 ;; Has real vars, static count: N-fold assignment (last pass wins)
+                 ;; Has real vars, static count: N-fold assignment (last pass
+                 ;; wins).  The list-context result is the repeated lvalue
+                 ;; RUN, one entry per slot consumed (#721): `(($x,$y) x 2) =
+                 ;; (1,2,3,4)` is ($x,$y,$x,$y) = (3,4,3,4) after the last
+                 ;; pass, so a named target collects its BOX (which now holds
+                 ;; the final value) and an undef placeholder its slot's value.
                  ((numberp count-form)
                   (dotimes (i count-form)
                     (dolist (inner-var inner-vars)
-                      (if (is-undef-form inner-var)
-                          (incf static-idx 1)
-                          (let ((idx (cur-idx)))
-                            (push (if (symbolp inner-var)
-                                      (assign-scalar inner-var idx)
-                                      `(p-setf ,inner-var
-                                               (if (< ,idx (length ,src-vec))
-                                                   (aref ,src-vec ,idx)
-                                                   *p-undef*)))
-                                  forms)
-                            (incf static-idx 1))))))
+                      (let ((idx (cur-idx)))
+                        (cond
+                          ((is-undef-form inner-var)
+                           (push (collect-src idx) collect-forms))
+                          (t
+                           (push (if (symbolp inner-var)
+                                     (assign-scalar inner-var idx)
+                                     `(p-setf ,inner-var
+                                              (if (< ,idx (length ,src-vec))
+                                                  (aref ,src-vec ,idx)
+                                                  *p-undef*)))
+                                 forms)
+                           (push (if (symbolp inner-var)
+                                     `(vector-push-extend ,inner-var ,result-var)
+                                     (collect-src idx))
+                                 collect-forms)))
+                        (incf static-idx 1)))))
 
                  ;; Has real vars, dynamic count: advance offset by count*inner-len
                  ;; (cannot do per-element assignments without knowing count at macro time)
@@ -5310,8 +5346,14 @@
                     (push dyn-var dyn-vars))))))
 
             ;; Skip single undef placeholder: (p-undef), *p-undef*, or
-            ;; (let ((*wantarray* t)) (p-undef)) wrapper from wantarray context
+            ;; (let ((*wantarray* t)) (p-undef)) wrapper from wantarray context.
+            ;; It skips the WRITE, never the SLOT — and in list context perl
+            ;; hands the slot back: `my @l = ((undef) = (10,20,30))` is (10),
+            ;; and `(($a,$b,undef) = (1,2))` is three elements, the last undef
+            ;; (#721; measured vs perl 5.40.3).  Collecting nothing here made
+            ;; every undef-carrying LHS return a SHORT list.
             ((is-undef-form var)
+             (push (collect-src (cur-idx)) collect-forms)
              (incf static-idx 1))
 
             ;; Array variable (@arr) - absorbs remaining elements
@@ -5414,13 +5456,22 @@
                      collect-forms)
                (push dyn-n dyn-vars)))
 
-            ;; Other lvalue (hash/array access, etc.) — no collect
+            ;; Other lvalue (hash/array element, a deref, …).  It consumes one
+            ;; slot and it IS an lvalue perl returns in list context —
+            ;; `(($h{a},$h{b}) = (1,2))` is (1,2), not the empty list this arm
+            ;; used to contribute (#721).  Collect the slot's VALUE, the same
+            ;; answer the array-slice and hash-slice arms give for their
+            ;; element targets; PCL does not hand back a writable element
+            ;; lvalue here (perl's `for (($h{a}) = (1)) { $_++ }` does write
+            ;; through — recorded in #721, not reachable without an
+            ;; element-box accessor in every place form).
             (t
              (let ((idx (cur-idx)))
                (push `(p-setf ,var (if (< ,idx (length ,src-vec))
                                        (aref ,src-vec ,idx)
                                        *p-undef*))
                      forms)
+               (push (collect-src idx) collect-forms)
                (incf static-idx 1)))))
 
         `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
@@ -13316,7 +13367,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-400"
+(defparameter *pcl-cache-generation* "v2-405"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

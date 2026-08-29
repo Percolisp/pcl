@@ -8117,7 +8117,7 @@ sub _lower_block {
       push @forms, $cl;
       return (@forms, $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
-    my $our = $self->_lower_our_decl($first);
+    my $our = $self->_lower_our_decl($first, $decl_tail ? $tail_ctx : undef);
     if ($our) {
       # A no-init `our` in TAIL position still has a value in perl — the
       # declared variable, read in the tail's context (probed: `our $A` → 5,
@@ -8418,8 +8418,26 @@ sub _lower_block {
     # branch below emits).
     # The assignment form the five `[@k]` sites all want, with the modifier
     # applied.  `_apply_modifier` is the same helper the scalar branch uses.
+    #
+    # CONTEXT (#721).  A list assignment used as a VALUE answers its own
+    # context: perl gives the number of RHS elements in scalar/void and the
+    # LHS lvalues in LIST context (`sub f { my ($a,$b) = (10,20,30) }` is 3
+    # scalar, (10,20) list).  The default here was SCALAR_CTX, which made
+    # ExprToCL wrap the assignment in `(p-scalar-ctx …)` and freeze the
+    # scalar answer in every caller — so the count leaked out as a
+    # one-element list.  In TAIL position lower it in 'inherit' (no wrap, the
+    # runtime *wantarray* decides, exactly as the plain non-declaration
+    # spelling `($a,$b) = …` has always done) and, under the sub-body :void
+    # regime, restore the CALLER's context for this one statement the same
+    # way `_lower_stmt` does for an ordinary tail expression — a declaration
+    # statement never passes through there, so the regime's :void would
+    # otherwise be the ambient the assignment reads.  Statement position
+    # keeps the scalar default and is byte-identical.
     my $assign_form = sub {
-      _apply_modifier($self->_lower_expr([@k], $first), $kmod, $kcond, $self, $first);
+      my $f = _apply_modifier(
+                $self->_lower_expr([@k], $first, ($decl_tail ? 'inherit' : undef)),
+                $kmod, $kcond, $self, $first);
+      return $decl_tail ? ($self->_restore_caller_wa($tail_ctx, $f))[0] : $f;
     };
     if (@$vars == 1 && $self->{_file_lex_renamed}{$vars->[0]}) {
       push @{ $self->{_captured_decls} },
@@ -10861,7 +10879,12 @@ sub _apply_modifier {
 # name simply resolves per-package (an `our $x` followed by `package Foo;
 # print $x;` reads Foo::$x in both pipelines; Perl reads the alias).
 sub _lower_our_decl {
-  my ($self, $stmt) = @_;
+  # $TAIL_CTX is the enclosing block's tail context, passed ONLY when this
+  # declaration is the block's last statement (#721) — the assignment is then
+  # the block's value and must answer the caller's context, not the scalar
+  # default.  undef everywhere else, which keeps statement-position emission
+  # byte-identical.
+  my ($self, $stmt, $tail_ctx) = @_;
   my @k = _strip_semi($stmt->schildren);
   return undef unless @k >= 2
     && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'our';
@@ -10957,8 +10980,11 @@ sub _lower_our_decl {
   # real perl prints "default" — the runtime our-init runs in source order and
   # clobbers the BEGIN value).  v1 emits the raw setf and has this stale-cache
   # divergence; v2 deliberately matches perl here, not v1.
-  my $form = $self->_lower_expr([@k[1 .. $#k]], $stmt);
-  return [ $mod ? _apply_modifier($form, $mod, $cond, $self, $stmt) : $form ];
+  my $form = $self->_lower_expr([@k[1 .. $#k]], $stmt,
+                                (defined $tail_ctx ? 'inherit' : undef));
+  $form = _apply_modifier($form, $mod, $cond, $self, $stmt) if $mod;
+  $form = ($self->_restore_caller_wa($tail_ctx, $form))[0] if defined $tail_ctx;
+  return [ $form ];
 }
 
 # `my @a` / `my %h` / `my ($p, @q)` [= INIT] → (\@var_names, $has_init); else ().

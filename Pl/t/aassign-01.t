@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 24;
+plan tests => 32;
 
 sub run_cl {
     my ($code) = @_;
@@ -242,3 +242,98 @@ test_cl('#610 inverse: mixed list, my (), and a no-init placeholder list',
      my (); my (undef);
      print m7(qw(A B)), " ", n7(qw(A B)), "\n";',
     "B A\n");
+
+# ── #721: a list assignment used as a VALUE ──────────────────────────────────
+# perl: SCALAR/void context → the number of RHS elements; LIST context → the
+# LHS lvalues AFTER the assignment.  PCL froze the SCALAR answer for the
+# DECLARATION spellings (`my (LIST) =`, `my %h =`, `our … =` all lowered their
+# assignment in scalar context, so the count leaked out as a one-element list)
+# and never collected the undef placeholders or the element lvalues in
+# p-list-='s list-context result.  Every expected string below is perl
+# 5.40.3's own output.
+
+my $SHOW = 'sub show { my $t = shift; my @l = @_;
+                       print "$t=", scalar(@l), ":", join("|", map { defined $_ ? $_ : "U" } @l), "\n" }
+            ';
+
+test_cl('#721 a declaration as a sub tail yields the LHS in list context',
+    $SHOW . 'sub d1 { my ($a, $b) = (10,20,30) }
+             sub d2 { my ($a, undef) = (10,20,30) }
+             sub d3 { my %h = (a=>1) }
+             sub d4 { our ($O1,$O2) = (40,50,60) }
+             show("d1", d1()); show("d2", d2()); show("d3", d3()); show("d4", d4());
+             print "s=", scalar(d1()), ",", scalar(d2()), ",", scalar(d3()), ",", scalar(d4()), "\n";',
+    "d1=2:10|20\nd2=2:10|20\nd3=2:a|1\nd4=2:40|50\ns=3,3,2,3\n");
+
+# The same statements one line down in a MULTI-statement body: the sub-body
+# :void regime is active there, so the tail declaration has to restore the
+# CALLER's context exactly as an ordinary tail expression statement does.
+test_cl('#721 ... and under the sub-body void regime (multi-statement body)',
+    $SHOW . 'sub v1 { my $p = 1; my ($a, $b) = (10,20,30) }
+             sub v2 { my $p = 1; my %h = (a=>1,b=>2) }
+             sub v3 { my $p = 1; our ($P1,$P2) = (7,8,9) }
+             show("v1", v1()); show("v2", v2()); show("v3", v3());
+             print "s=", scalar(v1()), ",", scalar(v2()), ",", scalar(v3()), "\n";',
+    "v1=2:10|20\nv2=4:a|1|b|2\nv3=2:7|8\ns=3,4,3\n");
+
+# The undef placeholder is an LVALUE that takes its slot's value, not a hole:
+# it consumes a slot AND contributes it to the list-context result.
+test_cl('#721 undef placeholders are collected, `()` still yields nothing',
+    $SHOW . 'our ($a1,$b1,$c1);
+             show("u1", ((undef) = (10,20,30)));
+             show("u2", ((undef,undef) = (10,20,30)));
+             show("mid", (($a1,undef,$c1) = (1,2,3,4)));
+             show("trail", (($a1,$b1,undef) = (1,2)));
+             show("empty", (() = (10,20,30)));
+             my $n = () = (1,2,3,4); print "countof=$n\n";',
+    "u1=1:10\nu2=2:10|20\nmid=3:1|2|3\ntrail=3:1|2|U\nempty=0:\ncountof=4\n");
+
+# Element / repeat lvalues: the generic p-setf arm and p-list-x collected
+# nothing, so every such LHS returned a SHORT list.
+test_cl('#721 element and repeat lvalues are collected too',
+    $SHOW . 'our (%h, @arr, $z1, $z2);
+             show("elem", (($h{a},$h{b}) = (1,2)));
+             show("aelem", (($arr[0],$arr[1]) = (3,4)));
+             show("mix", (($z1,$h{c},$arr[2]) = (5,6,7)));
+             show("repeat", ((($z1,$z2) x 2) = (1,2,3,4)));',
+    "elem=2:1|2\naelem=2:3|4\nmix=3:5|6|7\nrepeat=4:3|4|3|4\n");
+
+# Every other block whose value is the declaration.
+test_cl('#721 do / eval / map / ternary blocks ending in a declaration',
+    $SHOW . 'show("do", do { my ($a,$b) = (1,2,3) });
+             show("eval", eval { my ($a,$b) = (4,5,6) });
+             show("map", map { my ($p,$q) = ($_, $_*2) } (1,2));
+             sub t1 { my $c = shift; $c ? (my ($a,$b) = (1,2)) : (my ($x,$y) = (3,4)) }
+             show("tern1", t1(1)); show("tern0", t1(0));
+             my $ds = do { my ($a,$b) = (1,2,3) }; print "do_scalar=$ds\n";',
+    "do=2:1|2\neval=2:4|5\nmap=4:1|2|2|4\ntern1=2:1|2\ntern0=2:3|4\ndo_scalar=3\n");
+
+# INVERSES — the shapes that must NOT move.  A declaration in a CONDITION or
+# a non-tail statement stays in its own (boolean/void) context, and the
+# container spellings answered correctly before this change.
+test_cl('#721 inverse: condition heads and non-tail statements are unchanged',
+    'my %h = (a=>1);
+     if (my ($k,$v) = %h) { print "if=$k\n" } else { print "if=no\n" }
+     if (my ($z) = ()) { print "if2=yes\n" } else { print "if2=no\n" }
+     print "grep0=", scalar(grep { my ($g) = (0) } (1,2,3)), "\n";
+     print "grepE=", scalar(grep { my ($g) = () } (1,2,3)), "\n";
+     sub vv { my ($v1,$v2) = (1,2); return "ok" }
+     print "void=", vv(), "\n";',
+    "if=a\nif2=no\ngrep0=3\ngrepE=0\nvoid=ok\n");
+
+test_cl('#721 inverse: plain and container LHS keep their answers',
+    $SHOW . 'our (@A, %H, $X, $Y);
+             sub c1 { @A = (1,2,3) }  sub c2 { %H = (a=>1,b=>2) }
+             sub c3 { ($X,$Y) = (10,20,30) }  sub c4 { my @z = (5,6) }
+             show("c1", c1()); show("c2", c2()); show("c3", c3()); show("c4", c4());
+             print "s=", scalar(c1()), ",", scalar(c2()), ",", scalar(c3()), ",", scalar(c4()), "\n";',
+    "c1=3:1|2|3\nc2=4:a|1|b|2\nc3=2:10|20\nc4=2:5|6\ns=3,4,3,2\n");
+
+# The lvalues perl hands back are WRITABLE for the named-scalar targets, and
+# that must survive the collect (op/hashassign.t's `$_++ foreach (…) = (…)`
+# family already depends on it for the greedy-starved tail).
+test_cl('#721 the collected scalar lvalues are still writable',
+    'our ($w1,$w2);
+     for (($w1,$w2) = (1,2)) { $_ *= 10 }
+     print "$w1 $w2\n";',
+    "10 20\n");

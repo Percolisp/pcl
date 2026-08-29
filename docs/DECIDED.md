@@ -21,6 +21,27 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s452ab (2026-08-29, Opus round 11, agent AB)
+
+- **A LIST ASSIGNMENT USED AS A VALUE IS TWO-FACED, AND A DECLARATION IS ONE
+  (#721).**  Scalar/void = the number of elements the RHS produced; LIST =
+  the LHS *lvalues* after the assignment.  Two independent halves were
+  wrong: (a) `Pl::Parser2` lowered the assignment of a `my (LIST)=` / `my %h=`
+  / `our …=` declaration in SCALAR_CTX unconditionally, so ExprToCL froze the
+  count into `(p-scalar-ctx …)` and it leaked out as a ONE-element list — in
+  TAIL position it now lowers 'inherit' and, under the sub-body `:void`
+  regime, restores the caller's context through the SAME `_restore_caller_wa`
+  every other tail statement uses (a declaration statement never passes
+  through `_lower_stmt`, which is why it never got one); (b) `p-list-=`
+  collected nothing for an `undef` placeholder, for the generic element/deref
+  lvalue arm or for `p-list-x`, so any LHS carrying one returned a SHORT
+  list.  A slot with no nameable box contributes the value that landed in it
+  (the rule the array-/hash-slice arms already used); a named scalar
+  contributes its BOX and stays writable.  `() = LIST` (the countof idiom)
+  and every scalar-context answer are unchanged.  ir-spec §op-family
+  "assignment" row; guards `Pl/t/aassign-01.t` 24 → 32 (rows 25–29 fail on
+  `0dd7434`, rows 30–32 pass there).
+
 ## s452aa (2026-08-29, Opus agent AA, round 11) — the %ENV/%INC marker on the LIST paths (#736), the TAP glue KILLED (#723), sysopen (#730), `exit` in an END block (#738)
 
 - **A `%ENV`/`%INC` MARKER is a HASH everywhere, not just on the keyed

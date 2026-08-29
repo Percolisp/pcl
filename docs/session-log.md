@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 452ab (2026-08-29, Opus round 11, agent AB) — #721 (list assignment as a VALUE), #720, #731, #734, #733
+
+Base `0dd7434` (main after round 10), generation **v2-405**.
+
+**#721 — a list assignment used as a VALUE.**  perl: scalar/void = the number
+of elements the RHS produced, LIST = the LHS *lvalues* after the assignment.
+PCL froze the scalar answer, so the count leaked out as a one-element list.
+TWO independent halves, found by probing the family before touching anything:
+
+1. **`Pl::Parser2` lowered every DECLARATION's assignment in SCALAR_CTX.**
+   `_lower_block`'s multi-decl branch and `_lower_our_decl` both called
+   `_lower_expr` with no context, whose default is 0 = SCALAR_CTX; ExprToCL's
+   `=` dispatch then wrapped the assignment in `(p-scalar-ctx …)`, which is a
+   *freeze*, not a default.  That is why `sub f { my ($a,$b) = (10,20,30) }`
+   gave `(3)` while the plain `($X,$Y) = …` spelling — which never gets a
+   wrap — was right all along, and why `my @a = …` was right (`p-array-=`
+   does not read `*wantarray*`) but `my %h = …` was not (`p-hash-=` does).
+   In TAIL position the assignment now lowers `'inherit'` **and** goes
+   through `_restore_caller_wa`, the same helper `_lower_stmt` applies to
+   every other tail statement: a declaration statement never passes through
+   `_lower_stmt`, so under the sub-body `:void` regime the ambient it read
+   was `:void` and `'inherit'` alone would still have answered the count.
+   Statement position keeps the scalar default and is byte-identical.
+2. **`p-list-=` collected nothing for three of its LHS arms.**  The `undef`
+   placeholder skips the WRITE, never the SLOT — perl hands the slot back
+   (`(undef) = (10,20,30)` is `(10)`; `($a,$b,undef) = (1,2)` is three
+   elements, the last undef) — and the generic element/deref arm and
+   `p-list-x` had no collect at all, so `(($h{a},$h{b}) = (1,2))` was the
+   EMPTY list.  One `collect-src` helper in the macro's `flet` gives all
+   three the answer the array-slice and hash-slice arms already used: the
+   value that landed in the slot.  A named scalar still contributes its BOX,
+   so the returned lvalues stay writable.
+
+`() = LIST` and every scalar-context answer are unchanged by construction.
+Emission: corpus-diff **3 of 111** (`eval.t`, `my.t`, `signatures.t`);
+emission-ab over 1030 files (lib + cpan-tests + perl's own t/) **SAME 1026 /
+DIFF 4 / RCDIFF 0** — the same three plus `t/perf/opcount.t`.  `my.t` is the
+fix itself (a tail `my %h = ()` losing its scalar freeze); the other three
+are an *inert* `p-caller-ctx` around a tail `p-array-=`, which ignores
+`*wantarray*` for its value and binds list context around its own RHS.  Gate
+**184/6224** (xs skipped in a worktree; +8 = the new guard rows).  Guards
+`Pl/t/aassign-01.t` 24 → 32, inverse-run on a `0dd7434` worktree: rows 25–29
+FAIL there, rows 30–32 (the inverses) pass.
+
+Filed from the probes, all PRE-EXISTING and none touched: **#750** (a
+DEREFERENCED array/hash in a list LHS is not greedy — `($x, @$r) = (1,2,3)`
+leaves `@$r` empty, silent wrong), **#751** (`sub f { my ($x) = @_ }` returns
+NOTHING — the `p-raw-params` fast path drops the unpack's statement value;
+the entry-time argument count is not reachable inside the macro, which is why
+it was filed rather than folded in), **#752** (an EMPTY-bodied signature sub
+returns its synthesized unpack's value where perl returns `()` — the
+`signatures.t` A/B diff; those subs are only ever called for their die, so no
+row moves).
+
+---
+
 ## Session 452aa (2026-08-29, Opus agent AA, round 11) — #736 the %ENV/%INC marker reaches the LIST paths; #723 the TAP glue is gone; #730 sysopen; #738 `exit` inside an END block
 
 Round-11 agent AA, the `cl/`-runtime + harness lane, off `0dd7434`.  Four tasks,
