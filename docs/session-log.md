@@ -22,6 +22,60 @@ verified at review: population compile 226.6 → 62–78 s; m//g linear.
 **Round 9 agent V launched mid-legs (USER: "start another Opus job")**:
 s450v = #541 (ruled conditional save/restore) + the s///-replacement
 family #520 → #522 → #521, off `3c7c6ec`, gen v2-375, IDs 690–699.
+## Session 450v (2026-08-29, Opus, round 9 agent V) — the conditional `local` (#541) and the s/// replacement family (#520 + #522 + #521)
+
+**Two commits, 121 probes against perl 5.40.3.**  Gate **182 files / 6154 rows**
+(only the 13 known pclxs xs failures); generation **v2-365 → v2-375**, all three
+checked-in artifacts regenerated (bodies byte-identical; stamp only).
+
+- **#541 — `local TARGET if COND` gates the SAVE AND RESTORE, never the value.**
+  "Do not localize" was spelled "localize to a COPY OF THE CURRENT VALUE", which
+  is observationally identical only while nothing WRITES the slot: a save and
+  restore of an unchanged slot is invisible, a save and restore AROUND a write
+  is not, and perl — which never ran the statement — keeps the write.  Two new
+  runtime macros, split by **lexical binding**: `p-local-cell-if` keeps the body
+  in place (p-local-cell rebinds its name lexically, for the string-eval thunk),
+  and `p-local-maybe COND (LOCALIZER…) BODY` carries every other shape — element,
+  slice, `$.`, `$|`, symbolic deref, and the exception set's dynamic `let` — by
+  writing the body ONCE into a local function called from both arms (a dynamic
+  binding is visible through that call; a lexical one would not be, which is why
+  the ruling's `progv` is not needed).  Two loud DROPS became correct emission
+  (deref-under-modifier, array-slice-RANGE-under-modifier), and a pre-existing
+  runtime bug came out with them: `p-local-array-slice` demanded an ADJUSTABLE
+  vector while `p-..` builds a simple one, so **every** `local @a[1..2]`
+  localized index 0.  **Byte-identity leg held**: corpus-diff 109/111 identical,
+  and the two that differ (ref.t, sprintf2.t) differ only in their
+  `local $::TODO = … if $^O eq …` statements; A/B over 792 files = 20 diffs, all
+  conditional-`local` hunks.  Guard `stmt-modifier-01.t` 21 → 30.  Filed **#690**
+  (`local @a[RANGE] = LIST` still writes the last value to index 0).
+- **#520 was TWO-SIDED and the runtime half is the enabler.**  `p-subst`'s
+  lambda arm called cl-ppcre with `:simple-calls t` — only the matched STRINGS —
+  so it had a hand-rolled `$1..$9` block and could set nothing built from
+  OFFSETS; `` $` ``, `$'`, `$+`, `$^N`, `@-` were EMPTY inside a replacement,
+  which is why the earlier gate-only attempt failed and still fails after #477.
+  The arm now uses the non-simple call form and the same
+  `clear-capture-groups` + `set-capture-groups` + `set-match-vars` trio the m//
+  path uses (rule 11), which also brings `$10..$20` and `@{^CAPTURE}`.  The gate
+  then skips only `[1-9][0-9]*` — `$0` is the program name, not a backref.
+- **#522**: the case-shift escapes are dq-string OPERATORS, so the replacement
+  is routed to the dq compiler that already implements them; the reason can fire
+  with no sigil in the text at all.
+- **#521 IS NOT s///-SPECIFIC** — `print "s=${\ \"L\"}\n"` produces the same
+  unreadable form.  A fragment lifted out of a dq construct carries the ESCAPED
+  DELIMITER and perl undoes THAT ONE ESCAPE AND NOTHING ELSE (`\\` stays a pair,
+  `\t` stays a backslash and a t — probed row by row).  `_undelimit` sits in
+  `_interp_reparse`, the one place a lifted fragment is read; the `@{…}`
+  consumer's full `unescape_string` is deleted with it, which is how
+  `"@{[ &attributes::get(\&utf8::valid) ]}"` had been losing its `\`.
+- **The inverse the widening would have broken, plus a pre-existing silent
+  wrong: a SINGLE-QUOTED half interpolates NOTHING.**  Interpolation is the
+  DELIMITER's answer (`_delim_interpolates`), taken per half; a single-quoted
+  replacement is a LAMBDA OVER A CONSTANT so the engine's `$N` rewrite cannot
+  see it.  Companion A/B on both trees: **op/lc.t +2, re/subst.t +6,
+  re/pat_advanced.t +1**, nothing worse.  Guard `regexp-subst-01.t` +7.  Filed
+  **#691** (raw-slot verdict blind to a deref use in a replacement), **#692**
+  (nested case shift does not pop around an interpolated variable), **#693**
+  (the loud residue of #521).
 
 ## Session 450t (2026-08-29, Opus, round 8 agent T) — the computed magics: #561 + #602
 
