@@ -1099,27 +1099,127 @@
 ;;; situations a LOAD would.  A file with no uncaught top-level die evaluates
 ;;; identically, form for form.  Each caught error is still printed on *error-output*
 ;;; (recovered, not hidden) so the planned-vs-emitted check flags the under-count.
+;;;
+;;; ---- The line-atomic stderr wrapper (task #723) ----------------------------
+;;;
+;;; The sweep and the companion runner capture the child as `>$tmp 2>&1`: ONE
+;;; file, two descriptors.  Descriptor 2 is UNBUFFERED (perl's rule, and #542's
+;;; %p-std-buffering implements it), so a multi-write diagnostic reaches the
+;;; file in PIECES, while descriptor 1 is block-buffered and empties in 8 KB
+;;; slabs.  When a slab lands between two pieces of one stderr line, the next
+;;; stdout line loses its column-0 anchor and the TAP parser cannot count it —
+;;; exactly ONE row per affected file, and WHICH row moves with any change in
+;;; output volume (that is why #542 turned two long-standing glue points into
+;;; two "lost" pass rows: reset.t ok 35, tr.t ok 223).
+;;;
+;;; MEASURED writer: SBCL's own `While evaluating the form starting at line N,
+;;; column C~% of #P"...":~%` context note.  It is printed by a HANDLER-BIND on
+;;; ERROR inside sb-impl::load-as-source — reached here when an eval'd form
+;;; LOADs a cached module transpile from ~/.pcl-cache — so it fires as the
+;;; condition passes by even though a perl-level `eval {}` goes on to handle it
+;;; and nothing else is ever printed.  Its trailing `~%` is a separate write
+;;; from the text, which is the gap the stdout slab fell into.
+;;;
+;;; The fix is not about that one writer: *error-output* is bound to a stream
+;;; that buffers until a newline and then emits the whole line in ONE
+;;; write-string, and any partial line left when the load finishes is flushed
+;;; TERMINATED.  Glue is then impossible regardless of who writes in pieces.
+;;; Harness-only — this file is loaded by the sweep and the companion runner,
+;;; never by a shipped program — so there is no perl-fidelity constraint on
+;;; stderr buffering here.
+(defclass %line-atomic-stream (sb-gray:fundamental-character-output-stream)
+  ((under :initarg :under :reader %las-under
+          :documentation "The real stderr stream every completed line goes to.")
+   (pending :initform (make-array 256 :element-type 'character
+                                  :adjustable t :fill-pointer 0)
+            :reader %las-pending
+            :documentation "Characters written since the last newline.")))
+
+(defun %las-emit (s)
+  "Write the pending characters to the underlying stream as ONE write-string."
+  (let ((p (%las-pending s)))
+    (when (plusp (fill-pointer p))
+      (write-string (coerce p 'simple-string) (%las-under s))
+      (finish-output (%las-under s))
+      (setf (fill-pointer p) 0))))
+
+(defun %las-append (s string start end)
+  (let ((p (%las-pending s)))
+    (loop for i from start below end
+          do (vector-push-extend (char string i) p))))
+
+(defun %las-flush-terminated (s)
+  "End of a top-level form: nothing may stay unterminated across the boundary,
+   or the next stdout slab could still land inside it."
+  (let ((p (%las-pending s)))
+    (when (plusp (fill-pointer p))
+      (vector-push-extend #\Newline p)
+      (%las-emit s))))
+
+(defmethod sb-gray:stream-write-char ((s %line-atomic-stream) ch)
+  (vector-push-extend ch (%las-pending s))
+  (when (char= ch #\Newline) (%las-emit s))
+  ch)
+
+(defmethod sb-gray:stream-write-string ((s %line-atomic-stream) string
+                                        &optional (start 0) end)
+  ;; Bulk path: everything up to and including the LAST newline is one emit,
+  ;; the tail stays pending.  (Per-character would work but this stream sees
+  ;; every warning a suite file prints.)
+  (let* ((end (or end (length string)))
+         (nl (position #\Newline string :from-end t :start start :end end)))
+    (cond (nl (%las-append s string start (1+ nl))
+              (%las-emit s)
+              (%las-append s string (1+ nl) end))
+          (t (%las-append s string start end))))
+  string)
+
+(defmethod sb-gray:stream-line-column ((s %line-atomic-stream))
+  ;; What `~&` / FRESH-LINE asks.  The pending buffer never holds a newline
+  ;; (stream-write-char emits on one), so its length IS the column.
+  (fill-pointer (%las-pending s)))
+
+;; FORCE-OUTPUT/FINISH-OUTPUT deliberately do NOT flush a partial line: that
+;; is the one thing this stream exists to prevent.  The completed lines are
+;; already through (%las-emit finishes each one).
+(defmethod sb-gray:stream-force-output ((s %line-atomic-stream))
+  (declare (ignore s))
+  nil)
+
+(defmethod sb-gray:stream-finish-output ((s %line-atomic-stream))
+  (declare (ignore s))
+  nil)
+
 (defun p-load-with-recovery (path)
   (with-open-file (stream path :direction :input :external-format :utf-8)
-    (let ((*load-pathname* (pathname path))
-          (*load-truename* (ignore-errors (truename path)))
-          (eof '#:eof)
-          (errs 0))
-      (loop
-       (let ((form (handler-case (read stream nil eof)
-                     (error (e)
-                       (format *error-output*
-                               "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
-                       eof))))
-         (when (eq form eof) (return))
-         (handler-case (eval form)
-           (error (e)
-             (incf errs)
-             (format *error-output*
-                     "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))))
-      (when (plusp errs)
-        (format *error-output*
-                "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path))
+    (let* ((*load-pathname* (pathname path))
+           (*load-truename* (ignore-errors (truename path)))
+           (eof '#:eof)
+           (errs 0)
+           (atomic (make-instance '%line-atomic-stream :under *error-output*)))
+      ;; ONE binding for the whole load, so the recovery diagnostics below are
+      ;; line-atomic too.  A form that RE-POINTS stderr (`open STDERR,'>',…`)
+      ;; setf's this binding and every later form sees the new stream, exactly
+      ;; as before; what is left pending in ATOMIC still reaches the original.
+      (let ((*error-output* atomic))
+        (unwind-protect
+             (loop
+              (let ((form (handler-case (read stream nil eof)
+                            (error (e)
+                              (format *error-output*
+                                      "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
+                              eof))))
+                (when (eq form eof) (return))
+                (handler-case (eval form)
+                  (error (e)
+                    (incf errs)
+                    (format *error-output*
+                            "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))
+                (%las-flush-terminated atomic)))
+          (%las-flush-terminated atomic))
+        (when (plusp errs)
+          (format *error-output*
+                  "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path)))
       (values))))
 
 ;;; ----- Test::More->builder / Test::Builder ------------------------------
