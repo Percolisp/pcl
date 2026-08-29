@@ -14865,6 +14865,20 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; (t v) and \%{"Pkg::H"} backslashed the *string* (ref → SCALAR, not HASH),
       ;; which broke Exporter::Heavy's `*{...}=\%{"$pkg\::$name"}` %hash export.
       ((stringp v) (%p-symref-hash v))
+      ;; val is an lvalue box containing undef: auto-vivify as hash ref — the
+      ;; MISSING TWIN of p-cast-@'s arm (task #720).  Store (make-p-box new-h)
+      ;; for the same reason the array arm does: box-set must see a REFERENCE,
+      ;; not a raw hash it would coerce to a scalar-context count.  Without it
+      ;; `%{ $h{k} } = (a=>1)` wrote into a hash nothing pointed at (the cast
+      ;; had already turned the box into :undef, so p-hash-deref-='s own
+      ;; autovivification had no box left to store back through) and
+      ;; `@{ $h{k} }{qw(x y)} = (1,2)` DIED in (setf p-gethash) on :undef —
+      ;; while every array spelling of the same shape worked.  Two casts, one
+      ;; rule: they must not disagree about what dereferencing undef means.
+      ((and (p-box-p val) (or (null v) (eq v *p-undef*)))
+       (let ((new-h (make-hash-table :test 'equal)))
+         (box-set val (make-p-box new-h))
+         new-h))
       ;; Wrong kind of referent (%$aryref, keys %$aryref): perl's fatal.
       ;; Previously fell through to (t v) and the caller silently saw no keys.
       ((%p-wrong-referent-p "HASH" v) (%p-not-a-ref "HASH"))

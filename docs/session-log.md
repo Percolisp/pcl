@@ -48,6 +48,40 @@ are an *inert* `p-caller-ctx` around a tail `p-array-=`, which ignores
 `Pl/t/aassign-01.t` 24 → 32, inverse-run on a `0dd7434` worktree: rows 25–29
 FAIL there, rows 30–32 (the inverses) pass.
 
+**#720 — an lvalue SLICE through an autovivified element wrote nowhere.**  The
+discriminator, measured: a pre-made container works, a MISSING hash/array
+element does not, and the paren/postfix spellings behave identically — so it
+is not the paren the task suspected.  A slice is a SUBSCRIPTED dereference,
+and perl vivifies the base of one **even in rvalue position** (`my @y = @{
+$h{k} }[0,1]` leaves the key present; the bare `@{ $h{k} }` does not — probed
+both ways).  The four slice emitters lowered their container in RVALUE
+context, so `p-gethash` handed back the throwaway box a missing key reads as,
+`p-cast-@` autovivified into THAT, and the write went nowhere; the hash
+spelling DIED in `(setf p-gethash)` on `:undef` because **`p-cast-%` was also
+missing the autovivification arm its `p-cast-@` twin has** — two casts that
+had drifted apart about what dereferencing undef means.  Fix: one helper
+`Pl::ExprToCL::_slice_base_form` (the lvalue bind; each emitter passes its own
+base rule as a thunk, since they differ) + the runtime twin arm.  It is the
+same rule the `@` cast already applies to its own operand, which is exactly
+why the element sibling `@{ $h{k} } = (5,6)` always worked.
+
+corpus-diff **2 of 111** (`ref.t`, `postfixderef.t` — both `@{$ref[2]}[0]`,
+the fix itself); the three artifacts regenerate byte-identically.  Gate
+**184/6227**.  Guards `Pl/t/aassign-01.t` 32 → 35, inverse-run on `0dd7434`:
+rows 33–34 fail there, row 35 (the inverse) passes.
+
+**Two fixes were MEASURED AND BACKED OUT, and #753 records them so nobody
+retries them as written**: (a) giving `p-aref-deref`/`p-gethash-deref` bases
+the same lvalue rule fixes `${ $h{k} }[0] = 3` (a silent no-op) but also flips
+a NESTED base to the live-box `-deref-box` accessor — 4 corpus files; (b)
+adding `%` to the cast emitter's lvalue test fixes `%{ $h{k} } = (a=>1)` (also
+a silent no-op) but an lvalue accessor VIVIFIES, and the emission A/B turned
+15 real READ sites in Test2/Test::Builder/Text::CSV_PP into vivifications
+where perl leaves the key absent.  Both need a sweep leg this round cannot
+run.  The honest shape of the family, recorded in #753: PCL over-vivifies a
+BARE rvalue deref because the cast emitter cannot tell lvalue from rvalue —
+the `@` twin has carried that since forever.
+
 Filed from the probes, all PRE-EXISTING and none touched: **#750** (a
 DEREFERENCED array/hash in a list LHS is not greedy — `($x, @$r) = (1,2,3)`
 leaves `@$r` empty, silent wrong), **#751** (`sub f { my ($x) = @_ }` returns

@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 35;
 
 sub run_cl {
     my ($code) = @_;
@@ -337,3 +337,57 @@ test_cl('#721 the collected scalar lvalues are still writable',
      for (($w1,$w2) = (1,2)) { $_ *= 10 }
      print "$w1 $w2\n";',
     "10 20\n");
+
+# ── #720: an lvalue SLICE whose container must be AUTOVIVIFIED ───────────────
+# A slice is a SUBSCRIPTED dereference, and perl vivifies the base of one —
+# `@{ $h{k} }[0,1] = (11,12)` makes $h{k} an ARRAY ref and writes through it,
+# and it vivifies even in RVALUE position (`my @y = @{ $h{k} }[0,1]` leaves
+# the key present, while the BARE `@{ $h{k} }` does not).  The four slice
+# emitters generated their container in RVALUE context, so `p-gethash` handed
+# back the throwaway box a missing key reads as, `p-cast-@` autovivified into
+# THAT and the write went nowhere (silent wrong); the hash spelling DIED in
+# (setf p-gethash) on :undef, because `p-cast-%` was ALSO missing the
+# autovivification arm its `p-cast-@` twin has.  Expected strings are perl
+# 5.40.3's.
+
+test_cl('#720 an lvalue slice autovivifies its container element',
+    'use v5.24;
+     my %a1; @{ $a1{k} }[0,1] = (11,12);
+     my %a2; @{ ($a2{k}) }[0,1] = (21,22);
+     my @ar; @{ $ar[2] }[0,1] = (31,32);
+     my %a3; @{ $a3{k} }{qw(x y)} = (1,2);
+     print "a1=", join(",",@{$a1{k}}), ":", ref($a1{k}), "\n";
+     print "a2=", join(",",@{$a2{k}}), ":", ref($a2{k}), "\n";
+     print "ar=", join(",",@{$ar[2]}), ":", ref($ar[2]), "\n";
+     print "a3=", join(",", map {"$_=$a3{k}{$_}"} sort keys %{$a3{k}}), ":", ref($a3{k}), "\n";',
+    "a1=11,12:ARRAY\na2=21,22:ARRAY\nar=31,32:ARRAY\na3=x=1,y=2:HASH\n");
+
+# The postfix spelling and a MULTI-element parenthesised base reach the same
+# emitters, and a kv-slice through an element must stop leaving the key absent.
+test_cl('#720 postfix, parenthesised and kv spellings agree',
+    'use v5.24;
+     my %p1; $p1{k}->@[0,1] = (41,42);
+     my %p2; @{ (0,$p2{k}) }{qw(x y)} = (1,2);
+     my %p3; my @kv = %{ $p3{k} }{"x"};
+     print "p1=", join(",",@{$p1{k}}), ":", ref($p1{k}), "\n";
+     print "p2=", join(",", map {"$_=$p2{k}{$_}"} sort keys %{$p2{k}}), ":", ref($p2{k}), "\n";
+     print "p3=", scalar(@kv), ":", (defined $p3{k} ? ref($p3{k}) : "undef"), "\n";',
+    "p1=41,42:ARRAY\np2=x=1,y=2:HASH\np3=2:HASH\n");
+
+# INVERSE — the containers that were already right must stay right: a slice
+# through a scalar holding a ref, through an UNDEF scalar (which vivifies),
+# through a bare aggregate, and the element sibling `@{ $h{k} } = (…)` whose
+# `@` cast has always set the lvalue context this fix gives the slices.
+test_cl('#720 inverse: ref, undef-scalar, bare and whole-aggregate containers',
+    'use v5.24;
+     my $r = []; @{ $r }[0,1] = (51,52);
+     my $u;      @{ $u }[0,1] = (61,62);
+     my $hr = {}; @{ ($hr) }{qw(x y)} = (7,8);
+     my @bare = (0,0,0); @bare[0,1] = (71,72);
+     my %bh; @bh{qw(a b)} = (81,82);
+     my %w; @{ $w{k} } = (5,6);
+     print "r=", join(",",@$r), " u=", join(",",@$u), ":", ref($u), "\n";
+     print "hr=", join(",", map {"$_=$hr->{$_}"} sort keys %$hr), "\n";
+     print "bare=", join(",",@bare), " bh=", join(",", map {"$_=$bh{$_}"} sort keys %bh), "\n";
+     print "w=", join(",",@{$w{k}}), ":", ref($w{k}), "\n";',
+    "r=51,52 u=61,62:ARRAY\nhr=x=7,y=8\nbare=71,72,0 bh=a=81,b=82\nw=5,6:ARRAY\n");

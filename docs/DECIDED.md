@@ -42,6 +42,25 @@ those two files and the live plan doc directly -- no new review-doc families.*
   "assignment" row; guards `Pl/t/aassign-01.t` 24 → 32 (rows 25–29 fail on
   `0dd7434`, rows 30–32 pass there).
 
+- **A SLICE IS A SUBSCRIPTED DEREFERENCE, AND PERL VIVIFIES THE BASE OF ONE
+  (#720)** — in RVALUE position too (`my @y = @{ $h{k} }[0,1]` leaves the key
+  present; the BARE `@{ $h{k} }` does not).  The four slice emitters lowered
+  their container in RVALUE context, so `p-gethash` handed back the throwaway
+  box a missing key reads as, `p-cast-@` autovivified into THAT and the write
+  went nowhere; the hash spelling DIED in `(setf p-gethash)` on `:undef`
+  because `p-cast-%` was ALSO missing the autovivification arm its `p-cast-@`
+  twin has.  ONE helper `Pl::ExprToCL::_slice_base_form` (the lvalue bind; each
+  emitter keeps its own base rule as a thunk) plus the runtime twin arm.  The
+  rule is the SAME one the `@` cast has always applied to its own operand,
+  which is why the element sibling `@{ $h{k} } = (5,6)` always worked.
+  **Residue MEASURED AND BACKED OUT in #753** (do not retry as written):
+  extending the lvalue rule to `p-aref-deref`/`p-gethash-deref` bases fixes
+  `${ $h{k} }[0] = 3` but flips nested bases to the live-box accessor (4
+  corpus files); adding `%` to the cast emitter's lvalue test fixes
+  `%{ $h{k} } = (a=>1)` but turns 15 real READ sites in Test2/Text::CSV into
+  vivifications.  Guards `Pl/t/aassign-01.t` 32 → 35 (rows 33–34 fail on
+  `0dd7434`, row 35 passes there).
+
 ## s452aa (2026-08-29, Opus agent AA, round 11) — the %ENV/%INC marker on the LIST paths (#736), the TAP glue KILLED (#723), sysopen (#730), `exit` in an END block (#738)
 
 - **A `%ENV`/`%INC` MARKER is a HASH everywhere, not just on the keyed

@@ -2847,6 +2847,14 @@ sub gen_prefix_op_form {
 
   # @ needs lvalue context so subscripts return boxes → p-cast-@ can autoviv.
   # (++/--/\ already declined above.)
+  #
+  # `%` is deliberately NOT here, and that asymmetry is measured, not an
+  # oversight (task #753): adding it fixes `%{ $h{k} } = (a=>1)`, which is a
+  # silent no-op today, but an lvalue accessor VIVIFIES, and a BARE rvalue
+  # deref must not — `keys %{ $h{k} }` would start creating the key, which
+  # perl does not do (probed).  The `@` twin has always carried that cost;
+  # extending it turned 15 real read sites in Test2/Text::CSV into
+  # vivifications (emission A/B, s452ab), so it waits for its own sweep leg.
   my $needs_lvalue = ($op eq '@');
   my $saved_lvalue = $self->lvalue_context;
   $self->lvalue_context(1) if $needs_lvalue;
@@ -3270,6 +3278,11 @@ sub gen_array_ref_access_form {
               && $child0_node->{type} eq 'progn'))) {
     $self->expr_o->set_node_context($kids->[0], 1);
   }
+  # NB the base is NOT generated in lvalue context, and `${ $h{k} }[0] = 3`
+  # therefore still writes nowhere — task #753 has the measurement and the
+  # two-line fix, which was tried here and backed out: it also flips a NESTED
+  # `p-aref-deref` base to the live-box `-deref-box` accessor (4 corpus files),
+  # a widening that needs its own sweep leg.
   my $ref = $paren_scalar_base
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
@@ -3282,6 +3295,7 @@ sub gen_array_ref_access_form {
 # $ref->{a,b} → (p-join |$;| (vector …)).
 sub gen_hash_ref_access_form {
   my ($self, $node, $node_id, $kids) = @_;
+  # The base is NOT an lvalue here — see gen_array_ref_access_form (#753).
   my $ref = $self->_is_paren_scalar_base($kids->[0])
             ? $self->_gen_scalar_deref_base_form($kids->[0])
             : $self->gen_node_form($kids->[0]);
@@ -3320,6 +3334,40 @@ sub _slice_index_forms {
 # A bare Symbol/Magic naming the aggregate (`@a`, `%h`, `@-`, `@{name}`) IS
 # the container; anything else in container position is a scalar value, and
 # a scalar there can only be a reference.
+# The BASE form of a slice's container, generated the way perl's
+# vivification rule requires (task #720).  A slice is a SUBSCRIPTED
+# dereference, and perl vivifies the base of one — in RVALUE position too:
+# probed vs perl 5.40.3, `my @y = @{ $b{k} }[0,1]` leaves `$b{k}` an ARRAY
+# ref while the BARE `@{ $b{k} }` leaves the key absent.  That is exactly the
+# rule the `@` CAST emitter already applies to its own operand ("@ needs
+# lvalue context so subscripts return boxes → p-cast-@ can autoviv"), and it
+# is why the element sibling `@{ $hh{k} } = (5,6)` has always worked.
+#
+# The slice emitters generated their base in RVALUE context, so `$hh{k}`
+# lowered to `p-gethash`, which for a MISSING key hands back a throwaway box;
+# `p-cast-@` then autovivified into THAT box and every write through the
+# slice went nowhere — silent wrong — while the hash spelling died outright
+# in `p-cast-%`.  ONE helper, four callers (rule 11): a per-emitter bind
+# would be the same three lines copied four times.
+#
+# A BARE aggregate container (`@a[0,1]`, `@h{x,y}`) is unaffected: no
+# element access is generated, so `_elem_accessor` is never consulted.
+#
+# Each emitter keeps its OWN base rule (they differ — the two kv sites swap
+# the sigil of a bare container, and the hash site renders bare containers as
+# text) and hands it over as a thunk; what is shared, and belongs in exactly
+# one place, is the lvalue binding.
+sub _slice_base_form {
+  my ($self, $gen) = @_;
+  my $saved = $self->lvalue_context;
+  $self->lvalue_context(1);
+  my $form = eval { $gen->() };
+  my $err  = $@;
+  $self->lvalue_context($saved);
+  die $err if $err;
+  return $form;
+}
+
 sub _slice_container_form {
   my ($self, $kid_id, $form, $cast) = @_;
   my $node = $self->expr_o->get_a_node($kid_id);
@@ -3335,8 +3383,9 @@ sub gen_array_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $arr = $self->_slice_container_form($kids->[0],
-              $self->_paren_deref_base_form($kids->[0], 1)
-                // $self->gen_node_form($kids->[0]), 'p-cast-@');
+              $self->_slice_base_form(sub {                             # #720
+                $self->_paren_deref_base_form($kids->[0], 1)
+                  // $self->gen_node_form($kids->[0]) }), 'p-cast-@');
   return $self->_slice_in_context_form(['p-aslice', $arr, $self->_slice_index_forms($kids)], $node_id);
 }
 
@@ -3347,8 +3396,9 @@ sub gen_hash_slice_form {
   my $hash_node = $self->expr_o->get_a_node($kids->[0]);
   my $is_bare = ref($hash_node) eq 'PPI::Token::Symbol';
   my $hash = $is_bare ? $self->gen_node($kids->[0])
-                      : ($self->_paren_deref_base_form($kids->[0], 1)   # #612
-                         // $self->gen_node_form($kids->[0]));
+                      : $self->_slice_base_form(sub {                   # #612, #720
+                          $self->_paren_deref_base_form($kids->[0], 1)
+                            // $self->gen_node_form($kids->[0]) });
   # ONE swap helper (rule 11): _swap_elem_sigil also knows the PIPE-QUOTED
   # spelling (|@Ｘ| → |%Ｘ|), which this local copy did not — a non-ASCII hash
   # slice handed p-hslice the ARRAY of the same name and died "Not a HASH
@@ -3368,8 +3418,9 @@ sub gen_kv_hash_slice_form {
   my ($self, $node, $node_id, $kids) = @_;
   return undef unless @$kids;  # empty SLICE normalized: text twin printed a trailing space (task #78)
   my $hash = $self->_slice_container_form($kids->[0],
-               $self->_paren_deref_base_form($kids->[0], 1)             # #612
-                 // $self->gen_node_form($kids->[0]), 'p-cast-%');
+               $self->_slice_base_form(sub {                            # #612, #720
+                 $self->_paren_deref_base_form($kids->[0], 1)
+                   // $self->gen_node_form($kids->[0]) }), 'p-cast-%');
   return ['p-kv-hslice', $hash, $self->_slice_index_forms($kids)];
 }
 
@@ -3382,9 +3433,10 @@ sub gen_kv_array_slice_form {
   # names whose aggregate spelling is a FORM rather than a symbol.
   # #612: a parenthesised base is lowered structurally (the sigil swap is a
   # rewrite of a BARE container's NAME and has nothing to swap here).
-  my $arr = $self->_paren_deref_base_form($kids->[0], 1)
-            // $self->_bare_container_sym($self->expr_o->get_a_node($kids->[0]),
-                                          $self->gen_node($kids->[0]), q(@), q(%));
+  my $arr = $self->_slice_base_form(sub {                               # #720
+    $self->_paren_deref_base_form($kids->[0], 1)                        # #612
+    // $self->_bare_container_sym($self->expr_o->get_a_node($kids->[0]),
+                                  $self->gen_node($kids->[0]), q(@), q(%)) });
   # `(unbox $r)` stood here — the shape-blind half of _slice_container_form's
   # rule, right for a single-boxed anon ref and one layer short of \@named.
   my $arr_form = $self->_slice_container_form($kids->[0], $arr, 'p-cast-@');
