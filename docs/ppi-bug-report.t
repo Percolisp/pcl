@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 42;
+use Test::More tests => 44;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -611,4 +611,33 @@ PERL
         '`*@` should lex as one Symbol — a sigil character names a glob too' )
         or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
                                     grep { $_->significant } $doc->tokens);
+}
+
+# ── Bug 27: ->symbol answers `%x` for the `$x` in `*$x{SLOT}` ────────────────
+# NOT a mis-tokenization — the token stream for `*$x{SCALAR}` is right
+# (Cast(*) Symbol($x) Structure::Subscript({SCALAR})).  It is ->symbol, the
+# method documented to return "the ACTUAL symbol this token refers to", which
+# resolves `$foo{…}` to `%foo` UNLESS a cast trumps the braces — and its cast
+# set is `qw{ $ @ % }`, so `*` is missing.  But `*$x{SCALAR}` is perl's
+# glob-slot syntax, `*{$x}{SCALAR}`, whose operand is the SCALAR $x:
+#
+#   $ perl -e 'our $n = "g"; *{$n} = \10; print ${*$n{SCALAR}}'
+#   10
+#
+# and `*$x[0]{…}` is not valid perl at all, so braces after a `*` cast are
+# never an element access.  Five sites in core Carp.pm depend on it
+# (`*$_{HASH}`, `${*$_{SCALAR}}`), plus t/op/filetest.t, t/op/stat.t,
+# t/op/gv.t and t/uni/parser.t.  One-token fix: add `*` to
+# %cast_which_trumps_braces in PPI/Token/Symbol.pm.
+{
+    my $doc = PPI::Document->new(\'my $x = *$a{SCALAR};');
+    my ($sym) = grep { $_->isa('PPI::Token::Symbol') && $_->content eq '$a' } $doc->tokens;
+    is( ($sym ? $sym->symbol : '(no token)'), '$a',
+        '`$a` under a `*` cast is the SCALAR $a — the glob-slot operand' );
+}
+{
+    my $doc = PPI::Document->new(\'return *$_{HASH};');
+    my ($sym) = grep { $_->isa('PPI::Token::Magic') && $_->content eq '$_' } $doc->tokens;
+    is( ($sym ? $sym->symbol : '(no token)'), '$_',
+        '`$_` under a `*` cast is $_, not %_ (core Carp.pm:34)' );
 }

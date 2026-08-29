@@ -40,6 +40,32 @@ those two files and the live plan doc directly -- no new review-doc families.*
   70/1** (rows 48 + 67–70 + the `%foo::SIG` symbolic twin), parallel = serial.
   Guard `Pl/t/symref-package-01.t` 6 → 9 rows; ir-spec §7.1.  `cl/`-only, no
   generation bump.
+- **#663 CLOSED — the SYMBOL under a `*` cast is the glob-slot OPERAND, and
+  PPI's `->symbol` said otherwise.**  `PPI::Token::Symbol::symbol` resolves
+  `$x{…}` to `%x` unless a CAST trumps the braces, and its cast set is
+  `qw{ $ @ % }` — `*` is missing (PPI 1.291; `ppi-upstream-bugs.md` §27, Bug
+  27 in `ppi-bug-report.t`, canary in `misc-fixes-02.t`).  That ONE wrong
+  answer produced TWO failures: (a) the `my $a`/`my $b` exception rename skips
+  a token whose `->symbol` is a different variable, so `*$a{SCALAR}` kept
+  reading the never-assigned package global and the whole top-level form died
+  — `t/uni/parser.t` **18/5 with one aborted form → 28/30, 58 rows, no abort**
+  (two rows ABOVE the pre-regression 26/32); and (b) with a MAGIC symbol it
+  reached the expression compiler, so `*$_{HASH}` emitted
+  `(p-dynamic-typeglob (p-gethash %_ "HASH"))` — a typeglob of a phantom
+  `%_`'s element — a **SILENT WRONG live in core `Carp.pm`** (five sites).
+  **Fixed where all ~40 `->symbol` consumers pass through** (rule 11's
+  worked-example shape): `Pl::Parser::_brace_glob_slot_symbol` wraps the
+  Symbol's TEXT in braces in `_ppi_parse`'s repair group, so the reparse gives
+  `*{$x}{SLOT}` — emission-identical, and the subscript is no longer the
+  Symbol's sibling.  **The negative is PPI's own**: in `8 *$Config{sizesize}`
+  (`perl-tests/vec.t:195`) the `*` is an Operator, not a Cast — measured after
+  a call, subscript, hash element, string, number and paren.  Emission A/B
+  1036 files (lib + perl `t/` + cpan modules + shapes): exactly TWO diffs,
+  `uni/parser.t` (the rename) and `Carp.pm` (the silent-wrong), 0 RCDIFF;
+  `corpus-diff` IDENTICAL over 111.  Generation **v2-380**, three artifacts
+  regenerated (gen stamp only, content-identical); `pack.t` 5636/89 =
+  baseline.  Guard `Pl/t/glob-slot-operand-01.t` (6 rows, 1.1 s; inverse-run:
+  rows 1–2 fail without the pass).
 - Residue filed from the same probes: **#700** (the LITERAL `%foo::SIG`
   reaches the inherited symbol through the CL READER, not this resolver — the
   ONE leaky-magic row left; an EMISSION-side fix, shape and the rejected

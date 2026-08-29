@@ -1410,6 +1410,78 @@ that existed.
 
 ---
 
+## 27. `->symbol` answers `%x` for the `$x` in `*$x{SLOT}` — the `*` cast is missing from its "cast trumps braces" set  [CONFIRMED 1.291]
+
+**Scope note:** this is not a mis-TOKENIZATION — PPI's token stream for
+`*$x{SCALAR}` is right (`Cast(*) Symbol($x) Structure::Subscript({SCALAR})`).
+It is PPI's own documented ANALYSIS method giving a wrong answer for valid
+Perl, and the fix upstream is one token, so it is worth reporting here rather
+than filing as a PCL-only task.
+
+**Perl:** `*$x{SCALAR}` is the glob-slot syntax — `*{$x}{SCALAR}` — whose
+operand is the **scalar** `$x`.  The braces are the slot name, not a hash
+subscript.  Real code writes it:
+
+```
+*$_{HASH}         lib/5.40.3/Carp.pm:34, 122, 124   (five sites in one core module)
+${*$_{SCALAR}}    lib/5.40.3/Carp.pm:127
+*$fh{IO}          t/op/filetest.t:313, t/op/stat.t:485
+*$handleref{NAME} t/op/gv.t:1100
+${*$a{SCALAR}}    t/uni/parser.t:75, 76
+```
+
+`*$x[0]{…}` is not valid Perl at all (`syntax error … near "$a["`), so braces
+after a `*` cast are never an element access.
+
+**PPI:** `PPI::Token::Symbol::symbol` documents itself as returning "the ACTUAL
+symbol this token refers to" and resolves `$foo{…}` to `%foo` — correctly
+skipping that resolution when a cast trumps the braces.  Its cast set omits
+`*`:
+
+```perl
+my %cast_which_trumps_braces = map { $_ => 1 } qw{ $ @ % };   # PPI/Token/Symbol.pm
+```
+
+Measured on 1.291 (`$doc->find('PPI::Token::Symbol')`, `->symbol` per token):
+
+| source           | `->symbol` | perl means |
+|------------------|-----------|------------|
+| `$x = *$a{SCALAR};` | `%a`  | `$a`  ← **wrong** |
+| `$x = *$a{ARRAY};`  | `%a`  | `$a`  ← **wrong** |
+| `$x = $$a{k};`      | `$a`  | `$a`  (cast `$` trumps) |
+| `$x = @$a{'k','j'};`| `$a`  | `$a`  (cast `@` trumps) |
+| `$x = $a{k};`       | `%a`  | `%a`  |
+| `$x = ${$a}{k};`    | `$a`  | `$a`  |
+
+**Fix upstream:** add `*` to `%cast_which_trumps_braces`.  (`&` already returns
+early, one line above.)
+
+**Impact on PCL: two independent failures, one of them a SILENT WRONG** (task
+#663).  `->symbol` is the one question ~40 sites in the compiler ask a Symbol
+token — "which variable is this".  (a) The `my $a`/`my $b` exception rename
+skips a token whose `->symbol` is a different variable, so `*$a{SCALAR}` kept
+reading the never-assigned package global `$a`: the whole top-level form died
+`Can't use an undefined value as a symbol reference` and `t/uni/parser.t` lost
+35 rows of coverage (18/5 with one aborted form → 28/30, 58 rows).  (b) With a
+MAGIC symbol it reached the expression compiler: `*$_{HASH}` emitted
+`(p-dynamic-typeglob (p-gethash %_ "HASH"))` — a typeglob of the hash element
+`$_{HASH}` of a phantom `%_` — where perl reads the glob's HASH slot.  That one
+is live in core `Carp.pm`.
+
+**Workaround (s451w):** `Pl::Parser::_brace_glob_slot_symbol`, one pass in
+`_ppi_parse`'s repair group, wraps the Symbol's TEXT in braces so the reparse
+yields `*{$x}{SLOT}` — the spelling PCL's machinery already consumes,
+emission-identical, and a Symbol PPI can no longer mis-canonicalise because the
+subscript is no longer its next sibling.  It keys on `Token::Cast` eq `*`, and
+PPI itself separates the dangerous case: in `8 *$Config{sizesize}` (a real line
+in `perl-tests/vec.t`) the `*` is an `Operator`, not a `Cast` — verified after a
+call, a subscript, a hash element, a string, a number and a paren.
+
+**Repro + failing rows:** Bug 27 in `docs/ppi-bug-report.t`.  Guard:
+`Pl/t/glob-slot-operand-01.t`.
+
+---
+
 ## Possibly FIXED upstream — verify before trusting
 
 * **`word :` in a ternary lexed as a Label** — `Pl::PExpr::_fix_ppi_ternary_label_bug`

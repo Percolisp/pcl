@@ -412,6 +412,45 @@ sub _fix_spaced_sigils {
   return $changed;
 }
 
+# PPI's `->symbol` — the ONE question 40 sites in this compiler ask a Symbol
+# token, "which variable is this" — answers `%a` for the `$a` in `*$a{SCALAR}`.
+# Its rule is "a `{…}` after a `$`-symbol means the symbol is really `%a`,
+# UNLESS a cast trumps the braces", and its cast set is `$ @ %`: `*` is
+# missing (PPI 1.291, `PPI::Token::Symbol::symbol`, docs/ppi-upstream-bugs.md
+# §24).  But `*$a{SCALAR}` is perl's GLOB-SLOT syntax — `*{$a}{SCALAR}`, where
+# `$a` is the scalar holding the glob name — and `*$a[0]{…}` is not even valid
+# perl, so the braces after a `*` cast are never an element access.
+#
+# The damage was silent and total: `_rename_decl_within` skips a token whose
+# ->symbol is a different variable, so the `my $a` rename (`$a__excl__0`) left
+# the `$a` inside `*$a{SCALAR}` pointing at the never-assigned PACKAGE global
+# and the whole top-level form died "Can't use an undefined value as a symbol
+# reference" — t/uni/parser.t lost 35 rows to it (task #663).  Every OTHER
+# ->symbol consumer (span analysis, capture detection, promotion) was equally
+# misinformed.
+#
+# Fixed where all of them pass through, by normalising the odd spelling into
+# the one the generic machinery already consumes (CLAUDE.md rule 11): the
+# Symbol's text is wrapped in braces, so the caller's reparse produces
+# `*{$a}{SCALAR}` — the same emission (`(p-glob-slot (p-dynamic-typeglob $a)
+# …)`, verified byte-identical) with a Symbol PPI cannot mis-canonicalise,
+# because it no longer has the subscript as its own next sibling.
+sub _brace_glob_slot_symbol {
+  my ($doc) = @_;
+  my $changed = 0;
+  for my $tok (@{ $doc->find('PPI::Token::Cast') || [] }) {
+    next unless $tok->content eq '*';
+    my $sym = $tok->snext_sibling;
+    next unless $sym && $sym->isa('PPI::Token::Symbol') && $sym->raw_type eq '$';
+    my $after = $sym->snext_sibling;
+    next unless $after && $after->isa('PPI::Structure')
+             && ($after->braces // '') eq '{}';
+    $sym->set_content('{' . $sym->content . '}');
+    $changed = 1;
+  }
+  return $changed;
+}
+
 # ---- Core feature pragmas, answered for PPI's own lexer (task #360) -------
 #
 # PPI decides whether `try` / `signatures` are IN EFFECT at a token, and it
@@ -545,6 +584,7 @@ sub _ppi_parse {
   # is not a Word — and therefore invisible — before that pass.  A NAMED sub's
   # signature is already a Structure, so it never depended on the order.
   if ($doc && (_fix_modulo_magic($doc) | _fix_spaced_sigils($doc)
+               | _brace_glob_slot_symbol($doc)
                | $self->_extract_prototype_attributes($doc)
                | $self->_desugar_anon_signatures($doc)
                | _rewrite_current_sub($doc))) {

@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 122;
+plan tests => 123;
 
 sub run_cl {
     my ($code) = @_;
@@ -970,6 +970,15 @@ ok( !PPI::Document->new(\'for ${*$f} (5,11,33) { print }'),
         'CANARY: PPI still splits a filetest after a SCALAR filehandle into '
       . '`-` + Word — if this FAILS, drop _fuse_print_filehandle_filetest '
       . '(ppi-upstream-bugs.md §22)' );
+}
+{
+    my $doc = PPI::Document->new(\'my $x = *$a{SCALAR};');
+    my ($sym) = grep { $_->isa('PPI::Token::Symbol') && $_->content eq '$a' } $doc->tokens;
+    ok( $sym && $sym->symbol eq '%a',
+        'CANARY: PPI\'s ->symbol still answers `%a` for the `$a` in '
+      . '`*$a{SCALAR}` (the `*` cast is missing from its trumps-braces set) — '
+      . 'if this FAILS, drop _brace_glob_slot_symbol (ppi-upstream-bugs.md '
+      . '§27)' );
 }
 {
     # PPI's own answer, with NO callback attached — the state the feature table
