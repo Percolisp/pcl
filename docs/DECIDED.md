@@ -21,6 +21,53 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s451 (2026-08-29, Fable) — ROUND 10 reviewed and merged (X/W/Y/Z); the TAP-glue family named; six rulings
+
+- **Round 10 = X #542, W #685+#663+#694, Y #610+#620+#611+#612, Z
+  #702+#703+#700+#701+#711+#710 — ALL APPROVED and ff-merged** (final tree
+  `c880cd9`, gen **v2-395** adopted from Z's regeneration on exactly the
+  final content).  Every agent independently probed vs perl 5.40.3 by Fable
+  before its merge; inverse runs on the pre-merge tree where the fix owns
+  the change.  Sweep TOTAL **18327 (+2)** GATE CLEAN after row-by-row
+  baseline edits; drops 5 = census.
+- **The 2 LOST rows were the TAP-GLUE family (#723), PRE-EXISTING**: an
+  unterminated multi-write stderr diagnostic swallows the column-0 anchor of
+  exactly ONE stdout TAP row in the sweep's merged capture; #542 moved the
+  glue landing from a skip row to a pass row (reset.t 41→40, tr.t 239→238,
+  serially stable, probed on BOTH trees by manual child A/B).  Handling =
+  the USER-ratified interleave cadence (pass-baseline edited by hand with
+  cause); fix shape in #723 (line-atomic *error-output* wrapper inside
+  p-load-with-recovery, harness-only — no perl-fidelity constraint); the
+  class produces ±1 pass-baseline churn in PARTIAL files until fixed.
+- **runpcl-through-a-pipe is CORRECT tty behaviour**: runpcl captures SBCL
+  via backticks, so a tty invocation behaves as perl-through-a-pipe; the
+  #542 policy verifies on a DIRECT pty run.  Do not "fix" runpcl for this.
+- **Rulings recorded in tasks**: #701 die-shaped (value flows onward; ONE
+  shared marker predicate); #722 ratified (condition to a temp once, tested
+  twice, RHS in outer scope; probes+guards ARE the bar, unscheduled);
+  #733 (export scan decides import-name vs argument — conservative: unknown
+  name does NOT restrict the prototype merge); #700 rode this round's
+  emission work per its own scheduling ruling; #710 shipped the BOUNDED
+  shape (tty-output opens only; the open-path rewrite stays filed).
+- **Filed by Fable review probes**: **#736** (%ENV/%INC MARKER lacks the
+  flatten/referent arms — `my %d = %ENV` copies nothing, `%{\%ENV}` dies;
+  PRE-EXISTING both trees), **#737** (census MESSAGE column stale tree-wide
+  since the s440 `_dd` swap; counts stay the baseline).  Census: the Mojo
+  `_Collection.pm` board row was a stale COUNT, 2 → 4 by EDIT (verified by
+  transpile on 718db6b).
+- **Companion legs: 18 movers, ALL attributed** (five predicted; sub_lval =
+  Y; two known noise; three pre-existing/stale incl. two `--bless-rows`
+  re-blesses read row-by-row; **seven bisected to X's #542 merge point** —
+  the child-flush/capture family, +50 honest coverage rows, one #723 glue
+  instance (charset), one real 2-row loss = **#738** (rt119311
+  exit-in-format)).  **Standing lesson: a buffering/exit-path runtime
+  change's companion leg is op/ + re/ + uni/, not io/ alone** — X's io/-only
+  spot checks missed all seven.  gate-SET scan 718db6b↔final: ZERO diff.
+- **Process**: an accidentally-stopped agent resumes via SendMessage with
+  its worktree intact (commit + dirty diff — read the diff first, round-4
+  lesson reconfirmed); a launched agent's brief must name the CONCURRENT
+  agents' files so its rebase expectations are set at launch.
+
 ## s451y (2026-08-29, Opus, round 10 agent Y) — a CONTAINER declaration under a statement modifier (#620)
 
 - **The modifier comes off the token run ONCE, before either consumer.**

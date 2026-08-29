@@ -606,7 +606,7 @@
 #         a loud failure for a silent one is the wrong direction.  That one is
 #         not a census row at all today -- the `local` fall-through swallows it
 #         without a `;; PARSE ERROR`, which is exactly what #564 is about.
-board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Bug. Fell through. Missing case: [ x2
+board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	4	Bug. Fell through. Missing case: [ x2
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Context.pm	1	Handle single node of unknown type. Dump: x1
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Instance.pm	2	Handle single node of unknown type. Dump: x2
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	1	Can't call method "content" on an undefined value x1

@@ -101,7 +101,6 @@ mro/basic.t	[at t/mro/basic.t line 71]
 mro/basic.t	delete $package::{ISA}
 mro/basic.t	local *ISA
 mro/basic.t	local *ISA = []
-mro/basic.t	obliterating @ISA via glob assignment
 mro/basic.t	undef %package:: updates subclasses
 mro/basic_01_c3.t	... can(method) resolved itself as expected
 mro/basic_01_c3.t	... can(method) resolved itself as expected
@@ -1952,7 +1951,6 @@ run/fresh_perl.t	[perl \#112312] crash on syntax error
 run/fresh_perl.t	[perl \#112312] crash on syntax error - another test
 run/fresh_perl.t	[perl \#20667] unicode regex vs non-unicode regex
 run/fresh_perl.t	\# 20001210.003 (\#4893) mjd@plover.com
-run/fresh_perl.t	\# David Dyck
 run/fresh_perl.t	\# [ID 20001202.002 (\#4821)] and change \#8066 added...
 run/fresh_perl.t	\# core dump in 20000716.007 (\#3516)
 run/fresh_perl.t	for ("ABCDE") {

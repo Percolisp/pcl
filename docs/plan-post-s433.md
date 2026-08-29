@@ -160,6 +160,32 @@ below.  USER rulings now standing: #74's pack half waits on pclxs; ONE
 perf-shaped agent per round max (interleave, never displace); prose/doc
 tasks may run on Sonnet via the Agent model override.
 
+**ROUND 10 DONE (s451, 2026-08-29): ALL FOUR MERGED — X #542, W
+#685+#663+#694, Y #610+#620+#611+#612, Z #702+#703+#700+#701+#711+#710
+(final tree `c880cd9`, gen v2-395; sweep TOTAL 18327 (+2) GATE clean; the
+2 "LOST" rows = the pre-existing #723 TAP-glue family, pass-baseline edited
+with cause; records DECIDED §s451 + session-log §451).**  op/leaky-magic.t
+closes at 71/0; op/exec.t back to 24/1; uni/parser.t 28/30 no abort; the
+stdio buffering policy is perl's.  **NEXT (the queue as it now stands):**
+1. **The filler/regression pool, by what they block**: #684 (block-scoped
+   match-var restore, the round-8 review find), #736 (%ENV marker
+   flatten/referent arms — cl/-only, closes the last big %ENV gap), #723
+   (TAP-glue harness fix — stops the ±1 pass-baseline churn), #721 (list
+   assignment as a LIST-context value), #720 (lvalue slice through
+   autovivified element), #731/#732/#734 (Z's exec/override residue; #732
+   is gate-SET-scan-sized, NOT a filler), #730 (sysopen), #733 (ruled,
+   filler once the export-scan predicate exists), #735, #737 (census
+   message refresh, rides any census session).
+2. **Item 4 of the s448 queue**: the census push toward zero (34 files /
+   90 drops, all owned; child-drop sites #483, #480–#482); re-check the old
+   Q7 leftovers (#457, #464–#466, #468, #470) against the task store —
+   several overtaken; #582 only if inherited dispatch still lags.
+3. **Parked on standing rulings** (unchanged): boxed aggregates (Fable
+   design first), #221, E5.3 `local`, indirect object, #622 JS target.
+4. **USER decision still open: the v0.2 headline** — items 1–2 keep
+   producing "census to zero + errno/%ENV completeness + the buffering
+   policy"; recommendation unchanged.
+
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 
 1. **Fable design session(s)** — the five rulings damming the pool:

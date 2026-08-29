@@ -1,4 +1,8 @@
 # taken-at: 5323d9e 2026-08-15
+# s451 (round 10, edited ROW BY ROW): postfixderef.t 96/25 -> 100/21 (Y #612 made
+#   dropped statements run: 6 rows fixed, renumbered survivors, rows 72/73 honest
+#   PVBM fails); reset.t 41->40 + tr.t 239->238 = the #723 TAP-glue landing moved
+#   from a skip row to a pass row (#542 buffering; pre-existing glue, probed both trees).
 # s435 (THE FLIP — Option B phase 2's last step; ruled fable-answers-s433.md
 #   §A.1, accept-the-price ruled in the s435 review): a statement the compiler
 #   cannot lower is no longer replaced by `nil` with the program running on —
@@ -209,7 +213,7 @@ parent.t	OK	7	2	9
 pos.t	OK	15	15	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's
 #   ([perl #94476]); it left fail-baseline.tsv by EDIT in the same commit.
-postfixderef.t	PARTIAL	96	25	128
+postfixderef.t	PARTIAL	100	21	128
 pow.t	OK	268	0	268
 print.t	OK	2	1	3
 push.t	OK	32	0	32
@@ -224,7 +228,7 @@ recurse.t	OK	27	1	28
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
 ref.t	PARTIAL	193	16	245
-reset.t	PARTIAL	41	0	45
+reset.t	PARTIAL	40	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
@@ -239,7 +243,7 @@ study.t	OK	43	0	43
 sub.t	OK	62	2	65
 substr.t	PARTIAL	347	3	397
 time.t	OK	72	0	72
-tr.t	PARTIAL	239	3	317
+tr.t	PARTIAL	238	3	317
 translate.t	OK	257	0	257
 undef.t	OK	30	0	35
 unshift.t	OK	19	0	19

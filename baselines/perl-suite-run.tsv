@@ -853,7 +853,7 @@ comp/opsubs.t	36	0	31	5	DIFF		0
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)	0
 comp/package_block.t	7	0	0	7	DIFF		0
-comp/parser.t	191	0	49	49	DIFF	undef-fn:main::pl-FOO; aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through. 	5
+comp/parser.t	191	0	50	48	DIFF	undef-fn:main::pl-FOO; aborted-forms:1: PCL: statement not supported at parser.t line N: "${; =pod =cut }"; -- Bug. Fell through. 	5
 comp/parser_run.t	70	0	29	41	DIFF	unbound:$00	0
 comp/proto.t	216	0	47	14	DIFF	aborted-forms:1: Undefined subroutine &main::N called at (eval N) line N. 	0
 comp/redef.t	20	0	1	19	DIFF		0
@@ -876,7 +876,7 @@ io/eintr.t	0	0	0	0	NOTAP		0
 io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC	0
 io/errno.t	16	0	16	0	OK		0
 io/errnosig.t	1	0	0	1	DIFF		0
-io/fflush.t	7	0	3	1	DIFF	aborted-forms:1: The function main::pl-_create_runperl is undefined.	0
+io/fflush.t	7	0	4	0	DIFF	aborted-forms:1: Undefined subroutine &main::_create_runperl called	0
 io/fs.t	61	0	56	2	DIFF	aborted-forms:1: Could not delete the file "/tmp/pcl-test-N-N": Is a directory	0
 io/getcwd.t	0	0	0	0	NOTAP		0
 io/inplace.t	8	0	2	6	DIFF		0
@@ -915,7 +915,7 @@ io/socketpair.t	8	0	0	0	DIFF		0
 io/tell.t	36	0	26	0	DIFF	aborted-forms:1: The path #P"/tmp/nKNTIilTqW/t/>/tmp/pcl-test-N-N" does not exist.	0
 io/through.t	942	0	942	0	OK		0
 io/utf8.t	62	0	13	14	DIFF	aborted-forms:1: The function bytes::pl-length is undefined.	0
-mro/basic.t	66	0	34	23	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ISACLEAR'  | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions	0
+mro/basic.t	66	0	35	22	XDIFF	aborted-forms:2: Inconsistent hierarchy during CN merge of 'ISACLEAR'  | not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions	0
 mro/basic_01_c3.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/basic_01_c3_utf8.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hèllò" via package "Ｄiᚪၚd_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
 mro/basic_01_dfs.t	4	0	0	1	XDIFF	aborted-forms:3: Can't locate object method "hello" via package "Diamond_D" at - line N.  | not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs/mro-plan.md)	0
@@ -999,8 +999,8 @@ op/arith2.t	9	0	9	0	OK		0
 op/array.t	195	0	169	26	DIFF		0
 op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.	0
 op/attrhand.t	4	0	0	0	DIFF	aborted-forms:1: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle	0
-op/attrproto.t	48	0	17	28	DIFF		0
-op/attrs.t	157	2	37	67	DIFF	aborted-forms:2: The function attributes::pl-_guess_stash is undefined.	0
+op/attrproto.t	48	0	17	31	DIFF		0
+op/attrs.t	157	2	37	108	DIFF	aborted-forms:2: The function attributes::pl-_guess_stash is undefined.	0
 op/auto.t	47	0	47	0	OK		0
 op/avhv.t	40	0	39	1	DIFF		0
 op/bless.t	116	2	111	6	DIFF		0
@@ -1047,7 +1047,7 @@ op/evalbytes.t	9	0	5	4	DIFF		0
 #   #541-only both 23/2; the s/// commit 22/3; parallel=serial).  Mechanism NOT yet isolated —
 #   task #694 carries every measurement taken and the next discriminator (capture the row's
 #   own diag under recovery on both trees).
-op/exec.t	41	0	22	3	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
+op/exec.t	41	0	24	1	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
@@ -1107,7 +1107,7 @@ op/lc.t	2716	0	2685	31	DIFF		0
 #   pcl-EXPORTED symbol INHERITED into |FOO| — the SAME pre-existing mechanism rows 67-70 have
 #   always failed on; #561 added a member.  Task #685 owns the one-resolver fix (rows 48+67-70
 #   should flip together).
-op/leaky-magic.t	71	0	65	6	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
+op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
@@ -1145,7 +1145,7 @@ op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/pe
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
 op/packagev.t	307	0	197	110	DIFF		0
 op/pos.t	33	0	15	15	DIFF		0
-op/postfixderef.t	128	0	96	25	DIFF	aborted-forms:3: Undefined subroutine &main::foo called	0
+op/postfixderef.t	128	0	100	21	DIFF	aborted-forms:3: Undefined subroutine &main::foo called	0
 op/pow.t	268	0	268	0	OK		0
 op/print.t	3	0	2	1	XDIFF	not-supported.md §Unicode semantics differences — t3 is the ONLY failing row (2/1 vs perl 3/0): reading MALFORMED (overlong) UTF-8 through a `<:utf8` in-memory handle and printing it must pass the bytes through unchanged. Probe s319: PCL emits c3 81 c2 af … where perl emits c1 af …, i.e. it holds the scalar as CHARACTERS and re-encodes on output — no per-scalar UTF-8/byte flag (CL strings are always Unicode). NB the open itself was ALSO broken until s319 (task #171, `<:utf8` was rejected outright); this row is what remains after that fix.	0
 op/protowarn.t	12	0	4	8	DIFF		0
@@ -1163,12 +1163,12 @@ op/ref.t	257	0	199	43	DIFF	aborted-forms:1: PCL: statement not supported at ref.
 op/refstack.t	0	0	0	0	NOTAP		0
 op/repeat.t	50	0	47	3	DIFF		0
 op/require_37033.t	10	0	5	1	DIFF	aborted-forms:2: Can't locate test_use_N.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linu	0
-op/require_errors.t	73	0	3	68	DIFF		0
+op/require_errors.t	73	0	5	68	DIFF		0
 op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	25	19	DIFF		0
 op/reverse.t	25	0	25	0	OK		0
-op/rt119311.t	22	0	9	2	DIFF	aborted-forms:2: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t	0
+op/rt119311.t	22	0	9	0	DIFF	aborted-forms:2: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t	0
 op/runlevel.t	24	0	0	0	DIFF		0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0
@@ -1195,7 +1195,7 @@ op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / 
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
-op/sub_lval.t	211	0	51	48	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
+op/sub_lval.t	211	0	53	48	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	347	7	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
@@ -1247,7 +1247,7 @@ re/alpha_assertions.t	2279	0	1784	74	DIFF	aborted-forms:2: end of file on #<dyna
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 re/begin-once.t	2	0	1	1	DIFF		0
 re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF		0
-re/charset.t	8328	0	2776	2776	DIFF		0
+re/charset.t	8328	0	2776	2775	DIFF		0
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
 re/fold_grind_a.t	31	0	0	0	DIFF		0
@@ -1260,11 +1260,11 @@ re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
 re/pat.t	1263	4	0	0	DIFF		3
-re/pat_advanced.t	1678	0	950	730	DIFF		4
+re/pat_advanced.t	1678	0	673	223	DIFF		4
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_psycho.t	15	0	11	0	DIFF		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/pat_re_eval.t	527	0	64	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
+re/pat_re_eval.t	527	0	65	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_rt_report.t	2513	1	2458	52	DIFF		0
 re/pat_rt_report_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
@@ -1332,7 +1332,7 @@ re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to su
 run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	14	3	DIFF		0
-run/fresh_perl.t	91	0	56	35	XDIFF	unbound:H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
+run/fresh_perl.t	91	0	57	34	XDIFF	unbound:H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1381,11 +1381,11 @@ uni/package.t	18	0	8	10	DIFF		0
 #   round-5 merge order): the glob-ELEMENT read `${*$a{SCALAR}}` dies "Can't use an undefined
 #   value as a symbol reference" where perl reads the slot — task #663 has the 5-line ASCII
 #   repro; identical on base c8a8311 and main, parallel and serial.
-uni/parser.t	58	0	18	5	DIFF	aborted-forms:1: Can't use an undefined value as a symbol reference	0
+uni/parser.t	58	0	28	30	DIFF		0
 uni/readline.t	7	0	4	1	DIFF		2
 uni/select.t	3	2	1	4	DIFF		0
 uni/sprintf.t	52	0	49	3	DIFF		0
-uni/stash.t	48	1	43	6	DIFF		0
+uni/stash.t	48	1	44	6	DIFF		0
 uni/tie.t	9	1	9	1	OK		0
 uni/title.t	5936	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/tr_utf8.t	8	0	8	0	OK		0

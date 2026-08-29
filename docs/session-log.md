@@ -4,6 +4,87 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 451 (2026-08-29, Fable) — ROUND 10: four Opus agents launched, reviewed and merged (X #542 / W #685+#663+#694 / Y #610+#620+#611+#612 / Z #702+#703+#700+#701+#711+#710); batch legs run; TOTAL 18327 (+2)
+
+Round 10 ran off `718db6b` under the USER's 3-Opus cap, with Z added mid-round
+on the USER's ask (Z launched off `2264a3c`, after X+W merged; one accidental
+USER stop mid-#700 was resumed via SendMessage with the worktree intact —
+commit + dirty diff both survived, nothing redone).  Merge order X → W → Y →
+Z, each ff after Fable review (probe files vs perl 5.40.3 per agent: X 8/8
+pipe + direct-SBCL pty; W 4 files + 2 inverse-DIFF on the base; Y 3 files +
+3 inverse-DIFF; Z 5 files incl. the pty `a S b`).  Final tree `c880cd9`,
+generation **v2-395** (Z's, artifacts regenerated on exactly the final
+content — adopted per the round-5/7 precedent).
+
+**Review findings and rulings this session:**
+- **X's runpcl-tty divergence is the HARNESS, correctly**: runpcl captures
+  SBCL via backticks (a pipe), so a tty run through runpcl behaves like
+  perl-through-a-pipe; direct SBCL on the pty matches perl.  The `$|`-carry
+  ride-along RATIFIED (the ruling's own "$| keeps overriding" clause).
+- **The 2 LOST sweep rows (reset.t 41→40, tr.t 239→238) are the #723
+  TAP-GLUE family, PRE-EXISTING**: an SBCL stderr diagnostic ("While
+  evaluating the form starting at line N…of #P…") is written in pieces and
+  left unterminated; ONE following stdout row loses its column-0 anchor in
+  the merged capture.  Probed on 718db6b AND the merged tree by manual child
+  A/B: BOTH glue exactly one row; #542's block buffering only moved WHICH row
+  lands there (a `# skip` row before, a real pass now).  Pass-baseline edited
+  by hand with #723 as cause; #723 carries the harness-only fix shape
+  (line-atomic *error-output* wrapper in p-load-with-recovery) and the
+  warning that the class produces ±1 churn until fixed.
+- **#701 ruled die-shaped** (value flows onward; ONE marker predicate);
+  **#722 shape ratified** (condition to a temp once, tested twice; RHS in
+  the outer scope; unscheduled filler); **#733 ruled** (the export scan
+  decides import-name vs argument, conservative side); **#700 scheduling**
+  (bundle with an emission round) — executed by Z this same round.
+- **#736 filed (Fable probe find, PRE-EXISTING both trees)**: the %ENV/%INC
+  MARKER does not survive the list-flatten/referent paths — `my %d = %ENV`
+  copies nothing, `%{\%ENV}` dies, `%h = %{"main::ENV"}` yields one bogus
+  pair — one mechanism, the flatten/backslash consumers lack the marker arm
+  the keyed primitives have.
+- **Census**: the board Mojo `_Collection.pm` row was a stale COUNT (2 → 4,
+  verified by transpile on 718db6b too — pre-existing) — edited; the
+  tree-wide stale MESSAGE column (the s440 `_dd` swap) is **#737**.
+
+**Batch legs (final tree):** full gated sweep TOTAL **18327 (+2 = Y's
+postfixderef +4 − the two glue rows)**, GATE CLEAN after the row-by-row
+edits (postfixderef fail rows 16 → 21: 6 fixed by #612 leave, renumbered
+survivors re-anchored, rows 72/73 the honest PVBM pair; drops 5 = census;
+0 new / 0 fixed in stable files).  **gate-SET scan vs 718db6b: ZERO diff
+over both populations** (as Y predicted — its un-refused shapes occur in no
+population).  **Companion `--all --quick` 528 files: 18 serial-confirmed
+movers, every one attributed** — five predicted (fflush 4/0 X; exec 24/1
+W #694; leaky-magic 71/0 W #685+Z #700; postfixderef 100/21 Y #612;
+uni/parser 28/30 W #663), op/sub_lval 53/48 = Y (its A/B list), two known
+noise (pvbm 13th sighting, uni/variables TIMEOUT), three PRE-EXISTING on a
+718db6b worktree (comp/parser 50/48 stale row; mro/basic + run/fresh_perl =
+stale registered XDIFF rows — "obliterating @ISA via glob assignment" and
+the "\# David Dyck" row no longer diverge, re-blessed with `--bless-rows`
+after reading them), and **SEVEN bisected to agent X's #542 at the 80a11a7
+merge point** (identical at every later point): the child-flush/capture
+family — coverage GAINS attrs 37/108 (+41 honest rows run past the old
+stall), attrproto 17/31 (+3), require_errors 5/68 (+2), uni/stash 44/6,
+pat_re_eval 65/462; charset 2776/2775 = a #723 glue-mangled row (its
+description text is cut mid-line with "warning:" glued); and ONE 2-row
+coverage LOSS, **rt119311 9/0 — filed #738** (rows 10/11, exit-in-format
+DESTROY, the file now stops at row 9; discriminator in the task).  All 17
+snapshot rows spliced with these causes.  X's "nothing should move"
+prediction was wrong for the companion population — its spot checks were
+io/-heavy; the lesson: a buffering/exit change's companion leg is op/ + re/
++ uni/, not io/ alone.
+
+Agent session records: s451x and s451y wrote their own sections below; W's
+and Z's are their commit messages (W: `7ca3da4`/`f739254`/`60f3f27` —
+#685 one-resolver, #663 = PPI `->symbol` cast set misses `*` (§27),
+#694 = `_undelimit` ran on RAW-text synthetic wrappers; Z: `76715fd`/
+`fec2712`/`fbb0098`/`a569f57`/`c880cd9` — ONE command-capture lowering +
+`use subs` pre-pass with source position, %ENV marker predicate + rule-12
+die, the FOURTH name table over the #685 resolver + `local` deref kind,
+`use constant` visible to sub bodies, bounded tty-open rebuild with the
+finalizer hazard measured absent).  Tasks filed this round: #700–#703,
+#710–#711 (X/W), #720–#722 (Y), #730–#735 (Z), #723 + #736 + #737 (Fable).
+
+---
+
 ## Session 451y (2026-08-29, Opus agent Y, round 10) — the agent-P residue: two context bugs and two declaration arms (#611, #612, #610, #620)
 
 Four commits on `2264a3c` (rebased; main's generation was v2-380, mine is
