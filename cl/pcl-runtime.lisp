@@ -1600,7 +1600,7 @@
    p-cast-$.  Telling \\$x from a representation layer needs a referent-kind tag
    on the box, which PCL does not have; until it does, only the three
    UNAMBIGUOUS container types below count as mismatches."
-  (let ((hash (hash-table-p v))
+  (let ((hash (or (hash-table-p v) (%p-hash-marker-p v)))   ; %ENV/%INC: #736
         (ary  (and (vectorp v) (not (stringp v))))
         (code (functionp v)))
     (cond ((string= kind "HASH")  (or ary  code))
@@ -2716,7 +2716,12 @@
     ;; print the same word and the same (referent) address — #163.
     ((p-box-p v) (or (%p-ref-string v)
                      (format nil "SCALAR(0x~(~X~))" (object-address v))))
-    ((hash-table-p v) (format nil "HASH(0x~(~X~))" (object-address v)))
+    ;; A \%ENV / \%INC reference holds the MARKER where a hash ref holds the
+    ;; table (box-set stores the payload either way), so the two must print
+    ;; the same shape — the marker symbol is EQ across calls, so its address
+    ;; is as stable as a table's (task #736).
+    ((or (hash-table-p v) (%p-hash-marker-p v))
+     (format nil "HASH(0x~(~X~))" (object-address v)))
     ((vectorp v) (format nil "ARRAY(0x~(~X~))" (object-address v)))
     ;; A glob stringifies to its PERL spelling, so both halves must undo the
     ;; case inversion they are stored under — `*plain` printed `*MAIN::PLAIN`
@@ -4871,6 +4876,9 @@
       (,recurse ,item))
      ((null ,item)
       (vector-push-extend nil ,target))
+     ;; %ENV / %INC inside a list: the marker IS the hash (task #736).
+     ((%p-hash-marker-p ,item)
+      (,recurse ,item))
      (t
       (%p-array-store-scalar ,target ,item))))
 
@@ -4907,6 +4915,15 @@
                  ((listp src)
                   (loop for item in src
                         do (%p-array-fill-item item place add-items)))
+                 ;; %ENV / %INC: the marker IS the hash, expanded through the
+                 ;; one env/INC walk (%p-marker-pairs, task #736).  This
+                 ;; walker is p-array-fill's own (it preserves holes and
+                 ;; stores into PLACE), so the arm is spelled here as well as
+                 ;; in %p-flatten-list — the sibling hash-table arms are the
+                 ;; same pair.
+                 ((%p-hash-marker-p src)
+                  (loop for x across (%p-marker-pairs src)
+                        do (%p-array-store-scalar place x)))
                  ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
                  (t
                   (when src
@@ -5053,8 +5070,13 @@
                  ;; that must drop) — both are indistinguishable raw nils, so the
                  ;; real fix is a distinct hole marker at the (setf p-aref) source.
                  ((null item) nil)
-                 ((consp item)
-                  (loop for x in item do (add x)))
+                 ;; %ENV / %INC: the marker IS the hash (see %p-marker-pairs,
+                 ;; task #736).  Placed here, one arm above the scalar
+                 ;; fallthrough it used to take, so the aggregate fast paths
+                 ;; above cost nothing.
+                 ((%p-hash-marker-p item)
+                  (loop for x across (%p-marker-pairs item)
+                        do (vector-push-extend x result)))
                  (t
                   ;; Snapshot the value that box-set will store, not the box
                   ;; itself.  This prevents aliasing when the same boxes appear
@@ -7146,6 +7168,11 @@ create the key on a read-only call, which perl does not."
                     (vector-push-extend (make-p-box k) result)
                     (vector-push-extend (if (p-box-p v) v (make-p-box v)) result))
                   arg))
+        ;; %ENV / %INC in argument context: the marker IS the hash, so it
+        ;; spreads to pairs like any other (see %p-marker-pairs, task #736).
+        ((%p-hash-marker-p arg)
+         (loop for x across (%p-marker-pairs arg)
+               do (vector-push-extend x result)))
         (t
          ;; Scalar (p-box, string, number, etc.): keep as-is
          (vector-push-extend arg result))))
@@ -7482,6 +7509,25 @@ create the key on a read-only call, which perl does not."
   "True when H is one of the runtime's marker symbols for a non-table hash."
   (or (eq h '%ENV-MARKER%) (eq h '%INC-MARKER%)))
 
+(defun %p-marker-pairs (marker)
+  "MARKER (%ENV / %INC) expanded to the flat KEY VALUE KEY VALUE … vector a
+   real hash table flattens to, each element boxed.
+
+   ONE walk, and it is the one keys/each already read the process environment
+   (and *p-inc-table*) through — p-keys for the key set, p-gethash for each
+   value (task #736, rule 11).  The pair-expanding consumers — %p-flatten-list
+   and p-flatten-args, and through them p-hash-fill, p-array-= and every list
+   context — saw the marker SYMBOL as an ordinary scalar instead, so
+   `my %d = %ENV` produced ONE bogus pair (the marker's own name, undef value)
+   where perl copies the whole environment, and `foo(%ENV)` passed one argument
+   where perl passes 2×N."
+  (let* ((keys (p-keys marker))
+         (out (make-array (* 2 (length keys)) :adjustable t :fill-pointer 0)))
+    (loop for k across keys
+          do (vector-push-extend (make-p-box k) out)
+          (vector-push-extend (make-p-box (p-gethash marker k)) out))
+    out))
+
 (defun p-gethash-box (hash key)
   "Get the BOX at hash key (for l-value operations like chop, ++).
    Creates box if needed (autovivification). Returns the box itself."
@@ -7519,6 +7565,10 @@ create the key on a read-only call, which perl does not."
       ;; package hash named "" instead of Foo's symbol table.
       ((stringp h) (p-cast-% h))
       ((hash-table-p h) h)
+      ;; %ENV / %INC through a reference: the marker IS the hash, and both
+      ;; p-gethash arms take it (task #736), so `$$envref{PATH} = "x"` writes
+      ;; the real environment as perl does.
+      ((%p-hash-marker-p h) h)
       ;; Wrong kind of referent ($aryref->{k} = …): perl's fatal.
       ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
       ;; A ref to a plain SCALAR used as a hash ($scalarref->{k}): also perl's
@@ -7851,7 +7901,10 @@ create the key on a read-only call, which perl does not."
                  ;; store the result, rather than repeating the maphash.
                  ;; A hash REFERENCE is a p-box, not a raw table, so it still
                  ;; reaches the scalar arm and stays one element.
-                 ((hash-table-p e)
+                 ;; %ENV / %INC in a constructor — `[%ENV]`, `@{[%ENV]}` — is
+                 ;; the same case: the marker IS the hash, and %p-flatten-list
+                 ;; expands it to pairs (task #736).
+                 ((or (hash-table-p e) (%p-hash-marker-p e))
                   (add-element (%p-flatten-list e)))
                  ;; Vector (array) - flatten its contents, preserving bless class
                  ((vectorp e)
@@ -14329,7 +14382,14 @@ buffer's fill-pointer; everything else falls back to file-length."
     ;; Non-string vector (Perl array), hash, code, typeglob: wrap directly.
     ;; Strings are specialized vectors in CL but are Perl scalars, so exclude them here
     ;; — they fall through to the raw-scalar branch below.
-    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val) (functionp val))
+    ;; A %ENV / %INC MARKER is a hash for every purpose but its storage, so it
+    ;; takes the SAME arm: \%ENV is a HASH ref whose referent is the marker
+    ;; symbol, which is EQ across calls — so `\%ENV == \%ENV` and the address
+    ;; perl prints is stable, exactly as for a table (task #736).  Without this
+    ;; the raw-scalar branch below double-boxed it and %$r died "Not a HASH
+    ;; reference".
+    ((or (and (vectorp val) (not (stringp val))) (hash-table-p val) (functionp val)
+         (%p-hash-marker-p val))
      (make-p-box val))
     ;; Typeglob ref \\*foo: set is-ref so it is distinguishable from a *bare* glob
     ;; stored in a scalar (my $g = *foo).  A glob REF numifies to its address
@@ -14627,6 +14687,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     (cond
       ;; Direct hash — the common `%$href`, first so the hot path is free.
       ((hash-table-p v) v)
+      ;; %ENV / %INC reached through a reference (`my $r = \%ENV; %$r`) or a
+      ;; symbolic name (`%{"main::ENV"}` — %p-symref-hash hands the marker
+      ;; back): the marker IS the hash and every hash primitive knows it, so
+      ;; pass it on unchanged rather than letting it fall to (t v) by accident
+      ;; (task #736; the #701 arm in %p-symref-hash is the other half).
+      ((%p-hash-marker-p v) v)
       ;; %$scalarref — see p-cast-@'s arm (#163's referent rule); the p-box-p
       ;; guard is the whole cost when it does not apply.
       ((and (p-box-p v) (%p-scalar-referent-p val)) (%p-not-a-ref "HASH"))
@@ -14910,6 +14976,15 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Assign to a dereferenced hash: %$ref = (list).
    hash-ref is the box containing the hash reference.
    Gets or auto-vivifies the hash, then clears and repopulates it."
+  ;; %$r where $r is \%ENV / \%INC: the marker IS the hash, and p-hash-fill
+  ;; already knows how to REPLACE the process environment / the %INC table
+  ;; wholesale (its two place arms).  Route there instead of letting the
+  ;; autovivify arm below build a fresh table nothing reads — `%$envref = (…)`
+  ;; used to be a silent no-op (task #736).
+  (let ((marker (unbox hash-ref)))
+    (when (%p-hash-marker-p marker)
+      (p-hash-fill marker value)
+      (return-from p-hash-deref-= marker)))
   (let* ((inner (unbox hash-ref))
          (h (cond
               ;; Double-boxed (from \%hash): box(box(hash))
@@ -14968,6 +15043,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let ((u (unbox referent)))
          (or (and (vectorp u) (not (stringp u)))   ; holds an array ref
              (hash-table-p u)                       ; holds a hash ref
+             (%p-hash-marker-p u)                   ; holds \%ENV / \%INC (#736)
              (p-regex-match-p u)                    ; holds a regexp ref
              (functionp u)                          ; holds a code ref
              (p-typeglob-p u)                       ; holds a glob ref
@@ -15072,7 +15148,9 @@ buffer's fill-pointer; everything else falls back to file-length."
            (t (format nil "SCALAR(0x~(~X~))" (object-address referent))))))
       ((and (vectorp referent) (not (stringp referent)))
        (format nil "ARRAY(0x~(~X~))" (object-address referent)))
-      ((hash-table-p referent)
+      ;; %ENV / %INC: the marker symbol IS the referent, and it is EQ across
+      ;; calls, so the address is as stable as a table's (task #736).
+      ((or (hash-table-p referent) (%p-hash-marker-p referent))
        (format nil "HASH(0x~(~X~))" (object-address referent)))
       ((functionp referent)
        (format nil "CODE(0x~(~X~))" (object-address referent)))
@@ -15219,8 +15297,9 @@ buffer's fill-pointer; everything else falls back to file-length."
                 "REF")
                ;; Scalar reference: box containing box (from p-backslash $x)
                (t "SCALAR")))))
-      ;; Old-format hash reference (autovivified, single-boxed)
-      ((hash-table-p inner) "HASH")
+      ;; Old-format hash reference (autovivified, single-boxed) — and \%ENV /
+      ;; \%INC, whose referent IS the marker symbol (task #736).
+      ((or (hash-table-p inner) (%p-hash-marker-p inner)) "HASH")
       ;; Old-format array reference (autovivified, single-boxed)
       ((or (listp inner) (and (vectorp inner) (not (stringp inner)))) "ARRAY")
       ;; Code reference
