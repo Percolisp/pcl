@@ -21,6 +21,44 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s450 (2026-08-29, Fable) — ROUND 8 reviewed and BOTH MERGED; batch legs clean; the perf pair measured
+
+- **Round 8 merged** (T `5e2f498` → U `3c7c6ec` = main; Fable rebased U's
+  branch over T — doc-section conflicts only, both kept), every diff read,
+  probes vs perl per review (T: 3 files byte-identical incl. 134-key `%!`,
+  aliased-number pairs, RO store, clear-then-copy, pat.t:1715; U:
+  partition/failed-match probes + the 200k timing re-measured at 0.5 s).
+  Generation **v2-365** (T's; U bumps nothing by design).  T's ask
+  RATIFIED: the 11-name glibc errno fallback — platform parity was the
+  design's intent, sb-posix values win where present, the fallback is a
+  Linux table like `*p-signal-numbers*`.
+- **Legs**: full sweep GATE clean **TOTAL 18325 (+0)**, drops 5 = census
+  (T's one emission diff — `$!{ENOENT}` finally reading `%!` — moves no
+  verdict, as its 634-file A/B predicted); combined-tree gate + corpus-diff
+  run BEFORE the merge (182/6124 PASS, identical); companion op/+re/+uni/:
+  **op/utf8cache.t TIMEOUT 2/0 → DIFF 14/0** (#477 — the file completes)
+  and **re/reg_namedcapture.t 0/2 → 1/1** (#561; row 1 held by #671+#672),
+  both parallel=serial, spliced with causes.
+- **op/leaky-magic.t 66/5 → 65/6 — the batch's one regression, UNDERSTOOD
+  and FILED (#685)**: `%{"foo::!"}` now answers main's errno table because
+  the qualified-foreign symref finds the pcl-EXPORTED symbol INHERITED into
+  |FOO| — the SAME pre-existing mechanism rows 67–70 have always failed on
+  (#561 added a member; the scalar twin leaks too once the package exists,
+  probed).  Bounded: the only sigil-named pcl exports are the punct/magic
+  set.  Fix shape ruled in the task: `%p-symref-symbol` treats an
+  `:inherited` answer for an explicitly-qualified non-main name as NOT
+  FOUND; create shadows locally; ${"main::!"} + unqualified keep the magic.
+  Heads the next filler slot.
+- **Fable filing from review probes: #684** — match variables are
+  BLOCK-scoped in perl (leaving the enclosing block RESTORES `$&`/`$1`);
+  PCL keeps last-successful globally.  PRE-existing (probed on pre-#477
+  main); the while-//g-then-read idiom is the visible spelling; the state
+  is now 6 slots + captures, so a block save is O(groups) — measure the
+  rows behind it before building.
+- **The perf headlines, measured at review**: population compile 226.6 s →
+  62–78 s (warm hit 99.0 %; single Test2 file 0.70 → 0.13 s); the m//g
+  loop linear (200k 12.8 → 0.5 s; 1M 2.83 s vs perl 0.09 — residue #680).
+
 ## s450t (2026-08-29, Opus, round 8 agent T) — a COMPUTED magic gets a CANONICAL BOX, `%!` is a real hash of magic values, and `*A = *B` CLEARS (#561 + #602)
 
 - **A magic scalar whose EMISSION is an accessor call must ALSO exist as the

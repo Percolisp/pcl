@@ -146,9 +146,16 @@ IDENTICAL is its first bar leg — and the quadratic-pos runtime fix).
 Merge review owes: ONE sweep, op/+re/+uni/ legs (T touches errno/glob —
 include uni/ per the #663 lesson), corpus-diff-IDENTITY specifically
 asserted for U's cache, the 289-file timing A/B for #560.
+**ROUND 8 DONE (s450, same day): T+U merged, legs clean, records in DECIDED
+§s450 + session-log §450.  Filed at review: #684 (block-scoped match-var
+restore), #685 (qualified-foreign symref inherits exported magic — the
+leaky-magic family, fix shape ruled, HEADS the next filler slot).**
 **ROUND 9**: V = #541 + #520 + #521 + #522 (conditional local save/restore
-+ the s/// replacement family); #542 SOLO (its own sweep-wide price,
-ruled); then P's residue #610/#611/#612, #663, and item 4 below.
++ the s/// replacement family) — **LAUNCHED s450 (agent V, s450v, off
+`3c7c6ec`, gen v2-375, IDs 690–699)**; then **#685** + #663 (the two
+review-found regressions, one bundle — both single-resolver runtime fixes);
+#542 SOLO (its own sweep-wide price, ruled); then P's residue
+#610/#611/#612 and item 4 below.
 
 **THE QUEUE FOR THE COMING SESSIONS (written s448):**
 

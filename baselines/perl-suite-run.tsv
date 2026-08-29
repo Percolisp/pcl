@@ -1094,7 +1094,12 @@ op/lc.t	2716	0	2683	33	DIFF		0
 #   iterate through STDIN`) passes since s443f #491: a QUALIFIED spelling of a
 #   forced-main handle names that package's own glob, no longer aliasing main::ARGV.
 #   Attributed by running the file ALONE on a c76875a worktree (65/6) vs main (66/5).
-op/leaky-magic.t	71	0	66	5	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: /home/bernt/perlN/perlbrew/build/perl-N.N.N/	0
+# s450 (round 8): op/leaky-magic.t 66/5 -> 65/6 EDITED BY HAND — row 48 (`%{"foo::!"}` must be
+#   EMPTY) fails since s450t/#561 gave %! a real table: the qualified-foreign symref finds the
+#   pcl-EXPORTED symbol INHERITED into |FOO| — the SAME pre-existing mechanism rows 67-70 have
+#   always failed on; #561 added a member.  Task #685 owns the one-resolver fix (rows 48+67-70
+#   should flip together).
+op/leaky-magic.t	71	0	65	6	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
@@ -1208,7 +1213,11 @@ op/universal.t	142	2	80	64	DIFF		0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
-op/utf8cache.t	16	0	2	0	TIMEOUT	timeout	1
+# s450 (round 8): op/utf8cache.t TIMEOUT 2/0 -> DIFF 14/0 EDITED BY HAND — s450u/#477: the
+#   quadratic $&/$`/$' eager cut is gone (offsets + lazy cut), so the "quadratic pos" loop
+#   completes (200k chars 12.8s -> 0.72s, linear).  Parallel and serial agree; its one drop is
+#   the census's existing row.
+op/utf8cache.t	16	0	14	0	DIFF	aborted-forms:1: PCL: statement not supported at utfNcache.t line N: substr $x, N, N, = "\x{N}"; -- Bug. Fe	1
 op/utf8decode.t	710	0	620	90	DIFF		0
 op/utf8magic.t	6	0	2	4	DIFF		0
 op/utfhash.t	99	0	91	0	DIFF		0
@@ -1267,7 +1276,10 @@ re/reg_eval.t	8	0	1	7	DIFF	NOT fully registered: 1 unregistered diverging row(s)
 re/reg_eval_scope.t	48	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 re/reg_fold.t	6786	105	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC PCL: Internals::SvREADONLY: a SCA	0
 re/reg_mesg.t	3348	0	0	0	DIFF	aborted-forms:1: The function main::pl-display_rx is undefined.	0
-re/reg_namedcapture.t	2	0	0	2	DIFF		2
+# s450 (round 8): re/reg_namedcapture.t 0/2 -> 1/1 EDITED BY HAND — s450t/#561: `*Y = *!` now
+#   aliases the errno hash (row 2 passes... row 1 held by #671 (glob-slot subscript drop) and
+#   #672 (%- values must be arrayrefs)).  Parallel and serial agree.
+re/reg_namedcapture.t	2	0	1	1	DIFF		0
 re/reg_nc_tie.t	37	0	14	18	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-STORE; aborted-forms:5: The function |Tie::Hash::NamedCapture|::pl-FETCH is undefined.	0
 re/reg_nocapture.t	25	0	14	11	DIFF		0
 re/reg_pmod.t	88	0	58	30	DIFF		0

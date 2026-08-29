@@ -4,6 +4,25 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 450 (2026-08-29, Fable) — ROUND 8 merged (T+U) and legs run; round 9 agent V launched
+
+Round 8 ran as TWO agents (USER).  Both reviewed with independent probes
+and merged (T then U; Fable rebased U over T — doc conflicts only); ONE
+ask ruled (T's 11-name glibc errno fallback RATIFIED — platform parity was
+the design's intent).  Legs: sweep GATE clean TOTAL 18325 (+0); combined
+gate + corpus-diff before the merge; companion op/+re/+uni/ with the two
+predicted movers spliced (utf8cache.t TIMEOUT → 14/0 by #477;
+reg_namedcapture.t 0/2 → 1/1 by #561) and ONE regression, understood,
+spliced and filed: leaky-magic.t row 48 — the qualified-foreign symref
+inherits pcl-exported magic symbols, the rows-67–70 mechanism gaining a
+member (**#685**, fix shape ruled: `:inherited` = not-found for qualified
+non-main; create shadows).  Fable filed **#684** (perl's block-scoped
+match-var restore — pre-existing, surfaced while reviewing #477).  Perf
+verified at review: population compile 226.6 → 62–78 s; m//g linear.
+**Round 9 agent V launched mid-legs (USER: "start another Opus job")**:
+s450v = #541 (ruled conditional save/restore) + the s///-replacement
+family #520 → #522 → #521, off `3c7c6ec`, gen v2-375, IDs 690–699.
+
 ## Session 450t (2026-08-29, Opus, round 8 agent T) — the computed magics: #561 + #602
 
 **Both tasks shipped from the s449 design (`docs/computed-magic-design-s449.md`),
