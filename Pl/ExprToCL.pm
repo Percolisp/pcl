@@ -188,7 +188,7 @@ my %RUNTIME_NAMES = map { $_ => 1 } qw(
 # funcalls — they apply the same wrapper in gen_readline_form / gen_glob_form.)
 my %WANTARRAY_SENSITIVE = map { $_ => 1 } qw(
   reverse localtime gmtime caller unpack each splice readdir
-  getprotobyname getprotobynumber
+  getprotobyname getprotobynumber readpipe
 );
 
 # Only exceptions that need different CL names than p-<perl-op>
@@ -1844,6 +1844,26 @@ sub gen_funcall_form {
   }
 
   my $cl_func = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
+
+  # `readpipe EXPR` — the NAMED spelling of `` `CMD` ``/`qx`/`` <<`TAG` ``, and
+  # the SAME runtime function they lower to (task #734): one command capture,
+  # four surface syntaxes, so the #731 list-context record split is shared
+  # rather than re-derived.  It is spelled here and not in %RUNTIME_NAMES
+  # because the runtime name differs from the perl name AND because a package
+  # that displaced the builtin with `use subs` must keep winning — the same
+  # question `Pl::PExpr::_make_command_node` asks for the term spellings
+  # (#703), asked through the same Environment registry so the two cannot
+  # disagree.  `&readpipe(…)` (force_user_sub) bypasses builtins as always.
+  if ($func_name eq 'readpipe' && !$node->{force_user_sub}) {
+    my $fn   = $self->expr_o->get_a_node($kids->[0]);
+    my $at   = ($fn && ref($fn) && $fn->can('location')) ? ($fn->location || undef) : undef;
+    my $pkg  = $self->environment ? ($self->environment->current_package // 'main') : 'main';
+    $cl_func = 'p-backtick'
+      unless $self->environment
+             && $self->environment->can('builtin_is_overridden')
+             && $self->environment->builtin_is_overridden($pkg, 'readpipe',
+                                                          $at ? @$at[0,1] : ());
+  }
 
   # ---- converted special branches (same order as the text emitter; a
   # ---- non-matching shape FALLS THROUGH to the generic tail, exactly
@@ -3508,9 +3528,17 @@ sub gen_progn_form {
   return ['progn', @forms];
 }
 
+# `cmd` / qx{cmd} / <<`TAG` — WANTARRAY-SENSITIVE (task #731): list context
+# splits the captured output into $/ records.  Bound to the node's static
+# context exactly as `<FH>` is, and for the same reason — a backtick is a PPI
+# node type, not a funcall, so `%WANTARRAY_SENSITIVE` (which gen_funcall_form
+# reads, and which carries the NAMED `readpipe` spelling) never sees it.
 sub gen_backtick_form {
   my ($self, $node, $node_id, $kids) = @_;
-  return ['p-backtick', $self->gen_node_form($kids->[0])];
+  my $call = ['p-backtick', $self->gen_node_form($kids->[0])];
+  my $ctx  = defined $node_id
+             ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
+  return $self->_wrap_wantarray_ctx_form($call, $ctx);
 }
 
 # <FH> / <$fh> / <> — wantarray-sensitive, context-bound like the text emitter.

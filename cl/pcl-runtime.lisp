@@ -11867,94 +11867,101 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl getc — bareword filehandle is auto-quoted."
   (if args `(%p-getc-impl (%p-fh-arg ,(car args))) `(%p-getc-impl)))
 
+(defun %p-read-record (stream sep)
+  "ONE record from STREAM under perl's $/ rule SEP — nil at EOF.
+   Perl has exactly one such rule, and it is not readline's private property:
+   `readpipe` (backticks / qx) splits its captured output by the SAME rule in
+   list context (task #731), so this is a function of a STREAM and a
+   SEPARATOR, with the handle bookkeeping ($., *p-last-read-handle*) left to
+   %p-readline-impl, which is the only caller that has a handle at all.
+     nil        = slurp             \"\"  = paragraph
+     integer    = fixed-size record  else = that string, kept on the record."
+  (handler-case
+      (cond
+        ;; Slurp mode: $/ = undef - read entire file
+        ((null sep)
+         (let ((content (make-array 4096 :element-type 'character
+                                    :adjustable t :fill-pointer 0)))
+           (loop for char = (read-char stream nil nil)
+                 while char
+                 do (vector-push-extend char content))
+           (if (zerop (length content)) nil (coerce content 'string))))
+
+        ;; Record mode: $/ = \N - read exactly N characters per record.
+        ((integerp sep)
+         (let* ((buf (make-string sep))
+                (got (read-sequence buf stream)))
+           (if (zerop got) nil (subseq buf 0 got))))
+
+        ;; Paragraph mode: $/ = "" - read until blank line
+        ((string= sep "")
+         (let ((lines nil)
+               (seen-content nil)
+               (last-missing-nl nil))
+           (loop
+            (multiple-value-bind (line missing-nl) (read-line stream nil nil)
+              (cond
+                ((null line)
+                 ;; EOF: rebuild the record.  Only append the final newline
+                 ;; if the last content line actually had one — a file whose
+                 ;; last line lacks a trailing newline keeps it that way
+                 ;; (Perl does not invent one).
+                 (return
+                   (if lines
+                       (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
+                         (if last-missing-nl
+                             body
+                             (concatenate 'string body (string #\Newline))))
+                       nil)))
+                ((string= line "")
+                 (if seen-content
+                     (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
+                     nil))  ; Skip leading blank lines
+                (t
+                 (setf seen-content t
+                       last-missing-nl missing-nl)
+                 (push line lines)))))))
+
+        ;; Single character separator (common case, optimized)
+        ((= (length sep) 1)
+         (let ((sep-char (char sep 0))
+               (result (make-array 256 :element-type 'character
+                                   :adjustable t :fill-pointer 0)))
+           (loop for char = (read-char stream nil nil)
+                 while char
+                 do (vector-push-extend char result)
+                 when (char= char sep-char)
+                 do (loop-finish))
+           (if (zerop (length result)) nil (coerce result 'string))))
+
+        ;; Multi-character separator
+        (t
+         (let ((result (make-array 256 :element-type 'character
+                                   :adjustable t :fill-pointer 0))
+               (sep-len (length sep)))
+           (loop for char = (read-char stream nil nil)
+                 while char
+                 do (vector-push-extend char result)
+                 when (and (>= (length result) sep-len)
+                           (string= result sep
+                                    :start1 (- (length result) sep-len)))
+                 do (loop-finish))
+           (if (zerop (length result)) nil (coerce result 'string)))))
+    ;; Any stream error (e.g. reading from a directory) → return nil like Perl
+    (stream-error () nil)
+    (error () nil)))
+
 (defun %p-readline-impl (&optional fh)
-  "Perl readline / diamond operator <FH> - read a record from filehandle.
-   Respects $/ (input record separator):
-     default newline = line mode, undef = slurp, \"\" = paragraph, other = custom separator.
-   Returns nil at EOF. If no filehandle given, reads from *standard-input*.
-   Note: Unlike CL's read-line, this keeps the trailing separator (like Perl).
-   Updates $. (input line number) on each successful read."
+  "Perl readline / diamond operator <FH> — one record from a FILEHANDLE.
+   The record rule itself is %p-read-record; what belongs here is the handle:
+   which stream, which one `eof`/`$.` last referred to, and the line-counter
+   bump.  Returns nil at EOF; with no filehandle, reads *standard-input*."
   (let ((stream (if fh (p-get-stream fh) *standard-input*))
         (sep (get-input-record-separator)))
     ;; Remember the handle so a later argument-less `eof` tests THIS stream and
     ;; $. reports THIS handle's line counter.
     (when stream (setf *p-last-read-handle* stream))
-    (let ((%rl-result
-           (when stream
-             (handler-case
-                 (cond
-                   ;; Slurp mode: $/ = undef - read entire file
-                   ((null sep)
-                    (let ((content (make-array 4096 :element-type 'character
-                                               :adjustable t :fill-pointer 0)))
-                      (loop for char = (read-char stream nil nil)
-                            while char
-                            do (vector-push-extend char content))
-                      (if (zerop (length content)) nil (coerce content 'string))))
-
-                   ;; Record mode: $/ = \N - read exactly N characters per record.
-                   ((integerp sep)
-                    (let* ((buf (make-string sep))
-                           (got (read-sequence buf stream)))
-                      (if (zerop got) nil (subseq buf 0 got))))
-
-                   ;; Paragraph mode: $/ = "" - read until blank line
-                   ((string= sep "")
-                    (let ((lines nil)
-                          (seen-content nil)
-                          (last-missing-nl nil))
-                      (loop
-                       (multiple-value-bind (line missing-nl) (read-line stream nil nil)
-                         (cond
-                           ((null line)
-                            ;; EOF: rebuild the record.  Only append the final newline
-                            ;; if the last content line actually had one — a file whose
-                            ;; last line lacks a trailing newline keeps it that way
-                            ;; (Perl does not invent one).
-                            (return
-                              (if lines
-                                  (let ((body (format nil "~{~A~^~%~}" (nreverse lines))))
-                                    (if last-missing-nl
-                                        body
-                                        (concatenate 'string body (string #\Newline))))
-                                  nil)))
-                           ((string= line "")
-                            (if seen-content
-                                (return (format nil "~{~A~^~%~}~%~%" (nreverse lines)))
-                                nil))  ; Skip leading blank lines
-                           (t
-                            (setf seen-content t
-                                  last-missing-nl missing-nl)
-                            (push line lines)))))))
-
-                   ;; Single character separator (common case, optimized)
-                   ((= (length sep) 1)
-                    (let ((sep-char (char sep 0))
-                          (result (make-array 256 :element-type 'character
-                                              :adjustable t :fill-pointer 0)))
-                      (loop for char = (read-char stream nil nil)
-                            while char
-                            do (vector-push-extend char result)
-                            when (char= char sep-char)
-                            do (loop-finish))
-                      (if (zerop (length result)) nil (coerce result 'string))))
-
-                   ;; Multi-character separator
-                   (t
-                    (let ((result (make-array 256 :element-type 'character
-                                              :adjustable t :fill-pointer 0))
-                          (sep-len (length sep)))
-                      (loop for char = (read-char stream nil nil)
-                            while char
-                            do (vector-push-extend char result)
-                            when (and (>= (length result) sep-len)
-                                      (string= result sep
-                                               :start1 (- (length result) sep-len)))
-                            do (loop-finish))
-                      (if (zerop (length result)) nil (coerce result 'string)))))
-               ;; Any stream error (e.g. reading from a directory) → return nil like Perl
-               (stream-error () nil)
-               (error () nil)))))
+    (let ((%rl-result (when stream (%p-read-record stream sep))))
       ;; A successful record read bumps THIS handle's line counter ($.).
       (when (and stream %rl-result)
         (incf (gethash stream *p-fh-lines* 0)))
@@ -13302,8 +13309,16 @@ buffer's fill-pointer; everything else falls back to file-length."
         *p-undef*))))
 
 (defun p-backtick (cmd)
-  "Perl backticks - execute shell command and capture output.
-   Returns the stdout output as a string. Uses latin-1 so binary output won't crash.
+  "Perl backticks / qx / readpipe — run the command and capture its stdout.
+   WANTARRAY-SENSITIVE, exactly like readline (task #731): scalar/void context
+   gives the whole output as one string, LIST context gives the output SPLIT
+   INTO RECORDS by $/, each record keeping its separator — perl's readpipe is
+   the pipe-shaped twin of readline and shares its record rule, including
+   `local $/ = undef` (one record), `$/ = \"\"` (paragraph mode) and a custom
+   separator.  Empty output is the EMPTY LIST in list context and \"\" in
+   scalar.  The split goes through %p-read-record, the SAME reader readline
+   uses — a second splitter here would be a copy that drifts.
+   Uses latin-1 so binary output won't crash.
    PERL_FLUSHALL_FOR_CHILD first — my_popen runs it, and the child inherits
    STDERR, so a block-buffered handle must not hold text across the fork."
   (%p-flush-all-output)
@@ -13317,7 +13332,22 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (loop for c = (read-char (sb-ext:process-output proc) nil nil)
                          while c do (write-char c s)))))
     (sb-ext:process-wait proc)
-    output))
+    (if (eq *wantarray* t)
+        (%p-split-records output)
+        output)))
+
+(defun %p-split-records (text)
+  "TEXT split into perl records by the current $/ — the list-context answer of
+   a command capture.  One reader (%p-read-record) over a string stream, so the
+   $/ rules cannot disagree between readline and readpipe."
+  (let ((result (make-array 8 :adjustable t :fill-pointer 0))
+        (sep (get-input-record-separator)))
+    (with-input-from-string (s text)
+      (loop
+       (let ((rec (%p-read-record s sep)))
+         (if rec
+             (vector-push-extend (make-p-box rec) result)
+             (return result)))))))
 
 ;;; ============================================================
 ;;; Environment Variables (%ENV)

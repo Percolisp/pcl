@@ -3976,6 +3976,17 @@ sub handle_subcalls {
           my($top_node, $top_id) = $self->make_node_insert('funcall');
           my $node_id = $self->make_node($now);
           $self->add_child_to_node($top_id, $node_id);
+          # A zero-arg funcall built HERE needs the `$_`/`@_` default exactly
+          # as the three sibling sites do — the helper is a no-op for anything
+          # whose spec carries neither -2 nor -3, so this cannot reach a user
+          # sub.  Reachable when the name is a `-2` BUILTIN that the
+          # zero-param branch above declined because `no_params_of_sub`
+          # answered for a same-named DECLARED SUB instead (that table is
+          # keyed by the bare name, #421): `local $_ = …; join(",","a",
+          # readpipe,"c")` in a file that also declares `sub readpipe`
+          # elsewhere built `(p-backtick)` with no argument at all — an arity
+          # error where perl reads $_ (t/op/exec.t:141, task #734).
+          $self->add_implicit_default_param($sub_name, $top_id);
           $e->[$i] = $self->make_subtree_item($top_id, 'funcall');
           next;
         }
@@ -5152,10 +5163,14 @@ sub child_context {
       # `push @a, length reverse $s` counts characters.  Without this the arg
       # inherits the caller's list context and a context-sensitive callee like
       # reverse/sort returns a list.
+      # `readpipe` is one of them (task #734): its prototype is `$`, so
+      # `join(",", "a", readpipe(f()), "b")` calls f in SCALAR context even
+      # though readpipe itself is in list context there — t/op/exec.t's
+      # "readpipe argument context in list context" row asserts exactly that.
       if ($func_name && $func_name =~ /^(length|uc|lc|ucfirst|lcfirst|fc
                                          |ord|chr|hex|oct|quotemeta
                                          |abs|int|sqrt|sin|cos|exp|log
-                                         |defined|ref)$/x) {
+                                         |defined|ref|readpipe)$/x) {
         return SCALAR_CTX
             if $child_index >= 1;
       }

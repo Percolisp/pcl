@@ -551,6 +551,12 @@ has known_no_of_params => (
       warn       => -1,         # warn LIST
       exit       => [0, 1],     # exit or exit EXPR
       system     => -1,         # system CMD or system PROG, ARGS
+      # readpipe EXPR / readpipe (defaults to $_) — the NAMED spelling of
+      # `CMD` / qx{CMD} / <<`TAG`, and a first-class builtin in its own right
+      # (t/op/exec.t rows 21-26).  It emits the SAME p-backtick the term
+      # spellings do (gen_funcall_form in Pl::ExprToCL), so its list-context
+      # record split and its `use subs` override come for free — task #734.
+      readpipe   => [1, -2],    # readpipe EXPR or readpipe (defaults to $_)
       do         => 1,          # do BLOCK or do FILE (always 1 arg)
       eval       => [0, 1, -2], # eval EXPR or eval BLOCK or eval (defaults to $_)
       require    => [0, 1, -2], # require [VERSION|MODULE|FILE]; bare = $_ as file

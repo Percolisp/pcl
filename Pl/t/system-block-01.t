@@ -52,7 +52,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 24;
+plan tests => 31;
 
 # --- transpile (codegen) checks: the block lowers to a plain program arg ---
 like transpile('system { "/bin/echo" } "argv0", "x";'),
@@ -202,3 +202,69 @@ is run_cl(q{package z; print "b=[", `/bin/echo pre`, "]";}
         . q{ print "a=[", `/bin/echo post`, "]";}),
    "b=[pre\n]a=[OVR:/bin/echo post]",
    'a backtick BEFORE the `use subs` is still the builtin (perl-probed)';
+
+# ── #731: a command capture is WANTARRAY-SENSITIVE ──────────────────────────
+# perl's readpipe is the pipe-shaped twin of readline: LIST context splits the
+# captured output into $/ records, each keeping its separator; scalar context
+# gives the whole output as one string.  p-backtick answered the string in
+# every context, so `for my $l (`cmd`)` iterated ONCE over everything and
+# `my @a = `cmd`` was a one-element list — silent wrong, and the value flows
+# on.  Every expected string below is perl 5.40.3's own output.
+
+is run_cl(q{my @a = `printf 'x\ny\n'`; my $s = `printf 'x\ny\n'`;}
+        . q{ my @b = qx{printf 'p\nq\n'};}
+        . q{ print "a=", scalar(@a), ":", join("|",@a), " s=", length($s), " b=", scalar(@b), "\n";}),
+   "a=2:x\n|y\n s=4 b=2\n",
+   '#731 backticks and qx split into $/ records in list context';
+
+is run_cl(q{my $n = 0; $n++ for `printf 'l1\nl2\nl3\n'`;}
+        . q{ my @e = `true`; my $es = `true`;}
+        . q{ my @nt = `printf 'no-newline'`;}
+        . q{ print "n=$n e=", scalar(@e), " es=", length($es), " nt=", scalar(@nt), ":$nt[0]\n";}),
+   "n=3 e=0 es=0 nt=1:no-newline\n",
+   '#731 foreach iterates per record; empty output is the empty list';
+
+# The $/ rule is ONE rule — the same one readline uses, including slurp,
+# paragraph mode and a custom separator.
+is run_cl(q[{ local $/ = undef; my @c = `printf 'a\nb\n'`; print "slurp=", scalar(@c), " "; }]
+        . q[{ local $/ = ""; my @d = `printf 'a\n\n\nb\nc\n'`; print "para=", scalar(@d), " "; }]
+        . q[{ local $/ = "X"; my @e = `printf 'aXbXc'`; print "cust=", scalar(@e), ":", join("|",@e), "\n"; }]),
+   "slurp=1 para=2 cust=3:aX|bX|c\n",
+   '#731 $/ = undef / "" / a custom string all apply';
+
+# ── #734: `readpipe` as a NAME ──────────────────────────────────────────────
+# perl spells every command capture `readpipe EXPR`, and the named form is a
+# first-class builtin (t/op/exec.t rows 21-26).  PCL knew only the term
+# spellings, so the name was an undefined sub — and, where a `sub readpipe`
+# existed anywhere in the file, the bare form silently became the STRING
+# "readpipe".  It routes to the same p-backtick, so #731 applies to it too.
+
+is run_cl(q{my @c = readpipe("printf 'm\nn\n'"); my $s = readpipe("printf 'm\nn\n'");}
+        . q{ my @d = readpipe "printf 'p\nq\n'";}
+        . q{ print "c=", scalar(@c), " s=", length($s), " d=", scalar(@d), "\n";}),
+   "c=2 s=4 d=2\n",
+   '#734 readpipe(EXPR) and readpipe EXPR run the command, list-split';
+
+is run_cl(q{local $_ = "printf 'f\n'";}
+        . q{ print "s=[", scalar(readpipe), "] j=[", join(",", "a", readpipe, "c"), "]\n";}),
+   "s=[f\n] j=[a,f\n,c]\n",
+   '#734 bare readpipe defaults to $_ in both contexts';
+
+# The argument is a `$` prototype slot: SCALAR context even when the readpipe
+# itself is in list context (t/op/exec.t "readpipe argument context in list
+# context").  And a `sub readpipe` elsewhere in the file must not disturb the
+# bare form — that is what used to strip the $_ default off it.
+is run_cl(q{sub rpechocxt { my $c = wantarray ? "list" : defined(wantarray) ? "scalar" : "void"; return "printf '$c\n'" }}
+        . q{ print "l=[", join(",", "a", readpipe(rpechocxt()), "b"), "]\n";}
+        . q{ package o { use subs "readpipe"; sub readpipe { pop } }}),
+   "l=[a,scalar\n,b]\n",
+   '#734 the argument is scalar context, and a sibling `sub readpipe` does not disturb it';
+
+# INVERSE — an overriding package still wins for the NAMED form, exactly as
+# it already does for the term spellings (#703), and main:: still runs the shell.
+is run_cl(q{package O; use subs "readpipe"; sub readpipe { "OVR:$_[0]" }}
+        . q{ my $n = readpipe("named"); my @l = readpipe("namedlist");}
+        . q{ package main; my $c = readpipe("/bin/echo core");}
+        . q{ print "n=$n l=", scalar(@l), ":$l[0] c=$c";}),
+   "n=OVR:named l=1:OVR:namedlist c=core\n",
+   '#734 inverse: `use subs "readpipe"` wins for the named form too';

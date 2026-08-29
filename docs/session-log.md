@@ -82,6 +82,48 @@ run.  The honest shape of the family, recorded in #753: PCL over-vivifies a
 BARE rvalue deref because the cast emitter cannot tell lvalue from rvalue —
 the `@` twin has carried that since forever.
 
+**#731 + #734 — a command capture is wantarray-sensitive, and `readpipe` is
+its name.**  perl's `readpipe` is the pipe-shaped twin of `readline`: LIST
+context splits the captured output into `$/` records, each keeping its
+separator.  `p-backtick` returned the whole string in every context, so
+`for my $l (`cmd`)` iterated ONCE over everything and `chomp(my @l = `cmd`)`
+left the inner newlines.  The fix reuses the reader rather than growing a
+second splitter: **`%p-read-record`** is extracted out of `%p-readline-impl`
+(one `$/` rule, two consumers — the handle bookkeeping, `$.` and
+`*p-last-read-handle*`, stays with readline, the only consumer that has a
+handle), and `p-backtick` runs it over a string stream in list context.  The
+context bind is `gen_backtick_form`'s, exactly like `<FH>`'s: a backtick is a
+PPI node type, not a funcall, so `%WANTARRAY_SENSITIVE` never sees it.
+
+**#734** makes `readpipe` a builtin NAME (`known_no_of_params => [1,-2]`)
+routed by `gen_funcall_form` to the SAME `p-backtick`, asking
+`builtin_is_overridden` first so a `use subs "readpipe"` package keeps winning
+for the named form exactly as it does for the terms (#703, probed both ways).
+Two sibling gaps surfaced while doing it and are fixed in the same commit:
+
+- `handle_subcalls`'s **binary-operator** branch builds a zero-arg funcall and
+  never called `add_implicit_default_param`, unlike its three siblings.  It
+  only shows when a `-2` builtin's name is ALSO a declared sub somewhere in
+  the file (the arity table is keyed by the bare name, #421) — then
+  `join(",", "a", readpipe, "c")` emitted `(p-backtick)` with NO argument.
+  Found in the op/exec.t A/B, reproduced in four lines, fixed by calling the
+  shared helper (a no-op for anything without a `-2`/`-3` spec).
+- `readpipe`'s ARGUMENT is a `$` prototype slot, so it is SCALAR context even
+  when the readpipe is in list context — `child_context`'s named-unary list.
+
+Emission: corpus-diff **2 of 111** (`magic.t`, `sprintf.t`); emission-ab over
+1030 files **SAME 999 / DIFF 31 / RCDIFF 0**, and an atom-multiset compare
+(whitespace, parens and the ctx-macro heads removed) shows **30 of the 31 are
+a context wrap and nothing else**.  The 31st is `t/op/exec.t`, #734's own
+target: two named calls become `p-backtick`, two bare ones gain `$_`, and the
+forward declaration PCL used to emit for the "undeclared sub" readpipe
+disappears — the two real `o::pl-readpipe` override calls stay.  op/exec.t's
+verdict is **unchanged** (`C_ok 24/1` on both trees, = the blessed snapshot):
+the file aborts at `Couldn't execute "lskdfj"` before the readpipe rows, so
+the `Pl/t` guards are the bar, not exec.t.  Gate **184/6234**; the three
+artifacts regenerate identically.  Guards `Pl/t/system-block-01.t` 24 → 31,
+all seven failing on `0dd7434`.
+
 Filed from the probes, all PRE-EXISTING and none touched: **#750** (a
 DEREFERENCED array/hash in a list LHS is not greedy — `($x, @$r) = (1,2,3)`
 leaves `@$r` empty, silent wrong), **#751** (`sub f { my ($x) = @_ }` returns

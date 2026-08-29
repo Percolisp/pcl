@@ -61,6 +61,30 @@ those two files and the live plan doc directly -- no new review-doc families.*
   vivifications.  Guards `Pl/t/aassign-01.t` 32 → 35 (rows 33–34 fail on
   `0dd7434`, row 35 passes there).
 
+- **A COMMAND CAPTURE IS WANTARRAY-SENSITIVE, AND `readpipe` IS ITS NAME
+  (#731 + #734).**  perl's `readpipe` is the pipe-shaped twin of `readline`:
+  LIST context splits the captured output into `$/` records, each keeping its
+  separator; scalar/void gives the whole output as one string, and empty
+  output is the EMPTY LIST in list context.  `p-backtick` answered the string
+  in every context, so `for my $l (`cmd`)` iterated ONCE over everything.  The
+  split goes through **`%p-read-record`**, extracted out of
+  `%p-readline-impl` — one $/ reader, two consumers, so slurp / paragraph /
+  custom-separator cannot drift between them; the handle bookkeeping (`$.`,
+  `*p-last-read-handle*`) stays with readline, which is the only consumer that
+  has a handle.  The context bind is `gen_backtick_form`'s, like `<FH>`'s —
+  a backtick is a PPI node type, not a funcall, so `%WANTARRAY_SENSITIVE`
+  never sees it (`readpipe` is in that table for the named form).
+  **#734**: `readpipe` is `known_no_of_params => [1,-2]` and `gen_funcall_form`
+  routes it to the SAME `p-backtick`, asking `builtin_is_overridden` first so
+  a `use subs "readpipe"` package keeps winning exactly as it does for the
+  term spellings (#703).  Two sibling gaps surfaced and were fixed with it:
+  a zero-arg funcall built by `handle_subcalls`'s **binary-operator** branch
+  never got `add_implicit_default_param` (so a `-2` builtin whose name is ALSO
+  a declared sub somewhere in the file lost its `$_` — `(p-backtick)` with no
+  argument), and `readpipe`'s argument needs SCALAR context from
+  `child_context`'s named-unary list (its prototype is `$`).  Guards
+  `Pl/t/system-block-01.t` 24 → 31; all seven fail on `0dd7434`.
+
 ## s452aa (2026-08-29, Opus agent AA, round 11) — the %ENV/%INC marker on the LIST paths (#736), the TAP glue KILLED (#723), sysopen (#730), `exit` in an END block (#738)
 
 - **A `%ENV`/`%INC` MARKER is a HASH everywhere, not just on the keyed
