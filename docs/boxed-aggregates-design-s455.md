@@ -94,8 +94,206 @@ element boxes (slice machinery itself — measure again after).
 
 ---
 
-*(§4 mechanism details, §5 corpus event sizing, §6 phased plan + bars, §7
-open questions — next checkpoints.)*
+## 4. The mechanism, decided per event
+
+### 4.1 The two rules every path shares
+
+- **READ**: `unbox` of a raw value is identity — every existing read path
+  (`p-aref`, `p-gethash`, flatten-for-print, coercions) already handles a
+  raw slot.  No read site changes.
+- **WRITE** (the invariant from §2): `slot holds p-box → (box-set slot v)`;
+  else `(setf slot v-raw)` where `v-raw` = `(unbox v)` — storing a VALUE,
+  never someone else's box (storing a caller's box would create aliasing
+  perl doesn't have; today's box-set into a fresh slot box has the same
+  copy semantics).  One `p-box-p` branch per element write, replacing
+  today's vivify-or-box-set — strictly less work.
+
+### 4.2 Promotion — ONE function
+
+`%p-elem-cell (vec i)` / hash twin: if slot holds a box, return it; if raw
+(or nil under lvalue rules), `(setf (aref vec i) (make-p-box raw))`, return
+the box.  This is `p-aref-argbox`'s existing arm, extracted and named; the
+consumers are E1 (argbox — already does it), E3/E7's aliasing arm, E4
+(`p-aref-box`/`p-gethash-box` raw arm), E5 (`local` element).  Promotion is
+**monotone**: nothing ever demotes a slot (a demotion would detach live
+aliases).  Whole-container assignment REPLACES slots wholesale with raw
+values — that is not demotion, it is perl's own copy-breaks-aliasing.
+
+### 4.3 E2, the flatten-into-@_ problem — amortized monotone promotion
+
+`f(@a)` must let the callee write `$_[N]` through to `@a`.  Three options
+weighed:
+
+- *(a) lazy defelem-style view per element* — allocates a cell per element
+  per CALL: same cost as today's flatten or worse.  Rejected.
+- *(b) pass raw values* — breaks @_ writes silently.  Rejected outright
+  (the one unaffordable failure mode).
+- **(c) promote-on-flatten (CHOSEN)**: flattening a plain array into a
+  user-sub argument list promotes each raw slot ONCE (`%p-elem-cell`) and
+  passes the boxes, exactly today's @_ shape from there on.  The cost is
+  one allocation per element the FIRST time; an array repeatedly passed
+  whole converges to all-boxed — i.e. to today's representation, never
+  worse.  Arrays that are never flattened into calls (loop accumulators,
+  temporaries, build-and-return lists — the hot-path population) stay raw
+  forever.
+- **(c′) the fast path over (c)**: when the callee is KNOWN and its
+  `writes_args` fact (Parser2.pm:1766, shared scan with VarAnnotator:855)
+  is false, pass raw values without promoting — reads of `$_[N]` work on
+  raw values as they do everywhere.  Same closed-world conditions as every
+  sub_info consumer.  This is an optimization on top of (c), not a
+  correctness requirement, and can ship later.
+
+Builtins never alias their list args through @_ (they are language, and
+`p-flatten-args` for builtins reads VALUES) — builtin calls do not promote.
+The exceptions that WRITE their operand aggregate (`sort` in-place,
+`splice`, `reverse @a` lvalue…) operate on the container, not through
+element identity — container ops follow the write rule per slot.
+
+### 4.4 E3/E7, foreach/map/grep binding — two arms
+
+- **Proven arm**: the VarAnnotator's existing unboxable verdict for the
+  loop VARIABLE (the same facts that drive `p-foreach-range-raw`, extended
+  to foreach-LIST) ⇒ bind the RAW slot value directly.  No promotion, no
+  allocation — the read-only loop over a raw array touches nothing.  This
+  arm also finally gives #810's read-only literal-list case its honest
+  shape.
+- **Unproven arm**: `%p-foreach-elt`'s raw case flips from "fresh
+  TEMPORARY" (correct today only because raw slots are provably-unaliased
+  intermediates; a silent-wrong under raw-default) to **promote in place
+  and bind the box** — writes through the loop var reach the slot, exactly
+  perl.  Holes keep the defelem arm unchanged.
+
+### 4.5 What stays fully boxed, permanently
+
+Tied containers, magic containers (`@-`/`@+` — #680's in-place magic boxes
+are the semantics), `%ENV`-marker machinery (#736 family), and any
+container the tie/magic dispatch already routes specially.  The promotion
+design touches PLAIN containers only; the existing dispatch is the fence.
+
+### 4.6 Emission side
+
+Almost none.  The representation change is runtime-internal: accessors and
+their setf expansions change ARMS, not names.  Candidate Kind-A gate
+(`raw-elems`, PCL_OPT-switchable) for the WRITE-side raw arm so the whole
+design is bisectable at runtime — but note the storage is shared state:
+mixing gate-on and gate-off code over one container is fine BY DESIGN
+(boxed slots are always legal; the gate only decides whether writes
+manufacture boxes), which makes the A/B honest.  `PCL_OPT=none` must
+reproduce today's all-boxed behavior bit for bit.
+
+---
+
+## 5. Sizing (perl-tests corpus emission, static site counts, s455d)
+
+Transpiled at `eab6c97`, grep over the emitted CL (indicative, not
+per-execution weights):
+
+| family | sites | reading |
+|---|---:|---|
+| plain element reads (`p-aref`/`p-gethash`) | 926 | unchanged by design; get faster (no pointer chase) |
+| E1 argbox (already-promoting @_ element args) | 443 | volume proof the promotion arm is battle-tested |
+| E3 list-foreach (`p-foreach`) | 324 | the biggest alias-relevant population → the two-arm strategy pays here |
+| builtin flatten (`p-flatten-args`) | 292 | reads values; never promotes |
+| `push` | 91 | pure fast-path win |
+| lvalue element accessors (`p-aref-box`/`p-gethash-box`) | 73 | plus the `elem-setf` Kind-A lowering's CL-setf arm — element WRITES have ≥2 lowerings; the write rule must land in each (enumerate in phase 1) |
+| static `make-p-box` | 3476 | how box-saturated the emission is overall |
+
+Owed measurements for the implementing session (cheap, listed so they are
+not re-derived): the E2 population (user-sub calls flattening a whole
+array) — countable from the user-sub call lowering; `writes_args`-true
+frequency across sub_info; per-execution box-allocation counts before/after
+(sb-sprof alloc profile on arrhash/arrfill).
+
+**Two events the §2 catalogue must also carry (caught while sizing):**
+
+- **E11 `values %h` / `each` aliasing**: `for (values %h) { s/a/b/ }`
+  WRITES THROUGH to the hash in perl.  The list builder for aliasing
+  constructs (`values`, and E12) must pass promoted cells (or existing
+  boxes), never raw copies — same two-arm treatment as E3: proven
+  read-only body ⇒ raw values; else promote each visited slot.
+- **E12 slice-in-foreach / slice lvalues**: `for (@a[1..3])`,
+  `@a[0,1] = ...` — slice machinery aliases elements; its element
+  collection routes through the same `%p-elem-cell` promotion on the
+  lvalue/alias paths and raw values on the value paths.
+
+## 6. The phased plan (each phase lands alone, with its bar)
+
+The ORDER is the design's safety argument: every consumer is hardened for
+raw slots while no raw slot can yet exist, so each early phase must be a
+ZERO-CHANGE sweep — any movement is a bug in that phase, cheaply
+attributed.
+
+- **Phase 0 — the battery + the gate skeleton.**  A `Pl/t` differential
+  battery vs real perl covering E1–E8+E11+E12 (both spellings each: write
+  through `$_[0]`, foreach-var write, `\$a[i]` write-after, local-element
+  restore, values-write, slice-alias write, hole defelem, copy-breaks-
+  aliasing `@b = @a`).  Register the Kind-A gate `raw-elems`, default OFF,
+  in Pl/Passes.pm — but note it is consumed by the RUNTIME write arms
+  (a runtime-consulted gate: settle the PCL_OPT plumbing here; the
+  registry's names are compile-time today).  Bar: battery green vs perl on
+  the UNCHANGED tree (it must pass BEFORE the design so it can catch the
+  design).
+- **Phase 1 — the write rule, inert.**  Every element-write arm (the
+  `p-aref-box`/`p-gethash-box` setf expansions, the `elem-setf` CL-setf
+  lowering arm, push/unshift/splice/list-assign/literal-construction
+  stores, hash stores) gains the `p-box-p slot` branch.  All slots are
+  still boxes ⇒ behavior identical.  Bar: full sweep TOTAL/fail-rows
+  byte-identical; battery green; bench unchanged (branch cost noise).
+- **Phase 2 — alias consumers promote, inert.**  `%p-elem-cell` extracted
+  from `p-aref-argbox`; `%p-foreach-elt` raw arm flips to promote (the E3
+  semantics flip); `p-aref-box`/`p-gethash-box`/local-element raw arms
+  promote; flatten-into-user-sub promotes (E2c); values/slice alias paths
+  (E11/E12) promote.  Still no raw slots exist ⇒ zero-change bar again
+  (sweep + gate-SET + battery).
+- **Phase 3 — THE FLIP.**  `raw-elems` ON by default: the write arms store
+  raw.  Bar: the full boat — battery byte-identical to perl, full sweep,
+  companion op/+uni/+re/+io/ legs, board, census, `PCL_OPT=none`
+  equivalence (none ⇒ all-boxed world, bit-identical to phase-2 tree),
+  bench (targets: arrhash ≤1.0×, arrfill ~1×, push-loop toward the 7×
+  win), ir-spec §2.3/§2.4 rewritten (normative change), generation bump +
+  artifacts.
+- **Phase 4 — the fast paths on top.**  E2c′ (`writes_args`-gated raw
+  pass), E3 proven-arm (annotator verdict extension to foreach-LIST vars —
+  closes #810's family honestly), slices re-measure (how much of 4.8× was
+  element boxes vs slice machinery), sort-comparator decision (§7).
+
+Sizing: phases 0–2 ≈ one Opus session (mechanical, zero-change bars);
+phase 3 ≈ one session dominated by its measurement boat; phase 4 ≈ one
+more.  Fable reviews at each phase boundary (the round pattern).
+
+## 7. Open questions (for the USER / the next Fable session)
+
+1. **sort comparator writes (E6)**: perl documents element modification
+   inside a comparator as undefined behavior.  Options: bind raw (fast,
+   writes lost — matches "undefined"), or promote-on-visit (slow for big
+   sorts), or bind raw + DIE on write attempt (rule 12's loud option, but
+   requires detecting the write).  RECOMMENDATION: bind existing boxes as
+   today when present, raw values raw; document in not-supported.md that
+   comparator writes to raw-element arrays are not written through
+   (undefined in perl).  Needs a ruling.
+2. **The gate's runtime consultation**: `raw-elems` differs from existing
+   Kind-A gates (compile-time emission switches) — it is a runtime write-arm
+   policy.  Either give Passes.pm a runtime-consulted kind, or key it on an
+   emission difference (emit `p-aset-raw` vs `p-aset` — cleaner, bigger
+   diff).  Decide in phase 0.
+3. **Hash `values` in LIST-copy positions** (`my @v = values %h`) copies in
+   perl (no aliasing) — only the foreach/alias positions alias.  The list
+   builder needs the position fact; verify the existing `%p-flatten-for-list`
+   vs list-assign split already distinguishes them (it should — same split
+   as @a).
+4. Does any XS/pclxs path hand out element boxes assuming boxed slots?
+   (xs-magic family — check `xs-ref-target` before phase 3.)
+
+## CHECKPOINT LOG (continued)
+
+- **C2:** §4 mechanism (write rule; ONE promotion fn extracted from
+  argbox; E2 amortized-monotone promote-on-flatten with writes_args fast
+  path; E3/E7 two arms; tie/magic fence; emission mostly untouched), §5
+  corpus sizing (926 reads / 443 argbox / 324 foreach / 73+elem-setf
+  lvalue sites; E11 values-aliasing and E12 slice-aliasing ADDED to the
+  catalogue), §6 the four-phase plan with zero-change bars for phases 0–2,
+  §7 the four open questions (sort-write policy needs a USER ruling; the
+  runtime-gate shape; values-copy positions; xs element-box assumptions).
 
 ## CHECKPOINT LOG
 
