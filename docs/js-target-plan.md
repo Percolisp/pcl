@@ -483,6 +483,14 @@ Decisions fixed here:
 
 #### (d) Context, wantarray, eval/die — probe `ir4.pl`
 
+```perl
+sub ctx { return wantarray ? "list" : "scalar" }
+my @r = ctx(); my $s = ctx();
+print "@r $s\n";
+my $n = eval { die "oops\n"; 1 };
+print "err=$@" if !defined $n;
+```
+
 IR:
 
 ```lisp
