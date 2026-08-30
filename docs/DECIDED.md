@@ -21,6 +21,28 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s455d (2026-08-30, Fable) — THE BOXED-AGGREGATES DESIGN (USER-started): raw elements + in-place cell promotion — `docs/boxed-aggregates-design-s455.md`, task #816
+
+- **The design is the doc** (written in committed checkpoints): store
+  elements RAW by default; `%p-elem-cell` promotes one element to a box IN
+  PLACE at an alias event (the mechanism `p-aref-argbox` ALREADY runs
+  today); the one write rule — slot holds a box → write THROUGH it, else
+  store raw; promotion monotone; copies break aliasing (perl's own rule).
+  E2 flatten-into-@_ = amortized-monotone promote-on-flatten (converges to
+  today's representation, never worse) with a `writes_args` fast path
+  later.  Four phases, ZERO-CHANGE sweeps for 0–2 (every consumer hardened
+  before any raw slot can exist), the gated flip in 3, fast paths in 4.
+  Tie/magic containers stay fully boxed (the fence).  Open: the
+  sort-comparator write policy (USER ruling), the runtime-gate shape.
+- **The design probes found TWO LIVE silent-wrongs on the fully-boxed
+  tree**: `for (values %h) { $_ .= "x" }` and `for (@a[0,1]) { $_ *= 10 }`
+  do NOT write through (perl aliases both; PCL's intermediate-list
+  builders COPY) — **#817/#818**, pre-existing, fixable before the design
+  ships; direct-array foreach and @_ aliasing probed correct.
+- Also this session: pack premise corrected by profile (#74 updated, #815
+  filed — overload negative path ~20% of a plain-data loop; #814 = the
+  broken regexg bench row).
+
 ## s455b (2026-08-30, Fable) — round-13 merge: AF + AG merged same day, legs clean, gen v2-440
 
 - **Round 13 is MERGED and clean** (AF `030a089`, AG rebased `b42ef7a`,

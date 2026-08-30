@@ -230,13 +230,21 @@ pushes per round, as rounds 5–11.
    the readline predicate pair — census 27/77 → **21/65, both cpan
    populations at ZERO**; Q7 leftovers all six verified closed.  Filler
    agent AH (#800 + #740 + #737) launched same session, merged separately.
-3. **Round 14**: perf = the tier list (#77 return-family transfer next;
-   #811 box-set store-dispatch; #812 symref accretion, measured-first;
-   #813 print/say topic-allowlist measurement); correctness = census
-   21/65 remainder (op/lexsub 1, the perl-t families by harvest,
-   uni/variables charclass, Mojo board 2 behind #564/#652's design slot)
-   + #820 (non-ASCII bareword FH classifier, gate-SET-sized) + #822
-   behind #757.
+3. **Round 14**: perf = **#815 + #811** (the two boxed-op cheapenings,
+   both measured: overload negative path ~20% of a plain-data loop +
+   box-set store dispatch 1.54×) then the tier list (#77 return-family;
+   #812 measured-first; #813; #814 = fix the regexg bench row);
+   correctness = **#817 + #818** (values/slice foreach aliasing — live
+   silent-wrongs the aggregate design probes found) + census 21/65
+   remainder (op/lexsub 1, the perl-t families by harvest, uni/variables
+   charclass, Mojo board 2 behind #564/#652's design slot) + #820
+   (non-ASCII bareword FH classifier, gate-SET-sized) + #822 behind #757.
+3b. **THE BOXED-AGGREGATES TRACK (USER-started s455d)**: the plan IS
+   `docs/boxed-aggregates-design-s455.md` (task #816) — phases 0–2 = one
+   Opus session with ZERO-CHANGE bars, phase 3 = the gated flip with the
+   full boat, phase 4 = fast paths.  Two open rulings before phase 0
+   closes: the sort-comparator write policy and the runtime-gate shape
+   (doc §7).  Expected: arrhash ≤1.0×, arrfill ~1×, push toward 7×.
 4. Fillers (#722, #750–#754, AB/AA residue) ride as same-mechanism budget
    fillers, never displacing the census.
 

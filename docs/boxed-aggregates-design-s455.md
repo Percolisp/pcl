@@ -211,10 +211,18 @@ frequency across sub_info; per-execution box-allocation counts before/after
   constructs (`values`, and E12) must pass promoted cells (or existing
   boxes), never raw copies — same two-arm treatment as E3: proven
   read-only body ⇒ raw values; else promote each visited slot.
+  **PROBED (s455d, 90da9e8): ALREADY BROKEN on today's fully-boxed tree**
+  — perl `v=1x`, PCL `v=1`; the values list builder COPIES.  Filed **#817**
+  (pre-existing, fixable independently; phase 2 is also its fix).
 - **E12 slice-in-foreach / slice lvalues**: `for (@a[1..3])`,
   `@a[0,1] = ...` — slice machinery aliases elements; its element
   collection routes through the same `%p-elem-cell` promotion on the
   lvalue/alias paths and raw values on the value paths.
+  **PROBED: the foreach half is ALSO ALREADY BROKEN today** — perl
+  `sl=10 20 3`, PCL `sl=1 2 3`.  Filed **#818** (sibling of #817; the
+  lvalue-slice half IS correct today).  Direct-array foreach (`fe=6 7`)
+  and @_ aliasing (`ar=p! q`) probed CORRECT — the misses are exactly the
+  intermediate-list builders, which sharpens phase 2's worklist.
 
 ## 6. The phased plan (each phase lands alone, with its bar)
 
