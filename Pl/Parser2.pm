@@ -10005,7 +10005,7 @@ my %TOPIC_RAW_WORD = map { $_ => 1 } qw(
 #             the lvalue spelling only sometimes trips the write-list gate
 #   shift/pop — harmless to $_, but they read @_ / an array the body may also
 #             be iterating; left out until something measures a need
-#   print/say/warn/sprintf-to-a-handle — stringifying an operand can enter a
+#   print/say/warn/printf — stringifying an operand can enter a
 #             `""` overload handler, which is user code
 #   sort/map/grep/sub — they run a BLOCK (and sort rebinds $a/$b)
 #   do — `do BLOCK` would be fine, `do FILE` runs a file
