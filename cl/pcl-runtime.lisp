@@ -4862,6 +4862,34 @@
                   inner))
            (and (or (numberp value) (stringp value)) value))))
 
+(declaim (inline %p-elem-cell %p-hash-elem-cell))
+(defun %p-elem-cell (vec i)
+  "THE element-cell promotion (docs/boxed-aggregates-design-s455.md §4.2): the
+LIVE box for slot I of VEC — an alias, so a write through it reaches the
+container.  A slot already holding a box IS the cell; a slot holding a RAW
+value is promoted IN PLACE (the box replaces the raw value in the slot) so
+every later alias of the same slot gets the same box.  Promotion is MONOTONE:
+nothing ever demotes a slot, which is what keeps a live alias live.
+I must be a non-negative, in-bounds index into VEC and the slot must not be a
+HOLE — a hole is %p-defelem-box's business, and the callers dispatch on that."
+  (let ((elem (aref vec i)))
+    (if (p-box-p elem)
+        elem
+        (setf (aref vec i) (make-p-box elem)))))
+
+(defun %p-hash-elem-cell (h k)
+  "Hash twin of %p-elem-cell: the LIVE box for the EXISTING key K of hash H,
+promoting a raw slot value in place.  Answers NIL — and only NIL — when K is
+ABSENT, which is the caller's business (%p-hash-defelem-box); a present key
+always yields a box, so the two answers cannot be confused.  ONE gethash: the
+found test and the fetch are the same lookup, because a hash slice pays this
+per element."
+  (multiple-value-bind (v found) (gethash k h)
+    (and found
+         (if (p-box-p v)
+             v
+             (setf (gethash k h) (make-p-box v))))))
+
 (defun %p-array-store-scalar (arr item)
   "Store a scalar ITEM into ARR, preserving blessed objects and references.
    THE ARRAY CONSTRUCTION ARM of the write rule: push / unshift / splice /
@@ -5286,14 +5314,17 @@
     result))
 
 (defun %p-hash-keyval-list (h)
-  "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...) of boxed values,
-   matching how %hash flattens in list context (same pairing as %p-flatten-list).
-   Used by list consumers that flatten %hash args: join, foreach, push, map/grep."
+  "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...), matching how %hash
+   flattens in list context (same pairing as %p-flatten-list).
+   Used by list consumers that flatten %hash args: join, foreach, push, map/grep.
+   The KEY half is a fresh box (perl's keys are copies); the VALUE half is the
+   hash's own slot, promoted in place if raw — `for (%h) { $_ .= \"x\" }` writes
+   through in perl, and a copy consumer unboxes as it does for `values %h`."
   (let ((result nil))
     (maphash (lambda (k v)
                (when (%p-real-hash-key-p k)
                  (push (make-p-box k) result)
-                 (push (if (p-box-p v) v (make-p-box v)) result)))
+                 (push (if (p-box-p v) v (%p-hash-elem-cell h k)) result)))
              h)
     (nreverse result)))
 
@@ -7132,12 +7163,10 @@
       (when (and (vectorp a) (>= actual-idx 0))
         ;; Auto-extend array if needed (intermediate slots are nil = non-existent)
         (%p-extend-to a actual-idx)
-        ;; Ensure box exists at this index
-        (let ((elem (aref a actual-idx)))
-          (unless (p-box-p elem)
-            (setf elem (make-p-box elem))
-            (setf (aref a actual-idx) elem))
-          (return-from p-aref-box elem)))
+        ;; The slot's CELL — %p-elem-cell is the one promotion (design §4.2);
+        ;; a hole (nil) promotes to a box of nil here, which is this accessor's
+        ;; EAGER contract (p-aref-argbox is the lazy one, for read-only uses).
+        (return-from p-aref-box (%p-elem-cell a actual-idx)))
       ;; Out of bounds or not a vector
       (make-p-box *p-undef*))))
 
@@ -7260,34 +7289,6 @@
          (p-push-impl ,arr ,@items))
       ;; Complex place
       `(p-push-impl ,arr ,@items)))
-
-(declaim (inline %p-elem-cell %p-hash-elem-cell))
-(defun %p-elem-cell (vec i)
-  "THE element-cell promotion (docs/boxed-aggregates-design-s455.md §4.2): the
-LIVE box for slot I of VEC — an alias, so a write through it reaches the
-container.  A slot already holding a box IS the cell; a slot holding a RAW
-value is promoted IN PLACE (the box replaces the raw value in the slot) so
-every later alias of the same slot gets the same box.  Promotion is MONOTONE:
-nothing ever demotes a slot, which is what keeps a live alias live.
-I must be a non-negative, in-bounds index into VEC and the slot must not be a
-HOLE — a hole is %p-defelem-box's business, and the callers dispatch on that."
-  (let ((elem (aref vec i)))
-    (if (p-box-p elem)
-        elem
-        (setf (aref vec i) (make-p-box elem)))))
-
-(defun %p-hash-elem-cell (h k)
-  "Hash twin of %p-elem-cell: the LIVE box for the EXISTING key K of hash H,
-promoting a raw slot value in place.  Answers NIL — and only NIL — when K is
-ABSENT, which is the caller's business (%p-hash-defelem-box); a present key
-always yields a box, so the two answers cannot be confused.  ONE gethash: the
-found test and the fetch are the same lookup, because a hash slice pays this
-per element."
-  (multiple-value-bind (v found) (gethash k h)
-    (and found
-         (if (p-box-p v)
-             v
-             (setf (gethash k h) (make-p-box v))))))
 
 (defun %p-defelem-box (vec i)
   "A deferred-element alias box for an array HOLE slot (perl's defelem magic).
@@ -7427,7 +7428,13 @@ create the key on a read-only call, which perl does not."
    elements as individual arguments.  HOLE slots (nil) spread as deferred-element
    boxes tied to the SOURCE array (%p-defelem-box): they read undef and stay
    non-exists, but a write through them (foreach alias, $_[N]) vivifies the
-   source slot, like perl."
+   source slot, like perl.  A RAW slot is PROMOTED IN PLACE (%p-elem-cell /
+   %p-hash-elem-cell) — the design's amortized-monotone answer to E2 (§4.3c):
+   `f(@a)` must let the callee write `$_[N]` through, and the only way to keep
+   that with raw storage is to hand the callee a real cell.  It costs one
+   allocation per element the FIRST time an array is passed whole; an array
+   passed repeatedly converges to today's all-boxed representation and never
+   gets worse, while an array that is never flattened into a call stays raw."
   (let ((result (make-array (length args) :adjustable t :fill-pointer 0)))
     (dolist (arg args)
       (cond
@@ -7436,14 +7443,20 @@ create the key on a read-only call, which perl does not."
          (loop for j from 0
                for elem across arg
                do (vector-push-extend
-                   (if (null elem) (%p-defelem-box arg j) elem)
+                   (cond ((null elem) (%p-defelem-box arg j))
+                         ((p-box-p elem) elem)
+                         (t (%p-elem-cell arg j)))
                    result)))
         ((and (hash-table-p arg) (not (gethash :__class__ arg)))
          ;; Hash in argument context: spread to alternating key-value pairs.
          ;; But NOT blessed objects (which have :__class__) — those stay as-is.
+         ;; The KEY half is a copy (perl's keys are read-only), the VALUE half
+         ;; an alias, exactly as for `values %h`.
          (maphash (lambda (k v)
                     (vector-push-extend (make-p-box k) result)
-                    (vector-push-extend (if (p-box-p v) v (make-p-box v)) result))
+                    (vector-push-extend
+                     (if (p-box-p v) v (%p-hash-elem-cell arg k))
+                     result))
                   arg))
         ;; %ENV / %INC in argument context: the marker IS the hash, so it
         ;; spreads to pairs like any other (see %p-marker-pairs, task #736).
@@ -7822,13 +7835,14 @@ create the key on a read-only call, which perl does not."
     ;; Special markers don't support boxing
     (when (%p-hash-marker-p h)
       (return-from p-gethash-box (make-p-box *p-undef*)))
-    ;; Get or create box at this key
-    (multiple-value-bind (existing found) (gethash k h)
-      (if (and found (p-box-p existing))
-          existing
-          (let ((box (make-p-box (if found existing *p-undef*))))
-            (setf (gethash k h) box)
-            box)))))
+    ;; The slot's CELL — %p-hash-elem-cell is the one promotion (design §4.2),
+    ;; and this accessor is the EAGER one, so an ABSENT key is CREATED with an
+    ;; undef box (perl's lvalue autovivification).  p-gethash-argbox is the lazy
+    ;; sibling, for read-only uses that must not create the key.
+    (or (%p-hash-elem-cell h k)
+        (let ((box (make-p-box *p-undef*)))
+          (setf (gethash k h) box)
+          box))))
 
 (defun p-ensure-hashref (ref)
   "Ensure ref (a p-box) contains a hash table.
@@ -8762,13 +8776,21 @@ Uses tagbody/go instead of loop — see p-while for rationale."
 
 (defun %p-foreach-elt (vec i)
   "Bind the foreach alias var for slot I of VEC.  An existing box aliases
-directly; a raw value gets a fresh box (a temporary — writes are not
-aliased); a NIL slot is an array HOLE and aliases via a deferred-element
-box that vivifies (aref VEC I) on first write (%p-defelem-box)."
+directly; a RAW value is PROMOTED IN PLACE (%p-elem-cell) so the loop variable
+aliases the slot, which is what perl's foreach does; a NIL slot is an array
+HOLE and aliases via a deferred-element box that vivifies (aref VEC I) on
+first write (%p-defelem-box).
+
+The raw arm used to bind a fresh TEMPORARY — writes NOT aliased — which was
+correct only while every raw slot was a provably-unaliased intermediate.  Under
+raw element storage that is a silent wrong (design §4.4, E3), so it promotes.
+With the gate off the arm is unreachable for a real container's slots and the
+temporaries it does reach (a `(vector …)` literal list) are private to the
+loop, so promoting them changes nothing observable."
   (let ((slot (aref vec i)))
     (cond ((p-box-p slot) slot)
           ((null slot) (%p-defelem-box vec i))
-          (t (make-p-box slot)))))
+          (t (%p-elem-cell vec i)))))
 
 (defun %p-flatten-for-list (raw)
   "Flatten a value for use as a foreach list.
@@ -8806,11 +8828,15 @@ box that vivifies (aref VEC I) on first write (%p-defelem-box)."
                     (when (and (vectorp src) (not (stringp src)))
                       ;; HOLE slots (nil) alias through a deferred-element box
                       ;; tied to the SOURCE array, not this flattened copy —
-                      ;; `for (@a, @b) { $_ = 1 }` must vivify @a's slot.
+                      ;; `for (@a, @b) { $_ = 1 }` must vivify @a's slot — and a
+                      ;; RAW slot is promoted in the SOURCE for the same reason:
+                      ;; the loop variable must alias @a, not this vector.
                       (loop for j from 0
                             for x across src
                             do (vector-push-extend
-                                (if (null x) (%p-defelem-box src j) x)
+                                (cond ((null x) (%p-defelem-box src j))
+                                      ((p-box-p x) x)
+                                      (t (%p-elem-cell src j)))
                                 result)))))
                  ((and (not (p-box-p item)) (vectorp item) (not (stringp item)))
                   ;; Raw CL vector from function return (keys, grep, etc.) — spread
@@ -14380,9 +14406,12 @@ buffer's fill-pointer; everything else falls back to file-length."
            (loop for j from 0
                  for x across src
                  ;; HOLE slots spread as defelem aliases tied to the source
-                 ;; array — grep/map write through $_ like perl (see p-flatten-args)
+                 ;; array, and a RAW slot is PROMOTED IN PLACE — grep/map write
+                 ;; through $_ like perl (design E7, same rule as p-flatten-args)
                  do (vector-push-extend
-                     (if (null x) (%p-defelem-box src j) x)
+                     (cond ((null x) (%p-defelem-box src j))
+                           ((p-box-p x) x)
+                           (t (%p-elem-cell src j)))
                      result))))
         (t
          (let ((val (unbox item)))
@@ -14391,7 +14420,9 @@ buffer's fill-pointer; everything else falls back to file-length."
               (loop for j from 0
                     for x across val
                     do (vector-push-extend
-                        (if (null x) (%p-defelem-box val j) x)
+                        (cond ((null x) (%p-defelem-box val j))
+                              ((p-box-p x) x)
+                              (t (%p-elem-cell val j)))
                         result)))
              ;; Raw %hash (not a ref): spread to key/value pairs in list context.
              ((and (hash-table-p val) (not (p-box-p item)))

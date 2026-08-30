@@ -392,6 +392,27 @@ more.  Fable reviews at each phase boundary (the round pattern).
   still need phase 2: **E2, E3, E7 and only those** — E1, E4, E5, E8, E10, E11,
   E12 already work over raw slots.
 
+- **P2 (alias consumers promote, inert):** `%p-elem-cell` / `%p-hash-elem-cell`
+  moved up beside the write rule (so every caller sees the inline
+  proclamation) and are now the ONE promotion for all of it:
+  `p-aref-argbox` / `p-gethash-argbox` (E1), `p-aref-box` / `p-gethash-box`
+  (E4, the eager accessors — they already promoted, by their own copy of the
+  arm), `%p-alias-aelem` / `%p-alias-helem` (E11/E12, from P0a),
+  `p-flatten-args` (E2c, both the array and the hash arm — key half a copy,
+  value half an alias), `%p-flatten-for-list`'s spread arm and
+  `%p-foreach-elt`'s raw arm (E3 — the design's semantics flip, from "fresh
+  temporary" to promote-in-place), `%p-collect-list`'s two spread arms (E7,
+  map/grep), and `%p-hash-keyval-list` (`%h` in list context).
+  **local-element (E5) needed NO change**: `p-local-array-elem` and
+  `%p-lhe-save`/`%p-lhe-restore` save and restore the slot's CONTENT by
+  index/key, which is the design's other correct option for E5 — verified by
+  the battery under BOTH gate settings, not assumed.
+  Zero-change bar met: gate PASS 190/6367; sweep GATE clean TOTAL 18339 (+0),
+  drops 5 = census; **gate-SET scan 638 × 2 populations IDENTICAL**; battery
+  byte-identical to perl with the gate off.  **And with the gate ON the whole
+  battery is byte-identical to perl too** — E1–E12 all green over raw slots,
+  which is what makes phase 3 a flip rather than a rewrite.
+
 ## CHECKPOINT LOG (continued)
 
 - **C2:** §4 mechanism (write rule; ONE promotion fn extracted from
