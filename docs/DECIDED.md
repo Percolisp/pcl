@@ -135,13 +135,20 @@ those two files and the live plan doc directly -- no new review-doc families.*
   fail-baseline by edit, hexfp 107/14), census **21/65 = the edited
   baseline, both cpan populations at ZERO drops**.
 - **Raw-topic rulings (AF asks)**: the overload/tie residue line beside
-  `_topic_raw_ok` is RATIFIED, sharpened — in a RANGE topic loop perl's
+  `_topic_raw_ok` is RATIFIED ~~, sharpened — in a RANGE topic loop perl's
   `$_` is READ-ONLY, so the only path that could notice the raw value's
-  box-lessness is code that dies in perl; `print`/`say` stay OFF the
-  allowlist (the measured question = **#813**, round-14 filler); **#810
-  rides the boxed-aggregate design**, never standalone; a full sweep run
-  by an agent against the launcher's "no sweeps" line is RATIFIED when the
-  WHAT-TO-RUN table names the sweep as the gate for that change class.
+  box-lessness is code that dies in perl~~ **[the "sharpening" was WRONG —
+  corrected s457aj/s455e: `for (1..N)` iterates FRESH MUTABLE SVs
+  (`for (1..3) { $_ = $_*10 }` prints 10 20 30 in perl; only a LITERAL
+  LIST's elements are read-only), so the residue is silent-vs-silent, not
+  perl-fatal — the ratified residue LINE itself still stands, on its
+  original §7 rationale]**; `print`/`say` stay OFF the allowlist —
+  re-affirmed s457aj by measurement (#813 MEASURED AND DECLINED: 4.8×→4.2×
+  on a print loop, zero corpus emission change, and it widens the
+  overload-write exposure); **#810 rides the boxed-aggregate design**,
+  never standalone; a full sweep run by an agent against the launcher's
+  "no sweeps" line is RATIFIED when the WHAT-TO-RUN table names the sweep
+  as the gate for that change class.
 - **AG asks**: Mojo's `local (*{"${caller}::a"}, …)` list form stays with
   #564/#652 (Fable design slot); the census message-text drift stays
   noted, #737 owns the one-time refresh (agent AH is on it).
