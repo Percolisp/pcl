@@ -10,7 +10,9 @@
 # pathname") or touch the WRONG file.  The runtime now routes every
 # user-filename -> pathname conversion through the one seam %p-literal-path
 # (sb-ext:parse-native-namestring).  glob() keeps its own wildcard parsing
-# by design (guarded by Pl/t/glob-01.t).
+# of the PATTERN by design (guarded by Pl/t/glob-01.t) -- but its RESULTS are
+# filenames, so they are rendered by the one literal leaf-name renderer
+# %p-dirent-name, which readdir shares (#755's output half + #800).
 # Also guards the p-unlink/p-rename upgrades that rode along: unlink(2)
 # removes a dangling symlink and answers EISDIR on a directory instead of
 # crashing; rename(2) replaces an existing target.
@@ -19,7 +21,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 11;
+use Test::More tests => 15;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -56,6 +58,16 @@ opendir(my $dh, "d_*_ir") or die "opendir: $!";
 my @e = sort readdir($dh);
 closedir $dh;
 print "rd=[@e]\n";
+# #800: a glob RESULT is a filename too, so the matched leaf comes back
+# LITERALLY.  The escaped leaf also fed glob's own filter regex, so `gq`
+# below (a `?` pattern over a name that CONTAINS `?`) used to match nothing.
+my @g = sort glob("*");
+print "gall=[@g]\n";
+print "gq=[", join("|", sort glob("q_?_n")), "]\n";
+print "gout=[", join("|", sort glob("out_*")), "]\n";
+my $gex = 0;
+$gex += (-e $_ ? 1 : 0) for @g;
+print "gex=$gex/", scalar(@g), "\n";
 symlink("/nope_$$", "dang") or die "symlink dang: $!";
 print "dang=", unlink("dang"), "\n";
 my $u = unlink("d_*_ir");
@@ -102,6 +114,10 @@ is($pcl{'r(s_\\_n)'}, $perl{'r(s_\\_n)'}, 'a literal backslash in a name is a ch
 is($pcl{'l'},     $perl{'l'},     '-l sees a symlink whose name contains a wildcard char');
 is($pcl{'ren'},   $perl{'ren'},   'rename with wildcard chars in both names');
 is($pcl{'rd'},    $perl{'rd'},    'readdir: wild-named dir listed, wild-named entries UNESCAPED (#755 output half)');
+is($pcl{'gall'},  $perl{'gall'},  'glob RESULTS carry wild characters literally (#800 output half)');
+is($pcl{'gq'},    $perl{'gq'},    'a `?` pattern MATCHES a name containing `?` -- the escaped leaf broke the filter too');
+is($pcl{'gout'},  $perl{'gout'},  'a `*` pattern matches a name containing `*`');
+is($pcl{'gex'},   $perl{'gex'},   'every name glob returns names an existing file (round trip)');
 is($pcl{'dang'},  $perl{'dang'},  'unlink removes a DANGLING symlink (unlink(2), not probe-file)');
 is($pcl{'udir'},  $perl{'udir'},  'unlink of a directory answers 0/EISDIR instead of crashing');
 is($pcl{'cnt'},   $perl{'cnt'},   'unlink count over all wildcard-char names');

@@ -73,6 +73,119 @@ continues (#77 return-family next, #811 box-set dispatch, #812 symref
 accretion measured-first); correctness = census 21/65 remainder (op/
 lexsub 1, sub.t child drops, uni/variables charclass family, Mojo board
 2 behind #564's design), #820, #822 behind #757.
+## Session 456ah (2026-08-30, Opus agent AH, round-13 filler slot) — glob's results become literal filenames, `-s` becomes a value, and the census message column is refreshed
+
+Three bounded filler tasks off `49e55ad` (gen v2-440), all `cl/`-only product
+changes plus one baseline text refresh.  No emission change, so no generation
+bump.
+
+### #800 — a glob RESULT is a filename, and there is only one renderer for one
+
+`glob("gx*")` over a directory holding a file literally named `gx*wild.dat`
+answered `gx\*wild.dat`.  The cause is the s455 readdir bug in a second
+location: `%p-glob-leaf-name` was a private copy of `%p-dirent-name` built on
+`file-namestring`, and CL's `file-namestring` ESCAPES the wild characters
+`* ? [ \` on the way out.
+
+What made it worth more than a cosmetic fix is that **the escaped leaf is also
+what glob's own glob→regex filter scans**.  So the bug had a matching half the
+task had guessed at and the probes confirmed: a pattern that should match a
+literal-wild name matched *nothing*.
+
+    fixture: gx*wild.dat  gx?q.dat  gx[a]b.dat  gx\back.dat  gx]y[z*.out
+             .gxdot.dat  gxnorm2.dat  gxplain.dat  gxsub*dir/
+
+                          perl 5.40.3            PCL (before)
+    glob("gx?q.dat")      gx?q.dat               (EMPTY)
+    glob("gx*")           …8 names, literal      …5 of them escaped
+    -e each result        8/8 exist              3/8 exist
+
+The fix is a deletion: `%p-glob-leaf-name` is gone, its one caller and the
+`%p-glob--expand-pathname` fallback both call `%p-dirent-name`, and readdir
+and glob now share the one literal leaf-name renderer.  `p-glob` keeps its own
+wildcard parsing of the PATTERN — the one deliberate non-consumer of
+`%p-literal-path` (DECIDED s455), and that stays true.
+
+Twelve probe lines vs perl; three matched before, eleven after.
+
+**The twelfth is filed as #830** and is worth reading before anyone calls it a
+regression: PCL's glob pattern language has no backslash escape at all.  Perl's
+`glob("gx\\?q.dat")` is the literal `gx?q.dat`; PCL answers nothing, and
+answered nothing before this session too — except for `glob("gx\\\\*")`, which
+used to return `gx\\back.dat` *because* the escaped leaf happened to match the
+doubled backslash the escape-blind regex demanded.  Two wrongs partially
+cancelled and now neither does.  Both spellings diverge from perl; what moved
+is the shape of the divergence.  The task carries the reason it is not a
+one-arm fix: `glob("no\\?such.dat")` returns `no?such.dat` in perl even though
+no such file exists, i.e. perl unescapes and *then* applies the #450
+no-metacharacter literal rule, so four sites move together.
+
+Guard: `Pl/t/wild-filename-01.t` 11 → 15 rows, in the perl-oracle battery that
+already exists there (the file is the #755 family's home and glob results are
+that family's other half).
+
+### #740 — `-s` is a size, not a flag
+
+`p--s` returned `(if (> size 0) size nil)`, so an empty existing file was
+undef where perl gives a defined 0: `defined(-s $f)` was the discriminator and
+`printf "%d", -s $f` printed nothing where perl prints `0`.
+
+The whole answer is that `-s` is the one member of the `p--*` family whose
+result is a VALUE and not a flag, which is why it could close on its own
+without any of #403's ""-vs-undef machinery.  It now returns the stat's size;
+undef means only that the stat FAILED — perl's own split, and the thing that
+keeps `-s $missing` distinguishable from `-s $empty`.  `p-true-p` is false on
+0, so no boolean use moves.
+
+    perl 5.40.3 == PCL, all seven lines:
+      -s empty  -> defined 0        -s five-byte -> 5      -s missing -> undef
+      -s _ after stat -> 0          printf "%d"  -> 0      bool       -> false
+      -s -f $empty (this file's own `_` chain) -> 0
+
+#403's residue was re-measured into that task: `-z` on a non-empty file and
+`-x`/`-d` false on a successful stat are still undef where perl gives a
+defined `""`.  Guard: `Pl/t/filetest-stack-01.t` 12 → 13 rows; its header note
+about #403 now says which member is done.
+
+### #737 — the census message column, refreshed once
+
+s440 swapped `Data::Dump` for core `Data::Dumper` in `Pl::PExpr::_dd`, which
+changed the shape of the compiler's own drop message, so every message in
+`baselines/parse-error-drop-census-s399.tsv` had gone stale tree-wide.  The
+counts are the compared value, so the refresh script asserts — before it will
+write anything — that the file SET and every per-file COUNT are byte-identical
+to the blessed file, and refuses otherwise.  They were.  21 files / 65 drops,
+unchanged; only message text moved, and the header carries a note saying so.
+
+### Bar
+
+`cl/`-only, so `tools/corpus-diff.pl` cannot see it and was not run; the full
+perl-tests sweep is owed and is the merging session's (per the round-13 slot
+rules).  Targeted green: `Pl/t/wild-filename-01.t`,
+`Pl/t/filetest-stack-01.t`, `Pl/t/glob-01.t`, `Pl/t/punct-array-glob-01.t`,
+`Pl/t/fileio-01.t`, `Pl/t/fileio-02.t`, `Pl/t/io-shim-01.t`,
+`Pl/t/glob-sub-alias-01.t`, then the whole gate on a fresh core: **189 files,
+6347 tests, PASS** (a worktree, so the 14 pclxs xs rows skip; 6342 + this
+session's 5 new rows reconciles with the s455b merge count exactly).
+
+**The companion io/+op/ leg ran, and its one mover is ATTRIBUTED rather than
+assumed.**  `op/filetest.t` 181/253 → **184/250**, `REAL MOVE` in the #366
+serial re-run.  A/B on this same tree settles the cause: with 251997a's
+runtime checked back in the file measures 181/253 — the blessed row exactly —
+and the fails-list diff between the two runs is exactly three rows, all of
+them `-s` on a zero-byte file (26 `-s: file has 0 bytes`, 27 `-f and -s:
+plain file with 0 bytes`, 28 `-s and -f: file with 0 bytes is plain file`).
+So the mover is #740 alone.  `op/glob.t` 14/4, `io/fs.t` 59/2 and
+`io/dup.t` 10/0 are all unchanged, which is the measurement that says #800
+reaches no row those files assert.  The snapshot row is spliced with that
+cause.
+
+The perl-tests sweep is expected +0 and there is evidence for the
+expectation, not just hope: `-s` appears in exactly one perl-tests file
+(`lfs.t:187`, on a 5 GB file, and it is in neither baseline), and `glob(` in
+exactly one (`defins.t`, globbing `*` over plain names, where the two
+renderers agree byte for byte).  The merging session's sweep is still the
+authority.
 
 ## Session 456af (2026-08-30, Opus agent AF, round-13 PERF slot) — the four verdict-coverage narrowings shipped; BOTH intloop bench rows now BEAT perl; the s454ac load-suspect rows settled and `symref` bisected
 

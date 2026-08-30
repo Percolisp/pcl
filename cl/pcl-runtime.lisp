@@ -11663,11 +11663,14 @@ buffer's fill-pointer; everything else falls back to file-length."
       (error () nil))))
 
 (defun p--s (file)
-  "Perl -s: return file size if non-zero, nil otherwise"
+  "Perl -s: the file's SIZE — the one filetest whose answer is a value rather
+   than a flag, which is why an EMPTY file is a defined 0 and not undef (#740;
+   `defined(-s $f)` is the discriminator, and `printf \"%d\"` printed nothing
+   where perl prints 0).  undef only when the stat FAILS — that is perl's own
+   split, and it is what keeps `-s $missing` distinguishable from `-s $empty`.
+   0 is false to p-true-p, so every boolean use is unchanged."
   (handler-case
-      (let* ((stat (sb-posix:stat (%p--path file)))
-             (size (sb-posix:stat-size stat)))
-        (if (> size 0) size nil))
+      (sb-posix:stat-size (sb-posix:stat (%p--path file)))
     (error () nil)))
 
 (defun p--z (file)
@@ -12373,12 +12376,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (write-char c s) (incf i))))))
     (write-char #\$ s)))
 
-(defun %p-glob-leaf-name (path)
-  "Final path component of PATH as a string — the directory name for a
-   directory pathname, else the file name+type."
-  (if (and (null (pathname-name path)) (null (pathname-type path)))
-      (car (last (pathname-directory path)))
-      (file-namestring path)))
+;;; A glob RESULT is a filename, so it is rendered by the ONE literal
+;;; leaf-name renderer, %p-dirent-name (#800; the readdir half is #755's).
+;;; %p-glob-leaf-name used to be a second copy built on file-namestring,
+;;; which ESCAPES wild characters — and because that leaf is also what the
+;;; glob→regex filter below scans, a name holding a wild character not only
+;;; came back as gx\*wild.dat but could fail to MATCH at all (glob("gx?q.dat")
+;;; answered nothing, the escaped \ being an extra character).  p-glob still
+;;; parses wildcards in the PATTERN: that is its job (#755), and only the
+;;; PATTERN's.
 
 (defun %p-glob--expand-dir (dir-prefix file-glob)
   "Match FILE-GLOB against the leaf names in the fixed directory DIR-PREFIX
@@ -12403,7 +12409,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (result (make-array 0 :adjustable t :fill-pointer 0)))
     (when scanner
       (dolist (p entries)
-        (let ((leaf (%p-glob-leaf-name p)))
+        (let ((leaf (%p-dirent-name p)))
           (when (and leaf
                      (or match-dot
                          (not (and (plusp (length leaf)) (char= (char leaf 0) #\.))))
@@ -12424,7 +12430,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (matches (remove-if (lambda (p) (null (pathname-name p))) all-matches))
          (result (make-array (length matches) :fill-pointer 0)))
     (dolist (path matches result)
-      (vector-push (concatenate 'string dir-prefix (file-namestring path)) result))))
+      (vector-push (concatenate 'string dir-prefix (%p-dirent-name path)) result))))
 
 (defun %p-glob-own-home ()
   "This process's home directory from the passwd database — bsd_glob's

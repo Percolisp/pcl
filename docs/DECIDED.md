@@ -40,6 +40,62 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **AG asks**: Mojo's `local (*{"${caller}::a"}, …)` list form stays with
   #564/#652 (Fable design slot); the census message-text drift stays
   noted, #737 owns the one-time refresh (agent AH is on it).
+## s456ah (2026-08-30, Opus agent AH, round-13 filler slot) — one literal leaf-name renderer for readdir AND glob; `-s` is a VALUE, so an empty file is a defined 0
+
+- **A glob RESULT is a filename, so it is rendered by the ONE literal
+  leaf-name renderer `%p-dirent-name` (#800, CLOSED).**  `%p-glob-leaf-name`
+  was a second copy of that function built on `file-namestring`, which
+  ESCAPES wild characters — so `glob("gx*")` answered `gx\*wild.dat` where
+  perl answers `gx*wild.dat`.  **The escaping was not only an output bug: the
+  escaped leaf is what glob's own glob→regex FILTER scans**, so
+  `glob("gx?q.dat")` over a file literally named `gx?q.dat` matched NOTHING
+  (the `\` is an extra character the regex has no place for), and only 3 of 8
+  returned names named an existing file.  The duplicate is DELETED, its one
+  caller and the `%p-glob--expand-pathname` fallback both route through
+  `%p-dirent-name`, and readdir + glob now share one renderer (#755's output
+  half was the same bug in the same shape, fixed at `ea58eb4`).  **p-glob
+  keeps its own wildcard parsing of the PATTERN** — that is its job and the
+  one deliberate non-consumption of `%p-literal-path` (DECIDED s455).
+  Probes: 12 lines vs perl 5.40.3, 11 identical after the fix (before: 3).
+  Guard `Pl/t/wild-filename-01.t` 11 → 15 rows.
+- **Residue #830, filed with its five-row probe table: PCL's glob PATTERN has
+  no BACKSLASH ESCAPE at all** (`glob("gx\\?q.dat")` is perl's literal
+  `gx?q.dat` and PCL's nothing).  It is not a one-arm fix, and the row that
+  says so is `glob("no\\?such.dat")` → perl `no?such.dat`: perl unescapes
+  FIRST and then applies the #450 no-metacharacter LITERAL rule, so
+  `%p-glob--wildcard-p`, the literal arm of `%p-glob--expand-one` and
+  `expand-glob-char-ranges` all move with the regex builder.  **Honest
+  accounting: the one row that used to produce anything now produces
+  nothing** — `glob("gx\\\\*")` answered `gx\\back.dat` because the escaped
+  LEAF happened to match the doubled backslash the escape-blind regex
+  demanded.  Two wrongs partially cancelled; both spellings diverge from
+  perl, so what moved is the shape of the divergence, not its presence.
+- **`-s` is the one filetest whose answer is a VALUE rather than a flag, so an
+  EMPTY existing file is a DEFINED 0 (#740, CLOSED).**  `p--s` read perl's
+  documentation as "size if non-zero" and returned `(if (> size 0) size nil)`,
+  so `defined(-s $f)` was the discriminator and `printf "%d"` printed nothing
+  where perl prints 0.  It now returns the stat's size unconditionally; undef
+  means only that the STAT FAILED, which is perl's own split and what keeps
+  `-s $missing` distinguishable from `-s $empty`.  0 is false to `p-true-p`,
+  so every boolean use is unchanged.  **This needed none of #403's
+  ""-vs-undef machinery** — that is why the numeric member could close alone;
+  the three residual rows (`-z` / `-x` / `-d` false on a successful stat) are
+  re-measured into #403.  Guard `Pl/t/filetest-stack-01.t` 12 → 13 rows
+  (7 lines byte-compared against perl, incl. `_` after an explicit stat and
+  the `-s -f $E` chain).  **The one companion mover of this session, and it
+  is ATTRIBUTED, not assumed**: `op/filetest.t` 181/253 → **184/250**,
+  measured by A/B on the same tree (251997a's runtime checked back in gives
+  181/253 = the blessed row exactly), and the fails-list diff is exactly the
+  three `-s`-on-a-zero-byte-file rows 26/27/28.  `op/glob.t` 14/4,
+  `io/fs.t` 59/2 and `io/dup.t` 10/0 are unchanged, so #800 reaches no row
+  any of them asserts.
+- **The drop census MESSAGE column was refreshed ONCE, text only (#737,
+  CLOSED).**  s440's `Data::Dump` → core `Data::Dumper` swap in
+  `Pl::PExpr::_dd` changed the shape of the compiler's drop message, so every
+  blessed row's message had gone stale tree-wide.  The refresh asserts before
+  writing that the file SET and every per-file COUNT are byte-identical to the
+  blessed file and REFUSES to write otherwise — a count that moves is a
+  finding, not a refresh.  Counts unchanged at 21 files / 65 drops.
 
 ## s456af (2026-08-30, Opus agent AF, round-13 perf slot) — the four verdict-coverage narrowings SHIPPED; both intloop bench rows now beat perl
 

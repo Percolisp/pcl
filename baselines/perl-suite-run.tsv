@@ -1062,7 +1062,16 @@ op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /h
 # fail HONESTLY (#221 warnings-gated family; the old rows were skip-as-pass), and the abort
 # moved: the base wild-pathname crash is gone (#755), the remaining abort is #782
 # (`-f 'TEST';` mis-parse -> undefined &main::f).  Base-worktree A/B agrees.
-op/filetest.t	436	0	181	253	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
+# s456ah (round 13): op/filetest.t 181/253 -> 184/250 EDITED BY HAND -- task #740, the ONLY
+# row this session's cl/ change moves.  `-s` is the one filetest whose answer is a VALUE, so
+# an empty file's size is a DEFINED 0 and p--s no longer folds it to undef.  Attributed by an
+# A/B on this same tree (251997a's runtime checked back in: 181/253 = the blessed row exactly;
+# HEAD's: 184/250), and the fails-list diff is exactly three rows, all of them `-s` on a
+# zero-byte file: 26 "-s: file has 0 bytes", 27 "-f and -s: plain file with 0 bytes",
+# 28 "-s and -f: file with 0 bytes is plain file".  Nothing else moved: op/glob.t 14/4,
+# io/fs.t 59/2 and io/dup.t 10/0 are unchanged under the same change (#800's glob leaf-name
+# fix reaches no row any of them asserts).  The abort and drop columns are unchanged.
+op/filetest.t	436	0	184	250	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
 op/flip.t	14	0	12	2	DIFF		0

@@ -35,7 +35,9 @@
 # undef for both.  That is a property of the whole `p--*` runtime family, not
 # of stacking — it diverges for a plain `-f "/tmp"` too — so it is filed with
 # its own reproducer (task #403) rather than weakened into a wrong expectation
-# here.
+# here.  The one member of that family whose answer is a VALUE rather than a
+# flag, `-s`, IS asserted (task #740, s456ah): an empty file's size is a
+# defined 0, and only a FAILED stat is undef.
 
 use v5.30;
 use strict;
@@ -54,7 +56,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 12;
+plan tests => 13;
 
 # Fixtures built by the HARNESS (real perl), with their paths interpolated into
 # the generated program — so the expectations below do not depend on anything
@@ -65,7 +67,11 @@ my $file = "$dir/plain.txt";
 open my $mk, '>', $file or die "cannot create fixture: $!";
 print $mk "hello";
 close $mk;
-my $FIX = qq{my \$D = "$dir"; my \$F = "$file"; my \$O = "$dir/printed.txt";\n};
+my $empty = "$dir/empty.txt";
+open my $mke, '>', $empty or die "cannot create empty fixture: $!";
+close $mke;
+my $FIX = qq{my \$D = "$dir"; my \$F = "$file"; my \$O = "$dir/printed.txt";\n}
+        . qq{my \$E = "$empty"; my \$M = "$dir/nope.txt";\n};
 
 sub write_pl {
     my ($code) = @_;
@@ -104,6 +110,22 @@ print "5:", (-r -w -x $F), "\n";
 print "6:", (-s -f $F), "\n";
 PL
    'stacked filetests chain over `_`, not nested');
+
+# `-s` is the one filetest whose answer is a VALUE, so an EMPTY file is a
+# defined 0 and only a FAILED stat is undef (task #740).  Every line below is
+# the live perl answer; `b:` shows 0 is still boolean-false, and `z:` runs the
+# size out through this file's own `_` chain.
+is(run_cl($FIX . <<'PL'), "e:d0\nf:d5\nm:u\nu:d0\np:0\nb:F\nz:0.\n",
+print "e:", (defined(-s $E) ? "d" : "u"), (-s $E), "\n";
+print "f:", (defined(-s $F) ? "d" : "u"), (-s $F), "\n";
+print "m:", (defined(-s $M) ? "d" : "u"), (-s $M), "\n";
+stat($E);
+print "u:", (defined(-s _) ? "d" : "u"), (-s _), "\n";
+printf("p:%d\n", -s $E);
+print "b:", ((-s $E) ? "T" : "F"), "\n";
+print "z:", (-s -f $E), ".\n";
+PL
+   '-s on an EMPTY file is a defined 0; only a failed stat is undef (#740)');
 
 like(emitted(q{my $x = "/tmp"; my $r = -e -r -f $x;}),
      qr/\(p-&&\s+\(p-&&\s+\(p--f\s+\$x\)\s+\(p--r\s+_\)\)\s+\(p--e\s+_\)\)/,
