@@ -281,6 +281,9 @@
    #:|$~| #:|$=| #:|$-| #:|$%| #:|$:| #:|$^L| #:|$^A| #:|$^| #:|$^R| #:|$^S| #:|$^P| #:|$^D| #:|$^F| #:|$^I| #:|$^M| #:|$^W| #:|$[| #:|$^C|
    ;; Context — the variable and the four macros that name its bindings (#281)
    #:*wantarray*
+   ;; raw element storage gate (docs/boxed-aggregates-design-s455.md §7.2) —
+   ;; exported so a test or a REPL can flip it without reaching into pcl::
+   #:*p-raw-elems*
    #:p-list-ctx #:p-scalar-ctx #:p-void-ctx #:p-caller-ctx
    #:p-sort-cmp
    #:*pcl-caller-wantarray*
@@ -4787,8 +4790,89 @@
           (p-box-sv nb) s (p-box-sv-ok nb) t)
     nb))
 
+;;; ============================================================
+;;; RAW ELEMENT STORAGE — the write rule
+;;; (docs/boxed-aggregates-design-s455.md §2, §4.1; task #816)
+;;; ============================================================
+;;;
+;;; Perl array/hash ELEMENTS are boxes today, unconditionally, and the box
+;;; serves exactly ONE master: identity — some other holder may write through
+;;; the slot or observe writes to it (@_ aliasing, a foreach loop variable,
+;;; \$a[0], local $a[0], values/slices).  The design stores elements RAW by
+;;; default and promotes ONE element to a box IN PLACE at the moment an alias
+;;; is taken (%p-elem-cell / %p-hash-elem-cell).  What makes that safe is the
+;;; single WRITE RULE every store obeys:
+;;;
+;;;     a slot that holds a BOX is written THROUGH (box-set), never replaced;
+;;;     a slot that holds a raw value or a hole takes the raw value.
+;;;
+;;; Promotion is monotone — nothing ever demotes a slot — so an alias taken at
+;;; any time stays live.  (Whole-container assignment REPLACES the slots
+;;; wholesale; that is not demotion, it is perl's own copy-breaks-aliasing.)
+;;;
+;;; THE GATE IS A RUNTIME POLICY, not an emission switch (decided by
+;;; measurement in phase 0 — see the design doc §7.2).  The write arms are
+;;; RUNTIME functions that no emission site names: %p-array-store-scalar is
+;;; reached from push/unshift/splice/p-array-fill/p-array-init, and
+;;; (setf p-aref) is reached BOTH from p-setf and, under the Kind-A elem-setf
+;;; rule, from CL's own setf.  Keying those on emission would mean a `-raw`
+;;; twin of each — the rule-11 hard stop — and would put the setting into the
+;;; module-cache key, where a module transpiled under one setting could be
+;;; loaded into a program running the other.  A defglobal has neither problem
+;;; and mixed storage is legal BY DESIGN (a boxed slot is always correct).
+(defun %p-raw-elems-default ()
+  "The gate's value for THIS process: PCL_RAW_ELEMS, empty or 0 meaning off.
+   Phase 3 changes the fallback when the variable is unset."
+  (let ((e (sb-posix:getenv "PCL_RAW_ELEMS")))
+    (and e (not (string= e "")) (not (string= e "0")) t)))
+
+(sb-ext:defglobal *p-raw-elems* (%p-raw-elems-default)
+  "Store plain element values RAW instead of boxing them (PCL_RAW_ELEMS=1).
+   OFF in phases 0-2: every slot is a box, exactly as before, and the write
+   rule's raw arms are unreachable.  Phase 3 flips the default.")
+
+;;; The runtime is normally reached through a SAVED CORE (USER s439), and a
+;;; defglobal's initial value is baked into that core at build time — so the
+;;; environment must be re-read when the core BOOTS, or the gate would answer
+;;; whatever the machine that built the core happened to have set.  Measured:
+;;; without this hook PCL_RAW_ELEMS=1 was silently ignored by every runner.
+(push (lambda () (setf *p-raw-elems* (%p-raw-elems-default)))
+      sb-ext:*init-hooks*)
+
+(declaim (inline %p-storable-raw))
+(defun %p-storable-raw (value)
+  "The RAW value to park in an element slot for VALUE — or NIL when VALUE needs
+   a box.  NIL is never a legal raw element (it is the HOLE marker), so the two
+   answers cannot be confused.
+
+   Only a plain number, or a plain string with no cached numeric half, may live
+   unboxed: every other kind carries identity on the CONTAINER rather than in
+   the value — a bless class, the is-ref flag (\\$x, \\*foo), a dualvar's two
+   halves, a magic cell, a tie proxy, a box-in-box scalar ref.  That is the
+   same split the READING side already makes: p-aref-unbox-elem and
+   %p-hash-unbox-elem return the BOX for exactly those kinds and the bare value
+   otherwise, which is why no read path changes."
+  (and *p-raw-elems*
+       (if (p-box-p value)
+           (let ((inner (p-box-value value)))
+             (and (not (p-box-class value))
+                  (not (p-box-is-ref value))
+                  (or (numberp inner)
+                      (and (stringp inner) (not (p-box-nv-ok value))))
+                  inner))
+           (and (or (numberp value) (stringp value)) value))))
+
 (defun %p-array-store-scalar (arr item)
-  "Store a scalar ITEM into ARR, preserving blessed objects and references."
+  "Store a scalar ITEM into ARR, preserving blessed objects and references.
+   THE ARRAY CONSTRUCTION ARM of the write rule: push / unshift / splice /
+   p-array-fill (list assignment) / p-array-init (a literal) all append through
+   here, so a plain scalar goes in RAW when the gate is on and boxed when it is
+   not.  Appending creates a NEW slot, so there is no existing box to write
+   through — the gate alone decides."
+  (let ((raw (%p-storable-raw item)))
+    (when raw
+      (vector-push-extend raw arr)
+      (return-from %p-array-store-scalar arr)))
   (if (p-box-p item)
       (let ((inner (p-box-value item)))
         (cond
@@ -4854,7 +4938,15 @@
 
    Plain scalars and blessed objects keep copy semantics (unbox+rewrap, copying the
    bless class).  Array/hash refs don't set is-ref (a box wrapping a vector/
-   hash-table is unambiguously a ref), so they take the plain branch unchanged."
+   hash-table is unambiguously a ref), so they take the plain branch unchanged.
+
+   THE HASH CONSTRUCTION ARM of the write rule
+   (docs/boxed-aggregates-design-s455.md §4.1): p-hash (a `{…}` literal) and
+   p-hash-fill (`%h = (…)`) build every slot through here, so a plain scalar
+   becomes a RAW value when the gate is on.  A NEW slot has no existing box to
+   write through, so the gate alone decides."
+  (let ((raw (%p-storable-raw v)))
+    (when raw (return-from %p-make-hash-entry raw)))
   (cond
     ((and (p-box-p v) (p-box-is-ref v))
      (make-p-box v))
@@ -7006,13 +7098,21 @@
           ;; never past the end of a read-only array — perl allows `$ro[0] = 9`
           ;; (in bounds) and dies on `$ro[5] = 9` (task #159).
           (%p-extend-to a actual-idx)
-          ;; Get or create box at this index
+          ;; THE WRITE RULE (docs/boxed-aggregates-design-s455.md §4.1).  A slot
+          ;; holding a box is written THROUGH it — that box may be someone's
+          ;; live alias.  A slot holding a raw value or a hole takes the new
+          ;; value raw when it is raw-storable, and otherwise gets a fresh box,
+          ;; which is what this arm has always done.
           (let ((box (aref a actual-idx)))
-            (unless (p-box-p box)
-              (setf box (make-p-box nil))
-              (setf (aref a actual-idx) box))
-            ;; Set the box's value and return the box
-            (box-set box value)))
+            (if (p-box-p box)
+                (box-set box value)
+                (let ((raw (%p-storable-raw value)))
+                  (if raw
+                      (setf (aref a actual-idx) raw)
+                      (progn
+                        (setf box (make-p-box nil))
+                        (setf (aref a actual-idx) box)
+                        (box-set box value)))))))
         ;; Not a writable array.  A wrong-kind referent ($hashref->[0] = …) is
         ;; perl's fatal — the write used to be silently dropped.  Anything else
         ;; (nil/undef container, negative index past the front) keeps the old
@@ -7654,25 +7754,31 @@ create the key on a read-only call, which perl does not."
          (setf (gethash k sym-h) box)
          (box-set box value)))
       ((hash-table-p h)
-       ;; Get or create box at this key
+       ;; THE WRITE RULE (docs/boxed-aggregates-design-s455.md §4.1), the hash
+       ;; twin of (setf p-aref)'s: an existing slot BOX is written through (it
+       ;; may be someone's live alias); anything else takes the value raw when
+       ;; it is raw-storable, and otherwise gets a fresh box.
        (multiple-value-bind (existing found) (gethash k h)
-         (let ((box (if (and found (p-box-p existing))
-                        existing
-                        (make-p-box nil))))
-           (unless (and found (p-box-p existing))
-             (setf (gethash k h) box))
-           ;; Set the box's value and return the box
-           (box-set box value))))
+         (if (and found (p-box-p existing))
+             (box-set existing value)
+             (let ((raw (%p-storable-raw value)))
+               (if raw
+                   (setf (gethash k h) raw)
+                   (let ((box (make-p-box nil)))
+                     (setf (gethash k h) box)
+                     (box-set box value)))))))
       ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
       ;; Other non-hash values (a p-box representation layer) keep the previous
       ;; path — see the note in p-gethash.
       (t (multiple-value-bind (existing found) (gethash k h)
-           (let ((box (if (and found (p-box-p existing))
-                          existing
-                          (make-p-box nil))))
-             (unless (and found (p-box-p existing))
-               (setf (gethash k h) box))
-             (box-set box value)))))))
+           (if (and found (p-box-p existing))
+               (box-set existing value)
+               (let ((raw (%p-storable-raw value)))
+                 (if raw
+                     (setf (gethash k h) raw)
+                     (let ((box (make-p-box nil)))
+                       (setf (gethash k h) box)
+                       (box-set box value))))))))))
 
 ;;; %ENV and %INC are NOT hash tables: the runtime binds each to a MARKER
 ;;; symbol, and every hash primitive has an arm that talks to the real process

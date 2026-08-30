@@ -112,6 +112,38 @@ element boxes (slice machinery itself — measure again after).
   copy semantics).  One `p-box-p` branch per element write, replacing
   today's vivify-or-box-set — strictly less work.
 
+### 4.1a The write arms, ENUMERATED (s457ai, phase 1)
+
+The sizing table (§5) warned that "element WRITES have ≥2 lowerings".  Counted
+in the runtime, they are FOUR value-store arms plus a fenced set of cell
+producers — and the two element-assignment *lowerings* (`p-setf` and the
+Kind-A `elem-setf` CL `setf`) both land in the same function, so they are one
+arm, not two:
+
+| # | arm | reached from | write rule |
+|---|---|---|---|
+| A1 | `(setf p-aref)` | `$a[i] = V` via `p-setf` **and** via CL `setf` (`elem-setf`); the array-slice assign arm of `p-setf` | box → `box-set`; else raw-or-fresh-box |
+| A2 | `%p-array-store-scalar` | `push` / `unshift` / `p-splice-impl` / `p-array-fill` (`@a = …`) / `p-array-init` (`[…]`) / the flatten walkers | APPEND — no existing slot, so the gate alone decides |
+| H1 | `(setf p-gethash)` | `$h{k} = V` (both lowerings); the hash-slice assign arm | box → `box-set`; else raw-or-fresh-box |
+| H2 | `%p-make-hash-entry` | `p-hash` (`{…}`) / `p-hash-fill` (`%h = …`) | NEW slot — the gate alone decides |
+
+Raw-storability is its own predicate, `%p-storable-raw`: only a plain number,
+or a plain string with no cached numeric half, may live unboxed.  Everything
+else carries identity on the CONTAINER — a bless class, the `is-ref` flag
+(`\$x`, `\*foo`), a dualvar's two halves, a magic cell, a tie proxy, a
+box-in-box scalar ref — and keeps its box.  That is exactly the split the
+READING side already makes (`p-aref-unbox-elem` / `%p-hash-unbox-elem` return
+the box for those kinds and the bare value otherwise), which is why no read
+path changes.  `nil` is never a legal raw value, so "not raw-storable" and
+"hole" cannot be confused.
+
+Unchanged by design: the CELL producers (`p-aref-box`, `p-gethash-box`,
+`p-aref-argbox`, `p-gethash-argbox`, `%p-elem-cell`, `%p-hash-elem-cell`) store
+a BOX because the box IS the cell; the defelem setters (`%p-defelem-box`,
+`%p-hash-defelem-box`) likewise; and `%p-extend-to` writes `nil` holes.
+`cl/pcl-xs.lisp`'s `xs-av-store` / `xs-hv-store` are the same family and are
+phase 3's business (`xs-av-fetch` already promotes — §7 Q4).
+
 ### 4.2 Promotion — ONE function
 
 `%p-elem-cell (vec i)` / hash twin: if slot holds a box, return it; if raw
@@ -282,11 +314,38 @@ more.  Fable reviews at each phase boundary (the round pattern).
    element modification during sort.  The implementing session adds the
    `docs/not-supported.md` entry (cite this doc + the ruling) in the
    phase-3 commit, since only the flip makes the case reachable.
-2. **The gate's runtime consultation**: `raw-elems` differs from existing
-   Kind-A gates (compile-time emission switches) — it is a runtime write-arm
-   policy.  Either give Passes.pm a runtime-consulted kind, or key it on an
-   emission difference (emit `p-aset-raw` vs `p-aset` — cleaner, bigger
-   diff).  Decide in phase 0.
+2. ~~The gate's runtime consultation~~ **DECIDED (s457ai, phase 0, by
+   measurement + an arm enumeration): a RUNTIME-CONSULTED GLOBAL, not an
+   emission-keyed Kind-A gate.**  `pcl:*p-raw-elems*` is an `sb-ext:defglobal`
+   whose value comes from `PCL_RAW_ELEMS` (empty or `0` = off), re-read from an
+   `sb-ext:*init-hooks*` entry so a SAVED CORE cannot freeze the answer its
+   build machine happened to have.  Three reasons, in order of weight:
+
+   - **Structural.**  The enumerated write arms are RUNTIME functions that no
+     emission site names (see §4.1a): `%p-array-store-scalar` is reached from
+     push / unshift / splice / `p-array-fill` / `p-array-init`, and
+     `(setf p-aref)` is reached BOTH from `p-setf` and, under the existing
+     Kind-A `elem-setf` rule, from CL's own `setf` — the two lowerings the
+     sizing table warned about turn out to land in the SAME function.  Keying
+     those on emission means a `-raw` twin of each, which is rule 11's hard
+     stop.
+   - **Correctness.**  An emission gate has to enter the module-cache key, or
+     a module transpiled under one setting gets loaded into a program running
+     the other.  A runtime flag has no cache interaction at all, and mixed
+     storage is legal by design.
+   - **Cost: none measurable.**  With the gate OFF (phase 1, tools/bench-exec.pl,
+     best-of-5, against a base tree at `0237940`; the run-to-run noise band on
+     this machine is 7–10 %, measured by running the base twice):
+     arrhash 0.1877 → 0.1814 s, arrfill 0.1892 → 0.1852 s,
+     slices 0.3195 → 0.3203 s, sliceasgn 0.0717 → 0.0757 s.  The gate read is
+     one memory load in a function that already allocates.
+
+   `PCL_OPT` is a COMPILE-time registry (`Pl/Passes.pm` is a perl module the
+   SBCL side never sees), so `raw-elems` is deliberately NOT registered there —
+   the two are orthogonal knobs.  *Ask for Fable: if the project wants one
+   knob, `Pl::Passes` could grow a runtime-consulted kind that emits a setter
+   into the file preamble; that trades the cache-key hazard back in, so it was
+   not done unasked.*
 3. ~~Hash `values` in LIST-copy positions~~ **RESOLVED (probed, C4)**:
    `my @v = values %h` and `my ($first) = values %h` COPY in perl AND in
    PCL today (`copy=1 lst=2` both sides) — the position split already
@@ -300,6 +359,38 @@ more.  Fable reviews at each phase boundary (the round pattern).
    phase-3 blocker.  This is the THIRD live copy of the promotion arm in
    the tree (argbox, defelem-vivify, xs-av-fetch) — the design
    consolidates an existing idiom, it does not invent one.
+
+## CHECKPOINT LOG (execution, s457ai — phases 0–2)
+
+- **P0a (#817 + #818, `9c0cf75` + `baf8f29`):** the two live silent-wrongs are
+  CLOSED, at the list-builder layer.  `p-values` / `p-aslice` / `p-hslice` /
+  `p-kv-aslice` / `p-kv-hslice` hand out the container's own slots through
+  `%p-alias-aelem` / `%p-alias-helem`, which is `p-aref-argbox` /
+  `p-gethash-argbox` with a fall-back for containers that cannot hold a slot
+  box.  **The key measurement that made this the right layer**: a plain `@a`
+  in list context has ALWAYS handed out its slot boxes, and every copy
+  consumer already unboxes — probed over twelve copy positions.  So this is
+  the sibling shape, not a new one.  **The sweep caught the other half**:
+  `@a[0,1] = @a[1,0]` needs perl's read-the-whole-RHS-first rule, which PCL
+  already had inside `%p-flatten-list` and the slice-assign arms did not run;
+  extracted as `%p-assign-snapshot`.  Cost measured and clawed back to parity
+  (three hot-path narrowings, `baf8f29`), residual +6 % on sliceasgn.
+  `Pl/t/elem-alias-01.t` is the phase-0 battery — E1–E12, both spellings,
+  byte-compared against real perl at test time; the E11/E12 rows were RED
+  before the fix.  Filed **#840** (the real `experimental.pm`'s second
+  blocker, found when the shim's DELETE-WHEN trigger fired).
+- **P0b (the gate decision):** §7 Q2 RESOLVED — a runtime-consulted defglobal,
+  with the enumeration and the numbers in §7.2 and the arms in §4.1a.
+- **P1 (the write rule, inert):** the four arms of §4.1a carry the write rule
+  behind `*p-raw-elems*`, default OFF.  Zero-change bar met: gate PASS
+  190/6367, sweep GATE clean TOTAL 18339 (+0), drops 5 = census, battery
+  byte-identical to perl, bench at or below base.  **Gate-ON preview** (phase 1
+  alone, nothing else done): arrhash 1.41× → **1.21×**, arrfill 3.91× →
+  **2.94×**, sliceasgn 3.04× → **2.71×**, slices 4.96× → 5.17× (promotion
+  allocates on first read of each slot; §4.4's proven arm and phase 4's slice
+  re-measure own that).  The gate-ON battery ALSO showed exactly which E-events
+  still need phase 2: **E2, E3, E7 and only those** — E1, E4, E5, E8, E10, E11,
+  E12 already work over raw slots.
 
 ## CHECKPOINT LOG (continued)
 
