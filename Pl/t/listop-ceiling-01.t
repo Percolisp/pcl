@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 4;
+plan tests => 5;
 
 # The f/g/h vocabulary every row below shares: each sub prints its name and
 # args, and returns what the row needs for the short-circuit under test.
@@ -119,3 +119,22 @@ is(run_cl($SUBS . q{f0 "a" or g1 "fb"; f1 "b", "m" or g1 "x"; f0(ref $u, "m") or
 is(run_cl(q{my @t = ("print 'A';", "print 'B';"); eval join "", @t or die $@; print "\n";} . "\n"),
    "AB\n",
    'eval join ... or die $@ — the benign named-unary shape stays correct');
+
+# ── 5. The BLOCK-FORM argument run gets the SAME ceiling (s454ae, rule 11):
+# _take_rest_as_args used to consume to END OF STREAM, so `grep { … } LIST or
+# EXPR` swallowed the `or` (SILENT WRONG: r read 1, perl says 2) and
+# `$c ? grep { … } @a : ()` swallowed `: ()` (orphaned colon → drop).  The
+# nested-ternary-inside-the-args negative rides along.  Perl-probed s455. ─────
+is(run_cl($SUBS . <<'PL'),
+sub skipit { print "skip(@_)\n" }
+my $r = grep { $_ > 1 } (1,2,3) or g1 "never";
+print "r=$r\n";
+my @z = 1 ? grep { $_ % 2 } (1,2,3,4) : ();
+print "z=@z\n";
+my @w = map { $_ + 1 } 1 ? (10,20) : (30,40);
+print "w=@w\n";
+my ($e) = grep { /x/ } ("a","b") or skipit "bf", 3;
+print "e=", (defined $e ? $e : "undef"), "\n";
+PL
+   "r=2\nz=1 3\nw=11 21\nskip(bf 3)\ne=undef\n",
+   'block-form grep/map argument run ends at or / enclosing-ternary colon');
