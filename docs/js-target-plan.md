@@ -139,19 +139,28 @@ restore always happens on the way out:
 our $level = 0;
 sub inner { print $level; }
 sub outer {
-    local $level = $level + 1;
-    inner();
+    local $level = $level + 1;   # <-- the hard part in JS: it has no `local`
+    inner();                     # prints the raised value...
 }
+outer();                         # ...and after outer() returns, $level is 0 again
 ```
 
 ```js
+// our $level = 0 — a package variable lives in the registry, not in a JS let
+pkg("main").scalar("level").set(0);
+
+function inner() {
+    print(pkg("main").scalar("level").get());
+}
+
 function outer() {
+    // Hard part in JS: no dynamic binding — `local` becomes save + try/finally
     let saved = pkg("main").scalar("level").get();
     pkg("main").scalar("level").set(saved + 1);
     try {
-        inner();
+        inner();                                   // sees 1
     } finally {
-        pkg("main").scalar("level").set(saved);
+        pkg("main").scalar("level").set(saved);    // restored even if inner() dies
     }
 }
 ```
