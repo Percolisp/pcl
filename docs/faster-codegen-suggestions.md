@@ -51,7 +51,7 @@ counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
 
 * **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
 * **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
-* **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort)
+* **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort) · [§13 s453 verdict-coverage review, #758–#761](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761)
 
 ---
 
@@ -705,3 +705,54 @@ my $s = sprintf("%05d-%s", $i, $name);   # constant format in a loop
 (0%); unboxing hash *values* without also removing a lookup (can be net
 negative); optimizing constant-key hashing (~5 ns already); micro-tuning IO
 codegen (syscall-bound).
+
+---
+
+## 13. s453 review — the unclaimed speed is in VERDICT COVERAGE, not new shapes (probes on HEAD `a2b2eb5`; tasks #758–#761)
+
+The USER asked whether more speed can be squeezed out of box elision.  Answer:
+yes, and almost none of it needs a new fast shape — the shipped raw machinery
+(`p-foreach-range-raw`, `p-incf-raw`, raw lets, `p-raw-params`) is excellent
+**when the verdict fires**.  What was reviewed is WHEN it fires:
+`Pl/VarAnnotator.pm`'s reason list, probed shape by shape against the control
+
+```perl
+sub hot { my $s = 0; for my $i (1..1000) { $s += $i } return $s }
+# → (let (($s 0)) (p-foreach-range-raw ($i 1 1000) :my t (p-incf-raw $s $i)))
+```
+
+which emits fully raw — the class that BEATS perl (cfor 0.24×).  Four
+verdict-coverage gaps keep real code off that path:
+
+| # | veto today | probe result | fix | task |
+|---|---|---|---|---|
+| 1 | **`eval-in-region` fires on BLOCK eval too** — any `eval` Word in the region boxes EVERY name; the code comment ("Block eval still fires … a separate, later decision") was never scheduled | adding one `my $r = eval { 1 };` to the control sub boxes the accumulator (`make-p-box` + boxed loop) | veto STRING eval only — the capture alist (#296-B1) that needs cells is a string-eval mechanism; `eval {}` is plain control flow with no name capture | **#758** |
+| 2 | **write families are OPERAND-derived** — `$s = $s + $_` is `write-shape` (B-DEBUG: `reasons=[write-shape] uses={num,opaque}`) because `$_` is opaque, though `p-+` yields num by the OPERATOR | `$s = $s + $i` raw, `$s = $s + $_` boxed; `$s += $_` raw (compound counts as arith) — the same value, three verdicts | derive the family from the operator's result type for the closed arith/string op set; overload is already gated file-wide for the freeze class | **#759** |
+| 3 | **`nested-sub-ref` boxes every name captured by an anon sub**, categorically | a closure that only READS `$s` still boxes it | CL closures capture `let` bindings natively (shared, mutable) — the box is needed only for a REAL boxing event (`\$x`, `local`, string eval), which the event walk already detects inside nested bodies; narrow the veto to capture+event | **#760** |
+| 4 | **the topic variable keeps the LOOP boxed**: `for (1..N) { … }` always takes the boxed `p-foreach-range ($_ …)` (dynamic global `$_` per iteration), even when `$s` itself goes raw | the exact `intloop+=` bench spelling emits `(p-foreach-range ($_ …) (p-incf-raw $s $_))` — raw accumulator inside a boxed topic loop | bind `$_` raw per iteration when the body has NO dynamic `$_` reader (no user-sub calls, no eval, no `local $_`) — the front-end's `$_`-default machinery already spells implicit uses explicitly | **#761** |
+
+**This fully explains the two losing loop rows in §0.1** (both bench
+spellings use the topic variable):
+
+* `intloop=` **4.86×** = gap 2 (boxed accumulator) + gap 4 (boxed topic loop);
+* `intloop+=` **2.07×** = gap 4 alone;
+* the same loop with an explicit counter (`cfor`) is **0.24×** — the target
+  both rows reach when the two gaps close.
+
+Two review side-findings, no task needed:
+
+* **Tier-2 N2 ("in-place box write, ~1.3×") appears ALREADY SATISFIED** —
+  `p-my-=` expands to `box-set` (mutate in place, `pcl-runtime.lisp:4761`),
+  not the `make-p-box`-per-write the §3 `acc0` variant modeled.  The perf
+  agent should re-run the acc variants and strike N2 from §12 if confirmed.
+* Two feared blanket vetoes are NARROWER than they read: `_overload_in_file`
+  gates only the B-regime freeze (the A-verdict still fired in a
+  `use overload` file — probed), and sub params already have a raw path
+  (`p-raw-params ($n)` emitted for `my ($n) = @_` — §6/F2 is further along
+  than its text says).
+
+Priority within the four: #758 first (one-line narrowing, `eval {}` is the
+exception idiom so it robs whole subs in real code), #759 second (closes a
+bench row by itself), then #760, then #761 (the only one needing a new-ish
+loop emission).  Every widening transfers to the JS backend for free
+(`js-target-plan.md` II.0 — the backend inherits verdicts).

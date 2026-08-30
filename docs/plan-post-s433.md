@@ -202,6 +202,14 @@ pushes per round, as rounds 5–11.
    own condition).
 2. Then the tier list in order (T1 #77 return-family transfer next), one
    agent per round.  #74's pack half stays BLOCKED on pclxs (USER).
+   **s453 addendum (USER-asked box-elision review,
+   `faster-codegen-suggestions.md` §13): four verdict-COVERAGE gaps filed as
+   #758 (block `eval {}` boxes the whole region) → #759 (operator-derived
+   write families; closes the intloop= row) → #760 (anon-sub capture veto
+   too wide) → #761 (raw topic `$_` loop; the only new emission) — cheap,
+   ordered, and they slot into this tier walk ahead of most of tier 2; the
+   §13 side-finding says re-run the acc variants and strike N2 if
+   `box-set`-in-place already covers it.
 3. Discipline: every perf change carries before/after wall numbers on the
    same bench + the PCL_OPT registry rules (an emission-changing transform
    is a NAMED Kind-A/B gate in Pl/Passes.pm, never an unconditional edit);

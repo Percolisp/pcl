@@ -29,6 +29,23 @@ Three USER-requested planning deliverables; no product code touched.
    proceeds silently.  #757 = close the silent classes at the ANNOUNCE
    level.  Also caught: CLAUDE.md's "`use experimental 'try'` does NOT
    work" was STALE (#360 completed; probed working) — corrected in place.
+**Addendum (same session, USER ask): the box-elision review** — "is there
+more speed to squeeze out of removing boxes?"  YES, and it is in verdict
+COVERAGE, not new shapes: `faster-codegen-suggestions.md` §13, tasks
+**#758–#761**.  Probed on HEAD: (1) block `eval {}` boxes EVERY name in its
+region (the veto should be string-eval-only — the capture alist is a
+string-eval mechanism); (2) write families are operand-derived, so
+`$s = $s + $_` stays boxed while `$s += $_` goes raw — `p-+` proves num by
+the OPERATOR; (3) `nested-sub-ref` boxes any anon-sub-captured name though
+CL closures capture raw let slots natively; (4) the topic loop
+`for (1..N) { … }` always binds `$_` as the boxed dynamic global — the
+intloop bench rows decompose exactly into gaps 2+4 (4.86× = both, 2.07× =
+topic alone, 0.24× cfor = neither).  Side-findings: tier-2 N2 looks already
+satisfied (`p-my-=` is `box-set` in place — verify and strike);
+`_overload_in_file` gates only the B-freeze; `p-raw-params` means F2 is
+further along than §6 says.  Perf-agent pointer added to
+`plan-post-s433.md` §s452.
+
 3. **`docs/js-target-plan.md` (task #622, still parked)** — continues the
    s448 sketch.  Part I = human-readable narrative (drafted by Sonnet per
    the USER's instruction, Fable-reviewed); Part II = normative IR→JS

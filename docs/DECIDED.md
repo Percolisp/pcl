@@ -41,6 +41,17 @@ those two files and the live plan doc directly -- no new review-doc families.*
   variable-interpolated then STRIPPED by the runtime (~17715), match
   proceeds silently.  CLAUDE.md's "`use experimental 'try'` does NOT
   work" was STALE (#360 completed, probed working) — corrected s453.
+- **Box-elision headroom is VERDICT COVERAGE, not new shapes (USER-asked
+  review, `faster-codegen-suggestions.md` §13, tasks #758–#761)** — block
+  `eval {}` boxes its whole region (#758, veto should be string-eval-only);
+  write families are operand-derived so `$s = $s + $_` boxes where
+  `$s += $_` goes raw (#759, derive num from the operator); anon-sub
+  capture boxes categorically though CL closures capture raw lets (#760);
+  the topic loop binds `$_` boxed/dynamic always (#761).  The intloop bench
+  rows decompose exactly into #759+#761.  N2 ("in-place box write") looks
+  already satisfied by `p-my-=`→`box-set` — verify and strike;
+  `_overload_in_file` gates ONLY the B-freeze (probed); `p-raw-params`
+  already covers the `my (…) = @_` prefix.
 - **JS target: the plan doc is `docs/js-target-plan.md` (#622, still
   parked)** — Part I human narrative (Sonnet-drafted per USER), Part II
   normative IR→JS mappings on captured IR: box model ports, `local` =
