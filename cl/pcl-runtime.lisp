@@ -8791,8 +8791,18 @@ what changes is that the element is the raw counter rather than a fresh box."
     ((let ((v (p-box-value val)))
        (or (hash-table-p v) (vectorp v) (functionp v)))
      val)
-    ;; Simple scalar box - return the unboxed value
-    (t (unbox val))))
+    ;; Simple scalar box - return the unboxed value.  A box is a SCALAR, so its
+    ;; value contributes exactly ONE element to the returned list — but raw nil
+    ;; is the runtime's "empty list" marker (%p-flatten-list drops it by
+    ;; design, see the (null item) arm there), so unboxing a box that holds
+    ;; undef would make the scalar VANISH from the caller's list and shift
+    ;; every later element left (#790: `my $ok = eval { die }; return ($ok,"w")`
+    ;; assigned "w" to the FIRST target).  Normalise to *p-undef*, the marker
+    ;; that means "one undef scalar" — which is what `return undef` already
+    ;; produces, and what every other list consumer sees when the BOX itself
+    ;; is passed instead of its unboxed value.
+    (t (let ((v (unbox val)))
+         (if (null v) *p-undef* v)))))
 
 (defun p-list-scalar (val)
   "A list/slice evaluated in scalar context yields its LAST element (undef if

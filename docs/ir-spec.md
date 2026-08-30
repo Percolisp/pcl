@@ -943,9 +943,19 @@ code always means "the coderef itself", never a suppressed call.
 `(p-return V…)` throws to the nearest `:p-return` catch — normally the
 sub frame, but `eval { }` installs its own (§6.3), matching Perl. On the
 way out `p-return-value` adjusts the value:
-- scalar box → unboxed value (blessed boxes stay boxed to keep the class);
+- scalar box → unboxed value (blessed boxes stay boxed to keep the class),
+  **except that a box holding `nil` yields `*p-undef*`, never raw `nil`** — a
+  box is a SCALAR and a scalar contributes exactly one element to the returned
+  list, while raw `nil` is the runtime's *empty-list* marker that
+  `%p-flatten-list` drops by design.  Without the normalisation the scalar
+  vanished from the caller's list and every later element shifted left
+  (#790: `my $ok = eval { die }; return ($ok, "w")` assigned `"w"` to the
+  caller's FIRST target).  The two producers of a `nil`-holding scalar are
+  `eval { }` after a die and a bare `return` read in scalar context;
 - array value in **scalar** context → its element count;
-- `undef`/empty in **list** context → empty list;
+- a **raw** (unboxed) `nil`/empty in **list** context → empty list — this is
+  the bare-`return`/`return ()`/empty-array arm, and it is the one place the
+  marker still means "no elements";
 - multiple values `return (5,3,1)` → the list in list context, the *last*
   element in scalar context.
 

@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 31;
 
 sub run_cl {
     my ($code) = @_;
@@ -186,3 +186,37 @@ test_cl('scalar readline inside list-context sub reads ONE line',
 test_cl('scalar reverse inside list-context sub = reversed string',
     q{sub f { my $s = reverse("abc"); return "$s"; } my @r=(f()); print "$r[0]\n";},
     "cba\n");
+
+# ── #790: a SCALAR in a returned list contributes exactly ONE element, even
+#    when it holds undef.  `eval {}` and a bare `return` both hand a scalar
+#    context the runtime's raw-nil "empty list" marker; p-return-value unboxed
+#    it straight back out, %p-flatten-list dropped it, and every later element
+#    shifted LEFT (silent wrong: the caller's FIRST target got "w").  Every row
+#    below was probed against perl 5.40.3. ─────────────────────────────────────
+test_cl('#790 died-eval scalar keeps its slot in a returned list',
+    q{sub t { my $ok = eval { die "z\n" }; return ($ok, "w") }
+      my ($m, $n) = t();
+      print((defined $m ? $m : "undef"), "|", (defined $n ? $n : "undef"), "\n");},
+    "undef|w\n");
+
+test_cl('#790 a scalar holding a bare-return result keeps its slot',
+    q{sub g { return } sub t { my $ok = g(); return ($ok, "w") }
+      my ($m, $n) = t();
+      print((defined $m ? $m : "undef"), "|", (defined $n ? $n : "undef"), "\n");},
+    "undef|w\n");
+
+# The inverse: an EMPTY LIST really is zero elements.  These shapes reach
+# p-return-value's non-box arm (or the bare-return branch) and must keep
+# contributing nothing — the raw-nil marker is still the empty list there.
+test_cl('#790 inverse: empty array / bare return / () still contribute 0',
+    q{sub a { my @e; return @e } sub b { return } sub c { return () }
+      sub d { my $x; return $x }
+      print scalar(my @p = a()), scalar(my @q = b()), scalar(my @r = c()),
+            scalar(my @s = d()), "\n";},
+    "0001\n");
+
+test_cl('#790 (&;@) block form: ($ok, $@) from a died eval',
+    q{sub tryit (&;@) { my ($cb, @rest) = @_; my $ok = eval { $cb->() }; return ($ok, $@) }
+      my ($ok, $err) = tryit { die "boom\n" };
+      print((defined $ok ? $ok : "undef"), "|", ($err =~ /boom/ ? "boom" : "?"), "\n");},
+    "undef|boom\n");
