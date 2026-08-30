@@ -12170,16 +12170,19 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defvar *p-dirhandles* (make-hash-table :test 'eq))
 
 (defun %p-dirent-name (path)
-  "The entry's OWN name: file-namestring for a file, the last directory
-   component for a subdirectory (whose file-namestring is \"\" — that
-   emptiness is what File::Path's remove_tree used to try to unlink)."
-  (let ((fn (file-namestring path)))
-    (if (and fn (string/= fn ""))
-        fn
-        (let ((d (pathname-directory path)))
-          (if (and (consp d) (stringp (car (last d))))
-              (car (last d))
-              (namestring path))))))
+  "The entry's OWN name, LITERALLY: cut from the NATIVE namestring, because
+   file-namestring ESCAPES wild characters — a file named a*b listed as a\\*b
+   (#755's output half; the input seam is %p-literal-path).  A subdirectory's
+   native namestring ends in a slash (its file-namestring is \"\" — that
+   emptiness is what File::Path's remove_tree used to try to unlink), so the
+   trailing slash is stripped before the last component is taken."
+  (let* ((n (sb-ext:native-namestring path))
+         (end (if (and (plusp (length n))
+                       (char= (char n (1- (length n))) #\/))
+                  (1- (length n))
+                  (length n)))
+         (slash (position #\/ n :from-end t :end end)))
+    (subseq n (if slash (1+ slash) 0) end)))
 
 (defun %p-opendir-impl (dh dir)
   "Perl opendir - open directory for reading.
