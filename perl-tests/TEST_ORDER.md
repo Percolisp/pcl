@@ -1,6 +1,6 @@
 # Perl Test Files - Priority Order
 
-Tests from `/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t/op/`
+Tests from `perl-5.40.3/perl-5.40.3/t/op/`
 
 ## Tier 1 - Simple, likely to pass
 These use basic features already tested in our simplified tests.
