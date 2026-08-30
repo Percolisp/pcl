@@ -52,7 +52,16 @@ reviewed immediately (the round-12 pattern, compressed):
    plan line).  Six-population census on the merged tree: **21 files /
    65 drops = AG's edited baseline exactly**, with BOTH cpan populations
    (94 modules + 289 dist tests) at ZERO drops.  Companion op/ uni/ re/
-   legs: see the addendum below this section when they land.
+   legs (331 files, --quick): **seven snapshot movers, six spliced with
+   tip-bisect attribution** (throwaway worktrees at the round-12 tip and
+   the AF tip) — op/lexsub.t 78/63 drops 4→1 and uni/readline.t 6/1
+   drops 2→0 (AG's predicted movers; readline's two rows PASS where the
+   report guessed honest fails), op/split.t 213/6 and op/hexfp.t 111/14
+   and op/packagev.t 198/109 (all AG — old values at the AF tip;
+   packagev consistent with the #480 dot-number family), re/charset.t
+   2776/2776 (**AF** — one MORE row produced, failing honestly, pass
+   count unchanged); uni/variables.t is the known TIMEOUT churn, row
+   unchanged.
 4. **AH (filler, s456ah)** launched on the merged tree (USER: "add
    another smaller Opus subjob"): #800 glob-output escaping + #740 `-s`
    on empty file + #737 census message-text refresh; IDs 830–839.

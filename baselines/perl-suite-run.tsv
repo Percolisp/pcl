@@ -1090,7 +1090,9 @@ op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for modul
 op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).	0
 op/hashwarn.t	20	0	5	15	DIFF		0
 op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF	0
-op/hexfp.t	125	0	110	15	DIFF		0
+# s455b (round 13): op/hexfp.t 110/15 -> 111/14 EDITED BY HAND -- s456ag (tip bisect: old at
+# the AF tip, moved on AG-only), the same single-row gain as perl-tests/hexfp.t row 78.
+op/hexfp.t	125	0	111	14	DIFF		0
 op/inc.t	93	0	60	15	DIFF		0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 op/inccode.t	89	0	13	28	DIFF	aborted-forms:4: The value #<function (lambda (&rest %_args) :in	0
@@ -1121,7 +1123,10 @@ op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC 
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
-op/lexsub.t	156	0	76	62	DIFF	undef-fn:main::pl-foo; aborted-forms:16: Undefined subroutine &main::d called. 	4
+# s455b (round 13): op/lexsub.t 76/62 drops 4 -> 78/63 drops 1 EDITED BY HAND -- s456ag
+# (PPI �19b, bare `x` starting a statement): the three un-dropped statements execute
+# (2 pass, 1 honest fail); the abort note now shows the binding-stack crash + 11 aborts.
+op/lexsub.t	156	0	78	63	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1
 op/lfs.t	17	0	0	0	DIFF		0
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run	-1
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|	0
@@ -1153,7 +1158,10 @@ op/ord.t	38	0	38	0	OK		0
 op/overload_integer.t	2	0	2	0	OK		0
 op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/xN_N-linux/Confi	0
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
-op/packagev.t	307	0	197	110	DIFF		0
+# s455b (round 13): op/packagev.t 197/110 -> 198/109 EDITED BY HAND -- s456ag by tip bisect
+# (old value at the AF tip); consistent with the #480 dot-number repair family reaching a
+# version spelling.
+op/packagev.t	307	0	198	109	DIFF		0
 op/pos.t	33	0	15	15	DIFF		0
 op/postfixderef.t	128	0	100	21	DIFF	aborted-forms:3: Undefined subroutine &main::foo called	0
 op/pow.t	268	0	268	0	OK		0
@@ -1191,7 +1199,9 @@ op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
 op/sort.t	205	0	183	22	DIFF		0
 op/splice.t	34	0	34	0	OK		0
-op/split.t	219	0	212	7	DIFF		0
+# s455b (round 13): op/split.t 212/7 -> 213/6 EDITED BY HAND -- s456ag, the same scalar-split
+# row family as perl-tests/split.t (its fail-baseline row left by edit the same session).
+op/split.t	219	0	213	6	DIFF		0
 op/split_unicode.t	147	0	107	40	DIFF		0
 op/sprintf.t	559	0	534	25	DIFF		0
 op/sprintf2.t	1704	0	1679	25	DIFF		0
@@ -1257,7 +1267,10 @@ re/alpha_assertions.t	2279	0	1784	74	DIFF	aborted-forms:2: end of file on #<dyna
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 re/begin-once.t	2	0	1	1	DIFF		0
 re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF		0
-re/charset.t	8328	0	2776	2775	DIFF		0
+# s455b (round 13): re/charset.t 2776/2775 -> 2776/2776 EDITED BY HAND -- s456af by tip
+# bisect (moved at the AF tip, old at the round-12 tip): one MORE row is produced and fails
+# honestly, pass count unchanged (the perennial churn file gains coverage, not a loss).
+re/charset.t	8328	0	2776	2776	DIFF		0
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
 re/fold_grind_a.t	31	0	0	0	DIFF		0
@@ -1395,7 +1408,10 @@ uni/package.t	18	0	8	10	DIFF		0
 #   value as a symbol reference" where perl reads the slot — task #663 has the 5-line ASCII
 #   repro; identical on base c8a8311 and main, parallel and serial.
 uni/parser.t	58	0	28	30	DIFF		0
-uni/readline.t	7	0	4	1	DIFF		2
+# s455b (round 13): uni/readline.t 4/1 drops 2 -> 6/1 drops 0 EDITED BY HAND -- s456ag
+# (the readline-name predicate pair): both formerly-dropped rows now run and PASS
+# (the report expected honest fails; they pass).  #820 owns the paren-less residue.
+uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	1	4	DIFF		0
 uni/sprintf.t	52	0	49	3	DIFF		0
 uni/stash.t	48	1	44	6	DIFF		0
