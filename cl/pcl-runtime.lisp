@@ -4792,6 +4792,18 @@
   (if (p-box-p item)
       (let ((inner (p-box-value item)))
         (cond
+          ;; FAST PATH — a plain unblessed box holding a number, or a string
+          ;; with no cached numeric half (so not a dualvar, which needs both).
+          ;; This is the overwhelmingly common element and it reaches the same
+          ;; `(make-p-box inner)` as the final arm; before, it walked eight type
+          ;; tests plus a call to %p-dualvar-box-p to get there.  It pays for
+          ;; itself now that a slice / `values` hands out BOXES rather than raw
+          ;; scalars (#818) and this walk therefore runs where it used to be
+          ;; skipped by the outer p-box-p test.
+          ((and (not (p-box-class item))
+                (or (numberp inner)
+                    (and (stringp inner) (not (p-box-nv-ok item)))))
+           (vector-push-extend (make-p-box inner) arr))
           ;; Blessed box: preserve as-is (class must not be lost)
           ((p-box-class item) (vector-push-extend item arr))
           ;; Scalar/nested reference (box-in-box, e.g. \$x or \\$x): the depth of
@@ -5081,6 +5093,7 @@
        (stringp (p-box-value box))
        (/= (p-box-nv box) (parse-perl-number (p-box-value box)))))
 
+(declaim (inline %p-assign-snapshot))
 (defun %p-assign-snapshot (item)
   "The value BOX-SET would store for ITEM, read NOW.  Perl evaluates the WHOLE
    right-hand side of a list assignment before any store happens, so an RHS
@@ -5120,14 +5133,22 @@
       item))
 
 (defun %p-assign-snapshot-vector (src)
-  "%p-assign-snapshot over a whole assignment RHS, into a fresh simple vector —
-   ONE allocation, and per element no allocation at all for the ordinary
-   scalar/reference cases.  The slice-assignment arms of p-setf run this before
-   their store loop, which is where perl's own aassign copies."
-  (let* ((n (length src))
-         (out (make-array n)))
-    (dotimes (i n out)
-      (setf (aref out i) (%p-assign-snapshot (aref src i))))))
+  "%p-assign-snapshot over a whole assignment RHS.  The slice-assignment arms of
+   p-setf run this before their store loop, which is where perl's own aassign
+   copies.  Allocates the output vector LAZILY — only from the first element
+   whose snapshot differs from the element itself, so a literal RHS
+   (`@a[1..3] = (7,8,9)`, raw scalars) and an all-reference RHS cost nothing but
+   the walk, and SRC is handed straight back."
+  (let ((n (length src))
+        (out nil))
+    (dotimes (i n)
+      (let* ((x (aref src i))
+             (s (%p-assign-snapshot x)))
+        (when (and (null out) (not (eq s x)))
+          (setf out (make-array n))
+          (dotimes (j i) (setf (aref out j) (aref src j))))
+        (when out (setf (aref out i) s))))
+    (or out src)))
 
 (defun %p-flatten-list (src)
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
@@ -7140,6 +7161,7 @@
       ;; Complex place
       `(p-push-impl ,arr ,@items)))
 
+(declaim (inline %p-elem-cell %p-hash-elem-cell))
 (defun %p-elem-cell (vec i)
   "THE element-cell promotion (docs/boxed-aggregates-design-s455.md §4.2): the
 LIVE box for slot I of VEC — an alias, so a write through it reaches the
@@ -7156,12 +7178,16 @@ HOLE — a hole is %p-defelem-box's business, and the callers dispatch on that."
 
 (defun %p-hash-elem-cell (h k)
   "Hash twin of %p-elem-cell: the LIVE box for the EXISTING key K of hash H,
-promoting a raw slot value in place.  A missing key is the caller's business
-(the defelem alias in p-gethash-argbox)."
-  (let ((v (gethash k h)))
-    (if (p-box-p v)
-        v
-        (setf (gethash k h) (make-p-box v)))))
+promoting a raw slot value in place.  Answers NIL — and only NIL — when K is
+ABSENT, which is the caller's business (%p-hash-defelem-box); a present key
+always yields a box, so the two answers cannot be confused.  ONE gethash: the
+found test and the fetch are the same lookup, because a hash slice pays this
+per element."
+  (multiple-value-bind (v found) (gethash k h)
+    (and found
+         (if (p-box-p v)
+             v
+             (setf (gethash k h) (make-p-box v))))))
 
 (defun %p-defelem-box (vec i)
   "A deferred-element alias box for an array HOLE slot (perl's defelem magic).
@@ -7240,14 +7266,45 @@ a slot box, so there is nothing to alias and no behaviour to preserve."
         (p-aref-argbox a idx)
         (p-aref arr idx))))
 
+(defun %p-hash-defelem-box (h k)
+  "The lazy defelem alias for an ABSENT key K of hash H (perl's defelem magic,
+the hash twin of %p-defelem-box): reads look the key up LIVE and stay
+undef/non-exists, and the first WRITE through the alias creates it.  Used by
+every alias-position hash reader — @_ argument position, hash slices, values —
+so that a read-only use never vivifies, which p-gethash-box (the eager lvalue
+accessor) would."
+  (let ((box (make-p-box nil)))
+    (setf (p-box-value box)
+          (make-p-magic-cell
+           :kind :defelem
+           :getter (lambda ()
+                     ;; live delegation: the key may have been created
+                     ;; independently since the alias was taken
+                     (multiple-value-bind (v f) (gethash k h)
+                       (if f (unbox v) *p-undef*)))
+           :setter (lambda (new)
+                     (setf (p-box-value box) nil
+                           (p-box-nv-ok box) nil
+                           (p-box-sv-ok box) nil)
+                     (multiple-value-bind (v f) (gethash k h)
+                       (if (and f (p-box-p v))
+                           ;; created independently since: write the live slot;
+                           ;; this alias detaches (the array sibling agrees)
+                           (box-set v new)
+                           (setf (gethash k h) box)))
+                     (box-set box new))))
+    box))
+
 (defun %p-alias-helem (hash key)
   "Hash twin of %p-alias-aelem: one element of `@h{…}` / `values %h` as an
-ALIAS (p-gethash-argbox), falling back to p-gethash's value for containers
-that cannot hold a slot box (undef, %ENV/%INC markers, symbolic-ref strings,
-blessed objects)."
+ALIAS, falling back to p-gethash's value for containers that cannot hold a
+slot box (undef, %ENV/%INC markers, symbolic-ref strings, blessed objects).
+Spelled out rather than routed through p-gethash-argbox so that the hit path
+costs TWO hash lookups, not four — a hash slice pays this per element."
   (let ((h (unbox hash)))
     (if (and (hash-table-p h) (not (gethash :__class__ h)))
-        (p-gethash-argbox h key)
+        (let ((k (to-string key)))
+          (or (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))
         (p-gethash hash key))))
 
 (defun p-gethash-argbox (hash key)
@@ -7262,32 +7319,7 @@ create the key on a read-only call, which perl does not."
         ;; undef container / special markers / symbolic-ref strings / blessed:
         ;; keep plain value semantics, no aliasing.
         (make-p-box (p-gethash hash key))
-        (multiple-value-bind (existing found) (gethash k h)
-          (declare (ignore existing))
-          (if found
-              (%p-hash-elem-cell h k)
-              (let ((box (make-p-box nil)))
-                (setf (p-box-value box)
-                      (make-p-magic-cell
-                       :kind :defelem
-                       :getter (lambda ()
-                                 ;; live delegation: the key may have been
-                                 ;; created independently since the alias
-                                 (multiple-value-bind (v f) (gethash k h)
-                                   (if f (unbox v) *p-undef*)))
-                       :setter (lambda (new)
-                                 (setf (p-box-value box) nil
-                                       (p-box-nv-ok box) nil
-                                       (p-box-sv-ok box) nil)
-                                 (multiple-value-bind (v f) (gethash k h)
-                                   (if (and f (p-box-p v))
-                                       ;; created independently since: write the
-                                       ;; live slot; this alias detaches (the
-                                       ;; array sibling behaves the same way)
-                                       (box-set v new)
-                                       (setf (gethash k h) box)))
-                                 (box-set box new))))
-                box))))))
+        (or (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
 
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
