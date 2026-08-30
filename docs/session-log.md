@@ -4,6 +4,41 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 453 (2026-08-30, Fable) — PLANNING ONLY (USER: "just planning, no work"): the single-binary plan, the unsupported-diagnostics survey, the JS-target plan
+
+Three USER-requested planning deliverables; no product code touched.
+
+1. **`docs/single-binary-plan.md` (task #756)** — compile a Perl program to
+   ONE standalone binary.  Found first: the existing `pl2cl --executable` is
+   a demo (top-level statements run at BUILD time during `load`; the saved
+   `:toplevel` only exits) and `--bundle` does not bundle the use-closure.
+   Plan: #217 relocatable preamble as prerequisite → `--build-mode`
+   section-split (compile phase stays at build = perl's compile phase;
+   run phase moves into `pl-__pcl_main__` with a perl-shaped toplevel) →
+   `use`-closure PRELOADS at build / `require`-closure + `--with-module`
+   EMBED as FASL blobs loaded on demand (preserves require's run-time
+   timing; eval-loaded modules are the parameters, per the USER's ask) →
+   extensions embed, XS refuses loudly → eval works iff `pl2cl` is on the
+   target, else trappable perl-shaped die.  Three USER questions open (§6).
+2. **Diagnostics survey (plan §5, task #757)** — nine features probed on
+   HEAD.  Three loud classes (hard refusal `~~`/`class`; drop→die lvalue;
+   announce-and-continue tie-array/computed-goto) and TWO SILENT ones:
+   `format` blocks stripped with no trace + `p-write` silently returns 1;
+   `sub DESTROY` never announced anywhere; regex `(?{…})` blocks are
+   variable-interpolated then STRIPPED by the runtime and the match
+   proceeds silently.  #757 = close the silent classes at the ANNOUNCE
+   level.  Also caught: CLAUDE.md's "`use experimental 'try'` does NOT
+   work" was STALE (#360 completed; probed working) — corrected in place.
+3. **`docs/js-target-plan.md` (task #622, still parked)** — continues the
+   s448 sketch.  Part I = human-readable narrative (drafted by Sonnet per
+   the USER's instruction, Fable-reviewed); Part II = normative IR→JS
+   mapping keyed to REAL captured IR: the box model, `my`/`our`/`local`/
+   `state`/foreach-alias worked examples, PArray/PHash/PRef with the
+   element-cell promotion policy, the context stack answering the sketch's
+   open question, milestones M0–M3 with byte-compare acceptance.
+
+---
+
 ## Session 452 (2026-08-29/30, Fable) — ROUND 11: AA + AB reviewed and merged with ONE review fix; TOTAL 18337 (+10); THE INTERLEAVED PLAN ratified (USER: performance in parallel from round 12)
 
 Round 11 = TWO agents (USER: "two opus jobs"): AA (#736 %ENV marker

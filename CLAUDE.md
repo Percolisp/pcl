@@ -396,8 +396,9 @@ Perl Source → PPI → PExpr (AST) → ExprToCL → Common Lisp
 - `package` with block scoping
 - `use constant`
 - `try`/`catch`/`finally` (perl 5.34 `use feature 'try'`; task #340, s405) —
-  `p-try`, semantics in `docs/ir-spec.md` §6.3.  **`use experimental 'try'`
-  does NOT work** (two independent reasons, task #360).
+  `p-try`, semantics in `docs/ir-spec.md` §6.3.  `use experimental 'try'`
+  also works (task #360, completed; the "does NOT work" note that stood here
+  was stale — probed working s453).
 
 ### OO Support
 - `bless`, `ref`

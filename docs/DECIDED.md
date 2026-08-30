@@ -21,6 +21,34 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s453 (2026-08-30, Fable) — PLANNING ONLY (USER): single-binary plan, unsupported-diagnostics survey, JS-target plan
+
+- **Single standalone binary: THE PLAN IS `docs/single-binary-plan.md`
+  (task #756, NOT scheduled)** — supersedes the `--exe` sketches in
+  `pcl-command-plan.md` §pclbuild / `pcl-rollout-plan.md` Phase 8 where
+  they disagree.  Measured first: **`pl2cl --executable` is a demo** (the
+  program runs at BUILD time during `load`; the saved `:toplevel` only
+  exits) and `--bundle` does NOT bundle the use-closure.  Plan shape:
+  `use`-closure preloads at build (= perl's compile phase);
+  `require`-closure + `--with-module` (the eval-loaded parameters) embed
+  as on-demand FASL blobs; #217 relocatable preamble is a prerequisite;
+  XS refuses loudly; string eval works iff `pl2cl` is on the target, else
+  a trappable perl-shaped die.  Three USER questions open in its §6.
+- **Unsupported-feature diagnostics: 3 loud classes, 2 SILENT (measured
+  s453, plan §5; task #757 = close the silent ones at the ANNOUNCE
+  level)** — silent: `format` stripped with no trace + `p-write` returns 1
+  silently; `sub DESTROY` never announced; regex `(?{…})` blocks
+  variable-interpolated then STRIPPED by the runtime (~17715), match
+  proceeds silently.  CLAUDE.md's "`use experimental 'try'` does NOT
+  work" was STALE (#360 completed, probed working) — corrected s453.
+- **JS target: the plan doc is `docs/js-target-plan.md` (#622, still
+  parked)** — Part I human narrative (Sonnet-drafted per USER), Part II
+  normative IR→JS mappings on captured IR: box model ports, `local` =
+  slot swap + try/finally (so package-var reads go through the slot, only
+  promoted file lexicals cache), element-cell promotion is the ONE
+  mechanism behind `\$a[0]`/foreach-alias, context = explicit runtime
+  stack captured into the frame at sub entry.
+
 ## s452 (2026-08-29/30, Fable) — ROUND 11 merged with one review fix; THE INTERLEAVED PLAN (USER: performance in parallel)
 
 - **ROUND 11 (AA #736+#723+#730+#738; AB #721+#720+#731+#734+#733) MERGED**
