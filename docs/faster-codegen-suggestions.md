@@ -15,11 +15,15 @@ Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
 Every shipped transform is a **named, switchable emission** in the
 optimization registry [`Pl/Passes.pm`](../Pl/Passes.pm) (`PCL_OPT`):
 `raw-slot`, `raw-numeric`, `str-buffer`, `foreach-range`, `insensitive-call`,
-`elem-setf`.  Tier 1 is half done:
+`elem-setf`, and since s456af the four verdict-COVERAGE names
+`raw-block-eval`, `raw-op-family`, `raw-closure-capture`, `raw-topic`
+([§13.1](#131-all-four-shipped-s456af-round-13--and-what-they-cost)).
+Tier 1 is half done:
 
 | tier-1 item | task | state |
 |---|---|---|
 | **S1 + N1** — string buffer, raw numerics | #62 | **done.**  `str-buffer` killed the O(n²) append class (`strcat` 756× → 5.7×); `raw-numeric`/`raw-slot` put the counting loops and `collatz` *ahead of perl*.  See the re-measured [§0.1 table](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut). |
+| **verdict COVERAGE** — where N1's machinery fires | #758–#761 | **done (s456af).**  Not new shapes: four vetoes narrowed, so real code reaches the raw machinery.  **Both losing loop rows now beat perl** — `intloop+=` 2.02× → **0.28×**, `intloop=` 4.83× → **0.29×**, `arrhash` 2.17× → **1.45×**.  [§13.1](#131-all-four-shipped-s456af-round-13--and-what-they-cost) and the [§0.2b table](#02b-after-the-verdict-coverage-work-s456af-758761). |
 | **M1** — method dispatch | #73 | **done, cache-free.**  The per-call-site inline cache was *rejected* (USER, s444): profiling showed the ~15× was mostly `finalize-inheritance` running on every call, not the lookup.  The own-package fast path plus the stash/`pl-NAME` memos took a monomorphic loop to **2.62× of perl** and an inherited one to **4.74×** (`ovlsub` 3.44×).  Two further steps measured 7 % and 0 % and were closed unshipped — [§7](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) has the table.  One lever remains: a per-CLASS cache (#582), blocked on `@ISA`-write invalidation. |
 | **P1** — `sprintf` / `pack` | #74 | **open**, and now the largest single loss on the board. |
 
@@ -49,7 +53,8 @@ counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
 
 ## Contents
 
-* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
+* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
+* **Verdict coverage** — [§13 the s453 review](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761) · [§13.1 all four shipped, s456af](#131-all-four-shipped-s456af-round-13--and-what-they-cost)
 * **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
 * **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort) · [§13 s453 verdict-coverage review, #758–#761](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761)
 
@@ -145,6 +150,79 @@ load-suspect until the round-13 agent re-measures on a quiet machine; no
 change since s446m touched either path.  The stable story matches §0.1:
 counting loops and recursion beat perl, `intloop=`/`intloop+=` wait on the
 verdict-coverage tasks (#758–#761, §13), pack/unpack wait on #74.
+
+### 0.2a The two load-suspect rows, re-measured on a quiet box (s456af)
+
+Verdict on the note above: **`ovlsub` was load noise, `symref` was a real
++34 % regression** — and telling them apart needed the ABSOLUTE PCL time,
+not the ratio.  Two independent best-of-5 runs at 1-min load 0.1–0.2, agreeing
+within 0.5 %:
+
+| row | pcl(s) now | pcl(s) record | perl(s) now | perl(s) then | ratio now | verdict |
+|---|---:|---:|---:|---:|---:|---|
+| `ovlsub` | 0.1477 | 0.1620 (s446m) | 0.0388 | 0.0471 | 3.80x | **no regression** — PCL is 9 % FASTER than the record; the ratio rose only because perl ran faster too |
+| `symref` | 0.2155 | 0.1601 (§0.1) | 0.0210 | 0.0215 | 10.26x | **real, PCL-side**: perl is unchanged, PCL is 34 % slower |
+
+> **Reading rule this establishes:** a `pcl/perl` ratio compares two
+> measurements taken in the same machine state, so it is only comparable
+> across sessions when the perl column moved too.  Compare the **PCL absolute
+> seconds** first, and look at the perl column before calling a ratio a
+> regression.
+
+`symref` BISECTED (the bench row is `${'main::g'} + ${'g'} + scalar(@{'main::ga'})`
+in a 200k loop; each step a `BENCH_K=3` run on that commit):
+
+| commit | pcl(s) | what landed |
+|---|---:|---|
+| `99b003d` | 0.1578 | (pre-#525 baseline) |
+| `91633d6` | 0.1739 | **#525** — an unqualified symbolic name resolves in the perl-level current package (+10 %) |
+| `c8a8311` | 0.1737 | round 6 |
+| `f937afd` | 0.1804 | round 8 |
+| `80a11a7` | 0.1844 | round 9 + s451x |
+| `7ca3da4` | **0.2150** | **#685** — a foreign-qualified symbolic name never reaches main's magic (**+16.6 %**) |
+| `0dd7434` | 0.2247 | round 10 |
+| `83b335f` | 0.2155 | HEAD |
+
+So it is not a mystery and not a bug: it is the accumulated price of the
+round-5–10 correctness work on the symbolic-name resolver, two thirds of it
+in the two commits that made resolution package-aware.  Whether any of it is
+recoverable (a per-call-site memo on the resolved cell, keyed for
+invalidation the way #582 would need) is **task #812** — filed, not
+scheduled.
+
+### 0.2b After the verdict-coverage work (s456af, #758–#761)
+
+```
+bench          perl(s)     pcl(s)  pcl/perl   was
+intloop+=       0.0647     0.0179     0.28x   2.02x  <- 3.6x FASTER than perl
+intloop=        0.0652     0.0190     0.29x   4.83x  <- 3.4x FASTER than perl
+cfor            0.1062     0.0242     0.23x   0.25x
+arrhash         0.1303     0.1891     1.45x   2.17x
+fib(27)x        1.4773     0.4437     0.30x   0.29x
+gcdrec          0.1909     0.0947     0.50x   0.52x
+collatz         1.9626     0.7839     0.40x   0.40x
+strcat          0.0017     0.0040     2.33x   3.50x  (0.004 s: noise-dominated)
+pack            0.0031     4.5134  1472.04x          (P1 #74)
+packunpk        0.0038     4.6277  1203.57x          (P1 #74)
+arrfill         0.0810     0.3049     3.77x   3.96x
+slices          0.1105     0.5251     4.75x   4.75x
+sliceasgn       0.0414     0.1128     2.73x   2.80x
+ovlsub          0.0677     0.2505     3.70x   3.82x
+symref          0.0400     0.3639     9.10x   9.33x
+regexg          0.1039     0.0012     0.01x          (#680, s454ac)
+```
+
+**Both losing loop rows now beat perl**, and they decompose exactly as §13
+predicted: `intloop=` needed #759 (4.83x → 3.01x) and then #761 (→ 0.29x);
+`intloop+=` needed #761 alone.  Two rows §13 did not name moved with them
+because they are topic loops too — `arrhash` 2.17x → 1.45x and `strcat`.
+
+This table's TAIL (arrfill through symref) was taken with a sibling agent
+active — its perl column reads high — so those rows are for the shape of the
+board, not for comparison; the §0.2a rows above are the quiet-box numbers.
+What is left, in order of size: pack/unpack (#74, still the whole board),
+aggregate/slice traffic (boxed-aggregate design), `symref` (#812),
+dispatch's remainder (#73/#582).
 
 **m//g (task #680, fixed this session, runtime-only):** the qp6 shape
 `while ($x =~ /./g) {}` went from ~1.7 µs/match to **~0.21 µs/match**
@@ -271,10 +349,15 @@ indirection plus the boxed loop var. (acc0/acc2 use the boxed-`$_`
   numerically): a string slot re-numifies every use — measured **~8.5×** slower
   than freezing the number into the slot once (`num0` 0.82s vs `num1` 0.10s @
   5M). This is the `cfor`/`$n=$ENV{N}` bound tax from §2/O4.
-- **N2. In-place box write** as a cheap partial win where a variable must stay
-  boxed but is only ever *re-assigned a scalar*: have `p-my-=`/`p-scalar-=`
-  mutate `(p-box-value)` instead of allocating a fresh box. ~1.3× and it cuts
-  per-iteration GC garbage. Independent of N1, helps every still-boxed write.
+- ~~**N2. In-place box write**~~ — **STRUCK s456af, premise false.**  It asked
+  for `p-my-=`/`p-scalar-=` to mutate `(p-box-value)` instead of allocating a
+  fresh box; `p-my-=` has always expanded to `box-set`, which does exactly
+  that.  Re-measured, today's real emission (`acc_today`, 0.2880 s) is SLOWER
+  than the `acc0_boxed` variant N2 wanted to replace, because the cost is
+  `box-set`'s store-semantics DISPATCH, not allocation — 1.54× over a plain
+  slot mutation.  The real item is **task #811** (a no-tie/no-magic/simple-
+  scalar fast path in `box-set`); the table and the reasoning are in
+  [§13.1](#131-all-four-shipped-s456af-round-13--and-what-they-cost).
 
 ---
 
@@ -550,7 +633,7 @@ moves (from §0), and a realistic expectation.
 | **P1** pack/sprintf memoize | pack oracle, sprintf ~5× | `pack` 1175×→?, `packunpk` 1587×→? | Decisive for pack/unpack/sprintf-in-loop code; local to the oracle/formatter. |
 | **A4** raw array elements | ~3.5× | `arrhash` 2.07×→~1× | Recovers array-traffic loops; needs the Phase-4 element machinery. |
 | **F1** dynamic-extent `@_` | (GC, not timed here) | helps `fib`/`gcdrec` further | Cuts per-call garbage → less GC on call-heavy code; keeps PCL's existing call advantage. |
-| **N2** in-place box write | ~1.3× | every still-boxed write | Small but universal; also cuts GC. Ship with N1. |
+| ~~**N2** in-place box write~~ | — | — | **STRUCK s456af**: `p-my-=` already mutates in place. Superseded by **#811** — the tax is `box-set`'s store-semantics dispatch, **1.54×** over a plain slot mutation, on every still-boxed write. See §13.1. |
 | **X1** block-compile runtime | 1.2–2× (est.) | everything | Broad baseline lift; free once the load-time cost is managed. |
 | **O1** fixnum specialization | ~10× | tightest numeric loops | Only behind a range proof; narrow applicability, hard soundness. Low priority (§2). |
 
@@ -738,7 +821,9 @@ my $s = sprintf("%05d-%s", $i, $name);   # constant format in a loop
 **Tier 2 — needs the type-flow / Phase-4 spine:**
 5. **A1/A3 single-lookup + fill-pointer aggregates** (arrhash, push loops).
 6. **F1 `dynamic-extent @_`**, then **F2/F3**.
-7. **N2 in-place box write** (~1.3× on every still-boxed write; cheap).
+7. ~~**N2 in-place box write**~~ — **STRUCK s456af** (already done); read
+   **#811** instead: a fast path in `box-set` for a simple scalar into an
+   untied, unmagic box, worth **1.54×** on every still-boxed write (§13.1).
 7b. **T1 return-family transfer through sub_info** (task #77, user-approved
    idea s303, **scheduled AFTER E2–E4**): per named sub, classify every
    `return`/tail expression with `_tw_shape_ok`'s family oracle in the
@@ -797,12 +882,62 @@ spellings use the topic variable):
 * the same loop with an explicit counter (`cfor`) is **0.24×** — the target
   both rows reach when the two gaps close.
 
-Two review side-findings, no task needed:
+### 13.1 All four SHIPPED (s456af, round 13) — and what they cost
 
-* **Tier-2 N2 ("in-place box write, ~1.3×") appears ALREADY SATISFIED** —
-  `p-my-=` expands to `box-set` (mutate in place, `pcl-runtime.lisp:4761`),
-  not the `make-p-box`-per-write the §3 `acc0` variant modeled.  The perf
-  agent should re-run the acc variants and strike N2 from §12 if confirmed.
+| # | gate (`PCL_OPT`) | what changed | bench |
+|---|---|---|---|
+| #758 | `raw-block-eval` | an `eval` Word whose next sibling is a `Structure::Block` is not a boxing event; a STRING eval (incl. one nested inside a block eval) still is | — |
+| #759 | `raw-op-family` | under an `%ARITH_OP` root the family comes from the OPERATOR; the `_tw_operand_ok` walk stays for the NO-operator case, which is the aliasing hazard it was written for | `intloop=` 4.83x → **3.01x** |
+| #760 | `raw-closure-capture` | capture alone is not an event; the veto is capture + a `_text_gate_tags` hit on the closure BODY | — |
+| #761 | `raw-topic` | `for (A..B)` binds `$_` to the RAW counter when `_topic_raw_ok` passes | `intloop+=` 2.02x → **0.28x**, `intloop=` → **0.29x**, `arrhash` 2.17x → **1.45x** |
+
+Four separate Kind-A names rather than one, because `-raw-slot` can only turn
+the whole verdict off — these are bisectable individually, and
+`Pl/t/raw-verdict-coverage-01.t` is inverse-guarded per gate.
+
+**#761 did NOT need the new emission the task predicted.**  Measured first
+(§9 recipe, 5M iterations, one image per variant): special bind + fresh box
+**0.1680 s**, special bind + RAW value **0.0160 s**, plain lexical + raw
+**0.0150 s** — the box ALLOCATION is the whole tax and the special bind costs
+7 %.  So `$_` keeps its name and its dynamic binding (a callee still sees the
+current element, the outer `$_` is still restored) and only the value goes
+raw; `%expand-foreach-range`'s existing raw arm already applies.
+
+**What the gate must prove, and how.**  Reading a raw value is always safe —
+every `p-op` coerces — so `_topic_raw_ok` only has to exclude a body that
+WRITES THROUGH the box, aliases it, or reaches code the compiler cannot see.
+It is an ALLOWLIST (a rejected body only loses an optimization), in three
+parts: the shared `text_gate_tags` list, a blanket rejection of every regex
+token (a bare `//`/`s///`/`tr///` acts on `$_` with no `=~` to see, and two of
+the three write it), and a short word list with the exclusions documented.
+**corpus-diff found the hole reasoning missed**: `closure.t` calls
+`$foo[$_]->(4 - $_)`, and a code-ref call carries no Word — `->` before a
+List and an `&` Cast are rejected too, `->` before a Subscript is not.
+
+Two review side-findings, both now measured:
+
+* **Tier-2 N2 ("in-place box write, ~1.3×") is STRUCK — its premise is
+  false, and the truth is worse.**  `p-my-=` already expands to `box-set`
+  (mutate in place, `pcl-runtime.lisp:4761`), which is exactly what N2 asked
+  for.  Re-measuring the §3 variants one-per-image (5M) shows today's REAL
+  emission is slower than the fresh-box variant N2 proposed to replace:
+
+  | variant | inner CL | exec(s) | §3 said |
+  |---|---|---:|---:|
+  | `acc0_boxed` | `(setf $s (make-p-box (p-+ (unbox $s) $_)))` | 0.2560 | 0.2237 |
+  | `acc2_boxmut` | `(setf (p-box-value $s) (p-+ (p-box-value $s) $_))` | 0.1870 | 0.1706 |
+  | **`acc_today`** | **`(p-my-= $s (p-+ $s $_))` — what PCL emits** | **0.2880** | *not measured* |
+  | `a0_current` | raw slot `(setf $s (p-+ $s $i))` | 0.0170 | 0.0160 |
+
+  The §3 numbers reproduce, so the harness is sound; the new row is the
+  finding.  The remaining boxed-write tax is not allocation, it is
+  **`box-set`'s store-semantics dispatch** (tie / magic / dualvar /
+  adjustable-vector / copy semantics) — **1.54× over a plain slot mutation,
+  on every still-boxed scalar write in every program**.  A fast path for "no
+  tie, no magic, simple scalar value" is **task #811**.
+  *(Run the variants one per SBCL image: they allocate 5M boxes each, so in
+  one image the later ones measure the earlier ones' garbage — that is how a
+  first pass read the raw slot at 0.030 s where a fresh image reads 0.017.)*
 * Two feared blanket vetoes are NARROWER than they read: `_overload_in_file`
   gates only the B-regime freeze (the A-verdict still fired in a
   `use overload` file — probed), and sub params already have a raw path

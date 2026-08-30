@@ -4,6 +4,105 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 456af (2026-08-30, Opus agent AF, round-13 PERF slot) — the four verdict-coverage narrowings shipped; BOTH intloop bench rows now BEAT perl; the s454ac load-suspect rows settled and `symref` bisected
+
+Round 13's perf slot, off `83b335f` (gen v2-420).  Two jobs, both done.
+
+**Job 1 — the two load-suspect rows, on a quiet box (1-min load 0.1–0.2, two
+independent best-of-5 runs agreeing within 0.5 %).**  The s454ac note asked
+whether `ovlsub` 3.44→3.82 and `symref` 7.44→9.33 were load noise.  They are
+different answers, and telling them apart needed the **absolute PCL seconds,
+not the ratio**:
+
+* `ovlsub` — **no regression.**  PCL 0.1477 s vs the s446m record 0.1620 s:
+  9 % FASTER.  The ratio rose only because perl ran faster too (0.0388 vs
+  0.0471).  That gives a reading rule now written into §0.2a: a `pcl/perl`
+  ratio compares two measurements taken in one machine state, so look at the
+  perl column before calling a ratio a regression.
+* `symref` — **a real +34 % PCL-side regression** (0.1601 → 0.2155 s with perl
+  unchanged at 0.021).  BISECTED commit by commit: `99b003d` 0.1578 →
+  **#525** (`91633d6`, an unqualified symbolic name resolves in the perl-level
+  current package) **+10 %** → round 6/8/9 accretion → **#685** (`7ca3da4`, a
+  foreign-qualified symbolic name never reaches main's magic) **+16.6 %** →
+  HEAD 0.2155.  So it is the accumulated price of the round-5–10 correctness
+  work on the symbolic-name resolver, two thirds of it in the two commits that
+  made resolution package-aware.  **Nothing to revert**; whether any is
+  recoverable is **#812**, filed with the discriminating measurement it must
+  take first (sb-sprof the row and report the package-lookup fraction).
+
+**Job 2 — #758 → #759 → #760 → #761, all four shipped**
+(`faster-codegen-suggestions.md` §13.1).  None is a new fast shape: each
+narrows a veto so real code reaches the raw machinery that already ships.
+Four separate Kind-A names in `Pl/Passes.pm` — `raw-block-eval`,
+`raw-op-family`, `raw-closure-capture`, `raw-topic` — because `-raw-slot` can
+only turn the whole verdict off and these had to be bisectable individually.
+
+* **#758** — a BLOCK `eval {}` is not a boxing event; the capture alist
+  (#296-B1) is a STRING-eval mechanism.  Discriminator: the `eval` Word's next
+  significant sibling is a `Structure::Block` (probed nine spellings; PPI never
+  makes that brace run a hash Constructor).  A string eval nested inside a
+  block eval still vetoes.
+* **#759** — under an `%ARITH_OP` root the OPERATOR proves the family.  That
+  was already the file header's stated invariant; `_tw_operand_ok` contradicted
+  it by rejecting a Magic operand and an unknown-sub call, which is how
+  `$s = $s + $_` boxed while `$s += $_` went raw.  The operand walk stays for
+  the no-operator case — a bare `$y` RHS stores `$y`'s BOX, the aliasing it was
+  written for.  Overload adds no class: a plain `$scalar` operand was already
+  accepted.  `intloop=` 4.83× → 3.01×.
+* **#760** — capture is not an event; the event inside the closure is.  A CL
+  closure captures the `let` BINDING, and `%expand-foreach-range` gives each
+  iteration its own `let` in the RAW arm too, so the acceptance probe holds
+  (10,20,30 with a raw loop var).  The oracle is the shared
+  `text_gate_tags` list run on the closure body.
+* **#761** — **did not need the new emission the task predicted, and the
+  measurement is why.**  5M iterations, one image per variant: special bind +
+  fresh box **0.1680 s**, special bind + RAW value **0.0160 s**, plain lexical
+  + raw **0.0150 s**.  The box allocation is the whole tax; the special bind
+  costs 7 %.  So `$_` keeps its name and its dynamic binding and only the value
+  goes raw — the existing raw arm already applies.  `_topic_raw_ok` is an
+  allowlist (a rejected body only loses an optimization).  **corpus-diff found
+  the hole reasoning had missed**: `closure.t` calls `$foo[$_]->(4 - $_)` and a
+  code-ref call carries no Word, so `->` before a List and an `&` Cast are
+  rejected too.
+
+**BENCH — the two losing loop rows fall exactly as §13 decomposed them:**
+`intloop+=` **2.02× → 0.28×**, `intloop=` **4.83× → 0.29×** (both now 3.4–3.6×
+FASTER than perl, the `cfor` class), and two rows §13 did not name move with
+them because they are topic loops too: `arrhash` **2.17× → 1.45×**, `strcat`
+3.50× → ~1.5–2.3× (0.004 s absolute, noise-dominated).  Table: §0.2b.
+
+**Side-finding, measured: tier-2 N2 is STRUCK and the truth is worse.**
+`p-my-=` has always expanded to `box-set`, which mutates in place — exactly
+what N2 asked for.  Re-measured one image per variant, today's REAL emission
+(0.2880 s) is *slower* than the fresh-box variant N2 wanted to replace
+(0.2560 s); §3's own numbers reproduce, so the harness is sound.  The tax is
+`box-set`'s store-semantics dispatch — **1.54× over a plain slot mutation on
+every still-boxed scalar write** — filed as **#811**.  *Method trap recorded:
+the variants allocate 5M boxes each, so in one image the later ones measure
+the earlier ones' garbage.*
+
+**Bar.**  Gate `tools/prove-core` **PASS, 188 files / 6306 rows** (worktree, xs
+skipped).  Full sweep **GATE clean, TOTAL passing 18337 (+0)** — main's number
+exactly — drops 5 = census, 0 new / 0 fixed.  corpus-diff per change with every
+diff explained and its files swept against the blessed pass baseline: #758+#759
+25 files (0 moved, incl. pack.t 5636/89 and sprintf2.t 1631/11), #760 3 files
+(0 moved), #761 5 files + closure.t (0 moved).  **110 probes vs real perl, 109
+identical**; the one divergence is pre-existing (**#810**, a literal-list
+foreach alias is read-only in perl and writable in PCL — identical under
+`PCL_OPT=none`).  All 110 probes identical under `PCL_OPT=none` as well.
+Generation **v2-430**, three artifacts regenerated and paren-checked.
+
+**Two `Pl/t` expectations encoded the conservatism this session removed** and
+were rewritten in place under the s377 four-conjunct rule: `constants-01.t`
+12–13 (an arith-rooted `my` now takes the raw let-init) and `parser2-01.t` 167
+(asserted that a closure-captured range var STAYS boxed).  Guard
+`Pl/t/raw-verdict-coverage-01.t`, 27 rows, ~7 s, **inverse-guarded per gate** —
+`-raw-block-eval` fails row 2 alone, `-raw-op-family` rows 8–9,
+`-raw-closure-capture` row 13, `-raw-topic` rows 19+24, and no BEHAVIOUR row
+moves under any setting.
+
+---
+
 ## Session 455 (2026-08-30, Fable) — ROUND 12 MERGE REVIEW: AC + AD + AE merged (the user-stopped round finished), one review fix, legs all clean, gen v2-420
 
 The three s454 worktrees, committed under the stop order, reviewed and

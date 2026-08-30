@@ -21,6 +21,81 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s456af (2026-08-30, Opus agent AF, round-13 perf slot) — the four verdict-coverage narrowings SHIPPED; both intloop bench rows now beat perl
+
+- **#758–#761 are DONE (`faster-codegen-suggestions.md` §13.1).**  None is a
+  new fast shape: each narrows a veto so real code reaches the already-shipped
+  raw machinery.  Four separate Kind-A names in `Pl/Passes.pm` —
+  `raw-block-eval`, `raw-op-family`, `raw-closure-capture`, `raw-topic` —
+  because `-raw-slot` can only turn the whole verdict off, and these must be
+  bisectable individually.  Guard `Pl/t/raw-verdict-coverage-01.t` (27 rows),
+  inverse-guarded PER GATE.
+- **A BLOCK `eval {}` is not a boxing event (#758).**  The mechanism that
+  needs a cell per name is the eval CAPTURE ALIST (#296-B1), a STRING-eval
+  feature.  Discriminator: an `eval` Word whose next significant sibling is a
+  `PPI::Structure::Block` (probed nine spellings — PPI never lexes that brace
+  run as a hash Constructor).  A string eval NESTED inside a block eval still
+  vetoes; `find()` descends and the inner Word has no Block sibling.
+- **An `%ARITH_OP` root proves its own result family (#759)** — the file's own
+  header always said so ("every such p-op coerces its operands … and returns a
+  raw CL number or string"); `_tw_operand_ok` contradicted it by rejecting a
+  `PPI::Token::Magic` operand and an unknown-sub call, which is why
+  `$s = $s + $_` boxed while `$s += $_` went raw.  The operand walk still owns
+  the NO-operator case — a bare `$y` RHS stores `$y`'s BOX, and that aliasing
+  is what it was written for.  Overload adds no class: a plain `$scalar`
+  operand was already accepted.
+- **CAPTURE by an anon sub is not a boxing event; the EVENT inside the closure
+  is (#760).**  A CL closure captures the `let` BINDING, and
+  `%expand-foreach-range` wraps every iteration in its own `(let ((var val)) …)`
+  in the RAW arm too — so `for my $i (1..3) { push @f, sub { $i * 10 } }` still
+  gives 10,20,30 with `$i` raw.  The event oracle is the SHARED
+  `Pl::VarAnnotator::text_gate_tags` run on the closure body (now published for
+  cross-file callers).  Named subs are already out of scope: their block's
+  previous sibling is the NAME, never the word `sub`.
+- **`$_` in a topic range loop may hold the RAW counter (#761) — and it needed
+  NO new emission.**  Measured first (5M, one image per variant): special bind
+  + fresh box 0.1680 s, special bind + RAW value 0.0160 s, plain lexical + raw
+  0.0150 s — **the box ALLOCATION is the whole tax, the special bind costs
+  7 %**.  So `$_` keeps its name and its dynamic binding (a callee still sees
+  the element, the outer `$_` is still restored) and only the value goes raw.
+  `_topic_raw_ok` is an ALLOWLIST: `text_gate_tags` + a blanket rejection of
+  every regex token (a bare `//`/`s///`/`tr///` acts on `$_` with no `=~` to
+  see) + a short word list.  **corpus-diff found the hole reasoning missed** —
+  a CODE-REF call (`$c->()`, `&$c()`) carries no Word, so `->` before a List
+  and an `&` Cast are rejected; `->` before a Subscript is a deref and stays.
+- **BENCH: `intloop+=` 2.02× → 0.28×, `intloop=` 4.83× → 0.29×** (both now
+  3.4–3.6× FASTER than perl, exactly the `cfor` class §13 predicted), plus two
+  rows §13 did not name because they are topic loops too — `arrhash` 2.17× →
+  1.45×, `strcat` 3.50× → ~1.5–2.3×.  Table: §0.2b.
+- **A `pcl/perl` RATIO is not comparable across sessions unless the perl
+  column moved too — compare the PCL ABSOLUTE seconds first** (§0.2a).  That
+  rule settled the two s454ac load-suspect rows on a quiet box: `ovlsub` was
+  load noise (PCL is 9 % FASTER than the record; the ratio rose because perl
+  ran faster), `symref` is a REAL +34 % PCL-side regression.
+- **The `symref` regression is the accumulated price of correctness, bisected
+  commit by commit** (§0.2a table): **#525** (`91633d6`, unqualified symbolic
+  names resolve in the perl-level current package) +10 % and **#685**
+  (`7ca3da4`, a foreign-qualified symbolic name never reaches main's magic)
+  **+16.6 %** are two thirds of it.  Not a bug; whether any is recoverable is
+  **#812**, filed not scheduled.
+- **Tier-2 N2 ("in-place box write") is STRUCK — its premise was false and the
+  truth is worse.**  `p-my-=` has always expanded to `box-set`, which mutates
+  in place.  Re-measured one-per-image, today's REAL emission (0.2880 s) is
+  slower than the fresh-box variant N2 wanted to replace (0.2560 s): the tax
+  is **`box-set`'s store-semantics dispatch** (tie/magic/dualvar/vector),
+  **1.54× over a plain slot mutation on every still-boxed scalar write**.
+  New item **#811**.  *Method note: these variants allocate 5M boxes each, so
+  running them in ONE image makes the later ones measure the earlier ones'
+  garbage — one SBCL image per variant, or the raw slot reads 2× slow.*
+- **A `Pl/t` expectation can encode the conservatism a session removes.**  Two
+  did, and were rewritten under the s377 four-conjunct rule in the same
+  commit: `constants-01.t` 12–13 (the arith-rooted `my` now takes the raw
+  let-init, not `p-my-=`) and `parser2-01.t` 167 (asserted that a
+  closure-captured range var STAYS boxed — exactly what #760 removes).
+- **#810 filed**: `for ("cat","dog") { s/o/0/ }` dies in perl ("Modification
+  of a read-only value") and substitutes in PCL — a LIST-foreach aliasing
+  divergence, identical under `PCL_OPT=none`, unrelated to #761's ranges.
+
 ## s455 (2026-08-30, Fable) — round-12 merge review: AC + AD + AE all merged; readdir literal names; glob-alias prototypes ratified
 
 - **The round-12 batch is MERGED and its legs are clean** (AC `dc13541` perf,
