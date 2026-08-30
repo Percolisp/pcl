@@ -877,7 +877,10 @@ io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for
 io/errno.t	16	0	16	0	OK		0
 io/errnosig.t	1	0	0	1	DIFF		0
 io/fflush.t	7	0	4	0	DIFF	aborted-forms:1: Undefined subroutine &main::_create_runperl called	0
-io/fs.t	61	0	56	2	DIFF	aborted-forms:1: Could not delete the file "/tmp/pcl-test-N-N": Is a directory	0
+# s455 (round 12): io/fs.t 56/2 -> 59/2 EDITED BY HAND -- s454ad/#755: unlink of a directory
+# answers 0/EISDIR instead of delete-file CRASHING the file (the `Could not delete ... Is a
+# directory` abort is gone, +3 rows); base-worktree A/B agrees 56/2 there, 59/2 here.
+io/fs.t	61	0	59	2	DIFF		0
 io/getcwd.t	0	0	0	0	NOTAP		0
 io/inplace.t	8	0	2	6	DIFF		0
 io/iofile.t	3	0	1	2	DIFF		0
@@ -889,7 +892,10 @@ io/nargv.t	7	0	11	2	DIFF		0
 #   the tie-crossing-package-switch lexical now promoted) and #594 (+4: the STDOUT-unbound
 #   aborts are gone; abort reason is now the pre-existing #138 indirect-object drop at line 267).
 #   Parallel and #366 serial agree; predicted row-for-row by agent R's emission A/B.
-io/open.t	188	0	141	24	DIFF	aborted-forms:2: PCL: statement not supported at open.t line N: ok open($stdin, "<&", $N), 'open ... "<&", 	1
+# s455 (round 12): io/open.t 141/24 -> 142/23 EDITED BY HAND -- s454ad/#755: the second aborted
+# form (wild-pathname family) is gone, aborted-forms 2 -> 1; the `<&` fd-number statement drop
+# remains.  Base-worktree A/B agrees.
+io/open.t	188	0	142	23	DIFF	aborted-forms:1: PCL: statement not supported at open.t line N: ok open($stdin, "<&", $N), 'open ... "<&", 	1
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
@@ -1052,7 +1058,11 @@ op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for inval
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
-op/filetest.t	436	0	181	250	DIFF	aborted-forms:1: The function main::pl-f is undefined.	1
+# s455 (round 12): op/filetest.t 181/250 -> 181/253 EDITED BY HAND -- s454ad: rows 34-36 now
+# fail HONESTLY (#221 warnings-gated family; the old rows were skip-as-pass), and the abort
+# moved: the base wild-pathname crash is gone (#755), the remaining abort is #782
+# (`-f 'TEST';` mis-parse -> undefined &main::f).  Base-worktree A/B agrees.
+op/filetest.t	436	0	181	253	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
 op/flip.t	14	0	12	2	DIFF		0
@@ -1262,7 +1272,10 @@ re/overload.t	87	0	3	0	TIMEOUT	timeout	0
 re/pat.t	1263	4	0	0	DIFF		3
 re/pat_advanced.t	1678	0	673	223	DIFF		4
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-re/pat_psycho.t	15	0	11	0	DIFF		0
+# s455 (round 12): re/pat_psycho.t 11/0 DIFF -> 15/0 OK EDITED BY HAND -- s454ac/#680: the
+# pathological rows that starved on per-match cost finish inside the 450s allowance; verified
+# alone at --timeout 450 (m//g per-match 30x -> ~2.4x of perl).
+re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_re_eval.t	527	0	65	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
 re/pat_re_eval_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0

@@ -216,13 +216,20 @@ pushes per round, as rounds 5–11.
    corpus/PCL_OPT=none equivalence per the s411 rules.
 
 *Correctness track (the v0.2 census half):*
-1. **Round 12**: the census's biggest owned families (34 files / 90 drops)
-   + **#755** (promoted: wildcard filenames, one seam) + **#732**
-   (gate-SET-sized: builtin-named subs).
-2. **Round 13**: census remainder + #684 + the Q7 leftover re-check
-   (#457 #464–#466 #468 #470 — several likely overtaken) + child-drop
-   sites #483/#480–#482.
-3. Fillers (#722, #737, #740, #750–#754, AB/AA residue) ride as
+1. **Round 12 — DONE (s454 agents user-stopped mid-round; merged + legs
+   clean s455, DECIDED §s455)**: census 34/90 → **27/77** (glob-alias
+   prototypes, the block-form listop ceiling, per-package stash
+   prototypes — which also fixed the qualified-invocant silent-wrong
+   class), **#755** + readdir output half (#800 = the glob twin),
+   **#732**, and the perf slot shipped **#680** (m//g 30×→~2.4×; #582
+   measured, blocker stands).  Main gen v2-420.
+2. **Round 13**: perf slot = **#758→#759→#760→#761** (the §13
+   verdict-coverage walk; re-measure ovlsub/symref on a quiet box);
+   correctness = census remainder (27/77) + **#790 FIRST** (died-eval
+   scalar vanishes from a returned list — silent shift) + #684 + the Q7
+   leftover re-check (#457 #464–#466 #468 #470 — several likely
+   overtaken) + child-drop sites #483/#480–#482.
+3. Fillers (#722, #737, #740, #750–#754, #800, AB/AA residue) ride as
    same-mechanism budget fillers, never displacing the census.
 
 *The v0.2 gate (both tracks met):* census = 0 (or every survivor

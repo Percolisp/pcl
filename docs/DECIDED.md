@@ -21,6 +21,41 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s455 (2026-08-30, Fable) — round-12 merge review: AC + AD + AE all merged; readdir literal names; glob-alias prototypes ratified
+
+- **The round-12 batch is MERGED and its legs are clean** (AC `dc13541` perf,
+  AD `4c7dde0` #755+#732, Fable review fix `ea58eb4`, AE `b2ca837` census,
+  gen v2-420 + artifacts + guards `d9748cb`): sweep GATE clean TOTAL 18337
+  (+0) drops 5 = census, gate-SET 638×2 ZERO diff, serial re-run of the six
+  PARTIAL files reproduces baseline pass counts exactly, six-population
+  census re-measured **27/77 = the edited baseline**.  The stopped-agent
+  resume pattern (round 4) worked a third time: read the worktree diff
+  first, run the unrun bar yourself, merge only after it is green.
+- **Filename LITERALNESS has an OUTPUT half (#755 family)**: readdir listed
+  a wild-charactered entry ESCAPED (`x]y\[z\*.out` for `x]y[z*.out`) —
+  `%p-dirent-name` now cuts the name from `sb-ext:native-namestring`
+  (ea58eb4; guard row in wild-filename-01.t).  The glob-results twin (a
+  matched name containing a wild char comes back escaped, and the escaped
+  leaf also feeds glob's own filter regex) is **#800** — fix it at glob's
+  leaf-name rendering, the same native-namestring cut.
+- **A regex-op struct is SHARED per source text (#680)**: `p-regex`/
+  `p-regex-from-parts` memoize (qr// keeps identity, NOT memoized), the
+  compiled scanner lives in the struct's `%compiled` slot, the capture
+  clear is high-water-marked (`*p-captures-set*`), and **@-/@+ elements are
+  MAGIC — a saved `\$-[0]` reads the CURRENT match** (probed; the in-place
+  box reuse is what makes it true).  m//g scalar loop 30×→~2.4× perl;
+  the engine gap (PCRE2 FFI) is the next lever, not more plumbing.
+- **AE's qualified-name work also fixed an uncounted silent-wrong class**:
+  `Test2::API::test2_stack->top` (and the `()->` spelling) used to emit a
+  method call on the STRING invocant; with the sub's stash record known it
+  now calls the function first — perl's bareword-before-arrow rule, probed
+  (`Foo::mk->who`).  7 files moved in the Test-Simple A/B beyond the 7
+  census un-drops; all 14 attributed to exactly these two classes.
+- Filed **#800** (glob output escaping); AE filed **#790** (a died-eval's
+  result scalar VANISHES from a returned list — silent list shift, heads
+  the round-13 filler pool); AC filed #770 (s/// twin re-parses per
+  iteration); AD filed #780–#782.  #755/#732/#680 completed.
+
 ## s454ad (2026-08-30, Opus round 12, agent AD) — #755 literal filenames (ONE pathname seam), #732 `use subs` builtin displacement
 
 - **A perl filename is a LITERAL byte string, and the runtime's ONE

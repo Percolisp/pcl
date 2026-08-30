@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 455 (2026-08-30, Fable) — ROUND 12 MERGE REVIEW: AC + AD + AE merged (the user-stopped round finished), one review fix, legs all clean, gen v2-420
+
+The three s454 worktrees, committed under the stop order, reviewed and
+fast-forwarded in sequence (each rebased onto the moving main first; the
+session-log conflicts resolved keep-both):
+
+1. **AC (perf, `dc13541`)** — #680 + bench §0.2 + #582 measurement.  Diff
+   read line-by-line (memoized p-regex, struct %compiled cache, high-water
+   capture clear, in-place @-/@+ boxes, direct-funcall scan); four Fable
+   probes (saved `\$-[0]` magic, 0-group/fewer-group capture clears, memo
+   separation by modifiers, %+ clearing) byte-identical to perl; guards 101
+   rows.  The pre-existing scanner cache means the new memo tables add no
+   new leak class.
+2. **AD (`4c7dde0`)** — #755 (the %p-literal-path seam through 11 consumers,
+   unlink(2)/rename(2)) + #732 (use-subs displacement, the weak-keyword
+   table).  corpus-diff re-verified IDENTICAL on the merged tree; probes
+   identical to perl (incl. `push` being weak — dies "Undefined subroutine
+   &main::push" under use subs — and `grep` staying strong).  **Fable
+   review fix `ea58eb4`: readdir returned ESCAPED wild names**
+   (`x]y\[z\*.out`) — %p-dirent-name now cuts from native-namestring; guard
+   row added; the glob-results twin filed as **#800**.  #755/#732 flipped
+   completed.
+3. **AE (`b2ca837`)** — census 34/90 → 27/77; ITS BAR WAS UNRUN and Fable
+   ran all of it green: prove-core **PASS 186 files / 6273 rows**,
+   corpus-diff IDENTICAL over 111 + silent-drops 5 unchanged, emission-ab
+   lib 22 SAME, **Test-Simple+Mojo A/B 323 files: 14 DIFF, every one
+   attributed** — 7 census un-drops + 7 fixes of the qualified-invocant
+   silent-wrong (`Test2::API::test2_stack->top` called the method on a
+   STRING; perl calls the sub first — probed `Foo::mk->who`), six-population
+   drop census re-measured **exactly 27 files / 77 drops**.  Probe files
+   r1–r7 (block-form ceiling incl. the r=2 silent-wrong shape, glob-alias
+   both spellings, module-side alias, qualified unimported
+   List::Util::first/reduce, disagreeing candidates) all byte-identical to
+   perl.  **Fable wrote AE's owed guards** (`d9748cb`):
+   listop-ceiling-01.t row 5 + glob-sub-alias-01.t (5 rows), both verified
+   FAILING on a 154f4a9 worktree; generation bumped **v2-420**, three
+   artifacts regenerated (gen-stamp-only diffs, expected).
+
+**Batch legs, all clean:** full sweep GATE clean **TOTAL 18337 (+0)**,
+drops 5 = census; the six PARTIAL crash-files (eval/magic/ref/tr/yadayada/
+method) re-run SERIALLY reproduce baseline pass counts exactly (magic.t's
+fail-row wobble is abort-point noise, pass count identical); **gate-SET
+scan 638 files × BOTH populations vs 154f4a9: ZERO diff lines** (AE's
+un-drops live in the cpan population; #732 measured neutral twice);
+companion legs re/ op/ uni/ io/ (375 files, --quick, 4 jobs): **five
+snapshot movers, four spliced with base-worktree A/B attribution, one
+noise** — io/fs.t 56/2 → 59/2 (#755: unlink-of-directory no longer CRASHES
+the file, its `Is a directory` abort gone), io/open.t 141/24 → 142/23
+(#755: the wild-pathname abort gone, aborted-forms 2 → 1), op/filetest.t
+181/250 → 181/253 (rows 34–36 fail honestly, #221 family; the base
+wild-pathname crash gone, remaining abort = #782's `&main::f`),
+re/pat_psycho.t 11/0 DIFF → **15/0 OK** verified alone at 450 s (#680 —
+AC's predicted mover, exactly); io/pvbm.t read 21/7 in-suite but 23/5
+ALONE = the snapshot (13th sighting of the load-noise pattern, row
+unchanged); uni/variables.t is the known TIMEOUT churn (partial counts
+wobble, row unchanged); op/utf8cache.t matched its 14/0 snapshot.  Census
+verified by measurement; bench story read into the plan (intloop rows wait
+on #758–#761, pack on #74, m//g now ~2.4× with the engine gap next).
+
+Filed this session: **#800** (glob output escaping, from the review probe).
+Round-13 pointer: perf slot = #758→#759→#760→#761 (+ re-measure the
+ovlsub/symref load-suspect rows on a quiet box); correctness = census
+remainder 27/77 + **#790 first** (died-eval scalar vanishes from a returned
+list — AE's probe find, silent list shift) + the Q7 leftover re-check;
+fillers #722/#737/#740/#800.
+
 ## Session 454ac (2026-08-30, Opus agent AC) — round 12 PERF slot: bench re-measured, #680 SHIPPED (m//g 30x → ~2.4x), #582 re-measured and left pending, #770 filed
 
 The three launcher jobs, in order.  Runtime-only (`cl/pcl-runtime.lisp`), NO
