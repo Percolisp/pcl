@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 5;
+plan tests => 7;
 
 # The f/g/h vocabulary every row below shares: each sub prints its name and
 # args, and returns what the row needs for the short-circuit under test.
@@ -138,3 +138,46 @@ print "e=", (defined $e ? $e : "undef"), "\n";
 PL
    "r=2\nz=1 3\nw=11 21\nskip(bf 3)\ne=undef\n",
    'block-form grep/map argument run ends at or / enclosing-ternary colon');
+
+# ── 6. A TRAILING COMMA also ends the run (task #850, s457aj).  perl lets a
+# list operator's argument list end in a comma, and then the operator that
+# follows applies to the CALL: `substr $x,0,1, = "Z"` is `(substr $x,0,1,) =
+# "Z"` and `f 5, || 7` is `(f 5,) || 7` (probed 5.40.3).  PCL swallowed the
+# operator into the run, so the comma split handed `parse` an operator with no
+# left operand and the reducer spliced the run down to nothing — "Fell
+# through.  Missing case: []", the whole statement DROPPED.  These were the
+# LAST two `Missing case: []` census rows: t/op/utf8cache.t (the substr line,
+# now FULLY PASSING) and t/io/open.t (the `ok …, 'desc',\n|| _diag $!` line,
+# 142/23 -> 153/35 — the file reaches its end for the first time). ──────────
+is(run_cl($SUBS . <<'PL'),
+my $x = "abc";
+substr $x, 0, 1, = "Z";
+print "x=$x\n";
+print "a=", (f1 5, || h1 "no"), "\n";
+print "b=", (f0 5, && h1 "yes"), "\n";
+print "c=", (f1 5, . "s"), "\n";
+print "d=", ((f1 5, == 1) ? "eq" : "ne"), "\n";
+print "e=", ((f1 5, ? "t" : "z")), "\n";
+PL
+   "x=Zbc\nf(5)\na=1\nf(5)\nb=0\nf(5)\nc=1s\nf(5)\nd=eq\nf(5)\ne=t\n",
+   'a trailing comma ends the argument run; the operator applies to the call');
+
+# The inverses the rule must not reach: an operator that CAN be unary is an
+# ARGUMENT (`f 5, - 7` passes -7, probed), an operator with a real left
+# operand stays inside the run, an empty MIDDLE slot is not a boundary
+# (`f(1,,2)` is `f(1,2)`), and a parenthesised list keeps its trailing comma.
+is(run_cl(<<'PL'),
+sub s0 { print "s(@_)\n"; $_[0] }
+s0 5, - 7;
+s0 1, 2 . "x";
+s0 1, 2 + 3;
+s0 1, ! 0;
+s0 1, ref \ "r";
+s0(1,,2);
+my @a = (7,8,);
+s0 1, @a;
+my %h = (a => 1, b => 2,);
+print "h=", join(",", map { "$_=$h{$_}" } sort keys %h), "\n";
+PL
+   "s(5 -7)\ns(1 2x)\ns(1 5)\ns(1 1)\ns(1 SCALAR)\ns(1 2)\ns(1 7 8)\nh=a=1,b=2\n",
+   'inverses: a unary-capable operator after a comma is still an ARGUMENT');

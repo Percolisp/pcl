@@ -6376,10 +6376,13 @@ sub _repair_try_finally {
 #   * the ALL-CAPS convention, which is what the compiler already assumes for a
 #     constant it cannot place (PExpr::_bareword_subscript_autoquotes).  An
 #     imported constant (`use POSIX qw(DBL_MAX); DBL_MAX / 2`) is invisible to
-#     a token scan, and this is the cheap way not to break it.
+#     a token scan, and this is the cheap way not to break it.  Unicode-aware
+#     (#820): under `use utf8` a mis-lexed `Ạ / 2` is a whole DROPPED
+#     statement, which is strictly worse than a division that was meant to be
+#     a match — the same trade the ASCII arm already makes.
 sub _word_is_term {
   my ($self, $name, $doc) = @_;
-  return 1 if $name =~ /^[A-Z][A-Z0-9_]*\z/;
+  return 1 if Pl::Environment::all_caps_shape($name);
   return $self->_word_is_declared_term($name, $doc);
 }
 

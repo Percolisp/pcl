@@ -895,7 +895,18 @@ io/nargv.t	7	0	11	2	DIFF		0
 # s455 (round 12): io/open.t 141/24 -> 142/23 EDITED BY HAND -- s454ad/#755: the second aborted
 # form (wild-pathname family) is gone, aborted-forms 2 -> 1; the `<&` fd-number statement drop
 # remains.  Base-worktree A/B agrees.
-io/open.t	188	0	142	23	DIFF	aborted-forms:1: PCL: statement not supported at open.t line N: ok open($stdin, "<&", $N), 'open ... "<&", 	1
+# s457aj (round 14): io/open.t 142/23 -> 153/35, aborted-forms 1 -> 0, drops 1 -> 0
+# EDITED BY HAND -- #850, the LAST drop in this file: `ok open(...), 'desc',\n|| _diag $!;`
+# ends its paren-less argument run at the trailing comma in perl, and PCL swallowed the
+# `||` into the run, so the reducer was handed an operator with no left operand and the
+# WHOLE STATEMENT was dropped -- which aborted the enclosing form and cost the 23 rows
+# after line 267.  The file now runs to the end (165 rows produced -> 188 = perl's own
+# count): +11 pass, +12 honest fails, all of them rows that had never run (embedded-NUL
+# pathnames, warnings-gated diagnostics, scalar-handle buffering).  The new `sig` is
+# `unbound:$99` -- `eval { open $99, "foo" }` at line 362, which perl rejects as a
+# read-only value and PCL emits as an unbound reference (task #851, row 140).
+# Emission A/B vs a 0237940 worktree: this file DIFFs only for that one statement.
+io/open.t	188	0	153	35	DIFF	unbound:$99	0
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0
@@ -1133,7 +1144,7 @@ op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
 # s455b (round 13): op/lexsub.t 76/62 drops 4 -> 78/63 drops 1 EDITED BY HAND -- s456ag
-# (PPI §19b, bare `x` starting a statement): the three un-dropped statements execute
+# (PPI ï¿½19b, bare `x` starting a statement): the three un-dropped statements execute
 # (2 pass, 1 honest fail); the abort note now shows the binding-stack crash + 11 aborts.
 op/lexsub.t	156	0	78	63	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1
 op/lfs.t	17	0	0	0	DIFF		0
@@ -1254,7 +1265,11 @@ op/upgrade.t	64	0	64	0	OK		0
 #   quadratic $&/$`/$' eager cut is gone (offsets + lazy cut), so the "quadratic pos" loop
 #   completes (200k chars 12.8s -> 0.72s, linear).  Parallel and serial agree; its one drop is
 #   the census's existing row.
-op/utf8cache.t	16	0	14	0	DIFF	aborted-forms:1: PCL: statement not supported at utfNcache.t line N: substr $x, N, N, = "\x{N}"; -- Bug. Fe	1
+# s457aj (round 14): op/utf8cache.t DIFF 14/0 -> OK 16/0, aborted-forms 1 -> 0, drops 1 -> 0
+#   EDITED BY HAND â€” #850, the same mechanism as io/open.t's: `substr $x, 0, 1, = "\x{100}"`
+#   is `(substr $x,0,1,) = "\x{100}"` in perl (probed), and PCL swallowed the `=` into the
+#   paren-less argument run.  The file is now FULLY PASSING.
+op/utf8cache.t	16	0	16	0	OK		0
 op/utf8decode.t	710	0	620	90	DIFF		0
 op/utf8magic.t	6	0	2	4	DIFF		0
 op/utfhash.t	99	0	91	0	DIFF		0

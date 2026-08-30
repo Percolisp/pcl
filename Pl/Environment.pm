@@ -640,6 +640,61 @@ sub fh_bareword_shape {
 
     return 0 if !defined $name;
     $name =~ s/\A.*:://;
+    return all_caps_shape($name);
+}
+
+=head2 all_caps_shape($name)
+
+THE ALL-CAPS bareword convention, as a shape — the one test behind every site
+that guesses "filehandle or constant" for a word it cannot place (task #820).
+
+UNICODE, not ASCII.  Under C<use utf8> a source name is a decoded string and
+C<Ạ> (U+1EA0) is an uppercase letter, so C<open Ạ, …> is exactly as much a
+handle-shaped bareword as C<open BEE, …> — perl reads both the same way.  The
+pattern is a strict superset of the old C<[A-Z][A-Z0-9_]*>: on a pure-ASCII
+name C<\p{Lu}> IS C<[A-Z]> and C<\p{Nd}> IS C<[0-9]>, so every ASCII answer is
+unchanged by construction.
+
+Asked of a PLAIN name.  A caller that must look through a package qualifier
+strips it first — that is what C<fh_bareword_shape> is (a handle NAME is the
+same handle however it is qualified, #491), and the callers that must NOT look
+through one (the indirect-object skip, the C<WORD /> term guess) ask this
+directly.
+
+=cut
+
+sub all_caps_shape {
+    my $name = shift;
+
+    return 0 if !defined $name;
+    return $name =~ /\A\p{Lu}[\p{Lu}\p{Nd}_]*\z/ ? 1 : 0;
+}
+
+=head2 all_caps_call_guess($name)
+
+The SAME convention asked for the opposite purpose: "this bareword cannot be
+placed — keep it a CALL rather than read it as a no-strict bareword string".
+Three sites ask it (the two C<handle_subcalls> string fall-throughs and the
+eval-mode array-subscript autoquote).
+
+ASCII ONLY, and deliberately so — this is the one place where the two
+questions must NOT share an answer, because their false positives point in
+opposite directions.  A wrong "yes" in a HANDLE slot is harmless (the slot
+admits no other reading), while a wrong "yes" HERE turns a value perl prints
+into an undefined-subroutine death: perl reads C<no strict; print "x=", Ẹ;>
+as the string C<Ẹ>, and PCL already gets the ASCII twin C<ABC> wrong for
+exactly this reason (#266's accepted residue — an ALL-CAPS word is far more
+often a constant than a string, so the guess earns its keep).  Widening THAT
+compromise to a new character range was measured: it converts a correct
+answer into a dying one and buys nothing (s457aj probe 08c), so the legacy
+ASCII spelling stays until #266's classifier replaces the guess outright.
+
+=cut
+
+sub all_caps_call_guess {
+    my $name = shift;
+
+    return 0 if !defined $name;
     return $name =~ /\A[A-Z][A-Z0-9_]*\z/ ? 1 : 0;
 }
 

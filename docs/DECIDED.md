@@ -21,6 +21,72 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s457aj (2026-08-31, Opus round-14 agent AJ) — the ALL-CAPS bareword convention is UNICODE (#820), and a paren-less argument list may END IN A COMMA (#850)
+
+- **THE ALL-CAPS CONVENTION IS ONE SHAPE, ASKED FOR TWO OPPOSITE PURPOSES, AND
+  ONLY ONE OF THEM MAY BE WIDENED (#820).**  `Pl::Environment::all_caps_shape`
+  is the convention as a UNICODE shape (`\p{Lu}[\p{Lu}\p{Nd}_]*` — identical
+  to the old `[A-Z][A-Z0-9_]*` on ASCII input BY CONSTRUCTION, so the ASCII
+  inverse needs no measuring), and `fh_bareword_shape` is that test after the
+  qualifier is stripped.  Six hand-written copies of the regex are gone.  The
+  HANDLE/TERM/indirect-object sites take the Unicode shape; the three
+  "keep an unplaceable bareword a CALL rather than read it as a no-strict
+  bareword STRING" sites keep the ASCII spelling through a second named
+  predicate `all_caps_call_guess`, **because the two questions' false
+  positives point in opposite directions** — a wrong yes in a handle slot is
+  harmless (the slot admits no other reading), a wrong yes in the call guess
+  turns a value perl PRINTS into an undefined-subroutine death.  Measured, not
+  argued: widening the guess cost `use utf8; no strict; print "x=", Ẹ;`, which
+  works today and whose ASCII twin `ABC` is #266's accepted residue.
+- **A `use utf8` source NAME arrives DECODED** (traced: utf8 flag on), which is
+  what makes `\p{Lu}` the right test and a byte test wrong.
+- **`%p-fh-arg`'s macro-time rescue of a `(pl-NAME)` form was masking half of
+  #820**: under `use strict` an unplaceable bareword is classified a CALL and
+  the runtime recovers the handle from the emitted form, so `open Ạ, …` was
+  right in a strict file and wrong in a non-strict one.  A handle-slot probe
+  that does not turn strict OFF proves nothing.  Same trap the other way: a
+  file that mentions `open(Ạ, …)` ANYWHERE registers the name, and every
+  paren-less use in it then works.
+- **RESIDUE #852**: a CASELESS-script bareword handle (`open ᕝ, …`, U+157D, Lo)
+  is still silently wrong in a non-strict file — perl's own
+  `t/uni/readline.t:31` shape.  The candidate widening ("a letter, no
+  `\p{Ll}`") must keep the leading-`_` exclusion and re-run #820's bar.
+- **A PAREN-LESS LIST OPERATOR'S ARGUMENT LIST MAY END IN A COMMA, and the
+  operator that follows applies to the CALL (#850).**  `substr $x,0,1, = "Z"`
+  is `(substr $x,0,1,) = "Z"`; `ok f(),'d',\n|| _diag $!` is
+  `(ok f(),'d',) || _diag $!`; `f 5, . 7` is `f(5) . 7` (all probed 5.40.3;
+  `//` and `x` there are perl SYNTAX ERRORS, and the rule is the paren-LESS
+  run only — `print("a"), || …` is a syntax error too).  A unary-capable
+  operator after the comma is an ARGUMENT (`f 5, - 7` passes -7).  ONE place:
+  `Pl::PExpr::_listop_arg_ceiling`, the #343/B2 boundary both spellings share;
+  the "can this operator only be binary" test was extracted from
+  handle_subcalls as `Pl::PExpr::_is_binary_only_op` and is now asked by both.
+  **`Bug. Fell through. Missing case: []` — the EMPTY list — is the signature
+  of this family**: the reducer was handed an operator with no left operand
+  and spliced the run down to nothing.
+- Census **21 files / 65 drops → 19 / 63** (t/io/open.t and t/op/utf8cache.t
+  edited out with cause).  Suite: **op/utf8cache.t 14/0 → OK 16/0**,
+  **io/open.t 142/23 → 153/35** — the drop was aborting the enclosing form, so
+  the file produced 165 rows where perl produces 188 and now runs to the end
+  (+11 pass, +12 honest fails, all previously unreachable).  #851 filed from
+  the newly reachable rows (`eval { open $99, "foo" }` — a capture variable is
+  read-only in perl; PCL emits an unbound reference).
+- **THE PERL-T CENSUS REMAINDER IS NOW ALL SINGLETONS AND RULED-OUT FAMILIES**
+  — measured with `tools/drop-harvest.pl` and grouped by mechanism: 39 drops
+  are lvalue subs (`sub_lval.t`'s 33 "are a feature" plus the same shape in
+  substr/signatures/try), 4 are scalar-invocant indirect object (USER: MAYBE
+  LATER, s425), 4 are `(?{CODE})` in `re/pat*.t` (NOT TAKEN — repairing them
+  turns four LOUD drops into four SILENT wrongs), 2 are Mojo's
+  `local (*{…})` (#564's design owner).  What is left is ~13 one-off shapes,
+  most of them deliberate parser torture in `comp/parser.t` (heredocs whose
+  body interpolates a `${ … }` block carrying `#line`).  **There is no next
+  big family here** — the remaining census work is singles.
+- Guards: `Pl/t/utf8-source-01.t` 32 → 36, `Pl/t/listop-ceiling-01.t` 5 → 7,
+  both inverse-run on a `0237940` worktree.  Bar: corpus-diff IDENTICAL over
+  111 + shapes; emission A/B over 923 files (lib + perl t/ + cpan-tests t/ +
+  shapes) = exactly the 4 intended files, 0 RCDIFF; gate-SET scan 638×2 = the
+  2 drop→OK moves and nothing else.  Generation **v2-460** + three artifacts.
+
 ## s455d (2026-08-30, Fable) — THE BOXED-AGGREGATES DESIGN (USER-started): raw elements + in-place cell promotion — `docs/boxed-aggregates-design-s455.md`, task #816
 
 - **The design is the doc** (written in committed checkpoints): store

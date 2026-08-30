@@ -4,6 +4,99 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 457aj (2026-08-31, Opus round-14 agent AJ) — the ALL-CAPS bareword convention becomes UNICODE (#820) and a paren-less argument list may end in a COMMA (#850); census 21/65 → 19/63
+
+Two parser-side fixes, both classifier widenings, both measured with the
+mandatory two-population gate-SET scan against a `0237940` worktree.
+
+**#820 — one predicate, and a deliberate SPLIT.**  `Pl::Environment::
+fh_bareword_shape` (THE shape test for a bareword filehandle NAME since #491)
+read `[A-Z][A-Z0-9_]*`, so under `use utf8` one name got three answers in one
+statement: `open Ạ, …` emitted the STRING `"Ạ"`, `close Ạ` a CALL to a sub of
+that name, and `<Ạ>` the handle (the readline path was already Unicode-aware).
+The shape is now `Pl::Environment::all_caps_shape`,
+`\A\p{Lu}[\p{Lu}\p{Nd}_]*\z` — a strict superset of the old pattern that is
+IDENTICAL on ASCII input by construction, so the ASCII inverse needed no
+measurement.  Six hand-written copies of that regex are gone.
+
+But they are not all the same question, and the measurement said so.  Four
+sites (the handle shape, the two indirect-object skips, `_word_is_term`'s
+`WORD /` guess) take the Unicode shape.  Three — handle_subcalls' two
+"unplaceable bareword stays a CALL, it is not a no-strict string"
+fall-throughs and the eval-mode subscript autoquote — keep the ASCII spelling
+through a second named predicate, `all_caps_call_guess`, because **their false
+positives point the other way**: a wrong yes in a handle slot is harmless (the
+slot admits no other reading), a wrong yes there turns a value perl prints
+into an undefined-subroutine death.  Probed: with the guess widened,
+`use utf8; no strict; print "uni:", Ẹ, "\n";` — which works on the base and in
+perl — died.  Its ASCII twin `ABC` already dies; that is #266's accepted
+residue, and spreading it to a case that was accidentally right buys nothing.
+Both predicates carry the rationale in their POD.
+
+Two traps worth the ink.  `%p-fh-arg` rescues a `(pl-NAME)` form back to the
+handle AT MACROEXPANSION, so under `use strict` (where an unplaceable bareword
+is classified a CALL) `open Ạ, …` was already right — the bug only shows in a
+NON-strict file, and a probe that forgets to turn strict off proves nothing.
+And a file that mentions `open(Ạ, …)` anywhere registers the name, after which
+every paren-less use in it works; the task's own repro depended on neither
+being true.
+
+15 probes vs perl 5.40.3, base/fix/perl three ways.  Four moved DIFF → SAME:
+paren-less open/close in a non-strict file, `print`/`printf` to a non-ASCII
+handle, `binmode`/`fileno`, and the package-qualified `open main::Ọ` family.
+Unchanged: a declared non-ASCII uppercase sub, a non-ASCII constant as a term
+(`Ạ . "x"`, `Ạ + 1`, `Ạ / 2`, `$a[Ạ - 4]`), a fat-comma key, a class-name
+invocant, opendir/eof, and the no-strict string the split protects.  Emission
+A/B over 923 files: exactly `t/uni/readline.t` and `t/uni/parser.t` (the
+latter's `opendir FÒÒ` / `closedir FÒÒ`).  **NO suite row moves** — the task
+predicted readline.t's remaining row, and it does not: that row is
+`[perl #19566]`, a read-only-aliasing gap, and both files' opens are under
+`use strict`.  Residue **#852** filed: a CASELESS-script handle (`open ᕝ, …`,
+U+157D) is still silently wrong, which is `t/uni/readline.t:31`'s own shape.
+
+**#850 — the census remainder, grouped by mechanism.**  `tools/drop-harvest.pl`
+over the perl-t rows showed the two remaining `Bug. Fell through. Missing
+case: []` drops were ONE family, and the EMPTY list was the tell: the reducer
+had been handed an operator with no left operand.  perl lets a paren-less list
+operator's argument list end in a comma, and the operator that follows then
+applies to the CALL — `substr $x,0,1, = "Z"` is `(substr $x,0,1,) = "Z"`,
+`ok f(),'d',\n|| _diag $!` is `(ok f(),'d',) || _diag $!`, `f 5, . 7` is
+`f(5) . 7` (twelve spellings probed; `//` and `x` there are perl syntax
+errors, and `print("a"), || …` is one too — the rule is the paren-LESS run).
+A unary-capable operator after the comma is an ARGUMENT: `f 5, - 7` passes -7.
+Fixed in the one ceiling `_listop_arg_ceiling` (the #343/B2 boundary both
+spellings already share), with the "binary-only operator" test extracted from
+handle_subcalls' bareword classifier as `_is_binary_only_op` and asked by
+both.  Separators are excluded explicitly — `f(1,,2)` is `f(1,2)`.
+
+Census **21 files / 65 drops → 19 / 63**, rows edited out with cause.
+`op/utf8cache.t` 14/0 → **OK 16/0**, fully passing.  `io/open.t` 142/23 →
+**153/35**: the drop was aborting the enclosing top-level form, so the file
+produced 165 rows where perl produces 188 — it now runs to the end, +11 pass
+and +12 honest fails, every one a row that had never run.  **#851** filed from
+those: `eval { open $99, "foo" }` is "Modification of a read-only value
+attempted" in perl and an unbound reference in PCL (io/open.t row 140, and the
+file's new `sig`).
+
+**And the finding the grouping produced:** the perl-t census remainder is now
+all singletons and ruled-out families — 39 lvalue-sub drops (a feature), 4
+scalar-invocant indirect object (USER: maybe later), 4 `(?{CODE})` (not taken
+by ruling), 2 Mojo `local (*{…})` (#564's owner), and ~13 one-off shapes,
+most of them deliberate parser torture in `comp/parser.t`.  There is no next
+big family in this population.
+
+BAR: corpus-diff IDENTICAL over 111 + shapes (twice); emission A/B vs
+`0237940` over 923 files = the 4 intended files, 0 RCDIFF; gate-SET scan
+638×2 = exactly the 2 drop→OK verdict moves; `tools/prove-core` PASS;
+pack.t 5636/89 after the artifact rebuild.  Guards `Pl/t/utf8-source-01.t`
+32 → 36 and `Pl/t/listop-ceiling-01.t` 5 → 7, both inverse-run on the base
+worktree.  Generation **v2-460** + all three artifacts regenerated, tagged
+and paren-checked.  No full sweep (the merging session runs one over the
+combined batch); the sibling AI was live in the runtime's element/box region
+throughout, and nothing here touches it.
+
+---
+
 ## Session 455b (2026-08-30, Fable) — ROUND 13 MERGE: AF + AG reviewed and merged same-day, legs clean, gen v2-440; a third small filler agent (AH) launched
 
 Both round-13 agents finished within the session that launched them and were

@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 32;
+plan tests => 36;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -342,11 +342,10 @@ is(run_bytes('my @X = (10,20,30); my $i = 1;'
 # made Unicode-aware, so the SAME handle compiled at one site and DROPPED the
 # whole statement at the other (perl's own t/uni/readline.t, two census drops).
 # Both sites now ask `_readline_bareword_name_p` / `_readline_scalar_name_p`.
-# NB the PARENTHESISED `open(Ạ, …)`: the paren-LESS spelling puts the same
-# name through the ALL-CAPS `[A-Z][A-Z0-9_]*` bareword-handle heuristic, which
-# a non-ASCII capital is not, so `open Ạ, …` still emits the STRING "Ạ" and
-# `close Ạ` a CALL — a PRE-EXISTING bug of the #452/#266 classifier family
-# (task #820), unrelated to the readline rebuild this row is about.
+# This row uses the PARENTHESISED `open(Ạ, …)` because when it was written the
+# paren-LESS spelling was still broken (#820, fixed in s457aj — the rows below
+# are its guards); it is kept in the paren form so it keeps testing the
+# READLINE rebuild and nothing else.
 is(run_file_bytes(encode_utf8(
      "use utf8;\nuse open qw( :utf8 :std );\n"
    . "my \$f = \"/tmp/pcl_utf8_rl_\$\$.txt\";\n"
@@ -363,3 +362,57 @@ is(run_bytes('my ($p,$q) = (1,2); my %h = (k=>1);'
            . ' ($h{k} < 5 ? "lt" : "ge"), "\n");'),
    "ltgelt\n",
    'inverse: a `<` after a value is still the comparison, not a readline');
+
+# Task #820 (s457aj): the ALL-CAPS bareword-handle convention is UNICODE.
+# `Pl::Environment::fh_bareword_shape` — THE shape test for "this word I have
+# not seen opened is a filehandle" — read `[A-Z][A-Z0-9_]*`, so under `use
+# utf8` one name got THREE answers in one statement: `open Ạ, …` emitted the
+# STRING "Ạ", `close Ạ` a CALL to a sub of that name, and `<Ạ>` the handle
+# (the readline path was already Unicode-aware).  The shape now asks
+# `all_caps_shape` (`\p{Lu}[\p{Lu}\p{Nd}_]*`), a strict superset of the old
+# pattern on ASCII input, and six hand-written copies of that regex are gone.
+is(run_file_bytes(encode_utf8(
+     "use utf8;\nuse open qw( :utf8 :std );\n"
+   . "my \$f = \"/tmp/pcl_utf8_820a_\$\$.txt\";\n"
+   . "open(my \$w, '>', \$f) or die; print \$w \"L1\\n\"; close \$w;\n"
+   . "open \x{1ea0}, '<', \$f or die; my \$a = <\x{1ea0}>; close \x{1ea0};\n"
+   . "print \"a=\$a\"; unlink \$f;\n")),
+   "a=L1\n",
+   'paren-LESS `open Ạ, …` / `close Ạ` reach the handle slots as the handle (#820)');
+
+# The print `:fh` slot and the `*`-prototype slot are the same predicate, and
+# they were wrong even in a `use strict` file (where `%p-fh-arg`'s macro-time
+# rescue of a `(pl-NAME)` call had been covering the open/close half).
+is(run_file_bytes(encode_utf8(
+     "use utf8;\nuse open qw( :utf8 :std );\nuse strict; use warnings;\n"
+   . "my \$f = \"/tmp/pcl_utf8_820b_\$\$.txt\";\n"
+   . "open \x{1ecc}, '>', \$f or die;\n"
+   . "binmode \x{1ecc};\n"
+   . "print \x{1ecc} \"one\\n\"; printf \x{1ecc} \"%s\\n\", 'two';\n"
+   . "close \x{1ecc};\n"
+   . "open main::\x{1ecc}, '<', \$f or die; my \@l = <main::\x{1ecc}>; close main::\x{1ecc};\n"
+   . "print 'n=', scalar(\@l), ' ', join('/', map { my \$x = \$_; chomp \$x; \$x } \@l), \"\\n\";\n"
+   . "unlink \$f;\n")),
+   "n=2 one/two\n",
+   '… and so do print/printf/binmode and the package-QUALIFIED spelling (#820)');
+
+is(run_file_bytes(
+     "use strict; use warnings;\n"
+   . "my \$f = \"/tmp/pcl_utf8_820c_\$\$.txt\";\n"
+   . "open BEE, '>', \$f or die; print BEE \"one\\n\"; close BEE;\n"
+   . "open BEE, '<', \$f or die; my \@l = <BEE>; close BEE;\n"
+   . "print 'n=', scalar(\@l), \"\\n\"; unlink \$f;\n"),
+   "n=1\n",
+   'the ASCII inverse: the same handle slots with an ASCII name, unchanged');
+
+# The case the widening MUST NOT reach.  The same ALL-CAPS convention is asked
+# for the opposite purpose in `handle_subcalls` — "keep an unplaceable bareword
+# a CALL rather than read it as a no-strict bareword string" — and there a
+# wrong yes turns a value perl PRINTS into an undefined-subroutine death.  That
+# site keeps the ASCII spelling (`all_caps_call_guess`); widening it was
+# measured and cost exactly this row.
+is(run_file_bytes(encode_utf8(
+     "use utf8;\nuse open qw( :utf8 :std );\nno strict;\n"
+   . "print \"uni:\", \x{1eb8}, \"|lc:\", \x{1eb9}, \"\\n\";\n")),
+   "uni:\x{1eb8}|lc:\x{1eb9}\n",
+   'inverse: a non-ASCII bareword in no-strict operand position is still a STRING (#820)');

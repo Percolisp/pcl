@@ -94,10 +94,22 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 21 files, 65 drops (recounted from the rows,
-# s456ag; 20 in-repo files / 63 drops as tools/drop-census.pl reports them,
+# TOTAL after the edits below: 19 files, 63 drops (recounted from the rows,
+# s457aj; 18 in-repo files / 61 drops as tools/drop-census.pl reports them,
 # plus the one board row, which a run without --board does not re-measure).
-# The previous line said 27 / 77 (s454ae; the pre-session recount there was
+# The two rows that LEFT in s457aj are t/io/open.t and t/op/utf8cache.t, both
+# by EDIT with their cause: they were the SAME mechanism (#850) — a paren-less
+# list operator's argument list may end in a COMMA, and the operator that
+# follows applies to the CALL, not to an argument (`substr $x,0,1, = "\x{100}"`
+# is `(substr $x,0,1,) = "\x{100}"`; `ok f(),'d',\n|| _diag $!` is
+# `(ok f(),'d',) || _diag $!` — both probed 5.40.3).  PCL swallowed the
+# operator into the run, so the comma split handed `parse` an operand-less
+# operator and the reducer spliced the run to nothing: "Fell through.  Missing
+# case: []", which is what BOTH rows' messages were.  Fixed in the one ceiling
+# (`Pl::PExpr::_listop_arg_ceiling`).  Suite effect, spliced into
+# baselines/perl-suite-run.tsv: io/open.t 142/23 -> 153/35 (the file reaches
+# its end for the first time), op/utf8cache.t 14/0 -> 16/0 FULLY PASSING.
+# The previous line said 21 / 65 (s456ag), and before that 27 / 77 (s454ae; the pre-session recount there was
 # 34 / 90 -- the s448o "34 / 88" line had
 # gone stale when s451 edited the Mojo _Collection.pm count 2 -> 4; the ROWS
 # are the authority and the sum is what the runner compares against).  The s440-era split was 4
@@ -713,7 +725,6 @@ perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: ['Structure::Constructo
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: ['Statement::Null<;>','Token::Pod<=pod x1 | Bug. Fell through. Missing case: ['Statement<check_line(537, \'first line of interp in here-doc\');>','Stateme x1 | Bug. Fell through. Missing case: ['Statement<check_line(540, \'first line of interp in second here-doc on ...> x1 | Bug. Fell through. Missing case: ['Token::Quote::Single<\'Hello\'>',bless( {'id' => 0,'type' => 'funcall'}, 'P x1 | Handle single node of unknown type. Dump: x1
-t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/op/filetest.t	1	Bug. Fell through. Missing case: ['Token::Magic<_>','Structure::Block<{ "this is not a file name" }>',bless( { x1
 t/op/lex.t	1	Bug. Fell through. Missing case: ['Statement::Include<no strict;>','Statement<\\$_>'] x1
 t/op/lexsub.t	1	Bug. Fell through. Missing case: ['Token::Regexp::Transliterate<y, 43, \'my sub that looks like constant closu x1
@@ -723,7 +734,6 @@ t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x
 t/op/sub_lval.t	34	Bug. Fell through. Missing case: ['Structure::Condition<(!Internals::SvREADONLY($]))>','Structure::Block<{ Int x1 | PCL: Can't modify non-lvalue subroutine call in assignment x33
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
-t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	2	Handle single node of unknown type. Dump: x1 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: ['Token::Symbol<*MARK>','Token::Operator<:>','Token::Word<a>'] x1 | Ternary operator: Found '?' but no matching ':' x3

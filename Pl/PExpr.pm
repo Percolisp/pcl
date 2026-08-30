@@ -18,8 +18,10 @@ use PPI;
 use PPI::Dumper;
 use Pl::CLForm ();
 # For fh_bareword_shape — THE shape test for a bareword filehandle name, asked
-# by four parse sites here and by the `defined FH` emitter.  Pl::Environment
-# has no Pl:: dependencies of its own, so this cannot be circular.
+# by four parse sites here and by the `defined FH` emitter — and for the plain
+# `all_caps_shape` it is built on, which is the SAME convention asked without
+# looking through a package qualifier (#820).  Pl::Environment has no Pl::
+# dependencies of its own, so this cannot be circular.
 use Pl::Environment ();
 
 use Data::Dumper ();
@@ -2956,8 +2958,10 @@ sub handle_subcalls {
       next if $self->_is_known_callable($method_name, 1);
 
       # Skip all-uppercase words: they are filehandles (STDIN/STDOUT/STDERR)
-      # or constants, never method names in indirect-object syntax
-      next if $method_name =~ /^[A-Z][A-Z0-9_]*$/;
+      # or constants, never method names in indirect-object syntax.  The shape
+      # is the Unicode one (#820) — skipping one more word is conservative
+      # here, and indirect object is the reading PCL guesses LAST.
+      next if Pl::Environment::all_caps_shape($method_name);
 
       # Skip if preceded by -> (this is a method name, not an invocant position)
       if ($i > 0 && $self->is_arrow_op($e->[$i-1])) {
@@ -2984,7 +2988,7 @@ sub handle_subcalls {
         # unqualified all-caps words are typically filehandles (STDIN/STDOUT),
         # special blocks (BEGIN/END), or constants — not class names.
         # Exception: if the name is a known package, allow it as indirect invocant.
-        if ($invocant->content =~ /^[A-Z][A-Z0-9_]*$/) {
+        if (Pl::Environment::all_caps_shape($invocant->content)) {
           my $is_known_pkg = $self->has_environment
               && $self->environment->is_package($invocant->content);
           next unless $is_known_pkg;
@@ -4023,15 +4027,7 @@ sub handle_subcalls {
       my $next = $e->[$i + 1];
       my $next_op = $self->is_token_operator($next);
       if (defined $next_op) {
-        # Check if this is a binary-only operator (cannot be unary prefix)
-        # Cast tokens (@, $, %, &, *) are always unary deref operators
-        my $is_cast = ref($next) eq 'PPI::Token::Cast';
-        # Operators that can be unary prefix: + - ! ~ ~. \ not
-        my %can_be_unary_op = map { $_ => 1 } ('+', '-', '!', '~', '~.', '\\', 'not', '++', '--');
-        # Filetest operators (-e, -f, -d, …) are always unary prefix.
-        my $is_unary = $is_cast || $can_be_unary_op{$next_op}
-            || $next_op =~ /^-[A-Za-z]$/;
-        if (!$is_unary) {
+        if ($self->_is_binary_only_op($next)) {
           # Binary-only operator - treat bareword as zero-arg function.
           # BUT: if the word is not a known function (not in known_no_of_params,
           # not declared in Environment), it's an unknown bareword string literal
@@ -4041,7 +4037,9 @@ sub handle_subcalls {
           # ALL-CAPS words (DIR, FILE, STDIN, MAXSIZE, etc.) are filehandles or
           # constants — leave them as funcalls so %p-fh-arg can identify them.
           # Only mixed-case unknown words (like Bare in !Bare) are string literals.
-          my $is_all_caps_bop = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
+          # ASCII-ONLY on purpose — see all_caps_call_guess's header for why
+          # this one does not share the Unicode widening (#820).
+          my $is_all_caps_bop = Pl::Environment::all_caps_call_guess($sub_name);
           # Under strict-subs an undeclared bareword is a COMPILE ERROR, so by
           # principle 9 anything that compiles here is a CALL, never a string —
           # a sub installed through a dynamic glob in a BEGIN loop is invisible
@@ -4466,8 +4464,9 @@ sub handle_subcalls {
     # fail at runtime, which is correct Perl behavior for typo'd sub names).
     if ($end_pars < $i + 1) {
       my $callable_fb = $self->_bareword_callable_here($sub_name, $now);
-      # ALL-CAPS words are filehandles/constants — leave as funcalls.
-      my $is_all_caps_fb = ($sub_name =~ /^[A-Z][A-Z0-9_]*$/);
+      # ALL-CAPS words are filehandles/constants — leave as funcalls.  ASCII
+      # only; all_caps_call_guess's header says why (#820).
+      my $is_all_caps_fb = Pl::Environment::all_caps_call_guess($sub_name);
       unless ($callable_fb eq 'yes' || $is_all_caps_fb) {
         my $prev_is_unary     = 0;
         my $prev_is_value_op  = 0;
@@ -5840,7 +5839,8 @@ sub _bareword_subscript_autoquotes {
   # barewords in HASH subscripts — `$a[FOO]` is always a sub call — so an ALL-CAPS
   # bareword here (the convention for constants, matching the handle_subcalls
   # heuristic) must stay callable, not be stringified to a 0 index.
-  return 0 if $self->parser->eval_mode && $name =~ /^[A-Z][A-Z0-9_]*$/;
+  return 0 if $self->parser->eval_mode
+           && Pl::Environment::all_caps_call_guess($name);
   return 1;                                         # unknown bareword: string index
 }
 
@@ -6055,6 +6055,27 @@ sub _take_rest_as_args {
   return;
 }
 
+# Is this token an operator that can ONLY be binary — one that cannot begin a
+# term?  The complement is small and fixed: the prefix-capable operators
+# (`+ - ! ~ ~. \ not ++ --`), every Cast (`@ $ % & *` as a deref sigil) and the
+# filetests (`-e`, `-f`, …).  ONE reading of that fact (rule 11): the
+# bareword-before-an-operator classifier in handle_subcalls asks it to decide
+# "zero-arg call, not a call with arguments", and _listop_arg_ceiling asks it
+# to decide "the argument run ended at the previous comma".  Note `,`/`=>` ARE
+# binary-only by this test — a bareword before a comma is a call — so the
+# ceiling excludes the separators itself.
+sub _is_binary_only_op {
+  my ($self, $tok) = @_;
+  my $op = $self->is_token_operator($tok);
+  return 0 if !defined $op;
+  return 0 if ref($tok) eq 'PPI::Token::Cast';
+  state $CAN_BE_UNARY = { map { $_ => 1 }
+      ('+', '-', '!', '~', '~.', '\\', 'not', '++', '--') };
+  return 0 if $CAN_BE_UNARY->{$op};
+  return 0 if $op =~ /\A-[A-Za-z]\z/;   # filetest
+  return 1;
+}
+
 # THE argument ceiling of a paren-less list operator, over $e->[$from..$end]
 # (task #343's boundary, both spellings, one copy):
 #   * the run ends before the first same-level and/or/xor — perlop: those are
@@ -6071,6 +6092,23 @@ sub _listop_arg_ceiling {
   my $tern_depth = 0;
   for (my $j = $from; $j <= $end; $j++) {
     my $jop = $self->is_token_operator($e->[$j]) // '';
+    # A COMMA followed by an operator that cannot begin a term ends the run
+    # there (task #850).  perl allows a list operator's argument list to end
+    # in a comma, and then the operator applies to the CALL: `substr $x, 0,
+    # 1, = "Z"` is `(substr $x,0,1,) = "Z"` and `ok f(), 'd', || _diag $!` is
+    # `(ok f(),'d',) || _diag $!` (both probed 5.40.3, both real perl-suite
+    # lines).  Without this the operator was swallowed INTO the argument run,
+    # the comma split then handed `parse` an operator with no left operand,
+    # and the reducer spliced the run down to nothing — "Fell through.
+    # Missing case: []", the whole statement DROPPED.  A separator does not
+    # end anything (`f(1,,2)` is `f(1,2)`; parse_list skips the empty part),
+    # and a unary-capable operator is an ARGUMENT — `f 5, - 7` passes -7,
+    # probed — which is exactly what _is_binary_only_op already answers.
+    if ($j > $from && $jop ne ',' && $jop ne '=>'
+        && $self->_is_binary_only_op($e->[$j])) {
+      my $prev = $self->is_token_operator($e->[$j - 1]) // '';
+      return $j - 1 if $prev eq ',' || $prev eq '=>';
+    }
     if ($jop eq 'and' || $jop eq 'or' || $jop eq 'xor') {
       return $j - 1;
     }
