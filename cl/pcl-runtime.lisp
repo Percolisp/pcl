@@ -17668,10 +17668,24 @@ buffer's fill-pointer; everything else falls back to file-length."
    differ wherever perl-regex-to-ppcre translates — notably `(?^flags:` (perl's
    qr wrapper), which becomes `(?flags:` for cl-ppcre and would otherwise leak
    into `\"$re\"` as a shape perl never prints (task #181).  SOURCE nil means
-   \"same as PATTERN\"."
+   \"same as PATTERN\".
+   %COMPILED is the lazily-computed compile cache (task #680): the list
+   (scanner reg-names closers anchored-g), filled by %p-regex-compiled the
+   first time the op is matched and reused for every later match.  Before it
+   existed the \\G strip, the ppcre options plist and the scanner-cache format
+   key were rebuilt on EVERY match of a m//g loop.  Everything else in the
+   struct is immutable after construction and this slot is idempotent, so one
+   struct may be shared between call sites (see *p-regex-op-cache*)."
   pattern
   modifiers
-  source)
+  source
+  %compiled
+  ;; %OP-VARIANTS (task #680): alist of (modifier-string . derived-struct)
+  ;; for the qr-object-with-op-flags spelling — `while ($t =~ /$re/g)` calls
+  ;; p-regex-from-parts per ITERATION, and building a fresh derived struct
+  ;; each time defeated the %compiled cache.  The variant for "" (or any
+  ;; flagless modifier string) is the struct itself.
+  %op-variants)
 
 (defstruct p-subst-op
   "Substitution operation s///"
@@ -17795,11 +17809,22 @@ buffer's fill-pointer; everything else falls back to file-length."
                        str :start prefix-len)
       prefix-len))
 
-(defun p-regex (pattern-string)
-  "Parse /pattern/modifiers and return a regex-match struct.
-   Pattern-string is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'"
-  (let* ((str (to-string pattern-string))
-         (first-char (char str 0))
+(defvar *p-regex-op-cache* (make-hash-table :test 'equal)
+  "Regex source text -> its parsed p-regex-match struct (task #680).  The
+   emitted code calls (p-regex \"/pat/mods\") at the match SITE — i.e. once
+   per loop ITERATION in `while ($x =~ /./g) {}` — and the parse
+   (perl-regex-to-ppcre's rewrite passes) was 66% of that loop under
+   sb-sprof.  A match op is immutable after construction (the %compiled slot
+   is idempotent) and has no perl-visible identity, so one shared struct per
+   source text is safe.  qr// DOES have perl-visible identity (two
+   evaluations of qr/a/ are different refaddrs), so p-qr is NOT memoized.
+   Keys are copied when stored (%pcl-memo-key): a Perl string can be a
+   fill-pointer buffer the program appends to in place.")
+
+(defun %p-regex-parse (str)
+  "Parse /pattern/modifiers text into a fresh p-regex-match struct.
+   STR is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'."
+  (let* ((first-char (char str 0))
          (start-delim (%pcl-regex-delim-start
                        str (if (char= first-char #\m) 1 0)))
          (open-delim (char str start-delim))
@@ -17813,6 +17838,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (make-p-regex-match :pattern pattern
                         :source raw
                         :modifiers (parse-regex-modifiers modifiers))))
+
+(defun p-regex (pattern-string)
+  "Parse /pattern/modifiers and return a regex-match struct, memoized on the
+   source text (see *p-regex-op-cache*).
+   Pattern-string is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'"
+  (let ((str (to-string pattern-string)))
+    (or (gethash str *p-regex-op-cache*)
+        (setf (gethash (%pcl-memo-key str) *p-regex-op-cache*)
+              (%p-regex-parse str)))))
 
 (defun p-regex-from-parts (pattern modifiers)
   "Build a regex from a runtime-interpolated pattern string and modifier string.
@@ -17833,19 +17867,38 @@ buffer's fill-pointer; everything else falls back to file-length."
         ;; into an infinite loop (Pl/t/regex-gpos-01.t caught it).  With none of
         ;; them present the object is returned unchanged, which is what keeps
         ;; `qr/$re/` identical to `$re`.
-        (let* ((outer (parse-regex-modifiers (to-string modifiers)))
-               (op-flags (loop for k in '(:g :c :e :r)
-                               when (getf outer k) nconc (list k t))))
-          (if op-flags
-              (make-p-regex-match
-               :pattern   (p-regex-match-pattern rx)
-               :source    (p-regex-match-source rx)
-               :modifiers (append op-flags (p-regex-match-modifiers rx)))
-              rx))
-        (let ((raw (to-string pattern)))
-          (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
-                              :source raw
-                              :modifiers (parse-regex-modifiers (to-string modifiers)))))))
+        ;; The DERIVED struct is cached per modifier string in the qr object
+        ;; (%op-variants, task #680): `while ($t =~ /$re/g)` builds it per
+        ;; ITERATION, and a fresh struct made every %compiled cache useless.
+        (let ((mods (to-string modifiers)))
+          (or (cdr (assoc mods (p-regex-match-%op-variants rx)
+                          :test #'string=))
+              (let* ((outer (parse-regex-modifiers mods))
+                     (op-flags (loop for k in '(:g :c :e :r)
+                                     when (getf outer k) nconc (list k t)))
+                     (derived (if op-flags
+                                  (make-p-regex-match
+                                   :pattern   (p-regex-match-pattern rx)
+                                   :source    (p-regex-match-source rx)
+                                   :modifiers (append op-flags
+                                                      (p-regex-match-modifiers rx)))
+                                  rx)))
+                (push (cons (%pcl-memo-key mods) derived)
+                      (p-regex-match-%op-variants rx))
+                derived)))
+        ;; Memoized like p-regex (task #680): `while ($x =~ /$pat/g)` calls
+        ;; this per ITERATION with the same pattern text.  The key is a LIST
+        ;; (modifiers pattern), which EQUAL can never conflate with p-regex's
+        ;; string keys in the shared table.
+        (let* ((raw (to-string pattern))
+               (mods (to-string modifiers)))
+          (or (gethash (list mods raw) *p-regex-op-cache*)
+              (setf (gethash (list (%pcl-memo-key mods) (%pcl-memo-key raw))
+                             *p-regex-op-cache*)
+                    (make-p-regex-match
+                     :pattern (perl-regex-to-ppcre raw)
+                     :source raw
+                     :modifiers (parse-regex-modifiers mods))))))))
 
 (defun p-qr (pattern-string)
   "Parse qr/pattern/modifiers and return a compiled regex (regex-match struct).
@@ -18152,22 +18205,70 @@ buffer's fill-pointer; everything else falls back to file-length."
       (setf options (list* :pcl-xx-mode t options)))
     options))
 
+(defvar *p-captures-set* 0
+  "How many of the $1..$20 specials the last set-capture-groups wrote (its
+   pattern's group count, capped at 20).  clear-capture-groups resets only
+   that many (task #680): a 0-group m//g loop used to pay 20 special-variable
+   writes per match to re-clear variables that were already undef.  The
+   observable state is identical — probed vs perl 5.40: a 0-group SUCCESSFUL
+   match does clear $1 (both sides), a FAILED match keeps it (both sides).
+   The invariant (no $N is set beyond this count) holds because the only
+   writers are clear/set-capture-groups; `local $1` restore is the one
+   spelling outside it, and match-var block scoping is #684's known
+   divergence already.")
+
+(defvar *p-capture-syms*
+  #($1 $2 $3 $4 $5 $6 $7 $8 $9 $10
+    $11 $12 $13 $14 $15 $16 $17 $18 $19 $20)
+  "The capture specials in order, for clear-capture-groups' counted reset.")
+
 (defun clear-capture-groups ()
-  "Reset all capture group variables.  $1..$9 reset to *p-undef* (Perl undef),
-   NOT raw nil — see the defvar note: a raw-nil capture vanishes when flattened
-   into a list (%p-flatten-list treats raw nil as an empty-list/hole marker)."
-  (setf $1 *p-undef* $2 *p-undef* $3 *p-undef* $4 *p-undef* $5 *p-undef*
-        $6 *p-undef* $7 *p-undef* $8 *p-undef* $9 *p-undef*
-        $10 *p-undef* $11 *p-undef* $12 *p-undef* $13 *p-undef*
-        $14 *p-undef* $15 *p-undef* $16 *p-undef* $17 *p-undef*
-        $18 *p-undef* $19 *p-undef* $20 *p-undef*
-        |$+| nil |$^N| nil)
+  "Reset the capture group variables that are currently set (see
+   *p-captures-set*).  $N resets to *p-undef* (Perl undef), NOT raw nil — see
+   the defvar note: a raw-nil capture vanishes when flattened into a list
+   (%p-flatten-list treats raw nil as an empty-list/hole marker)."
+  (let ((n *p-captures-set*))
+    (loop for i from 0 below n
+          do (set (svref *p-capture-syms* i) *p-undef*)))
+  (setf *p-captures-set* 0)
+  (setf |$+| nil |$^N| nil)
   ;; $& / $` / $' are computed from the last match's offsets (task #477), so
   ;; clearing them means forgetting the match, not assigning nil.
   (%clear-match-strings)
-  (clrhash %+)
-  (clrhash |%-|)
+  (when (plusp (hash-table-count %+)) (clrhash %+))
+  (when (plusp (hash-table-count |%-|)) (clrhash |%-|))
   (setf (fill-pointer |@{^CAPTURE}|) 0))
+
+(declaim (inline %p-ppcre-scan))
+(defun %p-ppcre-scan (scanner str start)
+  "cl-ppcre:scan for an already-compiled scanner closure, without the CLOS
+   generic-function dispatch and keyword parsing (task #680: the emf +
+   check-applicable-keywords + &rest consing were ~7% of a m//g loop).
+   Mirrors ppcre's (scanner function) method exactly: funcall the closure on
+   a simple string over [START, length).  *real-start-pos* is not rebound —
+   the method binds it to its default NIL, which is its global value; nothing
+   in this runtime binds it.  Callers pass STR already simple (do-regex-match
+   coerces once per call), so the guard here is belt only."
+  (funcall (the function scanner)
+           (if (simple-string-p str) str (coerce str 'simple-string))
+           start (length str)))
+
+(defun %p-at-elem-set (arr i val)
+  "Write VAL into offset array ARR at index I, reusing the element box in
+   place when one is there (task #680).  perl's @-/@+ elements are magic —
+   a saved \\$-[0] reads the CURRENT match (probed vs 5.40) — so mutating
+   the box is what perl does; it also removes two allocations per match
+   from a 0-group m//g loop.  @-/@+ are read-only in perl (a write dies),
+   so no program-held box arrives here with other state.  Sequential
+   callers only: I is at most the fill pointer."
+  (if (< i (fill-pointer arr))
+      (let ((old (aref arr i)))
+        (if (p-box-p old)
+            (setf (p-box-value old) val
+                  (p-box-sv-ok old) nil
+                  (p-box-nv-ok old) nil)
+            (setf (aref arr i) (make-p-box val))))
+      (vector-push-extend (make-p-box val) arr)))
 
 (defun set-match-vars (str match-start match-end reg-starts reg-ends
                        &optional closers)
@@ -18208,21 +18309,31 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;;   @- stops after the LAST PARTICIPATING group  ($#- = last matched paren)
   ;;   @+ runs to the pattern's GROUP COUNT         ($#+ = number of groups)
   ;; so a trailing non-participant is absent from @- and a present undef in @+.
-  ;; Elements are boxed integers like any other array element.
+  ;; Elements are boxed integers like any other array element, and the boxes
+  ;; are REUSED in place (%p-at-elem-set, task #680): perl's @-/@+ elements
+  ;; are magic, so a saved \$-[0] reads the CURRENT match — probed; rebuilding
+  ;; with fresh boxes left such a ref on the stale box AND allocated two boxes
+  ;; per match of a 0-group m//g loop.
   (when (and match-start match-end)
-    (setf (fill-pointer |@-|) 0
-          (fill-pointer |@+|) 0)
-    (vector-push-extend (make-p-box match-start) |@-|)
-    (vector-push-extend (make-p-box match-end)   |@+|)
-    (when (and reg-starts reg-ends)
-      (let ((last-matched -1))
-        (loop for i from (1- (length reg-starts)) downto 0
-              when (aref reg-starts i)
-              do (setf last-matched i) (return))
-        (loop for i from 0 to last-matched
-              do (vector-push-extend (make-p-box (aref reg-starts i)) |@-|))
-        (loop for i from 0 below (length reg-ends)
-              do (vector-push-extend (make-p-box (aref reg-ends i)) |@+|))))))
+    (%p-at-elem-set |@-| 0 match-start)
+    (%p-at-elem-set |@+| 0 match-end)
+    (let ((n-minus 1)
+          (n-plus 1))
+      (when (and reg-starts reg-ends)
+        (let ((last-matched -1))
+          (loop for i from (1- (length reg-starts)) downto 0
+                when (aref reg-starts i)
+                do (setf last-matched i) (return))
+          (loop for i from 0 to last-matched
+                do (%p-at-elem-set |@-| (1+ i) (aref reg-starts i)))
+          (loop for i from 0 below (length reg-ends)
+                do (%p-at-elem-set |@+| (1+ i) (aref reg-ends i)))
+          (setf n-minus (+ 2 last-matched)
+                n-plus (1+ (length reg-ends)))))
+      (when (> (fill-pointer |@-|) n-minus)
+        (setf (fill-pointer |@-|) n-minus))
+      (when (> (fill-pointer |@+|) n-plus)
+        (setf (fill-pointer |@+|) n-plus)))))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
@@ -18243,6 +18354,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    Groups that did not participate in the match (optional groups) set $N to nil."
   (when (and reg-starts reg-ends)
     (let ((num-groups (length reg-starts)))
+      ;; Record how many $N are being written, so clear-capture-groups can
+      ;; reset exactly that many next time (task #680).
+      (setf *p-captures-set* (min num-groups 20))
       (when (> num-groups 0) (%set-cap $1 str reg-starts reg-ends 0))
       (when (> num-groups 1) (%set-cap $2 str reg-starts reg-ends 1))
       (when (> num-groups 2) (%set-cap $3 str reg-starts reg-ends 2))
@@ -18326,7 +18440,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((items nil) (pos start) (slen (length str))
         (last-rs nil) (last-re nil) (last-ms nil) (last-me nil) (any nil))
     (loop
-     (multiple-value-bind (ms me rs re) (cl-ppcre:scan scanner str :start pos)
+     (multiple-value-bind (ms me rs re) (%p-ppcre-scan scanner str pos)
        (unless (and ms (= ms pos)) (return))
        (setf any t last-rs rs last-re re last-ms ms last-me me)
        (if (> (length rs) 0)
@@ -18346,6 +18460,28 @@ buffer's fill-pointer; everything else falls back to file-length."
         (set-match-vars str last-ms last-me last-rs last-re closers))
       result)))
 
+(defun %p-regex-compiled (op)
+  "The compiled form of match op OP: the simple-vector
+   #(scanner reg-names closers anchored-g global-p cont-p), computed ONCE and
+   cached in the struct's %compiled slot (task #680).
+   ANCHORED-G is true when the pattern carried a \\G anchor: cl-ppcre has no
+   \\G, so it is stripped and the match is required to START at the /g
+   position instead (a shorter stripped pattern means a \\G was present).
+   Before this cache the strip, the ppcre options plist, the scanner-cache
+   format key and the two modifier getfs were rebuilt on EVERY match of a
+   m//g loop."
+  (or (p-regex-match-%compiled op)
+      (let* ((raw-pattern (p-regex-match-pattern op))
+             (pattern (%pcl-strip-gpos raw-pattern))
+             (anchored-g (< (length pattern) (length raw-pattern)))
+             (modifiers (p-regex-match-modifiers op))
+             (options (build-ppcre-options modifiers)))
+        (multiple-value-bind (scanner reg-names closers)
+            (%pcl-create-scanner pattern options)
+          (setf (p-regex-match-%compiled op)
+                (vector scanner reg-names closers anchored-g
+                        (getf modifiers :g) (getf modifiers :c)))))))
+
 (defun do-regex-match (string op)
   "Perform regex match.
    In scalar context: return t if matched, nil otherwise.
@@ -18355,24 +18491,25 @@ buffer's fill-pointer; everything else falls back to file-length."
    /g in scalar context: iterates over matches, tracking pos in *p-match-pos*.
    /g in list context: returns all matches at once (no pos tracking).
    /gc: keeps pos on failure instead of resetting it."
-  (let* ((str (to-string string))   ; to-string handles unboxing via box-sv (preserves class)
-         (raw-pattern (p-regex-match-pattern op))
-         ;; \G anchors the match at the current pos.  cl-ppcre has no \G, so we
-         ;; strip it and require the match to START at the /g position.  A shorter
-         ;; stripped pattern means a \G was present (anchored).
-         (pattern (%pcl-strip-gpos raw-pattern))
-         (anchored-g (< (length pattern) (length raw-pattern)))
-         (modifiers (p-regex-match-modifiers op))
-         (options (build-ppcre-options modifiers))
-         (global-p (getf modifiers :g))
-         (cont-p (getf modifiers :c)))
+  (let* ((str0 (to-string string))  ; to-string handles unboxing via box-sv (preserves class)
+         ;; One simple-string coercion per CALL (task #680): ppcre's scan
+         ;; method coerces per SCAN, so a non-simple subject (a str-buffer)
+         ;; was copied whole on every /g step.  It also pins *match-subject*
+         ;; to a copy no str-buffer append can mutate under a deferred
+         ;; $&/$`/$' cut (see the #477 block comment).
+         (str (if (simple-string-p str0) str0 (coerce str0 'simple-string))))
     (handler-case
-        (multiple-value-bind (scanner reg-names closers)
-            (%pcl-create-scanner pattern options)
+        (let* ((c (%p-regex-compiled op))
+               (scanner    (svref c 0))
+               (reg-names  (svref c 1))
+               (closers    (svref c 2))
+               (anchored-g (svref c 3))
+               (global-p   (svref c 4))
+               (cont-p     (svref c 5)))
           ;; Perl clears %+/%- on every match attempt, even failures.
           ;; $1..$9 are only cleared/set on successful matches.
-          (clrhash %+)
-          (clrhash |%-|)
+          (when (plusp (hash-table-count %+)) (clrhash %+))
+          (when (plusp (hash-table-count |%-|)) (clrhash |%-|))
           (cond
             ;; /\G.../g in list context: contiguous anchored matches from pos
             ((and global-p (eq *wantarray* t) anchored-g)
@@ -18415,7 +18552,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             ((and global-p (not (eq *wantarray* t)))
              (let ((start (or (gethash string *p-match-pos*) 0)))
                (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                   (cl-ppcre:scan scanner str :start start)
+                   (%p-ppcre-scan scanner str start)
                  ;; \G: the match must begin exactly at the start position.
                  (when (and anchored-g match-start (/= match-start start))
                    (setf match-start nil))
@@ -18436,7 +18573,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             (t
              (let ((start (if anchored-g (or (gethash string *p-match-pos*) 0) 0)))
                (multiple-value-bind (match-start match-end reg-starts reg-ends)
-                   (cl-ppcre:scan scanner str :start start)
+                   (%p-ppcre-scan scanner str start)
                  (when (and anchored-g match-start (/= match-start start))
                    (setf match-start nil))
                  (if match-start

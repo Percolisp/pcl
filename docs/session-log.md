@@ -4,6 +4,67 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 454ac (2026-08-30, Opus agent AC) — round 12 PERF slot: bench re-measured, #680 SHIPPED (m//g 30x → ~2.4x), #582 re-measured and left pending, #770 filed
+
+The three launcher jobs, in order.  Runtime-only (`cl/pcl-runtime.lisp`), NO
+generation bump; plus a `regexg` bench row, 3 guard rows, and the §0.2 doc
+baseline.
+
+1. **Bench re-measured FIRST** (`tools/bench-exec.pl`, best-of-5) and
+   recorded as `docs/faster-codegen-suggestions.md` §0.2.  Stable story
+   unchanged from §0.1 (loops/recursion beat perl; `intloop=` 4.83x waits on
+   #758–#761; pack ~1220x waits on #74).  Two rows read WORSE than their
+   records (ovlsub 3.44→3.82, symref 7.44→9.33) — taken beside active
+   sibling agents, flagged load-suspect for round 13, nothing touched either
+   path since s446m.
+2. **#680 (scalar m//g per-match cost) CLOSED.**  sb-sprof named a suspect
+   the task did not list, and it was 66% of the loop: the emission calls
+   `(p-regex "/./g")` in the loop CONDITION, so the pattern text was
+   re-parsed per ITERATION (`perl-regex-to-ppcre`'s eight
+   `regex-replace-all` passes = 51% alone).  Shipped, in profile order:
+   `p-regex`/`p-regex-from-parts` memoized on source text
+   (`*p-regex-op-cache*`; list-vs-string key types cannot conflate; keys
+   copied via `%pcl-memo-key`; `p-qr` NOT memoized — qr has perl-visible
+   identity, probed); the compiled scanner CACHED IN THE STRUCT
+   (`%compiled`: scanner/reg-names/closers/anchored-g/global-p/cont-p —
+   kills the per-match \G strip, options plist, FORMAT-built cache key and
+   modifier getfs); a per-qr `%op-variants` cache so `while ($t =~ /$re/g)`
+   stops rebuilding the derived op per iteration; `clear-capture-groups`
+   HIGH-WATER MARKED (`*p-captures-set*` — probed first: perl DOES clear $1
+   on a 0-group successful match, so the task's "gate on group count" would
+   have been silent-wrong; a failed match keeps, fewer-group clears the
+   excess); @-/@+ element boxes REUSED IN PLACE (`%p-at-elem-set`) — the
+   probe made that a CORRECTNESS fix: perl's `\$-[0]` reads the CURRENT
+   match and PCL's fresh-box rebuild left the saved ref stale (now
+   identical); and `cl-ppcre:scan` bypassed via `%p-ppcre-scan` (direct
+   funcall — the GF emf + keyword check + &rest consing were ~7%), with the
+   simple-string coercion hoisted to once per call (a str-buffer subject was
+   copied whole per scan by ppcre, and *match-subject* is now pinned to a
+   copy no in-place append can mutate).  **Ladder: 1M chars 2.83 s → 0.40 s
+   wall; ~2.6 → ~0.21 µs/match vs perl's 0.09 — 30x → ~2.4x, INSIDE the
+   §8 engine gap (~3.7x), so the next lever on regex is the PCRE2 FFI, not
+   PCL plumbing.**  29 probe rows vs perl 5.40.3 byte-identical (capture
+   lifetime, @-/@+ aliasing, /gc + \G + pos, split/s///e/tr/qr-identity/
+   memo-separation wide probe); guards `Pl/t/match-vars-01.t` 31→34.
+3. **#582 (per-class method cache) — measurement only, as briefed.**  2M
+   calls: inherited 0.984 s vs plain-sub 0.188 s (5.2x; monomorphic 0.470 s,
+   so the @ISA walk pays ~0.26 µs/call) — the lag stands, the cache would
+   fire, the blocker is still the @ISA-write invalidation marker + die-loud
+   array-write audit, which is session-sized; numbers written into the task.
+
+**#770 filed** (residue): the s/// twin — `$n++ while $x =~ s/a/b/` builds
+`(p-subst "a" "b")` per iteration and `do-regex-subst` re-parses the pattern
+per execution; same memo treatment applies.
+
+For Fable at the merge: cl/-only change ⇒ full sweep + companion re/ op/
+uni/ legs are the outstanding population checks (round rules kept them out
+of this session; targeted runs of op/utf8cache.t + re/regexp.t + re/subst.t
++ re/pat_psycho.t were clean here).  Expected movers: NONE in row counts;
+op/utf8cache.t should stay DIFF (its loop is ~7x faster again); any @-/@+
+aliasing row that existed would move TOWARD perl.
+
+---
+
 ## Session 453 (2026-08-30, Fable) — PLANNING ONLY (USER: "just planning, no work"): the single-binary plan, the unsupported-diagnostics survey, the JS-target plan
 
 Three USER-requested planning deliverables; no product code touched.

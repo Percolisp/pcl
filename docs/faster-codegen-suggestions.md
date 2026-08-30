@@ -49,7 +49,7 @@ counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
 
 ## Contents
 
-* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
+* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
 * **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
 * **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort) · [§13 s453 verdict-coverage review, #758–#761](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761)
 
@@ -110,6 +110,57 @@ class; the s444 finalize-once guard took the first bite out of dispatch.
 Left, in order of size: the pack/unpack template re-parse (#74), method
 dispatch's remainder (#73, cache-free plan in the task), aggregate/slice
 traffic (boxed-aggregate design, post-v0.1), symbolic refs.
+
+---
+
+## 0.2 Re-measured baseline (2026-08-30, round-12 perf agent, s454ac)
+
+Same instrument (`perl tools/bench-exec.pl`, best-of-5, startup subtracted),
+taken on the round-12 tree BEFORE this session's #680 regex work (no bench
+row exercises m//g, so that work does not move this table; `regexg` below is
+the new row that will track it from round 13).
+
+```
+bench          perl(s)     pcl(s)  pcl/perl
+intloop+=       0.0657     0.1328     2.02x
+intloop=        0.0650     0.3141     4.83x    (#759 + #761)
+cfor            0.1053     0.0265     0.25x    4x FASTER
+arrhash         0.1294     0.2805     2.17x
+fib(27)x        1.4483     0.4175     0.29x    3.5x FASTER
+gcdrec          0.1956     0.1007     0.52x    1.9x FASTER
+collatz         1.9259     0.7738     0.40x    2.5x FASTER
+strcat          0.0016     0.0057     3.50x
+pack            0.0042     5.1287  1219.05x    (P1 #74 -- still the big loss)
+packunpk        0.0046     5.6759  1222.47x    (P1 #74)
+arrfill         0.0737     0.2915     3.96x
+slices          0.1001     0.4757     4.75x
+sliceasgn       0.0322     0.0900     2.80x
+ovlsub          0.0489     0.1867     3.82x    (s446m said 3.44x -- see note)
+symref          0.0257     0.2397     9.33x    (§0.1 said 7.44x -- see note)
+```
+
+Notes: taken while sibling agents were active on the box, so treat rows that
+moved AGAINST the record (ovlsub 3.44→3.82, symref 7.44→9.33) as
+load-suspect until the round-13 agent re-measures on a quiet machine; no
+change since s446m touched either path.  The stable story matches §0.1:
+counting loops and recursion beat perl, `intloop=`/`intloop+=` wait on the
+verdict-coverage tasks (#758–#761, §13), pack/unpack wait on #74.
+
+**m//g (task #680, fixed this session, runtime-only):** the qp6 shape
+`while ($x =~ /./g) {}` went from ~1.7 µs/match to **~0.21 µs/match**
+(perl 0.09 µs — ~19× → **~2.4×**); 1M chars 1.88 s → 0.40 s wall via runpcl.
+sb-sprof named the cost: 66 % was `p-regex` RE-PARSING the pattern text per
+ITERATION (emission calls `(p-regex "/./g")` inside the loop condition —
+eight `regex-replace-all` passes per match), ~8 % the scanner-cache FORMAT
+key + \\G strip + options plist per call, the rest the 20-write capture
+clear, the @-/@+ fresh-box rebuild, and the CLOS dispatch on
+`cl-ppcre:scan`.  All five are gone: `p-regex`/`p-regex-from-parts` memoize
+on source text, the compiled scanner lives in the struct, the capture clear
+is high-water-marked, @-/@+ element boxes mutate in place (which also fixed
+a probed divergence — perl's `\\$-[0]` reads the CURRENT match), and scan is
+a direct funcall.  What remains is ~irreducible from PCL's side: the
+cl-ppcre engine itself (§8's ~3.7× note; the PCRE2-FFI future item is the
+next lever on this shape).
 
 ---
 
@@ -419,6 +470,13 @@ code and the highest-value OO change.
   pattern once at load time** (`load-time-value` scanner) instead of per match;
   then measure how much of the gap is PCL plumbing (capture boxing, `=~`
   `*wantarray*` wrap) vs the engine before considering a PCRE2 FFI.
+  - **DONE at the runtime layer instead (#680, s454ac; see §0.2):** memoizing
+    `p-regex`/`p-regex-from-parts` on the source text + caching the compiled
+    scanner in the op struct gets the same effect as the load-time-value
+    emission with NO emission change, and it covers the interpolated-pattern
+    spelling too.  The measured plumbing share is now small: a scalar m//g
+    step is ~2.4× perl, i.e. inside the engine gap — the next lever on regex
+    IS the PCRE2 FFI below, not more PCL plumbing.
   - **FUTURE ITEM — PCRE2 via `sb-alien` (not CFFI).** Investigated 2026-07-19.
     Feasibility is good; it's scoped as a separate, well-contained project.
     Findings: `libpcre2-8/16/32.so.0` are already present on the dev box (no

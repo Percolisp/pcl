@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 31;
+plan tests => 34;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -290,4 +290,47 @@ is run_cl(<<'END'), "[y][y][q][p][r]\n", 'a new match invalidates the memoised $
 my $a1 = $&; my $a2 = $&;
 "pqr" =~ /q/;
 print "[$a1][$a2][$&][$`][$']\n";
+END
+
+# 32-34: the #680 per-match cost work (memoized p-regex / struct-cached
+# scanner / high-water capture clear / in-place @-/@+ element boxes).  Every
+# expectation is perl 5.40.3's own output.
+
+# 32. @-/@+ ELEMENTS ARE MAGIC in perl: a saved \$-[0] reads the CURRENT
+# match.  The in-place box reuse (%p-at-elem-set) is what makes this true —
+# rebuilding with fresh boxes left the saved ref on the stale box (a live
+# divergence before #680).  \@- identity must survive matches too.
+is run_cl(<<'END'), "elem-ref=2 arr-ref=2\n", 'a saved \\$-[0] reads the CURRENT match (magic elements)';
+"ab"=~/(a)/;
+my $r=\$-[0]; my $ra=\@-;
+"zzb"=~/b/;
+print "elem-ref=$$r arr-ref=$$ra[0]\n";
+END
+
+# 33. THE HIGH-WATER CLEAR must be invisible: a 0-group SUCCESSFUL match
+# clears $1..$N from the previous match (perl does), a FAILED match keeps
+# them, and a match with FEWER groups clears the excess.
+is run_cl(<<'END'), "a:1undef 4undef\nb:1z\nc:1c 2undef\n", 'capture vars clear per perl across group counts';
+"abcd" =~ /(a)(b)(c)(d)/;
+"q" =~ /q/;
+print "a:", (defined $1 ? "1def" : "1undef"), " ", (defined $4 ? "4def" : "4undef"), "\n";
+"z" =~ /(z)/;
+"q" =~ /x/;
+print "b:1$1\n";
+"ab" =~ /(a)(b)/;
+"cd" =~ /(c)/;
+print "c:1$1 2", (defined $2 ? $2 : "undef"), "\n";
+END
+
+# 34. THE MEMO CANNOT CONFLATE: the same pattern TEXT under different
+# modifiers is a different op (p-regex keys on the whole source text), and an
+# interpolated /$pat/g (p-regex-from-parts, list-keyed in the same table)
+# still iterates and terminates.
+is run_cl(<<'END'), "mods=01\ninterp-g=2\n", 'regex-op memo keys keep modifiers and interpolation apart';
+my $m1 = "ABC" =~ /abc/ ? 1 : 0;
+my $m2 = "ABC" =~ /abc/i ? 1 : 0;
+print "mods=$m1$m2\n";
+my $pat = "b"; my $c = 0;
+$c++ while "abcabc" =~ /$pat/g;
+print "interp-g=$c\n";
 END

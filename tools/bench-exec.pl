@@ -72,6 +72,10 @@ my @benches = (
   ['sliceasgn', "$HN my \@a = (1..20); my \%h; my \$s=0; for (1..\$n) { \@a[1..3] = (7,8,9); \@h{'a','b'} = (\$_, 2); \$s += \$a[2] + \$h{a} } print \"\$s\\n\";", 200_000, 0],
   ['ovlsub',    "$HN package V; use overload '-' => sub { V->new(\$_[2] ? \$_[1] - \$_[0]{v} : \$_[0]{v} - (ref \$_[1] ? \$_[1]{v} : \$_[1])) }, '\"\"' => sub { \$_[0]{v} }; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$x = V->new(1000); my \$s = 0; for (1..\$n) { my \$y = \$x - 3; \$s += \"\$y\" } print \"\$s\\n\";", 100_000, 0],
   ['symref',    "$HN no strict 'refs'; our \$g = 2; our \@ga = (1,2,3); my \$s=0; for (1..\$n) { \$s += \${'main::g'} + \${'g'} + scalar(\@{'main::ga'}) } print \"\$s\\n\";", 200_000, 0],
+  # Scalar-context m//g per-match cost (task #680): N repeats of a 200k-char
+  # /./g loop = N*200k matches.  The subject build is identical between big
+  # and small runs, so it subtracts out with startup.
+  ['regexg',    "$HN my \$x = 'a' x 200000; my \$c = 0; for (1..\$n) { \$c = 0; while (\$x =~ /./g) { \$c++ } } print \"\$c\\n\";", 5, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
