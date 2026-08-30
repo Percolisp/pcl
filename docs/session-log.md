@@ -85,6 +85,26 @@ by ruling), 2 Mojo `local (*{…})` (#564's owner), and ~13 one-off shapes,
 most of them deliberate parser torture in `comp/parser.t`.  There is no next
 big family in this population.
 
+**#813 (the third job) — MEASURED AND DECLINED, no product change.**  Adding
+`print`/`say`/`printf` to `%TOPIC_RAW_WORD` was made, measured and reverted.
+The s455 ruling's premise turns out to be wrong, and that is the finding: `$_`
+in `for (1..N)` is NOT read-only — perl iterates fresh mutable SVs, so
+`eval { for (1..2) { $_ = "D" } 1 }` succeeds and a handler called from the
+body keeps its write.  The divergence is therefore silent-vs-silent, and one
+probe moves from AGREEING with perl to diverging: a `""` overload handler
+reached from `print` that writes `$_` loses the write (`OV(rw:clobber)` →
+`OV(rw:1)`), because the raw arm binds `$_` to the raw counter.  It is the SAME
+residue `_topic_raw_ok`'s header already accepts — identical today through
+`uc`, which IS on the list — but `print` is the most common word in a topic
+loop, so it widens the exposure most, for the smallest prize measured here:
+`for (1..2e6) { print $null $_ }` goes 0.63 s → 0.55 s against perl's 0.13
+(4.8× → 4.2×; the print path, not the box, is what remains), and corpus
+emission over 111 files is IDENTICAL — nothing in the measured population
+takes the new arm at all.  Two probe families are clean (a read-only `""`
+handler, a tied `$,` FETCH); the tied output HANDLE leg CANNOT be measured
+until #155 exists, which is said out loud rather than inferred.  Full record
+in the task.
+
 BAR: corpus-diff IDENTICAL over 111 + shapes (twice); emission A/B vs
 `0237940` over 923 files = the 4 intended files, 0 RCDIFF; gate-SET scan
 638×2 = exactly the 2 drop→OK verdict moves; `tools/prove-core` PASS;

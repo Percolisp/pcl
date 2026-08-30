@@ -86,6 +86,23 @@ those two files and the live plan doc directly -- no new review-doc families.*
   111 + shapes; emission A/B over 923 files (lib + perl t/ + cpan-tests t/ +
   shapes) = exactly the 4 intended files, 0 RCDIFF; gate-SET scan 638×2 = the
   2 drop→OK moves and nothing else.  Generation **v2-460** + three artifacts.
+- **#813 MEASURED AND DECLINED — do not add `print`/`say`/`printf` to
+  `%TOPIC_RAW_WORD`** (change made, measured, reverted; full record in the
+  task).  **The s455 ruling's premise is WRONG and that is the finding: `$_`
+  in `for (1..N)` is NOT read-only** — perl iterates fresh MUTABLE SVs, so
+  `eval { for (1..2) { $_ = "D" } 1 }` succeeds and a handler reached from the
+  body keeps its write (probed 5.40.3).  So the divergence is silent-vs-silent,
+  and one probe moves from AGREEING with perl to diverging: a `""` handler
+  reached from `print` that writes `$_` loses the write (`OV(rw:clobber)` →
+  `OV(rw:1)`), because the raw arm binds `$_` to the raw counter.  It is the
+  SAME residue `_topic_raw_ok`'s header already accepts — identical today
+  through `uc`, which is on the list — but `print` is the most common word in
+  a topic loop, so it widens the exposure most.  Prize: `for (1..2e6) { print
+  $null $_ }` 0.63 s → 0.55 s against perl 0.13 (4.8× → 4.2×; the print path,
+  not the box, is what remains), and corpus emission over 111 files IDENTICAL —
+  nothing measured takes the new arm.  The tied-output-HANDLE leg is
+  UNMEASURABLE until #155 (`tie *OUT` on a non-lvalue) exists; say so rather
+  than inferring it.
 
 ## s455d (2026-08-30, Fable) — THE BOXED-AGGREGATES DESIGN (USER-started): raw elements + in-place cell promotion — `docs/boxed-aggregates-design-s455.md`, task #816
 
