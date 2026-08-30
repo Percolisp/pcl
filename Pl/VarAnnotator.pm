@@ -445,11 +445,28 @@ sub _tw_region_facts {
 
   # String-eval reachability: an `eval` WORD token.  Structural, so `eval`
   # inside a comment or string literal no longer boxes the whole region —
-  # the W12 flagship win.  (Block eval still fires, matching the text scan;
-  # narrowing that is a separate, later decision.)
+  # the W12 flagship win.
+  #
+  # A BLOCK eval is NOT a boxing event (#758, Kind-A `raw-block-eval`).  The
+  # mechanism that needs a cell per name is the eval CAPTURE ALIST (#296-B1),
+  # and that is a STRING-eval feature: the runtime resolves a free name in the
+  # eval'd source against the alist, so the name must have a box to alias.
+  # `eval {…}` is plain control flow — its body is compiled in place (walked
+  # with the seam flag by `_tw_expr_parse`, so its writes are counted) and a
+  # die unwinding past a raw `let` slot leaves the slot holding its last value,
+  # which is exactly perl's `my` retention.  A STRING eval nested inside an
+  # eval block still fires: find() descends, and that inner `eval` Word has no
+  # Block sibling.  PPI is unambiguous here — `eval {` always lexes the brace
+  # run as a Structure::Block, never a hash Constructor (probed s456af over
+  # nine spellings).
+  my $block_eval_free = Pl::Passes::enabled('raw-block-eval');
   $ctx->{has_eval} = 1
     if @{ $stmt->find(sub {
-            $_[1]->isa('PPI::Token::Word') && $_[1]->content eq 'eval';
+            return '' unless $_[1]->isa('PPI::Token::Word')
+                          && $_[1]->content eq 'eval';
+            return 1 unless $block_eval_free;
+            my $next = $_[1]->snext_sibling;
+            return !($next && $next->isa('PPI::Structure::Block'));
           }) || [] };
 
   # Names captured by nested anon subs (`sub { … }` blocks): Symbol tokens
@@ -1105,10 +1122,28 @@ sub _tw_rhs_is_object {
   return ref($node) eq 'PPI::Token::QuoteLike::Regexp' ? 1 : 0;
 }
 
+# #759 (Kind-A `raw-op-family`): under an %ARITH_OP root the family is decided
+# by the OPERATOR, not by its operands.  That is this file's own stated
+# invariant (the header above: "every such p-op coerces its operands — boxes,
+# strings, sub results — and returns a raw CL number or string"), and the
+# `_tw_operand_ok` walk below contradicts it: it rejected a `PPI::Token::Magic`
+# operand and an unknown-sub call, so `$s = $s + $_` was an unproven
+# write-shape while `$s += $_` — the same value through the same coercion —
+# went raw.  Three spellings of one sum, three verdicts (probed s453/s456af).
+#
+# What the operand walk still owns is the NO-operator case, and that is the
+# real hazard the check was written for: a bare `$y` RHS stores $y's BOX, so
+# the slot becomes an alias.  An operator root cannot do that — `p-+` builds a
+# fresh CL number.  Overload does not add a class here: a plain `$scalar`
+# operand was ALREADY accepted and may hold an overloaded object, so
+# `$a + f()` is exactly as exposed as `$a + $b` was before (probed).
+sub _op_family_by_operator { return Pl::Passes::enabled('raw-op-family') }
+
 sub _tw_shape_ok {
   my ($ctx, $xo, $id) = @_;
   my $node = $xo->get_a_node($id);
   my $kids = $xo->get_node_children($id) || [];
+  my $by_op = _op_family_by_operator();
 
   if ($xo->is_internal_node_type($node)) {
     my $t = $node->{type} // '';
@@ -1117,7 +1152,7 @@ sub _tw_shape_ok {
     if ($t eq 'prefix_op' && @$kids == 2) {          # -$y / +$y / !$y roots
       my $op = $xo->get_a_node($kids->[0]);
       my $opc = (ref($op) && !$xo->is_internal_node_type($op)) ? $op->content : '';
-      return (_tw_operand_ok($ctx, $xo, $kids->[1]) ? 'num' : 0)
+      return (($by_op || _tw_operand_ok($ctx, $xo, $kids->[1])) ? 'num' : 0)
         if $opc eq '-' || $opc eq '+' || $opc eq '!';
     }
     return 0;               # funcall/h_acc/… root: value may be/alias a box
@@ -1125,8 +1160,10 @@ sub _tw_shape_ok {
   my $r = ref $node;
   if ($r eq 'PPI::Token::Operator' && @$kids) {
     return 0 unless $ARITH_OP{$node->content};
-    for my $k (@$kids) {
-      return 0 unless _tw_operand_ok($ctx, $xo, $k);
+    if (!$by_op) {
+      for my $k (@$kids) {
+        return 0 unless _tw_operand_ok($ctx, $xo, $k);
+      }
     }
     return $NUM_OP{$node->content} ? 'num' : 'str';
   }

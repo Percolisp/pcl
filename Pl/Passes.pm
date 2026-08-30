@@ -51,6 +51,15 @@ our %KIND_A = (
   'foreach-range' => 'Parser2 foreach: `for $v (A..B)` lowers to the counting macro p-foreach-range instead of materializing the range',
   'insensitive-call' => 'ExprToCL funcall: a KNOWN user sub whose body never observes *wantarray* (Parser2::_sub_ctx_insensitive) is called without the context bind (the p-…-ctx wrap, ir-spec §4)',
   'elem-setf'      => 'ExprToCL `=`: `$h{k} = V` / `$a[i] = V` on a let-bound container with a pure key writes through CL setf instead of p-setf (no boundp auto-declare)',
+  # --- verdict-COVERAGE narrowings (s453 review §13, tasks #758-#761).  Each
+  # widens where the raw-slot/raw-numeric verdicts above may fire; none is a
+  # new fast shape except raw-topic.  Named separately so a coverage widening
+  # can be bisected on its own (PCL_OPT=-raw-op-family), which -raw-slot
+  # cannot do (it turns the whole verdict off).
+  'raw-block-eval' => 'VarAnnotator eval-in-region: a BLOCK `eval {…}` is not a boxing event (the capture alist is a STRING-eval mechanism), so it no longer boxes every name in its region',
+  'raw-op-family'  => "VarAnnotator write family: a root write whose RHS is a closed-set arith/string OPERATOR takes the operator's result family, so `\$s = \$s + \$_` proves num like `\$s += \$_` does",
+  'raw-closure-capture' => 'VarAnnotator nested-sub-ref: an anon sub CAPTURING a name is not itself a boxing event (a CL closure captures a raw let slot natively) — only a real boxing event inside the closure vetoes',
+  'raw-topic'      => 'Parser2 foreach: a topic loop `for (A..B) {…}` whose body has no dynamic `$_` reader binds `$_` as a raw per-iteration lexical (p-foreach-range-raw) instead of localizing the global',
 );
 
 my @PASSES;          # [name, coderef] in registration order (Kind B)
