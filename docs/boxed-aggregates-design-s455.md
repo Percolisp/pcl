@@ -1,8 +1,12 @@
 # Boxed aggregates → raw element storage: the design analysis (s455d, Fable)
 
-**Status: IN PROGRESS — written in checkpoints (USER: "save at checkpoints").
-Each checkpoint is committed; a stopped session resumes at the last one.
-CHECKPOINT LOG at the bottom.  Task #816.**
+**Status: DESIGN COMPLETE AND HANDOFF-READY (2026-08-31).  The
+sort-comparator ruling is in (§7.1, USER); the one remaining §7 item (the
+gate shape, Q2) is DELEGATED to the implementing session by design — it
+decides with a measurement in phase 0.  Execution: an Opus session takes
+phases 0–2 (zero-change bars), a second takes phase 3 (the flip + the full
+boat), Fable reviews at each boundary.  Task #816.  CHECKPOINT LOG at the
+bottom.**
 
 The question this doc answers: Perl array/hash ELEMENTS are stored as boxes
 today, unconditionally.  The measured cost is the whole remaining
@@ -271,14 +275,13 @@ more.  Fable reviews at each phase boundary (the round pattern).
 
 ## 7. Open questions (for the USER / the next Fable session)
 
-1. **sort comparator writes (E6)**: perl documents element modification
-   inside a comparator as undefined behavior.  Options: bind raw (fast,
-   writes lost — matches "undefined"), or promote-on-visit (slow for big
-   sorts), or bind raw + DIE on write attempt (rule 12's loud option, but
-   requires detecting the write).  RECOMMENDATION: bind existing boxes as
-   today when present, raw values raw; document in not-supported.md that
-   comparator writes to raw-element arrays are not written through
-   (undefined in perl).  Needs a ruling.
+1. ~~sort comparator writes (E6)~~ **RULED (USER, 2026-08-31: "I accept
+   your suggestion")**: bind existing boxes as today when present, bind
+   raw values RAW — a comparator write to a raw-element array is not
+   written through, which sits inside perl's own "undefined behavior" for
+   element modification during sort.  The implementing session adds the
+   `docs/not-supported.md` entry (cite this doc + the ruling) in the
+   phase-3 commit, since only the flip makes the case reachable.
 2. **The gate's runtime consultation**: `raw-elems` differs from existing
    Kind-A gates (compile-time emission switches) — it is a runtime write-arm
    policy.  Either give Passes.pm a runtime-consulted kind, or key it on an
