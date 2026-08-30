@@ -136,6 +136,75 @@ different, unimplemented spelling — the other three grep hits are the word
 the s371/s438 rule); guards are the bar.
 
 ---
+## Session 454ae (2026-08-30, Opus agent AE, round 12 correctness slot 2) — census push: 34/90 -> 27/77 (13 drops, two mechanisms); STOPPED EARLY on the user's stop order, GATE NOT RUN
+
+Worktree agent-a96e620de5346d021.  **The merging session must run the full
+bar** — tools/prove-core, corpus-diff (was IDENTICAL over 111 after changes
+1+1b; NOT re-run after change 2), emission-ab over the populations, gen bump
+to v2-420 + the three artifact regens (all three changes are Pl/** and
+emission-affecting for files carrying the shapes), and enumerate sweep/
+companion movers (Test2-heavy cpan .t files and Mojo board rows will move;
+perl-tests corpus was measured identical mid-way).
+
+What shipped (each verified by re-running the census harvest over the
+cpan+board rows, and by probes vs perl 5.40):
+
+1. **Code assigned to a typeglob is a sub declaration, prototype included**
+   (`BEGIN { *try = \&_manual_try }`, Test2::Util's shape; also
+   `*HAVE_PERLIO = COND ? sub() {1} : sub() {0}`).  Pl::Parser::
+   glob_sub_alias_fact (the statement shape), glob_sub_alias_stmts (the
+   load-time collector: skips named/anon sub bodies, BEGIN-scheduled only
+   among Scheduleds), _glob_alias_sig_info (record resolution; multiple
+   candidates must agree or the fact is dropped).  Consumed by
+   collect_prototypes (module facts walk — every load-time assignment) and
+   by Parser2's pre-scan (BEGIN blocks only: within the same file only a
+   BEGIN-time assignment is a compile-time fact — probed, p4).  Clears 6
+   census drops (Context.pm, Instance.pm x2, IPC/Driver/Files.pm,
+   Tools/Tiny.pm, IPC/Driver/Files.t) + Util.pm's with (1b).
+
+2. **The block-form argument run gets THE listop ceiling** (rule 11):
+   _take_rest_as_args consumed to END OF STREAM, so `$c ? grep { … } @a :
+   ()` swallowed `: ()` (orphaned colon → drop) and `grep { … } @a or EXPR`
+   swallowed the `or` — a SILENT WRONG the probe caught (`my $r = grep
+   { $_ > 1 } (1,2,3) or print "none"` gave r=1, perl r=2: the or-arm was
+   reduced INSIDE the args).  One shared helper _listop_arg_ceiling
+   (and/or/xor + enclosing-ternary ':', nested-ternary depth-paired) now
+   serves the operator-loop path and _take_rest_as_args.  Probe file p6:
+   5/5 rows identical to perl (incl. the nested `map { } $c ? (1,2) :
+   (8,9)` negative).
+
+3. **A module's subs are in its stash whatever the import list says**:
+   _merge_module_prototypes (new 3rd arg = module name, passed at the three
+   module-name call sites) registers the module env's prototype facts under
+   the module's package via Environment::add_pkg_prototype — per-package
+   table ONLY, so unqualified resolution is untouched — and _proto_entry
+   answers a QUALIFIED spelling from the per-package table first.  Clears
+   `Test2::API::context_do { … }` / `no_context` (API.t, 4 drops — never
+   imported) and `List::Util::first { … } @$self` (Mojo _Collection.pm,
+   which declares its OWN `first` — why the flat table could never answer).
+   First attempt read module_env->get_declared_subs and FAILED on every
+   ProtoCache L2 hit (declared_subs is not serialized) — the shipped shape
+   reads the serialized prototypes/pkg_prototypes tables instead; builtin
+   seed rows skipped by name.
+
+Census: 7 rows removed, Mojo reduced 4→2 with its message refreshed
+(34 files/90 drops → 27/77; the header's "34/88" was stale — s451's Mojo
+count edit never updated it; recounted and corrected).
+
+Findings filed/known, NOT fixed here: **#790** (a scalar holding a died
+eval's result VANISHES from a returned list: `my $ok = eval { die }; return
+($ok, "w")` → ("w") — perl (undef, "w"); minimized p8.pl, pre-existing,
+runtime family).  Remaining census targets untouched: #458 regex family
+(pat.t/pat_advanced 4-6), #480/#481/#482 (owned, pending), the two WTF
+rows, readline `<Ạ>` x2, lex.t `${no strict; …}`, utf8cache substr-comma,
+sprintf2 bare-block-as-Constructor, open.t, filetest.t `sub _`, parser.t 5
+(torture shapes), lexsub.t 4 (x/y-named lexsubs, #361/#376 residue),
+method.t/ref.t indirect-object 4 (USER-ruled MAYBE LATER — leave), the
+lvalue 39 (blessed — leave).  #737 (message-column refresh) NOT done except
+the Mojo row.  Guard Pl/t rows NOT yet written for the three changes —
+the merging session should add them (probe files p2/p3/p4/p6/p12 in the
+scratchpad show the shapes; fixture module pattern: build the module in a
+temp lib with a variable-built export list).
 
 ## Session 453 (2026-08-30, Fable) — PLANNING ONLY (USER: "just planning, no work"): the single-binary plan, the unsupported-diagnostics survey, the JS-target plan
 

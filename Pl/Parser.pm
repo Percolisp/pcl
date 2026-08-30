@@ -1343,6 +1343,15 @@ sub collect_prototypes {
   $self->_cur_bucket('runtime');
   $self->_open_section('pcl');
   $self->_walk_prototype_facts($doc);
+  # Code assigned to a typeglob at LOAD time declares the glob's name with
+  # the assigned code's prototype (`BEGIN { *try = \&_manual_try; }` —
+  # see glob_sub_alias_fact above).  Resolved AFTER the walk so a target
+  # declared below its alias still answers.
+  for my $fact (glob_sub_alias_stmts($doc)) {
+    my $info = $self->_glob_alias_sig_info($fact) or next;
+    $self->_register_sub_prototype($fact->{stmt}, $fact->{name}, $info,
+                                   'glob-alias', 0);
+  }
   return 1;
 }
 
@@ -1364,6 +1373,160 @@ sub _walk_prototype_facts {
       $self->_walk_prototype_facts($child);
     }
   }
+}
+
+# --------------------------------------------------------------------------
+# CODE ASSIGNED TO A TYPEGLOB IS A SUB DECLARATION, prototype included — from
+# the moment the assignment RUNS.  Test2::Util is the living example of both
+# spellings:
+#
+#     sub _manual_try(&;@) { … }
+#     BEGIN { *try = \&_manual_try; }                 # try is (&;@) from here
+#     BEGIN { *HAVE_PERLIO = eval {…} ? sub() { 1 } : sub() { 0 }; }
+#
+# perl's compiler sees `try` with a `(&;@)` prototype for every LATER
+# statement — which is exactly what makes `my ($ok, $err) = try { … };`
+# a block-form call.  PCL's prototype facts came only from `sub NAME (P)`
+# heads, so the whole family was invisible: six census drops in the Test2
+# stack (`try { … }` fell through the term grammar) and one more behind
+# `HAVE_PERLIO ? … : …` (the zero-arg term was read as a list operator that
+# swallowed the `?`).
+#
+# WHEN an assignment counts is the load-model question:
+#   * within the SAME file, only a BEGIN-time assignment affects later
+#     compilation (a plain file-scope one runs after the whole file is
+#     compiled) — Parser2's pre-scan therefore collects from BEGIN blocks
+#     only;
+#   * a use'd MODULE has run its whole body by the time the `use` returns,
+#     so the module facts walk (collect_prototypes) takes every assignment
+#     that runs at load: file scope, compounds, BEGIN — but never the body
+#     of a named or anonymous sub (those run at call time, maybe never:
+#     Test2::Util's own CAN_REALLY_FORK memoizes by re-assigning ITSELF
+#     from inside its body, and that one must NOT override).
+#
+# glob_sub_alias_fact recognizes one statement; glob_sub_alias_stmts collects
+# the ones that run at load under a node; _glob_alias_sig_info resolves a
+# fact to the prototype record to register (undef = no fact: an unresolvable
+# target, or candidates that disagree).
+
+# One statement: `*NAME = RHS ;` where RHS carries code — `\&TARGET`, an
+# anon `sub (PROTO) {…}` (any mix, e.g. across a ternary), or a bare anon
+# `sub {…}` (existence only, no prototype).  Returns undef when the
+# statement is not this shape or carries no code candidate (`*G = *H`,
+# `*G = \$x`, `local *G = …`, `*$name = …` all decline).
+sub glob_sub_alias_fact {
+  my ($stmt) = @_;
+  my @k = grep { $_->significant } $stmt->children;
+  return undef unless @k >= 3;
+  my ($sym, $eq) = @k[0, 1];
+  return undef unless $sym->isa('PPI::Token::Symbol')
+    && $sym->content =~ /\A\*([A-Za-z_'][\w']*(?:::[\w']+)*)\z/;
+  my $name = $1;
+  return undef unless $eq->isa('PPI::Token::Operator') && $eq->content eq '=';
+  my @cands;
+  for my $i (2 .. $#k) {
+    my $t = $k[$i];
+    if ($t->isa('PPI::Token::Cast') && $t->content eq "\\"
+        && $i < $#k
+        && $k[$i + 1]->isa('PPI::Token::Symbol')
+        && $k[$i + 1]->content =~ /\A&([A-Za-z_'][\w']*(?:::[\w']+)*)\z/) {
+      push @cands, { target => $1 };
+    }
+    elsif ($t->isa('PPI::Token::Word') && $t->content eq 'sub' && $i < $#k) {
+      if ($k[$i + 1]->isa('PPI::Token::Prototype')) {
+        push @cands, { proto => $k[$i + 1]->content };
+      }
+      elsif ($k[$i + 1]->isa('PPI::Structure::Block')) {
+        push @cands, { bare => 1 };
+      }
+    }
+  }
+  return undef unless @cands;
+  return { name => $name, candidates => \@cands, stmt => $stmt };
+}
+
+# Every glob-alias statement under $node that RUNS WHEN $NODE'S CODE RUNS:
+# skips named-sub and anon-sub bodies (call time), descends into everything
+# else, and of the scheduled blocks descends into BEGIN only (END runs at
+# exit, CHECK/INIT after the user's own compilation — neither contributes a
+# compile-time fact to anyone).  A BEGIN nested inside a named sub still
+# counts: perl runs it when the sub is COMPILED.
+sub glob_sub_alias_stmts {
+  my ($node) = @_;
+  my @out;
+  for my $child ($node->schildren) {
+    if ($child->isa('PPI::Statement::Scheduled')) {
+      next unless ($child->type // '') eq 'BEGIN' && $child->block;
+      push @out, glob_sub_alias_stmts($child->block);
+      next;
+    }
+    if ($child->isa('PPI::Statement::Sub')) {
+      for my $s (@{ $child->find('PPI::Statement::Scheduled') || [] }) {
+        next unless ($s->type // '') eq 'BEGIN' && $s->block;
+        push @out, glob_sub_alias_stmts($s->block);
+      }
+      next;
+    }
+    if ($child->isa('PPI::Statement')) {
+      if (my $fact = glob_sub_alias_fact($child)) { push @out, $fact; }
+    }
+    if ($child->isa('PPI::Node')) {
+      next if $child->isa('PPI::Structure::Block') && _block_is_anon_sub_body($child);
+      push @out, glob_sub_alias_stmts($child);
+    }
+  }
+  return @out;
+}
+
+sub _block_is_anon_sub_body {
+  my ($blk) = @_;
+  my $prev = $blk->sprevious_sibling or return 0;
+  return 1 if $prev->isa('PPI::Token::Prototype');
+  return 1 if $prev->isa('PPI::Structure::Signature');
+  return 1 if $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+  return 0;
+}
+
+# The prototype record a glob-alias fact contributes, or undef for none.
+# `\&TARGET` reads TARGET's registered record (an unknown target resolves
+# nothing — we cannot invent facts perl would have had at run time); a
+# literal prototype parses through the SAME helper a sub head uses, with the
+# same signature-vs-prototype boundary (#455: a signature sets no prototype
+# in perl, so it contributes existence only).  When a statement offers more
+# than one candidate (`COND ? sub(){1} : sub(){0}`), they must agree on the
+# call-site-parse-relevant shape, or the fact is dropped — perl's answer
+# would depend on which branch ran, and guessing is how silent-wrongs start.
+sub _glob_alias_sig_info {
+  my ($self, $fact) = @_;
+  my @infos;
+  for my $c (@{ $fact->{candidates} }) {
+    if (defined $c->{target}) {
+      my $p = $self->environment->get_prototype($c->{target});
+      return undef unless $p;
+      push @infos, $p;
+    }
+    elsif (defined $c->{proto}) {
+      if (proto_text_has_named_params($c->{proto})
+          && $self->_signatures_enabled_at($fact->{stmt})) {
+        push @infos, { params => [], min_params => -1, is_proto => 0 };
+      }
+      else {
+        push @infos, $self->parse_prototype_or_signature($c->{proto}, $fact->{stmt});
+      }
+    }
+    else {
+      push @infos, { params => [], min_params => -1, is_proto => 0 };
+    }
+  }
+  my $shape = sub {
+    my ($p) = @_;
+    join '|', ($p->{min_params} // -1), scalar @{ $p->{params} || [] },
+              ($p->{has_block_arg} ? 1 : 0), ($p->{is_proto} ? 1 : 0);
+  };
+  my $first = shift @infos;
+  my $k0 = $shape->($first);
+  for my $p (@infos) { return undef if $shape->($p) ne $k0; }
+  return $first;
 }
 
 # Transform Perl qualified sub name to CL format
@@ -8833,7 +8996,7 @@ sub _process_include_statement {
       # This allows prototypes in other files to work..
       my $module_env = $self->_extract_module_prototypes($module);
       if ($module_env) {
-        $self->_merge_module_prototypes($module_env, \@imports);
+        $self->_merge_module_prototypes($module_env, \@imports, $module);
         # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
         $self->_merge_bare_quote_imports($stmt, $module_env, scalar @imports);
       }
@@ -9419,7 +9582,7 @@ sub _walk_file_prototypes {
 
 # Merge prototypes from another environment (only exported ones)
 sub _merge_module_prototypes {
-  my ($self, $module_env, $imports) = @_;
+  my ($self, $module_env, $imports, $module) = @_;
 
   # A merged prototype is tagged from_module, and a merge never overwrites
   # a LOCAL declaration (an untagged entry).  Under v2, sub definitions are
@@ -9434,6 +9597,45 @@ sub _merge_module_prototypes {
     return if $existing && !$existing->{from_module};
     $self->environment->add_prototype($name, { %$proto, from_module => 1 });
   };
+
+  # A module's subs are in its STASH whatever the import list says, so perl
+  # parses a package-QUALIFIED call site — `Test2::API::context_do { … }`,
+  # `List::Util::first { … } @$self` — with the declared prototype even when
+  # the name was never imported (6 census drops).  Register the module env's
+  # prototype facts under the MODULE's package, per-package ONLY: the flat
+  # table is what unqualified call sites read, and those must keep resolving
+  # exactly as before.  Two sources, both of which ProtoCache serializes (a
+  # declared-subs pass was tried first and read empty on every L2 cache
+  # hit — declared_subs is not in the record):
+  #   (1) the module env's flat table, minus the builtin seed rows it was
+  #       born with — what the module's own file declared or imported (an
+  #       IMPORTED sub is in the importing module's stash too, so
+  #       registering it under $module matches perl);
+  #   (2) the per-package facts the module env accumulated from ITS own
+  #       `use`s through this very pass — so a transitively loaded module's
+  #       qualified spelling resolves here as it does in perl ('main'-owned
+  #       rows are the facts walk's package-blind self-registrations, which
+  #       (1) already covers under the module's real name).
+  # $module is undef for a path-required FILE, which has no package name to
+  # own its subs — the pass is skipped.
+  if (defined $module) {
+    my $builtins = Pl::Environment::_builtin_prototypes();
+    for my $name (keys %{ $module_env->prototypes }) {
+      next if exists $builtins->{$name};
+      my $proto = $module_env->prototypes->{$name} or next;
+      $self->environment->add_pkg_prototype($name, { %$proto, from_module => 1 },
+                                            $module);
+    }
+    for my $bare (keys %{ $module_env->pkg_prototypes }) {
+      my $per = $module_env->pkg_prototypes->{$bare};
+      for my $pkg (keys %$per) {
+        next if $pkg eq 'main' || !$per->{$pkg};
+        $self->environment->add_pkg_prototype($bare,
+                                              { %{ $per->{$pkg} }, from_module => 1 },
+                                              $pkg);
+      }
+    }
+  }
 
   # If specific imports requested, only import those
   if ($imports && @$imports) {

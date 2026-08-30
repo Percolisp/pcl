@@ -473,12 +473,40 @@ sub _proto_entry {
     my ($self, $name) = @_;
     my $bare = _bare_sub_name($name);
     my $per  = $self->pkg_prototypes->{$bare};
+    my $q    = (defined $name && $name =~ /\A(.+)::[^:]+\z/) ? $1 : undef;
+    # A QUALIFIED spelling asks its own package FIRST: a module sub reached
+    # only by qualified calls (`Test2::API::context_do { … }`) is in no
+    # import list, so the flat table has never heard of it — its record
+    # arrives through add_pkg_prototype and lives in the per-package table
+    # alone.  (With a single add_prototype-written key the two tables hold
+    # the same entry, so answering per-package here changes nothing else.)
+    return $per->{$q} if defined $q && $per && exists $per->{$q};
     return $self->prototypes->{$bare} if !$per || keys(%$per) < 2;
-    my $pkg = (defined $name && $name =~ /\A(.+)::[^:]+\z/)
-            ? $1
-            : ($self->current_package // 'main');
+    my $pkg = $q // ($self->current_package // 'main');
     return $per->{$pkg} if exists $per->{$pkg};
     return $self->prototypes->{$bare};
+}
+
+=head2 add_pkg_prototype($name, $sig_info, $package)
+
+Register a prototype under its DECLARING package ONLY — the per-package
+table, never the flat one.  This is the record a package-QUALIFIED call site
+resolves; the flat table is what unqualified call sites read, and a fact
+that arrived without an import must not change those.  Consumer:
+C<_merge_module_prototypes>'s declared-subs pass (a module's subs are in its
+stash whatever the import list says, so perl parses C<Module::name { … }>
+with the declared prototype).  A local untagged declaration for the same
+package is never overwritten — the same rule the merge applies to the flat
+table.
+
+=cut
+
+sub add_pkg_prototype {
+    my ($self, $name, $sig_info, $package) = @_;
+    my $bare = _bare_sub_name($name);
+    my $existing = $self->pkg_prototypes->{$bare}{$package};
+    return if $existing && !$existing->{from_module};
+    $self->pkg_prototypes->{$bare}{$package} = $sig_info;
 }
 
 =head2 has_prototype($name)

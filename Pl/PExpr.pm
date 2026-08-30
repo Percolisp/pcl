@@ -4007,34 +4007,14 @@ sub handle_subcalls {
     # arguments then swallow the operator that should end them (#343;
     # docs/b2-stale-operand-ceiling-s417.md has the trace and the
     # population scan, docs/b2-ceiling-fix-s418.md the equivalence argument).
-    my $end_pars= scalar(@$e)-1;
-    for (my $j = $i + 1; $j <= $end_pars; $j++) {
-      my $jop = $self->is_token_operator($e->[$j]) // '';
-      if ($jop eq 'and' || $jop eq 'or' || $jop eq 'xor') {
-        $end_pars = $j - 1;
-        last;
-      }
-    }
-
-    # A ternary ':' that closes an ENCLOSING ternary terminates this list
-    # operator's argument list: `cond ? join "-", @a : $fb` must parse as
-    # `cond ? (join "-", @a) : $fb`, not let join swallow `: $fb` (which then
-    # orphans the colon and the whole expression falls through).  Walk the arg
-    # region tracking ternary depth so a NESTED ternary's own ':' (whose '?' is
-    # inside the args, e.g. `join "-", $c ? @a : @b`) is NOT treated as a
-    # boundary and stays part of the args.
-    {
-      my $tern_depth = 0;
-      for (my $j = $i + 1; $j <= $end_pars; $j++) {
-        my $jop = $self->is_token_operator($e->[$j]) // '';
-        if ($jop eq '?') {
-          $tern_depth++;
-        } elsif ($jop eq ':') {
-          if ($tern_depth == 0) { $end_pars = $j - 1; last; }
-          $tern_depth--;
-        }
-      }
-    }
+    # …and before a ':' that closes an ENCLOSING ternary: `cond ? join "-",
+    # @a : $fb` must parse as `cond ? (join "-", @a) : $fb`, not let join
+    # swallow `: $fb` (which then orphans the colon and the whole expression
+    # falls through).  A NESTED ternary's own ':' (whose '?' is inside the
+    # args, e.g. `join "-", $c ? @a : @b`) stays part of the args.  ONE
+    # helper carries both rules — the block-form path (_take_rest_as_args)
+    # is its other consumer.
+    my $end_pars = $self->_listop_arg_ceiling($e, $i + 1, scalar(@$e) - 1);
 
     # Named unary operators only take the next single term
     # But Cast + Symbol (like @$list) counts as one term
@@ -5975,16 +5955,54 @@ sub _reduce_pre {
 sub _take_rest_as_args {
   my ($self, $e, $i, $top_id, $top_node) = @_;
   if ($i + 2 < scalar(@$e)) {
-    my @rest = @$e[$i + 2 .. $#$e];
+    # The argument run of a paren-less list operator (block-form grep/map/
+    # sort, a (&@)-prototype sub, `sort NAME LIST`) ends where every other
+    # paren-less list operator's does: before a same-level and/or/xor
+    # (`grep { $_ > 1 } (1,2,3) or print` — the `or` is the STATEMENT's,
+    # perl-probed; this copy used to swallow it, a silent wrong) and before
+    # a ':' that closes an ENCLOSING ternary (`$c ? grep { … } @a : ()` —
+    # swallowing `: ()` orphaned the colon and dropped the statement).
+    # Same rule, same helper, as the operator-loop list-op path.
+    my $end = $self->_listop_arg_ceiling($e, $i + 2, $#$e);
+    my @rest = @$e[$i + 2 .. $end];
     my $rest_list = $self->cleanup_for_parsing(\@rest);
     my $rest_ids  = $self->parse_list($rest_list);   # usually one element
     $self->add_child_to_node($top_id, $_) for @$rest_ids;
-    splice @$e, $i, scalar(@$e) - $i;
-    $e->[$i] = $top_node;
+    splice @$e, $i, $end - $i + 1, $top_node;
   } else {
     splice @$e, $i, 2, $top_node;
   }
   return;
+}
+
+# THE argument ceiling of a paren-less list operator, over $e->[$from..$end]
+# (task #343's boundary, both spellings, one copy):
+#   * the run ends before the first same-level and/or/xor — perlop: those are
+#     the only operators looser than the list operator's own comma;
+#   * and before the first same-level ':' whose '?' is NOT within the run —
+#     that ':' closes an ENCLOSING ternary, so it is the ternary's, never an
+#     argument.  A nested ternary wholly inside the span keeps its ':' (the
+#     depth count pairs it with its own '?').
+# Returns the last argument index.  Consumers: the operator-loop list-op
+# path and _take_rest_as_args (block-form grep/map/sort, (&@)-prototype
+# subs, sort NAME/$scalar LIST).
+sub _listop_arg_ceiling {
+  my ($self, $e, $from, $end) = @_;
+  my $tern_depth = 0;
+  for (my $j = $from; $j <= $end; $j++) {
+    my $jop = $self->is_token_operator($e->[$j]) // '';
+    if ($jop eq 'and' || $jop eq 'or' || $jop eq 'xor') {
+      return $j - 1;
+    }
+    elsif ($jop eq '?') {
+      $tern_depth++;
+    }
+    elsif ($jop eq ':') {
+      return $j - 1 if $tern_depth == 0;
+      $tern_depth--;
+    }
+  }
+  return $end;
 }
 
 

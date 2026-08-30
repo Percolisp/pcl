@@ -1002,13 +1002,13 @@ sub _premerge_include_prototypes {
       next if $module =~ $skip;
       my $menv = $fp->_extract_module_prototypes($module) or next;
       my @imports = $fp->_parse_use_import_list($inc);
-      $fp->_merge_module_prototypes($menv, \@imports);
+      $fp->_merge_module_prototypes($menv, \@imports, $module);
       # #733: `use M 'name';` with no parens — see _merge_bare_quote_imports.
       $fp->_merge_bare_quote_imports($inc, $menv, scalar @imports);
     } elsif ($type eq 'require') {
       if (my $module = $inc->module) {
         my $menv = $fp->_extract_module_prototypes($module) or next;
-        $fp->_merge_module_prototypes($menv, undef);
+        $fp->_merge_module_prototypes($menv, undef, $module);
         next;
       }
       my ($q) = grep { $_->isa('PPI::Token::Quote') } $inc->schildren;
@@ -1762,6 +1762,32 @@ sub parse {
           # fact into an `arg-to-writer` boxing event at the call sites).
           writes_args => $self->_sub_writes_args($sub),
         };
+      }
+    }
+  }
+
+  # BEGIN-time code assignment to a typeglob declares the glob's name with
+  # the assigned code's prototype — `BEGIN { *try = \&_manual_try; }` makes
+  # `try` a `(&;@)` block-form call for every later statement, exactly as
+  # `sub try (&;@)` would (Test2::Util's shape; Pl::Parser::
+  # glob_sub_alias_fact has the family).  Within the SAME file only a BEGIN
+  # block's assignment is a compile-time fact (a plain file-scope one runs
+  # after the whole file is compiled), so the scan takes Scheduled BEGINs
+  # only; resolution runs after the sub pre-scan above so a target declared
+  # anywhere in the file answers.
+  for my $seg (@segments) {
+    $self->_set_cur_package($seg->{pkg});
+    for my $child (@{ $seg->{stmts} }) {
+      my @scheds = ($child->isa('PPI::Statement::Scheduled') ? ($child) : (),
+                    @{ $child->find('PPI::Statement::Scheduled') || [] });
+      for my $s (@scheds) {
+        next unless ($s->type // '') eq 'BEGIN' && $s->block;
+        for my $fact (Pl::Parser::glob_sub_alias_stmts($s->block)) {
+          my $fp   = $self->fallback_parser;
+          my $info = $fp->_glob_alias_sig_info($fact) or next;
+          $fp->_register_sub_prototype($fact->{stmt}, $fact->{name}, $info,
+                                       'glob-alias', 0);
+        }
       }
     }
   }

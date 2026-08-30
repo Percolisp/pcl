@@ -94,10 +94,10 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 34 files, 88 drops (recounted from the rows,
-# s448o -- this line still read the pre-s446k "73 files, 167 drops", which that
-# session's own edit note had already superseded; the ROWS are the authority
-# and the sum is what the runner compares against).  The s440-era split was 4
+# TOTAL after the edits below: 27 files, 77 drops (recounted from the rows,
+# s454ae; the pre-session recount was 34 / 90 -- the s448o "34 / 88" line had
+# gone stale when s451 edited the Mojo _Collection.pm count 2 -> 4; the ROWS
+# are the authority and the sum is what the runner compares against).  The s440-era split was 4
 # perl-tests files (5
 # drops), 20 companion files (70), 6 cpan-tests modules (7), 42 cpan-tests
 # dist test files (83), 1 board module (2), ZERO in lib/.  (s440 merge of agents
@@ -116,6 +116,43 @@
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
+#   s454ae SEVEN rows REMOVED and ONE reduced, THIRTEEN drops (34/90 -> 27/77),
+#         by two mechanisms, both verified by re-running the harvest over the
+#         cpan+board rows after each change (gate NOT yet run -- stop-order
+#         session; the merging session must run the full bar):
+#         (1) CODE ASSIGNED TO A TYPEGLOB IS A SUB DECLARATION, prototype
+#         included: `BEGIN { *try = \&_manual_try }` (Test2::Util's shape)
+#         now registers `try (&;@)` -- Pl::Parser::glob_sub_alias_fact /
+#         glob_sub_alias_stmts / _glob_alias_sig_info, consumed by the module
+#         facts walk (collect_prototypes: every load-time assignment) and by
+#         Parser2's pre-scan (BEGIN blocks only -- within the same file only a
+#         BEGIN-time assignment is a compile-time fact).  Clears Context.pm 1,
+#         Instance.pm 2, IPC/Driver/Files.pm 1, Tools/Tiny.pm 1,
+#         IPC/Driver/Files.t 1; with the ceiling half below, Util.pm 1
+#         (`HAVE_PERLIO ? grep {...} ... : ()` -- the BEGIN-aliased
+#         `sub() {1}` makes HAVE_PERLIO a zero-arg term).  Probes p2/p3/p4
+#         vs perl in the session log.
+#         (1b) THE BLOCK-FORM ARGUMENT RUN GETS THE SAME CEILING as every
+#         other paren-less list operator: _take_rest_as_args used to consume
+#         to END OF STREAM, so `$c ? grep { ... } @a : ()` swallowed the
+#         `: ()` (orphaned colon, statement dropped) and `grep { ... } @a
+#         or EXPR` swallowed the `or` (a SILENT WRONG, probed:
+#         `my $r = grep { $_ > 1 } (1,2,3) or print` gave r=1 where perl
+#         says r=2).  ONE shared helper _listop_arg_ceiling (and/or/xor +
+#         enclosing-ternary ':') now serves the operator-loop path AND
+#         _take_rest_as_args (rule 11).
+#         (2) A module's subs are in its STASH whatever the import list says:
+#         _merge_module_prototypes registers the module env's prototype facts
+#         under the MODULE's package (Environment::add_pkg_prototype,
+#         per-package table ONLY -- flat/unqualified resolution unchanged),
+#         and _proto_entry answers a QUALIFIED spelling from the per-package
+#         table first.  Clears API.t 4 (`Test2::API::context_do { ... }`,
+#         `Test2::API::no_context { ... }` -- context_do was never imported)
+#         and Mojo _Collection.pm 4 -> 2 (`List::Util::first { ... } @$self`;
+#         the module also declares its OWN `first`, which is why the flat
+#         table could never answer).  The 2 that stay are the
+#         `local (*{"${caller}::a"}, ...)` family -- a LOUD Parser2 TODO
+#         (#564's neighborhood), message refreshed in the row.
 #   s448o -1 drop (task #562, the residue s446k left): t/re/pat.t 3 -> 2, so
 #         the file total goes 34 rows / 89 drops -> 34 / 88 (the row stays, it
 #         keeps two).  `*^R = *caretRglobwithnoscalar;` (pat.t:1715) is not the
@@ -606,17 +643,10 @@
 #         a loud failure for a silent one is the wrong direction.  That one is
 #         not a census row at all today -- the `local` fall-through swallows it
 #         without a `;; PARSE ERROR`, which is exactly what #564 is about.
-board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	4	Bug. Fell through. Missing case: [ x2
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Context.pm	1	Handle single node of unknown type. Dump: x1
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/Instance.pm	2	Handle single node of unknown type. Dump: x2
+board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Parser2 TODO: unsupported `local` target: *{"${caller}::a"} x2
 cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	1	Can't call method "content" on an undefined value x1
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/IPC/Driver/Files.pm	1	Handle single node of unknown type. Dump: x1
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Tools/Tiny.pm	1	Bug. Fell through. Missing case: [ x1
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/Util.pm	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Regression/637.t	1	WTF? :-) Expr starts with ->/brace?? x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API.t	4	Bug. Fell through. Missing case: [ x4
 cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/InterceptResult.t	2	Can't call method "content" on an undefined value x1 | WTF? :-) Expr starts with ->/brace?? x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/IPC/Driver/Files.t	1	Bug. Fell through. Missing case: [ x1
 cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t	2	PExpr: unhandled postfix '->' term in cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t: term=bless( { x2
 cpan-tests/modules/Text-CSV-2.04/t/78_fragment.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
