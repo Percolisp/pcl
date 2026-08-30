@@ -284,13 +284,19 @@ more.  Fable reviews at each phase boundary (the round pattern).
    policy.  Either give Passes.pm a runtime-consulted kind, or key it on an
    emission difference (emit `p-aset-raw` vs `p-aset` — cleaner, bigger
    diff).  Decide in phase 0.
-3. **Hash `values` in LIST-copy positions** (`my @v = values %h`) copies in
-   perl (no aliasing) — only the foreach/alias positions alias.  The list
-   builder needs the position fact; verify the existing `%p-flatten-for-list`
-   vs list-assign split already distinguishes them (it should — same split
-   as @a).
-4. Does any XS/pclxs path hand out element boxes assuming boxed slots?
-   (xs-magic family — check `xs-ref-target` before phase 3.)
+3. ~~Hash `values` in LIST-copy positions~~ **RESOLVED (probed, C4)**:
+   `my @v = values %h` and `my ($first) = values %h` COPY in perl AND in
+   PCL today (`copy=1 lst=2` both sides) — the position split already
+   exists and is correct; only the foreach-alias position is broken
+   (#817).  Phase 2 touches the alias position only.
+4. ~~XS element-box assumptions~~ **RESOLVED (code-read, C4)**:
+   `xs-av-fetch` (cl/pcl-xs.lisp:679) **already promotes a raw slot in
+   place** — `(unless (p-box-p elem) (setf elem (make-p-box …) (aref a i)
+   elem))`, comment "the ELEMENT BOX, not its value: that is what makes an
+   lvalue fetch write through (rule O3)".  The XS bridge is raw-ready; no
+   phase-3 blocker.  This is the THIRD live copy of the promotion arm in
+   the tree (argbox, defelem-vivify, xs-av-fetch) — the design
+   consolidates an existing idiom, it does not invent one.
 
 ## CHECKPOINT LOG (continued)
 
@@ -302,6 +308,18 @@ more.  Fable reviews at each phase boundary (the round pattern).
   catalogue), §6 the four-phase plan with zero-change bars for phases 0–2,
   §7 the four open questions (sort-write policy needs a USER ruling; the
   runtime-gate shape; values-copy positions; xs element-box assumptions).
+- **C3:** the probe battery found #817/#818 (values/slice foreach aliasing
+  ALREADY broken on the fully-boxed tree — the intermediate-list builders
+  copy); #816 filed as the design task; DECIDED §s455d + plan-post-s433
+  §3b pointers landed.
+- **C4 (design COMPLETE except two rulings):** §7 Q3+Q4 RESOLVED by
+  probe/code-read — the values copy/alias position split is already
+  correct, and the XS bridge already promotes raw slots (`xs-av-fetch`,
+  the THIRD live copy of the promotion arm).  Remaining before phase 0
+  closes: Q1 (sort-comparator write policy — USER ruling; recommendation
+  in §7) and Q2 (runtime-gate vs emission-keyed gate — the implementing
+  session decides with a measurement).  The design is otherwise ready to
+  hand to an Opus session for phases 0–2.
 
 ## CHECKPOINT LOG
 
