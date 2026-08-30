@@ -89,14 +89,21 @@ my $x = PI;',
                 '(p-my-= $x (p-scalar-ctx (pl-PI)))',
                 'Constant in assignment');
 
+# These two used to spell the write `p-my-=` into a boxed slot.  Since #759
+# (Kind-A `raw-op-family`, s456af) the ARITH ROOT proves the stored value is a
+# raw CL number whatever its operands are, so the declaration takes the raw
+# let-init instead — a strictly stronger assertion, because it pins the
+# constant's lowering AND the operand tree AND the slot's representation.
+# What these rows are really about is unchanged and still asserted: a constant
+# use compiles to a scalar-context call of the constant sub.
 output_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
-                '(p-my-= $area (p-* (p-* (p-scalar-ctx (pl-PI)) $r) $r))',
+                '(let (($area (p-* (p-* (p-scalar-ctx (pl-PI)) $r) $r))))',
                 'Constant in arithmetic');
 
 output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
-                '(p-my-= $size (p-* (p-scalar-ctx (pl-WIDTH)) (p-scalar-ctx (pl-HEIGHT))))',
+                '(let (($size (p-* (p-scalar-ctx (pl-WIDTH)) (p-scalar-ctx (pl-HEIGHT))))))',
                 'Multiple constants in expression');
 
 

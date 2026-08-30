@@ -717,9 +717,17 @@ EOF
   my $us = Pl::Parser2->parse_code(q[for (1..3) { print $_ }]);
   like($us, qr/\(p-foreach-range \(\$_ 1 3\)/,
        '$_ range foreach counting-loops but stays boxed');
+  # Until #760 (s456af) a closure CAPTURING the loop var forced the boxed
+  # variant, categorically.  It no longer does: a CL closure captures the
+  # `let` BINDING, and %expand-foreach-range wraps every iteration in its own
+  # `(let ((var val)) …)` in the RAW arm as well as the boxed one, so each
+  # closure still gets a distinct binding.  The property that made this row
+  # exist is the one asserted now — and its BEHAVIOUR half (perl and PCL both
+  # print 10,20,30) is a row in Pl/t/raw-verdict-coverage-01.t.  A capture
+  # PLUS a real boxing event still boxes: that is the next row, `\$i`.
   my $cap = Pl::Parser2->parse_code(q[my @s; for my $i (1..3) { push @s, sub { $i } }]);
-  like($cap, qr/\(p-foreach-range \(\$i 1 3\)/,
-       'closure-captured range var stays boxed variant');
+  like($cap, qr/\(p-foreach-range-raw \(\$i 1 3\)/,
+       'read-only closure capture no longer forces the boxed range var (#760)');
   my $ref = Pl::Parser2->parse_code(q[for my $i (1..3) { my $r = \$i }]);
   like($ref, qr/\(p-foreach-range \(\$i 1 3\)/,
        '\\$i in body keeps boxed variant');

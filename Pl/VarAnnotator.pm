@@ -200,6 +200,13 @@ sub analyze {
 # Text annotator (s272 prototype) — kept verbatim during bring-up.
 # ==========================================================================
 
+# The ONE list of "what makes a name need a box", published for the callers
+# outside this file that ask the same question of a source RUN rather than of
+# a region: Parser2's #761 topic gate (is anything in this loop body a write /
+# ref / local / alias of `$_`?) and #760's closure-body event test above.
+# Same convention as foreach_range_split / raw_compound_macro / arg_writing_builtin.
+sub text_gate_tags { return _text_gate_tags(@_) }
+
 # Step-3 per-name gates, shared with the tree annotator's parse-failure
 # fallback.  Returns the tags of every firing gate ('' text → none).
 sub _text_gate_tags {

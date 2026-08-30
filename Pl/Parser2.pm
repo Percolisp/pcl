@@ -9748,6 +9748,22 @@ sub _lower_compound {
       # global must stay a box (s///, chomp write through it).
       $range_raw = 1
         if defined $to_form && $var && $vi->{$name} && $vi->{$name}{unboxable};
+      # #761 (Kind-A `raw-topic`): the TOPIC loop `for (A..B) {…}` has no
+      # declaration, so it never had a $vi verdict to consult and always took
+      # the boxed arm — a fresh `make-p-box` per iteration.  MEASURED (the §9
+      # variant recipe, 5M iterations against the runtime core): the box
+      # ALLOCATION is essentially the whole tax — special-bind + fresh box
+      # 0.168 s, special-bind + RAW value 0.016 s, plain lexical + raw
+      # 0.015 s.  So `$_` keeps its NAME and its dynamic binding (a callee
+      # that reaches the global still sees the current element) and only the
+      # VALUE goes raw; no rename, no new macro — %expand-foreach-range's raw
+      # arm already applies, because `%p-cell-loop-var-p` answers NIL for the
+      # exception-set specials.  Reading a raw value is always safe (every
+      # p-op coerces), so the gate only has to prove nothing WRITES THROUGH
+      # the box, aliases it, or hands it to code this compiler cannot see.
+      $range_raw = 1
+        if defined $to_form && !$var
+        && Pl::Passes::enabled('raw-topic') && _topic_raw_ok($block);
     }
     my $list_form;
     unless (defined $to_form) {
@@ -9859,6 +9875,78 @@ sub _lower_compound {
 # loop var aliases nothing (→ raw-slot candidate), so there is exactly one
 # definition of "the list is one range".
 sub _foreach_range_split { Pl::VarAnnotator::foreach_range_split(@_) }
+
+# #761: the constructs a raw-topic loop body may contain.  Deliberately a
+# SHORT ALLOWLIST rather than a denylist — the question "can this reach code
+# that writes through $_'s box" has no safe negative answer over an open set,
+# and a rejected body only loses an optimization.  Everything here is either a
+# keyword that calls nothing, or a builtin that reads its operand and returns
+# a value.  `sort`/`map`/`grep`/`sub` are absent on purpose (they run a block,
+# and sort rebinds $a/$b); so is every I/O word (a `""` overload handler is
+# user code); so is `shift` (it reads @_, and in a sub body that is caller
+# state).  A Word that is a hash KEY or a fat-comma LHS is not a call and is
+# allowed by position, not by name.
+my %TOPIC_RAW_WORD = map { $_ => 1 } qw(
+  my our if elsif else unless while until for foreach last next redo return
+  and or not xor eq ne lt gt le ge cmp x
+  abs int sqrt hex oct ord chr length uc lc ucfirst lcfirst
+  scalar defined exists delete keys values ref reverse push
+  sprintf join index rindex sin cos atan2 exp log
+);
+# NOT on the list, and each for a reason worth keeping written down:
+#   substr  — 4-arg substr($_,0,1,"x") writes THROUGH its first argument, and
+#             the lvalue spelling only sometimes trips the write-list gate
+#   shift/pop — harmless to $_, but they read @_ / an array the body may also
+#             be iterating; left out until something measures a need
+#   print/say/warn/sprintf-to-a-handle — stringifying an operand can enter a
+#             `""` overload handler, which is user code
+#   sort/map/grep/sub — they run a BLOCK (and sort rebinds $a/$b)
+#   do — `do BLOCK` would be fine, `do FILE` runs a file
+
+# True when `for (A..B) BLOCK` may bind $_ to the RAW counter (task #761).
+#
+# RESIDUE, written down rather than guessed at: user code can still be reached
+# from a body this returns 1 for, by a route with no token to see — an
+# operator that finds an `overload` handler on a blessed operand, a tied
+# variable's FETCH, a DESTROY at collection.  Such a handler would have to
+# reach the GLOBAL $_ and write through its box to notice the difference,
+# since every read coerces.  Nothing in the four corpora does; if something
+# ever does, `PCL_OPT=-raw-topic` is the switch and the fix is to demand a
+# `use overload`-free file the way the B-regime freeze already does.
+sub _topic_raw_ok {
+  my ($block) = @_;
+  # The shared per-name gate list is the write/alias half: `$_ = …`, `\$_`,
+  # `$_++`, `$_ .= …`, `$_ =~ …`, `local $_`, `chomp $_`, `tie $_`, a nested
+  # `for $_ (…)`.  Text-shaped, so it over-fires — the safe direction.
+  return 0 if Pl::VarAnnotator::text_gate_tags('$_', $block->content, 1);
+  for my $t ($block->tokens) {
+    # ANY regex construct: a bare `//`, `s///` or `tr///` acts on $_ with no
+    # `=~` for the gate above to see, and two of those three WRITE it.
+    return 0 if $t->isa('PPI::Token::Regexp')
+             || $t->isa('PPI::Token::QuoteLike::Regexp');
+    # A CODE-REF call carries no Word for the name check below to catch:
+    # `$c->(…)` is an Operator `->` whose next sibling is a List (a `->`
+    # before a SUBSCRIPT is an ordinary deref and stays allowed), and
+    # `&$c(…)` / `&{$c}(…)` are an `&` Cast.  Found by corpus-diff, not by
+    # reasoning: perl-tests/closure.t calls `$foo[$_]->(4 - $_)` inside a
+    # topic loop, and the callee may read the global $_.
+    if ($t->isa('PPI::Token::Operator') && $t->content eq '->') {
+      my $nx = $t->snext_sibling;
+      return 0 if $nx && $nx->isa('PPI::Structure::List');
+      next;
+    }
+    return 0 if $t->isa('PPI::Token::Cast') && $t->content eq '&';
+    next unless $t->isa('PPI::Token::Word');
+    next if $TOPIC_RAW_WORD{ $t->content };
+    my $par = $t->parent;
+    next if $par && $par->isa('PPI::Structure::Subscript');   # $h{key}
+    my $nx = $t->snext_sibling;
+    next if $nx && $nx->isa('PPI::Token::Operator')
+         && $nx->content eq '=>';                             # key => …
+    return 0;             # may be a call into code this compiler cannot see
+  }
+  return 1;
+}
 
 # Rewrite a lowered foreach-list element's call head FROM → TO (its box-
 # returning form) so the loop var aliases the live container slot.  The two

@@ -8678,9 +8678,10 @@ A package-global loop var is localized over its cell (%p-cell-loop-var-p);
 (defun %expand-foreach-range (rawp var from to body-and-keys env)
   "Shared expander for p-foreach-range / p-foreach-range-raw.  RAWP selects the
 loop-var binding: NIL binds a fresh box per iteration (like p-foreach's
-ensure-boxed — required for $_ and any var the annotator could not prove
-unboxable), T binds the raw counter value (annotator-approved named vars; the
-string-range fallback vector holds raw strings, also fine in a raw slot).
+ensure-boxed — for any var the compiler could not prove unboxable), T binds the
+raw counter value (annotator-approved named vars, and since #761 a $_ whose
+body passed Parser2's _topic_raw_ok; the string-range fallback vector holds raw
+strings, also fine in a raw slot).
 A package-global loop var (%p-cell-loop-var-p, overridden by :my) is localized
 over its cell instead of let-bound, and is ALWAYS boxed: the cell's contract is
 that it holds a box, and a raw integer parked there would be read as one by
@@ -8742,8 +8743,13 @@ body appears ONCE — only the per-iteration value source branches on the vec."
 
 (defmacro p-foreach-range-raw ((var from to) &rest body-and-keys &environment env)
   "p-foreach-range with a RAW loop-var binding (no per-iteration box).  Emitted
-only when the VarAnnotator proves the body never captures/aliases the var —
-and never for $_, which must stay a box (s///, chomp write through it)."
+only when the compiler proves the body never captures/aliases the var: for a
+NAMED var that is the VarAnnotator's unboxable verdict; for $_ it is Parser2's
+_topic_raw_ok, which allows the raw value only when nothing in the body can
+write through the box (no s///, no chomp, no `$_ =`, no call into code the
+compiler cannot see — task #761).  $_ keeps its NAME and its dynamic binding
+either way, so a callee that reaches the global still sees the current element;
+what changes is that the element is the raw counter rather than a fresh box."
   (%expand-foreach-range t var from to body-and-keys env))
 
 (defun p-return-value (val)
@@ -13453,7 +13459,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-420"
+(defparameter *pcl-cache-generation* "v2-430"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

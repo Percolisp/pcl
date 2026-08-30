@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-420
+;;; pcl: pipeline=v2 gen=v2-430
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -930,12 +930,10 @@
                                                                       (p-void-ctx
                                                                         (let
                                                                           (($c
-                                                                              (make-p-box nil)))
-                                                                          (p-my-= $c
-                                                                            (p-+ 32
-                                                                              (p-bit-and
-                                                                                (p-aref @_ 0)
-                                                                                63)))
+                                                                              (p-+ 32
+                                                                                (p-bit-and
+                                                                                  (p-aref @_ 0)
+                                                                                  63))))
                                                                           (p-caller-ctx
                                                                             (p-if (p-== $c 32)
                                                                               96
@@ -1546,11 +1544,7 @@
                                               0
                                               (p-* (p-int (p-/ $cur $n)) $n))))))
                                     (progn
-                                      (let
-                                        (($fp
-                                            (%pcl-to-number-strict
-                                              (p-- (p-length (p-cast-$ $result_ref)) $nrep)
-                                              "$fp")))
+                                      (let (($fp (p-- (p-length (p-cast-$ $result_ref)) $nrep)))
                                         (p-setf (p-cast-$ $result_ref)
                                           (p-substr (p-cast-$ $result_ref)
                                             0
@@ -1980,8 +1974,7 @@
           ($checksum_p (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $ch $nrep $all $s $si_ref $push_val $checksum_p) @_))
         (p-void-ctx
-          (let (($slen (make-p-box nil)))
-            (p-my-= $slen (p-length $s))
+          (let (($slen (%pcl-to-number-strict (p-length $s) "$slen")))
             (let ((--pcl-if-ret--2 nil))
               (p-if
                 (setf --pcl-if-ret--2
@@ -2187,10 +2180,8 @@
                                                         (p-void-ctx
                                                           (let
                                                             (($i
-                                                                (%pcl-to-number-strict
-                                                                  (p-+ (p-cast-$ $si_ref)
-                                                                    (p-aref @_ 0))
-                                                                  "$i")))
+                                                                (p-+ (p-cast-$ $si_ref)
+                                                                  (p-aref @_ 0))))
                                                             (p-caller-ctx
                                                               (p-if (p-< $i $slen)
                                                                 (p-bit-and
