@@ -21,6 +21,34 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s454ad (2026-08-30, Opus round 12, agent AD) — #755 literal filenames (ONE pathname seam), #732 `use subs` builtin displacement
+
+- **A perl filename is a LITERAL byte string, and the runtime's ONE
+  filename→pathname seam is `%p-literal-path`
+  (sb-ext:parse-native-namestring — no wildcard/escape parsing; #755)** —
+  every consumer that hands a user filename to a CL pathname function
+  routes through it; sb-posix sites pass strings to C untouched and need
+  none; **p-glob is the one deliberate non-consumer** (wildcard expansion
+  is its job).  A new file-touching runtime path must use the seam or a
+  name containing `* ? [ \` dies/misfiles.  Siblings fixed with it:
+  p-unlink = unlink(2) (dangling symlink removed, directory = 0/EISDIR,
+  never a crash), p-rename = rename(2) (relative NEW is cwd-relative,
+  replaces existing, sets $!).  Guard `Pl/t/wild-filename-01.t`.
+- **A user sub displaces a core builtin ONLY after a `use subs`/import
+  predeclaration, ONLY for a WEAK keyword, and `CORE::NAME` names the
+  builtin UNCONDITIONALLY (#732)** — the overridable set is the sign of
+  perl's keyword code (`regen/keywords.pl`'s '-' half →
+  `Pl::Environment::builtin_is_overridable`); `prototype("CORE::NAME")`
+  is NOT the discriminator (`system` undef yet overridable, probed).  The
+  emission seam is `gen_funcall_form`'s lookup before `cl_name`
+  (overridable + `builtin_is_overridden`, position-aware); PExpr's
+  CORE::-strip leaves the `_core_qualified` marker (in @PPI_ADHOC_KEYS)
+  to suppress the lookup.  Guard `Pl/t/use-subs-override-01.t`.  Residue
+  #781: the paren-less operand EXTENT still parses as the builtin's.
+- Filed #780 (unlink/chmod/utime/kill @array unflattened), #781, #782
+  (`-f 'TEST';` void statement = negated call to sub f — op/filetest.t's
+  remaining aborted form).
+
 ## s453 (2026-08-30, Fable) — PLANNING ONLY (USER): single-binary plan, unsupported-diagnostics survey, JS-target plan
 
 - **Single standalone binary: THE PLAN IS `docs/single-binary-plan.md`

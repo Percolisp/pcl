@@ -2829,11 +2829,15 @@ sub handle_subcalls {
   say "---- handle_subcalls. Incoming expr:\n", _dd($e)     if 8 & DEBUG;
 
   # - - - Pre-pass: normalize CORE::<builtin> to the bare builtin name.
-  # `CORE::foo` explicitly names Perl's builtin (bypassing any override).  PCL
-  # has no overridable builtins, so CORE::foo == foo.  Rewriting the token here
-  # makes ALL downstream logic — named-unary detection, param specs, funcall
-  # recognition — treat it as the builtin (codegen already maps both to p-foo).
+  # `CORE::foo` explicitly names Perl's builtin (bypassing any override).
+  # Rewriting the token here makes ALL downstream logic — named-unary
+  # detection, param specs, funcall recognition — treat it as the builtin.
   # Without this, `CORE::ref $x` / `CORE::shift` (no parens) parse as barewords.
+  # Since #703 builtins ARE overridable (`use subs`), so the stripped token
+  # keeps a MARKER: _core_qualified tells the emission's override lookup
+  # (gen_funcall_form, #732) that this spelling names the builtin
+  # UNCONDITIONALLY — deleting the prefix outright would hand CORE::length to
+  # the same `use subs` lookup the bare spelling gets.
   for my $tok (@$e) {
     next unless ref($tok) eq 'PPI::Token::Word';
     my $c = $tok->content();
@@ -2841,6 +2845,7 @@ sub handle_subcalls {
         && (exists $self->known_no_of_params->{$1}
             || $1 =~ /^(?:my|our|state|local)$/)) {
       $tok->set_content($1);
+      $tok->{_core_qualified} = 1;
     }
   }
 

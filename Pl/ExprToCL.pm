@@ -1843,7 +1843,31 @@ sub gen_funcall_form {
     return ['pcl::%pcl-super-indirect', "\"$method\"", "\"$cur_pkg\"", 'nil'];
   }
 
-  my $cl_func = $self->cl_name($func_name, 1, $node->{force_user_sub} ? 1 : 0);
+  my $force_user = $node->{force_user_sub} ? 1 : 0;
+
+  # A name with a builtin form asks the `use subs` registry (#732): perl lets
+  # a user sub displace a core builtin ONLY after a compile-time
+  # predeclaration (`use subs`/an import) and only for a WEAK keyword —
+  # Perl_keyword()'s negative half, Environment::builtin_is_overridable.
+  # A plain `sub length {…}` never displaces (the recorder never saw it), and
+  # the CORE::-qualified spelling names the builtin UNCONDITIONALLY — PExpr's
+  # normalize pre-pass strips the prefix but leaves the _core_qualified
+  # marker on the token for exactly this lookup.
+  if (!$force_user && exists $RUNTIME_NAMES{$func_name}
+      && $self->environment
+      && $self->environment->can('builtin_is_overridable')
+      && $self->environment->builtin_is_overridable($func_name)) {
+    my $fn = $self->expr_o->get_a_node($kids->[0]);
+    unless (ref($fn) && $fn->{_core_qualified}) {
+      my $at  = (ref($fn) && $fn->can('location')) ? ($fn->location || undef) : undef;
+      my $pkg = $self->environment->current_package // 'main';
+      $force_user = 1
+        if $self->environment->builtin_is_overridden($pkg, $func_name,
+                                                     $at ? @$at[0,1] : ());
+    }
+  }
+
+  my $cl_func = $self->cl_name($func_name, 1, $force_user);
 
   # `readpipe EXPR` — the NAMED spelling of `` `CMD` ``/`qx`/`` <<`TAG` ``, and
   # the SAME runtime function they lower to (task #734): one command capture,
@@ -1858,8 +1882,11 @@ sub gen_funcall_form {
     my $fn   = $self->expr_o->get_a_node($kids->[0]);
     my $at   = ($fn && ref($fn) && $fn->can('location')) ? ($fn->location || undef) : undef;
     my $pkg  = $self->environment ? ($self->environment->current_package // 'main') : 'main';
+    # CORE::readpipe (the _core_qualified marker, #732) is the builtin even
+    # inside a `use subs "readpipe"` package.
     $cl_func = 'p-backtick'
-      unless $self->environment
+      unless !(ref($fn) && $fn->{_core_qualified})
+             && $self->environment
              && $self->environment->can('builtin_is_overridden')
              && $self->environment->builtin_is_overridden($pkg, 'readpipe',
                                                           $at ? @$at[0,1] : ());

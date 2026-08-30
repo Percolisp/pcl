@@ -62,6 +62,78 @@ of this session; targeted runs of op/utf8cache.t + re/regexp.t + re/subst.t
 + re/pat_psycho.t were clean here).  Expected movers: NONE in row counts;
 op/utf8cache.t should stay DIFF (its loop is ~7x faster again); any @-/@+
 aliasing row that existed would move TOWARD perl.
+## Session 454ad (2026-08-30, Opus round 12, agent AD) — #755 wildcard filenames (the ONE pathname seam) + #732 `use subs` displaces a weak builtin at the emission seam
+
+**#755 (PROMOTED, heads the round): a perl filename is a LITERAL string.**
+CL's namestring parser reads `*` `?` `[` as WILD components and `\` as an
+escape, so `open my $fh, ">", "/tmp/a_*_b"` DIED in SBCL's pathname
+machinery ("Can't find the truename of wild pathname") and a name with a
+backslash opened the WRONG file.  ONE seam: `%p-literal-path`
+(`sb-ext:parse-native-namestring` — raw OS path, no wildcard or escape
+processing, `:as-directory` for opendir/chdir), routed through by every
+runtime consumer that hands a user filename to a CL pathname function:
+`%p-open-impl`'s five opens, `p--e`, `%p--text-scan` (-T/-B),
+`%p-inplace-begin/finish`, `%p-argv-open-next` (`<>`), `%p-opendir-impl`
+(AS-DIRECTORY replaces the manual trailing-slash logic), `p-chdir`,
+`p-do-file`, `p-require-file`'s non-.pm branch (%INC value =
+native-namestring), `%p-inc-dir-file`.  The sb-posix sites pass strings to
+C untouched — no routing needed; **p-glob is the ONE deliberate
+non-consumer** (wildcard expansion is its job; glob-01.t green).  Two
+siblings switched to the same-family posix calls because their CL wrappers
+were ALSO semantically wrong (probed vs perl first): **p-unlink →
+unlink(2)** — a DANGLING symlink is now removed (probe-file answered nil
+and skipped it) and a directory answers 0/EISDIR in `$!` where delete-file
+CRASHED the program; **p-rename → rename(2)** — a relative NEW is
+cwd-relative (CL rename-file merged it against OLD's directory), `$!` set.
+30-line probe battery byte-IDENTICAL to perl (names with `* ? [ ] ~ \`, a
+name that is ONLY `*`, -l on a wildcard-named symlink, stat, opendir +
+chdir into a wildcard-named dir, rename wild→wild and over-existing,
+dangling-symlink + directory unlink).  Guard `Pl/t/wild-filename-01.t`
+(11 rows, perl-as-oracle at test time; 10 fail on the base).
+**Movement for Fable's batch legs: op/filetest.t 181/250 → 181/253** —
+rows 34–36 (the `-l $handle` warning family, the #221 warnings absence)
+were dead behind the #755 abort and now run to honest not-ok; NO passes
+return (the task's "183 back" guess was the old skip-as-pass accident).
+The remaining aborted form is the pre-existing `-f 'TEST';` void-statement
+mis-parse → **#782**.  Also found pre-existing: `unlink @array` reaches the
+runtime UNFLATTENED (one vector argument; chmod/utime/kill emit the same
+shape) → **#780**.
+
+**#732: a user sub displaces a core builtin ONLY after `use subs`, only
+for a WEAK keyword, and `CORE::NAME` is the builtin unconditionally.**
+The 4-row readpipe probe in the task was ALREADY green (#734 routed the
+named spelling); the LIVE asymmetry was the positive direction — `use subs
+qw(length uc chdir); sub length {…}` still called the BUILTIN (perl calls
+the user sub).  Three pieces, one seam: (1)
+`Pl::Environment::builtin_is_overridable` — the weak ('-') half of perl's
+own `regen/keywords.pl` data (the discriminator is the SIGN of the keyword
+code; `prototype("CORE::NAME")` is NOT the rule — `system` has an undef
+prototype yet IS overridable, `print`/`sort`/`grep` are strong, both
+probed); (2) PExpr's CORE::-strip pre-pass leaves a `_core_qualified`
+marker on the token (registered in @PPI_ADHOC_KEYS) so the qualified
+spelling suppresses the lookup instead of joining it; (3)
+`gen_funcall_form` asks overridable + `builtin_is_overridden` (the #703
+registry, position-aware) before `cl_name` and forces the user-sub route
+when both say yes; the #734 readpipe branch honors the marker too
+(CORE::readpipe runs the shell inside an overriding package).  Probes all
+IDENTICAL to perl: plain-sub-does-not-displace (length/uc/ref/time),
+use-subs-displaces (length/uc/chdir/system/open/shift/time), strong
+keywords stay builtin (print), use-site-before-the-pragma gets the
+builtin, second package gets the builtin, `&length()` force-user, CORE::
+both ways.  Guard `Pl/t/use-subs-override-01.t` (13 rows, perl-as-oracle);
+`Pl/t/system-block-01.t` (#703/#734) green.  Residue → **#781**: a
+paren-less overridden named unary keeps the BUILTIN's operand extent
+(`length "a", "b"` passes one arg where perl passes both) — the parse-time
+classifier is #453 territory.
+**Blast radius measured at zero**: corpus-diff IDENTICAL over 111 +
+shapes (SILENT-DROP 5, unchanged); emission-ab vs the 154f4a9 base over
+lib (23 SAME) and over perl-tests + perl-t/ + cpan-tests (1023 files);
+gate-SET scan 638 files both populations diffed against the base worktree.
+`use subs` occurs in exactly TWO suite files (op/exec.t — readpipe,
+already routed by #703; op/override.t uses the CORE::GLOBAL mechanism, a
+different, unimplemented spelling — the other three grep hits are the word
+"confUSE SUBStr").  No generation bump (all populations byte-identical,
+the s371/s438 rule); guards are the bar.
 
 ---
 

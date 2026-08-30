@@ -1017,6 +1017,51 @@ sub builtin_is_overridden {
     return 1;
 }
 
+=head2 builtin_is_overridable($name)
+
+Whether perl lets a C<use subs>/import predeclaration displace the builtin
+C<$name> at all (task #732).  perl's discriminator is the SIGN of the keyword
+code: C<Perl_keyword()> returns a NEGATIVE code for a "weak" keyword, and only
+then does the toker look for an imported sub.  C<prototype("CORE::NAME")> is
+NOT the rule (C<system> has an undef prototype yet IS overridable — probed
+5.40.3), so the set below is the weak ('-') half of perl's own
+C<regen/keywords.pl> data section, extracted from the 5.40.3 source with
+
+    perl -ne 'print "$1 " if /^-([A-Za-z_2]+)$/' regen/keywords.pl
+
+A strong ('+') keyword — C<print>, C<sort>, C<grep>, C<defined>, … — keeps
+the builtin meaning even when a C<use subs> row was recorded for it.
+
+=cut
+
+my %WEAK_KEYWORDS = map { $_ => 1 } qw(
+    __FILE__ __LINE__ __PACKAGE__ __CLASS__ __SUB__ abs accept alarm and atan2
+    bind binmode bless break caller chdir chmod chomp chop chown chr chroot
+    class close closedir cmp connect continue cos crypt dbmclose dbmopen die
+    dump each endgrent endhostent endnetent endprotoent endpwent endservent
+    eof eq evalbytes exec exit exp fc fcntl field fileno flock fork formline
+    ge getc getgrent getgrgid getgrnam gethostbyaddr gethostbyname gethostent
+    getlogin getnetbyaddr getnetbyname getnetent getpeername getpgrp getppid
+    getpriority getprotobyname getprotobynumber getprotoent getpwent getpwnam
+    getpwuid getservbyname getservbyport getservent getsockname getsockopt
+    gmtime gt hex index int ioctl isa join keys kill lc lcfirst le length link
+    listen localtime lock log lstat lt method mkdir msgctl msgget msgrcv
+    msgsnd ne not oct open opendir or ord pack pipe pop push quotemeta rand
+    read readdir readline readlink readpipe recv ref rename reset reverse
+    rewinddir rindex rmdir seek seekdir select semctl semget semop send
+    setgrent sethostent setnetent setpgrp setpriority setprotoent setpwent
+    setservent setsockopt shift shmctl shmget shmread shmwrite shutdown sin
+    sleep socket socketpair splice sprintf sqrt srand stat substr symlink
+    syscall sysopen sysread sysseek system syswrite tell telldir tie tied
+    time times truncate uc ucfirst umask unlink unpack unshift untie utime
+    values vec wait waitpid wantarray warn write x xor
+);
+
+sub builtin_is_overridable {
+    my ($self, $name) = @_;
+    return defined($name) && $WEAK_KEYWORDS{$name} ? 1 : 0;
+}
+
 =head2 set_isa($pkg, \@parents)
 
 Records the @ISA declaration for a package.
