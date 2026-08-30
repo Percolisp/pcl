@@ -100,6 +100,116 @@ were rewritten in place under the s377 four-conjunct rule: `constants-01.t`
 `-raw-block-eval` fails row 2 alone, `-raw-op-family` rows 8–9,
 `-raw-closure-capture` row 13, `-raw-topic` rows 19+24, and no BEHAVIOUR row
 moves under any setting.
+## Session 456ag (2026-08-30, Opus agent AG, round 13 correctness slot) — #790, and the drop census 27/77 → 21/65 with the cpan-`t` population at ZERO
+
+Six census rows and twelve drops removed by five mechanisms, plus the #790
+silent-wrong the round-12 perf agent found by probe.  Every fix probed against
+perl 5.40.3 (95 shapes in all), every one guarded, every population A/B'd.
+
+**#790 — a SCALAR in a returned list contributes exactly ONE element
+(`cl/pcl-runtime.lisp`, one line).**  `p-return-value`'s scalar-box arm
+unboxed a box holding undef straight into raw `nil`, which IS the runtime's
+*empty-list* marker: `%p-flatten-list` drops it BY DESIGN (array holes and
+Exporter's hash-export internals ride on that arm, so it stays).  The scalar
+then VANISHED from the caller's list and every later element shifted LEFT —
+`sub t { my $ok = eval { die "z\n" }; return ($ok, "w") }` assigned `"w"` to
+the caller's FIRST target.  A box is a SCALAR, so the fix is to normalise
+`nil` → `*p-undef*`, the marker `return undef` already produces.
+**The family is bigger than the eval**: the two measured producers of a
+nil-holding scalar are `eval {}` after a die and a bare `return` READ IN
+SCALAR CONTEXT, and single-element `return ($ok)` was broken the same way (0
+elements where perl says 1).  Every OTHER list consumer receives the BOX, so
+`my @a = ($ok,"w")`, push, join, argument passing, hash init and the IMPLICIT
+return were already right — measured, 10 shapes.  `p-return-value` has exactly
+one caller (`p-return`), so the blast radius is the explicit-return path.
+ir-spec §5.3 amended; guard `Pl/t/list-scalar-context-01.t` 27 → 31 (3 of the
+4 fail on the base tree; the inverse row passes on both by design).
+
+**A WORD AFTER `->` IS A METHOD NAME — ONE predicate, two passes that each LOST
+the statement (#481 + #482).**  perl allows any identifier as a method name,
+keywords included.  `extract_declarations` stripped `state`/`my`/`our`/`local`
+as a DECLARATOR, so `$one->state` reached the postfix-`->` handler with nothing
+after the arrow and the compiler died inside PPI's own API ("Can't call method
+\"content\" on an undefined value" — the message named PPI, not the
+construct); and the fat-comma pass AUTOQUOTED the word, so
+`is $csv->module => 'M'` turned the method name into a string and left the
+arrow with no word.  Both now ask `Pl::PExpr::_word_is_method_name`.  The same
+fact already lived in the term walker (s407), which is why the chain parses at
+all — these two rewrites read the word before anyone asks the walker.
+
+**A `(&…)`-PROTOTYPE BLOCK CALL ENDS AT `->`.**  The slurpy `@` consumes
+juxtaposed TERMS and `->` is not one — it is a postfix operator binding to the
+call's RESULT, so `intercept {…}->upgrade` is `intercept(sub{…})->upgrade`
+(probed for `(&)` and `(&;@)`, for a method, `->[0]` and `->{k}`).  Swallowing
+the arrow left it at the head of an argument list with nothing before it:
+"WTF? :-) Expr starts with ->/brace??".  One arm added to the existing
+`$comma_stops` boundary, which already stops at `,`/`=>`; leaving the arrow IN
+the stream is exactly what `eval`/`do` already do.
+
+**PPI §28 — `$x.2` (#480).**  The `.` is absorbed into a `Number::Float`, so
+there is no operator token at all and the term walker sees two juxtaposed
+terms.  `Pl::Parser2::_repair_dot_number` is the `_ends_term` family's fourth
+member (§12 `)*name`, §15 `)-1`, §25 `)-name`).  **One position needs an
+exception the shape oracle cannot see**: a `print`/`printf`/`say` FILEHANDLE is
+shaped like a term and is not one — perl is still waiting for the argument
+list, so `print $fh .5` writes the NUMBER 0.5 (probed; it is what my first
+version broke).  `_is_print_filehandle_slot` is that exception, named and with
+one consumer, because narrowing the shared oracle would reach four sibling
+repairs — and none of the four populations has a site (task #405 owns the
+family).
+
+**PPI §19b — a bare `x` STARTING a statement.**  `x` is INFIX, so a statement
+cannot begin with it; PPI does begin one with it whenever the previous token is
+a sub definition's closing brace, which is exactly how a sub named `x` is
+called with neither parens nor arguments.  perl's own `t/op/lexsub.t` writes
+`{ my sub x {…} x }` twice.  `_repair_word_x_call` gains a second arm whose
+discriminator is PPI's own TREE — the `x` must be the FIRST significant child
+of its Statement.  **That is what keeps the genuine operator out**: in
+`do { "a" } x 3` and `map { … } x 3` the `x` sits in the MIDDLE of its
+statement, and those are the shapes a "previous token does not end a term" test
+would have broken, since `_ends_term` answers 0 for a `do`/`map` block's brace
+(correctly, for its other callers).
+
+**ONE readline-name predicate pair.**  PPI splits `<Ạ>` into `< Ạ >` in most
+term positions (§14) and `_fix_ppi_glob_after_block` rebuilds it — but ITS name
+test was ASCII-only while the readline/glob decision in `parse` had already
+been made Unicode-aware, so `$a .= <Ạ>` was dropped whole while
+`my $x = <Ạ>` compiled.  Both sites now ask
+`_readline_bareword_name_p` / `_readline_scalar_name_p` (rule 11: they are one
+question).  **A fix that makes values real exposes what was passing on
+nothing**: the two `t/uni/readline.t` rows behind that drop now RUN and fail
+honestly, because the paren-LESS `open Ạ, …` still puts the name through the
+ALL-CAPS `[A-Z][A-Z0-9_]*` bareword heuristic — **task #820**, pre-existing and
+separate, and the reason the guard row uses the paren form.
+
+**Measurements.**  corpus-diff IDENTICAL over 111 after every change (silent
+drops 5, unchanged).  Emission A/B vs `83b335f` over 1788 file-pairs in four
+populations (987 = cpan-tests `.pm` + `.t` and perl's own t/; 801 =
+Test-Simple + Text-CSV + the board's Test-Simple and Mojo-DOM58 + `lib/`):
+**only the six census files and `t/op/lexsub.t` DIFF, RCDIFF 0.**  Gate-SET
+scan over both populations vs the same Pl/ base: only those files' verdicts
+move, all drop→OK.  Census re-harvested after each change and edited row by
+row with causes; the cpan-`t` population (289 files) is now at **zero drops**.
+Generation **v2-440**, all three artifacts regenerated (only the `gen=` stamp
+moves — no `lib/` or `cl/pack-impl.pl` emission changed).
+
+**Q7 leftovers re-checked and all already CLOSED, verified live on this tree**:
+#457 (`)-name`), #464 (statement modifier on `require $m` / `local(LIST)`),
+#465 (`$\`/`$,` undef), #466 (`print $_ LIST`), #468 (never-declared call
+reaches AUTOLOAD), #470 (identity-promoted file lexical ≢ `$main::y`) — six
+repros, PCL identical to perl on all six.
+
+**Not taken, with reasons.**  The four `t/re/pat*.t` "Ternary operator" drops
+are `1 while /…(?{CODE})…/g`: `_repair_word_match` declines because the `;`
+inside the mis-lexed `(?{…})` group stops its close-scan, and repairing it
+would convert four LOUD drops into four SILENT wrongs, since PCL strips
+`(?{…})` (probed: `n=0` where perl says 1) — that is #757's announce-level
+class, not a census fix.  The four indirect-object drops are the USER's
+MAYBE-LATER ruling (DECIDED s425).  `t/op/sub_lval.t`'s 33 lvalue-sub drops
+are a feature.  The Mojo `local (*{"${caller}::a"}, …)` pair needs
+`p-local-glob-dynamic` plus a list form (#564's feature half, sibling #652) —
+a Fable-sized design, and it is a board row a run without `--board` does not
+re-measure.
 
 ---
 

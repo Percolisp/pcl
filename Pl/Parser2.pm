@@ -1173,6 +1173,9 @@ sub parse {
   $doc = $self->_repair_punct_hash_cast($doc);
   $doc = $self->_repair_punct_hash_name($doc);
   $doc = $self->_repair_minus_word($doc);
+  # …and the CONCATENATION spelling of the same family: `$x.2` is lexed as one
+  # Number::Float and the operator disappears — see _repair_dot_number (#480).
+  $doc = $self->_repair_dot_number($doc);
   $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_word_x_call($doc);
   $doc = $self->_repair_term_initial_complement($doc);
@@ -5989,6 +5992,41 @@ sub _repair_minus_word {
   return $repaired ? $self->_reparse_doc($doc) : $doc;
 }
 
+# PPI LEXER BUG, task #480 (docs/ppi-upstream-bugs.md §28) — the FOURTH sibling
+# of §12 (`)*name`), §15 (`)-1`) and §25 (`)-name`), and one rule decides all
+# four.
+#
+#     my $x = $_.2;    =>  Magic($_)  Number::Float(.2)     <- WRONG: no operator
+#     my $x = $_ . 2;  =>  Magic($_)  Operator(.)  Number(2)
+#
+# There is no `.` OPERATOR in the first stream at all, so the term walker sees
+# SYMBOL NUMBER juxtaposed and DROPS the statement ("Bug. Fell through").
+# perl's own toke.c starts a number at `.` only where a TERM is expected; after
+# a complete term `.` is concatenation, which is exactly the `_ends_term`
+# discriminator the two sibling repairs already use.  A space or a non-digit
+# (`$_ . 2`, `$_."2"`) makes PPI lex it correctly — the bug needs the digit
+# adjacent.
+#
+# THE NEGATIVES ARE THE SAME FAMILY'S, and they are all "a term is expected
+# here", so the previous token is not term-ending and the repair cannot fire:
+# `= .5`, `return .5`, `(a => .5)`, `[.5]`, `f(.5)`, `,.5`, `-.5`.  A leading
+# `..`/`...` is an Operator token to PPI and never a Float, so ranges are out
+# by construction.
+sub _repair_dot_number {
+  my ($self, $doc) = @_;
+  my $repaired = 0;
+  for my $n (@{ $doc->find('PPI::Token::Number') || [] }) {
+    my $c = $n->content;
+    next unless $c =~ /^\.\d/;
+    my $prev = _prev_sig_token($n);
+    next unless _ends_term($prev);
+    next if _is_print_filehandle_slot($prev);   # print $fh .5 writes 0.5
+    $n->set_content(". " . substr($c, 1));
+    $repaired = 1;
+  }
+  return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
 # PPI LEXER BUG (task #351, docs/ppi-upstream-bugs.md §11).  A bare `/PATTERN/`
 # as the first argument of a PAREN-LESS call is tokenized as DIVISION:
 #
@@ -6241,6 +6279,23 @@ sub _repair_glob_pattern_cascade_pass {
 # The repair is perl's own disambiguator: a unary `+` in front of the call,
 # which is a documented no-op and makes PPI lex the word as a word.  PCL
 # already emits `+x()` as a plain call, so the fix costs no emission shape.
+#
+# SECOND POSITION, same bug (s456ag, §19's addendum): a bare `x` that STARTS a
+# statement, which is how a sub named `x` is called with neither parens nor
+# arguments.  PPI reads it as the operator whenever the previous token is a
+# sub definition's closing `}` — `sub x { 1 } x` and `my sub x { 1 } x` both —
+# and t/op/lexsub.t writes exactly that twice (`{ my sub x {…} x }`, and the
+# `state sub` twin), so each was a dropped statement.  There is no operator
+# reading available at all in that position: `x` is INFIX, so a statement
+# cannot begin with it.
+#
+# THE DISCRIMINATOR IS PPI'S OWN TREE, not the token before: the `x` must be
+# the first significant child of its Statement.  That is what keeps the
+# genuine operator out — in `do { "a" } x 3` and `map { … } x 3` the `x` sits
+# in the MIDDLE of its statement, and those are the shapes a "previous token
+# does not end a term" test would have broken (a `do`/`map` block's `}` does
+# not end a term by `_ends_term`'s rule, which is right for its other callers
+# and wrong here).
 sub _repair_word_x_call {
   my ($self, $doc) = @_;
   my @tok = grep { $_->significant } $doc->tokens;
@@ -6248,7 +6303,13 @@ sub _repair_word_x_call {
   for my $i (1 .. $#tok) {
     my ($prev, $t) = @tok[$i - 1, $i];
     next unless $t->isa('PPI::Token::Operator') && $t->content eq 'x';
-    next unless $prev->isa('PPI::Token::Word');
+    if (!$prev->isa('PPI::Token::Word')) {
+      next unless _starts_statement($t);
+      next unless $self->_document_declares_sub('x', $doc);
+      $t->set_content('+x');
+      $repaired = 1;
+      next;
+    }
     # A METHOD NAME is a term (`$o->name x 3` repeats the method's value; it
     # was mis-repaired into `$o->name + x(3)` — s407 review, a regression of
     # this repair), and the repair only makes sense at all when this document
@@ -6491,6 +6552,52 @@ sub _ends_term {
   return _ends_term(_prev_sig_token($t))
     if $t->isa('PPI::Token::Operator') && ($t->content eq '++' || $t->content eq '--');
   return 0;
+}
+
+# THE ONE POSITION `_ends_term` CANNOT SEE (task #480, and the family is #405's).
+#
+# `_ends_term` is a token-SHAPE oracle — a value, `)`, `]`, a subscript's `}`.
+# A `print`/`printf`/`say` FILEHANDLE is shaped like a term and is not one:
+# perl's indirect-object slot takes a plain scalar (or a bareword, or a block)
+# and then STARTS the argument list, so what follows the handle is in TERM
+# position, not operator position:
+#
+#     print $fh .5;      perl writes 0.5 to $fh      (a NUMBER — probed)
+#     my $y = $x .5;     perl concatenates           (an OPERATOR)
+#
+# Only the plain-Symbol spelling needs the guard.  A BAREWORD handle
+# (`print STDOUT .5`) is a Word, which `_ends_term` already answers 0 for; the
+# block form (`print {$fh} .5`) is a Structure::Block whose previous sibling is
+# not a Cast, which it also answers 0 for.  A non-simple expression
+# (`print $h->{fh} .5`) is NOT an indirect-object slot in perl, so it really is
+# a completed term and the guard must not fire — hence the test is exactly
+# "a `$` Symbol whose own previous significant token is print/printf/say".
+#
+# TODAY IT HAS ONE CONSUMER, deliberately: the sibling repairs
+# (`_repair_minus_word`, `_repair_glob_multiply`, `_repair_word_x_call`, …) can
+# reach the same position — `print $fh -3` is task #405, already filed and
+# measured as its own bug — but narrowing THEIR oracle is a wider change than
+# this one, and none of the four populations has a site (A/B measured, s456ag).
+# The next consumer routes through HERE rather than growing a second copy.
+sub _is_print_filehandle_slot {
+  my ($t) = @_;
+  return 0 unless $t && $t->isa('PPI::Token::Symbol') && $t->content =~ /^\$/;
+  my $p = _prev_sig_token($t);
+  return 0 unless $p && $p->isa('PPI::Token::Word');
+  return $p->content =~ /^(?:print|printf|say)\z/ ? 1 : 0;
+}
+
+# True when T is the FIRST significant token of its own statement — i.e. a
+# position where perl expects a TERM and no infix operator can stand.  PPI's
+# own tree answers it, which is why it can tell `my sub x {…} x` (a call) from
+# `do { … } x 3` (the repetition operator) where a token-shape test cannot:
+# `_ends_term` answers 0 for BOTH braces, correctly for its other callers.
+sub _starts_statement {
+  my ($t) = @_;
+  my $p = $t->parent;
+  return 0 unless $p && $p->isa('PPI::Statement');
+  my $first = $p->schild(0);
+  return ($first && $first == $t) ? 1 : 0;
 }
 
 # The previous significant token in DOCUMENT order — the raw stream twin of

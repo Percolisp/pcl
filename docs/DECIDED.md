@@ -95,6 +95,64 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **#810 filed**: `for ("cat","dog") { s/o/0/ }` dies in perl ("Modification
   of a read-only value") and substitutes in PCL — a LIST-foreach aliasing
   divergence, identical under `PCL_OPT=none`, unrelated to #761's ranges.
+## s456ag (2026-08-30, Opus agent AG, round 13) — a returned SCALAR is one element; a word after `->` is a method NAME; PPI §28 + §19b; the census is 21/65 and the cpan-`t` population is ZERO
+
+- **A BOX IS A SCALAR, so `p-return-value` may never hand raw `nil` out
+  (#790).**  Raw `nil` IS the runtime's *empty-list* marker —
+  `%p-flatten-list`'s `((null item) nil)` arm drops it BY DESIGN (array holes,
+  Exporter's hash-export internals) and that arm stays — so unboxing a scalar
+  that holds undef made it VANISH from the caller's list and shifted every
+  later element LEFT: `my $ok = eval { die }; return ($ok, "w")` assigned
+  `"w"` to the caller's FIRST target.  Normalised to `*p-undef*`.  The two
+  producers of a nil-holding scalar are `eval {}` after a die and a bare
+  `return` READ IN SCALAR CONTEXT; single-element `return ($ok)` was broken
+  the same way.  Only the EXPLICIT return path is affected — every other list
+  consumer receives the BOX (10 shapes measured), and `p-return-value` has one
+  caller.  `docs/ir-spec.md` §5.3; guard `Pl/t/list-scalar-context-01.t`.
+
+- **A WORD AFTER `->` IS A METHOD NAME, and that is now ONE predicate
+  (`Pl::PExpr::_word_is_method_name`, #481 + #482).**  perl allows any
+  identifier there, keywords included.  `extract_declarations` was stripping
+  `state`/`my`/`our`/`local` as a DECLARATOR and the fat-comma pass was
+  AUTOQUOTING the word; each left the arrow with nothing after it and DROPPED
+  the statement.  The term walker already knew the fact (s407) — these two
+  rewrites read the word before anyone asks it.  Guard
+  `Pl/t/method-name-word-01.t`.
+
+- **A `(&…)`-PROTOTYPE BLOCK CALL ENDS AT `->`.**  The slurpy `@` consumes
+  juxtaposed TERMS and `->` is not one — it binds to the call's RESULT, so
+  `intercept {…}->upgrade` is `intercept(sub{…})->upgrade` (probed for `(&)`
+  and `(&;@)`, method / `->[0]` / `->{k}`).  One arm on the existing
+  `$comma_stops` boundary; the arrow stays in the stream exactly as it does
+  for `eval`/`do`.
+
+- **PPI §28 (`$x.2`, #480) and §19b (a bare `x` STARTING a statement).**  The
+  fourth and fifth members of the `_ends_term` repair family.  §19b's
+  discriminator is PPI's own TREE — the `x` must be the FIRST significant
+  child of its Statement — because `_ends_term` answers 0 for a `do`/`map`
+  block's brace (right for its other callers, wrong here), so a token-shape
+  test would have broken `do { "a" } x 3`.  **ONE POSITION THE SHAPE ORACLE
+  CANNOT SEE**: a `print`/`printf`/`say` FILEHANDLE looks like a completed
+  term and is not one — `print $fh .5` writes the NUMBER 0.5 —
+  `Pl::Parser2::_is_print_filehandle_slot`, one consumer today, #405's family
+  for the rest.  Guards `Pl/t/minus-word-01.t`, `Pl/t/bareword-call-01.t`.
+
+- **The readline `<…>` name test is ONE predicate pair**
+  (`_readline_bareword_name_p` / `_readline_scalar_name_p`): `parse`'s
+  readline/glob decision and `_fix_ppi_glob_after_block`'s REBUILD ask the
+  same question and had drifted, the rebuild being ASCII-only — so
+  `$a .= <Ạ>` was dropped whole while `my $x = <Ạ>` compiled.  **A
+  non-ASCII bareword handle in the paren-LESS `open`/`close` slots is still
+  wrong** (the ALL-CAPS `[A-Z][A-Z0-9_]*` heuristic) — task **#820**,
+  pre-existing, which is why the guard row uses `open(Ạ, …)`.
+
+- **Not taken, and why** (do not re-derive): the four `t/re/pat*.t` "Ternary
+  operator" drops are `1 while /…(?{CODE})…/g`, and repairing the `WORD /`
+  mis-lex there would turn four LOUD drops into four SILENT wrongs, because
+  PCL strips `(?{…})` (probed, `n=0` where perl says 1) — #757's class.
+  Indirect object stays MAYBE LATER (s425).  `t/op/sub_lval.t`'s 33 lvalue-sub
+  drops are a feature.  Mojo's `local (*{"${caller}::a"}, …)` needs
+  `p-local-glob-dynamic` plus a list form (#564's feature half, sibling #652).
 
 ## s455 (2026-08-30, Fable) — round-12 merge review: AC + AD + AE all merged; readdir literal names; glob-alias prototypes ratified
 

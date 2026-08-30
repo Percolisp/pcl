@@ -45,7 +45,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 30;
 
 sub run_cl {
     my ($code) = @_;
@@ -224,3 +224,30 @@ test_cl('with no `sub x` in the document, WORD x N is repetition whatever WORD i
     qq{package Foo; sub new { bless {}, shift } sub name { "ab" }\n}
   . qq{package main; my \$o = Foo->new; print \$o->name x 2, "|", (\$o->name) x 2, "\\n";},
     "abab|abab\n");
+
+# ── §19b: the same `x` STARTING a statement ─────────────────────────────────
+# `x` is INFIX, so a statement cannot begin with it — but PPI does begin one
+# with it after a sub definition's closing brace, which is exactly how a sub
+# named `x` is called with neither parens nor arguments.  perl's own
+# t/op/lexsub.t writes `{ my sub x {…} x }` twice (lines 448 and 836), one
+# census drop each.  The discriminator is PPI's TREE: the `x` must be the FIRST
+# significant child of its Statement — which is what leaves `do { … } x 3` and
+# `map { … } x 3` alone, since there the `x` is in the MIDDLE of a statement.
+test_cl('a bare `x` after a sub definition is a CALL, not repetition',
+    qq{sub x { print "PKG\\n" }\nx\n}, "PKG\n");
+
+test_cl('the LEXICAL-sub spelling, both `my` and `state`',
+    qq{use feature 'lexical_subs', 'state'; no warnings;\n}
+  . qq[{ my sub x { print "LEX\\n" }  x }\n]
+  . qq[{ state sub x { print "ST\\n" } x }\n], "LEX\nST\n");
+
+# The negatives: a `do`/`map` block's brace does NOT end a statement, so the
+# `x` after it is the operator — in a document that DOES declare `sub x`.
+test_cl('`do { } x N` and `map { } LIST` keep the repetition operator',
+    qq{sub x { "CALL" }\n}
+  . qq{print do { "d" } x 2, "|", join("", map { \$_ } ("e") x 2), "\\n";},
+    "dd|ee\n");
+
+test_cl('a mid-statement `x` after a sub definition is still the operator',
+    qq{sub x { "CALL" }\nmy \$s = "f";\nprint \$s x 3, "|", x(), "\\n";},
+    "fff|CALL\n");

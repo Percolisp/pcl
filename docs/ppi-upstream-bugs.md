@@ -918,6 +918,42 @@ ALL-CAPS shortcut dropped, because an ALL-CAPS word before `x` is a filehandle
 rather than a constant.  Guard rows: `Pl/t/bareword-call-01.t`; canary:
 `Pl/t/misc-fixes-02.t`.
 
+### 19b. …and the same `x` STARTING a statement  [CONFIRMED 1.291, found s456ag]
+
+A second position, the same misreading, and here there is no operator reading
+available at all: `x` is INFIX, so a statement cannot begin with it.  PPI does
+begin one with it whenever the previous token is a sub definition's closing
+brace — and a bare `x` right after `sub x {…}` is precisely how such a sub is
+called with neither parens nor arguments:
+
+```perl
+sub x { print "PKG\n" }   x         # perl prints PKG
+my sub x { print "LEX\n" } x        # perl prints LEX  (t/op/lexsub.t writes this)
+```
+
+```
+# PPI::Document->new(\'my sub x { 1 } x')->tokens
+# PPI::Token::Word       my
+# PPI::Token::Word       sub
+# PPI::Token::Word       x
+# PPI::Structure::Block  { 1 }
+# PPI::Token::Operator   x     <-- WRONG: expected Word (a call)
+```
+
+A `;` after the sub's brace makes PPI lex the next `x` as a Word, which is the
+control.
+
+**Impact on PCL:** the statement was DROPPED ("Handle single node of unknown
+type") — `t/op/lexsub.t` lines 448 and 836 are the `state sub` and `my sub`
+spellings of it, one census drop each.  The same `_repair_word_x_call` handles
+it, with a second arm whose discriminator is PPI's own TREE rather than the
+previous token: the `x` must be the FIRST significant child of its Statement.
+That is what keeps the genuine operator out — in `do { "a" } x 3` and
+`map { … } x 3` the `x` sits in the MIDDLE of its statement, and those are
+exactly the shapes a "previous token does not end a term" test would have
+broken (`_ends_term` answers 0 for a `do`/`map` block's brace, correctly for
+its other callers).  Guard rows: `Pl/t/method-name-word-01.t`.
+
 ---
 
 ## 20. Two of perl's three ways to enable `try` are not recognised, so the construct mis-lexes  [CONFIRMED 1.291]
@@ -1479,6 +1515,59 @@ call, a subscript, a hash element, a string, a number and a paren.
 
 **Repro + failing rows:** Bug 27 in `docs/ppi-bug-report.t`.  Guard:
 `Pl/t/glob-slot-operand-01.t`.
+
+---
+
+## 28. `$x.2` — a `.` followed by a digit after a term is lexed as a Number::Float, so the concatenation OPERATOR disappears  [CONFIRMED 1.291]
+
+The fourth sibling of §12 (`)*name`), §15 (`)-1`) and §25 (`)-name`): the same
+operator-vs-term decision, in the one position PPI still gets wrong.
+
+**Perl:** `perlop` and `toke.c` agree — a number may START at `.` only where a
+TERM is expected.  After a complete term `.` is the concatenation operator, so
+`$_.2` is `$_ . 2`.  `perl -MO=Deparse -e 'my $x = $_.2'` prints
+`my $x = $_ . 2;`.
+
+```perl
+local $_ = "a";  my $x = $_.2;   # perl: x is "a2"
+my $y  = "b";    my $z = $y.5;   # perl: z is "b5"
+```
+
+**PPI:** there is no `.` operator in the stream at all — the dot is absorbed
+into the number:
+
+```
+# PPI::Document->new(\'my $x = $_.2;')->tokens  -- WRONG
+# PPI::Token::Word          my
+# PPI::Token::Symbol        $x
+# PPI::Token::Operator      =
+# PPI::Token::Magic         $_
+# PPI::Token::Number::Float .2        <-- expected Operator('.') Number('2')
+# PPI::Token::Structure     ;
+```
+
+A space (`$_ . 2`) or a non-digit (`$_."2"`) makes PPI lex it correctly — the
+bug needs the digit adjacent to the dot.  Every term-ending token on the left
+triggers it: `$x.2`, `$a[1].3`, `$h{k}.4`, `f().6`, `$#a.7`, `"r".8`,
+`$r->[0].1`.
+
+**Impact on PCL (task #480):** the term walker sees SYMBOL NUMBER juxtaposed
+with no operator between them and DROPS the whole statement ("Bug. Fell
+through. Missing case: ['Token::Magic<\$_>','Token::Number::Float<.2>']") — the
+#138 family, fatal since the s435 announce→DIE flip.  Found by the s438 cpan-`t`
+census population in `Text-CSV-2.04/t/78_fragment.t:101`, the only site in the
+six census populations.
+
+`Pl::Parser2::_repair_dot_number` splits the token back into `.` + NUMBER on
+the raw stream when the previous significant token `_ends_term`, and reparses —
+the same predicate and shape as `_repair_minus_word`.  The condition is the
+family's NEGATIVE, which is what makes it safe: `= .5`, `return .5`,
+`(a => .5)`, `[.5]`, `f(.5)`, `1, .5` and `-.5` all follow a token that does
+not end a term (all probed against perl).  ONE position needs an exception the
+shape oracle cannot see — a `print`/`printf`/`say` FILEHANDLE is shaped like a
+term but STARTS the argument list, so `print $fh .5` writes the number `0.5`
+(probed); `Pl::Parser2::_is_print_filehandle_slot` is that exception.  Guard
+rows: `Pl/t/minus-word-01.t`.
 
 ---
 

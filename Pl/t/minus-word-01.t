@@ -42,7 +42,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 10;
+plan tests => 20;
 
 sub write_pl {
     my ($code) = @_;
@@ -115,3 +115,46 @@ both_agree('sub f { "F" } my @l = (1, -bar, 2); print scalar(@l), "$l[1]\n";',
 
 both_agree('print "x" . -foo . "y", "\n";',
            'negative: after a `.` operator, `-foo` is the string');
+
+# ---- task #480: `$x.2` — the SAME rule, on the CONCATENATION spelling -------
+#
+# PPI 1.291 absorbs the `.` into a Number::Float, so there is no operator token
+# at all and the statement was dropped ("Missing case: [Symbol, Number::Float]").
+# Upstream report: docs/ppi-upstream-bugs.md §28 + docs/ppi-bug-report.t bug 28.
+# The one census site is Text-CSV-2.04/t/78_fragment.t:101.
+
+both_agree('local $_ = "a"; my $x = $_.2; print "$x\n";',
+           '#480: `$_.2` is a concatenation');
+
+both_agree('my @a = (7,8); my $w = $a[1].3; print "$w\n";',
+           '#480: `].3` is a concatenation');
+
+both_agree('my %h = (k => "v"); my $v = $h{k}.4; print "$v\n";',
+           '#480: a subscript `}` then `.4` is a concatenation');
+
+both_agree('sub f { "F" } my $u = f().6; print "$u\n";',
+           '#480: `).6` is a concatenation');
+
+both_agree('my @a = (1,2,3); my $t = $#a.7; print "$t\n";',
+           '#480: `$#a.7` is a concatenation');
+
+# ---- the negatives: a TERM is expected, so `.5` really is one half ----------
+
+both_agree('my $n = .5; print "$n\n";',
+           'negative: `= .5` is the number 0.5');
+
+both_agree('my @l = (1, .5); print "@l\n";',
+           'negative: after a comma, `.5` is the number');
+
+both_agree('my %g = (a => .5); print "$g{a}\n";',
+           'negative: after a fat comma, `.5` is the number');
+
+# The ONE position the shape oracle cannot see: a print FILEHANDLE looks like a
+# completed term and is not one — perl is still waiting for the argument list,
+# so `.5` there is the NUMBER (task #405's family; the guard is
+# Pl::Parser2::_is_print_filehandle_slot).
+both_agree('my $x = "A"; print $x .5, "\n"; print "done\n";',
+           'negative: `print $x .5` treats $x as the FILEHANDLE, .5 as a number');
+
+both_agree('print STDOUT .5, "\n";',
+           'negative: `print STDOUT .5` writes 0.5');

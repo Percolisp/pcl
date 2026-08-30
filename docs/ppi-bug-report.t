@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 44;
+use Test::More tests => 51;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -341,6 +341,34 @@ PERL
              map { ref($_) . '[' . $_->content . ']' }
              grep { $_->significant } $doc->tokens);
 }
+# ── Bug 16b: the same `x` STARTING a statement ──────────────────────────────
+#
+# `x` is INFIX, so a statement cannot begin with it — yet PPI begins one with it
+# whenever the previous token is a sub definition's closing brace, which is
+# exactly how a sub named `x` is called with neither parens nor arguments.
+# perl's own t/op/lexsub.t writes `{ my sub x {…} x }` twice.
+{
+    my $doc = PPI::Document->new(\'sub x { print "PKG\n" } x');
+    my ($op) = grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+               $doc->tokens;
+    ok( !$op, 'a statement cannot BEGIN with the infix `x` — it is a call' )
+        or diag "got Operator(x) at: " . join(' ',
+             map { ref($_) . '[' . $_->content . ']' }
+             grep { $_->significant } $doc->tokens);
+}
+{
+    my $doc = PPI::Document->new(\'my sub x { print "LEX\n" } x');
+    my ($op) = grep { $_->isa('PPI::Token::Operator') && $_->content eq 'x' }
+               $doc->tokens;
+    ok( !$op, 'the lexical-sub spelling lexes the same way (t/op/lexsub.t)' );
+}
+# The `;` spelling proves the intent: one added semicolon and PPI lexes the
+# very same `x` as the Word it is.
+{
+    my $doc = PPI::Document->new(\'sub x { print "PKG\n" }; x');
+    ok( (grep { $_->isa('PPI::Token::Word') && $_->content eq 'x' } $doc->tokens) >= 2,
+        '`}; x` lexes the call as a Word (the control)' );
+}
 
 # ── Bug 17: only one of perl's three ways to enable `try` is recognised ──────
 #
@@ -640,4 +668,41 @@ PERL
     my ($sym) = grep { $_->isa('PPI::Token::Magic') && $_->content eq '$_' } $doc->tokens;
     is( ($sym ? $sym->symbol : '(no token)'), '$_',
         '`$_` under a `*` cast is $_, not %_ (core Carp.pm:34)' );
+}
+
+# ── Bug 28: `$x.2` — the `.` is absorbed into a Number::Float ────────────────
+#
+# The fourth sibling of bugs 12 (`)*name`), 15 (`)-1`) and 25 (`)-name`), and
+# the same operator-vs-term decision.  perl starts a number at `.` only where a
+# TERM is expected; after a complete term the `.` is concatenation, so `$_.2` is
+# `$_ . 2` (perl -MO=Deparse says so).  PPI leaves NO operator in the stream at
+# all, so a consumer sees two juxtaposed terms.  A space or a non-digit on the
+# right fixes it — the bug needs the digit adjacent.
+{
+    my $doc = PPI::Document->new(\'my $x = $_.2;');
+    ok( !(grep { $_->isa('PPI::Token::Number') && $_->content eq '.2' } $doc->tokens),
+        '`$_.2` should lex as Operator(.) + Number(2), not one Number::Float' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+{
+    my $doc = PPI::Document->new(\'my $z = $y[1].3;');
+    ok( (grep { $_->isa('PPI::Token::Operator') && $_->content eq '.' } $doc->tokens),
+        '`].3` should carry a concatenation operator' )
+        or diag "got: " . join(' ', map { ref($_) =~ s/^PPI::Token:://r . "[" . $_->content . "]" }
+                                    grep { $_->significant } $doc->tokens);
+}
+# The spaced spelling proves the intent: the SAME source with one blank added
+# lexes the way perl reads both of them.
+{
+    my $doc = PPI::Document->new(\'my $x = $_ . 2;');
+    ok( (grep { $_->isa('PPI::Token::Operator') && $_->content eq '.' } $doc->tokens),
+        '`$_ . 2` lexes as a concatenation operator (the control)' );
+}
+# …and the NEGATIVE, which PPI gets right and must keep getting right: where a
+# TERM is expected, `.5` really is the number one half.
+{
+    my $doc = PPI::Document->new(\'my $x = .5;');
+    ok( (grep { $_->isa('PPI::Token::Number') && $_->content eq '.5' } $doc->tokens),
+        '`= .5` is the NUMBER 0.5 (the negative control)' );
 }

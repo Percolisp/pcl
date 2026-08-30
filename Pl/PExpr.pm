@@ -368,6 +368,70 @@ sub parse_expr_to_tree {
 }
 
 
+# WHAT MAY STAND INSIDE `<…>` AND STILL BE A READLINE — the two predicates
+# perlop's whitelist names: "a filehandle, or a simple scalar variable
+# containing a filehandle name, typeglob, or typeglob reference"; everything
+# else is a filename PATTERN to be globbed.
+#
+# A handle NAME is a perl identifier, and under `use utf8` that means UNICODE
+# word characters — `[^\W\d]\w*`, not `[A-Za-z_]\w*`.  An ASCII-only test reads
+# `<ＦＨ>` as a filename pattern and silently globs it.  A package QUALIFIER is
+# allowed on both: `<main::FH>` is a handle and `<$main::fh>` reads a line
+# (both probed vs perl 5.40.3).
+#
+# TWO CALLERS, and they must agree: the readline/glob decision in `parse`, and
+# `_fix_ppi_glob_after_block`, which REBUILDS the token PPI split into
+# `< … >` in term position (PPI bug §14).  They had drifted — the rebuild's
+# copies were ASCII-only — so `$a .= <Ạ>` was dropped whole while `my $x = <Ạ>`
+# compiled (t/uni/readline.t, two census drops).
+sub _readline_bareword_name_p {
+  my ($s) = @_;
+  return (defined $s && $s =~ /\A[^\W\d]\w*(?:::[^\W\d]\w*)*\z/) ? 1 : 0;
+}
+
+sub _readline_scalar_name_p {
+  my ($s) = @_;
+  return (defined $s && $s =~ /\A\$(?:[^\W\d]\w*::)*[^\W\d]\w*\z/) ? 1 : 0;
+}
+
+
+# A WORD after `->` is a METHOD NAME — the one predicate (tasks #481/#482).
+#
+# perl allows ANY identifier as a method name, keywords included: `$o->state`,
+# `$o->my`, `$o->print`, `$o->length` are all method calls, because after `->`
+# the lexer is looking for a method name, not for a term.  Two passes here used
+# to read such a word as something else and each one LOST it:
+#
+#   * extract_declarations stripped `state`/`my`/`our`/`local` as a declarator,
+#     so `$one->state` reached the postfix-`->` handler with NOTHING after the
+#     arrow and the compiler died on `$nxt->content()` (#482 — the message
+#     named PPI's API, not the construct);
+#   * the fat-comma pass autoquoted the word on the left of `=>`, so
+#     `is $csv->module => 'M'` turned the METHOD NAME into a string and left
+#     the arrow with no word at all (#481).
+#
+# The same fact already lives in the term walker (a word directly before `->`
+# is an invocant; a position directly after `->` is never a term start), which
+# is why the chain `$o->thing` parses — it is only these two rewrites that read
+# the word before anyone asks the walker.  Both now ask HERE, so the two
+# spellings cannot drift apart again (CLAUDE.md rule 11).
+#
+# The scan skips whitespace because extract_declarations sees the raw token
+# list (cleanup_for_parsing's array has none).  A NON-arrow previous token
+# answers 0 immediately: `my $x`, `local $/`, `state $n` and a fat-comma key
+# all reach this with an operator, a comma or nothing before them.
+sub _word_is_method_name {
+  my ($self, $e, $i) = @_;
+  return 0 if !ref($e) || $i <= 0;
+  for (my $j = $i - 1; $j >= 0; $j--) {
+    my $t = $e->[$j];
+    next if ref($t) && ref($t) =~ /::Whitespace$/;
+    return $self->is_arrow_op($t) ? 1 : 0;
+  }
+  return 0;
+}
+
+
 # Extract declarations (my, our, state, local) from expression.
 # Returns modified expression with declarators stripped.
 # Records declarations in $self->declarations for later retrieval.
@@ -383,7 +447,8 @@ sub extract_declarations {
 
   my @result;
 
-  for my $item (@$exprs) {
+  for (my $ix = 0; $ix < scalar(@$exprs); $ix++) {
+    my $item = $exprs->[$ix];
     # Check for PPI::Statement::Variable (wraps 'my $x = ...' etc)
     if (ref($item) eq 'PPI::Statement::Variable') {
       my @children = $item->children();
@@ -482,7 +547,8 @@ sub extract_declarations {
     # Accept an explicit CORE:: prefix (CORE::state $y = ...) — PCL has no
     # overridable builtins, so CORE::<declarator> is the bare declarator.
     elsif (ref($item) eq 'PPI::Token::Word'
-           && $item->content() =~ /^(?:CORE::)?(my|our|state|local)$/) {
+           && $item->content() =~ /^(?:CORE::)?(my|our|state|local)$/
+           && !$self->_word_is_method_name($exprs, $ix)) {
       my $decl_type = $1;
 
       # Look ahead for the variable in the next items
@@ -803,14 +869,13 @@ sub parse {
       # is a readline, not a pattern: the old blacklist rule crashed on it
       # (an unbound CL symbol `<>`, io/argv.t's first failure note) and a
       # whitelist without this line would silently glob the string "<>".
-      # A handle NAME is a perl identifier, and under `use utf8` that means
-      # unicode word characters — `[^\W\d]\w*`, not `[A-Za-z_]\w*`.  An
-      # ASCII-only test reads `<ＦＨ>` as a filename pattern and silently
-      # globs it (caught by Pl/t/utf8-source-01.t's #418 bareword-filehandle
-      # row, which is exactly the case this rule change could break).
+      # What may stand between the brackets is the two predicates above —
+      # _readline_bareword_name_p / _readline_scalar_name_p — which
+      # _fix_ppi_glob_after_block's REBUILD also asks, so the decision and the
+      # rebuild cannot drift apart (they had; see the note there).
       my $is_glob = defined $inner && $inner ne '' && $inner ne '<>'
-                 && $inner !~ /\A[^\W\d]\w*(?:::[^\W\d]\w*)*\z/       # bareword handle
-                 && $inner !~ /\A\$(?:[^\W\d]\w*::)*[^\W\d]\w*\z/;    # scalar handle
+                 && !_readline_bareword_name_p($inner)
+                 && !_readline_scalar_name_p($inner);
 
       if ($is_glob) {
         # File glob: <*.txt>, </path/*.log>, etc.
@@ -3546,11 +3611,26 @@ sub handle_subcalls {
         # siblings), whereas `try {} catch {}` (no comma) → catch{} is slurped.
         # grep/map/sort are true list-ops whose list starts juxtaposed and then
         # continues across commas, so this only applies to $has_block_proto subs.
+        #
+        # A `->` ends it too, and for a different reason: the slurpy @ consumes
+        # juxtaposed TERMS, and `->` cannot start one — it is a POSTFIX
+        # operator that binds to the block call's RESULT.  Perl:
+        # `intercept {…}->upgrade` is `intercept(sub{…})->upgrade` (probed for
+        # `(&)` and `(&;@)`, for a method, a `->[0]` and a `->{k}`), whereas
+        # swallowing the arrow left it at the head of an argument list with
+        # nothing before it and the whole statement DROPPED with the
+        # "Expr starts with ->/brace" die (task #482's file, Test-Simple's
+        # t/Legacy/Regression/637.t and t/Test2/modules/API/InterceptResult.t).
+        # Leaving the arrow IN the stream is exactly what eval/do already do
+        # (see the note at the inline-lambda branch above): the ordinary
+        # postfix machinery then binds it onto the funcall node.
         my $next_after = $e->[$i + 2];
         my $comma_stops = $has_block_proto
           && $next_after
           && $next_after->isa('PPI::Token::Operator')
-          && ($next_after->content eq ',' || $next_after->content eq '=>');
+          && ($next_after->content eq ','
+              || $next_after->content eq '=>'
+              || $next_after->content eq '->');
 
         if ($func_name eq 'eval' || $func_name eq 'do' || $comma_stops) {
           # Replace eval+block (2 elements) with result node in-place
@@ -6110,7 +6190,12 @@ sub cleanup_for_parsing {
       next
           if $i == 0;
       my $prev  = $no_ws[$i-1];
-      if (ref($prev) eq "PPI::Token::Word") {
+      # …unless the word is a METHOD NAME.  `=>` autoquotes a BAREWORD, and a
+      # word after `->` is not one — `is $csv->module => 'M'` is
+      # `is($csv->module, 'M')` in perl (#481).  Quoting it here left the arrow
+      # with no word at all and dropped the whole statement.
+      if (ref($prev) eq "PPI::Token::Word"
+          && !$self->_word_is_method_name(\@no_ws, $i-1)) {
         $no_ws[$i-1] = $self->_make_string_of_token_word($prev);
       }
       # A FILETEST letter is autoquoted by the fat comma too, and the string
@@ -6337,11 +6422,18 @@ sub _fix_ppi_glob_after_block {
       # Also detect bare filehandle readline: < BAREWORD > when not preceded
       # by a value token (symbol/number/string/structure) — those indicate < is
       # the less-than operator, not the readline diamond.
-      my $is_bare_fh = ($glob_content =~ /^[A-Za-z_][A-Za-z0-9_:]*$/);
+      # …asked through the SAME two predicates the readline/glob whitelist
+      # itself uses (rule 11): this rebuild and that decision are one question,
+      # and they had drifted — these two spellings were ASCII-only, so a
+      # `use utf8` handle name was rebuilt at one site and not the other.
+      # `$a .= <Ạ>` (perl's own t/uni/readline.t, two census drops) reached the
+      # main loop as `< Ạ >` and the whole statement was DROPPED, while the
+      # very same `<Ạ>` after an `=` compiled fine.
+      my $is_bare_fh = _readline_bareword_name_p($glob_content);
       # Scalar filehandle readline <$fh>: a single scalar variable between < and >.
       # PPI misparses this as `< $fh >` (two operators) whenever it follows a
       # bareword that could take an operand — print/return/scalar/sort <$fh>.
-      my $is_scalar_fh = ($glob_content =~ /^\$[A-Za-z_]\w*$/);
+      my $is_scalar_fh = _readline_scalar_name_p($glob_content);
       my $prev = @result ? $result[-1] : undef;
       # A simple value (symbol/number/string) before < means it's definitely lt, not glob.
       # e.g. $a<$b?1:$a>$b: the < is less-than, not a glob opener.

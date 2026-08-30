@@ -94,8 +94,11 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 27 files, 77 drops (recounted from the rows,
-# s454ae; the pre-session recount was 34 / 90 -- the s448o "34 / 88" line had
+# TOTAL after the edits below: 21 files, 65 drops (recounted from the rows,
+# s456ag; 20 in-repo files / 63 drops as tools/drop-census.pl reports them,
+# plus the one board row, which a run without --board does not re-measure).
+# The previous line said 27 / 77 (s454ae; the pre-session recount there was
+# 34 / 90 -- the s448o "34 / 88" line had
 # gone stale when s451 edited the Mojo _Collection.pm count 2 -> 4; the ROWS
 # are the authority and the sum is what the runner compares against).  The s440-era split was 4
 # perl-tests files (5
@@ -116,6 +119,55 @@
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
+#   s456ag SIX rows REMOVED and ONE reduced, TWELVE drops (27/77 -> 21/65).
+#         Five mechanisms, each probed against perl 5.40.3 and each carrying
+#         its own guard rows; the cpan-`t` population is now at ZERO:
+#         (1) A WORD AFTER `->` IS A METHOD NAME (#481 + #482, one predicate
+#         Pl::PExpr::_word_is_method_name).  Two passes read such a word as
+#         something else and each LOST the statement: extract_declarations
+#         stripped `state`/`my`/`our`/`local` as a DECLARATOR (so `$one->state`
+#         reached the postfix handler with nothing after the arrow and the
+#         compiler died inside PPI's API), and the fat-comma pass AUTOQUOTED it
+#         (so `is $csv->module => 'M'` left the arrow with no word).  Removes
+#         Test2/API/InterceptResult/Event.pm (1) and one of
+#         t/Test2/modules/API/InterceptResult.t's two, and both of
+#         Text-CSV-2.04/t/01_is_pp.t.
+#         (2) A `(&…)`-PROTOTYPE BLOCK CALL ENDS AT `->`: the slurpy @ consumes
+#         juxtaposed TERMS and `->` is not one — it is a postfix operator
+#         binding to the call's RESULT, so `intercept {…}->upgrade` is
+#         `intercept(sub{…})->upgrade` (probed for `(&)` and `(&;@)`, for a
+#         method, `->[0]` and `->{k}`).  Swallowing the arrow left it at the
+#         head of an argument list with nothing before it.  Removes
+#         t/Legacy/Regression/637.t (1) and InterceptResult.t's other one.
+#         (3) PPI §28, `$x.2` (#480): the `.` is absorbed into a Number::Float
+#         and there is no operator token at all.  Pl::Parser2::_repair_dot_number,
+#         the `_ends_term` family's fourth member.  Removes
+#         Text-CSV-2.04/t/78_fragment.t (1).
+#         (4) PPI §19b, a bare `x` STARTING a statement: `x` is INFIX, so a
+#         statement cannot begin with it, yet PPI does after a sub definition's
+#         closing brace — which is how a sub named `x` is called with neither
+#         parens nor arguments.  _repair_word_x_call's second arm; the
+#         discriminator is PPI's own tree (first significant child of the
+#         Statement), which is what leaves `do { … } x 3` alone.  t/op/lexsub.t
+#         4 -> 1 (its lines 448, 751 and 836; the remaining drop is the
+#         `y, 43, '…'` transliterate shape).
+#         (5) ONE readline-name predicate pair (_readline_bareword_name_p /
+#         _readline_scalar_name_p): PPI splits `<Ạ>` into `< Ạ >` in most term
+#         positions (§14) and _fix_ppi_glob_after_block rebuilds it, but ITS
+#         name test was ASCII-only while the readline/glob decision in `parse`
+#         had already been made Unicode-aware — so `$a .= <Ạ>` was dropped
+#         whole while `my $x = <Ạ>` compiled.  Removes t/uni/readline.t (2).
+#         NOTE on that last one: the two rows behind it will now RUN and FAIL
+#         honestly, because the paren-LESS `open Ạ, …` still puts the name
+#         through the ALL-CAPS `[A-Z][A-Z0-9_]*` bareword-handle heuristic
+#         (task #820, PRE-EXISTING and separate).  That is the s438h pattern —
+#         a fix that makes values real exposes what was passing on nothing.
+#         The MESSAGE TEXT of the rows this session did not touch is older than
+#         the rows themselves: `Pl::PExpr::_dd` became one-line at s440d, so a
+#         fresh run prints the full token dump where a row blessed before that
+#         kept only the text up to the first newline.  Counts are unaffected —
+#         they are what the runners compare — and the text is left alone rather
+#         than re-blessed, per the row-by-row rule.
 #   s454ae SEVEN rows REMOVED and ONE reduced, THIRTEEN drops (34/90 -> 27/77),
 #         by two mechanisms, both verified by re-running the harvest over the
 #         cpan+board rows after each change (gate NOT yet run -- stop-order
@@ -644,11 +696,6 @@
 #         not a census row at all today -- the `local` fall-through swallows it
 #         without a `;; PARSE ERROR`, which is exactly what #564 is about.
 board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Parser2 TODO: unsupported `local` target: *{"${caller}::a"} x2
-cpan-tests/modules/Test-Simple-1.302199/lib/Test2/API/InterceptResult/Event.pm	1	Can't call method "content" on an undefined value x1
-cpan-tests/modules/Test-Simple-1.302199/t/Legacy/Regression/637.t	1	WTF? :-) Expr starts with ->/brace?? x1
-cpan-tests/modules/Test-Simple-1.302199/t/Test2/modules/API/InterceptResult.t	2	Can't call method "content" on an undefined value x1 | WTF? :-) Expr starts with ->/brace?? x1
-cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t	2	PExpr: unhandled postfix '->' term in cpan-tests/modules/Text-CSV-2.04/t/01_is_pp.t: term=bless( { x2
-cpan-tests/modules/Text-CSV-2.04/t/78_fragment.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/method.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: [ x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: [ x1
@@ -658,7 +705,7 @@ t/comp/parser.t	5	Bug. Fell through. Missing case: [ x4 | Handle single node of 
 t/io/open.t	1	Bug. Fell through. Missing case: [] x1
 t/op/filetest.t	1	Bug. Fell through. Missing case: [ x1
 t/op/lex.t	1	Bug. Fell through. Missing case: [ x1
-t/op/lexsub.t	4	Bug. Fell through. Missing case: [ x1 | Bug. Fell through. Missing case: [] x1 | Handle single node of unknown type. Dump: x2
+t/op/lexsub.t	1	Bug. Fell through. Missing case: [ x1
 t/op/method.t	1	Bug. Fell through. Missing case: [ x1
 t/op/ref.t	1	Bug. Fell through. Missing case: [ x1
 t/op/signatures.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
@@ -669,4 +716,3 @@ t/op/utf8cache.t	1	Bug. Fell through. Missing case: [] x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
 t/re/pat.t	2	Handle single node of unknown type. Dump: x1 | Ternary operator: Found '?' but no matching ':' x1
 t/re/pat_advanced.t	4	Bug. Fell through. Missing case: [ x1 | Ternary operator: Found '?' but no matching ':' x3
-t/uni/readline.t	2	Handle single node of unknown type. Dump: x2

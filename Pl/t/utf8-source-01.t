@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 30;
+plan tests => 32;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -333,3 +333,33 @@ is(run_bytes('my @X = (10,20,30); my $i = 1;'
            . ' print "$s $r $q\n";'),
    "a20b a1b a10 20 30b\n",
    'the ASCII inverse: the same three s/// replacement spellings, unchanged');
+
+# s456ag: a non-ASCII bareword FILEHANDLE inside a READLINE that PPI split.
+# PPI hands `<Ạ>` over as one Readline token after `=`, and as `< Ạ >` — three
+# tokens — after `.=` and in most other term positions (PPI bug §14).
+# `Pl::PExpr::_fix_ppi_glob_after_block` rebuilds the token, and ITS name test
+# was ASCII-only while the readline/glob decision in `parse` had already been
+# made Unicode-aware, so the SAME handle compiled at one site and DROPPED the
+# whole statement at the other (perl's own t/uni/readline.t, two census drops).
+# Both sites now ask `_readline_bareword_name_p` / `_readline_scalar_name_p`.
+# NB the PARENTHESISED `open(Ạ, …)`: the paren-LESS spelling puts the same
+# name through the ALL-CAPS `[A-Z][A-Z0-9_]*` bareword-handle heuristic, which
+# a non-ASCII capital is not, so `open Ạ, …` still emits the STRING "Ạ" and
+# `close Ạ` a CALL — a PRE-EXISTING bug of the #452/#266 classifier family
+# (task #820), unrelated to the readline rebuild this row is about.
+is(run_file_bytes(encode_utf8(
+     "use utf8;\nuse open qw( :utf8 :std );\n"
+   . "my \$f = \"/tmp/pcl_utf8_rl_\$\$.txt\";\n"
+   . "open(my \$w, '>', \$f) or die; print \$w \"L1\\n\"; close \$w;\n"
+   . "open(\x{1ea0}, '<', \$f) or die; my \$a = 'x'; \$a .= <\x{1ea0}>; close(\x{1ea0});\n"
+   . "open(BEE, '<', \$f) or die; my \$b = 'y'; \$b .= <BEE>; close(BEE);\n"
+   . "print \"\$a|\$b\"; unlink \$f;\n")),
+   "xL1\n|yL1\n",
+   'a non-ASCII bareword handle in a REBUILT readline (`$a .= <Ạ>`)');
+
+# The negative the widening could have broken: `<` is still less-than.
+is(run_bytes('my ($p,$q) = (1,2); my %h = (k=>1);'
+           . ' print(($p < $q ? "lt" : "ge"), (2 < 1 ? "lt" : "ge"),'
+           . ' ($h{k} < 5 ? "lt" : "ge"), "\n");'),
+   "ltgelt\n",
+   'inverse: a `<` after a value is still the comparison, not a readline');
