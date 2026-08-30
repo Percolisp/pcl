@@ -282,7 +282,11 @@ sub _analyze_tree {
     my @reasons;
     push @reasons, 'multi-decl'     if $ctx->{decl_count}{$name} != 1;
     push @reasons, 'eval-in-region' if $ctx->{has_eval};
-    push @reasons, 'nested-sub-ref' if $ctx->{nested_sub}{$name};
+    # #760: the veto is capture PLUS a boxing event in the closure body; with
+    # `raw-closure-capture` off, _tw_region_facts sets nested_sub_ev for every
+    # captured name, so this reads as the pre-s456af categorical veto.
+    push @reasons, 'nested-sub-ref'
+      if $ctx->{nested_sub}{$name} && $ctx->{nested_sub_ev}{$name};
     push @reasons, 'write-shape'    if $ctx->{init_bad}{$name};
     push @reasons, 'write-object'   if $ctx->{write_obj}{$name};
     # Root `$x++;` statements are allowed on a raw slot ONLY when every
@@ -473,16 +477,34 @@ sub _tw_region_facts {
   # plus $names inside interpolatable quote-likes ("…", qq, regexes,
   # backticks) — a "$x" in a closure body is a capture.  Comments and
   # single-quoted strings no longer count (text-scan false fires).
+  # (A NAMED sub's block has its own name as the previous sibling, so only
+  # anon subs are collected here — the named-sub case is the file-promotion
+  # story, p-defcell, and is deliberately out of this scan.)
   my $blocks = $stmt->find(sub {
     $_[1]->isa('PPI::Structure::Block') && do {
       my $prev = $_[1]->sprevious_sibling;
       $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
     };
   }) || [];
+  # #760 (Kind-A `raw-closure-capture`): CAPTURE is not itself a boxing event.
+  # A CL closure over a `let` binding shares that binding natively — mutable,
+  # kept alive — so a raw slot serves a capture-and-read exactly as a box does,
+  # and the per-iteration `let` inside %expand-foreach-range means a closure
+  # made in a raw range loop still captures a FRESH binding per iteration
+  # (probed: 10/20/30, not 30/30/30).  What a capture cannot serve is a real
+  # boxing EVENT inside the closure body — `\$x`, `local`, a write, `tie`, a
+  # regex target — because the body lowers through the v1 seam, where every
+  # write goes through box-set machinery and needs a box to write into.
+  # The oracle for "is there an event" is the SHARED per-name gate list
+  # `_text_gate_tags` (the same list the parse-failure fallback uses), run on
+  # the closure body's source WITH the bare-write gate: text-shaped, therefore
+  # over-firing, which is the safe direction for a veto.
+  my $capture_needs_event = Pl::Passes::enabled('raw-closure-capture');
   for my $b (@$blocks) {
+    my %cap;
     for my $t ($b->tokens) {
       if ($t->isa('PPI::Token::Symbol')) {
-        $ctx->{nested_sub}{$1}++ if $t->content =~ /^(\$\w+)/;
+        $cap{$1}++ if $t->content =~ /^(\$\w+)/;
       }
       elsif ($t->isa('PPI::Token::Quote::Double')
           || $t->isa('PPI::Token::Quote::Interpolate')
@@ -494,8 +516,15 @@ sub _tw_region_facts {
           || $t->isa('PPI::Token::HereDoc')) {
         my $c = $t->content;
         $c .= join '', $t->heredoc if $t->isa('PPI::Token::HereDoc');
-        $ctx->{nested_sub}{$1}++ while $c =~ /(\$\w+)/g;
+        $cap{$1}++ while $c =~ /(\$\w+)/g;
       }
+    }
+    next unless %cap;
+    my $body = $capture_needs_event ? $b->content : undef;
+    for my $n (keys %cap) {
+      $ctx->{nested_sub}{$n} += $cap{$n};
+      $ctx->{nested_sub_ev}{$n} = 1
+        if !$capture_needs_event || _text_gate_tags($n, $body, 1);
     }
   }
 }
