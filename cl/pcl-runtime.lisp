@@ -9210,6 +9210,25 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 (declaim (ftype function p-eval))
 (defvar @INC) ; forward declaration; value set in Module System section below
 
+(defun %p-literal-path (name &optional as-directory)
+  "THE ONE SEAM turning a perl filename STRING into a CL pathname (#755).
+   A perl filename is a literal byte string: `*' `?' `[' `\\' `~' are
+   ordinary characters, never wildcards or escapes.  CL's own namestring
+   parser reads them as WILD components / escapes, so any later
+   truename/native-namestring DIES (\"Can't find the truename of wild
+   pathname\") or opens the WRONG file (backslash-escape).
+   SB-EXT:PARSE-NATIVE-NAMESTRING parses the string as a raw OS path with
+   no wildcard or escape processing, which is exactly perl's reading.
+   AS-DIRECTORY parses the name as a directory (opendir/chdir need this so
+   merging a wild \"*.*\" listing pattern lands INSIDE it).
+   Every runtime consumer that hands a user filename to a CL pathname
+   function must route through here.  The sb-posix calls need no routing
+   (they pass strings to the C layer untouched), and p-glob is the ONE
+   deliberate non-consumer: wildcard expansion is its job."
+  (sb-ext:parse-native-namestring (to-string name) nil
+                                  *default-pathname-defaults*
+                                  :as-directory as-directory))
+
 ;;; p-do - Perl's do FILE (block form is inlined by codegen as (progn ...))
 ;;; Called only for do EXPR where EXPR is not a bare block.
 
@@ -9235,11 +9254,13 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                   (and (>= (length filename) 2)
                        (char= (char filename 0) #\.)
                        (char= (char filename 1) #\/)))
-              (when (probe-file filename) (truename filename))
+              (let ((fp (%p-literal-path filename)))
+                (when (probe-file fp) (truename fp)))
               (loop for dir-box across @INC
                     for dir = (to-string (unbox dir-box))
                     for p = (probe-file
-                             (concatenate 'string dir "/" filename))
+                             (%p-literal-path
+                              (concatenate 'string dir "/" filename)))
                     when p return (truename p)))))
     (if (null abs-path)
         ;; File not found: return undef, clear $@, set $! = ENOENT
@@ -10639,7 +10660,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                   (member mode-str '(">" ">>") :test #'string=))
              *standard-output*)
             ((string= mode-str "<")
-             (open file-str :direction :input :if-does-not-exist nil
+             (open (%p-literal-path file-str)
+                   :direction :input :if-does-not-exist nil
                    :external-format ef))
             ;; The two OUTPUT opens ask %p-line-buffer-if-tty (task #710): CL
             ;; `open` takes no :buffering, so a handle onto a TERMINAL was
@@ -10647,17 +10669,21 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
             ;; handed straight back, untouched.
             ((string= mode-str ">")
              (%p-line-buffer-if-tty
-              (open file-str :direction :output :if-exists :supersede
+              (open (%p-literal-path file-str)
+                    :direction :output :if-exists :supersede
                     :if-does-not-exist :create :external-format ef)))
             ((string= mode-str ">>")
              (%p-line-buffer-if-tty
-              (open file-str :direction :output :if-exists :append
+              (open (%p-literal-path file-str)
+                    :direction :output :if-exists :append
                     :if-does-not-exist :create :external-format ef)))
             ((string= mode-str "+<")
-             (open file-str :direction :io :if-exists :overwrite
+             (open (%p-literal-path file-str)
+                   :direction :io :if-exists :overwrite
                    :if-does-not-exist nil :external-format ef))
             ((string= mode-str "+>")
-             (open file-str :direction :io :if-exists :supersede
+             (open (%p-literal-path file-str)
+                   :direction :io :if-exists :supersede
                    :if-does-not-exist :create :external-format ef))
             ((or (string= mode-str "|-") (string= mode-str "-|"))
              ;; Fork-pipe open (#70): bare (the TWO-argument spelling, no
@@ -11568,7 +11594,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          ;; CWD in SBCL — so reject it before probing.  It reaches here from
          ;; undef and from `_` used before any stat.
          (exists (and (plusp (length path))
-                      (or (probe-file path)
+                      (or (probe-file (%p-literal-path path))
                           ;; probe-file may fail on directories in some implementations
                           (ignore-errors
                             (sb-posix:stat path)
@@ -11728,7 +11754,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    A NUL byte in the first 512 bytes means binary; else >30% odd bytes
    (high-bit set, or controls outside TAB/LF/FF/CR/ESC) means binary."
   (handler-case
-      (with-open-file (s (%p--path file)
+      (with-open-file (s (%p-literal-path (%p--path file))
                          :element-type '(unsigned-byte 8))
         (let* ((buf (make-array 512 :element-type '(unsigned-byte 8)))
                (n (read-sequence buf s)))
@@ -11780,13 +11806,21 @@ buffer's fill-pointer; everything else falls back to file-length."
   x)
 
 (defun p-unlink (&rest files)
-  "Perl unlink - delete files. Returns count of files deleted."
+  "Perl unlink - delete files via unlink(2), the path string passed to the
+   C layer untouched (wildcard characters are literal, #755).  A symlink is
+   removed ITSELF, dangling or not; a directory fails with EISDIR in $!
+   instead of crashing (perl's behaviour, probed 5.40.3 -- the old
+   probe-file/delete-file pair skipped dangling symlinks and DIED on a
+   directory).  Returns count of files deleted."
   (let ((count 0))
-    (dolist (f files)
-      (let ((path (to-string (unbox f))))
-        (when (and (probe-file path) (delete-file path))
-          (incf count))))
-    count))
+    (dolist (f files count)
+      (handler-case
+          (progn
+            (sb-posix:unlink (to-string (unbox f)))
+            (incf count))
+        (sb-posix:syscall-error (e)
+          (setf *p-stored-errno* (sb-posix:syscall-errno e)))
+        (error () (%pcl-save-errno))))))
 
 (defun %p-fileno-impl (fh)
   "Perl fileno - get file descriptor number.  Real fd via the fd-stream
@@ -12016,7 +12050,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun %p-inplace-begin (orig-path)
   "Redirect default output to a fresh temp file alongside ORIG-PATH."
   (let* ((tmp (format nil "~A.pcl-inplace-~36,8,'0R" orig-path (random (expt 36 8))))
-         (out (open tmp :direction :output :if-exists :supersede
+         (out (open (%p-literal-path tmp)
+                    :direction :output :if-exists :supersede
                     :if-does-not-exist :create)))
     (setf *p-inplace-orig* orig-path
           *p-inplace-tmp* tmp
@@ -12048,7 +12083,7 @@ buffer's fill-pointer; everything else falls back to file-length."
               (error ()
                 (p-warn (format nil "Can't rename ~A to ~A: No such file or directory, skipping file"
                                 orig backup))
-                (ignore-errors (delete-file tmp)))))
+                (ignore-errors (sb-posix:unlink tmp)))))
           (ignore-errors (sb-posix:rename tmp orig)))) ; no backup: replace original
     (setf *p-inplace-out* nil *p-inplace-orig* nil
           *p-inplace-tmp* nil *p-inplace-saved-out* nil)))
@@ -12071,7 +12106,8 @@ buffer's fill-pointer; everything else falls back to file-length."
      (cond
        ((string= fname "-") (return *standard-input*))
        (t (let ((s (ignore-errors
-                     (open fname :direction :input :if-does-not-exist nil))))
+                     (open (%p-literal-path fname)
+                           :direction :input :if-does-not-exist nil))))
             (cond
               ((null s)
                (p-warn (format nil "Can't open ~A: No such file or directory"
@@ -12153,10 +12189,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    Symlinks are not resolved (readdir reports the link's own name), and
    the entry list starts with \".\" and \"..\" as perl's does."
   (let* ((dir-str (to-string dir))
-         (dir-path (if (and (plusp (length dir-str))
-                            (char= (char dir-str (1- (length dir-str))) #\/))
-                       dir-str
-                       (concatenate 'string dir-str "/"))))
+         ;; %p-literal-path AS-DIRECTORY: trailing slash or not, DIR is a
+         ;; directory, and its own name is LITERAL (a `*' in it is a
+         ;; character, not a wildcard, #755) — only the merged "*.*" below
+         ;; is a wild listing pattern.
+         (dir-path (%p-literal-path dir-str t)))
     (when (probe-file dir-path)
       (let* ((entries (directory (merge-pathnames "*.*" dir-path)
                                  :resolve-symlinks nil))
@@ -12547,7 +12584,8 @@ buffer's fill-pointer; everything else falls back to file-length."
     (handler-case
         (progn
           (sb-posix:chdir path)
-          (setf *default-pathname-defaults* (truename (pathname path)))
+          (setf *default-pathname-defaults*
+                (truename (%p-literal-path path t)))
           t)
       (sb-posix:syscall-error (e)
         (setf *p-stored-errno* (sb-posix:syscall-errno e))
@@ -12591,10 +12629,16 @@ buffer's fill-pointer; everything else falls back to file-length."
   (sb-posix:getcwd))
 
 (defun p-rename (old new)
-  "Perl rename - rename file. Returns true on success."
+  "Perl rename - rename(2), both path strings passed to the C layer
+   untouched: wildcard characters stay literal (#755), a relative NEW is
+   cwd-relative (CL rename-file merges it against OLD's directory), an
+   existing NEW is replaced, and $! reports a failure."
   (handler-case
-      (progn (rename-file (to-string old) (to-string new)) t)
-    (error () nil)))
+      (progn (sb-posix:rename (to-string old) (to-string new)) 1)
+    (sb-posix:syscall-error (e)
+      (setf *p-stored-errno* (sb-posix:syscall-errno e))
+      nil)
+    (error () (%pcl-save-errno) nil)))
 
 (defun p-chmod (mode &rest files)
   "Perl chmod MODE, LIST — change permissions. Returns count changed.
@@ -13470,13 +13514,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    For a .pm, a .pmc beside it wins (perl's PMC preference — modern .pmc
    files are just alternative source, which PCL transpiles like any .pm)."
   (let* ((d (unbox dir))
-         ;; Ensure dir ends with / so merge-pathnames treats it as directory
+         ;; %p-literal-path AS-DIRECTORY treats DIR as a directory with or
+         ;; without a trailing slash, and keeps any wildcard character in
+         ;; either component literal (#755) instead of dying in the parse.
          (s (if (stringp d) d (namestring d)))
-         (s (if (and (> (length s) 0)
-                     (char/= (char s (1- (length s))) #\/))
-                (concatenate 'string s "/")
-                s))
-         (full-path (merge-pathnames rel-path (pathname s)))
+         (full-path (merge-pathnames (%p-literal-path rel-path)
+                                     (%p-literal-path s t)))
          (pmc (and (>= (length rel-path) 3)
                    (string= rel-path ".pm" :start1 (- (length rel-path) 3))
                    (probe-file (concatenate 'string (namestring full-path)
@@ -14071,9 +14114,9 @@ buffer's fill-pointer; everything else falls back to file-length."
         (return-from p-require-file t)))
     ;; Non-.pm: literal file load (e.g. ./test.pl), cwd-relative, @INC fallback.
     (let ((abs-path (if (char= (char path-str 0) #\/)
-                        path-str
+                        (%p-literal-path path-str)
                         (let ((cwd-path (merge-pathnames
-                                         path-str
+                                         (%p-literal-path path-str)
                                          (truename *default-pathname-defaults*))))
                           (if (probe-file cwd-path)
                               cwd-path
@@ -14081,7 +14124,8 @@ buffer's fill-pointer; everything else falls back to file-length."
       (unless (probe-file abs-path)
         (error "Can't locate ~A" path-str))
       (p-load-module-cached abs-path)
-      (setf (gethash path-str *p-inc-table*) (namestring abs-path))
+      (setf (gethash path-str *p-inc-table*)
+            (sb-ext:native-namestring (pathname abs-path)))
       t)))
 
 ;;; ============================================================
