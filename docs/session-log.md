@@ -4,6 +4,67 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 455b (2026-08-30, Fable) — ROUND 13 MERGE: AF + AG reviewed and merged same-day, legs clean, gen v2-440; a third small filler agent (AH) launched
+
+Both round-13 agents finished within the session that launched them and were
+reviewed immediately (the round-12 pattern, compressed):
+
+1. **AF (perf, `030a089`)** merged ff.  All four verdict-coverage gates
+   reviewed line-by-line (the veto now requires capture PLUS an event; the
+   operator proves its own family; block eval is control flow; the topic
+   loop binds `$_` to the raw counter, name and dynamic binding kept).  My
+   probes f1–f4 (die-retention through refs, ref-of-accumulator, shared
+   closure bindings + per-iteration freshness, raw-topic accumulators)
+   byte-identical to perl under BOTH `PCL_OPT` regimes; guards 265 rows;
+   bench re-confirmed on the merged tree: **intloop+= 0.27x, intloop=
+   0.29x, cfor 0.24x — every counting-loop row now beats perl**.
+   ASK RULINGS: (1) `_topic_raw_ok`'s overload/tie residue line RATIFIED,
+   with a sharpening recorded here: in a RANGE topic loop perl's `$_` is
+   READ-ONLY (a handler writing it dies in perl), so the only divergent
+   path is perl-fatal code; (2) print/say stay OFF the allowlist — the
+   measured question is FILED as #813 (round-14 filler); (3) #810 rides
+   the boxed-aggregate design, not standalone — confirmed; (4) the
+   full-sweep deviation is RATIFIED (the WHAT-TO-RUN table outranks the
+   launcher brief for a VarAnnotator change).  One comment nit fixed in
+   review (`printf`, not "sprintf-to-a-handle" — sprintf is legitimately
+   allowlisted under the residue class).
+2. **AG (`b42ef7a` after my rebase over AF)** merged ff with two Fable
+   commits on the branch: the pack artifact regenerated on the COMBINED
+   tree (AF's verdict widenings reach pack-impl) and the comment nit.
+   Conflicts at rebase: the generation line (v2-440 wins) and the two
+   record docs (keep-both).  My probes g1–g4 (#790 died-eval + bare-return
+   shapes, method-name words after `->`, `$x.2`, statement-leading `x`
+   call, block-call `->` postfix) byte-identical to perl; guards 183 rows
+   over 7 files; **combined-tree gate PASS 189 files / 6342 rows**.
+   ASK RULINGS: (1) Mojo's `local (*{"${caller}::a"}, …)` list form NOT
+   taken — right call, it is #564/#652's design half, stays for a Fable
+   design slot; (2) census MESSAGE-text drift stays as noted — #737 owns
+   the one-time refresh; (3) the owed sweep + companion legs land here.
+3. **Batch legs**: full sweep GATE clean, **TOTAL 18339 (+2), 0 new /
+   1 fixed** — the split.t "scalar split stack overflow" row left
+   fail-baseline BY EDIT and hexfp.t went 106/15 → 107/14, BOTH verified
+   on an AG-only worktree (`cbfd7c0`) so they attribute to AG, not to the
+   combined pack regen; aassign.t's pass-baseline fail-column 15 → 13 was
+   round-11 edit lag, reconciled; magic.t 37 → 31 is PARTIAL abort-point
+   wobble (31 = the round-12 serial value too); reset.t PARTIAL → OK with
+   identical counts (completes on the AF-only tree too); state.t's
+   planned column 166 → −1 (the given/when refusal now fires before the
+   plan line).  Six-population census on the merged tree: **21 files /
+   65 drops = AG's edited baseline exactly**, with BOTH cpan populations
+   (94 modules + 289 dist tests) at ZERO drops.  Companion op/ uni/ re/
+   legs: see the addendum below this section when they land.
+4. **AH (filler, s456ah)** launched on the merged tree (USER: "add
+   another smaller Opus subjob"): #800 glob-output escaping + #740 `-s`
+   on empty file + #737 census message-text refresh; IDs 830–839.
+   Its merge is recorded separately when it lands.
+
+Filed: #813.  Closed via the batch: #758–#761, #790, #480–#482, #821
+(+#680/#755/#732 in round 12).  Round-14 pointer: perf = tier list
+continues (#77 return-family next, #811 box-set dispatch, #812 symref
+accretion measured-first); correctness = census 21/65 remainder (op/
+lexsub 1, sub.t child drops, uni/variables charclass family, Mojo board
+2 behind #564's design), #820, #822 behind #757.
+
 ## Session 456af (2026-08-30, Opus agent AF, round-13 PERF slot) — the four verdict-coverage narrowings shipped; BOTH intloop bench rows now BEAT perl; the s454ac load-suspect rows settled and `symref` bisected
 
 Round 13's perf slot, off `83b335f` (gen v2-420).  Two jobs, both done.

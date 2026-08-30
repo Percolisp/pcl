@@ -223,14 +223,22 @@ pushes per round, as rounds 5–11.
    class), **#755** + readdir output half (#800 = the glob twin),
    **#732**, and the perf slot shipped **#680** (m//g 30×→~2.4×; #582
    measured, blocker stands).  Main gen v2-420.
-2. **Round 13**: perf slot = **#758→#759→#760→#761** (the §13
-   verdict-coverage walk; re-measure ovlsub/symref on a quiet box);
-   correctness = census remainder (27/77) + **#790 FIRST** (died-eval
-   scalar vanishes from a returned list — silent shift) + #684 + the Q7
-   leftover re-check (#457 #464–#466 #468 #470 — several likely
-   overtaken) + child-drop sites #483/#480–#482.
-3. Fillers (#722, #737, #740, #750–#754, #800, AB/AA residue) ride as
-   same-mechanism budget fillers, never displacing the census.
+2. **Round 13 — DONE (launched AND merged s455, same day; DECIDED §s455b)**:
+   perf **#758–#761 ALL SHIPPED — every counting-loop bench row now BEATS
+   perl** (intloop+= 0.27x, intloop= 0.29x; N2 struck, #811/#812 filed
+   measured-first); correctness **#790** + **#480–#482** + #821 + §19b +
+   the readline predicate pair — census 27/77 → **21/65, both cpan
+   populations at ZERO**; Q7 leftovers all six verified closed.  Filler
+   agent AH (#800 + #740 + #737) launched same session, merged separately.
+3. **Round 14**: perf = the tier list (#77 return-family transfer next;
+   #811 box-set store-dispatch; #812 symref accretion, measured-first;
+   #813 print/say topic-allowlist measurement); correctness = census
+   21/65 remainder (op/lexsub 1, the perl-t families by harvest,
+   uni/variables charclass, Mojo board 2 behind #564/#652's design slot)
+   + #820 (non-ASCII bareword FH classifier, gate-SET-sized) + #822
+   behind #757.
+4. Fillers (#722, #750–#754, AB/AA residue) ride as same-mechanism budget
+   fillers, never displacing the census.
 
 *The v0.2 gate (both tracks met):* census = 0 (or every survivor
 USER-blessed in not-supported.md), the filler pool down to

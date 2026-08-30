@@ -21,6 +21,26 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s455b (2026-08-30, Fable) — round-13 merge: AF + AG merged same day, legs clean, gen v2-440
+
+- **Round 13 is MERGED and clean** (AF `030a089`, AG rebased `b42ef7a`,
+  Fable pack-regen + nit on the branch, tip `49e55ad`): combined gate PASS
+  189/6342, sweep GATE clean TOTAL **18339 (+2, both movers verified on an
+  AG-only worktree** — split.t's scalar-stack-overflow row left
+  fail-baseline by edit, hexfp 107/14), census **21/65 = the edited
+  baseline, both cpan populations at ZERO drops**.
+- **Raw-topic rulings (AF asks)**: the overload/tie residue line beside
+  `_topic_raw_ok` is RATIFIED, sharpened — in a RANGE topic loop perl's
+  `$_` is READ-ONLY, so the only path that could notice the raw value's
+  box-lessness is code that dies in perl; `print`/`say` stay OFF the
+  allowlist (the measured question = **#813**, round-14 filler); **#810
+  rides the boxed-aggregate design**, never standalone; a full sweep run
+  by an agent against the launcher's "no sweeps" line is RATIFIED when the
+  WHAT-TO-RUN table names the sweep as the gate for that change class.
+- **AG asks**: Mojo's `local (*{"${caller}::a"}, …)` list form stays with
+  #564/#652 (Fable design slot); the census message-text drift stays
+  noted, #737 owns the one-time refresh (agent AH is on it).
+
 ## s456af (2026-08-30, Opus agent AF, round-13 perf slot) — the four verdict-coverage narrowings SHIPPED; both intloop bench rows now beat perl
 
 - **#758–#761 are DONE (`faster-codegen-suggestions.md` §13.1).**  None is a

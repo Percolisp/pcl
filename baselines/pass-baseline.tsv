@@ -1,4 +1,12 @@
 # taken-at: 5323d9e 2026-08-15
+# s455 round-13 edits, ROW BY ROW (never re-blessed): split.t 177/7->178/6 and
+#   hexfp.t 106/15->107/14 (both s456ag, verified on an AG-only cbfd7c0 worktree;
+#   the split scalar-stack-overflow row also left fail-baseline BY EDIT);
+#   aassign.t fail-col 15->13 (round-11 fail-baseline edit lag, reconciled);
+#   magic.t fail-col 37->31 (PARTIAL abort-point wobble, 31 = the serial value
+#   round 12 AND this run); reset.t PARTIAL->OK same counts (completes now, on
+#   the AF-only tree too); state.t planned 166->-1 (the given/when refusal now
+#   fires before the plan line is read; 0 rows either way).
 # s451 (round 10, edited ROW BY ROW): postfixderef.t 96/25 -> 100/21 (Y #612 made
 #   dropped statements run: 6 rows fixed, renumbered survivors, rows 72/73 honest
 #   PVBM fails); reset.t 41->40 + tr.t 239->238 = the #723 TAP-glue landing moved
@@ -131,7 +139,7 @@
 #   split.t: the un-dropped `my ($sp) = grep ... or skip` now takes the file's own skip branch
 #   (PCL's \s under /u misses NBSP, owner #407), so 9 rows skip: 3 were baseline fails (fixed),
 #   6 were ACCIDENTAL passes running on the dropped statement's undef $sp.
-aassign.t	OK	175	15	189
+aassign.t	OK	175	13	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
 args.t	OK	22	1	23
@@ -178,7 +186,7 @@ grent.t	OK	3	0	3
 grep.t	OK	71	0	77
 hash.t	OK	7	7	14
 hashassign.t	OK	305	4	309
-hexfp.t	OK	106	15	125
+hexfp.t	OK	107	14	125
 if.t	OK	2	0	2
 index.t	OK	110	0	120
 infnan.t	OK	1106	0	1112
@@ -196,7 +204,7 @@ lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
 # argv rename from SBCL, docs/not-supported.md) added to fail-baseline in the same commit.
-magic.t	PARTIAL	158	37	208
+magic.t	PARTIAL	158	31	208
 # s449 (#564, agent S): `local *{EXPR} = sub {…}` has a lowering, so the four rows of the
 # `local *1 = sub {123}` loop at method.t:38 PASS — 72/26 -> 76/22, verified SERIALLY on both
 # this tree and a c8a8311 worktree (the file's other named fails identical on both, incl. the
@@ -232,17 +240,17 @@ recurse.t	OK	27	1	28
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
 ref.t	PARTIAL	193	16	245
-reset.t	PARTIAL	41	0	45
+reset.t	OK	41	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
 sort.t	OK	204	0	205
 splice.t	OK	34	0	34
-split.t	OK	177	7	219
+split.t	OK	178	6	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
-state.t	TRANSPILE_FAIL	0	0	166
+state.t	TRANSPILE_FAIL	0	0	-1
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
 substr.t	PARTIAL	347	3	397
