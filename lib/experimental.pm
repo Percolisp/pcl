@@ -10,18 +10,26 @@
 # perl feature that is still marked experimental.  It does two things: enable
 # the feature, and silence the `experimental::<name>` warning category.
 #
-# PCL cannot run the REAL experimental.pm.  It does
+# PCL cannot run the REAL experimental.pm.
+#
+# The ORIGINAL reason is GONE (s457ai, task #817): the module does
 #
 #     $_ = version->new($_) for values %min_version;
 #
-# and `for values %h` does not alias in PCL — the write lands on a copy, the
-# hash keeps its strings, and the next line calls ->stringify on "5.34.0"
-# ("Can't locate object method \"stringify\" via package \"5.34.0\"").  That is
-# the `values` half of the aliasing residue on the E5 boxed-aggregates axis
-# (docs/fable-answers-s370.md §5), which is deliberately not being worked on
-# yet — so this shim stands in until it is.
+# and `for values %h` did not alias in PCL, so the write landed on a copy and
+# the next line called ->stringify on "5.34.0".  `values` (and slices) now
+# hand out the container's own slots, so that line works.
 #
-# DELETE-WHEN: `$_ = f($_) for values %h` aliases (writes reach the hash).  At
+# The shim stands on a SECOND, unrelated blocker, measured by moving this file
+# aside and running `use experimental 'try'` (task #840): PCL's feature.pm and
+# warnings.pm shims leave %feature::feature, %warnings::Offsets and
+# %warnings::NoOp EMPTY, and the real module builds its whole dispatch table
+# from those three hashes.  With them empty every pragma falls past the
+# "is it a known feature" arms into the version check and croaks
+# "Need perl 5.34.0 or later for feature try" — a wrong answer on a perl whose
+# $] is 5.040003.
+#
+# DELETE-WHEN: `%feature::feature` / `%warnings::Offsets` are populated.  At
 # that point the real module loads and this file should go; the guard for the
 # trigger is in Pl/t/feature-pragma-01.t.
 #

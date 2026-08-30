@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 28;
 
 # ---- 1. the table is perl's -----------------------------------------------
 
@@ -219,16 +219,31 @@ print "with=", (defined $with ? $with : "undef"),
       " without=", (defined $without ? $without : "undef"), "\n";
 PERL
 
-# DELETE-WHEN trigger for lib/experimental.pm: the shim exists only because
-# `for values %h` does not alias, which is what makes the real module die at
-# load.  When this row starts FAILING, `values` aliases — drop the shim and
-# let the real experimental.pm load.
+# The `values` half of lib/experimental.pm's DELETE-WHEN trigger is MET (s457ai,
+# task #817): `$_ = f($_) for values %h` now aliases, so the real module's
+# `$_ = version->new($_) for values %min_version` would work.  This row is now
+# the POSITIVE guard on that (perl prints 20), and the row below is the new
+# DELETE-WHEN trigger — the second, unrelated blocker measured when the shim
+# was moved aside: PCL's feature/warnings shims leave %feature::feature and
+# %warnings::Offsets EMPTY, so the real module falls through its dispatch to
+# the version check and croaks "Need perl 5.34.0 or later for feature try"
+# (task #840).
 {
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh qq{my %h = (a => 2);\n\$_ = \$_ * 10 for values %h;\nprint \$h{a}, "\\n";\n};
     close $fh;
     my $got = run_cl($pl_file);
     chomp(my $g = $got);
-    isnt($g, '20', 'STILL not aliasing through `for values %h` — lib/experimental.pm '
-                 . 'is still needed (when this row fails, delete the shim)');
+    is($g, '20', '`$_ = ... for values %h` aliases into the hash (#817)');
+}
+
+{
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh qq{require feature; require warnings;\n}
+            . qq{print scalar(keys %feature::feature) + scalar(keys %warnings::Offsets), "\\n";\n};
+    close $fh;
+    my $got = run_cl($pl_file);
+    chomp(my $g = $got);
+    is($g, '0', 'STILL empty %feature::feature/%warnings::Offsets — lib/experimental.pm '
+              . 'is still needed (when this row fails, delete the shim; #840)');
 }

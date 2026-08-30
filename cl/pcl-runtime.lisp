@@ -5081,6 +5081,54 @@
        (stringp (p-box-value box))
        (/= (p-box-nv box) (parse-perl-number (p-box-value box)))))
 
+(defun %p-assign-snapshot (item)
+  "The value BOX-SET would store for ITEM, read NOW.  Perl evaluates the WHOLE
+   right-hand side of a list assignment before any store happens, so an RHS
+   element that is a live box must be snapshotted or a later store can be read
+   back through it: `($a,$b) = ($b,$a)` (the same variable box on both sides)
+   and, since #818, `@a[0,1] = @a[1,0]` (a slice hands out the container's own
+   element boxes).  box-set's rules, mirrored:
+     - p-box with a non-box inner -> store the inner value (copy semantics)
+     - p-box with a box inner (a reference) -> keep the outer box
+     - blessed / array-ref / hash-ref / dualvar box -> keep the box
+     - typeglob -> a FRESH box carrying the is-ref flag (#423: glob REF vs glob
+       VALUE lives on the CONTAINER, so a raw-value snapshot loses it, and
+       keeping ITEM would alias — ($g1,$g2) = ($g2,$g1) collapsed to one glob)
+     - MAGIC or TIED source (a defelem @_ alias, an arylen/substr/pos lvalue, a
+       tied scalar) -> the value it reads as now, never the cell or the proxy
+       (copying the cell made `my ($x) = @_; $x = 0` write THROUGH the alias
+       and vivify the caller's `$h{k}`; copying the proxy made the target
+       itself tied -- s411, found by PCL_OPT=none)
+     - non-box -> as-is.
+   Idempotent, so a path that snapshots twice is harmless."
+  (if (p-box-p item)
+      (let ((inner (p-box-value item)))
+        (cond
+          ((or (p-box-p inner)
+               (p-box-class item)
+               (and (vectorp inner) (not (stringp inner)))  ; array ref
+               (hash-table-p inner)                          ; hash ref
+               (%p-dualvar-box-p item))                      ; $!/dualvar
+           item)
+          ((p-typeglob-p inner)
+           (let ((nb (make-p-box inner)))
+             (setf (p-box-is-ref nb) (p-box-is-ref item))
+             nb))
+          ((p-magic-cell-p inner) (funcall (p-magic-cell-getter inner)))
+          ((p-tie-proxy-p inner) (unbox (%p-tie-fetch item inner)))
+          (t inner)))
+      item))
+
+(defun %p-assign-snapshot-vector (src)
+  "%p-assign-snapshot over a whole assignment RHS, into a fresh simple vector —
+   ONE allocation, and per element no allocation at all for the ordinary
+   scalar/reference cases.  The slice-assignment arms of p-setf run this before
+   their store loop, which is where perl's own aassign copies."
+  (let* ((n (length src))
+         (out (make-array n)))
+    (dotimes (i n out)
+      (setf (aref out i) (%p-assign-snapshot (aref src i))))))
+
 (defun %p-flatten-list (src)
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (labels ((add (item)
@@ -5118,53 +5166,9 @@
                   (loop for x across (%p-marker-pairs item)
                         do (vector-push-extend x result)))
                  (t
-                  ;; Snapshot the value that box-set will store, not the box
-                  ;; itself.  This prevents aliasing when the same boxes appear
-                  ;; on both sides, e.g. ($a,$b) = ($b,$a).  box-set logic:
-                  ;;   - p-box with non-box inner → store inner (copy semantics)
-                  ;;   - p-box with box inner (reference) → store outer box
-                  ;;   - p-box with class set (blessed non-hash) → preserve box (bless semantics)
-                  ;;   - p-box with vector/hash inner (array/hash ref) → preserve the box
-                  ;;   - non-box → store as-is
-                  (vector-push-extend
-                   (if (p-box-p item)
-                       (let ((inner (p-box-value item)))
-                         (cond
-                           ((or (p-box-p inner)
-                                (p-box-class item)
-                                (and (vectorp inner) (not (stringp inner)))  ; array ref
-                                (hash-table-p inner)  ; hash ref
-                                (%p-dualvar-box-p item))  ; $!/dualvar: keep both halves
-                            item)   ; reference, blessed, or dualvar: preserve the box
-                           ;; A typeglob payload: glob REF vs glob VALUE is the
-                           ;; BOX's is-ref flag (#423), so the raw-value snapshot
-                           ;; below loses it and box-set re-boxes a `\*foo` as a
-                           ;; bare glob (`my $x = shift` on a glob ref printed
-                           ;; *main::foo).  Snapshot a FRESH box carrying the
-                           ;; flag — preserving ITEM instead would alias, and
-                           ;; ($g1,$g2) = ($g2,$g1) would collapse to one glob.
-                           ;; Coderefs need no such arm: a raw function is
-                           ;; unambiguously a reference.
-                           ((p-typeglob-p inner)
-                            (let ((nb (make-p-box inner)))
-                              (setf (p-box-is-ref nb) (p-box-is-ref item))
-                              nb))
-                           ;; A MAGIC or TIED source (a defelem @_ alias, an
-                           ;; arylen / substr / pos lvalue, a tied scalar):
-                           ;; snapshot the VALUE it reads as NOW — perl
-                           ;; evaluates the whole RHS before any store — never
-                           ;; the cell or the proxy: copying the cell made
-                           ;; `my ($x) = @_; $x = 0` write THROUGH the alias and
-                           ;; vivify the caller's `$h{k}`, and copying the proxy
-                           ;; made the target itself tied (s411, found by
-                           ;; PCL_OPT=none: the raw-params fast path hid it).
-                           ((p-magic-cell-p inner)
-                            (funcall (p-magic-cell-getter inner)))
-                           ((p-tie-proxy-p inner)
-                            (unbox (%p-tie-fetch item inner)))
-                           (t inner)))  ; plain scalar: snapshot value
-                       item)
-                   result)))))
+                  ;; The RHS-snapshot rule lives in %p-assign-snapshot
+                  ;; (the slice-assignment arms of p-setf run it too).
+                  (vector-push-extend (%p-assign-snapshot item) result)))))
       (add src))
     result))
 
@@ -5787,11 +5791,16 @@
        ;; (#387 family 46, s413: the body was spelled once per case).
        (let ((body
               `(let* ((,src ,value)
-                      ;; Convert source to vector
-                      (,src-vec (cond
-                                  ((listp ,src) (coerce ,src 'vector))
-                                  ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                  (t (vector ,src))))
+                      ;; Convert source to vector, then SNAPSHOT it: perl
+                      ;; evaluates the whole RHS before the first store, and a
+                      ;; slice RHS holds the container's own element boxes
+                      ;; (#818), so `@a[0,1] = @a[1,0]` would otherwise read
+                      ;; source 1 after store 0 overwrote it.
+                      (,src-vec (%p-assign-snapshot-vector
+                                 (cond
+                                   ((listp ,src) (coerce ,src 'vector))
+                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                                   (t (vector ,src)))))
                       ;; Flatten indices (handle range operator returning vector or list)
                       (,indices (let ((idx-list nil))
                                   (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
@@ -5829,10 +5838,13 @@
        ;; (#387 family 46, s413: the body was spelled once per case).
        (let ((body
               `(let* ((,src ,value)
-                      (,src-vec (cond
-                                  ((listp ,src) (coerce ,src 'vector))
-                                  ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                  (t (vector ,src))))
+                      ;; snapshot before the first store, as the array-slice
+                      ;; sibling above does (#818, `@h{'p','q'} = @h{'q','p'}`)
+                      (,src-vec (%p-assign-snapshot-vector
+                                 (cond
+                                   ((listp ,src) (coerce ,src 'vector))
+                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                                   (t (vector ,src)))))
                       (,keys (let ((key-list nil))
                                (dolist (k (list ,@keys-exprs) (nreverse key-list))
                                  (cond
@@ -7128,6 +7140,29 @@
       ;; Complex place
       `(p-push-impl ,arr ,@items)))
 
+(defun %p-elem-cell (vec i)
+  "THE element-cell promotion (docs/boxed-aggregates-design-s455.md §4.2): the
+LIVE box for slot I of VEC — an alias, so a write through it reaches the
+container.  A slot already holding a box IS the cell; a slot holding a RAW
+value is promoted IN PLACE (the box replaces the raw value in the slot) so
+every later alias of the same slot gets the same box.  Promotion is MONOTONE:
+nothing ever demotes a slot, which is what keeps a live alias live.
+I must be a non-negative, in-bounds index into VEC and the slot must not be a
+HOLE — a hole is %p-defelem-box's business, and the callers dispatch on that."
+  (let ((elem (aref vec i)))
+    (if (p-box-p elem)
+        elem
+        (setf (aref vec i) (make-p-box elem)))))
+
+(defun %p-hash-elem-cell (h k)
+  "Hash twin of %p-elem-cell: the LIVE box for the EXISTING key K of hash H,
+promoting a raw slot value in place.  A missing key is the caller's business
+(the defelem alias in p-gethash-argbox)."
+  (let ((v (gethash k h)))
+    (if (p-box-p v)
+        v
+        (setf (gethash k h) (make-p-box v)))))
+
 (defun %p-defelem-box (vec i)
   "A deferred-element alias box for an array HOLE slot (perl's defelem magic).
 Aliasing a hole (foreach loop var, @_ slot) reads undef but leaves the hole
@@ -7189,11 +7224,31 @@ why p-aref-box (the eager lvalue accessor) is wrong here."
           (cond
             ((< actual-idx 0) (make-p-box *p-undef*))
             ((and (< actual-idx len) (aref a actual-idx))
-             (let ((elem (aref a actual-idx)))
-               (if (p-box-p elem)
-                   elem
-                   (setf (aref a actual-idx) (make-p-box elem)))))
+             (%p-elem-cell a actual-idx))
             (t (%p-defelem-box a actual-idx)))))))
+
+(defun %p-alias-aelem (arr idx)
+  "One element of an array SLICE or of `values @a`, as an ALIAS.  Perl's
+slices and `values` yield the container's own elements, so `for (@a[0,1])
+{ $_ *= 10 }` and `for (values @a) { … }` write THROUGH (probed vs perl
+5.40: tasks #817/#818) — the same identity @_ gets, so this is p-aref-argbox
+with the containers it cannot alias falling back to p-aref's plain value:
+a LIST-backed pseudo-array, a symbolic-ref string, undef.  Those cannot hold
+a slot box, so there is nothing to alias and no behaviour to preserve."
+  (let ((a (unbox arr)))
+    (if (and (vectorp a) (not (stringp a)))
+        (p-aref-argbox a idx)
+        (p-aref arr idx))))
+
+(defun %p-alias-helem (hash key)
+  "Hash twin of %p-alias-aelem: one element of `@h{…}` / `values %h` as an
+ALIAS (p-gethash-argbox), falling back to p-gethash's value for containers
+that cannot hold a slot box (undef, %ENV/%INC markers, symbolic-ref strings,
+blessed objects)."
+  (let ((h (unbox hash)))
+    (if (and (hash-table-p h) (not (gethash :__class__ h)))
+        (p-gethash-argbox h key)
+        (p-gethash hash key))))
 
 (defun p-gethash-argbox (hash key)
   "Hash element in USER-SUB ARGUMENT position (perl's @_ aliasing): the
@@ -7208,10 +7263,9 @@ create the key on a read-only call, which perl does not."
         ;; keep plain value semantics, no aliasing.
         (make-p-box (p-gethash hash key))
         (multiple-value-bind (existing found) (gethash k h)
+          (declare (ignore existing))
           (if found
-              (if (p-box-p existing)
-                  existing
-                  (setf (gethash k h) (make-p-box existing)))
+              (%p-hash-elem-cell h k)
               (let ((box (make-p-box nil)))
                 (setf (p-box-value box)
                       (make-p-magic-cell
@@ -7914,21 +7968,26 @@ create the key on a read-only call, which perl does not."
         collect arg))
 
 (defun p-aslice (arr &rest indices)
-  "Perl array slice @arr[indices] - returns vector of values.
+  "Perl array slice @arr[indices] - returns a vector of the container's own
+   ELEMENTS (slot boxes / defelem aliases, %p-alias-aelem): a slice is a list
+   of ALIASES in perl, so `for (@a[0,1]) { $_ *= 10 }` writes through (#818).
+   Copy positions (`my @c = @a[0,1]`, push, sort, list assign) unbox as they
+   already do for a plain `@a`, which is the same shape.
    Handles individual indices, lists, and vectors (from range operator)."
   (let ((flat-indices (%p-flatten-slice-args indices))
         (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (idx flat-indices result)
-      (vector-push-extend (p-aref arr idx) result))))
+      (vector-push-extend (%p-alias-aelem arr idx) result))))
 
 (defun p-hslice (hash &rest keys)
-  "Perl hash slice @hash{keys} - returns vector of values.
+  "Perl hash slice @hash{keys} - returns a vector of the hash's own value
+   slots as ALIASES (%p-alias-helem, the #818 sibling of p-aslice).
    Handles individual keys, lists, and vectors (from range operator).
    Strings are vectors in CL but must not be expanded into characters."
   (let ((flat-keys (%p-flatten-slice-args keys))
         (result (make-array 0 :adjustable t :fill-pointer 0)))
     (dolist (key flat-keys result)
-      (vector-push-extend (p-gethash hash key) result))))
+      (vector-push-extend (%p-alias-helem hash key) result))))
 
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
@@ -7939,7 +7998,9 @@ create the key on a read-only call, which perl does not."
     (dolist (key flat-keys result)
       (let ((k (to-string key)))
         (vector-push-extend k result)
-        (vector-push-extend (p-gethash hash k) result)))))
+        ;; the VALUE half is an alias, like the plain slice's (probed: perl
+        ;; writes through `for (%h{'a'}) { $_ = "K" }`); the key half is a copy
+        (vector-push-extend (%p-alias-helem hash k) result)))))
 
 (defun p-kv-aslice (arr &rest indices)
   "Perl KV array slice %arr[indices] - returns vector of (index, value) pairs.
@@ -7951,7 +8012,8 @@ create the key on a read-only call, which perl does not."
       (let* ((i (truncate (to-number idx)))
              (i (if (< i 0) (max 0 (+ (length arr) i)) i)))
         (vector-push-extend (make-p-box i) result)
-        (vector-push-extend (p-aref arr i) result)))))
+        ;; VALUE half is an alias, the index half a copy (p-kv-hslice's rule)
+        (vector-push-extend (%p-alias-aelem arr i) result)))))
 
 (defun p-hash (&rest pairs)
   "Create a Perl hash from key-value pairs.
@@ -8118,22 +8180,32 @@ create the key on a read-only call, which perl does not."
     (t (make-array 0 :adjustable t :fill-pointer 0))))
 
 (defun p-values (collection)
-  "Perl values function - returns unboxed values, also resets each() iterator"
+  "Perl values function — returns the container's own value slots as ALIASES
+   (%p-elem-cell / %p-hash-elem-cell), so `for (values %h) { $_ .= \"x\" }`
+   writes through as it does in perl (#817); copy positions unbox, exactly as
+   they already do for a plain `@a` in list context.  Also resets each()."
   (cond
     ;; Array case: return elements and reset array iterator
     ((and (vectorp collection) (not (stringp collection)))
      (remhash collection *array-iterators*)
      (let* ((n (length collection))
             (result (make-array n :adjustable t :fill-pointer n)))
-       (dotimes (i n) (setf (aref result i) (p-aref-unbox-elem (aref collection i))))
+       (dotimes (i n)
+         (setf (aref result i)
+               (if (null (aref collection i))
+                   (%p-defelem-box collection i)   ; hole: alias, vivify on write
+                   (%p-elem-cell collection i))))
        result))
     ;; Hash case
     ((hash-table-p collection)
      (remhash collection *hash-iterators*)
      (let ((result (make-array 0 :adjustable t :fill-pointer 0)))
        (maphash (lambda (k v)
+                  (declare (ignore v))
                   (when (%p-real-hash-key-p k)
-                    (vector-push-extend (%p-hash-unbox-elem v) result)))
+                    ;; promotion REPLACES an existing key's value — legal
+                    ;; during maphash (adding/removing keys would not be)
+                    (vector-push-extend (%p-hash-elem-cell collection k) result)))
                 collection)
        result))
     ;; %INC special hash: values are the loaded modules' resolved paths.

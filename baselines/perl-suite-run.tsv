@@ -1124,8 +1124,8 @@ op/int.t	19	0	19	0	OK		0
 op/isa.t	14	0	14	0	OK		0
 op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
-op/kvaslice.t	38	0	22	16	DIFF		0
-op/kvhslice.t	39	0	18	20	DIFF		0
+op/kvaslice.t	38	0	24	14	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
+op/kvhslice.t	39	0	20	18	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
 # s450 (round 9): op/lc.t 2683/33 -> 2685/31 EDITED BY HAND — s450v #522: \U/\L/\E in an
 #   s/// replacement route through the dq case-shift compiler.  Predicted by agent V's A/B
 #   (worktree vs 3c7c6ec), parallel and serial agree.
