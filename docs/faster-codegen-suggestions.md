@@ -579,10 +579,18 @@ code and the highest-value OO change.
     classes — see `not-supported.md`) as a side effect. Do the plumbing/capture
     measurement above FIRST to confirm the engine (not PCL's own wrapping)
     dominates before committing.
-- **pack/unpack (1175–1587×).** The transpiled pure-Perl oracle **re-parses the
-  template string every call**. **P1: memoize the template parse** keyed on the
-  constant template (biggest local win); **P2:** for a literal template, emit a
-  specialized unrolled packer at transpile time.
+- **pack/unpack (1175–1587×).** ~~The transpiled pure-Perl oracle **re-parses
+  the template string every call**. **P1: memoize the template parse**~~
+  **PREMISE CORRECTED s455c (sb-sprof, steady state after warming the lazy
+  extension compile): there is NO separated parse to memoize** —
+  `_pack_tmpl`/`_unpack_tmpl` walk the template WHILE packing, and the
+  profile is FLAT (`%make-p-box` 14 %, `p-find-overload` 14 % → **#815**,
+  box-set 6 %, class checks 6 %, `%p-flatten-list` 8 %, `p-substr` 5 %):
+  ~21 µs per bench call-pair vs perl's ~0.17 µs is the boxed interpreter,
+  not a parse.  The in-PCL fix is a **plan/executor restructure** (parse
+  once → compact op list; raw-CL executor) — a real session; the USER-ruled
+  pclxs/`pp_pack.c` route (#74) stands as the plan.  P2 (literal-template
+  specialized packer) survives as the restructure's second phase.
 - **sprintf (measured ~5×).** `p-sprintf` re-parses the format each call:
   `sp0` `(p-sprintf "%05d-%s" i "x")` 0.129s vs a pre-compiled CL formatter
   `sp1` 0.025s @ 200k. Same "hoist the constant parse out of the hot loop"
