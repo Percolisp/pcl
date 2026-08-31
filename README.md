@@ -133,10 +133,50 @@ failure breakdowns.
 
 ### Speed
 
-PCL beats perl at recursion, counting loops and integer arithmetic: `fib` by
-3.3×, `cfor` by 4.1×, `collatz` by 2.5×.  It is slower at `pack`/`unpack`,
-at method dispatch, and at moving data in and out of arrays and hashes.  The
-current benchmark table, and the work queue behind it, are in
+These are microbenchmarks — each isolates one Perl feature, not a whole
+program, so read the ratios as *why something is fast or slow*, not as a
+promise about your code.  Ratio is PCL time / perl time, best-of-5; below
+1.00× is a PCL win.
+
+**Provably-numeric loops and recursion: roughly 2× to 4× faster.**  When the
+compiler can prove a loop variable is always a machine integer, or that a
+recursive call is doing plain numeric work, it emits native machine
+arithmetic instead of perl's generic boxed-scalar path.  The same kind of
+proof lets a read-only `foreach` bind array slots directly instead of
+copying through a scalar.
+
+| benchmark | ratio | what it measures |
+|---|---|---|
+| cfor | 0.24× | C-style for loop |
+| collatz | 0.26× | while loop, integer arithmetic |
+| intloop= | 0.28× | counting loop, assignment form |
+| intloop+= | 0.29× | counting loop, `$s += $i` |
+| fib(27) | 0.29× | recursion |
+| feread | 0.46× | read-only foreach over an array |
+| gcdrec | 0.50× | recursion with modulo |
+
+**Aggregate traffic: parity to a bit faster for one element, slower in
+bulk.**  A single array or hash element read/write (`arrhash`, 0.66×, about
+1.5× faster) hits that same direct-slot path.  Building an array
+element-by-element (`arrfill`, 1.46×) or moving several elements at once
+(`sliceasgn`, 2.09×; `slices`, 3.29×) is slower: each element carries PCL's
+boxed-scalar representation, an abstraction layer that perl's flat C arrays
+don't pay for on a bulk copy.
+
+**Dynamic features: slower, because nothing can be proved ahead of time.**
+Method dispatch (`ovlsub`, 3.31×) and symbolic references (`symref`,
+`${'name'}`, 9.94×) both resolve a name at runtime through a string-keyed
+lookup that no compiler can predict ahead of time, and perl's C
+implementation is currently faster at it than PCL's.  `m//g` in a loop
+(`regexg`, 2.14×) is slower for a different reason: PCL runs SBCL's own Lisp
+regex engine, not perl's hand-tuned C one.
+
+**`pack`/`unpack` (~1300×) is a known open item, not a representative
+number.**  PCL's `pack`/`unpack` is itself Perl transpiled by PCL, kept
+around as a correctness oracle rather than optimized; a native fast path is
+planned but deliberately deferred.
+
+The full table and the work queue behind these numbers are in
 [`docs/faster-codegen-suggestions.md`](docs/faster-codegen-suggestions.md).
 
 ## Requirements
