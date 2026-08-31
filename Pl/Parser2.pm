@@ -1161,6 +1161,16 @@ sub parse {
   # the FILE, so every repair below would otherwise be reading garbage tokens —
   # see _repair_glob_pattern_cascade (task #563).
   $doc = $self->_repair_glob_pattern_cascade($doc);
+  # SECOND, and for the SAME reason (task #931): the `WORD /` derail is the
+  # other unbounded one.  PPI scans to the closing `/`, then reads the next `/`
+  # as the start of another match and swallows every statement between them, so
+  # what the repairs below see there is not perl at all — it is PATTERN TEXT
+  # tokenized as code.  Left later in the block, `_repair_glob_multiply` met the
+  # `*b` of `ok /a*b?c*/` as a GLOB (a Regexp ends a term) and rewrote it to
+  # `* b` — a space spliced into the middle of a regex, which then matched
+  # something else entirely.  A repair whose damage is unbounded must run before
+  # the repairs that read the damaged region, never beside them.
+  $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_glob_multiply($doc);
   # …and its INVERSE: a punctuation- or digit-named GLOB (`*X = *-`,
   # `local *1 = sub {…}`) that PPI hands over as two operator tokens — see
@@ -1176,7 +1186,6 @@ sub parse {
   # …and the CONCATENATION spelling of the same family: `$x.2` is lexed as one
   # Number::Float and the operator disappears — see _repair_dot_number (#480).
   $doc = $self->_repair_dot_number($doc);
-  $doc = $self->_repair_word_match($doc);
   $doc = $self->_repair_word_x_call($doc);
   $doc = $self->_repair_term_initial_complement($doc);
   # And the CASCADE of §14's readline mis-lex: with `>` read as an operator the
@@ -6055,7 +6064,34 @@ sub _repair_dot_number {
 # `ok`, `while` and `when` — all repairs — plus one that must NOT be touched,
 # `map { … } <op/*>`, where PPI derails a GLOB into `< Word / * >`.  Hence the
 # `<` guard, which no amount of reading would have suggested.
+#
+# TO FIXPOINT, for the same reason `_repair_glob_pattern_cascade` is (s449),
+# and found the same way — by a file with TWO of them (task #931).  The derail
+# does not stop at the statement: PPI scans for the closing `/` and, having
+# passed it, is back in term position, so the NEXT `/` starts a `Regexp::Match`
+# that swallows every following statement up to the one after it.  In
+#
+#     ok /a+b?c+/, "one";
+#     ok /a*b?c*/, "two";
+#
+# the second `ok` is not a Word token at all — it is text inside
+# `Regexp::Match</, "one";\n ok /a>` — so a single pass repairs line 1, and
+# line 2 is only a `WORD /` site AFTER that pass's reparse.  One pass therefore
+# fixes the first of a run and drops the rest (t/re/pat.t:106 lost three
+# statements to this, one of them a whole `$_ = …` reset).  Each iteration
+# repairs at least one `/` or stops, and a file's `/` characters are finite;
+# the round cap is a belt, not the argument.
 sub _repair_word_match {
+  my ($self, $doc) = @_;
+  for my $round (1 .. 20) {
+    my $pass = $self->_repair_word_match_pass($doc);
+    last if !$pass;
+    $doc = $pass;
+  }
+  return $doc;
+}
+
+sub _repair_word_match_pass {
   my ($self, $doc) = @_;
   my @tok = grep { $_->significant } $doc->tokens;
   my $repaired = 0;
@@ -6073,7 +6109,7 @@ sub _repair_word_match {
     $t->set_content('m/');
     $repaired = 1;
   }
-  return $repaired ? $self->_reparse_doc($doc) : $doc;
+  return $repaired ? $self->_reparse_doc($doc) : undef;
 }
 
 # Does a closing `/` follow the mis-lexed one at $i?  Everything between them is
