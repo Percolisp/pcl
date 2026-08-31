@@ -96,6 +96,15 @@ my @benches = (
   # index spelling `for my $i (0..$#a) { $s += $a[$i] }` is the floor it is
   # chasing.
   ['feread',    "$HN my \@a = (1..1000); my \$s=0; for (1..\$n) { for my \$x (\@a) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
+  # #883: the SAME read-only foreach over a MULTI-array list.  `for my $x
+  # (@a, @b)` lowers to p-foreach-raw over (p-flatten-args (list @a @b)), and
+  # the flattener promotes every source slot as it builds the flattened
+  # vector — so ARM A's verdict fires but the allocation it exists to avoid
+  # has already happened, and @a/@b pay box indirection on every later read.
+  # Element count and total work are matched to `feread` (2 x 500 = 1000
+  # elements, same 30k outer repeats) so the two rows subtract cleanly: if
+  # this row is near feread's ratio the flattener is NOT the cost.
+  ['feread2',   "$HN my \@a = (1..500); my \@b = (501..1000); my \$s=0; for (1..\$n) { for my \$x (\@a, \@b) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
   ['ovlsub',    "$HN package V; use overload '-' => sub { V->new(\$_[2] ? \$_[1] - \$_[0]{v} : \$_[0]{v} - (ref \$_[1] ? \$_[1]{v} : \$_[1])) }, '\"\"' => sub { \$_[0]{v} }; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$x = V->new(1000); my \$s = 0; for (1..\$n) { my \$y = \$x - 3; \$s += \"\$y\" } print \"\$s\\n\";", 100_000, 0],
   ['symref',    "$HN no strict 'refs'; our \$g = 2; our \@ga = (1,2,3); my \$s=0; for (1..\$n) { \$s += \${'main::g'} + \${'g'} + scalar(\@{'main::ga'}) } print \"\$s\\n\";", 200_000, 0],
   # Scalar-context m//g per-match cost (task #680): N repeats of a 200k-char

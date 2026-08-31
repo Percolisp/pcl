@@ -172,8 +172,9 @@ when every other write to `$x` is numeric-valued (the A-num rule —
 magical string increment is then unreachable); a tail-position postfix
 wraps in `prog1` to return the old value.
 
-**Invariant: a raw slot never holds a box or a reference** — only host
-numbers and strings. Ops always accept either form (they unbox
+**Invariant: a raw slot holds a host number or string** — never a box or a
+reference — **with one exception, the freeze-licensed slot's runtime
+decline described below.** Ops always accept either form (they unbox
 internally), so reads look identical.
 
 A raw slot may also be **freeze-licensed** (the B-regime, s303, task #62):
@@ -181,11 +182,23 @@ when every USE of the variable is provably numeric (resp. string/boolean)
 but a write's value shape is unproven (`my $n = $h{k}`, `$x = $y`, a bare
 sub call), the slot stays raw and every native write routes through
 `(%pcl-to-number-strict V "$n")` / `(%pcl-to-string-strict V "$n")` — an
-eager coercion that preserves the invariant (the stored value is always a
-plain host number/string), applies box-set's aggregate scalar-context
-collapse, and **dies loudly** if an overload-capable blessed ref or a
-genuine dualvar arrives (never freeze what per-use code must observe).
-Semantics and the full licensing/disqualifier tables:
+eager coercion that applies box-set's aggregate scalar-context collapse
+and then freezes the value to a plain host number/string.  (The second
+argument names the slot in the IR; the runtime does not read it.)
+
+**The freeze DECLINES when the arriving value carries per-use behavior**
+— its class overloads *any* operator, or it is a genuine dualvar.  Then
+the coercer stores `(p-box-init V)` instead: a fresh box under box-set's
+own assignment rules, i.e. **exactly what the general-form (boxed)
+compiler would have stored for that write**.  That is the one exception to
+the raw-slot invariant above, and it is what keeps the optimized emission
+running identically to `PCL_OPT=none` — a translator therefore has to make
+every raw-slot read box-tolerant, which it already is, since all reads go
+through ordinary `p-*` ops.  A decline is silent and value-correct, not an
+error: the compile-time licence is a textual scan of *this file* for `use
+overload`, so an overloaded object arriving from a module, a container, or
+a string `eval` is invisible to it, and only the runtime can see it (task
+#890).  Semantics and the full licensing/disqualifier tables:
 `docs/raw-numeric-verdict.md`.
 
 A freeze-licensed slot whose only writes are plain roots + `.=` and whose

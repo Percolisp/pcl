@@ -2700,19 +2700,44 @@
         (make-p-box (if cls (format nil "~A=~A" cls raw) raw)))
       (make-p-box (to-string obj))))
 
+(defun %p-class-table-overloaded-p (cls)
+  "True when CLS itself registers a handler for ANY operator."
+  (block scan
+    (maphash (lambda (k v)
+               (declare (ignore v))
+               (when (and (consp k) (equal (car k) cls))
+                 (return-from scan t)))
+             *p-overload-table*)
+    nil))
+
+(defun %p-class-overloaded-p (cls &optional visited)
+  "True when CLS or an @ISA ancestor registers a `use overload` handler for
+   ANY operator.  ONE reading of the question `does this class overload
+   anything`: overload::Overloaded (p-overloaded) and the raw-slot freeze
+   decline (%pcl-raw-freeze-unsafe-p) both ask it and must not drift.
+   INHERITANCE IS PART OF THE QUESTION — perl's own overload::Overloaded
+   answers true for a subclass of an overloaded parent (probed 5.40.3), and
+   so does the operator dispatch this predicate has to stay ahead of
+   (%p-find-overload-mro).  Same cycle guard and same @ISA reading as that
+   walk; an empty table settles it without touching a package."
+  (unless (or (null cls)
+              (zerop (hash-table-count *p-overload-table*))
+              (member cls visited :test #'equal))
+    (or (%p-class-table-overloaded-p cls)
+        (let* ((pkg     (find-package (%pcl-invert-case cls)))
+               (isa-sym (when pkg (find-symbol "@isa" pkg)))
+               (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
+               (seen    (cons cls visited)))
+          (when (and isa-val (vectorp isa-val))
+            (loop for parent across isa-val
+                  thereis (%p-class-overloaded-p (to-string parent) seen)))))))
+
 (defun p-overloaded (obj)
   "Return true (1) if OBJ has any use overload handlers registered, else undef.
    Implements overload::Overloaded($obj)."
-  ;; use overload: scan table for any entry whose package matches obj's class
-  (when (p-box-p obj)
-    (let ((cls (p-get-class obj)))
-      (when cls
-        (maphash (lambda (k v)
-                   (declare (ignore v))
-                   (when (and (consp k) (equal (car k) cls))
-                     (return-from p-overloaded (make-p-box 1))))
-                 *p-overload-table*))))
-  *p-undef*)
+  (if (and (p-box-p obj) (%p-class-overloaded-p (p-get-class obj)))
+      (make-p-box 1)
+      *p-undef*))
 
 (defun box-nv (box)
   "Get numeric value from box with lazy caching.
@@ -3536,10 +3561,27 @@
     (t (stringify-value val))))
 (declaim (notinline to-string))
 
-;;; Strict eager coercion for raw-numeric / raw-string slot writes
+;;; Checked eager coercion for raw-numeric / raw-string slot writes
 ;;; (docs/raw-numeric-verdict.md §Checked coercion, task #62 step 2).
 ;;; Writes are rare, uses are hot: the check runs once per write so every
 ;;; use of the slot stays an unconditional raw read.
+;;;
+;;; The check DECLINES the freeze rather than dying (#890), and what it
+;;; stores is `p-box-init` — a fresh box under box-set's own assignment
+;;; rules, i.e. EXACTLY the value the general-form (boxed) compiler would
+;;; have stored for the same write.  That is what makes the decline safe:
+;;; the slot then holds the general form's own representation, every
+;;; consumer of a raw slot is polymorphic (`setf`, the `-raw` compound
+;;; twins, `prog1`, and reads, which go to ordinary `p-*` ops), and so the
+;;; optimized emission RUNS IDENTICALLY to PCL_OPT=none BY CONSTRUCTION —
+;;; the registry's contract — instead of by a case analysis of consumers.
+;;;
+;;; Declining is the only COMPLETE answer.  The compile-time licence is a
+;;; scan (this file's text for `use overload`), and no scan can see an
+;;; overloaded object arriving from a module, from a container, or from a
+;;; string eval that loads `overload` after the transpile.  Dying instead
+;;; lost whole programs — `my $w = version->new('5.30.0'); $] >= $w` was
+;;; fatal where perl just runs.
 
 (defun %pcl-dualvar-p (v)
   "True when V is a box carrying a GENUINE dualvar: both caches valid and the
@@ -3552,21 +3594,30 @@
        (let ((n (ignore-errors (to-number (p-box-sv v)))))
          (and n (/= (p-box-nv v) n)))))
 
-(defun %pcl-raw-coerce-check (v name kind)
-  "Die loudly when eagerly coercing V for raw slot NAME would lose behavior:
-   (1) an overload-capable blessed ref (a \"\" or 0+ handler) — per-use code
-   the frozen value cannot run (catches use-overload loaded by a string eval
-   AFTER the transpile-time corpus scan); (2) a genuine dualvar — coercion
-   irreversibly drops the other side, so a use-classifier bug would corrupt
-   silently.  Never weaken this check; a firing die means fix the classifier
-   or re-box the variable (raw-numeric-verdict.md)."
-  (when (or (p-find-overload v "\"\"") (p-find-overload v "0+"))
-    (error "PCL raw-~a slot ~a: value has use-overload conversion handlers; re-box the variable"
-           kind name))
-  (when (%pcl-dualvar-p v)
-    (error "PCL raw-~a slot ~a: genuine dualvar reached an eager coercion"
-           kind name))
-  v)
+(declaim (inline %pcl-raw-freeze-unsafe-p))
+(defun %pcl-raw-freeze-unsafe-p (v)
+  "True when eagerly coercing V for a raw slot would lose behavior, so the
+   freeze must DECLINE and store the general form's own box (p-box-init):
+   (1) V's class overloads ANY operator — per-use code a frozen number or
+   string could never run; (2) V is a genuine dualvar — coercion
+   irreversibly drops the other side.
+
+   (1) IS `ANY OPERATOR`, NOT `\"\" OR 0+`.  Asking only about the two
+   conversion handlers was a SILENT WRONG: a class that overloads `<=>`
+   alone (no `\"\"`, no `0+`) has every numeric comparison autogenerated
+   from it, and a frozen slot compared the ref's stable ID instead —
+   `CmpOnly->new(42) > 10` answered 0 where perl answers 1.
+
+   ORDER: the P-BOX-P test comes first and settles every raw operand on one
+   inline type test — this predicate runs once per write to a B-regime slot.
+   %P-NO-OVERLOAD-POSSIBLE-P is the tuned negative path (its own comment has
+   the 19 %-of-`collatz` measurement), so a box holding a plain payload
+   never reaches P-GET-CLASS."
+  (and (p-box-p v)
+       (or (and (not (%p-no-overload-possible-p v))
+                (%p-class-overloaded-p (p-get-class v)))
+           (%pcl-dualvar-p v))
+       t))
 
 (defun %pcl-scalar-collapse (v)
   "Scalar-assignment context for a RAW aggregate value, mirroring box-set's
@@ -3581,10 +3632,18 @@
 
 (defun %pcl-to-number-strict (v name)
   "Eager numeric freeze for a raw-numeric slot write (the compile-time
-   equivalent of the user writing `+ 0`); strict per %pcl-raw-coerce-check.
-   Applies box-set's scalar-assignment aggregate collapse first, so the
-   wrapper stays equivalent to the boxed write it replaces."
-  (to-number (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "numeric")))
+   equivalent of the user writing `+ 0`).  Applies box-set's
+   scalar-assignment aggregate collapse first, so the wrapper stays
+   equivalent to the boxed write it replaces.
+
+   DECLINES when %PCL-RAW-FREEZE-UNSAFE-P says the freeze would lose per-use
+   behavior, storing `(p-box-init V)` — the value the general-form compiler
+   would have stored for this write — see that predicate and
+   docs/raw-numeric-verdict.md §The runtime decline.  NAME is unused; it is
+   kept in the emitted call because it names the slot in the IR."
+  (declare (ignore name))
+  (let ((c (%pcl-scalar-collapse v)))
+    (if (%pcl-raw-freeze-unsafe-p c) (p-box-init c) (to-number c))))
 
 (defun %pcl-superchar-payload (v)
   "V's payload when V IS a super-Unicode character — `chr(N)` for
@@ -3597,8 +3656,9 @@
     (and (p-superchar-p u) u)))
 
 (defun %pcl-to-string-strict (v name)
-  "Eager string freeze for a raw-string slot write (`. \"\"`); strict per
-   %pcl-raw-coerce-check.  Aggregate collapse as in %pcl-to-number-strict.
+  "Eager string freeze for a raw-string slot write (`. \"\"`).  Aggregate
+   collapse and the %PCL-RAW-FREEZE-UNSAFE-P decline as in
+   %pcl-to-number-strict (NAME is unused for the same reason).
 
    A super-Unicode character (`chr(N)`, N > U+10FFFF) passes through
    UNFROZEN (task #442).  It is the one payload whose CL string form is
@@ -3610,8 +3670,11 @@
    the same point the boxed path makes it, and nowhere earlier.  The rule
    is the registry's own contract: the optimized emission must RUN
    identically to the general form."
-  (let ((c (%pcl-raw-coerce-check (%pcl-scalar-collapse v) name "string")))
-    (or (%pcl-superchar-payload c) (to-string c))))
+  (declare (ignore name))
+  (let ((c (%pcl-scalar-collapse v)))
+    (cond ((%pcl-raw-freeze-unsafe-p c) (p-box-init c))
+          ((%pcl-superchar-payload c))
+          (t (to-string c)))))
 
 ;;; S1 str-buffer raw slots (task #62, docs/raw-numeric-verdict.md §S1):
 ;;; an accumulator whose only writes are plain roots + `.=` and whose every
@@ -6418,6 +6481,15 @@ per element."
             (> (length v) 0)
             (cl-ppcre:scan "^[a-zA-Z]*[0-9]*$" v))
        (magical-string-increment v))
+      ;; An overloaded object numifies through its OWN `0+` handler, so ask
+      ;; the BOX — UNBOX has already thrown the class away, and to-number on
+      ;; the bare payload then answers the hash-table's address instead.
+      ;; That is how one program got two answers: a root `$o++` on a declined
+      ;; raw slot (p-incf-raw, which numifies the slot itself) said 6 while
+      ;; PCL_OPT=none (p-post++ -> here) said 2.  The remaining divergence
+      ;; from perl -- perl AUTOGENERATES `++` from a `+` handler and keeps an
+      ;; OBJECT -- is task #900, and is the same on both paths.
+      ((and (p-box-p val) (p-find-overload val "0+")) (1+ (to-number val)))
       ;; Otherwise convert to number and increment
       (t (1+ (to-number v))))))
 
@@ -7764,6 +7836,15 @@ create the key on a read-only call, which perl does not."
         (make-p-box (p-gethash hash key))
         (or (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
 
+;; MEASURED AND REJECTED (s460ao, task #883): pre-sizing RESULT from the
+;; element count instead of `(length args)` — the count of ARGUMENTS, which
+;; is what a whole-array argument grows from by doubling.  The O(1) pre-pass
+;; over ARGS taxes the OVERWHELMINGLY COMMON scalar-argument call to save
+;; growth in the rare array one, and the A/B (best-of-5, one session) says
+;; that trade is negative: fib(27)x 0.4505 -> 0.4676 s (+3.8 %), gcdrec
+;; 0.1064 -> 0.1088 (+2.3 %), against feread2 0.5815 -> 0.5694 (-2.1 %).
+;; Same rule as %p-no-overload-possible-p's comment: a guard added in front
+;; of an existing fast path is measured against the path it precedes.
 (defun p-flatten-args (args)
   "Build @_ from %_args, spreading raw (non-string, non-boxed) vectors and hash-tables.
    This implements Perl's argument flattening: foo(@arr) and foo(%hash) spread their
