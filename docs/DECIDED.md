@@ -21,6 +21,26 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s460f (2026-09-01, Fable) — USER priority: speed + correctness FIRST; the JS prototype WAITS on a quiet IR; E2c′ not shipped
+
+- **USER (2026-09-01): "speed optimizations and correctness fixes first, for a
+  while — I am scared that it might change the IR."**  The JS-target prototype
+  (#622, `docs/js-target-plan.md`) is deliberately sequenced AFTER the
+  IR-moving perf/correctness rounds, so the second consumer is not built
+  against a moving target.  Regex architecture for it is already settled
+  (js-target-plan §II.8.3, three tiers).  Do not start JS work unasked; the
+  trigger for scheduling it is the v0.2 gate (census 0 + perf story) or an
+  explicit USER ask, whichever comes first.
+- **E2c′ (the writes_args-gated raw pass into @_) is NOT SHIPPED and #862 is
+  CLOSED** — it inverts writes_args' safety polarity for arrays (a wrong
+  FALSE becomes a SILENT LOST WRITE) for a prize no bench measures; reopen
+  only with a measured prize AND a die-on-mismatch verification story
+  (ruling in task #862, s460f).
+- Round 18 launched under this priority: AQ = #77 return-family transfer +
+  #812 name→symbol memo + #910 + #881; AR = the census push (sub_lval.t's
+  33-drop lvalue-sub family diagnose-and-size first, then the singles
+  harvest) + #900 + #911.
+
 ## s460ap (2026-09-01, Opus agent AP, round 17) — an RHS snapshot COPIES the container box; `\` over a slice DISTRIBUTES; a capture is READ-ONLY
 
 - **A list-assignment RHS element whose payload must travel as a BOX is
