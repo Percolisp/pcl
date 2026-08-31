@@ -4,6 +4,106 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 457ai (2026-08-31, Opus) — BOXED AGGREGATES: phases 0–3, elements are stored RAW, #817/#818 closed; gen v2-470
+
+The boxed-aggregates design (`docs/boxed-aggregates-design-s455.md`, task #816)
+executed end to end.  Five commits, each with its own bar.
+
+**#817 + #818 first, because they were live silent-wrongs on the fully-boxed
+tree.**  `for (values %h) { $_ .= "x" }` and `for (@a[0,1]) { $_ *= 10 }` did
+not write through; perl aliases both.  The mechanism was the intermediate-list
+BUILDERS copying: `p-values` unboxed each slot and `p-aslice`/`p-hslice` read
+through `p-aref`/`p-gethash`, so the identity was gone before the foreach binder
+ever saw the list.  **The right layer came from a measurement, not from the
+nearest place to patch**: a plain `@a` in list context has ALWAYS handed out its
+slot boxes — that is how `f(@a)` gives `@_` aliasing — and every copy consumer
+already unboxes, probed over twelve copy positions (`@b = @a`, push, sort, map,
+grep, reverse, `(@a)[0]`, `my ($p) = @a`, `@h{…} = @a`, `@j[0..2] = @a`, a sub's
+`my @l = @_`, a hash slice).  So the fix put the builders in that same shape
+rather than inventing a second one, and `values`/slices/KV-slices reached
+correctness through the promotion arm that already existed in `p-aref-argbox`.
+
+**The sweep then caught the other half, which is exactly what it is for.**
+`aassign.t` "lex array slice" went 2:1 → 2:2: perl evaluates a list assignment's
+whole RHS before its first store (its `OPpASSIGN_COMMON` copy), and once a slice
+RHS holds the container's own boxes, `@a[0,1] = @a[1,0]` reads source 1 after
+store 0 has overwritten it.  PCL had that rule ALREADY — inside
+`%p-flatten-list`, which is why `($a,$b) = ($b,$a)` has always worked — and the
+slice-assign arms of `p-setf` built their source vector themselves and never ran
+it.  Extracted as `%p-assign-snapshot` and called from both (rule 11).
+
+**The fix's cost was measured and clawed back** (`baf8f29`): handing out boxes
+put `%p-array-store-scalar` on paths that used to skip it, and routing
+`%p-alias-helem` through `p-gethash-argbox` cost FOUR hash lookups per element.
+Three narrowings — a fast-path arm for the common unblessed number/string box,
+one `gethash` per hash-cell lookup, a lazily-allocated snapshot vector, plus
+inline proclamations — brought `slices` back to base and left `sliceasgn` +6 %,
+which is the honest price of perl's RHS-before-store rule.
+
+**Phase 0's delegated decision (design §7.2): the gate is a RUNTIME policy.**
+`pcl:*p-raw-elems*` is an `sb-ext:defglobal` read from `PCL_RAW_ELEMS` — and
+**re-read from an `sb-ext:*init-hooks*` entry**, because the runtime is normally
+reached through a SAVED CORE, which bakes a defglobal's initial value in.
+Measured: without the hook, `PCL_RAW_ELEMS=1` was silently ignored by every
+runner.  Emission-keying was rejected on three grounds, the first structural:
+the write arms are runtime functions no emission site names, so keying them
+would mean a `-raw` twin of each.  Cost with the gate off: none measurable.
+
+**Phase 1 found that the write arms are FOUR**, not the "≥2 lowerings" the
+design feared — `(setf p-aref)`, `%p-array-store-scalar`, `(setf p-gethash)`,
+`%p-make-hash-entry` — and that the two element-assignment lowerings (`p-setf`
+and the Kind-A `elem-setf` CL `setf`) land in the same function.  Phase 2 routed
+every alias consumer through ONE promotion (`%p-elem-cell` /
+`%p-hash-elem-cell`), including the design's E3 semantics flip in
+`%p-foreach-elt` (from "fresh temporary, writes not aliased" to
+promote-in-place).  **local-element needed no change, and that was a
+measurement**: `p-local-array-elem` and `%p-lhe-save`/`%p-lhe-restore` save and
+restore the slot's CONTENT by index/key, the design's other correct option for
+E5, verified green under both gate settings.  Both phases met a zero-change bar
+(sweep byte-identical, gate-SET 638×2 identical), and at the end of phase 2 the
+whole E1–E12 battery was byte-identical to perl WITH THE GATE ON — which is what
+made phase 3 a default change rather than a rewrite.
+
+**The flip's four failures were all one mistake, and it is the finding worth
+keeping: a BOX was doing double duty as a marker for something other than
+identity.**  `p-exists-array` (and `p-delete-kv-array-slice`) read "the slot
+holds a box" as "the element EXISTS" — the hole marker is `nil`, full stop;
+fixing it made `exists returns true for &PL_sv_undef elem [perl #7508]` pass on
+its own merit and leave `cl/skip-registry.lisp` by the stale-detector rule.
+`p-refgen-list` backslashed the slot's VALUE, so `\(@a)` produced refs to
+copies.  `p-hash-=`'s list-context return and `p-list-=`'s greedy array/hash
+collect arms handed out VALUES where perl yields the container's own LVALUES
+(`$_++ foreach %h = (1,2,1,4)`, `($x,@a,$z) = (…)`).
+
+**Bars.**  Gate PASS 190/6367 and full sweep GATE clean TOTAL **18340** BOTH
+with the flip and under `PCL_RAW_ELEMS=0` — the A/B equivalence the design
+asked for.  `Pl/t/elem-alias-01.t` (the phase-0 battery: E1–E12, both spellings,
+byte-compared against real perl at test time, plus the copy-position negatives
+and the RHS-before-store rows) byte-identical under both settings.  Census
+unchanged.  Companion op/ + uni/ + re/ + io/ legs with every mover attributed:
+op/array.t +1 is the un-skipped row; io/open.t and io/pvbm.t measure IDENTICAL
+on a base tree, so their snapshot rows were stale and were spliced with that
+cause.  Generation **v2-470**, all three artifacts regenerated, paren-checked
+and license-tagged, pack.t 5636/89 = its baseline.
+
+**Speed** (`faster-codegen-suggestions.md` §0.2c, A/B against `0237940` in one
+sitting): **arrhash 1.48× → 1.25×**, **arrfill 3.91× → 2.91×**, and nothing
+already won regressed.  The design's targets (arrhash ≤1.0×, arrfill ~1×) are
+NOT met, and the reason is worth writing down: what is left in those loops is
+ACCESSOR DISPATCH — `p-aref`'s `to-number` and negative-index handling,
+`p-gethash`'s stringify and lookup — not allocation.  `slices` went 4.81× →
+5.29× because a slice in a COPY position still promotes every visited slot;
+phase 4's "proven arm" (the annotator showing the consumer only reads) owns it,
+and `slices` is the row that will measure it.
+
+`docs/ir-spec.md` §2.3/§2.4 were rewritten to the new normative model, and
+`docs/not-supported.md` gained the sort-comparator entry the §7.1 USER ruling
+deferred to this commit, plus the `exists` correction.  Filed **#840**: the real
+`experimental.pm`'s DELETE-WHEN trigger fired (its `values` reason is gone), and
+moving the shim aside measured a SECOND blocker — PCL leaves
+`%feature::feature`, `%warnings::Offsets` and `%warnings::NoOp` empty, so the
+module falls past its dispatch into the version check and croaks on a perl whose
+`$]` is 5.040003.
 ## Session 457aj (2026-08-31, Opus round-14 agent AJ) — the ALL-CAPS bareword convention becomes UNICODE (#820) and a paren-less argument list may end in a COMMA (#850); census 21/65 → 19/63
 
 Two parser-side fixes, both classifier widenings, both measured with the

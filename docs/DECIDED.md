@@ -21,6 +21,58 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s457ai (2026-08-31, Opus) — BOXED AGGREGATES PHASES 0–3 SHIPPED: elements are stored RAW; #817/#818 closed — `docs/boxed-aggregates-design-s455.md`, task #816
+
+- **The write rule is the whole model**: a slot holding a BOX is written
+  THROUGH it, never replaced; a slot holding a raw value or a hole takes the
+  new value raw when it is raw-storable, else gets a fresh box.  Raw-storable
+  (`%p-storable-raw`) = a plain number, or a plain string with no cached
+  numeric half; everything else carries identity on the CONTAINER (bless class,
+  is-ref, dualvar, magic cell, tie proxy, box-in-box scalar ref) and keeps its
+  box — the SAME split the reading side already made, which is why NO read path
+  changed.  `nil` is the hole marker and is never a legal raw value.
+- **The write arms are FOUR, not the "≥2 lowerings" the design feared**:
+  `(setf p-aref)`, `%p-array-store-scalar`, `(setf p-gethash)`,
+  `%p-make-hash-entry` — and the two element-assignment lowerings (`p-setf` and
+  the Kind-A `elem-setf` CL `setf`) land in the SAME function.  Design §4.1a.
+- **THE GATE IS A RUNTIME POLICY, not an emission switch** (§7.2, decided by
+  measurement): `pcl:*p-raw-elems*`, an `sb-ext:defglobal` from
+  `PCL_RAW_ELEMS`, **re-read from an `sb-ext:*init-hooks*` entry** — a saved
+  core freezes a defglobal's initial value, so without the hook the variable
+  was silently ignored by every runner.  Emission-keying was rejected: the
+  write arms are runtime functions no emission site names (rule 11), and an
+  emission gate would have to enter the module-cache key.  Cost measured at
+  zero.
+- **A BOX WAS DOING DOUBLE DUTY IN FOUR PLACES, and the flip is what exposed
+  it** — the general lesson, worth more than the four fixes: `p-exists-array`
+  and `p-delete-kv-array-slice` read "the slot holds a box" as "the element
+  EXISTS"; `p-refgen-list` backslashed the slot's VALUE so `\(@a)` referenced
+  copies; `p-hash-=`'s and `p-list-='s greedy collect arms handed out VALUES
+  where perl yields the container's own LVALUES.  A box means IDENTITY and
+  nothing else.
+- **#817/#818 CLOSED** (they were live silent-wrongs on the fully-boxed tree):
+  `values`, array/hash/KV slices and `\(@a)` hand out the container's own
+  slots.  **The right layer was found by measurement**: a plain `@a` in list
+  context has ALWAYS handed out its slot boxes and every copy consumer already
+  unboxes (probed over twelve copy positions), so the fix put the builders in
+  that same shape rather than inventing a second one.
+- **The sweep caught the other half**: perl evaluates a list assignment's whole
+  RHS before its first store, and PCL had that rule ALREADY — inside
+  `%p-flatten-list`, which is why `($a,$b) = ($b,$a)` always worked — but the
+  slice-assign arms built their source vector themselves and never ran it.
+  Extracted as `%p-assign-snapshot` (rule 11).
+- **Speed** (`faster-codegen-suggestions.md` §0.2c, A/B against `0237940`):
+  arrhash **1.48× → 1.25×**, arrfill **3.91× → 2.91×**, nothing already won
+  regressed.  Targets (≤1.0× / ~1×) NOT met — the residue in those loops is
+  accessor dispatch, not allocation.  `slices` 4.81× → 5.29× because a slice in
+  a COPY position still promotes; phase 4's "proven arm" owns it.
+- Bars: gate 190/6367 and full sweep GATE clean TOTAL **18340** BOTH with the
+  flip and under `PCL_RAW_ELEMS=0`; gate-SET 638×2 identical at phase 2;
+  census unchanged; generation **v2-470** + all three artifacts.  ir-spec
+  §2.3/§2.4 rewritten (normative); `not-supported.md` gains the
+  sort-comparator entry (§7.1 ruling) and the `exists` correction.
+- Filed **#840** (the real `experimental.pm`'s SECOND blocker: PCL leaves
+  `%feature::feature` / `%warnings::Offsets` / `%warnings::NoOp` empty).
 ## s457aj (2026-08-31, Opus round-14 agent AJ) — the ALL-CAPS bareword convention is UNICODE (#820), and a paren-less argument list may END IN A COMMA (#850)
 
 - **THE ALL-CAPS CONVENTION IS ONE SHAPE, ASKED FOR TWO OPPOSITE PURPOSES, AND

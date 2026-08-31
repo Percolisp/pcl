@@ -7,6 +7,13 @@
 #   round 12 AND this run); reset.t PARTIAL->OK same counts (completes now, on
 #   the AF-only tree too); state.t planned 166->-1 (the given/when refusal now
 #   fires before the plan line is read; 0 rows either way).
+# s457ai (boxed aggregates phase 3, edited ROW BY ROW): array.t 169 -> 170.  ONE
+#   row, identified by a TAP byte-diff against a base-tree run: test 127 "exists
+#   returns true for &PL_sv_undef elem [perl #7508]" was SKIP-REGISTERED and now
+#   PASSES on its own merit, because p-exists-array stopped reading "the slot is
+#   a box" as "the element exists" (the hole marker is NIL).  The stale registry
+#   entry was removed in the same commit, per the stale-detector rule.  The 15
+#   fail rows are byte-identical to the base tree's.
 # s451 (round 10, edited ROW BY ROW): postfixderef.t 96/25 -> 100/21 (Y #612 made
 #   dropped statements run: 6 rows fixed, renumbered survivors, rows 72/73 honest
 #   PVBM fails); reset.t 41->40 + tr.t 239->238 = the #723 TAP-glue landing moved
@@ -145,7 +152,7 @@ append.t	OK	13	0	13
 args.t	OK	22	1	23
 arith.t	OK	183	0	183
 arith2.t	OK	9	0	9
-array.t	OK	169	15	195
+array.t	OK	170	15	195
 assignwarn.t	OK	96	20	116
 auto.t	OK	47	0	47
 bless.t	OK	106	1	106

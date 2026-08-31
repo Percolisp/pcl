@@ -314,10 +314,10 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("error when setting alias to (negative index past beginning|-1 elem of empty array)"
                  :principle9
                  "assigning through an @_ alias to a non-creatable negative index must die 'Modification of non-creatable array value attempted' — error detection. not-supported.md: 'Error compatibility for invalid Perl input'.")
-                ;; &PL_sv_undef / per-element SV identity — CL box model has neither.
-                ("exists returns true for &PL_sv_undef elem"
-                 :alias
-                 "exists of the shared &PL_sv_undef SV in an array — CL box model has no shared-undef SV. not-supported.md: 'Sparse arrays (holes), element aliasing, and SV identity'.")
+                ;; ("exists returns true for &PL_sv_undef elem" …) DROPPED s457ai:
+                ;; passes since p-exists-array stopped reading "is a box" as
+                ;; "exists" — the hole marker is NIL, and `$a[0] = undef` leaves
+                ;; a live slot either way (stale-detector).
                 ;; ("undef preserves identity in array" …) DROPPED s295b:
                 ;; passes since $#a++ extends with real holes (stale-detector).
                 ;; @_ aliasing to nonexistent (sparse) elements.

@@ -4821,15 +4821,17 @@
 ;;; loaded into a program running the other.  A defglobal has neither problem
 ;;; and mixed storage is legal BY DESIGN (a boxed slot is always correct).
 (defun %p-raw-elems-default ()
-  "The gate's value for THIS process: PCL_RAW_ELEMS, empty or 0 meaning off.
-   Phase 3 changes the fallback when the variable is unset."
+  "The gate's value for THIS process.  ON unless PCL_RAW_ELEMS says otherwise
+   (`0` or the empty string turn it off) — phase 3 flipped the default."
   (let ((e (sb-posix:getenv "PCL_RAW_ELEMS")))
-    (and e (not (string= e "")) (not (string= e "0")) t)))
+    (if e
+        (and (not (string= e "")) (not (string= e "0")) t)
+        t)))
 
 (sb-ext:defglobal *p-raw-elems* (%p-raw-elems-default)
-  "Store plain element values RAW instead of boxing them (PCL_RAW_ELEMS=1).
-   OFF in phases 0-2: every slot is a box, exactly as before, and the write
-   rule's raw arms are unreachable.  Phase 3 flips the default.")
+  "Store plain element values RAW instead of boxing them.  ON by default since
+   phase 3; PCL_RAW_ELEMS=0 restores the all-boxed world of phases 0-2, which
+   is the A/B switch and must stay bit-identical to it.")
 
 ;;; The runtime is normally reached through a SAVED CORE (USER s439), and a
 ;;; defglobal's initial value is baked into that core at build time — so the
@@ -5189,10 +5191,15 @@ per element."
              ;; List context: return hash contents as flat vector
              (let ((,ret (make-array (* 2 (hash-table-count ,place))
                                      :adjustable t :fill-pointer 0)))
+               ;; Perl's hash assignment yields the hash's own contents as
+               ;; LVALUES (`$_++ foreach %h = (1,2,1,4)` increments the stored
+               ;; values), so the VALUE half is the slot's cell — promoted if
+               ;; raw.  The KEY half is a copy, as everywhere else.
                (maphash (lambda (k v)
+                          (declare (ignore v))
                           (when (%p-real-hash-key-p k)
                             (vector-push-extend (make-p-box k) ,ret)
-                            (vector-push-extend v ,ret)))
+                            (vector-push-extend (%p-hash-elem-cell ,place k) ,ret)))
                         ,place)
                ,ret)
              ;; Scalar/void: return count of input elements
@@ -5518,9 +5525,14 @@ per element."
                   (char= (char (symbol-name var) 0) #\@))
              (let ((idx (cur-idx)))
                (push `(p-array-= ,var (subseq ,src-vec (min ,idx (length ,src-vec)))) forms)
-               ;; Collect: push array elements
-               (push `(loop for v across ,var
-                            do (vector-push-extend v ,result-var)) collect-forms))
+               ;; Collect: push array elements as LVALUES — perl yields the
+               ;; LHS containers themselves, so a raw slot promotes (design E4)
+               (let ((j (gensym "J")))
+                 (push `(dotimes (,j (length ,var))
+                          (vector-push-extend
+                           (if (aref ,var ,j) (%p-elem-cell ,var ,j) (p-undef))
+                           ,result-var))
+                       collect-forms)))
              (setf greedy-done t))
 
             ;; Hash variable (%hash) - absorbs remaining elements in pairs
@@ -5532,8 +5544,11 @@ per element."
                         (p-hash-= ,var (subseq ,src-vec (min ,idx (length ,src-vec))))) forms)
                ;; Collect: push hash k-v pairs (deduplicated by the hash itself)
                (push `(maphash (lambda (k v)
+                                 (declare (ignore v))
                                  (vector-push-extend (make-p-box k) ,result-var)
-                                 (vector-push-extend v ,result-var))
+                                 ;; the VALUE half is an LVALUE (design E4)
+                                 (vector-push-extend (%p-hash-elem-cell ,var k)
+                                                     ,result-var))
                                ,var) collect-forms))
              (setf greedy-done t))
 
@@ -8471,16 +8486,22 @@ create the key on a read-only call, which perl does not."
 
 (defun p-exists-array (arr idx)
   "Perl exists function for arrays.
-   Returns true only if element is within bounds AND is a box (assigned, not deleted)."
+   Returns true only if the element is within bounds AND the slot is not a HOLE.
+   The hole marker is NIL — `delete $a[i]` and %p-extend-to both write nil — so
+   that, not \"is a box\", is the existence test: under raw element storage an
+   assigned slot may hold a bare number or string (the box carries IDENTITY,
+   never existence).  Reading box-ness here made every raw element answer
+   `exists` = FALSE (Pl/t/delete-01.t rows 4/10 caught it at the flip)."
   (let* ((a (%p-designator-array arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
          (actual-idx (if (< i 0) (+ len i) i)))
     (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
     (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
-         (p-box-p (aref a actual-idx))
+         (aref a actual-idx)
          ;; an unvivified deferred-element alias (@_ hole) is still a hole
-         (not (%p-defelem-p (aref a actual-idx))))))
+         (not (%p-defelem-p (aref a actual-idx)))
+         t)))
 
 (defun p-delete-hash-slice (hash &rest keys)
   "Perl delete for hash slices: delete @hash{k1, k2, ...}
@@ -8562,9 +8583,10 @@ create the key on a read-only call, which perl does not."
       (dolist (idx indices)
         (let* ((i (truncate (to-number idx)))
                (len (if (vectorp a) (length a) 0))
+               ;; NIL is the hole marker; anything else is a live element,
+               ;; boxed or raw (the box means identity, never existence).
                (old-val (if (and (>= i 0) (< i len))
-                            (let ((elem (aref a i)))
-                              (if (p-box-p elem) elem *p-undef*))
+                            (or (aref a i) *p-undef*)
                             *p-undef*)))
           (vector-push-extend (make-p-box i) result)
           (vector-push-extend old-val result)
@@ -13711,7 +13733,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-460"
+(defparameter *pcl-cache-generation* "v2-470"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -15001,13 +15023,28 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-refgen-list (val)
   "Perl \\(LIST) — distribute reference generation over list elements.
    Receives the list-context value of the parenthesized expression and returns
-   a fresh vector with one ref per element (spreading flatten-markers and arrays)."
+   a fresh vector with one ref per element (spreading flatten-markers and arrays).
+   Each ref must alias the container's SLOT, so a raw slot is PROMOTED in place
+   first (%p-elem-cell) — `\\(@y)` is E4 for the whole-array spelling, and
+   backslashing a raw VALUE would reference a fresh copy instead
+   (Pl/t/refaliasing-01.t rows 21/28/43 caught it at the flip)."
   (let ((result (make-array 4 :adjustable t :fill-pointer 0)))
-    (labels ((add-ref (item)
+    (labels ((add-slot-ref (src j)
+               ;; One element of a real container: recurse for the aggregate
+               ;; shapes, otherwise take the ref of the slot's CELL.
+               (let ((x (aref src j)))
+                 (if (or (null x)
+                         (p-flatten-marker-p x)
+                         (hash-table-p x)
+                         (and (vectorp x) (not (stringp x))))
+                     (add-ref x)
+                     (vector-push-extend (p-backslash (%p-elem-cell src j))
+                                         result))))
+             (add-ref (item)
                (cond
                  ((p-flatten-marker-p item)
-                  (loop for elem across (p-flatten-marker-array item)
-                        do (vector-push-extend (p-backslash elem) result)))
+                  (let ((src (p-flatten-marker-array item)))
+                    (dotimes (j (length src)) (add-slot-ref src j))))
                  ;; A HASH flattens to its key/value list first — `\(%h)` is
                  ;; 2N scalar refs, not one hash ref.  %p-flatten-list is the
                  ;; same flattener list assignment uses, so the ORDER matches
@@ -15017,13 +15054,12 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (loop for elem across (%p-flatten-list item)
                         do (add-ref elem)))
                  ((and (vectorp item) (not (stringp item)))
-                  (loop for elem across item
-                        do (add-ref elem)))
+                  (dotimes (j (length item)) (add-slot-ref item j)))
                  (t
                   (vector-push-extend (p-backslash item) result)))))
       (cond
         ((and (vectorp val) (not (stringp val)))
-         (loop for item across val do (add-ref item)))
+         (dotimes (j (length val)) (add-slot-ref val j)))
         ((listp val)
          (loop for item in val do (add-ref item)))
         (t (add-ref val))))

@@ -51,6 +51,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Read-only constants via `\undef` stash tricks](#read-only-constants-via-undef-stash-tricks)
 * [Scalar copy does not preserve reference/SV identity](#scalar-copy-does-not-preserve-referencesv-identity)
 * [Sparse arrays (holes), element aliasing, and SV identity](#sparse-arrays-holes-element-aliasing-and-sv-identity)
+* [Writing to `$a`/`$b` inside a sort comparator](#writing-to-ab-inside-a-sort-comparator)
 * [`**` returns an exact integer where Perl returns a float (NV)](#-returns-an-exact-integer-where-perl-returns-a-float-nv)
 * [`use integer` — large shift / overflow edge cases](#use-integer--large-shift--overflow-edge-cases)
 * [Hex floating-point literals (`0x1.8p+1`)](#hex-floating-point-literals-0x18p1)
@@ -1801,6 +1802,42 @@ compatibility for invalid Perl input".
 
 **NOT covered here (still fix targets):** arylen magic (`\$#array`, freed-array length,
 `arylen_p`) and the `map +(LIST)` unary-plus parse bug — see `docs/sweep-bug-catalog.md`.
+
+**Update (s457ai, boxed aggregates):** `exists` no longer reads "the slot holds
+a box" as "the element exists" — the hole marker is `nil`, full stop — which is
+what let `exists returns true for &PL_sv_undef elem [perl #7508]` leave the skip
+registry and pass honestly.  Element ALIASING is now general rather than
+hole-only: `values`, slices, `%h` in list context and `\(@a)` all hand out the
+container's own element cells (tasks #817/#818 and
+`docs/boxed-aggregates-design-s455.md`).  What stays unsupported here is the SV
+IDENTITY half — `\$_[0] == \undef` (the shared read-only `&PL_sv_undef`) and
+hole-vs-real `exists` after a whole-array copy.
+
+---
+
+## Writing to `$a`/`$b` inside a sort comparator
+
+**Perl behaviour:** `sort` binds `$a` and `$b` to the list's elements, and perl's
+own documentation says that **modifying an element during a sort is undefined
+behaviour** ("the behaviour is undefined if the comparison subroutine modifies
+the array"), because the elements are being moved under the comparator.
+
+**PCL behaviour (ruled by the USER 2026-08-31,
+`docs/boxed-aggregates-design-s455.md` §7.1):** the comparator binds an
+element's existing BOX when the slot has one, and binds the RAW VALUE when it
+does not.  A comparator that *writes* to `$a` or `$b` therefore reaches the
+element only when that element happened to be boxed already — a raw-stored
+element takes the write in a temporary and the container is unchanged.  Reads,
+which are what every real comparator does, are unaffected either way.
+
+**Rationale:** promoting both operands to cells on every comparison would put
+an allocation in the hottest inner loop PCL has, to make one perl-undefined
+behaviour deterministic.  The ruling buys the speed and spends nothing perl
+guarantees.  A program that genuinely needs to mutate during a sort can do it
+by index (`$list[$i] = …`), which is defined in both languages.
+
+**Affected tests:** none measured — no file in any of the five populations
+writes through a comparator operand.
 
 ---
 

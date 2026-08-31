@@ -245,17 +245,56 @@ list.
 ### 2.3 Arrays
 
 A Perl array is an **adjustable vector with a fill pointer** (growable,
-ordered, integer-indexed). Elements are boxes (or `nil` for holes;
-elements of proven-safe intermediate lists may be raw values). Negative
-indices count from the end. Reading past the end yields `undef` without
-growing; **writing** past the end extends the vector, filling the gap with
-holes.  Growing an array by **assigning to `$#a`** (`p-set-array-length`,
+ordered, integer-indexed).
+
+**Element storage: RAW by default, promoted to a box at an alias event**
+(s457ai, `docs/boxed-aggregates-design-s455.md`).  A slot holds one of three
+things:
+
+| slot content | meaning |
+|---|---|
+| `nil` | a HOLE — deleted, or never assigned.  **`nil` is the existence test**; a box has nothing to do with whether an element exists. |
+| a raw value (a number, or a string with no cached numeric half) | a live element nobody has taken an alias to |
+| a `p-box` | a live element that carries IDENTITY — someone may write through it or observe writes to it |
+
+The whole model rests on ONE **write rule**, obeyed by every store:
+
+> *a slot that holds a BOX is written THROUGH it (`box-set`), never replaced;
+> a slot that holds a raw value or a hole takes the new value raw when the
+> value is raw-storable, and otherwise gets a fresh box.*
+
+"Raw-storable" (`%p-storable-raw`) is a plain number, or a plain string with
+no cached numeric half.  Everything else carries identity on the CONTAINER
+rather than in the value — a bless class, the `is-ref` flag (`\$x`, `\*foo`),
+a dualvar's two halves, a magic cell, a tie proxy, a box-in-box scalar ref —
+and therefore keeps its box.  This is the same split the reading side already
+makes, which is why **no read path changes**: `p-aref` (read) unboxes scalar
+elements and returns reference elements still boxed (`p-aref-unbox-elem`), and
+a raw slot passes through it unchanged.
+
+**Promotion** (`%p-elem-cell`) turns a raw slot into a box IN PLACE at the
+moment something needs the element's identity — an alias event.  The complete
+list of alias events: `@_` aliasing of one element (`f($a[0])`) or of every
+element (`f(@a)`), a `foreach`/`map`/`grep` loop variable, `\$a[0]`, `local
+$a[0]`, `values`, a slice, `%h` or a hash-assignment result in list context.
+Promotion is **monotone** — nothing ever demotes a slot — which is what keeps
+an alias taken at any time live for as long as the element exists.  Copying a
+container (`@b = @a`, `push`, `sort`, list assignment) reads VALUES and never
+shares slots, so a copy breaks aliasing, exactly as in perl.
+
+A port may store elements however it likes, but it must be able to answer
+"give me a stable cell for element *i*" and it must not treat "has a cell" as
+"exists".  `pcl:*p-raw-elems*` (the `PCL_RAW_ELEMS` environment variable) turns
+raw storage off and restores an all-boxed world; both settings are correct and
+may be mixed over one container, because a boxed slot is always legal.
+
+Negative indices count from the end. Reading past the end yields `undef`
+without growing; **writing** past the end extends the vector, filling the gap
+with holes.  Growing an array by **assigning to `$#a`** (`p-set-array-length`,
 incl. the `$#a++` idiom) likewise fills the new slots with holes (`nil`),
 never with fresh boxes — `exists $a[$i]` on the new slots must stay false
-(s295; a port that models holes as "slot absent" gets this for free). `p-aref` (read) **unboxes scalar elements but returns reference
-elements still boxed** (`p-aref-unbox-elem`) — so `==` on two references
-compares object identity, not content. An array in numeric/scalar position
-coerces to its length.
+(s295; a port that models holes as "slot absent" gets this for free). An array
+in numeric/scalar position coerces to its length.
 
 **Read-only arrays (s337, task #159):** the ONE case where the storage is not
 adjustable.  `Internals::SvREADONLY(@a, 1)` replaces the variable's storage
@@ -286,11 +325,20 @@ copy): `push` during the loop extends the iteration, like perl.
 ### 2.4 Hashes
 
 A Perl hash is a string-keyed equality hash table. **All keys are
-stringified on the way in** (`(to-string key)`). Values are boxes or raw
-values; `p-gethash` unboxes scalars and preserves reference boxes, exactly
-like `p-aref`. A hash in numeric position coerces to its key count.
-`%ENV` is special-cased: the table holds a marker and reads/writes go to
-the process environment.
+stringified on the way in** (`(to-string key)`). A hash in numeric position
+coerces to its key count.  `%ENV` is special-cased: the table holds a marker
+and reads/writes go to the process environment.
+
+**Values follow §2.3's element model exactly** — RAW by default, promoted to a
+box in place (`%p-hash-elem-cell`) at an alias event, the same write rule, the
+same monotone promotion.  The array's `nil` hole has no hash counterpart: an
+absent KEY is the hash's hole, and its lazy alias is `%p-hash-defelem-box`,
+whose reads look the key up live (staying non-`exists`) and whose first write
+creates it.  `p-gethash` unboxes scalars and preserves reference boxes, exactly
+like `p-aref`, so a raw value passes through unchanged.  KEYS are always copies
+— perl's hash keys are read-only — so only the VALUE half of `values %h`,
+`%h` in list context, `@h{…}`, `%h{…}` and a hash-assignment's list-context
+result is an alias.
 
 ### 2.5 References
 

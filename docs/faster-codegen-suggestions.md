@@ -240,6 +240,58 @@ a direct funcall.  What remains is ~irreducible from PCL's side: the
 cl-ppcre engine itself (§8's ~3.7× note; the PCRE2-FFI future item is the
 next lever on this shape).
 
+### 0.2c After the BOXED-AGGREGATES flip (s457ai, phases 0–3, task #816)
+
+Array/hash ELEMENTS are no longer boxed unconditionally: a slot holds a raw
+value until something takes an alias to it, and is then promoted to a box IN
+PLACE (`docs/boxed-aggregates-design-s455.md`).  A/B on the same quiet box, in
+one sitting, both sides `perl tools/bench-exec.pl` best-of-5: the BASE column
+is a `git archive` of main at `0237940`, the FLIP column is this tree.
+
+```
+bench          base pcl(s)  flip pcl(s)   base      flip
+intloop+=         0.0198       0.0191     0.30x    0.28x
+intloop=          0.0174       0.0184     0.26x    0.27x
+cfor              0.0273       0.0269     0.26x    0.25x
+arrhash           0.1955       0.1648     1.48x    1.25x   <- -16 %
+fib(27)x          0.4430       0.4259     0.30x    0.29x
+gcdrec            0.0943       0.1000     0.49x    0.52x
+collatz           0.7972       0.7790     0.40x    0.39x
+strcat            0.0040       0.0022     2.25x    1.16x   (abs. 2 ms — noise)
+pack              4.5310       4.5108        —        —    (#74, untouched)
+packunpk          4.6382       4.6397        —        —    (#74, untouched)
+arrfill           0.1927       0.1451     3.91x    2.91x   <- -25 %
+slices            0.3276       0.3539     4.81x    5.29x   <- +8 % WORSE
+sliceasgn         0.0697       0.0722     2.65x    2.78x   (+4 %, see below)
+ovlsub            0.1530       0.1504     3.92x    3.86x
+symref            0.2198       0.2196     9.58x   10.04x
+regexg            0.0000       0.0001        —        —
+```
+
+**What moved, and why.**  `arrfill` (`@a = (1..20, $_)` 200 k times) and
+`arrhash` (`$h{x}=$_; $a[3]=$_+1` 2 M times) are the two rows whose inner loop
+allocated a box per element store; both now store the raw scalar.  **Neither
+reached the design's target** (arrhash ≤1.0×, arrfill ~1×) because what is left
+in those loops is the ACCESSOR dispatch, not the allocation — `p-aref`'s
+`to-number` + negative-index handling, `p-gethash`'s stringify + lookup.  That
+is a different axis and a fair phase-4 item.
+
+**The two rows that went the wrong way are both understood and both owned.**
+`sliceasgn` pays for the correctness half of this work: perl evaluates a list
+assignment's whole RHS before its first store, and PCL now does too
+(`%p-assign-snapshot`, without which `@a[0,1] = @a[1,0]` reads source 1 after
+store 0 overwrote it — the sweep caught exactly that).  `slices` pays for
+promotion in a COPY position: `my @v = @a[1..5]` takes the container's own
+element cells because a slice is a list of ALIASES in perl, so the first pass
+promotes every visited slot.  The design's phase 4 already names the fix — the
+"proven arm": when the annotator can show the slice's consumer only READS,
+bind raw values and skip promotion entirely.  That is the same two-arm shape
+§4.4 gives `foreach`, and `slices` is the row that will measure it.
+
+**Nothing already won regressed**: every counting/recursion row is within the
+7–10 % noise band this machine shows (measured by running the base twice), and
+four of them are nominally faster.
+
 ---
 
 ## 0.5 Headline results (what the experiments proved)

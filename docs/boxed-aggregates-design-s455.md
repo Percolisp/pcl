@@ -1,12 +1,15 @@
 # Boxed aggregates → raw element storage: the design analysis (s455d, Fable)
 
-**Status: DESIGN COMPLETE AND HANDOFF-READY (2026-08-31).  The
-sort-comparator ruling is in (§7.1, USER); the one remaining §7 item (the
-gate shape, Q2) is DELEGATED to the implementing session by design — it
-decides with a measurement in phase 0.  Execution: an Opus session takes
-phases 0–2 (zero-change bars), a second takes phase 3 (the flip + the full
-boat), Fable reviews at each boundary.  Task #816.  CHECKPOINT LOG at the
-bottom.**
+**Status: PHASES 0–3 SHIPPED (s457ai, 2026-08-31) — raw element storage is ON
+by default.**  Both §7 open items are closed: the sort-comparator ruling
+(§7.1, USER) is now a `docs/not-supported.md` entry, and the gate shape (§7.2)
+was decided by measurement in phase 0 — a runtime-consulted defglobal,
+`PCL_RAW_ELEMS=0` restores the all-boxed world.  **PHASE 4 IS THE ONLY THING
+LEFT** (§6): E2c′ (`writes_args`-gated raw pass into `@_`), the E3/§4.4 proven
+arm extended to slices — which is what the `slices` bench row is waiting for —
+and the remaining accessor-dispatch cost that keeps `arrhash`/`arrfill` above
+their targets.  Task #816.  EXECUTION CHECKPOINT LOG at the bottom (P0a → P3),
+design checkpoints C1–C4 below it.
 
 The question this doc answers: Perl array/hash ELEMENTS are stored as boxes
 today, unconditionally.  The measured cost is the whole remaining
@@ -412,6 +415,39 @@ more.  Fable reviews at each phase boundary (the round pattern).
   byte-identical to perl with the gate off.  **And with the gate ON the whole
   battery is byte-identical to perl too** — E1–E12 all green over raw slots,
   which is what makes phase 3 a flip rather than a rewrite.
+
+- **P3 — THE FLIP (s457ai, scope extended by the USER mid-session).**
+  `*p-raw-elems*` defaults ON; `PCL_RAW_ELEMS=0` restores the all-boxed world.
+  **The gate found FOUR gaps the design did not foresee, and every one of them
+  is the same mistake: a BOX was doing double duty as a marker for something
+  other than identity.**
+  1. `p-exists-array` read "the slot holds a box" as "the element exists".  The
+     hole marker is `nil`; box-ness has nothing to do with existence.  Fixing
+     it made `exists returns true for &PL_sv_undef elem [perl #7508]` pass on
+     its own merit and leave `cl/skip-registry.lisp` (the stale-detector rule).
+     `p-delete-kv-array-slice` had the same test.
+  2. `p-refgen-list` (`\(@a)`) backslashed the slot's VALUE, so each ref was to
+     a fresh copy.  It now takes the ref of the slot's CELL.
+  3. `p-hash-=`'s list-context return handed out slot VALUES where perl yields
+     the hash's own LVALUES (`$_++ foreach %h = (1,2,1,4)`), and
+  4. `p-list-=`'s greedy array/hash collect arms did the same for
+     `($x,%h) = (…)` and `($x,@a,$z) = (…)`.
+  BAR MET: gate PASS 190/6367 with the flip AND with `PCL_RAW_ELEMS=0`; full
+  sweep GATE clean both ways, TOTAL **18340**; the battery byte-identical to
+  perl both ways; census unchanged (20 files / 63 drops = the blessed rows in
+  the five measured populations); companion op/ + uni/ + re/ + io/ legs with
+  every mover attributed (op/array.t +1 = the un-skipped row; io/open.t and
+  io/pvbm.t measured IDENTICAL on a base tree — stale snapshot rows, spliced
+  with that cause); generation **v2-470**, all three artifacts regenerated,
+  paren-checked, license-tagged, pack.t 5636/89 = its baseline.
+  ir-spec §2.3/§2.4 rewritten to the new normative model; the §7.1
+  sort-comparator ruling is now a `docs/not-supported.md` entry.
+  **Speed (§0.2c of `docs/faster-codegen-suggestions.md`): arrhash 1.48× →
+  1.25×, arrfill 3.91× → 2.91×, nothing already won regressed.**  The two
+  targets (arrhash ≤1.0×, arrfill ~1×) are NOT met — what is left in those
+  loops is accessor dispatch, not allocation.  `slices` went 4.81× → 5.29×
+  because a slice in a COPY position still promotes; that is phase 4's
+  "proven arm", and `slices` is the row that will measure it.
 
 ## CHECKPOINT LOG (continued)
 

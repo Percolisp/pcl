@@ -919,7 +919,7 @@ io/perlio_open.t	10	0	0	0	DIFF	aborted-forms:3: Execution of a form compiled wit
 #   wobble one row (17/13 vs 18/14) — SIGPIPE timing; serial recorded.
 io/pipe.t	27	0	18	14	DIFF		0
 io/print.t	24	0	23	1	DIFF		0
-io/pvbm.t	28	0	23	5	DIFF		0
+io/pvbm.t	28	0	20	8	DIFF	s457ai: NOT a mover -- measured IDENTICAL on a 0237940 base tree; the snapshot row was stale (the known pvbm flapper, DECIDED s437/s438)	0
 io/read.t	2	0	2	0	OK		0
 io/say.t	13	0	13	0	OK		0
 io/scalar.t	128	0	98	30	DIFF		0
@@ -1013,7 +1013,7 @@ op/anonsub.t	14	1	1	5	DIFF		0
 op/append.t	13	0	13	0	OK		0
 op/args.t	23	0	22	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t23 is the ONLY failing row (22/1 vs perl 23/0): after `delete $_[0]` in a sub, the blessed arg's DESTROY must fire when the enclosing block drops the last reference. Probe s319: PCL agrees on t21/t22 (flag stays 0 inside f and after f) and only misses the scope-exit DESTROY — refcount-deterministic destruction, which PCL does not have.	0
 op/arith2.t	9	0	9	0	OK		0
-op/array.t	195	0	169	26	DIFF		0
+op/array.t	195	0	170	25	DIFF	s457ai boxed-aggregates phase 3: p-exists-array stopped reading "is a box" as "exists" -- test 127 (&PL_sv_undef elem) passes honestly and left the skip registry	0
 op/assignwarn.t	116	0	96	20	XDIFF	rows NOT checked (*rows-unstable*) | not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 20 diverging rows (96/20 vs perl 116/0) are one assertion shape: `warning_is { $x OP= … } 'Use of uninitialized value'` for each compound assignment operator, plain and tied. PCL emits no warnings-gated diagnostic; owner task #221. The rows became visible in s399 when task #323 stopped the t/test.pl helper manufacturing a pass. ROW CHECK OPTED OUT (*rows-unstable*, measured s399): the file iterates `keys %should_warn`, so BOTH sides emit the rows in a per-process random order and the description-multiset pairing reports a different missing/extra split every run (81 then 73 diverging rows in two consecutive runs). The COUNTS are stable.	0
 op/attrhand.t	4	0	0	0	DIFF	aborted-forms:1: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/Attribute/Handle	0
 op/attrproto.t	48	0	17	31	DIFF		0
