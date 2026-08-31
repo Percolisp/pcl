@@ -1,0 +1,57 @@
+# The multi-distro INSTALL MATRIX (task #876; closes #282's container half).
+#
+# ci.yml answers "does a stock ubuntu-latest runner install and pass the
+# gate"; this answers the DISTRO question — the same fresh-machine install
+# recipe on bare ubuntu:22.04 / ubuntu:24.04 / debian:12 / debian:13
+# container images, where none of the hosted runner's preinstalled
+# conveniences (build tools, curl, git, full perl) exist.
+#
+# The whole recipe lives in ONE script shared with the local Docker harness
+# (tools/install-matrix/install-and-verify.sh — see its header for the
+# container gotchas it settles); this workflow only supplies the containers.
+#
+# Triggers: NOT per-push (four distro installs cost ~40–60 min of runner
+# time).  Weekly cron + manual dispatch, plus a push trigger scoped to the
+# matrix harness's own files — that is what gives a freshly-landed harness
+# its first run (gh is unauthenticated on the dev box, so workflow_dispatch
+# cannot be the first trigger) and re-runs it exactly when it changes.
+
+name: install-matrix
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 5 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/install-matrix.yml"
+      - "tools/install-matrix/**"
+
+jobs:
+  install:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - "ubuntu:22.04"
+          - "ubuntu:24.04"
+          - "debian:12"
+          - "debian:13"
+    container:
+      image: ${{ matrix.image }}
+    env:
+      SBCL_VERSION: "2.6.0"
+      PPI_MIN: "1.291"
+    steps:
+      # The bare images have no git; checkout@v4 falls back to the REST API
+      # tarball download, which is fine here (nothing below needs .git).
+      - uses: actions/checkout@v4
+
+      - name: Fresh-machine install + verify (the shared recipe)
+        # ci-step re-emits a failing step's tail as a public ::error::
+        # annotation (job logs are admin-only) — same reason as ci.yml.
+        run: tools/ci-step tools/install-matrix/install-and-verify.sh
