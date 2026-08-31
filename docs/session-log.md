@@ -73,6 +73,30 @@ loads, exactly as the real one does, and that single registration IS perl's
 its reason written down (it registers the CALLING package; PCL skips lexical
 pragmas at parse time, so there is no caller to read).
 
+**#873 SIZED, NOT SHIPPED — and the measurement shrinks it.**  The task said
+the write family was "the whole assign/modify set" and asked for it to be
+measured before choosing; it is THREE spellings.  Across 1247 files
+(perl-tests/, lib/, cpan-tests/modules/, perl's own t/): `$N = …` 23,
+`$N =~ s///`/`tr///` 10, `open $N` 1, and ZERO for chop/chomp, `++`/`--`,
+op-assign, `foreach $N`, substr-lvalue and `\$N` — the last is the one worth
+saying out loud, because a raw grep answers 237 and every one of them is an
+ESCAPED `\$1` inside a double-quoted string (test descriptions, and
+`t/re/pat_re_eval.t`'s expected-output strings).  Almost every real occurrence
+is an `eval { … }` in a test OF this very behaviour, so there is no measured
+CPAN code writing a capture by accident.  That turns the task's option (ii)
+from "needs a written-position oracle the compiler does not have" into one
+predicate plus three slots, touching neither the box model nor the hot read
+path.  The full finding, including why the `open` slot's check has to be
+runtime-conditional (perl dies on `open $99` and not on `open $1`, because the
+difference is autovivification into an undef), is in the task JSON.  I did not
+ship it: the brief said measure-then-decide, and the honest decision is that
+this is a task, not a filler.
+
+**#852 NOT ATTEMPTED.**  It is a classifier widening, so its bar is the
+gate-SET scan over BOTH populations plus the four-population emission A/B —
+the one shape of change that most needs an unhurried session, and the brief
+named it skippable.  Nothing about it is blocked; it is simply not started.
+
 **ONE COMPANION ROW I DID NOT EDIT, and why.**  `re/pat_advanced.t` reads
 951/729 against a snapshot of 673/223, with `drops` 4 → 0.  That is **#872's**
 move, from the PREVIOUS session: its row was never refreshed because the file

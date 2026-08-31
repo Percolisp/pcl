@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-500
+;;; pcl: pipeline=v2 gen=v2-510
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -62,13 +62,13 @@
   (p-args-body
     (block nil
       (p-void-ctx
-        (p-foreach ($name @_)
+        (p-foreach-raw ($name @_)
           :my
           t
           (p-if (p-defined (p-gethash warnings::%Offsets $name)) (p-next))
           (let (($bit (make-p-box nil)))
             (p-my-= $bit 0)
-            (p-foreach ($off (p-list-ctx (p-values warnings::%Offsets)))
+            (p-foreach-raw ($off (p-list-ctx (p-values warnings::%Offsets)))
               :my
               t
               (p-if (p-> $off $bit) (p-my-= $bit $off)))

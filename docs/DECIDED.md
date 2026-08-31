@@ -87,6 +87,28 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `register_categories` explicitly too, which is the path that works.  Guard
   `Pl/t/feature-pragma-01.t` (+1 row, compared against a fresh perl on the same
   file).
+- **#873 (capture variables are writable) is SIZED, not shipped — and the
+  measurement shrinks it.**  The task feared "the whole assign/modify set"; a
+  scan of 1247 files (perl-tests/, lib/, cpan-tests/modules/, perl's own t/)
+  finds exactly THREE spellings occurring: `$N = …` (23), `$N =~ s///` or
+  `tr///` (10), `open $N` (1) — and zero for chop/chomp, `++`/`--`,
+  op-assign, `foreach $N`, substr-lvalue and `\$N` (a raw grep says 237 for
+  `\$N`, and ALL of them are an ESCAPED `\$1` inside a double-quoted string).
+  Almost every occurrence is an `eval { … }` in a test OF this behaviour.  So
+  shape (ii) — a compiler rule at the written slot — is ONE predicate ("is
+  this CLForm a capture read": a `$1..$20` bare symbol or `(p-high-capture N)`,
+  the two shapes `Pl::ExprToCL` already emits) plus three slots
+  (`p-scalar-=`/`p-setf` target, `p-=~` target under s///|tr///, `p-open`'s
+  handle), and it touches neither the box model nor the hot read path.  Shape
+  (i), a read-only magic cell, is more principled and owes a Target-A
+  measurement first: it changes the REPRESENTATION of $1..$20, so `%set-cap`,
+  `clear-capture-groups`, `local $1`, `p-high-capture` and `@{^CAPTURE}` move
+  together and every capture read becomes a getter funcall.  ONE wrinkle is
+  perl's own: `open $1` does NOT die when $1 is DEFINED (a defined value is a
+  symbolic filehandle name) while `open $99` does, so that slot's check is
+  runtime-conditional.  Full finding in the task; whichever shape wins, the
+  death must be TRAPPABLE and must NOT be a run-time stderr line (the #874
+  lesson, measured the same session).
 - Filed from the probes, all PRE-EXISTING and all outside this agent's region:
   **#890** (the raw-numeric B-regime freeze DIES on an overloaded object that
   came from a MODULE — `_overload_in_file` is a TEXTUAL scan of this file
