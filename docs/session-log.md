@@ -3,6 +3,45 @@
 Append new entries at the top. One section per session.
 
 ---
+---
+
+## Session 460f (2026-09-01, Fable) — ROUND 17 MERGED: the raw freeze declines (#890, collatz 0.26x), the reference/lvalue silent-wrong family closed (#891/#892/#873); E2c' ruled NOT shipped; gen v2-530
+
+Both agents reviewed and merged in finish order (AO `1845965` ff, pushed
+mid-round; AP rebased over the docs scrub -> `19d4283` = main tip, pushed).
+
+1. **AO review**: 5 own probes vs perl all SAME — the #890 reproducer in
+   both spellings, the `<=>`-only class, -inherited overload,
+   increment consistency.  **E2c' RULED NOT SHIPPED, #862 CLOSED**: it
+   inverts writes_args' safety polarity for arrays (a wrong FALSE becomes
+   a SILENT LOST WRITE) for a prize no bench measures; reopen only with a
+   measured prize AND a die-on-mismatch verification story.  #883 declined
+   at 15% of one row; **#812 answered and retargeted** (76% is name-string
+   mangling — a name->symbol memo has no invalidation blocker).
+2. **AP review**: 9 own probes vs perl all SAME — swaps/rotations in every
+   container shape, the refgen spread with aliasing + the `\(@A,$x)`
+   non-spread constraint, the capture read-only family.  Two
+   trust-nothing wins: the filed #891 diagnosis was HALF WRONG (the bug
+   was the container arms handing the live box, not the flatten path —
+   `%p-container-snapshot` generalizes #423's typeglob treatment), and the
+   #873 `=~` slot was written then REVERTED because perl decides it at
+   RUN time (four blessed tr.t rows assert it; corpus-diff caught the
+   break) — boundary table filed as #911.  perl's own OPpASSIGN_COMMON
+   test (multideref.t 42) now passes.
+3. **Combined legs**: gate PASS 191/6443 (xs masked; xs-only posture on
+   main), agents' sweeps GATE clean TOTAL 18342 (+2: multideref 43/9 +
+   undef 31, baselines row-by-row, one stale skip-registry entry removed),
+   bench re-measured — collatz **0.26x** (was 0.40x), all won rows held
+   (intloop 0.28-0.29x / cfor 0.24x / arrhash 0.66x / feread 0.46x),
+   AP's #910 "standard table unmoved" claim verified.
+4. Closed #890/#862 (AO), #891/#892/#873 (AP).  Filed #900 (AO),
+   #910/#911 (AP).  #852 remains (gate-SET-sized).  Gen **v2-530** = AP's,
+   artifacts regenerated on the final tree.  Also this session: the five
+   live how-to docs scrubbed of local absolute paths (USER ask, `415de3a`).
+   **Next: round 18 = census push (op/sub_lval.t's 34-drop lvalue-sub
+   family first) + the JS-prototype question (USER leaning yes — slot it
+   beside the census track).**
+
 
 ## Session 460ap (2026-09-01, Opus agent AP, round 17) — three SILENT-WRONGS in the reference/lvalue family: the swap that loses references (#891), `\` over a slice (#892), the read-only capture (#873); gen v2-530
 
