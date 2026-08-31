@@ -246,26 +246,27 @@ Array/hash ELEMENTS are no longer boxed unconditionally: a slot holds a raw
 value until something takes an alias to it, and is then promoted to a box IN
 PLACE (`docs/boxed-aggregates-design-s455.md`).  A/B on the same quiet box, in
 one sitting, both sides `perl tools/bench-exec.pl` best-of-5: the BASE column
-is a `git archive` of main at `0237940`, the FLIP column is this tree.
+is a `git archive` of main at `07f2df0` (the rebase base), the FLIP column is
+this tree.  An earlier A/B against `0237940` agreed within 3 % on every row.
 
 ```
 bench          base pcl(s)  flip pcl(s)   base      flip
-intloop+=         0.0198       0.0191     0.30x    0.28x
-intloop=          0.0174       0.0184     0.26x    0.27x
-cfor              0.0273       0.0269     0.26x    0.25x
-arrhash           0.1955       0.1648     1.48x    1.25x   <- -16 %
-fib(27)x          0.4430       0.4259     0.30x    0.29x
-gcdrec            0.0943       0.1000     0.49x    0.52x
-collatz           0.7972       0.7790     0.40x    0.39x
-strcat            0.0040       0.0022     2.25x    1.16x   (abs. 2 ms — noise)
-pack              4.5310       4.5108        —        —    (#74, untouched)
-packunpk          4.6382       4.6397        —        —    (#74, untouched)
-arrfill           0.1927       0.1451     3.91x    2.91x   <- -25 %
-slices            0.3276       0.3539     4.81x    5.29x   <- +8 % WORSE
-sliceasgn         0.0697       0.0722     2.65x    2.78x   (+4 %, see below)
-ovlsub            0.1530       0.1504     3.92x    3.86x
-symref            0.2198       0.2196     9.58x   10.04x
-regexg            0.0000       0.0001        —        —
+intloop+=         0.0177       0.0182     0.26x    0.28x
+intloop=          0.0184       0.0184     0.28x    0.28x
+cfor              0.0262       0.0269     0.25x    0.26x
+arrhash           0.1929       0.1594     1.48x    1.23x   <- -17 %
+fib(27)x          0.4260       0.4196     0.29x    0.29x
+gcdrec            0.0977       0.1003     0.51x    0.52x
+collatz           0.7873       0.7878     0.40x    0.40x
+strcat            0.0040       0.0034     1.83x    1.54x   (abs. 4 ms — noise)
+pack              4.4936       4.5099        —        —    (#74, untouched)
+packunpk          4.6371       4.6165        —        —    (#74, untouched)
+arrfill           0.1920       0.1454     3.94x    2.99x   <- -24 %
+slices            0.3219       0.3465     4.77x    5.07x   <- +8 % WORSE
+sliceasgn         0.0702       0.0727     2.65x    2.88x   (+4 %, see below)
+ovlsub            0.1510       0.1494     3.84x    3.83x
+symref            0.2195       0.2179     9.72x    9.74x
+regexg            0.0012       0.0005        —        —
 ```
 
 **What moved, and why.**  `arrfill` (`@a = (1..20, $_)` 200 k times) and

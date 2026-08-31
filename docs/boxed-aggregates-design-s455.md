@@ -388,7 +388,7 @@ more.  Fable reviews at each phase boundary (the round pattern).
   behind `*p-raw-elems*`, default OFF.  Zero-change bar met: gate PASS
   190/6367, sweep GATE clean TOTAL 18339 (+0), drops 5 = census, battery
   byte-identical to perl, bench at or below base.  **Gate-ON preview** (phase 1
-  alone, nothing else done): arrhash 1.41× → **1.21×**, arrfill 3.91× →
+  alone, nothing else done): arrhash 1.41× → **1.21×**, arrfill 3.94× →
   **2.94×**, sliceasgn 3.04× → **2.71×**, slices 4.96× → 5.17× (promotion
   allocates on first read of each slot; §4.4's proven arm and phase 4's slice
   re-measure own that).  The gate-ON battery ALSO showed exactly which E-events
@@ -442,10 +442,14 @@ more.  Fable reviews at each phase boundary (the round pattern).
   paren-checked, license-tagged, pack.t 5636/89 = its baseline.
   ir-spec §2.3/§2.4 rewritten to the new normative model; the §7.1
   sort-comparator ruling is now a `docs/not-supported.md` entry.
+  **Re-verified after rebasing onto main `07f2df0`** (round-14's AJ landed while
+  this ran): gate 190/6373, sweep GATE clean TOTAL 18340, census 18/61 = main's
+  blessed rows, generation **v2-470**, all four companion legs with ZERO real
+  movers, pack.t 5636/89.
   **Speed (§0.2c of `docs/faster-codegen-suggestions.md`): arrhash 1.48× →
-  1.25×, arrfill 3.91× → 2.91×, nothing already won regressed.**  The two
+  1.23×, arrfill 3.94× → 2.99×, nothing already won regressed.**  The two
   targets (arrhash ≤1.0×, arrfill ~1×) are NOT met — what is left in those
-  loops is accessor dispatch, not allocation.  `slices` went 4.81× → 5.29×
+  loops is accessor dispatch, not allocation.  `slices` went 4.77× → 5.07×
   because a slice in a COPY position still promotes; that is phase 4's
   "proven arm", and `slices` is the row that will measure it.
 

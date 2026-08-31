@@ -62,9 +62,9 @@ those two files and the live plan doc directly -- no new review-doc families.*
   slice-assign arms built their source vector themselves and never ran it.
   Extracted as `%p-assign-snapshot` (rule 11).
 - **Speed** (`faster-codegen-suggestions.md` §0.2c, A/B against `0237940`):
-  arrhash **1.48× → 1.25×**, arrfill **3.91× → 2.91×**, nothing already won
+  arrhash **1.48× → 1.23×**, arrfill **3.94× → 2.99×**, nothing already won
   regressed.  Targets (≤1.0× / ~1×) NOT met — the residue in those loops is
-  accessor dispatch, not allocation.  `slices` 4.81× → 5.29× because a slice in
+  accessor dispatch, not allocation.  `slices` 4.77× → 5.07× because a slice in
   a COPY position still promotes; phase 4's "proven arm" owns it.
 - Bars: gate 190/6367 and full sweep GATE clean TOTAL **18340** BOTH with the
   flip and under `PCL_RAW_ELEMS=0`; gate-SET 638×2 identical at phase 2;
