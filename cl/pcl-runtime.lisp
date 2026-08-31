@@ -5540,7 +5540,7 @@ per element."
     nb))
 
 (declaim (inline %p-assign-snapshot))
-(defun %p-assign-snapshot (item)
+(defun %p-assign-snapshot (item &optional keep-container)
   "The value BOX-SET would store for ITEM, read NOW.  Perl evaluates the WHOLE
    right-hand side of a list assignment before any store happens, so an RHS
    element that is a live box must be snapshotted or a later store can be read
@@ -5563,7 +5563,15 @@ per element."
        and vivify the caller's `$h{k}`; copying the proxy made the target
        itself tied -- s411, found by PCL_OPT=none)
      - non-box -> as-is.
-   Idempotent, so a path that snapshots twice is harmless."
+   Idempotent, so a path that snapshots twice is harmless.
+
+   KEEP-CONTAINER (task #910) hands the LIVE box back from the container arm
+   instead of allocating a copy.  Only a caller that then does its own
+   commonality check may pass it — today exactly p-list-='s all-scalar-targets
+   fast path, which runs %p-protect-target before each store.  A REF-WRAPPER
+   box (is-ref, the result of `\\`) is copied even so: box-set stores such a box
+   BY IDENTITY rather than unwrapping it, so keeping it live would be the one
+   case where the object landing in the target differs from today's."
   (if (p-box-p item)
       (let ((inner (p-box-value item)))
         (cond
@@ -5573,7 +5581,9 @@ per element."
                (hash-table-p inner)                          ; hash ref
                (p-typeglob-p inner)
                (%p-dualvar-box-p item))                      ; $!/dualvar
-           (%p-container-snapshot item inner))
+           (if (and keep-container (not (p-box-is-ref item)))
+               item
+               (%p-container-snapshot item inner)))
           ((p-magic-cell-p inner) (funcall (p-magic-cell-getter inner)))
           ((p-tie-proxy-p inner) (unbox (%p-tie-fetch item inner)))
           (t inner)))
@@ -5598,7 +5608,29 @@ per element."
         (when out (setf (aref out i) s))))
     (or out src)))
 
-(defun %p-flatten-list (src)
+(defun %p-protect-target (target src-vec from)
+  "perl's `common assignment' rule, applied exactly where it bites (task #910).
+
+   A list assignment evaluates the whole RHS before any store, so a store into
+   TARGET must not change what a LATER RHS slot reads.  %p-assign-snapshot
+   enforces that by COPYING every container-valued RHS element up front — two
+   struct allocations on every `my (\\$self,\\$x,\\$r) = \\@_' (measured +8.9 % on
+   OO method entry), for a hazard that needs the SAME box on both sides.
+   perl instead marks the assignment `common' (OPpASSIGN_COMMON_*) and copies
+   only then.  This is the runtime spelling of the same test: just before
+   storing into TARGET, snapshot every slot at index >= FROM that IS (eq)
+   TARGET.  k targets x m slots is a handful of EQ tests and zero allocations
+   when nothing is shared — which is the overwhelmingly common case.
+
+   A RUNTIME test on purpose: a compile-time LHS/RHS name comparison has a
+   hole (`our (\\$p,\\$q); sub f { (\\$p,\\$q) = \\@_ } f(\\$q,\\$p)' puts the caller's
+   boxes in \\@_ and the RHS form mentions neither name)."
+  (when (p-box-p target)
+    (loop for i from from below (length src-vec)
+          do (when (eq (aref src-vec i) target)
+               (setf (aref src-vec i) (%p-assign-snapshot target))))))
+
+(defun %p-flatten-list (src &optional keep-containers)
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (labels ((add (item)
                (cond
@@ -5637,7 +5669,10 @@ per element."
                  (t
                   ;; The RHS-snapshot rule lives in %p-assign-snapshot
                   ;; (the slice-assignment arms of p-setf run it too).
-                  (vector-push-extend (%p-assign-snapshot item) result)))))
+                  ;; KEEP-CONTAINERS is p-list-='s #910 fast path: it protects
+                  ;; the shared-box case itself, per target, at store time.
+                  (vector-push-extend (%p-assign-snapshot item keep-containers)
+                                      result)))))
       (add src))
     result))
 
@@ -5665,10 +5700,26 @@ per element."
    slots (N may be a runtime expression).
    Returns: list ctx (*wantarray* t) → flat vector of actual LHS values;
             scalar/void ctx → count of RHS elements."
-  (let ((vars (cdr place))
-        (src (gensym "SRC"))
-        (src-vec (gensym "SRC-VEC"))
-        (result-var (gensym "LIST-RESULT")))
+  (let* ((vars (cdr place))
+         (src (gensym "SRC"))
+         (src-vec (gensym "SRC-VEC"))
+         (result-var (gensym "LIST-RESULT"))
+         ;; #910's fast path, gated on the ONE shape whose every store target
+         ;; is a nameable box this macro can hand to %p-protect-target: every
+         ;; LHS element a plain `$' scalar symbol.  That is `my ($self,$x,$r)
+         ;; = @_' and `($a,$b) = ($b,$a)'.  Any other element — an array or
+         ;; hash (which absorb a SUBSEQ of the source), a p-list-x repeat, an
+         ;; undef placeholder or a slice/element lvalue — keeps the general
+         ;; form, because those arms either consume src slots wholesale or
+         ;; write through a place whose box is not known here, and the
+         ;; undef/slice arms also hand src-vec elements back as the
+         ;; list-context RESULT (an all-scalar LHS returns its target boxes).
+         (all-scalar (and vars
+                          (every (lambda (v)
+                                   (and (symbolp v)
+                                        (plusp (length (symbol-name v)))
+                                        (char= (char (symbol-name v) 0) #\$)))
+                                 vars))))
     (let ((forms nil)
           (collect-forms nil)  ; forms to collect LHS values for list-ctx return
           (static-idx 0)   ; statically-known offset accumulated so far
@@ -5692,11 +5743,13 @@ per element."
              (if (null dyn-vars)
                  static-idx
                  `(+ ,static-idx ,@(reverse dyn-vars))))
-           (assign-scalar (lvar idx-expr)
+           (assign-scalar (lvar idx-expr &optional protect-from)
              `(progn
                 (unless (boundp ',lvar)
                   (%p-ensure-storage (quote ,lvar))
                   (setf (symbol-value ',lvar) (make-p-box nil)))
+                ,@(when protect-from
+                    `((%p-protect-target ,lvar ,src-vec ,protect-from)))
                 (box-set ,lvar (if (< ,idx-expr (length ,src-vec))
                                    (aref ,src-vec ,idx-expr)
                                    *p-undef*))))
@@ -5876,7 +5929,10 @@ per element."
             ;; Scalar variable - auto-declare and assign
             ((symbolp var)
              (let ((idx (cur-idx)))
-               (push (assign-scalar var idx) forms)
+               ;; ALL-SCALAR: src-vec carries LIVE container boxes (#910), so
+               ;; protect this target's later occurrences before storing.
+               ;; IDX is a literal here — an all-scalar LHS has no dyn-vars.
+               (push (assign-scalar var idx (and all-scalar (1+ idx))) forms)
                ;; Collect: push the scalar's box (holds the assigned value)
                (push `(vector-push-extend ,var ,result-var) collect-forms)
                (incf static-idx 1)))
@@ -5968,7 +6024,7 @@ per element."
                (incf static-idx 1)))))
 
         `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
-                (,src-vec (%p-flatten-list ,src))
+                (,src-vec (%p-flatten-list ,src ,all-scalar))
                 ,@(reverse extra-lets))
            ,@(nreverse forms)
            ;; List ctx: collect actual LHS values; scalar/void: return RHS count
@@ -15799,6 +15855,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; main ⇒ an :INHERITED answer is NOT FOUND".  The unqualified spelling is
 ;;; untouched (perl forces an unqualified special into main, which is what
 ;;; inheritance already gives).  t/op/leaky-magic.t rows 4, 48, 67–70.
+(defvar *p-symref-symbol-memo* (make-hash-table :test 'equal)
+  "Task #812's name -> symbol memo; see %p-symref-symbol below for why it needs
+   no invalidation.  name-string -> list of #(sigil-char package-string symbol).")
+
 (defun %p-symref-foreign-p (pos pkg-str)
   "True when the symbolic name was EXPLICITLY qualified (POS = its last `::`)
    into a package other than main — the case where a symbol INHERITED from
@@ -15816,10 +15876,49 @@ buffer's fill-pointer; everything else falls back to file-length."
    symbol is SHADOWED first, so the vivified variable is the foreign package's
    and a write through it cannot reach main's magic."
   (or (%p-symref-find pkg sym-name foreign)
-      (progn (when (find-symbol sym-name pkg) (shadow sym-name pkg))
+      (progn (when (find-symbol sym-name pkg)
+               ;; SHADOW is the one operation that changes which symbol a
+               ;; (package, name) pair denotes, so it is the one thing that can
+               ;; stale *p-symref-symbol-memo*.  It fires at most once per
+               ;; foreign-qualified special, so dropping the whole table is
+               ;; cheaper than tracking which entries could point at the
+               ;; inherited symbol.
+               (shadow sym-name pkg)
+               (clrhash *p-symref-symbol-memo*))
              (intern sym-name pkg))))
 
-(defun %p-symref-symbol (name-str sigil create)
+;;; MEMO: (name-string, sigil, perl current package) -> the SYMBOL.  Task #812,
+;;; sized by sb-sprof (s460ao): ~76 % of a symbolic-reference access is the
+;;; NAME-STRING work below — `search`ing for "::", %pcl-invert-case, the
+;;; string-upcase inside it, and two fresh strings from subseq/concatenate —
+;;; for a name that is a compile-time constant at nearly every call site.  The
+;;; package lookup was ~11 % and the cell read 0.5 %, so this is where the row is.
+;;;
+;;; WHY THIS NEEDS NO INVALIDATION, unlike a memo on the CELL (#582's blocker):
+;;; the answer here is which SYMBOL a name denotes, and that is stable forever
+;;; — a later `*main::g = ...`, an @ISA edit or a fresh `our` rebinds what the
+;;; symbol HOLDS, which is exactly what the caller's `symbol-value` then picks
+;;; up.  The two ways an entry could go stale are `unintern` and
+;;; `delete-package`, neither of which the runtime ever does, and `shadow`,
+;;; which only %p-symref-intern below performs — and it drops the table.
+;;; Only a HIT is stored: a miss (unknown package, or a name not interned yet)
+;;; must stay a miss, or `${"n"} = 1; ${"n"}` would keep answering undef.
+;;; The stored key is copied (%pcl-memo-key) because a Perl string can be a
+;;; fill-pointer buffer the `str-buffer` transform appends to in place.
+(defun %p-symref-memo-lookup (name-str sigil cur-pkg)
+  (let ((sc (char sigil 0)))
+    (dolist (e (gethash name-str *p-symref-symbol-memo*))
+      (when (and (char= (svref e 0) sc)
+                 (let ((p (svref e 1)))
+                   (or (eq p cur-pkg) (string= p cur-pkg))))
+        (return (svref e 2))))))
+
+(defun %p-symref-memo-store (name-str sigil cur-pkg sym)
+  (push (vector (char sigil 0) (%pcl-memo-key cur-pkg) sym)
+        (gethash (%pcl-memo-key name-str) *p-symref-symbol-memo*))
+  sym)
+
+(defun %p-symref-symbol-uncached (name-str sigil create)
   (let* ((pos (search "::" name-str :from-end t))
          (pkg-str (perl-pkg-to-cl-pkg-name
                    (cond ((null pos)  *pcl-current-package*)
@@ -15839,6 +15938,18 @@ buffer's fill-pointer; everything else falls back to file-length."
               (%p-ensure-storage sym)
               sym)
             (%p-symref-find pkg sym-name foreign))))))
+
+(defun %p-symref-symbol (name-str sigil create)
+  "The symbol NAME-STR names for SIGIL, memoized (see *p-symref-symbol-memo*).
+   A CREATE hit still runs %p-ensure-storage — the entry may have been stored
+   by a reader, which never gives the symbol its global cell."
+  (let* ((cur *pcl-current-package*)
+         (hit (%p-symref-memo-lookup name-str sigil cur)))
+    (if hit
+        (if create (%p-ensure-storage hit) hit)
+        (let ((sym (%p-symref-symbol-uncached name-str sigil create)))
+          (when sym (%p-symref-memo-store name-str sigil cur sym))
+          sym))))
 
 (defun %p-symref-box (name-str)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
