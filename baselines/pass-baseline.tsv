@@ -1,4 +1,19 @@
 # taken-at: 5323d9e 2026-08-15
+# s460ap (round 17, edited ROW BY ROW): multideref.t 42/10 -> 43/9.  ONE row,
+#   test 42 "OA_DANGEROUS b" -- perl's OWN OPpASSIGN_COMMON test
+#   `($x->{a}, $x->{b}) = ($x->{b}, $x->{a})` on two ARRAY REFS.  #891: the
+#   RHS snapshot kept the LIVE box for a reference, so store 1 read $x->{a}
+#   back after store 0 overwrote it.  Verified on a base-runtime single-file
+#   run (row 42 fails there, every other row byte-identical); the row also
+#   left fail-baseline BY EDIT.
+#   Same session, a SECOND row: undef.t 30 -> 31.  Test 17 is `eval { $1 = undef }`,
+#   a SKIP-REGISTERED row (:read-only, keyed by number) that now PASSES ON ITS
+#   OWN MERIT because #873 made a write to a capture variable perls trappable
+#   "Modification of a read-only value attempted".  The stale-detector flagged it
+#   in the same run (REGISTRY-STALE: undef.t test 17 now passes) and the registry
+#   entry was removed in the same commit, per the stale-detector rule.  Its
+#   neighbours 16 (`undef $1` -- the undef BUILTIN, not a #873 write slot) and 18
+#   (`undef &constant_sub`) still skip.
 # s455 round-13 edits, ROW BY ROW (never re-blessed): split.t 177/7->178/6 and
 #   hexfp.t 106/15->107/14 (both s456ag, verified on an AG-only cbfd7c0 worktree;
 #   the split scalar-stack-overflow row also left fail-baseline BY EDIT);
@@ -219,7 +234,7 @@ magic.t	PARTIAL	158	31	208
 # among this PARTIAL file's unrecorded churn rows, never blessed.
 method.t	PARTIAL	76	22	163
 min_local.t	OK	10	0	10
-multideref.t	PARTIAL	42	10	65
+multideref.t	PARTIAL	43	9	65
 my.t	OK	52	0	52
 negate.t	OK	47	0	47
 not.t	OK	20	0	24
@@ -264,7 +279,7 @@ substr.t	PARTIAL	347	3	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257
-undef.t	OK	30	0	35
+undef.t	OK	31	0	35
 unshift.t	OK	19	0	19
 vec.t	OK	76	0	78
 wantarray.t	OK	27	1	28

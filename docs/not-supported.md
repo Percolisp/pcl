@@ -216,8 +216,22 @@ Attempts to assign to it throw "Modification of a read-only value".
 **PCL behaviour:** Stash manipulation (`%::`) is not fully supported; the
 read-only flag on scalars is not emulated.
 
-**Affected tests:** `perl-tests/undef.t` tests 16–18 (need `$SIG{__WARN__}`
+**Affected tests:** `perl-tests/undef.t` tests 16 and 18 (need `$SIG{__WARN__}`
 and read-only scalars).
+
+**Not this entry — CAPTURE variables (s460ap, task #873).**  `$1`, `$2`, … are
+read-only in perl too, but that is a *named* family with a *named* set of write
+slots, and PCL now implements it: an assignment target (`$1 = 5`) and `open`'s
+handle both raise perl's own "Modification of a read-only value attempted",
+trappably.  `open` is CONDITIONAL, as perl makes it — `open $1` on a DEFINED
+capture is an ordinary symbolic filehandle NAME and does not die, `open $99`
+on a group that never participated does.  `undef $1` (the `undef` BUILTIN, not
+an assignment) is still this entry's silent no-op — undef.t test 16 — and so
+are `.=` / `++` / `chop` / substr-lvalue / `\$1`, which a 1247-file scan found
+zero real occurrences of.  `$1 =~ s///` and `$1 =~ tr///` are an OPEN BUG with
+an owner, not non-support: perl decides them at RUN time (a no-match `s///`,
+any `/r`, and a `tr` that cannot change its target are all fine) and PCL warns
+where it should croak — **task #911**.
 
 ---
 

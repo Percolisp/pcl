@@ -367,6 +367,20 @@ same argument about its own class slot before aliasing elements.
 
 ### 2.5 References
 
+**`\` applied to a LIST is a LIST of references, one per element** (normative,
+task #892). The distributing forms are `(p-refgen-list X)` — one ref per
+element of the list value `X`, each aliasing the container's slot — and, for a
+multi-term `\( … )`, a `(vector …)` of per-term refs with the spreading terms
+looped in. What SPREADS is decided by the term, not by whether parens were
+written: **a SLICE** (`\@A[0,1]`, `\@h{…}`, and the kv spellings `\%h{…}` /
+`\%a[…]`) and **the range operator** (`\(1..3)`). What does NOT spread is an
+array or hash VARIABLE: perl's special case spreads `\(@foo)` only when the
+parenthesized list is exactly that one aggregate, so `\@A` and `\(@A,$x)` are
+one ARRAY ref (plus, there, one scalar ref) — `Pl::ExprToCL::_is_refgen_spread_node`
+is the single predicate for the first question and `_is_list_node_for_refgen`
+for the second. In explicit scalar/void context a distributing form is the
+comma operator: `my $s = \@A[0,1]` is `\$A[1]`.
+
 `(p-backslash X)` — Perl `\X` — returns a **box with `is-ref` = t** whose
 `value` is:
 - for a scalar: the scalar's *box* (so writes through `$$r` hit the
@@ -446,6 +460,25 @@ resolves the referent, and `is-ref` on the wrapper is its only discriminator:
   instead of a flag-carrying snapshot **aliases**, and `($g1,$g2) = ($g2,$g1)`
   collapses to one glob. A **raw** `p-typeglob` outside a box is a glob VALUE
   by the same convention `stringify-value` uses (#316).
+- **That aliasing rule is not special to globs — it is the rule for EVERY
+  payload that travels as a box** (normative, task #891). Perl evaluates the
+  whole right-hand side of a list assignment before any store happens
+  (`OPpASSIGN_COMMON`), so an RHS element that is a live box must be
+  snapshotted: `%p-assign-snapshot` reduces a plain scalar to its inner VALUE
+  (copy semantics), reads a magic cell or tie proxy *now*, and for anything
+  whose facts live on the CONTAINER — a reference (inner is a box, a vector or
+  a hash table), a blessed box, a typeglob, a dualvar — hands back a **fresh
+  box with the same inner and the same container flags**
+  (`%p-container-snapshot`: class, `is-ref`, the cached NV/SV). Handing over
+  the live box instead makes `($x,$y) = ($y,$x)` read `$x` back *after* store 0
+  overwrote it, so both names end up holding `$y`'s referent — silently, and
+  only for references, which is why the plain-scalar swap looks correct. The
+  REFERENT is untouched by the copy, so `==`, `refaddr` and the `TYPE(0x…)`
+  string are unchanged: identity is the referent's, per the rule above. Both
+  assignment families read this one rule — `p-list-=` through
+  `%p-flatten-list`'s scalar arm, and `p-setf`'s array-slice / hash-slice arms
+  through `%p-assign-snapshot-vector` (a slice hands out the container's own
+  element boxes, #818).
 
 **Ref identity is a monotonic id, deliberately NOT a machine address**
 (`object-address`, `cl/pcl-runtime.lisp`). A translator must reproduce the

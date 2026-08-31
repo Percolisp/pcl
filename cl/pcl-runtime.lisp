@@ -240,6 +240,7 @@
    #:p-local-deref-scalar #:p-local-deref-array #:p-local-deref-hash
    #:p-copy-array #:p-copy-hash
    #:p-pack #:p-unpack #:p-load-extension #:p-high-capture
+   #:p-capture-write #:p-capture-fh
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-sort-named #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
@@ -5520,6 +5521,24 @@ per element."
        (stringp (p-box-value box))
        (/= (p-box-nv box) (parse-perl-number (p-box-value box)))))
 
+(defun %p-container-snapshot (item inner)
+  "A FRESH box holding INNER with ITEM's CONTAINER flags — the snapshot for an
+   RHS element whose payload cannot be reduced to a bare value because facts
+   live on the box itself: the blessed class, the glob is-ref discriminator,
+   and a dualvar's cached NV alongside its string.  Everything box-set reads off
+   a source box is carried, and nothing else is shared, so a later store into
+   ITEM cannot be read back through the snapshot.
+   The REFERENT is untouched, so reference identity (== / refaddr / the
+   TYPE(0xADDR) string, all keyed on the referent's address) is unchanged."
+  (let ((nb (%make-p-box :value inner
+                         :class (p-box-class item)
+                         :is-ref (p-box-is-ref item))))
+    (when (p-box-nv-ok item)
+      (setf (p-box-nv nb) (p-box-nv item) (p-box-nv-ok nb) t))
+    (when (p-box-sv-ok item)
+      (setf (p-box-sv nb) (p-box-sv item) (p-box-sv-ok nb) t))
+    nb))
+
 (declaim (inline %p-assign-snapshot))
 (defun %p-assign-snapshot (item)
   "The value BOX-SET would store for ITEM, read NOW.  Perl evaluates the WHOLE
@@ -5529,11 +5548,15 @@ per element."
    and, since #818, `@a[0,1] = @a[1,0]` (a slice hands out the container's own
    element boxes).  box-set's rules, mirrored:
      - p-box with a non-box inner -> store the inner value (copy semantics)
-     - p-box with a box inner (a reference) -> keep the outer box
-     - blessed / array-ref / hash-ref / dualvar box -> keep the box
-     - typeglob -> a FRESH box carrying the is-ref flag (#423: glob REF vs glob
-       VALUE lives on the CONTAINER, so a raw-value snapshot loses it, and
-       keeping ITEM would alias — ($g1,$g2) = ($g2,$g1) collapsed to one glob)
+     - reference (inner is a box / vector / hash table), blessed, typeglob or
+       dualvar box -> a FRESH box carrying the same inner and the same
+       container flags (%p-container-snapshot).  Keeping ITEM here was #891:
+       `($x,$y) = ($y,$x)` on REFERENCES read $x back AFTER the first store had
+       overwritten it, so both names ended up holding $y's referent — silently,
+       and only for references, which is why the plain-scalar swap (which
+       reduces to a bare value one arm down) hid it.  #423 had already found
+       this for the typeglob arm and fixed that arm alone; the rule is the same
+       for every payload that must travel as a box.
      - MAGIC or TIED source (a defelem @_ alias, an arylen/substr/pos lvalue, a
        tied scalar) -> the value it reads as now, never the cell or the proxy
        (copying the cell made `my ($x) = @_; $x = 0` write THROUGH the alias
@@ -5548,12 +5571,9 @@ per element."
                (p-box-class item)
                (and (vectorp inner) (not (stringp inner)))  ; array ref
                (hash-table-p inner)                          ; hash ref
+               (p-typeglob-p inner)
                (%p-dualvar-box-p item))                      ; $!/dualvar
-           item)
-          ((p-typeglob-p inner)
-           (let ((nb (make-p-box inner)))
-             (setf (p-box-is-ref nb) (p-box-is-ref item))
-             nb))
+           (%p-container-snapshot item inner))
           ((p-magic-cell-p inner) (funcall (p-magic-cell-getter inner)))
           ((p-tie-proxy-p inner) (unbox (%p-tie-fetch item inner)))
           (t inner)))
@@ -5564,8 +5584,9 @@ per element."
    p-setf run this before their store loop, which is where perl's own aassign
    copies.  Allocates the output vector LAZILY — only from the first element
    whose snapshot differs from the element itself, so a literal RHS
-   (`@a[1..3] = (7,8,9)`, raw scalars) and an all-reference RHS cost nothing but
-   the walk, and SRC is handed straight back."
+   (`@a[1..3] = (7,8,9)`, raw scalars) costs nothing but the walk and SRC is
+   handed straight back.  (A reference RHS does allocate, since #891: its
+   snapshot is a fresh container box, never the live one.)"
   (let ((n (length src))
         (out nil))
     (dotimes (i n)
@@ -6078,8 +6099,10 @@ per element."
    leaves two elements).  Referents resolve through p-alias-scalar-target —
    the same helper the `\\$x = REF` arm uses — so a ref-to-a-ref, and a
    variable holding the ref, stay right here too.  %p-flatten-list is what
-   spreads the right-hand side, because it PRESERVES a reference box while
-   snapshotting a plain scalar's value, which is precisely the split we need."
+   spreads the right-hand side, because it PRESERVES the reference (in a fresh
+   container box since #891) while snapshotting a plain scalar's value, which
+   is precisely the split we need — the REFERENT is what this walk resolves to,
+   and that is untouched by the container copy."
   (let ((v (p-cast-@ arr))
         (items (%p-flatten-list refs)))
     (unless (and (vectorp v) (not (stringp v)))
@@ -14198,7 +14221,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-510"
+(defparameter *pcl-cache-generation* "v2-530"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -19188,6 +19211,38 @@ buffer's fill-pointer; everything else falls back to file-length."
         (let ((v (aref |@{^CAPTURE}| i)))
           (if (p-box-p v) (p-box-value v) v))
         *p-undef*)))
+
+(defun p-capture-write (value)
+  "perl makes every CAPTURE VARIABLE read-only, so a WRITE to one is a
+   trappable run-time death — `eval { $1 = 5 }` leaves \"Modification of a
+   read-only value attempted\" in $@ and the variable unchanged (#873).
+
+   PCL cannot see this at the write itself: $1..$20 are plain defvars holding a
+   raw STRING and $21+ are read through p-high-capture, so every write path
+   receives a VALUE where it expects a place, box-set returns on a non-box, and
+   the write was a SILENT no-op.  The compiler therefore names the three write
+   SLOTS the corpus contains — an assignment target, a `=~` target whose right
+   side is a substitution or transliteration, and `open`'s handle (that one via
+   p-capture-fh) — and routes them here.
+
+   VALUE is the right-hand side, taken as an ARGUMENT rather than ignored at
+   the call site, so its side effects happen BEFORE the death — the order
+   perl's sv_setsv gives, since perl evaluates the RHS and then croaks in the
+   store."
+  (declare (ignore value))
+  (%p-readonly-modification))
+
+(defun p-capture-fh (value)
+  "`open` on a capture variable, whose verdict perl makes CONDITIONAL, and the
+   condition is autovivification (#873, probed 5.40.3): `open $1, …` on a
+   DEFINED capture is an ordinary symbolic filehandle NAME and open proceeds,
+   while `open $99, …` on a group that did not participate would have to write
+   a glob into a read-only undef scalar, and dies.  So this is the identity on
+   a defined value — p-open sees exactly what it saw before — and perl's
+   read-only death otherwise."
+  (if (or (null value) (eq value *p-undef*))
+      (%p-readonly-modification)
+      value))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."

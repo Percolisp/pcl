@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 36;
+plan tests => 40;
 
 sub run_cl {
     my ($code) = @_;
@@ -402,3 +402,64 @@ test_cl("LHS slice absorbs its width in a list assignment",
      ($a, @bcd[0..2], $e) = ("a","b","c","d","e");
      print join(":", $a, @bcd[0..2], $e), "\n";',
     "a:b:c:d:e\n");
+
+# ── #891: a swap whose values are REFERENCES ─────────────────────────────────
+# `($x,$y) = ($y,$x)` was CORRECT for plain scalars and SILENTLY WRONG for
+# references: %p-assign-snapshot returned the LIVE box for a ref/blessed/dualvar
+# payload, so store 1 read $x back AFTER store 0 had overwritten it and both
+# names ended up holding $y's referent.  #423 had already found this for the
+# typeglob arm; the rule is the same for every payload that travels as a box.
+# Every expectation below is real perl's output (probed, perl 5.40.3).
+
+test_cl('#891 reference swap: array, hash, blessed, 3-cycle',
+    'my $x=[1,2]; my $y=[9]; ($x,$y)=($y,$x);
+     my $h1={a=>1}; my $h2={b=>2,c=>3}; ($h1,$h2)=($h2,$h1);
+     my $o1=bless({},"A"); my $o2=bless({},"B"); ($o1,$o2)=($o2,$o1);
+     my $c1=[1]; my $c2=[2]; my $c3=[3]; ($c1,$c2,$c3)=($c3,$c1,$c2);
+     print scalar(@$x), ",", scalar(@$y), "\n";
+     print scalar(keys %$h1), ",", scalar(keys %$h2), "\n";
+     print ref($o1), ref($o2), "\n";
+     print $$c1[0], $$c2[0], $$c3[0], "\n";',
+    "1,2\n2,1\nBA\n312\n");
+
+test_cl('#891 reference swap: scalar refs, mixed ref/plain, sub params',
+    'my $s1="one"; my $s2="two"; my $r1=\$s1; my $r2=\$s2; ($r1,$r2)=($r2,$r1);
+     my $m=[7]; my $n="N"; ($m,$n)=($n,$m);
+     sub sw { my ($u,$v)=@_; ($u,$v)=($v,$u); return "$$u[0]$$v[0]" }
+     print "$$r1,$$r2\n";
+     print $m, ",", ref($n), $n->[0], "\n";
+     print sw([4],[6]), "\n";',
+    "two,one\nN,ARRAY7\n64\n");
+
+test_cl('#891 reference swap through element places and slices',
+    'my @e=([10],[20]);    ($e[0],$e[1])=($e[1],$e[0]);
+     my %hh=(a=>[1],b=>[2]); ($hh{a},$hh{b})=($hh{b},$hh{a});
+     my @a=([1],[2,3]);    @a[0,1] = @a[1,0];
+     my %h=(x=>[1],y=>[2,3]); @h{qw(x y)} = @h{qw(y x)};
+     print $e[0][0], ",", $e[1][0], "\n";
+     print $hh{a}[0], ",", $hh{b}[0], "\n";
+     print scalar(@{$a[0]}), ",", scalar(@{$a[1]}), "\n";
+     print scalar(@{$h{x}}), ",", scalar(@{$h{y}}), "\n";',
+    "20,10\n2,1\n2,1\n2,1\n");
+
+# INVERSE — what the fresh CONTAINER box must not disturb.  The copy carries
+# the class, the glob is-ref discriminator and a dualvar's cached NV, and it
+# shares the REFERENT, which is what identity (== / refaddr / "ARRAY(0x..)")
+# is keyed on.  #423's glob swap must stay fixed, and refaliasing must still
+# resolve to the referent BOX through the copy.
+test_cl('#891 inverse: identity, class, dualvar, glob swap, refaliasing',
+    'use Scalar::Util qw(refaddr);
+     no warnings "experimental::refaliasing"; use feature "refaliasing";
+     my $r=[1]; my ($r2)=($r);
+     my $o=bless([1],"Cls"); my ($o2)=($o);
+     $!=13; my ($e9)=($!);
+     our @G1=(1); our @G2=(2,3);
+     my $g1=\*G1; my $g2=\*G2; ($g1,$g2)=($g2,$g1);
+     our $ra; my $src="S"; \$ra = \$src; $src="T";
+     push @$r2, 2;
+     print refaddr($r)==refaddr($r2) ? "same" : "diff", " ", "$r" eq "$r2" ? "str" : "STR", " ", scalar(@$r), "\n";
+     print ref($o2), " ", ($o==$o2 ? "same" : "diff"), "\n";
+     print $e9+0, "|$e9\n";
+     print scalar(@{*$g1{ARRAY}}), ",", scalar(@{*$g2{ARRAY}}), "\n";
+     print "$ra\n";',
+    "same str 2\nCls same\n13|Permission denied\n2,1\nT\n");

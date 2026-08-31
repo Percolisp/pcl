@@ -103,15 +103,22 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                  "tr/// on a zero-length read-only string must die 'Modification of a read-only value'. not-supported.md: read-only scalars / Internals.")
                 )
 
-;; undef.t 16-18 are UNNAMED (no description) -> keyed by test number.
-;; not-supported.md: 'Read-only constants via \undef stash tricks' (tests 16-18).
+;; undef.t 16 and 18 are UNNAMED (no description) -> keyed by test number.
+;; not-supported.md: 'Read-only constants via \undef stash tricks'.
+;;
+;; TEST 17 WAS HERE AND IS GONE (s460ap): it is `eval { $1 = undef }`, and #873
+;; made a WRITE to a capture variable perl's trappable read-only death, so the
+;; row PASSES ON ITS OWN MERIT.  The stale-detector said so in the same run
+;; ("REGISTRY-STALE: undef.t test 17 now passes"), which is what this entry's
+;; removal answers.  Its two neighbours stay: 16 is `eval { undef $1 }` — the
+;; `undef` BUILTIN applied to a capture, a write slot #873 does NOT name (the
+;; corpus has zero occurrences outside this row) — and 18 is
+;; `undef &constant_sub`, an unrelated constant slot.
 (register-skips "undef.t"
                 (16 :read-only
-                    "undef of a read-only value must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16-18).")
-                (17 :read-only
-                    "undef of a read-only value must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16-18).")
+                    "undef of a read-only value must die 'Modification of a read-only value' — read-only scalars not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16, 18).")
                 (18 :read-only
-                    "undef &constant_sub must die 'Can't modify constant item' — constant/read-only slots not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16-18)."))
+                    "undef &constant_sub must die 'Can't modify constant item' — constant/read-only slots not emulated. not-supported.md: 'Read-only constants via \\undef stash tricks' (undef.t 16, 18)."))
 
 ;; not.t 21-24 — perl's `!0`/`!1` are ONE globally-shared read-only scalar, so
 ;; writing through `for (!0) { $_ = 43 }` dies and `\!0` is the same address every

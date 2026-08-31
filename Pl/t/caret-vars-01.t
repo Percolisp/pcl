@@ -54,7 +54,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 8;
 
 sub write_pl {
     my ($code) = @_;
@@ -135,4 +135,55 @@ both_agree(<<'PL', '$: defaults to the three chars space, NEWLINE, hyphen');
 print "len=", length($:), " ords=", join(",", map { ord } split //, $:), "\n";
 $: = "xy";
 print "after=[$:]\n";
+PL
+
+# ---- #873: a CAPTURE VARIABLE is READ-ONLY --------------------------------
+#
+# The same mechanism as #565 above, one family over: $1..$20 are plain defvars
+# holding a raw STRING and $21+ are read through p-high-capture, so every write
+# path received a VALUE where it wanted a place, box-set returned on the
+# non-box, and `$1 = 5` was a SILENT no-op where perl dies "Modification of a
+# read-only value attempted".  The compiler now names the write SLOTS: an
+# assignment target, and `open`'s handle.  `open` is the CONDITIONAL one and
+# the condition is autovivification — `open $1` on a DEFINED capture is an
+# ordinary symbolic filehandle NAME and does not die, while `open $99` on a
+# group that never participated would vivify a glob into a read-only undef.
+#
+# The reporter must not use s/// : a substitution inside the helper sub would
+# clobber the very captures under test (PCL's captures are not block-scoped —
+# a separate gap, and the reason index/substr strip the " at FILE line N" tail
+# here).
+#
+# NOT covered, and measured (task #911): `$1 =~ s///` and `$1 =~ tr///`.  perl
+# decides those at RUN time — a no-match s///, any /r, and a tr that cannot
+# change its target are all "no error" — so the verdict belongs at the
+# runtime's two write sites, which today only warn.
+
+both_agree(<<'PL', '#873: writing a capture is perl\'s read-only death, in every slot that dies');
+sub t { my ($n,$c)=@_;
+        my $r = eval { my $v = $c->(); 1 }; my $e = $@;
+        my $i = index($e, " at "); $e = substr($e,0,$i) if $i >= 0;
+        print "$n: ", ($r ? "no error" : $e), "\n" }
+"abc" =~ /(a)(b)/;  t("1 assign low",   sub { $1 = 5 });
+"abc" =~ /(a)(b)/;  t("2 assign high",  sub { $99 = 5 });
+"abc" =~ /(a)(b)/;  t("3 assign undef", sub { $1 = undef });
+"abc" =~ /(a)(b)/;  t("4 open defined", sub { open $1, "<", "/nope-xyz" });
+"abc" =~ /(a)(b)/;  t("5 open undef",   sub { open $99, "<", "/nope-xyz" });
+"abc" =~ /(a)(b)/;  print "6 unchanged: $1$2\n";
+PL
+
+# INVERSE — reading a capture is fine EVERYWHERE, and a non-capture target is
+# still writable.  $0 is the program name, not a capture, and must stay
+# writable; the three write slots must not fire on an ordinary place.
+both_agree(<<'PL', '#873 inverse: capture READS and non-capture writes are untouched');
+"abc" =~ /(a)(b)/;
+my $x = $1; my @a = ($1, $2); my %h = (k => $1);
+print "copies=$x,$a[0],$a[1],$h{k}\n";
+print "expr=", ($1 . $2), " len=", length($1), " def99=", (defined $99 ? "D" : "U"), "\n";
+my $z = "z"; $z = 5;             print "plain=$z\n";
+my @b = (1,2); $b[0] = 9;        print "elem=$b[0]\n";
+my $s = "abc"; $s =~ s/a/X/;     print "subst=$s\n";
+my $h2 = {}; $h2->{1} = "one";   print "hashkey=$h2->{1}\n";
+$0 = "argv0";                    print "dollar0=ok\n";
+my $c = "miss"; if ("zz" =~ /(z)/) { $c = $1 } print "loop=$c\n";
 PL

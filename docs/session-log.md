@@ -4,6 +4,130 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 460ap (2026-09-01, Opus agent AP, round 17) — three SILENT-WRONGS in the reference/lvalue family: the swap that loses references (#891), `\` over a slice (#892), the read-only capture (#873); gen v2-530
+
+Three shipped, one declined with the measurement that declines it, two filed.
+Not pushed, not merged; branch `worktree-agent-a6ae692720f08208e` on `6fa3757`.
+
+**#891 — `($x,$y) = ($y,$x)` silently loses the swap when the values are
+REFERENCES.**  `%p-assign-snapshot`'s container arms handed the RHS the LIVE
+box, so store 1 read `$x` back *after* store 0 had overwritten it and both
+names ended up holding `$y`'s referent.  The plain-scalar swap hid it (that arm
+reduces to a bare value one step down), and #423 had already found the same bug
+for TYPEGLOBS and fixed that arm alone.  Now every payload that must travel as
+a box — reference, blessed, glob, dualvar — gets the same fresh-container-box
+snapshot (`%p-container-snapshot`, carrying class / is-ref / the dualvar NV;
+the REFERENT is untouched, so `==`, `refaddr` and `ARRAY(0x…)` are unchanged).
+- **The task's change (1) was not needed, and that is the finding**: `p-list-=`
+  ALREADY snapshots — it binds its RHS through `%p-flatten-list`, whose scalar
+  fall-through arm calls `%p-assign-snapshot`.  Rule (2) was the whole bug.
+- **The family is wider than the repro**: 32 probe rows found scalar-refs,
+  mixed, 3-cycles, element swaps, sub-parameter swaps AND the two slice
+  self-swaps (`@a[0,1] = @a[1,0]` with reference values) — the slice arms read
+  the same rule through `%p-assign-snapshot-vector`.
+- **perl's own suite confirms it**: `perl-tests/multideref.t` test 42
+  "OA_DANGEROUS b" *is* `($x->{a},$x->{b}) = ($x->{b},$x->{a})` on array refs,
+  under the comment "test that multideref is marked OA_DANGEROUS, i.e. it's one
+  of the ops that should set the OPpASSIGN_COMMON flag".  Blessed FAIL → pass.
+- **PRICE, flagged**: the standard bench table does not move (no row
+  list-assigns a reference; gcdrec/arrfill/slices/sliceasgn/ovlsub all within
+  spread), but a worst-case micro-bench — 4e6 calls of `my ($self,$x,$r) = @_`
+  with a blessed box and an array-ref box — pays **+8.9 %** (2.13 → 2.32 s
+  exec) for two struct allocations per call.  perl only copies when the
+  assignment is "common" (OPpASSIGN_COMMON), and `p-list-=` knows its LHS
+  symbols at macro-expansion time, so an allocation-free `eq`-scan would
+  recover it: **task #910**, filed with the measurement and with what not to
+  retry (narrowing `%p-assign-snapshot` alone silently regresses the slice
+  arms).
+- Guard `Pl/t/aassign-01.t` 36 → 40 (three positives + one inverse carrying
+  identity, class, dualvar, the #423 glob swap and refaliasing).
+
+**#892 — `\` does not DISTRIBUTE over a slice.**  A slice is a LIST of
+lvalues, so `\@A[0,1]` is `(\$A[0], \$A[1])`; PCL answered ONE ref, to the
+slice's LAST element, and the ref did not alias the container.  ONE predicate
+`_is_refgen_spread_node` (range or slice — the four slice node types) with
+three callers: the `\` gate (which asked "was it written with parens" where
+perl asks "does it produce a LIST"), the single-child `\( )` test, and the
+multi-term walk's per-term test.
+- **Two spellings beyond the task's list were also wrong**: `\(@A[0,1])`
+  collapsed to one ref, and `\($A[0], @A[1,2])` gave two where perl gives
+  three.
+- **What must NOT spread constrains the fix**: an array or hash VARIABLE.
+  perlref spreads `\(@foo)` only when the parenthesized list is exactly that
+  one aggregate — `\(@A,$x)` is (ARRAY, SCALAR), `\(@A,@B)` is (ARRAY, ARRAY).
+  That is why the new predicate is not the wider `_is_list_node_for_refgen`.
+- 42 probe rows over three files, all byte-identical to perl.  Emission A/B
+  over four populations: 111 corpus (1 diff), perl t/ 605 (3), lib 22 (0),
+  cpan 383 (0), RCDIFF 0.  Every diff explained *and its verdict measured*:
+  the kvaslice/kvhslice "# ref of a slice produces list" rows were passing BY
+  ACCIDENT (PCL's `$$_` on the one wrong ref flattened the whole kv-slice), and
+  `t/op/for-many.t` is the COMPILER'S OWN generated perl — the n-at-a-time
+  foreach pad writes `\@__PCL_PD0[scalar @__PCL_PD0]`, a one-element slice, and
+  `push` flattens the one-element vector either way (63/8 both trees).
+- Guard `Pl/t/list-slice-01.t` 10 → 13, the inverse row passing on base.
+
+**#873 — a capture variable is READ-ONLY.**  Shipped option (ii), sized by
+s459an, with **two** of the three write slots — one compiler predicate
+(`_capture_read_group`: the bare defvar `$N`, or `(p-high-capture N)`, the only
+two spellings `gen_symbol_form` emits) plus the `=` target and `open`'s handle,
+and two runtime helpers on the EXISTING `%p-readonly-modification`.  `open` is
+perl's conditional one and the condition is autovivification: `open $1` on a
+DEFINED capture is a symbolic handle name and does not die; `open $99` does.
+- **The third slot (`=~` with s/// or tr///) was written and REVERTED, and the
+  measurement is the point**: perl decides at RUN time.  A no-match `s///`,
+  any `/r`, and a tr that cannot change its target are all "no error" — and
+  `perl-tests/tr.t` rows 631/639/748/752 assert exactly that ("harmless if
+  explicitly not updating", "explicit read-only count").  corpus-diff caught
+  it.  The right place is the runtime's two existing write sites, which already
+  fire exactly when a write is needed and today only `warn`: **task #911**,
+  filed with the 14-row boundary table and the audit that gates the flip.
+- Bar met: `t/io/open.t` row 140 "readonly fh" 153/35 → **154/34**;
+  `t/op/undef.t` 32/5 → **33/4**; `perl-tests/undef.t` 30 → 31, where test 17
+  (`eval { $1 = undef }`) was a REGISTERED SKIP and the stale-detector said so
+  in the same run — the registry entry is removed in the same commit, per the
+  rule.  16 probe rows byte-identical to perl.
+- **A probe trap worth keeping**: the reporter sub must not use `s///` — PCL's
+  captures are not block-scoped, so a substitution inside a helper clobbers the
+  captures under test and the first probe read `$1` as empty everywhere.
+- Guard `Pl/t/caret-vars-01.t` 6 → 8, in the file whose subject is already
+  "box-set silently returns on a non-box place, so the write stored nothing".
+
+**Bar.** Rebased onto `origin/main` `415de3a` (agent AO's #890 landed first;
+runtime + docs only, no `Pl/`, so the regenerated artifacts stay valid, and the
+two DECIDED / session-log conflicts are both-sides-kept).  Gate
+`tools/prove-core` on the REBASED tree **191 files / 6443 rows PASS** (6436
+before the rebase; the +7 are AO's raw-verdict rows — this worktree skips the 3
+pclxs xs files).  Full sweep re-run on the rebased tree: **GATE clean, TOTAL
+passing 18342 (+2 over main's 18340)**, drops 5 = census; all 74 probe rows
+re-verified against perl after the merge; the two gained rows are
+`multideref.t` 42 (#891) and `undef.t` 17 (#873), both edited into the
+baselines ROW BY ROW with their cause, and `multideref.t` 42 also left
+`fail-baseline` by EDIT.
+
+Companion: **`--dir op --quick` 221 files with EXACTLY ONE mover**
+(`op/multideref.t` 43/9, the runner's own #366 serial re-run agreeing) for the
+`cl/` change, then **`--all --quick` 528 files** for the harness change, whose
+four snapshot differences resolve as:
+- `op/multideref.t`, `io/open.t`, `op/undef.t` — this session's three gains,
+  each measured ALONE on both trees.  `io/open.t`'s base-vs-mine fails diff,
+  taken alone, is **exactly one line** (row 140 "readonly fh").
+- `comp/parser_run.t` 29/41 → 33/37 — **PRE-EXISTING**: a base run of the file
+  alone reads 33/37 too, so the snapshot row was stale.
+- `io/pvbm.t` 21/7 and `uni/variables.t` — the two documented flappers; the row
+  note and the runner's own THREE-WAY line already say so, and both stay.
+- **One caveat spliced with its measurement**: the `--all` run reads
+  `io/open.t` at 153/35 while running it alone (3×), under `--dir io --quick`,
+  and against base all agree on 154/34 vs 153/35.  Something in the 528-file
+  session flips one of that file's `not inherited across exec` rows; it is not
+  this change, and the next agent should not chase it.
+
+Generation **v2-530**;
+`tools/rebuild-pack` plus both `--extension` artifacts regenerated (bodies
+byte-identical, only the gen stamp moves).  **#852 not attempted** — it is a
+classifier widening owing a gate-SET scan over both populations, and the budget
+went to the three silent-wrongs.
+
+---
 ## Session 460ao (2026-09-01, Opus round 17, agent AO) — the raw-numeric freeze DECLINES instead of dying (#890); `collatz` 0.40× → 0.25×; E2c′/#883 measured and declined
 
 **#890 — the fix is a RUNTIME DECLINE, and the reason it is not a classifier

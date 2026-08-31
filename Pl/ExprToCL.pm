@@ -1485,6 +1485,16 @@ sub gen_binary_op_form {
         return ['box-set', $tern, $rhs];
       }
     }
+    # A CAPTURE VARIABLE is READ-ONLY in perl, and a write to one is a
+    # trappable run-time death (#873).  This is the first of the three write
+    # SLOTS the compiler routes; the others are `=~` with a substitution or
+    # transliteration, and `open`'s handle argument.  It must precede every
+    # dispatch below: `$1 = …` picks the p-scalar-= arm and `$99 = …` the
+    # generic p-setf tail, and BOTH silently did nothing (box-set returns on a
+    # non-box, and a capture special holds a raw STRING).
+    if (defined $self->_capture_read_group($left_flat)) {
+      return ['p-capture-write', $right];
+    }
     # \($x) = LIST — a one-element \(…) lvalue is still a LIST assignment
     # (see _is_backslash_paren_lvalue); re-wrap it into the (vector …) shape
     # the branch below already handles, rather than adding a second list path.
@@ -1573,6 +1583,15 @@ sub gen_binary_op_form {
     my $rhs_node = $self->expr_o->get_a_node($kids->[1]);
     my $rhs_is_subst_tr = ref($rhs_node) eq 'PPI::Token::Regexp::Substitute'
                        || ref($rhs_node) eq 'PPI::Token::Regexp::Transliterate';
+    # NOT a #873 write slot, and the measurement is why (s460ap).  `$1 =~ s///`
+    # and `$1 =~ tr///` ARE writes perl kills — but only SOMETIMES, and perl
+    # decides at RUN time: `$1 =~ s/zzz/q/` with no match is "no error", as is
+    # any /r, and a tr that cannot change its target (`tr/abcd//`, `tr/abcd/abcd/`,
+    # `tr/abcd//c`) is a COUNT, which perl-tests/tr.t rows 631/639/748/752 assert
+    # by name ("harmless if explicitly not updating", "explicit read-only count").
+    # A compile-time die here therefore breaks four blessed rows.  The right
+    # place is the runtime's two existing write sites, which already fire
+    # exactly when a write is needed and today only `warn` — task #911.
     if (!$rhs_is_subst_tr) {
       my $ctx = defined $node_id ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
       return Pl::CLForm::ctx_bind('nil', [$cl_op, $left, $right])
@@ -2314,6 +2333,18 @@ sub gen_funcall_form {
     my $arg = defined $dup_src ? $dup_src : $self->gen_node_form($kids->[$i]);
     $self->lvalue_context($saved_lvalue);
 
+    # Write slot 3 of the #873 family, and the one perl makes CONDITIONAL:
+    # `open $1, …` on a DEFINED capture is an ordinary symbolic filehandle
+    # NAME and open proceeds, while `open $99, …` on an undef one would have
+    # to autovivify a glob into a read-only scalar and dies (probed 5.40.3 —
+    # the difference is the vivification, not the variable).  The condition is
+    # therefore a RUN-TIME one; p-capture-fh is the identity on a defined
+    # value, so p-open sees exactly what it saw before.
+    if ($func_name eq 'open' && $i == 1
+        && defined $self->_capture_read_group(Pl::CLForm::to_flat($arg))) {
+      $arg = ['p-capture-fh', $arg];
+    }
+
     if ($impose_scalar) {
       my $an = $self->expr_o->get_a_node($kids->[$i]);
       my $r = ref($an);
@@ -2797,7 +2828,13 @@ sub gen_prefix_op_form {
     # multi-term comma list (with or without ranges) →
     # _gen_backslash_multi_term_form, general list → (p-refgen-list …)
     # [+ (p-list-scalar …) in scalar/void ctx].
-    if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')) {
+    # A BARE slice operand is a list too, and carries no parens to mark it:
+    # `\@A[0,1]` is `(\$A[0], \$A[1])` in perl, and answering one ref (to the
+    # slice's LAST element) was silent-wrong in both the count and the target
+    # (#892).  The gate asks the operand what it PRODUCES, which is the
+    # question perl asks, instead of how it was written.
+    if ($self->expr_o->node_tree->get_metadata($operand_id, 'backslash_paren_list')
+        || $self->_is_refgen_spread_node($operand_id)) {
       my $inner_node = $self->expr_o->get_a_node($operand_id);
       if ($self->expr_o->is_internal_node_type($inner_node)
           && ($inner_node->{type} // '') eq 'tree_val') {
@@ -3853,11 +3890,51 @@ sub _is_list_node_for_refgen {
   if (($mode // '') eq 'spread' && ref($node) && $node->can('content')) {
     return 1 if ($node->content() // '') =~ /^\%[\w\$\{:]/;
   }
-  # Range operator .. — binary op stored as PPI::Token::Operator with children
-  if (ref($node) eq 'PPI::Token::Operator') {
-    return 1 if ($node->content() // '') eq '..';
-  }
+  return 1 if $self->_is_refgen_spread_node($node_id);
   return 0;
+}
+
+# True when applying `\` to this TERM yields ONE REF PER ELEMENT — perl's
+# "a reference to a LIST of lvalues is a list of references" rule.  Exactly two
+# shapes answer yes, and they are the whole set (probed against perl 5.40.3):
+#   - the range operator, `\(1..3)` == (\1,\2,\3);
+#   - a SLICE, which IS a list of lvalues: `\@A[0,1]` == (\$A[0], \$A[1]) and
+#     likewise for `@h{…}` and the kv spellings `%h{…}` / `%a[…]` (#892).
+# An array or hash VARIABLE is deliberately NOT here.  perlref's special case
+# spreads `\(@foo)` only when the parenthesized list is exactly that one
+# aggregate — `\@foo` and `\(@A, $x)` are ONE array ref plus one scalar ref
+# (probed: `\(@A,$B[0])` is (ARRAY, SCALAR), `\(@A,@B)` is (ARRAY, ARRAY)) —
+# so the whole-aggregate spread stays where it is, in the single-child arm of
+# _is_list_node_for_refgen, and never reaches the multi-term walk.
+# The GROUP NUMBER when FLAT is an emitted CAPTURE READ, else undef (#873).
+# There are exactly two spellings and gen_symbol_form is the only source of
+# either: $1..$20 are runtime defvars and go out as the bare symbol `$N`, while
+# $21 and up have no defvar and go out as `(p-high-capture N)` (task #851).
+# Reading a capture is fine everywhere; perl makes the VARIABLE read-only, so
+# only a WRITE dies — hence the three write slots that ask this, and nothing on
+# the read path.  Takes the FLAT text because the two call sites already have
+# it (the `=` lowering's own $left_flat), and because that is how the sigil
+# dispatch beside it reads its operand.
+sub _capture_read_group {
+  my ($self, $flat) = @_;
+  return undef unless defined $flat && !ref $flat;
+  return $1 if $flat =~ /^\$([1-9][0-9]*)\z/;
+  return $1 if $flat =~ /^\(p-high-capture ([0-9]+)\)\z/;
+  return undef;
+}
+
+my %REFGEN_SPREAD_TYPE =
+  map { $_ => 1 } qw(slice_a_acc slice_h_acc kv_slice_h_acc kv_slice_a_acc);
+
+sub _is_refgen_spread_node {
+  my ($self, $node_id) = @_;
+  return 0 unless defined $node_id;
+  my $node = $self->expr_o->get_a_node($node_id);
+  # Range operator .. — binary op stored as PPI::Token::Operator with children
+  return 1 if ref($node) eq 'PPI::Token::Operator'
+              && ($node->content() // '') eq '..';
+  return 0 unless $self->expr_o->is_internal_node_type($node);
+  return $REFGEN_SPREAD_TYPE{ $node->{type} // '' } ? 1 : 0;
 }
 
 # True when NODE_ID is `\( … )` — a refgen whose operand is a PARENTHESIZED
@@ -3904,24 +3981,24 @@ sub _gen_backslash_multi_term_form {
   my ($self, $tv_kids) = @_;
   my $id = $g_refgen_count++;
 
-  my @parts;  # each is ['single', FORM] or ['range', FORM]
+  my @parts;  # each is ['single', FORM] or ['spread', FORM]
   for my $kid_id (@$tv_kids) {
-    my $kid_node = $self->expr_o->get_a_node($kid_id);
-    my $is_range = ref($kid_node) eq 'PPI::Token::Operator'
-                && ($kid_node->content() // '') eq '..';
-    if ($is_range) {
+    # A term that spreads: a range, and — since #892 — a SLICE.  `\($A[0],
+    # @A[1,2])` is THREE scalar refs in perl, not two; the slice term was
+    # taking the 'single' arm and collapsing to its last element.
+    if ($self->_is_refgen_spread_node($kid_id)) {
       my $saved = $self->expr_o->get_node_context($kid_id);
       $self->expr_o->set_node_context($kid_id, LIST_CTX);
       my $kid_form = $self->gen_node_form($kid_id);
       $self->expr_o->set_node_context($kid_id, $saved);
-      push @parts, ['range', ['p-refgen-list', $kid_form]];
+      push @parts, ['spread', ['p-refgen-list', $kid_form]];
     } else {
       push @parts, ['single', ['p-backslash', $self->gen_node_form($kid_id)]];
     }
   }
 
-  my $has_range = grep { $_->[0] eq 'range' } @parts;
-  if (!$has_range) {
+  my $has_spread = grep { $_->[0] eq 'spread' } @parts;
+  if (!$has_spread) {
     return ['vector', map { $_->[1] } @parts];
   }
 
@@ -3929,7 +4006,7 @@ sub _gen_backslash_multi_term_form {
   my $iter_var   = "|--pcl-bsl-x$id--|";
   my @stmts;
   for my $part (@parts) {
-    if ($part->[0] eq 'range') {
+    if ($part->[0] eq 'spread') {
       push @stmts, ['loop', 'for', $iter_var, 'across', $part->[1],
                     'do', ['vector-push-extend', $iter_var, $result_var]];
     } else {

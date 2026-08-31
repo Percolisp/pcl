@@ -21,6 +21,45 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s460ap (2026-09-01, Opus agent AP, round 17) — an RHS snapshot COPIES the container box; `\` over a slice DISTRIBUTES; a capture is READ-ONLY
+
+- **A list-assignment RHS element whose payload must travel as a BOX is
+  snapshotted into a FRESH box, never the live one (#891).**  `%p-assign-snapshot`
+  handed `($x,$y) = ($y,$x)` the live box for a reference / blessed / dualvar
+  payload, so store 1 read `$x` back after store 0 overwrote it and both names
+  ended up holding `$y`'s referent — silently, and only for references, which
+  is why the plain-scalar swap hid it.  #423 had found the same thing for
+  TYPEGLOBS and fixed that one arm; the rule is now `%p-container-snapshot` for
+  every such payload (class + is-ref + the dualvar NV carried; the REFERENT
+  untouched, so `==` / `refaddr` / `ARRAY(0x…)` are unchanged).  **`p-list-=`
+  already snapshotted** — through `%p-flatten-list`'s scalar arm — so the task's
+  "route it through the snapshot vector" half was a no-op.  The slice arms of
+  `p-setf` read the same rule and had the same bug.  Confirmed by perl's own
+  `multideref.t` test 42, the OPpASSIGN_COMMON test.  **Price, measured and
+  flagged**: the bench table does not move, but a ref-heavy `my ($self,…) = @_`
+  micro-bench pays +8.9 % for two allocations per call — recovering it is
+  **#910** (perl copies only when the assignment is COMMON; `p-list-=` knows
+  its LHS symbols at macro-expansion time).  Guard `Pl/t/aassign-01.t`.
+- **`\` DISTRIBUTES over a SLICE, because a slice is a LIST of lvalues (#892)** —
+  `\@A[0,1]` is `(\$A[0], \$A[1])`, and the refs alias the container.  ONE
+  predicate `_is_refgen_spread_node` (the range operator plus the four slice
+  node types) replaces the "was the operand written with parens" gate at three
+  callers.  **An array or hash VARIABLE is deliberately NOT in it**: perlref
+  spreads `\(@foo)` only when the parenthesized list is exactly that one
+  aggregate, so `\(@A,$x)` is (ARRAY, SCALAR) and `\(@A,@B)` is (ARRAY, ARRAY)
+  — probed.  Guard `Pl/t/list-slice-01.t`.
+- **A WRITE to a capture variable is perl's trappable read-only death, and the
+  write slots are named at COMPILE time (#873)** — one predicate
+  (`_capture_read_group`: the bare defvar `$N` or `(p-high-capture N)`, the only
+  two spellings emitted) plus the `=` target and `open`'s handle, both routed to
+  the existing `%p-readonly-modification`.  `open` is CONDITIONAL and the
+  condition is autovivification: `open $1` on a DEFINED capture is a symbolic
+  handle NAME and does not die, `open $99` does.  **`=~` with `s///` or `tr///`
+  is NOT a compile-time slot — perl decides at RUN time** (a no-match `s///`,
+  any `/r`, and a tr that cannot change its target are all "no error", and
+  `perl-tests/tr.t` 631/639/748/752 assert it by name); a compile-time die was
+  written and reverted, and the runtime's two existing write sites are the right
+  place — **#911**.  Guard `Pl/t/caret-vars-01.t`.
 ## s460ao (2026-09-01, Opus agent AO, round 17) — the raw-slot freeze DECLINES; E2c′/#883 measured and declined
 
 - **A raw-slot eager freeze DECLINES at runtime; it does not die (#890,
