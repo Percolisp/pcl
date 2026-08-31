@@ -34,13 +34,23 @@ if (!defined $engine) {
       . "The GitHub workflow install-matrix.yml runs the same matrix.\n";
 }
 
+# Same per-image SBCL pin as install-matrix.yml: sbcl.org's 2.6.0 binary
+# needs glibc >= 2.38 (first-run fact, 2026-08-31), so older bases get the
+# validated floor 2.5.2, whose binary needs only 2.34.
+my %sbcl_for = (
+    'ubuntu:22.04' => '2.5.2',
+    'debian:12'    => '2.5.2',
+);
+
 my %verdict;
 for my $image (@images) {
     (my $tag = lc "pcl-install-matrix:$image") =~ tr/:.\//---/;
-    print "\n=== $image (via $engine) ===\n";
+    my $sbcl = $sbcl_for{$image} // '2.6.0';
+    print "\n=== $image (via $engine, sbcl $sbcl) ===\n";
     my $status = system($engine, 'build',
         '--file', 'tools/install-matrix/Dockerfile',
         '--build-arg', "BASE_IMAGE=$image",
+        '--build-arg', "SBCL_VERSION=$sbcl",
         '--tag', $tag, '.');
     $verdict{$image} = $status == 0 ? 'PASS' : 'FAIL';
 }

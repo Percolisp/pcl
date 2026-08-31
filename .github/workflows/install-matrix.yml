@@ -35,16 +35,21 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      # Per-image SBCL pin (first-run fact, 2026-08-31): sbcl.org's 2.6.0
+      # x86-64 binary needs glibc >= 2.38, which ubuntu:22.04 (2.35) and
+      # debian:12 (2.36) lack; their rows pin 2.5.2 — the validated FLOOR
+      # (README "Minimum SBCL version"), whose binary needs only 2.34.  So
+      # the matrix covers BOTH validated SBCL versions, floor and current.
       matrix:
-        image:
-          - "ubuntu:22.04"
-          - "ubuntu:24.04"
-          - "debian:12"
-          - "debian:13"
+        include:
+          - { image: "ubuntu:22.04", sbcl: "2.5.2" }
+          - { image: "ubuntu:24.04", sbcl: "2.6.0" }
+          - { image: "debian:12", sbcl: "2.5.2" }
+          - { image: "debian:13", sbcl: "2.6.0" }
     container:
       image: ${{ matrix.image }}
     env:
-      SBCL_VERSION: "2.6.0"
+      SBCL_VERSION: ${{ matrix.sbcl }}
       PPI_MIN: "1.291"
     steps:
       # The bare images have no git; checkout@v4 falls back to the REST API

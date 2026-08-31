@@ -10,6 +10,11 @@
 ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
+# The 2.6.0 sbcl.org binary needs glibc >= 2.38; older bases pin 2.5.2 (the
+# validated floor).  tools/install-matrix.pl passes the right one per image.
+ARG SBCL_VERSION=2.6.0
+ENV SBCL_VERSION=${SBCL_VERSION}
+
 COPY . /pcl
 WORKDIR /pcl
 

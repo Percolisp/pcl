@@ -20,6 +20,8 @@
 # header comment: PPI comes from CPAN because apt's 1.277 is under the 1.291
 # floor; SBCL is sbcl.org's pinned binary because the distro's is under the
 # 2.5.2 floor; Data::Dump + Try::Tiny are gate-row FIXTURES, not deps.
+# SBCL_VERSION is caller-chosen because the 2.6.0 binary needs glibc >= 2.38
+# (first-run fact): older bases get 2.5.2, the validated floor (glibc 2.34).
 #
 # Container gotchas this file settles: locales (C.UTF-8 is built into both
 # distros — no `locales` package needed), tzdata's interactive prompt
