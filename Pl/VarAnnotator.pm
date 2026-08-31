@@ -285,9 +285,23 @@ sub _analyze_tree {
   my $no_b = !Pl::Passes::enabled('raw-numeric')
           || ($host && $host->{_overload_in_file});
   my $no_raw_slot = !Pl::Passes::enabled('raw-slot');
-  for my $name (keys %{ $ctx->{decl_count} }) {
+  # #862 ARM A: a `for my $v (LIST)` variable is declared BY THE LOOP, so it
+  # is NOT in decl_count — only the sole-RANGE arm registers a declaration
+  # there, because that arm gives the name a real storage verdict.  ARM A's
+  # question is about the CONTAINER's elements, not this name's slot, so the
+  # name gets its region reasons computed here and nothing else: the walk runs
+  # over both populations, and a foreach-only name is answered `unboxable => 0`
+  # (byte-identical to the absent entry every consumer reads today) plus the
+  # read-only key.  decl_count is deliberately NOT bumped: that would add a
+  # 'multi-decl' reason to any OUTER `my $v` of the same name and silently
+  # de-optimize it.
+  my %fe_only = map  { $_ => 1 }
+                grep { !$ctx->{decl_count}{$_} }
+                keys %{ $ctx->{foreach_my_alias} // {} };
+  for my $name (keys %{ $ctx->{decl_count} }, keys %fe_only) {
     my @reasons;
-    push @reasons, 'multi-decl'     if $ctx->{decl_count}{$name} != 1;
+    push @reasons, 'multi-decl'
+      if !$fe_only{$name} && $ctx->{decl_count}{$name} != 1;
     push @reasons, 'eval-in-region' if $ctx->{has_eval};
     # #760: the veto is capture PLUS a boxing event in the closure body; with
     # `raw-closure-capture` off, _tw_region_facts sets nested_sub_ev for every
@@ -342,9 +356,54 @@ sub _analyze_tree {
         next;
       }
     }
-    $vi{$name} = { unboxable => (@reasons ? 0 : 1),
-                   ($ENV{PCL_B_DEBUG} ? (reasons => \@reasons) : ()) };
-    _mark_strbuf($ctx, \%vi, $name) unless @reasons;
+    if ($fe_only{$name}) {
+      # Declared by the loop itself — the binding is the loop macro's, so
+      # there is no storage verdict to give and never a str-buffer.
+      $vi{$name} = { unboxable => 0,
+                     ($ENV{PCL_B_DEBUG} ? (reasons => \@reasons) : ()) };
+    }
+    else {
+      $vi{$name} = { unboxable => (@reasons ? 0 : 1),
+                     ($ENV{PCL_B_DEBUG} ? (reasons => \@reasons) : ()) };
+      _mark_strbuf($ctx, \%vi, $name) unless @reasons;
+    }
+
+    # #862 ARM A — the READ-ONLY foreach-LIST loop variable (Kind-A
+    # `foreach-raw`).  A SEPARATE verdict key, deliberately NOT `unboxable`:
+    # the loop variable's own storage question is unchanged (every other
+    # consumer keeps seeing unboxable => 0, so the BODY's emission is
+    # byte-identical), and this key answers only "may p-foreach skip
+    # promoting each element to a box".
+    #
+    # The licence STARTS from the reason list being exactly the alias event
+    # (it does not end there — see the write FACTS below): any write
+    # (root/embedded/cond/compound/incdec/list), `\$v`, a regex target,
+    # `local`, pos/chomp/open, `arg-to-writer` (#189: a known sub that writes
+    # through @_), a nested-sub capture WITH an event, a string eval in the
+    # region, a redeclaration, or any parse-failure fallback text mentioning
+    # the name — each pushes its own reason and revokes this.  What is left is
+    # a variable every one of whose uses is a pure READ, and a read never
+    # needs the element's identity.  (The B-regime `next` above cannot reach
+    # here, and could not qualify anyway: its licence is a WRITE-shape reason.)
+    #
+    # THE REASON LIST IS NOT THE WHOLE WRITE STORY, and assuming it was cost
+    # this arm its first probe battery: the writes Parser2 lowers NATIVELY —
+    # a statement-root `$v = RHS`, a root coercing compound `$v *= 2`, a root
+    # `$v++` — are deliberately NOT boxing events (a raw slot stores them
+    # fine), so they leave no reason at all.  They are recorded as write
+    # FACTS instead, and for a foreach ALIAS every one of them is a write that
+    # must reach the container.  `for my $o (@a) { for my $i (@$o) { $i *= 2 } }`
+    # was the catch: `$i`'s reasons were exactly [foreach-alias], the arm
+    # fired, `(p-*= $i 2)` box-set a raw value and the doubling vanished
+    # silently.  So the licence tests the facts too — no write of ANY kind.
+    $vi{$name}{foreach_ro} = 1
+      if $ctx->{foreach_my_alias}{$name}
+      && @reasons == 1 && $reasons[0] eq 'foreach-alias'
+      && !$ctx->{write_fam}{$name}       # root `$v = …` / `$v OP= …`
+      && !$ctx->{incdec_root}{$name}     # root `$v++` / `$v--`
+      && !$ctx->{init_bad}{$name}        # root write of unproven shape
+      && !$ctx->{write_obj}{$name}       # root write of an object
+      && Pl::Passes::enabled('foreach-raw');
   }
   if ($no_raw_slot) {
     for my $v (values %vi) {
@@ -589,6 +648,16 @@ sub _tw_stmt {
           $ctx->{foreach_var}{$var->content} = 1;
         } else {
           _ev($ctx, $var->content, 'foreach-alias');
+          # #862 ARM A (the boxed-aggregates design's §4.4 "proven arm"): a
+          # `my` loop variable whose ONLY event is this very alias is read
+          # ONLY, so the loop never needs the element's IDENTITY and the
+          # elements need not be promoted to boxes.  Record the my-spelling;
+          # the verdict loop turns "reasons == exactly [foreach-alias]" into
+          # foreach_ro.  A PLAIN (non-my) loop var is excluded here and not
+          # merely by the verdict: it is a dynamically-scoped global a callee
+          # can read AND write, and the cell arm would then store a raw value
+          # where the callee's write needs a box.
+          $ctx->{foreach_my_alias}{$var->content}++ if $is_my;
         }
       }
       # A magic-lvalue foreach alias — `for (substr($x,…))` / pos / vec — binds

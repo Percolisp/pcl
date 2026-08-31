@@ -170,7 +170,7 @@
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
-   #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach #:p-foreach-range #:p-foreach-range-raw
+   #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach #:p-foreach-raw #:p-foreach-range #:p-foreach-range-raw
    #:p-return #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
@@ -3469,7 +3469,18 @@
                 (truncate nc))))
     (if (<= n 0)
         ""
-        (apply #'concatenate 'string (make-list n :initial-element s)))))
+        ;; Fill the result directly.  The old spelling was
+        ;; `(apply #'concatenate 'string (make-list n :initial-element s))`,
+        ;; which passes N ARGUMENTS to concatenate: `'a' x 200000` then
+        ;; exhausted SBCL's control stack (task #880 — measured s459am: 50k
+        ;; fine, 200k dead on the 2 MB default stack, and dead in ANY runner
+        ;; whose stack is small).  It also consed an N-element list per call.
+        ;; One allocation, one pass, same result type ((simple-array character)
+        ;; either way).
+        (let* ((len (length s))
+               (out (make-string (* n len))))
+          (dotimes (i n out)
+            (replace out s :start1 (* i len)))))))
 
 (defun flatten-list-elements (val)
   "Flatten a value into a list of elements for list repeat.
@@ -9129,6 +9140,35 @@ loop, so promoting them changes nothing observable."
           ((null slot) (%p-defelem-box vec i))
           (t (%p-elem-cell vec i)))))
 
+(defun %p-foreach-elt-raw (vec i)
+  "THE READ-ONLY foreach binding (task #862 ARM A, the boxed-aggregates
+design's §4.4 \"proven arm\").  Answers slot I of VEC *as it stands* — no
+promotion, no allocation, nothing written back into the container:
+
+  - a RAW value (the common case under raw element storage) binds directly;
+  - a slot that already holds a BOX binds THAT BOX, unchanged.  It is not
+    unboxed, because a box is how every identity-bearing representation
+    travels: a reference is a box with `is-ref`, and tie proxies, magic cells
+    and blessed values live in one too — unboxing here would hand the loop
+    variable the REFERENT and silently lose `ref`, the tie FETCH and the
+    class.  Reads through a box are what every p-op already does;
+  - a HOLE (nil) reads as undef, which is exactly what the deferred-element
+    box the aliasing arm builds reads as — minus the allocation.
+
+SOUND ONLY because the compiler proved the loop variable READ-ONLY.
+%p-foreach-elt exists to make WRITES through the loop variable reach the
+slot; a variable with no write of ANY kind, no `\\$v`, no `local`, no regex
+target, no mutating builtin and no @_-writing callee never exercises that, so
+the promotion it pays for is pure cost — and, promotion being MONOTONE, a
+cost every later read of the same array keeps paying.
+
+The proof is VarAnnotator's `foreach_ro`, which tests the region's reason
+list AND the native-write FACTS: a statement-root `$v = RHS`, a root
+coercing compound `$v *= 2` and a root `$v++` are not boxing events and
+leave no reason, but for an ALIAS each is a write that must reach the
+container.  Do not widen this arm without asking that question again."
+  (or (aref vec i) *p-undef*))
+
 (defun %p-flatten-for-list (raw)
   "Flatten a value for use as a foreach list.
    - p-box wrapping a vector (@array passed directly) -> iterate over elements
@@ -9209,11 +9249,12 @@ loop, so promoting them changes nothing observable."
      UNDECLARED loop variable."
     (and (symbolp var) (nth-value 1 (macroexpand-1 var env)))))
 
-(defmacro p-foreach ((var list) &rest body-and-keys &environment env)
-  "Perl foreach loop with optional :label, :my and :continue.
-Uses tagbody/go instead of loop -- see p-while for rationale.
-A package-global loop var is localized over its cell (%p-cell-loop-var-p);
-:my says the compiler declared the variable, which settles that question."
+(defun %expand-foreach (rawp var list body-and-keys env)
+  "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
+binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
+slot as it stands).  Everything else — the flatten, the tagbody, the label
+catch, the package-cell localization — is one body, so the two loops cannot
+drift apart the way two copies would."
   (multiple-value-bind (label continue-form body myp) (parse-loop-keys body-and-keys)
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
@@ -9222,6 +9263,7 @@ A package-global loop var is localized over its cell (%p-cell-loop-var-p);
            (old (gensym "OLD"))
            (i (gensym))
            (cellp (and (not myp) (%p-cell-loop-var-p var env)))
+           (elt-fn (if rawp '%p-foreach-elt-raw '%p-foreach-elt))
            (iter-forms (cons `(incf ,i)
                              (cons (make-loop-iteration-body label body)
                                    (when continue-form (list continue-form))))))
@@ -9237,9 +9279,9 @@ A package-global loop var is localized over its cell (%p-cell-loop-var-p);
                                 ,(if cellp
                                      `(progn
                                         (setf (sb-ext:symbol-global-value ',var)
-                                              (%p-foreach-elt ,vec ,i))
+                                              (,elt-fn ,vec ,i))
                                         ,@iter-forms)
-                                     `(let ((,var (%p-foreach-elt ,vec ,i)))
+                                     `(let ((,var (,elt-fn ,vec ,i)))
                                         ,@iter-forms))
                                 (go :next))))
                    (wrapped (if label `(catch ',last-tag ,inner) inner)))
@@ -9247,6 +9289,33 @@ A package-global loop var is localized over its cell (%p-cell-loop-var-p);
                   `(unwind-protect ,wrapped
                      (setf (sb-ext:symbol-global-value ',var) ,old))
                   wrapped)))))))
+
+(defmacro p-foreach ((var list) &rest body-and-keys &environment env)
+  "Perl foreach loop with optional :label, :my and :continue.
+Uses tagbody/go instead of loop -- see p-while for rationale.
+A package-global loop var is localized over its cell (%p-cell-loop-var-p);
+:my says the compiler declared the variable, which settles that question.
+The loop variable ALIASES each element (%p-foreach-elt), which promotes a raw
+slot to a box so writes through the variable reach the container; the
+read-only twin p-foreach-raw skips that."
+  (%expand-foreach nil var list body-and-keys env))
+
+(defmacro p-foreach-raw ((var list) &rest body-and-keys &environment env)
+  "p-foreach for a loop variable the compiler PROVED read-only (task #862
+ARM A; VarAnnotator's `foreach_ro`, Kind-A gate `foreach-raw`).  Identical to
+p-foreach except that the variable is bound to the slot AS IT STANDS
+(%p-foreach-elt-raw) instead of to a promoted element box — see that
+function's docstring for why that is sound and what it buys.
+
+Emitted only with :my, and it says so: the verdict requires the my-spelling,
+and the package-cell arm would store a raw value into a global a callee can
+write through.  A missing :my is a compiler self-inconsistency, so it is an
+error here rather than a silently different loop (rule 12)."
+  (multiple-value-bind (label continue-form body myp) (parse-loop-keys body-and-keys)
+    (declare (ignore label continue-form body))
+    (unless myp
+      (error "p-foreach-raw without :my for ~S — the read-only verdict is my-only" var)))
+  (%expand-foreach t var list body-and-keys env))
 
 (defun %expand-foreach-range (rawp var from to body-and-keys env)
   "Shared expander for p-foreach-range / p-foreach-range-raw.  RAWP selects the
@@ -14048,7 +14117,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-490"
+(defparameter *pcl-cache-generation* "v2-500"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

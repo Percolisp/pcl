@@ -21,6 +21,48 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s459am (2026-08-31, Opus round 16, agent AM) — #862 ARM A (the read-only foreach), #814's regexg row was measuring a CRASH, #880
+
+- **A READ-ONLY `for my $v (LIST)` binds the slot AS IT STANDS — `p-foreach-raw`,
+  no element promotion** (#862 ARM A, the boxed-aggregates design §4.4 "proven
+  arm").  A raw value binds directly, an **existing box binds unchanged** (a
+  reference keeps `is-ref`, tie/magic/blessed keep their dispatch — unboxing
+  there would hand the loop variable the *referent*), a hole reads as undef.
+  Kind-A gate **`foreach-raw`**; emitted only with `:my` (the package-cell arm
+  is refused).  Record: `docs/boxed-aggregates-design-s455.md` P4b, ir-spec
+  §6.2, guard `Pl/t/foreach-raw-01.t`.
+- **The verdict key is `foreach_ro`, deliberately NOT `unboxable`** — the loop
+  variable's storage verdict is untouched, so every other consumer is
+  unaffected and the loop BODY's emission is byte-identical.  Measured: the
+  ONLY emission change over the corpus and all 22 lib shims is the macro name.
+- **THE ANNOTATOR'S REASON LIST IS NOT THE WHOLE WRITE STORY — do not
+  re-derive this.**  A statement-root `$v = RHS`, a root coercing compound
+  `$v *= 2` and a root `$v++` are deliberately NOT boxing events (a raw slot
+  stores them fine), so they leave NO reason and are recorded as write FACTS
+  (`write_fam` / `incdec_root` / `init_bad` / `write_obj`).  For a foreach
+  ALIAS every one is a write that must reach the container.  A licence keyed
+  only on "reasons == [foreach-alias]" silently lost
+  `for my $o (@a) { for my $i (@$o) { $i *= 2 } }`.  Any future widening of a
+  foreach/alias verdict must test the facts too.
+- **ARM B (the slice COPY position) buys NOTHING measurable — recommended for
+  closure, #882.**  `slices` is 3.02× with ARM A off and 3.06× on; the
+  promotion arm is not in its profile (confirming s458ak's sb-sprof from the
+  other direction).  Its remaining ~3× is equal-hash lookups,
+  `p-array-fill`'s construction and the key stringify — a different task.
+- **`tools/bench-exec.pl` was a SEVENTH SBCL runner bypassing
+  `tools/lib/PCLSbcl.pm` — #324 all over again** (#814).  It ran PCL on the
+  2 MB default control stack, the `regexg` row crashed identically at N_big
+  and N_small, and the difference of two crashes printed 0.01×.  **A bench row
+  is now VERIFIED before it is timed** (both engines' stdout must match, PCL
+  must exit 0, else BROKEN and untimed) — a crashed run is fast, so the
+  table's most attractive number is otherwise its least trustworthy.
+- **Read no bench row whose signal is under the ~1 s constant term both runs
+  pay** to compile the program at load.  regexg's N_big 5 → 30 (now 2.19×,
+  agreeing with itself at two N); `strcat` is the next such row (#881).
+- **#880: `p-str-x` passed N ARGUMENTS to `concatenate`** — `'a' x 200000`
+  exhausted the control stack.  Now `make-string` + `replace`.  `p-list-x`
+  does not have the shape.
+
 ## s458al (2026-08-31, Opus agent AL, round 15) — the core-pragma tables, the `1 while /…/` mis-lex, high captures
 
 - **`%feature::feature` / `%warnings::Offsets` / `%warnings::NoOp` are populated

@@ -25,10 +25,24 @@
 #   timed.  The per-program loop still compiles at load, but that cost is in
 #   BOTH the big and small runs, so it subtracts out.
 #
+# EVERY ROW IS VERIFIED BEFORE IT IS TIMED (task #814, s459am).  A run that
+# CRASHES is fast, and a subtraction of two crashes is 0.0000 — so without a
+# correctness check the table's most attractive number is its least trustworthy
+# one.  Each row therefore runs both engines once at N_big and compares stdout;
+# a mismatch or a non-zero PCL exit prints BROKEN and the row is NOT timed.
+# That is exactly how the regexg row was reading 0.0009 s / 0.01x: it ran on
+# SBCL's 2 MB default control stack (this file was a SEVENTH SBCL runner
+# hand-writing its own option string — the #324 drift, see tools/lib/PCLSbcl.pm)
+# and died in `'a' x 200000` identically at N=5 and N=0.  The command line now
+# comes from PCLSbcl like every other runner's, and #880 fixed the p-str-x
+# stack blowup underneath it.
+#
 # EXTENDING: add a row to @benches: [ name, perl-source, N_big, N_small ].
 #   Use the $HN prefix so the hot loop reads a lexical $n, never %ENV.  Keep the
-#   source valid Perl that also transpiles under PCL (run tools once by hand and
-#   eyeball that perl and pcl print the same result).
+#   source valid Perl that also transpiles under PCL — the verification pass
+#   tells you at once if it does not.  N_big must make the row's own work large
+#   against the ~1 s constant term both runs pay (SBCL compiles the program at
+#   load): a signal below the run-to-run spread subtracts to noise.
 use v5.30;
 use strict;
 use warnings;
@@ -37,7 +51,11 @@ use File::Temp qw(tempfile);
 use File::Basename qw(dirname);
 use Cwd qw(abs_path);
 
-my $ROOT  = dirname(dirname(abs_path($0)));
+my $ROOT;
+BEGIN { $ROOT = dirname(dirname(abs_path($0))) }
+use lib "$ROOT/tools/lib";
+use PCLSbcl qw(sbcl_prefix_str);
+
 my $PL2CL = "$ROOT/pl2cl";
 my $RT    = "$ROOT/cl/pcl-runtime.lisp";
 my $K     = $ENV{BENCH_K} // 5;                 # best-of-K
@@ -70,12 +88,24 @@ my @benches = (
   ['arrfill',   "$HN my \@a; my \$s=0; for (1..\$n) { \@a = (1..20, \$_); \$s += \@a } print \"\$s\\n\";", 200_000, 0],
   ['slices',    "$HN my \@a = (1..50); my \%h = map { \$_ => \$_ } 1..50; my \@k = (1..10); my \$s=0; for (1..\$n) { my \@v = \@a[1..5]; my \@w = \@h{\@k}; \$s += \$v[0] + \$w[9] } print \"\$s\\n\";", 200_000, 0],
   ['sliceasgn', "$HN my \@a = (1..20); my \%h; my \$s=0; for (1..\$n) { \@a[1..3] = (7,8,9); \@h{'a','b'} = (\$_, 2); \$s += \$a[2] + \$h{a} } print \"\$s\\n\";", 200_000, 0],
+  # READ-ONLY foreach over an ARRAY (task #862 ARM A, the boxed-aggregates
+  # design's §4.4 proven arm).  The loop variable aliases each element, which
+  # under raw element storage PROMOTES every slot to a box — once, but
+  # promotion is monotone, so the array then pays box indirection on every
+  # later read forever.  This row is the arm's own metric; the never-promoting
+  # index spelling `for my $i (0..$#a) { $s += $a[$i] }` is the floor it is
+  # chasing.
+  ['feread',    "$HN my \@a = (1..1000); my \$s=0; for (1..\$n) { for my \$x (\@a) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
   ['ovlsub',    "$HN package V; use overload '-' => sub { V->new(\$_[2] ? \$_[1] - \$_[0]{v} : \$_[0]{v} - (ref \$_[1] ? \$_[1]{v} : \$_[1])) }, '\"\"' => sub { \$_[0]{v} }; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$x = V->new(1000); my \$s = 0; for (1..\$n) { my \$y = \$x - 3; \$s += \"\$y\" } print \"\$s\\n\";", 100_000, 0],
   ['symref',    "$HN no strict 'refs'; our \$g = 2; our \@ga = (1,2,3); my \$s=0; for (1..\$n) { \$s += \${'main::g'} + \${'g'} + scalar(\@{'main::ga'}) } print \"\$s\\n\";", 200_000, 0],
   # Scalar-context m//g per-match cost (task #680): N repeats of a 200k-char
   # /./g loop = N*200k matches.  The subject build is identical between big
   # and small runs, so it subtracts out with startup.
-  ['regexg',    "$HN my \$x = 'a' x 200000; my \$c = 0; for (1..\$n) { \$c = 0; while (\$x =~ /./g) { \$c++ } } print \"\$c\\n\";", 5, 0],
+  # N_big was 5 until s459am (#814) — 1M matches, ~0.06 s of perl, which is
+  # under the run-to-run spread of the ~1 s both runs pay to compile the
+  # program, so even once the row stopped CRASHING it would have measured
+  # mostly noise.  30 puts perl at ~0.36 s and PCL at ~0.8 s.
+  ['regexg',    "$HN my \$x = 'a' x 200000; my \$c = 0; for (1..\$n) { \$c = 0; while (\$x =~ /./g) { \$c++ } } print \"\$c\\n\";", 30, 0],
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
@@ -88,6 +118,12 @@ system(qq{sbcl --noinform --non-interactive --load "$RT" }
      . qq{--eval "(sb-ext:save-lisp-and-die \\"$CORE\\" :executable nil)" >/dev/null 2>&1});
 die "bench-exec: core build failed\n" unless -s $CORE;
 
+# The SBCL command line comes from the ONE builder every other runner uses
+# (tools/lib/PCLSbcl.pm) — this file hand-wrote its own until s459am and so ran
+# PCL on the 2 MB default control stack, which is #324 all over again.  Only
+# the CORE is ours: it is built above from this tree's runtime on purpose.
+my $SBCL = sbcl_prefix_str(core => $CORE, runtime => $RT);
+
 sub best {                       # min wall time over K runs of $cmd with N=$n
   my ($cmd, $n) = @_;
   my $min;
@@ -99,6 +135,17 @@ sub best {                       # min wall time over K runs of $cmd with N=$n
     $min = $e if !defined $min || $e < $min;
   }
   return $min;
+}
+
+# stdout of one run, plus the exit status.  A row is timed only when the two
+# engines AGREE here: a crashed run is fast, and two crashes subtract to zero.
+sub run_out {
+  my ($cmd, $n) = @_;
+  local $ENV{N} = $n;
+  my $out = `$cmd 2>/dev/null`;
+  my $rc  = $?;
+  $out =~ s/\s+\z//;
+  return ($out, $rc);
 }
 
 printf "PCL v2 vs Perl — execution time (startup subtracted), best-of-%d\n\n", $K;
@@ -116,7 +163,18 @@ for my $b (@benches) {
   my ($lfh, $lfile) = tempfile(SUFFIX => '.lisp', UNLINK => 1);
   close $lfh;
   system("$PL2CL $pfile > $lfile 2>/dev/null");
-  my $pcl_cmd = "sbcl --core $CORE --noinform --non-interactive --load $lfile";
+  my $pcl_cmd = "$SBCL --load $lfile";
+
+  # Verify before timing (#814): both engines must print the same thing at
+  # N_big, and PCL must exit 0.  Otherwise the row is BROKEN, not fast.
+  my ($pout, $prc) = run_out($perl_cmd, $big);
+  my ($cout, $crc) = run_out($pcl_cmd,  $big);
+  if ($crc != 0 || $cout ne $pout) {
+    my $why = $crc != 0 ? sprintf('pcl exit %d', $crc >> 8)
+            :             sprintf('perl=%.30s pcl=%.30s', $pout, $cout);
+    printf "%-11s %10s %10s %9s   BROKEN: %s\n", $name, '-', '-', '-', $why;
+    next;
+  }
 
   my $perl_exec = best($perl_cmd, $big) - best($perl_cmd, $small);
   my $pcl_exec  = best($pcl_cmd,  $big) - best($pcl_cmd,  $small);

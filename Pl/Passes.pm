@@ -60,6 +60,7 @@ our %KIND_A = (
   'raw-op-family'  => "VarAnnotator write family: a root write whose RHS is a closed-set arith/string OPERATOR takes the operator's result family, so `\$s = \$s + \$_` proves num like `\$s += \$_` does",
   'raw-closure-capture' => 'VarAnnotator nested-sub-ref: an anon sub CAPTURING a name is not itself a boxing event (a CL closure captures a raw let slot natively) — only a real boxing event inside the closure vetoes',
   'raw-topic'      => 'Parser2 foreach: a topic loop `for (A..B) {…}` whose body has no dynamic `$_` reader binds `$_` as a raw per-iteration lexical (p-foreach-range-raw) instead of localizing the global',
+  'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 
 my @PASSES;          # [name, coderef] in registration order (Kind B)

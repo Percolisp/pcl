@@ -28,7 +28,9 @@ like($wc, qr/\(p-while .*\(p-print \$i\).*:continue \(progn/s,
 # foreach continue → :continue key too.
 my $fc = Pl::Parser2->parse_code(
   q{my @a = (1,2); foreach my $y (@a) { print $y; } continue { print "-"; }});
-like($fc, qr/\(p-foreach .*:continue \(progn/s, 'foreach continue: :continue key');
+# Either foreach arm (`print $y` is a pure read → #862 ARM A's raw arm);
+# this row's subject is the :continue key, not the loop-variable binding.
+like($fc, qr/\(p-foreach(?:-raw)? .*:continue \(progn/s, 'foreach continue: :continue key');
 
 # `my $aa, $bb, $cc;` — Perl declares only $aa (a lexical); $bb/$cc are package
 # vars.  Lower as a boxed `my $aa` let + the comma expression discarded.

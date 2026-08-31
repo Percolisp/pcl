@@ -732,7 +732,10 @@ EOF
   like($ref, qr/\(p-foreach-range \(\$i 1 3\)/,
        '\\$i in body keeps boxed variant');
   my $rev = Pl::Parser2->parse_code(q[for my $i (reverse 1..3) { print $i }]);
-  like($rev, qr/\(p-foreach \(/,
+  # Either foreach arm: the claim is that the range is NOT split into the
+  # counting loop, which the paired `unlike` below is what actually pins.
+  # (`print $i` is a pure read, so the loop var takes #862 ARM A's raw arm.)
+  like($rev, qr/\(p-foreach(?:-raw)? \(/,
        'reverse 1..3 is NOT split (bare list-op swallows the range)');
   unlike($rev, qr/p-foreach-range/, 'reverse range never counting-loops');
   my $two = Pl::Parser2->parse_code(q[for my $i (1..3, 7) { print $i }]);

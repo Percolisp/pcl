@@ -33,15 +33,17 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found" unless `which sbcl 2>/dev/null`;
-plan tests => 27;
+plan tests => 32;
 
-# One program that exercises all four Kind-A transforms: a raw let slot
-# with a counting loop (raw-slot + foreach-range), an append-only string
-# (str-buffer), and a B-regime numeric freeze (raw-numeric).
+# One program that exercises the Kind-A transforms: a raw let slot with a
+# counting loop (raw-slot + foreach-range), an append-only string
+# (str-buffer), a B-regime numeric freeze (raw-numeric), and a read-only
+# foreach over an ARRAY (foreach-raw, task #862 ARM A).
 my $PROG = <<'PERL';
 my $n = 0; for my $i (1..10) { $n += $i } print "$n\n";
 my $s = ""; for my $j (1..3) { $s .= "x" } print "$s\n";
 my $c = shift // 5; $c = $c * 2; print $c + 1, "\n";
+my @a = (7, 8); my $t = 0; for my $x (@a) { $t += $x } print "$t\n";
 PERL
 my ($pfh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
 print $pfh $PROG;
@@ -79,6 +81,7 @@ like($def, qr/\(let \(\(\$n 0\)\)/,          'default: raw let slot');
 like($def, qr/p-foreach-range-raw/,           'default: counting loop, raw var');
 like($def, qr/%pcl-str-append/,               'default: str-buffer append');
 like($def, qr/%pcl-to-number-strict/,         'default: raw-numeric freeze');
+like($def, qr/\(p-foreach-raw \(\$x \@a\)/,   'default: read-only foreach-LIST takes the raw arm');
 
 my $none = transpile_with('none');
 like($none,   qr/\(let \(\(\$n \(make-p-box nil\)\)\)/, 'none: the slot is a box');
@@ -86,6 +89,8 @@ unlike($none, qr/p-foreach-range/,            'none: no counting loop');
 like($none,   qr/\(p-foreach \(\$i \(p-\.\. 1 10\)\)/, 'none: general p-foreach over the range');
 unlike($none, qr/%pcl-str-(?:append|buffer)/, 'none: no str-buffer');
 unlike($none, qr/%pcl-to-number-strict/,      'none: no freeze');
+unlike($none, qr/p-foreach-raw/,              'none: no raw foreach arm');
+like($none,   qr/\(p-foreach \(\$x \@a\)/,    'none: the general aliasing p-foreach over the array');
 
 my $no_slot = transpile_with('-raw-slot');
 like($no_slot, qr/\(let \(\(\$n \(make-p-box nil\)\)\)/, '-raw-slot: boxed');
@@ -105,6 +110,11 @@ like($no_buf,   qr/\(p-\.=-raw \$s "x"\)/,    '-str-buffer: the raw slot keeps a
 my $no_range = transpile_with('-foreach-range');
 like($no_range, qr/\(p-foreach \(\$i \(p-\.\. 1 10\)\) :my t \(p-incf-raw \$n \$i\)\)/,
      '-foreach-range: general loop over a materialized range, slot still raw');
+
+my $no_fe = transpile_with('-foreach-raw');
+like($no_fe,   qr/\(p-foreach \(\$x \@a\) :my t \(p-incf-raw \$t \$x\)\)/,
+     '-foreach-raw: the aliasing loop is back, the accumulator slot still raw');
+like($no_fe,   qr/p-foreach-range-raw/,       '-foreach-raw: other transforms untouched');
 
 # Phase A names (folded from the deleted ExprToCL2): a call to a context-
 # INSENSITIVE user sub gets no *wantarray* bind; `$h{k} = V` on a let-bound
@@ -133,7 +143,7 @@ PERL
 # --- 2. not a correctness switch: same output under every setting --------
 my $out_def  = run_with();
 my $out_none = run_with(PCL_OPT => 'none');
-is($out_def, "55\nxxx\n11\n", 'default setting runs to the expected output');
+is($out_def, "55\nxxx\n11\n15\n", 'default setting runs to the expected output');
 is($out_none, $out_def, 'PCL_OPT=none runs to the SAME output (general forms are correct)');
 
 # --- 3. the registry itself: typo dies; Kind-B passes -------------------

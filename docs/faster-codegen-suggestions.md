@@ -363,6 +363,46 @@ after this session `slices` no longer shows `make-p-box` or the promotion arm
 anywhere in its top 19 — the remainder is equal-hash lookups (21 %) and
 `p-array-fill`'s own construction.
 
+### 0.2e After the FOREACH read-only arm (s459am, phase 4's emission half, #862 ARM A)
+
+`for my $v (@a)` aliases each element, which under raw element storage
+PROMOTES every slot to a box — once, but promotion is MONOTONE, so the array
+then pays box indirection on every later read of it forever.  When the
+annotator can prove the loop variable read-only the identity is never used, so
+the loop lowers to `p-foreach-raw`, which binds the slot as it stands.  Design
+`docs/boxed-aggregates-design-s455.md` §4.4 + P4b; Kind-A gate `foreach-raw`.
+
+A NEW BENCH ROW, `feread`, is this arm's own metric — the exact program #862
+quotes: `my @a=(1..1000); for (1..30000) { for my $x (@a) { $s += $x } }`.
+A/B in one session through the arm's own gate (BENCH_K=3):
+
+| row | arm OFF | arm ON | |
+|---|---:|---:|---|
+| `feread` | 0.3970 s / **0.71×** | 0.2746 s / **0.47×** | −31 %, the predicted ~40 % of the loop |
+| `slices` | 0.3033 s / 3.02× | 0.2101 s / 3.06× | **unmoved** (the two runs' perl sides differ more than the arm does) |
+
+**`slices` not moving is the result #862 asked for before anyone spent on ARM
+B**, and it confirms §0.2d's profile reading from the other direction: the
+promotion arm contributes ~nothing there.  ARM B as scoped — "skip the
+promotion in a slice COPY position" — is optimizing something that is not in
+the profile; **recommended for closure, task #882**.  `slices`' remaining ~3×
+is the equal-hash lookups, `p-array-fill`'s construction and the key
+stringify, which is a different piece of work.
+
+**And the `regexg` row was never measuring anything** (task #814, fixed here):
+`tools/bench-exec.pl` hand-wrote its own SBCL command line instead of using
+`tools/lib/PCLSbcl.pm`, so it ran PCL on SBCL's 2 MB DEFAULT control stack,
+where the row's `'a' x 200000` died before the loop ran — identically at N=5
+and N=0, and `2>&1 >/dev/null` hid it, so the subtraction of two crashes
+printed 0.0009 s / **0.01×**.  This is #324 exactly, one runner later.  Fixed
+three ways: the command line now comes from PCLSbcl; **every row is VERIFIED
+before it is timed** (both engines' stdout must match and PCL must exit 0, or
+the row prints BROKEN and is not timed — a crashed run is fast, so without
+this the table's most attractive number is its least trustworthy one); and the
+underlying `p-str-x` stack blowup is task #880.  `regexg` now reads **2.19×**,
+and agrees with itself at two N.  **Read no bench row whose signal is under
+the ~1 s constant term both runs pay** — `strcat` is the next one, task #881.
+
 ---
 
 ## 0.5 Headline results (what the experiments proved)

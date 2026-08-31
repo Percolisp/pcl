@@ -4,6 +4,108 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 459am (2026-08-31, Opus round 16, agent AM) — #862 ARM A: the READ-ONLY foreach binds the slot as it stands (0.71× → 0.47×); #814's regexg row was measuring a CRASH; #880 `p-str-x`
+
+Three tasks, and the second one turned out not to be the bug it was filed as.
+
+**#862 ARM A — the boxed-aggregates design's §4.4 "proven arm", shipped.**
+`for my $v (@a)` aliases each element, which under raw element storage
+PROMOTES every slot to a box; promotion is MONOTONE, so a read-only walk taxes
+every later read of that array forever.  When VarAnnotator proves the loop
+variable read-only the identity is never used, so the loop lowers to
+**`p-foreach-raw`**, binding the slot as it stands — a raw value directly, an
+existing box unchanged (a reference keeps its `is-ref`, tie/magic/blessed keep
+their dispatch: unboxing there would hand the loop variable the *referent*), a
+hole as undef.  One new verdict key (`foreach_ro`), one macro-name choice in
+Parser2, one runtime accessor behind a shared `%expand-foreach` expander so
+the two loops cannot drift.  Kind-A gate **`foreach-raw`**.
+
+`foreach_ro` is deliberately **not** `unboxable`: the loop variable's storage
+verdict is untouched, so every other consumer sees exactly what it saw and the
+loop BODY's emission is byte-identical.  That is why the only emission change
+anywhere is the macro name — corpus-diff 14 of 111 files where every diff line
+is the rename (plus two pretty-printer re-flows caused by the 4-char-longer
+symbol), emission-ab over all 22 lib shims the same, RCDIFF 0.
+
+**THE TRAP, caught by the probe battery before it shipped, and the reason
+`Pl/t/foreach-raw-01.t` exists: the annotator's REASON list is not the whole
+write story.**  A statement-root `$v = RHS`, a root coercing compound
+`$v *= 2` and a root `$v++` are deliberately NOT boxing events — a raw slot
+stores them fine — so they leave no reason at all and are recorded as write
+FACTS (`write_fam` / `incdec_root` / `init_bad` / `write_obj`).  For a foreach
+ALIAS every one of them is a write that must reach the container.  The first
+version keyed only on "reasons == exactly [foreach-alias]", fired on
+`for my $o (@a) { for my $i (@$o) { $i *= 2 } }`, `(p-*= $i 2)` box-set a raw
+value, and the doubling vanished **silently**.  The licence now tests the
+facts too; a future widening must ask the same question of any new
+native-write shape.
+
+**Measured** (new `feread` bench row = #862's own program): **0.71× perl →
+0.47×**, PCL 0.3970 s → 0.2746 s, A/B through the arm's own gate in one
+session.  **`slices` did NOT move — 3.02× off, 3.06× on.**  That is the
+re-measure #862 required before anyone spent on ARM B, and it confirms
+s458ak's sb-sprof reading from the other direction: the promotion arm is not
+in `slices`' profile at all.  **ARM B as scoped is optimizing something that
+is not there — recommended for closure, #882**; what remains in `slices` is
+equal-hash lookups, `p-array-fill`'s construction and the key stringify.
+#810's READ-ONLY half is now honest; its writing half still diverges, #810
+stays open.
+
+**#814 — the regexg bench row, and the cause was not the filed guess.**  The
+task supposed the big/small counts were both 5 and "the subtraction cancels".
+Measured first instead: perl's side was always honest and linear (N=0 0.0025 s
+→ N=100 1.1914 s) while **PCL's was FLAT at 0.0389 s for every N**.  A program
+that costs the same at N=0 and N=100 is not running — and it was not.
+`tools/bench-exec.pl` hand-wrote its own SBCL command line instead of using
+`tools/lib/PCLSbcl.pm`, so it ran PCL on SBCL's **2 MB default control
+stack**, where the row's first statement `my $x = 'a' x 200000` died with
+`Control stack exhausted`; `2>&1 >/dev/null` hid it, both runs crashed at the
+same point, and the difference of two crashes is 0.0000 s.  **This is #324
+exactly, one runner later** — and PCLSbcl's own docstring is the warning that
+went unheeded.  Fixed three ways: the command line comes from PCLSbcl; **every
+row is VERIFIED before it is timed** (both engines' stdout must match and PCL
+must exit 0, else the row prints BROKEN and is not timed — a crashed run is
+fast, so without the check the table's most attractive number is its least
+trustworthy one); and N_big 5 → 30, because even uncrashed, a ~0.06 s signal
+sits under the run-to-run spread of the ~1 s both runs pay to compile the
+program at load.  `regexg` now reads **2.19×** and agrees with itself at two N
+(2.21× at N=5).  Residue **#881**: `strcat` has the same too-small signal.
+
+**#880 (new, fixed here)** — the product bug underneath: `p-str-x` built its
+result as `(apply #'concatenate 'string (make-list n …))`, i.e. N *arguments*
+plus an N-element list.  `'a' x 50000` fine, `'a' x 200000` dead on a 2 MB
+stack.  Now one `make-string` + `replace` per copy: same result type, no list,
+no argument spray, O(1) stack.  `p-list-x` checked — it does not have the
+shape.
+
+**#812** — not measured, and recorded as such in the task rather than left
+ambiguous: the budget went to ARM A's bar.  Its discriminating measurement
+(sb-sprof the symref bench) is still the first thing to do and still cheap;
+the row read 0.2175 s / 9.75× here, consistent with the bisected 0.2155 s.
+
+**THREE `Pl/t` SHAPE ROWS WERE STALE against this change** and were repaired
+in the same commit (the s416 standing rule): `statements-01.t` "foreach with
+variable", `parser2-01.t` "reverse 1..3 is NOT split", `parser2-02.t` "foreach
+continue".  Each asserts membership of the foreach FAMILY, not which arm binds
+the loop variable, so each widened to `p-foreach(?:-raw)?` — the convention
+those very files already use for `p-foreach-range(?:-raw)?` — and the specific
+fact they stop pinning is pinned instead, in the same commit, by the new guard.
+
+Bar: gate PASS **191/6416**; full sweep **GATE clean, TOTAL 18340 (+0)**,
+drops 5 = census, pack.t 5636/89 = baseline; **gate-SET scan 638 × 2
+populations IDENTICAL**; corpus-diff + lib emission-ab as above; the
+elem-alias battery + `foreach-raw-01.t` + `passes-01.t` green under **both**
+`PCL_RAW_ELEMS` settings; PCL_OPT=none equivalence in `passes-01.t` (shape
+rows *and* the run-output row); generation **v2-500** with all three artifacts
+regenerated and paren-checked; guard `Pl/t/foreach-raw-01.t` (28 rows)
+inverse-verified on an `e9296cb` worktree — exactly the 4 shape rows fail
+there and all 24 behaviour/refusal rows pass, which is the point: the
+behaviour rows are perl's answer on both trees.  ir-spec §6.2 updated (it was
+stale twice over: it still said raw elements get a *fresh box*, and still
+mentioned gating to the deleted v1 pipeline).
+
+Tasks: **#880 / #881 / #882 filed**, **#814 + #880 closed**, #862 partial
+(ARM A done, E2c′ outstanding), #812 annotated.
 ## Session 459f (2026-08-31, Fable) — #876 the multi-distro INSTALL MATRIX green on all four distros (#282's container half CLOSED); round 16 launched (AM #862 / AN #870+#861+fillers)
 
 1. **#876 SHIPPED and GREEN** (`e9296cb` + fix `1cacd42`): a second

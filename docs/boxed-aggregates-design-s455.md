@@ -504,6 +504,51 @@ more.  Fable reviews at each phase boundary (the round pattern).
   `make-p-box` or the promotion arm in its profile at all) — do the foreach
   arm first and RE-MEASURE `slices` before spending anything on the slice arm.
 
+- **P4b — THE FOREACH HALF OF PHASE 4'S EMISSION (s459am, task #862 ARM A).**
+  §4.4's "proven arm", shipped: a `for my $v (LIST)` whose loop variable the
+  annotator proves READ ONLY lowers to **`p-foreach-raw`**, which binds the
+  slot as it stands instead of promoting each element.  The pieces are one
+  new VarAnnotator verdict key (`foreach_ro`), one Parser2 macro-name choice,
+  and one runtime accessor (`%p-foreach-elt-raw`) behind a shared
+  `%expand-foreach` expander — `p-foreach` and `p-foreach-raw` differ in
+  nothing else, so they cannot drift.  Kind-A gate **`foreach-raw`**.
+  **`foreach_ro` is deliberately NOT `unboxable`**: the loop variable's own
+  storage verdict is untouched, so every other consumer sees what it saw and
+  the loop BODY's emission is byte-identical.  Measured: the ONLY emission
+  change over the 111-file corpus and all 22 lib shims is the macro name.
+  **THE TRAP, found by the probe battery before it shipped and now the reason
+  `Pl/t/foreach-raw-01.t` exists: the annotator's REASON list is not the whole
+  write story.**  A statement-root `$v = RHS`, a root coercing compound
+  `$v *= 2` and a root `$v++` are deliberately NOT boxing events (a raw slot
+  stores them fine), so they leave no reason at all and are recorded as write
+  FACTS instead.  For a foreach ALIAS every one of them is a write that must
+  reach the container.  A first version keyed only on "reasons == exactly
+  [foreach-alias]" fired on `for my $o (@a) { for my $i (@$o) { $i *= 2 } }`,
+  `(p-*= $i 2)` box-set a raw value, and the doubling vanished SILENTLY.  The
+  licence tests the facts too; any future widening must ask the same question
+  of any new native-write shape.
+  **Speed: the new `feread` bench row — the design's own read-only-foreach
+  shape — goes 0.71× perl → 0.47×** (PCL 0.3970 s → 0.2746 s, −31 %), A/B
+  through the arm's own gate in one session.
+  **`slices` did NOT move: 3.02× with the arm off, 3.06× with it on.**  That
+  is the re-measure §4.4/#862 asked for, and it CONFIRMS s458ak's sb-sprof
+  reading from the other direction — the promotion arm contributes ~nothing
+  there.  **ARM B as scoped ("skip the promotion in a slice COPY position")
+  is therefore optimizing something that is not in the profile; recommended
+  for closure, task #882.**  What is actually left in `slices` is the
+  equal-hash lookups, `p-array-fill`'s own construction and the key stringify
+  — a different piece of work with a different design.
+  #810's READ-ONLY half is now honest (`for my $x (1,2,3)` binds raw values
+  and allocates nothing); its WRITING half still diverges and #810 stays open.
+  BAR MET: corpus-diff 14 files, every diff the rename (plus two
+  pretty-printer re-flows from the 4-char-longer symbol); emission-ab over lib
+  22 files, rename only, RCDIFF 0; gate PASS **191/6416**; full sweep GATE
+  clean **TOTAL 18340 (+0)**, drops 5 = census, pack.t 5636/89; gate-SET scan
+  **638 × 2 populations IDENTICAL**; the elem-alias battery + the new guard +
+  passes-01.t green under BOTH `PCL_RAW_ELEMS` settings; PCL_OPT=none
+  equivalence (shape rows and the run-output row); generation **v2-500**, all
+  three artifacts regenerated.  Still not done from #862: E2c′.
+
 ## CHECKPOINT LOG (continued)
 
 - **C2:** §4 mechanism (write rule; ONE promotion fn extracted from

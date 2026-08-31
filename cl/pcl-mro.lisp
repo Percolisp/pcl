@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-490
+;;; pcl: pipeline=v2 gen=v2-500
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -77,7 +77,7 @@
   (p-raw-params ($class)
     (block nil
       (p-void-ctx (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
-        (p-foreach ($u (p-cast-@ "UNIVERSAL::ISA"))
+        (p-foreach-raw ($u (p-cast-@ "UNIVERSAL::ISA"))
           :my
           t
           (p-if (p-str-eq $u $class) (p-return 1)))
@@ -124,13 +124,13 @@
                     (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
                   (p-if (p-! @seqs) (p-last))
                   (let (($cand (make-p-box nil)))
-                    (p-foreach ($seq @seqs)
+                    (p-foreach-raw ($seq @seqs)
                       :my
                       t
                       (let (($head (make-p-box nil)))
                         (p-my-= $head (p-aref-deref $seq 0))
                         (let (($in_tail 0))
-                          (p-foreach ($s @seqs)
+                          (p-foreach-raw ($s @seqs)
                             :my
                             t
                             (p-foreach-range-raw ($i 1 (p-array-last-index $s))
@@ -148,7 +148,7 @@
                           "'
 ")))
                     (p-push @result $cand)
-                    (p-foreach ($seq @seqs)
+                    (p-foreach-raw ($seq @seqs)
                       :my
                       t
                       (p-if (p-&& (p-cast-@ $seq) (p-str-eq (p-aref-deref $seq 0) $cand))

@@ -40,9 +40,13 @@ sub output_contains {
 diag "";
 diag "-------- foreach loops:";
 
-output_contains('for my $x (@array) { }',
-                '(p-foreach ($x @array)',
-                'foreach with variable');
+# EITHER member of the foreach family — this row's subject is the lowering
+# SHAPE `($x @array)`, not which arm binds the loop variable.  A read-only
+# `my` loop var takes p-foreach-raw (task #862 ARM A), the same way a sole
+# range takes p-foreach-range-raw and the range rows here already spell it.
+# WHICH arm fires, and when it must not, is pinned in Pl/t/foreach-raw-01.t.
+like(parse_code('for my $x (@array) { }'), qr/\(p-foreach(?:-raw)? \(\$x \@array\)/,
+     'foreach with variable');
 
 output_contains('foreach (@list) { print $_; }',
                 '(p-foreach ($_ @list)',

@@ -1093,7 +1093,8 @@ conditionals over `p-true-p` (§3.3). Ternary `?:` is also `p-if`.
 ### 6.2 Loops and loop control
 
 `p-while`, `p-until`, `p-for` (C-style: `(p-for (INIT) (COND) (STEP)
-body…)`), `p-foreach ((VAR LIST) body…)`. All accept trailing keys
+body…)`), `p-foreach ((VAR LIST) body…)` and its read-only twin
+`p-foreach-raw`. All accept trailing keys
 `:label NAME` (must be first key) and `:continue (progn …)`.  The foreach
 family additionally accepts `:my t` (after `:label`, before the body) —
 see "Loop variable: lexical or localized" below.
@@ -1114,10 +1115,27 @@ block `{ … }` is a loop-that-runs-once: same shape, so `last` inside it
 exits the block.
 
 `p-foreach` evaluates its list in list context, flattens it, and binds VAR
-to **each element's box** (`ensure-boxed`) — so mutating the loop variable
-writes through to the array, matching Perl's foreach aliasing (raw
-elements get a fresh box; files where that aliasing would be observable
-gate to the v1 pipeline).
+to **each element's cell** (`%p-foreach-elt`) — so mutating the loop
+variable writes through to the array, matching Perl's foreach aliasing.
+Under raw element storage (§2.3) a slot holding a raw value is **promoted
+in place** to a box at that moment, which is what makes the alias real; a
+hole binds a deferred-element box that vivifies on first write.
+
+**`p-foreach-raw` is the read-only twin** (normative, s459am): identical in
+every respect except that VAR is bound to the slot **as it stands**
+(`%p-foreach-elt-raw`) — a raw value directly, an existing box unchanged, a
+hole as undef — with no promotion and no allocation.  A translator may treat
+the two as the same construct; the `-raw` spelling is a *promise by the
+compiler*, not a different loop.  The promise is that the loop variable is
+read only: VarAnnotator emits it only when the region's every use of the name
+is a pure read (no write of any kind — including the statement-root `=`,
+coercing-compound and `++` writes that leave no boxing event — no `\$v`, no
+`local`, no regex target, no mutating builtin, no `@_`-writing callee, no
+capture with an event, no string eval).  It is worth having because promotion
+is **monotone**: a read-only walk over an array would otherwise box every slot
+permanently, taxing every later read of that array.  Emitted only with `:my`;
+the package-cell arm is refused (a raw value in a global a callee can write
+through would lose the write).  Switchable as the Kind-A gate `foreach-raw`.
 
 **Loop variable: lexical or localized.**  Perl's `foreach $pkgvar (…)`
 implicitly *localizes* the package variable — the loop variable is aliased to

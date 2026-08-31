@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-490
+;;; pcl: pipeline=v2 gen=v2-500
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -2922,7 +2922,7 @@
               (p-if $utf8_mode
                 (progn
                   (let (($bytes ""))
-                    (p-foreach ($c (p-split (p-regex "//") $s))
+                    (p-foreach-raw ($c (p-split (p-regex "//") $s))
                       :my
                       t
                       (let (($code (make-p-box nil)))

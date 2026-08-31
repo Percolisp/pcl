@@ -9960,11 +9960,20 @@ sub _lower_compound {
     $self->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
     my @my_keys = $loop_my ? (':my', 't') : ();
+    # #862 ARM A (Kind-A `foreach-raw`, gated inside the verdict): a `my` loop
+    # variable the annotator proved READ-ONLY needs no element identity, so
+    # p-foreach-raw binds the slot as it stands instead of promoting every
+    # element to a box (which, promotion being monotone, taxes every LATER
+    # read of that array too).  The verdict is name-keyed like every other one
+    # and already requires the my-spelling; `$loop_my` is re-asserted here
+    # because it is what makes `:my t` present, and p-foreach-raw refuses the
+    # package-cell arm.
+    my $ro = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro};
     return defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
          ['list', $cl_name, $from_form, $to_form],
          _label_keys($label), @my_keys, @body, @cont]
-      : ['p-foreach', ['list', $cl_name, $list_form],
+      : [($ro ? 'p-foreach-raw' : 'p-foreach'), ['list', $cl_name, $list_form],
          _label_keys($label), @my_keys, @body, @cont];
   }
 
