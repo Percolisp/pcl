@@ -1325,7 +1325,7 @@ re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
 re/pat.t	1263	4	0	0	DIFF		3
-re/pat_advanced.t	1678	0	673	223	DIFF		4
+re/pat_advanced.t	1678	0	951	729	DIFF		0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 # s455 (round 12): re/pat_psycho.t 11/0 DIFF -> 15/0 OK EDITED BY HAND -- s454ac/#680: the
 # pathological rows that starved on per-match cost finish inside the 450s allowance; verified
