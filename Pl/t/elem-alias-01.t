@@ -11,7 +11,8 @@
 # leave THIS file green, which is what makes the early phases' zero-change bar
 # checkable at the semantic level rather than only at the sweep level.
 #
-# The catalogue is the design's E1-E12, both spellings each:
+# The catalogue is the design's E1-E12 (plus E13, added s458ak), both
+# spellings each:
 #   E1  f($a[0]) / f($h{k})            -- @_ aliasing of ONE element
 #   E2  f(@a) / f(%h)                  -- @_ aliasing of every element
 #   E3  for (@a) / for my $x (@a)      -- loop var aliases each element
@@ -23,6 +24,8 @@
 #   E10 readonly array                 -- element write still legal
 #   E11 values %h / values @a          -- aliases (task #817)
 #   E12 @a[0,1] / @h{...}              -- slice aliases (task #818)
+#   E13 @$obj{k} / @$obj[0] on a BLESSED container -- aliases exactly like a
+#       plain one, and the class survives it (task #841)
 #   plus the NEGATIVES: every COPY position must BREAK aliasing.
 # E9 (tie/magic containers) is out of scope by design -- those keep today's
 # fully-boxed representation, and their own guards cover them.
@@ -31,7 +34,7 @@
 
 use strict;
 use warnings;
-use Test::More tests => 19;
+use Test::More tests => 21;
 use File::Temp qw(tempfile);
 use FindBin qw($RealBin);
 use lib $RealBin;
@@ -110,6 +113,22 @@ my %h12d = (x=>1); for (@h12d{'x','zz'}) { $_ = 8 }      # missing key vivifies
 print "e12d=", scalar(keys %h12d), "/$h12d{zz}\n";
 my $r12 = [1,2,3]; for (@{$r12}[0,1]) { $_ *= 2 }        print "e12e=@$r12\n";
 
+# --- E13: BLESSING DOES NOT CHANGE ELEMENT ALIASING (task #841) -----------
+# A blessed hash is an ordinary hash with a stash attached; its ELEMENTS are
+# ordinary lvalues.  PCL used to refuse to alias them (the :__class__ guard),
+# which was a silent wrong.  The class key must stay invisible throughout.
+my $ob13 = bless { k => "v" }, "C13";
+w0(@$ob13{"k"});                                         print "e13a=$ob13->{k}\n";
+my $oc13 = bless { a => "x", b => "y" }, "C13";
+for my $v (@$oc13{'a','b'}) { $v .= "!" }                print "e13b=$oc13->{a} $oc13->{b}\n";
+my $od13 = bless { a => "x" }, "C13";
+for my $v (values %$od13) { $v .= "!" }                  print "e13c=$od13->{a}\n";
+my $oe13 = bless [ "p", "q" ], "C13";
+w0(@$oe13[0]);                                           print "e13d=$oe13->[0]\n";
+my $of13 = bless { a => "x" }, "C13";
+my @cb13 = @$of13{'a'};  $cb13[0] = "C";                 # a COPY still breaks it
+print "e13e=", ref($ob13), "/", join(",", sort keys %$ob13), "/$of13->{a}\n";
+
 # --- NEGATIVES: every copy position breaks aliasing -----------------------
 my @an = (1,2,3);
 my @c1 = @an;             $c1[0] = "C";
@@ -186,6 +205,11 @@ is("$pcl{e11a}|$pcl{e11b}", "$perl{e11a}|$perl{e11b}", 'E11 values %h / values @
 is("$pcl{e12a}|$pcl{e12b}|$pcl{e12c}|$pcl{e12d}|$pcl{e12e}",
    "$perl{e12a}|$perl{e12b}|$perl{e12c}|$perl{e12d}|$perl{e12e}",
    'E12 array/hash/ref slices alias, holes and missing keys vivify (#818)');
+is("$pcl{e13a}|$pcl{e13b}|$pcl{e13c}|$pcl{e13d}",
+   "$perl{e13a}|$perl{e13b}|$perl{e13c}|$perl{e13d}",
+   'E13 a BLESSED hash/array aliases its elements exactly like a plain one (#841)');
+is($pcl{e13e}, $perl{e13e},
+   'E13 the bless class survives element aliasing and is never a visible key');
 is("$pcl{neg}|$pcl{nov}", "$perl{neg}|$perl{nov}",
    'NEGATIVES: every copy position breaks aliasing; reads never vivify');
 is($pcl{swap}, $perl{swap},

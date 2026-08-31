@@ -85,6 +85,51 @@ those two files and the live plan doc directly -- no new review-doc families.*
   `open $99`), is **#873**: the specials are not boxes, so there is nowhere to
   hang the flag, and the write spellings are the whole assign/modify family.
 
+## s458ak (2026-08-31, Opus round-15 perf) — boxed aggregates PHASE 4's RUNTIME half: accessor dispatch, #815, #811, #841 — `docs/faster-codegen-suggestions.md` §0.2d, design checkpoint P4a
+
+- **A "cheap global short-circuit" is only cheap if it is cheaper than the
+  test it jumps in front of.**  Putting `(zerop (hash-table-count
+  *p-overload-table*))` FIRST in the #815 negative predicate cost `collatz`
+  **19 %** (0.776 → 0.926 s, reproduced three times): `HASH-TABLE-COUNT` is an
+  out-of-line call, and `%pcl-raw-coerce-check` asks the predicate twice per
+  iteration on a RAW number, where the predecessor exited on one `p-box-p`
+  test.  Order is now box test → payload test → table read.  Generalises: a
+  guard added in front of an existing fast path must be measured against the
+  path it precedes, not only against the work it avoids.
+- **The generic `aref` on PCL's arrays was the biggest single runtime cost on
+  the aggregate axis** — 44 % of `arrfill`, 18 % of `arrhash`.  A Perl array is
+  an ARRAY HEADER over a simple-vector and SBCL cannot see that statically.
+  `%p-vec-data` returns the backing simple-vector (NIL = not that shape, use
+  the ordinary path); the contract — bound indices by the FILL POINTER, never
+  hold it across a push — is on the CALLER and is stated at the helper.
+- **Two per-element predicates were compiled as full CALLS purely because they
+  were DEFINED BELOW their hottest callers** (`p-flatten-marker-p`'s defstruct,
+  `%p-hash-marker-p`): SBCL inlines a struct predicate only where the defstruct
+  is already known, and a defun only where the `inline` proclamation is.  Worth
+  4.9 % of `arrfill`.  Check definition ORDER before concluding a predicate is
+  cheap.
+- **#841 CLOSED, and it is normative now (ir-spec §2.4): BLESSING DOES NOT
+  CHANGE ELEMENT ALIASING.**  perl aliases a blessed hash's elements exactly as
+  a plain one's (probed 5.40.3, 8 rows); PCL's `:__class__` refusal in
+  `%p-alias-helem` / `p-gethash-argbox` was a silent wrong.  The class key needs
+  NO guard: `:__class__` is a CL keyword and every Perl-level key arrives
+  through `to-string`, so no program can name it.  Guard: `elem-alias-01.t` E13.
+- **A companion "REAL MOVE" can still be contention.**  The #366 serial re-run
+  re-runs a flagged file ALONE but inside the same loaded session; io/open.t and
+  io/pvbm.t both reproduced their snapshot rows when re-run in a quiet two-file
+  batch, on this tree and on a `git archive` of the base.
+- Filed **#860** (`f($ref->{k})` not an `@_` alias — the already-documented
+  `not-supported.md` residue, now probed and quantified), **#861**
+  (`\$$h{k}` / `\${$h}{k}` / `\$$a[0]` lose the backslash — the emission has no
+  `p-backslash` at all; the arrow spellings are correct), **#862** (phase 4's
+  EMISSION half, re-sized: foreach-LIST read-only arm ≈ 40 % of a read-only
+  foreach and closes #810; the slice COPY arm is now the smaller prize — after
+  the accessor work `slices` shows neither `make-p-box` nor the promotion arm).
+- Bar: gate 190/6375 both `PCL_RAW_ELEMS` settings, sweep GATE clean TOTAL
+  18340 (+0) both ways, companion op/+io/+re/ 345 files zero real movers,
+  pack.t 5636/89.  **Runtime-only — no emission change, so no generation bump
+  and no artifact regeneration.**
+
 ## s455e (2026-08-31, Fable) — AI + AJ merged: boxed aggregates LIVE, #820/#850 in; the merge-review rulings
 
 - **Both s457 agents reviewed and merged same-session** (AJ `21e0b70` +

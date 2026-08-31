@@ -109,6 +109,86 @@ bareword handle) was NOT started.
 
 ---
 
+## Session 458ak (2026-08-31, Opus round-15 perf agent) — PHASE 4's RUNTIME HALF: accessor dispatch, #815, #811, #841.  arrhash 1.28× → 0.67×, arrfill 3.09× → 1.48×, slices 5.13× → 3.18×.  Runtime-only: no emission change, no generation bump
+
+The design's phase-4 note said the residue in `arrhash`/`arrfill` "is the
+ACCESSOR dispatch, not the allocation".  This session profiled that claim
+instead of assuming it, and every fix below came out of an sb-sprof run.  Full
+A/B table and the six findings: `docs/faster-codegen-suggestions.md` §0.2d;
+design checkpoint P4a.
+
+1. **The generic `aref` was the biggest single item — 44 % of `arrfill`, 18 %
+   of `arrhash`.**  Every Perl array PCL builds is an ARRAY HEADER over a
+   simple-vector; SBCL cannot see that statically, so every element touch
+   compiled to the hairy-data-vector dispatch, and a hand-written copy loop
+   beats `aref` **3.3×**.  `%p-vec-data` hands the backing simple-vector to a
+   caller that has already bounds-checked, with the contract on the helper
+   (bound by the FILL POINTER, never hold it across a push, NIL = use the
+   ordinary path).  Beside it, `p-aref` / `(setf p-aref)` / `p-gethash` /
+   `(setf p-gethash)` gained fast arms whose preconditions make the general
+   path's coercions provable identities, and the element write rule now has ONE
+   spelling per container kind (`%p-aref-store`, `%p-gethash-store`).
+2. **Number → string was 24 % of `slices`** (its hash keys are numbers).
+   `%p-fixnum-string` is a digit loop instead of the printer: **3× faster**,
+   and it is on every `print $n`, `"$n"` and numeric hash key.
+3. **#815, the overload NEGATIVE path.**  One inline predicate
+   `%p-no-overload-possible-p`, asked AT THE CALL SITE by the seven hot askers
+   (`%with-binary-overload`, both comparison macros, `box-nv`, `box-sv`,
+   `%p-true-p-slow`) — guarding only `p-find-overload` bought 3.4 % because
+   the CALL itself remained.  pack −4.7 %, ovlsub −11 %.
+4. **#811, `box-set`'s store dispatch.**  A fast path for a raw scalar into an
+   untied, unmagic, plain-valued box, with the comment enumerating why each
+   later step is a no-op under those two conditions; `pos()`'s `remhash` only
+   when `*p-match-pos*` is non-empty.  A boxed accumulator (`my $r = \$s`
+   defeats the raw verdict) **0.2521 s → 0.1734 s, −31 %**.
+5. **#841 CLOSED: blessing does not change element aliasing.**  Probed
+   5.40.3 — perl aliases a blessed hash's elements exactly as a plain one's,
+   and PCL's `:__class__` refusal in `%p-alias-helem` / `p-gethash-argbox` was
+   a silent wrong.  Deleted; the class key needs no guard because it is a CL
+   keyword no Perl-level key can name.  Battery gains **E13**, 19 → 21 rows,
+   green under both `PCL_RAW_ELEMS` settings.  ir-spec §2.4 says so
+   normatively.
+6. **Two per-ELEMENT predicates were compiled as full CALLS** because they
+   were DEFINED BELOW their hottest callers (`p-flatten-marker-p`'s defstruct,
+   `%p-hash-marker-p`) — 4.9 % of `arrfill` for two forms that expand to a tag
+   test and two EQs.  Moving the definitions up is the whole fix.
+
+**THE ORDERING TRAP, and it is the session's most transferable finding.**  The
+first `%p-no-overload-possible-p` asked "is the overload table empty?" FIRST,
+on the reasoning that one slot read settles every program that never says
+`use overload`.  It cost **`collatz` 19 %** (0.776 → 0.926 s, reproduced three
+times), because `HASH-TABLE-COUNT` is an out-of-line call and
+`%pcl-raw-coerce-check` asks the predicate twice per iteration on a RAW number
+— where the predecessor exited on a single `p-box-p` test.  A "cheap global
+short-circuit" is only cheap if it is cheaper than the test it jumps in front
+of.  Reordered, `collatz` is 0.773 s.  The bench found it; sb-sprof named it in
+one run.
+
+**Bar.**  Gate PASS **190/6375** (base 190/6373; the +2 are E13) with the flip
+AND with `PCL_RAW_ELEMS=0`; full sweep GATE clean TOTAL **18340 (+0)**, drops
+5 = census, BOTH ways; pack.t 5636/89; companion op/ + io/ + re/ (345 files)
+**zero real movers**.  Nothing emitted changed (`git status` = `cl/` + one
+`Pl/t` file), so no generation bump and no artifact regeneration.
+
+**A COMPANION "REAL MOVE" CAN STILL BE CONTENTION.**  The run flagged
+io/open.t and io/pvbm.t as real moves and the #366 serial re-run agreed —
+but that re-run happens inside the same loaded session.  Re-run alone in a
+quiet two-file batch, both reproduce their snapshot rows exactly, on this tree
+AND on a `git archive` of the base.
+
+**Filed:** **#860** (`f($ref->{k})` / `f($ref->[0])` is not an `@_` alias —
+already the documented residue in `not-supported.md` §`@_` argument aliasing,
+now quantified and probed on plain AND blessed refs) and **#861**
+(`\$$h{k}` / `\${$h}{k}` / `\$$a[0]` LOSE THE BACKSLASH — the emission shows
+it directly, `(p-my-= $r (p-gethash …))` with no `p-backslash`; the arrow
+spellings are correct).  **#862** = phase 4's emission half, re-sized by
+measurement: the foreach-LIST read-only arm is worth ~40 % of a read-only
+foreach and closes #810; the slice COPY-position arm is now the SMALLER prize
+(after this session `slices` shows neither `make-p-box` nor the promotion arm
+anywhere in its profile) — do the foreach arm first and re-measure.
+
+---
+
 ## Session 455e (2026-08-31, Fable) — AI + AJ merged: BOXED AGGREGATES ARE LIVE (raw elements, phases 0–3), #820/#850/#817/#818 closed, gen v2-470, all pushed
 
 The two parallel s457 agents, reviewed and merged in finish order:

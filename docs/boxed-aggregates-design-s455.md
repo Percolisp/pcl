@@ -1,15 +1,19 @@
 # Boxed aggregates → raw element storage: the design analysis (s455d, Fable)
 
 **Status: PHASES 0–3 SHIPPED (s457ai, 2026-08-31) — raw element storage is ON
-by default.**  Both §7 open items are closed: the sort-comparator ruling
-(§7.1, USER) is now a `docs/not-supported.md` entry, and the gate shape (§7.2)
-was decided by measurement in phase 0 — a runtime-consulted defglobal,
-`PCL_RAW_ELEMS=0` restores the all-boxed world.  **PHASE 4 IS THE ONLY THING
-LEFT** (§6): E2c′ (`writes_args`-gated raw pass into `@_`), the E3/§4.4 proven
-arm extended to slices — which is what the `slices` bench row is waiting for —
-and the remaining accessor-dispatch cost that keeps `arrhash`/`arrfill` above
-their targets.  Task #816.  EXECUTION CHECKPOINT LOG at the bottom (P0a → P3),
-design checkpoints C1–C4 below it.
+by default; PHASE 4's RUNTIME HALF SHIPPED (s458ak, checkpoint P4a).**  Both
+§7 open items are closed: the sort-comparator ruling (§7.1, USER) is now a
+`docs/not-supported.md` entry, and the gate shape (§7.2) was decided by
+measurement in phase 0 — a runtime-consulted defglobal, `PCL_RAW_ELEMS=0`
+restores the all-boxed world.  The accessor-dispatch cost that kept
+`arrhash`/`arrfill` above their targets is GONE (arrhash 1.23× → **0.67×**,
+arrfill 2.99× → **1.48×**, slices 5.07× → **3.18×**; §0.2d of
+`faster-codegen-suggestions.md`).  **WHAT IS LEFT is phase 4's EMISSION half,
+re-sized by measurement and filed as task #862**: the §4.4 proven arm for a
+foreach-LIST loop variable (worth ~40 % of a read-only foreach, and it closes
+#810), then a re-measure before the slice COPY-position arm, plus E2c′
+(`writes_args`-gated raw pass into `@_`).  Task #816.  EXECUTION CHECKPOINT
+LOG at the bottom (P0a → P3 → P4a), design checkpoints C1–C4 below it.
 
 The question this doc answers: Perl array/hash ELEMENTS are stored as boxes
 today, unconditionally.  The measured cost is the whole remaining
@@ -452,6 +456,53 @@ more.  Fable reviews at each phase boundary (the round pattern).
   loops is accessor dispatch, not allocation.  `slices` went 4.77× → 5.07×
   because a slice in a COPY position still promotes; that is phase 4's
   "proven arm", and `slices` is the row that will measure it.
+
+- **P4a — THE ACCESSOR-DISPATCH HALF OF PHASE 4 (s458ak).  Runtime only: no
+  emission change, so no generation bump and no artifact regeneration.**
+  §0.2c ended by saying that what keeps `arrhash` and `arrfill` above their
+  targets "is the ACCESSOR dispatch, not the allocation".  Profiled and acted
+  on: **`arrhash` 1.23× → 0.67× (the ≤1.0× target MET), `arrfill` 2.99× →
+  1.48×, `slices` 5.07× → 3.18×, `sliceasgn` 2.88× → 2.19×**, nothing won
+  regressed.  The six findings and the full A/B table are
+  `docs/faster-codegen-suggestions.md` §0.2d; the two that matter to THIS
+  design are:
+  1. **The generic `aref` was the single biggest item** — 44 % of `arrfill`,
+     18 % of `arrhash`.  Every Perl array PCL builds is an ARRAY HEADER over a
+     simple-vector, and SBCL cannot see that statically, so every element
+     touch compiled to the hairy-data-vector dispatch.  `%p-vec-data` hands
+     the backing simple-vector to a caller that has already bounds-checked;
+     the contract (bound by the FILL POINTER, never hold it across a push) is
+     on the helper.  This is a REPRESENTATION win the design did not predict
+     and it is orthogonal to boxing: it would have been there in the
+     all-boxed world too.
+  2. **The write rule now has ONE spelling per container kind** —
+     `%p-aref-store` and `%p-gethash-store`, each shared by its accessor's
+     fast arm and its general path.  §4.1a's four arms are unchanged in
+     meaning; they are just no longer written out twice.
+  Also landed here: **#841 — blessing does not change element aliasing.**
+  Probed 5.40.3: perl aliases a blessed hash's elements exactly as it does a
+  plain one, and PCL's `:__class__` refusal in `%p-alias-helem` /
+  `p-gethash-argbox` was a silent wrong.  Deleted; the class key needs no
+  guard because it is a CL keyword no Perl-level key can name.  The battery
+  gains **E13** (19 → 21 rows) and is green under both gate settings.  The
+  same probe battery filed two PRE-EXISTING silent-wrongs that are NOT about
+  blessing: **#860** (`f($ref->{k})` is not an `@_` alias — already the
+  documented residue in `not-supported.md` §`@_` argument aliasing, now
+  quantified) and **#861** (`\$$h{k}` loses the backslash entirely).
+  Bar: gate PASS **190/6375** with the flip AND with `PCL_RAW_ELEMS=0`; full
+  sweep GATE clean TOTAL **18340 (+0)**, drops 5 = census, BOTH ways; pack.t
+  5636/89; companion op/ + io/ + re/ (345 files) with **zero real movers** —
+  the two the run flagged (io/open.t, io/pvbm.t) reproduce their snapshot rows
+  exactly when re-run in a quiet two-file batch on BOTH this tree and a
+  `git archive` of the base, so the #366 serial re-run's "REAL MOVE" was
+  itself a contention artefact (it re-runs alone, but still inside the same
+  loaded session — worth remembering).
+  **PHASE 4'S EMISSION HALF IS NOT DONE and is now task #862, re-sized by
+  measurement**: the foreach-LIST read-only arm is worth ~40 % of a read-only
+  foreach (measured) and closes #810; the slice COPY-position arm is the
+  smaller prize now that the accessor cost is gone (`slices` no longer shows
+  `make-p-box` or the promotion arm in its profile at all) — do the foreach
+  arm first and RE-MEASURE `slices` before spending anything on the slice arm.
 
 ## CHECKPOINT LOG (continued)
 

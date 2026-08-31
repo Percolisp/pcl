@@ -2201,6 +2201,38 @@
    If box is tied (contains a p-tie-proxy), routes through STORE."
   (unless (p-box-p box)
     (return-from box-set value))
+  ;; ---------------------------------------------------------------
+  ;; PLAIN SCALAR INTO A PLAIN BOX — the fast path (task #811, s458ak).
+  ;;
+  ;; Measured: every still-boxed scalar write pays this function's whole
+  ;; store-semantics dispatch, 1.54x a bare slot mutation, and in the
+  ;; overwhelmingly common write NONE of it applies.  The two conditions
+  ;; below are exactly what makes each of the general path's steps a no-op:
+  ;;
+  ;;   VALUE is a raw number or string  =>  it is not a box, so the copy-
+  ;;     semantics unwrap, the class-COPY rule and the dualvar carry-over all
+  ;;     fail their (p-box-p value) guard; it is not a vector or hash table,
+  ;;     so neither scalar-context count conversion applies; it is not a
+  ;;     typeglob, so the is-ref rule does not.
+  ;;   THE BOX'S CURRENT VALUE is a plain scalar  =>  no tie proxy and no
+  ;;     magic cell to delegate to, and the class-CLEAR rule is guarded on the
+  ;;     old value being a REF shape, so a stale class must be left alone
+  ;;     exactly as the general path leaves it.
+  ;;
+  ;; What remains is the slot write, the two caches, and pos() — and pos() is
+  ;; a REMHASH on a table that is empty in any program that never used m//g,
+  ;; so it is asked for only when the table has something in it.
+  ;; ---------------------------------------------------------------
+  (when (or (numberp value) (stringp value))
+    (let ((old (p-box-value box)))
+      (when (or (null old) (numberp old) (stringp old) (eq old *p-undef*))
+        (setf (p-box-value box) value)
+        (if (numberp value)
+            (setf (p-box-nv box) value (p-box-nv-ok box) t (p-box-sv-ok box) nil)
+            (setf (p-box-sv box) value (p-box-sv-ok box) t (p-box-nv-ok box) nil))
+        (unless (zerop (hash-table-count *p-match-pos*))
+          (remhash box *p-match-pos*))
+        (return-from box-set box))))
   ;; Tied variable: delegate to STORE.  Magic lvalue: delegate to its setter.
   (let ((current (p-box-value box)))
     (when (p-tie-proxy-p current)
@@ -2511,11 +2543,50 @@
                    (when h (return-from %p-find-overload-mro h)))))))
   nil)
 
+;;; THE OVERLOAD NEGATIVE PATH (task #815, s458ak).
+;;;
+;;; Since #119/#402 made more op families overload-aware, EVERY arithmetic,
+;;; string and comparison op asks p-find-overload — and in a plain-data
+;;; program the answer is always NO.  sb-sprof on the `pack` oracle loop put
+;;; p-find-overload at 14.3 % total with p-get-class and %p-target-class
+;;; behind it, on operands that are boxed fixnums and strings.
+;;;
+;;; Two tests, both of which prove NO OVERLOAD IS POSSIBLE without walking
+;;; anything:
+;;;
+;;;  1. The overload table is EMPTY.  Every handler this function and
+;;;     %p-find-overload-mro can return comes out of *p-overload-table*, which
+;;;     p-register-overloads is the only writer of, so an empty table means no
+;;;     program in this image has ever said `use overload`.  Reading the count
+;;;     is a struct-slot read.
+;;;  2. The BOX'S PAYLOAD IS A PLAIN SCALAR — a number, a string, NIL or
+;;;     undef.  p-get-class answers NIL for exactly those and can do nothing
+;;;     else: %p-target-class's own first arm rejects them by name, and
+;;;     %p-ref-shaped-p (the guard on the box's own class slot) is false for
+;;;     all four, so even a box carrying a stale class cannot report one.
+;;;     This is the same plain-payload split the whole box model is built on.
+;;;
+;;; Anything else falls through to the unchanged lookup.
+(declaim (inline %p-no-overload-possible-p))
+(defun %p-no-overload-possible-p (val)
+  "True when VAL provably carries no `use overload` handler for any operator.
+   ORDER IS THE WHOLE POINT, and it was measured: a RAW operand must settle on
+   the single P-BOX-P type test this function's predecessor already used, so
+   that test comes first.  Putting the table test first cost `collatz` 19 %
+   (0.776 s -> 0.926 s, sb-sprof: HASH-TABLE-COUNT is an out-of-line call and
+   %pcl-raw-coerce-check asks this twice per iteration on a raw number).  The
+   payload test is second — no call either.  The table read is LAST, where it
+   only runs for a box whose payload is object-shaped."
+  (or (not (p-box-p val))
+      (let ((v (p-box-value val)))
+        (or (null v) (stringp v) (numberp v) (eq v *p-undef*)))
+      (zerop (hash-table-count *p-overload-table*))))
+
 (defun p-find-overload (val op-str)
   "Return the use overload handler for VAL's class and OP-STR, or NIL.
    Checks the class directly, then walks @ISA for inherited overloads."
-  ;; use overload: fast path — non-boxes never have overloads
-  (when (p-box-p val)
+  ;; use overload: fast path — see %p-no-overload-possible-p above
+  (unless (%p-no-overload-possible-p val)
     (let ((cls (p-get-class val)))
       (when cls
         ;; Direct hit (common case)
@@ -2652,11 +2723,14 @@
         (to-number (%p-tie-fetch box inner))))
     (when (p-magic-cell-p inner)
       (return-from box-nv (to-number (funcall (p-magic-cell-getter inner))))))
-  ;; use overload "0+" (numify): call handler if registered for this class
-  (let ((handler (p-find-overload box "0+")))
-    (when handler
-      (return-from box-nv
-        (to-number (p-call-overload handler box nil nil)))))
+  ;; use overload "0+" (numify): call handler if registered for this class.
+  ;; Guarded by the inline negative test (#815) — this is the hottest single
+  ;; overload lookup in the runtime (every numification of a box reaches it).
+  (unless (%p-no-overload-possible-p box)
+    (let ((handler (p-find-overload box "0+")))
+      (when handler
+        (return-from box-nv
+          (to-number (p-call-overload handler box nil nil))))))
   (if (p-box-nv-ok box)
       (p-box-nv box)
       (let ((v (p-box-value box)))
@@ -2692,6 +2766,36 @@
                   (p-box-nv-ok box) t))
           n))))
 
+(defun %p-fixnum-string (n)
+  "Decimal text of the FIXNUM N, as a fresh (simple-array character (*)) —
+   the same string WRITE-TO-STRING returns, built by a digit loop instead of
+   through the printer.  Measured 3x faster (0.21 s -> 0.064 s for 2 M
+   conversions, s458ak), and integer stringification is everywhere: a numeric
+   hash key, \"$n\", print $n.  sb-sprof put it at 24 % of the `slices` bench
+   row alone, all of it in %output-integer-in-base and the string stream it
+   writes into.  Bignums keep the printer (its algorithm is better than a
+   repeated TRUNCATE for very large values)."
+  (declare (type fixnum n))
+  (if (zerop n)
+      "0"
+      (let* ((neg (minusp n))
+             (m (if neg (- n) n))          ; a bignum only for most-negative-fixnum
+             (d 0))
+        (declare (type (integer 0) m) (type fixnum d))
+        (let ((x m))
+          (loop while (> x 0) do (setf x (truncate x 10)) (incf d)))
+        (let* ((len (+ d (if neg 1 0)))
+               (s (make-string len)))
+          (when neg (setf (char s 0) #\-))
+          (let ((i (1- len)) (v m))
+            (loop
+             (multiple-value-bind (q r) (truncate v 10)
+               (setf (char s i) (code-char (+ 48 r)))
+               (setf v q)
+               (decf i)
+               (when (zerop v) (return)))))
+          s))))
+
 (defun stringify-value (v)
   "Convert a raw value to string"
   (cond
@@ -2699,6 +2803,7 @@
     ((eq v *p-undef*) "")
     ((null v) "")
     ((p-vstring-p v) (or (p-vstring-display v) (p-vstring-s v)))
+    ((typep v 'fixnum) (%p-fixnum-string v))
     ((integerp v) (write-to-string v))
     ((floatp v)
      ;; Format floats like Perl's %.15g (Gconvert)
@@ -2813,10 +2918,12 @@
       (return-from box-sv (to-string (funcall (p-magic-cell-getter inner))))))
   ;; use overload '""' (stringify): call handler if registered for this class.
   ;; Checked before cache because the handler result IS the string value.
-  (let ((handler (p-find-overload box "\"\"")))
-    (when handler
-      (return-from box-sv
-        (to-string (p-call-overload handler box nil nil)))))
+  ;; Guarded by the inline negative test (#815), like box-nv's.
+  (unless (%p-no-overload-possible-p box)
+    (let ((handler (p-find-overload box "\"\"")))
+      (when handler
+        (return-from box-sv
+          (to-string (p-call-overload handler box nil nil))))))
   (if (p-box-sv-ok box)
       (p-box-sv box)
       (let* ((inner (p-box-value box))
@@ -2954,7 +3061,8 @@
    A RAW (non-box) container is a bare @array/%hash used in boolean context, so
    it is true iff non-empty (`if(%h)`/`if(@a)` test element count)."
   ;; use overload "bool": check before unboxing so we have the class info
-  (when (p-box-p val)
+  ;; (inline negative test first — #815).
+  (unless (%p-no-overload-possible-p val)
     (let ((handler (p-find-overload val "bool")))
       (when handler
         (return-from %p-true-p-slow
@@ -3057,12 +3165,18 @@
 ;;; hand-written slow paths (- / % . <=> cmp), p-** and %def-overloaded-arith
 ;;; expand to exactly the code they used to spell.  A and B are evaluated more
 ;;; than once — pass variables (every use does).
+;;; The NEGATIVE test is inline here, not just inside p-find-overload (#815):
+;;; a plain-data binary op would otherwise still pay TWO full calls to learn
+;;; that neither operand is an object.  %p-no-overload-possible-p settles both
+;;; operands with a slot read in the overwhelmingly common case.
 (defmacro %with-binary-overload ((op-str a b) &body body)
-  `(let ((ha (p-find-overload ,a ,op-str)))
-     (if ha (p-call-overload ha ,a ,b nil)
-         (let ((hb (p-find-overload ,b ,op-str)))
-           (if hb (p-call-overload hb ,b ,a t)
-               (progn ,@body))))))
+  `(if (and (%p-no-overload-possible-p ,a) (%p-no-overload-possible-p ,b))
+       (progn ,@body)
+       (let ((ha (p-find-overload ,a ,op-str)))
+         (if ha (p-call-overload ha ,a ,b nil)
+             (let ((hb (p-find-overload ,b ,op-str)))
+               (if hb (p-call-overload hb ,b ,a t)
+                   (progn ,@body)))))))
 
 (defmacro %def-overloaded-arith (name op-str cl-op)
   (let ((slow (intern (concatenate 'string "%" (symbol-name name) "-SLOW") :pcl)))
@@ -4841,6 +4955,89 @@
 (push (lambda () (setf *p-raw-elems* (%p-raw-elems-default)))
       sb-ext:*init-hooks*)
 
+;;; ------------------------------------------------------------
+;;; Two predicates the list/array walkers ask PER ELEMENT.
+;;;
+;;; Both used to be defined LOWER DOWN in this file than their hottest
+;;; callers (the p-array-fill / %p-flatten-list walkers, and the marker arm
+;;; of %p-array-fill-item), which is exactly what stopped them being inlined:
+;;; SBCL inlines a structure predicate only where the DEFSTRUCT is already
+;;; known, and an ordinary defun only where an INLINE proclamation is already
+;;; in force.  Measured on the `arrfill` bench row (sb-sprof, s458ak):
+;;; p-flatten-marker-p 2.2 % and %p-hash-marker-p 2.7 % of the whole run, as
+;;; two full calls per ELEMENT that expand to a struct tag test and two EQs.
+;;; They live here now — above every caller — and cost nothing.
+;;; ------------------------------------------------------------
+
+;; Marker struct for flattened arrays in push/unshift
+(defstruct p-flatten-marker
+  "Marker indicating an array should be flattened when pushed/unshifted"
+  array)
+
+;;; %ENV and %INC are NOT hash tables: the runtime binds each to a MARKER
+;;; symbol, and every hash primitive has an arm that talks to the real process
+;;; environment / the %INC table instead.  "Is this value one of those
+;;; markers?" is asked from several places, and ONE predicate answers it
+;;; (rule 11) — the copies drifted once already: %p-symref-hash asked
+;;; `hash-table-p` alone and so REPLACED the %ENV marker with a fresh empty
+;;; table, i.e. `%{"main::ENV"}` destroyed the process environment for the
+;;; rest of the run (task #701).
+(declaim (inline %p-hash-marker-p))
+(defun %p-hash-marker-p (h)
+  "True when H is one of the runtime's marker symbols for a non-table hash."
+  (or (eq h '%ENV-MARKER%) (eq h '%INC-MARKER%)))
+
+;;; ------------------------------------------------------------
+;;; THE ELEMENT-STORAGE VECTOR (s458ak).
+;;;
+;;; Every Perl array PCL builds is `(make-array n :adjustable t
+;;; :fill-pointer k)`, i.e. an ARRAY HEADER whose data vector is a
+;;; SIMPLE-VECTOR at displacement 0.  SBCL cannot see that statically, so an
+;;; `aref` on one compiles to the generic hairy-data-vector dispatch — which
+;;; sb-sprof measured at 44 % of the whole `arrfill` bench row and 18 % of
+;;; `arrhash`, and which a hand-written copy loop beats 3.3× (0.099 s -> 0.030 s
+;;; for 1 M snapshots of a 21-element array, measured before the change).
+;;;
+;;; %P-VEC-DATA hands back that simple-vector so a hot loop can index it
+;;; directly.  CONTRACT, and it is on the CALLER:
+;;;   * bound the indices by (LENGTH V) — the FILL POINTER — never by the
+;;;     length of the data vector, which is the CAPACITY and is longer;
+;;;   * do not push/extend V while holding the data vector: growing it
+;;;     allocates a NEW one and the old is then stale;
+;;;   * NIL means "not that shape" (a list, a string, a displaced array, a
+;;;     specialised vector) and the caller must use its ordinary path — the
+;;;     answer is identical either way, so the fallback is a speed decision,
+;;;     never a semantic one.
+;;; ------------------------------------------------------------
+(declaim (inline %p-vec-data))
+(defun %p-vec-data (v)
+  "The SIMPLE-VECTOR holding V's elements, or NIL when V is not that shape."
+  (cond
+    ((simple-vector-p v) v)
+    ((and (sb-kernel:array-header-p v)
+          (not (sb-kernel::%array-displaced-p v))
+          (let ((d (sb-kernel:%array-data v)))
+            (and (simple-vector-p d) d))))
+    (t nil)))
+
+(declaim (inline %p-vpush))
+(defun %p-vpush (item arr)
+  "VECTOR-PUSH-EXTEND for a plain PCL element vector, returning ARR.
+   When the array has spare CAPACITY the append is a simple-vector write plus
+   a fill-pointer bump; a full array (and anything that is not the plain
+   shape) falls through to VECTOR-PUSH-EXTEND, which grows it.  Same element
+   in the same slot either way — the generic path's per-call widetag dispatch
+   was 18 % of the `arrfill` bench row (s458ak)."
+  (let ((d (and (array-has-fill-pointer-p arr) (%p-vec-data arr))))
+    (if d
+        (let ((fp (fill-pointer arr)))
+          (if (< fp (length d))
+              (progn (setf (svref d fp) item)
+                     (setf (fill-pointer arr) (1+ fp)))
+              (vector-push-extend item arr)))
+        (vector-push-extend item arr)))
+  arr)
+
 (declaim (inline %p-storable-raw))
 (defun %p-storable-raw (value)
   "The RAW value to park in an element slot for VALUE — or NIL when VALUE needs
@@ -4901,7 +5098,7 @@ per element."
    through — the gate alone decides."
   (let ((raw (%p-storable-raw item)))
     (when raw
-      (vector-push-extend raw arr)
+      (%p-vpush raw arr)
       (return-from %p-array-store-scalar arr)))
   (if (p-box-p item)
       (let ((inner (p-box-value item)))
@@ -4917,13 +5114,13 @@ per element."
           ((and (not (p-box-class item))
                 (or (numberp inner)
                     (and (stringp inner) (not (p-box-nv-ok item)))))
-           (vector-push-extend (make-p-box inner) arr))
+           (%p-vpush (make-p-box inner) arr))
           ;; Blessed box: preserve as-is (class must not be lost)
-          ((p-box-class item) (vector-push-extend item arr))
+          ((p-box-class item) (%p-vpush item arr))
           ;; Scalar/nested reference (box-in-box, e.g. \$x or \\$x): the depth of
           ;; box nesting encodes the reference type (SCALAR vs REF), so we must
           ;; NOT add or remove a box layer here.  Store the reference box as-is.
-          ((p-box-p inner) (vector-push-extend item arr))
+          ((p-box-p inner) (%p-vpush item arr))
           ;; Reference to a raw object (array-ref, hash-ref, code-ref, qr//; the
           ;; glob is the arm just below):
           ;; copy the scalar CONTAINER while keeping the SAME underlying object.
@@ -4940,18 +5137,18 @@ per element."
           ((p-typeglob-p inner)
            (let ((nb (make-p-box inner)))
              (setf (p-box-is-ref nb) (p-box-is-ref item))
-             (vector-push-extend nb arr)))
+             (%p-vpush nb arr)))
           ((or (and (vectorp inner) (not (stringp inner)))
                (hash-table-p inner)
                (functionp inner)
                (p-regex-match-p inner))
-           (vector-push-extend (make-p-box inner) arr))
+           (%p-vpush (make-p-box inner) arr))
           ;; Dualvar ($!/Scalar::Util::dualvar): copy keeping both halves.
           ((%p-dualvar-box-p item)
-           (vector-push-extend (%p-dualvar-copy item) arr))
+           (%p-vpush (%p-dualvar-copy item) arr))
           ;; Plain scalar box: copy into new box
-          (t (vector-push-extend (make-p-box inner) arr))))
-      (vector-push-extend (make-p-box item) arr)))
+          (t (%p-vpush (make-p-box inner) arr))))
+      (%p-vpush (make-p-box item) arr)))
 
 (defun %p-make-hash-entry (v)
   "Create a fresh entry box from V for storage in a hash, preserving bless class
@@ -4998,15 +5195,31 @@ per element."
    handles those steps.  Nested adjustable vectors are also snapshotted
    recursively so that e.g. @a = (1, @a, 2) works correctly."
   (cond
-    ;; Adjustable vector: copy element-by-element, recursing into nested ones
+    ;; Adjustable vector: copy element-by-element, recursing into nested ones.
+    ;; The length is known, so the fill pointer starts AT it and each slot is
+    ;; written by index — vector-push-extend would re-check capacity and bump
+    ;; the fill pointer once per element for a vector that can never grow here
+    ;; (measured: prepare-vector-push-extend was 4.6 % of the `arrfill` row).
     ((and (vectorp src) (not (stringp src)))
-     (let ((snap (make-array (length src) :adjustable t :fill-pointer 0)))
-       (loop for item across src
-             do (vector-push-extend
-                 (if (and (vectorp item) (not (stringp item)))
-                     (%p-snapshot-array-rhs item)
-                     item)
-                 snap))
+     (let* ((n (length src))
+            (snap (make-array n :adjustable t :fill-pointer n))
+            (sd (%p-vec-data src))
+            (dd (%p-vec-data snap)))
+       (if (and sd dd)
+           ;; Both sides are plain element-storage vectors and the copy never
+           ;; grows SNAP, so the whole loop is simple-vector indexing.
+           (dotimes (i n)
+             (let ((item (svref sd i)))
+               (setf (svref dd i)
+                     (if (and (vectorp item) (not (stringp item)))
+                         (%p-snapshot-array-rhs item)
+                         item))))
+           (dotimes (i n)
+             (let ((item (aref src i)))
+               (setf (aref snap i)
+                     (if (and (vectorp item) (not (stringp item)))
+                         (%p-snapshot-array-rhs item)
+                         item)))))
        snap))
     ;; CL list: recurse into nested vectors, leave other items as-is
     ((listp src)
@@ -5075,8 +5288,21 @@ per element."
                                (%p-array-store-scalar place v)))
                            src))
                  ((vectorp src)
-                  (loop for item across src
-                        do (%p-array-fill-item item place add-items)))
+                  ;; Index the element-storage vector directly when SRC is a
+                  ;; plain array that is NOT the array being filled: PLACE
+                  ;; grows under this loop and a growth reallocates its data
+                  ;; vector, so a hoisted pointer would go stale — for any
+                  ;; other SRC the two vectors are unrelated and the hoist is
+                  ;; exactly the same reads.
+                  (let ((sd (and (not (eq src place)) (%p-vec-data src)))
+                        (n (length src)))
+                    (if sd
+                        (dotimes (i n)
+                          (let ((item (svref sd i)))
+                            (%p-array-fill-item item place add-items)))
+                        (dotimes (i n)
+                          (let ((item (aref src i)))
+                            (%p-array-fill-item item place add-items))))))
                  ((listp src)
                   (loop for item in src
                         do (%p-array-fill-item item place add-items)))
@@ -6438,14 +6664,21 @@ per element."
          ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
          ;; use overload: check op-specific handler, then fallback to <=> or cmp.
          ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
+         ;; The FOUR lookups collapse to one inline slot read when neither
+         ;; operand can carry an overload (#815).
          (p-bool
-          (let ((ha (p-find-overload a ,op-str)))
+          (let ((ha (unless (and (%p-no-overload-possible-p a)
+                                 (%p-no-overload-possible-p b))
+                      (p-find-overload a ,op-str))))
             (if ha (p-true-p (p-call-overload ha a b nil))
-                (let ((hb (p-find-overload b ,op-str)))
+                (let ((hb (unless (%p-no-overload-possible-p b)
+                            (p-find-overload b ,op-str))))
                   (if hb (p-true-p (p-call-overload hb b a t))
                       ;; use overload fallback: derive from three-way if available
-                      (let ((fa (p-find-overload a ,fallback-op))
-                            (fb (p-find-overload b ,fallback-op)))
+                      (let ((fa (unless (%p-no-overload-possible-p a)
+                                  (p-find-overload a ,fallback-op)))
+                            (fb (unless (%p-no-overload-possible-p b)
+                                  (p-find-overload b ,fallback-op))))
                         (if (or fa fb)
                             (,cl-test (to-number (if fa
                                                      (p-call-overload fa a b nil)
@@ -6582,8 +6815,15 @@ per element."
             (if (> (- b a) #.(expt 2 61))
                 (error "panic: memory wrap")
                 (error "Out of memory during list extend")))
+          ;; Fill the result vector directly.  The old shape CONSED the whole
+          ;; range into a list and then COERCEd it — two passes and one cons
+          ;; per element for a result whose length is known up front (p-.. was
+          ;; 10 % of the `arrfill` bench row, s458ak).  Same simple-vector out.
           (if (<= a b)
-              (coerce (loop for i from a to b collect i) 'vector)
+              (let* ((n (1+ (- b a)))
+                     (v (make-array n)))
+                (dotimes (i n) (setf (svref v i) (+ a i)))
+                v)
               (make-array 0))))))
 
 (defun p-... (start end)
@@ -6732,12 +6972,17 @@ per element."
          ;; use overload: check op-specific handler, then fallback to cmp.
          ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
          (p-bool
-          (let ((ha (p-find-overload a ,op-str)))
+          (let ((ha (unless (and (%p-no-overload-possible-p a)
+                                 (%p-no-overload-possible-p b))
+                      (p-find-overload a ,op-str))))
             (if ha (p-true-p (p-call-overload ha a b nil))
-                (let ((hb (p-find-overload b ,op-str)))
+                (let ((hb (unless (%p-no-overload-possible-p b)
+                            (p-find-overload b ,op-str))))
                   (if hb (p-true-p (p-call-overload hb b a t))
-                      (let ((fa (p-find-overload a "cmp"))
-                            (fb (p-find-overload b "cmp")))
+                      (let ((fa (unless (%p-no-overload-possible-p a)
+                                  (p-find-overload a "cmp")))
+                            (fb (unless (%p-no-overload-possible-p b)
+                                  (p-find-overload b "cmp"))))
                         (if (or fa fb)
                             ;; use overload fallback: cmp returns -1/0/1, test against 0
                             (,cmp-test (to-number (if fa
@@ -7034,7 +7279,17 @@ per element."
   "Unbox an array element, preserving the box for reference types.
    Scalar types (number, string, undef) are unboxed for efficiency.
    Reference types (array/hash/code ref, scalar ref) keep their box so
-   that numeric comparison (== on refs) uses object-address, not array length."
+   that numeric comparison (== on refs) uses object-address, not array length.
+
+   RAW SLOT FAST ARM (s458ak): since the boxed-aggregates flip a slot most
+   often holds a bare number or string, and for those the general walk below
+   provably ends at its last arm — a number/string is not a vector-that-is-not-
+   a-string, not a hash table, not a function, not a box, and %p-dualvar-box-p
+   and p-typeglob-p both answer NIL for a non-box — so it returns V, which IS
+   ELEM.  Answering that up front skips two full calls per element read
+   (measured 3.1 % of the `arrhash` row)."
+  (when (or (numberp elem) (stringp elem))
+    (return-from p-aref-unbox-elem elem))
   (if (null elem)
       *p-undef*
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
@@ -7064,7 +7319,14 @@ per element."
    A slot holding a p-magic-cell is read through its GETTER, exactly as
    p-aref-unbox-elem reads one — the arm %! needs (task #561), and the one
    place values/each/gethash all funnel through, so value-level magic costs a
-   single dispatch rather than an arm at every hash chokepoint."
+   single dispatch rather than an arm at every hash chokepoint.
+
+   RAW SLOT FAST ARM (s458ak), the twin of p-aref-unbox-elem's: a bare number
+   or string reaches the general walk's last arm and comes back unchanged —
+   it is not a box (so neither the class test nor %p-dualvar-box-p can fire),
+   not a hash table, and not a non-string vector."
+  (when (or (numberp elem) (stringp elem))
+    (return-from %p-hash-unbox-elem elem))
   (if (null elem)
       *p-undef*
       (let ((v (if (p-box-p elem) (p-box-value elem) elem)))
@@ -7079,7 +7341,25 @@ per element."
 
 (defun p-aref (arr idx)
   "Perl array access (supports negative indices, works on vectors and lists).
-   Returns the VALUE (unboxed for scalars, box preserved for references)."
+   Returns the VALUE (unboxed for scalars, box preserved for references).
+
+   FAST ARM (s458ak): a bare vector container with a non-negative fixnum index
+   is the overwhelmingly common read, and it takes the general path's first
+   arm verbatim — ARR being a vector means `unbox` is the identity (a box is a
+   struct, never a vector) and it is neither *p-undef* nor a symbolic-ref
+   string; IDX being a non-negative fixnum means `(truncate (to-number idx))`
+   is IDX and no negative-index rebase applies.  Skipping those costs nothing
+   and saves two full calls plus a LENGTH per read (unbox 6.1 %, to-number +
+   %unary-truncate 3.4 % of the `arrhash` row).  Anything else — a boxed
+   container, a list, a string, a negative or non-fixnum index — falls through
+   to the general path below, unchanged."
+  (when (and (typep idx 'fixnum) (>= (the fixnum idx) 0)
+             (vectorp arr) (not (stringp arr)))
+    (return-from p-aref
+      (if (< (the fixnum idx) (length arr))
+          (let ((d (%p-vec-data arr)))
+            (p-aref-unbox-elem (if d (svref d idx) (aref arr idx))))
+          *p-undef*)))
   (let* ((a (unbox arr)))  ; Unbox if needed
     ;; If array is undef (from failed hash lookup etc), return undef
     (when (eq a *p-undef*)
@@ -7120,10 +7400,44 @@ per element."
           do (vector-push-extend nil a)))
   a)
 
+;;; THE ELEMENT WRITE RULE (docs/boxed-aggregates-design-s455.md §4.1), spelled
+;;; ONCE for both of (setf p-aref)'s entry paths: a slot holding a box is
+;;; written THROUGH it — that box may be someone's live alias — and a slot
+;;; holding a raw value or a hole takes the new value raw when it is
+;;; raw-storable, and otherwise gets a fresh box.
+(declaim (inline %p-aref-store))
+(defun %p-aref-store (a actual-idx value)
+  ;; The slot is already in range (the callers extend first), and nothing here
+  ;; grows A, so the element-storage vector is safe to index directly.
+  (let* ((d (%p-vec-data a))
+         (box (if d (svref d actual-idx) (aref a actual-idx))))
+    (if (p-box-p box)
+        (box-set box value)
+        (let ((raw (%p-storable-raw value)))
+          (cond
+            ((and raw d) (setf (svref d actual-idx) raw))
+            (raw (setf (aref a actual-idx) raw))
+            (t (let ((nb (make-p-box nil)))
+                 (if d
+                     (setf (svref d actual-idx) nb)
+                     (setf (aref a actual-idx) nb))
+                 (box-set nb value))))))))
+
 (defun (setf p-aref) (value arr idx)
   "Setf expander for p-aref - allows assignment to array elements.
    Auto-extends array if index is beyond current length (Perl semantics).
-   Stores values in boxes for l-value semantics. Returns the box."
+   Stores values in boxes for l-value semantics. Returns the box.
+
+   FAST ARM (s458ak), the write twin of p-aref's read arm: a bare vector
+   container with a non-negative fixnum index skips the `unbox` call, the
+   `to-number`/`truncate` coercion and the negative-index rebase, all of which
+   are provably identities in that case.  The stored value and the container
+   state are byte-identical to the general path — it is the SAME
+   %p-extend-to + %p-aref-store pair."
+  (when (and (typep idx 'fixnum) (>= (the fixnum idx) 0)
+             (vectorp arr) (not (stringp arr)))
+    (%p-extend-to arr idx)
+    (return-from p-aref (%p-aref-store arr idx value)))
   (let* ((a (unbox arr)))  ; unbox array refs ($arr[i][j] write-through)
     ;; A bare string is a SYMBOLIC array reference (@{$str}[i] = ... under
     ;; no-strict-refs), not a char-vector to overwrite — resolve to the package
@@ -7144,21 +7458,8 @@ per element."
           ;; never past the end of a read-only array — perl allows `$ro[0] = 9`
           ;; (in bounds) and dies on `$ro[5] = 9` (task #159).
           (%p-extend-to a actual-idx)
-          ;; THE WRITE RULE (docs/boxed-aggregates-design-s455.md §4.1).  A slot
-          ;; holding a box is written THROUGH it — that box may be someone's
-          ;; live alias.  A slot holding a raw value or a hole takes the new
-          ;; value raw when it is raw-storable, and otherwise gets a fresh box,
-          ;; which is what this arm has always done.
-          (let ((box (aref a actual-idx)))
-            (if (p-box-p box)
-                (box-set box value)
-                (let ((raw (%p-storable-raw value)))
-                  (if raw
-                      (setf (aref a actual-idx) raw)
-                      (progn
-                        (setf box (make-p-box nil))
-                        (setf (aref a actual-idx) box)
-                        (box-set box value)))))))
+          ;; THE WRITE RULE — %p-aref-store, shared with the fast arm above.
+          (%p-aref-store a actual-idx value))
         ;; Not a writable array.  A wrong-kind referent ($hashref->[0] = …) is
         ;; perl's fatal — the write used to be silently dropped.  Anything else
         ;; (nil/undef container, negative index past the front) keeps the old
@@ -7411,14 +7712,28 @@ accessor) would."
                      (box-set box new))))
     box))
 
+;;; BLESSING DOES NOT CHANGE ELEMENT ALIASING (task #841, probed 5.40.3
+;;; s458ak).  `sub w { $_[0] .= "!" } my $o = bless {k=>"v"}, "C";
+;;; w(@$o{"k"})` writes through in perl, and so does
+;;; `for my $v (@$o{"a","b"}) { $v .= "!" }` — a blessed hash is an ordinary
+;;; hash with a stash attached, and its ELEMENTS are ordinary lvalues.  The
+;;; two aliasing entry points below used to refuse a container carrying
+;;; :__class__ and hand back a detached copy instead, which was a SILENT
+;;; wrong (probed: PCL printed `v` where perl prints `v!`).
+;;;
+;;; The class key itself stays untouchable, and needs no guard to stay that
+;;; way: :__class__ is a KEYWORD and every Perl-level key arrives through
+;;; `to-string`, so no program can name it.  The array twins never had the
+;;; refusal — a blessed arrayref carries its class on the BOX, not in the
+;;; vector — which is why `@$ar[0]` already aliased.
 (defun %p-alias-helem (hash key)
   "Hash twin of %p-alias-aelem: one element of `@h{…}` / `values %h` as an
 ALIAS, falling back to p-gethash's value for containers that cannot hold a
-slot box (undef, %ENV/%INC markers, symbolic-ref strings, blessed objects).
+slot box (undef, %ENV/%INC markers, symbolic-ref strings).
 Spelled out rather than routed through p-gethash-argbox so that the hit path
 costs TWO hash lookups, not four — a hash slice pays this per element."
   (let ((h (unbox hash)))
-    (if (and (hash-table-p h) (not (gethash :__class__ h)))
+    (if (hash-table-p h)
         (let ((k (to-string key)))
           (or (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))
         (p-gethash hash key))))
@@ -7431,9 +7746,10 @@ alias creates the key.  p-gethash-box (the eager lvalue accessor) would
 create the key on a read-only call, which perl does not."
   (let ((h (unbox hash))
         (k (to-string key)))
-    (if (or (not (hash-table-p h)) (gethash :__class__ h))
-        ;; undef container / special markers / symbolic-ref strings / blessed:
-        ;; keep plain value semantics, no aliasing.
+    (if (not (hash-table-p h))
+        ;; undef container / special markers / symbolic-ref strings:
+        ;; keep plain value semantics, no aliasing.  A BLESSED hash is NOT in
+        ;; this set — see the note on %p-alias-helem above (task #841).
         (make-p-box (p-gethash hash key))
         (or (%p-hash-elem-cell h k) (%p-hash-defelem-box h k)))))
 
@@ -7519,11 +7835,6 @@ create the key on a read-only call, which perl does not."
             do (setf (gethash (to-string (aref args i)) h)
                      (if (< (1+ i) (length args)) (aref args (1+ i)) *p-undef*))))
     h))
-
-;; Marker struct for flattened arrays in push/unshift
-(defstruct p-flatten-marker
-  "Marker indicating an array should be flattened when pushed/unshifted"
-  array)
 
 (defun p-flatten (arr)
   "Mark an array for flattening in push/unshift.
@@ -7726,7 +8037,18 @@ create the key on a read-only call, which perl does not."
 (defun p-gethash (hash key)
   "Perl hash access. Special handling for %ENV and %INC.
    Returns the VALUE (unboxed if element is a box).
-   When hash unboxes to a string, treats as symbolic reference to %name."
+   When hash unboxes to a string, treats as symbolic reference to %name.
+
+   FAST ARM (s458ak): a bare hash table with a string key takes the
+   hash-table-p arm of the general dispatch below and nothing else — a hash
+   table is not a box (so `unbox` is the identity), is neither marker symbol,
+   and is not a string; a string key is its own `to-string`.  Saves two full
+   calls and four EQ/type tests per read (unbox + to-string were 9.3 % of the
+   `arrhash` row)."
+  (when (and (hash-table-p hash) (stringp key))
+    (return-from p-gethash
+      (multiple-value-bind (val found) (gethash key hash)
+        (if found (%p-hash-unbox-elem val) *p-undef*))))
   (let* ((h (unbox hash))
          (k (to-string key)))
     ;; If hash is undef (from failed lookup), return undef
@@ -7762,10 +8084,33 @@ create the key on a read-only call, which perl does not."
       (t (multiple-value-bind (val found) (gethash k h)
            (if (not found) *p-undef* (%p-hash-unbox-elem val)))))))
 
+;;; THE HASH ELEMENT WRITE RULE (docs/boxed-aggregates-design-s455.md §4.1),
+;;; the twin of %p-aref-store and — like it — spelled ONCE for every entry
+;;; path: an existing slot BOX is written through (it may be someone's live
+;;; alias); anything else takes the value raw when it is raw-storable, and
+;;; otherwise gets a fresh box.
+(declaim (inline %p-gethash-store))
+(defun %p-gethash-store (h k value)
+  (multiple-value-bind (existing found) (gethash k h)
+    (if (and found (p-box-p existing))
+        (box-set existing value)
+        (let ((raw (%p-storable-raw value)))
+          (if raw
+              (setf (gethash k h) raw)
+              (let ((box (make-p-box nil)))
+                (setf (gethash k h) box)
+                (box-set box value)))))))
+
 (defun (setf p-gethash) (value hash key)
   "Setf expander for p-gethash - allows assignment to hash elements.
    Special handling for %ENV and %INC.
-   Stores values in boxes for l-value semantics. Returns the box."
+   Stores values in boxes for l-value semantics. Returns the box.
+
+   FAST ARM (s458ak), the write twin of p-gethash's read arm: a bare hash
+   table with a string key can only be the hash-table-p case, where `unbox`
+   and `to-string` are both identities."
+  (when (and (hash-table-p hash) (stringp key))
+    (return-from p-gethash (%p-gethash-store hash key value)))
   (let* ((h (unbox hash))
          (k (to-string key)))
     (cond
@@ -7781,44 +8126,12 @@ create the key on a read-only call, which perl does not."
              (box (make-p-box nil)))
          (setf (gethash k sym-h) box)
          (box-set box value)))
-      ((hash-table-p h)
-       ;; THE WRITE RULE (docs/boxed-aggregates-design-s455.md §4.1), the hash
-       ;; twin of (setf p-aref)'s: an existing slot BOX is written through (it
-       ;; may be someone's live alias); anything else takes the value raw when
-       ;; it is raw-storable, and otherwise gets a fresh box.
-       (multiple-value-bind (existing found) (gethash k h)
-         (if (and found (p-box-p existing))
-             (box-set existing value)
-             (let ((raw (%p-storable-raw value)))
-               (if raw
-                   (setf (gethash k h) raw)
-                   (let ((box (make-p-box nil)))
-                     (setf (gethash k h) box)
-                     (box-set box value)))))))
+      ;; THE WRITE RULE — %p-gethash-store, shared with the fast arm above.
+      ((hash-table-p h) (%p-gethash-store h k value))
       ((%p-wrong-referent-p "HASH" h) (%p-not-a-ref "HASH"))
       ;; Other non-hash values (a p-box representation layer) keep the previous
       ;; path — see the note in p-gethash.
-      (t (multiple-value-bind (existing found) (gethash k h)
-           (if (and found (p-box-p existing))
-               (box-set existing value)
-               (let ((raw (%p-storable-raw value)))
-                 (if raw
-                     (setf (gethash k h) raw)
-                     (let ((box (make-p-box nil)))
-                       (setf (gethash k h) box)
-                       (box-set box value))))))))))
-
-;;; %ENV and %INC are NOT hash tables: the runtime binds each to a MARKER
-;;; symbol, and every hash primitive has an arm that talks to the real process
-;;; environment / the %INC table instead.  "Is this value one of those
-;;; markers?" is asked from several places, and ONE predicate answers it
-;;; (rule 11) — the copies drifted once already: %p-symref-hash asked
-;;; `hash-table-p` alone and so REPLACED the %ENV marker with a fresh empty
-;;; table, i.e. `%{"main::ENV"}` destroyed the process environment for the
-;;; rest of the run (task #701).
-(defun %p-hash-marker-p (h)
-  "True when H is one of the runtime's marker symbols for a non-table hash."
-  (or (eq h '%ENV-MARKER%) (eq h '%INC-MARKER%)))
+      (t (%p-gethash-store h k value)))))
 
 (defun %p-marker-pairs (marker)
   "MARKER (%ENV / %INC) expanded to the flat KEY VALUE KEY VALUE … vector a
@@ -8141,46 +8454,48 @@ create the key on a read-only call, which perl does not."
    Copy positions (`my @c = @a[0,1]`, push, sort, list assign) unbox as they
    already do for a plain `@a`, which is the same shape.
    Handles individual indices, lists, and vectors (from range operator)."
-  (let ((flat-indices (%p-flatten-slice-args indices))
-        (result (make-array 0 :adjustable t :fill-pointer 0)))
+  (let* ((flat-indices (%p-flatten-slice-args indices))
+         ;; capacity known up front: growing from 0 reallocated the result
+         ;; vector once per element (15 % of the `slices` bench row, s458ak)
+         (result (make-array (length flat-indices) :adjustable t :fill-pointer 0)))
     (dolist (idx flat-indices result)
-      (vector-push-extend (%p-alias-aelem arr idx) result))))
+      (%p-vpush (%p-alias-aelem arr idx) result))))
 
 (defun p-hslice (hash &rest keys)
   "Perl hash slice @hash{keys} - returns a vector of the hash's own value
    slots as ALIASES (%p-alias-helem, the #818 sibling of p-aslice).
    Handles individual keys, lists, and vectors (from range operator).
    Strings are vectors in CL but must not be expanded into characters."
-  (let ((flat-keys (%p-flatten-slice-args keys))
-        (result (make-array 0 :adjustable t :fill-pointer 0)))
+  (let* ((flat-keys (%p-flatten-slice-args keys))
+         (result (make-array (length flat-keys) :adjustable t :fill-pointer 0)))
     (dolist (key flat-keys result)
-      (vector-push-extend (%p-alias-helem hash key) result))))
+      (%p-vpush (%p-alias-helem hash key) result))))
 
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
    Handles individual keys, lists, and vectors (from range operator).
    Strings are vectors in CL but must not be expanded into characters."
-  (let ((flat-keys (%p-flatten-slice-args keys))
-        (result (make-array 0 :adjustable t :fill-pointer 0)))
+  (let* ((flat-keys (%p-flatten-slice-args keys))
+         (result (make-array (* 2 (length flat-keys)) :adjustable t :fill-pointer 0)))
     (dolist (key flat-keys result)
       (let ((k (to-string key)))
-        (vector-push-extend k result)
+        (%p-vpush k result)
         ;; the VALUE half is an alias, like the plain slice's (probed: perl
         ;; writes through `for (%h{'a'}) { $_ = "K" }`); the key half is a copy
-        (vector-push-extend (%p-alias-helem hash k) result)))))
+        (%p-vpush (%p-alias-helem hash k) result)))))
 
 (defun p-kv-aslice (arr &rest indices)
   "Perl KV array slice %arr[indices] - returns vector of (index, value) pairs.
    Handles individual indices, lists, and vectors (e.g. from range operator).
    Repeated indices yield repeated pairs, matching Perl semantics."
-  (let ((flat-indices (%p-flatten-slice-args indices))
-        (result (make-array 0 :adjustable t :fill-pointer 0)))
+  (let* ((flat-indices (%p-flatten-slice-args indices))
+         (result (make-array (* 2 (length flat-indices)) :adjustable t :fill-pointer 0)))
     (dolist (idx flat-indices result)
       (let* ((i (truncate (to-number idx)))
              (i (if (< i 0) (max 0 (+ (length arr) i)) i)))
-        (vector-push-extend (make-p-box i) result)
+        (%p-vpush (make-p-box i) result)
         ;; VALUE half is an alias, the index half a copy (p-kv-hslice's rule)
-        (vector-push-extend (%p-alias-aelem arr i) result)))))
+        (%p-vpush (%p-alias-aelem arr i) result)))))
 
 (defun p-hash (&rest pairs)
   "Create a Perl hash from key-value pairs.

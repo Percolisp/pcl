@@ -625,6 +625,14 @@ What still COPIES:
   for exactly these, and must not be removed.
 - deref elements (`f($ref->{k})`) and prototype-`$`-imposed element args
   (extendable via the same argbox accessors if real code needs them).
+  **Probed and quantified s458ak (task #860)**: `sub w { $_[0] .= "!" }
+  my $h = {k=>"v"}; w($h->{k})` prints `v` where perl prints `v!`, and the
+  array twin `w($a->[0])` likewise — on plain AND blessed refs alike, so it is
+  NOT the (now-fixed) blessed-container question of #841.  The named spellings
+  `w($n{k})` / `w($na[0])` and the slice-through-a-ref `w(@$h{"k"})` are all
+  correct.  The cause is visible in the emission: the argument lowers to
+  `(p-gethash-deref …)` / `(p-aref-deref …)`, which return VALUES, so the
+  argbox/cell family is never reached.
 - `substr($_[0],…)` as an lvalue and 4-arg `substr` — the ARGUMENT arrives
   boxed, but the callee lowers substr's target as a value (task #209).
 

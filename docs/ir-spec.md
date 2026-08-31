@@ -340,6 +340,18 @@ like `p-aref`, so a raw value passes through unchanged.  KEYS are always copies
 `%h` in list context, `@h{…}`, `%h{…}` and a hash-assignment's list-context
 result is an alias.
 
+**BLESSING DOES NOT CHANGE ELEMENT ALIASING** (normative, s458ak, task #841).
+A blessed container is an ordinary container with a stash attached, and its
+ELEMENTS are ordinary lvalues: `w(@$obj{"k"})` and
+`for my $v (@$obj{'a','b'}) { $v .= "!" }` write through, exactly as they do
+for `{k=>…}`.  PCL records a hash's class in the reserved key `:__class__`,
+which is a CL keyword — no Perl-level key can name it, because every key
+arrives through `to-string` — so the class needs no guard at the aliasing
+sites and must not get one.  (A blessed ARRAY carries its class on the
+enclosing box rather than in the vector, so the array side never had the
+question.)  A port that keeps the class inside the container must make the
+same argument about its own class slot before aliasing elements.
+
 ### 2.5 References
 
 `(p-backslash X)` — Perl `\X` — returns a **box with `is-ref` = t** whose

@@ -53,7 +53,7 @@ counting loop), [`ir-spec.md`](ir-spec.md) §2.2 (the box/raw invariant).
 
 ## Contents
 
-* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
+* **Baselines** — [§0 whole-program vs perl](#0-whole-program-baseline-vs-perl-this-session) · [§0.1 re-measured, 2026-08-25](#01-re-measured-baseline-2026-08-25-after-62--the-73-first-cut) · [§0.2 re-measured, 2026-08-30 + the #680 m//g result](#02-re-measured-baseline-2026-08-30-round-12-perf-agent-s454ac) · [§0.2a the two load-suspect rows on a quiet box + the `symref` bisection](#02a-the-two-load-suspect-rows-re-measured-on-a-quiet-box-s456af) · [§0.2b after #758–#761 — both intloop rows beat perl](#02b-after-the-verdict-coverage-work-s456af-758761) · [§0.2c after the boxed-aggregates flip](#02c-after-the-boxed-aggregates-flip-s457ai-phases-03-task-816) · [§0.2d after the accessor-dispatch work](#02d-after-the-accessor-dispatch-work-s458ak-phase-4s-runtime-half) · [§0.5 headline results](#05-headline-results-what-the-experiments-proved)
 * **Verdict coverage** — [§13 the s453 review](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761) · [§13.1 all four shipped, s456af](#131-all-four-shipped-s456af-round-13--and-what-they-cost)
 * **Per category** — [§1 loops](#1-loops) · [§2 arithmetic](#2-arithmetic--operators--the-p--pipeline-is-already-at-the-sound-ceiling) · [§3 boxed accumulator](#3-boxed-accumulator--raw-slot-is-13-the-intloop-tax) · [§4 strings](#4-strings--fill-pointer-buffer-is-2400-the-single-biggest-win) · [§5 aggregates](#5-aggregates--the-value-box-is-not-the-cost-keys--lookups-are) · [§6 calls and recursion](#6-function-calls--recursion--already-winning-keep-it) · [§7 objects and dispatch](#7-object-handling--method-dispatch-is-15-a-plain-call-biggest-oo-lever) · [§8 I/O, regex, pack](#8-io--regex--pack--io-is-syscall-bound-the-other-two-re-parse-constants)
 * **Working with this catalogue** — [§9 reproduce or extend the experiments](#9-how-to-reproduce--extend-the-variant-experiments) · [§10 microbench → whole-program impact](#10-expected-wins--microbench-speedup--whole-program-impact) · [§11 before/after listings](#11-before--after--perl--current-cl--proposed-cl) · [§12 priority, win ÷ effort](#12-priority-by-measured-win--effort) · [§13 s453 verdict-coverage review, #758–#761](#13-s453-review--the-unclaimed-speed-is-in-verdict-coverage-not-new-shapes-probes-on-head-a2b2eb5-tasks-758761)
@@ -292,6 +292,73 @@ bind raw values and skip promotion entirely.  That is the same two-arm shape
 **Nothing already won regressed**: every counting/recursion row is within the
 7–10 % noise band this machine shows (measured by running the base twice), and
 four of them are nominally faster.
+
+### 0.2d After the ACCESSOR-DISPATCH work (s458ak, phase 4's runtime half)
+
+The §0.2c note said what was left in `arrhash`/`arrfill` "is the ACCESSOR
+dispatch, not the allocation".  This session profiled that claim and acted on
+it — RUNTIME ONLY, no emission change, so the corpus, the generation string
+and the three artifacts are untouched.  A/B on a quiet box in one sitting,
+both sides `perl tools/bench-exec.pl` best-of-5; the BASE column is a
+`git archive` of main at `8e38d79`.
+
+```
+bench          base pcl(s)  s458ak pcl(s)    base    s458ak
+intloop+=         0.0176       0.0174       0.27x    0.27x
+intloop=          0.0185       0.0185       0.29x    0.29x
+cfor              0.0269       0.0261       0.26x    0.25x
+arrhash           0.1624       0.0854       1.28x    0.67x   <- -47 %, TARGET (<=1.0x) MET
+fib(27)x          0.4178       0.4196       0.29x    0.29x
+gcdrec            0.0980       0.0942       0.53x    0.50x
+collatz           0.7765       0.7731       0.40x    0.40x
+strcat            0.0029       0.0037          —        —    (3 ms: noise-dominated)
+pack              4.5078       4.2968          —        —    -4.7 %  (#815)
+packunpk          4.6182       4.4649          —        —    -3.3 %  (#815)
+arrfill           0.1449       0.0719       3.09x    1.48x   <- -50 %
+slices            0.3437       0.2135       5.13x    3.18x   <- -38 %
+sliceasgn         0.0720       0.0554       2.78x    2.19x   <- -23 %
+ovlsub            0.1500       0.1329       3.76x    3.39x   <- -11 %  (#815)
+symref            0.2159       0.2160       9.76x    9.80x
+regexg            0.0001       0.0000          —        —
+```
+
+Plus, off the board: a **boxed** scalar accumulator (`my $s=0; my $r=\$s;
+for (1..5e6) { $s = $s + $_ }` — the escaping reference defeats the raw-slot
+verdict, so every write is a `box-set`) **0.2521 s → 0.1734 s, −31 %**
+(#811 + #815 together).
+
+**What sb-sprof actually blamed, and what each fix was.**  Six findings, in
+descending size; none of them was allocation.
+
+| finding | cost, where measured | fix |
+|---|---|---|
+| the generic `aref` on an adjustable vector | 44 % of `arrfill`, 18 % of `arrhash` | `%p-vec-data` hands back the backing SIMPLE-VECTOR so a hot loop indexes it directly (a hand copy loop beat `aref` 3.3×).  Used by `p-aref`, the element write rule, the array-fill walker and the RHS snapshot |
+| number → string | 24 % of `slices` (its hash keys are numbers) | `%p-fixnum-string`: a digit loop instead of the printer, **3× faster** (0.21 s → 0.064 s for 2 M conversions).  Everything numeric that is printed, interpolated or used as a hash key pays this |
+| the overload NEGATIVE path (#815) | 14 % of the `pack` loop | one inline predicate `%p-no-overload-possible-p`, asked AT THE CALL SITE by the seven hot askers, not only inside `p-find-overload` |
+| `box-set`'s store dispatch (#811) | 1.54× a plain slot write | a fast path for a raw scalar into an untied, unmagic, plain-valued box; `pos()`'s `remhash` only when `*p-match-pos*` is non-empty |
+| `vector-push-extend` | 18 % of `arrfill`, 15 % of `slices` | `%p-vpush` (write + fill-pointer bump when capacity allows) and preallocating the slice result to its known length instead of growing it from 0 |
+| two per-ELEMENT predicates compiled as full CALLS | 4.9 % of `arrfill` | `p-flatten-marker-p` and `%p-hash-marker-p` were DEFINED BELOW their hottest callers, so neither the struct predicate nor the `inline` proclamation was in force there.  Moving the definitions up is the whole fix |
+
+> **The ordering trap, worth more than any single fix.**  The first version of
+> `%p-no-overload-possible-p` asked "is the overload table empty?" FIRST,
+> reasoning that one slot read settles every program that never says
+> `use overload`.  It cost **`collatz` 19 %** (0.776 → 0.926 s, reproduced in
+> three runs), because `HASH-TABLE-COUNT` is an out-of-line call and
+> `%pcl-raw-coerce-check` asks the predicate twice per iteration on a RAW
+> number — where the predecessor exited on a single `p-box-p` test.  Reordered
+> (box test → payload test → table read), `collatz` is back to 0.773 s.  A
+> "cheap global short-circuit" is only cheap if it is cheaper than the test it
+> jumped in front of; sb-sprof said so in one run.
+
+**Still open on this axis**, both re-sized by measurement in the same session
+(task **#862**): the design's phase-4 EMISSION arms.  The read-only verdict for
+a `foreach`-LIST loop variable is worth ~40 % of a read-only foreach
+(a 30 M-iteration read loop over a 1000-element array runs in ~0.48 s where the
+never-promoting index spelling runs in ~0.29 s; perl 0.616 s / 0.708 s) and
+also closes #810.  The slice COPY-position arm is now the SMALLER prize:
+after this session `slices` no longer shows `make-p-box` or the promotion arm
+anywhere in its top 19 — the remainder is equal-hash lookups (21 %) and
+`p-array-fill`'s own construction.
 
 ---
 
