@@ -34,7 +34,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 2;
+plan tests => 4;
 
 sub run_cl {
     my ($code) = @_;
@@ -77,3 +77,59 @@ print "\n";
 PL
 is(run_cl($LAX_CASES), "11111111111111110000000000000\n",
    "is_lax: the sixteen lax spellings pass, the thirteen non-versions fail");
+
+# --------------------------------------------------------------------------
+# Task #870: a version is a TUPLE OF INTEGER COMPONENTS, not a string and not
+# a number.  vcmp used to be `$a cmp $b`, which made `$] < version->new(
+# '5.14.0')` TRUE ("5.030000" lt "5.14.0" as text, while v5.30.0 gt v5.14.0)
+# and every `$version >= 5.010` idiom in CPAN code silently wrong.
+#
+# Every expectation below is the REAL `version::` module's answer (perl
+# 5.40.3), taken from a 3864-check run over 56 version strings covering all
+# four spellings (decimal / dotted / leading-v / alpha) in both directions.
+
+my $TUPLE_CASES = <<'PL';
+require version;
+my @out;
+for my $t (qw(5 5.005 5.005_03 1.2 1.02 1.0203 v1.2 v1.2.3 1.2.3 1.2.3.4
+              v5.14.0 5.030000 0.9933 v1.2_3 1.2.3_4 v2)) {
+  my $v = version->new($t);
+  push @out, $v->numify . "|" . $v->normal . "|" . ($v->is_qv ? 1 : 0) . ($v->is_alpha ? 1 : 0);
+}
+print join(" ", @out), "\n";
+PL
+is(run_cl($TUPLE_CASES),
+   "5.000|v5.0.0|00 5.005|v5.5.0|00 5.005030|v5.5.30|01 1.200|v1.200.0|00 "
+   . "1.020|v1.20.0|00 1.020300|v1.20.300|00 1.002000|v1.2.0|10 "
+   . "1.002003|v1.2.3|10 1.002003|v1.2.3|10 1.002003004|v1.2.3.4|10 "
+   . "5.014000|v5.14.0|10 5.030000|v5.30.0|00 0.993300|v0.993.300|00 "
+   . "1.023000|v1.23.0|11 1.002034|v1.2.34|11 2.000000|v2.0.0|10\n",
+   "numify/normal/is_qv/is_alpha: a decimal fraction cuts into 3-digit groups, "
+   . "a dotted version pads to three components, and `_` is REMOVED (not a separator)");
+
+# The comparison matrix, plus the two spellings the bug was reported through:
+# a plain decimal STRING on the LEFT (the swapped overload call) and `$]`.
+# The `$]` row is written so it holds for any perl >= 5.6 — PCL reports
+# 5.030000 and this perl 5.040003 (task #871), and this row is about vcmp.
+my $CMP_CASES = <<'PL';
+require version;
+my @s = ('5.030000','5.14.0','v5.14.0','5.005','v5.5.0','1.2','v1.200.0','1.02','0');
+my @rows;
+for my $a (@s) {
+  my $r = '';
+  for my $b (@s) { $r .= version->new($a) <=> version->new($b) }
+  push @rows, $r;
+}
+print join(" ", @rows), "\n";
+print "str ", (("5.030000" < version->new('5.14.0')) ? 1 : 0),
+              (("5.030000" >= version->new('5.30.0')) ? 1 : 0),
+              ("5.030000" <=> version->new('5.14.0')), "\n";
+print "dol ", (($] >= version->new('5.6.0')) ? 1 : 0),
+              (($] < version->new('99.0.0')) ? 1 : 0), "\n";
+PL
+is(run_cl($CMP_CASES),
+   "011111111 -100111111 -100111111 -1-1-1001111 -1-1-1001111 -1-1-1-1-10011 "
+   . "-1-1-1-1-10011 -1-1-1-1-1-1-101 -1-1-1-1-1-1-1-10\n"
+   . "str 011\n"
+   . "dol 11\n",
+   "vcmp is componentwise (5.030000 == v5.30.0 > v5.14.0), in BOTH operand orders");

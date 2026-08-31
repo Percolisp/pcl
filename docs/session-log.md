@@ -4,6 +4,73 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 459an (2026-08-31, Opus agent AN, round 16) — a version is a TUPLE (#870); `\` is not a deref cast (#861)
+
+Two silent-wrongs closed, three filed.  Base `e9296cb`; gen **v2-510**.
+
+**#870 — `lib/version.pm`'s `vcmp` was `$a cmp $b`.**  A version is neither a
+string nor a number: it is a tuple of integer components, and `<=>` / `cmp` /
+`numify` / `normal` / `is_qv` / `is_alpha` all read that one tuple.  A DECIMAL
+string cuts its fraction into 3-digit groups right-padded with zeros (1.2 is
+v1.200.0); a DOTTED one — a leading `v`, or two or more dots — splits on the
+dots and pads to three components; missing components compare 0.  The one rule
+I had to MEASURE rather than guess is the alpha `_`: it is simply REMOVED on
+both paths, and the plausible "it separates components in the dotted form" is
+wrong by 24 rows (`v1.2_3` is v1.23.0).  Built an oracle from the REAL
+`version::` — 56 strings × numify/stringify/normal + every pairwise `<=>` +
+both operand orders against plain scalars = **3864 checks, 0 mismatches under
+perl AND under PCL**.  The task's four probe lines and the real
+`experimental.pm`'s two croak messages are now byte-identical to perl.
+
+**#861 — `\` was being spliced away with a cast run.**  PPI tags `\`
+`PPI::Token::Cast` exactly like the sigils, so `_cast_run_start` walked over
+it and `\$$h{k}` arrived at the subscript builder as a TWO-cast run.  That
+took the #305 widened path, which accounts for the whole run and splices it —
+the `\` included.  The emission held no `p-backslash` at all: `\$$h{k}`,
+`\${$h}{k}`, `\$$a[0]`, `\${$a}[0]` and `\$$d{x}[0]{y}` produced the element's
+VALUE, so the "reference" was not one (`ref` empty) and the write through it
+went nowhere — silent wrong twice over.  The arrow spellings were always right
+because an arrow supplies the access kind and the `\` never joins the run.
+The fix is ONE line in the ONE shared helper both cast-consuming sites read
+(`\` ends the run), with NO `$end_pars` / `_reduce_term` change — the region
+prohibition in `docs/pexpr-term-parsing-review.md` does not apply, because the
+grammar it states (`cast := $ @ % & *`) is exactly the rule being restored.
+
+**Bars.**  Gate `tools/prove-core` **190 files / 6390 rows PASS** (worktree, xs
+skipped; +7 = my new rows).  Sweep `--jobs 8`: **GATE clean, TOTAL passing
+18340 (+0), drops 5 = census (+0)**.  corpus-diff **identical over 111 + 6
+shapes**; emission A/B vs HEAD **SAME over perl's own t/ (605 files) and the 22
+lib shims, RCDIFF 0**.  Companion leg for the `lib/` change — the five files
+that reach `version` (op/packagev.t, comp/use.t, op/sprintf.t, op/universal.t,
+run/locale.t) — **byte-identical to their snapshot rows, zero movers**.  Both
+guards inverse-verified (base answers differ on every field; rows 19–22 of
+`lvalue-ref-01.t` fail at base and row 23, the non-regression shapes, passes on
+both sides).  Three artifacts regenerated: each differs by exactly the gen
+stamp, which is itself evidence the compiler change is emission-neutral there.
+
+**Filed, all PRE-EXISTING and all outside this agent's region.**  **#890**: the
+raw-numeric B-regime freeze DIES on an overloaded object that came from a
+MODULE.  `_overload_in_file` is a TEXTUAL scan of *this* file for `use
+overload`, so an overloaded object built inline is safe and one from a module
+is not — `my $w = version->new('5.30.0'); $] >= $w` kills the program where
+perl runs it.  It is what blocked #870's own written bar (the corpus run needs
+`PCL_NO_RAW_VERDICT=1`), and it is FATAL, not silent.  Dates to `ec95f50`, not
+round 15.  **#891**: `($x,$y) = ($y,$x)` loses the swap when the values are
+REFERENCES — 270 of my 3864 checks, all in the swapped direction, all
+answering 0.  `p-list-=` binds its RHS through `%p-flatten-list` where
+`p-array-=`/`p-hash-=` use `%p-assign-snapshot-vector`, and
+`%p-assign-snapshot` deliberately keeps the LIVE box for a reference, so even
+routing it there would not be enough — the reference arms need the fresh-box
+treatment the typeglob arm already has for the identical `($g1,$g2)=($g2,$g1)`
+reason (#423).  The plain-scalar swap is correct, which is exactly how it
+hid.  `lib/version.pm` was written in perl's own non-swapping idiom instead.
+**#892**: `\` does not distribute over a SLICE (`\@A[0,1]` is one ref where
+perl gives one per element) — independent of #861, since the cast-free named
+spelling is wrong identically; #861 moved the `@$ref[…]` spelling from "one
+ARRAY ref" into that same family.
+
+---
+
 ## Session 459am (2026-08-31, Opus round 16, agent AM) — #862 ARM A: the READ-ONLY foreach binds the slot as it stands (0.71× → 0.47×); #814's regexg row was measuring a CRASH; #880 `p-str-x`
 
 Three tasks, and the second one turned out not to be the bug it was filed as.

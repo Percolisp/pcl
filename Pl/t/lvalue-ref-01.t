@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 18;
+plan tests => 23;
 
 sub run_cl {
     my ($code) = @_;
@@ -123,3 +123,50 @@ test_cl('for(substr) positive-start to-end tracks appended text',
 test_cl('for(substr) negative start re-anchors from end',
     q{my $x="abcdef"; for (substr($x,-5)) { $_="XX"; $x.="z"; print "$_\n" }},
     "Xz\n");
+
+# --- \ + a SIGIL-DEREF carrying a subscript (task #861) -------------------
+# The same "backslashed a COPY" failure as \substr above, arriving by a
+# different route: PPI tags `\` as a PPI::Token::Cast exactly like the
+# sigils, so `\$$h{k}` reached the subscript builder as a TWO-cast run.
+# That sent it down the #305 widened path, which then spliced the WHOLE run
+# away -- the `\` included.  The emission held no p-backslash at all, so the
+# "reference" was the element's VALUE and the write through it was lost.
+# `\` is not a deref: the term grammar is `cast* primary postfix*` with
+# `cast := $ @ % & *`, and `\$$h{k}` is `\( ${$h}{k} )` -- the very thing
+# `\$h->{k}` is, which is why the arrow spellings were always right.
+like(transpile('my $h={}; my $r = \$$h{k};'),
+    qr/\(p-backslash \(p-gethash-deref-box /,
+    '\\$$h{k} compiles to (p-backslash (p-gethash-deref-box ...))');
+like(transpile('my $a=[]; my $r = \${$a}[0];'),
+    qr/\(p-backslash \(p-aref-deref-box /,
+    '\\${$a}[0] compiles to (p-backslash (p-aref-deref-box ...))');
+test_cl('\\ + sigil-deref-with-subscript takes a REAL reference, all four spellings',
+    q{my $h={k=>"v"}; my $a=["z"];
+      my $r1 = \$$h{k};   $$r1 = "W1";
+      my $r2 = \${$h}{k}; $$r2 = "W2";
+      my $r3 = \$$a[0];   $$r3 = "W3";
+      my $r4 = \${$a}[0]; $$r4 = "W4";
+      print join("|", ref($r1), ref($r2), ref($r3), ref($r4)), "\n";
+      print join("|", $h->{k}, $a->[0]), "\n";},
+    "SCALAR|SCALAR|SCALAR|SCALAR\nW2|W4\n");
+# The arrow and named twins, and a chained subscript, must answer the same.
+test_cl('\\ arrow / named / chained twins agree with the deref spellings',
+    q{my %n=(k=>"v"); my @m=("z"); my $h={k=>"v"}; my $a=["z"];
+      my $d = { x => [ { y => "Y" } ] };
+      my $r5 = \$h->{k};      $$r5 = "W5";
+      my $r6 = \$a->[0];      $$r6 = "W6";
+      my $r7 = \$n{k};        $$r7 = "W7";
+      my $r8 = \$m[0];        $$r8 = "W8";
+      my $r9 = \$$d{x}[0]{y}; $$r9 = "W9";
+      print join("|", $h->{k}, $a->[0], $n{k}, $m[0], $d->{x}[0]{y}), "\n";},
+    "W5|W6|W7|W8|W9\n");
+# The multi-cast deref runs the #305 path exists for must NOT move: a `\`
+# stops the run, every sigil still continues it.
+test_cl('multi-cast deref runs are unchanged by the \\ stop',
+    q{my %H=(a=>1,b=>2); my @A=(10,20,30);
+      my $h=\%H; my $a=\@A; my $hh=\$h; my $aa=\$a;
+      print join("|", $$h{a}, $$a[1], $$$hh{a}, $$$aa[2]), "\n";
+      print join("|", join(",",@$a[0,1]), join(",",@$h{qw(a b)}),
+                      join(",",@$$aa[0,1]), join(",",@$$hh{qw(a b)})), "\n";
+      print join("|", $$hh->{a}, $$aa->[0], ${$h}{a}, ${$a}[0]), "\n";},
+    "1|20|1|30\n10,20|1,2|10,20|1,2\n1|10|1|10\n");

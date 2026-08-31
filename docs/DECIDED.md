@@ -21,6 +21,50 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s459an (2026-08-31, Opus agent AN, round 16) — a version is a TUPLE; `\` is not a deref cast
+
+- **A version is a TUPLE OF INTEGER COMPONENTS — never a string, never a
+  number (#870, `lib/version.pm`).**  `vcmp` was `$a cmp $b`, so
+  `$] < version->new('5.14.0')` was TRUE ("5.030000" lt "5.14.0" as text while
+  v5.30.0 gt v5.14.0) and every `$version >= 5.010` idiom in CPAN code was
+  silently wrong.  ONE parse (`_parse`) now feeds `vcmp` / `numify` / `normal`
+  / `is_qv` / `is_alpha`: a DECIMAL string cuts its fraction into 3-digit
+  groups right-padded with zeros (1.2 is v1.200.0, 1.02 is v1.20.0), a DOTTED
+  one (leading `v`, or two or more dots) splits on the dots and pads to three
+  components, missing components compare as 0.  **An `_` is REMOVED on both
+  paths** — the plausible reading, that it separates components in the dotted
+  form, is WRONG by 24 measured rows (`v1.2_3` is v1.23.0, not v1.2.3).
+  Validated at 3864 checks over 56 version strings against the REAL
+  `version::` (perl 5.40.3), under perl AND under PCL; the real
+  `experimental.pm`'s two croak messages now match perl byte for byte.  Guard
+  `Pl/t/version-shim-01.t` (2 → 4 rows).
+- **`\` STOPS a cast run — it is not a deref (#861, `Pl::PExpr::_cast_run_start`).**
+  PPI tags `\` `PPI::Token::Cast` like the sigils, but the term grammar is
+  `cast* primary postfix*` with `cast := $ @ % & *`
+  (`docs/pexpr-term-parsing-review.md`), and `\` is a prefix OPERATOR over the
+  whole reduced term: `\$$h{k}` IS `\( ${$h}{k} )`, the same thing
+  `\$h->{k}` is.  Walking over it made the run two casts long, which sent the
+  subscript down the #305 widened path and then **spliced the `\` away with
+  the rest of the run** — `\$$h{k}`, `\${$h}{k}`, `\$$a[0]`, `\${$a}[0]` and
+  `\$$d{x}[0]{y}` emitted the element's VALUE with no `p-backslash` at all, so
+  the "reference" was not one and the write through it vanished.  ONE line in
+  the ONE shared helper both cast-consuming sites read; NO `$end_pars` /
+  `_reduce_term` change.  Emission-IDENTICAL over corpus (111) + shapes (6) +
+  perl's own t/ (605) + lib (22), and the shape occurs in NO population, so
+  probes + guard rows are the bar (s371).  Guard `Pl/t/lvalue-ref-01.t`
+  (18 → 23), inverse-verified.
+- Filed from the probes, all PRE-EXISTING and all outside this agent's region:
+  **#890** (the raw-numeric B-regime freeze DIES on an overloaded object that
+  came from a MODULE — `_overload_in_file` is a TEXTUAL scan of this file
+  only, so `my $w = version->new(…); $] >= $w` kills the program where perl
+  runs it; dates to `ec95f50`, not round 15), **#891** (`($x,$y) = ($y,$x)`
+  loses the swap when the values are REFERENCES — `p-list-=` uses
+  `%p-flatten-list` where its aggregate siblings use
+  `%p-assign-snapshot-vector`, and the snapshot deliberately keeps the LIVE
+  box for a ref; the plain-scalar swap is correct, which is why it hid),
+  **#892** (`\` does not DISTRIBUTE over a slice: `\@A[0,1]` answers one ref
+  where perl answers one per element — independent of #861, it hits the
+  cast-free named spelling identically).
 ## s459am (2026-08-31, Opus round 16, agent AM) — #862 ARM A (the read-only foreach), #814's regexg row was measuring a CRASH, #880
 
 - **A READ-ONLY `for my $v (LIST)` binds the slot AS IT STANDS — `p-foreach-raw`,

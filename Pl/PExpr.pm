@@ -308,16 +308,29 @@ sub _is_zero_arg_func {
            $self->environment->get_prototype($name));
 }
 
-# The maximal run of Cast tokens immediately before position $p in @$e.
+# The maximal run of DEREF Cast tokens immediately before position $p in @$e.
 # Returns the index of the FIRST (outermost) cast, or $p itself when the
-# token before $p is not a Cast.  The caller takes @$e[$start .. $p-1] as the
-# casts and splices that same span.  See the "THE CAST RUN (#305)" comment at
-# the Case 0-3 dispatch for what the run means; both cast-consuming sites
-# read it through this ONE helper.
+# token before $p is not a deref cast.  The caller takes @$e[$start .. $p-1]
+# as the casts and splices that same span.  See the "THE CAST RUN (#305)"
+# comment at the Case 0-3 dispatch for what the run means; both
+# cast-consuming sites read it through this ONE helper.
+#
+# `\` STOPS THE RUN (#861).  PPI tags it PPI::Token::Cast like the sigils,
+# but it is not a deref: the term grammar is `cast* primary postfix*` with
+# `cast := $ @ % & *` (docs/pexpr-term-parsing-review.md), and `\` is a
+# prefix OPERATOR that takes the whole reduced term — `\$$h{k}` is
+# `\( ${$h}{k} )`, the same thing `\$h->{k}` is.  Walking over it made the
+# run two casts long, which sent the subscript down the #305 widened path
+# and then SPLICED THE `\` AWAY with the rest of the run: `\$$h{k}`,
+# `\${$h}{k}`, `\$$a[0]` and `\${$a}[0]` all emitted the element's VALUE
+# with no p-backslash at all, so the "reference" was not one and the write
+# through it went nowhere — silent wrong twice over.
 sub _cast_run_start {
   my ($self, $e, $p) = @_;
   my $s = $p;
-  $s-- while $s >= 1 && ref($e->[$s-1]) eq 'PPI::Token::Cast';
+  $s-- while $s >= 1
+          && ref($e->[$s-1]) eq 'PPI::Token::Cast'
+          && $e->[$s-1]->content ne '\\';
   return $s;
 }
 
