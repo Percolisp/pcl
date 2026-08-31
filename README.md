@@ -168,8 +168,8 @@ Method dispatch (`ovlsub`, 3.31×) and symbolic references (`symref`,
 `${'name'}`, 9.94×) both resolve a name at runtime through a string-keyed
 lookup that no compiler can predict ahead of time, and perl's C
 implementation is currently faster at it than PCL's.  `m//g` in a loop
-(`regexg`, 2.14×) is slower for a different reason: PCL runs SBCL's own Lisp
-regex engine, not perl's hand-tuned C one.
+(`regexg`, 2.14×) is slower for a different reason: PCL runs a regex engine
+written in Lisp (cl-ppcre), not perl's hand-tuned C one.
 
 **`pack`/`unpack` (~1300×) is a known open item, not a representative
 number.**  PCL's `pack`/`unpack` is itself Perl transpiled by PCL, kept
