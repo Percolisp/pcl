@@ -4,6 +4,54 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 459f part 2 (2026-08-31, Fable) — ROUND 16 MERGED: the read-only foreach beats perl at 0.46×, a version is a tuple, `\` is not a deref cast; gen v2-510
+
+Both round-16 agents reviewed and merged in finish order (AM `4335e2e` ff;
+AN rebased over the Sonnet README commit → `f4af1fc`), plus the
+user-requested Sonnet README job (`fd80583`, per-distro SBCL guidance from
+the #876 first-run fact).
+
+1. **AM review**: read the full diff; my own 11-probe battery vs perl on
+   its worktree — 10/11 byte-identical (write revocation in every spelling,
+   @_-writing callees both orders, refs/blessed keep identity through the
+   raw arm; the 1 DIFF is #810's literal-list read-only half, confirmed
+   pre-existing on base and correctly left open).  `PCL_OPT=-foreach-raw`
+   and `=none` legs identical.  **ARM B CLOSED, ratified** (#882): `slices`
+   3.02×→3.06× around ARM A — the remainder is not a boxing question.
+2. **AN review**: 11 more probes — #861's six spellings all SAME
+   (incl. chained `\$$d{x}[0]{y}` and the `$$h{k}`/`$$$x` non-regression),
+   #870 inverse-verified (old main gives exactly the filed wrong answers
+   `a:1 b:0 c:-1 n:5.14`; AN's tree matches perl byte-for-byte — probed
+   under `PCL_OPT=-raw-numeric` because **#890**, the raw-numeric freeze on
+   a module-provided overloaded object, blocks the plain spelling on BOTH
+   trees), #875's 81-key parity SAME, #874's two announcements carry
+   file/line + the deliberate-choice sentence + the not-supported pointer.
+   Its two filed silent-wrongs reproduced live and confirmed PRE-EXISTING
+   on main: **#890** (fatal) and **#891** (`($x,$y)=($y,$x)` with refs
+   gives 22, perl 21).
+3. **The owed baseline splice verified by my own run**:
+   re/pat_advanced.t 673/223 → **951/729, drops 0** (single-file suite run,
+   900 s allowance) — #872's round-15 move, quick-capped until now;
+   spliced with cause (`4359d69`).
+4. **Combined tree legs**: cold gate (fresh temp core) 191/6441 with
+   exactly the 13 known pclxs xs rows failing — proven xs-ONLY by a second
+   full gate with `PCLXS_DIR=/nonexistent`: **PASS 191/6427**.  Both
+   agents' own full sweeps: GATE clean, TOTAL 18340 (+0), drops 5 = census.
+   Bench re-measured on merged main: **feread 0.46×** (the ARM A headline),
+   regexg honest 2.18×, all won rows held (intloop+= 0.29× / intloop=
+   0.28× / cfor 0.24× / arrhash 0.66× / arrfill 1.48×); pack ~1040× is the
+   long-standing #74 posture, unmoved.
+5. Closed #862-ARM-A/#814/#880 (AM), #870/#861/#874/#875 (AN), #882
+   (ratified), #876/#282-container (part 1).  Filed #881/#883 (AM),
+   #890/#891/#892 (AN); #873 pending with its sizing (the write family is
+   THREE spellings, not the whole modify set).  Generation **v2-510** =
+   AN's, artifacts regenerated on the combined tree.  **Next round
+   candidates: #891 (live silent-wrong) + #890 (fatal, blocks version.pm
+   users under raw-numeric) head the filler pool; #873 is now
+   one-predicate-sized; #862's E2c′ remains.**
+
+---
+
 ## Session 459an (2026-08-31, Opus agent AN, round 16) — a version is a TUPLE (#870); `\` is not a deref cast (#861)
 
 Two silent-wrongs closed, three filed.  Base `e9296cb`; gen **v2-510**.
