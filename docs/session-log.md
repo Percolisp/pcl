@@ -4,6 +4,62 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 455f (2026-08-31, Fable) — ROUND 15 MERGED: **arrhash BEATS perl (0.67×)** — the aggregate-parity target met; the real experimental.pm loads; gen v2-490
+
+Both round-15 agents reviewed and merged in finish order (AL `0d5b923`,
+AK rebased over it → `f49a34d` = main tip):
+
+1. **AL** — #840 with the LAYER settled by measurement (a hash READ cannot
+   trigger the lazy extension load; eager loading costs 20 ms/program —
+   the tables are pragma NAMES, language data per the s408 ruling, and
+   live beside the runtime's existing warnings stub); `lib/experimental.pm`
+   DELETED, the real CPAN module loads and answers 16/18 probes like perl.
+   My verification: `use experimental 'try'` end-to-end; pure
+   `use warnings` = 80 Offsets keys BOTH sides (the +1 seen under
+   experimental is perl's DYNAMIC warnings::register — mechanism gap filed
+   **#875**).  #872 (the `1 while /…/g` PPI mis-lex — census 19/63 →
+   **18/58**) and #851(a) (high captures `$21+` via `@{^CAPTURE}`) probed
+   byte-identical to perl (m2: 25-group match, clearing).  Its best
+   non-code find: the run-time `(?{…})` announce PASSED THE GATE and was
+   REJECTED BY THE SWEEP (4 fresh_perl empty-output rows destroyed) —
+   reverted, re-scoped compile-time (#874), lesson in DECIDED: **a
+   diagnostic that fires during a RUN is a sweep question, never a gate
+   question.**  Filed #870 (version.pm vcmp string-compare silent-wrong —
+   promote next round), #871, #873.
+2. **AK** — boxed-aggregates **PHASE 4, the runtime half**, all
+   sprof-attributed: `%p-vec-data` (generic aref on adjustable vectors was
+   44 % of arrfill), `%p-fixnum-string` (24 % of slices), `%p-vpush`,
+   #815 inlined at seven call sites, #811.  The one trap it recorded: a
+   global short-circuit REORDERED after it cost collatz 19 % (a
+   hash-table-count call is not cheaper than the p-box-p test it jumped).
+   **#841 resolved by probe: perl DOES alias blessed-hash elements — the
+   `:__class__` refusal was a silent wrong, deleted** (battery gains E13).
+   Runtime-only: no gen bump (v2-490 = AL's stands); corpus untouched.
+   The phase-4 EMISSION arms measured and deferred with numbers (**#862**:
+   foreach-LIST read-only arm is real at ~40 %, its own session — the
+   sweep is the gate there; the slice copy arm is now the smaller prize).
+   Filed #860 (deref-arg @_ aliasing residue quantified), **#861**
+   (`\$$h{k}` loses the backslash — parse silent-wrong, un-related
+   pre-existing find).
+3. **Batch verification (Fable)**: n1 semantic-edge battery (blessed
+   aliasing, negative index r/w, holes, extension, exists, numeric-key
+   unification) byte-identical to perl under BOTH `PCL_RAW_ELEMS`
+   settings (the one divergence = the loud pre-existing #155 tie
+   announcement); both agents' own bars complete (AL: gate 190/6381,
+   sweep +0, emission-ab 1035 = 3 intended diffs, companion 332 zero
+   movers; AK: gate 190/6383 both settings, sweep +0 both ways, companion
+   345 zero movers).  **Bench, Fable-re-measured on merged main
+   (§0.2d confirmed): arrhash 0.67× (from 2.17× three days ago),
+   arrfill 1.51× (from 3.96×), slices 3.28×, sliceasgn 2.18×,
+   ovlsub 3.43×; every won row held** (intloop 0.29–0.30×, cfor 0.25×,
+   fib 0.29×, collatz 0.40×).  Census re-measured on the final tree =
+   the blessed 18/58.
+4. Round-16 pointer: **#862** (the foreach-LIST proven arm, ~40 %, its
+   own emission session) + **#870** (vcmp — silent-wrong promotion) +
+   **#861** + #873/#874/#875 + #852 + #812 measured-first; the perf
+   story's remaining big rocks are pack (#74 route decision stands) and
+   symref (#812).
+
 ## Session 458al (2026-08-31, Opus agent AL, round 15 correctness) — the core-pragma tables (#840, the real experimental.pm loads), the `1 while /…/` mis-lex (#872, census 19/63 → 18/58), high capture variables (#851 half a); gen v2-490
 
 Three jobs, three shipped, six findings filed (#870–#874 + the #757 half).
