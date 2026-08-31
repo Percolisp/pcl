@@ -21,6 +21,27 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s455e (2026-08-31, Fable) — AI + AJ merged: boxed aggregates LIVE, #820/#850 in; the merge-review rulings
+
+- **Both s457 agents reviewed and merged same-session** (AJ `21e0b70` +
+  Fable's in-place DECIDED correction `07f2df0`; AI `5f7a23e` = main tip,
+  gen **v2-470**).  Fable verification: the k1 aliasing battery
+  (exists/delete on raw slots, `\$a[0]` + `\(@a)` write-through,
+  values/slice write-through, RHS-snapshot swap, @_ write, local-element
+  restore) byte-identical to perl under BOTH `PCL_RAW_ELEMS` settings; the
+  six-population census re-measured **19/63 = the blessed baseline** (the
+  agent report's "18/61" was a misstatement — measured, not trusted); j1/j2
+  probes for #820/#850 identical to perl; AJ's guards 48 rows green.
+- **RULING (AI ask 1): TWO knobs stand** — `PCL_RAW_ELEMS` is a runtime
+  policy and stays OUT of `Pl/Passes.pm`; folding it into PCL_OPT would
+  trade the module-cache-key hazard back in for cosmetics.  Revisit only if
+  a second runtime-policy gate appears (then a shared runtime-gate registry
+  earns its keep).
+- **AI ask 2 → #841 filed** (blessed-hash element aliasing `@$obj{…}` —
+  probe first, then widen or bless the conservative guard).
+- The `for (1..N)` `$_`-read-only claim was CORRECTED IN PLACE in §s455b
+  (AJ's #813 measurement disproved it; probed).
+
 ## s457ai (2026-08-31, Opus) — BOXED AGGREGATES PHASES 0–3 SHIPPED: elements are stored RAW; #817/#818 closed — `docs/boxed-aggregates-design-s455.md`, task #816
 
 - **The write rule is the whole model**: a slot holding a BOX is written

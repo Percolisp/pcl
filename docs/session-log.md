@@ -4,6 +4,53 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 455e (2026-08-31, Fable) — AI + AJ merged: BOXED AGGREGATES ARE LIVE (raw elements, phases 0–3), #820/#850/#817/#818 closed, gen v2-470, all pushed
+
+The two parallel s457 agents, reviewed and merged in finish order:
+
+1. **AJ (`05b3d86`+`21e0b70`)** — #820 (the ALL-CAPS convention is Unicode
+   through ONE shape predicate, with a measured, POD-documented split
+   keeping three call-guess sites ASCII because their false positives
+   point the other way) + #850 (a paren-less argument list may END IN A
+   COMMA — the last two `Missing case: []` census rows; io/open.t reaches
+   its end for the first time, 142/23 → 153/35; utf8cache.t fully
+   passing) + #813 MEASURED AND DECLINED, whose measurement DISPROVED the
+   s455b "range-topic `$_` is read-only" sharpening — probed, confirmed,
+   corrected in place (`07f2df0`).  My probes j1/j2 byte-identical to
+   perl; gate-SET 638×2 = exactly the two drop→OK moves.
+2. **AI (`405ebb3`..`5f7a23e`)** — the boxed-aggregates implementation,
+   phases 0–3 COMPLETE per `docs/boxed-aggregates-design-s455.md`:
+   #817/#818 first (values/slices are ALIASES; plus the RHS-before-store
+   list-assign rule the sweep caught), the elem-alias battery (E1–E12 vs
+   real perl), the write rule + ONE promotion pair
+   (`%p-elem-cell`/`%p-hash-elem-cell`), and THE FLIP —
+   **array/hash elements are stored RAW by default** (`PCL_RAW_ELEMS=0`
+   restores the all-boxed world, bit-identical; a saved-core init-hook
+   re-reads the env, without which the gate was silently frozen).  Four
+   design-unforeseen gaps all caught by existing guards at the flip (the
+   phase-ordering discipline doing its job): exists/delete read box-ness
+   as existence, `\(@a)` referenced copies, two lvalue-collect arms.
+   My verification: the k1 battery byte-identical to perl under BOTH gate
+   settings; census re-measured **19/63 = blessed** (the report's 18/61
+   was a misstatement); AI's own bar = gate PASS 190/6373 both settings,
+   sweep clean TOTAL 18340 both ways, companion 4 dirs zero real movers,
+   baselines row-by-row (op/array.t's [perl #7508] row LEFT THE SKIP
+   REGISTRY and passes honestly).
+3. **Speed (the USER's ask), Fable-re-measured on the merged tree**:
+   `arrhash` **1.42× → 1.23×**, `arrfill` **3.94× → 3.00×**; every won
+   row held (intloop 0.28–0.29×, cfor 0.26×, fib 0.29×).  Targets
+   (arrhash ≤1.0×, arrfill ~1×) NOT yet met: the residual is ACCESSOR
+   DISPATCH (`p-aref`'s to-number/negative-index, `p-gethash`'s
+   stringify), not allocation — phase 4's worklist, plus `slices`
+   5.2× / `sliceasgn` 2.9× (copy-position promotion + the RHS rule;
+   the §4.4 proven arm owns them).
+4. Rulings: TWO knobs stand (PCL_RAW_ELEMS stays out of Pl/Passes.pm —
+   the cache-key hazard is not worth one-knob cosmetics); #841 filed
+   (blessed-hash element aliasing probe); #840 (experimental.pm /
+   feature-warnings tables) noted.  Round-15 pointer: **phase 4**
+   (accessor dispatch + the proven arms + E2c′) alongside #815/#811 —
+   the three together are the aggregate-parity push.
+
 ## Session 457ai (2026-08-31, Opus) — BOXED AGGREGATES: phases 0–3, elements are stored RAW, #817/#818 closed; gen v2-470
 
 The boxed-aggregates design (`docs/boxed-aggregates-design-s455.md`, task #816)
