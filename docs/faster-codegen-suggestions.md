@@ -300,7 +300,10 @@ dispatch, not the allocation".  This session profiled that claim and acted on
 it — RUNTIME ONLY, no emission change, so the corpus, the generation string
 and the three artifacts are untouched.  A/B on a quiet box in one sitting,
 both sides `perl tools/bench-exec.pl` best-of-5; the BASE column is a
-`git archive` of main at `8e38d79`.
+`git archive` of main at `8e38d79`.  Re-confirmed after rebasing onto
+`0d5b923` (the sibling agent's emission work landed first): every row within
+noise of the column below — `arrhash` 0.0870, `arrfill` 0.0710, `slices`
+0.2135, `sliceasgn` 0.0539, `collatz` 0.7681.
 
 ```
 bench          base pcl(s)  s458ak pcl(s)    base    s458ak

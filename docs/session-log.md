@@ -169,6 +169,12 @@ AND with `PCL_RAW_ELEMS=0`; full sweep GATE clean TOTAL **18340 (+0)**, drops
 5 = census, BOTH ways; pack.t 5636/89; companion op/ + io/ + re/ (345 files)
 **zero real movers**.  Nothing emitted changed (`git status` = `cl/` + one
 `Pl/t` file), so no generation bump and no artifact regeneration.
+**Re-verified after rebasing onto `0d5b923`** (agent AL's emission work landed
+first; the two doc conflicts resolved keep-both): gate **190/6383**, sweep GATE
+clean TOTAL **18340 (+0)** against AL's new census, battery green under both
+settings, bench re-confirmed within noise, and the companion **op/ leg re-run
+on the COMBINED tree — 221 files, not one differs from the snapshot** (neither
+side's leg had seen the other's changes).
 
 **A COMPANION "REAL MOVE" CAN STILL BE CONTENTION.**  The run flagged
 io/open.t and io/pvbm.t as real moves and the #366 serial re-run agreed —
