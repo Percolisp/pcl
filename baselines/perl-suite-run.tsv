@@ -1,4 +1,22 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s458al (Opus agent AL) — ONE ROW EDITED BY HAND, the `sig` column only:
+#   io/open.t's `unbound:$99` is GONE (task #851 half a — `$21` and up are read
+#   through p-high-capture instead of a bare, never-declared symbol, so the file
+#   no longer carries an unbound-variable diagnostic).  The COUNTS do not move,
+#   153/35 either way, because row 140 ("readonly fh") still fails: perl's
+#   `open $99, "foo"` dies "Modification of a read-only value attempted" and
+#   PCL's captures are still WRITABLE — task #873, the other half.
+#   Companion legs run for the `cl/` change: re/ + io/ + op/, `--quick --jobs 4`,
+#   332 files compared (everything but op/cond.t, still in its solo phase — the
+#   known MemoryMax TIMEOUT either way).  ZERO real movers.  The ONE count/status
+#   difference is io/through.t 942/0 OK -> 928/0 TIMEOUT under load; its SERIAL
+#   re-run gives 942/0 OK, i.e. the snapshot exactly, so the serial verdict
+#   replaces (#215/#366) and the row is NOT edited.  The 70 files whose `sig`
+#   TEXT differs are all "The function X::pl-Y is undefined." -> "Undefined
+#   subroutine &X::Y called" (plus whitespace normalisation), text this session's
+#   diff does not contain — a main-side change between the s448 snapshot and
+#   8e38d79 — so those rows are LEFT ALONE (a mover is spliced only with ITS
+#   cause) and stay for whoever owns that change to refresh.
 # s448 (Fable) — EIGHT ROWS EDITED BY HAND after the round-6 batch (agents N/O/P
 #   merged, tree 866830c), companion legs io/re/op --quick; every mover
 #   re-measured ALONE (--jobs 1), the four unexplained ones A/B’d against a
@@ -906,7 +924,7 @@ io/nargv.t	7	0	11	2	DIFF		0
 # `unbound:$99` -- `eval { open $99, "foo" }` at line 362, which perl rejects as a
 # read-only value and PCL emits as an unbound reference (task #851, row 140).
 # Emission A/B vs a 0237940 worktree: this file DIFFs only for that one statement.
-io/open.t	188	0	153	35	DIFF	unbound:$99	0
+io/open.t	188	0	153	35	DIFF		0
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
 io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/": Is a directory	0

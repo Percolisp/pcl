@@ -94,10 +94,18 @@ files): DIFF only `t/re/pat.t` and `t/re/pat_advanced.t`, RCDIFF 0; full
 perl-tests sweep GATE clean, TOTAL passing +0, drops 5 = census; the three
 checked-in artifacts regenerated (gen stamp the only change in all three);
 guards `Pl/t/feature-pragma-01.t` 28 → 32 rows and `Pl/t/transpile-test-10.t`
-58 → 62.  Expected companion movers: `t/re/pat.t` and `t/re/pat_advanced.t`
-(drops become honest failures + the announce), `t/io/open.t` (`sig`
-`unbound:$99` clears, the file runs past line 362 — row 140 still fails on
-#873).  #852 (the caseless-script bareword handle) was NOT started.
+58 → 62.  **Companion re/ + io/ + op/ `--quick`, 332 files compared: ZERO real
+movers.**  `io/open.t`'s `sig` returns to EMPTY (task #851's stated bar) with
+its counts unmoved at 153/35, because row 140 still fails on #873 — one row
+edited by hand.  The only count/status difference, `io/through.t` OK →
+TIMEOUT, is load noise: its SERIAL re-run is 942/0 OK, the snapshot exactly
+(#215/#366), so the row is not edited.  70 files differ in `sig` TEXT only
+("The function X::pl-Y is undefined." → "Undefined subroutine &X::Y called"),
+text this session's diff does not contain — a main-side change between the
+s448 snapshot and `8e38d79` — so those rows are left for its owner.
+`t/re/pat.t` cannot show the un-drop (PCL produces 0 rows there — #419) and
+`t/re/pat_advanced.t` is QUICK-CAPPED at 900 s.  #852 (the caseless-script
+bareword handle) was NOT started.
 
 ---
 
