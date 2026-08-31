@@ -20,7 +20,7 @@ says "verify parity", that is the full Working Loop in §2, not a spot check.
 Run these and read the output until each line makes sense:
 
 ```bash
-cd /home/bernt/pcl
+cd "$(git rev-parse --show-toplevel)"
 echo 'my $x = 1 + 2; print "$x\n";' | PCL_V2=1 ./pl2cl --no-cache   # v2 output
 echo 'my $x = 1 + 2; print "$x\n";' | ./pl2cl --no-cache            # v1 output
 prove Pl/t/parser2-01.t                                             # 90 tests, all pass
@@ -64,7 +64,7 @@ update docs (§6). Never batch two work items into one commit.
 - **`--no-cache` on every experimental pl2cl invocation.** Cached module
   transpiles will otherwise mix pipelines mid-experiment.
 - **grep runpcl output with `grep -a`** (it can contain NUL bytes).
-- Commands run from the repo root (`/home/bernt/pcl`). The Bash tool resets
+- Commands run from the repo root. The Bash tool resets
   CWD between calls — do not rely on a `cd` from a previous call.
 
 ### 0.5 Know your risk profile — and when to escalate

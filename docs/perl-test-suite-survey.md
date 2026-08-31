@@ -8,7 +8,8 @@ This file records a survey of the **self-contained** files (no
 `require './test.pl'`, no `chdir`) in `t/base`, `t/cmd`, `t/comp`, so we **don't
 re-investigate the same files repeatedly**. Update it when a row changes.
 
-> Source tree: `/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t`.
+> Source tree: perl's own `t/` from the perlbrew build (5.40.3), derived by
+> `tools/lib/PCLPaths.pm` (`perl_suite_t`; override with `$PCL_PERL_SUITE_T`).
 > Re-run a row with: `tools/run-perl-suite.pl <rel>` (see "How to re-run").
 
 **Legend:** ✅ PASS (PCL matches perl ok/notok counts) · 🐞 real fixable bug ·
@@ -129,7 +130,7 @@ matches perl exactly).  Run a t/re file with **CWD = perl's `t/` dir** so the
 `require './test.pl'` resolves:
 
 ```bash
-T=/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t
+T=$(perl -Itools/lib -MPCLPaths=perl_suite_t -e 'print perl_suite_t')
 ./pl2cl "$T/re/pos.t" > /tmp/x.lisp
 ( cd "$T" && sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load /tmp/x.lisp )
 ```
@@ -577,7 +578,7 @@ The s323e regeneration left 7 files TIMEOUT that had been DIFF at the same
 ## How to re-run
 
 ```bash
-T=/home/bernt/perl5/perlbrew/build/perl-5.40.3/perl-5.40.3/t
+T=$(perl -Itools/lib -MPCLPaths=perl_suite_t -e 'print perl_suite_t')
 perl tools/run-perl-suite.pl base/rs.t            # one file: perl-vs-PCL TAP + crash sig
 perl tools/run-perl-suite.pl --dir comp           # all runnable files in a dir
 perl tools/run-perl-suite.pl --all                # every default dir, files NOT in the

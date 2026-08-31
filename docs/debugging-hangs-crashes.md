@@ -76,7 +76,7 @@ sbcl --eval "
 (sb-sprof:start-profiling)
 (let ((th (sb-thread:make-thread
            (lambda ()
-             (setf *default-pathname-defaults* #p\"/home/bernt/pcl/perl-tests/\")
+             (setf *default-pathname-defaults* (merge-pathnames #p\"perl-tests/\"))  ; run from the repo root
              (load \"/tmp/foo.lisp\")))))
   (sleep 3)
   (sb-sprof:stop-profiling)

@@ -8,7 +8,7 @@ groupings in `docs/sweep-bug-catalog.md`.**
 Sweep total: **18386 passing / 666 failing**, 66 fully-passing files
 (incl. closure.t 257+0/258 as of s301; E1 complete, census 111/0).
 
-Run: `perl sweep-perl-tests.pl --jobs 8` from `/home/bernt/pcl/`
+Run: `perl sweep-perl-tests.pl --jobs 8` from the repo root
 
 ---
 

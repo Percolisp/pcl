@@ -118,7 +118,7 @@ Override section start: find with `perl -ne 'print "$.: $_" if /^\(defun pl-_pac
 (was line 4248 after session 198).
 
 ```bash
-cd /home/bernt/pcl
+cd "$(git rev-parse --show-toplevel)"
 ./pl2cl < cl/pack-impl.pl > /tmp/pack-generated.lisp
 # Save overrides — find start line first (see above)
 sed -n 'LINE,$p' cl/pcl-pack.lisp > /tmp/pack-overrides.lisp
