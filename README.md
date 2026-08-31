@@ -153,6 +153,20 @@ work but are untested.
   versions will not work — and Debian 12, Ubuntu 24.04 and Ubuntu 22.04 all
   ship an older one.  A current binary from
   [sbcl.org](https://www.sbcl.org/platform-table.html) installs without root.
+
+  Which binary depends on the distro's glibc: sbcl.org's 2.6.0 x86-64-linux
+  binary needs glibc >= 2.38.  Ubuntu 24.04 and Debian 13 (or newer) have
+  that; Ubuntu 22.04 (glibc 2.35) and Debian 12 (2.36) do not, and fail to
+  start it with `version 'GLIBC_2.38' not found` — on those two, get the
+  **2.5.2** binary instead, which needs only glibc 2.34 and is the validated
+  floor anyway.  Both versions are installed and run continuously by the
+  install matrix
+  ([`.github/workflows/install-matrix.yml`](.github/workflows/install-matrix.yml)):
+
+  | distro | SBCL binary to install |
+  |---|---|
+  | Ubuntu 22.04, Debian 12 | 2.5.2 |
+  | Ubuntu 24.04, Debian 13 (or newer) | 2.6.0 (current) |
 * **cl-ppcre**, from Quicklisp:
   `sbcl --eval '(ql:quickload :cl-ppcre)' --quit`.
 
