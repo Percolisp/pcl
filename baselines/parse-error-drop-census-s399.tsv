@@ -94,9 +94,10 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 19 files, 63 drops (recounted from the rows,
-# s457aj; 18 in-repo files / 61 drops as tools/drop-census.pl reports them,
+# TOTAL after the edits below: 18 files, 58 drops (recounted from the rows,
+# s458al; 17 in-repo files / 56 drops as tools/drop-census.pl reports them,
 # plus the one board row, which a run without --board does not re-measure).
+# The previous line said 19 / 63 (s457aj).
 # The two rows that LEFT in s457aj are t/io/open.t and t/op/utf8cache.t, both
 # by EDIT with their cause: they were the SAME mechanism (#850) — a paren-less
 # list operator's argument list may end in a COMMA, and the operator that
@@ -718,6 +719,27 @@
 #         a loud failure for a silent one is the wrong direction.  That one is
 #         not a census row at all today -- the `local` fall-through swallows it
 #         without a `;; PARSE ERROR`, which is exactly what #564 is about.
+#   s458al FIVE drops REMOVED and ONE FILE CLEARED by task #872 -- the file
+#         total goes 19 rows / 63 drops -> 18 / 58 -- edited ROW BY ROW against
+#         a fresh `tools/drop-census.pl . OUT 4` (no --board, so the board row
+#         below was NOT re-measured and stays at its 2).
+#         #872 -- the #351 `WORD /` repair's "is there a closing /?" scan was
+#         fooled by the pattern's own re-tokenized text: a `;` inside a
+#         `(?{ … ; … })` block stopped it, and the closing delimiter is
+#         swallowed into a `Regexp::Match` (after a `(…)` group -- which then
+#         eats the rest of the FILE) or merged into `//`.  t/re/pat_advanced.t
+#         4 -> 0 and t/re/pat.t 2 -> 1: the `1 while /…(?{…})…/g` counting
+#         loops.  ppi-upstream-bugs.md §11a.
+#         It is NOT free: the un-dropped statement RUNS, and the `(?{…})` block
+#         is STRIPPED, so those rows now fail HONESTLY (count 0 where perl says
+#         2) instead of dying.  Making the strip ANNOUNCE was implemented as
+#         the companion fix and REVERTED by this same sweep -- split.t lost 4
+#         `fresh_perl_is(…, '')` rows, which assert an EMPTY child output --
+#         so the announcement is re-scoped to COMPILE time (task #874, with the
+#         `(*SKIP)`/`(*FAIL)` control verbs).  not-supported.md "Regex code
+#         blocks" carries the measurement.
+#         t/re/pat.t's remaining drop is family "Handle single node of unknown
+#         type" (`ok /a* b?c*/, qq [...]` at line 106) -- a different mechanism.
 board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Parser2 TODO: unsupported `local` target: *{"${caller}::a"} x2
 perl-tests/method.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$obj>','Token::Quote::Double<"a">'] x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">'] x1
@@ -735,5 +757,4 @@ t/op/sub_lval.t	34	Bug. Fell through. Missing case: ['Structure::Condition<(!Int
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
-t/re/pat.t	2	Handle single node of unknown type. Dump: x1 | Ternary operator: Found '?' but no matching ':' x1
-t/re/pat_advanced.t	4	Bug. Fell through. Missing case: ['Token::Symbol<*MARK>','Token::Operator<:>','Token::Word<a>'] x1 | Ternary operator: Found '?' but no matching ':' x3
+t/re/pat.t	1	Handle single node of unknown type. Dump: x1

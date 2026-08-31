@@ -1037,4 +1037,74 @@ LISP
        '#281: every context macro and p-sort-cmp expand to exactly the form they renamed');
 }
 
+# ── #872: `1 while /…/` — the #351 repair's THREE swallow shapes ──────────────
+# PPI reads the `/` after the `while`/`until` statement modifier as DIVISION
+# (ppi-upstream-bugs.md §11a), and _repair_word_match declined all three
+# spellings in which the CLOSING delimiter is not a bare `Operator(/)`: it is
+# swallowed into a `Regexp::Match` after a `(…)` group (which then eats the
+# rest of the FILE), or merged with the modifier into `//`; and a `;` inside a
+# `(?{ … ; … })` code block stopped the scan before it got there.  The
+# division NEGATIVES are in the same row: a constant, a `()`-prototyped sub
+# and a method name after `->` must all keep dividing.
+test_transpile('#872: /re/ after the while/until modifier is a MATCH; division survives', '
+my $n = 0;
+$_ = "aXbXcX";
+$n++ while /(X)/g;                      print "a=$n\n";
+$_ = "aXbXcX";
+my $k = 0;
+$k++ until !/(X)/g;                     print "b=$k\n";
+$_ = "a/b/c";
+my @p;
+push @p, $1 while /([a-c])\//g;         print "c=@p\n";
+$_ = "zzz";
+my $c = 0;
+$c++ while /(z)/g;                      print "d=$c\n";
+use constant HALF => 8;                 print "e=", HALF / 2, "\n";
+sub zero () { 12 }                      print "f=", zero / 3, "\n";
+package O; sub new { bless {w=>10,h=>5}, shift } sub w { $_[0]{w} } sub h { $_[0]{h} }
+package main;
+my $o = O->new;                         print "g=", $o->w / $o->h, "\n";
+');
+
+# The statement no longer DROPS — but a `(?{ … })` code block in the pattern is
+# still stripped (docs/not-supported.md "Regex code blocks"), so the match runs
+# WITHOUT the block: perl sets $foo, PCL leaves it undef.  This row pins that
+# residue so it cannot be mistaken for the repair failing, and it is the guard
+# on task #874: a RUN-TIME announcement here was implemented in s458 and
+# MEASURED — it costs perl-tests/split.t four `fresh_perl_is(…, '')` rows,
+# which assert an EMPTY child output — so the announcement belongs at COMPILE
+# time, in the `PCL:` channel no row's output captures.  WHEN #874 LANDS this
+# row's second assertion changes from "says nothing" to "says it at compile
+# time"; the first must not change.
+{
+    my $out = run_cl(<<'PERL');
+my ($foo, $bar);
+$_ = "abcabc";
+1 while /b(?{$foo = $_; $bar = pos})c/g;
+print "foo=", (defined $foo ? $foo : "U"), "\n";
+PERL
+    like($out, qr/^foo=U$/m,
+         '#872: the statement RUNS (no drop, no die); the code block is stripped');
+    unlike($out, qr/^PCL: /m,
+           '#874: and the strip says nothing AT RUN TIME — a stderr line here '
+         . 'breaks every row that asserts an empty child output');
+}
+
+# ── #851: a capture variable above the pre-declared specials ─────────────────
+# $1..$20 are runtime defvars emitted as bare symbols; $21 and up had no
+# defvar, so `open $99, "foo"` (t/io/open.t:362) left the whole FILE dead at
+# load with "The variable $99 is unbound".  p-high-capture reads @{^CAPTURE},
+# the same state the specials hold — so a 25-group pattern really does answer
+# $25, and a later 2-group match really does clear it.
+test_transpile('#851: $21+ is a capture variable, not an unbound symbol', '
+my $s = join("", map { chr(97 + $_ % 26) } 0 .. 24);
+my $re = join("", map { "(.)" } 1 .. 25);
+"$s" =~ /$re/ or die "no match\n";
+print "a=$20 b=$21 c=$25\n";
+print "d=", (defined $26 ? $26 : "U"), "\n";
+"zy" =~ /(z)(y)/;
+print "e=", (defined $21 ? $21 : "U"), " f=$1\n";
+print "g=", (defined $99 ? $99 : "U"), "\n";
+');
+
 done_testing();

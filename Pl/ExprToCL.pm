@@ -957,6 +957,19 @@ sub gen_symbol_form {
   $content =~ s/^([\$\@\%\*&])([a-zA-Z_]\w*)'/$1$2::/;
   # Handle magic/special variables via dispatch table
   return $SPECIAL_VARS{$content} if exists $SPECIAL_VARS{$content};
+  # A HIGH capture variable (task #851).  $1..$20 are runtime defvars and are
+  # emitted as bare symbols — one special per group is what makes a capture
+  # read a variable read.  $21 and up have no defvar, so the bare symbol was
+  # UNBOUND and the file died at load: `open $99, "foo"` (t/io/open.t:362, and
+  # `$99` is a capture variable there precisely because perl's point is that it
+  # is read-only) killed the whole file.  p-high-capture reads the same state
+  # the specials hold — @{^CAPTURE}, which carries every participating group —
+  # so 20 is a SPEED boundary, not a semantic one, and moving it can only cost
+  # a function call.  (Reading is all this fixes: the capture variables are
+  # still WRITABLE, where perl says "Modification of a read-only value
+  # attempted" — task #873.)
+  return ['p-high-capture', $1]
+    if $content =~ /^\$([0-9]+)$/ && $1 > 20 && $1 !~ /^0/;
   # Handle package-qualified variables: $Pkg::var -> Pkg::$var
   # Perl: $Config::debug  ->  CL: Config::$debug
   # Also: $::foo means $main::foo (empty package = main)

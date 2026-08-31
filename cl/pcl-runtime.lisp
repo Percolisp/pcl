@@ -239,7 +239,7 @@
    #:p-local-array-slice
    #:p-local-deref-scalar #:p-local-deref-array #:p-local-deref-hash
    #:p-copy-array #:p-copy-hash
-   #:p-pack #:p-unpack #:p-load-extension
+   #:p-pack #:p-unpack #:p-load-extension #:p-high-capture
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-sort-named #:p-reverse
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
@@ -13733,7 +13733,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-470"
+(defparameter *pcl-cache-generation* "v2-490"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -18068,6 +18068,29 @@ buffer's fill-pointer; everything else falls back to file-length."
     (#\< #\>)
     (t open-delim)))  ; Non-paired delimiters use same char
 
+(defun %pcl-strip-regex-code-blocks (pattern)
+  "Remove `(?{code})` / `(??{code})` from PATTERN — cl-ppcre has no mid-match
+   callback into perl (docs/not-supported.md 'Regex code blocks'), and it hangs
+   on the construct, so the match runs without the block.
+
+   IT DOES NOT ANNOUNCE, and that was MEASURED rather than assumed (s458al).
+   The removal is silent, which is the #138 family's failure mode inside a
+   regex, so the obvious fix is a `format *error-output*` here — rule 12's
+   ANNOUNCE half, since the match around the block is still perl's answer for
+   everything else.  It was implemented and the full sweep rejected it:
+   `perl-tests/split.t` costs FOUR passing rows, because they are
+   `fresh_perl_is(…, '')` — the child asserts EMPTY output, so a stderr line
+   makes them fail permanently and, worse, unable ever again to detect the
+   crash they exist to catch.  That is a coverage LOSS, not the exposure of a
+   row passing on nothing.
+
+   The announcement therefore belongs at COMPILE time, in the `PCL:` channel
+   the #339 drop announcer already uses, which no row's output captures —
+   task #874, together with the `(*SKIP)`/`(*FAIL)` control verbs.  The whole
+   `(?{` population is perl's own regex tests and six perl-tests files; ZERO
+   CPAN modules (measured), which is what makes waiting for that affordable."
+  (cl-ppcre:regex-replace-all "\\(\\?\\??\\{[^}]*\\}\\)" pattern ""))
+
 (defun perl-regex-to-ppcre (pattern)
   "Convert Perl regex escape sequences to cl-ppcre compatible form.
    cl-ppcre does not handle \\x{HHHH} (Perl hex escapes with braces).
@@ -18076,9 +18099,9 @@ buffer's fill-pointer; everything else falls back to file-length."
    and cause infinite loops).
    Also converts \\Q...\\E metachar-quoting blocks (not supported by cl-ppcre)
    by applying ppcre:quote-meta-chars to the content."
-  ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these
-  (let* ((pat (cl-ppcre:regex-replace-all "\\(\\?\\?\\{[^}]*\\}\\)" pattern ""))
-         (pat (cl-ppcre:regex-replace-all "\\(\\?\\{[^}]*\\}\\)" pat ""))
+  ;; First strip (?{code}) and (??{code}) blocks — cl-ppcre hangs on these.
+  ;; The stripper ANNOUNCES; see %pcl-strip-regex-code-blocks.
+  (let* ((pat (%pcl-strip-regex-code-blocks pattern))
          ;; Named-group names: perl allows \w (underscore); cl-ppcre allows
          ;; only alphanumerics and #\-.  Perl names can never contain '-', so
          ;; _ <-> - is a collision-free bijection: rewrite here, map back when
@@ -18680,6 +18703,26 @@ buffer's fill-pointer; everything else falls back to file-length."
         (setf (fill-pointer |@-|) n-minus))
       (when (> (fill-pointer |@+|) n-plus)
         (setf (fill-pointer |@+|) n-plus)))))
+
+(defun p-high-capture (n)
+  "$N for an N above the pre-declared capture specials (task #851).
+
+   $1..$20 are defvars — one special per group, which is what makes a capture
+   read a variable read on the hot path — and the compiler emits them as bare
+   symbols.  It emitted `$99` the same way, so `open $99, \"foo\"` (t/io/open.t
+   line 362, where perl's point is that $99 is a READ-ONLY capture variable)
+   left the whole FILE dead at load: `The variable $99 is unbound`.
+
+   The answer comes from @{^CAPTURE}, which set-capture-groups fills with EVERY
+   participating group's value, 0-based and cleared per match — so this is not
+   a stub returning undef for want of the real value: it is the same state the
+   specials hold, read by index.  ($1 and (p-high-capture 1) therefore agree;
+   the threshold in the compiler is a SPEED choice, not a correctness one.)"
+  (let ((i (1- (truncate (to-number n)))))
+    (if (and (>= i 0) (< i (length |@{^CAPTURE}|)))
+        (let ((v (aref |@{^CAPTURE}| i)))
+          (if (p-box-p v) (p-box-value v) v))
+        *p-undef*)))
 
 (defmacro %set-cap (var str starts ends idx)
   "Set capture variable VAR from reg-starts/ends at IDX, guarding against NIL (optional group)."
@@ -19369,9 +19412,117 @@ buffer's fill-pointer; everything else falls back to file-length."
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (p-defcell $VERSION (make-p-box "1.50"))
   (p-defcell $BYTES (make-p-box 12))   ; bytes in warning bitmask (12 in modern Perl)
-  )
+  (p-defcell %Offsets (make-hash-table :test 'equal))
+  (p-defcell %NoOp (make-hash-table :test 'equal)))
 (defun pl-unimport (&rest args) (declare (ignore args)) nil)
 (defun pl-import (&rest args) (declare (ignore args)) nil)
+(in-package :pcl)
+
+;;; The CORE-PRAGMA NAME TABLES: perl's warning categories and feature names
+;;; (task #840).  Real code READS them — the CPAN `experimental` pragma builds
+;;; its entire dispatch table from `keys %warnings::Offsets`, `keys
+;;; %warnings::NoOp` and `keys %feature::feature` before it calls anything, and
+;;; with them empty every pragma falls past the "is this a known feature /
+;;; category" arms into a version check that croaks "Need perl 5.34.0 or later
+;;; for feature try" on a perl whose $] is 5.040003.
+;;;
+;;; WHY HERE and not in the lib/ shims, where module data belongs (CLAUDE.md
+;;; 9a): a hash READ cannot trigger the lazy `%pcl-def-ext-stub` load the way a
+;;; CALL does, so data reached only through `keys %warnings::Offsets` has to be
+;;; present before any warnings:: sub is ever called — measured, and the reason
+;;; the extension route was rejected rather than assumed.  Loading the
+;;; extension eagerly is the other way and costs ~20 ms on EVERY program (also
+;;; measured), and extensions are deliberately outside the saved core, so it
+;;; would be paid per run.  These are pragma NAMES — perl language data, the
+;;; same class as `Pl::Parser::%PCL_FEATURE_BUNDLE` and the `$BYTES` above —
+;;; not one module's behaviour, and the ruling that a feature-enabling core
+;;; pragma is LANGUAGE rather than module behaviour is s408's (DECIDED §s408).
+;;;
+;;; The VALUES are perl 5.40.3's own bit offsets / hint-key names, mirrored
+;;; exactly; nothing in PCL reads them, but a program that does gets perl's
+;;; answer.  They are STATIC on purpose, for the same reason the bundle
+;;; thresholds are: PCL must answer the same way whatever perl it runs under.
+;;; `Pl/t/feature-pragma-01.t` re-derives them from the running perl (skipping
+;;; when that perl is not 5.40.x), so a drift fails a row instead of rotting.
+;;; Deliberately NOT mirrored: `%warnings::Bits`/`%DeadBits`/`@LAST_BIT` (the
+;;; bitmask model PCL does not have — docs/not-supported.md "Warnings-gated
+;;; diagnostics are absent", #221) and `%feature::feature_bundle` (no measured
+;;; consumer; task #870).
+
+(in-package :warnings)
+
+(p-hash-= %Offsets
+          (vector
+           "all" 0 "ambiguous" 58 "bareword" 60 "closed" 12 "closure" 2
+           "debugging" 44 "deprecated" 4
+           "deprecated::apostrophe_as_package_separator" 152
+           "deprecated::delimiter_will_be_paired" 148 "deprecated::dot_in_inc" 124
+           "deprecated::goto_construct" 96
+           "deprecated::missing_import_called_with_args" 156
+           "deprecated::smartmatch" 154 "deprecated::subsequent_use_version" 158
+           "deprecated::unicode_property_name" 98 "deprecated::version_downgrade" 146
+           "digit" 62 "exec" 14 "exiting" 6 "experimental" 106
+           "experimental::args_array_with_signatures" 136 "experimental::builtin" 138
+           "experimental::class" 150 "experimental::declared_refs" 122
+           "experimental::defer" 140 "experimental::extra_paired_delimiters" 142
+           "experimental::private_use" 128 "experimental::re_strict" 112
+           "experimental::refaliasing" 114 "experimental::regex_sets" 108
+           "experimental::try" 134 "experimental::uniprop_wildcards" 130
+           "experimental::vlb" 132 "glob" 8 "illegalproto" 94 "imprecision" 92
+           "inplace" 46 "internal" 48 "io" 10 "layer" 16 "locale" 116 "malloc" 50
+           "misc" 24 "missing" 118 "newline" 18 "non_unicode" 100 "nonchar" 102
+           "numeric" 26 "once" 28 "overflow" 30 "pack" 32 "parenthesis" 64 "pipe" 20
+           "portable" 34 "precedence" 66 "printf" 68 "prototype" 70 "qw" 72
+           "recursion" 36 "redefine" 38 "redundant" 120 "regexp" 40 "reserved" 74
+           "scalar" 144 "semicolon" 76 "severe" 42 "shadow" 126 "signal" 52
+           "substr" 54 "surrogate" 104 "syntax" 56 "syscalls" 110 "taint" 78
+           "threads" 80 "uninitialized" 82 "unopened" 22 "unpack" 84 "untie" 86
+           "utf8" 88 "void" 90))
+
+;;; The categories perl KNOWS but no longer warns about: `no warnings
+;;; 'experimental::signatures'` must stay legal, and the experimental pragma
+;;; reads this hash to tell "silently accepted" from "unknown feature".
+(p-hash-= %NoOp
+          (vector
+           "experimental::alpha_assertions" 1 "experimental::bitwise" 1
+           "experimental::const_attr" 1 "experimental::for_list" 1
+           "experimental::isa" 1 "experimental::lexical_subs" 1
+           "experimental::postderef" 1 "experimental::script_run" 1
+           "experimental::signatures" 1 "experimental::smartmatch" 1))
+
+(in-package :pcl)
+
+;;; feature:: — the same story as the warnings stub above.  `use feature` is a
+;;; skipped pragma (PCL answers it at PARSE time, through PPI's
+;;; custom_feature_include_cb: Pl::Parser::_pcl_feature_include_cb), so
+;;; feature.pm is never loaded and nothing else would ever define this package.
+;;; import/unimport are no-ops because the parse-time table has already
+;;; decided; they exist because `feature->import($name)` is a real call real
+;;; modules make, and a missing method would die.
+(p-defpackage :feature)
+(defpackage :feature (:use :cl :pcl))
+(in-package :feature)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (p-defcell $VERSION (make-p-box "1.93"))
+  (p-defcell %feature (make-hash-table :test 'equal)))
+(defun pl-import (&rest args) (declare (ignore args)) nil)
+(defun pl-unimport (&rest args) (declare (ignore args)) nil)
+
+(p-hash-= %feature
+          (vector
+           "bareword_filehandles" "feature_bareword_filehandles"
+           "bitwise" "feature_bitwise" "class" "feature_class"
+           "current_sub" "feature___SUB__" "declared_refs" "feature_myref"
+           "defer" "feature_defer" "evalbytes" "feature_evalbytes"
+           "extra_paired_delimiters" "feature_more_delims" "fc" "feature_fc"
+           "indirect" "feature_indirect" "isa" "feature_isa"
+           "module_true" "feature_module_true"
+           "multidimensional" "feature_multidimensional"
+           "postderef_qq" "feature_postderef_qq" "refaliasing" "feature_refaliasing"
+           "say" "feature_say" "signatures" "feature_signatures"
+           "state" "feature_state" "switch" "feature_switch" "try" "feature_try"
+           "unicode_eval" "feature_unieval" "unicode_strings" "feature_unicode"))
+
 (in-package :pcl)
 
 ;; Carp module stub - Carp loads utf8 which causes infinite loops in PCL

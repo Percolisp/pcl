@@ -4,6 +4,103 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 458al (2026-08-31, Opus agent AL, round 15 correctness) — the core-pragma tables (#840, the real experimental.pm loads), the `1 while /…/` mis-lex (#872, census 19/63 → 18/58), high capture variables (#851 half a); gen v2-490
+
+Three jobs, three shipped, six findings filed (#870–#874 + the #757 half).
+
+**#840 — `%feature::feature` / `%warnings::Offsets` / `%warnings::NoOp` are
+populated, and `lib/experimental.pm` is DELETED.**  The layer question (module
+data belongs in a lib/ shim, CLAUDE.md 9a) was settled by MEASUREMENT, not by
+the rule: a hash READ cannot trigger the lazy `%pcl-def-ext-stub` load a CALL
+does, and the real `experimental.pm` builds its whole dispatch table from
+`keys` on all three BEFORE it calls anything — so tables that live only in
+`cl/pcl-warnings.lisp` are still empty when they are read (probed: `keys
+%warnings::Offsets` is 0 before AND after a `warnings::enabled` call).  Loading
+the extension eagerly is the other way and costs ~20 ms on EVERY program
+(measured 0.14 s → 0.16 s), and extensions are deliberately outside the saved
+core, so it would be paid per run.  So the three tables sit in the runtime,
+beside the `warnings` package stub that already carries `$BYTES = 12`, with
+perl 5.40.3's own values; a `feature` package stub joins it (import/unimport
+no-ops, because PCL answers the pragma at PARSE time).  `%feature::feature_bundle`
+is deliberately not mirrored — no measured consumer.
+
+With them the REAL perl `experimental.pm` loads and runs: `use experimental
+'try'` is byte-identical to perl, and 16 of 18 `experimental->import(NAME)`
+answers match, including the croaks for an unknown feature.  The two that do
+not are `autoderef` and `array_base`, and they are **not this fix**: they are
+`lib/version.pm`'s `vcmp`, which is a STRING compare, so `$] < version->new('5.14.0')`
+is TRUE under PCL (**#870** — a silent wrong for every `$version < 5.010`
+idiom in CPAN), sitting on top of PCL reporting `$]` = 5.030000 while targeting
+5.40 everywhere else (**#871**).  Both filed with the probe.
+
+**THE TEST'S ORACLE HAD TO BE A FRESH PERL, NOT THE HARNESS.**  The first drift
+row compared PCL's tables against the .t process's own `%warnings::Offsets` and
+failed on `Tie::Hash => 160`: `warnings::register` ADDS a category per
+registering package, so by the time PPI and File::Temp are loaded the harness
+carries entries a fresh perl does not.  The row now runs the SAME dumper file
+under both engines.
+
+**#872 — `1 while /…/g;` dropped whole, and the #351 repair was asking the
+wrong question.**  PPI reads the `/` after the `while`/`until` statement
+modifier as DIVISION (`if`/`unless`/`and`/`or` are right — `ppi-upstream-bugs.md`
+§11a, `ppi-bug-report.t` rows 10–12, both new rows FAIL as they must).
+`_repair_word_match` already knew the shape; what declined was its sanity scan
+for a closing `/`.  **Everything between the two delimiters has been
+re-tokenized AS CODE**, so the pattern's own text supplies `;`s and eats `/`s,
+in three spellings: a `;` inside a `(?{ … ; … })` block; the closing delimiter
+swallowed into a `Regexp::Match` after a `(…)` group — which then eats the rest
+of the FILE, one token; and merged into the defined-or `//` after an escaped
+`\/`.  `_match_close_after` tracks nesting and accepts any Operator/Regexp
+token BEGINNING with `/`; it answers yes/no, never WHERE, so pattern text that
+looks like the close is still the right answer.  Census `t/re/pat_advanced.t`
+4 → 0, `t/re/pat.t` 2 → 1.
+
+**AND IT IS NOT FREE — the companion fix was implemented, MEASURED, and
+REVERSED, which is the session's most useful finding.**  The un-dropped
+statement RUNS, and a `(?{…})` block is STRIPPED, so `1 while /b(?{$foo =
+$_})c/g` leaves `$foo` undef and says nothing: a loud drop traded for a silent
+wrong, the one outcome a census fix must not have.  So the strip was made to
+ANNOUNCE, once per pattern — rule 12's ANNOUNCE half by the s329 boundary.
+**The gate was GREEN and the full sweep rejected it.**  `perl-tests/split.t`
+lost FOUR passing rows ("Still LOST after a serial re-run — NOT load noise"):
+they are `fresh_perl_is('my @ary; @ary = split(/\w(?{ undef @ary })/, "abc");',
+'')` and three siblings, where the child asserts EMPTY output — so ANY stderr
+line makes them fail permanently and, worse, unable ever again to detect the
+crash they exist to catch.  That is a coverage LOSS, not the exposure of a row
+passing on nothing.  The announcement was reverted and re-scoped to COMPILE
+time, in the `PCL:` channel the #339 drop announcer already uses and no row's
+output captures (**#874**, together with the `(*SKIP)`/`(*FAIL)`/`(*MARK:…)`
+control verbs, which are not stripped at all and fail in cl-ppcre's words).
+What makes the remaining silence affordable is the population, measured: every
+`(?{` in the six census populations is in perl's own regex tests plus six
+`perl-tests/` files — **zero CPAN modules**.  Standing lesson: **a diagnostic
+that fires during a RUN is a sweep question, never a gate question.**
+
+**#851 half (a) — `$21` and up are capture VARIABLES.**  `$1..$20` are runtime
+defvars emitted as bare symbols; higher ones had no defvar, so `open $99,
+"foo"` (t/io/open.t:362, where `$99` is a capture variable precisely because
+perl's point is that it is read-only) left the whole FILE dead at load, "The
+variable $99 is unbound".  `p-high-capture` reads `@{^CAPTURE}` — the same
+state the specials hold, and complete — so this is not a stub: a 25-group
+pattern really answers `$25`, `$26` is undef, and a later 2-group match clears
+it, all byte-identical to perl.  20 is now a SPEED boundary, not a semantic
+one.  Half (b) — a capture is READ-ONLY in perl (`$1 = 5`, `chop $1`, `open
+$99` all die; `open $1` does NOT, because the difference is autovivification) —
+is **#873**: the specials are not boxes, so there is nowhere to hang the flag.
+
+**Measurements.**  corpus-diff IDENTICAL over 111 (drops 5, unchanged);
+emission A/B vs `8e38d79` over perl's t/ + lib + cpan-tests + shapes (1035
+files): DIFF only `t/re/pat.t` and `t/re/pat_advanced.t`, RCDIFF 0; full
+perl-tests sweep GATE clean, TOTAL passing +0, drops 5 = census; the three
+checked-in artifacts regenerated (gen stamp the only change in all three);
+guards `Pl/t/feature-pragma-01.t` 28 → 32 rows and `Pl/t/transpile-test-10.t`
+58 → 62.  Expected companion movers: `t/re/pat.t` and `t/re/pat_advanced.t`
+(drops become honest failures + the announce), `t/io/open.t` (`sig`
+`unbound:$99` clears, the file runs past line 362 — row 140 still fails on
+#873).  #852 (the caseless-script bareword handle) was NOT started.
+
+---
+
 ## Session 455e (2026-08-31, Fable) — AI + AJ merged: BOXED AGGREGATES ARE LIVE (raw elements, phases 0–3), #820/#850/#817/#818 closed, gen v2-470, all pushed
 
 The two parallel s457 agents, reviewed and merged in finish order:

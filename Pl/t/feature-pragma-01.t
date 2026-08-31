@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 28;
+plan tests => 32;
 
 # ---- 1. the table is perl's -----------------------------------------------
 
@@ -219,15 +219,18 @@ print "with=", (defined $with ? $with : "undef"),
       " without=", (defined $without ? $without : "undef"), "\n";
 PERL
 
-# The `values` half of lib/experimental.pm's DELETE-WHEN trigger is MET (s457ai,
-# task #817): `$_ = f($_) for values %h` now aliases, so the real module's
-# `$_ = version->new($_) for values %min_version` would work.  This row is now
-# the POSITIVE guard on that (perl prints 20), and the row below is the new
-# DELETE-WHEN trigger — the second, unrelated blocker measured when the shim
-# was moved aside: PCL's feature/warnings shims leave %feature::feature and
-# %warnings::Offsets EMPTY, so the real module falls through its dispatch to
-# the version check and croaks "Need perl 5.34.0 or later for feature try"
-# (task #840).
+# ---- 4. the core-pragma NAME TABLES, and the REAL experimental.pm ----------
+#
+# `lib/experimental.pm` used to be a PCL shim, standing on two blockers.  Both
+# are gone: #817 made `$_ = f($_) for values %h` alias (the module's
+# `$_ = version->new($_) for values %min_version`), and #840 populated the
+# three tables the module builds its whole dispatch from —
+# `keys %warnings::Offsets`, `keys %warnings::NoOp`, `keys %feature::feature`.
+# With them empty every pragma fell past the "is this a known feature /
+# category" arms into a version check and croaked "Need perl 5.34.0 or later
+# for feature try" on a perl whose $] is 5.040003.  The shim is DELETED, so
+# these rows guard the real module.
+
 {
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh qq{my %h = (a => 2);\n\$_ = \$_ * 10 for values %h;\nprint \$h{a}, "\\n";\n};
@@ -237,13 +240,71 @@ PERL
     is($g, '20', '`$_ = ... for values %h` aliases into the hash (#817)');
 }
 
+# The tables as PCL answers them, dumped from a PCL run: one "KIND\tkey\tvalue"
+# line each.  A hash READ cannot trigger the lazy extension load a CALL does,
+# so these live in the runtime rather than a lib/ shim — which is exactly what
+# this dump measures (nothing here calls a warnings:: sub first).
+#
+# The oracle is the SAME FILE run by perl, in its own process, never this
+# harness's `%warnings::Offsets` — `warnings::register` ADDS a category per
+# registering package, so by the time PPI and File::Temp are loaded the
+# harness's copy carries entries (Tie::Hash => 160, …) a fresh perl has not.
+my ($dump_out, $dump_file);
+my %pcl_tables;
 {
     my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh qq{require feature; require warnings;\n}
-            . qq{print scalar(keys %feature::feature) + scalar(keys %warnings::Offsets), "\\n";\n};
+    print $fh <<'PERL';
+require feature; require warnings;
+print "F\t$_\t$feature::feature{$_}\n"   for sort keys %feature::feature;
+print "O\t$_\t$warnings::Offsets{$_}\n"  for sort keys %warnings::Offsets;
+print "N\t$_\t$warnings::NoOp{$_}\n"     for sort keys %warnings::NoOp;
+PERL
     close $fh;
-    my $got = run_cl($pl_file);
-    chomp(my $g = $got);
-    is($g, '0', 'STILL empty %feature::feature/%warnings::Offsets — lib/experimental.pm '
-              . 'is still needed (when this row fails, delete the shim; #840)');
+    $dump_file = $pl_file;
+    $dump_out  = run_cl($pl_file);
+    for my $line (split /\n/, $dump_out) {
+        next if $line !~ /^([FON])\t([^\t]*)\t(.*)$/;
+        $pcl_tables{$1}{$2} = $3;
+    }
+}
+
+# Load-bearing names, asserted on every host: these are the ones the real
+# experimental.pm dispatches on, and the ones a `no warnings '...'` names.
+is(join(",", map { exists $pcl_tables{F}{$_} ? $_ : "MISSING($_)" }
+              qw(try signatures say state switch class current_sub)),
+   "try,signatures,say,state,switch,class,current_sub",
+   '%feature::feature carries perl\'s feature names (#840)');
+is(join(",", map { exists $pcl_tables{O}{$_} ? $_ : "MISSING($_)" }
+              qw(all uninitialized experimental experimental::try experimental::class)),
+   "all,uninitialized,experimental,experimental::try,experimental::class",
+   '%warnings::Offsets carries perl\'s warning categories (#840)');
+is(join(",", map { exists $pcl_tables{N}{$_} ? $_ : "MISSING($_)" }
+              qw(experimental::signatures experimental::smartmatch)),
+   "experimental::signatures,experimental::smartmatch",
+   '%warnings::NoOp carries the no-longer-warning categories (#840)');
+
+# THE DRIFT ROW.  The tables are static on purpose — PCL answers for its
+# target perl whatever perl it runs under — so the comparison is only
+# meaningful against a 5.40.x host (CI's is 5.38, s440).
+SKIP: {
+    my $hostv = sprintf("%.6f", $]);
+    skip "the host perl is $], not 5.40.x — the tables are 5.40's", 1
+        if $hostv !~ /^5\.040/;
+    my $perl_out = `perl $dump_file 2>&1`;
+    is($dump_out, $perl_out,
+        'the three tables are line-for-line this 5.40 perl\'s (a drift fails here)');
+}
+
+# The shim is gone: what loads is the REAL module, from perl's own lib.
+{
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh qq{require experimental;\n}
+            . qq{print "V=\$experimental::VERSION IN=", }
+            . qq{(\$INC{"experimental.pm"} =~ m{/lib/experimental\\.pm\$} ? "pcl-shim" : "real"), "\\n";\n};
+    close $fh;
+    chomp(my $g = run_cl($pl_file));
+    my $perl_g = `perl $pl_file 2>&1`;
+    chomp $perl_g;
+    is($g, $perl_g,
+        'the REAL experimental.pm loads under PCL, same VERSION as perl (#840)');
 }

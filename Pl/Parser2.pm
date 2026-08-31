@@ -6064,17 +6064,48 @@ sub _repair_word_match {
     next if $self->_word_is_term($prev->content, $doc);
     # A match needs a closing delimiter; without one this is not the shape and
     # the statement is left to the ordinary error path to name.
-    my $close = 0;
-    for my $j ($i + 1 .. $#tok) {
-      last if $tok[$j]->isa('PPI::Token::Structure') && $tok[$j]->content eq ';';
-      ($close = 1), last if $tok[$j]->isa('PPI::Token::Operator')
-                         && $tok[$j]->content eq '/';
-    }
-    next unless $close;
+    next unless _match_close_after(\@tok, $i);
     $t->set_content('m/');
     $repaired = 1;
   }
   return $repaired ? $self->_reparse_doc($doc) : $doc;
+}
+
+# Does a closing `/` follow the mis-lexed one at $i?  Everything between them is
+# PATTERN TEXT that PPI has lexed as perl, so the two things this scan must not
+# be fooled by are exactly the two the pattern can contain (task #872):
+#
+#   * a `;` inside a `(?{ … ; … })` code block — PPI built a real Block for it,
+#     so the `;` is a Structure token like any other.  Only a `;` at the
+#     statement's OWN nesting depth ends the search.
+#   * the closing `/` swallowed INTO a LONGER token.  Three spellings seen:
+#     it stays a bare `Operator(/)`; it merges with what follows into another
+#     operator (`\/` + `/g` gives `Cast(\) Operator(//)`); or, after a `(…)`
+#     group, PPI is back in term position and reads it as the START of a match,
+#     taking the rest of the FILE with it (`1 while /(a+b?)x/g;` ends in one
+#     `Regexp::Match </g;\nprint …>`).  In every one the token BEGINS with the
+#     delimiter, which is the whole test — this scan answers yes/no, never
+#     WHERE, so a `/` that is pattern text rather than the true close is still
+#     the right answer.
+#
+# Both left `1 while /…/g;` — the shape `t/re/pat.t` and `t/re/pat_advanced.t`
+# use for a `(?{…})` counting loop — declining the repair and dropping whole.
+sub _match_close_after {
+  my ($tok, $i) = @_;
+  my $depth = 0;
+  for my $j ($i + 1 .. $#$tok) {
+    my $t = $tok->[$j];
+    if ($t->isa('PPI::Token::Structure')) {
+      my $c = $t->content;
+      $depth++, next if $c =~ /^[({\[]\z/;
+      $depth--, next if $c =~ /^[)}\]]\z/;
+      last if $c eq ';' && $depth <= 0;
+      next;
+    }
+    return 1 if ($t->isa('PPI::Token::Operator') || $t->isa('PPI::Token::Regexp'))
+             && $t->content =~ m{\A/};
+  }
+  return 0;
 }
 
 

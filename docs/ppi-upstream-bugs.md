@@ -547,6 +547,44 @@ both populations: 28 `WORD /` sites, of which the repair fires on `ok`, `while`
 and `when` and must NOT fire on `map { … } <op/*>`, where PPI derails a GLOB
 into `< Word / * >` — hence the `<` guard.  Removes 11 dropped statements.
 
+### 11a. The mis-lex takes THREE shapes, and the s404 workaround only saw one  (task #872, s458)
+
+The repair asks one sanity question before firing — *is there a closing `/`?* —
+and it asked it by scanning forward for a bare `Operator(/)`, stopping at the
+first `Structure(;)`.  Both halves are wrong, because **everything between the
+two delimiters has been re-tokenized as code**, so the pattern's own text
+supplies `;`s and eats `/`s:
+
+```
+1 while /b(?{$n++; $n++})c/g;         # the `;` is INSIDE a (?{…}) code block
+  Word(while) Operator(/) Word(b) Structure(() Operator(?) Structure({)
+  Symbol($n) Operator(++) Structure(;)   <-- scan stopped here, repair declined
+  … Structure(}) Structure()) Word(c) Operator(/) Word(g) Structure(;)
+
+1 while /(a+b?)x/g;                   # after a (…) group PPI is in TERM position
+  Word(while) Operator(/) Structure<(a+b?)> Operator(x)
+  Regexp::Match</g;\nprint "next\n";>    <-- the closing / STARTED a match that
+                                            swallowed the rest of the FILE
+
+push @p, $1 while /([a-c])\//g;       # an escaped delimiter
+  … Structure()) Cast(\) Operator(//) Word(g) Structure(;)
+                          ^^ the closing / merged with the modifier-less / into
+                             the defined-or operator
+```
+
+Note the second: PPI emits **both** an `Operator(/)` and a `Regexp::Match`, so
+the statement it builds is not merely wrong, it is unbounded — one file-length
+token.  The third shows the delimiter merging into a LONGER operator (`//`,
+and by the same route `/=`, `//=`).
+
+**PCL (s458, `Pl::Parser2::_match_close_after`):** the forward scan now tracks
+`(`/`{`/`[` nesting and honours a `;` only at the statement's own depth, and
+accepts as the close any `Operator`- or `Regexp`-class token whose content
+BEGINS with `/`.  It answers yes/no, never *where*, so a `/` that is pattern
+text rather than the true close is still the right answer.  Closes 5 census
+drops in `t/re/pat.t` and `t/re/pat_advanced.t` — the `1 while /…(?{…})…/g`
+counting loop — and the escaped-delimiter shape probed above.
+
 ---
 
 ## 12. `)*name` — a `*` after a term is lexed as a GLOB, not multiplication  [CONFIRMED 1.291]

@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 51;
+use Test::More tests => 54;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -169,6 +169,32 @@ sub toks {
     my @t = toks('ok /x/, "d";');
     ok( grep(/^PPI::Token::Regexp::Match=/, @t),
         '/x/ after a paren-less word should be a match, as it is after grep/return' )
+        or diag "got: @t";
+}
+# The statement MODIFIERS are the same bug and the same fix: `if` and `unless`
+# are right, `while` and `until` are not.  Their damage is worse than `ok`'s,
+# because a `(…)` group inside the pattern puts PPI back in term position — so
+# the CLOSING delimiter starts a match of its own and swallows the rest of the
+# FILE into one token.
+{
+    my $src = '1 while /(a+b?)x/g;' . "\n" . 'print "next\n";';
+    my $doc = PPI::Document->new(\$src);
+    my @st  = $doc ? $doc->schildren : ();
+    is( scalar(@st), 2,
+        '`1 while /(a+b?)x/g;` must not swallow the following statement' )
+        or diag "statements: " . join(' | ', map { my $c = $_->content; $c =~ s/\n/\\n/g; $c } @st);
+}
+{
+    my @t = toks('1 while /b(?{$n++})c/g;');
+    ok( grep(/^PPI::Token::Regexp::Match=/, @t),
+        '/…/ after the `while` statement modifier should be a match' )
+        or diag "got: @t";
+}
+# The control: `if` is the same grammatical position and PPI reads it right.
+{
+    my @t = toks('1 if /(a+b?)x/;');
+    ok( grep(/^PPI::Token::Regexp::Match=/, @t),
+        '/…/ after `if` IS lexed as a match (the control)' )
         or diag "got: @t";
 }
 

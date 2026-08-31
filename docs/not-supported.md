@@ -692,13 +692,32 @@ matching; `(??{code})` evaluates code and uses the result as a sub-pattern.
 Both allow the regex engine to call back into Perl mid-match.
 
 **PCL behaviour:** Not implemented.  CL-PPCRE does not expose a hook for
-embedded Perl-side callbacks during scanning.
+embedded Perl-side callbacks during scanning.  The block is REMOVED from the
+pattern (cl-ppcre hangs on it otherwise) and the rest of the match runs —
+**silently**, which puts it in the #138 family: `1 while /b(?{$foo = $_})c/g`
+leaves `$foo` undef and says nothing.
+
+**A RUN-TIME announcement was implemented in s458 and MEASURED, then reverted**
+(`%pcl-strip-regex-code-blocks`, task #874).  It cost `perl-tests/split.t` four
+passing rows, because they are `fresh_perl_is(…, '')` — the child asserts EMPTY
+output, so any stderr line makes them fail permanently and, worse, unable ever
+again to detect the crash they exist to catch.  That is a coverage LOSS, not
+the exposure of a row passing on nothing.  The announcement belongs at COMPILE
+time instead, in the `PCL:` channel the #339 drop announcer already uses, which
+no row's output captures.  What makes waiting for that affordable is the
+population: every `(?{` in the six census populations is in perl's own regex
+tests plus six `perl-tests/` files — **zero CPAN modules** (measured s458).
 
 **Rationale:** These features require deep integration between the regex
 engine and the Perl interpreter.  They are rarely used in CPAN modules and
 have no clean mapping to CL-PPCRE's interface.
 
-**Affected tests:** `perl-tests/study.t` (tests using `(?{...})`).
+**Affected tests:** `perl-tests/study.t` (tests using `(?{...})`);
+`t/re/pat.t` and `t/re/pat_advanced.t`, whose `1 while /…(?{…})…/g` counting
+loops became honest failures when #872 stopped dropping the statement.
+The regex CONTROL VERBS `(*SKIP)` / `(*FAIL)` / `(*MARK:name)` are a DIFFERENT
+gap and are not covered here — they are not stripped, so they reach cl-ppcre
+and fail the match with cl-ppcre's own message (task #874).
 
 ---
 

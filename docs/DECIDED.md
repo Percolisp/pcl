@@ -21,6 +21,70 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s458al (2026-08-31, Opus agent AL, round 15) — the core-pragma tables, the `1 while /…/` mis-lex, high captures
+
+- **`%feature::feature` / `%warnings::Offsets` / `%warnings::NoOp` are populated
+  in the RUNTIME, not the lib/ shims (#840).**  The layer question was decided
+  by MEASUREMENT, not by 9a alone: a hash READ cannot trigger the lazy
+  `%pcl-def-ext-stub` load a CALL does, and the real `experimental.pm` builds
+  its whole dispatch table from `keys` on all three BEFORE calling anything —
+  so data reachable only through `cl/pcl-warnings.lisp` would still be empty
+  when it is read.  Loading the extension eagerly is the other way and costs
+  ~20 ms on EVERY program (measured: 0.14 s → 0.16 s), and extensions are
+  deliberately outside the saved core, so it would be paid per run.  Pragma
+  NAMES are perl LANGUAGE data (the s408 ruling), the same class as the
+  `$warnings::BYTES` already in the runtime.  Values mirror perl 5.40.3
+  exactly; `%feature::feature_bundle` is deliberately NOT mirrored (no
+  measured consumer — task #870 note).  `Pl/t/feature-pragma-01.t` re-derives
+  the three tables from the running perl, skipping unless it is 5.40.x — and
+  the ORACLE is a fresh `perl` on the SAME dumper file, never the harness's own
+  `%warnings::Offsets`, because `warnings::register` ADDS a category per
+  registering package (by the time PPI and File::Temp are loaded the harness
+  carries `Tie::Hash => 160`, which a fresh perl does not).
+- **`lib/experimental.pm` is DELETED — the real perl module loads and runs.**
+  Its two blockers are both gone (#817's `for values %h` aliasing, then #840),
+  and `use experimental 'try'` is byte-identical to perl.  Residue, both filed
+  and both PRE-EXISTING: `lib/version.pm`'s `vcmp` is a STRING compare, so
+  `$] < version->new('5.14.0')` is TRUE under PCL (**#870**, silent wrong for
+  every `$version < 5.010` idiom), and PCL reports `$]` = 5.030000 / `$^V` =
+  v5.30.0 while targeting 5.40 semantics everywhere else (**#871**, measure
+  `%p-parse-require-version`'s dependents before raising it).
+- **The #351 `WORD /` repair asked "is there a closing `/`?" wrongly (#872).**
+  Everything between the two delimiters has been re-tokenized AS CODE, so the
+  pattern's own text supplies `;`s and eats `/`s: a `;` inside a `(?{ … ; … })`
+  block stopped the scan, and the closing delimiter is swallowed into a
+  `Regexp::Match` (after a `(…)` group — which then eats the rest of the FILE)
+  or merged into `//`.  `_match_close_after` tracks nesting and accepts any
+  Operator/Regexp token BEGINNING with `/`.  It answers yes/no, never WHERE, so
+  pattern text that looks like the close is still the right answer.
+  → `ppi-upstream-bugs.md` §11a, `ppi-bug-report.t` rows 10–12.
+- **A RUN-TIME "PCL:" announcement BREAKS every row that asserts an empty
+  child output — and the sweep, not the gate, is what says so.**  The
+  un-dropped `1 while /b(?{$foo = $_})c/g` RUNS and the `(?{…})` strip is
+  silent, so the obvious companion fix was to make the strip ANNOUNCE (rule
+  12's ANNOUNCE half by the s329 boundary).  It was implemented, the gate was
+  GREEN, and the full sweep rejected it: `perl-tests/split.t` lost FOUR
+  passing rows, `fresh_perl_is('…split(/\w(?{ undef @ary })/…);', '')` — the
+  child asserts EMPTY output, so a stderr line makes them fail permanently and
+  unable ever again to detect the crash they exist to catch.  That is a
+  coverage LOSS, not the exposure of a row passing on nothing, so the announce
+  was REVERTED and re-scoped to COMPILE time, in the `PCL:` channel the #339
+  drop announcer uses and no row's output captures (**#874**, with the
+  `(*SKIP)`/`(*FAIL)` control verbs).  What makes the silence affordable is
+  the population, measured: every `(?{` in the six census populations is in
+  perl's own regex tests plus six `perl-tests/` files — ZERO CPAN modules.
+  **Standing: a diagnostic that fires during a RUN is a sweep question, never
+  a gate question.**
+- **`$21` and up are capture VARIABLES, read through `p-high-capture` (#851
+  half a).**  $1..$20 are defvars emitted as bare symbols; higher ones had no
+  defvar, so `open $99, "foo"` (t/io/open.t:362) left the whole file dead at
+  load, unbound.  The accessor reads `@{^CAPTURE}` — the same state the
+  specials hold, and complete — so a 25-group pattern really does answer `$25`
+  (probed identical to perl) and 20 is a SPEED boundary, not a semantic one.
+  Half (b), that a capture is READ-ONLY in perl (`$1 = 5`, `chop $1`,
+  `open $99`), is **#873**: the specials are not boxes, so there is nowhere to
+  hang the flag, and the write spellings are the whole assign/modify family.
+
 ## s455e (2026-08-31, Fable) — AI + AJ merged: boxed aggregates LIVE, #820/#850 in; the merge-review rulings
 
 - **Both s457 agents reviewed and merged same-session** (AJ `21e0b70` +
