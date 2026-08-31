@@ -705,16 +705,28 @@ pattern (cl-ppcre hangs on it otherwise) and the rest of the match runs —
 **silently**, which puts it in the #138 family: `1 while /b(?{$foo = $_})c/g`
 leaves `$foo` undef and says nothing.
 
+**It is no longer silent (task #874, s459an): the strip ANNOUNCES at COMPILE
+time**, on the transpile's stderr, once per pattern:
+
+```
+PCL: regex code block (?{...}) is STRIPPED at FILE line N -- cl-ppcre has no
+mid-match callback, so the match runs WITHOUT the block and its side effects
+never happen
+```
+
 **A RUN-TIME announcement was implemented in s458 and MEASURED, then reverted**
-(`%pcl-strip-regex-code-blocks`, task #874).  It cost `perl-tests/split.t` four
-passing rows, because they are `fresh_perl_is(…, '')` — the child asserts EMPTY
-output, so any stderr line makes them fail permanently and, worse, unable ever
-again to detect the crash they exist to catch.  That is a coverage LOSS, not
-the exposure of a row passing on nothing.  The announcement belongs at COMPILE
-time instead, in the `PCL:` channel the #339 drop announcer already uses, which
-no row's output captures.  What makes waiting for that affordable is the
-population: every `(?{` in the six census populations is in perl's own regex
-tests plus six `perl-tests/` files — **zero CPAN modules** (measured s458).
+(`%pcl-strip-regex-code-blocks`).  It cost `perl-tests/split.t` four passing
+rows, because they are `fresh_perl_is(…, '')` — the child asserts EMPTY output,
+so any stderr line makes them fail permanently and, worse, unable ever again to
+detect the crash they exist to catch.  That is a coverage LOSS, not the
+exposure of a row passing on nothing.  So the line is emitted where the
+COMPILER holds the pattern (`Pl::Parser::_announce_regex_gaps`, the `PCL:`
+channel the #339 drop announcer already uses): a child program's transpile
+stderr is discarded on success by `tools/pclperl-for-tests`, so no row's
+observed output can capture it.  Only a LITERAL pattern carries its text at
+compile time; one built at run time out of an interpolated variable is out of
+reach and stays silent, rather than reintroducing the channel that was
+measured and rejected.
 
 **Rationale:** These features require deep integration between the regex
 engine and the Perl interpreter.  They are rarely used in CPAN modules and
@@ -724,8 +736,40 @@ have no clean mapping to CL-PPCRE's interface.
 `t/re/pat.t` and `t/re/pat_advanced.t`, whose `1 while /…(?{…})…/g` counting
 loops became honest failures when #872 stopped dropping the statement.
 The regex CONTROL VERBS `(*SKIP)` / `(*FAIL)` / `(*MARK:name)` are a DIFFERENT
-gap and are not covered here — they are not stripped, so they reach cl-ppcre
-and fail the match with cl-ppcre's own message (task #874).
+gap, with the opposite answer — see the next section.
+
+---
+
+## Regex control verbs: `(*SKIP)`, `(*FAIL)`, `(*MARK:name)`, `(*PRUNE)`, …
+
+**Perl behaviour:** backtracking control verbs steer the regex engine —
+`(*SKIP)` marks a point the engine may not backtrack past, `(*FAIL)` forces
+the current attempt to fail, `(*MARK:name)` names a position.  Together with
+`(?{code})` they are how perl writes a "find every non-overlapping match with
+side effects" loop.
+
+**PCL behaviour:** not supported, and — unlike a code block — **not stripped**.
+Removing `(*FAIL)` would INVERT the meaning of the match it appears in, which
+is worse than failing: the pattern would start succeeding where the author
+wrote "always fail here".  So the verb is left in the pattern and cl-ppcre
+rejects it, in cl-ppcre's own words.
+
+Because a `(?{…})` beside it has already been stripped by then, cl-ppcre's
+message names a **position in a pattern the program never wrote**, which is
+why a compile-time line says whose gap it is first (task #874, s459an):
+
+```
+PCL: regex control verb (*FAIL/SKIP) is NOT supported at FILE line N -- it is
+left in the pattern on purpose -- removing (*FAIL) would INVERT the match --
+so cl-ppcre rejects the pattern in its own words
+```
+
+Same channel and same limits as the code-block announcement above: the
+transpile's stderr, once per construct per site, literal patterns only, silent
+under `pl2cl --module`.
+
+**Affected tests:** `t/re/pat_advanced.t` lines 1235/1255/1267/1285 — census
+DROPS until #872, honest failures since.
 
 ---
 

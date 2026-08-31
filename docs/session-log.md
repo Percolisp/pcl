@@ -48,6 +48,43 @@ guards inverse-verified (base answers differ on every field; rows 19–22 of
 both sides).  Three artifacts regenerated: each differs by exactly the gen
 stamp, which is itself evidence the compiler change is emission-neutral there.
 
+**Fillers.**  **#874** — a regex gap now ANNOUNCES, at COMPILE time, with a
+verb of its own (`PCL: regex …`, not `PCL: statement dropped …`, which the
+runners key on).  One pass over the document's regex tokens in `_ppi_parse`,
+deliberately outside the three in-place repair passes so `fragment_doc`'s
+re-parses do not double-announce.  The two constructs get opposite treatment
+for one reason each: a `(?{code})` block is STRIPPED, so the match runs without
+it and its side effects never happen; a control verb is NOT stripped, because
+removing `(*FAIL)` would INVERT the match, so it reaches cl-ppcre and is
+rejected in cl-ppcre's words — naming a position in a pattern the program never
+wrote, which is what the compile-time line exists to explain.  The run-time
+version is the one that must not be re-tried: s458al implemented it, the gate
+stayed green and the sweep cost `perl-tests/split.t` four `fresh_perl_is(…,'')`
+rows.  Here the sweep is **+0** — the line rides the transpile's stderr, which
+`pclperl-for-tests` discards on success.  **#875** — `register_categories` now
+allocates; the next offset is derived from the table (max+2 IS perl's LAST_BIT
+at every step, and cannot drift from the mirrored table the way a second
+constant would).  `$BYTES` was a stale 12 against perl's 20, and that is not
+trivia: perl's invariant is `$LAST_BIT == $BYTES*8`, so 12 would have put the
+first runtime category on top of `deprecated::goto_construct`.  The other half
+was mine from #870 — PCL's `lib/version.pm` must declare its own category as it
+loads, exactly as the real one does, and that single registration IS perl's
+81st key against PCL's 80.  `use warnings::register` stays unimplemented with
+its reason written down (it registers the CALLING package; PCL skips lexical
+pragmas at parse time, so there is no caller to read).
+
+**ONE COMPANION ROW I DID NOT EDIT, and why.**  `re/pat_advanced.t` reads
+951/729 against a snapshot of 673/223, with `drops` 4 → 0.  That is **#872's**
+move, from the PREVIOUS session: its row was never refreshed because the file
+is QUICK-CAPPED (900 s allowance), so s458al's own companion pass skipped it.
+Attribution is conclusive rather than argued — `tools/emission-ab.pl` over
+perl's own t/ reports 605/605 SAME, RCDIFF 0, for this whole batch, so my
+compiler emits byte-identical CL for that file.  The fix is a one-row splice
+(`re/pat_advanced.t 1678 0 951 729 DIFF <blank> 0`, cause: #872 un-dropped the
+four `1 while /…/` counting loops at lines 1235/1255/1267/1285, so the file
+runs 896 → 1680 rows), but my brief restricts baseline edits to the drop census
+and the sweep fail/pass baselines, so I am reporting it instead of taking it.
+
 **Filed, all PRE-EXISTING and all outside this agent's region.**  **#890**: the
 raw-numeric B-regime freeze DIES on an overloaded object that came from a
 MODULE.  `_overload_in_file` is a TEXTUAL scan of *this* file for `use

@@ -1069,25 +1069,53 @@ my $o = O->new;                         print "g=", $o->w / $o->h, "\n";
 # The statement no longer DROPS — but a `(?{ … })` code block in the pattern is
 # still stripped (docs/not-supported.md "Regex code blocks"), so the match runs
 # WITHOUT the block: perl sets $foo, PCL leaves it undef.  This row pins that
-# residue so it cannot be mistaken for the repair failing, and it is the guard
-# on task #874: a RUN-TIME announcement here was implemented in s458 and
-# MEASURED — it costs perl-tests/split.t four `fresh_perl_is(…, '')` rows,
-# which assert an EMPTY child output — so the announcement belongs at COMPILE
-# time, in the `PCL:` channel no row's output captures.  WHEN #874 LANDS this
-# row's second assertion changes from "says nothing" to "says it at compile
-# time"; the first must not change.
+# residue so it cannot be mistaken for the repair failing.
+#
+# #874 LANDED (s459an): the strip now ANNOUNCES, at COMPILE time.  The second
+# assertion below is the one that matters and it has NOT been weakened — it
+# still says the RUN is silent, because a RUN-TIME announcement was implemented
+# in s458, MEASURED, and cost perl-tests/split.t four `fresh_perl_is(…, '')`
+# rows, which assert an EMPTY child output.  The third asserts the line is
+# said where no row's output captures it: on the TRANSPILE's stderr.
 {
-    my $out = run_cl(<<'PERL');
+    my $prog = <<'PERL';
 my ($foo, $bar);
 $_ = "abcabc";
 1 while /b(?{$foo = $_; $bar = pos})c/g;
 print "foo=", (defined $foo ? $foo : "U"), "\n";
 PERL
+    my $out = run_cl($prog);
     like($out, qr/^foo=U$/m,
          '#872: the statement RUNS (no drop, no die); the code block is stripped');
     unlike($out, qr/^PCL: /m,
            '#874: and the strip says nothing AT RUN TIME — a stderr line here '
          . 'breaks every row that asserts an empty child output');
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $terr = `$pl2cl $pl_file 2>&1 >/dev/null`;
+    like($terr, qr/^PCL: regex code block \(\?\{\.\.\.\}\) is STRIPPED at .* line 3 --/m,
+         '#874: it says so AT COMPILE TIME instead, naming the line');
+}
+
+# ── #874: the CONTROL VERBS are the other half, and get the opposite answer ──
+# `(*FAIL)` must NOT be stripped — removing it INVERTS the match — so it
+# reaches cl-ppcre, which rejects the pattern in its own words, naming a
+# position in a pattern the program never wrote (the code block beside it has
+# already been stripped).  The compile-time line is what says whose gap that is.
+{
+    my $prog = <<'PERL';
+my @res; my $count = 0;
+$_ = "aaabaaab";
+1 while /(a+b?)(*SKIP)(?{$count++; push @res,$1})(*FAIL)/g;
+print "count=$count\n";
+PERL
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $prog; close $fh;
+    my $terr = `$pl2cl $pl_file 2>&1 >/dev/null`;
+    like($terr, qr/^PCL: regex control verb \(\*FAIL\/SKIP\) is NOT supported at .* line 3 --/m,
+         '#874: a control verb is announced at compile time, both verbs named');
+    like($terr, qr/^PCL: regex code block/m,
+         '#874: …and the stripped block on the same pattern is announced too');
 }
 
 # ── #851: a capture variable above the pre-declared specials ─────────────────

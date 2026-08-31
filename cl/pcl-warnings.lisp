@@ -34,8 +34,12 @@
 (defvar $b (make-p-box nil))
 
 ;; Forward declarations for undeclared package globals
+(p-defcell $bit (make-p-box nil))
 (p-defcell $message (make-p-box nil))
+(p-defcell $name (make-p-box nil))
+(p-defcell $off (make-p-box nil))
 (p-defcell warnings::$VERSION (make-p-box nil))
+(p-defcell warnings::%Offsets (make-hash-table :test 'equal))
 
 (p-defcell $VERSION (make-p-box nil))
 
@@ -53,7 +57,23 @@
 
 (p-sub pl-fatal_enabled_at_level (&rest %_args) (p-args-body (block nil (p-return 0))))
 
-(p-sub pl-register_categories (&rest %_args) (p-args-body (block nil)))
+(p-sub pl-register_categories
+  (&rest %_args)
+  (p-args-body
+    (block nil
+      (p-void-ctx
+        (p-foreach ($name @_)
+          :my
+          t
+          (p-if (p-defined (p-gethash warnings::%Offsets $name)) (p-next))
+          (let (($bit (make-p-box nil)))
+            (p-my-= $bit 0)
+            (p-foreach ($off (p-list-ctx (p-values warnings::%Offsets)))
+              :my
+              t
+              (p-if (p-> $off $bit) (p-my-= $bit $off)))
+            (p-setf (p-gethash warnings::%Offsets $name) (p-+ $bit 2))))
+        (p-return)))))
 
 (p-sub pl-warn
   (&rest %_args)
@@ -62,7 +82,7 @@
       (p-void-ctx
         (let (($message (make-p-box nil)))
           (p-my-= $message (p-pop @_))
-          (p-caller-ctx (p-warn :loc "lib/warnings.pm line 38" $message)))))))
+          (p-caller-ctx (p-warn :loc "lib/warnings.pm line 69" $message)))))))
 
 (p-sub pl-warnif
   (&rest %_args)
@@ -71,7 +91,7 @@
       (p-void-ctx
         (let (($message (make-p-box nil)))
           (p-my-= $message (p-pop @_))
-          (p-caller-ctx (p-warn :loc "lib/warnings.pm line 44" $message)))))))
+          (p-caller-ctx (p-warn :loc "lib/warnings.pm line 75" $message)))))))
 
 (p-run-compile-phase-blocks)
 

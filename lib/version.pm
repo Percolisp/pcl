@@ -16,6 +16,12 @@ use overload
 
 our $VERSION = '0.9933';
 
+# The real version.pm declares its own warning category as it loads (`use
+# warnings::register` plus an explicit call).  That registration is the whole
+# difference between perl's 81 `%warnings::Offsets` keys and PCL's 80 after
+# `require experimental`, which loads this module — task #875.
+warnings::register_categories(qw/version/);
+
 sub new {
     my ($class, $val) = @_;
     $val //= '';

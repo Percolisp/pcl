@@ -48,7 +48,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 32;
+plan tests => 33;
 
 # ---- 1. the table is perl's -----------------------------------------------
 
@@ -293,6 +293,40 @@ SKIP: {
     my $perl_out = `perl $dump_file 2>&1`;
     is($dump_out, $perl_out,
         'the three tables are line-for-line this 5.40 perl\'s (a drift fails here)');
+}
+
+# THE RUNTIME HALF of the same table (task #875).  The static mirror above is
+# only what perl starts with: `warnings::register_categories` ALLOCATES, and a
+# module that declares its own category as it loads produces a key no static
+# table can carry.  `version.pm` is that module, and its registration is the
+# whole difference between perl's 81 keys and PCL's 80 after `require
+# experimental` — which is how this was found.
+#
+# `$BYTES` is in the same row because it is not free-standing trivia: perl's
+# invariant is $LAST_BIT == $BYTES*8, so the stale 12 this runtime carried
+# would have put the first runtime category at bit 96, on top of
+# "deprecated::goto_construct".  Same 5.40 host gate as the drift row.
+SKIP: {
+    my $hostv = sprintf("%.6f", $]);
+    skip "the host perl is $], not 5.40.x — the offsets are 5.40's", 1
+        if $hostv !~ /^5\.040/;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh <<'PERL';
+use warnings;
+print "BYTES\t$warnings::BYTES\n";
+print "base\t", scalar(keys %warnings::Offsets), "\n";
+require version;
+print "version\t", (defined $warnings::Offsets{version}
+                    ? $warnings::Offsets{version} : "MISSING"), "\n";
+warnings::register_categories("Zed::One", "Zed::Two", "all");
+print "one\t$warnings::Offsets{'Zed::One'}\n";
+print "two\t$warnings::Offsets{'Zed::Two'}\n";
+print "all\t$warnings::Offsets{'all'}\n";
+print "keys\t", scalar(keys %warnings::Offsets), "\n";
+PERL
+    close $fh;
+    is(run_cl($pl_file), scalar `perl $pl_file 2>&1`,
+       'register_categories allocates like perl, and version.pm declares its own (#875)');
 }
 
 # The shim is gone: what loads is the REAL module, from perl's own lib.

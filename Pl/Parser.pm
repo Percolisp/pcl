@@ -600,6 +600,10 @@ sub _ppi_parse {
   _reclassify_bare_vwords($doc) if $doc;
   _merge_unicode_symbols($doc) if $doc;
   _merge_punct_array_symbols($doc) if $doc;
+  # A DIAGNOSTIC, not a repair — deliberately NOT one of the three in-place
+  # passes above, so `fragment_doc`'s re-parses do not announce a construct
+  # twice (#435 routes those three and only those three).
+  $self->_announce_regex_gaps($doc) if $doc;
   return $doc;
 }
 
@@ -10690,6 +10694,87 @@ sub _announce_dropped_statement {
   return if $announced_drop{"$file:$line:$text"}++;
   print STDERR "PCL: statement dropped at $file line $line: $text -- $reason\n";
   return;
+}
+
+
+# THE OTHER COMPILE-TIME DIAGNOSTIC: the regex constructs PCL strips or cannot
+# run, said ONCE, while the compiler holds the pattern (task #874).  Two of
+# them, one channel, and they get OPPOSITE treatment for one reason each:
+#
+#   (?{code}) / (??{code})  are REMOVED from the pattern by the runtime
+#       (%pcl-strip-regex-code-blocks) and the match then runs without them, so
+#       `1 while /b(?{$foo = $_})c/g` leaves $foo undef and used to say
+#       nothing.  That is the #138 family inside a regex.
+#   (*SKIP) / (*FAIL) / …   are deliberately NOT removed — dropping `(*FAIL)`
+#       would INVERT the match's meaning — so they reach cl-ppcre, which
+#       rejects them in its own words, naming a position in a pattern the
+#       program never wrote (the code block beside them is already stripped).
+#       This line is what says whose fault that is.
+#
+# WHY COMPILE TIME, and do NOT re-try the run-time version: s458al put a
+# `format *error-output*` in the stripper.  The gate stayed green and the FULL
+# SWEEP rejected it — `perl-tests/split.t` lost FOUR passing rows, because they
+# are `fresh_perl_is('… (?{ undef @ary }) …', '')`: the child asserts EMPTY
+# output, so any stderr line fails them permanently and, worse, leaves them
+# unable ever again to detect the crash they exist to catch.  Emitted here, the
+# line is on the TRANSPILE's stderr, which tools/pclperl-for-tests discards on
+# a successful transpile — so no row's observed output can capture it.
+#
+# Only a LITERAL pattern carries its text at compile time.  A pattern built at
+# run time out of an interpolated variable is out of reach and stays silent,
+# rather than reintroducing the run-time channel that was measured and rejected.
+#
+# `PCL: regex …` is a DIFFERENT verb from `PCL: statement dropped at …` on
+# purpose: the runners and tools/gate-set-scan.pl key on that fixed prefix, and
+# a regex gap is not a dropped statement — the statement runs, the pattern is
+# poorer.  Gated exactly like the drop announcement, so `pl2cl --module` is as
+# silent here as it is there.
+my %announced_regex;   # "file:line:construct" seen this process — announce ONCE
+
+sub _announce_regex_gaps {
+  my ($self, $doc) = @_;
+  return if $self->collect_prototypes_only;
+  return if !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
+  my $file = $self->eval_mode ? '(eval)'
+           : $self->has_filename ? $self->filename : '-';
+  my $toks = $doc->find(sub {
+    my $r = ref $_[1];
+    return $r =~ /^PPI::Token::Regexp/ || $r eq 'PPI::Token::QuoteLike::Regexp';
+  }) || [];
+  for my $tok (@$toks) {
+    my $content = $tok->content;
+    next if !defined $content;
+    my $line = $tok->line_number // 0;
+    for my $hit (_regex_gap_hits($content)) {
+      my ($what, $effect) = @$hit;
+      next if $announced_regex{"$file:$line:$what"}++;
+      print STDERR "PCL: regex $what at $file line $line -- $effect\n";
+    }
+  }
+  return;
+}
+
+# The constructs, and what PCL actually does with each — kept as one list so
+# the two opposite answers stay side by side with the reason each is right.
+# An escaped `\(` opens nothing; a bare `(*` is a syntax error in perl unless
+# it opens a verb, so these shapes are specific enough without re-parsing the
+# pattern (which is the runtime's job, and cl-ppcre's).
+sub _regex_gap_hits {
+  my ($content) = @_;
+  my @hits;
+  push @hits, ['code block (?{...}) is STRIPPED',
+               'cl-ppcre has no mid-match callback, so the match runs WITHOUT '
+             . 'the block and its side effects never happen '
+             . '(docs/not-supported.md "Regex code blocks")']
+    if $content =~ /(?<!\\)\(\?\??\{/;
+  my %verbs;
+  while ($content =~ /(?<!\\)\(\*([A-Za-z_]+)/g) { $verbs{$1} = 1 }
+  push @hits, ['control verb (*' . join('/', sort keys %verbs) . ') is NOT supported',
+               'it is left in the pattern on purpose -- removing (*FAIL) would '
+             . 'INVERT the match -- so cl-ppcre rejects the pattern in its own '
+             . 'words (docs/not-supported.md "Regex control verbs")']
+    if %verbs;
+  return @hits;
 }
 
 

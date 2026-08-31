@@ -19795,7 +19795,12 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; initialization still wins.
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (p-defcell $VERSION (make-p-box "1.50"))
-  (p-defcell $BYTES (make-p-box 12))   ; bytes in warning bitmask (12 in modern Perl)
+  ;; Bytes in the warning bitmask.  MEASURED against perl 5.40.3, which says
+  ;; 20 — the "12 in modern Perl" this line used to claim was stale by four
+  ;; categories' worth of bits, and it is not free-standing trivia: perl's
+  ;; invariant is $LAST_BIT == $BYTES*8, so 12 would put the next runtime
+  ;; category at bit 96, on top of "deprecated::goto_construct" (#875).
+  (p-defcell $BYTES (make-p-box 20))
   (p-defcell %Offsets (make-hash-table :test 'equal))
   (p-defcell %NoOp (make-hash-table :test 'equal)))
 (defun pl-unimport (&rest args) (declare (ignore args)) nil)

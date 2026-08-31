@@ -53,6 +53,40 @@ those two files and the live plan doc directly -- no new review-doc families.*
   perl's own t/ (605) + lib (22), and the shape occurs in NO population, so
   probes + guard rows are the bar (s371).  Guard `Pl/t/lvalue-ref-01.t`
   (18 → 23), inverse-verified.
+- **A regex gap is announced AT COMPILE TIME, in the `PCL:` channel, with a
+  DIFFERENT verb from a dropped statement (#874).**  `PCL: regex <what> at FILE
+  line N -- <effect>`; `Pl::Parser::_announce_regex_gaps`, one pass over the
+  document's regex tokens in `_ppi_parse` (deliberately NOT one of the three
+  in-place repair passes, so `fragment_doc`'s re-parses do not double-announce).
+  **Do not re-try the run-time version**: s458al put a `format *error-output*`
+  in `%pcl-strip-regex-code-blocks`, the gate stayed green and the FULL SWEEP
+  rejected it — `perl-tests/split.t` lost four `fresh_perl_is(…, '')` rows,
+  which assert an EMPTY child output.  At compile time the line rides the
+  TRANSPILE's stderr, which `tools/pclperl-for-tests` discards on success, and
+  the sweep measured **+0**.  The two constructs get OPPOSITE treatment for one
+  reason each: a `(?{code})` block is STRIPPED (cl-ppcre has no mid-match
+  callback), a control verb `(*SKIP)`/`(*FAIL)` is NOT — removing `(*FAIL)`
+  would INVERT the match — so it reaches cl-ppcre and is rejected in cl-ppcre's
+  words.  Literal patterns only; one built at run time from an interpolated
+  variable stays silent rather than reintroducing the rejected channel.  Two
+  `not-supported.md` sections; guard `Pl/t/transpile-test-10.t` (+3 rows, and
+  the "says nothing AT RUN TIME" assertion is KEPT, not weakened).
+- **`warnings::register_categories` ALLOCATES, and the next offset is derived
+  from the table (#875).**  perl keeps a `$LAST_BIT` counter, but max+2 IS
+  LAST_BIT at every step, so deriving it cannot drift from the mirrored table a
+  second constant would shadow.  Probed vs perl 5.40.3: first new category 160,
+  next 162, a known name (including `"all"`, offset 0) untouched.  `$BYTES` was
+  a stale **12** and is perl's **20** — not trivia: perl's invariant is
+  `$LAST_BIT == $BYTES*8`, so 12 would have put the first runtime category on
+  top of `deprecated::goto_construct`.  The other half is that PCL's own
+  `lib/version.pm` must declare its category as it loads, exactly as the real
+  one does — that single registration IS perl's 81st key against PCL's 80 after
+  `require experimental`.  NOT implemented, deliberately: `use
+  warnings::register` (it registers the CALLING package, and PCL skips lexical
+  pragmas at parse time, so there is no caller to read); perl's own users call
+  `register_categories` explicitly too, which is the path that works.  Guard
+  `Pl/t/feature-pragma-01.t` (+1 row, compared against a fresh perl on the same
+  file).
 - Filed from the probes, all PRE-EXISTING and all outside this agent's region:
   **#890** (the raw-numeric B-regime freeze DIES on an overloaded object that
   came from a MODULE — `_overload_in_file` is a TEXTUAL scan of this file
