@@ -243,9 +243,14 @@ doesn't do what Perl's does either. Nothing is lost carrying this over.
 **Regular expressions.** Perl's regex engine and JavaScript's built-in
 `RegExp` differ in a long list of corner cases — character classes, named
 captures, lookaround, Unicode property matching, and more. Reconciling the
-two is the single largest item of work in porting the runtime; this
-document does not enumerate the differences, only flags it as the biggest
-unsolved problem.
+two is the single largest item of work in porting the runtime.  The shape
+of the answer is now sketched (Part II §II.8 item 3): translate the common
+subset to native JS `RegExp` (modern JS regex covers far more than its
+reputation, and V8's engine is fast), fall back to PCRE2 — WASM build
+first, native binding if measured necessary — for the perl constructs JS
+cannot express, and keep the CL target's loud compile-time refusals for
+the code-block features neither engine runs.  What remains open is the
+translation rule table itself, not the architecture.
 
 **String eval.** Perl's `eval "some code string"` compiles and runs Perl
 source at run time, so the compiler itself has to be reachable while the
@@ -607,10 +612,41 @@ paths are the #217 problem, and a JS target must not inherit it.
    ride on ≤0xFF-only strings (perl's own downgraded model).  The corners
    (chr(0x110000)+, `use bytes`) are already not-supported on the CL
    target — parity, not perfection.
-3. **Regex** (the big one, own doc): start with pattern TRANSLATION to JS
-   RegExp for the measured-common subset + a LOUD perl-shaped die on any
-   untranslatable construct (the project's refusal discipline), and let
-   the corpus decide whether an engine port is ever needed.
+3. **Regex** (the big one, own doc): a THREE-TIER design (settled in
+   outline s460, 2026-09-01; the own doc fills in the translation table).
+   - **Tier 1 — translate to native JS `RegExp`** for the measured-common
+     subset.  This is the performance-right default: V8's regex engine is
+     JITted and fast, and ES2018+ covers more than the folklore says —
+     named captures, lookbehind, Unicode property escapes (`\p{…}` under
+     `u`), dotall `s`, and sticky `y` for the `\G`/`m//gc` idiom.  PCL
+     already ships a pattern-rewriting layer (the cl-ppcre translation in
+     the CL runtime), so the approach is proven in-house; this is a second
+     rule table over the same scanner, not a new mechanism.
+   - **Tier 2 — PCRE2 as the fallback engine** for constructs JS RegExp
+     cannot express but perl programs actually use (possessive
+     quantifiers, atomic groups, recursion `(?R)`, conditionals
+     `(?(1)…)`, POSIX classes, `\K`).  npm landscape as surveyed
+     2026-09-01: the bare `pcre` and `pcre2` packages are DEAD (years
+     stale) — do not reach for them; the live options are
+     `@segevfiner/pcre2` (Node-API native binding, maintained) and the
+     current `pcre2-wasm` builds (tracking PCRE2 10.47.x).  The trade-off
+     to decide at that milestone: native addon = PCRE2's JIT (fast) but
+     node-gyp/prebuilt distribution pain; WASM = zero toolchain and
+     browser-portable, but interpreter-only (no JIT inside WASM) plus a
+     per-match string-marshalling copy — exactly the m//g hot-loop cost
+     the CL backend just spent a round removing.  Start WASM for
+     portability, measure, promote to the N-API binding only if a real
+     workload demands it.
+   - **Tier 3 — the LOUD perl-shaped die** for what neither engine runs
+     (`(?{…})`, `(??{…})` — the same compile-time announced refusals the
+     CL target has, #874's shape), so the refusal discipline is shared
+     verbatim across backends.
+   - **Both-backends note**: PCRE2 is ALSO the CL side's named "engine
+     gap next" (regexg ~2.1× = cl-ppcre vs perl's C engine, s454ac).  The
+     pattern-classification corpus and the translation rule table built
+     for tier 1/2 should be written backend-neutral — one "which
+     constructs does this pattern use" classifier serving the JS
+     translator, a future PCRE2-FFI path on SBCL, and the announce layer.
 4. **String eval architecture**: Node = `pl2cl --server` subprocess,
    verbatim from the CL runtime's design (HARD REQUIREMENT preserved);
    browser = out of scope until someone asks.
