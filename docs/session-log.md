@@ -4,6 +4,43 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 459f (2026-08-31, Fable) — #876 the multi-distro INSTALL MATRIX green on all four distros (#282's container half CLOSED); round 16 launched (AM #862 / AN #870+#861+fillers)
+
+1. **#876 SHIPPED and GREEN** (`e9296cb` + fix `1cacd42`): a second
+   workflow `install-matrix.yml` — workflow_dispatch + weekly cron + a
+   push trigger scoped to the harness's OWN files (that scoped trigger IS
+   the first run; `gh` is unauthed locally so dispatch could not be) —
+   over a container matrix ubuntu:22.04 / ubuntu:24.04 / debian:12 /
+   debian:13.  ONE recipe script `tools/install-matrix/install-and-verify.sh`
+   is shared by the CI containers and the local
+   `tools/install-matrix/Dockerfile` (ARG BASE_IMAGE) driven by
+   `tools/install-matrix.pl` (docker/podman; none installed locally — the
+   driver says to ask the user).  Recipe = ci.yml minus sudo, plus what
+   bare images lack (make/gcc/curl/bzip2/git), C.UTF-8 for the locale
+   gotcha, a utf8-source smoke probe, the self-verifying installer, the
+   installed-tools smoke, `prove tools/t/install-pcl.t`.
+2. **The first run surfaced the predicted stock-machine fact**: debian:13
+   + ubuntu:24.04 passed end to end; ubuntu:22.04 + debian:12 died at
+   `GLIBC_2.38 not found` launching sbcl — **sbcl.org's 2.6.0 binary
+   needs glibc ≥ 2.38** (those images have 2.35/2.36).  Verified by
+   objdump on the tarball: **the 2.5.2 binary — the validated floor —
+   needs only GLIBC_2.34**, so the fix is a per-image SBCL pin and the
+   matrix now covers BOTH validated SBCL versions (floor on old distros,
+   2.6.0 on new).  Run 2: **all four distros SUCCESS**.  `ci-step`'s
+   public annotations carried the exact cause without admin rights — the
+   s439 diagnosability design paid off on its first container failure.
+3. **Round 16 launched** from base `e9296cb` (two Opus agents, models
+   pinned, own worktrees, standing rules; disjoint regions declared):
+   **AM** (s459am, gen v2-500, IDs 880–889) = #862 ARM A (foreach-LIST
+   read-only raw binding; #810 rides; full sweep IS the gate + gate-SET +
+   Kind-A registry + elem-alias battery both settings) → re-measure
+   `slices` before ARM B → #814 → #812 measurement; **AN** (s459an, gen
+   v2-510, IDs 890–899) = #870 vcmp → #861 backslash-loses → fillers
+   #875/#874/#873/#852.  In-flight table in memory
+   `project_s421_opus_agents_inflight`.
+
+---
+
 ## Session 455f (2026-08-31, Fable) — ROUND 15 MERGED: **arrhash BEATS perl (0.67×)** — the aggregate-parity target met; the real experimental.pm loads; gen v2-490
 
 Both round-15 agents reviewed and merged in finish order (AL `0d5b923`,
