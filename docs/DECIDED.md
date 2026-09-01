@@ -21,6 +21,74 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s463au (2026-09-01, Opus agent AU, round 20) — the empty list is a VALUE, and a magic-lvalue window's TARGET is a place in all three write spellings
+
+- **A FAILED `m//` ANSWERS BY CONTEXT AND BY NOTHING ELSE (#962 = #459, both
+  CLOSED).**  Scalar/void is the defined-false `""` (the #416 rule, unmoved);
+  LIST context is the EMPTY LIST, whatever the pattern — a capture-less miss
+  is not a one-element false value, and neither is a capture-bearing one
+  (the task said the capture path was already right; measured, it was not —
+  only the sole-RHS spelling hid it).  `cl/pcl-runtime.lisp` `do-regex-match`.
+- **RAW `nil` IS THE EMPTY LIST TO EXACTLY ONE CONSUMER.**  `%p-flatten-list`
+  drops it as an empty-list/hole marker; `p-array-fill` keeps it as an array
+  HOLE and `p-flatten-args` spreads it as ONE argument.  So a runtime value
+  meaning "no elements" must be a zero-length VECTOR — `(%p-empty-list)`, now
+  the ONE producer (`%pcl-no-op-import-result` #534, `p-return-value`'s
+  list-context nil arm and `do-regex-match` all call it).  `docs/ir-spec.md`
+  §the regex row + §the empty-list note.
+- **perl gives `substr`/`vec`/`pos` their FIRST ARGUMENT IN LOOSE LVALUE
+  CONTEXT, and that is ONE rule for THREE write spellings (#960 half (b))**:
+  `substr(X,…) = V`, the 4-argument `substr(X,…,V)` and #939's
+  `substr(X,…) =~ s///`.  `Pl::ExprToCL::_lvalue_target_form` is the one
+  rewriter; `_write_through_form` (the `=~` half, which also swaps the HEAD
+  to the `-lvalue-cell`) calls it.  The gate is the WRITE POSITION — the `=`
+  operator, or a 4-argument call — never the head: a 2/3-argument substr
+  READS, and imposing lvalue context on a read promotes the element to a box
+  on every access.
+- **`*p-match-pos*` IS KEYED BY BOX IDENTITY, so `pos(ELEM)` needs all FOUR
+  element kinds** — `gen_funcall`'s `pos` arm listed `a_acc`/`h_acc` only, so
+  `pos($c->{tmp}) = 0` wrote to a value while the named-hash spelling worked.
+  A table now, like the `delete` arm three lines below it.
+- **p-substr's 4-argument form STAYS SILENT on a non-box target, and that is
+  measured, not conceded** (#960 asked for a rule-12 death there).
+  `sub f {"hello"} substr(f(),0,2,"AB")` is NOT an error in perl: the
+  temporary is written and discarded and the call answers "he".  Only the `=`
+  spelling refuses a non-lvalue sub call, and only a READ-ONLY literal refuses
+  both — a distinction PCL cannot make.  The s329 boundary agrees: perl
+  discards the write itself.
+- **A SKIP REGISTRATION CAN BLAME THE WRONG MECHANISM, and the registry's own
+  stale-detector is what catches it**: substr.t test 142 was registered as
+  "4-arg substr does not write through tie magic"; the cause was the RAW
+  ELEMENT (s455), and with the element's BOX — the box holding the tie proxy
+  — `box-set` runs STORE as it always would have.  Dropped in the same commit
+  (`# REGISTRY-STALE: substr.t test 142 now passes`).
+- **#960 half (a) — the BINARY overload refusal — is DECLINED with its
+  evidence (#972)**, per DECIDED s461f's caution.  PCL's overload model has
+  three measured gaps that would make the death fire where perl runs:
+  `nomethod` is ignored; the BITWISE ops have no overload dispatch at all (and
+  that is where the half's own rows are — perl-tests/bop.t 462-465, two
+  needing the refusal and two needing the dispatch); and `""` is not derived
+  from `0+`, which is what decides the refusal's own boundary (`.` and `x` are
+  the two binary ops perl AUTOGENERATES and therefore never refuses).  The
+  message shape and the full die/no-die table are measured in #972 so the next
+  session does not re-derive them.
+- **THE VALUE OF AN UNTAKEN `if`/`unless` STATEMENT MODIFIER IS THE
+  CONDITION'S OWN VALUE (#920, CLOSED)** — defined, never undef, and for
+  `unless` it is the condition, NOT its negation (`sub { 5 unless 1 }` is 1).
+  `Pl::Parser2::_modifier_ret_form` is the one spelling of the ret-var
+  transform the BLOCK spelling `if (C) { … }` has always used; `_apply_modifier`
+  takes an optional `$tail_ctx` and applies it, so the four callers that KNOW
+  they are in tail position (`return … if`, `next/last … if`, `our $y = … if`,
+  `my $x = … if`) opt in with one argument.  THE GATE IS TAIL POSITION: a
+  modifier whose value is discarded keeps its bare `p-if`, which is why the
+  change moves 4 files out of 1145.  Residue: `return X while 0` is `0` in
+  perl and `""` in PCL — an optree artifact perl's own `until 1` twin
+  contradicts (`""`, which PCL matches).
+- **A GUARD BATTERY THAT DISCRIMINATES HAS TO PICK ITS PROBE**: a failed match
+  and a `""` both render as nothing in a `warn`, so #970's finding (printf's
+  and warn's ARGUMENT LISTS are evaluated in VOID context where perl uses
+  LIST) needed a `wantarray`-visible sub to show at all.  `print`, `sprintf`,
+  `join` and list assignment are all correct; only those two are not.
 ## s463f (2026-09-01, Fable) — ROUND 19 COMPLETE: AT (#939 + #934 + #940) MERGED on top of AS, main `6e6f191`, gen v2-560; ROUND 20 LAUNCHED (AU correctness / AV perf)
 
 - **A kept-and-stopped worktree is merged by the round-4 recipe, and the recipe held again**: read the whole code diff FIRST (the stop record matched it line for line), rebase over the sibling's merge (the only conflicts were the two record-doc tops; both sections kept, the later merge's on top), paren-check the auto-merged runtime, probe every family vs perl, ff.  Record: session-log §463f.

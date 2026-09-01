@@ -4,6 +4,175 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 463au (2026-09-01, Opus, agent AU — round 20 CORRECTNESS slot) — the empty list is a VALUE; a magic-lvalue window's TARGET is a place in all three write spellings; an untaken modifier answers its CONDITION
+
+Three tasks shipped, one half declined with its evidence.  All three shipped
+fixes have the same shape: a rule that already existed for ONE spelling of a
+thing, applied to the others.
+
+**#962 (= #459 — the same bug filed twice, both CLOSED) — a FAILED `m//` in
+LIST context is the EMPTY LIST.**  `do-regex-match`'s no-match arm answered
+raw NIL, and raw nil is the runtime's empty list to exactly ONE consumer:
+`%p-flatten-list` drops it as an empty-list/hole marker, while `p-array-fill`
+keeps it as an array HOLE and `p-flatten-args` spreads it as one argument.  So
+the sole-RHS spelling `my @l = (/zzz/)` was right — which is why the bug
+survived — and a failed match ANYWHERE ELSE in a list contributed a phantom
+element that shifted every value after it.  `ok /pat/, "desc"` is the shape
+that makes it a silent wrong rather than a count: on a miss perl hands the sub
+`("desc")` and PCL handed it `("", "desc")`, so the row read its description
+as its verdict.
+
+The measurement corrected the task on one point, and that is worth keeping:
+#962 says the capture-BEARING path already returned `()`.  It did not.
+`(/(z)(z)/, "b")` was two elements too — the arm is shared, and only the
+sole-RHS spelling hid it.  What WAS already right is the `/g` list arm, which
+builds a vector; that is what identified the fix's shape.  `(%p-empty-list)` is
+now the ONE producer of Perl's empty list as a runtime value, and
+`%pcl-no-op-import-result` (#534, whose docstring already called it "the same
+shape every other empty-list producer yields") and `p-return-value`'s
+list-context nil arm are routed through it.  #416's neighbouring rule — the
+SCALAR answer of a failed match is the defined-false `""` — is unmoved, and
+has an INVERSE guard row that passes on the base tree to say so.
+
+Runtime-only, so no corpus-diff, no generation bump.  40-row battery 39
+identical to perl (the 40th is #970, below).  Full sweep GATE clean, TOTAL
+18343 (+0).  Companion `--dir op --dir re --quick`, 301 files: two movers,
+both PRE-EXISTING on 6e6f191 and both in the round-19 tail that s462at's stop
+record names as NOT VERIFIED — `re/subst.t` 200/72 → **205/67**, a GAIN of
+five in the s/// suite, so the cause is round 19's own #939/#911 work at the
+substitution write site, and `re/charset.t` 2776/2776 → 2776/2775.  Both
+spliced with their causes; that hole is now closed.
+
+**#960 half (b) — substr/vec/pos take their TARGET ARGUMENT in perl's LOOSE
+LVALUE CONTEXT.**  #939 routed one of the three write spellings (the `=~`
+target).  The other two — `substr(X,…) = V` and the 4-argument
+`substr(X,…,V)` — kept an RVALUE target, which is harmless on a plain scalar
+(the box IS the place) and a SILENT WRONG on an element: since s455
+`(p-aref @a 0)` is a raw string, p-substr's 4-arg form is silent on a non-box,
+and the write landed nowhere and said nothing.  `_lvalue_target_form` is the
+one rewriter, factored OUT of #939's `_write_through_form`, which now calls
+it.  The head is not swapped for the two new spellings — p-setf's own arms
+already turn `(p-substr X S L)` into the 4-arg write, `(p-vec X O B)` into
+`p-vec-set` and `(p-pos X)` into the 2-arg setter; what they lacked was a
+PLACE.  The gate is the WRITE POSITION, spelled as the `=` operator and as the
+ARGUMENT COUNT, because a 2/3-argument substr READS and imposing lvalue
+context on a read promotes the element to a box on every access — the cost the
+boxed-aggregates work removed.
+
+`pos` gained its other two element kinds in the same commit: `*p-match-pos*`
+is keyed by BOX IDENTITY and `gen_funcall`'s `pos` arm listed `a_acc`/`h_acc`
+only, so `pos($c->{tmp}) = 0` — Text::CSV_PP's own shape — wrote to a value
+while the named-hash spelling worked.  A table now, like the `delete` arm
+three lines below it that has had all four kinds all along.
+
+**The rule-12 death the task asked for is NOT here, and the probe it asked for
+FIRST is exactly why.**  `sub f { "hello" } substr(f(),0,2,"AB")` is not an
+error in perl: the 4-argument form's loose lvalue context writes a TEMPORARY,
+discards it, and still answers the replaced part `"he"`.  Only the `=`
+spelling refuses a non-lvalue sub call, and only a READ-ONLY literal refuses
+both — a distinction PCL cannot make, since a raw CL string is exactly that
+temporary.  The s329 boundary agrees: perl discards this write itself, so no
+value the program consumes is lost.  `p-substr` keeps its `when (p-box-p str)`
+with the measurement in the comment.
+
+Bars: 28-row battery 26 identical (6 before) plus 18 rows for the shapes the
+A/B turned up; corpus-diff 1 of 111; emission A/B over **1145 files** — lib/ +
+perl-tests/ + the cpan board + EVERY directory of perl's own t/ + the SHAPES
+corpus — SAME=1139 DIFF=6 RCDIFF=0, all six probed and all six the intended
+rewrite (the two substr.t copies, Text::CSV_PP's `pos`, t/op/avhv.t's
+`$#{$_[0]} = N` through an @_ element, t/op/tiehandle.t's buffer write, and
+t/op/vec.t's NESTED `vec(substr($foo,1,3),5,4) = 3`, which the recursion
+handles).  Full sweep GATE clean, TOTAL **18343 → 18346 (+3)**, all three
+substr.t; companion op/+re/ has exactly two movers, `op/substr.t` 348/6 →
+351/3 and `op/vec.t` 73/5 → 74/4, both spliced with causes.
+
+**A skip registration can blame the wrong mechanism, and the registry's own
+stale-detector is what catches it.**  substr.t test 142 was registered as
+"4-arg substr does not write through tie magic".  It now passes:
+`# REGISTRY-STALE: substr.t test 142 now passes`.  The cause was never tie —
+the target is a hash ELEMENT, so the 4-arg call received its VALUE; with the
+element's BOX, which is the box holding the tie proxy, `box-set` runs STORE as
+it always would have.  Registration dropped in the same commit, pass baseline
+edited by hand with all three rows and a serial base-tree attribution.
+
+**#960 half (a) — the BINARY overload refusal — DECLINED, and the evidence is
+the finding (#972).**  DECIDED s461f asks for evidence before a new death in a
+`fallback => 1`-heavy world.  PCL's overload model has three measured gaps
+that would make the death fire where perl runs.  (1) **`nomethod` is
+ignored** — perl consults it at exactly the point the refusal fires, so a
+class that says "call me instead of dying" would be killed.  (2) **The bitwise
+ops have no overload dispatch at all**, and that is where this half's own rows
+are: perl-tests/bop.t 462-465 are four blessed fails, two needing the REFUSAL
+and two needing the DISPATCH (`bless([],"Baz") | "x"` is `y` in perl and `8` in
+PCL), so shipping the refusal alone moves two and leaves two wrong for the
+other reason.  (3) **`""` is not derived from `0+`**, and the refusal's own
+boundary depends on the conversion set — `.` and `x` are the two binary ops
+perl AUTOGENERATES and therefore never refuses.  The exact three-line message
+shape and the full die/no-die table (17 rows) are written into #972 so the
+next session does not re-derive them.  PCL's lookup is otherwise good: the
+method-NAME handler form, @ISA inheritance of handlers AND of `fallback`, and
+the `<=>`/`cmp` derivations all agree with perl.
+
+**#920 — the value of an UNTAKEN statement modifier is the CONDITION'S.**  A
+sub that falls off the end returns its last evaluated statement, and an
+untaken `EXPR if COND` evaluates to COND's own value — DEFINED, never undef,
+and for `unless` it is the condition and not its negation (`sub { 5 unless 1 }`
+is 1).  The task's own note that "the BLOCK spelling is already right" was the
+answer rather than a coincidence: the block form has always used the ret-var
+transform, and the modifier form used it for a plain expression tail only.
+Four other routes reached a bare `p-if` — `return … if`, `next/last … if`,
+`our $y = … if`, `my ($a,$b) = … if` and `my $x = … if`, the last of which
+spelled the `['p-if', $cf, $set]` inline as a fourth copy.
+`_modifier_ret_form` is the one spelling now, and `_apply_modifier` takes an
+optional `$tail_ctx` so a caller opts in with one argument.  The two sites keep
+their own lowering ORDER (the plain-expression tail lowers the CONDITION
+first, the `return` family lowers its EXPRESSION first), so the ret-var name is
+allocated by the caller and the existing site's emission is byte-identical.
+
+The gate is TAIL POSITION, and that is what keeps it small: 4 files move out
+of 1145, and every early `return … if …` in the middle of a sub is untouched.
+corpus-diff IDENTICAL over 111; sweep GATE clean, TOTAL 18346 (+0), no
+per-file pass delta; the one suite file whose emission moved
+(`re/pat_advanced.t`, which `--quick` does not run) is 951/729 ALONE at
+--timeout 900 — exactly its snapshot row.  Residue: `return X while 0` is `0`
+in perl and `""` in PCL, an optree artifact perl's own `until 1` twin
+contradicts (`""`, which PCL matches).
+
+**#938 item 3 (`is y, 43, '…'` with a lexical sub `y`) was NOT started** — the
+budget went to the three above.  Its repair has to rewrite a mis-lexed token's
+CONTENT and the swallowed tail, not a one-character operator, which is why it
+is the harder member of the `_repair_word_match` family.
+
+**Filed:** **#970** (printf's and warn's ARGUMENT LISTS are evaluated in VOID
+context where perl uses LIST — `print`, `sprintf`, `join` and list assignment
+are all right; found by #962's battery, and it needed a `wantarray`-visible
+sub to show at all, because a failed match and a `""` both render as nothing
+in a warn), **#971** (a COMPOUND assignment through a magic-lvalue window —
+`substr(X,0,2) .= "Q"`, `vec(X,0,8) |= 65` — computes the value and writes it
+nowhere, ON A PLAIN SCALAR TOO: `%store-back-form` has no magic-lvalue arm
+where `p-setf` has one per head), **#972** (the three prerequisites of
+#960(a), above).
+
+**The final bar**, on the tree rebased over main `2065b89` (Fable's round-19
+completion), COLD with `PCLXS_DIR=~/pclxs`: **191 files / 6515 tests, and the
+only failures are the 13 pclxs xs rows** (xs-01 5, xs-02 4, xs-03 4 — the
+documented allowed set).  Generation **v2-581**, artifacts regenerated.  The
+rebase took two conflicts, both "two sessions added a section at the top" in
+`docs/DECIDED.md` and `docs/session-log.md` (kept both, newest first), and one
+in `baselines/perl-suite-run.tsv` where Fable had spliced the SAME
+`re/subst.t` row from the same measurement — Fable's row-by-row note is the
+authoritative one and this session's header now points at it.
+
+**Asks for Fable.**  (1) #960(a): is the DECLINE the right call, and if so
+does #972 go before or after the rest of the queue?  It is four blessed rows
+and it needs the bitwise DISPATCH first, which is additive and small.  (2)
+`p-substr`'s 4-arg form now documents WHY it does not take the rule-12 death
+the task asked for; that reading of the s329 boundary ("perl discards this
+write itself") is new and worth ratifying or striking.  (3) #920's residue —
+`return X while 0` — is left because perl's two answers there contradict each
+other; confirm that is the right place to stop.  (4) The generation moved
+TWICE in one session (v2-580 for #960(b), v2-581 for #920) because two
+emission-changing commits landed; the artifacts were regenerated both times.
 ## Session 463f (2026-09-01, Fable) — ROUND 19 COMPLETE: the USER-stopped AT worktree merge-reviewed and MERGED over AS (main `6e6f191`, gen v2-560); its unverified re/ tail run and attributed; #963 filed; ROUND 20 launched as two Opus agents (USER: "just two subjobs at a time")
 
 **Merge review of AT (s462at: #939 substr-lvalue `=~` target, #934 overload
