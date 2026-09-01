@@ -6670,7 +6670,7 @@ per element."
    object left a plain number behind and the class was gone after the first
    increment (task #900, probed 5.40.3).
 
-   NOT implemented here, deliberately, and measured (task #933): perl also DIES
+   NOT implemented here, deliberately, and measured (task #934): perl also DIES
    `Operation \"++\": no method found, argument in overloaded package C` when
    neither handler exists and the class does not say `fallback => 1` — and it
    dies even when `+` IS overloaded if the class says `fallback => 0`.  PCL
@@ -6716,7 +6716,7 @@ per element."
       ;; PCL_OPT=none (p-post++ -> here) said 2.  Reached only when the class
       ;; overloads NEITHER `++` nor `+` (task #900 handled those above), which
       ;; is also the case perl refuses outright unless `fallback => 1` — see
-      ;; %p-incdec-overload's note and task #933.
+      ;; %p-incdec-overload's note and task #934.
       ((and (p-box-p val) (p-find-overload val "0+")) (1+ (to-number val)))
       ;; Otherwise convert to number and increment
       (t (1+ (to-number v))))))
