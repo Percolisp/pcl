@@ -5,6 +5,74 @@ Append new entries at the top. One section per session.
 ---
 ---
 
+## Session 461ar (2026-09-01, Opus agent AR, round 18) — the WORD-/ repair's bars (#931), `++` keeps the OBJECT (#900), and s///+tr/// get perl's read-only death (#911); census 18/58 → 17/57
+
+Resumed from the USER-stopped stop-record `59eb514`, whose only code change was
+40 lines in `Pl/Parser2.pm` with EVERY bar unrun.
+
+1. **#931 CLOSED — the bars, and one of them changed the claim.**  The guard
+   asserts the two `ok /…/` ANSWERS, not the absent drop: a drop-only row would
+   have PASSED on the second bug, where the statement stopped dropping and came
+   out as `m/a* b?c*/` — a space spliced into a regex by `_repair_glob_multiply`,
+   which had met the `*b` of the SECOND pattern as a typeglob Symbol PPI
+   MANUFACTURED out of pattern text.  `ppi-upstream-bugs.md` §11b + two failing
+   `ppi-bug-report.t` rows (54 → 56) pay CLAUDE.md rule 13.  Census re-measured,
+   not asserted: 16 in-repo files / 55 drops, the ONLY difference from the
+   blessing being `t/re/pat.t`; removed by EDIT, header **18/58 → 17/57**.
+   Emission A/B vs `33a71c9` over FOUR populations (perl-tests 111, lib 22,
+   cpan .pm 94, cpan t/ 289 — all SAME; perl's own t/ 528 with exactly ONE DIFF,
+   `re/pat.t`), so no generation bump.
+2. **#900 — `++`/`--`/`+=`/`-=` autogenerate from `+`/`-` and keep the OBJECT.**
+   One helper `%p-incdec-overload` serves `perl-increment` and the NEW
+   `perl-decrement` (which also collapses four copies of
+   `(1- (to-number PLACE))`).  **POSTFIX hands back a COPY OF THE REFERENCE**
+   (`%p-incdec-old`) — that is perl's own [perl #9466] regression test, op/inc.t
+   rows 68/70, **60/15 → 62/13**.  **The guard's shape is the measurement**: the
+   bench harness could not settle it (a sibling agent had four cores busy;
+   `perl(s)` swung 2.5×), so five candidates were timed INSIDE the runtime core,
+   and the winner asks the PROGRAM-level question first —
+   `*p-any-overload-registered*`, one memory load — before it asks anything
+   about its operands (raw −4 %, boxed +5 %; the four alternatives cost the
+   boxed shape +15 % to +49 %).  **The RAW twin needs the guard too**:
+   `my $s = 0; $s += $obj` emits `p-incf-raw` and the slot then HOLDS the object.
+   perl's REFUSAL half (`fallback => 0`) is measured and NOT shipped → **#934**.
+3. **#911 — the read-only verdict for `s///`/`tr///` is a RUN-TIME one.**  Both
+   runtime sites already fired exactly where a write is needed and only
+   `warn`ed; they now raise perl's own death.  12-row boundary table
+   byte-identical to 5.40.3.  **The audit found one arrival perl ACCEPTS** and
+   it is recorded rather than hidden: `substr($#ta,0,2) =~ s/…/23/` reaches the
+   site with a raw string because `=~` does not bind the lvalue substr cell, so
+   op/substr.t goes 347/7 → **347/5 — two already-FAILING rows stop being
+   produced**, a silent wrong traded for a loud one (**#939**).
+4. **`re/pat.t` 0/0 → 231/138 is NOT the compiler work, and the attribution was
+   measured three ways**: #931 alone leaves it at 0/0, the base tree leaves it
+   at 0/0, and the OLD runtime dies "Heap exhausted … 95.6 % of 1073741824 max"
+   COMPILING the emitted file while the new one fits.  The core's footprint
+   moved.  That is luck, and it makes the row fragile → **#935**.
+5. **Bars**: gate **191 files / 6461 rows** (base 33a71c9 on the same tree shape
+   = 6457, so +4 is exactly this session's guard rows), only the 13 known pclxs
+   xs rows failing; full perl-tests sweep GATE clean, **TOTAL 18342 (+0)**,
+   drops 5 = census; companion `--dir op --dir re --quick` 301 files, four
+   snapshot movers, three REAL and spliced with causes, the fourth
+   (re/charset.t) cleared by the runner's own #366 serial re-run.  Guards
+   `Pl/t/transpile-test-10.t` (+1), `Pl/t/raw-verdict-01.t` (31 → 33, both
+   emission paths), `Pl/t/caret-vars-01.t` (8 → 9), all inverse-verified on a
+   `33a71c9` worktree.
+6. **#930 NOT started, by the round's own instruction** — the 39 lvalue-sub
+   drops stay LOUD with the 8-shape sizing table as the deliverable.  **Singles
+   harvest**: every one of the 57 drops is now classified in **#938** —
+   39 lvalue, 4 scalar-invocant indirect object (USER: MAYBE LATER), 2 Mojo
+   `local (*{…})` (#564), **7 deliberate parser torture** (t/op/write.t:1930
+   newly classified there), 1 PPI structure bug (**#937**: an EMPTY or
+   comment-only bare block lexes as an anon-hash Constructor and swallows the
+   next statement), and three diagnosed singles — `sub _` (PPI lexes `_` after
+   `sub` as the stat handle, and the ordinary `_repair_*` shape cannot fix it
+   because `_reparse_doc` is TEXTUAL), `${no strict; \$_}`, `is y, 43`.
+   Also filed **#932** (capture variables are not dynamically scoped — perl
+   RESTORES `$1` on block/sub exit; this is why the caret-vars helpers re-match
+   at the top), **#933** (`${^SAFE_LOCALES}` undef sends `t/loc_tools.pl` into
+   `require threads`), **#936** (#911's residue).
+
 ## Session 461aq (2026-09-01, Opus agent AQ, round 18) — symbolic refs 9.5x (#812), the list-assign copy removed the ONLY way that pays (#910), the return-family transfer with the two silent-wrongs it exposed (#77); gen v2-540
 
 Four tasks, all shipped; five filed.  Not pushed, not merged; branch
