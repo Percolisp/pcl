@@ -585,6 +585,63 @@ text rather than the true close is still the right answer.  Closes 5 census
 drops in `t/re/pat.t` and `t/re/pat_advanced.t` — the `1 while /…(?{…})…/g`
 counting loop — and the escaped-delimiter shape probed above.
 
+### 11b. The damage CASCADES to the next statement, and MANUFACTURES tokens  (task #931, s461ar)
+
+§11a noted in passing that after a `(…)` group PPI is back in term position and
+the closing delimiter starts a match of its own.  That is not a property of the
+group — it is the general shape, and it is what makes this bug *unbounded*: the
+tokenizer passes the closing `/` and is in term position again, so the **next**
+`/` in the file opens a `Regexp::Match` that runs to the one after it.  Two
+adjacent `ok /…/` statements therefore collapse into ONE, with the second `ok`
+buried *inside a token*:
+
+```perl
+sub ok { 1 }
+$_ = 'aaabccc';
+ ok /a+b?c+/, "one";
+ ok /a*b?c*/, "two";
+print "done\n";
+```
+
+perl: five statements, both calls run.  PPI 1.291 (`->schildren`): **three**,
+the last of which is the whole rest of the file.  The token stream:
+
+```
+Word(ok) Operator(/) Word(a) Operator(+) Word(b) Operator(?) Word(c) Operator(+)
+Regexp::Match</, "one";\n ok /a>          <-- the SECOND `ok` is inside this token
+Symbol(*b)                                <-- manufactured: see below
+Operator(?) Word(c) Operator(*)
+Regexp::Match</, "two";\nprint "done\n";\n>
+```
+
+Two consequences a consumer has to plan for, and neither is visible from one
+statement:
+
+1. **A repair cannot be a single pass.**  The second `ok` is not a `Word` token
+   at all until the first repair has been applied and the document reparsed, so
+   a one-pass rewrite fixes the first of a run and loses the rest.
+2. **The pattern text is tokenized as code, and some of it becomes tokens that
+   appear nowhere in the source.**  The `*b` of `a*b?c*` above is a
+   `PPI::Token::Symbol` — a typeglob — and `$_` and `*b` are the only Symbols
+   the document has.  Any *other* repair that runs over this region is reading
+   the inside of a regular expression: a consumer that repairs bug 12
+   (`)*name` lexed as a glob) will faithfully rewrite `*b` to `* b` and splice
+   a space into the middle of the pattern.  The result still compiles, matches
+   something else, and says nothing — the worst outcome available.
+
+**Repro + failing rows:** Bug 8b in `docs/ppi-bug-report.t` (statement count,
+manufactured symbol).
+
+**PCL workaround (s461ar):** `_repair_word_match` is now a bounded driver over
+`_repair_word_match_pass`, iterating to a fixpoint (each round repairs at least
+one `/` or stops, and a file's `/` characters are finite) — the same two-sub
+shape `_repair_glob_pattern_cascade` was given in s449 for §14's cascade.  And
+it MOVED to run second in `Pl::Parser2::parse`'s repair block, right after that
+one and before `_repair_glob_multiply`: a repair whose damage is unbounded must
+run before the repairs that read the damaged region, never beside them.
+Removes the `t/re/pat.t:106` census drop, which had swallowed three statements
+including a `$_ = 'aaaccc'` reset.
+
 ---
 
 ## 12. `)*name` — a `*` after a term is lexed as a GLOB, not multiplication  [CONFIRMED 1.291]

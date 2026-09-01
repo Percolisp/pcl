@@ -94,10 +94,10 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 18 files, 58 drops (recounted from the rows,
-# s458al; 17 in-repo files / 56 drops as tools/drop-census.pl reports them,
+# TOTAL after the edits below: 17 files, 57 drops (recounted from the rows,
+# s461ar; 16 in-repo files / 55 drops as tools/drop-census.pl reports them,
 # plus the one board row, which a run without --board does not re-measure).
-# The previous line said 19 / 63 (s457aj).
+# The previous line said 18 / 58 (s458al), and 19 / 63 before that (s457aj).
 # The two rows that LEFT in s457aj are t/io/open.t and t/op/utf8cache.t, both
 # by EDIT with their cause: they were the SAME mechanism (#850) — a paren-less
 # list operator's argument list may end in a COMMA, and the operator that
@@ -740,6 +740,29 @@
 #         blocks" carries the measurement.
 #         t/re/pat.t's remaining drop is family "Handle single node of unknown
 #         type" (`ok /a* b?c*/, qq [...]` at line 106) -- a different mechanism.
+#   s461ar ONE drop REMOVED and the file CLEARED by task #931 -- 18 rows / 58
+#         drops -> 17 / 57 -- edited ROW BY ROW against a fresh
+#         `tools/drop-census.pl . OUT 8` (no --board, so the board row below
+#         was NOT re-measured and stays at its 2).  That run's ONLY difference
+#         from the previous blessing is this one row: 16 in-repo files / 55
+#         drops, everything else byte-identical.
+#         #931 -- the s458al note above quoted the remaining drop's text as
+#         `ok /a* b?c*/` and the SPACE in it was the tell nobody read: the
+#         source says `ok /a*b?c*/`.  Two bugs, one family, both in the #351
+#         `WORD /` repair.  (a) It ran ONCE where it must run to FIXPOINT: PPI
+#         passes the closing `/` and is back in term position, so the NEXT `/`
+#         opens a Regexp::Match that swallows every statement between them --
+#         the second `ok` is not a Word token until the first pass's reparse,
+#         so one pass repairs the first of a run and drops the rest (this drop
+#         swallowed THREE statements, one of them a `$_ = 'aaaccc'` reset).
+#         (b) With (a) fixed the statement stopped dropping and emitted
+#         `m/a* b?c*/`: `_repair_glob_multiply` (#354) ran FIRST, met the `*b`
+#         of the second pattern as a glob Symbol (a Regexp ends a term) and
+#         rewrote PATTERN TEXT tokenized as code.  So the repair also MOVED to
+#         run second in the block, right after _repair_glob_pattern_cascade --
+#         a repair whose damage is unbounded must run before the repairs that
+#         read the damaged region.  ppi-upstream-bugs.md §11b; guard row in
+#         Pl/t/transpile-test-10.t asserts the ANSWERS, not the absent drop.
 board/Mojo-DOM58-3.002-0/lib/Mojo/DOM58/_Collection.pm	2	Parser2 TODO: unsupported `local` target: *{"${caller}::a"} x2
 perl-tests/method.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$obj>','Token::Quote::Double<"a">'] x1
 perl-tests/ref.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">'] x1
@@ -757,4 +780,3 @@ t/op/sub_lval.t	34	Bug. Fell through. Missing case: ['Structure::Condition<(!Int
 t/op/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
 t/op/try.t	1	PCL: Can't modify non-lvalue subroutine call in assignment x1
 t/op/write.t	1	Handle single node of unknown type. Dump: x1
-t/re/pat.t	1	Handle single node of unknown type. Dump: x1

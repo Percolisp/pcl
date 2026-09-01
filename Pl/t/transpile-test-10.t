@@ -1135,4 +1135,34 @@ print "e=", (defined $21 ? $21 : "U"), " f=$1\n";
 print "g=", (defined $99 ? $99 : "U"), "\n";
 ');
 
+# ── #931: the #351 `WORD /` repair runs TO FIXPOINT, and BEFORE its readers ──
+# Two bugs in one family, and the row has to assert the ANSWERS, not the
+# absence of a drop — a drop-only assertion passes on the second bug.
+#   (a) FIXPOINT.  PPI scans past the closing `/` and is back in term position,
+#       so the NEXT `/` opens a Regexp::Match that swallows every statement
+#       between them: the second `myok` is not a Word token until the first
+#       pass's reparse.  One pass repaired line 1 and dropped the rest.
+#   (b) ORDER.  With (a) fixed the statement stopped dropping and came out as
+#       `m/a* b?c*/` — `_repair_glob_multiply` (#354) had run FIRST, met the
+#       `*b` of the SECOND pattern as a glob (a Regexp ends a term) and
+#       rewrote PATTERN TEXT it had no business reading.  The `a*b?c*` row is
+#       what pins that: with the space the match fails and `$_[0]` is "".
+# The negatives ride along: a real `)*name` multiplication (#354) and a real
+# `()`-prototyped division must both survive the reorder.  Shape is
+# t/re/pat.t:106, whose ONE drop swallowed three statements.
+test_transpile('#931: the WORD-/ repair runs to fixpoint, and before the repairs that read its damage', '
+sub myok { print "ok:$_[0]:$_[1]\n" }
+$_ = "aaabccc";
+ myok /a+b?c+/, "one";
+ myok /a*b?c*/, "two";
+$_ = "aaaccc";
+ myok /a*b?c*/, "three";
+ myok /a+b?c+/, "four";
+my $k = "ab";
+print "mul=", length($k)*length($k), "\n";
+sub gz () { 10 }
+print "div=", gz / 2, "\n";
+print "done\n";
+');
+
 done_testing();

@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 54;
+use Test::More tests => 56;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -196,6 +196,34 @@ sub toks {
     ok( grep(/^PPI::Token::Regexp::Match=/, @t),
         '/…/ after `if` IS lexed as a match (the control)' )
         or diag "got: @t";
+}
+# Bug 8b: the damage CASCADES, and it manufactures tokens that were never
+# written.  Having passed the closing `/` PPI is back in TERM position, so the
+# NEXT `/` opens a match that runs to the one after it — two adjacent `ok /…/`
+# statements collapse into ONE, with the second `ok` buried inside a
+# Regexp::Match token, and everything after them swallowed as well.
+{
+    my $src = qq{sub ok { 1 }\n\$_ = 'aaabccc';\n ok /a+b?c+/, "one";\n}
+            . qq{ ok /a*b?c*/, "two";\nprint "done\\n";\n};
+    my $doc = PPI::Document->new(\$src);
+    my @st  = $doc ? $doc->schildren : ();
+    is( scalar(@st), 5,
+        'two adjacent `ok /…/` statements must stay FIVE statements, not three' )
+        or diag "statements: " . join(' | ',
+            map { my $c = $_->content; $c =~ s/\n/\\n/g; $c } @st);
+}
+# …and the pattern text between the two delimiters is tokenized as CODE, so a
+# `*` inside the SECOND pattern becomes a typeglob SYMBOL that appears nowhere
+# in the source.  A consumer that repairs `)*name` (bug 9) will faithfully
+# rewrite it, splicing a space into the middle of a regular expression.
+{
+    my $src = qq{sub ok { 1 }\n\$_ = 'aaabccc';\n ok /a+b?c+/, "one";\n}
+            . qq{ ok /a*b?c*/, "two";\n};
+    my $doc = PPI::Document->new(\$src);
+    my @sym = $doc ? grep { $_->isa('PPI::Token::Symbol') } $doc->tokens : ();
+    is( join(',', map { $_->content } @sym), '$_',
+        'no typeglob symbol may be manufactured out of the second pattern' )
+        or diag "symbols: " . join(', ', map { $_->content } @sym);
 }
 
 # ── Bug 9: `)*name` is lexed as a GLOB instead of multiplication ──────────────
