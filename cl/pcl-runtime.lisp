@@ -5632,16 +5632,56 @@ per element."
   (dolist (tg targets nil)
     (when (eq item tg) (return t))))
 
-(defun %p-flatten-list (src &optional keep-containers)
-  "Flatten a Perl RHS into a fresh vector of assignable values.
+(declaim (inline %p-flatten-sized-p))
+(defun %p-flatten-sized-p (item)
+  "True when ITEM is an element the SIZED path of %p-flatten-list may take.
+   Two conditions, and the second is the one that is easy to miss:
 
-   KEEP-CONTAINERS is p-list-='s #910 fast path and is the LIST OF TARGET BOXES
-   (not a flag): a container-valued element may then stay LIVE — saving the two
-   struct allocations every `my ($self,$x,$r) = @_' used to pay — unless it IS
-   one of the targets, which is exactly perl's commonality rule.  The test lives
-   here because this walk already has each element in hand; a separate pass over
-   the result vector costs a generic AREF per slot, which measured as expensive
-   as the allocations it saves (task #910's first two attempts)."
+   (1) ITEM contributes EXACTLY ONE slot — i.e. %p-flatten-list-general's walk
+       takes its final arm for it.  The five other shapes either EXPAND (a
+       hash-table and the %ENV/%INC marker to their pairs, a nested vector and
+       a cons to their elements) or VANISH (raw nil, the empty-list /
+       array-hole marker), so a source whose every element is one slot has a
+       known output LENGTH.  A STRING is one slot although it is a vector,
+       exactly as the walk's own vector arm says; so is a box holding an array
+       or hash — that is a REFERENCE, and the walk tests the RAW item.
+
+   (2) Snapshotting ITEM cannot run PERL code.  %p-assign-snapshot reads a
+       MAGIC cell through its getter and a TIED scalar through FETCH, and both
+       are arbitrary user code.  This conjunct is NOT what keeps FETCH to one
+       call — the separate pre-scan in %p-flatten-list is (see there).  It is
+       what makes the sized loop provably free of Perl code, and that is what
+       licenses hoisting the element-storage vector and the length out of it:
+       a FETCH that grew the source array would reallocate the data vector
+       under a hoisted pointer, where the general walk's header-going AREF
+       would see the new one.  A source with a tied or magic element takes the
+       general walk instead, which reads it exactly as it always did."
+  (if (p-box-p item)
+      (let ((inner (p-box-value item)))
+        (and (not (p-magic-cell-p inner))
+             (not (p-tie-proxy-p inner))))
+      (not (or (null item)
+               (consp item)
+               (hash-table-p item)
+               (and (vectorp item) (not (stringp item)))
+               (%p-hash-marker-p item)))))
+
+;; The result is ALWAYS a SIMPLE-VECTOR, and this proclamation is what makes
+;; that fact reach the CALL SITES — including the ones inside p-list-='s
+;; expansion, which is compiled in the generated program's own compilation
+;; unit.  Without it every `(aref src-vec i)` and `(length src-vec)` there
+;; takes SBCL's hairy-data-vector dispatch (task #923).
+(declaim (ftype (function (t &optional t) (values simple-vector &optional))
+                %p-flatten-list)
+         (ftype (function (t t) (values simple-vector &optional))
+                %p-flatten-list-general))
+
+(defun %p-flatten-list-general (src keep-containers)
+  "%p-flatten-list's EXPANDING walk: the arms that turn one source element into
+   none, one or many result slots.  Reached whenever the output length is not
+   the input length, so it builds into an adjustable buffer and hands back a
+   trimmed simple vector (the trim is one bulk copy, against a walk that is
+   already expanding aggregates)."
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (labels ((add (item)
                (cond
@@ -5676,17 +5716,63 @@ per element."
                  ;; above cost nothing.
                  ((%p-hash-marker-p item)
                   (loop for x across (%p-marker-pairs item)
-                        do (vector-push-extend x result)))
+                        do (%p-vpush x result)))
                  (t
                   ;; The RHS-snapshot rule lives in %p-assign-snapshot
                   ;; (the slice-assignment arms of p-setf run it too).
-                  (vector-push-extend
+                  (%p-vpush
                    (%p-assign-snapshot item
                                        (and keep-containers
                                             (not (%p-in-targets-p item keep-containers))))
                    result)))))
       (add src))
-    result))
+    (let* ((n (fill-pointer result))
+           (out (make-array n)))
+      (replace out result)
+      out)))
+
+(defun %p-flatten-list (src &optional keep-containers)
+  "Flatten a Perl RHS into a fresh SIMPLE-VECTOR of assignable values.
+
+   KEEP-CONTAINERS is p-list-='s #910 fast path and is the LIST OF TARGET BOXES
+   (not a flag): a container-valued element may then stay LIVE — saving the two
+   struct allocations every `my ($self,$x,$r) = @_' used to pay — unless it IS
+   one of the targets, which is exactly perl's commonality rule.  The test lives
+   on the WALK because the walk already has each element in hand; a separate
+   pass over the result vector costs as much as the allocations it saves
+   (task #910's first two attempts).
+
+   THE SIZED PATH (task #923).  When SRC is a plain element-storage vector
+   and %p-flatten-sized-p holds for EVERY element — `@_', and every
+   `(vector A B C)' the emitter builds for a literal RHS — the output length
+   IS SRC's length, so the result is allocated exactly once at that size: no
+   adjustable header, no fill pointer, no per-element capacity check, and no
+   trim.  The scan is a separate pass ON PURPOSE.  Deciding element by element
+   and abandoning the half-filled result at the first non-leaf reads better and
+   is WRONG: %p-assign-snapshot is not a pure read (a TIED element goes through
+   FETCH, a MAGIC one through its getter), so the elements already snapshotted
+   would run their user code a second time on the re-walk.  Measured: with the
+   element-by-element form, `my $t; tie $t,…; my ($a,$b,$c) = ($t, @arr)'
+   FETCHes TWICE where perl FETCHes once (guard: Pl/t/aassign-01.t).
+   Measured, 4e6 three-element assignments: building adjustable and reading it
+   generically 0.145 s, this 0.035 s — the assignment's own arithmetic aside,
+   4x.  Half of that is the ftype above: the reads at the CALL sites."
+  (let ((d (and (vectorp src) (not (stringp src)) (%p-vec-data src))))
+    (if (null d)
+        (%p-flatten-list-general src keep-containers)
+        (let ((n (length src)))
+          (declare (fixnum n))
+          (if (dotimes (i n t)
+                (unless (%p-flatten-sized-p (svref d i)) (return nil)))
+              (let ((out (make-array n)))
+                (dotimes (i n out)
+                  (let ((item (svref d i)))
+                    (setf (svref out i)
+                          (%p-assign-snapshot
+                           item
+                           (and keep-containers
+                                (not (%p-in-targets-p item keep-containers))))))))
+              (%p-flatten-list-general src keep-containers))))))
 
 (defun %p-hash-keyval-list (h)
   "Flatten a hash-table into a Perl list (k1 v1 k2 v2 ...), matching how %hash

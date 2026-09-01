@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 42;
+plan tests => 44;
 
 sub run_cl {
     my ($code) = @_;
@@ -501,3 +501,43 @@ test_cl('#910 inverse: a live container box must not leak into the target',
      print $d1+0, "|$d1 ", $d2+0, "|$d2\n";
      print $c1->(), $c2->(), "\n";',
     "orig 1\nCls same\n22|twenty-two 11|eleven\ntwoone\n");
+
+# ── #923: the SIZED path of %p-flatten-list ─────────────────────────────────
+# A source whose every element contributes exactly one slot has a known output
+# LENGTH, so the flattener allocates its result exactly instead of growing an
+# adjustable one — which also makes every read of it at the CALL sites inline.
+# The classification happens in a SEPARATE PRE-SCAN, and this row is why:
+# %p-assign-snapshot is not a pure read.  Deciding element by element and
+# abandoning the half-filled result at the first aggregate makes the elements
+# already snapshotted run their user code a second time — with that (rejected)
+# form the FETCH count below reads 2, where perl's is 1 (probed 5.40.3).
+
+test_cl('#923 a tied element FETCHes ONCE, expanding source or not',
+    'package Cnt;
+     sub TIESCALAR { my ($c,$v)=@_; bless {v=>$v,n=>0}, $c }
+     sub FETCH { my $s=shift; $s->{n}++; $s->{v} }
+     sub STORE { my ($s,$v)=@_; $s->{v}=$v }
+     package main;
+     my $t; my $ob = tie $t, "Cnt", 7; my @arr = (8,9);
+     my ($a,$b,$c) = ($t, @arr);
+     my $t2; my $ob2 = tie $t2, "Cnt", 5;
+     my ($d,$e) = ($t2, 6);
+     print "$a $b $c ", $ob->{n}, "\n";
+     print "$d $e ", $ob2->{n}, "\n";',
+    "7 8 9 1\n5 6 1\n");
+
+# The sized path and the expanding walk must agree element for element: an
+# array and a hash still flatten, an empty array still contributes nothing,
+# and a string and a reference are each ONE slot although both are vectors
+# underneath (a reference is a BOX around one — the walk tests the raw item).
+test_cl('#923 sized path agrees with the expanding walk',
+    'my @ar2 = (2,3); my %h = (k => 4);
+     my ($p,$q,$r,$s,$u) = (1, @ar2, %h);
+     my $ref = [10,11];
+     my ($v,$w,$x) = ("str", $ref, 12);
+     my @none = ();
+     my ($g,$i) = (1, @none, 2);
+     print "$p $q $r $s $u\n";
+     print "$v ", scalar(@$w), " $x\n";
+     print "$g $i\n";',
+    "1 2 3 k 4\nstr 2 12\n1 2\n");
