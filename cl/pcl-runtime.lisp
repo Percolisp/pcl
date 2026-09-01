@@ -85,8 +85,9 @@
 ;;; spawn recompiles it), while the end of this file re-proclaims them
 ;;; INLINE so all GENERATED USER CODE compiled afterwards gets the numberp/
 ;;; stringp fast paths open-coded at its call sites.
-;;; The global optimize policy for generated code lives at the end of the
-;;; file for the same reason.
+;;; The global optimize policy for GENERATED CODE lives at the end of the
+;;; file for the same reason.  The policy for THIS FILE's own code is set
+;;; just after (in-package :pcl) below — see the note there.
 ;;; ----------------------------------------------------------------------
 
 (defpackage :pcl
@@ -316,6 +317,51 @@
    #:p-my-= #:p-box-init))
 
 (in-package :pcl)
+
+;;; --- Policy for THIS FILE (the runtime's own 21k lines) -----------------
+;;; Task #950, measured s463av.  Until this declaim existed the runtime
+;;; compiled at SBCL's DEFAULT policy: the only `(declaim (optimize …))` was at
+;;; the very END of the file, and a declaim at the end applies to what is
+;;; compiled AFTER it — i.e. to the generated program, not to the runtime.  So
+;;; the code every PCL program actually spends its time in was built at
+;;; speed 1, while the program calling it was built at speed 2.
+;;;
+;;; THE MEASUREMENT (tools/bench-exec.pl BENCH_RT_B=…, six interleaved
+;;; best-of-5 A/B runs against this same file without the declaim; median B/A,
+;;; and the sign of all six samples is what makes a row a verdict rather than a
+;;; sample):
+;;;
+;;;   feread -7.2 %  arrhash -5.2 %  cfor -5.0 %  ovlsub -3.9 %  feread2 -2.6 %
+;;;   arrfill -2.2 % regexg -2.1 %   slices -1.5 % strcat -1.4 %
+;;;   — and intloop+=/intloop=/fib/gcdrec/collatz/sliceasgn/symref/pack all
+;;;   within noise, sign-mixed across the six.  NO row is consistently slower.
+;;;   (An earlier K=3 run on a loaded box had gcdrec at +11.8 %; six samples
+;;;   put it at -1.2 % with mixed signs.  It was load.)
+;;;
+;;; THE COST is the runtime's own compile, which every saved-core build pays:
+;;; 3.02 s → 4.11 s, +36 % (best-of-3, interleaved; core size 46.9 MB either
+;;; way).  Cores are content-keyed and cached under ~/.pcl-cache/core, so this
+;;; is once per edit of this file, not once per run.  A PROGRAM's compile time
+;;; is untouched — the end-of-file declaim still governs that.
+;;;
+;;; THE HAZARD IT CARRIES, because `speed 3 > debug 1` and one thing keys on
+;;; exactly that: SBCL turns a defun's reference to its own name into a LOCAL
+;;; call when (> speed debug).  The self-loading extension stubs delegate to a
+;;; definition the extension file installs OVER them, so a local self-call
+;;; silently defeats the delegation — `pack` died with "cl/pcl-pack.lisp not
+;;; found" on a file that was present.  That is task #980, fixed in the same
+;;; commit (all stubs go through %pcl-def-ext-stub, which delegates via
+;;; SYMBOL-FUNCTION) and guarded by a source invariant in
+;;; Pl/t/extension-preamble-01.t.  Measured, not assumed, before shipping this:
+;;; no other runtime function is redefined by a loaded artifact (the four
+;;; artifacts' defuns were diffed against this file's), and GENERATED code is
+;;; unaffected — it already compiles at speed 2 / debug 0, and a perl sub that
+;;; recurses and is then redefined through a glob still reaches the new body
+;;; (probed against perl 5.40.3).
+;;;
+;;; If a future change here needs a function to be redefinable at runtime,
+;;; delegate through SYMBOL-FUNCTION rather than lowering this policy.
+(declaim (optimize (speed 3)))
 
 ;;; Forward declarations to suppress compile-time "undefined function" style-warnings.
 ;;; These functions are defined later in this file; the declarations tell the compiler
@@ -1615,11 +1661,24 @@
 ;;; CL closures rather than a Perl tie object: reading calls GETTER, writing calls
 ;;; SETTER.  Used for \$#array (arylen) and reusable for other magic lvalue refs
 ;;; (\substr / \pos / \vec).  See docs/sweep-bug-catalog.md (array.t arylen).
+;;; The two closures are DECLARED `function`, and that is not decoration: the
+;;; comment already said "(function () -> value)" and every one of the eleven
+;;; construction sites in this file passes one, but without the declaration
+;;; `(funcall (p-magic-cell-getter v))` compiles to a call that first has to ask
+;;; whether it was handed a symbol needing FDEFINITION.  That funcall is inlined
+;;; into `unbox` and `box-set`, so the check multiplied out to 248 of the 3179
+;;; optimization notes the runtime emits at (speed 3) — the single largest class
+;;; attributable to one missing declaration (task #950's harvest).  The
+;;; erroring defaults are rule 12: a cell with no getter has no meaning, so
+;;; constructing one says so instead of failing at the first read.
+;;;   getter : (function () -> value)          — invoked by unbox
+;;;   setter : (function (new-value) -> value) — invoked by box-set
+;;;   kind   : nil -> ref()="SCALAR" (arylen); :lvalue -> ref()="LVALUE"
+;;;            (\substr / \pos / \vec), matching Perl's reftype.
 (defstruct p-magic-cell
-  getter        ; (function () -> value)        — invoked by unbox
-  setter        ; (function (new-value) -> value) — invoked by box-set
-  (kind nil))   ; nil → ref()="SCALAR" (arylen); :lvalue → ref()="LVALUE"
-                                        ;   (\substr / \pos / \vec), matching Perl's reftype.
+  (getter (error "p-magic-cell: :getter is required") :type function)
+  (setter (error "p-magic-cell: :setter is required") :type function)
+  (kind nil))
 
 (declaim (inline unbox))
 (defun unbox (val)
@@ -5447,6 +5506,21 @@ per element."
      (t
       (%p-array-store-scalar ,target ,item))))
 
+;;; A LOWER bound on how many elements p-array-fill will push for SRC, used
+;;; only to reserve the destination's capacity — never to decide anything
+;;; semantic, so a bound that is too small merely costs what today costs
+;;; always.  It is a lower bound rather than the exact count because
+;;; `add-items` RECURSES: a nested vector or a hash inside SRC expands to more
+;;; than one slot.  The top-level length is the part that is free to know.
+(declaim (inline %p-fill-lower-bound))
+(defun %p-fill-lower-bound (src)
+  (cond
+    ((stringp src) 1)                            ; one box, not its characters
+    ((hash-table-p src) (* 2 (hash-table-count src)))
+    ((vectorp src) (length src))
+    ((listp src) (length src))                   ; NIL lands here: bound 0
+    (t 1)))
+
 (defun p-array-fill (place value)
   "Clear adjustable array PLACE and refill it from VALUE: flatten nested vectors
    (but not strings), box elements, preserve nil holes.  Snapshots VALUE first so
@@ -5462,6 +5536,39 @@ per element."
   ;; adjustable vectors and preserves nil.
   (let ((snap (%p-snapshot-array-rhs value)))
     (setf (fill-pointer place) 0)
+    ;; RESERVE the destination's capacity from the source's own length before
+    ;; the push loop below (task #981, s463av).  `my @c = @src` allocates PLACE
+    ;; as `(make-array 0 :adjustable t :fill-pointer 0)` — every iteration, when
+    ;; it is a `my` inside a loop — so the stores used to walk a full doubling
+    ;; sequence, re-discovering one reallocation at a time a length the source
+    ;; already knows.  Reserved once, every store takes %p-vpush's
+    ;; simple-vector fast path.
+    ;;
+    ;; WHAT IT IS WORTH, measured both ways (interleaved best-of-5, startup
+    ;; subtracted), because the profile and the bench disagree and the bench is
+    ;; right: sb-sprof put the growth family at 16.1 % of the `slices` row, but
+    ;; `adjust-array` allocates and copies too, so most of that cost is merely
+    ;; RELOCATED — re-profiling shows adjust-array at 11.1 % where the growth
+    ;; was, and six A/B samples give slices +0.9 % and sliceasgn +1.6 % and the
+    ;; rest nothing.  The real prize is a shape no bench row covered: an
+    ;; ordinary whole-array copy is **+20.4 % at 50 elements** and +10-12 % at
+    ;; 2000.  The slice rows assign five and ten, which is too few for the
+    ;; growth to show against their hash traffic.  `tools/bench-exec.pl` gained
+    ;; the `listcopy` row so the shape stops being invisible.
+    ;;
+    ;; Capacity is invisible to Perl — only the fill pointer is `scalar(@a)` —
+    ;; so this cannot change a result; and it only ever GROWS (an array being
+    ;; refilled to a smaller length keeps its buffer, as it did before), so a
+    ;; reused `@a` in a loop still adjusts at most once.
+    ;;
+    ;; ADJUSTABLE-ARRAY-P is not defensive noise: `adjust-array` on a
+    ;; non-adjustable array returns a FRESH array and leaves the original
+    ;; alone, so calling it unguarded would silently drop the whole assignment
+    ;; if PLACE were ever a plain fill-pointer vector.
+    (let ((want (%p-fill-lower-bound snap)))
+      (when (and (> want (array-dimension place 0))
+                 (adjustable-array-p place))
+        (adjust-array place want)))
     ;; Perl: assigning to an array resets the each() iterator
     (remhash place *array-iterators*)
     (labels ((add-items (src)
@@ -20346,24 +20453,47 @@ buffer's fill-pointer; everything else falls back to file-length."
     arr))
 
 ;;; ============================================================
+;;; THE SELF-LOADING EXTENSION STUB — one spelling for all of them
+;;; ============================================================
+;;; A stub calls `p-load-extension`, which `load`s cl/EXT.lisp; that file
+;;; REDEFINES this very name with the real implementation, and the stub then
+;;; delegates to it.  `p-load-extension` answers T only for the load that
+;;; actually happened (a second call answers NIL), so the delegation MUST reach
+;;; the NEW definition — one more trip through the stub raises the "not found"
+;;; error on a file that is sitting right there.
+;;;
+;;; That is why the delegation goes through `(symbol-function ',name)` and NOT
+;;; through a direct self-call.  SBCL converts a `defun`'s reference to its own
+;;; name into a LOCAL call whenever the policy has `(> speed debug)` — so
+;;; `(apply #'p-pack …)` inside `p-pack` compiles to "jump back to the top of
+;;; this same code", which the later redefinition cannot displace.  The runtime
+;;; happens to compile at SBCL's default policy (speed 1 = debug 1), where the
+;;; conversion does not fire, so the direct spelling worked — and would break
+;;; the moment the file's policy rose.  MEASURED, s463av / task #950: with one
+;;; `(declaim (optimize (speed 3)))` at the top of this file, `pack("N",1)` dies
+;;; with `p-pack: cl/pcl-pack.lisp not found in …/cl/` while the file is
+;;; present; the symbol-function spelling answers correctly at every policy.
+;;; The mro/warnings/xs stubs below were always spelled this way; pack/unpack
+;;; were the two that were not (rule 11 — the same mechanism in two spellings,
+;;; and the odd one out is the wrong one).
+(defmacro %pcl-def-ext-stub (name ext)
+  `(defun ,name (&rest args)
+     (let ((loaded (p-load-extension ,ext)))
+       (if loaded
+           (apply (symbol-function ',name) args)
+           (error "~a: cl/~a.lisp not found in ~a" ,ext ,ext
+                  (or *pcl-runtime-directory* "(no runtime dir)"))))))
+
+;;; ============================================================
 ;;; pack / unpack (basic implementation)
 ;;; ============================================================
+;;; The real definitions arrive with cl/pcl-pack.lisp (cl/pack-impl.pl,
+;;; transpiled).  `p-unpack`'s `$_` default lives on THAT definition, which is
+;;; the one every call after the first reaches; the stub's &rest simply passes
+;;; the caller's actual arguments through to it.
 
-(defun p-pack (template &rest args)
-  ;; Self-loading stub: loads pcl-pack.lisp on first call then delegates.
-  (let ((loaded (p-load-extension "pcl-pack")))
-    (if loaded
-        (apply #'p-pack template args)
-        (error "p-pack: cl/pcl-pack.lisp not found in ~a"
-               (or *pcl-runtime-directory* "(no runtime dir)")))))
-
-(defun p-unpack (template &optional (str $_))
-  ;; Self-loading stub: loads pcl-pack.lisp on first call then delegates.
-  (let ((loaded (p-load-extension "pcl-pack")))
-    (if loaded
-        (p-unpack template str)
-        (error "p-unpack: cl/pcl-pack.lisp not found in ~a"
-               (or *pcl-runtime-directory* "(no runtime dir)")))))
+(%pcl-def-ext-stub p-pack "pcl-pack")
+(%pcl-def-ext-stub p-unpack "pcl-pack")
 
 ;;; ============================================================
 ;;; mro — always-available core facility (perl >= 5.10)
@@ -20385,15 +20515,10 @@ buffer's fill-pointer; everything else falls back to file-length."
 (p-defpackage :mro)
 (p-defpackage :warnings)
 
-(defmacro %pcl-def-ext-stub (name ext)
-  ;; Self-loading stub: loads cl/EXT.lisp on first call then delegates to
-  ;; the real definition the extension just installed over this stub.
-  `(defun ,name (&rest args)
-     (let ((loaded (p-load-extension ,ext)))
-       (if loaded
-           (apply (symbol-function ',name) args)
-           (error "~a: cl/~a.lisp not found in ~a" ,ext ,ext
-                  (or *pcl-runtime-directory* "(no runtime dir)"))))))
+;;; %pcl-def-ext-stub is defined once, above p-pack — the first stub that
+;;; needs it.  (It used to be defined here, so pack/unpack, which come
+;;; earlier in the file, were hand-written instead and drifted; see the
+;;; macro's own comment.)
 
 (%pcl-def-ext-stub mro::pl-get_linear_isa "pcl-mro")
 (%pcl-def-ext-stub mro::pl-get_mro "pcl-mro")

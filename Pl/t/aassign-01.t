@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 44;
+plan tests => 46;
 
 sub run_cl {
     my ($code) = @_;
@@ -541,3 +541,40 @@ test_cl('#923 sized path agrees with the expanding walk',
      print "$v ", scalar(@$w), " $x\n";
      print "$g $i\n";',
     "1 2 3 k 4\nstr 2 12\n1 2\n");
+
+# ── #981: the destination's capacity is RESERVED from the source's length ────
+# p-array-fill now reserves PLACE's capacity (via %p-fill-lower-bound) before
+# its push loop, instead of letting `my @c = @src` re-discover the length one
+# growth at a time.  Capacity is invisible to Perl — only the fill pointer is
+# scalar(@a) — so these rows CANNOT fail on the pre-#981 tree; they are not
+# inverse guards.  What they cover is the new predicate's ARMS: every kind of
+# source p-array-fill can be handed must still produce exactly the elements it
+# produced before, whatever bound was reserved for it.  Get the bound wrong for
+# one arm and the row that arm feeds is where it shows.
+test_cl('#981 reservation arms: vector / list / hash / string / nested / empty',
+    'my @src = (1..6); my @c = @src;                 # vector arm
+     my %h = (a => 1); my @fromh = %h;               # hash-table arm (2 x count)
+     my @s = ("hello");                              # string arm: ONE slot
+     my @nest = (1, (2, 3), 4);                      # recursion past the bound
+     my @none = (); my @e = @none;                   # bound 0
+     my @big = (1..30); @big = (7, 8);               # shrink keeps the buffer
+     print "@c|", scalar(@c), "\n";
+     print scalar(@fromh), "\n";
+     print "@s|", scalar(@s), "\n";
+     print "@nest|", scalar(@nest), "\n";
+     print scalar(@e), "\n";
+     print "@big|", scalar(@big), "\n";',
+    "1 2 3 4 5 6|6\n2\nhello|1\n1 2 3 4|4\n0\n7 8|2\n");
+
+# A deleted element must still copy as ONE slot holding undef — the reservation
+# reaches %p-array-fill-item's `(null item)` arm, and a bound that skipped the
+# nil marker would shorten the copy.  Length and values are perl's exactly.
+# NOT asserted here: `exists $copy[1]`, which perl answers TRUE (copying an
+# array flattens it to a list, and a hole in a list is an ordinary undef) while
+# PCL propagates the hole marker and answers false.  That divergence is
+# PRE-EXISTING and untouched by #981 — task #984.
+test_cl('#981 a deleted element still copies as one undef slot',
+    'my @d = (1,2,3); delete $d[1]; my @copy = @d;
+     print scalar(@copy), " ", (defined $copy[1] ? "def" : "undef"), " ",
+           (defined $copy[2] ? $copy[2] : "?"), "\n";',
+    "3 undef 3\n");

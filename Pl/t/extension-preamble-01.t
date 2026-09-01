@@ -41,7 +41,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 5;
+plan tests => 9;
 
 # The three program-preamble forms an extension must never carry.  Each is
 # global state the HOST program owns: its module search path, the transpiler
@@ -116,3 +116,42 @@ close $gfh;
 my $guard_out = `sbcl @sbcl_rt --load $gfile 2>&1`;
 like($guard_out, qr/DIED:.*pcl-badext/s,
      'p-load-extension dies naming an extension that changes @INC (rule 12)');
+
+# --- 5. the STUB DELEGATION invariant (task #980) -------------------------
+# A self-loading stub gets exactly ONE chance: p-load-extension answers T for
+# the load that actually happened and NIL for every later call, so the
+# delegation must reach the definition the extension file just installed OVER
+# the stub.  A DIRECT self-reference — `(apply #'p-pack …)` inside `p-pack` —
+# does not: SBCL turns a defun's reference to its own name into a LOCAL call
+# whenever the policy has (> speed debug), and the stub then re-enters itself
+# and raises "cl/pcl-pack.lisp not found" on a file that is right there.
+# Measured s463av: one `(declaim (optimize (speed 3)))` at the top of the
+# runtime is enough.  `(symbol-function ',name)` is an fdefinition lookup SBCL
+# cannot fold away, and that is what %pcl-def-ext-stub uses.
+#
+# This is a SOURCE invariant because the bug is invisible at the policy the
+# tree compiles at — a behavioural row would pass on the broken spelling.  It
+# fails on a tree where any stub is hand-written again.
+my $rt_src = do {
+  open my $fh, '<:raw', $runtime or die "cannot read $runtime: $!";
+  local $/; <$fh>;
+};
+my @macro_defs = $rt_src =~ /^\(defmacro \%pcl-def-ext-stub\b/mg;
+is(scalar @macro_defs, 1,
+   'the runtime defines %pcl-def-ext-stub exactly once (one mechanism, rule 11)');
+
+# Every CALL of p-load-extension must be the macro's — that is what makes the
+# macro the single place the delegation is spelled.  (Its own `(defun
+# p-load-extension` reads differently and is not counted.)  A hand-written stub
+# shows up here as a second call site.
+my @uses = $rt_src =~ /\(p-load-extension\b/g;
+is(scalar @uses, 1,
+   'p-load-extension is CALLED from exactly one place: %pcl-def-ext-stub')
+  or diag("a hand-written self-loading stub has appeared; route it through "
+        . "%pcl-def-ext-stub (task #980) — a direct self-call breaks under "
+        . "(> speed debug)");
+
+like($rt_src, qr/^\(\%pcl-def-ext-stub p-pack "pcl-pack"\)$/m,
+     'p-pack is a %pcl-def-ext-stub, not a hand-written self-call (#980)');
+like($rt_src, qr/^\(\%pcl-def-ext-stub p-unpack "pcl-pack"\)$/m,
+     'p-unpack is a %pcl-def-ext-stub, not a hand-written self-call (#980)');

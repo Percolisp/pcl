@@ -95,6 +95,13 @@ my @benches = (
   ['arrfill',   "$HN my \@a; my \$s=0; for (1..\$n) { \@a = (1..20, \$_); \$s += \@a } print \"\$s\\n\";", 200_000, 0],
   ['slices',    "$HN my \@a = (1..50); my \%h = map { \$_ => \$_ } 1..50; my \@k = (1..10); my \$s=0; for (1..\$n) { my \@v = \@a[1..5]; my \@w = \@h{\@k}; \$s += \$v[0] + \$w[9] } print \"\$s\\n\";", 200_000, 0],
   ['sliceasgn', "$HN my \@a = (1..20); my \%h; my \$s=0; for (1..\$n) { \@a[1..3] = (7,8,9); \@h{'a','b'} = (\$_, 2); \$s += \$a[2] + \$h{a} } print \"\$s\\n\";", 200_000, 0],
+  # `my @c = @src` — a WHOLE-ARRAY copy into a fresh lexical, the commonest
+  # list assignment there is, and until s463av (#981) no row covered it: the
+  # slice rows assign 5 and 10 elements, which is too few for the destination's
+  # growth to show against their hash traffic.  At 50 it is 20 % of the shape
+  # (measured both ways at the #981 fix).  50 elements x 1e6 puts perl at
+  # ~0.74 s, comfortably above the ~1 s constant term's spread.
+  ['listcopy',  "$HN my \@src = (1..50); my \$s=0; for (1..\$n) { my \@c = \@src; \$s += scalar(\@c) } print \"\$s\\n\";", 1_000_000, 0],
   # READ-ONLY foreach over an ARRAY (task #862 ARM A, the boxed-aggregates
   # design's §4.4 proven arm).  The loop variable aliases each element, which
   # under raw element storage PROMOTES every slot to a box — once, but
@@ -125,32 +132,84 @@ my @benches = (
 );
 
 # ---- build a fresh runtime core (like tools/prove-core) --------------------
-my ($cfh, $CORE) = tempfile('pcl-bench-core.XXXXXX', TMPDIR => 1, UNLINK => 0);
-close $cfh; unlink $CORE;
-END { unlink $CORE if defined $CORE }
-$SIG{$_} = sub { unlink $CORE if defined $CORE; exit 1 } for qw(INT TERM);
-print STDERR "bench-exec: building runtime core ...\n";
-system(qq{sbcl --noinform --non-interactive --load "$RT" }
-     . qq{--eval "(sb-ext:save-lisp-and-die \\"$CORE\\" :executable nil)" >/dev/null 2>&1});
-die "bench-exec: core build failed\n" unless -s $CORE;
+my @CORES;
+END { unlink $_ for @CORES }
+$SIG{$_} = sub { unlink $_ for @CORES; exit 1 } for qw(INT TERM);
+
+sub build_core {                 # save a core with $rt_source baked in
+  my ($rt_source, $label) = @_;
+  my ($cfh, $core) = tempfile('pcl-bench-core.XXXXXX', TMPDIR => 1, UNLINK => 0);
+  close $cfh; unlink $core;
+  push @CORES, $core;
+
+  # The runtime derives *pcl-runtime-directory* from its own *load-truename*,
+  # and the lazily-loaded extensions (pack/mro/warnings/xs) are found under it.
+  # So a B runtime kept OUTSIDE cl/ builds a core whose `pack` cannot load —
+  # which shows up as `BROKEN: pclB exit 1` on the two pack rows and is an
+  # artefact of where the file sits, not of what is in it.  Stage any source
+  # that is not already beside $RT into cl/ for the build.
+  my $staged;
+  if (dirname(abs_path($rt_source)) ne dirname(abs_path($RT))) {
+    my ($sfh, $sfile) = tempfile('bench-rt-XXXXXX', SUFFIX => '.lisp',
+                                 DIR => dirname($RT), UNLINK => 0);
+    close $sfh;
+    open my $in, '<', $rt_source or die "bench-exec: $rt_source: $!\n";
+    open my $out, '>', $sfile    or die "bench-exec: $sfile: $!\n";
+    print $out $_ while <$in>;
+    close $in; close $out;
+    $staged = $sfile;
+    push @CORES, $sfile;         # same cleanup list (unlinked on exit/INT/TERM)
+    $rt_source = $sfile;
+  }
+
+  print STDERR "bench-exec: building runtime core ($label) ...\n";
+  system(qq{sbcl --noinform --non-interactive --load "$rt_source" }
+       . qq{--eval "(sb-ext:save-lisp-and-die \\"$core\\" :executable nil)" >/dev/null 2>&1});
+  my $ok = -s $core;
+  unlink $staged if defined $staged;
+  die "bench-exec: core build failed ($label: $rt_source)\n" if !$ok;
+  return $core;
+}
+
+# RUNTIME A/B (s463av, task #950).  BENCH_RT_B=<other cl/pcl-runtime.lisp> adds
+# a SECOND core built from that source and times both PCL sides INTERLEAVED
+# (below).  Emission is identical for the two — only the runtime differs — so
+# the one transpile is shared and the columns differ by exactly the runtime.
+# Use it for any runtime-side change: a policy declaim, a hot-path rewrite, a
+# base-commit worktree's runtime.  Without it the tool behaves as before.
+my $RT_B = $ENV{BENCH_RT_B};
+my $CORE   = build_core($RT, 'A');
+my $CORE_B = defined $RT_B ? build_core($RT_B, 'B') : undef;
 
 # The SBCL command line comes from the ONE builder every other runner uses
 # (tools/lib/PCLSbcl.pm) — this file hand-wrote its own until s459am and so ran
 # PCL on the 2 MB default control stack, which is #324 all over again.  Only
 # the CORE is ours: it is built above from this tree's runtime on purpose.
-my $SBCL = sbcl_prefix_str(core => $CORE, runtime => $RT);
+my $SBCL   = sbcl_prefix_str(core => $CORE, runtime => $RT);
+my $SBCL_B = defined $CORE_B
+           ? sbcl_prefix_str(core => $CORE_B, runtime => $RT_B) : undef;
 
-sub best {                       # min wall time over K runs of $cmd with N=$n
-  my ($cmd, $n) = @_;
-  my $min;
-  for (1 .. $K) {
-    local $ENV{N} = $n;
-    my $t = time();
-    system("$cmd >/dev/null 2>&1");
-    my $e = time() - $t;
-    $min = $e if !defined $min || $e < $min;
+# INTERLEAVED best-of-K over several (command, N) series at once.  Every series
+# gets its round-r sample before any series gets its round-(r+1) sample, so a
+# drift in machine load during the row — a sibling agent starting a sweep — hits
+# all series alike instead of landing wholly on whichever one ran last.  This is
+# what makes an A/B verdict trustworthy on a SHARED box; on a quiet one it is
+# identical in expectation to the old series-at-a-time loop.  Returns one
+# minimum per series, in order.
+sub best_interleaved {
+  my (@series) = @_;             # each: [ $cmd, $n ]
+  my @min = (undef) x @series;
+  for my $round (1 .. $K) {
+    for my $i (0 .. $#series) {
+      my ($cmd, $n) = @{ $series[$i] };
+      local $ENV{N} = $n;
+      my $t = time();
+      system("$cmd >/dev/null 2>&1");
+      my $e = time() - $t;
+      $min[$i] = $e if !defined $min[$i] || $e < $min[$i];
+    }
   }
-  return $min;
+  return @min;
 }
 
 # stdout of one run, plus the exit status.  A row is timed only when the two
@@ -164,9 +223,19 @@ sub run_out {
   return ($out, $rc);
 }
 
-printf "PCL v2 vs Perl — execution time (startup subtracted), best-of-%d\n\n", $K;
-printf "%-11s %10s %10s %9s\n", 'bench', 'perl(s)', 'pcl(s)', 'pcl/perl';
-printf "%-11s %10s %10s %9s\n", '-'x11, '-'x10, '-'x10, '-'x9;
+printf "PCL v2 vs Perl — execution time (startup subtracted), best-of-%d\n", $K;
+printf "runtime B: %s\n", $RT_B if defined $RT_B;
+print "\n";
+if (defined $RT_B) {
+  printf "%-11s %10s %10s %10s %9s %9s\n",
+         'bench', 'perl(s)', 'pclA(s)', 'pclB(s)', 'B/A', 'A/perl';
+  printf "%-11s %10s %10s %10s %9s %9s\n",
+         '-'x11, '-'x10, '-'x10, '-'x10, '-'x9, '-'x9;
+}
+else {
+  printf "%-11s %10s %10s %9s\n", 'bench', 'perl(s)', 'pcl(s)', 'pcl/perl';
+  printf "%-11s %10s %10s %9s\n", '-'x11, '-'x10, '-'x10, '-'x9;
+}
 
 for my $b (@benches) {
   my ($name, $src, $big, $small) = @$b;
@@ -180,24 +249,49 @@ for my $b (@benches) {
   close $lfh;
   system("$PL2CL $pfile > $lfile 2>/dev/null");
   my $pcl_cmd = "$SBCL --load $lfile";
+  my $pcl_cmd_b = defined $SBCL_B ? "$SBCL_B --load $lfile" : undef;
 
   # Verify before timing (#814): both engines must print the same thing at
   # N_big, and PCL must exit 0.  Otherwise the row is BROKEN, not fast.
+  # In A/B mode BOTH runtimes are verified — a "faster" runtime that stopped
+  # computing the row's answer is the failure this check exists to catch.
   my ($pout, $prc) = run_out($perl_cmd, $big);
-  my ($cout, $crc) = run_out($pcl_cmd,  $big);
-  if ($crc != 0 || $cout ne $pout) {
-    my $why = $crc != 0 ? sprintf('pcl exit %d', $crc >> 8)
-            :             sprintf('perl=%.30s pcl=%.30s', $pout, $cout);
-    printf "%-11s %10s %10s %9s   BROKEN: %s\n", $name, '-', '-', '-', $why;
+  my @engines = ([$pcl_cmd, 'pcl']);
+  push @engines, [$pcl_cmd_b, 'pclB'] if defined $pcl_cmd_b;
+  my $broken;
+  for my $e (@engines) {
+    my ($cout, $crc) = run_out($e->[0], $big);
+    next if $crc == 0 && $cout eq $pout;
+    $broken = $crc != 0 ? sprintf('%s exit %d', $e->[1], $crc >> 8)
+            :             sprintf('perl=%.30s %s=%.30s', $pout, $e->[1], $cout);
+    last;
+  }
+  if (defined $broken) {
+    my $cols = defined $RT_B ? 5 : 4;
+    printf "%-11s%s   BROKEN: %s\n", $name, ('      -' x ($cols - 1)), $broken;
     next;
   }
 
-  my $perl_exec = best($perl_cmd, $big) - best($perl_cmd, $small);
-  my $pcl_exec  = best($pcl_cmd,  $big) - best($pcl_cmd,  $small);
-  $_ < 0 and $_ = 0 for $perl_exec, $pcl_exec;
+  my @series = ([$perl_cmd, $big], [$perl_cmd, $small],
+                [$pcl_cmd,  $big], [$pcl_cmd,  $small]);
+  push @series, [$pcl_cmd_b, $big], [$pcl_cmd_b, $small] if defined $pcl_cmd_b;
+  my ($pb, $ps, $cb, $cs, $bb, $bs) = best_interleaved(@series);
 
+  my $perl_exec = $pb - $ps;
+  my $pcl_exec  = $cb - $cs;
+  $_ < 0 and $_ = 0 for $perl_exec, $pcl_exec;
   my $ratio = $perl_exec > 0 ? sprintf('%.2fx', $pcl_exec / $perl_exec) : 'n/a';
-  printf "%-11s %10.4f %10.4f %9s\n", $name, $perl_exec, $pcl_exec, $ratio;
+
+  if (!defined $pcl_cmd_b) {
+    printf "%-11s %10.4f %10.4f %9s\n", $name, $perl_exec, $pcl_exec, $ratio;
+    next;
+  }
+  my $pclb_exec = $bb - $bs;
+  $pclb_exec = 0 if $pclb_exec < 0;
+  my $ba = $pcl_exec > 0 ? sprintf('%+.1f%%', 100 * ($pclb_exec / $pcl_exec - 1))
+         :                 'n/a';
+  printf "%-11s %10.4f %10.4f %10.4f %9s %9s\n",
+         $name, $perl_exec, $pcl_exec, $pclb_exec, $ba, $ratio;
 }
 
 print "\nratio < 1.00x = PCL faster; > 1.00x = PCL slower.\n";
