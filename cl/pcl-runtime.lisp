@@ -863,6 +863,24 @@
                 build-ppcre-options))
 (defvar *p-undef* :undef "Perl's undef value")
 
+(defun %p-empty-list ()
+  "Perl's EMPTY LIST as a runtime VALUE: a fresh zero-length adjustable vector.
+
+   A list value in this runtime is a vector, so the empty list is a
+   zero-length one — the shape every list consumer already splices to nothing
+   (p-array-fill's vector arm, %p-flatten-list's vector arm, p-flatten-args's
+   spread, %p-collect-list).  Raw NIL is NOT that shape: %p-flatten-list drops
+   it as an empty-list/hole marker, but every OTHER consumer reads it as one
+   slot — p-array-fill preserves it as an array HOLE and p-flatten-args
+   spreads it as one argument (tasks #962/#459).
+
+   THE ONE SPELLING (rule 11).  Three sites answered this question with the
+   same line: %pcl-no-op-import-result (#534), p-return-value's list-context
+   nil arm, and do-regex-match's no-match arm.  #534's docstring already
+   called this \"the same shape every other empty-list producer yields\"; with
+   this function it is."
+  (make-array 0 :adjustable t :fill-pointer 0))
+
 ;;; Forward declaration for %INC table (full definition in Module System section)
 (defvar *p-inc-table* (make-hash-table :test 'equal)
   "Perl %INC - tracks loaded modules (forward declaration)")
@@ -9941,7 +9959,7 @@ what changes is that the element is the raw counter rather than a fresh box."
        ;; nil (undef/empty-list) in list context: return empty list vector
        ;; so bare `return` and `return ()` contribute 0 elements to surrounding list.
        ((and (eq *wantarray* t) (null val))
-        (make-array 0 :adjustable t :fill-pointer 0))
+        (%p-empty-list))
        (t val)))
     ;; Blessed box - return the whole box so the class is preserved.
     ;; Needed for e.g. bless \$scalar (scalar-ref inside box): the box carries the
@@ -18408,7 +18426,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    exhausted, unknown package, @ISA walk exhausted — and %pcl-super-fallback)
    call it; they used to spell the same four lines each."
   (if (eq *wantarray* t)
-      (make-array 0 :adjustable t :fill-pointer 0)
+      (%p-empty-list)
       nil))
 
 (defun p-method-call (obj method &rest args)
@@ -20009,8 +20027,18 @@ buffer's fill-pointer; everything else falls back to file-length."
                              captures)
                            t))
                      ;; No match: scalar/void context returns Perl's '' (defined
-                     ;; false), not undef; list context returns the empty list.
-                     (if (eq *wantarray* t) nil "")))))))
+                     ;; false), not undef; list context returns the EMPTY LIST.
+                     ;; The empty list is spelled as a zero-length VECTOR, not
+                     ;; raw nil (tasks #962/#459).  Raw nil is the runtime's
+                     ;; "empty list" only to %p-flatten-list; every OTHER list
+                     ;; consumer reads it as one slot — p-array-fill preserves
+                     ;; it as an array HOLE, p-flatten-args spreads it as one
+                     ;; argument — so `f(/nomatch/, "d")' handed the callee two
+                     ;; arguments where perl hands one, and every later
+                     ;; argument shifted.  A vector is what the SUCCESS arm and
+                     ;; the /g list arm already return, so all four consumers
+                     ;; splice it to nothing with no arm of their own.
+                     (if (eq *wantarray* t) (%p-empty-list) "")))))))
       (cl-ppcre:ppcre-syntax-error (e)
         (warn "Regex syntax error: ~A" e)
         nil))))

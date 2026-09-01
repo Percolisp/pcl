@@ -45,7 +45,7 @@ sub run_cl {
     return $out;
 }
 
-plan tests => 34;
+plan tests => 39;
 
 # 1. $& whole match
 is run_cl(<<'END'), "world\n", '$& is the whole matched string';
@@ -333,4 +333,94 @@ print "mods=$m1$m2\n";
 my $pat = "b"; my $c = 0;
 $c++ while "abcabc" =~ /$pat/g;
 print "interp-g=$c\n";
+END
+
+# ── #962 / #459: A FAILED MATCH IN LIST CONTEXT IS THE EMPTY LIST ────────────
+# perlop: "in list context a failed match returns the empty list".  PCL's
+# do-regex-match answered raw NIL there, and raw nil is the runtime's empty
+# list to ONE consumer only — %p-flatten-list drops it as an empty-list/hole
+# marker.  Every other list consumer reads it as one slot: p-array-fill keeps
+# it as an array HOLE and p-flatten-args spreads it as one argument.  So a
+# failed match ALONE on the RHS was right (`my @l = (/zzz/)` is 0) and a
+# failed match anywhere ELSE in a list contributed a phantom element that
+# shifted every value after it.  It now returns %p-empty-list — a zero-length
+# vector, the shape the SUCCESS arm and the /g list arm already yield, which
+# every consumer splices to nothing with no arm of its own.
+
+# 35. THE ARGUMENT LIST is where it bites hardest: perl hands the callee one
+# argument, PCL handed it two.  The capture-BEARING failure is the same bug
+# (a captured miss and a capture-less miss are both the empty list), and the
+# two successful twins are the negatives that must not move.
+is run_cl(<<'END'), "n=1 [d]\nn=2 [1][d]\nn=3 [a][a][d]\nn=1 [d]\n", 'a failed match contributes NO argument (#459)';
+sub sh { print "n=", scalar(@_), " [", join("][", map { defined $_ ? $_ : "U" } @_), "]\n" }
+$_ = 'aaaccc';
+sh(/a*b/, "d");
+sh(/a/, "d");
+sh(/(a)(a)/, "d");
+sh(/(z)(z)/, "d");
+END
+
+# 36. THE SHAPE THAT MAKES IT A SILENT WRONG rather than a count: `ok /pat/,
+# "desc"` is the Test::More idiom, so on a MISS perl's $_[0] is the
+# DESCRIPTION (a true string) and $_[1] is undef — the row reads "ok" with no
+# name.  PCL's phantom "" took $_[0] and the description slid into $_[1], so
+# the row reported the opposite verdict.  This is #940's residue, isolated.
+is run_cl(<<'END'), "ok - U\nok - hit\n", 'a miss does not shift `ok /pat/, "desc"` (#962)';
+sub myok { print(($_[0] ? "ok" : "not ok"), " - ", (defined $_[1] ? $_[1] : "U"), "\n") }
+$_ = "zzz";
+myok /q+/, "miss";
+myok /z+/, "hit";
+END
+
+# 37. EVERY LIST CONSUMER, because the fix is a VALUE change and each consumer
+# has its own walk: array assignment, map/grep/sort, join, push, foreach, hash
+# assignment (an odd phantom would have shifted the key/value pairing), a miss
+# in the MIDDLE of a literal list, and the array-HOLE question — p-array-fill's
+# nil arm is exactly what made the old value a defined-less phantom slot.
+is run_cl(<<'END'), "arr=1\nmap=1\ngrep=1\nsort=1\njoin=b\npush=1\neach=1\nhash=k,v\nmid=2:1 2\nhole=D:b\n", 'a failed match splices to nothing in every list consumer';
+$_ = "aaa";
+my @a = (/zzz/, "b");                 print "arr=", scalar(@a), "\n";
+my @m = map { "x" } (/zzz/, "b");     print "map=", scalar(@m), "\n";
+my @g = grep { 1 } (/zzz/, "b");      print "grep=", scalar(@g), "\n";
+my @s = sort (/zzz/, "b");            print "sort=", scalar(@s), "\n";
+print "join=", join("|", /zzz/, "b"), "\n";
+my @p; push @p, /zzz/, "b";           print "push=", scalar(@p), "\n";
+my $c = 0; foreach my $e (/zzz/, "b") { $c++ }  print "each=$c\n";
+my %h = (/zzz/, "k", "v");            print "hash=", join(",", %h), "\n";
+my @n = (1, /zzz/, 2);                print "mid=", scalar(@n), ":@n\n";
+my @h2 = (/zzz/, "b");                print "hole=", (defined $h2[0] ? "D" : "U"), ":$h2[0]\n";
+END
+
+# 38. THE NEIGHBOUR THAT MUST NOT MOVE (#416): the SCALAR answer of a failed
+# match is perl's DEFINED "" — not undef, not 0 — and s/// answers the same
+# while tr/// answers the count 0.  Only the LIST-context value changed, so
+# every row here reads the same before and after (it passes on the base tree,
+# which is the point of having it).
+is run_cl(<<'END'), "m=<>D\ns=<>D\nt=<0>D\ng=<>D\nif=F not=T\nnum=1\n", 'the scalar answer of a failed match is unchanged (#416)';
+my $q = "abc";
+my $m = ($q =~ /zzz/);   print "m=<$m>", (defined $m ? "D" : "U"), "\n";
+my $s = ($q =~ s/zzz/x/);print "s=<$s>", (defined $s ? "D" : "U"), "\n";
+my $t = ($q =~ tr/z/y/); print "t=<$t>", (defined $t ? "D" : "U"), "\n";
+my $g = ($q =~ /zzz/g);  print "g=<$g>", (defined $g ? "D" : "U"), "\n";
+print "if=", ($q =~ /zzz/ ? "T" : "F"), " not=", ($q !~ /zzz/ ? "T" : "F"), "\n";
+print "num=", (($q =~ /zzz/) + 1), "\n";
+END
+
+# 39. THE OTHER LIST-CONTEXT ARMS and the two consumers that read the value as
+# a COUNT: /g in list context (which already yielded an empty vector, so it is
+# the shape the no-/g arm was taught), the `() = ` count, a list assignment in
+# BOOLEAN position (the count must stay 0 = false), the `my ($x) = $s =~ /…/`
+# loop idiom, and a failed match RETURNED from a sub in list context.
+is run_cl(<<'END'), "gmiss=1\nghit=3:1 2 b\ncount0=0\nbool=FT\nloop=2/1\nret=1\n", 'count, boolean and return consumers of an empty match list';
+$_ = "a1b2";
+my @c = (/zzz/g, "b");                 print "gmiss=", scalar(@c), "\n";
+my @d = (/(\d)/g, "b");                print "ghit=", scalar(@d), ":@d\n";
+my $n = (() = /zzz/);                  print "count0=$n\n";
+print "bool=", ((my ($k) = /zzz/) ? "T" : "F"), ((my ($j) = /a/) ? "T" : "F"), "\n";
+my @src = ("a1", "bb", "c2");
+my $i = 0; my $u = 0;
+for my $t (@src) { my ($z) = $t =~ /(\d)/; defined $z ? $i++ : $u++ }
+print "loop=$i/$u\n";
+sub sub_ret { my $x = shift; $x =~ /zzz/ }
+my @r = (sub_ret("q"), "b");           print "ret=", scalar(@r), "\n";
 END

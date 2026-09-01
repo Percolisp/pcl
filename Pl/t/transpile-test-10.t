@@ -1178,6 +1178,14 @@ print "done\n";
 # division; a REAL `q*…*` string after a real division must survive; and a
 # `()`-prototyped sub's division (the row above) is what _word_is_term keeps
 # out of the repair in the first place.
+# THE THREE FAILING-MATCH SPELLINGS (`q+`, `qq*`, `tr*`) were #940's measured
+# residue and are #962's: the parse is right for all three, but a FAILED
+# capture-less m// used to return a false ELEMENT in list context where perl
+# returns the empty list, so `myok /q+/, "six"` handed the sub ("", "six") and
+# the description slid into $_[1].  They are here rather than in a file of
+# their own because the derail and the empty list are the same call site read
+# twice: the parse decides WHICH match runs, the list value decides what the
+# argument list then holds.
 # THE LAST TWO ROWS ARE t/re/pat.t:113-114 VERBATIM IN SHAPE, and they are the
 # case the first version of this fix BROKE: the description is a `qq [...]`
 # holding a `/`, so a scan of the WHOLE statement (rather than the token
@@ -1192,6 +1200,9 @@ $_ = "zzz";
  myok /s*/, "three";
  myok /y*/, "four";
  myok /z*/, "five";
+ myok /q+/, "six";
+ myok /qq*/, "seven";
+ myok /tr*/, "eight";
 my $n = 8;
 print "div=", $n / 2, " lit=", q*a/b*, "\n";
 my $s = q*plain*;
