@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 123;
+plan tests => 124;
 
 sub run_cl {
     my ($code) = @_;
@@ -1179,3 +1179,26 @@ test_cl('term-initial ~~ as a call argument',
       . 'operator — if this FAILS, PPI is fixed: drop '
       . '_repair_term_initial_complement (ppi-upstream-bugs.md §21)' );
 }
+
+# ── #922: integer stringification across the FIXNUM boundary ────────────────
+# %p-fixnum-string builds the decimal text with a digit loop, and s462as made
+# every TRUNCATE in it inline by handling most-negative-fixnum (the one value
+# whose magnitude is not a fixnum) separately.  These are the values that
+# would break if the split were ever got wrong — the two fixnum limits and
+# the first value on each side of them — printed and used as HASH KEYS, which
+# is where a wrong digit becomes a wrong lookup.  Expectations are perl's
+# (probed 5.40.3).
+test_cl('#922 integers stringify across the fixnum boundary',
+    'my @v = (0, 1, -1, 9, 10, 99, 100, 1234567, -1234567,
+              4611686018427387903, -4611686018427387904,
+              4611686018427387904, -4611686018427387905,
+              9223372036854775807, -9223372036854775808);
+     print join("|", map { "$_" } @v), "\n";
+     my %h; $h{$_} = 1 for @v;
+     print join("|", sort { $a <=> $b } keys %h), "\n";',
+    "0|1|-1|9|10|99|100|1234567|-1234567|4611686018427387903|"
+  . "-4611686018427387904|4611686018427387904|-4611686018427387905|"
+  . "9223372036854775807|-9223372036854775808\n"
+  . "-9223372036854775808|-4611686018427387905|-4611686018427387904|"
+  . "-1234567|-1|0|1|9|10|99|100|1234567|4611686018427387903|"
+  . "4611686018427387904|9223372036854775807\n");

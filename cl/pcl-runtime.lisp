@@ -2813,27 +2813,44 @@
    hash key, \"$n\", print $n.  sb-sprof put it at 24 % of the `slices` bench
    row alone, all of it in %output-integer-in-base and the string stream it
    writes into.  Bignums keep the printer (its algorithm is better than a
-   repeated TRUNCATE for very large values)."
+   repeated TRUNCATE for very large values).
+
+   MOST-NEGATIVE-FIXNUM IS HANDLED FIRST, AND THAT IS THE SPEED FIX (task
+   #922, s462as).  Its magnitude is the ONE value of `(if neg (- n) n)' that
+   is not a fixnum, so SBCL derived `(integer 0 4611686018427387904)' for the
+   digits — and every TRUNCATE in both loops became a GENERIC call, one per
+   digit, twice over.  Sending that single value to the printer lets the rest
+   be declared, and each TRUNCATE becomes the inline multiply-shift: measured
+   4e6 conversions, 0.198 s -> 0.112 s on a 7-digit number and 0.081 s ->
+   0.057 s on a 2-digit one (1.8x / 1.4x).  A comparison-table digit count was
+   also measured and is NOT taken: faster on long numbers (0.096 s) and slower
+   on the short ones that dominate real programs (0.066 s)."
   (declare (type fixnum n))
-  (if (zerop n)
-      "0"
-      (let* ((neg (minusp n))
-             (m (if neg (- n) n))          ; a bignum only for most-negative-fixnum
-             (d 0))
-        (declare (type (integer 0) m) (type fixnum d))
-        (let ((x m))
-          (loop while (> x 0) do (setf x (truncate x 10)) (incf d)))
-        (let* ((len (+ d (if neg 1 0)))
-               (s (make-string len)))
-          (when neg (setf (char s 0) #\-))
-          (let ((i (1- len)) (v m))
-            (loop
-             (multiple-value-bind (q r) (truncate v 10)
-               (setf (char s i) (code-char (+ 48 r)))
-               (setf v q)
-               (decf i)
-               (when (zerop v) (return)))))
-          s))))
+  (cond
+    ((zerop n) "0")
+    ((eql n most-negative-fixnum) (write-to-string n))
+    (t
+     (let* ((neg (minusp n))
+            (m (if neg (- n) n)))
+       (declare (type (and fixnum unsigned-byte) m))
+       (let ((d 0) (x m))
+         (declare (type (integer 0 20) d) (type (and fixnum unsigned-byte) x))
+         (loop while (> x 0) do (setf x (truncate x 10)) (incf d))
+         (let* ((len (+ d (if neg 1 0)))
+                (s (make-string len)))
+           (declare (type (integer 1 21) len))
+           (when neg (setf (schar s 0) #\-))
+           (let ((i (1- len)) (v m))
+             (declare (type fixnum i) (type (and fixnum unsigned-byte) v))
+             (loop
+              (multiple-value-bind (q r) (truncate v 10)
+                (declare (type (and fixnum unsigned-byte) q)
+                         (type (integer 0 9) r))
+                (setf (schar s i) (code-char (+ 48 r)))
+                (setf v q)
+                (decf i)
+                (when (zerop v) (return)))))
+           s))))))
 
 (defun stringify-value (v)
   "Convert a raw value to string"
