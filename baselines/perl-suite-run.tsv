@@ -1,4 +1,21 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s463au (Opus agent AU, round 20) — TWO ROWS EDITED BY HAND, and they are
+#   THE ROUND-19 TAIL the note below says was NOT VERIFIED (the rest of re/).
+#   Both are PRE-EXISTING relative to this session: measured on the 6e6f191
+#   base (= the round-19 merge) with the same runner and the same two-file
+#   command, and both trees agree row for row, so neither is #962's.  The
+#   full 301-file op/ + re/ run for #962 had exactly these two and no other
+#   mover.
+#     re/subst.t  C 200/72 -> 205/67 — A GAIN of five rows, in the s/// suite.
+#       The s463f (round-19 merge review) note further down this file, beside
+#       the row itself, is the AUTHORITATIVE attribution: it names the six
+#       rows (#939's %p-write-match-target reaching a TIED scalar's STORE) and
+#       the one that used to pass only by the clobber (#963).  Both sessions
+#       measured the same 205/67 independently, parallel and serial.
+#     re/charset.t C 2776/2776 -> 2776/2775 — one failure fewer, same tail.
+#       Note the s461ar header below records this file reading DIFF from
+#       CONTENTION once; this is not that — the runner's own #366 serial
+#       re-run agrees with the parallel verdict on BOTH trees.
 # s462at (Opus agent AT, round 19) — ONE ROW EDITED BY HAND, and it is the
 #   ONLY mover in 231 of the 301 op/ + re/ files the companion leg had produced
 #   when the session was stopped (the other 230 byte-identical to this
@@ -1392,7 +1409,7 @@ re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF		0
 # s455b (round 13): re/charset.t 2776/2775 -> 2776/2776 EDITED BY HAND -- s456af by tip
 # bisect (moved at the AF tip, old at the round-12 tip): one MORE row is produced and fails
 # honestly, pass count unchanged (the perennial churn file gains coverage, not a loss).
-re/charset.t	8328	0	2776	2776	DIFF		0
+re/charset.t	8328	0	2776	2775	DIFF		0
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
 re/fold_grind_a.t	31	0	0	0	DIFF		0
