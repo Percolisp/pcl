@@ -255,9 +255,17 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("Timely scalar destruction with lvalue substr"
                  :destroy-gc
                  "DESTROY must fire when the object held by a substr-lvalue target is overwritten — PCL never calls DESTROY via GC. not-supported.md: 'DESTROY called by garbage collector'.")
-                ;; 4-arg substr replacement on a tied (Tie::StdScalar) magical value.
-                (142 :tie
-                     "substr($tied,0,5,'') must STORE back through the tie so the tied value becomes 'last' — 4-arg substr does not write through tie magic. not-supported.md: 'DESTROY/tie magic' (tie write-through).")
+                ;; (Test 142 — `substr($data{a},0,5,"")` on a TIED hash element —
+                ;; was registered here as "4-arg substr does not write through tie
+                ;; magic" and is DROPPED as of task #960: it passes.  The cause was
+                ;; not tie at all.  The target is a hash ELEMENT, so under the s455
+                ;; raw-element model the 4-arg call received the element's VALUE and
+                ;; p-substr's write is silent on a non-box; #960 gives substr's
+                ;; target argument perl's loose lvalue context, so the call now gets
+                ;; the element's BOX — which is the box holding the tie proxy, and
+                ;; box-set has always run STORE through one.  The registry's own
+                ;; stale-detector is what found it: `# REGISTRY-STALE: substr.t
+                ;; test 142 now passes`.)
                 ;; UTF8-flag toggling: $refee blessed into a Unicode-named class,
                 ;; stringified so its SvUTF8 flag flips, then 4-arg substr.  PCL has
                 ;; no per-scalar UTF-8 flag (CL strings are always Unicode), so the

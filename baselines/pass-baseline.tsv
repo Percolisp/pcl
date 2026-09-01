@@ -1,4 +1,23 @@
 # taken-at: 5323d9e 2026-08-15
+# s463au (round 20, edited ROW BY ROW): substr.t 348/2 -> 351/0.  ONE row again,
+#   THREE test rows, all task #960 half (b) — substr/vec/pos take their TARGET
+#   ARGUMENT in perl's loose lvalue context, so the `=` and 4-argument write
+#   spellings reach a PLACE the way #939 made the `=~` spelling reach one.
+#     351  `substr($#ta,0,2) = 23`     was -1, want 23 (a blessed-free NEW fail
+#     353  `substr($#ta,0,2,23)`        above the abort point, so it read as
+#                                       UNSTABLE, never as a baseline row)
+#     142  `substr($data{a},0,5,"")` on a TIED hash element — a REGISTERED SKIP
+#          that now passes, found by the registry's own stale-detector
+#          (`# REGISTRY-STALE: substr.t test 142 now passes`) and dropped from
+#          cl/skip-registry.lisp in the same commit.  Its registration blamed
+#          tie write-through; the cause was the RAW ELEMENT (s455), so the 4-arg
+#          call got the element's value and p-substr's write is silent on a
+#          non-box.  With the element's BOX it is the box holding the tie proxy,
+#          and box-set has always run STORE through one.
+#   Attributed on the 6e6f191 base with a SERIAL single-file run of the same
+#   file: base 348/2, this tree 351/0, both aborting after test 353, and the
+#   whole TAP diff between the two trees is those three rows.  fail-baseline is
+#   UNCHANGED — substr.t's one blessed row is test 372, above the abort point.
 # s462at (round 19, edited ROW BY ROW): substr.t 347/3 -> 348/2.  ONE row, the
 #   `is $#ta, 23` at t/op/substr.t:893 whose statement is
 #   `substr($#ta, 0, 2) =~ s/\A..\z/23/s;`.  #939: an lvalue substr used as an
@@ -290,7 +309,7 @@ sprintf2.t	OK	1631	11	1678
 state.t	TRANSPILE_FAIL	0	0	-1
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
-substr.t	PARTIAL	348	2	397
+substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257

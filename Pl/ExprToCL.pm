@@ -1378,6 +1378,14 @@ sub gen_binary_op_form {
     if ($writes && $MAGIC_LVALUE_BASE{ _place_head($l) }) {
       $l = _write_through_form($l) // $l;
     }
+    # `substr($a[0],0,2) = "AB"` / `vec($a[0],0,8) = 65` / `pos($a[0]) = 1` —
+    # the `=` spelling of the same write (task #960).  p-setf's own place arms
+    # turn these into the writing call (`p-substr` 4-arg, `p-vec-set`,
+    # `p-pos` 2-arg), so the HEAD is already right and it is the TARGET
+    # ARGUMENT that has to be a place.
+    elsif ($op eq '=' && $MAGIC_LVALUE_BASE{ _place_head($l) }) {
+      $l = _lvalue_target_form($l);
+    }
     $l;
   };
   # Flat text of the left form == v1's $left bytes (to_flat contract); used
@@ -1777,14 +1785,40 @@ sub _write_through_form {
     return defined $inner ? [$head, $inner] : undef;
   }
   if (my $base = $MAGIC_LVALUE_BASE{$head}) {
-    if (@rest && ref $rest[0]) {
-      my $inner = _write_through_form($rest[0]);
-      $rest[0] = $inner if defined $inner;
-    }
-    return ["$base-lvalue-cell", @rest];
+    my $tgt = _lvalue_target_form([$head, @rest]);
+    return ["$base-lvalue-cell", @{$tgt}[1 .. $#$tgt]];
   }
   return ["$head-box", @rest] if $head =~ /^p-(?:aref|gethash)(?:-deref)?\z/;
   return undef;
+}
+
+# FORM (a magic-lvalue builtin call) with its TARGET ARGUMENT — the first —
+# rewritten to a write-through place; FORM unchanged when there is nothing to
+# rewrite.  This is perl's LOOSE LVALUE CONTEXT, and all THREE write spellings
+# of a magic-lvalue window need it (rule 11, one rewriter):
+#     substr($a[0],0,2) = "AB"      p-setf's `p-substr' place arm
+#     substr($a[0],0,2,"AB")        the 4-argument call
+#     substr($a[0],0,2) =~ s/…/…/   #939's `=~' target
+# The HEAD is left alone here, and that is the difference from
+# _write_through_form: only the `=~' spelling wants the target to BE the cell,
+# because do-regex-subst writes through a box.  The other two keep the
+# `p-substr' call, which p-setf and the 4-arg form already know how to write —
+# what they lacked was a PLACE to write to, since `(p-aref @a 0)' is a raw
+# element under the s455 boxed-aggregate model and p-substr's 4-arg form is
+# SILENT on a non-box (task #960: `substr($a[0],0,2) = "AB"` wrote nothing and
+# said nothing).  Recursive through a context bind for the same reason
+# _write_through_form is: a bind says nothing about where a value lives.
+sub _lvalue_target_form {
+  my ($form) = @_;
+  my $head = _form_head($form);
+  return $form unless length $head;
+  my @rest = @{$form}[1 .. $#$form];
+  return [$head, _lvalue_target_form($rest[0])]
+    if $CTX_WRAP{$head} && @rest == 1 && ref $rest[0];
+  return $form unless $MAGIC_LVALUE_BASE{$head} && @rest && ref $rest[0];
+  my $inner = _write_through_form($rest[0]);
+  $rest[0] = $inner if defined $inner;
+  return [$head, @rest];
 }
 
 sub _elem_accessor {
@@ -2265,12 +2299,20 @@ sub gen_funcall_form {
     return ['p-tied', ['p-gethash-box', $container, $keys[0]]] if $kind eq 'h_acc';
   }
 
-  # pos($a[i]) / pos($h{k}): needs the box for *p-match-pos* tracking.
+  # pos($a[i]) / pos($h{k}) / pos($r->[i]) / pos($r->{k}): needs the box, since
+  # *p-match-pos* is keyed by BOX IDENTITY — a raw element reads and writes
+  # nothing.  ALL FOUR element kinds, spelled from a table like the `delete`
+  # arm just below: the DEREF pair was missing, so `pos($c->{tmp}) = 0` (the
+  # shape Text::CSV_PP uses) wrote to a value and `pos($c->{tmp})` read undef,
+  # while the same code through a named hash worked (task #960).
   if ($func_name eq 'pos' && @$kids == 2) {
+    my %pos_box = (
+      'a_acc'     => 'p-aref-box',          'h_acc'     => 'p-gethash-box',
+      'a_ref_acc' => 'p-aref-deref-box',    'h_ref_acc' => 'p-gethash-deref-box',
+    );
     my ($kind, $container, @keys) = $self->_elem_container_key($kids->[1]);
     $kind //= '';
-    return ['p-pos', ['p-aref-box',    $container, $keys[0]]] if $kind eq 'a_acc';
-    return ['p-pos', ['p-gethash-box', $container, $keys[0]]] if $kind eq 'h_acc';
+    return ['p-pos', [$pos_box{$kind}, $container, $keys[0]]] if $pos_box{$kind};
   }
 
   # delete on array/hash elements and slices: pass container + key/index.
@@ -2462,6 +2504,16 @@ sub gen_funcall_form {
   }
 
   $self->environment->tail_position($saved_tail) if $self->environment && $saved_tail;
+
+  # THE 4-ARGUMENT `substr` WRITES ITS TARGET, so that argument is a place —
+  # perl's loose lvalue context again, and the third of the three spellings
+  # _lvalue_target_form serves (task #960).  Keyed on the ARGUMENT COUNT
+  # because that is what makes the call a write: 2 and 3 arguments READ, and
+  # imposing lvalue context on a read would promote an element to a box on
+  # every access, which is exactly the cost the boxed-aggregates work removed.
+  if ($cl_func eq 'p-substr' && @args == 4) {
+    $args[0] = _write_through_form($args[0]) // $args[0];
+  }
 
   my $call;
   if ($cl_func eq 'p-die' || $cl_func eq 'p-warn') {

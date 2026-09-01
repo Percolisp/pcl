@@ -3874,7 +3874,24 @@
                                      (to-string replacement)
                                      (subseq s end-pos))))
           (declare (ignore _))
-          ;; Modify in place if str is a box
+          ;; Modify in place if str is a box.
+          ;;
+          ;; AND IT STAYS `when', NOT %p-require-writable-target — task #960
+          ;; asked for the rule-12 death here and the probe it asked for
+          ;; FIRST is what rules it out.  `sub f { "hello" } substr(f(),0,2,
+          ;; "AB")' is not an error in perl: the 4-argument form takes its
+          ;; target in LOOSE lvalue context, so a TEMPORARY is written and
+          ;; discarded and the call still answers the replaced part "he"
+          ;; (probed 5.40.3 — only the `=' spelling of the same write refuses
+          ;; a non-lvalue sub call, and a read-only LITERAL refuses both).
+          ;; A raw CL string here is exactly that temporary, and PCL cannot
+          ;; tell it from a literal, so dying would refuse a shape perl
+          ;; accepts.  The s329 boundary agrees: perl discards this write
+          ;; itself, so no VALUE the program consumes is lost.  What makes a
+          ;; MISSED place loud is the emitter instead — Pl::ExprToCL's
+          ;; _lvalue_target_form rewrites every write position's target to a
+          ;; real place, so a raw target reaching here is a shape perl also
+          ;; writes to nothing.
           (when (p-box-p str)
             (box-set str new-str))
           replaced-part)
@@ -14663,7 +14680,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-560"
+(defparameter *pcl-cache-generation* "v2-580"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
