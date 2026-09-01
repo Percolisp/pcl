@@ -4,6 +4,79 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 463f (2026-09-01, Fable) — ROUND 19 COMPLETE: the USER-stopped AT worktree merge-reviewed and MERGED over AS (main `6e6f191`, gen v2-560); its unverified re/ tail run and attributed; #963 filed; ROUND 20 launched as two Opus agents (USER: "just two subjobs at a time")
+
+**Merge review of AT (s462at: #939 substr-lvalue `=~` target, #934 overload
+`fallback` read, #940 the manufactured-quote derail; #936 sized and
+declined).**  Round-4 recipe: the full code diff read first — `Pl/ExprToCL.pm`
+(%MAGIC_LVALUE_BASE, `_form_head`/`_place_head`/`_write_through_form`, the
+`p-unparsable-quote` arm), `Pl/Parser2.pm` (`_manufactured_quote_close`,
+strictly the NEXT token), `cl/pcl-runtime.lisp` (`%p-require-writable-target`
+at the three cell setters, `%p-write-match-target` shared by the s/// and
+tr/// sites, `%p-isa-parent-names` de-tripling the @ISA walk,
+`%p-overload-fallback-of` + `%p-incdec-autogen`, the `delta-p` supplied-p on
+the compound pair so raw `$x++` reaches perl-increment, `p-arylen-lvalue-cell`)
+— and every claim in the stop record matched the diff.  Rebased the kept
+worktree over `12eacb5` (AS): conflicts only in the DECIDED and session-log
+tops, both sections kept; runtime auto-merged and paren-checked.  Fast-forward.
+
+**Probes vs perl 5.40.3 (three files, 55 rows).**  #939: 19 rows SAME
+(substr/vec/pos/`$#a` targets; hash-element and array-ref-element bases;
+scalar, boolean, list and void contexts; `tr`, `!~`, `/g`, the for-alias
+window, `m//` unmoved).  #934: 25 rows SAME except the class with
+`fallback => 1` and nothing to autogenerate (`$e++; $e > 1000` — perl big, PCL
+small) = **#961**, filed by AT.  #940: 11 rows SAME.  Two of my probe rows were
+INVALID PERL and taught the ruling in DECIDED: perl refuses
+`substr("literal",0,1) =~ s///` at compile time, and reads
+`declared_sub / 3, "\n"` as an unterminated match — the very licence #940
+rests on.  One more finding for #936 (appended to the task): #939 turned an
+ACCIDENTAL death (`for my $e ("const") { substr($e,0,1) =~ s/c/C/ }` died on
+12eacb5 for want of a place, not for read-only-ness) into the silent write the
+task already sizes; PCL now agrees with itself across the three spellings.
+Tasks #934/#939/#940 flipped to completed; **#962 is a duplicate of #459**
+(AU closes both).
+
+**Bars on `6e6f191`.**  Gate COLD `tools/prove-core`: **191 files / 6498
+rows**, the only failures the 13 pclxs xs rows (`~/pclxs` is ABI 8 against the
+pin's 6 — the standing state).  Full sweep: **TOTAL passing 18343 (+0)**, GATE
+clean, drops 5 = census, 4 UNSTABLE rows in the runner's crash-file category.
+Companion `--dir re --quick` (80 files — the tail AT's stop cut off): TWO
+files differ from the snapshot, both REAL MOVE by the #366 serial re-run.
+**re/subst.t 200/72 → 205/67 is #939's**, attributed on a `12eacb5` worktree
+run alone (200/72 there): `%p-write-match-target` STOREs through a TIE instead
+of overwriting the proxy with the result string, so the tied block at
+t/re/subst.t:838-886 (`$tied_glob`/`$tied_latin1`/`$tied_cow`/`$tied_ref`
+fetch counts + the cow result) passes honestly — six rows up; and row 212
+(`$tied_ref … result`) had passed ONLY because the clobber had already killed
+the tie before `$s = \1` ran.  With the tie alive it lands on a PRE-EXISTING
+bug, **#963: a reference CONSTRUCTOR assigned to a tied scalar reaches STORE
+dereferenced** (`$s = \1` → STORE gets 1; `\$v`, `[1,2]`, `{a=>1}`, `\"lit"`
+likewise; `my $r = \1; $s = $r` is right; `\\1` reports SCALAR not REF) —
+identical on 12eacb5 by probe, so an honest new fail, spliced into
+`baselines/perl-suite-run.tsv` ROW BY ROW with the cause.  re/charset.t
+2776/2776 → 2776/2775 is the s455b "perennial churn" file producing one row
+fewer at an unchanged pass count — snapshot left alone.  Bench (quiet machine,
+K=3, before the agents started): strcat 2.21×, ovlsub 3.36× (PCL 0.129 s,
+under the 0.148 s record), regexg 2.21× — held.  The AT worktree and branch
+are pruned.
+
+**Round 20 launched (USER: two Opus subjobs), both in Agent-tool worktrees,
+models pinned opus.**  AU (s463au, correctness, IDs 970–979, gen v2-580 if
+emission moves): #962(=#459) failed capture-less m// in LIST context → #960
+overload BINARY refusal + substr target as a PLACE for `=`/4-arg → #920
+`return EXPR if FALSE` → #938(3) `is y, 43` lexsub repair if budget.  AV
+(s463av, perf, IDs 980–989, gen v2-590): #950 the speed-3 policy A/B at K=5
+with load recorded + the optimization-note harvest + the core's own compile
+time → the owed §0.2f full bench re-tabulation → the worst lagging
+non-pack/ovlsub/regexg row, filed with an sb-sprof profile, then fixed.
+Ownership disjoint (memory `project_s421_opus_agents_inflight`).  **Both
+worktrees were created at `12eacb5` — the Agent tool branches from the
+session-start commit, not main's HEAD — and each was messaged to `git rebase
+main` before starting; verify at merge review.**  Two more lessons recorded in
+memory: `pkill -f` with a pattern whose text also appears in a heredoc or a
+`setsid bash -c` string in the SAME command kills the calling shell (exit 144,
+twice) — long leg chains now go in a script file.
+
 ## Session 462at (2026-09-01, Opus, agent AT — round 19 CORRECTNESS slot) — the read-only/overload residue family: #939 + #934 + #940 SHIPPED, #936 SIZED AND DECLINED
 
 Four tasks in order, all from round 18's residue.  Three shipped, one is a

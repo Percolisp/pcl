@@ -1462,7 +1462,14 @@ re/stclass_threads.t	0	0	5	1	NOTAP		0
 # s450 (round 9): re/subst.t 194/78 -> 200/72 EDITED BY HAND — s450v #520: the s///
 #   replacement lambda now sets the FULL match state through the shared setters ($`/$'/$+/
 #   $^N// were empty on that path).  Predicted by agent V's A/B, parallel and serial agree.
-re/subst.t	281	0	200	72	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
+# s463f (round 19 merge review): re/subst.t 200/72 -> 205/67 EDITED BY HAND -- attributed on a
+#   12eacb5 worktree run ALONE (200/72 there; 205/67 on main 6e6f191, parallel AND serial).  Cause = #939's
+#   %p-write-match-target: an s/// on a TIED scalar now STOREs through the tie instead of clobbering the
+#   proxy with the result string, so rows 203/205/207/209/210/211 (the t/re/subst.t:838-886 tied block:
+#   fetch counts + the cow result) pass HONESTLY; row 212 ( result) PASSED ONLY BY THE CLOBBER
+#   (the tie was already gone when ` = \1` ran) and now fails honestly on PRE-EXISTING #963 (a reference
+#   CONSTRUCTOR assigned to a tied scalar reaches STORE dereferenced; identical on 12eacb5 by probe).
+re/subst.t	281	0	205	67	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
 re/substT.t	0	0	0	0	NOTAP		0
 re/subst_amp.t	13	0	0	13	DIFF		0
 re/subst_wamp.t	281	0	0	0	DIFF		0
