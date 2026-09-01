@@ -4,6 +4,72 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 463f, part 2 (2026-09-01, Fable) — AU merge-reviewed and MERGED (`aafb02c`, gen v2-581); the return protocol sized from a USER question and SCHEDULED after round 20; #963–#967 filed
+
+**AU (s463au) review.**  The diff first, as with AT: `cl/pcl-runtime.lisp`'s
+`%p-empty-list` replaces three hand-spelled zero-length vectors and
+`do-regex-match`'s raw-NIL no-match arm (raw nil is the empty list to exactly
+one consumer, `%p-flatten-list`; `p-array-fill` keeps it as a hole and
+`p-flatten-args` spreads it as one argument — the mechanism the task text had
+half wrong, since the capture-bearing arm was shared); `Pl/ExprToCL.pm`'s
+`_lvalue_target_form` gives substr/vec/pos their target in perl's loose lvalue
+context for the `=` and 4-arg spellings the way #939 did for `=~`, keyed on
+the WRITE position so reads never promote an element; `pos()` gains the two
+DEREF element kinds; `Pl/Parser2.pm`'s `_modifier_ret_form` is the one
+spelling of "an untaken modifier yields the CONDITION", reached from the four
+sites that used to spell a bare `p-if`.  Rebased on `2065b89`; parens
+balanced; generation v2-581 with all three artifacts stamped; ir-spec
+updated.  COLD gate re-run on main: **191 files / 6515 rows**, only the 13
+pclxs xs rows.  AU's own legs stand (three sweeps 18343 → 18346 (+3) → +0,
+companion op/+re/ twice, 1145-file A/B, four guard files inverse-verified).
+Probes vs perl 5.40.3: #962 24 rows SAME (argument lists, grep/map/sort
+positions, list assignment, `wantarray`, `push`, `return`, `() =`, `x`, `/g`,
+foreach); #920 19 rows SAME (`if`/`unless` with 0 / "" / undef / "0" / a
+string, `my`/`our`/`return` carriers, `do {}`, a loop that never returns);
+#960(b) 18 rows SAME except three that are IDENTICAL on 6e6f191 and therefore
+pre-existing: `pos($elem)` right after `$elem =~ /x/g` reads undef for all
+four element kinds although the `/g` loop terminates like perl (**#966**),
+the value of `substr($u,0,1) = "V"` is the old text (**#967**, #971's
+sibling), and the 4-arg `substr("lit",…)` on a literal is silent (one more
+#936 spelling).  AU's four asks ruled in DECIDED §s463f part 2: the #960(a)
+decline stands with #972 queued behind the return-protocol task; the 4-arg
+substr's `when` is a ratified reading of the s329 boundary; `return X while
+0` stops where AU stopped; a bump per emission-changing commit is the rule.
+AU's worktree and branch pruned; main is `aafb02c`.
+
+**The return protocol, from a USER question.**  While AU ran, the USER asked
+whether `:lvalue` subs (#930) are "a simple code generation thing", then
+whether a reference to one works, then whether ordinary subs would start
+modifying variables — and the last question measured YES, TODAY: an ordinary
+sub whose tail or `return` is a scalar VARIABLE hands back its BOX, so
+`for my $v (f()) { $v = 5 }`, `$_ = 7 for f()`, `map { $_ = 8 } f()`,
+`\f()`, and an `@_`-writing callee all write into the caller's `$x` (perl
+copies; elements, `$_[0]` and a sub-local `my` do not leak; identical under
+`PCL_OPT=none`).  Filed **#964**, and it is the SAME switch as #930's scalar
+half: perl's rule is "copy unless `:lvalue`", PCL's today is "always the
+box".  The USER's follow-up — "isn't this tested?" — found the row disarmed
+twice: perl's own t/op/sub.t `[perl #91844]` block has "result of shift is
+copied when returned", which FAILS inside op/sub.t's blessed DIFF (53/12,
+never attributed) and was hand-edited into `ok(1, 'SKIP: @_ aliasing not
+supported …')` in `perl-tests/sub.t` in an early session with a wrong
+rationale; the Pl/t guard named "normal sub returns a copy" tests a sub-local
+`my` and asserts only "ok".  **#965** counts 132 such inline `ok(1,'SKIP')`
+rows across perl-tests (state.t 46, lex.t 38, sub.t 11, each.t 11, …), the
+runbook §5 migration nobody tracked.  **USER RULING: this is a big change —
+do it only after AU and AV are merged, as its own task** (round 21
+correctness slot, one owner of the return family, never with a perf slot);
+#965 a filler in chunks, sub.t first.  Also filed from the round-19 tail:
+**#963** (a reference CONSTRUCTOR assigned to a TIED scalar reaches STORE
+dereferenced — `tie $s; $s = \1` stores 1; through a variable it is right).
+
+**Lessons kept in memory this session**: `pkill -f` with a pattern whose text
+also appears in a heredoc or `setsid bash -c` string in the SAME command kills
+the calling shell (exit 144, twice) — long leg chains go in a script file; the
+Agent tool's worktree isolation branches from the SESSION-START commit, not
+main's HEAD (both round-20 agents started three commits behind and were
+messaged to rebase first); a Fable probe can be invalid Perl — run the perl
+side alone and read its stderr before calling a DIFF a finding.
+
 ## Session 463au (2026-09-01, Opus, agent AU — round 20 CORRECTNESS slot) — the empty list is a VALUE; a magic-lvalue window's TARGET is a place in all three write spellings; an untaken modifier answers its CONDITION
 
 Three tasks shipped, one half declined with its evidence.  All three shipped
