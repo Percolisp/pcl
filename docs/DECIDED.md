@@ -21,6 +21,74 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s462at (2026-09-01, Opus, round 19 correctness slot) — #939 + #934 + #940 SHIPPED; #936 sized and declined
+
+- **An lvalue `substr(EXPR,…)` as an `=~` TARGET binds the write-through CELL
+  (#939).**  The `=~` lowering asks `_rhs_writes_match_target` (which already
+  encodes perl's "does this s///-or-tr/// actually write" rule: never for m//,
+  /r, or an identity tr) and, when it says yes, rewrites a magic-lvalue head to
+  its `-lvalue-cell` twin.  ONE table `%MAGIC_LVALUE_BASE` in `Pl/ExprToCL.pm`
+  now serves BOTH readers — the `\` arm's `-ref` heads and this one — and
+  `_write_through_form` maps substr/vec/pos's own FIRST ARGUMENT too, which is
+  perl's loose lvalue context (`substr($#ta,0,2) =~ s/../23/` resizes @ta).
+  New bare cell `p-arylen-lvalue-cell`; `p-arylen-ref` is now
+  `(p-backslash (p-arylen-lvalue-cell …))`, and its KIND stays NIL because
+  `ref \$#a` is "SCALAR".  **A CONTEXT BIND is not a place question**: the
+  routing looks through `p-list-ctx`/`p-scalar-ctx`/… and puts it back, or the
+  LIST-context spelling alone keeps dying (`push @r, (substr($s,0,2) =~ s///)`
+  arrives as `(p-list-ctx (p-substr …))`).
+- **The cells' setters DIE (`%p-require-writable-target`) when the target is
+  not a box** — rule 12.  `p-substr`'s 4-arg form is silent on a non-box, so
+  without this the head-swap could have written NOTHING and said nothing; with
+  it a declined argument keeps today's loud death.  **And the s/// and tr///
+  write sites go through `box-set` (`%p-write-match-target`) when the box holds
+  MAGIC** — the direct `setf` of the value slot would have REPLACED the cell
+  (and, for a TIED variable, the tie proxy) with the string.
+- **overload `fallback` is READ at last (#934), for `++`/`--` only.**
+  `%p-overload-fallback-of` (inherited through @ISA, like a handler) +
+  `%p-incdec-autogen`: a handler wins; `+`/`-` autogenerates unless
+  `fallback => 0`; otherwise, for a class that overloads SOMETHING
+  (`%p-class-overloaded-p`, the one reading), perl's one-line
+  `Operation "++": no method found, argument in overloaded package C`.
+  **The BINARY family (`$o + 2`, `$o += 2`) is NOT flipped** — a different,
+  three-line message and a much wider blast radius: task #960, and the s461f
+  caution is why.  **`fallback => 1` with nothing to autogenerate keeps PCL's
+  `0+` answer** (perl uses the ref ADDRESS and DROPS the blessing; the value
+  alone is unobservable because box-set keeps the class — task #961).
+  The raw twin `p-incf-raw` with NO delta is `$x++`, not `$x += 1`, and now
+  routes a blessed operand to `perl-increment` so both paths refuse alike.
+- **RAW PERL TEXT NEVER REACHES THE CL (#940 half ii).**
+  `convert_perl_string_form`'s unknown-shape arm returned the token verbatim;
+  it now emits `(p-unparsable-quote "…")`, a form that READS and dies at use —
+  `p-unrepresentable-char`'s shape (#419).  Loudness was an accident of the
+  bytes before.
+- **`_match_close_after` counts a `/` INSIDE a quote-like or Regexp token
+  (#940 half i).**  `ok /q*/, "four";` puts a quote-like letter at the head of
+  the pattern, so PPI reads `q*…*` to EOF and swallows the closing delimiter;
+  every such letter derails (q qq m s y tr; `x` does not).  **perl's own lexer
+  is the licence, probed:** `sub w {8} print w / 2, " a/b\n";` is a SYNTAX
+  ERROR in perl — perl reads that `/` as a match too — so wherever the arm
+  fires the match reading is perl's.  Guards `Pl/t/transpile-test-10.t`.
+- **#936 (read-only marks) SIZED AND DECLINED, and two of its premises are
+  false**: #873 ships NO mark (it is a compiler predicate + two write slots;
+  the read-only BOX was explicitly rejected there for hot-path cost), and `$+`
+  already agrees since #911.  The family is also wider than s/// — ANY write to
+  a foreach-over-a-literal alias diverges (`$v = "X"`, `chop $v`, `$v++`),
+  while a RANGE's elements are modifiable in perl too.  The mechanism that
+  fits is a magic cell with a dying setter (zero cost to other boxes, a getter
+  funcall per READ), gated on a counting-loop bench A/B, in a session that owns
+  the foreach/sort lowering.  Full sizing in the task.
+- Filed: **#960** (the binary overload refusal + substr's target argument as a
+  place for `=` and 4-arg — the ELEMENT spellings are SILENT WRONGS today),
+  **#961**, **#962** (a failed capture-less m// returns a false ELEMENT in list
+  context where perl returns `()` — it shifts every argument of
+  `ok /pat/, "desc"`).
+- **A `use overload` EXPOSURE SCAN, for whoever takes #960**: cpan-tests/ +
+  lib/ + perl-tests/ hold 23 files that say `use overload` at all — 5 with
+  `fallback => 1`, 1 with another value, 17 with none.  That is the population
+  a new binary-overload death has to be measured against, and it is small.
+- Record: `docs/session-log.md` §462at; PPI §11c + `ppi-bug-report.t` Bug 8c.
+
 ## s462as (2026-09-01, Opus agent AS, round 19) — a flattener that SIZES its result; a decline measured to ZERO population; #77 half (b) recommended DECLINED
 
 - **A pass that may ABANDON its work must decide BEFORE it starts (#923).**

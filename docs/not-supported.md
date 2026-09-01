@@ -483,6 +483,31 @@ populations (measured s422 over perl-tests/, perl's `t/`, `lib/**` and
 cpan-tests/modules — 1205 files): `t/re/pat.t` (8) and `t/uni/variables.t`
 (1, `"\x{11_1111}"`); `perl-tests/`, `lib/` and the CPAN dists have none.
 
+### A quote-like literal whose delimiters the compiler cannot read
+
+`Pl::ExprToCL::convert_perl_string_form` recognises `'…'`, `"…"`, `q…`, `qq…`
+and their bracketing forms.  A token of none of those shapes — which in
+practice means PPI handed over an UNTERMINATED quote-like operator, usually
+because an earlier mis-lex derailed it (task #940's `ok /q*/, "four";`) —
+becomes `(p-unparsable-quote "…")` in the character's place, exactly as an
+unrepresentable code point becomes `p-unrepresentable-char` above.  The form
+READS, and **evaluating it dies** with
+
+```
+PCL: quote-like literal: q*/, "four";\n is not implemented — the compiler
+could not read its delimiters
+```
+
+trappable by `eval { }` like any perl death, and costing nothing in code that
+never runs.
+
+**Why it is written down at all:** the arm used to `return $str` — the token's
+RAW PERL TEXT, emitted straight into the CL file.  Whether that was loud
+depended entirely on the bytes: `q*/, "four";` happened to contain a comma and
+SBCL's reader refused the file, but different content would have READ as CL
+and RUN as garbage.  That is the #138 family one level worse than a drop, and
+rule 12 says the sin is the silence.
+
 ### `use vN` does not toggle default warnings
 
 Perl ≥ 5.35 as a `use VERSION` target enables warnings by default in that

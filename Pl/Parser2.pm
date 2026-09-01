@@ -6133,6 +6133,22 @@ sub _repair_word_match_pass {
 # use for a `(?{…})` counting loop — declining the repair and dropping whole.
 sub _match_close_after {
   my ($tok, $i) = @_;
+  # A FOURTH spelling of the swallowed close, and the only one where the
+  # swallower is a token the derail ITSELF manufactured (task #940).  When the
+  # pattern starts with a quote-like LETTER, PPI — already in term position
+  # after reading the `/` as division — reads `q*…*` / `m*…*` and runs to the
+  # next delimiter or to EOF, taking the closing `/` and the rest of the file
+  # inside ONE token, so the scan below sees nothing.  Every quote-like letter
+  # does it (q qq qw m s y tr, probed); `x` does not, because `x` is not one.
+  # PERL'S OWN LEXER IS THE LICENCE, probed rather than assumed:
+  # `sub w {8} print w / 2, " a/b\n";` is a SYNTAX ERROR in perl ("Unknown
+  # regexp modifier \"/b\""), i.e. perl reads that `/` as a match too.
+  # STRICTLY THE NEXT TOKEN, and that is not a tidiness rule — a scan of the
+  # whole statement is WRONG and was measured so: `ok /bcd|xyz/, qq [… /…/];`
+  # (t/re/pat.t:113) ends in a `qq` string that contains `/`, and a loose test
+  # then repaired the CLOSING `/` too (`xyz` is a Word before it), producing
+  # `m/bcd|xyzmmmm/` — one `m` per fixpoint round.
+  return 1 if _manufactured_quote_close($tok->[$i + 1]);
   my $depth = 0;
   for my $j ($i + 1 .. $#$tok) {
     my $t = $tok->[$j];
@@ -6147,6 +6163,21 @@ sub _match_close_after {
              && $t->content =~ m{\A/};
   }
   return 0;
+}
+
+# Is T the quote-like token the WORD-/ derail manufactured, with the closing
+# `/` swallowed inside it?  Three conjuncts, all necessary: it is a quote-like
+# token, it is spelled with an OPERATOR letter and a non-word delimiter (a bare
+# `'…'`/`"…"` string cannot be what PPI read INSTEAD of the pattern), and it
+# holds a `/` — the delimiter the token scan could not find.
+sub _manufactured_quote_close {
+  my ($t) = @_;
+  return 0 unless defined $t
+               && ($t->isa('PPI::Token::Quote') || $t->isa('PPI::Token::QuoteLike')
+                || $t->isa('PPI::Token::Regexp'));
+  my $c = $t->content;
+  return 0 unless $c =~ /\A(?:qq|qw|tr|q|m|s|y)[^\w\s]/;
+  return index($c, '/') >= 0 ? 1 : 0;
 }
 
 

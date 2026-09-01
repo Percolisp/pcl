@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 23;
+plan tests => 31;
 
 sub run_cl {
     my ($code) = @_;
@@ -170,3 +170,77 @@ test_cl('multi-cast deref runs are unchanged by the \\ stop',
                       join(",",@$$aa[0,1]), join(",",@$$hh{qw(a b)})), "\n";
       print join("|", $$hh->{a}, $$aa->[0], ${$h}{a}, ${$a}[0]), "\n";},
     "1|20|1|30\n10,20|1,2|10,20|1,2\n1|10|1|10\n");
+
+# ---- #939: an lvalue substr as an `=~` TARGET -----------------------------
+# perl performs an s///-or-tr/// THROUGH the substr window, so the write lands
+# in the ORIGINAL string (t/op/substr.t's `$#ta` block, and the wild
+# `substr($munged_seed,-1)=~tr/0-9a-f/1-9a-f0/` in t/run/runenv_hashseed.t).
+# PCL evaluated substr as an RVALUE and handed do-regex-subst a raw CL string,
+# so the write had nowhere to land: a silent no-op until #911 turned that site
+# into perl's read-only death.  The `=~` target is now rewritten to the
+# write-through CELL when — and only when — the RHS actually writes
+# (_rhs_writes_match_target: never for m//, /r, or a tr that cannot change its
+# target), the SAME cell `\substr` and `for (substr(…))` already bind.
+
+sub both_agree {
+    my ($code, $desc) = @_;
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $code; close $fh;
+    my $perl = `perl $pl_file 2>&1`;
+    my $pcl  = run_cl($code);
+    is($pcl, $perl, "$desc (perl: " . ($perl =~ s/\n/\\n/gr) . ")");
+}
+
+both_agree(<<'PL', '#939: substr as an =~ target writes THROUGH the window');
+my $s = "hello"; substr($s,0,2) =~ s/he/XY/;            print "1:$s\n";
+my $t = "hello"; substr($t,3)   =~ s/lo/LO/;            print "2:$t\n";
+my $u = "hello"; substr($u,-2)  =~ s/lo/LO/;            print "3:$u\n";
+my $v = "hello"; substr($v,0,2) =~ tr/a-z/A-Z/;         print "4:$v\n";
+my $w = "hello"; substr($w,0,2) =~ s/he/XYZ/;           print "5:$w\n";
+my $x = "hello"; substr($x,0,3) =~ s/hel/H/;            print "6:$x\n";
+my $y = "hello"; my $n = substr($y,0,5) =~ s/l/L/g;     print "7:$y:$n\n";
+my %h = (k=>"hello"); substr($h{k},0,2) =~ s/he/XY/;    print "8:$h{k}\n";
+my $r = ["hello"];    substr($r->[0],0,2) =~ s/he/XY/;  print "9:$r->[0]\n";
+our @ta; $#ta = -1; substr($#ta,0,2) =~ s/\A..\z/23/s;  print "10:$#ta\n";
+PL
+
+# The same target in the three CONTEXTS `ctx_bind` wraps an operand in.  A
+# context bind says nothing about where a value LIVES, so the routing looks
+# through it — without that, only the scalar and boolean spellings were
+# rewritten and the LIST one (`push @r, (…)`, a `(p-list-ctx (p-substr …))`)
+# declined to the read-only death.
+both_agree(<<'PL', '#939: …in scalar, boolean and LIST context alike');
+my $s = "hello"; my $n = (substr($s,0,2) =~ s/he/XY/); print "1:$s:$n\n";
+my $t = "hello"; if (substr($t,0,2) =~ s/he/AB/) { print "2:$t\n" }
+my @r; my $u = "hello"; push @r, (substr($u,0,2) =~ s/he/CD/); print "3:$u:@r\n";
+my $v = "hello"; my @w = (substr($v,0,2) =~ s/he/EF/); print "4:$v:@w\n";
+PL
+
+both_agree(<<'PL', '#939: the NON-writing =~ spellings leave the target alone');
+my $a = "hello"; my $c = substr($a,0,2) =~ s/he/XY/r;    print "1:$a:$c\n";
+my $b = "hello"; my $d = substr($b,0,2) =~ s/zz/XY/;     print "2:$b:", ($d||0), "\n";
+my $e = "hello"; my $f = substr($e,0,2) =~ tr/a-z/A-Z/r; print "3:$e:$f\n";
+my $g = "hello"; my $i = substr($g,0,4) =~ tr/l//;       print "4:$g:$i\n";
+my $j = "hello"; print "5:", (substr($j,0,2) =~ /he/ ? 1 : 0), ":$j\n";
+PL
+
+# The INVERSE: everything the routing must NOT move.  Passes on the base tree
+# (verified on a 4c354bc worktree) except the two positive shape rows.
+like(transpile('my $s="x"; substr($s,0,1) =~ m/x/;'),
+    qr/\(p-=~ \(p-substr \$s 0 1\)/,
+    '#939 inverse: a READ (m//) target keeps the plain p-substr rvalue');
+like(transpile('my $s="x"; substr($s,0,1) =~ s/x/y/r;'),
+    qr/\(p-=~ \(p-substr \$s 0 1\)/,
+    '#939 inverse: an /r target keeps the plain p-substr rvalue');
+like(transpile('my $s="x"; substr($s,0,1) =~ s/x/y/;'),
+    qr/\(p-=~ \(p-substr-lvalue-cell \$s 0 1\)/,
+    '#939: a WRITING target binds p-substr-lvalue-cell');
+like(transpile('my @a; substr($#a,0,2) =~ s/x/y/;'),
+    qr/\(p-substr-lvalue-cell \(p-arylen-lvalue-cell \@a\) 0 2\)/,
+    "#939: substr's own target argument is a place too (loose lvalue context)");
+test_cl('#939 inverse: \\substr / \\$#a / plain substr-assign / foreach alias unmoved',
+    q{my @a=(1,2,3); my $x="hello"; my $y="hello";
+      substr($y,0,2) = "AB";
+      for (substr($x,0,2)) { $_ = "CD" }
+      print join("|", ref(\substr($x,0,2)), ref(\$#a), $x, $y), "\n";},
+    "LVALUE|SCALAR|CDllo|ABllo\n");

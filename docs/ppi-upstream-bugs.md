@@ -642,6 +642,58 @@ run before the repairs that read the damaged region, never beside them.
 Removes the `t/re/pat.t:106` census drop, which had swallowed three statements
 including a `$_ = 'aaaccc'` reset.
 
+### 11c. A pattern that STARTS with a quote-like letter swallows the closing `/` into a QUOTE token  (task #940, s462at)
+
+§11b's manufactured tokens are the general case; this is its worst spelling,
+because the token that is manufactured is a **quote-like operator** and it
+takes the closing delimiter — and the rest of the file — inside itself.
+
+```perl
+sub ok { print(($_[0] ? "ok" : "not ok"), " - $_[1]\n") }
+$_ = "zzz";
+ok /q*/, "four";
+```
+
+perl prints `ok - four`: the pattern `q*` (a literal `q`, zero or more) matches
+the empty string in `"zzz"`.  PPI 1.291, after reading the `/` as division, is
+in TERM position and reads `q*…*` as a `Quote::Literal` — running to the next
+`*` or, as here, to end of file:
+
+```
+Word(ok) Operator(/) Quote::Literal<q*/, "four";\n>
+```
+
+There is **no closing-delimiter token at all**: it is characters 2-3 of the
+quote's content.  A consumer scanning the token stream for the match's closing
+`/` finds nothing and declines the repair.
+
+Every quote-like letter derails this way, and the class of the manufactured
+token follows the letter — probed one by one on 1.291:
+
+| source        | manufactured token                            |
+|---------------|-----------------------------------------------|
+| `ok /q*/, …`  | `Quote::Literal <q*/, "four";\n>`             |
+| `ok /qq*/, …` | `Quote::Interpolate`                          |
+| `ok /m*/, …`  | `Regexp::Match <m*/, "two";\n>`               |
+| `ok /s*/, …`  | `Regexp::Substitute`                          |
+| `ok /y*/, …`  | `Regexp::Transliterate`                       |
+| `ok /tr*/, …` | `Regexp::Transliterate`                       |
+| `ok /x*/, …`  | *(nothing — `x` is not a quote-like letter)*  |
+
+**Repro + failing rows:** Bug 8c in `docs/ppi-bug-report.t`.
+
+**PCL workaround (s462at):** `_match_close_after` also answers yes when the
+token IMMEDIATELY after the mis-lexed `/` is a quote-like token spelled with an
+operator letter and a non-word delimiter and containing a `/`
+(`_manufactured_quote_close`).  **Strictly the next token**, and that is
+measured, not tidiness: `ok /bcd|xyz/, qq [… /…/];` (`t/re/pat.t:113`) ends in
+a description string that contains `/`, so a scan of the whole statement also
+"finds a close" after the real closing delimiter — whose preceding token is the
+Word `xyz` — and repairs that one too, giving `m/bcd|xyzmmmm/`, one `m` per
+fixpoint round.  perl's own lexer licenses the repair wherever it fires:
+`sub w {8} print w / 2, " a/b\n";` is a syntax error in perl (`Unknown regexp
+modifier "/b"`), i.e. perl reads that `/` as a match as well.
+
 ---
 
 ## 12. `)*name` — a `*` after a term is lexed as a GLOB, not multiplication  [CONFIRMED 1.291]

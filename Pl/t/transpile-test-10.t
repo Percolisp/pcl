@@ -1165,4 +1165,64 @@ print "div=", gz / 2, "\n";
 print "done\n";
 ');
 
+# ── #940: the same derail, when the pattern STARTS WITH A QUOTE-LIKE LETTER ──
+# `myok /q*/, "four";` — once PPI has read the `/` as division it is in TERM
+# position and reads `q*…*` as a Quote::Literal running to the next `*` or to
+# EOF, so the closing `/` and the rest of the FILE end up INSIDE one token.
+# _match_close_after scanned tokens for a `/`-initial one, found none, and the
+# repair declined; the mis-parse then put RAW PERL TEXT into the emitted CL
+# (`q*/, "four";` inside a `(p-/ …)`), which only died loudly by the accident
+# of a comma.  Every quote-like letter derails: q qq m s y tr (m/s/y/tr make a
+# Regexp token instead of a Quote one, which is why the scan covers both).
+# THE NEGATIVES ARE THE POINT: `x` is not a quote-like letter and must stay a
+# division; a REAL `q*…*` string after a real division must survive; and a
+# `()`-prototyped sub's division (the row above) is what _word_is_term keeps
+# out of the repair in the first place.
+# THE LAST TWO ROWS ARE t/re/pat.t:113-114 VERBATIM IN SHAPE, and they are the
+# case the first version of this fix BROKE: the description is a `qq [...]`
+# holding a `/`, so a scan of the WHOLE statement (rather than the token
+# immediately after the mis-lexed `/`) also repaired the CLOSING delimiter —
+# `xyz` is a Word before it — and the pattern came out `m/bcd|xyzmmmm/`, one
+# `m` per fixpoint round.  Caught by the 1029-file emission A/B, not by probes.
+test_transpile('#940: the WORD-/ derail through a manufactured quote token', '
+sub myok { print "ok:$_[0]:$_[1]\n" }
+$_ = "zzz";
+ myok /q*/, "one";
+ myok /m*/, "two";
+ myok /s*/, "three";
+ myok /y*/, "four";
+ myok /z*/, "five";
+my $n = 8;
+print "div=", $n / 2, " lit=", q*a/b*, "\n";
+my $s = q*plain*;
+print "s=$s\n";
+$_ = "abcdef";
+ myok /bcd|xyz/, qq [$_ = "x"; /bcd|xyz/];
+ myok /xyz|bcd/, qq [$_ = "x"; /xyz|bcd/];
+print "done\n";
+');
+
+# #940 half (ii), and the more important half: whatever the parse does, RAW
+# PERL TEXT must never reach the emitted CL.  convert_perl_string_form's
+# unknown-shape arm used to `return $str` — the token verbatim — so the
+# emitted file held Perl source, and whether that was LOUD depended entirely
+# on the bytes (a comma killed SBCL's reader; other content would have READ
+# and run as garbage, which is the #138 family one level worse).  It now emits
+# `(p-unparsable-quote "…")`: a form that READS and dies where the value would
+# have been used, naming the token — p-unrepresentable-char's shape (#419).
+# The inputs below are INVALID Perl (an unterminated q*…), so there is no
+# oracle to compare against; the claim is exactly "no raw source in the CL".
+for my $case (['my $s = q*abc',                  'q*abc'],
+              ["sub w () { 8 }\nprint w / 2, q*x", 'q*x']) {
+    my ($bad, $raw) = @$case;
+    my $cl = transpile($bad);
+    like($cl, qr/\(p-unparsable-quote /,
+         '#940: an unreadable quote token becomes a named run-time death');
+    # The token text may appear INSIDE the death's message string and nowhere
+    # else — the anchor is the character before it: a space or `(` means it is
+    # sitting in the CL as a bare token, which is the bug.
+    unlike($cl, qr/[\s(]\Q$raw\E/,
+           '#940: …and its raw Perl text is NOT emitted into the CL');
+}
+
 done_testing();

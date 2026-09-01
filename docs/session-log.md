@@ -4,6 +4,156 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 462at (2026-09-01, Opus, agent AT — round 19 CORRECTNESS slot) — the read-only/overload residue family: #939 + #934 + #940 SHIPPED, #936 SIZED AND DECLINED
+
+Four tasks in order, all from round 18's residue.  Three shipped, one is a
+design finding with the measurement that kills two of its own premises.
+
+**#939 — an lvalue `substr(EXPR,…)` as an `=~` TARGET.**  perl substitutes
+THROUGH the substr window; PCL evaluated substr as an rvalue and handed
+`do-regex-subst` a raw CL string, so the write had nowhere to land — silent
+until #911 turned that site into perl's read-only death.  The fix is one
+routing at the `=~` lowering, gated by the predicate that was ALREADY there:
+`_rhs_writes_match_target` encodes perl's own "does this s///-or-tr/// actually
+write" rule (never for m//, never for /r, never for a tr that cannot change its
+target), and it had only been used to decide whether an ELEMENT target needed
+its box.  A magic-lvalue head now becomes its `-lvalue-cell` twin, from ONE new
+table `%MAGIC_LVALUE_BASE` that the `\` arm's four `-ref` heads read too (they
+had been spelled independently in two places, rule 11).  `_write_through_form`
+maps substr/vec/pos's own FIRST ARGUMENT as well — perl's loose lvalue context,
+and it is what makes `substr($#ta,0,2) =~ s/\A..\z/23/s` resize @ta, the shape
+t/op/substr.t:893 is named for.  New bare cell `p-arylen-lvalue-cell`, with
+`p-arylen-ref` rebuilt on it; its KIND stays NIL because `ref \$#a` is
+"SCALAR", not "LVALUE".
+
+Two runtime consequences that are the real content of the change.  **The cells'
+setters now DIE** (`%p-require-writable-target`) when the target is not a box:
+`p-substr`'s 4-arg form is SILENT on a non-box, so a head-swap over a
+non-place argument would have written nothing and said nothing — the #138
+family one level down — and with the guard a declined argument keeps exactly
+today's loud death.  **And the s/// and tr/// write sites go through `box-set`**
+(`%p-write-match-target`, the one write both had spelled twice): they used to
+`setf` the value slot directly, which is right for an ordinary scalar and
+REPLACES the magic for a cell — or, for a TIED variable, replaces the tie
+proxy with the string.  A tied `$t =~ s/he/XY/` now runs STORE, as perl does.
+
+One thing the guard rows did not reach and a probe did: the routing has to look
+through the CONTEXT BIND `ctx_bind` wraps an operand in.  Without that, only
+the scalar and boolean spellings were rewritten — `push @r, (substr($s,0,2) =~
+s/…/…/)` is a LIST-context operand, so the target arrives as `(p-list-ctx
+(p-substr …))` and the head test declined it to the read-only death.  A context
+bind says nothing about where a value LIVES; the rewriter now descends through
+one and puts it back.
+
+Bars: 17 of 20 substr-family probes byte-identical to 5.40.3 (6 before); the
+three that remain are `sub :lvalue` (a feature PCL drops loudly) and the `=` /
+4-arg spellings, filed as **#960** with their measurements — and the ELEMENT
+rows of that task (`substr($a[0],0,2) = "AB"`) are SILENT WRONGS today, the
+bigger half.  corpus-diff: **1 of 111** files differ (substr.t, both sites, as
+designed).  Emission A/B over 1029 files: substr.t plus
+**t/run/runenv_hashseed.t:206**, which carries the shape in the wild
+(`substr($munged_seed,-1)=~tr/0-9a-f/1-9a-f0/`) and now agrees with perl.
+Sweep TOTAL **18342 → 18343**, GATE clean, drops 5 = census; substr.t's pass
+row edited BY HAND with a serial-run attribution on a 4c354bc worktree (base
+347/1 aborting after test 351, this tree 348/2 after 353 — the fix passed its
+own row AND unblocked the next two, one of which now fails honestly).
+Guard `Pl/t/lvalue-ref-01.t` 23 → 30 rows, including four inverse ones.
+
+**#934 — overload `fallback` is READ at last.**  It had been WRITTEN by
+`p-register-overloads` since forever and consulted nowhere, so PCL numified
+where perl refuses.  `%p-overload-fallback-of` answers T / :NO / :UNDEF with
+@ISA inheritance, and `%p-incdec-autogen` implements perl's rule: an own
+`++`/`--` handler wins; `+`/`-` autogenerates unless `fallback => 0`;
+otherwise, for a class that overloads SOMETHING, perl's one-line
+`Operation "++": no method found, argument in overloaded package C`.  Probes
+12 of 15 identical (6 before).
+
+Two scope calls, both measured rather than assumed.  **The BINARY family is
+NOT flipped**: `$o + 2` and `$o += 2` refuse under the same rule but with a
+different THREE-LINE message, and DECIDED s461f's caution says a new death in
+a `fallback => 1`-heavy world needs evidence first — the exposure scan over
+cpan-tests/ + lib/ + perl-tests/ found 23 files using `use overload` at all
+(5 with `fallback => 1`, 17 with none), which is the population to measure
+against; task **#960**.  **`fallback => 1` with nothing to autogenerate keeps
+PCL's `0+` answer** (perl uses the referent's ADDRESS and DROPS the blessing):
+the value alone is unobservable, because `box-set` leaves the class on the box
+and every later read goes back through `0+` either way, so matching perl needs
+the DECLASSING — a protocol change across `p-pre++`/`p-post++`/`p-incf`.
+Task **#961**, with the probe that shows it (`ref($x)` is "" in perl).
+
+One thing the guard row found that probes did not: **the RAW `++` path did not
+ask about `++` at all.**  `$x++` on an unboxable slot emits `(p-incf-raw $x)`,
+which routed a blessed operand to `p-+` — so the refusal fired on one emission
+path and not the other, and a class with its OWN `++` handler was numified
+there.  `%define-compound-pair` now carries a supplied-p: NO delta is `$x++`
+(Parser2 emits exactly that spelling for it and nothing else), a delta is
+`$x += 1`, and the first routes to `perl-increment`, which owns the whole
+decision.  Guard `Pl/t/raw-verdict-01.t` 50 → 52, both emission paths.
+
+**#940 — the WORD-/ derail through a manufactured quote token, both halves.**
+`ok /q*/, "four";` puts a quote-like LETTER at the head of the pattern, so once
+PPI has read the `/` as division it is in term position and reads `q*…*` to
+EOF — the closing delimiter and the rest of the file end up inside ONE token,
+`_match_close_after` finds no `/`-initial token and the repair declines.  Every
+quote-like letter derails (q qq qw m s y tr; `x` does not, because `x` is not
+one).  **perl's own lexer is the licence, and it was probed rather than
+assumed**: `sub w {8} print w / 2, " a/b\n";` is a SYNTAX ERROR in perl
+("Unknown regexp modifier \"/b\""), i.e. perl reads that `/` as a match too.
+
+The first version of the widening scanned the WHOLE statement for a quote-like
+token containing `/`, and **the 1029-file emission A/B caught what no probe
+did**: t/re/pat.t:113 is `ok /bcd|xyz/, qq [… /…/];`, whose description string
+contains `/`, so the loose test also repaired the CLOSING delimiter (`xyz` is a
+Word before it) and the pattern came out `m/bcd|xyzmmmm/` — one `m` per
+fixpoint round.  The rule is therefore STRICTLY the token immediately after the
+mis-lexed `/`, spelled with an operator letter and a non-word delimiter, and
+holding a `/`.  That shape is in the guard as an inverse row (it passes on the
+base tree; the q/m/s/y rows do not).
+
+Half (ii) is the more important one and is a rule-12 fix with no parse in it:
+`convert_perl_string_form`'s unknown-shape arm returned the token's RAW PERL
+TEXT, emitted straight into the CL.  Loudness was an ACCIDENT of the bytes —
+`q*/, "four";` happened to contain a comma so SBCL's reader refused the file;
+different content would have READ and run as garbage.  It now emits
+`(p-unparsable-quote "…")`, a form that reads and dies at use, naming the
+token: `p-unrepresentable-char`'s shape (#419), with a `docs/not-supported.md`
+entry.  Guard `Pl/t/transpile-test-10.t` (66 → 71), asserting ANSWERS for the
+parse half and "no raw source in the CL" for the loudness half.
+
+Filed from the same probes: **#962** — a FAILED capture-LESS `m//` returns a
+false ELEMENT in list context where perl returns `()`.  It is why three of the
+#940 rows still disagree, and it is a Test::More hazard rather than a curiosity:
+`ok /pat/, "desc"` on a miss hands the sub ("desc") in perl and ("", "desc") in
+PCL, so every argument shifts and the row reads its description as its verdict.
+The capture-BEARING path is already right, so the miss is one branch.
+
+**#936 — sized and DECLINED, and two of its own premises are false.**  The task
+says to reuse "#873's read-only mark": #873 ships NO mark (it is a compiler
+predicate plus two write slots, and the read-only BOX was explicitly sized and
+rejected there for hot-path cost), and `%p-array-readonly-p` is
+representational and array-only.  `p-box` has no spare flag and an eighth slot
+grows every box in the image.  `$+`, the task's first row, already agrees since
+#911.  And the family is WIDER than s///: any write to a foreach-over-a-literal
+alias diverges (`$v = "X"`, `chop $v`, `$v++` — three shapes the task does not
+list), while a RANGE's elements are modifiable in perl too, so a per-write-site
+fix is unbounded and the mark has to be set where the box is CREATED.  The
+mechanism that fits is a magic cell with a dying setter — free for other boxes,
+a getter funcall per READ of the loop variable — which owes a counting-loop
+bench A/B and a session that owns the foreach/sort lowering.  Full sizing
+appended to the task.
+
+**THE BARS, all on this tree.**  Gate COLD **191 files / 6494 rows**, the only
+failures the 13 known pclxs xs rows (base + 14 new rows: 7 lvalue-ref, 2
+raw-verdict, 5 transpile-test-10).  corpus-diff over 111: ONE file (substr.t).
+Emission A/B over 1029 files (perl-tests + lib/ + cpan modules + perl's own
+t/): SAME=1027 DIFF=2 RCDIFF=0.  **Gate-SET scan over BOTH populations, 638
+files, vs a 4c354bc worktree: IDENTICAL** — the mandatory leg for #940's
+widened decline, and nothing moved.  Full perl-tests sweep GATE clean, TOTAL
+passing **18343**, drops 5 = census; one baseline row edited by hand with a
+serial attribution.  Companion legs op/ + re/ (the `cl/` change class).
+~127 probe rows against perl 5.40.3.  Generation **v2-560**; the three
+checked-in artifacts regenerated (their stamp is the only byte that moves).
+
 ## Session 462as (2026-09-01, Opus agent AS, round 19) — the list-assign source vector is SIZED (#923, OO entry −15 %, swap −30 %), every TRUNCATE in the integer stringifier was a GENERIC call (#922), and #77 half (b) is sized to 3 files in 535 (#924)
 
 Three tasks: two shipped, one measured and recommended DECLINED.  Not pushed,

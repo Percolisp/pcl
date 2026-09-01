@@ -12,7 +12,7 @@
 #
 use strict;
 use warnings;
-use Test::More tests => 56;
+use Test::More tests => 58;
 use PPI;
 
 # Significant tokens of a snippet, as "Class=content" strings.
@@ -224,6 +224,40 @@ sub toks {
     is( join(',', map { $_->content } @sym), '$_',
         'no typeglob symbol may be manufactured out of the second pattern' )
         or diag "symbols: " . join(', ', map { $_->content } @sym);
+}
+# Bug 8c: the worst spelling of the same manufacture.  When the pattern starts
+# with a QUOTE-LIKE LETTER, the token PPI builds after reading the `/` as
+# division is a quote-like OPERATOR, and it swallows the closing delimiter and
+# the rest of the file inside itself — so there is no closing-`/` token at all
+# for a consumer to find.  perl reads `ok /q*/, "four";` as a match of `q*`
+# against $_ and prints "ok - four".
+{
+    my $src = qq{sub ok { 1 }\n\$_ = "zzz";\nok /q*/, "four";\n};
+    my $doc = PPI::Document->new(\$src);
+    my @t   = $doc ? map { ref } grep { $_->significant } $doc->tokens : ();
+    ok( !grep(/^PPI::Token::Quote::Literal$/, @t),
+        'a pattern starting with `q` must not become a Quote::Literal' )
+        or diag "tokens: @t";
+}
+# …and the class of the manufactured token follows the LETTER: `m`/`s`/`y`/`tr`
+# give a Regexp:: token instead of a Quote:: one, so a consumer cannot even key
+# on one class.  `x` is not a quote-like letter and is lexed correctly, which is
+# the control.
+{
+    my %want = ('q'  => 'PPI::Token::Quote::Literal',
+                'qq' => 'PPI::Token::Quote::Interpolate',
+                'm'  => 'PPI::Token::Regexp::Match',
+                's'  => 'PPI::Token::Regexp::Substitute',
+                'y'  => 'PPI::Token::Regexp::Transliterate');
+    my @bad;
+    for my $letter (sort keys %want) {
+        my $src = qq{sub ok { 1 }\n\$_ = "zzz";\nok /$letter*/, "four";\n};
+        my $doc = PPI::Document->new(\$src);
+        my @t   = $doc ? map { ref } grep { $_->significant } $doc->tokens : ();
+        push @bad, "$letter -> $want{$letter}" if grep { $_ eq $want{$letter} } @t;
+    }
+    is( join(', ', @bad), '',
+        'no quote-like letter at the head of a pattern may manufacture a quote token' );
 }
 
 # ── Bug 9: `)*name` is lexed as a GLOB instead of multiplication ──────────────

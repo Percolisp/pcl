@@ -244,6 +244,20 @@ my %OP_EXCEPTIONS = (
   'cmp' => 'p-str-cmp',
 );
 
+# THE magic-lvalue builtin heads, and the base their write-through forms are
+# named from.  ONE table, because two questions ask it and they used to spell
+# the same four heads independently: `\substr(…)` / `\pos` / `\vec` / `\$#a`
+# want the `-ref` form (a scalar ref to the live cell), and an `=~` target
+# whose RHS WRITES wants the bare `-lvalue-cell` (the cell itself, which
+# do-regex-subst then writes through box-set).  Consumers: gen_prefix_op_form's
+# `\` arm and _write_through_form.
+my %MAGIC_LVALUE_BASE = (
+  'p-substr'           => 'p-substr',
+  'p-pos'              => 'p-pos',
+  'p-vec'              => 'p-vec',
+  'p-array-last-index' => 'p-arylen',
+);
+
 # Magic/special variables that need specific CL output
 # Maps Perl variable name to its CL representation
 # Values are CLForms: atoms (plain strings) or single-level array forms for
@@ -1346,14 +1360,24 @@ sub gen_binary_op_form {
   # element, a "Cannot modify non-boxed value" warning for a hash element.
   # Found while building #189 — it is also what kept lib/File/Basename.pm on
   # a shim, since core's _strip_trailing_sep is `$_[0] =~ s{…}{}`.
+  #
+  # The SIBLING shape is a magic-lvalue builtin: `substr($x,0,2) =~ s/he/XY/`
+  # substitutes THROUGH the substr window in perl, and `substr($#ta,0,2) =~
+  # s/\A..\z/23/` even resizes @ta.  PCL evaluated substr as an RVALUE and
+  # handed do-regex-subst a raw CL string, so the write had nowhere to land —
+  # a silent no-op until #911 made it perl's read-only death (task #939).  The
+  # target is therefore rewritten to the write-through CELL, which is what
+  # `\substr(…)` and `for (substr(…))` already bind (rule 11, one table).
   my $left = do {
+    my $writes = ($op eq '=~' || $op eq '!~')
+              && _rhs_writes_match_target($self, $kids->[1]);
     my $saved_lv = $self->lvalue_context;
-    $self->lvalue_context(1)
-      if ($op eq '=~' || $op eq '!~')
-      && $self->_is_elem_arg($kids->[0])
-      && _rhs_writes_match_target($self, $kids->[1]);
+    $self->lvalue_context(1) if $writes && $self->_is_elem_arg($kids->[0]);
     my $l = $self->gen_node_form($kids->[0]);
     $self->lvalue_context($saved_lv);
+    if ($writes && $MAGIC_LVALUE_BASE{ _place_head($l) }) {
+      $l = _write_through_form($l) // $l;
+    }
     $l;
   };
   # Flat text of the left form == v1's $left bytes (to_flat contract); used
@@ -1705,6 +1729,62 @@ sub _rhs_writes_match_target {
     return 0 if $to eq $from && !$mods->{d} && !$mods->{s} && !$mods->{c};
   }
   return 1;
+}
+
+# The call head of a generated form, or '' when FORM is not a call.
+sub _form_head {
+  my ($form) = @_;
+  return (ref($form) eq 'ARRAY' && @$form && !ref $form->[0]) ? $form->[0] : '';
+}
+
+# The context binds `Pl::CLForm::ctx_bind` wraps a generated operand in.  They
+# are single-argument and say nothing about WHERE a value lives, so the
+# write-through routing looks THROUGH them and puts them back — otherwise
+# `push @r, (substr($s,0,2) =~ s/…/…/)` (a LIST-context operand, so
+# `(p-list-ctx (p-substr …))`) declines while the same expression in scalar
+# or boolean position is rewritten.  The set is ctx_bind's own, closed table.
+my %CTX_WRAP = map { $_ => 1 } qw(p-list-ctx p-scalar-ctx p-void-ctx p-caller-ctx);
+
+# FORM's call head with any context binds looked through.
+sub _place_head {
+  my ($form) = @_;
+  my $head = _form_head($form);
+  while ($CTX_WRAP{$head} && ref($form) eq 'ARRAY' && @$form == 2 && ref $form->[1]) {
+    $form = $form->[1];
+    $head = _form_head($form);
+  }
+  return $head;
+}
+
+# FORM rewritten so it denotes a PLACE the runtime can write through, or undef
+# when it is not one of the shapes that has such a form (then the caller leaves
+# it alone — the runtime's write sites all end in a p-box test that dies perl's
+# read-only death, so a decline is loud, never silent).
+#
+# Two families, both already named elsewhere in this file: the magic-lvalue
+# builtins (their `-lvalue-cell`, from the table above) and a container ELEMENT
+# access (its `-box` twin — the same `-box` suffix `_elem_accessor` applies).
+# The recursion on the FIRST argument is perl's own rule: substr/vec/pos take
+# their target in "loose lvalue context", which is why `substr($#ta,0,2) =~
+# s/../23/` resizes @ta (t/op/substr.t's `$#ta` block).
+sub _write_through_form {
+  my ($form) = @_;
+  my $head = _form_head($form);
+  return undef unless length $head;
+  my @rest = @{$form}[1 .. $#$form];
+  if ($CTX_WRAP{$head} && @rest == 1 && ref $rest[0]) {
+    my $inner = _write_through_form($rest[0]);
+    return defined $inner ? [$head, $inner] : undef;
+  }
+  if (my $base = $MAGIC_LVALUE_BASE{$head}) {
+    if (@rest && ref $rest[0]) {
+      my $inner = _write_through_form($rest[0]);
+      $rest[0] = $inner if defined $inner;
+    }
+    return ["$base-lvalue-cell", @rest];
+  }
+  return ["$head-box", @rest] if $head =~ /^p-(?:aref|gethash)(?:-deref)?\z/;
+  return undef;
 }
 
 sub _elem_accessor {
@@ -2878,10 +2958,11 @@ sub gen_prefix_op_form {
              ? $operand->[0] : '';
     my @rest = ref($operand) eq 'ARRAY' ? @$operand[1 .. $#$operand] : ();
     if ($op eq '\\') {
-      # magic-lvalue refs: live cells with write-through setters
-      return ['p-arylen-ref', @rest] if $head eq 'p-array-last-index';
-      return [$head . '-ref', @rest]
-        if $head eq 'p-substr' || $head eq 'p-pos' || $head eq 'p-vec';
+      # magic-lvalue refs: live cells with write-through setters.  Same table
+      # the `=~` write-target routing reads (%MAGIC_LVALUE_BASE) — the four
+      # heads were spelled here and there independently before.
+      return [$MAGIC_LVALUE_BASE{$head} . '-ref', @rest]
+        if $MAGIC_LVALUE_BASE{$head};
       return [$self->cl_name($op), $operand];
     }
     # prefix ++/--: arylen target gets the setter shape (value = new length)
@@ -4943,8 +5024,17 @@ sub convert_perl_string_form {
     return _cl_string_literal_form($content);
   }
   else {
-    # Unknown format, return as-is
-    return $str;
+    # RULE 12 / the #138 family: the token's shape is not one this function
+    # knows, and returning it AS-IS put RAW PERL TEXT into the emitted CL.
+    # That only ever failed LOUDLY by accident — task #940's `ok /q*/,
+    # "four";` emitted `q*/, "four";` verbatim inside a `(p-/ …)` and died at
+    # LOAD because a comma happened to be there; other content would have READ
+    # and run as garbage, which is worse than a drop.  Emit a form that READS
+    # and dies where the value would have been used, naming the token: the same
+    # shape p-unrepresentable-char uses for a code point CL cannot hold (#419).
+    my $shown = length($str) > 60 ? substr($str, 0, 60) . '...' : $str;
+    $shown =~ s/\n/\\n/g;
+    return ['p-unparsable-quote', _cl_string_literal_form($shown)];
   }
 
   # Process Perl escape sequences in single pass to handle \\ correctly

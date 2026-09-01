@@ -125,7 +125,7 @@
    #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf #:p-crypt
    #:p-version-string
    #:p-pos
-   #:p-unrepresentable-char
+   #:p-unrepresentable-char #:p-unparsable-quote
    ;; Assignment
    #:p-setf #:p-incf #:p-decf
    #:p-pre++ #:p-post++ #:p-pre-- #:p-post--
@@ -224,7 +224,7 @@
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
    #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
    #:p-alias-array-elements
-   #:p-backslash #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
+   #:p-backslash #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -1702,6 +1702,16 @@
    operation that changes an array's SIZE."
   (when (%p-array-readonly-p a) (%p-readonly-modification)))
 
+(declaim (inline %p-require-writable-target))
+(defun %p-require-writable-target (place)
+  "Die perl's read-only death unless PLACE is a box — i.e. somewhere a write
+   can actually land.  Call it at the head of a write-through SETTER (the
+   substr/pos/vec lvalue cells): those helpers all end in a p-box test and
+   would otherwise return a value having written NOTHING, which is the #138
+   silent-wrong one level down.  perl's own answer for assigning through a
+   non-place is this same fatal."
+  (unless (p-box-p place) (%p-readonly-modification)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The two rule-12 endings for a case PCL does not implement   (task #152)
 ;;; ---------------------------------------------------------------------------
@@ -1747,6 +1757,19 @@
   (if detail
       (error "PCL: ~A: ~A is not implemented — ~A" site operand detail)
       (error "PCL: ~A: ~A is not implemented" site operand)))
+
+(defun p-unparsable-quote (text)
+  "The value of a quote-like literal whose delimiters the compiler could not
+   read.  Pl/ExprToCL.pm's convert_perl_string_form emits this call IN PLACE of
+   the string, so the emitted file still READS and the failure is a NAMED
+   run-time death at the one expression instead of raw Perl text sitting in the
+   CL — which is how task #940 was found (`ok /q*/, \"four\";` left
+   `q*/, \"four\";` verbatim inside a `(p-/ …)`, and only the accident of a
+   comma made SBCL's reader complain rather than run it).  Never returns.
+   Reaching it means PPI handed over a token this compiler cannot classify;
+   the TEXT is in the message so the source line is findable."
+  (%p-unsupported-value "quote-like literal" text
+                        "the compiler could not read its delimiters"))
 
 (defun p-unrepresentable-char (code)
   "The value of a string literal that held CODE, a code point above U+10FFFF.
@@ -2533,28 +2556,56 @@
 ;;; p-find-overload is called from every overloadable operator — it must be fast.
 ;;; The common case (non-blessed value) short-circuits at p-box-p with no allocation.
 
+(defun %p-isa-parent-names (cls)
+  "CLS's direct @ISA parents, as class-name strings, or NIL.  ONE reading of
+   `whom does this class inherit from' for the overload walks: the package
+   lookup was spelled out once per walk (%p-find-overload-mro,
+   %p-class-overloaded-p, %p-overload-fallback-of) and the three must not
+   drift — they answer three halves of the same dispatch question."
+  (let* ((pkg     (find-package (%pcl-invert-case cls)))
+         (isa-sym (when pkg (find-symbol "@isa" pkg)))
+         (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym))))
+    (when (and isa-val (vectorp isa-val))
+      (map 'list #'to-string isa-val))))
+
 (defun %p-find-overload-mro (cls op-str visited)
   "Walk @ISA hierarchy to find an inherited use overload handler for OP-STR.
    Two-pass BFS: check direct parents first, then recurse into grandparents."
   ;; use overload: cycle guard
   (when (member cls visited :test #'equal)
     (return-from %p-find-overload-mro nil))
-  (let* ((pkg      (find-package (%pcl-invert-case cls)))
-         (isa-sym  (when pkg (find-symbol "@isa" pkg)))
-         (isa-val  (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym))))
-    (when (and isa-val (vectorp isa-val))
+  (let ((parents (%p-isa-parent-names cls)))
+    (when parents
       (let ((new-visited (cons cls visited)))
         ;; First pass: direct parent table entries
-        (loop for parent across isa-val
-              for parent-str = (to-string parent)
+        (loop for parent-str in parents
               do (let ((h (gethash (cons parent-str op-str) *p-overload-table*)))
                    (when h (return-from %p-find-overload-mro h))))
         ;; Second pass: recurse into grandparents
-        (loop for parent across isa-val
-              for parent-str = (to-string parent)
+        (loop for parent-str in parents
               do (let ((h (%p-find-overload-mro parent-str op-str new-visited)))
                    (when h (return-from %p-find-overload-mro h)))))))
   nil)
+
+(defun %p-overload-fallback-of (cls &optional visited)
+  "perl's `fallback' for class CLS, as one of three keywords:
+     T      `fallback => 1'  — autogenerate, and where that is impossible use
+                               the ORDINARY (non-overloaded) semantics;
+     :NO    `fallback => 0'  — never autogenerate; die instead;
+     :UNDEF the default      — autogenerate where perl can, die where it cannot.
+   Inherited through @ISA exactly as a handler is (perl's overload magic lives
+   on the package and a subclass sees its parent's), and :UNDEF when nothing in
+   the hierarchy sets it.  This is the FIRST reader of *p-overload-fallback*:
+   p-register-overloads has always written the flag and nothing consulted it,
+   so PCL used to numify where perl refuses (task #934)."
+  (if (or (null cls) (member cls visited :test #'equal))
+      :undef
+      (or (gethash cls *p-overload-fallback*)
+          (let ((seen (cons cls visited)))
+            (loop for parent in (%p-isa-parent-names cls)
+                  for f = (%p-overload-fallback-of parent seen)
+                  unless (eq f :undef) return f))
+          :undef)))
 
 ;;; THE OVERLOAD NEGATIVE PATH (task #815, s458ak).
 ;;;
@@ -2738,13 +2789,9 @@
               (zerop (hash-table-count *p-overload-table*))
               (member cls visited :test #'equal))
     (or (%p-class-table-overloaded-p cls)
-        (let* ((pkg     (find-package (%pcl-invert-case cls)))
-               (isa-sym (when pkg (find-symbol "@isa" pkg)))
-               (isa-val (when (and isa-sym (boundp isa-sym)) (symbol-value isa-sym)))
-               (seen    (cons cls visited)))
-          (when (and isa-val (vectorp isa-val))
-            (loop for parent across isa-val
-                  thereis (%p-class-overloaded-p (to-string parent) seen)))))))
+        (let ((seen (cons cls visited)))
+          (loop for parent in (%p-isa-parent-names cls)
+                thereis (%p-class-overloaded-p parent seen))))))
 
 (defun p-overloaded (obj)
   "Return true (1) if OBJ has any use overload handlers registered, else undef.
@@ -6644,7 +6691,7 @@ per element."
   (p-- c d))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun %compound-arith-form (slow-fn cl-op cur delta)
+  (defun %compound-arith-form (slow-fn cl-op cur delta &optional incdecp)
     "Build the new-value form for `+=`/`-=`: the same arithmetic as ever, plus
      perl's OVERLOAD dispatch when an operand carries one (task #900 — perl
      autogenerates `+=` from a `+` handler and keeps the OBJECT; PCL numified,
@@ -6683,7 +6730,17 @@ per element."
      would be a silent wrong (perl answers P(7); numifying answers 7).
 
      CUR and DELTA are FORMS and each is evaluated ONCE (the boxed macro passes
-     the place form itself for an accessor place)."
+     the place form itself for an accessor place).
+
+     INCDECP says this is `$x++`/`$x--`, not `$x += 1` — the two are DIFFERENT
+     perl operators on an overloaded operand and the emitter already
+     distinguishes them (Parser2 emits `(p-incf-raw $x)` with no delta for the
+     first, `(p-incf-raw $x 1)` for the second).  perl asks a `++` handler
+     BEFORE autogenerating from `+`, and its refusal names `\"++\"`; SLOW-FN is
+     then perl-increment / perl-decrement, which own that whole decision (tasks
+     #900, #934).  Before this the raw twin asked only for `+`, so a class with
+     its own `++` handler was numified on the raw path while the boxed
+     `p-post++` path called it — one program, two answers, again."
     (let* ((c (gensym "CUR"))
            (d (gensym "DELTA"))
            ;; `++`/`--` hand this builder the LITERAL 1: bind nothing and test
@@ -6696,26 +6753,32 @@ per element."
                         `(or (and (p-box-p ,c) (p-box-class ,c))
                              (and (p-box-p ,dref) (p-box-class ,dref)))))
            (form `(if (and *p-any-overload-registered* ,blessed)
-                      (,slow-fn ,c ,dref)
+                      ,(if incdecp `(,slow-fn ,c) `(,slow-fn ,c ,dref))
                       (,cl-op (to-number ,c) (to-number ,dref)))))
       (if constp
           `(let ((,c ,cur)) ,form)
           `(let ((,c ,cur) (,d ,delta)) ,form)))))
 
-(%define-compound-pair p-incf p-incf-raw (&optional (delta 1))
+(%define-compound-pair p-incf p-incf-raw (&optional (delta 1 delta-p))
                        "Perl += - works on boxed values, hash/array elements, and derefs.
    Coerce the current value through to-number BEFORE adding: an absent key/slot
    reads as *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
    A BLESSED operand goes through p-+ instead, for the `+` overload perl
-   autogenerates `+=` from — see %compound-arith-form.
-   PLACE is evaluated once (see %store-back-form)."
-                       (%compound-arith-form '%p-compound-+-slow '+ cur delta))
+   autogenerates `+=` from — or, with NO delta (which is how `$x++` reaches
+   here), through perl-increment, which asks the class's own `++` first.
+   See %compound-arith-form.  PLACE is evaluated once (see %store-back-form)."
+                       (%compound-arith-form
+                        (if delta-p '%p-compound-+-slow 'perl-increment)
+                        '+ cur delta (not delta-p)))
 
-(%define-compound-pair p-decf p-decf-raw (&optional (delta 1))
+(%define-compound-pair p-decf p-decf-raw (&optional (delta 1 delta-p))
                        "Perl -= - works on boxed values, hash/array elements, and derefs.
-   A BLESSED operand goes through p--, for the `-` overload — see
-   %compound-arith-form.  PLACE is evaluated once (see %store-back-form)."
-                       (%compound-arith-form '%p-compound---slow '- cur delta))
+   A BLESSED operand goes through p--, for the `-` overload — or, with NO delta
+   (`$x--`), through perl-decrement.  See %compound-arith-form.  PLACE is
+   evaluated once (see %store-back-form)."
+                       (%compound-arith-form
+                        (if delta-p '%p-compound---slow 'perl-decrement)
+                        '- cur delta (not delta-p)))
 
 (defun magical-string-increment (s)
   "Perl's magical string increment: 'a0' -> 'a1', 'Az' -> 'Ba', 'zz' -> 'aaa'"
@@ -6773,12 +6836,18 @@ per element."
    object left a plain number behind and the class was gone after the first
    increment (task #900, probed 5.40.3).
 
-   NOT implemented here, deliberately, and measured (task #934): perl also DIES
-   `Operation \"++\": no method found, argument in overloaded package C` when
-   neither handler exists and the class does not say `fallback => 1` — and it
-   dies even when `+` IS overloaded if the class says `fallback => 0`.  PCL
-   ignores the fallback flag entirely (it is recorded in *p-overload-fallback*
-   and read nowhere), so it keeps numifying there, which is what it did before."
+   perl's REFUSAL is here too, since task #934: when neither handler applies it
+   DIES `Operation \"++\": no method found, argument in overloaded package C`,
+   and it dies even when `+` IS overloaded if the class says `fallback => 0`.
+   `fallback => 1` is the one escape, and it does NOT mean `use 0+' — perl
+   falls back to the ORDINARY semantics of the operand, which for a blessed
+   reference is its ADDRESS (probed 5.40.3: the answer is 110257620425689-ish,
+   not `0+`+1).  Only ++/-- are decided here; the BINARY family (`$o + 2`,
+   `$o += 2`) refuses under the same rule with a different, three-line message
+   and is task #960.
+   The refusal fires only for a class that overloads SOMETHING —
+   %p-class-overloaded-p, the one reading of that question — so an ordinary
+   blessed object still increments its address as it always did."
   ;; The program-level question first — one memory load, and NIL in every
   ;; program that never says `use overload`; %p-no-overload-possible-p's own
   ;; last test is an out-of-line hash-table-count.
@@ -6789,10 +6858,33 @@ per element."
             ;; perl calls it as handler($self, undef, ''): a mutator whose
             ;; return value is what the place receives.
             (values (p-call-overload own val nil nil) t)
-            (let ((gen (p-find-overload val gen-op)))
-              (if gen
-                  (values (p-call-overload gen val 1 nil) t)
-                  (values nil nil)))))))
+            (%p-incdec-autogen val op-str gen-op)))))
+
+(defun %p-incdec-autogen (val op-str gen-op)
+  "%p-incdec-overload's tail: no OWN `++'/`--' handler, so perl's
+   autogeneration and its `fallback' rules decide.  Two values, as the caller's."
+  (let* ((cls      (p-get-class val))
+         (fallback (%p-overload-fallback-of cls))
+         (gen      (p-find-overload val gen-op)))
+    (cond
+      ;; `fallback => 0' forbids autogeneration outright — even with `+' present.
+      ((and gen (not (eq fallback :no)))
+       (values (p-call-overload gen val 1 nil) t))
+      ;; Not an overloaded package at all: nothing to refuse, the caller's
+      ;; ordinary numeric path (a reference's address) is perl's answer too.
+      ((not (%p-class-overloaded-p cls)) (values nil nil))
+      ;; `fallback => 1' with nothing to autogenerate FROM.  perl uses the
+      ;; ORDINARY reference semantics here — the referent's ADDRESS, never
+      ;; `0+' — and the result REPLACES the scalar, so the blessing is gone
+      ;; afterwards.  PCL keeps its `0+' answer (the caller's numeric path),
+      ;; DELIBERATELY: the stored number alone is unobservable, because
+      ;; box-set leaves the class on the box and every later read goes back
+      ;; through `0+' either way, so matching perl needs the DECLASSING, which
+      ;; is a protocol change across p-pre++/p-post++/p-incf.  Measured
+      ;; (`$o++` then `$o > 100`: perl big, PCL small) and filed as task #961.
+      ((eq fallback t) (values nil nil))
+      (t (error "Operation \"~A\": no method found, argument in overloaded package ~A"
+                op-str cls)))))
 
 (defun perl-increment (val)
   "Perl ++ semantics: magical string increment for certain strings, numeric otherwise"
@@ -6816,10 +6908,11 @@ per element."
       ;; the bare payload then answers the hash-table's address instead.
       ;; That is how one program got two answers: a root `$o++` on a declined
       ;; raw slot (p-incf-raw, which numifies the slot itself) said 6 while
-      ;; PCL_OPT=none (p-post++ -> here) said 2.  Reached only when the class
-      ;; overloads NEITHER `++` nor `+` (task #900 handled those above), which
-      ;; is also the case perl refuses outright unless `fallback => 1` — see
-      ;; %p-incdec-overload's note and task #934.
+      ;; PCL_OPT=none (p-post++ -> here) said 2.  Since #934 this is reached
+      ;; for exactly ONE overloaded shape — a class with no `++`/`+` that says
+      ;; `fallback => 1` (every other shape is applied or refused above), and
+      ;; there perl would use the referent's ADDRESS and drop the blessing:
+      ;; see %p-incdec-autogen's `fallback => t` arm and task #961.
       ((and (p-box-p val) (p-find-overload val "0+")) (1+ (to-number val)))
       ;; Otherwise convert to number and increment
       (t (1+ (to-number v))))))
@@ -14552,7 +14645,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-540"
+(defparameter *pcl-cache-generation* "v2-560"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -15750,19 +15843,29 @@ buffer's fill-pointer; everything else falls back to file-length."
        (setf (p-box-is-ref b) t)
        b))))
 
+(defun p-arylen-lvalue-cell (arr)
+  "Bare magic-cell box for the array-length (arylen) magic of ARR (no \\-ref
+   wrapper).  Reading returns the last index, writing resizes ARR.  See
+   p-substr-lvalue-cell — this is the same shape for `$#array`, and it is what
+   makes `$#a` usable as a WRITABLE operand: `substr($#a,0,2) =~ s/../23/`
+   writes through to the array's length, as perl's loose lvalue context does
+   (t/op/substr.t's `$#ta` block).
+   ARR is whatever $#array's operand evaluates to (raw @arr vector or a boxed
+   array ref) — p-array-last-index / p-set-array-length both accept either.
+   KIND stays NIL on purpose: `ref \\$#a` is \"SCALAR\" in perl, not \"LVALUE\"
+   (p-ref / p-reftype read the kind, and substr/pos/vec's cells set :lvalue)."
+  (make-p-box
+   (make-p-magic-cell
+    :getter (lambda () (p-array-last-index arr))
+    :setter (lambda (n) (p-set-array-length arr (to-number n))))))
+
 (defun p-arylen-ref (arr)
   "Perl \\$#array — a live reference to the array-length (arylen) magic of ARR.
    A plain (p-backslash (p-array-last-index arr)) backslashes a COPY of the
    integer, so $$ref = N would not resize ARR.  Instead wrap a p-magic-cell whose
    getter reads the last index and whose setter resizes ARR; reading/writing
-   through the resulting scalar ref then flows through unbox/box-set automatically.
-   ARR is whatever $#array's operand evaluates to (raw @arr vector or a boxed
-   array ref) — p-array-last-index / p-set-array-length both accept either."
-  (p-backslash
-   (make-p-box
-    (make-p-magic-cell
-     :getter (lambda () (p-array-last-index arr))
-     :setter (lambda (n) (p-set-array-length arr (to-number n)))))))
+   through the resulting scalar ref then flows through unbox/box-set automatically."
+  (p-backslash (p-arylen-lvalue-cell arr)))
 
 (defun p-substr-lvalue-cell (str start &optional len)
   "Bare magic-cell box for a substr() lvalue window (no \\-ref wrapper).
@@ -15789,6 +15892,13 @@ buffer's fill-pointer; everything else falls back to file-length."
       :kind :lvalue
       :getter (lambda () (p-substr str cur-start cur-len))
       :setter (lambda (v)
+                ;; RULE 12: the cell's whole purpose is the write-through, and
+                ;; p-substr's 4-arg form is silent when its target is not a
+                ;; box.  A non-box STR here means the caller handed us a VALUE
+                ;; where a place was needed — perl's own answer for writing to
+                ;; a non-place, and the loudness the `=~`-target routing below
+                ;; relies on (a silent no-write would be the #138 family).
+                (%p-require-writable-target str)
                 (let* ((slen-before (length (to-string (unbox str))))
                        (astart (if (< cur-start 0)
                                    (max 0 (+ slen-before cur-start))
@@ -15809,7 +15919,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    (make-p-magic-cell
     :kind :lvalue
     :getter (lambda () (let ((p (p-pos var))) (if p p *p-undef*)))
-    :setter (lambda (v) (p-pos var v)))))
+    :setter (lambda (v) (%p-require-writable-target var) (p-pos var v)))))
 
 (defun p-vec-lvalue-cell (str offset bits)
   "Bare magic-cell box for a vec() lvalue element (no \\-ref wrapper).  See
@@ -15818,7 +15928,8 @@ buffer's fill-pointer; everything else falls back to file-length."
    (make-p-magic-cell
     :kind :lvalue
     :getter (lambda () (p-vec str offset bits))
-    :setter (lambda (v) (p-vec-set str offset bits v)))))
+    :setter (lambda (v) (%p-require-writable-target str)
+              (p-vec-set str offset bits v)))))
 
 (defun p-substr-ref (str start &optional len)
   "Perl \\substr(STR, START [, LEN]) — a live reference to the substr lvalue
@@ -19925,6 +20036,22 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (write-char c out)
                   (incf i)))))))
 
+(defun %p-write-match-target (string-box result)
+  "Store RESULT into the s/// or tr/// target box.  The ONE write both sites
+   make (rule 11): they used to `setf` the value slot directly, which is right
+   for an ordinary scalar and WRONG for a box whose value is magic — a
+   substr/pos/vec/$#a lvalue window or a tied variable.  Writing the slot there
+   would REPLACE the magic with the string, so the substitution would land
+   nowhere the program can see it.  box-set is the one place that knows the
+   whole dispatch, so a magic box goes through it and a plain one keeps the
+   direct slot write (which also invalidates the two caches)."
+  (let ((cur (p-box-value string-box)))
+    (if (or (p-magic-cell-p cur) (p-tie-proxy-p cur))
+        (box-set string-box result)
+        (setf (p-box-value string-box) result
+              (p-box-sv-ok string-box) nil
+              (p-box-nv-ok string-box) nil))))
+
 (defun do-regex-subst (string-box op)
   "Perform substitution on boxed string, return count of replacements.
    Also sets capture groups $1, $2, ... from the match."
@@ -20011,9 +20138,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                   (progn
                     (when (and (stringp result) (plusp count))
                       (if (p-box-p string-box)
-                          (setf (p-box-value string-box) result
-                                (p-box-sv-ok string-box) nil
-                                (p-box-nv-ok string-box) nil)
+                          (%p-write-match-target string-box result)
                           ;; No box to write to, and the guard above says a
                           ;; write IS needed — which is exactly where perl
                           ;; croaks (task #911, #873's third slot).  It used to
@@ -20121,9 +20246,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (return-p result)
         (t
          (if (p-box-p string-box)
-             (setf (p-box-value string-box) result
-                   (p-box-sv-ok string-box) nil
-                   (p-box-nv-ok string-box) nil)
+             (%p-write-match-target string-box result)
              ;; A count-only tr (empty replacement, no /d) leaves the target
              ;; untouched, and perl accepts that on a read-only value:
              ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result

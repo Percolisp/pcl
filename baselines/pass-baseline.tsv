@@ -1,4 +1,19 @@
 # taken-at: 5323d9e 2026-08-15
+# s462at (round 19, edited ROW BY ROW): substr.t 347/3 -> 348/2.  ONE row, the
+#   `is $#ta, 23` at t/op/substr.t:893 whose statement is
+#   `substr($#ta, 0, 2) =~ s/\A..\z/23/s;`.  #939: an lvalue substr used as an
+#   `=~` TARGET now binds the write-through cell (p-substr-lvalue-cell), and
+#   substr's own target argument is a place too, so `$#ta` becomes
+#   p-arylen-lvalue-cell and the substitution resizes @ta as perl does.  It was
+#   -1 before (the substitution ran against a raw CL string and #911 turned that
+#   into a read-only death, which aborted the top-level form).
+#   Attributed on a 4c354bc worktree with a SERIAL single-file run of the same
+#   file: base 347/1 aborting after test 351, this tree 348/2 aborting after
+#   353.  So the fix both PASSED its own row and unblocked the next two, one of
+#   which (`substr($#ta,0,2,23)` -- the 4-arg spelling of the same write) fails
+#   HONESTLY and is task #960.  The remaining rows of the block need `sub
+#   :lvalue`, which PCL drops loudly; the parallel run this baseline is taken
+#   from produces the same 350 rows as before with one fail turned pass.
 # s460ap (round 17, edited ROW BY ROW): multideref.t 42/10 -> 43/9.  ONE row,
 #   test 42 "OA_DANGEROUS b" -- perl's OWN OPpASSIGN_COMMON test
 #   `($x->{a}, $x->{b}) = ($x->{b}, $x->{a})` on two ARRAY REFS.  #891: the
@@ -275,7 +290,7 @@ sprintf2.t	OK	1631	11	1678
 state.t	TRANSPILE_FAIL	0	0	-1
 study.t	OK	43	0	43
 sub.t	OK	62	2	65
-substr.t	PARTIAL	347	3	397
+substr.t	PARTIAL	348	2	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
 translate.t	OK	257	0	257
