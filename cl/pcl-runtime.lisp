@@ -5566,12 +5566,13 @@ per element."
    Idempotent, so a path that snapshots twice is harmless.
 
    KEEP-CONTAINER (task #910) hands the LIVE box back from the container arm
-   instead of allocating a copy.  Only a caller that then does its own
-   commonality check may pass it — today exactly p-list-='s all-scalar-targets
-   fast path, which runs %p-protect-target before each store.  A REF-WRAPPER
-   box (is-ref, the result of `\\`) is copied even so: box-set stores such a box
-   BY IDENTITY rather than unwrapping it, so keeping it live would be the one
-   case where the object landing in the target differs from today's."
+   instead of allocating a copy.  Only a caller that has established that ITEM
+   is not one of the assignment's own targets may pass it — today exactly
+   p-list-='s all-scalar fast path, whose %p-flatten-list walk tests each
+   element against the target boxes (see %p-in-targets-p).  A REF-WRAPPER box
+   (is-ref, the result of `\\`) is copied even so: box-set stores such a box BY
+   IDENTITY rather than unwrapping it, so keeping it live would be the one case
+   where the object landing in the target differs from today's."
   (if (p-box-p item)
       (let ((inner (p-box-value item)))
         (cond
@@ -5608,29 +5609,26 @@ per element."
         (when out (setf (aref out i) s))))
     (or out src)))
 
-(defun %p-protect-target (target src-vec from)
-  "perl's `common assignment' rule, applied exactly where it bites (task #910).
-
-   A list assignment evaluates the whole RHS before any store, so a store into
-   TARGET must not change what a LATER RHS slot reads.  %p-assign-snapshot
-   enforces that by COPYING every container-valued RHS element up front — two
-   struct allocations on every `my (\\$self,\\$x,\\$r) = \\@_' (measured +8.9 % on
-   OO method entry), for a hazard that needs the SAME box on both sides.
-   perl instead marks the assignment `common' (OPpASSIGN_COMMON_*) and copies
-   only then.  This is the runtime spelling of the same test: just before
-   storing into TARGET, snapshot every slot at index >= FROM that IS (eq)
-   TARGET.  k targets x m slots is a handful of EQ tests and zero allocations
-   when nothing is shared — which is the overwhelmingly common case.
-
-   A RUNTIME test on purpose: a compile-time LHS/RHS name comparison has a
-   hole (`our (\\$p,\\$q); sub f { (\\$p,\\$q) = \\@_ } f(\\$q,\\$p)' puts the caller's
-   boxes in \\@_ and the RHS form mentions neither name)."
-  (when (p-box-p target)
-    (loop for i from from below (length src-vec)
-          do (when (eq (aref src-vec i) target)
-               (setf (aref src-vec i) (%p-assign-snapshot target))))))
+(declaim (inline %p-in-targets-p))
+(defun %p-in-targets-p (item targets)
+  "True when ITEM is (eq) one of the assignment TARGETS — perl's `common
+   assignment' test (OPpASSIGN_COMMON_*), asked per RHS element.  Written out
+   rather than MEMBER so it inlines: it runs once per source element on
+   p-list-='s hot path, and an out-of-line call there costs more than the
+   allocation the whole fast path exists to avoid (measured, task #910)."
+  (dolist (tg targets nil)
+    (when (eq item tg) (return t))))
 
 (defun %p-flatten-list (src &optional keep-containers)
+  "Flatten a Perl RHS into a fresh vector of assignable values.
+
+   KEEP-CONTAINERS is p-list-='s #910 fast path and is the LIST OF TARGET BOXES
+   (not a flag): a container-valued element may then stay LIVE — saving the two
+   struct allocations every `my ($self,$x,$r) = @_' used to pay — unless it IS
+   one of the targets, which is exactly perl's commonality rule.  The test lives
+   here because this walk already has each element in hand; a separate pass over
+   the result vector costs a generic AREF per slot, which measured as expensive
+   as the allocations it saves (task #910's first two attempts)."
   (let ((result (make-array 8 :adjustable t :fill-pointer 0)))
     (labels ((add (item)
                (cond
@@ -5669,10 +5667,11 @@ per element."
                  (t
                   ;; The RHS-snapshot rule lives in %p-assign-snapshot
                   ;; (the slice-assignment arms of p-setf run it too).
-                  ;; KEEP-CONTAINERS is p-list-='s #910 fast path: it protects
-                  ;; the shared-box case itself, per target, at store time.
-                  (vector-push-extend (%p-assign-snapshot item keep-containers)
-                                      result)))))
+                  (vector-push-extend
+                   (%p-assign-snapshot item
+                                       (and keep-containers
+                                            (not (%p-in-targets-p item keep-containers))))
+                   result)))))
       (add src))
     result))
 
@@ -5704,8 +5703,9 @@ per element."
          (src (gensym "SRC"))
          (src-vec (gensym "SRC-VEC"))
          (result-var (gensym "LIST-RESULT"))
+         (targets (gensym "TARGETS"))
          ;; #910's fast path, gated on the ONE shape whose every store target
-         ;; is a nameable box this macro can hand to %p-protect-target: every
+         ;; is a nameable box this macro can test for commonality itself: every
          ;; LHS element a plain `$' scalar symbol.  That is `my ($self,$x,$r)
          ;; = @_' and `($a,$b) = ($b,$a)'.  Any other element — an array or
          ;; hash (which absorb a SUBSEQ of the source), a p-list-x repeat, an
@@ -5714,7 +5714,10 @@ per element."
          ;; write through a place whose box is not known here, and the
          ;; undef/slice arms also hand src-vec elements back as the
          ;; list-context RESULT (an all-scalar LHS returns its target boxes).
+         ;; The k <= 8 cap bounds the per-element commonality test; a longer
+         ;; LHS is rare and pays the general form's up-front copy instead.
          (all-scalar (and vars
+                          (<= (length vars) 8)
                           (every (lambda (v)
                                    (and (symbolp v)
                                         (plusp (length (symbol-name v)))
@@ -5743,13 +5746,16 @@ per element."
              (if (null dyn-vars)
                  static-idx
                  `(+ ,static-idx ,@(reverse dyn-vars))))
-           (assign-scalar (lvar idx-expr &optional protect-from)
+           (assign-scalar (lvar idx-expr &optional ensured)
              `(progn
-                (unless (boundp ',lvar)
-                  (%p-ensure-storage (quote ,lvar))
-                  (setf (symbol-value ',lvar) (make-p-box nil)))
-                ,@(when protect-from
-                    `((%p-protect-target ,lvar ,src-vec ,protect-from)))
+                ,@(unless ensured
+                    ;; ENSURED: the #910 fast path vivified every target before
+                    ;; the RHS (it has to READ them to build the target list),
+                    ;; so repeating the `boundp' here would be a second test per
+                    ;; element on the hot path.
+                    `((unless (boundp ',lvar)
+                        (%p-ensure-storage (quote ,lvar))
+                        (setf (symbol-value ',lvar) (make-p-box nil)))))
                 (box-set ,lvar (if (< ,idx-expr (length ,src-vec))
                                    (aref ,src-vec ,idx-expr)
                                    *p-undef*))))
@@ -5929,10 +5935,10 @@ per element."
             ;; Scalar variable - auto-declare and assign
             ((symbolp var)
              (let ((idx (cur-idx)))
-               ;; ALL-SCALAR: src-vec carries LIVE container boxes (#910), so
-               ;; protect this target's later occurrences before storing.
-               ;; IDX is a literal here — an all-scalar LHS has no dyn-vars.
-               (push (assign-scalar var idx (and all-scalar (1+ idx))) forms)
+               ;; ALL-SCALAR: the #910 prologue has already vivified every
+               ;; target and made src-vec free of them, so this store needs
+               ;; neither the `boundp' guard nor a commonality test.
+               (push (assign-scalar var idx all-scalar) forms)
                ;; Collect: push the scalar's box (holds the assigned value)
                (push `(vector-push-extend ,var ,result-var) collect-forms)
                (incf static-idx 1)))
@@ -6023,16 +6029,35 @@ per element."
                (push (collect-src idx) collect-forms)
                (incf static-idx 1)))))
 
-        `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
-                (,src-vec (%p-flatten-list ,src ,all-scalar))
-                ,@(reverse extra-lets))
-           ,@(nreverse forms)
-           ;; List ctx: collect actual LHS values; scalar/void: return RHS count
-           (if (eq *wantarray* t)
-               (let ((,result-var (make-array 8 :adjustable t :fill-pointer 0)))
-                 ,@(nreverse collect-forms)
-                 ,result-var)
-               (make-p-box (length ,src-vec))))))))
+        (let ((body
+               `(let* ((,src (let ((*wantarray* t) (*p-in-list-assign-rhs* t)) ,value))
+                       (,src-vec (%p-flatten-list ,src ,(if all-scalar targets nil)))
+                       ,@(reverse extra-lets))
+                  ,@(nreverse forms)
+                  ;; List ctx: collect actual LHS values; scalar/void: RHS count
+                  (if (eq *wantarray* t)
+                      (let ((,result-var (make-array 8 :adjustable t :fill-pointer 0)))
+                        ,@(nreverse collect-forms)
+                        ,result-var)
+                      (make-p-box (length ,src-vec))))))
+          (if (not all-scalar)
+              body
+              ;; #910: hand the flattener THIS assignment's target boxes so a
+              ;; container-valued RHS element can stay live unless it is one of
+              ;; them (perl's commonality rule).  The list is DYNAMIC-EXTENT —
+              ;; stack-allocated, never stored by the callee — so the fast path
+              ;; allocates nothing at all.  Vivifying the targets here, before
+              ;; the RHS, is safe: it only gives a name storage, and a name
+              ;; without storage reads as undef either way.
+              `(progn
+                 ,@(mapcar (lambda (v)
+                             `(unless (boundp ',v)
+                                (%p-ensure-storage (quote ,v))
+                                (setf (symbol-value ',v) (make-p-box nil))))
+                           vars)
+                 (let ((,targets (list ,@vars)))
+                   (declare (dynamic-extent ,targets))
+                   ,body))))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-alias-expansion (place value)

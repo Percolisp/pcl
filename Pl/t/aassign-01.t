@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 40;
+plan tests => 42;
 
 sub run_cl {
     my ($code) = @_;
@@ -463,3 +463,41 @@ test_cl('#891 inverse: identity, class, dualvar, glob swap, refaliasing',
      print scalar(@{*$g1{ARRAY}}), ",", scalar(@{*$g2{ARRAY}}), "\n";
      print "$ra\n";',
     "same str 2\nCls same\n13|Permission denied\n2,1\nT\n");
+
+# ── #910: the fast path that keeps a container box LIVE ──────────────────────
+# `my ($self,$x,$r) = @_` used to copy every reference-valued RHS element into a
+# fresh box up front (#891's rule, two struct allocations per OO method entry).
+# It now hands the LIVE box through and applies perl's COMMONALITY test instead
+# — an element that IS one of this assignment's own target boxes is snapshotted,
+# nothing else is.  The test is a RUNTIME eq against the targets on purpose:
+# the shapes below are exactly the ones a compile-time LHS/RHS name comparison
+# would miss, because the caller's boxes arrive through @_ and the RHS form
+# mentions neither target name.  Every expectation is real perl's (probed 5.40.3).
+
+test_cl('#910 common assignment through @_ (names invisible to the RHS form)',
+    'our ($p,$q); sub f { ($p,$q) = @_ }
+     $p=[1]; $q=[2,2]; f($q,$p);
+     sub g { my ($u,$v)=@_; ($u,$v)=($v,$u); return "$$u[0]$$v[0]" }
+     my $h={k=>1}; my ($a,$b) = ($h,$h);
+     my $x={a=>[5,6]}; my $y="y0"; ($x,$y) = ($x->{a}, $x);
+     print scalar(@$p), ",", scalar(@$q), "\n";
+     print g([4],[6]), "\n";
+     print(($a == $b ? "same" : "diff"), $a->{k}, $b->{k}, "\n");
+     print scalar(@$x), " ", ref($y), " ", scalar(@{$y->{a}}), "\n";',
+    "2,1\n64\nsame11\n2 HASH 2\n");
+
+test_cl('#910 inverse: a live container box must not leak into the target',
+    'use Scalar::Util qw(refaddr dualvar);
+     my $cv = "orig"; sub h { my ($only) = @_; $only = "changed"; } h($cv);
+     my $hr = {n=>1}; sub h2 { my ($o) = @_; $o = {n=>2}; } h2($hr);
+     my $o = bless [1], "Cls";
+     sub k { my ($self) = @_; return (ref($self), refaddr($self)) }
+     my ($cls,$ad) = k($o);
+     my $d1 = dualvar(11,"eleven"); my $d2 = dualvar(22,"twenty-two");
+     ($d1,$d2) = ($d2,$d1);
+     my $c1 = sub { "one" }; my $c2 = sub { "two" }; ($c1,$c2) = ($c2,$c1);
+     print "$cv ", $hr->{n}, "\n";
+     print "$cls ", ($ad == refaddr($o) ? "same" : "diff"), "\n";
+     print $d1+0, "|$d1 ", $d2+0, "|$d2\n";
+     print $c1->(), $c2->(), "\n";',
+    "orig 1\nCls same\n22|twenty-two 11|eleven\ntwoone\n");
