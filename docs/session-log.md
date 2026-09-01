@@ -5,6 +5,94 @@ Append new entries at the top. One section per session.
 ---
 ---
 
+## Session 461aq (2026-09-01, Opus agent AQ, round 18) — symbolic refs 9.5x (#812), the list-assign copy removed the ONLY way that pays (#910), the return-family transfer with the two silent-wrongs it exposed (#77); gen v2-540
+
+Four tasks, all shipped; five filed.  Not pushed, not merged; branch
+`worktree-agent-a8c270bc4e29a4de3`, base `33a71c9` (main~1).  The session
+resumed a USER-stopped agent whose stop-record had #812 done, #910
+code-complete-but-never-run, #77 and #881 not started.
+
+**#812 — the symbolic-reference name → SYMBOL memo (shipped pre-stop,
+verified here).**  `%p-symref-symbol` is now a memo wrapper over the old body;
+one `equal` string hash replaces the five string walks and three allocations
+sb-sprof measured as ~76 % of the row.  It needs NO invalidation, and the
+comment says why: the answer is which SYMBOL a name denotes, which is stable
+forever — a later `*main::g = …` rebinds what the symbol HOLDS, which is
+exactly what the caller's `symbol-value` then reads.  Only `shadow` can stale
+it, at one site, which clrhashes.  **symref 0.2909 s / 9.01x → 0.0327 s /
+1.02x** (re-measured on a quiet machine, both trees).
+
+**#910 — the container copy on every list assignment, removed the only way
+that pays.**  The draft in the stop-record was CORRECT and bought NOTHING:
+its per-target `%p-protect-target` calls cost exactly the two allocations they
+saved.  Three-way A/B (4e6 OO method entries, min of 5) is the finding:
+
+    base (snapshot always)                          1.811 s
+    keep the box, NO commonality check (unsafe)     1.700 s   (-6.1 %)
+    the task's per-target check                     1.810 s
+    one INLINE pass over the source vector          1.822 s
+    SHIPPED: the check rides the flattener's walk   1.702 s   (-5.0 %)
+
+Any extra traversal of the source vector costs what it saves, because that
+vector is ADJUSTABLE and every `aref` on it is a generic call (~7 ns) — filed
+as **#923**.  So `%p-flatten-list` takes the assignment's TARGET BOXES (a
+DYNAMIC-EXTENT list, zero heap) and keeps a container element live unless it
+IS one of them: perl's OPpASSIGN_COMMON rule, asked where the element is
+already in hand.  Consing per 1e6 method entries 1685.5 → 1567.1 MB.
+Guard: `Pl/t/aassign-01.t` 40 → 42, INVERSE-GUARDED (with the check removed,
+#891's rows 37-38 and the new 41-42 all fail).  16-shape swap battery vs perl
+byte-identical, incl. the runtime-common `our ($p,$q); sub f { ($p,$q)=@_ }
+f($q,$p)` that no compile-time name test can see.
+
+**#77 half (a) — the return-family transfer, Kind-A `raw-return-family`.**
+`_sub_return_facts` replaces `_sub_ctx_insensitive`: ONE walk over every value
+a named sub can return, from ONE analysis parse, answering BOTH facts —
+`insensitive` (byte-identical conditions) and `returns` ('num'/'str' when
+every return is proven and they agree).  The oracle is VarAnnotator's OWN
+(`value_family` → `_tw_shape_ok`), so the proof licensing `$x = $a + $b` and
+the proof licensing `$x = f()` are literally the same proof.  Half (b) is
+split out as **#924**.
+
+**Two PRE-EXISTING silent-wrongs found by extending that oracle, both fixed
+here because #77 would have transferred them:**
+1. `_tw_shape_ok` called unary PLUS 'num'.  perl's unary plus is a NO-OP, so
+   `+$y` IS `$y` — a BOX — and `my $b = +$h; $h = 77;` read **77** where perl
+   reads 5 (wrong on HEAD too).  It is value-TRANSPARENT now.  `#921` has the
+   `-$str` label residue.
+2. Parser2's native token split declines a statement with a depth-0 operator
+   below assignment precedence and routes it through the seam, where the write
+   is a box-set that cannot reach a raw slot.  Parser2's own comment claimed
+   an unboxable name "cannot be stranded by this reroute" *because* a comma
+   tail always sits under a funcall root, which was never a proven shape.  #77
+   made it provable and `$c = two 1, 2` stored NOTHING — **the gate caught it**
+   (transpile-test-07.t row 23).  `_tw_stmt_expr` now asks the SAME predicate
+   (`_tail_below_assign_prec`), so the two native-root models agree by
+   construction.
+
+**#881 — the strcat bench row measured noise** (perl 0.0028 s / PCL 0.0050 s
+against a ~1 s constant term; it printed 1.00x, 1.64x and 1.79x in three runs
+of the same two trees).  N_big 100_000 → 20_000_000: **perl 0.3086 / PCL
+0.6781 / 2.20x** — an honest losing number where there was noise.
+
+**Bars.**  Gate PASS **191/6462** (19 new guard rows).  Full sweep GATE clean,
+TOTAL passing **18342 (+0)**, drops 5 = census, 0 new / 0 fixed.  gate-SET
+scan **638 files × 2 populations, ZERO differences**.  corpus-diff IDENTICAL
+over 111 files; emission A/B over 405 lib/+cpan files = 4 DIFF / 0 RCDIFF, all
+four read and explained.  Companion `op/ --quick`, 221 files: **zero real
+movers** — 28 rows differ in the `sig` column only, every one reproduced on
+the base tree (a round-17 message-text change the snapshot predates) or a
+worktree-path artifact, and NO count moved, so no baseline row was edited.
+PCL_OPT=-raw-return-family is byte-identical to the base compiler and
+PCL_OPT=none identical on both.  ~40 probes vs perl 5.40.3.  Generation
+**v2-540**, all three artifacts regenerated (and re-tagged — `pl2cl
+--extension` does not carry the license header).
+
+**Filed: #920** (`return EXPR if COND` with a false condition yields undef,
+perl yields the condition's `""`; pre-existing, block spelling already right),
+**#921**, **#922** (a raw slot can be 9.9 % SLOWER than a boxed one when the
+value is a HASH KEY — the box caches its string form; a property of the
+raw-slot verdict generally), **#923**, **#924**.
+
 ## Session 460f (2026-09-01, Fable) — ROUND 17 MERGED: the raw freeze declines (#890, collatz 0.26x), the reference/lvalue silent-wrong family closed (#891/#892/#873); E2c' ruled NOT shipped; gen v2-530
 
 Both agents reviewed and merged in finish order (AO `1845965` ff, pushed

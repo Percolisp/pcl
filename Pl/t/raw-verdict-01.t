@@ -32,7 +32,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 31;
+plan tests => 48;
 
 sub run_cl {
     my ($code, $env) = @_;
@@ -254,3 +254,86 @@ test_cl('#890: a dualvar in a numeric-only slot keeps both sides',
     'open(my $fh, "<", "/no/such/file/pcl-890") or 1;
      my $e = $!; my $n = $e + 0; print(($n > 0 ? 1 : 0), "\n");',
     "1\n");
+
+# ---- #77: return-family transfer through sub_info -------------------------
+# A funcall ROOT is normally unproven (a sub may hand back a BOX), but when
+# every value a named sub can return is operator-coerced or literal, its
+# result is a fresh raw CL value by the SAME proof that licenses
+# `$x = $a + $b`.  Parser2::_sub_return_facts records `returns => num/str`;
+# the call-site write is then PROVEN — a plain raw slot, no freeze wrapper.
+
+$cl = Pl::Parser2->parse_code(
+  q{sub f { my $a = shift; return $a + 1 } my $x = f(1); g($x); print "$x\n";});
+like($cl, qr/\(\$x \(pl-f 1\)\)/,
+     '#77 proven-num return: plain raw slot, no freeze wrapper');
+
+$cl = Pl::Parser2->parse_code(
+  q{sub f { my $a = shift; return $a . "x" } my $x = f(1); g($x); print "$x\n";});
+like($cl, qr/\(\$x \(pl-f 1\)\)/, '#77 proven-str return: plain raw slot');
+
+# The gate switches it off — the general form comes back.
+{
+  local $ENV{PCL_OPT} = '-raw-return-family';
+  Pl::Passes::_parse_env();
+  my $off = Pl::Parser2->parse_code(
+    q{sub f { my $a = shift; return $a + 1 } my $x = f(1); g($x); print "$x\n";});
+  like($off, qr/\(\$x \(make-p-box nil\)\)/,
+       '#77 PCL_OPT=-raw-return-family: the general (boxed) form');
+}
+Pl::Passes::_parse_env();
+
+# The NEGATIVES — each is a way a sub can hand back a box or an unknown, and
+# each must leave the call site unproven.
+for my $neg (
+  ['bare variable return' => q{our $g; sub f { $g } my $x = f(); g($x); print "$x\n";}],
+  ['mixed families'       => q{sub f { my $n=shift; return $n+1 if $n; return "s"."t" }
+                               my $x = f(1); g($x); print "$x\n";}],
+  ['bare return;'         => q{sub f { my $n=shift; return if $n; return $n+1 }
+                               my $x = f(1); g($x); print "$x\n";}],
+  ['conditional tail return (falls off the end)'
+                          => q{sub f { my $n=shift; return $n+1 if $n }
+                               my $x = f(1); g($x); print "$x\n";}],
+  ['compound tail'        => q{sub f { my $n=shift; if ($n) { $n+1 } else { 0 } }
+                               my $x = f(1); g($x); print "$x\n";}],
+  ['unknown sub'          => q{my $x = nosuchsub(1); g($x); print "$x\n";}],
+  ['method call'          => q{sub f { my $a=shift; $a+1 } my $o = bless {}, "C";
+                               my $x = $o->f(1); g($x); print "$x\n";}],
+) {
+  my ($what, $src) = @$neg;
+  like(Pl::Parser2->parse_code($src), qr/\(\$x \(make-p-box nil\)\)/,
+       "#77 negative: $what stays boxed");
+}
+
+# The shape where the two native-root models disagreed: PExpr folds the comma
+# into the parenless list-op CALL (so the parse root is the `=`), while
+# Parser2's token split sees a depth-0 comma and reroutes the whole statement
+# through the seam, where the write is a box-set that cannot reach a raw slot.
+# Proving the call's family made that reachable — `$c` printed nothing.
+$cl = Pl::Parser2->parse_code(
+  q{sub two { $_[0] + $_[1] } my $c; $c = two 1, 2; print "$c\n";});
+like($cl, qr/\(\$c \(make-p-box nil\)\)/,
+     '#77 negative: a below-assignment tail is not a native root write');
+test_cl('#77: `$c = f 1, 2` still assigns the call result',
+    'sub two { $_[0] + $_[1] } my $c; $c = two 1, 2; print "$c\n";',
+    "3\n");
+
+# Unary PLUS is a no-op in perl, so `+$y` IS `$y` — a BOX, not a raw value.
+# Calling it 'num' with `-` and `!` was a silent wrong of the bare-`$y` kind
+# (`my $b = +$h; $h = 77` then read 77); it is value-TRANSPARENT now.
+$cl = Pl::Parser2->parse_code(q{our $h; my $b = +$h; print "$b\n";});
+unlike($cl, qr/\(\$b\w* \$h\)/,
+       q{unary + over a variable never seeds the slot with that variable's BOX});
+like($cl, qr/\(\$b\w* \(%pcl-to-string-strict /,
+     q{... it is an unproven write, so the B-regime freeze COPIES instead});
+$cl = Pl::Parser2->parse_code(q{my $b = +5; print $b+1,"\n";});
+like($cl, qr/\(\$b\w* 5\)/, 'unary + over a literal is still proven num');
+$cl = Pl::Parser2->parse_code(q{our $h; my $b = -$h; print $b+1,"\n";});
+like($cl, qr/\(\$b\w* \(p-- \$h\)\)/, 'unary - still computes a raw value');
+
+test_cl('#77 + the unary-plus fix: values are COPIED, never aliased',
+    'our $g = 1; sub uplus { +$g } my $a = uplus(); $g = 99;
+     our $h = 5; my $b = +$h; $h = 77;
+     our $k = 2; sub plus0 { $k + 0 } my $c = plus0(); $k = 42;
+     sub bare { $g } my $d = bare(); $g = 1000;
+     print "$a $b $c $d\n";',
+    "1 5 2 99\n");

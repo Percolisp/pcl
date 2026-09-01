@@ -253,7 +253,7 @@ has parser => (
 
 # Phase B1 (docs/plan-one-compiler-s411.md): an ANALYSIS parse wants the
 # expression's SHAPE — VarAnnotator's tree walk, Parser2's
-# _expr_scalar_rooted — never its emission.  Under analysis_only the block
+# _with_analysis_parse callers — never its emission.  Under analysis_only the block
 # sites (map/grep/sort/eval/do/&-proto/anon sub) build their lambda nodes
 # with NO body: neither the structural route (the parser's `_v2_embed` hook)
 # nor v1's text compile of the block runs, so an analysis parse compiles

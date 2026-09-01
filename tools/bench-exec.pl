@@ -75,7 +75,14 @@ my @benches = (
   # (task #60) — fib above coalesces to a single-statement body and skips it.
   ['gcdrec',    "$HN sub gcd { my (\$x,\$y)=\@_; return gcd(\$x-\$y,\$y) if \$x>\$y; return gcd(\$x,\$y-\$x) if \$x<\$y; \$x } my \$r=0; \$r += gcd(\$_ % 97 + 1, 89) for 1..\$n; print \"\$r\\n\";", 100_000, 0],
   ['collatz',   "$HN my \$c=0; for my \$i (1..\$n) { my \$m=\$i; while (\$m>1) { \$m = \$m%2 ? 3*\$m+1 : \$m/2; \$c++ } } print \"\$c\\n\";", 300_000, 0],
-  ['strcat',    "$HN my \$s=''; for (1..\$n) { \$s .= 'x' } print length(\$s), \"\\n\";", 100_000, 0],
+  # N_big was 100_000 until s461aq (#881): 100k appends is ~0.003 s of perl and
+  # ~0.005 s of PCL, both far under the run-to-run spread of the ~1 s constant
+  # term both runs pay to compile the program — so the row's own ratio was a
+  # ratio of two noise samples (it printed 1.00x, 1.64x and 1.79x in three
+  # consecutive runs of the SAME two trees).  20M puts perl at ~0.5 s.  This is
+  # the same N_big rule regexg was fixed under (#814): the row's work must be
+  # large against that constant term or the subtraction measures nothing.
+  ['strcat',    "$HN my \$s=''; for (1..\$n) { \$s .= 'x' } print length(\$s), \"\\n\";", 20_000_000, 0],
   # pack/unpack: perl's is C (pp_pack.c); PCL's is the TRANSPILED pure-Perl
   # oracle (cl/pack-impl.pl → cl/pcl-pack.lisp), which re-parses the template
   # string per call — expect a big ratio; this row tracks oracle overhead,

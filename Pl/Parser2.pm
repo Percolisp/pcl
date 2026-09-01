@@ -1644,7 +1644,7 @@ sub parse {
 
   # W5: rewrite file lexicals captured by named subs to fresh package-level
   # cells (see _rename_captured_file_lexicals).  Runs BEFORE the pre-pass so
-  # every downstream reader (sub_info, _sub_ctx_insensitive, VarAnnotator,
+  # every downstream reader (sub_info, _sub_return_facts, VarAnnotator,
   # _lower_block) sees the renamed tokens; _file_lex_renamed drives the
   # defvar-not-let lowering and un-fires the capture gates.
   # File-wide my/state declaration counts (post-span tree): a bare name with
@@ -1757,9 +1757,14 @@ sub parse {
         # cl_name stays UNQUALIFIED (pl-foo) for a plain name: the section's
         # in-package makes the reader intern it in the segment's package —
         # exactly v1's per-section convention.
+        my $rf = $self->_sub_return_facts($sub);
         $self->sub_info->{ $seg->{pkg} }{ $sub->name } = {
           cl_name     => $self->fallback_parser->_qualified_sub_to_cl($sub->name),
-          insensitive => $self->_sub_ctx_insensitive($sub),
+          insensitive => $rf->{insensitive},
+          # #77: the FAMILY every return proves, when they all do — a call
+          # site write `my $x = f()` is then a proven raw write.  Absent key
+          # = no proof, which is what every reader must default to.
+          (defined $rf->{returns} ? (returns => $rf->{returns}) : ()),
           # #189: this sub writes through @_ to its caller's variables, so
           # every argument handed to it must be a BOX (VarAnnotator turns the
           # fact into an `arg-to-writer` boxing event at the call sites).
@@ -10994,41 +10999,83 @@ sub _sub_writes_args {
   return 0;
 }
 
-# ------------------------------------------------------- context sensitivity
-
-# A sub is context-INSENSITIVE when its caller's *wantarray* provably cannot
-# be observed: no `wantarray` in the body, and every value it can return —
-# each explicit `return EXPR` and the implicit last-statement value — is
-# scalar-shaped.  Conservative: any doubt → sensitive (call sites keep the
-# dynamic bind, exactly today's behaviour).
-sub _sub_ctx_insensitive {
+# --------------------------------------------- what a sub's RETURNS prove
+#
+# ONE walk over every value a named sub can hand back — each explicit
+# `return EXPR` and the implicit last-statement value — answering the two
+# facts sub_info carries about them:
+#
+#   insensitive  the caller's *wantarray* provably cannot be observed: no
+#                `wantarray` in the body, and every returned value is
+#                scalar-SHAPED (Kind-A `insensitive-call`, ir-spec §4).
+#   returns      the FAMILY ('num'/'str') of every returned value, when each
+#                one is proven and they all agree (Kind-A `raw-return-family`,
+#                task #77).  The oracle is VarAnnotator's own — the one that
+#                licenses `$x = $a + $b` as a raw write — asked of the sub's
+#                returns instead of of the RHS: a sub all of whose returns are
+#                operator-coerced or literal hands back a fresh raw CL value,
+#                so a call-site write `my $x = f()` is a PROVEN family write
+#                and needs no strict-freeze wrapper.
+#
+# Both are conservative: any doubt → sensitive / no family.  They share the
+# walk AND the parse — two questions about the same root, and the pre-pass
+# already pays that parse once per return for the context fact.
+#
+# `find` returns DESCENDANTS, so a `return` inside a nested anon or named sub
+# is counted here too.  That is conservative in the safe direction for both
+# facts (an extra unproven return only removes a verdict), and it is what
+# makes the walk sound without a scope model.
+sub _sub_return_facts {
   my ($self, $sub) = @_;
-  my $txt = $sub->block->content;
-  return 0 if $txt =~ /\bwantarray\b/;
+  my %facts = (insensitive => 1, returns => undef);
+  my $want_fam = Pl::Passes::enabled('raw-return-family');
+  $facts{insensitive} = 0 if $sub->block->content =~ /\bwantarray\b/;
+
+  my %fams;                     # families seen; '' = at least one unproven
+  my $decided = sub { !$facts{insensitive} && $fams{''} };
+  my $see = sub {               # one returned expression
+    my ($expr) = @_;
+    my ($scalar_rooted, $fam) = $self->_expr_root_facts($expr, $want_fam);
+    $facts{insensitive} = 0 unless $scalar_rooted;
+    $fams{ $fam // '' } = 1;
+  };
 
   my $breaks = $sub->block->find('PPI::Statement::Break') || [];
   for my $b (@$breaks) {
     my @k = _strip_semi($b->schildren);
     my $kw = shift @k;
     next unless $kw && $kw->content eq 'return';
-    return 0 unless @k;                        # bare `return;` = () vs undef
-    my ($expr) = _split_modifier(\@k);
-    return 0 unless $self->_expr_scalar_rooted($expr);
+    if (!@k) { $facts{insensitive} = 0; $fams{''} = 1 }   # bare `return;`
+    else     { my ($expr) = _split_modifier(\@k); $see->($expr) }
+    last if $decided->();
   }
 
   my @stmts = grep { $_->significant && !$_->isa('PPI::Statement::Null') }
               $sub->block->schildren;
-  return 0 unless @stmts;
-  my $last = $stmts[-1];
-  return 1 if $last->isa('PPI::Statement::Break');   # checked above
-  if (ref($last) eq 'PPI::Statement' || $last->isa('PPI::Statement::Variable')) {
+  my $last = @stmts ? $stmts[-1] : undef;
+  if (!$last) { $facts{insensitive} = 0; $fams{''} = 1 }
+  elsif ($last->isa('PPI::Statement::Break')) {
+    # Its expression was counted with the other returns above.  But a
+    # CONDITIONAL trailing return (`return 1 if $ok;`) also lets control fall
+    # OFF the end, and that hands back undef / () — no family.  (The context
+    # fact answered 1 here before this walk existed; it still does.)
+    my @k = _strip_semi($last->schildren);
+    shift @k;                                  # 'return'
+    my (undef, $mod) = _split_modifier(\@k);
+    $fams{''} = 1 if $mod || !@k;
+  }
+  elsif (ref($last) eq 'PPI::Statement' || $last->isa('PPI::Statement::Variable')) {
     my @k = _strip_semi($last->schildren);
     shift @k if @k && $k[0]->isa('PPI::Token::Word') && $k[0]->content eq 'my';
     my ($expr) = _split_modifier(\@k);
     # for `my $x = INIT` the statement value is the assignment value
-    return $self->_expr_scalar_rooted($expr) ? 1 : 0;
+    $see->($expr);
   }
-  return 0;                                   # compound/other tail → sensitive
+  else { $facts{insensitive} = 0; $fams{''} = 1 }   # compound/other tail
+
+  my @f = keys %fams;
+  $facts{returns} = $f[0] if $want_fam && @f == 1 && $f[0] ne '';
+  return \%facts;
 }
 
 # The expression's ROOT forces scalar shape: an arithmetic/comparison operator
@@ -11038,26 +11085,48 @@ sub _sub_ctx_insensitive {
 # x (repeats lists in list context).
 my %SCALAR_ROOT_OP = map { $_ => 1 } qw(+ - * / % ** < > <= >= == != .
                                         eq ne lt gt le ge <=> cmp !);
-sub _expr_scalar_rooted {
-  my ($self, $parts) = @_;
+# The two facts _sub_return_facts asks of ONE returned expression, from ONE
+# analysis parse: is its root scalar-forcing, and (when the #77 gate is on)
+# what family does VarAnnotator's oracle prove for it.
+sub _expr_root_facts {
+  my ($self, $parts, $want_family) = @_;
+  my $r = $self->_with_analysis_parse($parts, sub {
+    my ($expr_o, $id) = @_;
+    return [ _scalar_rooted_root($expr_o, $id),
+             $want_family
+               # The oracle is asked with an EMPTY call table on purpose: a
+               # sub's own return family must not depend on WHERE in the file
+               # the subs it calls happen to be defined, which a table still
+               # being built by this very pre-pass would make it.
+               ? Pl::VarAnnotator::value_family({}, $expr_o, $id)
+               : undef ];
+  });
+  return $r ? @$r : (0, undef);
+}
+
+# Parse PARTS for ANALYSIS and hand the tree to CB.
+#
+# parse_expr_to_tree runs cleanup_for_parsing, which DESTRUCTIVELY rewrites the
+# `=>` operator to `,` (fat-comma auto-quote) on the SHARED PPI tokens.  This
+# analysis runs during sub pre-registration, BEFORE the body is lowered — if we
+# don't restore, the later _lower_expr sees `,` instead of `=>` and the fat
+# comma's key auto-quote never fires (`bless { key => shift }` lowers `key` as a
+# funcall — every OO constructor broke).  Snapshot + restore token content,
+# exactly as _lower_expr does around its own native attempt.
+#
+# ANALYSIS-ONLY parse (PExpr `analysis_only`, Phase B1): embedded block bodies
+# stay uncompiled, so this parse neither lowers through the `_v2_embed` hook
+# nor emits v1 text.  The `local $SIG{__WARN__} = sub {}` that used to sit here
+# silenced ONE line, PExpr's "Handle single node of unknown type" warn (`sub u
+# { ... }` triggered it); that warn is gone since task #339, so the workaround
+# left with its cause.
+sub _with_analysis_parse {
+  my ($self, $parts, $cb) = @_;
   my @parts = _strip_semi(@{ $parts // [] });
-  return 0 unless @parts;
-  # parse_expr_to_tree runs cleanup_for_parsing, which DESTRUCTIVELY rewrites the
-  # `=>` operator to `,` (fat-comma auto-quote) on the SHARED PPI tokens.  This
-  # analysis runs during sub pre-registration, BEFORE the body is lowered — if we
-  # don't restore, the later _lower_expr sees `,` instead of `=>` and the fat
-  # comma's key auto-quote never fires (`bless { key => shift }` lowers `key` as a
-  # funcall — every OO constructor broke).  Snapshot + restore token content,
-  # exactly as _lower_expr does around its own native attempt.
+  return undef unless @parts;
   my @snap = map { [$_, $_->content] }
              map { $_->isa('PPI::Node') ? $_->tokens : $_ } @parts;
-  my $ok = eval {
-    # ANALYSIS-ONLY parse (PExpr `analysis_only`, Phase B1): embedded block
-    # bodies stay uncompiled, so this parse neither lowers through the
-    # `_v2_embed` hook nor emits v1 text.  The `local $SIG{__WARN__} = sub {}`
-    # that used to sit here silenced ONE line, PExpr's "Handle single node of
-    # unknown type" warn (`sub u { ... }` triggered it); that warn is gone
-    # since task #339, so the workaround left with its cause.
+  my $out = eval {
     my $expr_o = Pl::PExpr->new(
       e             => \@parts,
       environment   => $self->environment,
@@ -11065,25 +11134,30 @@ sub _expr_scalar_rooted {
       analysis_only => 1,
     );
     my ($id) = $expr_o->parse_expr_to_tree(\@parts);
-    while (1) {
-      my $node = $expr_o->get_a_node($id);
-      my $kids = $expr_o->get_node_children($id);
-      if ($expr_o->is_internal_node_type($node)) {
-        my $t = $node->{type} // '';
-        if ($t eq 'tree_val' && @$kids == 1) { $id = $kids->[0]; next }
-        return 0;
-      }
-      return 1 if ref($node) eq 'PPI::Token::Operator' && @$kids
-                  && $SCALAR_ROOT_OP{ $node->content };
-      return 1 if ref($node) && $node->isa('PPI::Token::Number');
-      return 1 if ref($node) && $node->isa('PPI::Token::Quote');
-      return 1 if ref($node) eq 'PPI::Token::Symbol' && !@$kids
-                  && $node->content =~ /^\$\w+$/;
-      return 0;
-    }
+    $cb->($expr_o, $id);
   };
   $_->[0]->set_content($_->[1]) for @snap;   # restore pristine tokens (cleanup mutates =>→,)
-  return $ok ? 1 : 0;
+  return $out;
+}
+
+sub _scalar_rooted_root {
+  my ($expr_o, $id) = @_;
+  while (1) {
+    my $node = $expr_o->get_a_node($id);
+    my $kids = $expr_o->get_node_children($id);
+    if ($expr_o->is_internal_node_type($node)) {
+      my $t = $node->{type} // '';
+      if ($t eq 'tree_val' && @$kids == 1) { $id = $kids->[0]; next }
+      return 0;
+    }
+    return 1 if ref($node) eq 'PPI::Token::Operator' && @$kids
+                && $SCALAR_ROOT_OP{ $node->content };
+    return 1 if ref($node) && $node->isa('PPI::Token::Number');
+    return 1 if ref($node) && $node->isa('PPI::Token::Quote');
+    return 1 if ref($node) eq 'PPI::Token::Symbol' && !@$kids
+                && $node->content =~ /^\$\w+$/;
+    return 0;
+  }
 }
 
 # ---------------------------------------------------------------- small helpers

@@ -2429,7 +2429,7 @@ sub gen_funcall_form {
   if (!exists $RUNTIME_NAMES{$func_name}) {
     # Kind-A `insensitive-call` (Pl::Passes): a KNOWN user sub whose body
     # never observes its context — no `wantarray`, every `return` scalar-
-    # rooted (Parser2::_sub_ctx_insensitive, the fact rides sub_info) — is
+    # rooted (Parser2::_sub_return_facts, the fact rides sub_info) — is
     # called WITHOUT the *wantarray* bind: the callee cannot tell, and the
     # bind is a special-variable rebinding per call.  ExprToCL2's native
     # funcall rule, folded here (Phase A); the general form is the bind.

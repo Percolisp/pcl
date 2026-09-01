@@ -49,7 +49,7 @@ our %KIND_A = (
   'raw-numeric'   => 'VarAnnotator B-regime freeze (docs/raw-numeric-verdict.md): use-proven eager coercion, %pcl-to-number-strict / %pcl-to-string-strict',
   'str-buffer'    => 'VarAnnotator S1 verdict: an append-only string slot holds a fill-pointer buffer, `.=` becomes in-place %pcl-str-append',
   'foreach-range' => 'Parser2 foreach: `for $v (A..B)` lowers to the counting macro p-foreach-range instead of materializing the range',
-  'insensitive-call' => 'ExprToCL funcall: a KNOWN user sub whose body never observes *wantarray* (Parser2::_sub_ctx_insensitive) is called without the context bind (the p-…-ctx wrap, ir-spec §4)',
+  'insensitive-call' => 'ExprToCL funcall: a KNOWN user sub whose body never observes *wantarray* (Parser2::_sub_return_facts) is called without the context bind (the p-…-ctx wrap, ir-spec §4)',
   'elem-setf'      => 'ExprToCL `=`: `$h{k} = V` / `$a[i] = V` on a let-bound container with a pure key writes through CL setf instead of p-setf (no boundp auto-declare)',
   # --- verdict-COVERAGE narrowings (s453 review §13, tasks #758-#761).  Each
   # widens where the raw-slot/raw-numeric verdicts above may fire; none is a
@@ -60,6 +60,7 @@ our %KIND_A = (
   'raw-op-family'  => "VarAnnotator write family: a root write whose RHS is a closed-set arith/string OPERATOR takes the operator's result family, so `\$s = \$s + \$_` proves num like `\$s += \$_` does",
   'raw-closure-capture' => 'VarAnnotator nested-sub-ref: an anon sub CAPTURING a name is not itself a boxing event (a CL closure captures a raw let slot natively) — only a real boxing event inside the closure vetoes',
   'raw-topic'      => 'Parser2 foreach: a topic loop `for (A..B) {…}` whose body has no dynamic `$_` reader binds `$_` as a raw per-iteration lexical (p-foreach-range-raw) instead of localizing the global',
+  'raw-return-family' => "Parser2 sub_info `returns` + VarAnnotator write family (task #77): a root write `my \$x = f()` calling a KNOWN user sub whose every return is operator-coerced or literal takes THAT family, so the slot is a PROVEN raw write (no strict-freeze wrapper) instead of an unproven shape",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 

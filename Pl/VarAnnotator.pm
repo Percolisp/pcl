@@ -793,6 +793,22 @@ sub _tw_stmt_expr {
     _tw_expr_parse($ctx, $expr, 0);
     return;
   }
+  # Perl parses `$x = A, B` as `($x = A), B`, so Parser2's native token split
+  # DECLINES any statement carrying a depth-0 operator below assignment
+  # precedence and hands the whole thing to the generic machinery — where
+  # every write is a box-set that cannot store into a raw slot.  Such a write
+  # is therefore not a native root for this walk either: ONE predicate, both
+  # models (Parser2::_tail_below_assign_prec).
+  #
+  # Until #77 this agreement held by ACCIDENT, and Parser2's own comment said
+  # so: the shape where the two models disagree is the parenless list-op call
+  # (`$x = f 1, 2` — PExpr folds the comma into the CALL, so the parse root is
+  # the `=` and this walk saw a native root, while the token split saw the
+  # comma and rerouted).  A funcall root was never a proven write shape, so
+  # the name was boxed anyway.  With `raw-return-family` it can be proven, and
+  # the write went to a raw slot through p-my-= — storing nothing at all.
+  $native_root = 0
+    if $native_root && Pl::Parser2::_tail_below_assign_prec(\@parts);
   _tw_expr_parse($ctx, \@parts, $native_root, $uctx);
 }
 
@@ -1244,6 +1260,31 @@ sub _tw_rhs_is_object {
 # `$a + f()` is exactly as exposed as `$a + $b` was before (probed).
 sub _op_family_by_operator { return Pl::Passes::enabled('raw-op-family') }
 
+# Task #77 (Kind-A `raw-return-family`), the callee→caller half.  A funcall
+# ROOT is unproven because a sub can hand back a BOX — its own lexical's, a
+# global's — and storing that in a raw slot would make the slot an ALIAS.  But
+# when every value a named sub can return is itself operator-coerced or a
+# literal, its result is a fresh raw CL value by the same argument that
+# licenses `$x = $a + $b`: the ONE proof, applied to the sub's returns instead
+# of to this RHS.  Parser2's sub_info pre-pass records the verdict as
+# `returns => 'num'/'str'` (Parser2::_sub_return_family); nothing is recorded
+# unless every return is proven and they agree, so a present key IS the proof.
+#
+# NO new soundness assumption over the direct-call facts already on sub_info
+# (`insensitive`, `writes_args`): same closed world, same table, same
+# invalidation.  What it does NOT cover is a method / coderef / AUTOLOAD call —
+# those are not funcall-with-a-Word roots and never reach here.
+sub _tw_known_sub_return_family {
+  my ($ctx, $xo, $node, $kids) = @_;
+  return 0 unless ($node->{type} // '') eq 'funcall' && @$kids;
+  return 0 unless Pl::Passes::enabled('raw-return-family');
+  my $f = $xo->get_a_node($kids->[0]);
+  return 0 unless ref($f) eq 'PPI::Token::Word';
+  my $info = $ctx->{known_subs}{ $f->content };
+  return 0 unless ref $info;
+  return $info->{returns} || 0;
+}
+
 sub _tw_shape_ok {
   my ($ctx, $xo, $id) = @_;
   my $node = $xo->get_a_node($id);
@@ -1257,10 +1298,26 @@ sub _tw_shape_ok {
     if ($t eq 'prefix_op' && @$kids == 2) {          # -$y / +$y / !$y roots
       my $op = $xo->get_a_node($kids->[0]);
       my $opc = (ref($op) && !$xo->is_internal_node_type($op)) ? $op->content : '';
+      # perl's unary PLUS is a NO-OP — `+$y` IS `$y`, and `+{…}` is the
+      # anon-hash constructor with a disambiguator in front.  It computes
+      # nothing, so it cannot make a raw value: it is VALUE-TRANSPARENT and
+      # takes its operand's shape, exactly like the parens arm above.  Calling
+      # it 'num' with the other two was a SILENT WRONG of the bare-`$y` kind
+      # this oracle exists to reject — `my $b = +$h; $h = 77;` stored $h's BOX
+      # and then read 77 where perl reads the old value (probed s461aq, wrong
+      # on HEAD too; found extending this oracle for #77, which would have
+      # transferred it through every `return +$y`).
+      return _tw_shape_ok($ctx, $xo, $kids->[1]) if $opc eq '+';
+      # `-` and `!` DO compute: p--/p-! return a fresh raw value.  (Perl's
+      # unary minus on a non-numeric string yields a STRING — "-foo" — so the
+      # 'num' LABEL is imprecise there, but the value is raw either way, which
+      # is what the write proof is about; task #921 has the residue.)
       return (($by_op || _tw_operand_ok($ctx, $xo, $kids->[1])) ? 'num' : 0)
-        if $opc eq '-' || $opc eq '+' || $opc eq '!';
+        if $opc eq '-' || $opc eq '!';
     }
-    return 0;               # funcall/h_acc/… root: value may be/alias a box
+    # funcall/h_acc/… root: the value may BE or alias a box — except a call to
+    # a known sub whose returns are all proven (#77).
+    return _tw_known_sub_return_family($ctx, $xo, $node, $kids);
   }
   my $r = ref $node;
   if ($r eq 'PPI::Token::Operator' && @$kids) {
@@ -1276,6 +1333,18 @@ sub _tw_shape_ok {
   return 'str' if $r eq 'PPI::Token::Quote::Single'
                || $r eq 'PPI::Token::Quote::Double';
   return 0;                 # bare $y / f() / anything else: may alias a box
+}
+
+# The family oracle as a NAMED SEAM for a caller outside this file (task #77):
+# Parser2's sub_info pre-pass asks it of every `return` expression, so that the
+# proof licensing `my $x = $a + $b` and the proof licensing `my $x = f()` are
+# THE SAME proof — the alternative was a second family table in Parser2, which
+# is exactly the drift rule 11 forbids.  KNOWN_SUBS is the call table
+# _tw_operand_ok consults; a caller with none passes {}.  Returns 'num' / 'str'
+# / undef (never 0), because the fact it feeds is an ABSENT-or-proven key.
+sub value_family {
+  my ($known_subs, $xo, $id) = @_;
+  return _tw_shape_ok({ known_subs => $known_subs // {} }, $xo, $id) || undef;
 }
 
 # Allowed vocabulary INSIDE an operator-coerced RHS (mirror of _scan):
