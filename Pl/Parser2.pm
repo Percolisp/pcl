@@ -8543,13 +8543,15 @@ sub _lower_block {
       my @assign;
       if (defined $init) {
         my $set = ['p-my-=', cl_sym($name), $self->_lower_expr($init, $first)];
-        if ($imod) {
-          my $cf = $self->_lower_expr($icond, $first);
-          $cf = ['p-!', $cf] if $imod eq 'unless';
-          @assign = (['p-if', $cf, $set]);
-        } else {
-          @assign = ($set);
-        }
+        # `my $x = INIT if COND` — the FOURTH site that applies a statement
+        # modifier, and it used to spell the `p-if` itself.  Routed through
+        # _apply_modifier so the untaken-value rule reaches it too (#920:
+        # `sub f { my $x = 5 if 0 }` is 0 in perl, and this `p-if` IS the
+        # block's last form when the declaration is its tail).
+        @assign = $imod
+          ? (_apply_modifier($set, $imod, $icond, $self, $first,
+                             ($decl_tail ? $tail_ctx : undef)))
+          : ($set);
       }
       return (@declmod_eval,
               ['let', ['list', ['list', cl_sym($name), '(make-p-box nil)']],
@@ -8679,7 +8681,8 @@ sub _lower_block {
     my $assign_form = sub {
       my $f = _apply_modifier(
                 $self->_lower_expr([@k], $first, ($decl_tail ? 'inherit' : undef)),
-                $kmod, $kcond, $self, $first);
+                $kmod, $kcond, $self, $first,
+                ($decl_tail ? $tail_ctx : undef));
       return $decl_tail ? ($self->_restore_caller_wa($tail_ctx, $f))[0] : $f;
     };
     if (@$vars == 1 && $self->{_file_lex_renamed}{$vars->[0]}) {
@@ -9392,7 +9395,7 @@ sub _lower_stmt {
       my $form = @$expr
         ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
         : ['p-return'];
-      return _apply_modifier($form, $mod, $cond, $self, $stmt);
+      return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
     }
     # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
     # machinery lower the whole thing (goto &sub tail-calls with the LIVE @_;
@@ -9401,7 +9404,7 @@ sub _lower_stmt {
     my ($expr, $mod, $cond) = _split_modifier(\@k);
     return $self->_fallback_stmt($stmt) if _modifier_needs_fallback($mod);
     my $form = $self->_lower_expr($expr, $stmt);
-    return _apply_modifier($form, $mod, $cond, $self, $stmt);
+    return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
   }
 
   if ($stmt->isa('PPI::Statement::Scheduled') || $stmt->isa('PPI::Statement::Package')) {
@@ -9433,13 +9436,14 @@ sub _lower_stmt {
   # (s308b): a map tail is LIST, so `map { (A, B) if C }` keeps both
   # elements — the default lowering flattened the list to its last element.
   if (defined $tail_ctx && $mod && $mod =~ /^(?:if|unless)$/) {
+    # The ret-var name and the CONDITION are built here, before the body, so
+    # this site's lowering order is unchanged; the shape itself is
+    # _modifier_ret_form, shared with _apply_modifier (task #920).
     my $ret = '--pcl-if-ret--' . $self->{_if_ret_counter}++;
-    my $test = ['setf', $ret, $self->_lower_expr($cond, $stmt)];
-    $test = ['p-!', $test] if $mod eq 'unless';
+    my $condform = $self->_lower_expr($cond, $stmt);
     return $self->_restore_caller_wa($tail_ctx,
-           ['let', ['list', ['list', $ret, 'nil']],
-            ['p-if', $test, ['setf', $ret, $self->_lower_expr($expr, $stmt, $tail_ctx)], 'nil'],
-            $ret]);
+           _modifier_ret_form($mod, $ret, $condform,
+                              $self->_lower_expr($expr, $stmt, $tail_ctx)));
   }
 
   # `$x = RHS;` on a let-bound scalar → native form: `setf` when $x is a raw
@@ -11269,10 +11273,49 @@ sub _modifier_needs_fallback {
   return $mod && $mod !~ /^(?:if|unless)$/;
 }
 
+# THE VALUE OF AN UNTAKEN `if`/`unless` STATEMENT MODIFIER IS THE CONDITION'S
+# OWN VALUE, never undef (task #920, probed 5.40.3 across every spelling):
+#
+#     sub f { my $n = shift; return $n + 1 if $n > 0 }   f(-1) is ""  and DEFINED
+#     sub g {                       5 if 0 }             is 0
+#     sub h {                       5 unless 1 }         is 1 — the CONDITION,
+#                                                        not its negation
+#     sub i { my $n = shift; my $x = 5 if $n }           i(0) is 0
+#
+# so a sub that falls off the end through an untaken modifier returns a DEFINED
+# false value, and `my @l = f(-1)` is ONE element, not none.
+#
+# It matters only where the statement's value IS the block's — tail position —
+# and the transform is the ret-var one the BLOCK spelling `if (C) { … }` has
+# always used, which is exactly why `sub m { if ($n>0) { return $n+1 } }` was
+# already right while every modifier spelling that carried a `return`, a `my`
+# or an `our` was not.
+#
+# $RET IS ALLOCATED BY THE CALLER so each site keeps its own lowering ORDER:
+# the plain-expression tail lowers the CONDITION first, the `return` family
+# lowers its EXPRESSION first (its `p-return` form is built before the modifier
+# is applied).  The RULE lives here, once.
+sub _modifier_ret_form {
+  my ($mod, $ret, $condform, $bodyform) = @_;
+  my $test = ['setf', $ret, $condform];
+  $test = ['p-!', $test] if $mod eq 'unless';
+  return ['let', ['list', ['list', $ret, 'nil']],
+          ['p-if', $test, ['setf', $ret, $bodyform], 'nil'],
+          $ret];
+}
+
 sub _apply_modifier {
-  my ($form, $mod, $cond, $self, $stmt) = @_;
+  my ($form, $mod, $cond, $self, $stmt, $tail_ctx) = @_;
   return $form unless $mod;
   my $condform = $self->_lower_expr($cond, $stmt);
+  # TAIL position: the statement's value is the block's, so an untaken
+  # modifier must yield the CONDITION (see _modifier_ret_form).  Anywhere else
+  # the value is discarded and the plain `p-if` is what it has always been —
+  # which is why passing $tail_ctx is per-caller and not a blanket change.
+  return _modifier_ret_form($mod,
+                            '--pcl-if-ret--' . $self->{_if_ret_counter}++,
+                            $condform, $form)
+    if defined $tail_ctx && ($mod eq 'if' || $mod eq 'unless');
   return ['p-if', $condform, $form]          if $mod eq 'if';
   return ['p-if', ['p-!', $condform], $form] if $mod eq 'unless';
   die "Parser2 TODO: statement modifier '$mod'";   # unreachable (callers gate)
@@ -11391,7 +11434,7 @@ sub _lower_our_decl {
   # divergence; v2 deliberately matches perl here, not v1.
   my $form = $self->_lower_expr([@k[1 .. $#k]], $stmt,
                                 (defined $tail_ctx ? 'inherit' : undef));
-  $form = _apply_modifier($form, $mod, $cond, $self, $stmt) if $mod;
+  $form = _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx) if $mod;
   $form = ($self->_restore_caller_wa($tail_ctx, $form))[0] if defined $tail_ctx;
   return [ $form ];
 }

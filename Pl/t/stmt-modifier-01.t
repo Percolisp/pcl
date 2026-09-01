@@ -79,7 +79,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 39;
+plan tests => 44;
 
 # Fixture modules built by the HARNESS (real perl), with their directory
 # interpolated into the generated program: the require rows then depend on
@@ -543,4 +543,77 @@ PL
     my $plain = emitted(q{my @t = (1,2); print scalar(@t);});
     unlike($plain, qr/p-if/,
            '#620 shape: the UNCONDITIONAL spelling gains no p-if');
+}
+
+# ── 6. #920: THE VALUE OF AN UNTAKEN MODIFIER IS THE CONDITION'S ────────────
+# perl: a sub that falls off the end returns the value of the LAST STATEMENT
+# EVALUATED, and an untaken `EXPR if COND` evaluates to COND's own value —
+# DEFINED, never undef.  `sub f { return $n+1 if $n > 0 }` therefore answers ""
+# for a false condition, `5 if 0` answers 0, and `5 unless 1` answers 1 (the
+# CONDITION, not its negation).  PCL answered undef for every spelling that
+# carried a `return`, a `my` or an `our`, while the BLOCK spelling
+# `if (C) { return X }` was already right — the block form has always used the
+# ret-var transform and the modifier form used it only for a plain expression.
+# ONE rule now (`_modifier_ret_form`), four callers.
+#
+# Row 9 is why this is not cosmetic: `my @l = f(-1)` is ONE element in perl and
+# was ZERO in PCL, so every later element of a list built from such a call
+# shifted — the #962 family, one level up.
+is(run_cl(<<'PL'), "1:<><3>\n2:<1><0>\n3:<>UNDEF\n4:<0><5>\n5:<0>\n6:<0>\n7:<>\n8:<9><7>\n9:1\n10:<0><>UNDEF<0>\n",
+sub d { my $v = shift; defined $v ? "<$v>" : "UNDEF" }
+sub m1 { my $n = shift; return $n + 1 if $n > 0 }
+sub m2 { my $n = shift; return $n + 1 unless $n > 0 }
+sub m3 { my $n = shift; return if $n > 0 }
+sub m4 { my $n = shift; my $x = 5 if $n }
+sub m5 { my $n = shift; our $y = 5 if $n }
+sub m6 { my $n = shift; my ($a,$b) = (1,2) if $n }
+sub m7 { my $n = shift; if ($n > 0) { return $n + 1 } }
+sub m8 { my $n = shift; return 7 if $n; 9 }
+print "1:", d(m1(-1)), d(m1(2)), "\n";
+print "2:", d(m2(2)),  d(m2(-1)), "\n";
+print "3:", d(m3(-1)), d(m3(2)), "\n";
+print "4:", d(m4(0)),  d(m4(1)), "\n";
+print "5:", d(m5(0)),  "\n";
+print "6:", d(m6(0)),  "\n";
+print "7:", d(m7(-1)), "\n";
+print "8:", d(m8(0)),  d(m8(1)), "\n";
+my @l = m1(-1); print "9:", scalar(@l), "\n";
+sub c1 { my $n = shift; return 9 if $n }
+print "10:", d(c1(0)), d(c1("")), d(c1(undef)), d(c1("0")), "\n";
+PL
+   '#920: an untaken if/unless modifier yields the CONDITION, in every tail spelling');
+
+# THE BOUNDARY, and it is where the transform must NOT change an answer: a
+# modifier in STATEMENT position (its value discarded), a loop-body tail, a
+# `do { }` block value, a map block, an eval block, and a nested anon sub.
+# Rows 11 and 13 pass on the base tree; 12, 14 and 15 do not.
+is(run_cl(<<'PL'), "11:2 4\n12:<0>\n13:3:,4,6\n14:<0>\n15:<0>\n",
+sub d { my $v = shift; defined $v ? "<$v>" : "UNDEF" }
+my @o; for my $i (1..5) { next if $i % 2; push @o, $i }
+print "11:@o\n";
+my $r = do { my $x = 5; $x = 9 if 0; };
+print "12:", d($r), "\n";
+my @m = map { $_ * 2 if $_ > 1 } (1,2,3);
+print "13:", scalar(@m), ":", join(",", map { defined $_ ? $_ : "U" } @m), "\n";
+my $e = eval { my $x = 1; return 5 if 0; };
+print "14:", d($e), "\n";
+sub o2 { my $f = sub { my $z = shift; return $z if $z }; return $f->(0) }
+print "15:", d(o2()), "\n";
+PL
+   '#920 boundary: loop bodies, do-blocks, map blocks, eval and nested subs');
+
+# THE EMISSION PROMISE: only a TAIL modifier gains the ret-var `let`.  A
+# modifier in statement position keeps the bare `p-if` it has always had —
+# which is what keeps the transform off every early `return … if …` in the
+# MIDDLE of a sub, i.e. almost all of them, and is why the corpus moved in
+# four files out of 1145.
+{
+    my $tail = emitted(q{sub f { my $n = shift; return 1 if $n }});
+    like($tail, qr/--pcl-if-ret--/,
+         '#920 shape: a TAIL `return … if …` gets the ret-var transform');
+    my $mid = emitted(q{sub f { my $n = shift; return 1 if $n; 9 }});
+    like($mid, qr/\(p-if \$n \(p-return 1\)\)/,
+         '#920 shape: a MID-BODY `return … if …` keeps the bare p-if');
+    unlike($mid, qr/--pcl-if-ret--/,
+           '#920 shape: …and gains no ret-var');
 }
