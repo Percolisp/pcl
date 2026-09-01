@@ -981,7 +981,12 @@ comp/form_scope.t	14	0	0	2	DIFF		0
 comp/hints.t	31	0	16	13	DIFF	NOT fully registered: 3 unregistered diverging row(s): #15; tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
 comp/line_debug.t	25	0	1	24	DIFF		0
 comp/multiline.t	6	0	6	0	OK		0
-comp/opsubs.t	36	0	31	5	DIFF		0
+# s463f (round 20 batch legs, companion --all --quick on fc96b08): comp/opsubs.t 31/5 -> 32/4 EDITED BY HAND --
+#   bisected across the two merges with single-file runs: 31/5 on 2065b89 (pre-AU), 32/4 on aafb02c (AU) and
+#   on fc96b08; the row that moved is test 2 (unnamed in the TAP because its arguments were SHIFTED):
+#   #962 -- a failed `m(...)` in LIST context is now the EMPTY LIST, so the assertion's argument list lines up.
+#   Rows 22/26/30/34 (qx/s/tr/y as sub names) keep failing for the #938-family reason.
+comp/opsubs.t	36	0	32	4	DIFF		0
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)	0
 comp/package_block.t	7	0	0	7	DIFF		0
@@ -1525,7 +1530,14 @@ run/fresh_perl.t	91	0	57	34	XDIFF	unbound:H | not-supported.md §Error message t
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-run/runenv_hashseed.t	278	0	8	0	DIFF	aborted-forms:1: Failed to munge seed 'NxdNdNbNbNaNbNfNaNeNcaNcdNeNecNcadaNfN' at runenv_hashseed.t line N.	0
+# s463f (round 20 batch legs): run/runenv_hashseed.t 8/0 -> 9/0 EDITED BY HAND, and it is ROUND 19's: #939 (AT) --
+#   its 1029-file emission A/B named t/run/runenv_hashseed.t:206 `substr($munged_seed,-1)=~tr/0-9a-f/1-9a-f0/`
+#   as one of its two diffs ("the shape in the wild"); the file reads 9/0 on 2065b89 (pre-round-20) and on
+#   fc96b08 alike, so neither round-20 agent touched it.  The abort reason moves from `Failed to munge seed`
+#   (the substr window write that was silent) to the NEXT pre-existing gap, `Undefined subroutine
+#   &main::unlink_tempfiles` (a helper the file expects from its runenv.t sibling).  Neither the AT leg
+#   (op/+re/) nor the s463f re/ tail covered run/, which is why the row waited for the --all leg.
+run/runenv_hashseed.t	278	0	9	0	DIFF	aborted-forms:1: Undefined subroutine &main::unlink_tempfiles called	0
 run/runenv_randseed.t	9	0	2	7	DIFF		0
 run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	0	1	DIFF		0

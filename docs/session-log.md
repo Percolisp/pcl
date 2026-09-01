@@ -4,6 +4,75 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 463f, part 3 (2026-09-02, Fable) — ROUND 20 COMPLETE: AV merge-reviewed and MERGED (`fc96b08`); batch legs green on the final tree; two companion movers attributed and spliced; pushed
+
+**AV (s463av) review.**  The diff first: the runtime's own policy was never
+set — the only `optimize` declaim sat at the END of the file and governs the
+generated program — so the 21k lines every program spends its time in were
+compiled at speed 1.  AV's `(declaim (optimize (speed 3)))` at the top was
+MEASURED with a new runtime A/B mode in `tools/bench-exec.pl` (`BENCH_RT_B`,
+two cores, interleaved series; single-core timing interleaved too): six
+best-of-5 runs, median B/A, and the SIGN of all six samples is the verdict —
+feread −7.2 %, arrhash −5.2 %, cfor −5.0 %, ovlsub −3.9 %, five more rows
+−1.4 to −2.6 %, nothing consistently slower, s462as's gcdrec +11.8 % dead
+(load).  Cost: the runtime's own compile 3.02 → 4.11 s, once per runtime edit
+(cores are content-keyed).  The policy's one side effect was a real bug class:
+SBCL turns a defun's self-reference into a LOCAL call under `(> speed debug)`,
+so the hand-written pack/unpack stubs re-entered themselves and `pack("N",1)`
+died "cl/pcl-pack.lisp not found" on a present file — **#980**, fixed by
+routing them through `%pcl-def-ext-stub` (moved above its first user; it
+delegates through SYMBOL-FUNCTION, as the mro/warnings/xs stubs always had)
+and guarded by a SOURCE invariant in `Pl/t/extension-preamble-01.t`, because
+the bug is invisible at the shipped policy.  The speed-3 note harvest (3179
+notes, **#983**) found that 248 were one missing declaration —
+`p-magic-cell`'s closures are now `:type function` with erroring defaults.
+**#981**: `p-array-fill` re-discovered a known length one reallocation at a
+time; a lower-bound predicate + one guarded `adjust-array` reserves the
+destination — the profile's 16 % on `slices` was mostly RELOCATED (slices
++0.9 %), the real prize was a shape no row covered, `my @c = @src`, +20 % at
+50 elements, now the `listcopy` row (0.90–0.93×).  **§0.2f** re-tabulates the
+whole board with a previous column and one line per row naming what moved
+it: ten of nineteen rows beat perl; every remaining gap has a named owner.
+Filed #980–#986.  Rebased on `bb62fc0`; parens balanced; no emission change,
+no generation bump.  Fable probes vs perl 5.40.3 (20 rows: pack/unpack incl.
+unpack's `$_` default through the new stub, six array-fill shapes, a
+deleted-element copy, a recursing sub redefined through a glob and through a
+string eval, slices, nested copies) SAME — and SAME under `PCL_RAW_ELEMS=0`
+and `PCL_OPT=none`.  Checked that no harness or xs file redefines a runtime
+defun, so the local-call hazard has no second victim.  AV's three asks ruled
+in DECIDED §s463f part 3: keep `(speed 3)` (standing rule: a redefinable
+runtime function delegates through SYMBOL-FUNCTION, the policy is never
+lowered for it); interleaved series are the standing bench form; coverage
+rows for an invisible change are the right bar when labelled as such.
+
+**Batch legs on the final tree `fc96b08`** (one detached script: gate → sweep
+→ bench → companion).  Gate COLD **191 files / 6521 rows**, only the 13 pclxs
+xs rows (the 244 undefined-function style notes in the log are the same 244
+as in every gate this session).  Sweep **TOTAL passing 18346 (+0)**, GATE
+clean, drops 5 = census.  Bench (K=3): slices 2.96×, listcopy 0.91×, feread
+0.46×, feread2 1.28×, symref 1.30×, pack 850× — the §0.2f board within noise.
+Companion **`--all --quick`, 528 files** (a global policy change touches
+every runtime path, so the broad leg): five files differ from the snapshot,
+two of them real and ATTRIBUTED with single-file runs on worktrees at
+`2065b89` and `aafb02c` — **comp/opsubs.t 31/5 → 32/4 is #962's** (31/5
+before AU, 32/4 after; test 2, unnamed in the TAP because its arguments were
+shifted by the phantom element) and **run/runenv_hashseed.t 8/0 → 9/0 is
+round 19's #939** (9/0 already on 2065b89; AT's 1029-file A/B had named
+`t/run/runenv_hashseed.t:206` as one of its two diffs, and run/ was in no
+earlier leg — the abort moves from "Failed to munge seed" to the next
+pre-existing gap, `unlink_tempfiles` undefined).  Both spliced ROW BY ROW
+with their causes.  The other three are the documented noise rows: io/open.t
+154/34 → 153/35 (the multi-file flip), io/pvbm.t 20/8 → 21/7 (the flapper's
+ninth sighting), uni/variables.t's TIMEOUT count (three-way unstable).
+No fail-baseline or pass-baseline row moved.
+
+**Round 20 in one line**: AU shipped #962 (=#459) + #960(b) + #920 and
+declined #960(a) into #972; AV shipped #950 + #980 + #981 + §0.2f; the
+session filed #963–#967 from review probes and a USER question; generation
+v2-581; main pushed as this commit.  **Round 21 (USER)**: the return protocol
+(#964 + #930's scalar half) as its own task under one owner — see DECIDED
+§s463f part 3 for the queue after it.
+
 ## Session 463av (2026-09-01, Opus agent AV, round 20 PERF slot) — the runtime compiles at (speed 3) (#950), the extension-stub self-call that policy exposed (#980), p-array-fill reserves capacity (#981), and the bench table is re-tabulated (§0.2f)
 
 Three tasks, all three delivered; six filed.  Not pushed, not merged; base
