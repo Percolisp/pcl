@@ -1,4 +1,17 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s462at (Opus agent AT, round 19) — ONE ROW EDITED BY HAND, and it is the
+#   ONLY mover in 231 of the 301 op/ + re/ files the companion leg had produced
+#   when the session was stopped (the other 230 byte-identical to this
+#   snapshot; op/ and re/ are the change class for a runtime + `=~`-emission
+#   change).  op/substr.t C_ok/C_notok 347/5 -> 348/6.  #939: an lvalue substr
+#   as an `=~` TARGET now binds the write-through cell, so the
+#   `substr($#ta,0,2) =~ s/\A..\z/23/s` row PASSES and the file runs two rows
+#   further, the next of which (`substr($#ta,0,2,23)`, the 4-arg spelling of
+#   the same write) FAILS HONESTLY and is task #960.  Same +1/+1 the
+#   perl-tests sweep measured for the same file, attributed there on a
+#   4c354bc worktree with a serial single-file run.
+#   NOT VERIFIED: the remaining ~70 files of that companion run (the tail of
+#   re/), which the stop order cut short.
 # s461ar (Opus agent AR, round 18) — THREE ROWS EDITED BY HAND, each measured
 #   ALONE on both trees (33a71c9 base worktree vs this tree) and each with its
 #   cause; the runner's own #366 serial re-run agrees with the parallel verdict
@@ -1321,7 +1334,7 @@ op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
 op/sub_lval.t	211	0	54	47	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
-op/substr.t	400	0	347	5	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
+op/substr.t	400	0	348	6	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
