@@ -1,5 +1,22 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
-# s463au (Opus agent AU, round 20) — TWO ROWS EDITED BY HAND, and they are
+# s463au (Opus agent AU, round 20), SECOND EDIT — TWO ROWS, both GAINS and
+#   both ATTRIBUTED to task #960 half (b) (substr/vec/pos take their TARGET
+#   ARGUMENT in perl's loose lvalue context).  These are the ONLY two movers
+#   in the 301-file op/ + re/ leg, and they are exactly two of the six files
+#   the 1145-file emission A/B named — the attribution is the diff itself —
+#   and the runner's own #366 serial re-run agrees with the parallel verdict
+#   on both.  The other four A/B files: perl-tests/substr.t (the sweep's +3),
+#   Text::CSV_PP.pm (a module, not a suite row), t/op/avhv.t and
+#   t/op/tiehandle.t (both already at their snapshot value — the shapes are
+#   there, the rows around them fail for other reasons).
+#     op/substr.t C 348/6 -> 351/3 — the SAME three rows as the perl-tests
+#       twin: `substr($#ta,0,2) = 23`, `substr($#ta,0,2,23)`, and the TIED
+#       hash element `substr($data{a},0,5,"")`, whose skip registration was
+#       dropped as stale in the same commit.
+#     op/vec.t    C  73/5 ->  74/4 — `vec(substr($foo,1,3),5,4) = 3`, the
+#       NESTED magic-lvalue spelling: the target rewriter recurses, so the
+#       inner substr becomes its cell and the vec writes through it.
+# s463au (Opus agent AU, round 20), FIRST EDIT — TWO ROWS, and they are
 #   THE ROUND-19 TAIL the note below says was NOT VERIFIED (the rest of re/).
 #   Both are PRE-EXISTING relative to this session: measured on the 6e6f191
 #   base (= the round-19 merge) with the same runner and the same two-file
@@ -1351,7 +1368,7 @@ op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
 op/sub_lval.t	211	0	54	47	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
-op/substr.t	400	0	348	6	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
+op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1389,7 +1406,7 @@ op/utf8decode.t	710	0	620	90	DIFF		0
 op/utf8magic.t	6	0	2	4	DIFF		0
 op/utfhash.t	99	0	91	0	DIFF		0
 op/utftaint.t	0	0	72	17	NOTAP		0
-op/vec.t	78	0	73	5	DIFF		0
+op/vec.t	78	0	74	4	DIFF		0
 op/ver.t	54	0	47	7	XDIFF	undef-fn:main::pl-gethostbyaddr | not-supported.md §use bytes / §use vN default warnings / §Control-character glob names — tests 21/23/25 (bytes view), 52 (Mordor), 54 (vN warnings); test 51 is the OPEN defelem arg-aliasing gap (task #131), a fix target	0
 op/waitpid.t	1	0	1	0	OK		0
 op/wantarray.t	28	0	27	1	DIFF		0
