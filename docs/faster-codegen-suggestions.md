@@ -403,6 +403,90 @@ underlying `p-str-x` stack blowup is task #880.  `regexg` now reads **2.19×**,
 and agrees with itself at two N.  **Read no bench row whose signal is under
 the ~1 s constant term both runs pay** — `strcat` is the next one, task #881.
 
+### 0.2f The board re-tabulated (s463av, round 20) — the first full table since §0.2e
+
+Rounds 16–19 moved five rows whose numbers lived only in `docs/session-log.md`
+sections.  This is the whole board again, on the tree round 20 delivers, with
+the task that moved each row.
+
+```
+perl tools/bench-exec.pl          # on the s463av tree; BENCH_K=5 is the default
+```
+
+Median of three best-of-5 runs; the `pcl(s) spread` column is that row's
+min..max across the three, so a row whose spread is wider than the move it is
+being read for is a row that has not been measured yet.  **1-minute load
+1.3–7.3** — a sibling correctness agent and the reviewer were live on the same
+box all session — so read the **PCL absolute seconds against the perl column**
+(the §0.2a rule), never the ratio alone.
+
+```
+bench          perl(s)     pcl(s)  pcl/perl   pcl(s) spread    last recorded
+intloop+=       0.0667     0.0224     0.34x   0.0207..0.0254   0.27x  §0.2d
+intloop=        0.0663     0.0205     0.31x   0.0192..0.0219   0.29x  §0.2d
+cfor            0.1083     0.0302     0.28x   0.0298..0.0385   0.25x  §0.2d
+arrhash         0.1364     0.0835     0.61x   0.0827..0.1077   0.67x  §0.2d
+fib(27)x        1.5083     0.4327     0.29x   0.4315..0.4503   0.29x  §0.2d
+gcdrec          0.1930     0.0952     0.49x   0.0949..0.0981   0.50x  §0.2d
+collatz         1.9404     0.5104     0.26x   0.5079..0.5464   0.25x  s460ao
+strcat          0.2997     0.6492     2.17x   0.6429..0.7025   2.20x  s461aq
+pack            0.0038     3.4051   896.08x   3.4025..3.5687      —   §0.2d
+packunpk        0.0042     3.5817   852.79x   3.4246..3.6291      —   §0.2d
+arrfill         0.0491     0.0711     1.45x   0.0710..0.0748   1.48x  §0.2d
+slices          0.0686     0.2071     3.02x   0.2031..0.2184   3.18x  §0.2d
+sliceasgn       0.0266     0.0534     2.01x   0.0531..0.0547   2.19x  §0.2d
+listcopy        0.5126     0.4771     0.93x   0.4769..0.4830    NEW   #981
+feread          0.4266     0.1943     0.46x   0.1933..0.1946   0.47x  §0.2e
+feread2         0.4272     0.5404     1.26x   0.5387..0.5413      —   #883
+ovlsub          0.0398     0.1307     3.28x   0.1291..0.1406   3.39x  §0.2d
+symref          0.0228     0.0324     1.42x   0.0310..0.0339   1.02x  s461aq (quiet box)
+regexg          0.3706     0.8059     2.17x   0.7847..0.8256   2.19x  §0.2e
+```
+
+**Ten of nineteen rows beat perl.**  What moved each, and who owns what is
+left:
+
+| row | what moved it | what is left |
+|---|---|---|
+| `intloop+=` `intloop=` | #759 + #761 (s456af) took them from 2.02×/4.83× to under 0.30× | nothing; they are 3× faster than perl |
+| `cfor` | the counting-loop lowering (`p-foreach-range-raw`) | — |
+| `arrhash` | #816's raw elements (−17 %) then s458ak's accessor dispatch, 1.28× → 0.67×; #950 a further −5.2 % | beats perl |
+| `fib(27)x` `gcdrec` | unmoved for six rounds; the sub-call path is settled | — |
+| `collatz` | **#890** (s460ao): the raw-numeric freeze DECLINES instead of dying, 0.40× → 0.25× | — |
+| `strcat` | **#881** (s461aq) raised N_big to 20 M — before that the row was two noise samples and printed 1.00×, 1.64× and 1.79× on the same two trees | 2.17×: PCL's fill-pointer buffer against perl's realloc-in-place |
+| `pack` `packunpk` | **#74** owns the whole ratio: PCL runs the transpiled pure-Perl oracle (`cl/pack-impl.pl`) and re-parses the template per call, where perl runs `pp_pack.c` | a plan/executor restructure, a session of its own |
+| `arrfill` | #816 (−24 %) then s458ak, 3.09× → 1.45× | the remainder is the per-element store rule |
+| `slices` | s458ak 5.13× → 3.02×; #922 −4.3 %; #981 +0.9 % | **#982** key stringify ~9 %, **#985** the slice-argument list ~5 %, and ~21 % equal-hash lookups that are the hash table itself |
+| `sliceasgn` | s458ak −23 %; it also PAYS for `%p-assign-snapshot`, the correctness half of #816 (perl evaluates a list assignment's whole RHS before its first store) | — |
+| `listcopy` | **NEW, #981** — `my @c = @src` at 50 elements.  The shape had no row, which is why a 20 % win in it was invisible in the two slice rows (they assign 5 and 10) | beats perl at 0.93× |
+| `feread` | **#862 ARM A** (s459am): a read-only foreach binds the slot as it stands, 0.71× → 0.47×; #950 a further −7.2 %, the largest of that change | beats perl |
+| `feread2` | **#883** measured and DECLINED; #923's sized flattener | 1.26× — the multi-array flatten still promotes |
+| `ovlsub` | s458ak −11 % (#815) | **#582**, blocked on @ISA-write invalidation |
+| `symref` | **#812** (s461aq): the name → SYMBOL memo, 9.80× → **1.02× on a quiet box** | 1.42× here is this box, not a regression — see below |
+| `regexg` | **#680** (s454ac) 30× → ~2.4×, and **#814** (s459am), which found the row had been timing a CRASH | the cl-ppcre engine itself; **#71** (PCRE2 FFI) is the next lever |
+
+**Two rows read higher here than in their record, and neither is a
+regression.**  `symref` 1.02× → 1.42×: perl's column is 0.0228 s against
+s461aq's 0.032 s on its quiet box, so *perl* got faster here and the ratio
+moved with it — the PCL absolute (0.0324 s) is within 1 % of the record's
+0.0327 s.  `intloop+=` and `cfor` sit ~16–20 % above §0.2d's quiet-box
+absolutes (0.0209 vs 0.0174; 0.0302 vs 0.0261) while `intloop=` matches its
+record exactly (0.0182 vs 0.0185).  **That was probed rather than left as a
+suspicion**: five interleaved A/B runs of this tree's runtime against round
+18's (`4c354bc`) give `cfor` **+9.3 %, all five samples positive** — round 18
+is *slower* — and `intloop+=` +2.8 % with mixed signs.  So rounds 18 and 19 did
+not cause it, and the gap is either older or is this machine.  **Settling it
+needs a quiet box, and it is a ten-minute job there**: task **#986** has the
+numbers and the bisection recipe.
+
+**What the board says as a whole.**  The counting, recursion, foreach and
+whole-array-copy shapes beat perl, several of them by 3×.  Everything still
+behind perl is behind for a *named* reason with an owner: an oracle that
+re-parses (`pack`, #74), an engine PCL does not own (`regexg`, #71), a dispatch
+cache that needs an invalidation story (`ovlsub`, #582), a string buffer versus
+realloc (`strcat`), and the hash/slice traffic (`slices`, `sliceasgn`, #982 and
+#985).  There is no row left whose gap is unexplained.
+
 ---
 
 ## 0.5 Headline results (what the experiments proved)

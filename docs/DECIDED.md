@@ -21,6 +21,48 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s463av (Opus, round 20 PERF slot, 2026-09-01) — the runtime's own optimize policy, and what it exposed
+
+- **The RUNTIME compiles at `(speed 3)`** (#950).  The declaim sits right after the
+  first `(in-package :pcl)`; the end-of-file declaim still governs the GENERATED
+  program, which is why the runtime had been compiling at SBCL's default speed 1
+  all along.  Nine bench rows consistently faster (1.4–7.2 %, `feread` the largest),
+  none consistently slower, over six interleaved best-of-5 A/B runs; +36 % on the
+  runtime's own compile, which is once per edit because cores are content-keyed and
+  cached.  The numbers and the reasoning are a comment at the declaim's own site;
+  the board is `docs/faster-codegen-suggestions.md` §0.2f.
+- **s462as's `gcdrec` +11.8 % suspicion is DEAD**: −1.2 % with mixed signs over six
+  samples.  It was load.  (#950.)
+- **A runtime function that must be REDEFINABLE at run time is delegated to through
+  `SYMBOL-FUNCTION`, never a self-call** (#980).  SBCL converts a `defun`'s reference
+  to its own name into a LOCAL call whenever `(> speed debug)`, which silently
+  defeats the self-loading extension stubs — `pack` died "cl/pcl-pack.lisp not
+  found" on a file that was present.  ONE spelling for all of them,
+  `%pcl-def-ext-stub`, defined above the first stub that uses it.  Guard
+  `Pl/t/extension-preamble-01.t` (a SOURCE invariant: the bug is invisible at the
+  policy the tree compiles at, so a behavioural row would pass on the broken form).
+- **`load` of a Lisp SOURCE file emits no optimization notes at all** — the harvest
+  is a `compile-file` inside an image that has already loaded the runtime.  Recipe
+  and the 3179-note census: task **#983**.  248 of them were one missing
+  declaration (`p-magic-cell`'s closures are now `:type function`).
+- **An sb-sprof share is not a prize** (#981).  Vector growth was 16.1 % of the
+  `slices` row and removing it bought ~1 %, because `adjust-array` costs what the
+  growth cost.  **The row's own A/B is the bar**, and when it disagrees with the
+  profile the profile is the one describing something else.
+- **A bench row's SIZE decides what it can see** (#981).  The slice rows assign 5
+  and 10 elements, so a **+20 %** win on a 50-element `my @c = @src` was invisible in
+  them.  New row `listcopy`; PCL reads 0.93× on it.
+- **`tools/bench-exec.pl` times its series INTERLEAVED** (both modes) and takes
+  **`BENCH_RT_B=<runtime>`** for a two-core runtime A/B — one transpile, both cores
+  verified against perl before either is timed, and the B source is staged into
+  `cl/` so `*pcl-runtime-directory*` resolves (otherwise the pack rows read BROKEN).
+  This makes a per-commit runtime bisect one command instead of a worktree.
+- **UNSETTLED, with rounds 18/19 ruled out**: `intloop+=` and `cfor` read ~16–20 %
+  above their §0.2d quiet-box absolutes while `intloop=` matches exactly; an A/B
+  against round 18's runtime shows round 18 SLOWER, so the cause is older or is
+  machine state.  Ten minutes on a quiet box settles it — task **#986** has the
+  recipe.
+
 ## s463f, part 2 (2026-09-01, Fable) — AU (#962=#459 + #960(b) + #920) REVIEWED + MERGED, main `aafb02c`, gen v2-581; AU's four asks RULED; USER ruling on the return protocol; #963–#967 filed
 
 - **AU APPROVED as shipped.**  Diff read first (`%p-empty-list` the ONE producer of the empty-list value; `_lvalue_target_form` the ONE rewriter for the three write spellings of a magic-lvalue window; `_modifier_ret_form` the ONE spelling of the untaken-modifier value); rebased on 2065b89; COLD gate re-run on main **191 / 6515**, only the 13 pclxs xs rows.  Fable probes: #962 24 rows SAME, #920 19 rows SAME, #960(b) 18 rows SAME except three PRE-EXISTING rows (identical on 6e6f191), filed: **#966** (`pos($h{k})` reads undef right after `$h{k} =~ /x/g` for every element kind, though the `/g` LOOP itself terminates like perl — two keys for one element), **#967** (the VALUE of `substr($u,0,1) = "V"` is the OLD text; perl's is the lvalue, "V"; sibling of #971), and one more spelling appended to **#936** (4-arg `substr("lit",…)` on a LITERAL is silent).
@@ -31,6 +73,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **The re/charset.t snapshot row**: AU spliced 2776/2776 → 2776/2775 after measuring both trees in parallel AND serial (four runs agree); that supersedes part 1's "untouched" — the churn file now reads 2775 consistently.
 - **USER RULING (2026-09-01): the RETURN PROTOCOL is a BIG change and is done ONLY AFTER round 20 is merged, as its own task** — #964 (an ordinary sub returns the BOX of a returned scalar variable, so foreach/map/grep/`\f()`/an `@_`-writer write into the caller's variable; perl copies unless `:lvalue`) together with #930's scalar half (`:lvalue` subs) as ONE switch at the return site under ONE owner of the return family, never bundled with a perf slot.  Found by a USER question; the suite HAD the row (t/op/sub.t "result of shift is copied when returned") and it was disarmed twice — commented into `ok(1,'SKIP')` in the sweep copy with a wrong rationale, and inside a blessed DIFF in the companion — while the Pl/t guard named for it tests a sub-local `my` and asserts only "ok".  **#965**: 132 such inline `ok(1,'SKIP')` rows remain in perl-tests (runbook §5's unfinished migration) — a filler in chunks, sub.t first with #964.
 - Record: session-log §463f (part 2).
+
 
 ## s463au (2026-09-01, Opus agent AU, round 20) — the empty list is a VALUE, and a magic-lvalue window's TARGET is a place in all three write spellings
 
@@ -110,6 +153,7 @@ those two files and the live plan doc directly -- no new review-doc families.*
 - **Two tooling lessons, recorded in memory**: `pkill -f`/`pgrep -f` kills the calling shell when the SAME command line mentions the pattern's text anywhere else (a heredoc, a `setsid bash -c` string) — long chains go in a SCRIPT FILE; and the Agent tool's worktree isolation branches from the SESSION-START commit, not main's HEAD at launch — every agent is told its real base and to rebase first.
 - Bars on 6e6f191: gate COLD 191 files / 6498 rows (only the 13 pclxs xs rows; `~/pclxs` is ABI 8 vs pin 6, standing); sweep TOTAL 18343 (+0) GATE clean, drops 5 = census, 4 UNSTABLE = crash-file noise; companion `--dir re --quick` 80 files, the two movers above; bench (quiet, K=3) strcat 2.21×, ovlsub 3.36× (PCL 0.129 s, under the record), regexg 2.21× — held.
 - Round 20: AU = #962(=#459) → #960 → #920 → #938(3); AV = #950 measured at K=5 + speed-3 note harvest + core compile time → §0.2f bench re-tabulation → worst lagging runtime row, profile-then-fix.  Ownership and IDs in memory (`project_s421_opus_agents_inflight`).  Filed: #963 (round-21 correctness pool).
+
 
 ## s462at (2026-09-01, Opus, round 19 correctness slot) — #939 + #934 + #940 SHIPPED; #936 sized and declined
 
