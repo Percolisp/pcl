@@ -443,6 +443,14 @@ symref          0.0228     0.0324     1.42x   0.0310..0.0339   1.02x  s461aq (qu
 regexg          0.3706     0.8059     2.17x   0.7847..0.8256   2.19x  §0.2e
 ```
 
+**Re-verified after the rebase** onto main `aafb02c` (the sibling agent's
+emission work, gen v2-581), one best-of-5 run at 1-min load **1.24**, the
+quietest the box got all session: every row within noise of the table above,
+and several PCL absolutes at or just under their medians — `intloop=` 0.0177,
+`cfor` 0.0291, `arrhash` 0.0800, `slices` 0.2052, `listcopy` 0.4599 (0.90×),
+`symref` 0.0316, `regexg` 0.7754.  Nothing in that merge moves this board.
+
+
 **Ten of nineteen rows beat perl.**  What moved each, and who owns what is
 left:
 
