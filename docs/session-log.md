@@ -4,6 +4,193 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 463av (2026-09-01, Opus agent AV, round 20 PERF slot) — the runtime compiles at (speed 3) (#950), the extension-stub self-call that policy exposed (#980), p-array-fill reserves capacity (#981), and the bench table is re-tabulated (§0.2f)
+
+Three tasks, all three delivered; six filed.  Not pushed, not merged; base
+`6e6f191`, rebased onto main `aafb02c` (the sibling agent AU's merge) before the
+final gate.  **Runtime-only — emission is byte-untouched (nothing under `Pl/`
+changed), so no generation bump, no artifact regeneration, no corpus-diff
+move.**
+
+**#950 — the runtime's own optimize policy, and the instrument it needed.**
+The only `(declaim (optimize …))` in `cl/pcl-runtime.lisp` was at the END of
+the file, and a declaim at the end governs what is compiled AFTER it — the
+generated program, not the runtime's own 21k lines.  So the code every PCL
+program spends its time in was built at SBCL's default speed 1 while the
+program calling it was built at speed 2.
+
+The measurement needed a tool: `tools/bench-exec.pl` gained a **runtime A/B
+mode** (`BENCH_RT_B=<runtime>` builds a second core and times both PCL sides
+**interleaved** — every series gets its round-r sample before any series gets
+round-(r+1), so a load drift during a row hits all series alike instead of
+landing wholly on whichever ran last).  The single-core path is interleaved
+now too.  Six best-of-5 runs; **the sign of all six samples, not the median, is
+what makes a row a verdict**:
+
+| row | median B/A | samples |
+|---|---:|---|
+| `feread` | **−7.2 %** | −3.4 −11.0 −12.9 −6.1 −6.7 −7.6 |
+| `arrhash` | −5.2 % | −4.1 −5.2 −6.3 +1.7 −5.2 −5.8 |
+| `cfor` | −5.0 % | −6.6 −5.4 −4.6 −5.5 +2.2 −2.1 |
+| `ovlsub` | −3.9 % | −1.5 −10.0 −7.6 −1.2 −3.4 −4.4 |
+| `feread2` | −2.6 % | all six negative |
+| `arrfill` | −2.2 % | all six negative |
+| `regexg` −2.1 %, `slices` −1.5 %, `strcat` −1.4 % | | five of six each |
+
+The counting-loop, recursion, `sliceasgn`, `symref` and pack rows are
+sign-mixed within noise.  **No row is consistently slower**, and **s462as's
+gcdrec suspicion is killed by the data** — +11.8 % on the K=3 loaded run,
+−1.2 % with mixed signs over six.  Cost, which s462as did not measure: the
+runtime's own compile 3.02 s → **4.11 s (+36 %)**, best-of-3 interleaved, core
+size 46.9 MB either way — paid once per edit of the file (cores are
+content-keyed and cached), with a PROGRAM's compile time untouched.
+
+**#980 — and the policy is what found it.**  At (speed 3) `pack("N",1)` dies
+`p-pack: cl/pcl-pack.lisp not found in …/cl/` on a file that is sitting there;
+it is why two bench rows read BROKEN rather than slow.  A self-loading stub
+gets exactly ONE chance — `p-load-extension` answers T for the load that
+happened and NIL for every call after — so the delegation must reach the
+definition the extension file installs OVER the stub.  SBCL turns a `defun`'s
+reference to its own name into a LOCAL call whenever `(> speed debug)`, so
+`(apply #'p-pack …)` inside `p-pack` compiles to "jump back to the top of this
+same code" and the redefinition can never displace it.  **The other spelling
+was already right**: `%pcl-def-ext-stub` (mro's seven entry points, warnings,
+xs) delegates through `SYMBOL-FUNCTION`, which SBCL cannot fold away.  Two
+spellings of one mechanism, and the odd ones out were hand-written **because
+the macro was defined LOWER IN THE FILE than pack/unpack** — the macro moves up
+and owns all of them (rule 11).
+
+Measured, not assumed, before shipping the declaim: **no other runtime function
+is redefined by a loaded artifact** (the four artifacts' `defun`s diffed
+against the runtime's), and **generated user code is unaffected** — it already
+compiles at speed 2 / debug 0, and a perl sub that recurses and is then
+redefined through a glob still reaches the new body (probed vs 5.40.3).
+
+The guard is a SOURCE invariant, not a behavioural row, and that is the point:
+the bug is invisible at the policy the tree compiles at, so a behavioural row
+would pass on the broken spelling.  `Pl/t/extension-preamble-01.t` 5 → 9 rows
+(`%pcl-def-ext-stub` defined once; `p-load-extension` CALLED from exactly one
+place; p-pack and p-unpack are stubs) — three fail on a `6e6f191` base, the
+fourth is the forward-looking "one mechanism" invariant and says so.
+
+**The note harvest #950 asked for: 3179 notes, censused in task #983** with its
+reproduction recipe — and the recipe is a finding in itself: **`load` of a
+source file emits no optimization notes at all**, so the harvest has to be a
+`compile-file` inside an image that has already loaded the runtime (the file
+sets `:invert` and `require`s cl-ppcre mid-way, so a cold `compile-file` reads
+garbage).  **248 of the 3179 were ONE missing declaration** — every
+`(funcall (p-magic-cell-getter v))`, inlined into `unbox`/`box-set`; the slots
+are now `:type function` with erroring defaults (rule 12), all eleven
+construction sites already passed functions.  Cold path, no speed change, 8 %
+of the census gone.  The reading that matters is the negative one: **the hot
+element and loop paths are NOT at the top** — `p-aref`, `(setf p-aref)`,
+`%p-vpush`, `p-+` carry a handful of notes each and every one sits in the
+GENERAL fallback arm, because s458ak and #923 already open-coded the fast arms.
+The largest remaining concentration is 239 notes on the regex capture path
+(`set-capture-groups` 162, `set-match-vars` 35, `do-regex-match` 42), left for
+a session that owns that family and profiles it.
+
+**#981 — the worst lagging row, profiled, and the honest answer about what a
+profile is worth.**  `slices` (3.05×) is the highest `pcl/perl` ratio once
+pack/packunpk (#74), `ovlsub` (#582) and `regexg` (#71) are excluded.  sb-sprof
+(N = 1.5e6, 1492 samples) splits it three ways: the hash machinery ~21 %
+(`gethash/equal` 20.6 % total with sxhash-string, `string=*` and `equal` under
+it), key stringification ~9 % (**#982**), and **vector growth 16.1 %**
+(`vector-push-extend` → `extend-vector` 11.8 % → `reallocate-vector-with-widetag`
+8.8 %).  The growth was real and its cause exact: `my @c = @src` allocates a
+zero-capacity destination and re-discovers the length one reallocation at a
+time, while `p-aslice`, `p-hslice` and the RHS snapshot had all been sized
+already (s458ak).  Fix: one lower-bound predicate `%p-fill-lower-bound` and one
+reservation, guarded by `adjustable-array-p` because `adjust-array` on a
+non-adjustable array returns a FRESH array and would silently drop the whole
+assignment.
+
+**And then the profile's 16 % was not the prize.**  `adjust-array` allocates
+and copies too, so re-profiling shows it at 11.1 % where the growth was, and
+six focused A/B samples give `slices` +0.9 % and `sliceasgn` +1.6 % and nothing
+elsewhere.  Had that been the whole story this would have been a
+recommend-decline like #883 and #924.  It is not: **the bench was the wrong
+instrument**.  Both slice rows assign five and ten elements, too few for the
+growth to show against their hash traffic.  On an ordinary whole-array copy,
+interleaved best-of-5, startup subtracted:
+
+| shape | with the reservation | without | |
+|---|---:|---:|---|
+| `my @c = @src`, 50 elements × 1e6 | 0.610 s | 0.735 s | **+20.4 %** |
+| same, 2000 elements × 2e5 | 3.884 s | 4.281 s | +10.2 % (repeat +12.4 %) |
+
+So the fix is worth 10–20 % of the commonest list assignment there is, and the
+reason nobody had seen it is that **no bench row covered the shape**.  One is
+added — `listcopy` (50 elements × 1e6) — and PCL reads **0.89×** on it.
+
+**§0.2f — the owed re-tabulation**, the first full one since §0.2e (s459am).
+Rounds 16–19 moved five rows that were recorded only in session-log sections;
+they are now in the table with the task that moved each.  See
+`docs/faster-codegen-suggestions.md` §0.2f for the numbers, the load under
+which each was taken, and the reading rule that the machine was shared.
+
+**Bars.**  Full sweep `--jobs 4`: **GATE clean, TOTAL passing 18343 (+0)**,
+drops 5 = census, 0 new / 0 fixed; the 4 UNSTABLE and 14 DID-NOT-RUN rows are
+the runner's own crash-file noise on the same PARTIAL files as the round-19
+record.  No baseline row edited.  Guards green under `PCL_RAW_ELEMS=0` (the
+all-boxed A/B world); `Pl/t/passes-01.t` (PCL_OPT=none equivalence) is in the
+green gate.  Emission byte-untouched, so no corpus-diff move, no generation
+bump, no artifact regeneration.  Gate COLD on a fresh core, on the REBASED tree
+(main `aafb02c`, the sibling's merge, gen v2-581): **191 files / 6521 rows**,
+and the only failures are the 13 known pclxs xs rows (`PCLXS_DIR` was set, so
+the three xs files produced their full 14; every other file `ok`).
+
+**Companion.**  A global policy change has no natural dir, so all three of the
+change's own classes ran, and then `op/` and `re/` ran AGAIN on the rebased
+tree, because the rebase brings the sibling agent's emission work into this one
+and the combination is a tree neither agent had measured.
+
+On the REBASED tree (main `aafb02c` + this branch), against
+`baselines/perl-suite-run.tsv`: **`op/` 219 files ZERO movers, `re/` 70 files ZERO movers.**
+
+On the pre-rebase tree (base `6e6f191`): `op/` 219 files **ZERO movers**;
+`io/` 44 files **one** — `io/crlf_through.t`, which the snapshot's own header
+documents as losing rows when the machine is busy because it pipes through a
+`which_perl` child (snapshot 942, this run 912, and the serial re-run 648, i.e.
+the *lower* of the two — contention, not a mover); `re/` 70 files **two**,
+`re/charset.t` 2776/2776 → 2776/2775 and `re/subst.t` 200/72 → 205/67, both
+gains and both stable across a parallel and a serial run.
+
+Those two were attributed the cheapest way there is: the base runtime
+(`6e6f191`) swapped in over this tree's — emission is byte-identical between
+the two, so the runtime is the only variable — gives **exactly the same
+numbers**.  So they are round 19's, not this session's.  **And they are already
+blessed**: s463f had run that same tail (the one AT's stop order cut short),
+attributed `re/subst.t` to #939 and filed #963 out of it, and left
+`re/charset.t` alone as the s455b churn file.  This session's measurement is
+therefore an independent reproduction of both numbers rather than a new
+finding — which is the useful thing to know about a file that has churned
+before.
+
+**Filed:** #986 (UNSETTLED and worth a quiet box: `intloop+=` and `cfor` sit
+~16-20 % above their §0.2d absolutes while `intloop=` matches exactly; five A/B
+runs against round 18's runtime show round 18 SLOWER, so rounds 18/19 are ruled
+out and the cause is older or is this machine — ten minutes and the recipe is in
+the task), #982 (a numeric hash key read from an ARRAY re-stringifies on every
+use — raw element storage left no SV to cache the string half in; carries the
+sharing hazard that has to be answered before a small-integer string table),
+#983 (the note census with its residue and owners), #984 (a deleted element's
+HOLE survives a whole-array copy, where perl flattens it to an ordinary
+existing undef — pre-existing), #985 (`%p-flatten-slice-args` builds a
+throwaway list on every slice, ~5 % of the `slices` row; the fix is a
+representation change across six callers, not a fast arm in two).
+
+**Asks for Fable.**  (1) The `(speed 3)` declaim is a global change to 21k
+lines whose one measured side effect was a hard break that is now fixed and
+guarded; the numbers are 1.4–7.2 % on nine rows and nothing on the others.
+Worth keeping, or is the blast radius wrong for the size of the prize?  (2)
+`tools/bench-exec.pl` now interleaves its timing series in BOTH modes — a
+method change to the project's instrument, taken because the machine is shared;
+please confirm that is the standing form.  (3) #981's guard rows are coverage,
+not inverse guards, because capacity is invisible to Perl — is that the right
+bar for a purely representational perf change, or should such a change carry no
+new rows at all?
+
 ## Session 463f, part 2 (2026-09-01, Fable) — AU merge-reviewed and MERGED (`aafb02c`, gen v2-581); the return protocol sized from a USER question and SCHEDULED after round 20; #963–#967 filed
 
 **AU (s463au) review.**  The diff first, as with AT: `cl/pcl-runtime.lisp`'s
@@ -69,6 +256,7 @@ Agent tool's worktree isolation branches from the SESSION-START commit, not
 main's HEAD (both round-20 agents started three commits behind and were
 messaged to rebase first); a Fable probe can be invalid Perl — run the perl
 side alone and read its stderr before calling a DIFF a finding.
+
 
 ## Session 463au (2026-09-01, Opus, agent AU — round 20 CORRECTNESS slot) — the empty list is a VALUE; a magic-lvalue window's TARGET is a place in all three write spellings; an untaken modifier answers its CONDITION
 
