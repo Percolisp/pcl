@@ -21,6 +21,26 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s461f (2026-09-01, Fable) — ROUND 18 MERGED (AQ `72930b7` + AR `b583f77` + review fix `5fc8cfd`, gen v2-540); the AR asks ruled; #940 filed
+
+- **The #911 flip STANDS** though one audited arrival is a shape perl accepts
+  (`substr(EXPR,…) =~ s///`, → #939): no passing row lost, silent wrong became
+  loud; reverting would restore warn-and-continue on `$1`/`$&` writes.
+- **The re/pat.t 0/0 → 231/138 snapshot splice STAYS** despite being a heap
+  accident (#935): a file producing no rows hides regressions (#176); a
+  recorded row makes a future heap-death loud and attributable.
+- **#934 stays unshipped** (perl's `++` refusal without `fallback => 1`): a
+  new death needs its own evidence, never a ride-along.  Ratified.
+- **#940 (Fable review probe): `ok /q*/, LIST` lexes the pattern as the `q*…*`
+  QUOTE OPERATOR and RAW PERL TEXT reaches the emitted CL** — the WORD-/
+  repair declines because the closing `/` sits inside the manufactured quote
+  token; pre-existing on main, probed both trees; loud only by the accident of
+  a comma.  Task #940 has the repro + the two-bug split (repair can't see it;
+  the emitter must never print source text verbatim).
+- Batch legs: sweep 18342 (+0) clean; census 16/55 in-repo = blessing; bench
+  won rows held, symref 1.37x (#812); gen v2-540 (AR no emission move).
+  Record: session-log §461f.
+
 ## s461ar (2026-09-01, Opus agent AR, round 18) — a REPAIR that reads a damaged region must run AFTER the repair that heals it; `++` autogenerates and keeps the OBJECT; the read-only verdict for s///+tr/// is a RUN-time one
 
 - **A PPI repair whose damage is UNBOUNDED runs BEFORE every repair that reads
