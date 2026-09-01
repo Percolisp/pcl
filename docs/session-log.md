@@ -4,6 +4,116 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 462as (2026-09-01, Opus agent AS, round 19) — the list-assign source vector is SIZED (#923, OO entry −15 %, swap −30 %), every TRUNCATE in the integer stringifier was a GENERIC call (#922), and #77 half (b) is sized to 3 files in 535 (#924)
+
+Three tasks: two shipped, one measured and recommended DECLINED.  Not pushed,
+not merged; base `4c354bc`, which main is still at, so the merge is already a
+fast-forward.  Runtime-only — emission is byte-untouched, so no generation
+bump and no artifact regeneration.
+
+**#923 — `%p-flatten-list` sizes its result, and its return TYPE reaches the
+generated program.**  The flattener returned `(make-array 8 :adjustable t
+:fill-pointer 0)`, so every element cost a `vector-push-extend` and every
+`(aref src-vec i)` / `(length src-vec)` in p-list-='s expansion took SBCL's
+hairy-data-vector dispatch.  Isolated, 4e6 three-element cycles: build
+adjustable + read generically 0.145 s, build an exact simple vector + read it
+inline 0.035 s.  Two halves, both existing mechanisms:
+
+  * the SIZED path — SRC a plain element-storage vector (`%p-vec-data`, s458ak)
+    whose every element passes the new `%p-flatten-sized-p` ⇒ the output length
+    IS SRC's, so the result is `(make-array n)`.  Everything else goes to
+    `%p-flatten-list-general`, the old expanding walk, which now pushes with
+    `%p-vpush` and returns a trimmed simple vector;
+  * the `declaim ftype` — the result is ALWAYS a simple vector and says so,
+    which is what carries the fact into the generated program's own compilation
+    unit (verified: no HAIRY-DATA-VECTOR in the compiled call site).
+
+**The classification is a SEPARATE PRE-SCAN, and that is the correctness
+point.**  Deciding element by element and abandoning the half-filled result at
+the first aggregate reads better and is wrong: `%p-assign-snapshot` is not a
+pure read — a TIED element goes through FETCH, a MAGIC one through its getter —
+so the elements already snapshotted run their user code again on the re-walk.
+Built and measured: with that form `my $t; tie $t,'Cnt',7; my ($a,$b,$c) = ($t,
+@arr)` FETCHes TWICE where perl FETCHes once.  The predicate's second conjunct
+(no tie proxy, no magic cell) is NOT what keeps FETCH single — the pre-scan is;
+it is what makes the sized loop provably free of Perl code, which is what
+licenses hoisting the data vector and the length.
+
+A/B against `4c354bc`'s runtime, interleaved, min-of-K, one transpile:
+`oo` (4e6 `my ($self,$x,$r) = @_` method entries) **1.7740 → 1.5003, −15.4 %**;
+`swap` (4e6 `($a,$b) = ($b,$a)`) **0.3609 → 0.2527, −30.0 %**; arrhash −2.1 %,
+packunpk −1.6 %; gcdrec/arrfill/slices/sliceasgn/feread/ovlsub/listasgn5 flat
+within 0.7 %.  **NOT taken** (the task's own first suggestion): trimming the
+adjustable build in every case — measured 0.1790 s against 0.1770 s at k=3, the
+trim costs more than the reads it saves.  Guard `Pl/t/aassign-01.t` 42 → 44,
+inverse-guarded against both rejected forms.
+
+**#922 — measured in both directions the task named; (b) declined, (a)
+shipped.**  Direction (b), a verdict that declines the raw slot when the uses
+are stringy, HAS NO POPULATION: VarAnnotator instrumented at the verdict over
+lib/ + cpan-tests/ + perl-tests/ (~730 files, 1159 proven raw slots) finds 195
+with a numeric family, 16 with any stringify use and **ZERO with a hash-key
+use**.  A verdict narrowing is a decline widening, so its bar is a gate-SET
+scan over both populations — paid for a change that moves no file.  Instrument
+removed, not shipped.
+
+Direction (a) shipped, and the cause was not the missing cache but a TYPE:
+`%p-fixnum-string` computed the magnitude as `(if neg (- n) n)`, whose derived
+type for a fixnum is `(integer 0 4611686018427387904)` — one past
+most-positive-fixnum, because of most-negative-fixnum alone — so **every
+`(truncate x 10)` in both loops was a full generic call, one per digit each
+way**.  Sending that one value to the printer lets the rest be declared: 4e6
+conversions, 7-digit 0.198 → 0.112 s (1.8×), 2-digit 0.081 → 0.057 s (1.4×).  A
+comparison-table digit count was measured and NOT taken (better on long
+numbers, worse on the short ones that dominate).  Integer stringification is on
+every numeric hash key, every `"$n"`, every printed number: numstr **−8.2 %**,
+hashkey −5.1 %, hk4 −4.6 %, slices −4.3 %, ovlsub −2.7 %, sliceasgn −1.2 %; the
+rest flat.  The raw-vs-boxed gap on the hash-key shape narrows from +10.6 % to
++7.4 %; the residue is the box's SV cache, and it scales with the redundant
+hash uses (+31.6 % at four hash operations per value).  200 000 random values
+plus both fixnum limits agree with `write-to-string`; guard
+`Pl/t/misc-fixes-02.t` 123 → 124.
+
+**#924 (#77 half (b)) — SIZED, RECOMMEND DECLINE.**  Stubbing
+`_tw_walk_funcall_args`'s argument class to 'num' is the one-run upper bound.
+Over 535 files (lib/ + cpan-tests/ + perl-tests/): 79 DIFF for EVERY unknown
+callee, and **3 DIFF** when restricted to what the transfer could soundly cover
+— a known user sub with `writes_args` false.  Smaller than half (a)'s 4 of 405,
+and an over-estimate in the wrong direction: the names that move are `$desc`,
+`$expect`, `$result`, `$block`, `$code`, `$data`, `$message` — description
+STRINGS and CODE REFS, which a correct transfer would classify 'str'/'opaque'
+and not move at all.  A hand-built best case does not even flip (the name
+carries a second opaque use besides the argument).  And it is bigger than half
+(a): a parameter is not a NAME until the callee's own `my ($a,$b) = @_` runs,
+and `shift` / `$_[i]` do not name it at all, so the transfer needs a new
+per-position classification through three parameter idioms before it has
+anything to hand the call site.  Numbers and the re-open condition are in #924.
+Confirmed along the way, no bug: a proven raw slot still aliases through `@_`
+(`sub f { $_[0] = 99 } my $q = 1 + 2; f($q)` writes 99, as perl does) — #189's
+`writes_args` is what protects it, and the 'opaque' arg class only ever gated
+the B-regime.
+
+**Bars.**  Gate COLD on a fresh core: **191 files / 6483 rows**, and the only
+failures are the 13 known pclxs xs rows (`PCLXS_DIR` was set, so the three xs
+files produced their full 14; every other file `ok`).  The +3 over the base
+tree is exactly this session's guard rows, both files' plans bumped by hand.
+Full sweep: **GATE clean, TOTAL passing 18342 (+0)**, drops 5 = census, 0 new /
+0 fixed; the 4 UNSTABLE and 14 DID-NOT-RUN rows are the runner's own crash-file
+noise category on the same PARTIAL files as the round-18 record.  Companion
+`op/` + `io/` (263 measured rows) — the dirs a list-assignment and an
+integer-stringification change touch — with **ZERO real movers**: three files
+differ from the snapshot in the parallel pass and all three reproduce the
+snapshot EXACTLY when re-run alone (io/open.t 153/35 → 154/34, io/pvbm.t 21/7
+→ 20/8, io/crlf_through.t 844/0 DIFF → 942/0 OK).  All three are documented
+in the snapshot's own header: open.t's multi-file flip, pvbm.t's known flapper
+(the seventh sighting), and "a file that spawns fresh_perl/runperl children
+loses rows when the machine is busy" — crlf_through.t pipes through a
+which_perl child.  No baseline row edited.  Both guard files also green under
+`PCL_RAW_ELEMS=0` (the
+all-boxed A/B world), and `Pl/t/passes-01.t` (PCL_OPT=none equivalence) is in
+the green gate.  Emission is byte-untouched (nothing under `Pl/` changed), so
+no corpus-diff move, no generation bump, no artifact regeneration.
+
 ## Session 461f (2026-09-01, Fable) — ROUND 18 COMPLETE: the USER-stopped round resumed per the round-4 pattern, AQ + AR reviewed and MERGED; gen v2-540; #940 filed by review probe
 
 The two kept round-18 worktrees were resumed as fresh Opus agents after their

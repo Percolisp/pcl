@@ -21,6 +21,54 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s462as (2026-09-01, Opus agent AS, round 19) — a flattener that SIZES its result; a decline measured to ZERO population; #77 half (b) recommended DECLINED
+
+- **A pass that may ABANDON its work must decide BEFORE it starts (#923).**
+  `%p-flatten-list`'s sized path classifies every source element in a separate
+  pre-scan, not element by element while filling, because `%p-assign-snapshot`
+  is not a pure read: a TIED element goes through FETCH and a MAGIC one through
+  its getter, so a mid-loop bail runs that user code TWICE on the re-walk
+  (measured: `my $t; tie $t,…; my ($a,$b,$c) = ($t, @arr)` FETCHes twice where
+  perl FETCHes once).  Guard `Pl/t/aassign-01.t` 42 → 44, inverse-guarded.
+- **The return type of a runtime helper reaches GENERATED code through a
+  `declaim ftype`, and that is half of #923's win.**  `%p-flatten-list` always
+  returns a SIMPLE-VECTOR and says so, so the `aref`/`length` inside p-list-='s
+  expansion — compiled in the generated program's own compilation unit — are
+  inline instead of SBCL's hairy-data-vector dispatch.
+  Measured: oo method entry −15.4 %, `($a,$b)=($b,$a)` −30.0 %, everything else
+  flat.  **NOT taken**: trimming an adjustable build to a simple vector in every
+  case — the trim costs more than the reads it saves at k=3 (0.1790 vs 0.1770 s
+  per 4e6); the win is not building the adjustable vector at all.
+- **#922 direction (b), the raw-slot verdict declining on stringy uses, is
+  DECLINED ON A POPULATION COUNT: ZERO of 1159 proven raw slots in ~730 files
+  (lib/ + cpan-tests/ + perl-tests/) has a numeric family AND a hash-key use.**
+  A verdict narrowing is a decline widening, so its bar is a gate-SET scan over
+  both populations — paid for a change that moves no file.  Standing shape: a
+  proposed verdict narrowing is priced by instrumenting the verdict and counting
+  the population BEFORE the design.
+- **#922 direction (a) shipped and the cause was a TYPE, not a missing cache**:
+  `(if neg (- n) n)` on a FIXNUM derives `(integer 0 4611686018427387904)` —
+  one past most-positive-fixnum — so every `truncate` in `%p-fixnum-string` was
+  a GENERIC call, one per digit, twice over.  Handling most-negative-fixnum
+  separately lets the rest be declared: 1.8× on a 7-digit number, and integer
+  stringification is on every numeric hash key, every `"$n"`, every printed
+  number (numstr −8.2 %, slices −4.3 %, hashkey −5.1 %).
+- **#77 half (b) (#924) is RECOMMENDED DECLINED, sized not guessed**: stubbing
+  the argument use class to 'num' where the transfer could be sound (a known
+  user sub with `writes_args` false) moves **3 of 535 files** — smaller than
+  half (a)'s 4 of 405 — and the names that move are description STRINGS and
+  CODE REFS, which a correct transfer would classify 'str'/'opaque' and not
+  move at all.  Task #924 has the numbers and the re-open condition.
+- Bars: gate 191 files / 6483 rows with only the 13 known pclxs xs rows
+  failing; full sweep GATE clean, TOTAL passing 18342 (+0), drops 5 = census,
+  0 new / 0 fixed; companion op/ + io/ with ZERO real movers (three parallel
+  differences, all three reproducing the snapshot when re-run ALONE — the
+  #366 rule, and all three already described in the snapshot's own header);
+  both guard files green under
+  `PCL_RAW_ELEMS=0`.  Emission untouched (runtime-only), so no corpus-diff
+  move, no generation bump, no artifact regeneration.  Record: session-log
+  §462as.
+
 ## s461f (2026-09-01, Fable) — ROUND 18 MERGED (AQ `72930b7` + AR `b583f77` + review fix `5fc8cfd`, gen v2-540); the AR asks ruled; #940 filed
 
 - **The #911 flip STANDS** though one audited arrival is a shape perl accepts
