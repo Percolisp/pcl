@@ -1,4 +1,35 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s461ar (Opus agent AR, round 18) — THREE ROWS EDITED BY HAND, each measured
+#   ALONE on both trees (33a71c9 base worktree vs this tree) and each with its
+#   cause; the runner's own #366 serial re-run agrees with the parallel verdict
+#   on all three (re/charset.t also read DIFF in the parallel pass and matches
+#   its snapshot when re-run alone — contention, not a mover).
+#     op/inc.t   C 60/15 -> 62/13 — A GAIN, task #900.  Perl rows 68 and 70,
+#       `i_post(in|de)c/TARGMY on ref`: `my $a = bless {}; my $b = $a++;` must
+#       leave $b holding an object of the same class.  PCL's postfix arm
+#       returned `(unbox PLACE)`, which throws the class away, so `ref $b` was
+#       ''.  %p-incdec-old now hands back a COPY OF THE REFERENCE.
+#     op/substr.t C 347/5, was 347/7 — NOT a gain: TWO FAILING ROWS ARE NO
+#       LONGER PRODUCED, and the pass count is unchanged.  Cause, read out of
+#       the runner's kept artifacts (PCL_SUITE_KEEP): substr.t:892
+#       `substr($#ta, 0, 2) =~ s/\A..\z/23/s;`.  PCL's `=~` hands the s///
+#       write site a raw STRING there instead of the lvalue substr cell, so the
+#       write cannot happen.  It used to `warn "Cannot modify non-boxed value
+#       in s///"` and carry on (the two `is` rows then ran and FAILED, got -1
+#       want 23); task #911 made that site perl's read-only death, so the
+#       top-level form now aborts and the two rows are not emitted.  perl
+#       SUCCEEDS here, so this is a silent wrong traded for a loud one, not a
+#       fix — the real gap is task #939 (an lvalue `substr` as an `=~` target
+#       must bind p-substr-lvalue-cell).
+#     re/pat.t   C 0/0 -> 231/138 — A GAIN OF 231 ROWS, and the attribution is
+#       not what it looks like.  It is NOT task #931 (which removed this file's
+#       census drop): measured, #931 ALONE leaves the file at 0/0, and so does
+#       the base tree.  The file was dying with SBCL "Heap exhausted ... 95.6%
+#       of 1073741824 max" while COMPILING its emitted CL, and this session's
+#       cl/pcl-runtime.lisp edits changed the core's footprint enough to fit.
+#       That is luck, not engineering, and it makes the row FRAGILE — see task
+#       #935, which has the measurement and the options.  Stable over three
+#       runs on this tree; 0/0 on both control trees.
 # s460ap (round 17) — TWO MORE ROWS EDITED BY HAND, both #873 (a write to a
 #   CAPTURE VARIABLE is perl's trappable "Modification of a read-only value
 #   attempted", where PCL silently did nothing):
@@ -1167,7 +1198,7 @@ op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF	0
 # s455b (round 13): op/hexfp.t 110/15 -> 111/14 EDITED BY HAND -- s456ag (tip bisect: old at
 # the AF tip, moved on AG-only), the same single-row gain as perl-tests/hexfp.t row 78.
 op/hexfp.t	125	0	111	14	DIFF		0
-op/inc.t	93	0	60	15	DIFF		0
+op/inc.t	93	0	62	13	DIFF		0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
 op/inccode.t	89	0	13	28	DIFF	aborted-forms:4: The value #<function (lambda (&rest %_args) :in	0
 op/incfilter.t	153	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Filter::Util::Call in @INC	0
@@ -1290,7 +1321,7 @@ op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	53	12	DIFF		0
 op/sub_lval.t	211	0	54	47	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
-op/substr.t	400	0	347	7	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
+op/substr.t	400	0	347	5	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1360,7 +1391,7 @@ re/keep_tabs.t	14	0	14	0	OK		0
 re/no_utf8_pm.t	1	0	1	0	OK		0
 re/opt.t	639	17	0	0	XDIFF	aborted-forms:1: The function re::pl-optimization is undefined. | not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimization, XS::APItest — re::optimization reports perl's regex-COMPILER decisions (minlen/anchored/floating/stclass); cl-ppcre is a different optimizer, so there is no perl answer to report	0
 re/overload.t	87	0	3	0	TIMEOUT	timeout	0
-re/pat.t	1263	4	0	0	DIFF		3
+re/pat.t	1263	4	231	138	DIFF	aborted-forms:1: Failed to match at pat.t line N. 	0
 re/pat_advanced.t	1678	0	951	729	DIFF		0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 # s455 (round 12): re/pat_psycho.t 11/0 DIFF -> 15/0 OK EDITED BY HAND -- s454ac/#680: the

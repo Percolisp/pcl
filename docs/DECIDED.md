@@ -21,6 +21,69 @@ removed with them).  The settled content lives HERE and in
 `docs/session-log.md`; since s440 a review session writes its rulings into
 those two files and the live plan doc directly -- no new review-doc families.*
 
+## s461ar (2026-09-01, Opus agent AR, round 18) — a REPAIR that reads a damaged region must run AFTER the repair that heals it; `++` autogenerates and keeps the OBJECT; the read-only verdict for s///+tr/// is a RUN-time one
+
+- **A PPI repair whose damage is UNBOUNDED runs BEFORE every repair that reads
+  the damaged region, and it runs TO FIXPOINT (#931).**  The #351 `WORD /`
+  derail is the second unbounded one after `_repair_glob_pattern_cascade`:
+  PPI passes the closing `/` and is back in term position, so the NEXT `/`
+  opens a `Regexp::Match` that swallows every statement between them.  Two
+  consequences, and both were bugs.  (a) the second `ok /…/` is not a Word
+  token until the first pass's REPARSE, so one pass repairs the first of a run
+  and drops the rest; `_repair_word_match` is now the same
+  driver + `_pass` shape the glob cascade got in s449.  (b) fixing (a) exposed
+  the ORDER: `_repair_glob_multiply` (#354) ran first, met the `*b` of
+  `ok /a*b?c*/` as a typeglob Symbol — a token PPI MANUFACTURED out of pattern
+  text — and rewrote it to `* b`, splicing a space into a regex.  Silent wrong.
+  `docs/ppi-upstream-bugs.md` §11b has the token dump; guard row in
+  `Pl/t/transpile-test-10.t` asserts the two `ok` ANSWERS, not the absent drop
+  — **a drop-only guard would have passed on (b)**.  Census 18/58 → **17/57**.
+- **`++`/`--`/`+=`/`-=` on an overloaded object AUTOGENERATE from the class's
+  `+`/`-` handler and keep the OBJECT (#900).**  perl's rule: the class's own
+  `++`/`--` first, else `+`/`-` with a 1, and whatever the handler returns is
+  what the place receives.  PCL numified, so the class was gone after the first
+  increment, on BOTH emission paths.  One helper `%p-incdec-overload` serves
+  `perl-increment` and the NEW `perl-decrement` (which also collapses the four
+  copies of `(1- (to-number PLACE))` in `p-pre--`/`p-post--`), and
+  `%compound-arith-form` builds `+=`/`-=`'s new value.  **POSTFIX hands back a
+  COPY OF THE REFERENCE** (`%p-incdec-old`): unboxing it dropped the class, so
+  `my $r = $obj++` came back a bare hash.  **The RAW twin needs the guard too**
+  — `my $s = 0; $s += $obj` emits `p-incf-raw` and the slot then HOLDS the
+  object.  Guard `Pl/t/raw-verdict-01.t` (+2, both paths).  perl's *refusal*
+  half (`fallback => 0`, and no-handler-at-all) is **NOT** shipped and is
+  measured in task **#934**.
+- **A `+=` guard asks the PROGRAM-level question first: `*p-any-overload-registered*`
+  (#900).**  Five spellings were timed INSIDE the runtime core, not through the
+  bench harness (a sibling agent had four cores busy and `perl(s)` swung 2.5x):
+  delegating to `p-+` cost the boxed `+=` shape +49 %, a per-operand blessed
+  test cost it +15 %, and putting the numeric test first cost the raw loop
+  nothing but the boxed shape +23–49 %.  A single special-variable read, then
+  the blessed test, then the old arithmetic: raw −4 %, boxed +5 %.  **When the
+  bench harness cannot settle a runtime-form question, write the two loop
+  bodies out and time them in the core.**
+- **The read-only verdict for `s///` and `tr///` is a RUN-TIME one, at the two
+  runtime write sites (#911, #873's third slot).**  perl decides per operation
+  whether a WRITE would happen: `tr` with an empty or identical replacement, any
+  `/r`, and a no-match `s///` are all legal on a read-only value; the rest die.
+  Both sites already fired exactly there and only `warn`ed; they now call
+  `%p-readonly-modification`, so `$1 =~ s/b/z/` and `$& =~ tr/b/B/` die perl's
+  own text.  **A COMPILE-time refusal was written in s460ap and REVERTED** for
+  moving four blessed `tr.t` rows — do not retry it.  Guard: the 12-row table
+  in `Pl/t/caret-vars-01.t`.  Residue in **#936** (`$+`, a foreach over a
+  literal, sort's `$a` — they never reach the sites; the fix is a read-only
+  MARK on the box, shared with #873 and `%p-array-readonly-p`).
+- **`t/op/sub_lval.t`'s 33 lvalue drops stay LOUD, now with numbers (#930).**
+  Measured 8-shape table: PCL's box model already writes through
+  `sub f :lvalue { $x }` with no lvalue support at all, and that is the ONE
+  shape of eight that works — `return $x`, `$_[0]`, `${\shift}`, `substr`,
+  `vec`, `$h{k}` and `$a[0]` all lose the identity.  A half-fix would convert
+  33 loud drops into 33 SILENT WRONGS.
+- Filed from probes, all PRE-EXISTING: **#932** (capture variables are not
+  dynamically scoped — perl RESTORES `$1` on block/sub exit; this is why the
+  `Pl/t/caret-vars-01.t` helpers re-match at the top), **#933**
+  (`${^SAFE_LOCALES}` undef sends `t/loc_tools.pl` into `require threads`),
+  **#935** (`t/re/pat.t` cannot COMPILE at the runners' 1 GB SBCL heap).
+
 ## s460f (2026-09-01, Fable) — USER priority: speed + correctness FIRST; the JS prototype WAITS on a quiet IR; E2c′ not shipped
 
 - **USER (2026-09-01): "speed optimizations and correctness fixes first, for a

@@ -54,7 +54,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 8;
+plan tests => 9;
 
 sub write_pl {
     my ($code) = @_;
@@ -154,10 +154,14 @@ PL
 # a separate gap, and the reason index/substr strip the " at FILE line N" tail
 # here).
 #
-# NOT covered, and measured (task #911): `$1 =~ s///` and `$1 =~ tr///`.  perl
-# decides those at RUN time — a no-match s///, any /r, and a tr that cannot
-# change its target are all "no error" — so the verdict belongs at the
-# runtime's two write sites, which today only warn.
+# The THIRD write slot (task #911, closed s461ar) is the one the compiler could
+# never own: `$1 =~ s///` and `$1 =~ tr///`.  perl decides those at RUN time —
+# a no-match s///, any /r, and a tr that cannot change its target are all "no
+# error" — so a compile-time refusal was written in s460ap and REVERTED for
+# moving four blessed tr.t rows.  The verdict lives at the runtime's two write
+# sites instead, and each already fired exactly when a write was needed; they
+# warned and carried on where perl croaks.  The 12-row table below is that
+# boundary, probed against 5.40.3.
 
 both_agree(<<'PL', '#873: writing a capture is perl\'s read-only death, in every slot that dies');
 sub t { my ($n,$c)=@_;
@@ -186,4 +190,30 @@ my $s = "abc"; $s =~ s/a/X/;     print "subst=$s\n";
 my $h2 = {}; $h2->{1} = "one";   print "hashkey=$h2->{1}\n";
 $0 = "argv0";                    print "dollar0=ok\n";
 my $c = "miss"; if ("zz" =~ /(z)/) { $c = $1 } print "loop=$c\n";
+PL
+
+# #911: the RUN-TIME half of the read-only rule.  Twelve cases, and the split
+# is not "s/// dies, tr/// does not": it is whether THIS operation would write.
+# tr with an empty or identical replacement only counts; /r builds a copy; a
+# no-match s/// leaves the target alone — perl allows all of those on a
+# read-only value and refuses the rest.  $& is in the table too: it is the same
+# read-only family and reaches the same two sites.
+both_agree(<<'PL', '#911: $1/$& =~ s/// and tr/// die exactly where a WRITE would happen');
+sub t { my ($n,$c)=@_;
+        'abcdef' =~ /(bcd)/;
+        my $r = eval { $c->(); 1 }; my $e = $@;
+        my $i = index($e, " at "); $e = substr($e,0,$i) if $i >= 0;
+        print "$n: ", ($r ? "no error" : $e), "\n" }
+t('1 tr count',      sub { $1 =~ tr/abcd// });
+t('2 tr identical',  sub { $1 =~ tr/abcd/abcd/ });
+t('3 tr /r',         sub { $1 =~ tr/a-z/A-Z/r });
+t('4 tr modifies',   sub { $1 =~ tr/a-z/A-Z/ });
+t('5 tr /d',         sub { $1 =~ tr/a-z//d });
+t('6 tr short repl', sub { $1 =~ tr/abcd/ab/ });
+t('7 s matches',     sub { $1 =~ s/b/z/ });
+t('8 s no match',    sub { $1 =~ s/zzz/q/ });
+t('9 s /r',          sub { $1 =~ s/b/z/r });
+t('10 m read',       sub { $1 =~ m/b/ });
+t('11 amp modifies', sub { $& =~ s/b/B/ });
+t('12 amp tr',       sub { $& =~ tr/b/B/ });
 PL

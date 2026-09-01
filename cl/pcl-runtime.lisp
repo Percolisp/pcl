@@ -940,6 +940,18 @@
 (defvar *p-overload-table* (make-hash-table :test 'equal)
   "use overload registry: (cons pkg-name op-string) -> handler")
 
+(defvar *p-any-overload-registered* nil
+  "True once ANY `use overload` handler has been registered, anywhere.  The
+   PROGRAM-level answer to `can an operator dispatch at all?`, and a single
+   memory load — which is why the `+=`/`-=` guard asks it before it asks
+   anything about its operands (see %compound-arith-form, where the per-operand
+   spelling cost a hot loop 15 %).  It is one-way on purpose: overload::unimport
+   leaves it set, because a conservative T only costs two struct reads on a
+   path that was already going to look.
+   *p-overload-table*'s COUNT would answer the same question, but
+   hash-table-count is an out-of-line call — the very measurement in
+   %p-no-overload-possible-p's comment.")
+
 ;;; use overload — fallback flags per package.
 ;;; :undef = default (try stringify/numify), t = autogenerate, :no = die on undef op.
 (defvar *p-overload-fallback* (make-hash-table :test 'equal)
@@ -2647,7 +2659,8 @@
                                     (t t))))
                            (t t)))
                    ;; use overload operator handler registration
-                   (setf (gethash (cons pkg op-str) *p-overload-table*) fn))))))
+                   (setf *p-any-overload-registered* t
+                         (gethash (cons pkg op-str) *p-overload-table*) fn))))))
 
 ;;; overload::import / overload::unimport — the runtime entry points behind
 ;;; `overload->import(...)` and modules that call them directly (e.g.
@@ -6517,17 +6530,89 @@ per element."
        ,doc
        (list 'setf var (let ((cur var)) ,@new-value)))))
 
+(defun %p-compound-+-slow (c d)
+  "`+=`'s new value when an operand IS a blessed box: perl's `+` overload if the
+   class has one (perl autogenerates `+=` from it), else the numeric coercion.
+   OUT OF LINE on purpose — see %compound-arith-form."
+  (p-+ c d))
+
+(defun %p-compound---slow (c d)
+  "`-=`'s new value, `%p-compound-+-slow`'s twin."
+  (p-- c d))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %compound-arith-form (slow-fn cl-op cur delta)
+    "Build the new-value form for `+=`/`-=`: the same arithmetic as ever, plus
+     perl's OVERLOAD dispatch when an operand carries one (task #900 — perl
+     autogenerates `+=` from a `+` handler and keeps the OBJECT; PCL numified,
+     so the class was gone after the first `$obj += 1`).
+
+     THE GUARD'S SHAPE WAS MEASURED, and every plausible spelling was WRONG
+     before this one.  The bench harness could not settle it — a sibling agent
+     had four cores busy and `perl(s)` itself swung 2.5x between runs — so the
+     five candidates were timed INSIDE the runtime core instead, the two loop
+     bodies written out by hand and run best-of-5, three rounds, against the
+     form they replace (`(CL-OP (to-number cur) (to-number delta))`).  `cfor` is
+     raw+raw (`$i++`), `fe` is raw+BOXED (`$s += $x` over a mixed foreach list,
+     which is what the feread2 row does):
+
+                                                    cfor        fe
+       the form being replaced                     0.0280     0.0500
+       (a) delegate to p-+ outright                             +49 %
+       (b) blessed test inline, arithmetic inline   -4 %        +15 %
+       (c) numberp test first, then (b)             -3 %        +23 %
+       (d) as (c) but slow half out of line          0 %        +49 %
+       (e) THIS: a global has-any-overload flag,
+           then the blessed test, then (b)          -4 %         +5 %
+
+     (a) and (d) lose because a BOXED operand misses the numeric test and pays
+     an out-of-line call the old form did not; (b) and (c) lose because a hot
+     loop pays three struct reads per iteration to learn what the whole PROGRAM
+     could have answered once.  (e) asks the program-level question first with a
+     single special-variable read: *p-any-overload-registered* is NIL in every
+     program that never says `use overload`, and then this is the old form plus
+     one memory load.
+
+     THE RAW TWIN NEEDS THE GUARD TOO, and that was measured rather than
+     assumed: `my $s = 0; $s += $obj;` emits `(p-incf-raw $s $o)` with an
+     OVERLOADED delta, and the slot then HOLDS the object — so neither operand
+     of a raw `+=` is provably a number, and leaving the raw twin numeric-only
+     would be a silent wrong (perl answers P(7); numifying answers 7).
+
+     CUR and DELTA are FORMS and each is evaluated ONCE (the boxed macro passes
+     the place form itself for an accessor place)."
+    (let* ((c (gensym "CUR"))
+           (d (gensym "DELTA"))
+           ;; `++`/`--` hand this builder the LITERAL 1: bind nothing and test
+           ;; nothing on that side (`(p-box-p 1)` would fold anyway, but the
+           ;; binding would not).
+           (constp (numberp delta))
+           (dref (if constp delta d))
+           (blessed (if constp
+                        `(and (p-box-p ,c) (p-box-class ,c))
+                        `(or (and (p-box-p ,c) (p-box-class ,c))
+                             (and (p-box-p ,dref) (p-box-class ,dref)))))
+           (form `(if (and *p-any-overload-registered* ,blessed)
+                      (,slow-fn ,c ,dref)
+                      (,cl-op (to-number ,c) (to-number ,dref)))))
+      (if constp
+          `(let ((,c ,cur)) ,form)
+          `(let ((,c ,cur) (,d ,delta)) ,form)))))
+
 (%define-compound-pair p-incf p-incf-raw (&optional (delta 1))
                        "Perl += - works on boxed values, hash/array elements, and derefs.
    Coerce the current value through to-number BEFORE adding: an absent key/slot
    reads as *p-undef*, which raw (+ …) cannot handle — Perl treats it as 0.
+   A BLESSED operand goes through p-+ instead, for the `+` overload perl
+   autogenerates `+=` from — see %compound-arith-form.
    PLACE is evaluated once (see %store-back-form)."
-                       `(+ (to-number ,cur) (to-number ,delta)))
+                       (%compound-arith-form '%p-compound-+-slow '+ cur delta))
 
 (%define-compound-pair p-decf p-decf-raw (&optional (delta 1))
                        "Perl -= - works on boxed values, hash/array elements, and derefs.
-   PLACE is evaluated once (see %store-back-form)."
-                       `(- (to-number ,cur) (to-number ,delta)))
+   A BLESSED operand goes through p--, for the `-` overload — see
+   %compound-arith-form.  PLACE is evaluated once (see %store-back-form)."
+                       (%compound-arith-form '%p-compound---slow '- cur delta))
 
 (defun magical-string-increment (s)
   "Perl's magical string increment: 'a0' -> 'a1', 'Az' -> 'Ba', 'zz' -> 'aaa'"
@@ -6573,8 +6658,46 @@ per element."
                      chars)
         chars)))
 
+(defun %p-incdec-overload (val op-str gen-op)
+  "perl's ++/-- on an OVERLOADED object, as TWO values: the new value, and
+   whether a handler applied at all (a handler may legally return undef, which
+   must not read as `no handler`).
+
+   perl asks the class's OWN `++`/`--` handler first and, failing that,
+   AUTOGENERATES the operator from `+`/`-` with a 1 — keeping whatever that
+   returns, which is normally another OBJECT.  That is the whole point of the
+   feature and what PCL used to lose: it numified, so `$y++` on an overloaded
+   object left a plain number behind and the class was gone after the first
+   increment (task #900, probed 5.40.3).
+
+   NOT implemented here, deliberately, and measured (task #933): perl also DIES
+   `Operation \"++\": no method found, argument in overloaded package C` when
+   neither handler exists and the class does not say `fallback => 1` — and it
+   dies even when `+` IS overloaded if the class says `fallback => 0`.  PCL
+   ignores the fallback flag entirely (it is recorded in *p-overload-fallback*
+   and read nowhere), so it keeps numifying there, which is what it did before."
+  ;; The program-level question first — one memory load, and NIL in every
+  ;; program that never says `use overload`; %p-no-overload-possible-p's own
+  ;; last test is an out-of-line hash-table-count.
+  (if (or (not *p-any-overload-registered*) (%p-no-overload-possible-p val))
+      (values nil nil)
+      (let ((own (p-find-overload val op-str)))
+        (if own
+            ;; perl calls it as handler($self, undef, ''): a mutator whose
+            ;; return value is what the place receives.
+            (values (p-call-overload own val nil nil) t)
+            (let ((gen (p-find-overload val gen-op)))
+              (if gen
+                  (values (p-call-overload gen val 1 nil) t)
+                  (values nil nil)))))))
+
 (defun perl-increment (val)
   "Perl ++ semantics: magical string increment for certain strings, numeric otherwise"
+  ;; An overloaded object is decided FIRST, as perl decides it: its own `++`,
+  ;; else autogenerated from `+`.  The guard inside is one type test for a
+  ;; plain box, so the numeric path below is unchanged in cost.
+  (multiple-value-bind (new appliedp) (%p-incdec-overload val "++" "+")
+    (when appliedp (return-from perl-increment new)))
   (let ((v (unbox val)))
     (cond
       ;; If it's already a number, just add 1
@@ -6590,12 +6713,36 @@ per element."
       ;; the bare payload then answers the hash-table's address instead.
       ;; That is how one program got two answers: a root `$o++` on a declined
       ;; raw slot (p-incf-raw, which numifies the slot itself) said 6 while
-      ;; PCL_OPT=none (p-post++ -> here) said 2.  The remaining divergence
-      ;; from perl -- perl AUTOGENERATES `++` from a `+` handler and keeps an
-      ;; OBJECT -- is task #900, and is the same on both paths.
+      ;; PCL_OPT=none (p-post++ -> here) said 2.  Reached only when the class
+      ;; overloads NEITHER `++` nor `+` (task #900 handled those above), which
+      ;; is also the case perl refuses outright unless `fallback => 1` — see
+      ;; %p-incdec-overload's note and task #933.
       ((and (p-box-p val) (p-find-overload val "0+")) (1+ (to-number val)))
       ;; Otherwise convert to number and increment
       (t (1+ (to-number v))))))
+
+(defun %p-incdec-old (place)
+  "The OLD value a POSTFIX ++/-- hands back.  `unbox` for anything ordinary —
+   but a BLESSED box yields a copy of the REFERENCE, class and all.  perl's
+   postfix on an overloaded object without a `=` copy constructor gives back
+   the same referent (`my $r = $p++` is `P(5)` and stays a Plus), and unboxing
+   it here handed the caller the bare hash: `ref` said '' and interpolation
+   said 1, with no `\"\"` handler to ask (task #900)."
+  (if (and (p-box-p place) (p-box-class place))
+      (let ((copy (make-p-box (p-box-value place))))
+        (setf (p-box-class copy) (p-box-class place))
+        copy)
+      (unbox place)))
+
+(defun perl-decrement (val)
+  "Perl -- semantics.  ALWAYS numeric — perl has no magical string decrement
+   (`$x = 'aa'; $x--` gives -1) — but the OVERLOAD rules are ++'s exactly: the
+   class's own `--` handler, else autogenerated from `-` (task #900).
+   This is the one reading of the `--` new value: p-pre-- and p-post-- had four
+   copies of `(1- (to-number PLACE))` between them, and none of them could see
+   an overloaded object."
+  (multiple-value-bind (new appliedp) (%p-incdec-overload val "--" "-")
+    (if appliedp new (1- (to-number val)))))
 
 (defmacro p-pre++ (place)
   "Perl prefix ++ - works on boxed values, hash/array elements, and derefs.
@@ -6636,7 +6783,7 @@ per element."
       ((and (listp real-place)
             (member (car real-place) '(p-aref-box p-gethash-box)))
        `(let* ((,box ,real-place)
-               (,old (let ((v (unbox ,box))) (if (or (null v) (eq v *p-undef*)) 0 v))))
+               (,old (let ((v (%p-incdec-old ,box))) (if (or (null v) (eq v *p-undef*)) 0 v))))
           (box-set ,box (perl-increment ,box))
           ,old))
       ;; p-cast-$ (scalar deref): may return a mutable box (chain ref→box→value).
@@ -6657,7 +6804,7 @@ per element."
       ;; When value is nil (Perl undef), return 0 — Perl's undef++ returns 0
       ;; because ++ treats undef as 0 in numeric context.
       (t (let ((val (gensym "VAL")))
-           `(let* ((,val (unbox ,real-place))
+           `(let* ((,val (%p-incdec-old ,real-place))
                    (,old (if (or (null ,val) (eq ,val *p-undef*)) 0 ,val)))
               (box-set ,real-place (perl-increment ,real-place))
               ,old))))))
@@ -6674,23 +6821,23 @@ per element."
             (member (car real-place) '(p-aref-box p-gethash-box)))
        (let ((box (gensym "BOX")))
          `(let* ((,box ,real-place))
-            (box-set ,box (1- (to-number ,box))))))
+            (box-set ,box (perl-decrement ,box)))))
       ;; Traditional setf-able places (p-aref, p-gethash, etc).  Same shape as
       ;; p-pre++'s arm, deliberately: `(decf place)` expands to `(- place 1)`,
       ;; and these readers do NOT always hand back a number — p-cast-$ returns
       ;; the referent BOX for a hard ref, p-gethash returns *p-undef* for an
       ;; absent key, and any of them can hold a numeric STRING.  perl numifies
-      ;; first, so to-number is the read.  (Unreachable until #463 item 2 let
-      ;; `--$$r` / `--${"name"}` parse at all: it died "#S(p-box …) is not of
-      ;; type number".)
+      ;; first, so perl-decrement's to-number is the read.  (Unreachable until
+      ;; #463 item 2 let `--$$r` / `--${"name"}` parse at all: it died
+      ;; "#S(p-box …) is not of type number".)
       ((and (listp real-place)
             (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
        (let ((tmp (gensym "TMP")))
-         `(let ((,tmp (1- (to-number ,real-place))))
+         `(let ((,tmp (perl-decrement ,real-place)))
             (setf ,real-place ,tmp)
             ,tmp)))
       ;; Boxed scalar
-      (t `(box-set ,real-place (1- (to-number ,real-place)))))))
+      (t `(box-set ,real-place (perl-decrement ,real-place))))))
 
 (defmacro p-post-- (place)
   "Perl postfix -- - returns old value"
@@ -6707,26 +6854,26 @@ per element."
       ((and (listp real-place)
             (member (car real-place) '(p-aref-box p-gethash-box)))
        `(let* ((,box ,real-place)
-               (,old (unbox ,box)))
-          (box-set ,box (1- (to-number ,box)))
+               (,old (%p-incdec-old ,box)))
+          (box-set ,box (perl-decrement ,box))
           ,old))
       ;; p-cast-$ (scalar deref): may return a mutable box — capture VALUE before mutation
       ((and (listp real-place) (eq (car real-place) 'p-cast-$))
        `(let* ((,box ,real-place)
                (,old (to-number (if (p-box-p ,box) (p-box-value ,box) ,box))))
-          (setf ,real-place (1- ,old))
+          (setf ,real-place (perl-decrement ,box))
           ,old))
       ;; Traditional setf-able places (p-aref, p-gethash, etc)
       ((and (listp real-place)
             (member (car real-place) '(p-gethash p-aref p-gethash-deref p-aref-deref p-$ p-cast-$)))
        `(let ((,old ,real-place))
-          (decf ,real-place)
+          (setf ,real-place (perl-decrement ,real-place))
           ,old))
       ;; Boxed scalar — return the RAW old value (string or number).  Postfix --
       ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
       (t (let ((val (gensym "VAL")))
-           `(let ((,val (unbox ,real-place)))
-              (box-set ,real-place (1- (to-number ,real-place)))
+           `(let ((,val (%p-incdec-old ,real-place)))
+              (box-set ,real-place (perl-decrement ,real-place))
               ,val))))))
 
 ;;; ------------------------------------------------------------
@@ -19764,7 +19911,16 @@ buffer's fill-pointer; everything else falls back to file-length."
                           (setf (p-box-value string-box) result
                                 (p-box-sv-ok string-box) nil
                                 (p-box-nv-ok string-box) nil)
-                          (warn "Cannot modify non-boxed value in s///")))
+                          ;; No box to write to, and the guard above says a
+                          ;; write IS needed — which is exactly where perl
+                          ;; croaks (task #911, #873's third slot).  It used to
+                          ;; warn and carry on, so `$1 =~ s/b/z/` silently did
+                          ;; nothing where perl dies.  The `(plusp count)`
+                          ;; guard is what keeps `s/zzz/q/` (no match) legal,
+                          ;; which perl also allows — perl decides this at RUN
+                          ;; time and a compile-time refusal was tried in s460ap
+                          ;; and reverted for moving four blessed tr.t rows.
+                          (%p-readonly-modification)))
                     ;; perl returns the COUNT on a match and PL_sv_no on a miss
                     ;; -- the dualvar ("" , 0), so `print "<$n>"` shows <> and
                     ;; not <0> (task #416).  "" is false and numifies to 0, so
@@ -19867,10 +20023,15 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (p-box-nv-ok string-box) nil)
              ;; A count-only tr (empty replacement, no /d) leaves the target
              ;; untouched, and perl accepts that on a read-only value:
-             ;; `"\x8c" =~ y o…oo` just counts.  Complain only when the
-             ;; result actually differs from the input.
+             ;; `"\x8c" =~ y o…oo` just counts.  Die only when the result
+             ;; actually differs from the input — which is perl's own rule and
+             ;; even finer than its compile-time OPpTRANS_IDENTICAL flag, and
+             ;; is what keeps tr.t's "harmless if explicitly/implicitly not
+             ;; updating" rows (631, 639, 748, 752) passing.  It used to warn
+             ;; and carry on: `$1 =~ tr/a-z/A-Z/` silently did nothing where
+             ;; perl croaks (task #911, #873's third slot).
              (when (string/= result str)
-               (warn "Cannot modify non-boxed value in tr///")))
+               (%p-readonly-modification)))
          count)))))
 
 (defun p-=~ (string operation)
