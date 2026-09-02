@@ -695,7 +695,7 @@
                           (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
                           (*pcl-caller-wantarray* *wantarray*))
                      (p-sub-frame
-                       ,@body)))))))))
+                      ,@body)))))))))
 
 (defmacro p-args-body (&body body)
   "Standard named-sub prologue emitted by the code generator: bind Perl's @_
@@ -2735,28 +2735,135 @@
             ;; Walk @ISA for inherited overloads (subclass of overloaded parent)
             (%p-find-overload-mro cls op-str nil))))))
 
-(defun p-call-overload (handler self other reversedp)
+(defun p-call-overload (handler self other reversedp &optional op-str)
   "Call a use overload handler with Perl's three-argument convention:
    handler(self, other, reversed).  REVERSEDP is true when the blessed
    object was the right operand and Perl swapped the args.
-   Handler may be a CL function, a boxed code ref, or a string (method name)."
-  ;; use overload: build the three args Perl overload handlers expect
-  (let ((other-val   (or other *p-undef*))
-        (reversed-val (if reversedp (make-p-box 1) *p-undef*)))
-    (cond
-      ((functionp handler)
-       ;; Direct CL function: lambda or #'pl-name from \&sub
-       (funcall handler self other-val reversed-val))
-      ((p-box-p handler)
-       ;; Boxed code ref (e.g. stored in a variable before use overload)
-       (let ((inner (unbox handler)))
-         (if (functionp inner)
-             (funcall inner self other-val reversed-val)
-             (error "use overload: boxed handler is not a function: ~S" inner))))
-      ((stringp handler)
-       ;; Method-name form: '+' => 'add' — call $self->add($other, $reversed)
-       (p-method-call self handler other-val reversed-val))
-      (t (error "use overload: invalid handler ~S for ~S" handler self)))))
+   Handler may be a CL function, a boxed code ref, or a string (method name).
+
+   OP-STR, when given, adds perl's FOURTH argument — the operator's name —
+   which is passed to a `nomethod' handler and to nothing else (task #972).
+
+   THE THIRD ARGUMENT IS `\"\"', NOT undef, for an ordinary non-swapped call.
+   perl's convention is three-valued and a handler can read all three:
+   FALSE-but-DEFINED (`\"\"') = ordinary, TRUE (1) = operands swapped, UNDEF =
+   the handler is being called as a MUTATOR (`$x += 2' reaching a `+=' key).
+   PCL never produces the mutator call — it autogenerates every compound form
+   from its base op — so `undef' here made a handler asking `defined $_[2]'
+   see every call as a mutator call.  Probed 5.40.3: `$o + 1' gives the
+   handler an empty string, `1 + $o' gives 1."
+  ;; use overload: build the args Perl overload handlers expect
+  (let ((other-val    (or other *p-undef*))
+        (reversed-val (if reversedp (make-p-box 1) (make-p-box ""))))
+    (flet ((call3 (fn) (funcall fn self other-val reversed-val))
+           (call4 (fn) (funcall fn self other-val reversed-val (make-p-box op-str))))
+      (cond
+        ((functionp handler)
+         ;; Direct CL function: lambda or #'pl-name from \&sub
+         (if op-str (call4 handler) (call3 handler)))
+        ((p-box-p handler)
+         ;; Boxed code ref (e.g. stored in a variable before use overload)
+         (let ((inner (unbox handler)))
+           (cond
+             ((not (functionp inner))
+              (error "use overload: boxed handler is not a function: ~S" inner))
+             (op-str (call4 inner))
+             (t      (call3 inner)))))
+        ((stringp handler)
+         ;; Method-name form: '+' => 'add' — call $self->add($other, $reversed)
+         (if op-str
+             (p-method-call self handler other-val reversed-val (make-p-box op-str))
+             (p-method-call self handler other-val reversed-val)))
+        (t (error "use overload: invalid handler ~S for ~S" handler self))))))
+
+;;; ------------------------------------------------------------
+;;; `nomethod' and the CONVERSION derivations (task #972)
+;;; ------------------------------------------------------------
+;;; Both are parts of perl's dispatch that PCL used to skip entirely, and both
+;;; had to be measured rather than read off the pod — every rule below is a
+;;; probed 5.40.3 row (the tables are in task #972's RESULT section).
+
+(defun %p-nomethod-binary (a b op-str)
+  "perl's `nomethod' key for a BINARY operator, consulted at exactly the point
+   where no handler and no autogeneration apply.  Two values: the result, and
+   whether a handler was found at all — a caller with no nomethod anywhere
+   falls through to its ordinary semantics unchanged.
+
+   LEFT operand first, then the RIGHT one swapped, like every other binary
+   lookup.  The handler gets FOUR arguments, the fourth being OP-STR: probed,
+   `$x | 2' on a nomethod class calls it with op=`|'.
+
+   NOT consulted for an op perl AUTOGENERATES (`.' and `x' from `\"\"'):
+   there, the ordinary body IS perl's answer (probed: `$x . \"q\"' on a class
+   with `nomethod' and `\"\"' gives the concatenation, never nomethod).
+   %with-binary-overload's :AUTOGENERATED flag is that distinction."
+  (let ((ha (p-find-overload a "nomethod")))
+    (if ha
+        (values (p-call-overload ha a b nil op-str) t)
+        (let ((hb (p-find-overload b "nomethod")))
+          (if hb
+              (values (p-call-overload hb b a t op-str) t)
+              (values nil nil))))))
+
+(defun %p-conversion-chain (key)
+  "The order in which perl DERIVES one conversion operator from the other two
+   (perl's Perl_amagic_call, probed 5.40.3 one class per row):
+     \"\"   <- 0+ <- bool     (a `0+'-only class stringifies through `0+')
+     0+   <- \"\" <- bool
+     bool <- 0+ <- \"\"       (`0+' wins over `\"\"': a class with 0+ => 0 and
+                             \"\" => \"yes\" is FALSE)
+   Rule 12: a KEY that is not one of the three conversions is a caller bug —
+   there is no sensible default, so say which one arrived."
+  (cond ((string= key "\"\"") '("0+" "bool"))
+        ((string= key "0+")   '("\"\"" "bool"))
+        ((string= key "bool") '("0+" "\"\""))
+        (t (error "%p-conversion-chain: ~S is not a conversion operator ~
+                   (expected one of \"\\\"\\\"\", \"0+\", \"bool\")" key))))
+
+(defun %p-conversion-derive (val key)
+  "The handler perl DERIVES for one CONVERSION operator on VAL when the class
+   declares no handler for KEY itself — KEY is one of `\"\"', `0+', `bool'.
+   Two values: the handler (or NIL) and the OP-STRING to pass it as a fourth
+   argument (non-NIL only for a `nomethod' handler, which is the only handler
+   perl gives four arguments to).
+
+   perl's order, all probed: the class's OWN handler; else the MAGIC
+   AUTOGENERATION from the other two conversions (%p-conversion-chain); else
+   `nomethod'.  `fallback => 0' forbids autogeneration outright — perl dies
+   there (`Operation \"\\\"\\\"\": no method found'), and PCL keeps its
+   ordinary answer instead, because the binary REFUSAL is task #960(a) and
+   the two must arrive together or a program that runs today dies for half a
+   reason.
+
+   Before this (task #972) PCL asked `p-find-overload' for the key and
+   nothing else, so a class with only `0+' stringified to N0=HASH(0x1).
+
+   OUT OF LINE, and its caller's fast path is not: see %p-conversion-handler."
+  (let ((derived (loop for k in (%p-conversion-chain key)
+                       thereis (p-find-overload val k))))
+    (if (and derived
+             (not (eq (%p-overload-fallback-of (p-get-class val)) :no)))
+        (values derived nil)
+        (let ((nm (p-find-overload val "nomethod")))
+          (if nm (values nm key) (values nil nil))))))
+
+(declaim (inline %p-conversion-handler))
+(defun %p-conversion-handler (val key)
+  "The handler perl uses for KEY on VAL, own or derived — the entry point the
+   three conversion sites (box-sv / box-nv / %p-true-p-slow) call.
+
+   INLINE, and the OWN handler is the whole inline part, because a class that
+   DECLARES the conversion it is asked for is the overwhelmingly common case
+   and this runs at every stringification of an object: the hit then costs
+   exactly the single `p-find-overload' the three sites used to spell by hand,
+   with the derivation walk out of line behind it.  Measured on the `ovlsub'
+   bench row (a `\"\"'-overloaded object stringified 100k times), best-of-3 and
+   best-of-5 against an 80b715c worktree: a single out-of-line function here
+   cost 0.1494/0.1483 s -> 0.1531/0.1551 s, a consistent ~3.5 %; splitting it
+   this way puts the row back inside the run-to-run band."
+  (let ((own (p-find-overload val key)))
+    (if own (values own nil) (%p-conversion-derive val key))))
+(declaim (notinline %p-conversion-handler))
 
 (defun p-register-overloads (pkg pairs-vec)
   "Register use overload handlers for package PKG from PAIRS-VEC.
@@ -2886,14 +2993,16 @@
         (to-number (%p-tie-fetch box inner))))
     (when (p-magic-cell-p inner)
       (return-from box-nv (to-number (funcall (p-magic-cell-getter inner))))))
-  ;; use overload "0+" (numify): call handler if registered for this class.
+  ;; use overload "0+" (numify): the class's own handler, else the one perl
+  ;; DERIVES it from (`""', then `bool'), else `nomethod' — %p-conversion-handler
+  ;; is the one reading of that chain, shared with box-sv and %p-true-p-slow (#972).
   ;; Guarded by the inline negative test (#815) — this is the hottest single
   ;; overload lookup in the runtime (every numification of a box reaches it).
   (unless (%p-no-overload-possible-p box)
-    (let ((handler (p-find-overload box "0+")))
+    (multiple-value-bind (handler nm-op) (%p-conversion-handler box "0+")
       (when handler
         (return-from box-nv
-          (to-number (p-call-overload handler box nil nil))))))
+          (to-number (p-call-overload handler box nil nil nm-op))))))
   (if (p-box-nv-ok box)
       (p-box-nv box)
       (let ((v (p-box-value box)))
@@ -3096,14 +3205,17 @@
         (to-string (%p-tie-fetch box inner))))
     (when (p-magic-cell-p inner)
       (return-from box-sv (to-string (funcall (p-magic-cell-getter inner))))))
-  ;; use overload '""' (stringify): call handler if registered for this class.
+  ;; use overload '""' (stringify): the class's own handler, else the one perl
+  ;; DERIVES it from (`0+', then `bool'), else `nomethod' — see
+  ;; %p-conversion-handler.  A `0+'-only class used to stringify to
+  ;; N0=HASH(0x1) here where perl prints the number (#972).
   ;; Checked before cache because the handler result IS the string value.
   ;; Guarded by the inline negative test (#815), like box-nv's.
   (unless (%p-no-overload-possible-p box)
-    (let ((handler (p-find-overload box "\"\"")))
+    (multiple-value-bind (handler nm-op) (%p-conversion-handler box "\"\"")
       (when handler
         (return-from box-sv
-          (to-string (p-call-overload handler box nil nil))))))
+          (to-string (p-call-overload handler box nil nil nm-op))))))
   (if (p-box-sv-ok box)
       (p-box-sv box)
       (let* ((inner (p-box-value box))
@@ -3241,12 +3353,15 @@
    A RAW (non-box) container is a bare @array/%hash used in boolean context, so
    it is true iff non-empty (`if(%h)`/`if(@a)` test element count)."
   ;; use overload "bool": check before unboxing so we have the class info
-  ;; (inline negative test first — #815).
+  ;; (inline negative test first — #815).  perl DERIVES `bool' from `0+' and
+  ;; then `""' when the class has no `bool' of its own, so an object whose
+  ;; `0+' is 0 (or whose `""' is "" / "0") is FALSE — PCL used to answer TRUE
+  ;; for every blessed reference (#972).  %p-conversion-handler owns the chain.
   (unless (%p-no-overload-possible-p val)
-    (let ((handler (p-find-overload val "bool")))
+    (multiple-value-bind (handler nm-op) (%p-conversion-handler val "bool")
       (when handler
         (return-from %p-true-p-slow
-          (p-true-p (p-call-overload handler val nil nil))))))
+          (p-true-p (p-call-overload handler val nil nil nm-op))))))
   (if (p-box-p val)
       ;; Boxed = Perl scalar.  A held reference is always true.
       (let ((v (unbox val)))
@@ -3349,13 +3464,36 @@
 ;;; a plain-data binary op would otherwise still pay TWO full calls to learn
 ;;; that neither operand is an object.  %p-no-overload-possible-p settles both
 ;;; operands with a slot read in the overwhelmingly common case.
-(defmacro %with-binary-overload ((op-str a b) &body body)
+;;; AUTOGENERATED says perl DERIVES this operator from a conversion, so the
+;;; BODY below is already perl's answer and `nomethod' must NOT intercept it:
+;;; `.' and `x' come from `\"\"' (probed — a class with `nomethod' and `\"\"'
+;;; concatenates).  Every other binary op consults `nomethod' first (#972).
+(defmacro %with-binary-overload ((op-str a b &key autogenerated) &body body)
   `(if (and (%p-no-overload-possible-p ,a) (%p-no-overload-possible-p ,b))
        (progn ,@body)
        (let ((ha (p-find-overload ,a ,op-str)))
          (if ha (p-call-overload ha ,a ,b nil)
              (let ((hb (p-find-overload ,b ,op-str)))
                (if hb (p-call-overload hb ,b ,a t)
+                   ,(if autogenerated
+                        `(progn ,@body)
+                        `(multiple-value-bind (nm-val nm-p)
+                             (%p-nomethod-binary ,a ,b ,op-str)
+                           (if nm-p nm-val (progn ,@body))))))))))
+
+;;; The UNARY twin of %with-binary-overload — perl calls a unary handler as
+;;; handler($self, undef, ''), and `nomethod' the same way with the operator
+;;; name fourth (probed: `~$x' on a nomethod class gives op=`~').  Two callers
+;;; before #972 spelled the lookup by hand and only one of them existed
+;;; (`neg'); `~' and `~.' had no dispatch at all.  A is evaluated more than
+;;; once — pass a variable.
+(defmacro %with-unary-overload ((op-str a) &body body)
+  `(if (%p-no-overload-possible-p ,a)
+       (progn ,@body)
+       (let ((h (p-find-overload ,a ,op-str)))
+         (if h (p-call-overload h ,a nil nil)
+             (let ((nm (p-find-overload ,a "nomethod")))
+               (if nm (p-call-overload nm ,a nil nil ,op-str)
                    (progn ,@body)))))))
 
 (defmacro %def-overloaded-arith (name op-str cl-op)
@@ -3382,25 +3520,26 @@
 
 (defun %p-neg (a)
   "Perl unary minus slow path.
-   Checks 'neg' overload, then applies Perl string-negation rules."
-  ;; use overload "neg": unary minus overload
-  (let ((h-neg (p-find-overload a "neg")))
-    (when h-neg (return-from %p-neg (p-call-overload h-neg a nil nil))))
-  ;; No overload: apply Perl string-negation rules
-  (let ((val (unbox a)))
-    (if (and (stringp val) (> (length val) 0) (not (looks-like-number val)))
-        ;; Not a pure number — string operations
-        (let ((ch (char val 0)))
-          (cond
-            ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
-            ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
-            ;; ASCII alpha/underscore: prepend '-'
-            ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
-             (concatenate 'string "-" val))
-            ;; Starts with digit but not pure number (e.g. "12foo"): numeric
-            (t (- (to-number a)))))
-        ;; Numeric negation
-        (- (to-number a)))))
+   Checks 'neg' overload (and `nomethod'), then applies Perl string-negation
+   rules.  Routed through %with-unary-overload since #972 — the hand-spelled
+   lookup it used to carry was the ONLY unary dispatch in the runtime, and
+   `~'/`~.' had none because there was nothing to copy."
+  (%with-unary-overload ("neg" a)
+                        ;; No overload: apply Perl string-negation rules
+                        (let ((val (unbox a)))
+                          (if (and (stringp val) (> (length val) 0) (not (looks-like-number val)))
+                              ;; Not a pure number — string operations
+                              (let ((ch (char val 0)))
+                                (cond
+                                  ((char= ch #\-) (concatenate 'string "+" (subseq val 1)))
+                                  ((char= ch #\+) (concatenate 'string "-" (subseq val 1)))
+                                  ;; ASCII alpha/underscore: prepend '-'
+                                  ((or (and (alpha-char-p ch) (< (char-code ch) 128)) (char= ch #\_))
+                                   (concatenate 'string "-" val))
+                                  ;; Starts with digit but not pure number (e.g. "12foo"): numeric
+                                  (t (- (to-number a)))))
+                              ;; Numeric negation
+                              (- (to-number a))))))
 
 (defun %p---slow (a b)
   "Perl binary subtraction slow path: use overload dispatch, then coercion."
@@ -3602,7 +3741,9 @@
 
 (defun %p-.-slow (a b)
   "Perl string concatenation slow path with use overload '.' dispatch."
-  (%with-binary-overload ("." a b)
+  ;; :AUTOGENERATED — perl derives `.' from `""', so the concatenation below IS
+  ;; perl's answer for a class with no `.' handler, and `nomethod' never sees it.
+  (%with-binary-overload ("." a b :autogenerated t)
                          (concatenate 'string (to-string a) (to-string b))))
 
 (declaim (inline p-.))
@@ -7015,6 +7156,24 @@ per element."
       ;; Not an overloaded package at all: nothing to refuse, the caller's
       ;; ordinary numeric path (a reference's address) is perl's answer too.
       ((not (%p-class-overloaded-p cls)) (values nil nil))
+      ;; `nomethod' — the class has told perl "call me instead of dying", so it
+      ;; is consulted at exactly the point the refusal below would fire, and
+      ;; BEFORE the `fallback => 1' arm (probed: a fallback-1 class with a
+      ;; nomethod key gets the nomethod call).  Task #972: without this arm
+      ;; #934's refusal KILLS a program perl runs.
+      ;;
+      ;; ITS RETURN VALUE IS DISCARDED, and that is perl, measured twice: with
+      ;; `nomethod => sub {...}' and no `++'/`+', `$x++' calls the handler once
+      ;; (op=`++', other=undef, swapped='') and leaves $x holding the SAME
+      ;; blessed object — `ref($x)' is still the class afterwards.  perl treats
+      ;; a `++'/`--' handler as a MUTATOR of $_[0].  (PCL's OWN-`++'-handler arm
+      ;; in %p-incdec-overload above still USES the return value, which is the
+      ;; same divergence measured from the other side and filed as its own
+      ;; task — it is not made worse here, and the two arms are perl's two
+      ;; different questions.)
+      ((p-find-overload val "nomethod")
+       (p-call-overload (p-find-overload val "nomethod") val nil nil op-str)
+       (values val t))
       ;; `fallback => 1' with nothing to autogenerate FROM.  perl uses the
       ;; ORDINARY reference semantics here — the referent's ADDRESS, never
       ;; `0+' — and the result REPLACES the scalar, so the blessing is gone
@@ -7260,13 +7419,18 @@ per element."
                        "Perl ^= (bitwise-xor-assign)"
                        `(p-bit-xor ,cur ,value))
 
+;;; `<<=' / `>>=' DELEGATE to `p-<<' / `p->>' (task #972).  They used to spell
+;;; a SECOND copy of the shift, and the copies disagreed: this one has no
+;;; clamp, so `my $z = 5; $z <<= 70' answered 5902958103587056517120 where
+;;; both perl and `5 << 70' answer 0.  One reading also gets them the overload
+;;; dispatch p-<< now carries, which is what perl does for `$obj <<= 3'.
 (%define-compound-pair p-<<= p-<<=-raw (value)
                        "Perl <<= (left-shift-assign)"
-                       `(ash (truncate (to-number ,cur)) (truncate (to-number ,value))))
+                       `(p-<< ,cur ,value))
 
 (%define-compound-pair p->>= p->>=-raw (value)
                        "Perl >>= (right-shift-assign)"
-                       `(ash (truncate (to-number ,cur)) (- (truncate (to-number ,value)))))
+                       `(p->> ,cur ,value))
 
 ;;; Compound conditional-assignment operators (&&=, ||=, //=).
 ;;;
@@ -7335,32 +7499,48 @@ per element."
        (defun ,slow (a b)
          ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
          ;; use overload: check op-specific handler, then fallback to <=> or cmp.
-         ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
          ;; The FOUR lookups collapse to one inline slot read when neither
          ;; operand can carry an overload (#815).
-         (p-bool
-          (let ((ha (unless (and (%p-no-overload-possible-p a)
-                                 (%p-no-overload-possible-p b))
-                      (p-find-overload a ,op-str))))
-            (if ha (p-true-p (p-call-overload ha a b nil))
-                (let ((hb (unless (%p-no-overload-possible-p b)
-                            (p-find-overload b ,op-str))))
-                  (if hb (p-true-p (p-call-overload hb b a t))
-                      ;; use overload fallback: derive from three-way if available
-                      (let ((fa (unless (%p-no-overload-possible-p a)
-                                  (p-find-overload a ,fallback-op)))
-                            (fb (unless (%p-no-overload-possible-p b)
-                                  (p-find-overload b ,fallback-op))))
-                        (if (or fa fb)
+         ;;
+         ;; A HANDLER'S RETURN VALUE IS THE OPERATOR'S VALUE — p-bool is applied
+         ;; only to the arms that COMPUTE a CL boolean, never to a handler's
+         ;; answer.  perl returns it verbatim (probed 5.40.3: with
+         ;; `use overload '==' => sub {"PQR"}', `$x == 2' answers PQR, not 1);
+         ;; PCL used to wrap every arm in p-true-p + p-bool and hand back 1.
+         ;; The DERIVED arm still computes a boolean, because there perl itself
+         ;; is comparing `<=>''s -1/0/1 against 0.
+         (let ((ha (unless (and (%p-no-overload-possible-p a)
+                                (%p-no-overload-possible-p b))
+                     (p-find-overload a ,op-str))))
+           (if ha (p-call-overload ha a b nil)
+               (let ((hb (unless (%p-no-overload-possible-p b)
+                           (p-find-overload b ,op-str))))
+                 (if hb (p-call-overload hb b a t)
+                     ;; use overload fallback: derive from three-way if available
+                     (let ((fa (unless (%p-no-overload-possible-p a)
+                                 (p-find-overload a ,fallback-op)))
+                           (fb (unless (%p-no-overload-possible-p b)
+                                 (p-find-overload b ,fallback-op))))
+                       (if (or fa fb)
+                           (p-bool
                             (,cl-test (to-number (if fa
                                                      (p-call-overload fa a b nil)
                                                      (p-call-overload fb b a t)))
-                                      0)
-                            ;; IEEE 754: any comparison with NaN → nan-result
-                            (let ((na (to-number a)) (nb (to-number b)))
-                              (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
-                                  ,nan-result
-                                  (,cl-test na nb)))))))))))
+                                      0))
+                           ;; No handler and no `<=>' to derive from: perl's
+                           ;; `nomethod' owns this point, and it is told the
+                           ;; COMPARISON's own name, not `<=>' (probed: `$x != 1'
+                           ;; on a nomethod class gives op=`!=').  #972.
+                           (multiple-value-bind (nm-val nm-p)
+                               (%p-nomethod-binary a b ,op-str)
+                             (if nm-p
+                                 nm-val
+                                 ;; IEEE 754: any comparison with NaN → nan-result
+                                 (p-bool
+                                  (let ((na (to-number a)) (nb (to-number b)))
+                                    (if (or (%pcl-nan-p na) (%pcl-nan-p nb))
+                                        ,nan-result
+                                        (,cl-test na nb)))))))))))))
        (declaim (inline ,name))
        (defun ,name (a b)
          ,(format nil "Perl ~A with numberp fast path (returns 1 / \"\")" op-str)
@@ -7642,27 +7822,38 @@ per element."
        (defun ,slow (a b)
          ,(format nil "Perl ~A slow path: use overload dispatch (returns 1 / \"\")" op-str)
          ;; use overload: check op-specific handler, then fallback to cmp.
-         ;; Every branch yields a CL boolean; p-bool maps it to Perl's 1 / "".
-         (p-bool
-          (let ((ha (unless (and (%p-no-overload-possible-p a)
-                                 (%p-no-overload-possible-p b))
-                      (p-find-overload a ,op-str))))
-            (if ha (p-true-p (p-call-overload ha a b nil))
-                (let ((hb (unless (%p-no-overload-possible-p b)
-                            (p-find-overload b ,op-str))))
-                  (if hb (p-true-p (p-call-overload hb b a t))
-                      (let ((fa (unless (%p-no-overload-possible-p a)
-                                  (p-find-overload a "cmp")))
-                            (fb (unless (%p-no-overload-possible-p b)
-                                  (p-find-overload b "cmp"))))
-                        (if (or fa fb)
-                            ;; use overload fallback: cmp returns -1/0/1, test against 0
+         ;; A HANDLER'S RETURN VALUE IS THE OPERATOR'S VALUE — see the twin
+         ;; note in %def-overloaded-cmp.  p-bool wraps only the two arms that
+         ;; COMPUTE a CL boolean (the `cmp' derivation and the plain string
+         ;; comparison), never a handler's answer.
+         (let ((ha (unless (and (%p-no-overload-possible-p a)
+                                (%p-no-overload-possible-p b))
+                     (p-find-overload a ,op-str))))
+           (if ha (p-call-overload ha a b nil)
+               (let ((hb (unless (%p-no-overload-possible-p b)
+                           (p-find-overload b ,op-str))))
+                 (if hb (p-call-overload hb b a t)
+                     (let ((fa (unless (%p-no-overload-possible-p a)
+                                 (p-find-overload a "cmp")))
+                           (fb (unless (%p-no-overload-possible-p b)
+                                 (p-find-overload b "cmp"))))
+                       (if (or fa fb)
+                           ;; use overload fallback: cmp returns -1/0/1, test against 0
+                           (p-bool
                             (,cmp-test (to-number (if fa
                                                       (p-call-overload fa a b nil)
                                                       (p-call-overload fb b a t)))
-                                       0)
-                            ;; No overload: direct string comparison
-                            (,str-test (to-string a) (to-string b)))))))))) ; t/nil → p-bool
+                                       0))
+                           ;; No handler and no `cmp' to derive from: `nomethod',
+                           ;; told this comparison's own name (probed: `$x lt "q"'
+                           ;; gives op=`lt').  #972.
+                           (multiple-value-bind (nm-val nm-p)
+                               (%p-nomethod-binary a b ,op-str)
+                             (if nm-p
+                                 nm-val
+                                 ;; No overload: direct string comparison
+                                 (p-bool
+                                  (,str-test (to-string a) (to-string b))))))))))))
        (declaim (inline ,name))
        (defun ,name (a b)
          ,(format nil "Perl ~A with stringp fast path (returns 1 / \"\")" op-str)
@@ -7831,45 +8022,59 @@ per element."
    their integer operands as unsigned 64-bit, so a negative operand wraps."
   (logand (%pcl-to-integer n) #xFFFFFFFFFFFFFFFF))
 
+;;; THE BITWISE FAMILY DISPATCHES `use overload' LIKE EVERY OTHER OPERATOR
+;;; (task #972, the additive half of #960(a)).  Until then these ten functions
+;;; coerced with to-number / p-string-bit-op and never asked, so
+;;; `bless([],"Baz") | "x"' answered the object's ADDRESS where perl calls the
+;;; class's `|' handler (perl-tests/bop.t 464).  perl overloads all ten keys —
+;;; probed one class per key, 5.40.3.
 (defun p-bit-and (a b)
   "Perl bitwise AND — string (char-by-char, truncates) or numeric (unsigned 64-bit)"
-  (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-      (p-string-bit-op a b #'logand t)
-      (logand (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b)))))
+  (%with-binary-overload ("&" a b)
+                         (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+                             (p-string-bit-op a b #'logand t)
+                             (logand (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
 
 (defun p-bit-or (a b)
   "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
-  (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-      (p-string-bit-op a b #'logior nil)
-      (logior (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b)))))
+  (%with-binary-overload ("|" a b)
+                         (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+                             (p-string-bit-op a b #'logior nil)
+                             (logior (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
 
 (defun p-bit-xor (a b)
   "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
-  (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-      (p-string-bit-op a b #'logxor nil)
-      (logxor (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b)))))
+  (%with-binary-overload ("^" a b)
+                         (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
+                             (p-string-bit-op a b #'logxor nil)
+                             (logxor (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
 
 (defun p-bit-not (a)
   "Perl bitwise NOT - string NOT if non-numeric string, integer NOT otherwise"
-  (if (p-string-bitwise-operand-p a)
-      (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
-      (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF)))
+  (%with-unary-overload ("~" a)
+                        (if (p-string-bitwise-operand-p a)
+                            (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
+                            (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF))))
 
 (defun p-str-bit-and (a b)
   "Perl string bitwise AND (&.) — always string, byte-by-byte, truncates to shorter"
-  (p-string-bit-op a b #'logand t))
+  (%with-binary-overload ("&." a b)
+                         (p-string-bit-op a b #'logand t)))
 
 (defun p-str-bit-or (a b)
   "Perl string bitwise OR (|.) — always string, byte-by-byte, pads with NUL"
-  (p-string-bit-op a b #'logior nil))
+  (%with-binary-overload ("|." a b)
+                         (p-string-bit-op a b #'logior nil)))
 
 (defun p-str-bit-xor (a b)
   "Perl string bitwise XOR (^.) — always string, byte-by-byte, pads with NUL"
-  (p-string-bit-op a b #'logxor nil))
+  (%with-binary-overload ("^." a b)
+                         (p-string-bit-op a b #'logxor nil)))
 
 (defun p-str-bit-not (a)
   "Perl string bitwise NOT (~.) — always string, complement each byte"
-  (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a)))
+  (%with-unary-overload ("~." a)
+                        (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))))
 
 (defmacro p-str-bit-and= (place value)
   `(%p-store-back ,place (p-str-bit-and ,place ,value)))
@@ -7902,15 +8107,17 @@ per element."
 
 (defun p-<< (a b)
   "Perl left shift — clamp shift count to prevent SBCL bignum explosion"
-  (let ((av (%pcl-uv-coerce (to-number a)))
-        (bv (%pcl-to-integer (to-number b))))
-    (if (>= (abs bv) 64) 0 (ash av bv))))
+  (%with-binary-overload ("<<" a b)
+                         (let ((av (%pcl-uv-coerce (to-number a)))
+                               (bv (%pcl-to-integer (to-number b))))
+                           (if (>= (abs bv) 64) 0 (ash av bv)))))
 
 (defun p->> (a b)
   "Perl right shift — clamp shift count to prevent SBCL bignum explosion"
-  (let ((av (%pcl-uv-coerce (to-number a)))
-        (bv (%pcl-to-integer (to-number b))))
-    (if (>= (abs bv) 64) 0 (ash av (- bv)))))
+  (%with-binary-overload (">>" a b)
+                         (let ((av (%pcl-uv-coerce (to-number a)))
+                               (bv (%pcl-to-integer (to-number b))))
+                           (if (>= (abs bv) 64) 0 (ash av (- bv))))))
 
 (defun p-to-s64 (n)
   "Convert integer to signed 64-bit range (-2^63 to 2^63-1)."
@@ -8622,7 +8829,7 @@ create the key on a read-only call, which perl does not."
     ;; spreads is now ours.
     ((p-flatten-marker-p v)
      (make-p-flatten-marker
-       :array (%p-leavesub-aggregate (p-flatten-marker-array v))))
+      :array (%p-leavesub-aggregate (p-flatten-marker-array v))))
     ((and (hash-table-p v)
           (not (gethash :__class__ v))
           (not (%p-hash-marker-p v)))

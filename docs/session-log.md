@@ -4,6 +4,65 @@ Append new entries at the top. One section per session.
 
 ---
 
+## s464aw (Opus, round 22, 2026-09-02) — #972: the three overload prerequisites
+
+Task #972 = the three things #960(a) (the binary overload REFUSAL) turned out
+to need before it can be safe.  All three shipped; the refusal itself did not
+and is still #960(a)'s.
+
+**Part 2 first, because it is the additive half.**  The bitwise operators had
+no `use overload` dispatch at all — `p-bit-and/or/xor`, `p-<<`, `p->>`,
+`p-bit-not` and the four string twins coerced and never asked.  Ten keys now
+go through `%with-binary-overload` or a new `%with-unary-overload`, which is
+also where `%p-neg`'s hand-written `neg` lookup moved: it had been the only
+unary dispatch in the runtime, which is exactly why `~` and `~.` had none —
+there was no sibling to copy (rule 11 read from the other direction).
+`p-<<=`/`p->>=` turned out to be a second copy of the shift with no clamp
+(`$z <<= 70` gave 5902958103587056517120, perl 0); they delegate now.
+
+**Part 1: `nomethod`.**  The dangerous finding is that #934's already-shipped
+`Operation "++"` refusal KILLS a class that declares `nomethod` — perl calls
+the handler and leaves the object alone.  perl's own
+`t/lib/overload_nomethod.t` was 0/3 on main and is 3/3 here.  Getting the
+boundary right needed the autogeneration table probed rather than read: `.`
+and `x` come from `""` and never reach `nomethod`, the comparison families
+come from `<=>`/`cmp`, and the conversions come from each other.  Two
+divergences fell out of the same code and are fixed with it: perl's THIRD
+argument is `""` (defined) and not undef for an ordinary call — undef is
+perl's *mutator* marker — and a comparison handler's return value is the
+operator's value, which PCL was truthifying to 1.
+
+**Part 3: the conversion derivations.**  `box-sv`, `box-nv` and
+`%p-true-p-slow` each asked `p-find-overload` for one key and stopped, so a
+`0+`-only class stringified to `N0=HASH(0x1)`.  One reading now
+(`%p-conversion-handler`) with perl's fixed preference order.  The half that
+needed the widest measurement: a blessed reference is no longer
+unconditionally true, because `bool` derives from `0+` then `""`.  Zero rows
+moved for it in either population.
+
+Bars: gate 192/6527 (13 pclxs xs rows only); sweep GATE clean, TOTAL
+18346 → 18347, drops 5 = census; companion op/ = 221 files with ONE mover
+(op/bop.t +1, attributed row by row on an 80b715c worktree) plus an
+`--all --quick` leg; guard `Pl/t/overload-01.t` 23 → 34 rows, ten of eleven
+inverse-verified failing on the base.  Runtime-only — no generation bump.
+
+Filed from the probes: #1000 (`use integer` emits CL primitives inline and so
+bypasses EVERY operator's overload dispatch), #1001 (the compound family:
+four ops with no dispatch, and the base-operator spelling reaching
+`nomethod`), #1002 (`join` flattens a hash/array-ref argument away — a silent
+wrong that eats every `join` over objects), #1003 (`"$a$a"` collapses to one
+copy), #1004 (a `++` handler's return is discarded by perl, stored by PCL),
+#1005 (abs/sqrt/cos/sin/exp/log/atan2/x/! have no dispatch), #1006 (the `=`
+copy constructor; `fallback => 0` should forbid `.`-from-`""`), #1007
+(`$aryref x N` is list repetition and loses the reference).  #1002/#1003/
+#1004/#1007 are PRE-EXISTING, verified identical on an 80b715c worktree.
+
+Coverage hole worth #993's attention: perl's `t/lib/overload_fallback.t` and
+`t/lib/overload_nomethod.t` are not in the companion's scan set, so the
+feature's own acceptance tests had never run.
+
+---
+
 ## Session 464 (2026-09-02, Fable) — ROUND 21: #964 the return protocol SHIPPED and MERGED (main `4fd661b`); `:lvalue` (#930) DEFERRED by the USER; the ignored-tests audit plan drafted (#993, to be presented s465)
 
 **USER asked how common `:lvalue` subs are on CPAN** — measured (2 real definitions in ~1000 core+site .pm files: JSON::PP::incr_text, Thread::Queue::limit; 0 in cpan-tests) — and deferred #930: "fix so the local subs aren't `:lvalue` by default".  Fable measured the leak on a8b4043 (38-row probe, 24 leak, identical under PCL_OPT=none; `return $str` aliased via the `vectorp`-string accident) and wrote the design into task #964 (ONE runtime rule at the frame exit, perl's pp_leavesub; ONE macro `p-sub-frame`); ONE Opus agent (s464a) implemented it in a worktree, solo — the round-21 shape the USER ordered.

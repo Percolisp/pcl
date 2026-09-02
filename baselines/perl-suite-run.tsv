@@ -1,4 +1,14 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s464aw (Opus, round 22, task #972 — THE THREE OVERLOAD PREREQUISITES),
+#   ONE ROW, a GAIN: op/bop.t C 251/246 -> 252/245.  The bitwise operators
+#   now dispatch `use overload' like every other operator, so bop.t's
+#   `| overload works' (bless([],"Baz") | "x" with a `|' handler) stops
+#   answering the object's ADDRESS.  Attribution: the same file on an
+#   80b715c worktree with the same runner scores 251/246; the row is present
+#   in one .fails.tsv and absent from the other, and nothing else in the
+#   file or in the other 220 op/ files moved (whole-dir run compared
+#   file-by-file against this snapshot: 1 mover).  perl-tests/bop.t's twin
+#   row left baselines/fail-baseline.tsv by EDIT in the same commit.
 # s464a (Opus, round 21, task #964 — THE SUB-FRAME LEAVE RULE), FOUR ROWS:
 #   ONE GAIN and THREE LOSSES, and all four have the SAME single cause —
 #   an ordinary sub now returns a COPY of a returned scalar (perl's
@@ -1193,7 +1203,7 @@ op/avhv.t	40	0	39	1	DIFF		0
 op/bless.t	116	2	111	6	DIFF		0
 op/blocks.t	25	1	16	10	DIFF		0
 op/bool.t	8	0	8	0	OK		0
-op/bop.t	510	0	251	246	DIFF	aborted-forms:1: Invalid type 'P' in pack 	0
+op/bop.t	510	0	252	245	DIFF	aborted-forms:1: Invalid type 'P' in pack 	0
 op/caller.t	111	1	28	84	DIFF		0
 op/catch.t	12	0	10	2	DIFF		0
 op/chars.t	34	0	34	0	OK		0

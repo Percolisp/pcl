@@ -821,7 +821,10 @@ these rules (every one probed on perl 5.40.3):
 False: the number 0 (but **NaN is true**), the strings `""` and `"0"`,
 `undef`, `nil`, empty array, empty hash. Everything else is true —
 including `"0.0"`, `"00"`, `" "`, and all references. Boxes test their
-value. Blessed objects consult `use overload 'bool'` first.
+value. Blessed objects consult `use overload 'bool'` first — **or the
+handler perl derives it from** (`0+`, then `""`; see §3.4's conversion
+table), so an overloading object can be false where a plain reference
+never is.
 
 ### 3.4 What ops return
 
@@ -835,11 +838,49 @@ value. Blessed objects consult `use overload 'bool'` first.
   first operand if false, else the second; `p-||` symmetrically; `p-//`
   keys on definedness. They are macros — the second operand is not
   evaluated unless needed.
-- **Overload protocol:** every arithmetic/string/compare op first checks
-  whether a blessed operand's class declares `use overload` for that
-  operator and dispatches to it (`p-find-overload`/`p-call-overload`).
-  Translators supporting objects must preserve this hook order:
-  left operand, then right (with the swapped-args flag).
+- **Overload protocol:** every arithmetic, string, bitwise and compare op
+  first checks whether a blessed operand's class declares `use overload`
+  for that operator and dispatches to it
+  (`p-find-overload`/`p-call-overload`). Translators supporting objects
+  must preserve this hook order, which is perl's and is spelled once in
+  `%with-binary-overload` / `%with-unary-overload`:
+
+  1. the **left** operand's handler for this operator, then the **right**
+     one with the swapped flag;
+  2. perl's **autogeneration**, where perl has a derivation — for the
+     binary ops that is `.` and `x` from `""`, and the `== != < > <= >=`
+     family from `<=>` / the `eq ne lt gt le ge` family from `cmp`;
+  3. the class's **`nomethod`** handler, called with a **fourth**
+     argument naming the operator (`handler($self,$other,$swapped,$op)`);
+  4. the ordinary non-overloaded semantics.
+
+  The **third** argument is three-valued and every state is observable:
+  `""` (defined, false) for an ordinary call, `1` when the operands were
+  swapped, `undef` when the handler is invoked as a *mutator* (a `+=`-family
+  key, which PCL does not produce — it autogenerates every compound form
+  from its base operator). Never pass `undef` for "not swapped".
+
+  A **comparison handler's return value is the operator's value** and is
+  *not* truthified; only the `<=>`/`cmp` derivation produces a Perl boolean,
+  because there the language itself is comparing -1/0/1 against 0.
+
+- **Conversion derivation.** The three conversion operators derive from one
+  another when a class does not declare the one being asked for, in a fixed
+  preference order (perl's `Perl_amagic_call`):
+
+  | asked for | first fallback | second |
+  |---|---|---|
+  | `""`   | `0+`  | `bool` |
+  | `0+`   | `""`  | `bool` |
+  | `bool` | `0+`  | `""`   |
+
+  so a class with only `0+` stringifies through it, and an object whose
+  `0+` returns 0 (or whose `""` returns `""`/`"0"`) is **false** — a
+  blessed reference is not unconditionally true once its class overloads a
+  conversion. `fallback => 0` forbids the derivation outright (perl dies;
+  PCL keeps the ordinary address form until the binary refusal lands).
+  `nomethod` answers a conversion too, with the conversion's own name as
+  the fourth argument. One reading: `%p-conversion-handler`.
 
 ## 4. Context (scalar / list / void)
 

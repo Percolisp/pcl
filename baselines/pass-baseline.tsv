@@ -207,7 +207,7 @@ auto.t	OK	47	0	47
 bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
-bop.t	PARTIAL	252	257	510
+bop.t	PARTIAL	253	256	510
 caller.t	PARTIAL	15	49	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
