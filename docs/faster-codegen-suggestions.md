@@ -538,9 +538,73 @@ PCL absolute seconds for `slices`: **0.1878–0.1924 (A) against 0.2002–0.2012
 through `%p-slice-args-vector`, which must still hand back a length-exact
 vector.
 
-What is left on the row is what §0.2f already named: **#982** key
-stringification (~6 % here) and the ~23 % that is the `equal` hash table
-itself.
+### 0.2h `slices` after the small-fixnum string table (s464ax, round 22, #982)
+
+Since the boxed-aggregates flip an array ELEMENT holds a RAW value until
+something aliases it, so `@h{@k}` re-stringifies the same ten integers on
+every iteration with **no box and therefore no SV cache anywhere** to hold the
+answer — #922 closed with exactly that note.  `%p-fixnum-string` now answers
+small non-negative values out of a pre-built 1024-entry table (~32 KB) built
+BY the digit loop, which is unchanged and renamed `%p-fixnum-string-digits`.
+
+**The entries are SHARED, and that was the gating question, answered twice.**
+Every in-place string writer in `cl/` was read and none writes into a string
+it did not make (the list is in the runtime comment beside the table).  Then it
+was *measured*: a 16-route probe — a hash key handed back by `keys`/`each`/a
+foreach over `keys`, interpolation, `join`, `sprintf`, an array element, each
+followed by chop / substr-lvalue / vec-lvalue / an in-memory filehandle / `++`
+/ `s///` / `tr///` / a str-buffer append — run with the entries deliberately
+built **adjustable with a fill-pointer**, i.e. mutable in place: all 16 routes
+still read correctly.  With entry 5 poisoned to `"ZZ"` the first field reads
+`key:ZZ`, which is what makes the negative result mean something.  Guard rows:
+`Pl/t/misc-fixes-02.t` (#982 ×2).
+
+**The instrument.**  `bench-exec` on a shared box read ±8–15 % on `slices`
+that afternoon, so the primary measurement is an interleaved wall-time A/B of
+the two SAVED CORES on one emitted program (startup subtracted, best-of-K),
+with a same-core CONTROL run alternately:
+
+```
+program            control (A vs A)        A/B (A = table, B = 0e54656)
+slices, N=1.5e6    +1.6 % +0.7 %           +20.6 %  +16.9 %  +17.4 %
+                   (B vs B) +0.2 %
+numstr-small       -0.8 %                  +20.7 %    "" . ($i % 1000), 4e6
+numstr-big         +2.9 %                  +0.1 %     "" . ($i + 1e6),  4e6
+numstr-neg         -0.6 %                  +0.4 %     "" . -$i,         4e6
+```
+
+**~15 % of the `slices` program and ~17 % of a small-integer stringify loop;
+the non-table paths are unchanged** — the extra `TYPEP` costs nothing
+measurable.  Interleaved sb-sprof of the same two cores, three rounds each:
+A 1472/1500/1480 samples (0.736/0.750/0.740 s CPU) against B
+1754/1761/1737 (0.877/0.881/0.869); `%p-fixnum-string` is 5.5/5.1/4.5 % self
+in B and absent from A.  Note the profile's own attribution UNDERSTATES the
+win — the 15 M short-lived strings the digit loop allocated cost more than the
+time spent inside it.
+
+On the board, `bench-exec` A/B twice: `slices` **+13.5 % and +13.4 %** (base
+slower) in both, every other row sign-mixed and inside a control band that was
+±7 % on `intloop+=` and ±33 % on `pack` that afternoon.  `slices` reads
+**2.49x / 2.51x**.
+
+**Where `slices` stands after round 22: 3.02x -> ~2.5x** (#985 then #982).
+Both commits together against main `80b715c`, one interleaved best-of-5 run at
+1-min load 3.6:
+
+```
+bench          perl(s)    pclA(s)    pclB(s)       B/A    A/perl
+slices          0.0685     0.1699     0.2036    +19.9%     2.48x   <- the round
+arrhash         0.1302     0.0810     0.0840     +3.8%     0.62x
+gcdrec          0.1890     0.0935     0.0955     +2.1%     0.49x
+feread2         0.4241     0.5429     0.5538     +2.0%     1.28x
+arrfill         0.0489     0.0701     0.0705     +0.6%     1.43x
+listcopy        0.5131     0.4720     0.4738     +0.4%     0.92x
+feread          0.4186     0.1954     0.1958     +0.2%     0.47x
+collatz         1.9328     0.5225     0.5223     -0.0%     0.27x
+sliceasgn       0.0252     0.0526     0.0524     -0.3%     2.09x
+```
+
+What is left on the row is the ~23 % that is the `equal` hash table itself.
 
 ---
 

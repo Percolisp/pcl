@@ -25,7 +25,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 124;
+plan tests => 126;
 
 sub run_cl {
     my ($code) = @_;
@@ -1202,3 +1202,63 @@ test_cl('#922 integers stringify across the fixnum boundary',
   . "-9223372036854775808|-4611686018427387905|-4611686018427387904|"
   . "-1234567|-1|0|1|9|10|99|100|1234567|4611686018427387903|"
   . "4611686018427387904|9223372036854775807\n");
+
+# ── #982: the small-fixnum string table, and why it may be SHARED ───────────
+# Since s464ax the decimal text of 0..1023 is pre-built and handed out EQ, so
+# `@h{@k}` stops re-stringifying the same integers (a raw array element has no
+# box, hence no SV cache — docs/boxed-aggregates-design-s455.md).  The table
+# entries are therefore SHARED, and a writer that mutated one in place would
+# corrupt every later use of that number for the life of the image.
+#
+# These are the routes by which a to-string RESULT — the entry itself, not a
+# copy — reaches a scalar the program can write to, each followed by a fresh
+# read of the same number.  Verified to have teeth: with the table poisoned at
+# entry 5 the first field reads `key:ZZ`, and with the entries deliberately
+# built ADJUSTABLE (i.e. mutable in place) every field still reads correctly,
+# which is the measured half of the s464ax audit.
+test_cl('#982 nothing writes through a shared small-fixnum string',
+    'my $out = "";
+     { my %h = (5 => "a"); my ($k) = keys %h; $k .= "x";
+       my %g = (5 => "b"); my ($j) = keys %g; $out .= "key:$j "; }
+     { my %h = (6 => "a"); for my $k (keys %h) { $k .= "x" }
+       my %g = (6 => "b"); my ($j) = keys %g; $out .= "forkey:$j "; }
+     { my $n = 7; my $s = "$n"; $s .= "x"; my $t = "$n"; $out .= "interp:$t "; }
+     { my $s = join("", 8); $s .= "x"; $out .= "join:" . join("", 8) . " "; }
+     { my $s = sprintf("%s", 9); $s .= "x";
+       $out .= "sprintf:" . sprintf("%s", 9) . " "; }
+     { my @a; $a[0] = 10; $a[0] .= "x"; my @b; $b[0] = 10; $out .= "elem:$b[0] "; }
+     { my %h = (11 => "a"); while (my ($k,$v) = each %h) { $k .= "x" }
+       my %g = (11 => "b"); my ($j) = keys %g; $out .= "each:$j "; }
+     { my %h; $h{12} = 1; my ($k) = keys %h; my $c = $k; $c .= "!";
+       $h{12}++; $out .= "count:$h{12} "; }
+     { my %h = (13 => "a"); my ($k) = keys %h; chop $k;
+       my %g = (13 => "b"); my ($j) = keys %g; $out .= "chopkey:$j "; }
+     { my %h = (14 => "a"); my ($k) = keys %h; substr($k,0,1) = "Z";
+       my %g = (14 => "b"); my ($j) = keys %g; $out .= "subkey:$j "; }
+     { my %h = (15 => "a"); my ($k) = keys %h; vec($k,0,8) = 65;
+       my %g = (15 => "b"); my ($j) = keys %g; $out .= "veckey:$j "; }
+     { my %h = (16 => "a"); my ($k) = keys %h;
+       open my $fh, ">>", \$k or die; print $fh "X"; close $fh;
+       my %g = (16 => "b"); my ($j) = keys %g; $out .= "fhkey:$j "; }
+     { my %h = (17 => "a"); my ($k) = keys %h; $k++;
+       my %g = (17 => "b"); my ($j) = keys %g; $out .= "incrkey:$j "; }
+     { my %h = (18 => "a"); my ($k) = keys %h; $k =~ s/18/QQ/;
+       my %g = (18 => "b"); my ($j) = keys %g; $out .= "subskey:$j "; }
+     { my %h = (19 => "a"); my ($k) = keys %h; $k =~ tr/19/QQ/;
+       my %g = (19 => "b"); my ($j) = keys %g; $out .= "trkey:$j "; }
+     { my $s = 20; for (1..3) { $s .= "x" } my $t = 20; $out .= "buf:$t "; }
+     print "$out\n";',
+    "key:5 forkey:6 interp:7 join:8 sprintf:9 elem:10 each:11 count:2 "
+  . "chopkey:13 subkey:14 veckey:15 fhkey:16 incrkey:17 subskey:18 "
+  . "trkey:19 buf:20 \n");
+
+# The table's own boundary: 1023 is the last pre-built value, 1024 the first
+# that runs the digit loop, and negatives never come from it.  A wrong bound
+# is a wrong hash key, not just wrong output.
+test_cl('#982 the small-fixnum table boundary',
+    'my @b = (0, 1, 1021, 1022, 1023, 1024, 1025, 4095, 4096, -1, -1023, -1024);
+     print join("|", map { "$_" } @b), "\n";
+     my %g; $g{$_} = 1 for @b;
+     print join("|", sort { $a <=> $b } keys %g), "\n";',
+    "0|1|1021|1022|1023|1024|1025|4095|4096|-1|-1023|-1024\n"
+  . "-1024|-1023|-1|0|1|1021|1022|1023|1024|1025|4095|4096\n");

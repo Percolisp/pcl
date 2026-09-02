@@ -3038,7 +3038,7 @@
                   (p-box-nv-ok box) t))
           n))))
 
-(defun %p-fixnum-string (n)
+(defun %p-fixnum-string-digits (n)
   "Decimal text of the FIXNUM N, as a fresh (simple-array character (*)) —
    the same string WRITE-TO-STRING returns, built by a digit loop instead of
    through the printer.  Measured 3x faster (0.21 s -> 0.064 s for 2 M
@@ -3084,6 +3084,40 @@
                 (decf i)
                 (when (zerop v) (return)))))
            s))))))
+
+;;; SMALL NON-NEGATIVE FIXNUMS ARE PRE-BUILT (task #982, s464ax).  Since the
+;;; boxed-aggregates flip an array ELEMENT holds a RAW value until something
+;;; aliases it, so `@h{@k}` re-stringifies the same ten integers on every
+;;; iteration with no box and therefore no SV cache anywhere to hold the
+;;; answer (docs/boxed-aggregates-design-s455.md; #922 closed with exactly
+;;; that note).  The table is that cache, in the only place a raw value can
+;;; have one — 1024 entries, ~32 KB, built BY the digit loop so the text is
+;;; identical to it by construction, not by a second implementation.
+;;;
+;;; ITS ENTRIES ARE SHARED, so they must never be mutated in place.  Audited
+;;; s464ax, every in-place string writer in cl/: magical-string-increment
+;;; (COPY-SEQ first), p-chop/p-chomp (SUBSEQ), p-vec-set (COPY-SEQ or
+;;; CONCATENATE), p-string-bit-op (fresh MAKE-STRING), %pcl-str-buffer (fresh
+;;; adjustable buffer + REPLACE), %pcl-str-append (writes its own accumulator,
+;;; reads the source), %psos-put via %psos-buf (rebuilds unless the box already
+;;; holds an ADJUSTABLE fill-pointer string — a table entry is simple, so it
+;;; rebuilds), and the XS bridge (STRING-TO-OCTETS makes a fresh octet vector
+;;; before any SAP is taken).  Nothing writes into a plain simple-string it
+;;; did not make.  A future in-place string writer MUST copy first.
+(defparameter *p-small-fixnum-strings*
+  (let ((v (make-array 1024)))
+    (dotimes (i 1024 v) (setf (svref v i) (%p-fixnum-string-digits i))))
+  "Decimal text of 0..1023, EQ-shared.  Read-only — see the note above.")
+
+(declaim (inline %p-fixnum-string))
+(defun %p-fixnum-string (n)
+  "Decimal text of the FIXNUM N.  0..1023 come from the shared table above and
+   the answer is therefore NOT FRESH — never mutate it in place; everything
+   else runs the digit loop and is fresh.  Callers must assume shared."
+  (declare (type fixnum n))
+  (if (typep n '(integer 0 1023))
+      (svref (the simple-vector *p-small-fixnum-strings*) n)
+      (%p-fixnum-string-digits n)))
 
 (defun stringify-value (v)
   "Convert a raw value to string"

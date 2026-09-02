@@ -90,6 +90,90 @@ Coverage hole worth #993's attention: perl's `t/lib/overload_fallback.t` and
 feature's own acceptance tests had never run.
 
 ---
+## Session 464ax, part 2 (2026-09-02, Opus, round 22 PERF slot) — small fixnums stringify out of a SHARED table (#982)
+
+**Why there was no cache to begin with.**  A PCL box caches its
+stringification (`p-box-sv`) exactly so a scalar used as a hash key
+stringifies once.  Since the boxed-aggregates flip an array ELEMENT holds a
+RAW value until something aliases it, so `@h{@k}` — ten raw integers — has no
+box and therefore no cache anywhere, and re-stringifies the same ten values on
+every iteration.  #922 closed with that observation.  The table is that cache,
+in the only place a raw value can have one: 1024 pre-built strings (~32 KB)
+for 0..1023, **built by the digit loop itself** (unchanged, renamed
+`%p-fixnum-string-digits`), so the text is identical by construction rather
+than by a second implementation.
+
+**The entries are shared, and that was the gating question.**  Answered twice.
+The audit: every in-place string writer in `cl/` either copies first
+(`magical-string-increment` COPY-SEQ, chop/chomp SUBSEQ, `p-vec-set`
+COPY-SEQ/CONCATENATE, `p-string-bit-op` MAKE-STRING, `%pcl-str-buffer` a fresh
+adjustable buffer) or writes only a buffer it made (`%pcl-str-append`,
+`%psos-put` via `%psos-buf`, which rebuilds unless the box already holds an
+adjustable fill-pointer string — a table entry is simple, so it rebuilds); the
+XS bridge takes STRING-TO-OCTETS before any SAP.  Then the measurement, which
+is the half that counts: a 16-route probe for the ways a `to-string` RESULT
+reaches a writable scalar — a hash key handed back by `keys` / `each` / a
+foreach over `keys`, interpolation, `join`, `sprintf`, an array element, each
+followed by chop, substr-lvalue, vec-lvalue, an in-memory filehandle, `++`,
+`s///`, `tr///`, a str-buffer append.  Run with the entries deliberately built
+**ADJUSTABLE with a fill-pointer** — mutable in place, the worst case — all 16
+routes still read correctly.  And run with entry 5 poisoned to `"ZZ"`, the
+first field reads `key:ZZ`, which is what makes the negative result mean
+anything rather than proving the probe never touched the table.  Both are
+guard rows.  Standing rule in the runtime comment: a future in-place string
+writer MUST copy first.
+
+**The instrument had to change.**  A sibling agent was on the box, and
+`bench-exec`'s own control (the tree against a byte-identical copy of itself)
+read ±8–15 % on `slices` — wider than the effect.  So the primary measurement
+is an interleaved wall-time A/B of the two SAVED CORES on one emitted program,
+startup subtracted the bench's way, best-of-K, with a same-core CONTROL run
+alternately:
+
+```
+program            control (A vs A)        A/B (A = table, B = 0e54656)
+slices, N=1.5e6    +1.6 % +0.7 %           +20.6 %  +16.9 %  +17.4 %
+                   (B vs B) +0.2 %
+numstr-small       -0.8 %                  +20.7 %
+numstr-big         +2.9 %                  +0.1 %
+numstr-neg         -0.6 %                  +0.4 %
+```
+
+**~15 % of the `slices` program, ~17 % of a small-integer stringify loop, and
+nothing at all on the paths the table does not serve** (values > 1023,
+negatives) — the extra `TYPEP` is free.  Interleaved sb-sprof of the same two
+cores: A 1472/1500/1480 samples against B 1754/1761/1737, with
+`%p-fixnum-string` 5.5/5.1/4.5 % self in B and absent from A.  **The profile
+UNDERSTATES the win**: the 15 M short-lived strings the digit loop allocated
+cost more than the time spent inside it, which is why 6.5 % of samples buys
+15 % of the program.  On the board, `bench-exec` A/B twice gives `slices`
++13.5 % and +13.4 %, i.e. **2.49×/2.51× against §0.2f's 3.02×** — with #985
+that is **3.02× → ~2.5× over round 22**.
+
+**Key text held.**  48 numeric values (the fixnum limits, the table boundary
+1021–1025, negatives, floats, numeric strings, `0 but true`, `-0`, `1e3`)
+printed AND used as hash keys, before and after: byte-identical, and identical
+to perl but for one PRE-EXISTING row now filed as **#1012** — a float of
+magnitude exactly 1e15 prints as its integer text where perl says `1e+15`,
+because `stringify-value`'s float arm derives the exponent from a LOG that
+lands on 14.999999999999998.  `stringify-value` itself was NOT touched (the
+sibling agent owns its overload arms this round).
+
+**The round as a whole**, both commits against main `80b715c`, one interleaved
+best-of-5 at 1-min load 3.6: `slices` **+19.9 %** (0.1699 s against 0.2036 s,
+**3.02× → 2.48×**), and arrhash +3.8, gcdrec +2.1, feread2 +2.0, arrfill +0.6,
+listcopy +0.4, feread +0.2, collatz −0.0, sliceasgn −0.3 — every other row
+inside ±4 %.
+
+Legs: gate **193 / 6544** (only the 13 pclxs xs rows); sweep TOTAL **18346
+(+0)** GATE clean drops 5 = census; companion **`--all --quick` 528 files with
+ZERO real movers** — io/open.t (153/35) and io/pvbm.t (21/7) both reproduce
+their BLESSED 154/34 and 23/5 when run ALONE on this tree, which is the
+multi-file-session artefact this snapshot's own notes document; io/pipe.t
+contention; io/crlf_through.t / io/through.t / uni/variables.t the known load
+TIMEOUTs.  Five probe files identical under `PCL_OPT=none`.  Record §0.2h;
+guards `Pl/t/misc-fixes-02.t` 124 → 126.
+
 ## Session 464ax (2026-09-02, Opus, round 22 PERF slot) — the slice-argument flattener answers a VECTOR (#985)
 
 **The shape.**  `%p-flatten-slice-args` is the ONE place the rule "a non-string
