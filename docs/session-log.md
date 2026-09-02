@@ -131,6 +131,8 @@ Append new entries at the top. One section per session.
 
 **USER (same day, after the presentation)**: all four §5 decisions taken as recommended (interleaved standing slot; Unicode class out of scope → #1036; wholesale refresh → #1038; the statement-level refusal rule ratified → #1037); "start working on the stack of tasks"; and on #1034: "I assume it is a need to annotate what variables are used for what in the IR, yes?  In case someone wants to compile to C/C++/etc.  Are there more obvious internal information that we should export?" → the pair **#1035** (export the compiler's own verdicts — variable class, per-sub facts, rename manifest, source lines — as a no-op `p-facts` block; part a) + **#1034** (the user hints, part b; the USER suggested DISTINCT DECLARATORS `int $i = 0` as the spelling — recorded beside the attribute form).  **ROUND 23 LAUNCHED**: AZ phase 0 instruments, BA #1028 → #1032 → #1037, BB #994 → #995 (DECIDED §s465 has the shape).  Fable: records, the `not-supported.md` Unicode-class section, the CLAUDE.md I4 line when AZ proposes it.
 
+**BB MERGED (2026-09-03, ff `73edcff`, gen v2-610)** after the Fable review: diff read, a 40-row probe battery on three emission paths (two pre-existing diffs: #1039, **#1045** `goto &NAME` under `insensitive-call` — filed), gate 194/6567 xs-only on BB's tree, sweep on the merged main TOTAL 18266 (+0) GATE clean.  BB's scratch/ (51 files) had been COMMITTED — dropped from the index before the ff, copied to the scratchpad.  **#1046** filed (bench-exec has no explicit-return rows).  Bench-alone leg = round end.  DECIDED §s465 has the legs and the two lessons.
+
 **Legs**: `tools/prove-core` on the records tree (docs-only change) — see the commit; sweep as above.
 
 ---
