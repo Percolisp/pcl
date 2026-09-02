@@ -18,6 +18,19 @@
 #   tools/sweep-diff.pl diff <baseline> <current> # NEW + FIXED + LOST (see below)
 #   tools/sweep-diff.pl save <current> <dest.tsv>  # write a sorted baseline to commit
 #   tools/sweep-diff.pl save-status <current-dir> <dest.tsv>   # bless the PASS baseline
+#   tools/sweep-diff.pl save-shortfall <current-dir> <dest.tsv> # bless the SHORTFALL baseline
+#
+# THE BASELINE'S SIXTH COLUMN — the CAUSE (task #993, docs/plan-test-audit-s464.md
+# §3 I3).  baselines/fail-baseline.tsv rows are
+#   file <TAB> num <TAB> description <TAB> got <TAB> expected <TAB> cause
+# where cause is a task number, a docs/not-supported.md anchor, or UNEXPLAINED.
+# The JOIN KEY is unchanged — (file, description) — and a LIVE .faillog row has
+# five fields, so the column is read when present and ignored otherwise.  Every
+# `diff` prints how many blessed rows are cause-less, because a cause-less row
+# is QUEUE, not baseline, and a queue nobody counts grows unnoticed: 229 of the
+# 708 rows (bop.t, one mechanism, #1028) had sat unattributed for months.
+# `save` cannot write causes — it reads a RUN — so it WARNS when the
+# destination has them.  Baseline rows leave BY EDIT.
 #
 # <current>/<baseline> may each be a directory (globs *.fails.tsv) or a single .tsv file.
 #
@@ -48,11 +61,25 @@
 # with MORE drops than the census fails the run like a NEW failure; FEWER is a
 # fix, and the census row leaves by EDIT — never by re-blessing the file.
 #
-# `diff` exits nonzero if there are NEW failures, any LOST rows, or any new
-# dropped statements — usable as a CI gate.
+# THE SIXTH BUCKET — SHORTFALL (task #993, plan-test-audit-s464.md §3 I2).
+# A verdict of OK means "no previously-passing row was lost", never "the plan
+# was produced": perl-tests/pack.t is OK with 8,997 of its 14,722 planned rows
+# never produced, lc.t with 2,577.  Those rows are invisible to every bucket
+# above, because the row is not failing — it is ABSENT.  The sweep records a
+# per-file `shortfall` column in _status.tsv (planned - (pass+fail+skip)) and
+# this tool compares it against baselines/row-shortfall.tsv, blessed per file
+# WITH A CAUSE.  MORE than blessed fails the run like a NEW failure; FEWER is a
+# fix and the row leaves BY EDIT.  Same contract as the drop census, and the
+# same file shape — see tools/lib/PCLShortfall.pm.
+#
+# `diff` exits nonzero if there are NEW failures, any LOST rows, any new
+# dropped statements, or any new shortfall — usable as a CI gate.
 
 use strict;
 use warnings;
+use FindBin;
+use lib "$FindBin::RealBin/lib";
+use PCLShortfall ();   # the ONE reader of the shared shortfall baseline (#993)
 
 # Read a per-file run status table: one line of
 #   name <TAB> status <TAB> pass <TAB> fail <TAB> planned [<TAB> drops <TAB> note]
@@ -70,13 +97,18 @@ sub read_status_file {
         chomp $line;
         next unless length $line;
         next if $line =~ /^#/;
-        my ($file, $status, $pass, $fail, $planned, $drops) = split /\t/, $line;
+        my ($file, $status, $pass, $fail, $planned, $drops, $child, $short) = split /\t/, $line;
         next unless defined $file;
         $st{$file} = { status  => $status  // 'OK',
                        pass    => defined $pass    ? $pass    : -1,
                        fail    => defined $fail    ? $fail    : -1,
                        planned => defined $planned ? $planned : -1,
-                       drops   => (defined $drops && $drops =~ /^-?\d+$/) ? $drops : -1 };
+                       drops   => (defined $drops && $drops =~ /^-?\d+$/) ? $drops : -1,
+                       # SHORTFALL (task #993): planned - produced, the eighth
+                       # column.  -1 = NOT MEASURED, exactly like drops — the
+                       # blessed pass baseline has five columns and every reader
+                       # must treat a missing column as unknown, never as zero.
+                       short   => (defined $short && $short =~ /^-?\d+$/) ? $short : -1 };
     }
     close $fh;
     return \%st;
@@ -161,11 +193,17 @@ sub load {
             chomp $line;
             next unless length $line;
             next if $line =~ /^#/;   # legend/comment lines
-            my ($file, $num, $desc, $got, $exp) = split /\t/, $line, 5;
+            # SIX fields since task #993: the blessed baseline carries a CAUSE
+            # column (a task number, a not-supported.md anchor, or UNEXPLAINED).
+            # The JOIN KEY is unchanged — (file, description) — and a live
+            # .faillog row has five fields, so the sixth reads back undef there.
+            # Splitting at 5 would have glued the cause onto `expected` and made
+            # every blessed row's got/expected report wrong.
+            my ($file, $num, $desc, $got, $exp, $cause) = split /\t/, $line, 6;
             next unless defined $desc;
             $rec{"$file\t$desc"} = { file => $file, desc => $desc,
                                      got => $got // '', expected => $exp // '',
-                                     num => $num // '' };
+                                     num => $num // '', cause => $cause };
         }
         close $fh;
     }
@@ -186,8 +224,39 @@ my ($pass_baseline_opt, $drop_census_opt);
     @ARGV = @keep;
 }
 
-my %modes = map { $_ => 1 } qw(diff save save-status);
+my %modes = map { $_ => 1 } qw(diff save save-status save-shortfall);
 my $mode = (@ARGV && $modes{$ARGV[0]}) ? shift @ARGV : 'summary';
+
+if ($mode eq 'save-shortfall') {
+    # Bless THIS POPULATION's rows in the shared shortfall baseline (task #993).
+    # The companion's rows (`t/…`) are copied through untouched — one file, two
+    # populations, exactly like baselines/parse-error-drop-census-s399.tsv.  A
+    # writer that only knows its own half must never erase the other's.
+    my $cur  = shift @ARGV or die "usage: $0 save-shortfall <current-dir> <dest.tsv>\n";
+    my $dest = shift @ARGV or die "usage: $0 save-shortfall <current-dir> <dest.tsv>\n";
+    my $st = load_status($cur);
+    die "no _status.tsv under $cur (a live .faillog directory is required)\n" unless %$st;
+    my $rows = PCLShortfall::read_shortfall($dest);
+    my $touched = 0;
+    for my $file (sort keys %$st) {
+        my $now = $st->{$file}{short};
+        next if !defined $now || $now < 0;         # not measured: keep the row
+        $touched++;
+        my $key = "perl-tests/$file";
+        if (!$now) { delete $rows->{$key}; next }
+        $rows->{$key} = { rows  => $now,
+                          cause => ($rows->{$key} ? $rows->{$key}{cause} : 'UNEXPLAINED') };
+    }
+    my $sha = `git rev-parse --short HEAD 2>/dev/null`;
+    chomp $sha;
+    my @t = localtime;
+    PCLShortfall::write_shortfall($dest, $rows,
+        sprintf("%s %04d-%02d-%02d", (length $sha ? $sha : 'unknown'), $t[5]+1900, $t[4]+1, $t[3]));
+    my $sum = 0; $sum += $rows->{$_}{rows} for keys %$rows;
+    printf "saved %d shortfall row(s) over %d file(s) (%d sweep file(s) re-measured) -> %s\n",
+        $sum, scalar(keys %$rows), $touched, $dest;
+    exit 0;
+}
 
 if ($mode eq 'save-status') {
     # Bless a clean run's per-file pass counts as the LOST-bucket baseline.
@@ -233,6 +302,26 @@ if ($mode eq 'save') {
     my $cur  = shift @ARGV or die "usage: $0 save <current> <dest.tsv>\n";
     my $dest = shift @ARGV or die "usage: $0 save <current> <dest.tsv>\n";
     my $rec = load($cur);
+    # A RUN has no causes to write, so this mode writes FIVE columns.  Say so
+    # loudly when the destination already has a cause column: overwriting
+    # baselines/fail-baseline.tsv from a run would throw away every attribution
+    # AND absorb whatever else moved — which is why its rows leave BY EDIT.
+    if (-e $dest) {
+        my $has_cause = 0;
+        if (open my $dh, '<', $dest) {
+            while (my $l = <$dh>) {
+                next if $l =~ /^#/ || $l !~ /\S/;
+                chomp $l;
+                $has_cause = 1 if (split /\t/, $l, 6) >= 6;
+                last;
+            }
+            close $dh;
+        }
+        warn "WARNING: $dest carries a CAUSE column and `save` cannot write one —\n"
+           . "  every attribution in it will be LOST.  A blessed baseline's rows leave\n"
+           . "  BY EDIT (task #993 / #223); use `save` only for a NEW baseline file.\n"
+            if $has_cause;
+    }
     open my $out, '>', $dest or die "open $dest: $!\n";
     for my $k (sort keys %$rec) {
         my $r = $rec->{$k};
@@ -311,6 +400,39 @@ if (%$census && %$cur_status) {
         my $was = $census->{"perl-tests/$file"} // 0;
         push @drop_up,   [$file, $was, $now] if $now > $was;
         push @drop_down, [$file, $was, $now] if $now < $was;
+    }
+}
+
+# ── SIXTH BUCKET — SHORTFALL: rows the PLAN promised that never ran (#993) ───
+# A file's verdict here is "no previously-passing row was lost", which says
+# nothing about the rows that never ran at all: perl-tests/pack.t is OK with
+# 8,997 of its 14,722 planned rows never produced, lc.t with 2,577.  Those are
+# invisible to every bucket above — the row is not failing, it is ABSENT — so
+# they are blessed per file WITH A CAUSE in baselines/row-shortfall.tsv and
+# compared here.  MORE than blessed = the run is NOT clean; FEWER = a fix, and
+# the row leaves BY EDIT.  Same contract as the drop census.
+my $shortfall_path = do {
+    my $dir = -d $base_path ? $base_path : ($base_path =~ s{/[^/]*$}{}r);
+    $dir = '.' if !length $dir;
+    my ($p) = grep { -e $_ } ("$dir/row-shortfall.tsv", 'baselines/row-shortfall.tsv');
+    $p;
+};
+my $shortfall_base = $shortfall_path ? PCLShortfall::read_shortfall($shortfall_path) : {};
+my (@short_up, @short_down, $short_now, $short_unexplained, $short_unexplained_files);
+($short_now, $short_unexplained, $short_unexplained_files) = (0, 0, 0);
+if (%$shortfall_base && %$cur_status) {
+    for my $file (sort keys %$cur_status) {
+        my $now = $cur_status->{$file}{short};
+        next if !defined $now || $now < 0;         # not measured this run
+        $short_now += $now;
+        my $b   = $shortfall_base->{"perl-tests/$file"};
+        my $was = $b ? $b->{rows} : 0;
+        push @short_up,   [$file, $was, $now] if $now > $was;
+        push @short_down, [$file, $was, $now] if $now < $was;
+        if ($now && (!$b || $b->{cause} =~ /^UNEXPLAINED/)) {
+            $short_unexplained += $now;
+            $short_unexplained_files++;
+        }
     }
 }
 
@@ -414,6 +536,56 @@ if (!%$census) {
         (@drop_up ? '  <-- a NEW drop landed: this run is NOT clean' : '');
 }
 
+if (@short_up || @short_down) {
+    print "SHORTFALL vs the baseline (", ($shortfall_path // '?'), "):\n";
+    printf "  + %-14s %d -> %d planned row(s) NEVER PRODUCED — NEW shortfall\n", @$_[0,1,2]
+        for sort { $a->[0] cmp $b->[0] } @short_up;
+    printf "  - %-14s %d -> %d planned row(s) — fixed; EDIT the baseline row\n", @$_[0,1,2]
+        for sort { $a->[0] cmp $b->[0] } @short_down;
+    print "\n";
+}
+# Same rule as every other bucket: a check that goes quiet when it could not
+# run is indistinguishable from one that passed.
+if (!%$shortfall_base) {
+    print "SHORTFALL: NOT CHECKED — no baselines/row-shortfall.tsv"
+        . " (bless one with: $0 save-shortfall .faillog baselines/row-shortfall.tsv)\n";
+} elsif (!%$cur_status) {
+    print "SHORTFALL: NOT CHECKED — the current run has no _status.tsv (needs a live .faillog directory)\n";
+} else {
+    my $base_short = 0;
+    for my $file (sort keys %$cur_status) {
+        next if ($cur_status->{$file}{short} // -1) < 0;
+        $base_short += ($shortfall_base->{"perl-tests/$file"} || {})->{rows} // 0;
+    }
+    printf "TOTAL planned rows never produced: baseline %d, current %d (%+d)%s\n",
+        $base_short, $short_now, $short_now - $base_short,
+        (@short_up ? '  <-- a NEW shortfall landed: this run is NOT clean' : '');
+    printf "  UNEXPLAINED shortfall: %d row(s) in %d file(s) — that is the audit's queue (#993)\n",
+        $short_unexplained, $short_unexplained_files if $short_unexplained;
+}
+
+# ── The CAUSE column (task #993 I3) ─────────────────────────────────────────
+# A blessed failing row carries a CAUSE (task number / not-supported.md anchor);
+# a cause-less row is QUEUE, not baseline.  Counted on every run so the queue
+# can never silently grow — the same reason the UNEXPLAINED suite verdicts are
+# counted rather than inferred from an absence.
+{
+    my ($have, $none) = (0, 0);
+    for my $k (keys %$base) {
+        my $c = $base->{$k}{cause};
+        if (defined $c && length $c && $c !~ /^UNEXPLAINED/) { $have++ } else { $none++ }
+    }
+    if (!$have && !$none) {
+        print "CAUSES: NOT CHECKED — the baseline has no rows\n";
+    } elsif (!$have) {
+        printf "CAUSES: NOT CHECKED — no cause column in %s (add one: docs/plan-test-audit-s464.md §3 I3)\n",
+            $base_path;
+    } else {
+        printf "CAUSES: %d of %d blessed row(s) have no cause — a cause-less row is QUEUE, not baseline (#993)\n",
+            $none, $have + $none;
+    }
+}
+
 # The TOTAL line is the gate itself: it must be printed on EVERY run, including
 # the runs where nothing was lost, and it must say so when it could not be
 # computed.  A check that goes quiet when it cannot run is indistinguishable
@@ -430,12 +602,13 @@ if (!%$pass_base) {
         (@lost ? '  <-- LOST is non-empty: this run is NOT clean' : '');
 }
 
-printf "summary: %d new, %d fixed%s%s%s%s (baseline %d fails, current %d fails)\n",
+printf "summary: %d new, %d fixed%s%s%s%s%s (baseline %d fails, current %d fails)\n",
     scalar(@new), scalar(@fixed),
     (@lost ? sprintf(", %d LOST", scalar(@lost)) : ''),
     (@drop_up ? sprintf(", %d file(s) with NEW drops", scalar(@drop_up)) : ''),
+    (@short_up ? sprintf(", %d file(s) with NEW shortfall", scalar(@short_up)) : ''),
     (@new_unstable ? sprintf(", %d unstable (crash-file noise)", scalar(@new_unstable)) : ''),
     (@notrun ? sprintf(", %d unverified (did not run)", scalar(@notrun)) : ''),
     scalar(keys %$base), scalar(keys %$cur);
 
-exit((@new || @lost || @drop_up) ? 1 : 0);
+exit((@new || @lost || @drop_up || @short_up) ? 1 : 0);

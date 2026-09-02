@@ -62,6 +62,24 @@
 #   marked only when the crash itself is the documented gap; everything
 #   UNEXPLAINED stays a fix/triage target.
 #
+# THE THREE PHASE-0 AUDIT INSTRUMENTS (task #993, docs/plan-test-audit-s464.md
+# §3).  All three answer the same question from different sides: WHAT IS THIS
+# RUN NOT TELLING ME?
+#
+#   --bless-fails      baselines/perl-suite-fails.tsv — the ROW-level fail
+#                      baseline (I1).  Until it existed the 273 DIFF files were
+#                      blessed as COUNTS: #964's failing row sat inside
+#                      op/sub.t's "12 not ok" for months and nothing named it.
+#                      Every run prints NEW ROW / FIXED ROW / UNVERIFIED / LOST.
+#   --bless-shortfall  baselines/row-shortfall.tsv — perl rows PCL never
+#                      produced, per file, WITH A CAUSE (I2, shared with the
+#                      sweep through tools/lib/PCLShortfall.pm).  The 10
+#                      TRANSPILE files are one line each and 2,031 rows behind
+#                      them; a shortfall is invisible to every other bucket.
+#   --bless-stamps     baselines/perl-suite-notrun-stamps.tsv — WHEN each
+#                      never-run file was last measured (I4).  "not run" says
+#                      nothing about how old the hole is; the stamp does.
+#
 #   XDIFF IS GRANTED PER ROW, all-or-nothing (task #185), exactly like FIXTURE:
 #   baselines/perl-suite-expected-rows.tsv holds the blessed multiset of diverging
 #   rows for each registered file, keyed by PERL's test DESCRIPTION (#177 —
@@ -159,6 +177,7 @@ use PclTapAlign qw(tap_rows align_taps);
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 use PCLPaths qw(perl_suite_t);
+use PCLShortfall ();   # the ONE reader/writer of the shared shortfall baseline (#993)
 
 # Contain the whole sweep in its own memory-capped cgroup: a runaway child
 # (e.g. the pl2cl eval-server ballooning on op/cond.t's 20k-nested ternary)
@@ -195,12 +214,19 @@ my $expected_tsv = "$root/baselines/perl-suite-expected.tsv";
 my $expected_rows_tsv = "$root/baselines/perl-suite-expected-rows.tsv";
 my $fixture_tsv  = "$root/baselines/perl-suite-fixture.tsv";
 my $timeouts_tsv = "$root/baselines/perl-suite-timeouts.tsv";
-my $bless_rows;
+# The three PHASE-0 audit instruments (task #993, docs/plan-test-audit-s464.md §3).
+my $fails_tsv     = "$root/baselines/perl-suite-fails.tsv";           # I1 row bless
+my $shortfall_tsv = "$root/baselines/row-shortfall.tsv";              # I2 planned-produced
+my $stamps_tsv    = "$root/baselines/perl-suite-notrun-stamps.tsv";   # I4 last measured
+my ($bless_rows, $bless_fails, $bless_shortfall, $bless_stamps);
 my $quick;
 my (@dirs, @files);
 while (@ARGV) {
   my $a = shift @ARGV;
   if    ($a eq '--bless-rows')     { $bless_rows = 1 }
+  elsif ($a eq '--bless-fails')     { $bless_fails = 1 }
+  elsif ($a eq '--bless-shortfall') { $bless_shortfall = 1 }
+  elsif ($a eq '--bless-stamps')    { $bless_stamps = 1 }
   elsif ($a eq '--tdir')           { $tdir = shift @ARGV }
   elsif ($a eq '--dir')            { push @dirs, shift @ARGV }
   elsif ($a eq '--all')            { $all = 1 }
@@ -285,6 +311,65 @@ sub timeout_for {
   my ($rel) = @_;
   my $e = $file_timeout{$rel} or return $timeout;
   return $e->{secs} > $timeout ? $e->{secs} : $timeout;
+}
+
+# ── I1: the ROW-level fail baseline (task #993, plan-test-audit §3) ──────────
+# baselines/perl-suite-fails.tsv — the companion's answer to the sweep's
+# baselines/fail-baseline.tsv.  Until this existed the 273 DIFF files were blessed
+# as COUNTS only: #964's failing row sat inside op/sub.t's "12 not ok" and
+# nothing named it, so a semantic difference could live for months while the
+# file's numbers never moved.  Keyed exactly like the #185 expected-rows
+# baseline — (rel, PERL's test DESCRIPTION), compared as a MULTISET — because
+# test NUMBERS are the unstable coordinate (#177) and because the two
+# baselines must not disagree about what a row IS.
+#
+# Files registered in perl-suite-expected.tsv or perl-suite-fixture.tsv are
+# NOT in here: their rows are already gated, per row, by those registries.
+# One gate per file, or a moved row reads twice and is fixed once.
+my %blessed_fails;      # rel -> sorted arrayref of rowkeys
+my %blessed_fail_meta;  # rel -> arrayref of [num, perl_verb, pcl_verb, rowkey]
+if (open my $bf, '<', $fails_tsv) {
+  while (<$bf>) {
+    chomp;
+    next if /^\s*(?:#|$)/;
+    my ($rel, $num, $pv, $cv, $key) = split /\t/, $_, 5;
+    next unless defined $key;
+    push @{ $blessed_fails{$rel} }, $key;
+    push @{ $blessed_fail_meta{$rel} }, [$num, $pv, $cv, $key];
+  }
+  close $bf;
+  @{ $blessed_fails{$_} } = sort @{ $blessed_fails{$_} } for keys %blessed_fails;
+}
+
+# ── I2: the ROW-SHORTFALL baseline, SHARED with the sweep ────────────────────
+# baselines/row-shortfall.tsv — rows the population expected and PCL never
+# produced, per file, with a CAUSE.  The drop census's shape (rows leave by
+# EDIT; more than blessed fails the run) applied to a different blindness:
+# a drop is a statement that vanished, a shortfall is a whole TAIL of rows that
+# never ran.  "OK" used to mean "no previously-passing row lost", so pack.t
+# read OK while 8,997 of its 14,722 planned rows were never produced.
+# Keys are population-prefixed exactly like the drop census: `t/<rel>` here,
+# `perl-tests/<name>` for the sweep.
+my %shortfall_base = %{ PCLShortfall::read_shortfall($shortfall_tsv) };
+
+# ── I4: WHEN was a not-run file last measured? ───────────────────────────────
+# baselines/perl-suite-notrun-stamps.tsv — one row per file this runner does
+# not measure in its default form (QUARANTINED, QUICK-SKIP, QUICK-CAPPED,
+# NEED-HARNESS) and per snapshot row no `--all` scan refreshes.  A hole that is
+# only ever printed as "not run" says nothing about how OLD it is: op/list.t
+# has been quarantined since s320 and the hang set is only reached by a full
+# `--all`, which happened once in 40 sessions.  The stamp makes the age
+# countable.  Machine-maintained: `--bless-stamps` rewrites it from a run.
+my %stamp;   # rel -> { session, date, note }
+if (open my $tf2, '<', $stamps_tsv) {
+  while (<$tf2>) {
+    chomp;
+    next if /^\s*(?:#|$)/;
+    my ($rel, $sess, $date, $note) = split /\t/, $_, 4;
+    next unless defined $date;
+    $stamp{$rel} = { session => $sess, date => $date, note => $note // '' };
+  }
+  close $tf2;
 }
 
 # PCL_SUITE_KEEP=DIR — copy a file's run artifacts out of the (deleted)
@@ -796,15 +881,25 @@ sub run_one {
                        "PCL's TAP numbering is offset from perl's for $shifted row(s)"
                        . " — rows below are paired by description, not by number"), "\n"
           if $shifted;
-        my $rows = 0;
+        # The 500-row cap is old, and it was INVISIBLE: a file with 4,204
+        # diverging rows wrote 500 and said nothing, so the #993 row baseline
+        # built from this log would silently be a partial multiset.  Count
+        # first, then say so in a COMMENT line — comments are skipped by every
+        # reader (read_diverging_rows, diverging_rowkeys, sweep-diff's load),
+        # so the blessed #185 row multisets are byte-identical to before.
+        my @diverge;
         for my $pair (@$pairs) {
           my ($p, $c) = @$pair;
           my $cv = $c ? $c->{verb} : '(missing)';
           next if $p->{verb} eq $cv;
           $cv .= " [PCL #$c->{num}]" if $c && $c->{num} != $p->{num};
-          print $lf join("\t", $rel, $p->{num}, $p->{verb}, $cv, $p->{desc}), "\n";
-          last if ++$rows >= 500;
+          push @diverge, [$rel, $p->{num}, $p->{verb}, $cv, $p->{desc}];
         }
+        printf $lf "# TRUNCATED: %d diverging row(s), only the first 500 are listed"
+                 . " — any row baseline built from this file is PARTIAL\n", scalar(@diverge)
+          if @diverge > 500;
+        splice(@diverge, 500) if @diverge > 500;
+        print $lf join("\t", @$_), "\n" for @diverge;
         # PCL-only rows: named individually now.  They are evidence in their
         # own right — do.t's two extras ARE the principle-9 divergence firing.
         print $lf join("\t", $rel, 0, '(none)', "extra [PCL #$_->{num}]",
@@ -924,7 +1019,14 @@ while (@queue || %children) {
 }
 
 rerun_movers_serially();
+# The blesses run BEFORE the report on purpose: every report section compares
+# against the registries as they were AT STARTUP, so a blessing run still
+# prints the honest "what moved" (or "NOT CHECKED") verdict for the tree it
+# measured, instead of comparing a file against itself.
 bless_expected_rows() if $bless_rows;
+bless_fail_rows()     if $bless_fails;
+bless_shortfall()     if $bless_shortfall;
+bless_stamps()        if $bless_stamps;
 exit(emit_report() ? 1 : 0);
 
 # ---- A moved row is re-run ALONE before it is believed (task #366) ---------
@@ -1040,15 +1142,22 @@ sub read_diverging_rows {
 # baseline.  Keys are PERL's descriptions, never numbers (#177) — see the
 # %expected_rows comment for the three fallbacks.  Returns a SORTED list, so
 # callers can compare it as a multiset.
-sub diverging_rowkeys {
+# The per-test failure log of ONE file, read back as rows: [num, perl_verb,
+# pcl_verb, rowkey].  ONE reader (task #993): diverging_rowkeys is the key
+# projection of it and the I1 bless is the row projection, so the two can
+# never disagree about what a row IS.  Returns (\@rows, $sentinel) where
+# $sentinel is '*no-log*' (no log written — TRANSPILE, or a file that never
+# diverged), '*empty-log*' (a log with no rows), or undef.  Also reports
+# whether the log said it was TRUNCATED at the 500-row cap.
+sub diverging_rows_full {
   my ($rel) = @_;
   (my $safe = $rel) =~ s{/}{_}g;
-  open my $lf, '<', "$faillog/$safe.fails.tsv" or return ('*no-log*');
-  my @keys;
+  open my $lf, '<', "$faillog/$safe.fails.tsv" or return ([], '*no-log*', 0);
+  my (@rows, $truncated);
   while (<$lf>) {
-    next if /^\s*#/;
+    if (/^\s*#/) { $truncated = 1 if /^#\s*TRUNCATED:/; next }
     chomp;
-    my (undef, $n, undef, $cv, $desc) = split /\t/, $_, 5;
+    my (undef, $n, $pv, $cv, $desc) = split /\t/, $_, 5;
     next unless defined $n;
     $desc = '' unless defined $desc;
     $desc =~ s/\s+\z//;
@@ -1057,20 +1166,29 @@ sub diverging_rowkeys {
     # renumbered), whose text carries an unstable crash signature and so
     # normalizes to one sentinel, or a PCL-ONLY row, which is real evidence
     # (do.t's two extras ARE the principle-9 divergence) and keeps its text.
+    my $key;
     if ($n !~ /^[1-9][0-9]*$/) {
-      push @keys, (defined $cv && $cv =~ /^extra\b/)
-                  ? '*extra* ' . (length $desc ? $desc : '(unnamed)')
-                  : '*summary*';
-      next;
+      $key = (defined $cv && $cv =~ /^extra\b/)
+             ? '*extra* ' . (length $desc ? $desc : '(unnamed)')
+             : '*summary*';
+    } else {
+      # An UNNAMED test's description is perl's "[at <file> line N]" marker
+      # (the $tdir strip above keeps the stable line number and drops this
+      # machine's absolute perl-build path — the task #217 family: a generated
+      # artifact must not bake in build paths).
+      $key = length $desc ? $desc : "#$n";
     }
-    # An UNNAMED test's description is perl's "[at <file> line N]" marker (the
-    # $tdir strip above keeps the stable line number and drops this machine's
-    # absolute perl-build path — the task #217 family: a generated artifact
-    # must not bake in build paths).
-    push @keys, (length $desc ? $desc : "#$n");
+    push @rows, [$n, $pv // '', $cv // '', $key];
   }
   close $lf;
-  return @keys ? (sort @keys) : ('*empty-log*');
+  return (\@rows, (@rows ? undef : '*empty-log*'), ($truncated ? 1 : 0));
+}
+
+sub diverging_rowkeys {
+  my ($rel) = @_;
+  my ($rows, $sentinel) = diverging_rows_full($rel);
+  return ($sentinel) if defined $sentinel;
+  return (sort map { $_->[3] } @$rows);
 }
 
 # (in A not in B, in B not in A) over two SORTED lists, counting duplicates.
@@ -1166,6 +1284,163 @@ HDR
   return;
 }
 
+# ── I1/I2/I4: which files each instrument owns, and the blesses ─────────────
+#
+# A file is ROW-GATED here unless another registry already gates its rows:
+# perl-suite-expected.tsv (XDIFF) and perl-suite-fixture.tsv (FIXTURE) are
+# both per-ROW and all-or-nothing, so a file in either would be gated twice
+# and a moved row would read twice and be fixed once.
+sub row_gated_here { my ($rel) = @_; return !$expected{$rel} && !$fixture{$rel} }
+
+# Did this run produce a COMPARABLE TAP stream for this file?  A file that
+# never got to its assertions cannot verify anything about its blessed rows —
+# the same rule as sweep-diff.pl's ran_clean(), and the reason a TRANSPILE this
+# run reports its 50 vanished blessed rows as UNVERIFIED, never as 50 FIXED.
+sub row_verifiable {
+  my ($st) = @_;
+  return $st !~ /^(?:TRANSPILE|TIMEOUT|KILLED|NOT-RUN|MISSING|NO-RESULT)$/;
+}
+
+# This session's identity for a stamp.  PCL_SESSION when the operator sets it
+# (e.g. s465), else the short sha — never a guess that reads like a session.
+sub stamp_session {
+  return $ENV{PCL_SESSION} if $ENV{PCL_SESSION};
+  my $sha = `git -C \Q$root\E rev-parse --short HEAD 2>/dev/null`;
+  chomp $sha;
+  return length $sha ? $sha : 'unknown';
+}
+sub stamp_today { my @t = localtime; return sprintf("%04d-%02d-%02d", $t[5]+1900, $t[4]+1, $t[3]) }
+
+# --bless-fails: rewrite baselines/perl-suite-fails.tsv from THIS run.  Only
+# files this run MEASURED are touched (the bless_expected_rows rule: a partial
+# run must never erase rows for files it did not look at).
+sub bless_fail_rows {
+  my %rows;   # rel -> arrayref of [num, pv, cv, key]
+  %rows = %blessed_fail_meta;
+  my ($touched, $truncated) = (0, 0);
+  for my $rel (keys %results) {
+    my $st = $results{$rel}[5];
+    if (!row_gated_here($rel)) { delete $rows{$rel}; next }
+    next unless row_verifiable($st);       # unmeasured: keep what is blessed
+    delete $rows{$rel};
+    $touched++;
+    my ($rr, undef, $trunc) = diverging_rows_full($rel);
+    $truncated++ if $trunc;
+    $rows{$rel} = $rr if @$rr;
+  }
+  open my $out, '>', $fails_tsv or die "write $fails_tsv: $!";
+  print $out <<'HDR';
+# perl-suite-fails.tsv — the ROW-level fail baseline for tools/run-perl-suite.pl
+# (task #993 / docs/plan-test-audit-s464.md §3 I1).  The companion suite's
+# answer to baselines/fail-baseline.tsv: until this file existed the 273 DIFF
+# files were blessed as COUNTS only, so #964's failing row sat inside op/sub.t's
+# "12 not ok" for months with nothing naming it.
+#
+# One line per DIVERGING TAP row:
+#   <rel> <TAB> <PERL's test#> <TAB> <perl verb> <TAB> <PCL verb> <TAB> <rowkey>
+# rowkey = PERL's test DESCRIPTION (test NUMBERS are the unstable coordinate,
+# task #177), with the same fallbacks as perl-suite-expected-rows.tsv: "#N" for
+# an unnamed test, "*extra* <desc>" for a PCL-ONLY row, "*summary*" for the
+# log's test#-0 summary rows.  The JOIN KEY is (rel, rowkey), compared as a
+# MULTISET.  got/expected are NOT here: perl's TAP does not carry them on the
+# ok line (they are in the diag, which the runner does not keep).
+#
+# GENERATED: `tools/run-perl-suite.pl --all --bless-fails`.  A run only rewrites
+# the files it MEASURED; a file that produced no comparable TAP this run keeps
+# its blessed rows (they are UNVERIFIED, never "fixed").
+#
+# NOT IN HERE: files registered in perl-suite-expected.tsv (XDIFF) or
+# perl-suite-fixture.tsv (FIXTURE) — their rows are already gated per row by
+# those registries, and one row must have exactly one gate.
+#
+# TRUNCATION: a file with more than 500 diverging rows writes only its first
+# 500 to the per-test log, so its multiset here is PARTIAL and a new failure
+# past row 500 is invisible.  The log says so in a `# TRUNCATED:` line and the
+# runner counts such files in every report.
+HDR
+  printf $out "# taken-at: %s %s\n", stamp_session(), stamp_today();
+  my $n = 0;
+  for my $rel (sort keys %rows) {
+    for my $r (sort { $a->[3] cmp $b->[3] || ($a->[0] // 0) <=> ($b->[0] // 0) } @{ $rows{$rel} }) {
+      print $out join("\t", $rel, @$r), "\n";
+      $n++;
+    }
+  }
+  close $out;
+  printf "blessed fail-rows: %d row(s) over %d file(s) (%d file(s) re-measured, %d truncated) -> %s\n",
+    $n, scalar(keys %rows), $touched, $truncated, $fails_tsv;
+  return;
+}
+
+# --bless-shortfall: rewrite this population's rows in the SHARED
+# baselines/row-shortfall.tsv.  The sweep's rows (perl-tests/…) are copied
+# through untouched — one file, two populations, exactly like the drop census.
+sub bless_shortfall {
+  my %rows = map { $_ => { %{ $shortfall_base{$_} } } } keys %shortfall_base;
+  my $touched = 0;
+  for my $rel (sort keys %results) {
+    my $r = $results{$rel};
+    my $key = "t/$rel";
+    next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT)$/;   # unmeasured
+    $touched++;
+    my $short = ($r->[1] + $r->[2]) - ($r->[3] + $r->[4]);
+    $short = 0 if $short < 0;
+    if (!$short) { delete $rows{$key}; next }
+    $rows{$key} = { rows => $short,
+                    cause => ($shortfall_base{$key} ? $shortfall_base{$key}{cause} : 'UNEXPLAINED') };
+  }
+  PCLShortfall::write_shortfall($shortfall_tsv, \%rows,
+                                stamp_session() . ' ' . stamp_today());
+  my $sum = 0; $sum += $rows{$_}{rows} for keys %rows;
+  printf "blessed shortfall: %d row(s) over %d file(s) (%d companion file(s) re-measured) -> %s\n",
+    $sum, scalar(keys %rows), $touched, $shortfall_tsv;
+  return;
+}
+
+# --bless-stamps: rewrite baselines/perl-suite-notrun-stamps.tsv.  A file this
+# run MEASURED gets this session's stamp; a file it did not keeps the old one
+# (that is the whole point — the stamp is the AGE of the last measurement).
+sub bless_stamps {
+  my %out = map { $_ => { %{ $stamp{$_} } } } keys %stamp;
+  my ($sess, $date) = (stamp_session(), stamp_today());
+  for my $rel (@files) {
+    my $why = $not_run{$rel};
+    if ($why) {
+      $out{$rel} //= { session => 'NEVER', date => '-', note => '' };
+      $out{$rel}{note} = short_cause($why, 90);
+      next;
+    }
+    next unless exists $out{$rel};           # only stamped files are tracked
+    my $r = $results{$rel} or next;
+    next unless row_verifiable($r->[5]) || $r->[5] eq 'TRANSPILE';
+    $out{$rel} = { session => $sess, date => $date,
+                   note => sprintf("measured: %s %d/%d", $r->[5], $r->[3], $r->[4]) };
+  }
+  open my $fh, '>', $stamps_tsv or die "write $stamps_tsv: $!";
+  print $fh <<'HDR';
+# perl-suite-notrun-stamps.tsv — WHEN was each not-run file last measured?
+# (task #993 / docs/plan-test-audit-s464.md §3 I4)
+#
+#   <rel> <TAB> <session> <TAB> <date> <TAB> <note>
+#
+# One row per file tools/run-perl-suite.pl does not measure in its default
+# form: QUARANTINED (task #160), QUICK-SKIP (the #326 hang set), QUICK-CAPPED
+# (a registered allowance above the 120 s quick cap), NEED-HARNESS.  A hole
+# that is only ever printed as "not run" says nothing about how OLD it is —
+# op/list.t has been quarantined since s320 and the hang set is reached only by
+# a full `--all`.  The stamp makes the age countable, and every run prints it.
+#
+# session `NEVER` = this file has no measurement on record at all.
+# GENERATED: `tools/run-perl-suite.pl --all --bless-stamps` (a file measured by
+# that run gets the run's session; one it did not measure keeps its old stamp).
+HDR
+  print $fh join("\t", $_, $out{$_}{session}, $out{$_}{date}, $out{$_}{note} // ''), "\n"
+    for sort keys %out;
+  close $fh;
+  printf "blessed stamps: %d file(s) -> %s\n", scalar(keys %out), $stamps_tsv;
+  return;
+}
+
 # The registry classification of ONE result row (expected-divergence,
 # fixture-artifact).  EXTRACTED from the dispatch loop (task #366) so the
 # serial re-run of moved rows classifies identically — two copies of this
@@ -1227,6 +1502,142 @@ sub classify_result {
       $r->[6] = "fixture-artifact row now PASSES — remove it from baselines/perl-suite-fixture.tsv";
     }
   }
+  return;
+}
+
+# ── I1: the ROW DIFF (task #993) ────────────────────────────────────────────
+# The buckets are sweep-diff.pl's, for the same reasons:
+#   NEW ROW    a diverging row this run produced that is not blessed
+#   FIXED ROW  a blessed row that stopped diverging, in a file that ran
+#   UNVERIFIED a blessed row absent because the file produced nothing
+#              comparable this run (TRANSPILE/TIMEOUT/KILLED) — NEVER "fixed"
+#   LOST       passing rows (C_ok) this run did not produce, vs the snapshot
+# Printed on EVERY run, including the clean ones, and it SAYS SO when it could
+# not run: a check that goes quiet when it cannot run is indistinguishable
+# from one that passed.
+sub report_row_diff {
+  print "\n";
+  if (!%blessed_fails && !-e $fails_tsv) {
+    print "ROW DIFF: NOT CHECKED — no $fails_tsv"
+        . " (bless one with: tools/run-perl-suite.pl --all --bless-fails)\n";
+    return;
+  }
+  my (@new, @fixed, @unver, @trunc, @unstable);
+  my %seen;
+  for my $rel (sort keys %results) {
+    $seen{$rel} = 1;
+    next unless row_gated_here($rel);
+    my $st = $results{$rel}[5];
+    my @reg = @{ $blessed_fails{$rel} || [] };
+    my ($rows, undef, $tr) = diverging_rows_full($rel);
+    push @trunc, $rel if $tr;
+    my @actual = sort map { $_->[3] } @$rows;
+    my ($only_now, $only_reg) = multiset_diff(\@actual, \@reg);
+    if (row_verifiable($st)) {
+      push @new,   [$rel, $_] for @$only_now;
+      push @fixed, [$rel, $_] for @$only_reg;
+    } else {
+      push @unstable, [$rel, $_] for @$only_now;
+      push @unver,    [$rel, $_, $st] for @$only_reg;
+    }
+  }
+  # A blessed file this run never looked at (a --dir run, or a file gone from
+  # t/): its rows are unverified, exactly like sweep-diff's DID NOT RUN.  Kept
+  # as ONE number — for a --dir run this is every other file in the baseline,
+  # and 25,000 lines of "not looked at" would bury the four rows that moved.
+  my ($absent_rows, $absent_files) = (0, 0);
+  for my $rel (sort keys %blessed_fails) {
+    next if $seen{$rel};
+    $absent_files++;
+    $absent_rows += scalar @{ $blessed_fails{$rel} };
+  }
+  # LOST: the sweep's fourth bucket, read from the count snapshot — the row
+  # buckets above all read FAILING rows, so none of them can see a file that
+  # simply stopped producing PASSING ones.
+  my %snap = read_snapshot();
+  my @lost_rows;
+  for my $rel (sort keys %results) {
+    my $s = $snap{$rel} or next;
+    my $r = $results{$rel};
+    next if $r->[5] =~ /^(?:NOT-RUN|KILLED)$/;
+    push @lost_rows, [$rel, $s->{c_ok} - $r->[3], $s->{status}, $r->[5]]
+      if $r->[3] < $s->{c_ok};
+  }
+  printf "ROW DIFF vs %s: %d NEW ROW, %d FIXED ROW, %d UNVERIFIED, %d LOST%s\n",
+    $fails_tsv, scalar(@new), scalar(@fixed), scalar(@unver), scalar(@lost_rows),
+    (@new ? '  <-- a NEW failing row: this run is NOT clean' : '');
+  printf "  + %-24s %s\n", $_->[0], short_cause($_->[1], 90) for @new[0 .. ($#new > 39 ? 39 : $#new)];
+  print  "  ... and " . (@new - 40) . " more NEW ROW(s)\n" if @new > 40;
+  printf "  - %-24s %s\n", $_->[0], short_cause($_->[1], 90) for @fixed[0 .. ($#fixed > 39 ? 39 : $#fixed)];
+  print  "  ... and " . (@fixed - 40) . " more FIXED ROW(s)\n" if @fixed > 40;
+  if (@unver) {
+    my %by; $by{ $_->[0] }++ for @unver;
+    printf "  ? %-24s %d blessed row(s) unverified — %s\n", $_, $by{$_},
+      ($results{$_} ? $results{$_}[5] : 'NOT RUN') for sort keys %by;
+  }
+  if (@unstable) {
+    my %by; $by{ $_->[0] }++ for @unstable;
+    printf "  ~ %-24s %d new row(s) in a file that produced no comparable TAP — noise, not a regression\n",
+      $_, $by{$_} for sort keys %by;
+  }
+  printf "  ! %-24s -%d passing row(s) (snapshot %s, now %s)\n", @$_[0,1,2,3] for @lost_rows;
+  printf "  %d blessed row(s) in %d file(s) this run did not look at — NOT verified, not fixed\n",
+    $absent_rows, $absent_files if $absent_rows;
+  printf "  %d file(s) exceed the 500-row log cap — their row baselines are PARTIAL: %s\n",
+    scalar(@trunc), join(', ', @trunc) if @trunc;
+  return;
+}
+
+# ── I2: the SHORTFALL, this population's half (task #993) ───────────────────
+sub report_shortfall {
+  print "\n";
+  my (@up, @down, $sum, $unexplained, $unexplained_files) = ((), (), 0, 0, 0);
+  for my $rel (sort keys %results) {
+    my $r = $results{$rel};
+    next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT)$/;
+    my $short = ($r->[1] + $r->[2]) - ($r->[3] + $r->[4]);
+    $short = 0 if $short < 0;
+    $sum += $short;
+    my $b = $shortfall_base{"t/$rel"};
+    my $was = $b ? $b->{rows} : 0;
+    push @up,   [$rel, $was, $short] if $short > $was;
+    push @down, [$rel, $was, $short] if $short < $was;
+    if ($short && (!$b || $b->{cause} eq 'UNEXPLAINED')) {
+      $unexplained += $short;
+      $unexplained_files++;
+    }
+  }
+  if (!%shortfall_base) {
+    printf "SHORTFALL: NOT CHECKED — no %s (bless one with --bless-shortfall);"
+         . " this run: %d row(s) perl produced and PCL did not\n", $shortfall_tsv, $sum;
+    return;
+  }
+  printf "SHORTFALL (perl rows PCL never produced): %d in this run%s\n", $sum,
+    (@up ? '  <-- a file lost rows it used to produce: this run is NOT clean' : '');
+  printf "  + %-24s %d -> %d row(s) NEVER PRODUCED — NEW shortfall\n", @$_[0,1,2] for @up;
+  printf "  - %-24s %d -> %d row(s) — fixed; EDIT the baseline row\n", @$_[0,1,2] for @down;
+  printf "  UNEXPLAINED: %d row(s) in %d file(s) have no cause — that is the audit's queue (#993)\n",
+    $unexplained, $unexplained_files;
+  return;
+}
+
+# ── I4: HOW OLD is each not-run hole? (task #993) ───────────────────────────
+sub report_stamps {
+  print "\n";
+  my @holes = grep { $not_run{$_} } @files;
+  if (!@holes) { print "NOT-RUN STAMPS: no unmeasured file in this run\n"; return }
+  printf "NOT-RUN STAMPS: %d file(s) this run did not measure — last measured when?\n",
+    scalar(@holes);
+  my $never = 0;
+  for my $rel (sort @holes) {
+    my $s = $stamp{$rel};
+    $never++ if !$s || ($s->{session} // 'NEVER') eq 'NEVER';
+    printf "  %-24s last measured %-10s %-12s %s\n", $rel,
+      ($s ? $s->{session} : 'NEVER'), ($s ? $s->{date} : '-'),
+      short_cause($not_run{$rel}, 70);
+  }
+  printf "  %d of them have NO measurement on record at all\n", $never if $never;
+  print  "  (re-stamp with: tools/run-perl-suite.pl --all --bless-stamps, PCL_SESSION=sNNN)\n";
   return;
 }
 
@@ -1382,6 +1793,10 @@ sub emit_report {
       printf "  - %-24s %d -> %d  fixed; EDIT the census row\n", @$_[0,1,2] for @down;
     }
   }
+
+  report_row_diff();
+  report_shortfall();
+  report_stamps();
 
   if ($JOURNAL) {
     printf $JOURNAL "# %s\n", @lost ? "INCOMPLETE: @{[scalar @lost]} files unmeasured"

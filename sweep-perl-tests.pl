@@ -610,7 +610,7 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # flaky -j8 crash (e.g. pack.t's transient SIMPLE-FILE-ERROR) makes every
 # baseline failure in that file look "FIXED".  One line per file:
 #   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> drops
-#        <TAB> child-drops <TAB> note
+#        <TAB> child-drops <TAB> shortfall <TAB> note
 # where `note` carries the crash-localization snippet (# ABORTED after test N ...)
 # for CRASH/PARTIAL files, and `drops` is the #138-family count (task #343):
 # how many statements the compiler replaced with nil in this file's CL, or -1
@@ -620,7 +620,10 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # is the same count for the programs this file's fresh_perl/runperl rows
 # spawn; 0 there means "no child dropped anything", including "this file
 # spawns no child", and it is REPORTED, not gated (sweep-diff.pl reads the
-# first six columns and ignores it).
+# first six columns and ignores it).  `shortfall` (task #993) is
+# planned - (pass+fail+skip): the rows the file's OWN PLAN promised and this
+# run never produced, GATED against baselines/row-shortfall.tsv — a verdict of
+# OK means "no previously-passing row was lost", never "the plan was produced".
 sub write_status_file {
     open my $sf, '>', "$log_dir/_status.tsv" or return;
     for my $name (sort keys %results) {
@@ -629,9 +632,25 @@ sub write_status_file {
         $note =~ s/[\t\n]/ /g;
         print $sf join("\t", $name, $r->{status} // 'OK',
                        $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1,
-                       $r->{drops} // -1, $r->{child_drops} // 0, $note) . "\n";
+                       $r->{drops} // -1, $r->{child_drops} // 0,
+                       shortfall_of($r), $note) . "\n";
     }
     close $sf;
+}
+
+# SHORTFALL (task #993): planned rows this file never produced.  -1 = NOT
+# MEASURED (the file has no `1..N` plan line), never 0 — the same convention as
+# `drops`, and for the same reason: a file with no plan says nothing about its
+# shortfall, and reading that silence as zero is how pack.t's 8,997 missing
+# rows stayed invisible under an OK verdict.  The oracle here is the file's OWN
+# plan; the companion runner's oracle is real perl's run (PCLShortfall.pm).
+sub shortfall_of {
+    my ($r) = @_;
+    my $planned = $r->{planned} // -1;
+    return -1 if $planned < 0;
+    my $produced = ($r->{pass} // 0) + ($r->{fail} // 0) + ($r->{skip} // 0);
+    my $short = $planned - $produced;
+    return $short > 0 ? $short : 0;
 }
 write_status_file();
 
@@ -670,7 +689,15 @@ sub run_gate {
     # match comes up empty and the serial re-run silently stops firing — the
     # printf site carries the mirror comment naming this consumer.
     my @lost = ($out =~ /^  ! (\S+)\s+-\d+/mg);
-    return ($code, \@lost);
+    # A file whose SHORTFALL grew (task #993) gets the same #215 treatment: it
+    # produced fewer rows than it used to, which is the LOST bucket's own
+    # symptom seen from the plan's side, and under -j8 load it has the same two
+    # possible causes.  Re-run it ALONE before believing it.  (Same format
+    # coupling, to sweep-diff.pl's "+ FILE N -> M planned row(s)" line.)
+    my @short = ($out =~ /^  \+ (\S+)\s+\d+ -> \d+ planned row\(s\)/mg);
+    my %seen;
+    my @rerun = grep { !$seen{$_}++ } @lost, @short;
+    return ($code, \@rerun);
 }
 
 sub rerun_serially {
@@ -714,12 +741,13 @@ if ($full_sweep && $GATE) {
     if (-e $fail_base && -x $differ) {
         my ($code, $lost) = run_gate($fail_base, $differ, '');
         if (@$lost) {
-            print "\nLOST files re-run SERIALLY (task #215) — " . mem_report() . "\n";
+            print "\nFiles that LOST rows re-run SERIALLY (task #215; since #993 a"
+                . " grown SHORTFALL counts too) — " . mem_report() . "\n";
             print "The serial verdict REPLACES the parallel one; both are shown.\n";
             rerun_serially(@$lost);
             ($code, $lost) = run_gate($fail_base, $differ, ' (after serial re-run)');
-            print "\nStill LOST after a serial re-run: " . (@$lost ? join(', ', @$lost)
-                  . " — NOT load noise\n" : "none — the parallel LOST was load noise\n");
+            print "\nStill losing rows after a serial re-run: " . (@$lost ? join(', ', @$lost)
+                  . " — NOT load noise\n" : "none — the parallel loss was load noise\n");
         }
         print $code == 0 ? "GATE: clean\n" : "GATE: NOT CLEAN (sweep-diff exit $code)\n";
         exit $code;

@@ -8,9 +8,12 @@ TAB-separated and may contain NUL bytes: read with `grep -a` or perl.
 
 | file | what | reader |
 |---|---|---|
-| `fail-baseline.tsv` | the blessed FAILING rows of `perl-tests/*.t` (the sweep) | `tools/sweep-diff.pl` |
+| `fail-baseline.tsv` | the blessed FAILING rows of `perl-tests/*.t` (the sweep); SIX columns since s465 — the last is the CAUSE (#993) | `tools/sweep-diff.pl` |
 | `pass-baseline.tsv` | per-file pass counts of the sweep (the LOST bucket) | `tools/sweep-diff.pl` |
 | `parse-error-drop-census-s399.tsv` | the #138 drop census over six populations (the DROPS gate) | `tools/drop-census.pl`, `tools/sweep-diff.pl`, `tools/run-perl-suite.pl` |
+| `row-shortfall.tsv` | rows the PLAN promised and PCL never produced, both populations, with a cause (the SHORTFALL gate, #993) | `tools/sweep-diff.pl`, `tools/run-perl-suite.pl` |
+| `perl-suite-fails.tsv` | the blessed DIVERGING ROWS of perl's own `t/` — the companion's `fail-baseline.tsv` (#993) | `tools/run-perl-suite.pl` |
+| `perl-suite-notrun-stamps.tsv` | when each never-run companion file was last measured (#993) | `tools/run-perl-suite.pl` |
 | `perl-suite-run.tsv` | per-file verdict snapshot of perl's own `t/` (the companion suite) | `tools/run-perl-suite.pl` |
 | `perl-suite-expected.tsv`, `perl-suite-expected-rows.tsv` | registered expected divergences / diverging rows of the companion suite | `tools/run-perl-suite.pl` |
 | `perl-suite-fixture.tsv`, `perl-suite-timeouts.tsv` | fixture files and per-file timeout allowances of the companion suite | `tools/run-perl-suite.pl` |

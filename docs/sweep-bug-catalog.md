@@ -1,5 +1,25 @@
 # PCL Sweep Bug Catalog
 
+## WHERE THE CAUSES LIVE NOW (s465, task #993)
+
+This catalogue is a session-201..231 snapshot: **its ROW NUMBERS are stale, its
+mechanism names are not**, and that is exactly how it was used in the s464
+Pass-3 attribution.  Since s465 a blessed failing row carries its cause IN THE
+BASELINE — `baselines/fail-baseline.tsv` has a sixth column (task number,
+`docs/not-supported.md` anchor, or `UNEXPLAINED`), so the answer to "why is
+this row failing?" is one `grep -a` away and cannot go stale against a row
+number again.  552 of the 708 rows are attributed; the 156 that are not are the
+audit's queue and `tools/sweep-diff.pl diff` prints the count on every run.
+
+Three more instruments landed with it, all in `docs/test-debugging-runbook.md`
+§4c–§4f: the **SHORTFALL** baseline (rows a plan promised and no run produced —
+pack.t is 8,997 of 14,722), the companion's **ROW-level** fail baseline
+(`baselines/perl-suite-fails.tsv`; the 273 DIFF files used to be blessed as
+counts, which is how #964 hid), and the **not-run stamps** (how old each
+never-measured hole is).  Read the runbook before adding a finding here: a new
+cause belongs in the baseline's cause column, and only its MECHANISM belongs in
+this file.
+
 ## Real CPAN-module test-suite findings (session 262)
 
 Strategy: run a real pure-Perl module's *own* `.t` suite through PCL (the module

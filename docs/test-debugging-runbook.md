@@ -116,6 +116,60 @@ glob), edit the row into the baseline with that cause, and say so in the
 commit.  A row that was passing on nothing is not a regression; a row that
 was passing on something is.
 
+## 4c. A row that never ran at all: the SHORTFALL bucket (task #993, s465)
+The DROPS bucket sees a STATEMENT the compiler lost.  The shortfall sees a
+whole TAIL of rows the file's plan promised and the run never produced — and
+"OK" never meant otherwise: it means "no previously-passing row was lost".
+`perl-tests/pack.t` is OK with **8,997 of its 14,722 planned rows never
+produced**, `lc.t` with 2,577; the companion's ten TRANSPILE files are one
+line each with 2,031 perl rows behind them.
+- the sweep records a per-file `shortfall` column in `.faillog/_status.tsv`
+  (`planned - (pass+fail+skip)`; `-1` = no plan line = NOT MEASURED) and
+  `tools/sweep-diff.pl` compares it against `baselines/row-shortfall.tsv`;
+- `tools/run-perl-suite.pl` computes its half against REAL PERL's row count
+  (its oracle is a run, not a plan line) and prints the same comparison;
+- **more shortfall than blessed fails the run like a NEW failure**; fewer is a
+  fix and the row leaves BY EDIT.  Every run prints how many shortfall rows are
+  `UNEXPLAINED` — that number IS the audit's queue (`docs/plan-test-audit-s464.md`).
+
+Bless: `tools/sweep-diff.pl save-shortfall .faillog baselines/row-shortfall.tsv`
+(sweep half) / `tools/run-perl-suite.pl --all --bless-shortfall` (companion
+half).  One file, two populations, keyed `perl-tests/<name>` and `t/<rel>`
+exactly like the drop census — a blesser must copy the other half through.
+
+## 4d. WHICH row is failing, on the companion side (task #993 I1, s465)
+`baselines/perl-suite-fails.tsv` is the companion's `fail-baseline.tsv`: one
+line per DIVERGING TAP row, keyed `(rel, PERL's description)` and compared as a
+multiset.  Before it, the 273 DIFF files were blessed as COUNTS only — which is
+how #964's row lived inside `op/sub.t`'s "12 not ok" for months with nothing
+naming it.  Every run prints `ROW DIFF … N NEW ROW, M FIXED ROW, K UNVERIFIED,
+L LOST`; a blessed row absent because the file produced nothing comparable is
+UNVERIFIED, never "fixed".  Files registered in `perl-suite-expected.tsv` or
+`perl-suite-fixture.tsv` are NOT in it — their rows are already gated per row
+there, and one row gets exactly one gate.  Bless with
+`tools/run-perl-suite.pl --all --bless-fails`.
+
+A file with more than 500 diverging rows writes only its first 500 to the
+per-test log, so its blessed multiset is PARTIAL and a new failure past row 500
+is invisible; the log says so in a `# TRUNCATED:` line and the report counts
+such files.
+
+## 4e. HOW OLD is a hole? (task #993 I4, s465)
+`baselines/perl-suite-notrun-stamps.tsv` carries, per never-run companion file
+(QUARANTINED / QUICK-SKIP / QUICK-CAPPED / NEED-HARNESS), the session that last
+measured it.  Printed on every run: "not run" says nothing about the age of the
+hole, and `op/list.t` has been quarantined since s320.  Re-stamp with
+`PCL_SESSION=sNNN tools/run-perl-suite.pl --all --bless-stamps`.
+
+## 4f. WHY is a blessed row failing? — the CAUSE column (task #993 I3, s465)
+`baselines/fail-baseline.tsv` has a SIXTH column: a task number, a
+`docs/not-supported.md` anchor, or `UNEXPLAINED`.  **A cause-less row is QUEUE,
+not baseline**, and every `sweep-diff.pl diff` prints how many there are, so the
+queue cannot grow unnoticed — 229 of the 708 rows (bop.t, one mechanism, now
+#1028) had been unattributed for months.  The join key is unchanged
+(file, description); `save` cannot write causes and warns before it would throw
+them away.  Rows leave, and gain a cause, BY EDIT.
+
 ## 5. The migration (remaining work): un-mutate the ~14 inline-skipped files
 Files with inline `ok(1,'SKIP…')` / commented-out tests (sort.t, state.t, reset.t, lex.t,
 quotemeta.t, each.t, join.t, range.t, splice.t, sub.t, loopctl.t, local.t, time.t,
@@ -133,8 +187,12 @@ Do a few files, then a full sweep + `sweep-diff diff` to confirm no net regressi
 ```sh
 perl sweep-perl-tests.pl --jobs 8
 tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog   # review NEW (must be empty) + FIXED
-tools/sweep-diff.pl save .faillog baselines/fail-baseline.tsv    # commit the new baseline
 ```
+**Do NOT run `sweep-diff.pl save` over `baselines/fail-baseline.tsv`.**  Since
+s465 that file carries a CAUSE column (§4f) and `save` reads a RUN, which has
+no causes — it would erase every attribution AND absorb whatever else moved.
+It warns, but the rule is older than the warning: a blessed row leaves, or
+arrives, **BY EDIT with its cause** (#223).  `save` is for a NEW baseline file.
 Re-bless **only from a clean sweep** — a file that flaky-crashes under `-j8` (transient
 `SIMPLE-FILE-ERROR`; pack.t/join.t/anonsub.t seen) contributes 0 failures that run. As of
 session 217 `sweep-diff diff` no longer mislabels these as "FIXED": it reads
