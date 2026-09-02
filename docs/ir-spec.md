@@ -1181,11 +1181,17 @@ Notes a translator needs:
   *is* consumed sees `:void` too — `my $r = \f(); $$r = 10` and
   `sub mod { $_[0] = 12 } mod(f())` both leak if `:void` returns the value
   untouched.  `:void` therefore takes the scalar rule.
-- **Not frames:** `p-sort-cmp` (§5.4 — the value is numified), `p-eval-block`
-  and the string-eval catch (perl copies at *eval* exit too, `pp_leaveeval`,
-  but that is a sibling rule: `for (eval { $x }) { $_ = 5 }` leaves `$x`
-  alone while `\do { $x }` *is* `\$x` — task #987), and `p-goto-sub` (the
-  target sub runs its own frame, which copies).
+- **An EVAL is a frame too** (task #987).  perl's `pp_leaveeval` mortal-copies
+  the value an `eval { }` or a string `eval` leaves with, exactly as
+  `pp_leavesub` does at a sub's exit, so `for (eval { $x }) { $_ = 5 }` leaves
+  `$x` alone and `\eval { $x }` is not `\$x`.  The same rule, applied at
+  `p-eval-block`'s and the string-eval's `catch :p-return` — in the `prog1`'s
+  *value* position, so `$@` is still set after the body and the error path
+  still yields a bare `nil`.
+- **`do { }` is NOT a frame**, and that is the boundary: `\do { $x }` *is*
+  `\$x` in perl, so a `do` block must not copy.
+- **Not frames:** `p-sort-cmp` (§5.4 — the value is numified), `do { }` above,
+  and `p-goto-sub` (the target sub runs its own frame, which copies).
 - **`:lvalue` (task #930) is the switch on this macro**: an lvalue sub is to be
   emitted with a frame that omits the copy, since the bare `catch` value is
   already the place.  Not implemented.
@@ -1381,9 +1387,15 @@ to string messages (documented divergence).
 `eval { body }` compiles to `p-eval-block`:
 1. installs its own `:p-return` catch (Perl: `return` inside `eval{}`
    exits the eval, not the enclosing sub);
-2. runs the body; on success sets `$@` to `""` and yields the body value;
+2. runs the body; on success sets `$@` to `""` and yields the body value
+   **after applying the frame leave rule to it** — an eval is a frame
+   (`pp_leaveeval`), so the value is a copy, exactly as at a sub's exit;
+   see §5.3;
 3. on `p-exception` sets `$@` to the payload (string or object) and
    yields `nil`; any other host error is stringified into `$@`.
+
+A string `eval` is a frame on the same terms.  A `do { }` block is **not**:
+it has no return frame and no copy, so `\do { $x }` *is* `\$x`.
 
 `$@` is an ordinary global box. `die` with no arguments re-raises `$@`.
 `$SIG{__WARN__}` fires on `warn`; `$SIG{__DIE__}` does **not** fire

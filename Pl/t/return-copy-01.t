@@ -52,7 +52,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 8;
 
 sub run_cl {
     my ($code) = @_;
@@ -316,3 +316,72 @@ like(transpile('my $x = 1; my $c = sub { $x }; print $c->(), "\n";'),
 unlike(transpile('my $x = 1; my @s = sort { $a <=> $b } (3,1); my $e = eval { $x }; print "$e\n";'),
     qr/\(p-sub-frame\b/,
     'a sort comparator and eval { } keep the bare catch — not sub frames (#964 inverse)');
+# ─────────────────────────────────────────────────────────────────────────────
+# E — THE EVAL FRAME (task #987, s464aw).  perl's pp_leaveeval mortal-copies
+# the value an `eval { }` or a string `eval` leaves with, exactly as
+# pp_leavesub does for a sub.  `do { }` is NOT a frame, and that is the
+# boundary this row set holds: `\do { $x }` IS `\$x` in perl too.
+#
+# Eight of the twenty rows below wrote through into the eval'd variable before
+# the fix, on both emission paths.  The `do` rows and the value/context rows
+# are the inverse guard: an over-eager copy at a non-frame, or one that
+# changes the eval's VALUE or its context, fails there rather than in the
+# leaking half.
+# ─────────────────────────────────────────────────────────────────────────────
+test_cl('eval frame: the value an eval leaves with is a copy', <<'PL', <<'OUT');
+my $x = 1; my @l = (1,2); my %h = (k=>1);
+sub r { $x = 1; @l = (1,2); %h = (k=>1) }
+sub w { $_[0] = 'A' }
+r(); for (eval { $x }) { $_ = 5 }            print "block-foreach=$x\n";
+r(); my $r1 = \eval { $x }; $$r1 = 6;        print "block-backslash=$x\n";
+r(); for (eval '$x') { $_ = 9 }              print "streval-foreach=$x\n";
+r(); my $r2 = \eval '$x'; $$r2 = 11;         print "streval-backslash=$x\n";
+r(); for my $v (eval { @l }) { $v = 'W' }    print "block-list=@l\n";
+r(); for my $v (eval '@l') { $v = 'W' }      print "streval-list=@l\n";
+r(); for my $v (eval { %h }) { $v = 'W' }    print "block-hash=$h{k}\n";
+r(); w(eval { $x });                         print "block-argwriter=$x\n";
+PL
+block-foreach=1
+block-backslash=1
+streval-foreach=1
+streval-backslash=1
+block-list=1 2
+streval-list=1 2
+block-hash=1
+block-argwriter=1
+OUT
+
+#
+# The `do` rows use `our` deliberately: `do { $lexical }` does not alias in
+# PCL for ANY lexical kind today (only a package variable does) — a
+# pre-existing gap in the OPPOSITE direction, filed, and not what this row is
+# for.  With `our` the aliasing works on the base, so an over-eager copy at a
+# non-frame FAILS here, which is the inverse guard this row exists to be.
+test_cl('eval frame: `do` is NOT a frame, and the eval VALUE is unchanged', <<'PL', <<'OUT');
+our $x = 1;
+for (do { $x }) { $_ = 7 }               print "do-foreach=$x\n";
+$x = 1; my $d = \do { $x }; $$d = 8;     print "do-backslash=$x\n";
+my @l3 = (1,2,3);
+my $n = eval { @l3 };                    print "scalar-ctx=$n\n";
+my @g = eval { @l3 };                    print "list-ctx=@g\n";
+my $v = eval { 42 };                     print "value=$v [$@]\n";
+my $e = eval { die "boom\n"; 1 };        print "dies=", (defined $e ? "def" : "undef"), " [$@]";
+my $o = bless {}, 'C'; my $b = eval { $o }; print "blessed=", ref($b), "\n";
+{ local $! = 2; my $du = eval { $! };    print "dualvar=", ($du+0), "/", ($du ne '' ? "str" : "nostr"), "\n"; }
+my @em = eval { () };                    print "empty=", scalar(@em), "\n";
+my $u = eval { undef };                  print "undef=", (defined $u ? "def" : "undef"), "\n";
+my $y = 2; sub s1 { for (eval { $y }) { $_ = 3 } $y }
+print "in-sub=", s1(), "\n";
+PL
+do-foreach=7
+do-backslash=8
+scalar-ctx=3
+list-ctx=1 2 3
+value=42 []
+dies=undef [boom
+]blessed=C
+dualvar=2/str
+empty=0
+undef=undef
+in-sub=2
+OUT

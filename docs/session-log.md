@@ -4,6 +4,34 @@ Append new entries at the top. One section per session.
 
 ---
 
+## s464aw (Opus, round 22, 2026-09-02) — #987: an eval is a frame
+
+The sibling of #964, and #964's design named it: perl copies at BOTH
+`pp_leavesub` and `pp_leaveeval`, and PCL applied the rule only at the sub
+frame.  So an `eval` still handed the caller the variable's own box: eight
+probe rows leaked, on both emission paths.
+
+The fix is `%p-leavesub` at two more `catch :p-return` sites — `p-eval-block`
+and the string eval — and nothing else.  Everything the task warned about
+(the semantic vector shape, the dualvar arm, `:void`, the caller's
+`*wantarray*`) is inherited from the mechanism #964 built, which is the point
+of having built it once; the only site-specific care is that the copy goes in
+the `prog1`'s VALUE position so `$@` is still set after the body.
+
+`do { }` needed no exclusion: it is not a frame in perl (`\do { $x }` IS
+`\$x`) and it has no catch here to hang a copy on.  Writing the inverse-guard
+row for that boundary is what turned up **#1008**: `do { $lexical }` does not
+alias in PCL for any lexical kind — only a package variable does — which is
+PRE-EXISTING and the opposite direction from this family.  The guard uses
+`our` and says why.
+
+Bars: gate 192/6540; sweep GATE clean, TOTAL 18347 (+0), drops 5 = census;
+companion op/ + comp/; the 23-row probe file byte-identical to perl on both
+emission paths; guard `Pl/t/return-copy-01.t` 6 → 8, both rows
+inverse-verified failing on an 80b715c worktree.  Runtime-only.
+
+---
+
 ## s464aw (Opus, round 22, 2026-09-02) — #972: the three overload prerequisites
 
 Task #972 = the three things #960(a) (the binary overload REFUSAL) turned out

@@ -8712,10 +8712,13 @@ create the key on a read-only call, which perl does not."
 ;;; the consumers instead (foreach / map / grep / p-backslash / @_) would be N
 ;;; copies of one rule (CLAUDE.md 11) and would miss the next consumer.
 ;;;
-;;; NOT applied at: p-sort-cmp (a comparator's value is numified), p-eval-block
-;;; and the string-eval catch (perl copies at eval exit too — pp_leaveeval — but
-;;; that is a SIBLING frame rule with its own probe set, task #987), and
-;;; p-goto-sub (the target sub runs its OWN frame, which copies).
+;;; ALSO applied at the EVAL frame since task #987 — p-eval-block and the
+;;; string-eval catch — because perl copies at eval exit too (pp_leaveeval).
+;;; NOT applied at: p-sort-cmp (a comparator's value is numified), `do { }`
+;;; (perl's `do` block is NOT a frame — `\do { $x }` IS `\$x`, probed; it has
+;;; no catch of its own here, so there is nothing to hang a copy on and
+;;; nothing does), and p-goto-sub (the target sub runs its OWN frame, which
+;;; copies).
 (defun %p-leavesub-scalar (v)
   "perl's mortalcopy for ONE scalar leaving a sub frame.
    A PLAIN box yields its unboxed value — the raw value IS the copy, so this
@@ -11181,16 +11184,21 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                  ;; into the caller's dynamic scope — so a later `eval "bar()"`
                  ;; would resolve bar() in Foo instead of the caller's package.
                  ;; Mirrors *package* above and the module-load rebind in p-require.
-                 (result   (catch :p-return
-                             (let ((*package* *package*)
-                                   (*pcl-current-package* *pcl-current-package*)
-                                   (eof '#:eof))
-                               (with-input-from-string (in cl-text)
-                                 (loop with r = nil
-                                       for form = (read in nil eof)
-                                       until (eq form eof)
-                                       do (setf r (eval form))
-                                       finally (return r)))))))
+                 ;; A STRING EVAL IS A FRAME TOO (task #987): perl's
+                 ;; pp_leaveeval mortal-copies the value it leaves with, so
+                 ;; `for (eval '$x') { $_ = 9 }` must not write into $x.  Same
+                 ;; one reading as the block form and as a sub's exit.
+                 (result   (%p-leavesub
+                            (catch :p-return
+                              (let ((*package* *package*)
+                                    (*pcl-current-package* *pcl-current-package*)
+                                    (eof '#:eof))
+                                (with-input-from-string (in cl-text)
+                                  (loop with r = nil
+                                        for form = (read in nil eof)
+                                        until (eq form eof)
+                                        do (setf r (eval form))
+                                        finally (return r))))))))
             (box-set $@ "")
             result)
         (p-exception (e)
@@ -11243,8 +11251,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
   ;; `return` inside eval { } exits the eval block (perldoc -f return), not the
   ;; enclosing sub — so catch :p-return here, letting the eval evaluate to the
   ;; returned value rather than unwinding the whole sub.
+  ;;
+  ;; AN EVAL IS A FRAME, so perl's leave rule applies to the value it exits
+  ;; with, exactly as at a sub's exit (pp_leaveeval / pp_leavesub) — task #987,
+  ;; the sibling of #964.  %p-leavesub is the one reading of that rule; the
+  ;; copy sits in the PROG1'S VALUE POSITION, not around the whole form, so
+  ;; `box-set $@` still runs after the body and the error path still yields a
+  ;; bare nil.  Without it `for (eval { $x }) { $_ = 5 }` wrote 5 into $x,
+  ;; and so did `\eval { $x }`, `eval { @l }`, `eval { %h }` and an @_-writing
+  ;; callee (8 probe rows).  `do { }` is NOT a frame and must not get this —
+  ;; `\do { $x }` IS `\$x` in perl (probed); it has no catch here to hang it on.
   `(handler-case
-       (prog1 (let ((|$^S| 1)) (catch :p-return ,@body))
+       (prog1 (%p-leavesub (let ((|$^S| 1)) (catch :p-return ,@body)))
          (box-set $@ ""))
      (error (e)
        (box-set $@ (%p-caught-perl-value e))
