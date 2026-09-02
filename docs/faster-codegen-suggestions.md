@@ -495,6 +495,53 @@ cache that needs an invalidation story (`ovlsub`, #582), a string buffer versus
 realloc (`strcat`), and the hash/slice traffic (`slices`, `sliceasgn`, #982 and
 #985).  There is no row left whose gap is unexplained.
 
+### 0.2g `slices` after the slice-argument flattener (s464ax, round 22, #985)
+
+`%p-flatten-slice-args` — the ONE flattener the eight slice functions share —
+answered a LIST, so `@a[1..5]` and `@h{@k}`, which hand it a single vector,
+allocated the index list twice (`coerce … 'list`, then LOOP `APPEND`'s copy).
+It now answers a SIMPLE-VECTOR and a COUNT, and in that single-vector case the
+vector is the argument's own backing store, so nothing is allocated at all.
+
+**sb-sprof, N = 1.5e6, this row's program, same box, before and after:**
+
+| | before | after |
+|---|---|---|
+| total sampling time | 0.686 s (1372 samples) | **0.654 s** (1308) |
+| `sb-kernel:vector-to-list` | 1.7 % self / 2.0 % total | **absent** |
+| `sb-impl::copy-list-to` | 2.6 % self / 2.8 % | **absent** |
+| `LISTIFY-&REST` + `listify_rest_arg` | — | 0.0 % self / 0.1 % total |
+
+That last row answers #985's second question by measurement: the `&rest` list
+the eight functions cons is **1 sample of 1308** — it is not the allocation
+that dominates, so no `dynamic-extent` declaration was added.
+
+**Bench, interleaved best-of-5 A/B (`BENCH_RT_B`), A = this tree, B = main
+`80b715c`; positive = B slower = the change helps.  The CONTROL is A against a
+BYTE-IDENTICAL COPY of A, run alternately with the A/B so both see the same
+box (1-min load 0.1–1.0 throughout):**
+
+```
+row          control (3 runs)          A/B (4 runs)              verdict
+slices       -0.6 -1.7 +0.1            +5.8 +5.8 +6.4 +5.0       -5.5 %, every run outside the band
+sliceasgn    +3.2 -1.3 -2.0            -1.0 +0.2 +0.3 -0.0       inside the band (it takes the LHS-macro path)
+arrhash      -1.3 +0.4 -1.1            +0.5 -0.5 +1.0 +2.0       inside
+arrfill      -1.0 +1.5 -1.7            +0.3 -0.7 +0.4 -0.7       inside
+listcopy     +0.0 +4.2 +0.1            -0.1 +0.2 -0.2 -0.0       inside
+feread       +1.7 +0.3 +0.3            +2.2 +12.6 +0.8 +2.4      inside but for one outlier (this row has no slice)
+feread2      +1.5 -1.1 +1.5            +1.7 +3.2 +1.3 +1.5       inside
+```
+
+PCL absolute seconds for `slices`: **0.1878–0.1924 (A) against 0.2002–0.2012
+(B)**, perl 0.0656–0.0681 — so the row reads **2.78–2.92×** here against
+§0.2f's 3.02×.  `sliceasgn` does not move because a list-assign LHS slice goes
+through `%p-slice-args-vector`, which must still hand back a length-exact
+vector.
+
+What is left on the row is what §0.2f already named: **#982** key
+stringification (~6 % here) and the ~23 % that is the `equal` hash table
+itself.
+
 ---
 
 ## 0.5 Headline results (what the experiments proved)

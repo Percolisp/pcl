@@ -90,6 +90,70 @@ Coverage hole worth #993's attention: perl's `t/lib/overload_fallback.t` and
 feature's own acceptance tests had never run.
 
 ---
+## Session 464ax (2026-09-02, Opus, round 22 PERF slot) — the slice-argument flattener answers a VECTOR (#985)
+
+**The shape.**  `%p-flatten-slice-args` is the ONE place the rule "a non-string
+vector is many indices, a string is one key" lives — six slice functions
+spelled it separately until s413, and the three that DISAGREED were the bugs of
+#394.  It answered a LIST.  Every slice the corpus emits hands it exactly ONE
+non-string vector, so that case built the index list twice: `coerce … 'list`
+(`vector-to-list` 1.7 % self) then LOOP `APPEND`'s copy (`copy-list-to`
+2.6 %) — 4.3 % of the `slices` bench row, thrown away one `dolist` later.
+
+**The change is a representation change across all eight callers, not a fast
+arm in the two hot ones** (that would put the rule in three places — rule 11).
+It now answers a SIMPLE-VECTOR **and a COUNT**, and in the single-vector case
+the vector is the argument's own backing store (`%p-vec-data`), so the common
+slice allocates nothing here at all.  Two things follow, and both are guarded:
+
+* **the store is CAPACITY, not length.**  `my @k = (0..9); pop @k; pop @k;` is
+  8 entries in a 10-slot store — a reader that took `(LENGTH store)` would
+  slice TEN.  That is why the count is a second value.  Inverse-guard
+  (the count replaced by the capacity): ten of eleven probe rows change,
+  three guard rows fail.
+* **the store can be the LIVE container.**  Reading it is safe — promotion
+  preserves the value — but `p-delete-array-slice` and its KV twin WRITE the
+  array they are indexing by, and perl evaluates the index list onto the stack
+  before the first store.  They snapshot on `(eq flat (%p-vec-data a))`.
+  The discriminating case is not the obvious one: `delete @s[@s]` on `(2,1,0)`
+  answers the same either way, but on `(1,2,0)` the unsnapshotted loop reads
+  the second index out of the slot the first store emptied — `2,1,U|3` against
+  perl's `2,0,1|0`.  Both spellings are guard rows.
+
+One caller cannot take two values (the list-assign LHS macro, whose `let*`
+bindings are generated) and gets the thin wrapper `%p-slice-args-vector`.
+
+**Measured.**  sb-sprof on the row's program at N = 1.5e6: total sampling time
+0.686 s → 0.654 s, and `vector-to-list` / `copy-list-to` are gone from the
+report entirely.  Bench, interleaved best-of-5 A/B against main `80b715c`,
+alternated with a CONTROL A/B of the tree against a byte-identical copy of
+itself: `slices` **+5.8 +5.8 +6.4 +5.0 %** (base slower) against a control
+band of ±1.7 % on that row — every run outside the band, PCL absolute
+0.1878–0.1924 s against 0.2002–0.2012 s, i.e. **3.02× → 2.78–2.92×**.  Every
+other row inside its own control band; `sliceasgn` does not move because it
+takes the LHS-macro path.  #985's second question — is the `&rest` list the
+allocation that dominates? — is answered NO by the same profile: `LISTIFY-&REST`
+plus `listify_rest_arg` are 1 sample of 1308, so no `dynamic-extent` was added.
+
+**Two PRE-EXISTING divergences the 50-row probe battery found**, both
+reproducing on `80b715c` and both FILED rather than fixed: **#1010**, perl
+vivifies a missing hash key when a slice element is ALIASED (`f(@h{'a','zz'})`
+and `for (@h{'a','zz'}) {}` both create `$h{zz}`; PCL does not), and **#1011**,
+`%a[-1]` yields the index as WRITTEN in perl (`-1,50`) where PCL normalises it
+(`4,50`).
+
+**Also measured, for #986** (the open "is the board's `intloop+=`/`cfor` gap
+real or is it this box?"): its step 1 taken on a genuinely quiet box (1-min
+load 0.12–0.36, three runs) — `intloop+=` 0.0203/0.0223/0.0212 against
+§0.2d's 0.0174, `cfor` 0.0285/0.0293/0.0293 against 0.0261, while `intloop=`
+reaches its record at 0.0188.  **The gap does not dissolve**, so #986's
+machine-state arm is killed and only its `BENCH_RT_B` bisect over rounds 15–18
+is left.
+
+Legs: gate **193 / 6542** (only the 13 pclxs xs rows); sweep TOTAL **18346
+(+0)** GATE clean, drops 5 = census; companion `op/ --quick`.  Guard
+`Pl/t/slice-args-01.t`, 15 rows.  Record `docs/faster-codegen-suggestions.md`
+§0.2g.
 
 ## Session 464 (2026-09-02, Fable) — ROUND 21: #964 the return protocol SHIPPED and MERGED (main `4fd661b`); `:lvalue` (#930) DEFERRED by the USER; the ignored-tests audit plan drafted (#993, to be presented s465)
 
