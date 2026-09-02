@@ -53,14 +53,16 @@ sub run_diff {
 }
 
 # ── the sweep gate: shortfall is compared per file, MORE is a failure ───────
-# _status.tsv columns: name status pass fail planned drops child-drops shortfall note
+# _status.tsv columns:
+#   name status pass fail planned drops child-drops shortfall unrun note
+# shortfall = planned - (pass+fail); unrun = that minus the SKIPPED rows.
 {
   my $log = "$dir/faillog";
   mkdir $log;
   spew("$log/_status.tsv",
-       join("\t", 'pack.t',  'OK', 5725, 89, 14722, 0, 0, 8908, ''),
-       join("\t", 'lc.t',    'OK',   82,  0,  2659, 0, 0, 2577, ''),
-       join("\t", 'clean.t', 'OK',   10,  0,    10, 0, 0,    0, ''));
+       join("\t", 'pack.t',  'OK', 5725, 89, 14722, 0, 0, 8908, 44, ''),
+       join("\t", 'lc.t',    'OK',   82,  0,  2659, 0, 0, 2577, 0, ''),
+       join("\t", 'clean.t', 'OK',   10,  0,    10, 0, 0, 0, 0, ''));
   spew("$log/clean.fails.tsv");
   my $base = spew("$dir/fail-base.tsv");
   my $sfp  = "$dir/row-shortfall.tsv";
@@ -68,17 +70,19 @@ sub run_diff {
                           'perl-tests/lc.t'   => { rows => 2577, cause => 'UNEXPLAINED' } });
   # sweep-diff looks for row-shortfall.tsv beside the fail baseline.
   my ($out, $rc) = run_diff('diff', $base, $log);
-  like($out, qr/TOTAL planned rows never produced: baseline 11485, current 11485 \(\+0\)/,
+  like($out, qr/TOTAL planned rows not asserted: baseline 11485, current 11485 \(\+0\)/,
        'a matching shortfall reports the totals and does not fail');
   like($out, qr/UNEXPLAINED shortfall: 2577 row\(s\) in 1 file\(s\)/,
        'the UNEXPLAINED rows are counted every run — that is the audit queue');
+  like($out, qr/of those, 44 row\(s\) produced no TAP at all .*; 11441 were SKIPPED/,
+       'the two halves are named: a stopped file and a skipped row are not the same event');
   is($rc, 0, 'a run whose shortfall equals the baseline exits clean');
 
   # One MORE unproduced row than blessed = a NEW shortfall = a failing run.
   spew("$log/_status.tsv",
-       join("\t", 'pack.t',  'OK', 5724, 89, 14722, 0, 0, 8909, ''),
-       join("\t", 'lc.t',    'OK',   82,  0,  2659, 0, 0, 2577, ''),
-       join("\t", 'clean.t', 'OK',   10,  0,    10, 0, 0,    0, ''));
+       join("\t", 'pack.t',  'OK', 5724, 89, 14722, 0, 0, 8909, 45, ''),
+       join("\t", 'lc.t',    'OK',   82,  0,  2659, 0, 0, 2577, 0, ''),
+       join("\t", 'clean.t', 'OK',   10,  0,    10, 0, 0, 0, 0, ''));
   ($out, $rc) = run_diff('diff', $base, $log);
   like($out, qr/\+ pack\.t\s+8908 -> 8909 planned row\(s\) NEVER PRODUCED/,
        'a new shortfall names the file and both numbers');
@@ -87,9 +91,9 @@ sub run_diff {
 
   # FEWER is a fix: reported, and it does NOT fail the run.
   spew("$log/_status.tsv",
-       join("\t", 'pack.t',  'OK', 5725, 89, 14722, 0, 0, 8908, ''),
-       join("\t", 'lc.t',    'OK', 2659,  0,  2659, 0, 0,    0, ''),
-       join("\t", 'clean.t', 'OK',   10,  0,    10, 0, 0,    0, ''));
+       join("\t", 'pack.t',  'OK', 5725, 89, 14722, 0, 0, 8908, 44, ''),
+       join("\t", 'lc.t',    'OK', 2659,  0,  2659, 0, 0, 0, 0, ''),
+       join("\t", 'clean.t', 'OK',   10,  0,    10, 0, 0, 0, 0, ''));
   ($out, $rc) = run_diff('diff', $base, $log);
   like($out, qr/- lc\.t\s+2577 -> 0 planned row\(s\) — fixed; EDIT the baseline row/,
        'a fixed shortfall says the row leaves BY EDIT');
@@ -104,7 +108,10 @@ sub run_diff {
   spew("$log/a.fails.tsv");
   mkdir "$dir/no-neighbours" or die "mkdir: $!";
   spew("$dir/no-neighbours/fail-base.tsv");
-  my ($out) = run_diff('diff', "$dir/no-neighbours/fail-base.tsv", $log);
+  # From a cwd with no baselines/ either: sweep-diff falls back to
+  # `baselines/row-shortfall.tsv` relative to cwd (the drop census's rule), and
+  # running this from the repo root would find the REAL one.
+  my $out = `cd \Q$dir/no-neighbours\E && $^X \Q$SWEEP_DIFF\E diff \Q$dir/no-neighbours/fail-base.tsv\E \Q$log\E 2>&1`;
   like($out, qr/SHORTFALL: NOT CHECKED/,
        'no baseline beside the fail baseline reports NOT CHECKED, not silence');
 }

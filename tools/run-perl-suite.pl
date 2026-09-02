@@ -328,6 +328,12 @@ sub timeout_for {
 # One gate per file, or a moved row reads twice and is fixed once.
 my %blessed_fails;      # rel -> sorted arrayref of rowkeys
 my %blessed_fail_meta;  # rel -> arrayref of [num, perl_verb, pcl_verb, rowkey]
+# Whether the baseline existed AT STARTUP, not at report time: a --bless-fails
+# run WRITES the file before the report, so `-e` there would answer yes and the
+# report would list every blessed row as a NEW ROW.  It did exactly that on the
+# first bless (s465az).  Every registry answer must come from the state the run
+# was MEASURED against.
+my $fails_tsv_existed = -e $fails_tsv;
 if (open my $bf, '<', $fails_tsv) {
   while (<$bf>) {
     chomp;
@@ -524,6 +530,21 @@ printf STDERR "need-harness: %d file(s) scanned, %d not run — listed NOT-RUN b
   if %need_harness;
 my @quick_skipped  = grep { ($not_run{$_} // '') =~ /^QUICK-SKIP/   } @files;
 my @quick_capped   = grep { ($not_run{$_} // '') =~ /^QUICK-CAPPED/ } @files;
+# I4 (task #993): the files the runner's DEFAULT form does not measure, whether
+# or not THIS invocation is that form.  Membership must not depend on --quick:
+# the whole point of the stamp is that a full `--all` MEASURES the hang set, and
+# that measurement is what a later quick run's "last measured" line reports.
+# Computed from the tables, never from %not_run, which is this run's view.
+my %stamp_tracked;
+for my $rel (@files) {
+  $stamp_tracked{$rel} = "QUARANTINED: $QUARANTINE{$rel}" if $QUARANTINE{$rel};
+  $stamp_tracked{$rel} = "QUICK-SKIP: $QUICK_SKIP{$rel}"  if $QUICK_SKIP{$rel};
+  $stamp_tracked{$rel} = "NEED-HARNESS: $NEED_HARNESS_NOT_RUN{$rel}"
+    if $need_harness{$rel} && $NEED_HARNESS_NOT_RUN{$rel};
+  $stamp_tracked{$rel} = sprintf("QUICK-CAPPED: registered allowance %ds > quick cap %ds — %s",
+                                 $file_timeout{$rel}{secs}, $QUICK_CAP, $file_timeout{$rel}{cause})
+    if $file_timeout{$rel} && $file_timeout{$rel}{secs} > $QUICK_CAP;
+}
 printf STDERR "quick mode: %d file(s) not run (%d hang-set, %d allowance > %ds) — listed NOT-RUN below\n",
   scalar(@quick_skipped) + scalar(@quick_capped),
   scalar(@quick_skipped), scalar(@quick_capped), $QUICK_CAP if $quick;
@@ -1386,8 +1407,18 @@ sub bless_shortfall {
     my $short = ($r->[1] + $r->[2]) - ($r->[3] + $r->[4]);
     $short = 0 if $short < 0;
     if (!$short) { delete $rows{$key}; next }
-    $rows{$key} = { rows => $short,
-                    cause => ($shortfall_base{$key} ? $shortfall_base{$key}{cause} : 'UNEXPLAINED') };
+    # A file already REGISTERED as an expected divergence (XDIFF) or a harness
+    # FIXTURE artifact has a cause by construction: the registration covers its
+    # whole divergence, all-or-nothing (#185), and rows perl produced that PCL
+    # did not are part of that divergence.  Calling those UNEXPLAINED would put
+    # ~325,000 uniprops rows into the audit's queue, which is the opposite of
+    # what the queue is for.  An EXISTING hand-written cause always wins.
+    my $cause = $shortfall_base{$key} ? $shortfall_base{$key}{cause} : 'UNEXPLAINED';
+    if ($cause =~ /^UNEXPLAINED/) {
+      $cause = 'XDIFF: '   . short_cause($expected{$rel}, 90)     if $expected{$rel};
+      $cause = 'FIXTURE: ' . short_cause($fixture{$rel}{cause}, 90) if $fixture{$rel};
+    }
+    $rows{$key} = { rows => $short, cause => $cause };
   }
   PCLShortfall::write_shortfall($shortfall_tsv, \%rows,
                                 stamp_session() . ' ' . stamp_today());
@@ -1403,18 +1434,19 @@ sub bless_shortfall {
 sub bless_stamps {
   my %out = map { $_ => { %{ $stamp{$_} } } } keys %stamp;
   my ($sess, $date) = (stamp_session(), stamp_today());
-  for my $rel (@files) {
-    my $why = $not_run{$rel};
-    if ($why) {
-      $out{$rel} //= { session => 'NEVER', date => '-', note => '' };
-      $out{$rel}{note} = short_cause($why, 90);
-      next;
+  for my $rel (sort keys %stamp_tracked) {
+    # Every tracked file gets a row.  A file this run did NOT measure keeps the
+    # stamp it had (that IS the age); one it measured gets this session's.
+    $out{$rel} //= { session => 'NEVER', date => '-', note => '' };
+    my $r = $results{$rel};
+    if ($r && $r->[5] !~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT)$/) {
+      $out{$rel} = { session => $sess, date => $date,
+                     note => sprintf("%s — measured %s %d/%d",
+                                     short_cause($stamp_tracked{$rel}, 60),
+                                     $r->[5], $r->[3], $r->[4]) };
+    } elsif (($out{$rel}{session} // 'NEVER') eq 'NEVER') {
+      $out{$rel}{note} = short_cause($stamp_tracked{$rel}, 90);
     }
-    next unless exists $out{$rel};           # only stamped files are tracked
-    my $r = $results{$rel} or next;
-    next unless row_verifiable($r->[5]) || $r->[5] eq 'TRANSPILE';
-    $out{$rel} = { session => $sess, date => $date,
-                   note => sprintf("measured: %s %d/%d", $r->[5], $r->[3], $r->[4]) };
   }
   open my $fh, '>', $stamps_tsv or die "write $stamps_tsv: $!";
   print $fh <<'HDR';
@@ -1434,6 +1466,7 @@ sub bless_stamps {
 # GENERATED: `tools/run-perl-suite.pl --all --bless-stamps` (a file measured by
 # that run gets the run's session; one it did not measure keeps its old stamp).
 HDR
+  printf $fh "# taken-at: %s %s\n", $sess, $date;
   print $fh join("\t", $_, $out{$_}{session}, $out{$_}{date}, $out{$_}{note} // ''), "\n"
     for sort keys %out;
   close $fh;
@@ -1517,7 +1550,7 @@ sub classify_result {
 # from one that passed.
 sub report_row_diff {
   print "\n";
-  if (!%blessed_fails && !-e $fails_tsv) {
+  if (!%blessed_fails && !$fails_tsv_existed) {
     print "ROW DIFF: NOT CHECKED — no $fails_tsv"
         . " (bless one with: tools/run-perl-suite.pl --all --bless-fails)\n";
     return;
@@ -1591,7 +1624,13 @@ sub report_row_diff {
 # ── I2: the SHORTFALL, this population's half (task #993) ───────────────────
 sub report_shortfall {
   print "\n";
-  my (@up, @down, $sum, $unexplained, $unexplained_files) = ((), (), 0, 0, 0);
+  # Declared one at a time on purpose: `my (@up, @down, $x) = ((), (), 0)`
+  # FLATTENS — @up swallows the whole right-hand side and every scalar comes
+  # back undef, which cost this report a die at its first shortfall row.
+  my (@up, @down);
+  my $sum = 0;
+  my $unexplained = 0;
+  my $unexplained_files = 0;
   for my $rel (sort keys %results) {
     my $r = $results{$rel};
     next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT)$/;
@@ -1624,20 +1663,24 @@ sub report_shortfall {
 # ── I4: HOW OLD is each not-run hole? (task #993) ───────────────────────────
 sub report_stamps {
   print "\n";
-  my @holes = grep { $not_run{$_} } @files;
-  if (!@holes) { print "NOT-RUN STAMPS: no unmeasured file in this run\n"; return }
-  printf "NOT-RUN STAMPS: %d file(s) this run did not measure — last measured when?\n",
-    scalar(@holes);
+  my @holes = sort keys %stamp_tracked;
+  if (!@holes) { print "NOT-RUN STAMPS: no tracked hole among this run's files\n"; return }
+  my @unmeasured = grep { !$results{$_} || $results{$_}[5] =~ /^(?:NOT-RUN|KILLED)$/ } @holes;
+  printf "NOT-RUN STAMPS: %d file(s) the DEFAULT form does not measure; %d of them"
+       . " were not measured by THIS run — last measured when?\n",
+    scalar(@holes), scalar(@unmeasured);
   my $never = 0;
-  for my $rel (sort @holes) {
+  for my $rel (@holes) {
     my $s = $stamp{$rel};
-    $never++ if !$s || ($s->{session} // 'NEVER') eq 'NEVER';
+    my $measured_now = $results{$rel} && $results{$rel}[5] !~ /^(?:NOT-RUN|KILLED)$/;
+    $never++ if !$measured_now && (!$s || ($s->{session} // 'NEVER') eq 'NEVER');
     printf "  %-24s last measured %-10s %-12s %s\n", $rel,
-      ($s ? $s->{session} : 'NEVER'), ($s ? $s->{date} : '-'),
-      short_cause($not_run{$rel}, 70);
+      ($measured_now ? '(this run)' : $s ? $s->{session} : 'NEVER'),
+      ($measured_now ? stamp_today() : $s ? $s->{date} : '-'),
+      short_cause($stamp_tracked{$rel}, 70);
   }
   printf "  %d of them have NO measurement on record at all\n", $never if $never;
-  print  "  (re-stamp with: tools/run-perl-suite.pl --all --bless-stamps, PCL_SESSION=sNNN)\n";
+  print  "  (re-stamp with: PCL_SESSION=sNNN tools/run-perl-suite.pl --all --bless-stamps)\n";
   return;
 }
 

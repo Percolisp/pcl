@@ -117,6 +117,20 @@ None of those needed changing to find #964 — what was missing is READING.
 
 ## 3. Instruments first (so the audit leaves rows behind, not a one-off)
 
+**PHASE 0 IS DONE — s465az (Opus, round 23), commit `dda76d1`** (baselines
+blessed in the follow-up commit; runner and baseline work only, no compiler or
+runtime file touched).  Per instrument:
+
+| | file | reader | blessed from | DONE |
+|---|---|---|---|---|
+| I1 | `baselines/perl-suite-fails.tsv` | `tools/run-perl-suite.pl` (`--bless-fails`) | the s465az full `--all --jobs 4` run | `dda76d1` |
+| I2 | `baselines/row-shortfall.tsv` (SHARED, `tools/lib/PCLShortfall.pm`) | `tools/sweep-diff.pl` + `tools/run-perl-suite.pl` | that run + a full sweep | `dda76d1` |
+| I3 | `baselines/fail-baseline.tsv` column 6 | `tools/sweep-diff.pl` | `docs/blessed-fails-review-s464.md` §3, row for row | `dda76d1` |
+| I4 | `baselines/perl-suite-notrun-stamps.tsv` | `tools/run-perl-suite.pl` (`--bless-stamps`) | that run | `dda76d1` |
+
+How to read each one: `docs/test-debugging-runbook.md` §4c–§4f.  Tests:
+`tools/t/audit-instruments.t` (run directly, like `tools/t/tap-align.t`).
+
 - **I1 — row-level blessing for the companion suite.**  A
   `baselines/perl-suite-fails.tsv` (file, row number, description, got /
   expected when the TAP carries them), diffed BY ROW by the runner: a new

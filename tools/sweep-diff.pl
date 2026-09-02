@@ -97,7 +97,8 @@ sub read_status_file {
         chomp $line;
         next unless length $line;
         next if $line =~ /^#/;
-        my ($file, $status, $pass, $fail, $planned, $drops, $child, $short) = split /\t/, $line;
+        my ($file, $status, $pass, $fail, $planned, $drops, $child, $short, $unrun)
+            = split /\t/, $line;
         next unless defined $file;
         $st{$file} = { status  => $status  // 'OK',
                        pass    => defined $pass    ? $pass    : -1,
@@ -108,7 +109,10 @@ sub read_status_file {
                        # column.  -1 = NOT MEASURED, exactly like drops — the
                        # blessed pass baseline has five columns and every reader
                        # must treat a missing column as unknown, never as zero.
-                       short   => (defined $short && $short =~ /^-?\d+$/) ? $short : -1 };
+                       short   => (defined $short && $short =~ /^-?\d+$/) ? $short : -1,
+                       # the half of the shortfall that produced NO row at all
+                       # (the file stopped); the rest of it was SKIPPED
+                       unrun   => (defined $unrun && $unrun =~ /^-?\d+$/) ? $unrun : -1 };
     }
     close $fh;
     return \%st;
@@ -557,9 +561,21 @@ if (!%$shortfall_base) {
         next if ($cur_status->{$file}{short} // -1) < 0;
         $base_short += ($shortfall_base->{"perl-tests/$file"} || {})->{rows} // 0;
     }
-    printf "TOTAL planned rows never produced: baseline %d, current %d (%+d)%s\n",
+    my $unrun_now = 0;
+    for my $file (sort keys %$cur_status) {
+        my $u = $cur_status->{$file}{unrun};
+        $unrun_now += $u if defined $u && $u > 0;
+    }
+    printf "TOTAL planned rows not asserted: baseline %d, current %d (%+d)%s\n",
         $base_short, $short_now, $short_now - $base_short,
         (@short_up ? '  <-- a NEW shortfall landed: this run is NOT clean' : '');
+    # The two halves are very different in character and a single number hides
+    # it: pack.t's 8,997 are almost all SKIPPED rows (blessed or the file's
+    # own directives), while caller.t's 47 are rows that never ran because the
+    # file aborted.  Both are shortfall; only one is a crash.
+    printf "  of those, %d row(s) produced no TAP at all (the file stopped);"
+         . " %d were SKIPPED\n", $unrun_now, $short_now - $unrun_now
+        if $short_now > 0;
     printf "  UNEXPLAINED shortfall: %d row(s) in %d file(s) — that is the audit's queue (#993)\n",
         $short_unexplained, $short_unexplained_files if $short_unexplained;
 }

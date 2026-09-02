@@ -209,10 +209,19 @@ session-216 preprocessing change) with "2 tests changed: both newly passing."
 ```sh
 perl sweep-perl-tests.pl --jobs 8                       # writes .faillog/*, THEN runs the gate itself
 tools/sweep-diff.pl .faillog                            # summary: per-file fail counts
-tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog # NEW + FIXED + LOST (exit!=0 if NEW or LOST)
-tools/sweep-diff.pl save .faillog baselines/fail-baseline.tsv        # re-bless the FAIL baseline
-tools/sweep-diff.pl save-status .faillog baselines/pass-baseline.tsv # re-bless the PASS baseline
+tools/sweep-diff.pl diff baselines/fail-baseline.tsv .faillog # NEW + FIXED + LOST + DROPS + SHORTFALL
+tools/sweep-diff.pl save-status .faillog baselines/pass-baseline.tsv    # re-bless the PASS baseline
+tools/sweep-diff.pl save-shortfall .faillog baselines/row-shortfall.tsv # re-bless the SHORTFALL baseline
 ```
+
+**`save` is NOT in that list any more.** Since s465 (task #993) the fail
+baseline has a SIXTH column — the CAUSE (task number, `not-supported.md`
+anchor, or `UNEXPLAINED`) — and `save` reads a RUN, which has no causes: it
+would erase all 552 attributions and absorb whatever else moved. Its rows
+leave, and arrive, BY EDIT with a cause (#223); `sweep-diff.pl save` warns
+when the destination has a cause column, and is for a NEW baseline file.
+The line format above is the LIVE `.faillog` row (five fields); the blessed
+baseline is that plus the cause.
 
 A **full** sweep (no file arguments) ends by running that `diff` itself and exits
 with its verdict — `--no-gate` opts out.  A sweep of named files stays

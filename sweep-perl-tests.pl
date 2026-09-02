@@ -610,7 +610,7 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # flaky -j8 crash (e.g. pack.t's transient SIMPLE-FILE-ERROR) makes every
 # baseline failure in that file look "FIXED".  One line per file:
 #   name <TAB> status <TAB> pass <TAB> fail <TAB> planned <TAB> drops
-#        <TAB> child-drops <TAB> shortfall <TAB> note
+#        <TAB> child-drops <TAB> shortfall <TAB> unrun <TAB> note
 # where `note` carries the crash-localization snippet (# ABORTED after test N ...)
 # for CRASH/PARTIAL files, and `drops` is the #138-family count (task #343):
 # how many statements the compiler replaced with nil in this file's CL, or -1
@@ -621,9 +621,11 @@ print "\nSkipped (known hang): " . join(', ', @SKIP) . "\n";
 # spawn; 0 there means "no child dropped anything", including "this file
 # spawns no child", and it is REPORTED, not gated (sweep-diff.pl reads the
 # first six columns and ignores it).  `shortfall` (task #993) is
-# planned - (pass+fail+skip): the rows the file's OWN PLAN promised and this
-# run never produced, GATED against baselines/row-shortfall.tsv — a verdict of
-# OK means "no previously-passing row was lost", never "the plan was produced".
+# planned - (pass+fail): the rows the file's OWN PLAN promised and this run did
+# not ASSERT, GATED against baselines/row-shortfall.tsv — a verdict of OK means
+# "no previously-passing row was lost", never "the plan was produced".  `unrun`
+# is the half of it that produced no TAP row AT ALL (the file stopped);
+# shortfall - unrun is the skipped half.  Reported, not separately gated.
 sub write_status_file {
     open my $sf, '>', "$log_dir/_status.tsv" or return;
     for my $name (sort keys %results) {
@@ -633,24 +635,39 @@ sub write_status_file {
         print $sf join("\t", $name, $r->{status} // 'OK',
                        $r->{pass} // 0, $r->{fail} // 0, $r->{planned} // -1,
                        $r->{drops} // -1, $r->{child_drops} // 0,
-                       shortfall_of($r), $note) . "\n";
+                       shortfall_of($r), unrun_of($r), $note) . "\n";
     }
     close $sf;
 }
 
-# SHORTFALL (task #993): planned rows this file never produced.  -1 = NOT
-# MEASURED (the file has no `1..N` plan line), never 0 — the same convention as
-# `drops`, and for the same reason: a file with no plan says nothing about its
-# shortfall, and reading that silence as zero is how pack.t's 8,997 missing
-# rows stayed invisible under an OK verdict.  The oracle here is the file's OWN
-# plan; the companion runner's oracle is real perl's run (PCLShortfall.pm).
+# SHORTFALL (task #993): rows this file's own `1..N` plan promised that this
+# run did not ASSERT — `planned - (pass + fail)`.  -1 = NOT MEASURED (no plan
+# line), never 0: the same convention as `drops`, and for the same reason —
+# reading silence as zero is how pack.t's 8,997 unasserted rows stayed
+# invisible under an OK verdict.  The companion runner's oracle is real perl's
+# run instead of a plan line (tools/lib/PCLShortfall.pm).
+#
+# A SKIPPED row counts as shortfall.  It was planned and it did not assert, and
+# whether the skip is blessed is a DIFFERENT question, asked by the
+# skip-registry (which also flags a stale one).  The two components are very
+# different in character, so `unrun_of` records the other half and the report
+# prints the split: pack.t's 8,997 are almost all skips, while caller.t's 47
+# are rows that never ran because the file aborted.
 sub shortfall_of {
     my ($r) = @_;
     my $planned = $r->{planned} // -1;
     return -1 if $planned < 0;
-    my $produced = ($r->{pass} // 0) + ($r->{fail} // 0) + ($r->{skip} // 0);
-    my $short = $planned - $produced;
+    my $short = $planned - (($r->{pass} // 0) + ($r->{fail} // 0));
     return $short > 0 ? $short : 0;
+}
+
+# The half of the shortfall that produced NO TAP row at all — the file stopped.
+sub unrun_of {
+    my ($r) = @_;
+    my $planned = $r->{planned} // -1;
+    return -1 if $planned < 0;
+    my $unrun = $planned - (($r->{pass} // 0) + ($r->{fail} // 0) + ($r->{skip} // 0));
+    return $unrun > 0 ? $unrun : 0;
 }
 write_status_file();
 

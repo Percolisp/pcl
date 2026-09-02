@@ -1,0 +1,32 @@
+# perl-suite-notrun-stamps.tsv — WHEN was each not-run file last measured?
+# (task #993 / docs/plan-test-audit-s464.md §3 I4)
+#
+#   <rel> <TAB> <session> <TAB> <date> <TAB> <note>
+#
+# One row per file tools/run-perl-suite.pl does not measure in its default
+# form: QUARANTINED (task #160), QUICK-SKIP (the #326 hang set), QUICK-CAPPED
+# (a registered allowance above the 120 s quick cap), NEED-HARNESS.  A hole
+# that is only ever printed as "not run" says nothing about how OLD it is —
+# op/list.t has been quarantined since s320 and the hang set is reached only by
+# a full `--all`.  The stamp makes the age countable, and every run prints it.
+#
+# session `NEVER` = this file has no measurement on record at all.
+# GENERATED: `tools/run-perl-suite.pl --all --bless-stamps` (a file measured by
+# that run gets the run's session; one it did not measure keeps its old stamp).
+# FIRST BLESS: s465az, from that session's own `--all --jobs 4` run — by
+# construction, because the file did not exist before it (scratch/i4-stamps-from-run.pl
+# says why it was not the runner that wrote this first copy).
+# taken-at: s465az 2026-09-03
+comp/require.t	s465az	2026-09-03	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured DIFF 910/837
+op/list.t	NEVER	-	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run
+op/pack.t	NEVER	-	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed
+re/overload.t	s465az	2026-09-03	QUICK-SKIP: HANG measured s404 — 3 of perl's 87 rows at... — measured TIMEOUT 0/0
+re/pat_advanced.t	s465az	2026-09-03	QUICK-CAPPED: registered allowance 900s > quick cap 120s ... — measured DIFF 951/729
+re/pat_psycho.t	s465az	2026-09-03	QUICK-CAPPED: registered allowance 450s > quick cap 120s ... — measured OK 15/0
+re/regexp.t	s465az	2026-09-03	QUICK-SKIP: task #326 — hangs at TAP row ~905 (identica... — measured TIMEOUT 795/110
+re/regexp_noamp.t	s465az	2026-09-03	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 796/109
+re/regexp_notrie.t	s465az	2026-09-03	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 795/110
+re/regexp_qr.t	s465az	2026-09-03	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 795/110
+re/regexp_qr_embed.t	s465az	2026-09-03	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 795/110
+re/regexp_trielist.t	s465az	2026-09-03	QUICK-SKIP: task #326 — same driver/data as re/regexp.t... — measured TIMEOUT 795/110
+re/speed.t	s465az	2026-09-03	QUICK-SKIP: HANG measured s404 — 1 of perl's 59 rows at... — measured TIMEOUT 25/30

@@ -1,0 +1,279 @@
+# row-shortfall.tsv — rows the population expected and PCL never produced
+# (task #993 / docs/plan-test-audit-s464.md §3 I2).  SHARED by both runners.
+#
+#   <key> <TAB> <rows never produced> <TAB> <cause>
+#
+# key = perl-tests/<name>  (sweep-perl-tests.pl:      planned - (pass+fail+skip))
+#     = t/<rel>            (tools/run-perl-suite.pl:  perl's rows - PCL's rows)
+#
+# THE RULE, the drop census's: a row leaves BY EDIT when the shortfall is
+# fixed; MORE shortfall than blessed fails the run like a NEW failure; a cause
+# is a task number, a docs/not-supported.md anchor, or UNEXPLAINED — and
+# UNEXPLAINED is the audit's queue, counted on every run so it cannot grow
+# unnoticed.
+#
+# WHY IT EXISTS: "OK" used to mean "no previously-passing row was lost".
+# perl-tests/pack.t is OK with 8,997 of 14,722 planned rows never produced;
+# the companion's 10 TRANSPILE files are one line each and 2,031 rows behind
+# them.  Neither is visible in any other bucket.
+# taken-at: s465az 2026-09-03
+perl-tests/aassign.t	1	UNEXPLAINED
+perl-tests/array.t	10	UNEXPLAINED
+perl-tests/blocks.t	1	UNEXPLAINED
+perl-tests/bop.t	1	UNEXPLAINED
+perl-tests/caller.t	48	UNEXPLAINED
+perl-tests/chdir.t	19	UNEXPLAINED
+perl-tests/chop.t	52	UNEXPLAINED
+perl-tests/chr.t	4	UNEXPLAINED
+perl-tests/closure.t	2	UNEXPLAINED
+perl-tests/crypt.t	1	UNEXPLAINED
+perl-tests/do.t	5	UNEXPLAINED
+perl-tests/dor.t	2	UNEXPLAINED
+perl-tests/each.t	14	UNEXPLAINED
+perl-tests/eval.t	9	UNEXPLAINED
+perl-tests/exp.t	1	UNEXPLAINED
+perl-tests/for.t	1	UNEXPLAINED
+perl-tests/grep.t	6	UNEXPLAINED
+perl-tests/hexfp.t	4	UNEXPLAINED
+perl-tests/index.t	10	UNEXPLAINED
+perl-tests/infnan.t	6	UNEXPLAINED
+perl-tests/join.t	2	UNEXPLAINED
+perl-tests/kvhslice.t	16	UNEXPLAINED
+perl-tests/lc.t	2577	UNEXPLAINED
+perl-tests/length.t	11	UNEXPLAINED
+perl-tests/lex.t	8	UNEXPLAINED
+perl-tests/local.t	6	UNEXPLAINED
+perl-tests/loopctl.t	3	UNEXPLAINED
+perl-tests/magic.t	19	UNEXPLAINED
+perl-tests/method.t	65	UNEXPLAINED
+perl-tests/multideref.t	13	UNEXPLAINED
+perl-tests/not.t	4	UNEXPLAINED
+perl-tests/or.t	1	UNEXPLAINED
+perl-tests/pack.t	8997	UNEXPLAINED
+perl-tests/postfixderef.t	7	UNEXPLAINED
+perl-tests/quotemeta.t	20	UNEXPLAINED
+perl-tests/range.t	4	UNEXPLAINED
+perl-tests/readline.t	8	UNEXPLAINED
+perl-tests/ref.t	36	UNEXPLAINED
+perl-tests/reset.t	23	UNEXPLAINED
+perl-tests/scalar.t	12	UNEXPLAINED
+perl-tests/signatures.t	1	UNEXPLAINED
+perl-tests/sort.t	17	UNEXPLAINED
+perl-tests/split.t	35	UNEXPLAINED
+perl-tests/sprintf.t	2	UNEXPLAINED
+perl-tests/sprintf2.t	36	UNEXPLAINED
+perl-tests/sub.t	9	UNEXPLAINED
+perl-tests/substr.t	46	UNEXPLAINED
+perl-tests/tr.t	75	UNEXPLAINED
+perl-tests/undef.t	4	UNEXPLAINED
+perl-tests/vec.t	2	UNEXPLAINED
+perl-tests/yadayada.t	1	UNEXPLAINED
+t/base/lex.t	120	UNEXPLAINED
+t/class/accessor.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/class.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/construct.t	10	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/destruct.t	4	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/field.t	33	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/inherit.t	19	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/method.t	8	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/phasers.t	3	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/class/utf8.t	4	XDIFF: not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surfa...
+t/cmd/subval.t	1	UNEXPLAINED
+t/comp/decl.t	3	UNEXPLAINED
+t/comp/final_line_num.t	1	UNEXPLAINED
+t/comp/form_scope.t	12	UNEXPLAINED
+t/comp/hints.t	2	XDIFF: not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile...
+t/comp/our.t	7	UNEXPLAINED
+t/comp/parser.t	93	UNEXPLAINED
+t/comp/proto.t	155	UNEXPLAINED
+t/comp/require.t	3	UNEXPLAINED
+t/io/closepid.t	3	UNEXPLAINED
+t/io/crlf.t	3	UNEXPLAINED
+t/io/data.t	4	UNEXPLAINED
+t/io/dup.t	19	UNEXPLAINED
+t/io/fflush.t	3	UNEXPLAINED
+t/io/layers.t	55	UNEXPLAINED
+t/io/msg.t	18	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
+t/io/perlio.t	26	UNEXPLAINED
+t/io/perlio_open.t	10	UNEXPLAINED
+t/io/scalar_ungetc.t	17	UNEXPLAINED
+t/io/sem.t	22	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
+t/io/semctl.t	2	UNEXPLAINED
+t/io/shm.t	19	XDIFF: not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pcl...
+t/io/socket.t	45	UNEXPLAINED
+t/io/socketpair.t	8	UNEXPLAINED
+t/io/tell.t	10	UNEXPLAINED
+t/io/utf8.t	35	UNEXPLAINED
+t/mro/basic.t	9	XDIFF: not-supported.md §mro — C3-only: DFS orders + get_mro 'dfs' default assertions
+t/mro/basic_01_c3.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_01_c3_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_01_dfs.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_01_dfs_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_02_c3.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_02_c3_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_02_dfs.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_02_dfs_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_03_c3.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_03_c3_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_03_dfs.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_03_dfs_utf8.t	3	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_05_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_05_c3_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_05_dfs.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_05_dfs_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/basic_utf8.t	9	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/complex_c3.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/complex_c3_utf8.t	1	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_NEXT.t	3	XDIFF: not-supported.md §mro — next::method family (Tier 3, deferred: docs/mro-plan.md)
+t/mro/next_NEXT_utf8.t	3	XDIFF: not-supported.md §mro — next::method family (Tier 3, deferred, utf8)
+t/mro/next_goto.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_goto_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_inanon.t	2	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_inanon_utf8.t	2	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_method.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_method_utf8.t	4	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_skip.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/next_skip_utf8.t	8	XDIFF: not-supported.md §mro — C3-only, no mro:: API / next::method (provider planned: docs...
+t/mro/pkg_gen.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters
+t/mro/pkg_gen_utf8.t	7	XDIFF: not-supported.md §mro — mro::get_pkg_gen method-cache generation counters (utf8)
+t/op/anonsub.t	9	UNEXPLAINED
+t/op/attrhand.t	4	UNEXPLAINED
+t/op/attrs.t	14	UNEXPLAINED
+t/op/bless.t	1	UNEXPLAINED
+t/op/bop.t	13	UNEXPLAINED
+t/op/chop.t	48	UNEXPLAINED
+t/op/closure.t	6	UNEXPLAINED
+t/op/coreamp.t	778	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also...
+t/op/coresubs.t	1109	UNEXPLAINED
+t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...
+t/op/dbm.t	5	UNEXPLAINED
+t/op/decl-refs.t	195	UNEXPLAINED
+t/op/defer.t	28	XDIFF: not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B ph...
+t/op/die.t	6	UNEXPLAINED
+t/op/each.t	18	UNEXPLAINED
+t/op/eval.t	1	UNEXPLAINED
+t/op/exec.t	16	UNEXPLAINED
+t/op/filehandle.t	2	UNEXPLAINED
+t/op/filetest.t	2	UNEXPLAINED
+t/op/filetest_t.t	7	UNEXPLAINED
+t/op/for.t	149	UNEXPLAINED
+t/op/fork.t	27	UNEXPLAINED
+t/op/getppid.t	8	UNEXPLAINED
+t/op/gmagic.t	45	UNEXPLAINED
+t/op/goto.t	134	UNEXPLAINED
+t/op/gv.t	113	UNEXPLAINED
+t/op/hash-clear-placeholders.t	9	UNEXPLAINED
+t/op/hash-rt85026.t	1	UNEXPLAINED
+t/op/hash.t	479	UNEXPLAINED
+t/op/inc.t	18	UNEXPLAINED
+t/op/inccode-tie.t	89	UNEXPLAINED
+t/op/inccode.t	48	UNEXPLAINED
+t/op/incfilter.t	153	UNEXPLAINED
+t/op/index.t	308	UNEXPLAINED
+t/op/kvhslice.t	1	UNEXPLAINED
+t/op/length.t	2	UNEXPLAINED
+t/op/lex.t	1	UNEXPLAINED
+t/op/lexsub.t	15	UNEXPLAINED
+t/op/lfs.t	17	UNEXPLAINED
+t/op/lock.t	5	UNEXPLAINED
+t/op/lvref.t	201	UNEXPLAINED
+t/op/magic.t	1	UNEXPLAINED
+t/op/method.t	38	UNEXPLAINED
+t/op/multideref.t	13	UNEXPLAINED
+t/op/my_stash.t	2	UNEXPLAINED
+t/op/numconvert.t	1446	UNEXPLAINED
+t/op/numify_chkflags.t	14	UNEXPLAINED
+t/op/override.t	16	UNEXPLAINED
+t/op/pos.t	3	UNEXPLAINED
+t/op/postfixderef.t	7	UNEXPLAINED
+t/op/readline.t	4	UNEXPLAINED
+t/op/ref.t	15	UNEXPLAINED
+t/op/require_37033.t	4	UNEXPLAINED
+t/op/rt119311.t	9	UNEXPLAINED
+t/op/runlevel.t	24	UNEXPLAINED
+t/op/sigdispatch.t	2	UNEXPLAINED
+t/op/signame_canonical.t	15	UNEXPLAINED
+t/op/signatures.t	35	XDIFF: not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) + §Error...
+t/op/sigsystem.t	4	XDIFF: not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the p...
+t/op/smartmatch.t	353	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl ...
+t/op/stat.t	111	UNEXPLAINED
+t/op/state.t	166	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — one `given` block in an othe...
+t/op/sub_lval.t	116	UNEXPLAINED
+t/op/substr.t	46	UNEXPLAINED
+t/op/svflags.t	16	UNEXPLAINED
+t/op/svleak.t	156	UNEXPLAINED
+t/op/switch.t	197	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL re...
+t/op/symbolcache.t	1	UNEXPLAINED
+t/op/tie.t	95	UNEXPLAINED
+t/op/tie_fetch_count.t	343	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) — one infix `~~` statement; re...
+t/op/tiehandle.t	23	UNEXPLAINED
+t/op/tr.t	2	UNEXPLAINED
+t/op/try.t	2	UNEXPLAINED
+t/op/undef.t	51	UNEXPLAINED
+t/op/utfhash.t	8	UNEXPLAINED
+t/op/write.t	595	UNEXPLAINED
+t/op/yadayada.t	1	UNEXPLAINED
+t/opbasic/cmp.t	1202	UNEXPLAINED
+t/opbasic/magic_phase.t	2	UNEXPLAINED
+t/re/alpha_assertions.t	421	UNEXPLAINED
+t/re/anyof.t	1187	UNEXPLAINED
+t/re/charset.t	2777	UNEXPLAINED
+t/re/fold_grind_8.t	213	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/fold_grind_a.t	31	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/fold_grind_aa.t	103	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/fold_grind_d.t	31	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/fold_grind_l.t	113	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/fold_grind_u.t	213	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/opt.t	656	XDIFF: not-supported.md §Readouts of perl's own internals: B:: optree inspection, re::optimiz...
+t/re/overload.t	87	UNEXPLAINED
+t/re/pat.t	898	UNEXPLAINED
+t/re/pat_rt_report.t	4	UNEXPLAINED
+t/re/reg_email.t	13	UNEXPLAINED
+t/re/reg_eval_scope.t	49	UNEXPLAINED
+t/re/reg_fold.t	6891	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/reg_mesg.t	3348	UNEXPLAINED
+t/re/reg_nc_tie.t	5	UNEXPLAINED
+t/re/regex_sets.t	8	XDIFF: not-supported.md §Regex extended character classes — cl-ppcre has no (?[ … ]); per...
+t/re/regex_sets_compat.t	311	UNEXPLAINED
+t/re/regexp.t	1264	UNEXPLAINED
+t/re/regexp_noamp.t	1264	UNEXPLAINED
+t/re/regexp_nonull.t	2169	UNEXPLAINED
+t/re/regexp_normal.t	311	UNEXPLAINED
+t/re/regexp_notrie.t	1264	UNEXPLAINED
+t/re/regexp_qr.t	1264	UNEXPLAINED
+t/re/regexp_qr_embed.t	1264	UNEXPLAINED
+t/re/regexp_trielist.t	1264	UNEXPLAINED
+t/re/rxcode.t	1	UNEXPLAINED
+t/re/speed.t	4	UNEXPLAINED
+t/re/subst.t	9	UNEXPLAINED
+t/re/subst_wamp.t	281	UNEXPLAINED
+t/re/uniprops01.t	39811	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops02.t	39961	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops03.t	39793	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops04.t	39759	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops05.t	17394	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops06.t	31724	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops07.t	29260	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops08.t	30492	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops09.t	29848	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/re/uniprops10.t	26334	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/run/locale.t	44	UNEXPLAINED
+t/run/runenv.t	106	UNEXPLAINED
+t/run/runenv_hashseed.t	269	UNEXPLAINED
+t/run/switchF.t	1	UNEXPLAINED
+t/run/switcha.t	1	UNEXPLAINED
+t/run/switches.t	35	UNEXPLAINED
+t/run/switchn.t	1	UNEXPLAINED
+t/run/switchp.t	2	UNEXPLAINED
+t/run/switchx.t	5	UNEXPLAINED
+t/uni/attrs.t	1	UNEXPLAINED
+t/uni/fold.t	18072	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/uni/gv.t	118	UNEXPLAINED
+t/uni/labels.t	2	UNEXPLAINED
+t/uni/lower.t	11720	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/uni/method.t	13	UNEXPLAINED
+t/uni/overload.t	1	UNEXPLAINED
+t/uni/title.t	5936	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/uni/universal.t	10	UNEXPLAINED
+t/uni/upper.t	6228	#1036 (Unicode case-fold/property class, OUT OF SCOPE by USER decision s465; phase 1 still reads each member first error - a non-Unicode cause leaves the class)
+t/uni/variables.t	42387	UNEXPLAINED
