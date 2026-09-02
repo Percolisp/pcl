@@ -42,6 +42,7 @@ not-supported.md → only then probe.*
 - **#1012 filed** from the #982 key-text battery (48 values printed AND used as keys, before/after byte-identical, and identical to perl but for this one): a float of magnitude exactly 1e15 prints as its integer text where perl says `1e+15` — `stringify-value`'s float arm derives the exponent from a LOG that lands on 14.999999999999998.  PRE-EXISTING.
 - **#986's step 1 TAKEN on a quiet box (1-min load 0.12–0.36, three runs of `bench-exec.pl intloop cfor`): the gap does NOT dissolve.**  `intloop+=` 0.0203/0.0223/0.0212 against §0.2d's 0.0174 (+17 %), `cfor` 0.0285/0.0293/0.0293 against 0.0261 (+9 %), `intloop=` 0.0188–0.0193 against 0.0185 (+2 %, i.e. its record).  So the task's "machine state" arm is KILLED and its step 2 (the `BENCH_RT_B` bisect over rounds 15–18) is what is left.  Recorded in #986.
 ## s464ay (2026-09-02, Opus, ROUND 22 REVIEW) — THE IGNORED-TESTS AUDIT, first execution: 115 inline SKIPs restored (#965), the 695 blessed sweep rows read for cause, NINE new bugs filed (#1020–#1028)
+## s464ay (2026-09-02, Opus, ROUND 22 REVIEW) — THE IGNORED-TESTS AUDIT, first execution: 115 inline SKIPs restored (#965), the 695 blessed sweep rows read for cause, FOURTEEN new bugs filed (#1020–#1033)
 
 - **THE CENSUS THAT BOUNDS THE PROBLEM WAS ITSELF WRONG BY 51 %.**  `#965` and
   `plan-test-audit-s464.md` §2b say "132 inline `ok(1,'SKIP')` rows in 11
@@ -115,6 +116,43 @@ not-supported.md → only then probe.*
   (38) are NOT done: state.t transpile-fails whole so its rows do not run, and
   `perl-tests/lex.t` is a different extraction (251 lines vs upstream 588) so
   there is no text to restore from — both are phase-1 / phase-4b work.
+- **PASS 4 — the companion suite's `t/op` rows READ, not counted, for the first
+  time**: `--quick --dir op` = 221 files, **6201 analysable rows** (3773 PCL
+  ran and failed, 2340 never emitted, 62 extra).  **The 2340 missing rows are
+  SIX file aborts, not 2340 facts** (hash.t 479, write.t 477, index.t 308,
+  decl-refs.t 195, sub_lval.t 116, gv.t 113 — each a contiguous tail after one
+  named event); count an abort once.  **Mechanical clustering does NOT work on
+  this population** — 3835 rows give 2931 distinct normalised shapes because
+  the files interpolate the value under test into the description; the unit is
+  the mechanism family, which in `t/op` is almost always ONE FILE.
+  **THE CROSS-CHECK THAT VALIDATES PASS 1**: `t/op/sort.t`'s failing rows in
+  this run are EXACTLY the 22 that appeared when `perl-tests/sort.t` was
+  restored, and `t/op/sub.t`'s are exactly the 11 — the two populations agree
+  once the manufactured rows are gone; the difference was never PCL, it was
+  that one copy had been edited and the other blessed as a number.
+  **Four unowned families probed and filed**: **#1031** (a filetest does not
+  dispatch its operand's `""`/`-X` overload — `-e $path_object` is silently
+  FALSE; 237 of filetest.t's 252 rows), **#1032** (a BAREWORD handle in a
+  `stat`/`-X` slot is emitted as a bare CL symbol even when OPEN — #452's
+  predicate family at a slot it never reached; it kills stat_errors.t's 333
+  rows AND write.t's abort + 477 missing rows, so ~810 rows sit behind ONE
+  predicate), **#1033** (a filetest does not set `$!` on failure; a closed
+  handle reports ENOENT where perl reports EBADF), and **#1028 confirmed
+  independently** — bop.t's string-mode bitwise ops are the largest cluster in
+  BOTH populations (229 sweep rows, 259 companion).  Ten more #964-class
+  candidates ranked and unprobed in `docs/blessed-fails-review-s464.md` §4c,
+  led by `op/aassign.t`'s list-assignment ORDER (13) and `op/repeat.t`'s
+  `\$_[0] == \$_[1] when @_ aliases elems repeated by x` (the purest identity
+  claim in the run).  One attribution to re-check early: `op/decl-refs.t`, 360
+  rows and 42 of 402 passing, attributed to declared-refs residue although
+  **#325 is marked done**.
+- **Two more filed from Pass-3 probes**: **#1029** (`$SIG{INT} = "handler"`
+  stores the name verbatim; perl qualifies it to `main::handler`, so the
+  read-back string differs) and **#1030** (`$ENV{X} = undef` leaves the value
+  DEFINED `""` where perl keeps it UNDEF, flipping `defined $ENV{X}`; both
+  agree the child sees an empty value).  Also corrected in the clustering by
+  reading the SOURCE: aassign.t's 6-row "tied FETCH/STORE order" cluster is
+  `tie @proxy` — a tied ARRAY, so **#155**, not unexplained.
 
 ## s464 (2026-09-02, Fable) — ROUND 21: THE RETURN PROTOCOL SHIPPED (#964, agent s464a + s464b, merged ff into main `4fd661b`); `:lvalue` subs (#930) DEFERRED by the USER; the ignored-tests AUDIT PLAN drafted (#993, to be PRESENTED s465)
 

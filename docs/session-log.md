@@ -239,6 +239,7 @@ Legs: gate **193 / 6542** (only the 13 pclxs xs rows); sweep TOTAL **18346
 `Pl/t/slice-args-01.t`, 15 rows.  Record `docs/faster-codegen-suggestions.md`
 §0.2g.
 ## Session 464ay (2026-09-02, Opus, round 22 REVIEW) — the ignored-tests audit, first execution: 115 inline SKIPs restored (#965), 695 blessed rows read for cause, nine bugs filed (#1020–#1028)
+## Session 464ay (2026-09-02, Opus, round 22 REVIEW) — the ignored-tests audit, first execution: 115 inline SKIPs restored (#965), 695 blessed rows read for cause, fourteen bugs filed (#1020-#1033)
 
 **The brief.** #964 (a sub returned the caller's box) hid for months although
 perl's own test for it existed TWICE — once replaced by an inline
@@ -299,6 +300,27 @@ count; #1024 a bareword key in `%h{i}` is called as a sub; #1025 `..` in an
 `s///e` replacement is the flip-flop; #1026 a `map {}` there fails the whole
 transpile; #1027 the each.t refaliasing rows (in-file only, four isolated
 shapes pass); #1028 above.
+
+**Pass 4 — the companion suite's `t/op` rows read, not counted, for the first
+time.**  `--quick --dir op`: 221 files, **6201 analysable rows** (3773 PCL ran
+and failed, 2340 never emitted, 62 extra).  The 2340 missing rows are **six
+file aborts**, not 2340 facts.  Mechanical clustering does not work here — 3835
+rows give 2931 distinct normalised shapes, because these files interpolate the
+value under test into the description; the unit is the mechanism family, and in
+`t/op` that is almost always one file.  **The cross-check that validates Pass
+1**: `t/op/sort.t`'s failing rows in this run are exactly the 22 that appeared
+when `perl-tests/sort.t` was restored, and `t/op/sub.t`'s are exactly the 11.
+The two populations agree once the manufactured rows are gone — the difference
+was never PCL, it was that one copy had been edited and the other blessed as a
+number.  Four unowned families probed and filed: #1031 (a filetest does not
+dispatch its operand's `""`/`-X` overload — `-e $path_object` is silently
+FALSE), #1032 (a bareword handle in a `stat`/`-X` slot is emitted as a bare CL
+symbol even when OPEN — #452's predicate family at a slot it never reached;
+~810 rows across stat_errors.t and write.t sit behind that one predicate),
+#1033 (a filetest does not set `$!`; a closed handle reports ENOENT where perl
+reports EBADF), and #1028 confirmed independently as the largest cluster in
+BOTH populations.  Ten more #964-class candidates are ranked and unprobed in
+the review doc §4c.
 
 **Legs.**  Sweep TOTAL 18346 → **18265 (−81)**, every row explained per file;
 both baselines edited ROW BY ROW (never re-blessed) and the re-diff is **0 new /

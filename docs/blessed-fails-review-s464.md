@@ -2,7 +2,8 @@
 
 Executes `docs/plan-test-audit-s464.md` phase 4a (task #965, the inline
 SKIPs), phase 3 (the 695 blessed sweep rows read for cause) and a first pass
-over the companion suite's count-blessed rows.  Measured on `80b715c`.
+over the companion suite's count-blessed rows (`t/op`, 6201 of them).
+Measured on `80b715c`.
 
 **The question this session was asked**: #964 — an ordinary sub returning the
 caller's box instead of a copy — hid for months although perl's own test for
@@ -13,8 +14,9 @@ what is behind them?
 
 **The short answer**: the census that was supposed to bound the problem was
 itself wrong by 51 %, five files the sweep calls *fully passing* were passing
-on manufactured rows, and reading the restored rows produced **nine new
-filed bugs**, five of them silent-wrong semantics of the #964 kind.
+on manufactured rows, and reading the rows produced **fourteen filed bugs**,
+nine of them silent-wrong semantics of the #964 kind — one of which owns 33 %
+of the entire blessed sweep baseline.
 
 ---
 
@@ -224,7 +226,8 @@ it never surfaced outside bop.t.
 
 pack.t utf8-flag family (23 + 11 + 5 + 4 + 2), scalar.t in-memory-handle
 code-points-over-0xFF (12), magic.t %ENV store encoding (10), caller.t
-`@DB::args` (5), multideref.t (5), magic.t `%SIG` key qualification (4) and
+`@DB::args` (5), multideref.t (5), magic.t `%SIG` key qualification (4, **probed and filed as #1029** — perl qualifies a
+bare handler NAME with the current package, PCL stores it verbatim) and
 `${^LAST_FH}` (3), postfixderef.t residue (5), **scalar.t's scalar-tie
 FETCH/STORE call sequence (4)** — that last one is the interesting shape,
 because scalar `tie` DOES work in PCL, so it is a real ordering question and
@@ -237,11 +240,110 @@ HASH'), not unexplained.  That moves 6 rows from UNEXPLAINED to ATTRIBUTED and
 is a reminder that a cluster's mechanism name must come from the test SOURCE,
 not from its description.
 
+Two more filed from Pass-3 probes: **#1029** (`$SIG{INT} = "handler"` stores the
+name unqualified; perl stores `main::handler`, so the read-back string differs)
+and **#1030** (`$ENV{X} = undef` leaves the value DEFINED `""` in PCL and UNDEF
+in perl, so `defined $ENV{X}` takes the opposite branch — both agree that the
+child process sees an empty value).  The magic.t %ENV cluster itself does NOT
+reproduce standalone: the general store path is right (a ref stringifies, a
+number round-trips), so those 10 rows need magic.t's own wide-character
+context.
+
 ---
 
-## 4. Pass 4 — the companion suite's count-blessed rows
+## 4. Pass 4 — the companion suite's count-blessed rows, read for the first time
 
-(filled in below)
+`tools/run-perl-suite.pl --quick --jobs 3 --dir op` on this tree, then every
+`.suitelog-s464ay/*.fails.tsv` row clustered by mechanism.  These rows have
+never been read individually: the companion suite blesses per-file COUNTS
+(`baselines/perl-suite-run.tsv`), which is the mechanism that hid #964's second
+copy.  This is `t/op` only — one directory of the 528-file suite.
+
+| | |
+|---|---|
+| files scanned / run | 221 / 219 (`op/list.t`, `op/pack.t` quarantined, #160) |
+| verdicts | 138 DIFF · 43 OK · 23 XDIFF · 8 NOTAP · 6 TRANSPILE · 1 FIXTURE |
+| analysable rows in the logs | **6201** |
+| — PCL ran the row and FAILED it | 3773 |
+| — PCL never emitted the row (`(missing)`) | 2340 |
+| — PCL emitted a row perl did not | 62 |
+
+**The 2340 missing rows are six file ABORTS, not 2340 facts**: `op/hash.t` 479,
+`op/write.t` 477, `op/index.t` 308, `op/decl-refs.t` 195, `op/sub_lval.t` 116,
+`op/gv.t` 113 — each a contiguous tail after one named event.  Count an abort
+once.
+
+Mechanical clustering does not work on this population (3835 rows → 2931
+distinct normalised shapes, because these files interpolate the value under
+test into the description).  The unit is the mechanism family, which in `t/op`
+is almost always one file.  Full analysis: `scratch/pass4-companion-op.md`.
+
+### 4a. The cross-check that validates Pass 1
+
+`t/op/sort.t`'s failing rows in this run are **exactly** the 22 that appeared
+when `perl-tests/sort.t` was restored — same row numbers, same descriptions.
+`t/op/sub.t`'s are exactly the 11 from `perl-tests/sub.t`.  The two populations
+agree once the manufactured rows are gone; the difference was never PCL, it
+was that one copy had been edited and the other blessed as a number.
+
+### 4b. Four unowned families, probed and filed
+
+| rows | file | what | filed |
+|---:|---|---|---|
+| 259 | `op/bop.t` | `& \| ^` have no STRING mode — an operand that is not a plain string is numified | **#1028** (independently the largest cluster of the sweep baseline too, 229 rows) |
+| 252 | `op/filetest.t` | a filetest does not dispatch its operand's `""` / `-X` overload — `-e $path_object` is silently FALSE | **#1031** |
+| 333 | `op/stat_errors.t` | (crash) a BAREWORD handle in a `stat`/`-X` slot is emitted as a bare CL symbol, even when OPEN — `#452`'s predicate family, one slot it never reached | **#1032** |
+| " | " | (value) a filetest does not set `$!` on failure; a closed handle reports ENOENT where perl reports EBADF | **#1033** |
+
+#1032 also owns `op/write.t`'s abort (`The variable OUT is unbound` ×21, and
+477 missing rows behind it), so one predicate fix reaches ~810 rows across two
+files that today produce almost nothing.
+
+### 4c. #964-class candidates NOT probed (ranked, for the next session)
+
+Each is a value / alias / copy / identity / context / ordering / scoping
+question where PCL prints something plausible.  None has an owner.
+
+1. `op/aassign.t` 13 — list-assignment evaluation ORDER with tied and lvalue
+   operands (`tied left first`, `lvalue sub on RHS returns array`).  Adjacent
+   to round 21's return protocol.
+2. `op/array.t` 25 — `@_` alias to a negative/nonexistent index, `$#array`
+   magic, arylen aliasing in `foreach`.
+3. `op/repeat.t` 3 — `\$_[0] == \$_[1] when @_ aliases elems repeated by x`.
+   The purest identity claim in the whole run.
+4. `op/inc.t` 13 — `++` produces a silently different NUMBER at the NV
+   mantissa boundary.
+5. `op/grep.t` 6 — what `$_` and the source list look like AFTER a map/grep in
+   each context.
+6. `op/my.t` 7 — `my $x if 0` / `0 && my $z` static-variable scoping, all
+   seven sigil variants.
+7. `op/local.t` + `op/localref.t` + `op/multideref.t` 21 — `local` on a stash
+   sub slot; `old value not visible during restore` is an ORDERING guarantee.
+8. `op/anonconst.t` 6 (all of it) — `:const` does not freeze the captured
+   value, which is a COPY question, #964's own family.
+9. `op/select.t` 6 — `select`'s return value and `the ref returned references
+   the right referent`.
+10. `op/tiehash.t` / `op/gmagic.t` / `op/bop.t` — how MANY times an operand is
+    fetched (`two FETCHes for tied hash in list context`).
+
+Already owned, listed so they are not re-derived: `op/pos.t` 15 → #261/#396/
+#966; `op/or.t` 2 → #165; `op/context.t` 1 → #164; `op/sub_lval.t` +
+`op/kvaslice.t` + `op/kvhslice.t` 57 → #930; `op/for-many.t` 6 of 8 → #330;
+`op/universal.t` 40 → #206.
+
+### 4d. Large families with ONE attributed cause (skip these when reading rows)
+
+`op/hash.t` (Hash::Util bucket stats + `tie %h`, #155), `op/cmpchain.t` (229,
+chained non-associative comparison must be a compile error — already XDIFF),
+`op/cproto.t` (183, `prototype("CORE::…")`, #175), `op/signatures.t` (332,
+malformed-signature error text), `op/index.t` (321, dies on `formline`),
+`op/write.t` (500, `format`/`write`), plus attrs/attrproto, utf8decode,
+assignwarn, caller, inccode, const-optree, split_unicode, lex, tiearray, lc,
+numify/hashwarn/hashassign/protowarn, method.
+
+One family is a GUESS worth checking early: `op/decl-refs.t` 360 rows, 42 of
+402 passing, attributed to declared-refs residue — but **#325 is marked done**,
+so either the task is over-claimed or a large second half is unowned.
 
 ---
 
