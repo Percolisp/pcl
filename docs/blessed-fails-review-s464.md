@@ -13,7 +13,7 @@ blessed inside a per-file COUNT.  So: how many more rows are in that state, and
 what is behind them?
 
 **The short answer**: the census that was supposed to bound the problem was
-itself wrong by 51 %, five files the sweep calls *fully passing* were passing
+itself missing 37 % of the rows, five files the sweep calls *fully passing* were passing
 on manufactured rows, and reading the rows produced **fourteen filed bugs**,
 nine of them silent-wrong semantics of the #964 kind — one of which owns 33 %
 of the entire blessed sweep baseline.
@@ -22,20 +22,24 @@ of the entire blessed sweep baseline.
 
 ## 0. Three findings about the instruments, before any test row
 
-**0a. The inline-SKIP census undercounts by 51 %.**  Task #965 says "132 rows
-in 11 files", from `grep -c "ok(1, 'SKIP"`.  That pattern only matches the
-SINGLE-quoted spelling.  With both quote styles:
+**0a. The inline-SKIP census misses 37 % of the rows.**  Task #965 says "132
+rows in 11 files", from `grep -c "ok(1, 'SKIP"`.  That pattern only matches the
+SINGLE-quoted spelling.  Counted with both quote styles on the base commit
+`80b715c`:
 
-| | files | rows |
+| | files | statements |
 |---|---:|---:|
 | census as filed (`ok(1, 'SKIP`) | 11 | 132 |
-| **actual (`ok(1, ['\"]SKIP`)** | **13** | **199** |
+| **actual (`ok(1, ['\"]SKIP`)** | **14** | **210** |
 
-Three files were entirely invisible — **`sort.t` (32 rows)**, `kvhslice.t`
-(25), `splice.t` (2) — and `reset.t` was counted as 4 when it has 22.  sort.t
-is one of the semantically central files.  The census grep in #965 and in
-`plan-test-audit-s464.md` §2b must be
-`grep -c -E "ok\(1, *['\"]SKIP"`.
+The 78 it missed: three files entirely invisible — **`sort.t` (32)**,
+`kvhslice.t` (25), `splice.t` (2) — plus `reset.t` counted as 4 when it has 22,
+and `loopctl.t` as 5 when it has 6.  `sort.t` is one of the semantically
+central files.  The census grep in #965 and in `plan-test-audit-s464.md` §2b
+must be `grep -c -E "ok\(1, *['\"]SKIP"`.
+
+(Statements, not TAP rows: one `ok(1,…)` inside a loop produces several rows.
+`loopctl.t`'s 6 statements produce 8 rows.)
 
 **0b. There is a THIRD spelling the census never looked for.**  Nine
 hand-added `skip "… not supported in PCL", N` calls hide at least 21 further
@@ -76,7 +80,7 @@ names — and the reason is wrong often enough that this is the whole method.
 
 ### 1a. Verdicts
 
-**11 of 13 files done; 115 of the 199 rows.**
+**11 of 14 files done: 109 of the 210 statements, which are 115 TAP rows.**
 
 | file | rows | STALE (pass now) | correct reason → registry | WRONG reason → registry | new BUG → fail-baseline | crash/incomplete |
 |---|---:|---:|---:|---:|---:|---:|

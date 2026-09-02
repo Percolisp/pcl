@@ -44,12 +44,13 @@ not-supported.md → only then probe.*
 ## s464ay (2026-09-02, Opus, ROUND 22 REVIEW) — THE IGNORED-TESTS AUDIT, first execution: 115 inline SKIPs restored (#965), the 695 blessed sweep rows read for cause, NINE new bugs filed (#1020–#1028)
 ## s464ay (2026-09-02, Opus, ROUND 22 REVIEW) — THE IGNORED-TESTS AUDIT, first execution: 115 inline SKIPs restored (#965), the 695 blessed sweep rows read for cause, FOURTEEN new bugs filed (#1020–#1033)
 
-- **THE CENSUS THAT BOUNDS THE PROBLEM WAS ITSELF WRONG BY 51 %.**  `#965` and
+- **THE CENSUS THAT BOUNDS THE PROBLEM MISSES 37 % OF THE ROWS.**  `#965` and
   `plan-test-audit-s464.md` §2b say "132 inline `ok(1,'SKIP')` rows in 11
   files", measured with `grep -c "ok(1, 'SKIP"` — the SINGLE-quoted spelling
-  only.  The true count is **199 rows in 13 files**: `sort.t` (32),
+  only.  The true count on `80b715c` is **210 statements in 14 files** (STATEMENTS,
+  not TAP rows -- one `ok(1,...)` inside a loop makes several): `sort.t` (32),
   `kvhslice.t` (25) and `splice.t` (2) were entirely invisible and `reset.t`
-  is 22, not 4.  Use `grep -c -E "ok\(1, *['\"]SKIP"`.  There is a **THIRD
+  is 22 not 4 and `loopctl.t` 6 not 5.  Use `grep -c -E "ok\(1, *['\"]SKIP"`.  There is a **THIRD
   spelling** nobody counted: 9 hand-added `skip "… not supported in PCL", N`
   calls hiding ≥21 more rows (each.t 3, pack.t 4, range.t 1, chr.t 1) — real
   `# skip` TAP, so it looks legitimate, but the assertion still never runs.
@@ -58,7 +59,7 @@ not-supported.md → only then probe.*
   (32 manufactured; it was in the "Fully passing" list), `kvhslice.t` 39/39 →
   19/19, `reset.t` 41/45 → 22/19, `loopctl.t` 67/67 → 63/4, `join.t` 43/43 →
   41/2.
-- **31 of the 115 restored rows PASS TODAY** — fixes that shipped and were
+- **109 of the 210 statements restored (115 TAP rows); 31 of those rows PASS TODAY** — fixes that shipped and were
   never counted, each behind a comment saying the feature did not work.  The
   seven `sort.t` "wantarray regression in PCL sub body" rows, both `splice.t`
   "wantarray regression" rows and both `kvhslice.t` ones all pass: **the

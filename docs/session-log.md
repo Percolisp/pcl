@@ -248,16 +248,16 @@ blessed inside a per-file count.  This session hunts for more of the same:
 rows the project does not run, or runs and does not READ.
 
 **Three findings about the instruments, before any test row.**  (1) The census
-that bounds #965 is wrong by 51 %: `grep -c "ok(1, 'SKIP"` matches only the
-single-quoted spelling, so the real count is **199 rows in 13 files**, not 132
-in 11 — `sort.t` (32 rows), `kvhslice.t` (25) and `splice.t` (2) were entirely
-invisible.  (2) A THIRD spelling nobody counted: nine hand-added
+that bounds #965 misses 37 % of the rows: `grep -c "ok(1, 'SKIP"` matches only
+the single-quoted spelling, so the real count is **210 statements in 14 files**,
+not 132 in 11 — `sort.t` (32), `kvhslice.t` (25) and `splice.t` (2) were
+entirely invisible, and `reset.t` is 22 not 4.  (2) A THIRD spelling nobody counted: nine hand-added
 `skip "… not supported in PCL", N` calls hide ≥21 further rows; they emit real
 `# skip` TAP so they look legitimate, but the assertion still never runs.
 (3) **"Fully passing" is not a fact about PCL** — five files the sweep reported
 as PASS were passing on manufactured rows, `sort.t` at 204/205 with 32 of them.
 
-**Pass 1 — 115 of the 199 rows restored, in 11 files.**  Method: recover the
+**Pass 1 — 109 of the 210 statements restored, in 11 files: 115 TAP rows.**  Method: recover the
 upstream assertion (the `## PCL SKIP:` comments quote perl 5.40.3 verbatim, and
 seven of the files turned out to differ from upstream ONLY by the skip edits, so
 they were restored wholesale), run the file, and then **verify the written
