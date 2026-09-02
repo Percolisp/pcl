@@ -64,6 +64,7 @@ The handful most likely to matter to a program that is otherwise portable:
   [`use vN` and default warnings](#use-vn-does-not-toggle-default-warnings),
   [control-character glob names](#control-character-glob-names-mordor-v-strings)
 * [NUL bytes (and other control characters) in identifiers](#nul-bytes-and-other-control-characters-in-identifiers)
+* [Unicode case folding and property tables — DEFERRED, owner #1036](#unicode-case-folding-and-property-tables--deferred-ruled-s465-owner-1036) — the ~370,000-row class ruled out of scope for v0.2
 
 ### Regexes
 
@@ -522,6 +523,35 @@ exercises symbolic-glob machinery PCL does not model for non-identifier
 names.
 
 ---
+
+## Unicode case folding and property tables — [DEFERRED] (RULED s465, owner #1036)
+
+**Perl behaviour.** `lc`/`uc`/`ucfirst`/`lcfirst`/`fc`, `/i` matching and
+`\p{…}` properties follow perl's own Unicode tables (`lib/unicore`, the
+Unicode version perl was built with), including full case folding, special
+casing (`ß` → `SS`, `ǅ` titlecase), and every property perl's tables carry.
+
+**PCL behaviour.** Case mapping and folding go through SBCL's `sb-unicode`
+(its own Unicode version, simple mappings), and regex properties through
+cl-ppcre's property support.  The common ASCII and simple-mapping cases are
+right; the full-table behaviour is not, and the files that test it row by row
+abort early or produce no rows at all.
+
+**Rationale.** RULED by the USER s465 (plan-test-audit §5.2): this is ONE
+class of ~370,000 perl rows (uni/fold.t 18,072, uni/lower.t 11,720,
+uni/upper.t 6,228, uni/title.t 5,936, re/reg_fold.t 6,891, re/uniprops01–10.t
+~325,000 registered XDIFF, the re/fold_grind_* family), out of scope for
+v0.2.  It is DEFERRED, not rejected: the tables are data and can be
+generated from perl's own `lib/unicore` into a CL table post-v0.2 (task
+#1036 owns the implementation decision).  Phase 1 of the ignored-tests
+audit STILL reads each member's FIRST error so the crash reason is named
+in the shortfall baseline — a member whose first error is not a table gap
+leaves the class and becomes an ordinary fix target.
+
+**Affected tests:** the companion files above (`baselines/perl-suite-run.tsv`
+statuses DIFF-with-0-rows / XDIFF); the sweep's `lc.t` shortfall (82 of
+2,659 planned rows produced) is in this class too.  See task #1036 and
+`docs/plan-test-audit-s464.md` §2d.
 
 ## `$SIG{__DIE__}` and `$SIG{__WARN__}` handler invocation
 

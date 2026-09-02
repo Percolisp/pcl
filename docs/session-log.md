@@ -14,6 +14,8 @@ Append new entries at the top. One section per session.
 
 **Presented to the USER (message, not a doc)**: the fourteen review bugs ranked (#1028 first — one cause, 229 sweep + 259 companion rows), the ten unprobed §4c candidates, AW's #1000–#1008, AX's #1010–#1012, the perf trio #994–#996; the plan's five §5 decisions with a recommendation each, plus the review's §5 small items.  **Decisions PENDING the USER's answer — nothing from the plan was executed this session.**
 
+**USER (same day, after the presentation)**: all four §5 decisions taken as recommended (interleaved standing slot; Unicode class out of scope → #1036; wholesale refresh → #1038; the statement-level refusal rule ratified → #1037); "start working on the stack of tasks"; and on #1034: "I assume it is a need to annotate what variables are used for what in the IR, yes?  In case someone wants to compile to C/C++/etc.  Are there more obvious internal information that we should export?" → the pair **#1035** (export the compiler's own verdicts — variable class, per-sub facts, rename manifest, source lines — as a no-op `p-facts` block; part a) + **#1034** (the user hints, part b; the USER suggested DISTINCT DECLARATORS `int $i = 0` as the spelling — recorded beside the attribute form).  **ROUND 23 LAUNCHED**: AZ phase 0 instruments, BA #1028 → #1032 → #1037, BB #994 → #995 (DECIDED §s465 has the shape).  Fable: records, the `not-supported.md` Unicode-class section, the CLAUDE.md I4 line when AZ proposes it.
+
 **Legs**: `tools/prove-core` on the records tree (docs-only change) — see the commit; sweep as above.
 
 ---
