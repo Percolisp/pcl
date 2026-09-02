@@ -21,6 +21,104 @@ Append new entries at the top. One section per session.
 **Legs (on the tree rebased onto `d9faf2b`, with s465bb's #994 underneath)**: gate 196 files / 6696 tests, only the 13 pclxs xs rows; full sweep GATE clean, TOTAL 18266 → 18493 (+227), 0 new / 0 fixed, drops 5 = census, bop.t the ONLY mover in 108 files; re-run against the edited baselines and again after the rebase, TOTAL 18493 (+0) both times; companion `--dir io --dir op --quick --jobs 4` = 265 files, two real moves, both above.  All three baselines edited ROW BY ROW.  Guards `Pl/t/bitwise-string-01.t` (74 rows, 54 fail on `1fed80b`) and `Pl/t/bareword-fh-slot-01.t` (55 rows, 55 fail there).  Both changes are RUNTIME ONLY: no `Pl/` file touched, so no generation bump, no artifact regeneration, and the corpus cannot move.
 
 ---
+## Session 465az (Opus, round 23) — PHASE 0 of the ignored-tests audit: the four instruments I1–I4 (#993) BUILT and BLESSED; runner and baseline work only, no compiler or runtime change
+
+**The job** (Fable, `docs/plan-test-audit-s464.md` §3): build the instruments
+the audit writes into, so it leaves rows behind instead of one session's
+reading.  Their reason is that plan's §1 — #964 survived because the test for
+it existed TWICE and both copies were neutralised, once by an inline SKIP with
+a false diagnosis and once by COUNT-blessing.  These four close the counting
+half.  Commits `1393948` (the instruments) + `40acb79` (the blesses).
+
+**I1 — `baselines/perl-suite-fails.tsv`, the companion's ROW-level fail
+baseline; 21,097 rows over 267 files.**  Until now the 273 DIFF files were
+blessed as COUNTS, which is exactly how #964's failing row sat inside
+`op/sub.t`'s "12 not ok" for months with nothing naming it.  Keyed
+`(rel, PERL's description)` and compared as a MULTISET — the #185 expected-rows
+key, through ONE reader (`diverging_rows_full`, of which `diverging_rowkeys` is
+now the key projection), so the two baselines can never disagree about what a
+row IS.  Buckets are `sweep-diff.pl`'s: NEW ROW / FIXED ROW / UNVERIFIED (a
+blessed row absent because the file produced nothing comparable — never
+"fixed") / LOST (C_ok fell vs the snapshot).  Files registered XDIFF or FIXTURE
+are NOT in it — their rows are gated per row there, and one row gets one gate.
+**The 500-row per-file log cap was invisible** and would have made 19 files'
+multisets silently partial; the log now says so in a `#` COMMENT (readers skip
+comments, so the #185 multisets are byte-identical) and every report counts
+those files — task **#1051**.
+
+**I2 — `baselines/row-shortfall.tsv`, SHARED by both runners**
+(`tools/lib/PCLShortfall.pm`); **459,454 rows over 260 files.**  "OK" never
+meant "the plan was produced"; it means "no previously-passing row was lost".
+The shortfall is what the population expected and PCL did not assert — the
+sweep's oracle is the file's own `1..N` plan, the companion's is real perl's
+run.  Same shape and contract as the drop census: one row per file WITH A
+CAUSE, rows leave BY EDIT, MORE than blessed fails the run like a NEW failure.
+**376,788 rows carry a cause** (the #1036 Unicode class by the USER's s465
+decision, the XDIFF/FIXTURE registrations — a registered divergence covers the
+rows PCL never produced, all-or-nothing per #185 — and #1037 for `state.t`'s
+158); **86,126 in 185 files are UNEXPLAINED, and that number IS the audit's
+queue**, printed every run.  The sweep half also records `unrun` and the report
+splits it: of 12,257 planned-not-asserted rows, **222 produced no TAP at all**
+(the file stopped: caller.t 47, chop.t 48, substr.t 44, method.t 39 — the
+PARTIAL class) and **12,035 were SKIPPED** (pack.t 8,997, lc.t 2,577).  Both
+are shortfall; only one is a crash.  A file whose shortfall GREW now joins the
+#215 serial re-run — it produced fewer rows than it used to, which is the LOST
+bucket's symptom seen from the plan's side.
+
+**I3 — `baselines/fail-baseline.tsv` gains a sixth column, the CAUSE: 552 of
+708 rows attributed, 156 cause-less.**  Not invented here — the attributions
+are `docs/blessed-fails-review-s464.md`'s Pass-3 clustering, whose rule matrix
+is reused verbatim, plus the three attributions the review's TEXT makes after
+that matrix was written (§3a bop.t → **#1028, 222 + 7 = 229 rows, 33 % of the
+whole baseline**; §3c magic.t `%SIG` → #1029; §3c aassign.t → #155) and the 13
+rows §1c restored, row for row.  `sweep-diff.pl` joins on `(file, description)`
+as before and splits at SIX — splitting at five would have glued the cause onto
+`expected`.  Every diff prints the cause-less count; `save` cannot write causes
+and WARNS before it would throw them away.  Verified byte for byte: stripping
+column 6 reproduces the input exactly (the file is binary to git).
+
+**I4 — `baselines/perl-suite-notrun-stamps.tsv`: 13 files, 11 measured this
+session, 2 NEVER** (the quarantined pair, #160).  "Not run" says nothing about
+how old the hole is; `op/list.t` has been quarantined since s320 and the hang
+set is reached only by a full `--all`.
+
+**Three bugs found by USING the instruments**, two of them the same family — an
+answer taken from the wrong moment or the wrong table.  (1) The ROW DIFF's "NOT
+CHECKED" guard tested `-e` at REPORT time, and a `--bless-fails` run writes the
+file before the report: the first bless listed all 20,097 of its own rows as
+NEW.  (2) The I4 stamp membership came from a run's `%not_run` instead of from
+the tables, so a full `--all` — the only form that MEASURES the hang set —
+stamped nothing.  (3) `my (@up, @down, $sum, …) = ((), (), 0, …)` FLATTENS, so
+the shortfall report died at its first row, after the blesses, taking the run's
+`--tsv` with it; it only fires once a shortfall baseline exists, which is why
+the first bless survived it.
+
+**Bars** (shared box — two sibling agents ran throughout).  Gate
+`tools/prove-core` **194 files / 6567 rows, only the 13 pclxs xs rows fail**
+(8 m 53 s).  Companion `--all --jobs 4` **41 min 17 s**, 528 files: 90 OK / 273
+DIFF / 111 XDIFF / 30 NOTAP / 11 TIMEOUT / 10 TRANSPILE / 2 NOT-RUN / 1
+FIXTURE, both SNAPSHOT holes zero.  Sweep `--jobs 8` **0 new / 0 fixed / 0
+LOST, TOTAL passing 18266 (+0)**, drops 5 = census; the only thing that failed
+it was the unblessed shortfall — what a first bless looks like — and after
+blessing, `sweep-diff.pl diff` on the same `.faillog` exits 0.  `PCL_SHOW_SBCL`
+for the companion runner byte-identical before and after.  All 267 blessed
+files reconcile with the count snapshot (21,097 rows = 7,938 PCL `not ok` +
+6,276 `(missing)` + 6,771 PCL-only extras, and every file's not-ok count fits
+inside its C_notok).  **Of the 11 snapshot movers, 9 were LOAD** and reproduced
+the snapshot when re-run alone; the two that did not are **#1052**, reported
+and NOT spliced (comp/require.t 909/835 → 910/837, a time-bounded file that is
+cut off at its 450 s allowance; re/overload.t TIMEOUT 3/0 → 0/0, a #326
+hang-set file — worth one probe because it is an OVERLOAD file one round after
+the overload work, and the task carries the discriminator).
+
+**Left by design**: the 156 cause-less baseline rows and the 86,126 UNEXPLAINED
+shortfall rows are the queue — phases 1–3 attribute them.  The companion
+baselines were blessed on `1fed80b`, before BB's #994 merged; the first `--all`
+on the merged tree will name at row level whatever that moved, which is the
+instrument doing its job.
+
+---
+
 ## Session 465bb (Opus, round 23) — A TAIL `return` DOES NOT THROW (#994): the Kind-A emission `tail-return`, and the two things `p-return-value` still has to do
 
 - **A `return EXPR` that IS a sub body's LAST statement now lowers as the tail
