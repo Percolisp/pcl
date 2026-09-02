@@ -8016,27 +8016,116 @@ per element."
 ;;; Bitwise Operators
 ;;; ============================================================
 
-(defun p-string-bitwise-operand-p (v)
-  "Return T if v is a non-numeric string and should trigger string bitwise ops."
-  (let ((val (unbox v)))
-    (and (stringp val)
-         (not (looks-like-number val)))))
+;;; THE STRING-VS-NUMERIC MODE DECISION (perlop, "Bitwise String Operators";
+;;; task #1028).  perl's `pp_bit_and' and its siblings ask ONE question of the
+;;; two operands — `SvNIOKp(left) || SvNIOKp(right)' — and take the numeric op
+;;; when either SV carries a number; otherwise `do_vop' STRINGIFIES both and
+;;; operates byte by byte.  An SV that carries neither a number nor a string
+;;; body — a reference, a glob, a qr//, a blessed object, undef — therefore
+;;; goes to the STRING side and stringifies into it: `undef | "abc"' is "abc"
+;;; and `[1] | ("\0" x 13)' is "ARRAY(0x…)".
+;;;
+;;; PCL used to ask `(and (stringp v) (not (looks-like-number v)))', i.e. it
+;;; sent every NON-string state to the NUMERIC side, so all five of those
+;;; answered an address or 0.  That was the largest single cluster in the
+;;; blessed sweep baseline (229 perl-tests/bop.t rows) and had no owner.
+;;; `%p-bitwise-operand-kind' below is the ONE reading of the decision: it
+;;; enumerates the same box states `stringify-value' and `box-nv' enumerate,
+;;; and an unlisted state DIES rather than silently choosing a mode (rule 12).
+;;;
+;;; TWO RULES, NOT ONE — the unary `~' differs from the binary trio, and the
+;;; difference is measured, not deduced (scratch/p3-perl-complement.pl, perl
+;;; 5.40.3): `~ [1]' is the complemented ADDRESS while `[1] | "x"' is the
+;;; string op.  `pp_complement' takes its string branch only for an SV that
+;;; HAS a PV, and a reference has neither PV nor number, so it lands in `~''s
+;;; numeric branch and in the binary ops' string branch.  Hence the third
+;;; verdict :REFERENCE, which the two families read differently.
+;;;
+;;; NOT FIXED HERE, deliberately: a numeric-LOOKING string is still sent to
+;;; the numeric side (`"12" & "10"' is "10" in perl, "8" here).  perl's real
+;;; test is a per-SV flag PCL does not carry and `looks-like-number' is the
+;;; standing stand-in for it; removing it requires `use feature "bitwise"'
+;;; to exist first, because under that pragma `&' is ALWAYS numeric and
+;;; perl-tests/bop.t asserts exactly that for `"22" & "66"'.  Task #1040.
+(defun %p-bitwise-operand-kind (v)
+  "Classify V for the bitwise operators' string-vs-numeric mode decision.
+   :NUMBER    — carries a number (perl's SvNIOKp): forces the numeric op.
+   :STRING    — has a string body and no number: feeds the bit-string op.
+   :REFERENCE — carries neither.  The binary ops treat it as :STRING (they
+                stringify it); unary `~' treats it as :NUMBER (the address).
+   A state that is none of the three DIES naming itself — the arm this
+   replaced answered :NUMBER for every unlisted state and so turned an
+   unknown value into 0 (rule 12)."
+  (let* ((boxp (p-box-p v))
+         (val (unbox v)))
+    (cond
+      ((numberp val) :number)
+      ;; CL's T is perl's PL_sv_yes, which carries an IV.  CL's NIL is NOT
+      ;; PL_sv_no: it is PCL's OTHER spelling of undef (`%pcl-definedp' calls
+      ;; both NIL and *p-undef* undefined, and `my ($a,$b);' fills the boxes
+      ;; with NIL), so it stringifies into the bit-string op like undef.
+      ;; perl's false reaches here as the STRING "" — `p-bool' answers 1/"".
+      ((eq val t) :number)
+      ((null val) :string)
+      ((eq val *p-undef*) :string)       ; do_vop stringifies undef to ""
+      ((stringp val) (if (looks-like-number val) :number :string))
+      ((p-vstring-p val) :string)        ; a vstring is PV-only
+      ((p-superchar-p val) :string)
+      ;; A BARE glob has a string body ("*main::g"); a glob REF is a reference.
+      ((p-typeglob-p val) (if (and boxp (p-box-is-ref v)) :reference :string))
+      ((p-box-p val) :reference)         ; \$x
+      ((hash-table-p val) :reference)
+      ((%p-hash-marker-p val) :reference); \%ENV / \%INC
+      ((vectorp val) :reference)         ; strings are excluded above
+      ((functionp val) :reference)
+      ((streamp val) :reference)         ; a lexical filehandle IS a glob ref
+      ((p-regex-match-p val) :reference)
+      ;; A PCL return-list that reached a scalar slot: it has a string body
+      ;; (stringify-value joins it) and no number.
+      ((listp val) :string)
+      (t (error "PCL internal: bitwise operator operand of unhandled type ~S: ~S"
+                (type-of val) val)))))
 
-(defun p-string-bit-op (a b op truncate-p)
+(defun p-string-bitwise-operand-p (v)
+  "True when V does not force the NUMERIC bitwise op — i.e. the binary
+   `& | ^' take the bit-string path when this holds for BOTH operands.
+   :REFERENCE answers T here: perl stringifies it into `do_vop'."
+  (not (eq (%p-bitwise-operand-kind v) :number)))
+
+(defun %p-check-bit-string-width (op-name &rest strings)
+  "perl makes a bit-STRING op FATAL when an operand holds a code point above
+   0xFF: `do_vop' downgrades a UTF-8 operand to bytes and croaks when it
+   cannot.  The check belongs INSIDE the string path — `5 | \"\\x{100}\"' is
+   the numeric op and is fine (probed, scratch/p5-perl-fatal-shapes.pl)."
+  (dolist (s strings)
+    (when (find-if (lambda (c) (> (char-code c) #xFF)) s)
+      (p-die (format nil "Use of strings with code points over 0xFF as arguments to ~A operator is not allowed"
+                     op-name)))))
+
+(defun p-string-bit-op (a b op truncate-p &optional (op-name "bitwise op"))
   "Perl string bitwise op. OP is logand/logior/logxor.
    TRUNCATE-P T: result length = min(len(a),len(b)) (for &).
-   TRUNCATE-P NIL: result length = max(len(a),len(b)), shorter padded with NUL (for |, ^)."
+   TRUNCATE-P NIL: result length = max(len(a),len(b)), shorter padded with NUL (for |, ^).
+   OP-NAME is perl's spelling for the over-0xFF fatal (\"bitwise and (&)\")."
   (let* ((sa (to-string a))
          (sb (to-string b))
          (la (length sa))
          (lb (length sb))
          (result-len (if truncate-p (min la lb) (max la lb)))
          (result (make-string result-len :initial-element #\Nul)))
+    (%p-check-bit-string-width op-name sa sb)
     (dotimes (i result-len)
       (let ((ca (if (< i la) (char-code (char sa i)) 0))
             (cb (if (< i lb) (char-code (char sb i)) 0)))
         (setf (char result i) (code-char (funcall op ca cb)))))
     result))
+
+(defun %p-string-bit-not (a op-name)
+  "The bit-string arm of `~' / `~.': complement each byte of the stringified
+   operand, with the same over-0xFF fatal the binary string ops carry."
+  (let ((s (to-string a)))
+    (%p-check-bit-string-width op-name s)
+    (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) s)))
 
 (defun %pcl-to-integer (n)
   "Convert numeric value to integer using Perl IV semantics.
@@ -8065,49 +8154,52 @@ per element."
   "Perl bitwise AND — string (char-by-char, truncates) or numeric (unsigned 64-bit)"
   (%with-binary-overload ("&" a b)
                          (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-                             (p-string-bit-op a b #'logand t)
+                             (p-string-bit-op a b #'logand t "bitwise and (&)")
                              (logand (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
 
 (defun p-bit-or (a b)
   "Perl bitwise OR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
   (%with-binary-overload ("|" a b)
                          (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-                             (p-string-bit-op a b #'logior nil)
+                             (p-string-bit-op a b #'logior nil "bitwise or (|)")
                              (logior (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
 
 (defun p-bit-xor (a b)
   "Perl bitwise XOR — string (char-by-char, pads with NUL) or numeric (unsigned 64-bit)"
   (%with-binary-overload ("^" a b)
                          (if (and (p-string-bitwise-operand-p a) (p-string-bitwise-operand-p b))
-                             (p-string-bit-op a b #'logxor nil)
+                             (p-string-bit-op a b #'logxor nil "bitwise xor (^)")
                              (logxor (%pcl-to-u64 (to-number a)) (%pcl-to-u64 (to-number b))))))
 
 (defun p-bit-not (a)
-  "Perl bitwise NOT - string NOT if non-numeric string, integer NOT otherwise"
+  "Perl bitwise NOT — bit-string complement when the operand has a string body,
+   integer complement when it carries a number OR IS A REFERENCE.  That last
+   clause is where `~' parts company with the binary trio: `~ [1]' is the
+   complemented address while `[1] | \"x\"' is the string op (#1028)."
   (%with-unary-overload ("~" a)
-                        (if (p-string-bitwise-operand-p a)
-                            (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))
+                        (if (eq (%p-bitwise-operand-kind a) :string)
+                            (%p-string-bit-not a "1's complement (~)")
                             (logand (lognot (%pcl-to-integer (to-number a))) #xFFFFFFFFFFFFFFFF))))
 
 (defun p-str-bit-and (a b)
   "Perl string bitwise AND (&.) — always string, byte-by-byte, truncates to shorter"
   (%with-binary-overload ("&." a b)
-                         (p-string-bit-op a b #'logand t)))
+                         (p-string-bit-op a b #'logand t "bitwise and (&)")))
 
 (defun p-str-bit-or (a b)
   "Perl string bitwise OR (|.) — always string, byte-by-byte, pads with NUL"
   (%with-binary-overload ("|." a b)
-                         (p-string-bit-op a b #'logior nil)))
+                         (p-string-bit-op a b #'logior nil "bitwise or (|)")))
 
 (defun p-str-bit-xor (a b)
   "Perl string bitwise XOR (^.) — always string, byte-by-byte, pads with NUL"
   (%with-binary-overload ("^." a b)
-                         (p-string-bit-op a b #'logxor nil)))
+                         (p-string-bit-op a b #'logxor nil "bitwise xor (^)")))
 
 (defun p-str-bit-not (a)
   "Perl string bitwise NOT (~.) — always string, complement each byte"
   (%with-unary-overload ("~." a)
-                        (map 'string (lambda (c) (code-char (logxor (char-code c) #xFF))) (to-string a))))
+                        (%p-string-bit-not a "string 1's complement (~)")))
 
 (defmacro p-str-bit-and= (place value)
   `(%p-store-back ,place (p-str-bit-and ,place ,value)))

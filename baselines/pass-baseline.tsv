@@ -1,4 +1,14 @@
 # taken-at: 5323d9e 2026-08-15
+# s465ba (round 23, task #1028, edited ROW BY ROW): bop.t 253/256 -> 480/29.
+#   ONE cause -- the bitwise `& | ^ ~` mode decision sent every non-string
+#   operand (a ref, glob, qr//, blessed object, undef) to the NUMERIC op where
+#   perl STRINGIFIES it and does the bit-string op, so `undef | "abc"` was 0
+#   and `[1] | "\0"x40` was 1.  224 blessed fail rows left fail-baseline.tsv by
+#   EDIT (join key = sweep-diff's file+description; the 15 that remain are the
+#   14 named rows still failing plus the ONE key every unnamed row collapses
+#   onto -- see #1041).  The 7 error-half rows are the over-0xFF fatal, now
+#   raised with perl's own wording.  bop.t stays PARTIAL (509 of 510 rows;
+#   the last row is the pre-existing `formline` child-program drop).
 # s463au (round 20, edited ROW BY ROW): substr.t 348/2 -> 351/0.  ONE row again,
 #   THREE test rows, all task #960 half (b) — substr/vec/pos take their TARGET
 #   ARGUMENT in perl's loose lvalue context, so the `=` and 4-argument write
@@ -230,7 +240,7 @@ auto.t	OK	47	0	47
 bless.t	OK	106	1	106
 blocks.t	OK	16	9	26
 bool.t	OK	8	0	8
-bop.t	PARTIAL	253	256	510
+bop.t	PARTIAL	480	29	510
 caller.t	PARTIAL	15	49	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
