@@ -1203,7 +1203,7 @@ op/avhv.t	40	0	39	1	DIFF		0
 op/bless.t	116	2	111	6	DIFF		0
 op/blocks.t	25	1	16	10	DIFF		0
 op/bool.t	8	0	8	0	OK		0
-op/bop.t	510	0	252	245	DIFF	aborted-forms:1: Invalid type 'P' in pack 	0
+op/bop.t	510	0	469	28	DIFF	aborted-forms:1: Invalid type 'P' in pack 	0
 op/caller.t	111	1	28	84	DIFF		0
 op/catch.t	12	0	10	2	DIFF		0
 op/chars.t	34	0	34	0	OK		0
@@ -1262,7 +1262,7 @@ op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /h
 # 28 "-s and -f: file with 0 bytes is plain file".  Nothing else moved: op/glob.t 14/4,
 # io/fs.t 59/2 and io/dup.t 10/0 are unchanged under the same change (#800's glob leaf-name
 # fix reaches no row any of them asserts).  The abort and drop columns are unchanged.
-op/filetest.t	436	0	184	250	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
+op/filetest.t	436	0	180	254	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
 op/flip.t	14	0	12	2	DIFF		0
@@ -1460,7 +1460,7 @@ op/waitpid.t	1	0	1	0	OK		0
 op/wantarray.t	28	0	27	1	DIFF		0
 op/warn.t	32	1	19	14	DIFF		0
 op/while.t	26	0	20	6	DIFF		0
-op/write.t	636	0	18	23	DIFF	unbound:OUT; aborted-forms:21: The variable OUT is unbound.	1
+op/write.t	636	0	99	32	DIFF	aborted-forms:13: Undefined subroutine &main::formline called	1
 op/yadayada.t	34	0	20	13	DIFF	undef-fn:main::pl-A	0
 opbasic/arith.t	183	0	183	0	OK		0
 opbasic/cmp.t	13280	0	12078	0	DIFF		0

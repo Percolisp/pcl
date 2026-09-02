@@ -1791,9 +1791,31 @@ usable handle whether or not the program contains `package Foo`.
 **In an argument slot, a bareword handle is its NAME as a plain string.**
 A `*`-prototype slot of a *user* sub receives `"FOO"` — and `"G"` even when
 `G` is an open handle, never a glob — while a name that is *callable* at
-that point is called instead. The **builtin** handle slots do not follow
-that second rule: there the bareword is always the handle, even when a sub
-of the same name is declared (`sub FILE1 () {42}; tell FILE1` is `-1`).
+that point is called instead.
+
+**The builtin handle slots are TWO groups, not one, and the discriminator is
+the slot's shape** (re-measured s465ba, perl 5.40.3,
+`scratch/p17-builtin-slot-rule.pl` + `p18-slot-warning-names.pl`; the earlier
+one-group claim here was wrong, and its own example was the case that
+disproves it):
+
+* **Glob slots** — `tell` `eof` `fileno` `close` `binmode` `seek` and the
+  `open` family: an ordinary declared sub does NOT displace the bareword, so
+  `sub SPATH {…}; tell SPATH` reads the *handle*, not the sub's result.
+* **EXPR slots** — `stat` `lstat` and the filetests `-X`: the operand is an
+  expression, so a declared sub IS called.  `sub SPATH {"/etc/passwd"}` makes
+  `-e SPATH` and `stat SPATH` answer for that path, with or without parens.
+
+**A `()`-prototype sub is inlined BEFORE either rule applies**, and that
+cuts across the two groups: `use constant CPATH => "YYPATH"; tell CPATH`
+warns `tell() on unopened filehandle YYPATH` — the *value* is the handle name
+— and `sub FILE1 () {42}; tell FILE1` is `-1` because the handle is named
+`42`, not because the bareword survived.  So a translator must resolve an
+inlinable constant first, then apply the group rule to what is left.
+
+PCL follows the EXPR rule for the filetests (the emitter produces the call)
+and does NOT yet follow it for `stat`'s paren-argument spelling — task
+**#1044**, whose colliding shape occurs zero times across all six populations.
 
 **A dup-open's SOURCE is a handle DESIGNATOR, not a string** (task #513).
 `open FH, ">&", SRC` accepts every spelling the resolver accepts — a

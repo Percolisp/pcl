@@ -12827,24 +12827,38 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;; Helper used by filehandle macros: if FH-FORM is a plain symbol (no sigil)
 ;; it is a bareword filehandle — quote it.  Otherwise pass through as-is.
 ;; Also handles (pl-NAME) forms where codegen wrapped the bareword in a funcall.
-(defmacro %p-fh-arg (fh-form)
+(defmacro %p-fh-arg (fh-form &optional (call-form-is-a-handle t))
   ;; A CONTEXT WRAP around the argument is peeled first (%p-strip-ctx): a
   ;; scalar-context user-sub call is emitted wrapped, and the (pl-NAME) arm
   ;; below is exactly what a bareword filehandle looks like inside one.  That
   ;; used to be a SECOND copy of the arm, keyed on the `let` spelling only —
   ;; which the #281 context macros would have silently defeated (probed: the
   ;; bareword then CALLS pl-NAME, an undefined function).
-  (let ((fh-form (%p-strip-ctx fh-form)))
+  ;;
+  ;; CALL-FORM-IS-A-HANDLE NIL turns the (pl-NAME) arm — and with it the
+  ;; strip, which exists only to expose that arm — OFF.  That is the READ-slot
+  ;; reading, and it is perl's: in a `stat` / filetest operand a DECLARED sub
+  ;; is CALLED, so `sub SPATH {"/etc/passwd"} -e SPATH` is TRUE and
+  ;; `use constant CPATH => …; -e CPATH` reads the constant (probed 5.40.3,
+  ;; scratch/p13-const-handle-slot.pl).  The filetest emitter already gets
+  ;; that right — it emits `(p--e (pl-SPATH))` — so turning that call back
+  ;; into a handle NAME would be a new silent wrong.  The `open` family keeps
+  ;; the arm ON: there the first argument is a GLOB slot, not a read slot.
+  (let ((fh-form (if call-form-is-a-handle (%p-strip-ctx fh-form) fh-form)))
     (cond
-      ;; Bare symbol without sigil — bareword filehandle: quote it
+      ;; Bare symbol without sigil — bareword filehandle: quote it.
+      ;; `_` is NOT one: it is the runtime's stat-cache VARIABLE (defvar _),
+      ;; which `-f _` reads, and quoting it would look up a handle named "_".
       ((and (symbolp fh-form)
+            (not (eq fh-form '_))
             (let ((name (symbol-name fh-form)))
               (and (plusp (length name))
                    (not (member (char name 0) '(#\$ #\@ #\% #\*))))))
        `',(intern (symbol-name fh-form)))
       ;; (pl-NAME) pattern: codegen wrapped a bareword FH in a user-sub call.
       ;; Extract the bare name and quote it instead of calling the nonexistent function.
-      ((and (listp fh-form)
+      ((and call-form-is-a-handle
+            (listp fh-form)
             (= (length fh-form) 1)
             (symbolp (car fh-form))
             (let ((name (symbol-name (car fh-form))))
@@ -13516,7 +13530,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           (error () ""))
         arg)))
 
-(defun p-stat (file-or-fh)
+(defun %p-stat-impl (file-or-fh)
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
    size atime mtime ctime blksize blocks).  Follows symlinks.  nil on failure."
   (let ((arg (%p-stat-arg file-or-fh)))
@@ -13527,7 +13541,7 @@ buffer's fill-pointer; everything else falls back to file-length."
              (sb-posix:stat arg)))
       (error () (%pcl-save-errno) nil))))
 
-(defun p-lstat (file)
+(defun %p-lstat-impl (file)
   "Perl lstat — like stat but does NOT follow a symlink (reports the link)."
   (let ((arg (%p-stat-arg file)))
     (handler-case
@@ -13541,7 +13555,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z)
 ;;; ============================================================
 
-(defun p--e (file)
+(defun %p--e-impl (file)
   "Perl -e: test if file exists"
   (let* ((path (%p--path file))
          ;; The empty path is ENOENT in perl, but (probe-file "") answers the
@@ -13555,7 +13569,7 @@ buffer's fill-pointer; everything else falls back to file-length."
                             t)))))
     (if exists 1 nil)))
 
-(defun p--d (file)
+(defun %p--d-impl (file)
   "Perl -d: test if file is a directory"
   (handler-case
       (let ((stat (sb-posix:stat (%p--path file))))
@@ -13564,7 +13578,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             nil))
     (error () nil)))
 
-(defun p--f (file)
+(defun %p--f-impl (file)
   "Perl -f: test if file is a regular file"
   (handler-case
       (let ((stat (sb-posix:stat (%p--path file))))
@@ -13573,7 +13587,7 @@ buffer's fill-pointer; everything else falls back to file-length."
             nil))
     (error () nil)))
 
-(defun p--r (file)
+(defun %p--r-impl (file)
   "Perl -r: test if file is readable"
   (let ((path (%p--path file)))
     (handler-case
@@ -13582,7 +13596,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           1)
       (error () nil))))
 
-(defun p--w (file)
+(defun %p--w-impl (file)
   "Perl -w: test if file is writable"
   (let ((path (%p--path file)))
     (handler-case
@@ -13591,7 +13605,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           1)
       (error () nil))))
 
-(defun p--x (file)
+(defun %p--x-impl (file)
   "Perl -x: test if file is executable"
   (let ((path (%p--path file)))
     (handler-case
@@ -13600,7 +13614,7 @@ buffer's fill-pointer; everything else falls back to file-length."
           1)
       (error () nil))))
 
-(defun p--s (file)
+(defun %p--s-impl (file)
   "Perl -s: the file's SIZE — the one filetest whose answer is a value rather
    than a flag, which is why an EMPTY file is a defined 0 and not undef (#740;
    `defined(-s $f)` is the discriminator, and `printf \"%d\"` printed nothing
@@ -13611,7 +13625,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (sb-posix:stat-size (sb-posix:stat (%p--path file)))
     (error () nil)))
 
-(defun p--z (file)
+(defun %p--z-impl (file)
   "Perl -z: test if file has zero size"
   (handler-case
       (let* ((stat (sb-posix:stat (%p--path file)))
@@ -13629,62 +13643,62 @@ buffer's fill-pointer; everything else falls back to file-length."
         (if (funcall pred stat) 1 nil))
     (error () nil)))
 
-(defun p--l (file)
+(defun %p--l-impl (file)
   "Perl -l: test if file is a symbolic link (lstat, not stat)"
   (%p--stat-test file
                  (lambda (s) (sb-posix:s-islnk (sb-posix:stat-mode s)))
                  :lstat t))
 
-(defun p--p (file)
+(defun %p--p-impl (file)
   "Perl -p: test if file is a named pipe (FIFO)"
   (%p--stat-test file (lambda (s) (sb-posix:s-isfifo (sb-posix:stat-mode s)))))
 
-(defun p--S (file)
+(defun %p--S-impl (file)
   "Perl -S: test if file is a socket"
   (%p--stat-test file (lambda (s) (sb-posix:s-issock (sb-posix:stat-mode s)))))
 
-(defun p--b (file)
+(defun %p--b-impl (file)
   "Perl -b: test if file is a block special file"
   (%p--stat-test file (lambda (s) (sb-posix:s-isblk (sb-posix:stat-mode s)))))
 
-(defun p--c (file)
+(defun %p--c-impl (file)
   "Perl -c: test if file is a character special file"
   (%p--stat-test file (lambda (s) (sb-posix:s-ischr (sb-posix:stat-mode s)))))
 
-(defun p--u (file)
+(defun %p--u-impl (file)
   "Perl -u: test if file has the setuid bit set"
   (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o4000))))
 
-(defun p--g (file)
+(defun %p--g-impl (file)
   "Perl -g: test if file has the setgid bit set"
   (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o2000))))
 
-(defun p--k (file)
+(defun %p--k-impl (file)
   "Perl -k: test if file has the sticky bit set"
   (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o1000))))
 
-(defun p--o (file)
+(defun %p--o-impl (file)
   "Perl -o: test if file is owned by the effective uid"
   (%p--stat-test file (lambda (s) (= (sb-posix:stat-uid s) (sb-posix:geteuid)))))
 
-(defun p--O (file)
+(defun %p--O-impl (file)
   "Perl -O: test if file is owned by the real uid"
   (%p--stat-test file (lambda (s) (= (sb-posix:stat-uid s) (sb-posix:getuid)))))
 
 ;; -R/-W/-X are the real-uid variants of -r/-w/-x.  perl uses access() vs
 ;; eaccess(); the two differ only in setuid/setgid programs, which PCL
 ;; programs are not, so the effective-uid tests stand in.
-(defun p--R (file)
+(defun %p--R-impl (file)
   "Perl -R: readable by the REAL uid (== -r for non-setuid programs)"
-  (p--r file))
+  (%p--r-impl file))
 
-(defun p--W (file)
+(defun %p--W-impl (file)
   "Perl -W: writable by the REAL uid (== -w for non-setuid programs)"
-  (p--w file))
+  (%p--w-impl file))
 
-(defun p--X (file)
+(defun %p--X-impl (file)
   "Perl -X: executable by the REAL uid (== -x for non-setuid programs)"
-  (p--x file))
+  (%p--x-impl file))
 
 (defun %p--file-age (file accessor)
   "Days between program start ($^T) and the ACCESSOR time of FILE (-M/-A/-C).
@@ -13694,15 +13708,15 @@ buffer's fill-pointer; everything else falls back to file-length."
         (/ (- (symbol-value '|$^T|) (funcall accessor stat)) 86400.0d0))
     (error () nil)))
 
-(defun p--M (file)
+(defun %p--M-impl (file)
   "Perl -M: script start time minus file modification time, in days"
   (%p--file-age file #'sb-posix:stat-mtime))
 
-(defun p--A (file)
+(defun %p--A-impl (file)
   "Perl -A: script start time minus file access time, in days"
   (%p--file-age file #'sb-posix:stat-atime))
 
-(defun p--C (file)
+(defun %p--C-impl (file)
   "Perl -C: script start time minus file inode-change time, in days"
   (%p--file-age file #'sb-posix:stat-ctime))
 
@@ -13728,17 +13742,60 @@ buffer's fill-pointer; everything else falls back to file-length."
                 (if (> (* 10 odd) (* 3 n)) :binary :text)))))
     (error () nil)))
 
-(defun p--T (file)
+(defun %p--T-impl (file)
   "Perl -T: heuristic text-file test (empty files are text)"
   (case (%p--text-scan file)
     ((:empty :text) 1)
     (t nil)))
 
-(defun p--B (file)
+(defun %p--B-impl (file)
   "Perl -B: heuristic binary-file test (empty files are binary too, as in perl)"
   (case (%p--text-scan file)
     ((:empty :binary) 1)
     (t nil)))
+
+;;; A BAREWORD FILEHANDLE IS A NAME IN A stat / FILETEST SLOT TOO (task #1032).
+;;; `stat FH` and `-e FH` emitted the bare CL symbol FH, which is an UNBOUND
+;;; VARIABLE at load time: "The variable FH is unbound" killed the whole
+;;; program — for an OPEN handle, and for every one of `stat` `lstat` and the
+;;; 26 filetests.  It cost two whole companion files (t/op/stat_errors.t's 333
+;;; rows and t/op/write.t's abort plus its 477 missing rows).
+;;;
+;;; Every other handle-taking builtin already answers this with `%p-fh-arg` at
+;;; its call site — p-open, p-close, p-eof, p-tell, p-seek, p-binmode,
+;;; p-fileno, p-readline, and `p--t`, which IS a filetest and is therefore the
+;;; sibling this family had all along (rule 11).  `%p-stat-arg`, the one funnel
+;;; both `stat` and `%p--path` already go through, has always accepted a symbol
+;;; naming a handle; the only thing missing was the QUOTE at the call site.
+;;; So the public name becomes a macro and the body keeps its name with a
+;;; `%`…`-impl` spelling, exactly as `p--t` / `%p--t-impl` already do.
+;;;
+;;; The (pl-NAME) arm is OFF here — see `%p-fh-arg`'s own note for why (a
+;;; declared sub in a READ slot is CALLED by perl, and the filetest emitter
+;;; already emits the call).
+(defmacro %define-fh-slot-op (name impl)
+  "Define NAME as the macro form of IMPL: one operand, which may be a bareword
+   filehandle NAME rather than a path or a lexical handle."
+  `(defmacro ,name (arg)
+     ,(format nil "Perl ~(~A~) — a bareword filehandle in the operand slot is a NAME, not a variable (#1032).  Body: ~(~A~)."
+              (symbol-name name) (symbol-name impl))
+     (list ',impl (list '%p-fh-arg arg nil))))
+
+(%define-fh-slot-op p-stat  %p-stat-impl)
+(%define-fh-slot-op p-lstat %p-lstat-impl)
+(%define-fh-slot-op p--e %p--e-impl)  (%define-fh-slot-op p--d %p--d-impl)
+(%define-fh-slot-op p--f %p--f-impl)  (%define-fh-slot-op p--r %p--r-impl)
+(%define-fh-slot-op p--w %p--w-impl)  (%define-fh-slot-op p--x %p--x-impl)
+(%define-fh-slot-op p--s %p--s-impl)  (%define-fh-slot-op p--z %p--z-impl)
+(%define-fh-slot-op p--l %p--l-impl)  (%define-fh-slot-op p--p %p--p-impl)
+(%define-fh-slot-op p--S %p--S-impl)  (%define-fh-slot-op p--b %p--b-impl)
+(%define-fh-slot-op p--c %p--c-impl)  (%define-fh-slot-op p--u %p--u-impl)
+(%define-fh-slot-op p--g %p--g-impl)  (%define-fh-slot-op p--k %p--k-impl)
+(%define-fh-slot-op p--o %p--o-impl)  (%define-fh-slot-op p--O %p--O-impl)
+(%define-fh-slot-op p--R %p--R-impl)  (%define-fh-slot-op p--W %p--W-impl)
+(%define-fh-slot-op p--X %p--X-impl)  (%define-fh-slot-op p--M %p--M-impl)
+(%define-fh-slot-op p--A %p--A-impl)  (%define-fh-slot-op p--C %p--C-impl)
+(%define-fh-slot-op p--T %p--T-impl)  (%define-fh-slot-op p--B %p--B-impl)
 
 (defun %p--t-impl (fh)
   "Perl -t body: is the filehandle attached to a tty?  Undef/nil (a bare -t
@@ -15127,7 +15184,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (when fh (setf *p-selected-out* fh))
         prev)))
 
-(defun p-write (&optional fh)
+(defun %p-write-impl (&optional fh)
   "Perl write - emit a report via the current `format` (stub).
    format/write report templates are deliberately not-supported
    (docs/not-supported.md) and are stripped at the source level, so there is
@@ -15135,6 +15192,16 @@ buffer's fill-pointer; everything else falls back to file-length."
    stray write() call does not abort the whole program."
   (declare (ignore fh))
   1)
+
+;;; …AND THE COMMONEST SPELLING WAS ABORTING THE WHOLE PROGRAM ANYWAY (#1032):
+;;; `write(OUT)` reached this as the BARE CL symbol OUT, so evaluating the
+;;; ARGUMENT of the no-op died with "The variable OUT is unbound" — the stub's
+;;; own promise, broken by the slot rather than by the body.  `write FILEHANDLE`
+;;; is a GLOB slot (perl's group (b), ir-spec §7.5), so it takes `%p-fh-arg`
+;;; with the call-form arm ON, exactly like `close` and `tell`.
+(defmacro p-write (&optional fh)
+  "Perl write — a bareword filehandle in the slot is a NAME (#1032)."
+  (if fh `(%p-write-impl (%p-fh-arg ,fh)) `(%p-write-impl)))
 
 (defun p-exit (&optional code)
   "Perl exit - terminate program with exit code.
