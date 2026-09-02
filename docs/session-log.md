@@ -4,6 +4,121 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 465bb (Opus, round 23) — A TAIL `return` DOES NOT THROW (#994): the Kind-A emission `tail-return`, and the two things `p-return-value` still has to do
+
+- **A `return EXPR` that IS a sub body's LAST statement now lowers as the tail
+  expression.**  Nothing stands between it and the `(catch :p-return …)` inside
+  `p-sub-frame`, so the throw, the catch, the `*wantarray*` rebind and the
+  out-of-line `p-return-value` call were pure overhead on every returning call
+  (#994: ~10 % of fib(27) by direct A/B, measured s464).  Emission:
+  `(p-tail-value X)` for a single-statement body,
+  `(p-caller-ctx (p-tail-value X))` under the multi-statement `:void` regime —
+  the same restore an implicit tail statement gets, ir-spec §4 — and
+  `(p-return-empty)` for a bare `return;`.  `Pl/Parser2.pm`'s
+  `_lower_body_regime` records the body's last live statement by `refaddr`
+  (POSITION is the one fact a statement cannot see about itself); the existing
+  Break branch owns eligibility — no statement modifier, no comma list (those
+  still gate to the v1 seam) — plus the Kind-A gate `tail-return`.  Normative
+  text: `docs/ir-spec.md` §5.3.
+
+- **A PLAIN ELISION IS SILENT-WRONG, and a probe caught it before any gate
+  did.**  Two of `p-return-value`'s arms fire on a value the frame exit does
+  NOT repeat: an ARRAY in scalar context is its element COUNT, and raw `nil` in
+  list context is the empty list.  With the naive elision,
+  `sub f { my $z=0; return @arr } print f() . ""` printed `ARRAY(0x1)` where
+  perl prints 3.  `p-tail-value` is therefore `p-return-value` with its
+  IDENTITY fast path inlined — *a value that is neither raw nil nor a raw
+  non-string vector comes back unchanged*, a claim read off `p-return-value`'s
+  own arms (every BOX arm is applied again by `%p-leavesub` at the frame exit,
+  which is why a box may pass straight through).  The ordinary scalar return
+  pays two type tests and no call; every rare shape goes to the ONE existing
+  rule, so there is no second copy of the normalisation (rule 11).
+  `p-return-empty` is shared with `p-return`'s own zero-argument branch for the
+  same reason.
+
+- **Every corpus diff is attributable to the gate — proved, not argued.**
+  `tools/corpus-diff.pl` reports 31 of 111 files differing (silent drops 5,
+  unchanged) and `tools/emission-ab.pl` 18 of 22 lib shims (RCDIFF 0): the
+  shape is everywhere, so classifying hunks by eye would have been the weak
+  bar.  Instead both populations were re-transpiled with
+  `PCL_OPT=-tail-return` and byte-compared against a `1fed80b` worktree —
+  **perl-tests SAME 111 / DIFF 0, lib SAME 22 / DIFF 0, SHAPES SAME 6 / DIFF 0,
+  80 CPAN modules SAME 80 / DIFF 0** — all four populations — which says the
+  general form is untouched and the whole diff is the three shape classes
+  (`(p-return X)` → `(p-tail-value X)`, → `(p-caller-ctx (p-tail-value X))`,
+  `(p-return)` → `(p-return-empty)`), plus the re-indentation the wrapper's
+  extra depth causes and the `gen=` stamp.
+
+- **Two `Pl/t` guards asserted the shape this change replaces**, and were
+  repaired in the same commit (the s416 standing rule): `parser2-01.t`'s
+  bare-return row now asserts BOTH positions — `(p-return-empty)` in tail
+  position AND the zero-arg `(p-return)` for `return if $x;` — which is a
+  strengthening, one row more; `decl-ordering-01.t`'s relative-order row reads
+  `p-tail-value (pl-inner)`.  They were the only two rows in the whole gate
+  that moved.
+
+- **THE BENCH TABLE, and the finding that the standing bench rows are BLIND to
+  this transform.**  `tools/bench-exec.pl`'s `fib(27)x` body ends in an
+  IMPLICIT tail and `gcdrec`'s two returns carry statement MODIFIERS — neither
+  is a shape the gate touches — so three rows were added to the scratch
+  instrument (`scratch/wallab.pl`, an interleaved wall-time A/B of two trees,
+  rebuilt because the round-22 file of that name was never committed): `fibret`
+  (fib with a tail `return`), `subret` (a two-statement adder called 2M times)
+  and `methret` (an accessor `return $s->{v}`), plus `gcdret` (gcd with tail
+  returns instead of modifiers).  K=5, interleaved, load average 3, main
+  `605b837` vs the branch; the CONTROL (the same tree against itself, same
+  session) reads 0.983×–1.062×, so **±6.2 % is the floor**:
+
+  | row | main s | branch s | B/A | |
+  |---|---|---|---|---|
+  | `fibret` | 0.6979 | 0.4782 | **0.685×** | −31.5 % |
+  | `gcdret` | 0.1103 | 0.0978 | **0.887×** | −11.3 % |
+  | `subret` | 0.1141 | 0.1025 | **0.898×** | −10.2 % |
+  | `methret` | 0.3379 | 0.3101 | **0.918×** | −8.2 % |
+  | `fib(27)x` | 0.4692 | 0.4633 | 0.987× | implicit tail — untouched |
+  | `gcdrec` | 0.1099 | 0.1085 | 0.987× | modifier returns — untouched |
+  | `slices` | 0.1873 | 0.1863 | 0.995× | inside the band |
+  | `ovlsub` | 0.1536 | 0.1542 | 1.004× | inside the band |
+  | `symref` | 0.0353 | 0.0351 | 0.993× | inside the band |
+  | `arrhash` | 0.0869 | 0.0939 | 1.080× | NOISE — 1.011× on a K=7 re-run, and the CONTROL read 1.062× on this very row; no sub in its loop |
+
+  Every row that moves has the mechanism and every row without the shape is
+  inside the control band.  **The cleanest statement of what it buys: on main a
+  fib written with an explicit tail `return` cost 0.698 s against the implicit
+  tail's 0.469 s — 49 % more for the same program; on the branch the two
+  spellings are 0.478 and 0.463, i.e. the same sub.**  Compile time is
+  unchanged (interleaved best-of-3: `pack.t` 4.07 s → 3.93 s, `sprintf.t`
+  0.48 → 0.47), well inside the 50 % budget.
+
+- **#1039 filed (PRE-EXISTING, found by the probe battery): a raw ARRAY in
+  STRING context stringifies as `ARRAY(0x1)` instead of its element COUNT.**
+  `my @a=(7,8,9); print @a . ""` is 3 in perl and `ARRAY(0x1)` in PCL — no sub
+  involved — and `lc`, `length` and `eq` all follow the wrong answer;
+  identical on the base tree and under `PCL_OPT=none`, so it is the coercion
+  table.  It stayed hidden because the two return spellings DISAGREED:
+  `return @a` was converted by `p-return-value` and `sub { @a }` was not.
+
+- **#995 MEASURED, not implemented — and the measurement supersedes both fixes
+  the task proposed.**  Its first instruction was "measure WHY `$k` did not get
+  the raw-slot verdict".  `PCL_B_DEBUG=1` on the arrhash shape answers in one
+  line: `B-DEBUG $k unboxable=0 … reasons=[write-incdec] uses={strkey=1}`, and
+  the SAME program with `$h{$k} = 1` in place of `$h{$k}++` reads
+  `unboxable=1 reasons=[]` and emits a RAW slot.  So the profile's 15.4 %
+  `%make-p-box` + 8.1 % `box-set` on that row is ONE false-positive boxing
+  event: **`++` on a hash/array ELEMENT is attributed as a write to the KEY**.
+  `Pl/VarAnnotator.pm`'s prefix/postfix-op arm calls
+  `_tw_mark(…, 'write-incdec')` on the WHOLE operand subtree, which for
+  `$h{$k}++` includes the key `$k` (and for `$a[$i]++` the index `$i`) — while
+  `++` writes only the element.  The over-marking is not even needed for the
+  case its comment names (`++($x = 5)`): the generic `_tw_walk` on the very
+  next line already records that embedded assignment.  The fix is one
+  mechanism — mark the lvalue PATH, not the subscript/key subtrees — but it is
+  a boxing-verdict widening, so it needs the sweep-as-gate plus a gate-SET scan
+  over both populations, i.e. its own session.  The measurement, the located
+  line and the acceptance list are written into task #995; neither candidate
+  (a) raw-string slot nor (b) box reuse is needed for this row.
+
+
 ## Session 465 (2026-09-02, Fable) — the found-bugs REPORT + the ignored-tests audit plan PRESENTED (#993, §2 re-measured on `ea34c0f`); #1034 filed (LOW PRIO: declaration-site type hints visible in the IR)
 
 **USER**: "Please continue" + "write up as a low prio task for sometime in the future — (optionally?) add some modification to variable declarations or something, to specify when a variable or sub parameter just contain integers, numbers or strings.  So it is visible in the IR."  → **#1034** (design questions listed: perl-valid syntax via a `MODIFY_SCALAR_ATTRIBUTES` shim, trusted vs checked, box-model meaning, Passes.pm licensing source, ir-spec entry; not scheduled).

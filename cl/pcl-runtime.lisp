@@ -172,7 +172,7 @@
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach #:p-foreach-raw #:p-foreach-range #:p-foreach-range-raw
-   #:p-return #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
+   #:p-return #:p-return-empty #:p-tail-value #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
    #:p-continue #:p-break
    ;; I/O
    #:p-print #:p-say #:p-warn #:p-die
@@ -10599,6 +10599,33 @@ what changes is that the element is the raw counter rather than a fresh box."
     (t (let ((v (unbox val)))
          (if (null v) *p-undef* v)))))
 
+(defmacro p-tail-value (form)
+  "The value of a TAIL-position `return EXPR` (task #994, the `tail-return`
+   Kind-A emission).  A `return` that IS a sub body's last statement does not
+   need the throw to :p-return -- its value already reaches the frame exit --
+   but it DOES need p-return-value's normalisation, which the throw used to
+   apply on the way out.  This macro is that call with its FAST PATH inlined:
+
+     p-return-value is the IDENTITY on every value that is neither raw NIL
+     nor a raw NON-STRING VECTOR.
+
+   Read it off p-return-value above: only two of its arms change a value that
+   is not a p-box -- an ARRAY (adjustable vector) in SCALAR context becomes its
+   element count, and raw NIL in LIST context becomes the empty list -- and the
+   BOX arms are all repeated verbatim by %p-leavesub at the frame exit
+   (unbox with nil -> *p-undef*, a fresh box for a ref / blessed / dualvar), so
+   letting a box through unchanged here yields exactly the same value.  Every
+   other shape (number, string, hash-table, function, keyword) falls out of
+   p-return-value untouched.  So the fast path is two type tests and no call.
+
+   INVARIANT: if p-return-value ever grows an arm that fires on something that
+   is neither NIL nor a non-string vector, this test must grow with it."
+  (let ((v (gensym "TV")))
+    `(let ((,v ,form))
+       (if (or (null ,v) (and (vectorp ,v) (not (stringp ,v))))
+           (p-return-value ,v)
+           ,v))))
+
 (defun p-list-scalar (val)
   "A list/slice evaluated in scalar context yields its LAST element (undef if
    empty) — the comma-operator semantics.  This differs from an array variable
@@ -10692,6 +10719,18 @@ what changes is that the element is the raw counter rather than a fresh box."
     `(let ((,target (%p-goto-target ,expr)))
        (when ,target (p-goto-sub ,target)))))
 
+(defmacro p-return-empty (&optional (ctx '*wantarray*))
+  "The VALUE of a bare `return;` — perl's EMPTY LIST in list context, undef
+   (raw nil) in scalar/void.  Two sites ask this question and they must agree
+   (rule 11): `p-return`'s zero-argument branch, which reads the caller's
+   context out of *pcl-caller-wantarray* because the throw has not restored it
+   yet, and the TAIL-position emission (task #994, the `tail-return` Kind-A
+   gate), which is already running in the caller's context and so reads
+   *wantarray*.
+   Raw nil is deliberate for the non-list answer — it is exactly what p-return
+   has always thrown, and %p-leavesub hands it on as one undef scalar."
+  `(if (eq ,ctx t) (%p-empty-list) nil))
+
 (defmacro p-return (&rest values)
   "Perl return - returns single value or list depending on args.
    Evaluates argument(s) with *wantarray* restored to *pcl-caller-wantarray*
@@ -10700,10 +10739,7 @@ what changes is that the element is the raw counter rather than a fresh box."
    so return always exits the enclosing p-sub, not just the innermost loop."
   (if (null values)
       ;; Bare return: in list context contributes 0 elements; scalar/void → undef.
-      `(throw :p-return
-         (if (eq *pcl-caller-wantarray* t)
-             (make-array 0 :adjustable t :fill-pointer 0)
-             nil))
+      `(throw :p-return (p-return-empty *pcl-caller-wantarray*))
       (if (= (length values) 1)
           `(throw :p-return
              (let ((*wantarray* *pcl-caller-wantarray*))
@@ -15285,7 +15321,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-590"
+(defparameter *pcl-cache-generation* "v2-610"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

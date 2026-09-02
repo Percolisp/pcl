@@ -7881,6 +7881,14 @@ sub _lower_sub_inner {
 sub _lower_body_regime {
   my ($self, $stmts, $vi) = @_;
   my @live = grep { ref $_ && !$_->isa('PPI::Statement::Null') } @$stmts;
+  # THE SUB BODY'S LAST STATEMENT, by identity (task #994).  A `return` there
+  # is in TAIL position -- nothing stands between it and the sub frame's
+  # `catch :p-return`, so its value IS the frame's value.  Recorded here
+  # because POSITION is the one fact a statement cannot see about itself; the
+  # Break branch below owns eligibility (no modifier, no comma list) and the
+  # Kind-A gate.  `local`, so a nested sub body lowered inside this one
+  # records its OWN tail and restores this one on the way out.
+  local $self->{_body_tail_stmt} = @live ? refaddr($live[-1]) : undef;
   if (@live == 0
       || (@live == 1 && !$live[0]->isa('PPI::Statement::Compound'))) {
     return $self->_lower_block($stmts, $vi, 'inherit');
@@ -9387,6 +9395,38 @@ sub _lower_stmt {
         $top_comma = $inner && grep { $is_comma->($_) } $inner->schildren;
       }
       return $self->_fallback_stmt($stmt) if $top_comma;
+      # ── TAIL POSITION (task #994, Kind-A gate `tail-return`) ─────────────
+      # This `return` IS the sub body's last statement, so its value is the
+      # frame's value and reaches the caller through the very same
+      # `(p-sub-frame …)` exit an implicit tail does.  The throw to :p-return
+      # is then pure overhead.  `p-return-value` is NOT: two of its arms fire
+      # on a value the frame exit does not touch (an ARRAY in scalar context
+      # is its element COUNT, raw nil in list context is the empty list), and
+      # dropping them made `(return @a) . ""` print ARRAY(0x1) where perl
+      # prints 3 (probed, scratch/arrctx.pl).  `p-tail-value` is that call
+      # with its IDENTITY fast path inlined -- two type tests for the
+      # ordinary scalar return.  What is saved is the throw, the catch, the
+      # *wantarray* rebind and the out-of-line call: ~10 % of fib(27).
+      #
+      # The CONTEXT is the one thing that must be re-supplied: `p-return`
+      # evaluates its value under *pcl-caller-wantarray*, and under the
+      # sub-body :void regime the ambient *wantarray* is :void.  Wrap in
+      # p-caller-ctx exactly when that regime is active — when it is not, no
+      # bind was ever emitted and *wantarray* still IS the caller's.
+      # A statement MODIFIER is excluded (the value is then conditional; that
+      # is _modifier_ret_form's business), and a comma list has already gated
+      # to v1 above.
+      if (!$mod
+          && defined $self->{_body_tail_stmt}
+          && $self->{_body_tail_stmt} == refaddr($stmt)
+          && Pl::Passes::enabled('tail-return')) {
+        my $tform = @$expr
+          ? ['p-tail-value', $self->_lower_expr($expr, $stmt, 'inherit')]
+          : ['p-return-empty'];
+        return $self->environment->wa_void_active
+          ? Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', $tform)
+          : $tform;
+      }
       # A returned call must see the CALLER's context (no *wantarray* bind).
       # Bare `return;` must be a ZERO-arg (p-return): in list context it
       # contributes 0 elements (`()`), scalar/void → undef.  `(p-return

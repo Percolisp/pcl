@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-590
+;;; pcl: pipeline=v2 gen=v2-610
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -263,7 +263,7 @@
                                         (progn
                                           ;; return (8, 0, 0)
 (p-return 8 0 0))))))))))))))))))
-        (p-return (progn))))))
+        (p-caller-ctx (p-tail-value (progn)))))))
 
 (p-sub pl-_pack_skip_ws
   (&rest %_args)
@@ -305,7 +305,7 @@
                           (p-post++ $ti))
                         (p-if (p-< $ti $tlen) (p-post++ $ti)))
                       (progn (p-last)))))))
-            (p-return $ti)))))))
+            (p-caller-ctx (p-tail-value $ti))))))))
 
 (p-sub pl-_pack_find_group_end
   (&rest %_args)
@@ -331,7 +331,7 @@
                       (p-if (p-str-eq $ch ")")
                         (progn (p-decf-raw $depth) (p-if (p-> $depth 0) (p-post++ $ti)))
                         (progn (p-post++ $ti)))))))
-              (p-return $ti))))))))
+              (p-caller-ctx (p-tail-value $ti)))))))))
 
 (p-sub pl-_pack_parse_mods
   (&rest %_args)
@@ -563,7 +563,7 @@
                                 (p-str-eq $ch "w"))
                               (progn (p-incf $pos $nrep) (p-next)))
                             (p-if (p-str-eq $ch ".") (progn (p-next)))))))))
-                (p-return $pos)))))))))
+                (p-caller-ctx (p-tail-value $pos))))))))))
 
 (p-sub pl-_pack_parse_count
   (&rest %_args)
@@ -665,7 +665,7 @@
                     ((p-< $k $nbytes))
                     ((p-incf-raw $k))
                     (p-.=-raw $result (p-chr (p-bit-and (p->> $val (p-* 8 $k)) #xFF)))))))
-            (p-return $result)))))))
+            (p-caller-ctx (p-tail-value $result))))))))
 
 (p-sub pl-_unpack_read_int
   (&rest %_args)
@@ -696,19 +696,19 @@
               (progn
                 (let (($max (p-** 2 (p-* $nbytes 8))))
                   (p-if (p->= $v (p-/ $max 2)) (p-decf $v $max)))))
-            (p-return $v)))))))
+            (p-caller-ctx (p-tail-value $v))))))))
 
-(p-sub pl-_pack_float32 (&rest %_args) (p-raw-params ($val $be) (block nil (p-return ""))))
+(p-sub pl-_pack_float32 (&rest %_args) (p-raw-params ($val $be) (block nil (p-tail-value ""))))
 
-(p-sub pl-_pack_float64 (&rest %_args) (p-raw-params ($val $be) (block nil (p-return ""))))
+(p-sub pl-_pack_float64 (&rest %_args) (p-raw-params ($val $be) (block nil (p-tail-value ""))))
 
 (p-sub pl-_unpack_float32
   (&rest %_args)
-  (p-raw-params ($s $si $be) (block nil (p-return 0.0))))
+  (p-raw-params ($s $si $be) (block nil (p-tail-value 0.0))))
 
 (p-sub pl-_unpack_float64
   (&rest %_args)
-  (p-raw-params ($s $si $be) (block nil (p-return 0.0))))
+  (p-raw-params ($s $si $be) (block nil (p-tail-value 0.0))))
 
 (p-sub pl-_pack_str_one
   (&rest %_args)
@@ -1928,7 +1928,7 @@
                   (p-backslash $result)
                   0
                   0)
-                (p-return $result)))))))))
+                (p-caller-ctx (p-tail-value $result))))))))))
 
 (p-sub pl-_unpack_utf8_char
   (&rest %_args)
@@ -1958,7 +1958,7 @@
                         (p-bit-or (p-<< $code 6)
                           (p-bit-and (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $k) 1)) #x3F))))))
                 (p-incf (p-cast-$ $si_ref) $nb)
-                (p-return $code)))))))))
+                (p-caller-ctx (p-tail-value $code))))))))))
 
 (p-sub pl-_unpack_str
   (&rest %_args)
@@ -3007,7 +3007,7 @@
                         0
                         0
                         0)))
-                  (p-return (p-if (p-wantarray) @result (p-aref @result 0))))))))))))
+                  (p-caller-ctx (p-tail-value (p-if (p-wantarray) @result (p-aref @result 0)))))))))))))
 
 (p-run-compile-phase-blocks)
 

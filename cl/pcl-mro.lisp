@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-590
+;;; pcl: pipeline=v2 gen=v2-610
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -62,15 +62,16 @@
 
 (p-sub pl-get_linear_isa
   (&rest %_args)
-  (p-raw-params ($class $type) (block nil (p-return (mro::pl-_c3_linearize $class)))))
+  (p-raw-params ($class $type) (block nil (p-tail-value (mro::pl-_c3_linearize $class)))))
 
-(p-sub pl-get_mro (&rest %_args) (p-args-body (block nil (p-return "c3"))))
+(p-sub pl-get_mro (&rest %_args) (p-args-body (block nil (p-tail-value "c3"))))
 
-(p-sub pl-set_mro (&rest %_args) (p-args-body (block nil (p-return))))
+(p-sub pl-set_mro (&rest %_args) (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-get_isarev
   (&rest %_args)
-  (p-args-body (block nil (p-return (make-p-box (make-array 0 :adjustable t :fill-pointer 0))))))
+  (p-args-body
+    (block nil (p-tail-value (make-p-box (make-array 0 :adjustable t :fill-pointer 0))))))
 
 (p-sub pl-is_universal
   (&rest %_args)
@@ -81,13 +82,15 @@
           :my
           t
           (p-if (p-str-eq $u $class) (p-return 1)))
-        (p-return 0)))))
+        (p-caller-ctx (p-tail-value 0))))))
 
 (p-eval-always (p-note-inc "strict"))
 
-(p-sub pl-invalidate_all_method_caches (&rest %_args) (p-args-body (block nil (p-return))))
+(p-sub pl-invalidate_all_method_caches
+  (&rest %_args)
+  (p-args-body (block nil (p-return-empty))))
 
-(p-sub pl-method_changed_in (&rest %_args) (p-args-body (block nil (p-return))))
+(p-sub pl-method_changed_in (&rest %_args) (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-_c3_linearize
   (&rest %_args)
@@ -153,7 +156,7 @@
                       t
                       (p-if (p-&& (p-cast-@ $seq) (p-str-eq (p-aref-deref $seq 0) $cand))
                         (p-shift (p-cast-@ $seq))))))
-                (p-return (p-backslash @result))))))))))
+                (p-caller-ctx (p-tail-value (p-backslash @result)))))))))))
 
 (p-eval-always (p-note-inc "strict"))
 

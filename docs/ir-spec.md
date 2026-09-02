@@ -1120,6 +1120,37 @@ matching Perl.  On the way out `p-return-value` adjusts the value:
 A sub body falling off the end returns its last evaluated form (the `catch`'s
 value), so the tail expression and `return` arrive at the frame the same way.
 
+**A `return` in TAIL POSITION does not throw (normative, s465bb, task #994).**
+When a `return EXPR` (no statement modifier, single expression) IS a sub
+body's LAST statement, nothing stands between it and the frame's catch, so the
+emitter writes the value where the implicit tail would go:
+
+```lisp
+(p-tail-value EXPR)                      ; single-statement body
+(p-caller-ctx (p-tail-value EXPR))       ; multi-statement body (:void regime)
+(p-return-empty)                         ; a bare `return;` in tail position
+```
+
+`p-tail-value` is `p-return-value` with its IDENTITY fast path inlined: a
+value that is neither raw `nil` nor a raw non-string vector comes back
+unchanged, so the ordinary scalar return costs two type tests and no call.
+The two arms that do fire are the ones the frame exit does NOT repeat — an
+ARRAY in scalar context is its element COUNT, and raw `nil` in list context is
+the empty list; every BOX arm of `p-return-value` is applied again by
+`%p-leavesub` below, which is why a box may pass through here untouched.  The
+`p-caller-ctx` wrap is the same restore an implicit tail statement gets (§4):
+a multi-statement body binds `*wantarray*` to `:void` once, and the tail value
+must be computed in the CALLER's context — which is what `p-return`'s own
+`*pcl-caller-wantarray*` rebind used to supply.  A single-statement body never
+rebinds `*wantarray*`, so it needs no wrap.
+
+Everything else still throws: a `return` under a statement modifier, a
+multi-element `return (A, B)`, a `return` nested in a compound or a loop, and a
+`return` inside `eval { }` or a sort comparator (whose frame is a different
+`catch` — §5.4 and §6.3).  The transform is the Kind-A emission `tail-return`,
+so `PCL_OPT=none` / `PCL_OPT=-tail-return` restore `(p-return EXPR)` and run
+identically.
+
 **Leaving the frame — the copy (normative, s464a, task #964).**  A non-lvalue
 Perl sub returns a *mortal copy* of every value it returns (perl's
 `pp_leavesub`); only a `:lvalue` sub returns the variable itself.  PCL applies

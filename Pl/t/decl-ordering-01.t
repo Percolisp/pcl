@@ -257,7 +257,10 @@ note "-------- Phase 1: nested sub stubs";
          'nested sub gets p-declare-sub stub');
     # The stub is emitted inline within the enclosing sub's body (same bucket),
     # so it appears after the opening of p-sub pl-outer but before the call.
-    is(relative_order($cl, qr/\(p-declare-sub pl-inner\)/, qr/p-return \(pl-inner\)/), -1,
+    # The call form is (p-tail-value (pl-inner)) since task #994: `return
+    # inner();` is outer's LAST statement, so it lowers as the tail
+    # expression instead of throwing to the frame (ir-spec 5.3).
+    is(relative_order($cl, qr/\(p-declare-sub pl-inner\)/, qr/p-tail-value \(pl-inner\)/), -1,
        'inner stub declared before call to inner inside outer body');
 }
 

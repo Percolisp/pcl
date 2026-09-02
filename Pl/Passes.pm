@@ -51,6 +51,7 @@ our %KIND_A = (
   'foreach-range' => 'Parser2 foreach: `for $v (A..B)` lowers to the counting macro p-foreach-range instead of materializing the range',
   'insensitive-call' => 'ExprToCL funcall: a KNOWN user sub whose body never observes *wantarray* (Parser2::_sub_return_facts) is called without the context bind (the p-…-ctx wrap, ir-spec §4)',
   'elem-setf'      => 'ExprToCL `=`: `$h{k} = V` / `$a[i] = V` on a let-bound container with a pure key writes through CL setf instead of p-setf (no boundp auto-declare)',
+  'tail-return'   => "Parser2 _lower_body_regime: a `return EXPR` that IS the sub body's last statement lowers as the tail expression EXPR (task #994) -- its value is already the frame's, so the throw to :p-return and p-return-value's normalisation (which %p-leavesub repeats at the frame exit) are pure overhead",
   # --- verdict-COVERAGE narrowings (s453 review §13, tasks #758-#761).  Each
   # widens where the raw-slot/raw-numeric verdicts above may fire; none is a
   # new fast shape except raw-topic.  Named separately so a coverage widening

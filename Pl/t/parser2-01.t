@@ -698,10 +698,17 @@ EOF
        'bareword call to a sub nested inside another sub resolves to (pl-inner)');
   unlike($nsub, qr/pl-"inner"|\(pl-k "inner"/,
        'nested-sub bareword is not left as the string "inner"');
-  # Bare `return;` is the zero-arg (p-return) (context-sensitive empty/undef),
-  # never (p-return (p-undef)) which leaks a 1-element list in list context.
+  # Bare `return;` is the context-sensitive empty/undef form — 0 elements in
+  # list context, undef in scalar/void — and never (p-return (p-undef)), which
+  # leaks a 1-element list in list context.  Task #994 gives that form TWO
+  # spellings, one per POSITION, and both are asserted here: in TAIL position
+  # (the sub body's last statement) it is the macro (p-return-empty), whose
+  # expansion is the same context test without the throw; anywhere else the
+  # zero-arg (p-return) still throws to the frame.
   my $br = Pl::Parser2->parse_code(q[sub f { return; }]);
-  like($br, qr/\(p-return\)/, 'bare return emits zero-arg (p-return)');
+  like($br, qr/\(p-return-empty\)/, 'bare TAIL return emits (p-return-empty)');
+  my $brn = Pl::Parser2->parse_code(q[sub f { return if $x; 1 }]);
+  like($brn, qr/\(p-return\)/, 'bare NON-tail return still emits the zero-arg (p-return)');
   unlike($br, qr/\(p-return \(p-undef\)\)/, 'bare return is not (p-return (p-undef))');
 }
 

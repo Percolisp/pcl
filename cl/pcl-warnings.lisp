@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-590
+;;; pcl: pipeline=v2 gen=v2-610
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -49,13 +49,13 @@
 
 (p-sub pl-unimport (&rest %_args) (p-args-body (block nil)))
 
-(p-sub pl-enabled (&rest %_args) (p-args-body (block nil (p-return 1))))
+(p-sub pl-enabled (&rest %_args) (p-args-body (block nil (p-tail-value 1))))
 
-(p-sub pl-fatal_enabled (&rest %_args) (p-args-body (block nil (p-return 0))))
+(p-sub pl-fatal_enabled (&rest %_args) (p-args-body (block nil (p-tail-value 0))))
 
-(p-sub pl-enabled_at_level (&rest %_args) (p-args-body (block nil (p-return 1))))
+(p-sub pl-enabled_at_level (&rest %_args) (p-args-body (block nil (p-tail-value 1))))
 
-(p-sub pl-fatal_enabled_at_level (&rest %_args) (p-args-body (block nil (p-return 0))))
+(p-sub pl-fatal_enabled_at_level (&rest %_args) (p-args-body (block nil (p-tail-value 0))))
 
 (p-sub pl-register_categories
   (&rest %_args)
@@ -73,7 +73,7 @@
               t
               (p-if (p-> $off $bit) (p-my-= $bit $off)))
             (p-setf (p-gethash warnings::%Offsets $name) (p-+ $bit 2))))
-        (p-return)))))
+        (p-caller-ctx (p-return-empty))))))
 
 (p-sub pl-warn
   (&rest %_args)
