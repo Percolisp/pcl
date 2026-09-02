@@ -150,6 +150,8 @@ Append new entries at the top. One section per session.
 
 **BB MERGED (2026-09-03, ff `73edcff`, gen v2-610)** after the Fable review: diff read, a 40-row probe battery on three emission paths (two pre-existing diffs: #1039, **#1045** `goto &NAME` under `insensitive-call` — filed), gate 194/6567 xs-only on BB's tree, sweep on the merged main TOTAL 18266 (+0) GATE clean.  BB's scratch/ (51 files) had been COMMITTED — dropped from the index before the ff, copied to the scratchpad.  **#1046** filed (bench-exec has no explicit-return rows).  Bench-alone leg = round end.  DECIDED §s465 has the legs and the two lessons.
 
+**BA MERGED (2026-09-03, ff `0e7c5e3`, runtime-only; its four commits rewritten without the 55 committed scratch files)** after the Fable review: diff read, the 224-row baseline edit verified, two probe batteries (46 rows; every remaining diff pre-existing — **#1048 #1049 #1050** filed), gate 196/6696 xs-only, sweep on the merged main **TOTAL 18493 (+227 this round)** GATE clean.  DECIDED §s465 has the legs.  AZ (phase-0 instruments) still in flight.
+
 **Legs**: `tools/prove-core` on the records tree (docs-only change) — see the commit; sweep as above.
 
 ---
