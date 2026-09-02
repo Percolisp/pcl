@@ -4,6 +4,12 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 464 part 2 (2026-09-02, Fable) — ROUND 22 COMPLETE + MERGED (main `ea34c0f`): AW #972+#987, AX #985+#982 (`slices` 3.01× → 2.54×), AY the failing-tests review — FOURTEEN silent-wrong bugs filed (#1020–#1033), the #965 census corrected (210 not 132), 31 stale skips restored as passing rows, "fully passing" 62 → 58
+
+**USER**: "do a run of a couple of normal sub-jobs with Opus" (AW correctness, AX perf) and then "review the failing tests … to see if we have missed bugs like that sub calling followed `:lvalue`" (AY).  The compressed record with every ruling and number is DECIDED §s464 part 2; the review's own record is `docs/blessed-fails-review-s464.md`.  Fable review of each agent: full diff read, probes vs perl 5.40.3 on both PCL_OPT paths (ovl.pl 37 rows; ay.pl 16 rows — 12 of the review's findings reproduce on main), rebase (doc-top conflicts resolved by keeping both sides; `fail-baseline.tsv` is BINARY to git, so it was merged as a three-way ROW SET — scratchpad `merge-tsv.pl`), ff merge, legs on the final tree (gate 193/6557 xs-only; sweep 18266 +0 GATE clean; bench alone: slices 0.2027 → 0.1687 s, other rows inside the band).  Also this session: Fable profiled two WINNING bench rows on the USER's question and filed #994 (tail `return` is a throw, ~10 % of fib), #995 (loop-body `my` box churn, 23 % of arrhash) and #996 (catalogue items A3/A5 never taken).
+
+**NEXT SESSION opens with (1) the found-bugs report to the USER — DECIDED §s464 part 2: the fourteen (#1028 bitwise ops numify undef/refs, 33 % of the sweep baseline; #1031; #1032 bareword handle in stat; #1022 `last` in a called sub; #1020 `undef *x` no-op; #1021; #1023; #1025; #1029; #1030; #1033; #1024; #1026; #1027), the ten unprobed candidates in the review record §4c, AW's #1000–#1008 and AX's #1010–#1012 — and (2) the audit-plan presentation (`docs/plan-test-audit-s464.md`, #993), whose §2 numbers must be re-measured first: the review already moved them (210 inline SKIPs, 58 fully passing, TOTAL 18266).**
+
 ## s464aw (Opus, round 22, 2026-09-02) — #987: an eval is a frame
 
 The sibling of #964, and #964's design named it: perl copies at BOTH
