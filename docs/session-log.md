@@ -152,6 +152,8 @@ Append new entries at the top. One section per session.
 
 **BA MERGED (2026-09-03, ff `0e7c5e3`, runtime-only; its four commits rewritten without the 55 committed scratch files)** after the Fable review: diff read, the 224-row baseline edit verified, two probe batteries (46 rows; every remaining diff pre-existing — **#1048 #1049 #1050** filed), gate 196/6696 xs-only, sweep on the merged main **TOTAL 18493 (+227 this round)** GATE clean.  DECIDED §s465 has the legs.  AZ (phase-0 instruments) still in flight.
 
+**SESSION END (2026-09-03, USER out of tokens): the three running agents STOPPED, worktrees KEPT** — AZ's phase-0 instruments are committed and await the merge review (first job next session); BC (#1037) and BD (#995) had one uncommitted file each.  Round 23 so far: BB + BA merged (TOTAL 18493, +227), #1035/#1034 designed, #1036–#1038 + #1045–#1050 filed.  DECIDED §s465 has the per-worktree state.
+
 **Legs**: `tools/prove-core` on the records tree (docs-only change) — see the commit; sweep as above.
 
 ---
