@@ -308,7 +308,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-args-body #:p-raw-params #:p-declare-sub
+   #:p-defpackage #:p-sub #:p-sub-frame #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
@@ -694,7 +694,7 @@
                           (*pcl-current-package* %%home-pkg)
                           (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
                           (*pcl-caller-wantarray* *wantarray*))
-                     (catch :p-return
+                     (p-sub-frame
                        ,@body)))))))))
 
 (defmacro p-args-body (&body body)
@@ -8480,6 +8480,158 @@ create the key on a read-only call, which perl does not."
          (vector-push-extend arg result))))
     result))
 
+;;; ============================================================
+;;; THE SUB-FRAME LEAVE RULE — perl's pp_leavesub (task #964).
+;;;
+;;; A non-lvalue Perl sub returns a mortal COPY of each value it returns; only
+;;; a `:lvalue` sub returns the variable itself.  PCL used to hand the tail
+;;; expression's BOX straight out of the frame, so every aliasing consumer wrote
+;;; through it into the returned VARIABLE:
+;;;
+;;;   my $x = 1; sub f { $x }
+;;;   for my $v (f()) { $v = 5 }         ; perl leaves $x = 1, PCL printed 5
+;;;   $_ = 7 for f();  map { $_ = 8 } f();  grep { $_ = 9 } f();
+;;;   my $r = \f(); $$r = 10;   sub mod { $_[0] = 12 } mod(f());
+;;;
+;;; 24 of the 38 probe rows now in Pl/t/return-copy-01.t leaked that way, the
+;;; same on both emission paths (default optimizer and PCL_OPT=none), so it was
+;;; the return PROTOCOL and not an optimizer regime.  perl's own t/op/sub.t
+;;; row 9 ([perl #91844] "result of shift is copied when returned") is the one
+;;; row in either suite population that saw it.
+;;;
+;;; The rule is applied ONCE, at the frame exit, where *wantarray* is still the
+;;; CALLER's binding (p-sub never rebinds it — it only snapshots it into
+;;; *pcl-caller-wantarray*), so the copy can be context-correct.  Fixing it at
+;;; the consumers instead (foreach / map / grep / p-backslash / @_) would be N
+;;; copies of one rule (CLAUDE.md 11) and would miss the next consumer.
+;;;
+;;; NOT applied at: p-sort-cmp (a comparator's value is numified), p-eval-block
+;;; and the string-eval catch (perl copies at eval exit too — pp_leaveeval — but
+;;; that is a SIBLING frame rule with its own probe set, task #987), and
+;;; p-goto-sub (the target sub runs its OWN frame, which copies).
+(defun %p-leavesub-scalar (v)
+  "perl's mortalcopy for ONE scalar leaving a sub frame.
+   A PLAIN box yields its unboxed value — the raw value IS the copy, so this
+   costs no allocation; undef normalises to *p-undef* (one undef scalar) rather
+   than raw nil, which the list machinery reads as the empty-list marker.  A
+   ref / blessed / container box must stay a box, so it yields a FRESH one with
+   the same value, is-ref and class: p-copy-scalar-arg, the very copy a
+   signature parameter takes.  A raw value is already a copy and passes through
+   — including an array's vector in scalar context, which the consumer counts."
+  (cond
+    ((not (p-box-p v)) v)
+    ;; A GENUINE dualvar ($!, Scalar::Util::dualvar) carries its two halves
+    ;; on the BOX, so unboxing would drop the numeric one — perl's copy keeps
+    ;; both (IOK and POK survive sv_mortalcopy).  The runtime already has the
+    ;; one reading of "is this a dualvar" and the one copier; both are used
+    ;; by the raw-element storage rule for exactly this reason.
+    ((%pcl-dualvar-p v) (%p-dualvar-copy v))
+    ((or (p-box-class v)
+         (p-box-is-ref v)
+         (let ((raw (p-box-value v)))
+           (or (hash-table-p raw)
+               (functionp raw)
+               (and (vectorp raw) (not (stringp raw))))))
+     (p-copy-scalar-arg v))
+    (t (let ((x (unbox v)))
+         (if (null x) *p-undef* x)))))
+
+(defun %p-leavesub-vector (v)
+  "Copy the vector V leaving a sub frame, applying the scalar rule per element
+   and PRESERVING V'S SHAPE.  The shape is not cosmetic: PCL distinguishes an
+   ARRAY (adjustable, with a fill pointer — its slots are the values) from a
+   LIST TEMP (a simple vector the emitter builds for a comma list, whose
+   aggregate elements are still UNFLATTENED and are expanded by the consumer's
+   %p-flatten-list walk).  Copying a list temp into an adjustable vector told
+   every consumer it was an array, so a nested aggregate stopped being
+   flattened and became ONE element — a reference: `sub steps { qw(x),
+   $_[0]->SUPER::steps }` then made `foreach my $step (…->steps)` yield
+   ARRAY(0x1) and every Moo role application died (the gate's whole moo-01.t).
+   A nested aggregate is therefore left alone here; flattening it first is the
+   consumer's job, and doing it early would be a second copy of that rule."
+  (let* ((n   (length v))
+         (fp  (array-has-fill-pointer-p v))
+         (adj (adjustable-array-p v))
+         (out (if (or fp adj)
+                  (make-array n :adjustable adj :fill-pointer (and fp 0))
+                  (make-array n))))
+    (if fp
+        (loop for e across v
+              do (vector-push-extend (%p-leavesub-scalar e) out))
+        (dotimes (i n)
+          (setf (aref out i) (%p-leavesub-scalar (aref v i)))))
+    out))
+
+(defun %p-leavesub-aggregate (v)
+  "perl's mortalcopy for a RAW AGGREGATE leaving a sub frame in LIST context
+   (a box is one scalar in either context and never reaches here).
+   A returned vector is copied by %p-leavesub-vector above -- a FRESH vector of
+   the SAME shape, with the scalar rule per element -- so element cells and
+   defelem boxes of the callee's array, the caller's own @_ boxes and the
+   `(vector $x $s)` temp of a literal list all stop aliasing; raw elements
+   are already copies and holes stay holes.
+   NEVER in place — `&f;` and `goto &f` SHARE @_ with the caller, so a vector
+   reaching the exit may be someone else's storage.
+   A raw hash-table is copied into a fresh table of the same shape (task #964
+   probe `sub fh { %h } for my $v (fh()) { $v = 'W' }`: perl leaves %h alone,
+   PCL wrote 'W' into it).  The design note said a hash needed nothing because
+   \"the consumer flattens k/v fresh\"; measured, that is false — p-flatten-args
+   hands out %p-hash-elem-cell aliases for the VALUE half, and must, because
+   `f(%h)` lets the callee write $_[1] through.  Copying the table rather than
+   flattening it keeps the value's TYPE, so no consumer sees a shape change;
+   internal keys (:__class__ and friends) are carried across untouched, and a
+   BLESSED table or an %ENV/%INC marker is an object/alias, never a copy."
+  (cond
+    ((and (vectorp v) (not (stringp v))) (%p-leavesub-vector v))
+    ((and (hash-table-p v)
+          (not (gethash :__class__ v))
+          (not (%p-hash-marker-p v)))
+     (let ((out (make-hash-table :test 'equal :size (max 1 (hash-table-count v)))))
+       (maphash (lambda (k e)
+                  (setf (gethash k out)
+                        (if (%p-real-hash-key-p k) (%p-leavesub-scalar e) e)))
+                v)
+       out))
+    (t v)))
+
+(declaim (inline %p-leavesub))
+(defun %p-leavesub (v)
+  "Apply perl's pp_leavesub rule to the value V a sub frame is exiting with, in
+   the CALLER's context — *wantarray* is still the caller's binding here.
+
+   :void does NOT skip the copy, and that is measured, not cautious: PCL's void
+   regime binds *wantarray* to :void around a whole DISCARDED STATEMENT, so an
+   inner call whose value IS consumed sees :void too.  Two probe rows fail if
+   :void returns V untouched — `my $r = \\f(); $$r = 10` (emitted as
+   (p-my-= $r (p-backslash (pl-f))) inside the statement's void wrap) and
+   `sub mod { $_[0] = 12 } mod(f())` ((p-void-ctx (pl-mod (pl-f)))), both of
+   which then wrote 10 / 12 into the caller's $x.  :void therefore takes the
+   SCALAR rule, which leaves raw aggregates exactly as they are today and costs
+   a genuinely void call one struct typep.
+
+   INLINE, and the RAW arm is first, because this runs at EVERY sub return and
+   the overwhelmingly common return is a raw value in a non-list context — a
+   raw value is ALREADY a copy, so the whole rule is one struct typep and one
+   special read with no call at all.  Measured (interleaved runtime A/B against
+   the same runtime with the rule short-circuited, best-of-5): out of line and
+   list-first it cost 4-9 % on the call-heavy rows (gcdrec, symref, ovlsub,
+   fib); this shape brings them back inside the run-to-run spread.  The two
+   helpers stay out of line: %p-leavesub-scalar is called per ELEMENT by
+   %p-leavesub-vector, so inlining it would multiply, not save."
+  (if (p-box-p v)
+      (%p-leavesub-scalar v)
+      (if (eq *wantarray* t) (%p-leavesub-aggregate v) v)))
+
+(defmacro p-sub-frame (&body body)
+  "A Perl SUB frame: BODY with `return` bound to it, and perl's leave rule
+   applied to the value it exits with.  ONE spelling of the frame — p-sub uses
+   it, and the anon-sub wrapper EMITS it (Pl/Parser2.pm _lower_embedded_anon,
+   Pl/Parser.pm's v1 seam) in place of the bare (catch :p-return …).
+   Task #930 (`:lvalue` subs) will emit a frame that OMITS the copy: an lvalue
+   sub returns the PLACE, which is exactly what the bare catch already yields —
+   this macro is the switch, and #930 is not implemented here."
+  `(%p-leavesub (catch :p-return ,@body)))
+
 (defun p-check-arity (funcname got min max flexible &optional hash-start)
   "Perl subroutine-signature arity check.  Throws a Perl-formatted
    'Too few/many arguments for subroutine ...' error when GOT is outside
@@ -10100,8 +10252,21 @@ what changes is that the element is the raw counter rather than a fresh box."
     ;; Box containing a reference (hash, array, function) - return the box intact.
     ;; The box IS the reference (hashref/arrayref/coderef). Stripping it would give
     ;; a raw hash-table/vector/function, which box-set then misinterprets.
+    ;; A CL STRING is a vector, so this arm used to keep a plain string-holding
+    ;; box intact and `return $s` handed the caller's box out (task #964: the
+    ;; probe row "return ($x,$s) foreach" copied the NUMBER and aliased the
+    ;; STRING, printing "1 W").  A string is a scalar, not a container.
+    ;;
+    ;; That accident was LOAD-BEARING for one shape, which is why the dualvar
+    ;; arm below it is not decoration: a genuine dualvar ($!, dualvar(42,"x"))
+    ;; holds a STRING and carries its numeric half on the BOX, so it rode out
+    ;; of here intact only because a string answered `vectorp`.  Unboxing it
+    ;; drops the numeric side (Pl/t/errno-01.t's four dualvar rows).
+    ((%pcl-dualvar-p val) val)
     ((let ((v (p-box-value val)))
-       (or (hash-table-p v) (vectorp v) (functionp v)))
+       (or (hash-table-p v)
+           (functionp v)
+           (and (vectorp v) (not (stringp v)))))
      val)
     ;; Simple scalar box - return the unboxed value.  A box is a SCALAR, so its
     ;; value contributes exactly ONE element to the returned list — but raw nil
@@ -14787,7 +14952,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-581"
+(defparameter *pcl-cache-generation* "v2-590"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -228,7 +228,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
     try2 { die "boom\n" } catch2 { print "caught" };
   };
   my $ok = eval { Pl::Parser2->parse_code($src_ok) };
-  ok(defined $ok && $ok !~ /--anon-block-/ && $ok =~ /\(catch :p-return \(block nil \(p-print "caught"\)\)\)/,
+  ok(defined $ok && $ok !~ /--anon-block-/ && $ok =~ /\(p-sub-frame \(block nil \(p-print "caught"\)\)\)/,
      'non-capturing block-form arg lowers to the same in-place lambda') or diag($@);
 
   # DECLINE RESIDUE: bodies the embed hook refuses (a `package` statement needs
@@ -578,9 +578,14 @@ EOF
   # thing p-sub rebinds per call for a NAMED sub.  Asserted here as part of
   # the wrapper's shape, and differentially against perl in
   # Pl/t/decl-ordering-02.t.
+  # The frame itself is `p-sub-frame`, not a bare `catch :p-return`: a SUB
+  # frame applies perl's leave rule (pp_leavesub) to the value it exits with,
+  # and an anon sub's wrapper is EMITTED, so the copy would be lost here if
+  # this site drifted back (task #964; Pl/t/return-copy-01.t owns the
+  # behaviour, this row owns the spelling).
   my $an = Pl::Parser2->parse_code(q{my $s = sub { 42 };});
   like($an,
-       qr/\(lambda \(&rest %_args\)\s+\(let\s+\(\(\@_ \(p-flatten-args %_args\)\)\s+\(\*pcl-current-package\* "main"\)\s+\(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(catch :p-return \(block nil 42\)\)\)\)/,
+       qr/\(lambda \(&rest %_args\)\s+\(let\s+\(\(\@_ \(p-flatten-args %_args\)\)\s+\(\*pcl-current-package\* "main"\)\s+\(\*pcl-caller-wantarray\* \*wantarray\*\)\)\s+\(p-sub-frame \(block nil 42\)\)\)\)/,
        '#78: anon sub emits v1 wrapper shape as one structured form');
   # Layout is no longer the v1-vs-native discriminator (the structural printer
   # breaks lines too); v1's text body is marked by its `;; <src>` echo lines.

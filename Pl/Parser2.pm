@@ -10530,7 +10530,7 @@ sub _lower_embedded_body {
 # task #78 step 2: anonymous `sub { … }` in expression position — the
 # raw_lambda sibling of the map/grep/sort/eval re-host.  Returns v1's exact
 # lambda WRAPPER as one CLForm (`&rest %_args` + `@_` flatten +
-# *pcl-caller-wantarray* snapshot + the :p-return catch), with the body
+# *pcl-caller-wantarray* snapshot + the p-sub-frame leave rule), with the body
 # lowered like a named sub body (_lower_body_regime: void regime + tail
 # caller-context restore).  Unlike a NAMED sub (hoisted, so _lower_sub
 # clears _let_bound_vars), an anon sub CLOSES OVER the enclosing lexicals —
@@ -10550,7 +10550,7 @@ sub _lower_embedded_anon {
                      ['list', '@_', ['p-flatten-args', '%_args']],
                      $self->_anon_home_pkg_binding,
                      ['list', '*pcl-caller-wantarray*', '*wantarray*']],
-             ['catch', ':p-return',
+             ['p-sub-frame',
               ['block', 'nil',
                Pl::CLForm::ctx_bind(':void')]]]];
   }
@@ -10610,7 +10610,7 @@ sub _lower_embedded_anon {
                    ['list', '@_', ['p-flatten-args', '%_args']],
                    $self->_anon_home_pkg_binding,
                    ['list', '*pcl-caller-wantarray*', '*wantarray*']],
-           ['catch', ':p-return',
+           ['p-sub-frame',
             ['block', 'nil', @$forms]]]];
 }
 

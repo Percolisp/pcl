@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-581
+;;; pcl: pipeline=v2 gen=v2-590
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -925,7 +925,7 @@
                                                                       "main")
                                                                     (*pcl-caller-wantarray*
                                                                       *wantarray*))
-                                                                  (catch :p-return
+                                                                  (p-sub-frame
                                                                     (block nil
                                                                       (p-void-ctx
                                                                         (let
@@ -2175,7 +2175,7 @@
                                                     ((@_ (p-flatten-args %_args))
                                                       (*pcl-current-package* "main")
                                                       (*pcl-caller-wantarray* *wantarray*))
-                                                    (catch :p-return
+                                                    (p-sub-frame
                                                       (block nil
                                                         (p-void-ctx
                                                           (let
@@ -2971,8 +2971,7 @@
                                     ((@_ (p-flatten-args %_args))
                                       (*pcl-current-package* "main")
                                       (*pcl-caller-wantarray* *wantarray*))
-                                    (catch :p-return
-                                      (block nil (p-incf $checksum (p-aref @_ 0))))))
+                                    (p-sub-frame (block nil (p-incf $checksum (p-aref @_ 0))))))
                                 0
                                 0
                                 1)))
@@ -2991,8 +2990,7 @@
                                         ((@_ (p-flatten-args %_args))
                                           (*pcl-current-package* "main")
                                           (*pcl-caller-wantarray* *wantarray*))
-                                        (catch :p-return
-                                          (block nil (p-push @result (p-aref @_ 0))))))
+                                        (p-sub-frame (block nil (p-push @result (p-aref @_ 0))))))
                                     0
                                     0
                                     0))))))))
@@ -3005,7 +3003,7 @@
                             ((@_ (p-flatten-args %_args))
                               (*pcl-current-package* "main")
                               (*pcl-caller-wantarray* *wantarray*))
-                            (catch :p-return (block nil (p-push @result (p-aref @_ 0))))))
+                            (p-sub-frame (block nil (p-push @result (p-aref @_ 0))))))
                         0
                         0
                         0)))

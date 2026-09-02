@@ -4,6 +4,121 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 464a (2026-09-02, Opus, round 21) — THE RETURN PROTOCOL: an ordinary sub returns a COPY (#964)
+
+**The bug.**  perl's `pp_leavesub` returns a mortal COPY of every value a
+non-lvalue sub returns.  PCL handed the tail expression's BOX straight out of
+the frame, so every aliasing consumer wrote through it into the RETURNED
+VARIABLE: `my $x = 1; sub f { $x } for my $v (f()) { $v = 5 }` left `$x = 5`.
+24 of the 38 probe rows leaked — the tail forms `$x`, `$x || $s`, `do { $x }`,
+`($x,$s)`, `@a`, `@_`, `shift`, `our $g`, `$_`, a string through `s///`, an
+anon sub both ways, `&f()`, `goto &f`, a string-eval-defined sub, `$_[0]`
+returned from a method, and BOTH `return @a` and `return ($x,$s)` — identically
+under the default optimizer and `PCL_OPT=none`, so it was the return PROTOCOL,
+not an optimizer regime.
+
+**The fix is ONE rule at ONE place.**  `%p-leavesub`, applied to the value a
+sub frame exits with, in the CALLER's context (`p-sub` never rebinds
+`*wantarray*` — it only snapshots it into `*pcl-caller-wantarray*`), reached
+through a macro `p-sub-frame` = `(%p-leavesub (catch :p-return …))`.  `p-sub`
+expands to it and the anon-sub wrapper EMITS it at its three sites (Parser2
+`_lower_embedded_anon` ×2, Parser.pm's v1 seam ×1) — the emitted wrapper is the
+only place the frame is written out, and it is where the copy would be lost
+again.  Fixing it at the consumers instead would have been N copies of one rule
+and would have missed the next consumer.
+
+**Three things the design did not predict, all found by measurement.**
+
+*`:void` cannot skip the copy.*  PCL's void regime binds `*wantarray*` to
+`:void` around a whole DISCARDED STATEMENT, so an inner call whose value IS
+consumed sees `:void` too: `(p-my-= $r (p-backslash (pl-f)))` and
+`(p-void-ctx (pl-mod (pl-f)))` are both inside the statement's void wrap, and
+both still wrote 10 / 12 into `$x` while `:void` returned the value untouched.
+`:void` takes the scalar rule.
+
+*A vector's SHAPE is semantic.*  PCL distinguishes an ARRAY (adjustable, fill
+pointer; its slots are the values) from a LIST TEMP (the simple vector the
+emitter builds for a comma list, whose aggregate elements are still
+UNFLATTENED and are expanded later by `%p-flatten-list`).  The first version
+copied every returned vector into an adjustable one; that told each consumer a
+list temp was an array, a nested aggregate stopped being flattened, and
+`sub steps { qw(x), $_[0]->SUPER::steps }` — Role::Tiny's
+`role_application_steps`, exactly — made `foreach my $step (…)` yield
+`ARRAY(0x1)`.  The whole gate's `moo-01.t` died on it (15 rows).
+`%p-leavesub-vector` now mirrors `array-has-fill-pointer-p` /
+`adjustable-array-p`.
+
+*A dualvar's identity is on the BOX, and one accident was load-bearing.*
+`p-return-value`'s container arm tested `(vectorp v)` — and a CL string IS a
+vector, so `$!` and `Scalar::Util::dualvar(42,"forty-two")` rode out of it
+BOXED, keeping both halves, purely by accident.  Adding the honest
+`(not (stringp v))` the design asked for dropped the numeric half and
+`Pl/t/errno-01.t`'s four dualvar rows failed.  The arm is now explicit, through
+the runtime's own single reading of the question (`%pcl-dualvar-p`) and its own
+copier (`%p-dualvar-copy`) — the same pair the raw-element storage rule uses —
+in `p-return-value` AND in `%p-leavesub-scalar`.
+
+**Guards.**  `Pl/t/foreach-aliasing-01.t`'s `for(f()) does not write back` row
+was VACUOUS (a sub-local `my`, the one shape where the copy is unobservable,
+asserting only that the program printed "ok"); replaced with the observable
+shape.  New `Pl/t/return-copy-01.t`: the 38-row battery as four programs (four
+SBCL launches, 1.5 s) — scalar family / list family / the frames that are not
+`p-sub` / the inverse guard (referent sharing, object identity, wantarray,
+the undef and empty-list edges) — plus two emission-shape rows, one of which is
+an inverse guard that `p-sort-cmp` and `eval { }` keep the bare catch.
+Inverse-verified on an `a8b4043` worktree: 5 of its 6 rows FAIL there, and so
+does the replaced foreach row.  Two `Pl/t/parser2-02.t` rows spelled the old
+`(catch :p-return …)` wrapper text and were stale twin guards of the emission
+this commit replaces — repaired in the same commit (the s416 standing rule).
+
+**The bar.**  Gate 192 files / 6527 rows, only the 13 known pclxs xs rows red.
+`corpus-diff` 49 of 111 files differ and EVERY hunk is exactly
+`(catch :p-return` → `(p-sub-frame` (271 hunks, checked mechanically after
+collapsing whitespace — the shorter head lets the printer re-join some lines);
+silent drops 5, unchanged.  `emission-ab` over the 22 `lib/` shims: 22 SAME / 0
+DIFF.  Generation **v2-590**, all three checked-in artifacts regenerated.  Full
+sweep: **TOTAL passing 18346 (+0)**, GATE clean, drops 5 = census.
+
+**Companion — one gain, and 25 rows of accident removed.**  `op/sub.t`
+53/12 → **54/11** is the expected mover: row 9 `result of shift is copied when
+returned` ([perl #91844]), the one row in either suite population that ever saw
+this bug.  Against it, `op/sub_lval.t` 54/47 → **31/64**, `op/kvaslice.t`
+24/14 → **23/15** and `op/kvhslice.t` 20/18 → **19/19** — every one of those 25
+rows goes through an `: lvalue` sub, and they passed only because PCL returned
+the box from EVERY sub, so an lvalue sub looked like it returned the place.
+That is the accident this task's own text predicted, and it is **#930's to
+restore**: an `: lvalue` sub gets a frame that OMITS the copy, which is exactly
+what the bare `(catch :p-return …)` already yields — `p-sub-frame` is the
+switch.  It is also the measurement behind the USER's round-21 ruling that
+#964 and #930's scalar half belong to ONE owner.  All four attributed by a
+base-worktree run of the same four files and spliced ROW BY ROW; io/open.t,
+io/pvbm.t, op/grent.t (contention; the #366 serial re-run matches) and
+uni/variables.t are the known noise rows and were NOT spliced.
+
+**The cost, and the instrument's resolution.**  Interleaved runtime A/B (this
+runtime vs the same runtime with `%p-leavesub` short-circuited), best-of-5,
+five runs.  Then the control that makes the numbers readable: the SAME A/B with
+side B a byte-identical COPY of the runtime reports `symref` **+14.2 %** and
+`intloop=` **−5.0 %** with a consistent sign across three runs.  So the
+consistent-sign method has a per-row bias of ±5 % on this box (±15 % for
+symref), and no smaller difference is interpretable.  Against that floor the
+only row with a mechanism is `ovlsub` ≈ −4 % — two blessed-box mortalcopies per
+iteration, which is perl's own cost — and every row the bar names (gcdrec,
+collatz, intloop+=, intloop=, arrhash, symref) sits inside the control band.
+Branch-vs-main absolutes agree: all within ±3 % except `intloop=` +6 %, whose
+hot loop contains no sub call at all.  Getting there needed the right shape:
+`%p-leavesub` is INLINE with the RAW arm first (a raw value is already a copy,
+so the whole rule is one struct typep and one special read with no call), and
+the two helpers stay out of line because `%p-leavesub-scalar` is called per
+element.  Out of line and list-first it cost 4-9 % on the call-heavy rows.
+
+**Filed:** **#987** (eval `{ }` and string eval are frames too — `pp_leaveeval`;
+four probe rows diverge, `do { }` correctly does not, and the task carries the
+three traps this session paid for) and **#988** (PRE-EXISTING silent-wrong,
+byte-verified on a base worktree: `p-flatten-args` spreads ONE level where
+`%p-flatten-list-general` recurses, so `join("|", D1->steps)` prints
+`ARRAY(0x1)` where perl prints the elements).
+
 ## Session 463f, part 3 (2026-09-02, Fable) — ROUND 20 COMPLETE: AV merge-reviewed and MERGED (`fc96b08`); batch legs green on the final tree; two companion movers attributed and spliced; pushed
 
 **AV (s463av) review.**  The diff first: the runtime's own policy was never

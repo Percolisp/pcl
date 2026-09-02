@@ -100,8 +100,16 @@ test_cl('for($x+1) does not write back (computed temp)',
     q{my $x=5; for ($x+1) { $_++ } print "$x\n";}, "5\n");
 test_cl('for(uc $x) does not write back (rvalue builtin)',
     q{my $x="abc"; for (uc $x) { $_="ZZ" } print "$x\n";}, "abc\n");
+# perl 5.40.3 prints "7": pp_leavesub hands the caller a mortal COPY of the
+# returned scalar, so the foreach alias writes into the copy (task #964).  The
+# row this replaces used `sub f { my $v=7; return $v }` — a SUB-LOCAL my, the
+# one shape where the copy is unobservable, since nobody else holds that box —
+# and asserted only that the program printed "ok", so it could not fail on the
+# bug it names.  The observable shape returns an OUTER lexical and reads it.
+# The map / grep / \f() / @_-writer spellings of the same rule, and the list,
+# @_, goto, anon-sub and method families, are Pl/t/return-copy-01.t.
 test_cl('for(f()) does not write back (normal sub returns a copy)',
-    q{sub f { my $v=7; return $v } for (f()) { $_=99 } print "ok\n";}, "ok\n");
+    q{my $v=7; sub f { $v } for (f()) { $_=99 } print "$v\n";}, "7\n");
 
 # --- multi-element list must NOT trigger the single-element rewrite ---
 test_cl('for($a[0], $a[1]) still iterates both (no false rewrite)',

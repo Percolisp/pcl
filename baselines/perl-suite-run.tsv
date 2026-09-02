@@ -1,4 +1,37 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s464a (Opus, round 21, task #964 — THE SUB-FRAME LEAVE RULE), FOUR ROWS:
+#   ONE GAIN and THREE LOSSES, and all four have the SAME single cause —
+#   an ordinary sub now returns a COPY of a returned scalar (perl's
+#   pp_leavesub) instead of the variable's own box.  Attribution is a
+#   base-worktree run of the same four files with the same runner
+#   (a8b4043): every row below is present in one run's .fails.tsv and
+#   absent from the other's, and nothing else in the four files moved.
+#     op/sub.t       C 53/12 -> 54/11 — THE GAIN, and the one row in either
+#       suite population that ever saw this bug: row 9,
+#       `isnt \sub { ()=\@_; shift }->($x), \$x,
+#        'result of shift is copied when returned'` ([perl #91844]).
+#     op/sub_lval.t  C 54/47 -> 31/64 — 23 rows, EVERY ONE of them through an
+#       `: lvalue` sub (the file's own `get_lex`/`get_st`/`id`/`id1`/`inc` are
+#       all declared `: lvalue`, lines 34-38).  They passed only BY ACCIDENT:
+#       PCL returned the box from every sub, so an lvalue sub looked like it
+#       returned the place.  #964's task text predicted exactly this ("#930's
+#       shape s1 works by accident and every other :lvalue shape misses").
+#       These rows are #930's to restore — an `: lvalue` sub is to be emitted
+#       with a frame that OMITS the copy, which is what the bare
+#       `(catch :p-return …)` already yields; the `p-sub-frame` macro is the
+#       switch.  NOT a regression to hunt: it is the accident being removed,
+#       and it is why the USER's round-21 ruling put #964 and #930's scalar
+#       half under ONE owner of the return family.
+#     op/kvaslice.t  C 24/14 -> 23/15 — ONE row, `sub foo:lvalue{ %a[@i] };
+#       $_++ foreach foo();` (line 107-109).  Same cause, same owner.
+#     op/kvhslice.t  C 20/18 -> 19/19 — the hash twin of the row above.
+#   NOT spliced, as the standing rule says: io/open.t (154/34 vs 153/35, the
+#   known multi-file flip), io/pvbm.t (20/8 vs 21/7, the flapper this file's
+#   own note already documents), op/grent.t (contention — the runner's #366
+#   serial re-run matches the snapshot) and uni/variables.t (unstable TIMEOUT
+#   counts).  None of the four has a mechanism in this change: the leave rule
+#   cannot reach a file whose rows do not return a variable from a sub, and
+#   all four read their snapshot values on the base tree too.
 # s463au (Opus agent AU, round 20), SECOND EDIT — TWO ROWS, both GAINS and
 #   both ATTRIBUTED to task #960 half (b) (substr/vec/pos take their TARGET
 #   ARGUMENT in perl's loose lvalue context).  These are the ONLY two movers
@@ -1261,8 +1294,8 @@ op/int.t	19	0	19	0	OK		0
 op/isa.t	14	0	14	0	OK		0
 op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
-op/kvaslice.t	38	0	24	14	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
-op/kvhslice.t	39	0	20	18	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
+op/kvaslice.t	38	0	23	15	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
+op/kvhslice.t	39	0	19	19	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
 # s450 (round 9): op/lc.t 2683/33 -> 2685/31 EDITED BY HAND — s450v #522: \U/\L/\E in an
 #   s/// replacement route through the dq case-shift compiler.  Predicted by agent V's A/B
 #   (worktree vs 3c7c6ec), parallel and serial agree.
@@ -1371,8 +1404,8 @@ op/stat_errors.t	638	0	305	333	DIFF		0
 op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one `given` block in an otherwise supported file; the refusal costs the file's rows, ruled with task #400	-1
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
-op/sub.t	64	1	53	12	DIFF		0
-op/sub_lval.t	211	0	54	47	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
+op/sub.t	64	1	54	11	DIFF		0
+op/sub_lval.t	211	0	31	64	DIFF	unbound:@119797; aborted-forms:11: PCL: statement not supported at sub_lval.t line N: get_st = N; -- PCL: Can't modify non-lv	34
 op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at substr.t line N: bar = "XXX"; -- PCL: Can't modify non-lva	2
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0

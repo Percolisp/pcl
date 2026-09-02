@@ -6034,7 +6034,7 @@ sub parse_block_as_function {
     $self->_emit("      (*pcl-current-package* \"$home_pkg\")");
     $self->_emit("      (*pcl-caller-wantarray* *wantarray*))");
     $self->indent_level($self->indent_level + 1);
-    $self->_emit("(catch :p-return");
+    $self->_emit("(p-sub-frame");
     $self->indent_level($self->indent_level + 1);
   }
 
@@ -6133,7 +6133,7 @@ sub parse_block_as_function {
 
   if ($is_anon_sub) {
     $self->indent_level($self->indent_level - 1);
-    $self->_emit(")");  # close catch :p-return
+    $self->_emit(")");  # close p-sub-frame
     $self->indent_level($self->indent_level - 1);
     $self->_emit(")");  # close let @_
   }

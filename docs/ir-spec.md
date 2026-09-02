@@ -920,7 +920,9 @@ form is inside `eval-when`) and wraps the body so that at **every call**:
    `caller()`),
 2. `*pcl-current-package*` becomes the sub's home package,
 3. `*pcl-caller-wantarray*` snapshots `*wantarray*`,
-4. the body runs inside `(catch :p-return …)` — the sub's return frame.
+4. the body runs inside `(p-sub-frame …)` — the sub's return frame:
+   a `(catch :p-return …)` whose value then goes through perl's LEAVE
+   rule, `%p-leavesub` (§5.3).
 
 `(p-declare-sub pl-NAME)` is a forward stub so earlier code can reference
 the name; it is normally overwritten by the real `p-sub` before anything
@@ -1046,9 +1048,12 @@ code always means "the coderef itself", never a suppressed call.
 
 ### 5.3 Return
 
-`(p-return V…)` throws to the nearest `:p-return` catch — normally the
-sub frame, but `eval { }` installs its own (§6.3), matching Perl. On the
-way out `p-return-value` adjusts the value:
+Two rules, in this order: how a `return` **reaches** the frame, and what the
+frame does to the value on the way **out**.
+
+**Reaching the frame.**  `(p-return V…)` throws to the nearest `:p-return`
+catch — normally the sub frame, but `eval { }` installs its own (§6.3),
+matching Perl.  On the way out `p-return-value` adjusts the value:
 - scalar box → unboxed value (blessed boxes stay boxed to keep the class),
   **except that a box holding `nil` yields `*p-undef*`, never raw `nil`** — a
   box is a SCALAR and a scalar contributes exactly one element to the returned
@@ -1058,6 +1063,12 @@ way out `p-return-value` adjusts the value:
   (#790: `my $ok = eval { die }; return ($ok, "w")` assigned `"w"` to the
   caller's FIRST target).  The two producers of a `nil`-holding scalar are
   `eval { }` after a die and a bare `return` read in scalar context;
+- a box holding a hash-table, a function, or a NON-STRING vector is a
+  reference and stays boxed.  A CL string IS a vector, so a string-holding
+  box used to stay boxed here too and `return $s` handed the caller its own
+  box (task #964).  That accident was load-bearing for one shape: a genuine
+  dualvar holds a STRING and carries its numeric half on the BOX, so it now
+  has an arm of its own (`%pcl-dualvar-p`) instead of riding on `vectorp`;
 - array value in **scalar** context → its element count;
 - a **raw** (unboxed) `nil`/empty in **list** context → empty list — this is
   the bare-`return`/`return ()`/empty-array arm, and it is the one place the
@@ -1065,8 +1076,67 @@ way out `p-return-value` adjusts the value:
 - multiple values `return (5,3,1)` → the list in list context, the *last*
   element in scalar context.
 
-A sub body falling off the end returns its last evaluated form (the
-`catch`'s value).
+A sub body falling off the end returns its last evaluated form (the `catch`'s
+value), so the tail expression and `return` arrive at the frame the same way.
+
+**Leaving the frame — the copy (normative, s464a, task #964).**  A non-lvalue
+Perl sub returns a *mortal copy* of every value it returns (perl's
+`pp_leavesub`); only a `:lvalue` sub returns the variable itself.  PCL applies
+that rule ONCE, at the frame exit, in `%p-leavesub`, reached through the
+`p-sub-frame` macro:
+
+```lisp
+(p-sub-frame BODY…)  ≡  (%p-leavesub (catch :p-return BODY…))
+```
+
+`p-sub` expands to it, and the emitter writes it for an anonymous sub's
+wrapper (`Pl/Parser2.pm` `_lower_embedded_anon`, `Pl/Parser.pm`'s v1 seam).
+The rule reads `*wantarray*`, which at that point is still the **caller's**
+binding — `p-sub` never rebinds it, it only snapshots it into
+`*pcl-caller-wantarray*` — so the copy is context-correct.
+
+| value at the frame exit | list context | scalar (and `:void`) |
+|---|---|---|
+| genuine dualvar box (`$!`, `Scalar::Util::dualvar`) | a FRESH box keeping BOTH halves (`%p-dualvar-copy`) | same |
+| ref / blessed / container box (value is a hash-table, a function, or a non-string vector) | a FRESH box with the same value, is-ref and class (`p-copy-scalar-arg`) | same |
+| any other box | its unboxed value; `nil` → `*p-undef*` | same |
+| raw non-string vector | a FRESH vector **of the same shape**, scalar rule per element | unchanged — the consumer counts it |
+| raw non-blessed hash-table | a FRESH hash-table, scalar rule per real-key value | unchanged |
+| anything else raw | unchanged | unchanged |
+
+Notes a translator needs:
+- **A plain box costs nothing** — the unboxed raw value *is* the copy.  Only a
+  reference/blessed/dualvar box allocates, which is exactly `pp_leavesub`'s
+  own per-SV `mortalcopy`.
+- **A vector's SHAPE is semantic and the copy preserves it.**  An *array* is
+  adjustable with a fill pointer and its slots are the values; a *list temp*
+  is the simple vector the emitter builds for a comma list, and its aggregate
+  elements are still UNFLATTENED — the consumer's `%p-flatten-list` walk
+  expands them.  Copying a list temp into an adjustable vector tells every
+  consumer it is an array, and a nested aggregate then becomes ONE element:
+  `sub steps { qw(x), $_[0]->SUPER::steps }` yields `ARRAY(0x1)`.  A nested
+  aggregate is therefore passed through untouched here; flattening it is the
+  consumer's job.  (That the ARGUMENT flattener spreads only one level where
+  the list-assignment one recurses is a separate, pre-existing bug — #988.)
+- **The copy is of the REFERENCE, never the referent.**  `sub f { $obj }`
+  returns a fresh box over the same blessed hash-table, so the object still
+  `==` and method calls still reach it; only `\f()` and `$_[0] = …` stop
+  writing through.
+- **Never in place.**  `&f;` and `goto &f` share `@_` with the caller, so a
+  vector reaching the frame exit may be the caller's storage.
+- **`:void` does NOT skip the copy.**  PCL's void regime binds `*wantarray*`
+  to `:void` around a whole discarded STATEMENT, so an inner call whose value
+  *is* consumed sees `:void` too — `my $r = \f(); $$r = 10` and
+  `sub mod { $_[0] = 12 } mod(f())` both leak if `:void` returns the value
+  untouched.  `:void` therefore takes the scalar rule.
+- **Not frames:** `p-sort-cmp` (§5.4 — the value is numified), `p-eval-block`
+  and the string-eval catch (perl copies at *eval* exit too, `pp_leaveeval`,
+  but that is a sibling rule: `for (eval { $x }) { $_ = 5 }` leaves `$x`
+  alone while `\do { $x }` *is* `\$x` — task #987), and `p-goto-sub` (the
+  target sub runs its own frame, which copies).
+- **`:lvalue` (task #930) is the switch on this macro**: an lvalue sub is to be
+  emitted with a frame that omits the copy, since the bare `catch` value is
+  already the place.  Not implemented.
 
 ### 5.4 Comparator frames — `p-sort-cmp`
 
