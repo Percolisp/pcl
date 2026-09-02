@@ -30,10 +30,7 @@ is( j(@a), j(0..11), '... list remains the same');
 is( j(splice(@a, @a, 0, 12, 13)), "", 'push two elements onto the end of the list, return value is empty');
 is( j(@a), j(0..13), '... added two elements to the end of the list');
 
-## PCL: splice() return list value in j() context gets :void ctx (wantarray regression)
-## Perform the splice for side-effect on @a, skip the return-value assertion
-{ splice(@a, -@a, @a, 1, 2, 3) }
-ok(1, "SKIP: splice return list in j() — wantarray regression gives :void ctx to splice in PCL");
+is( j(splice(@a, -@a, @a, 1, 2, 3)), j(0..13), 'splice the whole list out, add 3 elements, return value is @a');
 is( j(@a), j(1..3), '... array only contains new elements');
 
 is( j(splice(@a, 1, -1, 7, 7)), "2", 'replace middle element with two elements, negative offset, return value is the element' );
@@ -43,9 +40,7 @@ is( j(splice(@a,-3,-2,2)), j(7), 'replace first 7 with a 2, negative offset, neg
 is( j(@a), j(1,2,7,3), '... array has 1,2,7,3');
 
 # Bug 20000223.001 (#2196) - no test for splice(@array).  Destructive test!
-## PCL: bare splice(@arr) same wantarray regression — perform for side-effect, skip assertion
-{ splice(@a) }
-ok(1, "SKIP: bare splice() return list — wantarray regression gives :void ctx to splice in PCL");
+is( j(splice(@a)), j(1,2,7,3), 'bare splice empties the array, return value is the array');
 is( j(@a),  '', 'array is empty');
 
 # Tests 11 and 12:

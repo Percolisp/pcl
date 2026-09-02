@@ -41,6 +41,80 @@ not-supported.md → only then probe.*
 - **Small non-negative fixnums stringify out of a SHARED pre-built table (#982).**  Since the boxed-aggregates flip a raw array element has no box and therefore no SV cache, so `@h{@k}` re-stringified the same integers every iteration (#922 closed with that note).  `%p-fixnum-string` is now an inline dispatcher over `*p-small-fixnum-strings*` (0..1023, ~32 KB, BUILT BY the digit loop — which is unchanged and renamed `%p-fixnum-string-digits`, so the text is identical by construction, not by a second implementation).  **THE SHARING HAZARD IS ANSWERED TWICE, and the measured half is the one that counts**: every in-place string writer in `cl/` copies first or writes only a buffer it made (list in the runtime comment), AND a 16-route probe — a hash key handed back by `keys`/`each`/foreach, interpolation, `join`, `sprintf`, an array element, each followed by chop / substr-lvalue / vec-lvalue / an in-memory filehandle / `++` / `s///` / `tr///` / a str-buffer append — reads correctly even with the entries deliberately built ADJUSTABLE (mutable in place); with entry 5 poisoned to `"ZZ"` the first field reads `key:ZZ`, which is what makes that negative result mean anything.  **Standing rule: a future in-place string writer MUST copy first.**  Measured with an interleaved wall-time A/B of two SAVED CORES on one emitted program (the tool `bench-exec` could not resolve it — ±8–15 % on a shared box): `slices` **+20.6 / +16.9 / +17.4 %** base-slower against a same-core control of ±1.6 %, a small-integer stringify loop +20.7 % against ±0.8 %, and the non-table paths (>1023, negatives) +0.1 % / +0.4 % — the extra TYPEP costs nothing.  Board: `slices` +13.5 % and +13.4 % in two A/B runs, and BOTH round-22 commits against main `80b715c` give `slices` **+19.9 %** (0.1699 s vs 0.2036 s) with every other row inside ±4 % — **3.02× → 2.48×**.  Record §0.2h; guards `Pl/t/misc-fixes-02.t` (#982 ×2).
 - **#1012 filed** from the #982 key-text battery (48 values printed AND used as keys, before/after byte-identical, and identical to perl but for this one): a float of magnitude exactly 1e15 prints as its integer text where perl says `1e+15` — `stringify-value`'s float arm derives the exponent from a LOG that lands on 14.999999999999998.  PRE-EXISTING.
 - **#986's step 1 TAKEN on a quiet box (1-min load 0.12–0.36, three runs of `bench-exec.pl intloop cfor`): the gap does NOT dissolve.**  `intloop+=` 0.0203/0.0223/0.0212 against §0.2d's 0.0174 (+17 %), `cfor` 0.0285/0.0293/0.0293 against 0.0261 (+9 %), `intloop=` 0.0188–0.0193 against 0.0185 (+2 %, i.e. its record).  So the task's "machine state" arm is KILLED and its step 2 (the `BENCH_RT_B` bisect over rounds 15–18) is what is left.  Recorded in #986.
+## s464ay (2026-09-02, Opus, ROUND 22 REVIEW) — THE IGNORED-TESTS AUDIT, first execution: 115 inline SKIPs restored (#965), the 695 blessed sweep rows read for cause, NINE new bugs filed (#1020–#1028)
+
+- **THE CENSUS THAT BOUNDS THE PROBLEM WAS ITSELF WRONG BY 51 %.**  `#965` and
+  `plan-test-audit-s464.md` §2b say "132 inline `ok(1,'SKIP')` rows in 11
+  files", measured with `grep -c "ok(1, 'SKIP"` — the SINGLE-quoted spelling
+  only.  The true count is **199 rows in 13 files**: `sort.t` (32),
+  `kvhslice.t` (25) and `splice.t` (2) were entirely invisible and `reset.t`
+  is 22, not 4.  Use `grep -c -E "ok\(1, *['\"]SKIP"`.  There is a **THIRD
+  spelling** nobody counted: 9 hand-added `skip "… not supported in PCL", N`
+  calls hiding ≥21 more rows (each.t 3, pack.t 4, range.t 1, chr.t 1) — real
+  `# skip` TAP, so it looks legitimate, but the assertion still never runs.
+- **"FULLY PASSING" IS NOT A FACT ABOUT PCL.**  Five files the sweep reported
+  as PASS were passing on manufactured rows: `sort.t` **204/205 → 182/22**
+  (32 manufactured; it was in the "Fully passing" list), `kvhslice.t` 39/39 →
+  19/19, `reset.t` 41/45 → 22/19, `loopctl.t` 67/67 → 63/4, `join.t` 43/43 →
+  41/2.
+- **31 of the 115 restored rows PASS TODAY** — fixes that shipped and were
+  never counted, each behind a comment saying the feature did not work.  The
+  seven `sort.t` "wantarray regression in PCL sub body" rows, both `splice.t`
+  "wantarray regression" rows and both `kvhslice.t` ones all pass: **the
+  regression named in CLAUDE.md design principle 8 does not reach any row that
+  was skipped for it.**  Also stale: `time.t`'s `$ENV{TZ}`/tzset row (so
+  not-supported.md's 'Runtime `$ENV{TZ}` changes' entry is suspect — for the
+  USER), `loopctl.t`'s bug 37725 ("foreach loop var aliasing not supported …
+  PCL copies the value instead" — flatly false), `each.t`'s refaliasing rows,
+  `sub.t`'s #964 row and its #401 state-in-string-eval row, `sort.t`'s
+  cross-package `$a`/`$b` row and 2 of 3 Tie::Array EXTEND rows.
+- **THE METHOD IS: VERIFY THE WRITTEN REASON BY PROBING THE PRIMITIVE IT
+  NAMES.**  11 of the restored rows had a reason that is FALSE, and #964's own
+  row is the archetype: "@_ aliasing not supported" when **@_ aliasing works**
+  in every spelling probed.  Other false reasons found in the tree: "string
+  eval runs in a subprocess"; "PCL's local-hash-key restore does not invoke
+  tie DELETE callbacks" (`tie %hash` is not implemented AT ALL, #155);
+  "`use feature 'refaliasing'` is not supported … removed in Perl 5.40"
+  (IMPLEMENTED, #325); "sort ignores overloaded `\"\"`" (it uses `\"\"` and
+  nothing else); "crashes SBCL" (it does not).  Three SKIP-REGISTRY entries
+  cite '@_ argument aliasing' with the wording "@_ elements are copies in
+  PCL"; corrected in place, and `array.t`'s is marked **provisional** — its
+  named primitive works, so that still-failing row fails for an unknown
+  reason.
+- **NINE BUGS FILED, five of them #964-class silent-wrongs.**  **#1028** is
+  the largest: `&`/`|`/`^` choose the NUMERIC op whenever an operand is a
+  ref/glob/qr/object/undef where perl stringifies and does the BIT-STRING op
+  (`undef | "abc"` → 0, perl "abc") — **229 of the 695 blessed rows, 33 % of
+  the whole baseline, and it had no recorded cause**.  Then **#1020** `undef
+  *GLOB` is a silent no-op for all four slots; **#1021** `sort @objects`
+  ignores an overloaded `cmp` and stringifies (the explicit `sort {$a cmp $b}`
+  is correct); **#1022** an unlabelled `last`/`next` inside a called sub does
+  not reach the caller's loop (silent in a `for`, "attempt to GO to nonexistent
+  tag" in a `while` — PCL lowers it to a LEXICAL CL `go`; the labelled form is
+  right); **#1023** a kv-slice in scalar context yields the element COUNT, not
+  the last value; **#1024** a bareword key in `%h{i}` is not autoquoted and is
+  called as a sub; **#1025** `..` inside an `s///e` replacement is lowered as
+  the scalar FLIP-FLOP even in list context; **#1026** a `map {}` in an
+  `s///e` replacement fails the whole transpile; **#1027** the `each.t`
+  refaliasing rows, in-file only (four isolated shapes all pass — needs a
+  bisection).
+- **PASS 3 — the 695 blessed rows clustered**: 128 clusters, 81 ATTRIBUTED
+  (298 rows) / 47 UNEXPLAINED (397, of which 229 are #1028).  Largest
+  attributed cause is **#221 warnings-gated diagnostics, ~62 rows**
+  (assignwarn 20, signatures 19, caller 5, magic 4, hashassign 4, …); #233
+  caller fidelity owns 29 of caller.t's 44.  `sort.t` and the `tie*.t` files
+  contribute ZERO rows to that baseline — which is exactly why sort.t's 32
+  manufactured rows were invisible from it.  Record:
+  `docs/blessed-fails-review-s464.md`.
+- **Legs**: sweep TOTAL 18346 → **18265 (−81)**, every row of the move
+  explained per file and both baselines edited **ROW BY ROW** (never
+  re-blessed); re-diff = **0 new / 0 fixed / 0 LOST**, drops 5 = census.
+  `kvhslice.t` goes OK → **PARTIAL** (39 planned, 38 produced — the
+  manufactured rows had been filling a planned-minus-produced hole, which is
+  what instrument I2 of the plan is for).  `state.t` (46 rows) and `lex.t`
+  (38) are NOT done: state.t transpile-fails whole so its rows do not run, and
+  `perl-tests/lex.t` is a different extraction (251 lines vs upstream 588) so
+  there is no text to restore from — both are phase-1 / phase-4b work.
 
 ## s464 (2026-09-02, Fable) — ROUND 21: THE RETURN PROTOCOL SHIPPED (#964, agent s464a + s464b, merged ff into main `4fd661b`); `:lvalue` subs (#930) DEFERRED by the USER; the ignored-tests AUDIT PLAN drafted (#993, to be PRESENTED s465)
 

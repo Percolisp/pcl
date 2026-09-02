@@ -34,7 +34,7 @@ package main;
 is(aiieee::zlopp(""), 0, "mismatch doesn't match");
 is(aiieee::zlopp("zlopp"), 1, "match matches first time");
 is(aiieee::zlopp(""), 0, "mismatch doesn't match");
-ok(1, "SKIP: m?pat? one-match regex not supported in PCL (removed in Perl 5.38) — match doesn't match second time");
+is(aiieee::zlopp("zlopp"), 0, "match doesn't match second time");
 aiieee::reset_zlopp();
 is(aiieee::zlopp("zlopp"), 1, "match matches after reset");
 is(aiieee::zlopp(""), 0, "mismatch doesn't match");
@@ -46,38 +46,99 @@ is(aiieee::zlopp("zlopp"), 1, "match matches first time");
 is(CLINK::ZZIP(""), 0, "mismatch doesn't match");
 is(CLINK::ZZIP("ZZIP"), 1, "match matches first time");
 is(CLINK::ZZIP(""), 0, "mismatch doesn't match");
-ok(1, "SKIP: m?pat? one-match regex not supported in PCL — ZZIP doesn't match second time");
+is(CLINK::ZZIP("ZZIP"), 0, "match doesn't match second time");
 is(aiieee::zlopp(""), 0, "mismatch doesn't match");
-ok(1, "SKIP: m?pat? one-match regex not supported in PCL — zlopp doesn't match second time");
+is(aiieee::zlopp("zlopp"), 0, "match doesn't match second time");
 
 aiieee::reset_zlopp();
 is(aiieee::zlopp("zlopp"), 1, "match matches after reset");
 is(aiieee::zlopp(""), 0, "mismatch doesn't match");
 
 is(CLINK::ZZIP(""), 0, "mismatch doesn't match");
-ok(1, "SKIP: m?pat? one-match regex not supported in PCL — ZZIP doesn't match third time");
+is(CLINK::ZZIP("ZZIP"), 0, "match doesn't match third time");
 
 CLINK::reset_ZZIP();
 is(CLINK::ZZIP("ZZIP"), 1, "match matches after reset");
 is(CLINK::ZZIP(""), 0, "mismatch doesn't match");
 
-## PCL: Tests 21-31 — reset() with character arguments (reset "char", reset "range",
-## m?pat? one-match clearing) not implemented in PCL (documented not-supported).
-ok(1, "SKIP: reset() not supported in PCL — reset '' leaves patterns alone");
-ok(1, 'SKIP: reset() not supported in PCL — reset "char"');
-ok(1, 'SKIP: reset() not supported in PCL — reset "chars"');
-ok(1, 'SKIP: reset() not supported in PCL — reset "range"');
-ok(1, 'SKIP: reset() not supported in PCL — reset "\0char"');
-ok(1, "SKIP: reset() not supported in PCL — cow, qr, vstring, glob, ro test");
-ok(1, "SKIP: reset() not supported in PCL — resetting an array");
-ok(1, "SKIP: reset() not supported in PCL — resetting a hash");
-ok(1, "SKIP: reset() not supported in PCL — resetting array in the same gv as a ro scalar");
-ok(1, "SKIP: reset() not supported in PCL — resetting a hash in the same gv as a ro scalar");
-ok(1, "SKIP: reset() not supported in PCL — reset skips ro scalars in the same gv as av/hv");
+sub match_foo{
+    "foo" =~ m?foo?;
+}
+match_foo();
+reset "";
+ok !match_foo(), 'reset "" leaves patterns alone [perl #97958]';
 
-## PCL: Tests 32-33 SKIP — reset("z") to clear glob-valued scalars not supported.
-ok(1, "SKIP: reset() not supported in PCL — reset leaves real-globs-as-scalars as GLOBs");
-ok(1, "SKIP: reset() not supported in PCL — And the glob still has the right value");
+$scratch::a = "foo";
+$scratch::a2 = "bar";
+$scratch::b   = "baz";
+package scratch { reset "a" }
+is join("-", $scratch::a//'u', $scratch::a2//'u', $scratch::b//'u'),
+   "u-u-baz",
+   'reset "char"';
+
+$scratch::a = "foo";
+$scratch::a2 = "bar";
+$scratch::b   = "baz";
+$scratch::c    = "sea";
+package scratch { reset "bc" }
+is join("-", $scratch::a//'u', $scratch::a2//'u', $scratch::b//'u',
+             $scratch::c//'u'),
+   "foo-bar-u-u",
+   'reset "chars"';
+
+$scratch::a = "foo";
+$scratch::a2 = "bar";
+$scratch::b   = "baz";
+$scratch::c    = "sea";
+package scratch { reset "a-b" }
+is join("-", $scratch::a//'u', $scratch::a2//'u', $scratch::b//'u',
+             $scratch::c//'u'),
+   "u-u-u-sea",
+   'reset "range"';
+
+{ no strict; ${"scratch::\0foo"} = "bar" }
+$scratch::a = "foo";
+package scratch { reset "\0a" }
+is join("-", $scratch::a//'u', do { no strict; ${"scratch::\0foo"} }//'u'),
+   "u-u",
+   'reset "\0char"';
+
+$scratch::cow = __PACKAGE__;
+$scratch::qr = ${qr//};
+$scratch::v  = v6;
+$scratch::glob = *is;
+*scratch::ro = \1;
+package scratch { reset 'cqgvr' }
+is join ("-", map $_//'u', $scratch::cow, $scratch::qr, $scratch::v,
+                           $scratch::glob,$scratch::ro), 'u-u-u-u-1',
+   'cow, qr, vstring, glob, ro test';
+
+@scratch::an_array = 1..3;
+%scratch::a_hash   = 1..4;
+package scratch { reset 'a' }
+is @scratch::an_array, 0, 'resetting an array';
+is %scratch::a_hash,   0, 'resetting a hash';
+
+@scratch::an_array = 1..3;
+%scratch::an_array = 1..4;
+*scratch::an_array = \1;
+package scratch { reset 'a' }
+is @scratch::an_array, 0, 'resetting array in the same gv as a ro scalar';
+is @scratch::an_array, 0, 'resetting a hash in the same gv as a ro scalar';
+is $scratch::an_array, 1, 'reset skips ro scalars in the same gv as av/hv';
+
+for our $z (*_) {
+    {
+        local *_;
+        reset "z";
+        $z = 3;
+        () = *_{SCALAR};
+	no warnings;
+        () = "$_";   # used to crash
+    }
+    is ref\$z, "GLOB", 'reset leaves real-globs-as-scalars as GLOBs';
+    is $z, "*main::_", 'And the glob still has the right value';
+}
 
 package _128106 {
     # Crash on non-globs in the stash.
@@ -129,12 +190,29 @@ SKIP:
     }
 }
 
-## PCL: Tests 41-45 SKIP — reset() with magic variables ($^W, $|, $1) not implemented.
-ok(1, "SKIP: reset() not supported in PCL — magic tries to SvIV() the new value");
-ok(1, "SKIP: reset() not supported in PCL — check \$^W has been zeroed");
-ok(1, "SKIP: reset() not supported in PCL — should be no more warnings");
-ok(1, "SKIP: reset() not supported in PCL — check magic applied to \$|");
-ok(1, "SKIP: reset() not supported in PCL — \$1 isn't marked read-only, but throws on set magic");
+# magic reset #20763
+{
+    {
+        local $^W = 1; # we're resetting this
+        my $warn = '';
+        local $SIG{__WARN__} = sub { $warn .= "@_\n" };
+        reset "\cW";
+        like($warn, qr/uninitialized/, "magic tries to SvIV() the new value");
+        $warn = '';
+        is($^W, 0, q"check $^W has been zeroed");
+        is($warn, '', "should be no more warnings");
+    }
+    {
+        local $| = 1;
+        no warnings 'uninitialized';
+        reset '|';
+        is($|, 0, q"check magic applied to $|");
+    }
+
+    eval { reset "1" };
+    like($@, qr/Modification of a read-only value attempted/,
+         "\$1 isn't marked read-only, but throws on set magic");
+}
 
 __DATA__
 #!perl

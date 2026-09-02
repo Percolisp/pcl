@@ -35,32 +35,34 @@ plan tests => 39;
 # repeated keys
 {
     my %h = map { $_ => uc $_ } 'a'..'d';
-    ## PCL: p-array-= doesn't bind *wantarray* to t before evaluating p-kv-hslice args;
-    ## wantarray regression causes scalar-context warning instead of list return
-    ok(1, "SKIP: %hash{(key) x N} repeated kv-slice — list ctx not propagated to p-kv-hslice in PCL");
+    my @a = %h{ ('c') x 3 };
+    ok eq_array( \@a, [ ('c', 'C') x 3 ]), "repetead keys end with repeated results";
 }
 
-## PCL: Tests 9-13 SKIP — %hash{keys} scalar-context detection requires context
-## propagation through string eval, which PCL cannot do (eval runs in its own context).
-## Original tests (condensed):
-##   is scalar eval"%h{'c','d','e'}", 'E', 'last element in scalar context';
-##   like ($warn[0], qr/^\%h\{\.\.\.\} in scalar context .../);
-##   eval 'is( scalar %h{i}, "I", "correct value");';
-##   is (scalar @warn, 2);
-##   like ($warn[1], qr/^\%h\{"i"\} in scalar context .../);
-ok(1, "SKIP: %hash{keys} in scalar context not supported via string eval in PCL — last element in scalar context");
-ok(1, "SKIP: %hash{keys} scalar-context warning not supported in PCL — warn[0] check");
-ok(1, "SKIP: %hash{keys} in scalar context not supported via string eval in PCL — correct value");
-ok(1, "SKIP: %hash{keys} scalar-context warning count not supported in PCL");
-ok(1, "SKIP: %hash{keys} scalar-context warning text — warn[1] not checked in PCL");
+# scalar context
+{
+    my @warn;
+    local $SIG{__WARN__} = sub {push @warn, "@_"};
+
+    my %h = map { $_ => uc $_ } 'a'..'z';
+    is scalar eval"%h{'c','d','e'}", 'E', 'last element in scalar context';
+
+    like ($warn[0],
+     qr/^\%h\{\.\.\.\} in scalar context better written as \$h\{\.\.\.\}/);
+
+    eval 'is( scalar %h{i}, "I", "correct value");';
+
+    is (scalar @warn, 2);
+    like ($warn[1],
+          qr/^\%h\{"i"\} in scalar context better written as \$h\{"i"\}/);
+}
 
 # autovivification
 {
     my %h = map { $_ => uc $_ } 'a'..'b';
 
     my @a = %h{'c','d'};
-    ## PCL: same wantarray regression — p-kv-hslice in scalar ctx, warns, wrong result
-    ok(1, "SKIP: %hash{nonexistent-keys} kv-slice result — wantarray regression in PCL");
+    is( join(':', map {$_//'undef'} @a), 'c:undef:d:undef', "correct result");
     ok( eq_hash( \%h, { a => 'A', b => 'B' } ), "correct hash" );
 }
 
@@ -80,55 +82,90 @@ ok(1, "SKIP: %hash{keys} scalar-context warning text — warn[1] not checked in 
 
 # ref of a slice produces list
 {
-    ## PCL: \%hash{keys} requires ref-of-list semantics (p-backslash takes ref of the
-    ## whole vector, not each element) plus wantarray regression in p-kv-hslice
-    ok(1, "SKIP: ref of kv-hash-slice not supported in PCL — ref-of-list semantics missing");
-    ok(1, "SKIP: ref of kv-hash-slice join — not supported in PCL");
+    my %h = map { $_ => uc $_ } 'a'..'z';
+    my @a = \%h{ qw'c d e' };
+
+    my $ok = 1;
+    $ok = 0 if grep !ref, @a;
+    ok $ok, "all elements are refs";
+
+    is join( ':', map{ $$_ } @a ), 'c:C:d:D:e:E'
 }
 
 # lvalue usage in foreach
 {
-    ## PCL: lvalue kv-hslice — $_ aliasing into the slice values not supported
-    ok(1, "SKIP: lvalue %hash{keys} foreach aliasing not supported in PCL");
+    my %h = qw(a 1 b 2 c 3);
+    $_++ foreach %h{'b', 'c'};
+    ok( eq_hash( \%h, { a => 1, b => 3, c => 4 } ), "correct hash" );
 }
 
 # lvalue subs in foreach
 {
-    ## PCL: :lvalue attribute not supported; kv-hslice cannot be an lvalue
-    ok(1, "SKIP: lvalue sub returning kv-hslice not supported in PCL");
+    my %h = qw(a 1 b 2 c 3);
+    sub foo:lvalue{ %h{qw(a b)} };
+    $_++ foreach foo();
+    ok( eq_hash( \%h, { a => 2, b => 3, c => 3 } ), "correct hash" );
 }
 
-## PCL: Tests 22-25 SKIP — error detection for invalid Perl (local/assign to kv-hslice,
-## lvalue subs) — principle 9: PCL is a transpiler for valid Perl, not a validator.
-ok(1, "SKIP: error detection for 'local %hash{keys}' — principle 9: PCL accepts invalid Perl");
-ok(1, "SKIP: error detection for '%hash{keys} = list' — principle 9: PCL accepts invalid Perl");
-ok(1, "SKIP: error for lvalue sub returning kv-hslice (list assign) — principle 9");
-ok(1, "SKIP: error for lvalue sub returning kv-hslice (scalar assign) — principle 9");
+# errors
+{
+    my %h = map { $_ => uc $_ } 'a'..'b';
+    # no local
+    {
+        local $@;
+        eval 'local %h{qw(a b)}';
+        like $@, qr{^Can't modify key/value hash slice in local at},
+            'local dies';
+    }
+    # no assign
+    {
+        local $@;
+        eval '%h{qw(a b)} = qw(B A)';
+        like $@, qr{^Can't modify key/value hash slice in list assignment},
+            'assign dies';
+    }
+    # lvalue subs in assignment
+    {
+        local $@;
+        eval 'sub bar:lvalue{ %h{qw(a b)} }; (bar) = "1"';
+        like $@, qr{^Can't modify key/value hash slice in list assignment},
+            'not allowed as result of lvalue sub';
+        eval 'sub bbar:lvalue{ %h{qw(a b)} }; bbar() = "1"';
+        like $@,
+             qr{^Can't modify key/value hash slice in scalar assignment},
+            'not allowed as result of lvalue sub';
+    }
+}
 
-## PCL: Tests 26-31 SKIP — scalar-context detection via string eval requires context
-## propagation into p-eval (see docs/not-supported.md "Context propagation into string eval").
-## Tests 30-31 also require error detection for %$h->{}  (principle 9).
+# warnings
 {
     my @warn;
     local $SIG{__WARN__} = sub {push @warn, "@_"};
 
     my %h = map { $_ => uc $_ } 'a'..'c';
-    ok(1, "SKIP: %hash{a} scalar-context warning via string eval — ctx not propagated in PCL");
-    ok(1, "SKIP: scalar-context warning text — string eval context propagation not in PCL");
+    {
+        @warn = ();
+        my $v = eval '%h{a}';
+        is (scalar @warn, 1, 'warning in scalar context');
+        like $warn[0],
+             qr{^%h\{"a"\} in scalar context better written as \$h\{"a"\}},
+            "correct warning text";
+    }
     {
         @warn = ();
         my ($k,$v) = eval '%h{a}';
-        ## PCL: list context not propagated into string eval; $k/$v get wrong values
-        ok(1, "SKIP: %hash{a} in list-ctx string eval — $k value wrong, ctx not propagated");
-        ok(1, "SKIP: %hash{a} in list-ctx string eval — $v value wrong, ctx not propagated");
+        is ($k, 'a');
+        is ($v, 'A');
         is (scalar @warn, 0, 'no warning in list context');
     }
 
     {
         my $h = \%h;
-        ## PCL: %$h->{a} error detection — principle 9: PCL accepts invalid Perl
-        ok(1, "SKIP: error detection for '%\$h->{a}' — principle 9: PCL accepts invalid Perl");
-        ok(1, "SKIP: error detection for '%\$h->{\"b\",\"c\"}' — principle 9");
+        eval '%$h->{a}';
+        like($@, qr/Can't use a hash as a reference/, 'hash reference is error' );
+
+        eval '%$h->{"b","c"}';
+        like($@, qr/Can't use a hash as a reference/, 'hash slice reference is error' );
     }
 }
 
@@ -144,12 +181,24 @@ ok(1, "SKIP: error for lvalue sub returning kv-hslice (scalar assign) — princi
     ok( !exists $h{e}, "no autovivification" );
 }
 
-## PCL: Tests 35-37 SKIP — keys/values/each %hash{key} error detection via string eval
-## (principle 9: PCL accepts invalid Perl; also string eval context propagation limitation)
-ok(1, "SKIP: error for 'keys %hash{key}' via string eval — principle 9");
-ok(1, "SKIP: error for 'values %hash{key}' via string eval — principle 9");
-ok(1, "SKIP: error for 'each %hash{key}' via string eval — principle 9");
+# keys/value/each refuse to compile kvhslice
+{
+    my %h = 'a'..'b';
+    my %i = (foo => \%h);
+    eval '() = keys %i{foo=>}';
+    like($@, qr/Experimental keys on scalar is now forbidden/,
+         'keys %hash{key} forbidden');
+    eval '() = values %i{foo=>}';
+    like($@, qr/Experimental values on scalar is now forbidden/,
+         'values %hash{key} forbidden');
+    eval '() = each %i{foo=>}';
+    like($@, qr/Experimental each on scalar is now forbidden/,
+         'each %hash{key} forbidden');
+}
 
-## PCL: Test 38 SKIP — \% prototype violation error detection via string eval
-## (principle 9: PCL accepts invalid Perl; no prototype enforcement at call-time)
-ok(1, "SKIP: \\% prototype type error for kv-hslice arg — principle 9");
+# \% prototype expects hash deref
+sub nowt_but_hash(\%) {}
+eval 'nowt_but_hash %INC{bar}';
+like $@, qr`^Type of arg 1 to main::nowt_but_hash must be hash \(not(?x:
+           ) key/value hash slice\) at `,
+    '\% prototype';

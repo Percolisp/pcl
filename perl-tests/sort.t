@@ -114,8 +114,11 @@ if (! ok($ordered_correctly, "sort of non-utf8 list worked")) {
     diag ("This should be in numeric order (with 2 instances of every code point):\n"
         . join " ", map { sprintf "%02x", ord substr $_, $prefix_len, 1 } @non_utf8_result);
 }
-## PCL: utf8::is_utf8() not implemented — all chars appear as utf8-flagged
-ok(1, "SKIP: utf8::is_utf8 not implemented in PCL — UTF-8 flag concept doesn't apply");
+if (! is(@wrongly_utf8, 0,
+                      "No elements were wrongly converted to utf8 in sorting"))
+{
+    diag "For code points " . join " ", @wrongly_utf8;
+}
 
 # And then the UTF-8 one
 my @wrongly_non_utf8;
@@ -200,8 +203,7 @@ cmp_ok("@b",'eq','1 2 3 4','reverse then sort');
 cmp_ok("@b",'eq','1 2 3 4','CORE::reverse then sort');
 
 eval  { @b = sort CORE::revers (4,1,3,2); };
-## PCL: error message format mismatch — principle 9
-ok(1, "SKIP: 'Undefined sort subroutine' error message format — PCL gives different msg");
+like($@, qr/^Undefined sort subroutine "CORE::revers" called at /);
 
 
 sub twoface { no warnings 'redefine'; *twoface = sub { $a <=> $b }; &twoface }
@@ -221,8 +223,7 @@ cmp_ok("@b",'eq','4 3 2 1','twoface redefinition');
 }
 
 eval { @b = sort twoface 4,1,9,5 };
-## PCL: sort comparator sub replacement mid-sort isolation not implemented
-ok(1, "SKIP: sort comparator redefinition mid-sort isolation not supported in PCL");
+ok(($@ eq "" && "@b" eq "1 4 5 9"),'redefinition should not take effect during the sort');
 
 {
   no warnings 'redefine';
@@ -503,16 +504,13 @@ cmp_ok($x,'eq','123',q(optimized-away comparison block doesn't take any other ar
     }
     my @t;
     tie @t, "Tied_Array_EXTEND_Test";
-    ## PCL: EXTEND tie callback not called correctly — PCL calls it during setup
-    ok(1, "SKIP: Tie::Array EXTEND callback not called at right time in PCL");
+    is($extend_count, undef, "test that EXTEND has not been called prior to initialization");
     $t[0]=3;
     $t[1]=1;
     $t[2]=2;
-    ## PCL: same — EXTEND called during element assignment in PCL
-    ok(1, "SKIP: Tie::Array EXTEND callback during initialization — PCL calls it when Perl doesn't");
+    is($extend_count, undef, "test that EXTEND has not been called during initialization");
     @t= sort @t;
-    ## PCL: EXTEND not called by PCL's sort on tied arrays
-    ok(1, "SKIP: Tie::Array EXTEND called by sort — PCL sort doesn't call EXTEND");
+    is($extend_count, 3, "test that EXTEND was called with an argument of 3 by pp_sort()");
     is("@t","1 2 3","test that sorting the tied array worked even though EXTEND is a no-op");
 }
 
@@ -636,8 +634,8 @@ sub sortr {
 }
 
 @output = sortr &generate;
-## PCL: wantarray regression — reverse sort inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable sort list context — wantarray regression in PCL sub body");
+is join(" ", map {0+$_} @output), "8 7 6 5 4 3 2 1 0",
+    'reversed stable sort return list context';
 $output = sortr &generate;
 is $output, "CCCBBBAAA",
     'reversed stable sort return scalar context';
@@ -647,8 +645,8 @@ sub sortcmpr {
 }
 
 @output = sortcmpr &generate;
-## PCL: wantarray regression — reverse sort {cmp} inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable \$a cmp \$b sort list context — wantarray regression in PCL");
+is join(" ", map {0+$_} @output), "8 7 6 5 4 3 2 1 0",
+    'reversed stable $a cmp $b sort return list context';
 $output = sortcmpr &generate;
 is $output, "CCCBBBAAA",
     'reversed stable $a cmp $b sort return scalar context';
@@ -658,8 +656,8 @@ sub sortcmprba {
 }
 
 @output = sortcmprba &generate;
-## PCL: wantarray regression — reverse sort {cmp} inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable \$b cmp \$a sort list context — wantarray regression in PCL");
+is join(" ", map {0+$_} @output), "2 1 0 5 4 3 8 7 6",
+    'reversed stable $b cmp $a sort return list context';
 $output = sortcmprba &generate;
 is $output, "AAABBBCCC",
 'reversed stable $b cmp $a sort return scalar context';
@@ -669,8 +667,8 @@ sub sortcmprq {
 }
 
 @output = sortcmpr &generate;
-## PCL: wantarray regression — reverse sort {complex} inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable complex sort return list context — wantarray regression in PCL");
+is join(" ", map {0+$_} @output), "8 7 6 5 4 3 2 1 0",
+    'reversed stable complex sort return list context';
 $output = sortcmpr &generate;
 is $output, "CCCBBBAAA",
     'reversed stable complex sort return scalar context';
@@ -766,8 +764,8 @@ sub sortnumr {
 }
 
 @output = sortnumr &generate1;
-## PCL: wantarray regression — reverse sort {<=>} inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable \$a <=> \$b sort return list context — wantarray regression in PCL");
+is "@output", "I H G F E D C B A",
+    'reversed stable $a <=> $b sort return list context';
 $output = sortnumr &generate1;
 is $output, "IHGFEDCBA", 'reversed stable $a <=> $b sort return scalar context';
 
@@ -776,8 +774,8 @@ sub sortnumrba {
 }
 
 @output = sortnumrba &generate1;
-## PCL: wantarray regression — reverse sort {$b<=>$a} inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable \$b <=> \$a sort return list context — wantarray regression in PCL");
+is "@output", "C B A F E D I H G",
+    'reversed stable $b <=> $a sort return list context';
 $output = sortnumrba &generate1;
 is $output, "CBAFEDIHG", 'reversed stable $b <=> $a sort return scalar context';
 
@@ -786,8 +784,8 @@ sub sortnumrq {
 }
 
 @output = sortnumrq &generate1;
-## PCL: wantarray regression — reverse sort {complex <=>} inside sub body runs in scalar ctx
-ok(1, "SKIP: reversed stable complex sort return list context — wantarray regression in PCL");
+is "@output", "I H G F E D C B A",
+    'reversed stable complex sort return list context';
 $output = sortnumrq &generate1;
 is $output, "IHGFEDCBA", 'reversed stable complex sort return scalar context';
 
@@ -798,27 +796,35 @@ is "@output", "0 C B A", 'reversed sort with trailing argument';
 is "@output", "C B A 0", 'reversed sort with leading argument';
 
 eval { @output = sort {goto sub {}} 1,2; };
-## PCL: goto from sort block — error message format differs from Perl's
-ok(1, "SKIP: 'goto subr outside subr' error message — PCL gives different message");
+$fail_msg = q(Can't goto subroutine outside a subroutine);
+cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'goto subr outside subr');
+
+
 
 sub goto_sub {goto sub{}}
 eval { @output = sort goto_sub 1,2; };
-## PCL: goto from named sort sub — error message format differs from Perl's
-ok(1, "SKIP: 'goto subr from a sort sub' error message — PCL gives different message");
+$fail_msg = q(Can't goto subroutine from a sort sub);
+cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'goto subr from a sort sub');
+
+
 
 eval { @output = sort {goto label} 1,2; };
-## PCL: goto label from sort block — error message format differs from Perl's
-ok(1, "SKIP: 'goto out of a pseudo block 1' error message — PCL gives different message");
+$fail_msg = q(Can't "goto" out of a pseudo block);
+cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'goto out of a pseudo block 1');
+
+
 
 sub goto_label {goto label}
 label: eval { @output = sort goto_label 1,2; };
-## PCL: goto label from named sort sub — error message format differs from Perl's
-ok(1, "SKIP: 'goto out of a pseudo block 2' error message — PCL gives different message");
+$fail_msg = q(Can't "goto" out of a pseudo block);
+cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'goto out of a pseudo block 2');
 
-## PCL: undef active sort sub — causes SBCL binding-stack overflow, skip eval too
+
+
 sub self_immolate {undef &self_immolate; $a<=>$b}
-# eval { @output = sort self_immolate 1,2,3 };  # crashes SBCL
-ok(1, "SKIP: 'undef active subr' error message — crashes SBCL, undef-during-sort not supported");
+eval { @output = sort self_immolate 1,2,3 };
+$fail_msg = q(Can't undef active subroutine);
+cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'undef active subr');
 
 
 for(1,2) # We run this twice, to make sure sort does not lower the ref
@@ -856,8 +862,7 @@ my $answer = "good";
     }
 }
 
-## PCL: $a/$b in PCL are global defvars, not package-scoped — OtherPack::a seen as defined
-ok(1, "SKIP: sort subr from other package — \$a/\$b package scoping not implemented in PCL");
+cmp_ok($answer,'eq','good','sort subr called from other package');
 
 
 # Bug 36430 - sort called in package2 while a
@@ -954,10 +959,9 @@ is("@b", "1 2 3 3 4 5 7", "comparison result as string");
 
     tie my %h, 'RT34604';
     my @sorted = sort @h{qw(p q)};
-    ## PCL: overloaded 'cmp' not invoked by p-sort — sort uses CL comparison, ignores overload
-    ok(1, "SKIP: overload compare called once — sort doesn't use overloaded 'cmp' in PCL");
-    ok(1, "SKIP: overload sort result — sort ignores overloaded 'cmp' in PCL");
-    ok(1, "SKIP: overload string called twice — sort ignores overloaded '\"\"' in PCL");
+    is($cc, 1, 'overload compare called once');
+    is("@sorted","1 2", 'overload sort result');
+    is($cs, 2, 'overload string called twice');
 }
 
 fresh_perl_is('sub w ($$) {my ($l, $r) = @_; my $v = \@_; undef @_; $l <=> $r}; print join q{ }, sort w 3, 1, 2, 0',
@@ -1004,8 +1008,7 @@ fresh_perl_is('sub w ($$) {my ($l, $r) = @_; my $v = \@_; undef @_; @_ = 0..2; $
 
     @a = (); @b = ();
 
-    ## PCL: CL's GC is non-deterministic — DESTROY not called immediately on scope exit
-    ok(1, "SKIP: all gone — deterministic object destruction via GC not supported in PCL");
+    is($count, 0, 'all gone');
 }
 
 # [perl #77930] The context stack may be reallocated during a sort, as a
@@ -1044,25 +1047,21 @@ fresh_perl_is
   "Win" =~ /(.*)/;
   my @b = sort soarter 0..2;
 
-  ## PCL: match vars ($1 etc.) not properly saved/restored per sort sub call
-  ok(1, "SKIP: Match vars do not leak from one plain sort sub — match var isolation per sort call not in PCL");
+  like $output, qr/^(?:Win)+\z/,
+   "Match vars do not leak from one plain sort sub to the next";
 
   $output = '';
 
   "Win" =~ /(.*)/;
   @b = sort soarterdd 0..2;
 
-  ## PCL: same — match var isolation between sort comparator calls not implemented
-  ok(1, "SKIP: Match vars do not leak from one \$\$ sort sub — match var isolation per sort call not in PCL");
+  like $output, qr/^(?:Win)+\z/,
+   'Match vars do not leak from one $$ sort sub to the next';
 }
 
 # [perl #30661] autoloading
 AUTOLOAD { $b <=> $a }
 sub stubbedsub;
-## PCL s432: RESTORED to perl's own assertion.  The limitation the skip named
-## (a p-declare-sub stub answering nil instead of falling through to AUTOLOAD)
-## is fixed — the stub now runs the package's AUTOLOAD, and dies only when
-## there is none (task #456 half (a), CLAUDE.md rule 12).
 is join("", sort stubbedsub split//, '04381091'), '98431100',
     'stubborn AUTOLOAD';
 is join("", sort hopefullynonexistent split//, '04381091'), '98431100',
@@ -1108,8 +1107,7 @@ is $@, "",
 
 $#a = -1;
 () = [sort { $a = 10; $b = 10; 0 } $#a, $#a];
-## PCL: modifying $a/$b in sort block modifies sort vars but $#a is a separate variable
-ok(1, "SKIP: sort block modifying \$a and \$b — \$a/\$b alias semantics for \$#a not in PCL");
+is $#a, 10, 'sort block modifying $a and $b';
 
 () = sort {
     is \$a, \$a, '[perl #78194] op return values passed to sort'; 0
@@ -1183,16 +1181,14 @@ SKIP:
 	    ReportDestruction->new("[sorta]"), "foo";
     $act .= "2";
     $filla = undef;
-    ## PCL: CL's GC is non-deterministic — DESTROY not called immediately; *a typeglob assign not fully supported
-    ok(1, "SKIP: refcount of *a GvSV slot during sort — deterministic DESTROY/typeglob not in PCL");
+    is $act, "01[sorta]2[filla]";
     $act = "";
     my $fillb = \(ReportDestruction->new("[fillb]"));
     () = sort { my $r = $a cmp $b; $act .= "0"; *b = \$$fillb; $act .= "1"; $r }
 	    "foo", ReportDestruction->new("[sortb]");
     $act .= "2";
     $fillb = undef;
-    ## PCL: same — CL GC non-deterministic, *b typeglob assign during sort not supported
-    ok(1, "SKIP: refcount of *b GvSV slot during sort — deterministic DESTROY/typeglob not in PCL");
+    is $act, "01[sortb]2[fillb]";
 }
 
 # GH #18081
@@ -1220,17 +1216,16 @@ SKIP:
     is "@sorted", "", 'sort @empty';
 
     eval 'my @s = sort';
-    ## PCL: principle 9 — PCL is a transpiler for valid Perl, does not detect bare 'sort' error
-    ok(1, "SKIP: empty sort not allowed — error detection for bare 'sort' not in PCL (principle 9)");
+    like($@, qr/Not enough arguments for sort/, 'empty sort not allowed');
 
     eval '{my @s = sort}';
-    ok(1, "SKIP: empty {sort} not allowed — error detection not in PCL (principle 9)");
+    like($@, qr/Not enough arguments for sort/, 'empty {sort} not allowed');
 
     eval 'my @s = sort; 1';
-    ok(1, "SKIP: empty sort; not allowed — error detection not in PCL (principle 9)");
+    like($@, qr/Not enough arguments for sort/, 'empty sort; not allowed');
 
     eval 'my @s = (sort); 1';
-    ok(1, "SKIP: empty (sort); not allowed — error detection not in PCL (principle 9)");
+    like($@, qr/Not enough arguments for sort/, 'empty (sort); not allowed');
 }
 
 # check that lexical sort subs are ok

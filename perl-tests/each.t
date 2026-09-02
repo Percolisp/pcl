@@ -357,21 +357,15 @@ fresh_perl_like('$a = $ENV{PATH}; $a = $ENV{q=DCL$PATH=}; $a = keys %ENV; $b = (
                 undef,
                 '%ENV lookup, and keys %ENV in scalar context remain consistent');
 
-## PCL: `use feature 'refaliasing'` is not supported. This feature
-## (experimental, removed in Perl 5.40) allows `\$hash{key} = \$var`
-## to make a hash slot an alias to another variable. PCL does not
-## implement reference aliasing. Tests 64 and 65.
-## use feature 'refaliasing';
-## no warnings 'experimental::refaliasing';
-## $a = 7;
-## my %h2;
-## \$h2{f} = \$a;
-## ($a, $b) = (each %h2);
-## is "$a $b", "f 7", 'each in list assignment';
-## $a = 7;
-## ($a, $b) = (3, values %h2);
-## is "$a $b", "3 7", 'values in list assignment';
-ok(1, 'SKIP: use feature refaliasing not supported in PCL');
-ok(1, 'SKIP: use feature refaliasing not supported in PCL');
+use feature 'refaliasing';
+no warnings 'experimental::refaliasing';
+$a = 7;
+my %h2;
+\$h2{f} = \$a;
+($a, $b) = (each %h2);
+is "$a $b", "f 7", 'each in list assignment';
+$a = 7;
+($a, $b) = (3, values %h2);
+is "$a $b", "3 7", 'values in list assignment';
 
 done_testing();

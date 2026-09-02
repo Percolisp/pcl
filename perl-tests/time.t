@@ -55,13 +55,11 @@ SKIP: {
            $^O eq "interix";
 
 # check that localtime respects changes to $ENV{TZ}
-# PCL: CL's decode-universal-time doesn't call tzset() on $ENV{TZ} change
 $ENV{TZ} = "GMT-5";
 ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime($beg);
 $ENV{TZ} = "GMT+5";
 ($sec,$min,$hour2,$mday,$mon,$year,$wday,$yday,$isdst) = localtime($beg);
-# ok($hour != $hour2,                             'changes to $ENV{TZ} respected');
-ok(1, 'SKIP: PCL localtime does not call tzset() on $ENV{TZ} change');
+ok($hour != $hour2,                             'changes to $ENV{TZ} respected');
 }
 
 

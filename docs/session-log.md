@@ -238,6 +238,76 @@ Legs: gate **193 / 6542** (only the 13 pclxs xs rows); sweep TOTAL **18346
 (+0)** GATE clean, drops 5 = census; companion `op/ --quick`.  Guard
 `Pl/t/slice-args-01.t`, 15 rows.  Record `docs/faster-codegen-suggestions.md`
 §0.2g.
+## Session 464ay (2026-09-02, Opus, round 22 REVIEW) — the ignored-tests audit, first execution: 115 inline SKIPs restored (#965), 695 blessed rows read for cause, nine bugs filed (#1020–#1028)
+
+**The brief.** #964 (a sub returned the caller's box) hid for months although
+perl's own test for it existed TWICE — once replaced by an inline
+`ok(1, 'SKIP: @_ aliasing not supported …')` with a wrong diagnosis, once
+blessed inside a per-file count.  This session hunts for more of the same:
+rows the project does not run, or runs and does not READ.
+
+**Three findings about the instruments, before any test row.**  (1) The census
+that bounds #965 is wrong by 51 %: `grep -c "ok(1, 'SKIP"` matches only the
+single-quoted spelling, so the real count is **199 rows in 13 files**, not 132
+in 11 — `sort.t` (32 rows), `kvhslice.t` (25) and `splice.t` (2) were entirely
+invisible.  (2) A THIRD spelling nobody counted: nine hand-added
+`skip "… not supported in PCL", N` calls hide ≥21 further rows; they emit real
+`# skip` TAP so they look legitimate, but the assertion still never runs.
+(3) **"Fully passing" is not a fact about PCL** — five files the sweep reported
+as PASS were passing on manufactured rows, `sort.t` at 204/205 with 32 of them.
+
+**Pass 1 — 115 of the 199 rows restored, in 11 files.**  Method: recover the
+upstream assertion (the `## PCL SKIP:` comments quote perl 5.40.3 verbatim, and
+seven of the files turned out to differ from upstream ONLY by the skip edits, so
+they were restored wholesale), run the file, and then **verify the written
+reason by probing the primitive it names**.  **31 of the 115 PASS today** —
+fixes that shipped and were never counted.  All seven `sort.t` "wantarray
+regression in PCL sub body" rows pass, and so do both `splice.t` and both
+`kvhslice.t` rows blaming the same thing: the regression named in CLAUDE.md
+design principle 8 does not reach a single row that was skipped for it.  Also
+stale: `time.t`'s `$ENV{TZ}`/tzset row, `loopctl.t`'s bug 37725 ("foreach loop
+var aliasing not supported … PCL copies the value instead" — flatly false),
+`each.t`'s two refaliasing rows, `sub.t`'s #964 row and its #401
+state-in-string-eval row.  **Eleven reasons were FALSE**, #964's own being the
+archetype: @_ aliasing works in every spelling probed.  57 rows moved to the
+skip-registry with a cited reason; 14 are held back as fix targets and fail
+honestly.
+
+**Pass 2 — the registry's own reasons.**  Its stale-detector already covers
+"the row passes now"; what is uninstrumented is a wrong reason on a
+still-failing row.  Three entries cite '@_ argument aliasing' with the wording
+"@_ elements are copies in PCL"; corrected in place, and `array.t`'s is now
+marked **provisional** — its named primitive works, so that row fails for a
+reason nobody has identified.
+
+**Pass 3 — the 695 blessed sweep rows clustered and looked up** (DECIDED →
+not-supported.md → task store): 128 clusters, 81 attributed (298 rows) / 47
+unexplained (397).  **The single biggest find: `bop.t`'s 229 rows — 33 % of the
+entire baseline — are ONE mechanism with no recorded cause**, now #1028: the
+bitwise operators pick the numeric op whenever an operand is a
+ref/glob/qr/object/undef, where perl stringifies and does the bit-string op
+(`undef | "abc"` is 0 in PCL, "abc" in perl).  Largest attributed cause is #221
+(warnings absent), ~62 rows.  Record: `docs/blessed-fails-review-s464.md`.
+
+**Nine bugs filed, five of them #964-class silent-wrongs**: #1020 `undef *GLOB`
+is a silent no-op for all four slots; #1021 `sort @objects` ignores an
+overloaded `cmp` (the explicit block form is correct); #1022 an unlabelled
+`last`/`next` inside a called sub never reaches the caller's loop — PCL lowers
+it to a LEXICAL CL `go`, so a `for` swallows it and a `while` dies "attempt to
+GO to nonexistent tag"; #1023 a kv-slice in scalar context yields the element
+count; #1024 a bareword key in `%h{i}` is called as a sub; #1025 `..` in an
+`s///e` replacement is the flip-flop; #1026 a `map {}` there fails the whole
+transpile; #1027 the each.t refaliasing rows (in-file only, four isolated
+shapes pass); #1028 above.
+
+**Legs.**  Sweep TOTAL 18346 → **18265 (−81)**, every row explained per file;
+both baselines edited ROW BY ROW (never re-blessed) and the re-diff is **0 new /
+0 fixed / 0 LOST**, drops 5 = census.  `kvhslice.t` goes OK → PARTIAL (39
+planned, 38 produced — the manufactured rows had been filling that hole).
+**Not done: `state.t` (46 rows) and `lex.t` (38)** — state.t transpile-fails
+whole so its rows do not run at all, and `perl-tests/lex.t` is a different
+extraction (251 lines vs upstream 588) with no text to restore from; both are
+phase-1 / phase-4b work in `docs/plan-test-audit-s464.md`.
 
 ## Session 464 (2026-09-02, Fable) — ROUND 21: #964 the return protocol SHIPPED and MERGED (main `4fd661b`); `:lvalue` (#930) DEFERRED by the USER; the ignored-tests audit plan drafted (#993, to be presented s465)
 

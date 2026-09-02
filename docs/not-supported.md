@@ -1946,8 +1946,12 @@ behaviour deterministic.  The ruling buys the speed and spends nothing perl
 guarantees.  A program that genuinely needs to mutate during a sort can do it
 by index (`$list[$i] = …`), which is defined in both languages.
 
-**Affected tests:** none measured — no file in any of the five populations
-writes through a comparator operand.
+**Affected tests:** `perl-tests/sort.t` test 184 `sort block modifying $a and $b`
+(`$#a = -1; () = [sort { $a = 10; $b = 10; 0 } $#a, $#a]; is $#a, 10`) is exactly
+this shape.  It was invisible when this entry was written because the row had
+been replaced by an inline `ok(1, "SKIP…")`; restored s464ay (task #965) and
+registered here as a skip.  No OTHER file in the five populations writes
+through a comparator operand.
 
 ---
 

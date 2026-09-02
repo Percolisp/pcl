@@ -35,11 +35,8 @@ is(scalar(@test), 0, 'Didnt return anything');
       'result of delete(aelem) is copied when returned';
     isnt \sub { return delete $_[0] }->($x), \$x,
       'result of delete(aelem) is copied when explicitly returned';
-    ## PCL SKIP: @_ aliasing not supported — shifted @_ element is the same box as
-    ## the caller's variable, so \sub{shift}->($x) === \$x. Original test:
-    ##   isnt \sub { ()=\@_; shift }->($x), \$x,
-    ##     'result of shift is copied when returned';
-    ok(1, 'SKIP: @_ aliasing not supported — result of shift is copied when returned');
+    isnt \sub { ()=\@_; shift }->($x), \$x,
+      'result of shift is copied when returned';
     isnt \sub { ()=\@_; return shift }->($x), \$x,
       'result of shift is copied when explicitly returned';
 
@@ -140,19 +137,15 @@ is eval {
     $#_++;
     &utf8::encode;
     is @_, 1, 'num of elems in @_ after &xsub with nonexistent $_[0]';
-    ## PCL SKIP: &utf8::encode is an XS built-in; it modifies @_ elements in place via
-    ## the XS API (which aliases @_ elements to caller args). PCL uses CL, not XS/C.
-    ## Original test:  is $_[0], "", 'content of nonexistent $_[0] is modified by &xsub';
-    ok(1, 'SKIP: @_ aliasing / XS in-place modification not supported in PCL');
+    is $_[0], "", 'content of nonexistent $_[0] is modified by &xsub';
 }
 
 # &xsub when @_ itself does not exist
-## PCL SKIP: Test requires (1) 'undef *_' to clear the typeglob ARRAY slot and (2)
-## '&utf8::encode' to be an XS sub that receives the cleared @_. PCL implements
-## *_{ARRAY} syntax (returns \@_), but cannot 'undef *_' to make @_ undefined, and
-## &utf8::encode is not a PCL built-in.
-## Original test:  undef *_; eval { &utf8::encode }; is *_{ARRAY}, undef, '...';
-ok(1, 'SKIP: *_{ARRAY} after undef *_ — requires XS &utf8::encode and typeglob slot clearing');
+undef *_;
+eval { &utf8::encode };
+# The main thing we are testing is that it did not crash.  But make sure 
+# *_{ARRAY} was untouched, too.
+is *_{ARRAY}, undef, 'goto &xsub when @_ does not exist';
 
 # We do not want re.pm loaded at this point.  Move this test up or find
 # another XSUB if this fails.
@@ -204,10 +197,7 @@ use constant { constant1 => 1, constant2 => 2 };
       'stub re-declaration of constant with no prototype';
     is eval '&constant2', '2',
       'stub re-declaration of constant with wrong prototype';
-    ## PCL SKIP: Re-declaring a constant with 'sub constant1' should warn "Constant subroutine
-    ## constant1 redefined". PCL does not generate constant-redefinition warnings.
-    ## Original test:  is $w, 2, 'two warnings from the above';
-    ok(1, 'SKIP: constant-redefinition warnings not generated in PCL');
+    is $w, 2, 'two warnings from the above';
 }
 
 package _122845 {
@@ -227,23 +217,12 @@ package _122845 {
 is $_122845::ok, 1,
   '[perl #122845] no crash in closure recursion with our-vars';
 
-## PCL SKIP: string eval runs in a subprocess and cannot capture outer lexical variables.
-## Original test: eval '$x' inside a sub nested in 'sub predeclared' should see the
-## CORE::state $x == 42. PCL's p-eval uses a subprocess that sees $main::x instead.
-## Original test code:
-##   () = *predeclared;   # vivify glob at compile time
-##   sub predeclared;     # CV stub
-##   sub predeclared {
-##       CORE::state $x = 42;
-##       sub inside_predeclared {
-##           is eval '$x', 42, 'eval q/$var/ in named sub in predeclared sub';
-##       }
-##   }
-##   predeclared(); $main::x = "You should not see this."; inside_predeclared();
+() = *predeclared; # vivify the glob at compile time
+sub predeclared; # now we have a CV stub with no body (incorporeal? :-)
 sub predeclared {
     CORE::state $x = 42;
     sub inside_predeclared {
-	ok(1, 'SKIP: string eval cannot capture outer lexical (state) vars in PCL');
+	is eval '$x', 42, 'eval q/$var/ in named sub in predeclared sub';
     }
 }
 predeclared(); # set $x to 42
@@ -261,35 +240,50 @@ pass("RT #126845: stub with prototype, then definition with attribute");
 # the tie allows us to trigger another die while cleaning up the stack
 # from an earlier die.
 
-## PCL SKIP (RT124156, 3 tests): Tests require Perl's tied-hash DELETE callback to fire
-## when 'local $hash{key}' unwinds during exception propagation, replacing the inner die
-## with the outer one. PCL's local-hash-key restore does not invoke tie DELETE callbacks.
-## Test 37 additionally requires DESTROY (GC-driven, not supported in PCL).
-## Original test code (condensed):
-##   package RT124156;
-##   sub TIEHASH { bless({}, $_[0]) }  sub FETCH { undef }  sub STORE { }
-##   sub DELETE { die "outer\n" }
-##   eval { @value = sub { @value = sub {
-##       my %a; tie %a, "RT124156"; local $a{foo} = "bar"; die "inner";
-##   }->();}->();};
-##   ::is($@, "outer\n", "RT124156 plain");   # DELETE intercepts unwind
-##   my $destroyed = 0;
-##   sub DESTROY { $destroyed = 1 }
-##   eval { f(); };
-##   ::is($@, "outer\n", "RT124156 depth");
-##   ::is($destroyed, 1, "RT124156 freed cv");  # DESTROY called when blessed coderef freed
 {
     package RT124156;
+
     sub TIEHASH { bless({}, $_[0]) }
     sub EXISTS { 0 }
     sub FETCH { undef }
     sub STORE { }
     sub DELETE { die "outer\n" }
-    sub DESTROY { }
 
-    ::ok(1, 'SKIP: RT124156 plain — tie DELETE exception during local unwind not supported in PCL');
-    ::ok(1, 'SKIP: RT124156 depth — tie DELETE exception during local unwind not supported in PCL');
-    ::ok(1, 'SKIP: RT124156 freed cv — DESTROY not called by GC in PCL');
+    my @value;
+    eval {
+        @value = sub {
+            @value = sub {
+                my %a;
+                tie %a, "RT124156";
+                local $a{foo} = "bar";
+                die "inner";
+                ("dd2a", "dd2b");
+            }->();
+            ("cc3a", "cc3b");
+        }->();
+    };
+    ::is($@, "outer\n", "RT124156 plain");
+
+    my $destroyed = 0;
+    sub DESTROY { $destroyed = 1 }
+
+    sub f {
+        my $x;
+        my $f = sub {
+            $x = 1; # force closure
+            my %a;
+            tie %a, "RT124156";
+            local $a{foo} = "bar";
+            die "inner";
+        };
+        bless $f, 'RT124156';
+        $f->();
+    }
+
+    eval { f(); };
+    # as opposed to $@ eq "Can't undef active subroutine"
+    ::is($@, "outer\n", "RT124156 depth");
+    ::is($destroyed, 1, "RT124156 freed cv");
 }
 
 # trapping dying while popping a scope needs to have the right pad at all
@@ -376,18 +370,12 @@ is(join('-', 10, check_ret(-1,5)),      "10",  "check_ret(-1,5) list");
 
 # A sub should FREETMPS on exit
 # RT #124248
-## PCL SKIP: DESTROY is not called by the CL garbage collector (Perl uses refcounting).
-## Perl calls DESTROY when 'bless []' result leaves scope at end of g(). Original test:
-##   my $d = 0;
-##   sub DESTROY { $d++ }
-##   sub f { ::is($d, 1, "RT 124248"); }
-##   sub g { !!(my $x = bless []); }
-##   f(g());
+
 {
     package p124248;
     my $d = 0;
     sub DESTROY { $d++ }
-    sub f { ::ok(1, 'SKIP: RT 124248 — DESTROY not called by GC in PCL'); }
+    sub f { ::is($d, 1, "RT 124248"); }
     sub g { !!(my $x = bless []); }
     f(g());
 }
@@ -442,22 +430,24 @@ eval '
 eval '()=%e; sub e { sub e; eval q|$x| } e;';
 watchdog 0;
 
-## PCL SKIP: fresh_perl_like tests Perl's lexer error for gibberish/invalid input.
-## Principle 9: PCL transpiles valid Perl; invalid-Perl error messages not supported.
-## Original test:
-##   fresh_perl_like(q#<s,,$0[sub{m]]]],}>0,shift#, qr/^syntax error/, {},
-##       "GH Issue #16944 - Syntax error with sub and shift causes segfault");
-ok(1, 'SKIP: GH Issue #16944 — invalid Perl error detection not supported in PCL');
+fresh_perl_like(
+    q#<s,,$0[sub{m]]]],}>0,shift#,
+    qr/^syntax error/,
+    {},
+    "GH Issue #16944 - Syntax error with sub and shift causes segfault"
+);
 
 # Bug 20010515.004 (#6998)
 # freeing array used as args to sub
-## PCL SKIP: Uses Internals::stack_refcounted() (documented not-supported, see docs/not-supported.md).
-## Also tests freed-value iteration behaviour, which depends on Perl's refcount-based memory model.
-## Original test:
-##   fresh_perl_like(q{my @h = 1..10; bad(@h); sub bad { undef @h; ... print for @_; }},
-##       (Internals::stack_refcounted() & 1) ? qr/^O\nK/ : qr/Use of freed value.../,
-##       {}, "#6998 freeing array used as args to sub");
-ok(1, 'SKIP: #6998 freeing array used as args to sub — Internals::stack_refcounted() not supported in PCL');
+
+fresh_perl_like(
+    q{my @h = 1 .. 10; bad(@h); sub bad { undef @h; warn "O\n"; print for @_; warn "K\n";}},
+    (Internals::stack_refcounted() & 1)
+        ? qr/^O\nK/
+        : qr/Use of freed value in iteration/,
+    {},
+    "#6998 freeing array used as args to sub",
+);
 
 # github #21044
 ok( eval { $_->{x} = 1 for sub { undef }->(); 1 }, "check sub return values are modifiable")

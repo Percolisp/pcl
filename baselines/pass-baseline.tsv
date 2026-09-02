@@ -195,6 +195,29 @@
 #   split.t: the un-dropped `my ($sp) = grep ... or skip` now takes the file's own skip branch
 #   (PCL's \s under /u misses NBSP, owner #407), so 9 rows skip: 3 were baseline fails (fixed),
 #   6 were ACCIDENTAL passes running on the dropped statement's undef $sp.
+# s464ay (round 22, task #965, edited ROW BY ROW -- NOT re-blessed): eight files
+#   lose passing rows because their inline `ok(1,'SKIP...')` MANUFACTURED PASSES
+#   were replaced by the upstream assertions they had been standing in for.
+#   TOTAL passing 18346 -> 18265 (-81).  Every row of the move, per file:
+#     sort.t     204 -> 182  32 manufactured rows restored; 10 PASS (7 "wantarray
+#                            regression", 1 cross-package $a/$b, 2 Tie EXTEND),
+#                            16 skip-registered, 6 fix targets (#1021 x3, #684 x2,
+#                            1 unattributed in-file).  It was in "Fully passing".
+#     kvhslice.t  39 ->  19  25 restored; 6 PASS, 14 registered, 4 fix targets
+#                            (#1023, #1024).  OK -> PARTIAL: the file plans 39
+#                            rows and PCL produces 38; the manufactured rows had
+#                            been filling that hole.
+#     reset.t     41 ->  22  22 restored; 3 PASS, 19 registered (reset()/m?pat?).
+#     sub.t       62 ->  53  11 restored; 2 PASS (#964's own [perl #91844] row,
+#                            and #401's state-in-string-eval row), 8 registered,
+#                            1 fix target (#1020, `undef *GLOB` is a no-op).
+#     loopctl.t   67 ->  63   8 restored; 4 PASS (bug 37725 + 3 typeglob rebind),
+#                            3 registered, 1 fix target (#1022).
+#     local.t    303 -> 300   3 restored, all registered (principle 9).
+#     each.t      51 ->  49   2 restored, both fix targets (#1027).
+#     join.t      43 ->  41   5 restored; 3 PASS, 2 registered (utf8::encode).
+#   time.t and splice.t also had manufactured rows (1 and 2); both are STILL
+#   fully passing after restoration, so their rows do not move.
 aassign.t	OK	175	13	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -230,7 +253,7 @@ do.t	OK	65	3	73
 # s445/s446k (#479): the readline-in-ternary cascade repair makes <FOO> // and <$foo> // compile —
 # dor.t rows 21+22 left fail-baseline.tsv by EDIT (row 23, -f //, still fails: filed residue).
 dor.t	OK	31	1	34
-each.t	OK	51	0	65
+each.t	OK	49	2	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
 eval.t	PARTIAL	128	32	169
@@ -248,14 +271,14 @@ index.t	OK	110	0	120
 infnan.t	OK	1106	0	1112
 int.t	OK	19	0	19
 isa.t	OK	14	0	14
-join.t	OK	43	0	43
+join.t	OK	41	0	43
 kvaslice.t	OK	17	0	17
-kvhslice.t	OK	39	0	39
+kvhslice.t	PARTIAL	19	4	39
 lc.t	OK	82	0	2659
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53
-local.t	OK	303	13	319
-loopctl.t	OK	67	0	67
+local.t	OK	300	13	319
+loopctl.t	OK	63	1	67
 lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level
@@ -296,19 +319,19 @@ recurse.t	OK	27	1	28
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
 ref.t	PARTIAL	193	16	245
-reset.t	OK	41	0	45
+reset.t	OK	22	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128
 signatures.t	OK	888	90	979
 sleep.t	OK	4	0	4
-sort.t	OK	204	0	205
+sort.t	OK	182	6	205
 splice.t	OK	34	0	34
 split.t	OK	178	6	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
 state.t	TRANSPILE_FAIL	0	0	-1
 study.t	OK	43	0	43
-sub.t	OK	62	2	65
+sub.t	OK	53	3	65
 substr.t	PARTIAL	351	0	397
 time.t	OK	72	0	72
 tr.t	PARTIAL	239	3	317
