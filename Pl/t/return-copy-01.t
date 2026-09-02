@@ -133,9 +133,17 @@ OUT
 # flattened array, the caller's own @_ boxes (`&f;` and `goto &f` SHARE @_, so
 # the copy can never be made in place), a slice's cells, and a raw hash's
 # values.  `shift-ref=copied` is [perl #91844] — perl's own t/op/sub.t row 9.
+# The last two rows are the s464b residue: a NESTED aggregate inside a returned
+# list temp.  The emitter writes `(0, @a)` as `(vector 0 (p-flatten @a))`, so the
+# element is a deferred-flatten MARKER around the LIVE array and never a bare
+# vector — the per-element copy has to reach through it, or the consumer flatten
+# walk aliases the callee storage and `for (nest_a()) { $_ = 1 }` writes into @a.
+# The copy is SAME-SHAPE, so the element stays ONE element and the consumer still
+# flattens it — that is what keeps Role::Tiny (`qw(x), $_[0]->SUPER::steps`)
+# working, and Pl/t/moo-01.t is its guard.
 # ─────────────────────────────────────────────────────────────────────────────
 test_cl('list family: every element of a returned list is a copy', <<'PL', <<'OUT');
-my $x = 1; my $s = "abc"; my @a = (1,2,3); my %h = (a=>1); my @big = (1,2,3,4);
+my $x = 1; my $s = "abc"; my @a = (1,2,3); my %h = (a=>1); my @big = (1,2,3,4); my @b = (4,5);
 sub fl    { ($x, $s) }
 sub flr   { return ($x, $s) }
 sub fa    { @a }
@@ -146,7 +154,9 @@ sub fst   { $s }
 sub fu    { $_ }
 sub fhash { %h }
 sub fslice { @big[1,2] }
-sub r { $x = 1; $s = "abc"; @a = (1,2,3); %h = (a=>1); @big = (1,2,3,4); $_ = "topic" }
+sub nest_a  { (0, @a) }
+sub two_arr { (@a, @b) }
+sub r { $x = 1; $s = "abc"; @a = (1,2,3); %h = (a=>1); @big = (1,2,3,4); @b = (4,5); $_ = "topic" }
 r(); for my $v (fl())  { $v = 'W' } print "list-tail=$x $s\n";
 r(); for my $v (flr()) { $v = 'W' } print "list-return=$x $s\n";
 r(); for my $v (fa())  { $v = 'W' } print "array-tail=@a\n";
@@ -161,6 +171,8 @@ r(); for my $v (fhash()) { $v = 'W' if $v eq '1' } print "hash=", join(",", map 
 r(); for my $v (fslice()) { $v = 'S' } print "slice=@big\n";
 r(); my @c = fa(); $c[0] = 'C'; print "array-copy=@a / @c\n";
 r(); my %cp = fhash(); $cp{a} = 'C'; print "hash-copy=", join(",", map { "$_=$h{$_}" } sort keys %h), " / $cp{a}\n";
+r(); for my $v (nest_a())  { $v = 'W' } print "nested-array=@a\n";
+r(); for my $v (two_arr()) { $v = 'W' } print "two-arrays=@a|@b\n";
 PL
 list-tail=1 abc
 list-return=1 abc
@@ -176,6 +188,8 @@ hash=a=1
 slice=1 2 3 4
 array-copy=1 2 3 / C 2 3
 hash-copy=a=1 / C
+nested-array=1 2 3
+two-arrays=1 2 3|4 5
 OUT
 
 # ─────────────────────────────────────────────────────────────────────────────

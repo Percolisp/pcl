@@ -8536,8 +8536,24 @@ create the key on a read-only call, which perl does not."
     (t (let ((x (unbox v)))
          (if (null x) *p-undef* x)))))
 
+;; %p-leavesub-vector and %p-leavesub-aggregate are mutually recursive through
+;; %p-leavesub-element: a list temp may hold an array, whose own elements are
+;; scalars.  The nesting a Perl list can carry is finite, so the walk is.
+(declaim (ftype (function (t) t) %p-leavesub-aggregate))
+
+(defun %p-leavesub-element (e)
+  "The leave rule for ONE element of a vector leaving a sub frame -- the same
+   rule %p-leavesub applies in list context, written once.
+   A BOX is one scalar (unboxed, or a fresh box for a ref / blessed / dualvar).
+   A raw AGGREGATE is copied SAME-SHAPE, so it stops being the callee's storage
+   while staying ONE element for the consumer to flatten.  Every other raw
+   value is already a copy, and a HOLE (nil) stays a hole."
+  (if (p-box-p e)
+      (%p-leavesub-scalar e)
+      (%p-leavesub-aggregate e)))
+
 (defun %p-leavesub-vector (v)
-  "Copy the vector V leaving a sub frame, applying the scalar rule per element
+  "Copy the vector V leaving a sub frame, applying the ELEMENT rule per element
    and PRESERVING V'S SHAPE.  The shape is not cosmetic: PCL distinguishes an
    ARRAY (adjustable, with a fill pointer — its slots are the values) from a
    LIST TEMP (a simple vector the emitter builds for a comma list, whose
@@ -8547,8 +8563,22 @@ create the key on a read-only call, which perl does not."
    flattened and became ONE element — a reference: `sub steps { qw(x),
    $_[0]->SUPER::steps }` then made `foreach my $step (…->steps)` yield
    ARRAY(0x1) and every Moo role application died (the gate's whole moo-01.t).
-   A nested aggregate is therefore left alone here; flattening it first is the
-   consumer's job, and doing it early would be a second copy of that rule."
+   FLATTENING a nested aggregate is therefore still the consumer's job, and
+   doing it early here would be a second copy of that rule.
+
+   But it is COPIED, same-shape, and that is not the same thing (s464b, the
+   #964 residue).  The per-element rule is %p-leavesub-element, not the scalar
+   rule: %p-leavesub-scalar passes a RAW value through, so a nested @a rode
+   out of the frame as the callee's own storage and the consumer's flatten
+   walk then aliased it --
+     my @a=(1,2,3);  sub nest_a  { (0, @a) }
+     for (nest_a()) { $_ = 'W' }     perl leaves @a = 1 2 3; PCL wrote W W W
+     my @b=(4,5);    sub two_arr { (@a, @b) }
+     for (two_arr()) { $_ = 'W' }    perl 1 2 3 | 4 5; PCL wrote W W W | W W
+   (`return (@a, 9)` was already right -- p-return flattens before the frame
+   sees it -- and so were `sub { @a }` and a nested %h.)  Copying same-shape
+   keeps the element ONE element, so the consumer flattens exactly as before;
+   it just flattens the copy."
   (let* ((n   (length v))
          (fp  (array-has-fill-pointer-p v))
          (adj (adjustable-array-p v))
@@ -8557,9 +8587,9 @@ create the key on a read-only call, which perl does not."
                   (make-array n))))
     (if fp
         (loop for e across v
-              do (vector-push-extend (%p-leavesub-scalar e) out))
+              do (vector-push-extend (%p-leavesub-element e) out))
         (dotimes (i n)
-          (setf (aref out i) (%p-leavesub-scalar (aref v i)))))
+          (setf (aref out i) (%p-leavesub-element (aref v i)))))
     out))
 
 (defun %p-leavesub-aggregate (v)
@@ -8583,6 +8613,16 @@ create the key on a read-only call, which perl does not."
    BLESSED table or an %ENV/%INC marker is an object/alias, never a copy."
   (cond
     ((and (vectorp v) (not (stringp v))) (%p-leavesub-vector v))
+    ;; A DEFERRED aggregate: the emitter writes a comma list as
+    ;; `(vector 0 (p-flatten @a))', so an @array element of a returned list
+    ;; is a marker around the LIVE array and never a bare vector — which is
+    ;; why the element rule alone did not fix `sub nest_a { (0, @a) }' (the
+    ;; s464b residue).  A fresh marker around the copied array keeps the
+    ;; deferral, so the consumer's spread is unchanged; only the storage it
+    ;; spreads is now ours.
+    ((p-flatten-marker-p v)
+     (make-p-flatten-marker
+       :array (%p-leavesub-aggregate (p-flatten-marker-array v))))
     ((and (hash-table-p v)
           (not (gethash :__class__ v))
           (not (%p-hash-marker-p v)))

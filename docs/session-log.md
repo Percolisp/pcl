@@ -48,6 +48,26 @@ list temp was an array, a nested aggregate stopped being flattened, and
 `%p-leavesub-vector` now mirrors `array-has-fill-pointer-p` /
 `adjustable-array-p`.
 
+*And a nested aggregate must still be COPIED — s464b, the residue Fable's own
+probe battery found.*  "Not flattened" and "not copied" are different things,
+and the first version conflated them: the per-element rule was the SCALAR
+rule, which passes a raw value through, so a nested `@a` rode out of the frame
+as the callee's storage and the consumer's flatten walk aliased it —
+`sub nest_a { (0, @a) }` and `sub two_arr { (@a, @b) }` both wrote through a
+`foreach` alias into the callee's arrays.  The per-element rule is now
+`%p-leavesub-element` (a box is one scalar; a raw aggregate is copied
+same-shape), and the fix needed one more step than that: the emitter writes an
+`@array` element of a comma list as `(p-flatten @a)` — a deferred-flatten
+MARKER around the LIVE array, never a bare vector — so `%p-leavesub-aggregate`
+gained a marker arm that rebuilds the marker around the copy.  Copying
+same-shape keeps the element ONE element, so Role::Tiny's
+`qw(x), $_[0]->SUPER::steps` is untouched (moo-01.t re-run explicitly).
+`return (@a, 9)` was already right: `p-return` flattens before the frame sees
+it.  Bar: Fable's 28-row `edge.pl` byte-identical on both emission paths, gate
+192/6527 unchanged, sweep TOTAL 18346 (+0) GATE clean drops 5, and the whole
+221-file companion `op/` leg with ZERO movers — the four `:lvalue` files read
+their spliced values exactly.
+
 *A dualvar's identity is on the BOX, and one accident was load-bearing.*
 `p-return-value`'s container arm tested `(vectorp v)` — and a CL string IS a
 vector, so `$!` and `Scalar::Util::dualvar(42,"forty-two")` rode out of it

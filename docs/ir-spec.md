@@ -1100,9 +1100,18 @@ binding — `p-sub` never rebinds it, it only snapshots it into
 | genuine dualvar box (`$!`, `Scalar::Util::dualvar`) | a FRESH box keeping BOTH halves (`%p-dualvar-copy`) | same |
 | ref / blessed / container box (value is a hash-table, a function, or a non-string vector) | a FRESH box with the same value, is-ref and class (`p-copy-scalar-arg`) | same |
 | any other box | its unboxed value; `nil` → `*p-undef*` | same |
-| raw non-string vector | a FRESH vector **of the same shape**, scalar rule per element | unchanged — the consumer counts it |
+| raw non-string vector | a FRESH vector **of the same shape**, the ELEMENT rule per element | unchanged — the consumer counts it |
 | raw non-blessed hash-table | a FRESH hash-table, scalar rule per real-key value | unchanged |
+| deferred-flatten marker (`(p-flatten @a)`, the emitter's `@array` element of a comma list) | a FRESH marker around the copied aggregate | unchanged |
 | anything else raw | unchanged | unchanged |
+
+The **element rule** for a vector's slots is not the scalar rule: a box is one
+scalar, and *a raw aggregate is copied same-shape as well*.  Without that,
+a nested aggregate rode out of the frame as the callee's own storage —
+`my @a=(1,2,3); sub nest_a { (0, @a) }; for (nest_a()) { $_ = 'W' }` wrote into
+`@a`, and so did `sub two_arr { (@a, @b) }` — because the consumer's flatten
+walk then aliases what it finds.  `return (@a, 9)` was already right: `p-return`
+flattens before the frame sees it.
 
 Notes a translator needs:
 - **A plain box costs nothing** — the unboxed raw value *is* the copy.  Only a
@@ -1115,9 +1124,11 @@ Notes a translator needs:
   expands them.  Copying a list temp into an adjustable vector tells every
   consumer it is an array, and a nested aggregate then becomes ONE element:
   `sub steps { qw(x), $_[0]->SUPER::steps }` yields `ARRAY(0x1)`.  A nested
-  aggregate is therefore passed through untouched here; flattening it is the
-  consumer's job.  (That the ARGUMENT flattener spreads only one level where
-  the list-assignment one recurses is a separate, pre-existing bug — #988.)
+  aggregate is therefore never FLATTENED here — that stays the consumer's job —
+  but it *is* COPIED, same-shape, which leaves it one element and changes only
+  whose storage it is.  (That the ARGUMENT flattener spreads only one level
+  where the list-assignment one recurses is a separate, pre-existing bug —
+  #988.)
 - **The copy is of the REFERENCE, never the referent.**  `sub f { $obj }`
   returns a fresh box over the same blessed hash-table, so the object still
   `==` and method calls still reach it; only `\f()` and `$_[0] = …` stop
