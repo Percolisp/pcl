@@ -4,6 +4,20 @@ Append new entries at the top. One section per session.
 
 ---
 
+## Session 465 (2026-09-02, Fable) — the found-bugs REPORT + the ignored-tests audit plan PRESENTED (#993, §2 re-measured on `ea34c0f`); #1034 filed (LOW PRIO: declaration-site type hints visible in the IR)
+
+**USER**: "Please continue" + "write up as a low prio task for sometime in the future — (optionally?) add some modification to variable declarations or something, to specify when a variable or sub parameter just contain integers, numbers or strings.  So it is visible in the IR."  → **#1034** (design questions listed: perl-valid syntax via a `MODIFY_SCALAR_ATTRIBUTES` shim, trusted vs checked, box-model meaning, Passes.pm licensing source, ir-spec entry; not scheduled).
+
+**CI** for `1370533` / `be5c611` / `80b715c`: all three `completed success`.
+
+**The audit plan's §2 re-measured (`docs/plan-test-audit-s464.md` §2d)** — sweep from a fresh run on `ea34c0f` (GATE clean, TOTAL 18266 +0, drops 5 = census), companion from the blessed snapshot.  What moved: inline SKIPs 210 → **101 in 5 files** (state.t 46, lex.t 38, each.t 9, range.t 7, concat.t 1); blessed fails 695 → **708** (no cause column); PARTIAL 14 → **15 files / 407 rows** (kvhslice.t joined); staleness 62/43/6 → **73 identical / 35 differ / 3 none**; fully passing 58.  **A class the draft did not count: 40 companion DIFF files produce ZERO PCL rows (34,440 perl rows)** — the TRANSPILE class's twin (the file starts and dies before its first assertion), so phase 1's population is 50 files / ~36,500 rows, not 10 / 2,030; and `re/reg_posixcc.t` produces 9,190 PCL rows against perl's 2,560 (a row-count anomaly for phase 3).  The draft's 53,619 count-blessed failing rows is 51,020 across DIFF + TIMEOUT in the snapshot's own classes.
+
+**Presented to the USER (message, not a doc)**: the fourteen review bugs ranked (#1028 first — one cause, 229 sweep + 259 companion rows), the ten unprobed §4c candidates, AW's #1000–#1008, AX's #1010–#1012, the perf trio #994–#996; the plan's five §5 decisions with a recommendation each, plus the review's §5 small items.  **Decisions PENDING the USER's answer — nothing from the plan was executed this session.**
+
+**Legs**: `tools/prove-core` on the records tree (docs-only change) — see the commit; sweep as above.
+
+---
+
 ## Session 464 part 2 (2026-09-02, Fable) — ROUND 22 COMPLETE + MERGED (main `ea34c0f`): AW #972+#987, AX #985+#982 (`slices` 3.01× → 2.54×), AY the failing-tests review — FOURTEEN silent-wrong bugs filed (#1020–#1033), the #965 census corrected (210 not 132), 31 stale skips restored as passing rows, "fully passing" 62 → 58
 
 **USER**: "do a run of a couple of normal sub-jobs with Opus" (AW correctness, AX perf) and then "review the failing tests … to see if we have missed bugs like that sub calling followed `:lvalue`" (AY).  The compressed record with every ruling and number is DECIDED §s464 part 2; the review's own record is `docs/blessed-fails-review-s464.md`.  Fable review of each agent: full diff read, probes vs perl 5.40.3 on both PCL_OPT paths (ovl.pl 37 rows; ay.pl 16 rows — 12 of the review's findings reproduce on main), rebase (doc-top conflicts resolved by keeping both sides; `fail-baseline.tsv` is BINARY to git, so it was merged as a three-way ROW SET — scratchpad `merge-tsv.pl`), ff merge, legs on the final tree (gate 193/6557 xs-only; sweep 18266 +0 GATE clean; bench alone: slices 0.2027 → 0.1687 s, other rows inside the band).  Also this session: Fable profiled two WINNING bench rows on the USER's question and filed #994 (tail `return` is a throw, ~10 % of fib), #995 (loop-body `my` box churn, 23 % of arrhash) and #996 (catalogue items A3/A5 never taken).

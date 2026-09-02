@@ -1,4 +1,4 @@
-# The ignored-tests audit — plan (DRAFT, s464; to be PRESENTED s465, after #964 lands)
+# The ignored-tests audit — plan (s464 draft; §2 RE-MEASURED and PRESENTED s465, 2026-09-02 — §2d; the §5 decisions are the USER's)
 
 **Why this exists.**  The USER asked (s464, 2026-09-02), after #964 was measured:
 "how could such a big difference in semantics live for so long, despite all
@@ -45,6 +45,68 @@ times.  Each mechanism below is a hole the plan closes.
 | TRANSPILE_FAIL whole file | **state.t, 158 rows, since s415 (2026-08-20)** | one `given` block (the ruled given/when refusal) kills the file; it had 157 passing rows |
 | files called OK whose PLAN is far larger than what PCL produces | lc.t **82 of 2,659**, pack.t 5,725 of 14,722, sprintf2.t 1,642 of 1,678, split.t 184 of 219, quotemeta.t 40 of 60, chdir.t 25 of 44, each.t 51 of 65 | the OK verdict checks "no previously-passing row lost", not "the plan was produced" |
 | extraction STALENESS vs perl 5.40.3's t/ | 62 identical, **43 differ**, 6 have no counterpart | e.g. `while.t` is a 4-test file (33 lines) vs 223 upstream; `lex.t` 266 upstream-only lines, `warn.t` 141, `reset.t` 105, `index.t` 100, `die.t` 86 — some are OLD perl versions, some carry PCL edits; unseparated |
+
+### 2d. RE-MEASURED s465 (2026-09-02, Fable) on code tip `ea34c0f` — what moved since the draft
+
+Companion side from the blessed snapshot `baselines/perl-suite-run.tsv` (the
+528-file scan; no companion run this session).  Sweep side from a FRESH
+`sweep-perl-tests.pl --jobs 8` on `ea34c0f`: GATE clean, TOTAL 18266 (+0),
+drops 5 = census.
+
+**Companion (`t/`), by snapshot status:**
+
+| status | files | perl rows | PCL ok | PCL not ok | note |
+|---|---|---|---|---|---|
+| OK | 92 | 7,265 | 7,264 | 1 | |
+| DIFF | 273 | 144,655 | 61,062 | 22,427 | blessed as COUNTS (the draft's 53,619 added `uni/variables.t`, which the snapshot classes TIMEOUT: DIFF + TIMEOUT = **51,020** failing rows with no per-row list) |
+| TIMEOUT | 9 | 80,040 | 6,023 | 28,593 | `uni/variables.t` 37,698 rows unreached; `re/regexp_trielist.t` + `re/regexp_qr_embed.t` 1,264 each |
+| TRANSPILE | 10 | 2,031 | 0 | 0 | unchanged from the draft |
+| XDIFF | 111 | 330,838 | 2,790 | 911 | deliberate registrations, to be re-read once |
+| NOTAP | 30 | — | 290 | 1,702 | no TAP plan on the perl side |
+| NOT-RUN | 2 | — | — | — | `op/list.t`, `op/pack.t` quarantined (#160) since s320 |
+| FIXTURE | 1 | 44 | 42 | 2 | `op/chdir.t` (#172) |
+
+Hang set (`%QUICK_SKIP`, 8 files) and the three registered allowances above
+120 s (`re/pat_advanced.t` 900, `comp/require.t` 450, `re/pat_psycho.t` 450)
+are unchanged — only a full `--all` run reaches them.
+
+**A CLASS THE DRAFT DID NOT COUNT: 40 DIFF files produce ZERO PCL rows** —
+the file transpiles, starts, and dies before its first assertion, so it is
+the TRANSPILE class's twin (one error per file) but classed DIFF: **34,440
+perl rows**.  The ≥100-row members: `uni/lower.t` 11,720, `re/reg_fold.t`
+6,891, `uni/title.t` 5,936, `re/reg_mesg.t` 3,348, `re/regexp_nonull.t`
+2,169, `op/numconvert.t` 1,446, `re/anyof.t` 1,187, `re/subst_wamp.t` 281,
+the `re/fold_grind_{8,u,l,aa,a,d}.t` family 213+213+113+103+31+31,
+`op/incfilter.t` 153, `op/stat.t` 111 (#1032), `op/tie.t` 95,
+`op/inccode-tie.t` 89.  **Phase 1's population is therefore 50 files (10 +
+40), ~36,500 perl rows**, of which the Unicode case-fold members are
+decision §5.2.
+
+Perl rows PCL never produces, top ten: `uni/variables.t` 37,698 (TIMEOUT),
+`uni/fold.t` 18,072, `uni/lower.t` 11,720, `re/reg_fold.t` 6,891,
+`uni/upper.t` 6,228, `uni/title.t` 5,936, `re/reg_mesg.t` 3,348,
+`re/charset.t` 2,777, `re/regexp_nonull.t` 2,169, `op/numconvert.t` 1,446.
+
+Largest DIFF failing counts: `re/reg_posixcc.t` 7,646 — **PCL produces
+9,190 rows against perl's 2,560, a row-count anomaly to look at in phase 3**;
+`comp/utf.t` 4,204 of 4,216; `re/charset.t` 2,775; `comp/require.t` 835;
+`re/pat_advanced.t` 729; `re/pat_re_eval.t` 462; `op/stat_errors.t` 333
+(#1032 + #1033); `re/regexp_unicode_prop.t` 332; `op/signatures.t` 296;
+`re/regex_sets_compat.t` 258; `op/filetest.t` 250 (#1031); `op/bop.t` 245
+(#1028).
+
+**Sweep (`perl-tests/`):**
+
+| class | draft (a8b4043) | now (ea34c0f) | note |
+|---|---|---|---|
+| inline `ok(1, 'SKIP…')` rows | 132 in 11 files (an under-count; the true number was 210 in 14) | **101 in 5 files**: `state.t` 46, `lex.t` 38, `each.t` 9, `range.t` 7, `concat.t` 1 | AY restored 115 rows; `state.t`'s 46 wait on the file-level refusal, `lex.t`'s 38 on the older extraction |
+| `skip "… not supported in PCL"` calls | 9 (review §0b) | 3 by the strict pattern (`each.t` 2, `chr.t` 1); the phrase occurs in 5 files (hash 1, chr 1, each 10, range 2, lex 20 — mostly the ok(1) rows above) | phase-4a remainder |
+| blessed failing rows, no cause column | 695 | **708** | AY's honest restorations + AW's bop.t row; still no `cause` column (I3) |
+| PARTIAL files / rows past the abort | 14 / ~400 | **15 / 407**: tr.t 75, method.t 65, chop.t 52, caller.t 48, substr.t 46, ref.t 36, magic.t 19, kvhslice.t 16 (joined, as AY predicted), multideref.t 13, length.t 11, eval.t 9, readline.t 8, postfixderef.t 7, bop.t 1, yadayada.t 1 | fix targets, never skips |
+| TRANSPILE_FAIL whole file | `state.t` 158 rows | unchanged (`given/when` refusal at FILE level) | decision §5.5 |
+| OK files, planned − produced ≥ 5 | lc.t 2,577, pack.t … | `pack.t` **8,997** (14,722 planned / 5,725 produced), `lc.t` 2,577, `sprintf2.t` 36, `split.t` 35, `reset.t` 23, `quotemeta.t` 20, `chdir.t` 19, `sort.t` 17, `each.t` 14, `scalar.t` 12, `array.t` 10, `index.t` 10, `sub.t` 9, `lex.t` 8, `grep.t` 6, `infnan.t` 6, `local.t` 6, `do.t` 5 | the I2 column makes these visible per file |
+| fully passing files | 62 (five on manufactured rows) | **58** | honest |
+| staleness vs 5.40.3 (byte compare, `t/op/` copy preferred) | 62 identical / 43 differ / 6 none | **73 identical / 35 differ / 3 none** (`errno_test.t`, `min_local.t`, `parent.t`) | AY's refreshes.  Local SHORTER = upstream growth: `while.t` 33 vs 223, `lex.t` 251 vs 400, `warn.t` 142 vs 242, `die.t` 85 vs 126, `index.t` 307 vs 369, `concat.t` 821 vs 863, `cond.t` 17 vs 31.  Local LONGER = PCL edits to separate first: `state.t` 616 vs 567, `each.t` 371 vs 330, `bless.t` 255 vs 236, `vec.t` 275 vs 261, `cmpchain.t` 183 vs 175, `method.t` 772 vs 760 |
 
 ### 2c. What is fine
 

@@ -11,6 +11,12 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s465 (2026-09-02, Fable) — the audit plan PRESENTED (#993) with §2 RE-MEASURED on `ea34c0f`; the s464 found-bugs REPORTED; #1034 filed (LOW PRIO type hints in the IR)
+
+- **Re-measurement (`docs/plan-test-audit-s464.md` §2d)**: inline SKIPs **101 in 5 files** (was 210/14 before AY); blessed fails **708**, no cause column; PARTIAL **15 / 407 rows**; staleness **73 / 35 / 3**; **40 companion DIFF files with ZERO PCL rows (34,440 perl rows) = a phase-1 class the draft missed** — phase 1 is 50 files, not 10; `re/reg_posixcc.t` 9,190 PCL rows vs perl 2,560 (anomaly).  Sweep on the tip: GATE clean, TOTAL 18266 (+0), drops 5.
+- **#1034 (USER, LOW PRIORITY, unscheduled)**: optional declaration-site type hints (`int` / `num` / `str`) on lexicals and sub parameters, visible in the emitted CL as a fact the Kind-A raw emissions may use where inference is blind (call boundaries, elements).  Design questions in the task; perl-valid syntax candidate = a `my $i :int` attribute through a `MODIFY_SCALAR_ATTRIBUTES` shim.  Do not start unasked.
+- **The plan's five §5 decisions are ASKED, not ruled** — answers land here when the USER gives them.
+
 ## s464 part 2 (2026-09-02, Fable) — ROUND 22 COMPLETE: AW (#972 + #987) + AX (#985 + #982) + AY (the failing-tests REVIEW, #965 part) MERGED ff, main `ea34c0f`; FOURTEEN silent-wrong bugs found by reading the rows nobody read; `slices` 3.02× → 2.48× perl
 
 - **USER (2026-09-02): "do a run of a couple of normal sub-jobs with Opus"** → AW correctness + AX perf (the s452 shape); then **"review the failing tests … to see if we have missed bugs like that sub calling followed `:lvalue`"** → AY.  Three agents, no ownership collision (AX's #982 stayed in the fixnum arm; AW's #972 in the overloaded-object arm of the same string path).
