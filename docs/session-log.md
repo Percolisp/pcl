@@ -143,6 +143,139 @@ source lines — the task's steps 2–4.
 
 ---
 
+## Session 466bd (2026-09-03/04, Opus, round 23 resumed) — #995: a write to a container ELEMENT writes the element; the subscript is a READ (arrhash-k −25 %)
+
+**The bug was ONE false positive, and it was already measured.**  s465bb's
+addendum to #995 had done the task's first instruction — *measure why `$k`
+did not get the raw slot* — and the answer superseded both candidate fixes:
+`my $k = "k".($i%500); $h{$k}++` already qualifies for the existing raw slot,
+and `PCL_B_DEBUG` showed one reason taking it away, `write-incdec`.
+`Pl::VarAnnotator`'s tree walk records a boxing event for every lvalue it
+cannot prove is a plain scalar, and **only the `=` arm asked WHERE the write
+lands**.  `++`/`--`, the compound assigns, `=~`, the mutating builtins
+(chomp/read/tie/pos/4-arg substr/open), an argument to a known `@_`-writing
+sub and `\` each `_tw_mark`-ed the WHOLE operand subtree — so `$h{$k}++`,
+`$h{$k} .= "x"`, `$h{$k} =~ s///` and `chomp $h{$k}` recorded a WRITE against
+the hash KEY, and `$a[$i]++` against the index.  One box allocated and one
+`box-set` per iteration for a variable perl only reads: 15.4 % `%make-p-box`
++ 8.1 % `box-set` of the profile the task was filed from.
+
+**The fix is one marker every write arm asks** (`_tw_mark_lvalue`, rule 11 —
+the arms that used to disagree with `=` now cannot).  It walks the access
+chain down to its ROOT, and the chain is the whole family, not two types:
+`%ACCESS_NODE` = h_acc / a_acc / h_ref_acc / a_ref_acc / slice_h_acc /
+slice_a_acc / kv_slice_h_acc / kv_slice_a_acc, all shaped `[BASE,
+SUBSCRIPT...]`.  What the write reaches:
+
+- **a plain `%h`/`@a` root → NO scalar at all.**  `$h{$k}{$j} = 1` vivifies
+  into `%h`'s own element box, never into a lexical slot — so the inherited
+  version's "mark every $scalar under the base" was over-marking, and it also
+  polluted the same-named scalar through the base token's `$h` content.
+- **a SCALAR root (`$r->{A}[0]`, `$$r{k}`, `@{$r}{…}`) → `write-deref-viv`**:
+  the vivified container is written BACK into `$r`'s box, so `$r` stays boxed.
+  That is exists_sub.t t13 — an unboxed root re-vivified a fresh hash on every
+  deref — and it is why the rule cannot simply be "subscripts are reads".
+- **anything else** (a plain `$x`, `$$r`, `substr($x,…)`, a paren list,
+  `++($x = 5)`) → the whole subtree with the caller's own reason, unchanged.
+
+The subscripts are then read-walked exactly as before, so the key/index use
+classes (h_acc key → strkey, a_acc index → num) and any embedded write
+(`++($x = 5)`, `$h{$k++}++`) are untouched.
+
+**MEASURED.**  Emission over the 111-file perl-tests corpus and the 6 shapes
+files: **IDENTICAL** (nothing there meets the raw-slot verdict's *other*
+conditions — a single `my`, no string eval in the region, raw-shaped writes).
+Emission A/B over **1006 files** (22 `lib/` shims + perl's own t/ + the
+four-dist cpan board): **987 SAME / 19 DIFF / 0 RCDIFF**, and every diff is
+the one family — a binding whose only "write" was through a subscript loses
+its `(make-p-box nil)` + `p-my-=` for a raw let-init (List::Util's `shuffle`
+`$j`, Math::BigInt::Calc `$j`/`$dst`/`$prod`, Test2's `$class` — which also
+turns `p-args-body` into `p-raw-params` — Text::CSV_PP `$i`/`$sep`,
+podcheck's `$addr`, five more), a foreach variable takes the `-raw` arm, or a
+`p-for` init hoists into the `let`.  Five of the 19 also pick up the existing
+B-str freeze (`%pcl-to-string-strict`), which is the verdict machinery
+downstream of the removed event, not a new rule.
+
+**BENCH — a new instrument, because the tool could not see this change.**
+`tools/bench-exec.pl`'s runtime A/B (`BENCH_RT_B`) shares ONE transpile
+between its two columns, so it is blind to an EMISSION change; and a
+tree-vs-tree run of the whole tool carries a per-tree offset (the byte-
+identical `feread` row read −8 % across trees on a loaded box).  So **`tools/bench-emission-ab.pl`** (new, checked in): one core, both
+compilers' emissions of the same program, interleaved best-of-K, with the
+emission identity checked and PRINTED per row â which makes every control
+self-declaring.
+
+    tools/bench-emission-ab.pl --ref 57848f3 prog.pl 600000
+
+| row | emission across the two trees | branch vs 57848f3 |
+|---|---|---|
+| **arrhash-k** | **DIFFERENT** | **−25.4 % median of 5** (−17.2 / −25.0 / −25.4 / −28.4 / −35.9) |
+| arrhash | IDENTICAL | +0.7 %, −2.9 %, −5.7 % |
+| slices | IDENTICAL | +1.8 % |
+| feread | IDENTICAL | +1.3 %, −2.4 %, −3.1 % |
+| listcopy | IDENTICAL | +3.2 % |
+
+The controls ARE the noise band — eight runs of byte-identical pairs span
+−5.7 … +3.2 % (and one run read −31.2 % when a load spike sat on the B
+slots for every round, which is why the instrument's header says to run the
+control in the same window and repeat); the one row that CAN move has a
+median of −25.4 % over five runs, never once inside the band.
+
+Against perl the row goes **1.37–1.55x → 1.06–1.23x**
+(`tools/bench-exec.pl`, three alternating runs per side).  It is still slower
+than perl — the residue is the task's other two observations, `"k" . NUM`
+taking `%p-.-slow` and `$h{$k}++` going through `p-gethash-box`, both still
+filed.  A byte-compare of all 21 bench rows' emission across the two trees
+says **arrhash-k is the only one that differs**, so no other row's movement
+in any run is attributable.
+
+**Bars.**  Gate **197 files / 6719 tests**, only the 13 pclxs xs rows failing
+(196/6696 + this session's guard file).  Full sweep **GATE clean, TOTAL
+18493 (+0)**, 0 new / 0 fixed, drops 5 = census, SHORTFALL 12257 (+0),
+CAUSES unchanged (no baseline edited — none needed).  `PCL_OPT=none` runs
+identically on six probe programs, and `Pl/t/passes-01.t` is green.
+Companion: the three moved t/ files that the snapshot tracks were run on
+BOTH trees and are identical row for row (`op/groups.t` OK 4/0,
+`op/signame_canonical.t` DIFF, `re/reg_mesg.t` DIFF) — `re/reg_mesg.t`'s
+signature differs from the blessed snapshot on the BASE too, so that text is
+pre-existing, not mine.  `uni/variables.t` (blessed TIMEOUT, 66880 planned
+rows) was NOT re-run: under a timeout its C_ok is load-dependent, so it is a
+stated coverage hole, not an inferred absence.
+
+Guard **`Pl/t/lvalue-root-01.t`** (23 transpile-shape rows, 7 s): the raw slot
+where perl only reads, the box where a box is right, plus the `PCL_OPT=none`
+/ `-raw-slot` rows that keep the transform inside the registry.
+Inverse-guarded on a 57848f3 worktree — **rows 1-4, 6-12 and 14 fail there**.
+Generation **v2-640**; the three checked-in artifacts regenerated (their
+bodies are byte-identical — only the gen stamp moved).
+
+**17 probes vs perl 5.40.3, and three of them found PRE-EXISTING bugs** (all
+reproduced on a 57848f3 worktree, all filed, none fixed here — they are not
+#995's cause and a runtime change would have muddied the attribution):
+
+- **#1058, a SILENT WRONG in the counting idiom**: `my %h; $h{a}{b}++` leaves
+  `$h{a}{b}` **undef** where perl says 1 (`$g{x}{y}++` twice: still undef;
+  `$a[0]{k}++` CRASHES).  `p-gethash-box` is the EAGER lvalue accessor, but
+  when its container is an undef box — exactly what the inner call of a
+  nested `++` hands it — it returns a **fresh detached box** instead of
+  vivifying through it.  `exists $h{a}` is 1, so the damage is invisible to
+  `exists`/`keys`.  Rule 12 exactly: a missing case falling through to a
+  default that produces a VALUE the program consumes.
+- **#1057**: a COERCING compound assign to a nested element (`$h{a}{b} .= "x"`,
+  `+=`) lowers the chain through the plain READ accessor `p-gethash` and dies
+  with an SBCL type error; `++`, `=` and `||=` take other paths and work, and
+  `$h{a}[0] .= "x"` works while `$a[0]{k} .= "x"` does not — so a fix has to
+  enumerate the accessor pairs from the one place that builds a chain.
+- **#1056** (perf residue of this session's own change): only h_acc/a_acc
+  classify their subscript's USE, so a key read through `->{}` or a slice is
+  `opaque` and cannot take the B-str freeze that the same key under `$h{…}`
+  gets.
+
+The tie probe's divergence is the pre-existing `tie %h` non-support
+announcement (#155) — and it also *proves the rule*: perl's `STORE` writing
+`$_[1]` does not reach the caller's key variable, so a subscript really is
+only a read.
+
 ## Session 465ba (2026-09-03, Opus, round 23) — #1028: the bitwise `& | ^ ~` MODE DECISION (bop.t 253/256 → 480/29, the largest cluster in the sweep baseline) + #1032: a bareword filehandle is a NAME in a stat / filetest slot
 
 **#1028.**  perl's `pp_bit_and` asks ONE question of the two operands — `SvNIOKp(left) || SvNIOKp(right)`, does either SV carry a NUMBER? — and if neither does, `do_vop` STRINGIFIES both and operates byte by byte.  PCL asked `(and (stringp v) (not (looks-like-number v)))`, which sends every NON-string state to the NUMERIC side, so `undef | "abc"` was 0 where perl says `abc` and `[1] | "\0"x40` was 1 where perl says `ARRAY(0x…)`.  229 blessed `bop.t` rows — a third of the entire baseline — behind one predicate, with no recorded cause.  ONE classifier now, `%p-bitwise-operand-kind`, enumerating the same box states `stringify-value` and `box-nv` enumerate and answering :NUMBER / :STRING / :REFERENCE; an unlisted state DIES naming its type.
