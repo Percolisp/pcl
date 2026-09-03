@@ -2,6 +2,80 @@
 
 Append new entries at the top. One section per session.
 
+## Session 466 (Fable, 2026-09-03) — s465az REVIEWED + MERGED (the four audit instruments), BC + BD RELAUNCHED, and #1035 steps 0 + 1: the declaration form carries its CLASS (`p-let`)
+
+**Part 1 — the merge review of s465az (phase 0 of the ignored-tests audit, #993).**
+Diff read in full (sweep-diff.pl, sweep-perl-tests.pl, run-perl-suite.pl, the new
+`tools/lib/PCLShortfall.pm`, `tools/t/audit-instruments.t`, the docs).  Reconciliations:
+`fail-baseline.tsv` against main's post-#1028 row set — 484 = 484 with column 6
+stripped, zero rows either way, all 484 six-column, 331 caused; `row-shortfall.tsv`
+against its OWN totals — 376,788 caused + **82,666 UNEXPLAINED in 183 files** =
+459,454 over 260 files.  The agent's report had said 86,126 / 185, which does not add
+up to its own total; the RECORD was corrected, not the file (lesson: recompute every
+quoted count from the blessed FILE, never from the run report that preceded the last
+hand-edit).  Gate on the AZ tree 196 / 6696, only the 13 pclxs xs rows.  Rebase onto
+`c562d21` clean; ff as main `57848f3`.
+
+**Review fixes (one commit).**  The sweep's shortfall is `planned - (pass+fail)` — a
+SKIPPED row COUNTS (the code's own comment argues it, the unit test states it, and
+pack.t's blessed 8,997 ARE skips) — but the definition comment said
+`(pass+fail+skip)` in FOUR places (PCLShortfall.pm twice, sweep-diff.pl, runbook
+§4c); all four now say what the code does.  The companion reader tested
+`eq 'UNEXPLAINED'` where sweep-diff.pl and the blesser use `/^UNEXPLAINED/` — one
+predicate now.  The I4 cadence line went into CLAUDE.md: **the full `--all --jobs 4`
+companion AT LEAST ONCE PER ROUND**, run with `PCL_SESSION=sNNN … --bless-stamps`, and
+how to read the ROW DIFF / SHORTFALL / NOT-RUN STAMPS blocks.
+
+**Legs on the merged tree.**  Sweep: GATE clean, TOTAL 18493 (+0), drops 5 = census,
+shortfall 12,257 (+0; 222 unrun + 12,035 skipped), CAUSES 153 of 473 keys cause-less;
+the runner row of the cadence table — all 108 files identical in (status, pass, fail,
+planned, drops) before and after the runner change.  Companion `PCL_SESSION=s466 --all
+--jobs 4 --bless-stamps` (41 min, 528 files, both SNAPSHOT holes zero, the 13 stamps blessed at s466 — 11 measured, the quarantined pair still NEVER): **the first ROW DIFF read 343 NEW ROW / 450 FIXED ROW / 84 UNVERIFIED / 3 LOST, and reading it found FOUR instrument bugs** (commit `e660d12`): 342 of the 343 NEW rows were a STALE LOG — io/crlf_through.t was parallel DIFF 900/0, serial OK 942/0, and an OK file writes no log, so the parallel run's log stayed and the row diff read it (fixed: a non-diverging file unlinks its log); comp/proto.t's one NEW + one FIXED row was a `CODE(0x…)` address in the description (fixed: perl's `TYPE(0x…)` shape normalizes to `TYPE(0xADDR)` in the ONE reader; the baseline row re-keyed by hand); the shortfall GREW by 15,000 rows in uni/variables.t because a TIMEOUT file's row count is a load reading (27,934 / 19,396 / 7,881 not-ok rows in three runs of one tree — TIMEOUT files are no longer compared); and the 40-row sample hid the per-file picture (the report now leads with `NEW ROW by file: …`).  Of the 11 count-snapshot movers 9 were LOAD (crlf/through/the regexp family; serial re-run agrees with the snapshot).  The re-run on the fixed runner (`--dir io --dir op --dir comp --dir uni --quick`, f330e5f) reads 178 NEW / 407 FIXED with the breakdown: op/bop.t 217 FIXED (#1028), op/filetest.t 4 NEW (#1032's honest failures), and five SYMMETRIC pairs (op/write.t 86/86 = the 500-row cap window shifting as #1032 un-hid 90 rows, #1051; op/hash.t 57/57 = hash-order-dependent counts IN the descriptions; op/undef.t 14/14, op/require_errors.t 4/4, op/inc.t 2/2 = volatile descriptions to identify) plus op/utfhash.t net 8, uni/overload.t 6, op/closure.t 2 (+5 rows produced; shortfall 6 → 1), io/open.t 1, io/pvbm.t 1 to bisect.  **Attribution, the per-file blesses and the volatile-description report bucket are DELEGATED to Opus agent BE (session s466be) — its record follows.**
+
+**Housekeeping.**  Five merged worktrees pruned (AZ, BB, BA, round 21, plus the two
+kept ones stay: AY for its cited scratch, BC/BD for their resumed work); every pruned
+worktree's `scratch/` copied to the session scratchpad first.  Task #993 carries the
+phase-0 DONE note; the queue is phases 1–5.
+
+**Part 2 — BC (#1037) and BD (#995) RELAUNCHED** as fresh Opus agents in their kept
+worktrees, told to WIP-commit the inherited diff, rebase onto main, take generation
+strings v2-630 / v2-640 (a gap above main's), never run the companion `--all`, never
+merge or push.  Their reports are reviewed when they arrive.
+
+**Part 3 — #1035 steps 0 + 1 (Fable, worktree `s466-1035`): the declaration form carries its CLASS.**
+The `(let ((NAME INIT)) …)` node for a perl `my` was built at SIXTEEN separate sites of
+Pl/Parser2.pm — the rule-11 shape that made a binding's class invisible in the IR: each
+site knew which initform it chose and none said so.  **Step 0** (`cc1dd14`): ONE printer —
+`_decl_entry($name, $class, $init)` over a CLOSED class set (:box :scalar :num :str
+:str-buffer :array :hash; unknown DIES), `_decl_fresh` (class by sigil, one `_sigil_of`
+shared with `_fresh_container`), `_slot_class` (the same VarAnnotator keys `_wrap_freeze`
+reads), `_decl_let`; byte-identical: corpus-diff IDENTICAL over 111 + shapes, emission-ab
+lib 22/22 SAME, six transpiles incl. pack.t byte-identical to main.  **Step 1**: the
+printer emits `(p-let ((NAME CLASS INIT)) …)`; the runtime's DEAD legacy `p-let` (v1's
+"every binding is a box") is replaced by the class-dispatching macro whose expansion IS
+the old `let` — proven by `macroexpand-1` EQUAL, and an unknown class errors at
+macroexpansion naming the set.  `:scalar` was ADDED to the task's class set: the plain
+`unboxable` verdict is a raw unboxed slot with no fixed value family, and the closed set
+had no name for it.  `PCL_IR_PLAIN=1` in the ONE printer prints the pre-s466 spelling —
+a verification switch, not in Pl/Passes.pm — and it is the normaliser bar:
+`PCL_IR_PLAIN=1 tools/corpus-diff.pl cc1dd14` IDENTICAL over 111 + shapes proves the
+flip touched nothing but the syntax; `emission-ab --env PCL_IR_PLAIN=1` over lib: 22
+DIFF (the syntax), RCDIFF 0.  Pl/CLForm.pm keeps `NAME CLASS` on the head line of a
+multi-line entry (shape-keyed).  ir-spec §2b.2a is the normative text; generation
+**v2-611**; the three artifacts regenerated (`tools/rebuild-pack`; `./pl2cl --extension
+lib/mro.pm` + `tools/tag-license`, same for warnings).  **72 Pl/t rows in 17 files
+match the old spelling; 68 in 10 files are `my` bindings and were rewritten to the new
+one, each STRENGTHENED with its class** (the rest bind runtime temporaries — `*wantarray*`,
+`_prev`, `--name--`, v1's `p-box-for-local` — and stay `let`).  Bars: gate 196/6696 —
+only the 13 xs rows after two non-xs failures were fixed and re-run alone (an untracked
+smoke file tripped the license row; raw-verdict-01.t's 27 pair-shaped rows needed the
+class); sweep GATE clean, TOTAL 18493 (+0), drops 5, shortfall +0.  NOT done: the FACTS
+keys (:perl/:why manifest, :captured), `p-raw-params` classes, the `p-sub` facts plist,
+source lines — the task's steps 2–4.
+
+---
+
+
 ---
 
 ## Session 465ba (2026-09-03, Opus, round 23) — #1028: the bitwise `& | ^ ~` MODE DECISION (bop.t 253/256 → 480/29, the largest cluster in the sweep baseline) + #1032: a bareword filehandle is a NAME in a stat / filetest slot
