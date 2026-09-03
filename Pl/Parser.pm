@@ -10781,6 +10781,10 @@ sub _announce_dropped_statement {
 # it is reached.
 sub announce_refusal {
   my ($self, $file, $line, $text, $refusal) = @_;
+  # Prototype-extraction parses throw their output away (_emit is a no-op), so
+  # a refusal there costs the program nothing and would only double the line —
+  # the same first gate `_announce_dropped_statement` applies.
+  return if $self->collect_prototypes_only;
   die "PCL: $refusal, at (eval) line $line\n" if $self->eval_mode;
   return if !($ANNOUNCE_DROPS || ($ENV{PCL_DROP_ANNOUNCE} // '') eq 'all');
   return if $announced_drop{"$file:$line:$text"}++;
