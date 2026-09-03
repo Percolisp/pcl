@@ -117,17 +117,28 @@ keeps_dropping('$foo = doit $object "FOO";',
                'indirect object syntax is NOT refused here');
 
 # --- end to end: the refusal reaches the user, and only for these families
+#
+# SINCE s466 (task #1037) A RULED REFUSAL IS STATEMENT-LEVEL: pl2cl exits 0 and
+# emits a run-time die at the refused statement's own site, so the rest of the
+# file compiles and runs.  The rows below therefore assert BOTH halves — the
+# transpile-time announcement (its own verb, `PCL: refused statement at …`) and
+# the emitted die carrying the byte-identical ruled text this file used to read
+# off pl2cl's stderr.  `Pl/t/refusal-site-01.t` owns the run-time half.
 SKIP: {
-  skip "pl2cl not found", 3 unless -x $pl2cl;
+  skip "pl2cl not found", 4 unless -x $pl2cl;
 
   my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
   print $fh "my \$x = 1;\ngiven (\$x) { when (1) { print \"a\" } }\n";
   close $fh;
-  my (undef, $err, $rc) = PCLCore::transpile_raw("$pl2cl $pl");
-  isnt($rc, 0, 'pl2cl exits nonzero on a ruled refusal');
-  like($err, qr/^PCL: given\/when \(feature 'switch'\) is not supported/m,
-       'the refusal text is perl-shaped and names the feature');
-  like($err, qr/, at \Q$pl\E line 2$/m, 'the refusal names file and line');
+  my ($cl, $err, $rc) = PCLCore::transpile_raw("$pl2cl $pl");
+  is($rc, 0, 'pl2cl exits 0: the refusal costs the statement, not the file');
+  like($err, qr/^PCL: refused statement at \Q$pl\E line 2: .* -- given\/when/m,
+       'the announcement has its own verb and names file, line and feature');
+  like($cl, qr/\Q;; RULED REFUSAL: given\/when (feature 'switch') is not supported\E/,
+       'the statement is replaced by the refusal form, not by a PARSE ERROR');
+  like($cl,
+       qr/PCL: given\/when \(feature 'switch'\) is not supported[^"]*, at \Q$pl\E line 2/,
+       'and the emitted die carries the ruled text with file and line');
 }
 
 # A drop that is NOT one of the ruled families still only drops: pl2cl exits 0
@@ -156,8 +167,10 @@ SKIP: {
   my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
   print $fh "my \@a = ('x');\nfor ('x') { my \$r = (/x/ ~~ \@a); print \$r }\n";
   close $fh;
-  my (undef, $err, $rc) = PCLCore::transpile_raw("$pl2cl $pl");
-  isnt($rc, 0, 'a match on the left keeps `~~` INFIX (refused, not split)');
-  like($err, qr/^PCL: smart match/m, 'and the refusal is the smart-match one');
+  my ($cl, $err, undef) = PCLCore::transpile_raw("$pl2cl $pl");
+  like($err, qr/^PCL: refused statement at .* -- smart match/m,
+       'a match on the left keeps `~~` INFIX (refused, not split)');
+  like($cl, qr/\Q;; RULED REFUSAL: smart match\E/,
+       'and the refusal reaches the emission as the smart-match one');
 }
 done_testing();

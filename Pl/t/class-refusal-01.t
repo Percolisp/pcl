@@ -36,7 +36,7 @@ my $pl2cl        = "$project_root/pl2cl";
 
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 
-plan tests => 11;
+plan tests => 15;
 
 # Transpile SRC and return ($stdout, $stderr, $rc) — transpile_raw judges
 # nothing, which is what a row asserting a REFUSAL needs.
@@ -48,11 +48,20 @@ sub attempt {
     return PCLCore::transpile_raw("$pl2cl $pl");
 }
 
+# SINCE s466 (task #1037) THE REFUSAL IS STATEMENT-LEVEL: the file transpiles
+# (rc 0) and the refused statement becomes a run-time die at its own site, so
+# every other statement of the file still runs.  Both halves are asserted —
+# the announcement, which carries the refusal's own verb, and the emitted die,
+# which carries the byte-identical perl-shaped text this file used to read off
+# pl2cl's stderr.
 sub refuses {
     my ($name, $src) = @_;
-    my (undef, $err, $rc) = attempt($src);
-    like($err, qr/PCL: feature 'class' is not supported/,
-         "$name — refuses, perl-shaped")
+    my ($cl, $err, $rc) = attempt($src);
+    like($err, qr/^PCL: refused statement at .* -- feature 'class' is not supported$/m,
+         "$name — refuses, announced at transpile")
+      or diag("rc=$rc stderr=$err");
+    like($cl, qr/PCL: feature 'class' is not supported, at \S+ line \d+/,
+         "$name — and the emitted die is perl-shaped")
       or diag("rc=$rc stderr=$err");
 }
 

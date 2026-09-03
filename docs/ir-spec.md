@@ -2337,6 +2337,48 @@ rows until #457 closed the drop; ruled s437).
 `drops` column all find drops by the exact text `;; PARSE ERROR:`. A
 translator may discard the comment; PCL's emitter may not reword it.
 
+### 9.3b The refusal form: a statement PCL deliberately declines (normative, s466)
+
+A **ruled refusal** — a construct PCL recognises and will not translate, each
+one carrying an entry in `docs/not-supported.md` — takes the same shape, with a
+different marker and message:
+
+```lisp
+(progn ;; RULED REFUSAL: <reason>
+  (p-die "PCL: <reason>, at FILE line N
+"))
+```
+
+Everything §9.3 says about the drop form's run-time meaning holds verbatim:
+reaching it signals a Perl `die`, trappable in `eval { … }`; the unit of the
+decision is the statement and the unit of the loss is the enclosing top-level
+form; a translator must reproduce the die and never lower it to a no-op.
+
+Two things differ, both deliberate:
+
+* **The marker is `;; RULED REFUSAL:`, never `;; PARSE ERROR:`.** The second
+  string is the drop census's key, and the census exists to be *shrunk* — it
+  counts compiler gaps PCL intends to close. A refusal is not a gap: no fix to
+  the term grammar will ever close it. A translator may discard both comments;
+  PCL's emitter may not merge them.
+* **The message is the feature's own wording**, `PCL: <reason>, at FILE line N`
+  — byte-identical to the text the refusal used to raise at transpile time and
+  to the text `docs/not-supported.md` documents — rather than the drop form's
+  `statement not supported at F line N: <text> -- <reason>`.
+
+**In `eval STRING` a refusal still arrives at transpile time**, landing in
+`$@`, because the emission is discarded on error and there is nothing to carry
+a run-time form; that is also what perl does with code that does not compile.
+The same is true of a drop (§9.3, task #363).
+
+Before s466 a refusal aborted the whole transpile. That was a bug in the
+refusal, not a property of the feature: `perl-tests/state.t` and perl's own
+`t/op/state.t` each contain one `given` block in an otherwise supported file
+and each lost every one of its ~160 rows to it (USER ruling, s465; task #1037).
+The three refusals that are *not* statement-level — the `our`-alias region, the
+oversized generated form, and the two string-eval refusals — each say why in
+their `not-supported.md` entry.
+
 ## 10. Op inventory — family rules
 
 The full inventory is the export list of the runtime namespace (~500

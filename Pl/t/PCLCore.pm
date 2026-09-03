@@ -54,6 +54,13 @@ sub sbcl_prefix {
 #     FAILS the row — a dropped statement inside a gate snippet is a compiler
 #     bug, and the gate is the right place to catch it (rule 12's spirit: the
 #     sin is the silence).
+#   * `PCL: refused statement …` (task #1037's prefix, the transpile half of a
+#     ruled refusal) FAILS it too.  Before s466 such a snippet made pl2cl EXIT
+#     NONZERO, which this function already failed on; now the file transpiles
+#     and the statement dies when reached, so without this arm a gate snippet
+#     that hits a ruled refusal would go from a loud failure to a diag.  A
+#     refusal is not a compiler bug, but it is never what a gate row MEANT to
+#     write — and a row that means it asks for transpile_raw().
 #   * a nonzero pl2cl exit FAILS the row, with stderr as the diagnostic.
 #   * anything else on stderr is passed through as a diag and changes no
 #     verdict — a warning is information, not a failure.
@@ -76,13 +83,14 @@ sub transpile {
     my ($cmd) = @_;
     my ($cl, $err, $rc) = transpile_raw($cmd);
 
-    my @drops = grep { /^PCL: statement dropped/ } split /\n/, $err;
+    my @drops = grep { /^PCL: statement dropped|^PCL: refused statement/ }
+                split /\n/, $err;
     if ($rc != 0) {
         Test::More::fail("transpile FAILED (exit " . ($rc >> 8) . "): $cmd");
         Test::More::diag($err) if length $err;
     }
     elsif (@drops) {
-        Test::More::fail("transpile DROPPED a statement: $cmd");
+        Test::More::fail("transpile DROPPED or REFUSED a statement: $cmd");
         Test::More::diag($_) for @drops;
     }
     elsif (length $err) {

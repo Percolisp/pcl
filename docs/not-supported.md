@@ -29,6 +29,42 @@ says how permanent it is:
 > history (`git show 959bf43:docs/fable-answers-sNNN.md`).  `sNNN` names a
 > working session, `#NNN` an internal task.
 
+### The shape of a ruled refusal (RULED s465 by the USER; task #1037)
+
+A handful of entries below are **refusals**: PCL recognises the construct,
+declines to translate it, and says so in perl's own words.  Since s466 every
+one of them is a **STATEMENT-level** event, the same shape as the drop form
+(`docs/ir-spec.md` §9.3):
+
+* the file **transpiles**, and every other statement in it compiles and runs;
+* the refused statement is replaced by a run-time `die` at its own site,
+  carrying `PCL: <reason>, at FILE line N` — perl-shaped, and **trappable**:
+  `eval { … }; $@` sees it like any other `die`;
+* the emitted marker is `;; RULED REFUSAL: <reason>`, deliberately **not** the
+  drop census's `;; PARSE ERROR:` key — a refusal is not a compiler gap to be
+  closed, so it never enters the census that exists to be shrunk;
+* the transpile also announces it once on stderr, with its own verb:
+  `PCL: refused statement at FILE line N: <text> -- <reason>`;
+* a program that never *reaches* the statement is unaffected;
+* in `eval STRING` the refusal still arrives at transpile time and lands in
+  `$@`, because there the emission is discarded and nothing could carry a
+  run-time form — which is also exactly what perl does with code that does not
+  compile.
+
+**A refusal that aborted the whole transpile was a bug in the refusal, not a
+property of the feature**: `perl-tests/state.t` and perl's own `t/op/state.t`
+each contain exactly one `given` block in an otherwise supported file, and
+each lost every one of its ~160 rows to it.
+
+Three refusals are **not** statement-level, each for a reason of its own, and
+each says so in its entry: [an `our` alias whose requalified region cannot be
+determined](#an-our-alias-whose-requalified-region-contains-a-nested-package-statement-or-an-inner-scope-re-declaration)
+(the unit is a *region*, not a statement), [a single generated top-level form
+above 64k characters](#a-single-generated-top-level-form-above-64k-characters)
+(the unit is a *generated form*), and the two [string](#string-eval-with-multiple-package-sections)
+[eval](#string-eval-ending-in-an-unconvertible-declaration) refusals (the unit
+is the eval, which is what perl's compile error covers too).
+
 ## The short list
 
 The handful most likely to matter to a program that is otherwise portable:
@@ -628,14 +664,22 @@ smart-match operator were introduced experimentally in Perl 5.10
 (`use feature 'switch'`), deprecated through 5.34–5.38, and **removed in
 Perl 5.42** — a file using them no longer compiles at all.
 
-**PCL behaviour:** Not implemented, and since s415 (task #371) **PCL
-refuses such a file the way perl 5.42 does** rather than dropping the
-statement and running the rest:
+**PCL behaviour:** Not implemented, and since s415 (task #371) **PCL refuses
+the statement the way perl 5.42 refuses the construct**, rather than dropping
+it and running on:
 
 ```
 PCL: given/when (feature 'switch') is not supported -- removed in perl 5.42, at FILE line N
 PCL: smart match (~~) is not supported -- removed in perl 5.42, at FILE line N
 ```
+
+**The refusal is STATEMENT-level** — see [the shape of a ruled
+refusal](#the-shape-of-a-ruled-refusal-ruled-s465-by-the-user-task-1037).
+Since s466 (task #1037, the USER's s465 ruling) the file transpiles, the
+`given` dies with that text *when it is reached* (trappable in `eval`), and
+every other statement runs.  Until s466 it died at transpile time and took the
+whole file with it, which is what cost `perl-tests/state.t` and `t/op/state.t`
+their ~160 rows each for one `given` block.
 
 The refusal is decided at the drop site (`Pl/Parser.pm`
 `_ruled_refusal_for_drop`), so a statement that compiles never reaches it.
@@ -650,9 +694,13 @@ implementing a deleted construct would add complexity for zero practical
 gain — and running a *silently different* program is worse than refusing.
 
 **Affected tests:** `perl-tests/switch.t` — entire file skipped.
-`perl-tests/state.t` and `t/op/state.t` each contain one `given` block and
-therefore now refuse as a whole (their rows left the baselines in s415 with
-this cause).  `t/op/switch.t`, `t/op/smartmatch.t`, `t/op/coreamp.t` and
+`perl-tests/state.t` and `t/op/state.t` each contain one `given` block, inside
+a loop at file scope; their rows left the baselines in s415 when the refusal
+was file-level and **came back in s466** when it became statement-level — the
+file now runs up to the `given` and dies there, so it contributes every row
+before it (`perl-tests/state.t` 88 of 166; the rest are lost with the
+enclosing top-level form, `docs/ir-spec.md` §9.3).
+`t/op/switch.t`, `t/op/smartmatch.t`, `t/op/coreamp.t` and
 `t/op/tie_fetch_count.t` register as expected divergences.  The `~~`
 operator is also excluded from `perl-tests/cmpchain.t` (the few tests that
 used it are commented out).
@@ -863,7 +911,9 @@ stay at their defaults.
 
 A header the stripper does not match — a quoted or package-qualified name
 (`format 'one =`, `format ::two =`, `format +x =`) — reaches the parser and
-loses its statement.  Since s415 (task #371) that case **refuses** instead:
+loses its statement.  Since s415 (task #371) that case **refuses** instead — and since s466
+(task #1037) the refusal is [STATEMENT-level](#the-shape-of-a-ruled-refusal-ruled-s465-by-the-user-task-1037):
+the file transpiles and only that statement dies, when it is reached:
 
 ```
 PCL: format/write report formatting is not supported, at FILE line N
@@ -991,7 +1041,9 @@ declaration, however it leaves — fall-through, `return`, `last`, or `die`.
 
 **PCL behaviour:** Not implemented.  Since s415 (task #371) a `defer` block
 **refuses** rather than dropping the statement (which would silently skip the
-cleanup the program depends on):
+cleanup the program depends on), and since s466 (task #1037) that refusal is
+[STATEMENT-level](#the-shape-of-a-ruled-refusal-ruled-s465-by-the-user-task-1037)
+— the file transpiles and only the `defer` statement dies, when reached:
 
 ```
 PCL: defer blocks are not supported, at FILE line N
@@ -2168,8 +2220,12 @@ declares inheritance.  Instances are opaque (not blessed hashes).
 **PCL behaviour:** Not implemented.  The `class`/`field`/`method` keywords are
 not recognized; a file using them mis-parses (PPI has only partial knowledge
 of the syntax — it reads `method m { 1 }` as a `m{...}` MATCH, which is what
-that text means in a Perl without the feature).  Since s415 (task #371) the
-transpile **refuses** such a file instead of dropping the statement:
+that text means in a Perl without the feature).  Since s415 (task #371) PCL
+**refuses** instead of dropping the statement, and since s466 (task #1037) the
+refusal is
+[STATEMENT-level](#the-shape-of-a-ruled-refusal-ruled-s465-by-the-user-task-1037)
+— the file transpiles and each `class`/`field`/`method`/`ADJUST` statement dies
+with this text when it is reached:
 
 ```
 PCL: feature 'class' is not supported, at FILE line N
@@ -2194,10 +2250,14 @@ EXPLICITLY: `use feature 'class'`, `use experimental 'class'`, or a
 `use v5.38; class Foo;` is a perl SYNTAX ERROR (probed) — though the bundle
 stays acceptable at the drop sites above, where the statement is already lost.
 The two readings share one scanner with a `$strict` flag
-(`Pl::Parser::_class_feature_in_scope`) so they cannot drift.  Guard rows:
+(`Pl::Parser::_class_feature_in_scope`) so they cannot drift.  This is the
+SECOND route into the refusal emission — it is raised from `Pl::Parser2`'s own
+`_lower_stmt`, not from the drop classifier — and both go through the one
+builder `Pl::Parser::refused_statement_form` (task #1037).  Guard rows:
 `Pl/t/class-refusal-01.t`, including the must-not-fire cases (`Foo->class`
 written directly, `class Foo;` with no pragma, a file with its own
-`sub class`, `use v5.38`, a `class` hash key).
+`sub class`, `use v5.38`, a `class` hash key), and `Pl/t/refusal-site-01.t`
+for the statement-level shape.
 
 **Why deferred, not rejected:** this is the future of Perl OO and PCL should
 support it in a **future version** — but it is a *self-contained surface
@@ -2347,6 +2407,12 @@ between them, which is whole-file section machinery inside a runtime eval.
 Measured share: one event across the whole sweep + CPAN board, and it is a
 shape no surveyed CPAN module uses.
 
+**Why it is NOT statement-level** (task #1037's classification, s466): the unit
+here *is* the eval.  The emission is produced by the `pl2cl --server`
+subprocess and discarded on error, so there is no run-time form to carry a
+die — and perl's own contract for `eval STRING` is that what does not compile
+sets `$@`, which is exactly where this lands.
+
 **Owner:** task #242 (the refusal is deliberate; a real consumer re-opens it).
 
 ## String eval ending in an unconvertible declaration
@@ -2363,6 +2429,10 @@ shapes have no such form. All five sweep events are perl-INVALID source from
 lexer-torture rows that assert perl *rejects* them, so a non-empty `$@` is
 the answer those rows want (CLAUDE.md principle 9 — PCL is a transpiler for
 valid Perl, not a validator, but it must not silently accept nonsense).
+
+**Why it is NOT statement-level** (task #1037's classification, s466): as with
+the sibling entry above, the unit is the eval — a discarded emission cannot
+carry a run-time form, and `$@` is where perl puts a compile error too.
 
 **Owner:** task #242.
 
@@ -2383,6 +2453,12 @@ attribution. The limit is never raised (RULED s346 §2). The one measured
 event is torture-scale generated source; one honest loud row there is the
 accepted outcome, and shrinking arbitrary generated forms is not required by
 any target.
+
+**Why it is NOT statement-level** (task #1037's classification, s466): the unit
+is a GENERATED form, not a source statement.  The property is discovered after
+lowering, the form is already the concatenation of many statements, and there
+is no one statement whose death would keep the rest loadable — replacing any
+single statement inside it with a die leaves the form just as oversized.
 
 **Revisit if:** a real CPAN module produces such a form — then the fix is
 splitting the run form (option (a): extend `_oversized_top_decls`), not
@@ -2416,6 +2492,14 @@ re-declaration is fine (it simply ENDS the alias, #251/M7), but an
 inner-scope one does not: the inner binding expires at its own scope's end
 and the OUTER alias RESUMES, which a flat region rewrite cannot express.
 Refusing beats requalifying the wrong half.
+
+**Why it is NOT statement-level** (task #1037's classification, s466): the unit
+is a REGION — the run of statements whose bare names must be requalified — not
+a statement.  Emitting the die at the declaration would leave every statement
+of the region compiled with the *wrong* variable identity; they are unreachable
+only within that one top-level form, so a sub defined inside the region and
+called from elsewhere would still run the mis-homed code.  Refusing the file is
+the only answer that cannot be silently wrong.
 
 **Revisit if:** the requalification is rebuilt as a scope-walk rather than a
 region rewrite — then both shapes fall out.

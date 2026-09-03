@@ -9342,12 +9342,14 @@ sub _lower_stmt {
   # where the author declared a class.  Refuse perl-shaped, like the Track A
   # families — but on code that COMPILES, so the key is the STRICT one (no
   # version-bundle evidence).  See Pl::Parser::class_statement_refusal.
+  #
+  # THE UNIT IS THE STATEMENT (RULED s465, USER; task #1037): the refusal is a
+  # run-time die at this statement's own site, announced at transpile, so every
+  # other statement of the file still compiles and runs.  ONE builder for both
+  # refusal routes — Pl::Parser::refused_statement_form (which keeps the
+  # eval-string transpile die, #363).
   if (my $refusal = $self->fallback_parser->class_statement_refusal($stmt)) {
-    my $where = $self->fallback_parser->eval_mode
-              ? '(eval)'
-              : ($self->fallback_parser->has_filename
-                   ? $self->fallback_parser->filename : '-');
-    die "PCL: $refusal, at $where line " . ($stmt->line_number // 0) . "\n";
+    return raw($self->fallback_parser->refused_statement_form($stmt, $refusal));
   }
 
   if ($stmt->isa('PPI::Statement::Compound')) {
