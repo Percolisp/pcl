@@ -43,6 +43,11 @@ package Pl::VarAnnotator;
 #       write-compound   ALL compound assigns incl. bitwise/string-bitwise (D24)
 #       write-incdec     ++/-- either side (also covers ++($x=5) via subtree)
 #       write-list       any `=` whose LHS is not a plain $scalar/element (D11)
+#       write-deref-viv  the SCALAR ROOT of an element write through a deref
+#                        chain ($r->{A}[0] = …): autovivification writes the
+#                        new container back into $r's box.  Every write arm
+#                        routes its lvalue through _tw_mark_lvalue, which is
+#                        the ONE place that knows a subscript is a READ (#995)
 #       ref-taken        \$x — marking the WHOLE `\` operand subtree also
 #                        covers \substr($x…)/\vec/\pos, paren-less too (D15/D25)
 #       regex-target     `$x =~ …` / `!~` (s///, tr///, m//g pos)
@@ -933,7 +938,8 @@ sub _tw_walk {
         # sysread/recv can write any/later args → mark them all.
         my @args = $MUTATING_FN{$fname} ? @$kids[1 .. $#$kids]
                  :                        ($kids->[1] // ());
-        _tw_mark($ctx, $xo, $_, $mark) for @args;
+        # each is an lvalue: `chomp $h{$k}` writes the ELEMENT (#995)
+        _tw_mark_lvalue($ctx, $xo, $_, $mark) for @args;
       }
       # #189: a KNOWN user sub whose body writes through @_ aliases EVERY
       # argument, exactly as chomp aliases its own — same marking, same
@@ -942,13 +948,16 @@ sub _tw_walk {
       elsif ($fname
              && ref $ctx->{known_subs}{$fname}
              && $ctx->{known_subs}{$fname}{writes_args}) {
-        _tw_mark($ctx, $xo, $_, 'arg-to-writer') for @$kids[1 .. $#$kids];
+        _tw_mark_lvalue($ctx, $xo, $_, 'arg-to-writer')         # #995
+          for @$kids[1 .. $#$kids];
       }
       _tw_walk_funcall_args($ctx, $xo, $fname, $kids);
       return;
     }
     if ($t eq '=~') {
-      _tw_mark($ctx, $xo, $kids->[0], 'regex-target') if @$kids;
+      # the match/substitution target is an lvalue: `$h{$k} =~ s///` writes
+      # the ELEMENT, the key is a read (#995)
+      _tw_mark_lvalue($ctx, $xo, $kids->[0], 'regex-target') if @$kids;
       _tw_walk($ctx, $xo, $_, 0) for @$kids;
       return;
     }
@@ -974,15 +983,18 @@ sub _tw_walk {
           return;  # the incdec IS the bare symbol's use — nothing to walk
         }
         # The write lands on the lvalue ROOT, never on a subscript: `$h{$k}++`
-        # writes the ELEMENT and READS the key (#995).  _tw_mark_lvalue also
-        # runs the generic walk, so an operand subtree that holds embedded
-        # writes/uses (`++($x = 5)`) is still classified.
+        # writes the ELEMENT and READS the key (#995).
         _tw_mark_lvalue($ctx, $xo, $kids->[$ex_i], 'write-incdec');
+        # the operand subtree (`++($x = 5)`, `++$a[$i]`) can hold embedded
+        # writes/uses that still need the generic walk
+        _tw_walk($ctx, $xo, $kids->[$ex_i], 0);
         return;
       }
       if ($opc eq '\\') {
-        # the WHOLE operand subtree: covers \$x and \substr($x,…)/\vec/\pos
-        _tw_mark($ctx, $xo, $kids->[$ex_i], 'ref-taken');
+        # \$h{$k} refs the ELEMENT — the key is a read (#995); every other
+        # operand shape still marks the WHOLE subtree, which is what covers
+        # \$x and \substr($x,…)/\vec/\pos
+        _tw_mark_lvalue($ctx, $xo, $kids->[$ex_i], 'ref-taken');
       }
       # Operand use class: `!`/`not` truth-test → bool; unary `+` is value-
       # transparent → pass through; unary `-` is TYPE-SENSITIVE in perl
@@ -1050,11 +1062,12 @@ sub _tw_walk {
       }
       else {
         # Everything else — a container element ($h{$k} = …), a deref chain,
-        # a list/paren/lvalue-fn target — goes through the ONE lvalue-root
-        # walker: it decides what the write lands on and does the read walk.
-        # 'write-list' is this arm's reason for the shapes that need one
-        # (D11: every $scalar inside a list LHS is written by seam machinery).
+        # a list/paren/lvalue-fn target — asks the ONE lvalue-root marker
+        # which scalar (if any) the write lands on.  'write-list' is this
+        # arm's reason for the shapes that need one (D11: every $scalar
+        # inside a list LHS is written by seam machinery).
         _tw_mark_lvalue($ctx, $xo, $kids->[0], 'write-list');
+        _tw_walk($ctx, $xo, $kids->[0], 0);
       }
       _tw_walk($ctx, $xo, $kids->[1], 0);
       return;
@@ -1086,6 +1099,7 @@ sub _tw_walk {
         # same lvalue-root rule as `=` and `++`: `$h{$k} .= "x"` writes the
         # element, the key is a read (#995)
         _tw_mark_lvalue($ctx, $xo, $kids->[0], 'write-compound');
+        _tw_walk($ctx, $xo, $kids->[0], 0);
       }
       # RHS operand class follows the op's coercion: += … <<= → num;
       # .= → str; x= repeat COUNT → num; bitwise/||=/&&=///= → opaque.
@@ -1099,7 +1113,7 @@ sub _tw_walk {
       return;
     }
     if ($op eq '=~' || $op eq '!~') {
-      _tw_mark($ctx, $xo, $kids->[0], 'regex-target');
+      _tw_mark_lvalue($ctx, $xo, $kids->[0], 'regex-target');   # #995
       _tw_walk($ctx, $xo, $_, 0) for @$kids;
       return;
     }
@@ -1185,44 +1199,54 @@ sub _tw_walk_funcall_args {
   }
 }
 
-# THE lvalue-root walker (#995) — the ONE place that decides what a write to
-# a non-plain-scalar lvalue lands on.  `=`, `++`/`--` and the compound assigns
-# all call it; before s465bd only `=` got the rule right and the other two
-# _tw_mark-ed the whole operand subtree, so `$h{$k}++` and `$h{$k} .= "x"`
-# recorded a WRITE against the hash KEY (and `$a[$i]++` against the index),
-# boxing a variable perl only reads.  That single false positive was 15.4 %
-# %make-p-box + 8.1 % box-set of the arrhash bench row.
+# The element/slice access node types.  Every one of them has the shape
+# [BASE, SUBSCRIPT...]: the base is the container (or the chain below it) and
+# everything after it is a subscript expression.
+my %ACCESS_NODE = map { $_ => 1 } qw(h_acc a_acc h_ref_acc a_ref_acc
+                                     slice_h_acc slice_a_acc
+                                     kv_slice_h_acc kv_slice_a_acc);
+
+# THE lvalue-root marker (#995) — the ONE place that decides which scalar a
+# write to a non-plain-scalar lvalue lands on.  Every write arm of the walk
+# asks it: `=`, `++`/`--`, the compound assigns, `=~`/`!~`, the mutating
+# builtins (chomp/read/tie/pos/4-arg substr/open…), an argument to a known
+# @_-writing sub, and `\`.  Before s465bd only `=` had the rule and the other
+# arms _tw_mark-ed the WHOLE operand subtree, so `$h{$k}++`, `$h{$k} .= "x"`
+# and `chomp $h{$k}` all recorded a WRITE against the hash KEY (and `$a[$i]++`
+# against the index) — boxing a variable perl only reads.  That single false
+# positive was 15.4 % %make-p-box + 8.1 % box-set of the arrhash bench row.
 #
-# A write to a container element writes the ELEMENT; the subscript expression
-# is an ordinary READ.  What the write does reach:
-#   $h{$k} / $a[$i] over a plain %h/@a Symbol base → no scalar at all
-#   $h{$k}{$j}, $r->{A}[0] (deref-CHAIN base)      → every $scalar under the
-#     base: autovivification writes the new container back into the root
-#     scalar's box, so an unboxed root would re-vivify on every deref
-#     (exists_sub.t t13).  A nested plain access over-marks token '$h' —
-#     over-boxing only, never correctness.
-#   anything else ($x, $$r, substr($x,…), a paren list, ++($x = 5)) → the
-#     whole subtree, with the caller's own reason.
-# Every shape then gets the generic read walk, which classifies the key/index
-# uses (h_acc → strkey, a_acc → num) and picks up embedded writes.
+# The rule, which is just perl's: a write to a container element writes the
+# ELEMENT, so every subscript on the way down is an ordinary READ (the
+# caller's own generic walk classifies them: h_acc key → strkey, a_acc index
+# → num).  Only the ROOT of the access chain can be a scalar the write
+# reaches, and then only by autovivification:
+#   %h / @a plain container root  → NO scalar is written.  ($h{$k}{$j} = 1
+#     vivifies into %h's own element box, never into a lexical slot.)
+#   $r scalar root ($r->{A}[0], $$r{k}, @{$r}{…})  → the vivified container is
+#     written BACK into $r's box, so $r must stay boxed: an unboxed root made
+#     every deref re-vivify a fresh hash (exists_sub.t t13) — 'write-deref-viv'.
+#   any other root (a funcall, a paren list, `++($x = 5)`, a plain $x, $$r,
+#     substr($x,…))  → the whole subtree, with the caller's own reason.
+# Marks only; the caller walks the subtree for reads exactly as before.
 sub _tw_mark_lvalue {
   my ($ctx, $xo, $id, $event) = @_;
   return if !defined $id;
   my $n = $xo->get_a_node($id);
-  my $t = (ref($n) && $xo->is_internal_node_type($n)) ? ($n->{type} // '') : '';
-  if ($t eq 'h_acc' || $t eq 'a_acc') {
+  my $t = $xo->is_internal_node_type($n) // '';
+  my $descended = 0;
+  while ($ACCESS_NODE{$t}) {
     my $base = ($xo->get_node_children($id) || [])->[0];
-    my $bn   = defined $base ? $xo->get_a_node($base) : undef;
-    my $plain_container = ref($bn) && !$xo->is_internal_node_type($bn)
-      && $bn->isa('PPI::Token::Symbol') && $bn->symbol =~ /^[\@\%]/;
-    if (!$plain_container && defined $base) {
-      _tw_mark($ctx, $xo, $base, 'write-deref-viv');
-    }
+    return if !defined $base;          # subscript-less access: nothing to mark
+    $descended = 1;
+    $id = $base;
+    $n  = $xo->get_a_node($id);
+    $t  = $xo->is_internal_node_type($n) // '';
   }
-  else {
-    _tw_mark($ctx, $xo, $id, $event);
-  }
-  _tw_walk($ctx, $xo, $id, 0);
+  return if $descended
+    && ref($n) && !$xo->is_internal_node_type($n)
+    && $n->isa('PPI::Token::Symbol') && $n->symbol =~ /^[\@\%]/;
+  _tw_mark($ctx, $xo, $id, $descended ? 'write-deref-viv' : $event);
 }
 
 # Mark every $scalar Symbol in the subtree with a boxing event.
