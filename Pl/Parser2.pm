@@ -7854,11 +7854,11 @@ sub _lower_sub_inner {
     $vi->{$_} = { unboxable => 0 } for @$params;
     return ['p-sub', $clname, ['list', '&rest', '%_args'],
             ['p-args-body', ['block', 'nil',
-              ['let', ['list', map { ['list', cl_sym($_), '(make-p-box nil)'] } @$params],
+              _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @$params],
                 Pl::CLForm::ctx_bind('nil',
                   ['p-list-=', ['vector', map { cl_sym($_) } @$params], '@_']),
                 $self->_lower_body_regime(\@body_stmts, $vi),
-                ($tail_param ? (cl_sym($tail_param)) : ())]]]];
+                ($tail_param ? (cl_sym($tail_param)) : ()))]]];
   }
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
@@ -8189,10 +8189,9 @@ sub _lower_block {
           };
           $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
           my $vi2 = { %$vi, map { $_ => { unboxable => 0 } } @hoist };
-          return (['let',
-                   ['list', map { ['list', cl_sym($_), '(make-p-box nil)'] } @hoist],
+          return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @hoist],
                    ['catch', $tag, @pre_forms],
-                   $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)]);
+                   $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)));
         }
       }
       # -- #252 GENERAL forward-goto shape (Text::Balanced's _match_tagged):
@@ -8528,10 +8527,10 @@ sub _lower_block {
       if ($lowprec_run) {
         my $vi2 = { %$vi, $name => { unboxable => 0 } };
         return (@declmod_eval,
-                ['let', ['list', ['list', cl_sym($name), '(make-p-box nil)']],
+                _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
                  $self->_lower_expr($lowprec_run, $first,
                                     ($decl_tail ? 'inherit' : ':void')),
-                 $self->_lower_block(\@rest, $vi2, $tail_ctx)]);
+                 $self->_lower_block(\@rest, $vi2, $tail_ctx)));
       }
       # A conditional init MUST keep $c boxed (the assignment writes through the
       # box; a false cond leaves it undef) — never the unboxable raw-slot path.
@@ -8539,14 +8538,14 @@ sub _lower_block {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
         $initform = _wrap_freeze($vi->{$name}, $name, $initform);
         return (@declmod_eval,
-                ['let', ['list', ['list', cl_sym($name), $initform]],
+                _decl_let([_decl_entry($name, _slot_class($vi->{$name}), $initform)],
                  $self->_lower_block(\@rest, $vi, $tail_ctx),
-                 ($decl_tail ? (cl_sym($name)) : ())]);
+                 ($decl_tail ? (cl_sym($name)) : ())));
       }
       if ($self_init) {
-        return (['let', ['list', ['list', cl_sym($name), $self_init]],
+        return (_decl_let([_decl_entry($name, ':box', $self_init)],
                  $self->_lower_block(\@rest, $vi, $tail_ctx),
-                 ($decl_tail ? (cl_sym($name)) : ())]);
+                 ($decl_tail ? (cl_sym($name)) : ())));
       }
       my @assign;
       if (defined $init) {
@@ -8562,10 +8561,10 @@ sub _lower_block {
           : ($set);
       }
       return (@declmod_eval,
-              ['let', ['list', ['list', cl_sym($name), '(make-p-box nil)']],
+              _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
                @assign,
                $self->_lower_block(\@rest, $vi, $tail_ctx),
-               (($decl_tail && !@assign) ? ($name) : ())]);
+               (($decl_tail && !@assign) ? ($name) : ())));
     }
     # -- my VAR <non-'=' trailing>;  (`my $aa, $bb, $cc;` / `my $a . $foo;` /
     #    `my @raw, @upgraded, @utf8;`)
@@ -8584,10 +8583,10 @@ sub _lower_block {
       my $sname = $lead;
       $self->_reg_lex($sname);
       my $vi2 = { %$vi, $sname => { unboxable => 0 } };
-      return (['let', ['list', ['list', cl_sym($sname), _fresh_container($sname)]],
+      return (_decl_let([_decl_fresh($sname)],
                $self->_lower_expr([@kd[1 .. $#kd]], $first, ':void'),
                $self->_lower_block(\@rest, $vi2, $tail_ctx),
-               ($decl_tail ? (cl_sym($sname)) : ())]);
+               ($decl_tail ? (cl_sym($sname)) : ())));
     }
 
     # -- my @a / my %h / my (LIST) [= INIT];  → fresh containers in a let,
@@ -8762,9 +8761,9 @@ sub _lower_block {
             || (grep { $final_txt =~ _reads_name_rx($_) } @all)
             || (grep { $self->{_file_lex_renamed}{$_} } @all);
           $self->_reg_lex(@all);
-          return (['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @all],
+          return (_decl_let([map { _decl_fresh($_) } @all],
                    $assign_form->(),
-                   $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+                   $self->_lower_block(\@rest, $vi, $tail_ctx)));
         }
       }
       my $rhs_txt = join ' ', map { $_->content } @rhs;
@@ -8780,9 +8779,10 @@ sub _lower_block {
           my $var  = $vars->[0];
           my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
           $self->_reg_lex($var);
-          return (['let', ['list', ['list', cl_sym($var), [$copy, $self->_lower_expr(\@rhs, $first, 1)]]],
+          return (_decl_let([_decl_entry($var, _sigil_class($var),
+                                         [$copy, $self->_lower_expr(\@rhs, $first, 1)])],
                    $self->_lower_block(\@rest, $vi, $tail_ctx),
-                   ($decl_tail ? (cl_sym($var)) : ())]);
+                   ($decl_tail ? (cl_sym($var)) : ())));
         }
         # LIST form (`my (undef,@bee) = @bee`, `my ($x,@a) = ($a[0],@a)`): the
         # same dance per variable — every SELF-REFERENCED name binds to a copy
@@ -8801,11 +8801,11 @@ sub _lower_block {
                    : substr($v, 0, 1) eq '@' ? ['p-copy-array', $v]
                    : substr($v, 0, 1) eq '%' ? ['p-copy-hash',  $v]
                    :                           ['p-box-init',   $v];
-          push @binds, ['list', cl_sym($v), $init];
+          push @binds, _decl_entry($v, _sigil_class($v), $init);
         }
-        return (['let', ['list', @binds],
+        return (_decl_let(\@binds,
                  $assign_form->(),
-                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+                 $self->_lower_block(\@rest, $vi, $tail_ctx)));
       }
     }
     # Promoted (captured) names in a MULTI-decl lower as defvar'd package
@@ -8826,12 +8826,12 @@ sub _lower_block {
       return (@kmod_eval, @assign, @reg, $self->_lower_block(\@rest, $vi, $tail_ctx))
         unless @unren;
       return (@kmod_eval,
-              ['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @unren],
+              _decl_let([map { _decl_fresh($_) } @unren],
                @assign, @reg,
-               $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+               $self->_lower_block(\@rest, $vi, $tail_ctx)));
     }
     $self->_reg_lex(@$vars);
-    my @binds = map { ['list', cl_sym($_), _fresh_container($_)] } @$vars;
+    my @binds = map { _decl_fresh($_) } @$vars;
     # Tail value: with an init the assignment form (last) returns the place;
     # a bare single container is its own value.  A bare MULTI decl
     # (`my ($c,$d);` as tail) is the LIST of the declared names — perl gives 2
@@ -8846,10 +8846,10 @@ sub _lower_block {
                  ? ($self->_lower_expr([$k[1]], $first, 'inherit')) : ();
     }
     return (@kmod_eval,
-            ['let', ['list', @binds],
+            _decl_let(\@binds,
              ($has_init ? ($assign_form->()) : ()),
              $self->_lower_block(\@rest, $vi, $tail_ctx),
-             @tailval]);
+             @tailval));
   }
 
   # -- BEGIN/END/CHECK/… blocks: v1's p-BEGIN goes to the definitions bucket,
@@ -9037,9 +9037,9 @@ sub _lower_block {
                      $self->{_seg_named_subs} // [], $first, \@emb) ? 1 : 0;
       if (!$vetoed) {
         $self->_reg_lex(@emb);
-        return (['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @emb],
+        return (_decl_let([map { _decl_fresh($_) } @emb],
                  $self->_lower_stmt($first, $vi, $first_tail),
-                 $self->_lower_block(\@rest, $vi, $tail_ctx)]);
+                 $self->_lower_block(\@rest, $vi, $tail_ctx)));
       }
     }
   }
@@ -9837,8 +9837,8 @@ sub _lower_compound {
         : ['list', 't'];
       my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
       my @body = $self->_lower_scope([$block->schildren], $vi);
-      my $form = ['let', ['list', map { ['list', cl_sym($_), '(make-p-box nil)'] } @init_mys],
-                  ['p-for', $initform, $cond, $step, _label_keys($label), @body]];
+      my $form = _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @init_mys],
+                  ['p-for', $initform, $cond, $step, _label_keys($label), @body]);
       $self->{_let_bound_vars} = \%saved_lb;
       $self->{_live_lex} = \%saved_lex;
       return $self->_wrap_cond_mys($form, @head_mys);
@@ -9915,18 +9915,18 @@ sub _lower_compound {
       my $initval = defined $init && !$lowprec_run
         ? $self->_lower_expr($init, $stmt) : '(p-undef)';
       if ($lowprec_run) {
-        $form = ['let', ['list', ['list', cl_sym($name), '(make-p-box nil)']],
+        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
                  ['p-for', ['list', $self->_lower_expr($lowprec_run, $stmt, ':void')],
-                  $cond, $step, _label_keys($label), @body]];
+                  $cond, $step, _label_keys($label), @body]);
       } elsif ($vi->{$name} && $vi->{$name}{unboxable}) {
         # a B-verdict/str-buffer counter must freeze/bufferize its init too
-        $form = ['let', ['list', ['list', cl_sym($name),
-                                  _wrap_freeze($vi->{$name}, $name, $initval)]],
-                 ['p-for', ['list'], $cond, $step, _label_keys($label), @body]];
+        $form = _decl_let([_decl_entry($name, _slot_class($vi->{$name}),
+                                       _wrap_freeze($vi->{$name}, $name, $initval))],
+                 ['p-for', ['list'], $cond, $step, _label_keys($label), @body]);
       } else {
-        $form = ['let', ['list', ['list', cl_sym($name), '(make-p-box nil)']],
+        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
                  ['p-for', ['list', ['p-my-=', cl_sym($name), $initval]], $cond, $step,
-                  _label_keys($label), @body]];
+                  _label_keys($label), @body]);
       }
     } else {
       $form = ['p-for',
@@ -11504,13 +11504,78 @@ sub _multi_decl {
   return (\@vars, 1);
 }
 
+# ── THE ONE DECLARATION PRINTER (task #1035, step 0) ──────────────────────────
+# Every perl `my` NAME that binds a fresh CL variable is spelled HERE, and only
+# here.  Before s466 the `(let ((NAME INIT)) …)` node was built at sixteen
+# separate sites of this file, which is the rule-11 shape that made a binding's
+# CLASS invisible in the IR: each site knew which initform it chose — a box, a
+# raw numeric slot, a str-buffer, a fresh container, a copy — and none of them
+# said so.  Step 0 (s466) routes every site through `_decl_entry`/`_decl_let`
+# and emits today's spelling byte for byte; step 1 flips `_decl_let` to the
+# class-carrying `p-let` — `(p-let ((NAME CLASS INIT …facts)) body)`, the USER
+# design of 2026-09-03 (task #1035; docs/ir-spec.md §2.2 when it lands).
+#
+# The CLASS set is CLOSED (rule 12: an unknown class dies at the printer):
+#   :box         a p-box cell — the general scalar `(make-p-box …)`, including
+#                the self-referential `(p-box-init …)` shape
+#   :scalar      a raw UNBOXED slot holding the scalar VALUE itself (the plain
+#                `unboxable` verdict: never aliased, no fixed value family)
+#   :num         a raw numeric slot (the B-regime `coerce => 'num'` verdict)
+#   :str         a raw simple-string slot (`coerce => 'str'`)
+#   :str-buffer  an adjustable fill-pointer string (the S1 `strbuf` verdict)
+#   :array       a fresh or copied perl array
+#   :hash        a fresh or copied perl hash
+my %DECL_CLASS = map { $_ => 1 } qw(:box :scalar :num :str :str-buffer :array :hash);
+
+# One `(NAME INIT)` binding entry.  $name is the perl spelling; cl_sym is
+# applied here (every site used to apply it itself).
+sub _decl_entry {
+  my ($name, $class, $init) = @_;
+  die "PCL: internal — unknown declaration class '$class' for $name"
+    unless $DECL_CLASS{$class};
+  return ['list', cl_sym($name), $init];
+}
+
+# The entry for a plain `my $x` / `my @a` / `my %h`: the fresh container of
+# the name's sigil, and the class that container IS.
+sub _decl_fresh {
+  my ($name) = @_;
+  return _decl_entry($name, _sigil_class($name), _fresh_container($name));
+}
+
+# The class of the container a sigil declares.
+sub _sigil_class {
+  my ($sigil) = _sigil_of($_[0]);
+  return $sigil eq '@' ? ':array' : $sigil eq '%' ? ':hash' : ':box';
+}
+
+# The class of an UNBOXED scalar slot, from its VarAnnotator verdict entry —
+# the same keys `_wrap_freeze` reads to build the slot's initform.
+sub _slot_class {
+  my ($vi_entry) = @_;
+  return ':str-buffer' if $vi_entry->{strbuf};
+  my $c = $vi_entry->{coerce} // '';
+  return $c eq 'num' ? ':num' : $c eq 'str' ? ':str' : ':scalar';
+}
+
+# The binding FORM around the entries: `(let (ENTRIES…) BODY…)` today.
+sub _decl_let {
+  my ($entries, @body) = @_;
+  return ['let', ['list', @$entries], @body];
+}
+
+# A name's SIGIL.  The name may arrive in its CL spelling — pipe-quoted when
+# it carries a non-ASCII character (#418) — so look past the quote, or every
+# such container is initialised (and classed) as a scalar box.
+sub _sigil_of {
+  my ($var) = @_;
+  $var = Pl::CLForm::cl_unquote($var) if $var =~ /\A\|.*\|\z/s;
+  return substr($var, 0, 1);
+}
+
 sub _fresh_container {
   my ($var) = @_;
-  # The name may arrive in its CL spelling — pipe-quoted when it carries a
-  # non-ASCII character (#418).  The SIGIL is what this reads, so look past
-  # the quote, or every such container is initialised as a scalar box.
-  $var = Pl::CLForm::cl_unquote($var) if $var =~ /\A\|.*\|\z/s;
-  my $sigil = substr($var, 0, 1);
+  my $sigil = _sigil_of($var);
   return '(make-array 0 :adjustable t :fill-pointer 0)' if $sigil eq '@';
   return "(make-hash-table :test 'equal)"               if $sigil eq '%';
   return '(make-p-box nil)';
@@ -11890,7 +11955,7 @@ sub _cond_my_names {
 sub _wrap_cond_mys {
   my ($self, $form, @names) = @_;
   return $form unless @names;
-  return ['let', ['list', map { ['list', cl_sym($_), _fresh_container($_)] } @names], $form];
+  return _decl_let([map { _decl_fresh($_) } @names], $form);
 }
 
 # ============================================================ seam census
