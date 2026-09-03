@@ -200,9 +200,10 @@ downstream of the removed event, not a new rule.
 `tools/bench-exec.pl`'s runtime A/B (`BENCH_RT_B`) shares ONE transpile
 between its two columns, so it is blind to an EMISSION change; and a
 tree-vs-tree run of the whole tool carries a per-tree offset (the byte-
-identical `feread` row read −8 % across trees on a loaded box).  So **`tools/bench-emission-ab.pl`** (new, checked in): one core, both
+identical `feread` row read −8 % across trees on a loaded box).  So
+**`tools/bench-emission-ab.pl`** (new, checked in): one core, both
 compilers' emissions of the same program, interleaved best-of-K, with the
-emission identity checked and PRINTED per row â which makes every control
+emission identity checked and PRINTED per row — which makes every control
 self-declaring.
 
     tools/bench-emission-ab.pl --ref 57848f3 prog.pl 600000
