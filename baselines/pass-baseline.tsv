@@ -1,4 +1,10 @@
 # taken-at: 5323d9e 2026-08-15
+# s466bc (round 23, task #1037, edited ROW BY ROW): state.t TRANSPILE_FAIL 0/0/-1
+#   -> PARTIAL 88/0/166.  ONE cause — a ruled refusal is now a STATEMENT-level
+#   event (the USER s465 ruling): the file transpiles, its 88 rows before the
+#   `given` at line 350 run, and the statement dies when reached.  The 78 rows
+#   after it go with the enclosing top-level form (a file-level `my` wraps the
+#   remainder in one `let`, ir-spec §9.3) and are blessed in row-shortfall.tsv.
 # s465ba (round 23, task #1028, edited ROW BY ROW): bop.t 253/256 -> 480/29.
 #   ONE cause -- the bitwise `& | ^ ~` mode decision sent every non-string
 #   operand (a ref, glob, qr//, blessed object, undef) to the NUMERIC op where
@@ -339,7 +345,7 @@ splice.t	OK	34	0	34
 split.t	OK	178	6	219
 sprintf.t	OK	532	25	559
 sprintf2.t	OK	1631	11	1678
-state.t	TRANSPILE_FAIL	0	0	-1
+state.t	PARTIAL	88	0	166
 study.t	OK	43	0	43
 sub.t	OK	53	3	65
 substr.t	PARTIAL	351	0	397

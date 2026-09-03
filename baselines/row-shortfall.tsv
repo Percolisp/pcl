@@ -62,6 +62,7 @@ perl-tests/sort.t	17	UNEXPLAINED
 perl-tests/split.t	35	UNEXPLAINED
 perl-tests/sprintf.t	2	UNEXPLAINED
 perl-tests/sprintf2.t	36	UNEXPLAINED
+perl-tests/state.t	78	not-supported.md §`given`/`when` — one `given` block at line 350, inside a foreach at file scope; the refusal is STATEMENT-level since s466 (#1037) so the file runs to it, and the tail of the enclosing top-level form goes with the die (ir-spec §9.3; sizing = #1055).  Was NOT MEASURED (-1) while the refusal killed the transpile.
 perl-tests/sub.t	9	UNEXPLAINED
 perl-tests/substr.t	46	UNEXPLAINED
 perl-tests/tr.t	75	UNEXPLAINED
