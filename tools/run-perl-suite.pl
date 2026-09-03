@@ -1641,7 +1641,7 @@ sub report_shortfall {
     my $was = $b ? $b->{rows} : 0;
     push @up,   [$rel, $was, $short] if $short > $was;
     push @down, [$rel, $was, $short] if $short < $was;
-    if ($short && (!$b || $b->{cause} eq 'UNEXPLAINED')) {
+    if ($short && (!$b || $b->{cause} =~ /^UNEXPLAINED/)) {
       $unexplained += $short;
       $unexplained_files++;
     }

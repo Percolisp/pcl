@@ -56,7 +56,7 @@ CAUSE, rows leave BY EDIT, MORE than blessed fails the run like a NEW failure.
 **376,788 rows carry a cause** (the #1036 Unicode class by the USER's s465
 decision, the XDIFF/FIXTURE registrations — a registered divergence covers the
 rows PCL never produced, all-or-nothing per #185 — and #1037 for `state.t`'s
-158); **86,126 in 185 files are UNEXPLAINED, and that number IS the audit's
+158); **82,666 in 183 files are UNEXPLAINED (70,409 companion / 132 files + 12,257 sweep / 51 files; the s465az report said 86,126 — recounted from the blessed file in the s466 review), and that number IS the audit's
 queue**, printed every run.  The sweep half also records `unrun` and the report
 splits it: of 12,257 planned-not-asserted rows, **222 produced no TAP at all**
 (the file stopped: caller.t 47, chop.t 48, substr.t 44, method.t 39 — the
@@ -111,7 +111,7 @@ cut off at its 450 s allowance; re/overload.t TIMEOUT 3/0 → 0/0, a #326
 hang-set file — worth one probe because it is an OVERLOAD file one round after
 the overload work, and the task carries the discriminator).
 
-**Left by design**: the 156 cause-less baseline rows and the 86,126 UNEXPLAINED
+**Left by design**: the 156 cause-less baseline rows and the 82,666 UNEXPLAINED
 shortfall rows are the queue — phases 1–3 attribute them.  The companion
 baselines were blessed on `1fed80b`, before BB's #994 merged; the first `--all`
 on the merged tree will name at row level whatever that moved, which is the

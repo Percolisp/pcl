@@ -124,7 +124,7 @@ whole TAIL of rows the file's plan promised and the run never produced — and
 produced**, `lc.t` with 2,577; the companion's ten TRANSPILE files are one
 line each with 2,031 perl rows behind them.
 - the sweep records a per-file `shortfall` column in `.faillog/_status.tsv`
-  (`planned - (pass+fail+skip)`; `-1` = no plan line = NOT MEASURED) and
+  (`planned - (pass+fail)`, so a SKIPPED row counts; `-1` = no plan line = NOT MEASURED) and
   `tools/sweep-diff.pl` compares it against `baselines/row-shortfall.tsv`;
 - `tools/run-perl-suite.pl` computes its half against REAL PERL's row count
   (its oracle is a run, not a plan line) and prints the same comparison;

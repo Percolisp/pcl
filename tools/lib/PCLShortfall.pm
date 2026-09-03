@@ -29,7 +29,7 @@ package PCLShortfall;
 # holds both populations and a bare basename would collide (`t/op/sub.t` and
 # `perl-tests/sub.t` are different files with different plans):
 #
-#   perl-tests/<name>    sweep         planned (1..N) minus (pass+fail+skip)
+#   perl-tests/<name>    sweep         planned (1..N) minus (pass+fail); a SKIPPED row counts
 #   t/<rel>              companion     perl's TAP rows minus PCL's TAP rows
 #
 # The two definitions differ because the two runners have different oracles —
@@ -67,7 +67,7 @@ sub shortfall_header {
 #
 #   <key> <TAB> <rows never produced> <TAB> <cause>
 #
-# key = perl-tests/<name>  (sweep-perl-tests.pl:      planned - (pass+fail+skip))
+# key = perl-tests/<name>  (sweep-perl-tests.pl:      planned - (pass+fail); skips count)
 #     = t/<rel>            (tools/run-perl-suite.pl:  perl's rows - PCL's rows)
 #
 # THE RULE, the drop census's: a row leaves BY EDIT when the shortfall is

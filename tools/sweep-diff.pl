@@ -66,7 +66,7 @@
 # was produced": perl-tests/pack.t is OK with 8,997 of its 14,722 planned rows
 # never produced, lc.t with 2,577.  Those rows are invisible to every bucket
 # above, because the row is not failing — it is ABSENT.  The sweep records a
-# per-file `shortfall` column in _status.tsv (planned - (pass+fail+skip)) and
+# per-file `shortfall` column in _status.tsv (planned - (pass+fail), so a SKIPPED row counts) and
 # this tool compares it against baselines/row-shortfall.tsv, blessed per file
 # WITH A CAUSE.  MORE than blessed fails the run like a NEW failure; FEWER is a
 # fix and the row leaves BY EDIT.  Same contract as the drop census, and the

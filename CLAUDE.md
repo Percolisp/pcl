@@ -294,8 +294,17 @@ plus the targeted files the change names.
 
 Companion: **`--quick` is the default form** (#345: skips the #326 hang
 set, caps registered allowances at 120 s, LISTS every skipped/capped file as
-NOT-RUN); the full `--all` at most once per session and only when a row
-says so, before a snapshot re-bless, or for a Fable review.  Fable review
+NOT-RUN); **the full `--all --jobs 4` AT LEAST ONCE PER ROUND** (I4, #993,
+s465az — was "at most once per session"), on a quiet box, run as
+`PCL_SESSION=sNNN tools/run-perl-suite.pl --all --jobs 4 --bless-stamps` so
+`baselines/perl-suite-notrun-stamps.tsv` records which session last measured
+each hole (the #326 hang set is reached ONLY by the full form); every run
+prints the NOT-RUN STAMPS block, and a stamp older than the current round is
+the reason to run it.  The full run also prints the ROW DIFF
+(`baselines/perl-suite-fails.tsv`, the companion's row-level fail baseline)
+and SHORTFALL (`baselines/row-shortfall.tsv`) blocks — read them like the
+sweep's buckets (`docs/test-debugging-runbook.md` §4c–§4e); a NEW ROW is
+explained or fixed, never re-blessed over.  Fable review
 sessions: cold gate + full sweep + probes, plus a `--quick` companion when
 the batch touched name resolution or the harness.  The three s399 tools:
 `corpus-diff`'s drop counter is per-change (free); `tools/gate-set-scan.pl`
