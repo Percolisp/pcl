@@ -419,7 +419,7 @@ comp/proto.t	96	ok	(missing)	#96
 comp/proto.t	97	ok	(missing)	#97
 comp/proto.t	99	ok	(missing)	#99
 comp/proto.t	98	ok	(missing)	$1 containing CORE::Foo
-comp/proto.t	77	ok	(missing)	@_ = (CODE(0x63ec642bcf00),O,K, ,78)
+comp/proto.t	77	ok	(missing)	@_ = (CODE(0xADDR),O,K, ,78)
 comp/proto.t	193	ok	(missing)	Check that ckproto ignores spaces in comparisons
 comp/proto.t	215	ok	(missing)	[perl #123514] (got 1 2 3 $$$$$$$ 4 5 6)
 comp/proto.t	134	ok	(missing)	\$ with invalid argument

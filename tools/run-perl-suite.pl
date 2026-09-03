@@ -929,6 +929,16 @@ sub run_one {
       close $lf;
     }
   }
+  else {
+    # The log must reflect THIS run.  A file that is OK now (or TRANSPILE /
+    # NOTAP, which write no log) leaves no log behind — the #366 serial re-run
+    # of a parallel DIFF that turns out to be load noise used to keep the
+    # parallel run's log, and the s466 ROW DIFF read 342 phantom NEW rows out
+    # of io/crlf_through.t (parallel DIFF 900/0, serial OK 942/0).  Same rule
+    # as the count: every registry answer comes from the state the run was
+    # MEASURED against.
+    unlink "$faillog/$safe.fails.tsv";
+  }
 
 WRITE:
   open my $rf, '>', $result_file or _exit(1);
@@ -1183,6 +1193,14 @@ sub diverging_rows_full {
     $desc = '' unless defined $desc;
     $desc =~ s/\s+\z//;
     $desc =~ s{\Q$tdir\E/}{t/}g;
+    # A reference STRINGIFICATION inside a description (`CODE(0x63ec642bcf00)`,
+    # comp/proto.t:77) carries an address that differs on every run, so the row
+    # read as NEW + FIXED on every run (s466, the first ROW DIFF).  Only perl's
+    # own `TYPE(0x…)` shape is normalized — a hex CONSTANT in a description
+    # (`0x80000000 is a single character`, op/index.t) is stable and keeps its
+    # text.  This is the ONE reader, so both row baselines (#185 expected-rows,
+    # #993 fails) see the same key.
+    $desc =~ s/\b((?:[\w:]+=)?(?:CODE|HASH|ARRAY|SCALAR|REF|GLOB|LVALUE|FORMAT|IO|VSTRING|Regexp))\(0x[0-9a-f]+\)/$1(0xADDR)/g;
     # test# 0 is not a paired test: either a summary row (no TAP at all / PCL
     # renumbered), whose text carries an unstable crash signature and so
     # normalizes to one sentinel, or a PCL-ONLY row, which is real evidence
@@ -1402,7 +1420,10 @@ sub bless_shortfall {
   for my $rel (sort keys %results) {
     my $r = $results{$rel};
     my $key = "t/$rel";
-    next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT)$/;   # unmeasured
+    # A TIMEOUT file is cut off by the clock: how many rows it produced is a
+    # load reading (s466: uni/variables.t 27,934 / 19,396 / 7,881 not-ok rows
+    # in three runs of the same tree), so its shortfall is NOT MEASURED here.
+    next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT|TIMEOUT)$/;   # unmeasured
     $touched++;
     my $short = ($r->[1] + $r->[2]) - ($r->[3] + $r->[4]);
     $short = 0 if $short < 0;
@@ -1599,6 +1620,15 @@ sub report_row_diff {
   printf "ROW DIFF vs %s: %d NEW ROW, %d FIXED ROW, %d UNVERIFIED, %d LOST%s\n",
     $fails_tsv, scalar(@new), scalar(@fixed), scalar(@unver), scalar(@lost_rows),
     (@new ? '  <-- a NEW failing row: this run is NOT clean' : '');
+  # The per-FILE breakdown first: 343 rows in a 40-row sample is unreadable,
+  # and the question a reader asks is "which files moved, by how much".
+  for my $bucket (['NEW ROW', \@new], ['FIXED ROW', \@fixed]) {
+    my ($label, $rows) = @$bucket;
+    next unless @$rows;
+    my %by; $by{ $_->[0] }++ for @$rows;
+    printf "  %s by file: %s\n", $label,
+      join(', ', map { "$_ $by{$_}" } sort { $by{$b} <=> $by{$a} || $a cmp $b } keys %by);
+  }
   printf "  + %-24s %s\n", $_->[0], short_cause($_->[1], 90) for @new[0 .. ($#new > 39 ? 39 : $#new)];
   print  "  ... and " . (@new - 40) . " more NEW ROW(s)\n" if @new > 40;
   printf "  - %-24s %s\n", $_->[0], short_cause($_->[1], 90) for @fixed[0 .. ($#fixed > 39 ? 39 : $#fixed)];
@@ -1631,8 +1661,12 @@ sub report_shortfall {
   my $sum = 0;
   my $unexplained = 0;
   my $unexplained_files = 0;
+  my $timeouts = 0;
   for my $rel (sort keys %results) {
     my $r = $results{$rel};
+    # a TIMEOUT file's row count is a load reading, not a measurement (see
+    # bless_shortfall) — counted and named, never compared
+    if ($r->[5] eq 'TIMEOUT') { $timeouts++; next }
     next if $r->[5] =~ /^(?:NOT-RUN|KILLED|MISSING|NO-RESULT)$/;
     my $short = ($r->[1] + $r->[2]) - ($r->[3] + $r->[4]);
     $short = 0 if $short < 0;
@@ -1657,6 +1691,8 @@ sub report_shortfall {
   printf "  - %-24s %d -> %d row(s) — fixed; EDIT the baseline row\n", @$_[0,1,2] for @down;
   printf "  UNEXPLAINED: %d row(s) in %d file(s) have no cause — that is the audit's queue (#993)\n",
     $unexplained, $unexplained_files;
+  printf "  %d TIMEOUT file(s) NOT compared — a file cut off by the clock produces a load-dependent row count\n",
+    $timeouts if $timeouts;
   return;
 }
 
