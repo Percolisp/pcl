@@ -10551,7 +10551,35 @@ sub _drop_site {
 # spell bare).
 sub _dropped_statement_cl {
   my ($self, $parts, $stmt, $error) = @_;
-  my ($file, $line, $text) = $self->_drop_site($parts, $stmt);
+  my ($file, $line, $text, $src) = $self->_drop_site($parts, $stmt);
+
+  # A RULED REFUSAL IS STATEMENT-LEVEL TOO (RULED s465, USER; task #1037).
+  # Until s465 a ruled refusal DIED AT TRANSPILE TIME, which cost the whole
+  # file: `perl-tests/state.t` and perl's own `t/op/state.t` each contain ONE
+  # `given` block, and each lost every one of its ~160 rows to it.  The ruling:
+  # a refusal is an event at a STATEMENT, exactly like a drop, so it takes the
+  # drop form's shape — a perl-shaped, trappable run-time die at the site, with
+  # the rest of the file running.  A refusal that aborts the transpile is a bug
+  # in the refusal, not a property of the feature.
+  #
+  # THE TEXT IS UNCHANGED, byte for byte: `PCL: <reason>, at FILE line N` is
+  # what `docs/not-supported.md` documents and what string-eval mode still
+  # puts in `$@` (there the transpile output is discarded, so the refusal
+  # keeps dying at transpile — see `_announce_dropped_statement`).  Only WHEN
+  # it is signalled moved.
+  #
+  # THE COMMENT MARKER IS DELIBERATELY NOT `;; PARSE ERROR:`.  That string is
+  # the census key — tools/drop-census.pl, tools/corpus-diff.pl's SILENT-DROP
+  # counter and both runners' `drops` column read it — and a refused statement
+  # is not a compiler gap to be closed, so it must not enter the census the
+  # census exists to shrink.  It is loud in its own right: announced at
+  # transpile and fatal when reached.
+  if (my $refusal = $self->_ruled_refusal_for_drop($src)) {
+    my $msg = "PCL: $refusal, at $file line $line\n";
+    return "(progn ;; RULED REFUSAL: $refusal\n "
+         . "(pcl:p-die " . Pl::ExprToCL::cl_string_literal($msg) . "))";
+  }
+
   my $msg = "PCL: statement not supported at $file line $line: $text -- $error\n";
   return "(progn ;; PARSE ERROR: $error\n "
        . "(pcl:p-die " . Pl::ExprToCL::cl_string_literal($msg) . "))";
@@ -10661,13 +10689,34 @@ sub _announce_dropped_statement {
 
   # A RULED REFUSAL COMES FIRST (Track A, #371): for the five families above
   # this statement is not a compiler gap but a feature PCL does not have, and
-  # the honest answer is perl's -- refuse the file, in every mode, rather than
-  # run a program the author did not write.  The location is spelled like the
-  # announcement's so the two read alike; the message keeps its `PCL:` prefix
-  # so that in eval-string mode it travels the ruled refusal route into $@.
+  # the honest answer is perl's -- refuse, rather than run a program the author
+  # did not write.  The message keeps its `PCL:` prefix so that in eval-string
+  # mode it travels the ruled refusal route into $@.
+  #
+  # THE UNIT IS THE STATEMENT (RULED s465, USER; task #1037).  In FILE mode the
+  # refusal is now emitted as a run-time die at the statement's own site
+  # (`_dropped_statement_cl`), so the file transpiles, every other statement
+  # runs, and only a program that REACHES the refused statement dies -- with
+  # the same text, trappable in `eval {}`.  A whole file lost to one refused
+  # statement was a bug in the refusal: `perl-tests/state.t` and `t/op/state.t`
+  # cost ~320 rows to one `given` block between them.
+  #
+  # STRING-EVAL MODE STILL DIES AT TRANSPILE, and that is not an exception to
+  # the ruling but the same #363 reasoning as for a drop: the emission is
+  # produced by the `pl2cl --server` subprocess and, on an error, discarded --
+  # there is nothing to carry a run-time form -- while perl's own contract for
+  # `eval STRING` is that what does not compile sets `$@`.  perl 5.42 does not
+  # compile `given`, so `$@` is exactly where perl puts it too.
   if ($refusal) {
-    my $where = $self->eval_mode ? '(eval)' : $file;
-    die "PCL: $refusal, at $where line $line\n";
+    die "PCL: $refusal, at (eval) line $line\n" if $self->eval_mode;
+    # Announced ONCE per statement, like a drop, and with its OWN verb: the
+    # runners and tools/gate-set-scan.pl key on the fixed `PCL: statement
+    # dropped at` prefix, and a refusal is not a drop (it is not in the census
+    # and no later fix to the term grammar will close it).
+    return if $announced_drop{"$file:$line:$text"}++;
+    print STDERR
+      "PCL: refused statement at $file line $line: $text -- $refusal\n";
+    return;
   }
   # ONCE per statement: a statement can reach an emitter twice (the v2 seam
   # tries the form entry, a block body is lowered inside an outer lowering),
