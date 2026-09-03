@@ -106,14 +106,14 @@ my $ro = transpile(q{sub ro { my ($v) = @_; return uc $v }
 my $z = "keep";
 print ro($z), "\n";
 });
-like($ro, qr/\(let \(\(\$z "keep"\)\)/,
+like($ro, qr/\(p-let \(\(\$z :scalar "keep"\)\)/,
    'INVERSE: a read-only sub leaves its argument a RAW slot (no make-p-box)');
 
 my $rw = transpile(q{sub rw { $_[0] = "x" }
 my $z = "keep";
 rw($z);
 });
-like($rw, qr/\(let \(\(\$z \(make-p-box/,
+like($rw, qr/\(p-let \(\(\$z :box \(make-p-box/,
    'a writing sub DOES box the caller variable it is handed');
 
 # INVERSE, second shape: the read-only uses of @_ that a naive scan would
@@ -125,7 +125,7 @@ sub r4 { my $s = ""; $s .= $_ for @_; return $s }
 my $p = "p";
 print r1($p,"q"), r2($p,"q"), r3($p,"q"), r4($p,"q"), "\n";
 });
-like($ro2, qr/\(let \(\(\$p "p"\)\)/,
+like($ro2, qr/\(p-let \(\(\$p :scalar "p"\)\)/,
    'INVERSE: `my (…) = @_`, join(@_), scalar/$#_ and a read-only foreach stay reads');
 
 # The IMPLICIT-$_ writers (probe-found s332, all four were silent wrongs):
@@ -157,7 +157,7 @@ sub m2 { return join "", map { $_ . "y" } @_ }
 my $p = "p";
 print m1($p), g1($p), m2($p), "\n";
 });
-like($ro3, qr/\(let \(\(\$p "p"\)\)/,
+like($ro3, qr/\(p-let \(\(\$p :scalar "p"\)\)/,
    'INVERSE: read-only map/grep over @_ leave the caller a RAW slot');
 
 # ------------------------------------- 2. s/// and tr/// on an ELEMENT

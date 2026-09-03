@@ -98,12 +98,12 @@ my $x = PI;',
 # use compiles to a scalar-context call of the constant sub.
 output_contains('use constant PI => 3.14;
 my $area = PI * $r * $r;',
-                '(let (($area (p-* (p-* (p-scalar-ctx (pl-PI)) $r) $r))))',
+                '(p-let (($area :scalar (p-* (p-* (p-scalar-ctx (pl-PI)) $r) $r))))',
                 'Constant in arithmetic');
 
 output_contains('use constant { WIDTH => 100, HEIGHT => 200 };
 my $size = WIDTH * HEIGHT;',
-                '(let (($size (p-* (p-scalar-ctx (pl-WIDTH)) (p-scalar-ctx (pl-HEIGHT))))))',
+                '(p-let (($size :scalar (p-* (p-scalar-ctx (pl-WIDTH)) (p-scalar-ctx (pl-HEIGHT))))))',
                 'Multiple constants in expression');
 
 

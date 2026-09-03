@@ -35,13 +35,13 @@ like($fc, qr/\(p-foreach(?:-raw)? .*:continue \(progn/s, 'foreach continue: :con
 # `my $aa, $bb, $cc;` — Perl declares only $aa (a lexical); $bb/$cc are package
 # vars.  Lower as a boxed `my $aa` let + the comma expression discarded.
 my $md = Pl::Parser2->parse_code(q{my $aa, $bb, $cc; $bb = 1; print $aa;});
-like($md, qr/\(let \(\(\$aa \(make-p-box nil\)\)\)/, 'my $aa,… : only $aa let-bound');
-unlike($md, qr/\(let \(\(\$bb/, 'my $aa,… : $bb is NOT let-bound (package var)');
+like($md, qr/\(p-let \(\(\$aa :box \(make-p-box nil\)\)\)/, 'my $aa,… : only $aa let-bound');
+unlike($md, qr/\(p-let \(\(\$bb/, 'my $aa,… : $bb is NOT let-bound (package var)');
 like($md, qr/\(p-defcell \$bb /, 'my $aa,… : $bb forward-declared as a package global');
 
 # `my $a . $foo;` — declares $a, concatenation discarded.
 my $dc = Pl::Parser2->parse_code(q{my $foo = "f"; my $a . $foo; print $a;});
-like($dc, qr/\(let \(\(\$a__excl__\d+ \(make-p-box nil\)\)\)/,
+like($dc, qr/\(p-let \(\(\$a__excl__\d+ :box \(make-p-box nil\)\)\)/,
      'my $a . $foo : $a let-bound');   # $a is exception-partition → #296 rename
 
 # ---- W8 tail (s273): VarAnnotator write shapes + self-ref my init + our-init ----
@@ -52,23 +52,23 @@ like($dc, qr/\(let \(\(\$a__excl__\d+ \(make-p-box nil\)\)\)/,
 # semantics are preserved) — the write must lower through the twin, never a
 # box-set on the raw slot.
 my $bw = Pl::Parser2->parse_code(q{my $s = "zzzzz"; $s &= "AAAAA"; print $s;});
-like($bw, qr/\(let \(\(\$s "zzzzz"\)\)/, 'bitwise &= target goes raw (task #62)');
+like($bw, qr/\(p-let \(\(\$s :scalar "zzzzz"\)\)/, 'bitwise &= target goes raw (task #62)');
 like($bw, qr/\(p-bit-and=-raw \$s "AAAAA"\)/, '&= lowers via the raw macro twin');
 
 # Paren-less \substr $t: magic write-through ref needs the box (misc-fixes-02 t27).
 my $sb = Pl::Parser2->parse_code(q{my $t = ""; ${\substr $t, 0} = "X"; print $t;});
-like($sb, qr/\(\$t \(make-p-box nil\)\)/, 'paren-less \substr target stays boxed');
+like($sb, qr/\(\$t :box \(make-p-box nil\)\)/, 'paren-less \substr target stays boxed');
 
 # Handle-vivifying builtin writes its FH arg: open($h,…) keeps $h boxed
 # (fileio-02 t25 — a raw slot loses the handle association).
 my $oh = Pl::Parser2->parse_code(q{my $h = "Log123"; open($h, '<', "/dev/null") or die; print $h;});
-like($oh, qr/\(\$h \(make-p-box nil\)\)/, 'open($h,…) FH arg stays boxed');
+like($oh, qr/\(\$h :box \(make-p-box nil\)\)/, 'open($h,…) FH arg stays boxed');
 
 # Self-referencing init `my $i = $i` reads the OUTER $i: the init moves into
 # the let BINDING via p-box-init (evaluated in the outer env), never a
 # body-position p-my-= that would read the fresh nil box (closure-01 t17).
 my $sh = Pl::Parser2->parse_code(q{my $i = 7; { my $i = $i; print $i; } print $i;});
-like($sh, qr/\(let \(\(\$i \(p-box-init \$i\)\)\)/, 'my $i = $i: init in the let binding (outer scope)');
+like($sh, qr/\(p-let \(\(\$i :box \(p-box-init \$i\)\)\)/, 'my $i = $i: init in the let binding (outer scope)');
 
 # Scalar our-init emits p-scalar-= (box-set clears sv/nv caches) — a raw
 # (setf (p-box-value …)) reads back a stale string cache after a BEGIN wrote
@@ -108,7 +108,7 @@ $name = 9;
 print $name;
 EOF
 unlike($pc, qr/__cond__/, 'condition-my keeps its name (the rename is gone)');
-like($pc, qr/\(let \(\(\$name /, 'the condition-my is let-bound — a lexical shadow');
+like($pc, qr/\(p-let \(\(\$name /, 'the condition-my is let-bound — a lexical shadow');
 like($pc, qr/\(p-defcell \$name /, 'the package global $name still gets its declaration');
 
 # A self-contained condition-my (no outside use) is unchanged too.
@@ -135,11 +135,11 @@ unlike($ea, qr/\(p-setf \(p-gethash/, 'W11: no p-setf macro on let-bound hash wr
 # B-str freeze (all uses stringify) stores its STRING through the strict
 # coercer instead.  With an opaque use the variable still boxes.
 my $eb = Pl::Parser2->parse_code(q{my %h; $h{k} = 5; my $v = $h{k}; print $v;});
-like($eb, qr/\(\$v \(%pcl-to-string-strict \(p-gethash %h "k"\) "\$v"\)\)/,
+like($eb, qr/\(\$v :str \(%pcl-to-string-strict \(p-gethash %h "k"\) "\$v"\)\)/,
      'W11/B-str: element-read init freezes raw when every use stringifies');
 my $eb2 = Pl::Parser2->parse_code(
   q{my %h; $h{k} = 5; my $v = $h{k}; my $w = $v; print $v;});
-like($eb2, qr/\(\$v \(make-p-box nil\)\)/,
+like($eb2, qr/\(\$v :box \(make-p-box nil\)\)/,
      'W11: element-read init stays boxed once an opaque use exists');
 
 # A non-let-bound (package) container falls back — v1 owns the boundp/
@@ -206,7 +206,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
   # `die "boom\n"` puts a genuine newline inside a CL string and a
   # column/line-based scan would misread its closing line as top level.
   {
-    my $open  = index($cl // '', "\n(let ((\$caught ");
+    my $open  = index($cl // '', "\n(p-let ((\$caught ");
     my $write = index($cl // '', '(p-my-= $caught (p-aref @_ 0))');
     my ($depth, $min) = (0, 0);
     if ($open >= 0 && $write > $open) {
@@ -348,7 +348,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
        'state: per-sub cell hoisted as a declared box');
   like($st, qr/\(unless \$n__state__0__init \(box-set \$n__state__0 0\) \(setf \$n__state__0__init t\)\)/,
        'state: guarded once-init in v1 shape');
-  unlike($st, qr/\(let \(\(\$n__state__0/, 'state: cell is never let-bound');
+  unlike($st, qr/\(p-let \(\(\$n__state__0/, 'state: cell is never let-bound');
 
   # No init → cell only, no flag.
   my $sp = Pl::Parser2->parse_code(
@@ -565,7 +565,7 @@ EOF
 
   # -- step 2: do{} / anonymous sub raw_lambda re-host --
   my $do = Pl::Parser2->parse_code(q{my $d = do { my $y = 5; $y + 1 };});
-  like($do, qr/\(funcall \(lambda \(\) \(progn \(let \(\(\$y 5\)\) \(p-\+ \$y 1\)\)\)\)\)/,
+  like($do, qr/\(funcall \(lambda \(\) \(progn \(p-let \(\(\$y :scalar 5\)\) \(p-\+ \$y 1\)\)\)\)\)/,
        '#78: do{} body is structural — (funcall (lambda () (progn …)))');
 
   my $hc = Pl::Parser2->parse_code(q{my @h = map { { k => $_ } } (1);});
@@ -744,7 +744,7 @@ print $i;
 EOF
 unlike($cm2, qr/\$i__cond__/,
        'cond-my: a global use outside the construct no longer renames it');
-like($cm2, qr/\(let \(\(\$i /, 'the C-for head my is let-bound — a lexical shadow');
+like($cm2, qr/\(p-let \(\(\$i /, 'the C-for head my is let-bound — a lexical shadow');
 like($cm2, qr/\(p-defcell \$i /, 'the package global $i still gets its declaration');
 
 # ---- E4.1 pre-work (s342d, task #229): the two perl CORE modules the s342c
@@ -799,7 +799,7 @@ EOF
 is($@, '', 'cond-my: a string eval in the construct no longer gates the file');
 unlike($cm4 // 'x', qr/__cond__/,
        'cond-my: a real use outside the constructs no longer renames');
-like($cm4 // '', qr/\(let \(\(\$err /,
+like($cm4 // '', qr/\(p-let \(\(\$err /,
      'cond-my: the construct binds a lexical $err over the global');
 # INVERSE 2: an `our` declaration DOES create the global — both roles, one name.
 my $cm5 = Pl::Parser2->parse_code(<<'EOF');
@@ -809,7 +809,7 @@ print $err;
 EOF
 unlike($cm5, qr/__cond__/, 'cond-my: `our $err` beside a condition-my needs no rename');
 like($cm5, qr/\(p-defcell \$err /, 'cond-my: the `our` global still gets its cell');
-like($cm5, qr/\(let \(\(\$err /,   'cond-my: the condition-my still gets its lexical');
+like($cm5, qr/\(p-let \(\(\$err /,   'cond-my: the condition-my still gets its lexical');
 
 # ---- E4.1 pre-work (s342f, task #227): eval-mode trailing declarations.
 # The audit's CPAN half of family F2 was not syntax probes at all — it was

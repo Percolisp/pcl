@@ -38,7 +38,7 @@ my $c_boxes = () = $cl =~ /\(\$c \(make-p-box/g;
 is($c_boxes, 0, '$c is unboxed (single arith write)');
 # $a/$b are exception-partition, so #296 renames the two accumulators to
 # $a__excl__N/$b__excl__N before any of this analysis runs; $c is ordinary.
-like($cl, qr/\(let \(\(\$c \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/,
+like($cl, qr/\(p-let \(\(\$c :scalar \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/,
      '$c bound raw at its declaration site');
 
 # Spec #2 (amended by task #60): exactly ONE :void bind — the hoisted
@@ -48,7 +48,7 @@ like($cl, qr/\(let \(\(\$c \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/,
 # for suppressing every per-statement bind (SBCL heap blowup on large subs).
 my $void_wraps = () = $cl =~ /\(p-void-ctx\b/g;
 is($void_wraps, 1, 'exactly one :void bind: the hoisted sub-body regime');
-like($cl, qr/\(p-void-ctx\s*\n?\s*\(let \(\(\$a/,
+like($cl, qr/\(p-void-ctx\s*\n?\s*\(p-let \(\(\$a/,
      'the :void regime wraps the body once, directly above the first decl');
 # B-num (task #62 scan-licensed freeze): $a's only uses are numeric ($a + $b),
 # so the bare copy `$a = $b;` goes raw through the strict numeric freeze; $b's
@@ -66,13 +66,13 @@ like($cl, qr/\(p-foreach-range(?:-raw)? \(\$i 2 \$n\)/, 'foreach range in list c
 # Unboxed accumulator: my $sum = 0; $sum = $sum + ...;
 my $cl2 = Pl::Parser2->parse_code(
   'my $sum = 0; for my $i (0..9) { $sum = $sum + $i * 2; } print "$sum\n";');
-like($cl2, qr/\(let \(\(\$sum 0\)\)/, 'unboxable scalar bound raw');
+like($cl2, qr/\(p-let \(\(\$sum :scalar 0\)\)/, 'unboxable scalar bound raw');
 like($cl2, qr/\(setf \$sum \(p-\+ \$sum \(p-\* \$i 2\)\)\)/, 'native setf write, native op forms');
 
 # Gate-1 fallbacks: a ref-taken scalar stays boxed.
 my $cl3 = Pl::Parser2->parse_code(
   'my $x = 1; my $r = \$x; print "$x\n";');
-like($cl3, qr/\(\$x \(make-p-box nil\)\)/, 'ref-taken scalar stays boxed');
+like($cl3, qr/\(\$x :box \(make-p-box nil\)\)/, 'ref-taken scalar stays boxed');
 
 # Native funcalls + R2 caller half: context-insensitive callee → direct call,
 # no *wantarray* bind; context-sensitive callee keeps the bind.
@@ -92,13 +92,13 @@ like($ctx, qr/\(pl-inc \(p-\+/,
 # String literals + `.` concat are native, and string slots unbox.
 my $str = Pl::Parser2->parse_code(
   q{my $s = 'hello'; my $t = $s . " world"; print "$t\n";});
-like($str, qr/\(let \(\(\$s "hello"\)\)/, 'bare string literal binds raw');
-like($str, qr/\(let \(\(\$t \(p-\. \$s " world"\)\)\)/, 'native p-. concat, raw slot');
+like($str, qr/\(p-let \(\(\$s :scalar "hello"\)\)/, 'bare string literal binds raw');
+like($str, qr/\(p-let \(\(\$t :scalar \(p-\. \$s " world"\)\)\)/, 'native p-. concat, raw slot');
 
 # A known-sub call under a top-level operator unboxes (`my $x = f() + 1`).
 my $fca = Pl::Parser2->parse_code(
   'sub add { my ($a, $b) = @_; return $a + $b; } my $x = add(2, 3) + 1; print "$x\n";');
-like($fca, qr/\(let \(\(\$x \(p-\+ \(pl-add 2 3\) 1\)\)\)/,
+like($fca, qr/\(p-let \(\(\$x :scalar \(p-\+ \(pl-add 2 3\) 1\)\)\)/,
      'funcall under arith op: raw slot, direct native call');
 
 # A BARE known-sub call could return a box — but $x's only use is string
@@ -106,12 +106,12 @@ like($fca, qr/\(let \(\(\$x \(p-\+ \(pl-add 2 3\) 1\)\)\)/,
 # dies on overload-capable refs instead of freezing them).
 my $fcb = Pl::Parser2->parse_code(
   'sub give { my ($a) = @_; return $a; } my $x = give(2); print "$x\n";');
-like($fcb, qr/\(\$x \(%pcl-to-string-strict \(pl-give 2\) "\$x"\)\)/,
+like($fcb, qr/\(\$x :str \(%pcl-to-string-strict \(pl-give 2\) "\$x"\)\)/,
      'bare funcall RHS with all-string uses freezes raw (B-str)');
 # With an opaque use added (bare return value escapes), the box stays.
 my $fcb2 = Pl::Parser2->parse_code(
   'sub give { my ($a) = @_; return $a; } my $x = give(2); my $y = $x; print "$x\n";');
-like($fcb2, qr/\(\$x \(make-p-box nil\)\)/, 'bare funcall RHS with an opaque use stays boxed');
+like($fcb2, qr/\(\$x :box \(make-p-box nil\)\)/, 'bare funcall RHS with an opaque use stays boxed');
 
 # elsif chains lower to nested p-if.
 my $eif = Pl::Parser2->parse_code(
@@ -122,7 +122,7 @@ like($eif, qr/\(p-if \(p-> \$x 4\)/, 'elsif lowered as nested p-if');
 # C-style for: arith step → raw counter; ++ step → boxed counter.
 my $cfor = Pl::Parser2->parse_code(
   'for (my $i = 0; $i < 3; $i = $i + 1) { print "$i\n"; }');
-like($cfor, qr/\(let \(\(\$i 0\)\)/, 'C-for arith-step counter binds raw');
+like($cfor, qr/\(p-let \(\(\$i :scalar 0\)\)/, 'C-for arith-step counter binds raw');
 like($cfor, qr/\(\(setf \$i \(p-\+ \$i 1\)\)\)/, 'C-for raw counter native setf step');
 # A-num root-incdec (task #62, replaced the s269/s286b ++-step carve-out): a
 # `$j++` statement — the step slot AND any root statement in the body — is a
@@ -130,17 +130,17 @@ like($cfor, qr/\(\(setf \$i \(p-\+ \$i 1\)\)\)/, 'C-for raw counter native setf 
 # numeric-valued, so the counter unboxes in both shapes.
 my $cfor2 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 3; $j++) { print "$j\n"; }');
-like($cfor2, qr/\(let \(\(\$j 0\)\)/, 'C-for pure ++ step: counter unboxes (A-num)');
+like($cfor2, qr/\(p-let \(\(\$j :scalar 0\)\)/, 'C-for pure ++ step: counter unboxes (A-num)');
 like($cfor2, qr/\(\(p-incf-raw \$j\)\)/, 'C-for ++ step lowered via the -raw twin');
 my $cfor3 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 6; $j++) { $j++; print "$j\n"; }');
-like($cfor3, qr/\(let \(\(\$j 0\)\)/, 'C-for with body ++ also unboxes (A-num)');
+like($cfor3, qr/\(p-let \(\(\$j :scalar 0\)\)/, 'C-for with body ++ also unboxes (A-num)');
 like($cfor3, qr/\(p-incf-raw \$j\)\s*\(p-print/s, 'body ++ lowered via the -raw twin');
 # … but a STR-family write forces the box: perl magically increments a
 # non-numeric string ("aa" -> "ab"), which the numeric twin cannot do.
 my $cfor4 = Pl::Parser2->parse_code(
   'for (my $j = "aa"; $j ne "ad"; $j++) { print "$j\n"; }');
-like($cfor4, qr/\(\$j \(make-p-box nil\)\)/, 'C-for string-seeded counter keeps the box');
+like($cfor4, qr/\(\$j :box \(make-p-box nil\)\)/, 'C-for string-seeded counter keeps the box');
 like($cfor4, qr/\(p-post\+\+ \$j\)/, 'string counter step through p-post++ (magical incr)');
 
 # Lean p-sub: a body that never reads @_ skips the p-args-body prologue —
@@ -170,10 +170,10 @@ like($brk, qr/p-last/, 'last lowers');
 # through the original expression machinery (p-array-= / p-hash-= / p-list-=).
 my $agg = Pl::Parser2->parse_code(
   'my @a = (1,2,3); my %h = (x => 9); my ($p, $q) = (4, 5); print $a[0]+$h{x}+$p+$q, "\n";');
-like($agg, qr/\(let \(\(\@a \(make-array 0 :adjustable t :fill-pointer 0\)\)\)/,
+like($agg, qr/\(p-let \(\(\@a :array \(make-array 0 :adjustable t :fill-pointer 0\)\)\)/,
      'my @a binds a fresh adjustable vector');
 like($agg, qr/\(p-array-= \@a \(vector 1 2 3\)\)/, 'array init via p-array-=');
-like($agg, qr/\(let \(\(%h \(make-hash-table :test 'equal\)\)\)/,
+like($agg, qr/\(p-let \(\(%h :hash \(make-hash-table :test 'equal\)\)\)/,
      'my %h binds a fresh hash table');
 like($agg, qr/\(p-list-= \(vector \$p \$q\)/, 'my (LIST) init via p-list-=');
 
@@ -223,11 +223,11 @@ my $interp = Pl::Parser2->parse_code(
 # lay the concat out multiline since the E2.final root flip.)
 like($interp, qr/\(p-string-concat "x is "\s+\$x\s+"!\s*\n?"\)/,
      'simple $name interpolation lowers natively to p-string-concat');
-like($interp, qr/\(\$msg\s*\n?\s*\(p-string-concat/, 'interpolated-string slot binds raw');
+like($interp, qr/\(\$msg :scalar\s*\n?\s*\(p-string-concat/, 'interpolated-string slot binds raw');
 
 # Unary ! is native and raw-rooted.
 my $bang = Pl::Parser2->parse_code('my $x = 0; my $y = !$x; print "y=[$y]\n";');
-like($bang, qr/\(let \(\(\$y \(p-! \$x\)\)\)/, 'unary ! native, raw slot');
+like($bang, qr/\(p-let \(\(\$y :scalar \(p-! \$x\)\)\)/, 'unary ! native, raw slot');
 
 # --- Session-270 growth: `package` statements (section splitting) ---
 
@@ -285,7 +285,7 @@ my $capt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { $n + 1 } print bump()
 like($capt, qr/\(p-defcell \$n \(make-p-box nil\)\)/,
      'W5: captured file-unique scalar gets an identity cell');
 unlike($capt, qr/\$n__file__\d+/, 'W5: file-unique captured name is NOT mangled');
-unlike($capt, qr/\(let \(\(\$n\b/, 'W5: promoted cell is NOT let-bound');
+unlike($capt, qr/\(p-let \(\(\$n\b/, 'W5: promoted cell is NOT let-bound');
 # A NON-unique name (block-nested shadow elsewhere) takes the mangled path;
 # the shadow scope keeps its own name (M-C shadow-aware count + rewrite).
 my $captm = Pl::Parser2->parse_code(
@@ -293,7 +293,7 @@ my $captm = Pl::Parser2->parse_code(
 like($captm, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\)\)/,
      'W5: shadowed captured lexical gets a MANGLED cell');
 like($captm, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in place');
-like($captm, qr/\(let \(\(\$n (?:9|\(make-p-box)/,
+like($captm, qr/\(p-let \(\(\$n (?::scalar 9|:box \(make-p-box)/,
      'W5: the block shadow keeps its own let-bound $n');
 
 # An interpolated use ($n inside a string) once forced whole-file v1 (text a
@@ -364,11 +364,11 @@ like($@, qr/captured by sub/, 'shadowed captured lexical still dies to v1');
 
 # … but the same name confined to top-level statements is still v2-lowered.
 my $nocapt = Pl::Parser2->parse_code(q{my $n = 1; sub bump { my ($m) = @_; return $m + 1 } print bump($n), "\n";});
-like($nocapt, qr/\(let \(\(\$n 1\)\)/, 'sub with its own params does not block v2');
+like($nocapt, qr/\(p-let \(\(\$n :scalar 1\)\)/, 'sub with its own params does not block v2');
 
 # Octal literals must NOT enter the native subset (CL reads 0100 as 100).
 my $oct = Pl::Parser2->parse_code(q{my $o = 0100; print "$o\n";});
-like($oct, qr/\(\$o #o100\)/, 'octal literal routed to fallback (#o100), not bare 0100');
+like($oct, qr/\(\$o :scalar #o100\)/, 'octal literal routed to fallback (#o100), not bare 0100');
 
 # --- `our` declarations: package vars — declaration hoisted to the section top,
 # no let, assignment through the ordinary machinery.
@@ -385,7 +385,7 @@ like($our, qr/^\(p-defcell \$count \(make-p-box nil\)\)/m, 'our $x declaration h
 like($our, qr/^\(p-defcell \@list /m, 'our @a declaration hoisted');
 like($our, qr/\(p-scalar-= \$count 3\)/, 'our $x init via p-scalar-= (box-set clears sv/nv caches; a raw p-box-value setf reads back stale — D23)');
 like($our, qr/\(p-list-= \(vector \$p \$q\)/, 'our (LIST) init via p-list-=');
-unlike($our, qr/\(let \(\(\$count/, 'our vars are not let-bound');
+unlike($our, qr/\(p-let \(\(\$count/, 'our vars are not let-bound');
 like($our, qr/\(in-package :Dog\).*\(p-defcell \@ISA /s, 'our @ISA declaration lands in its package section');
 my $ourshadow = eval { Pl::Parser2->parse_code(q{my $x = 1; our $x; print $x;}) };
 like($@, qr/shadows a my-lexical/, 'our shadowing a my-lexical dies to v1');
@@ -502,7 +502,7 @@ is(paren_balance($loclen), 0, 'local $#a (no scope opened) stays balanced');
 # fallback; the written var stays boxed (fallback writes are box-ops).
 my $fe = Pl::Parser2->parse_code(q{my $t = 0; $t = $t + $_ foreach 1..3; print "$t\n";});
 like($fe, qr/\(p-foreach \(\$_ \(p-\.\. 1 3\)\) \(p-my-= \$t/, 'foreach modifier via per-statement fallback');
-unlike($fe, qr/\(let \(\(\$t 0\)\)/, 'modifier-written var stays boxed');
+unlike($fe, qr/\(p-let \(\(\$t :scalar 0\)\)/, 'modifier-written var stays boxed');
 my $dw = Pl::Parser2->parse_code(q{my $x = 5; do { $x--; } while ($x > 3); print "$x\n";});
 like($dw, qr/p-do-while/, 'do-while via per-statement fallback');
 
@@ -510,7 +510,7 @@ like($dw, qr/p-do-while/, 'do-while via per-statement fallback');
 my $inf = Pl::Parser2->parse_code(q{for (;;) { last; } print "done\n";});
 like($inf, qr/\(p-for \(\) \(t\) \(\)/, 'for(;;) native: empty init/step, cond t');
 my $nostep = Pl::Parser2->parse_code(q{for (my $i = 0; $i < 3;) { $i = $i + 1; } print "ok\n";});
-like($nostep, qr/\(let \(\(\$i 0\)\)\s*\(p-for \(\) \(\(p-< \$i 3\)\) \(\)/,
+like($nostep, qr/\(p-let \(\(\$i :scalar 0\)\)\s*\(p-for \(\) \(\(p-< \$i 3\)\) \(\)/,
      'for with empty step: raw counter, empty step slot');
 
 # Loop-condition auto-defined rewrites (v1's _auto_defined_cond at the raw
@@ -538,7 +538,7 @@ like($bcont, qr/\(p-print "y"\)/, 'bare-block continue block lowers natively');
 # Unlabeled bare block = single-iteration loop: last/next/redo must work.
 my $bare = Pl::Parser2->parse_code(q[{ my $y = 5; print "$y\n"; last; } print "after\n";]);
 like($bare, qr/\(block nil\s*\n?\s*\(tagbody :redo/, 'bare block lowers to loop-once tagbody');
-like($bare, qr/\(tagbody :redo.*\(let \(\(\$y.*:next/s, 'my inside bare block nests inside the tagbody');
+like($bare, qr/\(tagbody :redo.*\(p-let \(\(\$y.*:next/s, 'my inside bare block nests inside the tagbody');
 
 # Labeled bare block gets the LAST/NEXT/REDO catch tags for dynamic throws.
 my $skip = Pl::Parser2->parse_code(q[SKIP: { last SKIP; print "no\n"; } print "yes\n";]);
@@ -583,7 +583,7 @@ like($sib, qr/\(p-sub pl-getu/, 'closed sibling-scope lexical does not block sub
 # VarAnnotator: a list-assignment LHS is a write — the var must stay boxed
 # (a raw slot in (vector $a $b) would silently drop the p-list-= write).
 my $la = Pl::Parser2->parse_code(q[my $a = 7; my $b = 0; ($a, $b) = (1, 2); print "$a $b\n";]);
-unlike($la, qr/\(let \(\(\$a 7\)\)/, 'list-assigned scalar stays boxed');
+unlike($la, qr/\(p-let \(\(\$a :scalar 7\)\)/, 'list-assigned scalar stays boxed');
 
 # CLForm: a raw `;;` comment chunk must never be flattened onto one line
 # with following siblings (the comment would swallow them).
@@ -792,7 +792,7 @@ EOF
 # chained `my … = my … = …` collapses to one let + chained assignment.
 {
   my $ls = Pl::Parser2->parse_code(q[my @bee=(1,2); { my (undef,@bee) = @bee; }]);
-  like($ls, qr/\(let \(\(\@bee \(p-copy-array \@bee\)\)\)/,
+  like($ls, qr/\(p-let \(\(\@bee :array \(p-copy-array \@bee\)\)\)/,
        'list self-ref container binds to p-copy-array of outer self');
   my $ch = Pl::Parser2->parse_code(q[my @bee = my @bee = (1,2);]);
   like($ch, qr/\(p-array-= \@bee \(p-array-= \@bee/,

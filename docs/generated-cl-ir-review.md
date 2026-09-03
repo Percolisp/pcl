@@ -398,6 +398,13 @@ fired: `;;; rename: $tick -> $tick__file__0 (captured by named sub)`.
 Makes source-mapping mechanical, documents the surgery in-band,
 transpile-time only.
 
+**Status (s466, task #1035):** the landing place is decided — the declaration
+form itself.  Every `my` binding is now printed as `(p-let ((NAME CLASS INIT
+. FACTS)) …)` (ir-spec §2b.2a) and the manifest goes into FACTS as `:perl "$tick"
+:why :captured-by-named-sub` on the renamed entry, in-band and next to the name
+it describes, instead of a header comment.  The CLASS half shipped in s466; the
+`:perl`/`:why` keys are #1035's step 2, not yet emitted.
+
 ### 4b.4 Seam-emitted declarations execute per call
 
 Observed shape: a renamed shadow cell inside a `map` lambda is emitted by

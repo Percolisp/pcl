@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-610
+;;; pcl: pipeline=v2 gen=v2-611
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -96,7 +96,7 @@
   (&rest %_args)
   (p-args-body
     (block nil
-      (let (($class (make-p-box nil)) ($seen (make-p-box nil)))
+      (p-let (($class :box (make-p-box nil)) ($seen :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $class $seen) @_))
         (p-void-ctx
           (p-my-= $seen (make-p-box (p-hash (p-cast-% (p-|| $seen (make-p-box (p-hash)))))))
@@ -108,10 +108,10 @@
                   $class
                   "'
 "))))
-          (let ((@parents (make-array 0 :adjustable t :fill-pointer 0)))
+          (p-let ((@parents :array (make-array 0 :adjustable t :fill-pointer 0)))
             (p-array-= @parents (p-cast-@ (p-string-concat $class "::ISA")))
             (p-if (p-! @parents) (p-return (make-p-box (p-array-init $class))))
-            (let ((@seqs (make-array 0 :adjustable t :fill-pointer 0)))
+            (p-let ((@seqs :array (make-array 0 :adjustable t :fill-pointer 0)))
               (p-array-= @seqs
                 (p-list-ctx
                   (p-map
@@ -120,19 +120,19 @@
                         (p-array-init (p-cast-@ (p-list-ctx (mro::pl-_c3_linearize $_ $seen))))))
                     @parents)))
               (p-push @seqs (make-p-box (p-array-init @parents)))
-              (let ((@result (make-array 0 :adjustable t :fill-pointer 0)))
+              (p-let ((@result :array (make-array 0 :adjustable t :fill-pointer 0)))
                 (p-array-= @result (vector $class))
                 (p-while 1
                   (p-array-= @seqs
                     (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
                   (p-if (p-! @seqs) (p-last))
-                  (let (($cand (make-p-box nil)))
+                  (p-let (($cand :box (make-p-box nil)))
                     (p-foreach-raw ($seq @seqs)
                       :my
                       t
-                      (let (($head (make-p-box nil)))
+                      (p-let (($head :box (make-p-box nil)))
                         (p-my-= $head (p-aref-deref $seq 0))
-                        (let (($in_tail 0))
+                        (p-let (($in_tail :scalar 0))
                           (p-foreach-raw ($s @seqs)
                             :my
                             t

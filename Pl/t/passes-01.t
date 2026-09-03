@@ -77,14 +77,14 @@ sub run_with {
 
 # --- 1. each name gates its emission -----------------------------------
 my $def = transpile_with(undef);
-like($def, qr/\(let \(\(\$n 0\)\)/,          'default: raw let slot');
+like($def, qr/\(p-let \(\(\$n :scalar 0\)\)/,          'default: raw let slot');
 like($def, qr/p-foreach-range-raw/,           'default: counting loop, raw var');
 like($def, qr/%pcl-str-append/,               'default: str-buffer append');
 like($def, qr/%pcl-to-number-strict/,         'default: raw-numeric freeze');
 like($def, qr/\(p-foreach-raw \(\$x \@a\)/,   'default: read-only foreach-LIST takes the raw arm');
 
 my $none = transpile_with('none');
-like($none,   qr/\(let \(\(\$n \(make-p-box nil\)\)\)/, 'none: the slot is a box');
+like($none,   qr/\(p-let \(\(\$n :box \(make-p-box nil\)\)\)/, 'none: the slot is a box');
 unlike($none, qr/p-foreach-range/,            'none: no counting loop');
 like($none,   qr/\(p-foreach \(\$i \(p-\.\. 1 10\)\)/, 'none: general p-foreach over the range');
 unlike($none, qr/%pcl-str-(?:append|buffer)/, 'none: no str-buffer');
@@ -93,7 +93,7 @@ unlike($none, qr/p-foreach-raw/,              'none: no raw foreach arm');
 like($none,   qr/\(p-foreach \(\$x \@a\)/,    'none: the general aliasing p-foreach over the array');
 
 my $no_slot = transpile_with('-raw-slot');
-like($no_slot, qr/\(let \(\(\$n \(make-p-box nil\)\)\)/, '-raw-slot: boxed');
+like($no_slot, qr/\(p-let \(\(\$n :box \(make-p-box nil\)\)\)/, '-raw-slot: boxed');
 like($no_slot, qr/\(p-foreach-range \(\$i 1 10\)/, '-raw-slot: the counting loop keeps its BOXED variant');
 
 my $no_num = transpile_with('-raw-numeric');

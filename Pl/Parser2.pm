@@ -11527,13 +11527,21 @@ sub _multi_decl {
 #   :hash        a fresh or copied perl hash
 my %DECL_CLASS = map { $_ => 1 } qw(:box :scalar :num :str :str-buffer :array :hash);
 
-# One `(NAME INIT)` binding entry.  $name is the perl spelling; cl_sym is
+# One `(NAME CLASS INIT)` binding entry.  $name is the perl spelling; cl_sym is
 # applied here (every site used to apply it itself).
+#
+# PCL_IR_PLAIN=1 prints the pre-s466 spelling — `(let ((NAME INIT)) …)` with no
+# class — and exists for ONE purpose: to prove that a step-1 tree differs from
+# its step-0 base by EXACTLY the declaration syntax (`PCL_IR_PLAIN=1
+# tools/corpus-diff.pl <step-0-sha>` must read IDENTICAL while the plain run
+# differs in every file).  It is a verification switch, not an optimization:
+# it is not in Pl/Passes.pm's registry and changes no runtime behaviour.
 sub _decl_entry {
   my ($name, $class, $init) = @_;
   die "PCL: internal — unknown declaration class '$class' for $name"
     unless $DECL_CLASS{$class};
-  return ['list', cl_sym($name), $init];
+  return ['list', cl_sym($name), $init] if $ENV{PCL_IR_PLAIN};
+  return ['list', cl_sym($name), $class, $init];
 }
 
 # The entry for a plain `my $x` / `my @a` / `my %h`: the fresh container of
@@ -11558,10 +11566,12 @@ sub _slot_class {
   return $c eq 'num' ? ':num' : $c eq 'str' ? ':str' : ':scalar';
 }
 
-# The binding FORM around the entries: `(let (ENTRIES…) BODY…)` today.
+# The binding FORM around the entries: `(p-let (ENTRIES…) BODY…)` — the
+# runtime macro expands to exactly the `let` this printed before s466, so the
+# class is free at run time (cl/pcl-runtime.lisp `p-let`; ir-spec §2b.2).
 sub _decl_let {
   my ($entries, @body) = @_;
-  return ['let', ['list', @$entries], @body];
+  return [($ENV{PCL_IR_PLAIN} ? 'let' : 'p-let'), ['list', @$entries], @body];
 }
 
 # A name's SIGIL.  The name may arrive in its CL spelling — pipe-quoted when

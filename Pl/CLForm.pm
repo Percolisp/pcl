@@ -328,6 +328,16 @@ sub to_string {
   my ($head, @args) = @$f;
   my $ind1 = '  ' x ($depth + 1);
   if ($head eq 'list') {
+    # A declaration entry `(NAME CLASS INIT …)` (p-let, ir-spec §2b.2a) keeps
+    # NAME and its keyword CLASS on the head line when the entry does not fit
+    # flat: the class is what a reader looks for, and a line of its own would
+    # separate it from the name it describes.  Shape-keyed (an atom followed
+    # by a keyword atom), not name-keyed.
+    if (@args >= 3 && !ref $args[0] && !ref $args[1] && $args[1] =~ /^:/) {
+      my ($n, $c, @rest) = @args;
+      return _close("($n $c\n" . join("\n", map { $ind1 . to_string($_, $depth + 1) } @rest),
+                    $depth);
+    }
     return _close('(' . join("\n$ind1", map { to_string($_, $depth + 1) } @args),
                   $depth);
   }

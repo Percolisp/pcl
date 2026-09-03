@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-610
+;;; pcl: pipeline=v2 gen=v2-611
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -66,7 +66,7 @@
           :my
           t
           (p-if (p-defined (p-gethash warnings::%Offsets $name)) (p-next))
-          (let (($bit (make-p-box nil)))
+          (p-let (($bit :box (make-p-box nil)))
             (p-my-= $bit 0)
             (p-foreach-raw ($off (p-list-ctx (p-values warnings::%Offsets)))
               :my
@@ -80,7 +80,7 @@
   (p-args-body
     (block nil
       (p-void-ctx
-        (let (($message (make-p-box nil)))
+        (p-let (($message :box (make-p-box nil)))
           (p-my-= $message (p-pop @_))
           (p-caller-ctx (p-warn :loc "lib/warnings.pm line 69" $message)))))))
 
@@ -89,7 +89,7 @@
   (p-args-body
     (block nil
       (p-void-ctx
-        (let (($message (make-p-box nil)))
+        (p-let (($message :box (make-p-box nil)))
           (p-my-= $message (p-pop @_))
           (p-caller-ctx (p-warn :loc "lib/warnings.pm line 75" $message)))))))
 

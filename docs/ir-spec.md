@@ -661,6 +661,40 @@ the seam's my-vs-package decisions and the string-eval capture alist),
 `_live_lex` (scoped, drives capture *gates*), `_all_lex` (cumulative,
 drives the never-defvar exclusion).
 
+### 2b.2a The declaration form carries its CLASS — `p-let` (normative, s466, task #1035)
+
+Since s466 every `my` binding in the table above is printed as
+
+    (p-let ((NAME CLASS INIT . FACTS) …) BODY…)
+
+and `p-let` expands to exactly the `let` the table shows — the class costs
+nothing at run time and changes no behaviour; a consumer that ignores it still
+reads a correct program, it just loses the information.  CLASS is the
+compiler's verdict about what the binding IS, from a CLOSED set (an unknown
+class is an error at macroexpansion, CLAUDE.md rule 12 — never a silently
+untyped binding):
+
+| class | the binding is | INIT shape |
+|---|---|---|
+| `:box` | a p-box cell — the general scalar (§2.2), incl. the self-referential init | `(make-p-box nil)`, `(p-box-init …)` |
+| `:scalar` | a raw UNBOXED slot holding the scalar VALUE itself — the plain `unboxable` verdict: never aliased, no fixed value family | the lowered init expression |
+| `:num` | a raw numeric slot — the B-regime `coerce => num` verdict | `(%pcl-to-number-strict …)` |
+| `:str` | a raw simple-string slot — `coerce => str` | `(%pcl-to-string-strict …)` |
+| `:str-buffer` | an adjustable fill-pointer string — the S1 append-only verdict | `(%pcl-str-buffer …)` |
+| `:array` | a perl array, fresh or copied | `(make-array 0 :adjustable t :fill-pointer 0)`, `(p-copy-array …)` |
+| `:hash` | a perl hash, fresh or copied | `(make-hash-table :test 'equal)`, `(p-copy-hash …)` |
+
+FACTS are optional keyword pairs after INIT and are reserved for the rename
+manifest (`:perl "$x" :why :captured-by-named-sub`, §2b.3), closure capture
+(`:captured t`) and the provenance flag (`:proven` / `:declared`, task #1034);
+none is emitted yet.  No SBCL type declaration is derived from the class: the
+runtime runs at `(speed 3)`, where a wrong declaration is undefined behaviour.
+The compiler prints every `my` binding through ONE printer (`Pl::Parser2::_decl_entry`
+/ `_decl_let`); `PCL_IR_PLAIN=1` prints the pre-s466 `let` spelling, a
+verification switch whose only use is proving a change touched nothing but the
+syntax.  Sub parameters (`p-raw-params`) and the per-sub facts on `p-sub` are
+the next steps of #1035 and are not yet classed.
+
 ### 2b.3 The rename families
 
 All renames happen **at the PPI token level, before lowering**

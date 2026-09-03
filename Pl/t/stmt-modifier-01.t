@@ -536,7 +536,7 @@ PL
 # declared and empty.  And the unconditional spelling is untouched.
 {
     my $cond = emitted(q{my @t = (1,2) if 0; print scalar(@t);});
-    like($cond, qr/\(let \(\(\@t \(make-array 0 /,
+    like($cond, qr/\(p-let \(\(\@t :array \(make-array 0 /,
          '#620 shape: the let still binds the container unconditionally');
     like($cond, qr/\(p-if 0 \(p-array-= \@t/,
          '#620 shape: only the assignment is wrapped in the condition');

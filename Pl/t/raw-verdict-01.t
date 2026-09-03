@@ -60,48 +60,48 @@ sub test_cl {
 # The bench shape: element-seeded loop bound, all uses numeric → raw-numeric.
 my $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>5); my $n = $h{k}; my $s=0; for (my $i=0; $i<$n; $i++) { $s+=$i } print "$s\n";});
-like($cl, qr/\(\$n \(%pcl-to-number-strict /, 'element-seeded numeric bound: B-num freeze');
+like($cl, qr/\(\$n :num \(%pcl-to-number-strict /, 'element-seeded numeric bound: B-num freeze');
 
 # All-string uses (interpolation, length, bool) → raw-string; bool licenses str.
 $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>"x"); my $m = $h{k}; if ($m) { print "got $m\n"; } print length($m),"\n";});
-like($cl, qr/\(\$m \(%pcl-to-string-strict /, 'string/bool uses: B-str freeze');
+like($cl, qr/\(\$m :str \(%pcl-to-string-strict /, 'string/bool uses: B-str freeze');
 
 # Boolean context DISQUALIFIES raw-numeric ("0.0"/"00"/" " are true strings
 # that numify false) — a bool + num mix stays boxed.
 $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>"0.0"); my $n = $h{k}; print "T\n" if $n; print $n+1,"\n";});
-like($cl, qr/\(\$n \(make-p-box nil\)\)/, 'bool+num mixed uses stay boxed (the "0.0" trap)');
+like($cl, qr/\(\$n :box \(make-p-box nil\)\)/, 'bool+num mixed uses stay boxed (the "0.0" trap)');
 
 # defined() is a call arg → opaque → boxed (freeze would make undef defined).
 $cl = Pl::Parser2->parse_code(
   q{my %h; my $n = $h{k}; print defined($n)?"d":"u"; print $n+1,"\n";});
-like($cl, qr/\(\$n \(make-p-box nil\)\)/, 'defined() use disqualifies');
+like($cl, qr/\(\$n :box \(make-p-box nil\)\)/, 'defined() use disqualifies');
 
 # Dereference → opaque → boxed (freeze would break the ref).
 $cl = Pl::Parser2->parse_code(q{my %h=(k=>[1]); my $r = $h{k}; print $r->[0],"\n";});
-like($cl, qr/\(\$r \(make-p-box nil\)\)/, 'deref use disqualifies');
+like($cl, qr/\(\$r :box \(make-p-box nil\)\)/, 'deref use disqualifies');
 
 # Range endpoint is TYPE-SENSITIVE (magical string range) → opaque → boxed.
 $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>3); my $n = $h{k}; for my $i (1..$n) { print $i } print "\n";});
-like($cl, qr/\(\$n \(make-p-box nil\)\)/, 'range endpoint use disqualifies');
+like($cl, qr/\(\$n :box \(make-p-box nil\)\)/, 'range endpoint use disqualifies');
 
 # & | ^ are TYPE-SENSITIVE (string bitwise on two strings) → opaque → boxed.
 $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>6); my $n = $h{k}; print $n & 3, "\n";});
-like($cl, qr/\(\$n \(make-p-box nil\)\)/, 'bitwise & use disqualifies');
+like($cl, qr/\(\$n :box \(make-p-box nil\)\)/, 'bitwise & use disqualifies');
 
 # Unary minus is TYPE-SENSITIVE (-"abc" eq "-abc") → opaque → boxed.
 $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>3); my $n = $h{k}; print -$n, "\n"; print $n+1,"\n";});
-like($cl, qr/\(\$n \(make-p-box nil\)\)/, 'unary minus use disqualifies');
+like($cl, qr/\(\$n :box \(make-p-box nil\)\)/, 'unary minus use disqualifies');
 
 # A read hidden in a regex PATTERN interpolates (stringify) — licenses B-str,
 # disqualifies B-num even when every visible use is numeric.
 $cl = Pl::Parser2->parse_code(
   q{my %h=(k=>3); my $n = $h{k}; print $n+1,"\n"; print "y\n" if "x3" =~ /x$n/;});
-like($cl, qr/\(\$n \(make-p-box nil\)\)/, 'regex-pattern interpolation blocks B-num');
+like($cl, qr/\(\$n :box \(make-p-box nil\)\)/, 'regex-pattern interpolation blocks B-num');
 
 # `use overload` anywhere in the file disables both B-verdicts.
 $cl = Pl::Parser2->parse_code(
@@ -141,7 +141,7 @@ test_cl('undef freeze: numeric slot sees 0, like perl at first numeric use',
 # Accumulator with only `.=` writes and transient uses → buffer.
 $cl = Pl::Parser2->parse_code(
   q{my $s = ""; for (my $i=0; $i<10; $i++) { $s .= "ab"; } print "$s\n";});
-like($cl, qr/\(\$s \(%pcl-str-buffer ""\)\)/, 'S1: accumulator init becomes a buffer');
+like($cl, qr/\(\$s :str-buffer \(%pcl-str-buffer ""\)\)/, 'S1: accumulator init becomes a buffer');
 like($cl, qr/\(%pcl-str-append \$s "ab"\)/,   'S1: .= appends in place');
 
 # A bare-copy alias escape (opaque use) blocks the buffer (the alias must
@@ -302,12 +302,12 @@ test_cl('#890: a dualvar in a numeric-only slot keeps both sides',
 
 $cl = Pl::Parser2->parse_code(
   q{sub f { my $a = shift; return $a + 1 } my $x = f(1); g($x); print "$x\n";});
-like($cl, qr/\(\$x \(pl-f 1\)\)/,
+like($cl, qr/\(\$x :scalar \(pl-f 1\)\)/,
      '#77 proven-num return: plain raw slot, no freeze wrapper');
 
 $cl = Pl::Parser2->parse_code(
   q{sub f { my $a = shift; return $a . "x" } my $x = f(1); g($x); print "$x\n";});
-like($cl, qr/\(\$x \(pl-f 1\)\)/, '#77 proven-str return: plain raw slot');
+like($cl, qr/\(\$x :scalar \(pl-f 1\)\)/, '#77 proven-str return: plain raw slot');
 
 # The gate switches it off — the general form comes back.
 {
@@ -315,7 +315,7 @@ like($cl, qr/\(\$x \(pl-f 1\)\)/, '#77 proven-str return: plain raw slot');
   Pl::Passes::_parse_env();
   my $off = Pl::Parser2->parse_code(
     q{sub f { my $a = shift; return $a + 1 } my $x = f(1); g($x); print "$x\n";});
-  like($off, qr/\(\$x \(make-p-box nil\)\)/,
+  like($off, qr/\(\$x :box \(make-p-box nil\)\)/,
        '#77 PCL_OPT=-raw-return-family: the general (boxed) form');
 }
 Pl::Passes::_parse_env();
@@ -338,7 +338,7 @@ for my $neg (
                                my $x = $o->f(1); g($x); print "$x\n";}],
 ) {
   my ($what, $src) = @$neg;
-  like(Pl::Parser2->parse_code($src), qr/\(\$x \(make-p-box nil\)\)/,
+  like(Pl::Parser2->parse_code($src), qr/\(\$x :box \(make-p-box nil\)\)/,
        "#77 negative: $what stays boxed");
 }
 
@@ -349,7 +349,7 @@ for my $neg (
 # Proving the call's family made that reachable — `$c` printed nothing.
 $cl = Pl::Parser2->parse_code(
   q{sub two { $_[0] + $_[1] } my $c; $c = two 1, 2; print "$c\n";});
-like($cl, qr/\(\$c \(make-p-box nil\)\)/,
+like($cl, qr/\(\$c :box \(make-p-box nil\)\)/,
      '#77 negative: a below-assignment tail is not a native root write');
 test_cl('#77: `$c = f 1, 2` still assigns the call result',
     'sub two { $_[0] + $_[1] } my $c; $c = two 1, 2; print "$c\n";',
@@ -359,14 +359,14 @@ test_cl('#77: `$c = f 1, 2` still assigns the call result',
 # Calling it 'num' with `-` and `!` was a silent wrong of the bare-`$y` kind
 # (`my $b = +$h; $h = 77` then read 77); it is value-TRANSPARENT now.
 $cl = Pl::Parser2->parse_code(q{our $h; my $b = +$h; print "$b\n";});
-unlike($cl, qr/\(\$b\w* \$h\)/,
+unlike($cl, qr/\(\$b\w* :\S+ \$h\)/,
        q{unary + over a variable never seeds the slot with that variable's BOX});
-like($cl, qr/\(\$b\w* \(%pcl-to-string-strict /,
+like($cl, qr/\(\$b\w* :str \(%pcl-to-string-strict /,
      q{... it is an unproven write, so the B-regime freeze COPIES instead});
 $cl = Pl::Parser2->parse_code(q{my $b = +5; print $b+1,"\n";});
-like($cl, qr/\(\$b\w* 5\)/, 'unary + over a literal is still proven num');
+like($cl, qr/\(\$b\w* :scalar 5\)/, 'unary + over a literal is still proven num');
 $cl = Pl::Parser2->parse_code(q{our $h; my $b = -$h; print $b+1,"\n";});
-like($cl, qr/\(\$b\w* \(p-- \$h\)\)/, 'unary - still computes a raw value');
+like($cl, qr/\(\$b\w* :scalar \(p-- \$h\)\)/, 'unary - still computes a raw value');
 
 test_cl('#77 + the unary-plus fix: values are COPIED, never aliased',
     'our $g = 1; sub uplus { +$g } my $a = uplus(); $g = 99;

@@ -169,7 +169,7 @@ note "-------- Phase 2: compile-time before runtime";
     # my $x = foo() at file scope evaluates its init at RUNTIME (v2: the
     # let binding runs foo() in place; v1 spelled it defvar + box-set) —
     # and that runtime init sits AFTER the compile-time sub definition.
-    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/\(let \(\(\$x /), -1,
+    is(relative_order($cl, qr/\(p-sub pl-foo/, qr/\(p-let \(\(\$x /), -1,
        'my $x (box-set) stays in runtime, after compile-time sub');
 }
 

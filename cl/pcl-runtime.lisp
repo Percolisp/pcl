@@ -3301,19 +3301,38 @@
                 (p-box-sv-ok box) t))
         s)))
 
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; THE DECLARATION CLASSES (task #1035, s466; docs/ir-spec.md §2b.2).  The
+  ;; set is CLOSED: a class the compiler did not agree on is an error at
+  ;; macroexpansion (rule 12), never a silently untyped binding.
+  (defparameter *p-let-classes* '(:box :scalar :num :str :str-buffer :array :hash))
+  (defun %p-let-binding (b)
+    "One p-let entry (NAME CLASS INIT . FACTS) -> the `let' binding (NAME INIT)."
+    (destructuring-bind (name class init &rest facts) b
+      (declare (ignore facts))
+      (unless (member class *p-let-classes*)
+        (error "p-let: unknown declaration class ~S for ~S -- the set is closed: ~S"
+               class name *p-let-classes*))
+      (list name init))))
+
 (defmacro p-let (bindings &body body)
-  "Perl my declarations - creates boxed variables.
-   Usage: (p-let (($x 10) ($y 20)) ...body...)
-   Each variable becomes a box that can be referenced with \\$x"
-  (let ((box-bindings
-         (mapcar (lambda (binding)
-                   (if (listp binding)
-                       (list (first binding)
-                             `(make-p-box ,(second binding)))
-                       (list binding '(make-p-box *p-undef*))))
-                 bindings)))
-    `(let ,box-bindings
-       ,@body)))
+  "THE DECLARATION FORM of a perl `my' (task #1035, s466; docs/ir-spec.md §2b.2):
+     (p-let ((NAME CLASS INIT . FACTS) ...) BODY...)
+   binds each NAME to INIT exactly as `let' does -- the expansion IS `let', so the
+   class costs nothing at run time -- and carries the compiler's verdict about
+   what the binding IS, for a reader or a second backend:
+     :box         a p-box cell (the general scalar; also (p-box-init ...))
+     :scalar      a raw unboxed slot holding the scalar value itself
+     :num         a raw numeric slot (the B-regime verdict)
+     :str         a raw simple-string slot
+     :str-buffer  an adjustable fill-pointer string (%pcl-str-buffer)
+     :array       a perl array (fresh or copied)
+     :hash        a perl hash (fresh or copied)
+   FACTS are optional keyword pairs (:perl \"$x\" :why :captured-by-named-sub ...),
+   ignored here.  No type declaration is derived from the class: the runtime runs
+   at (speed 3), where a wrong declaration is undefined behaviour.  Before s466
+   this name was the dead v1 \"every binding is a box\" macro."
+  `(let ,(mapcar #'%p-let-binding bindings) ,@body))
 
 (defun p-$ (box)
   "Perl scalar dereference $$ref - get value from the referenced box.
@@ -15480,7 +15499,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-610"
+(defparameter *pcl-cache-generation* "v2-611"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

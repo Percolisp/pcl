@@ -65,7 +65,7 @@ diag "-------- C-style for loops:";
 # spells the void `$i++` p-incf-raw — same init/condition/step semantics as
 # v1's in-form (p-my-= …)/(p-post++ …) spellings.
 output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '(let (($i 0)) (p-for ()',
+                '(p-let (($i :scalar 0)) (p-for ()',
                 'C-style for: init');
 
 output_contains('for (my $i = 0; $i < 10; $i++) { }',

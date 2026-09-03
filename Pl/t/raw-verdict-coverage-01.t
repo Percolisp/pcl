@@ -156,15 +156,15 @@ PL
 # ══ #760 — CAPTURE is not a boxing event; the EVENT in the closure is ════════
 
 like(emitted('sub hot { my $s = 0; my $c = sub { $s + 1 }; for my $i (1..9) { $s += $i } $s . $c->() }'),
-     qr/\(let \(\(\$s 0\)\)/,
+     qr/\(p-let \(\(\$s :scalar 0\)\)/,
      '#760 a READ-ONLY closure capture leaves the slot raw');
 
 unlike(emitted('sub hot { my $s = 0; my $c = sub { $s = 42 }; for my $i (1..9) { $s += $i } $s }'),
-       qr/\(let \(\(\$s 0\)\)/,
+       qr/\(p-let \(\(\$s :scalar 0\)\)/,
        '#760 a closure that WRITES the name still boxes it');
 
 unlike(emitted('sub hot { my $s = 0; my $c = sub { my $r = \$s; $$r }; for my $i (1..9) { $s += $i } $s }'),
-       qr/\(let \(\(\$s 0\)\)/,
+       qr/\(p-let \(\(\$s :scalar 0\)\)/,
        '#760 a closure that takes a REF to the name still boxes it');
 
 # THE acceptance probe named by task #760 care item (b): a closure made inside
