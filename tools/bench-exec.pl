@@ -70,6 +70,15 @@ my @benches = (
   ['intloop=',  "$HN my \$s=0; for (1..\$n) { \$s = \$s + \$_ } print \"\$s\\n\";",        5_000_000, 0],
   ['cfor',      "$HN my \$s=0; for (my \$i=0; \$i<\$n; \$i++) { \$s = \$s + \$i } print \"\$s\\n\";", 5_000_000, 0],
   ['arrhash',   "$HN my (\@a,\%h,\$s); for (1..\$n) { \$h{x}=\$_; \$a[3]=\$_+1; \$s=\$s+\$h{x}+\$a[3] } print \"\$s\\n\";", 2_000_000, 0],
+  # A COMPUTED hash key: `my $k = …; $h{$k}++` in a loop (task #995).  The
+  # arrhash row above uses a LITERAL key, so it cannot see the shape this row
+  # exists for — a per-iteration `my` whose only "write" is being a subscript.
+  # Until s466bd VarAnnotator read `$h{$k}++` as a write to $k and boxed it:
+  # one make-p-box + one box-set per iteration (15.4 % + 8.1 % of an
+  # sb-sprof profile of exactly this program).  The row is the metric for
+  # that class of false positive; keep the key STRING-valued, since a raw
+  # string slot is the verdict the fix restores.
+  ['arrhash-k',  "$HN my (\%h,\@a); for my \$i (1..\$n) { my \$k = \"k\" . (\$i % 500); \$h{\$k}++; push \@a, \$i } print scalar(keys \%h), \" \", scalar(\@a), \"\\n\";", 600_000, 0],
   ['fib(27)x',  "$HN sub fib { my \$m=shift; \$m<2 ? \$m : fib(\$m-1)+fib(\$m-2) } my \$r=0; \$r=fib(27) for 1..\$n; print \"\$r\\n\";", 30, 0],
   # Multi-statement recursive sub: exercises the sub-body :void regime
   # (task #60) — fib above coalesces to a single-statement body and skips it.
