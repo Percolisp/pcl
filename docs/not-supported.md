@@ -1894,6 +1894,16 @@ release.  Announced-wrong is the CLAUDE.md rule 12 minimum; TAP output is
 unaffected by the stderr line.  Revisit die-vs-support when the boxed-aggregate
 design lands.  Tracked as task #155, ruled in `docs/fable-answers-s318.md` §1.
 
+**Status s467 (2026-09-04).**  The boxed-aggregate model SHIPPED in rounds
+14–16 (s455e–s459, [`boxed-aggregates-design-s455.md`](boxed-aggregates-design-s455.md)), and its
+scope table (E9) deliberately left tied and magic containers OUT: they keep the
+fully-boxed representation, and the tie hook itself is still unimplemented, so
+this entry stands and #155 stays open.  The same announcement covers a
+FILEHANDLE tie — `tie *FH, 'Class'` prints
+`PCL: tie: a non-lvalue (class Class) is not implemented — the container is left untied (task #155)`
+and `print FH …` goes to the untied handle (probed s467).  Only a SCALAR tie is
+implemented.
+
 ## Sparse arrays (holes), element aliasing, and SV identity
 
 **Perl behaviour:** A Perl array can have *holes* — index positions that have never

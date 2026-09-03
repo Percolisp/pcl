@@ -12,6 +12,8 @@ Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
 
 ## Where this stands (2026-08-25)
 
+> **The current measured board is [§0.2i](#02i-the-board-on-a-quiet-box-s467-2026-09-04-main-bc9aa4a-gen-v2-611) (2026-09-04, quiet box): ten of nineteen rows beat perl, `arrhash` 0.60×, `slices` 2.60×, `symref` 1.37×.**  The table below is the 2026-08-25 reading and is kept as the record of what each tier delivered.
+
 Every shipped transform is a **named, switchable emission** in the
 optimization registry [`Pl/Passes.pm`](../Pl/Passes.pm) (`PCL_OPT`):
 `raw-slot`, `raw-numeric`, `str-buffer`, `foreach-range`, `insensitive-call`,
