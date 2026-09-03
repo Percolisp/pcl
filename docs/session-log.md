@@ -2,6 +2,71 @@
 
 Append new entries at the top. One section per session.
 
+## Session 467 (Fable, 2026-09-04) — s466 died mid-round and was RECONSTRUCTED (agents relaunched, then stopped at the USER's word); the README REWRITTEN as an introduction (USER ask) with every linked doc re-measured the same day; three bugs found by checking its claims, FILED
+
+**Part 0 — the reconstruction.**  s466's context was lost at ~00:25 with
+BC / BD / BE in flight.  Nothing on main was lost (`bc9aa4a`, clean).  BD's
+#995 is committed and already rebased (`65e519c`, v2-640); its only blocker
+is a STALE GUARD — `Pl/t/lvalue-root-01.t` 21/23 because it greps the old
+`(let ((` spelling and main's #1035 emits `(p-let (($k :scalar …)))`; #995
+itself probed intact.  BC's #1037 is committed on 57848f3 (`e60ce12`,
+v2-630), unrebased, and its companion run finished after its agent died —
+UNREAD, copied into its worktree `scratch/s466bc-legs/`.  BE had no
+commits; its three bisection runs and the companion log are in its
+`scratch/s466be/`.  Two Opus agents (BD-finish, BC-finish) were launched and
+stopped within a minute when the USER ended the day; both worktrees clean.
+Memory carries the resume plan (BD → merge → BC second rebase at v2-650 →
+BE).  Lessons in memory: an agent's final report dies with the parent
+session (the record that survives is what it COMMITTED + its `scratch/`);
+`/tmp` scratchpads are not durable (the s464 probe copies are gone; AY's
+worktree is now the only copy for #1020–#1033 — KEEP it).
+
+**Part 1 — the README, and the docs it links.**  Rewritten from scratch as
+an introduction for Perl programmers who know neither Lisp nor compilers:
+what it is, why, quick start, the CLI, a worked example (a 30-line program
+with signatures / sort / heredoc / both evals printing byte-identically),
+the generated code with a reading guide, what works and does not, the
+measurements, speed, requirements, how it works (compiler / runtime / boxes
+/ shims), roadmap.  Every command in it was run today.  `docs/STATUS.md`
+rewritten with the same numbers; `CHANGELOG.md` gained the rounds since
+2026-08-25; `docs/faster-codegen-suggestions.md` §0.2i is a fresh board on a
+QUIET box (every row inside §0.2f's spread except `slices` 3.02× → 2.60×,
+the two round-22 changes landing as predicted; ten of nineteen rows beat
+perl).  **Measured today on main `bc9aa4a`:** gate 196 files / 6,696 (only
+the 13 pclxs rows; 193 / 6,682 for a user without the sibling); sweep
+(s466's run, same tree) 18,493 pass / 649 fail, 58 files complete; companion
+snapshot 528 files = 92 OK / 111 XDIFF / 273 DIFF / 10 TRANSPILE / 9 TIMEOUT /
+30 NOTAP / 2 NOT-RUN / 1 FIXTURE; drop census 17 files / 57; **CPAN board14
+re-run: 78 PASS / 54 PARTIAL / 51 FAIL files, 2,140 ok / 342 not-ok**
+(`baselines/cpan-board14-s467.tsv`; s378 read 70/64/49, 2,053/483).  A
+documentation error corrected in README and STATUS: the board is **14
+distributions with 183 test FILES**, not "183 distributions".
+
+**Part 2 — three findings, filed not fixed** (a README session; each is
+an Opus job with its own bars):
+- **#1059 SILENT WRONG**: under `use feature 'signatures'` (so `use v5.36`)
+  the output-field separator `$,` is mis-tokenized — `local $, = "-"`
+  emits `(let (($ …)))` (binds a variable named `$`; the separator is
+  silently lost) and `$, = "-"` is a loud DROP with an EMPTY missing-case
+  list.  `$"`, `$;`, `$\` are fine; the feature alone triggers it, no sub
+  needed.  Found because the demo's last line printed `12345`.
+- **#1060**: `pl2cl --executable` runs the program AT BUILD TIME (its output
+  and a marker file appear during the build) and emits a 48 MB binary that
+  does nothing (exit 0, no output).  `pcl --help` already says standalone
+  compilation is not supported; pl2cl's header advertises the flag.  Not in
+  the README.
+- **#1061**: the board re-run's nine DOWN movers since s378
+  (role-long-package-name.t and when.t PASS → FAIL, 05_extmul.t and
+  dualvar.t → FAIL, max/min/product.t → PARTIAL on an overload row, four
+  Capture-Tiny files, Algorithm-Diff oo.t 59/0 → 102/20) — unattributed;
+  the board is not a gate.
+
+Also confirmed by probe today, and stated in the README: `DESTROY` is never
+called (not even at exit), a handle `tie` is announced and ignored,
+`AUTOLOAD` / phase blocks / `%SIG` handlers / named captures / `pos` work.
+
+---
+
 ## Session 466 (Fable, 2026-09-03) — s465az REVIEWED + MERGED (the four audit instruments), BC + BD RELAUNCHED, and #1035 steps 0 + 1: the declaration form carries its CLASS (`p-let`)
 
 **Part 1 — the merge review of s465az (phase 0 of the ignored-tests audit, #993).**

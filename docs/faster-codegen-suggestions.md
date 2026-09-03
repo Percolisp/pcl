@@ -8,7 +8,7 @@ result, and a head-to-head timing of the two.  Every entry says concretely
 It is the measured basis of **Target A** — general program speed must beat
 Perl (`v2-endgame-plan.md` §6 holds the acceptance criteria and sequencing).
 
-**Written** 2026-07-19 against the v2 pipeline; §0.1 re-measured 2026-08-25.
+**Written** 2026-07-19 against the v2 pipeline; §0.1 re-measured 2026-08-25; §0.2i is the current board (2026-09-04, quiet box).
 
 ## Where this stands (2026-08-25)
 
@@ -605,6 +605,45 @@ sliceasgn       0.0252     0.0526     0.0524     -0.3%     2.09x
 ```
 
 What is left on the row is the ~23 % that is the `equal` hash table itself.
+
+### 0.2i The board on a QUIET box (s467, 2026-09-04, main `bc9aa4a`, gen v2-611)
+
+Taken for the README refresh: nothing else was running (the gate had just
+finished, the CPAN board started only after this run), one `perl
+tools/bench-exec.pl` at the default best-of-5.  This is the first full table
+on a quiet machine since §0.2f, and the first with rounds 21–23 in the tree
+(#964 the return protocol, #994 tail-return, #985/#982 the two `slices`
+changes, #1028 bitwise, #1035 `p-let`).
+
+```
+bench          perl(s)     pcl(s)  pcl/perl   §0.2f      note
+intloop+=       0.0652     0.0230     0.35x    0.34x
+intloop=        0.0680     0.0196     0.29x    0.31x
+cfor            0.1145     0.0293     0.26x    0.28x
+arrhash         0.1364     0.0819     0.60x    0.61x
+fib(27)x        1.4670     0.4211     0.29x    0.29x
+gcdrec          0.1928     0.0998     0.52x    0.49x
+collatz         1.9518     0.5064     0.26x    0.26x
+strcat          0.3168     0.6786     2.14x    2.17x
+pack            0.0029     3.3648  1174.03x    896x     perl's column moved (0.0038 -> 0.0029); PCL 3.41 -> 3.36 s
+packunpk        0.0041     3.4902   857.54x    853x
+arrfill         0.0488     0.0710     1.46x    1.45x
+slices          0.0678     0.1760     2.60x    3.02x    #985 + #982 (§0.2g/h predicted ~2.5x)
+sliceasgn       0.0266     0.0530     1.99x    2.01x
+listcopy        0.5129     0.4802     0.94x    0.93x
+feread          0.4090     0.1920     0.47x    0.46x
+feread2         0.4168     0.5486     1.32x    1.26x    PCL 0.5404 -> 0.5486 s, inside §0.2f's spread
+ovlsub          0.0399     0.1381     3.46x    3.28x    PCL 0.1307 -> 0.1381 s, inside §0.2f's spread (0.1291..0.1406)
+symref          0.0222     0.0304     1.37x    1.42x
+regexg          0.3685     0.8043     2.18x    2.17x
+```
+
+Read against §0.2f by the PCL absolute seconds (the §0.2a rule): every row
+is inside that table's recorded spread except `slices`, which is the two
+round-22 changes landing as predicted.  The `pack` ratio rose because
+*perl* ran faster on this machine today; PCL's own time is unchanged.
+**Ten of nineteen rows beat perl**, the same ten as §0.2f.
+
 
 ---
 

@@ -5,6 +5,56 @@ sessions); dates are development-time, not release-time.
 
 ## Unreleased
 
+- 2026-09-04: README rewritten as an introduction for Perl programmers;
+  `docs/STATUS.md`, this file and the benchmark board re-measured on the
+  same day.  Two bugs found while checking its claims are filed, not fixed:
+  under `use feature 'signatures'` (so `use v5.36`) the output-field
+  separator `$,` is mis-tokenized (#1059), and `pl2cl --executable` runs
+  the program at build time and emits a binary that does nothing (#1060).
+- Speed, rounds 10–23 (2026-08-29 → 2026-09-03): array and hash elements
+  are stored raw until something aliases them (the boxed-aggregates flip),
+  element accessors have fast paths, a read-only `foreach` binds the array
+  slot directly, a whole-array copy is one operation, the raw-numeric
+  verdict covers more loop shapes, symbolic references memoize the
+  name-to-symbol lookup, small integers stringify from a shared table, and
+  the runtime compiles at `(speed 3)`.  On the board
+  (`docs/faster-codegen-suggestions.md` §0.2i): counting loops, `cfor`,
+  `collatz` and recursion at 0.26–0.52× of perl; `arrhash` 0.60×; `feread`
+  0.47×; `listcopy` 0.94×; `symref` 9.8× → 1.37×; `slices` 4.7× → 2.6×;
+  `m//g` 30× → 2.2×.
+- The return protocol: an ordinary sub returns a *copy* of its value, as
+  perl does (a returned lexical is no longer aliased into the caller), and
+  a `return` in tail position is a plain value rather than a non-local
+  exit.
+- Bitwise `& | ^ ~` make perl's mode decision — numeric when either
+  operand carries a number, otherwise a byte-by-byte string operation —
+  which was the largest single cluster of failures in the extracted suite
+  (bop.t 253 → 480 passing).  The bitwise operators dispatch
+  `use overload` like every other operator, `nomethod` is honoured, and a
+  missing conversion handler is derived from `""` / `0+` / `bool`.
+- A bareword filehandle is a name in the `stat`/`lstat`/filetest/`write`
+  slots (an open handle there used to crash as an unbound variable).
+- Correctness fillers: the empty list is a value; a list assignment used
+  as a value; `local` under a statement modifier; `\` on an element is a
+  reference to the element, not a dereference cast; `version` objects
+  compare as tuples; `use subs` overrides a builtin; wildcard filenames
+  in the pathname seam; `%!` and the other computed magic variables read
+  live values; a `package NAME VERSION` sets `$VERSION` before a `BEGIN`
+  in the same section; signature parameters are declarations for the
+  capture analysis.
+- Test hygiene: 115 inline `skip`s in the extracted perl suite restored to
+  real assertions and 695 blessed failures re-read for their cause; the
+  sweep and the in-place perl `t/` runner gained row-level and
+  shortfall baselines, so a file that stops early loses rows visibly.
+- The compiler's census of untranslatable statements: 34 files / 89
+  statements → 17 / 57.
+- The generated code: a `my` declaration carries the compiler's class
+  for the variable — `(p-let ((NAME CLASS INIT)) …)` with CLASS one of
+  `:box :scalar :num :str :str-buffer :array :hash` (ir-spec §2b.2a).
+- The installer is exercised on Ubuntu 22.04 / 24.04 and Debian 12 / 13
+  in CI (SBCL 2.5.2 and 2.6.0); `.github/workflows/install-matrix.yml`.
+- The regression gate grew to 193 files / 6,682 assertions (196 / 6,696
+  with the XS-bridge sibling present).
 - IO, round 6: the standard handles are names for descriptors 0/1/2 —
   `open(STDOUT, …)` moves descriptor 1 (plain print, `print STDOUT` and
   exec'd children all follow), `close(STDOUT)` frees the descriptor (a
