@@ -2,6 +2,138 @@
 
 Append new entries at the top. One section per session.
 
+## Session 468be (Opus agent, 2026-09-04) — the companion ROW DIFF ATTRIBUTED: 178 NEW / 407 FIXED / 2 LOST resolved to ten files and four causes, the volatile-key class registered `*rows-unstable*` (#1082), three bugs filed
+
+**The problem.**  AZ blessed the row-level fail baseline
+`baselines/perl-suite-fails.tsv` (I1, #993) from a companion run on a tree
+BEFORE two round-23 merges — BB's #994 tail-return (`73edcff`) and BA's #1028
+bitwise mode decision + #1032 bareword handle slots (`0e7c5e3`).  s466's first
+runs on main therefore reported **178 NEW ROW / 407 FIXED ROW / 500 UNVERIFIED
+/ 2 LOST** (dirs io/op/comp/uni, 320 files) with nothing naming any of it.  No
+compiler or runtime file was touched this session: baselines, `tools/`, docs,
+tasks.
+
+**The attribution — every row, no residue.**
+
+| file | NEW | FIXED | cause | how it was decided |
+|---|---|---|---|---|
+| op/bop.t | 0 | 217 | **#1028** (BA, main `0e7c5e3`) | 252/245 on `1fed80b` AND `73edcff`, 469/28 on `0e7c5e3`; every row is `& \| ^ =` on a ref / glob / PVBM |
+| uni/overload.t | 0 | 6 | **#1028** | 178/14 → 184/8 at the same commit; the six rows are "something xor itself is zeros" |
+| op/write.t | 86 | 86 | **#1032 + #1051** | 18/23 → 99/32 at `0e7c5e3`; the log says `# TRUNCATED: 537 diverging row(s)`, so the 500-row window slid by 86 |
+| op/filetest.t | 4 | 0 | **#1032 → #1047** | 184/250 → 180/254; the four manufactured passes BA already probed and filed |
+| op/closure.t | 0 | 2 | **#1032** (`p-write` / bareword handle) | 273/3 → 274/7 at `0e7c5e3`; the abort moved off `fileno ff; write ff` (closure.t:661) |
+| op/hash.t | 57 | 57 | volatile row KEY (**#1082**) | 45/45, 57/57, 46/46 in three runs of ONE tree |
+| op/undef.t | 14 | 14 | volatile row KEY (**#1082**) | 3 of 55 rows differ between two runs of one tree |
+| op/utfhash.t | 11 | 19 | volatile row KEY (**#1082**) | the diverging-row COUNT itself was 51 / 43 / 19 |
+| op/inc.t | 2 | 2 | volatile row ALIGNMENT (**#1082**) | 36 rows in three runs, 40 in the fourth |
+| op/require_errors.t | 4 | 4 | volatile row KEY — `tempfile()` encodes the PID | normalising perl's own `$::tempfile_regexp` gives 0/0 |
+| io/crlf_through.t | — | — | **LOAD** (2 LOST) | s466 parallel TIMEOUT; **OK 942/0 serial on this tree** = the snapshot |
+| io/through.t | — | — | **LOAD** (2 LOST) | same, OK 942/0 serial |
+
+178 = 86+57+14+11+4+4+2; 407 = 217+86+57+19+14+6+4+2+2.  The **500 UNVERIFIED**
+is one file, comp/require.t (QUICK-CAPPED: registered allowance 450 s > the
+120 s quick cap).
+
+**Two movers hid from the agent that caused them.**  BA's own companion leg was
+`--dir io --dir op` and reported "two movers, both mine".  op/closure.t was IN
+that dir set and did not show, because its move is `273/3 → 274/7` — one more
+passing row *and* four more failing ones, which reads as a wash unless both
+columns are read; uni/overload.t was outside the leg.  Both are now spliced
+into `baselines/perl-suite-run.tsv` with their bisection and their cause.
+
+**The volatile-key class (#1082), and the trap inside it.**  Four files build
+their test descriptions out of perl's own hash state, which is randomised per
+process: op/hash.t interpolates bucket-head and array-size counts, op/undef.t
+the key whose `X::DESTROY` ran first, op/utfhash.t the `keys`/`each` order on
+BOTH sides (so the description PAIRING itself moves), op/inc.t the
+(in|de)cremented key from `foreach (keys %inc)`.  They cannot be blessed: the
+key is a per-run draw.  They are registered with the **`*rows-unstable*`**
+opt-out that `perl-suite-expected-rows.tsv` has carried since s336
+(mro/package_aliases_utf8.t) and s399 (op/assignwarn.t — *the identical cause*),
+extended to I1 in about twenty lines: a file whose blessed rows are exactly one
+`*rows-unstable* <cause>` entry opts out of the ROW check, keeps that entry
+through a `--bless-fails`, and is NAMED on every run (`= <file> …`) so the
+opt-out is never silent.  Their COUNTS still gate — the snapshot and the
+shortfall are untouched.  **op/inc.t is the lesson**: it was measured IDENTICAL
+in two consecutive runs and was on course to be blessed, and the very next run
+produced a third draw (40 diverging rows instead of 36).  Two agreeing runs are
+not evidence of a stable row set in this family; measure three.
+
+**The one normaliser that generalises.**  `t/test.pl`'s `tempfile()` builds
+`tmp_` + the PID in base 26, and perl's own test.pl declares the shape as
+`$::tempfile_regexp = 'tmp_[A-Z]+_[A-Z]+'` and substitutes it away in its
+fresh_perl comparisons.  op/require_errors.t's four rows moved on that alone.
+It now lives with the `TYPE(0x…)` rule in ONE function,
+`PclTapAlign::rowkey_desc` — the row-baseline KEY projection, put beside the
+description PAIRING it is the baseline half of, and called by the ONE reader
+both row baselines share.  What was NOT normalised, and why: the hash-order
+descriptions above are per-FILE test prose rather than a token class (a
+measured normaliser took op/hash.t 57/57 → 2/2, op/undef.t → 0/0, op/utfhash.t
+→ 0/8 and did nothing for op/inc.t), so they got the opt-out instead; the
+durable alternative — `PERL_HASH_SEED=0 PERL_PERTURB_KEYS=0` for the perl
+oracle only — is recorded in #1082 as a decision about the suite's contract,
+not a bless.
+
+**Bars.**  Every file re-run ALONE on 9bee19b and agreeing with the parallel
+run (#366).  Verification run after the blesses, ten files serial: **0 NEW ROW / 0 FIXED
+ROW / 0 UNVERIFIED / 0 LOST**, no snapshot mover, no shortfall mover, and the
+four opt-outs named; the shortfall's UNEXPLAINED count for these files fell
+1,078 -> 572 because the two rows I moved got causes written in.  Baseline edits are
+per file with a cause: `perl-suite-fails.tsv` 21,097 → 20,252 data rows (the four
+opt-out lines replace 632 volatile ones; every non-touched line verified
+byte-identical AND in order, twice), `perl-suite-run.tsv` two rows spliced by
+hand under a header block, `row-shortfall.tsv` op/closure.t 6 → 1 and
+op/write.t 595 → 505 **with causes written in** (they were UNEXPLAINED).  The
+same bless also caught the shortfall file's own header up with the s466 review
+fix (`planned - (pass+fail)`, not `+skip`).  `tools/t/tap-align.t` 14 → 23 and
+`tools/t/audit-instruments.t` 23 → 29, the new audit-instruments rows
+inverse-verified (row 29 FAILED before the registrations landed).  Nothing
+under `Pl/`, `cl/` or `lib/` was touched, so corpus-diff and the sweep cannot
+move; the gate was run anyway and is GREEN — `tools/prove-core` **196 files /
+6,682 tests, Result: PASS** (a worktree has no pclxs sibling, so the 14 xs
+rows are absent rather than failing), plus the three structural rows that DO
+scan `tools/` (no-hardcoded-paths-01.t, license-tag-01.t, core-deps-01.t).
+
+**Post-rebase onto main `b128345`** (BD's #995 and BC's #1037 underneath).  The
+four commits conflict in the three baseline TSVs and in `docs/DECIDED.md`.  The
+TSVs were resolved as a three-way ROW SET out of the index stages (`git show
+:1:` / `:2:` / `:3:`) — the two sides' row sets are DISJOINT by measurement:
+main touched `op/coreamp.t` + `op/tie_fetch_count.t` in the fails baseline, its
+sixteen #1037 files in the snapshot and eight rows in the shortfall; this
+session touched only its ten.  Each resolution is then PROVEN in both
+directions: the rows of every OTHER file byte-identical to main's *and in that
+order* (perl-suite-fails.tsv 20,131 rows, perl-suite-run.tsv 526,
+row-shortfall.tsv 259), and the rows of my ten byte-identical to the pre-rebase
+commit's (889 / 2 / 2).  Both header blocks are kept in every file, main's
+first, and the `# taken-at:` stamps now NAME both sessions rather than letting
+one claim a file the other half of which it never measured.  On the rebased
+tree: `tools/t/tap-align.t` + `tools/t/audit-instruments.t` **52 rows PASS**;
+the ten files re-run serially give **0 NEW ROW / 0 FIXED ROW / 0 UNVERIFIED /
+0 LOST**, no snapshot mover, no shortfall mover, and all ten counts identical
+to the 9bee19b measurement — so neither #995's lib-emission change nor #1037
+reaches them; gate `PCLXS_DIR=$HOME/pclxs tools/prove-core` **198 files / 6,743
+tests**, the only failures the 13 pclxs xs rows (xs-01.t 5, xs-02.t 4,
+xs-03.t 4).
+
+**Filed**: **#1082** (the volatile-key class, with both alternatives measured),
+**#1083** (op/closure.t's three now-honest failures — the `format`/`write` row,
+and two `isnt($s[0],$s[1])` rows where PCL returns the SAME code ref for a
+`use re 'eval'` or `s///ee` body but a DIFFERENT one for a plain `eval "1"`
+body; probed against perl 5.40.3), **#1084** (`do FILE` re-parses through the
+INLINE-CODE path and dies on a non-ASCII byte that the file-mode path handles —
+one U+2019 in `t/op/closure_test.pl`'s header comment is closure.t's whole
+remaining abort and its whole remaining shortfall; three-file reproducer).
+
+**Not touched, deliberately**: io/open.t (153/35 ↔ 154/34) and io/pvbm.t
+(20/8 ↔ 21/7) flapped in BOTH directions between two runs of this tree — the
+documented load flappers, blessing either way would just move the noise; and
+every file owned by the sibling agent BC.  **Still UNVERIFIED after this
+session**: a dirs-limited companion run leaves 12,298 blessed rows in 59 files
+it never looks at — re/ 36 files / 11,272 rows (`re/reg_posixcc.t` alone
+7,130), run/ 18, opbasic/ 3, base/ 1, cmd/ 1 — reachable only by the full
+`--all` form (I4, the round-end item).
+
+
 ## Session 467 (Fable, 2026-09-04) — s466 died mid-round and was RECONSTRUCTED (agents relaunched, then stopped at the USER's word); the README REWRITTEN as an introduction (USER ask) with every linked doc re-measured the same day; three bugs found by checking its claims, FILED
 
 **Part 0 — the reconstruction.**  s466's context was lost at ~00:25 with
