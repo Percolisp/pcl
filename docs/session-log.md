@@ -88,7 +88,7 @@ will be), companion legs, bench re-measure of BG's zero-cost claim.
 5. Round 25: A5 (#996 classic sort comparators, the 7.3× row) as the perf
    agent; #1022(b) ruling if BI stopped at the loud half; #1072 tools filler.
 
-## Session 469bf (Opus agent, 2026-09-05) — the re/ comp/ run/ half of the companion ROW DIFF attributed: 199 NEW / 74 FIXED / 84 UNVERIFIED / 2 LOST resolved to NINE files and FIVE causes, with the volatility measured on the perl ORACLE alone
+## Session 469bf (Opus agent, 2026-09-05) — the re/ comp/ run/ half of the companion ROW DIFF attributed: 199 NEW / 74 FIXED / 84 UNVERIFIED / 2 LOST resolved to TEN files and SIX causes, with the volatility measured on the perl ORACLE alone
 
 **The job.**  s468's round-end leg was the full companion
 (`--all --jobs 4 --bless-stamps`) on main `a715608` (= today's `c80b1a0`
@@ -198,6 +198,23 @@ opt-outs, run/cloexec.t's four re-keyed, **every other row byte-identical and in
 order** (verified by a `cmp` of both files with the four affected files
 filtered out).  No compiler or runtime file touched, so no generation bump and
 no artifact regeneration.
+
+**Part 7 â a TENTH file, and the bucket nobody scans.**  run/fresh_perl.t had
+been reading **STALE 59/32** (snapshot 57/34) in s468's serial re-run and again
+in this session's â two of its 34 registered diverging rows had stopped
+diverging, which fails every run.  It is not in any NEW/FIXED bucket, because
+the file is XDIFF-registered and `row_gated_here` deliberately keeps such files
+out of I1's ROW DIFF (one row, one gate); a registered row that starts PASSING
+surfaces only as a STALE *status* in the per-file lines.  Bisected: `1fed80b`
+reads 57/34 XDIFF with the sig **`unbound:H`**, `0e7c5e3` (after BA's #1028 +
+#1032) reads 59/32 STALE naming the same two rows, main is identical.  The two
+rows are **#1032's two named builtins** â `open(H,'run/fresh_perl.t')` (the bare
+CL symbol that WAS the `unbound:H`) and `write REMITOUT`
+(t/run/fresh_perl.t:572-586, the `p-write` half its audit of all 44
+handle-taking builtins found).  BA's leg was `--dir io --dir op`, so run/ was
+never opened and the win reached main uncounted.  `--bless-rows` on that file
+alone (2564 â 2562 rows, exactly the two), snapshot spliced with the bisection.
+**When a change fixes a class of crash, STALE is where its uncounted wins are.**
 
 **Filed:** **#1085** (the tempfile stub).  **Appended:** #1082 (three new
 members + the perl-only measurement + what it does to option (b), and a third
