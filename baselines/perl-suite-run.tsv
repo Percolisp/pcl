@@ -1167,6 +1167,21 @@
 # s455b (round 13): uni/readline.t 4/1 drops 2 -> 6/1 drops 0 EDITED BY HAND -- s456ag
 # (the readline-name predicate pair): both formerly-dropped rows now run and PASS
 # (the report expected honest fails; they pass).  #820 owns the paren-less residue.
+# s469bf (2026-09-05): comp/require.t 909/835 -> 910/837 EDITED BY HAND.  NOT a round-23
+#   mover and not one event: 910/837 is what s465az, s466, s468 (parallel AND the #366
+#   serial re-run) and s469bf (parallel AND serial) all measured, i.e. FIVE readings over
+#   three sessions, while the snapshot's 909/835 was last confirmed at s396 (2026-08-15).
+#   The file is QUICK-CAPPED (registered allowance 450 s > the 120 s quick cap), so only a
+#   full `--all` reaches it and the row simply went un-re-measured for ~25 sessions.
+#   Bisected two steps and then STOPPED, deliberately: a d00f893 (s440, 2026-08-23)
+#   worktree reads 906/836, so the drift is at least TWO steps somewhere in rounds 5-22,
+#   and a 2065b89 (round 19, 2026-09-01) worktree TIMEOUTs at 868/795 INSIDE the registered
+#   450 s allowance -- so part of the "drift" is the tree getting FASTER rather than more
+#   correct, which makes a count bisect non-monotone and worthless here.  The row-level
+#   cause is also invisible: the file is TRUNCATED at the 500-row log cap (#1051) and its
+#   first 500 diverging rows are byte-identical in every run, so the three rows that
+#   actually moved are past the boundary.  Naming them needs the cap raised (#1051), not
+#   more 450 s runs.
 base/cond.t	4	0	4	0	OK		0
 base/if.t	2	0	2	0	OK		0
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1210,7 +1225,7 @@ comp/parser.t	191	0	50	48	DIFF	undef-fn:main::pl-FOO; aborted-forms:1: PCL: stat
 comp/parser_run.t	70	0	33	37	DIFF	unbound:$00	0
 comp/proto.t	216	0	47	14	DIFF	aborted-forms:1: Undefined subroutine &main::N called at (eval N) line N. 	0
 comp/redef.t	20	0	1	19	DIFF		0
-comp/require.t	1750	0	909	835	DIFF		0
+comp/require.t	1750	0	910	837	DIFF	s469bf: PRE-EXISTING and multi-step, NOT a round-23 mover -- 910/837 in five readings (s465az, s466, s468 parallel+serial, s469bf parallel+serial); the 909/835 it replaces was last confirmed at s396 and this QUICK-CAPPED file is reached only by a full --all.  s440's tree reads 906/836 and round 19's TIMEOUTs at 868/795 inside the 450 s allowance, so the drift is multi-step and partly a speed effect; the moved rows are past the 500-row log cap (#1051) and cannot be named without raising it.	0
 comp/retainedlines.t	109	0	18	91	DIFF	undef-fn:main::pl-foq	0
 comp/term.t	23	0	23	0	OK		0
 comp/uproto.t	32	0	13	21	DIFF		0
