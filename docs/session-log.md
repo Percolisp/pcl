@@ -2,6 +2,96 @@
 
 Append new entries at the top. One section per session.
 
+## Session 469bh (Opus agent, 2026-09-05) — the explicit-`return` bench rows (#1046), the subscript use class for all eight access spellings (#1056), and the infinite loop underneath it (#1105); #996 measured and designed, not shipped
+
+**#1046 — a bench row that cannot see its transform.**  Every sub in
+`tools/bench-exec.pl` ended in an implicit tail expression (`fib`) or in
+`return … if …` statement modifiers (`gcdrec`), and neither reaches the
+`tail-return` transform, so the standing bench had been blind to the return
+protocol since #994 shipped: that session's ~31 % lived in a scratch
+instrument that is now gone.  `fibret` / `gcdret` / `subret` / `methret` were
+written beside their twins, each verified to contain exactly one
+`p-tail-value` and each passing the tool's own BROKEN check.  On a quiet box
+`PCL_OPT=-tail-return` moves them +39.6 / +15.6 / +37.2 / +8.8 % — the rows
+do see the transform, which is the whole point.  `gcdret`'s shape was chosen
+BY MEASUREMENT rather than taste: the natural spelling — two
+`if (…) { return gcd… }` blocks and a trailing `return $x` — leaves the
+recursive returns non-tail, and the row then reads −0.0 % under
+`-tail-return`, i.e. it measures the transform not firing.
+
+**#1056 — one table, one fact.**  `%ACCESS_NODE` records the
+`[BASE, SUBSCRIPT…]` shape of all eight element/slice node types, but only
+`h_acc`/`a_acc` said what the SUBSCRIPT position means; the six deref and
+slice types fell through to the generic "opaque" tail.  So `$h{$k}` could give
+its key the B-regime string freeze and `$r->{$k}` could not, although the two
+stringify the key identically.  The table now carries the use class as its
+value and the one classification arm reads it.  Emission over `perl-tests` is
+IDENTICAL (111 files, silent drops 5 unchanged) — so the sweep could not move
+and was not run — and the widening shows only in the wide A/B: 1033 files,
+1027 SAME, 6 DIFF, 0 RCDIFF, every diff one family, each read and probed.
+
+**#1105 — and the widening walked into an infinite loop that was already
+there.**  `t/re/pat_psycho.t` line 55 is `for (my $i = @psycho; -- $i;)`, and
+with the deref/slice subscripts now classified `num` its `$i` takes the raw
+verdict.  Running it hung.  The cause is not the widening: `box-set` on a
+non-box returns the value and stores NOTHING (deliberately — `undef = val` is
+a perl no-op), and that is the default arm of all four incdec macros, the arm
+a bare `$x` reaches.  A raw-verdict slot holds the value, not a box, so
+`--$i` computed the new value and threw it away.  Reproduced on a `c80b1a0`
+worktree with byte-identical emission from the plain-`$a[$i]` spelling, whose
+index has classified `num` since long before this session.
+
+The hole is exactly one position — an incdec in a C-style for CONDITION.
+Parser2's raw twin `p-incf-raw`/`p-decf-raw` fires only when the incdec IS
+the whole statement, and everywhere else VarAnnotator records `write-incdec`
+and keeps the slot boxed (measured with `PCL_B_DEBUG` over eleven shapes:
+`my $v = $x++`, `while (--$c)`, a statement-modifier `while`, the magical
+string increment, undef, a numeric string).  The fix is ONE store-back
+decision shared by the four macros (`%p-incdec-store-form`) rather than four
+emitter branches: a symbol place tests `p-box-p` and SETFs when the slot is
+raw.  Recording a boxing event instead would have BOXED the slot — it would
+have made the two agree by throwing the optimization away.  `Pl/ExprToCL.pm`
+has no access to the verdicts at all, which is why the emitter-side fix is
+the bigger one and stays as residue on #1105.
+
+**A guard lesson worth the entry.**  The first version of the #1105 guard
+bounded each loop on the accumulated value (`last if $t1 > 99`).  With the bug
+the counter never moves, `$a[4]` is undef, the sum stays 0 — and the row HANGS
+THE GATE instead of failing it, which is exactly what the base worktree did.
+Every loop now carries an independent iteration counter; row 55 then fails on
+`c80b1a0` in six seconds with `0 168 14 14` against perl's `14 7 14 14`.
+
+**#996 — verified unshipped, measured, designed, not shipped.**  Neither half
+has landed under another name (`%KIND_A` has no push or sort entry; the only
+`stable-sort` in the runtime is `p-sort`'s own loop).  Three bench rows were
+added first, the way #881/#981 added strcat/listcopy: `pushloc`, `sortnum`,
+`sortstr` — and they invert the task's own priority.  `push` on a local array
+is **0.48x, already twice as fast as perl** (the catalogue's ~7x was measured
+before raw elements and `%p-vpush`'s fast path collected it), while
+`sort { $a <=> $b }` is **7.3x SLOWER** and `cmp` 3.5x, the worst ratios on
+the board apart from the pack oracle.  Hand-written ceilings, timed against
+one core with byte-identical control pairs in the same window: sortnum
+−48.4 %, sortstr −40.4 %, pushloc −40.9 %.  A3's blocker turned out not to be
+the emission but the FACTS — `Pl::VarAnnotator` is scalar-only by
+construction (`next unless $var =~ /^\$\w+$/`), so a `my @a` has no verdict of
+any kind and the escape licence A3 needs is a new fact family over array
+names.  A5's cost is not where the catalogue put it either: besides the
+per-comparison `catch :p-return`, the `*wantarray*` bind and two
+`make-p-box`, `%p-collect-list` promotes every raw element of the source
+array to a box before the sort begins, and promotion is monotone — a plain
+`sort { $a <=> $b } @a` makes `@a` pay box indirection on every later read
+forever, so the measured ceilings are a floor on the prize.  Both designs,
+with the correctness constraints each must honour, are written into #996.
+
+**Bars.**  Gate 198/6756, only the 13 pclxs xs rows.  corpus-diff IDENTICAL
+over 111 files; lib A/B 19 SAME / 1 DIFF / 0 RCDIFF; wide A/B 1033 files 1027
+SAME / 6 DIFF / 0 RCDIFF.  Generation v2-670 with all three artifacts
+regenerated (bodies byte-identical to main's).  Sixteen #1056 probes and
+eleven #1105 shapes identical to perl 5.40.3 in default and `PCL_OPT=none`
+mode.  No full sweep (Fable runs one over the merged batch) and no companion
+legs: `op/sort.t` / `op/push.t` were the #996 legs and #996 shipped no
+product change.
+
 ## Session 468 (Fable, 2026-09-04) — ROUND 23 COMPLETE: BD (#995) + BC (#1037) + BE (the companion ROW DIFF attribution) reviewed and MERGED ff; the round-end legs on the final tree; the prompts of a round are now files in the worktrees
 
 **Part 0 — the relaunch, made durable.**  s467 had reconstructed s466's
