@@ -2,6 +2,92 @@
 
 Append new entries at the top. One section per session.
 
+## Session 469 (Fable, 2026-09-04/05) — ROUND 24 LAUNCHED, BH MERGED, then STOPPED at the USER's word (shutdown) — RESTART RECIPE at the end
+
+**Part 0 — orientation.**  CI green on `c80b1a0`.  The OWED bench board ran
+FIRST, on the freshly rebooted box (`~/pcl-agent-scratch/s469/bench.log`):
+every row within noise of the README table; `arrhash-k` 1.14× (still slower
+than perl after #995's −22 %); pack/packunpk 860×/1020× = the extension
+load, as documented.  (s468's bench had been invoked as `tools/bench-exec.pl`
+without `perl` in front and died with "Permission denied" — that is why the
+leg was never measured.)
+
+**Part 1 — the round: three pinned Opus agents off main `c80b1a0`.**  Every
+brief was written to `~/pcl-agent-scratch/s469/<label>/prompt.md` (+ the
+shared `COMMON.md`) BEFORE launch and copied by each agent into
+`<worktree>/scratch/<label>/`; agents wait for `bench.done` before any SBCL.
+
+| agent | task | worktree (KEPT) | state at shutdown |
+|---|---|---|---|
+| BF = s469bf | companion ROW DIFF attribution of re/ comp/ run/ (s468's full run: 199 NEW / 74 FIXED / 84 UNVERIFIED / 2 LOST; s468's `.suitelog` copied to its scratch first) | `.claude/worktrees/agent-a0fecca95db4e2759` | in flight, told to STOP; no compiler change, no generation |
+| BG = s469bg | #1035 steps 2–4 | `.claude/worktrees/agent-af8ba53a7b37a7a58` (pruned after merge; scratch archived) | FINISHED, follow-up DONE, rebased, **MERGED ff = main `600ed53`, gen v2-680** (gate 199/6793 xs-only; manifest arithmetic 283 registrations / 282 annotated / 1 verified absent = a given/when refusal; #1096 filed) |
+| BH = s469bh | perf: #1046 + #1056 + #1105 + #996 measured | pruned; scratch archived `~/pcl-agent-scratch/s469/bh-agent-ab83d94ab96620fab/` | **MERGED ff = main `57969a2`, gen v2-670** |
+| BI = s469bi | correctness pool #1045 → #1020 → #1084 → #1083 (closure-identity half) → #1022 (loud half mandatory, dynamic half measure-first) | `.claude/worktrees/agent-a4b9fedc2175a6513` (gen **v2-690**, IDs 1115–1124) | launched when BH's slot freed; told to STOP |
+
+**BG review (Fable, own probes).**  The runtime's declaration vocabulary is
+ONE closed block ahead of `p-sub`/`p-raw-params`/`p-let`; a registrar
+`_reg_rename` at the six mint sites; `PCL_IR_PLAIN=1` reproduces the pre-step
+spelling (corpus-diff IDENTICAL over 111 under it); the closed sets die at
+macroexpansion (four `macroexpand-1` cases here) and expand EQUAL to the old
+forms; step 4 = DECIDED (`;; @ FILE:LINE` comment grammar; 71 statement
+return paths → needs its own step-0), not implemented — accepted.  **THE
+FOLLOW-UP SENT**: the manifest reaches only `p-let` entries — a promoted cell
+prints `(p-defcell $x__file__0 …)` with no `:perl "$x" :why :captured`
+(the `:captured`/`:spanning` families, exactly the ones the task named first)
+and a renamed parameter in `p-raw-params` carries its class only.  Fix =
+the same `_decl_facts` reader on both forms, runtime macros accept + check
+the tail, IR_PLAIN prints the old spelling, the registration count must equal
+the printed-pair count.  #1095 filed (bench-emission-ab cannot cross a
+runtime-macro lambda-list change).
+
+**BH review (Fable, own probes) — MERGED.**  #1046: four explicit-`return`
+rows; `PCL_OPT=-tail-return` moves them +39.6 / +15.6 / +37.2 / +8.8 %.
+#1056: all eight access spellings classify their subscript (`%ACCESS_NODE`
+carries the class); wide A/B 1027 SAME / 6 DIFF / 0 RCDIFF.  **#1105, NEW and
+FIXED, PRE-EXISTING: a value-consuming `++`/`--` on a RAW slot stored
+NOTHING (`box-set` on a non-box returns the value), so `for (my $i = @a;
+--$i;)` LOOPED FOREVER** — one store-back decision `%p-incdec-store-form`
+shared by the four macros.  My probe file (`scratchpad/bh/p1105.pl`, eight
+incdec shapes) is identical to perl on BH's tree in both `PCL_OPT` modes and
+HANGS on `c80b1a0` (timeout 25 s).  #996: both halves verified unshipped and
+MEASURED — `pushloc` is already **0.48×** (raw elements + `%p-vpush` took the
+catalogue's 7×), `sortnum` **7.3× SLOWER**, `sortstr` 3.5× — hand-written
+ceilings −48 % / −40 %; **A5 (classic comparators) FIRST, A3 needs a new
+array-fact family in VarAnnotator**.  Both designs in #996.
+
+**Part 2 — README (USER: "the beginning doesn't work for someone browsing").**
+Opening rewritten: the quoted 110-word paragraph → two paragraphs, 64 words;
+the whole opening 331 → 196 words; the SBCL explanation dropped; the false
+"perl is not involved at any point" replaced by the accurate split (perl runs
+the compiler; the program needs it only for string `eval`).  Verified as a
+visitor would: the quick-start one-liner runs, the worked example prints
+identically under perl and `pcl`, every relative link resolves.  Still open,
+USER's call: roadmap says census "57" (it is 62 in 19 files), the pl2cl
+snippet is prettified (the real output breaks the line inside `"\n"`), the
+bench table lacks `arrhash-k`; a comparison-with-alternatives paragraph and a
+three-line Quicklisp recipe would help a first visitor.
+
+**Part 3 — STOPPED (USER: shutdown, out of tokens).**  Each in-flight agent
+was told: commit finished, coherent work by name; leave half-done diffs in
+the working tree; write `scratch/<label>/STOP.md` (committed shas, the
+uncommitted `git diff --stat`, which bars ran on which sha, what the next
+agent does first).  **Round-end legs NOT run on the merged tree** and OWED:
+cold gate, full sweep (NON-OPTIONAL — #1105 is a `cl/` change; #1020/#1022
+will be), companion legs, bench re-measure of BG's zero-cost claim.
+
+**RESTART RECIPE — the next session's first items, in order.**
+1. `git worktree list`; for each KEPT worktree read `scratch/<label>/prompt.md`
+   + `STOP.md`, then `git log --oneline main..HEAD` and `git diff --stat`
+   THERE — the diff is the truth, the STOP record is a claim (s444 lesson).
+2. Relaunch each as a FRESH Opus agent (model pinned) in its KEPT worktree
+   with the two files, told to `git rebase main` first (main = `600ed53`,
+   gen v2-680; BI renumbers ABOVE it (v2-690 or higher)).
+3. BG is MERGED (main `600ed53`, gen v2-680).  BF next (baselines only), then BI
+   (rebase onto `600ed53`, renumber ABOVE v2-680).
+4. Round-end legs on the final tree; session log + DECIDED + push.
+5. Round 25: A5 (#996 classic sort comparators, the 7.3× row) as the perf
+   agent; #1022(b) ruling if BI stopped at the loud half; #1072 tools filler.
+
 ## Session 469bg (Opus agent, 2026-09-05) — #1035 steps 2–4: the compiler's own FACTS printed on the declaration forms; step 4 decided, measured, deferred
 
 Steps 0+1 (s466) made every perl `my` print through ONE printer as

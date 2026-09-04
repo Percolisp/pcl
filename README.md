@@ -2,39 +2,31 @@
 
 [![CI](https://github.com/Percolisp/pcl/actions/workflows/ci.yml/badge.svg)](https://github.com/Percolisp/pcl/actions/workflows/ci.yml)
 
-PCL takes an ordinary Perl 5 program, together with the modules it `use`s,
-and compiles it into Common Lisp source code.  [SBCL](https://www.sbcl.org/),
-a Common Lisp implementation with an optimizing native-code compiler, then
-turns that source into machine code and runs it.  The perl interpreter is
-not involved at any point.  Everything Perl does while a program runs —
-scalar and list context, string/number coercion, `local`, `tie`,
-`use overload`, `eval` of a string — is reimplemented in a runtime library
-written in Common Lisp, and the compiled program calls into that library
-exactly where perl would do the same work internally.
+PCL compiles a Perl 5 program, with the modules it uses, into Common Lisp.
+[SBCL](https://www.sbcl.org/) then compiles that into machine code and
+runs it.  A runtime library written in Lisp supplies what perl does behind
+the scenes: context, coercion, `local`, `tie`, `use overload`, string
+`eval`.
 
-Why do this?
+perl runs the compiler.  The compiled program does not need it, except to
+`eval` a string at run time.
 
-* **Speed, where it can be proved safe.**  Perl is slow in the places where
-  it has to be generic: every scalar might be aliased, tied, or turn into a
-  string at any moment.  When PCL can see that a variable never is — a loop
-  counter nobody takes a reference to, a sub that only does integer
-  arithmetic — it compiles that part to plain machine operations.  Counting
-  loops, recursion and integer math already run two to four times faster
-  than under perl.  Other things are slower, and the [numbers](#speed)
-  below report the losses along with the wins.
-* **Output you can read.**  The generated Lisp keeps your variable names
-  and sigils and Perl's own operator names, so a Perl programmer can follow
-  it without knowing Lisp.  Its meaning is [specified](docs/ir-spec.md), so
-  it can serve as an intermediate form for other tools.
-* **Perl on a different engine.**  Garbage collection, closures, dynamic
-  scoping and non-local exits come from the Lisp system rather than from
-  hand-written C, which keeps the whole implementation to about 65,000
-  lines of Perl and Lisp — small enough to read.
+Why?
 
-**Maturity: early.**  The first tag is v0.1.0 (August 2026).  Pure-Perl
-code, including most of the CPAN modules that are written in Perl, works
-well.  Modules with a compiled C part (XS) do not work at all.  Read
-[What works](#what-works) before depending on it.
+* **Speed, where it can be proved safe.**  A variable nobody takes a
+  reference to becomes a machine integer instead of a Perl scalar.  Loops,
+  recursion and integer math run two to four times faster than under perl.
+  Other things are slower; the [numbers](#speed) show both.
+* **Output you can read.**  The Lisp keeps your variable names, sigils and
+  Perl's operator names, and its meaning is [specified](docs/ir-spec.md).
+* **A small implementation.**  Garbage collection, closures, `local` and
+  non-local exits come from Lisp, not hand-written C.  About 65,000 lines
+  of Perl and Lisp in all.
+
+**Maturity: early.**  First tag v0.1.0, August 2026.  Pure-Perl code works
+well, including most CPAN modules written in Perl.  XS modules, the ones
+with a C part, do not work at all.  Read [What works](#what-works) before
+depending on it.
 
 ## Quick start
 
