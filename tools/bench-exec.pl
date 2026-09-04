@@ -83,6 +83,45 @@ my @benches = (
   # Multi-statement recursive sub: exercises the sub-body :void regime
   # (task #60) — fib above coalesces to a single-statement body and skips it.
   ['gcdrec',    "$HN sub gcd { my (\$x,\$y)=\@_; return gcd(\$x-\$y,\$y) if \$x>\$y; return gcd(\$x,\$y-\$x) if \$x<\$y; \$x } my \$r=0; \$r += gcd(\$_ % 97 + 1, 89) for 1..\$n; print \"\$r\\n\";", 100_000, 0],
+  # ---- THE EXPLICIT-`return` ROWS (task #1046, s469bh) ---------------------
+  # Every row above ends its subs in an IMPLICIT tail expression (fib) or in
+  # `return … if …` statement MODIFIERS (gcdrec) — and neither shape reaches
+  # the `tail-return` transform (Pl/Passes.pm; Parser2 _lower_body_regime), so
+  # the standing bench was BLIND to the return protocol: #994 measured ~31 %
+  # on an explicit tail `return` in a one-off scratch instrument and no row
+  # here could see it.  These four are the twins that can: each ends its sub
+  # in a plain `return EXPR` that IS the body's last statement.
+  #
+  # They are METRICS, not targets — never tune the runtime for one.  The way
+  # to read them is a PCL_OPT A/B of the same tree, which the transpile picks
+  # up from the environment:
+  #     perl tools/bench-exec.pl fibret gcdret subret methret
+  #     PCL_OPT=-tail-return perl tools/bench-exec.pl fibret gcdret subret methret
+  # fib/fibret and gcdrec/gcdret are ALSO a cross-row pair, but the two rows
+  # differ in more than the return (fibret's body is two statements), so the
+  # PCL_OPT A/B is the attributable number and the twin is context.
+  ['fibret',    "$HN sub fibret { my \$m=shift; return \$m<2 ? \$m : fibret(\$m-1)+fibret(\$m-2) } my \$r=0; \$r=fibret(27) for 1..\$n; print \"\$r\\n\";", 30, 0],
+  # gcdrec's twin: same algorithm, but the BASE case is the guarded block and
+  # the RECURSION is the body's last statement, so the tail `return` is the
+  # exit taken on every recursive step instead of once per chain.  The shape
+  # was chosen by measurement, not taste: the obvious spelling (two `if
+  # (…) { return gcd… }` blocks and a trailing `return $x`) leaves the
+  # recursive returns NON-tail and the row then reads -0.0 % under
+  # PCL_OPT=-tail-return — it measures the transform not firing.  A row must
+  # be able to see what it exists for; gcdrec (the modifier spelling) is
+  # still here as the twin that does not reach the transform at all.
+  # Unlike fibret this sub takes its parameters through `my (…) = @_`.
+  ['gcdret',    "$HN sub gcdret { my (\$x,\$y)=\@_; if (\$x==\$y) { return \$x } return \$x>\$y ? gcdret(\$x-\$y,\$y) : gcdret(\$x,\$y-\$x) } my \$r=0; \$r += gcdret(\$_ % 97 + 1, 89) for 1..\$n; print \"\$r\\n\";", 100_000, 0],
+  # A PLAIN (non-recursive) sub call in a loop: the per-call protocol with
+  # nothing else in it — no recursion depth, no method dispatch.  3M calls
+  # puts perl at ~0.9 s, well above the ~1 s constant term's spread.
+  ['subret',    "$HN sub add1 { my \$x = shift; return \$x + 1 } my \$s=0; for my \$i (1..\$n) { \$s += add1(\$i) } print \"\$s\\n\";", 3_000_000, 0],
+  # The same protocol behind a METHOD call, which is ~15x a plain call
+  # (section 7 of docs/faster-codegen-suggestions.md) — so N is smaller and
+  # the return's share of the row is correspondingly smaller.  That contrast
+  # against subret is the point: it says how much of a dispatch-heavy program
+  # the return protocol can be.
+  ['methret',   "$HN package C; sub new { bless { v => \$_[1] }, \$_[0] } sub bump { my \$self = shift; return \$self->{v} + 1 } package main; my \$o = C->new(1); my \$s=0; for my \$i (1..\$n) { \$s += \$o->bump } print \"\$s\\n\";", 1_000_000, 0],
   ['collatz',   "$HN my \$c=0; for my \$i (1..\$n) { my \$m=\$i; while (\$m>1) { \$m = \$m%2 ? 3*\$m+1 : \$m/2; \$c++ } } print \"\$c\\n\";", 300_000, 0],
   # N_big was 100_000 until s461aq (#881): 100k appends is ~0.003 s of perl and
   # ~0.005 s of PCL, both far under the run-to-run spread of the ~1 s constant
