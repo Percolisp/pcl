@@ -94,10 +94,11 @@
 # flag leaves them alone and says so.  Measured with tools/drop-census.pl at
 # commit d0b52e9 + this session's tools; 1m36s at 8 jobs for all six.
 #
-# TOTAL after the edits below: 17 files, 57 drops (recounted from the rows,
-# s461ar; 16 in-repo files / 55 drops as tools/drop-census.pl reports them,
+# TOTAL after the edits below: 19 files, 62 drops (recounted from the rows,
+# s468bc; 18 in-repo files / 60 drops as tools/drop-census.pl reports them,
 # plus the one board row, which a run without --board does not re-measure).
-# The previous line said 18 / 58 (s458al), and 19 / 63 before that (s457aj).
+# The previous line said 17 / 57 (s461ar), 18 / 58 (s458al) before that, and
+# 19 / 63 before that (s457aj).
 # The two rows that LEFT in s457aj are t/io/open.t and t/op/utf8cache.t, both
 # by EDIT with their cause: they were the SAME mechanism (#850) — a paren-less
 # list operator's argument list may end in a COMMA, and the operator that
@@ -132,6 +133,23 @@
 #
 # EDITS since the s399 measurement (a drop leaves this file BY EDIT, like a
 # fail-baseline row — never by re-blessing the whole census from a run):
+#   s468bc TWO ROWS ADDED, FIVE drops (17/57 -> 19/62), and both are the legal
+#         kind of rise (ruled s409): a file that used to die at transpile now
+#         emits CL, so its drops become COUNTABLE for the first time.  Task
+#         #1037 made a ruled refusal a STATEMENT-level event, and the two
+#         files below are among the seventeen that went transpile-FAIL -> rc 0
+#         because of it.  Neither drop is new CODE -- both statements were
+#         always unlowerable; nothing could see them while the whole file
+#         refused, which is the #138 family's oldest lesson.
+#           t/class/inherit.t 1 -- PPI lexes the unit-class header
+#             "class Testcase1C :isa(Testcase1B) 1.000;" as a Token::Label, so
+#             the statement falls through the term walker.  Inside the class
+#             feature, which PCL refuses; no separate owner.
+#           t/op/coreamp.t 4 -- the lvalue-subroutine family ("Can't modify
+#             non-lvalue subroutine call in assignment"), which the file's OWN
+#             expected-divergence reason named before s468bc removed it.
+#         The perl-tests population is UNCHANGED at 5: both rows are companion
+#         files, so the sweep's own DROPS bucket does not move.
 #   s456ah MESSAGE TEXT ONLY, no row and no count touched (task #737).  s440
 #         swapped Data::Dump for the core Data::Dumper in Pl::PExpr::_dd, which
 #         changed the SHAPE of the compiler's drop message, so every message
@@ -768,8 +786,10 @@ perl-tests/method.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$obj>','T
 perl-tests/ref.t	1	Bug. Fell through. Missing case: ['Token::Symbol<$object>','Token::Quote::Double<"FOO">'] x1
 perl-tests/sprintf2.t	1	Bug. Fell through. Missing case: ['Structure::Constructor<{ x1
 perl-tests/substr.t	2	PCL: Can't modify non-lvalue subroutine call in assignment x2
+t/class/inherit.t	1	Bug. Fell through. Missing case: ['Token::Label<Testcase1C :>',bless( {'id' => 0,'type' => 'funcall'}, 'PPIref x1
 t/comp/final_line_num.t	1	Handle single node of unknown type. Dump: x1
 t/comp/parser.t	5	Bug. Fell through. Missing case: ['Statement::Null<;>','Token::Pod<=pod x1 | Bug. Fell through. Missing case: ['Statement<check_line(537, \'first line of interp in here-doc\');>','Stateme x1 | Bug. Fell through. Missing case: ['Statement<check_line(540, \'first line of interp in second here-doc on ...> x1 | Bug. Fell through. Missing case: ['Token::Quote::Single<\'Hello\'>',bless( {'id' => 0,'type' => 'funcall'}, 'P x1 | Handle single node of unknown type. Dump: x1
+t/op/coreamp.t	4	PCL: Can't modify non-lvalue subroutine call in assignment x4
 t/op/filetest.t	1	Bug. Fell through. Missing case: ['Token::Magic<_>','Structure::Block<{ "this is not a file name" }>',bless( { x1
 t/op/lex.t	1	Bug. Fell through. Missing case: ['Statement::Include<no strict;>','Statement<\\$_>'] x1
 t/op/lexsub.t	1	Bug. Fell through. Missing case: ['Token::Regexp::Transliterate<y, 43, \'my sub that looks like constant closu x1

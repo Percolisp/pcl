@@ -1,4 +1,40 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s468bc (Opus, round 23, task #1037 -- A RULED REFUSAL IS A STATEMENT-LEVEL
+#   EVENT), SIXTEEN ROWS, every one of them a file that produced NO EMISSION
+#   AT ALL before and now transpiles.  There is ONE cause and it is the same
+#   for all sixteen: a construct PCL recognises and will not translate used to
+#   kill the whole transpile, so the runner scored the file TRANSPILE-FAIL and
+#   PCL contributed nothing; since s466 the refusal is a run-time die at its
+#   own statement, so the file compiles, every statement before the refused
+#   one runs, and only a program that REACHES it dies.  Attribution is the
+#   emission itself: a 1016-file A/B against 0e0b0b9 names exactly seventeen
+#   movers (these sixteen plus t/bigmem/stack.t, which lies outside both dir
+#   sets), each transpile-FAIL -> rc 0, and tools/gate-set-scan.pl over both
+#   populations moves exactly those files' verdicts and nothing else.
+#     op/state.t             C 0/0 -> 88/4    (+88 rows; ONE `given` block).  KEEPS
+#       its registration: its 4 failing rows are `computed goto`, a SECOND
+#       blessed not-supported.md section, so the all-or-nothing bar is met.
+#     op/tie_fetch_count.t   C 0/0 -> 76/65   (ONE infix `~~`)
+#     op/smartmatch.t        C 0/0 -> 55/295
+#     op/coreamp.t           C 0/0 ->  9/46
+#     op/defer.t             C 0/0 ->  4/8
+#     op/switch.t            C 0/0 ->  2/0
+#     class/inherit.t        C 0/0 ->  0/1    (one row, and one NEW countable
+#       drop -- see baselines/parse-error-drop-census-s399.tsv, s468bc note)
+#     the other nine class/*.t stay 0/0: they die at the class statement
+#       before any assertion, so their whole divergence is still the
+#       registered class reason.  class/threads.t moves TRANSPILE-FAIL ->
+#       NOTAP -- this perl is not built with threads, which is what the file
+#       measures, and which nothing could see while the file refused.
+#   TWO of the sixteen LOST their expected-divergence registration in the
+#   same commit, because the rows they now produce are NOT the refusal and the
+#   registration bar is all-or-nothing: op/coreamp.t (46 rows, the &CORE::
+#   family) and op/tie_fetch_count.t (65 rows, tie FETCH counts).  They are
+#   ordinary DIFF files now, gated row by row in
+#   baselines/perl-suite-fails.tsv.  The other fourteen were re-read
+#   row by row and re-blessed into baselines/perl-suite-expected-rows.tsv.
+#   NOT spliced: op/write.t, whose SHORTFALL row moved for a different reason
+#   (#1032, already in main) and which agent BE measured in the same window.
 # s464aw (Opus, round 22, task #972 — THE THREE OVERLOAD PREREQUISITES),
 #   ONE ROW, a GAIN: op/bop.t C 251/246 -> 252/245.  The bitwise operators
 #   now dispatch `use overload' like every other operator, so bop.t's
@@ -995,16 +1031,16 @@ base/rs.t	41	0	26	15	DIFF		0
 base/term.t	7	0	7	0	OK		0
 base/translate.t	257	0	257	0	OK		0
 base/while.t	4	0	4	0	OK		0
-class/accessor.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/class.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/construct.t	10	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/destruct.t	4	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/field.t	33	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/inherit.t	19	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/method.t	8	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/phasers.t	3	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
-class/threads.t	0	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — the file also needs a threaded perl (NOTAP before s415; it now refuses at transpile like its siblings, task #371)	-1
-class/utf8.t	4	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	-1
+class/accessor.t	10	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at accessor.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/class.t	10	0	0	0	XDIFF	aborted-forms:6: PCL: feature 'class' is not supported, at class.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/construct.t	10	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at construct.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/destruct.t	4	0	0	0	XDIFF	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/field.t	33	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at field.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/inherit.t	19	0	0	1	XDIFF	aborted-forms:7: PCL: feature 'class' is not supported, at inherit.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	1
+class/method.t	8	0	0	0	XDIFF	aborted-forms:6: PCL: feature 'class' is not supported, at method.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/phasers.t	3	0	0	0	XDIFF	aborted-forms:2: PCL: feature 'class' is not supported, at phasers.t line N  | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
+class/threads.t	0	0	0	0	NOTAP	aborted-forms:2: This Perl not built to support threads 	0
+class/utf8.t	4	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "binmode" via package "STDOUT" (perhaps you forgot to load "STD | not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)	0
 cmd/elsif.t	4	0	4	0	OK		0
 cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)	0
 cmd/mod.t	15	0	15	0	OK		0
@@ -1216,14 +1252,14 @@ op/concat2.t	4	0	4	0	OK		0
 op/cond.t	5	0	4	1	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
 op/const-optree.t	148	0	90	58	XDIFF	not-supported.md §Readouts of perl's own internals -> "Constant-folding / inlinability and the :method attribute readout" (53 of 58 rows: 28 "… is/is not inlinable", 25 "… has (no) :method attribute" — both are diagnostics ABOUT an optree PCL does not build) AND §Error compatibility for invalid Perl input / CLAUDE.md §9 (the other 5: "… now throws exception (RT 134138)", where perl REJECTS `sub () { $x }` for a lexical modified elsewhere and PCL compiles it). REGISTERED s408, after #337 fixed the 4 "retval of my sub …" rows that were the file's real fix target and kept it UNEXPLAINED — a fresh per-row read of all 58 was the precondition the s399 note set.	0
 op/context.t	8	0	7	1	DIFF		0
-op/coreamp.t	778	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also carries lvalue-sub drops (§Lvalue subroutines)	-1
+op/coreamp.t	778	0	9	46	DIFF	undef-fn:main::pl-__FILE__; aborted-forms:15: Undefined subroutine &File::Spec::Functions called	4
 op/coresubs.t	1109	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/cproto.t	254	0	71	183	DIFF		0
 op/crypt.t	6	0	5	1	XDIFF	not-supported.md §Unicode semantics differences — t6 is the ONLY failing row (5/1 vs perl 6/0): `crypt` writing to a utf8 target must turn the target's UTF-8 flag OFF. Probe s319: PCL's crypt VALUE is correct (t5 passes); only `utf8::is_utf8($x)` differs, because PCL has no per-scalar UTF-8 flag (CL strings are always Unicode).	0
 op/current_sub.t	22	0	8	3	XDIFF	aborted-forms:3: invalid number of arguments: N | not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-sub* threaded through the calling convention; roadmap)	0
 op/dbm.t	5	0	0	0	DIFF		0
 op/decl-refs.t	402	0	42	165	DIFF	aborted-forms:2: ParserN TODO: state outside a block-level declaration at (eval N) line N. 	0
-op/defer.t	28	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	-1
+op/defer.t	28	0	4	8	XDIFF	aborted-forms:13: Undefined subroutine &main::defer called | not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)	0
 op/defined.t	5	0	5	0	OK		0
 op/defins.t	27	0	27	0	OK		0
 op/delete.t	56	0	53	3	DIFF		0
@@ -1396,7 +1432,7 @@ op/signatures.t	1245	1	915	296	DIFF	aborted-forms:1: PCL: statement not supporte
 op/sigsystem.t	4	0	0	0	XDIFF	aborted-forms:1: Can't locate loadable object for module Time::HiRes in @INC | not-supported.md §DynaLoader / XS binary extensions — Time::HiRes is XS; needs the pclxs bridge. Before s316 this file scored OK only because empty %SIG made `skip ... if not exists $SIG{CHLD}` fire, so PCL emitted 4 skip-oks against perl 4 oks — a false pass.	0
 op/sleep.t	4	0	4	0	OK		0
 op/smartkve.t	18	0	3	15	DIFF		0
-op/smartmatch.t	353	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	-1
+op/smartmatch.t	353	0	55	295	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
 op/sort.t	205	0	183	22	DIFF		0
 op/splice.t	34	0	34	0	OK		0
 # s455b (round 13): op/split.t 212/7 -> 213/6 EDITED BY HAND -- s456ag, the same scalar-split
@@ -1411,7 +1447,7 @@ op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	0	0	DIFF	aborted-forms:1: The function main::pl-is_linux_container is undefined.	0
 op/stat_errors.t	638	0	305	333	DIFF		0
-op/state.t	166	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one `given` block in an otherwise supported file; the refusal costs the file's rows, ruled with task #400	-1
+op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0
 op/sub.t	64	1	54	11	DIFF		0
@@ -1420,14 +1456,14 @@ op/substr.t	400	0	351	3	DIFF	aborted-forms:2: PCL: statement not supported at su
 op/substr_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/svflags.t	16	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/svleak.t	156	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-op/switch.t	197	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)	-1
+op/switch.t	197	0	2	0	XDIFF	aborted-forms:55: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at switch.t li | not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)	0
 op/symbolcache.t	8	0	4	3	DIFF	aborted-forms:1: The function main::pl-removed is undefined.	0
 op/sysio.t	45	0	45	0	OK		0
 op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
 op/tie.t	94	1	0	0	DIFF		0
-op/tie_fetch_count.t	343	0	0	0	XDIFF	TRANSPILE-FAIL | not-supported.md §`given`/`when` / smart match (`~~`) — one infix `~~` statement; refused (task #371)	-1
+op/tie_fetch_count.t	343	0	76	65	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N	0
 op/tiearray.t	75	0	36	39	DIFF		0
 op/tiehandle.t	67	0	12	32	DIFF		0
 op/tiehash.t	27	0	20	7	DIFF		0

@@ -18,16 +18,35 @@
 # (the file-level reason covers it wholesale, as before #185).  It must be
 # hand-placed and justified by a MEASUREMENT that the row set is
 # nondeterministic; --bless-rows never invents it and never overwrites it.
-class/accessor.t	*no-log*
-class/class.t	*no-log*
-class/construct.t	*no-log*
-class/destruct.t	*no-log*
-class/field.t	*no-log*
-class/inherit.t	*no-log*
-class/method.t	*no-log*
-class/phasers.t	*no-log*
+class/accessor.t	*summary*
+class/class.t	*summary*
+class/construct.t	*summary*
+class/destruct.t	*summary*
+class/field.t	*summary*
+class/inherit.t	*summary*
+class/inherit.t	:isa attribute trims whitespace
+class/inherit.t	:isa() version test can throw
+class/inherit.t	@Testcase1B::ISA is set correctly
+class/inherit.t	Constructor params passed through to superclass
+class/inherit.t	Exception thrown from :isa version test
+class/inherit.t	Object has base class ADJUSTed field
+class/inherit.t	Object has base class initialised field
+class/inherit.t	Object has derived class ADJUSTed field
+class/inherit.t	Object has derived class initialised field
+class/inherit.t	Object is also its base class
+class/inherit.t	Object is its own class
+class/inherit.t	Testcase1B->can('adja')
+class/inherit.t	Testcase1B->can('inita')
+class/inherit.t	Testcase6B inherits Testcase6B
+class/inherit.t	Testcase6B sets VERSION
+class/inherit.t	Unit class syntax allows :isa
+class/inherit.t	__CLASS__ yields correct class name for subclass
+class/inherit.t	__CLASS__ yields runtime instance class name
+class/inherit.t	hierarchical base class loaded
+class/method.t	*summary*
+class/phasers.t	*summary*
 class/threads.t	*no-log*
-class/utf8.t	*no-log*
+class/utf8.t	*summary*
 cmd/for.t	[perl #78194] Lone C-style for in a block
 cmd/for.t	double destroy, x=1
 cmd/for.t	freed value in iteration
@@ -782,7 +801,6 @@ op/const-optree.t	sub with simple lexical unmodified elsewhere has no :method at
 op/const-optree.t	sub with simple lexical unmodified elsewhere is inlinable
 op/const-optree.t	sub:method with constant is inlinable
 op/const-optree.t	sub:method with simple lexical is inlinable
-op/coreamp.t	*no-log*
 op/crypt.t	crypt turns off utf8 on its target
 op/current_sub.t	& in grep block in sub with forw decl
 op/current_sub.t	& in sort block in sub with forw decl
@@ -799,7 +817,31 @@ op/current_sub.t	in sort block in sub with forw decl
 op/current_sub.t	sub named () { __SUB__ } returns self ref
 op/current_sub.t	sub(){__SUB__} anonymous closure returns self ref
 op/current_sub.t	sub(){__SUB__} under -d
-op/defer.t	*no-log*
+op/defer.t	*summary*
+op/defer.t	Cannot goto into defer block
+op/defer.t	Empty defer block parses OK
+op/defer.t	Error from finalization
+op/defer.t	Thrown exception still occurs after defer
+op/defer.t	defer after localization still unlocalizes
+op/defer.t	defer before localization overwrites
+op/defer.t	defer block can contain another defer
+op/defer.t	defer block can contain multiple statements
+op/defer.t	defer block can throw exception
+op/defer.t	defer block can throw exception during exception unwind
+op/defer.t	defer block captures live value of same-scope lexicals
+op/defer.t	defer block correctly captures outer lexical when only shadowed afterwards
+op/defer.t	defer block does not disturb do { } value
+op/defer.t	defer block happens for every iteration of foreach
+op/defer.t	defer block inside sub
+op/defer.t	defer block inside sub does not happen if entered but returned early
+op/defer.t	defer block invoked before tail-call
+op/defer.t	defer block is invoked
+op/defer.t	defer block still runs during exception unwind
+op/defer.t	defer blocks happen after the main body
+op/defer.t	defer blocks happen in LIFO order
+op/defer.t	defer blocks run inside do { }
+op/defer.t	goto backwards within defer {} is permitted
+op/defer.t	goto forwards within defer {} is permitted
 op/do.t	*extra* do subname() called
 op/do.t	*extra* do subname(arg) called
 op/do.t	*summary*
@@ -1158,10 +1200,578 @@ op/signatures.t	when does not swallow trailing comma
 op/signatures.t	write does not swallow trailing comma
 op/signatures.t	x does not swallow trailing comma
 op/sigsystem.t	*summary*
-op/smartmatch.t	*no-log*
-op/state.t	*no-log*
-op/switch.t	*no-log*
-op/tie_fetch_count.t	*no-log*
+op/smartmatch.t	!1 ~~ undef does not match
+op/smartmatch.t	!1 ~~ undef does not match
+op/smartmatch.t	"" ~~ [undef] does not match
+op/smartmatch.t	"" ~~ undef does not match
+op/smartmatch.t	"" ~~ undef does not match
+op/smartmatch.t	"$ov_obj" ~~ "stringified" matches
+op/smartmatch.t	"$str_obj" ~~ "object" matches
+op/smartmatch.t	"1.0" ~~ { "1.0" => 3 } matches
+op/smartmatch.t	"1.0" ~~ { 1 => 3 } does not match
+op/smartmatch.t	"1.0" ~~ { 1.0 => 3 } does not match
+op/smartmatch.t	"2" ~~ 2 matches
+op/smartmatch.t	"2" ~~ [qw(1foo 2bar)] does not match
+op/smartmatch.t	"2.0" ~~ 2 matches
+op/smartmatch.t	"2_3" ~~ 2_3 does not match
+op/smartmatch.t	"2bar" ~~ [qw(1foo 2bar)] matches
+op/smartmatch.t	"bar" ~~ [{foo => "bar"}] does not match
+op/smartmatch.t	"baz" ~~ +{foo => 1, bar => 2} does not match
+op/smartmatch.t	"boz" ~~ %fooormore does not match
+op/smartmatch.t	"foo" ~~ %fooormore matches
+op/smartmatch.t	"foo" ~~ %hash matches
+op/smartmatch.t	"foo" ~~ +{foo => 1, bar => 2} matches
+op/smartmatch.t	"foo" ~~ [{foo => "bar"}] matches
+op/smartmatch.t	"foo" ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	"foo" ~~ undef does not match
+op/smartmatch.t	"foo" ~~ undef does not match
+op/smartmatch.t	"more" ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	"object" ~~ "$str_obj" matches
+op/smartmatch.t	"stringified" ~~ "$ov_obj" matches
+op/smartmatch.t	"stringified" ~~ $ov_obj does not match
+op/smartmatch.t	"x" ~~ qr/x/ matches
+op/smartmatch.t	"x" ~~ qr/y/ does not match
+op/smartmatch.t	"à" ~~ { "à" => "À" } matches
+op/smartmatch.t	$deep1 ~~ $deep1 matches
+op/smartmatch.t	$deep1 ~~ $deep2 does not match
+op/smartmatch.t	$deep1 ~~ undef does not match
+op/smartmatch.t	$obj ~~ $ov_obj does not match
+op/smartmatch.t	$obj ~~ @fooormore does not match
+op/smartmatch.t	$obj ~~ [sub{ref shift}] matches
+op/smartmatch.t	$obj ~~ qr/NoOverload/ matches
+op/smartmatch.t	$obj ~~ sub { ref($_[0]) =~ /NoOverload/ } matches
+op/smartmatch.t	$obj ~~ undef does not match
+op/smartmatch.t	$ov_obj ~~ "stringified" does not match
+op/smartmatch.t	$ov_obj ~~ 'magic' matches
+op/smartmatch.t	$ov_obj ~~ 'not magic' does not match
+op/smartmatch.t	$ov_obj ~~ qr/^stringified$/ matches
+op/smartmatch.t	$ov_obj ~~ sub { ref($_[0]) =~ /WithOverload/ } matches
+op/smartmatch.t	$ov_obj ~~ undef does not match
+op/smartmatch.t	$str_obj ~~ "object" matches
+op/smartmatch.t	%empty ~~ \&fatal matches
+op/smartmatch.t	%empty ~~ \&foo matches
+op/smartmatch.t	%fooormore ~~ "".\%fooormore matches
+op/smartmatch.t	%fooormore ~~ /^(fo[ox])$/ matches
+op/smartmatch.t	%fooormore ~~ @fooormore matches
+op/smartmatch.t	%fooormore ~~ \@fooormore matches
+op/smartmatch.t	%fooormore ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	%fooormore ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	%fooormore ~~ sub{@_==1} matches
+op/smartmatch.t	%hash ~~ %hash matches
+op/smartmatch.t	%hash ~~ %tied_hash matches
+op/smartmatch.t	%hash ~~ %tied_hash matches
+op/smartmatch.t	%hash ~~ +{%hash} matches
+op/smartmatch.t	%hash ~~ \%hash matches
+op/smartmatch.t	%hash ~~ undef does not match
+op/smartmatch.t	%hash ~~ undef does not match
+op/smartmatch.t	%hash ~~ { foo => 5, bar => 10 } matches
+op/smartmatch.t	%hash ~~ { foo => 5, bar => 10, quux => 15 } does not match
+op/smartmatch.t	%keyandmore ~~ "".\%fooormore does not match
+op/smartmatch.t	%tied_hash ~~ %hash matches
+op/smartmatch.t	%tied_hash ~~ %tied_hash matches
+op/smartmatch.t	%tied_hash ~~ %tied_hash matches
+op/smartmatch.t	%tied_hash ~~ undef does not match
+op/smartmatch.t	%tied_hash ~~ {"a"=>"b"} does not match
+op/smartmatch.t	&NOT_DEF ~~ sub{not shift} matches
+op/smartmatch.t	&NOT_DEF ~~ undef matches
+op/smartmatch.t	'cigam on' ~~ $ov_obj does not match
+op/smartmatch.t	'cigam' ~~ $ov_obj matches
+op/smartmatch.t	(my $u) ~~ 0 does not match
+op/smartmatch.t	(my $u) ~~ undef matches
+op/smartmatch.t	+{%fooormore} ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	+{%fooormore} ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	+{0..99} ~~ qr/[13579]$/ does not match
+op/smartmatch.t	+{} ~~ \&fatal matches
+op/smartmatch.t	/B/i ~~ {b=>2} matches
+op/smartmatch.t	/FOO/i ~~ @fooormore matches
+op/smartmatch.t	/^(fo[ox])$/ ~~ %fooormore matches
+op/smartmatch.t	/bar/ ~~ %hash matches
+op/smartmatch.t	/bar/ ~~ @fooormore does not match
+op/smartmatch.t	/foo/ ~~ undef does not match
+op/smartmatch.t	/fooormore/ ~~ sub{ref $_[0] eq 'Regexp'} matches
+op/smartmatch.t	/x/ ~~ [qw(foo bar baz quux)] matches
+op/smartmatch.t	/y/ ~~ [qw(foo bar baz quux)] does not match
+op/smartmatch.t	0 ~~ @keyandmore{qw(key and more)} matches
+op/smartmatch.t	0 ~~ FALSE matches
+op/smartmatch.t	0 ~~ [undef] does not match
+op/smartmatch.t	0 ~~ sub{shift} does not match
+op/smartmatch.t	1 ~~ %fooormore does not match
+op/smartmatch.t	1 ~~ +{foo => 1, bar => 2} does not match
+op/smartmatch.t	1 ~~ @nums[0..0] matches
+op/smartmatch.t	1 ~~ sub{shift} matches
+op/smartmatch.t	1 ~~ undef does not match
+op/smartmatch.t	1 ~~ { 1 => 3 } matches
+op/smartmatch.t	1.0 ~~ { 1 => 3 } matches
+op/smartmatch.t	11 ~~ [[11]] matches
+op/smartmatch.t	11 ~~ [[12]] does not match
+op/smartmatch.t	12345 ~~ qr/3/ matches
+op/smartmatch.t	12345 ~~ qr/7/ does not match
+op/smartmatch.t	189 ~~ undef does not match
+op/smartmatch.t	2 ~~ "2" matches
+op/smartmatch.t	2 ~~ "2.0" matches
+op/smartmatch.t	2 ~~ "2bananas" does not match
+op/smartmatch.t	2 ~~ 2 matches
+op/smartmatch.t	2 ~~ 3 does not match
+op/smartmatch.t	2 ~~ @keyandmore{qw(key and)} does not match
+op/smartmatch.t	2 ~~ @nums[0..1] matches
+op/smartmatch.t	2 ~~ [qw(1.00 2.00)] matches
+op/smartmatch.t	2 ~~ [qw(1foo bar2)] does not match
+op/smartmatch.t	2 ~~ [qw(foo 2)] matches
+op/smartmatch.t	2.0_0e+0 ~~ [qw(foo 2)] matches
+op/smartmatch.t	20 ~~ 2_0 matches
+op/smartmatch.t	21..30 ~~ undef does not match
+op/smartmatch.t	2_3 ~~ "2_3" does not match
+op/smartmatch.t	3 ~~ undef does not match
+op/smartmatch.t	3-2 ~~ TRUE matches
+op/smartmatch.t	7 ~~ @nums matches
+op/smartmatch.t	@$deep1 ~~ @$deep1 matches
+op/smartmatch.t	@empty ~~ \&fatal matches
+op/smartmatch.t	@empty ~~ \&foo matches
+op/smartmatch.t	@empty ~~ {} does not match
+op/smartmatch.t	@fooormore ~~ "".\@fooormore matches
+op/smartmatch.t	@fooormore ~~ %fooormore matches
+op/smartmatch.t	@fooormore ~~ /FOO/i matches
+op/smartmatch.t	@fooormore ~~ /bar/ does not match
+op/smartmatch.t	@fooormore ~~ \%fooormore matches
+op/smartmatch.t	@fooormore ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	@fooormore ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	@fooormore ~~ sub{@_==1} matches
+op/smartmatch.t	@fooormore ~~ { foo => 1, or => 2, more => 3 } matches
+op/smartmatch.t	@fooormore{qw(foo or more)} ~~ @keyandmore{qw(key and more)} matches
+op/smartmatch.t	@fooormore{qw(foo)} ~~ @keyandmore{qw(key)} matches
+op/smartmatch.t	@keyandmore ~~ "".\@fooormore does not match
+op/smartmatch.t	@keyandmore{qw(key)} ~~ [0] matches
+op/smartmatch.t	@keyandmore{qw(not)} ~~ [undef] matches
+op/smartmatch.t	@nums ~~ @tied_nums matches
+op/smartmatch.t	@nums ~~ [0..9] does not match
+op/smartmatch.t	@nums ~~ [1..10] matches
+op/smartmatch.t	@nums ~~ \@nums matches
+op/smartmatch.t	@nums ~~ \@tied_nums matches
+op/smartmatch.t	@nums ~~ \\@nums does not match
+op/smartmatch.t	@nums ~~ undef does not match
+op/smartmatch.t	@nums ~~ undef does not match
+op/smartmatch.t	@nums ~~ {  1, '',  2, '' } matches
+op/smartmatch.t	@nums ~~ {  1, '', 12, '' } matches
+op/smartmatch.t	@nums ~~ { 11, '', 12, '' } does not match
+op/smartmatch.t	@nums[0..-1] ~~ [] matches
+op/smartmatch.t	@nums[0..0] ~~ [1] matches
+op/smartmatch.t	@nums[0..1] ~~ 2 does not match
+op/smartmatch.t	@nums[0..1] ~~ @nums[0..1] matches
+op/smartmatch.t	@nums[0..1] ~~ [0..2] does not match
+op/smartmatch.t	@nums[0..4] ~~ [1..5] matches
+op/smartmatch.t	@tied_nums ~~ @nums matches
+op/smartmatch.t	@tied_nums ~~ \@nums matches
+op/smartmatch.t	@tied_nums ~~ undef does not match
+op/smartmatch.t	FALSE ~~ "0" matches
+op/smartmatch.t	FALSE ~~ $obj dies
+op/smartmatch.t	FALSE ~~ $str_obj dies
+op/smartmatch.t	FALSE ~~ sub{not shift} matches
+op/smartmatch.t	NOT_DEF ~~ sub{not shift} matches
+op/smartmatch.t	NOT_DEF ~~ undef matches
+op/smartmatch.t	RT 123860: stack realloc
+op/smartmatch.t	[""] ~~ {"" => 1} matches
+op/smartmatch.t	[""] ~~ {} does not match
+op/smartmatch.t	["foo", "", "bar"] ~~ [qr/o/, undef, "bar"] does not match
+op/smartmatch.t	["foo", "bar"] ~~ [["foo"], ["bar"]] matches
+op/smartmatch.t	["foo", "bar"] ~~ [qr/o/, "foo"] does not match
+op/smartmatch.t	["foo", "bar"] ~~ [qr/o/, qr/a/] matches
+op/smartmatch.t	["foo", "bar"] ~~ \%hash matches
+op/smartmatch.t	["foo", "bar"] ~~ { foo => 1 } matches
+op/smartmatch.t	["foo", undef, "bar"] ~~ [qr/o/, "",    "bar"] does not match
+op/smartmatch.t	["foo", undef, "bar"] ~~ [qr/o/, undef, "bar"] matches
+op/smartmatch.t	["foo"] ~~ \%hash matches
+op/smartmatch.t	["foo"] ~~ { foo => 1 } matches
+op/smartmatch.t	["quux"] ~~ \%hash does not match
+op/smartmatch.t	['cigam'] ~~ $ov_obj does not match
+op/smartmatch.t	['stringified'] ~~ $ov_obj does not match
+op/smartmatch.t	[1,2] ~~ undef does not match
+op/smartmatch.t	[1] ~~ [] does not match
+op/smartmatch.t	[1] ~~ \&bar matches
+op/smartmatch.t	[1] ~~ \&foo does not match
+op/smartmatch.t	[@fooormore] ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	[@fooormore] ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	[["foo"], ["bar"]] ~~ [qr/ARRAY/, qr/ARRAY/] does not match
+op/smartmatch.t	[["foo"], ["bar"]] ~~ [qr/o/, qr/a/] matches
+op/smartmatch.t	[] ~~ [1] does not match
+op/smartmatch.t	[] ~~ [] matches
+op/smartmatch.t	[] ~~ \%:: does not match
+op/smartmatch.t	[] ~~ \&fatal matches
+op/smartmatch.t	[] ~~ \&foo matches
+op/smartmatch.t	[] ~~ undef does not match
+op/smartmatch.t	[] ~~ undef does not match
+op/smartmatch.t	[] ~~ {} does not match
+op/smartmatch.t	[keys %main::] ~~ \%:: matches
+op/smartmatch.t	[qr/o/, qr/a/] ~~ ["foo", "bar"] does not match
+op/smartmatch.t	[qw(a b c)] ~~ %hash does not match
+op/smartmatch.t	[qw(bar)] ~~ %hash matches
+op/smartmatch.t	[qw(foo bar baz quux)] ~~ /x/ matches
+op/smartmatch.t	[qw(foo bar baz quux)] ~~ /y/ does not match
+op/smartmatch.t	[qw(foo bar baz quux)] ~~ qr/x/ matches
+op/smartmatch.t	[qw(foo bar baz quux)] ~~ qr/y/ does not match
+op/smartmatch.t	[qw(foo quux)] ~~ \%hash matches
+op/smartmatch.t	[qw[STDIN STDOUT]] ~~ \%:: matches
+op/smartmatch.t	[undef] ~~ {"" => 1} matches
+op/smartmatch.t	\%:: ~~ [] does not match
+op/smartmatch.t	\%:: ~~ [keys %main::] matches
+op/smartmatch.t	\%:: ~~ [qw[STDIN STDOUT]] matches
+op/smartmatch.t	\%::main ~~ undef does not match
+op/smartmatch.t	\%fooormore ~~ @fooormore matches
+op/smartmatch.t	\%fooormore ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	\%fooormore ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	\%hash ~~ ["foo", "bar"] matches
+op/smartmatch.t	\%hash ~~ ["foo"] matches
+op/smartmatch.t	\%hash ~~ ["quux"] does not match
+op/smartmatch.t	\%hash ~~ [qw(foo quux)] matches
+op/smartmatch.t	\%hash ~~ \%tied_hash matches
+op/smartmatch.t	\%hash ~~ undef does not match
+op/smartmatch.t	\%main:: ~~ {map {$_ => 'x'} keys %main::} matches
+op/smartmatch.t	\%tied_hash ~~ \%hash matches
+op/smartmatch.t	\%tied_hash ~~ \%tied_hash matches
+op/smartmatch.t	\%tied_hash ~~ {"a"=>"b"} does not match
+op/smartmatch.t	\&fatal ~~ $ov_obj does not match
+op/smartmatch.t	\&foo ~~ undef does not match
+op/smartmatch.t	\@fooormore ~~ %fooormore matches
+op/smartmatch.t	\@fooormore ~~ sub { $_[0] =~ /^(foo|or|less)$/ } does not match
+op/smartmatch.t	\@fooormore ~~ sub { $_[0] =~ /^(foo|or|more)$/ } matches
+op/smartmatch.t	\@nums ~~ @tied_nums matches
+op/smartmatch.t	\@nums ~~ \@tied_nums matches
+op/smartmatch.t	\@nums ~~ undef does not match
+op/smartmatch.t	\@tied_nums ~~ @nums matches
+op/smartmatch.t	\@tied_nums ~~ \@nums matches
+op/smartmatch.t	don't fill the stack with rubbish
+op/smartmatch.t	don't qr-ify left-side match against a stacked argument
+op/smartmatch.t	don't qr-ify right-side match against a stacked argument
+op/smartmatch.t	qr// ~~ \&bar matches
+op/smartmatch.t	qr// ~~ \&foo does not match
+op/smartmatch.t	qr/B/i ~~ {b=>2} matches
+op/smartmatch.t	qr/[13579]$/ ~~ +{0..99} does not match
+op/smartmatch.t	qr/^(fo[ox])$/ ~~ {foo => 1} matches
+op/smartmatch.t	qr/^à/ ~~ {"à"=>2} matches
+op/smartmatch.t	qr/a*/ ~~ {b=>2} matches
+op/smartmatch.t	qr/a*/ ~~ {} does not match
+op/smartmatch.t	qr/a+/ ~~ {b=>2} does not match
+op/smartmatch.t	qr/foo/ ~~ undef does not match
+op/smartmatch.t	qr/fooormore/ ~~ sub{ref $_[0] eq 'Regexp'} matches
+op/smartmatch.t	qr/x/ ~~ [qw(foo bar baz quux)] matches
+op/smartmatch.t	qr/y/ ~~ [qw(foo bar baz quux)] does not match
+op/smartmatch.t	sub { } ~~ undef does not match
+op/smartmatch.t	sub {0} ~~ qr/^CODE/ matches
+op/smartmatch.t	sub {0} ~~ sub { ref shift eq "CODE" } matches
+op/smartmatch.t	sub {} ~~ undef does not match
+op/smartmatch.t	sub{0} ~~ sub { ref $_[0] eq "CODE" } matches
+op/smartmatch.t	undef ~~ @keyandmore{qw(not)} matches
+op/smartmatch.t	undef ~~ @sparse matches
+op/smartmatch.t	undef ~~ [1, 2, undef, 4] matches
+op/smartmatch.t	undef ~~ [undef] matches
+op/smartmatch.t	undef ~~ \&bar matches
+op/smartmatch.t	undef ~~ \&fatal dies
+op/smartmatch.t	undef ~~ sub{not shift} matches
+op/smartmatch.t	undef ~~ undef matches
+op/smartmatch.t	{ cigam => 1 } ~~ $ov_obj does not match
+op/smartmatch.t	{ foo => 1 } ~~ ["foo", "bar"] matches
+op/smartmatch.t	{ foo => 1 } ~~ ["foo"] matches
+op/smartmatch.t	{ foo => 1, or => 2, more => 3 } ~~ @fooormore matches
+op/smartmatch.t	{ stringified => 1 } ~~ $ov_obj does not match
+op/smartmatch.t	{"" => 1} ~~ [""] matches
+op/smartmatch.t	{"" => 1} ~~ [undef] matches
+op/smartmatch.t	{"a"=>"b"} ~~ %tied_hash does not match
+op/smartmatch.t	{"a"=>"b"} ~~ \%tied_hash does not match
+op/smartmatch.t	{"à"=>2} ~~ qr/^à/ matches
+op/smartmatch.t	{1 => 2} ~~ {1 => 2} matches
+op/smartmatch.t	{1 => 2} ~~ {1 => 3} matches
+op/smartmatch.t	{1 => 2} ~~ {2 => 3} does not match
+op/smartmatch.t	{1 => 2} ~~ {} does not match
+op/smartmatch.t	{2 => 3} ~~ {1 => 2} does not match
+op/smartmatch.t	{a=>1} ~~ \&bar matches
+op/smartmatch.t	{a=>1} ~~ \&foo does not match
+op/smartmatch.t	{b=>2} ~~ /B/i matches
+op/smartmatch.t	{b=>2} ~~ qr/B/i matches
+op/smartmatch.t	{b=>2} ~~ qr/a*/ matches
+op/smartmatch.t	{b=>2} ~~ qr/a+/ does not match
+op/smartmatch.t	{foo => 1} ~~ qr/^(fo[ox])$/ matches
+op/smartmatch.t	{} ~~ @empty does not match
+op/smartmatch.t	{} ~~ [""] does not match
+op/smartmatch.t	{} ~~ [] does not match
+op/smartmatch.t	{} ~~ \&foo matches
+op/smartmatch.t	{} ~~ qr/a*/ does not match
+op/smartmatch.t	{} ~~ undef does not match
+op/smartmatch.t	{} ~~ undef does not match
+op/smartmatch.t	{} ~~ {1 => 2} does not match
+op/smartmatch.t	{} ~~ {} matches
+op/state.t	Currently forbidden: (state $a) = 1;
+op/state.t	Currently forbidden: (state $a, $b) = ();
+op/state.t	Currently forbidden: (state $a, local @b) = ();
+op/state.t	Currently forbidden: (state $a, my $b) = ();
+op/state.t	Currently forbidden: (state $a, state $b) = ();
+op/state.t	Currently forbidden: (state $a, state @b) = ();
+op/state.t	Currently forbidden: (state $a, undef, state $b) = ();
+op/state.t	Currently forbidden: (state %a :shared) = ();
+op/state.t	Currently forbidden: (state %a) = ();
+op/state.t	Currently forbidden: (state ($a)) = 1;
+op/state.t	Currently forbidden: (state ($a, $b) :shared) = ();
+op/state.t	Currently forbidden: (state ($a, $b)) = ();
+op/state.t	Currently forbidden: (state ($a, @b) :shared) = ();
+op/state.t	Currently forbidden: (state ($a, @b)) = ();
+op/state.t	Currently forbidden: (state ($a, undef)) = ();
+op/state.t	Currently forbidden: (state (%a) :shared) = ();
+op/state.t	Currently forbidden: (state (%a)) = ();
+op/state.t	Currently forbidden: (state (@a) :shared) = 1;
+op/state.t	Currently forbidden: (state (@a)) = 1;
+op/state.t	Currently forbidden: (state (@a, $b) :shared) = ();
+op/state.t	Currently forbidden: (state (@a, $b)) = ();
+op/state.t	Currently forbidden: (state (@a, @b) :shared) = ();
+op/state.t	Currently forbidden: (state (@a, @b)) = ();
+op/state.t	Currently forbidden: (state (@a, undef)) = ();
+op/state.t	Currently forbidden: (state (undef, $a)) = ();
+op/state.t	Currently forbidden: (state (undef, @a)) = ();
+op/state.t	Currently forbidden: (state @a :shared) = 1;
+op/state.t	Currently forbidden: (state @a) = 1;
+op/state.t	Currently forbidden: state ($a) = 1;
+op/state.t	Currently forbidden: state ($a, $b) :shared = ();
+op/state.t	Currently forbidden: state ($a, $b) = ();
+op/state.t	Currently forbidden: state ($a, @b) :shared = ();
+op/state.t	Currently forbidden: state ($a, @b) = ();
+op/state.t	Currently forbidden: state ($a, undef) = ();
+op/state.t	Currently forbidden: state ($a, undef, $b) = ();
+op/state.t	Currently forbidden: state (%a) :shared = ();
+op/state.t	Currently forbidden: state (%a) = ();
+op/state.t	Currently forbidden: state (@a) :shared = 1;
+op/state.t	Currently forbidden: state (@a) = 1;
+op/state.t	Currently forbidden: state (@a, $b) :shared = ();
+op/state.t	Currently forbidden: state (@a, $b) = ();
+op/state.t	Currently forbidden: state (@a, @b) :shared = ();
+op/state.t	Currently forbidden: state (@a, @b) = ();
+op/state.t	Currently forbidden: state (@a, undef) = ();
+op/state.t	Currently forbidden: state (undef, $a) = ();
+op/state.t	Currently forbidden: state (undef, @a) = ();
+op/state.t	State variable is correct
+op/state.t	State variable is correct
+op/state.t	State variable is correct
+op/state.t	State variable is correct
+op/state.t	[at t/op/state.t line 374]
+op/state.t	[at t/op/state.t line 375]
+op/state.t	[at t/op/state.t line 384]
+op/state.t	[at t/op/state.t line 385]
+op/state.t	[at t/op/state.t line 386]
+op/state.t	[at t/op/state.t line 387]
+op/state.t	computed goto 1
+op/state.t	computed goto 1
+op/state.t	computed goto 1
+op/state.t	computed goto 1
+op/state.t	const state sub ran ok
+op/state.t	eval f_49522
+op/state.t	given
+op/state.t	given
+op/state.t	given
+op/state.t	given
+op/state.t	masked
+op/state.t	no 'Attempt to free unreferenced scalar'
+op/state.t	state init not skipped
+op/state.t	state var closure 1
+op/state.t	state var closure 2
+op/state.t	state var closure 3
+op/state.t	state variables don't surprisingly disappear when accessed
+op/state.t	state with multiconcat pass 1
+op/state.t	state with multiconcat pass 2
+op/state.t	suppress warnings part 1 []
+op/state.t	suppress warnings part 2 []
+op/state.t	suppress warnings part 3 []
+op/switch.t	$_ is not lexically scoped
+op/switch.t	((1 == $ok || undef) // "foo") smartmatched
+op/switch.t	((1 == $ok) || "foo") smartmatched
+op/switch.t	((1 == 1) && "bar") not smartmatched
+op/switch.t	*summary*
+op/switch.t	CORE::given and CORE::when
+op/switch.t	Calling sub directly (false)
+op/switch.t	Calling sub directly (true)
+op/switch.t	Calling sub indirectly (false)
+op/switch.t	Calling sub indirectly (true)
+op/switch.t	Can't "break" in a loop topicalizer
+op/switch.t	Can't "break" in a loop topicalizer
+op/switch.t	Class-method call acts as boolean
+op/switch.t	DESTROY called once
+op/switch.t	Explicit $_: first
+op/switch.t	Explicit $_: second
+op/switch.t	Filetest -d
+op/switch.t	Filetest -f
+op/switch.t	Filetest -r
+op/switch.t	Given("") when($undef)
+op/switch.t	Given("") when(undef)
+op/switch.t	Given($undef) when("")
+op/switch.t	Given($undef) when($undef)
+op/switch.t	Given($undef) when(0)
+op/switch.t	Given($undef) when(undef)
+op/switch.t	Given(0) when($undef)
+op/switch.t	Given(0) when(1++)
+op/switch.t	Given(0) when(undef)
+op/switch.t	Given(undef) when("")
+op/switch.t	Given(undef) when($undef)
+op/switch.t	Given(undef) when(0)
+op/switch.t	Given(undef) when(undef)
+op/switch.t	Loop: first
+op/switch.t	Loop: second
+op/switch.t	Multiple FETCHes in given, due to aliasing
+op/switch.t	Object-method call acts as boolean
+op/switch.t	Only one FETCH (numeric when)
+op/switch.t	Only one FETCH (string when)
+op/switch.t	Only one FETCH (undef)
+op/switch.t	Optimized-away comparison
+op/switch.t	Overloaded obj in given (false): called
+op/switch.t	Overloaded obj in given (false): not matched
+op/switch.t	Overloaded obj in given (true): called
+op/switch.t	Overloaded obj in given (true): matched
+op/switch.t	Overloaded obj in when (false): called
+op/switch.t	Overloaded obj in when (false): left
+op/switch.t	Overloaded obj in when (false): not matched
+op/switch.t	Overloaded obj in when (false): reversed
+op/switch.t	Overloaded obj in when (false): right
+op/switch.t	Overloaded obj in when (true): called
+op/switch.t	Overloaded obj in when (true): left
+op/switch.t	Overloaded obj in when (true): matched
+op/switch.t	Overloaded obj in when (true): reversed
+op/switch.t	Overloaded obj in when (true): right
+op/switch.t	RT \#133368 index
+op/switch.t	RT \#133368 rindex
+op/switch.t	Sanity check: Only one FETCH (numeric when)
+op/switch.t	Sanity check: Only one FETCH (string when)
+op/switch.t	Sanity check: Only one FETCH (undef)
+op/switch.t	Sub call acts as boolean
+op/switch.t	[at t/op/switch.t line 958]
+op/switch.t	[at t/op/switch.t line 958]
+op/switch.t	[at t/op/switch.t line 958]
+op/switch.t	[at t/op/switch.t line 958]
+op/switch.t	across continue and default - constant
+op/switch.t	across continue and default - extern-global
+op/switch.t	across continue and default - extern-lexical
+op/switch.t	across continue and default - extern-local
+op/switch.t	across continue and default - given-global
+op/switch.t	across continue and default - given-lexical
+op/switch.t	across continue and default - given-local
+op/switch.t	across continue and default - when-global
+op/switch.t	across continue and default - when-lexical
+op/switch.t	across continue and default - when-local
+op/switch.t	bar didn't match
+op/switch.t	bar() was called
+op/switch.t	bool not smartmatches
+op/switch.t	break resets the stack
+op/switch.t	continue (without feature) and CORE::default
+op/switch.t	defined() not smartmatched
+op/switch.t	eof() not smartmatched
+op/switch.t	exists() not smartmatched
+op/switch.t	explicit numeric comparison (<)
+op/switch.t	explicit numeric comparison (<=)
+op/switch.t	explicit numeric comparison (>)
+op/switch.t	explicit numeric comparison (>=)
+op/switch.t	explicit numeric comparison (integer <)
+op/switch.t	explicit numeric comparison (integer <=)
+op/switch.t	explicit numeric comparison (integer >)
+op/switch.t	explicit numeric comparison (integer >=)
+op/switch.t	explicit string comparison (ge)
+op/switch.t	explicit string comparison (gt)
+op/switch.t	explicit string comparison (le)
+op/switch.t	explicit string comparison (lt)
+op/switch.t	foo did match
+op/switch.t	foo() was called
+op/switch.t	given scope ends
+op/switch.t	given scope starts
+op/switch.t	given scope starts
+op/switch.t	given/when does not leak - break
+op/switch.t	given/when does not leak - continue
+op/switch.t	given/when does not leak - default
+op/switch.t	given/when does not leak - when
+op/switch.t	given/when returns the right object - break
+op/switch.t	given/when returns the right object - continue
+op/switch.t	given/when returns the right object - default
+op/switch.t	given/when returns the right object - when
+op/switch.t	goto GIVEN1
+op/switch.t	goto inside for and when
+op/switch.t	goto inside given
+op/switch.t	goto inside given and when
+op/switch.t	goto inside given and when to the given stmt
+op/switch.t	handle magical TARG
+op/switch.t	handle magical TARG
+op/switch.t	integer comparison
+op/switch.t	is 5
+op/switch.t	is [7]
+op/switch.t	last LABEL in when
+op/switch.t	last in when
+op/switch.t	list value of false when
+op/switch.t	more numeric (pt. 1)
+op/switch.t	more numeric (pt. 2)
+op/switch.t	next LABEL in when
+op/switch.t	next in when
+op/switch.t	numeric comparison
+op/switch.t	plain call - constant
+op/switch.t	plain call - extern-global
+op/switch.t	plain call - extern-lexical
+op/switch.t	plain call - extern-local
+op/switch.t	plain call - given-global
+op/switch.t	plain call - given-lexical
+op/switch.t	plain call - given-local
+op/switch.t	plain call - when-global
+op/switch.t	plain call - when-lexical
+op/switch.t	plain call - when-local
+op/switch.t	postfix numeric
+op/switch.t	postfix regex
+op/switch.t	postfix string
+op/switch.t	postfix undef
+op/switch.t	precheck: Multiple FETCHes in given, due to aliasing
+op/switch.t	precheck: Only one FETCH (numeric when)
+op/switch.t	precheck: Only one FETCH (string when)
+op/switch.t	precheck: Only one FETCH (undef)
+op/switch.t	regex 1
+op/switch.t	regex 2
+op/switch.t	rvalue given - default list [0]
+op/switch.t	rvalue given - default list [0]
+op/switch.t	rvalue given - default list [1]
+op/switch.t	rvalue given - default list [1]
+op/switch.t	rvalue given - default list [2]
+op/switch.t	rvalue given - default list [3]
+op/switch.t	rvalue given - default scalar [0]
+op/switch.t	rvalue given - default scalar [1]
+op/switch.t	rvalue given - default scalar [2]
+op/switch.t	rvalue given - list context propagation [2]
+op/switch.t	rvalue given - list context propagation [4]
+op/switch.t	rvalue given - list context propagation [999]
+op/switch.t	rvalue given - list context propagation [undef]
+op/switch.t	rvalue given - postfix list [0]
+op/switch.t	rvalue given - postfix list [1]
+op/switch.t	rvalue given - postfix list [2]
+op/switch.t	rvalue given - postfix scalar [0]
+op/switch.t	rvalue given - postfix scalar [1]
+op/switch.t	rvalue given - postfix scalar [2]
+op/switch.t	rvalue given - scalar context propagation [4]
+op/switch.t	rvalue given - scalar context propagation [999]
+op/switch.t	rvalue given - scalar context propagation [undef]
+op/switch.t	rvalue given - simple list [0]
+op/switch.t	rvalue given - simple list [1]
+op/switch.t	rvalue given - simple list [2]
+op/switch.t	rvalue given - simple scalar [0]
+op/switch.t	rvalue given - simple scalar [1]
+op/switch.t	rvalue given - simple scalar [2]
+op/switch.t	scalar value of false when
+op/switch.t	scalar()
+op/switch.t	scope after ... when my $x = ...
+op/switch.t	scope after my $x = ... when ...
+op/switch.t	scope inside ... when my $x = ...
+op/switch.t	simple continue
+op/switch.t	string comparison
+op/switch.t	when in for 1,2,3
+op/switch.t	when in for 1..3
+op/switch.t	when in for @a
+op/switch.t	when in for a..c
+op/switch.t	when(E1...E2) evaluates in boolean context
+op/switch.t	when(E1...E2) evaluates in boolean context
+op/switch.t	when(E1...E2) evaluates in boolean context
+op/switch.t	when(E1...E2) evaluates in boolean context
+op/switch.t	when(E1..E2) evaluates in boolean context
+op/switch.t	when(E1..E2) evaluates in boolean context
+op/switch.t	when(E1..E2) evaluates in boolean context
+op/switch.t	when(E1..E2) evaluates in boolean context
+op/switch.t	when(array slice)
+op/switch.t	when(array)
+op/switch.t	when(hash slice)
+op/switch.t	when(hash)
 op/ver.t	ASCII sprintf("%*vb", "\#\#", v1.22.333.4444)
 op/ver.t	ASCII sprintf("%vX", v1.22.333.4444)
 op/ver.t	ASCII sprintf("%vd", v1.22.333.4444 w/use bytes

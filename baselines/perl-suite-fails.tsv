@@ -25,7 +25,7 @@
 # 500 to the per-test log, so its multiset here is PARTIAL and a new failure
 # past row 500 is invisible.  The log says so in a `# TRUNCATED:` line and the
 # runner counts such files in every report.
-# taken-at: s465az 2026-09-03
+# taken-at: s468bc 2026-09-04
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -2609,6 +2609,507 @@ op/closure.t	276	ok	(missing)	cloning closure proto with no CvOUTSIDE
 op/closure.t	275	not ok	(missing)	closures only close over named variables, not entire subs # TODO we need outside links for debugger behaviour
 op/closure.t	271	ok	(missing)	don't copy a stale lexical; create a fresh undef one instead
 op/context.t	8	ok	not ok	context of { foo(); BEGIN {} }
+op/coreamp.t	63	ok	not ok [PCL #36]	&CORE::close with no args
+op/coreamp.t	67	ok	not ok [PCL #40]	&CORE::closedir
+op/coreamp.t	68	ok	not ok [PCL #41]	&CORE::closedir in list context
+op/coreamp.t	89	ok	not ok [PCL #48]	&CORE::die
+op/coreamp.t	127	ok	(missing)	&CORE::fileno
+op/coreamp.t	128	ok	(missing)	&CORE::fileno in list cx
+op/coreamp.t	2	ok	not ok	&__CLASS__ with too many args
+op/coreamp.t	3	ok	not ok	&__FILE__ with too many args
+op/coreamp.t	4	ok	not ok	&__LINE__ with too many args
+op/coreamp.t	5	ok	not ok	&__PACKAGE__ with too many args
+op/coreamp.t	10	ok	not ok	&__SUB__
+op/coreamp.t	6	ok	not ok	&__SUB__ with too many args
+op/coreamp.t	12	ok	not ok	&abs
+op/coreamp.t	13	ok	not ok	&abs in list context
+op/coreamp.t	14	ok	not ok	&abs with no args
+op/coreamp.t	11	ok	not ok	&abs with too many args
+op/coreamp.t	17	ok	(missing)	&accept
+op/coreamp.t	18	ok	(missing)	&accept in list context
+op/coreamp.t	15	ok	(missing)	&accept w/too few args
+op/coreamp.t	16	ok	(missing)	&accept w/too many args
+op/coreamp.t	23	ok	(missing)	&alarm with too many args
+op/coreamp.t	24	ok	(missing)	&atan2 w/too few args
+op/coreamp.t	25	ok	(missing)	&atan2 w/too many args
+op/coreamp.t	28	ok	(missing)	&bind
+op/coreamp.t	29	ok	(missing)	&bind in list context
+op/coreamp.t	26	ok	(missing)	&bind w/too few args
+op/coreamp.t	27	ok	(missing)	&bind w/too many args
+op/coreamp.t	34	ok	not ok [PCL #17]	&binmode in list context
+op/coreamp.t	35	ok	(missing)	&binmode with one arg
+op/coreamp.t	31	ok	(missing)	&binmode with too few args
+op/coreamp.t	32	ok	not ok [PCL #15]	&binmode with too many args
+op/coreamp.t	39	ok	not ok [PCL #20]	&bless in list context
+op/coreamp.t	40	ok	not ok [PCL #21]	&bless with one arg
+op/coreamp.t	36	ok	(missing)	&bless with too few args
+op/coreamp.t	37	ok	not ok [PCL #18]	&bless with too many args
+op/coreamp.t	42	ok	not ok [PCL #23]	&break
+op/coreamp.t	41	ok	not ok [PCL #22]	&break with too many args
+op/coreamp.t	44	ok	not ok [PCL #25]	&caller
+op/coreamp.t	46	ok	(missing)	&caller in list context
+op/coreamp.t	45	ok	not ok [PCL #26]	&caller(1)
+op/coreamp.t	47	ok	(missing)	&caller(1) in list context
+op/coreamp.t	49	ok	(missing)	&chmod
+op/coreamp.t	50	ok	(missing)	&chmod in list context
+op/coreamp.t	48	ok	(missing)	&chmod with no args
+op/coreamp.t	54	ok	not ok [PCL #30]	&chown in list context
+op/coreamp.t	56	ok	(missing)	&chr
+op/coreamp.t	57	ok	(missing)	&chr in list context
+op/coreamp.t	58	ok	(missing)	&chr with no args
+op/coreamp.t	55	ok	not ok [PCL #31]	&chr with too many args
+op/coreamp.t	59	ok	not ok [PCL #32]	&chroot with too many args
+op/coreamp.t	64	ok	not ok [PCL #37]	&close in list context
+op/coreamp.t	60	ok	not ok [PCL #33]	&close with too many args
+op/coreamp.t	65	ok	not ok [PCL #38]	&closedir w/too few args
+op/coreamp.t	66	ok	not ok [PCL #39]	&closedir w/too many args
+op/coreamp.t	71	ok	not ok [PCL #44]	&connect
+op/coreamp.t	72	ok	not ok [PCL #45]	&connect in list context
+op/coreamp.t	69	ok	not ok [PCL #42]	&connect w/too few args
+op/coreamp.t	70	ok	not ok [PCL #43]	&connect w/too many args
+op/coreamp.t	74	ok	not ok [PCL #47]	&continue
+op/coreamp.t	73	ok	not ok [PCL #46]	&continue with too many args
+op/coreamp.t	75	ok	(missing)	&cos with too many args
+op/coreamp.t	76	ok	(missing)	&crypt w/too few args
+op/coreamp.t	77	ok	(missing)	&crypt w/too many args
+op/coreamp.t	80	ok	(missing)	&dbmclose with array ref arg
+op/coreamp.t	82	ok	(missing)	&dbmclose with non-hash arg with hash overload (which does not count)
+op/coreamp.t	79	ok	(missing)	&dbmclose with too few args
+op/coreamp.t	78	ok	(missing)	&dbmclose with too many args
+op/coreamp.t	81	ok	(missing)	&dbmclose with typeglob arg
+op/coreamp.t	88	ok	(missing)	&dbmopen and &dbmclose
+op/coreamp.t	85	ok	(missing)	&dbmopen with array ref arg
+op/coreamp.t	87	ok	(missing)	&dbmopen with non-hash arg with hash overload (which does not count)
+op/coreamp.t	84	ok	(missing)	&dbmopen with too few args
+op/coreamp.t	83	ok	(missing)	&dbmopen with too many args
+op/coreamp.t	86	ok	(missing)	&dbmopen with typeglob arg
+op/coreamp.t	113	ok	(missing)	&each with coderef arg
+op/coreamp.t	111	ok	(missing)	&each with ioref arg
+op/coreamp.t	112	ok	(missing)	&each with ioref arg with hash overload (which does not count)
+op/coreamp.t	110	ok	(missing)	&each with non-ref arg
+op/coreamp.t	114	ok	(missing)	&each with scalarref arg
+op/coreamp.t	109	ok	(missing)	&each with too few args
+op/coreamp.t	108	ok	(missing)	&each with too many args
+op/coreamp.t	90	ok	not ok [PCL #49]	&endgrent with too many args
+op/coreamp.t	91	ok	not ok [PCL #50]	&endhostent with too many args
+op/coreamp.t	92	ok	not ok [PCL #51]	&endnetent with too many args
+op/coreamp.t	93	ok	not ok [PCL #52]	&endprotoent with too many args
+op/coreamp.t	94	ok	not ok [PCL #53]	&endpwent with too many args
+op/coreamp.t	95	ok	not ok [PCL #54]	&endservent with too many args
+op/coreamp.t	97	ok	(missing)	&evalbytes
+op/coreamp.t	96	ok	not ok [PCL #55]	&evalbytes with too many args
+op/coreamp.t	102	ok	(missing)	&exit with no args
+op/coreamp.t	101	ok	(missing)	&exit with too many args
+op/coreamp.t	119	ok	(missing)	&exp with too many args
+op/coreamp.t	120	ok	(missing)	&fc with too many args
+op/coreamp.t	121	ok	(missing)	&fc, no unicode_strings
+op/coreamp.t	122	ok	(missing)	&fc, unicode_strings
+op/coreamp.t	123	ok	(missing)	&fcntl w/too few args
+op/coreamp.t	124	ok	(missing)	&fcntl w/too many args
+op/coreamp.t	125	ok	(missing)	&fileno w/too few args
+op/coreamp.t	126	ok	(missing)	&fileno w/too many args
+op/coreamp.t	129	ok	(missing)	&flock w/too few args
+op/coreamp.t	130	ok	(missing)	&flock w/too many args
+op/coreamp.t	103	ok	(missing)	&fork with too many args
+op/coreamp.t	131	ok	(missing)	&fork with too many args
+op/coreamp.t	104	ok	(missing)	&formline with too few args
+op/coreamp.t	132	ok	(missing)	&getc with too many args
+op/coreamp.t	136	ok	(missing)	&getgrent with too many args
+op/coreamp.t	137	ok	(missing)	&getgrgid w/too few args
+op/coreamp.t	138	ok	(missing)	&getgrgid w/too many args
+op/coreamp.t	139	ok	(missing)	&getgrnam w/too few args
+op/coreamp.t	140	ok	(missing)	&getgrnam w/too many args
+op/coreamp.t	141	ok	(missing)	&gethostbyaddr w/too few args
+op/coreamp.t	142	ok	(missing)	&gethostbyaddr w/too many args
+op/coreamp.t	143	ok	(missing)	&gethostbyname w/too few args
+op/coreamp.t	144	ok	(missing)	&gethostbyname w/too many args
+op/coreamp.t	145	ok	(missing)	&gethostent with too many args
+op/coreamp.t	146	ok	(missing)	&getlogin with too many args
+op/coreamp.t	147	ok	(missing)	&getnetbyaddr w/too few args
+op/coreamp.t	148	ok	(missing)	&getnetbyaddr w/too many args
+op/coreamp.t	149	ok	(missing)	&getnetbyname w/too few args
+op/coreamp.t	150	ok	(missing)	&getnetbyname w/too many args
+op/coreamp.t	151	ok	(missing)	&getnetent with too many args
+op/coreamp.t	152	ok	(missing)	&getpeername w/too few args
+op/coreamp.t	153	ok	(missing)	&getpeername w/too many args
+op/coreamp.t	155	ok	(missing)	&getpgrp with no args does not crash
+op/coreamp.t	154	ok	(missing)	&getpgrp with too many args
+op/coreamp.t	156	ok	(missing)	&getppid with too many args
+op/coreamp.t	157	ok	(missing)	&getpriority w/too few args
+op/coreamp.t	158	ok	(missing)	&getpriority w/too many args
+op/coreamp.t	159	ok	(missing)	&getprotobyname w/too few args
+op/coreamp.t	160	ok	(missing)	&getprotobyname w/too many args
+op/coreamp.t	161	ok	(missing)	&getprotobynumber w/too few args
+op/coreamp.t	162	ok	(missing)	&getprotobynumber w/too many args
+op/coreamp.t	163	ok	(missing)	&getprotoent with too many args
+op/coreamp.t	164	ok	(missing)	&getpwent with too many args
+op/coreamp.t	165	ok	(missing)	&getpwnam w/too few args
+op/coreamp.t	166	ok	(missing)	&getpwnam w/too many args
+op/coreamp.t	167	ok	(missing)	&getpwuid w/too few args
+op/coreamp.t	168	ok	(missing)	&getpwuid w/too many args
+op/coreamp.t	169	ok	(missing)	&getservbyname w/too few args
+op/coreamp.t	170	ok	(missing)	&getservbyname w/too many args
+op/coreamp.t	171	ok	(missing)	&getservbyport w/too few args
+op/coreamp.t	172	ok	(missing)	&getservbyport w/too many args
+op/coreamp.t	173	ok	(missing)	&getservent with too many args
+op/coreamp.t	174	ok	(missing)	&getsockname w/too few args
+op/coreamp.t	175	ok	(missing)	&getsockname w/too many args
+op/coreamp.t	176	ok	(missing)	&getsockopt w/too few args
+op/coreamp.t	177	ok	(missing)	&getsockopt w/too many args
+op/coreamp.t	181	ok	(missing)	&glob with an arg
+op/coreamp.t	179	ok	(missing)	&glob with too many args
+op/coreamp.t	180	ok	(missing)	&glob without arguments
+op/coreamp.t	182	ok	(missing)	&gmtime with too many args
+op/coreamp.t	183	ok	(missing)	&gmtime without args does not crash
+op/coreamp.t	185	ok	(missing)	&hex
+op/coreamp.t	186	ok	(missing)	&hex in list context
+op/coreamp.t	187	ok	(missing)	&hex with no args
+op/coreamp.t	184	ok	(missing)	&hex with too many args
+op/coreamp.t	190	ok	(missing)	&index
+op/coreamp.t	191	ok	(missing)	&index in list context
+op/coreamp.t	192	ok	(missing)	&index with 2 args
+op/coreamp.t	188	ok	(missing)	&index with too few args
+op/coreamp.t	189	ok	(missing)	&index with too many args
+op/coreamp.t	194	ok	(missing)	&int
+op/coreamp.t	195	ok	(missing)	&int in list context
+op/coreamp.t	196	ok	(missing)	&int with no args
+op/coreamp.t	193	ok	(missing)	&int with too many args
+op/coreamp.t	197	ok	(missing)	&ioctl w/too few args
+op/coreamp.t	198	ok	(missing)	&ioctl w/too many args
+op/coreamp.t	200	ok	(missing)	&join
+op/coreamp.t	201	ok	(missing)	&join in list context
+op/coreamp.t	199	ok	(missing)	&join with too few args
+op/coreamp.t	207	ok	(missing)	&keys with coderef arg
+op/coreamp.t	205	ok	(missing)	&keys with ioref arg
+op/coreamp.t	206	ok	(missing)	&keys with ioref arg with hash overload (which does not count)
+op/coreamp.t	204	ok	(missing)	&keys with non-ref arg
+op/coreamp.t	208	ok	(missing)	&keys with scalarref arg
+op/coreamp.t	203	ok	(missing)	&keys with too few args
+op/coreamp.t	202	ok	(missing)	&keys with too many args
+op/coreamp.t	215	ok	(missing)	&kill
+op/coreamp.t	217	ok	(missing)	&lc
+op/coreamp.t	218	ok	(missing)	&lc in list context
+op/coreamp.t	219	ok	(missing)	&lc with no args
+op/coreamp.t	216	ok	(missing)	&lc with too many args
+op/coreamp.t	221	ok	(missing)	&lcfirst
+op/coreamp.t	222	ok	(missing)	&lcfirst in list context
+op/coreamp.t	223	ok	(missing)	&lcfirst with no args
+op/coreamp.t	220	ok	(missing)	&lcfirst with too many args
+op/coreamp.t	225	ok	(missing)	&length
+op/coreamp.t	226	ok	(missing)	&length in list context
+op/coreamp.t	227	ok	(missing)	&length with no args
+op/coreamp.t	224	ok	(missing)	&length with too many args
+op/coreamp.t	228	ok	(missing)	&link w/too few args
+op/coreamp.t	229	ok	(missing)	&link w/too many args
+op/coreamp.t	230	ok	(missing)	&listen w/too few args
+op/coreamp.t	231	ok	(missing)	&listen w/too many args
+op/coreamp.t	232	ok	(missing)	&localtime with too many args
+op/coreamp.t	233	ok	(missing)	&localtime without args does not crash
+op/coreamp.t	240	ok	(missing)	&lock in list context
+op/coreamp.t	242	ok	(missing)	&lock retval when passed a ash ref
+op/coreamp.t	243	ok	(missing)	&lock retval when passed a code ref
+op/coreamp.t	244	ok	(missing)	&lock retval when passed a glob ref
+op/coreamp.t	239	ok	(missing)	&lock retval when passed a scalar ref
+op/coreamp.t	241	ok	(missing)	&lock retval when passed an array ref
+op/coreamp.t	237	ok	(missing)	&lock with ioref arg
+op/coreamp.t	238	ok	(missing)	&lock with ioref arg with hash overload (which does not count)
+op/coreamp.t	236	ok	(missing)	&lock with non-ref arg
+op/coreamp.t	235	ok	(missing)	&lock with too few args
+op/coreamp.t	234	ok	(missing)	&lock with too many args
+op/coreamp.t	245	ok	(missing)	&log with too many args
+op/coreamp.t	246	ok	(missing)	&mkdir with too many args
+op/coreamp.t	247	ok	(missing)	&msgctl w/too few args
+op/coreamp.t	248	ok	(missing)	&msgctl w/too many args
+op/coreamp.t	249	ok	(missing)	&msgget w/too few args
+op/coreamp.t	250	ok	(missing)	&msgget w/too many args
+op/coreamp.t	251	ok	(missing)	&msgrcv w/too few args
+op/coreamp.t	252	ok	(missing)	&msgrcv w/too many args
+op/coreamp.t	253	ok	(missing)	&msgsnd w/too few args
+op/coreamp.t	254	ok	(missing)	&msgsnd w/too many args
+op/coreamp.t	116	ok	(missing)	&myeach(\%hash) in list cx
+op/coreamp.t	115	ok	(missing)	&myeach(\%hash) in scalar cx
+op/coreamp.t	118	ok	(missing)	&myeach(\@array) in list cx
+op/coreamp.t	117	ok	(missing)	&myeach(\@array) in scalar cx
+op/coreamp.t	107	ok	(missing)	&myformline in list context
+op/coreamp.t	105	ok	(missing)	&myformline retval
+op/coreamp.t	133	ok	(missing)	&mygetc
+op/coreamp.t	135	ok	(missing)	&mygetc in list context
+op/coreamp.t	134	ok	(missing)	&mygetc with no args
+op/coreamp.t	213	ok	(missing)	&mykeys = changed number of buckets allocated
+op/coreamp.t	210	ok	(missing)	&mykeys(\%hash) in list cx
+op/coreamp.t	209	ok	(missing)	&mykeys(\%hash) in scalar cx
+op/coreamp.t	212	ok	(missing)	&mykeys(\@array) in list cx
+op/coreamp.t	211	ok	(missing)	&mykeys(\@array) in scalar cx
+op/coreamp.t	381	ok	(missing)	&myselect($a,$total,$of,$five,$args)
+op/coreamp.t	379	ok	(missing)	&myselect($two,$args)
+op/coreamp.t	380	ok	(missing)	&myselect($with,$three,$args)
+op/coreamp.t	257	ok	(missing)	&not
+op/coreamp.t	258	ok	(missing)	&not in list context
+op/coreamp.t	255	ok	(missing)	&not w/too few args
+op/coreamp.t	256	ok	(missing)	&not w/too many args
+op/coreamp.t	260	ok	(missing)	&oct
+op/coreamp.t	261	ok	(missing)	&oct in list context
+op/coreamp.t	262	ok	(missing)	&oct with no args
+op/coreamp.t	259	ok	(missing)	&oct with too many args
+op/coreamp.t	267	ok	(missing)	&open autovivifies
+op/coreamp.t	264	ok	(missing)	&open with 1 arg
+op/coreamp.t	263	ok	(missing)	&open with too few args
+op/coreamp.t	271	ok	(missing)	&opendir w/too few args
+op/coreamp.t	272	ok	(missing)	&opendir w/too many args
+op/coreamp.t	274	ok	(missing)	&ord
+op/coreamp.t	275	ok	(missing)	&ord in list context
+op/coreamp.t	276	ok	(missing)	&ord with no args
+op/coreamp.t	273	ok	(missing)	&ord with too many args
+op/coreamp.t	278	ok	(missing)	&pack
+op/coreamp.t	279	ok	(missing)	&pack in list context
+op/coreamp.t	277	ok	(missing)	&pack with too few args
+op/coreamp.t	280	ok	(missing)	&pipe w/too few args
+op/coreamp.t	281	ok	(missing)	&pipe w/too many args
+op/coreamp.t	286	ok	(missing)	&pop with coderef arg
+op/coreamp.t	288	ok	(missing)	&pop with hashref arg
+op/coreamp.t	284	ok	(missing)	&pop with ioref arg
+op/coreamp.t	285	ok	(missing)	&pop with ioref arg with array overload (which does not count)
+op/coreamp.t	283	ok	(missing)	&pop with non-ref arg
+op/coreamp.t	287	ok	(missing)	&pop with scalarref arg
+op/coreamp.t	282	ok	(missing)	&pop with too many args
+op/coreamp.t	296	ok	(missing)	&pos with array ref arg
+op/coreamp.t	298	ok	(missing)	&pos with non-scalar arg w/scalar overload (which does not count)
+op/coreamp.t	297	ok	(missing)	&pos with scalar arg
+op/coreamp.t	295	ok	(missing)	&pos with too many args
+op/coreamp.t	304	ok	(missing)	&prototype
+op/coreamp.t	303	ok	(missing)	&prototype with too many args
+op/coreamp.t	309	ok	(missing)	&push with coderef arg
+op/coreamp.t	311	ok	(missing)	&push with hashref arg
+op/coreamp.t	307	ok	(missing)	&push with ioref arg
+op/coreamp.t	308	ok	(missing)	&push with ioref arg with array overload (which does not count)
+op/coreamp.t	306	ok	(missing)	&push with non-ref arg
+op/coreamp.t	310	ok	(missing)	&push with scalarref arg
+op/coreamp.t	305	ok	(missing)	&push with too few args
+op/coreamp.t	315	ok	(missing)	&quotemeta
+op/coreamp.t	316	ok	(missing)	&quotemeta in list context
+op/coreamp.t	317	ok	(missing)	&quotemeta with no args
+op/coreamp.t	314	ok	(missing)	&quotemeta with too many args
+op/coreamp.t	320	ok	(missing)	&rand in list context
+op/coreamp.t	319	ok	(missing)	&rand returns a valid number
+op/coreamp.t	321	ok	(missing)	&rand with 1 arg
+op/coreamp.t	318	ok	(missing)	&rand with too many args
+op/coreamp.t	331	ok	(missing)	&read in list context
+op/coreamp.t	327	ok	(missing)	&read with 3 args
+op/coreamp.t	329	ok	(missing)	&read with 4 args
+op/coreamp.t	324	ok	(missing)	&read with array ref arg
+op/coreamp.t	326	ok	(missing)	&read with non-scalar arg w/scalar overload (which does not count)
+op/coreamp.t	325	ok	(missing)	&read with scalar arg
+op/coreamp.t	323	ok	(missing)	&read with too few args
+op/coreamp.t	322	ok	(missing)	&read with too many args
+op/coreamp.t	332	ok	(missing)	&readdir w/too few args
+op/coreamp.t	333	ok	(missing)	&readdir w/too many args
+op/coreamp.t	337	ok	(missing)	&readline in list context
+op/coreamp.t	335	ok	(missing)	&readline w/no args
+op/coreamp.t	336	ok	(missing)	&readline with 1 arg
+op/coreamp.t	334	ok	(missing)	&readline with too many args
+op/coreamp.t	338	ok	(missing)	&readlink with too many args
+op/coreamp.t	339	ok	(missing)	&readpipe with too many args
+op/coreamp.t	342	ok	(missing)	&recv with array ref arg
+op/coreamp.t	344	ok	(missing)	&recv with non-scalar arg w/scalar overload (which does not count)
+op/coreamp.t	343	ok	(missing)	&recv with scalar arg
+op/coreamp.t	341	ok	(missing)	&recv with too few args
+op/coreamp.t	340	ok	(missing)	&recv with too many args
+op/coreamp.t	349	ok	(missing)	&ref
+op/coreamp.t	350	ok	(missing)	&ref in list context
+op/coreamp.t	351	ok	(missing)	&ref with no args
+op/coreamp.t	348	ok	(missing)	&ref with too many args
+op/coreamp.t	347	ok	(missing)	&rename
+op/coreamp.t	345	ok	(missing)	&rename w/too few args
+op/coreamp.t	346	ok	(missing)	&rename w/too many args
+op/coreamp.t	353	ok	(missing)	&reset with no args
+op/coreamp.t	352	ok	(missing)	&reset with too many args
+op/coreamp.t	355	ok	(missing)	&reverse
+op/coreamp.t	356	ok	(missing)	&reverse in list context
+op/coreamp.t	357	ok	(missing)	&rewinddir w/too few args
+op/coreamp.t	358	ok	(missing)	&rewinddir w/too many args
+op/coreamp.t	361	ok	(missing)	&rindex
+op/coreamp.t	362	ok	(missing)	&rindex in list context
+op/coreamp.t	363	ok	(missing)	&rindex with 2 args
+op/coreamp.t	359	ok	(missing)	&rindex with too few args
+op/coreamp.t	360	ok	(missing)	&rindex with too many args
+op/coreamp.t	364	ok	(missing)	&rmdir with too many args
+op/coreamp.t	367	ok	(missing)	&scalar
+op/coreamp.t	368	ok	(missing)	&scalar in list cx
+op/coreamp.t	365	ok	(missing)	&scalar w/too few args
+op/coreamp.t	366	ok	(missing)	&scalar w/too many args
+op/coreamp.t	371	ok	(missing)	&seek in action
+op/coreamp.t	369	ok	(missing)	&seek w/too few args
+op/coreamp.t	370	ok	(missing)	&seek w/too many args
+op/coreamp.t	372	ok	(missing)	&seekdir w/too few args
+op/coreamp.t	373	ok	(missing)	&seekdir w/too many args
+op/coreamp.t	377	ok	(missing)	&select autovivifies
+op/coreamp.t	378	ok	(missing)	&select selects
+op/coreamp.t	375	ok	(missing)	&select with no args
+op/coreamp.t	376	ok	(missing)	&select($arg) retval
+op/coreamp.t	382	ok	(missing)	&semctl w/too few args
+op/coreamp.t	383	ok	(missing)	&semctl w/too many args
+op/coreamp.t	384	ok	(missing)	&semget w/too few args
+op/coreamp.t	385	ok	(missing)	&semget w/too many args
+op/coreamp.t	386	ok	(missing)	&semop w/too few args
+op/coreamp.t	387	ok	(missing)	&semop w/too many args
+op/coreamp.t	388	ok	(missing)	&send with too few args
+op/coreamp.t	389	ok	(missing)	&send with too many args
+op/coreamp.t	390	ok	(missing)	&setgrent with too many args
+op/coreamp.t	391	ok	(missing)	&sethostent w/too few args
+op/coreamp.t	392	ok	(missing)	&sethostent w/too many args
+op/coreamp.t	393	ok	(missing)	&setnetent w/too few args
+op/coreamp.t	394	ok	(missing)	&setnetent w/too many args
+op/coreamp.t	397	ok	(missing)	&setpgrp with no arguments
+op/coreamp.t	396	ok	(missing)	&setpgrp with one argument
+op/coreamp.t	395	ok	(missing)	&setpgrp with too many args
+op/coreamp.t	398	ok	(missing)	&setpriority w/too few args
+op/coreamp.t	399	ok	(missing)	&setpriority w/too many args
+op/coreamp.t	400	ok	(missing)	&setprotoent w/too few args
+op/coreamp.t	401	ok	(missing)	&setprotoent w/too many args
+op/coreamp.t	402	ok	(missing)	&setpwent with too many args
+op/coreamp.t	403	ok	(missing)	&setservent w/too few args
+op/coreamp.t	404	ok	(missing)	&setservent w/too many args
+op/coreamp.t	405	ok	(missing)	&setsockopt w/too few args
+op/coreamp.t	406	ok	(missing)	&setsockopt w/too many args
+op/coreamp.t	411	ok	(missing)	&shift with coderef arg
+op/coreamp.t	413	ok	(missing)	&shift with hashref arg
+op/coreamp.t	409	ok	(missing)	&shift with ioref arg
+op/coreamp.t	410	ok	(missing)	&shift with ioref arg with array overload (which does not count)
+op/coreamp.t	408	ok	(missing)	&shift with non-ref arg
+op/coreamp.t	412	ok	(missing)	&shift with scalarref arg
+op/coreamp.t	407	ok	(missing)	&shift with too many args
+op/coreamp.t	420	ok	(missing)	&shmctl w/too few args
+op/coreamp.t	421	ok	(missing)	&shmctl w/too many args
+op/coreamp.t	422	ok	(missing)	&shmget w/too few args
+op/coreamp.t	423	ok	(missing)	&shmget w/too many args
+op/coreamp.t	424	ok	(missing)	&shmread w/too few args
+op/coreamp.t	425	ok	(missing)	&shmread w/too many args
+op/coreamp.t	426	ok	(missing)	&shmwrite w/too few args
+op/coreamp.t	427	ok	(missing)	&shmwrite w/too many args
+op/coreamp.t	428	ok	(missing)	&shutdown w/too few args
+op/coreamp.t	429	ok	(missing)	&shutdown w/too many args
+op/coreamp.t	430	ok	(missing)	&sin with too many args
+op/coreamp.t	431	ok	(missing)	&sleep with too many args
+op/coreamp.t	432	ok	(missing)	&socket w/too few args
+op/coreamp.t	433	ok	(missing)	&socket w/too many args
+op/coreamp.t	434	ok	(missing)	&socketpair w/too few args
+op/coreamp.t	435	ok	(missing)	&socketpair w/too many args
+op/coreamp.t	440	ok	(missing)	&splice with coderef arg
+op/coreamp.t	442	ok	(missing)	&splice with hashref arg
+op/coreamp.t	438	ok	(missing)	&splice with ioref arg
+op/coreamp.t	439	ok	(missing)	&splice with ioref arg with array overload (which does not count)
+op/coreamp.t	437	ok	(missing)	&splice with non-ref arg
+op/coreamp.t	441	ok	(missing)	&splice with scalarref arg
+op/coreamp.t	436	ok	(missing)	&splice with too few args
+op/coreamp.t	452	ok	(missing)	&sprintf
+op/coreamp.t	453	ok	(missing)	&sprintf in list context
+op/coreamp.t	451	ok	(missing)	&sprintf with too few args
+op/coreamp.t	455	ok	(missing)	&sqrt
+op/coreamp.t	456	ok	(missing)	&sqrt in list context
+op/coreamp.t	457	ok	(missing)	&sqrt with no args
+op/coreamp.t	454	ok	(missing)	&sqrt with too many args
+op/coreamp.t	459	ok	(missing)	&srand with no args does not crash
+op/coreamp.t	458	ok	(missing)	&srand with too many args
+op/coreamp.t	460	ok	(missing)	&study with too many args
+op/coreamp.t	461	ok	(missing)	&substr with too few args
+op/coreamp.t	462	ok	(missing)	&substr with too many args
+op/coreamp.t	468	ok	(missing)	&symlink w/too few args
+op/coreamp.t	469	ok	(missing)	&symlink w/too many args
+op/coreamp.t	470	ok	(missing)	&syscall with too few args
+op/coreamp.t	473	ok	(missing)	&sysopen does not crash with 3 args
+op/coreamp.t	471	ok	(missing)	&sysopen with too few args
+op/coreamp.t	472	ok	(missing)	&sysopen with too many args
+op/coreamp.t	477	ok	(missing)	&sysread with array ref arg
+op/coreamp.t	479	ok	(missing)	&sysread with non-scalar arg w/scalar overload (which does not count)
+op/coreamp.t	478	ok	(missing)	&sysread with scalar arg
+op/coreamp.t	476	ok	(missing)	&sysread with too few args
+op/coreamp.t	475	ok	(missing)	&sysread with too many args
+op/coreamp.t	480	ok	(missing)	&sysseek w/too few args
+op/coreamp.t	481	ok	(missing)	&sysseek w/too many args
+op/coreamp.t	482	ok	(missing)	&syswrite with too few args
+op/coreamp.t	483	ok	(missing)	&syswrite with too many args
+op/coreamp.t	486	ok	(missing)	&tell with an arg
+op/coreamp.t	485	ok	(missing)	&tell with no args
+op/coreamp.t	484	ok	(missing)	&tell with too many args
+op/coreamp.t	487	ok	(missing)	&telldir w/too few args
+op/coreamp.t	488	ok	(missing)	&telldir w/too many args
+op/coreamp.t	501	ok	(missing)	&tie actually ties
+op/coreamp.t	500	ok	(missing)	&tie and &tied retvals
+op/coreamp.t	493	ok	(missing)	&tie with coderef arg
+op/coreamp.t	491	ok	(missing)	&tie with ioref arg
+op/coreamp.t	492	ok	(missing)	&tie with ioref arg with hash overload (which does not count)
+op/coreamp.t	490	ok	(missing)	&tie with non-ref arg
+op/coreamp.t	489	ok	(missing)	&tie with too few args
+op/coreamp.t	499	ok	(missing)	&tied with coderef arg
+op/coreamp.t	497	ok	(missing)	&tied with ioref arg
+op/coreamp.t	498	ok	(missing)	&tied with ioref arg with hash overload (which does not count)
+op/coreamp.t	496	ok	(missing)	&tied with non-ref arg
+op/coreamp.t	495	ok	(missing)	&tied with too few args
+op/coreamp.t	494	ok	(missing)	&tied with too many args
+op/coreamp.t	505	ok	(missing)	&time in list context
+op/coreamp.t	504	ok	(missing)	&time in scalar context
+op/coreamp.t	503	ok	(missing)	&time with too many args
+op/coreamp.t	508	ok	(missing)	&times in list context
+op/coreamp.t	507	ok	(missing)	&times in scalar context
+op/coreamp.t	506	ok	(missing)	&times with too many args
+op/coreamp.t	509	ok	(missing)	&uc with too many args
+op/coreamp.t	502	ok	(missing)	&untie unties
+op/coreamp.t	178	ok	(missing)	*CORE::glob not autovivified yet
+op/coreamp.t	0	(none)	renumbered	*summary*
+op/coreamp.t	354	ok	(missing)	1-arg &reset
+op/coreamp.t	466	ok	(missing)	2-arg &substr
+op/coreamp.t	465	ok	(missing)	3-arg &substr
+op/coreamp.t	463	ok	(missing)	4-arg &substr
+op/coreamp.t	19	ok	(missing)	CORE::accept autovivifies its first argument
+op/coreamp.t	22	ok	(missing)	CORE::accept autovivs its first arg under strict
+op/coreamp.t	20	ok	(missing)	CORE::accept does not autovivify its second argument
+op/coreamp.t	21	ok	(missing)	CORE::accept will not accept undef 2nd arg under strict
+op/coreamp.t	30	ok	(missing)	CORE::bind dies with undef first arg
+op/coreamp.t	214	ok	(missing)	[at t/op/coreamp.t line 647]
+op/coreamp.t	7	ok	not ok	__FILE__ does check its caller
+op/coreamp.t	8	ok	not ok	__LINE__ does check its caller
+op/coreamp.t	9	ok	not ok	__PACKAGE__ does check its caller
+op/coreamp.t	99	ok	(missing)	compile-time hh propagates into &evalbytes
+op/coreamp.t	100	ok	(missing)	compile-time hint bits propagate into &evalbytes
+op/coreamp.t	106	ok	(missing)	effect of &myformline
+op/coreamp.t	294	ok	(missing)	effect of &pop
+op/coreamp.t	290	ok	(missing)	effect of &pop on @ARGV
+op/coreamp.t	292	ok	(missing)	effect of &pop on @_
+op/coreamp.t	313	ok	(missing)	effect of &push
+op/coreamp.t	419	ok	(missing)	effect of &shift
+op/coreamp.t	415	ok	(missing)	effect of &shift on @ARGV
+op/coreamp.t	417	ok	(missing)	effect of &shift on @_
+op/coreamp.t	446	ok	(missing)	effect of 2-arg &splice in list context
+op/coreamp.t	444	ok	(missing)	effect of 2-arg &splice in scalar context
+op/coreamp.t	448	ok	(missing)	effect of 3-arg &splice in list context
+op/coreamp.t	450	ok	(missing)	effect of 4-arg &splice in list context
+op/coreamp.t	467	ok	(missing)	lvalue &substr
+op/coreamp.t	374	ok	(missing)	prototype of &select (or lack thereof)
+op/coreamp.t	299	ok	(missing)	reading &pos without args
+op/coreamp.t	301	ok	(missing)	reading &pos without args
+op/coreamp.t	265	ok	(missing)	result of &open with 1 arg
+op/coreamp.t	268	ok	(missing)	result of &open with 2 args
+op/coreamp.t	270	ok	(missing)	result of three-arg &open
+op/coreamp.t	293	ok	(missing)	retval of &pop
+op/coreamp.t	289	ok	(missing)	retval of &pop with no args (@ARGV)
+op/coreamp.t	291	ok	(missing)	retval of &pop with no args (@_)
+op/coreamp.t	312	ok	(missing)	retval of &push
+op/coreamp.t	418	ok	(missing)	retval of &shift
+op/coreamp.t	414	ok	(missing)	retval of &shift with no args (@ARGV)
+op/coreamp.t	416	ok	(missing)	retval of &shift with no args (@_)
+op/coreamp.t	445	ok	(missing)	retval of 2-arg &splice in list cx
+op/coreamp.t	443	ok	(missing)	retval of 2-arg &splice in scalar context
+op/coreamp.t	269	ok	(missing)	retval of 3-arg &open
+op/coreamp.t	447	ok	(missing)	retval of 3-arg &splice in list cx
+op/coreamp.t	449	ok	(missing)	retval of 4-arg &splice in list cx
+op/coreamp.t	98	ok	(missing)	run-time hint bits do not leak into &evalbytes
+op/coreamp.t	474	ok	(missing)	sysopen autovivifies
+op/coreamp.t	266	ok	(missing)	two-arg &open
+op/coreamp.t	328	ok	(missing)	value read by 3-arg &read
+op/coreamp.t	330	ok	(missing)	value read by 4-arg &read
+op/coreamp.t	464	ok	(missing)	what 4-arg &substr does
+op/coreamp.t	300	ok	(missing)	writing to &pos without args
+op/coreamp.t	302	ok	(missing)	writing to &pos without args
 op/cproto.t	9	ok	not ok	CORE
 op/cproto.t	1	ok	not ok	__FILE__
 op/cproto.t	2	ok	not ok	__LINE__
@@ -6480,6 +6981,273 @@ op/symbolcache.t	5	ok	not ok [PCL #4]	function not bound
 op/symbolcache.t	1	ok	(missing)	function still bound
 op/symbolcache.t	3	ok	not ok [PCL #2]	original function still bound
 op/tie.t	0	ok*	(no TAP)	*summary*
+op/tie_fetch_count.t	245	ok	(missing)	FETCH called 3 times using '%='
+op/tie_fetch_count.t	289	ok	(missing)	FETCH called 3 times using '&='
+op/tie_fetch_count.t	233	ok	(missing)	FETCH called 3 times using '**='
+op/tie_fetch_count.t	237	ok	(missing)	FETCH called 3 times using '*='
+op/tie_fetch_count.t	307	ok	(missing)	FETCH called 3 times using '+='
+op/tie_fetch_count.t	251	ok	(missing)	FETCH called 3 times using '-='
+op/tie_fetch_count.t	301	ok	(missing)	FETCH called 3 times using '.='
+op/tie_fetch_count.t	241	ok	(missing)	FETCH called 3 times using '/='
+op/tie_fetch_count.t	255	ok	(missing)	FETCH called 3 times using '<<='
+op/tie_fetch_count.t	259	ok	(missing)	FETCH called 3 times using '>>='
+op/tie_fetch_count.t	297	ok	(missing)	FETCH called 3 times using '^='
+op/tie_fetch_count.t	319	ok	(missing)	FETCH called 3 times using 'use integer; %='
+op/tie_fetch_count.t	311	ok	(missing)	FETCH called 3 times using 'use integer; *='
+op/tie_fetch_count.t	323	ok	(missing)	FETCH called 3 times using 'use integer; +='
+op/tie_fetch_count.t	327	ok	(missing)	FETCH called 3 times using 'use integer; -='
+op/tie_fetch_count.t	315	ok	(missing)	FETCH called 3 times using 'use integer; /='
+op/tie_fetch_count.t	293	ok	(missing)	FETCH called 3 times using '|='
+op/tie_fetch_count.t	144	ok	(missing)	FETCH called just once using '$ref =~ y///'
+op/tie_fetch_count.t	150	ok	(missing)	FETCH called just once using '${}'
+op/tie_fetch_count.t	152	ok	(missing)	FETCH called just once using '%{}'
+op/tie_fetch_count.t	38	ok	not ok	FETCH called just once using '&'
+op/tie_fetch_count.t	154	ok	(missing)	FETCH called just once using '&{}'
+op/tie_fetch_count.t	182	ok	(missing)	FETCH called just once using '()=sort $tied_glob 1,2,3'
+op/tie_fetch_count.t	183	ok	(missing)	FETCH called just once using '()=sort \$tied_glob 1,2,3'
+op/tie_fetch_count.t	165	ok	(missing)	FETCH called just once using '*$tied = \&{"name of const"}'
+op/tie_fetch_count.t	153	ok	(missing)	FETCH called just once using '*{}'
+op/tie_fetch_count.t	164	ok	(missing)	FETCH called just once using '->method'
+op/tie_fetch_count.t	133	ok	not ok	FETCH called just once using '-A $tied_glob'
+op/tie_fetch_count.t	132	ok	not ok	FETCH called just once using '-A'
+op/tie_fetch_count.t	127	ok	not ok	FETCH called just once using '-B $tied_glob'
+op/tie_fetch_count.t	126	ok	not ok	FETCH called just once using '-B'
+op/tie_fetch_count.t	136	ok	not ok	FETCH called just once using '-C $tied_glob'
+op/tie_fetch_count.t	135	ok	not ok	FETCH called just once using '-C'
+op/tie_fetch_count.t	130	ok	not ok	FETCH called just once using '-M $tied_glob'
+op/tie_fetch_count.t	129	ok	not ok	FETCH called just once using '-M'
+op/tie_fetch_count.t	85	ok	not ok	FETCH called just once using '-O $tied_glob'
+op/tie_fetch_count.t	84	ok	not ok	FETCH called just once using '-O'
+op/tie_fetch_count.t	76	ok	not ok	FETCH called just once using '-R $tied_glob'
+op/tie_fetch_count.t	75	ok	not ok	FETCH called just once using '-R'
+op/tie_fetch_count.t	106	ok	not ok	FETCH called just once using '-S $tied_glob'
+op/tie_fetch_count.t	105	ok	not ok	FETCH called just once using '-S'
+op/tie_fetch_count.t	124	ok	not ok	FETCH called just once using '-T $tied_glob'
+op/tie_fetch_count.t	123	ok	not ok	FETCH called just once using '-T'
+op/tie_fetch_count.t	79	ok	not ok	FETCH called just once using '-W $tied_glob'
+op/tie_fetch_count.t	78	ok	not ok	FETCH called just once using '-W'
+op/tie_fetch_count.t	82	ok	not ok	FETCH called just once using '-X $tied_glob'
+op/tie_fetch_count.t	81	ok	not ok	FETCH called just once using '-X'
+op/tie_fetch_count.t	109	ok	not ok	FETCH called just once using '-b $tied_glob'
+op/tie_fetch_count.t	108	ok	not ok	FETCH called just once using '-b'
+op/tie_fetch_count.t	112	ok	not ok	FETCH called just once using '-c $tied_glob'
+op/tie_fetch_count.t	111	ok	not ok	FETCH called just once using '-c'
+op/tie_fetch_count.t	100	ok	not ok	FETCH called just once using '-d $tied_glob'
+op/tie_fetch_count.t	99	ok	not ok	FETCH called just once using '-d'
+op/tie_fetch_count.t	88	ok	not ok	FETCH called just once using '-e $tied_glob'
+op/tie_fetch_count.t	139	ok	not ok	FETCH called just once using '-e -e'
+op/tie_fetch_count.t	87	ok	not ok	FETCH called just once using '-e'
+op/tie_fetch_count.t	97	ok	not ok	FETCH called just once using '-f $tied_glob'
+op/tie_fetch_count.t	96	ok	not ok	FETCH called just once using '-f'
+op/tie_fetch_count.t	120	ok	not ok	FETCH called just once using '-g $tied_glob'
+op/tie_fetch_count.t	119	ok	not ok	FETCH called just once using '-g'
+op/tie_fetch_count.t	122	ok	not ok	FETCH called just once using '-k $tied_glob'
+op/tie_fetch_count.t	121	ok	not ok	FETCH called just once using '-k'
+op/tie_fetch_count.t	138	ok	not ok	FETCH called just once using '-l'
+op/tie_fetch_count.t	73	ok	not ok	FETCH called just once using '-o $tied_glob'
+op/tie_fetch_count.t	72	ok	not ok	FETCH called just once using '-o'
+op/tie_fetch_count.t	103	ok	not ok	FETCH called just once using '-p $tied_glob'
+op/tie_fetch_count.t	102	ok	not ok	FETCH called just once using '-p'
+op/tie_fetch_count.t	64	ok	not ok	FETCH called just once using '-r $tied_glob'
+op/tie_fetch_count.t	63	ok	not ok	FETCH called just once using '-r'
+op/tie_fetch_count.t	94	ok	not ok	FETCH called just once using '-s $tied_glob'
+op/tie_fetch_count.t	93	ok	not ok	FETCH called just once using '-s'
+op/tie_fetch_count.t	115	ok	not ok	FETCH called just once using '-t $tied_glob'
+op/tie_fetch_count.t	116	ok	not ok	FETCH called just once using '-t \$tied_glob'
+op/tie_fetch_count.t	114	ok	not ok	FETCH called just once using '-t'
+op/tie_fetch_count.t	118	ok	not ok	FETCH called just once using '-u $tied_glob'
+op/tie_fetch_count.t	117	ok	not ok	FETCH called just once using '-u'
+op/tie_fetch_count.t	67	ok	not ok	FETCH called just once using '-w $tied_glob'
+op/tie_fetch_count.t	66	ok	not ok	FETCH called just once using '-w'
+op/tie_fetch_count.t	70	ok	not ok	FETCH called just once using '-x $tied_glob'
+op/tie_fetch_count.t	69	ok	not ok	FETCH called just once using '-x'
+op/tie_fetch_count.t	91	ok	not ok	FETCH called just once using '-z $tied_glob'
+op/tie_fetch_count.t	90	ok	not ok	FETCH called just once using '-z'
+op/tie_fetch_count.t	225	ok	(missing)	FETCH called just once using '4-arg substr with utf8 replacement'
+op/tie_fetch_count.t	58	ok	not ok	FETCH called just once using '<readline>'
+op/tie_fetch_count.t	151	ok	(missing)	FETCH called just once using '@{}'
+op/tie_fetch_count.t	163	ok	(missing)	FETCH called just once using '[]'
+op/tie_fetch_count.t	39	ok	not ok	FETCH called just once using '^'
+op/tie_fetch_count.t	224	ok	(missing)	FETCH called just once using 'assigning $utf8 to lvalue substr'
+op/tie_fetch_count.t	166	ok	(missing)	FETCH called just once using 'chdir $tied_glob'
+op/tie_fetch_count.t	167	ok	(missing)	FETCH called just once using 'chdir \$tied_glob'
+op/tie_fetch_count.t	168	ok	(missing)	FETCH called just once using 'chmod 0,$tied_glob'
+op/tie_fetch_count.t	169	ok	(missing)	FETCH called just once using 'chmod 0,\$tied_glob'
+op/tie_fetch_count.t	170	ok	(missing)	FETCH called just once using 'chown 0,0,$tied_glob'
+op/tie_fetch_count.t	171	ok	(missing)	FETCH called just once using 'chown 0,0,\$tied_glob'
+op/tie_fetch_count.t	184	ok	(missing)	FETCH called just once using 'crypt $tied, ...'
+op/tie_fetch_count.t	186	ok	(missing)	FETCH called just once using 'crypt $tied_utf8, ...'
+op/tie_fetch_count.t	185	ok	(missing)	FETCH called just once using 'crypt ..., $tied'
+op/tie_fetch_count.t	187	ok	(missing)	FETCH called just once using 'crypt ..., $tied_utf8'
+op/tie_fetch_count.t	178	ok	(missing)	FETCH called just once using 'lstat $tied_glob'
+op/tie_fetch_count.t	179	ok	(missing)	FETCH called just once using 'lstat \$tied_glob'
+op/tie_fetch_count.t	194	ok	(missing)	FETCH called just once using 'lvalue pos $utf8'
+op/tie_fetch_count.t	146	ok	(missing)	FETCH called just once using 'm/$tied foo/'
+op/tie_fetch_count.t	145	ok	(missing)	FETCH called just once using 'm/pattern/'
+op/tie_fetch_count.t	180	ok	(missing)	FETCH called just once using 'open my $fh,"<&",$tied_glob'
+op/tie_fetch_count.t	181	ok	(missing)	FETCH called just once using 'open my $fh,"<&",\$tied_glob'
+op/tie_fetch_count.t	191	ok	(missing)	FETCH called just once using 'pack "u", $utf8'
+op/tie_fetch_count.t	193	ok	(missing)	FETCH called just once using 'pack "w", $tied_huge_int_as_str'
+op/tie_fetch_count.t	192	ok	(missing)	FETCH called just once using 'pack "w", $tied_int'
+op/tie_fetch_count.t	20	ok	not ok	FETCH called just once using 'post ++'
+op/tie_fetch_count.t	21	ok	not ok	FETCH called just once using 'post --'
+op/tie_fetch_count.t	222	ok	(missing)	FETCH called just once using 'reading lvalue substr($utf8)'
+op/tie_fetch_count.t	148	ok	(missing)	FETCH called just once using 's/$tied foo//'
+op/tie_fetch_count.t	149	ok	(missing)	FETCH called just once using 's//replacement/'
+op/tie_fetch_count.t	147	ok	(missing)	FETCH called just once using 's/pattern//'
+op/tie_fetch_count.t	188	ok	(missing)	FETCH called just once using 'select $tied_glob, ...'
+op/tie_fetch_count.t	189	ok	(missing)	FETCH called just once using 'select $tied_ref, ...'
+op/tie_fetch_count.t	190	ok	(missing)	FETCH called just once using 'select $tied_undef, ...'
+op/tie_fetch_count.t	223	ok	(missing)	FETCH called just once using 'setting lvalue substr($utf8)'
+op/tie_fetch_count.t	196	ok	(missing)	FETCH called just once using 'sprintf "%.1s", $utf8'
+op/tie_fetch_count.t	195	ok	(missing)	FETCH called just once using 'sprintf "%1s", $utf8'
+op/tie_fetch_count.t	197	ok	(missing)	FETCH called just once using 'sprintf '%B''
+op/tie_fetch_count.t	209	ok	(missing)	FETCH called just once using 'sprintf '%B', $tied_inf'
+op/tie_fetch_count.t	200	ok	(missing)	FETCH called just once using 'sprintf '%D''
+op/tie_fetch_count.t	212	ok	(missing)	FETCH called just once using 'sprintf '%D', $tied_inf'
+op/tie_fetch_count.t	203	ok	(missing)	FETCH called just once using 'sprintf '%O''
+op/tie_fetch_count.t	215	ok	(missing)	FETCH called just once using 'sprintf '%O', $tied_inf'
+op/tie_fetch_count.t	206	ok	(missing)	FETCH called just once using 'sprintf '%U''
+op/tie_fetch_count.t	218	ok	(missing)	FETCH called just once using 'sprintf '%U', $tied_inf'
+op/tie_fetch_count.t	207	ok	(missing)	FETCH called just once using 'sprintf '%X''
+op/tie_fetch_count.t	219	ok	(missing)	FETCH called just once using 'sprintf '%X', $tied_inf'
+op/tie_fetch_count.t	198	ok	(missing)	FETCH called just once using 'sprintf '%b''
+op/tie_fetch_count.t	210	ok	(missing)	FETCH called just once using 'sprintf '%b', $tied_inf'
+op/tie_fetch_count.t	199	ok	(missing)	FETCH called just once using 'sprintf '%c''
+op/tie_fetch_count.t	211	ok	(missing)	FETCH called just once using 'sprintf '%c', $tied_inf'
+op/tie_fetch_count.t	201	ok	(missing)	FETCH called just once using 'sprintf '%d''
+op/tie_fetch_count.t	213	ok	(missing)	FETCH called just once using 'sprintf '%d', $tied_inf'
+op/tie_fetch_count.t	202	ok	(missing)	FETCH called just once using 'sprintf '%i''
+op/tie_fetch_count.t	214	ok	(missing)	FETCH called just once using 'sprintf '%i', $tied_inf'
+op/tie_fetch_count.t	204	ok	(missing)	FETCH called just once using 'sprintf '%o''
+op/tie_fetch_count.t	216	ok	(missing)	FETCH called just once using 'sprintf '%o', $tied_inf'
+op/tie_fetch_count.t	205	ok	(missing)	FETCH called just once using 'sprintf '%u''
+op/tie_fetch_count.t	217	ok	(missing)	FETCH called just once using 'sprintf '%u', $tied_inf'
+op/tie_fetch_count.t	208	ok	(missing)	FETCH called just once using 'sprintf '%x''
+op/tie_fetch_count.t	220	ok	(missing)	FETCH called just once using 'sprintf '%x', $tied_inf'
+op/tie_fetch_count.t	176	ok	(missing)	FETCH called just once using 'stat $tied_glob'
+op/tie_fetch_count.t	177	ok	(missing)	FETCH called just once using 'stat \$tied_glob'
+op/tie_fetch_count.t	221	ok	(missing)	FETCH called just once using 'substr $utf8'
+op/tie_fetch_count.t	155	ok	(missing)	FETCH called just once using 'symbolic ${}'
+op/tie_fetch_count.t	157	ok	(missing)	FETCH called just once using 'symbolic %{}'
+op/tie_fetch_count.t	159	ok	(missing)	FETCH called just once using 'symbolic &{}'
+op/tie_fetch_count.t	158	ok	(missing)	FETCH called just once using 'symbolic *{}'
+op/tie_fetch_count.t	156	ok	(missing)	FETCH called just once using 'symbolic @{}'
+op/tie_fetch_count.t	161	ok	(missing)	FETCH called just once using 'symbolic defined ${}'
+op/tie_fetch_count.t	160	ok	(missing)	FETCH called just once using 'symbolic readdir'
+op/tie_fetch_count.t	174	ok	(missing)	FETCH called just once using 'truncate $tied_glob,0'
+op/tie_fetch_count.t	175	ok	(missing)	FETCH called just once using 'truncate \$tied_glob,0'
+op/tie_fetch_count.t	4	ok	not ok	FETCH called just once using 'unary -'
+op/tie_fetch_count.t	172	ok	(missing)	FETCH called just once using 'utime 0,0,$tied_glob'
+op/tie_fetch_count.t	173	ok	(missing)	FETCH called just once using 'utime 0,0,\$tied_glob'
+op/tie_fetch_count.t	226	ok	(missing)	FETCH called just once using 'warn $tied'
+op/tie_fetch_count.t	227	ok	(missing)	FETCH called just once using 'warn() with $@ tied (num)'
+op/tie_fetch_count.t	228	ok	(missing)	FETCH called just once using 'warn() with $@ tied (ref)'
+op/tie_fetch_count.t	229	ok	(missing)	FETCH called just once using 'warn() with $@ tied (str)'
+op/tie_fetch_count.t	13	ok	not ok	FETCH called just once using 'x'
+op/tie_fetch_count.t	14	ok	not ok	FETCH called just once using 'x'
+op/tie_fetch_count.t	143	ok	(missing)	FETCH called just once using 'y///'
+op/tie_fetch_count.t	40	ok	not ok	FETCH called just once using '|'
+op/tie_fetch_count.t	41	ok	not ok	FETCH called just once using '~'
+op/tie_fetch_count.t	142	ok	(missing)	FETCH called just once using '~~'
+op/tie_fetch_count.t	269	ok	(missing)	FETCH called twice using '!='
+op/tie_fetch_count.t	243	ok	(missing)	FETCH called twice using '%'
+op/tie_fetch_count.t	287	ok	(missing)	FETCH called twice using '&'
+op/tie_fetch_count.t	235	ok	(missing)	FETCH called twice using '*'
+op/tie_fetch_count.t	231	ok	(missing)	FETCH called twice using '**'
+op/tie_fetch_count.t	305	ok	(missing)	FETCH called twice using '+'
+op/tie_fetch_count.t	249	ok	(missing)	FETCH called twice using '-'
+op/tie_fetch_count.t	299	ok	(missing)	FETCH called twice using '.'
+op/tie_fetch_count.t	239	ok	(missing)	FETCH called twice using '/'
+op/tie_fetch_count.t	261	ok	(missing)	FETCH called twice using '<'
+op/tie_fetch_count.t	253	ok	(missing)	FETCH called twice using '<<'
+op/tie_fetch_count.t	265	ok	(missing)	FETCH called twice using '<='
+op/tie_fetch_count.t	271	ok	(missing)	FETCH called twice using '<=>'
+op/tie_fetch_count.t	303	ok	(missing)	FETCH called twice using '=='
+op/tie_fetch_count.t	263	ok	(missing)	FETCH called twice using '>'
+op/tie_fetch_count.t	267	ok	(missing)	FETCH called twice using '>='
+op/tie_fetch_count.t	257	ok	(missing)	FETCH called twice using '>>'
+op/tie_fetch_count.t	295	ok	(missing)	FETCH called twice using '^'
+op/tie_fetch_count.t	343	ok	(missing)	FETCH called twice using 'atan2'
+op/tie_fetch_count.t	285	ok	(missing)	FETCH called twice using 'cmp'
+op/tie_fetch_count.t	281	ok	(missing)	FETCH called twice using 'eq'
+op/tie_fetch_count.t	279	ok	(missing)	FETCH called twice using 'ge'
+op/tie_fetch_count.t	277	ok	(missing)	FETCH called twice using 'gt'
+op/tie_fetch_count.t	273	ok	(missing)	FETCH called twice using 'le'
+op/tie_fetch_count.t	275	ok	(missing)	FETCH called twice using 'lt'
+op/tie_fetch_count.t	283	ok	(missing)	FETCH called twice using 'ne'
+op/tie_fetch_count.t	339	ok	(missing)	FETCH called twice using 'use integer; !='
+op/tie_fetch_count.t	317	ok	(missing)	FETCH called twice using 'use integer; %'
+op/tie_fetch_count.t	309	ok	(missing)	FETCH called twice using 'use integer; *'
+op/tie_fetch_count.t	321	ok	(missing)	FETCH called twice using 'use integer; +'
+op/tie_fetch_count.t	325	ok	(missing)	FETCH called twice using 'use integer; -'
+op/tie_fetch_count.t	313	ok	(missing)	FETCH called twice using 'use integer; /'
+op/tie_fetch_count.t	329	ok	(missing)	FETCH called twice using 'use integer; <'
+op/tie_fetch_count.t	333	ok	(missing)	FETCH called twice using 'use integer; <='
+op/tie_fetch_count.t	341	ok	(missing)	FETCH called twice using 'use integer; <=>'
+op/tie_fetch_count.t	337	ok	(missing)	FETCH called twice using 'use integer; =='
+op/tie_fetch_count.t	331	ok	(missing)	FETCH called twice using 'use integer; >'
+op/tie_fetch_count.t	335	ok	(missing)	FETCH called twice using 'use integer; >='
+op/tie_fetch_count.t	247	ok	(missing)	FETCH called twice using 'x'
+op/tie_fetch_count.t	162	ok	(missing)	FETCH called twice using '{}'
+op/tie_fetch_count.t	291	ok	(missing)	FETCH called twice using '|'
+op/tie_fetch_count.t	244	ok	(missing)	retval of  $var2 %= $var2
+op/tie_fetch_count.t	288	ok	(missing)	retval of  $var2 &= $var2
+op/tie_fetch_count.t	232	ok	(missing)	retval of  $var2 **= $var2
+op/tie_fetch_count.t	236	ok	(missing)	retval of  $var2 *= $var2
+op/tie_fetch_count.t	306	ok	(missing)	retval of  $var2 += $var2
+op/tie_fetch_count.t	250	ok	(missing)	retval of  $var2 -= $var2
+op/tie_fetch_count.t	300	ok	(missing)	retval of  $var2 .= $var2
+op/tie_fetch_count.t	240	ok	(missing)	retval of  $var2 /= $var2
+op/tie_fetch_count.t	254	ok	(missing)	retval of  $var2 <<= $var2
+op/tie_fetch_count.t	258	ok	(missing)	retval of  $var2 >>= $var2
+op/tie_fetch_count.t	296	ok	(missing)	retval of  $var2 ^= $var2
+op/tie_fetch_count.t	292	ok	(missing)	retval of  $var2 |= $var2
+op/tie_fetch_count.t	268	ok	(missing)	retval of $var != $var
+op/tie_fetch_count.t	242	ok	(missing)	retval of $var % $var
+op/tie_fetch_count.t	286	ok	(missing)	retval of $var & $var
+op/tie_fetch_count.t	234	ok	(missing)	retval of $var * $var
+op/tie_fetch_count.t	230	ok	(missing)	retval of $var ** $var
+op/tie_fetch_count.t	304	ok	(missing)	retval of $var + $var
+op/tie_fetch_count.t	248	ok	(missing)	retval of $var - $var
+op/tie_fetch_count.t	298	ok	(missing)	retval of $var . $var
+op/tie_fetch_count.t	238	ok	(missing)	retval of $var / $var
+op/tie_fetch_count.t	260	ok	(missing)	retval of $var < $var
+op/tie_fetch_count.t	252	ok	(missing)	retval of $var << $var
+op/tie_fetch_count.t	264	ok	(missing)	retval of $var <= $var
+op/tie_fetch_count.t	270	ok	(missing)	retval of $var <=> $var
+op/tie_fetch_count.t	302	ok	(missing)	retval of $var == $var
+op/tie_fetch_count.t	262	ok	(missing)	retval of $var > $var
+op/tie_fetch_count.t	266	ok	(missing)	retval of $var >= $var
+op/tie_fetch_count.t	256	ok	(missing)	retval of $var >> $var
+op/tie_fetch_count.t	294	ok	(missing)	retval of $var ^ $var
+op/tie_fetch_count.t	284	ok	(missing)	retval of $var cmp $var
+op/tie_fetch_count.t	280	ok	(missing)	retval of $var eq $var
+op/tie_fetch_count.t	278	ok	(missing)	retval of $var ge $var
+op/tie_fetch_count.t	276	ok	(missing)	retval of $var gt $var
+op/tie_fetch_count.t	272	ok	(missing)	retval of $var le $var
+op/tie_fetch_count.t	274	ok	(missing)	retval of $var lt $var
+op/tie_fetch_count.t	282	ok	(missing)	retval of $var ne $var
+op/tie_fetch_count.t	246	ok	(missing)	retval of $var x $var
+op/tie_fetch_count.t	290	ok	(missing)	retval of $var | $var
+op/tie_fetch_count.t	342	ok	(missing)	retval of atan2 $var, $var
+op/tie_fetch_count.t	318	ok	(missing)	retval of use integer;  $var2 %= $var2
+op/tie_fetch_count.t	310	ok	(missing)	retval of use integer;  $var2 *= $var2
+op/tie_fetch_count.t	322	ok	(missing)	retval of use integer;  $var2 += $var2
+op/tie_fetch_count.t	326	ok	(missing)	retval of use integer;  $var2 -= $var2
+op/tie_fetch_count.t	314	ok	(missing)	retval of use integer;  $var2 /= $var2
+op/tie_fetch_count.t	338	ok	(missing)	retval of use integer; $var != $var
+op/tie_fetch_count.t	316	ok	(missing)	retval of use integer; $var % $var
+op/tie_fetch_count.t	308	ok	(missing)	retval of use integer; $var * $var
+op/tie_fetch_count.t	320	ok	(missing)	retval of use integer; $var + $var
+op/tie_fetch_count.t	324	ok	(missing)	retval of use integer; $var - $var
+op/tie_fetch_count.t	312	ok	(missing)	retval of use integer; $var / $var
+op/tie_fetch_count.t	328	ok	(missing)	retval of use integer; $var < $var
+op/tie_fetch_count.t	332	ok	(missing)	retval of use integer; $var <= $var
+op/tie_fetch_count.t	340	ok	(missing)	retval of use integer; $var <=> $var
+op/tie_fetch_count.t	336	ok	(missing)	retval of use integer; $var == $var
+op/tie_fetch_count.t	330	ok	(missing)	retval of use integer; $var > $var
+op/tie_fetch_count.t	334	ok	(missing)	retval of use integer; $var >= $var
 op/tiearray.t	71	ok	not ok	- croak on negative FETCHSIZE
 op/tiearray.t	72	ok	not ok	Magical array fetch 1
 op/tiearray.t	74	ok	not ok	Magical hash fetch 1

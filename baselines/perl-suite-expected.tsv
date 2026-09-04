@@ -82,6 +82,27 @@ re/uniprops08.t	not-supported.md §Unicode — \p{} property classes in cl-ppcre
 re/uniprops09.t	not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 re/uniprops10.t	not-supported.md §Unicode — \p{} property classes in cl-ppcre (plan: docs/unicode-property-regex-plan.md)
 cmd/for.t	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)
+# DE-REGISTERED s468bc (task #1037, the statement-level ruled refusal).  Two
+# files LEFT this list, and the reason is the registration bar above, not a
+# change of heart: until s466 each of them REFUSED AT TRANSPILE, produced no
+# TAP at all, and its whole divergence was the refusal.  They now run to the
+# refused statement and produce rows -- and those rows are NOT the refusal:
+#   op/coreamp.t          46 failing rows, `&CORE::foo with too many args` /
+#                         `__FILE__ does check its caller` -- the &CORE:: sub
+#                         family, nothing to do with `CORE::given`.
+#   op/tie_fetch_count.t  65 failing rows, all `FETCH called just once using
+#                         OP` -- tie fetch-count semantics, not infix `~~`.
+# All-or-nothing: a partially-explained file stays UNEXPLAINED on purpose, so
+# these two are now ordinary DIFF files, gated ROW BY ROW in
+# baselines/perl-suite-fails.tsv, with a snapshot row in perl-suite-run.tsv.
+# op/state.t was RE-READ and KEPT (its four rows are `computed goto`, which
+# not-supported.md blesses by name -- two sections, both blessed, so the
+# all-or-nothing bar is met).
+# The fourteen files that STAY registered were re-read row by row in the same
+# session: the nine class/*.t and class/threads.t produce nothing but the
+# `*summary*` row, class/inherit.t adds one `hierarchical base class loaded`,
+# op/defer.t 8 rows that all name `defer`, op/smartmatch.t 295 that are all
+# `~~` assertions, op/switch.t 0 failing rows and 195 missing ones.
 class/accessor.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 class/class.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
 class/construct.t	not-supported.md §Perl 5.38 class/field/method — deferred to a future version (surface syntax; desugars onto existing package/CLOS/p-sub machinery)
@@ -141,9 +162,7 @@ op/assignwarn.t	not-supported.md section "Warnings-gated diagnostics are absent 
 op/hashassign.t	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).
 op/numify.t	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 11 diverging rows (21/11 vs perl 32/0) are `numifying '…' trigger a warning`, i.e. perl's `Argument "…" isn't numeric`. The VALUE each string numifies to is asserted separately and PCL passes those. Owner task #221; visible since s399 (#323).
 op/switch.t	not-supported.md §`given`/`when` / smart match (`~~`) — removed in perl 5.42; PCL refuses the file as perl does (task #371, Option B phase 2 Track A)
-op/state.t	not-supported.md §`given`/`when` / smart match (`~~`) — one `given` block in an otherwise supported file; the refusal costs the file's rows, ruled with task #400
-op/coreamp.t	not-supported.md §`given`/`when` / smart match (`~~`) — `CORE::given`; the file also carries lvalue-sub drops (§Lvalue subroutines)
+op/state.t	not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.
 op/smartmatch.t	not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)
-op/tie_fetch_count.t	not-supported.md §`given`/`when` / smart match (`~~`) — one infix `~~` statement; refused (task #371)
 op/defer.t	not-supported.md §`defer { … }` blocks — implementable, scheduled with Option B phase 2 Track C (task #371)
 class/threads.t	not-supported.md §Perl 5.38 class/field/method — the file also needs a threaded perl (NOTAP before s415; it now refuses at transpile like its siblings, task #371)
