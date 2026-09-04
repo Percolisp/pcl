@@ -150,6 +150,22 @@ my @benches = (
   # (measured both ways at the #981 fix).  50 elements x 1e6 puts perl at
   # ~0.74 s, comfortably above the ~1 s constant term's spread.
   ['listcopy',  "$HN my \@src = (1..50); my \$s=0; for (1..\$n) { my \@c = \@src; \$s += scalar(\@c) } print \"\$s\\n\";", 1_000_000, 0],
+  # `push @a, SCALAR` on a LOCAL array, on its own (task #996 A3, s469bh).
+  # arrhash-k pushes too, but under a hash increment that dominates it, so
+  # no row could price the append.  The array is never referenced, never
+  # passed whole, never captured — the shape A3's facts are about.
+  ['pushloc',   "$HN my \@a; for my \$i (1..\$n) { push \@a, \$i * 2 } print scalar(\@a), \" \", \$a[0], \" \", \$a[-1], \"\\n\";", 2_000_000, 0],
+  # The two CLASSIC sort comparators (task #996 A5, s469bh): 50 elements
+  # sorted N times.  perl's sort is a mergesort with an inlined `<=>` /
+  # `cmp`; PCL's runs the emitted comparator lambda per comparison, through
+  # a `catch :p-return`, a *wantarray* bind and — under raw element storage —
+  # TWO make-p-box calls per comparison, since p-sort boxes each raw element
+  # before it hands the pair to the block.  ~50*log2(50) ≈ 280 comparisons
+  # per sort, so 20k sorts is ~5.6M comparisons: comfortably above the ~1 s
+  # constant term both runs pay.  The list is rebuilt inside the loop
+  # because sort returns a COPY and the source must not become pre-sorted.
+  ['sortnum',   "$HN my \@src = map { (\$_ * 37) % 101 } 1..50; my \$s=0; for (1..\$n) { my \@x = sort { \$a <=> \$b } \@src; \$s += \$x[0] + \$x[49] } print \"\$s\\n\";", 20_000, 0],
+  ['sortstr',   "$HN my \@src = map { \"k\" . ((\$_ * 37) % 101) } 1..50; my \$s=0; for (1..\$n) { my \@x = sort { \$a cmp \$b } \@src; \$s += length(\$x[0]) + length(\$x[49]) } print \"\$s\\n\";", 20_000, 0],
   # READ-ONLY foreach over an ARRAY (task #862 ARM A, the boxed-aggregates
   # design's §4.4 proven arm).  The loop variable aliases each element, which
   # under raw element storage PROMOTES every slot to a box — once, but
