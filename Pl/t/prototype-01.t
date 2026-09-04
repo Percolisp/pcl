@@ -643,8 +643,8 @@ diag "-------- Unique Parameter Names (Issue: duplicate \$ params):";
          'Prototype $$$ does not generate duplicate $ param names');
 
   # Old-style prototypes use &rest %_args (body accesses @_)
-  like($cl, qr/\(p-sub pl-takes_three \(&rest %_args\)/,
-       'Prototype $$$ uses &rest pattern for @_ access');
+  like($cl, qr/\(p-sub pl-takes_three\s+\(&rest %_args\)\s+\([^)]*:prototype "\$\$\$"\)/,
+       'Prototype $$$ uses &rest pattern for @_ access, and says so on the definition');
 
   # The proto_type should preserve original
   my $proto = $env->get_prototype('takes_three');

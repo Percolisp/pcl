@@ -179,9 +179,9 @@ test_cl('#570 insignificant tokens keep the fast path (nested parens, comment)',
             . "print ok1(1,2), no1(1,2), \"\\n\";\n";
     close $fh;
     my $cl = `$pl2cl $pl 2>/dev/null`;
-    like($cl, qr/p-raw-params \(\$p \$q\)/,
+    like($cl, qr/p-raw-params \(\(\$p :\w[\w-]*\) \(\$q :\w[\w-]*\)\)/,
          '#570 shape: a plain name list still takes the params fast path');
-    unlike($cl, qr/p-raw-params \(\$x\)/,
+    unlike($cl, qr/p-raw-params \(\(\$x :\w[\w-]*\)\)/,
            '#570 shape: a placeholder list does NOT reach p-raw-params');
 }
 

@@ -28,7 +28,7 @@ my $cl = Pl::Parser2->parse_code($fib);
 
 # Spec #3: raw param binding (p-raw-params — flatten-honouring signature fast
 # path, s304 task #80), no p-list-= arg destructuring.
-like($cl, qr/\(p-sub pl-fib\s*\n?\s*\(&rest %_args\)\s*\n?\s*\(p-raw-params \(\$n\)/,
+like($cl, qr/\(p-sub pl-fib\s*\n?\s*\(&rest %_args\)\s*\n?\s*\([^)]*\)\s*\n?\s*\(p-raw-params \(\(\$n :\w[\w-]*\)\)/,
      'p-raw-params signature fast path for my (LIST) = @_');
 unlike($cl, qr/p-list-= \(vector \$n\)/, 'no p-list-= param destructuring');
 
@@ -48,8 +48,13 @@ like($cl, qr/\(p-let \(\(\$c :scalar \(p-\+ \$a__excl__\d+ \$b__excl__\d+\)\)\)/
 # for suppressing every per-statement bind (SBCL heap blowup on large subs).
 my $void_wraps = () = $cl =~ /\(p-void-ctx\b/g;
 is($void_wraps, 1, 'exactly one :void bind: the hoisted sub-body regime');
-like($cl, qr/\(p-void-ctx\s*\n?\s*\(p-let \(\(\$a/,
+like($cl, qr/\(p-void-ctx\s+\(p-let\s+\(\(\$a__excl__\d+ :\w[\w-]*\s/s,
      'the :void regime wraps the body once, directly above the first decl');
+# #1035 step 2: and that first decl says which perl variable it is -- `$a` is
+# an exception-set name, renamed before any of this analysis runs, and the
+# entry now carries the manifest instead of leaving the suffix to be parsed.
+like($cl, qr/\(\$a__excl__\d+ :\w[\w-]*\b.*?:perl "\$a" :why :exception-global\)/s,
+     'the renamed accumulator carries its source name and rename reason');
 # B-num (task #62 scan-licensed freeze): $a's only uses are numeric ($a + $b),
 # so the bare copy `$a = $b;` goes raw through the strict numeric freeze; $b's
 # `return $b` is an opaque use, so ITS bare copy stays a boxed p-my-=.
@@ -146,7 +151,7 @@ like($cfor4, qr/\(p-post\+\+ \$j\)/, 'string counter step through p-post++ (magi
 # Lean p-sub: a body that never reads @_ skips the p-args-body prologue —
 # p-raw-params binds the params raw (and spreads aggregate args itself,
 # s304 task #80).
-like($rec, qr/\(p-raw-params \(/,
+like($rec, qr/\(p-raw-params \(\(/,
      'no-@_ sub: p-raw-params raw binding, no p-args-body');
 unlike($rec, qr/p-args-body/, 'no p-args-body when @_ is unused');
 
@@ -154,7 +159,7 @@ unlike($rec, qr/p-args-body/, 'no p-args-body when @_ is unused');
 # @_ convention (p-args-body) so p-goto-sub has the full argument list.
 my $goto = Pl::Parser2->parse_code(
   'sub target { my ($x, $y) = @_; print "$x $y\n"; } sub fwd { my ($a) = @_; goto &target; } fwd(7, 9);');
-like($goto, qr/\(p-sub pl-fwd\s*\n?\s*\(&rest %_args\)\s*\n?\s*\(p-args-body/s,
+like($goto, qr/\(p-sub pl-fwd\s*\n?\s*\(&rest %_args\)\s*\n?\s*\([^)]*:writes-args t[^)]*\)\s*\n?\s*\(p-args-body/s,
      'goto-containing sub keeps p-args-body (@_ live for forwarding)');
 like($goto, qr/\(p-goto-sub #'pl-target\)/, 'goto &sub lowers via p-goto-sub');
 
@@ -247,7 +252,7 @@ like($pkg, qr/\(p-defpackage :Foo\)\n\(in-package :Foo\)/, 'package section prea
 like($pkg, qr/\(defclass plc-foo \(\) \(\)\)/, 'CLOS class for MRO in the section preamble');
 like($pkg, qr/\(p-set-current-package :Foo "Foo"\)/, 'runtime current-package tracking');
 like($pkg, qr/\(in-package :main\)/, 'package main section returns the reader to :main');
-my $hi_defs = () = $pkg =~ /\(p-sub pl-hi /g;
+my $hi_defs = () = $pkg =~ /\(p-sub pl-hi[\s(]/g;
 is($hi_defs, 2, 'same-named sub defined once per package section');
 
 # W10: a qualifying my-lexical spanning a package boundary is renamed to a

@@ -168,13 +168,15 @@ my $z = do &$ref;
 print $x + $z;
 EOT
 
-like($do, qr/\(funcall \(lambda \(\)/,   'do { BLOCK } → (funcall (lambda () …))');
+like($do, qr/\(funcall\s*\(lambda \(\)/, 'do { BLOCK } → (funcall (lambda () …))');
+like($do, qr/\(p-let \(\(\$a__excl__\d+ :\w[\w-]* 1 :perl "\$a" :why :exception-global\)\)/,
+     'do { BLOCK }: the block lexical carries its class and its rename manifest');
 # s316d: `&$ref` with no parens is a CALL with @_ (perl evaluates `do EXPR`'s
 # EXPR — calling the sub — then does do-FILE on the RESULT; verified vs perl).
 # The old pin `(p-do (p-get-coderef $ref))` never called the sub at all.
 like($do, qr/\(p-do \(p-funcall-ref \$ref \@_\)\)/,
      'do &$cref → generic tail (p-do (p-funcall-ref $ref @_))');
-like($do, qr/\(p-scalar-ctx\s*\(funcall \(lambda/,
+like($do, qr/\(p-scalar-ctx\s*\(funcall\s*\(lambda/,
      'do block gets its scalar-context wantarray bind');
 
 # --- converted: gen_funcall_form grep/map (E2.1) ----------------------------

@@ -156,8 +156,8 @@ PL
 # ══ #760 — CAPTURE is not a boxing event; the EVENT in the closure is ════════
 
 like(emitted('sub hot { my $s = 0; my $c = sub { $s + 1 }; for my $i (1..9) { $s += $i } $s . $c->() }'),
-     qr/\(p-let \(\(\$s :scalar 0\)\)/,
-     '#760 a READ-ONLY closure capture leaves the slot raw');
+     qr/\(p-let \(\(\$s :scalar 0 :captured t\)\)/,
+     '#760 a READ-ONLY closure capture leaves the slot raw -- and the IR says it IS captured');
 
 unlike(emitted('sub hot { my $s = 0; my $c = sub { $s = 42 }; for my $i (1..9) { $s += $i } $s }'),
        qr/\(p-let \(\(\$s :scalar 0\)\)/,

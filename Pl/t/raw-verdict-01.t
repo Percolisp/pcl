@@ -367,12 +367,14 @@ test_cl('#77: `$c = f 1, 2` still assigns the call result',
 $cl = Pl::Parser2->parse_code(q{our $h; my $b = +$h; print "$b\n";});
 unlike($cl, qr/\(\$b\w* :\S+ \$h\)/,
        q{unary + over a variable never seeds the slot with that variable's BOX});
-like($cl, qr/\(\$b\w* :str \(%pcl-to-string-strict /,
+like($cl, qr/\(\$b__excl__\d+ :str\s+\(%pcl-to-string-strict /,
      q{... it is an unproven write, so the B-regime freeze COPIES instead});
 $cl = Pl::Parser2->parse_code(q{my $b = +5; print $b+1,"\n";});
-like($cl, qr/\(\$b\w* :scalar 5\)/, 'unary + over a literal is still proven num');
+like($cl, qr/\(\$b__excl__\d+ :scalar 5 :perl "\$b" :why :exception-global\)/,
+     'unary + over a literal is still proven num');
 $cl = Pl::Parser2->parse_code(q{our $h; my $b = -$h; print $b+1,"\n";});
-like($cl, qr/\(\$b\w* :scalar \(p-- \$h\)\)/, 'unary - still computes a raw value');
+like($cl, qr/\(\$b__excl__\d+ :scalar \(p-- \$h\) :perl "\$b" :why :exception-global\)/,
+     'unary - still computes a raw value');
 
 test_cl('#77 + the unary-plus fix: values are COPIED, never aliased',
     'our $g = 1; sub uplus { +$g } my $a = uplus(); $g = 99;

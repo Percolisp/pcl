@@ -263,7 +263,7 @@ PERL
 {
     my $pl_file = write_pl("sub plain { my \$x = shift; return \$x * 3 }\nprint plain(5), \"\\n\";\n");
     my $cl = PCLCore::transpile("$pl2cl $pl_file");
-    like($cl, qr/\(p-raw-params \(\$x\)/,
+    like($cl, qr/\(p-raw-params \(\(\$x :\w[\w-]*\)/,
          '#377: an uncaptured shift-param still takes the raw-params fast path');
     unlike($cl, qr/\$x__file__/,
            '#377: …and is not promoted to a cell');

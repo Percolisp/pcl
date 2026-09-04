@@ -47,15 +47,15 @@ diag "";
 diag "-------- Single constant declaration:";
 
 output_contains('use constant PI => 3.14159;',
-                '(p-sub pl-PI (&rest %_args) (progn %_args 3.14159))',
+                '(p-sub pl-PI (&rest %_args) () (progn %_args 3.14159))',
                 'Single constant: p-sub generated');
 
 output_contains('use constant NAME => "hello";',
-                '(p-sub pl-NAME (&rest %_args) (progn %_args "hello"))',
+                '(p-sub pl-NAME (&rest %_args) () (progn %_args "hello"))',
                 'String constant');
 
 output_contains('use constant TWO_PI => 2 * 3.14159;',
-                '(p-sub pl-TWO_PI (&rest %_args) (progn %_args (p-* 2 3.14159)))',
+                '(p-sub pl-TWO_PI (&rest %_args) () (progn %_args (p-* 2 3.14159)))',
                 'Expression constant');
 
 
@@ -65,15 +65,15 @@ diag "-------- Hash-style constant declaration:";
 
 {
     my $result = parse_code('use constant { A => 1, B => 2 };');
-    like($result, qr/\(p-sub pl-A \(&rest %_args\) \(progn %_args 1\)/, 'Hash-style: A defined');
-    like($result, qr/\(p-sub pl-B \(&rest %_args\) \(progn %_args 2\)/, 'Hash-style: B defined');
+    like($result, qr/\(p-sub pl-A \(&rest %_args\) \(\) \(progn %_args 1\)/, 'Hash-style: A defined');
+    like($result, qr/\(p-sub pl-B \(&rest %_args\) \(\) \(progn %_args 2\)/, 'Hash-style: B defined');
 }
 
 {
     my $result = parse_code('use constant { WIDTH => 100, HEIGHT => 200, DEPTH => 50 };');
-    like($result, qr/\(p-sub pl-WIDTH \(&rest %_args\) \(progn %_args 100\)/, 'Hash-style: WIDTH defined');
-    like($result, qr/\(p-sub pl-HEIGHT \(&rest %_args\) \(progn %_args 200\)/, 'Hash-style: HEIGHT defined');
-    like($result, qr/\(p-sub pl-DEPTH \(&rest %_args\) \(progn %_args 50\)/, 'Hash-style: DEPTH defined');
+    like($result, qr/\(p-sub pl-WIDTH \(&rest %_args\) \(\) \(progn %_args 100\)/, 'Hash-style: WIDTH defined');
+    like($result, qr/\(p-sub pl-HEIGHT \(&rest %_args\) \(\) \(progn %_args 200\)/, 'Hash-style: HEIGHT defined');
+    like($result, qr/\(p-sub pl-DEPTH \(&rest %_args\) \(\) \(progn %_args 50\)/, 'Hash-style: DEPTH defined');
 }
 
 

@@ -331,6 +331,19 @@ entry-point names may differ, the division of labor may not.
 Captured IR is abbreviated (preamble and some nesting elided); the JS shows
 the intended lowering shape.
 
+> **The classes this section reverse-engineers from the emitted SHAPE are now
+> PRINTED** (task #1035; `docs/ir-spec.md` §2b.2a + §5.1).  A `my` binding is
+> `(p-let ((NAME CLASS INIT . FACTS)) …)` with CLASS from a closed set
+> (`:box :scalar :num :str :str-buffer :array :hash`) and FACTS carrying the
+> rename manifest (`:perl "$x" :why :FAMILY`) and closure capture
+> (`:captured t` — this section's heap-vs-stack question, answered);
+> a parameter is `(NAME CLASS)` on `p-raw-params`; and a sub carries a facts
+> plist (`:returns`, `:wantarray-insensitive`, `:writes-args`, `:string-eval`,
+> `:captures`, `:prototype`).  Read the class where the name is BOUND rather
+> than inferring it from which initform the compiler chose; the shape reading
+> below still works and is what a consumer that drops the vocabulary falls
+> back to.
+
 #### (a) `our`, file `my`, `state`, `local` — probe `ir1.pl`
 
 ```perl

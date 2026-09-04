@@ -426,6 +426,19 @@ sub _analyze_tree {
       && !$ctx->{write_obj}{$name}       # root write of an object
       && Pl::Passes::enabled('foreach-raw');
   }
+  # THE CAPTURE FACT (task #1035 step 2; docs/ir-spec.md 2b.2a `:captured`).
+  # `nested_sub` is this walk's record of "a nested ANONYMOUS sub's body names
+  # this scalar" -- the same reading that vetoes a raw slot when the closure
+  # body also carries a boxing event.  Published as its own verdict key so the
+  # declaration printer can state it: a consumer targeting a language without
+  # native closures needs it to decide heap-vs-stack for the binding, and it is
+  # the one fact the emitted shape does NOT already show.  Deliberately the
+  # capture alone, not the capture-plus-event veto: a read-only capture still
+  # makes the binding outlive its frame for an escaping closure, so UNDER-
+  # reporting would be the unsafe direction.  The scan is text-shaped over the
+  # closure body, therefore conservative in the OVER direction -- which is the
+  # safe one for every consumer, and is stated as such in ir-spec.
+  $vi{$_}{captured} = 1 for grep { $ctx->{nested_sub}{$_} } keys %vi;
   if ($no_raw_slot) {
     for my $v (values %vi) {
       $v->{unboxable} = 0;

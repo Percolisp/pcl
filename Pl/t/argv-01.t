@@ -82,7 +82,7 @@ diag "-------- shift/pop inside subs (should use \@_):";
 # arguments are consumed directly as the parameter binding (never @ARGV).
 {
         my $output = get_generated_code('sub foo { my $x = shift; }');
-    like($output, qr/p-raw-params \(\$x\)/, 'shift inside sub uses @_');
+    like($output, qr/p-raw-params \(\(\$x :\w[\w-]*\)\)/, 'shift inside sub uses @_');
 }
 
 # Test 8: pop inside sub defaults to @_
@@ -94,7 +94,7 @@ diag "-------- shift/pop inside subs (should use \@_):";
 # Test 9: shift used in typical constructor pattern
 {
         my $output = get_generated_code('sub new { my $class = shift; bless {}, $class; }');
-    like($output, qr/p-raw-params \(\$class\)/, 'shift in constructor uses @_');
+    like($output, qr/p-raw-params \(\(\$class :\w[\w-]*\)\)/, 'shift in constructor uses @_');
 }
 
 # Test 10: Nested subs both consume THEIR OWN @_ — inner gets raw-params;
@@ -112,7 +112,7 @@ diag "-------- shift/pop inside subs (should use \@_):";
     # $b is exception-partition, so #296 renames the lexical before the
     # params fast path sees it — the suffix pins that the RENAMED name still
     # collapses to p-raw-params.
-    ok($output =~ /p-raw-params \(\$b__excl__\d+\)/ && $output =~ /p-shift\s+\@_/,
+    ok($output =~ /p-raw-params \(\(\$b__excl__\d+ :\w[\w-]*\)\)/ && $output =~ /p-shift\s+\@_/,
        'Both nested subs use @_');
 }
 
@@ -126,7 +126,7 @@ diag "-------- Mixed context:";
         sub process { my $x = shift; }
     ');
     like($output, qr/p-shift\s+\@ARGV/, 'Top level shift uses @ARGV');
-    like($output, qr/p-raw-params \(\$x\)/, 'Sub shift uses @_');
+    like($output, qr/p-raw-params \(\(\$x :\w[\w-]*\)\)/, 'Sub shift uses @_');
 }
 
 # Test 12: Explicit @ARGV in sub (should stay @ARGV)

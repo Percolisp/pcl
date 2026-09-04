@@ -303,6 +303,23 @@ sub to_flat {
   return '(' . join(' ', @parts) . ')';
 }
 
+# THE ONE READING of the IR verification switch (task #1035, s466/s469bg;
+# docs/ir-spec.md 2b.2a).  PCL_IR_PLAIN=1 makes every printer that gained a
+# #1035 spelling -- the `p-let` declaration form, the `p-raw-params` per-name
+# class, the `p-sub` facts plist -- emit the spelling that stood before it, so
+# that `PCL_IR_PLAIN=1 tools/corpus-diff.pl <base>` reading IDENTICAL proves a
+# step touched nothing but syntax.  It is a VERIFICATION switch, not an
+# optimization: not in Pl/Passes.pm, and it changes no runtime behaviour.  Both
+# emitters ask here, so the answer cannot drift between them.
+#
+# ITS OUTPUT IS FOR COMPARISON, NOT FOR RUNNING (s469bg).  Since #1035 step 3
+# made `p-sub`'s facts plist a POSITIONAL slot, a plist-less `p-sub` -- which
+# is exactly what this switch prints -- does not load on THIS runtime: the
+# macro would bind its `facts` parameter to the first body form.  That is the
+# price of an unambiguous lambda list, and it costs nothing, because the only
+# consumer of this switch is a byte-diff against a tree that predates the step.
+sub ir_plain { return $ENV{PCL_IR_PLAIN} ? 1 : 0 }
+
 sub to_string {
   my ($f, $depth) = @_;
   $depth //= 0;
@@ -334,9 +351,13 @@ sub to_string {
     # separate it from the name it describes.  Shape-keyed (an atom followed
     # by a keyword atom), not name-keyed.
     if (@args >= 3 && !ref $args[0] && !ref $args[1] && $args[1] =~ /^:/) {
-      my ($n, $c, @rest) = @args;
-      return _close("($n $c\n" . join("\n", map { $ind1 . to_string($_, $depth + 1) } @rest),
-                    $depth);
+      my ($n, $c, $init, @facts) = @args;
+      # The FACTS tail (`:perl "$x" :why :FAMILY :captured t`, ir-spec 2b.2a)
+      # is short atoms describing the SAME binding, so it goes on ONE line
+      # after the init rather than one atom per line -- `:perl` and `"$x"` on
+      # separate lines would be unreadable and is not what a plist looks like.
+      my $tail = @facts ? "\n$ind1" . join(' ', @facts) : '';
+      return _close("($n $c\n" . $ind1 . to_string($init, $depth + 1) . $tail, $depth);
     }
     return _close('(' . join("\n$ind1", map { to_string($_, $depth + 1) } @args),
                   $depth);

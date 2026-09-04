@@ -53,7 +53,18 @@ itself carries no host-specific semantics beyond them.
   raw control characters (real newlines/tabs inside the quotes — see the
   review doc §3.2).
 - **Comments (`;` to end of line) are non-semantic** — source echoes for
-  humans.
+  humans — **with one exception, and a reserved second one.**  The exception
+  is the first line, the pipeline marker (below, §9.2): a comment with a fixed
+  grammar that tooling reads and that the compiler promises.  The reserved one
+  is the **statement source map**, `;; @ FILE:LINE` before a statement's forms
+  (task #1035 step 4, DECIDED s469bg, not emitted yet).  The grammar is a
+  comment rather than a `(p-line N)` marker form for two measured reasons: a
+  marker is a real form the host compiler has to see and delete, and in TAIL
+  position it would change a block's value, whereas a comment costs the reader
+  0.4 ms on the corpus's largest file even at one marker per LINE (measured
+  s469bg) and cannot change what is evaluated.  A consumer may drop every
+  comment and still read a correct program; what it must not do is invent
+  meaning for a free-text echo, which stays free text.
 - **The tree is explicit.** Perl's implicit operands are materialized at
   parse time: `$_` defaults (§8), `@_`/`@ARGV` for bare `shift`/`pop`,
   filetest operands. What you see in the tree is the complete argument
@@ -684,16 +695,65 @@ untyped binding):
 | `:array` | a perl array, fresh or copied | `(make-array 0 :adjustable t :fill-pointer 0)`, `(p-copy-array …)` |
 | `:hash` | a perl hash, fresh or copied | `(make-hash-table :test 'equal)`, `(p-copy-hash …)` |
 
-FACTS are optional keyword pairs after INIT and are reserved for the rename
-manifest (`:perl "$x" :why :captured-by-named-sub`, §2b.3), closure capture
-(`:captured t`) and the provenance flag (`:proven` / `:declared`, task #1034);
-none is emitted yet.  No SBCL type declaration is derived from the class: the
+FACTS are optional keyword pairs after INIT, from a CLOSED set (an unknown key
+is an error at macroexpansion, exactly like an unknown class).  Since s469bg
+three are emitted:
+
+| key | value | meaning |
+|---|---|---|
+| `:perl` | the source spelling, sigil included (`"$x"`) | this NAME is a rename; the perl program called the variable that |
+| `:why` | a family keyword (`:exception-global`, `:seam-shadow`, `:state-cell`, `:spanning`, `:captured`) | *why* the compiler renamed it — the §2b.3 family |
+| `:captured` | `t` | a nested anonymous sub's body names this binding: it must outlive the frame (heap, not stack, for a target without native closures) |
+
+`:perl`/`:why` come from the compiler's own RENAME MANIFEST, recorded at the
+moment the rename is minted — **never re-derived from the suffix text**, which
+is what a consumer would otherwise have to do (and what §2b.3 used to leave it
+to).  The manifest is complete for the families that bind a `let`: in the
+perl-tests corpus 129 of 2 214 `p-let` entries are renames and every one
+carries the pair (119 `:exception-global`, 7 `:seam-shadow`, 3 `:state-cell`).
+The other two families promote to a package CELL (`p-defcell`), which is not an
+entry and carries no facts — `:captured` reaches emission for those on `p-sub`
+instead (§5.1).
+
+`:captured` is the compiler's capture VERDICT and is conservative in the OVER
+direction: it is a scan of the closure body's text, so a name a nested sub only
+mentions in a string can carry it.  Over-reporting is the safe direction for
+every consumer (heap-allocating a binding nothing captures is merely wasteful;
+missing one is a dangling reference), and it is why the key is not narrowed to
+the veto the compiler acts on.
+
+Reserved and not emitted: the provenance flag (`:proven` / `:declared`, task
+#1034).  **An absent key means "not stated", never a default** — the compiler
+omits what it did not prove, so a present key is a promise and a missing one is
+silence.
+
+No SBCL type declaration is derived from the class: the
 runtime runs at `(speed 3)`, where a wrong declaration is undefined behaviour.
 The compiler prints every `my` binding through ONE printer (`Pl::Parser2::_decl_entry`
 / `_decl_let`); `PCL_IR_PLAIN=1` prints the pre-s466 `let` spelling, a
 verification switch whose only use is proving a change touched nothing but the
-syntax.  Sub parameters (`p-raw-params`) and the per-sub facts on `p-sub` are
-the next steps of #1035 and are not yet classed.
+syntax.  **Its output is for COMPARISON, not for running**: the `p-sub` facts
+plist is a POSITIONAL slot, so the plist-less form the switch prints does not
+load on the runtime that expects it.  That is the price of an unambiguous
+lambda list, and it costs nothing — the only consumer is a byte-diff against a
+tree that predates the step.
+
+**Sub PARAMETERS carry the same class.**  A parameter of the signature fast
+path is a declaration too — the sub's own binding of the caller's value — so
+since s469bg each `p-raw-params` entry is `(NAME CLASS)` with CLASS from the
+same closed set and the same `_slot_class`:
+
+```lisp
+(p-raw-params (($a :scalar) ($b :scalar)) BODY…)
+```
+
+The class is ignored at run time; the binding is the raw incoming argument
+either way.  Every parameter class in the perl-tests corpus is `:scalar` today
+and that is a fact about the ANALYSIS, not a placeholder: the B-regime freeze
+verdicts (`:num`/`:str`) exclude parameters by construction, because a
+parameter's initial value is caller-bound and not a wrappable write.
+
+**A `p-sub` carries a FACTS PLIST** — see §5.1.
 
 ### 2b.3 The rename families
 
@@ -986,7 +1046,7 @@ cannot be erased statically in general.
 ### 5.1 Definition
 
 ```lisp
-(p-sub pl-NAME LAMBDA-LIST body…)
+(p-sub pl-NAME LAMBDA-LIST FACTS body…)
 ```
 
 registers the function (visible to compile-time `BEGIN` code — the whole
@@ -1002,6 +1062,32 @@ form is inside `eval-when`) and wraps the body so that at **every call**:
 `(p-declare-sub pl-NAME)` is a forward stub so earlier code can reference
 the name; it is normally overwritten by the real `p-sub` before anything
 calls it.
+
+**FACTS (normative, s469bg, task #1035 step 3)** is a plist at a FIXED
+position after the lambda list — **always present, possibly `()`** — holding
+what the compiler PROVED about this sub and used to throw away at emission.  A
+consumer reads the slot by POSITION, never by shape, and may drop it entirely:
+it changes no behaviour and the macro ignores it.  The key set is CLOSED at
+both ends (an unknown key is an error at macroexpansion):
+
+| key | value | meaning |
+|---|---|---|
+| `:returns` | `:num` / `:str` | every `return` and the implicit tail value proved the SAME raw family (#77), so a call-site write `my $x = f()` needs no coercion wrapper |
+| `:wantarray-insensitive` | `t` | the caller's context provably cannot be observed: no `wantarray` in the body and every returned value is scalar-shaped (§4).  **True-only**: the walk answers 0 on any doubt, so an absent key already says "not proven" |
+| `:writes-args` | `t` / `nil` | does the sub write through `@_` into its caller's variables (#189, §5.2)?  **Both directions**: the scan answers 1 on any doubt, so `nil` is a real proof that the arguments may be passed by value |
+| `:string-eval` | `t` | the body contains a string `eval`.  True-only, and conservative: `->eval`, `eval =>` and a hash key spelled `eval` over-fire harmlessly |
+| `:captures` | a list of cell names | the promoted package cells this hoisted sub closes over, recorded by the promotion that PROVED the capture (§2b.3's `:captured` / `:spanning` families) |
+| `:prototype` | the text (`"$$"`) | an OLD-STYLE prototype.  A signature is not a prototype and prints nothing |
+
+`()` is common and means exactly "nothing proven": 155 of the perl-tests
+corpus's 661 `p-sub` forms print it, most of them `use constant` definitions,
+which are lowered by a path that computes none of these facts.
+
+The plist is what the compiler proved **under the configuration that emitted
+the file**: `PCL_OPT` switches off Kind-A rules, and a fact whose analysis a
+switched-off rule pays for (`:returns`, the #77 family) is then simply absent.
+That is the same contract as everywhere else here — absent means not stated —
+and it is why a consumer must never read an absent key as a negative.
 
 **A plain call that reaches no body is never a value (normative, s432 +
 s441c).** Whether the sub was forward-declared and never defined, or never
@@ -1051,14 +1137,19 @@ be able to see the AUTOLOAD *value*.
 `my ($a,$b) = @_;` prologues and coalesced leading `my $x = shift;` runs):
 
 ```lisp
-(p-sub pl-f (&optional ($a (p-undef)) ($b (p-undef)) &rest %_args)
-  (declare (ignore %_args) (dynamic-extent %_args))
-  …body…)
+(p-sub pl-f (&rest %_args) FACTS
+  (p-raw-params (($a :scalar) ($b :scalar))
+    …body…))
 ```
 
-Missing arguments are `undef`; extra arguments are silently ignored (they
-sit in the unused rest list). The two shapes are call-compatible — every
-call site just applies the function to the flattened values.
+`p-raw-params` binds the parameters raw — unboxed, positionally, missing
+arguments `undef` — from the enclosing `p-sub`'s `&rest %_args`, and it does
+the callee-side flattening the uniform calling convention requires (a plain
+`&optional` lambda list would misbind every `f(@args)` / `f(@_)` delegation).
+Extra arguments are silently ignored.  Each entry's CLASS is the declaration
+class of §2b.2a, carried for a reader and ignored at run time.  The two body
+shapes are call-compatible — every call site just applies the function to the
+flattened values.
 
 **Flattening:** Perl has no argument structure — at every call, array and
 hash arguments splice into one flat value list (`p-flatten-args`). A hash
@@ -2406,6 +2497,7 @@ function's docstring states its Perl contract. The families:
 | command capture | `p-backtick` (`` `CMD` ``, every `qx` delimiter, `` <<`TAG` `` and the NAMED `readpipe EXPR` — ONE runtime function, four surface syntaxes) | **wantarray-sensitive, exactly like `p-readline`** (task #731): scalar/void yields the whole captured stdout as one string, LIST context yields it SPLIT INTO `$/` RECORDS, each keeping its separator — so empty output is the empty list in list context and `""` in scalar.  The split uses `%p-read-record`, the same `$/` reader `p-readline` uses, so slurp (`$/ = undef`), paragraph mode (`$/ = ""`) and a custom separator cannot drift apart between the two.  A package that displaced the builtin with `use subs "readpipe"` is called instead, for every one of the four syntaxes (#703/#734) |
 | introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` returns package but file/line are stubs (divergence) |
 | context & frames | `p-list-ctx p-scalar-ctx p-void-ctx p-caller-ctx` (§4) · `p-sort-cmp` (§5.4) | **names, not operations**: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else. They mark where the IR says "this runs in context C" / "this is a comparator frame" |
+| declarations | `p-let` (§2b.2a) · `p-raw-params` (§5.2) · `p-sub` (§5.1) | **names carrying the compiler's own VERDICTS**: a binding's class, a parameter's class, a sub's proven facts.  Every one expands to exactly the form it replaced — the information is free at run time — and every set (classes, `p-let` fact keys, `p-sub` fact keys) is CLOSED: a member outside it is an error at macroexpansion, never a silent pass.  A translator may drop all three vocabularies and still produce a correct program; what it loses is the ability to choose a representation (raw slot vs box, stack vs heap, by-value vs by-reference arguments) without re-deriving the analysis |
 
 Anything not covered: read the `p-NAME` docstring in
 `cl/pcl-runtime.lisp` — by project rule the runtime implements *real Perl

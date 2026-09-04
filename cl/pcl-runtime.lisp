@@ -646,6 +646,71 @@
   (- (hash-table-count h)
      (if (nth-value 1 (gethash :__class__ h)) 1 0)))
 
+;;; -- THE DECLARATION VOCABULARY (task #1035; docs/ir-spec.md 2b.2a) --------
+;;; The compiler states, ON the declaration forms themselves, what it proved
+;;; about each binding, each parameter and each sub.  All of it is IGNORED at
+;;; run time -- every macro below expands to exactly what it expanded to before
+;;; the vocabulary existed -- so the information costs nothing and a consumer
+;;; that drops it still reads a correct program.  What it must NOT do is grow
+;;; silently: every set here is CLOSED, and a class or key outside it is an
+;;; error at macroexpansion (CLAUDE.md rule 12), never a silent pass.
+;;;
+;;; This block sits ahead of `p-sub', `p-raw-params' and `p-let' because all
+;;; three read it; before s469bg it lived beside `p-let' alone.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; THE DECLARATION CLASSES (s466).  What a binding IS.
+  (defparameter *p-let-classes* '(:box :scalar :num :str :str-buffer :array :hash))
+  ;; THE p-let FACT KEYS (s469bg).  Optional keyword pairs after INIT.
+  ;;   :perl "$x"    the source spelling the compiler renamed away from
+  ;;   :why  :FAMILY why it renamed (ir-spec 2b.3)
+  ;;   :captured t   a nested closure names this binding (heap, not stack)
+  (defparameter *p-let-fact-keys* '(:perl :why :captured))
+  ;; THE p-sub FACT KEYS (s469bg).  `p-sub' carries a plist at a FIXED position
+  ;; after its lambda list -- always present, possibly () -- holding what the
+  ;; compiler PROVED about the sub and used to throw away at emission.
+  ;;   :returns :num|:str        every return proved the same raw family (#77)
+  ;;   :wantarray-insensitive t  the caller's context cannot be observed
+  ;;   :writes-args t|nil        writes through @_ into the caller (#189)
+  ;;   :string-eval t            the body contains a string eval
+  ;;   :captures (CELLS...)      the promoted package cells it closes over
+  ;;   :prototype "$$"           an old-style prototype's text
+  (defparameter *p-sub-fact-keys*
+    '(:returns :wantarray-insensitive :writes-args :string-eval :captures :prototype))
+
+  (defun %p-check-facts (what name facts keys)
+    "Validate a FACTS plist against its closed KEYS set.  Returns NIL.  ONE
+     checker for both plists -- p-let's entry facts and p-sub's per-sub facts
+     ask the same question of different vocabularies."
+    (when (oddp (length facts))
+      (error "~A: facts of ~S are not keyword pairs: ~S" what name facts))
+    (loop for k in facts by #'cddr
+          do (unless (member k keys)
+               (error "~A: unknown fact key ~S for ~S -- the set is closed: ~S"
+                      what k name keys)))
+    nil)
+
+  (defun %p-let-binding (b)
+    "One p-let entry (NAME CLASS INIT . FACTS) -> the `let' binding (NAME INIT)."
+    (destructuring-bind (name class init &rest facts) b
+      (unless (member class *p-let-classes*)
+        (error "p-let: unknown declaration class ~S for ~S -- the set is closed: ~S"
+               class name *p-let-classes*))
+      (%p-check-facts "p-let" name facts *p-let-fact-keys*)
+      (list name init)))
+
+  (defun %p-param-name (p)
+    "One p-raw-params entry (NAME CLASS) -> NAME.  The class is the compiler's
+     verdict about the parameter's slot -- the SAME closed set a p-let entry
+     carries, because a parameter is a declaration too -- and it is IGNORED
+     here: the binding is the same raw one either way."
+    (unless (and (consp p) (= (length p) 2))
+      (error "p-raw-params: entry ~S is not (NAME CLASS)" p))
+    (destructuring-bind (name class) p
+      (unless (member class *p-let-classes*)
+        (error "p-raw-params: unknown declaration class ~S for ~S -- the set is closed: ~S"
+               class name *p-let-classes*))
+      name)))
+
 ;;; p-sub: Define a Perl subroutine.
 ;;; Uses eval-when so the function exists at compile time, allowing
 ;;; BEGIN blocks to call subs defined before them in source order.
@@ -658,10 +723,15 @@
 ;;; because packages (:use :pcl) inherit those symbols.  By shadowing first we
 ;;; create a fresh local symbol; the body's built-in calls (p-shift @_) were
 ;;; already resolved at READ time to pcl::PL-SHIFT and are unaffected.
-(defmacro p-sub (name params &body body)
+(defmacro p-sub (name params facts &body body)
+  ;; FACTS is the compiler's proven-facts plist (task #1035 step 3), at a FIXED
+  ;; position after the lambda list so a consumer reads it by position: always
+  ;; present, possibly ().  IGNORED at run time -- checked against the closed
+  ;; key set and dropped -- so the expansion is exactly what it was.
   ;; Leading (declare ...) forms are lifted to the lambda head (before the
   ;; bookkeeping let*), e.g. the v2 pipeline's (declare (ignore %_args)
   ;; (dynamic-extent %_args)) for subs that never touch @_.
+  (%p-check-facts "p-sub" name facts *p-sub-fact-keys*)
   (let ((decls (loop while (and (consp (first body))
                                 (eq (first (first body)) 'declare))
                      collect (pop body))))
@@ -720,6 +790,9 @@
   "Signature fast path for `sub f { my ($a,$b) = @_; … }` whose body provably
    never observes @_ again: bind PARAMS raw (unboxed, no p-list-= / no boxes)
    positionally from the enclosing p-sub's &rest %_args, missing args -> undef.
+   Each PARAMS entry is (NAME CLASS) -- the declaration class of the slot, from
+   the same closed set p-let uses (docs/ir-spec.md 2b.2a); it is carried for a
+   reader and ignored here.
    Unlike a plain &optional lambda list this HONOURS the uniform calling
    convention — callers pass containers raw and the CALLEE spreads aggregates
    (f(@args) / f(@_) delegation; task #80 broke Moo through exactly that) —
@@ -728,7 +801,7 @@
                      (coerce (p-flatten-args %_args) 'list)
                      %_args)))
      (let* ,(loop for p in params
-                  collect `(,p (if %_args (pop %_args) (p-undef))))
+                  collect `(,(%p-param-name p) (if %_args (pop %_args) (p-undef))))
        ,@body)))
 
 ;;; p-declare-sub: Forward-declare a Perl sub as a no-op stub.
@@ -3301,22 +3374,8 @@
                 (p-box-sv-ok box) t))
         s)))
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; THE DECLARATION CLASSES (task #1035, s466; docs/ir-spec.md §2b.2).  The
-  ;; set is CLOSED: a class the compiler did not agree on is an error at
-  ;; macroexpansion (rule 12), never a silently untyped binding.
-  (defparameter *p-let-classes* '(:box :scalar :num :str :str-buffer :array :hash))
-  (defun %p-let-binding (b)
-    "One p-let entry (NAME CLASS INIT . FACTS) -> the `let' binding (NAME INIT)."
-    (destructuring-bind (name class init &rest facts) b
-      (declare (ignore facts))
-      (unless (member class *p-let-classes*)
-        (error "p-let: unknown declaration class ~S for ~S -- the set is closed: ~S"
-               class name *p-let-classes*))
-      (list name init))))
-
 (defmacro p-let (bindings &body body)
-  "THE DECLARATION FORM of a perl `my' (task #1035, s466; docs/ir-spec.md §2b.2):
+  "THE DECLARATION FORM of a perl `my' (task #1035, s466; docs/ir-spec.md §2b.2a):
      (p-let ((NAME CLASS INIT . FACTS) ...) BODY...)
    binds each NAME to INIT exactly as `let' does -- the expansion IS `let', so the
    class costs nothing at run time -- and carries the compiler's verdict about
@@ -3328,8 +3387,11 @@
      :str-buffer  an adjustable fill-pointer string (%pcl-str-buffer)
      :array       a perl array (fresh or copied)
      :hash        a perl hash (fresh or copied)
-   FACTS are optional keyword pairs (:perl \"$x\" :why :captured-by-named-sub ...),
-   ignored here.  No type declaration is derived from the class: the runtime runs
+   FACTS are optional keyword pairs from the CLOSED set *p-let-fact-keys* --
+   :perl \"$x\" (the source spelling a rename replaced), :why :FAMILY (why it was
+   renamed, ir-spec 2b.3) and :captured t (a nested closure names this binding).
+   They are IGNORED here: the expansion is the same `let' with or without them.
+   No type declaration is derived from the class: the runtime runs
    at (speed 3), where a wrong declaration is undefined behaviour.  Before s466
    this name was the dead v1 \"every binding is a box\" macro."
   `(let ,(mapcar #'%p-let-binding bindings) ,@body))
@@ -15524,7 +15586,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-670"
+(defparameter *pcl-cache-generation* "v2-680"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

@@ -1073,6 +1073,10 @@ sub parse {
   # pass may register from any of them) — a typo dies with the known list
   # before any parse, instead of surfacing from inside an analysis walk.
   Pl::Passes::check_env();
+  # One source per parse: the rename manifest (task #1035) is file-scoped and
+  # starts empty, so a `--server` process answering many string evals never
+  # carries one file's renames into the next.
+  _reset_rename_manifest();
   # (The PCL_V1_FILES bisect hook lived here — it forced named files through
   # the whole-file v1 fallback to isolate a diverging module, task #80.  Both
   # it and the fallback were removed at E4.1 step 2, #242: with one pipeline
@@ -1473,15 +1477,22 @@ sub parse {
   # string eval inside a NAMED sub can only reach a file lexical through the
   # promotion-to-cell path, because the sub is hoisted out of the file-level
   # `let` that the eval-site capture alist is built from.
+  # THE per-sub half is the SAME scan (task #1035 step 3, `:string-eval` on
+  # p-sub): `_inside_named_sub` already walks to the enclosing named sub, so it
+  # answers WHICH one and the record costs one hash store.  The `last` early-out
+  # it used to have would have made the per-sub answer depend on which eval the
+  # walk met first, which is not an answer at all.
   $self->{_file_has_str_eval} = 0;
   $self->{_str_eval_in_named_sub} = 0;
+  $self->{_sub_str_eval} = {};
   for my $w (@{ $doc->find(sub { $_[1]->isa('PPI::Token::Word')
                                  && $_[1]->content eq 'eval' }) || [] }) {
     my $nx = $w->snext_sibling;
     next if $nx && $nx->isa('PPI::Structure::Block');
     $self->{_file_has_str_eval} = 1;
-    $self->{_str_eval_in_named_sub} = 1 if _inside_named_sub($w);
-    last if $self->{_str_eval_in_named_sub};
+    next unless my $insub = _inside_named_sub($w);
+    $self->{_str_eval_in_named_sub} = 1;
+    $self->{_sub_str_eval}{ refaddr($insub) } = 1;
   }
 
   # W10: a file lexical declared in one segment and used in a later one spans
@@ -3771,6 +3782,7 @@ sub _rename_spanning_lexicals {
     # Declaring segment: the decl symbol itself (its RHS reads the outer
     # global — _rename_decl_within's rule), then every use in later
     # statements of the segment.
+    _reg_rename("\$$bare", "\$$newbare", ':spanning') if !$unique;
     $self->_rename_decl_within($decl, $sym, "\$$newbare");
     my ($dsp) = map { $_->parent } grep { ref && $_->isa('PPI::Node') } @$stmts;
     my $decl_fix = $unique ? undef : _interp_fixer("\$$bare", $newbare);
@@ -4355,7 +4367,8 @@ sub _promote_captured {
   # A $force decl (oversized top-level extent — see _oversized_top_decls)
   # must be promoted regardless of capture; every other safety rule below
   # still applies, and the caller gates the file when we return falsy.
-  return if !$force && !$self->_captured_in_subs(\@psubs, $canon, $extent)
+  my @cap_subs;
+  return if !$force && !$self->_captured_in_subs(\@psubs, $canon, $extent, \@cap_subs)
     && _caprefuse($canon, 'not captured by a named sub after the decl');
   # File-unique name declared at segment top level: promote under its OWN
   # name (the span pass's identity-unmangle rule).  The defvar cannot poison
@@ -4373,6 +4386,7 @@ sub _promote_captured {
   if (!$extent && ($self->{_file_decl_count}{$bare} // 0) == 1
       && !$self->{_file_pkg_global}{$canon}) {
     $self->{_file_lex_renamed}{$canon} = 1;
+    $self->_reg_captures($canon, \@cap_subs);
     return 1;
   }
   # From here on the promotion RENAMES, and a signature that PPI handed over
@@ -4477,6 +4491,8 @@ sub _promote_captured {
   };
   # Declarator first (its RHS keeps the original name — it reads the OUTER
   # variable), then every post-declaration use, skipping shadow scopes.
+  _reg_rename($canon, $sig . $newbare, ':captured');
+  $self->_reg_captures($sig . $newbare, \@cap_subs);
   $self->_rename_decl_within($decl, $dsym, $sig . $newbare);
   $self->_rewrite_var_uses(\@post, $canon, $newbare, $extent, $skip);
   $self->{_file_lex_renamed}{ $sig . $newbare } = 1;             # drives the defvar lowering
@@ -4500,11 +4516,25 @@ sub _promote_captured {
   return 1;
 }
 
+# THE CAPTURE MANIFEST (task #1035 step 3, `:captures` on p-sub).  A named sub
+# that closes over a file lexical is exactly why that lexical becomes a package
+# CELL, and the pair is recorded HERE, where the compiler proves it -- the
+# printer never re-derives it from the sub's body.  Keyed by the PPI sub node,
+# so two same-named subs in different packages cannot be confused.
+sub _reg_captures {
+  my ($self, $cell, $subs) = @_;
+  push @{ $self->{_capture_manifest}{ refaddr($_) } }, $cell for @$subs;
+  return;
+}
+
 # True when $canon (sigil-aware, via ->symbol) is used inside a NAMED sub whose
 # body lies within $extent (any sub in the segment when $extent is undef).  A
 # block-scoped lexical can only be captured by a sub textually inside its block.
+# $found (optional, task #1035 step 3): collect EVERY capturing sub instead of
+# stopping at the first, so the promotion can record which subs close over the
+# cell it is about to mint.  Absent -> the ordinary first-hit answer, unchanged.
 sub _captured_in_subs {
-  my ($self, $subs, $canon, $extent) = @_;
+  my ($self, $subs, $canon, $extent, $found) = @_;
   (my $bare = $canon) =~ s/^[\$\@\%]//;
   for my $sub (@$subs) {
     next if $extent && !_elem_within($sub, $extent);
@@ -4525,9 +4555,11 @@ sub _captured_in_subs {
     # is the standing rule (detector and rewriter share one resolver) — and
     # since #485 they agree through ONE function, so the promoter also sees
     # the signature DEFAULTS and discounts the signature PARAMETERS.
-    return 1 if $self->_sub_captures_name($sub, $bare, { $canon => 1 });
+    next unless $self->_sub_captures_name($sub, $bare, { $canon => 1 });
+    return 1 unless $found;
+    push @$found, $sub;
   }
-  return 0;
+  return $found && @$found ? 1 : 0;
 }
 
 # M-F: any my/state declaration of $bare at a scope ENCLOSING $extent — an
@@ -6910,6 +6942,7 @@ sub _state_rewrite_routes {
     my $n    = $self->_state_disambig . $self->{_state_rename_counter}++;
     my $cell = "\$${bare}__state__${n}";
     my $flag = "${cell}__init";
+    _reg_rename($sym->content, $cell, ':state-cell');
     $self->_rename_decl_within($root, $sym, $cell);
     my $nx = $sym->snext_sibling;
     my $has_init = $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=';
@@ -7044,6 +7077,7 @@ sub _rename_state_vars {
     my $new = $k[1]->content . '__state__' . $self->_state_disambig
             . $self->{_state_rename_counter}++;
     $self->{_state_eval_capture_orig}{$new} = $orig if $eval_cap_ok;
+    _reg_rename($orig, $new, ':state-cell');
     $self->_rename_decl_within($sub->block, $k[1], $new);
     $self->{_state_renamed}{$new} = @k > 2 ? 'init' : 'plain';
     # Both symbols are defvar'd via _captured_decls at lowering time; the
@@ -7139,7 +7173,10 @@ sub _rename_exception_mys {
         : $self->_state_container_blocker($root, $s, 'eval_ok');
       next if $why;
       $self->_rename_decl_within($root, $s,
-        $s->content . '__excl__' . $self->{_excl_rename_counter}++, $decl);
+        _reg_rename($s->content,
+                    $s->content . '__excl__' . $self->{_excl_rename_counter}++,
+                    ':exception-global'),
+        $decl);
     }
   }
   return;
@@ -7295,11 +7332,14 @@ sub _interp_token_text {
 
 # True when $node is lexically inside a NAMED sub's body (so a `my` there is
 # sub-local, not a file lexical).
+# The enclosing NAMED sub of $node, or 0.  Returns the NODE, not a flag: the
+# per-sub `:string-eval` fact (task #1035) needs to say which sub, and every
+# caller's boolean reading is unchanged (a PPI node is always true).
 sub _inside_named_sub {
   my ($node) = @_;
   my $p = $node->parent;
   while ($p) {
-    return 1 if $p->isa('PPI::Statement::Sub') && $p->name;
+    return $p if $p->isa('PPI::Statement::Sub') && $p->name;
     $p = $p->parent;
   }
   return 0;
@@ -7845,16 +7885,16 @@ sub _lower_sub_inner {
       # landed whole in the first param (task #80: Moo's Sub::Util shim,
       # reached through _Utils's _subname(@_) delegation).  All-scalar calls
       # take p-raw-params' no-allocation fast path.
-      return $self->_sub_form($clname,
-              ['p-raw-params', ['list', map { cl_sym($_) } @$params],
+      return $self->_sub_form($clname, $sub,
+              ['p-raw-params', ['list', map { _param_entry($_, $vi) } @$params],
                 ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi),
                   ($tail_param ? (cl_sym($tail_param)) : ())]]);
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
-    return $self->_sub_form($clname,
+    return $self->_sub_form($clname, $sub,
             ['p-args-body', ['block', 'nil',
-              _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @$params],
+              _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @$params],
                 Pl::CLForm::ctx_bind('nil',
                   ['p-list-=', ['vector', map { cl_sym($_) } @$params], '@_']),
                 $self->_lower_body_regime(\@body_stmts, $vi),
@@ -7862,7 +7902,7 @@ sub _lower_sub_inner {
   }
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
-  return $self->_sub_form($clname,
+  return $self->_sub_form($clname, $sub,
           ['p-args-body', ['block', 'nil', $self->_lower_body_regime(\@stmts, $vi)]]);
 }
 
@@ -7874,8 +7914,73 @@ sub _lower_sub_inner {
 # reached emission and were thrown away.  One printer; the facts plist arrives
 # here in the next step.
 sub _sub_form {
-  my ($self, $clname, $body) = @_;
-  return ['p-sub', $clname, ['list', '&rest', '%_args'], $body];
+  my ($self, $clname, $sub, $body) = @_;
+  return ['p-sub', $clname, ['list', '&rest', '%_args'], $body]
+    if Pl::CLForm::ir_plain();
+  return ['p-sub', $clname, ['list', '&rest', '%_args'],
+          ['list', $self->_sub_facts($sub)], $body];
+}
+
+# THE PER-SUB FACTS (task #1035 step 3; docs/ir-spec.md 2b.2a + 5.1).  A plist
+# at a FIXED position after the lambda list -- ALWAYS printed, possibly `()`, so
+# a consumer reads the slot by position and the macro's lambda list is
+# unambiguous.  Every key is a fact the compiler PROVED and then, until now,
+# threw away at emission; a fact it does not know is OMITTED, never defaulted,
+# so an absent key means "not stated" and a present one is a promise.  The set
+# is CLOSED at both ends (rule 12): the runtime macro errors on a key it does
+# not know.
+#
+#   :returns :num|:str        every `return` and the implicit tail value proved
+#                             the SAME raw family (#77 raw-return-family, via
+#                             sub_info).  Absent when they disagree, when one is
+#                             unproven, or when the Kind-A gate is off.
+#   :wantarray-insensitive t  the caller's context provably cannot be observed:
+#                             no `wantarray` in the body and every returned
+#                             value is scalar-shaped.  TRUE-ONLY: the walk sets
+#                             it 0 on any doubt, so 0 means "not proven", which
+#                             is what an absent key already says.
+#   :writes-args t|nil        does this sub write through @_ into its caller's
+#                             variables (#189)?  BOTH directions: `_sub_writes_args`
+#                             answers 1 on any doubt, so 0 is a real proof that
+#                             the arguments may be passed by value.
+#   :string-eval t            the body contains a string `eval` -- the same
+#                             structural scan (an `eval` Word not followed by a
+#                             Block) that decides eval visibility.  TRUE-ONLY,
+#                             and conservative: `->eval` / `eval =>` / a hash key
+#                             spelled `eval` over-fire, harmlessly.
+#   :captures (CELLS...)      the promoted package cells this sub closes over,
+#                             recorded by the promotion that proved the capture.
+#   :prototype "$$"           an OLD-STYLE prototype's text, from the one
+#                             prototype table.  A signature is not a prototype
+#                             and prints nothing.
+my %SUB_FACT = map { $_ => 1 }
+  qw(:returns :wantarray-insensitive :writes-args :string-eval :captures :prototype);
+
+sub _sub_facts {
+  my ($self, $sub) = @_;
+  my @f;
+  if (my $si = $self->_cur_sub_info->{ $sub->name }) {
+    push @f, ':returns', ":$si->{returns}"  if defined $si->{returns};
+    push @f, ':wantarray-insensitive', 't'  if $si->{insensitive};
+    push @f, ':writes-args', ($si->{writes_args} ? 't' : 'nil');
+  }
+  push @f, ':string-eval', 't' if $self->{_sub_str_eval}{ refaddr($sub) };
+  if (my $caps = $self->{_capture_manifest}{ refaddr($sub) }) {
+    my %seen;
+    push @f, ':captures',
+      ['list', map { cl_sym($_) } grep { !$seen{$_}++ } @$caps];
+  }
+  my $proto = $self->environment->get_prototype($sub->name);
+  push @f, ':prototype', Pl::ExprToCL::cl_string_literal($proto->{proto_string})
+    if $proto && $proto->{is_proto} && defined $proto->{proto_string};
+  # The set is closed at THIS end too: a key added here without an ir-spec
+  # entry and a runtime arm dies at the printer, not at the reader.
+  for (my $i = 0; $i < @f; $i += 2) {
+    die "PCL: internal -- unknown p-sub fact key '$f[$i]'; the set is: "
+      . join(' ', sort keys %SUB_FACT) . "\n"
+      unless $SUB_FACT{ $f[$i] };
+  }
+  return @f;
 }
 
 # Sub-body :void regime (task #60 — v1's wa_void_active model): bind
@@ -8201,7 +8306,7 @@ sub _lower_block {
           };
           $self->{_goto_caught}{ refaddr($s[$k]) } = 1;
           my $vi2 = { %$vi, map { $_ => { unboxable => 0 } } @hoist };
-          return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @hoist],
+          return (_decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @hoist],
                    ['catch', $tag, @pre_forms],
                    $self->_lower_block([@s[$k .. $#s]], $vi2, $tail_ctx)));
         }
@@ -8539,7 +8644,7 @@ sub _lower_block {
       if ($lowprec_run) {
         my $vi2 = { %$vi, $name => { unboxable => 0 } };
         return (@declmod_eval,
-                _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
+                _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
                  $self->_lower_expr($lowprec_run, $first,
                                     ($decl_tail ? 'inherit' : ':void')),
                  $self->_lower_block(\@rest, $vi2, $tail_ctx)));
@@ -8550,12 +8655,12 @@ sub _lower_block {
         my $initform = defined $init ? $self->_lower_expr($init, $first) : '(p-undef)';
         $initform = _wrap_freeze($vi->{$name}, $name, $initform);
         return (@declmod_eval,
-                _decl_let([_decl_entry($name, _slot_class($vi->{$name}), $initform)],
+                _decl_let([_decl_entry($name, _slot_class($vi->{$name}), $initform, $vi)],
                  $self->_lower_block(\@rest, $vi, $tail_ctx),
                  ($decl_tail ? (cl_sym($name)) : ())));
       }
       if ($self_init) {
-        return (_decl_let([_decl_entry($name, ':box', $self_init)],
+        return (_decl_let([_decl_entry($name, ':box', $self_init, $vi)],
                  $self->_lower_block(\@rest, $vi, $tail_ctx),
                  ($decl_tail ? (cl_sym($name)) : ())));
       }
@@ -8573,7 +8678,7 @@ sub _lower_block {
           : ($set);
       }
       return (@declmod_eval,
-              _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
+              _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
                @assign,
                $self->_lower_block(\@rest, $vi, $tail_ctx),
                (($decl_tail && !@assign) ? ($name) : ())));
@@ -8595,7 +8700,7 @@ sub _lower_block {
       my $sname = $lead;
       $self->_reg_lex($sname);
       my $vi2 = { %$vi, $sname => { unboxable => 0 } };
-      return (_decl_let([_decl_fresh($sname)],
+      return (_decl_let([_decl_fresh($sname, $vi)],
                $self->_lower_expr([@kd[1 .. $#kd]], $first, ':void'),
                $self->_lower_block(\@rest, $vi2, $tail_ctx),
                ($decl_tail ? (cl_sym($sname)) : ())));
@@ -8773,7 +8878,7 @@ sub _lower_block {
             || (grep { $final_txt =~ _reads_name_rx($_) } @all)
             || (grep { $self->{_file_lex_renamed}{$_} } @all);
           $self->_reg_lex(@all);
-          return (_decl_let([map { _decl_fresh($_) } @all],
+          return (_decl_let([map { _decl_fresh($_, $vi) } @all],
                    $assign_form->(),
                    $self->_lower_block(\@rest, $vi, $tail_ctx)));
         }
@@ -8792,7 +8897,7 @@ sub _lower_block {
           my $copy = substr($var, 0, 1) eq '@' ? 'p-copy-array' : 'p-copy-hash';
           $self->_reg_lex($var);
           return (_decl_let([_decl_entry($var, _sigil_class($var),
-                                         [$copy, $self->_lower_expr(\@rhs, $first, 1)])],
+                                         [$copy, $self->_lower_expr(\@rhs, $first, 1)], $vi)],
                    $self->_lower_block(\@rest, $vi, $tail_ctx),
                    ($decl_tail ? (cl_sym($var)) : ())));
         }
@@ -8813,7 +8918,7 @@ sub _lower_block {
                    : substr($v, 0, 1) eq '@' ? ['p-copy-array', $v]
                    : substr($v, 0, 1) eq '%' ? ['p-copy-hash',  $v]
                    :                           ['p-box-init',   $v];
-          push @binds, _decl_entry($v, _sigil_class($v), $init);
+          push @binds, _decl_entry($v, _sigil_class($v), $init, $vi);
         }
         return (_decl_let(\@binds,
                  $assign_form->(),
@@ -8838,12 +8943,12 @@ sub _lower_block {
       return (@kmod_eval, @assign, @reg, $self->_lower_block(\@rest, $vi, $tail_ctx))
         unless @unren;
       return (@kmod_eval,
-              _decl_let([map { _decl_fresh($_) } @unren],
+              _decl_let([map { _decl_fresh($_, $vi) } @unren],
                @assign, @reg,
                $self->_lower_block(\@rest, $vi, $tail_ctx)));
     }
     $self->_reg_lex(@$vars);
-    my @binds = map { _decl_fresh($_) } @$vars;
+    my @binds = map { _decl_fresh($_, $vi) } @$vars;
     # Tail value: with an init the assignment form (last) returns the place;
     # a bare single container is its own value.  A bare MULTI decl
     # (`my ($c,$d);` as tail) is the LIST of the declared names — perl gives 2
@@ -9049,7 +9154,7 @@ sub _lower_block {
                      $self->{_seg_named_subs} // [], $first, \@emb) ? 1 : 0;
       if (!$vetoed) {
         $self->_reg_lex(@emb);
-        return (_decl_let([map { _decl_fresh($_) } @emb],
+        return (_decl_let([map { _decl_fresh($_, $vi) } @emb],
                  $self->_lower_stmt($first, $vi, $first_tail),
                  $self->_lower_block(\@rest, $vi, $tail_ctx)));
       }
@@ -9851,7 +9956,7 @@ sub _lower_compound {
         : ['list', 't'];
       my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
       my @body = $self->_lower_scope([$block->schildren], $vi);
-      my $form = _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @init_mys],
+      my $form = _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @init_mys],
                   ['p-for', $initform, $cond, $step, _label_keys($label), @body]);
       $self->{_let_bound_vars} = \%saved_lb;
       $self->{_live_lex} = \%saved_lex;
@@ -9929,16 +10034,16 @@ sub _lower_compound {
       my $initval = defined $init && !$lowprec_run
         ? $self->_lower_expr($init, $stmt) : '(p-undef)';
       if ($lowprec_run) {
-        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
+        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
                  ['p-for', ['list', $self->_lower_expr($lowprec_run, $stmt, ':void')],
                   $cond, $step, _label_keys($label), @body]);
       } elsif ($vi->{$name} && $vi->{$name}{unboxable}) {
         # a B-verdict/str-buffer counter must freeze/bufferize its init too
         $form = _decl_let([_decl_entry($name, _slot_class($vi->{$name}),
-                                       _wrap_freeze($vi->{$name}, $name, $initval))],
+                                       _wrap_freeze($vi->{$name}, $name, $initval), $vi)],
                  ['p-for', ['list'], $cond, $step, _label_keys($label), @body]);
       } else {
-        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)')],
+        $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
                  ['p-for', ['list', ['p-my-=', cl_sym($name), $initval]], $cond, $step,
                   _label_keys($label), @body]);
       }
@@ -11539,6 +11644,50 @@ sub _multi_decl {
 #   :str-buffer  an adjustable fill-pointer string (the S1 `strbuf` verdict)
 #   :array       a fresh or copied perl array
 #   :hash        a fresh or copied perl hash
+# THE RENAME MANIFEST (task #1035, step 2; docs/ir-spec.md 2b.2a + 2b.3).
+# A `my` the compiler RENAMED reaches emission as an ordinary variable with an
+# unusual name, and the only way back to the perl source was to strip the
+# `__family__N` suffix by hand -- a consumer parsing names, which is exactly
+# the shape rule 11 forbids.  The compiler KNOWS what it renamed and why, so it
+# records the pair AT THE MINT SITE and the declaration printer reads it back.
+#
+# The REASON set is CLOSED (rule 12): a family that mints a name without saying
+# why dies here rather than emitting an unexplained one.  Each is one of the
+# ir-spec 2b.3 families:
+#   :spanning          a file lexical used from a LATER package segment
+#                      (_rename_spanning_lexicals, `$x__file__N`)
+#   :captured          a file lexical a NAMED sub or scheduled block closes
+#                      over, promoted to a package cell (_promote_captured,
+#                      `$x__file__N`)
+#   :state-cell        a `state` variable promoted to a per-sub package cell
+#                      (_rename_state_vars / _state_rewrite_routes,
+#                      `$x__state__N`)
+#   :exception-global  a `my` of an EXCEPTION-SET name ($a/$b/$_/...), which CL
+#                      cannot lexically bind while the symbol is proclaimed
+#                      special (_rename_exception_mys, `$a__excl__N`)
+#   :seam-shadow       a `my` inside a block that lowers through the v1
+#                      expression seam while an outer lexical of the same name
+#                      is live (_gate_seam_my_shadow, `$x__shadow__N`)
+my %RENAME_WHY = map { $_ => 1 }
+  qw(:spanning :captured :state-cell :exception-global :seam-shadow);
+
+# original perl spelling + reason, keyed by the NEW name.  File-scoped and
+# reset per parse: one Pl::Parser2 object parses one source, `parse` is not
+# re-entrant (the v1 seam it calls never parses a file), and every mint site
+# is inside that one call.
+my %RENAME_MANIFEST;
+
+sub _reset_rename_manifest { %RENAME_MANIFEST = () }
+
+sub _reg_rename {
+  my ($old, $new, $why) = @_;
+  die "PCL: internal -- unknown rename reason '$why' ($old -> $new); the set is: "
+    . join(' ', sort keys %RENAME_WHY) . "\n"
+    unless $RENAME_WHY{$why};
+  $RENAME_MANIFEST{$new} = [$old, $why];
+  return $new;
+}
+
 my %DECL_CLASS = map { $_ => 1 } qw(:box :scalar :num :str :str-buffer :array :hash);
 
 # One `(NAME CLASS INIT)` binding entry.  $name is the perl spelling; cl_sym is
@@ -11551,18 +11700,48 @@ my %DECL_CLASS = map { $_ => 1 } qw(:box :scalar :num :str :str-buffer :array :h
 # differs in every file).  It is a verification switch, not an optimization:
 # it is not in Pl/Passes.pm's registry and changes no runtime behaviour.
 sub _decl_entry {
-  my ($name, $class, $init) = @_;
+  my ($name, $class, $init, $vi) = @_;
   die "PCL: internal — unknown declaration class '$class' for $name"
     unless $DECL_CLASS{$class};
-  return ['list', cl_sym($name), $init] if $ENV{PCL_IR_PLAIN};
-  return ['list', cl_sym($name), $class, $init];
+  return ['list', cl_sym($name), $init] if Pl::CLForm::ir_plain();
+  return ['list', cl_sym($name), $class, $init, _decl_facts($name, $vi)];
+}
+
+# The FACTS tail of one entry: `:perl "$x" :why :FAMILY` for a renamed name
+# (from the manifest above -- the compiler's own record, never the suffix text)
+# and `:captured t` when a nested anonymous sub closes over the name.  A fact
+# the compiler does not know is OMITTED, never defaulted: `:captured` is absent
+# both when the name is provably not captured and when no VarAnnotator verdict
+# reached this site, and a consumer must read the absence as "not stated".
+# $vi is the whole per-region verdict hash (the one `_slot_class` reads an entry
+# of), so a call site passes what it already has and the per-name lookup lives
+# in ONE place.
+sub _decl_facts {
+  my ($name, $vi) = @_;
+  my @f;
+  if (my $r = $RENAME_MANIFEST{$name}) {
+    push @f, ':perl', Pl::ExprToCL::cl_string_literal($r->[0]), ':why', $r->[1];
+  }
+  push @f, ':captured', 't' if $vi && $vi->{$name} && $vi->{$name}{captured};
+  return @f;
 }
 
 # The entry for a plain `my $x` / `my @a` / `my %h`: the fresh container of
 # the name's sigil, and the class that container IS.
 sub _decl_fresh {
-  my ($name) = @_;
-  return _decl_entry($name, _sigil_class($name), _fresh_container($name));
+  my ($name, $vi) = @_;
+  return _decl_entry($name, _sigil_class($name), _fresh_container($name), $vi);
+}
+
+# One `p-raw-params` entry `(NAME CLASS)` (task #1035, step 3).  A parameter of
+# the signature fast path IS a declaration -- the sub's own binding of the
+# caller's value -- so it carries the same class a `my` of the same verdict
+# carries, from the SAME `_slot_class`: ONE source for the class, or the two
+# spellings drift.  PCL_IR_PLAIN prints the bare name the form had before.
+sub _param_entry {
+  my ($name, $vi) = @_;
+  return cl_sym($name) if Pl::CLForm::ir_plain();
+  return ['list', cl_sym($name), _slot_class($vi->{$name} // {})];
 }
 
 # The class of the container a sigil declares.
@@ -11582,10 +11761,10 @@ sub _slot_class {
 
 # The binding FORM around the entries: `(p-let (ENTRIES…) BODY…)` — the
 # runtime macro expands to exactly the `let` this printed before s466, so the
-# class is free at run time (cl/pcl-runtime.lisp `p-let`; ir-spec §2b.2).
+# class is free at run time (cl/pcl-runtime.lisp `p-let`; ir-spec §2b.2a).
 sub _decl_let {
   my ($entries, @body) = @_;
-  return [($ENV{PCL_IR_PLAIN} ? 'let' : 'p-let'), ['list', @$entries], @body];
+  return [(Pl::CLForm::ir_plain() ? 'let' : 'p-let'), ['list', @$entries], @body];
 }
 
 # A name's SIGIL.  The name may arrive in its CL spelling — pipe-quoted when
@@ -11662,7 +11841,9 @@ sub _gate_seam_my_shadow {
       die "Parser2 TODO: my-shadow of live lexical " . $s->content
         . " inside fallback block ($why)\n" if $why;
       $self->_rename_decl_within($block, $s,
-        $s->content . '__shadow__' . $self->{_shadow_rename_counter}++);
+        _reg_rename($s->content,
+                    $s->content . '__shadow__' . $self->{_shadow_rename_counter}++,
+                    ':seam-shadow'));
     }
   }
 }

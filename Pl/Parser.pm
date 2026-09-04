@@ -8246,7 +8246,10 @@ sub _process_sub_statement {
     return;
   }
 
-  $self->_emit("(p-sub $cl_sub_name ($params_cl)");
+  # The facts plist sits at a FIXED position after the lambda list (task
+  # #1035 step 3, ir-spec 2b.2a): v1 proves none of those facts, so it prints
+  # the empty plist -- a consumer reads the slot by position, never by shape.
+  $self->_emit("(p-sub $cl_sub_name ($params_cl)" . _sub_facts_slot());
   $self->indent_level($self->indent_level + 1);
 
   # Number of wrapper forms ((let ...)/(let* ...)) opened for a signature sub,
@@ -10135,7 +10138,8 @@ sub _emit_constant {
   # references %_args so it ignores (and silences the unused-var warning on)
   # the arguments while still returning the constant value.
   my $cl_sub_name = $self->_qualified_sub_to_cl($name);
-  $self->_emit("(p-sub $cl_sub_name (&rest %_args) (progn %_args $cl_value))");
+  $self->_emit("(p-sub $cl_sub_name (&rest %_args)" . _sub_facts_slot()
+                . " (progn %_args $cl_value))");
 
   # Register as a zero-arg prototype so bareword is recognized as function call
   # (ONE spelling of that record — see register_constant_prototype, which the
@@ -10145,6 +10149,11 @@ sub _emit_constant {
 
 
 # Compile a constant's value expression to CL
+# The `p-sub` facts slot as v1 prints it: always empty (v1 computes none of
+# the per-sub facts), and absent entirely under the IR verification switch,
+# whose ONE reading is Pl::CLForm::ir_plain.
+sub _sub_facts_slot { return Pl::CLForm::ir_plain() ? '' : ' ()' }
+
 sub _compile_constant_value {
   my $self  = shift;
   my $parts = shift;
