@@ -349,6 +349,106 @@ checked-in artifacts are the ones regenerated on the rebased tree.
 
 **Guards.**  New `Pl/t/refusal-site-01.t` (19 rows; **13 of them FAIL on `57848f3`**, measured in a worktree — the six that pass there are negatives over an empty emission, the deliberately-unchanged string-eval half, and the inverse file).  Two existing guards were STALE against this change and are repaired in the same commit (the s416 standing rule): `ruled-refusal-01.t`'s two `isnt($rc, 0)` end-to-end blocks and `class-refusal-01.t`'s stderr-text rows now assert BOTH halves, the announcement and the emitted die.  `Pl/t/PCLCore.pm`'s `transpile()` fails a row on the refusal announcement as it does on a drop — such a snippet used to make pl2cl exit nonzero, which it already failed on, so without that arm a gate row would have gone from a loud failure to a diag.
 
+**s468bc finish (2026-09-04) — rebased twice, and the companion half of the
+change measured, read and blessed.**  The branch was replayed onto main
+`9bee19b` and then, when BD's #995 landed, onto `0e0b0b9`; generation
+**v2-650** (above BD's v2-640) and the three checked-in artifacts regenerated
+on the rebased tree — **all three bodies byte-identical to main's**, only
+line 1's `gen=` stamp moving, which is third-party evidence that #1037 is
+confined to its site.  (On the FIRST base that was not true of
+`cl/pcl-pack.lisp`, and the difference was MAIN's: regenerating it on a
+`9bee19b` worktree and on this branch produced the same body, 0 diff lines, so
+main's checked-in artifact simply did not match main's own compiler.  BD's
+regeneration fixed the instance; the instrument hole it exposed —
+`Pl/t/artifact-staleness-01.t` compares the `gen=` STAMP only, so a body drift
+WITHIN a generation is invisible — is task **#1072**.)
+
+**Bars on the rebased tree, all met.**  Gate **198 files / 6743 tests**, the
+only failures the 13 pclxs xs rows (the s466bc `transpile-test-06.t` `%SIG`
+load flake did not recur, on either base).  `tools/corpus-diff.pl 0e0b0b9`:
+**1 of 111 files differ — `state.t`**, whose diff is `@@ -0,0 +1,1310 @@`
+(the base emits nothing, this tree emits the whole file with exactly ONE
+`;; RULED REFUSAL:` form and ZERO `;; PARSE ERROR:`), **silent drops 5
+unchanged**, 6 shapes identical.  `tools/emission-ab.pl --ref 0e0b0b9`: the 22
+`lib/` shims **22 SAME** (the mandatory leg), and the wide population — all
+605 files of perl's own t/, 94 cpan-tests modules, 289 cpan-tests dist `.t`,
+the 22 shims and the 6 shapes, **1016 files** — **999 SAME / 17 DIFF / 17
+RCDIFF**, every RCDIFF a refusal file going transpile-FAIL (rc 2, rc 255 for
+`t/bigmem/stack.t`) → rc 0, which is the die-scan leg of the s373 three-leg
+bar: no file anywhere gained a die.  `tools/gate-set-scan.pl` over BOTH
+populations (638 files each side, against a `0e0b0b9` worktree) moves
+**exactly 17 verdicts and nothing else** — `perl-tests/state.t`, the ten
+`t/class/*.t` and the six `t/op/*.t`, each from the old transpile-time die to
+the new `PCL: refused statement at ...` announcement.  Full sweep
+(`--jobs 8`): **GATE clean**, TOTAL passing **18581**, current 18581 (+0)
+against the branch's own edited baseline and **+88 against main's 18493** —
+that +88 IS `state.t` entering `baselines/pass-baseline.tsv` by EDIT
+(TRANSPILE_FAIL 0/0/-1 → PARTIAL 88/0/166), drops **census 5, current 5**,
+shortfall baseline 12335 current 12335 (+0), LOST 0.  Re-run after every
+baseline edit of this session: identical.  Guards
+`refusal-site-01.t` / `ruled-refusal-01.t` / `class-refusal-01.t` /
+`artifact-staleness-01.t` / `passes-01.t` = 100 rows, all pass.
+
+**The companion half: sixteen files, read row by row, blessed per file.**
+These are the files that went transpile-FAIL → rc 0, so each moves from
+"PCL contributed nothing" to a real measurement.  Snapshot rows spliced BY
+HAND into `baselines/perl-suite-run.tsv` with the cause; nothing outside the
+sixteen touched.
+
+| file | before | after | cause |
+|---|---|---|---|
+| `op/state.t` | XDIFF TRANSPILE-FAIL 0/0 | XDIFF 88/4 | ONE `given` at line 350; 88 rows before it now run |
+| `op/tie_fetch_count.t` | XDIFF TRANSPILE-FAIL 0/0 | DIFF 76/65 | ONE infix `~~`; 141 rows now run |
+| `op/smartmatch.t` | XDIFF TRANSPILE-FAIL 0/0 | XDIFF 55/295 | infix `~~`; every failing row is a `~~` assertion |
+| `op/coreamp.t` | XDIFF TRANSPILE-FAIL 0/0 | DIFF 9/46 | `CORE::given` + 15 aborted forms (#1073) |
+| `op/defer.t` | XDIFF TRANSPILE-FAIL 0/0 | XDIFF 4/8 | `defer`; all 8 failing rows name `defer` |
+| `op/switch.t` | XDIFF TRANSPILE-FAIL 0/0 | XDIFF 2/0 | given/when; 0 failing rows, 195 missing |
+| `class/inherit.t` | XDIFF TRANSPILE-FAIL 0/0 | XDIFF 0/1 | one row, `hierarchical base class loaded` |
+| `class/threads.t` | XDIFF TRANSPILE-FAIL 0/0 | NOTAP 0/0 | this perl has no threads — what the file measures |
+| the other nine `class/*.t` | XDIFF TRANSPILE-FAIL 0/0 | XDIFF 0/0 | they die at the class statement before any assertion |
+
+**Three registrations were RE-READ rather than kept, and the reading changed
+two of them.**  The bar in `baselines/perl-suite-expected.tsv` is
+all-or-nothing: a file is registered only when EVERY failing row is explained
+by a blessed `not-supported.md` section, because a partially-explained file
+still contains a fix target.  While a file refused wholesale that was trivially
+true; now it has to be measured.  **`op/coreamp.t` and `op/tie_fetch_count.t`
+LOSE their registrations** — coreamp's 46 rows are the `&CORE::` family and
+tie_fetch_count's 65 are `FETCH called just once using OP`, and neither is the
+refusal its reason cited.  They are ordinary DIFF files now, gated row by row
+in `baselines/perl-suite-fails.tsv` (501 + 267 rows; coreamp is the one file
+over the runner's 500-row log cap, so its row baseline is PARTIAL — #1051).
+**`op/state.t` KEEPS one, with a rewritten TWO-section reason**: its four
+failing rows are `computed goto`, which `not-supported.md` blesses by name and
+cites in the perl-tests twin, so the file IS fully explained — by two
+sections rather than one, which the bar permits.  The other thirteen were
+re-read and re-blessed into `baselines/perl-suite-expected-rows.tsv` (`*no-log*`
+→ their real rowkeys, 2564 rows over 117 files).  Final companion run over
+the sixteen: 13 XDIFF, 1 NOTAP, 2 DIFF, **0 snapshot movers, ROW DIFF 0 NEW /
+0 FIXED / 0 UNVERIFIED / 0 LOST, DROPS 5 = census, SHORTFALL at baseline**.
+
+**Two census rows added, and they are the legal kind of rise (ruled s409).**
+`baselines/parse-error-drop-census-s399.tsv` 17 files / 57 drops → **19 /
+62**: `t/class/inherit.t` 1 (PPI lexes the unit-class header
+`class Testcase1C :isa(Testcase1B) 1.000;` as a `Token::Label`) and
+`t/op/coreamp.t` 4 (the lvalue-subroutine family).  Neither is new code —
+both statements were always unlowerable, and nothing could see them while the
+whole file refused.  The perl-tests population stays at **5**, so the sweep's
+own DROPS bucket does not move.  `t/bigmem/stack.t` is an eighteenth refusal
+file, outside both the companion's and `gate-set-scan`'s dir sets: noted, not
+blessed.  **`op/write.t` is NOT this change's** — its emission is identical
+to main's (it is not among the 17), its snapshot row already reads 99/32, and
+its stale 595 → 505 shortfall row belongs to #1032, which agent BE
+measured in the same window.
+
+**Filed while finishing**: **#1072** (the staleness gate compares the `gen=`
+stamp only), **#1073** (`t/op/coreamp.t`'s `File::Spec::Functions` abort and
+its 46 `&CORE::` rows), **#1074** (`STDOUT->binmode(...)` dies — no
+IO::Handle methods on a bareword filehandle, newly visible in
+`t/class/utf8.t`, which would die at its `class` block two statements later
+anyway).
+
+
 ---
 
 ## Session 465ba (2026-09-03, Opus, round 23) — #1028: the bitwise `& | ^ ~` MODE DECISION (bop.t 253/256 → 480/29, the largest cluster in the sweep baseline) + #1032: a bareword filehandle is a NAME in a stat / filetest slot
