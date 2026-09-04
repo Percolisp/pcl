@@ -7293,6 +7293,31 @@ per element."
   (multiple-value-bind (new appliedp) (%p-incdec-overload val "--" "-")
     (if appliedp new (1- (to-number val)))))
 
+;;; THE ONE STORE-BACK DECISION for the four incdec macros' DEFAULT arm — the
+;;; arm a bare `$x` reaches (task #1105, s469bh).  A SYMBOL place holds either
+;;; a p-box (the general form) or a RAW value (a raw-slot / B-regime verdict,
+;;; docs/raw-numeric-verdict.md), and `box-set` on a non-box RETURNS THE VALUE
+;;; AND STORES NOTHING — by design, since `undef = val` is a perl no-op and
+;;; *p-undef* is not a box.  So `++$i` / `--$i` on a raw slot computed the new
+;;; value and threw it away: `for (my $i = f(3); -- $i;)` looped FOREVER, and
+;;; the same silent no-op reached `my $j = $i++` anywhere the value is
+;;; consumed.  (Parser2 has a raw twin, p-incf-raw/p-decf-raw, but it only
+;;; fires when the incdec IS the whole statement — a value-consuming one falls
+;;; through the expression generator to these macros, which had no raw case.
+;;; That disagreement between the verdict and the emission is the bug; the
+;;; verdict is right and this is where the two meet, so ONE runtime test
+;;; settles it for all four macros rather than four emitter branches.)
+;;; The test costs one inline P-BOX-P on a path that already calls
+;;; perl-increment out of line.  A non-symbol place (an accessor form) never
+;;; reaches here — the arms above it own those — so it keeps box-set exactly.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-incdec-store-form (place new-form)
+    "Store NEW-FORM back into PLACE.  PLACE is a symbol or an evaluated form;
+     NEW-FORM may mention PLACE and is evaluated once in whichever branch runs."
+    (if (symbolp place)
+        `(if (p-box-p ,place) (box-set ,place ,new-form) (setf ,place ,new-form))
+        `(box-set ,place ,new-form))))
+
 (defmacro p-pre++ (place)
   "Perl prefix ++ - works on boxed values, hash/array elements, and derefs.
    Supports magical string increment for alphanumeric strings."
@@ -7314,8 +7339,8 @@ per element."
          `(let ((,tmp (perl-increment ,real-place)))
             (setf ,real-place ,tmp)
             ,tmp)))
-      ;; Boxed scalar
-      (t `(box-set ,real-place (perl-increment ,real-place))))))
+      ;; Boxed scalar — or a RAW slot: %p-incdec-store-form decides.
+      (t (%p-incdec-store-form real-place `(perl-increment ,real-place))))))
 
 (defmacro p-post++ (place)
   "Perl postfix ++ - returns old value.
@@ -7355,7 +7380,7 @@ per element."
       (t (let ((val (gensym "VAL")))
            `(let* ((,val (%p-incdec-old ,real-place))
                    (,old (if (or (null ,val) (eq ,val *p-undef*)) 0 ,val)))
-              (box-set ,real-place (perl-increment ,real-place))
+              ,(%p-incdec-store-form real-place `(perl-increment ,real-place))
               ,old))))))
 
 (defmacro p-pre-- (place)
@@ -7385,8 +7410,8 @@ per element."
          `(let ((,tmp (perl-decrement ,real-place)))
             (setf ,real-place ,tmp)
             ,tmp)))
-      ;; Boxed scalar
-      (t `(box-set ,real-place (perl-decrement ,real-place))))))
+      ;; Boxed scalar — or a RAW slot: %p-incdec-store-form decides.
+      (t (%p-incdec-store-form real-place `(perl-decrement ,real-place))))))
 
 (defmacro p-post-- (place)
   "Perl postfix -- - returns old value"
@@ -7422,7 +7447,7 @@ per element."
       ;; on undef returns undef (NOT 0 like ++), so do not numify the old value.
       (t (let ((val (gensym "VAL")))
            `(let ((,val (%p-incdec-old ,real-place)))
-              (box-set ,real-place (perl-decrement ,real-place))
+              ,(%p-incdec-store-form real-place `(perl-decrement ,real-place))
               ,val))))))
 
 ;;; ------------------------------------------------------------

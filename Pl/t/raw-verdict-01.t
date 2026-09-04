@@ -12,6 +12,12 @@
 # Transpile checks pin the verdict (wrapper present/absent); runtime checks
 # pin value fidelity vs perl for the trap cases ("0.0" truthiness, ref
 # stable-ID identity, aggregate scalar-context collapse).
+#
+# INVERSE GUARD for the #1105 section at the end (measured on a c80b1a0
+# worktree): row 55 — the only row that RUNS a value-consuming ++/-- on a raw
+# slot — fails there, printing "0 168 14 14" where perl says "14 7 14 14".
+# Rows 53/54 (the shape) and 56-58 (the general form and the boxed path) pass
+# on both sides, which is what stops the fix from being widened wrongly.
 
 use v5.30;
 use strict;
@@ -32,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 52;
+plan tests => 58;
 
 sub run_cl {
     my ($code, $env) = @_;
@@ -450,3 +456,56 @@ test_cl('#934: ++/-- refuse when nothing autogenerates and fallback is not 1',
         "${USE}use AoPlain ();\n$ovl934", $ovl934_want);
 test_cl('#934: …and the general-form compiler agrees, line for line',
         "${USE}use AoPlain ();\n$ovl934", $ovl934_want, 'PCL_OPT=none');
+
+# ---- a value-CONSUMING ++/-- on a RAW slot STORES BACK (task #1105) -------
+#
+# `box-set` on a non-box returns the value and stores NOTHING — deliberately,
+# because `undef = val` is a perl no-op and *p-undef* is not a box.  The four
+# incdec macros' DEFAULT arm (the arm a bare `$x` reaches) therefore computed
+# the new value and threw it away on a raw-verdict slot.  Parser2 HAS a raw
+# twin, p-incf-raw / p-decf-raw, but it fires only when the incdec IS the
+# whole statement; in a C-style for CONDITION the value is consumed, so the
+# expression generator emits p-pre-- / p-post-- and the counter never moved:
+#
+#     for (my $i = f(4); -- $i;) { ... }        # LOOPED FOREVER on c80b1a0
+#
+# verified by running exactly that on a worktree of the base commit.  The fix
+# is ONE store-back decision shared by all four macros
+# (%p-incdec-store-form): a SYMBOL place tests p-box-p and SETFs when the slot
+# is raw.  Rows 1-2 pin the slot's CLASS and the lowering so the run rows
+# cannot pass vacuously on the boxed path.
+#
+# EVERY loop carries an INDEPENDENT iteration counter as its bound.  A bound
+# written on the accumulated value (`last if $t1 > 99`) does NOT work here:
+# with the bug the counter never moves, `$a[4]` is undef, and the sum stays 0
+# forever — the row hangs the gate instead of failing.  Verified: on a
+# c80b1a0 worktree this file with a value-bound never finished, and with the
+# counter bound it FAILS on the value in 6 s.
+my $forcond = <<'PL';
+sub f { $_[0] }
+my @a = (1, 2, 4, 8);
+my ($b1, $b2, $b3, $b4) = (0, 0, 0, 0);
+my $t1 = 0; for (my $i = f(4); -- $i;) { $t1 += $a[$i]; last if ++$b1 > 20 }
+my $t2 = 0; for (my $j = f(3); $j --;) { $t2 += $a[$j]; last if ++$b2 > 20 }
+my $t3 = 0; for (my $p = f(0); ++ $p < 4;) { $t3 += $a[$p]; last if ++$b3 > 20 }
+my $t4 = 0; for (my $q = f(0); $q ++ < 3;) { $t4 += $a[$q]; last if ++$b4 > 20 }
+print "$t1 $t2 $t3 $t4\n";
+PL
+$cl = Pl::Parser2->parse_code($forcond);
+like($cl, qr/\(\$i :num \(%pcl-to-number-strict /,
+     '#1105: the C-for condition counter IS a raw slot (the run rows are not vacuous)');
+like($cl, qr/\(p-pre-- \$i\)/,
+     '#1105: … and its `--` still lowers through the boxed macro, not the raw twin');
+test_cl('#1105: ++/-- in a C-for CONDITION terminate — prefix and postfix, both signs',
+        $forcond, "14 7 14 14\n");
+test_cl('#1105: … and the general-form compiler agrees',
+        $forcond, "14 7 14 14\n", 'PCL_OPT=none');
+# The box path through the SAME macro arm must be undisturbed: a magical
+# string increment whose value is consumed still returns the OLD string and
+# still advances the variable.
+my $magic = q{sub f { $_[0] } my $m = f("Az"); my $mv = $m++; my $z = f("zz"); }
+          . q{my $zv = ++$z; print "$m $mv $z $zv\n";};
+test_cl('#1105: the boxed default arm is unchanged (magical string increment, value consumed)',
+        $magic, "Ba Az aaa aaa\n");
+test_cl('#1105: … and under PCL_OPT=none',
+        $magic, "Ba Az aaa aaa\n", 'PCL_OPT=none');
