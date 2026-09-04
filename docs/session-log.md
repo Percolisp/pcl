@@ -326,6 +326,9 @@ interleaved in the same window: **arrhash-k −21.7 % / −24.3 % / −22.3 %**
 `feread` control at **−0.3 %** — inside the record's −17 … −36 % band and far
 outside the control's noise.  Generation stays **v2-640**; the three
 checked-in artifacts are the ones regenerated on the rebased tree.
+
+---
+
 ## Session 466bc (2026-09-03, Opus, round 23) — #1037: A RULED REFUSAL IS A STATEMENT-LEVEL EVENT; 18 files across the two populations go from "no emission at all" to "the whole file, with one statement that dies when reached"
 
 **The ruling** (USER, s465, `docs/plan-test-audit-s464.md` §5.5 / DECIDED §s465): a ruled refusal — a construct PCL recognises and will not translate, each carrying a `docs/not-supported.md` entry — is an event **at a statement**, exactly like a drop.  It takes the drop form's shape (`docs/ir-spec.md` §9.3): a perl-shaped, trappable run-time `die` at the statement's own site, with the rest of the file compiling and running.  **A refusal that aborted the whole transpile was a bug in the refusal, not a property of the feature** — `perl-tests/state.t` and perl's own `t/op/state.t` each contain ONE `given` block in an otherwise supported file, and each lost every one of its ~160 rows to it.
