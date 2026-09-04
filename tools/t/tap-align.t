@@ -14,7 +14,7 @@ use warnings;
 use Test::More;
 use FindBin qw($RealBin);
 use lib "$RealBin/../lib";
-use PclTapAlign qw(tap_rows align_taps);
+use PclTapAlign qw(tap_rows align_taps rowkey_desc);
 
 # Compact writer: "ok:desc" / "nok:desc", numbered from 1 in order.
 sub tap {
@@ -104,6 +104,35 @@ sub verdicts {   # [ "perlnum perlverb pclverb(pclnum)" ] for diverging pairs on
   my ($pairs, $extras) = align_taps(tap_rows($perl), tap_rows($pcl));
   is($pairs->[1][1]{desc}, 'junk1', 'out-of-window match is ignored (pairs positionally)');
   is(scalar @$extras, 6, 'the unmatched tail is reported as extras, not silently dropped');
+}
+
+# ------------------------------------------------- rowkey_desc (I1/#185 key)
+# The BASELINE half of the same contract: a row baseline is keyed by perl's
+# DESCRIPTION, so a description carrying a per-RUN token can never be blessed —
+# it reads NEW + FIXED every run.  Two such tokens, both perl's own.
+{
+  is(rowkey_desc("correct error message for require 'tmp_JVEJ_B.ph'"),
+     "correct error message for require 'tmp_TMPFILE.ph'",
+     't/test.pl tempfile() names encode the PID — normalized (op/require_errors.t, 4 rows)');
+  is(rowkey_desc('correct error message for require ::tmp_CIFV_B'),
+     'correct error message for require ::tmp_TMPFILE',
+     'the same name in every spelling the file uses');
+  is(rowkey_desc('CODE(0x63ec642bcf00) is not CODE(0x63ec642bd100)'),
+     'CODE(0xADDR) is not CODE(0xADDR)',
+     "a reference stringification's address is normalized (comp/proto.t:77)");
+  is(rowkey_desc('Foo=HASH(0xdeadbeef) blessed'), 'Foo=HASH(0xADDR) blessed',
+     'a BLESSED stringification too');
+  is(rowkey_desc('0x80000000 is a single character'),
+     '0x80000000 is a single character',
+     'a hex CONSTANT in a description is STABLE and keeps its text (op/index.t)');
+  is(rowkey_desc('tmpfile is fine'), 'tmpfile is fine',
+     'a word that merely starts with tmp is not a tempfile name');
+  is(rowkey_desc('[at /build/perl-5.40.3/t/op/closure.t line 653]', '/build/perl-5.40.3/t'),
+     '[at t/op/closure.t line 653]',
+     "this machine's build path is stripped, the stable line number kept (#217)");
+  is(rowkey_desc("trailing space   "), 'trailing space',
+     'trailing whitespace is not part of the key');
+  is(rowkey_desc(undef), '', 'an undef description keys as the empty string, never dies');
 }
 
 done_testing();

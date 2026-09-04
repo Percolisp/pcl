@@ -173,7 +173,7 @@ use POSIX qw(:sys_wait_h _exit);
 use FindBin;
 use lib "$FindBin::RealBin/lib";
 # Description-based TAP pairing (task #177) — unit-tested in tools/t/tap-align.t.
-use PclTapAlign qw(tap_rows align_taps);
+use PclTapAlign qw(tap_rows align_taps rowkey_desc);
 use PCLSbcl ();   # the ONE builder of an SBCL command line (task #344)
 use PCLProc qw(run_isolated reap_orphan_transpilers);   # session isolation + reaping (#367)
 use PCLPaths qw(perl_suite_t);
@@ -1190,17 +1190,13 @@ sub diverging_rows_full {
     chomp;
     my (undef, $n, $pv, $cv, $desc) = split /\t/, $_, 5;
     next unless defined $n;
-    $desc = '' unless defined $desc;
-    $desc =~ s/\s+\z//;
-    $desc =~ s{\Q$tdir\E/}{t/}g;
-    # A reference STRINGIFICATION inside a description (`CODE(0x63ec642bcf00)`,
-    # comp/proto.t:77) carries an address that differs on every run, so the row
-    # read as NEW + FIXED on every run (s466, the first ROW DIFF).  Only perl's
-    # own `TYPE(0x…)` shape is normalized — a hex CONSTANT in a description
-    # (`0x80000000 is a single character`, op/index.t) is stable and keeps its
-    # text.  This is the ONE reader, so both row baselines (#185 expected-rows,
-    # #993 fails) see the same key.
-    $desc =~ s/\b((?:[\w:]+=)?(?:CODE|HASH|ARRAY|SCALAR|REF|GLOB|LVALUE|FORMAT|IO|VSTRING|Regexp))\(0x[0-9a-f]+\)/$1(0xADDR)/g;
+    # The row-baseline KEY projection lives in PclTapAlign::rowkey_desc, beside
+    # the description-pairing it is the baseline half of: it strips this
+    # machine's $tdir and normalizes the two per-RUN tokens perl puts in its own
+    # descriptions (a TYPE(0x…) address, a tempfile name that encodes the PID).
+    # This is the ONE reader, so both row baselines (#185 expected-rows, #993
+    # fails) see the same key; the reasons are in that sub.
+    $desc = rowkey_desc($desc, $tdir);
     # test# 0 is not a paired test: either a summary row (no TAP at all / PCL
     # renumbered), whose text carries an unstable crash signature and so
     # normalizes to one sentinel, or a PCL-ONLY row, which is real evidence

@@ -6154,11 +6154,11 @@ op/require_errors.t	57	ok	not ok	check we failed for the right reason
 op/require_errors.t	2	ok	not ok	correct error message for require ' '
 op/require_errors.t	33	ok	not ok	correct error message for require '.h'
 op/require_errors.t	35	ok	not ok	correct error message for require '.ph'
-op/require_errors.t	1	ok	not ok	correct error message for require 'tmp_CIFV_B'
-op/require_errors.t	32	ok	not ok	correct error message for require 'tmp_CIFV_B.h'
-op/require_errors.t	34	ok	not ok	correct error message for require 'tmp_CIFV_B.ph'
+op/require_errors.t	1	ok	not ok	correct error message for require 'tmp_TMPFILE'
+op/require_errors.t	32	ok	not ok	correct error message for require 'tmp_TMPFILE.h'
+op/require_errors.t	34	ok	not ok	correct error message for require 'tmp_TMPFILE.ph'
 op/require_errors.t	54	ok	not ok	correct error message for require ./no_such_file.pm
-op/require_errors.t	30	ok	not ok	correct error message for require ::tmp_CIFV_B
+op/require_errors.t	30	ok	not ok	correct error message for require ::tmp_TMPFILE
 op/require_errors.t	42	ok	not ok	do nulstring fails with ENOENT
 op/require_errors.t	40	ok	not ok	do nulstring returns undef
 op/require_errors.t	43	ok	not ok	do nulstring warning

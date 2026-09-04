@@ -27,7 +27,7 @@ package PclTapAlign;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(tap_rows align_taps);
+our @EXPORT_OK = qw(tap_rows align_taps rowkey_desc);
 
 our $WINDOW = 20;   # how far ahead a re-sync may look (and be confirmed)
 
@@ -98,5 +98,47 @@ sub align_taps {
   push @extras, @{$crows}[$j .. $#$crows] if $j <= $#$crows;
   return (\@pairs, \@extras);
 }
+
+# ── the ROW-BASELINE KEY ────────────────────────────────────────────────────
+# A row baseline (baselines/perl-suite-expected-rows.tsv #185,
+# baselines/perl-suite-fails.tsv #993) is keyed by PERL's test DESCRIPTION,
+# because the test NUMBER is the unstable coordinate (#177).  A description
+# that carries a per-RUN token is therefore unblessable: it reads as a NEW ROW
+# and a FIXED ROW on every single run.  Exactly two such tokens exist, and both
+# are perl's own text, not PCL's:
+#
+#   TYPE(0x…)     a reference STRINGIFICATION inside a description
+#                 (comp/proto.t:77 `CODE(0x63ec642bcf00)`, found by the first
+#                 ROW DIFF, s466).  Only perl's TYPE(0x…) shape is normalized —
+#                 a hex CONSTANT in a description ("0x80000000 is a single
+#                 character", op/index.t) is STABLE and keeps its text.
+#   tmp_XXX_YYY   t/test.pl's tempfile(): the prefix is "tmp_" . the PID in
+#                 base 26 (_num_to_alpha($$)), so op/require_errors.t's four
+#                 "correct error message for require '…'" rows carried a new
+#                 name every run (s468be: tmp_CIFV_B -> tmp_JVEJ_B).  The
+#                 pattern is not a guess: perl's own test.pl declares it as
+#                 $::tempfile_regexp = 'tmp_[A-Z]+_[A-Z]+' and substitutes it
+#                 away the same way in its fresh_perl comparisons.
+#
+# $tdir (perl's build t/) is stripped to "t/" so the key keeps the stable line
+# number and drops THIS machine's absolute path — the #217 family: a generated
+# artifact must not bake in build paths.
+#
+# NOT normalized here, on purpose: a description into which perl interpolates
+# its own HASH ORDER (op/hash.t "uses >0 heads (6)", op/undef.t "k1: delete",
+# op/utfhash.t "with 3 keys, key of length 4").  Those are volatile too, but
+# they are per-FILE test text rather than a token class, and one of the family
+# (op/inc.t) is volatile in the row ALIGNMENT, which no key rewrite can reach.
+# They opt out per file with *rows-unstable* instead (s468be, task #1082).
+sub rowkey_desc {
+  my ($desc, $tdir) = @_;
+  $desc = '' unless defined $desc;
+  $desc =~ s/\s+\z//;
+  $desc =~ s{\Q$tdir\E/}{t/}g if defined $tdir && length $tdir;
+  $desc =~ s/\b((?:[\w:]+=)?(?:CODE|HASH|ARRAY|SCALAR|REF|GLOB|LVALUE|FORMAT|IO|VSTRING|Regexp))\(0x[0-9a-f]+\)/$1(0xADDR)/g;
+  $desc =~ s/\btmp_[A-Z]+_[A-Z]+/tmp_TMPFILE/g;
+  return $desc;
+}
+
 
 1;
