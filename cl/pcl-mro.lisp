@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-670
+;;; pcl: pipeline=v2 gen=v2-680
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -56,26 +56,33 @@
 
 (p-eval-always (p-note-inc "warnings"))
 
-(p-sub pl-import (&rest %_args) (p-args-body (block nil)))
+(p-sub pl-import (&rest %_args) (:writes-args nil) (p-args-body (block nil)))
 
-(p-sub pl-unimport (&rest %_args) (p-args-body (block nil)))
+(p-sub pl-unimport (&rest %_args) (:writes-args nil) (p-args-body (block nil)))
 
 (p-sub pl-get_linear_isa
   (&rest %_args)
-  (p-raw-params ($class $type) (block nil (p-tail-value (mro::pl-_c3_linearize $class)))))
+  (:writes-args nil)
+  (p-raw-params (($class :scalar) ($type :scalar))
+    (block nil (p-tail-value (mro::pl-_c3_linearize $class)))))
 
-(p-sub pl-get_mro (&rest %_args) (p-args-body (block nil (p-tail-value "c3"))))
+(p-sub pl-get_mro
+  (&rest %_args)
+  (:returns :str :wantarray-insensitive t :writes-args nil)
+  (p-args-body (block nil (p-tail-value "c3"))))
 
-(p-sub pl-set_mro (&rest %_args) (p-args-body (block nil (p-return-empty))))
+(p-sub pl-set_mro (&rest %_args) (:writes-args nil) (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-get_isarev
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil (p-tail-value (make-p-box (make-array 0 :adjustable t :fill-pointer 0))))))
 
 (p-sub pl-is_universal
   (&rest %_args)
-  (p-raw-params ($class)
+  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (p-raw-params (($class :scalar))
     (block nil
       (p-void-ctx (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
         (p-foreach-raw ($u (p-cast-@ "UNIVERSAL::ISA"))
@@ -88,12 +95,17 @@
 
 (p-sub pl-invalidate_all_method_caches
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body (block nil (p-return-empty))))
 
-(p-sub pl-method_changed_in (&rest %_args) (p-args-body (block nil (p-return-empty))))
+(p-sub pl-method_changed_in
+  (&rest %_args)
+  (:writes-args nil)
+  (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-_c3_linearize
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let (($class :box (make-p-box nil)) ($seen :box (make-p-box nil)))

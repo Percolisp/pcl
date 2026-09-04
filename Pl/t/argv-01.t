@@ -112,7 +112,7 @@ diag "-------- shift/pop inside subs (should use \@_):";
     # $b is exception-partition, so #296 renames the lexical before the
     # params fast path sees it — the suffix pins that the RENAMED name still
     # collapses to p-raw-params.
-    ok($output =~ /p-raw-params \(\(\$b__excl__\d+ :\w[\w-]*\)\)/ && $output =~ /p-shift\s+\@_/,
+    ok($output =~ /p-raw-params \(\(\$b__excl__\d+ :\w[\w-]* :perl "\$b" :why :exception-global\)\)/ && $output =~ /p-shift\s+\@_/,
        'Both nested subs use @_');
 }
 

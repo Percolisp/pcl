@@ -77,7 +77,7 @@ sub test_cl {
 # partition calls it ORDINARY like any other package global (task #289).
 {
     my $cl = transpile('use feature ":5.10"; sub f { state $x = 1; $x }');
-    like($cl, qr/\(p-defcell \$x__state__\d+ \(make-p-box nil\)\)/,
+    like($cl, qr/\(p-defcell \$x__state__\d+ \(make-p-box nil\) :perl "\$x" :why :state-cell\)/,
          'state var generates a declared cell with unique name');
 }
 

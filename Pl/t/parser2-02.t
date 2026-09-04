@@ -344,7 +344,7 @@ like($s5, qr/\(&rest %_args\)[\s\S]*p-args-body/, 'W14: interleaved shift run st
 {
   my $st = Pl::Parser2->parse_code(
     q{use feature 'state'; sub c { state $n = 0; $n = $n + 1; return $n; } print c();});
-  like($st, qr/\(p-defcell \$n__state__0 \(make-p-box nil\)\)/,
+  like($st, qr/\(p-defcell \$n__state__0 \(make-p-box nil\) :perl "\$n" :why :state-cell\)/,
        'state: per-sub cell hoisted as a declared box');
   like($st, qr/\(unless \$n__state__0__init \(box-set \$n__state__0 0\) \(setf \$n__state__0__init t\)\)/,
        'state: guarded once-init in v1 shape');

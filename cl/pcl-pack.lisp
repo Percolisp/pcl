@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-670
+;;; pcl: pipeline=v2 gen=v2-680
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -45,15 +45,15 @@
 (p-defcell $b0 (make-p-box nil))
 (p-defcell $b1 (make-p-box nil))
 (p-defcell $b2 (make-p-box nil))
-(p-defcell $b__excl__0 (make-p-box nil))
-(p-defcell $b__excl__1 (make-p-box nil))
-(p-defcell $b__excl__2 (make-p-box nil))
-(p-defcell $b__excl__3 (make-p-box nil))
-(p-defcell $b__excl__4 (make-p-box nil))
-(p-defcell $b__excl__5 (make-p-box nil))
-(p-defcell $b__excl__6 (make-p-box nil))
-(p-defcell $b__excl__7 (make-p-box nil))
-(p-defcell $b__excl__8 (make-p-box nil))
+(p-defcell $b__excl__0 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__1 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__2 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__3 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__4 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__5 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__6 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__7 (make-p-box nil) :perl "$b" :why :exception-global)
+(p-defcell $b__excl__8 (make-p-box nil) :perl "$b" :why :exception-global)
 (p-defcell $bang (make-p-box nil))
 (p-defcell $be (make-p-box nil))
 (p-defcell $be2 (make-p-box nil))
@@ -196,7 +196,8 @@
 
 (p-sub pl-_pack_type_info
   (&rest %_args)
-  (p-raw-params ($ch $bang)
+  (:writes-args nil)
+  (p-raw-params (($ch :scalar) ($bang :scalar))
     (block nil
       (p-void-ctx
         (p-if (p-str-eq $ch "c")
@@ -267,6 +268,7 @@
 
 (p-sub pl-_pack_skip_ws
   (&rest %_args)
+  (:wantarray-insensitive t :writes-args nil)
   (p-args-body
     (block nil
       (p-let (($s :box (make-p-box nil)) ($ti :box (make-p-box nil)))
@@ -309,6 +311,7 @@
 
 (p-sub pl-_pack_find_group_end
   (&rest %_args)
+  (:wantarray-insensitive t :writes-args nil)
   (p-args-body
     (block nil
       (p-let (($s :box (make-p-box nil)) ($ti :box (make-p-box nil)))
@@ -335,6 +338,7 @@
 
 (p-sub pl-_pack_parse_mods
   (&rest %_args)
+  (:writes-args nil :captures ($CAN_ENDIAN $CAN_SHRIEK))
   (p-args-body
     (block nil
       (p-let
@@ -474,6 +478,7 @@
 
 (p-sub pl-_pack_template_size
   (&rest %_args)
+  (:wantarray-insensitive t :writes-args nil)
   (p-args-body
     (block nil
       (p-let (($tmpl :box (make-p-box nil)))
@@ -572,6 +577,7 @@
 
 (p-sub pl-_pack_parse_count
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let (($tmpl :box (make-p-box nil)) ($ti_ref :box (make-p-box nil)))
@@ -647,6 +653,7 @@
 
 (p-sub pl-_pack_emit_int
   (&rest %_args)
+  (:wantarray-insensitive t :writes-args nil)
   (p-args-body
     (block nil
       (p-let
@@ -674,7 +681,8 @@
 
 (p-sub pl-_unpack_read_int
   (&rest %_args)
-  (p-raw-params ($s $si $nbytes $be $signed)
+  (:wantarray-insensitive t :writes-args nil)
+  (p-raw-params (($s :scalar) ($si :scalar) ($nbytes :scalar) ($be :scalar) ($signed :scalar))
     (block nil
       (p-void-ctx
         (p-let (($slen :num (%pcl-to-number-strict (p-length $s) "$slen")))
@@ -703,20 +711,29 @@
                   (p-if (p->= $v (p-/ $max 2)) (p-decf $v $max)))))
             (p-caller-ctx (p-tail-value $v))))))))
 
-(p-sub pl-_pack_float32 (&rest %_args) (p-raw-params ($val $be) (block nil (p-tail-value ""))))
+(p-sub pl-_pack_float32
+  (&rest %_args)
+  (:returns :str :wantarray-insensitive t :writes-args nil)
+  (p-raw-params (($val :scalar) ($be :scalar)) (block nil (p-tail-value ""))))
 
-(p-sub pl-_pack_float64 (&rest %_args) (p-raw-params ($val $be) (block nil (p-tail-value ""))))
+(p-sub pl-_pack_float64
+  (&rest %_args)
+  (:returns :str :wantarray-insensitive t :writes-args nil)
+  (p-raw-params (($val :scalar) ($be :scalar)) (block nil (p-tail-value ""))))
 
 (p-sub pl-_unpack_float32
   (&rest %_args)
-  (p-raw-params ($s $si $be) (block nil (p-tail-value 0.0))))
+  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (p-raw-params (($s :scalar) ($si :scalar) ($be :scalar)) (block nil (p-tail-value 0.0))))
 
 (p-sub pl-_unpack_float64
   (&rest %_args)
-  (p-raw-params ($s $si $be) (block nil (p-tail-value 0.0))))
+  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (p-raw-params (($s :scalar) ($si :scalar) ($be :scalar)) (block nil (p-tail-value 0.0))))
 
 (p-sub pl-_pack_str_one
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let
@@ -977,6 +994,7 @@
 
 (p-sub pl-_pack_utf8_char
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let (($code :box (make-p-box nil)) ($r :box (make-p-box nil)))
@@ -1010,6 +1028,7 @@
 
 (p-sub pl-_pack_tmpl
   (&rest %_args)
+  (:writes-args nil :captures ($MAX_GROUP_DEPTH))
   (p-args-body
     (block nil
       (p-let
@@ -1890,7 +1909,8 @@
 
 (p-sub pl-_pack_check_brackets
   (&rest %_args)
-  (p-raw-params ($tmpl)
+  (:writes-args nil)
+  (p-raw-params (($tmpl :scalar))
     (block nil
       (p-void-ctx
         (p-let (($n_open :box (make-p-box nil)) ($n_close :box (make-p-box nil)))
@@ -1937,6 +1957,7 @@
 
 (p-sub pl-p_pack
   (&rest %_args)
+  (:wantarray-insensitive t :writes-args nil)
   (p-args-body
     (block nil
       (p-void-ctx
@@ -1961,6 +1982,7 @@
 
 (p-sub pl-_unpack_utf8_char
   (&rest %_args)
+  (:wantarray-insensitive t :writes-args nil)
   (p-args-body
     (block nil
       (p-let (($s :box (make-p-box nil)) ($si_ref :box (make-p-box nil)))
@@ -1991,6 +2013,7 @@
 
 (p-sub pl-_unpack_str
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let
@@ -2003,7 +2026,7 @@
           ($checksum_p :box (make-p-box nil)))
         (p-scalar-ctx (p-list-= (vector $ch $nrep $all $s $si_ref $push_val $checksum_p) @_))
         (p-void-ctx
-          (p-let (($slen :num (%pcl-to-number-strict (p-length $s) "$slen")))
+          (p-let (($slen :num (%pcl-to-number-strict (p-length $s) "$slen") :captured t))
             (let ((--pcl-if-ret--2 nil))
               (p-if
                 (setf --pcl-if-ret--2
@@ -2033,7 +2056,10 @@
                             (p-for ()
                               ((p-< $i (p-int (p-/ $n 2))))
                               ((p-incf-raw $i))
-                              (p-let (($b__excl__0 :box (make-p-box nil)))
+                              (p-let
+                                (($b__excl__0 :box
+                                    (make-p-box nil)
+                                    :perl "$b" :why :exception-global))
                                 (p-my-= $b__excl__0
                                   (p-if (p-< (p-+ (p-cast-$ $si_ref) $i) $slen)
                                     (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $i) 1))
@@ -2053,7 +2079,10 @@
                               (p-for ()
                                 ((p-< $i (p-int (p-/ $n 2))))
                                 ((p-incf-raw $i))
-                                (p-let (($b__excl__1 :box (make-p-box nil)))
+                                (p-let
+                                  (($b__excl__1 :box
+                                      (make-p-box nil)
+                                      :perl "$b" :why :exception-global))
                                   (p-my-= $b__excl__1
                                     (p-if (p-< (p-+ (p-cast-$ $si_ref) $i) $slen)
                                       (p-ord (p-substr $s (p-+ (p-cast-$ $si_ref) $i) 1))
@@ -2088,7 +2117,8 @@
                                                   (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
                                                   1))
                                               0)
-                                            "$b__excl__2")))
+                                            "$b__excl__2")
+                                          :perl "$b" :why :exception-global))
                                       (p-funcall-ref $push_val
                                         (p-bit-and (p->> $b__excl__2 (p-- 7 (p-% $i 8))) 1))))))
                               (progn
@@ -2109,7 +2139,8 @@
                                                     (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
                                                     1))
                                                 0)
-                                              "$b__excl__3")))
+                                              "$b__excl__3")
+                                            :perl "$b" :why :exception-global))
                                         (p-.= $bits
                                           (p-if
                                             (p-bit-and (p->> $b__excl__3 (p-- 7 (p-% $i 8))) 1)
@@ -2141,7 +2172,8 @@
                                                     (p-+ (p-cast-$ $si_ref) (p-int (p-/ $i 8)))
                                                     1))
                                                 0)
-                                              "$b__excl__4")))
+                                              "$b__excl__4")
+                                            :perl "$b" :why :exception-global))
                                         (p-funcall-ref $push_val
                                           (p-bit-and (p->> $b__excl__4 (p-% $i 8)) 1))))))
                                 (progn
@@ -2164,7 +2196,8 @@
                                                         (p-int (p-/ $i 8)))
                                                       1))
                                                   0)
-                                                "$b__excl__5")))
+                                                "$b__excl__5")
+                                              :perl "$b" :why :exception-global))
                                           (p-.= $bits
                                             (p-if (p-bit-and (p->> $b__excl__5 (p-% $i 8)) 1)
                                               "1"
@@ -2300,7 +2333,10 @@
                                                 "cl/pack-impl.pl line 878"
                                                 "Unterminated compressed integer in unpack
 "))
-                                            (p-let (($b__excl__6 :box (make-p-box nil)))
+                                            (p-let
+                                              (($b__excl__6 :box
+                                                  (make-p-box nil)
+                                                  :perl "$b" :why :exception-global))
                                               (p-my-= $b__excl__6
                                                 (p-ord
                                                   (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))
@@ -2315,6 +2351,7 @@
 
 (p-sub pl-_unpack_tmpl
   (&rest %_args)
+  (:writes-args nil :captures ($MAX_GROUP_DEPTH))
   (p-args-body
     (block nil
       (p-let
@@ -2441,7 +2478,10 @@
                                                     "cl/pack-impl.pl line 937"
                                                     "Unterminated compressed integer in unpack
 "))
-                                                (p-let (($b__excl__7 :box (make-p-box nil)))
+                                                (p-let
+                                                  (($b__excl__7 :box
+                                                      (make-p-box nil)
+                                                      :perl "$b" :why :exception-global))
                                                   (p-my-= $b__excl__7
                                                     (p-ord
                                                       (p-substr $s
@@ -2566,7 +2606,8 @@
                                                                   (p-last))
                                                                 (p-let
                                                                   (($b__excl__8 :box
-                                                                      (make-p-box nil)))
+                                                                      (make-p-box nil)
+                                                                      :perl "$b" :why :exception-global))
                                                                   (p-my-= $b__excl__8
                                                                     (p-ord
                                                                       (p-substr $s
@@ -2911,6 +2952,7 @@
 
 (p-sub pl-_next_format_item
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let (($tmpl :box (make-p-box nil)))
@@ -2940,6 +2982,7 @@
 
 (p-sub pl-p_unpack
   (&rest %_args)
+  (:writes-args nil)
   (p-args-body
     (block nil
       (p-let (($tmpl :box (make-p-box nil)) ($s :box (make-p-box nil)))
@@ -2997,7 +3040,7 @@
                         (p-scalar-ctx
                           (p-list-= (vector $cs_tmpl $rest_tmpl)
                             (p-list-ctx (pl-_next_format_item $tmpl))))
-                        (p-let (($checksum :box (make-p-box nil)))
+                        (p-let (($checksum :box (make-p-box nil) :captured t))
                           (p-my-= $checksum 0)
                           (p-if (p-length $cs_tmpl)
                             (progn

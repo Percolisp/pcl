@@ -2,6 +2,66 @@
 
 Append new entries at the top. One section per session.
 
+## Session 469bg (Opus agent, 2026-09-05) — #1035 steps 2–4: the compiler's own FACTS printed on the declaration forms; step 4 decided, measured, deferred
+
+Steps 0+1 (s466) made every perl `my` print through ONE printer as
+`(p-let ((NAME CLASS INIT)) …)`.  This session added the FACTS that printer was
+built for, did the same for parameters, subs and promoted CELLS, and settled
+the source-map question with numbers.
+
+**The byte-identical prep step first.**  `p-sub` was spelled at three sites of
+`_lower_sub_inner` — the rule-11 shape that makes a per-sub fact impossible to
+add without adding it three times.  `_sub_form` is now the one printer:
+corpus-diff IDENTICAL, lib 22/22 SAME, no generation bump.
+
+**The rename manifest, and the mistake worth recording.**  Six mint sites call
+one registrar with a closed reason; one reader prints it back.  The first
+version annotated `p-let` entries only and declared the arithmetic closed at
+129 — but a rename has THREE carriers, and the two families the task named
+first (`:captured`, `:spanning`) never bind a `let` at all: they publish a
+package cell.  A count that closes over the wrong population closes over
+nothing.  The merge review caught it; the fix routes all eight
+`global_decl_form` calls through one `_decl_cell`, gives `p-raw-params` entries
+the same tail, and re-closes the arithmetic by MATCHING every registration
+against a printed pair — 283 registrations, 282 annotated, 0 unannotated, the
+one absent verified as a `given/when` refusal whose declaration never reaches
+emission.
+
+**Re-closing it found a second bug.**  `perl-tests/aassign.t` renames `$a`
+twice, and recording only the last link made `:perl` name a compiler-invented
+intermediate — a spelling nowhere in the perl program, which is worse than
+saying nothing.  The manifest now follows the chain to the source and lists
+both reasons.
+
+**Parameters and subs.**  Each `p-raw-params` entry is `(NAME CLASS . FACTS)`
+from the same `_slot_class` and the same `_decl_facts`; `p-sub` carries a facts
+plist at a fixed position, always printed, with six keys the compiler had
+already proven and was throwing away.  Two sources had to be made to answer per
+sub rather than per file: the eval scan lost its `last` early-out, and
+`_captured_in_subs` gained a collector so the promotion records which subs it
+promoted for.
+
+**It is all syntax, and one instrument could not say so.**
+`PCL_IR_PLAIN=1 tools/corpus-diff.pl 57969a2` reads IDENTICAL over 111 files;
+form counts are identical on both trees; emitted bytes +0.91 %; compile time
+2.76 → 2.79 s (+1.1 %).  `tools/bench-emission-ab.pl` times two emissions
+against ONE core, and step 3 changed `p-sub`'s lambda list, so the base
+emission does not load — it answers `OUTPUTS DIFFER — not timed` (#1095).  The
+zero-cost evidence is macroexpansion equality instead, which is stronger: the
+compiled S-expression is the same form.
+
+**Step 4 is decided, measured and not implemented.**  The grammar is a comment
+`;; @ FILE:LINE`, not a `(p-line N)` form — a marker is a real form the host
+must delete, and in tail position it would change a block's value.  Cost:
+39 717 statements, 28 bytes each = +38.4 % of emitted bytes; reader cost
+1.4 → 1.8 ms at one marker per LINE.  The blocker is structural — 71 return
+paths across four lowerers, no ONE statement printer — so step 4 needs its own
+step-0, exactly as declarations did.
+
+Bars: gate 199 files / 6793 rows, only the 13 pclxs xs rows; generation v2-680; the three artifacts regenerated on the
+rebased tree; guard `Pl/t/decl-facts-01.t` (35 rows).  No sweep run and none
+owed — the expansion is identical, so nothing the sweep measures can move.
+
 ## Session 469bh (Opus agent, 2026-09-05) — the explicit-`return` bench rows (#1046), the subscript use class for all eight access spellings (#1056), and the infinite loop underneath it (#1105); #996 measured and designed, not shipped
 
 **#1046 — a bench row that cannot see its transform.**  Every sub in

@@ -295,7 +295,7 @@ unlike($capt, qr/\(p-let \(\(\$n\b/, 'W5: promoted cell is NOT let-bound');
 # the shadow scope keeps its own name (M-C shadow-aware count + rewrite).
 my $captm = Pl::Parser2->parse_code(
   q{my $n = 1; sub bump { $n + 1 } { my $n = 9; print $n; } print bump(), "\n";});
-like($captm, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\)\)/,
+like($captm, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\) :perl "\$n" :why :captured\)/,
      'W5: shadowed captured lexical gets a MANGLED cell');
 like($captm, qr/\(p-scalar-= \$n__file__\d+ 1\)/, 'W5: renamed cell assigned in place');
 like($captm, qr/\(p-let \(\(\$n (?::scalar 9|:box \(make-p-box)/,
@@ -326,7 +326,7 @@ for my $case (
 ) {
   my ($what, $src) = @$case;
   my $cl = Pl::Parser2->parse_code($src);
-  like($cl, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\)\)/,
+  like($cl, qr/\(p-defcell \$n__file__\d+ \(make-p-box nil\) :perl "\$n" :why :captured\)/,
        "#470: $what demotes the captured lexical to a mangled cell");
   # …and the declaration's own initialisation writes THAT cell, not `$n` —
   # the `our` case still emits a plain `$n` cell, which is the package
@@ -350,7 +350,7 @@ like($capt_sig, qr/\(p-defcell \$n \(make-p-box nil\)\)/,
 # The span pass carries the same identity branch and the same amendment.
 my $span_q = Pl::Parser2->parse_code(
   qq{my \$x = 1;\npackage Foo;\nprint \$x;\nprint \$main::x;\n});
-like($span_q, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\)\)/,
+like($span_q, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\) :perl "\$x" :why :spanning\)/,
      '#470: a qualified read demotes the SPANNING lexical too');
 like($span_q, qr/main::\$x__file__\d+/,
      '#470: the later section reads the mangled cell, qualified');
@@ -566,7 +566,7 @@ like($nest, qr/\(p-declare-sub pl-geta\)/, 'hoisted sub gets p-declare-sub');
 # W5: the static-variable idiom (block lexical captured by a nested sub) is
 # rewritten to a shared package cell — no gate.
 my $capt2 = Pl::Parser2->parse_code(q[{ my $x = 0; sub bump2 { $x = $x + 1; return $x; } } print bump2(), "\n";]);
-like($capt2, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\)\)/,
+like($capt2, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\) :perl "\$x" :why :captured\)/,
      'W5: static-variable idiom gets a declared cell');
 like($capt2, qr/\(p-sub pl-bump2/, 'W5: capturing nested sub still hoisted');
 
