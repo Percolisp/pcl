@@ -1327,6 +1327,21 @@ HDR
 # and a moved row would read twice and be fixed once.
 sub row_gated_here { my ($rel) = @_; return !$expected{$rel} && !$fixture{$rel} }
 
+# A file whose blessed rows are exactly ONE `*rows-unstable*` entry opts OUT of
+# the ROW check.  This is the same hand-placed, bless-surviving opt-out that
+# baselines/perl-suite-expected-rows.tsv has carried since s336
+# (mro/package_aliases_utf8.t) and s399 (op/assignwarn.t): a MEASURED claim that
+# the file's row SET is nondeterministic while its COUNTS are not, so the count
+# snapshot and the shortfall keep gating it and only the row multiset stands
+# down.  Registered here (s468be, task #1082): four files whose descriptions
+# interpolate perl's own hash order, measured DIFFERENT in two runs of ONE tree.
+# The rest of the line is the CAUSE, and it travels with the row.
+sub fails_rows_unstable {
+  my ($rel) = @_;
+  my @r = @{ $blessed_fails{$rel} || [] };
+  return (@r == 1 && $r[0] =~ /^\*rows-unstable\*/) ? $r[0] : undef;
+}
+
 # Did this run produce a COMPARABLE TAP stream for this file?  A file that
 # never got to its assertions cannot verify anything about its blessed rows —
 # the same rule as sweep-diff.pl's ran_clean(), and the reason a TRANSPILE this
@@ -1356,6 +1371,7 @@ sub bless_fail_rows {
   for my $rel (keys %results) {
     my $st = $results{$rel}[5];
     if (!row_gated_here($rel)) { delete $rows{$rel}; next }
+    next if fails_rows_unstable($rel);     # hand-placed opt-out survives a bless
     next unless row_verifiable($st);       # unmeasured: keep what is blessed
     delete $rows{$rel};
     $touched++;
@@ -1392,6 +1408,17 @@ sub bless_fail_rows {
 # 500 to the per-test log, so its multiset here is PARTIAL and a new failure
 # past row 500 is invisible.  The log says so in a `# TRUNCATED:` line and the
 # runner counts such files in every report.
+#
+# *rows-unstable*: a file whose ONLY line here is
+#   <rel> <TAB> 0 <TAB> (none) <TAB> rows-unstable <TAB> *rows-unstable* <cause>
+# opts OUT of the row check and KEEPS that line through a bless — the same
+# hand-placed opt-out perl-suite-expected-rows.tsv has carried since s336.  It
+# is a MEASURED claim: the file's row SET is nondeterministic, its COUNTS are
+# not, so the count snapshot and the shortfall still gate it.  Registered
+# s468be (task #1082): op/hash.t, op/inc.t, op/undef.t, op/utfhash.t, whose
+# descriptions interpolate perl's own hash order ("uses >0 heads (6)", "k1:
+# delete", "key '2' incremented correctly") and were measured DIFFERENT in two
+# runs of ONE tree.
 HDR
   printf $out "# taken-at: %s %s\n", stamp_session(), stamp_today();
   my $n = 0;
@@ -1572,11 +1599,14 @@ sub report_row_diff {
         . " (bless one with: tools/run-perl-suite.pl --all --bless-fails)\n";
     return;
   }
-  my (@new, @fixed, @unver, @trunc, @unstable);
+  my (@new, @fixed, @unver, @trunc, @unstable, @optout);
   my %seen;
   for my $rel (sort keys %results) {
     $seen{$rel} = 1;
     next unless row_gated_here($rel);
+    # A registered *rows-unstable* file: its COUNTS gate (snapshot + shortfall),
+    # its row multiset does not.  Named on every run so the opt-out is visible.
+    if (my $why = fails_rows_unstable($rel)) { push @optout, [$rel, $why]; next }
     my $st = $results{$rel}[5];
     my @reg = @{ $blessed_fails{$rel} || [] };
     my ($rows, undef, $tr) = diverging_rows_full($rel);
@@ -1639,6 +1669,7 @@ sub report_row_diff {
     printf "  ~ %-24s %d new row(s) in a file that produced no comparable TAP — noise, not a regression\n",
       $_, $by{$_} for sort keys %by;
   }
+  printf "  = %-24s %s\n", $_->[0], short_cause($_->[1], 100) for @optout;
   printf "  ! %-24s -%d passing row(s) (snapshot %s, now %s)\n", @$_[0,1,2,3] for @lost_rows;
   printf "  %d blessed row(s) in %d file(s) this run did not look at — NOT verified, not fixed\n",
     $absent_rows, $absent_files if $absent_rows;

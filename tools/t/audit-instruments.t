@@ -167,4 +167,39 @@ sub run_diff {
   is_deeply(\@only_b, ['gamma'], 'a blessed row that stopped diverging is a FIXED ROW');
 }
 
+# ── I1: the *rows-unstable* opt-out (s468be, task #1082) ───────────────────
+# A file whose blessed rows are exactly ONE `*rows-unstable*` entry opts out of
+# the ROW check and keeps that entry through a bless (run-perl-suite.pl's
+# fails_rows_unstable + bless_fail_rows).  The predicate is restated here; the
+# check that MATTERS is the one below it, over the real baseline: an opt-out
+# entry sitting BESIDE ordinary rows is a silent no-op — the file would still
+# be row-checked and the operator would believe it was not.
+{
+  my $unstable = sub { my @r = @_; return (@r == 1 && $r[0] =~ /^\*rows-unstable\*/) ? 1 : 0 };
+  is($unstable->('*rows-unstable* perl interpolates its own hash order'), 1,
+     'one *rows-unstable* row opts the file out');
+  is($unstable->('*rows-unstable* x', 'a real row'), 0,
+     'an opt-out beside real rows does NOT opt out (it would be a silent no-op)');
+  is($unstable->('a real row'), 0, 'an ordinary file is row-checked');
+  is($unstable->(), 0, 'a file with no blessed rows is row-checked');
+
+  my $base = "$RealBin/../../baselines/perl-suite-fails.tsv";
+ SKIP: {
+    skip "no $base in this checkout", 2 unless -e $base;
+    my %rows;
+    open my $bf, '<', $base or die "open $base: $!";
+    while (<$bf>) {
+      chomp; next if /^\s*(?:#|$)/;
+      my ($rel, $num, $pv, $cv, $key) = split /\t/, $_, 5;
+      push @{ $rows{$rel} }, $key if defined $key;
+    }
+    close $bf;
+    my @registered = sort grep { grep { /^\*rows-unstable\*/ } @{ $rows{$_} } } keys %rows;
+    my @broken = grep { !$unstable->(@{ $rows{$_} }) } @registered;
+    is_deeply(\@broken, [], 'every *rows-unstable* file in the real baseline is its ONLY row');
+    cmp_ok(scalar @registered, '>=', 1,
+           'the baseline carries the registrations the header documents');
+  }
+}
+
 done_testing();
