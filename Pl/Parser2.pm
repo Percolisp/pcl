@@ -7845,25 +7845,37 @@ sub _lower_sub_inner {
       # landed whole in the first param (task #80: Moo's Sub::Util shim,
       # reached through _Utils's _subname(@_) delegation).  All-scalar calls
       # take p-raw-params' no-allocation fast path.
-      return ['p-sub', $clname, ['list', '&rest', '%_args'],
+      return $self->_sub_form($clname,
               ['p-raw-params', ['list', map { cl_sym($_) } @$params],
                 ['block', 'nil', $self->_lower_body_regime(\@body_stmts, $vi),
-                  ($tail_param ? (cl_sym($tail_param)) : ())]]];
+                  ($tail_param ? (cl_sym($tail_param)) : ())]]);
     }
     # Old convention with boxed params + synthesized list-assign binding.
     $vi->{$_} = { unboxable => 0 } for @$params;
-    return ['p-sub', $clname, ['list', '&rest', '%_args'],
+    return $self->_sub_form($clname,
             ['p-args-body', ['block', 'nil',
               _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)') } @$params],
                 Pl::CLForm::ctx_bind('nil',
                   ['p-list-=', ['vector', map { cl_sym($_) } @$params], '@_']),
                 $self->_lower_body_regime(\@body_stmts, $vi),
-                ($tail_param ? (cl_sym($tail_param)) : ()))]]];
+                ($tail_param ? (cl_sym($tail_param)) : ()))]]);
   }
 
   my $vi = Pl::VarAnnotator->analyze(\@stmts, undef, $self->_cur_sub_info, $self);
-  return ['p-sub', $clname, ['list', '&rest', '%_args'],
-          ['p-args-body', ['block', 'nil', $self->_lower_body_regime(\@stmts, $vi)]]];
+  return $self->_sub_form($clname,
+          ['p-args-body', ['block', 'nil', $self->_lower_body_regime(\@stmts, $vi)]]);
+}
+
+# THE ONE SUB-DEFINITION PRINTER (task #1035, step 3).
+# `p-sub` was spelled at the three sites of `_lower_sub_inner` above -- the
+# rule-11 shape that makes a per-sub FACT impossible to add without adding it
+# three times, and that is exactly why the compiler's proven facts about a sub
+# (its return family, wantarray-insensitivity, whether it writes through @_)
+# reached emission and were thrown away.  One printer; the facts plist arrives
+# here in the next step.
+sub _sub_form {
+  my ($self, $clname, $body) = @_;
+  return ['p-sub', $clname, ['list', '&rest', '%_args'], $body];
 }
 
 # Sub-body :void regime (task #60 — v1's wa_void_active model): bind
