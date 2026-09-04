@@ -277,6 +277,56 @@ announcement (#155) — and it also *proves the rule*: perl's `STORE` writing
 `$_[1]` does not reach the caller's key variable, so a subscript really is
 only a read.
 
+
+**s468bd finish (2026-09-04, Opus).**  The branch was rebased onto main
+(`9bee19b`) and every bar re-run on the rebased tree.  The one blocker was a
+STALE GUARD, not the change: main's #1035 step 1 (`f330e5f`) made every `my`
+binding print as `(p-let ((NAME CLASS INIT)) …)`, and `Pl/t/lvalue-root-01.t`
+still grepped the old `(let ((` spelling — 21 of its 23 rows failed, and the
+two `unlike` rows passed VACUOUSLY (a regex that matches nothing cannot
+fail).  All 23 rows are respelled and STRENGTHENED with the class the tree
+actually emits, probed row by row before each regex was written: every raw
+row is `:scalar` (no `:num`/`:str` among them) and every box row `:box`, so a
+row can no longer pass on a shape that has lost its verdict, and the two
+`unlike` rows now assert the ABSENCE of `($k :box (make-p-box nil))`.  **The
+inverse guard's BASE moves with the spelling**: 57848f3 predates `p-let`, so
+every row would fail there for the WRONG reason.  Measured on a MAIN worktree
+(`9bee19b`): rows 1-4, 6-12 and 14 FAIL — the emission there is
+`(p-let (($k :box (make-p-box nil))) (p-my-= $k (p-. "k" $n)) …)` — and the
+other eleven pass.
+
+Post-rebase numbers.  Gate **197 files / 6719 tests**, failures only the 13
+pclxs xs rows (xs-01 5, xs-02 4, xs-03 4).  `tools/corpus-diff.pl 9bee19b`:
+emission **IDENTICAL** across 111 files + 6 shapes, silent drops 5 unchanged.
+Emission A/B over `lib/**/*.pm` (22 files): **20 SAME / 2 DIFF / 0 RCDIFF**
+(List::Util, Math::BigInt::Calc).  Over the WIDE population — 22 lib + perl's
+own t/ 605 + cpan-tests 402 + 6 shapes = **1035 files: 1015 SAME / 20 DIFF /
+0 RCDIFF** — every diff was read, and every one is the same family: a binding
+whose only "write" was through a subscript loses `(make-p-box nil)` +
+`p-my-=` for a raw `:scalar`/`:str` let-init, a foreach variable takes the
+`-raw` arm, a `p-for` init hoists into the `let` with `p-incf-raw`, and
+Test2's `$class` turns `p-args-body` into `p-raw-params`.  Full sweep **GATE
+clean, TOTAL passing 18493 (+0)**, 0 new / 0 fixed, LOST empty, drops 5 =
+census (+0), SHORTFALL 12257 (+0); **`pack.t` OK 5636 / 89, 0 drops**, on the
+`cl/pcl-pack.lisp` regenerated for this tree.  `PCL_OPT=none` runs
+IDENTICALLY on all 21 of the session's probe programs once the PID-named
+`/tmp/runpcl_N.lisp` path and the SBCL thread id are normalized (without that
+normalization two "differ" on their own temp-file names).  Companion on the
+three snapshot-tracked files whose emission moves: `op/groups.t` OK 4/0,
+`op/signame_canonical.t` DIFF, `re/reg_mesg.t` DIFF, ROW DIFF **0 NEW / 0
+FIXED / 0 UNVERIFIED / 0 LOST**, DROPS 0.  `re/reg_mesg.t`'s `sig` text still
+differs from the blessed snapshot ("Undefined subroutine &main::display_rx
+called" vs "The function main::pl-display_rx is undefined") and it is
+PROVABLY not ours: `cl/pcl-runtime.lisp` is byte-identical to main but for
+the generation stamp, and main's runtime already carries the new wording.
+
+Bench re-measured on a quiet box against `main`, arrhash-k and its control
+interleaved in the same window: **arrhash-k −21.7 % / −24.3 % / −22.3 %**
+(median −22.3 %, emission DIFFERENT on every run), against the byte-IDENTICAL
+`feread` control at **−0.3 %** — inside the record's −17 … −36 % band and far
+outside the control's noise.  Generation stays **v2-640**; the three
+checked-in artifacts are the ones regenerated on the rebased tree.
+
 ## Session 465ba (2026-09-03, Opus, round 23) — #1028: the bitwise `& | ^ ~` MODE DECISION (bop.t 253/256 → 480/29, the largest cluster in the sweep baseline) + #1032: a bareword filehandle is a NAME in a stat / filetest slot
 
 **#1028.**  perl's `pp_bit_and` asks ONE question of the two operands — `SvNIOKp(left) || SvNIOKp(right)`, does either SV carry a NUMBER? — and if neither does, `do_vop` STRINGIFIES both and operates byte by byte.  PCL asked `(and (stringp v) (not (looks-like-number v)))`, which sends every NON-string state to the NUMERIC side, so `undef | "abc"` was 0 where perl says `abc` and `[1] | "\0"x40` was 1 where perl says `ARRAY(0x…)`.  229 blessed `bop.t` rows — a third of the entire baseline — behind one predicate, with no recorded cause.  ONE classifier now, `%p-bitwise-operand-kind`, enumerating the same box states `stringify-value` and `box-nv` enumerate and answering :NUMBER / :STRING / :REFERENCE; an unlisted state DIES naming its type.
