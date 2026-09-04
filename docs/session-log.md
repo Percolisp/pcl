@@ -22,7 +22,7 @@ shared `COMMON.md`) BEFORE launch and copied by each agent into
 | BF = s469bf | companion ROW DIFF attribution of re/ comp/ run/ (s468's full run: 199 NEW / 74 FIXED / 84 UNVERIFIED / 2 LOST; s468's `.suitelog` copied to its scratch first) | `.claude/worktrees/agent-a0fecca95db4e2759` | in flight, told to STOP; no compiler change, no generation |
 | BG = s469bg | #1035 steps 2–4 | `.claude/worktrees/agent-af8ba53a7b37a7a58` (pruned after merge; scratch archived) | FINISHED, follow-up DONE, rebased, **MERGED ff = main `600ed53`, gen v2-680** (gate 199/6793 xs-only; manifest arithmetic 283 registrations / 282 annotated / 1 verified absent = a given/when refusal; #1096 filed) |
 | BH = s469bh | perf: #1046 + #1056 + #1105 + #996 measured | pruned; scratch archived `~/pcl-agent-scratch/s469/bh-agent-ab83d94ab96620fab/` | **MERGED ff = main `57969a2`, gen v2-670** |
-| BI = s469bi | correctness pool #1045 → #1020 → #1084 → #1083 (closure-identity half) → #1022 (loud half mandatory, dynamic half measure-first) | `.claude/worktrees/agent-a4b9fedc2175a6513` (gen **v2-690**, IDs 1115–1124) | launched when BH's slot freed; told to STOP |
+| BI = s469bi | correctness pool #1045 → #1020 → #1084 → #1083 (closure-identity half) → #1022 (loud half mandatory, dynamic half measure-first) | `.claude/worktrees/agent-a4b9fedc2175a6513` (gen **v2-690**, IDs 1115–1124) | STOPPED with **0 commits and an UNCOMMITTED 8-file diff (+102/−13)** in the worktree: #1045 code-complete (corpus-diff 2/111 = the two `goto &NAME` files, emission-ab 1041/7/0, 3 guard rows), #1084 code-complete (`p-do` read fixed: octet buffer + discarded `read-sequence` count + UTF-8 default, guard row NOT yet written), #1020 / #1083 / #1022 diagnosed only (STOP.md has the causes); its one gate run was CONTAMINATED (see the trap below) so nothing met the bar |
 
 **BG review (Fable, own probes).**  The runtime's declaration vocabulary is
 ONE closed block ahead of `p-sub`/`p-raw-params`/`p-let`; a registrar
@@ -67,7 +67,7 @@ snippet is prettified (the real output breaks the line inside `"\n"`), the
 bench table lacks `arrhash-k`; a comparison-with-alternatives paragraph and a
 three-line Quicklisp recipe would help a first visitor.
 
-**Part 3 — STOPPED (USER: shutdown, out of tokens).**  Each in-flight agent
+**Part 3 — STOPPED (USER: shutdown, out of tokens).**  **New trap (BI): editing `cl/pcl-runtime.lisp` WHILE `tools/prove-core` runs re-keys the content-addressed core and prunes the one the running gate is using — the gate is contaminated; never edit the runtime under a running gate.**  Each in-flight agent
 was told: commit finished, coherent work by name; leave half-done diffs in
 the working tree; write `scratch/<label>/STOP.md` (committed shas, the
 uncommitted `git diff --stat`, which bars ran on which sha, what the next
