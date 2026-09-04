@@ -127,6 +127,11 @@ sub verdicts {   # [ "perlnum perlverb pclverb(pclnum)" ] for diverging pairs on
      'a hex CONSTANT in a description is STABLE and keeps its text (op/index.t)');
   is(rowkey_desc('tmpfile is fine'), 'tmpfile is fine',
      'a word that merely starts with tmp is not a tempfile name');
+  is(rowkey_desc("tmpfile '/tmp/pcl-test-338873-2' exists"),
+     "tmpfile '/tmp/pcl-test-TMPFILE' exists",
+     "PCL's own test.pl stub spells tempfile() with the PID — normalized too (run/cloexec.t, 2 *extra* rows)");
+  is(rowkey_desc('/tmp/pcl-test-suite is fine'), '/tmp/pcl-test-suite is fine',
+     'a path that merely starts with /tmp/pcl-test- is not a tempfile name');
   is(rowkey_desc('[at /build/perl-5.40.3/t/op/closure.t line 653]', '/build/perl-5.40.3/t'),
      '[at t/op/closure.t line 653]',
      "this machine's build path is stripped, the stable line number kept (#217)");

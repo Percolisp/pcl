@@ -119,6 +119,17 @@ sub align_taps {
 #                 pattern is not a guess: perl's own test.pl declares it as
 #                 $::tempfile_regexp = 'tmp_[A-Z]+_[A-Z]+' and substitutes it
 #                 away the same way in its fresh_perl comparisons.
+#   /tmp/pcl-test-PID-N
+#                 the SAME token from OUR side of the pair: PCL's transpilable
+#                 test.pl stub (perl-tests/t/test.pl:343) spells tempfile() as
+#                 "/tmp/pcl-test-$$-$counter", so a PCL-only row quoting the
+#                 name carried a new PID every run (s469bf: run/cloexec.t's two
+#                 "*extra* tmpfile '…' exists" rows, /tmp/pcl-test-64955-2 ->
+#                 /tmp/pcl-test-338873-2).  A per-run token is a per-run token
+#                 whichever side wrote it; the row is only blessable once it is
+#                 gone.  NOTE that this does NOT make the row PAIR with perl's:
+#                 the two stubs use different NAMES, which is why cloexec's
+#                 four rows are 2 (missing) + 2 *extra* — task #1085.
 #
 # $tdir (perl's build t/) is stripped to "t/" so the key keeps the stable line
 # number and drops THIS machine's absolute path — the #217 family: a generated
@@ -137,6 +148,7 @@ sub rowkey_desc {
   $desc =~ s{\Q$tdir\E/}{t/}g if defined $tdir && length $tdir;
   $desc =~ s/\b((?:[\w:]+=)?(?:CODE|HASH|ARRAY|SCALAR|REF|GLOB|LVALUE|FORMAT|IO|VSTRING|Regexp))\(0x[0-9a-f]+\)/$1(0xADDR)/g;
   $desc =~ s/\btmp_[A-Z]+_[A-Z]+/tmp_TMPFILE/g;
+  $desc =~ s{/tmp/pcl-test-\d+-\d+}{/tmp/pcl-test-TMPFILE}g;
   return $desc;
 }
 
