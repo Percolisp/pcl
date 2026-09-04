@@ -2,6 +2,91 @@
 
 Append new entries at the top. One section per session.
 
+## Session 468 (Fable, 2026-09-04) — ROUND 23 COMPLETE: BD (#995) + BC (#1037) + BE (the companion ROW DIFF attribution) reviewed and MERGED ff; the round-end legs on the final tree; the prompts of a round are now files in the worktrees
+
+**Part 0 — the relaunch, made durable.**  s467 had reconstructed s466's
+three in-flight agents and stopped them at the USER's word.  This session
+wrote each agent's full instructions into its worktree first
+(`scratch/s468bd/prompt.md`, `s468bc`, `s468be` — untracked, never
+committed) and launched three Opus agents on the KEPT worktrees at 08:20
+from main `9bee19b`, with the bench told to run first on the quiet box and
+the other two told to read for twenty minutes before starting an SBCL.
+Both compiler diffs were read while they ran (below); each agent wrote its
+numbers into its own record section and committed BEFORE reporting, so a
+dying parent session no longer loses a round.
+
+**Part 1 — BD, #995 (`_tw_mark_lvalue`): MERGED ff as main `0e0b0b9`, gen
+v2-640.**  The diff is one helper on every write arm of `Pl::VarAnnotator`'s
+tree walk — a plain `%h`/`@a` root writes no scalar, a scalar root keeps
+`write-deref-viv`, anything else keeps the caller's whole-subtree marking —
+and four extra shapes probed in review (`push @{$h{$k}}`, `local $h{$k}`,
+a foreach alias over an element: raw; an lvalue `substr($h{$k},…) = …`:
+still boxed, filed on #1056).  The ONLY blocker had been a STALE GUARD:
+`Pl/t/lvalue-root-01.t` grepped `(let ((` after main's #1035 step 1 made
+every binding print `(p-let ((NAME CLASS INIT)))`; 21/23 failed and the two
+`unlike` rows passed vacuously.  Respelled row by row as a STRENGTHENING
+(every raw row asserts `:scalar`, every box row `:box`), inverse-guarded on
+a MAIN worktree (rows 1-4, 6-12, 14 fail there — a base older than
+`f330e5f` fails every row for the wrong reason).  Bars on the rebased tree:
+gate 197/6719 xs-only; corpus-diff IDENTICAL over 111 + shapes, drops 5;
+lib A/B 20 SAME / 2 DIFF / 0 RCDIFF; wide A/B 1015 SAME / 20 DIFF / 0 RCDIFF
+(one family); sweep GATE clean TOTAL 18493 (+0), LOST empty, pack.t
+5636/89 on the regenerated artifact; `PCL_OPT=none` identical on 21
+probes; `arrhash-k` −21.7 / −24.3 / −22.3 % vs a byte-identical `feread`
+control at −0.3 %.
+
+**Part 2 — BC, #1037 (a ruled refusal is a STATEMENT-level event): MERGED ff
+as main `b128345`, gen v2-650.**  Review of the compiler diff: ONE builder
+(`refusal_statement_cl`) reached by the drop classifier and by Parser2's
+`class NAME ;` route through `refused_statement_form`; ONE announcer with
+its own verb (`PCL: refused statement at …`) so a refusal never enters the
+drop census; string-eval mode unchanged (#363); `Pl/t/PCLCore.pm`'s
+`transpile()` fails a row on the announcement.  Live probe: rows before a
+`given` run, the statement dies trappably with the ruled text in `$@`, the
+rows after it run, a sub containing one dies only when called.  Two
+rebases in one pass (onto `9bee19b`, then onto BD's `0e0b0b9`); the three
+artifacts regenerated with bodies byte-identical to main's.  Bars: gate
+198/6743 xs-only; corpus-diff exactly `state.t` (nothing → 1310 lines, ONE
+`;; RULED REFUSAL:`, zero `;; PARSE ERROR:`), drops 5; lib A/B 22 SAME;
+wide A/B 999 SAME / 17 DIFF / 17 RCDIFF, every one transpile-FAIL → rc 0;
+gate-SET scan 638×2 = exactly those 17 verdicts; sweep GATE clean, TOTAL
+18493 → **18581 (+88 = perl-tests/state.t entering by EDIT)**, LOST 0.
+The companion half: sixteen files measured, read row by row and blessed per
+file; two XDIFF registrations de-registered after reading (op/coreamp.t,
+op/tie_fetch_count.t — their rows are not the refusal their reasons cited);
+two census rows added with cause (17/57 → 19/62, the s409 legal rise).
+Every baseline edit verified here to touch ONLY its own files' rows (seven
+tsv files, unowned rows byte-identical in order).
+
+**Part 3 — BE, the companion ROW DIFF attributed: MERGED ff as main
+`a715608`.**  178 NEW / 407 FIXED / 2 LOST over ten files, four
+causes, no residue: #1028 (op/bop.t 217 FIXED, uni/overload.t 6 — BISECTED
+over 1fed80b / 73edcff / 0e7c5e3 worktrees), #1032 (op/write.t 86/86 through
+the 500-row log cap, op/filetest.t 4 → #1047, op/closure.t 2), the
+volatile-key class (op/hash.t / op/inc.t / op/undef.t / op/utfhash.t —
+perl's own hash order in the DESCRIPTIONS, measured over four runs of one
+tree; registered `*rows-unstable*` in I1, named on every run, counts still
+gating; #1082), and a PID-derived tempfile name (op/require_errors.t —
+normalised by perl's own `$::tempfile_regexp` in the ONE key projection
+`PclTapAlign::rowkey_desc`).  The 2 LOST were load.  Verified here: 19,363
+untouched rows byte-identical in order; `tools/t` 52/52.  Standing lessons
+in DECIDED §s468 (three runs before calling a row set stable; read both
+count columns).
+
+**Part 4 — the round-end legs on the final tree.**
+
+| leg (final tree `a715608`, gen v2-650) | result |
+|---|---|
+| cold gate `PCLXS_DIR=~/pclxs tools/prove-core` | **198 files / 6,743 rows**, failing rows = the 13 pclxs xs rows only (372 s wall) |
+| full sweep `--jobs 8` | **GATE clean**, TOTAL passing **18,581 (+0)** against the edited baseline, drops 5 = census |
+| companion `PCL_SESSION=s468 tools/run-perl-suite.pl --all --jobs 4 --bless-stamps` | 528 files: 92 OK / 31 NOTAP / 107 XDIFF / 1 FIXTURE / 297 UNEXPLAINED (DIFF 276); **13 NOT-RUN stamps blessed at s468** (`baselines/perl-suite-notrun-stamps.tsv`; op/list.t + op/pack.t still NEVER — quarantined, #160).  **ROW DIFF NOT CLEAN: 199 NEW / 74 FIXED / 84 UNVERIFIED (re/overload.t TIMEOUT) / 2 LOST** — every one in a file the limited runs never open, exactly the hole BE's report named: the printed list has re/regexp_unicode_prop.t 28+/21−, re/pat.t 8+/12−, re/pat_advanced.t 3+/6−, io/open.t 1+/1− (its known flap), re/overload.t −3 under TIMEOUT.  Seven snapshot movers after the #366 serial re-run: comp/require.t DIFF 910/837 (REAL — the quick-capped file, first full measurement in a while), io/open.t 153/35 + io/pvbm.t 21/7 (the standing load flaps), re/overload.t TIMEOUT 0/0, run/fresh_perl.t STALE 59/32, re/speed.t + uni/variables.t THREE-WAY (timeouts, load-dependent).  SHORTFALL mover: re/speed.t 4 → 0.  **NOTHING BLESSED** — a new row is explained or fixed, never re-blessed over (runbook §4c).  Attribution by BE's method (the 1fed80b / 73edcff / 0e7c5e3 bisection worktrees; at least three runs before calling a row set stable) is the **next session's first item**. |
+| bench board | **NOT RUN** — the USER stopped the round before it; the bench-alone leg stays owed |
+
+**Part 5 — filed and next.**  Filed: #1072 #1073 #1074 (BC), #1082 #1083
+#1084 (BE); the substr residue on #1056 (Fable).  Next: #1035 steps 2–4
+(Opus), the correctness pool #1022 / #1020 / #1045 / #1084 / #1083, perf
+#1046 / #996 / #1056, #1072 as a tools filler.
+
 ## Session 468be (Opus agent, 2026-09-04) — the companion ROW DIFF ATTRIBUTED: 178 NEW / 407 FIXED / 2 LOST resolved to ten files and four causes, the volatile-key class registered `*rows-unstable*` (#1082), three bugs filed
 
 **The problem.**  AZ blessed the row-level fail baseline

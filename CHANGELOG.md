@@ -11,6 +11,18 @@ sessions); dates are development-time, not release-time.
   under `use feature 'signatures'` (so `use v5.36`) the output-field
   separator `$,` is mis-tokenized (#1059), and `pl2cl --executable` runs
   the program at build time and emits a binary that does nothing (#1060).
+- 2026-09-04, round 23 landed: a ruled refusal (`given`/`when`, `class`,
+  `format`, `defer`, infix `~~`) is now a STATEMENT-level event — the file
+  compiles and runs, and only the refused statement dies, trappably, with
+  the ruled text (#1037); `perl-tests/state.t` and perl's own `t/op/state.t`
+  regained their rows (+88 in the extracted suite; 16 of perl's `t/` files
+  produce TAP where they used to refuse).  A write to a container element
+  (`$h{$k}++`, `$h{$k} .= …`, `chomp $h{$k}`, `$h{$k} =~ s///`) no longer
+  boxes the KEY variable — the subscript is a read (#995; the computed-key
+  `arrhash-k` bench row −22 %).  The companion suite's row-level fail
+  baseline is attributed row for row, and four files whose test
+  descriptions carry perl's own hash order are opted out of the row check
+  by name (#1082).
 - Speed, rounds 10–23 (2026-08-29 → 2026-09-03): array and hash elements
   are stored raw until something aliases them (the boxed-aggregates flip),
   element accessors have fast paths, a read-only `foreach` binds the array

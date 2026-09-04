@@ -6,7 +6,7 @@ re-runnable measurement; nothing here is estimated.
 **Last full re-measure: 2026-09-04** — the gate, the extracted perl suite,
 the in-place perl `t/` snapshot, the execution benchmarks
 ([`faster-codegen-suggestions.md`](faster-codegen-suggestions.md) §0.2i is
-the table) and the CPAN board, all on main `bc9aa4a` (generation v2-611).
+the table) and the CPAN board, the bench and CPAN boards on main `bc9aa4a` (generation v2-611, the morning of 2026-09-04); the gate, the sweep, the companion counts and the census re-measured the same afternoon on main `a715608` (generation v2-650, after round 23 landed).
 
 **Contents:** [what runs](#what-runs) · [what deliberately does not](#what-deliberately-does-not-work) · [known sharp edges](#known-sharp-edges) · [XS](#xs)
 
@@ -14,11 +14,11 @@ the table) and the CPAN board, all on main `bc9aa4a` (generation v2-611).
 
 | measurement | result | how to reproduce |
 |---|---|---|
-| PCL's own regression gate (`Pl/t/`) | **193 files, 6,682 assertions, all passing.**  With the experimental [pclxs](#xs) sibling checked out beside the tree, three more files add 14 XS-bridge rows (196 / 6,696); those 14 currently fail because pclxs is mid-change | `tools/prove-core` (or `prove -j8 Pl/t/`) |
-| perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.40's `t/op`, `t/base`, …) | **18,493 assertions pass / 649 fail (96.6 %)**; **58 files pass completely**; 92 files run to the end, 15 abort part-way, 1 does not compile | `perl sweep-perl-tests.pl --jobs 8` |
-| perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **92 files identical to perl**; **111** differ for a registered, explained reason (`baselines/perl-suite-expected.tsv` — perl-internals probes, threads, taint, …); **273** differ and are the bug queue; 10 do not compile; 9 time out; 30 produce no TAP; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
+| PCL's own regression gate (`Pl/t/`) | **195 files, 6,729 assertions, all passing.**  With the experimental [pclxs](#xs) sibling checked out beside the tree, three more files add 14 XS-bridge rows (198 / 6,743); those 14 currently fail because pclxs is mid-change | `tools/prove-core` (or `prove -j8 Pl/t/`) |
+| perl's own test suite, extracted (`perl-tests/`, 108 files from perl 5.40's `t/op`, `t/base`, …) | **18,581 assertions pass / 649 fail (96.6 %)**; **58 files pass completely**; 92 files run to the end, 16 abort part-way, none fails to compile (`state.t`'s one `given` block is a statement-level refusal since round 23, so its other 88 assertions run) | `perl sweep-perl-tests.pl --jobs 8` |
+| perl's full `t/` tree, run in place (528 files, perl 5.40.3) | **92 files identical to perl**; **108** differ for a registered, explained reason (`baselines/perl-suite-expected.tsv` — perl-internals probes, threads, taint, …); **275** differ and are the bug queue; 10 do not compile; 9 time out; 31 produce no TAP; 2 are quarantined; 1 is a harness fixture | `tools/run-perl-suite.pl --all --quick --jobs 4` |
 | pure-Perl CPAN modules: a 14-distribution board, 183 test files | **78 files PASS / 54 PARTIAL / 51 FAIL; 2,140 assertions ok / 342 not ok** (a PARTIAL file ran most of its suite; FAIL is "zero ok", which also counts the files perl itself skips, such as `*-report-prereqs.t`).  Snapshot [`../baselines/cpan-board14-s467.tsv`](../baselines/cpan-board14-s467.tsv); the previous one (2026-08-23) read 70 / 64 / 49 and 2,053 / 483 — nine files moved DOWN between the two, task #1061 | the command below |
-| statements the compiler cannot translate, counted over six populations (the two suites above, the CPAN board, PCL's shipped `lib/`, the examples, the `Pl/t` fixtures) | **57 statements in 17 files**, every one classified with an owning task; zero in PCL's own shipped module tree | `tools/drop-census.pl` vs [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
+| statements the compiler cannot translate, counted over six populations (the two suites above, the CPAN board, PCL's shipped `lib/`, the examples, the `Pl/t` fixtures) | **62 statements in 19 files**, every one classified with an owning task; zero in PCL's own shipped module tree | `tools/drop-census.pl` vs [`../baselines/parse-error-drop-census-s399.tsv`](../baselines/parse-error-drop-census-s399.tsv) |
 | XS bridge conformance corpus (pclxs, real perl as oracle) | 398 pass / 0 fail at the last measurement (2026-08-03); `Digest::MD5`'s own `md5-aaa.t` passed 256/256 under PCL.  Not re-run since — pclxs is under separate development | `tools/pcl-conform` |
 
 Failures are tracked row by row in blessed baselines
