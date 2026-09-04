@@ -144,6 +144,22 @@ my %USE_STR_OP = map { $_ => 1 } qw(. eq ne lt gt le ge cmp);
 # escapes to the consumer → opaque.
 my %USE_BOOL_THROUGH_OP = map { $_ => 1 } qw(&& || and or);
 
+# The element/slice access node types.  Every one of them has the shape
+# [BASE, SUBSCRIPT...]: the base is the container (or the chain below it) and
+# everything after it is a subscript expression.  The VALUE is the use class
+# the subscript position licenses — a hash SUBSCRIPT is stringified into a
+# key, an array SUBSCRIPT is numified into an index — because that is the
+# same fact, and keeping it in two tables is how the two disagreed: until
+# s469bh only h_acc/a_acc classified their subscripts and the other six fell
+# through to the generic "opaque" tail, so `$r->{$k}` could not give `$k` the
+# B-regime string freeze that `$h{$k}` gives it although both stringify the
+# key identically (task #1056).  `%a[…]` and `%h{…}` (the kv slices) take
+# their bracket's class like the plain slices do.
+my %ACCESS_NODE = (h_acc          => 'strkey', a_acc          => 'num',
+                   h_ref_acc      => 'strkey', a_ref_acc      => 'num',
+                   slice_h_acc    => 'strkey', slice_a_acc    => 'num',
+                   kv_slice_h_acc => 'strkey', kv_slice_a_acc => 'num');
+
 # Builtin funcall arg licensing: name => 'str-all' (every non-filehandle arg
 # is a stringify use: print/say/join) or [per-position class] (undef slots =
 # opaque).  Args of every OTHER callee are opaque — the value escapes.
@@ -1015,18 +1031,23 @@ sub _tw_walk {
       _tw_walk($ctx, $xo, $_, 0, $uctx) for @$kids[1, 2];   # value pass-through
       return;
     }
-    if ($t eq 'h_acc' || $t eq 'a_acc') {
-      # element access: the key/index position classifies the key var
-      # ($h{$q} → strkey, $a[$q] → num) regardless of where the element's
-      # value flows.  Hash keys get their OWN class: a stringify use for the
-      # B-verdicts, but the hash RETAINS the key object, so it must block
-      # the str-buffer regime (an in-place-mutated buffer as a stored key
-      # would corrupt the table).  The base walk stays opaque: a $-Symbol
-      # base is either a deref-chain root (must disqualify) or the
-      # '$a'-content token of an @a element access (over-conservative
+    if ($ACCESS_NODE{$t}) {
+      # element/slice access: the key/index position classifies the key var
+      # ($h{$q} / $r->{$q} / @h{$q,…} → strkey, $a[$q] / $r->[$q] → num)
+      # regardless of where the element's value flows.  Hash keys get their
+      # OWN class: a stringify use for the B-verdicts, but the hash RETAINS
+      # the key object, so it must block the str-buffer regime (an
+      # in-place-mutated buffer as a stored key would corrupt the table).
+      # The base walk stays opaque: a $-Symbol base is either a deref-chain
+      # root (must disqualify — the vivification writes back through it) or
+      # the '$a'-content token of an @a element access (over-conservative
       # pollution of a same-named scalar — safe).
+      # ALL EIGHT access types, not just the two plain ones (#1056): the
+      # deref and slice spellings stringify/numify their subscripts exactly
+      # as the plain ones do, and %ACCESS_NODE is the one table that knows
+      # both the shape and the class.
       _tw_walk($ctx, $xo, $kids->[0], 0) if @$kids;
-      my $key_uctx = $t eq 'h_acc' ? 'strkey' : 'num';
+      my $key_uctx = $ACCESS_NODE{$t};
       _tw_walk($ctx, $xo, $_, 0, $key_uctx) for @$kids[1 .. $#$kids];
       return;
     }
@@ -1198,13 +1219,6 @@ sub _tw_walk_funcall_args {
     $argi++;
   }
 }
-
-# The element/slice access node types.  Every one of them has the shape
-# [BASE, SUBSCRIPT...]: the base is the container (or the chain below it) and
-# everything after it is a subscript expression.
-my %ACCESS_NODE = map { $_ => 1 } qw(h_acc a_acc h_ref_acc a_ref_acc
-                                     slice_h_acc slice_a_acc
-                                     kv_slice_h_acc kv_slice_a_acc);
 
 # THE lvalue-root marker (#995) — the ONE place that decides which scalar a
 # write to a non-plain-scalar lvalue lands on.  Every write arm of the walk

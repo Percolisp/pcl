@@ -37,6 +37,11 @@
 # a wrong one.  The base must be a tree that already has `p-let` (#1035,
 # f330e5f): on anything older every row fails for the WRONG reason — the
 # spelling, not the verdict.
+#
+# The last section (rows 24-30) is task #1056, the same table's other half:
+# which access spellings CLASSIFY their subscript's use.  Its inverse guard is
+# c80b1a0, where rows 24, 26, 27, 28 and 29 fail (the subscript variable is
+# `:box (make-p-box nil)`) while 25 and 30 — the two negatives — pass.
 use v5.30;
 use strict;
 use warnings;
@@ -50,7 +55,7 @@ use PCLCore;
 my $project_root = "$RealBin/../..";
 my $pl2cl = "$project_root/pl2cl";
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
-plan tests => 23;
+plan tests => 30;
 
 # Transpile one snippet.  Every case wraps its shape in a counting loop so
 # the subscript variable is a fresh block `my` — the raw-slot candidate the
@@ -162,3 +167,47 @@ my $ainc_none = cl_of('my @a; for my $n (1..3) { my $i = 0 + $n; $a[$i]++; }',
                       PCL_OPT => 'none');
 like($ainc_none, qr/\(p-let \(\(\$i :box \(make-p-box nil\)\)\)/,
      'PCL_OPT=none: the array index is boxed too');
+
+# --- ALL EIGHT access spellings classify their subscript's USE (task #1056) --
+#
+# %ACCESS_NODE is the one table that knows the [BASE, SUBSCRIPT...] shape, but
+# only h_acc/a_acc used to say what the subscript POSITION means; the six deref
+# and slice types fell through to the generic "opaque" tail.  `$h{$k}` and
+# `$r->{$k}` stringify the key identically, yet only the first could give the
+# slot the B-regime string freeze, and only `$a[$i]` the numeric one.  The
+# rows below are one spelling each, on a slot whose write shape is UNPROVEN
+# (`g()`) — which is exactly the case the B regime exists for.  `:str` /
+# `:num` IS the claim; PCL_OPT=-raw-numeric is its negation.
+my $ug = 'sub g { $_[0] } ';
+my $dref = cl_of($ug . 'my $r = {}; my $t = 0;'
+                . ' for my $n (1..3) { my $k = g($n); $t += $r->{$k}; }');
+like($dref, qr/\(\$k :str \(%pcl-to-string-strict /,
+     'h_ref_acc: a key read through ->{} is a STRINGIFY use');
+like($dref, qr/\(\$r :box \(make-p-box nil\)\)/,
+     'h_ref_acc: … while the deref ROOT stays opaque and boxed');
+
+my $hsl = cl_of($ug . 'my $r = {}; '
+              . 'for my $n (1..3) { my $k = g($n); my @v = @$r{$k, "z"}; }');
+like($hsl, qr/\(\$k :str \(%pcl-to-string-strict /,
+     'slice_h_acc: @$r{…} keys are stringify uses');
+
+my $kvh = cl_of($ug . 'my $r = {}; '
+              . 'for my $n (1..3) { my $k = g($n); my %w = %$r{$k}; }');
+like($kvh, qr/\(\$k :str \(%pcl-to-string-strict /,
+     'kv_slice_h_acc: %$r{…} keys are stringify uses');
+
+my $aref = cl_of($ug . 'my $ar = []; my $t = 0;'
+               . ' for my $n (1..3) { my $i = g($n); $t += $ar->[$i]; }');
+like($aref, qr/\(\$i :num \(%pcl-to-number-strict /,
+     'a_ref_acc: an index read through ->[] is a NUMIFY use');
+
+my $asl = cl_of($ug . 'my $ar = []; '
+              . 'for my $n (1..3) { my $i = g($n); my @u = @$ar[$i, 0]; }');
+like($asl, qr/\(\$i :num \(%pcl-to-number-strict /,
+     'slice_a_acc: @$ar[…] indices are numify uses');
+
+my $dref_nb = cl_of($ug . 'my $r = {}; my $t = 0;'
+                  . ' for my $n (1..3) { my $k = g($n); $t += $r->{$k}; }',
+                    PCL_OPT => '-raw-numeric');
+like($dref_nb, qr/\(\$k :box \(make-p-box nil\)\)/,
+     '-raw-numeric: the freeze IS the transform — the key is boxed again');
