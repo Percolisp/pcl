@@ -88,6 +88,123 @@ will be), companion legs, bench re-measure of BG's zero-cost claim.
 5. Round 25: A5 (#996 classic sort comparators, the 7.3× row) as the perf
    agent; #1022(b) ruling if BI stopped at the loud half; #1072 tools filler.
 
+## Session 469bf (Opus agent, 2026-09-05) — the re/ comp/ run/ half of the companion ROW DIFF attributed: 199 NEW / 74 FIXED / 84 UNVERIFIED / 2 LOST resolved to NINE files and FIVE causes, with the volatility measured on the perl ORACLE alone
+
+**The job.**  s468's round-end leg was the full companion
+(`--all --jobs 4 --bless-stamps`) on main `a715608` (= today's `c80b1a0`
+minus a docs commit).  Its ROW DIFF was **199 NEW / 74 FIXED / 84 UNVERIFIED
+/ 2 LOST** and nothing was blessed, because every moving file sits in a
+directory the dirs-limited round runs never open.  BE's method, re-aimed:
+copy the evidence first (`.suitelog/` → `scratch/s469bf/suitelog-s468/`),
+build the table from it, then measure ONE tree at least three times before
+calling any row set stable or volatile.
+
+**Part 1 — the measurements.**  Two companion runs on this tree
+(`--dir re --dir comp --dir run --jobs 4`, then the six movers ALONE at
+`--jobs 1`, the #366 serial rule) plus the s468 run give three readings; two
+bisection worktrees (`d00f893`, `2065b89`) answered comp/require.t.  **And a
+third, much cheaper instrument that this session adds to the family's
+toolkit: run PERL'S OWN FILE three times and compare the TAP description
+SEQUENCES.**  No SBCL, ~10 s a file (`scratch/s469bf/perlorder.sh` +
+`ordercmp.pl`).  It measures the volatility at its SOURCE instead of
+inferring it from repeated companion runs:
+
+| file | perl-only runs | verdict |
+|---|---|---|
+| re/pat.t | 3 × 1188 rows | order DIFFERENT in every pair, multiset SAME; first divergence row 270 = the `20000 nodes` block |
+| re/pat_advanced.t | 3 × 1675 | order DIFFERENT, multiset SAME; first divergence rows 29-32 = `Properties of \x7f|\x80|\xff` |
+| re/regexp_unicode_prop.t | 3 × 1110 | order DIFFERENT, multiset SAME; first divergence row 244 = `qr/\p{Lo}` vs `qr/\p{Cc}` |
+
+(Trap paid for once: compare the multisets under `LC_ALL=C` — a
+locale-collating `sort | uniq -c` splits byte-identical descriptions across
+groups and reports a false "multiset DIFFERENT".)
+
+**Part 2 — the attribution.**  Nine files, five causes, no residue.
+
+| file | rows | counts (s468 / --dir re / alone) | cause | action |
+|---|---|---|---|---|
+| re/regexp_unicode_prop.t | 149/51 | 778/332 ×3 = snapshot | `each %SHORT_PROPERTIES` (t/re/regexp_unicode_prop.t:223) builds `%d` **and** `@CLASSES`, so the ORACLE's row order is a per-process draw; descriptions repeat verbatim ("A" correctly did not match ×4) | `*rows-unstable*` (#1082) |
+| re/pat.t | 8/12 | 231/138 ×3 = snapshot | `for (keys %ans)` (t/re/pat.t:434) — the sixteen `20000 nodes …'<key>'` rows | `*rows-unstable*` |
+| re/pat_advanced.t | 3/6 | 951/729 ×3 = snapshot | `each %d` (t/re/pat_advanced.t:119) — the twelve `Properties of \x..` rows | `*rows-unstable*` |
+| run/cloexec.t | 4/4 | 16/6 ×3 = snapshot | a PER-RUN TOKEN on **both** sides of the pair | new `rowkey_desc` rule + BLESSED |
+| re/speed.t | 34 NEW | TIMEOUT 25/19‖DIFF 25/34, then TIMEOUT 25/0‖25/25 | #326 hang file: the clock decides how far it gets | NOT blessed |
+| io/open.t | 1 NEW, −1 LOST | 153/35 under `--all`, **154/34 alone = snapshot** | the documented full-session flip (this file's own s460ap caveat) | NOT blessed |
+| io/pvbm.t | 1 FIXED | 21/7 under `--all`, **20/8 alone = snapshot** | the standing flapper (DECIDED s437/s438) | NOT blessed |
+| re/overload.t | 84 UNVERIFIED, −3 LOST | TIMEOUT 0/0 in both runs | a QUICK-SKIP hang file; 0 vs 3 rows before the clock is load | stays UNVERIFIED |
+| comp/require.t | 0/0 (TRUNCATED) | **910/837** in five readings | PRE-EXISTING and multi-step; the snapshot 909/835 was last confirmed at s396 | snapshot SPLICED by hand |
+
+**Part 3 — the two per-run tokens of run/cloexec.t.**  Its four rows are the
+only ones in the whole diff that a KEY projection can fix, and they needed
+both halves.  perl's `tempfile()` names its files `tmp_<alpha(PID)>_<alpha(n)>`
+— already normalised by `PclTapAlign::rowkey_desc` since s468be, but BE's leg
+never opened run/, so the baseline still carried `tmp_CQZP_C`.  **PCL's own
+stub is the other half**: `perl-tests/t/test.pl:343` spells it
+`/tmp/pcl-test-$$-$counter`, which is a per-run token too and was not
+normalised — `/tmp/pcl-test-64955-2` in the blessed rows, `-338873-` in s468,
+`-27220-` in this session's run.  One line in `rowkey_desc`, two guard rows in
+`tools/t/tap-align.t` (the positive and the negative "a path that merely
+starts with `/tmp/pcl-test-` is not a tempfile name"), and the four rows are
+stable and blessed.  They still do not PAIR — the two stubs use different
+NAMES, so perl's two rows are `(missing)` and PCL's two are `*extra*` although
+both assertions pass on both sides.  Fixing that means making the stub answer
+perl's shape, which is a HARNESS change (full sweep + `--all --quick` on both
+populations): **task #1085**, with the expected gain (16/6 → 18/4) and the
+three things that must keep working.
+
+**Part 4 — the truncation amplifier, and why the registrations are whole-file.**
+re/pat.t and re/pat_advanced.t write exactly 500 PAIRED diverging rows (extras
+are appended after the cap and consume none of it).  Their volatile blocks sit
+EARLY — perl rows 277-292 and 29-36 — so a different draw changes how many rows
+the window consumes and its right edge MOVES: re/pat.t's last paired row went
+718 → 722, re/pat_advanced.t's 1186 → 1189.  The rows that then read NEW/FIXED
+at the edge (four `(?il), utf8=…, locale=…` rows; three `((?^:\v))` rows) have
+nothing wrong with them.  That is why a dozen volatile rows cannot be
+normalised away one by one, and why #1051's option 3 (a digest beside the first
+500) would not help either: the digest would move on every draw for the same
+reason.  Recorded on #1051.
+
+**Part 5 — comp/require.t, bisected two steps and then stopped on purpose.**
+910/837 is what s465az, s466, s468 (parallel **and** the #366 serial re-run)
+and this session (parallel **and** serial) all measured — five readings over
+three sessions.  The snapshot's 909/835 was last confirmed at s396
+(2026-08-15); the file is QUICK-CAPPED (450 s allowance > the 120 s quick cap),
+so only the rare full `--all` reaches it and the row simply went un-re-measured
+for ~25 sessions.  A `d00f893` (s440) worktree reads **906/836** — so the drift
+is at least two steps somewhere in rounds 5-22, not one round-23 event — and a
+`2065b89` (round 19) worktree **TIMEOUTs at 868/795 inside the registered 450 s
+allowance**, i.e. part of the "drift" is today's tree being FASTER rather than
+more correct.  That makes a count bisect non-monotone, and the row-level cause
+is invisible anyway (the file is truncated and its first 500 diverging rows are
+byte-identical in every run).  Row spliced with that whole reasoning in its
+annotation; naming the three moved rows needs #1051, not more 450 s runs.
+
+**Part 6 — what was NOT done, and why.**  (a) The I4 stamps were not re-blessed:
+they are one day old, this session's `--dir` run confirms every one of them, and
+re-stamping means re-running the hang set for a fresher date.  The one thing
+worth knowing is recorded on #326 — s468's stamp says `re/speed.t … measured
+DIFF 25/34` because that run's serial re-run happened to finish, and the very
+next run of the same tree measured TIMEOUT; for a member of that set the stamp
+answers *when*, never *what*.  (b) `baselines/row-shortfall.tsv` keeps
+`t/re/speed.t 4` — s468's `4 -> 0 … EDIT the baseline row` advisory is a load
+reading, and blessing 0 would fail every future run that completes the file with
+55 of 59 rows.  (c) re/overload.t's 84 blessed rows remain UNVERIFIED and can
+only be verified by a run that does not TIMEOUT (#326).
+
+**Bars.**  `tools/t/tap-align.t` 23 → 25 rows, `tools/t/audit-instruments.t`
+29 rows, both PASS.  ROW DIFF for the six touched files, measured on this tree
+after the edits: **0 NEW / 0 FIXED / 0 LOST**.  `baselines/perl-suite-fails.tsv`
+21,059 → 19,624 lines: 1,438 ordinary rows replaced by three hand-placed
+opt-outs, run/cloexec.t's four re-keyed, **every other row byte-identical and in
+order** (verified by a `cmp` of both files with the four affected files
+filtered out).  No compiler or runtime file touched, so no generation bump and
+no artifact regeneration.
+
+**Filed:** **#1085** (the tempfile stub).  **Appended:** #1082 (three new
+members + the perl-only measurement + what it does to option (b), and a third
+option: multiset pairing in `align_taps`), #1051 (the cap is a NOISE SOURCE,
+not only a hole), #326 (re/speed.t / re/overload.t are a load reading, and the
+two things not to act on).
+
 ## Session 469bg (Opus agent, 2026-09-05) — #1035 steps 2–4: the compiler's own FACTS printed on the declaration forms; step 4 decided, measured, deferred
 
 Steps 0+1 (s466) made every perl `my` print through ONE printer as
