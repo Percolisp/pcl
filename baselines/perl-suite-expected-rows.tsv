@@ -2560,13 +2560,11 @@ run/fresh_perl.t	BEGIN { undef = 0 }
 run/fresh_perl.t	[perl \#112312] crash on syntax error
 run/fresh_perl.t	[perl \#112312] crash on syntax error - another test
 run/fresh_perl.t	[perl \#20667] unicode regex vs non-unicode regex
-run/fresh_perl.t	\# 20001210.003 (\#4893) mjd@plover.com
 run/fresh_perl.t	\# [ID 20001202.002 (\#4821)] and change \#8066 added...
 run/fresh_perl.t	\# core dump in 20000716.007 (\#3516)
 run/fresh_perl.t	for ("ABCDE") {
 run/fresh_perl.t	if (@ARGV) { print "" }
 run/fresh_perl.t	my $foo = Bar->new();
-run/fresh_perl.t	open(H,'run/fresh_perl.t'); \# must be in the 't' d...
 run/fresh_perl.t	package FOO;sub new {bless {FOO => BAR}};
 run/fresh_perl.t	package X;
 run/fresh_perl.t	package X;

@@ -1182,6 +1182,20 @@
 #   first 500 diverging rows are byte-identical in every run, so the three rows that
 #   actually moved are past the boundary.  Naming them needs the cap raised (#1051), not
 #   more 450 s runs.
+# s469bf (2026-09-05): run/fresh_perl.t 57/34 -> 59/32 EDITED BY HAND, and its two
+#   registered rows removed from baselines/perl-suite-expected-rows.tsv (they stopped
+#   diverging, which is what made the file read STALE and fail every run since).
+#   ATTRIBUTED TO #1032 (s465ba, round 23) by two bisection worktrees: 1fed80b reads
+#   57/34 XDIFF with the sig `unbound:H`, 0e7c5e3 (after BA's #1028+#1032) reads 59/32
+#   STALE with the SAME two rows, and main is identical to 0e7c5e3.  The two rows ARE
+#   #1032's two named builtins:
+#     open(H,'run/fresh_perl.t')  -- the bareword handle in `open`, whose bare CL symbol
+#       is exactly the `unbound:H` the sig column lost;
+#     write REMITOUT              -- t/run/fresh_perl.t:572-586, the `p-write` half the
+#       task's own audit of all 44 handle-taking builtins turned up.
+#   BA's leg was `--dir io --dir op`, so run/ was never measured and this mover reached
+#   main uncounted; s468be's attribution could not see it either (its dirs were io/op
+#   too, and an XDIFF file's rows are gated by the #185 registry, not by I1's ROW DIFF).
 base/cond.t	4	0	4	0	OK		0
 base/if.t	2	0	2	0	OK		0
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1657,7 +1671,7 @@ re/user_prop_race_thr.t	0	0	0	3	NOTAP	aborted-forms:1: This Perl not built to su
 run/cloexec.t	22	0	16	6	DIFF		0
 run/dtrace.t	0	0	0	0	NOTAP		0
 run/exit.t	17	0	14	3	DIFF		0
-run/fresh_perl.t	91	0	57	34	XDIFF	unbound:H | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
+run/fresh_perl.t	91	0	59	32	XDIFF	s469bf: 57/34 -> 59/32 = #1032 (BISECTED: 57/34 at 1fed80b, 59/32 at 0e7c5e3) -- the `open(H,...)` and `write REMITOUT` rows now pass and left perl-suite-expected-rows.tsv; the file's old `unbound:H` sig went with them. | not-supported.md §Error message text and format — 36 residual rows after s316e (user-blessed 2026-07-28): ~30 expect perl's exact fatal-death text (method-on-undef wording, "BEGIN failed--compilation aborted", read-only enforcement); rest = invalid-perl detection (CLAUDE.md §9) + one (?{}) case (§regex-code-blocks). The semantic gaps this file exposed (hole aliasing, defelem @_, Perl-4 tick, &$ref call) were all FIXED s316d/s316e — 55/91 rows match.	0
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
