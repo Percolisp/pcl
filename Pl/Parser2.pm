@@ -2065,7 +2065,7 @@ sub parse {
       my $ver_cl = ($sec->{version} =~ /^\d+(?:\.\d+)?$/) ? $sec->{version}
                                                           : "\"$sec->{version}\"";
       push @body, "(eval-when (:compile-toplevel :load-toplevel :execute)",
-                  "  " . global_decl_form($sym, '(make-p-box nil)') . ")",
+                  "  " . _decl_cell($sym, '(make-p-box nil)') . ")",
                   "(p-scalar-= $sym $ver_cl)", '';
     }
     # Per-package $a/$b specials: once per package (not on reopen — duplicate
@@ -7728,7 +7728,7 @@ sub _forward_global_decls {
     my ($name, $init) = @_;
     my $key = $name =~ /::/ ? $name : "$pkg\0$name";
     return if $self->{_declared_globals}{$key}++;
-    push @decls, global_decl_form($name, $init);
+    push @decls, _decl_cell($name, $init);
   };
   $emit->($_, _fresh_container($_))            for sort keys %seen;
   $emit->($_, _fresh_container(substr($_, 1))) for sort keys %caret;
@@ -8423,11 +8423,11 @@ sub _lower_block {
         $self->{_eval_state_captures}{$orig} = $name;
       }
       push @{ $self->{_captured_decls} },
-        global_decl_form($cl, _fresh_container($name));
+        _decl_cell($cl, _fresh_container($name), $name);
       my @forms;
       if ($kind eq 'init') {
         my $flag = cl_sym($name . '__init');
-        push @{ $self->{_captured_decls} }, global_decl_form($flag, 'nil');
+        push @{ $self->{_captured_decls} }, _decl_cell($flag, 'nil');
         # Scalar: guarded box-set.  Container (@x/%x): the whole assignment
         # `@x__state__N = LIST` through the expression seam — v1 emits the
         # p-array-= / p-hash-= form (same path the my-container branch uses).
@@ -8544,7 +8544,7 @@ sub _lower_block {
       # hoisted named sub that captures it sees the same special symbol) plus a
       # plain package-var assignment in place.  No let, not let-bound.
       push @{ $self->{_captured_decls} },
-        global_decl_form($name, '(make-p-box nil)');
+        _decl_cell($name, '(make-p-box nil)');
       # Register AFTER the assignment: the decl's own RHS (incl. an eval in
       # it) still resolves the original name to the OUTER variable.
       my @reg;
@@ -8811,7 +8811,7 @@ sub _lower_block {
     };
     if (@$vars == 1 && $self->{_file_lex_renamed}{$vars->[0]}) {
       push @{ $self->{_captured_decls} },
-        global_decl_form($vars->[0], _fresh_container($vars->[0]));
+        _decl_cell($vars->[0], _fresh_container($vars->[0]));
       my @assign = $has_init ? ($assign_form->()) : ();
       return (@kmod_eval, @assign, $self->_lower_block(\@rest, $vi, $tail_ctx));
     }
@@ -8934,7 +8934,7 @@ sub _lower_block {
     my @renamed = grep { $self->{_file_lex_renamed}{$_} } @$vars;
     if (@renamed) {
       push @{ $self->{_captured_decls} },
-        global_decl_form($_, _fresh_container($_)) for @renamed;
+        _decl_cell($_, _fresh_container($_)) for @renamed;
       # Register AFTER the assignment (the decl's RHS reads the outer vars).
       my @reg = $self->{_file_has_str_eval} ? $self->_reg_eval_capture(@renamed) : ();
       my @unren  = grep { !$self->{_file_lex_renamed}{$_} } @$vars;
@@ -11575,7 +11575,7 @@ sub _lower_our_decl {
       $prefix = cl_pkg($cur) . '::';
     }
     push @{ $self->{_captured_decls} },
-      global_decl_form($prefix . cl_sym($n), _fresh_container($n));
+      _decl_cell($prefix . cl_sym($n), _fresh_container($n));
   }
   # Declaration only.  With a modifier (`our $z if C;`) the condition still
   # RUNS — perl evaluates it at runtime for its side effects, exactly as the
@@ -11679,12 +11679,33 @@ my %RENAME_MANIFEST;
 
 sub _reset_rename_manifest { %RENAME_MANIFEST = () }
 
+# A NAME CAN BE RENAMED TWICE, and the second link must not overwrite the
+# first's answer to "what did the programmer call this".  perl-tests/aassign.t
+# is the shape: `my $a` becomes `$a__excl__6` because `$a` is exception-set,
+# and then `$a__excl__6__file__2` because a named sub captures it.  Recording
+# the second link alone made `:perl` name `"$a__excl__6"` -- a spelling that is
+# nowhere in the perl program, which is worse than saying nothing.  So the
+# chain is FOLLOWED: `:perl` is the source spelling at its root, and `:why`
+# records every reason in the order they applied, because "why is this not
+# called $a" has two answers here and dropping either is a lie.
 sub _reg_rename {
   my ($old, $new, $why) = @_;
   die "PCL: internal -- unknown rename reason '$why' ($old -> $new); the set is: "
     . join(' ', sort keys %RENAME_WHY) . "\n"
     unless $RENAME_WHY{$why};
-  $RENAME_MANIFEST{$new} = [$old, $why];
+  my $src  = $old;
+  my @whys = ($why);
+  if (my $prev = $RENAME_MANIFEST{$old}) {
+    $src  = $prev->[0];
+    @whys = ((ref $prev->[1] ? @{ $prev->[1] } : $prev->[1]), $why);
+    # The intermediate spelling is SUPERSEDED: the second rename rewrote every
+    # token the first one wrote, so no declaration will carry that name.  The
+    # entry is MARKED rather than deleted -- if a rewrite ever left a use
+    # behind, that name still deserves its own (correct) facts, and the mark is
+    # what lets an audit tell "nothing declares this" from "a hole".
+    $RENAME_MANIFEST{$old}[2] = 1;
+  }
+  $RENAME_MANIFEST{$new} = [$src, (@whys > 1 ? \@whys : $whys[0])];
   return $new;
 }
 
@@ -11720,7 +11741,11 @@ sub _decl_facts {
   my ($name, $vi) = @_;
   my @f;
   if (my $r = $RENAME_MANIFEST{$name}) {
-    push @f, ':perl', Pl::ExprToCL::cl_string_literal($r->[0]), ':why', $r->[1];
+    # `:why` is ONE keyword for a single rename and a LIST for a chained one
+    # (the reasons in the order they applied, outermost last) -- self-describing
+    # shapes, so a consumer that wants a single value takes the last.
+    my $why = ref $r->[1] ? '(' . join(' ', @{ $r->[1] }) . ')' : $r->[1];
+    push @f, ':perl', Pl::ExprToCL::cl_string_literal($r->[0]), ':why', $why;
   }
   push @f, ':captured', 't' if $vi && $vi->{$name} && $vi->{$name}{captured};
   return @f;
@@ -11733,7 +11758,35 @@ sub _decl_fresh {
   return _decl_entry($name, _sigil_class($name), _fresh_container($name), $vi);
 }
 
-# One `p-raw-params` entry `(NAME CLASS)` (task #1035, step 3).  A parameter of
+# THE CELL DECLARATION and its facts (task #1035 step 2, review fix s469bg).
+# A PROMOTED lexical does not bind a `let` -- it publishes a package CELL -- so
+# the two `__file__` families (`:captured`, `:spanning`) and the `state` cells
+# would reach emission with nothing but the mangled name, and a consumer would
+# be back to parsing `__file__0` off the symbol: exactly the rule-11 shape this
+# step exists to remove.  The facts come from the SAME `_decl_facts` the `p-let`
+# entry and the `p-raw-params` entry read, so the three spellings cannot
+# disagree about what a rename was.
+#
+# EXCEPTION-SET names keep plain CL `defvar`, whose lambda list is
+# (name &optional value doc) -- a facts tail there would be read as a docstring
+# plus junk.  They are never renamed anyway (a rename's whole point is to leave
+# the partition), so the guard is belt, not a case.
+#
+# $perl_name is the manifest key when the CL spelling differs (a non-ASCII name
+# is pipe-quoted, #418); `cl_sym` is the identity on ASCII, so almost every
+# caller passes one name and means both.
+sub _decl_cell {
+  my ($cl_name, $init, $perl_name) = @_;
+  my $form = global_decl_form($cl_name, $init);
+  return $form if Pl::CLForm::ir_plain();
+  return $form if Pl::GlobalPartition::is_exception_global($cl_name);
+  my @f = _decl_facts($perl_name // $cl_name);
+  return $form unless @f;
+  $form =~ s/\)\z/ @f)/;
+  return $form;
+}
+
+# One `p-raw-params` entry `(NAME CLASS . FACTS)` (task #1035, step 3).  A parameter of
 # the signature fast path IS a declaration -- the sub's own binding of the
 # caller's value -- so it carries the same class a `my` of the same verdict
 # carries, from the SAME `_slot_class`: ONE source for the class, or the two
@@ -11741,7 +11794,8 @@ sub _decl_fresh {
 sub _param_entry {
   my ($name, $vi) = @_;
   return cl_sym($name) if Pl::CLForm::ir_plain();
-  return ['list', cl_sym($name), _slot_class($vi->{$name} // {})];
+  return ['list', cl_sym($name), _slot_class($vi->{$name} // {}),
+          _decl_facts($name, $vi)];
 }
 
 # The class of the container a sigil declares.

@@ -699,16 +699,18 @@
       (list name init)))
 
   (defun %p-param-name (p)
-    "One p-raw-params entry (NAME CLASS) -> NAME.  The class is the compiler's
-     verdict about the parameter's slot -- the SAME closed set a p-let entry
-     carries, because a parameter is a declaration too -- and it is IGNORED
-     here: the binding is the same raw one either way."
-    (unless (and (consp p) (= (length p) 2))
-      (error "p-raw-params: entry ~S is not (NAME CLASS)" p))
-    (destructuring-bind (name class) p
+    "One p-raw-params entry (NAME CLASS . FACTS) -> NAME.  The class is the
+     compiler's verdict about the parameter's slot and FACTS its rename
+     manifest -- the SAME closed sets a p-let entry carries, because a
+     parameter is a declaration too -- and both are IGNORED here: the binding
+     is the same raw one either way."
+    (unless (and (consp p) (consp (cdr p)))
+      (error "p-raw-params: entry ~S is not (NAME CLASS . FACTS)" p))
+    (destructuring-bind (name class &rest facts) p
       (unless (member class *p-let-classes*)
         (error "p-raw-params: unknown declaration class ~S for ~S -- the set is closed: ~S"
                class name *p-let-classes*))
+      (%p-check-facts "p-raw-params" name facts *p-let-fact-keys*)
       name)))
 
 ;;; p-sub: Define a Perl subroutine.
@@ -18276,7 +18278,7 @@ buffer's fill-pointer; everything else falls back to file-length."
   (if (aref saved 4) (setf (symbol-value array-sym)  (aref saved 5)) (makunbound array-sym))
   (if (aref saved 6) (setf (symbol-value hash-sym)   (aref saved 7)) (makunbound hash-sym)))
 
-(defmacro p-defcell (sym init)
+(defmacro p-defcell (sym init &rest facts)
   "Declare an ORDINARY package global (direction D, task #289): SYM becomes a
    symbol macro reading/writing its own global cell directly, and the cell is
    initialized ONCE.  This is the `defvar` of the cell world and must keep
@@ -18306,7 +18308,15 @@ buffer's fill-pointer; everything else falls back to file-length."
    symbol macro rather than erroring.  That is deliberate — it is how a perl
    `my` shadow becomes a real lexical (and 36% faster than the dynamic
    rebind it replaced) — but it means an emitter must never `let`-bind a
-   name it declared here expecting to write the global."
+   name it declared here expecting to write the global.
+
+   FACTS is the same optional keyword tail a `p-let` entry carries (task
+   #1035; docs/ir-spec.md §2b.2a): a PROMOTED lexical publishes a CELL rather
+   than binding a `let`, so its rename manifest — `:perl \"$x\" :why :FAMILY` —
+   has to ride here or the two `__file__` families and the `state` cells reach
+   emission as nothing but a mangled name.  Checked against the closed key set
+   and then IGNORED; the expansion is exactly what it was."
+  (%p-check-facts "p-defcell" sym facts *p-let-fact-keys*)
   `(progn
      (define-symbol-macro ,sym (sb-ext:symbol-global-value ',sym))
      (unless (boundp ',sym)

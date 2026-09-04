@@ -77,18 +77,20 @@ sub lisp_out {
     return $out;
 }
 
-# ── step 2: the rename manifest, one row per family that reaches a `p-let` ────
+# ── step 2: the rename manifest, one row per family and per CARRIER ───────────
 #
-# Three of the five rename families bind a `let`; the other two (`:spanning`
-# and `:captured`, both `$x__file__N`) promote to a package CELL, which is a
-# `p-defcell` and has no entry to carry facts.  They are registered all the
-# same -- the manifest records what the COMPILER did, not what the printer
-# happens to read -- and `:captured` reaches emission on `p-sub` instead (below).
+# There are five rename families and THREE carriers, because a rename does not
+# always bind a `let`: `:exception-global`, `:seam-shadow` and `:state-cell`
+# reach a `p-let` entry (below) or a `p-raw-params` entry (further down), while
+# `:spanning` and `:captured` promote to a package CELL and are carried there.
+# All three read the SAME `_decl_facts`, so the spellings cannot disagree about
+# what a rename was.
 
 {
     # `my $a` of an EXCEPTION-SET name: CL cannot lexically bind a proclaimed
     # special, so the declaration takes a fresh symbol.  The commonest family
-    # by far (119 of the 129 manifest entries in the perl-tests corpus).
+    # by far -- see the session record for the corpus-wide count, which is
+    # audited by matching every registration against a printed pair.
     my $cl = cl_of('my @o; { my $a = 7; my $b = 8; push @o, $a + $b; } print "@o\n";');
     like($cl, qr/\(\$a__excl__0 :scalar 7 :perl "\$a" :why :exception-global\)/,
          '#1035: an exception-global rename carries :perl and :why on its p-let entry');
@@ -133,12 +135,77 @@ sub lisp_out {
            '#1035: ... and one it does not name carries no :captured');
 }
 
-# ── step 3a: p-raw-params entries carry the class ────────────────────────────
+# ── step 2: the manifest on a CELL, for the families that never bind a let ───
+#
+# A PROMOTED lexical publishes a package cell instead of binding a `let`, so
+# `:captured` and `:spanning` -- the two families the task named FIRST -- reach
+# emission only here.  Without the facts on the cell a consumer is back to
+# parsing `__file__0` off the symbol, which is the whole thing this step
+# removes (found by the s469bg merge review; the first version annotated
+# p-let entries only).
+
+{
+    my $src = 'my $x = 1; sub f { $x + 1 } { my $x = 20; print "inner=$x\n"; }'
+            . ' print "f=", f(), "\n";';
+    my $cl = cl_of($src);
+    like($cl, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\) :perl "\$x" :why :captured\)/,
+         '#1035: a file lexical a NAMED SUB captures carries its manifest on the CELL');
+    is(run_cl($src), "inner=20\nf=2\n",
+       '#1035: ... and the promotion still works (the facts are inert)');
+}
+
+{
+    # SPANNING: declared in one package segment, used from a later one.  The
+    # name must not be file-unique, or the compiler keeps it (the #470 identity
+    # promotion) and there is no rename to record -- which is itself right, and
+    # the second row pins it.
+    my $span = cl_of('my $shared = 7; package Later; print "later=$shared\n";'
+                   . ' package main; { my $shared = 99; print "inner=$shared\n"; }');
+    like($span, qr/\(p-defcell \$shared__file__\d+ \(make-p-box nil\) :perl "\$shared" :why :spanning\)/,
+         '#1035: a lexical spanning a package boundary carries :why :spanning');
+    my $uniq = cl_of('my $shared = 7; package Later; sub peek { $shared }'
+                   . ' package main; print Later::peek(), "\n";');
+    like($uniq, qr/\(p-defcell \$shared \(make-p-box nil\)\)/,
+         '#1035: an IDENTITY promotion is not a rename and carries no manifest');
+}
+
+{
+    # A NAME CAN BE RENAMED TWICE, and `:perl` must still be the SOURCE
+    # spelling.  `$a` is exception-set (renamed once) AND captured by a named
+    # sub (renamed again); recording only the second link made `:perl` name
+    # `"$a__excl__0"`, a spelling nowhere in the perl program.
+    # perl-tests/aassign.t's own shape, minimised: a block `my ($a, @b)` that a
+    # NAMED sub inside the block writes.
+    my $src = <<'PL';
+{
+    local @_ = (1, 2, 3);
+    my ($a, @b) = @_;
+    print "($a)(@b)\n";
+    sub f17 { ($a, @b) = @_; return "$a" }
+}
+print f17(7, 8), "\n";
+PL
+    my $cl = cl_of($src);
+    like($cl, qr/\(p-defcell \$a__excl__\d+__file__\d+ [^\n]*:perl "\$a" :why \(:exception-global :captured\)\)/,
+         '#1035: a CHAINED rename resolves :perl to the SOURCE and lists both reasons');
+    is(run_cl($src), "(1)(2 3)\n7\n",
+       '#1035: ... and the doubly-renamed variable still works');
+}
+
+# ── step 3a: p-raw-params entries carry the class AND the manifest ───────────
 
 {
     my $cl = cl_of('sub add { my ($p, $q) = @_; return $p + $q } print add(1,2), "\n";');
     like($cl, qr/\(p-raw-params \(\(\$p :scalar\) \(\$q :scalar\)\)/,
          '#1035: every p-raw-params entry is (NAME CLASS), from the same _slot_class');
+    # A RENAMED parameter carries the same manifest a `p-let` entry would --
+    # the entry is `(NAME CLASS . FACTS)`, one shape for both (s469bg review:
+    # the first version classed parameters but did not annotate them).
+    like(cl_of('sub add { my ($a, $b) = @_; $a + $b } print add(2,3), "\n";'),
+         qr/\(\$a__excl__\d+ :\w[\w-]* :perl "\$a" :why :exception-global\)/,
+         '#1035: a RENAMED parameter carries :perl/:why on its p-raw-params entry');
+    is(run_cl('sub add { my ($a, $b) = @_; $a + $b } print add(2,3), "\n";'),
+       "5\n", '#1035: ... and the exception-set parameters still bind');
     is(run_cl('sub add { my ($p, $q) = @_; return $p + $q } print add(1,2), "\n";'),
        "3\n", '#1035: ... and the fast path still binds the arguments');
 }
@@ -213,6 +280,10 @@ PERL
          '#1035: ... bare p-raw-params names');
     like($plain, qr/\(p-sub pl-add \(&rest %_args\) \(p-raw-params/,
          '#1035: ... and no p-sub facts plist');
+    my $cell = cl_of('my $x = 1; sub f { $x + 1 } { my $x = 20; } print f();',
+                     PCL_IR_PLAIN => 1);
+    like($cell, qr/\(p-defcell \$x__file__\d+ \(make-p-box nil\)\)/,
+         '#1035: ... and a promoted CELL prints without its facts tail');
 }
 
 {
@@ -232,6 +303,14 @@ PERL
 (princ (if (equal (macroexpand-1 '(p-raw-params (($a :scalar) ($b :num)) body))
                   (macroexpand-1 '(p-raw-params (($a :box) ($b :str)) body)))
            "T" "F"))
+(princ (if (equal (macroexpand-1
+                    '(p-raw-params (($a :scalar :perl "$a" :why :exception-global)) body))
+                  (macroexpand-1 '(p-raw-params (($a :scalar)) body)))
+           "T" "F"))
+(princ (if (equal (macroexpand-1 '(p-defcell $x (make-p-box nil)))
+                  (macroexpand-1
+                    '(p-defcell $x (make-p-box nil) :perl "$y" :why :captured)))
+           "T" "F"))
 (princ (if (equal (macroexpand-1 '(p-sub pl-f (&rest %_args) () body))
                   (macroexpand-1
                     '(p-sub pl-f (&rest %_args)
@@ -239,7 +318,7 @@ PERL
            "T" "F"))
 (terpri)
 LISP
-    is($out, "TTTT\n",
+    is($out, "TTTTTT\n",
        '#1035: class and facts are inert -- every form expands to what it did before');
 }
 
@@ -257,11 +336,14 @@ LISP
 (try-expand (p-let (($x :box (make-p-box nil) :perl)) $x))
 (try-expand (p-raw-params (($a :fixnum)) body))
 (try-expand (p-raw-params ($a) body))
+(try-expand (p-raw-params (($a :box :colour "red")) body))
+(try-expand (p-defcell $x (make-p-box nil) :colour "red"))
+(try-expand (p-defcell $x (make-p-box nil) :perl))
 (try-expand (p-sub pl-f (&rest %_args) (:inlinable t) body))
 (try-expand (p-sub pl-f (&rest %_args) (:returns) body))
 (terpri)
 LISP
-    is($out, "TTTTTTT\n",
+    is($out, "TTTTTTTTTT\n",
        '#1035: an unknown class, an unknown fact key or a stray atom DIES at macroexpansion');
 }
 
