@@ -16,7 +16,7 @@
 # perl-tests/pack.t is OK with 8,997 of 14,722 planned rows never produced;
 # the companion's 10 TRANSPILE files are one line each and 2,031 rows behind
 # them.  Neither is visible in any other bucket.
-# taken-at: s468bc 2026-09-04
+# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (t/op/closure.t, t/op/write.t; hand-merged at the rebase)
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	10	UNEXPLAINED
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -143,7 +143,7 @@ t/op/attrs.t	14	UNEXPLAINED
 t/op/bless.t	1	UNEXPLAINED
 t/op/bop.t	13	UNEXPLAINED
 t/op/chop.t	48	UNEXPLAINED
-t/op/closure.t	6	UNEXPLAINED
+t/op/closure.t	1	#1084 — the file's last unproduced row (276, "cloning closure proto with no CvOUTSIDE") needs `do "./op/closure_test.pl"` (closure.t:721), and PCL's do-FILE path dies on the U+2019 in that file's header comment.  Was 6 rows before #1032 un-aborted `fileno ff; write ff` at line 661 (s468be).
 t/op/coreamp.t	723	UNEXPLAINED — MIXED, not measured per row.  The `CORE::given` refusal is one cause (statement-level since s466, #1037, which is why the file produces 55 rows at all instead of none), but the file also aborts FIFTEEN forms, the first on `Undefined subroutine &File::Spec::Functions` (#1073), and its 46 failing rows are the &CORE:: sub family.  Attribution of the 723 is an audit job, so the row stays in the queue on purpose.
 t/op/coresubs.t	1109	UNEXPLAINED
 t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...
@@ -212,7 +212,7 @@ t/op/tr.t	2	UNEXPLAINED
 t/op/try.t	2	UNEXPLAINED
 t/op/undef.t	51	UNEXPLAINED
 t/op/utfhash.t	8	UNEXPLAINED
-t/op/write.t	595	UNEXPLAINED
+t/op/write.t	505	not-supported.md §`format` / `write` report formatting — the file aborts at `Undefined subroutine &main::formline`.  Was 595 rows; #1032 (`p-write` takes a bareword handle) moved the abort later and produced 90 more (s468be).
 t/op/yadayada.t	1	UNEXPLAINED
 t/opbasic/cmp.t	1202	UNEXPLAINED
 t/opbasic/magic_phase.t	2	UNEXPLAINED

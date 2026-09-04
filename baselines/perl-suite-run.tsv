@@ -35,6 +35,25 @@
 #   row by row and re-blessed into baselines/perl-suite-expected-rows.tsv.
 #   NOT spliced: op/write.t, whose SHORTFALL row moved for a different reason
 #   (#1032, already in main) and which agent BE measured in the same window.
+# s468be (Opus, the companion ROW DIFF attribution).  TWO ROWS, both MOVERS OF
+#   ROUND 23 that s465ba's own companion leg (--dir io --dir op) could not see:
+#   op/closure.t is in op/ but its move is +1 passing row, and uni/overload.t is
+#   in uni/, which that leg did not run.  Both are task #1032
+#   (`%define-fh-slot-op`, merged as main 0e7c5e3) and both are BISECTED, not
+#   inferred: the same two files on 1fed80b and 73edcff worktrees score the OLD
+#   numbers and on 0e7c5e3 the new ones (logs run-1fed80b.log / run-73edcff.log
+#   / run-0e7c5e3.log in the s468be worktree's scratch/s466be/).  Each was
+#   re-run ALONE and agrees with the parallel run (#366).
+#     op/closure.t   273/3  -> 274/7  — t/op/closure.t:661 is `fileno ff; write
+#       ff` over a `format ff`, i.e. a BAREWORD HANDLE in a fileno/write slot.
+#       It used to abort there ("Undefined subroutine &main::ff"), losing perl's
+#       rows 271-276; now rows 272 and 275 PASS (the 2 FIXED ROWs) and 271, 273,
+#       274 fail HONESTLY (task #1083).  The file's new abort is one U+2019 in
+#       the comment of the `do "./op/closure_test.pl"` file it loads at line 721
+#       — task #1084, and that is its whole remaining shortfall (6 -> 1).
+#     uni/overload.t 178/14 -> 184/8  — six "something xor itself is zeros"
+#       rows, i.e. task #1028's bitwise mode decision reaching an overloaded
+#       operand.
 # s464aw (Opus, round 22, task #972 — THE THREE OVERLOAD PREREQUISITES),
 #   ONE ROW, a GAIN: op/bop.t C 251/246 -> 252/245.  The bitwise operators
 #   now dispatch `use overload' like every other operator, so bop.t's
@@ -1022,6 +1041,132 @@
 #   removal is honest (0 PARSE ERRORs emitted) but adds no row.
 # s431 first measurement (see the s431 note in the header)
 # s431 first measurement (see the s431 note in the header)
+# s444: cmd/subval.t 27/3 -> 31/4 EDITED BY HAND — s443f (#495 (c) + #491): the
+#   unbound-F handle aborts are gone (aborted-forms 4 -> 1), five more rows run;
+#   predicted by agent F's emission A/B.  Both the parallel and #366 serial pass agree.
+# s463f (round 20 batch legs, companion --all --quick on fc96b08): comp/opsubs.t 31/5 -> 32/4 EDITED BY HAND --
+#   bisected across the two merges with single-file runs: 31/5 on 2065b89 (pre-AU), 32/4 on aafb02c (AU) and
+#   on fc96b08; the row that moved is test 2 (unnamed in the TAP because its arguments were SHIFTED):
+#   #962 -- a failed `m(...)` in LIST context is now the EMPTY LIST, so the assertion's argument list lines up.
+#   Rows 22/26/30/34 (qx/s/tr/y as sub names) keep failing for the #938-family reason.
+# s455 (round 12): io/fs.t 56/2 -> 59/2 EDITED BY HAND -- s454ad/#755: unlink of a directory
+# answers 0/EISDIR instead of delete-file CRASHING the file (the `Could not delete ... Is a
+# directory` abort is gone, +3 rows); base-worktree A/B agrees 56/2 there, 59/2 here.
+# s449: io/open.t 136/25 -> 141/24 EDITED BY HAND — s449r: #593 (+1: PCL row 115 "open -| magic",
+#   the tie-crossing-package-switch lexical now promoted) and #594 (+4: the STDOUT-unbound
+#   aborts are gone; abort reason is now the pre-existing #138 indirect-object drop at line 267).
+#   Parallel and #366 serial agree; predicted row-for-row by agent R's emission A/B.
+# s455 (round 12): io/open.t 141/24 -> 142/23 EDITED BY HAND -- s454ad/#755: the second aborted
+# form (wild-pathname family) is gone, aborted-forms 2 -> 1; the `<&` fd-number statement drop
+# remains.  Base-worktree A/B agrees.
+# s457aj (round 14): io/open.t 142/23 -> 153/35, aborted-forms 1 -> 0, drops 1 -> 0
+# EDITED BY HAND -- #850, the LAST drop in this file: `ok open(...), 'desc',\n|| _diag $!;`
+# ends its paren-less argument run at the trailing comma in perl, and PCL swallowed the
+# `||` into the run, so the reducer was handed an operator with no left operand and the
+# WHOLE STATEMENT was dropped -- which aborted the enclosing form and cost the 23 rows
+# after line 267.  The file now runs to the end (165 rows produced -> 188 = perl's own
+# count): +11 pass, +12 honest fails, all of them rows that had never run (embedded-NUL
+# pathnames, warnings-gated diagnostics, scalar-handle buffering).  The new `sig` is
+# `unbound:$99` -- `eval { open $99, "foo" }` at line 362, which perl rejects as a
+# read-only value and PCL emits as an unbound reference (task #851, row 140).
+# Emission A/B vs a 0237940 worktree: this file DIFFs only for that one statement.
+# s449: io/pipe.t 8/0 -> 18/14 EDITED BY HAND — s449q #590: the Broken-pipe abort that ended
+#   the file at row 8 is now perl's FALSE print, so ten more rows run and fourteen fail
+#   HONESTLY (base c8a8311 alone: 8/0 with the abort; main serial: 18/14).  Parallel/serial
+#   wobble one row (17/13 vs 18/14) — SIGPIPE timing; serial recorded.
+# s450 (round 9): op/exec.t 23/2 -> 22/3 EDITED BY HAND — perl row 17 (the $! sanity check
+#   after the aborted `system {}` form) flipped with s450v's s/// commit (bisected: pre-V and
+#   #541-only both 23/2; the s/// commit 22/3; parallel=serial).  Mechanism NOT yet isolated —
+#   task #694 carries every measurement taken and the next discriminator (capture the row's
+#   own diag under recovery on both trees).
+# s455 (round 12): op/filetest.t 181/250 -> 181/253 EDITED BY HAND -- s454ad: rows 34-36 now
+# fail HONESTLY (#221 warnings-gated family; the old rows were skip-as-pass), and the abort
+# moved: the base wild-pathname crash is gone (#755), the remaining abort is #782
+# (`-f 'TEST';` mis-parse -> undefined &main::f).  Base-worktree A/B agrees.
+# s456ah (round 13): op/filetest.t 181/253 -> 184/250 EDITED BY HAND -- task #740, the ONLY
+# row this session's cl/ change moves.  `-s` is the one filetest whose answer is a VALUE, so
+# an empty file's size is a DEFINED 0 and p--s no longer folds it to undef.  Attributed by an
+# A/B on this same tree (251997a's runtime checked back in: 181/253 = the blessed row exactly;
+# HEAD's: 184/250), and the fails-list diff is exactly three rows, all of them `-s` on a
+# zero-byte file: 26 "-s: file has 0 bytes", 27 "-f and -s: plain file with 0 bytes",
+# 28 "-s and -f: file with 0 bytes is plain file".  Nothing else moved: op/glob.t 14/4,
+# io/fs.t 59/2 and io/dup.t 10/0 are unchanged under the same change (#800's glob leaf-name
+# fix reaches no row any of them asserts).  The abort and drop columns are unchanged.
+# s449: op/gv.t 130/61 -> 131/60 EDITED BY HAND — s449s #564: row 139 "Constant has correct
+#   value" passes (the *p-declared-subs* status now travels with a glob CODE-slot copy — the
+#   "static twin" fix).  Still failing at R's tip f0dda81, passing at S's 46325f9.  The
+#   [perl #77926] row stays MISSING on both trees (its form aborts earlier), unchanged.
+# s455b (round 13): op/hexfp.t 110/15 -> 111/14 EDITED BY HAND -- s456ag (tip bisect: old at
+# the AF tip, moved on AG-only), the same single-row gain as perl-tests/hexfp.t row 78.
+# s450 (round 9): op/lc.t 2683/33 -> 2685/31 EDITED BY HAND — s450v #522: \U/\L/\E in an
+#   s/// replacement route through the dq case-shift compiler.  Predicted by agent V's A/B
+#   (worktree vs 3c7c6ec), parallel and serial agree.
+# s444: op/leaky-magic.t 65/6 -> 66/5 EDITED BY HAND — row 3 (`<foo::ARGV> does not
+#   iterate through STDIN`) passes since s443f #491: a QUALIFIED spelling of a
+#   forced-main handle names that package's own glob, no longer aliasing main::ARGV.
+#   Attributed by running the file ALONE on a c76875a worktree (65/6) vs main (66/5).
+# s450 (round 8): op/leaky-magic.t 66/5 -> 65/6 EDITED BY HAND — row 48 (`%{"foo::!"}` must be
+#   EMPTY) fails since s450t/#561 gave %! a real table: the qualified-foreign symref finds the
+#   pcl-EXPORTED symbol INHERITED into |FOO| — the SAME pre-existing mechanism rows 67-70 have
+#   always failed on; #561 added a member.  Task #685 owns the one-resolver fix (rows 48+67-70
+#   should flip together).
+# s455b (round 13): op/lexsub.t 76/62 drops 4 -> 78/63 drops 1 EDITED BY HAND -- s456ag
+# (PPI �19b, bare `x` starting a statement): the three un-dropped statements execute
+# (2 pass, 1 honest fail); the abort note now shows the binding-stack crash + 11 aborts.
+# s449: op/method.t 99/26 -> 103/22 EDITED BY HAND — s449s #564: the four rows of the
+#   `local *1 = sub {123}` loop (the companion twin of perl-tests/method.t's +4 in the same
+#   batch sweep).  Measured by agent S in a two-file sweep and re-measured here, parallel
+#   and serial agreeing.
+# s455b (round 13): op/packagev.t 197/110 -> 198/109 EDITED BY HAND -- s456ag by tip bisect
+# (old value at the AF tip); consistent with the #480 dot-number repair family reaching a
+# version spelling.
+# s455b (round 13): op/split.t 212/7 -> 213/6 EDITED BY HAND -- s456ag, the same scalar-split
+# row family as perl-tests/split.t (its fail-baseline row left by edit the same session).
+# s450 (round 8): op/utf8cache.t TIMEOUT 2/0 -> DIFF 14/0 EDITED BY HAND — s450u/#477: the
+#   quadratic $&/$`/$' eager cut is gone (offsets + lazy cut), so the "quadratic pos" loop
+#   completes (200k chars 12.8s -> 0.72s, linear).  Parallel and serial agree; its one drop is
+#   the census's existing row.
+# s457aj (round 14): op/utf8cache.t DIFF 14/0 -> OK 16/0, aborted-forms 1 -> 0, drops 1 -> 0
+#   EDITED BY HAND — #850, the same mechanism as io/open.t's: `substr $x, 0, 1, = "\x{100}"`
+#   is `(substr $x,0,1,) = "\x{100}"` in perl (probed), and PCL swallowed the `=` into the
+#   paren-less argument run.  The file is now FULLY PASSING.
+# s455b (round 13): re/charset.t 2776/2775 -> 2776/2776 EDITED BY HAND -- s456af by tip
+# bisect (moved at the AF tip, old at the round-12 tip): one MORE row is produced and fails
+# honestly, pass count unchanged (the perennial churn file gains coverage, not a loss).
+# s455 (round 12): re/pat_psycho.t 11/0 DIFF -> 15/0 OK EDITED BY HAND -- s454ac/#680: the
+# pathological rows that starved on per-match cost finish inside the 450s allowance; verified
+# alone at --timeout 450 (m//g per-match 30x -> ~2.4x of perl).
+# s450 (round 8): re/reg_namedcapture.t 0/2 -> 1/1 EDITED BY HAND — s450t/#561: `*Y = *!` now
+#   aliases the errno hash (row 2 passes... row 1 held by #671 (glob-slot subscript drop) and
+#   #672 (%- values must be arrayrefs)).  Parallel and serial agree.
+# s450 (round 9): re/subst.t 194/78 -> 200/72 EDITED BY HAND — s450v #520: the s///
+#   replacement lambda now sets the FULL match state through the shared setters ($`/$'/$+/
+#   $^N// were empty on that path).  Predicted by agent V's A/B, parallel and serial agree.
+# s463f (round 19 merge review): re/subst.t 200/72 -> 205/67 EDITED BY HAND -- attributed on a
+#   12eacb5 worktree run ALONE (200/72 there; 205/67 on main 6e6f191, parallel AND serial).  Cause = #939's
+#   %p-write-match-target: an s/// on a TIED scalar now STOREs through the tie instead of clobbering the
+#   proxy with the result string, so rows 203/205/207/209/210/211 (the t/re/subst.t:838-886 tied block:
+#   fetch counts + the cow result) pass HONESTLY; row 212 ( result) PASSED ONLY BY THE CLOBBER
+#   (the tie was already gone when ` = \1` ran) and now fails honestly on PRE-EXISTING #963 (a reference
+#   CONSTRUCTOR assigned to a tied scalar reaches STORE dereferenced; identical on 12eacb5 by probe).
+# s463f (round 20 batch legs): run/runenv_hashseed.t 8/0 -> 9/0 EDITED BY HAND, and it is ROUND 19's: #939 (AT) --
+#   its 1029-file emission A/B named t/run/runenv_hashseed.t:206 `substr($munged_seed,-1)=~tr/0-9a-f/1-9a-f0/`
+#   as one of its two diffs ("the shape in the wild"); the file reads 9/0 on 2065b89 (pre-round-20) and on
+#   fc96b08 alike, so neither round-20 agent touched it.  The abort reason moves from `Failed to munge seed`
+#   (the substr window write that was silent) to the NEXT pre-existing gap, `Undefined subroutine
+#   &main::unlink_tempfiles` (a helper the file expects from its runenv.t sibling).  Neither the AT leg
+#   (op/+re/) nor the s463f re/ tail covered run/, which is why the row waited for the --all leg.
+# s449: uni/gv.t 55/33 -> 56/32 EDITED BY HAND — s449s #564: row 89 "Prototype for a constant
+#   subroutine is empty" passes (same declared-subs carry as op/gv.t row 139; still failing at
+#   f0dda81, passing at 46325f9).
+# s449: uni/parser.t 26/32 -> 18/5 EDITED BY HAND — NOT round 7: the row was STALE (uni/ last
+#   measured s444).  REGRESSED by s446k (round-5 agent K, 8600556..f95fa97, bisected across the
+#   round-5 merge order): the glob-ELEMENT read `${*$a{SCALAR}}` dies "Can't use an undefined
+#   value as a symbol reference" where perl reads the slot — task #663 has the 5-line ASCII
+#   repro; identical on base c8a8311 and main, parallel and serial.
+# s455b (round 13): uni/readline.t 4/1 drops 2 -> 6/1 drops 0 EDITED BY HAND -- s456ag
+# (the readline-name predicate pair): both formerly-dropped rows now run and PASS
+# (the report expected honest fails; they pass).  #820 owns the paren-less residue.
 base/cond.t	4	0	4	0	OK		0
 base/if.t	2	0	2	0	OK		0
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1044,9 +1189,6 @@ class/utf8.t	4	0	0	0	XDIFF	aborted-forms:2: Can't locate object method "binmode"
 cmd/elsif.t	4	0	4	0	OK		0
 cmd/for.t	16	0	13	3	XDIFF	not-supported.md §Internals::* — aborts on Internals::stack_refcounted (survey row 2026-06-23; tests before the abort match perl)	0
 cmd/mod.t	15	0	15	0	OK		0
-# s444: cmd/subval.t 27/3 -> 31/4 EDITED BY HAND — s443f (#495 (c) + #491): the
-#   unbound-F handle aborts are gone (aborted-forms 4 -> 1), five more rows run;
-#   predicted by agent F's emission A/B.  Both the parallel and #366 serial pass agree.
 cmd/subval.t	36	0	31	4	DIFF	aborted-forms:1: Can't close: at subval.t line N. 	0
 cmd/switch.t	18	0	18	0	OK		0
 comp/bproto.t	16	0	10	6	DIFF		0
@@ -1060,11 +1202,6 @@ comp/form_scope.t	14	0	0	2	DIFF		0
 comp/hints.t	31	0	16	13	DIFF	NOT fully registered: 3 unregistered diverging row(s): #15; tied empty hint hash is copied to inner scope; tied hint hash is copied to inner scope | not-supported.md §Lexical compile-time hints — $^H/%^H are inert globals, no compile-time scoping/restore (user bless 2026-07-28)	0
 comp/line_debug.t	25	0	1	24	DIFF		0
 comp/multiline.t	6	0	6	0	OK		0
-# s463f (round 20 batch legs, companion --all --quick on fc96b08): comp/opsubs.t 31/5 -> 32/4 EDITED BY HAND --
-#   bisected across the two merges with single-file runs: 31/5 on 2065b89 (pre-AU), 32/4 on aafb02c (AU) and
-#   on fc96b08; the row that moved is test 2 (unnamed in the TAP because its arguments were SHIFTED):
-#   #962 -- a failed `m(...)` in LIST context is now the EMPTY LIST, so the assertion's argument list lines up.
-#   Rows 22/26/30/34 (qx/s/tr/y as sub names) keep failing for the #938-family reason.
 comp/opsubs.t	36	0	32	4	DIFF		0
 comp/our.t	7	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 comp/package.t	14	0	8	6	DIFF	aborted-forms:1: Error while parsing arguments to defmacro p-scalar-=: too many elements in (main::$a $ 'b)	0
@@ -1093,9 +1230,6 @@ io/eintr_print.t	0	0	0	0	NOTAP	aborted-forms:1: Can't locate loadable object for
 io/errno.t	16	0	16	0	OK		0
 io/errnosig.t	1	0	0	1	DIFF		0
 io/fflush.t	7	0	4	0	DIFF	aborted-forms:1: Undefined subroutine &main::_create_runperl called	0
-# s455 (round 12): io/fs.t 56/2 -> 59/2 EDITED BY HAND -- s454ad/#755: unlink of a directory
-# answers 0/EISDIR instead of delete-file CRASHING the file (the `Could not delete ... Is a
-# directory` abort is gone, +3 rows); base-worktree A/B agrees 56/2 there, 59/2 here.
 io/fs.t	61	0	59	2	DIFF		0
 io/getcwd.t	0	0	0	0	NOTAP		0
 io/inplace.t	8	0	2	6	DIFF		0
@@ -1104,24 +1238,6 @@ io/iprefix.t	2	0	0	2	DIFF		0
 io/layers.t	55	0	0	0	DIFF	aborted-forms:1: The variable STDIN is unbound.	0
 io/msg.t	18	0	0	0	XDIFF	aborted-forms:6: Can't locate loadable object for module IPC::SysV in @INC | not-supported.md §DynaLoader / XS binary extensions — IPC::SysV is XS; needs the pclxs bridge (docs/xs-shim-design.md). The generic bugs behind the old crash (labeled-loop goto, empty %SIG) were fixed s316.	0
 io/nargv.t	7	0	11	2	DIFF		0
-# s449: io/open.t 136/25 -> 141/24 EDITED BY HAND — s449r: #593 (+1: PCL row 115 "open -| magic",
-#   the tie-crossing-package-switch lexical now promoted) and #594 (+4: the STDOUT-unbound
-#   aborts are gone; abort reason is now the pre-existing #138 indirect-object drop at line 267).
-#   Parallel and #366 serial agree; predicted row-for-row by agent R's emission A/B.
-# s455 (round 12): io/open.t 141/24 -> 142/23 EDITED BY HAND -- s454ad/#755: the second aborted
-# form (wild-pathname family) is gone, aborted-forms 2 -> 1; the `<&` fd-number statement drop
-# remains.  Base-worktree A/B agrees.
-# s457aj (round 14): io/open.t 142/23 -> 153/35, aborted-forms 1 -> 0, drops 1 -> 0
-# EDITED BY HAND -- #850, the LAST drop in this file: `ok open(...), 'desc',\n|| _diag $!;`
-# ends its paren-less argument run at the trailing comma in perl, and PCL swallowed the
-# `||` into the run, so the reducer was handed an operator with no left operand and the
-# WHOLE STATEMENT was dropped -- which aborted the enclosing form and cost the 23 rows
-# after line 267.  The file now runs to the end (165 rows produced -> 188 = perl's own
-# count): +11 pass, +12 honest fails, all of them rows that had never run (embedded-NUL
-# pathnames, warnings-gated diagnostics, scalar-handle buffering).  The new `sig` is
-# `unbound:$99` -- `eval { open $99, "foo" }` at line 362, which perl rejects as a
-# read-only value and PCL emits as an unbound reference (task #851, row 140).
-# Emission A/B vs a 0237940 worktree: this file DIFFs only for that one statement.
 io/open.t	188	0	154	34	DIFF		0
 io/openpid.t	10	0	8	2	DIFF		0
 io/paragraph_mode.t	80	0	80	0	OK		0
@@ -1129,10 +1245,6 @@ io/perlio.t	46	2	22	0	DIFF	aborted-forms:1: Error opening #P"/tmp/nKNTIilTqW/t/"
 io/perlio_fail.t	15	0	6	9	DIFF		0
 io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	0	0	DIFF	aborted-forms:3: Execution of a form compiled with errors. Form: (p-open	0
-# s449: io/pipe.t 8/0 -> 18/14 EDITED BY HAND — s449q #590: the Broken-pipe abort that ended
-#   the file at row 8 is now perl's FALSE print, so ten more rows run and fourteen fail
-#   HONESTLY (base c8a8311 alone: 8/0 with the abort; main serial: 18/14).  Parallel/serial
-#   wobble one row (17/13 vs 18/14) — SIGPIPE timing; serial recorded.
 io/pipe.t	27	0	18	14	DIFF		0
 io/print.t	24	0	23	1	DIFF		0
 io/pvbm.t	28	0	20	8	DIFF	s457ai: NOT a mover -- measured IDENTICAL on a 0237940 base tree; the snapshot row was stale (the known pvbm flapper, DECIDED s437/s438)	0
@@ -1246,7 +1358,7 @@ op/chars.t	34	0	34	0	OK		0
 op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.	0
 op/chop.t	148	0	96	4	DIFF		0
 op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — ALL 7 failing rows (38/7 vs perl 45/0) are two blessed subsections. t10-13 are the `### use bytes` block (t/op/chr.t lines 28-31: under the pragma `chr(-1)` must be the single byte "\xFF"; PCL has no byte view, so it keeps "\x{FFFD}"). t40-42 are `### Code points above U+10FFFF` (lines 80-82: chr(0x110000)/0x1FFFFF/0x200000 in perl's extended UTF-8) — measured s319/s320: SBCL's char-code-limit is 1114112, so a CL string physically cannot hold them and (code-char #x110000) yields no character. Blessed in fable-answers-s318.md §11; task #173.	0
-op/closure.t	281	1	273	3	DIFF	aborted-forms:1: The function main::pl-ff is undefined.	0
+op/closure.t	281	1	274	7	DIFF	aborted-forms:1: PCL: cannot parse (inline code): PPI failed to tokenize it at (eval N) line N.	0
 op/cmpchain.t	1750	0	1521	229	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.	0
 op/concat2.t	4	0	4	0	OK		0
 op/cond.t	5	0	4	1	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
@@ -1275,29 +1387,11 @@ op/each.t	65	0	35	12	DIFF	aborted-forms:1: Can't locate loadable object for modu
 op/each_array.t	65	0	65	0	OK		0
 op/eval.t	169	0	130	38	DIFF	undef-fn:main::pl-ARRAY	0
 op/evalbytes.t	9	0	5	4	DIFF		0
-# s450 (round 9): op/exec.t 23/2 -> 22/3 EDITED BY HAND — perl row 17 (the $! sanity check
-#   after the aborted `system {}` form) flipped with s450v's s/// commit (bisected: pre-V and
-#   #541-only both 23/2; the s/// commit 22/3; parallel=serial).  Mechanism NOT yet isolated —
-#   task #694 carries every measurement taken and the next discriminator (capture the row's
-#   own diag under recovery on both trees).
 op/exec.t	41	0	24	1	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
-# s455 (round 12): op/filetest.t 181/250 -> 181/253 EDITED BY HAND -- s454ad: rows 34-36 now
-# fail HONESTLY (#221 warnings-gated family; the old rows were skip-as-pass), and the abort
-# moved: the base wild-pathname crash is gone (#755), the remaining abort is #782
-# (`-f 'TEST';` mis-parse -> undefined &main::f).  Base-worktree A/B agrees.
-# s456ah (round 13): op/filetest.t 181/253 -> 184/250 EDITED BY HAND -- task #740, the ONLY
-# row this session's cl/ change moves.  `-s` is the one filetest whose answer is a VALUE, so
-# an empty file's size is a DEFINED 0 and p--s no longer folds it to undef.  Attributed by an
-# A/B on this same tree (251997a's runtime checked back in: 181/253 = the blessed row exactly;
-# HEAD's: 184/250), and the fails-list diff is exactly three rows, all of them `-s` on a
-# zero-byte file: 26 "-s: file has 0 bytes", 27 "-f and -s: plain file with 0 bytes",
-# 28 "-s and -f: file with 0 bytes is plain file".  Nothing else moved: op/glob.t 14/4,
-# io/fs.t 59/2 and io/dup.t 10/0 are unchanged under the same change (#800's glob leaf-name
-# fix reaches no row any of them asserts).  The abort and drop columns are unchanged.
 op/filetest.t	436	0	180	254	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
@@ -1315,10 +1409,6 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-# s449: op/gv.t 130/61 -> 131/60 EDITED BY HAND — s449s #564: row 139 "Constant has correct
-#   value" passes (the *p-declared-subs* status now travels with a glob CODE-slot copy — the
-#   "static twin" fix).  Still failing at R's tip f0dda81, passing at S's 46325f9.  The
-#   [perl #77926] row stays MISSING on both trees (its form aborts earlier), unchanged.
 op/gv.t	304	0	131	60	DIFF	aborted-forms:4: Died at gv.t line N. 	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
@@ -1326,8 +1416,6 @@ op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for modul
 op/hashassign.t	309	0	305	4	XDIFF	not-supported.md section "Warnings-gated diagnostics are absent (`use warnings` is not modelled)" — ALL 4 diverging rows (305/4 vs perl 309/0): `Odd number of elements in hash assignment` and `Reference found where even-sized list expected`, each in its `%h = …` and its `($s, %h) = …` spelling. Owner task #221; visible since s399 (#323).	0
 op/hashwarn.t	20	0	5	15	DIFF		0
 op/heredoc.t	138	0	32	106	DIFF	undef-fn:main::pl-EOF	0
-# s455b (round 13): op/hexfp.t 110/15 -> 111/14 EDITED BY HAND -- s456ag (tip bisect: old at
-# the AF tip, moved on AG-only), the same single-row gain as perl-tests/hexfp.t row 78.
 op/hexfp.t	125	0	111	14	DIFF		0
 op/inc.t	93	0	62	13	DIFF		0
 op/inccode-tie.t	89	0	0	0	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
@@ -1342,26 +1430,11 @@ op/join.t	43	0	41	2	DIFF		0
 op/kill0.t	9	0	6	3	DIFF		0
 op/kvaslice.t	38	0	23	15	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
 op/kvhslice.t	39	0	19	19	DIFF	s457ai #818: the KV-slice VALUE half is an alias, so the write-through rows pass	0
-# s450 (round 9): op/lc.t 2683/33 -> 2685/31 EDITED BY HAND — s450v #522: \U/\L/\E in an
-#   s/// replacement route through the dq case-shift compiler.  Predicted by agent V's A/B
-#   (worktree vs 3c7c6ec), parallel and serial agree.
 op/lc.t	2716	0	2685	31	DIFF		0
-# s444: op/leaky-magic.t 65/6 -> 66/5 EDITED BY HAND — row 3 (`<foo::ARGV> does not
-#   iterate through STDIN`) passes since s443f #491: a QUALIFIED spelling of a
-#   forced-main handle names that package's own glob, no longer aliasing main::ARGV.
-#   Attributed by running the file ALONE on a c76875a worktree (65/6) vs main (66/5).
-# s450 (round 8): op/leaky-magic.t 66/5 -> 65/6 EDITED BY HAND — row 48 (`%{"foo::!"}` must be
-#   EMPTY) fails since s450t/#561 gave %! a real table: the qualified-foreign symref finds the
-#   pcl-EXPORTED symbol INHERITED into |FOO| — the SAME pre-existing mechanism rows 67-70 have
-#   always failed on; #561 added a member.  Task #685 owns the one-resolver fix (rows 48+67-70
-#   should flip together).
 op/leaky-magic.t	71	0	71	0	DIFF	aborted-forms:16: Can't locate tests.pm in @INC (@INC contains: op . lib pcl xN_N-linux N.N.N xN_N-linux N.N	0
 op/length.t	49	0	35	12	DIFF		0
 op/lex.t	53	0	13	39	DIFF	unbound:%0	1
 op/lex_assign.t	353	0	350	3	DIFF		0
-# s455b (round 13): op/lexsub.t 76/62 drops 4 -> 78/63 drops 1 EDITED BY HAND -- s456ag
-# (PPI �19b, bare `x` starting a statement): the three un-dropped statements execute
-# (2 pass, 1 honest fail); the abort note now shows the binding-stack crash + 11 aborts.
 op/lexsub.t	156	0	78	63	DIFF	crash:sb-kernel::binding-stack-exhausted: Binding stack exhausted.; aborted-forms:11: Undefined subroutine &main::d called	1
 op/lfs.t	17	0	0	0	DIFF		0
 op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills the run	-1
@@ -1373,10 +1446,6 @@ op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
 op/magic.t	207	1	176	31	DIFF		0
-# s449: op/method.t 99/26 -> 103/22 EDITED BY HAND — s449s #564: the four rows of the
-#   `local *1 = sub {123}` loop (the companion twin of perl-tests/method.t's +4 in the same
-#   batch sweep).  Measured by agent S in a two-file sweep and re-measured here, parallel
-#   and serial agreeing.
 op/method.t	163	0	103	22	DIFF	aborted-forms:3: PCL: statement not supported at method.t line N: is((method $obj "a","b","c"), "method,a,b	1
 op/mkdir.t	17	0	17	0	OK		0
 op/multideref.t	65	0	43	9	DIFF	aborted-forms:1: invalid number of arguments: N	0
@@ -1394,9 +1463,6 @@ op/ord.t	38	0	38	0	OK		0
 op/overload_integer.t	2	0	2	0	OK		0
 op/override.t	36	0	3	17	DIFF	aborted-forms:2: Failed to transpile /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/xN_N-linux/Confi	0
 op/pack.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — never measured; was queued behind op/list.t when it OOMed	-1
-# s455b (round 13): op/packagev.t 197/110 -> 198/109 EDITED BY HAND -- s456ag by tip bisect
-# (old value at the AF tip); consistent with the #480 dot-number repair family reaching a
-# version spelling.
 op/packagev.t	307	0	198	109	DIFF		0
 op/pos.t	33	0	15	15	DIFF		0
 op/postfixderef.t	128	0	100	21	DIFF	aborted-forms:3: Undefined subroutine &main::foo called	0
@@ -1435,8 +1501,6 @@ op/smartkve.t	18	0	3	15	DIFF		0
 op/smartmatch.t	353	0	55	295	XDIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at smartmatch.t line N  | not-supported.md §`given`/`when` / smart match (`~~`) — infix `~~`, removed in perl 5.42 (task #371)	0
 op/sort.t	205	0	183	22	DIFF		0
 op/splice.t	34	0	34	0	OK		0
-# s455b (round 13): op/split.t 212/7 -> 213/6 EDITED BY HAND -- s456ag, the same scalar-split
-# row family as perl-tests/split.t (its fail-baseline row left by edit the same session).
 op/split.t	219	0	213	6	DIFF		0
 op/split_unicode.t	147	0	107	40	DIFF		0
 op/sprintf.t	559	0	534	25	DIFF		0
@@ -1477,14 +1541,6 @@ op/universal.t	142	2	80	64	DIFF		0
 op/unlink.t	6	0	4	2	DIFF	aborted-forms:1: Couldn't unlink tempdir '/tmp/pcl-test-N-N': Directory not empty at /home/bernt/perlN/perl	0
 op/unshift.t	19	0	19	0	OK		0
 op/upgrade.t	64	0	64	0	OK		0
-# s450 (round 8): op/utf8cache.t TIMEOUT 2/0 -> DIFF 14/0 EDITED BY HAND — s450u/#477: the
-#   quadratic $&/$`/$' eager cut is gone (offsets + lazy cut), so the "quadratic pos" loop
-#   completes (200k chars 12.8s -> 0.72s, linear).  Parallel and serial agree; its one drop is
-#   the census's existing row.
-# s457aj (round 14): op/utf8cache.t DIFF 14/0 -> OK 16/0, aborted-forms 1 -> 0, drops 1 -> 0
-#   EDITED BY HAND — #850, the same mechanism as io/open.t's: `substr $x, 0, 1, = "\x{100}"`
-#   is `(substr $x,0,1,) = "\x{100}"` in perl (probed), and PCL swallowed the `=` into the
-#   paren-less argument run.  The file is now FULLY PASSING.
 op/utf8cache.t	16	0	16	0	OK		0
 op/utf8decode.t	710	0	620	90	DIFF		0
 op/utf8magic.t	6	0	2	4	DIFF		0
@@ -1507,9 +1563,6 @@ re/alpha_assertions.t	2279	0	1784	74	DIFF	aborted-forms:2: end of file on #<dyna
 re/anyof.t	1187	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 re/begin-once.t	2	0	1	1	DIFF		0
 re/bigfuzzy_not_utf8.t	1	0	0	1	DIFF		0
-# s455b (round 13): re/charset.t 2776/2775 -> 2776/2776 EDITED BY HAND -- s456af by tip
-# bisect (moved at the AF tip, old at the round-12 tip): one MORE row is produced and fails
-# honestly, pass count unchanged (the perennial churn file gains coverage, not a loss).
 re/charset.t	8328	0	2776	2775	DIFF		0
 re/fold_grind_8.t	213	0	0	0	DIFF		0
 re/fold_grind_T.t	0	0	0	0	NOTAP		0
@@ -1525,9 +1578,6 @@ re/overload.t	87	0	3	0	TIMEOUT	timeout	0
 re/pat.t	1263	4	231	138	DIFF	aborted-forms:1: Failed to match at pat.t line N. 	0
 re/pat_advanced.t	1678	0	951	729	DIFF		0
 re/pat_advanced_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
-# s455 (round 12): re/pat_psycho.t 11/0 DIFF -> 15/0 OK EDITED BY HAND -- s454ac/#680: the
-# pathological rows that starved on per-match cost finish inside the 450s allowance; verified
-# alone at --timeout 450 (m//g per-match 30x -> ~2.4x of perl).
 re/pat_psycho.t	15	0	15	0	OK		0
 re/pat_psycho_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/pat_re_eval.t	527	0	65	462	DIFF	NOT fully registered: 15 unregistered diverging row(s): hairy backslashes plain blank [9\'] =~ /^9\\\'/; hairy backslashes plain blank [9\\'] =~ /^9\\\\'/; hairy backslashes plain blank [9\\\'] =~ /^9\\\\\\'/; +12 more | not-supported.md §regex-code-blocks — whole file exercises (?{...})/(??{...}) (196 uses); cl-ppcre has no mid-match callback hook	0
@@ -1550,9 +1600,6 @@ re/reg_eval.t	8	0	1	7	DIFF	NOT fully registered: 1 unregistered diverging row(s)
 re/reg_eval_scope.t	48	1	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 re/reg_fold.t	6786	105	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC PCL: Internals::SvREADONLY: a SCA	0
 re/reg_mesg.t	3348	0	0	0	DIFF	aborted-forms:1: The function main::pl-display_rx is undefined.	0
-# s450 (round 8): re/reg_namedcapture.t 0/2 -> 1/1 EDITED BY HAND — s450t/#561: `*Y = *!` now
-#   aliases the errno hash (row 2 passes... row 1 held by #671 (glob-slot subscript drop) and
-#   #672 (%- values must be arrayrefs)).  Parallel and serial agree.
 re/reg_namedcapture.t	2	0	1	1	DIFF		0
 re/reg_nc_tie.t	37	0	14	18	DIFF	undef-fn:|Tie::Hash::NamedCapture|::pl-STORE; aborted-forms:5: The function |Tie::Hash::NamedCapture|::pl-FETCH is undefined.	0
 re/reg_nocapture.t	25	0	14	11	DIFF		0
@@ -1577,16 +1624,6 @@ re/script_run.t	185	0	0	185	XDIFF	not-supported.md §Regex script-run assertions
 re/speed.t	59	0	1	0	TIMEOUT	timeout	0
 re/speed_thr.t	0	0	0	0	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 re/stclass_threads.t	0	0	5	1	NOTAP		0
-# s450 (round 9): re/subst.t 194/78 -> 200/72 EDITED BY HAND — s450v #520: the s///
-#   replacement lambda now sets the FULL match state through the shared setters ($`/$'/$+/
-#   $^N// were empty on that path).  Predicted by agent V's A/B, parallel and serial agree.
-# s463f (round 19 merge review): re/subst.t 200/72 -> 205/67 EDITED BY HAND -- attributed on a
-#   12eacb5 worktree run ALONE (200/72 there; 205/67 on main 6e6f191, parallel AND serial).  Cause = #939's
-#   %p-write-match-target: an s/// on a TIED scalar now STOREs through the tie instead of clobbering the
-#   proxy with the result string, so rows 203/205/207/209/210/211 (the t/re/subst.t:838-886 tied block:
-#   fetch counts + the cow result) pass HONESTLY; row 212 ( result) PASSED ONLY BY THE CLOBBER
-#   (the tie was already gone when ` = \1` ran) and now fails honestly on PRE-EXISTING #963 (a reference
-#   CONSTRUCTOR assigned to a tied scalar reaches STORE dereferenced; identical on 12eacb5 by probe).
 re/subst.t	281	0	205	67	DIFF	aborted-forms:3: The value #<hash-table :TEST equal :COUNT N {NDN}> 	2
 re/substT.t	0	0	0	0	NOTAP		0
 re/subst_amp.t	13	0	0	13	DIFF		0
@@ -1609,13 +1646,6 @@ run/fresh_perl.t	91	0	57	34	XDIFF	unbound:H | not-supported.md §Error message t
 run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
-# s463f (round 20 batch legs): run/runenv_hashseed.t 8/0 -> 9/0 EDITED BY HAND, and it is ROUND 19's: #939 (AT) --
-#   its 1029-file emission A/B named t/run/runenv_hashseed.t:206 `substr($munged_seed,-1)=~tr/0-9a-f/1-9a-f0/`
-#   as one of its two diffs ("the shape in the wild"); the file reads 9/0 on 2065b89 (pre-round-20) and on
-#   fc96b08 alike, so neither round-20 agent touched it.  The abort reason moves from `Failed to munge seed`
-#   (the substr window write that was silent) to the NEXT pre-existing gap, `Undefined subroutine
-#   &main::unlink_tempfiles` (a helper the file expects from its runenv.t sibling).  Neither the AT leg
-#   (op/+re/) nor the s463f re/ tail covered run/, which is why the row waited for the --all leg.
 run/runenv_hashseed.t	278	0	9	0	DIFF	aborted-forms:1: Undefined subroutine &main::unlink_tempfiles called	0
 run/runenv_randseed.t	9	0	2	7	DIFF		0
 run/script.t	3	0	3	0	OK		0
@@ -1644,9 +1674,6 @@ uni/eval.t	5	0	5	0	OK		0
 uni/fold.t	19128	104	928	232	DIFF	aborted-forms:3: Can't locate loadable object for module Storable in @INC While evaluating the form startin	0
 uni/goto.t	4	0	2	2	XDIFF	undef-fn:common-lisp:nil | not-supported.md §Error message text and format (CLAUDE.md §9; exact fatal-error text is not a goal — user 2026-07-28) — BOTH failing rows (2/2 vs perl 4/0) are `like $@, qr/Goto undefined subroutine &main::…/`, i.e. error-MESSAGE matches. PCL's BEHAVIOUR is correct in both: probed s321, it dies and does NOT call the sub in either case. t3 `goto &{"<utf8 bytes>"}` — perl declines to find the sub because the byte string lacks the UTF-8 flag; PCL declines too (it stores the sub under the CHARACTER name, so the byte string resolves to nothing) — same observable outcome, different mechanism, so do NOT read this row as PCL implementing a per-scalar UTF-8 flag (it has none). t4 `goto &因` on an undefined sub likewise dies. Task #149 category :principle9. NB rows 1-2 PASS: magical goto to a UTF-8-named sub, bareword and softref, both work. QUALITY NIT (not a blocker, no task): t3's message is SBCL's "The function common-lisp:nil is undefined" — an internal error leaking where a Perl-level one belongs (CLAUDE.md 12 in spirit).	0
 uni/greek.t	0	0	0	0	NOTAP		0
-# s449: uni/gv.t 55/33 -> 56/32 EDITED BY HAND — s449s #564: row 89 "Prototype for a constant
-#   subroutine is empty" passes (same declared-subs carry as op/gv.t row 139; still failing at
-#   f0dda81, passing at 46325f9).
 uni/gv.t	206	0	56	32	DIFF	aborted-forms:1: Died at gv.t line N. 	0
 uni/labels.t	10	0	3	5	DIFF	aborted-forms:1: Execution of a form compiled with errors. Form: (go :ここ)	0
 uni/latin2.t	0	0	0	0	NOTAP		0
@@ -1654,17 +1681,9 @@ uni/lex_utf8.t	16	0	6	10	DIFF		0
 uni/lower.t	11720	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module Storable in @INC	0
 uni/method.t	62	0	28	21	DIFF	aborted-forms:2: Can't locate object method "nÃ¨w" via package "Føø::Bær" at - line N. 	0
 uni/opcroak.t	5	0	0	5	DIFF	aborted-forms:1: PCL: unsupported in string eval: multiple package sections at (eval N) line N. 	0
-uni/overload.t	191	2	178	14	DIFF	aborted-forms:1: The function main::pl-todo_skip is undefined.	0
+uni/overload.t	191	2	184	8	DIFF	aborted-forms:1: Undefined subroutine &main::todo_skip called	0
 uni/package.t	18	0	8	10	DIFF		0
-# s449: uni/parser.t 26/32 -> 18/5 EDITED BY HAND — NOT round 7: the row was STALE (uni/ last
-#   measured s444).  REGRESSED by s446k (round-5 agent K, 8600556..f95fa97, bisected across the
-#   round-5 merge order): the glob-ELEMENT read `${*$a{SCALAR}}` dies "Can't use an undefined
-#   value as a symbol reference" where perl reads the slot — task #663 has the 5-line ASCII
-#   repro; identical on base c8a8311 and main, parallel and serial.
 uni/parser.t	58	0	28	30	DIFF		0
-# s455b (round 13): uni/readline.t 4/1 drops 2 -> 6/1 drops 0 EDITED BY HAND -- s456ag
-# (the readline-name predicate pair): both formerly-dropped rows now run and PASS
-# (the report expected honest fails; they pass).  #820 owns the paren-less residue.
 uni/readline.t	7	0	6	1	DIFF		0
 uni/select.t	3	2	1	4	DIFF		0
 uni/sprintf.t	52	0	49	3	DIFF		0

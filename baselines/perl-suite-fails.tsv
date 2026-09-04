@@ -36,7 +36,7 @@
 # descriptions interpolate perl's own hash order ("uses >0 heads (6)", "k1:
 # delete", "key '2' incremented correctly") and were measured DIFFERENT in two
 # runs of ONE tree.
-# taken-at: s468bc 2026-09-04
+# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (the ten s468be files; hand-merged at the rebase)
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -2213,18 +2213,6 @@ op/blocks.t	1	ok	not ok	Order of execution of special blocks
 op/blocks.t	23	ok	not ok	Prototype on BEGIN blocks should warn
 op/blocks.t	21	ok	not ok	Prototypes on BEGIN blocks should warn
 op/blocks.t	15	ok	not ok	UNITCHECK{die} should exit
-op/bop.t	413	ok	not ok	PVBM ref & string
-op/bop.t	426	ok	not ok	PVBM ref & utf8
-op/bop.t	419	ok	not ok	PVBM ref &= string
-op/bop.t	432	ok	not ok	PVBM ref &= utf8
-op/bop.t	414	ok	not ok	PVBM ref ^ string
-op/bop.t	427	ok	not ok	PVBM ref ^ utf8
-op/bop.t	420	ok	not ok	PVBM ref ^= string
-op/bop.t	433	ok	not ok	PVBM ref ^= utf8
-op/bop.t	412	ok	not ok	PVBM ref | string
-op/bop.t	425	ok	not ok	PVBM ref | utf8
-op/bop.t	418	ok	not ok	PVBM ref |= string
-op/bop.t	431	ok	not ok	PVBM ref |= utf8
 op/bop.t	503	ok	(missing)	Use of code points above 0xFF as argument to 1's complement (~) is not allowed
 op/bop.t	500	ok	(missing)	Use of code points above 0xFF as arguments to bitwise and (&) is not allowed
 op/bop.t	501	ok	(missing)	Use of code points above 0xFF as arguments to bitwise or (|) is not allowed
@@ -2252,225 +2240,20 @@ op/bop.t	146	ok	not ok	[at t/op/bop.t line 286]
 op/bop.t	499	ok	(missing)	[perl \#129995] access to freed memory
 op/bop.t	510	ok	(missing)	[perl \#17844] access beyond end of block
 op/bop.t	160	ok	not ok	and turns off the UTF-8 flag
-op/bop.t	257	ok	not ok	array ref & string
-op/bop.t	270	ok	not ok	array ref & utf8
-op/bop.t	263	ok	not ok	array ref &= string
-op/bop.t	276	ok	not ok	array ref &= utf8
-op/bop.t	258	ok	not ok	array ref ^ string
-op/bop.t	271	ok	not ok	array ref ^ utf8
-op/bop.t	264	ok	not ok	array ref ^= string
-op/bop.t	277	ok	not ok	array ref ^= utf8
-op/bop.t	256	ok	not ok	array ref | string
-op/bop.t	269	ok	not ok	array ref | utf8
-op/bop.t	262	ok	not ok	array ref |= string
-op/bop.t	275	ok	not ok	array ref |= utf8
 op/bop.t	465	ok	not ok	correct error
-op/bop.t	335	ok	not ok	glob & string
-op/bop.t	348	ok	not ok	glob & utf8
-op/bop.t	341	ok	not ok	glob &= string
-op/bop.t	354	ok	not ok	glob &= utf8
-op/bop.t	336	ok	not ok	glob ^ string
-op/bop.t	349	ok	not ok	glob ^ utf8
-op/bop.t	342	ok	not ok	glob ^= string
-op/bop.t	355	ok	not ok	glob ^= utf8
-op/bop.t	361	ok	not ok	glob ref & string
-op/bop.t	374	ok	not ok	glob ref & utf8
-op/bop.t	367	ok	not ok	glob ref &= string
-op/bop.t	380	ok	not ok	glob ref &= utf8
-op/bop.t	362	ok	not ok	glob ref ^ string
-op/bop.t	375	ok	not ok	glob ref ^ utf8
-op/bop.t	368	ok	not ok	glob ref ^= string
-op/bop.t	381	ok	not ok	glob ref ^= utf8
-op/bop.t	360	ok	not ok	glob ref | string
-op/bop.t	373	ok	not ok	glob ref | utf8
-op/bop.t	366	ok	not ok	glob ref |= string
-op/bop.t	379	ok	not ok	glob ref |= utf8
-op/bop.t	334	ok	not ok	glob | string
-op/bop.t	347	ok	not ok	glob | utf8
-op/bop.t	340	ok	not ok	glob |= string
-op/bop.t	353	ok	not ok	glob |= utf8
-op/bop.t	283	ok	not ok	hash ref & string
-op/bop.t	296	ok	not ok	hash ref & utf8
-op/bop.t	289	ok	not ok	hash ref &= string
-op/bop.t	302	ok	not ok	hash ref &= utf8
-op/bop.t	284	ok	not ok	hash ref ^ string
-op/bop.t	297	ok	not ok	hash ref ^ utf8
-op/bop.t	290	ok	not ok	hash ref ^= string
-op/bop.t	303	ok	not ok	hash ref ^= utf8
-op/bop.t	282	ok	not ok	hash ref | string
-op/bop.t	295	ok	not ok	hash ref | utf8
-op/bop.t	288	ok	not ok	hash ref |= string
-op/bop.t	301	ok	not ok	hash ref |= utf8
 op/bop.t	483	ok	not ok	neg UV (sic) left shift  = 0xFF..E
 op/bop.t	484	ok	not ok	neg UV (sic) right shift = 0x7F..F
 op/bop.t	216	ok	not ok	no duplicate warnings
 op/bop.t	229	ok	not ok	no duplicate warnings
-op/bop.t	439	ok	not ok	object & string
-op/bop.t	452	ok	not ok	object & utf8
-op/bop.t	445	ok	not ok	object &= string
-op/bop.t	458	ok	not ok	object &= utf8
-op/bop.t	440	ok	not ok	object ^ string
-op/bop.t	453	ok	not ok	object ^ utf8
-op/bop.t	446	ok	not ok	object ^= string
-op/bop.t	459	ok	not ok	object ^= utf8
-op/bop.t	438	ok	not ok	object | string
-op/bop.t	451	ok	not ok	object | utf8
-op/bop.t	444	ok	not ok	object |= string
-op/bop.t	457	ok	not ok	object |= utf8
-op/bop.t	309	ok	not ok	qr// & string
-op/bop.t	322	ok	not ok	qr// & utf8
-op/bop.t	315	ok	not ok	qr// &= string
-op/bop.t	328	ok	not ok	qr// &= utf8
-op/bop.t	310	ok	not ok	qr// ^ string
-op/bop.t	323	ok	not ok	qr// ^ utf8
-op/bop.t	316	ok	not ok	qr// ^= string
-op/bop.t	329	ok	not ok	qr// ^= utf8
-op/bop.t	308	ok	not ok	qr// | string
-op/bop.t	321	ok	not ok	qr// | utf8
-op/bop.t	314	ok	not ok	qr// |= string
-op/bop.t	327	ok	not ok	qr// |= utf8
-op/bop.t	231	ok	not ok	scalar ref & string
-op/bop.t	244	ok	not ok	scalar ref & utf8
-op/bop.t	237	ok	not ok	scalar ref &= string
-op/bop.t	250	ok	not ok	scalar ref &= utf8
-op/bop.t	232	ok	not ok	scalar ref ^ string
-op/bop.t	245	ok	not ok	scalar ref ^ utf8
-op/bop.t	238	ok	not ok	scalar ref ^= string
-op/bop.t	251	ok	not ok	scalar ref ^= utf8
-op/bop.t	230	ok	not ok	scalar ref | string
-op/bop.t	243	ok	not ok	scalar ref | utf8
-op/bop.t	236	ok	not ok	scalar ref |= string
-op/bop.t	249	ok	not ok	scalar ref |= utf8
 op/bop.t	27	ok	not ok	str var & const str
 op/bop.t	28	ok	not ok	str var & const str again
 op/bop.t	31	ok	not ok	str var ^ const str
 op/bop.t	32	ok	not ok	str var ^ const str again
 op/bop.t	29	ok	not ok	str var | const str
 op/bop.t	30	ok	not ok	str var | const str again
-op/bop.t	416	ok	not ok	string & PVBM ref
-op/bop.t	260	ok	not ok	string & array ref
-op/bop.t	338	ok	not ok	string & glob
-op/bop.t	364	ok	not ok	string & glob ref
-op/bop.t	286	ok	not ok	string & hash ref
-op/bop.t	442	ok	not ok	string & object
-op/bop.t	312	ok	not ok	string & qr//
-op/bop.t	234	ok	not ok	string & scalar ref
-op/bop.t	208	ok	not ok	string & undef
-op/bop.t	422	ok	not ok	string &= PVBM ref
-op/bop.t	266	ok	not ok	string &= array ref
-op/bop.t	344	ok	not ok	string &= glob
-op/bop.t	370	ok	not ok	string &= glob ref
-op/bop.t	292	ok	not ok	string &= hash ref
-op/bop.t	448	ok	not ok	string &= object
-op/bop.t	318	ok	not ok	string &= qr//
-op/bop.t	240	ok	not ok	string &= scalar ref
-op/bop.t	214	ok	not ok	string &= undef
-op/bop.t	417	ok	not ok	string ^ PVBM ref
-op/bop.t	261	ok	not ok	string ^ array ref
-op/bop.t	339	ok	not ok	string ^ glob
-op/bop.t	365	ok	not ok	string ^ glob ref
-op/bop.t	287	ok	not ok	string ^ hash ref
-op/bop.t	443	ok	not ok	string ^ object
-op/bop.t	313	ok	not ok	string ^ qr//
-op/bop.t	235	ok	not ok	string ^ scalar ref
-op/bop.t	209	ok	not ok	string ^ undef
-op/bop.t	423	ok	not ok	string ^= PVBM ref
-op/bop.t	267	ok	not ok	string ^= array ref
-op/bop.t	345	ok	not ok	string ^= glob
-op/bop.t	371	ok	not ok	string ^= glob ref
-op/bop.t	293	ok	not ok	string ^= hash ref
-op/bop.t	449	ok	not ok	string ^= object
-op/bop.t	319	ok	not ok	string ^= qr//
-op/bop.t	241	ok	not ok	string ^= scalar ref
-op/bop.t	215	ok	not ok	string ^= undef
 op/bop.t	464	ok	not ok	string overload can't use |
-op/bop.t	415	ok	not ok	string | PVBM ref
-op/bop.t	259	ok	not ok	string | array ref
-op/bop.t	337	ok	not ok	string | glob
-op/bop.t	363	ok	not ok	string | glob ref
-op/bop.t	285	ok	not ok	string | hash ref
-op/bop.t	441	ok	not ok	string | object
-op/bop.t	311	ok	not ok	string | qr//
-op/bop.t	233	ok	not ok	string | scalar ref
-op/bop.t	207	ok	not ok	string | undef
-op/bop.t	421	ok	not ok	string |= PVBM ref
-op/bop.t	265	ok	not ok	string |= array ref
-op/bop.t	343	ok	not ok	string |= glob
-op/bop.t	369	ok	not ok	string |= glob ref
-op/bop.t	291	ok	not ok	string |= hash ref
-op/bop.t	447	ok	not ok	string |= object
-op/bop.t	317	ok	not ok	string |= qr//
-op/bop.t	239	ok	not ok	string |= scalar ref
-op/bop.t	213	ok	not ok	string |= undef
-op/bop.t	205	ok	not ok	undef & string
-op/bop.t	218	ok	not ok	undef & utf8
-op/bop.t	211	ok	not ok	undef &= string
-op/bop.t	224	ok	not ok	undef &= utf8
-op/bop.t	206	ok	not ok	undef ^ string
-op/bop.t	219	ok	not ok	undef ^ utf8
-op/bop.t	212	ok	not ok	undef ^= string
-op/bop.t	225	ok	not ok	undef ^= utf8
-op/bop.t	204	ok	not ok	undef | string
-op/bop.t	217	ok	not ok	undef | utf8
-op/bop.t	210	ok	not ok	undef |= string
-op/bop.t	223	ok	not ok	undef |= utf8
-op/bop.t	429	ok	not ok	utf8 & PVBM ref
-op/bop.t	273	ok	not ok	utf8 & array ref
-op/bop.t	351	ok	not ok	utf8 & glob
-op/bop.t	377	ok	not ok	utf8 & glob ref
-op/bop.t	299	ok	not ok	utf8 & hash ref
-op/bop.t	455	ok	not ok	utf8 & object
-op/bop.t	325	ok	not ok	utf8 & qr//
-op/bop.t	247	ok	not ok	utf8 & scalar ref
-op/bop.t	221	ok	not ok	utf8 & undef
 op/bop.t	498	ok	(missing)	utf8 &. appends null byte
-op/bop.t	435	ok	not ok	utf8 &= PVBM ref
-op/bop.t	279	ok	not ok	utf8 &= array ref
-op/bop.t	357	ok	not ok	utf8 &= glob
-op/bop.t	383	ok	not ok	utf8 &= glob ref
-op/bop.t	305	ok	not ok	utf8 &= hash ref
-op/bop.t	461	ok	not ok	utf8 &= object
-op/bop.t	331	ok	not ok	utf8 &= qr//
-op/bop.t	253	ok	not ok	utf8 &= scalar ref
-op/bop.t	227	ok	not ok	utf8 &= undef
-op/bop.t	430	ok	not ok	utf8 ^ PVBM ref
-op/bop.t	274	ok	not ok	utf8 ^ array ref
-op/bop.t	352	ok	not ok	utf8 ^ glob
-op/bop.t	378	ok	not ok	utf8 ^ glob ref
-op/bop.t	300	ok	not ok	utf8 ^ hash ref
-op/bop.t	456	ok	not ok	utf8 ^ object
-op/bop.t	326	ok	not ok	utf8 ^ qr//
-op/bop.t	248	ok	not ok	utf8 ^ scalar ref
-op/bop.t	222	ok	not ok	utf8 ^ undef
-op/bop.t	436	ok	not ok	utf8 ^= PVBM ref
-op/bop.t	280	ok	not ok	utf8 ^= array ref
-op/bop.t	358	ok	not ok	utf8 ^= glob
-op/bop.t	384	ok	not ok	utf8 ^= glob ref
-op/bop.t	306	ok	not ok	utf8 ^= hash ref
-op/bop.t	462	ok	not ok	utf8 ^= object
-op/bop.t	332	ok	not ok	utf8 ^= qr//
-op/bop.t	254	ok	not ok	utf8 ^= scalar ref
-op/bop.t	228	ok	not ok	utf8 ^= undef
-op/bop.t	428	ok	not ok	utf8 | PVBM ref
-op/bop.t	272	ok	not ok	utf8 | array ref
-op/bop.t	350	ok	not ok	utf8 | glob
-op/bop.t	376	ok	not ok	utf8 | glob ref
-op/bop.t	298	ok	not ok	utf8 | hash ref
-op/bop.t	454	ok	not ok	utf8 | object
-op/bop.t	324	ok	not ok	utf8 | qr//
-op/bop.t	246	ok	not ok	utf8 | scalar ref
-op/bop.t	220	ok	not ok	utf8 | undef
-op/bop.t	434	ok	not ok	utf8 |= PVBM ref
-op/bop.t	278	ok	not ok	utf8 |= array ref
-op/bop.t	356	ok	not ok	utf8 |= glob
-op/bop.t	382	ok	not ok	utf8 |= glob ref
-op/bop.t	304	ok	not ok	utf8 |= hash ref
-op/bop.t	460	ok	not ok	utf8 |= object
-op/bop.t	330	ok	not ok	utf8 |= qr//
-op/bop.t	252	ok	not ok	utf8 |= scalar ref
-op/bop.t	226	ok	not ok	utf8 |= undef
 op/bop.t	467	ok	not ok	|= doesn't break string overload
-op/bop.t	468	ok	not ok	~v0 clears vstring magic on retval
 op/caller.t	33	ok	not ok	@DB::args doesn't leak with $^P = 0
 op/caller.t	34	ok	not ok	@DB::args doesn't leak with $^P = 1
 op/caller.t	38	ok	not ok	@DB::args is still tied
@@ -2613,12 +2396,10 @@ op/closure.t	0	(none)	renumbered	*summary*
 op/closure.t	265	ok	not ok	RT \#10085
 op/closure.t	264	ok	not ok	RT \#1028
 op/closure.t	270	ok	not ok	[at t/op/closure.t line 653]
-op/closure.t	274	ok	(missing)	cloneable with //ee
-op/closure.t	272	ok	(missing)	cloneable with eval
-op/closure.t	273	ok	(missing)	cloneable with use re eval
+op/closure.t	274	ok	not ok	cloneable with //ee
+op/closure.t	273	ok	not ok	cloneable with use re eval
 op/closure.t	276	ok	(missing)	cloning closure proto with no CvOUTSIDE
-op/closure.t	275	not ok	(missing)	closures only close over named variables, not entire subs # TODO we need outside links for debugger behaviour
-op/closure.t	271	ok	(missing)	don't copy a stale lexical; create a fresh undef one instead
+op/closure.t	271	ok	not ok	don't copy a stale lexical; create a fresh undef one instead
 op/context.t	8	ok	not ok	context of { foo(); BEGIN {} }
 op/coreamp.t	63	ok	not ok [PCL #36]	&CORE::close with no args
 op/coreamp.t	67	ok	not ok [PCL #40]	&CORE::closedir
@@ -3807,6 +3588,10 @@ op/filehandle.t	2	ok	(missing)	after 'seek' and 'tell', got expected current fh 
 op/filehandle.t	3	ok	(missing)	after 'seek' and 'tell', still got expected content
 op/filehandle.t	4	ok	not ok [PCL #2]	no errors after 'seek' or 'tell'
 op/filetest.t	0	(none)	renumbered	*summary*
+op/filetest.t	420	ok	not ok [PCL #418]	-T HANDLE sets the stat type
+op/filetest.t	424	ok	not ok [PCL #422]	-T _ works after -r $ioref
+op/filetest.t	423	ok	not ok [PCL #421]	-T _ works after stat $ioref
+op/filetest.t	426	ok	not ok [PCL #424]	-T on closed handle resets last stat type
 op/filetest.t	432	ok	not ok [PCL #430]	-T on name with \0
 op/filetest.t	18	ok	not ok	-d and -e: file at least exists
 op/filetest.t	19	ok	not ok	-e and -d: file at least exists
@@ -7080,34 +6865,12 @@ op/while.t	14	ok	not ok	[at t/op/while.t line 112]
 op/while.t	15	ok	not ok	[at t/op/while.t line 121]
 op/while.t	21	ok	not ok	[at t/op/while.t line 191]
 op/while.t	26	ok	not ok	[perl \#72406] segv with do{}until CONST where const is not folded
-op/write.t	14	ok	not ok [PCL #15]	#14
 op/write.t	400	ok	(missing)	#400
-op/write.t	7	ok	not ok [PCL #8]	#7
 op/write.t	8	ok	not ok [PCL #9]	#8
 op/write.t	0	(none)	renumbered	*summary*
+op/write.t	587	ok	(missing)	+{...} is interpreted as anon hash
 op/write.t	475	ok	(missing)	>64K
 op/write.t	472	ok	(missing)	@* doesn't overflow
-op/write.t	48	ok	(missing)	@0\#.\#\#
-op/write.t	49	ok	(missing)	@0\#.\#\#
-op/write.t	50	ok	(missing)	@0\#.\#\#
-op/write.t	51	ok	(missing)	@0\#.\#\#
-op/write.t	28	ok	not ok [PCL #29]	@0\#\#
-op/write.t	29	ok	not ok [PCL #30]	@0\#\#
-op/write.t	30	ok	not ok [PCL #31]	@0\#\#
-op/write.t	31	ok	not ok [PCL #32]	@0\#\#
-op/write.t	32	ok	not ok [PCL #33]	@0\#\#
-op/write.t	33	ok	not ok [PCL #34]	@0\#\#
-op/write.t	43	ok	(missing)	@\#\#.\#\#
-op/write.t	44	ok	(missing)	@\#\#.\#\#
-op/write.t	45	ok	(missing)	@\#\#.\#\#
-op/write.t	46	ok	(missing)	@\#\#.\#\#
-op/write.t	47	ok	(missing)	@\#\#.\#\#
-op/write.t	23	ok	not ok [PCL #24]	@\#\#\#
-op/write.t	24	ok	not ok [PCL #25]	@\#\#\#
-op/write.t	25	ok	not ok [PCL #26]	@\#\#\#
-op/write.t	26	ok	not ok [PCL #27]	@\#\#\#
-op/write.t	41	ok	not ok [PCL #42]	@\#\#\#.
-op/write.t	42	ok	(missing)	@\#\#\#.
 op/write.t	406	ok	(missing)	RT 91032: array ref still a ref
 op/write.t	407	ok	(missing)	RT 91032: array stringifies ok
 op/write.t	405	ok	(missing)	RT 91032: overloaded
@@ -7116,52 +6879,25 @@ op/write.t	404	ok	(missing)	RT 91032: tied
 op/write.t	473	ok	(missing)	RT \#130703
 op/write.t	474	ok	(missing)	RT \#130703 part 2
 op/write.t	409	ok	(missing)	RT91032: don't overwrite orig format string
-op/write.t	87	ok	(missing)	[at t/op/write.t line 1001]
-op/write.t	88	ok	(missing)	[at t/op/write.t line 1011]
-op/write.t	89	ok	(missing)	[at t/op/write.t line 1023]
-op/write.t	90	ok	(missing)	[at t/op/write.t line 1033]
-op/write.t	91	ok	(missing)	[at t/op/write.t line 1044]
-op/write.t	92	ok	(missing)	[at t/op/write.t line 1057]
-op/write.t	93	ok	(missing)	[at t/op/write.t line 1067]
-op/write.t	94	ok	(missing)	[at t/op/write.t line 1079]
-op/write.t	95	ok	(missing)	[at t/op/write.t line 1089]
-op/write.t	96	ok	(missing)	[at t/op/write.t line 1119]
-op/write.t	97	ok	(missing)	[at t/op/write.t line 1130]
-op/write.t	98	ok	(missing)	[at t/op/write.t line 1140]
-op/write.t	99	ok	(missing)	[at t/op/write.t line 1150]
-op/write.t	100	ok	(missing)	[at t/op/write.t line 1161]
-op/write.t	101	ok	(missing)	[at t/op/write.t line 1172]
-op/write.t	102	ok	(missing)	[at t/op/write.t line 1182]
-op/write.t	103	ok	(missing)	[at t/op/write.t line 1192]
-op/write.t	104	ok	(missing)	[at t/op/write.t line 1243]
-op/write.t	105	ok	(missing)	[at t/op/write.t line 1253]
-op/write.t	106	ok	(missing)	[at t/op/write.t line 1263]
-op/write.t	107	ok	(missing)	[at t/op/write.t line 1273]
-op/write.t	108	ok	(missing)	[at t/op/write.t line 1283]
-op/write.t	109	ok	(missing)	[at t/op/write.t line 1293]
-op/write.t	110	ok	(missing)	[at t/op/write.t line 1326]
-op/write.t	111	ok	(missing)	[at t/op/write.t line 1335]
-op/write.t	112	ok	(missing)	[at t/op/write.t line 1346]
-op/write.t	113	ok	(missing)	[at t/op/write.t line 1356]
-op/write.t	114	ok	(missing)	[at t/op/write.t line 1365]
-op/write.t	115	ok	(missing)	[at t/op/write.t line 1374]
-op/write.t	116	ok	(missing)	[at t/op/write.t line 1383]
-op/write.t	117	ok	(missing)	[at t/op/write.t line 1386]
-op/write.t	118	ok	(missing)	[at t/op/write.t line 1389]
-op/write.t	119	ok	(missing)	[at t/op/write.t line 1392]
-op/write.t	120	ok	(missing)	[at t/op/write.t line 1395]
-op/write.t	121	ok	(missing)	[at t/op/write.t line 1398]
-op/write.t	122	ok	(missing)	[at t/op/write.t line 1401]
-op/write.t	123	ok	(missing)	[at t/op/write.t line 1404]
-op/write.t	124	ok	(missing)	[at t/op/write.t line 1407]
-op/write.t	125	ok	(missing)	[at t/op/write.t line 1410]
-op/write.t	126	ok	(missing)	[at t/op/write.t line 1413]
-op/write.t	127	ok	(missing)	[at t/op/write.t line 1416]
+op/write.t	111	ok	not ok [PCL #112]	[at t/op/write.t line 1335]
+op/write.t	113	ok	not ok [PCL #115]	[at t/op/write.t line 1356]
+op/write.t	114	ok	not ok [PCL #116]	[at t/op/write.t line 1365]
+op/write.t	115	ok	not ok [PCL #117]	[at t/op/write.t line 1374]
+op/write.t	116	ok	not ok [PCL #118]	[at t/op/write.t line 1383]
+op/write.t	118	ok	not ok [PCL #120]	[at t/op/write.t line 1389]
+op/write.t	119	ok	not ok [PCL #121]	[at t/op/write.t line 1392]
+op/write.t	120	ok	not ok [PCL #122]	[at t/op/write.t line 1395]
+op/write.t	121	ok	not ok [PCL #123]	[at t/op/write.t line 1398]
+op/write.t	122	ok	not ok [PCL #124]	[at t/op/write.t line 1401]
+op/write.t	123	ok	not ok [PCL #125]	[at t/op/write.t line 1404]
+op/write.t	124	ok	not ok [PCL #126]	[at t/op/write.t line 1407]
+op/write.t	125	ok	not ok [PCL #127]	[at t/op/write.t line 1410]
+op/write.t	127	ok	not ok [PCL #129]	[at t/op/write.t line 1416]
 op/write.t	398	ok	(missing)	[at t/op/write.t line 1487]
 op/write.t	399	ok	(missing)	[at t/op/write.t line 1490]
 op/write.t	401	ok	(missing)	[at t/op/write.t line 1513]
 op/write.t	402	ok	(missing)	[at t/op/write.t line 1514]
-op/write.t	1	ok	not ok [PCL #2]	[at t/op/write.t line 170]
+op/write.t	1	ok	not ok	[at t/op/write.t line 170]
 op/write.t	482	ok	(missing)	[at t/op/write.t line 1754]
 op/write.t	483	ok	(missing)	[at t/op/write.t line 1755]
 op/write.t	484	ok	(missing)	[at t/op/write.t line 1757]
@@ -7199,47 +6935,94 @@ op/write.t	515	ok	(missing)	[at t/op/write.t line 1802]
 op/write.t	516	ok	(missing)	[at t/op/write.t line 1803]
 op/write.t	517	ok	(missing)	[at t/op/write.t line 1804]
 op/write.t	518	ok	(missing)	[at t/op/write.t line 1806]
-op/write.t	2	ok	not ok [PCL #3]	[at t/op/write.t line 209]
+op/write.t	519	ok	(missing)	[at t/op/write.t line 1807]
+op/write.t	520	ok	(missing)	[at t/op/write.t line 1808]
+op/write.t	521	ok	(missing)	[at t/op/write.t line 1809]
+op/write.t	522	ok	(missing)	[at t/op/write.t line 1811]
+op/write.t	523	ok	(missing)	[at t/op/write.t line 1812]
+op/write.t	524	ok	(missing)	[at t/op/write.t line 1813]
+op/write.t	525	ok	(missing)	[at t/op/write.t line 1814]
+op/write.t	526	ok	(missing)	[at t/op/write.t line 1816]
+op/write.t	527	ok	(missing)	[at t/op/write.t line 1817]
+op/write.t	528	ok	(missing)	[at t/op/write.t line 1818]
+op/write.t	529	ok	(missing)	[at t/op/write.t line 1819]
+op/write.t	530	ok	(missing)	[at t/op/write.t line 1834]
+op/write.t	531	ok	(missing)	[at t/op/write.t line 1835]
+op/write.t	532	ok	(missing)	[at t/op/write.t line 1837]
+op/write.t	533	ok	(missing)	[at t/op/write.t line 1838]
+op/write.t	534	ok	(missing)	[at t/op/write.t line 1840]
+op/write.t	535	ok	(missing)	[at t/op/write.t line 1841]
+op/write.t	536	ok	(missing)	[at t/op/write.t line 1843]
+op/write.t	537	ok	(missing)	[at t/op/write.t line 1844]
+op/write.t	538	ok	(missing)	[at t/op/write.t line 1847]
+op/write.t	539	ok	(missing)	[at t/op/write.t line 1848]
+op/write.t	540	ok	(missing)	[at t/op/write.t line 1849]
+op/write.t	541	ok	(missing)	[at t/op/write.t line 1850]
+op/write.t	542	ok	(missing)	[at t/op/write.t line 1852]
+op/write.t	543	ok	(missing)	[at t/op/write.t line 1853]
+op/write.t	544	ok	(missing)	[at t/op/write.t line 1854]
+op/write.t	545	ok	(missing)	[at t/op/write.t line 1855]
+op/write.t	546	ok	(missing)	[at t/op/write.t line 1857]
+op/write.t	547	ok	(missing)	[at t/op/write.t line 1858]
+op/write.t	548	ok	(missing)	[at t/op/write.t line 1859]
+op/write.t	549	ok	(missing)	[at t/op/write.t line 1860]
+op/write.t	550	ok	(missing)	[at t/op/write.t line 1862]
+op/write.t	551	ok	(missing)	[at t/op/write.t line 1863]
+op/write.t	552	ok	(missing)	[at t/op/write.t line 1864]
+op/write.t	553	ok	(missing)	[at t/op/write.t line 1865]
+op/write.t	554	ok	(missing)	[at t/op/write.t line 1868]
+op/write.t	555	ok	(missing)	[at t/op/write.t line 1869]
+op/write.t	556	ok	(missing)	[at t/op/write.t line 1871]
+op/write.t	557	ok	(missing)	[at t/op/write.t line 1872]
+op/write.t	558	ok	(missing)	[at t/op/write.t line 1874]
+op/write.t	559	ok	(missing)	[at t/op/write.t line 1875]
+op/write.t	560	ok	(missing)	[at t/op/write.t line 1877]
+op/write.t	561	ok	(missing)	[at t/op/write.t line 1878]
+op/write.t	562	ok	(missing)	[at t/op/write.t line 1881]
+op/write.t	563	ok	(missing)	[at t/op/write.t line 1882]
+op/write.t	564	ok	(missing)	[at t/op/write.t line 1883]
+op/write.t	565	ok	(missing)	[at t/op/write.t line 1884]
+op/write.t	566	ok	(missing)	[at t/op/write.t line 1886]
+op/write.t	567	ok	(missing)	[at t/op/write.t line 1887]
+op/write.t	568	ok	(missing)	[at t/op/write.t line 1888]
+op/write.t	569	ok	(missing)	[at t/op/write.t line 1889]
+op/write.t	570	ok	(missing)	[at t/op/write.t line 1891]
+op/write.t	571	ok	(missing)	[at t/op/write.t line 1892]
+op/write.t	572	ok	(missing)	[at t/op/write.t line 1893]
+op/write.t	573	ok	(missing)	[at t/op/write.t line 1894]
+op/write.t	574	ok	(missing)	[at t/op/write.t line 1896]
+op/write.t	575	ok	(missing)	[at t/op/write.t line 1897]
+op/write.t	576	ok	(missing)	[at t/op/write.t line 1898]
+op/write.t	577	ok	(missing)	[at t/op/write.t line 1899]
+op/write.t	594	ok	(missing)	[at t/op/write.t line 2082]
+op/write.t	598	ok	(missing)	[at t/op/write.t line 2091]
+op/write.t	2	ok	not ok	[at t/op/write.t line 209]
+op/write.t	3	ok	not ok	[at t/op/write.t line 250]
+op/write.t	4	ok	not ok [PCL #5]	[at t/op/write.t line 282]
 op/write.t	5	ok	not ok [PCL #6]	[at t/op/write.t line 283]
-op/write.t	6	ok	not ok [PCL #7]	[at t/op/write.t line 303]
-op/write.t	16	ok	not ok [PCL #17]	[at t/op/write.t line 441]
-op/write.t	20	ok	not ok [PCL #21]	[at t/op/write.t line 505]
-op/write.t	58	ok	(missing)	[at t/op/write.t line 629]
-op/write.t	59	ok	(missing)	[at t/op/write.t line 641]
-op/write.t	60	ok	(missing)	[at t/op/write.t line 651]
-op/write.t	61	ok	(missing)	[at t/op/write.t line 662]
-op/write.t	62	ok	(missing)	[at t/op/write.t line 672]
-op/write.t	63	ok	(missing)	[at t/op/write.t line 683]
-op/write.t	64	ok	(missing)	[at t/op/write.t line 695]
-op/write.t	65	ok	(missing)	[at t/op/write.t line 705]
-op/write.t	66	ok	(missing)	[at t/op/write.t line 716]
-op/write.t	67	ok	(missing)	[at t/op/write.t line 726]
-op/write.t	68	ok	(missing)	[at t/op/write.t line 738]
-op/write.t	69	ok	(missing)	[at t/op/write.t line 751]
-op/write.t	70	ok	(missing)	[at t/op/write.t line 762]
-op/write.t	71	ok	(missing)	[at t/op/write.t line 775]
-op/write.t	72	ok	(missing)	[at t/op/write.t line 786]
-op/write.t	73	ok	(missing)	[at t/op/write.t line 797]
-op/write.t	74	ok	(missing)	[at t/op/write.t line 811]
-op/write.t	75	ok	(missing)	[at t/op/write.t line 822]
-op/write.t	76	ok	(missing)	[at t/op/write.t line 835]
-op/write.t	77	ok	(missing)	[at t/op/write.t line 846]
-op/write.t	78	ok	(missing)	[at t/op/write.t line 884]
-op/write.t	79	ok	(missing)	[at t/op/write.t line 897]
-op/write.t	80	ok	(missing)	[at t/op/write.t line 908]
-op/write.t	81	ok	(missing)	[at t/op/write.t line 919]
-op/write.t	82	ok	(missing)	[at t/op/write.t line 932]
-op/write.t	83	ok	(missing)	[at t/op/write.t line 946]
-op/write.t	84	ok	(missing)	[at t/op/write.t line 957]
-op/write.t	85	ok	(missing)	[at t/op/write.t line 968]
-op/write.t	86	ok	(missing)	[at t/op/write.t line 988]
+op/write.t	9	ok	not ok [PCL #10]	[at t/op/write.t line 331]
+op/write.t	11	ok	not ok [PCL #12]	[at t/op/write.t line 360]
+op/write.t	61	ok	not ok [PCL #62]	[at t/op/write.t line 662]
+op/write.t	63	ok	not ok [PCL #64]	[at t/op/write.t line 683]
+op/write.t	65	ok	not ok [PCL #66]	[at t/op/write.t line 705]
+op/write.t	67	ok	not ok [PCL #68]	[at t/op/write.t line 726]
+op/write.t	70	ok	not ok [PCL #71]	[at t/op/write.t line 762]
+op/write.t	74	ok	not ok [PCL #75]	[at t/op/write.t line 811]
+op/write.t	78	ok	not ok [PCL #79]	[at t/op/write.t line 884]
+op/write.t	82	ok	not ok [PCL #83]	[at t/op/write.t line 932]
+op/write.t	592	ok	(missing)	\#123245 different panic in sv_chop
+op/write.t	591	ok	(missing)	\#123245 panic in sv_chop
+op/write.t	593	ok	(missing)	\#123538 crash in FF_MORE
 op/write.t	480	ok	(missing)	\#129125 - chop on format
 op/write.t	481	ok	(missing)	\#129125 - chop on format, later values
 op/write.t	478	ok	(missing)	\#64562 - Segmentation fault with redefined formats and warnings
 op/write.t	479	ok	(missing)	\#79532 - formline coerces its arguments
-op/write.t	37	ok	not ok [PCL #38]	^0\#\#
-op/write.t	34	ok	not ok [PCL #35]	^\#\#\#
-op/write.t	35	ok	not ok [PCL #36]	^\#\#\#
+op/write.t	595	ok	(missing)	^ format with glob copy
+op/write.t	596	ok	(missing)	^ format with glob copy
+op/write.t	597	ok	(missing)	^ format with glob copy
+op/write.t	599	ok	(missing)	^ format with real glob
+op/write.t	578	ok	(missing)	active format cannot be freed
+op/write.t	586	ok	(missing)	anonymous hashes
 op/write.t	477	ok	(missing)	assign to ^A sets FmLINES
 op/write.t	411	ok	(missing)	chop munging: [^<B ~ \n]
 op/write.t	412	ok	(missing)	chop munging: [^<B ~Z\n]
@@ -7302,13 +7085,19 @@ op/write.t	461	ok	(missing)	chop munging: [^<B^|||~~^<<<\n]
 op/write.t	463	ok	(missing)	chop munging: [^<B^|||~~^>>>\n]
 op/write.t	462	ok	(missing)	chop munging: [^<B^|||~~^|||\n]
 op/write.t	471	ok	(missing)	end-of-line blanks and realloc
-op/write.t	52	ok	(missing)	format with 0-length name
+op/write.t	581	ok	(missing)	format = ... } is not allowed
+op/write.t	580	ok	(missing)	format foo { ... } is not allowed
+op/write.t	590	ok	(missing)	formats in subs do not leak
+op/write.t	583	ok	(missing)	formats with compilation errors are not created
+op/write.t	579	ok	(missing)	freeing current handle in format
 op/write.t	403	ok	(missing)	glob assign
-op/write.t	54	ok	(missing)	no such format
-op/write.t	53	ok	(missing)	no such format beginning with null
-op/write.t	57	ok	(missing)	no such top format
-op/write.t	56	ok	(missing)	no such top format beginning with null
-op/write.t	131	ok	(missing)	swrite("1^*2 3@*4", "N", "N") class=""
+op/write.t	588	ok	(missing)	initial { is always BLOCK
+op/write.t	585	ok	(missing)	low-prec ops on arg line
+op/write.t	582	ok	(missing)	nested formats
+op/write.t	584	ok	(missing)	no crash with invalid use/format inside format
+op/write.t	589	ok	(missing)	pragmata on format line
+op/write.t	10	ok	not ok [PCL #11]	skipspace inside "${...}"
+op/write.t	131	ok	not ok [PCL #133]	swrite("1^*2 3@*4", "N", "N") class=""
 op/write.t	132	ok	(missing)	swrite("1^*2 3@*4", "N", "N") class="Count"
 op/write.t	137	ok	(missing)	swrite("1^*2 3@*4", "N", "N\n") class=""
 op/write.t	138	ok	(missing)	swrite("1^*2 3@*4", "N", "N\n") class="Count"
@@ -7398,8 +7187,6 @@ op/write.t	360	ok	(missing)	swrite("1^*2 3@*4", "\x{a3}", "\x{b1}\nMoo!\n") clas
 op/write.t	366	ok	(missing)	swrite("1^*2 3@*4", "\x{a3}", "\x{b1}\nMoo!\n") class="Count"
 op/write.t	390	ok	(missing)	swrite("1^*2 3@*4", "\x{a3}", "\x{b1}\nMoo!\n") class="Count"
 op/write.t	396	ok	(missing)	swrite("1^*2 3@*4", "\x{a3}", "\x{b1}\nMoo!\n") class="Count"
-op/write.t	128	ok	(missing)	swrite("1^*2 3^*4", "N", "N") class=""
-op/write.t	129	ok	(missing)	swrite("1^*2 3^*4", "N", "N") class="Count"
 op/write.t	134	ok	(missing)	swrite("1^*2 3^*4", "N", "N\n") class=""
 op/write.t	135	ok	(missing)	swrite("1^*2 3^*4", "N", "N\n") class="Count"
 op/write.t	140	ok	(missing)	swrite("1^*2 3^*4", "N", "N\nMoo!") class=""
@@ -7488,8 +7275,6 @@ op/write.t	357	ok	(missing)	swrite("1^*2 3^*4", "\x{a3}", "\x{b1}\nMoo!\n") clas
 op/write.t	363	ok	(missing)	swrite("1^*2 3^*4", "\x{a3}", "\x{b1}\nMoo!\n") class="Count"
 op/write.t	387	ok	(missing)	swrite("1^*2 3^*4", "\x{a3}", "\x{b1}\nMoo!\n") class="Count"
 op/write.t	393	ok	(missing)	swrite("1^*2 3^*4", "\x{a3}", "\x{b1}\nMoo!\n") class="Count"
-op/write.t	55	ok	(missing)	top format with 0-length name
-op/write.t	130	ok	(missing)	value read exactly once
 op/write.t	133	ok	(missing)	value read exactly once
 op/write.t	136	ok	(missing)	value read exactly once
 op/write.t	139	ok	(missing)	value read exactly once
@@ -20648,12 +20433,6 @@ uni/overload.t	16	ok	not ok	e acute -> E acute
 uni/overload.t	20	ok	not ok	e acute -> E acute
 uni/overload.t	28	ok	not ok	e acute -> E acute
 uni/overload.t	32	ok	not ok	e acute -> E acute
-uni/overload.t	173	ok	not ok	something xor itself is zeros
-uni/overload.t	174	ok	not ok	something xor itself is zeros
-uni/overload.t	175	ok	not ok	something xor itself is zeros
-uni/overload.t	176	ok	not ok	something xor itself is zeros
-uni/overload.t	177	ok	not ok	something xor itself is zeros
-uni/overload.t	178	ok	not ok	something xor itself is zeros
 uni/package.t	16	ok	not ok	comp/package_block.t test
 uni/package.t	2	ok	not ok	comp/stash.t test 1
 uni/package.t	11	ok	not ok	comp/stash.t test 10
