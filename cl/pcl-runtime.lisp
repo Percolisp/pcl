@@ -5883,6 +5883,71 @@ per element."
     ((listp src) (length src))                   ; NIL lands here: bound 0
     (t 1)))
 
+;;; ── THE BULK FILL (task #1181, s470bn) ──────────────────────────────────────
+;;; `@x = LIST' where every element lands in the destination AS ITSELF is a
+;;; BLOCK COPY, and the general path below does it as a snapshot (one full
+;;; allocation and copy) followed by a per-element walk (a five-way cond, then
+;;; %p-array-store-scalar's own tests, then %p-vpush).  Measured on the
+;;; `listcopy' shape (`my @c = @src', 50 elements, 1 M repeats, hand-replaced
+;;; A/B against a byte-identical control pair reading -0.2 %): **-72 %** of the
+;;; loop.  The same path serves `my @x = sort …' / `= map' / `= keys' — a
+;;; producer's fresh vector is a plain vector too.
+;;;
+;;; THE LICENCE IS PER ELEMENT, and it is EXACTLY the existing write rule read
+;;; backwards (rule 11 — %p-storable-raw is the ONE function that decides what
+;;; an element slot may hold, and it is asked here rather than re-derived):
+;;; the copy is legal for element E when the general path would store E ITSELF.
+;;; That is true for a hole (NIL, pushed unchanged) and for a value
+;;; %p-storable-raw hands back UNCHANGED — a plain number or a plain string.
+;;; It is false for everything else, and each falsehood matters:
+;;;   * a BOX is copied into a FRESH box by %p-array-store-scalar, because perl
+;;;     copies values (`my @c = @src; $c[0] = 9' must not reach @src) — sharing
+;;;     the box would be a silent wrong;
+;;;   * a nested vector / hash / flatten marker is FLATTENED, so `@a = (1,@a,2)'
+;;;     and `@a = (@b, @c)' decline here and keep the general walk (which is
+;;;     also what makes skipping the aliasing SNAPSHOT safe: the only source
+;;;     that can contain PLACE is one containing a vector);
+;;;   * a typeglob, a dualvar, a ref box, `*p-undef*' and a code ref each get
+;;;     their own container treatment.
+;;; With `*p-raw-elems*' off (the boxed-aggregates A/B world) %p-storable-raw
+;;; answers NIL for everything, so only an empty or all-holes source takes this
+;;; path — i.e. the fast path disappears with the gate, as it must.
+(declaim (inline %p-bulk-elem-p))
+(defun %p-bulk-elem-p (item)
+  "True when the general fill would store ITEM into the destination as ITSELF."
+  (or (null item)
+      (let ((raw (%p-storable-raw item))) (and raw (eq raw item)))))
+
+(defun %p-array-bulk-source (src)
+  "SRC's element SIMPLE-VECTOR and element COUNT when `@place = SRC' is a block
+   copy, or NIL.  The count is SRC's own length (its fill pointer), never the
+   data vector's capacity."
+  (when (and (vectorp src) (not (stringp src)))
+    (let ((sd (%p-vec-data src))
+          (n  (length src)))
+      (when sd
+        (dotimes (i n (values sd n))
+          (unless (%p-bulk-elem-p (svref sd i)) (return nil)))))))
+
+(defun %p-array-bulk-fill (place sd n)
+  "Refill PLACE from the first N slots of SD in one block.  SD may BE PLACE's
+   own data vector (`@a = @a'): N was taken before the fill pointer moved, and
+   REPLACE over identical ranges is the identity, so the self-assignment needs
+   no snapshot here."
+  (remhash place *array-iterators*)          ; perl: assigning resets each()
+  (setf (fill-pointer place) 0)
+  (when (and (> n (array-dimension place 0)) (adjustable-array-p place))
+    (adjust-array place n))
+  (let ((dd (%p-vec-data place)))
+    (if (and dd (>= (length dd) n))
+        (progn (replace dd sd :end1 n :end2 n)
+               (setf (fill-pointer place) n))
+        ;; PLACE is not the plain element-storage shape (a specialised or
+        ;; non-adjustable vector): the same elements, stored the same way, one
+        ;; at a time.  Same answer, slower — never a semantic difference.
+        (dotimes (i n) (vector-push-extend (svref sd i) place))))
+  place)
+
 (defun p-array-fill (place value)
   "Clear adjustable array PLACE and refill it from VALUE: flatten nested vectors
    (but not strings), box elements, preserve nil holes.  Snapshots VALUE first so
@@ -5893,6 +5958,9 @@ per element."
   ;; `@ro = (…)` — even `@ro = sort @ro`, which sort.t asserts — dies in perl:
   ;; a whole-array assignment resets the size (task #159).
   (%p-check-array-writable place)
+  ;; The block copy above, when every element qualifies.
+  (multiple-value-bind (sd n) (%p-array-bulk-source value)
+    (when sd (return-from p-array-fill (%p-array-bulk-fill place sd n))))
   ;; Snapshot any adjustable vector (including PLACE itself) BEFORE we clear PLACE,
   ;; to prevent aliasing. %p-snapshot-array-rhs recursively copies nested
   ;; adjustable vectors and preserves nil.

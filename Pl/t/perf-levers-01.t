@@ -4,21 +4,24 @@
 # same terms as the Perl 5 programming language system itself.
 # SPDX-License-Identifier: Artistic-1.0-Perl OR GPL-1.0-or-later
 
-# perf-levers-01.t — the round-27 Kind-A speed levers (docs/plan-speed-and-ir-s470.md
-# §A.2 rows 1-3 + L4), each guarded the way passes-01.t guards the older names:
-# the fast emission appears by default, `PCL_OPT=-name` brings the general form
-# back, the LICENCE's negatives do NOT take the fast shape, and the program
-# prints the same thing under every setting.
+# perf-levers-01.t — the round-27 speed levers (docs/plan-speed-and-ir-s470.md
+# §A.2), each guarded the way passes-01.t guards the older Kind-A names: the
+# fast shape appears by default, `PCL_OPT=-name` brings the general form back
+# (where the lever HAS a name), the LICENCE's negatives do NOT take the fast
+# shape, and the program prints perl's answer under every setting.
 #
 # WHY A FILE OF ITS OWN and not more rows in passes-01.t: passes-01.t's own
 # header says its subject is the REGISTRY (does a name gate anything at all);
 # these rows are about each lever's LICENCE — which operand shapes qualify and
 # which must not — and each needs its own snippet.  The gate's cost metric is a
-# file's WALL time (CLAUDE.md rule 6), and this file's runtime rows are three
-# SBCL runs, not one per row.
+# file's WALL time (CLAUDE.md rule 6), and this file's runtime rows are a
+# handful of SBCL runs, not one per row.
 #
-#   symref-const (task #1180): a CONSTANT-string operand of a symbolic
+#   symref-const (task #1180, Kind-A): a CONSTANT-string operand of a symbolic
 #     dereference resolves to its symbol ONCE per site.
+#   the array-assignment BULK FILL (task #1181, runtime only — no PCL_OPT name
+#     because there is no emission to switch): `@x = LIST` is ONE block copy
+#     when every element would be stored as itself.
 use v5.30;
 use strict;
 use warnings;
@@ -35,7 +38,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 21;
+plan tests => 22;
 
 sub write_pl {
     my ($src) = @_;
@@ -190,6 +193,80 @@ like(transpile_with($sr_wr, undef), qr/\(p-setf \(p-cast-\$ "main::w" \(p-symref
      'symref-const: the p-setf PLACE keeps the p-cast-$ head (its place tables key on it)');
 like(transpile_with($sr_wr, undef), qr/\(p-post\+\+ \(p-cast-\$ "main::w" \(p-symref-site\)\)\)/,
      'symref-const: the ++ place too');
+
+# ─────────────────────────────────────────────────────────────────────────────
+# the array-assignment BULK FILL — task #1181 (runtime only, no PCL_OPT name:
+# there is no emission to switch, the way %p-vpush and %p-vec-data have none)
+# ─────────────────────────────────────────────────────────────────────────────
+# `@x = LIST' is one block copy when every element would be stored AS ITSELF.
+# Every row below is a case the block copy could get wrong, and each is perl
+# 5.40.3's own answer: the COPY semantics a shared box would break (1, 8, 13),
+# self-assignment and embedding (2, 3), flattening (4, 12), a hole (5), the
+# container kinds that are NOT stored as themselves — a blessed box, a scalar
+# ref, a dualvar, a code ref, a glob (6, 7, 16, 17) — shrink and grow (10, 11),
+# the empty source (9), a mixed list with undef (14), and the each() iterator
+# an assignment must reset (15).
+{
+    my $bulk = write_pl(<<'PERL');
+use strict; use warnings;
+my @src = (1,2,3);
+my @c = @src; $c[0] = 99;
+print "1:@src|@c\n";
+my @a = (1,2,3); @a = @a;
+print "2:@a\n";
+my @b = (1,2,3); @b = (0, @b, 4);
+print "3:@b\n";
+my @d = (1,2); my @e = (3,4); my @f = (@d, @e);
+print "4:@f\n";
+my @g = (1,2,3); delete $g[1]; my @h = @g;
+print "5:", join(',', map { defined($_) ? $_ : 'u' } @h), " ", scalar(@h), "\n";
+my $o = bless { v => 7 }, 'K'; my @i = ($o, 5); my @j = @i;
+print "6:", ref($j[0]), " ", $j[0]{v}, "\n";
+my $r = \my $x; $x = 3; my @k = ($r, 1); my @l = @k; ${$l[0]} = 8;
+print "7:$x ", ${$l[0]}, "\n";
+my @m = ("a","b"); my @n = @m; $n[1] .= "!";
+print "8:@m|@n\n";
+my @p; my @q = @p;
+print "9:", scalar(@q), "\n";
+my @big = (1..5); my @small = (7); @big = @small;
+print "10:@big ", scalar(@big), "\n";
+my @grow = (1); @grow = (1..6);
+print "11:@grow\n";
+my %hh = (a=>1); my @flat = %hh; my @fc = @flat;
+print "12:", scalar(@fc), "\n";
+my @s2 = (3,1,2); my @sorted = sort { $a <=> $b } @s2; $sorted[0] = 42;
+print "13:@s2|@sorted\n";
+my @mixed = (1, "x", undef, 2.5); my @mc = @mixed;
+print "14:", join(',', map { defined($_) ? $_ : 'u' } @mc), "\n";
+my @it = (1,2,3); my ($idx) = each @it; my @it2 = (9,8); @it = @it2;
+my ($idx2) = each @it; print "15:$idx2\n";
+my @dv; { local $! = 2; @dv = ($!); }
+my @dvc = @dv; printf "16:%d %s\n", ($dvc[0]+0 == 2 ? 1 : 0), ($dvc[0] ne '' ? 'y' : 'n');
+my @cr = (sub { 11 }, \*STDOUT); my @crc = @cr;
+print "17:", $crc[0]->(), " ", ref($crc[1]), "\n";
+PERL
+    my $want_bulk = <<'OUT';
+1:1 2 3|99 2 3
+2:1 2 3
+3:0 1 2 3 4
+4:1 2 3 4
+5:1,u,3 3
+6:K 7
+7:8 8
+8:a b|a b!
+9:0
+10:7 1
+11:1 2 3 4 5 6
+12:2
+13:3 1 2|42 2 3
+14:1,x,u,2.5
+15:0
+16:1 y
+17:11 GLOB
+OUT
+    is(run_with($bulk, undef), $want_bulk,
+       'bulk fill: seventeen array-assignment shapes are perl 5.40.3\'s answers');
+}
 
 # The registry's own contract: the name is known, and a typo still dies.
 {
