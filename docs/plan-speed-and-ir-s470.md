@@ -99,6 +99,152 @@ What "done" looks like for Part A: every S and M lever either shipped or closed 
 the macro rows' profiles flat (no function above ~10 %) or their top entries owned by a filed
 lever; the general-form compiler (`PCL_OPT=none`) still running everything identically.
 
+### A.4 The ranked table (round 27 measurement, s470bn)
+
+*Measured on `f728637` + the four round-27 levers, generation v2-750.  **THE BOX
+WAS NOT QUIET** (a browser with several content processes): `perl`'s own column
+moved 40 % between consecutive runs of the same tree, so `tools/bench-exec.pl`
+could not resolve a 10 % change and every LEVER number below came from
+`scratch/s470bn/ab-lisp.pl` — two `.lisp` files on ONE core, interleaved,
+best-of-K, with a byte-identical control pair timed in the same window and
+printed beside the result.  The RATIOS are stable across four independent runs
+because both engines see the same load; the intercept/slope decomposition is
+NOT (see A.4.2).  Raw profiles: `scratch/s470bn/profiles/`.*
+
+#### A.4.1 THE FOUR CONSTANTS — and the answer they gave
+
+Each a one-line program timed END TO END, best-of-5, nothing subtracted: the
+constant IS what a user waits for before the program's own work starts.
+
+| constant | perl (s) | PCL (s) | PCL/perl |
+|---|---:|---:|---:|
+| startup (`print 1`) | 0.0016 | **0.169** | 105× |
+| `use Moo; print 1` — module cache WARM | 0.0081 | **3.50** | 431× |
+| `use JSON::PP; print 1` — module cache WARM | 0.0098 | **6.44** | 658× |
+| `use JSON::PP` — module cache COLD | — | **13.42** | (the warm run right after it: 6.63) |
+| `eval "1"; print 1` — the `pl2cl --server` spawn | 0.0020 | **0.292** | 142× |
+
+**THIS IS THE BIGGEST NUMBER IN THE WHOLE YARDSTICK, and it is not a codegen
+question at all.**  A program that says `use JSON::PP` waits **6.4 seconds**
+before its first statement runs — WARM, i.e. with the module's transpiled
+`.lisp` already in `~/.pcl-cache/`.  The cause is one `defparameter`:
+
+```lisp
+(defparameter *pcl-cache-fasl* nil
+  "When true, cache compiled FASL; when nil, cache .lisp and load as SOURCE.
+   NOTE (session 251): defaults to NIL as a correctness workaround for the
+   module compile-file+load DOUBLE-EXECUTION bug. … Loading as source is
+   single-pass and correct, at the cost of slower module loads.  The proper fix
+   … is option C/D in docs/module-double-exec-bug.md — DO NEXT SESSION.")
+```
+
+So the module cache stores TEXT and SBCL recompiles it on every run.  That
+"next session" is long past, and until now the cost had never been priced: it
+is 3.5–6.4 s per run per module set, against a codegen worklist whose whole
+round-27 harvest is measured in tens of milliseconds.  **Everything else in
+this table is smaller than this one row.**  It is task **#1188** (ease L,
+because a correctness bug has to be eliminated first — the double execution
+runs a module's guarded BEGIN-time sub redefinitions twice and clobbers them,
+which is what broke Moo subclasses in s251) and it is the FIRST thing the next
+perf round should cost out, not the last.
+
+The startup and string-eval constants are small beside it and both are already
+understood (the saved core; the `pl2cl --server` spawn).
+
+#### A.4.2 THE THREE MACRO ROWS
+
+`tools/bench-exec.pl` gained `json-rt`, `moo-objs`, `textproc` (+ `feread3` as
+L3's scaling control).  Best-of-3, startup subtracted, at N and 2N:
+
+| row | N | perl(s) | PCL(s) | PCL/perl | 2N | perl(s) | PCL(s) | PCL/perl |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `json-rt` | 100 | 0.967 | 3.280 | **3.39×** | 200 | 3.159 | 11.413 | 3.61× |
+| `moo-objs` | 20 000 | 0.045 | 2.439 | **54.5×** | 40 000 | 0.142 | 6.303 | 44.4× |
+| `textproc` | 400 | 0.688 | 3.479 | **5.06×** | 800 | 1.638 | 7.371 | 4.50× |
+
+An earlier pair at a quarter of these N read json-rt 3.46×/3.55× and textproc
+5.60×/4.99× — so **the RATIO is the stable quantity** (json-rt 3.4–3.6×,
+textproc 4.5–5.6×, moo-objs 36–55×).
+
+**The intercept/slope decomposition FAILED on this box and must be re-taken on
+a quiet one.**  Both engines' times grew SUPERLINEARLY between the two runs
+(perl's json-rt went 0.967 → 3.159 for a 2× work increase), which is a property
+of the machine, not of the programs; the resulting "intercept" comes out
+negative for json-rt and 2.3 s for moo-objs, and neither is meaningful.  What
+the numbers DO say is that all three rows' constant terms are already
+subtracted by the bench's own `t(N) − t(0)` and that the module load — the
+A.4.1 row — is therefore NOT in them.  It is in the user's wall clock.
+
+#### A.4.3 THE RANKED TABLE — every function ≥ 2 % of a row's RUN samples
+
+`sb-sprof`, `:mode :cpu`, 1 ms interval.  Sample counts: json-rt 26 973
+(N=400), moo-objs 22 655 (N=60 000), textproc 12 202 (N=1 200) — thousands of
+samples per row, so a 2 % entry is ~250 samples and stable.  The programs are
+LOADED AS SOURCE (a program containing `use M` cannot be `compile-file`d first:
+the `p-use` sits in an `eval-when` and runs before the plain load-time
+`(setf @INC …)`), so SBCL's own compiler frames are in each profile; they are
+reported as one compile share and the rest renormalised over the run.
+Instrument: `scratch/s470bn/prof.pl` + `rank.pl`.
+
+Compile share: json-rt 0.0 %, textproc 0.0 %, **moo-objs 16 %**.
+
+| # | function (self, % of the row's RUN samples) | json-rt | moo-objs | textproc | candidate lever (A.2 row) | ease | Kind-A? |
+|---|---|---:|---:|---:|---|---|---|
+| 1 | `list-all-packages` under a system mutex | – | 17.9 | – | **#1189** — moo-objs' profile is LOAD-and-COMPILE dominated (`p-use` was 59.7 % of its samples before Moo was pre-loaded out of the run); this is the A.4.1 module-load cost seen from inside | L | no |
+| 2 | `search` | 14.5 | – | 11.5 | **#1187** — it is cl-ppcre's OWN scanner calling it (graph-confirmed: `create-scanner-aux`'s lambda, 23.7 % TOTAL in json-rt), not `p-index`.  A.2 row 11 (PCRE2, #71) — or find the non-simple operand first: `do-regex-match` already coerces the SUBJECT (#680), so something else in the pair is generic | L (PCRE2) / S (if it is one coercion) | no |
+| 3 | `sb-kernel:vector-hairy-data-vector-ref/check-bounds` | 11.6 | – | 12.5 | same as #2 — a GENERIC aref on a non-simple vector, inside that scan | S–M | no |
+| 4 | `sb-kernel:%member-eq` | – | 12.6 | – | #1189 (package machinery) | L | no |
+| 5 | cl-ppcre `create-scanner-aux`'s scan closure | 8.7 | – | 8.2 | A.2 row 11 (#71 PCRE2) | L | no |
+| 6 | `(sb-vm::optimized-data-vector-ref character)` | 7.2 | – | 3.1 | as #3, but the FAST arm — the residue after #2/#3 | — | no |
+| 7 | a cached-module lambda (`~/.pcl-cache/021484…`) | 6.9 | – | – | JSON::PP's own transpiled body — a PCL-emitted sub; the shape to profile next | M | — |
+| 8 | cl-ppcre `create-char-set-matcher` closure | – | – | 6.3 | A.2 row 11 | L | no |
+| 9 | `char=` | 5.2 | – | 4.5 | as #2/#3 | — | no |
+| 10 | `sb-pcl` BRAID / `shared-initialize` / `update-ctors` | – | 5.1 / 4.0 / 2.6 | – | #1189 | L | no |
+| 11 | `sb-kernel:%sxhash-string` | – | 4.7 | – | hash-key stringification (§5's "keys and lookups, not boxes") | M | no |
+| 12 | `pcl::do-regex-match` | – | – | 4.5 | PCL's own regex entry — the per-match protocol around the scan | M | no |
+| 13 | `package-implements-list` | – | 4.3 | – | #1189 | L | no |
+| 14 | `pcl::set-match-vars` | – | – | 3.6 | the per-match `$1`/`$&` bookkeeping; a lever only if a match's captures are provably unread | M | Kind-A candidate |
+| 15 | `sb-kernel:ub32-bash-copy` | 2.8 | – | – | string copying — `p-string-concat` / `substr` | M | no |
+| 16 | `sb-kernel:string=*`, `length`, `two-arg-and` | 2.2 | 2.6 | 2.4 | residue | — | no |
+
+**How to read it.**  For the two text-heavy rows — which are the shape most
+CPAN code has — **more than a third of the run is inside cl-ppcre** (#2, #3,
+#5, #6, #8, #9 all belong to one scan), and A.2's row 11 (the PCRE2 backend,
+#71) is the lever that owns it.  That makes it the biggest CODEGEN-adjacent
+prize the profile found, and it is an L: an sb-alien binding plus the tier
+classification the JS plan already settled.  Before committing to it, the cheap
+half is worth one measurement (#1187): a generic `search` and a hairy
+`data-vector-ref` inside a scan whose subject `do-regex-match` already coerced
+means some OTHER operand is non-simple, and that could be one `coerce`.
+
+For `moo-objs`, the table is NOT a table of object work: 16 % is SBCL
+compiling the program and, before Moo was pre-loaded out of the profile, 59.7 %
+of the samples sat under `p-use`.  What it measures is A.4.1's module load.  The
+per-object ranking needs an instrument that separates them (#1189).
+
+**AND ONE LEVER THE SCALING CONTROL HANDED OVER FOR FREE.**  With
+`foreach-arrays` in, `feread2` reads **0.28x** of perl and `feread3` 0.30x
+(they were 1.32x and unmeasured), so the run's cost does not grow with the
+array COUNT — which is what `feread3` exists to say.  But the SINGLE-array
+`feread` still reads **0.47x**: a two-array loop is now FASTER than a one-array
+loop over the same 1000 elements, because the run indexes each source's
+element-storage simple-vector with `svref` while `p-foreach-raw` over one live
+array goes through `%p-foreach-elt-raw` on the array OBJECT.  So the
+single-array path can take the run's own indexing — ease **S** (the expander
+already has both shapes), impact narrow but free, and the number to beat is
+0.47x -> ~0.28x.  It is the cheapest lever this round found and it was not
+taken: it needs the live-array semantics checked (a `push` during a
+single-array loop DOES extend the iteration today, which the run deliberately
+does not).
+
+**None of the four round-27 levers appears in this table**, which is the
+expected outcome and worth stating: `symref-const`, the bulk fill,
+`numeric-slot` and `foreach-arrays` each removed the whole of a microbench
+row's cost, and none of those shapes is where a real program spends its time.
+The rounds after this one should be ordered by A.4.1 and A.4.3, not by A.2's
+guesses — and A.2's own ease-weighted order stands only for the rows the
+profile does not contradict.
+
 ---
 
 ## Part B — The IR as a contract: what a JavaScript or C backend would need to know

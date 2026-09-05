@@ -2,6 +2,161 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bn (Opus agent, 2026-09-05) — round 27 PERF: the four small levers all ship (symref-const, the array bulk fill, numeric-slot, foreach-arrays) and the YARDSTICK says the biggest number in PCL is not codegen at all — `use JSON::PP` costs 6.4 s WARM
+
+Round 27's perf agent: `docs/plan-speed-and-ir-s470.md` A.2 rows 1–3 plus L4
+(#1153's guard), each SIZED by a hand-replaced A/B before any compiler was
+written, then the yardstick — three macro rows, four constants, `sb-sprof`
+profiles, and the ranked table that is now **§A.4 of the plan**.  Base
+`ee9a658`, rebased onto main `f728637` after L4; generation **v2-750**;
+four commits.
+
+**THE BOX WAS NOT QUIET** (a browser with several content processes) and that
+shaped the whole session's method: `perl`'s own bench column moved 40 % between
+consecutive runs of the same tree, so `tools/bench-exec.pl` could not resolve a
+10 % change.  Every lever number below therefore comes from
+`scratch/s470bn/ab-lisp.pl` — two `.lisp` files on ONE core, interleaved,
+best-of-K, with a **byte-identical control pair timed in the same window and
+printed beside the result**.  The ratios in the macro table are stable across
+four independent runs because both engines see the same load; the
+intercept/slope decomposition is not, and §A.4.2 says so instead of pretending.
+
+### L1 `symref-const` (task #1180, `d8c1a0d`) — -60.1 %
+
+`${"main::g"}` names the same variable at every execution of its site, so the
+SYMBOL belongs in a cell the site owns.  #812's memo had removed the name
+arithmetic; what it still paid per access was a string sxhash + an `equal`
+gethash + a list walk + the O(n) NUL scan each reader runs first.  The emitted
+form keeps its HEAD and gains `(p-symref-site)` as a third argument — a macro
+over `load-time-value` — so p-setf's place tables, `%p-accessor-place-p` and the
+four ++/-- macros keep matching on `p-cast-$`, and `(setf (p-cast-$ NAME SITE)
+v)` reaches the same writer through CL's own setf-function rule.  ONE runtime
+entry point (`%p-symref-sym`); five ExprToCL emitters routed through
+`_cast_form`.  What the site may cache is exactly what #812's memo may cache —
+the SYMBOL, never the box (`local` installs a fresh one) — and an unqualified
+name records the package it resolved under, which the guard exercises with ONE
+site seeing four packages through string eval.  Ceiling -87.1 %, shipped
+-60.1 % (control +0.2 %).
+
+### L2 the array-assignment BULK FILL (task #1181, `cc83209`) — listcopy 0.94× → 0.42× of perl
+
+RUNTIME ONLY, no `PCL_OPT` name: there is no emission to switch.  `p-array-fill`
+did a full snapshot allocation and copy, then a per-element walk; both passes go
+away when every element would be stored AS ITSELF, and the licence is **the
+existing write rule read backwards** — `%p-storable-raw` is the ONE function
+that decides what an element slot may hold and it is ASKED, not re-derived.  A
+BOX is copied into a FRESH box (perl copies values, and sharing it would be the
+silent wrong `$c[0] = 9` reaching `@src`); a nested vector / hash / flatten
+marker is FLATTENED, which is also what makes skipping the aliasing snapshot
+safe.  Hand-replaced -72.3 %; shipped, as a runtime A/B against an `ee9a658`
+runtime, **listcopy -52..-57 %**, sortnum -6..-11 %, sortstr -3..-7 %, nothing
+else outside the box's ±5 % band.  Seventeen probe shapes identical to perl AND
+to the base runtime on the same emitted CL.
+
+### L4 `numeric-slot` (task #1183, `3f24edc`) — -59.2 %, and #1153's ruled premise CORRECTED
+
+**The ruled premise is false, and the probe is the finding.**  s470 ruled that a
+literal delta suffices because "a raw-numeric-verdict slot cannot hold a blessed
+box".  It can, twice over: a raw compound write with a NON-literal delta leaves
+the OBJECT in the slot (`$s += $obj`, then `$s *= 3` has a literal delta and a
+blessed CUR), and a B-regime write DECLINES the freeze — `%pcl-to-number-strict`
+stores `(p-box-init V)` when the value is overload-capable.  So the licence is
+about the SLOT: VarAnnotator's `numonly` (unboxable, not the B regime, every
+write family `num`, and every write stores a compile-time NUMBER).  **NOT
+"num-FAMILY"** — `$x = $a + $obj` is num-family and yields an object, which is
+the very value the licence promises cannot be there.  Emission = a trailing
+`:numeric` on the raw twin, so the IR gains a marker rather than eight macro
+names.  **What the guard costs is the BRANCH, not its tests** — each HALF alone
+measured as much as the whole (0.028 / 0.030 against 0.029 s), because with the
+branch gone SBCL compiles the body as straight-line arithmetic.  Ceiling
+-62.5 %, shipped -59.2 % (#1153's acceptance was ~0.015 s of loop; it reads
+0.0135).  mulmod -62.0 %, cfor -21.6 %; `intloop+=`, `strcat` and an overloaded
+boxed `+=` EMISSION-IDENTICAL under the switch, which is the acceptance's
+"unmoved" half.
+
+### L3 `foreach-arrays` (task #1184, `00b26f8`) — feread2 -78.3 %, and it fires in ZERO corpus files
+
+`for my $x (@a, @b)` flattened both arrays into a temporary first, which is 88 %
+of the `feread2` row.  The licence needs **no new fact**: `p-foreach-raw`
+already requires the loop variable to be read-only and every named array to
+neither escape nor be written in the body, so `foreach-arrays` adds only the
+list SHAPE test.  The run snapshots each source's element-storage vector and
+length at loop entry — today's multi-array behaviour — and `%p-run-elt-raw`
+finds the source by scanning the cumulative ends.  ONE expander still.  Ceiling
+-88.3 %, shipped -78.3 %.  **THE FINDING: the shape occurs in none of the 1035
+files of the four populations** — zero `:arrays` sites in perl-tests, perl's own
+t/, the CPAN board and lib/; a grep finds four such spellings in all of them and
+every one declines (perl-tests/for.t writes the loop variable, which is the
+licence working).  Real win, real row, unknown reach.
+
+### THE YARDSTICK — and the number that reorders the plan
+
+`tools/bench-exec.pl` gained `json-rt`, `moo-objs`, `textproc` (+ `feread3` as
+L3's scaling control), each measured at N and 2N; the four constants were timed
+end to end; all three rows were profiled with `sb-sprof`.  The ranked table is
+**§A.4** of `docs/plan-speed-and-ir-s470.md`.  Two results dominate it:
+
+* **`use JSON::PP` costs 6.44 s WARM, 13.42 s cold; `use Moo` 3.50 s; startup
+  0.169 s; string eval 0.292 s** (perl: 0.0098 / 0.0081 / 0.0016 / 0.0020).  The
+  cause is one `defparameter`: `*pcl-cache-fasl*` is NIL, so the module cache
+  stores `.lisp` TEXT and SBCL recompiles it on every run — a session-251
+  correctness workaround for the module double-execution bug whose "DO NEXT
+  SESSION" note is long past and whose cost had never been priced.  It is
+  **larger than everything else in the table put together**, and A.0's metric is
+  PCL's absolute seconds.  Task **#1188** (ease L: the double execution has to
+  be eliminated first, `docs/module-double-exec-bug.md` options C/D).
+* **More than a THIRD of both text-heavy rows is inside ONE cl-ppcre scan** —
+  `search` 14.5 / 11.5 %, `vector-hairy-data-vector-ref` 11.6 / 12.5 %, the
+  scanner closure 8.7 / 8.2 %, plus `char=` and the char-class matchers.  The
+  graph proves `search`'s caller is cl-ppcre's own `create-scanner-aux` closure,
+  NOT `p-index`.  Task **#1187** carries the cheap discriminating measurement:
+  `do-regex-match` already coerces the SUBJECT (#680), so a generic `search` and
+  a hairy `aref` inside that scan mean some OTHER operand is not simple — find
+  it before committing to A.2 row 11 (PCRE2, #71), because if it is one `coerce`
+  the lever is an S worth a third of two rows.
+
+Ratios: json-rt **3.4–3.6×**, textproc **4.5–5.6×**, moo-objs **36–55×**.
+`moo-objs`' profile is not a table of object work (`p-use` was 59.7 % of its
+samples, SBCL compile another 16 %), which is task **#1189** — an instrument
+that separates load from loop is owed.  **None of the four round-27 levers
+appears anywhere in the ranked table**, which is the expected and worth-stating
+outcome: each removed the whole of a microbench row's cost, and none of those
+shapes is where a real program spends its time.
+
+Also filed from building the rows: **#1185** (JSON::PP under PCL encodes an
+integer as a STRING — `{"a":"1"}` where perl gives `{"a":1}`; the `json-rt`
+document is all-strings because of it) and **#1186** (`Text::Wrap::wrap` dies
+"This shouldn't happen" at Wrap.pm:78, so `textproc` wraps by hand).  **#1182**
+records what L2 did NOT take, with its number: true storage adoption for a fresh
+producer's vector is a further -30 % of what is left (0.128 → 0.089 s), needing
+an SBCL array-header install and a compile-time freshness fact.
+
+### Bars
+
+Gate **208 files / 7079 rows**, the 13 pclxs xs rows the only failures — after
+repairing **four stale `Pl/t` shape guards** that pinned the marker-free form of
+the very emissions this session changed (prefix-incr-deref-01.t for L1;
+parser2-01.t rows 31 + 33 and statements-01.t row 7 for L4 — the s416 rule, paid
+four times).  `tools/corpus-diff.pl` 11 of 111 files + 1 shapes file, every
+changed line verified to be ONLY the two markers by a whitespace-flattened
+compare that strips them and finds the base text; **`PCL_OPT=none`
+byte-identical to the base across 111 files + 6 shapes**;
+`tools/emission-ab.pl` over the wide population (lib/ + perl's t/ + the CPAN
+board, 1035 pairs) SAME 982 / DIFF 53 / **RCDIFF 0**, all 53 explained the same
+way; `tools/ir-host-leak.pl` the same 41 pre-existing leaks and none new;
+`docs/ir-op-inventory.*` regenerated for L1's one new export (`p-symref-site`,
+with its `Contract:` tail).  Companion `--jobs 1/2` per lever: op/gv.t 134/57,
+op/local.t 300/19, op/array.t 170/25, op/aassign.t 175/14, op/sort.t 183/22,
+op/inc.t 62/13, op/my.t 52/7, op/state.t 88/4, op/loopctl.t 64/3 — each exactly
+its `baselines/perl-suite-run.tsv` row, **0 NEW ROW / 0 LOST** throughout.
+Guard `Pl/t/perf-levers-01.t`, 54 rows (~6 s wall): positives, negatives and the
+switch for each named lever, plus runtime rows over every route an object can
+reach a raw slot by and every loop shape a multi-array run must get right.  The
+three checked-in artifacts regenerated on the final tree.
+
+**NO full sweep and no `--all` companion** (Fable runs those over the merged
+batch), per the brief.
+
 ## Session 470bl (Opus agent, 2026-09-05) — #1022 half (b): a bare `last`/`next`/`redo` in a CALLED SUB reaches the caller's innermost loop, at one catch per loop ENTRY — and the licence is REACHABILITY, not "calls anything" (#1162); #1160 (the labelled bare block's missing `block nil`) fixed on the way
 
 Half (a) (s470bi) made the shape LOUD; this session makes it WORK, and #1022

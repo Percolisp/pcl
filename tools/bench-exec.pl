@@ -200,6 +200,27 @@ my @benches = (
   # under the run-to-run spread of the ~1 s both runs pay to compile the
   # program, so even once the row stopped CRASHING it would have measured
   # mostly noise.  30 puts perl at ~0.36 s and PCL at ~0.8 s.
+  # ---- THE MACRO ROWS (task #1187, s470bn; docs/plan-speed-and-ir-s470.md A.1)
+  # The rows above are MICRObenchmarks: each isolates one emitted shape.  These
+  # three are whole PROGRAMS built out of the real lib/ modules, because A.0's
+  # metric is PCL's absolute seconds on representative work, and a profile of a
+  # microbench can only rank the shape it was written for.  Each is measured at
+  # N and 2N (the intercept is the constant term, the slope the per-iteration
+  # cost); the SHAPE of each is in docs/plan-speed-and-ir-s470.md A.1.
+  #
+  # `json-rt` — JSON::PP encode+decode of a ~42 kB nested document.  EVERY leaf
+  #   is a STRING deliberately: PCL's JSON::PP encodes an integer as \"1\" where
+  #   perl encodes 1 (task #1185), so a document with numbers in it would make
+  #   the two engines do different work AND print different sums.
+  ['json-rt',   "$HN use strict; use warnings; use JSON::PP; my \$doc = { meta => { name => \"bench\", tags => [map { \"t\$_\" } 1..40], nested => { a => \"1\", b => [map { \"n\$_\" } 1..30] } }, rows => [ map { { id => \"id-\$_\", name => \"row-\$_\", vals => [map { sprintf(\"%03d\", \$_) } 1..12], flag => (\$_ % 2 ? \"y\" : \"n\"), text => \"some text for row \$_ with a few words\" } } 1..120 ] }; my \$j = JSON::PP->new->canonical; my \$len = 0; for (1 .. \$n) { my \$s = \$j->encode(\$doc); my \$back = \$j->decode(\$s); \$len += length(\$s) + scalar(\@{\$back->{rows}}) } print \"\$len\\n\";", 100, 0],
+  # `moo-objs` — a Moo class with three attributes: constructor, rw accessor,
+  #   ro accessor, a method building another object.  The OO mix.
+  ['moo-objs',  "$HN use strict; use warnings; package Pt; use Moo; has x => (is => 'rw', default => sub { 0 }); has y => (is => 'rw', default => sub { 0 }); has label => (is => 'ro', default => sub { \"p\" }); sub shifted { my (\$self, \$d) = \@_; return Pt->new(x => \$self->x + \$d, y => \$self->y - \$d, label => \$self->label) } sub norm { my \$self = shift; return \$self->x * \$self->x + \$self->y * \$self->y } package main; my \$s = 0; for my \$i (1 .. \$n) { my \$p = Pt->new(x => \$i % 100, y => (\$i * 7) % 100, label => \"l\" . (\$i % 5)); \$p->x(\$p->x + 1); my \$q = \$p->shifted(3); \$s += \$q->norm + length(\$q->label); } print \"\$s\\n\";", 20_000, 0],
+  # `textproc` — regex-heavy line processing of a ~200 kB blob: split, a match
+  #   with a capture, substr, uc, `.=`, a scalar m//g pos() scan, and a
+  #   hand-rolled wrap.  Text::Wrap was the plan's named example and does NOT
+  #   run under PCL (task #1186), so the row wraps by hand.
+  ['textproc',  "$HN use strict; use warnings; my \@src = map { \"line \$_: the quick brown fox jumps over the lazy dog, number \$_, tag=t\" . (\$_ % 17) } 1 .. 2000; my \$blob = join(\"\\n\", \@src); my \$s = 0; for (1 .. \$n) { my \$out = ''; for my \$l (split /\\n/, \$blob) { next unless \$l =~ /tag=t(\\d+)/; my \$tag = \$1; my \$up = uc(substr(\$l, 0, 20)); \$out .= \"\$up|\$tag;\"; \$s++ while \$l =~ /o/g; } \$s += length(\$out); my \$para = join(' ', \@src[0 .. 19]); my (\$col, \$wrapped) = (0, ''); for my \$w (split /\\s+/, \$para) { if (\$col + length(\$w) > 40) { \$wrapped .= \"\\n \"; \$col = 2 } \$wrapped .= \"\$w \"; \$col += length(\$w) + 1; } \$s += length(\$wrapped); } print \"\$s\\n\";", 400, 0],
   ['regexg',    "$HN my \$x = 'a' x 200000; my \$c = 0; for (1..\$n) { \$c = 0; while (\$x =~ /./g) { \$c++ } } print \"\$c\\n\";", 30, 0],
 );
 
