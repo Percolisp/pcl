@@ -9859,8 +9859,16 @@ sub _lower_stmt {
       return ['%pcl-str-append', $name,
               $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt)]
         if $vi->{$name}{strbuf} && $expr->[1]->content eq '.=';
+      # Kind-A `numeric-slot' (task #1183): a slot VarAnnotator proved can
+      # only ever hold a plain number needs no overload guard, and the guard's
+      # cost is its BRANCH, not its tests (-62.5 % on the 4e6 `*=`/`%=` loop;
+      # see %compound-arith-form).  Only the ops whose runtime template reads
+      # the marker are given it.
+      my @marker = ($vi->{$name}{numonly}
+                    && Pl::VarAnnotator::numeric_marker_op($expr->[1]->content)
+                    && Pl::Passes::enabled('numeric-slot')) ? (':numeric') : ();
       return [$rawmac, $name,
-              $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt)];
+              $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt), @marker];
     }
   }
 
@@ -9880,7 +9888,9 @@ sub _lower_stmt {
     if (defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--')
         && !$self->{_file_lex_renamed}{$name}
         && $vi->{$name} && $vi->{$name}{unboxable}) {
-      my $form = [$opc eq '++' ? 'p-incf-raw' : 'p-decf-raw', $name];
+      my $form = [$opc eq '++' ? 'p-incf-raw' : 'p-decf-raw', $name,
+                  ($vi->{$name}{numonly} && Pl::Passes::enabled('numeric-slot'))
+                    ? (':numeric') : ()];
       return ($post && defined $tail_ctx) ? ['prog1', $name, $form] : $form;
     }
   }

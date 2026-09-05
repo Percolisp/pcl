@@ -19,6 +19,8 @@
 #
 #   symref-const (task #1180, Kind-A): a CONSTANT-string operand of a symbolic
 #     dereference resolves to its symbol ONCE per site.
+#   numeric-slot (task #1183, Kind-A): a raw slot every one of whose writes
+#     stores a compile-time NUMBER drops the compound-assign overload guard.
 #   the array-assignment BULK FILL (task #1181, runtime only — no PCL_OPT name
 #     because there is no emission to switch): `@x = LIST` is ONE block copy
 #     when every element would be stored as itself.
@@ -38,7 +40,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 22;
+plan tests => 38;
 
 sub write_pl {
     my ($src) = @_;
@@ -266,6 +268,88 @@ PERL
 OUT
     is(run_with($bulk, undef), $want_bulk,
        'bulk fill: seventeen array-assignment shapes are perl 5.40.3\'s answers');
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# numeric-slot — task #1183 (the guard-free raw compound assign)
+# ─────────────────────────────────────────────────────────────────────────────
+# The licence is about the SLOT, not the site: a raw slot every one of whose
+# writes stores a compile-time NUMBER can never hold a blessed box, so its
+# `+=`/`-=`/`*=`/`%=`/`++`/`--` drop %compound-arith-form's overload guard.
+# THE NEGATIVE THAT MATTERS is a POISONED slot — `$s += $obj` puts an object
+# in a raw slot (measured, task #1153), and a later `$s *= 3` has a literal
+# delta and a BLESSED current value.  Licensing on the delta alone would
+# numify it: the silent wrong this file exists to prevent.
+{
+    my $ns = write_pl(<<'PERL');
+my $o = bless {}, 'K';
+my $lic = 2;  $lic *= 3; $lic %= 100; $lic += 1; $lic--; $lic++;
+my $poison = 0; $poison += $o; $poison *= 3;
+my $arith = 1;  $arith = $lic + 1; $arith *= 2;
+my $strfam = 1; $strfam += 2; $strfam .= "x";
+sub par { my ($p) = @_; $p *= 2; return $p }
+my $cond = 1; $cond = $o if $lic; $cond *= 2;
+print "$lic $poison $arith $strfam $cond ", par(3), "\n";
+PERL
+    my $ns_def = transpile_with($ns, undef);
+    like($ns_def, qr/\(p-\*=-raw \$lic 3 :numeric\)/,  'numeric-slot: `*=` with a literal delta on a literal-only slot');
+    like($ns_def, qr/\(p-%=-raw \$lic 100 :numeric\)/, 'numeric-slot: `%=` too');
+    like($ns_def, qr/\(p-incf-raw \$lic 1 :numeric\)/, 'numeric-slot: `+=` too');
+    like($ns_def, qr/\(p-decf-raw \$lic :numeric\)/,   'numeric-slot: root `--` (no delta)');
+    like($ns_def, qr/\(p-incf-raw \$lic :numeric\)/,   'numeric-slot: root `++`');
+    # NEGATIVE 1 — the POISONED slot: an object reached it through a NON-literal
+    # `+=`, so the later literal `*=` keeps the guard.
+    like($ns_def, qr/\(p-incf-raw \$poison \$o\)/,     'numeric-slot NEGATIVE: a non-literal delta is not licensed');
+    like($ns_def, qr/\(p-\*=-raw \$poison 3\)\n?/,     'numeric-slot NEGATIVE: and it POISONS the slot for the literal site after it');
+    # NEGATIVE 2 — an ARITHMETIC RHS is num-FAMILY and can still be an object
+    # (`$x = $a + $obj` runs the class's `+` handler).
+    unlike($ns_def, qr/\$arith \d+ :numeric/,          'numeric-slot NEGATIVE: an arithmetic RHS is not a literal');
+    # NEGATIVE 3 — a `.=` write makes the slot string-family.
+    unlike($ns_def, qr/\$strfam \d+ :numeric/,         'numeric-slot NEGATIVE: a str-family write declines');
+    # NEGATIVE 4 — a sub PARAMETER's value is caller-supplied.
+    unlike($ns_def, qr/\$p \d+ :numeric/,              'numeric-slot NEGATIVE: a sub parameter declines');
+    # NEGATIVE 5 — a CONDITIONAL write is not a proven one.
+    unlike($ns_def, qr/\$cond \d+ :numeric/,           'numeric-slot NEGATIVE: a conditional write declines');
+    # NEGATIVE 6 — the switch.
+    my $ns_off = transpile_with($ns, '-numeric-slot');
+    unlike($ns_off, qr/:numeric/,                      '-numeric-slot: no marker anywhere');
+    like($ns_off, qr/\(p-\*=-raw \$lic 3\)/,           '-numeric-slot: the guarded raw twin is back');
+    unlike(transpile_with($ns, 'none'), qr/:numeric/,  'PCL_OPT=none: no marker either');
+}
+# The runtime half: every route by which an OBJECT can reach a raw slot, and
+# the licensed shapes beside them — perl 5.40.3's answers, unchanged by the
+# switch.  The class carries its own `++` handler, which perl asks BEFORE
+# autogenerating from `+`.
+{
+    my $ns_run = write_pl(<<'PERL');
+package P;
+use overload
+  '+'  => sub { P->new($_[0]{v} + (ref $_[1] ? $_[1]{v} : $_[1])) },
+  '-'  => sub { P->new($_[0]{v} - (ref $_[1] ? $_[1]{v} : $_[1])) },
+  '*'  => sub { P->new($_[0]{v} * (ref $_[1] ? $_[1]{v} : $_[1])) },
+  '%'  => sub { P->new($_[0]{v} % (ref $_[1] ? $_[1]{v} : $_[1])) },
+  '++' => sub { $_[0]{v}++; $_[0] },
+  '""' => sub { "P(" . $_[0]{v} . ")" };
+sub new { bless { v => $_[1] }, $_[0] }
+package main;
+my $o = P->new(5);
+sub c1 { my $n = 1; my $f = sub { $n = $o }; $f->(); $n *= 2; return "$n" }
+sub c2 { my $n = 1; my $r = \$n; $$r = $o; $n *= 2; return "$n" }
+sub c3 { my ($n) = @_; $n *= 2; return "$n" }
+sub c4 { my $n = 1; $n = $o if 1; $n *= 2; return "$n" }
+sub c5 { my $n = 1; $n = $o + 0; $n *= 2; return "$n" }
+sub c6 { my $n = 1; eval '$n = $o'; $n *= 2; return "$n" }
+sub c7 { my $n = 1; $n += $o; $n++; return "$n" }
+sub c8 { my $n = 2; for (1..3) { $n *= 3; $n %= 100; $n += 1; $n--; $n++ } return "$n" }
+sub c9 { my $n = 10; $n *= -2; $n += 0.5; return "$n" }
+sub c10 { my $n = 1; $n += 2; $n .= "x"; return "$n" }
+sub c11 { my $n; $n += 5; $n *= 2; return "$n" }
+print join(' ', c1(), c2(), c3($o), c4(), c5(), c6(), c7(), c8(), c9(), c10(), c11()), "\n";
+PERL
+    my $want_ns = "P(10) P(10) P(10) P(10) P(10) P(10) P(7) 67 -19.5 3x 10\n";
+    is(run_with($ns_run, undef), $want_ns,
+       'numeric-slot: every route an OBJECT reaches a raw slot by is perl 5.40.3\'s answer');
+    is(run_with($ns_run, '-numeric-slot'), $want_ns, '-numeric-slot: the same answers');
 }
 
 # The registry's own contract: the name is known, and a typo still dies.

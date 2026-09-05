@@ -7343,14 +7343,28 @@ per element."
    with plain SETF.  NEW-VALUE is a form-template expression evaluated with CUR
    bound to the current-value form and the LAMBDA-LIST names bound to the
    macro's argument forms.  One builder, two store disciplines — the raw twin
-   cannot drift semantically from the boxed macro."
+   cannot drift semantically from the boxed macro.
+
+   A TRAILING `:numeric' on the RAW twin is the Kind-A `numeric-slot' licence
+   (task #1183): the emitter has PROVEN that this slot can only ever hold a
+   plain number, so the overload guard %compound-arith-form builds is dead code
+   and a template may drop it.  NUMERICP is bound around NEW-VALUE for the
+   templates that pass it on; the ones that do not are unaffected, and the
+   BOXED macro never sees the marker at all.  The keyword cannot be confused
+   with a DELTA: no compound assignment's right-hand side is `:numeric'."
   `(progn
      (defmacro ,boxed (place ,@lambda-list)
        ,doc
-       (%store-back-form place (lambda (cur) ,@new-value)))
-     (defmacro ,raw (var ,@lambda-list)
+       (let ((numericp nil))
+         (declare (ignorable numericp))
+         (%store-back-form place (lambda (cur) ,@new-value))))
+     (defmacro ,raw (var &rest %args)
        ,doc
-       (list 'setf var (let ((cur var)) ,@new-value)))))
+       (let ((numericp (eq (car (last %args)) :numeric)))
+         (declare (ignorable numericp))
+         (when numericp (setf %args (butlast %args)))
+         (destructuring-bind ,lambda-list %args
+           (list 'setf var (let ((cur var)) ,@new-value)))))))
 
 (defun %p-compound-+-slow (c d)
   "`+=`'s new value when an operand IS a blessed box: perl's `+` overload if the
@@ -7393,7 +7407,7 @@ per element."
   (p-str-x c d))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
-  (defun %compound-arith-form (slow-fn cl-op cur delta &optional incdecp)
+  (defun %compound-arith-form (slow-fn cl-op cur delta &optional incdecp numericp)
     "Build the new-value form for `+=`/`-=`: the same arithmetic as ever, plus
      perl's OVERLOAD dispatch when an operand carries one (task #900 — perl
      autogenerates `+=` from a `+` handler and keeps the OBJECT; PCL numified,
@@ -7474,9 +7488,25 @@ per element."
            (plain (if (functionp cl-op)
                       (funcall cl-op c dref)
                       `(,cl-op (to-number ,c) (to-number ,dref))))
-           (form `(if (and *p-any-overload-registered* ,blessed)
-                      ,(if incdecp `(,slow-fn ,c) `(,slow-fn ,c ,dref))
-                      ,plain)))
+           ;; NUMERICP — the `numeric-slot' licence (task #1183).  The EMITTER
+           ;; has proven that this raw slot can only ever hold a plain number
+           ;; (every write to it stores a compile-time NUMBER, directly or
+           ;; through one of these numeric compound ops), so BLESSED is
+           ;; statically false and the whole guard is dead code.  What it buys
+           ;; is not the two tests — measured, each HALF of the guard alone
+           ;; costs as much as the whole (0.028 s / 0.030 s against 0.029 s on
+           ;; the 4e6 `*=`/`%=` loop) — but the BRANCH: with it gone SBCL
+           ;; compiles the body as straight-line arithmetic and the loop reads
+           ;; 0.0109 s against 0.0292 s, **-62.5 %** (control pair +0.4 %).
+           ;; The licence is the emitter's alone; see Pl/VarAnnotator.pm's
+           ;; `numonly' verdict for what it proves and Pl/t/perf-levers-01.t
+           ;; for the probe that a poisoned slot (`$s += $obj; $s *= 3') is
+           ;; NOT licensed — that is the silent wrong this must never make.
+           (form (if numericp
+                     plain
+                     `(if (and *p-any-overload-registered* ,blessed)
+                          ,(if incdecp `(,slow-fn ,c) `(,slow-fn ,c ,dref))
+                          ,plain))))
       (if constp
           `(let ((,c ,cur)) ,form)
           `(let ((,c ,cur) (,d ,delta)) ,form)))))
@@ -7490,8 +7520,8 @@ per element."
    here), through perl-increment, which asks the class's own `++` first.
    See %compound-arith-form.  PLACE is evaluated once (see %store-back-form)."
                        (%compound-arith-form
-                        (if delta-p '%p-compound-+-slow 'perl-increment)
-                        '+ cur delta (not delta-p)))
+                        (if delta-p (quote %p-compound-+-slow) (quote perl-increment))
+                        (quote +) cur delta (not delta-p) numericp))
 
 (%define-compound-pair p-decf p-decf-raw (&optional (delta 1 delta-p))
                        "Perl -= - works on boxed values, hash/array elements, and derefs.
@@ -7499,8 +7529,8 @@ per element."
    (`$x--`), through perl-decrement.  See %compound-arith-form.  PLACE is
    evaluated once (see %store-back-form)."
                        (%compound-arith-form
-                        (if delta-p '%p-compound---slow 'perl-decrement)
-                        '- cur delta (not delta-p)))
+                        (if delta-p (quote %p-compound---slow) (quote perl-decrement))
+                        (quote -) cur delta (not delta-p) numericp))
 
 (defun magical-string-increment (s)
   "Perl's magical string increment: 'a0' -> 'a1', 'Az' -> 'Ba', 'zz' -> 'aaa'"
@@ -7865,7 +7895,7 @@ per element."
 (%define-compound-pair p-*= p-*=-raw (value)
                        "Perl *= (multiply-assign).  Overload `*` through
    %p-compound-*-slow when an operand is blessed; see %compound-arith-form."
-                       (%compound-arith-form '%p-compound-*-slow '* cur value))
+                       (%compound-arith-form (quote %p-compound-*-slow) (quote *) cur value nil numericp))
 
 (%define-compound-pair p-/= p-/=-raw (value)
                        "Perl /= (divide-assign).  Delegate to p-/ so an exact CL ratio is coerced to
@@ -7879,7 +7909,7 @@ per element."
                         '%p-compound-%-slow
                         (lambda (c d) `(mod (truncate (to-number ,c))
                                             (truncate (to-number ,d))))
-                        cur value))
+                        cur value nil numericp))
 
 (%define-compound-pair p-**= p-**=-raw (value)
                        "Perl **= (exponent-assign).  Delegate to p-** so a negative exponent yields a

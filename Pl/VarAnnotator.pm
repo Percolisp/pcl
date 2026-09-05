@@ -131,6 +131,16 @@ my %RAW_COMPOUND = (
 
 sub raw_compound_macro { $RAW_COMPOUND{ $_[0] } }
 
+# The compound ops whose RAW twin HONOURS the `:numeric' marker — i.e. the
+# ones whose runtime template threads `numericp` into %compound-arith-form
+# (task #1183).  Kept here, beside %RAW_COMPOUND, because it is the same kind
+# of fact and one table drifting from the other is how `$obj *= 3` lost its
+# dispatch in the first place.  `/=` and `**=` delegate to p-/ / p-** (they
+# have no guard of their own to drop); the string and bitwise ops are not
+# numeric.
+my %NUMERIC_MARKER_OP = map { $_ => 1 } qw(+= -= *= %=);
+sub numeric_marker_op { $NUMERIC_MARKER_OP{ $_[0] } }
+
 # --- B-regime use-classification tables (docs/raw-numeric-verdict.md, the
 # scan-licensed freeze verdicts, task #62).  WHITELISTS: a read of a plain
 # $scalar is classified by the operator/position that consumes it; any read
@@ -456,6 +466,9 @@ sub _analyze_tree {
     # package-name STRING that perl magically increments ('a' -> 'b'); the
     # numeric -raw twin would numify it (caught via sub.t, s302).
     $ctx->{write_fam}{$p}{caller}++;
+    # …and for the same reason it can never be `numonly': the caller may hand
+    # in an object.
+    $ctx->{numlit_bad}{$p} = 1;
   }
 
   for my $stmt (@stmts) {
@@ -594,6 +607,33 @@ sub _analyze_tree {
     # must not change the ARRAY verdicts (and therefore `local-push`).
     $ctx->{foreach_ro_raw}{$name} = 1 if $ro_ok;
     $vi{$name}{foreach_ro} = 1 if $ro_ok && Pl::Passes::enabled('foreach-raw');
+
+    # `numonly' — THE SLOT CAN ONLY EVER HOLD A PLAIN NUMBER (task #1183,
+    # Kind-A `numeric-slot').  Three conjuncts, and each is load-bearing:
+    #
+    #  (1) `unboxable` with NO `coerce`, i.e. the A regime.  There, EVERY
+    #      write to the name went through one of the two arms below that set
+    #      `numlit_bad` — anything else (an embedded write, a conditional one,
+    #      a list LHS, an element LHS, a `local`, a caller-supplied parameter,
+    #      a closure boxing event, a string eval in the region) leaves a
+    #      REASON and the name is not unboxable at all.  So "no numlit_bad"
+    #      means "no write of any kind that this walk did not prove".
+    #  (2) NOT the B regime.  There the writes are wrapped in
+    #      %pcl-to-number-strict, which DECLINES the freeze and stores
+    #      `(p-box-init V)` — a BOX — when the value is overload-capable.  A
+    #      B-regime slot can therefore hold a blessed box, and the guard must
+    #      stay.  (This is the correction to the premise task #1153 was filed
+    #      on; the probe is in Pl/t/perf-levers-01.t.)
+    #  (3) every write family is `num`.  A `.=`/`x=` write is str-family and
+    #      stores a STRING, which the numeric-only claim does not cover.
+    #
+    # A root `$x++`/`$x--` needs no conjunct of its own: it is already gated
+    # on every write family being num (the `write-incdec-root` reason), and
+    # incrementing a number yields a number.
+    $vi{$name}{numonly} = 1
+      if $vi{$name}{unboxable} && !$vi{$name}{coerce}
+      && !$ctx->{numlit_bad}{$name}
+      && !grep { $_ ne 'num' } keys %{ $ctx->{write_fam}{$name} // {} };
   }
   _array_verdicts($ctx, \%vi);
   # THE CAPTURE FACT (task #1035 step 2; docs/ir-spec.md 2b.2a `:captured`).
@@ -1411,6 +1451,11 @@ sub _tw_walk {
         if ($fam) { $ctx->{write_fam}{$name}{$fam}++ }
         else      { $ctx->{init_bad}{$name} = 1 }
         $ctx->{write_obj}{$name} = 1 if _tw_rhs_is_object($xo, $kids->[1]);
+        # `numonly' (task #1183): only a compile-time NUMBER keeps it.  NOT
+        # `$fam eq 'num'` — an arithmetic RHS is num-FAMILY and still yields
+        # an OBJECT when an operand is overloaded (`$x = $a + $obj`), which is
+        # exactly the value this licence promises can never be in the slot.
+        $ctx->{numlit_bad}{$name} = 1 unless _tw_num_literal($xo, $kids->[1]);
       }
       else {
         # Everything else — a container element ($h{$k} = …), a deref chain,
@@ -1439,6 +1484,12 @@ sub _tw_walk {
       if ($raw_ok) {
         $ctx->{write_fam}{$l->content}{ $NUM_COMPOUND{$op} ? 'num' : 'str' }++;
         $ctx->{write_ops}{$l->content}{$op}++;   # str-buffer verdict input
+        # `numonly' (task #1183): a NUMERIC compound op with a compile-time
+        # NUMBER on the right takes a number to a number.  Any other delta —
+        # `$s += $obj` is the measured one — can put an OBJECT in the slot,
+        # and a later `$s *= 3` would then be reading a blessed box.
+        $ctx->{numlit_bad}{$l->content} = 1
+          unless $NUM_COMPOUND{$op} && _tw_num_literal($xo, $kids->[1]);
         # The compound also READS the old value — classify the LHS use by
         # the op's coercion family.  The bitwise trio (&= |= ^=, and the
         # .-suffixed string forms) is TYPE-SENSITIVE (& | ^ dispatch on
@@ -1754,6 +1805,37 @@ sub _tw_known_sub_return_family {
   my $info = $ctx->{known_subs}{ $f->content };
   return 0 unless ref $info;
   return $info->{returns} || 0;
+}
+
+# THE `numonly' LICENCE (task #1183, the Kind-A `numeric-slot' emission).
+#
+# `_tw_shape_ok' answers "is this write's value RAW-STORABLE", which is a
+# question about the STORAGE.  This one answers a strictly narrower question
+# about the VALUE — "is it a compile-time NUMBER" — and the two must not be
+# confused, which is why it is its own predicate rather than a new return of
+# that one: a num-FAMILY arithmetic RHS is raw-storable and can still be an
+# OBJECT (`$x = $a + $obj` runs the class's `+` handler and stores what it
+# returns).  The whole point of `numonly' is that no such value can reach the
+# slot, so only a literal will do.
+#
+# Value-transparent wrappers are looked through — parens (`tree_val') and
+# unary +/- in front of a number — and NOTHING else.
+sub _tw_num_literal {
+  my ($xo, $id) = @_;
+  my $node = $xo->get_a_node($id);
+  my $kids = $xo->get_node_children($id) || [];
+  if ($xo->is_internal_node_type($node)) {
+    my $t = $node->{type} // '';
+    return _tw_num_literal($xo, $kids->[0]) if $t eq 'tree_val' && @$kids == 1;
+    if ($t eq 'prefix_op' && @$kids == 2) {
+      my $op = $xo->get_a_node($kids->[0]);
+      my $opc = (ref($op) && !$xo->is_internal_node_type($op)) ? $op->content : '';
+      return _tw_num_literal($xo, $kids->[1]) if $opc eq '-' || $opc eq '+';
+    }
+    return 0;
+  }
+  return 0 if @$kids;
+  return (ref($node) && $node->isa('PPI::Token::Number')) ? 1 : 0;
 }
 
 sub _tw_shape_ok {

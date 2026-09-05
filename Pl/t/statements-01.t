@@ -72,9 +72,12 @@ output_contains('for (my $i = 0; $i < 10; $i++) { }',
                 '((p-< $i 10))',
                 'C-style for: condition');
 
-output_contains('for (my $i = 0; $i < 10; $i++) { }',
-                '((p-incf-raw $i))',
-                'C-style for: increment');
+# The trailing `:numeric` is the Kind-A `numeric-slot` licence (task #1183),
+# which a counter whose every write is a compile-time number carries — an
+# extra ARGUMENT to the same raw twin, and this row's subject is the twin.
+like(parse_code('for (my $i = 0; $i < 10; $i++) { }'),
+     qr/\(\(p-incf-raw \$i(?: :numeric)?\)\)/,
+     'C-style for: increment');
 
 output_contains('for ($i = 0; $i <= $max; $i += 2) { }',
                 '(p-for ((p-scalar-= $i 0))',

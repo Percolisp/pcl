@@ -152,11 +152,14 @@ like($cfor, qr/\(\(setf \$i \(p-\+ \$i 1\)\)\)/, 'C-for raw counter native setf 
 my $cfor2 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 3; $j++) { print "$j\n"; }');
 like($cfor2, qr/\(p-let \(\(\$j :scalar 0\)\)/, 'C-for pure ++ step: counter unboxes (A-num)');
-like($cfor2, qr/\(\(p-incf-raw \$j\)\)/, 'C-for ++ step lowered via the -raw twin');
+# The optional trailing `:numeric` is the Kind-A `numeric-slot` licence (task
+# #1183), which a counter whose every write is a compile-time number carries:
+# an extra ARGUMENT to the same raw twin, and the twin is this row's subject.
+like($cfor2, qr/\(\(p-incf-raw \$j(?: :numeric)?\)\)/, 'C-for ++ step lowered via the -raw twin');
 my $cfor3 = Pl::Parser2->parse_code(
   'for (my $j = 0; $j < 6; $j++) { $j++; print "$j\n"; }');
 like($cfor3, qr/\(p-let \(\(\$j :scalar 0\)\)/, 'C-for with body ++ also unboxes (A-num)');
-like($cfor3, qr/\(p-incf-raw \$j\)\s*\(p-print/s, 'body ++ lowered via the -raw twin');
+like($cfor3, qr/\(p-incf-raw \$j(?: :numeric)?\)\s*\(p-print/s, 'body ++ lowered via the -raw twin');
 # … but a STR-family write forces the box: perl magically increments a
 # non-numeric string ("aa" -> "ab"), which the numeric twin cannot do.
 my $cfor4 = Pl::Parser2->parse_code(
