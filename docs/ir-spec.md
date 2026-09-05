@@ -1446,7 +1446,19 @@ anon-array constructor, `push`/`unshift`, `join`/`print`/`say`/`printf`,
 every top-level argument produces temporaries: a literal, `p-keys`, `p-map`,
 `p-split`, `p-readdir`, `p-glob`, a range, or a user sub call.  `p-values`,
 `p-grep`, `p-reverse` and a nested `p-sort` all hand aliases through and are
-NOT sources under (B); `p-reverse` *is* transparent to (A).
+NOT sources under (B); `p-reverse` *is* transparent to (A).  A `do { … }`
+tail is **not** a copying consumer — perl hands its aliases through
+(`$_++ for do { sort @d }` writes back) — while `eval { … }` and a sub tail
+are.
+
+**The `p-foreach-raw` member of (A) inherits `foreach-raw`'s own condition,
+no more and no less.** That verdict says the loop variable is only ever READ,
+which covers writes *through* the loop variable; it does not cover a write to
+the ARRAY by another path during the loop, because the annotator has no array
+facts. So `for my $x (@fa) { $fa[0] = 99; print $x; last }` already diverges
+from perl under `foreach-raw` alone, and the `sort`-fed spelling is exactly as
+sound as that. Task **#1140** (the array-fact family) makes both exact; a
+translator implementing `p-foreach-raw` faithfully inherits the same boundary.
 
 `grep`/`map`/`eval` block bodies are plain `(lambda …)` with **neither**
 the catch nor the context bind — `return` inside them must propagate to the

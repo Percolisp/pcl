@@ -27,6 +27,19 @@
 # `values' IS NOT FRESH — measured, and the reason there is a row for it:
 # `for my $v (sort { $a <=> $b } values %h) { $v .= "!" }' writes back into
 # the hash, in perl and in PCL alike.  So do `grep' and a nested `sort'.
+#
+# NOR IS A `do { … }' TAIL A COPYING CONSUMER (merge review): perl hands its
+# aliases through, so it keeps the general form; `eval { }' and a sub tail do
+# copy.  Both are rows below.
+#
+# WHAT IS DELIBERATELY *NOT* ASSERTED HERE: the (A) `foreach-raw' member
+# inherits foreach-raw's own condition — the loop variable is only ever READ —
+# and neither verdict covers a write to the ARRAY by another path during the
+# loop, because VarAnnotator has no array facts.  `for my $x (@fa)
+# { $fa[0] = 99; print $x; last }' already diverges from perl under
+# `PCL_OPT=-foreach-raw' alone, so the sort-fed spelling is exactly as sound
+# as the plain one.  No row here asserts that wrong answer; task #1140 (the
+# array-fact family) is what makes both exact.
 
 use v5.30;
 use strict;
@@ -45,7 +58,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 27;
+plan tests => 29;
 
 sub write_pl {
     my ($code) = @_;
@@ -124,6 +137,18 @@ for my $n (@negative) {
     my ($code, $what) = @$n;
     unlike(emitted($HEAD . $code), qr/%p-sort-classic/, "NOT licensed: $what");
 }
+
+# A `do { … }' TAIL IS NOT A COPYING CONSUMER (s470a5 merge review).  perl
+# hands its aliases through — `$_++ for do { sort { $a <=> $b } @d }' turns
+# (3,1,2) into (4,2,3), probed — so a do-block around a sort keeps the general
+# form, while `eval { }' and a sub tail (which DO copy) may license it.  The
+# runtime rows below carry the do-block's own value answer.
+unlike(emitted('my @d = (3,1,2); $_++ for do { sort { $a <=> $b } @d };'),
+       qr/%p-sort-classic/,
+       'NOT licensed: a `do { … }` tail hands the aliases through');
+like(emitted('our @f = (3,1,2); sub s1 { return sort { $a <=> $b } @f }'),
+     qr/p-tail-value \(\Q%p-sort-classic :num-asc\E/,
+     'a sub TAIL is a copying consumer (perl copies a returned list)');
 
 # The reverse twin: `reverse' hands aliases through, so it is NOT a fresh
 # source (licence B fails) — but a COPYING consumer licenses the sort anyway,
@@ -215,6 +240,16 @@ my @ro = (3,1,2);
 my @out;
 for my $x (sort { $a <=> $b } @ro) { push @out, $x }
 print "readonly:@ro|@out\n";
+my @d = (3,1,2);
+$_++ for do { sort { $a <=> $b } @d };
+print "doblock:@d\n";
+my @ev = (3,1,2);
+$_++ for eval { sort { $a <=> $b } @ev };
+print "evalblock:@ev\n";
+our @st = (3,1,2);
+sub s1 { return sort { $a <=> $b } @st }
+$_++ for s1();
+print "subtail:@st\n";
 PL
 my $ALIAS_WANT = <<'OUT';
 topic:4 2 3
@@ -224,6 +259,9 @@ values:2!,1!
 grep:3! 1! 2!
 reverse:3! 1! 2!
 readonly:3 1 2|1 2 3
+doblock:4 2 3
+evalblock:3 1 2
+subtail:3 1 2
 OUT
 is(run_cl($ALIAS), $ALIAS_WANT, 'sort returns ALIASES where the licence does not hold');
 is(run_cl($ALIAS, 'none'), $ALIAS_WANT, 'the aliasing answers are the same under PCL_OPT=none');

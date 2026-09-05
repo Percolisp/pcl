@@ -16572,8 +16572,11 @@ buffer's fill-pointer; everything else falls back to file-length."
   "THE FALLBACK, spelled exactly as the emitter spells the general form for
    the same MODE, so the fast and the general answer cannot drift.  :default
    is `sort LIST' with no block, whose runtime is p-sort's own no-comparator
-   arm — NOT the same code as { $a cmp $b } (that one dispatches a `cmp'
-   overload, this one stringifies), which is why the two are separate modes."
+   arm — NOT the same code as { $a cmp $b }, which is why the two are separate
+   modes.  That arm today IGNORES an overloaded `cmp' where perl uses it
+   (task #1021, filed s464 by the failing-tests review: `sort @objs' answers
+   `a b c' where perl answers `c b a'); this fallback goes through p-sort, so
+   it INHERITS #1021's fix and must not grow a second answer of its own."
   (case mode
     (:default  (apply #'p-sort items))
     (:num-asc  (apply #'p-sort (lambda (a b) (p-<=> a b)) items))

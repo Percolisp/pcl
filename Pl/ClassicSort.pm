@@ -37,6 +37,18 @@ package Pl::ClassicSort;
 #       constructor, push/unshift, join/print/say/printf, return.  `reverse'
 #       is TRANSPARENT (it hands the aliases through unchanged) and so is the
 #       context wrapper, so both propagate the licence.
+#       THE `p-foreach-raw' MEMBER INHERITS foreach-raw's OWN CONDITION, no
+#       more and no less (s470a5 merge review).  That verdict covers writes
+#       THROUGH the loop variable; it does NOT cover a write to the ARRAY by
+#       another path during the loop, because VarAnnotator has no array facts
+#       at all.  So `for my $x (@fa) { $fa[0] = 99; print $x; last }' already
+#       prints perl's 99 only with `PCL_OPT=-foreach-raw', and the sort-fed
+#       spelling is exactly as sound as that — no better, no worse.  The
+#       array-fact family that makes both exact is task #1140.
+#       NOT a member: `do { sort … }'.  A do-block's tail hands the aliases
+#       through in perl (`$_++ for do { sort @d }' writes back into @d —
+#       probed), so it is not a copying consumer.  `eval { }' and a sub tail
+#       DO copy; the eval-block head is left out anyway, conservatively.
 #   B — a TEMPORARY-PRODUCING SOURCE.  Every top-level argument is a fresh
 #       value: a literal, `keys', `map', `split', `readdir', `glob', a range,
 #       or a call to a user sub (the sub-call boundary copies — probed with a

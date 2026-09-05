@@ -101,12 +101,12 @@ spread: `cfor` 0.0306/0.0321/0.0311 → 0.0285/0.0315/0.0294, `arrhash`
 noise).
 
 **Bars.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` **200 files / 6820 rows**,
-the only failures the 13 known pclxs xs rows.  `tools/corpus-diff.pl ccdb6b7`:
+the only failures the 13 known pclxs xs rows.  `tools/corpus-diff.pl 0faac04`:
 12 files differ, 90 changed regions, **every one** `(p-sort` → `%p-sort-classic`
 (checked mechanically); silent drops 5, unchanged.  **`PCL_OPT=none
-tools/corpus-diff.pl ccdb6b7` = emission identical across 111 files + 6 shapes**
+tools/corpus-diff.pl 0faac04` = emission identical across 111 files + 6 shapes**
 — the proof that the pass is the only emission change.  `emission-ab --ref
-ccdb6b7` over `lib/**.pm` + shapes: 28/28 SAME.  Over the wide population
+0faac04` over `lib/**.pm` + shapes: 28/28 SAME.  Over the wide population
 (perl 5.40.3's `t/` + `cpan-tests/modules/**`, 1007 files): SAME 941, DIFF 66,
 **RCDIFF 0**, and all 152 diff hunks are the same rewrite.  Companion
 `op/sort.t --jobs 1`: C 183/22 before, after AND under `PCL_OPT=none` — 0 NEW
@@ -127,6 +127,48 @@ defeats any byte-compare and would make a module-cache key unstable.
 
 **#996 half A3 (`push @local, X`) stays OPEN** in the same task — untouched
 here.
+
+**MERGE REVIEW (Fable, same day) — APPROVED; the Kind-B deviation RATIFIED;
+three probe facts and one task added.**  Fable re-probed the tree in both
+`PCL_OPT` modes and confirmed the `values`-is-not-fresh correction.  Three
+facts landed in `Pl/ClassicSort.pm`'s header, `docs/ir-spec.md` §5.4 and
+`Pl/t/classic-sort-01.t`:
+
+* **a `do { … }` TAIL IS NOT a copying consumer** — perl hands its aliases
+  through (`$_++ for do { sort { $a <=> $b } @d }` turns (3,1,2) into (4,2,3)),
+  and the pass already left it generic; that is now a guard row rather than an
+  accident;
+* **`eval { }` and a SUB TAIL do copy** — the sub tail is licensed
+  (`p-tail-value`), and that is a guard row too;
+* **`sort @objs` with an overloaded `cmp` is perl `c b a` and PCL `a b c` in
+  BOTH modes** — the PRE-EXISTING **#1021**, not A5's.  The `:default`
+  fallback goes through `p-sort`, so #1021's fix carries automatically; the
+  runtime docstring now POINTS at #1021 instead of describing the no-block
+  arm's stringification as though it were perl's answer.
+
+**The foreach licence inherits `foreach-raw`'s condition, no better and no
+worse, and it STAYS.**  `foreach-raw` proves the loop VARIABLE is only ever
+read; neither verdict covers a write to the ARRAY by another path during the
+loop, because VarAnnotator is scalar-only by construction.  Measured on this
+tree, both reproducers:
+
+| | perl 5.40.3 | PCL default | `PCL_OPT=none` | `-foreach-raw` | `-classic-sort` |
+|---|---|---|---|---|---|
+| `for my $x (@fa) { $fa[0]=99; print $x; last }` | 99 | 1 | 99 | **99** | 1 |
+| `for my $x (sort { $a <=> $b } @fs) { $fs[1]=99; print $x; last }` | 99 | 1 | 99 | **99** | **99** |
+
+The plain loop diverges under `foreach-raw` ALONE — the sort-fed spelling adds
+no new hole, it inherits the same one.  **Task #1140** (the VarAnnotator
+ARRAY-fact family: never-written-in-region / non-escaping `@name`) closes both
+and is also the prerequisite for **#996 half A3**, whose licence IS that fact
+family.  No `Pl/t` row asserts the wrong answer; the guard file's header states
+the boundary and points at #1140.
+
+Rebased onto main `0faac04` (BF + s470c merged; #1072 makes
+`Pl/t/artifact-staleness-01.t` regenerate each artifact and compare the BODY,
+so the three artifacts were regenerated on the rebased tree — stamp v2-700
+unchanged).
+
 ## Session 470c (Opus agent, 2026-09-05) — #1072: the artifact-staleness gate row now REGENERATES each artifact and compares the BODY, not only the `gen=` stamp
 
 **The hole.**  `Pl/t/artifact-staleness-01.t` discovered the three checked-in
