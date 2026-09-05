@@ -141,6 +141,34 @@ stamp.  Generation **v2-760**.  Guards: the new `Pl/t/census-bugs-01.t` (26 run
 rows, 8.6 s) plus three transpile rows in `inheritance-01.t`, inverse-verified
 on a `da5c310` checkout where 11 of the 16 then-present rows fail.
 
+**THE ONE REGRESSION THIS BATCH SHIPPED, AND WHAT FOUND IT.**  Fable's full
+sweep on `f5dd298` was not clean: `perl-tests/sprintf.t` **532 → 0** passing
+(planned ONE test, described `> < >< >< > < `) and `readline.t` **23 → 21**.
+The cause was #1175's family 4, and it is a rule worth remembering: **`DATA` is
+a PER-PACKAGE handle**, `*p-filehandles*` keys on the SYMBOL, and the emitter's
+`'DATA` is interned in the EMITTING FILE'S package — so a `'DATA` interned
+inside the runtime is `pcl::DATA` for every caller, one key shared by the
+program and by every module it loads.  perl's own `Exporter.pm` has an
+`__END__` POD section, so anything that pulls Exporter REPLACED the program's
+DATA section with Exporter's POD.  `p-install-data-handle` takes the handle as
+an ARGUMENT now; `make-string-input-stream`, family 4's actual leak, still
+stays out of the IR, and the quoted handle NAME comes back — correctly, since
+it is #1176's meaning (c), the handle model, which this session declined.
+
+**Every cheap probe missed it**, which is the lesson: a two-line `__DATA__` in
+a standalone file works, `scalar(<DATA>)` works, a ten-line section with blank
+and `#` lines works — a program that loads no module with an `__END__` has no
+collision.  `<DATA>` even RESOLVED (`%p-resolve-fh` falls back by NAME to the
+`:pcl` symbol), the separator was `"\n"`, the stream sat at position 0 at loop
+entry, and 566 records were readable from the handle immediately after the DATA
+form.  What was wrong was WHICH stream by the time the loop ran.  It was found
+by the fact that the two emissions differ in exactly ONE form — the 25409-char
+string literal is byte-identical and everything after it is byte-identical — so
+one probe printing every `*p-filehandles*` key whose name is "data" settled it:
+`((DATA "MAIN") (pcl::DATA "PCL"))` before, `((pcl::DATA "PCL"))` after: one
+key, two writers.  The guard is two LIST-context rows (the spelling sprintf.t
+does not use) that `use Exporter`, so the collision is IN the fixture.
+
 **Filed:** **#1191** (`5 % Inf` answers NaN where perl answers 5 — the
 infinite-RIGHT-operand arm, with the nine-row table), **#1192**
 (`f((local $g = …))` — the `local`-in-expression family, wrong in BOTH PPI

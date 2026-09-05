@@ -201,6 +201,26 @@ not-supported.md → only then probe.*
 - **`use integer`'s nine bare CL operators are #1000's, not #1175's** — the
   same nine emission sites are where `use integer` stops bypassing overload
   dispatch, so a pure rename would be redone.  #1175 family 1 stops there.
+- **`DATA` IS A PER-PACKAGE HANDLE, so a runtime op that installs it must take
+  the handle SYMBOL as an ARGUMENT** — `main::DATA` and `Foo::DATA` are
+  different handles in perl, every module with an `__END__` POD section has
+  one, and `*p-filehandles*` keys on the symbol, which only the EMITTER can
+  intern in the right package.  #1175 family 4's first shape interned its own
+  `'DATA` (= `pcl::DATA` for every caller), so the program and every module it
+  loaded shared ONE key and perl's own `Exporter.pm` POD replaced
+  perl-tests/sprintf.t's 566-row `__END__` table: **532 passing → 0, planned 1
+  test instead of 559**.  Fixed in the same session; the quoted handle NAME
+  stays in the emission and that is #1176's (c), not an oversight.
+- **A DATA regression is invisible to every cheap probe** — a standalone file's
+  two-line `__DATA__`, a `scalar(<DATA>)`, a ten-line section with blanks and
+  `#` lines all pass, because a program that loads no module with an `__END__`
+  has no collision.  The handle even RESOLVES (`%p-resolve-fh` falls back by
+  NAME to the `:pcl` symbol), the separator is right and the stream is at
+  position 0 at loop entry.  **The discriminating measurement is "print every
+  `*p-filehandles*` key whose name is data, with its PACKAGE"** — one run, and
+  `((DATA "MAIN") (pcl::DATA "PCL"))` vs `((pcl::DATA "PCL"))` says everything.
+  A guard for this family must put the COLLISION IN THE FIXTURE (`use
+  Exporter`), or it tests nothing.
 
 ## s470bm (2026-09-05, Opus) — Part B instruments B1 + B2 + B4: the op inventory as DATA, the per-program manifest, the host-leak census and the measured CL kernel
 
