@@ -265,6 +265,174 @@ back with #1022(b)) → 18644 on BR's tree.  CI green through `027ba9c`.  Three 
 (all agents resumed via SendMessage each time) and the box at load 24–31 with four agents are
 WHY the USER capped concurrency at two.  **STOPPED for shutdown (USER); restart recipe in
 MEMORY.md's STATE line and each worktree's `scratch/<label>/STOP.md`.**
+## Session 470bp (Opus agent, 2026-09-05) — round 28 PERF: the module cache stores COMPILED FASLS (#1188, the yardstick's biggest number), and two of the three AGGREGATE levers SHIP (#1203 slice assignment, #1204 range fill) and the third (#1205 copying slices) is BUILT, MEASURED and held out of the commit by the shutdown
+
+**#1188 — the module cache stores compiled fasls, and the double-execution bug
+turned out to be an ORDER, not a count.**  `*pcl-cache-fasl*` had been NIL
+since session 251, so a cached module was CL TEXT that SBCL recompiled on
+EVERY run: `use JSON::PP; print 1` cost 2.75 s warm on this box, `use Moo`
+1.13 s, `use Carp` 0.41 s, against a 0.16 s startup (s470bn measured the same
+rows at 6.4 / 3.5 s on a loaded box, which is why it is the yardstick's
+headline).  The reason it was off is `docs/module-double-exec-bug.md`:
+compiling and loading in the SAME image installs a `sub NAME` at BOTH passes
+and runs a `BEGIN` block at the COMPILE pass only, so the load pass
+re-installs the plain body OVER a BEGIN-time replacement whose idempotency
+guard now skips — Moo subclasses came out with empty attrs.
+
+So the bug is an ORDER.  `*pcl-fasl-build*`, bound around and only around the
+`compile-file` that builds a module's fasl, moves exactly the forms that are
+not idempotent into the fasl and leaves the ones that are:
+
+* `p-BEGIN` compile+execute → load+execute.  A BEGIN block is the only module
+  form that is arbitrary, ordered and guarded; at the fasl's load it runs once,
+  in source order with the declarations around it — the order a source load
+  gives it.
+* `p-sub`'s LAMBDA INSTALL moves to load time; the compile pass keeps
+  `%p-reserve-sub-name` (shadow + intern), which **the READER depends on** —
+  without the shadow a module method named `push` reads as the inherited
+  `pcl:pl-push` and installing it would clobber the runtime's own builtin.  So
+  each body is compiled ONCE, into the fasl.
+* `p-CHECK` becomes `(eval-when (:execute))`, which compile-file discards —
+  which is what a source load already does, and perl's own "Too late to run
+  CHECK block" for a runtime require.
+* **`p-eval-always` is UNCHANGED, and that is a measurement.**  Suppressing it
+  fails JSON::PP's compile with "Package Exporter does not exist": it is
+  `(p-use "Exporter")` running in the compile pass that creates the package
+  before the reader meets a symbol in it.  `use`/`require`/`our` are idempotent
+  (`p-use` is %INC-guarded), so the compile pass may run them.
+
+This is option C of that doc done in the RUNTIME's macros rather than the
+transpiler, so the emitted text does not change at all — corpus-diff is
+IDENTICAL over 111 files and cannot move.
+
+**What invalidates a cached fasl.**  A fasl has this runtime's macro
+expansions BAKED IN and only this SBCL can load it, so its name carries a
+fourth key component beside the source path and the generation:
+`*pcl-runtime-identity*`, a CONTENT hash of `cl/pcl-runtime.lisp` plus the SBCL
+identity, computed once from `*load-truename*` while the runtime loads — baked
+into the cached core, so it costs nothing per run (9 ms in source mode).  Not
+an mtime: a stale fasl carrying a removed macro's old expansion is exactly the
+silent-wrong this project refuses.  The `.lisp` key is untouched, so existing
+text caches stay valid and both modes read the same text.  Failure is never
+fatal and never silent-wrong: a compile-file failure writes a `.failed` marker
+(one hour, like the cached core's) and the module loads from its text; an
+`invalid-fasl` is refused before any of its forms runs; every other error
+propagates, because a module that dies at load dies the same way from its text
+and swallowing it would leave the module half-loaded.  A nested load reached
+from a compile-pass `use` does not build a fasl — no compile-file inside
+compile-file — and gets one when the outer fasl's load reaches that `use`.
+
+Measured, interleaved on one tree and one core (`PCL_NO_FASL_CACHE=1` is
+exactly the pre-#1188 path), best-of-4, startup 0.164 s as the control:
+
+| constant | text (before) | fasl (after) | speedup |
+|---|---:|---:|---:|
+| `use Carp; print 1` | 0.406 | 0.216 | 1.88× |
+| `use Scalar::Util qw(blessed)` | 0.337 | 0.170 | 1.98× |
+| `use Moo; print 1` | 1.127 | 0.417 | 2.70× |
+| `use JSON::PP; print 1` | 2.751 | 1.432 | 1.92× |
+
+The GuardBoot repro of the bug report prints REPLACED (it printed BOOTSTRAP
+under the old fasl path) and the Moo subclass probe prints `Dog name=B,
+breed=lab`.
+
+**And the JSON::PP residue is the finding, not the number.**  `PCL_FASL_DEBUG`
+— the one place the cache says anything — names the path per module and how
+long it took, and with everything hot it reads `PP.pm -> FASL HIT (0.858s)`
+while its four dependencies take 1 ms each.  `sb-sprof` over the same program
+attributes the frames under it to `sb-c::ir1-convert` reached from
+`pcl:p-eval`: JSON::PP runs ~20 string `eval`s in a loop at load time to
+generate its property accessors, each a `pl2cl --server` round trip plus an
+SBCL compile, EVERY RUN.  That is a SECOND constant and a second cache, and it
+is not JSON::PP-specific — generate-accessors-with-eval is the pure-Perl idiom
+(Class::Accessor, Sub::Quote, Moose, Type::Tiny).  **#1200** carries the design
+(the same three key ingredients turn `p-eval`'s existing in-PROCESS cache,
+whose key is text + capture NAMES and therefore already process-independent,
+into a disk cache) and the five questions to answer before building it.
+**#1202** records the same disease in the EXTENSION load — `pack("N",1)` costs
+8.3 s because `p-load-extension` plainly `load`s a checked-in transpiled
+artifact — with the note that the USER has parked it with `pack`.
+
+---
+
+**The three aggregate levers (plan §A.2 rows 4–6), each sized by the
+hand-replaced A/B first and shipped only above its 20 % bar.**
+
+| lever | row | hand-replaced (control) | SHIPPED, two-core A/B | of perl |
+|---|---|---:|---:|---|
+| #1203 const-subscript slice assignment | `sliceasgn` | −62.7 % (+0.5 %) | **−43.5 %** | 2.20× → 1.17× |
+| #1204 array fill from a RANGE | `arrfill` | −93.9 % (−1.0 %) | **−58.3 %** | 1.47× → **0.61×** |
+| #1205 raw-element rvalue slices | `slices` | −33.3 % (−1.3 %) | **−22.2 %** | 2.53× → 1.95× |
+
+**#1203** — `@h{qw(a b)} = …`, `@a[1..3] = …`, `@a[0,2] = …` are idiomatic Perl
+and their subscripts are known while the file is COMPILED; the general arms
+built the subscript list at RUN time, every iteration, for a list that never
+changes.  The licence is `%p-const-subscript-values`, and exactly three shapes
+occur in PCL's emission for a literal slice: a self-evaluating number or
+string, a quoted literal, and a literal numeric range.  A DESCENDING literal
+range yields the EMPTY list — perl's own answer — so the call site reads empty
+as "no licence", not as "assign nothing".  Nothing else changes: the RHS is
+evaluated once and SNAPSHOTTED before the first store (#818), a missing value
+is `*p-undef*` and an extra one is dropped, the assignment's value is still the
+source vector, and the STORE is the same `(setf (p-aref …))` the general loop
+uses.  Two of the three new helpers also REMOVE an existing duplication — the
+array arm and the hash arm each spelled the source binding and the store loop
+out.
+
+**#1204** — `@a = (1..$n)` and `@a = (1..20, $_)` allocated a range vector, an
+enclosing list vector and a snapshot before pushing anything; the destination's
+elements ARE the counting loop.  `%p-fill-segments` licenses a bare range or a
+literal `(vector …)` at least one of whose pieces is one — REQUIRING a range is
+the point, because without one the general path is already the better answer
+(it has #1181's block copy) and this must not steal its work.  Every piece, the
+range BOUNDS included, is evaluated and each non-range piece SNAPSHOTTED before
+the destination is cleared, so `@a = (1..2, @a)` still reads the old @a.
+Non-range pieces store through `%p-array-add-items`, which was EXTRACTED from
+`p-array-fill` (it was the `add-items` LABELS) rather than copied, and the
+oversized-range refusal through `%p-range-size-check`, extracted and shared
+with `p-..` — so flattening, holes, boxing and the two refusal texts stay one
+rule each.  The direct arm is also gated on `*p-raw-elems*`, because a range's
+integers are stored RAW when the gate is on and BOXED when it is off: a fast
+path must disappear with the gate or the all-boxed A/B world stops being
+measurable.
+
+**#1205 — BUILT AND MEASURED, NOT COMMITTED** (the shutdown came before its own gate; the runtime carrying it is `scratch/s470bp/rt-L6-AND-L7.lisp`).  `p-aslice`/`p-hslice` build ALIASES (perl's slices are aliases:
+`for (@a[0,1]) { $_ *= 10 }` writes through), which under raw element storage
+PROMOTE every slot to a box — monotonically, so the container pays box
+indirection on every later read forever, and the boxes are allocated for
+nothing.  `my @v = @a[1..5]` needs none of it: a list assignment COPIES.  So
+the licence is THE CONSUMER, decided where the consumer is visible — in
+`p-array-=`'s macro, whose VALUE form is syntactically the slice.  Every other
+consumer keeps the aliasing path untouched, because it never reaches that arm.
+The READ is the existing one (rule 11): `%p-aslice-copy` asks `p-aref` and
+`%p-hslice-copy` asks `p-gethash`, the runtime's ONE reading of "what is
+@a[i] / $h{k} as a VALUE".  **It also fixed a divergence**, which is the sign
+the licence is the right one: `my @a=(1,2); my @v=@a[0..3]; exists $v[3]` was
+FALSE in PCL and TRUE in perl — the alias path produced something
+`p-array-fill` stored as a HOLE.
+
+**None of the three takes a PCL_OPT name**, for task #1181's reason: all three
+are runtime MACROS with no emission to switch.  So their guard rows are
+MACROEXPANSIONS — the macro's own answer read directly — each with a NEGATIVE
+beside it (a dynamic subscript list, a non-range RHS, a slice in a consumer
+that does not copy).  Without the negatives a lever that fired everywhere would
+pass every row here and be wrong everywhere else.
+
+**A ±10 % swing on `feread2`/`feread3` is this box's layout noise, and it took
+three measurements to say so.**  The two rows moved in OPPOSITE directions
+(−8.6 % and +12.8 %), reproducibly, in a loop neither lever touches.  A
+`push`-built variant of feread2 — no `p-array-=` in it at all — reads
+**+10.9 %**, and a control A/B of two BYTE-IDENTICAL runtimes on the same row
+reads **−4.8 %**.  At ~4 ns per element read over 30 M reads a data-vector
+alignment difference is worth that much.  Re-measure on a quiet box at merge
+review.
+
+Filed: **#1200**, **#1201** (a CHECK block in a `use`d module never runs; perl
+runs it at the end of the requiring unit's compile phase — PRE-EXISTING, both
+paths agree, which is why it is a task and not a guard row), **#1202**,
+**#1206** (a slice assignment in SCALAR context yields the source vector where
+perl yields the COUNT — PRE-EXISTING, both paths agree; `p-hash-=` has the
+two-armed return to copy, and the LIST-context half diverges too).
 
 ## Session 470br (Opus agent, 2026-09-05) — #1115: a filehandle carries OCTETS unless a layer says otherwise — the default open, `binmode`, `use open`, and perl's wide-character rule on a byte handle
 
