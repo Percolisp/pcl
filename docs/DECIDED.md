@@ -11,6 +11,11 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s470 (2026-09-05, Fable) — the speed METRIC re-based by the USER; the two overview plans
+
+- **USER (2026-09-05): "forget beating Perl in individual items, we do enough for that — just try to get PCL as fast as possible."  The steering metric is PCL's ABSOLUTE time on representative programs (three macro rows + five constant terms + an sb-sprof profile per row → a RANKED table), not per-row pcl/perl ratios; the ten winning board rows are CONTROL rows only.  Plan: `docs/plan-speed-and-ir-s470.md` Part A (A.1 first: the extension load — `cl/pcl-pack.lisp` compiled from source at first `pack`, ~3 s in every program that touches pack — is the likely biggest apple).**
+- **The IR as a contract for a JavaScript or C backend = INVENTORY and MEASURE, not more semantics** (`docs/plan-speed-and-ir-s470.md` Part B): B1 the op inventory as generated data + gate row; B2 a per-program `USES`/`NEEDS`/`FACTS` manifest (`pl2cl --manifest`); B3 `:needs` on `p-sub`; B4 the host-leak census gate + the CL-kernel whitelist (ir-spec §11b); B5 `--emit-sexp`/JSON + structured regex literals; B6 `tools/ir-conform` (perl-oracled corpus, the pclxs pattern); B7 the target notes as tables.  None changes generated-code speed; they interleave as the correctness slot.
+
 ## s470bj (2026-09-05, Opus) — #1140 the ARRAY-fact family SHIPPED, and with it #996 half A3 (`local-push`, pushloc 0.48× → 0.28×), foreach-raw's write-to-the-array hole, and classic-sort's foreach licence made exact
 
 - **`Pl::VarAnnotator` classifies a SECOND name kind.** Two facts per `my @name` declared in a region, computed by the ONE existing walk (no second scanner — standing rule §8): **`escapes`** (the container or an element is reachable under another name) and **`written_in(REGION)`** (a direct write inside a `for`/`foreach` body block, keyed by that block's `refaddr` — the same PPI object Parser2's foreach lowering holds).  ir-spec **§2.3a** is the normative statement.
