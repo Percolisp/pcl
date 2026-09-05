@@ -319,6 +319,24 @@ has lvalue_subs => (
     default => sub { {} },
 );
 
+=head2 dyn_exit_subs
+
+Hash-set of the NAMED subs of this compilation unit that MAY perform a
+dynamic loop exit (task #1022 half (b)): the fixpoint over the unit's call
+graph from the subs that contain a marked bare C<last>/C<next>/C<redo> site.
+Computed once per document by C<Pl::Parser2::_mark_dynamic_loop_exits>, and
+read by BOTH loop-lowering seams — Parser2's compound loops and Parser.pm's
+C<for>/C<while> statement modifiers — to decide whether a loop needs a
+dynamic-exit frame.  Empty for a unit with no such site, which is almost
+every unit, and that is what makes the frame free.
+
+=cut
+
+has dyn_exit_subs => (
+    is => 'rw',
+    default => sub { {} },
+);
+
 =head2 package_stack
 
 Array reference representing the current package scope stack.

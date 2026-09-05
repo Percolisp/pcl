@@ -2,7 +2,7 @@
 
 Append new entries at the top. One section per session.
 
-## Session 470bl (Opus agent, 2026-09-05) — #1022 half (b): a bare `last`/`next`/`redo` in a CALLED SUB reaches the caller's innermost loop, at one catch per loop ENTRY; #1160 (the labelled bare block's missing `block nil`) fixed on the way — BUILT and MEASURED, NOT MERGED
+## Session 470bl (Opus agent, 2026-09-05) — #1022 half (b): a bare `last`/`next`/`redo` in a CALLED SUB reaches the caller's innermost loop, at one catch per loop ENTRY — and the licence is REACHABILITY, not "calls anything" (#1162); #1160 (the labelled bare block's missing `block nil`) fixed on the way
 
 Half (a) (s470bi) made the shape LOUD; this session makes it WORK, and #1022
 closes.  The design is the Fable one of s470, unchanged, and the reason it is
@@ -36,26 +36,15 @@ it.  `t/op/rt119311.t` is six `{ foo(sub { …; last }) }` sites and
 `perl-tests/loopctl.t`'s own `dynamically scoped` row is a labelled bare block,
 so this arm is where the row cost was.
 
-**The licence** is `Pl::PExpr::TokenUtils::calls_user_code`, a syntactic scan
-of the loop STATEMENT's tokens, conservative in the COSTING direction: an
-unknown bareword counts as a call, so being wrong costs one catch per loop
-entry and never a missing frame.  The safe set is the builtin table the
-compiler already trusts (`known_no_of_params`, `_bareword_callable_here`'s
-"core callable word") plus the grammar words PPI hands over as Words, minus the
-handful of builtins that reach user code with no other marker (`eval`, `do`,
-`require`, `tie`, `untie`, and `goto` from `control_flow_ops`).  Three shapes
-hide a call inside ONE token and are handled by content: an `s///e`
-replacement, a `(?{…})` regex, and a `${…}`/`@{…}` block inside an
-interpolation that actually interpolates (`heredoc_is_raw` is the one reading
-of the last question — `<<'E'`, `'…'` and `q{…}` are literal).
-
-**What it buys, measured**: 21 of `tools/bench-exec.pl`'s 27 rows are
-byte-identical with the gate on or off, and the 6 that differ are exactly the
-rows whose loop body calls a sub (`subret`, `methret`, `fib(27)x`, `gcdrec`,
-`fibret`, `gcdret`).  Over `perl-tests` 97 of 111 files gain frames, all in
-loops that call `ok`/`is`/`cmp_ok`; the emission difference vs the base tree is
-NOTHING BUT the frames and the throw sites, checked token by token over the
-corpus and the wide 1007-file population.
+**The licence** is `Pl::PExpr::TokenUtils::may_dyn_exit`, a scan of the loop
+STATEMENT's tokens against this unit's MAY-DYN-EXIT set — see the #1162
+paragraph below for why it is REACHABILITY and not "does the body call
+anything", which is the same question asked one level deeper and the reason
+the frame is free.  Scanning the whole statement rather than only the body is
+deliberate: the condition and a `continue` block DO run inside the frame, and
+the sections that do not (a C-for INIT, a foreach LIST) sit outside the `catch`
+in the expansion, so counting them can only cost a frame — never mis-catch a
+throw.
 
 **What declines, and it is loud** (#1161): a `continue` block on a `foreach` or
 a bare block, whose continue block is not a re-entry point the driver can reach
@@ -86,32 +75,81 @@ all six pieces.  The wrap goes around the NEXT catch AND the continue forms, so
 a bare `last` skips the continue block exactly as `last L` does (probed both
 spellings).
 
-**WHAT STOPS IT SHIPPING, measured rather than suspected.**  `t/op/loopctl.t`
-goes 40/0 → 0/0, and the cause is SBCL's COMPILE heap, not the run.  That
-file's own code is ONE 64 KB top-level form carrying 88 frames; per-form
-consing (`scratch/s470bl/perform.lisp`) puts it at 244.6 MB with the gate off
-and 691.2 MB with it on, and its peak live set then exceeds the default 1 GB —
-the file produces no TAP at all.  The discriminating measurement is a runtime
-with `(catch …)` replaced by `(progn …)` and nothing else changed: the same
-form drops to 266.6 MB.  So it is the `catch` itself, at ~4.8 MB of compile IR
-each — not the nesting (60 frames nested six deep cost 0.25 MB each, the same
-as flat), not the frame's SHAPE (the NLX-free rewrite conses slightly MORE than
-the first version), and not policy (`notinline` is already applied to oversized
-top-level forms by `_cap_inlining_if_huge` — the same class of blow-up, solved
-the same way in s268 — and adding `(optimize (compilation-speed 3))` or
-`(speed 0)` changes nothing).
+**WHAT THE FIRST LICENCE COST, AND WHY THE RULED ONE IS REACHABILITY (#1162).**
+The brief's licence — frame a loop whose body calls user code — framed 88 of
+`t/op/loopctl.t`'s 89 loops, because nearly every one calls `ok`/`is`/`cmp_ok`.
+That file produced NO TAP at all, and the cause was SBCL's COMPILE heap, not
+the run: its own code is ONE 64 KB top-level form, and per-form consing
+(`scratch/s470bl/perform.lisp`) put it at 244.6 MB with the gate off and
+691.2 MB with it on, past the default 1 GB.  The discriminating measurement is
+a runtime with `(catch …)` replaced by `(progn …)` and nothing else changed:
+the same form drops to 266.6 MB.  So it is the `catch`, at ~4.8 MB of compile
+IR each — not the nesting (60 frames nested six deep cost 0.25 MB each, the
+same as flat), not the frame's SHAPE (the NLX-free rewrite conses MORE), and
+not policy (`notinline` is already applied to oversized top-level forms by
+`_cap_inlining_if_huge` — the same class of blow-up, solved the same way in
+s268 — and `(optimize (compilation-speed 3))` or `(speed 0)` change nothing).
 
-The regression is CONFINED, and that was measured too: the eight
-frame-heaviest `perl-tests` files (loopctl, sprintf2, local, split, magic,
-array, eval, aassign — 2974 rows between them) match their blessed baselines
-exactly, and `t/op/rt119311.t` goes 8/2 → 11/2, its pre-(a) value.  What would
-fix it is a NARROWER LICENCE — frame a loop only when it can reach a MARKED
-exit site, instead of when it makes any user call — which would take
-`t/op/loopctl.t` from 88 frames to about one, and every ordinary file to zero.
-That is a design change (it makes a dynamic exit from a sub in ANOTHER
-compilation unit die instead of working, loudly), so it needs a ruling rather
-than a commit: half (b) is finished, measured and left UNMERGED, with the
-numbers in #1022.
+Fable ruled the licence down to REACHABILITY BY NAME, and it is a much better
+fit for what a dynamic exit actually is: the exits are marked SITES, so the
+compiler computes MAY-DYN-EXIT — the fixpoint over this unit's call graph from
+the subs that contain one (`Pl::Parser2::_may_dyn_exit_set`, carried to both
+loop-lowering seams on `Environment::dyn_exit_subs`) — and a loop is framed iff
+its body NAMES one of them or lexically contains a nested `sub {…}` with a
+site.  Both readings are deliberately generous (a nested sub's site counts for
+its enclosing sub; any mention of a declared name counts as a call), because
+being wrong that way costs one catch per loop entry and never a missing frame.
+`Pl::PExpr::TokenUtils::calls_user_code` and its word tables are DELETED — the
+new predicate is fourteen lines.
+
+**What that buys, measured.**  `t/op/loopctl.t` carries ONE frame and produces
+its rows again at the default heap; the whole `perl-tests` corpus carries ONE
+frame, down from 1214 in 93 files; and ALL 27 `tools/bench-exec.pl` rows are
+emitted BYTE-IDENTICALLY with the gate on or off, so the bench cannot move at
+all — which is a stronger statement than the three-round A/B that preceded it
+(that table, every row 0.96–1.02× inside its own spread, is what says the frame
+is free where it IS emitted).  `t/op/loopctl.t` 40/0 → **64/3**, one row better
+than the pre-(a) 63/4 because test 41 `dynamically scoped` used to fail;
+`t/op/rt119311.t` 8/2 → **11/2**; `perl-tests/loopctl.t` stays 64/0, fully
+passing.
+
+**The ruled residue, and it is LOUD.**  An exit reached through an INDIRECT
+call — a coderef out of a data structure, a computed method name, `&$code`,
+`goto &$code` — or from ANOTHER compilation unit — a `use`d module, a string
+eval — meets no frame and takes perl's own `Can't "last" outside a loop block`
+at its site.  Exactly ONE of the 53 probes moved when the licence narrowed:
+`eval q{last}` inside a loop, which now dies into `$@` (perl exits the loop).
+The narrowing also CLOSED the one divergence #1163 recorded: a tie `FETCH`
+doing `last` with an outer loop present now dies exactly as perl does, because
+that outer loop takes no frame either.
+
+**What declines for a different reason, and is also loud** (#1161): a
+`continue` block on a `foreach` or a bare block, whose continue block is not a
+re-entry point the driver can reach (a foreach's reads the loop variable, so it
+lives inside the per-iteration binding).  `while`/`until` are licensed with one
+— theirs is a post-body form, and a caught `next` runs it, matching perl's
+n=3003.
+
+**A `sort` COMPARATOR is a `last` boundary in perl and is not one in PCL**
+(#1164), while a `map`/`grep` block is transparent in BOTH — probed rather than
+assumed, and the asymmetry is perl's.  **A LABELLED dynamic exit was never a
+residue**: the brief said labelled exits keep half (a)'s die; half (a)'s own
+note says it never marked them, and the probe agrees — `sub f { last OUT }
+OUT: { … }` is `ok=1` on both sides.
+
+**#1160, found on the way and fixed here.**  `_lower_bare_block`'s LABELLED arm
+emitted the three loop-tag catches and no `(block nil …)`, so an unlabelled
+`last` inside a labelled bare block had no target: at top level it died at LOAD
+("return for unknown block: nil"), and INSIDE A LOOP it found that loop's
+`block nil` and exited the wrong loop, silently — `for my $i (1..3) { L: { push
+@s,$i; last; push @s,"X" } push @s,"after$i" }` printed `1` where perl prints
+all six pieces.  The wrap goes around the NEXT catch AND the continue forms, so
+a bare `last` skips the continue block exactly as `last L` does (probed both
+spellings).  It is the ONLY emission change outside loopctl.t: the token-level
+A/B against main says 49 files differ with the gate OFF and the only tokens
+added are `(block nil`, and ONE file differs with it on.
+
+
 ## Session 470bm (Opus agent, 2026-09-05) — Part B instruments B1 + B2 + B4: the op inventory as DATA, the per-program manifest, the host-leak census
 
 Two product commits.  Nothing here changes the default emission —

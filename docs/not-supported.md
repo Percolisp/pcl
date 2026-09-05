@@ -2977,7 +2977,7 @@ result straight back in is not mistaken for a struct.
 `ioctl` is not implemented at all, for the same reason plus the absence of any
 constant table.
 
-## An unlabelled `last`/`next`/`redo` whose loop is not lexically here
+## An unlabelled `last`/`next`/`redo` through an indirect call, or across compilation units
 
 perl's unlabelled loop-control keywords act on the innermost **dynamically**
 enclosing loop, so a sub called from inside a loop can exit its CALLER's loop:
@@ -2989,25 +2989,53 @@ for my $i (1..3) { $n++; do_last(); $n += 100 }   # perl: n = 1
 ```
 
 **This WORKS since task #1022 half (b)** (s470bl; `docs/ir-spec.md` §6.2): a
-loop whose body can reach user code establishes one `catch` of `p-loop-dyn`
-per loop ENTRY, and the exit site throws to it.  Every loop shape carries the
-frame (`while`/`until`, C-style `for`, both `foreach` families and their raw
-twins, a bare block — labelled or not — and the `for`/`while` STATEMENT
-MODIFIERS), and all three keywords behave as perl's do: `next` runs the
-continue block / the C-for step and re-tests, `redo` re-runs the body on the
-same element without re-testing, `last` leaves the loop with the value a
-lexical `last` gives.  A bare exit with no dynamically enclosing loop keeps
-perl's own text, `Can't "last" outside a loop block`, trappably — which is
-also perl's answer for `do BLOCK while (…)` and for a `sort` comparator.
+loop that can REACH such an exit establishes one `catch` of `p-loop-dyn` per
+loop ENTRY, and the exit site throws to it.  Every loop shape carries the
+frame when licensed (`while`/`until`, C-style `for`, both `foreach` families
+and their raw twins, a bare block — labelled or not — and the `for`/`while`
+STATEMENT MODIFIERS), and all three keywords behave as perl's do: `next` runs
+the continue block / the C-for step and re-tests, `redo` re-runs the body on
+the same element without re-testing, `last` leaves the loop.  A bare exit with
+no dynamically enclosing loop keeps perl's own text,
+`Can't "last" outside a loop block`, trappably — which is also perl's answer
+for `do BLOCK while (…)` and for a `sort` comparator.
 
 What is **NOT** supported is below.  All of it is LOUD: the exit site dies with
-perl's text rather than exiting the wrong loop.
+perl's text rather than exiting the wrong loop or doing nothing.
 
-**A `continue` block on a `foreach` or a bare block declines the frame.**  The
-frame re-enters the loop at the point a lexical `next` would have reached, and
-a `foreach`'s continue block lives INSIDE the per-iteration binding (it reads
-the loop variable) while a bare block's sits after the tagbody — neither is a
-re-entry point the driver can reach.  So
+**THE LICENCE IS REACHABILITY BY NAME, INSIDE ONE COMPILATION UNIT** (the
+#1162 ruling).  The compiler computes MAY-DYN-EXIT — the fixpoint over this
+unit's call graph from the subs that contain a bare exit — and frames a loop
+only when its body names one of those subs, or lexically contains a nested
+`sub {…}` that carries an exit.  So these **do not** frame the loop, and an
+exit reached that way dies:
+
+- an **indirect call**: a coderef out of a data structure (`$h{cb}->()`), a
+  computed method name (`$o->$m`), `&$code`, `goto &$code`;
+- a sub from **another compilation unit**: a `use`d module, a `require`d file;
+- a **string eval** (`eval q{last}`) — its code is compiled separately, so the
+  loop around the eval takes no frame.  The die lands in `$@` like any other,
+  and the loop then runs on: perl gives `n=1`, PCL `n=303` with
+  `$@` set.
+
+The reason is measured, not stylistic: the frame's `catch` costs about 4.8 MB
+of SBCL **compile** IR, and `t/op/loopctl.t` — 89 loops in one 64 KB top-level
+form — went from 244.6 MB to 691.2 MB of compile-time consing and past the
+default 1 GB heap, producing no rows at all, when every loop with a call was
+framed.  Under the reachability licence that file carries **one** frame and the
+whole `perl-tests` corpus carries one.  Task #1162 has the full measurement,
+including what does NOT help (the frame's shape, `notinline`,
+`(optimize (compilation-speed 3))`).
+
+The name test is textual, so a word that merely COLLIDES with a MAY-DYN-EXIT
+sub name (a hash key, a method of the same name) costs a frame — never a
+missing one.
+
+**A `continue` block on a `foreach` or a bare block declines the frame**
+(#1161).  The frame re-enters the loop at the point a lexical `next` would
+have reached, and a `foreach`'s continue block lives INSIDE the per-iteration
+binding (it reads the loop variable) while a bare block's sits after the
+tagbody — neither is a re-entry point the driver can reach.  So
 
 ```perl
 sub f { next }
@@ -3017,14 +3045,12 @@ for my $i (1..3) { f() } continue { $n += 1000 }   # perl runs the continue
 dies instead of running the continue block.  `while`/`until` do NOT decline:
 their continue block is at the driver's own level, so a caught `next` runs it.
 
-**User code reached through MAGIC carries no syntactic marker, so the licence
-cannot see it** — an overloaded operator, a tie handler, `DESTROY`, a `%SIG`
-handler.  Measured against perl 5.40.3, this matters less than it looks: perl
-answers `Can't "last" outside a loop block` for a `last` inside an overloaded
-`+`, an overloaded `""` and a tie `FETCH` even when the operation is written
-inside a loop, and PCL answers the same, because such a loop takes no frame.
-The one divergence is an OUTER loop that DOES hold a frame: perl still refuses,
-PCL exits the outer loop (task #1163).
+**User code reached through MAGIC** — an overloaded operator, a tie handler,
+`DESTROY`, a `%SIG` handler — carries no name either, and here PCL and perl
+AGREE: perl answers `Can't "last" outside a loop block` for a `last` inside an
+overloaded `+`, an overloaded `""` and a tie `FETCH` even when the operation is
+written inside a loop, and so does PCL (probed, including the nested spelling
+where an outer loop is present).
 
 **A `sort` comparator is a boundary in perl and is not one in PCL** (#1164):
 `for (…) { my @x = sort { f() } … }` with `sub f { last }` is

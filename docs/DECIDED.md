@@ -11,7 +11,7 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
-## s470bl (2026-09-05, Opus) — #1022 half (b): THE DYNAMIC LOOP EXIT is BUILT and MEASURED but NOT MERGED (one compile-heap blocker); #1160 fixed on the way
+## s470bl (2026-09-05, Opus) — #1022 half (b): THE DYNAMIC LOOP EXIT ships, its licence narrowed to REACHABILITY by the #1162 ruling; #1160 fixed on the way
 
 - **#1022 half (b)** (the Fable design of s470, built as designed): a bare
   `last`/`next`/`redo` in a CALLED SUB now acts on the caller's innermost
@@ -28,12 +28,12 @@ not-supported.md → only then probe.*
   `(block nil …)`).  ONE implementation — `%p-loop-driver` — serves `p-while`,
   `p-for` and both foreach expanders; a bare block gets a WRAPPER instead
   (`p-dyn-once`), because a loop-once carries no state, so `redo` is a restart.
-- **The licence is `Pl::PExpr::TokenUtils::calls_user_code`** and it is
-  conservative in the COSTING direction: a bareword it cannot place counts as
-  a call, so an error costs one catch per loop entry and never a missing frame.
-  A loop it clears is emitted BYTE-IDENTICALLY — measured: 21 of the 27
-  `tools/bench-exec.pl` rows byte-identical with the gate on or off, the 6 that
-  differ being exactly the rows whose loop body calls a sub.
+- **The licence is `Pl::PExpr::TokenUtils::may_dyn_exit`** over the unit's
+  MAY-DYN-EXIT set (see the #1162 bullets below): a loop is framed iff its body
+  NAMES a sub that can reach a marked exit, or lexically contains a nested
+  `sub {…}` carrying one.  Everything else is emitted BYTE-IDENTICALLY —
+  measured: ALL 27 `tools/bench-exec.pl` rows byte-identical with the gate on
+  or off, so the bench cannot move.
 - **Kind-A gate `dyn-loop-exit`** (`Pl/Passes.pm`) — the one Kind-A gate whose
   OFF arm is NOT semantics-preserving, and the registry says so: with no frame
   there is nothing to throw to, so `PCL_OPT=-dyn-loop-exit` also restores half
@@ -62,25 +62,35 @@ not-supported.md → only then probe.*
   (`for my $i (1..3) { L: { last } }` printed `1` where perl prints all three
   iterations).  The wrap goes around the NEXT catch AND the continue forms, so
   a bare `last` skips the continue block exactly as `last L` does.
-- **THE ONE BLOCKER, and it is MEASURED, not suspected: `t/op/loopctl.t` goes
-  40/0 → 0/0 on SBCL's COMPILE HEAP.**  `catch` costs ~4.8 MB of SBCL compile
-  IR each, and that file's own code is ONE 64 KB top-level form carrying 88
-  frames: the form conses 244.6 MB with the gate off and 691.2 MB with it on
-  (per-form measurement), and its peak live set then exceeds SBCL's default
-  1 GB — the file produces NO TAP at all.  Discriminated, not guessed:
-  replacing `(catch …)` with `(progn …)` in the driver and changing NOTHING
-  else puts the form back at 266.6 MB.  It is not the nesting (60 frames
-  nested 6 deep cost 0.25 MB each), not the frame's shape (the NLX-free
-  rewrite is 2689 MB total vs the first version's 2589), and neither
-  `notinline` (already applied by `_cap_inlining_if_huge`) nor
-  `(optimize (compilation-speed 3))` nor `(speed 0)` moves it.  The regression
-  is CONFINED: the eight frame-heaviest `perl-tests` files (loopctl,
-  sprintf2, local, split, magic, array, eval, aassign — 2974 rows) match
-  their baselines exactly, and `t/op/rt119311.t` goes 8/2 → 11/2, its
-  pre-(a) value.  The fix is a NARROWER LICENCE (frame only a loop that can
-  reach a marked exit SITE, rather than any user call), which is a design
-  change and needs a ruling — **so half (b) is NOT merged; #1022 carries the
-  numbers**.
+- **THE COMPILE-HEAP BLOCKER, MEASURED then RULED away (#1162).**  The first
+  licence — "frame a loop whose body calls user code" — framed 88 of
+  `t/op/loopctl.t`'s 89 loops, and `catch` costs ~4.8 MB of SBCL COMPILE IR
+  each: that file's own code is ONE 64 KB top-level form, which went from
+  244.6 MB to 691.2 MB of consing and past SBCL's default 1 GB heap, producing
+  NO TAP at all.  Discriminated, not guessed: replacing `(catch …)` with
+  `(progn …)` and changing NOTHING else put the form back at 266.6 MB.  Not
+  the nesting (60 frames six deep cost 0.25 MB each, as flat), not the frame's
+  shape (the NLX-free rewrite conses MORE), not `notinline` (already applied
+  by `_cap_inlining_if_huge`) nor `(optimize (compilation-speed 3))`/`(speed 0)`.
+- **THE LICENCE IS THEREFORE REACHABILITY BY NAME** (Fable ruling on #1162):
+  MAY-DYN-EXIT is the fixpoint over the unit's call graph from the subs that
+  contain a marked site (`Pl::Parser2::_may_dyn_exit_set`, carried on
+  `Environment::dyn_exit_subs`), and a loop is framed iff its body NAMES one of
+  them or lexically contains a nested `sub {…}` with a site.  **`t/op/loopctl.t`
+  now carries ONE frame and the whole `perl-tests` corpus carries one** (was
+  1214 in 93 files); ALL 27 `tools/bench-exec.pl` rows are emitted
+  BYTE-IDENTICALLY with the gate on or off, so the bench cannot move at all.
+  `t/op/loopctl.t` 40/0 → **64/3** — one row better than the pre-(a) 63/4 —
+  and `t/op/rt119311.t` 8/2 → **11/2**.
+- **The ruled residue, LOUD and documented**: an exit reached through an
+  INDIRECT call (a coderef out of a structure, a computed method name,
+  `&$code`, `goto &$code`) or from ANOTHER compilation unit (a `use`d module, a
+  string eval) meets no frame and takes perl's own
+  `Can't "last" outside a loop block` at its site.  ONE probe moved when the
+  licence narrowed — `eval q{last}` inside a loop, which now dies into `$@`
+  where perl exits the loop.  The narrowing also CLOSED #1163's one
+  divergence: a tie `FETCH` doing `last` with an outer loop present now dies
+  exactly as perl does, because that outer loop takes no frame either.
 ## s470 (2026-09-05, Fable) — the speed METRIC re-based by the USER; the two overview plans
 
 - **USER (2026-09-05): "forget beating Perl in individual items, we do enough for that — just try to get PCL as fast as possible."  The steering metric is PCL's ABSOLUTE time on representative programs (three macro rows + five constant terms + an sb-sprof profile per row → a RANKED table), not per-row pcl/perl ratios; the ten winning board rows are CONTROL rows only.  RANKING: at least HALF the weight on how low-hanging (easy to implement) a lever is, the rest on seconds removed.  **`pack`/`unpack` PARKED (USER) until the XS decision** — the transpiled oracle and its ~3 s extension load are not a target while pclxs may carry `pack`.  Plan: `docs/plan-speed-and-ir-s470.md` Part A (round 27 = the three S levers `symref-const`, sort-result ADOPTION, foreach-raw over a LIST of arrays, plus the yardstick: three macro rows + four constants + `sb-sprof` → a RANKED table).**

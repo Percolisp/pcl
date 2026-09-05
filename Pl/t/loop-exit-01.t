@@ -31,7 +31,7 @@ use v5.30;
 use strict;
 use warnings;
 use Test::More;
-use File::Temp qw(tempfile);
+use File::Temp qw(tempfile tempdir);
 use FindBin qw($RealBin);
 use lib $RealBin;
 use PCLCore;
@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 27;
 
 # Transpile (a DROPPED statement fails the row, via PCLCore) and run; stderr
 # is kept, because some of these rows are about what lands on it.  $OPT is an
@@ -183,12 +183,12 @@ print "n=$n\n";
 PERL
    'a map BLOCK is transparent: the exit reaches the enclosing loop');
 
-is(run_cl(<<'PERL'), "n=1 err=\n",
+like(run_cl(<<'PERL'), qr/^err=Can't "last" outside a loop block/m,
 my $n = 0;
 for my $i (1..3) { $n++; eval q{last}; $n += 100 }
-print "n=$n err=$@\n";
+print "err=$@";
 PERL
-   'a `last` in a STRING EVAL exits the loop the eval is in (was n=303, silently)');
+     'a `last` in a STRING EVAL is a DIFFERENT compilation unit, so the loop takes no frame and the exit DIES with perl\'s text — trapped by the eval, but never silent (perl exits the loop: n=1; the divergence is the #1162 residue)');
 
 # ---- 5. what is NOT a loop — LOUD, with perl\'s own text -------------------
 like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
@@ -253,6 +253,73 @@ PERL
     my $a = PCLCore::transpile("$pl2cl $pl");
     my $b = PCLCore::transpile("PCL_OPT=-dyn-loop-exit $pl2cl $pl");
     ok($a eq $b, 'a call-free loop is emitted BYTE-IDENTICALLY with the gate on or off');
-    like(transpile('sub f { 1 } my $s = 0; for my $i (1..3) { $s += f() } print "$s\n";'),
-         qr/:dyn\s+t/, '... and a loop that calls user code carries :dyn t');
+    like(transpile('sub f { last } my $s = 0; for my $i (1..3) { $s += f() } print "$s\n";'),
+         qr/:dyn\s+t/, '... and a loop that can REACH a dynamic exit carries :dyn t');
+}
+
+# ---- 8. THE #1162 LICENCE: only a loop that can REACH a marked site --------
+#
+# The frame's `catch` costs ~4.8 MB of SBCL compile IR, so a loop is framed
+# only when its body can reach a marked exit site through NAMES this
+# compilation unit can follow: a direct call to a sub in MAY-DYN-EXIT (the
+# fixpoint over the unit's call graph), or a nested `sub {…}` carrying a site.
+# Everything else — a coderef out of a data structure, a computed method name,
+# a sub from another unit — meets NO frame and takes perl's own die at the
+# site, LOUDLY.  That is the ruled residue, and these rows are what keeps it
+# loud instead of silent.  (The name test is textual, so a word that merely
+# COLLIDES with a MAY-DYN-EXIT sub name costs a frame — never a missing one.)
+
+is(run_cl(<<'PERL'), "n=1\n",
+sub g { last }
+sub f { g() }
+my $n = 0;
+for my $i (1..3) { $n++; f(); $n += 100 }
+print "n=$n\n";
+PERL
+   'a TWO-LEVEL named chain is followed: the loop is framed and the exit works');
+
+like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
+sub f { last }
+my %d = (k => \&f);
+my $n = 0;
+for my $i (1..3) { $n++; $d{k}->(); $n += 100 }
+print "n=$n\n";
+PERL
+     'a CODEREF out of a data structure is not a name: no frame, and the exit dies LOUDLY (perl exits the loop)');
+
+like(run_cl(<<'PERL'), qr/Can't "last" outside a loop block/,
+package C;
+sub hop { last }
+package main;
+my $o = bless {}, 'C';
+my $m = "hop";
+my $n = 0;
+for my $i (1..3) { $n++; $o->$m(); $n += 100 }
+print "n=$n\n";
+PERL
+     'a COMPUTED method name is not a name either: no frame, and the exit dies LOUDLY');
+
+{
+    # a sub from ANOTHER compilation unit: the unit being compiled cannot see
+    # that the module's `mod_last` performs an exit, so its loop takes no frame
+    my $dir = File::Temp::tempdir(CLEANUP => 1);
+    open my $mfh, '>', "$dir/DynExitMod.pm" or die $!;
+    print $mfh "package DynExitMod;\nsub mod_last { last }\n1;\n";
+    close $mfh;
+    like(run_cl(<<"PERL"), qr/Can't "last" outside a loop block/,
+use lib '$dir';
+use DynExitMod;
+my \$n = 0;
+for my \$i (1..3) { \$n++; DynExitMod::mod_last(); \$n += 100 }
+print "n=\$n\\n";
+PERL
+         'a sub from a `use`d MODULE is a different compilation unit: no frame, and the exit dies LOUDLY');
+}
+
+{
+    # the whole point of the licence, in emission terms
+    my $callee_cannot_exit = 'sub f { last } sub g { 1 } my $s = 0;'
+                           . ' for my $i (1..3) { $s += g() } print "$s\n";';
+    unlike(transpile($callee_cannot_exit), qr/:dyn/,
+           'a loop that calls a sub which CANNOT exit takes no frame — that is what keeps the frame off 88 of t/op/loopctl.t\'s 89 loops (task #1162)');
 }

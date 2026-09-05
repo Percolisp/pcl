@@ -3733,14 +3733,17 @@ sub _wrap_statement_modifier {
     } $cond_parts[0]->children;
   }
 
-  # The dynamic-loop-exit licence (task #1022 half (b)): a `for`/`while`
-  # MODIFIER is a real loop, and `f() for 1..3` with `sub f { last }` exits it
-  # in perl.  Read off the UNTOUCHED token run (the modifier's own expression
-  # and its condition), before either is lowered — the same `:dyn t` key
-  # Parser2's block loops emit, consumed by %p-loop-driver.
+  # The dynamic-loop-exit licence (task #1022 half (b), narrowed by #1162): a
+  # `for`/`while` MODIFIER is a real loop, and `f() for 1..3` with
+  # `sub f { last }` exits it in perl.  Read off the UNTOUCHED token run (the
+  # modifier's own expression and its condition), before either is lowered —
+  # the same `:dyn t` key Parser2's block loops emit, the same predicate over
+  # the same per-unit MAY-DYN-EXIT set, consumed by %p-loop-driver.
   my $dyn_arg = ($modifier =~ /^(?:for|foreach|while|until)$/
                  && Pl::Passes::enabled('dyn-loop-exit')
-                 && Pl::PExpr::TokenUtils::calls_user_code([@$expr_parts, @cond_parts]))
+                 && Pl::PExpr::TokenUtils::may_dyn_exit(
+                      [@$expr_parts, @cond_parts],
+                      $self->environment->dyn_exit_subs))
               ? ' :dyn t' : '';
 
   # Generate appropriate control structure

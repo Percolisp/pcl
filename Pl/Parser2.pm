@@ -1497,7 +1497,9 @@ sub parse {
     $self->{_sub_str_eval}{ refaddr($insub) } = 1;
   }
 
-  _mark_dynamic_loop_exits($doc);
+  # The set rides on the ENVIRONMENT because BOTH loop-lowering seams need it:
+  # this file's compound loops and Pl::Parser's `for`/`while` modifiers.
+  $self->environment->dyn_exit_subs(_mark_dynamic_loop_exits($doc));
 
   # W10: a file lexical declared in one segment and used in a later one spans
   # a package boundary.  v1 has an OPEN BUG here (it defvars the name under
@@ -5516,7 +5518,60 @@ sub _mark_dynamic_loop_exits {
     next if $in_loop;
     $w->{_pcl_dyn_loop_exit} = defined $sub_name ? $sub_name : '';
   }
-  return;
+  return _may_dyn_exit_set($doc);
+}
+
+# MAY-DYN-EXIT — the set of this unit's NAMED subs that can perform a dynamic
+# loop exit (the #1162 licence, ruled by Fable in s470).  A loop is framed
+# only when its body can REACH one of them, which is what keeps the frame off
+# the 88 loops of `t/op/loopctl.t` (they all call `ok`/`is`/`cmp_ok`, which
+# this unit does not declare) and off essentially every ordinary file.  The
+# frame costs ~4.8 MB of SBCL COMPILE IR per `catch` — that is task #1162's
+# measurement, and it is why the licence is a reachability question and not
+# "does the body call anything".
+#
+# Seed: a sub whose block contains a MARKED exit token.  Step: a sub that
+# names a sub already in the set.  Both readings are deliberately GENEROUS —
+# a nested sub's site counts for its enclosing sub, and any mention of a
+# declared name counts as a call — because being wrong that way costs one
+# catch per loop entry, never a missing frame.
+#
+# WHAT IT CANNOT SEE, and this is the ruled residue: a dynamic exit reached
+# through an INDIRECT call (`$code->()`, `&$code`, a method, `goto &NAME`) or
+# from ANOTHER compilation unit (a `use`d module, a string eval) meets no
+# frame, so the site takes the perl-shaped `Can't "last" outside a loop block`
+# die — LOUD, and `docs/not-supported.md` names it.
+sub _may_dyn_exit_set {
+  my ($doc) = @_;
+  my %body;
+  for my $s (@{ $doc->find('PPI::Statement::Sub') || [] }) {
+    next if $s->can('forward') && $s->forward;
+    my $name = $s->name;
+    next unless defined $name && length $name;
+    $name =~ s/.*:://;                       # the tables are keyed BARE (#413)
+    my ($blk) = grep { $_->isa('PPI::Structure::Block') } $s->schildren;
+    $body{$name} = $blk if $blk;
+  }
+  return {} unless %body;
+
+  my (%set, %names);
+  for my $n (keys %body) {
+    my @w = @{ $body{$n}->find('PPI::Token::Word') || [] };
+    $set{$n} = 1 if grep { defined $_->{_pcl_dyn_loop_exit} } @w;
+    $names{$n} = { map  { $_->content => 1 }
+                   grep { exists $body{ $_->content } } @w };
+  }
+  my $changed = 1;
+  while ($changed) {
+    $changed = 0;
+    for my $n (keys %body) {
+      next if $set{$n};
+      next unless grep { $set{$_} } keys %{ $names{$n} };
+      $set{$n} = 1;
+      $changed = 1;
+    }
+  }
+  return \%set;
 }
 
 # Is this Word the loop-control KEYWORD, with no label?  A labelled exit
@@ -9958,7 +10013,7 @@ sub _lower_compound {
     # `{ foo(sub { …; last }) }` sites are exactly this shape.  A `continue`
     # block declines: it sits after the tagbody inside the block, where the
     # frame wrapper cannot re-enter it (see p-dyn-once).
-    my $dyn = !defined $cont && _dyn_keys([$k[0]->schildren]) ? 1 : 0;
+    my $dyn = !defined $cont && $self->_dyn_keys([$k[0]->schildren]) ? 1 : 0;
     return $self->_lower_bare_block($k[0], $label, $vi, $cont, $tail_ctx, $dyn);
   }
 
@@ -10036,7 +10091,7 @@ sub _lower_compound {
 
   # The dynamic-loop-exit licence is read from the UNTOUCHED tokens, before
   # any lowering: PExpr's cleanup mutates them destructively.
-  my @dyn = _dyn_keys(\@k);
+  my @dyn = $self->_dyn_keys(\@k);
 
   if ($kw eq 'while' || $kw eq 'until') {
     my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
@@ -10606,21 +10661,23 @@ sub _label_keys {
   return (':label', cl_sym($label));
 }
 
-# `:dyn t` — THE DYNAMIC-LOOP-EXIT LICENCE for one loop (task #1022 half (b);
-# ir-spec §6.2; Kind-A gate `dyn-loop-exit`).  @$ELEMS is the whole loop
-# STATEMENT's significant children: perl's unlabelled `last`/`next`/`redo`
-# acts on the innermost DYNAMICALLY enclosing loop, so a loop that can reach
-# user code may have to catch one, and a loop that cannot is emitted exactly
-# as before and pays nothing.
+# `:dyn t` — THE DYNAMIC-LOOP-EXIT LICENCE for one loop (task #1022 half (b),
+# narrowed by the #1162 ruling; ir-spec §6.2; Kind-A gate `dyn-loop-exit`).
+# @$ELEMS is the whole loop STATEMENT's significant children: a loop is framed
+# only when it can REACH a marked exit site (Pl::PExpr::TokenUtils::may_dyn_exit
+# over this unit's MAY-DYN-EXIT set), and a loop that cannot is emitted exactly
+# as before and pays nothing — which matters because the frame's `catch` costs
+# ~4.8 MB of SBCL compile IR (#1162).
 #
 # Scanning the WHOLE statement rather than only the body is deliberate: the
 # condition and a `continue` block DO run inside the frame, and the sections
 # that do not (a C-for INIT, a foreach LIST) sit outside the `catch` in the
 # expansion, so counting them can only cost a frame — never mis-catch a throw.
 sub _dyn_keys {
-  my ($elems) = @_;
+  my ($self, $elems) = @_;
   return () unless Pl::Passes::enabled('dyn-loop-exit');
-  return () unless Pl::PExpr::TokenUtils::calls_user_code($elems);
+  return () unless Pl::PExpr::TokenUtils::may_dyn_exit(
+                     $elems, $self->environment->dyn_exit_subs);
   return (':dyn', 't');
 }
 

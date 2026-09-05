@@ -76,7 +76,7 @@ our %KIND_A = (
   # the site dies).  A program with no dynamic loop exit runs identically
   # either way, which is the identity `Pl/t/passes-01.t` guards; a program
   # that HAS one cannot, because the frame is the feature.
-  'dyn-loop-exit'  => "Pl::PExpr::TokenUtils::calls_user_code + Parser2 loops (task #1022 half (b)): a loop whose body can reach USER CODE establishes ONE catch of 'p-loop-dyn per loop ENTRY (`:dyn t`, %p-loop-driver / p-dyn-once), so a bare `last`/`next`/`redo` in a CALLED sub acts on the caller's innermost loop as perl's does; a provably call-free loop is emitted byte-identically and pays nothing",
+  'dyn-loop-exit'  => "Pl::PExpr::TokenUtils::may_dyn_exit + Parser2 loops (task #1022 half (b), licence narrowed by #1162): a loop that can REACH a marked exit site BY NAME in this compilation unit establishes ONE catch of 'p-loop-dyn per loop ENTRY (`:dyn t`, %p-loop-driver / p-dyn-once), so a bare `last`/`next`/`redo` in a CALLED sub acts on the caller's innermost loop as perl's does; every other loop is emitted byte-identically and pays nothing, which matters because the catch costs ~4.8 MB of SBCL COMPILE IR",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 

@@ -185,7 +185,6 @@ t/op/lex.t	1	UNEXPLAINED
 t/op/lexsub.t	15	UNEXPLAINED
 t/op/lfs.t	17	UNEXPLAINED
 t/op/lock.t	5	UNEXPLAINED
-t/op/loopctl.t	27	#1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
 t/op/lvref.t	201	UNEXPLAINED
 t/op/magic.t	1	UNEXPLAINED
 t/op/method.t	38	UNEXPLAINED
@@ -199,7 +198,7 @@ t/op/postfixderef.t	7	UNEXPLAINED
 t/op/readline.t	4	UNEXPLAINED
 t/op/ref.t	15	UNEXPLAINED
 t/op/require_37033.t	4	UNEXPLAINED
-t/op/rt119311.t	12	#1022(a): the six `{ foo(sub { ...; last }) }` sites die at the site; waits on #1022(b)
+t/op/rt119311.t	9	UNEXPLAINED
 t/op/runlevel.t	24	UNEXPLAINED
 t/op/sigdispatch.t	2	UNEXPLAINED
 t/op/signame_canonical.t	15	UNEXPLAINED

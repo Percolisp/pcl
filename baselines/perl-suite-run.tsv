@@ -5,8 +5,8 @@
 #   in the sub now DIES at its own site: it used to do NOTHING silently in the
 #   `for` spelling (n=303 where perl says 1) and reach SBCL as "attempt to GO
 #   to nonexistent tag" in the `while` one.
-#     op/loopctl.t     63/4  ->  40/0    #1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
-#     op/rt119311.t    11/2  ->   8/2    #1022(a): the six `{ foo(sub { ...; last }) }` sites die at the site; waits on #1022(b)
+#     op/loopctl.t     40/0  ->  64/3    #1022(b) via the #1162 licence: the dynamic exit is PERFORMED again, and one row BETTER than the pre-(a) 63/4 -- test 41 `dynamically scoped` used to fail
+#     op/rt119311.t     8/2  ->  11/2    #1022(b): its pre-(a) value, the six `{ foo(sub { ...; last }) }` sites work
 #   Both re-run ALONE and agreeing (#366).  Half (b) -- a catch frame per loop
 #   ENTRY -- wins the rows back; these two rows are then re-measured, not
 #   assumed.
@@ -1502,7 +1502,7 @@ op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|	0
 op/localref.t	64	0	63	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t64 needs refcount-deterministic DESTROY at local-restore	0
 op/lock.t	5	0	0	0	DIFF	aborted-forms:5: invalid number of arguments: N	0
-op/loopctl.t	66	1	40	0	DIFF	aborted-forms:1: PCL: unsupported: "last" exiting subroutine test_last (dynamic loop exit; docs/not-support	0
+op/loopctl.t	66	1	64	3	DIFF		0
 op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
@@ -1549,7 +1549,7 @@ op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	26	19	DIFF		0
 op/reverse.t	25	0	25	0	OK		0
-op/rt119311.t	22	0	8	2	DIFF	aborted-forms:5: PCL: unsupported: "last" exiting subroutine __ANON__ (dynamic loop exit; docs/not-supporte	0
+op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at rtN.t line N.	0
 op/runlevel.t	24	0	0	0	DIFF		0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0

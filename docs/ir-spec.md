@@ -1668,17 +1668,28 @@ frame there is nothing to throw to, which is exactly what `PCL_OPT=none` /
 `-dyn-loop-exit` emits (frame-less loops, and a trappable
 `PCL: unsupported: "last" exiting subroutine NAME` at the site).
 
-**The licence is `Pl::PExpr::TokenUtils::calls_user_code`** over the loop
-statement's tokens, and it is conservative in the COSTING direction: a bareword
-it cannot place counts as a call, so an error costs one catch per loop entry
-and never a missing frame.  It sees a named/method/code-ref call, `goto`,
-`eval`, `require`, `tie`, a `sort`/`map`/`grep` whose comparator is a code ref
-in a scalar, an `s///e` replacement and a `${…}`/`@{…}` block inside an
-interpolation; it does NOT see user code reached through overload, a tie
-handler, `DESTROY` or `%SIG` (`docs/not-supported.md` has the measured
-consequence — perl refuses those exits too).  A loop the licence clears is
-emitted BYTE-IDENTICALLY to the pre-#1022(b) shape, which is what keeps a
-counting loop free of the frame.
+**The licence is REACHABILITY BY NAME within one compilation unit**
+(`Pl::PExpr::TokenUtils::may_dyn_exit` over the loop statement's tokens, against
+the unit's MAY-DYN-EXIT set — `Environment::dyn_exit_subs`, the fixpoint
+`Pl::Parser2::_may_dyn_exit_set` takes over the call graph from the subs that
+contain a marked exit).  A loop is framed when its body NAMES one of those subs
+or lexically contains a nested `sub {…}` carrying an exit; everything else is
+emitted BYTE-IDENTICALLY to the pre-#1022(b) shape, which is what keeps the
+frame off ordinary code.
+
+That boundary is a MEASUREMENT, not a taste (task #1162): the frame's `catch`
+costs about 4.8 MB of SBCL compile IR, and framing every loop with a call took
+`t/op/loopctl.t` (89 loops in one 64 KB top-level form) from 244.6 MB to
+691.2 MB of compile-time consing and past SBCL's default 1 GB heap — the file
+produced no rows at all.  Under reachability that file carries ONE frame, and
+the whole `perl-tests` corpus carries one.
+
+A consumer must therefore accept the ruled residue: an exit reached through an
+INDIRECT call (a coderef out of a structure, a computed method name, `&$code`,
+`goto &$code`) or from ANOTHER compilation unit (a `use`d module, a string
+eval) meets no frame and takes the perl-shaped die — LOUD, and
+`docs/not-supported.md` names it.  The name test is textual, so a word that
+merely collides with a MAY-DYN-EXIT name costs a frame, never a missing one.
 
 **Key order**: `:label NAME` must come first (its value is a symbol); `:my` and
 `:dyn` follow in any order; then the body; then `:continue (progn …)` last.
