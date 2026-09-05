@@ -92,6 +92,22 @@ like($ctx, qr/\(p-scalar-ctx \(pl-pair 7\)\)/,
 like($ctx, qr/\(pl-inc \(p-\+/,
      'insensitive callee called directly even with nested sensitive arg');
 
+# #1045: `goto` LEAVES the frame, so the value the caller receives is not one
+# _sub_return_facts' walk can see — `goto &NAME` REPLACES the frame outright
+# and the target runs in THIS sub's caller's context.  Such a sub is therefore
+# context-SENSITIVE and its call sites must keep the bind; classifying it
+# insensitive made `my @x = g()` answer the COUNT (silent wrong).
+my $gt = Pl::Parser2->parse_code(
+  'our @a = (7,8,9); sub ra { return @a } sub rgoto { my $t = 0; goto &ra } my $s = rgoto();');
+like($gt, qr/\(p-scalar-ctx \(pl-rgoto\)\)/,
+     'a sub whose body contains goto &NAME is context-SENSITIVE (#1045)');
+# INVERSE: the same sub WITHOUT the goto is still insensitive — the verdict is
+# the goto's, not a blanket "any sub with a `my` in it".
+my $gt2 = Pl::Parser2->parse_code(
+  'our @a = (7,8,9); sub ra { return @a } sub nogoto { my $t = 0; return $t + 1 } my $s = nogoto();');
+unlike($gt2, qr/p-scalar-ctx \(pl-nogoto\)/,
+     'without the goto the same shape stays insensitive (inverse)');
+
 # --- Session-265 growth: strings, funcall-in-arith unboxing, elsif, C-for ---
 
 # String literals + `.` concat are native, and string slots unbox.

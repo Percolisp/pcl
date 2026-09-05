@@ -11275,7 +11275,21 @@ sub _sub_return_facts {
   for my $b (@$breaks) {
     my @k = _strip_semi($b->schildren);
     my $kw = shift @k;
-    next unless $kw && $kw->content eq 'return';
+    next unless $kw;
+    # `goto` LEAVES this sub's frame, so the value the caller receives is not
+    # one this walk can see and the context it is produced in is not this
+    # sub's.  `goto &NAME` / `goto &$ref` / `goto EXPR` REPLACE the frame
+    # outright: the target runs in THIS sub's CALLER's context (ir-spec §6.4,
+    # and p-goto-sub restores *wantarray* for exactly that reason), so this
+    # sub's sensitivity IS the target's — unknown.  `goto LABEL` can land
+    # anywhere, so its returned value is equally unproven.  Either way the
+    # verdict is the one an unknown callee gets (#1045).
+    if ($kw->content eq 'goto') {
+      $facts{insensitive} = 0; $fams{''} = 1;
+      last if $decided->();
+      next;
+    }
+    next unless $kw->content eq 'return';
     if (!@k) { $facts{insensitive} = 0; $fams{''} = 1 }   # bare `return;`
     else     { my ($expr) = _split_modifier(\@k); $see->($expr) }
     last if $decided->();

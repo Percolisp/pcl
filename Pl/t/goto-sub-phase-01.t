@@ -38,7 +38,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 17;
+plan tests => 19;
 
 sub run_cl {
     my ($code) = @_;
@@ -118,6 +118,27 @@ sub g { goto \&t }
 my @r = g(); my $s = g();
 print "@r $s\n";
 }), "L S\n", 'goto \&NAME target sees the original caller wantarray');
+
+# #1045 — the CALL SITE half of the same rule.  p-goto-sub restores the
+# caller's *wantarray*, but the Kind-A `insensitive-call` gate
+# (Parser2::_sub_return_facts) had classified a `goto &NAME`-bodied sub as
+# never observing it, so the site omitted the bind and the target saw the
+# AMBIENT context: `@{[ rgoto() ]}` answered the COUNT (perl: the list) and
+# `scalar(gw())` answered "L" inside a list-context statement (perl: "S").
+# Both spellings, both directions; correct under PCL_OPT=-insensitive-call
+# even before the fix, which is what made it a silent wrong.
+is(run_cl(q{our @a = (7,8,9);
+sub ra    { return @a }
+sub rgoto { my $t = 0; goto &ra }
+print "@{[ rgoto() ]} / ", scalar(rgoto()), "\n";
+}), "7 8 9 / 3\n",
+   'a goto &NAME sub keeps its caller-context bind: list call gets the LIST (#1045)');
+
+is(run_cl(q{sub wa { return wantarray ? "L" : (defined wantarray ? "S" : "V") }
+sub gw { my $t = 0; goto &wa }
+print join(",", gw()), " ", scalar(gw()), "\n";
+}), "L S\n",
+   'scalar(gw()) is SCALAR context inside a list-context statement (#1045)');
 
 # ------------------------------------------------- 2. local in a phase block
 
