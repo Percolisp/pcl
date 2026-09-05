@@ -23,12 +23,44 @@
 #   perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t
 # and compare against the blessed baseline with tools/sweep-diff.pl (expect
 # 0 new failures; s316: 5635 pass / 90 fail).
+#
+#   tools/rebuild-pack             install the result over cl/pcl-pack.lisp
+#   tools/rebuild-pack -o PATH     write it to PATH instead, leaving the tree
+#                                  untouched
+#
+# -o exists so a CHECKER can run this exact procedure without editing the
+# tree: Pl/t/artifact-staleness-01.t regenerates into a temp file and compares
+# the body, which is how a body-stale artifact inside a current generation
+# gets caught (task #1072).  A checker that re-spelled the recipe would drift
+# from it, so it calls this script instead.
 set -e
+
+out=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|--output)
+      shift
+      [ $# -gt 0 ] || { echo "rebuild-pack: -o needs a path" >&2; exit 2; }
+      out=$1
+      # Resolve now, against the CALLER's cwd — the script cd's to the repo
+      # root below, which would otherwise silently re-root a relative path.
+      case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
+      ;;
+    -h|--help)
+      echo "usage: rebuild-pack [-o PATH]" >&2; exit 0 ;;
+    *)
+      echo "rebuild-pack: unknown argument $1" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
 target=cl/pcl-pack.lisp
+# The appendix always comes from the checked-in artifact — it is hand-written
+# and lives nowhere else — so -o changes only where the RESULT goes.
+[ -n "$out" ] || out=$target
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -60,6 +92,8 @@ test -s "$tmp/body.lisp" || { echo "rebuild-pack: pl2cl produced no output" >&2;
 tools/tag-license "$tmp/new.lisp" >/dev/null
 sbcl --script tools/check-parens.lisp "$tmp/new.lisp"
 
-cp "$tmp/new.lisp" "$target"
-echo "rebuild-pack: wrote $target ($(sed -n 1p "$target"))"
-echo "rebuild-pack: now run  perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t"
+cp "$tmp/new.lisp" "$out"
+echo "rebuild-pack: wrote $out ($(sed -n 1p "$out"))"
+if [ "$out" = "$target" ]; then
+  echo "rebuild-pack: now run  perl sweep-perl-tests.pl --jobs 1 --timeout 380 perl-tests/pack.t"
+fi
