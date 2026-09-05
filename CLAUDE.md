@@ -284,9 +284,9 @@ plus the targeted files the change names.
 | what changed | full perl-tests sweep (~2–3 min since s439b's cached core; was ~10) | companion suite (`--quick` ~15–25 min; full `--all` 30–60) | also |
 |---|---|---|---|
 | `Pl/**`, corpus-diff IDENTICAL, lib byte-identical, NOT a name-resolution change | **NO — it cannot move; do not run it "to be safe"** | no | — |
-| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | the dirs whose files carry the shape (`grep -a`); `--quick` once if broad | gen bump + `tools/rebuild-pack` (staleness gate enforces it) |
+| `Pl/**`, corpus-diff shows diffs | YES, after every diff is explained per file + probed vs perl | the dirs whose files carry the shape (`grep -a`); `--quick` once if broad | gen bump + `tools/rebuild-pack` (staleness gate enforces it) + `tools/ir-host-leak.pl` (the IR must stay in its three vocabularies — a new bare CL symbol in the emission is a LEAK, s470bm / ir-spec §11b) |
 | `Pl/**` name-resolution / scoping / rename / capture / promotion (Parser2 `_rename_*`, `_promote_*`, VarAnnotator, GlobalPartition, eval capture, span passes) | **YES — the sweep IS the gate** (#296) | `--quick` once | gate-SET scan over both populations when a checker / refusal / decline WIDENS (s372) |
-| `cl/**` runtime | YES (invisible to corpus-diff) | the dirs the change touches (op/, io/, re/ …) | rule-12 read of the touched dispatch |
+| `cl/**` runtime | YES (invisible to corpus-diff) | the dirs the change touches (op/, io/, re/ …) | rule-12 read of the touched dispatch + `tools/ir-inventory.pl` regenerated if an export moved (`Pl/t/ir-inventory-01.t` gates it) + `tools/ir-host-leak.pl` if a macro's expansion changed |
 | `lib/**` shim | YES | the files that `use` the module (`grep -a`) | — |
 | harness: `perl-tests/t/test.pl`, `cl/pcl-test.lisp`, `cl/skip-registry.lisp` | YES | **`--all --quick`** (both populations reach it) | baselines edited ROW BY ROW |
 | runners: `sweep-perl-tests.pl`, `tools/run-perl-suite.pl`, `tools/lib/PCLSbcl.pm`, `tools/pclperl-for-tests`, `Pl/t/PCLCore.pm` | the runner that changed, once; verdicts compared file-by-file | same | `PCL_SHOW_SBCL=1` before/after diff |
