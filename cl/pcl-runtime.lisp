@@ -7024,6 +7024,64 @@ per element."
     (t `(box-set ,place ,value))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
+  ;; Forward-declare so expand-autoviv can call expand-autoviv-for-array (mutually recursive)
+  (declaim (ftype (function (t) t) expand-autoviv-for-array))
+  (defun expand-autoviv (form)
+    "Compile-time helper to expand nested hash/array access into autovivifying code.
+     The result of this form must be a hash table (inner yields hash).
+     Handles p-gethash, p-aref, p-gethash-deref, p-aref-deref chains."
+    (cond
+      ;; (p-gethash inner key) - autovivify intermediate, this slot yields hash
+      ((and (listp form) (eq (car form) 'p-gethash))
+       (let ((inner (cadr form))
+             (key (caddr form)))
+         `(p-autoviv-gethash ,(expand-autoviv inner) ,key)))
+      ;; (p-aref inner idx) - intermediate array, this slot yields hash
+      ((and (listp form) (eq (car form) 'p-aref))
+       (let ((inner (cadr form))
+             (idx (caddr form)))
+         `(p-autoviv-aref-for-hash ,(expand-autoviv-for-array inner) ,idx)))
+      ;; (p-gethash-deref $ref key) - autovivify $ref to hashref, slot yields hash
+      ((and (listp form) (eq (car form) 'p-gethash-deref))
+       (let ((ref (cadr form))
+             (key (caddr form)))
+         `(p-autoviv-gethash (p-ensure-hashref ,ref) ,key)))
+      ;; (p-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields hash
+      ((and (listp form) (eq (car form) 'p-aref-deref))
+       (let ((ref (cadr form))
+             (idx (caddr form)))
+         `(p-autoviv-aref-for-hash (p-ensure-arrayref ,ref) ,idx)))
+      ;; Base case: form is a plain hash container
+      (t form)))
+
+  (defun expand-autoviv-for-array (form)
+    "Compile-time helper: the result of this form must be an array.
+     Handles p-gethash, p-aref, p-gethash-deref, p-aref-deref chains."
+    (cond
+      ;; (p-gethash inner key) - this slot yields array
+      ((and (listp form) (eq (car form) 'p-gethash))
+       (let ((inner (cadr form))
+             (key (caddr form)))
+         `(p-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)))
+      ;; (p-aref inner idx) - this slot yields array
+      ((and (listp form) (eq (car form) 'p-aref))
+       (let ((inner (cadr form))
+             (idx (caddr form)))
+         `(p-autoviv-aref-for-array ,(expand-autoviv-for-array inner) ,idx)))
+      ;; (p-gethash-deref $ref key) - autovivify $ref to hashref, slot yields array
+      ((and (listp form) (eq (car form) 'p-gethash-deref))
+       (let ((ref (cadr form))
+             (key (caddr form)))
+         `(p-autoviv-gethash-for-array (p-ensure-hashref ,ref) ,key)))
+      ;; (p-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields array
+      ((and (listp form) (eq (car form) 'p-aref-deref))
+       (let ((ref (cadr form))
+             (idx (caddr form)))
+         `(p-autoviv-aref-for-array (p-ensure-arrayref ,ref) ,idx)))
+      ;; Base case: form is a plain array container
+      (t form))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %p-accessor-place-p (place)
     "True for value-returning element/deref accessor forms (hash/array element
      or deref).  These are not boxes — they return raw values and have setf
@@ -7042,14 +7100,46 @@ per element."
     (and (consp place)
          (member (car place)
                  '(p-gethash p-aref p-gethash-deref p-aref-deref
-                   p-$ p-cast-$)))))
+                   p-$ p-cast-$))))
 
-(defmacro %p-store-back (place new)
-  "Write NEW into PLACE for a read-modify-write compound assignment: SETF for
-   accessor places, BOX-SET for boxed scalars and scalar derefs."
-  (if (%p-accessor-place-p place)
-      `(setf ,place ,new)
-      `(box-set ,place ,new)))
+  (defun %p-nested-elem-place-p (place)
+    "True for an ELEMENT place — (p-gethash C K) / (p-aref C I) — whose
+     CONTAINER subform is itself an access chain, i.e. `$h{a}{b}` and friends
+     rather than `$h{k}`.
+
+     WHY THE TWO ARE DIFFERENT (task #1057): the setf WRITER of p-gethash /
+     p-aref does not vivify its container — it cannot, it is handed a VALUE —
+     so `(setf (p-gethash (p-gethash %h \"a\") \"b\") …)` gave GETHASH the
+     inner read's :UNDEF and died with an SBCL type error.  The deref-rooted
+     spellings are NOT in this test because their writers already vivify
+     ((setf p-gethash-deref) is `(setf (p-gethash (p-ensure-hashref ref) …))`),
+     and neither are p-$ / p-cast-$, which are scalars, not containers."
+    (and (consp place)
+         (member (car place) '(p-gethash p-aref))
+         (%p-accessor-place-p (cadr place))))
+
+  (defun %p-vivified-elem-form (place fn)
+    "Bind PLACE's CONTAINER and KEY to temps — the container through the
+     compile-time chain walker, so every intermediate VIVIFIES — and call FN
+     with the rebound place form to build the body.
+
+     THE WALKER IS THE ONE THAT ALREADY DOES THIS: expand-autoviv /
+     expand-autoviv-for-array, the pair p-setf reaches through p-autoviv-set.
+     Routing the compound assignments through it rather than re-deriving the
+     chain rules is rule 11 — and it is also why the two answers cannot drift:
+     `$h{a}{b} = 1` and `$h{a}{b} .= \"x\"` now vivify by the same code.
+
+     Binding both temps makes the container and the KEY evaluated ONCE for the
+     read and the write together; the syntactic-place expansion evaluated each
+     of them TWICE (`$h{k()} .= \"q\"` called k() twice, perl calls it once)."
+    (let* ((acc (car place))
+           (cont (gensym "CONT"))
+           (key (gensym "KEY")))
+      `(let ((,cont ,(if (eq acc 'p-gethash)
+                         (expand-autoviv (cadr place))
+                         (expand-autoviv-for-array (cadr place))))
+             (,key ,(caddr place)))
+         ,(funcall fn (list acc cont key))))))
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defun %store-back-form (place build)
@@ -7060,12 +7150,23 @@ per element."
      lvalue chain like (($a .= $a) .= $a) runs PLACE's side effects only once
      (otherwise each textual reference to PLACE re-ran the inner assignment,
      growing the result exponentially).  For accessor places ($h{k}/$a[i]/derefs)
-     SETF is used on the syntactic place form."
-    (if (%p-accessor-place-p place)
-        `(setf ,place ,(funcall build place))
-        (let ((b (gensym "PLACE")))
-          `(let ((,b ,place))
-             (box-set ,b ,(funcall build b)))))))
+     SETF is used on the syntactic place form.
+
+     A NESTED element place is the third case (task #1057): its container must
+     VIVIFY before the store, so it goes through %p-vivified-elem-form and the
+     read and the write share the rebound place.  This is the ONE place the
+     whole compound family reaches, so `.=` `+=` `*=` `%=` `**=` `x=` `/=` `&=`
+     `|=` `^=` `<<=` `>>=` and `-=` are all fixed by it — they used to hand
+     :UNDEF to SBCL's GETHASH and die, while `++`, `=` and `||=` worked because
+     they take other lowering paths."
+    (cond
+      ((%p-nested-elem-place-p place)
+       (%p-vivified-elem-form place (lambda (p) `(setf ,p ,(funcall build p)))))
+      ((%p-accessor-place-p place)
+       `(setf ,place ,(funcall build place)))
+      (t (let ((b (gensym "PLACE")))
+           `(let ((,b ,place))
+              (box-set ,b ,(funcall build b))))))))
 
 (defmacro %define-compound-pair (boxed raw lambda-list doc &body new-value)
   "Define the BOXED compound-assign macro (any place: boxes, elements, derefs —
@@ -8313,14 +8414,21 @@ per element."
   (%with-unary-overload ("~." a)
                         (%p-string-bit-not a "string 1's complement (~)")))
 
+;;; `&.=' `|.=' `^.=' — the same read-modify-write as every other compound
+;;; assignment, so they go through %store-back-form like the thirteen defined
+;;; by %define-compound-pair (task #1057, rule 11).  They used to expand
+;;; through a SECOND spelling of the store decision, %p-store-back, which
+;;; wrote the syntactic place with plain SETF: it therefore evaluated the place
+;;; TWICE and died on a nested element (`$h{a}{b} &.= "x"') exactly as the
+;;; other thirteen did, and the two spellings could drift.
 (defmacro p-str-bit-and= (place value)
-  `(%p-store-back ,place (p-str-bit-and ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-str-bit-and ,cur ,value))))
 
 (defmacro p-str-bit-or= (place value)
-  `(%p-store-back ,place (p-str-bit-or ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-str-bit-or ,cur ,value))))
 
 (defmacro p-str-bit-xor= (place value)
-  `(%p-store-back ,place (p-str-bit-xor ,place ,value)))
+  (%store-back-form place (lambda (cur) `(p-str-bit-xor ,cur ,value))))
 
 ;; Raw twins for raw let-bound lexical slots (docs/raw-numeric-verdict.md):
 ;; same p-str-bit-* computation, plain SETF store.
@@ -9706,64 +9814,6 @@ which is one of #1140's escape spellings (probed)."
         (setf box (make-p-box nil))
         (setf (aref a i) box))
       (box-set box value))))
-
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  ;; Forward-declare so expand-autoviv can call expand-autoviv-for-array (mutually recursive)
-  (declaim (ftype (function (t) t) expand-autoviv-for-array))
-  (defun expand-autoviv (form)
-    "Compile-time helper to expand nested hash/array access into autovivifying code.
-     The result of this form must be a hash table (inner yields hash).
-     Handles p-gethash, p-aref, p-gethash-deref, p-aref-deref chains."
-    (cond
-      ;; (p-gethash inner key) - autovivify intermediate, this slot yields hash
-      ((and (listp form) (eq (car form) 'p-gethash))
-       (let ((inner (cadr form))
-             (key (caddr form)))
-         `(p-autoviv-gethash ,(expand-autoviv inner) ,key)))
-      ;; (p-aref inner idx) - intermediate array, this slot yields hash
-      ((and (listp form) (eq (car form) 'p-aref))
-       (let ((inner (cadr form))
-             (idx (caddr form)))
-         `(p-autoviv-aref-for-hash ,(expand-autoviv-for-array inner) ,idx)))
-      ;; (p-gethash-deref $ref key) - autovivify $ref to hashref, slot yields hash
-      ((and (listp form) (eq (car form) 'p-gethash-deref))
-       (let ((ref (cadr form))
-             (key (caddr form)))
-         `(p-autoviv-gethash (p-ensure-hashref ,ref) ,key)))
-      ;; (p-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields hash
-      ((and (listp form) (eq (car form) 'p-aref-deref))
-       (let ((ref (cadr form))
-             (idx (caddr form)))
-         `(p-autoviv-aref-for-hash (p-ensure-arrayref ,ref) ,idx)))
-      ;; Base case: form is a plain hash container
-      (t form)))
-
-  (defun expand-autoviv-for-array (form)
-    "Compile-time helper: the result of this form must be an array.
-     Handles p-gethash, p-aref, p-gethash-deref, p-aref-deref chains."
-    (cond
-      ;; (p-gethash inner key) - this slot yields array
-      ((and (listp form) (eq (car form) 'p-gethash))
-       (let ((inner (cadr form))
-             (key (caddr form)))
-         `(p-autoviv-gethash-for-array ,(expand-autoviv inner) ,key)))
-      ;; (p-aref inner idx) - this slot yields array
-      ((and (listp form) (eq (car form) 'p-aref))
-       (let ((inner (cadr form))
-             (idx (caddr form)))
-         `(p-autoviv-aref-for-array ,(expand-autoviv-for-array inner) ,idx)))
-      ;; (p-gethash-deref $ref key) - autovivify $ref to hashref, slot yields array
-      ((and (listp form) (eq (car form) 'p-gethash-deref))
-       (let ((ref (cadr form))
-             (key (caddr form)))
-         `(p-autoviv-gethash-for-array (p-ensure-hashref ,ref) ,key)))
-      ;; (p-aref-deref $ref idx) - autovivify $ref to arrayref, slot yields array
-      ((and (listp form) (eq (car form) 'p-aref-deref))
-       (let ((ref (cadr form))
-             (idx (caddr form)))
-         `(p-autoviv-aref-for-array (p-ensure-arrayref ,ref) ,idx)))
-      ;; Base case: form is a plain array container
-      (t form))))
 
 (defmacro p-autoviv-set (inner-hash-form outer-key value)
   "Set value with autovivification for nested hash access.

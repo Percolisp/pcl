@@ -44,7 +44,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 3;
+plan tests => 5;
 
 sub run_cl {
     my ($code) = @_;
@@ -93,5 +93,44 @@ print((exists $h{a} ? 1 : 0), " ", (exists $h{a}{b} ? 1 : 0), "\n");
 $$ref = 1; print $h{a}{b}, "\n";
 my %g; $g{a}{b}++; my $r2 = \$g{a}{b}; $$r2 += 0;
 print(($g{a}{b} == 1 ? "yes" : "no"), "\n");
+PL
+
+# ── 4. #1057: the coercing compound assigns over a nested element.  Every row
+# below CRASHED ("Value of pcl::h in (sb-impl::gethash3 k h nil) is :undef")
+# because the store was built as CL SETF over the plain READ accessor, whose
+# container subform cannot vivify.  `**=` and `x=` are the two whose perl
+# answer is not the obvious one (0 and the empty string).
+#
+# THE LAST ROW IS THE ALIAS, and it is why the fix binds the vivified
+# container and stores through the ORDINARY `(setf (p-gethash …))` write rule
+# rather than routing the whole place through `p-setf`: p-setf's nested arm
+# REPLACES the slot (raw `(setf (gethash …))`), which would answer "x" here.
+# perl answers "xy" — probed.  (A plain nested `=` still loses that alias in
+# PCL: #1151, pre-existing and filed, not made worse here.)
+is(run_cl(<<'PL'), "x\n1\n0\n[]\n0\n-3\n3\n0\n0\nx\nx\nx\nxy\n", '#1057 compound assigns over a nested element');
+my %a; $a{a}{b} .= "x";   print $a{a}{b}, "\n";
+my %b; $b{a}{b} += 1;     print $b{a}{b}, "\n";
+my %c; $c{a}{b} **= 2;    print $c{a}{b}, "\n";
+my %d; $d{a}{b} x= 3;     print "[", $d{a}{b}, "]\n";
+my %e; $e{a}{b} *= 3;     print $e{a}{b}, "\n";
+my %f; $f{a}{b} -= 3;     print $f{a}{b}, "\n";
+my %g; $g{a}{b} |= 3;     print $g{a}{b}, "\n";
+my %n; $n{a}{b} <<= 2;    print $n{a}{b}, "\n";
+my %o; $o{a}{b} %= 3;     print $o{a}{b}, "\n";
+my @i; $i[0]{k} .= "x";   print $i[0]{k}, "\n";
+my @j; $j[0][1] .= "x";   print $j[0][1], "\n";
+my $r; $r->{p}{q} .= "x"; print $r->{p}{q}, "\n";
+my %m; $m{a}{b} = "x"; my $al = \$m{a}{b}; $m{a}{b} .= "y"; print $$al, "\n";
+PL
+
+# ── 5. #1057, the string-bitwise third: `&.=` `|.=` `^.=` reached the same
+# crash through a SECOND spelling of the store decision (`%p-store-back`,
+# now deleted — they go through `%store-back-form` like the other thirteen).
+is(run_cl(<<'PL'), "x\ny\n240\n", '#1057 &.= |.= ^.= over a nested element');
+use feature 'bitwise';
+no warnings 'experimental::bitwise';
+my %k; $k{a}{b} = "\xff"; $k{a}{b} &.= "x"; print $k{a}{b}, "\n";
+my %l; $l{a}{b} .= "\x01"; $l{a}{b} |.= "x"; print $l{a}{b}, "\n";
+my @m; $m[0]{z} = "\xff"; $m[0]{z} ^.= "\x0f"; printf "%vd\n", $m[0]{z};
 PL
 
