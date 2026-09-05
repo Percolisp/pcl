@@ -3,7 +3,8 @@
 *USER's framing: "what to do about speed — total speed, get the low hanging apples; there
 are enough features faster than Perl that we don't need to stare at those larger than 1×"; then,
 sharper: "forget beating Perl in individual items, we do enough for that — just try to get PCL
-as fast as possible" —
+as fast as possible"; and then: "forget `pack()` until we know if XS will work; prioritize at least half
+the weight by how low hanging the fruit is, how easy to implement" —
 and "how we should extend the IR to inform the users about what compilation from IR to
 JavaScript or C would need".  Two plans, one file.  Every number is from the quiet-box board
 (`docs/faster-codegen-suggestions.md` §0.2i, s467) plus today's moves (A5 `sortnum` 7.4× → 3.2×,
@@ -13,18 +14,21 @@ JavaScript or C would need".  Two plans, one file.  Every number is from the qui
 
 ## Part A — Speed
 
-### A.0 The metric (USER, 2026-09-05): PCL as fast as possible, in ABSOLUTE time on real programs
+### A.0 The metric (USER, 2026-09-05): PCL as fast as possible, in ABSOLUTE time; rank by EASE first
 
-"Forget beating Perl in individual items, we do enough for that."  So the board's
-pcl/perl ratios stop being the steering instrument.  The metric is **PCL's own seconds on
-representative programs**, and a lever is ranked by **how much of those seconds it removes**
-(profile share × how many real programs hit it) divided by its cost — regardless of whether
-the row involved is at 0.3× or 3× of perl.  A hot path that is already "faster than perl"
-is still a target if it is where the cycles go; a 2× row is not a target if real programs
-spend no time there.  perl's column stays on the board as a sanity reference and the ten
-winning rows stay as the CONTROL rows every perf agent prints beside its numbers, nothing
-more.  (`docs/where-the-time-goes.md` is the earlier profile-driven record; this plan
-re-instates that method with macro programs as the subject.)
+"Forget beating Perl in individual items, we do enough for that."  So the board's pcl/perl
+ratios stop being the steering instrument.  The metric is **PCL's own seconds on
+representative programs**; a lever is ranked with **at least half its weight on how
+low-hanging it is** (how little compiler/runtime work, how little risk, how contained the
+change) and the rest on the seconds it removes (profile share × how many real programs hit
+it).  A hot path already "faster than perl" is still a target if it is where the cycles go
+and the fix is cheap; a big win that needs a design waits behind the cheap ones.  perl's
+column stays on the board as a sanity reference and the ten winning rows stay as the CONTROL
+rows every perf agent prints beside its numbers, nothing more.  **`pack`/`unpack` are PARKED
+(USER): the transpiled oracle and its 3 s extension load are not touched until the XS
+question is answered — if pclxs carries `pack`, that whole cost class goes away without
+compiler work.**  (`docs/where-the-time-goes.md` is the earlier profile-driven record; this
+plan re-instates that method with macro programs as the subject.)
 
 Method, unchanged: every transform is a NAMED Kind-A/Kind-B emission in the registry
 (`PCL_OPT=none` runs identically — `Pl/t/passes-01.t`); a change is SIZED first by the
@@ -33,86 +37,67 @@ replaced, one core, interleaved series, best-of-K, a byte-identical control pair
 window); one perf agent per round; the merged tree's sweep is the correctness bar; a row that
 gets slower anywhere is a stop.
 
-### A.1 The yardstick first: macro programs, their constant terms, and a PROFILE of each
+### A.1 The cheap round first, the yardstick beside it
 
-The board has nineteen micro-rows and no macro-row; a user's program is a mix plus constants.
-Round 27's perf agent adds THREE macro rows to `tools/bench-exec.pl`, measures each at N and
-2N (the intercept is the constant term, the slope the per-iteration cost), and PROFILES each
-with `sb-sprof` on the quiet box — the profile, not the ratio, is the deliverable:
+Because ease carries half the weight, the FIRST perf round is the three small levers whose
+cause is already known and whose change is a few dozen lines each (A.2 rows 1–3); the
+yardstick (macro rows, constants, profile) is built in the SAME round by the same agent
+after they ship, so round 28 has a ranked table to read.  The yardstick:
 
 | macro row | what it exercises | why this one |
 |---|---|---|
-| `json-rt` | `JSON::PP` encode+decode of a 50 kB nested structure, ×N | the commonest pure-Perl CPAN workload: hashes, arrays, string building, `sprintf`, regex, `pack`/`unpack` of unicode, method calls |
+| `json-rt` | `JSON::PP` encode+decode of a 50 kB nested structure, ×N | the commonest pure-Perl CPAN workload: hashes, arrays, string building, `sprintf`, regex, method calls (its `pack`/`unpack` of unicode is measured but NOT a target — parked) |
 | `moo-objs` | a `Moo` class with three attributes, ×N constructions + accessor calls | the OO mix: `bless`, method dispatch, closures, `local`, argument passing |
 | `textproc` | `Text::Balanced`/`Text::Wrap`-style line processing of a 1 MB string, ×N | regex-heavy string processing with `pos`, `substr`, `.=`, `split`, `join` |
 
-And FIVE constant terms measured on their own, each a one-line program timed end to end:
+Each measured at N and 2N (intercept = constant term, slope = per-iteration cost) and
+PROFILED with `sb-sprof` on the quiet box.  Four constant terms measured on their own, each a
+one-line program timed end to end: startup (`pcl -E 'print 1'`), module load warm and cold
+(`pcl -E 'use JSON::PP; print 1'`, second run / after `--clear-cache`), string eval (`pcl -E
+'eval "1"; print 1'`, the `pl2cl --server` spawn).  The extension load is NOT in the list
+(parked with `pack`).  **Round output: a RANKED TABLE** — every runtime function or emitted
+shape with ≥ 2 % of the cycles in any macro row, the constants as rows of their own, each with
+its candidate lever from A.2 or "no lever known", each with an EASE score — and the rounds
+after take it from the top of the ease-weighted order.
 
-| constant | how | today's guess (MEASURE) |
-|---|---|---|
-| startup | `pcl -E 'print 1'` | the saved core makes this ~0.1–0.2 s; confirm |
-| module load, warm cache | `pcl -E 'use JSON::PP; print 1'` twice, second run | the cached transpile's LOAD time (fasl or source?) |
-| module load, cold cache | same after `pcl --clear-cache` | the transpile itself — what the FIRST run of any program pays |
-| **extension load** | `pcl -E 'print length pack("N",1)'` | **the `pack` rows' 1000× IS this**: `cl/pcl-pack.lisp` is loaded lazily from SOURCE and compiled at load — ~3 s in every program that touches `pack`/`unpack`, and CPAN uses them everywhere (Digest, Storable, Encode, JSON::PP's unicode path) |
-| string eval | `pcl -E 'eval "1"; print 1'` | the `pl2cl --server` spawn: a perl process + PPI load, ~0.3–0.5 s, once per program that evals |
+### A.2 Candidate levers, ranked (ease ≥ 50 % of the weight; the profile re-ranks the impact half)
 
-**The output of round 27 is a RANKED TABLE**: every runtime function or emitted shape with
-≥ 2 % of the cycles in any macro row, with the constant terms as rows of their own, each
-with its candidate lever from A.2 (or "no lever known — needs a design").  Rounds 28+ take
-that table from the top.  This is the same discipline that found the 2400× string buffer
-and the 13× raw slot in s3xx (`faster-codegen-suggestions.md` §0.5): profile, then emit.
+Ease: **S** = a few dozen lines in one place, one Kind-A name, no new fact; **M** = a new
+emission shape or runtime helper with a licence from EXISTING facts; **L** = a new fact
+family, a new invalidation rule, or a foreign library.  Impact: a guess until the profile
+(A.1) replaces it — "wide" = most CPAN programs hit it, "narrow" = a shape.
 
-**Decisions the constants will force, in the order the numbers are likely to rank them:**
+| # | lever | ease | impact (guess) | what it is | cause known? |
+|---|---|---|---|---|---|
+| 1 | `symref-const` | **S** | narrow (symbolic access in older CPAN code, `Exporter`-style loops) | a CONSTANT string operand of `${"…"}`/`@{"…"}`/`&{"…"}` resolves once per site (a load-time cell); non-constant keeps the lookup | yes: `symref` resolves the string per access |
+| 2 | sort-result ADOPTION | **S** | wide (every `my @x = sort …`, `= map`, `= grep`, `= reverse`, `= keys`) | `p-array-=` whose RHS is a FRESH vector (the producer says so) adopts it instead of copying — A5's consumer analysis already proves freshness; the same helps every list-producing builtin | yes: the copy is visible in the A5 profile |
+| 3 | foreach-raw over a LIST of arrays | **S–M** | medium (`for my $x (@a, @b)`, `for (@$r, @$s)`) | iterate each array in turn, no flattened temporary; #1140's facts already say which arrays are safe | yes: `feread2` flattens (0.47× → 1.32× for one extra array) |
+| 4 | const-key slice assignment | **M** | medium (`@h{qw(a b)} = …` is idiomatic) | a list-assign whose LHS slice has constant keys/indices becomes N direct stores | yes (§0.2h): the generic list-assignment path |
+| 5 | `p-array-=` from a RANGE | **M** | narrow–medium | `@a = (1..$n)` and `(1..20, $_)` fill in one loop, no materialised range | yes: `arrfill` |
+| 6 | raw-element rvalue slices | **M** | medium (`@a[…]`, `@h{@k}`) | fill a fresh simple-vector directly when the container is raw-element (the #1140 facts + the hash's raw flag) | yes (§5): keys and lookups, not boxes |
+| 7 | sub-call frame trimming | **M** | **wide** (CPAN code is call-dense) | a sub proven not to `goto`/`wantarray`/`caller`/string-eval gets a leaner `p-sub-frame`; `raw-params` coverage measured (which subs still take boxed `@_`) | partly: #964 protocol; needs the `moo-objs` profile |
+| 8 | typed key sort | **M** | narrow | after adoption (#2): a merge sort specialised for all-fixnum / all-string key vectors | yes: the generic `stable-sort` |
+| 9 | `strcat` residue | measure | narrow | profile first (`sb-sprof` over the row); no design until the profile names it | no |
+| 10 | per-CLASS method + overload-handler cache (#582) | **L** | wide for OO code | blocked on the `@ISA`-write invalidation rule — a Fable design | yes: #73 measured the lookup share |
+| 11 | PCRE2 regex backend (#71, + #196 hangs, #477 quadratic `pos`) | **L** | wide for text code, and a PARITY lever | sb-alien binding; the JS target's tier design reuses the classification | yes: the engine itself |
+| — | `pack`/`unpack` (#74, the extension load) | — | — | **PARKED (USER) until the XS decision** | yes, but not ours to fix yet |
 
-1. **The extension load is very likely the biggest single apple.**  If ~3 s is confirmed,
-   the fix is one of: (a) compile the three checked-in extensions into the saved core (it is
-   content-keyed, so a change makes a new core — no staleness); or (b) cache each extension's
-   FASL under `~/.pcl-cache/` keyed like the core.  (a) is simpler and makes `pack` cost what
-   a builtin costs; the per-call cost that remains is #74's subject (constant-template
-   memoization, ~5× measured s3xx).  Acceptance: the `pack` row and `perl-tests/pack.t`'s 54 s run.
-2. **Module load** — if the cached transpile is loaded from source each run, cache the FASL
-   too (the same mechanism as 1b).  If it is already a fasl, nothing to do.
-3. **String eval** — if the server spawn dominates a program with one `eval "…"`, the lever
-   is a persistent `pl2cl --server` kept warm across runs (an idle-timeout daemon) — a Fable
-   design (a listening compiler's security, per-user socket), NOT before the number says so.
-4. **Startup** — only if > 0.3 s.
+### A.3 The rounds (each round = ONE perf agent + the correctness agents)
 
-### A.2 Candidate levers, by absolute cost class (the profile ranks them; this lists what is known)
+1. **Round 27 perf = levers 1–3 + the yardstick.**  Three sizings by the hand-replaced A/B
+   (ship what clears 20 % of its row), then the macro rows, the four constants and the
+   profiles → the ranked table.
+2. **Round 28 perf = levers 4–6** (the aggregate family, one mechanism: raw-element containers
+   under the #1140 facts) — sized together, ordered by the table.
+3. **Round 29 perf = lever 7** if `moo-objs`' profile puts the frame protocol high; else the
+   next table entry.
+4. **Fable designs in between**, unblocking the L rows for later rounds: the `@ISA`-write
+   invalidation for #582; the PCRE2 backend (also Part B's regex question); the string-eval
+   daemon only if the constant says so.  **The XS decision (USER) unparks `pack` or closes it.**
 
-The micro-row work left a catalogue of KNOWN causes.  They are listed here by the kind of
-cost they remove, so the profile can pick them up by name; the ratio column is gone on
-purpose.
-
-| cost class | where the cycles go | lever (known or to size) | size |
-|---|---|---|---|
-| **constant terms** | extension load (~3 s), module load, compiler spawn for string eval, startup | A.1 items 1–4 | small–medium |
-| **calls** | every user-sub call pays the `p-sub-frame`/`%p-leavesub` protocol (#964), argument flattening into `@_`, the context bind; CPAN code is call-dense even where the bench loops are not | measure the per-call floor on `moo-objs`; levers: `raw-params` coverage (which subs still take the boxed `@_` path), the `tail-return` family, a leaner frame for subs proven not to `goto`/`wantarray`/`caller` | measure first |
-| **method dispatch** | the string-keyed dispatch with memos (#73 cache-free); every `use overload` operation looks the handler up per op | per-CLASS handler + method cache (#582), blocked on `@ISA`-write invalidation — a Fable design | medium |
-| **aggregates** | keys and lookups, not value boxes (§5 of the suggestions): hash key stringification, `p-gethash` on non-constant keys, slices materialising temporaries (`slices`, `sliceasgn`), list assignment from ranges (`arrfill`), multi-array foreach flattening (`feread2`) | raw-element slice fast paths on the #1140 facts; `p-array-=` filling from a range; foreach-raw over a list of arrays; const-key slice assignment as N stores | medium |
-| **sort** | after A5 the collector copy, the decorate, the generic `stable-sort`, and the result COPIED into `my @x` | `p-array-=` ADOPTS a fresh vector (licensed by A5's own consumer analysis); a typed merge sort for all-fixnum / all-string keys | small / medium |
-| **symbolic access** | `${"name"}` resolves the string per access | `symref-const`: a constant string resolves once per site | small |
-| **strings** | `.=` is buffered (#62/#881); what remains in `strcat`, and `sprintf`/`pack` templates re-parsed per call (#74) | profile `strcat`; #74 memoization | measure / medium |
-| **regex** | the cl-ppcre engine: `/./g` scanning, exponential backtracking (#196), `pos` quadratic on long strings (#477) | #71 PCRE2 via sb-alien — the one lever that is also a PARITY lever; a Fable design, its own round | large |
-| **the general form** | `PCL_OPT=none` is the correctness twin; anything the profile finds in a Kind-A path must be re-measured with the name off, so the optimisation and not the general form gets the credit | rule, not lever | — |
-
-### A.3 The rounds (proposed order; each round = ONE perf agent + the correctness agents)
-
-1. **Round 27 perf = A.1**: the three macro rows, the five constants, the `sb-sprof` profile of
-   each macro row → the RANKED TABLE; the extension load moved into the core (or fasl-cached)
-   in the same round if it is the ~3 s the pack rows say; #74 sized.
-2. **Round 28+ perf = the table from the top**, one cost class per round where the levers
-   share a mechanism (the aggregate family together; the three small items — symref-const,
-   sort-result adoption, multi-array foreach-raw — together).  Each lever is SIZED by the
-   hand-replaced A/B before compiler work; a sizing under 20 % of the row closes the lever by
-   measurement.
-3. **Fable designs in between**: the per-class cache's `@ISA`-write invalidation (#582); the
-   PCRE2 backend (#71 + #196 + #477), which is also Part B's regex question; the string-eval
-   daemon if A.1 item 3 says so.
-
-What "done" looks like for Part A: the three macro rows' constant terms named and cached;
-each macro row's profile flat (no function above ~10 %) or its top entries owned by a filed
-lever with a sizing; the general-form compiler (`PCL_OPT=none`) still running everything
-identically.
+What "done" looks like for Part A: every S and M lever either shipped or closed by its sizing;
+the macro rows' profiles flat (no function above ~10 %) or their top entries owned by a filed
+lever; the general-form compiler (`PCL_OPT=none`) still running everything identically.
 
 ---
 
@@ -203,7 +188,7 @@ new `docs/c-target-notes.md` become SHORT: each is the B4 kernel table + the B1 
 per-family mapping + the open items.  The JS prototype itself waits for the quiet IR, as the
 USER ruled (2026-09-01); the C notes are written when someone needs them.
 
-### B.2 What each target must supply — the table B4 fills in
+### B.2 What each target must supply (the minimum) — the table B4 fills in
 
 | obligation (IR concept) | in the CL runtime | JavaScript | C |
 |---|---|---|---|
@@ -223,7 +208,74 @@ USER ruled (2026-09-01); the C notes are written when someone needs them.
 B1 tells a backend WHICH rows of this table a given program needs (through B2/B3); B4 tells
 it which host constructs it must implement; B6 tells it when it is right.
 
-### B.3 Order and cost, summarised
+### B.3 What a FAST backend needs from the IR — facts, not PCL's rewrites
+
+The B.1–B.3 items make a backend POSSIBLE.  A fast one needs something else: **the facts PCL
+proves, delivered as facts**, because a foreign target cannot use PCL's own fast-path
+rewrites (`%p-push1`, `%p-sort-classic`, `p-incf-raw` are shaped for SBCL) but can use the
+PROOF behind each of them to pick its own.  Today the facts reach the IR in two forms: on
+declarations (#1035: `p-let`'s class + `:perl`/`:why`, `p-raw-params`, `p-sub`'s plist) and
+implicitly, as the Kind-A rewrite that consumed them.  The rule for Part B is therefore:
+
+> **Every Kind-A/Kind-B licence is printed as a FACT on the general form**, so `PCL_OPT=none
+> --facts` yields the plain IR with every proof attached — the portable speed — and the
+> SBCL-shaped rewrites stay what they are: PCL's own consumption of those facts.
+
+What each fact buys, per target (the ones PCL already proves are marked ✓; the rest are the
+facts a fast backend would want and PCL does not yet compute):
+
+| fact (on the IR node) | PCL proves it | JavaScript uses it for | C uses it for |
+|---|---|---|---|
+| scalar class: raw numeric / raw string / boxed (`p-let :class`) | ✓ | a plain `let` number or string instead of a `{v}` cell — V8's fast path; no box allocation | `int64_t`/`double`/`char*` locals instead of an SV; no refcount traffic |
+| numeric RANGE proof (fits int32 / fits int53 / fits int64) | ✗ (the s3xx experiments: the fixnum win is gated on it) | `x \| 0` int32 arithmetic, or safe double arithmetic without a BigInt guard; without it every `+` must check overflow to NV | `int64_t` with overflow check vs perl's IV→NV promotion |
+| array facts: escapes / written-in-region (#1140) | ✓ | a plain JS `Array` used in place (push = `arr.push`), no alias cells; a raw `for…of` | stack or arena allocation of the array; `realloc` growth; no per-element SV |
+| element HOMOGENEITY (all-fixnum / all-double / all-string array) | ✗ | `Int32Array`/`Float64Array` or a V8 PACKED_SMI_ELEMENTS-shaped array | `int64_t[]`/`double[]` instead of `SV*[]` |
+| foreach loop var read-only (`foreach-raw`) | ✓ | a `for (const x of arr)` — no alias object per iteration | iterate by value, no alias pointer |
+| hash key class (constant string / small-int) and raw-element hash | ✓ partly (raw elements; #982 small-fixnum keys) | a JS object with a stable shape (hidden class) for constant-key hashes, `Map` for dynamic ones | open-addressing table with interned keys; a struct for constant-key "record" hashes |
+| sub facts: `:returns` family, `:insensitive` (context-insensitive), no `goto`/`caller`/string-eval/`local` inside (#1035, #1045) | ✓ | a plain JS function with positional parameters and a plain `return`; no wantarray argument; no frame object | a C function with a fixed prototype; no `@_` array; no frame push |
+| parameter class (`p-raw-params`) | ✓ | positional parameters, no `arguments` array, no `@_` aliasing | positional C parameters |
+| capture manifest (`:captured`/`:spanning`, the `:why` on cells) | ✓ | closures are native — the manifest says which `let`s must live in the closure scope vs the loop body | closure conversion: heap-allocate ONLY the captured cells, everything else on the stack |
+| call-site facts: callee statically known, monomorphic method site, static context | partly (insensitive-call; static ctx where a `p-*-ctx` bind is absent) | a direct call instead of dispatch; V8 inline caches reward a stable receiver shape, so blessed hashes should be shaped consistently | a direct C call; a per-site cache for method calls |
+| `tail-return` (a `return` in tail position) | ✓ | a plain `return` — no exception for non-local exit | a plain `return` — no `longjmp` |
+| string facts: buffer-only use (`str-buffer`), byte-only content | ✓ (buffer), ✗ (byte-only) | V8 ropes make `+=` cheap already; byte-only strings can be `Uint8Array`/Latin-1 one-byte strings | a growable byte buffer; UTF-8 only where the content is non-ASCII |
+| regex TIER per literal (native / PCRE / refused) + the parsed flags (B5) | ✗ (the classifier is designed, js-plan §II.8 item 3) | native `RegExp` (V8's engine is fast) for the common subset, PCRE2-WASM only where needed | PCRE2 with JIT; literal patterns compiled once at load |
+| dynamic-scope use (`local`, magic globals written) per sub | partly (the #1035 plist could carry it — B3) | skip the save/restore stack for subs that never `local`; magic globals as module-level `let`s | skip the dynamic stack; magic globals as plain globals |
+| exception use (`die`/`eval BLOCK` reachable) per sub | ✗ (B3's `:needs`) | no `try` frame where nothing can throw (V8's `try` is cheap but not free in tight loops) | no `setjmp` frame — the biggest C-side cost avoided |
+| phase facts (`BEGIN`/`INIT`/`END` present) | ✓ (form order) | run in order; no phase machinery when absent | same |
+
+Three facts on this list are new work for PCL itself and would pay on the CL target too,
+so they are Part A candidates as well as Part B ones: the **numeric range proof** (s3xx measured
+~10× for native fixnum add once it exists — it was rejected only because it is unsound
+without the proof), **element homogeneity** (typed arrays on every target), and **per-sub
+exception/dynamic-scope use** (B3's `:needs`, which on the CL target would let `p-sub-frame`
+drop its `catch` for subs that cannot `return` non-locally — lever 7 of A.2).
+
+For the two targets specifically, the shape of a FAST runtime follows from the table:
+
+* **JavaScript (Node first, V8):** values are doubles and strings; the IR's class facts decide
+  which variables are bare JS values and which are `{v}` cells; blessed hashes are objects
+  with a constructor-per-class so V8 gives them a hidden class and inline caches do the
+  method-dispatch caching PCL does by hand; arrays with the #1140 facts are plain `Array`s
+  (or typed arrays with homogeneity); closures and exceptions are native and cheap when not
+  thrown; `local` is a save/restore stack used only in subs whose `:needs` says so; strings
+  are UTF-16 with a codepoint layer only where the byte-only fact is absent; regex tier
+  native → `RegExp`.  The one thing V8 cannot do fast is perl's IV/NV integer semantics —
+  the range proof is the lever, BigInt the fallback.
+* **C:** the IR's class facts map to C types directly (that is the whole point of carrying
+  them); the capture manifest is closure conversion; `tail-return` and the per-sub
+  `:needs` remove `setjmp`/`longjmp` from most subs; GC is the one decision the IR cannot
+  make for you — perl-style refcounting keeps `DESTROY` timing identical to perl (and pclxs's
+  ABI expects it), a tracing collector (Boehm) is simpler and faster for allocation-heavy
+  code but changes destructor timing; the plan's recommendation is refcounting with the
+  class facts keeping most values OUT of refcounted cells, which is exactly where perl's own
+  cost is.  Regex is PCRE2 with JIT, patterns compiled at load from B5's structured literals.
+
+So the Part B order becomes: B1–B4 (inventory, manifest, `:needs`, host-leak gate) → **B4½:
+facts printed on the general form (`--facts`, section B.3)** → B5 (data form + regex literals) → B6
+(conformance corpus) → the three new facts (range proof, homogeneity, per-sub `:needs`
+consumed on the CL target) as Part A levers.
+
+### B.4 Order and cost, summarised
 
 | step | what | cost | informs |
 |---|---|---|---|
