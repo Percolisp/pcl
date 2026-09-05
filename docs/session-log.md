@@ -2,6 +2,150 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
+
+**#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
+fix un-broke 28 files of perl's own t/mro/.**  `-norequire` is parent.pm's own
+switch, and perl's parent.pm strips it with one line: *if the FIRST element of
+the import list is `-norequire`, shift it.*  PCL had that rule in the wrong
+shape — `_process_use_base` walked the statement's children looking for a
+`-norequire` WORD (and for the spaced `- norequire`), which caught the two
+comma spellings and missed the third, because inside `qw( -norequire Foo )` the
+flag is not a token at all but the first word of the qw CONTENT.  @ISA came out
+`[-norequire Foo]`, `Bar->isa("-norequire")` was TRUE, a `-norequire` package
+was defined in the image, the C3 linearisation had an extra ancestor, and the
+emitted superclass `-norequire::plc--norequire` is how s470bm's host-leak
+census surfaced it in `t/uni/method.t`.  **The fix is the FLATTEN, not a third
+name test** (rule 11): one helper builds the import list in SOURCE ORDER as
+perl hands it to `import`, and parent.pm's own first-position rule runs ONCE
+over that list — so all three spellings agree because there is only one reading
+of them.  A `lib/parent.pm` shim was considered and rejected FOR THIS TASK:
+`use base`/`use parent` is consumed at COMPILE time to build the CLOS defclass
+for MRO, so a shim's `import` would need run-time @ISA changes to reach the
+class model — a different mechanism, and much larger than the bug.  **The
+flatten also fixes the PARENTHESISED list spelling, which the old scan dropped
+ENTIRELY** (it looked for Quote tokens directly under the Structure::List and
+PPI puts a Statement::Expression in between): `use base ('B','C')` left @ISA
+empty, emitted no defclass, and DIED at the first inherited method call — 28
+files of `t/mro/` are that spelling, found by the 1015-file emission A/B and
+not by the reproducer.  Probed six spellings vs perl 5.40.3 including the two
+that DIE in perl (a later `-norequire`; `use base` with the flag), where PCL
+stays lenient as it already was.
+
+**#1178 — an inline `my` in a CALL ARGUMENT emitted the non-existent op
+`p-my`, and `open ..., undef` opened the CWD.**  Two bugs, one reproducer
+(`ok((open my $fh, "+>", undef), "opened")`, the shape of
+`t/io/perlio_open.t:19`, which died at LOAD and took the whole file).  (1)
+`parse()`'s single-element branch unwraps a `PPI::Statement::Variable` AND
+strips the declarator, but unwrapped a `PPI::Statement::Expression` WITHOUT
+stripping — and **which of the two PPI builds is decided by the run's FIRST
+token, not by whether it contains a declarator**: `f((my $q = 3), 4)` is a
+Statement::Variable and worked, `f((open my $fh, "<", $p))` is a
+Statement::Expression one token later and did not.  The two arms are merged;
+stripping the declarator is part of unwrapping.  **And the strip is ASYMMETRIC
+for `local`, measured not guessed** — corpus-diff caught the first version
+deleting the `local` from `perl-tests/multideref.t:220`, where the
+Statement::Expression route has its own lowering; excluding `local` from BOTH
+was TRIED and is worse (it turns `f((local $g = 1))` into a call to a sub named
+`local`, which dies).  Residue **#1192**, with the finding that `pl-local` on
+that route IS that bogus call, so the family has two wrong answers, one per PPI
+class.  (2) With `p-my` gone the form ran and hit the second bug: undef
+stringified to "" and PCL opened the CURRENT DIRECTORY.  perl's three-argument
+open with an undef filename opens an **anonymous temporary file**; `p-open`
+gains a first clause that mkstemps and immediately unlinks, honouring TMPDIR as
+tmpfile(3) does.  Probed mode by mode: **perl's temp file is O_RDWR whatever
+the WRITE mode says** — a `>` handle reads its own bytes back after a seek and
+merely warns — so only `<` is one-directional, and the pipe/dup modes have no
+anonymous form at all (`'-|'` is EPIPE, `'<&'` dies), which is why the
+direction map answers NIL for them rather than erroring.
+
+**#1174 + #1173 — perl's two FATAL zero-operand arithmetic errors, plus
+substr past the end and a false `exists`.**  `1/0` let SBCL's own condition
+print itself, so `$@` carried a CL s-expression (`Operation was (/ 1 0)`);
+`5 % 0` was worse — it did not die at all, folding the zero case in with NaN
+and handing the program a plausible-looking value, rule 12's archetype.  Both
+are `p-die` now.  **ONE BODY for `%`, not two** (rule 11): `p-%=` spelled its
+arithmetic out again inline, which is exactly how `$x %= 0` came to raise a raw
+CL error while `$x % 0` answered NaN.  **The zero test is not the same test in
+the two ops**, and each spelling was probed: `/` tests the NUMBER (`5 / 0.5` is
+10, `1 / -0.0` dies), `%` tests the TRUNCATED number (`5 % 0.5` AND `5 % 0.9`
+both die).  Fifteen expressions now agree with perl where eight did not; the
+one that still does not is `5 % inf`, which perl answers 5 — **the NaN arm's
+infinite-RIGHT-operand disjunct is WRONG**, measured across four sign
+combinations and filed as **#1191** rather than guessed at.  Also `substr($s,
+10, 2)` on "abc" answered a defined "" where perl answers undef (so `defined
+substr($s,$i)` was true for every $i) — fixed, with the in-range
+one-past-the-end position still "" as perl has it; and **a false `exists` was
+undef where perl gives the DEFINED empty string** — #416's settled rule, and
+the whole family had it wrong because each op returned a CL boolean, so all
+four (`p-exists`, `p-exists-array`, `p-sub-exists`, `p-coderef-exists-p`) now
+wrap the `p-bool` that was already there.
+
+**#1177 — the five runtime internals the emitter writes package-qualified are
+EXPORTS now, so the port list is complete by construction.**  ir-spec §10a's
+claim is "the export list IS the IR's vocabulary and the generated inventory is
+the PORT LIST"; five names worked in generated code precisely BECAUSE they were
+qualified, so a backend that implemented every inventory row still could not
+load `use integer`, `SUPER::`, `local $!`, a labelled loop or a `qr//`.  Of the
+task's two options, (a) EXPORT was taken not because it is smaller but because
+it **cannot drift**: the generator reads the export list, so a future qualified
+emission is either an export and appears, or is not and shows up as a leak.
+Nothing about the emission changed.  Each of the five is filed in its real
+family rather than left to the generator's sigil heuristic, which read `%pcl-…`
+as a perl HASH and put three of them in `magic-global`; and
+`tools/ir-host-leak.pl`'s hard-coded exception for `p-qr` and `%pcl-loop-tag`
+is DELETED with them, because a per-name exception in the census is exactly
+what hid this class.
+
+**#1175 — four of the six host-leak families become four named ops, and ten
+symbols leave the census.**  `p-arg-supplied-p` (the signature-default arity
+test — 86 occurrences of CL `>` in signatures.t alone, and TWO hand-written
+copies of the test in `Pl/Parser.pm` collapsed into one), `p-literal-string`
+(a `\x{…}` escape or `tr///` range: four CL names and a quoted host TYPE
+designator become one call whose bad code points are INTEGER arguments),
+`p-install-data-handle` (the `__DATA__` registration, which also takes the
+quoted handle NAME out of the emission) and `p-vector-append` (`\(LIST)`'s
+spread — CL's `loop`, whose body is a language of its own and so the worst
+thing to leave in an IR).  Two are MACROS on purpose: the emission then costs
+exactly what the inline form cost.  **Family 3's closure shrinks #1176 from
+three meanings of a quoted symbol to two** — the `'string` type designator is
+gone.  Families 1 and 6 stop with their measurement: family 1 (`use integer`,
+nine bare operators) is the emission half of the already-filed **#1000**, where
+`use integer` stops bypassing overload dispatch, so a pure rename here would be
+redone; family 6 has no single trigger and is five unrelated one-line edits.
+
+**Also: the stale-guard repair the s416 rule asks for.**
+`Pl/t/wide-codepoint-01.t` rows 5 and 6 spelled `(concatenate 'string …)` out
+and failed the moment family 3 landed — caught by the gate in the same session,
+repaired with the same claims in the new spelling, and its second comment
+rewritten because the distinction it drew no longer exists.
+
+**Bars.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` **208 files / 7035 rows**,
+failures only the 13 known pclxs xs rows (xs-01 5, xs-02 4, xs-03 4 — the local
+pclxs is ABI 8 against the pin).  `tools/corpus-diff.pl` **10 of 111 files
+differ**, and the explanation is exact: those are the ONLY ten whose emission
+contains one of the four new ops.  The 1015-file wide emission A/B (lib/**.pm,
+the cpan board's modules and their t/, all 604 of perl's own t/*/*.t, plus the
+SHAPES corpus): 156 DIFF / 0 RCDIFF, 127 carrying exactly one new op and the
+other 29 being #1178's and #1179's own shapes.  **Host-leak census over the 111
+perl-tests files: 41 distinct at the start of the session, 38 after #1177, 31
+after #1175** — the eleven that left are named one by one in ir-spec §11b, whose
+table now carries three struck-through rows.  Inventory regenerated: 693
+exported names, 53 families, **0 UNCLASSIFIED**.  Targeted sweep over nine
+perl-tests files for the runtime change, before and after: TOTAL 1290 passing /
+54 failing, identical.  Companion `--jobs 1` over op/inc.t opbasic/arith.t
+op/int.t op/substr.t op/exists_sub.t op/delete.t, before and after: identical
+verdicts and counts.  pack.t after regenerating the artifacts: 5636/89, the
+blessed numbers, and all three artifacts byte-identical but for their `gen=`
+stamp.  Generation **v2-760**.  Guards: the new `Pl/t/census-bugs-01.t` (26 run
+rows, 8.6 s) plus three transpile rows in `inheritance-01.t`, inverse-verified
+on a `da5c310` checkout where 11 of the 16 then-present rows fail.
+
+**Filed:** **#1191** (`5 % Inf` answers NaN where perl answers 5 — the
+infinite-RIGHT-operand arm, with the nine-row table), **#1192**
+(`f((local $g = …))` — the `local`-in-expression family, wrong in BOTH PPI
+classes and in two different ways).
+
 ## Session 470bn (Opus agent, 2026-09-05) — round 27 PERF: the four small levers all ship (symref-const, the array bulk fill, numeric-slot, foreach-arrays) and the YARDSTICK says the biggest number in PCL is not codegen at all — `use JSON::PP` costs 6.4 s WARM
 
 Round 27's perf agent: `docs/plan-speed-and-ir-s470.md` A.2 rows 1–3 plus L4

@@ -111,6 +111,97 @@ not-supported.md → only then probe.*
 
 - **USER (2026-09-05): "forget beating Perl in individual items, we do enough for that — just try to get PCL as fast as possible."  The steering metric is PCL's ABSOLUTE time on representative programs (three macro rows + five constant terms + an sb-sprof profile per row → a RANKED table), not per-row pcl/perl ratios; the ten winning board rows are CONTROL rows only.  RANKING: at least HALF the weight on how low-hanging (easy to implement) a lever is, the rest on seconds removed.  **`pack`/`unpack` PARKED (USER) until the XS decision** — the transpiled oracle and its ~3 s extension load are not a target while pclxs may carry `pack`.  Plan: `docs/plan-speed-and-ir-s470.md` Part A (round 27 = the three S levers `symref-const`, sort-result ADOPTION, foreach-raw over a LIST of arrays, plus the yardstick: three macro rows + four constants + `sb-sprof` → a RANKED table).**
 - **The IR as a contract for a JavaScript or C backend = INVENTORY and MEASURE, not more semantics** (`docs/plan-speed-and-ir-s470.md` Part B): B1 the op inventory as generated data + gate row; B2 a per-program `USES`/`NEEDS`/`FACTS` manifest (`pl2cl --manifest`); B3 `:needs` on `p-sub`; B4 the host-leak census gate + the CL-kernel whitelist (ir-spec §11b); B5 `--emit-sexp`/JSON + structured regex literals; B6 `tools/ir-conform` (perl-oracled corpus, the pclxs pattern); B7 the target notes as tables.  **The FAST-backend half (Part B §B.3): every Kind-A/Kind-B licence is printed as a FACT on the general form (`PCL_OPT=none --facts`) — a foreign target cannot use PCL's SBCL-shaped rewrites but can use the PROOF behind each; the table maps each fact (scalar class, array escapes, foreach-raw, sub facts, raw params, capture manifest, tail-return, regex tier …) to what JS and C do with it; three facts PCL does not yet prove would pay on every target incl. CL: the numeric RANGE proof, element HOMOGENEITY, per-sub exception/dynamic-scope use.**  None changes generated-code speed; they interleave as the correctness slot.**
+
+## s470bo (2026-09-05, Opus) — the bugs the s470bm IR censuses found: #1179, #1178, #1173, #1174, #1177, and four of #1175's six leak families
+
+- **`-norequire` is parent.pm's FLAG and its rule is FIRST POSITION ONLY** —
+  perl's parent.pm is one line (`if (@_ and $_[0] eq '-norequire') { shift }`),
+  so `use parent qw(Foo -norequire)` really does try to require Foo.pm and a
+  later `-norequire` stays an ordinary (bogus) parent name.  `use base` has no
+  such flag at all (perl DIES "Base class package "-norequire" is empty"); PCL
+  stays lenient there, as it already was for the comma spelling.  #1179.
+- **The `use base`/`use parent` import list is FLATTENED ONCE, in source order,
+  and the flag rule runs over that list** (`Pl::Parser::_flatten_use_base_args`)
+  — not a name test per spelling.  Three copies of "is this the flag" become
+  one; the string `-norequire` appears in `Pl/` exactly once.  #1179.
+- **A `lib/parent.pm` shim is NOT the layer for this** (measured, not assumed):
+  `use base`/`use parent` is consumed at COMPILE time to build the CLOS
+  defclass for MRO, so a shim's `import` would need run-time @ISA changes to
+  reach the class model.  Considered and rejected for #1179; if it is ever
+  wanted, it is a class-model change, not a shim.
+- **`use base ('A', 'B')` — the PARENTHESISED list — was dropped ENTIRELY**
+  before s470bo (@ISA empty, no defclass, dead at the first inherited method
+  call): the old scan looked for Quote tokens directly under the
+  Structure::List and PPI puts a Statement::Expression in between.  **28 files
+  of perl's own t/mro/** are that spelling.  #1179.
+- **Which PPI statement class a parenthesised run gets is decided by its FIRST
+  TOKEN, not by whether it contains a declarator** — `(my $q = 3)` is a
+  `Statement::Variable`, `(open my $fh, "<", $p)` is a
+  `Statement::Expression`.  `parse()`'s unwrap stripped the declarator for the
+  first and not the second, which is how a bare `my` Word became a call to the
+  non-existent op `p-my` and killed the whole emitted file.  #1178.
+- **The declarator strip is ASYMMETRIC for `local`, and the asymmetry is
+  measured**: on the Statement::Expression route the `local` WORD has its own
+  lowering (`@{1, local $x[0][0]}`), so stripping it there DELETES a binding
+  (perl-tests/multideref.t:220 caught it); on the Statement::Variable route
+  there is no such lowering, so leaving it makes `f((local $g = 1))` a call to
+  a sub named `local`.  Excluding it from BOTH was tried and is worse.  #1178,
+  residue #1192.
+- **`open($fh, MODE, undef)` is perl's ANONYMOUS TEMPORARY FILE, and the file
+  is O_RDWR whatever the WRITE mode says** — probed: `open($fh,'>',undef)`,
+  print, seek 0, readline reads the line back and merely WARNS.  Only `<` is
+  one-directional.  The pipe and dup modes have NO anonymous form
+  (`'-|'` → undef + EPIPE, `'<&'` dies), so the direction map answers NIL for
+  them and their own clauses answer instead.  #1178.
+- **perl's two fatal zero-operand arithmetic errors do not test the same
+  thing**: `/` tests the NUMBER (`5 / 0.5` is 10, `1 / -0.0` DIES), `%` tests
+  the TRUNCATED number (`5 % 0.5` and `5 % 0.9` both die).  Both are
+  `p-die` now — "Illegal division by zero" / "Illegal modulus zero", trappable.
+  #1174 + #1173.
+- **`5 % Inf` is 5 in perl, not NaN** — only a NaN operand or an infinite LEFT
+  operand gives NaN; with an infinite RIGHT operand perl computes the ordinary
+  mathematical modulo, carrying the sign of the right operand (`-5 % inf` is
+  Inf).  PCL answers NaN for all four sign combinations.  Measured, NOT fixed:
+  **#1191**.
+- **`substr($s, OFFSET)` PAST THE END is undef; ONE PAST the end is ""** — the
+  in-range boundary position keeps the empty string, everything beyond it is
+  undef.  #1173(a).  The unconditional "substr outside of string" diagnostic
+  stays: perl gates it on `use warnings` (#221).
+- **A false `exists` is the DEFINED empty string, in every form** — #416's rule
+  applied to the whole family (`p-exists`, `p-exists-array`, `p-sub-exists`,
+  `p-coderef-exists-p`), all of which returned a CL boolean and so answered
+  undef.  #1173(b).
+- **The runtime's EXPORT LIST is the IR's vocabulary, so a name the emitter
+  writes package-qualified must be exported anyway** — five were not
+  (`%pcl-to-integer`, `%pcl-super-indirect`, `%pcl-local-errno-init`,
+  `%pcl-loop-tag`, `p-qr`), and they worked precisely BECAUSE they were
+  qualified, which is what made them invisible to the port list.  Exporting is
+  the option that cannot DRIFT: the generator reads the export list, so a
+  future qualified emission either appears in the inventory or shows up as a
+  leak.  #1177.
+- **A per-name exception in the census is what hides a class** —
+  `tools/ir-host-leak.pl`'s hard-coded allowance for `p-qr` and `%pcl-loop-tag`
+  is deleted with #1177, not kept.
+- **A host-leak family closes as ONE named `p-*` op with a `Contract:` tail,
+  and its `Pl/t/ir-host-leak-01.t` row STAYS with an EMPTY expected set** — so a
+  re-opened family fails a gate row instead of going unnoticed.  Four closed at
+  s470bo: `p-arg-supplied-p`, `p-literal-string`, `p-install-data-handle`,
+  `p-vector-append`.  Two of them are MACROS, so the emission costs exactly what
+  the inline form cost.  #1175.
+- **The host-leak census over the 111 perl-tests files: 41 distinct before
+  s470bo, 31 after** — and the number to compare against is a measurement of
+  the MERGED tree, not s470bm's own 38 (its tool counted differently).  The
+  eleven that left are listed one by one under ir-spec §11b's table.
+- **A quoted symbol in the IR now means TWO things, not three** — the host TYPE
+  designator `'string` went with `p-literal-string`.  What is left is (a) the
+  `p-chain-cmp` operator selectors (26 occurrences, ONE file — a runtime
+  dispatch change) and (c) perl labels and bareword filehandles (22
+  occurrences, four files — the HANDLE MODEL, since `*p-filehandles*` is keyed
+  `:test 'eq` on symbols at every site).  #1176, measured and split.
+- **`use integer`'s nine bare CL operators are #1000's, not #1175's** — the
+  same nine emission sites are where `use integer` stops bypassing overload
+  dispatch, so a pure rename would be redone.  #1175 family 1 stops there.
+
 ## s470bm (2026-09-05, Opus) — Part B instruments B1 + B2 + B4: the op inventory as DATA, the per-program manifest, the host-leak census and the measured CL kernel
 
 - **The IR's op INVENTORY is GENERATED, not written**: `tools/ir-inventory.pl` → `docs/ir-op-inventory.tsv` (682 rows, one per `:pcl` export) + `.md` (grouped by family, §10's rule quoted per family); gate row `Pl/t/ir-inventory-01.t` regenerates and compares the body (the #1072 pattern), 280 ms.  53 families: **19 are ir-spec §10 rows, 34 are families §10 has no row for**; 0 UNCLASSIFIED.  (#1170)
