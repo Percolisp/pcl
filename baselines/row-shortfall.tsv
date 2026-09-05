@@ -52,7 +52,7 @@ perl-tests/lc.t	2577	UNEXPLAINED
 perl-tests/length.t	11	UNEXPLAINED
 perl-tests/lex.t	8	UNEXPLAINED
 perl-tests/local.t	6	UNEXPLAINED
-perl-tests/loopctl.t	27	#1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
+perl-tests/loopctl.t	3	UNEXPLAINED
 perl-tests/magic.t	19	UNEXPLAINED
 perl-tests/method.t	65	UNEXPLAINED
 perl-tests/multideref.t	15	s470 (Fable): 13 UNEXPLAINED + 2 registered skips (rows 47/49, the RT #130727 quirk, cl/skip-registry.lisp; not-supported.md `local` section) -- they were ACCIDENTAL passes before s470bk's #1058

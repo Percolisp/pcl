@@ -2127,6 +2127,12 @@ sub gen_funcall_form {
   if ($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo') {
     my $fn = $self->expr_o->get_a_node($kids->[0]);
     if (ref($fn) && defined $fn->{_pcl_dyn_loop_exit}) {
+      # Half (b): the exit is PERFORMED, against the innermost dynamically
+      # enclosing loop's frame (%p-dyn-loop-exit throws to it), and dies with
+      # perl's own text when no frame is active.  The die below is the Kind-A
+      # gate's OFF arm — with no frame emitted, the two halves must agree.
+      return ['%p-dyn-loop-exit', ":$func_name"]
+        if Pl::Passes::enabled('dyn-loop-exit');
       my $in_sub = $fn->{_pcl_dyn_loop_exit};
       my $msg = length $in_sub
         ? qq{PCL: unsupported: "$func_name" exiting subroutine $in_sub }

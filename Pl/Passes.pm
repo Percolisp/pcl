@@ -70,6 +70,13 @@ our %KIND_A = (
   'raw-topic'      => 'Parser2 foreach: a topic loop `for (A..B) {…}` whose body has no dynamic `$_` reader binds `$_` as a raw per-iteration lexical (p-foreach-range-raw) instead of localizing the global',
   'raw-return-family' => "Parser2 sub_info `returns` + VarAnnotator write family (task #77): a root write `my \$x = f()` calling a KNOWN user sub whose every return is operator-coerced or literal takes THAT family, so the slot is a PROVEN raw write (no strict-freeze wrapper) instead of an unproven shape",
   'local-push'     => "VarAnnotator array facts (task #1140) + ExprToCL's push emission: `push \@a, SCALAR` on a NON-ESCAPING `my \@a` is (%p-push1 \@a X) -- %p-array-store-scalar plus the new length -- instead of p-push-impl's &rest consing, array-shape type test and four-way per-item cond (task #996 half A3)",
+  # THE ONE Kind-A gate that is not purely about speed, and it says so: with
+  # it OFF a loop emits today's frame-less shape AND the exit site keeps half
+  # (a)'s trappable "unsupported" die, so the two halves agree (no frame =>
+  # the site dies).  A program with no dynamic loop exit runs identically
+  # either way, which is the identity `Pl/t/passes-01.t` guards; a program
+  # that HAS one cannot, because the frame is the feature.
+  'dyn-loop-exit'  => "Pl::PExpr::TokenUtils::calls_user_code + Parser2 loops (task #1022 half (b)): a loop whose body can reach USER CODE establishes ONE catch of 'p-loop-dyn per loop ENTRY (`:dyn t`, %p-loop-driver / p-dyn-once), so a bare `last`/`next`/`redo` in a CALLED sub acts on the caller's innermost loop as perl's does; a provably call-free loop is emitted byte-identically and pays nothing",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 

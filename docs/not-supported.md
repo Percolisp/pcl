@@ -2979,9 +2979,8 @@ constant table.
 
 ## An unlabelled `last`/`next`/`redo` whose loop is not lexically here
 
-perl's unlabelled loop-control keywords exit the innermost **dynamically**
-enclosing loop.  A sub called from inside a loop can therefore exit its
-CALLER's loop:
+perl's unlabelled loop-control keywords act on the innermost **dynamically**
+enclosing loop, so a sub called from inside a loop can exit its CALLER's loop:
 
 ```perl
 sub do_last { last }
@@ -2989,49 +2988,53 @@ my $n = 0;
 for my $i (1..3) { $n++; do_last(); $n += 100 }   # perl: n = 1
 ```
 
-PCL lowers a bare `last`/`next`/`redo` to a **lexical** CL exit, which is a
-different thing, and it failed in two ways — one of them silent.  The `for`
-spelling above answered `n=303`: the `last` did nothing, all three iterations
-ran, and the statement after the call ran each time.  The `while` spelling
-reached SBCL as `(go :next)` with no such tag in scope and died at the call
-site with `attempt to GO to nonexistent tag`.
+**This WORKS since task #1022 half (b)** (s470bl; `docs/ir-spec.md` §6.2): a
+loop whose body can reach user code establishes one `catch` of `p-loop-dyn`
+per loop ENTRY, and the exit site throws to it.  Every loop shape carries the
+frame (`while`/`until`, C-style `for`, both `foreach` families and their raw
+twins, a bare block — labelled or not — and the `for`/`while` STATEMENT
+MODIFIERS), and all three keywords behave as perl's do: `next` runs the
+continue block / the C-for step and re-tests, `redo` re-runs the body on the
+same element without re-testing, `last` leaves the loop with the value a
+lexical `last` gives.  A bare exit with no dynamically enclosing loop keeps
+perl's own text, `Can't "last" outside a loop block`, trappably — which is
+also perl's answer for `do BLOCK while (…)` and for a `sort` comparator.
 
-Such a statement now **dies at run time, at its own site, trappably**:
+What is **NOT** supported is below.  All of it is LOUD: the exit site dies with
+perl's text rather than exiting the wrong loop.
 
+**A `continue` block on a `foreach` or a bare block declines the frame.**  The
+frame re-enters the loop at the point a lexical `next` would have reached, and
+a `foreach`'s continue block lives INSIDE the per-iteration binding (it reads
+the loop variable) while a bare block's sits after the tagbody — neither is a
+re-entry point the driver can reach.  So
+
+```perl
+sub f { next }
+for my $i (1..3) { f() } continue { $n += 1000 }   # perl runs the continue
 ```
-PCL: unsupported: "last" exiting subroutine do_last (dynamic loop exit; docs/not-supported.md)
-```
 
-A bare exit with no enclosing loop **anywhere** — `last;` at file level — keeps
-perl's own text, `Can't "last" outside a loop block`.
+dies instead of running the continue block.  `while`/`until` do NOT decline:
+their continue block is at the driver's own level, so a caught `next` runs it.
 
-**Why a die and not an announce-and-continue** (the s329 boundary, ruled again
-for this case by Fable in s470): that boundary covers an EFFECT-ONLY missing
-case in code that otherwise runs correctly.  An untaken loop exit is not that —
-it changes the CALLER's control flow, so the loop runs on with values the
-program then uses.  `while (1) { f() }` with `sub f { last }` never ends.
+**User code reached through MAGIC carries no syntactic marker, so the licence
+cannot see it** — an overloaded operator, a tie handler, `DESTROY`, a `%SIG`
+handler.  Measured against perl 5.40.3, this matters less than it looks: perl
+answers `Can't "last" outside a loop block` for a `last` inside an overloaded
+`+`, an overloaded `""` and a tie `FETCH` even when the operation is written
+inside a loop, and PCL answers the same, because such a loop takes no frame.
+The one divergence is an OUTER loop that DOES hold a frame: perl still refuses,
+PCL exits the outer loop (task #1163).
 
-**What still works, and is guarded** (`Pl/t/loop-exit-01.t`): the LABELLED form
-from a sub (`sub f { last OUTER }`) — it already lowers to the labelled
-non-local exit; every ordinary exit inside its own loop, in all four of PPI's
-loop shapes (`for`, `foreach`, `while`/`until`, and a bare block, which perl
-runs as a loop-once loop).
+**A `sort` comparator is a boundary in perl and is not one in PCL** (#1164):
+`for (…) { my @x = sort { f() } … }` with `sub f { last }` is
+`Can't "last" outside a loop block` in perl and exits the loop in PCL.  A
+`map`/`grep` block is transparent in BOTH (probed).
 
-**What would remove the limitation** is task #1022 half (b): a catch frame per
-loop ENTRY (not per iteration) with the loop state outside it, so a throw from
-a called sub can be caught by a loop it cannot see lexically.  It is
-measure-first — the frame must cost nothing on the counting-loop bench rows —
-and the cost of NOT having it is measured, in both populations:
-`perl-tests/loopctl.t` runs 40 of its 67 rows instead of 63 (its
-`sub test_last { last }` is called outside any `eval`, so the file aborts
-there), and in perl's own t/ the same shape costs `op/loopctl.t` 23 rows and
-`op/rt119311.t` 3 — that file is six `{ foo(sub { …; last }) }` sites, the
-very shape, testing a DESTROY-during-unwind bug.
-
-**What must NOT be marked, and was measured rather than assumed**: a `for`/
-`foreach` STATEMENT MODIFIER is a loop for `last` (`($heavy = /\W/) and last
-foreach (@_);` — core Exporter.pm's `import` is written exactly that way to
-avoid entering a block scope), and PPI puts no Compound around it.  A
-`while`/`until` modifier is NOT: perl answers `Can't "last" outside a loop
-block` for `$i++ and last while $i < 5`, the same rule that makes
-`do BLOCK while (…)` not a loop.
+**The Kind-A gate** `dyn-loop-exit` (`Pl/Passes.pm`) turns the whole mechanism
+off: `PCL_OPT=-dyn-loop-exit` emits the frame-less loops PCL emitted before
+half (b) and restores half (a)'s trappable
+`PCL: unsupported: "last" exiting subroutine NAME (dynamic loop exit)` at the
+exit site — the two halves must agree, since with no frame there is nothing to
+throw to.  It is the one Kind-A gate whose OFF arm is not semantics-preserving,
+and it says so in the registry.

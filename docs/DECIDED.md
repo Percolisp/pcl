@@ -11,6 +11,76 @@ authoritative doc first, then the line.*
 (review doc §7).  The rule now: read failing test → grep DECIDED.md → grep
 not-supported.md → only then probe.*
 
+## s470bl (2026-09-05, Opus) — #1022 half (b): THE DYNAMIC LOOP EXIT is BUILT and MEASURED but NOT MERGED (one compile-heap blocker); #1160 fixed on the way
+
+- **#1022 half (b)** (the Fable design of s470, built as designed): a bare
+  `last`/`next`/`redo` in a CALLED SUB now acts on the caller's innermost
+  DYNAMICALLY enclosing loop, as perl's does.  Two emissions: the exit site is
+  `(%p-dyn-loop-exit :last)` — throw the keyword to the shared tag
+  `p-loop-dyn` when a frame is active, else die with perl's own
+  `Can't "last" outside a loop block`, trappably — and a loop whose body can
+  reach user code carries `:dyn t`, which licenses the FRAME.
+- **ONE catch per loop ENTRY, never per iteration**, and that is what makes it
+  free: the loop's STATE lives outside the catch and a caught throw re-enters
+  the iteration tagbody where the corresponding LEXICAL exit would have
+  arrived (`:next` at the post-body forms, `:redo` at the body with the
+  foreach index backed up, `:last` by returning from the loop's own
+  `(block nil …)`).  ONE implementation — `%p-loop-driver` — serves `p-while`,
+  `p-for` and both foreach expanders; a bare block gets a WRAPPER instead
+  (`p-dyn-once`), because a loop-once carries no state, so `redo` is a restart.
+- **The licence is `Pl::PExpr::TokenUtils::calls_user_code`** and it is
+  conservative in the COSTING direction: a bareword it cannot place counts as
+  a call, so an error costs one catch per loop entry and never a missing frame.
+  A loop it clears is emitted BYTE-IDENTICALLY — measured: 21 of the 27
+  `tools/bench-exec.pl` rows byte-identical with the gate on or off, the 6 that
+  differ being exactly the rows whose loop body calls a sub.
+- **Kind-A gate `dyn-loop-exit`** (`Pl/Passes.pm`) — the one Kind-A gate whose
+  OFF arm is NOT semantics-preserving, and the registry says so: with no frame
+  there is nothing to throw to, so `PCL_OPT=-dyn-loop-exit` also restores half
+  (a)'s die at the site.  The two halves must agree.
+- **What DECLINES the frame, and it is loud, not silent** (#1161): a
+  `continue` block on a `foreach` or a bare block — theirs is not a re-entry
+  point the driver can reach (a foreach's continue block reads the loop
+  variable, so it lives inside the per-iteration binding).  `while`/`until`
+  are licensed WITH a continue block: theirs is a post-body form, and a caught
+  `next` runs it (probed, n=3003 = perl's).
+- **The magic-callback residue is much narrower than the design feared, and
+  that is a measurement** (#1163): perl itself answers
+  `Can't "last" outside a loop block` for a `last` inside an overloaded `+`,
+  an overloaded `""` and a tie `FETCH` written inside a loop — and PCL answers
+  the same, because such a loop takes no frame.  The one divergence is an
+  OUTER loop that DOES hold a frame.  A `sort` COMPARATOR is a boundary in
+  perl and is not one in PCL (#1164); a `map`/`grep` block is transparent in
+  BOTH (probed).
+- **A LABELLED dynamic exit was never a residue** — the brief's premise was
+  wrong and half (a) already said so: `sub f { last OUT }` works on both sides
+  (probed `ok=1`).
+- **#1160, found and fixed on the way**: `Parser2::_lower_bare_block`'s
+  LABELLED arm had no `(block nil …)`, so an unlabelled `last` inside a
+  labelled bare block died at load ("return for unknown block: nil") — and,
+  nested in a loop, SILENTLY exited the enclosing loop
+  (`for my $i (1..3) { L: { last } }` printed `1` where perl prints all three
+  iterations).  The wrap goes around the NEXT catch AND the continue forms, so
+  a bare `last` skips the continue block exactly as `last L` does.
+- **THE ONE BLOCKER, and it is MEASURED, not suspected: `t/op/loopctl.t` goes
+  40/0 → 0/0 on SBCL's COMPILE HEAP.**  `catch` costs ~4.8 MB of SBCL compile
+  IR each, and that file's own code is ONE 64 KB top-level form carrying 88
+  frames: the form conses 244.6 MB with the gate off and 691.2 MB with it on
+  (per-form measurement), and its peak live set then exceeds SBCL's default
+  1 GB — the file produces NO TAP at all.  Discriminated, not guessed:
+  replacing `(catch …)` with `(progn …)` in the driver and changing NOTHING
+  else puts the form back at 266.6 MB.  It is not the nesting (60 frames
+  nested 6 deep cost 0.25 MB each), not the frame's shape (the NLX-free
+  rewrite is 2689 MB total vs the first version's 2589), and neither
+  `notinline` (already applied by `_cap_inlining_if_huge`) nor
+  `(optimize (compilation-speed 3))` nor `(speed 0)` moves it.  The regression
+  is CONFINED: the eight frame-heaviest `perl-tests` files (loopctl,
+  sprintf2, local, split, magic, array, eval, aassign — 2974 rows) match
+  their baselines exactly, and `t/op/rt119311.t` goes 8/2 → 11/2, its
+  pre-(a) value.  The fix is a NARROWER LICENCE (frame only a loop that can
+  reach a marked exit SITE, rather than any user call), which is a design
+  change and needs a ruling — **so half (b) is NOT merged; #1022 carries the
+  numbers**.
 ## s470 (2026-09-05, Fable) — the speed METRIC re-based by the USER; the two overview plans
 
 - **USER (2026-09-05): "forget beating Perl in individual items, we do enough for that — just try to get PCL as fast as possible."  The steering metric is PCL's ABSOLUTE time on representative programs (three macro rows + five constant terms + an sb-sprof profile per row → a RANKED table), not per-row pcl/perl ratios; the ten winning board rows are CONTROL rows only.  RANKING: at least HALF the weight on how low-hanging (easy to implement) a lever is, the rest on seconds removed.  **`pack`/`unpack` PARKED (USER) until the XS decision** — the transpiled oracle and its ~3 s extension load are not a target while pclxs may carry `pack`.  Plan: `docs/plan-speed-and-ir-s470.md` Part A (round 27 = the three S levers `symref-const`, sort-result ADOPTION, foreach-raw over a LIST of arrays, plus the yardstick: three macro rows + four constants + `sb-sprof` → a RANKED table).**

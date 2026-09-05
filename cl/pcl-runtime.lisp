@@ -175,6 +175,8 @@
    ;; Control flow
    #:p-if #:p-unless #:p-while #:p-until #:p-do-while #:p-do-until #:p-for #:p-foreach #:p-foreach-raw #:p-foreach-range #:p-foreach-range-raw
    #:p-return #:p-return-empty #:p-tail-value #:p-goto-sub #:p-goto-computed #:p-last #:p-last-dynamic #:p-next #:p-redo
+   ;; the DYNAMIC loop exit (task #1022 half (b)) — both names are emitted
+   #:p-dyn-once #:%p-dyn-loop-exit
    #:p-continue #:p-break
    ;; I/O
    #:p-print #:p-say #:p-warn #:p-die
@@ -10691,8 +10693,168 @@ which is one of #1140's escape spellings (probed)."
   "Perl unless"
   `(if (not (p-true-p ,condition)) ,then-form ,else-form))
 
-;;; Helper: extract :label, :my and :continue from loop body-and-keys.
-;;; Returns (values label continue-form body myp).
+;;; ------------------------------------------------------------
+;;; THE DYNAMIC LOOP EXIT (task #1022 half (b); ir-spec §6.2)
+;;;
+;;; Perl's unlabelled `last`/`next`/`redo` act on the innermost DYNAMICALLY
+;;; enclosing loop, so a sub called from a loop body can exit its CALLER's
+;;; loop.  A CL `go`/`return` is lexical and cannot: inside a sub compiled on
+;;; its own there is no such tag.  So a loop whose body can reach a dynamic
+;;; exit establishes a FRAME — one `catch` of the shared tag `p-loop-dyn`
+;;; plus one special binding — and the exit site throws to it.
+;;;
+;;; ONE catch per loop ENTRY, never per iteration: the loop's STATE (the
+;;; foreach index, the C-for counter, the while condition's side effects)
+;;; lives OUTSIDE the catch, and a caught throw re-enters the iteration
+;;; tagbody at the point the corresponding LEXICAL exit would have reached —
+;;; `:next` at the post-body forms (the continue block, the C-for step),
+;;; `:redo` at the body itself, `:last` by returning from the loop's own
+;;; `(block nil …)`, which is exactly what an unlabelled lexical `last` does.
+;;; The catch is re-established only after a throw, so an undisturbed loop
+;;; pays one establishment for the whole loop.
+;;;
+;;; *p-dyn-loop-frames* is how the EXIT SITE knows whether any frame is
+;;; active without probing the CL catch stack: the frame's `let` increments
+;;; it, and %p-dyn-loop-exit dies perl-shaped when it is zero.
+(defvar *p-dyn-loop-frames* 0
+  "Count of dynamic-loop-exit frames (see %p-dyn-loop-exit) on this stack.")
+
+(defun %p-dyn-loop-exit (kind)
+  "Perform an unlabelled `last`/`next`/`redo` (KIND :last/:next/:redo) whose
+loop is not LEXICALLY here — the compiler emits this call in place of the
+lexical exit when its walk out to the sub/file boundary met no loop.
+
+With a frame active, throw KIND to the innermost one: `catch`/`throw` picks
+the innermost dynamically enclosing loop, which is perl's own rule.  With no
+frame, perl's answer is a fatal error at the exit's own site, and this is its
+text — trappable by `eval`, like every other PCL die."
+  (unless (member kind '(:last :next :redo))
+    (error "PCL: %p-dyn-loop-exit: unknown loop-control kind ~S" kind))
+  (when (plusp *p-dyn-loop-frames*)
+    (throw 'p-loop-dyn kind))
+  (p-die (format nil "Can't \"~(~A~)\" outside a loop block" (symbol-name kind))))
+
+;;; EVERY EXIT STAYS LEXICAL, and that is not a nicety.  The first version put
+;;; the loop's exit targets (the `(block nil …)` an unlabelled `last` returns
+;;; from, and the block the test's `return-from` names) OUTSIDE the catch, so
+;;; each of them became a NON-LOCAL exit THROUGH it: SBCL then compiles an NLX
+;;; entry per block, which costs a stack unwind per loop exit at run time and,
+;;; measured, pushed `t/op/loopctl.t` (88 frames) over the default 1 GB
+;;; compile heap — it produced NO rows at all.  Both targets are now INSIDE
+;;; the catch and the value travels out through `catch`'s own return value,
+;;; tagged by a SECOND value: `:%p-normal` means "the loop finished", its
+;;; absence means "a throw delivered a keyword".  A `throw` delivers one value,
+;;; so the mark is nil exactly then; nothing is consed either way.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-loop-driver (dynp exit-block test-fn body-form post-forms redo-fixup)
+    "THE per-iteration skeleton shared by p-while, p-for and the two foreach
+expanders — one implementation, so the frame cannot be right in one loop and
+wrong in another (rule 11).
+
+Pieces, in the order the loop runs them: TEST-FN is called with the name of the
+block the test must `return-from` to END the loop, and answers that form (nil
+for a loop with no test); BODY-FORM is one form — the iteration body, wrapped
+in whatever per-iteration binding the caller needs; POST-FORMS are the forms a
+LEXICAL `next` reaches by falling out of the body (a `continue` block, a C-for
+step).  REDO-FIXUP undoes an advance the caller made BEFORE the body (the
+foreach `(incf i)`) so a caught `:redo` re-runs the body on the same element;
+nil when there is nothing to undo.
+
+EXIT-BLOCK is the loop macro's own outer block: with DYNP nil the test returns
+from it directly, which is exactly the shape these macros have always emitted —
+the Kind-A `dyn-loop-exit` gate's OFF arm and the general form."
+    (if (not dynp)
+        `(block nil                       ; for unlabeled p-last
+           (tagbody
+            :next
+              ,@(let ((tf (funcall test-fn exit-block))) (when tf (list tf)))
+              ,body-form
+              ,@post-forms
+              (go :next)))
+        (let ((resume (gensym "RESUME"))
+              (val (gensym "VAL"))
+              (mark (gensym "MARK"))
+              (drv (gensym "DRV"))
+              (out (gensym "LOOPOUT"))
+              (lexit (gensym "LEXIT"))
+              (body-tag (gensym "BODY"))
+              (post-tag (gensym "POST")))
+          ;; RESUME lives outside the catch: it is what survives the throw and
+          ;; says where re-entry must land.  Inside, LEXIT ends the loop
+          ;; normally and `(block nil …)` is still the innermost block an
+          ;; unlabelled lexical `last` returns from — both LOCAL exits.
+          `(let ((,resume nil))
+             (block ,out
+               (tagbody
+                  ,drv
+                  (multiple-value-bind (,val ,mark)
+                      (catch 'p-loop-dyn
+                        (let ((*p-dyn-loop-frames* (1+ *p-dyn-loop-frames*)))
+                          (values
+                           (block ,lexit
+                             (block nil
+                               (tagbody
+                                  (case ,resume
+                                    ((nil) nil)
+                                    (:next (setf ,resume nil) (go ,post-tag))
+                                    (:redo (setf ,resume nil)
+                                           ,@(when redo-fixup (list redo-fixup))
+                                           (go ,body-tag))
+                                    (t (error "PCL: loop driver: unknown resume ~S"
+                                              ,resume)))
+                                :next
+                                  ,@(let ((tf (funcall test-fn lexit)))
+                                      (when tf (list tf)))
+                                  ,body-tag
+                                  ,body-form
+                                  ,post-tag
+                                  ,@post-forms
+                                  (go :next)))
+                             nil)          ; a lexical `last` fell out of block nil
+                           :%p-normal)))
+                    (if (eq ,mark :%p-normal)
+                        (return-from ,out ,val)     ; the loop's own value
+                        ;; a throw: %p-dyn-loop-exit validated the keyword, so
+                        ;; the arms below are the closed set it can deliver
+                        (case ,val
+                          (:next (setf ,resume :next))
+                          (:redo (setf ,resume :redo))
+                          (:last (return-from ,out nil))
+                          (t (error "PCL: loop driver: unknown dynamic loop-exit kind ~S"
+                                    ,val)))))
+                  (go ,drv))))))))
+
+(defmacro p-dyn-once (form)
+  "The dynamic-loop-exit frame for a LOOP-ONCE — a bare block, which perl runs
+as a loop that iterates once (Parser2::_lower_bare_block emits FORM).
+
+A wrapper suffices here where the real loops need %p-loop-driver, and that is
+a fact about the construct, not a shortcut: a loop-once carries no state
+across iterations, so `redo` is simply a RESTART of FORM, and `next` and
+`last` both end the block.  FORM keeps its own `(block nil …)` — all three of
+_lower_bare_block's arms emit one — so every LEXICAL exit inside it stays a
+local transfer inside this catch."
+  (let ((drv (gensym "ONCE")) (out (gensym "ONCEOUT"))
+        (val (gensym "VAL")) (mark (gensym "MARK")))
+    `(block ,out
+       (tagbody
+          ,drv
+          (multiple-value-bind (,val ,mark)
+              (catch 'p-loop-dyn
+                (let ((*p-dyn-loop-frames* (1+ *p-dyn-loop-frames*)))
+                  ;; FORM's own value is the block's — a bare block in tail
+                  ;; position IS its value.
+                  (values ,form :%p-normal)))
+            (if (eq ,mark :%p-normal)
+                (return-from ,out ,val)
+                (case ,val
+                  ((:last :next) (return-from ,out nil))
+                  (:redo (go ,drv))
+                  (t (error "PCL: p-dyn-once: unknown dynamic loop-exit kind ~S"
+                            ,val)))))))))
+
+;;; Helper: extract :label, :my, :dyn and :continue from loop body-and-keys.
+;;; Returns (values label continue-form body myp dynp).
 ;;;
 ;;; :my t marks a foreach whose loop variable is a perl `my` — the compiler
 ;;; states it because the runtime cannot see it.  Since the direction-D flip an
@@ -10702,19 +10864,33 @@ which is one of #1140's escape spellings (probed)."
 ;;; is right for `foreach $x` and WRONG for `foreach my $x`, whose variable is a
 ;;; fresh lexical no matter what a package variable of the same name is doing —
 ;;; so the emitter marks the declaration and this key overrides the guess.
+;;;
+;;; :dyn t marks a loop whose body can reach a DYNAMIC loop exit (task #1022
+;;; half (b)): the compiler found a call to user code in it, so a called sub's
+;;; bare `last`/`next`/`redo` may have to act on this loop.  It licenses the
+;;; frame — see %p-loop-driver.
+;;;
+;;; The leading keys are read in any order so a caller need not know the
+;;; others' spelling; :label is the one that must come first (its VALUE is a
+;;; symbol, and a loop label could in principle be named `my` or `dyn`).
 (defun parse-loop-keys (body-and-keys)
   (let* ((label (when (eq (first body-and-keys) :label)
                   (second body-and-keys)))
-         (after-label (if label (cddr body-and-keys) body-and-keys))
-         (myp (eq (first after-label) :my))
-         (rest (if myp (cddr after-label) after-label))
+         (rest (if label (cddr body-and-keys) body-and-keys))
+         (myp nil) (dynp nil)
          (continue-form nil)
-         (body rest)
-         (pos (position :continue rest)))
+         body pos)
+    (loop while (member (first rest) '(:my :dyn))
+          do (case (first rest)
+               (:my  (setf myp  (second rest)))
+               (:dyn (setf dynp (second rest))))
+          (setf rest (cddr rest)))
+    (setf body rest
+          pos (position :continue rest))
     (when pos
       (setf continue-form (nth (1+ pos) rest))
       (setf body (subseq rest 0 pos)))
-    (values label continue-form body myp)))
+    (values label continue-form body myp dynp)))
 
 ;;; Helper: generate the inner iteration body structure for Perl loops.
 ;;; Handles labeled (catch/throw for next/redo across loop boundaries)
@@ -10746,17 +10922,17 @@ inside the loop body correctly exits the enclosing function, not just the loop.
 CL's (loop) creates an implicit (block nil ...) that would intercept p-return.
 Labeled form adds (catch 'pcl::LAST-LABEL ...) so that 'last LABEL' works
 dynamically (across function calls), matching p-next/p-redo behavior."
-  (multiple-value-bind (label continue-form body) (parse-loop-keys body-and-keys)
+  (multiple-value-bind (label continue-form body myp dynp) (parse-loop-keys body-and-keys)
+    (declare (ignore myp))
     (let ((block-name (or label (gensym "WHILE")))
           (last-tag (when label (%pcl-loop-tag "LAST" label))))
       `(block ,block-name
-         ,(let ((inner `(block nil    ; for unlabeled p-last
-                          (tagbody
-                           :next
-                             (unless (p-true-p ,condition) (return-from ,block-name ""))
-                             ,(make-loop-iteration-body label body)
-                             ,@(when continue-form (list continue-form))
-                             (go :next)))))
+         ,(let ((inner (%p-loop-driver
+                        dynp block-name
+                        (lambda (b) `(unless (p-true-p ,condition) (return-from ,b "")))
+                        (make-loop-iteration-body label body)
+                        (when continue-form (list continue-form))
+                        nil)))
             (if label
                 `(catch ',last-tag ,inner)
                 inner))))))
@@ -10784,19 +10960,21 @@ propagates up unhindered."
 (defmacro p-for ((&optional init) (test) (&optional step) &rest body-and-keys)
   "Perl C-style for loop with optional :label.
 Uses tagbody/go instead of loop — see p-while for rationale."
-  (multiple-value-bind (label _continue body) (parse-loop-keys body-and-keys)
-    (declare (ignore _continue))
+  (multiple-value-bind (label _continue body myp dynp) (parse-loop-keys body-and-keys)
+    (declare (ignore _continue myp))
     (let ((block-name (or label (gensym "FOR")))
           (last-tag (when label (%pcl-loop-tag "LAST" label))))
       `(block ,block-name
          ,init
-         ,(let ((inner `(block nil    ; for unlabeled p-last
-                          (tagbody
-                           :next
-                             (unless (p-true-p ,test) (return-from ,block-name ""))
-                             ,(make-loop-iteration-body label body)
-                             ,@(when step (list step))
-                             (go :next)))))
+         ,(let ((inner (%p-loop-driver
+                        dynp block-name
+                        (lambda (b) `(unless (p-true-p ,test) (return-from ,b "")))
+                        (make-loop-iteration-body label body)
+                        ;; The STEP is what a lexical `next` reaches by
+                        ;; falling out of the body, so it is a post-form:
+                        ;; a caught `:next` must run it too.
+                        (when step (list step))
+                        nil)))
             (if label
                 `(catch ',last-tag ,inner)
                 inner))))))
@@ -10941,7 +11119,14 @@ binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
 slot as it stands).  Everything else — the flatten, the tagbody, the label
 catch, the package-cell localization — is one body, so the two loops cannot
 drift apart the way two copies would."
-  (multiple-value-bind (label continue-form body myp) (parse-loop-keys body-and-keys)
+  (multiple-value-bind (label continue-form body myp dynp) (parse-loop-keys body-and-keys)
+    ;; A `continue` block sits INSIDE the per-iteration binding here (it reads
+    ;; the loop variable), so it is not a post-form the driver can re-enter —
+    ;; the compiler therefore never licenses the frame for a foreach with one,
+    ;; and the combination arriving here is a compiler self-inconsistency
+    ;; (rule 12), not a quietly different loop.
+    (when (and dynp continue-form)
+      (error "p-foreach: :dyn with a :continue block — see %p-loop-driver"))
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
            (vec (gensym))
@@ -10958,18 +11143,23 @@ drift apart the way two copies would."
                 (,vec (%p-flatten-for-list ,raw))
                 (,i 0)
                 ,@(when cellp `((,old (sb-ext:symbol-global-value ',var)))))
-           ,(let* ((inner `(block nil    ; for unlabeled p-last
-                             (tagbody
-                              :next
-                                (when (>= ,i (length ,vec)) (return-from ,block-name ""))
-                                ,(if cellp
-                                     `(progn
-                                        (setf (sb-ext:symbol-global-value ',var)
-                                              (,elt-fn ,vec ,i))
-                                        ,@iter-forms)
-                                     `(let ((,var (,elt-fn ,vec ,i)))
-                                        ,@iter-forms))
-                                (go :next))))
+           ,(let* ((inner (%p-loop-driver
+                           dynp block-name
+                           (lambda (b)
+                             `(when (>= ,i (length ,vec)) (return-from ,b "")))
+                           (if cellp
+                               `(progn
+                                  (setf (sb-ext:symbol-global-value ',var)
+                                        (,elt-fn ,vec ,i))
+                                  ,@iter-forms)
+                               `(let ((,var (,elt-fn ,vec ,i)))
+                                  ,@iter-forms))
+                           nil
+                           ;; the index is advanced BEFORE the body (so a
+                           ;; lexical `(go :next)` cannot skip it), so a
+                           ;; caught `:redo` must back it up to re-run the
+                           ;; body on the SAME element
+                           `(decf ,i)))
                    (wrapped (if label `(catch ',last-tag ,inner) inner)))
               (if cellp
                   `(unwind-protect ,wrapped
@@ -11014,7 +11204,11 @@ A package-global loop var (%p-cell-loop-var-p, overridden by :my) is localized
 over its cell instead of let-bound, and is ALWAYS boxed: the cell's contract is
 that it holds a box, and a raw integer parked there would be read as one by
 anything that reaches the global by name."
-  (multiple-value-bind (label continue-form body myp) (parse-loop-keys body-and-keys)
+  (multiple-value-bind (label continue-form body myp dynp) (parse-loop-keys body-and-keys)
+    ;; see %expand-foreach: a foreach's `continue` block is inside the
+    ;; per-iteration binding, so it cannot be a driver post-form
+    (when (and dynp continue-form)
+      (error "p-foreach-range: :dyn with a :continue block — see %p-loop-driver"))
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
            (kind (gensym))
@@ -11041,17 +11235,17 @@ anything that reaches the global by name."
                      (iter-forms (cons `(incf ,i)
                                        (cons (make-loop-iteration-body label body)
                                              (when continue-form (list continue-form)))))
-                     (inner `(block nil    ; for unlabeled p-last
-                               (tagbody
-                                :next
-                                  (when (> ,i ,hi) (return-from ,block-name ""))
-                                  ,(if cellp
-                                       `(progn
-                                          (setf (sb-ext:symbol-global-value ',var) ,val)
-                                          ,@iter-forms)
-                                       `(let ((,var ,val))
-                                          ,@iter-forms))
-                                  (go :next))))
+                     (inner (%p-loop-driver
+                             dynp block-name
+                             (lambda (b) `(when (> ,i ,hi) (return-from ,b "")))
+                             (if cellp
+                                 `(progn
+                                    (setf (sb-ext:symbol-global-value ',var) ,val)
+                                    ,@iter-forms)
+                                 `(let ((,var ,val))
+                                    ,@iter-forms))
+                             nil
+                             `(decf ,i)))     ; see %expand-foreach
                      (wrapped (if label `(catch ',last-tag ,inner) inner)))
                 (if cellp
                     `(unwind-protect ,wrapped
@@ -15960,7 +16154,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-720"
+(defparameter *pcl-cache-generation* "v2-740"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

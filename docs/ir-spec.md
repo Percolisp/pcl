@@ -1526,7 +1526,7 @@ control:
 
 | Perl | unlabeled | labeled |
 |---|---|---|
-| `last` | exit the innermost loop block | throw to tag `LAST-<label>` |
+| `last` | exit the innermost loop block (LEXICALLY; a bare exit whose loop is not lexically here becomes %p-dyn-loop-exit, below) | throw to tag `LAST-<label>` |
 | `next` | jump to `:next` (runs `:continue` form) | throw to `NEXT-<label>` |
 | `redo` | jump to `:redo` (body restart, no cond/step) | throw to `REDO-<label>` |
 
@@ -1639,6 +1639,54 @@ lowered continue block **after the tagbody, inside the loop-once block**
 `redo` re-runs the body without it — Perl's semantics.  The continue
 block is its own lexical scope.
 
+
+**The DYNAMIC loop exit: `:dyn t` and the frame** (task #1022 half (b), s470bl;
+Kind-A gate `dyn-loop-exit`).  Perl's unlabelled `last`/`next`/`redo` acts on
+the innermost **dynamically** enclosing loop, so a sub called from a loop body
+can exit its CALLER's loop.  A CL `go`/`return` is lexical and cannot: inside a
+sub compiled on its own there is no such tag.  Two emissions state it:
+
+- the EXIT SITE — a bare `last`/`next`/`redo` whose walk out to the enclosing
+  sub or to file level met no loop — is `(%p-dyn-loop-exit :last)` (`:next`,
+  `:redo`), never the lexical exit.  The runtime throws the keyword to the
+  shared tag `p-loop-dyn` when a frame is active, and otherwise dies with
+  perl's own text, `Can't "last" outside a loop block`, trappably.  `catch`
+  picks the innermost active frame, which IS perl's "innermost dynamically
+  enclosing loop";
+- the LOOP carries `:dyn t` when its body can reach user code, and that
+  licenses the frame: **one `catch` of `p-loop-dyn` plus one binding of
+  `*p-dyn-loop-frames*` per loop ENTRY, never per iteration**.  The loop's
+  STATE (the foreach index, the C-for counter, the while condition's side
+  effects) lives OUTSIDE the catch, and a caught throw re-enters the iteration
+  tagbody where the corresponding LEXICAL exit would have arrived — `:next` at
+  the post-body forms (the `continue` block, the C-for step), `:redo` at the
+  body with the foreach index backed up, `:last` by returning from the loop's
+  own `(block nil …)`.  The catch is re-established only after a throw.
+
+A consumer that lowers this IR must reproduce both halves or neither: with no
+frame there is nothing to throw to, which is exactly what `PCL_OPT=none` /
+`-dyn-loop-exit` emits (frame-less loops, and a trappable
+`PCL: unsupported: "last" exiting subroutine NAME` at the site).
+
+**The licence is `Pl::PExpr::TokenUtils::calls_user_code`** over the loop
+statement's tokens, and it is conservative in the COSTING direction: a bareword
+it cannot place counts as a call, so an error costs one catch per loop entry
+and never a missing frame.  It sees a named/method/code-ref call, `goto`,
+`eval`, `require`, `tie`, a `sort`/`map`/`grep` whose comparator is a code ref
+in a scalar, an `s///e` replacement and a `${…}`/`@{…}` block inside an
+interpolation; it does NOT see user code reached through overload, a tie
+handler, `DESTROY` or `%SIG` (`docs/not-supported.md` has the measured
+consequence — perl refuses those exits too).  A loop the licence clears is
+emitted BYTE-IDENTICALLY to the pre-#1022(b) shape, which is what keeps a
+counting loop free of the frame.
+
+**Key order**: `:label NAME` must come first (its value is a symbol); `:my` and
+`:dyn` follow in any order; then the body; then `:continue (progn …)` last.
+A `foreach`-family loop or a bare block with a `continue` block is NOT
+licensed — its continue block is not a re-entry point the driver can reach —
+and the runtime treats the combination as a compiler self-inconsistency
+(rule 12).  `while`/`until` are licensed with a continue block: theirs is a
+post-body form.
 ### 6.3 Exceptions: `die` / `eval { }` / `$@`
 
 `die` signals a `p-exception` carrying either a string or an arbitrary

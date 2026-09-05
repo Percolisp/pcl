@@ -352,6 +352,148 @@ sub heredoc_is_command {
   return (($t->{_heredoc_content} // $t->content) =~ /^<<~?\s*`/) ? 1 : 0;
 }
 
+# --- Does this run of code CALL USER CODE?  (task #1022 half (b)) -----------
+#
+# THE LICENCE for a dynamic-loop-exit frame (ir-spec §6.2, Kind-A gate
+# `dyn-loop-exit`).  Perl's unlabelled `last`/`next`/`redo` act on the
+# innermost DYNAMICALLY enclosing loop, so a loop whose body can reach perl
+# code this compiler cannot see may have to catch one.  A body that cannot
+# reach any such code has no dynamic exit to catch, and is emitted EXACTLY as
+# it is today — that byte-identity is the licence's whole point, since the
+# frame is what a counting loop must not pay for.
+#
+# CONSERVATIVE IN THE COSTING DIRECTION, deliberately: a bareword this
+# predicate has never heard of counts as a CALL, so being wrong costs one
+# `catch` plus one special bind per loop ENTRY and never a missing frame.  The
+# safe set is therefore the BUILTIN table the compiler already trusts
+# (Pl::PExpr::Config::known_no_of_params — PExpr::_bareword_callable_here's
+# "core callable word") plus the grammar words PPI hands over as Words, MINUS
+# the handful of builtins that reach user code with no other syntactic marker.
+#
+# WHAT IT CANNOT SEE, and this is the residue docs/not-supported.md names:
+# user code reached through OVERLOAD, a TIE handler, DESTROY or a %SIG handler
+# carries no syntactic marker at all, so `for (…) { $a + $b }` is licence-free
+# even though an overloaded `+` could run a sub that says `last`.  Such an
+# exit then takes the perl-shaped "outside a loop block" die, which is loud.
+my %DYN_CALLY_BUILTIN = map { $_ => 1 } qw(
+  eval do require tie untie tied dbmopen dbmclose
+);
+
+# Words PPI hands over as PPI::Token::Word that are not in the builtin table
+# and are not calls: perl's grammar, its word-spelled operators, and the
+# builtins the table happens not to carry.
+my %DYN_SAFE_GRAMMAR = map { $_ => 1 } qw(
+  my our local state sub package use no
+  if unless while until for foreach else elsif continue
+  last next redo return
+  and or not xor cmp x eq ne lt gt le ge
+  q qq qw qr m s tr y
+  unlink select flock study reset lock sleep chomp chop
+  dbmclose endhostent endnetent endprotoent endservent
+  sethostent setnetent setprotoent setservent
+  gethostbyaddr gethostbyname gethostent getnetbyaddr getnetbyname getnetent
+  getprotoent getservbyname getservbyport getservent
+  msgctl msgget msgrcv msgsnd semctl semget semop shmctl shmget shmread shmwrite
+  chroot formline ioctl syscall umask waitpid
+);
+
+my %DYN_SAFE_WORD;      # built once, on first ask
+
+sub _dyn_safe_words {
+  return \%DYN_SAFE_WORD if %DYN_SAFE_WORD;
+  require Pl::PExpr::Config;
+  my $cfg = Pl::PExpr::Config->new;
+  %DYN_SAFE_WORD = map { $_ => 1 } keys %{ $cfg->known_no_of_params };
+  $DYN_SAFE_WORD{$_} = 1 for keys %DYN_SAFE_GRAMMAR;
+  delete $DYN_SAFE_WORD{$_} for keys %DYN_CALLY_BUILTIN;
+  return \%DYN_SAFE_WORD;
+}
+
+# Words that make the NEXT word a name being declared or named, not a call.
+my %DYN_DECLARATOR = map { $_ => 1 } qw(package sub use no format);
+
+# A bareword that is not a call: a sole hash-subscript key, a fat-comma left
+# side, the NAME in a declarator.  (Getting one of these wrong only costs a
+# frame, so the test stays the cheap shapes and does not reach for PExpr's
+# full classifier, which needs an environment this predicate has not got.)
+sub _dyn_word_autoquotes {
+  my ($t) = @_;
+  my $pv = $t->sprevious_sibling;
+  return 1 if $pv && $pv->isa('PPI::Token::Word') && $DYN_DECLARATOR{$pv->content};
+  my $nx = $t->snext_sibling;
+  return 1 if $nx && $nx->isa('PPI::Token::Operator') && $nx->content eq '=>';
+  # PPI puts a subscript's contents either directly in the Structure or in a
+  # Statement::Expression inside it, depending on the key's shape — accept
+  # both, and answer YES only when the word is the WHOLE key.
+  my $parent = $t->parent           or return 0;
+  $parent = $parent->parent
+    if $parent->isa('PPI::Statement') && $parent->schildren == 1;
+  return 0 unless $parent && $parent->isa('PPI::Structure::Subscript');
+  my @sib = $parent->schildren;
+  @sib = $sib[0]->schildren if @sib == 1 && !$sib[0]->isa('PPI::Token');
+  return @sib == 1 && $sib[0] == $t ? 1 : 0;
+}
+
+sub calls_user_code {
+  my ($elems) = @_;
+  my $safe = _dyn_safe_words();
+  for my $el (@$elems) {
+    next unless ref($el) && Scalar::Util::blessed($el);
+    for my $t ($el->isa('PPI::Token') ? ($el) : $el->tokens) {
+      # A code-ref call, a method call, an indirect sub call: `$c->()`,
+      # `$o->m`, `Foo->new`, `&foo()`, `&$c()`, `&{$c}()`.
+      return 1 if $t->isa('PPI::Token::Operator') && $t->content eq '->';
+      return 1 if $t->isa('PPI::Token::Cast')     && $t->content eq '&';
+      return 1 if $t->isa('PPI::Token::Symbol')   && $t->content =~ /\A&/;
+      # Code hidden INSIDE one token: `s/x/f()/e` (the replacement is perl),
+      # a regex with `(?{…})`, and any interpolation with a `${…}`/`@{…}`
+      # BLOCK in it (`"@{[ f() ]}"`).  The token stream shows none of these.
+      if ($t->isa('PPI::Token::Regexp') || $t->isa('PPI::Token::Quote')
+          || $t->isa('PPI::Token::QuoteLike') || $t->isa('PPI::Token::HereDoc')) {
+        # NB a HereDoc's BODY is `{_heredoc}` (an arrayref of lines); its
+        # `content` is only the `<<TAG` marker, which the rename passes rewrite
+        # in `{_heredoc_content}`.  `$t->heredoc` returns a LIST, so reading it
+        # through `|| []` yields the COUNT and dies "Can't use string as an
+        # ARRAY ref" — the slot is the one thing to read here.
+        my $c = $t->isa('PPI::Token::HereDoc')
+              ? ($t->{_heredoc_content} // $t->content)
+                . join('', @{ $t->{_heredoc} || [] })
+              : $t->content;
+        # A `${…}`/`@{…}` BLOCK only runs code where the text INTERPOLATES:
+        # `'@{[f()]}'`, `q{…}` and a `<<'E'` heredoc are literal (heredoc_is_raw
+        # is the one reading of that last question).
+        my $literal = $t->isa('PPI::Token::Quote::Single')
+                   || $t->isa('PPI::Token::Quote::Literal')
+                   || ($t->isa('PPI::Token::HereDoc') && heredoc_is_raw($t));
+        return 1 if !$literal && $c =~ /[\$\@]\{/;
+        if ($t->isa('PPI::Token::Regexp')) {
+          return 1 if $c =~ /\(\?\??\{/;
+          # `s/…/EXPR/e` — the REPLACEMENT is perl code, and it is inside this
+          # one token, so the walk above cannot see the call in it.
+          my %m = $t->get_modifiers;
+          return 1 if $m{e};
+        }
+        next;
+      }
+      next unless $t->isa('PPI::Token::Word');
+      my $n = $t->content;
+      unless ($safe->{$n}) {
+        next if _dyn_word_autoquotes($t);
+        return 1;                       # a user sub, or a word we cannot place
+      }
+      # `sort $cmp @l` / `map $code, @l`: the comparator/body is a CODE REF IN
+      # A SCALAR, which calls user code with no other marker.  The BLOCK
+      # spellings need nothing here — their block IS part of this body, so a
+      # call inside it is found by this same walk.
+      if ($n =~ /\A(?:sort|map|grep)\z/) {
+        my $nx = $t->snext_sibling;
+        return 1 if $nx && $nx->isa('PPI::Token::Symbol') && $nx->content =~ /\A\$/;
+      }
+    }
+  }
+  return 0;
+}
+
 # Does site A sit at or before site B?  1 / 0, or undef when the two are not
 # comparable (either site unknown, or they come from different documents).
 sub site_precedes {

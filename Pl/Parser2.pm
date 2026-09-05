@@ -9952,7 +9952,14 @@ sub _lower_compound {
     # as a bare block — v1's detector + statement fallback handle it.
     return $self->_fallback_stmt($stmt)
       if Pl::Parser::_bare_block_is_anon_hash($k[0]);
-    return $self->_lower_bare_block($k[0], $label, $vi, $cont, $tail_ctx);
+    # The dynamic-loop-exit licence (task #1022 half (b)): a bare block is a
+    # loop-once, so a `last` from a sub it calls exits it — perl-tests
+    # loopctl.t's `dynamically scoped` row and t/op/rt119311.t's six
+    # `{ foo(sub { …; last }) }` sites are exactly this shape.  A `continue`
+    # block declines: it sits after the tagbody inside the block, where the
+    # frame wrapper cannot re-enter it (see p-dyn-once).
+    my $dyn = !defined $cont && _dyn_keys([$k[0]->schildren]) ? 1 : 0;
+    return $self->_lower_bare_block($k[0], $label, $vi, $cont, $tail_ctx, $dyn);
   }
 
   my $kw = $k[0]->content;
@@ -10027,6 +10034,10 @@ sub _lower_compound {
     return $result;
   }
 
+  # The dynamic-loop-exit licence is read from the UNTOUCHED tokens, before
+  # any lowering: PExpr's cleanup mutates them destructively.
+  my @dyn = _dyn_keys(\@k);
+
   if ($kw eq 'while' || $kw eq 'until') {
     my ($cond_s) = grep { $_->isa('PPI::Structure::Condition') } @k;
     # The FIRST Structure::Block is the loop body; a second (after `continue`)
@@ -10048,7 +10059,7 @@ sub _lower_compound {
     # v1 skips the rewrite for `until`, matching perl.
     $cond = $self->_auto_defined_raw($cond) if $kw eq 'while';
     $cond = ['p-!', $cond] if $kw eq 'until';
-    my $result = ['p-while', $cond, _label_keys($label),
+    my $result = ['p-while', $cond, _label_keys($label), @dyn,
                   $self->_lower_scope([$block->schildren], $vi),
                   $self->_continue_keys(\@k, $vi)];
     if (@cond_mys) {
@@ -10117,7 +10128,7 @@ sub _lower_compound {
       my $step = $step_s ? ['list', $self->_lower_stmt($step_s, $vi)] : ['list'];
       my @body = $self->_lower_scope([$block->schildren], $vi);
       my $form = _decl_let([map { _decl_entry($_, ':box', '(make-p-box nil)', $vi) } @init_mys],
-                  ['p-for', $initform, $cond, $step, _label_keys($label), @body]);
+                  ['p-for', $initform, $cond, $step, _label_keys($label), @dyn, @body]);
       $self->{_let_bound_vars} = \%saved_lb;
       $self->{_live_lex} = \%saved_lex;
       return $self->_wrap_cond_mys($form, @head_mys);
@@ -10196,21 +10207,21 @@ sub _lower_compound {
       if ($lowprec_run) {
         $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
                  ['p-for', ['list', $self->_lower_expr($lowprec_run, $stmt, ':void')],
-                  $cond, $step, _label_keys($label), @body]);
+                  $cond, $step, _label_keys($label), @dyn, @body]);
       } elsif ($vi->{$name} && $vi->{$name}{unboxable}) {
         # a B-verdict/str-buffer counter must freeze/bufferize its init too
         $form = _decl_let([_decl_entry($name, _slot_class($vi->{$name}),
                                        _wrap_freeze($vi->{$name}, $name, $initval), $vi)],
-                 ['p-for', ['list'], $cond, $step, _label_keys($label), @body]);
+                 ['p-for', ['list'], $cond, $step, _label_keys($label), @dyn, @body]);
       } else {
         $form = _decl_let([_decl_entry($name, ':box', '(make-p-box nil)', $vi)],
                  ['p-for', ['list', ['p-my-=', cl_sym($name), $initval]], $cond, $step,
-                  _label_keys($label), @body]);
+                  _label_keys($label), @dyn, @body]);
       }
     } else {
       $form = ['p-for',
                ['list', ($init_s ? ($self->_lower_stmt($init_s, $vi)) : ())],
-               $cond, $step, _label_keys($label), @body];
+               $cond, $step, _label_keys($label), @dyn, @body];
     }
     $self->{_let_bound_vars} = \%saved_lb;
     $self->{_live_lex} = \%saved_lex;
@@ -10390,12 +10401,18 @@ sub _lower_compound {
         last;
       }
     }
+    # A foreach's `continue` block reads the loop variable, so it lives INSIDE
+    # the per-iteration binding and is not a post-form the dynamic-exit driver
+    # can re-enter: decline the licence rather than run a caught `next`
+    # without it (%p-loop-driver; the macro treats the combination as a
+    # compiler self-inconsistency and dies).
+    @dyn = () if @cont;
     return defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
          ['list', $cl_name, $from_form, $to_form],
-         _label_keys($label), @my_keys, @body, @cont]
+         _label_keys($label), @dyn, @my_keys, @body, @cont]
       : [($ro ? 'p-foreach-raw' : 'p-foreach'), ['list', $cl_name, $list_form],
-         _label_keys($label), @my_keys, @body, @cont];
+         _label_keys($label), @dyn, @my_keys, @body, @cont];
   }
 
   # `try BLOCK catch (VAR) BLOCK [finally BLOCK]` — perl 5.34's feature 'try'.
@@ -10589,6 +10606,34 @@ sub _label_keys {
   return (':label', cl_sym($label));
 }
 
+# `:dyn t` — THE DYNAMIC-LOOP-EXIT LICENCE for one loop (task #1022 half (b);
+# ir-spec §6.2; Kind-A gate `dyn-loop-exit`).  @$ELEMS is the whole loop
+# STATEMENT's significant children: perl's unlabelled `last`/`next`/`redo`
+# acts on the innermost DYNAMICALLY enclosing loop, so a loop that can reach
+# user code may have to catch one, and a loop that cannot is emitted exactly
+# as before and pays nothing.
+#
+# Scanning the WHOLE statement rather than only the body is deliberate: the
+# condition and a `continue` block DO run inside the frame, and the sections
+# that do not (a C-for INIT, a foreach LIST) sit outside the `catch` in the
+# expansion, so counting them can only cost a frame — never mis-catch a throw.
+sub _dyn_keys {
+  my ($elems) = @_;
+  return () unless Pl::Passes::enabled('dyn-loop-exit');
+  return () unless Pl::PExpr::TokenUtils::calls_user_code($elems);
+  return (':dyn', 't');
+}
+
+# Does this compound carry a `continue { … }` block?  The foreach family and
+# the bare block put theirs where the driver cannot re-enter it (inside the
+# per-iteration binding, or after the tagbody), so they decline the licence
+# rather than run a caught `next` without it — see %p-loop-driver.
+sub _has_continue_block {
+  my ($k) = @_;
+  return (grep { $_->isa('PPI::Token::Word') && $_->content eq 'continue' } @$k)
+         ? 1 : 0;
+}
+
 # `:continue (progn …)` pair for a while/foreach `continue { … }` block, placed
 # AFTER the loop body (parse-loop-keys finds :continue by position; v1 emits it
 # last), or nothing.  The continue block is its own lexical scope.
@@ -10613,7 +10658,7 @@ sub _continue_keys {
 # no bookkeeping: _lower_block's nested lets sit inside the tagbody, and a
 # (go …) legally jumps out of them.
 sub _lower_bare_block {
-  my ($self, $block, $label, $vi, $cont, $tail_ctx) = @_;
+  my ($self, $block, $label, $vi, $cont, $tail_ctx, $dyn) = @_;
   # `{ … } continue { … }` — the continue block (its own lexical scope) runs
   # after normal completion or `next`, is skipped by `last` (which exits the
   # enclosing block/LAST catch), and is not re-run by `redo` (which re-enters
@@ -10634,16 +10679,26 @@ sub _lower_bare_block {
                                  $value_tail ? $tail_ctx : undef);
   my $inner;
   if (defined $label) {
+    # The `(block nil …)` is what an UNLABELLED `last` inside a LABELLED bare
+    # block targets, and it was missing: `L: { $x=1; last; $x=2 }` emitted a
+    # `(return-from nil nil)` with no such block in scope and the whole form
+    # died at load ("return for unknown block: nil"), where perl leaves the
+    # block with $x = 1 (task #1160).  Worse in the nested spelling — an
+    # enclosing loop's `(block nil …)` caught it, so `for (…) { L: { last } }`
+    # exited the FOR loop instead of the bare block, silently.  It wraps the
+    # NEXT catch AND the continue forms, so a bare `last` skips the continue
+    # block exactly as `last L` does.
     $inner =
       ['block', cl_sym($label),
         ['catch', "(pcl::%pcl-loop-tag \"LAST\" '" . cl_sym($label) . ")",
-          ['catch', "(pcl::%pcl-loop-tag \"NEXT\" '" . cl_sym($label) . ")",
-            ['tagbody', ':redo',
-              ['catch', "(pcl::%pcl-loop-tag \"REDO\" '" . cl_sym($label) . ")",
-                ['progn', @body, '(go :next)']],
-              '(go :redo)',
-              ':next']],
-          @cont]];
+          ['block', 'nil',
+            ['catch', "(pcl::%pcl-loop-tag \"NEXT\" '" . cl_sym($label) . ")",
+              ['tagbody', ':redo',
+                ['catch', "(pcl::%pcl-loop-tag \"REDO\" '" . cl_sym($label) . ")",
+                  ['progn', @body, '(go :next)']],
+                '(go :redo)',
+                ':next']],
+            @cont]]];
   } elsif ($value_tail) {
     $self->{_blk_ret_counter} //= 0;
     my $ret = '--pcl-blk-ret--' . $self->{_blk_ret_counter}++;
@@ -10656,6 +10711,11 @@ sub _lower_bare_block {
   } else {
     $inner = ['block', 'nil', ['tagbody', ':redo', @body, ':next'], @cont];
   }
+  # The dynamic-loop-exit frame (task #1022 half (b)): a WRAPPER suffices for a
+  # loop-once — it carries no state across iterations, so a caught `redo` is a
+  # restart and `next`/`last` both end the block.  $inner keeps its own
+  # `(block nil …)`, so every LEXICAL exit inside it is untouched.
+  $inner = ['p-dyn-once', $inner] if $dyn;
   return ['let', ['list', ['list', '*package*', '*package*']], $inner];
 }
 

@@ -1,11 +1,10 @@
-# s470bi (task #1022 half (a), 2026-09-05): the row `loopctl.t 41 dynamically
-#   scoped` left this file BY EDIT and is NOT FIXED.  It no longer RUNS: the
-#   `sub test_last { last }` it calls now dies at its own site (the ruled loud
-#   half -- it used to answer $ok=0 silently), so the file aborts at test 41.
-#   #1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
-#   When half (b) lands the row runs again; if it then FAILS it comes back
-#   here with its own cause, and if it passes it stays out.  The 22 rows after
-#   it are in perl-suite-fails.tsv / row-shortfall.tsv, not here.
+# s470bl (task #1022 half (b), 2026-09-05): the row `loopctl.t 41 dynamically
+#   scoped` stays OUT of this file, and now for the right reason -- it RUNS
+#   and it PASSES.  s470bi removed it BY EDIT when half (a) made the file abort
+#   there; half (b) performs the exit, so `sub test_last { last }` called from
+#   `TEST41: { … }` leaves the bare block and $ok stays 1.  Measured:
+#   perl-tests/loopctl.t is 64/0/67, fully passing.
+#   #1022(b): the dynamic exit is PERFORMED; s470bi's (a) cost is back
 #   s470 (Fable, #1083): closure.t row 272 `cloneable with //ee` LEFT BY EDIT — a sub whose body can
 #   compile perl at run time (string eval, s///ee, use re eval + runtime pattern) is cloned per
 #   evaluation (BI s470bi, p-cloned-sub); the batch sweep on 8a3477d read it FIXED (+1, TOTAL 18559).

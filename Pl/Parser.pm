@@ -21,6 +21,7 @@ use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm qw(cl_sym cl_pkg);
 use Pl::ExprToCL;
 use Pl::Environment;
+use Pl::Passes ();
 use Pl::ProtoCache;
 # THE global partition (task #289): every declaration this file emits, and the
 # `local` lowering below, ask the same function whether a name keeps today's
@@ -3732,6 +3733,16 @@ sub _wrap_statement_modifier {
     } $cond_parts[0]->children;
   }
 
+  # The dynamic-loop-exit licence (task #1022 half (b)): a `for`/`while`
+  # MODIFIER is a real loop, and `f() for 1..3` with `sub f { last }` exits it
+  # in perl.  Read off the UNTOUCHED token run (the modifier's own expression
+  # and its condition), before either is lowered — the same `:dyn t` key
+  # Parser2's block loops emit, consumed by %p-loop-driver.
+  my $dyn_arg = ($modifier =~ /^(?:for|foreach|while|until)$/
+                 && Pl::Passes::enabled('dyn-loop-exit')
+                 && Pl::PExpr::TokenUtils::calls_user_code([@$expr_parts, @cond_parts]))
+              ? ' :dyn t' : '';
+
   # Generate appropriate control structure
   # Note: 'for' and 'foreach' modifiers use p-foreach (iterate over list),
   # not p-for (C-style for loop)
@@ -3770,7 +3781,7 @@ sub _wrap_statement_modifier {
       $cond_cl = _apply_foreach_alias_rewrite($cond_cl, \@cond_parts);
       $cond_cl = "(vector $cond_cl)" if @el;
     }
-    return "(p-foreach (\$_ $cond_cl) $expr_cl)";
+    return "(p-foreach (\$_ $cond_cl)$dyn_arg $expr_cl)";
   }
 
   my $cond_cl = $self->_parse_expression(\@cond_parts, $stmt);
@@ -3789,9 +3800,11 @@ sub _wrap_statement_modifier {
       && ref($expr_parts->[0]) eq 'PPI::Token::Word'
       && $expr_parts->[0]->content eq 'do'
       && ref($expr_parts->[1]) eq 'PPI::Structure::Block') {
+    # `do BLOCK while COND` is not a loop in perl at all, so it takes no
+    # dynamic-exit frame either.
     return "(p-do-$cl_modifier $cond_cl $expr_cl)";
   }
-  return "(p-$cl_modifier $cond_cl $expr_cl)";
+  return "(p-$cl_modifier $cond_cl$dyn_arg $expr_cl)";
 }
 
 # Process 'local' variable declaration - dynamic scoping
