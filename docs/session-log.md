@@ -265,7 +265,7 @@ back with #1022(b)) → 18644 on BR's tree.  CI green through `027ba9c`.  Three 
 (all agents resumed via SendMessage each time) and the box at load 24–31 with four agents are
 WHY the USER capped concurrency at two.  **STOPPED for shutdown (USER); restart recipe in
 MEMORY.md's STATE line and each worktree's `scratch/<label>/STOP.md`.**
-## Session 470bp (Opus agent, 2026-09-05) — round 28 PERF: the module cache stores COMPILED FASLS (#1188, the yardstick's biggest number), and two of the three AGGREGATE levers SHIP (#1203 slice assignment, #1204 range fill) and the third (#1205 copying slices) is BUILT, MEASURED and held out of the commit by the shutdown
+## Session 470bp (Opus agent, 2026-09-05 + resume 2026-09-06) — round 28 PERF: the module cache stores COMPILED FASLS (#1188, the yardstick's biggest number) and all three AGGREGATE levers SHIP (#1203 slice assignment, #1204 range fill, #1205 copying slices — the third on resume, with the batch's owed full sweep and companion legs)
 
 **#1188 — the module cache stores compiled fasls, and the double-execution bug
 turned out to be an ORDER, not a count.**  `*pcl-cache-fasl*` had been NIL
@@ -396,7 +396,7 @@ integers are stored RAW when the gate is on and BOXED when it is off: a fast
 path must disappear with the gate or the all-boxed A/B world stops being
 measurable.
 
-**#1205 — BUILT AND MEASURED, NOT COMMITTED** (the shutdown came before its own gate; the runtime carrying it is `scratch/s470bp/rt-L6-AND-L7.lisp`).  `p-aslice`/`p-hslice` build ALIASES (perl's slices are aliases:
+**#1205 — built and measured here, and COMMITTED ON RESUME** (the shutdown came before its own gate; the runtime carrying it is `scratch/s470bp/rt-L6-AND-L7.lisp`).  `p-aslice`/`p-hslice` build ALIASES (perl's slices are aliases:
 `for (@a[0,1]) { $_ *= 10 }` writes through), which under raw element storage
 PROMOTE every slot to a box — monotonically, so the container pays box
 indirection on every later read forever, and the boxes are allocated for
@@ -433,6 +433,59 @@ paths agree, which is why it is a task and not a guard row), **#1202**,
 **#1206** (a slice assignment in SCALAR context yields the source vector where
 perl yields the COUNT — PRE-EXISTING, both paths agree; `p-hash-=` has the
 two-armed return to copy, and the LIST-context half diverges too).
+
+**RESUMED (2026-09-06) — the batch's OWED measurements were taken and
+L7/#1205 SHIPPED.**  The full `perl-tests` sweep, which a `cl/` change requires
+and which is the ONLY instrument that can see #1188 at all (module loading and
+fasl caching are invisible to corpus-diff), is **CLEAN on `485661b`**: GATE
+clean, 0 new / 0 fixed, **TOTAL passing baseline 18581, current 18581 (+0)**,
+dropped statements 5 = census, planned-rows-not-asserted +0; the 4 UNSTABLE and
+15 unverified rows are the standing crash-file noise, unchanged.  (The "expect
+18312" this session's own STOP note carried was STALE — main moved to `614c6af`
+and its baselines carry 18581.)  The six companion legs `--jobs 1` —
+op/hashassign.t, op/aassign.t, op/list.t, op/array.t, op/hash.t, op/local.t —
+reproduce `baselines/perl-suite-run.tsv` FILE FOR FILE (309/0 305/4 XDIFF;
+188/1 175/14; 195/0 170/25; 494/0 8/7; 316/3 300/19; op/list.t NOT-RUN,
+quarantined) with **0 NEW ROW / 0 FIXED ROW / 0 LOST**, so no base-tree
+measurement was owed.
+
+**L7/#1205 shipped on top**, from the runtime the shutdown had left in
+`scratch/s470bp/rt-L6-AND-L7.lisp` — the diff against `485661b` verified to be
+exactly the four edits `split-l7.pl` names and nothing else.  Its own gate is
+**211 files / 7149 rows**, failing only the 13 pclxs xs rows; the second full
+sweep on the L7 tree is again TOTAL 18581 (+0), GATE clean.  Both probe files
+ran against it: `probe-slice.pl` 40 of 42 identical to perl 5.40.3 (the two
+misses are #1206's scalar-context pair, PRE-EXISTING — the NON-const twin
+diverges the same way), including all twelve slice-READ shapes and both
+ALIASING rows; **`probe-slice2.pl`, which had never been run, is 20 of 20** —
+its one reported DIFF is the probe file's OWN shell quoting (`''` inside
+`perl -e '...'` closes the quote, so *perl itself* answers "syntax error near
+`ne ?`"), the same row run from a FILE agrees on both sides, and the repaired probe (no quote literals at all) reads **0 divergences of 20**.  Guard rows:
+`Pl/t/perf-levers-02.t` 11 → 17, the two expansions plus THREE negatives (a
+foreach over a slice keeps `p-aslice` — the non-vacuous one, since p-foreach is
+itself a macro; a printed slice keeps it; and the alias-building call is still
+what the foreach walks) and the twelve-shape RUN row.  Inverse-verified on a
+`485661b` tree: rows 12, 13 and 17 FAIL there, and row 17's failing line is the
+`exists $v[3]` divergence L7 fixes (`N` on the base, perl says `E`).
+
+**The four population instruments on the FINAL tree say what a runtime macro
+must say**: `tools/corpus-diff.pl 614c6af` — *emission identical across 111
+files*, silent drops 5 unchanged, the six `Pl/t/shapes` files identical;
+`tools/emission-ab.pl --ref 614c6af --shapes --list lib/**/*.pm` 27 SAME / 0
+DIFF / 0 RCDIFF and a wider 204-file leg (cpan `.pm` + the perl-tests corpus)
+likewise; `tools/ir-host-leak.pl` **byte-identical** to the pre-L7 run (31
+distinct leaked symbols over 111 files, the standing number); `PCL_OPT=none`
+byte-identical to main on a slice-assignment program once the preamble's
+embedded BUILD PATH is normalised (that path is the only diff, and it is task
+#217, not this change).  The companion legs were re-run on the L7 tree and are
+identical again, snapshot and ROW DIFF both.  **L7 also answers identically
+with `PCL_RAW_ELEMS=0`** — the all-boxed A/B world — because `%p-aslice-copy`
+asks `p-aref` rather than storing anything itself, so the s470bp trap that
+caught `%p-array-fill-range` cannot apply to it; the twelve-shape program is
+byte-identical to perl under both settings.  The `slices` A/B re-run as a
+confirmation (NOT the quiet re-measure, which is Fable's): **A 0.1694 s vs B
+0.2153 s, B/A +27.1 %** best-of-7 at load 4.6 — the same size as the −22 %
+recorded at the stop.
 
 ## Session 470br (Opus agent, 2026-09-05) — #1115: a filehandle carries OCTETS unless a layer says otherwise — the default open, `binmode`, `use open`, and perl's wide-character rule on a byte handle
 
