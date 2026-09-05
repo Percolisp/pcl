@@ -1,4 +1,16 @@
 # taken-at: 5323d9e 2026-08-15
+# s470bq (rule 12 in _parse_regex_content, edited ROW BY ROW): eval.t PARTIAL
+#   128/32 -> 129/31 (TOTAL 18644 -> 18645).  ONE row, test 6
+#   `like($@, qr/Search/)` for `eval '$foo = /'`.  Splitting the pattern from
+#   the flags at TRANSPILE time made that parse load-bearing, and `rindex`
+#   lands on the OPENING delimiter when there is no closing one -- so the
+#   literal read as an EMPTY pattern with the newline as FLAGS, an empty
+#   pattern matches, and the eval RETURNED 1 (it also printed that 1 with no
+#   newline, which glued itself to `not ok 6` and cost the row its TAP -- the
+#   run's only NEW shortfall).  The missing case now dies with perl's own
+#   text, so `$@` matches /Search/ and the eval returns undef, as perl does
+#   (probed 5.40.3).  Guard: Pl/t/ir-data-form-01.t rows 57-58,
+#   inverse-verified; the six terminated delimiter shapes are unchanged.
 # s470bl (task #1022 half (b), edited ROW BY ROW): loopctl.t PARTIAL 40/0/67 ->
 #   OK 64/0/67, MEASURED (`perl sweep-perl-tests.pl --jobs 1
 #   perl-tests/loopctl.t`).  Half (b) wins back every row s470bi's half (a)
@@ -311,7 +323,7 @@ dor.t	OK	31	1	34
 each.t	OK	49	2	65
 each_array.t	OK	65	0	65
 errno_test.t	OK	2	0	2
-eval.t	PARTIAL	128	32	169
+eval.t	PARTIAL	129	31	169
 exists_sub.t	OK	18	0	18
 exp.t	OK	30	0	31
 flip.t	OK	12	2	14

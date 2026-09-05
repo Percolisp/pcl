@@ -341,4 +341,35 @@ my $mf = `cd "$root" && ./pl2cl --manifest "$rx" 2>/dev/null`;
 like($mf, qr/"tier"\s*:\s*\{/, 'the manifest tier is a histogram, not a word');
 like($mf, qr/"native"\s*:\s*[1-9]/, 'and it counts the native-tier literals');
 
+# ── the literal must be TERMINATED (rule 12) ─────────────────────────────
+# Splitting the pattern from the flags at TRANSPILE time made this parse
+# load-bearing, and `rindex` lands on the OPENING delimiter when there is no
+# closing one — so `$foo = /` read an EMPTY pattern with the newline as FLAGS,
+# an empty pattern matches, and `eval '$foo = /'` returned 1.  perl raises
+# "Search pattern not terminated" and the eval returns undef (probed 5.40.3),
+# which is what perl-tests/eval.t test 6 asserts (`like($@, qr/Search/)`).
+{
+  my $bad = write_pl('unterminated.pl', "my \$foo;\nmy \$r = eval '\$foo = /';\n"
+                   . "print((defined \$r ? \"ret=\$r\" : 'ret=undef'), \" err=\", (\$\@ =~ /Search/ ? 'Search' : \"[\$\@]\"), \"\\n\");\n");
+  my $out = `cd "$root" && ./runpcl "$bad" 2>&1`;
+  like($out, qr/^ret=undef err=Search$/m,
+       'an unterminated regex literal raises perl\'s own message and the eval returns undef');
+  # And every TERMINATED spelling still parses — the guard must not have
+  # widened into the valid population (six delimiter shapes, all probed
+  # against perl 5.40.3, all `y`).
+  my $ok = write_pl('terminated.pl', <<'PL');
+my $s = "abc";
+print "1:", ($s =~ /b/       ? "y" : "n"), "\n";
+print "2:", ($s =~ m{c}      ? "y" : "n"), "\n";
+print "3:", ($s =~ //        ? "y" : "n"), "\n";
+my $q = qr/a/i;
+print "4:", ("A" =~ $q       ? "y" : "n"), "\n";
+print "5:", ($s =~ m!b!g     ? "y" : "n"), "\n";
+print "6:", ($s =~ qr {b}    ? "y" : "n"), "\n";
+PL
+  my $okout = `cd "$root" && ./runpcl "$ok" 2>&1`;
+  is($okout, "1:y\n2:y\n3:y\n4:y\n5:y\n6:y\n",
+     '... and every terminated delimiter shape still parses (perl gives the same six)');
+}
+
 done_testing();

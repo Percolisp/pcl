@@ -773,6 +773,17 @@ sub _parse_regex_content {
   my %pairs = ('{' => '}', '(' => ')', '[' => ']', '<' => '>');
   my $close_ch = $pairs{$open_ch} // $open_ch;
   my $end_pos = rindex($content, $close_ch);
+  # THE LITERAL MUST BE TERMINATED (rule 12).  `rindex` finds the LAST
+  # occurrence, so for an unterminated literal it lands on the OPENING
+  # delimiter (or on nothing at all): `$foo = /` arrives as the two characters
+  # `/` + newline, and the naive arithmetic below then reads an EMPTY pattern
+  # with the tail as FLAGS -- an empty pattern matches, so `eval '$foo = /'`
+  # returned 1 where perl raises "Search pattern not terminated" (probed
+  # 5.40.3: ret=undef, that text in $@).  The parse became load-bearing when
+  # the emission moved to the keyword form, so the missing case must say so
+  # instead of inventing a pattern the program then matches against.  perl's
+  # own text, because it is free here and it is the accurate diagnosis.
+  die "Search pattern not terminated\n" if $end_pos <= $prefix_len;
   my $pattern = substr($content, $prefix_len + 1, $end_pos - $prefix_len - 1);
   my $flags = substr($content, $end_pos + 1);
   return ($pattern, $flags, $open_ch);
