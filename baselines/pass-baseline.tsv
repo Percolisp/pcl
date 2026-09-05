@@ -267,7 +267,10 @@ chdir.t	OK	25	0	44
 chop.t	PARTIAL	96	0	148
 chr.t	OK	38	0	42
 # s428 (#411 elided-arrow call): closure.t 272 -> 273 EDITED BY HAND — `$s2->()()` (line 742) no longer DROPS.
-closure.t	OK	273	4	279
+# s470 (Fable, #1083): closure.t 273 -> 274 EDITED BY HAND — `cloneable with //ee` (row 272) passes: a sub
+#   whose body compiles perl at run time is cloned per evaluation (s470bi).  The row left fail-baseline.tsv
+#   by EDIT in the same commit.
+closure.t	OK	274	3	279
 cmpchain.t	OK	1476	0	1476
 concat.t	OK	234	0	225
 concat2.t	OK	4	0	4
