@@ -45,7 +45,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 11;
+plan tests => 17;
 
 # ── the two instruments ──────────────────────────────────────────────────────
 
@@ -200,5 +200,71 @@ my @f; @f=(0,1..3,4);             print "6:@f\n";
 my @g=(1,2); @g=(1..2,@g);        print "7:@g\n";
 my @h=(1,2,3); my ($i0,$v0)=each @h; @h=(1..3); my ($i1,$v1)=each @h; print "8:$i1\n";
 my @j; @j=(reverse(3..5));        print "9:@j\n";
+PERL
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1205 — an rvalue SLICE in a COPYING consumer reads VALUES
+# ─────────────────────────────────────────────────────────────────────────────
+{
+    my $mx = expand(
+        '(p-array-= @v (p-aslice @a 1 2))',
+        '(p-array-= @w (p-hslice %h @k))',
+        '(p-foreach ($_ (p-aslice @a 1 2)) (p-print $_))',
+        '(p-print (p-aslice @a 1))',
+    );
+    my @l = split /\n/, $mx;
+    like($l[0], qr/\(%p-aslice-copy \@a 1 2\)/,
+         '#1205: an array slice assigned to an array reads the slot VALUES');
+    like($l[1], qr/\(%p-hslice-copy %h \@k\)/,
+         '#1205: a hash slice assigned to an array reads the slot VALUES');
+    # THE NEGATIVES.  Only a consumer that COPIES may drop the aliasing, and a
+    # slice is a list of ALIASES everywhere else (`for (@a[0,1]) { $_ *= 10 }`
+    # writes through).  Both of these must keep the alias-building call.
+    unlike($l[2], qr/%p-aslice-copy/,
+           '#1205 NEGATIVE: a foreach over a slice keeps the aliases');
+    like($l[2], qr/\(p-aslice \@a 1 2\)/,
+         '#1205 NEGATIVE: ... the alias-building call is still the one it walks');
+    unlike($l[3], qr/%p-aslice-copy/,
+           '#1205 NEGATIVE: a slice that is merely printed keeps the generic path');
+}
+
+{
+    # perl 5.40.3, probed row by row (scratch/s470bp/probe-slice.pl's twelve
+    # slice-READ shapes).  The copy is a COPY (writing $v[0] does not reach
+    # @a), out-of-range positions are real undefs and not holes (row 3 —
+    # `exists` on them is TRUE, which is what the alias path got wrong),
+    # negative indices, a reference element kept as a reference, a missing hash
+    # key that is NOT vivified, dynamic keys, a sparse source — and the two
+    # ALIASING rows (9 and 10), which are the whole licence: a foreach over a
+    # slice writes THROUGH, so those must not take the copying path.
+    my $want = <<'OUT';
+1:99 3 4|1 2 3 4 5
+2:1,2,U,U n=4
+3:E
+4:5 4
+5:ARRAY23
+6:9 2|1
+7:1,U n=2 ex=N
+8:2 1
+9:10 20 3
+10:K1K2
+11:2 3
+12:1,U,U,4
+OUT
+    is(run_pl(<<'PERL'), $want, '#1205: twelve slice-READ shapes are perl 5.40.3\'s answers, aliasing included');
+use strict; use warnings;
+my @a1=(1..5); my @v1=@a1[1..3]; $v1[0]=99;      print "1:@v1|@a1\n";
+my @a2=(1,2);  my @v2=@a2[0..3];                 print "2:", join(",", map { defined $_ ? $_ : "U" } @v2), " n=", scalar(@v2), "\n";
+my @a3=(1,2);  my @v3=@a3[0..3];                 print "3:", (exists $v3[3] ? "E" : "N"), "\n";
+my @a4=(1..5); my @v4=@a4[-1,-2];                print "4:@v4\n";
+my @a5=([1,2],3); my @v5=@a5[0,1];               print "5:", ref($v5[0]), $v5[0][1], $v5[1], "\n";
+my %h6=(a=>1,b=>2); my @v6=@h6{'a','b'}; $v6[0]=9; print "6:@v6|$h6{a}\n";
+my %h7=(a=>1); my @v7=@h7{'a','zz'};             print "7:", join(",", map { defined $_ ? $_ : "U" } @v7), " n=", scalar(@v7), " ex=", (exists $h7{zz} ? "E":"N"), "\n";
+my %h8=(a=>1,b=>2); my @k8=('b','a'); my @v8=@h8{@k8}; print "8:@v8\n";
+my @a9=(1..3); for (@a9[0..1]) { $_ *= 10 }      print "9:@a9\n";
+my %h10=(a=>1,b=>2); for (@h10{qw(a b)}) { $_ = "K".$_ } print "10:$h10{a}$h10{b}\n";
+my @a11=(1..5); my @o11; push @o11, @a11[1,2];   print "11:@o11\n";
+my @a12=(1); $a12[3]=4; my @v12=@a12[0..3];      print "12:", join(",", map { defined $_ ? $_ : "U" } @v12), "\n";
 PERL
 }

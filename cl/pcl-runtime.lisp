@@ -6462,7 +6462,13 @@ per element."
                          (list :item f))))
       (t nil)))
 
-  )
+  (defun %p-copying-slice-form (form)
+    "FORM rewritten to the COPYING slice read when it IS an rvalue slice, and
+     NIL otherwise (task #1205).  Only p-array-= calls this, because only a
+     consumer that COPIES may drop the aliasing — see %p-aslice-copy."
+    (when (and (consp form) (member (car form) '(p-aslice p-hslice)))
+      (cons (if (eq (car form) 'p-aslice) '%p-aslice-copy '%p-hslice-copy)
+            (cdr form)))))
 
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
@@ -6471,12 +6477,16 @@ per element."
    so that self-assignment (@a = @a) and embedding (@a = (1, @a, 2))
    work correctly.  nil slots (deleted elements) are preserved.
 
-   A RANGE SEGMENT LIST is built DIRECTLY instead of being materialised and
-   then walked, decided from the VALUE form and declining to the general path
-   below (task #1204, %p-fill-segments).  Its commentary is on the runtime
-   functions it calls."
+   TWO RHS SHAPES ARE BUILT DIRECTLY instead of being materialised and then
+   walked — both decided from the VALUE form, both declining to the general
+   path below:
+     * a RANGE segment list (task #1204, %p-fill-segments);
+     * an rvalue SLICE, which this consumer COPIES (task #1205,
+       %p-copying-slice-form).
+   Their commentary is on the runtime functions they call."
   (let ((val (gensym "VAL"))
-        (segs (%p-fill-segments value)))
+        (segs (%p-fill-segments value))
+        (copy (%p-copying-slice-form value)))
     ;; Assigning to an array imposes LIST context on the RHS (Perl: @a = EXPR
     ;; evaluates EXPR in list context).  Bind *wantarray* t so a context-sensitive
     ;; RHS — most importantly readline `my @lines = <$fh>` — yields its list form
@@ -6509,7 +6519,7 @@ per element."
                (%p-array-fill-start ,place)
                ,@(nreverse fills)
                ,place)))
-        `(let ((,val (let ((*wantarray* t)) ,value)))
+        `(let ((,val (let ((*wantarray* t)) ,(or copy value))))
            (unless (boundp ',place)
              (%p-ensure-storage (quote ,place))
              (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
@@ -10816,6 +10826,51 @@ which is one of #1140's escape spellings (probed)."
     (let ((result (make-array n :adjustable t :fill-pointer 0)))
       (dotimes (i n result)
         (%p-vpush (%p-alias-helem hash (svref flat i)) result)))))
+
+;;; ── AN RVALUE SLICE IN A COPYING CONSUMER READS VALUES (task #1205) ────────
+;;; `@a[1..5]` and `@h{@k}` are ALIASES in perl — `for (@a[0,1]) { $_ *= 10 }`
+;;; writes through — so `p-aslice` / `p-hslice` build a vector of the
+;;; container's own element CELLS (%p-alias-aelem / %p-alias-helem), which
+;;; under raw element storage PROMOTES each slot to a box.  That promotion is
+;;; MONOTONE: the container then pays box indirection on every later read,
+;;; forever, and the boxes themselves are allocated for nothing.
+;;;
+;;; `my @v = @a[1..5]` does not need any of it.  A list assignment COPIES, so
+;;; the aliases are unboxed and thrown away one call later; reading the slot
+;;; VALUES straight into a fresh vector is the same answer with no promotion
+;;; and no cells.  The licence is the CONSUMER, and it is decided where the
+;;; consumer is visible — in `p-array-='s macro, whose VALUE form is
+;;; syntactically the slice.  Every other consumer (a foreach, a `\(…)`, a
+;;; sub call that may alias) keeps `p-aslice`/`p-hslice` untouched, so the
+;;; aliasing shapes are unaffected: they never reach this arm.
+;;;
+;;; THE READ IS THE EXISTING ONE (rule 11): `p-aref` and `p-gethash` are the
+;;; runtime's ONE reading of "what is @a[i] / $h{k} as a VALUE" — negative
+;;; indices, out-of-range undef, symbolic refs, magic cells, the box kept for a
+;;; reference, the fast arms.  Asking them is what keeps the copying slice and
+;;; the element read from ever disagreeing.
+;;;
+;;; Sized before it was written (hand-replaced A/B, the §0.5 method): the
+;;; `slices` bench row **-33.3 %** against a byte-identical control pair
+;;; reading -1.3 % in the same window.
+(defun %p-aslice-copy (arr &rest indices)
+  "@arr[LIST] read by a COPYING consumer: the slot VALUES, in one fresh
+   simple-vector, with no element cell promoted.  See the commentary above.
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
+  (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
+    (let ((result (make-array n)))
+      (dotimes (i n result)
+        (setf (svref result i) (p-aref arr (svref flat i)))))))
+
+(defun %p-hslice-copy (hash &rest keys)
+  "@hash{LIST} read by a COPYING consumer — the twin of %p-aslice-copy.
+   A missing key reads as undef and is NOT vivified, which is p-gethash's own
+   answer and the reason this asks it.
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
+  (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
+    (let ((result (make-array n)))
+      (dotimes (i n result)
+        (setf (svref result i) (p-gethash hash (svref flat i)))))))
 
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
