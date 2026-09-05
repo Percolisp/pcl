@@ -2,6 +2,120 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bs (Opus agent, 2026-09-05) — the FILETEST / STAT family gets ONE operand resolver: the overload (#1031), the string-is-a-path rule (#1049), the handle KINDS (#1048), perl's errno (#1033) and what `_` remembers (#1047)
+
+`stat`, `lstat` and the 27 filetests take THE SAME operand and perl reads it
+ONE way; PCL had drifted into several readings, which is how `-e STDOUT`
+answered false while `stat STDOUT` answered thirteen elements.  Five of the
+brief's eight tasks are shipped as three commits, all RUNTIME ONLY (no `Pl/`
+file touched, so no generation bump and no artifact regeneration; corpus-diff
+and emission-ab cannot move by construction).  The three remaining — #1042,
+#1043, #1044 — were NOT started: the machine was being shut down.
+
+**`%p-stat-operand` is the one reading, and nothing else in the family looks
+at its own argument** (rule 11).  `%p--stat-test` / `%p--access-test` / the
+-T/-B scan are its only consumers, so an operand rule cannot differ per
+operator.  Its kinds are `:over` (an overload answered), `:fd`, `:path`,
+`:bad`; the kind dispatch is an `ecase` (rule 12).
+
+- **#1031 — a filetest runs its operand's overload.**  Two halves, both probed:
+  a class with a `-X` handler ANSWERS the filetest (the handler is passed the
+  operator's LETTER and a false-but-defined third argument — measured
+  `($obj,"e","")`; no stat runs and the `_` cache is untouched), and anything
+  else blessed STRINGIFIES through `""`.  The `""` half was a one-line cause:
+  the funnel PEELED THE BOX before stringifying, so `to-string` saw the payload
+  and the handler never ran — `-e $path_object` answered a silent "no such
+  file", the worst shape the bug could take, and it is the everyday
+  Path::Tiny/Path::Class idiom.  `stat`/`lstat` are not filetests and never ask
+  the `-X` handler (probed: `stat $x` on a `-X`-only class stringifies and
+  fails).
+- **#1049 — a STRING is a PATH, always.**  `-e "FH"` tests a file called FH
+  even while a handle of that name is open.  **The `-t` exception was MEASURED,
+  not assumed**: `-t "STDIN"` answers "" with ENOTTY (it FOUND the handle)
+  while `-t "/etc/passwd"` answers undef with EBADF, so `-t` keeps resolving a
+  string as a handle NAME — and it now runs the overload and reports errno
+  like its siblings.
+- **#1048 — a glob VALUE, a glob REF, an IO ref, a standard stream and a
+  DIRHANDLE are handles.**  The resolver asks `%p-resolve-fh` and
+  `%p-fd-of-stream`, the two readings `fileno` already uses, so a synonym
+  stream (STDOUT and friends) resolves where `sb-sys:fd-stream-fd` used to
+  error into the empty path.  perl fstat(2)s the dirfd for `-d DIR`; PCL has
+  none, so `opendir` remembers the DIRECTORY in `*p-dirhandle-paths*` keyed on
+  the handle's own `(index . names)` cons — the object BOTH spellings hold, so
+  one lookup serves `opendir DIR` and `opendir my $dh` — and `closedir` drops
+  it, which is what makes a closed dirhandle EBADF.
+- **`-l` NEVER takes a handle**, which is its own rule and perl's: it
+  stringifies anything that is not a bareword (probed — `-l $lex` and
+  `-l \*FH` fail with ENOENT on the glob's own string, and op/filetest.t
+  asserts that `-l \*foo` names a file), and a bareword goes into the handle
+  slot and cannot be lstat'ed (EBADF).
+- **#1033 — every member sets `$!` the way perl does, and the two errnos are
+  different FACTS.**  EBADF for a handle that is not open (never-opened or
+  closed bareword, closed dirhandle, in-memory PerlIO::scalar handle); ENOENT
+  for a missing path — including one holding a NUL byte, which perl fails
+  ([perl #131895]) and the C layer TRUNCATES, so `-f "TEST\0-"` answered TRUE
+  for the file TEST.  `stat` already got the missing-path case right; every
+  FILETEST swallowed the condition in its own `handler-case`, so
+  `-e $f or die "…: $!"` printed a stale value and a closed handle answered
+  ENOENT.  ONE failure exit and ONE syscall wrapper, which reads the errno off
+  the POSIX condition rather than re-reading the C variable an intervening
+  allocation can clobber.
+- **#1047 — `_` carries WHICH stat filled it and whether it SUCCEEDED.**  perl
+  DIES when `_` is read by the other flavour (`stat $f; -l _` is fatal, in
+  perl's own two wordings), and after a FAILED stat its `_` is an INVALID
+  buffer: every filetest but -T/-B reports EBADF from it while -T/-B go on to
+  OPEN the remembered NAME and report ENOENT (probed: `lstat "/nope"; -e _` is
+  errno 9, `-T _` is errno 2 — the split `t/op/stat_errors.t` asserts).
+  Caching the OPERAND alone made a failed stat simply work again.
+- **#1047's other half was NOT where the task pointed, and that is the
+  finding.**  `stat *$fh{IO}` never reached the stat funnel: `*$fh` on a
+  lexical handle ran `p-dynamic-typeglob`, which STRINGIFIED the stream into a
+  glob NAME ("GLOB(0x…)"), so `*$fh{IO}` was undef.  perl's `*$fh` is the
+  anonymous glob the open created and PCL has no such object, so the handle
+  itself is handed through and `p-glob-slot` answers its two meaningful slots
+  from it (IO = the handle, GLOB = the operand); every other slot is undef,
+  which is perl's answer for a slot a glob does not have.
+- **`-r`/`-w`/`-x` now STAT before access(2)**, because perl's `cando` reads
+  the stat buffer: it is what fills `_` (op/filetest.t: "-T _ works after
+  -r $ioref") and what makes a missing file answer ENOENT instead of
+  access(2)'s own errno.  The access(2) verdict is unchanged, so the ACL-aware
+  answer this runtime documents stands.
+- **ONE ORDERING BUG the probe battery found on the way**: CL's NIL *is* a
+  symbol, so an undef operand fell into the bareword-handle arm and became
+  EBADF.  perl's `-e undef` is the EMPTY PATH (ENOENT, probed).
+
+**Bars.**  Gate after each commit; the last one **209 files / 7188 rows, only
+the 13 pclxs xs rows failing**.  Guard `Pl/t/bareword-fh-slot-01.t` **55 → 133
+rows** (39 new × both emission paths, 2.1 s), every expectation the output of
+the same program under perl 5.40.3; **inverse-verified by running the guard's
+own PROGRAM against 027ba9c's runtime** — 35 of the 39 differ there (the four
+that agree are negatives or accidents, named in the commits).  `docs/ir-op-
+inventory.tsv` regenerated (a docstring moved).  **The companion legs and the
+sweep were NOT run — the session was stopped for a machine shutdown.**
+
+**Filed, all PRE-EXISTING and all probed vs perl 5.40.3**: **#1230** (a box's
+STRING cache poisoned with a raw DOUBLE — `%pcl-dualvar-p` false-positives on
+ordinary floats, `%p-dualvar-copy` then writes the raw value into the sv slot,
+and `printf "%s"` dies "not of type SEQUENCE"; a whole-program crash on an
+ordinary idiom, traced to the two lines), **#1231** (an UNDECLARED bareword in
+a filetest operand slot is emitted as `(pl-NAME)` and DIES — this is what keeps
+`t/op/stat_errors.t`'s 311 errno rows failing, since that file is written as
+`eval "$op $arg"` over BAREWORDS and the fragment has no `open` to teach the
+compiler), **#1232** (`t/op/stat.t` produces ZERO rows on "Undefined subroutine
+&main::is_linux_container", a sub at the very end of perl's own t/test.pl —
+108 perl rows behind it; the cheap discriminating measurement is named in the
+task), **#1233** (a closed LEXICAL handle is ENOENT, not EBADF, because
+`%p-forget-fh` clears the box — deliberately, and #529's `fileno` contract
+depends on it), **#1234** (a STACKED filetest over a `-X`-overloaded operand
+re-dispatches the handler at EVERY level in perl; PCL's `_`-chain desugaring
+cannot, and the two probes prove it cannot be fixed in the runtime — 54
+op/filetest.t rows, a compiler change), **#1235** (`-t`/`-T`/`-B` on an IO REF
+run its `""` overload in perl; PCL cannot tell an IO ref from a lexical handle
+because both are a box holding a stream — 4 rows), **#1236** (`rand` is
+deterministic ACROSS RUNS: `*p-drand48-state*` is seeded from a literal 0 and
+nothing auto-seeds it; found by #1042's own "sweep that family" instruction,
+whose audit is recorded in the task).
+
 ## Session 470 (Fable, 2026-09-05) — ROUND 24 FINISHED (BF + BI), ROUND 25 (A5 + #1072) MERGED, ROUND 26 (BJ + BK) LAUNCHED; the eval.t LOST-36 regression found by the first sweep since s468
 
 **Part 0 — the restart recipe, executed as written (session-log §469).**  `git worktree
