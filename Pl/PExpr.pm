@@ -682,15 +682,22 @@ sub parse {
 
     if (ref($e1) eq "PPI::Statement::Expression"
         || ref($e1) eq "PPI::Statement"
-        || ref($e1) eq "PPI::Statement::Break") {
+        || ref($e1) eq "PPI::Statement::Break"
+        || ref($e1) eq "PPI::Statement::Variable") {
       # Usually puts an expression object around the items in expr list.
-      # Also handles Statement::Break (return/last/next)
-      my $kids  = $self->remove_expression_object_around($e1);
-      return $self->parse($kids);
-    }
-
-    if (ref($e1) eq "PPI::Statement::Variable") {
-      # Statement::Variable wraps 'my $x = ...' - need to strip the declarator
+      # Also handles Statement::Break (return/last/next) and
+      # Statement::Variable (`my $x = ...`).
+      #
+      # STRIPPING THE DECLARATOR IS PART OF UNWRAPPING (#1178).  Which of the
+      # two classes PPI hands us is decided by the run's FIRST token, not by
+      # whether it contains a declarator: `(my $q = 3)` is a
+      # Statement::Variable, `(open my $fh, "<", $p)` — the same declaration,
+      # one token later — is a Statement::Expression.  While only the
+      # Statement::Variable arm stripped, the second spelling reached the
+      # operator loop with a bare `my` Word in it, which became a call to the
+      # non-existent op `(p-my $fh "<" $p)` and killed the whole file at load.
+      # Every other route into a token run already strips here
+      # (parse_expr_to_tree, parse_list), so this is the one that was missing.
       my $kids  = $self->remove_expression_object_around($e1);
       # Extract declarations (strips 'my'/'our'/etc, keeps variable)
       my @stripped = $self->extract_declarations($kids);

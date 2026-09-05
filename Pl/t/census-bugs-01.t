@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 6;
+plan tests => 14;
 
 sub run_cl {
     my ($code) = @_;
@@ -104,3 +104,63 @@ package main;
 print "ISA=[@Bar::ISA]\n";
 PL
 
+# ── #1178: an inline `my` inside a CALL ARGUMENT ──────────────────────────
+# `f((open my $fh, ...), ...)` used to emit a call to the non-existent op
+# `p-my`, and the whole emitted file died at load.  Both spellings are here:
+# the plain one was always right and must stay right.
+
+test_cl('#1178 open my $fh inside a call argument', <<'PL', "take[call-arg]=1\n");
+sub take { my ($v, $d) = @_; print "take[$d]=", ($v ? 1 : 0), "\n" }
+take((open my $fh, "<", "/etc/hostname"), "call-arg");
+PL
+
+test_cl('#1178 the plain spelling is unchanged', <<'PL', "plain=1\n");
+my $ok = open my $fh, "<", "/etc/hostname";
+print "plain=", ($ok ? 1 : 0), "\n";
+PL
+
+test_cl('#1178 the declared handle really is the opened one', <<'PL', "n=1\n");
+sub take { my ($v) = @_; return $v }
+my $r = take((open my $fh, "<", "/etc/hostname"));
+my @l = <$fh>;
+print "n=", scalar(@l), "\n";
+PL
+
+# ── #1178: `open ..., undef` is perl's ANONYMOUS TEMPORARY FILE ───────────
+# perl 5.40.3: every FILE mode succeeds; `<` is read-only, and every write
+# mode reads back after a seek (the temp file is O_RDWR whatever the mode).
+
+test_cl('#1178 open +> undef opens an anonymous temp file', <<'PL', "ok=1\n");
+my $ok = open(my $fh, "+>", undef);
+print "ok=", ($ok ? 1 : 0), "\n";
+PL
+
+test_cl('#1178 the anonymous temp file round-trips a write', <<'PL', "read=[hello]\n");
+open(my $fh, "+>", undef) or die "no";
+print $fh "hello\n";
+seek($fh, 0, 0);
+my $l = <$fh>; chomp $l;
+print "read=[$l]\n";
+PL
+
+test_cl('#1178 a > anonymous temp file reads back too (perl: O_RDWR)', <<'PL', "read=[hi]\n");
+open(my $fh, ">", undef) or die "no";
+print $fh "hi\n";
+seek($fh, 0, 0);
+my $l = <$fh>; chomp $l;
+print "read=[$l]\n";
+PL
+
+test_cl('#1178 a < anonymous temp file is read-only and empty', <<'PL', "print=0 defined=0\n");
+open(my $fh, "<", undef) or die "no";
+my $p = print($fh "x\n") ? 1 : 0;
+seek($fh, 0, 0);
+my $l = <$fh>;
+printf "print=%d defined=%d\n", $p, (defined $l ? 1 : 0);
+PL
+
+my $tap_banner = "# PCL Test library loaded\n";
+test_cl('#1178 the task reproducer: ok((open my $fh, "+>", undef))', <<'PL', $tap_banner . "1..1\nok 1 - opened\n");
+use Test::More tests => 1;
+ok((open my $fh, "+>", undef), "opened");
+PL

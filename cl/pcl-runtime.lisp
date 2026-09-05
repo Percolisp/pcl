@@ -13443,6 +13443,52 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                     t)))
         (error () (%pcl-save-errno) nil)))))
 
+;;; ---------------------------------------------------------------------------
+;;; The ANONYMOUS TEMPORARY FILE (task #1178)
+;;; ---------------------------------------------------------------------------
+;;; `open(my $fh, '+>', undef)` — a THREE-argument open whose filename is undef
+;;; — opens an unnamed temporary file (perldoc -f open).  Probed 5.40.3: every
+;;; FILE mode takes it (`<` `>` `>>` `+<` `+>` all return true), while the pipe
+;;; and dup modes do NOT: `open($fh,'-|',undef)` is "Missing command in piped
+;;; open" (undef, $! = EPIPE) and `open($fh,'<&',undef)` dies "Can't use an
+;;; undefined value as filehandle reference".  Those keep their own clauses
+;;; below, which is why the direction map answers NIL for them rather than
+;;; erroring: NIL here is the ANSWER "that mode has no anonymous form", not an
+;;; unhandled case.
+
+(defun %p-open-anon-temp-direction (mode-str)
+  "The CL stream direction of MODE-STR's anonymous-temporary-file form, or NIL
+   when the mode has none (the pipe and dup modes — see the block comment).
+
+   Only `<` is one-directional.  perl's temporary file is opened READ-WRITE
+   whatever the write mode says, and the mode survives only as the advisory
+   warning: probed 5.40.3, `open($fh,'>',undef); print $fh \"x\"; seek($fh,0,0);
+   <$fh>` reads the line back and merely warns \"Filehandle $fh opened only for
+   output\", and `>>` does the same with no warning at all.  A `>` handle that
+   could not be read back would be a VALUE divergence (undef where perl has the
+   line); the missing warning is the known warnings-gated-diagnostic gap
+   (not-supported.md, #221)."
+  (cond ((string= mode-str "<") :input)
+        ((member mode-str '(">" ">>" "+<" "+>") :test #'string=) :io)
+        (t nil)))
+
+(defun %p-open-anon-temp (direction ef)
+  "Open perl's anonymous temporary file and return the stream.  The file is
+   created, opened, and immediately UNLINKED, so it has no name a program can
+   reach and lives exactly as long as the handle — which is what makes it
+   anonymous.  TMPDIR is honoured, as perl's tmpfile(3) does."
+  (let ((template (format nil "~A/pcl-anon-XXXXXX"
+                          (or (sb-posix:getenv "TMPDIR") "/tmp"))))
+    (multiple-value-bind (fd path) (sb-posix:mkstemp template)
+      (sb-posix:unlink path)
+      (sb-sys:make-fd-stream fd
+                             :input  (if (member direction '(:input :io)) t nil)
+                             :output (if (member direction '(:output :io)) t nil)
+                             :buffering :full
+                             :external-format ef
+                             :name "anonymous temporary file"
+                             :auto-close t))))
+
 (defun %p-open-impl (fh mode filename &optional three-arg-p)
   "Implementation of Perl open.  THREE-ARG-P says the program wrote the mode and
    the target as SEPARATE arguments; it is the only thing that distinguishes
@@ -13462,8 +13508,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          (mode-str (first mode-ef))
          (ef       (third mode-ef))
          (file-str (to-string filename))
+         ;; An UNDEF filename in the three-argument form is perl's anonymous
+         ;; temporary file; NIL means "not that shape", and the mode's own
+         ;; clause below answers instead.
+         (anon-dir (and three-arg-p
+                        (not (%pcl-definedp filename))
+                        (%p-open-anon-temp-direction mode-str)))
          (stream
           (cond
+            (anon-dir (%p-open-anon-temp anon-dir ef))
             ;; The magic filename "-" means a standard stream (Perl dups it):
             ;; "<-" / "<","-" → STDIN; ">-" / ">","-" → STDOUT.
             ((and (string= file-str "-") (string= mode-str "<"))
@@ -16338,7 +16391,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-750"
+(defparameter *pcl-cache-generation* "v2-760"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
