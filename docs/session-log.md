@@ -2,7 +2,7 @@
 
 Append new entries at the top. One section per session.
 
-## Session 470bs (Opus agent, 2026-09-05) — the FILETEST / STAT family gets ONE operand resolver: the overload (#1031), the string-is-a-path rule (#1049), the handle KINDS (#1048), perl's errno (#1033) and what `_` remembers (#1047)
+## Session 470bs (Opus agent, 2026-09-05 + merge legs 2026-09-06) — the FILETEST / STAT family gets ONE operand resolver: the overload (#1031), the string-is-a-path rule (#1049), the handle KINDS (#1048), perl's errno (#1033) and what `_` remembers (#1047)
 
 `stat`, `lstat` and the 27 filetests take THE SAME operand and perl reads it
 ONE way; PCL had drifted into several readings, which is how `-e STDOUT`
@@ -116,6 +116,83 @@ deterministic ACROSS RUNS: `*p-drand48-state*` is seeded from a literal 0 and
 nothing auto-seeds it; found by #1042's own "sweep that family" instruction,
 whose audit is recorded in the task).
 
+
+### The owed legs, taken at merge time (s470bs-merge, 2026-09-06)
+
+The batch stopped for a machine shutdown with three bars unrun: the companion
+legs, a full sweep and `tools/ir-host-leak.pl`.  All three were taken on the
+tree rebased onto main `48d8e39` (BR's byte handles + BP's module fasl cache).
+The rebase took no conflicts, and the proof is arithmetic rather than
+inspection: `git diff a130812 HEAD -- cl Pl lib`, hunk headers normalised, is
+byte-identical to main's own `git diff 614c6af 48d8e39 -- cl Pl lib` — only
+main's changes came in and nothing of either side was lost.  Gate on that
+tree: **212 files / 7261 rows, FAIL = only the 13 pclxs xs rows**.
+`ir-host-leak` reports **31 distinct leaked symbols over 111 files** and the
+report is byte-identical to a `git archive 48d8e39` extraction's (line numbers
+normalised) — no leak added; it had never been run on this batch.
+
+**The companion leg found a real bug, and it was ours.**  The first "after"
+run gained 188 rows in `op/filetest.t` but carried ONE NEW failing row and a
+shortfall that went 2 → 8: `stacked -l uses previous stat, not previous
+retval` (t/op/filetest.t:125), and the file's aborted form had become #1047's
+own new DIE, `The stat preceding -l _ wasn't an lstat`.  perl does not die
+there.  The cause was one line of #1047: `%p-stat-cache-operand` SET the
+remembered flavour on every read of `_`.  perl does not — reading `_`
+performs no stat, so it cannot change what kind of stat filled the buffer.
+An eleven-shape probe against perl 5.40.3 says exactly where the line is:
+`lstat $f; -e _; -l _` is legal, and so is a plain `stat _` in the middle of
+the chain, while `-T`/`-B` DO set the flavour to `stat`, because they open the
+file and stat the descriptor — and only when there was a valid buffer to work
+from, so `lstat "/nope"; -T _; -l _` is legal where `lstat $f; -T _; -l _`
+dies.  Five of the eleven shapes were wrong before the fix and all eleven
+agree with perl after it.  Guard `Pl/t/bareword-fh-slot-01.t` 133 → **143
+rows** (67–71, expectations taken from the SAME program under perl),
+inverse-verified against the pre-fix runtime, where four of the five differ
+(row 69 is the `-T` exception and is the negative that must NOT move).
+
+**The companion movement, by file.**  Every "before" number was re-measured on
+a `git archive 48d8e39` extraction, which reproduced the s470bs-era baseline
+in all six files and a ROW DIFF of 0/0/0/0 — so main's own BR/BP work
+contributed nothing here and every mover is this batch's.
+
+    op/filetest.t     C 180/254 -> C 369/65    +189   #1031 #1033 #1047 #1048
+    op/stat_errors.t  C 305/333 -> C 510/128   +205   #1033
+    io/fs.t           C  59/2   -> C  59/2       0
+    op/time.t         C  72/0   -> C  72/0       0    (OK on both)
+    op/stat.t         C   0/0   -> C   0/0       0    (#1232)
+    op/filetest_t.t   C   0/0   -> C   0/0       0    (no /dev/tty)
+
+ROW DIFF **0 NEW / 394 FIXED / 0 UNVERIFIED / 0 LOST**, SHORTFALL 120 = the
+base tree's.  Every one of the 394 was read before it was blessed away: all
+205 `op/stat_errors.t` rows are `error from -X <operand>` errno assertions
+(#1033), and the 189 `op/filetest.t` rows are the 27×5 `-X`-handler rows plus
+16 string-overload rows (#1031), the three `\0`-in-the-name rows (#1033), the
+`_` flavour / stacked-`-l` / `$ioref` rows (#1047) and the GLOB/IO
+string-overload rows (#1048).  `baselines/perl-suite-fails.tsv` was rewritten
+with `--bless-fails` over those six files only — the other 263 files' rows are
+the previous bless byte-for-byte, and the header's accumulated provenance was
+restored by hand, because `--bless-fails` replaces it with a bare `taken-at`
+line.
+
+**The sweep** (`perl sweep-perl-tests.pl --jobs 4`, the instrument that can see
+#1047's new DIE): **GATE clean, 0 new / 0 fixed, drops 5 = census, no new
+SHORTFALL row, TOTAL passing 18644 → 18645**.  Exactly one file moved and it
+was measured on both trees serially: `ref.t` 195/16 → **196/15**, test 46 `IO
+slot of the temporary glob is set correctly` (`$ref = *STDOUT{IO}; is($ref,
+*{$ref}{IO})`) — #1047's IO-ref half.  The row was never in
+`fail-baseline.tsv` (a PARTIAL file's unblessed churn), which is why the gate
+correctly reads 0 fixed; the identical assertion in `postfixderef.t` (test 69,
+the `$ref->*{IO}` spelling inside a string eval) still fails and stays
+blessed.  The tool's UNSTABLE bucket named four more files; all four were
+re-measured serially on both trees and six of seven are identical.  The
+seventh, `readline.t`, is an **EXPOSED SKIP, not a regression**: rows 12/13 are
+gated on `open F, '.' and binmode F and sysread F, $_, 1; my $err = $! + 0;`,
+and #1033 makes the BEGIN block's failing `-d 't'` leave ENOENT behind exactly
+as perl does, so `$err` is 2 instead of 0 and the SKIP stops firing.  They then
+fail on the half PCL still lacks — a read from a DIRECTORY handle sets no
+errno where perl sets EISDIR (21) — filed as **#1237** with the probe, and
+blessed with that cause; `baselines/row-shortfall.tsv` 8 → 6 in the same
+commit.  23/5/4 → 23/7/2, measured serially on both trees.
 ## Session 470 (Fable, 2026-09-05) — ROUND 24 FINISHED (BF + BI), ROUND 25 (A5 + #1072) MERGED, ROUND 26 (BJ + BK) LAUNCHED; the eval.t LOST-36 regression found by the first sweep since s468
 
 **Part 0 — the restart recipe, executed as written (session-log §469).**  `git worktree

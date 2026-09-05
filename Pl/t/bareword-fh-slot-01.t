@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 133;
+plan tests => 143;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -202,6 +202,27 @@ print "65=", ($@ ? "die" : "no"), "\n";
 lstat($tmp);
 my $d4 = eval { my @z = stat(_); 1 };
 print "66=", ($@ ? "die" : "no"), "\n";
+# READING `_` performs NO stat, so it does not change the remembered FLAVOUR
+# either: an `-e _`, or a plain `stat _`, between an lstat and an `-l _` is
+# legal.  The ONE exception is -T/-B, which OPEN the file and stat the
+# descriptor — and only when there is a valid buffer to work from.
+lstat($tmp); my $ig1 = -e _;
+my $d5 = eval { my $z = -l _; 1 };
+print "67=", ($@ ? "die" : "no"), "\n";
+lstat($tmp); my @ig2 = stat(_);
+my $d6 = eval { my $z = -l _; 1 };
+print "68=", ($@ ? "die" : "no"), "\n";
+lstat($tmp); my $ig3 = -T _;
+my $d7 = eval { my $z = -l _; 1 };
+print "69=", ($@ ? "die" : "no"), "\n";
+my @ig4 = lstat("/no/such/zz-xyq"); my $ig5 = -T _;
+my $d8 = eval { my $z = -l _; 1 };
+print "70=", ($@ ? "die" : "no"), "\n";
+# The stacked spelling of the same rule (t/op/filetest.t:125): `-l' reads the
+# BUFFER the inner test left, never the inner test's return VALUE — and with a
+# symlink named "1" in the cwd, reading the value answers the opposite.
+lstat($tmp);
+print "71=", ((-l -e _) ? 1 : 0), "\n";
 close(FH);
 unlink $tmp;
 PERL
@@ -277,6 +298,12 @@ my %EXPECT = (
     '64' => 'die',  #   … and so is `lstat _`
     '65' => 'no',   # after an lstat both are fine …
     '66' => 'no',   #   … including plain `stat _`
+    '67' => 'no',   # READING `_` does not re-stat, so it does not change the
+    '68' => 'no',   #   FLAVOUR — an `-e _` or a `stat _` in between is legal
+    '69' => 'die',  # … except -T/-B, which OPEN the file and stat the fd
+    '70' => 'no',   # … and only when there was a buffer: a -T that can open
+                    #   nothing performs no stat at all
+    '71' => '0',    # the stacked spelling (t/op/filetest.t:125)
 );
 
 my $n = 0;

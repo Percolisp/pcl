@@ -15609,7 +15609,15 @@ buffer's fill-pointer; everything else falls back to file-length."
     (p-die (if (string= op "lstat")
                "The stat preceding lstat() wasn't an lstat"
                "The stat preceding -l _ wasn't an lstat")))
-  (setf *pcl-stat-cache-type* (%p-stat-flavour op))
+  ;; READING `_` performs NO stat, so it does not change the remembered
+  ;; FLAVOUR either: `lstat $f; -e _; -l _` is legal in perl, and so is a
+  ;; `stat _` in the middle of the chain (probed, 11 shapes).  The ONE
+  ;; exception is -T/-B, which OPEN the file and stat the descriptor — and
+  ;; only when there is a valid buffer to work from, because a -T that
+  ;; cannot open anything performs no stat at all (`lstat "/nope"; -T _;
+  ;; -l _` is legal, while `lstat $f; -T _; -l _` dies).
+  (when (and *pcl-stat-cache-ok* (or (string= op "T") (string= op "B")))
+    (setf *pcl-stat-cache-type* :stat))
   (cond
     (*pcl-stat-cache-ok* (values *pcl-stat-cache-kind* *pcl-stat-cache-path*))
     ((and (eq *pcl-stat-cache-kind* :path)

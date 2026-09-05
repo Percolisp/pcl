@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example)
 
@@ -2820,6 +2820,62 @@ The obligation classes, each keyed to the machinery a target must have:
 `tail-return`, `elem-setf` and `insensitive-call` each report `fired` out of
 `candidates`, so a target can see how much of the program PCL could prove
 something about — and `fired <= candidates` always holds.
+
+
+### 10c. The stat / filetest family: ONE operand resolution, and what `_` remembers (normative, s470bs, tasks #1031 #1033 #1047 #1048 #1049)
+
+`stat`, `lstat` and the 26 filetests `-X` are ONE family with ONE reading of
+their operand.  A backend that gives each op its own reading will reproduce
+PCL's own drift, where `-e STDOUT` answered false while `stat STDOUT`
+answered thirteen elements.  The reading takes the operator's NAME as well as
+the operand, because three of perl's rules depend on it, and it answers a
+KIND:
+
+| kind | operand shapes | what the op then does |
+|---|---|---|
+| overload | a blessed operand whose class has a `-X` handler | the handler ANSWERS; it is passed the operator's LETTER, runs ONCE, does no stat and leaves `_` untouched.  `stat`/`lstat` never ask it — only a filetest does |
+| descriptor | a glob VALUE (`*FH`), a glob REF (`\*FH`), an IO ref (`*$fh{IO}`), a lexical handle, a bareword naming an OPEN handle, a standard stream, an open DIRHANDLE | `fstat(2)` the descriptor |
+| path | a STRING — always, whatever handle of that name is open — an unblessed value's stringification, a blessed operand with only a `""` overload, and `undef` (the empty path) | `stat(2)`/`lstat(2)` the name |
+| bad | a bareword or handle that is not open, a closed handle, a closed dirhandle | no syscall: `$!` = EBADF |
+
+Three operator-dependent exceptions, all measured against perl 5.40.3:
+`-l` NEVER takes a handle (it stringifies, so a glob is a nonexistent FILE
+NAME and a bareword is EBADF); `-t` keeps the handle-NAME reading of a string
+(`-t "STDIN"` finds the handle and answers ENOTTY, `-t "/etc/passwd"` is
+EBADF); and a `()`-prototype sub or declared sub in the slot is CALLED,
+because these are EXPR slots, not glob slots (§7.5).
+
+**`$!` is part of the answer.** EBADF and ENOENT are different facts and every
+member of the family sets one of them: EBADF for a handle that is not open,
+ENOENT for a missing path — *including a path containing a NUL byte*, which
+perl fails ([perl #131895]) where the C layer would truncate it.
+
+**`_` is the previous operand, and it carries two things the operand cannot
+say by itself.**  (1) the FLAVOUR of the stat that filled it — reading `_`
+with `-l` or `lstat` after a plain `stat` is FATAL, in perl's own two
+wordings (`The stat preceding -l _ wasn't an lstat` /
+`The stat preceding lstat() wasn't an lstat`).  (2) whether that stat
+SUCCEEDED — after a failure `_` is an INVALID buffer, so every filetest but
+`-T`/`-B` answers EBADF from it, while `-T`/`-B` go on to open the remembered
+NAME and so answer ENOENT.
+
+**Reading `_` performs no stat, and therefore does not change the flavour.**
+`lstat $f; -e _; -l _` is legal, and so is a plain `stat _` in the middle of
+the chain — perl re-uses the buffer without a syscall and without touching
+`PL_laststype`.  The ONE exception is `-T`/`-B`, which OPEN the file and stat
+the descriptor, so they DO set the flavour to `stat` — but only when there was
+a valid buffer to work from: a `-T` that can open nothing performs no stat at
+all, so `lstat "/nope"; -T _; -l _` is legal while `lstat $f; -T _; -l _`
+dies.  The same rule read through the stacked spelling: `-l -e _` reads the
+BUFFER the inner test left, never the inner test's return VALUE
+(`t/op/filetest.t:125`).
+
+PCL implements the buffer as the remembered OPERAND and stats again, rather
+than caching perl's `struct stat`; outside a race the answers agree, and each
+test keeps its own logic (access(2) for `-r`/`-w`/`-x`, `lstat` for `-l`, the
+first-block scan for `-T`/`-B`).  A backend may cache the buffer instead —
+what it may not do is drop the flavour and the success flag, which are
+observable.
 
 ## 11. What a translator may ignore
 

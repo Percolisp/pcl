@@ -346,6 +346,29 @@ magic.t	PARTIAL	158	31	208
 # among this PARTIAL file's unrecorded churn rows, never blessed.
 method.t	PARTIAL	76	22	163
 min_local.t	OK	10	0	10
+# s470bs-merge (2026-09-06, the batch's OWED full sweep) -- TWO ROWS EDITED BY
+#   HAND, both MEASURED on this tree AND on a `git archive 48d8e39` extraction
+#   of main with `sweep-perl-tests.pl --jobs 1`, which is what says whose move
+#   each is.  The run's own verdict: GATE clean, 0 new / 0 fixed, drops 5 =
+#   census, TOTAL passing 18644 -> 18645.
+#     ref.t     PARTIAL 195/16 -> 196/15  (+1).  Row 46 `IO slot of the
+#       temporary glob is set correctly` (`$ref = *STDOUT{IO}; is($ref,
+#       *{$ref}{IO})`) now PASSES: #1047's IO-ref half, where `*$fh` used to
+#       run p-dynamic-typeglob and STRINGIFY the stream into a glob NAME.
+#       Base tree 195/16, this tree 196/15, same last row (242 of 245).  The
+#       row was never in fail-baseline.tsv (it is a PARTIAL file's unblessed
+#       churn), which is why the gate correctly reads 0 fixed.  The identical
+#       assertion in postfixderef.t (test 69, the `$ref->*{IO}` spelling
+#       inside a string eval) still FAILS and stays blessed.
+#     readline.t PARTIAL 23/5 -> 23/7  (fail +2, skip -2, pass unchanged).  An
+#       EXPOSED SKIP, not a regression: rows 12/13 are gated on
+#       `open F, '.' and binmode F and sysread F, $_, 1; my $err = $! + 0;`
+#       and #1033 makes the BEGIN block's failing `-d 't'` leave ENOENT behind
+#       exactly as perl does, so `$err` is 2 instead of 0 and the SKIP stops
+#       firing.  They then fail on the half PCL still lacks -- a read from a
+#       DIRECTORY handle sets no errno where perl sets EISDIR -- filed as
+#       #1237 and blessed in fail-baseline.tsv with that cause.  Both rows
+#       leave the SHORTFALL: baselines/row-shortfall.tsv 8 -> 6.
 # s470 (Fable): multideref.t 43 -> 41 EDITED BY HAND — rows 47/49 (RT #130727 array not autovivified) were
 #   ACCIDENTAL passes (PCL never died there, nothing vivified); s470bk's #1058 write-vivification makes them
 #   honest; the corner is an accepted perl quirk registered in cl/skip-registry.lisp (not-supported.md, `local` section).
@@ -370,13 +393,13 @@ qq.t	OK	30	0	30
 qr.t	OK	23	14	37
 quotemeta.t	OK	38	2	60
 range.t	OK	158	0	162
-readline.t	PARTIAL	23	5	36
+readline.t	PARTIAL	23	7	36
 recurse.t	OK	27	1	28
 # s428 (#411 elided-arrow call): ref.t 191 -> 192 EDITED BY HAND — `(sub{})[0]()` (line 674) no longer DROPS.
 # s446j (#517): ref.t 192 -> 193 EDITED BY HAND — `ref(\&{""})` is CODE, as perl says
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
-ref.t	PARTIAL	195	16	245
+ref.t	PARTIAL	196	15	245
 reset.t	OK	22	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128

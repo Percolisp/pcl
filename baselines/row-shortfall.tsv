@@ -86,7 +86,7 @@ perl-tests/pack.t	8997	UNEXPLAINED
 perl-tests/postfixderef.t	7	UNEXPLAINED
 perl-tests/quotemeta.t	20	UNEXPLAINED
 perl-tests/range.t	4	UNEXPLAINED
-perl-tests/readline.t	8	UNEXPLAINED
+perl-tests/readline.t	6	#1237 (s470bs-merge: rows 12/13 `readline( DIRECTORY )` are PRODUCED now -- #1033 makes the failing `-d 't'` leave ENOENT behind, so readline.t:71's SKIP stops firing.  They FAIL, on #1237, and are blessed in fail-baseline.tsv)
 perl-tests/ref.t	34	UNEXPLAINED
 perl-tests/reset.t	23	UNEXPLAINED
 perl-tests/scalar.t	12	UNEXPLAINED

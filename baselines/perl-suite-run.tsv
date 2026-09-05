@@ -1,4 +1,19 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s470bs-merge (2026-09-06) -- TWO ROWS SPLICED BY HAND, the s470bs batch's
+#   OWED companion legs.  The stat/filetest family got ONE operand resolver
+#   (#1031 the `-X`/`""` overload, #1049 a string is a PATH, #1048 the handle
+#   KINDS, #1033 perl's errno, #1047 what `_` remembers).  Both numbers were
+#   measured on the finished tree AND on a `git archive 48d8e39` extraction of
+#   main, which reproduces the OLD row exactly -- so main's own BR/BP changes
+#   contributed nothing here and the move is this batch's.
+#     op/filetest.t   180/254 -> 369/65   #1031 (27x5 handler rows + 16 string-
+#                                         overload rows), #1033 (the \0-name
+#                                         rows), #1047 (`_`), #1048 (GLOB/IO).
+#                                         Its aborted form is unchanged.
+#     op/stat_errors.t 305/333 -> 510/128 #1033: every row is an
+#                                         `error from -X <operand>` assertion.
+#   The other four files of the leg are UNCHANGED on both trees: io/fs.t 59/2,
+#   op/time.t 72/0 OK, op/stat.t 0/0 (#1232), op/filetest_t.t 0/0 (no /dev/tty).
 # s470br (task #1115, 2026-09-05) -- THREE ROWS SPLICED BY HAND.  A filehandle
 #   carries OCTETS unless a layer says otherwise, which is perl's default: two
 #   files gain rows because their reads now measure bytes, and the third had
@@ -1466,7 +1481,7 @@ op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for inval
 op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
-op/filetest.t	436	0	180	254	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
+op/filetest.t	436	0	369	65	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
 op/filetest_stack_ok.t	136	0	71	65	DIFF		0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
 op/flip.t	14	0	12	2	DIFF		0
@@ -1584,7 +1599,7 @@ op/sselect.t	23	0	17	6	DIFF		0
 op/stash.t	54	1	48	7	DIFF	undef-fn:main::pl-SUPER	0
 op/stash_parse_gv.t	5	0	5	0	OK		0
 op/stat.t	108	3	0	0	DIFF	aborted-forms:1: The function main::pl-is_linux_container is undefined.	0
-op/stat_errors.t	638	0	305	333	DIFF		0
+op/stat_errors.t	638	0	510	128	DIFF		0
 op/state.t	166	0	88	4	XDIFF	aborted-forms:1: PCL: given/when (feature 'switch') is not supported -- removed in perl N.N, at state.t lin | not-supported.md §`given`/`when` / smart match (`~~`) AND §Computed goto (`goto EXPR`) — TWO blessed sections, and between them they cover every divergence.  The file's ONE `given` block (line 350) is refused; since s466 (#1037) that refusal is STATEMENT-level, so 88 of perl's 166 rows now run and the 74 after it go with the enclosing top-level form (#1055).  The 4 rows PCL does produce and fail are `computed goto N`, which the Computed goto section names by description (it cites the perl-tests twin's rows 70-73): the label form announces on stderr and falls through, by the s328 ruling.	0
 op/study.t	43	0	43	0	OK		0
 op/studytied.t	14	0	13	1	DIFF		0

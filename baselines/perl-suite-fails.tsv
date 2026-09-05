@@ -36,13 +36,11 @@
 # descriptions interpolate perl's own hash order ("uses >0 heads (6)", "k1:
 # delete", "key '2' incremented correctly") and were measured DIFFERENT in two
 # runs of ONE tree.
-# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (the ten s468be
-#   files) + s469bf 2026-09-05 (run/cloexec.t re-blessed; re/pat.t +
-#   re/pat_advanced.t + re/regexp_unicode_prop.t hand-registered
-#   *rows-unstable*) + s470bi 2026-09-05 (op/loopctl.t + op/rt119311.t ONLY,
-#   --bless-fails after READING every new row) + s470bk 2026-09-05
-#   (op/closure.t + op/gv.t ONLY, --bless-fails after READING every removed
-#   row) -- hand-merged, only the named files were ever re-measured.
+# taken-at: s468bc 2026-09-04 (main) + s468be + s469bf + s470bi +
+#   s470bk + s470br (see the notes below) + s470bs-merge 2026-09-06
+#   (op/filetest.t + op/stat_errors.t ONLY, --bless-fails
+#   after READING every removed row) -- hand-merged, only the named
+#   files were ever re-measured.
 # s470bi (task #1022 half (a), RULED by Fable in s470 and blessed with its
 #   cost VISIBLE): a bare `last`/`next`/`redo` whose loop is not lexically in
 #   the sub now DIES at its own site, trappably, instead of doing nothing
@@ -82,6 +80,29 @@
 #   f728637` extraction).  The three uni/gv.t rows -- the `undef *GLOB` slot
 #   rows at t/uni/gv.t 110-112 -- are NOT mine: the base tree passes them too,
 #   so this baseline was stale for that file before s470br.
+# s470bs-merge (2026-09-06, the batch's OWED companion legs): 394 rows REMOVED
+#   over TWO files, `--bless-fails` after READING every removed row, and only
+#   these six files were measured (op/filetest.t, op/stat.t, op/filetest_t.t,
+#   io/fs.t, op/time.t, op/stat_errors.t; the other 263 files' rows are the
+#   previous bless, byte-for-byte).  Both causes are s470bs's own, MEASURED
+#   against a `git archive 48d8e39` extraction that reproduces the old numbers
+#   exactly (op/filetest.t C 180/254, op/stat_errors.t C 305/333):
+#     op/stat_errors.t  205 rows -> gone.  #1033 (perl's ERRNO for the whole
+#       family: EBADF for a handle that is not open, ENOENT for a missing
+#       path).  Every one of the 205 is an `error from -X <operand>` row.
+#       Verdict C 305/333 -> C 510/128, parallel and serial agreeing.
+#     op/filetest.t     189 rows -> gone.  #1031 (a filetest runs its operand's
+#       `-X` / `""` overload: 27x5 handler rows + 16 string-overload rows),
+#       #1033 (the three `\0`-in-the-name rows), #1047 (the `_` flavour rows,
+#       the two stacked-`-l` error rows and the two `$ioref` rows) and #1048
+#       (the GLOB/IO string-overload rows).  Verdict C 180/254 -> C 369/65,
+#       parallel and serial agreeing; its one aborted form ("Undefined
+#       subroutine &main::f called") is PRE-EXISTING and unchanged.
+#   The remaining 68 + 128 rows are NOT fixed and stay blessed: #1231 (an
+#   undeclared bareword in a filetest slot is emitted as a CALL and dies --
+#   that is stat_errors.t's whole remaining 128), #1234 (a stacked filetest
+#   over a `-X`-overloaded operand re-dispatches at every level; a COMPILER
+#   change) and #1235 (`-t`/`-T`/`-B` on an IO ref).
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -1785,8 +1806,6 @@ io/errnosig.t	1	ok	not ok	Signal does not modify $!
 io/fflush.t	5	ok	(missing)	#5
 io/fflush.t	6	ok	(missing)	#6
 io/fflush.t	7	ok	(missing)	#7
-io/fs.t	40	ok	not ok	skip has futimes
-io/fs.t	53	ok	not ok	truncate(word) does not fall back to file name
 io/inplace.t	2	ok	not ok	backup file contents stay the same
 io/inplace.t	7	ok	not ok	die shouldn't touch file
 io/inplace.t	1	ok	not ok	file contents properly replaced
@@ -3617,263 +3636,6 @@ op/filehandle.t	0	(none)	renumbered	*summary*
 op/filehandle.t	2	ok	(missing)	after 'seek' and 'tell', got expected current fh position in bytes
 op/filehandle.t	3	ok	(missing)	after 'seek' and 'tell', still got expected content
 op/filehandle.t	4	ok	not ok [PCL #2]	no errors after 'seek' or 'tell'
-op/filetest.t	0	(none)	renumbered	*summary*
-op/filetest.t	420	ok	not ok [PCL #418]	-T HANDLE sets the stat type
-op/filetest.t	424	ok	not ok [PCL #422]	-T _ works after -r $ioref
-op/filetest.t	423	ok	not ok [PCL #421]	-T _ works after stat $ioref
-op/filetest.t	426	ok	not ok [PCL #424]	-T on closed handle resets last stat type
-op/filetest.t	432	ok	not ok [PCL #430]	-T on name with \0
-op/filetest.t	18	ok	not ok	-d and -e: file at least exists
-op/filetest.t	19	ok	not ok	-e and -d: file at least exists
-op/filetest.t	11	ok	not ok	-f and -d stackable: plain file found
-op/filetest.t	434	ok	not ok [PCL #432]	-f on name with \0
-op/filetest.t	34	ok	not ok	-l $handle warning is utf8-clean
-op/filetest.t	35	ok	not ok	-l $handle warning occurs for globs, not just globrefs
-op/filetest.t	36	ok	not ok	-l $handle warning occurs for iorefs as well
-op/filetest.t	32	ok	not ok	-l \*foo is a file name
-op/filetest.t	435	ok	not ok [PCL #433]	-r on name with \0
-op/filetest.t	37	ok	(missing)	_ is bareword after filetest operator
-op/filetest.t	38	ok	(missing)	_ is bareword after filetest operator
-op/filetest.t	394	ok	not ok [PCL #392]	correct -A on string overload
-op/filetest.t	398	ok	not ok [PCL #396]	correct -A on string/-X overload
-op/filetest.t	384	ok	not ok [PCL #382]	correct -B on string/-X overload
-op/filetest.t	408	ok	not ok [PCL #406]	correct -C on string overload
-op/filetest.t	412	ok	not ok [PCL #410]	correct -C on string/-X overload
-op/filetest.t	366	ok	not ok [PCL #364]	correct -M on string overload
-op/filetest.t	370	ok	not ok [PCL #368]	correct -M on string/-X overload
-op/filetest.t	142	ok	not ok [PCL #140]	correct -O on string overload
-op/filetest.t	146	ok	not ok [PCL #144]	correct -O on string/-X overload
-op/filetest.t	100	ok	not ok [PCL #98]	correct -R on string overload
-op/filetest.t	104	ok	not ok [PCL #102]	correct -R on string/-X overload
-op/filetest.t	258	ok	not ok [PCL #256]	correct -S on string/-X overload
-op/filetest.t	352	ok	not ok [PCL #350]	correct -T on string overload
-op/filetest.t	356	ok	not ok [PCL #354]	correct -T on string/-X overload
-op/filetest.t	114	ok	not ok [PCL #112]	correct -W on string overload
-op/filetest.t	118	ok	not ok [PCL #116]	correct -W on string/-X overload
-op/filetest.t	128	ok	not ok [PCL #126]	correct -X on string overload
-op/filetest.t	132	ok	not ok [PCL #130]	correct -X on string/-X overload
-op/filetest.t	272	ok	not ok [PCL #270]	correct -b on string/-X overload
-op/filetest.t	286	ok	not ok [PCL #284]	correct -c on string/-X overload
-op/filetest.t	216	ok	not ok [PCL #214]	correct -d on string/-X overload
-op/filetest.t	156	ok	not ok [PCL #154]	correct -e on string overload
-op/filetest.t	160	ok	not ok [PCL #158]	correct -e on string/-X overload
-op/filetest.t	198	ok	not ok [PCL #196]	correct -f on string overload
-op/filetest.t	202	ok	not ok [PCL #200]	correct -f on string/-X overload
-op/filetest.t	328	ok	not ok [PCL #326]	correct -g on string/-X overload
-op/filetest.t	342	ok	not ok [PCL #340]	correct -k on string/-X overload
-op/filetest.t	226	ok	not ok [PCL #224]	correct -l on string overload
-op/filetest.t	230	ok	not ok [PCL #228]	correct -l on string/-X overload
-op/filetest.t	86	ok	not ok [PCL #84]	correct -o on string overload
-op/filetest.t	90	ok	not ok [PCL #88]	correct -o on string/-X overload
-op/filetest.t	244	ok	not ok [PCL #242]	correct -p on string/-X overload
-op/filetest.t	44	ok	not ok [PCL #42]	correct -r on string overload
-op/filetest.t	48	ok	not ok [PCL #46]	correct -r on string/-X overload
-op/filetest.t	184	ok	not ok [PCL #182]	correct -s on string overload
-op/filetest.t	188	ok	not ok [PCL #186]	correct -s on string/-X overload
-op/filetest.t	300	ok	not ok [PCL #298]	correct -t on string/-X overload
-op/filetest.t	314	ok	not ok [PCL #312]	correct -u on string/-X overload
-op/filetest.t	58	ok	not ok [PCL #56]	correct -w on string overload
-op/filetest.t	62	ok	not ok [PCL #60]	correct -w on string/-X overload
-op/filetest.t	72	ok	not ok [PCL #70]	correct -x on string overload
-op/filetest.t	76	ok	not ok [PCL #74]	correct -x on string/-X overload
-op/filetest.t	174	ok	not ok [PCL #172]	correct -z on string/-X overload
-op/filetest.t	390	ok	not ok [PCL #388]	correct object for overloaded -A
-op/filetest.t	376	ok	not ok [PCL #374]	correct object for overloaded -B
-op/filetest.t	404	ok	not ok [PCL #402]	correct object for overloaded -C
-op/filetest.t	362	ok	not ok [PCL #360]	correct object for overloaded -M
-op/filetest.t	138	ok	not ok [PCL #136]	correct object for overloaded -O
-op/filetest.t	96	ok	not ok [PCL #94]	correct object for overloaded -R
-op/filetest.t	250	ok	not ok [PCL #248]	correct object for overloaded -S
-op/filetest.t	348	ok	not ok [PCL #346]	correct object for overloaded -T
-op/filetest.t	110	ok	not ok [PCL #108]	correct object for overloaded -W
-op/filetest.t	124	ok	not ok [PCL #122]	correct object for overloaded -X
-op/filetest.t	264	ok	not ok [PCL #262]	correct object for overloaded -b
-op/filetest.t	278	ok	not ok [PCL #276]	correct object for overloaded -c
-op/filetest.t	208	ok	not ok [PCL #206]	correct object for overloaded -d
-op/filetest.t	152	ok	not ok [PCL #150]	correct object for overloaded -e
-op/filetest.t	194	ok	not ok [PCL #192]	correct object for overloaded -f
-op/filetest.t	320	ok	not ok [PCL #318]	correct object for overloaded -g
-op/filetest.t	334	ok	not ok [PCL #332]	correct object for overloaded -k
-op/filetest.t	222	ok	not ok [PCL #220]	correct object for overloaded -l
-op/filetest.t	82	ok	not ok [PCL #80]	correct object for overloaded -o
-op/filetest.t	236	ok	not ok [PCL #234]	correct object for overloaded -p
-op/filetest.t	40	ok	not ok [PCL #38]	correct object for overloaded -r
-op/filetest.t	180	ok	not ok [PCL #178]	correct object for overloaded -s
-op/filetest.t	292	ok	not ok [PCL #290]	correct object for overloaded -t
-op/filetest.t	306	ok	not ok [PCL #304]	correct object for overloaded -u
-op/filetest.t	54	ok	not ok [PCL #52]	correct object for overloaded -w
-op/filetest.t	68	ok	not ok [PCL #66]	correct object for overloaded -x
-op/filetest.t	166	ok	not ok [PCL #164]	correct object for overloaded -z
-op/filetest.t	391	ok	not ok [PCL #389]	correct op for overloaded -A
-op/filetest.t	377	ok	not ok [PCL #375]	correct op for overloaded -B
-op/filetest.t	405	ok	not ok [PCL #403]	correct op for overloaded -C
-op/filetest.t	363	ok	not ok [PCL #361]	correct op for overloaded -M
-op/filetest.t	139	ok	not ok [PCL #137]	correct op for overloaded -O
-op/filetest.t	97	ok	not ok [PCL #95]	correct op for overloaded -R
-op/filetest.t	251	ok	not ok [PCL #249]	correct op for overloaded -S
-op/filetest.t	349	ok	not ok [PCL #347]	correct op for overloaded -T
-op/filetest.t	111	ok	not ok [PCL #109]	correct op for overloaded -W
-op/filetest.t	125	ok	not ok [PCL #123]	correct op for overloaded -X
-op/filetest.t	265	ok	not ok [PCL #263]	correct op for overloaded -b
-op/filetest.t	279	ok	not ok [PCL #277]	correct op for overloaded -c
-op/filetest.t	209	ok	not ok [PCL #207]	correct op for overloaded -d
-op/filetest.t	153	ok	not ok [PCL #151]	correct op for overloaded -e
-op/filetest.t	195	ok	not ok [PCL #193]	correct op for overloaded -f
-op/filetest.t	321	ok	not ok [PCL #319]	correct op for overloaded -g
-op/filetest.t	335	ok	not ok [PCL #333]	correct op for overloaded -k
-op/filetest.t	223	ok	not ok [PCL #221]	correct op for overloaded -l
-op/filetest.t	83	ok	not ok [PCL #81]	correct op for overloaded -o
-op/filetest.t	237	ok	not ok [PCL #235]	correct op for overloaded -p
-op/filetest.t	41	ok	not ok [PCL #39]	correct op for overloaded -r
-op/filetest.t	181	ok	not ok [PCL #179]	correct op for overloaded -s
-op/filetest.t	293	ok	not ok [PCL #291]	correct op for overloaded -t
-op/filetest.t	307	ok	not ok [PCL #305]	correct op for overloaded -u
-op/filetest.t	55	ok	not ok [PCL #53]	correct op for overloaded -w
-op/filetest.t	69	ok	not ok [PCL #67]	correct op for overloaded -x
-op/filetest.t	167	ok	not ok [PCL #165]	correct op for overloaded -z
-op/filetest.t	392	ok	not ok [PCL #390]	correct return value for overloaded -A
-op/filetest.t	378	ok	not ok [PCL #376]	correct return value for overloaded -B
-op/filetest.t	406	ok	not ok [PCL #404]	correct return value for overloaded -C
-op/filetest.t	364	ok	not ok [PCL #362]	correct return value for overloaded -M
-op/filetest.t	140	ok	not ok [PCL #138]	correct return value for overloaded -O
-op/filetest.t	98	ok	not ok [PCL #96]	correct return value for overloaded -R
-op/filetest.t	252	ok	not ok [PCL #250]	correct return value for overloaded -S
-op/filetest.t	350	ok	not ok [PCL #348]	correct return value for overloaded -T
-op/filetest.t	112	ok	not ok [PCL #110]	correct return value for overloaded -W
-op/filetest.t	126	ok	not ok [PCL #124]	correct return value for overloaded -X
-op/filetest.t	266	ok	not ok [PCL #264]	correct return value for overloaded -b
-op/filetest.t	280	ok	not ok [PCL #278]	correct return value for overloaded -c
-op/filetest.t	210	ok	not ok [PCL #208]	correct return value for overloaded -d
-op/filetest.t	154	ok	not ok [PCL #152]	correct return value for overloaded -e
-op/filetest.t	196	ok	not ok [PCL #194]	correct return value for overloaded -f
-op/filetest.t	322	ok	not ok [PCL #320]	correct return value for overloaded -g
-op/filetest.t	336	ok	not ok [PCL #334]	correct return value for overloaded -k
-op/filetest.t	224	ok	not ok [PCL #222]	correct return value for overloaded -l
-op/filetest.t	84	ok	not ok [PCL #82]	correct return value for overloaded -o
-op/filetest.t	238	ok	not ok [PCL #236]	correct return value for overloaded -p
-op/filetest.t	42	ok	not ok [PCL #40]	correct return value for overloaded -r
-op/filetest.t	182	ok	not ok [PCL #180]	correct return value for overloaded -s
-op/filetest.t	294	ok	not ok [PCL #292]	correct return value for overloaded -t
-op/filetest.t	308	ok	not ok [PCL #306]	correct return value for overloaded -u
-op/filetest.t	56	ok	not ok [PCL #54]	correct return value for overloaded -w
-op/filetest.t	70	ok	not ok [PCL #68]	correct return value for overloaded -x
-op/filetest.t	168	ok	not ok [PCL #166]	correct return value for overloaded -z
-op/filetest.t	389	ok	not ok [PCL #387]	overloaded -A succeeds
-op/filetest.t	375	ok	not ok [PCL #373]	overloaded -B succeeds
-op/filetest.t	403	ok	not ok [PCL #401]	overloaded -C succeeds
-op/filetest.t	361	ok	not ok [PCL #359]	overloaded -M succeeds
-op/filetest.t	137	ok	not ok [PCL #135]	overloaded -O succeeds
-op/filetest.t	95	ok	not ok [PCL #93]	overloaded -R succeeds
-op/filetest.t	249	ok	not ok [PCL #247]	overloaded -S succeeds
-op/filetest.t	347	ok	not ok [PCL #345]	overloaded -T succeeds
-op/filetest.t	109	ok	not ok [PCL #107]	overloaded -W succeeds
-op/filetest.t	123	ok	not ok [PCL #121]	overloaded -X succeeds
-op/filetest.t	263	ok	not ok [PCL #261]	overloaded -b succeeds
-op/filetest.t	277	ok	not ok [PCL #275]	overloaded -c succeeds
-op/filetest.t	207	ok	not ok [PCL #205]	overloaded -d succeeds
-op/filetest.t	151	ok	not ok [PCL #149]	overloaded -e succeeds
-op/filetest.t	193	ok	not ok [PCL #191]	overloaded -f succeeds
-op/filetest.t	319	ok	not ok [PCL #317]	overloaded -g succeeds
-op/filetest.t	333	ok	not ok [PCL #331]	overloaded -k succeeds
-op/filetest.t	221	ok	not ok [PCL #219]	overloaded -l succeeds
-op/filetest.t	81	ok	not ok [PCL #79]	overloaded -o succeeds
-op/filetest.t	235	ok	not ok [PCL #233]	overloaded -p succeeds
-op/filetest.t	39	ok	not ok [PCL #37]	overloaded -r succeeds
-op/filetest.t	179	ok	not ok [PCL #177]	overloaded -s succeeds
-op/filetest.t	291	ok	not ok [PCL #289]	overloaded -t succeeds
-op/filetest.t	305	ok	not ok [PCL #303]	overloaded -u succeeds
-op/filetest.t	53	ok	not ok [PCL #51]	overloaded -w succeeds
-op/filetest.t	67	ok	not ok [PCL #65]	overloaded -x succeeds
-op/filetest.t	165	ok	not ok [PCL #163]	overloaded -z succeeds
-op/filetest.t	402	ok	not ok [PCL #400]	overloaded stacked -A
-op/filetest.t	388	ok	not ok [PCL #386]	overloaded stacked -B
-op/filetest.t	416	ok	not ok [PCL #414]	overloaded stacked -C
-op/filetest.t	374	ok	not ok [PCL #372]	overloaded stacked -M
-op/filetest.t	150	ok	not ok [PCL #148]	overloaded stacked -O
-op/filetest.t	108	ok	not ok [PCL #106]	overloaded stacked -R
-op/filetest.t	262	ok	not ok [PCL #260]	overloaded stacked -S
-op/filetest.t	360	ok	not ok [PCL #358]	overloaded stacked -T
-op/filetest.t	122	ok	not ok [PCL #120]	overloaded stacked -W
-op/filetest.t	136	ok	not ok [PCL #134]	overloaded stacked -X
-op/filetest.t	276	ok	not ok [PCL #274]	overloaded stacked -b
-op/filetest.t	290	ok	not ok [PCL #288]	overloaded stacked -c
-op/filetest.t	220	ok	not ok [PCL #218]	overloaded stacked -d
-op/filetest.t	164	ok	not ok [PCL #162]	overloaded stacked -e
-op/filetest.t	206	ok	not ok [PCL #204]	overloaded stacked -f
-op/filetest.t	332	ok	not ok [PCL #330]	overloaded stacked -g
-op/filetest.t	346	ok	not ok [PCL #344]	overloaded stacked -k
-op/filetest.t	234	ok	not ok [PCL #232]	overloaded stacked -l
-op/filetest.t	94	ok	not ok [PCL #92]	overloaded stacked -o
-op/filetest.t	248	ok	not ok [PCL #246]	overloaded stacked -p
-op/filetest.t	52	ok	not ok [PCL #50]	overloaded stacked -r
-op/filetest.t	192	ok	not ok [PCL #190]	overloaded stacked -s
-op/filetest.t	304	ok	not ok [PCL #302]	overloaded stacked -t
-op/filetest.t	318	ok	not ok [PCL #316]	overloaded stacked -u
-op/filetest.t	66	ok	not ok [PCL #64]	overloaded stacked -w
-op/filetest.t	80	ok	not ok [PCL #78]	overloaded stacked -x
-op/filetest.t	178	ok	not ok [PCL #176]	overloaded stacked -z
-op/filetest.t	29	ok	not ok	stacked -l non-lstat error with warnings off
-op/filetest.t	30	ok	not ok	stacked -l non-lstat error with warnings on
-op/filetest.t	401	ok	not ok [PCL #399]	stacked overloaded -A
-op/filetest.t	387	ok	not ok [PCL #385]	stacked overloaded -B
-op/filetest.t	415	ok	not ok [PCL #413]	stacked overloaded -C
-op/filetest.t	373	ok	not ok [PCL #371]	stacked overloaded -M
-op/filetest.t	149	ok	not ok [PCL #147]	stacked overloaded -O
-op/filetest.t	107	ok	not ok [PCL #105]	stacked overloaded -R
-op/filetest.t	261	ok	not ok [PCL #259]	stacked overloaded -S
-op/filetest.t	359	ok	not ok [PCL #357]	stacked overloaded -T
-op/filetest.t	121	ok	not ok [PCL #119]	stacked overloaded -W
-op/filetest.t	135	ok	not ok [PCL #133]	stacked overloaded -X
-op/filetest.t	275	ok	not ok [PCL #273]	stacked overloaded -b
-op/filetest.t	289	ok	not ok [PCL #287]	stacked overloaded -c
-op/filetest.t	219	ok	not ok [PCL #217]	stacked overloaded -d
-op/filetest.t	163	ok	not ok [PCL #161]	stacked overloaded -e
-op/filetest.t	205	ok	not ok [PCL #203]	stacked overloaded -f
-op/filetest.t	331	ok	not ok [PCL #329]	stacked overloaded -g
-op/filetest.t	345	ok	not ok [PCL #343]	stacked overloaded -k
-op/filetest.t	233	ok	not ok [PCL #231]	stacked overloaded -l
-op/filetest.t	93	ok	not ok [PCL #91]	stacked overloaded -o
-op/filetest.t	247	ok	not ok [PCL #245]	stacked overloaded -p
-op/filetest.t	51	ok	not ok [PCL #49]	stacked overloaded -r
-op/filetest.t	191	ok	not ok [PCL #189]	stacked overloaded -s
-op/filetest.t	303	ok	not ok [PCL #301]	stacked overloaded -t
-op/filetest.t	317	ok	not ok [PCL #315]	stacked overloaded -u
-op/filetest.t	65	ok	not ok [PCL #63]	stacked overloaded -w
-op/filetest.t	79	ok	not ok [PCL #77]	stacked overloaded -x
-op/filetest.t	177	ok	not ok [PCL #175]	stacked overloaded -z
-op/filetest.t	395	ok	not ok [PCL #393]	string overload is called for -A
-op/filetest.t	381	ok	not ok [PCL #379]	string overload is called for -B
-op/filetest.t	383	ok	not ok [PCL #381]	string overload is called for -B on IO
-op/filetest.t	409	ok	not ok [PCL #407]	string overload is called for -C
-op/filetest.t	367	ok	not ok [PCL #365]	string overload is called for -M
-op/filetest.t	143	ok	not ok [PCL #141]	string overload is called for -O
-op/filetest.t	101	ok	not ok [PCL #99]	string overload is called for -R
-op/filetest.t	255	ok	not ok [PCL #253]	string overload is called for -S
-op/filetest.t	353	ok	not ok [PCL #351]	string overload is called for -T
-op/filetest.t	355	ok	not ok [PCL #353]	string overload is called for -T on IO
-op/filetest.t	115	ok	not ok [PCL #113]	string overload is called for -W
-op/filetest.t	129	ok	not ok [PCL #127]	string overload is called for -X
-op/filetest.t	269	ok	not ok [PCL #267]	string overload is called for -b
-op/filetest.t	283	ok	not ok [PCL #281]	string overload is called for -c
-op/filetest.t	213	ok	not ok [PCL #211]	string overload is called for -d
-op/filetest.t	157	ok	not ok [PCL #155]	string overload is called for -e
-op/filetest.t	199	ok	not ok [PCL #197]	string overload is called for -f
-op/filetest.t	325	ok	not ok [PCL #323]	string overload is called for -g
-op/filetest.t	339	ok	not ok [PCL #337]	string overload is called for -k
-op/filetest.t	227	ok	not ok [PCL #225]	string overload is called for -l
-op/filetest.t	228	ok	not ok [PCL #226]	string overload is called for -l on GLOB
-op/filetest.t	229	ok	not ok [PCL #227]	string overload is called for -l on IO
-op/filetest.t	87	ok	not ok [PCL #85]	string overload is called for -o
-op/filetest.t	241	ok	not ok [PCL #239]	string overload is called for -p
-op/filetest.t	45	ok	not ok [PCL #43]	string overload is called for -r
-op/filetest.t	185	ok	not ok [PCL #183]	string overload is called for -s
-op/filetest.t	297	ok	not ok [PCL #295]	string overload is called for -t
-op/filetest.t	299	ok	not ok [PCL #297]	string overload is called for -t on IO
-op/filetest.t	311	ok	not ok [PCL #309]	string overload is called for -u
-op/filetest.t	59	ok	not ok [PCL #57]	string overload is called for -w
-op/filetest.t	73	ok	not ok [PCL #71]	string overload is called for -x
-op/filetest.t	171	ok	not ok [PCL #169]	string overload is called for -z
-op/filetest.t	33	ok	not ok	warning for -l $handle
 op/filetest_stack_ok.t	130	ok	not ok	-A $overld did not leave $overld on the stack
 op/filetest_stack_ok.t	127	ok	not ok	-A *gv returns single value
 op/filetest_stack_ok.t	125	ok	not ok	-B $overld did not leave $overld on the stack
@@ -3939,7 +3701,6 @@ op/filetest_stack_ok.t	12	ok	not ok	-x *gv returns single value
 op/filetest_stack_ok.t	50	ok	not ok	-z $overld did not leave $overld on the stack
 op/filetest_stack_ok.t	47	ok	not ok	-z *gv returns single value
 op/filetest_stack_ok.t	46	ok	not ok	-z returns single value
-op/filetest_t.t	0	ok*	(no TAP)	*summary*
 op/flip.t	10	ok	not ok	[at t/op/flip.t line 61]
 op/flip.t	11	ok	not ok	[at t/op/flip.t line 65]
 op/for-many.t	52	ok	not ok	aliased rvalue
@@ -5700,340 +5461,6 @@ op/stash.t	55	ok	not ok	[perl \#129869] lookup %:: by name after clearing %::
 op/stash.t	50	ok	not ok	bareword lookup does not vivify stashes
 op/stash.t	1	ok	not ok	delete $::{STDERR} and print a warning
 op/stash.t	46	ok	not ok	setting stash name during undef has no effect
-op/stat.t	0	ok*	(no TAP)	*summary*
-op/stat_errors.t	616	ok	not ok	error from -A "tmpnotexist"
-op/stat_errors.t	608	ok	not ok	error from -A CLOSEDDIR
-op/stat_errors.t	604	ok	not ok	error from -A CLOSEDFILE
-op/stat_errors.t	596	ok	not ok	error from -A NEVEROPENED
-op/stat_errors.t	600	ok	not ok	error from -A SCALARFILE
-op/stat_errors.t	610	ok	not ok	error from -A \*CLOSEDDIR
-op/stat_errors.t	606	ok	not ok	error from -A \*CLOSEDFILE
-op/stat_errors.t	598	ok	not ok	error from -A \*NEVEROPENED
-op/stat_errors.t	602	ok	not ok	error from -A \*SCALARFILE
-op/stat_errors.t	614	ok	not ok	error from -A \*_
-op/stat_errors.t	612	ok	not ok	error from -A _
-op/stat_errors.t	572	ok	not ok	error from -B "tmpnotexist"
-op/stat_errors.t	564	ok	not ok	error from -B CLOSEDDIR
-op/stat_errors.t	560	ok	not ok	error from -B CLOSEDFILE
-op/stat_errors.t	552	ok	not ok	error from -B NEVEROPENED
-op/stat_errors.t	556	ok	not ok	error from -B SCALARFILE
-op/stat_errors.t	566	ok	not ok	error from -B \*CLOSEDDIR
-op/stat_errors.t	562	ok	not ok	error from -B \*CLOSEDFILE
-op/stat_errors.t	554	ok	not ok	error from -B \*NEVEROPENED
-op/stat_errors.t	558	ok	not ok	error from -B \*SCALARFILE
-op/stat_errors.t	570	ok	not ok	error from -B \*_
-op/stat_errors.t	568	ok	not ok	error from -B _
-op/stat_errors.t	638	ok	not ok	error from -C "tmpnotexist"
-op/stat_errors.t	630	ok	not ok	error from -C CLOSEDDIR
-op/stat_errors.t	626	ok	not ok	error from -C CLOSEDFILE
-op/stat_errors.t	618	ok	not ok	error from -C NEVEROPENED
-op/stat_errors.t	622	ok	not ok	error from -C SCALARFILE
-op/stat_errors.t	632	ok	not ok	error from -C \*CLOSEDDIR
-op/stat_errors.t	628	ok	not ok	error from -C \*CLOSEDFILE
-op/stat_errors.t	620	ok	not ok	error from -C \*NEVEROPENED
-op/stat_errors.t	624	ok	not ok	error from -C \*SCALARFILE
-op/stat_errors.t	636	ok	not ok	error from -C \*_
-op/stat_errors.t	634	ok	not ok	error from -C _
-op/stat_errors.t	594	ok	not ok	error from -M "tmpnotexist"
-op/stat_errors.t	586	ok	not ok	error from -M CLOSEDDIR
-op/stat_errors.t	582	ok	not ok	error from -M CLOSEDFILE
-op/stat_errors.t	574	ok	not ok	error from -M NEVEROPENED
-op/stat_errors.t	578	ok	not ok	error from -M SCALARFILE
-op/stat_errors.t	588	ok	not ok	error from -M \*CLOSEDDIR
-op/stat_errors.t	584	ok	not ok	error from -M \*CLOSEDFILE
-op/stat_errors.t	576	ok	not ok	error from -M \*NEVEROPENED
-op/stat_errors.t	580	ok	not ok	error from -M \*SCALARFILE
-op/stat_errors.t	592	ok	not ok	error from -M \*_
-op/stat_errors.t	590	ok	not ok	error from -M _
-op/stat_errors.t	220	ok	not ok	error from -O "tmpnotexist"
-op/stat_errors.t	212	ok	not ok	error from -O CLOSEDDIR
-op/stat_errors.t	208	ok	not ok	error from -O CLOSEDFILE
-op/stat_errors.t	200	ok	not ok	error from -O NEVEROPENED
-op/stat_errors.t	204	ok	not ok	error from -O SCALARFILE
-op/stat_errors.t	214	ok	not ok	error from -O \*CLOSEDDIR
-op/stat_errors.t	210	ok	not ok	error from -O \*CLOSEDFILE
-op/stat_errors.t	202	ok	not ok	error from -O \*NEVEROPENED
-op/stat_errors.t	206	ok	not ok	error from -O \*SCALARFILE
-op/stat_errors.t	218	ok	not ok	error from -O \*_
-op/stat_errors.t	216	ok	not ok	error from -O _
-op/stat_errors.t	154	ok	not ok	error from -R "tmpnotexist"
-op/stat_errors.t	146	ok	not ok	error from -R CLOSEDDIR
-op/stat_errors.t	142	ok	not ok	error from -R CLOSEDFILE
-op/stat_errors.t	134	ok	not ok	error from -R NEVEROPENED
-op/stat_errors.t	138	ok	not ok	error from -R SCALARFILE
-op/stat_errors.t	148	ok	not ok	error from -R \*CLOSEDDIR
-op/stat_errors.t	144	ok	not ok	error from -R \*CLOSEDFILE
-op/stat_errors.t	136	ok	not ok	error from -R \*NEVEROPENED
-op/stat_errors.t	140	ok	not ok	error from -R \*SCALARFILE
-op/stat_errors.t	152	ok	not ok	error from -R \*_
-op/stat_errors.t	150	ok	not ok	error from -R _
-op/stat_errors.t	396	ok	not ok	error from -S "tmpnotexist"
-op/stat_errors.t	388	ok	not ok	error from -S CLOSEDDIR
-op/stat_errors.t	384	ok	not ok	error from -S CLOSEDFILE
-op/stat_errors.t	376	ok	not ok	error from -S NEVEROPENED
-op/stat_errors.t	380	ok	not ok	error from -S SCALARFILE
-op/stat_errors.t	390	ok	not ok	error from -S \*CLOSEDDIR
-op/stat_errors.t	386	ok	not ok	error from -S \*CLOSEDFILE
-op/stat_errors.t	378	ok	not ok	error from -S \*NEVEROPENED
-op/stat_errors.t	382	ok	not ok	error from -S \*SCALARFILE
-op/stat_errors.t	394	ok	not ok	error from -S \*_
-op/stat_errors.t	392	ok	not ok	error from -S _
-op/stat_errors.t	550	ok	not ok	error from -T "tmpnotexist"
-op/stat_errors.t	542	ok	not ok	error from -T CLOSEDDIR
-op/stat_errors.t	538	ok	not ok	error from -T CLOSEDFILE
-op/stat_errors.t	530	ok	not ok	error from -T NEVEROPENED
-op/stat_errors.t	534	ok	not ok	error from -T SCALARFILE
-op/stat_errors.t	544	ok	not ok	error from -T \*CLOSEDDIR
-op/stat_errors.t	540	ok	not ok	error from -T \*CLOSEDFILE
-op/stat_errors.t	532	ok	not ok	error from -T \*NEVEROPENED
-op/stat_errors.t	536	ok	not ok	error from -T \*SCALARFILE
-op/stat_errors.t	548	ok	not ok	error from -T \*_
-op/stat_errors.t	546	ok	not ok	error from -T _
-op/stat_errors.t	176	ok	not ok	error from -W "tmpnotexist"
-op/stat_errors.t	168	ok	not ok	error from -W CLOSEDDIR
-op/stat_errors.t	164	ok	not ok	error from -W CLOSEDFILE
-op/stat_errors.t	156	ok	not ok	error from -W NEVEROPENED
-op/stat_errors.t	160	ok	not ok	error from -W SCALARFILE
-op/stat_errors.t	170	ok	not ok	error from -W \*CLOSEDDIR
-op/stat_errors.t	166	ok	not ok	error from -W \*CLOSEDFILE
-op/stat_errors.t	158	ok	not ok	error from -W \*NEVEROPENED
-op/stat_errors.t	162	ok	not ok	error from -W \*SCALARFILE
-op/stat_errors.t	174	ok	not ok	error from -W \*_
-op/stat_errors.t	172	ok	not ok	error from -W _
-op/stat_errors.t	198	ok	not ok	error from -X "tmpnotexist"
-op/stat_errors.t	190	ok	not ok	error from -X CLOSEDDIR
-op/stat_errors.t	186	ok	not ok	error from -X CLOSEDFILE
-op/stat_errors.t	178	ok	not ok	error from -X NEVEROPENED
-op/stat_errors.t	182	ok	not ok	error from -X SCALARFILE
-op/stat_errors.t	192	ok	not ok	error from -X \*CLOSEDDIR
-op/stat_errors.t	188	ok	not ok	error from -X \*CLOSEDFILE
-op/stat_errors.t	180	ok	not ok	error from -X \*NEVEROPENED
-op/stat_errors.t	184	ok	not ok	error from -X \*SCALARFILE
-op/stat_errors.t	196	ok	not ok	error from -X \*_
-op/stat_errors.t	194	ok	not ok	error from -X _
-op/stat_errors.t	418	ok	not ok	error from -b "tmpnotexist"
-op/stat_errors.t	410	ok	not ok	error from -b CLOSEDDIR
-op/stat_errors.t	406	ok	not ok	error from -b CLOSEDFILE
-op/stat_errors.t	398	ok	not ok	error from -b NEVEROPENED
-op/stat_errors.t	402	ok	not ok	error from -b SCALARFILE
-op/stat_errors.t	412	ok	not ok	error from -b \*CLOSEDDIR
-op/stat_errors.t	408	ok	not ok	error from -b \*CLOSEDFILE
-op/stat_errors.t	400	ok	not ok	error from -b \*NEVEROPENED
-op/stat_errors.t	404	ok	not ok	error from -b \*SCALARFILE
-op/stat_errors.t	416	ok	not ok	error from -b \*_
-op/stat_errors.t	414	ok	not ok	error from -b _
-op/stat_errors.t	440	ok	not ok	error from -c "tmpnotexist"
-op/stat_errors.t	432	ok	not ok	error from -c CLOSEDDIR
-op/stat_errors.t	428	ok	not ok	error from -c CLOSEDFILE
-op/stat_errors.t	420	ok	not ok	error from -c NEVEROPENED
-op/stat_errors.t	424	ok	not ok	error from -c SCALARFILE
-op/stat_errors.t	434	ok	not ok	error from -c \*CLOSEDDIR
-op/stat_errors.t	430	ok	not ok	error from -c \*CLOSEDFILE
-op/stat_errors.t	422	ok	not ok	error from -c \*NEVEROPENED
-op/stat_errors.t	426	ok	not ok	error from -c \*SCALARFILE
-op/stat_errors.t	438	ok	not ok	error from -c \*_
-op/stat_errors.t	436	ok	not ok	error from -c _
-op/stat_errors.t	330	ok	not ok	error from -d "tmpnotexist"
-op/stat_errors.t	322	ok	not ok	error from -d CLOSEDDIR
-op/stat_errors.t	318	ok	not ok	error from -d CLOSEDFILE
-op/stat_errors.t	310	ok	not ok	error from -d NEVEROPENED
-op/stat_errors.t	314	ok	not ok	error from -d SCALARFILE
-op/stat_errors.t	324	ok	not ok	error from -d \*CLOSEDDIR
-op/stat_errors.t	320	ok	not ok	error from -d \*CLOSEDFILE
-op/stat_errors.t	312	ok	not ok	error from -d \*NEVEROPENED
-op/stat_errors.t	316	ok	not ok	error from -d \*SCALARFILE
-op/stat_errors.t	328	ok	not ok	error from -d \*_
-op/stat_errors.t	326	ok	not ok	error from -d _
-op/stat_errors.t	242	ok	not ok	error from -e "tmpnotexist"
-op/stat_errors.t	234	ok	not ok	error from -e CLOSEDDIR
-op/stat_errors.t	230	ok	not ok	error from -e CLOSEDFILE
-op/stat_errors.t	222	ok	not ok	error from -e NEVEROPENED
-op/stat_errors.t	226	ok	not ok	error from -e SCALARFILE
-op/stat_errors.t	236	ok	not ok	error from -e \*CLOSEDDIR
-op/stat_errors.t	232	ok	not ok	error from -e \*CLOSEDFILE
-op/stat_errors.t	224	ok	not ok	error from -e \*NEVEROPENED
-op/stat_errors.t	228	ok	not ok	error from -e \*SCALARFILE
-op/stat_errors.t	240	ok	not ok	error from -e \*_
-op/stat_errors.t	238	ok	not ok	error from -e _
-op/stat_errors.t	308	ok	not ok	error from -f "tmpnotexist"
-op/stat_errors.t	300	ok	not ok	error from -f CLOSEDDIR
-op/stat_errors.t	296	ok	not ok	error from -f CLOSEDFILE
-op/stat_errors.t	288	ok	not ok	error from -f NEVEROPENED
-op/stat_errors.t	292	ok	not ok	error from -f SCALARFILE
-op/stat_errors.t	302	ok	not ok	error from -f \*CLOSEDDIR
-op/stat_errors.t	298	ok	not ok	error from -f \*CLOSEDFILE
-op/stat_errors.t	290	ok	not ok	error from -f \*NEVEROPENED
-op/stat_errors.t	294	ok	not ok	error from -f \*SCALARFILE
-op/stat_errors.t	306	ok	not ok	error from -f \*_
-op/stat_errors.t	304	ok	not ok	error from -f _
-op/stat_errors.t	506	ok	not ok	error from -g "tmpnotexist"
-op/stat_errors.t	498	ok	not ok	error from -g CLOSEDDIR
-op/stat_errors.t	494	ok	not ok	error from -g CLOSEDFILE
-op/stat_errors.t	486	ok	not ok	error from -g NEVEROPENED
-op/stat_errors.t	490	ok	not ok	error from -g SCALARFILE
-op/stat_errors.t	500	ok	not ok	error from -g \*CLOSEDDIR
-op/stat_errors.t	496	ok	not ok	error from -g \*CLOSEDFILE
-op/stat_errors.t	488	ok	not ok	error from -g \*NEVEROPENED
-op/stat_errors.t	492	ok	not ok	error from -g \*SCALARFILE
-op/stat_errors.t	504	ok	not ok	error from -g \*_
-op/stat_errors.t	502	ok	not ok	error from -g _
-op/stat_errors.t	528	ok	not ok	error from -k "tmpnotexist"
-op/stat_errors.t	520	ok	not ok	error from -k CLOSEDDIR
-op/stat_errors.t	516	ok	not ok	error from -k CLOSEDFILE
-op/stat_errors.t	508	ok	not ok	error from -k NEVEROPENED
-op/stat_errors.t	512	ok	not ok	error from -k SCALARFILE
-op/stat_errors.t	522	ok	not ok	error from -k \*CLOSEDDIR
-op/stat_errors.t	518	ok	not ok	error from -k \*CLOSEDFILE
-op/stat_errors.t	510	ok	not ok	error from -k \*NEVEROPENED
-op/stat_errors.t	514	ok	not ok	error from -k \*SCALARFILE
-op/stat_errors.t	526	ok	not ok	error from -k \*_
-op/stat_errors.t	524	ok	not ok	error from -k _
-op/stat_errors.t	352	ok	not ok	error from -l "tmpnotexist"
-op/stat_errors.t	344	ok	not ok	error from -l CLOSEDDIR
-op/stat_errors.t	340	ok	not ok	error from -l CLOSEDFILE
-op/stat_errors.t	332	ok	not ok	error from -l NEVEROPENED
-op/stat_errors.t	336	ok	not ok	error from -l SCALARFILE
-op/stat_errors.t	348	ok	not ok	error from -l _
-op/stat_errors.t	132	ok	not ok	error from -o "tmpnotexist"
-op/stat_errors.t	124	ok	not ok	error from -o CLOSEDDIR
-op/stat_errors.t	120	ok	not ok	error from -o CLOSEDFILE
-op/stat_errors.t	112	ok	not ok	error from -o NEVEROPENED
-op/stat_errors.t	116	ok	not ok	error from -o SCALARFILE
-op/stat_errors.t	126	ok	not ok	error from -o \*CLOSEDDIR
-op/stat_errors.t	122	ok	not ok	error from -o \*CLOSEDFILE
-op/stat_errors.t	114	ok	not ok	error from -o \*NEVEROPENED
-op/stat_errors.t	118	ok	not ok	error from -o \*SCALARFILE
-op/stat_errors.t	130	ok	not ok	error from -o \*_
-op/stat_errors.t	128	ok	not ok	error from -o _
-op/stat_errors.t	374	ok	not ok	error from -p "tmpnotexist"
-op/stat_errors.t	366	ok	not ok	error from -p CLOSEDDIR
-op/stat_errors.t	362	ok	not ok	error from -p CLOSEDFILE
-op/stat_errors.t	354	ok	not ok	error from -p NEVEROPENED
-op/stat_errors.t	358	ok	not ok	error from -p SCALARFILE
-op/stat_errors.t	368	ok	not ok	error from -p \*CLOSEDDIR
-op/stat_errors.t	364	ok	not ok	error from -p \*CLOSEDFILE
-op/stat_errors.t	356	ok	not ok	error from -p \*NEVEROPENED
-op/stat_errors.t	360	ok	not ok	error from -p \*SCALARFILE
-op/stat_errors.t	372	ok	not ok	error from -p \*_
-op/stat_errors.t	370	ok	not ok	error from -p _
-op/stat_errors.t	66	ok	not ok	error from -r "tmpnotexist"
-op/stat_errors.t	58	ok	not ok	error from -r CLOSEDDIR
-op/stat_errors.t	54	ok	not ok	error from -r CLOSEDFILE
-op/stat_errors.t	46	ok	not ok	error from -r NEVEROPENED
-op/stat_errors.t	50	ok	not ok	error from -r SCALARFILE
-op/stat_errors.t	60	ok	not ok	error from -r \*CLOSEDDIR
-op/stat_errors.t	56	ok	not ok	error from -r \*CLOSEDFILE
-op/stat_errors.t	48	ok	not ok	error from -r \*NEVEROPENED
-op/stat_errors.t	52	ok	not ok	error from -r \*SCALARFILE
-op/stat_errors.t	64	ok	not ok	error from -r \*_
-op/stat_errors.t	62	ok	not ok	error from -r _
-op/stat_errors.t	286	ok	not ok	error from -s "tmpnotexist"
-op/stat_errors.t	278	ok	not ok	error from -s CLOSEDDIR
-op/stat_errors.t	274	ok	not ok	error from -s CLOSEDFILE
-op/stat_errors.t	266	ok	not ok	error from -s NEVEROPENED
-op/stat_errors.t	270	ok	not ok	error from -s SCALARFILE
-op/stat_errors.t	280	ok	not ok	error from -s \*CLOSEDDIR
-op/stat_errors.t	276	ok	not ok	error from -s \*CLOSEDFILE
-op/stat_errors.t	268	ok	not ok	error from -s \*NEVEROPENED
-op/stat_errors.t	272	ok	not ok	error from -s \*SCALARFILE
-op/stat_errors.t	284	ok	not ok	error from -s \*_
-op/stat_errors.t	282	ok	not ok	error from -s _
-op/stat_errors.t	454	ok	not ok	error from -t CLOSEDDIR
-op/stat_errors.t	450	ok	not ok	error from -t CLOSEDFILE
-op/stat_errors.t	442	ok	not ok	error from -t NEVEROPENED
-op/stat_errors.t	446	ok	not ok	error from -t SCALARFILE
-op/stat_errors.t	456	ok	not ok	error from -t \*CLOSEDDIR
-op/stat_errors.t	452	ok	not ok	error from -t \*CLOSEDFILE
-op/stat_errors.t	444	ok	not ok	error from -t \*NEVEROPENED
-op/stat_errors.t	448	ok	not ok	error from -t \*SCALARFILE
-op/stat_errors.t	460	ok	not ok	error from -t \*_
-op/stat_errors.t	458	ok	not ok	error from -t _
-op/stat_errors.t	484	ok	not ok	error from -u "tmpnotexist"
-op/stat_errors.t	476	ok	not ok	error from -u CLOSEDDIR
-op/stat_errors.t	472	ok	not ok	error from -u CLOSEDFILE
-op/stat_errors.t	464	ok	not ok	error from -u NEVEROPENED
-op/stat_errors.t	468	ok	not ok	error from -u SCALARFILE
-op/stat_errors.t	478	ok	not ok	error from -u \*CLOSEDDIR
-op/stat_errors.t	474	ok	not ok	error from -u \*CLOSEDFILE
-op/stat_errors.t	466	ok	not ok	error from -u \*NEVEROPENED
-op/stat_errors.t	470	ok	not ok	error from -u \*SCALARFILE
-op/stat_errors.t	482	ok	not ok	error from -u \*_
-op/stat_errors.t	480	ok	not ok	error from -u _
-op/stat_errors.t	88	ok	not ok	error from -w "tmpnotexist"
-op/stat_errors.t	80	ok	not ok	error from -w CLOSEDDIR
-op/stat_errors.t	76	ok	not ok	error from -w CLOSEDFILE
-op/stat_errors.t	68	ok	not ok	error from -w NEVEROPENED
-op/stat_errors.t	72	ok	not ok	error from -w SCALARFILE
-op/stat_errors.t	82	ok	not ok	error from -w \*CLOSEDDIR
-op/stat_errors.t	78	ok	not ok	error from -w \*CLOSEDFILE
-op/stat_errors.t	70	ok	not ok	error from -w \*NEVEROPENED
-op/stat_errors.t	74	ok	not ok	error from -w \*SCALARFILE
-op/stat_errors.t	86	ok	not ok	error from -w \*_
-op/stat_errors.t	84	ok	not ok	error from -w _
-op/stat_errors.t	110	ok	not ok	error from -x "tmpnotexist"
-op/stat_errors.t	102	ok	not ok	error from -x CLOSEDDIR
-op/stat_errors.t	98	ok	not ok	error from -x CLOSEDFILE
-op/stat_errors.t	90	ok	not ok	error from -x NEVEROPENED
-op/stat_errors.t	94	ok	not ok	error from -x SCALARFILE
-op/stat_errors.t	104	ok	not ok	error from -x \*CLOSEDDIR
-op/stat_errors.t	100	ok	not ok	error from -x \*CLOSEDFILE
-op/stat_errors.t	92	ok	not ok	error from -x \*NEVEROPENED
-op/stat_errors.t	96	ok	not ok	error from -x \*SCALARFILE
-op/stat_errors.t	108	ok	not ok	error from -x \*_
-op/stat_errors.t	106	ok	not ok	error from -x _
-op/stat_errors.t	264	ok	not ok	error from -z "tmpnotexist"
-op/stat_errors.t	256	ok	not ok	error from -z CLOSEDDIR
-op/stat_errors.t	252	ok	not ok	error from -z CLOSEDFILE
-op/stat_errors.t	244	ok	not ok	error from -z NEVEROPENED
-op/stat_errors.t	248	ok	not ok	error from -z SCALARFILE
-op/stat_errors.t	258	ok	not ok	error from -z \*CLOSEDDIR
-op/stat_errors.t	254	ok	not ok	error from -z \*CLOSEDFILE
-op/stat_errors.t	246	ok	not ok	error from -z \*NEVEROPENED
-op/stat_errors.t	250	ok	not ok	error from -z \*SCALARFILE
-op/stat_errors.t	262	ok	not ok	error from -z \*_
-op/stat_errors.t	260	ok	not ok	error from -z _
-op/stat_errors.t	36	ok	not ok	error from lstat CLOSEDDIR
-op/stat_errors.t	32	ok	not ok	error from lstat CLOSEDFILE
-op/stat_errors.t	24	ok	not ok	error from lstat NEVEROPENED
-op/stat_errors.t	28	ok	not ok	error from lstat SCALARFILE
-op/stat_errors.t	38	ok	not ok	error from lstat \*CLOSEDDIR
-op/stat_errors.t	34	ok	not ok	error from lstat \*CLOSEDFILE
-op/stat_errors.t	26	ok	not ok	error from lstat \*NEVEROPENED
-op/stat_errors.t	30	ok	not ok	error from lstat \*SCALARFILE
-op/stat_errors.t	42	ok	not ok	error from lstat \*_
-op/stat_errors.t	40	ok	not ok	error from lstat _
-op/stat_errors.t	14	ok	not ok	error from stat CLOSEDDIR
-op/stat_errors.t	10	ok	not ok	error from stat CLOSEDFILE
-op/stat_errors.t	2	ok	not ok	error from stat NEVEROPENED
-op/stat_errors.t	6	ok	not ok	error from stat SCALARFILE
-op/stat_errors.t	16	ok	not ok	error from stat \*CLOSEDDIR
-op/stat_errors.t	12	ok	not ok	error from stat \*CLOSEDFILE
-op/stat_errors.t	4	ok	not ok	error from stat \*NEVEROPENED
-op/stat_errors.t	8	ok	not ok	error from stat \*SCALARFILE
-op/stat_errors.t	20	ok	not ok	error from stat \*_
-op/stat_errors.t	18	ok	not ok	error from stat _
-op/stat_errors.t	43	ok	not ok	result of lstat "tmpnotexist"
-op/stat_errors.t	35	ok	not ok	result of lstat CLOSEDDIR
-op/stat_errors.t	31	ok	not ok	result of lstat CLOSEDFILE
-op/stat_errors.t	23	ok	not ok	result of lstat NEVEROPENED
-op/stat_errors.t	27	ok	not ok	result of lstat SCALARFILE
-op/stat_errors.t	37	ok	not ok	result of lstat \*CLOSEDDIR
-op/stat_errors.t	33	ok	not ok	result of lstat \*CLOSEDFILE
-op/stat_errors.t	25	ok	not ok	result of lstat \*NEVEROPENED
-op/stat_errors.t	29	ok	not ok	result of lstat \*SCALARFILE
-op/stat_errors.t	41	ok	not ok	result of lstat \*_
-op/stat_errors.t	39	ok	not ok	result of lstat _
-op/stat_errors.t	21	ok	not ok	result of stat "tmpnotexist"
-op/stat_errors.t	13	ok	not ok	result of stat CLOSEDDIR
-op/stat_errors.t	9	ok	not ok	result of stat CLOSEDFILE
-op/stat_errors.t	1	ok	not ok	result of stat NEVEROPENED
-op/stat_errors.t	5	ok	not ok	result of stat SCALARFILE
-op/stat_errors.t	15	ok	not ok	result of stat \*CLOSEDDIR
-op/stat_errors.t	11	ok	not ok	result of stat \*CLOSEDFILE
-op/stat_errors.t	3	ok	not ok	result of stat \*NEVEROPENED
-op/stat_errors.t	7	ok	not ok	result of stat \*SCALARFILE
-op/stat_errors.t	19	ok	not ok	result of stat \*_
-op/stat_errors.t	17	ok	not ok	result of stat _
 op/studytied.t	9	ok	not ok	"next" doesn't match /f/
 op/sub.t	63	ok	not ok	GH Issue \#16944 - Syntax error with sub and shift causes segfault
 op/sub.t	58	ok	not ok	RT 124248
@@ -19645,3 +19072,203 @@ uni/write.t	8	ok	not ok	no such top format
 uni/write.t	1	ok	not ok	non-UTF8 literal / UTF8 item (1)
 uni/write.t	2	ok	not ok	non-UTF8 literal / UTF8 item (2)
 uni/write.t	5	ok	not ok	non-UTF8 literal / UTF8 multiline
+io/fs.t	40	ok	not ok	skip has futimes
+io/fs.t	53	ok	not ok	truncate(word) does not fall back to file name
+op/filetest.t	0	(none)	renumbered	*summary*
+op/filetest.t	18	ok	not ok	-d and -e: file at least exists
+op/filetest.t	19	ok	not ok	-e and -d: file at least exists
+op/filetest.t	11	ok	not ok	-f and -d stackable: plain file found
+op/filetest.t	34	ok	not ok	-l $handle warning is utf8-clean
+op/filetest.t	35	ok	not ok	-l $handle warning occurs for globs, not just globrefs
+op/filetest.t	36	ok	not ok	-l $handle warning occurs for iorefs as well
+op/filetest.t	32	ok	not ok	-l \*foo is a file name
+op/filetest.t	37	ok	(missing)	_ is bareword after filetest operator
+op/filetest.t	38	ok	(missing)	_ is bareword after filetest operator
+op/filetest.t	402	ok	not ok [PCL #400]	overloaded stacked -A
+op/filetest.t	388	ok	not ok [PCL #386]	overloaded stacked -B
+op/filetest.t	416	ok	not ok [PCL #414]	overloaded stacked -C
+op/filetest.t	374	ok	not ok [PCL #372]	overloaded stacked -M
+op/filetest.t	150	ok	not ok [PCL #148]	overloaded stacked -O
+op/filetest.t	108	ok	not ok [PCL #106]	overloaded stacked -R
+op/filetest.t	262	ok	not ok [PCL #260]	overloaded stacked -S
+op/filetest.t	360	ok	not ok [PCL #358]	overloaded stacked -T
+op/filetest.t	122	ok	not ok [PCL #120]	overloaded stacked -W
+op/filetest.t	136	ok	not ok [PCL #134]	overloaded stacked -X
+op/filetest.t	276	ok	not ok [PCL #274]	overloaded stacked -b
+op/filetest.t	290	ok	not ok [PCL #288]	overloaded stacked -c
+op/filetest.t	220	ok	not ok [PCL #218]	overloaded stacked -d
+op/filetest.t	164	ok	not ok [PCL #162]	overloaded stacked -e
+op/filetest.t	206	ok	not ok [PCL #204]	overloaded stacked -f
+op/filetest.t	332	ok	not ok [PCL #330]	overloaded stacked -g
+op/filetest.t	346	ok	not ok [PCL #344]	overloaded stacked -k
+op/filetest.t	234	ok	not ok [PCL #232]	overloaded stacked -l
+op/filetest.t	94	ok	not ok [PCL #92]	overloaded stacked -o
+op/filetest.t	248	ok	not ok [PCL #246]	overloaded stacked -p
+op/filetest.t	52	ok	not ok [PCL #50]	overloaded stacked -r
+op/filetest.t	192	ok	not ok [PCL #190]	overloaded stacked -s
+op/filetest.t	304	ok	not ok [PCL #302]	overloaded stacked -t
+op/filetest.t	318	ok	not ok [PCL #316]	overloaded stacked -u
+op/filetest.t	66	ok	not ok [PCL #64]	overloaded stacked -w
+op/filetest.t	80	ok	not ok [PCL #78]	overloaded stacked -x
+op/filetest.t	178	ok	not ok [PCL #176]	overloaded stacked -z
+op/filetest.t	401	ok	not ok [PCL #399]	stacked overloaded -A
+op/filetest.t	387	ok	not ok [PCL #385]	stacked overloaded -B
+op/filetest.t	415	ok	not ok [PCL #413]	stacked overloaded -C
+op/filetest.t	373	ok	not ok [PCL #371]	stacked overloaded -M
+op/filetest.t	149	ok	not ok [PCL #147]	stacked overloaded -O
+op/filetest.t	107	ok	not ok [PCL #105]	stacked overloaded -R
+op/filetest.t	261	ok	not ok [PCL #259]	stacked overloaded -S
+op/filetest.t	359	ok	not ok [PCL #357]	stacked overloaded -T
+op/filetest.t	121	ok	not ok [PCL #119]	stacked overloaded -W
+op/filetest.t	135	ok	not ok [PCL #133]	stacked overloaded -X
+op/filetest.t	275	ok	not ok [PCL #273]	stacked overloaded -b
+op/filetest.t	289	ok	not ok [PCL #287]	stacked overloaded -c
+op/filetest.t	219	ok	not ok [PCL #217]	stacked overloaded -d
+op/filetest.t	163	ok	not ok [PCL #161]	stacked overloaded -e
+op/filetest.t	205	ok	not ok [PCL #203]	stacked overloaded -f
+op/filetest.t	331	ok	not ok [PCL #329]	stacked overloaded -g
+op/filetest.t	345	ok	not ok [PCL #343]	stacked overloaded -k
+op/filetest.t	233	ok	not ok [PCL #231]	stacked overloaded -l
+op/filetest.t	93	ok	not ok [PCL #91]	stacked overloaded -o
+op/filetest.t	247	ok	not ok [PCL #245]	stacked overloaded -p
+op/filetest.t	51	ok	not ok [PCL #49]	stacked overloaded -r
+op/filetest.t	191	ok	not ok [PCL #189]	stacked overloaded -s
+op/filetest.t	303	ok	not ok [PCL #301]	stacked overloaded -t
+op/filetest.t	317	ok	not ok [PCL #315]	stacked overloaded -u
+op/filetest.t	65	ok	not ok [PCL #63]	stacked overloaded -w
+op/filetest.t	79	ok	not ok [PCL #77]	stacked overloaded -x
+op/filetest.t	177	ok	not ok [PCL #175]	stacked overloaded -z
+op/filetest.t	383	ok	not ok [PCL #381]	string overload is called for -B on IO
+op/filetest.t	355	ok	not ok [PCL #353]	string overload is called for -T on IO
+op/filetest.t	299	ok	not ok [PCL #297]	string overload is called for -t on IO
+op/filetest.t	33	ok	not ok	warning for -l $handle
+op/filetest_t.t	0	ok*	(no TAP)	*summary*
+op/stat.t	0	ok*	(no TAP)	*summary*
+op/stat_errors.t	608	ok	not ok	error from -A CLOSEDDIR
+op/stat_errors.t	604	ok	not ok	error from -A CLOSEDFILE
+op/stat_errors.t	596	ok	not ok	error from -A NEVEROPENED
+op/stat_errors.t	600	ok	not ok	error from -A SCALARFILE
+op/stat_errors.t	564	ok	not ok	error from -B CLOSEDDIR
+op/stat_errors.t	560	ok	not ok	error from -B CLOSEDFILE
+op/stat_errors.t	552	ok	not ok	error from -B NEVEROPENED
+op/stat_errors.t	556	ok	not ok	error from -B SCALARFILE
+op/stat_errors.t	570	ok	not ok	error from -B \*_
+op/stat_errors.t	630	ok	not ok	error from -C CLOSEDDIR
+op/stat_errors.t	626	ok	not ok	error from -C CLOSEDFILE
+op/stat_errors.t	618	ok	not ok	error from -C NEVEROPENED
+op/stat_errors.t	622	ok	not ok	error from -C SCALARFILE
+op/stat_errors.t	586	ok	not ok	error from -M CLOSEDDIR
+op/stat_errors.t	582	ok	not ok	error from -M CLOSEDFILE
+op/stat_errors.t	574	ok	not ok	error from -M NEVEROPENED
+op/stat_errors.t	578	ok	not ok	error from -M SCALARFILE
+op/stat_errors.t	212	ok	not ok	error from -O CLOSEDDIR
+op/stat_errors.t	208	ok	not ok	error from -O CLOSEDFILE
+op/stat_errors.t	200	ok	not ok	error from -O NEVEROPENED
+op/stat_errors.t	204	ok	not ok	error from -O SCALARFILE
+op/stat_errors.t	146	ok	not ok	error from -R CLOSEDDIR
+op/stat_errors.t	142	ok	not ok	error from -R CLOSEDFILE
+op/stat_errors.t	134	ok	not ok	error from -R NEVEROPENED
+op/stat_errors.t	138	ok	not ok	error from -R SCALARFILE
+op/stat_errors.t	388	ok	not ok	error from -S CLOSEDDIR
+op/stat_errors.t	384	ok	not ok	error from -S CLOSEDFILE
+op/stat_errors.t	376	ok	not ok	error from -S NEVEROPENED
+op/stat_errors.t	380	ok	not ok	error from -S SCALARFILE
+op/stat_errors.t	542	ok	not ok	error from -T CLOSEDDIR
+op/stat_errors.t	538	ok	not ok	error from -T CLOSEDFILE
+op/stat_errors.t	530	ok	not ok	error from -T NEVEROPENED
+op/stat_errors.t	534	ok	not ok	error from -T SCALARFILE
+op/stat_errors.t	548	ok	not ok	error from -T \*_
+op/stat_errors.t	168	ok	not ok	error from -W CLOSEDDIR
+op/stat_errors.t	164	ok	not ok	error from -W CLOSEDFILE
+op/stat_errors.t	156	ok	not ok	error from -W NEVEROPENED
+op/stat_errors.t	160	ok	not ok	error from -W SCALARFILE
+op/stat_errors.t	190	ok	not ok	error from -X CLOSEDDIR
+op/stat_errors.t	186	ok	not ok	error from -X CLOSEDFILE
+op/stat_errors.t	178	ok	not ok	error from -X NEVEROPENED
+op/stat_errors.t	182	ok	not ok	error from -X SCALARFILE
+op/stat_errors.t	410	ok	not ok	error from -b CLOSEDDIR
+op/stat_errors.t	406	ok	not ok	error from -b CLOSEDFILE
+op/stat_errors.t	398	ok	not ok	error from -b NEVEROPENED
+op/stat_errors.t	402	ok	not ok	error from -b SCALARFILE
+op/stat_errors.t	432	ok	not ok	error from -c CLOSEDDIR
+op/stat_errors.t	428	ok	not ok	error from -c CLOSEDFILE
+op/stat_errors.t	420	ok	not ok	error from -c NEVEROPENED
+op/stat_errors.t	424	ok	not ok	error from -c SCALARFILE
+op/stat_errors.t	322	ok	not ok	error from -d CLOSEDDIR
+op/stat_errors.t	318	ok	not ok	error from -d CLOSEDFILE
+op/stat_errors.t	310	ok	not ok	error from -d NEVEROPENED
+op/stat_errors.t	314	ok	not ok	error from -d SCALARFILE
+op/stat_errors.t	234	ok	not ok	error from -e CLOSEDDIR
+op/stat_errors.t	230	ok	not ok	error from -e CLOSEDFILE
+op/stat_errors.t	222	ok	not ok	error from -e NEVEROPENED
+op/stat_errors.t	226	ok	not ok	error from -e SCALARFILE
+op/stat_errors.t	300	ok	not ok	error from -f CLOSEDDIR
+op/stat_errors.t	296	ok	not ok	error from -f CLOSEDFILE
+op/stat_errors.t	288	ok	not ok	error from -f NEVEROPENED
+op/stat_errors.t	292	ok	not ok	error from -f SCALARFILE
+op/stat_errors.t	498	ok	not ok	error from -g CLOSEDDIR
+op/stat_errors.t	494	ok	not ok	error from -g CLOSEDFILE
+op/stat_errors.t	486	ok	not ok	error from -g NEVEROPENED
+op/stat_errors.t	490	ok	not ok	error from -g SCALARFILE
+op/stat_errors.t	520	ok	not ok	error from -k CLOSEDDIR
+op/stat_errors.t	516	ok	not ok	error from -k CLOSEDFILE
+op/stat_errors.t	508	ok	not ok	error from -k NEVEROPENED
+op/stat_errors.t	512	ok	not ok	error from -k SCALARFILE
+op/stat_errors.t	344	ok	not ok	error from -l CLOSEDDIR
+op/stat_errors.t	340	ok	not ok	error from -l CLOSEDFILE
+op/stat_errors.t	332	ok	not ok	error from -l NEVEROPENED
+op/stat_errors.t	336	ok	not ok	error from -l SCALARFILE
+op/stat_errors.t	124	ok	not ok	error from -o CLOSEDDIR
+op/stat_errors.t	120	ok	not ok	error from -o CLOSEDFILE
+op/stat_errors.t	112	ok	not ok	error from -o NEVEROPENED
+op/stat_errors.t	116	ok	not ok	error from -o SCALARFILE
+op/stat_errors.t	366	ok	not ok	error from -p CLOSEDDIR
+op/stat_errors.t	362	ok	not ok	error from -p CLOSEDFILE
+op/stat_errors.t	354	ok	not ok	error from -p NEVEROPENED
+op/stat_errors.t	358	ok	not ok	error from -p SCALARFILE
+op/stat_errors.t	58	ok	not ok	error from -r CLOSEDDIR
+op/stat_errors.t	54	ok	not ok	error from -r CLOSEDFILE
+op/stat_errors.t	46	ok	not ok	error from -r NEVEROPENED
+op/stat_errors.t	50	ok	not ok	error from -r SCALARFILE
+op/stat_errors.t	278	ok	not ok	error from -s CLOSEDDIR
+op/stat_errors.t	274	ok	not ok	error from -s CLOSEDFILE
+op/stat_errors.t	266	ok	not ok	error from -s NEVEROPENED
+op/stat_errors.t	270	ok	not ok	error from -s SCALARFILE
+op/stat_errors.t	476	ok	not ok	error from -u CLOSEDDIR
+op/stat_errors.t	472	ok	not ok	error from -u CLOSEDFILE
+op/stat_errors.t	464	ok	not ok	error from -u NEVEROPENED
+op/stat_errors.t	468	ok	not ok	error from -u SCALARFILE
+op/stat_errors.t	80	ok	not ok	error from -w CLOSEDDIR
+op/stat_errors.t	76	ok	not ok	error from -w CLOSEDFILE
+op/stat_errors.t	68	ok	not ok	error from -w NEVEROPENED
+op/stat_errors.t	72	ok	not ok	error from -w SCALARFILE
+op/stat_errors.t	102	ok	not ok	error from -x CLOSEDDIR
+op/stat_errors.t	98	ok	not ok	error from -x CLOSEDFILE
+op/stat_errors.t	90	ok	not ok	error from -x NEVEROPENED
+op/stat_errors.t	94	ok	not ok	error from -x SCALARFILE
+op/stat_errors.t	256	ok	not ok	error from -z CLOSEDDIR
+op/stat_errors.t	252	ok	not ok	error from -z CLOSEDFILE
+op/stat_errors.t	244	ok	not ok	error from -z NEVEROPENED
+op/stat_errors.t	248	ok	not ok	error from -z SCALARFILE
+op/stat_errors.t	43	ok	not ok	result of lstat "tmpnotexist"
+op/stat_errors.t	35	ok	not ok	result of lstat CLOSEDDIR
+op/stat_errors.t	31	ok	not ok	result of lstat CLOSEDFILE
+op/stat_errors.t	23	ok	not ok	result of lstat NEVEROPENED
+op/stat_errors.t	27	ok	not ok	result of lstat SCALARFILE
+op/stat_errors.t	37	ok	not ok	result of lstat \*CLOSEDDIR
+op/stat_errors.t	33	ok	not ok	result of lstat \*CLOSEDFILE
+op/stat_errors.t	25	ok	not ok	result of lstat \*NEVEROPENED
+op/stat_errors.t	29	ok	not ok	result of lstat \*SCALARFILE
+op/stat_errors.t	41	ok	not ok	result of lstat \*_
+op/stat_errors.t	39	ok	not ok	result of lstat _
+op/stat_errors.t	21	ok	not ok	result of stat "tmpnotexist"
+op/stat_errors.t	13	ok	not ok	result of stat CLOSEDDIR
+op/stat_errors.t	9	ok	not ok	result of stat CLOSEDFILE
+op/stat_errors.t	1	ok	not ok	result of stat NEVEROPENED
+op/stat_errors.t	5	ok	not ok	result of stat SCALARFILE
+op/stat_errors.t	15	ok	not ok	result of stat \*CLOSEDDIR
+op/stat_errors.t	11	ok	not ok	result of stat \*CLOSEDFILE
+op/stat_errors.t	3	ok	not ok	result of stat \*NEVEROPENED
+op/stat_errors.t	7	ok	not ok	result of stat \*SCALARFILE
+op/stat_errors.t	19	ok	not ok	result of stat \*_
+op/stat_errors.t	17	ok	not ok	result of stat _
