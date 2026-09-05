@@ -6,7 +6,7 @@ PCL compiles a Perl 5 program, with the modules it uses, into Common Lisp.
 [SBCL](https://www.sbcl.org/) then compiles that into machine code and
 runs it.  A runtime library written in Lisp supplies what perl does behind
 the scenes: context, coercion, `local`, `tie`, `use overload`, string
-`eval`.
+`eval`, etc.
 
 perl runs the compiler.  The compiled program does not need it, except to
 `eval` a string at run time.
@@ -18,10 +18,19 @@ Why?
   recursion and integer math run two to four times faster than under perl.
   Other things are slower; the [numbers](#speed) show both.
 * **Output you can read.**  The Lisp keeps your variable names, sigils and
-  Perl's operator names, and its meaning is [specified](docs/ir-spec.md).
-* **A small implementation.**  Garbage collection, closures, `local` and
-  non-local exits come from Lisp, not hand-written C.  About 65,000 lines
-  of Perl and Lisp in all.
+  Perl's operator names.
+* **A compiler toolkit with a documented IR, not a one-off translator.**
+  The front end proves facts about every variable (never referenced, always
+  a number, only read in its loop) and lowers the program to an
+  intermediate representation whose meaning is [specified](docs/ir-spec.md):
+  context, coercion, calling convention, non-local exits.  The proofs are
+  written onto the declarations, so the output says why a variable became a
+  raw integer.  Each speed transform is a named pass licensed by those
+  facts; `PCL_OPT=none` emits the plain form, which must run identically.
+  The IR can be read by other tools or aimed at another target; the
+  [architecture](docs/v2-target-architecture.md) is written down.  Garbage
+  collection, closures, `local` and non-local exits come from Lisp, not
+  hand-written C: about 65,000 lines of Perl and Lisp in all.
 
 **Maturity: early.**  First tag v0.1.0, August 2026.  Pure-Perl code works
 well, including most CPAN modules written in Perl.  XS modules, the ones
