@@ -190,7 +190,17 @@ my %USE_FN = (
   printf  => ['str'],    sprintf => ['str'],
 );
 
-my %MUTATING_FN   = map { $_ => 1 } qw(chomp chop undef read sysread recv);
+# `utf8::encode`/`decode`/`upgrade`/`downgrade` are CORE perl functions that
+# modify their argument IN PLACE (perlfunc/utf8), so they belong in this table
+# for exactly the reason `chomp` does — not module behaviour (CLAUDE.md 9a):
+# the qualified spelling IS the name perl gives them, and the Word token's
+# content is what this table is keyed on.  Without the mark the argument stays
+# a RAW SLOT and the runtime gets a value it cannot write back through, which
+# is why the stubs could never have worked (#1221).
+my %MUTATING_FN   = map { $_ => 1 } qw(chomp chop undef read sysread recv
+                                       utf8::encode utf8::decode
+                                       utf8::upgrade utf8::downgrade);
+
 my %HANDLE_VIV_FN = map { $_ => 1 } qw(open opendir sysopen pipe socket
                                        socketpair accept);
 # tie attaches magic to the BOX — a tied variable must stay boxed forever

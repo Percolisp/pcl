@@ -23189,10 +23189,75 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; so stubs in user-accessible packages must use pl- prefix (not p- which is for pcl builtins).
 (defpackage :utf8 (:use :cl :pcl))
 (in-package :utf8)
-(defun pl-encode (&optional str) (declare (ignore str)) 1)
-(defun pl-decode (&optional str) (declare (ignore str)) 1)
-(defun pl-upgrade (&optional str) (declare (ignore str)) 1)
-(defun pl-downgrade (&optional str) (declare (ignore str)) 1)
+;;; utf8::encode / decode / downgrade REALLY TRANSFORM the string now (#1221).
+;;;
+;;; They were no-op stubs returning 1, which was invisible while every handle
+;;; decoded by accident.  #1115 made bytes the default, so "read octets, then
+;;; utf8::decode" became the spelling programs actually use — and the write
+;;; direction is load-bearing too: perl-tests/readline.t:233 does
+;;; `utf8::encode($outdata); syswrite $out, $outdata`, and with the stub a WIDE
+;;; character reached syswrite, which perl makes FATAL.  That one row took the
+;;; file from 23 passing to 18.
+;;;
+;;; They MODIFY IN PLACE, so the argument has to arrive as a BOX; the four names
+;;; are in Pl::VarAnnotator's %MUTATING_FN for exactly the reason `chomp` is.
+;;; A non-box argument (a literal, a raw slot the annotator did not promote)
+;;; cannot be written back — it is answered without changing anything, which is
+;;; the same shape `chomp "literal"` has.
+;;;
+;;; NOT implemented, and deliberately: `upgrade` and `is_utf8` ask about the
+;;; SV's INTERNAL REPRESENTATION, and PCL's box model has no UTF8 flag
+;;; (docs/not-supported.md).  `upgrade` answers perl's octet count so a program
+;;; that uses the return value gets a number of the right shape; `is_utf8`
+;;; keeps answering 1.
+
+(defun pl-encode (&optional str)
+  "perl's utf8::encode: replace the string with its UTF-8 OCTETS in place.
+   Returns 1 (perl returns true).  Probed 5.40.3: `$s = \"\\x{2080}x\";
+   utf8::encode($s); length($s)` is 4."
+  (when (pcl::p-box-p str)
+    (pcl::box-set str (pcl::%p-utf8-octets (pcl::to-string (pcl::unbox str)))))
+  1)
+
+(defun pl-decode (&optional str)
+  "perl's utf8::decode: read the string's octets as UTF-8 and replace it with
+   the characters, in place.  Returns TRUE only when the octets ARE valid UTF-8
+   — perl leaves the string alone and answers false otherwise (probed) — so a
+   decode error is answered, never signalled.  A string holding a character
+   above 255 is not octets at all and is left alone, false."
+  (if (not (pcl::p-box-p str))
+      pcl::*p-undef*
+      (let ((s (pcl::to-string (pcl::unbox str))))
+        (if (pcl::%p-wide-char-p s)
+            pcl::*p-undef*
+            (let ((decoded
+                    (handler-case
+                        (sb-ext:octets-to-string
+                         (map '(vector (unsigned-byte 8)) #'char-code s)
+                         :external-format :utf-8)
+                      (error () nil))))
+              (cond (decoded (pcl::box-set str decoded) 1)
+                    (t pcl::*p-undef*)))))))
+
+(defun pl-upgrade (&optional str)
+  "perl's utf8::upgrade returns the number of OCTETS in the upgraded string.
+   PCL has no UTF8 flag to set, so nothing changes — but the COUNT is real, so
+   a program that uses the value gets perl's number."
+  (if (pcl::p-box-p str)
+      (length (pcl::%p-utf8-octets (pcl::to-string (pcl::unbox str))))
+      0))
+
+(defun pl-downgrade (&optional str &rest fail-ok)
+  "perl's utf8::downgrade: true when every character fits in an octet.  PCL has
+   no internal form to change, so this only ANSWERS — and perl dies without a
+   true FAIL_OK when it cannot downgrade, which is the one part that is a real
+   effect, so it is kept."
+  (let ((s (and (pcl::p-box-p str) (pcl::to-string (pcl::unbox str)))))
+    (cond ((null s) 1)
+          ((not (pcl::%p-wide-char-p s)) 1)
+          ((and fail-ok (pcl::p-true-p (car fail-ok))) pcl::*p-undef*)
+          (t (pcl::p-die "Wide character")))))
+
 (defun pl-is_utf8 (&optional str) (declare (ignore str)) 1)
 (in-package :pcl)
 

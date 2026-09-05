@@ -305,4 +305,33 @@ PL
          '#1223 the rule holds for the wide-character warning #1115 introduced');
 }
 
+# --- #1221: the utf8:: mutators really transform ---------------------------
+#
+# They were no-op stubs returning 1, invisible while every handle decoded by
+# accident.  perl-tests/readline.t:233 is `utf8::encode($x); syswrite $out, $x`,
+# and with the stub a WIDE character reached syswrite — which perl makes FATAL —
+# ending that file at 18 rows instead of 23.  They modify IN PLACE, so the four
+# names are in Pl::VarAnnotator's %MUTATING_FN beside chomp.
+{
+    my $enc = run_cl(<<'PL');
+my $s = "\x{2080}x";
+utf8::encode($s);
+print "enc: ", length($s), "\n";
+my $t = $s;
+utf8::decode($t);
+print "dec: ", length($t), "\n";
+print "rt: ", ($t eq "\x{2080}x" ? 1 : 0), "\n";
+PL
+    is($enc, "enc: 4\ndec: 2\nrt: 1\n",
+       '#1221 utf8::encode / utf8::decode really transform, and round-trip');
+
+    my $bad = run_cl(<<'PL');
+my $s = "\xff\xfe";
+my $r = utf8::decode($s);
+print "bad: ", ($r ? 1 : 0), " len: ", length($s), "\n";
+PL
+    is($bad, "bad: 0 len: 2\n",
+       '#1221 utf8::decode answers FALSE and leaves the string alone on invalid UTF-8');
+}
+
 done_testing();
