@@ -1573,6 +1573,17 @@
    Call this right after any OS call that may set errno on failure."
   (setf *p-stored-errno* (sb-alien:get-errno)))
 
+(defun %p-io-errno-fail (errno)
+  "Perl's answer for an I/O call that fails without a system call having failed:
+   FALSE, with $! set to ERRNO.  Both halves are needed — *p-stored-errno* is
+   what `$!` reads and the C errno is what a later %pcl-save-errno would keep —
+   and both callers used to spell them out, which is one copy too many.
+   Used for EBADF (9, a handle that is not open) and ENOENT (2, a PerlIO layer
+   name no layer answers to: perl's own binmode/open answer, probed 5.40.3)."
+  (setf *p-stored-errno* errno)
+  (setf (sb-alien:extern-alien "errno" sb-alien:int) errno)
+  nil)
+
 (defun %pcl-local-errno-init (n)
   "Helper for 'local $! = N': coerce n to int, set C errno, return int for let binding."
   (let ((i (truncate (to-number n))))
@@ -2122,7 +2133,7 @@
    the PROGRAM's $SIG{__WARN__}, so the harness's own TAP line or a PCL
    diagnostic raising one puts a warning into a program that never asked for
    it.  perl-tests/magic.t installs `$SIG{__WARN__} = sub { die "Dying on
-   warning", @_ }` at BEGIN, so ONE such warning ended that whole file (158
+  warning", @_ }` at BEGIN, so ONE such warning ended that whole file (158
    passing rows became 90).  Only a real perl print/printf/say passes a site.
 
    %p-with-wide-upgrade's handler is the BACKSTOP for writes that do NOT come
@@ -13713,50 +13724,101 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   "The external format ONE PerlIO layer names, or NIL when it does not decide
    the character discipline.  `:crlf` / `:perlio` / `:unix` / `:stdio` / `:mmap`
    are transport layers that leave the encoding alone; `:raw` and `:bytes` mean
-   octets; `:utf8` and `:encoding(...)` decode."
+   octets; `:utf8` and `:encoding(...)` decode.
+
+   SECOND value says whether LAYER names a layer at all.  NIL there is not a
+   PCL shortfall to announce: perl REJECTS a layer it does not know, and the
+   callers give exactly that answer — `binmode($fh,\":nosuch\")` is undef with
+   $! = ENOENT and the handle's layers UNCHANGED, `open($fh,\"<:nosuch\",$f)`
+   is false with the same $! (both probed 5.40.3).  Keeping the two apart is
+   what lets `:crlf` (known, no opinion) and `:nosuch` (unknown) differ."
   (let ((l (string-trim " " layer)))
-    (cond ((zerop (length l)) nil)
+    (cond ((zerop (length l)) (values nil t))
           ((or (string-equal l "raw") (string-equal l "bytes"))
-           +p-byte-external-format+)
-          ((string-equal l "utf8") :utf-8)
+           (values +p-byte-external-format+ t))
+          ((string-equal l "utf8") (values :utf-8 t))
           ((and (> (length l) 9)
                 (string-equal "encoding(" (subseq l 0 9))
                 (char= (char l (1- (length l))) #\)))
-           (%p-encoding-ef (subseq l 9 (1- (length l)))))
+           (values (%p-encoding-ef (subseq l 9 (1- (length l)))) t))
           ((member l '("crlf" "perlio" "unix" "stdio" "mmap" "scalar" "pop"
                        "std" "utf-8-strict")
                    :test #'string-equal)
            ;; :utf-8-strict is Encode's name and DOES decode; the rest are
            ;; transport layers with no say in the encoding.
-           (if (string-equal l "utf-8-strict") :utf-8 nil))
-          (t (%p-announce-unsupported "open layer" (format nil ":~A" l)
-                                      "the handle keeps the format it had")
-             nil))))
+           (values (if (string-equal l "utf-8-strict") :utf-8 nil) t))
+          (t (values nil nil)))))
+
+(defun %p-layer-separator-p (c)
+  "True for the characters that SEPARATE PerlIO layers in a layer string.
+   perl's PerlIO_parse_layers treats `:` and whitespace alike and skips a RUN
+   of either, which is why a leading colon is OPTIONAL and why `\":raw :utf8\"`
+   is two layers (task #1224)."
+  (or (char= c #\:) (char= c #\Space) (char= c #\Tab)
+      (char= c #\Newline) (char= c #\Return) (char= c #\Page)))
 
 (defun %p-split-layers (layers)
-  "The individual layers of a mode's layer suffix, in order:
-   `:raw:encoding(UTF-8)` -> (\"raw\" \"encoding(UTF-8)\").  A `:` inside the
-   parentheses of `:encoding(...)` does not start a new layer."
-  (let ((out '()) (depth 0) (start nil) (n (length layers)))
-    (dotimes (i n)
-      (let ((c (char layers i)))
-        (cond ((char= c #\() (incf depth))
-              ((char= c #\)) (decf depth))
-              ((and (char= c #\:) (zerop depth))
-               (when start (push (subseq layers start i) out))
-               (setf start (1+ i))))))
-    (when start (push (subseq layers start n) out))
-    (nreverse out)))
+  "The individual layers of a layer string, in order — THE one reading of that
+   grammar, shared by `binmode`, an open MODE's suffix, `use open` and the
+   per-site defaults (task #1224).
+
+   perl's grammar (PerlIO_parse_layers, probed 5.40.3): a run of `:` and
+   whitespace separates layers and MAY ALSO LEAD the string, so the leading
+   colon is optional — `\"utf8\"`, `\":utf8\"`, `\"::utf8\"` and `\" :utf8\"`
+   are the same one layer, `\"raw:utf8\"` and `\":raw :utf8\"` the same two.
+   A name runs to the next separator; a `(...)` argument belongs to the name
+   and a `:` or a space inside the parentheses does not split it, so
+   `:encoding(UTF-8)` and `:encoding(iso 8859-1)` stay whole.
+
+   Reading ONLY `:` as a separator is what made `binmode FH, \"utf8\"` a no-op
+   once #1115 made binmode real: the handle stayed a BYTE handle, so t/op/read.t
+   read the file's UTF-8 octets where perl reads its characters — its whole
+   ` u` matrix, 264 rows.  The old splitter also DROPPED the first layer of a
+   colon-less list (`\"utf8:crlf\"` gave (\"crlf\")), which is the same bug
+   seen from the other end."
+  (let ((out '()) (n (length layers)) (i 0))
+    (loop
+     (loop while (and (< i n) (%p-layer-separator-p (char layers i)))
+           do (incf i))
+     (when (>= i n) (return (nreverse out)))
+     (let ((start i) (depth 0))
+       (loop while (< i n)
+             do (let ((c (char layers i)))
+                  (cond ((char= c #\() (incf depth) (incf i))
+                        ((char= c #\)) (decf depth) (incf i))
+                        ((and (zerop depth) (%p-layer-separator-p c)) (return))
+                        (t (incf i)))))
+       (push (subseq layers start i) out)))))
 
 (defun %p-layer-ef (layers default)
   "The external format LAYERS asks for, or DEFAULT when none of them decides.
    perl applies layers left to right and the LAST one that names a discipline
    wins — `<:raw:encoding(UTF-8)` decodes, `<:encoding(UTF-8):raw` does not — so
-   this walks them in that order instead of searching the whole string."
-  (let ((ef default))
-    (dolist (l (%p-split-layers layers) ef)
-      (let ((this (%p-one-layer-ef l)))
-        (when this (setf ef this))))))
+   this walks them in that order instead of searching the whole string.
+
+   SECOND value is the first layer name PCL does not know, or NIL.  perl parses
+   the WHOLE list before applying any of it, so one unknown name rejects the
+   call and leaves the handle alone — `binmode($fh,\":utf8:nosuch\")` on a byte
+   handle stays bytes, and `\":nosuch:utf8\"` does not decode either (probed
+   5.40.3).  The callers that can give perl's answer do (%p-binmode-impl,
+   %p-open-impl); the two that cannot go through %p-layer-ef-or-announce."
+  (let ((ef default) (bad nil))
+    (dolist (l (%p-split-layers layers) (values ef bad))
+      (multiple-value-bind (this known) (%p-one-layer-ef l)
+        (cond ((not known) (unless bad (setf bad l)))
+              (this (setf ef this)))))))
+
+(defun %p-layer-ef-or-announce (layers default site)
+  "%p-layer-ef for the two callers with no perl-visible failure to give: the
+   `use open` pragma and the per-site defaults p-default-layers installs.
+   perl's open.pm croaks on an unknown layer when the pragma RUNS, which PCL
+   cannot do from here (the layers are a compile-time fact by then), so the
+   name is announced once and DEFAULT stands."
+  (multiple-value-bind (ef bad) (%p-layer-ef layers default)
+    (when bad
+      (%p-announce-unsupported site (format nil ":~A" bad)
+                               "the default format is unchanged"))
+    ef))
 
 (defun %p-input-mode-p (base-mode)
   "True for the base open modes that produce a READ handle, which is the half
@@ -13787,10 +13849,12 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    standard handles once, at the pragma, and it stays the one runtime effect
    (p-use-open)."
   `(let ((*p-default-in-ef*  ,(if (and (stringp in-layers) (plusp (length in-layers)))
-                                  `(%p-layer-ef ,in-layers *p-default-in-ef*)
+                                  `(%p-layer-ef-or-announce ,in-layers *p-default-in-ef*
+                                                            "use open")
                                   '*p-default-in-ef*))
          (*p-default-out-ef* ,(if (and (stringp out-layers) (plusp (length out-layers)))
-                                  `(%p-layer-ef ,out-layers *p-default-out-ef*)
+                                  `(%p-layer-ef-or-announce ,out-layers *p-default-out-ef*
+                                                            "use open")
                                   '*p-default-out-ef*)))
      ,@body))
 
@@ -13942,7 +14006,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    effect, so the compiler emits this call only for a list containing `:std`.
 
    ARGS is the pragma's LIST, so the direction words are honoured for `:std`
-   too: `use open IN => ':utf8', ':std'` re-points STDIN alone."
+   too: `use open IN => ':utf8', ':std'` re-points STDIN alone.
+
+   WHICH WORD IS A LAYER: perl's open.pm asks only whether the word is one of
+   the three direction names or `:std`; ANY other word is a layer descriptor
+   (`use open IO => \"utf8\"` and `use open \":utf8\"` are the same pragma,
+   probed 5.40.3), because the leading colon belongs to the layer GRAMMAR and
+   is optional there — it never marked the word as a layer.  Task #1270 is the
+   COMPILE-TIME half of that, in Pl::Parser::_use_open_layers, which still
+   requires the colon before it will put a layer on ordinary opens."
   (let ((slot :both) (std nil) (in nil) (out nil))
     (dolist (a (coerce (p-flatten-args args) 'list))
       (let ((s (to-string (unbox a))))
@@ -13950,14 +14022,13 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               ((string= s "OUT") (setf slot :out))
               ((string= s "IO")  (setf slot :both))
               ((string-equal s ":std") (setf std t))
-              ((and (plusp (length s)) (char= (char s 0) #\:))
-               (let ((ef (%p-layer-ef s nil)))
+              ((zerop (length s)))
+              (t
+               (let ((ef (%p-layer-ef-or-announce s nil "use open")))
                  (when ef
                    (when (member slot '(:in :both)) (setf in ef))
                    (when (member slot '(:out :both)) (setf out ef)))
-                 (setf slot :both)))
-              ((zerop (length s)))
-              (t (%p-announce-unsupported "use open" s)))))
+                 (setf slot :both))))))
     (when std
       (when in  (setf (svref *p-std-efs* 0) in))
       (when out (setf (svref *p-std-efs* 1) out
@@ -14074,6 +14145,15 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     (loop for c across init do (vector-push-extend c buf))
     buf))
 
+(defun %p-open-mode-char-p (c)
+  "True for a character that can appear in an open mode's SIGIL run — the seven
+   perl uses (`< > + & = | -`) plus the whitespace perl skips there.  What
+   follows the run is the PerlIO layer string, and nothing else: a layer name
+   is a word character, so no layer can start with one of these (task #1224)."
+  (or (char= c #\<) (char= c #\>) (char= c #\+) (char= c #\&)
+      (char= c #\=) (char= c #\|) (char= c #\-)
+      (char= c #\Space) (char= c #\Tab)))
+
 (defun %p-split-open-mode (mode-str)
   "Split a Perl open mode into its BASE mode and its PerlIO layer suffix:
    `<:utf8` -> \"<\" + \":utf8\";  `>>:encoding(UTF-8)` -> \">>\" + the rest.
@@ -14092,16 +14172,34 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    measured characters where perl measures bytes.
    NOTE: this ACCEPTS layers and honours the encoding ones; it is not a full
    PerlIO layer model — layer stacking and PerlIO::get_layers introspection are
-   task #139, which needs the design call."
-  (let* ((colon (position #\: mode-str))
-         (base  (if colon (subseq mode-str 0 colon) mode-str))
-         (layers (if colon (subseq mode-str colon) "")))
-    (values base
-            layers
-            (%p-layer-ef layers
-                         (if (%p-input-mode-p base)
-                             *p-default-in-ef*
-                             *p-default-out-ef*)))))
+   task #139, which needs the design call.
+
+   WHERE THE BASE ENDS is the run of mode SIGILS, not the first colon (task
+   #1224).  perl reads the sigils and hands everything after them to
+   PerlIO_parse_layers, whose leading colon is optional — so `\"<utf8\"`,
+   `\"<:utf8\"` and `\"< :utf8\"` are one and the same open, all three probed
+   5.40.3.  Splitting at the colon made the first and third `Unknown open
+   mode`.  A mode with NO sigil at all (`\"utf8\"`, `\":utf8\"`) is perl's
+   fatal `Unknown open() mode`; PCL keeps its own warn-and-fail for that, so
+   the whole string stays the base and the diagnostic still names it.
+
+   FOURTH value is the first layer name PCL does not know: perl fails the open
+   on one (`open($fh,'<:nosuch',$f)` is false with $! = ENOENT, probed), which
+   %p-open-impl gives."
+  (let* ((end (or (position-if-not #'%p-open-mode-char-p mode-str)
+                  (length mode-str)))
+         (sigil-p (find-if (lambda (c) (not (%p-layer-separator-p c)))
+                           mode-str :end end))
+         (base   (if sigil-p
+                     (string-trim '(#\Space #\Tab) (subseq mode-str 0 end))
+                     mode-str))
+         (layers (if sigil-p (subseq mode-str end) "")))
+    (multiple-value-bind (ef bad)
+        (%p-layer-ef layers
+                     (if (%p-input-mode-p base)
+                         *p-default-in-ef*
+                         *p-default-out-ef*))
+      (values base layers ef bad))))
 
 (defun %p-open-memory (fh mode target-box)
   "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s)."
@@ -14537,6 +14635,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
          ;; fail (task #171).  EF honours :raw/:bytes as byte-exact.
          (mode-str (first mode-ef))
          (ef       (third mode-ef))
+         (bad-layer (fourth mode-ef))
          (file-str (to-string filename))
          ;; An UNDEF filename in the three-argument form is perl's anonymous
          ;; temporary file; NIL means "not that shape", and the mode's own
@@ -14546,6 +14645,10 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                         (%p-open-anon-temp-direction mode-str)))
          (stream
           (cond
+            ;; A layer name no layer answers to fails the OPEN in perl, before
+            ;; the file is touched: `open($fh,'<:nosuch',$f)` is false with
+            ;; $! = ENOENT even when $f exists (probed 5.40.3).  #1224.
+            (bad-layer (return-from %p-open-impl (%p-io-errno-fail 2)))
             (anon-dir (%p-open-anon-temp anon-dir ef))
             ;; The magic filename "-" means a standard stream (Perl dups it):
             ;; "<-" / "<","-" → STDIN; ">-" / ">","-" → STDOUT.
@@ -14955,29 +15058,35 @@ buffer's fill-pointer; everything else falls back to file-length."
    A handle that is NOT open fails in Perl with errno EBADF; replicate that —
    set $! and return false — so error-checking code (io/binmode.t test 9)
    observes the right $!.  A handle with no OS descriptor (an in-memory
-   string handle) carries characters and has no format to change: true, no-op."
+   string handle) carries characters and has no format to change: true, no-op.
+
+   THE LAYER STRING carries perl's own grammar, so the leading colon is
+   optional: `binmode FH, \"utf8\"` is `binmode FH, \":utf8\"` (task #1224,
+   %p-split-layers).  A name no layer answers to fails the call the way perl
+   does — undef, $! = ENOENT, and the handle keeps the layers it had, whether
+   the name stands alone or beside a good one (`\":utf8:nosuch\"` on a byte
+   handle stays bytes; probed 5.40.3)."
   (let ((stream (p-get-stream fh)))
-    (cond
-      ((null stream)
-       (setf *p-stored-errno* 9)                                  ; EBADF (Linux)
-       (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-       nil)
-      (t
-       (let* ((text (if (or (null layer) (eq layer *p-undef*))
+    (if (null stream)
+        (%p-io-errno-fail 9)                                      ; EBADF (Linux)
+        (let ((text (if (or (null layer) (eq layer *p-undef*))
                         ":raw"
-                        (to-string (unbox layer))))
-              (ef (%p-layer-ef text +p-byte-external-format+))
-              (target (%p-stream-target stream)))
-         (cond
-           ((not (sb-sys:fd-stream-p target)) t)
-           ((eq (stream-external-format target) ef) t)
-           (t (let ((std (%p-std-descriptor target)))
-                (cond
-                  (std (ignore-errors (finish-output target))
-                       (setf (svref *p-std-efs* std) ef)
-                       (%p-std-rebuild std))
-                  (t (%p-rebuild-fd-stream fh target ef))))
-              t)))))))
+                        (to-string (unbox layer)))))
+          (multiple-value-bind (ef bad)
+              (%p-layer-ef text +p-byte-external-format+)
+            (if bad
+                (%p-io-errno-fail 2)                              ; ENOENT
+                (let ((target (%p-stream-target stream)))
+                  (cond
+                    ((not (sb-sys:fd-stream-p target)) t)
+                    ((eq (stream-external-format target) ef) t)
+                    (t (let ((std (%p-std-descriptor target)))
+                         (cond
+                           (std (ignore-errors (finish-output target))
+                                (setf (svref *p-std-efs* std) ef)
+                                (%p-std-rebuild std))
+                           (t (%p-rebuild-fd-stream fh target ef))))
+                       t)))))))))
 
 (defmacro p-binmode (fh &rest args)
   "Perl binmode — bareword filehandle is auto-quoted."
@@ -24261,11 +24370,11 @@ buffer's fill-pointer; everything else falls back to file-length."
         (if (pcl::%p-wide-char-p s)
             pcl::*p-undef*
             (let ((decoded
-                    (handler-case
-                        (sb-ext:octets-to-string
-                         (map '(vector (unsigned-byte 8)) #'char-code s)
-                         :external-format :utf-8)
-                      (error () nil))))
+                   (handler-case
+                       (sb-ext:octets-to-string
+                        (map '(vector (unsigned-byte 8)) #'char-code s)
+                        :external-format :utf-8)
+                     (error () nil))))
               (cond (decoded (pcl::box-set str decoded) 1)
                     (t pcl::*p-undef*)))))))
 

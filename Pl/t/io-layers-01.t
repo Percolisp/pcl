@@ -334,4 +334,52 @@ PL
        '#1221 utf8::decode answers FALSE and leaves the string alone on invalid UTF-8');
 }
 
+# --- #1224: a layer name's leading colon is OPTIONAL -----------------------
+#
+# perl's PerlIO_parse_layers separates layers on a RUN of `:` and whitespace,
+# and that run may LEAD the string — so `binmode FH, "utf8"` is exactly
+# `binmode FH, ":utf8"`, and an open MODE splits at its sigil run, not at the
+# first colon.  PCL read only `:` as a separator, so a colon-less spelling
+# named NO layer (the handle stayed bytes) and a colon-less FIRST layer was
+# DROPPED (`"utf8:crlf"` gave just `crlf`).  #1115 made binmode real, which
+# turned that from invisible into t/op/read.t 2116/0 -> 1852/264 — every ` u'
+# row of its matrix, which opens `binmode FH, "utf8"`.
+#
+# Every expectation is perl 5.40.3's own answer on this file's 15-octet
+# fixture.  INVERSE guard: on a `424cabc` worktree all nine rows fail.
+is(slurp_report('<', "'utf8'"), "len=12 ord3=233\n",
+   q{#1224 binmode($fh,'utf8') — no leading colon — decodes});
+is(slurp_report('<utf8'), "len=12 ord3=233\n",
+   q{#1224 a colon-less layer in the open MODE decodes});
+is(slurp_report('< :utf8'), "len=12 ord3=233\n",
+   q{#1224 a SPACE ends the base mode, so '< :utf8' is a decoding open});
+is(slurp_report('<', "':raw :utf8'"), "len=12 ord3=233\n",
+   q{#1224 whitespace separates two layers and the last decider wins});
+is(slurp_report('<', "'utf8:crlf'"), "len=12 ord3=233\n",
+   q{#1224 a colon-less FIRST layer is not dropped});
+is(slurp_report('<', "'encoding(UTF-8)'"), "len=12 ord3=233\n",
+   q{#1224 encoding(...) without the colon decodes too});
+is(slurp_report('<', "'raw'"), "len=15 ord3=195\n",
+   q{#1224 a colon-less :raw still means octets});
+
+# An unknown layer NAME: perl parses the whole list before applying any of it,
+# so binmode is undef with $! = ENOENT and the handle keeps the layers it had,
+# and an unknown layer in an open MODE fails the open (both probed 5.40.3).
+is(run_cl(<<"PL"), "ret=undef enoent=1 len=12\n", q{#1224 an unknown layer fails binmode with $! = ENOENT and changes nothing});
+open my \$fh, '<', '$data' or die;
+binmode(\$fh, ':utf8');
+\$! = 0;
+my \$r = binmode(\$fh, 'nosuch');
+my \$e = ((\$! + 0) == 2) ? 1 : 0;
+my \$s = do { local \$/; <\$fh> };
+close \$fh;
+printf "ret=%s enoent=%d len=%d\\n", (defined \$r ? (\$r ? 1 : 0) : 'undef'), \$e, length(\$s);
+PL
+
+is(run_cl(<<"PL"), "open=0 enoent=1\n", q{#1224 an unknown layer in the open MODE fails the open, as perl does});
+\$! = 0;
+my \$ok = open(my \$fh, '<:nosuch', '$data') ? 1 : 0;
+printf "open=%d enoent=%d\\n", \$ok, (((\$! + 0) == 2) ? 1 : 0);
+PL
+
 done_testing();

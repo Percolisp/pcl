@@ -2207,6 +2207,28 @@ are read LEFT TO RIGHT and the last one that names a discipline wins
 standard handles follow the same rule, and `use open qw(:std …)` is what moves
 them.
 
+**THE LAYER-STRING GRAMMAR (normative, s470bv, task #1224) — one reading,
+everywhere a layer list appears.**  perl's `PerlIO_parse_layers` separates
+layers on a RUN of `:` **and whitespace**, and that run may also LEAD the
+string, so **the leading colon is OPTIONAL**; a name runs to the next
+separator, and a `(...)` argument belongs to the name (a `:` or a space inside
+the parentheses does not split it).  Probed 5.40.3: `"utf8"`, `":utf8"`,
+`"::utf8"`, `" :utf8"` and `"utf8 "` are the same one layer; `"raw:utf8"` and
+`":raw :utf8"` the same two; `"utf8:crlf"` decodes (crlf is transport).  The
+SAME grammar serves `binmode FH, LIST`, an open MODE's suffix (where the base
+mode is the leading run of the sigils `< > + & = | -` and the whitespace perl
+skips there — `"<utf8"`, `"<:utf8"` and `"< :utf8"` are one open), `use open`
+(open.pm treats any word that is not `IN`/`OUT`/`IO`/`:std` as a layer
+descriptor) and the per-site defaults.  A translator that reads only `:` as a
+separator gets two silent wrongs at once: a colon-less list names NO layer, and
+a colon-less FIRST layer is dropped — which is how t/op/read.t went 2116/0 →
+1852/264 the moment `binmode` became real.
+A layer name that answers to no layer is **rejected**, not ignored: perl parses
+the whole list before applying any of it, so `binmode` returns false with
+`$! = ENOENT` and the handle keeps the layers it had (`":utf8:nosuch"` on a
+byte handle stays bytes, `":nosuch:utf8"` does not decode), and an unknown
+layer in an open MODE fails the open with the same `$!`.
+
 **The `open` pragma is LEXICAL, so its layers are a COMPILE-TIME fact carried to
 each site — never a global the pragma sets when it runs** (task #1222).  A
 translator that makes it global gets two silent wrongs the moment bytes are the
