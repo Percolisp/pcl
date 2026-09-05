@@ -150,16 +150,24 @@ PL
 }
 
 # ── 4. Only the character is replaced; its neighbours stay in the literal ────
+# The WRAPPER changed at s470bo (#1175 family 3): the pieces used to be joined
+# by `(concatenate 'string …)` — four CL host names and a quoted host type
+# designator in the IR — and are now arguments of the one op
+# `p-literal-string`.  What these two rows assert is unchanged: the
+# representable RUNS stay verbatim, and only the offending character becomes a
+# part of its own.
 like(emitted(q{no warnings; my $s = "a\x{4000000}b";}),
-     qr/\(concatenate 'string "a" \(p-unrepresentable-char 67108864\) "b"\)/,
+     qr/\(p-literal-string "a" \(p-unrepresentable-char 67108864\) "b"\)/,
      'a mixed literal keeps its representable runs and splits out the character');
 
-# The sibling case must not move: a surrogate is representable as an SBCL
-# character (it just cannot be written into a UTF-8 file), so it keeps the
-# (string (code-char N)) spelling it has always had.
+# The sibling case is still a DIFFERENT part shape: a surrogate IS
+# representable as an SBCL character (it just cannot be written into a UTF-8
+# file), so it becomes a bare CODE POINT argument, where a character above
+# U+10FFFF — which no CL character holds — becomes a `p-unrepresentable-char`
+# form that dies where the value would be used.
 like(emitted(q{no warnings; my $s = "x\x{D800}y";}),
-     qr/\(concatenate 'string "x" \(string \(code-char 55296\)\) "y"\)/,
-     'a surrogate still emits (string (code-char N)) — unchanged');
+     qr/\(p-literal-string "x" 55296 "y"\)/,
+     'a surrogate is a bare code-point argument, not a dying form');
 
 # ── 5. The representable boundary, against the perl oracle ──────────────────
 # U+10FFFF is the LAST code point SBCL can hold and must keep working; so must
