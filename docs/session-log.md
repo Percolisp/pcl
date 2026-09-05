@@ -524,6 +524,20 @@ yadayada.t) — all four are new fails ABOVE an abort point in files that are
 already PARTIAL, which is the bucket's definition of crash-file noise and not
 counted as a regression.
 
+**AND ONCE MORE, ONTO `d59e58c`** — main advanced again while the first
+rebase's sweep was running (two further s470br commits: the ten stale
+`index.t :utf8` skip registrations dropped, `cl/skip-registry.lisp` + docs).
+The batch was rebased a second time, with the same proof (`git diff f315cf5
+HEAD -- cl Pl lib` == main's own `f01dcd6..d59e58c` delta) and the same
+conflicts (the two doc insert points, resolved as unions — BR's new bullets
+keep their section, this one keeps its heading).  **Every bar was re-read on
+that tip and every number is unchanged**: gate 212 files / 7183 rows (13 xs
+rows), sweep TOTAL 18644 (+0) GATE clean drops 5 = census, the six companion
+legs 0 NEW / 0 FIXED / 0 LOST, `corpus-diff.pl d59e58c` emission identical
+across 111 files, `ir-host-leak.pl` identical to a `git archive d59e58c`
+extraction (31 symbols / 111 files).
+
+
 ## Session 470br (Opus agent, 2026-09-05) — #1115: a filehandle carries OCTETS unless a layer says otherwise — the default open, `binmode`, `use open`, and perl's wide-character rule on a byte handle
 
 **#1115** was the widest silent divergence PCL had left: `%p-split-open-mode`
