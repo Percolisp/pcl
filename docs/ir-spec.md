@@ -24,7 +24,7 @@ design ruling; `sNNN` names an internal working session.
 * [4. Context (scalar / list / void)](#4-context-scalar--list--void)
 * [5. Calling convention](#5-calling-convention) — [definition](#51-definition) · [arguments](#52-arguments--two-body-shapes) · [return](#53-return) · [comparator frames](#54-comparator-frames--p-sort-cmp)
 * [6. Control flow](#6-control-flow) — [conditionals](#61-conditionals) · [loops](#62-loops-and-loop-control) · [exceptions](#63-exceptions-die--eval----) · [goto](#64-goto)
-* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451)
+* [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
 * [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171)
@@ -2175,6 +2175,44 @@ Two consequences a translator must implement or lose output:
   even on an uncaught die, so `print "row\n"; die` still shows the row; a host
   whose abort path skips its exit hooks turns a mid-file abort into silent row
   loss, which for a test file is every row it had produced.
+
+### 7.7 I/O layers: a handle carries OCTETS unless told otherwise (normative, s470br, task #1115)
+
+perl's default I/O discipline is BYTES, and it is observable in every
+byte-oriented use of what was read: `length`, `tell`/`seek` arithmetic, a
+checksum, `read`/`getc` counts, and a re-write of the file.  Probed 5.40.3 on a
+15-octet file holding U+00E9 and U+2019:
+
+| how the handle was opened | `length` of the slurp | `ord` of the 4th char |
+|---|---|---|
+| `open $fh,'<',$f`                      | 15 | 195 |
+| `open $fh,'<:raw',$f`                  | 15 | 195 |
+| `open $fh,'<:utf8',$f`                 | 12 | 233 |
+| `open $fh,'<:encoding(UTF-8)',$f`      | 12 | 233 |
+| default open + `binmode($fh,':utf8')`   | 12 | 233 |
+| `:encoding(UTF-8)` open + `binmode($fh)` | 15 | 195 |
+
+A translator whose strings are Unicode expresses "octets" as **characters
+0–255**; PCL opens such a handle with the LATIN-1 external format, which is the
+same reading `p-do`/`p-require` use for SOURCE (§9).  Four things decide a
+handle's discipline, in this order: the layers in its own open MODE, a later
+`binmode`, the `use open` defaults, and failing all three, octets.  The layers
+are read LEFT TO RIGHT and the last one that names a discipline wins
+(`<:raw:encoding(UTF-8)` decodes, `<:encoding(UTF-8):raw` does not).  The three
+standard handles follow the same rule, and `use open qw(:std …)` is what moves
+them.  Emission: `use open LIST` lowers to `(p-use-open LIST)` in the compile
+phase — the only never-loaded pragma with a runtime effect.
+
+**Writing a character a byte handle cannot hold is NOT an error.**  perl decides
+per STRING, not per character: an SV whose UTF8 flag is on prints as its WHOLE
+UTF-8 encoding, so `print $fh "\x{e9}\x{2019}"` on a byte handle emits
+`c3 a9 e2 80 99` — the é becomes two octets although one would hold it — with
+one `Wide character in print` warning PER ARGUMENT, on by default and
+independent of `use warnings`.  A string that fits in octets is written as
+octets and does not warn.  A host without an SV flag reads that rule as **"does
+any character exceed 255"**, which agrees with perl on every probed shape.
+`syswrite` is the exception: perl makes it FATAL (`Wide character in syswrite`,
+trappable) because an unbuffered write has nowhere to put the upgrade.
 
 ## 8. Magic globals
 

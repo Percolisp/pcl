@@ -176,6 +176,8 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`split` implicit LHS-arity limit](#split-implicit-lhs-arity-limit-my-ab--split-----split-)
 * [`pack`/`unpack` — pointer types (`p`/`P`) and 80-bit long double (`D`)](#packunpack--pointer-types-pp-and-80-bit-long-double-d)
 * [An IN-MEMORY handle opened onto STDOUT/STDERR/STDIN](#an-in-memory-handle-opened-onto-stdoutstderrstdin)
+* [`use open` is GLOBAL, not lexically scoped](#use-open-is-global-not-lexically-scoped)
+* [PerlIO layer stacks and `PerlIO::get_layers`](#perlio-layer-stacks-and-perlioget_layers)
 * [`Hash::Util` bucket statistics](#hashutil-bucket-statistics)
 * [`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`](#max_nested_eval_begin_blocks)
 * [`use English` — everything works except `@ARG` inside a sub](#use-english--everything-works-except-arg-inside-a-sub)
@@ -1047,6 +1049,52 @@ installed, where perl would answer -1.
 at all (perl refuses the open), so no perl program depends on either answer.
 Capturing STDOUT portably is done with a dup and a temp file, which PCL matches
 exactly — that is what `Pl/t/std-handle-open-01.t` rows 1 and 5 assert.
+
+---
+
+## `use open` is GLOBAL, not lexically scoped
+
+**Perl:** the `open` pragma is lexically scoped — `{ use open qw(:std :utf8); … }`
+affects only the opens inside that block, and the layers revert at the closing
+brace.  `no open` turns it off for the rest of the enclosing scope.
+
+**PCL (task #1115):** `use open LIST` calls `p-use-open` at compile time and the
+defaults it sets stay in force for the REST OF THE RUN.  `no open` is a no-op.
+The two agree for every spelling that occurs in perl's own `t/`, in
+`perl-tests/` and on the CPAN board — all of them put the pragma at the top of a
+file, where "the rest of the file" and "the rest of the run" are the same thing
+for that program.  They part company only for a pragma deliberately scoped to an
+inner block, which then keeps acting after the block ends.
+
+**Why not lexical:** the layers are a property of the RUNTIME `open` call, and
+PCL's compiler would have to carry a lexical layer stack through every emitted
+`open`/`binmode`/`readpipe` site to reproduce it.  The measured population needs
+none of that; the entry is here so the divergence is named rather than
+discovered.
+
+---
+
+## PerlIO layer stacks and `PerlIO::get_layers`
+
+**Perl:** a handle carries a STACK of layers (`:unix:perlio:encoding(UTF-8)`),
+`binmode` pushes and `:raw`/`:pop` pop, and `PerlIO::get_layers($fh)` reports
+the stack.
+
+**PCL (task #1115):** a handle carries ONE character discipline — the external
+format of the CL stream behind it — computed from the layers left to right, with
+the last one that names a discipline winning.  That is enough for every layer
+spelling that decides bytes-vs-characters (`:raw`, `:bytes`, `:utf8`,
+`:encoding(NAME)`, and the `use open` defaults), and it is what makes
+`length`/`tell`/`-s`/`read`/`getc` agree with perl.  What it does not model:
+
+* `:crlf` line-ending translation (a no-op on Unix, which is where PCL runs);
+* stacking as HISTORY — `binmode(, ':raw')` after `:encoding(UTF-8)` gives
+  bytes, which is perl's answer, but there is no stack to pop TO;
+* `PerlIO::get_layers` introspection (task #139, which needs a design call);
+* an `:encoding(NAME)` SBCL has no codec for DIES naming the encoding (rule 12)
+  rather than decoding as something else.  Measured over perl's `t/`,
+  `perl-tests/`, `lib/` and the CPAN board, the only such name is `cp1047`
+  (EBCDIC), in a file that skips on an ASCII platform.
 
 ---
 

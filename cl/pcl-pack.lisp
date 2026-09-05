@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-760
+;;; pcl: pipeline=v2 gen=v2-790
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -330,10 +330,9 @@
 "))
                         (p-post++ $ti)))
                     (p-if (p-str-eq $ch "(")
-                      (progn (p-incf-raw $depth :numeric) (p-post++ $ti))
+                      (progn (p-incf-raw $depth) (p-post++ $ti))
                       (p-if (p-str-eq $ch ")")
-                        (progn (p-decf-raw $depth :numeric)
-                          (p-if (p-> $depth 0) (p-post++ $ti)))
+                        (progn (p-decf-raw $depth) (p-if (p-> $depth 0) (p-post++ $ti)))
                         (progn (p-post++ $ti)))))))
               (p-caller-ctx (p-tail-value $ti)))))))))
 
@@ -603,8 +602,8 @@
                             (%pcl-to-string-strict (p-substr $tmpl (p-cast-$ $ti_ref) 1) "$c")))
                         (p-post++ (p-cast-$ $ti_ref))
                         (p-if (p-str-eq $c "[")
-                          (progn (p-incf-raw $depth :numeric))
-                          (p-if (p-str-eq $c "]") (progn (p-decf-raw $depth :numeric))))))
+                          (progn (p-incf-raw $depth))
+                          (p-if (p-str-eq $c "]") (progn (p-decf-raw $depth))))))
                     (p-if (p-> $depth 0)
                       (p-die :loc
                         "cl/pack-impl.pl line 242"
@@ -676,7 +675,7 @@
                 (p-let (($k :scalar 0))
                   (p-for ()
                     ((p-< $k $nbytes))
-                    ((p-incf-raw $k :numeric))
+                    ((p-incf-raw $k))
                     (p-.=-raw $result (p-chr (p-bit-and (p->> $val (p-* 8 $k)) #xFF)))))))
             (p-caller-ctx (p-tail-value $result))))))))
 
@@ -694,7 +693,7 @@
                 (p-let (($k :scalar 0))
                   (p-for ()
                     ((p-< $k $nbytes))
-                    ((p-incf-raw $k :numeric))
+                    ((p-incf-raw $k))
                     (p-my-= $v
                       (p-bit-or (p-<< $v 8)
                         (p-if (p-< (p-+ $si $k) $slen) (p-ord (p-substr $s (p-+ $si $k) 1)) 0))))))
@@ -756,7 +755,7 @@
                       (p-let (($k :scalar 0))
                         (p-for ()
                           ((p-< $k $len))
-                          ((p-incf-raw $k :numeric))
+                          ((p-incf-raw $k))
                           (p-.= (p-cast-$ $result_ref)
                             (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0))))))))
                 (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "A"))
@@ -767,7 +766,7 @@
                         (p-let (($k :scalar 0))
                           (p-for ()
                             ((p-< $k $len))
-                            ((p-incf-raw $k :numeric))
+                            ((p-incf-raw $k))
                             (p-.= (p-cast-$ $result_ref)
                               (p-if (p-< $k $slen) (p-substr $arg $k 1) " ")))))))
                   (p-if (setf --pcl-if-ret--0 (p-str-eq $ch "Z"))
@@ -783,7 +782,7 @@
                                     (p-let (($k :scalar 0))
                                       (p-for ()
                                         ((p-< $k $body))
-                                        ((p-incf-raw $k :numeric))
+                                        ((p-incf-raw $k))
                                         (p-.= (p-cast-$ $result_ref)
                                           (p-if (p-< $k $slen) (p-substr $arg $k 1) (p-chr 0)))))
                                     (p-caller-ctx (p-.= (p-cast-$ $result_ref) (p-chr 0))))))
@@ -797,13 +796,13 @@
                             (p-let (($bs :scalar 0))
                               (p-for ()
                                 ((p-< $bs $nbits))
-                                ((p-incf-raw $bs 8 :numeric))
+                                ((p-incf-raw $bs 8))
                                 (p-let (($byte :box (make-p-box nil)))
                                   (p-my-= $byte 0)
                                   (p-let (($bit :scalar 0))
                                     (p-for ()
                                       ((p-&& (p-< $bit 8) (p-< (p-+ $bs $bit) $nbits)))
-                                      ((p-incf-raw $bit :numeric))
+                                      ((p-incf-raw $bit))
                                       (p-let (($idx :box (make-p-box nil)))
                                         (p-my-= $idx (p-+ $bs $bit))
                                         (p-if
@@ -819,13 +818,13 @@
                               (p-let (($bs :scalar 0))
                                 (p-for ()
                                   ((p-< $bs $nbits))
-                                  ((p-incf-raw $bs 8 :numeric))
+                                  ((p-incf-raw $bs 8))
                                   (p-let (($byte :box (make-p-box nil)))
                                     (p-my-= $byte 0)
                                     (p-let (($bit :scalar 0))
                                       (p-for ()
                                         ((p-&& (p-< $bit 8) (p-< (p-+ $bs $bit) $nbits)))
-                                        ((p-incf-raw $bit :numeric))
+                                        ((p-incf-raw $bit))
                                         (p-let (($idx :box (make-p-box nil)))
                                           (p-my-= $idx (p-+ $bs $bit))
                                           (p-if
@@ -841,7 +840,7 @@
                                 (p-let (($k :scalar 0))
                                   (p-for ()
                                     ((p-< $k $nyb))
-                                    ((p-incf-raw $k 2 :numeric))
+                                    ((p-incf-raw $k 2))
                                     (p-let (($hi :box (make-p-box nil)))
                                       (p-my-= $hi
                                         (p-if (p-< $k $slen) (p-hex (p-substr $arg $k 1)) 0))
@@ -860,7 +859,7 @@
                                   (p-let (($k :scalar 0))
                                     (p-for ()
                                       ((p-< $k $nyb))
-                                      ((p-incf-raw $k 2 :numeric))
+                                      ((p-incf-raw $k 2))
                                       (p-let (($lo :box (make-p-box nil)))
                                         (p-my-= $lo
                                           (p-if (p-< $k $slen) (p-hex (p-substr $arg $k 1)) 0))
@@ -913,7 +912,7 @@
                                               (p-let (($k :scalar 0))
                                                 (p-for ()
                                                   ((p-< $k $clen))
-                                                  ((p-incf-raw $k 3 :numeric))
+                                                  ((p-incf-raw $k 3))
                                                   (p-let
                                                     (($b0 :num
                                                         (%pcl-to-number-strict
@@ -1244,8 +1243,7 @@
                                                                                 ((p-< $k
                                                                                     (p-array-last-index
                                                                                       @bytes)))
-                                                                                ((p-incf-raw $k
-                                                                                    :numeric))
+                                                                                ((p-incf-raw $k))
                                                                                 (p-.=
                                                                                   (p-cast-$
                                                                                     $result_ref)
@@ -1345,8 +1343,7 @@
                                                                                 ((p-< $k
                                                                                     (p-array-last-index
                                                                                       @bytes)))
-                                                                                ((p-incf-raw $k
-                                                                                    :numeric))
+                                                                                ((p-incf-raw $k))
                                                                                 (p-.=
                                                                                   (p-cast-$
                                                                                     $result_ref)
@@ -1373,7 +1370,7 @@
                                                                 ((p-&& (p-< $i $actual_count)
                                                                     (p-< (p-cast-$ $ai_ref)
                                                                       $nargs)))
-                                                                ((p-incf-raw $i :numeric))
+                                                                ((p-incf-raw $i))
                                                                 (p-let
                                                                   (($val :box
                                                                       (make-p-box nil)))
@@ -1444,8 +1441,7 @@
                                                                               ((p-< $k
                                                                                   (p-array-last-index
                                                                                     @bytes)))
-                                                                              ((p-incf-raw $k
-                                                                                  :numeric))
+                                                                              ((p-incf-raw $k))
                                                                               (p-.=
                                                                                 (p-cast-$
                                                                                   $result_ref)
@@ -1466,7 +1462,7 @@
                                                                 ((p-&& (p-< $i $actual_count)
                                                                     (p-< (p-cast-$ $ai_ref)
                                                                       $nargs)))
-                                                                ((p-incf-raw $i :numeric))
+                                                                ((p-incf-raw $i))
                                                                 (p-let
                                                                   (($v :box (make-p-box nil)))
                                                                   (p-my-= $v
@@ -1493,8 +1489,7 @@
                                                                             ((p-< $k
                                                                                 (p-array-last-index
                                                                                   @bytes)))
-                                                                            ((p-incf-raw $k
-                                                                                :numeric))
+                                                                            ((p-incf-raw $k))
                                                                             (p-.=
                                                                               (p-cast-$
                                                                                 $result_ref)
@@ -1552,7 +1547,7 @@
                                           (p-let (($r :scalar 0))
                                             (p-for ()
                                               ((p-< $r $nrep))
-                                              ((p-incf-raw $r :numeric))
+                                              ((p-incf-raw $r))
                                               (p-let (($iter_base :box (make-p-box nil)))
                                                 (p-my-= $iter_base
                                                   (p-length (p-cast-$ $result_ref)))
@@ -1674,7 +1669,7 @@
                                       (p-let (($r :scalar 0))
                                         (p-for ()
                                           ((p-< $r $nrep))
-                                          ((p-incf-raw $r :numeric))
+                                          ((p-incf-raw $r))
                                           (p-let (($v :box (make-p-box nil)))
                                             (p-my-= $v
                                               (p-if (p-< (p-cast-$ $ai_ref) $nargs)
@@ -1711,7 +1706,7 @@
                                       (p-let (($r :scalar 0))
                                         (p-for ()
                                           ((p-< $r $nrep))
-                                          ((p-incf-raw $r :numeric))
+                                          ((p-incf-raw $r))
                                           (p-let (($v :box (make-p-box nil)))
                                             (p-my-= $v
                                               (p-if (p-< (p-cast-$ $ai_ref) $nargs)
@@ -1730,7 +1725,7 @@
                                       (p-let (($r :scalar 0))
                                         (p-for ()
                                           ((p-< $r $nrep))
-                                          ((p-incf-raw $r :numeric))
+                                          ((p-incf-raw $r))
                                           (p-let (($v :box (make-p-box nil)))
                                             (p-my-= $v
                                               (p-if (p-< (p-cast-$ $ai_ref) $nargs)
@@ -1771,7 +1766,7 @@
                                     (p-let (($r :scalar 0))
                                       (p-for ()
                                         ((p-< $r $nrep))
-                                        ((p-incf-raw $r :numeric))
+                                        ((p-incf-raw $r))
                                         (p-let (($v :box (make-p-box nil)))
                                           (p-my-= $v
                                             (p-if (p-< (p-cast-$ $ai_ref) $nargs)
@@ -1803,7 +1798,7 @@
                                     (p-let (($r :scalar 0))
                                       (p-for ()
                                         ((p-< $r $nrep))
-                                        ((p-incf-raw $r :numeric))
+                                        ((p-incf-raw $r))
                                         (p-let (($v :box (make-p-box nil)))
                                           (p-my-= $v
                                             (p-if (p-< (p-cast-$ $ai_ref) $nargs)
@@ -1834,7 +1829,7 @@
                                     (p-let (($r :scalar 0))
                                       (p-for ()
                                         ((p-< $r $nrep))
-                                        ((p-incf-raw $r :numeric))
+                                        ((p-incf-raw $r))
                                         (p-let (($raw :box (make-p-box nil)))
                                           (p-my-= $raw
                                             (p-if (p-< (p-cast-$ $ai_ref) $nargs)
@@ -1894,7 +1889,7 @@
                                                 (p-let (($k :scalar 0))
                                                   (p-for ()
                                                     ((p-< $k (p-array-last-index @bytes)))
-                                                    ((p-incf-raw $k :numeric))
+                                                    ((p-incf-raw $k))
                                                     (p-.= (p-cast-$ $result_ref)
                                                       (p-chr (p-bit-or (p-aref @bytes $k) #x80)))))
                                                 (p-.= (p-cast-$ $result_ref)
@@ -1924,7 +1919,7 @@
             (p-let (($i :scalar 0))
               (p-for ()
                 ((p-< $i $tlen))
-                ((p-incf-raw $i :numeric))
+                ((p-incf-raw $i))
                 (p-let (($c :box (make-p-box nil)))
                   (p-my-= $c (p-substr $tmpl $i 1))
                   (p-if (p-str-eq $c "[")
@@ -1941,7 +1936,7 @@
               (p-let (($i :scalar 0))
                 (p-for ()
                   ((p-< $i $tlen))
-                  ((p-incf-raw $i :numeric))
+                  ((p-incf-raw $i))
                   (p-let (($c :box (make-p-box nil)))
                     (p-my-= $c (p-substr $tmpl $i 1))
                     (p-if (p-str-eq $c "[")
@@ -2008,7 +2003,7 @@
                 (p-let (($k :scalar 1))
                   (p-for ()
                     ((p-< $k $nb))
-                    ((p-incf-raw $k :numeric))
+                    ((p-incf-raw $k))
                     (p-if (p-< (p-+ (p-cast-$ $si_ref) $k) $slen)
                       (p-my-= $code
                         (p-bit-or (p-<< $code 6)
@@ -2060,7 +2055,7 @@
                           (p-let (($i :scalar 0))
                             (p-for ()
                               ((p-< $i (p-int (p-/ $n 2))))
-                              ((p-incf-raw $i :numeric))
+                              ((p-incf-raw $i))
                               (p-let
                                 (($b__excl__0 :box
                                     (make-p-box nil)
@@ -2083,7 +2078,7 @@
                             (p-let (($i :scalar 0))
                               (p-for ()
                                 ((p-< $i (p-int (p-/ $n 2))))
-                                ((p-incf-raw $i :numeric))
+                                ((p-incf-raw $i))
                                 (p-let
                                   (($b__excl__1 :box
                                       (make-p-box nil)
@@ -2110,7 +2105,7 @@
                                 (p-let (($i :scalar 0))
                                   (p-for ()
                                     ((p-< $i $nbits))
-                                    ((p-incf-raw $i :numeric))
+                                    ((p-incf-raw $i))
                                     (p-let
                                       (($b__excl__2 :num
                                           (%pcl-to-number-strict
@@ -2132,7 +2127,7 @@
                                   (p-let (($i :scalar 0))
                                     (p-for ()
                                       ((p-< $i $nbits))
-                                      ((p-incf-raw $i :numeric))
+                                      ((p-incf-raw $i))
                                       (p-let
                                         (($b__excl__3 :num
                                             (%pcl-to-number-strict
@@ -2165,7 +2160,7 @@
                                   (p-let (($i :scalar 0))
                                     (p-for ()
                                       ((p-< $i $nbits))
-                                      ((p-incf-raw $i :numeric))
+                                      ((p-incf-raw $i))
                                       (p-let
                                         (($b__excl__4 :num
                                             (%pcl-to-number-strict
@@ -2187,7 +2182,7 @@
                                     (p-let (($i :scalar 0))
                                       (p-for ()
                                         ((p-< $i $nbits))
-                                        ((p-incf-raw $i :numeric))
+                                        ((p-incf-raw $i))
                                         (p-let
                                           (($b__excl__5 :num
                                               (%pcl-to-number-strict
@@ -2234,7 +2229,7 @@
                                         (p-let (($k :scalar 0))
                                           (p-for ()
                                             ((p-< $k $ng))
-                                            ((p-incf-raw $k :numeric))
+                                            ((p-incf-raw $k))
                                             (p-let (($get :box (make-p-box nil)))
                                               (p-my-= $get
                                                 (lambda (&rest %_args)
@@ -2315,7 +2310,7 @@
                                     (p-let (($i :scalar 0))
                                       (p-for ()
                                         ((p-&& (p-< $i $n) (p-< (p-cast-$ $si_ref) $slen)))
-                                        ((p-incf-raw $i :numeric))
+                                        ((p-incf-raw $i))
                                         (p-funcall-ref $push_val
                                           (p-list-ctx
                                             (p-ord (p-substr $s (p-post++ (p-cast-$ $si_ref)) 1)))))))))
@@ -2661,7 +2656,7 @@
                                                                       (p-+ (p-cast-$ $si_ref)
                                                                         $dnb)
                                                                       $slen)))
-                                                                ((p-incf-raw $i :numeric))
+                                                                ((p-incf-raw $i))
                                                                 (p-funcall-ref $push_val
                                                                   (pl-_unpack_read_int $s
                                                                     (p-cast-$ $si_ref)
@@ -2716,8 +2711,7 @@
                                                                   (p-let (($r :scalar 0))
                                                                     (p-for ()
                                                                       ((p-< $r $slash_n))
-                                                                      ((p-incf-raw $r
-                                                                          :numeric))
+                                                                      ((p-incf-raw $r))
                                                                       (p-let
                                                                         (($iter_base :box
                                                                             (make-p-box nil)))
@@ -2778,7 +2772,7 @@
                                           (p-let (($r :scalar 0))
                                             (p-for ()
                                               ((p-< $r $nrep))
-                                              ((p-incf-raw $r :numeric))
+                                              ((p-incf-raw $r))
                                               (p-let (($iter_base :box (make-p-box nil)))
                                                 (p-my-= $iter_base (p-cast-$ $si_ref))
                                                 (pl-_unpack_tmpl $inner
@@ -2865,7 +2859,7 @@
                                         (p-let (($i :scalar 0))
                                           (p-for ()
                                             ((p-< $i $n))
-                                            ((p-incf-raw $i :numeric))
+                                            ((p-incf-raw $i))
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) $nb) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
@@ -2888,7 +2882,7 @@
                                         (p-let (($i :scalar 0))
                                           (p-for ()
                                             ((p-< $i $n))
-                                            ((p-incf-raw $i :numeric))
+                                            ((p-incf-raw $i))
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 4) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val
@@ -2907,7 +2901,7 @@
                                         (p-let (($i :scalar 0))
                                           (p-for ()
                                             ((p-< $i $n))
-                                            ((p-incf-raw $i :numeric))
+                                            ((p-incf-raw $i))
                                             (p-if (p-> (p-+ (p-cast-$ $si_ref) 8) $slen)
                                               (p-last))
                                             (p-funcall-ref $push_val

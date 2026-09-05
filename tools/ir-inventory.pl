@@ -407,6 +407,12 @@ my $DUMP_LISP = <<'LISP';
 ;;; ir-inventory.pl's dump program — see that tool's header.
 (require :sb-introspect)
 (in-package :pcl)
+;;; THIS DUMP IS UTF-8 TEXT: the docstrings it prints carry em dashes and §.
+;;; Since task #1115 a PCL program's STDOUT is a BYTE handle (perl's default),
+;;; so a tool that wants character output has to say so — the runtime keeps the
+;;; standard handles' formats in *p-std-efs*, indexed by descriptor.
+(setf (svref *p-std-efs* 1) :utf-8)
+(%p-std-rebuild 1)
 (defun %ir-inv-esc (s)
   (with-output-to-string (o)
     (loop for c across s do

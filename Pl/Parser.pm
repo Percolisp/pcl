@@ -9046,6 +9046,22 @@ sub _process_include_statement {
         $self->environment->set_pragma('strict_subs', 1);
       }
     }
+    # `use open` is the ONE never-loaded pragma with a RUNTIME effect: it moves
+    # the default PerlIO layers, which decide whether a later `open` DECODES
+    # (task #1115 — PCL's handles carry octets unless a layer says otherwise,
+    # like perl's).  Its LIST is an ordinary perl list, so it goes through the
+    # same import-argument parse the general `use` arm below uses, and lands in
+    # the definitions bucket for the same reason a `use` does: perl's pragma is
+    # compile-time, so it must be in force before any runtime open runs.
+    if ($module eq 'open') {
+      my @arg_tokens = $self->_use_import_arg_tokens($stmt);
+      if (@arg_tokens) {
+        my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);  # LIST ctx
+        $self->_with_bucket('definitions', sub {
+          $self->_emit("(p-eval-always (p-use-open $args_cl))");
+        });
+      }
+    }
     $self->_emit(";; $perl_code (pragma)");
     # The pragma itself is a no-op, but its %INC entry is not: perl LOADS
     # strict.pm and programs read $INC{"strict.pm"} (task #511).  See

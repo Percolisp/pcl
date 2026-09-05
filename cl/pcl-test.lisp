@@ -13,6 +13,19 @@
 
 (in-package :pcl)
 
+(defun %tap-out (control &rest args)
+  "Every TAP line this layer emits, through ONE writer (task #1115).
+
+   Since #1115 STDOUT is a BYTE handle — perl's default — and a test
+   DESCRIPTION carries whatever a `use utf8` file wrote into it, so a non-ASCII
+   name would signal a stream-encoding-error inside the write and take the
+   whole file with it.  perl's own answer is to warn `Wide character in print`
+   once and write the string's UTF-8 encoding, which is what %p-out-string
+   does; the handler is the backstop for the format directives' own output.
+   It replaced 25 direct `format t` calls: one writer, not twenty-five."
+  (%p-with-wide-upgrade "print"
+                        (%p-out-string (apply #'format nil control args) *standard-output* "print")))
+
 ;;; Test state
 (defvar *test-count* 0)
 (defvar *test-planned* nil)
@@ -169,16 +182,16 @@
   (dolist (line (apply #'p-. args))
     (if (and (> (length (to-string line)) 0)
              (char= (char (to-string line) 0) #\#))
-        (format t "~A~%" line)
-        (format t "# ~A~%" line))))
+        (%tap-out "~A~%" line)
+        (%tap-out "# ~A~%" line))))
 
 ;;; skip_all(reason)
 ;;; Defined BEFORE pl-plan: `plan(skip_all => …)` calls it (perl's t/test.pl
 ;;; does the same), and a forward reference would be a load-time style-warning.
 (defun pl-skip_all (&optional reason)
   (if reason
-      (format t "1..0 # Skip ~A~%" reason)
-      (format t "1..0~%"))
+      (%tap-out "1..0 # Skip ~A~%" reason)
+      (%tap-out "1..0~%"))
   (sb-ext:exit :code 0))
 
 ;;; plan(N) or plan(tests => N) or plan(skip_all => REASON) or plan('no_plan')
@@ -197,7 +210,7 @@
       ;; plan(N)
       ((and (= (length args) 1) (numberp (first args)))
        (setf *test-planned* (first args))
-       (format t "1..~A~%" *test-planned*))
+       (%tap-out "1..~A~%" *test-planned*))
       ;; plan('no_plan')
       ((and (= (length args) 1) (equal (first args) "no_plan"))
        (setf *test-no-plan* t))
@@ -221,7 +234,7 @@
          (unless (or tests-value skip-reason)
            (error "plan(): no `tests` or `skip_all` key in ~S" args))
          (setf *test-planned* tests-value)
-         (format t "1..~A~%" *test-planned*)))
+         (%tap-out "1..~A~%" *test-planned*)))
       ;; No recognized form.  The plan is the count the whole file is judged
       ;; against, so a silent fall-through here means the run publishes TAP
       ;; nobody can check — exactly the shape task #202 exists to remove.
@@ -230,7 +243,7 @@
 ;;; done_testing() or done_testing(N)
 (defun pl-done_testing (&optional n)
   (let ((count (or n *test-count*)))
-    (format t "1..~A~%" count)
+    (%tap-out "1..~A~%" count)
     (setf *test-planned* count)))
 
 ;;; `use Test::More tests => N` — the IMPORT-ARG spelling of the plan.
@@ -275,7 +288,7 @@
 
 ;;; BAIL_OUT(reason)
 (defun pl-BAIL_OUT (reason)
-  (format t "Bail out!  ~A~%" reason)
+  (%tap-out "Bail out!  ~A~%" reason)
   (sb-ext:exit :code 255))
 
 ;;; Core: _ok(pass, name, @diag)
@@ -331,13 +344,13 @@
           ((not pass)
            (incf *test-todo*)
            (if dn
-               (format t "not ok ~A - ~A # TODO ~A~%" *test-count* dn todo)
-               (format t "not ok ~A # TODO ~A~%" *test-count* todo))
+               (%tap-out "not ok ~A - ~A # TODO ~A~%" *test-count* dn todo)
+               (%tap-out "not ok ~A # TODO ~A~%" *test-count* todo))
            (return-from test-ok nil))
           (t
            (if dn
-               (format t "ok ~A - ~A # TODO ~A~%" *test-count* dn todo)
-               (format t "ok ~A # TODO ~A~%" *test-count* todo))
+               (%tap-out "ok ~A - ~A # TODO ~A~%" *test-count* dn todo)
+               (%tap-out "ok ~A # TODO ~A~%" *test-count* todo))
            (return-from test-ok t))))))
   (let ((entry (%skip-registry-lookup name)))
     ;; Registry says this test is documented not-supported.
@@ -346,13 +359,13 @@
         ((not pass)
          ;; Expected failure -> emit a real TAP skip (counts as neither pass nor fail).
          (incf *test-skipped*)
-         (format t "ok ~A # skip ~A~%" *test-count* (third entry))
+         (%tap-out "ok ~A # skip ~A~%" *test-count* (third entry))
          (return-from test-ok nil))
         (t
          ;; Unexpectedly passes -> emit ok AND flag the stale registry entry.
-         (format t "ok ~A~@[ - ~A~]~%" *test-count* (test-display-value name))
-         (format t "# REGISTRY-STALE: ~A test ~A now passes; drop skip-registry pattern ~S~%"
-                 *current-test-file* *test-count* (fourth entry))
+         (%tap-out "ok ~A~@[ - ~A~]~%" *test-count* (test-display-value name))
+         (%tap-out "# REGISTRY-STALE: ~A test ~A now passes; drop skip-registry pattern ~S~%"
+                   *current-test-file* *test-count* (fourth entry))
          (return-from test-ok t)))))
   (let* ((display-name (test-display-value name))
          (out (if display-name
@@ -363,13 +376,13 @@
                   (format nil "~A ~A"
                           (if pass "ok" "not ok")
                           *test-count*))))
-    (format t "~A~%" out)
+    (%tap-out "~A~%" out)
     (unless pass
       (incf *test-failures*)
       (%test-log-failure *test-count* name diag)
       (when diag
         (dolist (d diag)
-          (format t "# ~A~%" d))))
+          (%tap-out "# ~A~%" d))))
     pass))
 
 ;;; ok(test, name)
@@ -396,7 +409,7 @@
             (make-p-box (length x))
             x))
     (error (e)
-      (format t "### test-to-scalar ERROR: ~A~%" e)
+      (%tap-out "### test-to-scalar ERROR: ~A~%" e)
       (force-output)
       x)))
 
@@ -865,7 +878,7 @@
         (r (to-string (unbox reason))))
     (dotimes (i n)
       (incf *test-count*)
-      (format t "ok ~A # skip ~A~%" *test-count* r)))
+      (%tap-out "ok ~A # skip ~A~%" *test-count* r)))
   (p-last-dynamic "SKIP"))
 
 ;;; Helper: split string (must be before pl-diag/pl-note which use it)
@@ -884,14 +897,14 @@
   (when args
     (dolist (msg args)
       (dolist (line (split-string (to-string msg) '(#\Newline)))
-        (format t "# ~A~%" line)))))
+        (%tap-out "# ~A~%" line)))))
 
 ;;; note(msg)
 (defun pl-note (&rest args)
   (when args
     (dolist (msg args)
       (dolist (line (split-string (to-string msg) '(#\Newline)))
-        (format t "# ~A~%" line)))))
+        (%tap-out "# ~A~%" line)))))
 
 ;;; END hook: check test count.  Skipped entirely in a fork child (pid
 ;;; differs from plan time) — the parent owns the plan.
@@ -899,8 +912,8 @@
         (unless (and *test-plan-pid*
                      (/= *test-plan-pid* (sb-posix:getpid)))
           (when (and *test-planned* (/= *test-count* *test-planned*))
-            (format t "# Looks like you planned ~A tests but ran ~A.~%"
-                    *test-planned* *test-count*))
+            (%tap-out "# Looks like you planned ~A tests but ran ~A.~%"
+                      *test-planned* *test-count*))
           ;; Crash localization: running FEWER tests than planned means the run is
           ;; INCOMPLETE.  Emit a neutral, machine-parseable fact (the exit hook
           ;; fires both on a clean EOF and on an unhandled condition under
@@ -908,11 +921,11 @@
           ;; the SBCL exit code and refines this into either "crashed mid-file
           ;; (crash site ~test N+1)" or "reached EOF but under-counted".
           (when (and *test-planned* (< *test-count* *test-planned*))
-            (format t "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
-                    *test-count* *test-planned* (or *last-test-name* "?"))
+            (%tap-out "# PCL-INCOMPLETE last=~A planned=~A desc=~A~%"
+                      *test-count* *test-planned* (or *last-test-name* "?"))
             (force-output))
           (when *test-no-plan*
-            (format t "1..~A~%" *test-count*))))
+            (%tap-out "1..~A~%" *test-count*))))
       sb-ext:*exit-hooks*)
 
 ;;; Stubs for common test-infrastructure functions that may not be loaded yet.
@@ -1191,6 +1204,15 @@
   nil)
 
 (defun p-load-with-recovery (path)
+  "Load PATH one top-level form at a time, continuing past a form that dies.
+   Wrapped in %p-with-wide-upgrade because the TAP layer writes with `format t`
+   rather than through p-print, so the wide-character rule that %p-guarded-write
+   applies to a perl `print` does not reach it — and since #1115 STDOUT is a
+   BYTE handle, one non-ASCII test description would signal inside the write and
+   take the whole file with it."
+  (%p-with-wide-upgrade "print" (%p-load-forms-with-recovery path)))
+
+(defun %p-load-forms-with-recovery (path)
   (with-open-file (stream path :direction :input :external-format :utf-8)
     (let* ((*load-pathname* (pathname path))
            (*load-truename* (ignore-errors (truename path)))
@@ -1206,20 +1228,19 @@
              (loop
               (let ((form (handler-case (read stream nil eof)
                             (error (e)
-                              (format *error-output*
+                              (%p-diag
                                       "~&; PCL recovery: unreadable form, stopping: ~A~%" e)
                               eof))))
                 (when (eq form eof) (return))
                 (handler-case (eval form)
                   (error (e)
                     (incf errs)
-                    (format *error-output*
+                    (%p-diag
                             "~&; PCL recovery: top-level form aborted (recovered): ~A~%" e)))
                 (%las-flush-terminated atomic)))
           (%las-flush-terminated atomic))
         (when (plusp errs)
-          (format *error-output*
-                  "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path)))
+          (%p-diag "~&; PCL recovery: ~D top-level form(s) aborted in ~A~%" errs path)))
       (values))))
 
 ;;; ----- Test::More->builder / Test::Builder ------------------------------
@@ -1273,4 +1294,4 @@
        (declare (ignore self args))
        (make-p-box "STDOUT"))
 
-(format t "# PCL Test library loaded~%")
+(%tap-out "# PCL Test library loaded~%")

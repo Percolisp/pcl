@@ -190,6 +190,7 @@
    ;; File I/O
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
+   #:p-use-open
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
    #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
@@ -1615,7 +1616,7 @@
                    ;; block and the loop goes on, which is perl (task #738).
                    (catch '%p-end-exit (funcall fn))
                  (error (e)
-                   (format *error-output* "Error in END block: ~A~%" e)))))
+                   (%p-diag "Error in END block: ~A~%" e)))))
            (%p-flush-all-output)
            ;; Only now, with every END run and every handle flushed, does the
            ;; status an END block asked for become the process's.  A nested
@@ -1890,6 +1891,133 @@
   (unless (p-box-p place) (%p-readonly-modification)))
 
 ;;; ---------------------------------------------------------------------------
+;;; A WIDE CHARACTER ON A BYTE HANDLE (#1115)
+;;; ---------------------------------------------------------------------------
+;;; Since #1115 a handle with no `:utf8`/`:encoding()` layer carries OCTETS (a
+;;; LATIN-1 stream), which is perl's default.  A character above 255 has no
+;;; octet, and perl does NOT refuse it: it warns `Wide character in print` —
+;;; once per ARGUMENT, and whether or not `use warnings` is on (both probed
+;;; 5.40.3) — and writes that character's UTF-8 encoding.  So
+;;;     print $fh "a\x{2019}b"   ==>  61 E2 80 99 62   + one warning
+;;; and a byte 0xE9 already in the string still goes out as one octet.
+;;;
+;;; SBCL signals a STREAM-ENCODING-ERROR instead — which %p-guarded-write would
+;;; turn into a silent FALSE — but it offers an OUTPUT-REPLACEMENT restart that
+;;; takes the octets to put there.  Using the restart rather than pre-scanning
+;;; every printed string is what makes this cost NOTHING on the ordinary path:
+;;; the handler is never entered until a wide character actually meets a byte
+;;; handle.
+
+(defvar *p-output-replacement-restart*
+  (find-symbol "OUTPUT-REPLACEMENT" "SB-IMPL")
+  "SBCL's restart for `write these octets instead of the character you cannot
+   encode`.  Reached through FIND-SYMBOL because SB-IMPL is package-locked
+   against interning, and looked up once rather than once per character.")
+
+(defvar *p-wide-char-warned* nil
+  "True once the current write has already warned, so the warning is issued
+   once per WRITE and not once per character — perl warns once per printed
+   ARGUMENT, and one argument holding two wide characters warns once (probed).")
+
+(defun %p-utf8-octets (s)
+  "S re-expressed as OCTETS: each byte of S's UTF-8 encoding as one character
+   0–255.  This is the form a byte handle can carry, and it is what perl puts
+   there for a wide character."
+  (map 'string #'code-char (sb-ext:string-to-octets s :external-format :utf-8)))
+
+(defun %p-wide-char-upgrade (c site)
+  "STREAM-ENCODING-ERROR handler: put the offending character's UTF-8 octets in
+   its place and carry on, warning once per write.  DECLINES (returns, leaving
+   the condition to travel) when SBCL offers no replacement restart — the
+   caller's own guard then answers as it always did, rather than this pretending
+   to have handled it."
+  (let ((r (and *p-output-replacement-restart*
+                (find-restart *p-output-replacement-restart* c))))
+    (when r
+      (let ((code (sb-int:character-encoding-error-code c)))
+        (unless *p-wide-char-warned*
+          ;; Set BEFORE the warn: a $SIG{__WARN__} handler may itself print,
+          ;; and this handler is still established around that write.
+          (setf *p-wide-char-warned* t)
+          (p-warn (format nil "Wide character in ~A" site)))
+        (invoke-restart r (%p-utf8-octets (string (code-char code))))))))
+
+(defmacro %p-with-wide-upgrade (site &body body)
+  "Run BODY under perl's wide-character-on-a-byte-handle rule (see above).
+   SITE names the operator for the warning text (`print`, `printf`, `say`)."
+  `(let ((*p-wide-char-warned* nil))
+     (handler-bind ((sb-int:stream-encoding-error
+                     (lambda (%c) (%p-wide-char-upgrade %c ,site))))
+       ,@body)))
+
+(defun %p-wide-char-p (s)
+  "True when S holds a character above 255 — one with no OCTET representation.
+   A BASE-STRING cannot hold one by its element type, so that case is answered
+   without a scan; the general case is a word compare per character, which is
+   cheaper than the encoding routine the same characters are about to go
+   through."
+  (declare (optimize (speed 3) (safety 0)))
+  (etypecase s
+    (base-string nil)
+    ((simple-array character (*))
+     (loop for i of-type fixnum from 0 below (length s)
+           thereis (> (char-code (schar s i)) 255)))
+    (string (and (some (lambda (c) (> (char-code c) 255)) s) t))))
+
+(defun %p-byte-stream-p (stream)
+  "True when STREAM carries OCTETS.  A synonym stream — which is what the three
+   standard handles are — is followed to the stream that holds the format.  An
+   in-memory (Gray) handle answers NIL: it stores CHARACTERS, so a wide
+   character reaches the scalar unchanged, as it does in perl."
+  (let ((s (if (typep stream 'synonym-stream)
+               (symbol-value (synonym-stream-symbol stream))
+               stream)))
+    (and (sb-sys:fd-stream-p s)
+         (eq (sb-impl::fd-stream-external-format s) :latin-1)
+         t)))
+
+(defun %p-out-string (s stream site)
+  "Write string S to STREAM under perl's rule for characters a BYTE handle
+   cannot hold.  perl decides per STRING, not per character: an SV whose UTF8
+   flag is on prints as its WHOLE UTF-8 encoding, so
+   `print $fh \"\\x{e9}\\x{2019}\"` on a byte handle emits c3 a9 e2 80 99 — the
+   é becomes two octets although one would hold it (probed 5.40.3).  PCL has no
+   UTF8 flag, and `does any character exceed 255` is the reading of it that
+   agrees with perl on every shape probed: a string that fits in octets goes
+   out as octets (perl downgrades it and does not warn), one that does not goes
+   out as UTF-8 with the `Wide character in SITE` warning — once per ARGUMENT,
+   which is what perl counts (two wide arguments in one print warn twice).
+
+   %p-with-wide-upgrade's handler is the BACKSTOP for writes that do NOT come
+   through here (the harness's own `format t`, a die message): it is signalled
+   per character and can only fix the character it is given, so anything that
+   can be decided whole is decided here."
+  (write-string
+   (cond ((not (%p-wide-char-p s)) s)
+         ((not (%p-byte-stream-p stream)) s)
+         (t (p-warn (format nil "Wide character in ~A" site))
+            (%p-utf8-octets s)))
+   stream))
+
+(defun %p-diag (control &rest args)
+  "Write one of PCL's OWN diagnostic lines to stderr — a rule-12 announcement,
+   a recovered END-block error, the load banner.  ONE writer, so the #1115
+   wide-character rule is applied in one place instead of at ten `format
+   *error-output*` sites, and a future message that needs a character above 255
+   cannot kill the program.
+
+   It is not hypothetical: STDERR became a BYTE handle with #1115, and PCL's own
+   messages are written with EM DASHES.  `%p-announce-unsupported`'s
+   \"… is not implemented — ignored\" signalled a stream-encoding-error INSIDE
+   the announcement, which took the whole program down — four rows of
+   Pl/t/transpile-test-07.t and five of Pl/t/moo-01.t, in files that had nothing
+   to do with I/O.  Perl's own answer to a wide character on a byte handle is
+   to warn and write UTF-8, and that is what these lines now get."
+  (%p-with-wide-upgrade "print"
+                        (%p-out-string (apply #'format nil control args) *error-output* "print"))
+  nil)
+
+;;; ---------------------------------------------------------------------------
 ;;; The two rule-12 endings for a case PCL does not implement   (task #152)
 ;;; ---------------------------------------------------------------------------
 ;;; CLAUDE.md rule 12: a dispatch over a closed set never falls through to a
@@ -1921,8 +2049,8 @@
   (let ((key (format nil "~A/~A" site operand)))
     (unless (gethash key *p-unsupported-announced*)
       (setf (gethash key *p-unsupported-announced*) t)
-      (format *error-output* "PCL: ~A: ~A is not implemented — ~A~%"
-              site operand (or detail "ignored"))
+      (%p-diag "PCL: ~A: ~A is not implemented — ~A~%"
+               site operand (or detail "ignored"))
       (force-output *error-output*)))
   nil)
 
@@ -2238,9 +2366,11 @@
              (gethash stream *p-autoflush-handles*))
     (ignore-errors (finish-output stream))))
 
-(defmacro %p-guarded-write (&body body)
+(defmacro %p-guarded-write (site &body body)
   "Run BODY — a write to a filehandle — and answer the way PERL answers a write
    the OS refuses: FALSE with $! set.  Never a CL condition (task #590).
+   SITE names the operator, for the wide-character warning %p-with-wide-upgrade
+   issues; the two wrappers are one macro because every perl write wants both.
 
    SBCL signals `stream-error` for a refused write, and BUFFERING decides WHEN:
    two bytes onto a read-only descriptor are swallowed and the EBADF surfaces at
@@ -2253,8 +2383,14 @@
    or tie handler while an argument stringifies is the PROGRAM's exception and
    must keep travelling.  The one write failure SBCL reports as a plain
    `type-error` — princ to a stream that is not an output stream — never gets
-   here, because %p-out-fh-or-fail answers false for such a handle first."
-  `(handler-case (progn ,@body)
+   here, because %p-out-fh-or-fail answers false for such a handle first.
+
+   ORDER MATTERS: the wide-character handler is established INSIDE this
+   handler-case, so it sees a stream-encoding-error (a stream-error subtype)
+   first and turns it into perl's warn-and-upgrade.  The other way round the
+   encoding error would be swallowed as a refused write and the print would
+   silently answer false."
+  `(handler-case (%p-with-wide-upgrade ,site ,@body)
      (stream-error () (%pcl-save-errno) *p-undef*)))
 
 (defvar |$\|| (make-p-box
@@ -5510,11 +5646,11 @@
     (let* ((flat (coerce (p-flatten-args list-args) 'list))
            (fmt (first flat))
            (fmt-args (cdr flat)))
-      (%p-guarded-write
-       (let ((*p-sprintf-caller* "printf"))
-         (princ (apply #'p-sprintf fmt fmt-args) fh))
-       (%p-maybe-autoflush fh)
-       1))))
+      (%p-guarded-write "printf"
+                        (let ((*p-sprintf-caller* "printf"))
+                          (%p-out-string (apply #'p-sprintf fmt fmt-args) fh "printf"))
+                        (%p-maybe-autoflush fh)
+                        1))))
 
 ;;; ============================================================
 ;;; Assignment and Mutation
@@ -11682,9 +11818,9 @@ what changes is that the element is the raw counter rather than a fresh box."
     (if (functionp fn)
         fn
         (progn
-          (format *error-output*
-                  "PCL: goto to the computed LABEL ~S is not supported — execution falls through (docs/not-supported.md).~%"
-                  (to-string fn))
+          (%p-diag
+           "PCL: goto to the computed LABEL ~S is not supported — execution falls through (docs/not-supported.md).~%"
+           (to-string fn))
           nil))))
 
 (defmacro p-goto-sub (fn)
@@ -11879,7 +12015,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
       (values (%p-out-fh-or-fail (second args) site) (cddr args))
       (values (%p-default-out) args)))
 
-(defun %p-write-list (fh args ors)
+(defun %p-write-list (fh args ors site)
   "Write ARGS — a print/say LIST — to FH: $, between successive elements, then
    ORS when it is a non-empty string.  `print` passes the current $\\; `say`
    passes \"\\n\", because perl's say appends a newline INSTEAD of $\\, never as
@@ -11895,31 +12031,32 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
    nothing but the terminator, exactly as perl does.
    Flatten raw @array / %hash args (both take a LIST): a bare vector/hash
    spreads to its elements/pairs, while a p-box-wrapped ref stays a scalar (so
-   `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening."
-  (%p-guarded-write
-   (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
-         (firstp t))
-     (dolist (arg (coerce (p-flatten-args args) 'list))
-       (when (and ofs (not firstp)) (princ ofs fh))
-       (setf firstp nil)
-       (princ (to-string arg) fh)))
-   (when (and (stringp ors) (plusp (length ors)))
-     (princ ors fh))
-   (%p-maybe-autoflush fh)
-   t))
+   `print $aref` prints ARRAY(0x..)). Same rule as @_ argument flattening.
+   SITE is the operator name the wide-character warning uses (#1115)."
+  (%p-guarded-write site
+                    (let ((ofs (let ((v (unbox |$,|))) (and (stringp v) (plusp (length v)) v)))
+                          (firstp t))
+                      (dolist (arg (coerce (p-flatten-args args) 'list))
+                        (when (and ofs (not firstp)) (%p-out-string ofs fh site))
+                        (setf firstp nil)
+                        (%p-out-string (to-string arg) fh site)))
+                    (when (and (stringp ors) (plusp (length ors)))
+                      (%p-out-string ors fh site))
+                    (%p-maybe-autoflush fh)
+                    t))
 
 (defun p-print (&rest args)
   "Perl print - prints args then appends $\\ (output record separator)"
   (multiple-value-bind (fh rest) (%p-out-target args "print")
     ;; NIL = perl already warned (or died); the write does not happen.
     (unless fh (return-from p-print *p-undef*))
-    (%p-write-list fh rest (unbox |$\\|))))
+    (%p-write-list fh rest (unbox |$\\|) "print")))
 
 (defun p-say (&rest args)
   "Perl say - print with \"\\n\" appended INSTEAD of $\\ (task #500)"
   (multiple-value-bind (fh rest) (%p-out-target args "say")
     (unless fh (return-from p-say *p-undef*))
-    (%p-write-list fh rest (string #\Newline))))
+    (%p-write-list fh rest (string #\Newline) "say")))
 
 (defun p-warn-is-reference (val)
   "Check if val is a Perl reference (hash, array ref, blessed object, etc.)"
@@ -11994,7 +12131,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; Default: print to *error-output*
         (t
          (let ((s (if (p-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
-           (write-string s *error-output*)
+           ;; STDERR is a byte handle like any other since #1115, so a warning
+           ;; carrying a wide character takes perl's upgrade here too — without
+           ;; it SBCL would signal inside the warn and take the program with it.
+           (%p-with-wide-upgrade "warn"
+                                 (write-string s *error-output*))
            (force-output *error-output*)))))))
 
 ;;; Exception condition for object-based die
@@ -12947,6 +13088,121 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    buffered, not unbuffered (probed with an external observer)."
   (if (%p-isatty fd) :line :full))
 
+;;; ---------------------------------------------------------------------------
+;;; PerlIO LAYERS: a handle carries OCTETS unless a layer says otherwise (#1115)
+;;; ---------------------------------------------------------------------------
+;;; perl's default I/O discipline is BYTES.  `open my $fh,'<',$f` gives a handle
+;;; whose every read produces ONE CHARACTER PER OCTET, so `length` on the slurped
+;;; text is the file's size in bytes — probed 5.40.3 on a 15-octet file holding
+;;; U+00E9 and U+2019: length 15, `ord(substr($s,3,1))` 195, is_utf8 false.
+;;; Decoding happens only where a layer says so: `:utf8` / `:encoding(...)` in
+;;; the open MODE, a later `binmode`, or the `use open` pragma.
+;;;
+;;; PCL's strings are Unicode, so "an octet" is a character 0–255 and the CL
+;;; spelling of that discipline is the LATIN-1 external format — exactly what
+;;; #1084 already gave `do FILE`/`require` for reading SOURCE
+;;; (%p-read-source-octets).  Before #1115 every handle was opened with SBCL's
+;;; default (UTF-8), so every read of a non-ASCII file measured CHARACTERS and
+;;; every byte-oriented use of the result — a size, a seek/tell offset, a
+;;; checksum, a re-write of the file — was wrong, silently.
+;;;
+;;; Four values decide a handle's format, in this order:
+;;;   1. the layers in its own open MODE                  (%p-layer-ef)
+;;;   2. a later `binmode`                                (%p-binmode-impl)
+;;;   3. the `use open` defaults                          (*p-default-in-ef*)
+;;;   4. failing all three, LATIN-1 — perl's own default.
+;;; The three standard handles take (3)+(4) at load time and follow `use open
+;;; qw(:std …)` after that.
+
+(defvar *p-default-in-ef* :latin-1
+  "The external format a READ handle gets when its open mode names no layer.
+   `use open` moves it; perl's own default is bytes (#1115).")
+
+(defvar *p-default-out-ef* :latin-1
+  "The external format a WRITE handle gets when its open mode names no layer.")
+
+(defvar *p-std-efs* (vector :latin-1 :latin-1 :latin-1)
+  "The external format of each standard handle, INDEXED BY DESCRIPTOR — read by
+   %p-std-rebuild at every rebuild rather than frozen at load, so `use open
+   qw(:std …)` and `binmode(STDOUT, ':utf8')` both work by writing here and
+   rebuilding.  Per SLOT, not per direction: binmode on STDOUT must not move
+   STDERR.")
+
+(defun %p-encoding-ef (name)
+  "The external format for the NAME inside a `:encoding(NAME)` layer.  perl's
+   Encode names and SBCL's differ in spelling only, so the name is folded to a
+   keyword and asked of SBCL's own table; `utf8` is perl's spelling of UTF-8 and
+   is the one alias SBCL does not carry.  An encoding SBCL has no codec for is
+   VALUE-PRODUCING — every character read through it would be wrong — so it dies
+   naming itself (rule 12) rather than quietly decoding as something else, which
+   is what PCL did for every encoding before #1115."
+  (let* ((trimmed (string-trim " " name))
+         (key (intern (string-upcase trimmed) :keyword)))
+    ;; The two disciplines PCL itself asks about are canonicalised to ONE
+    ;; spelling each: %p-byte-stream-p tests a handle's format with EQ, and
+    ;; `:encoding(latin1)` must give the same keyword as the default does.
+    (cond ((or (string-equal trimmed "utf8") (zerop (length trimmed))) :utf-8)
+          ((member key '(:utf-8 :utf8 :|UTF-8-STRICT|)) :utf-8)
+          ((member key '(:latin-1 :latin1 :iso-8859-1 :iso8859-1)) :latin-1)
+          ((sb-int:get-external-format key) key)
+          (t (%p-unsupported-value "open layer"
+                                   (format nil ":encoding(~A)" trimmed)
+                                   "SBCL has no codec for it")))))
+
+(defun %p-one-layer-ef (layer)
+  "The external format ONE PerlIO layer names, or NIL when it does not decide
+   the character discipline.  `:crlf` / `:perlio` / `:unix` / `:stdio` / `:mmap`
+   are transport layers that leave the encoding alone; `:raw` and `:bytes` mean
+   octets; `:utf8` and `:encoding(...)` decode."
+  (let ((l (string-trim " " layer)))
+    (cond ((zerop (length l)) nil)
+          ((or (string-equal l "raw") (string-equal l "bytes")) :latin-1)
+          ((string-equal l "utf8") :utf-8)
+          ((and (> (length l) 9)
+                (string-equal "encoding(" (subseq l 0 9))
+                (char= (char l (1- (length l))) #\)))
+           (%p-encoding-ef (subseq l 9 (1- (length l)))))
+          ((member l '("crlf" "perlio" "unix" "stdio" "mmap" "scalar" "pop"
+                       "std" "utf-8-strict")
+                   :test #'string-equal)
+           ;; :utf-8-strict is Encode's name and DOES decode; the rest are
+           ;; transport layers with no say in the encoding.
+           (if (string-equal l "utf-8-strict") :utf-8 nil))
+          (t (%p-announce-unsupported "open layer" (format nil ":~A" l)
+                                      "the handle keeps the format it had")
+             nil))))
+
+(defun %p-split-layers (layers)
+  "The individual layers of a mode's layer suffix, in order:
+   `:raw:encoding(UTF-8)` -> (\"raw\" \"encoding(UTF-8)\").  A `:` inside the
+   parentheses of `:encoding(...)` does not start a new layer."
+  (let ((out '()) (depth 0) (start nil) (n (length layers)))
+    (dotimes (i n)
+      (let ((c (char layers i)))
+        (cond ((char= c #\() (incf depth))
+              ((char= c #\)) (decf depth))
+              ((and (char= c #\:) (zerop depth))
+               (when start (push (subseq layers start i) out))
+               (setf start (1+ i))))))
+    (when start (push (subseq layers start n) out))
+    (nreverse out)))
+
+(defun %p-layer-ef (layers default)
+  "The external format LAYERS asks for, or DEFAULT when none of them decides.
+   perl applies layers left to right and the LAST one that names a discipline
+   wins — `<:raw:encoding(UTF-8)` decodes, `<:encoding(UTF-8):raw` does not — so
+   this walks them in that order instead of searching the whole string."
+  (let ((ef default))
+    (dolist (l (%p-split-layers layers) ef)
+      (let ((this (%p-one-layer-ef l)))
+        (when this (setf ef this))))))
+
+(defun %p-input-mode-p (base-mode)
+  "True for the base open modes that produce a READ handle, which is the half
+   `use open IN => …` sets.  A read/write mode counts as input: perl's IN
+   layer applies to it, and PCL has one format per stream either way."
+  (member base-mode '("<" "+<" "+>" "-|" "<&" "<&=") :test #'string=))
+
 (defun %p-line-buffer-if-tty (stream)
   "perl decides an OUTPUT handle's buffering by isatty and nothing else, and
    %p-output-buffering is that policy — but CL `open` takes no :buffering
@@ -13026,7 +13282,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    handle, which perl decides afresh from the new descriptor."
   (ecase slot
     (0 (setf sb-sys:*stdin*
-             (sb-sys:make-fd-stream 0 :input t :external-format :utf-8))
+             (sb-sys:make-fd-stream 0 :input t
+                                    :external-format (svref *p-std-efs* 0)))
        (setf *standard-input* (make-synonym-stream 'sb-sys:*stdin*))
        (setf (gethash 'STDIN *p-filehandles*) *standard-input*))
     (1 (let ((old *standard-output*))
@@ -13034,7 +13291,7 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                (sb-sys:make-fd-stream 1 :output t
                                       :buffering (or buffering
                                                      (%p-std-buffering 1))
-                                      :external-format :utf-8))
+                                      :external-format (svref *p-std-efs* 1)))
          (setf *standard-output* (make-synonym-stream 'sb-sys:*stdout*))
          (%p-carry-autoflush old *standard-output*)
          (setf (gethash 'STDOUT *p-filehandles*)
@@ -13044,21 +13301,72 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                (sb-sys:make-fd-stream 2 :output t
                                       :buffering (or buffering
                                                      (%p-std-buffering 2))
-                                      :external-format :utf-8))
+                                      :external-format (svref *p-std-efs* 2)))
          (setf *error-output* (make-synonym-stream 'sb-sys:*stderr*))
          (%p-carry-autoflush old *error-output*)
          (setf (gethash 'STDERR *p-filehandles*)
                (%p-register-open-stream *error-output*))))))
 
 (defun %p-apply-std-buffering ()
-  "Put descriptors 1 and 2 under %p-std-buffering.  Called at load time AND
-   from sb-ext:*init-hooks*, because THE DECISION IS PER PROCESS: a saved core
+  "Put descriptors 1 and 2 under %p-std-buffering, and all THREE under the
+   standard-handle external formats.  Called at load time AND from
+   sb-ext:*init-hooks*, because THE DECISION IS PER PROCESS: a saved core
    (tools/prove-core, ~/.pcl-cache/core, an installed pcl.core) would otherwise
    freeze the isatty answer of the machine that BUILT it — the same reason $$
-   and the FP modes are refreshed there."
+   and the FP modes are refreshed there.
+
+   Descriptor 0 joined the list with #1115: SBCL's own *stdin* decodes UTF-8,
+   and perl's STDIN reads OCTETS unless `use open qw(:std …)` says otherwise.
+   Nothing has been read at either call site, so the rebuild loses no input."
+  (%p-std-rebuild 0)
   (%p-std-rebuild 1)
   (%p-std-rebuild 2)
   nil)
+
+(defun %p-apply-std-layers ()
+  "Re-point STDIN/STDOUT/STDERR at the layers `use open qw(:std …)` has just
+   put in force.  The two output handles are FLUSHED first: %p-std-rebuild
+   drops the old stream rather than closing it, so anything still buffered
+   would be lost with it."
+  (setf (svref *p-std-efs* 0) *p-default-in-ef*
+        (svref *p-std-efs* 1) *p-default-out-ef*
+        (svref *p-std-efs* 2) *p-default-out-ef*)
+  (ignore-errors (finish-output *standard-output*))
+  (ignore-errors (finish-output *error-output*))
+  (%p-std-rebuild 0)
+  (%p-std-rebuild 1)
+  (%p-std-rebuild 2)
+  nil)
+
+(defun p-use-open (&rest args)
+  "The `use open` pragma (#1115).  ARGS is the pragma's LIST: `IN` / `OUT` /
+   `IO` say which default a following layer string sets, a bare layer string
+   sets both, and `:std` additionally re-points the three standard handles at
+   the defaults the whole list leaves in force — which is what
+   `use open qw(:std :utf8)` means in perl, whatever order the two appear in.
+
+   DIVERGENCE, registered in docs/not-supported.md: perl's `open` pragma is
+   LEXICALLY scoped and this one is global from the point the `use` runs.
+   Every spelling in perl's own t/ and on the CPAN board turns it on at the top
+   of a file, where the two agree; a `use open` scoped to an inner block keeps
+   acting for the rest of the run."
+  (let ((slot :both) (std nil))
+    (dolist (a (coerce (p-flatten-args args) 'list))
+      (let ((s (to-string (unbox a))))
+        (cond ((string= s "IN")  (setf slot :in))
+              ((string= s "OUT") (setf slot :out))
+              ((string= s "IO")  (setf slot :both))
+              ((string-equal s ":std") (setf std t))
+              ((and (plusp (length s)) (char= (char s 0) #\:))
+               (let ((ef (%p-layer-ef s nil)))
+                 (when ef
+                   (when (member slot '(:in :both)) (setf *p-default-in-ef* ef))
+                   (when (member slot '(:out :both)) (setf *p-default-out-ef* ef)))
+                 (setf slot :both)))
+              ((zerop (length s)))
+              (t (%p-announce-unsupported "use open" s)))))
+    (when std (%p-apply-std-layers)))
+  t)
 
 (%p-apply-std-buffering)
 (push (lambda () (%p-apply-std-buffering)) sb-ext:*init-hooks*)
@@ -13175,21 +13483,24 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    open FAILED — breaking ordinary code like
    `open $fh, '<:encoding(UTF-8)', $file` (task #171).
 
-   Second value is the external format to read/write the FILE with: `:raw` and
-   `:bytes` mean no translation, and latin-1 is the CL spelling of that (each
-   octet maps to one character).  Decoding raw bytes as UTF-8 would corrupt or
-   signal, so this is not cosmetic.  Everything else keeps PCL's default.
-   NOTE: this ACCEPTS layers and honours the encoding ones; it is not a PerlIO
-   layer model — :crlf, layer stacking and PerlIO::get_layers introspection are
+   THIRD value is the external format to read/write the FILE with.  Every layer
+   is read, left to right, by %p-layer-ef; when none of them decides, the
+   handle takes the `use open` default for its DIRECTION, which is LATIN-1 —
+   octets — unless the pragma moved it.  That default is perl's (#1115): before
+   it, a mode with no layer opened UTF-8 and every read of a non-ASCII file
+   measured characters where perl measures bytes.
+   NOTE: this ACCEPTS layers and honours the encoding ones; it is not a full
+   PerlIO layer model — layer stacking and PerlIO::get_layers introspection are
    task #139, which needs the design call."
   (let* ((colon (position #\: mode-str))
          (base  (if colon (subseq mode-str 0 colon) mode-str))
          (layers (if colon (subseq mode-str colon) "")))
     (values base
             layers
-            (if (or (search ":raw" layers) (search ":bytes" layers))
-                :latin-1
-                :default))))
+            (%p-layer-ef layers
+                         (if (%p-input-mode-p base)
+                             *p-default-in-ef*
+                             *p-default-out-ef*)))))
 
 (defun %p-open-memory (fh mode target-box)
   "Open an in-memory string filehandle over TARGET-BOX (the scalar behind \\$s)."
@@ -13277,11 +13588,11 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                           (sb-sys:make-fd-stream
                            write-fd :output t
                            :buffering (%p-output-buffering write-fd)
-                           :external-format :utf-8))
+                           :external-format *p-default-out-ef*))
                         (progn
                           (sb-posix:close write-fd)
                           (sb-sys:make-fd-stream read-fd :input t
-                                                 :external-format :utf-8)))))
+                                                 :external-format *p-default-in-ef*)))))
                (setf (gethash stream *p-pipe-pids*) pid)
                (%p-install-fh fh stream)
                pid))
@@ -13445,7 +13756,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
         ;; out in program order, which SBCL's :full default broke.
         (sb-sys:make-fd-stream fd :input in :output out
                                :buffering (%p-output-buffering fd)
-                               :external-format :utf-8)))))
+                               :external-format (if out
+                                                    *p-default-out-ef*
+                                                    *p-default-in-ef*))))))
 
 (defun %p-open-dup (fh mode-str src-name three-arg-p
                     &optional (src-val nil src-val-p))
@@ -13764,7 +14077,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
                    :buffering (if (eq dir :input)
                                   :full
                                   (%p-output-buffering fd))
-                   :external-format :utf-8
+                   :external-format (if (eq dir :input)
+                                        *p-default-in-ef*
+                                        *p-default-out-ef*)
                    :name path-str
                    :auto-close nil)))
       (%p-install-fh fh stream)
@@ -13970,20 +14285,84 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl sysseek — bareword filehandle is auto-quoted."
   `(%p-sysseek-impl (%p-fh-arg ,fh) ,@args))
 
-(defun %p-binmode-impl (fh &optional encoding)
-  "Perl binmode - set binary mode or encoding.
-   PCL builds on SBCL streams (which handle encoding natively) and does not
-   model PerlIO layers, so for an already-open handle this is a no-op returning
-   true.  But binmode on a filehandle that is NOT open fails in Perl with errno
-   EBADF (bad file descriptor); replicate that — set $! and return false — so
-   error-checking code (io/binmode.t test 9) observes the right $!."
-  (declare (ignore encoding))
-  (if (p-get-stream fh)
-      t
-      (progn
-        (setf *p-stored-errno* 9)                                  ; EBADF (Linux)
-        (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
-        nil)))
+(defun %p-rebuild-fd-stream (fh stream ef)
+  "Re-open the ordinary (non-standard) handle FH's STREAM with external format
+   EF and install the replacement.  Returns the new stream.
+
+   SBCL has no `(setf stream-external-format)` — the per-character routines are
+   baked into an fd-stream at construction — so the format is changed the way
+   %p-line-buffer-if-tty changes BUFFERING: dup the descriptor, build a new
+   fd-stream on the dup, and CLOSE the original rather than merely dropping it,
+   so no finalizer can later close a descriptor out from under the replacement.
+
+   The state that is keyed on the STREAM OBJECT travels with it: $| , the
+   fork-pipe child's pid (or close would stop reaping it) and $.  — the same
+   list %p-rebind-std carries for the standard handles.
+
+   POSITION: an output stream is flushed first.  An input stream's LOGICAL
+   position is behind the descriptor by whatever SBCL read ahead, and the dup
+   shares the descriptor's offset, so the logical position is seeked back onto
+   the dup — when the descriptor is seekable.  On a pipe or a terminal it is
+   not, and read-ahead is lost; perl's own binmode on a partially-read handle
+   has the same caveat."
+  (let* ((fd  (sb-sys:fd-stream-fd stream))
+         (in  (input-stream-p stream))
+         (out (output-stream-p stream))
+         (pos (and in (ignore-errors (file-position stream))))
+         (pid (gethash stream *p-pipe-pids*))
+         (lines (gethash stream *p-fh-lines*))
+         (dup (sb-posix:dup fd)))
+    (when out (ignore-errors (finish-output stream)))
+    (ignore-errors (close stream))
+    (let ((new (sb-sys:make-fd-stream dup :input in :output out
+                                      :buffering (if out
+                                                     (%p-output-buffering dup)
+                                                     :full)
+                                      :external-format ef)))
+      (when pos (ignore-errors (file-position new pos)))
+      (when pid (remhash stream *p-pipe-pids*)
+            (setf (gethash new *p-pipe-pids*) pid))
+      (when lines (remhash stream *p-fh-lines*)
+            (setf (gethash new *p-fh-lines*) lines))
+      (%p-carry-autoflush stream new)
+      (%p-install-fh fh new)
+      new)))
+
+(defun %p-binmode-impl (fh &optional layer)
+  "Perl binmode FH [, LAYER] — put FH under LAYER's character discipline.
+   `binmode($fh)` with no layer, and `binmode($fh, ':raw')`, mean OCTETS;
+   `':utf8'` / `':encoding(UTF-8)'` mean decode.  All four probed 5.40.3 on a
+   15-octet file holding U+00E9 and U+2019: bytes give length 15, the decoding
+   layers 12, and `binmode($fh)` after a `:encoding(UTF-8)` open pops back to
+   15 (#1115).  Before #1115 this was a no-op, which was invisible only because
+   every handle was UTF-8 already.
+
+   A handle that is NOT open fails in Perl with errno EBADF; replicate that —
+   set $! and return false — so error-checking code (io/binmode.t test 9)
+   observes the right $!.  A handle with no OS descriptor (an in-memory
+   string handle) carries characters and has no format to change: true, no-op."
+  (let ((stream (p-get-stream fh)))
+    (cond
+      ((null stream)
+       (setf *p-stored-errno* 9)                                  ; EBADF (Linux)
+       (setf (sb-alien:extern-alien "errno" sb-alien:int) 9)
+       nil)
+      (t
+       (let* ((text (if (or (null layer) (eq layer *p-undef*))
+                        ":raw"
+                        (to-string (unbox layer))))
+              (ef (%p-layer-ef text :latin-1))
+              (target (%p-stream-target stream)))
+         (cond
+           ((not (sb-sys:fd-stream-p target)) t)
+           ((eq (stream-external-format target) ef) t)
+           (t (let ((std (%p-std-slot fh)))
+                (cond
+                  (std (ignore-errors (finish-output target))
+                       (setf (svref *p-std-efs* std) ef)
+                       (%p-std-rebuild std))
+                  (t (%p-rebuild-fd-stream fh target ef))))
+              t)))))))
 
 (defmacro p-binmode (fh &rest args)
   "Perl binmode — bareword filehandle is auto-quoted."
@@ -14054,6 +14433,16 @@ buffer's fill-pointer; everything else falls back to file-length."
       (when (< (+ (length str) off) 0) (p-die "Offset outside string"))
       (setf off (+ (length str) off)))
     (when (> off (length str)) (p-die "Offset outside string"))
+    ;; perl makes THIS one fatal where print merely warns: probed 5.40.3,
+    ;; `syswrite($fh, "a\\x{2019}b")` on a byte handle dies `Wide character in
+    ;; syswrite` and writes nothing (trappable — the eval sets $@ and
+    ;; syswrite's value is undef).  An unbuffered write has nowhere to put the
+    ;; upgrade print takes.  OUTSIDE the handler-case below on purpose: that
+    ;; one answers NIL for every error, which would turn perl's die into a
+    ;; quiet false (#1115).
+    (let ((stream (p-get-stream fh)))
+      (when (and stream (%p-byte-stream-p stream) (%p-wide-char-p str))
+        (p-die "Wide character in syswrite")))
     (handler-case
         (let ((stream (p-get-stream fh)))
           (when stream
@@ -16130,11 +16519,11 @@ buffer's fill-pointer; everything else falls back to file-length."
         (let ((read-stream (sb-sys:make-fd-stream read-fd
                                                   :input t
                                                   :buffering :none
-                                                  :external-format :utf-8))
+                                                  :external-format *p-default-in-ef*))
               (write-stream (sb-sys:make-fd-stream write-fd
                                                    :output t
                                                    :buffering :none
-                                                   :external-format :utf-8)))
+                                                   :external-format *p-default-out-ef*)))
           (if (p-box-p read-fh)
               (box-set read-fh read-stream)
               (setf (gethash read-fh *p-filehandles*) read-stream))
@@ -16507,7 +16896,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-760"
+(defparameter *pcl-cache-generation* "v2-790"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -22820,9 +23209,9 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun pl-confess (&rest args)
   (error "Carp::confess: ~a" (if args (to-string (car args)) "")))
 (defun pl-carp (&rest args)
-  (format *error-output* "~a~%" (if args (to-string (car args)) "")))
+  (%p-diag "~a~%" (if args (to-string (car args)) "")))
 (defun pl-cluck (&rest args)
-  (format *error-output* "~a~%" (if args (to-string (car args)) "")))
+  (%p-diag "~a~%" (if args (to-string (car args)) "")))
 (defun pl-import (&rest args) (declare (ignore args)) nil)
 (in-package :pcl)
 
@@ -23177,8 +23566,7 @@ buffer's fill-pointer; everything else falls back to file-length."
         (when (and f (probe-file f))
           (handler-case (progn (load f) (%p-xs-bridge-loaded-p))
             (error (e)
-              (format *error-output*
-                      "~&pcl: XS bridge present but failed to load: ~A~%" e)
+              (%p-diag "~&pcl: XS bridge present but failed to load: ~A~%" e)
               nil))))))
 
 (defun %p-xs-try-load (module)

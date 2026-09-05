@@ -42,6 +42,35 @@ sub run_bytes {
     return decode_utf8($output);
 }
 
+sub run_bytes_raw {
+    # Like run_bytes, but hands back the OCTETS the program wrote.
+    #
+    # Needed since task #1115: a PCL program's STDOUT is a BYTE handle, exactly
+    # as perl's is, so a printed character BELOW 256 arrives as ONE octet and
+    # `decode_utf8` on it is not merely unnecessary but wrong (0xE9 alone is not
+    # valid UTF-8).  Only the rows whose output is such a character use this;
+    # everything above U+00FF still comes out UTF-8 (perl upgrades the whole
+    # string and warns), so those rows keep run_bytes.
+    my $out = run_bytes_octets(shift);
+    return $out;
+}
+
+sub run_bytes_octets {
+    my $code = shift;
+    my $cl_code = Pl::Parser2->parse_code($code);
+    my ($fh, $filename) = tempfile(SUFFIX => '.lisp');
+    binmode($fh, ':encoding(utf-8)');
+    print $fh $cl_code;
+    close $fh;
+    my $output = `sbcl --noinform --non-interactive --load cl/pcl-runtime.lisp --load "$filename" 2>&1`;
+    unlink $filename;
+    $output =~ s/^;.*\n//gm;
+    $output =~ s/PCL Runtime loaded\n?//g;
+    $output =~ s/^\s*\n//gm;
+    $output =~ s/^\s+//;
+    return $output;
+}
+
 sub transpile_bytes { return Pl::Parser2->parse_code($_[0]) }
 
 sub run_file_bytes {
@@ -68,9 +97,15 @@ is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
 is(run_bytes(encode_utf8('my $s = "café"; print length($s), "\n";')),
    "5\n", 'no use utf8: length("café") == 5 (bytes)');
 
-# substr on a decoded string indexes by character.
-is(run_bytes(encode_utf8('use utf8; my $s = "héllo"; print substr($s,1,1), "\n";')),
-   "é\n", 'use utf8: substr indexes by character');
+# substr on a decoded string indexes by character.  The ASSERTION is on the
+# OCTETS, and that is perl's answer, not a weakening: probed 5.40.3, `use utf8;
+# print substr("héllo",1,1)` writes the single octet 0xE9 — the string is
+# UTF8-flagged but every character fits in a byte, so perl downgrades it for a
+# handle with no :utf8 layer (task #1115; before it, PCL wrote 0xC3 0xA9 and
+# this row's decode_utf8 hid the divergence).  A BYTE-indexed substr would have
+# written 0xC3, so the row still tests exactly what it says it does.
+is(run_bytes_raw(encode_utf8('use utf8; my $s = "héllo"; print substr($s,1,1), "\n";')),
+   "\xe9\n", 'use utf8: substr indexes by character (one octet, as perl writes it)');
 
 # UTF-8 identifiers parse and round-trip under use utf8.
 is(run_bytes(encode_utf8("use utf8;\nmy \$café = 42;\nprint \$café, \"\\n\";")),
