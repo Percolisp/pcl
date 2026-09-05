@@ -1292,6 +1292,29 @@ perl-tests sweep moved.**  `baselines/perl-suite-run.tsv` spliced by hand for
 that row only, carrying both its cause and the reason the other 44 are not
 touched.
 
+*Rebased a second time, onto main `424cabc`* (BP = the #1188 module fasl cache
++ L5/L6/L7, BS = the stat/filetest operand resolver; both runtime-only).  Four
+doc/baseline conflicts, all unions; `pass-baseline.tsv` merged cleanly because
+the two batches edited DIFFERENT rows, so the tree carries BOTH (`eval.t`
+129/31 mine, `ref.t` 196/15 BS's) and both header notes.  **The rebase proof:
+`git diff e134949 HEAD -- cl Pl lib` is 2675 lines and equals main's own
+`git diff d59e58c 424cabc -- cl Pl lib` line for line but for the blob-index
+of `cl/pcl-runtime.lisp`, the one file both sides touch** — only main's
+changes came in, nothing of this batch's lost.  Every bar re-read on the
+COMBINED tree: artifacts still exact (BP/BS changed no `Pl/`), corpus-diff the
+same flag-day set with silent drops 5, gate **213 files / 7333 tests** green
+but for the 13 pclxs rows, full sweep **GATE clean, TOTAL passing 18646 (+0)**
+— the union of BS's ref.t +1 and this batch's eval.t +1 — drops 5 = census,
+SHORTFALL +0, `ir-host-leak` 31 = 31 with byte-identical sets, and the
+companion legs op/eval.t 131/37, op/do.t 66/7, op/require_errors.t 5/68,
+op/require_37033.t 5/1, op/require_override.t 7/3 all exactly their snapshot.
+**One row is left UNATTRIBUTED and is said so rather than guessed**:
+`comp/require.t` reads 911/836 against a snapshot of 910/837 — the one file
+where BP's fasl cache and this batch's emission meet (a module cached as a
+fasl of this emission).  Its attribution run on a `424cabc` extraction was cut
+off by the machine shutdown, so no verdict is claimed; the recipe is the first
+thing in `scratch/s470bq/STOP.md`.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
