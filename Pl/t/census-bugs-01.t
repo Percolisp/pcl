@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 14;
+plan tests => 16;
 
 sub run_cl {
     my ($code) = @_;
@@ -164,3 +164,46 @@ test_cl('#1178 the task reproducer: ok((open my $fh, "+>", undef))', <<'PL', $ta
 use Test::More tests => 1;
 ok((open my $fh, "+>", undef), "opened");
 PL
+
+# ── #1179 (the same flatten): `use base ('A', 'B')` — the PARENTHESISED list ──
+# The old per-child scan looked for Quote tokens directly under the
+# Structure::List and PPI puts a Statement::Expression in between, so the whole
+# `use base` was dropped: @ISA stayed empty, no defclass, and the program DIED
+# at the first inherited method call.  28 files of perl's own t/mro/ are this
+# spelling.  perl 5.40.3: @ISA is (Diamond_B, Diamond_C) and the method
+# resolves through the diamond.
+
+test_cl('#1179 use base with a parenthesised class list', <<'PL', "ISA_D=[Diamond_B Diamond_C]\nhello=A\nisa=1\n");
+package Diamond_A; sub hello { "A" }
+package Diamond_B; use base ('Diamond_A');
+package Diamond_C; use base ('Diamond_A');
+package Diamond_D; use base ('Diamond_B', 'Diamond_C');
+package main;
+print "ISA_D=[@Diamond_D::ISA]\n";
+print "hello=", Diamond_D->hello, "\n";
+print "isa=", (Diamond_D->isa('Diamond_A') ? 1 : 0), "\n";
+PL
+
+# ── #1178: the declarator strip must NOT swallow `local` ──────────────────
+# A run that STARTS with something else — `f((1, local $g = "x"))` — reaches
+# the unwrap as a Statement::Expression, where the `local` WORD is lowered on
+# its own; #1178's first shape stripped every declarator on that route and the
+# word simply vanished.  perl-tests/multideref.t:220 was the ONE corpus file
+# that showed it, and it is the reason the strip is asymmetric.
+#
+# This is a SHAPE row, and it does NOT claim the emission is right: today PCL
+# lowers that word to `(pl-local …)`, a call to a sub named `local` that dies
+# at run time — task #1192 owns making it a real dynamic binding, and this row
+# is expected to change (to a value row) when #1192 lands.  What it guards is
+# only that the declarator is not SILENTLY DELETED, which is the failure #1178
+# nearly introduced.
+
+{
+    my ($fh, $pl_file) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh "our \$g = 'outer';\nsub wrap { my (\$v) = \@_; return \$v }\n"
+            . "my \$r = wrap((1, local \$g = 'inner'));\n";
+    close $fh;
+    my $cl = `$pl2cl $pl_file 2>/dev/null`;
+    like($cl, qr/local/,
+         '#1178 a `local` in a call argument is not silently deleted (#1192)');
+}

@@ -459,6 +459,13 @@ sub _word_is_method_name {
 sub extract_declarations {
   my $self  = shift;
   my $exprs = shift;
+  # WHICH declarators this call may strip.  Default: all four, which is what
+  # every statement-level caller wants.  The single-element unwrap in parse()
+  # passes only the three LEXICAL ones for a Statement::Expression (#1178):
+  # `local`'s dynamic binding is lowered from the token itself on that route —
+  # `@{1, local $x[0][0]}` emits `(pl-local …)` — and stripping the word there
+  # silently deletes the restore.
+  my $kinds = shift || 'my|our|state|local';
 
   my @result;
 
@@ -479,7 +486,7 @@ sub extract_declarations {
 
         if ($in_decl && ref($child) eq 'PPI::Token::Word') {
           my $word = $child->content();
-          if ($word =~ /^(my|our|state|local)$/) {
+          if ($word =~ /^(?:$kinds)$/) {
             $decl_type = $word;
             next;
           }
@@ -562,7 +569,7 @@ sub extract_declarations {
     # Accept an explicit CORE:: prefix (CORE::state $y = ...) — PCL has no
     # overridable builtins, so CORE::<declarator> is the bare declarator.
     elsif (ref($item) eq 'PPI::Token::Word'
-           && $item->content() =~ /^(?:CORE::)?(my|our|state|local)$/
+           && $item->content() =~ /^(?:CORE::)?($kinds)$/
            && !$self->_word_is_method_name($exprs, $ix)) {
       my $decl_type = $1;
 
@@ -699,8 +706,22 @@ sub parse {
       # Every other route into a token run already strips here
       # (parse_expr_to_tree, parse_list), so this is the one that was missing.
       my $kids  = $self->remove_expression_object_around($e1);
-      # Extract declarations (strips 'my'/'our'/etc, keeps variable)
-      my @stripped = $self->extract_declarations($kids);
+      # Extract declarations (strips the declarator, keeps the variable).
+      #
+      # `local` is in the set for the Statement::Variable spelling ONLY, and
+      # that asymmetry is measured, not a guess.  On the Statement::Expression
+      # route the `local` WORD has its own lowering — `@{1, local $x[0][0]}`
+      # emits `(pl-local …)` — so stripping it there DELETES a working dynamic
+      # binding (perl-tests/multideref.t:220 caught it, and it was the ONE
+      # corpus diff this change produced).  On the Statement::Variable route
+      # there is no such lowering: leaving the word makes `f((local $g = 1))`
+      # a call to a sub named `local`.  Stripping it there loses the RESTORE
+      # instead — the pre-existing bug #1192, smaller than a crash and not
+      # this task's to fix.
+      my @stripped = $self->extract_declarations(
+        $kids,
+        ref($e1) eq 'PPI::Statement::Variable' ? 'my|our|state|local'
+                                               : 'my|our|state');
       return $self->parse(\@stripped);
     }
 
