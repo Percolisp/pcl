@@ -12328,6 +12328,22 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
                      (file-error (e)
                        (declare (ignore e))
                        (return-from p-do (%p-do-io-failed))))))
+              ;; perl records the file in %INC as soon as it has OPENED it, and
+              ;; a later `require` of the same string is then a no-op.  Probed
+              ;; 5.40.3: the key is the STRING THE CALLER WROTE ("./t.pl",
+              ;; "inc.pl"), the value the path actually opened; a file that
+              ;; COMPILES AND DIES still leaves the entry (`do "./dies.pl"` sets
+              ;; both $INC{"./dies.pl"} and $@), so does one that returns FALSE,
+              ;; and one that could not be OPENED does not — which is why this
+              ;; write is here, after the read and before the compile.  `do`
+              ;; itself never CONSULTS %INC (two `do`s of one file run it
+              ;; twice, probed); only `require` does, and p-require-file already
+              ;; reads *p-inc-table* — this was the one write it was missing
+              ;; (#1116), so every `do` then `require` of a file ran it twice
+              ;; and every side effect happened twice.  The value is spelled the
+              ;; way p-require-file spells it, so the two agree (rule 11).
+              (setf (gethash filename *p-inc-table*)
+                    (sb-ext:native-namestring (pathname abs-path)))
               (p-eval (make-p-box content)))
           (error (e)
             (box-set $@ (make-p-box (format nil "~A" e)))
@@ -16918,7 +16934,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-790"
+(defparameter *pcl-cache-generation* "v2-791"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

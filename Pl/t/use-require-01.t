@@ -973,4 +973,40 @@ print "val:", ((\$INC{"My511/Mod.pm"} // "") eq "$dir/My511/Mod.pm" ? "the-file"
 PL
 }
 
+# --- #1116: `do FILE` populates %INC, so a later `require` is a NO-OP -------
+#
+# perl records the file as soon as it has OPENED it, keyed by the STRING the
+# caller wrote.  Before #1116 PCL wrote nothing, so `do` then `require` of one
+# file RAN IT TWICE and every side effect happened twice.  Both rows go through
+# inc_agrees, so the expectation is real perl's output; only the KEY is printed,
+# never the value — perl stores the path it opened and PCL a native namestring,
+# a difference that is not what these rows are about.
+{
+  my $dir = tempdir(CLEANUP => 1);
+  my $inc = "$dir/inc1116.pl";
+  open my $w, '>', $inc or die "write inc1116: $!";
+  print $w "\$main::v1116 = 42;\n1;\n";
+  close $w;
+  inc_agrees('#1116 do FILE records %INC and a later require does not re-run it', <<"PL");
+do "$inc" or die "do failed";
+print "do:\$main::v1116\\n";
+print "inc:", (exists \$INC{"$inc"} ? 1 : 0), "\\n";
+\$main::v1116 = 0;
+require "$inc";
+print "require:\$main::v1116\\n";
+PL
+
+  my $dies = "$dir/dies1116.pl";
+  open my $d, '>', $dies or die "write dies1116: $!";
+  print $d "die \"boom\\n\";\n";
+  close $d;
+  inc_agrees('#1116 a do that DIES leaves the entry; one that cannot be OPENED does not', <<"PL");
+my \$r = do "$dies";
+print "ret:", (defined \$r ? \$r : "U"), " err:", (\$\@ ? 1 : 0),
+      " inc:", (exists \$INC{"$dies"} ? 1 : 0), "\\n";
+my \$s = do "$dir/nope1116.pl";
+print "missing:", (exists \$INC{"$dir/nope1116.pl"} ? 1 : 0), "\\n";
+PL
+}
+
 done_testing();

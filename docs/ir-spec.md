@@ -2312,6 +2312,18 @@ arrive — an entry satisfies `p-use`'s already-loaded guard, and `no Moose`
 recorded: `use constant` / `vars` / `lib` / `base` / `parent` / `overload`,
 which PCL also handles without a load.
 
+**`do FILE` records its own entry, and the moment matters (normative, s470br,
+task #1116).**  Perl writes `$INC{FILE}` as soon as it has OPENED the file,
+keyed by THE STRING THE CALLER WROTE (`"./t.pl"`, `"inc.pl"` — not the resolved
+path) and valued at the path opened.  Probed 5.40.3: a file that compiles and
+then DIES still leaves the entry (`$@` is set and the entry is there), so does
+one that returns FALSE, and one that could not be OPENED leaves none — so the
+write belongs after the read and before the compile.  `do` itself never
+CONSULTS `%INC` (two `do`s of one file run it twice); only `require` does, which
+is why the missing write made `do FILE; require FILE` run every side effect
+twice.  PCL's value is an absolute native path rather than perl's literal
+spelling, the same divergence `require "./file.pl"` already has.
+
 **The COMPILE PHASE of the whole file precedes the RUN PHASE of any of it
 (normative, s436).** Perl compiles a file before it runs a line of it: every
 named sub is defined and every `BEGIN` has run before the first run-time
