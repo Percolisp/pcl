@@ -4607,6 +4607,20 @@ sub gen_substitution {
 # replacement body is compiled by _compile_subst_e_expr / _gen_interp_replacement
 # — both still produce text, embedded as a raw atom inside the (lambda () …)
 # form; structuring those bodies is the inline_lambda step (E2 last item).
+# How many `e` modifiers a substitution token carries.  PPI's get_modifiers
+# answers `e => 1` for `ee`, so the only place the second one survives is the
+# token TEXT; Pl::Parser2::_regex_modifier_text is the existing reading of that
+# (#1083 uses it to decide a runtime-compile event) and is reached through a
+# runtime `require` because a compile-time `use` of Parser2 from here is
+# circular (the #435 pattern).
+sub _subst_e_count {
+  my ($node) = @_;
+  require Pl::Parser2;
+  my $text = Pl::Parser2::_regex_modifier_text($node);
+  my $n = () = $text =~ /e/g;
+  return $n;
+}
+
 sub gen_substitution_form {
   my $self = shift;
   my $node = shift;
@@ -4636,9 +4650,21 @@ sub gen_substitution_form {
   # s///e: replacement is Perl code — parse it and wrap in a lambda.
   # The body arrives as a CLForm (task #78); raw only inside declined subtrees.
   if ($mods->{e}) {
-    return ['p-subst', $match_form,
-            ['lambda', ['list'], $self->_compile_subst_e_expr($subst)],
-            @mod_strs];
+    # `s///ee` evaluates the replacement and then evaluates ITS RESULT as perl
+    # code; each further `e` is one more round.  Probed 5.40.3:
+    # `s/(\d)/'$1+1'/ee` on "3" gives 4 where `/e` gives the six characters
+    # `$1+1`, and `s/(a)/$code/ee` with $code = '"X" . uc($1)' gives XA.  PPI's
+    # get_modifiers collapses `ee` to `e => 1` (probed), so the COUNT is read
+    # off the token's trailing modifier letters — the same reading #1083 makes
+    # in Pl::Parser2::_regex_modifier_text (rule 11).  The extra rounds go
+    # through _gen_eval_string_form, so each gets the capture alist and the
+    # site's features a written-out `eval` would get, rather than a bare
+    # (p-eval …) that could not see a lexical.
+    my $body = $self->_compile_subst_e_expr($subst);
+    for (2 .. _subst_e_count($node)) {
+      $body = $self->_gen_eval_string_form($body);
+    }
+    return ['p-subst', $match_form, ['lambda', ['list'], $body], @mod_strs];
   }
 
   # A SINGLE-QUOTED replacement is literal text — no interpolation, no case

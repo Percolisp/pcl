@@ -231,4 +231,29 @@ unlink "$base/real/f.txt", "$base/link", "$base/abslink";
 rmdir "$base/real"; rmdir $base;
 ');
 
+# ---------------------------------------------------------------------------
+# #1120: `s///ee` evaluates the replacement AND THEN EVALUATES ITS RESULT as
+# perl code, and each further `e` is one more round.  PPI's get_modifiers
+# collapses `ee` to `e => 1`, so the second `e` used to be dropped on the floor
+# and the substitution put the unevaluated SOURCE TEXT into the string
+# (`s/(\d)/q{$1+1}/ee` on "3" gave the six characters `$1+1` where perl gives 4).
+# The count is read off the token's trailing modifier letters and each extra
+# round goes through the ordinary eval-STRING emission, so it gets the capture
+# alist and the site's features.
+#
+# test_transpile runs REAL PERL as the oracle for every row, so no expectation
+# is transcribed.  The `/e` row is the INVERSE guard: it must keep answering the
+# six characters, or the fix has widened onto single-`e`.
+# ---------------------------------------------------------------------------
+test_transpile('#1120 s///ee evaluates the replacement RESULT as code',
+               'my $s = "3"; (my $t = $s) =~ s/(\d)/q{$1+1}/ee; print "$t\n";');
+test_transpile('#1120 s///ee runs an expression built at run time',
+               'my $v = "ab"; my $code = q{"X" . uc($1)}; $v =~ s/(a)/$code/ee; print "$v\n";');
+test_transpile('#1120 s///e stops after ONE evaluation (inverse guard)',
+               'my $u = "3"; $u =~ s/(\d)/q{$1+1}/e; print "$u\n";');
+test_transpile('#1120 s///ee sees the capture variables of its own match',
+               'my $z = "5"; $z =~ s/(\d)/q{$1*2}/ee; print "$z\n";');
+test_transpile('#1120 s///eee is one more round again',
+               'my $q = "7"; $q =~ s/(\d)/q{$1}/eee; print "$q\n";');
+
 done_testing();
