@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-820
+;;; pcl: pipeline=v2 gen=v2-830
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -56,32 +56,35 @@
 
 (p-eval-always (p-note-inc "warnings"))
 
-(p-sub pl-import (&rest %_args) (:writes-args nil) (p-args-body (block nil)))
+(p-sub pl-import (&rest %_args) (:writes-args nil :needs ()) (p-args-body (block nil)))
 
-(p-sub pl-unimport (&rest %_args) (:writes-args nil) (p-args-body (block nil)))
+(p-sub pl-unimport (&rest %_args) (:writes-args nil :needs ()) (p-args-body (block nil)))
 
 (p-sub pl-get_linear_isa
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs ())
   (p-raw-params (($class :scalar) ($type :scalar))
     (block nil (p-tail-value (mro::pl-_c3_linearize $class)))))
 
 (p-sub pl-get_mro
   (&rest %_args)
-  (:returns :str :wantarray-insensitive t :writes-args nil)
+  (:returns :str :wantarray-insensitive t :writes-args nil :needs ())
   (p-args-body (block nil (p-tail-value "c3"))))
 
-(p-sub pl-set_mro (&rest %_args) (:writes-args nil) (p-args-body (block nil (p-return-empty))))
+(p-sub pl-set_mro
+  (&rest %_args)
+  (:writes-args nil :needs (:nonlocal_exit.return))
+  (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-get_isarev
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs ())
   (p-args-body
     (block nil (p-tail-value (make-p-box (make-array 0 :adjustable t :fill-pointer 0))))))
 
 (p-sub pl-is_universal
   (&rest %_args)
-  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (:returns :num :wantarray-insensitive t :writes-args nil :needs (:nonlocal_exit.return))
   (p-raw-params (($class :scalar))
     (block nil
       (p-void-ctx (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
@@ -95,17 +98,18 @@
 
 (p-sub pl-invalidate_all_method_caches
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs (:nonlocal_exit.return))
   (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-method_changed_in
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs (:nonlocal_exit.return))
   (p-args-body (block nil (p-return-empty))))
 
 (p-sub pl-_c3_linearize
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil
+    :needs (:nonlocal_exit.die :nonlocal_exit.loop_control :nonlocal_exit.return))
   (p-args-body
     (block nil
       (p-let (($class :box (make-p-box nil)) ($seen :box (make-p-box nil)))
@@ -118,8 +122,7 @@
                 "lib/mro.pm line 71"
                 (p-string-concat "Recursive inheritance detected in package '"
                   $class
-                  "'
-"))))
+                  (p-esc "'\\n")))))
           (p-let ((@parents :array (make-array 0 :adjustable t :fill-pointer 0)))
             (p-array-= @parents (p-cast-@ (p-string-concat $class "::ISA")))
             (p-if (p-! @parents) (p-return (make-p-box (p-array-init $class))))
@@ -160,8 +163,7 @@
                         "lib/mro.pm line 101"
                         (p-string-concat "Inconsistent hierarchy during C3 merge of '"
                           $class
-                          "'
-")))
+                          (p-esc "'\\n"))))
                     (p-push @result $cand)
                     (p-foreach ($seq @seqs)
                       :my

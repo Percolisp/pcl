@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-820
+;;; pcl: pipeline=v2 gen=v2-830
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -45,33 +45,33 @@
 
 (p-eval-always (p-note-inc "strict"))
 
-(p-sub pl-import (&rest %_args) (:writes-args nil) (p-args-body (block nil)))
+(p-sub pl-import (&rest %_args) (:writes-args nil :needs ()) (p-args-body (block nil)))
 
-(p-sub pl-unimport (&rest %_args) (:writes-args nil) (p-args-body (block nil)))
+(p-sub pl-unimport (&rest %_args) (:writes-args nil :needs ()) (p-args-body (block nil)))
 
 (p-sub pl-enabled
   (&rest %_args)
-  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
   (p-args-body (block nil (p-tail-value 1))))
 
 (p-sub pl-fatal_enabled
   (&rest %_args)
-  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
   (p-args-body (block nil (p-tail-value 0))))
 
 (p-sub pl-enabled_at_level
   (&rest %_args)
-  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
   (p-args-body (block nil (p-tail-value 1))))
 
 (p-sub pl-fatal_enabled_at_level
   (&rest %_args)
-  (:returns :num :wantarray-insensitive t :writes-args nil)
+  (:returns :num :wantarray-insensitive t :writes-args nil :needs ())
   (p-args-body (block nil (p-tail-value 0))))
 
 (p-sub pl-register_categories
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs (:nonlocal_exit.loop_control :nonlocal_exit.return))
   (p-args-body
     (block nil
       (p-void-ctx
@@ -90,7 +90,7 @@
 
 (p-sub pl-warn
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs ())
   (p-args-body
     (block nil
       (p-void-ctx
@@ -100,7 +100,7 @@
 
 (p-sub pl-warnif
   (&rest %_args)
-  (:writes-args nil)
+  (:writes-args nil :needs ())
   (p-args-body
     (block nil
       (p-void-ctx
