@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 89;
+plan tests => 115;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -145,6 +145,31 @@ my @af = stat(_);  print "43=", scalar(@af), "\n";
 # A class that overloads something else entirely falls back to the PLAIN
 # stringification, so the answer matches the address string's own.
 print "44=", ((-e $nov ? 1 : 0) == (-e "$nov" ? 1 : 0) ? "same" : "differ"), "\n";
+# --- s470bs: PERL'S ERRNO (task #1033) ------------------------------------
+# A HANDLE that is not open is EBADF; a missing PATH is ENOENT.  perl keeps
+# those apart and code branching on $!{EBADF} vs $!{ENOENT} reads them; every
+# filetest used to swallow the condition and leave $! whatever it held.
+$! = 0; my $u1 = -e NOPE;              print "45=", ($!+0), "\n";
+$! = 0; my @u2 = stat(NOPE);           print "46=", ($!+0), "\n";
+$! = 0; my $u3 = -e "/no/such/zz-xyq"; print "47=", ($!+0), "\n";
+$! = 0; my $u4 = -r "/no/such/zz-xyq"; print "48=", ($!+0), "\n";
+$! = 0; my $u5 = -T NOPE;              print "49=", ($!+0), "\n";
+open(CB, '<', $tmp) or die; close(CB);
+$! = 0; my $u6 = -e CB;                print "50=", ($!+0), "\n";
+# A pathname holding a NUL byte FAILS ([perl #131895]); the C layer truncates
+# it, so this used to answer true for $tmp itself.
+print "51=", (-f "$tmp\0-" ? 1 : 0), "\n";
+$! = 0; my $u7 = -f "$tmp\0-";         print "52=", ($!+0), "\n";
+# A DIRHANDLE is a handle (perl fstats the dirfd); a CLOSED one is EBADF.
+opendir(DIRH, "/") or die;
+print "53=", (-d DIRH ? 1 : 0), "\n";
+my @dh = stat(DIRH); print "54=", scalar(@dh), "\n";
+closedir(DIRH);
+$! = 0; my $u8 = -d DIRH;              print "55=", ($!+0), "\n";
+# `-t` has its own two failures: ENOTTY for an open handle that is not a tty,
+# EBADF when the operand names no handle at all.
+$! = 0; my $u9 = -t FH;                print "56=", ($!+0), "\n";
+$! = 0; my $ua = -t NOPE;              print "57=", ($!+0), "\n";
 close(FH);
 unlink $tmp;
 PERL
@@ -196,6 +221,20 @@ my %EXPECT = (
     '42' => '-e',   # `-X' beats `""' when a class declares both
     '43' => '13',   # an overloaded filetest leaves the `_' cache alone
     '44' => 'same', # any other overloading falls back to plain stringification
+    # --- s470bs: PERL'S ERRNO (task #1033) ------------------------------
+    '45' => '9',    # EBADF — a never-opened HANDLE, not "no such file"
+    '46' => '9',
+    '47' => '2',    # ENOENT — a missing PATH
+    '48' => '2',
+    '49' => '9',
+    '50' => '9',    # a CLOSED bareword handle is EBADF too
+    '51' => '0',    # a pathname with a NUL byte FAILS ([perl #131895]) …
+    '52' => '2',    #   … with ENOENT, rather than being truncated
+    '53' => '1',    # a DIRHANDLE is a handle (#1048)
+    '54' => '13',
+    '55' => '9',    # and a CLOSED dirhandle is EBADF
+    '56' => '25',   # -t on an open non-tty is ENOTTY …
+    '57' => '9',    #   … and EBADF when there is no handle at all
 );
 
 my $n = 0;

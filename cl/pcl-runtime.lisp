@@ -407,7 +407,7 @@
                 ;; (task #1005) — declaimed so the compile stays silent.
                 p-< p--
                 p-load-extension))
-(declaim (special *p-filehandles* *p-dirhandles*))
+(declaim (special *p-filehandles* *p-dirhandles* *p-dirhandle-paths*))
 
 ;;; Capture the runtime's directory at load time so extensions can be found.
 ;;; Must be near the top — *load-truename* changes as nested loads execute.
@@ -15466,10 +15466,28 @@ buffer's fill-pointer; everything else falls back to file-length."
    a path string, or an integer descriptor when the operand was a handle.  nil
    before the first one, which makes a premature `_` test false.")
 
-(defvar *pcl-stat-cache-fd* nil
-  "Whether *pcl-stat-cache-path* holds a DESCRIPTOR rather than a pathname.
-   The `_` marker must hand the kind back with the payload — re-classifying an
-   integer would read descriptor 3 as the file named \"3\".")
+(defvar *pcl-stat-cache-kind* :path
+  "What *pcl-stat-cache-path* holds — :path, :fd or :bad.  The `_` marker must
+   hand the kind back with the payload: re-classifying an integer would read
+   descriptor 3 as the file named \"3\", and a handle that was not open must
+   stay EBADF rather than becoming a pathname.")
+
+(defun %p-stat-fail (errno)
+  "THE failure exit of the stat/filetest family: record ERRNO in $! and answer
+   NIL.  perl sets $! on every one of them — `-e $f or die \"…: $!\"` is an
+   everyday idiom and it used to print a stale value, because each filetest
+   swallowed the condition in its own handler-case (task #1033)."
+  (setf *p-stored-errno* errno)
+  nil)
+
+(defmacro %p-stat-try (&body body)
+  "Run a stat-family syscall, answering NIL with perl's errno in $! when it
+   fails.  The POSIX condition carries the errno, so it is read off the
+   condition rather than re-read from the C variable (which an intervening
+   allocation can clobber); the general arm keeps the old fallback."
+  `(handler-case (progn ,@body)
+     (sb-posix:syscall-error (e) (%p-stat-fail (sb-posix:syscall-errno e)))
+     (error () (%pcl-save-errno) nil)))
 
 (defun %p-stat-op-letter-p (op)
   "Whether OP names a FILETEST (one letter) rather than `stat'/`lstat'.  Only
@@ -15495,18 +15513,37 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((s (%p-as-stream (%p-resolve-fh v))))
     (and s (open-stream-p s) (%p-fd-of-stream s))))
 
+(defun %p-dirhandle-path (v)
+  "The directory an open DIRHANDLE operand was opened on, or nil when V is not
+   one.  A dirhandle's value is a `(index . names)' cons — the object BOTH
+   spellings hold, `opendir DIR' through *p-dirhandles* and `opendir my $dh'
+   in its box — so the path table is keyed on that cons and one lookup serves
+   both.  perl fstat(2)s the dirfd for `-d DIR' / `stat DIR' (5.10+); PCL has
+   no dirfd, so the resolver answers with the PATH, the same operand-not-buffer
+   divergence `_' already documents.  A CLOSED dirhandle has no entry, which is
+   what makes it EBADF."
+  (let ((h (cond ((consp v) v)
+                 ((symbolp v) (gethash v *p-dirhandles*))
+                 ((p-box-p v) (let ((x (p-box-value v))) (and (consp x) x))))))
+    (and h (gethash h *p-dirhandle-paths*))))
+
 (defun %p-stat-handle-shaped-p (v)
   "Whether the RAW value V (a box already peeled) is a filehandle DESIGNATOR
-   rather than a name: a stream, a socket object or a typeglob.  A SYMBOL is
-   handle-shaped too but is asked separately, because `-l' reads a bareword
-   and a glob differently."
-  (or (streamp v) (%p-socket-p v) (p-typeglob-p v)))
+   rather than a name: a stream, a socket object, a typeglob or an open
+   dirhandle.  A SYMBOL is handle-shaped too but is asked separately, because
+   `-l' reads a bareword and a glob differently."
+  (or (streamp v) (%p-socket-p v) (p-typeglob-p v)
+      (and (consp v) (%p-dirhandle-path v) t)))
 
 (defun %p-stat-descriptor (v)
-  "The resolved form of a handle-shaped operand V: (:fd N) when the handle is
-   open, else the empty path, which fails as perl's does."
+  "The resolved form of a handle-shaped operand V: its descriptor when the
+   handle is open, the DIRECTORY when it is an open dirhandle, else :bad —
+   perl's EBADF, which is a different fact from \"no such file\" and which
+   programs branching on $!{EBADF} vs $!{ENOENT} read (task #1033)."
   (let ((fd (%p-stat-handle-fd v)))
-    (if fd (values :fd fd) (values :path ""))))
+    (cond (fd (values :fd fd))
+          ((%p-dirhandle-path v) (values :path (%p-dirhandle-path v)))
+          (t (values :bad nil)))))
 
 (defun %p-stat-resolve-box (arg v op)
   "Resolve a BOXED operand ARG whose payload is V.  A payload that is itself a
@@ -15523,15 +15560,19 @@ buffer's fill-pointer; everything else falls back to file-length."
   (let ((v (if (p-box-p arg) (p-box-value arg) arg)))
     (cond
       ((p-box-p arg) (%p-stat-resolve-box arg v op))
+      ;; UNDEF FIRST, because CL's NIL *is* a symbol and would otherwise be
+      ;; read as a bareword handle name: perl's `-e undef' is the EMPTY PATH
+      ;; (ENOENT), never EBADF (probed).  This is also `_` before any stat.
+      ((or (null v) (eq v *p-undef*)) (values :path ""))
       ((%p-stat-handle-shaped-p v)
        (if (string= op "l")
            (values :path (to-string v))
            (%p-stat-descriptor v)))
-      ;; A bareword handle NAME.  `-l' never takes one, so it must not fall
-      ;; through to a path named after the handle.
+      ;; A bareword handle NAME.  `-l' never takes one — it goes into the
+      ;; handle slot and cannot be lstat'ed, which is EBADF, not a path named
+      ;; after the handle (probed: `-l FH' errno 9).
       ((symbolp v)
-       (if (string= op "l") (values :path "") (%p-stat-descriptor v)))
-      ((null v) (values :path ""))       ; `_` before any stat: no operand
+       (if (string= op "l") (values :bad nil) (%p-stat-descriptor v)))
       ((stringp v) (values :path v))     ; a string is a PATH (task #1049)
       (t (values :path (to-string v))))))
 
@@ -15546,6 +15587,7 @@ buffer's fill-pointer; everything else falls back to file-length."
      :over VALUE     a `-X' overload handler already answered; VALUE is it
      :fd   INTEGER   fstat(2) this descriptor
      :path STRING    stat(2) this pathname
+     :bad  NIL       a HANDLE that is not open — perl's EBADF
 
    Maintains the `_` cache: the marker reads the remembered operand (with its
    kind), anything else becomes the remembered operand.  An overloaded answer
@@ -15554,27 +15596,39 @@ buffer's fill-pointer; everything else falls back to file-length."
     (cond
       ((not (eq ov :none)) (values :over ov))
       ((eq (if (p-box-p arg) (p-box-value arg) arg) '%pcl-stat-cache)
-       (values (if *pcl-stat-cache-fd* :fd :path) *pcl-stat-cache-path*))
+       (values *pcl-stat-cache-kind* *pcl-stat-cache-path*))
       (t
        (multiple-value-bind (kind val) (%p-stat-resolve arg op)
          (setf *pcl-stat-cache-path* val
-               *pcl-stat-cache-fd*   (eq kind :fd))
+               *pcl-stat-cache-kind* kind)
          (values kind val))))))
 
 (defun %p--path (kind val)
-  "The pathname to hand the filesystem for a resolved operand: the path
-   itself, or /dev/fd/N for a descriptor — which is what lets access(2) and
-   the -T/-B block scan work on an open handle."
-  (if (eq kind :fd) (format nil "/dev/fd/~D" val) val))
+  "The pathname to hand the filesystem for a resolved operand, and — when
+   there is none — the errno perl reports instead.  Two values, exactly one of
+   which is non-nil:
+     a path        /dev/fd/N for a descriptor, which is what lets access(2)
+                   and the -T/-B block scan work on an open handle
+     EBADF         the operand is a HANDLE that is not open
+     ENOENT        the pathname holds a NUL byte.  perl fails such a name
+                   ([perl #131895]); the C layer TRUNCATES it, so
+                   `-f \"TEST\\0-\"` used to answer true for the file TEST."
+  (ecase kind
+    (:fd   (values (format nil "/dev/fd/~D" val) nil))
+    (:bad  (values nil sb-posix:ebadf))
+    (:path (if (find #\Nul val)
+               (values nil sb-posix:enoent)
+               (values val nil)))))
 
 (defun %p-stat-buf (kind val lstatp)
   "Run the stat for an already-resolved operand: the sb-posix struct, or NIL
-   with the syscall's errno saved."
-  (handler-case
-      (if (eq kind :fd)
-          (sb-posix:fstat val)
-          (if lstatp (sb-posix:lstat val) (sb-posix:stat val)))
-    (error () (%pcl-save-errno) nil)))
+   with $! set the way perl sets it."
+  (if (eq kind :fd)
+      (%p-stat-try (sb-posix:fstat val))
+      (multiple-value-bind (path err) (%p--path kind val)
+        (if path
+            (%p-stat-try (if lstatp (sb-posix:lstat path) (sb-posix:stat path)))
+            (%p-stat-fail err)))))
 
 (defun %p-stat-impl (file-or-fh)
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
@@ -15614,8 +15668,10 @@ buffer's fill-pointer; everything else falls back to file-length."
   (multiple-value-bind (kind val) (%p-stat-operand file op)
     (if (eq kind :over)
         val
-        (handler-case (progn (sb-posix:access (%p--path kind val) mode) 1)
-          (error () (%pcl-save-errno) nil)))))
+        (multiple-value-bind (path err) (%p--path kind val)
+          (if path
+              (%p-stat-try (progn (sb-posix:access path mode) 1))
+              (%p-stat-fail err))))))
 
 (defun %p--e-impl (file)
   "Perl -e: the file exists — a stat that succeeds, which is perl's own test."
@@ -15770,7 +15826,10 @@ buffer's fill-pointer; everything else falls back to file-length."
   (multiple-value-bind (kind val) (%p-stat-operand file op)
     (if (eq kind :over)
         (values nil val)
-        (values (%p--scan-first-block (%p--path kind val)) nil))))
+        (multiple-value-bind (path err) (%p--path kind val)
+          (if path
+              (values (%p--scan-first-block path) nil)
+              (progn (%p-stat-fail err) (values nil nil)))))))
 
 (defun %p--T-impl (file)
   "Perl -T: heuristic text-file test (empty files are text)"
@@ -15825,18 +15884,34 @@ buffer's fill-pointer; everything else falls back to file-length."
 (%define-fh-slot-op p--A %p--A-impl)  (%define-fh-slot-op p--C %p--C-impl)
 (%define-fh-slot-op p--T %p--T-impl)  (%define-fh-slot-op p--B %p--B-impl)
 
+(defun %p--t-handle (fh)
+  "The handle designator `-t' looks up.  Undef/nil (a bare -t whose inserted
+   $_ is unset) is STDIN, perl's default; a blessed or otherwise non-handle
+   BOX is STRINGIFIED — probed, `-t $string_overloaded_object' calls the
+   handler once and then looks for a handle of that NAME.  Which is `-t''s own
+   rule and the ONE exception to `a string is a path' (task #1049): measured,
+   `-t \"STDIN\"' answers ENOTTY (it found the handle) while
+   `-t \"/etc/passwd\"' answers EBADF."
+  (cond ((or (null fh) (and (p-box-p fh) (null (p-box-value fh)))) 'STDIN)
+        ((and (p-box-p fh) (not (%p-stat-handle-shaped-p (p-box-value fh))))
+         (to-string fh))
+        (t fh)))
+
 (defun %p--t-impl (fh)
-  "Perl -t body: is the filehandle attached to a tty?  Undef/nil (a bare -t
-   whose inserted $_ is unset) falls back to STDIN, perl's default."
-  (handler-case
-      (let* ((handle (if (or (null fh) (and (p-box-p fh) (null (p-box-value fh))))
-                         'STDIN
-                         fh))
-             (fd (%p-fileno-impl handle)))
-        (if (and (integerp fd) (>= fd 0) (plusp (sb-unix:unix-isatty fd)))
-            1
-            nil))
-    (error () nil)))
+  "Perl -t body: is the filehandle attached to a tty?  Three answers, all
+   perl's (probed 5.40.3): 1 for a tty, false with ENOTTY for an open handle
+   that is not one, and false with EBADF when the operand names no open
+   handle at all — the errno is how a caller tells those two apart."
+  (let ((ov (%p-stat-overload-answer fh "t")))
+    (if (not (eq ov :none))
+        ov
+        (handler-case
+            (let ((fd (%p-fileno-impl (%p--t-handle fh))))
+              (cond ((not (and (integerp fd) (>= fd 0)))
+                     (%p-stat-fail sb-posix:ebadf))
+                    ((plusp (sb-unix:unix-isatty fd)) 1)
+                    (t (%p-stat-fail sb-posix:enotty))))
+          (error () (%p-stat-fail sb-posix:ebadf))))))
 
 (defmacro p--t (&optional (fh ''STDIN))
   "Perl -t: bareword filehandle is auto-quoted (like p-fileno)."
@@ -16211,6 +16286,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;; Directory handle storage
 (defvar *p-dirhandles* (make-hash-table :test 'eq))
 
+(defvar *p-dirhandle-paths* (make-hash-table :test 'eq)
+  "Directory each OPEN dirhandle was opened on, keyed by the handle's own
+   `(index . names)' cons — the object both spellings hold, `opendir DIR'
+   through *p-dirhandles* and `opendir my $dh' in its box.  It exists because
+   perl fstat(2)s the dirfd for `-d DIR' / `stat DIR' (5.10+) and PCL has no
+   dirfd: the ONE stat operand resolver answers with this PATH instead
+   (task #1048).  `closedir' drops the entry, which is what makes a closed
+   dirhandle EBADF rather than a silently working one.")
+
 (defun %p-dirent-name (path)
   "The entry's OWN name, LITERALLY: cut from the NATIVE namestring, because
    file-namestring ESCAPES wild characters — a file named a*b listed as a\\*b
@@ -16242,11 +16326,16 @@ buffer's fill-pointer; everything else falls back to file-length."
     (when (probe-file dir-path)
       (let* ((entries (directory (merge-pathnames "*.*" dir-path)
                                  :resolve-symlinks nil))
-             (names (list* "." ".." (mapcar #'%p-dirent-name entries))))
+             (names (list* "." ".." (mapcar #'%p-dirent-name entries)))
+             (handle (cons 0 names)))
+        ;; Remember the DIRECTORY beside the handle: `-d DIR` / `stat DIR`
+        ;; fstat the dirfd in perl, and the one stat operand resolver answers
+        ;; from this path instead (task #1048).
+        (setf (gethash handle *p-dirhandle-paths*) dir-str)
         (if (symbolp dh)
-            (setf (gethash dh *p-dirhandles*) (cons 0 names))
+            (setf (gethash dh *p-dirhandles*) handle)
             (when (p-box-p dh)
-              (setf (p-box-value dh) (cons 0 names))))
+              (setf (p-box-value dh) handle)))
         t))))
 
 (defmacro p-opendir (dh &rest args)
@@ -16280,7 +16369,13 @@ buffer's fill-pointer; everything else falls back to file-length."
   `(%p-readdir-impl (%p-fh-arg ,dh)))
 
 (defun %p-closedir-impl (dh)
-  "Perl closedir - close directory handle"
+  "Perl closedir - close directory handle.  The remembered DIRECTORY goes too:
+   a closed dirhandle must be EBADF in a stat/filetest slot, not a path that
+   still works (task #1048)."
+  (let ((handle (if (symbolp dh)
+                    (gethash dh *p-dirhandles*)
+                    (and (p-box-p dh) (p-box-value dh)))))
+    (when (consp handle) (remhash handle *p-dirhandle-paths*)))
   (when (symbolp dh)
     (remhash dh *p-dirhandles*))
   t)
