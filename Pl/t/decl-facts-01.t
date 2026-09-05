@@ -225,15 +225,15 @@ writer($z);
 print "$z\n";
 PERL
     my $cl = cl_of($src);
-    like($cl, qr/\(p-sub pl-add\s+\(&rest %_args\)\s+\(:returns :num :wantarray-insensitive t :writes-args nil\)/,
+    like($cl, qr/\(p-sub pl-add\s+\(&rest %_args\)\s+\(:returns :num :wantarray-insensitive t :writes-args nil :needs \(\)\)/,
          '#1035: a scalar-shaped, wantarray-free sub says so on its definition');
     unlike($cl, qr/\(p-sub pl-ctx\s+\(&rest %_args\)\s+\([^)]*:wantarray-insensitive/,
            '#1035: ... and one that READS wantarray does not (true-only key)');
-    like($cl, qr/\(p-sub pl-writer\s+\(&rest %_args\)\s+\(:writes-args t\)/,
+    like($cl, qr/\(p-sub pl-writer\s+\(&rest %_args\)\s+\(:writes-args t :needs \(\)\)/,
          '#1035: :writes-args is printed in BOTH directions -- 0 is a proof too');
-    like($cl, qr/\(p-sub pl-protod\s+\(&rest %_args\)\s+\(:prototype "\$\$"\)/,
+    like($cl, qr/\(p-sub pl-protod\s+\(&rest %_args\)\s+\(:prototype "\$\$" :needs \(\)\)/,
          '#1035: an old-style prototype prints its text');
-    like($cl, qr/\(p-sub pl-evaler\s+\(&rest %_args\)\s+\([^)]*:string-eval t\)/,
+    like($cl, qr/\(p-sub pl-evaler\s+\(&rest %_args\)\s+\(:writes-args nil :string-eval t :needs \(:string_eval\.eval\)\)/,
          '#1035: a body containing a string eval says so');
     # (`ctx()` sits in a print LIST, so wantarray is true there -- probed
     # against perl 5.40.3, which prints the same line.)
@@ -245,7 +245,7 @@ PERL
     # `:captures` names the promoted package cells a hoisted named sub closes
     # over -- recorded by the promotion that PROVED the capture.
     my $cl = cl_of('my $n = 5; sub bump { $n++ } bump(); print "$n\n";');
-    like($cl, qr/\(p-sub pl-bump\s+\(&rest %_args\)\s+\([^)]*:captures \(\$\w+\)\)/,
+    like($cl, qr/\(p-sub pl-bump\s+\(&rest %_args\)\s+\(:writes-args nil :captures \(\$\w+\) :needs \(\)\)/,
          '#1035: a sub that captures a file lexical lists the promoted cell');
     is(run_cl('my $n = 5; sub bump { $n++ } bump(); print "$n\n";'), "6\n",
        '#1035: ... and the capture still works');
@@ -369,7 +369,7 @@ PERL
     my $cl = cl_of($src);
     unlike($cl, qr/ARRAY\(0x/,
            '#1118: a perl arrayref never reaches the emitted CL');
-    like($cl, qr/\(p-sub pl-f\s+\(&rest %_args\)\s+\(:returns :str\s+:writes-args nil\s+:captures \(\$first_captured_cell_name \$second_captured_cell_name\)\)/,
+    like($cl, qr/\(p-sub pl-f\s+\(&rest %_args\)\s+\(:returns :str\s+:writes-args nil\s+:captures \(\$first_captured_cell_name \$second_captured_cell_name\)\s+:needs \(\)\)/,
          '#1118: a long facts plist breaks between PAIRS, and :captures names the cells');
     # Two transpiles of the same source must be BYTE-identical.  The
     # tempfile path is in the preamble and differs per call, so it is

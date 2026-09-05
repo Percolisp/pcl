@@ -157,7 +157,7 @@ is(run_cl($cl_unreached), "a\nb\nc\n",
 
 # 6 ── ONE builder, and the announcement has its own verb.
 my ($ann_site) = $err =~ /^PCL: refused statement at (\S+ line \d+): /m;
-my ($die_site) = $cl  =~ /\(pcl:p-die "PCL: [^"]*, at (\S+ line \d+)\n"\)/;
+my ($die_site) = $cl  =~ /\(pcl:p-die \(p-esc "PCL: [^"]*, at (\S+ line \d+)\\\\n"\)\)/;
 ok(defined $ann_site && length $ann_site,
    'the transpile-time announcement fires, with the refusal verb')
     or diag("stderr was: $err");

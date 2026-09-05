@@ -28,7 +28,7 @@ my $cl = Pl::Parser2->parse_code($fib);
 
 # Spec #3: raw param binding (p-raw-params — flatten-honouring signature fast
 # path, s304 task #80), no p-list-= arg destructuring.
-like($cl, qr/\(p-sub pl-fib\s*\n?\s*\(&rest %_args\)\s*\n?\s*\([^)]*\)\s*\n?\s*\(p-raw-params \(\(\$n :\w[\w-]*\)\)/,
+like($cl, qr/\(p-sub pl-fib\s*\n?\s*\(&rest %_args\)\s*\n?\s*\(:wantarray-insensitive t :writes-args nil :needs \(\)\)\s*\n?\s*\(p-raw-params \(\(\$n :\w[\w-]*\)\)/,
      'p-raw-params signature fast path for my (LIST) = @_');
 unlike($cl, qr/p-list-= \(vector \$n\)/, 'no p-list-= param destructuring');
 
@@ -178,7 +178,7 @@ unlike($rec, qr/p-args-body/, 'no p-args-body when @_ is unused');
 # @_ convention (p-args-body) so p-goto-sub has the full argument list.
 my $goto = Pl::Parser2->parse_code(
   'sub target { my ($x, $y) = @_; print "$x $y\n"; } sub fwd { my ($a) = @_; goto &target; } fwd(7, 9);');
-like($goto, qr/\(p-sub pl-fwd\s*\n?\s*\(&rest %_args\)\s*\n?\s*\([^)]*:writes-args t[^)]*\)\s*\n?\s*\(p-args-body/s,
+like($goto, qr/\(p-sub pl-fwd\s*\n?\s*\(&rest %_args\)\s*\n?\s*\(:writes-args t :needs \(:nonlocal_exit\.goto\)\)\s*\n?\s*\(p-args-body/s,
      'goto-containing sub keeps p-args-body (@_ live for forwarding)');
 like($goto, qr/\(p-goto-sub #'pl-target\)/, 'goto &sub lowers via p-goto-sub');
 
@@ -216,7 +216,7 @@ like($use, qr/\(p-sub pl-PI/, 'use constant: captured declaration hoisted');
 # Pl/t/use-require-01.t).
 my $ord = Pl::Parser2->parse_code(
   'print "a\n"; require POSIX; print "b\n";');
-like($ord, qr/\(p-print\s+"a.*\(p-require "POSIX"\).*\(p-print\s+"b/s,
+like($ord, qr/\(p-print \(p-esc "a\\\\n"\)\).*\(p-require "POSIX"\).*\(p-print \(p-esc "b\\\\n"\)\)/s,
      'require lowers between the two prints, in source order (#350)');
 unlike($ord, qr/\(p-eval-always\s*\n?\s*\(p-require "POSIX"/,
        'require is NOT hoisted to an eval-always declaration (#350)');
@@ -245,7 +245,7 @@ my $interp = Pl::Parser2->parse_code(
   'my $x = 5; my $msg = "x is $x!\n"; print $msg;');
 # (\s+ separators: a newline-bearing string atom makes the structural printer
 # lay the concat out multiline since the E2.final root flip.)
-like($interp, qr/\(p-string-concat "x is "\s+\$x\s+"!\s*\n?"\)/,
+like($interp, qr/\(p-string-concat "x is "\s+\$x\s+\(p-esc "!\\\\n"\)\)/,
      'simple $name interpolation lowers natively to p-string-concat');
 like($interp, qr/\(\$msg :scalar\s*\n?\s*\(p-string-concat/, 'interpolated-string slot binds raw');
 
