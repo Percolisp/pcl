@@ -1409,6 +1409,45 @@ a forward declaration with no body IS `fboundp` and perl dies for it, while an
 resolution lazy is wrong only in *when* it dies; one that keys it on `fboundp`
 is wrong about *whether*.
 
+
+**The comparator may be GONE: `%p-sort-classic` (s470a5, task #996 half A5).**
+When the comparator is one of the five *classic* shapes — no block at all, or
+exactly `{ $a <=> $b }` / `{ $b <=> $a }` / `{ $a cmp $b }` / `{ $b cmp $a }`
+on the current package's pair — and the sort's ALIASES are unobservable, the
+optimization registry's `classic-sort` pass replaces the whole call with
+
+```lisp
+(%p-sort-classic MODE ARGS…)
+  MODE ∈ { :default :num-asc :num-desc :str-asc :str-desc }
+```
+
+and there is no comparator frame left in the IR.  `:default` is the no-block
+form and is NOT the same as `:str-asc`: their fast paths agree, but their
+FALLBACKS do not — `p-sort`'s no-comparator arm stringifies (`string<` on
+`to-string`) while `{ $a cmp $b }` dispatches a `cmp` overload.  An unknown
+MODE is a compiler/runtime disagreement and dies naming the value.
+
+**A translator may treat this form as sugar and expand it back** to the
+`(p-sort (p-sort-cmp …) ARGS…)` of this section — the emission under
+`PCL_OPT=none` is exactly that, byte for byte, and the runtime itself falls
+back to it whenever any element is not a plain scalar.  What the fast form
+buys is that a *plain* element (a number, a string or undef — no bless class,
+no is-ref flag, no dualvar halves, no tie proxy, no magic) has pure numeric
+and string readings, so the key may be taken ONCE and the source array's raw
+slots need not be promoted to boxes (§3.2).
+
+**When it may NOT be emitted, and why it is a property of the CONSUMER.**
+`sort` yields ALIASES: `$_++ for sort { $a <=> $b } @a` writes back into `@a`,
+and `map { \$_ } sort @c` hands out the very scalar `\$c[i]` denotes.  The
+pass therefore emits the fast form only where either (A) the value is copied
+before anything can write through it — an array/hash/list assignment, an
+anon-array constructor, `push`/`unshift`, `join`/`print`/`say`/`printf`,
+`return`, or a `p-foreach-raw` list (§6.2's read-only loop verdict) — or (B)
+every top-level argument produces temporaries: a literal, `p-keys`, `p-map`,
+`p-split`, `p-readdir`, `p-glob`, a range, or a user sub call.  `p-values`,
+`p-grep`, `p-reverse` and a nested `p-sort` all hand aliases through and are
+NOT sources under (B); `p-reverse` *is* transparent to (A).
+
 `grep`/`map`/`eval` block bodies are plain `(lambda …)` with **neither**
 the catch nor the context bind — `return` inside them must propagate to the
 enclosing sub's frame.
@@ -2490,7 +2529,7 @@ function's docstring states its Perl contract. The families:
 | increment | `p-++ p---- p-++-post p----post` · on raw slots `p-incf-raw`/`p-decf-raw` (statement-root only; tail postfix wraps in `prog1` for the old value) | numeric ±1 on the box/slot; `p-++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) — a raw slot only takes root incdec when every write is numeric-valued (A-num), so the raw twins are never asked to do the magical form |
 | elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
 | slice delete | `p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice p-delete-kv-array-slice` | every one flattens its key/index arguments alike (`%p-flatten-slice-args`: a range or interpolated list contributes its elements, a STRING is one key — task #394), and every one answers **nil for an EMPTY slice** — undef in scalar context, the empty list in list context, per [perl #29127].  The emptiness test comes BEFORE the read-only check: perl allows `delete @ro[()]` on a read-only array and dies only on a real index (probed, s414) |
-| array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""` |
+| array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost |
 | regex | `p-=~ p-!~` with `(p-regex "/pat/flags") (p-subst …) (p-tr …)` | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is spelled `(%p-empty-list)`, a zero-length vector, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted |
 | compiled regex (qr) | `(pcl::p-qr "qr/pat/flags")` literal · `(pcl::p-regex-from-parts PAT "flags")` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
 | I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup |

@@ -20,8 +20,15 @@ package Pl::Passes;
 #     is printed: `register_pass('name', \&f)` appends to an ordered list;
 #     `run($form)` applies the enabled ones in registration order.  A pass is
 #     a pure function of the tree (plus whatever facts it closes over); it
-#     never sees text.  Empty until the first pass lands (#73/#74/#77 are the
-#     queued candidates).
+#     never sees text.  The first one is `classic-sort' (Pl/ClassicSort.pm,
+#     task #996 half A5): it is Kind B and not Kind A because its licence is a
+#     fact about the sort's CONSUMER — `sort' returns aliases, so a
+#     value-sorting fast path is legal only where the consumer copies — and
+#     the consumers are six different emitters with no parent link in the
+#     PExpr tree.  The lowered CLForm tree is the one place they all pass
+#     through, and it already carries the `p-foreach-raw' head, i.e.
+#     VarAnnotator's read-only verdict, so the pass consults that fact rather
+#     than walking for it a second time (rule 11).
 #
 # The switch is the environment: PCL_OPT=none turns everything off;
 # PCL_OPT=-raw-numeric,+str-buffer is a comma list of -name (off) / +name or

@@ -39,6 +39,7 @@ use Pl::PExpr;
 use Pl::InterpScan ();
 use Pl::VarAnnotator;
 use Pl::Passes ();
+use Pl::ClassicSort ();   # registers the Kind-B pass `classic-sort' (task #996)
 use Pl::CLForm qw(raw raw_wrap cl_sym cl_pkg);
 use Pl::GlobalPartition qw(global_decl_form);
 

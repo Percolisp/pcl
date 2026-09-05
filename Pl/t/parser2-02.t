@@ -535,8 +535,17 @@ EOF
   unlike($mp, qr/\(lambda \(\$_\)\n/,
          '#78: no v1 multiline lambda layout for a native block');
 
+  # The `map { $_ }` wrapper is load-bearing since task #996 (s470a5): the
+  # `classic-sort' pass rewrites `my @s = sort { $a <=> $b } @a' — an ARRAY
+  # ASSIGNMENT is a copying consumer, so it is licensed — to
+  # (%p-sort-classic :num-asc @a), which has no comparator lambda left to
+  # assert about.  `map' does NOT copy its input list, and `@a' hands aliases
+  # through, so this statement keeps the general form and the #78 property
+  # (ONE p-sort-cmp over the pair, scalar-context body) is still what is
+  # tested.  Its twin — that the licensed spelling DOES take the fast path —
+  # is Pl/t/classic-sort-01.t.
   my $st = Pl::Parser2->parse_code(
-    q{my @a = (3,1); my @s = sort { $a <=> $b } @a;});
+    q{my @a = (3,1); my @s = map { $_ } sort { $a <=> $b } @a;});
   # (\s+ between subforms: since the E2.final root flip the structural printer
   # may break long forms across lines — layout is free, the shape is pinned.)
   like($st,

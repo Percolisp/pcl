@@ -2,6 +2,131 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470a5 (Opus agent, 2026-09-05) — #996 half A5: the classic sort comparators; `classic-sort` is the optimization registry's first Kind-B pass; sortnum 7.4× → 3.2×, sortstr 3.5× → 1.9×
+
+**What shipped.**  `sort LIST` and the four classic comparator blocks
+(`{ $a <=> $b }`, `{ $b <=> $a }`, `{ $a cmp $b }`, `{ $b cmp $a }`) lower to
+`(%p-sort-classic MODE ARGS…)` — a path that reads VALUES instead of boxing
+every element and funcalling a comparator per comparison, and that does NOT
+send the source array through `%p-collect-list`'s monotone box promotion.
+Two files: `Pl/ClassicSort.pm` (the pass) and one block in
+`cl/pcl-runtime.lisp` (the runtime).  Guard `Pl/t/classic-sort-01.t`
+(27 rows, 5.1 s).  Generation **v2-700**; the three artifacts regenerated
+(stamp only — none of them contains a licensed sort).
+
+**Step 1, the corpus census** (250 `sort` calls over `lib/**.pm` +
+`cpan-tests/modules/**` + `perl-tests/*.t`, classified by comparator shape ×
+consumer × source; script kept in the agent scratch):
+
+| shape | n | | consumer | n | | source | n |
+|---|---|---|---|---|---|---|---|
+| no block | 105 | | assign-array | 114 | | array | 90 |
+| other block | 45 | | after-comma | 53 | | literal | 60 |
+| named cmp | 35 | | foreach-list | 16 | | keys | 48 |
+| scalar cmp | 21 | | block | 16 | | @_ | 8 |
+| `$a <=> $b` | 14 | | assign-list | 9 | | values | 7 |
+| `$b <=> $a` | 13 | | anon-array | 5 | | paren-list | 6 |
+| `$a cmp $b` | 9 | | assign-other | 8 | | user call | 6 |
+| `$b cmp $a` | 8 | | (rest) | 29 | | grep | 5 |
+
+**149 of 250 are a licensed SHAPE (60 %); 110 of those also carry a licence
+(44 % of every sort in the corpus).**  The 39 licensed shapes with no licence
+are almost all `after-comma` with an `@array` source — an argument position
+whose enclosing call is not one of the copying list operators.
+
+**Why the licence is about the consumer.**  `sort` returns ALIASES in perl and
+in PCL alike: `$_++ for sort { $a <=> $b } @a` writes back into `@a`, and
+`map { \$_ } sort @c` hands out the same scalar as `\$c[i]` — that is *why*
+`%p-collect-list` promotes each raw slot to a box.  So a value-sorting path is
+licensed by **A** a copying consumer or **B** a source that produces
+temporaries.  `Pl/ClassicSort.pm`'s header lists both sets and the probes
+behind them.
+
+**Two design corrections, both measured.**
+1. **`values` is not fresh.**  The design listed it with `keys`; probed,
+   `for my $v (sort { $a <=> $b } values %h) { $v .= "!" }` writes back into
+   the hash in perl and in PCL.  So do `grep` and a nested `sort`.  A USER SUB
+   CALL is fresh even when it returns `@arr` or `values %h` — the call
+   boundary copies (probed both).
+2. **Five modes, not four.**  `:default` (`sort LIST`) and `:str-asc`
+   (`{ $a cmp $b }`) share a fast path but not a FALLBACK: `p-sort`'s
+   no-comparator arm stringifies, while the block dispatches a `cmp` overload.
+   The guard row proves it — a class whose `cmp` handler REVERSES the order
+   sorts N3,N2,N1 through `{ $a cmp $b }` and N1,N2,N3 through `sort @objs`.
+
+**A deviation to review: `classic-sort` is Kind B, not Kind A.**  The task's
+design says a Kind-A emission site.  The licence is a fact about the
+CONSUMER, and the consumers are six different emitters — array assignment,
+list assignment, the anon-array constructor, push, the list operators,
+return — while the PExpr tree has no parent link, so a Kind-A gate would have
+to be spelled at all six (the rule-11 hard stop).  The lowered CLForm tree is
+the one place they all pass through (`Parser2::_lower_program`'s own comment:
+"the one place a lowered tree becomes text"), and it already carries the
+`p-foreach-raw` head — VarAnnotator's read-only verdict — so the pass
+CONSULTS that fact rather than walking for it a second time.  `PCL_OPT=none`
+and `PCL_OPT=-classic-sort` both restore today's emission either way.
+
+**The runtime.**  `%p-sort-classic` collects values without promoting the
+source; the per-element safety test is `%p-plain-scalar`, the gate-free core
+of `%p-storable-raw`'s rule — a plain number, string or undef carries no
+bless class, no is-ref flag, no dualvar halves, no tie proxy, no magic, so its
+readings are pure and may be taken ONCE.  `*p-any-overload-registered*` is
+deliberately NOT consulted: an overloaded value is a blessed box and the
+per-element test already excludes it.  When every value already IS its own key
+(reals under `<=>`, strings under `cmp` — the two bench rows) the values are
+sorted in place with `stable-sort` and no decoration at all; otherwise keys are
+computed exactly once into `(key . elem)` pairs.  A NaN key, and anything not
+plain, hands the whole sort back to `p-sort` with the mode's own comparator, so
+the two answers cannot drift.  `sort LIST` decides comparator-vs-list at RUN
+time, so `:default` makes that test itself, once per call.
+
+**Bench** (`perl tools/bench-exec.pl`, best-of-5, three interleaved passes,
+A = `PCL_OPT=-classic-sort` = today's general form, B = the pass on; box
+shared with a sibling agent, load 1.5–2.5):
+
+| row | A pcl(s) ×3 | B pcl(s) ×3 | best A → best B | ratio A → B |
+|---|---|---|---|---|
+| sortnum | 0.1854 0.1862 0.1963 | 0.0842 0.0846 0.0841 | 0.1854 → 0.0841 (**−54.6 %**) | 7.39× → **3.15×** |
+| sortstr | 0.2432 0.2617 0.2549 | 0.1312 0.1305 0.1301 | 0.2432 → 0.1301 (**−46.5 %**) | 3.53× → **1.87×** |
+
+Both beat s469bh's hand-replaced ceilings (−48.4 % / −40.4 %), which is the
+non-promoting collector's share.  A fourth pass taken after the gate finished
+read **2.98×** and **1.78×** (sortnum 0.0765, sortstr 0.1196) — better still,
+so the table above is the conservative reading, not the best one.  Controls, all inside their own run-to-run
+spread: `cfor` 0.0306/0.0321/0.0311 → 0.0285/0.0315/0.0294, `arrhash`
+0.0842/0.0885/0.0915 → 0.0841/0.0853/0.0848, `arrhash-k` 0.0703/0.0710/0.0764
+→ 0.0728/0.0760/0.0708, `feread` 0.1964/0.1999/0.1996 → 0.2012/0.2091/0.2083
+(feread's own spread with an identical setting, five runs: 0.1981–0.2125 =
+7.3 %, and its emission is byte-identical on both sides, so the 2.4 % gap is
+noise).
+
+**Bars.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` **200 files / 6820 rows**,
+the only failures the 13 known pclxs xs rows.  `tools/corpus-diff.pl ccdb6b7`:
+12 files differ, 90 changed regions, **every one** `(p-sort` → `%p-sort-classic`
+(checked mechanically); silent drops 5, unchanged.  **`PCL_OPT=none
+tools/corpus-diff.pl ccdb6b7` = emission identical across 111 files + 6 shapes**
+— the proof that the pass is the only emission change.  `emission-ab --ref
+ccdb6b7` over `lib/**.pm` + shapes: 28/28 SAME.  Over the wide population
+(perl 5.40.3's `t/` + `cpan-tests/modules/**`, 1007 files): SAME 941, DIFF 66,
+**RCDIFF 0**, and all 152 diff hunks are the same rewrite.  Companion
+`op/sort.t --jobs 1`: C 183/22 before, after AND under `PCL_OPT=none` — 0 NEW
+ROW, 0 SHORTFALL.  Guard inverse-verified with the pass off: exactly the 9
+positive rows fail, every negative and every runtime row still passes.
+
+**A stale guard repaired in the same commit** (the s416 rule): `parser2-02.t`
+t80 pinned the #78 shape "sort block is ONE p-sort-cmp over the pair" using
+`my @s = sort { $a <=> $b } @a` — an array assignment, hence licensed.  The
+statement is now wrapped in `map { $_ }`, which does not copy its input list,
+so the row tests exactly what it always tested; its twin (that the licensed
+spelling DOES take the fast path) is in `classic-sort-01.t`.
+
+**Filed: #1125** — emission is NONDETERMINISTIC.  A Perl arrayref
+stringification leaks into the `:captures` slot (`:captures ARRAY(0x…)`), so
+two runs of the SAME compiler on `t/op/try.t` differ byte for byte.  It
+defeats any byte-compare and would make a module-cache key unstable.
+
+**#996 half A3 (`push @local, X`) stays OPEN** in the same task — untouched
+here.
 ## Session 470c (Opus agent, 2026-09-05) — #1072: the artifact-staleness gate row now REGENERATES each artifact and compares the BODY, not only the `gen=` stamp
 
 **The hole.**  `Pl/t/artifact-staleness-01.t` discovered the three checked-in

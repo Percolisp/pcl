@@ -243,6 +243,8 @@
    #:p-pack #:p-unpack #:p-load-extension #:p-high-capture
    #:p-capture-write #:p-capture-fh
    #:p-grep #:p-map #:p-sort #:p-sort-get-fn #:p-sort-named #:p-reverse
+   ;; the classic-sort fast path (task #996 A5) — emitted, so exported
+   #:%p-sort-classic
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$
@@ -15588,7 +15590,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-680"
+(defparameter *pcl-cache-generation* "v2-700"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -16447,6 +16449,155 @@ buffer's fill-pointer; everything else falls back to file-length."
                                (make-array 0 :adjustable t :fill-pointer 0))))
               (stable-sort result (lambda (a b)
                                     (string< (to-string a) (to-string b)))))))))
+
+;;; ------------------------------------------------------------
+;;; THE CLASSIC-SORT FAST PATH (task #996 half A5; the Kind-B pass
+;;; `classic-sort' in Pl/ClassicSort.pm decides where it may be emitted).
+;;;
+;;; WHAT THE GENERIC PATH PAYS PER COMPARISON, and this one does not: two
+;;; make-p-box allocations (p-sort boxes each raw element so $a/$b alias
+;;; stably, [perl #78194]), a catch :p-return frame (p-sort-cmp wraps every
+;;; comparator body), a dynamic bind of the package $a/$b, a p-scalar-ctx
+;;; bind, an out-of-line funcall, and a to-number of the comparator's result.
+;;; AND BEFORE ANY OF THAT: %p-collect-list PROMOTES every raw element of the
+;;; source array to a box in place, and promotion is MONOTONE — so one plain
+;;; `sort { $a <=> $b } @a' makes @a pay box indirection on every later read
+;;; for the rest of the program.  This path reads values instead, and the
+;;; source keeps its raw slots.
+;;;
+;;; WHY THAT IS SAFE.  Reading a value is observable only when the value can
+;;; run user code (a tie FETCH, an overloaded "" / 0+ / <=> / cmp handler) or
+;;; when the caller can observe WHICH box it got (sort returns ALIASES in
+;;; perl and in PCL: `$_++ for sort { $a <=> $b } @a' writes back into @a).
+;;;   * the FIRST is answered per element by %p-plain-scalar below — a plain
+;;;     number, string or undef carries no handler and no tie, so its numeric
+;;;     and string readings are pure and may be taken ONCE;
+;;;   * the SECOND is answered by the COMPILER, which emits this call only
+;;;     where the aliases are unobservable (a copying consumer, or a list
+;;;     built entirely of fresh values) — see Pl/ClassicSort.pm.
+;;; Anything else falls back to the generic path, spelled EXACTLY as the
+;;; emitter would have spelled it, so the two answers cannot drift.
+
+(declaim (inline %p-plain-scalar))
+(defun %p-plain-scalar (v)
+  "The PLAIN scalar value V denotes — a number, a string, or perl's undef — or
+   NIL when V carries identity or user code: a bless class (hence any overload
+   handler), the is-ref flag, a dualvar's two halves, a tie proxy, a magic
+   cell, a container, or a hole.  NIL is never a plain value, so the two
+   answers cannot be confused.
+
+   This is the SAME split %p-storable-raw makes for the element write rule
+   (docs/boxed-aggregates-design-s455.md §4.1), read WITHOUT its *p-raw-elems*
+   gate: that function asks whether a SLOT may store the value unboxed, this
+   one asks whether READING the value can run user code — and the answer must
+   not change when the storage gate is flipped for an A/B."
+  (if (p-box-p v)
+      (let ((inner (p-box-value v)))
+        (and (not (p-box-class v))
+             (not (p-box-is-ref v))
+             (or (numberp inner)
+                 (eq inner *p-undef*)
+                 (and (stringp inner) (not (p-box-nv-ok v))))
+             inner))
+      (and (or (numberp v) (stringp v) (eq v *p-undef*)) v)))
+
+(defun %p-sort-collect-plain (out items)
+  "Collect ITEMS into OUT as PLAIN VALUES, without promoting any source slot.
+   T when every element was plain; NIL — OUT then meaningless — as soon as one
+   was not, which sends the whole sort to the generic path.
+
+   The walk knows exactly TWO shapes: a vector (an @array box or a raw list
+   value), whose slots are read as they stand, and a plain scalar.  Every
+   other shape %p-collect-list knows about — a flatten marker, a raw %hash, a
+   hole — answers NIL here and is flattened by %p-collect-list itself on the
+   fallback, so the general flattening rules stay in one place."
+  (dolist (item items t)
+    (let ((val (unbox item)))
+      (if (and (vectorp val) (not (stringp val)))
+          (dotimes (j (length val))
+            (let ((p (%p-plain-scalar (aref val j))))
+              (unless p (return-from %p-sort-collect-plain nil))
+              (vector-push-extend p out)))
+          (let ((p (%p-plain-scalar item)))
+            (unless p (return-from %p-sort-collect-plain nil))
+            (vector-push-extend p out))))))
+
+(defun %p-sort-classic-decorated (v keyfn pred)
+  "Sort V by KEYFN under PRED, computing each key EXACTLY ONCE.  Legal only
+   because every element is plain (%p-plain-scalar), so how many times the
+   program looks at a value is unobservable.  A NaN key answers NIL — the
+   generic comparator makes p-<=> yield undef for a NaN pair, i.e. `not less'
+   in both directions, and no CL predicate on the key reproduces that order,
+   so a NaN list goes to the generic path (task #996, D5)."
+  (let* ((n (length v))
+         (pairs (make-array n)))
+    (dotimes (i n)
+      (let ((k (funcall keyfn (aref v i))))
+        (when (and (floatp k) (sb-ext:float-nan-p k))
+          (return-from %p-sort-classic-decorated nil))
+        (setf (aref pairs i) (cons k (aref v i)))))
+    (let ((sorted (stable-sort pairs pred :key #'car)))
+      (dotimes (i n v)
+        (setf (aref v i) (cdr (aref sorted i)))))))
+
+(defun %p-sort-classic-numeric-p (mode)
+  "Does MODE compare numerically?  Validates the closed mode set on the way:
+   an unknown mode is a compiler/runtime disagreement and DIES naming the
+   value (CLAUDE.md rule 12)."
+  (case mode
+    ((:num-asc :num-desc) t)
+    ((:default :str-asc :str-desc) nil)
+    (t (error "PCL internal: %p-sort-classic: unknown mode ~S ~
+               (known: :default :num-asc :num-desc :str-asc :str-desc)"
+              mode))))
+
+(defun %p-sort-classic-sorted (vals mode numeric)
+  "Sort the collected plain VALS (a fill-pointer vector) into a fresh
+   simple-vector — the shape p-sort returns — or NIL when a NaN key sends the
+   sort to the generic path.  When every value already IS its own key (reals
+   under <=>, strings under cmp) there is nothing to decorate and the values
+   are sorted in place."
+  (let ((v (copy-seq vals)))
+    (if numeric
+        (let ((pred (if (eq mode :num-asc) #'< #'>)))
+          (if (every #'realp v)
+              (and (notany #'%pcl-nan-p v) (stable-sort v pred))
+              (%p-sort-classic-decorated v #'to-number pred)))
+        (let ((pred (if (eq mode :str-desc) #'string> #'string<)))
+          (if (every #'stringp v)
+              (stable-sort v pred)
+              (%p-sort-classic-decorated v #'to-string pred))))))
+
+(defun %p-sort-classic-generic (mode items)
+  "THE FALLBACK, spelled exactly as the emitter spells the general form for
+   the same MODE, so the fast and the general answer cannot drift.  :default
+   is `sort LIST' with no block, whose runtime is p-sort's own no-comparator
+   arm — NOT the same code as { $a cmp $b } (that one dispatches a `cmp'
+   overload, this one stringifies), which is why the two are separate modes."
+  (case mode
+    (:default  (apply #'p-sort items))
+    (:num-asc  (apply #'p-sort (lambda (a b) (p-<=> a b)) items))
+    (:num-desc (apply #'p-sort (lambda (a b) (p-<=> b a)) items))
+    (:str-asc  (apply #'p-sort (lambda (a b) (p-str-cmp a b)) items))
+    (:str-desc (apply #'p-sort (lambda (a b) (p-str-cmp b a)) items))
+    (t (%p-sort-classic-numeric-p mode))))
+
+(defun %p-sort-classic (mode &rest items)
+  "`sort LIST' and the four classic comparators, over plain scalars.
+   MODE is the closed set :default (no block) / :num-asc / :num-desc /
+   :str-asc / :str-desc."
+  (let ((numeric (%p-sort-classic-numeric-p mode)))
+    ;; `sort LIST' decides comparator-vs-list at RUN time: p-sort takes a
+    ;; first argument that unboxes to a function as the comparator.  The
+    ;; parser could not know, so the test belongs here — once per call.
+    (if (and (eq mode :default)
+             items
+             (functionp (%p-sort-resolve-comparator (unbox (first items)))))
+        (apply #'p-sort items)
+        (let ((vals (make-array 16 :adjustable t :fill-pointer 0)))
+          (or (and (%p-sort-collect-plain vals items)
+                   (%p-sort-classic-sorted vals mode numeric))
+              (%p-sort-classic-generic mode items))))))
 
 (defun p-reverse (&rest items)
   "Perl reverse: in list context reverses element order; in scalar context
