@@ -1208,6 +1208,75 @@ stale shape expectations** (manifest-01.t's tier row, regexp-subst-01.t's 23
 rows, codegen-01.t's raw-newline row, clform-01.t's 12): repaired in the same
 commit, per the s416 rule.
 
+**The merge session (2026-09-06) — the rebase onto `d59e58c`, four stale
+guards more, one real bug, and the wide measurements the shutdown owed.**
+
+*The guards first, on the pre-rebase tree, so the repair is attributable to
+this batch's own flag-day.*  Four MORE `Pl/t` files encoded the old shape —
+`decl-facts-01.t` (6 rows), `parser2-01.t` (4), `prototype-01.t` (1),
+`refusal-site-01.t` (1) — and every edit STRENGTHENS under the s377 rule: the
+`[^)]*` wildcards that used to skate over the facts plist are now the literal
+plist (`(:writes-args t :needs ())`), and `refusal-site-01.t`'s die-site regex
+now reads the `(p-esc "…")` the emission actually carries.  **The grep the
+shutdown note proposed names only four of the eight files**; the predicate
+that names all of them is "mentions `p-sub`, a regex-literal macro, `p-esc`, a
+facts key, or a control-character string expectation" — 58 files, 2701 rows,
+`prove -j3` PASS.
+
+*The rebase* took four conflict hunks, each resolved by keeping BOTH sides.
+The one that mattered is `Pl/ExprToCL.pm`: main's `s///ee` rounds (#1083) now
+build `$body` INSIDE this batch's keyword return, and main's `@mod_strs` is
+gone because `@tail` is the one place the four `p-subst` returns read their
+fixed slots from.  The artifact commit was `--skip`ped and replaced by a
+regeneration at generation **v2-830** (above main's v2-820).
+
+*One real bug, and the sweep is what found it.*  The batch had never had a
+full sweep; its first one reported exactly one NEW SHORTFALL —
+`perl-tests/eval.t 9 → 10 planned rows NEVER PRODUCED` — surviving the serial
+re-run.  The row is eval.t test 6, `print eval '$foo = /'; like($@, qr/Search/)`.
+`_parse_regex_content` locates the closing delimiter with `rindex`, which for
+an UNTERMINATED literal lands on the OPENING one, so the two-character content
+`/` + newline read as an EMPTY pattern with the newline as FLAGS — an empty
+pattern matches, the eval returned **1**, and printing that 1 without a
+newline glued it onto `not ok 6` and cost the row its TAP.  The function is
+PRE-EXISTING and byte-identical to the base; what changed is that the keyword
+form makes its output the EMITTED `:pat`/`:flags`, where before only the
+interpolation gate read it and the raw string went to `p-regex` for the
+runtime to re-parse.  **A tolerant parse behind a runtime that re-did the work
+became an authoritative one that invents a value** — the base at least DIED
+(with a leaked CL type error).  Rule 12, in perl's own words because they are
+free here: `die "Search pattern not terminated\n" if $end_pos <= $prefix_len`.
+Test 6 now PASSES (task **#1219**; sweep TOTAL 18644 → **18645**, the
+pass-baseline row edited by hand with its cause; guard
+`Pl/t/ir-data-form-01.t` 57–58, inverse-verified, with six terminated
+delimiter spellings as the negative half).
+
+*The wide measurements, all four populations vs `d59e58c`.*  **RCDIFF 0
+everywhere** — perl-tests 102 DIFF, lib+shapes 26, perl's own `t/` 517 of 610,
+cpan 195 of 294.  Mechanically EXPLAINED (the three shapes removed from both
+sides, the rest byte-identical): perl-tests 110/111, lib+shapes 28/28, perl's
+`t/` 590/598, cpan 292/293.  **The 9 residues are two families, both
+measured neutral**: five are the pre-existing `_cap_inlining_if_huge` wrapper
+crossing its 20 000-character threshold because the new forms are longer
+(op/state.t, op/tie_fetch_count.t, op/write.t, porting/header_parser.t,
+Text-CSV/71_pp.t — `notinline` 0 → 1, `p-defcell` counts identical), and four
+are #1218's `_blank_string_innards` p-defcell parity bug (op/sort.t's
+`@result`, op/lex_assign.t, op/threads.t's `$SIG`, win32/system.t's `@echo`).
+A companion run of the six runnable ones reads its SNAPSHOT exactly, file for
+file, with ROW DIFF 0/0/0/0.
+
+*The tier, measured at last* (it goes into ir-spec §10-tier as a table): 6291
+regex literals over 1030 files — **native 5030 (80.0 %), dynamic 1085
+(17.2 %), pcre 112 (1.8 %), refused 64 (1.0 %)**.  A target that implements
+only the native tier already runs four fifths of what PCL emits; `:dynamic`
+is the bucket to size first, because it is not a construct verdict at all but
+"the pattern is built at run time".
+
+Final bars: gate **211 files / 7206 tests**, green except the 13 standing
+pclxs xs rows; full sweep **GATE clean**, 0 new / 0 fixed / 0 LOST, drops 5 =
+census, SHORTFALL +0, TOTAL passing **18645**; `pack.t` 5636/89 = baseline;
+`ir-host-leak` 31 = 31 with byte-identical SETS.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same

@@ -2774,6 +2774,25 @@ the bigger engine" — is the right one.
 
 `p-tr` has no `:tier`: a transliteration needs no regex engine.
 
+**What the tier actually costs a target, MEASURED over the four populations
+(s470bq, the batch's own flag-day A/B).**  A target that implements only the
+`:native` tier already runs four fifths of every regex literal PCL emits, and
+`:refused` — the constructs no other engine can have, `(?{…})`/`(??{…})` and
+the recursion/`\G` family — is one percent:
+
+| population | files | regex literals | native | dynamic | pcre | refused |
+|---|---:|---:|---:|---:|---:|---:|
+| `perl-tests/` | 111 | 916 | 853 | 57 | 1 | 5 |
+| `lib/` + the `Pl/t/shapes` corpus | 28 | 49 | 48 | 1 | 0 | 0 |
+| perl's own `t/` | 598 | 4998 | 3842 | 986 | 111 | 59 |
+| `cpan-tests/modules/**/t/` | 293 | 328 | 287 | 41 | 0 | 0 |
+| **all four** | **1030** | **6291** | **5030** (80.0 %) | **1085** (17.2 %) | **112** (1.8 %) | **64** (1.0 %) |
+
+`:dynamic` is not a construct verdict at all — it is "the pattern is built at
+run time", so the classifier cannot see the text and the target must carry
+whatever its own `p-regex-from-parts` path can compile.  It is the second
+biggest bucket and it is the one a translator should size first.
+
 ### 10a. The inventory is GENERATED, and each op's contract is a docstring tail (normative, s470bm, task #1170)
 
 The full inventory is data, not prose: **`docs/ir-op-inventory.tsv`** (one row
