@@ -1974,7 +1974,11 @@
                (symbol-value (synonym-stream-symbol stream))
                stream)))
     (and (sb-sys:fd-stream-p s)
-         (eq (sb-impl::fd-stream-external-format s) :latin-1)
+         (let ((ef (sb-impl::fd-stream-external-format s)))
+           ;; The byte format is a LIST now — `(:latin-1 :replacement #\?)` —
+           ;; so the test is on its HEAD; the bare keyword still answers for a
+           ;; handle a program opened `:encoding(latin1)` by hand.
+           (or (eq ef :latin-1) (and (consp ef) (eq (car ef) :latin-1))))
          t)))
 
 (defun %p-out-string (s stream site)
@@ -1989,6 +1993,13 @@
    out as UTF-8 with the `Wide character in SITE` warning — once per ARGUMENT,
    which is what perl counts (two wide arguments in one print warn twice).
 
+   SITE NIL = upgrade SILENTLY, and that is not a convenience: a warning runs
+   the PROGRAM's $SIG{__WARN__}, so the harness's own TAP line or a PCL
+   diagnostic raising one puts a warning into a program that never asked for
+   it.  perl-tests/magic.t installs `$SIG{__WARN__} = sub { die "Dying on
+   warning", @_ }` at BEGIN, so ONE such warning ended that whole file (158
+   passing rows became 90).  Only a real perl print/printf/say passes a site.
+
    %p-with-wide-upgrade's handler is the BACKSTOP for writes that do NOT come
    through here (the harness's own `format t`, a die message): it is signalled
    per character and can only fix the character it is given, so anything that
@@ -1996,7 +2007,7 @@
   (write-string
    (cond ((not (%p-wide-char-p s)) s)
          ((not (%p-byte-stream-p stream)) s)
-         (t (p-warn (format nil "Wide character in ~A" site))
+         (t (when site (p-warn (format nil "Wide character in ~A" site)))
             (%p-utf8-octets s)))
    stream))
 
@@ -2015,7 +2026,7 @@
    to do with I/O.  Perl's own answer to a wide character on a byte handle is
    to warn and write UTF-8, and that is what these lines now get."
   (%p-with-wide-upgrade
-   (%p-out-string (apply #'format nil control args) *error-output* "print"))
+   (%p-out-string (apply #'format nil control args) *error-output* nil))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -13138,14 +13149,34 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
 ;;; The three standard handles take (3)+(4) at load time and follow `use open
 ;;; qw(:std …)` after that.
 
-(defvar *p-default-in-ef* :latin-1
+(defparameter +p-byte-external-format+ '(:latin-1 :replacement #\?)
+  "THE byte discipline: latin-1, so every octet is one character, WITH A
+   REPLACEMENT so the stream can never SIGNAL.
+
+   The replacement is not laxity — it is what keeps a byte STDERR able to carry
+   text PCL itself did not route.  SBCL's own compiler diagnostics go straight
+   to descriptor 2, and `cl/pcl-test.lisp` is `--load`ed (compiled) at RUN time
+   by both measurement runners: one style warning quoting a docstring that
+   holds an EM DASH signalled a stream-encoding-error nothing was there to
+   handle, and perl-tests/substr.t, magic.t, tr.t and readline.t ALL crashed at
+   load with 0 rows.  A core BUILD is the same shape.
+
+   It costs nothing a perl program can observe: every octet (0-255) still goes
+   out byte for byte, and a WIDE character in a perl `print` never reaches the
+   encoder — %p-out-string converts the whole string to UTF-8 octets first,
+   which is perl's own answer.  What becomes `?` is exactly the text that had
+   no business being a byte in the first place: an SBCL warning, a backtrace.")
+
+(defvar *p-default-in-ef* +p-byte-external-format+
   "The external format a READ handle gets when its open mode names no layer.
    `use open` moves it; perl's own default is bytes (#1115).")
 
-(defvar *p-default-out-ef* :latin-1
+(defvar *p-default-out-ef* +p-byte-external-format+
   "The external format a WRITE handle gets when its open mode names no layer.")
 
-(defvar *p-std-efs* (vector :latin-1 :latin-1 :latin-1)
+(defvar *p-std-efs* (vector +p-byte-external-format+
+                            +p-byte-external-format+
+                            +p-byte-external-format+)
   "The external format of each standard handle, INDEXED BY DESCRIPTOR — read by
    %p-std-rebuild at every rebuild rather than frozen at load, so `use open
    qw(:std …)` and `binmode(STDOUT, ':utf8')` both work by writing here and
@@ -13167,7 +13198,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
     ;; `:encoding(latin1)` must give the same keyword as the default does.
     (cond ((or (string-equal trimmed "utf8") (zerop (length trimmed))) :utf-8)
           ((member key '(:utf-8 :utf8 :|UTF-8-STRICT|)) :utf-8)
-          ((member key '(:latin-1 :latin1 :iso-8859-1 :iso8859-1)) :latin-1)
+          ((member key '(:latin-1 :latin1 :iso-8859-1 :iso8859-1))
+           +p-byte-external-format+)
           ((sb-int:get-external-format key) key)
           (t (%p-unsupported-value "open layer"
                                    (format nil ":encoding(~A)" trimmed)
@@ -13180,7 +13212,8 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    octets; `:utf8` and `:encoding(...)` decode."
   (let ((l (string-trim " " layer)))
     (cond ((zerop (length l)) nil)
-          ((or (string-equal l "raw") (string-equal l "bytes")) :latin-1)
+          ((or (string-equal l "raw") (string-equal l "bytes"))
+           +p-byte-external-format+)
           ((string-equal l "utf8") :utf-8)
           ((and (> (length l) 9)
                 (string-equal "encoding(" (subseq l 0 9))
@@ -13226,6 +13259,36 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    `use open IN => …` sets.  A read/write mode counts as input: perl's IN
    layer applies to it, and PCL has one format per stream either way."
   (member base-mode '("<" "+<" "+>" "-|" "<&" "<&=") :test #'string=))
+
+(defmacro p-default-layers ((in-layers out-layers) &body body)
+  "Run BODY — one `open` / `readpipe` / backtick site — with the layers a
+   `use open` puts in force AT THAT SITE (task #1222).
+
+   PERL'S `open` PRAGMA IS LEXICAL, and that is why this is a form around the
+   site rather than a global the pragma sets when it runs.  Measured: a module
+   whose own top carries `use open qw(:utf8)` changed the CALLING program's
+   plain `open` (11-octet file: perl `main-plain: 11 module-utf8: 8`, PCL
+   `8 8`), and a `use open` inside a block leaked to the rest of the file
+   (perl `after-block-plain: 11`, PCL `8`).  Before #1115 that was masked —
+   every handle decoded anyway — so making bytes the default is what turned it
+   into a silent wrong: any CPAN module carrying `use open` flipped its
+   caller's I/O.  The compiler knows the pragma's LEXICAL extent (it is a
+   compile-time fact, tracked like `use integer` on the Environment's scope
+   stack) and emits this wrapper only at sites inside it.
+
+   IN-LAYERS / OUT-LAYERS are layer SUFFIX strings as %p-layer-ef reads them
+   (\":utf8\", \":encoding(cp1252)\", \"\" for none), so the mode's own layers
+   still win — they are parsed after these, by the same left-to-right rule.
+   The `:std` half of the pragma is NOT here: perl applies that to the three
+   standard handles once, at the pragma, and it stays the one runtime effect
+   (p-use-open)."
+  `(let ((*p-default-in-ef*  ,(if (and (stringp in-layers) (plusp (length in-layers)))
+                                  `(%p-layer-ef ,in-layers *p-default-in-ef*)
+                                  '*p-default-in-ef*))
+         (*p-default-out-ef* ,(if (and (stringp out-layers) (plusp (length out-layers)))
+                                  `(%p-layer-ef ,out-layers *p-default-out-ef*)
+                                  '*p-default-out-ef*)))
+     ,@body))
 
 (defun %p-line-buffer-if-tty (stream)
   "perl decides an OUTPUT handle's buffering by isatty and nothing else, and
@@ -14389,7 +14452,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        (let* ((text (if (or (null layer) (eq layer *p-undef*))
                         ":raw"
                         (to-string (unbox layer))))
-              (ef (%p-layer-ef text :latin-1))
+              (ef (%p-layer-ef text +p-byte-external-format+))
               (target (%p-stream-target stream)))
          (cond
            ((not (sb-sys:fd-stream-p target)) t)

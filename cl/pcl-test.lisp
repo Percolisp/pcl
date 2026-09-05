@@ -21,10 +21,13 @@
    name would signal a stream-encoding-error inside the write and take the
    whole file with it.  perl's own answer is to warn `Wide character in print`
    once and write the string's UTF-8 encoding, which is what %p-out-string
-   does; the handler is the backstop for the format directives' own output.
+   does, and SILENTLY: a warning would run the PROGRAM's $SIG{__WARN__}, and
+   perl-tests/magic.t dies on any warning at all (`sub { die "Dying on
+   warning", @_ }` at BEGIN), so one wide TAP description ended that whole
+   file.  The handler is the backstop for the format directives' own output.
    It replaced 25 direct `format t` calls: one writer, not twenty-five."
   (%p-with-wide-upgrade
-    (%p-out-string (apply #'format nil control args) *standard-output* "print")))
+    (%p-out-string (apply #'format nil control args) *standard-output* nil)))
 
 ;;; Test state
 (defvar *test-count* 0)
