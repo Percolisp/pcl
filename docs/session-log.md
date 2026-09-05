@@ -1277,6 +1277,21 @@ pclxs xs rows; full sweep **GATE clean**, 0 new / 0 fixed / 0 LOST, drops 5 =
 census, SHORTFALL +0, TOTAL passing **18645**; `pack.t` 5636/89 = baseline;
 `ir-host-leak` 31 = 31 with byte-identical SETS.
 
+*The broad companion leg, run at the end.*  `--all --quick --jobs 4`, 528
+files, flags **40 movers, every one "REAL MOVE (both runs agree)"**, plus a
+ROW DIFF of 276 NEW / 620 FIXED — and **none of that scale is this batch**.
+The 45 movers (40 flagged + the 9 NEW-ROW files) were re-run on a
+`git archive d59e58c` extraction and **42 of 45 read IDENTICALLY**; the mro/*
+STALE family, the io/* moves and op/read.t's 264 rows are s470br's #1115 and
+s470bn's, whose records say this snapshot and `perl-suite-fails.tsv` were
+deliberately left unspliced.  The three that differed were re-run on the SAME
+FOOTING on both trees: io/open.t 154/34 both (batch contention), io/pvbm.t
+20/8 both (the flake recorded six times since s437), and **op/eval.t 130/38 →
+131/37 — the batch's one companion mover, the same single #1219 row the
+perl-tests sweep moved.**  `baselines/perl-suite-run.tsv` spliced by hand for
+that row only, carrying both its cause and the reason the other 44 are not
+touched.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
