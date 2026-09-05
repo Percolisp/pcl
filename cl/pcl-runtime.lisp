@@ -8586,9 +8586,15 @@ per element."
   "Get the BOX at array index (for l-value operations like chop, ++).
    Creates box if needed, auto-extends array. Returns the box itself."
   (let* ((a (unbox arr)))
-    ;; If array is undef, can't get box from it
-    (when (eq a *p-undef*)
-      (return-from p-aref-box (make-p-box *p-undef*)))
+    ;; THE INTERMEDIATE VIVIFICATION (#1058, s470bk) — the array twin of the
+    ;; rule spelled out in p-gethash-box: an undef container that IS a writable
+    ;; place is vivified into an array (perl's lvalue autovivification), so
+    ;; `$h{a}[0]++` and `$a[0][1]++` reach a slot the program can read back;
+    ;; a raw (unwritable) undef keeps the detached box.
+    (when (or (eq a *p-undef*) (null a))
+      (if (p-box-p arr)
+          (setf a (p-ensure-arrayref arr))
+          (return-from p-aref-box (make-p-box *p-undef*))))
     (let* ((i (truncate (to-number idx)))
            (len (if (vectorp a) (length a) 0))
            (actual-idx (if (< i 0) (+ len i) i)))
@@ -9535,9 +9541,22 @@ which is one of #1140's escape spellings (probed)."
    Creates box if needed (autovivification). Returns the box itself."
   (let* ((h (unbox hash))
          (k (to-string key)))
-    ;; If hash is undef, can't get box from it
-    (when (eq h *p-undef*)
-      (return-from p-gethash-box (make-p-box *p-undef*)))
+    ;; THE INTERMEDIATE VIVIFICATION (#1058, s470bk).  An undef CONTAINER that
+    ;; is a writable place is dereferenced-and-created, exactly as perl does:
+    ;; `$h{a}{b}++` lowers to (p-gethash-box (p-gethash-box %h "a") "b"), and
+    ;; the inner call hands the outer one the live box for key "a" — a place to
+    ;; vivify INTO.  Returning a fresh DETACHED box here instead (what this did
+    ;; before) made `$h{a}{b}++` increment a box nobody could reach: the
+    ;; increment was silently LOST while `exists $h{a}` still said 1.
+    ;; NIL is the array-slot spelling of the same undef ($a[0]{k} — %p-elem-cell
+    ;; promotes a hole to a box of NIL), and it used to reach GETHASH and die.
+    ;; A container that is NOT a box (a raw *p-undef* value) has nowhere to
+    ;; vivify to, so it keeps the detached box — that is what stops a read path
+    ;; that happens to route here from creating structure.
+    (when (or (eq h *p-undef*) (null h))
+      (if (p-box-p hash)
+          (setf h (p-ensure-hashref hash))
+          (return-from p-gethash-box (make-p-box *p-undef*))))
     ;; Special markers don't support boxing
     (when (%p-hash-marker-p h)
       (return-from p-gethash-box (make-p-box *p-undef*)))
