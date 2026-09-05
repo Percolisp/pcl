@@ -695,3 +695,20 @@ not-supported.md: 'Error compatibility for invalid Perl input'. (Scalar warn: va
                 ("prototype"
                  :principle9
                  "a kv-slice passed to a hash-ref prototype must die 'Type of arg 1 ... must be hash (not key/value hash slice)' -- error detection of invalid Perl. not-supported.md: 'Error compatibility for invalid Perl input'."))
+
+;; multideref.t: the RT #130727 corner — `@{local $x[0][0]} = 1` with an UNDEF
+;; intermediate.  perl dies "Can't use an undefined value as an ARRAY reference"
+;; WITHOUT vivifying (a deliberate perl decision for OPpLVAL_INTRO+OPpDEREF —
+;; perl's own test calls the combination senseless); PCL localizes, vivifies and
+;; assigns, exactly as the non-`local` `@{$x[0][0]} = 1` does on both sides.
+;; These two rows passed BY ACCIDENT before s470bk (#1058 write-vivification):
+;; PCL did not die there either, but nothing was vivified, so `!defined` held.
+;; Accepted divergence, RULED s470 (Fable).  not-supported.md: '`local` on
+;; hash/array elements and typeglobs' (the RT #130727 paragraph).
+(register-skips "multideref.t"
+                ("^RT #130727 array not autovivified$"
+                 :lvalue
+                 "`@{local $x[0][0]} = 1` on an undef intermediate: perl dies without vivifying (RT #130727 quirk), PCL vivifies and assigns like the non-local spelling. not-supported.md: '`local` on hash/array elements and typeglobs'.")
+                ("^RT #130727 part 2: array not autovivified$"
+                 :lvalue
+                 "`@{1, local $x[0][0]} = 1` on an undef intermediate: the same RT #130727 quirk. not-supported.md: '`local` on hash/array elements and typeglobs'."))

@@ -976,12 +976,28 @@ row now pass and are no longer in the skip registry.
 
 ## `local` on hash/array elements and typeglobs
 
-**PCL behaviour (all now supported):**
+**PCL behaviour (supported; two element corners below):**
 - `local $scalar`, `local @array`, `local %hash` — supported.
 - `local $hash{key}`, `local @arr[N]`, `local @hash{@keys}` — supported (sessions 85–86, via `p-local-hash-elem` / `p-local-array-elem` macros).
 - `local *GLOB` — supported (sessions 75–79, via `p-local-glob`).
 
 **Affected tests:** `perl-tests/local.t` still fails due to `Tie::Array` dependency which causes a hang — not a `local` issue.
+
+**Two element corners (s470, Fable, probed vs perl 5.40.3):**
+
+- **The RT #130727 quirk — ACCEPTED DIVERGENCE.**  `@{local $x[0][0]} = 1` (and
+  `@{1, local $x[0][0]} = 1`) when `$x[0]` is undef: perl dies `Can't use an
+  undefined value as an ARRAY reference` and leaves `$x[0][0]` undef — a deliberate
+  perl decision for an op that is both `OPpLVAL_INTRO` and `OPpDEREF` (perl's own
+  test comments "it may not make much sense").  PCL localizes, vivifies and assigns,
+  exactly what both perl and PCL do for the non-`local` `@{$x[0][0]} = 1`.  Affected:
+  `perl-tests/multideref.t` rows 47 and 49 ("RT #130727 array not autovivified"), in
+  `cl/skip-registry.lisp`; they passed BY ACCIDENT before s470bk (#1058) — PCL never
+  died there either, but nothing was vivified, so `!defined` happened to hold.
+- **`local` on a nested element whose intermediate is undef — BUG, task #1190 (not a
+  limitation).**  `local $y[0][0] = 5` must vivify `$y[0]` and read 5 inside the scope;
+  PCL reads empty and never vivifies.  `my $q = local $w[0][0]` likewise leaves `$w[0]`
+  undef where perl vivifies.  Owner #1190 (the local-element family, #508–#510).
 
 ---
 
