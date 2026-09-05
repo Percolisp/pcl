@@ -15472,6 +15472,18 @@ buffer's fill-pointer; everything else falls back to file-length."
    descriptor 3 as the file named \"3\", and a handle that was not open must
    stay EBADF rather than becoming a pathname.")
 
+(defvar *pcl-stat-cache-type* nil
+  "Which FLAVOUR of stat last filled the `_` cache — :stat or :lstat, nil
+   before the first one.  perl remembers this and DIES when `_` is then read
+   by the other flavour, so `-e $f; -l _` is fatal (task #1047).")
+
+(defvar *pcl-stat-cache-ok* nil
+  "Whether the operation that filled the `_` cache SUCCEEDED.  perl's `_` after
+   a FAILED stat is an INVALID BUFFER, not a re-usable operand: every filetest
+   but -T/-B answers EBADF from it, and -T/-B retry the remembered NAME (hence
+   ENOENT).  PCL caches the OPERAND rather than the buffer, so without this
+   flag a failed stat left an operand that simply worked again (task #1047).")
+
 (defun %p-stat-fail (errno)
   "THE failure exit of the stat/filetest family: record ERRNO in $! and answer
    NIL.  perl sets $! on every one of them — `-e $f or die \"…: $!\"` is an
@@ -15576,6 +15588,35 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((stringp v) (values :path v))     ; a string is a PATH (task #1049)
       (t (values :path (to-string v))))))
 
+(defun %p-stat-flavour (op)
+  "Which stat an operator runs — :lstat for `-l' and `lstat', :stat for every
+   other member of the family.  perl remembers it beside the `_' buffer."
+  (if (or (string= op "l") (string= op "lstat")) :lstat :stat))
+
+(defun %p-stat-cache-operand (op)
+  "What `_` resolves to for operator OP.
+
+   TWO of perl's rules live here and neither can be derived from the operand
+   alone (task #1047).  (1) The FLAVOUR: reading `_' with `-l' or `lstat' when
+   the buffer was filled by a plain `stat' is FATAL, in perl's own two
+   wordings.  (2) A FAILED stat leaves an INVALID buffer: every filetest but
+   -T/-B answers EBADF from it, while -T/-B go on to OPEN the remembered NAME
+   and so answer ENOENT — the split `t/op/stat_errors.t` asserts for its `_`
+   arguments, and probed directly (`lstat \"/nope\"; -e _` is errno 9,
+   `-T _` is errno 2)."
+  (when (and (eq *pcl-stat-cache-type* :stat)
+             (eq (%p-stat-flavour op) :lstat))
+    (p-die (if (string= op "lstat")
+               "The stat preceding lstat() wasn't an lstat"
+               "The stat preceding -l _ wasn't an lstat")))
+  (setf *pcl-stat-cache-type* (%p-stat-flavour op))
+  (cond
+    (*pcl-stat-cache-ok* (values *pcl-stat-cache-kind* *pcl-stat-cache-path*))
+    ((and (eq *pcl-stat-cache-kind* :path)
+          (or (string= op "T") (string= op "B")))
+     (values :path *pcl-stat-cache-path*))
+    (t (values :bad nil))))
+
 (defun %p-stat-operand (arg op)
   "THE ONE resolution of a stat / lstat / filetest operand.  OP is the
    operator's own name — one letter for a filetest, \"stat\" or \"lstat\" for
@@ -15596,11 +15637,12 @@ buffer's fill-pointer; everything else falls back to file-length."
     (cond
       ((not (eq ov :none)) (values :over ov))
       ((eq (if (p-box-p arg) (p-box-value arg) arg) '%pcl-stat-cache)
-       (values *pcl-stat-cache-kind* *pcl-stat-cache-path*))
+       (%p-stat-cache-operand op))
       (t
        (multiple-value-bind (kind val) (%p-stat-resolve arg op)
          (setf *pcl-stat-cache-path* val
-               *pcl-stat-cache-kind* kind)
+               *pcl-stat-cache-kind* kind
+               *pcl-stat-cache-type* (%p-stat-flavour op))
          (values kind val))))))
 
 (defun %p--path (kind val)
@@ -15622,13 +15664,17 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-stat-buf (kind val lstatp)
   "Run the stat for an already-resolved operand: the sb-posix struct, or NIL
-   with $! set the way perl sets it."
-  (if (eq kind :fd)
-      (%p-stat-try (sb-posix:fstat val))
-      (multiple-value-bind (path err) (%p--path kind val)
-        (if path
-            (%p-stat-try (if lstatp (sb-posix:lstat path) (sb-posix:stat path)))
-            (%p-stat-fail err)))))
+   with $! set the way perl sets it.  Records whether it SUCCEEDED, because
+   that is half of what `_` means — see *pcl-stat-cache-ok*."
+  (let ((st (if (eq kind :fd)
+                (%p-stat-try (sb-posix:fstat val))
+                (multiple-value-bind (path err) (%p--path kind val)
+                  (if path
+                      (%p-stat-try
+                       (if lstatp (sb-posix:lstat path) (sb-posix:stat path)))
+                      (%p-stat-fail err))))))
+    (setf *pcl-stat-cache-ok* (and st t))
+    st))
 
 (defun %p-stat-impl (file-or-fh)
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
@@ -15662,16 +15708,20 @@ buffer's fill-pointer; everything else falls back to file-length."
           (and st (funcall pred st))))))
 
 (defun %p--access-test (file op mode)
-  "Shared body for -r/-w/-x: resolve FILE, then access(2) with MODE.  perl
-   answers these from the stat buffer's mode bits against the effective ids;
-   PCL asks the kernel, which also honours ACLs."
+  "Shared body for -r/-w/-x: resolve FILE, STAT it, then access(2) with MODE.
+   perl answers these from the stat buffer's mode bits against the effective
+   ids; PCL asks the kernel, which also honours ACLs — but the stat still runs,
+   because perl's does: it is what fills `_` (op/filetest.t asserts
+   `-T _` works after `-r $ioref`) and what makes a missing file answer ENOENT
+   rather than access(2)'s own errno."
   (multiple-value-bind (kind val) (%p-stat-operand file op)
     (if (eq kind :over)
         val
-        (multiple-value-bind (path err) (%p--path kind val)
-          (if path
-              (%p-stat-try (progn (sb-posix:access path mode) 1))
-              (%p-stat-fail err))))))
+        (and (%p-stat-buf kind val nil)
+             (multiple-value-bind (path err) (%p--path kind val)
+               (if path
+                   (%p-stat-try (progn (sb-posix:access path mode) 1))
+                   (%p-stat-fail err)))))))
 
 (defun %p--e-impl (file)
   "Perl -e: the file exists — a stat that succeeds, which is perl's own test."
@@ -15827,9 +15877,13 @@ buffer's fill-pointer; everything else falls back to file-length."
     (if (eq kind :over)
         (values nil val)
         (multiple-value-bind (path err) (%p--path kind val)
-          (if path
-              (values (%p--scan-first-block path) nil)
-              (progn (%p-stat-fail err) (values nil nil)))))))
+          (let ((scan (if path
+                          (%p--scan-first-block path)
+                          (progn (%p-stat-fail err) nil))))
+            ;; `-T` on a closed handle RESETS the stat info (op/filetest.t):
+            ;; its success is the family's, so it records like a stat.
+            (setf *pcl-stat-cache-ok* (and scan t))
+            (values scan nil))))))
 
 (defun %p--T-impl (file)
   "Perl -T: heuristic text-file test (empty files are text)"
@@ -20560,14 +20614,21 @@ buffer's fill-pointer; everything else falls back to file-length."
    return as-is (e.g. *{$glob}{CODE} where $glob = \\*{...})."
   (let ((inner (if (p-box-p name-box) (unbox name-box) name-box)))
     (%p-check-symbol-reference name-box)
-    (if (p-typeglob-p inner)
-        inner
-        ;; Unqualified → the package in effect: %p-glob-dynamic-name, the one
-        ;; reading every dynamic-glob path shares.
-        (multiple-value-bind (pkg-str bare-str) (%p-glob-dynamic-name name-box)
-          (let ((pkg (or (%pcl-find-package pkg-str)
-                         (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
-            (make-p-typeglob pkg (%pcl-invert-case bare-str)))))))
+    (cond
+      ((p-typeglob-p inner) inner)
+      ;; A LEXICAL FILEHANDLE has no glob object here: perl's `*$fh` is the
+      ;; anonymous glob the open created, and PCL's `$fh` holds the stream
+      ;; itself.  Hand the HANDLE through — `p-glob-slot` answers its IO and
+      ;; GLOB slots from it (task #1047).  Stringifying it into a glob NAME
+      ;; (which is what this used to do) made `*$fh{IO}` undef.
+      ((or (streamp inner) (%p-socket-p inner)) inner)
+      (t
+       ;; Unqualified → the package in effect: %p-glob-dynamic-name, the one
+       ;; reading every dynamic-glob path shares.
+       (multiple-value-bind (pkg-str bare-str) (%p-glob-dynamic-name name-box)
+         (let ((pkg (or (%pcl-find-package pkg-str)
+                        (make-package (perl-pkg-to-cl-pkg-name pkg-str) :use '(:cl :pcl)))))
+           (make-p-typeglob pkg (%pcl-invert-case bare-str))))))))
 
 (defun %p-glob-empty-slot (prefix)
   "The EMPTY value a cleared glob slot holds, for slot sigil PREFIX.  ONE
@@ -20702,8 +20763,24 @@ buffer's fill-pointer; everything else falls back to file-length."
     (%p-glob-clear-var-slot prefix pkg uname))
   (%p-glob-clear-io-slot pkg uname))
 
+(defun %p-glob-slot-of-handle (h slot)
+  "`*$fh{SLOT}` where $fh is a LEXICAL filehandle (task #1047).  perl's `*$fh`
+   is the ANONYMOUS glob the open created; PCL has no glob object behind a
+   lexical handle, so `p-dynamic-typeglob` hands the handle itself through and
+   the two slots that mean anything answer from it — IO is the handle (the
+   `*$fh{IO}` idiom, which then stats and prints through the same handle) and
+   GLOB is the operand.  Every other slot is undef, which is perl's own answer
+   for a slot a glob does not have.  Before this, `*$fh` stringified the STREAM
+   into a glob NAME (\"GLOB(0x…)\"), so `stat *$fh{IO}` was a stat of undef."
+  (let ((s (string-upcase (to-string slot))))
+    (cond ((string= s "IO")   (make-p-box h))
+          ((string= s "GLOB") h)
+          (t *p-undef*))))
+
 (defun p-glob-slot (glob slot)
   "Read *foo{SLOT}."
+  (unless (p-typeglob-p glob)
+    (return-from p-glob-slot (%p-glob-slot-of-handle glob slot)))
   (let* ((pkg    (p-typeglob-package glob))
          (uname  (p-typeglob-name glob))
          ;; SLOT may be a literal string ("CODE") or a boxed scalar ($type) when

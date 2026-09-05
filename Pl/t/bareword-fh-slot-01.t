@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 115;
+plan tests => 133;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -170,6 +170,38 @@ $! = 0; my $u8 = -d DIRH;              print "55=", ($!+0), "\n";
 # EBADF when the operand names no handle at all.
 $! = 0; my $u9 = -t FH;                print "56=", ($!+0), "\n";
 $! = 0; my $ua = -t NOPE;              print "57=", ($!+0), "\n";
+# --- s470bs: WHAT `_` REMEMBERS (task #1047) ------------------------------
+# An IO REF is a handle: `*$fh{IO}` used to stringify the STREAM into a glob
+# NAME, so a stat through it stat'ed undef and never filled `_`.
+open(my $lx, '<', $tmp) or die;
+my $bin = "$tmp.bin";
+open(my $bh, '>', $bin) or die; print $bh "\0\0\0\0binary"; close($bh);
+my @ir = stat(*$lx{IO}); print "58=", scalar(@ir), "\n";
+stat($bin); stat(*$lx{IO});
+print "59=", (-T _ ? 1 : 0), "\n";
+stat($bin); my $ig = -r *$lx{IO};
+print "60=", (-T _ ? 1 : 0), "\n";
+close($lx); unlink $bin;
+# A FAILED stat leaves an INVALID buffer: EBADF for every filetest but -T/-B,
+# which retry the remembered NAME and so answer ENOENT.
+my @nz = lstat("/no/such/zz-xyq");
+$! = 0; my $c1 = -e _; print "61=", ($!+0), "\n";
+my @nz2 = lstat("/no/such/zz-xyq");
+$! = 0; my $c2 = -T _; print "62=", ($!+0), "\n";
+# The FLAVOUR: reading `_` with an lstat-flavoured op after a plain stat is
+# FATAL, in perl's own two wordings.
+stat($tmp);
+my $d1 = eval { -l _; 1 };
+print "63=", ($@ =~ /^The stat preceding -l _ wasn't an lstat/ ? "die" : "no[$@]"), "\n";
+stat($tmp);
+my $d2 = eval { lstat(_); 1 };
+print "64=", ($@ =~ /^The stat preceding lstat\(\) wasn't an lstat/ ? "die" : "no[$@]"), "\n";
+lstat($tmp);
+my $d3 = eval { my $z = -l _; 1 };
+print "65=", ($@ ? "die" : "no"), "\n";
+lstat($tmp);
+my $d4 = eval { my @z = stat(_); 1 };
+print "66=", ($@ ? "die" : "no"), "\n";
 close(FH);
 unlink $tmp;
 PERL
@@ -235,6 +267,16 @@ my %EXPECT = (
     '55' => '9',    # and a CLOSED dirhandle is EBADF
     '56' => '25',   # -t on an open non-tty is ENOTTY …
     '57' => '9',    #   … and EBADF when there is no handle at all
+    # --- s470bs: WHAT `_` REMEMBERS (task #1047) ------------------------
+    '58' => '13',   # an IO ref (*$fh{IO}) is a handle …
+    '59' => '1',    #   … and a stat through it FILLS `_`
+    '60' => '1',    #   … and so does -r through it
+    '61' => '9',    # a FAILED stat makes `_` EBADF …
+    '62' => '2',    #   … except for -T/-B, which retry the remembered NAME
+    '63' => 'die',  # `-l _` after a plain stat is FATAL, in perl's wording …
+    '64' => 'die',  #   … and so is `lstat _`
+    '65' => 'no',   # after an lstat both are fine …
+    '66' => 'no',   #   … including plain `stat _`
 );
 
 my $n = 0;
