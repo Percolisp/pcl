@@ -23,7 +23,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 34;
+plan tests => 35;
 
 sub run_cl {
     my ($code) = @_;
@@ -555,3 +555,57 @@ test_cl('a comparison handler returns its own value, not 1 (#972)',
      print(($y ne "q" ? "T" : "F"), "\n");
      print $y == 2, "\n";',
     "XYZ\nPQR\nLLL\nSSS\n1\nF\n1\n");
+
+# ── #1021: sort's DEFAULT comparator IS the `cmp` operator ────────────────
+# perldoc -f sort: "sorts in standard string comparison order".  p-sort's
+# no-comparator arm compared the STRINGIFICATIONS instead, so a class whose
+# `cmp` disagrees with its `""` sorted the wrong way round — and silently,
+# because a `cmp` that AGREES comes out right by accident.  The explicit
+# `{ $a cmp $b }` block was right all along, and the fix routes the default
+# through the SAME function (p-str-cmp), so the two cannot give two answers.
+#
+# The rows that must NOT move are the point of the second half: plain strings
+# and numbers keep the raw string compare (the overload question is asked
+# ONCE per sort, not per comparison), a class with only `""` sorts by its
+# string, and a handler given as a METHOD NAME is called like any other.
+# Every expectation is the live perl 5.40.3 answer, call counts included.
+test_cl('sort default comparator uses an overloaded cmp (#1021)',
+    'package OV;
+     use overload q(cmp) => sub { my ($s,$o,$sw)=@_;
+                                  my $r = $o->{val} <=> $s->{val};
+                                  $sw ? -$r : $r },
+                  q("")  => sub { $_[0]{val} };
+     sub new { bless { val => $_[1] }, $_[0] }
+     package SO;
+     use overload q("") => sub { "s" . $_[0]{v} }, fallback => 1;
+     sub new { bless { v => $_[1] }, $_[0] }
+     package MN;
+     use overload q(cmp) => "mycmp", q("") => sub { $_[0]{v} };
+     sub new { bless { v => $_[1] }, $_[0] }
+     sub mycmp { my ($s,$o,$sw)=@_; my $r = ("" . $o) cmp ("" . $s);
+                 $sw ? -$r : $r }
+     package CT;
+     use overload q(cmp) => sub { $main::nc++; my ($s,$o,$sw)=@_;
+                                  my $r = $s->{v} cmp $o->{v}; $sw ? -$r : $r },
+                  q("")  => sub { $main::ns++; $_[0]{v} };
+     sub new { bless { v => $_[1] }, $_[0] }
+     package main;
+     our ($nc, $ns) = (0, 0);
+     sub p { my ($l, @v) = @_; print $l, join(",", @v), "\n" }
+     my @o = map { OV->new($_) } (1, 2, 3);
+     p("default:  ", sort @o);
+     p("explicit: ", sort { $a cmp $b } @o);
+     my @s = map { SO->new($_) } (3, 1, 2);
+     p("onlystr:  ", sort @s);
+     my @m = map { MN->new($_) } ("a", "b", "c");
+     p("methname: ", sort @m);
+     p("plain:    ", sort qw(pear Apple banana));
+     p("nums:     ", sort (10, 9, 100, 1));
+     my @mixed = ("b", OV->new(5), "a");
+     p("mixed:    ", sort @mixed);
+     my @c = (CT->new("b"), CT->new("a"));
+     my @sorted = sort @c;
+     print "calls:    cmp=$nc str=$ns\n";',
+    "default:  3,2,1\nexplicit: 3,2,1\nonlystr:  s1,s2,s3\n"
+  . "methname: c,b,a\nplain:    Apple,banana,pear\nnums:     1,10,100,9\n"
+  . "mixed:    5,a,b\ncalls:    cmp=1 str=0\n");

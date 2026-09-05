@@ -16574,6 +16574,22 @@ buffer's fill-pointer; everything else falls back to file-length."
              (p-named-cmp-fn val))
       val))
 
+(defun %p-sort-plain-elements-p (v)
+  "T when NO element of V can carry a `use overload' handler, so the raw string
+   compare in p-sort's no-comparator arm IS perl's answer for the whole sort.
+
+   ASKED ONCE PER SORT, not per comparison — that is the entire design.  A
+   default `sort' over plain strings is a hot operation (CLAUDE.md design
+   principle 2: speed wins), and this is O(n) beside an O(n log n) sort whose
+   comparator would otherwise pay `p-str-cmp''s dispatch on every one of the
+   n log n calls.  Its first test is `*p-any-overload-registered*', a single
+   memory load that is NIL in every program that never says `use overload', so
+   such a program pays one special-variable read for the whole sort.
+   %p-no-overload-possible-p is the ONE reading of \"can this value carry a
+   handler\" (see its own comment for why its test order is what it is)."
+  (or (not *p-any-overload-registered*)
+      (every #'%p-no-overload-possible-p v)))
+
 (defun p-sort (&rest args)
   "Perl sort - sort a list with optional comparator function.
    (p-sort list)         - sort single array/list lexically
@@ -16602,8 +16618,22 @@ buffer's fill-pointer; everything else falls back to file-length."
                    (result (if (typep raw 'sequence)
                                (copy-seq raw)
                                (make-array 0 :adjustable t :fill-pointer 0))))
-              (stable-sort result (lambda (a b)
-                                    (string< (to-string a) (to-string b)))))))))
+              ;; PERL'S DEFAULT COMPARATOR IS THE `cmp' OPERATOR (task #1021),
+              ;; not a raw string compare — perldoc -f sort: "sorts in standard
+              ;; string comparison order".  So a class with an overloaded `cmp'
+              ;; is ordered BY IT: `sort @objs' over a `cmp' that disagrees with
+              ;; its `""' answered `a b c' where perl answers `c b a', and it
+              ;; was silent, because a `cmp' that AGREES comes out right by
+              ;; accident.  `p-str-cmp' is the same function `sort { $a cmp $b }'
+              ;; already reaches (which was right all along), so the default and
+              ;; the explicit block cannot give two answers — and its
+              ;; fall-through, `to-string', is perl's autogeneration of `cmp'
+              ;; from `""'.
+              (if (%p-sort-plain-elements-p result)
+                  (stable-sort result (lambda (a b)
+                                        (string< (to-string a) (to-string b))))
+                  (stable-sort result (lambda (a b)
+                                        (< (to-number (p-str-cmp a b)) 0)))))))))
 
 ;;; ------------------------------------------------------------
 ;;; THE CLASSIC-SORT FAST PATH (task #996 half A5; the Kind-B pass
