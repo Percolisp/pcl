@@ -2,6 +2,71 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470c (Opus agent, 2026-09-05) — #1072: the artifact-staleness gate row now REGENERATES each artifact and compares the BODY, not only the `gen=` stamp
+
+**The hole.**  `Pl/t/artifact-staleness-01.t` discovered the three checked-in
+transpiled artifacts by their line-1 `gen=` stamp and compared that stamp
+against `*pcl-cache-generation*`.  That catches exactly one failure — "the
+generation was bumped and the artifact was not regenerated" — and is blind to
+the other half: an artifact whose stamp is CURRENT while its body is not what
+today's compiler emits.  Measured, not hypothetical: on main `9bee19b` (found
+s468bc) `cl/pcl-pack.lisp` carried the tree's own generation and this file was
+green, yet regenerating it produced a body ~134 lines different, so every
+pack.t run in between was measuring an emitter the tree no longer had.
+
+**What shipped.**  Three new rows, one per artifact, on the SAME discovery
+loop (the gen stamp, never a list): rebuild the artifact into a temp file and
+compare everything after line 1.  The recipes are RUN as tools, never
+re-spelled in the test — a checker carrying its own copy of the recipe is free
+to drift from the recipe it is checking.  So `tools/rebuild-pack` gains
+**`-o PATH`** (write the result there, leave the tree untouched; a relative
+path resolves against the CALLER's cwd, since the script `cd`s to the repo
+root; the hand-written appendix still comes out of the checked-in artifact,
+which is the only place it lives), and mro/warnings go through
+`./pl2cl --extension` + `tools/tag-license`, the header's own recipe.  A
+mismatch prints the artifact, the first differing LINE NUMBER in it, the
+regeneration command, and a 40-line head (`-` checked in, `+` regenerated,
+` ` agreeing, stopping three agreeing lines after the last difference).
+
+**NOTHING is normalised, and that is a measurement.**  `--extension` emits no
+program preamble (#349), so no absolute path reaches an artifact at all —
+`grep /home/ cl/*.lisp` finds nothing and `Pl/t/extension-preamble-01.t` is
+the row that keeps it so.  What DOES vary with the caller is **the source path
+AS SPELLED**: `./pl2cl --extension /abs/path/lib/mro.pm` and
+`./pl2cl --extension lib/mro.pm` differ in two lines, because a `die` in
+lib/mro.pm becomes the literal string `"lib/mro.pm line 71"` in the emitted
+CL.  The fix is to run the recipe verbatim — cwd = the repo root, the recipe's
+relative spelling — not to normalise; with that fixed two runs are byte-equal
+(probed) and the comparison needs nothing outside the checkout but perl, PPI,
+Moo and sbcl (the `Pl/t/core-deps-01.t` set; `File::Temp` is core).
+
+**Rule 12.**  An artifact the stamp loop discovers and `%RECIPE` cannot
+classify DIES naming it — proved with a fourth stamped file: the three real
+rows still run and print, then the file dies naming `cl/pcl-zzz-fake.lisp`.
+Silently not checking a new artifact is the hole this file exists to close.
+
+**Wall time — the question the brief asked me to report, not decide.**
+`prove --timer` on a quiet box: this file **25 ms → 3.56 s**; in the same run
+the gate's slowest file, `Pl/t/autoviv-01.t`, is **130.6 s**.  The gate's wall
+≈ its slowest file, so at 2.7 % of it the check costs the gate nothing and the
+task's fallback (run the comparison from `rebuild-pack`-style tooling or a
+WHAT-TO-RUN-WHEN row instead) is **not needed** — nothing was implemented for
+it.  Under the loaded cold gate the same two files read 7.8 s and 399.8 s,
+i.e. the ratio holds.
+
+**The guard.**  One body line perturbed per artifact (a comment), one at a
+time: `cl/pcl-mro.lisp` line 18 and `cl/pcl-warnings.lisp` line 18 fail their
+own row, `cl/pcl-pack.lisp` line 36 fails its own row — each naming the
+artifact, the line and the command — and the other rows stay green; restored,
+all eight pass.
+
+**Bars.**  Cold `PCLXS_DIR=~/pclxs tools/prove-core`: **199 files / 6796 rows,
+FAIL only on the 13 known pclxs xs rows** (xs-01 5/6, xs-02 4/4, xs-03 4/4).
+`tools/corpus-diff.pl 9083d2e`: **emission identical across 111 files, silent
+drops 5 unchanged** — nothing under `Pl/` changed, so no generation bump and
+no sweep (the WHAT-TO-RUN-WHEN row for a test-only change).  Not done, and
+said plainly: no sweep, no companion (the brief excludes both).
+
 ## Session 469 (Fable, 2026-09-04/05) — ROUND 24 LAUNCHED, BH MERGED, then STOPPED at the USER's word (shutdown) — RESTART RECIPE at the end
 
 **Part 0 — orientation.**  CI green on `c80b1a0`.  The OWED bench board ran
