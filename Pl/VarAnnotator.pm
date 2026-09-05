@@ -616,6 +616,11 @@ sub _analyze_tree {
     # not about which optimizations are switched on, so `PCL_OPT=-foreach-raw`
     # must not change the ARRAY verdicts (and therefore `local-push`).
     $ctx->{foreach_ro_raw}{$name} = 1 if $ro_ok;
+    # …and a THIRD reading, for `--facts` (task #1213): the ungated verdict on
+    # the per-name record Parser2 already consults, so the licence can be
+    # PRINTED on the general `p-foreach` form when PCL_OPT has the emission
+    # off.  A key nothing else reads, so it moves no emission.
+    $vi{$name}{foreach_ro_fact} = 1 if $ro_ok;
     $vi{$name}{foreach_ro} = 1 if $ro_ok && Pl::Passes::enabled('foreach-raw');
 
     # `numonly' — THE SLOT CAN ONLY EVER HOLD A PLAIN NUMBER (task #1183,

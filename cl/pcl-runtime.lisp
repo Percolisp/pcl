@@ -122,7 +122,7 @@
    #:p-sin #:p-cos #:p-atan2 #:p-exp #:p-log #:p-sqrt #:p-rand #:p-srand
    ;; String
    #:p-. #:p-str-x #:p-list-x #:p-length #:p-substr #:p-lc #:p-uc #:p-fc #:p-quotemeta
-   #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat #:p-literal-string
+   #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat #:p-literal-string #:p-esc #:p-fact
    #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf #:p-crypt
    #:p-version-string
    #:p-pos
@@ -789,8 +789,16 @@
   ;;   :string-eval t            the body contains a string eval
   ;;   :captures (CELLS...)      the promoted package cells it closes over
   ;;   :prototype "$$"           an old-style prototype's text
+  ;;   :needs (CLASSES...)       the OBLIGATION classes the body exercises
+  ;;                             (Pl::Manifest's own class names; ir-spec
+  ;;                             SS5.1 + SS10b) -- ALWAYS present, possibly (),
+  ;;                             because the ABSENCE is what lets a target omit
+  ;;                             machinery: no :nonlocal_exit.* means no frame,
+  ;;                             no :dynamic_scope.* means no save/restore
+  ;;                             stack (plan-speed-and-ir-s470 SSB.3)
   (defparameter *p-sub-fact-keys*
-    '(:returns :wantarray-insensitive :writes-args :string-eval :captures :prototype))
+    '(:returns :wantarray-insensitive :writes-args :string-eval :captures :prototype
+      :needs))
 
   (defun %p-check-facts (what name facts keys)
     "Validate a FACTS plist against its closed KEYS set.  Returns NIL.  ONE
@@ -4280,6 +4288,108 @@
   (apply #'concatenate 'string
          (mapcar (lambda (p) (if (integerp p) (string (code-char p)) p))
                  parts)))
+
+;;; ---------------------------------------------------------------------------
+;;; p-esc — A STRING LITERAL WITH ITS CONTROL CHARACTERS ESCAPED (task #1212;
+;;; docs/generated-cl-ir-review.md §3.2, ir-spec §1 + §12b)
+;;;
+;;; Standard CL string syntax has no `\n` escape, so a Perl `"fib: $n\n"` used
+;;; to reach the emitted file as a literal carrying an ACTUAL newline.  The
+;;; tree was right and the file was not line-oriented: a grep hit half a
+;;; string, a diff split literals across hunks, and line counts stopped
+;;; matching form counts.
+;;;
+;;; So the emitter writes `(p-esc "fib: \\n")` — the escapes spelled in an
+;;; ordinary CL string with the backslash doubled so the CL reader passes it
+;;; through — and this macro decodes it AT MACROEXPANSION TIME.  The compiled
+;;; code holds exactly the same constant string as before: zero runtime cost,
+;;; by construction (a macro that returns a literal).
+;;;
+;;; THE ESCAPE ALPHABET IS THE DATA FORM'S (ir-spec §12b), deliberately: a
+;;; backend implements ONE unescape routine for `pl2cl --emit-sexp` and for
+;;; `p-esc`.  It is exactly
+;;;
+;;;     backslash-backslash  a backslash      backslash-n  newline
+;;;     backslash-quote      a double quote   backslash-t  tab
+;;;     backslash-r          return           backslash-uXXXX  any code point
+;;;
+;;; and nothing else: an unknown escape is an ERROR naming it (rule 12 — a
+;;; silently-copied bad escape would be a wrong STRING, i.e. a value the
+;;; program consumes, which is the side of the s329 boundary that dies).
+;;;
+;;; EMITTED ONLY WHEN THE CONTENT HOLDS A CHARACTER BELOW 0x20, so the common
+;;; case stays a plain literal and non-ASCII text stays readable in the file.
+
+(defun %p-esc-decode (s)
+  "Decode one p-esc payload.  See the section comment for the alphabet."
+  (declare (type string s))
+  (let ((out (make-string-output-stream))
+        (i 0)
+        (n (length s)))
+    (loop while (< i n)
+          do (let ((c (char s i)))
+               (if (char/= c #\\)
+                   (progn (write-char c out) (incf i))
+                   (let ((d (if (< (1+ i) n) (char s (1+ i)) nil)))
+                     (case d
+                       ((nil) (error "PCL IR: p-esc payload ends in a lone backslash: ~S" s))
+                       (#\\ (write-char #\\ out)        (incf i 2))
+                       (#\" (write-char #\" out)        (incf i 2))
+                       (#\n (write-char #\Newline out)  (incf i 2))
+                       (#\t (write-char #\Tab out)      (incf i 2))
+                       (#\r (write-char #\Return out)   (incf i 2))
+                       (#\u (when (> (+ i 6) n)
+                              (error "PCL IR: p-esc unicode escape needs four hex digits: ~S" s))
+                            (write-char (code-char (parse-integer s :start (+ i 2)
+                                                                  :end (+ i 6)
+                                                                  :radix 16))
+                                        out)
+                            (incf i 6))
+                       (t (error "PCL IR: p-esc: unknown escape ~S in ~S" d s)))))))
+    (get-output-stream-string out)))
+
+(defmacro p-esc (payload)
+  "The string literal PAYLOAD denotes, decoded at macroexpansion time.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (unless (stringp payload)
+    (error "PCL IR: p-esc takes a string literal, got ~S" payload))
+  (%p-esc-decode payload))
+
+;;; ---------------------------------------------------------------------------
+;;; p-fact — A COMPILER PROOF, ATTACHED TO THE FORM IT LICENSES (task #1213;
+;;; docs/plan-speed-and-ir-s470.md §B.3)
+;;;
+;;; PCL's optimizations are facts-licensed emissions: an analysis proves
+;;; something and the emitter then picks an SBCL-shaped fast form
+;;; (`%p-push1`, `%p-sort-classic`, `p-incf-raw`).  A foreign backend cannot
+;;; use those shapes — they are this host's — but it can use the PROOF behind
+;;; each of them to pick its own.  `pl2cl --facts` therefore prints every
+;;; Kind-A/Kind-B licence that fired as a FACT wrapped around the form it
+;;; licenses:
+;;;
+;;;     (p-fact (foreach-raw) (p-foreach-raw ($v @a) …))
+;;;     (p-fact (local-push)  (p-push @a $x))          ; under PCL_OPT=none
+;;;
+;;; so `PCL_OPT=none --facts` is the general-form IR with every proof
+;;; attached: the portable speed, without PCL's own consumption of it.
+;;;
+;;; This macro is the wrapper's runtime half and it is TRANSPARENT: it expands
+;;; to FORM and does not evaluate the licence at all.  The licence NAMES are
+;;; the optimization registry's (Pl/Passes.pm) and the closed set is checked
+;;; THERE, where it lives — a name list here would be a second copy that
+;;; drifts (rule 11).  What is checked here is the SHAPE, because a `p-fact`
+;;; whose first argument is not a licence list means the emitter is writing
+;;; something else into the slot.
+
+(defmacro p-fact (licence form)
+  "FORM, annotated with the compiler LICENCE (a list: name and optional
+   detail) that permitted its shape.  Expands to FORM; the annotation is for
+   a consumer of the IR, never for this target.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (unless (and (consp licence) (symbolp (first licence)))
+    (error "PCL IR: p-fact's first argument must be a licence list (NAME …), got ~S"
+           licence))
+  form)
 
 (defun p-string-concat (&rest args)
   "Perl string concatenation for string interpolation (\"$a $b\").
@@ -17665,7 +17775,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-820"
+(defparameter *pcl-cache-generation* "v2-830"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -22733,34 +22843,7 @@ buffer's fill-pointer; everything else falls back to file-length."
    Keys are copied when stored (%pcl-memo-key): a Perl string can be a
    fill-pointer buffer the program appends to in place.")
 
-(defun %p-regex-parse (str)
-  "Parse /pattern/modifiers text into a fresh p-regex-match struct.
-   STR is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'."
-  (let* ((first-char (char str 0))
-         (start-delim (%pcl-regex-delim-start
-                       str (if (char= first-char #\m) 1 0)))
-         (open-delim (char str start-delim))
-         (close-delim (get-closing-delim open-delim))
-         (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
-         (raw (subseq str (1+ start-delim) end-delim))
-         (pattern (perl-regex-to-ppcre raw))
-         (modifiers (if (< end-delim (1- (length str)))
-                        (subseq str (1+ end-delim))
-                        "")))
-    (make-p-regex-match :pattern pattern
-                        :source raw
-                        :modifiers (parse-regex-modifiers modifiers))))
-
-(defun p-regex (pattern-string)
-  "Parse /pattern/modifiers and return a regex-match struct, memoized on the
-   source text (see *p-regex-op-cache*).
-   Pattern-string is like '/foo/i' or 'm/bar/g' or 'm{pattern}s'"
-  (let ((str (to-string pattern-string)))
-    (or (gethash str *p-regex-op-cache*)
-        (setf (gethash (%pcl-memo-key str) *p-regex-op-cache*)
-              (%p-regex-parse str)))))
-
-(defun p-regex-from-parts (pattern modifiers)
+(defun %p-regex-parts (pattern modifiers)
   "Build a regex from a runtime-interpolated pattern string and modifier string.
    Used when the regex contains variable interpolation (e.g. /$x/ or qr/$x/).
 
@@ -22812,39 +22895,153 @@ buffer's fill-pointer; everything else falls back to file-length."
                      :source raw
                      :modifiers (parse-regex-modifiers mods))))))))
 
-(defun p-qr (pattern-string)
-  "Parse qr/pattern/modifiers and return a compiled regex (regex-match struct).
-   Pattern-string is like 'qr/foo/i' or 'qr{pattern}i'"
-  (let* ((str (to-string pattern-string))
-         ;; Skip past 'qr' prefix and any whitespace before the delimiter
-         (start-delim (%pcl-regex-delim-start str 2))
-         (open-delim (char str start-delim))
-         (close-delim (get-closing-delim open-delim))
-         (end-delim (position close-delim str :start (1+ start-delim) :from-end t))
-         (raw (subseq str (1+ start-delim) end-delim))
-         (pattern (perl-regex-to-ppcre raw))
-         (modifiers (if (< end-delim (1- (length str)))
-                        (subseq str (1+ end-delim))
-                        "")))
-    (make-p-regex-match :pattern pattern
-                        :source raw
-                        :modifiers (parse-regex-modifiers modifiers))))
+;;; ---------------------------------------------------------------------------
+;;; THE REGEX LITERAL, STRUCTURED (task #1210; ir-spec §10 regex row,
+;;; docs/generated-cl-ir-review.md §3.3, plan-speed-and-ir-s470 Part B item B5)
+;;;
+;;; A regex literal used to reach the runtime as ONE STRING carrying its perl
+;;; delimiters and its trailing flags — `(p-regex "/pat/i")`, `(pcl::p-qr
+;;; "qr{p}gi")` — so every consumer of the IR (this runtime included) had to
+;;; re-implement perl's delimiter/flag scan before it could see the pattern.
+;;; The compiler already HAS the parts (PPI hands them over separately and
+;;; Pl::ExprToCL::_parse_regex_content splits them); joining them back into a
+;;; delimited string threw the structure away.
+;;;
+;;; Each of the five entry points is therefore a MACRO over a keyword form:
+;;;
+;;;   (p-regex            :pat "…" :flags "…" :tier :native)
+;;;   (pcl::p-qr          :pat "…" :flags "…" :tier :native)
+;;;   (pcl::p-regex-from-parts :pat FORM :flags "…" :tier :dynamic)
+;;;   (p-subst  :pat "…"|FORM :rep "…"|LAMBDA :flags "…" :tier :native)
+;;;   (p-tr     :from "…" :to "…" :flags "…")
+;;;
+;;; and expands to exactly the call the string form used to make, so the RUN
+;;; is byte-identical (the parse simply happens at the transpiler instead of
+;;; at first use — friction §3.3's "negative runtime cost").
+;;;
+;;; `:tier` is the REGEX ENGINE CLASS a target needs for this literal
+;;; (Pl::RegexTier — `:native` / `:pcre` / `:refused` / `:dynamic`).  THIS
+;;; TARGET IGNORES IT: cl-ppcre runs everything cl-ppcre runs, so the keyword
+;;; is read and discarded here.  It is a FACT for other backends (a JS target
+;;; picks `RegExp` vs PCRE2-WASM from it without re-parsing perl source), and
+;;; `pl2cl --manifest` histograms it.
+;;;
+;;; THE OLD POSITIONAL FORM DIES AT MACROEXPANSION, naming the form (rule 12).
+;;; A stale module cache is the reason: two shapes reaching one entry point is
+;;; exactly the mix a "compatibility arm" would make invisible, and the
+;;; generation bump that ships this makes the old shape unreachable anyway.
+;;; `p-tr` is the one with no `:tier`: a transliteration is not a regex and
+;;; needs no engine — stated here rather than filled with a placeholder.
 
-(defun p-subst (pattern replacement &rest modifiers)
-  "Create a substitution operation s///
-   Modifiers are keywords like :g :i :s :m :x :e"
+(defun %p-regex-keyword-args (op args keys)
+  "Read the keyword plist ARGS of regex-literal macro OP, whose legal keys are
+   KEYS (a list, in order).  Returns the values in KEYS order.  A missing key
+   is NIL; an unknown key, an odd-length plist, or the OLD positional form
+   (first element not a keyword) is an ERROR naming the form — the closed-set
+   discipline of CLAUDE.md rule 12, and the guard against a stale cache mixing
+   the two shapes."
+  (when (or (null args) (not (keywordp (first args))))
+    (error "PCL IR: ~A takes the keyword form (~A~{ ~S …~}), not ~S — a cached
+ transpile from before the structured-regex generation is stale; clear
+ ~~/.pcl-cache" op op keys args))
+  (when (oddp (length args))
+    (error "PCL IR: ~A's keyword list has an odd length: ~S" op args))
+  (let ((seen '()))
+    (loop for (k v) on args by #'cddr
+          do (unless (member k keys)
+               (error "PCL IR: ~A: unknown key ~S (known: ~{~S~^ ~})" op k keys))
+          (setf (getf seen k) (list v)))
+    (values-list (mapcar (lambda (k) (first (getf seen k))) keys))))
+
+(defun %p-flag-keywords (flags)
+  "The modifier letters of a s/// or tr/// literal as the keyword list the
+   op structs have always carried: one keyword per letter, upcased.  PPI
+   collapses `/xx` to a single `x` (measured), so this reproduces the old
+   `map { \":$_\" } keys %$mods` emission exactly — including its standing gap,
+   that `s///xx` reaches the engine as `/x` (unchanged here, not fixed here)."
+  (loop for c across (or flags "") collect (intern (string-upcase (string c)) :keyword)))
+
+(defun %p-regex-op (raw flags)
+  "The match op for pattern text RAW with modifier letters FLAGS, memoized in
+   *p-regex-op-cache* on the (flags raw) pair — the key p-regex-from-parts
+   already used, so a literal and an interpolated pattern that come out the
+   same share one immutable struct (safe: a match op has no perl-visible
+   identity — see the cache's own docstring)."
+  (or (gethash (list flags raw) *p-regex-op-cache*)
+      (setf (gethash (list (%pcl-memo-key flags) (%pcl-memo-key raw))
+                     *p-regex-op-cache*)
+            (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+                                :source raw
+                                :modifiers (parse-regex-modifiers flags)))))
+
+(defmacro p-regex (&rest args)
+  "A m// literal: (p-regex :pat PATTERN :flags LETTERS :tier TIER).
+   PATTERN is the perl pattern text with no delimiters, LETTERS the modifier
+   letters as written, TIER the engine class other targets need (ignored here).
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=ppcre"
+  (multiple-value-bind (pat flags tier)
+      (%p-regex-keyword-args 'p-regex args '(:pat :flags :tier))
+    (declare (ignore tier))
+    `(%p-regex-op ,pat ,(or flags ""))))
+
+(defun %p-qr-parts (raw flags)
+  "A fresh Regexp OBJECT for qr// — never memoized: two evaluations of `qr/a/`
+   are distinct references in perl (ir-spec §10 compiled-regex row)."
+  (make-p-regex-match :pattern (perl-regex-to-ppcre raw)
+                      :source raw
+                      :modifiers (parse-regex-modifiers flags)))
+
+(defmacro p-qr (&rest args)
+  "A qr// literal: (p-qr :pat PATTERN :flags LETTERS :tier TIER).  Answers a
+   Regexp object with its own identity and flags.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=ppcre"
+  (multiple-value-bind (pat flags tier)
+      (%p-regex-keyword-args 'p-qr args '(:pat :flags :tier))
+    (declare (ignore tier))
+    `(%p-qr-parts ,pat ,(or flags ""))))
+
+(defmacro p-regex-from-parts (&rest args)
+  "An INTERPOLATED pattern: (p-regex-from-parts :pat FORM :flags LETTERS
+   :tier :dynamic).  FORM evaluates to the pattern text (or to a qr object) at
+   match time, so the tier is a run-time question for a target — `:dynamic` is
+   a declared absence, not a guess.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=ppcre"
+  (multiple-value-bind (pat flags tier)
+      (%p-regex-keyword-args 'p-regex-from-parts args '(:pat :flags :tier))
+    (declare (ignore tier))
+    `(%p-regex-parts ,pat ,(or flags ""))))
+
+(defmacro p-subst (&rest args)
+  "An s/// literal: (p-subst :pat PATTERN|FORM :rep TEXT|LAMBDA :flags LETTERS
+   :tier TIER).  The replacement is a string, or a thunk when it interpolates
+   or /e is in force.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=ppcre"
+  (multiple-value-bind (pat rep flags tier)
+      (%p-regex-keyword-args 'p-subst args '(:pat :rep :flags :tier))
+    (declare (ignore tier))
+    `(%p-subst-parts ,pat ,rep ,(or flags ""))))
+
+(defun %p-subst-parts (pattern replacement flags)
+  "Create a substitution operation s///."
   (make-p-subst-op :pattern (to-string pattern)
                    :replacement (if (functionp replacement)
                                     replacement
                                     (to-string replacement))
-                   :modifiers modifiers))
+                   :modifiers (%p-flag-keywords flags)))
 
-(defun p-tr (from to &rest modifiers)
-  "Create a transliteration operation tr///
-   Modifiers are keywords like :c :d :s :r"
+(defmacro p-tr (&rest args)
+  "A tr/// (y///) literal: (p-tr :from SET :to SET :flags LETTERS).  No `:tier`
+   — a transliteration needs no regex engine.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
+  (multiple-value-bind (from to flags)
+      (%p-regex-keyword-args 'p-tr args '(:from :to :flags))
+    `(%p-tr-parts ,from ,to ,(or flags ""))))
+
+(defun %p-tr-parts (from to flags)
+  "Create a transliteration operation tr///."
   (make-p-tr-op :from (to-string from)
                 :to (to-string to)
-                :modifiers modifiers))
+                :modifiers (%p-flag-keywords flags)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; /x extended-mode normaliser — works around a cl-ppcre bug where extended
@@ -23847,7 +24044,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; stringified value as a regex (also reached by ${qr//} deref, which
       ;; produces the "(?^:...)" string form).
       ((or (stringp operation) (numberp operation))
-       (do-regex-match string (p-regex-from-parts operation "")))
+       (do-regex-match string (%p-regex-parts operation "")))
       (t
        (warn "Unknown regex operation type: ~A" (type-of operation))
        nil))))

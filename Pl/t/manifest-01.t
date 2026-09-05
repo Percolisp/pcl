@@ -104,8 +104,15 @@ PL
   is($m->{needs}{overload}, 0, 'needs: overload zero');
   is($m->{needs}{formats},  0, 'needs: formats zero');
   is($m->{needs}{xs},       0, 'needs: xs zero');
-  is($m->{needs}{regex}{tier}, 'unclassified',
-     'needs: the regex TIER is declared unclassified, not guessed');
+  # The regex TIER stopped being a declared absence when B5's classifier
+  # landed (task #1211): it is now a HISTOGRAM over the four tiers, every one
+  # present with a zero — same discipline as the classes above.  This row
+  # asserted `'unclassified'` until then; the stale-guard rule (s416) says the
+  # commit that removes a behaviour repairs the row that asserted it, and the
+  # new form is a STRENGTHENING (a shape plus four keys, not a word).
+  is(ref $m->{needs}{regex}{tier}, 'HASH', 'needs: the regex TIER is a histogram');
+  is($m->{needs}{regex}{tier}{$_}, 0, "needs: tier $_ present and zero here")
+    for qw(native pcre refused dynamic);
   cmp_ok($m->{needs}{io}, '>', 0, 'needs: io counted (the print)');
 }
 

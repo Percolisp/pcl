@@ -127,6 +127,11 @@ my %FAMILY_META = (
   'introspection'       => { spec => 'introspection' },
   'context-frame'       => { spec => 'context & frames' },
   'declaration'         => { spec => 'declarations' },
+  'ir-literal'          => { note => "the IR's own spellings, both transparent "
+    . "macros: `p-esc` is a string literal whose control characters are "
+    . "ESCAPED (ir-spec \x{a7}1 + \x{a7}12b) and `p-fact` is a compiler LICENCE "
+    . "attached to the form it permitted (`pl2cl --facts`, "
+    . "docs/plan-speed-and-ir-s470.md \x{a7}B.3)" },
   # --- families §10 has no row for -------------------------------------
   'box'              => { note => 'the box/undef/coercion primitives — ir-spec §2.1, §2.2, §3' },
   'math'             => { note => 'the transcendental builtins — no §10 row; each dispatches `use overload` since #1005' },
@@ -304,6 +309,7 @@ my %FAMILY;
   'sub-definition' => [qw(p-defpackage p-sub-frame p-cloned-sub p-args-body
                           p-declare-sub)],
   'declaration' => [qw(p-let p-raw-params p-sub)],
+  'ir-literal' => [qw(p-esc p-fact)],
   );
   for my $fam (sort keys %by_family) {
     exists $FAMILY_META{$fam} or die "ir-inventory.pl: family '$fam' has no "
@@ -657,6 +663,7 @@ my %SPEC10_RULE = (
   'introspection' => '§7; `p-caller` returns package but file/line are stubs (divergence)',
   'context-frame' => 'names, not operations: each expands to exactly the `let`/`lambda` shape it replaced, so a translator implements the expansion and nothing else',
   'declaration' => 'names carrying the compiler\'s own VERDICTS — a binding\'s class, a parameter\'s class, a sub\'s proven facts.  Every one expands to exactly the form it replaced, and every set is CLOSED.  A translator may drop all three vocabularies and still produce a correct program',
+  'ir-literal' => 'TRANSPARENT macros.  `p-esc` expands to the string literal its escaped payload denotes — the alphabet is the data form\'s (§12b), so a translator implements ONE string-unescape for both; `p-fact` expands to its second argument, the licence list being an annotation `pl2cl --facts` writes for a consumer and this target never reads',
 );
 
 {

@@ -270,24 +270,29 @@ $x =~ s/a/b/;
 $x =~ tr/a/b/;
 print $m;
 EOT
-like($rl, qr/\(p-=~ \$x \(p-regex "\/a\.c\/"\)\)/,
-     'non-interp m// → (p-regex "/a.c/")');
-like($rl, qr{\(pcl::p-qr "qr/\\\\d\+/i"\)},
-     'non-interp qr// → (pcl::p-qr "qr/\\d+/i")');
-like($rl, qr/\(pcl::p-regex-from-parts \$x ""\)/,
-     'interp /$x/ → (pcl::p-regex-from-parts $x "")');
-like($rl, qr/\(pcl::p-regex-from-parts \(p-string-concat "pre" \$x "post"\) "i"\)/,
+# THE STRUCTURED REGEX LITERAL (task #1211, s470bq): the pattern and its flags
+# are separate keyword slots and the literal carries the engine TIER, where it
+# used to be one string with perl's delimiters inside it (`(p-regex "/a.c/")`).
+# ir-spec §10's regex row is the grammar; the flag-day bumped the generation.
+like($rl, qr/\(p-=~ \$x \(p-regex :pat "a\.c" :flags "" :tier :native\)\)/,
+     'non-interp m// → (p-regex :pat "a.c" :flags "" :tier :native)');
+like($rl, qr{\(pcl::p-qr :pat "\\\\d\+" :flags "i" :tier :native\)},
+     'non-interp qr// → (pcl::p-qr :pat "\\d+" :flags "i" :tier :native)');
+like($rl, qr/\(pcl::p-regex-from-parts :pat \$x :flags "" :tier :dynamic\)/,
+     'interp /$x/ → :pat $x :flags "" :tier :dynamic (a run-time pattern)');
+like($rl, qr/\(pcl::p-regex-from-parts :pat \(p-string-concat "pre" \$x "post"\)\s+:flags "i"\s+:tier :dynamic\)/,
      'interp /pre${x}post/i → concat parts + flags');
 # A deref chain in a PATTERN lowers exactly as the same reference lowers in
 # code and in dq text — through the one expression pipeline (task #237).  The
 # walk this replaced emitted the non-deref `(p-gethash $r "k")` / `(p-aref $r
 # 0)`; the array spelling MISSED at runtime (probed s382f: `/^$r->[0]$/` did
 # not match where perl did), so both spellings are pinned here.
-like($rl, qr/\(pcl::p-regex-from-parts \(p-gethash-deref \$r "k"\) ""\)/,
+like($rl, qr/\(pcl::p-regex-from-parts :pat \(p-gethash-deref \$r "k"\)\s+:flags ""/,
      'interp /$r->{k}/ → deref-chain (p-gethash-deref …) part');
-like($rl, qr/\(pcl::p-regex-from-parts \(p-aref-deref \$ar 0\) ""\)/,
+like($rl, qr/\(pcl::p-regex-from-parts :pat \(p-aref-deref \$ar 0\)\s+:flags ""/,
      'interp /$ar->[0]/ → deref-chain (p-aref-deref …) part');
-like($rl, qr/\(p-subst "a" "b"\)/,  's/// still declines → (p-subst …)');
+like($rl, qr/\(p-subst :pat "a" :rep "b" :flags "" :tier :native\)/,
+     's/// keyword form → :pat / :rep / :flags / :tier');
 like($rl, qr/\(p-tr /,              'tr/// still declines → (p-tr …)');
 
 # --- converted: gen_leaf_form Cast atom + ArrayIndex (E2.1 leaf) -------------
@@ -537,7 +542,7 @@ unlike($tv, qr/\(p-array-= \@m4 \(vector /,
 # multi-child with a regex element is a genuine multi-value list → (vector …);
 # the regex element is itself a single-child tree_val, so it keeps its own
 # (p-list-ctx (p-=~ …)) let-wrap inside the vector.
-like($tv, qr/\(p-array-= \@m5\s+\(vector \(p-list-ctx \(p-=~ /,
+like($tv, qr/\(p-array-= \@m5\s+\(vector\s+\(p-list-ctx \(p-=~ /,
      'multi-child list with a regex element → (vector (let … (p-=~ …)) …)');
 # plain single scalar / multi / range branches
 like($tv, qr/\(p-array-= \@m6\s+\(vector \$x\)/,   'single non-regex child → (vector $x)');
@@ -650,15 +655,15 @@ $x =~ s/a/b/;
 $x =~ tr/a/b/;
 print "$b$nb";
 EOT
-like($rx, qr/\(p-scalar-ctx \(p-=~ \$x \(p-regex "\/a\/"\)\)\)/,
+like($rx, qr/\(p-scalar-ctx \(p-=~ \$x \(p-regex :pat "a" :flags "" :tier :native\)\)\)/,
      'scalar-ctx match → (p-scalar-ctx (p-=~ …))');
 like($rx, qr/\(p-scalar-ctx \(p-!~ \$x /,
      'scalar-ctx !~ match → nil-wrapped');
-like($rx, qr/\(p-list-ctx \(p-=~ \$x \(p-regex "\/\(\\\\w\)\(\\\\w\)\/"\)\)\)/,
+like($rx, qr/\(p-list-ctx \(p-=~ \$x \(p-regex :pat "\(\\\\w\)\(\\\\w\)" :flags "" :tier :native\)\)\)/,
      'list-ctx match → (p-list-ctx (p-=~ …))');
-like($rx, qr/\(p-=~ \$x \(p-subst "a" "b"\)\)/,
+like($rx, qr/\(p-=~ \$x \(p-subst :pat "a" :rep "b" :flags "" :tier :native\)\)/,
      's/// RHS → (p-=~ … (p-subst …)) with NO wantarray wrap');
-like($rx, qr/\(p-=~ \$x \(p-tr "a" "b"\)\)/,
+like($rx, qr/\(p-=~ \$x \(p-tr :from "a" :to "b" :flags ""\)\)/,
      'tr/// RHS → (p-=~ … (p-tr …)) with NO wantarray wrap');
 unlike($rx, qr/\(p-\w+-ctx \(p-=~ \$x \(p-subst/,
      's/// RHS is never wantarray-wrapped');

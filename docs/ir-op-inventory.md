@@ -14,9 +14,9 @@ docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
 * names exported: **696**
-* families: **19** with an ir-spec §10 rule, **34** without one
-* with a machine-readable `Contract:` tail: **62** of 696
-* UNCLASSIFIED (no family rule matches): **3**
+* families: **19** with an ir-spec §10 rule, **35** without one
+* with a machine-readable `Contract:` tail: **69** of 696
+* UNCLASSIFIED (no family rule matches): **1**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -120,8 +120,8 @@ ir-spec §10 row **compiled regex (qr)** — a Regexp OBJECT, not a string: it c
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
-| `p-qr` | function | `(pattern-string)` | — | — | — | — | — | — | — |
-| `p-regex-from-parts` | function | `(pattern modifiers)` | — | — | — | — | — | — | — |
+| `p-qr` | macro | `(&rest args)` | insensitive | none | none | no | no | no | ppcre |
+| `p-regex-from-parts` | macro | `(&rest args)` | insensitive | str | none | no | no | no | ppcre |
 
 ## compound-assignment (35)
 
@@ -340,9 +340,9 @@ ir-spec §10 row **regex** — match/substitute/transliterate against a box (wri
 |---|---|---|---|---|---|---|---|---|---|
 | `p-!~` | function | `(string operation)` | — | — | — | — | — | — | — |
 | `p-=~` | function | `(string operation)` | — | — | — | — | — | — | — |
-| `p-regex` | function | `(pattern-string)` | — | — | — | — | — | — | — |
-| `p-subst` | function | `(pattern replacement &rest modifiers)` | — | — | — | — | — | — | — |
-| `p-tr` | function | `(from to &rest modifiers)` | — | — | — | — | — | — | — |
+| `p-regex` | macro | `(&rest args)` | insensitive | none | none | no | no | no | ppcre |
+| `p-subst` | macro | `(&rest args)` | insensitive | str | none | no | no | no | ppcre |
+| `p-tr` | macro | `(&rest args)` | insensitive | str | none | no | no | no | none |
 
 ## slice-delete (4)
 
@@ -630,6 +630,15 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p--w` | macro | `(arg)` | — | — | — | — | — | — | — |
 | `p--x` | macro | `(arg)` | — | — | — | — | — | — | — |
 | `p--z` | macro | `(arg)` | — | — | — | — | — | — | — |
+
+## ir-literal (2)
+
+*No ir-spec §10 row.*  the IR's own spellings, both transparent macros: `p-esc` is a string literal whose control characters are ESCAPED (ir-spec §1 + §12b) and `p-fact` is a compiler LICENCE attached to the form it permitted (`pl2cl --facts`, docs/plan-speed-and-ir-s470.md §B.3)
+
+| name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
+|---|---|---|---|---|---|---|---|---|---|
+| `p-esc` | macro | `(payload)` | insensitive | none | none | no | no | no | none |
+| `p-fact` | macro | `(licence form)` | insensitive | none | none | no | no | no | none |
 
 ## magic-global (136)
 

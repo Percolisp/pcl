@@ -45,13 +45,28 @@ package Pl::Manifest;
 use v5.20;
 use strict;
 use warnings;
+use Pl::CLForm ();   # is_raw / is_raw_wrap -- the walk's leaf tests
 
 our $VERSION = '1.0';
 
 my $ON = 0;
-my (%HEAD, %TEXT_HEAD, %PLET_CLASS, %PARAM_CLASS, %PLET_FACT, %SUB_FACT);
-my ($TEXT_CHUNKS, $SUBS, $SETF_ELEM, $PSETF_ELEM, $LOCAL_VALUE_WRAPS)
-  = (0, 0, 0, 0, 0);
+
+# THE WALK IS REENTRANT (task #1214, Part B item B3).  Every count lives in an
+# ACCUMULATOR the walk is handed, because the walk now has TWO callers: the
+# `--manifest` collector, which accumulates the whole program into $ACC, and
+# `needs_of_form`, which walks ONE sub body into a fresh accumulator to compute
+# that sub's `:needs` obligations.  Same table, same walk, two scopes — the
+# alternative was a second walk with its own copy of %OBLIGATION, which is
+# exactly the drift rule 11 forbids.
+sub _new_acc {
+  return {
+    HEAD => {}, TEXT_HEAD => {}, PLET_CLASS => {}, PARAM_CLASS => {},
+    PLET_FACT => {}, SUB_FACT => {}, TIER => {},
+    TEXT_CHUNKS => 0, SUBS => 0, SETF_ELEM => 0, PSETF_ELEM => 0,
+    LOCAL_VALUE_WRAPS => 0,
+  };
+}
+my $ACC = _new_acc();
 
 sub enable {
   $ON = 1;
@@ -66,12 +81,7 @@ sub enable {
 }
 sub enabled { return $ON }
 
-sub reset_all {
-  (%HEAD, %TEXT_HEAD, %PLET_CLASS, %PARAM_CLASS, %PLET_FACT, %SUB_FACT) = ();
-  ($TEXT_CHUNKS, $SUBS, $SETF_ELEM, $PSETF_ELEM, $LOCAL_VALUE_WRAPS)
-    = (0, 0, 0, 0, 0);
-  return;
-}
+sub reset_all { $ACC = _new_acc(); return }
 
 # ── The obligation classes ────────────────────────────────────────────────
 # op name => the class it obliges.  A name here that the runtime no longer
@@ -102,8 +112,8 @@ my %OBLIGATION = (
   'p-eval'          => 'string_eval.eval',
   'p-eval-thunk'    => 'string_eval.thunk',
   'p-evalbytes'     => 'string_eval.eval',
-  # regex: which engine tier the program needs (the TIER classifier is not
-  # ours — B5 owns it — so the manifest prints tier: unclassified)
+  # regex: which construct classes appear, and — since B5 (task #1211) — the
+  # engine TIER histogram, read off the `:tier` keyword the literals now carry
   'p-regex'             => 'regex.literal',
   'p-regex-from-parts'  => 'regex.interpolated',
   'p-qr'                => 'regex.qr',
@@ -163,6 +173,11 @@ sub _is_magic_name {
 # `p-setf` of one.
 my %ELEM_PLACE = map { ($_ => 1) } qw(p-aref p-gethash);
 
+# The regex-literal heads that carry a `:tier` keyword.  `p-tr` is not one:
+# a transliteration needs no regex engine.
+my %TIER_HEAD = map { ($_ => 1) }
+  qw(p-regex p-qr p-regex-from-parts p-subst);
+
 # ── Collection ────────────────────────────────────────────────────────────
 
 # Called from Pl::Passes::run — the one place a lowered top-level form is
@@ -170,16 +185,21 @@ my %ELEM_PLACE = map { ($_ => 1) } qw(p-aref p-gethash);
 sub note_form {
   return unless $ON;
   my ($form) = @_;
-  _walk($form);
+  _walk($form, $ACC);
   return;
 }
 
 sub note_text {
   return unless $ON;
-  my ($text) = @_;
+  _scan_text($_[0], $ACC);
+  return;
+}
+
+sub _scan_text {
+  my ($text, $acc) = @_;
   return unless defined $text && length $text;
-  $TEXT_CHUNKS++;
-  while ($text =~ /\(([^\s()"]+)/g) { $TEXT_HEAD{ _canon($1) }++ }
+  $acc->{TEXT_CHUNKS}++;
+  while ($text =~ /\(([^\s()"]+)/g) { $acc->{TEXT_HEAD}{ _canon($1) }++ }
   # THE `local` SITE CORRECTION, measured s470bm on five spellings.  The whole
   # `local` family is v1 TEXT (a raw_wrap open), and it has TWO shapes:
   #
@@ -194,7 +214,7 @@ sub note_text {
   # 6 sites for 5 `local`s; counting only `p-local-*` gave 3.  The site count
   # is therefore (p-local-* heads) + (p-box-for-local) − (the wraps), and this
   # counts the wraps.
-  $LOCAL_VALUE_WRAPS++
+  $acc->{LOCAL_VALUE_WRAPS}++
     while $text =~ /\(p-local-[^\s()]*\s+[^\s()]+\s+\(p-box-for-local\b/g;
   return;
 }
@@ -209,13 +229,13 @@ sub _canon {
 }
 
 sub _walk {
-  my ($f) = @_;
+  my ($f, $acc) = @_;
   return unless defined $f;
   if (!ref $f) { return }
-  if (Pl::CLForm::is_raw($f))      { note_text($$f); return }
+  if (Pl::CLForm::is_raw($f))      { _scan_text($$f, $acc); return }
   if (Pl::CLForm::is_raw_wrap($f)) {
-    note_text($f->{open});
-    _walk($_) for @{ $f->{body} };
+    _scan_text($f->{open}, $acc);
+    _walk($_, $acc) for @{ $f->{body} };
     return;
   }
   return unless ref $f eq 'ARRAY';
@@ -224,31 +244,52 @@ sub _walk {
   if (!ref $head) {
     my $h = _canon($head);
     if ($h ne 'list') {
-      $HEAD{$h}++;
-      _note_special($h, \@args);
+      $acc->{HEAD}{$h}++;
+      _note_special($h, \@args, $acc);
     }
     else {
       # A headless list: a let-binding list, a lambda list, a facts plist.
       # Nothing to count as an op; its members are walked below.
     }
   }
-  _walk($_) for @args;
+  _walk($_, $acc) for @args;
   return;
 }
 
 # The head-specific readings: the declaration classes (ir-spec §2b.2a), the
 # p-sub facts plist (§5.1), and the two element-write shapes.
 sub _note_special {
-  my ($h, $args) = @_;
-  if ($h eq 'p-let')        { _note_let_entries($args->[0]) }
-  elsif ($h eq 'p-raw-params') { _note_param_entries($args->[0]) }
-  elsif ($h eq 'p-sub')     { $SUBS++; _note_sub_facts($args->[2]) }
-  elsif ($h eq 'setf')      { $SETF_ELEM++  if _is_elem_place($args->[0]) }
-  elsif ($h eq 'p-setf')    { $PSETF_ELEM++ if _is_elem_place($args->[0]) }
+  my ($h, $args, $acc) = @_;
+  if ($h eq 'p-let')        { _note_let_entries($args->[0], $acc) }
+  elsif ($h eq 'p-raw-params') { _note_param_entries($args->[0], $acc) }
+  elsif ($h eq 'p-sub')     { $acc->{SUBS}++; _note_sub_facts($args->[2], $acc) }
+  elsif ($h eq 'setf')      { $acc->{SETF_ELEM}++  if _is_elem_place($args->[0]) }
+  elsif ($h eq 'p-setf')    { $acc->{PSETF_ELEM}++ if _is_elem_place($args->[0]) }
+  # THE REGEX TIER (task #1211): a regex literal carries `:tier :native` /
+  # `:pcre` / `:refused` / `:dynamic` in its keyword form (ir-spec §10 regex
+  # row), so the histogram is a read of the emitted tree — this is what makes
+  # `needs.regex.tier` a measurement instead of the `unclassified` it printed
+  # before B5.
+  if ($TIER_HEAD{$h}) {
+    my $t = _plist_value($args, ':tier');
+    $acc->{TIER}{ $t =~ s/\A://r }++ if defined $t;
+  }
   if ($ASSIGN_HEAD{$h} && _is_magic_name($args->[0])) {
-    $HEAD{'#magic-write'}++;
+    $acc->{HEAD}{'#magic-write'}++;
   }
   return;
+}
+
+# The value of KEY in a keyword-plist argument run, or undef.  Stops at the
+# first non-keyword: `p-subst`'s `:pat` value can be an arbitrary form, so the
+# scan reads pairs rather than assuming positions.
+sub _plist_value {
+  my ($args, $key) = @_;
+  for (my $i = 0; $i + 1 < @$args; $i += 2) {
+    return undef if ref $args->[$i] || $args->[$i] !~ /\A:/;
+    return $args->[$i + 1] if $args->[$i] eq $key;
+  }
+  return undef;
 }
 
 sub _is_elem_place {
@@ -260,17 +301,17 @@ sub _is_elem_place {
 # `(p-let ((NAME CLASS INIT . FACTS) …) …)` — the bindings are a headless
 # list of headless lists.
 sub _note_let_entries {
-  my ($bindings) = @_;
+  my ($bindings, $acc) = @_;
   return unless ref $bindings eq 'ARRAY' && !ref $bindings->[0]
              && $bindings->[0] eq 'list';
   for my $e (@$bindings[1 .. $#$bindings]) {
     next unless ref $e eq 'ARRAY' && !ref $e->[0] && $e->[0] eq 'list';
     my (undef, $name, $class, undef, @facts) = @$e;
     next if ref $class || !defined $class || $class !~ /\A:/;
-    $PLET_CLASS{$class}++;
+    $acc->{PLET_CLASS}{$class}++;
     for (my $i = 0; $i < @facts; $i += 2) {
       next if ref $facts[$i] || $facts[$i] !~ /\A:/;
-      $PLET_FACT{ $facts[$i] }++;
+      $acc->{PLET_FACT}{ $facts[$i] }++;
     }
   }
   return;
@@ -278,14 +319,14 @@ sub _note_let_entries {
 
 # `(p-raw-params ((NAME CLASS) …) …)`
 sub _note_param_entries {
-  my ($params) = @_;
+  my ($params, $acc) = @_;
   return unless ref $params eq 'ARRAY' && !ref $params->[0]
              && $params->[0] eq 'list';
   for my $e (@$params[1 .. $#$params]) {
     next unless ref $e eq 'ARRAY' && !ref $e->[0] && $e->[0] eq 'list';
     my $class = $e->[2];
     next if ref $class || !defined $class || $class !~ /\A:/;
-    $PARAM_CLASS{$class}++;
+    $acc->{PARAM_CLASS}{$class}++;
   }
   return;
 }
@@ -293,13 +334,13 @@ sub _note_param_entries {
 # `(p-sub pl-NAME LAMBDA-LIST FACTS body…)` — FACTS is at a FIXED position
 # and is a headless plist, possibly empty (ir-spec §5.1).
 sub _note_sub_facts {
-  my ($facts) = @_;
+  my ($facts, $acc) = @_;
   return unless ref $facts eq 'ARRAY' && !ref $facts->[0]
              && $facts->[0] eq 'list';
   my @kv = @$facts[1 .. $#$facts];
   for (my $i = 0; $i < @kv; $i += 2) {
     next if ref $kv[$i] || $kv[$i] !~ /\A:/;
-    $SUB_FACT{ $kv[$i] }++;
+    $acc->{SUB_FACT}{ $kv[$i] }++;
   }
   return;
 }
@@ -308,36 +349,84 @@ sub _note_sub_facts {
 
 sub _count { my ($h, @k) = @_; my $n = 0; $n += $h->{$_} // 0 for @k; return $n }
 
+# The head census of one accumulator: the runtime vocabulary by SPELLING and
+# everything else, merged from the walked forms and the regex-scanned text.
+# Returns the merged map and the magic-write count taken out of it.
+sub _all_heads {
+  my ($acc) = @_;
+  my %all;
+  $all{$_} += $acc->{HEAD}{$_}      for keys %{ $acc->{HEAD} };
+  $all{$_} += $acc->{TEXT_HEAD}{$_} for keys %{ $acc->{TEXT_HEAD} };
+  my $magic_writes = delete($all{'#magic-write'}) // 0;
+  return (\%all, $magic_writes);
+}
+
+# The OBLIGATION classes of one accumulator, as `group => count` or
+# `group => {sub => count}`.  Shared by `report` (whole program) and
+# `needs_of_form` (one sub) — one reading of %OBLIGATION, so a sub's `:needs`
+# and the program's `needs` can never disagree about what a class is.
+sub _needs_from {
+  my ($acc, $all, $magic_writes) = @_;
+  my %needs;
+  for my $k (keys %$all) {
+    my $cls = $OBLIGATION{$k} or next;
+    my ($group, $sub) = split /\./, $cls, 2;
+    if (defined $sub) { $needs{$group}{$sub} += $all->{$k} }
+    else              { $needs{$group} += $all->{$k} }
+  }
+  # The `local` site count, corrected for the value-wrapper double count
+  # (see _scan_text).  Clamped at 0: an arithmetic correction must never make
+  # a count negative, and if it ever would the shape assumption has changed —
+  # which is what Pl/t/manifest-01.t's exact rows are there to catch.
+  if (($needs{dynamic_scope}{local} // 0) && $acc->{LOCAL_VALUE_WRAPS}) {
+    my $n = $needs{dynamic_scope}{local} - $acc->{LOCAL_VALUE_WRAPS};
+    $needs{dynamic_scope}{local} = $n > 0 ? $n : 0;
+  }
+  $needs{dynamic_scope}{magic_global_write} = $magic_writes if $magic_writes;
+  return \%needs;
+}
+
+# THE PER-SUB OBLIGATIONS (task #1214, Part B item B3; ir-spec §5.1).
+# The `:needs` list on `p-sub`'s facts plist: the obligation CLASSES this sub's
+# own body exercises, spelled as keywords with §10b's own class names
+# (`:nonlocal_exit.die`, `:io`) so the two answers cannot drift.  A backend
+# reads it to compile a program PARTIALLY — every sub whose classes it
+# implements — and, on the CL target, to see where a frame or a save/restore
+# stack is provably unnecessary (plan §B.3's table).
+#
+# ALWAYS COMPUTED, not gated on `--manifest`: absence is the valuable half of
+# the fact ("nothing in this sub can throw"), so an empty list is printed
+# rather than omitted.  Cost is one walk of the body the emitter has just
+# built, no second representation.
+sub needs_of_form {
+  my ($form) = @_;
+  my $acc = _new_acc();
+  _walk($form, $acc);
+  my ($all, $magic) = _all_heads($acc);
+  my $needs = _needs_from($acc, $all, $magic);
+  my @classes;
+  for my $g (sort keys %$needs) {
+    if (ref $needs->{$g} eq 'HASH') {
+      push @classes, map { ":$g.$_" } grep { $needs->{$g}{$_} } sort keys %{ $needs->{$g} };
+    }
+    elsif ($needs->{$g}) { push @classes, ":$g" }
+  }
+  # The regex TIERS this sub's literals need, from the same walk.
+  push @classes, map { ":regex.$_" } grep { $acc->{TIER}{$_} } sort keys %{ $acc->{TIER} };
+  return @classes;
+}
+
 sub report {
   my (%o) = @_;
-  # The head census: the runtime vocabulary by SPELLING, and everything else.
-  # Both maps are printed, so a head can never be silently dropped.
-  my %all;
-  $all{$_} += $HEAD{$_}      for keys %HEAD;
-  $all{$_} += $TEXT_HEAD{$_} for keys %TEXT_HEAD;
-  my $magic_writes = delete($all{'#magic-write'}) // 0;
+  my ($all_ref, $magic_writes) = _all_heads($ACC);
+  my %all = %$all_ref;
   my (%uses, %other);
   for my $k (keys %all) {
     if ($k =~ /\A%?p-/ || $k =~ /\A%pcl-/) { $uses{$k} = $all{$k} }
     else { $other{$k} = $all{$k} }
   }
 
-  # The obligation classes, from the head census through %OBLIGATION.
-  my %needs;
-  for my $k (keys %all) {
-    my $cls = $OBLIGATION{$k} or next;
-    my ($group, $sub) = split /\./, $cls, 2;
-    if (defined $sub) { $needs{$group}{$sub} += $all{$k} }
-    else              { $needs{$group} += $all{$k} }
-  }
-  # The `local` site count, corrected for the value-wrapper double count
-  # (see note_text).  Clamped at 0: an arithmetic correction must never make
-  # a count negative, and if it ever would the shape assumption has changed —
-  # which is what Pl/t/manifest-01.t's exact rows are there to catch.
-  if (($needs{dynamic_scope}{local} // 0) && $LOCAL_VALUE_WRAPS) {
-    my $n = $needs{dynamic_scope}{local} - $LOCAL_VALUE_WRAPS;
-    $needs{dynamic_scope}{local} = $n > 0 ? $n : 0;
-  }
+  my %needs = %{ _needs_from($ACC, \%all, $magic_writes) };
   $needs{dynamic_scope}{magic_global_write} = $magic_writes;
   # Every class is PRESENT with a zero, never absent: "the program does not
   # need tie" is an answer, and a missing key would make a consumer guess.
@@ -349,23 +438,23 @@ sub report {
   $needs{nonlocal_exit}{$_}          //= 0 for qw(return loop_control goto die eval_block);
   $needs{string_eval}{$_}            //= 0 for qw(eval thunk);
   $needs{regex}{$_}                  //= 0 for qw(literal interpolated qr subst tr split);
-  $needs{regex}{tier}                  = 'unclassified';
+  $needs{regex}{tier} = { map { ($_ => $ACC->{TIER}{$_} // 0) } qw(native pcre refused dynamic) };
   $needs{phase}{$_}                  //= 0 for qw(begin check eval_when run_blocks);
 
   # The Kind-A/Kind-B licences.  `fired`/`candidates` wherever the tree can
   # say both — a bare `fired` where it cannot.
-  my $scalarish = _count(\%PLET_CLASS, ':box', ':scalar', ':num', ':str', ':str-buffer');
+  my $scalarish = _count($ACC->{PLET_CLASS}, ':box', ':scalar', ':num', ':str', ':str-buffer');
   my %facts = (
     'raw-slot' => {
-      fired      => _count(\%PLET_CLASS, ':scalar', ':num', ':str', ':str-buffer'),
+      fired      => _count($ACC->{PLET_CLASS}, ':scalar', ':num', ':str', ':str-buffer'),
       candidates => $scalarish,
     },
     'raw-numeric' => {
-      fired      => _count(\%PLET_CLASS, ':num', ':str'),
+      fired      => _count($ACC->{PLET_CLASS}, ':num', ':str'),
       candidates => $scalarish,
     },
     'str-buffer' => {
-      fired      => _count(\%PLET_CLASS, ':str-buffer'),
+      fired      => _count($ACC->{PLET_CLASS}, ':str-buffer'),
       candidates => $scalarish,
     },
     'foreach-range' => {
@@ -391,21 +480,21 @@ sub report {
       candidates => _count(\%all, 'p-tail-value', 'p-return'),
     },
     'elem-setf' => {
-      fired      => $SETF_ELEM,
-      candidates => $SETF_ELEM + $PSETF_ELEM,
+      fired      => $ACC->{SETF_ELEM},
+      candidates => $ACC->{SETF_ELEM} + $ACC->{PSETF_ELEM},
     },
     # insensitive-call's licence is a SUB fact, not a call-site shape the tree
     # can count both sides of: what the IR carries is the proof.
     'insensitive-call' => {
-      fired      => $SUB_FACT{':wantarray-insensitive'} // 0,
-      candidates => $SUBS,
+      fired      => $ACC->{SUB_FACT}{":wantarray-insensitive"} // 0,
+      candidates => $ACC->{SUBS},
     },
     # The declaration/parameter/sub verdicts themselves (#1035) — a fast
     # backend's raw material (plan-speed-and-ir §B.3).
-    'declaration_classes' => { %PLET_CLASS },
-    'declaration_facts'   => { %PLET_FACT },
-    'parameter_classes'   => { %PARAM_CLASS },
-    'sub_facts'           => { subs => $SUBS, %SUB_FACT },
+    'declaration_classes' => { %{ $ACC->{PLET_CLASS} } },
+    'declaration_facts'   => { %{ $ACC->{PLET_FACT} } },
+    'parameter_classes'   => { %{ $ACC->{PARAM_CLASS} } },
+    'sub_facts'           => { subs => $ACC->{SUBS}, %{ $ACC->{SUB_FACT} } },
   );
 
   return {
@@ -415,7 +504,7 @@ sub report {
     manifest_version => $VERSION,
     # The v1-text chunks the head census could only REGEX, not walk.  Nonzero
     # means `uses` is approximate for those chunks and says so out loud.
-    text_scanned => $TEXT_CHUNKS,
+    text_scanned => $ACC->{TEXT_CHUNKS},
     uses        => \%uses,
     uses_other  => \%other,
     needs       => \%needs,

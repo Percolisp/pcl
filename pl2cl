@@ -102,6 +102,7 @@ use lib dirname(abs_path($0));
 use Pl::Parser;
 use Pl::CLForm ();   # build_eval_preamble's designator rule (cl_pkg) — rule 11
 use Pl::ProtoCache ();  # the ONE reader of *pcl-cache-generation* (task #560)
+use Pl::Passes ();      # --facts: the licence annotation switch (task #1213)
 
 # v2 (Pl::Parser2 → Pl::CLForm structured emission) is the ONLY pipeline
 # (default since session 273/W9; the v1 escape hatch and the whole-file
@@ -175,6 +176,8 @@ my $lenient_ppi = 0;    # DEBUG: truncate at first PPI-unparseable line (test ru
 my $eval_pkg;           # When set, emit minimal preamble for eval-string mode
 my $server_mode = 0;    # Persistent transpiler server mode
 my $manifest_mode = 0;  # Print the per-program manifest as JSON, not the CL
+my $facts_mode = 0;     # Annotate the emission with every Kind-A/B licence
+my $sexp_mode = 0;      # Print the lowered tree as PORTABLE S-expressions
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
 GetOptions(
@@ -188,7 +191,9 @@ GetOptions(
   'lenient-ppi'  => \$lenient_ppi,   # DEBUG: for test runner use only
   'eval-pkg=s'   => \$eval_pkg,      # eval "string" mode: minimal preamble for named package
   'server'       => \$server_mode,   # persistent transpiler server mode
-  'manifest'     => \$manifest_mode, # print the JSON manifest INSTEAD of the CL
+  "manifest"     => \$manifest_mode, # print the JSON manifest INSTEAD of the CL
+  "facts"        => \$facts_mode,    # wrap licensed forms in (p-fact (NAME) FORM)
+  "emit-sexp"    => \$sexp_mode,     # print the data form INSTEAD of the CL
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or die "Usage: pl2cl [options] <file.pl>\n";
 
@@ -201,6 +206,31 @@ GetOptions(
 if ($manifest_mode) {
   require Pl::Manifest;
   Pl::Manifest::enable();
+}
+
+# `--facts` (task #1213; docs/plan-speed-and-ir-s470.md §B.3): every Kind-A /
+# Kind-B licence that HELD is printed as `(p-fact (NAME) FORM)` around the form
+# it licensed, so `PCL_OPT=none --facts` is the general-form IR with the
+# compiler's proofs attached — what a foreign backend needs in order to pick
+# ITS own fast shapes.  `p-fact` expands to FORM, so the annotation costs
+# nothing at run time; the flag is off by default, so the emission cannot move.
+Pl::Passes::facts_on(1) if $facts_mode;
+
+# `--emit-sexp` (task #1215; Part B item B5, grammar in docs/ir-spec.md §12b):
+# print the lowered CLForm tree as PORTABLE S-expressions — every symbol
+# pipe-quoted, every string 7-bit and one line, no comments — INSTEAD of the
+# CL, so a consumer parses the program with a ~50-line reader in any language
+# instead of implementing CL's five reader rules (ir-spec §11b).  It is a
+# SECOND PRINTER over the same tree, so the default emission cannot move.
+#
+# `--manifest` and `--emit-sexp` both install the observer hook, and there is
+# ONE hook slot: asking for both is an error naming both rather than a silent
+# win for whichever registered last.
+die "pl2cl: --manifest and --emit-sexp cannot be combined (one observer hook)\n"
+  if $manifest_mode && $sexp_mode;
+if ($sexp_mode) {
+  require Pl::DataForm;
+  Pl::DataForm::enable();
 }
 
 # The #138-family drop announcement (task #339) is a diagnostic for the person
@@ -508,6 +538,20 @@ if ($bundle_mode || $executable_mode) {
 
 # Print the manifest for whatever was just transpiled and exit.  ONE place, so
 # the file path and the mode label cannot drift between the two entry points.
+# The data form for whatever was just transpiled, and exit.  ONE place, like
+# print_manifest, so the two entry points cannot drift.
+sub print_sexp {
+  my ($file) = @_;
+  binmode(STDOUT, ':raw');
+  print Pl::DataForm::program(
+    file       => $file,
+    mode       => ($is_module ? 'module' : $is_extension ? 'extension'
+                              : defined $eval_pkg ? 'eval' : 'program'),
+    generation => cache_generation(),
+  );
+  return;
+}
+
 sub print_manifest {
   my ($file) = @_;
   require JSON::PP;   # core
@@ -528,6 +572,7 @@ if (@ARGV && -f $ARGV[0]) {
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
 
   if ($manifest_mode) { print_manifest($source_file); exit 0 }
+  if ($sexp_mode)     { print_sexp($source_file);     exit 0 }
 
   if ($is_module || $is_extension) {
     # Module / extension mode: skip full preamble (@INC etc. are already live in
@@ -569,7 +614,8 @@ elsif (!-t STDIN) {
   my $output = parse_source('parse_code', $code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
-  if ($manifest_mode) { print_manifest('-'); exit 0 }
+  if ($manifest_mode) { print_manifest("-"); exit 0 }
+  if ($sexp_mode)     { print_sexp("-");     exit 0 }
 
   if (defined $eval_pkg) {
     # eval-string mode: REPLACE (in-package :pcl) with just the package switch.

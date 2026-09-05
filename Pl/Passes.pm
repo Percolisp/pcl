@@ -47,7 +47,8 @@ use v5.20;
 use strict;
 use warnings;
 use Exporter 'import';
-our @EXPORT_OK = qw(enabled register_pass run);
+our @EXPORT_OK = qw(enabled register_pass run fact);
+
 
 # Kind-A names → the fact/site that owns each.  Add a name here when a new
 # facts-licensed emission lands; the emitter's gate is the second half.
@@ -87,6 +88,35 @@ my @PASSES;          # [name, coderef] in registration order (Kind B)
 my $FORM_HOOK;      # an OBSERVER of every finished top-level form (set_form_hook)
 my $TEXT_HOOK;      # ... and of the two v1-TEXT buckets (set_text_hook)
 my %PASS_INDEX;
+
+# ── `--facts`: THE LICENCE, PRINTED ON THE FORM (task #1213; §B.3) ────────
+# A foreign backend cannot use PCL's fast SHAPES (`%p-push1`, `%p-sort-classic`
+# and `p-incf-raw` are SBCL-shaped), but it can use the PROOF behind each of
+# them to pick its own.  With `pl2cl --facts` every licence that HELD is
+# printed as `(p-fact (NAME) FORM)` around the form it licensed — so
+# `PCL_OPT=none --facts` is the general-form IR with every proof attached,
+# which is the portable half of PCL's own optimizations.
+#
+# THE FACT IS COMPUTED INDEPENDENTLY OF THE SWITCH, and that is the whole
+# design: a site asks `fact(NAME, HELD, FORM)` with HELD already evaluated, so
+# turning the emission off with PCL_OPT does not turn the PROOF off.  A site
+# whose gate reads `Pl::Passes::enabled(NAME) && FACT` would short-circuit the
+# fact away, which is why those gates are written fact-first.
+#
+# `p-fact` expands to FORM (cl/pcl-runtime.lisp), so the flag costs nothing at
+# run time and the wrapper is invisible to every consumer that ignores it.
+my $FACTS = $ENV{PCL_FACTS} ? 1 : 0;
+
+sub facts_on   { $FACTS = defined $_[0] ? ($_[0] ? 1 : 0) : 1; return }
+sub facts_enabled { return $FACTS }
+
+sub fact {
+  my ($name, $held, $form, @detail) = @_;
+  return $form unless $FACTS && $held;
+  die "Pl::Passes::fact: '$name' is not a registered optimization\n"
+    unless $KIND_A{$name} || exists $PASS_INDEX{$name};
+  return ['p-fact', ['list', $name, @detail], $form];
+}
 my ($all_off, %off, %on, $checked);
 _parse_env();
 
@@ -143,13 +173,23 @@ sub register_pass {
 # it cannot change emission, and with no hook installed the cost is one
 # scalar test per top-level form.
 sub run {
-  my ($form) = @_;
+  my ($form, $bucket) = @_;
   return $form unless @PASSES || $FORM_HOOK;
   for my $p (@PASSES) {
-    next unless enabled($p->[0]);
-    $form = $p->[1]->($form);
+    my $on = enabled($p->[0]) ? 1 : 0;
+    # A DISABLED Kind-B pass still runs under `--facts`, in ANNOTATE-ONLY mode
+    # (second argument): its licence is a fact about the program, and the point
+    # of `PCL_OPT=none --facts` is the general form WITH the proofs.  A pass
+    # that ignores the argument simply rewrites as usual, which is why every
+    # pass must read it (Pl/ClassicSort.pm is the worked example).
+    next unless $on || $FACTS;
+    $form = $p->[1]->($form, $on ? 0 : 1);
   }
-  $FORM_HOOK->($form) if $FORM_HOOK;
+  # The BUCKET (`decls` / `defs` / `run` / `pkg_enter`) reaches the observer
+  # too: `--emit-sexp` must print the forms in the file's own order, and the
+  # phase model (#469) puts every section's compile buckets ahead of every
+  # section's run bucket.  An observer that does not care ignores it.
+  $FORM_HOOK->($form, $bucket) if $FORM_HOOK;
   return $form;
 }
 

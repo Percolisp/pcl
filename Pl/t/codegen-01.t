@@ -439,8 +439,12 @@ test_codegen('print $fh "data"',
              '(p-print :fh $fh "data")',
              'print with variable filehandle');
 
+# The `\n` literal goes out as `(p-esc "thing\\n")` since task #1212 — a
+# string holding a control character is ESCAPED, so the emitted file stays
+# line-oriented (ir-spec §1 + §12b).  This expectation carried the raw
+# newline, which is exactly the shape the flag-day removed.
 test_codegen('print STDERR "Some", "thing\n"',
-             "(p-print :fh 'STDERR \"Some\" \"thing\n\")",
+             "(p-print :fh 'STDERR \"Some\" (p-esc \"thing\\\\n\"))",
              'print with filehandle and multiple args');
 
 test_codegen('say "hello"',
@@ -570,7 +574,7 @@ diag "";
 diag "-------- split scalar context:";
 
 test_codegen('my $n = split(/,/, $str)',
-             '(p-scalar-= $n (length (p-split (p-regex "/,/") $str)))',
+             '(p-scalar-= $n (length (p-split (p-regex :pat "," :flags "" :tier :native) $str)))',
              'split in scalar context returns length');
 
 diag "";

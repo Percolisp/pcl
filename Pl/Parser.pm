@@ -2352,9 +2352,11 @@ sub _process_element {
     my ($data_tok) = grep { ref($_) eq 'PPI::Token::Data'
                             || ref($_) eq 'PPI::Token::End' }
                            $element->children;
-    my $data = $data_tok ? $data_tok->content : '';
-    $data =~ s/\\/\\\\/g;
-    $data =~ s/"/\\"/g;
+    # The section's text through the ONE string writer (task #1212): a
+    # `__DATA__` body is the densest source of literal newlines in an emitted
+    # file, so it goes out as `(p-esc …)` like every other control-character
+    # literal instead of putting the section's own line breaks into the CL.
+    my $data = Pl::ExprToCL::cl_string_literal($data_tok ? $data_tok->content : '');
     $self->_with_bucket('preamble', sub {
       $self->_emit(";; $ref — register DATA filehandle");
       # ONE named op, not the pieces spelled out: the old emission put a CL
@@ -2365,7 +2367,7 @@ sub _process_element {
       # inside the runtime made one key for the program and every module it
       # loads, and the last module's `__END__` POD replaced the program's
       # section (measured on sprintf.t: 559 tests -> 1).
-      $self->_emit("(p-install-data-handle 'DATA \"$data\")");
+      $self->_emit("(p-install-data-handle 'DATA $data)");
     });
     return;
   }

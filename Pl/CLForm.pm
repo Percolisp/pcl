@@ -400,6 +400,23 @@ sub to_string {
     return _close('(' . join("\n$ind1", map { to_string($_, $depth + 1) } @args),
                   $depth);
   }
+  # A HEADED KEYWORD PLIST breaks between PAIRS, never between a key and its
+  # value — the same argument the headless-plist arm below makes, applied where
+  # the plist is a form's whole argument run.  The regex literals are that
+  # shape since task #1211 (`(p-regex :pat "…" :flags "…" :tier :native)`), and
+  # without this a long interpolated pattern printed `:flags` and `"i"` on
+  # separate lines, which is not what a plist looks like and is unreadable.
+  # Keyed on the SHAPE and nothing else: an argument run that merely starts
+  # with a keyword (`p-die :loc "…" "msg"`) has odd length and is not one.
+  if (@args >= 2 && @args % 2 == 0 && _is_plist(\@args)) {
+    my @pairs;
+    for (my $i = 0; $i < @args; $i += 2) {
+      push @pairs, $args[$i] . ' ' . to_string($args[$i + 1], $depth + 1);
+    }
+    my $first = shift @pairs;
+    return _close("($head $first", $depth) unless @pairs;
+    return _close("($head $first\n" . join("\n", map { $ind1 . $_ } @pairs), $depth);
+  }
   # Keep short scrutinee args (var/list pairs of let/foreach) on the head line
   # when the first arg fits flat; body args go one per line.
   my $first = @args ? _flat($args[0]) : undef;

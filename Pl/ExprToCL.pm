@@ -16,6 +16,7 @@ use Pl::PExpr qw(SCALAR_CTX LIST_CTX VOID_CTX INHERIT_CTX);
 use Pl::CLForm qw(cl_sym cl_pkg);
 use Pl::InterpScan ();
 use Pl::Passes ();
+use Pl::RegexTier ();     # the regex-literal TIER fact — ir-spec §10 regex row
 use Pl::Environment ();   # fh_bareword_shape — see Pl/PExpr.pm's note
 
 # Per-compilation flip-flop ID counter (increments across all ExprToCL instances)
@@ -619,13 +620,21 @@ sub gen_leaf_form {
     return undef if !ref $f && $f =~ /^\(/;
     return $f;
   }
-  # Pure atom leaves: heredocs, barewords, and operator tokens.  gen_leaf for
+  # A HEREDOC is a string literal like any other and goes through the ONE
+  # writer (task #1212), which since `p-esc` returns a FORM whenever the body
+  # holds a control character — and a heredoc body always does.  It used to
+  # ride the atom arm below, whose `starts with "(" → decline` guard would
+  # send every heredoc to the v1 text path.
+  if ($ref eq 'PPI::Token::HereDoc') {
+    return _cl_string_literal_form(join('', $node->heredoc()));
+  }
+
+  # Pure atom leaves: barewords and operator tokens.  gen_leaf for
   # these is pure and its output is always an atom (a "…" literal, a
   # bareword, a number, an operator string), so it never starts with "(" —
   # the guard below is belt-and-braces only, and there is no double-run risk
   # because these never decline.
-  if ($ref eq 'PPI::Token::HereDoc'
-      || $ref eq 'PPI::Token::Word'
+  if ($ref eq 'PPI::Token::Word'
       || $ref eq 'PPI::Token::Operator'
       || $ref eq 'PPI::Token::Cast') {   # deref sigil (@/%/$/\/&/*): bare content atom
     my $s = $self->gen_leaf($node);
@@ -689,34 +698,14 @@ sub gen_leaf_form {
   # declines, so it runs exactly once per node either way.  s/// and tr/// via
   # gen_substitution_form / gen_transliteration_form (never decline, so their
   # side effects — the /e sub-compile — run exactly once).
-  if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
-    my $content = $node->content();
-    my ($pattern, $flags, $delim) = _parse_regex_content($content, 1);
-    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
-      my $pat_form = $self->_gen_interp_regex_pattern($pattern);
-      (my $esc_flags = $flags) =~ s/"/\\"/g;
-      return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
-    }
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return ['pcl::p-qr', qq{"$content"}];
-  }
+  return $self->_regex_literal_form($node, 1)
+    if $ref eq 'PPI::Token::QuoteLike::Regexp';
   return $self->gen_substitution_form($node)
     if $ref eq 'PPI::Token::Regexp::Substitute';
   return $self->gen_transliteration_form($node)
     if $ref eq 'PPI::Token::Regexp::Transliterate';
-  if ($ref =~ /^PPI::Token::Regexp/) {
-    my $content = $node->content();
-    my ($pattern, $flags, $delim) = _parse_regex_content($content, 0);
-    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
-      my $pat_form = $self->_gen_interp_regex_pattern($pattern);
-      (my $esc_flags = $flags) =~ s/"/\\"/g;
-      return ['pcl::p-regex-from-parts', $pat_form, qq{"$esc_flags"}];
-    }
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return ['p-regex', qq{"$content"}];
-  }
+  return $self->_regex_literal_form($node, 0)
+    if $ref =~ /^PPI::Token::Regexp/;
 
   return undef;   # decline: not a converted leaf type (never fires on the
                   # corpus — safety net, verified s304 census)
@@ -724,6 +713,52 @@ sub gen_leaf_form {
 
 
 # Generate code for leaf nodes (literals, variables)
+# THE ONE REGEX-LITERAL BUILDER (task #1210; ir-spec §10 regex row).
+#
+# A m// or qr// literal lowers to the STRUCTURED keyword form
+#
+#   (p-regex   :pat "…" :flags "…" :tier :native)          non-interpolated m//
+#   (pcl::p-qr :pat "…" :flags "…" :tier :native)           non-interpolated qr//
+#   (pcl::p-regex-from-parts :pat FORM :flags "…" :tier :dynamic)   interpolated
+#
+# instead of the delimited source text it used to carry
+# (`(p-regex "/pat/i")`) — friction §3.3: joining the parts back into `/…/`
+# threw away structure PPI had already separated, and made every consumer
+# (this runtime included) re-implement perl's delimiter/flag scan.
+#
+# It is ONE function because it was FOUR (gen_leaf and gen_leaf_form each had
+# an m// arm and a qr// arm, byte-identical but for the head symbol) — rule 11:
+# the `:tier` fact would otherwise have had to be added in four places.
+# `:pat` and `:flags` go out through `_cl_string_literal_form`, the one string
+# writer, so a pattern holding a control character or an unrepresentable code
+# point is escaped like any other literal (`p-esc` / `p-literal-string`)
+# instead of being written raw — the #419 hole in regex literals, closed by
+# the routing rather than by a second escaper.
+sub _regex_literal_form {
+  my ($self, $node, $is_qr) = @_;
+  my ($pattern, $flags, $delim) = _parse_regex_content($node->content(), $is_qr);
+  if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
+    # An interpolated pattern is not known until run time, so the TIER is a
+    # run-time question for a target: `:dynamic` is a declared absence, never
+    # a guess (Pl::RegexTier's header).
+    return ['pcl::p-regex-from-parts',
+            ':pat',   $self->_gen_interp_regex_pattern($pattern),
+            ':flags', _cl_string_literal_form($flags),
+            ':tier',  ':dynamic'];
+  }
+  return [($is_qr ? 'pcl::p-qr' : 'p-regex'),
+          ':pat',   _cl_string_literal_form($pattern),
+          ':flags', _cl_string_literal_form($flags),
+          ':tier',  Pl::RegexTier::tier_keyword($pattern, $flags)];
+}
+
+# The modifier letters of an s/// or tr/// literal, as ONE string in the same
+# `:flags` slot the match literals use.  PPI collapses `/xx` to a single `x`
+# (measured s470bq), so `sort keys` is always distinct single letters and the
+# runtime's per-letter conversion reproduces the old `map { ":$_" }` keyword
+# list exactly.
+sub _mod_letters { my ($mods) = @_; return join '', sort keys %$mods }
+
 # Parse a regex token content into (pattern_content, flags).
 # Works for /pat/flags, m/pat/flags, m{pat}flags, qr/pat/flags, qr{pat}flags, etc.
 # $is_qr: 1 if token starts with 'qr', 0 otherwise.
@@ -1148,27 +1183,17 @@ sub gen_leaf {
 
   # Compiled regex qr// (check before Quote to avoid catching QuoteLike::Regexp)
   if ($ref eq 'PPI::Token::QuoteLike::Regexp') {
-    my $content = $node->content();
-    my ($pattern, $flags, $delim) = _parse_regex_content($content, 1);
-    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
-      my $pat_expr = Pl::CLForm::to_flat($self->_gen_interp_regex_pattern($pattern));
-      (my $esc_flags = $flags) =~ s/"/\\"/g;
-      return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
-    }
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{(pcl::p-qr "$content")};
+    return Pl::CLForm::to_flat($self->_regex_literal_form($node, 1));
   }
 
-  # Heredoc <<'EOF' or <<"EOF" or <<EOF
+  # Heredoc <<'EOF' or <<"EOF" or <<EOF.  Its body is the corpus's densest
+  # source of literal newlines, so it goes out through the ONE string writer
+  # (`_cl_string_literal_form`) like every other literal — which is what gives
+  # it `p-esc` (task #1212) and, incidentally, the #419 unrepresentable-code-
+  # point split its own inline escaper never had.
   if ($ref eq 'PPI::Token::HereDoc') {
     # PPI::Token::HereDoc has heredoc() method to get the content lines
-    my @lines = $node->heredoc();
-    my $content = join('', @lines);
-    # Escape backslashes and double quotes for CL string literal
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{"$content"};
+    return Pl::CLForm::to_flat(_cl_string_literal_form(join('', $node->heredoc())));
   }
 
   # String literals
@@ -1236,16 +1261,7 @@ sub gen_leaf {
 
   # Match regex m// or //
   if ($ref =~ /^PPI::Token::Regexp/) {
-    my $content = $node->content();
-    my ($pattern, $flags, $delim) = _parse_regex_content($content, 0);
-    if (_delim_interpolates($delim) && _has_regex_interpolation($pattern)) {
-      my $pat_expr = Pl::CLForm::to_flat($self->_gen_interp_regex_pattern($pattern));
-      (my $esc_flags = $flags) =~ s/"/\\"/g;
-      return qq{(pcl::p-regex-from-parts $pat_expr "$esc_flags")};
-    }
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{(p-regex "$content")};
+    return Pl::CLForm::to_flat($self->_regex_literal_form($node, 0));
   }
 
   # Cast (deref sigil)
@@ -1571,8 +1587,10 @@ sub gen_binary_op_form {
       # container, and a key/index form free of side effects (setf
       # evaluates the key BEFORE the value; perl and p-setf evaluate the
       # value first — with a pure key the order cannot be observed).
-      return ['setf', $left, $right] if $self->_elem_setf_ok($left);
-      return ['p-setf', $left, $right];
+      my $esf = $self->_elem_setf_ok($left);
+      return Pl::Passes::fact("elem-setf", $esf, ["setf", $left, $right])
+        if $esf && Pl::Passes::enabled("elem-setf");
+      return Pl::Passes::fact("elem-setf", $esf, ["p-setf", $left, $right]);
     # The sigil tests read the EMITTED text, so they must see through the
     # pipe-quoting a non-ASCII name carries (#418): `|@Ｘ|` and
     # `|ＦＯＯ|::|@Ｘ|` are array targets exactly as `@x` and `Foo::@x` are.
@@ -2332,10 +2350,11 @@ sub gen_funcall_form {
     # Kind-A `local-push` (task #996 half A3, licensed by #1140's array
     # facts): one scalar appended to a `my @a` nothing else can reach needs
     # none of p-push-impl's generality.
-    return ['%p-push1', $target, $items[0]]
-      if $func_name eq 'push' && @items == 1
+    my $lpush = $func_name eq "push" && @items == 1
       && $self->_local_push_ok($kids->[1], $kids->[2], $target);
-    return [$cl_func, $target, @items];
+    return Pl::Passes::fact("local-push", $lpush, ["%p-push1", $target, $items[0]])
+      if $lpush && Pl::Passes::enabled("local-push");
+    return Pl::Passes::fact("local-push", $lpush, [$cl_func, $target, @items]);
   }
 
   # readline(BAREWORD) / select(BAREWORD): the arg is a filehandle name — and
@@ -2638,9 +2657,11 @@ sub gen_funcall_form {
     # bind is a special-variable rebinding per call.  ExprToCL2's native
     # funcall rule, folded here (Phase A); the general form is the bind.
     my $info = $self->sub_info->{$func_name};
-    return $call
-      if $info && $info->{insensitive} && Pl::Passes::enabled('insensitive-call');
-    return $self->_ctx_wrap_form($call, $ctx);
+    my $insens = ($info && $info->{insensitive}) ? 1 : 0;
+    return Pl::Passes::fact('insensitive-call', $insens, $call)
+      if $insens && Pl::Passes::enabled('insensitive-call');
+    return Pl::Passes::fact('insensitive-call', $insens,
+                            $self->_ctx_wrap_form($call, $ctx));
   }
   return $ctx == LIST_CTX
       ? Pl::CLForm::ctx_bind('t', $call)
@@ -2676,7 +2697,8 @@ sub _pure_form {
 }
 sub _elem_setf_ok {
   my ($self, $left) = @_;
-  return 0 unless Pl::Passes::enabled('elem-setf');
+  # THE FACT ONLY -- the Kind-A switch is asked at the SITE, so `--facts` can
+  # print the licence even when PCL_OPT has the emission off (task #1213).
   return 0 unless ref $left eq 'ARRAY' && @$left == 3 && !ref $left->[0]
     && ($left->[0] eq 'p-gethash' || $left->[0] eq 'p-aref');
   my $container = $left->[1];
@@ -2713,7 +2735,7 @@ sub _elem_setf_ok {
 #     what the four-way cond is for and that is a separate licence.
 sub _local_push_ok {
   my ($self, $target_id, $item_id, $target_form) = @_;
-  return 0 unless Pl::Passes::enabled('local-push');
+  # THE FACT ONLY -- see _elem_setf_ok.
   my $tn = $self->expr_o->get_a_node($target_id);
   return 0 if $self->expr_o->is_internal_node_type($tn);
   return 0 unless ref($tn) eq 'PPI::Token::Symbol'
@@ -3424,11 +3446,14 @@ my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
 # is what #812's name memo is for.
 sub _cast_form {
   my ($head, $operand) = @_;
-  return [$head, $operand]
-    unless !ref($operand)
-        && $operand =~ /\A"([^"\\\x00-\x1f]+)"\z/
-        && Pl::Passes::enabled('symref-const');
-  return [$head, $operand, ['p-symref-site']];
+  # THE FACT (a compile-time literal name with no escape) is computed BEFORE
+  # the switch is consulted, so `--facts` can print the licence even with the
+  # emission turned off by PCL_OPT (task #1213).
+  my $const = (!ref($operand) && $operand =~ /\A"([^"\\\x00-\x1f]+)"\z/) ? 1 : 0;
+  return Pl::Passes::fact('symref-const', $const, [$head, $operand])
+    unless $const && Pl::Passes::enabled('symref-const');
+  return Pl::Passes::fact('symref-const', $const,
+                          [$head, $operand, ['p-symref-site']]);
 }
 
 # `%foo::SIG` → `(p-cast-% "foo::SIG")` — the SAME form `%{"foo::SIG"}`
@@ -4631,10 +4656,10 @@ sub gen_inline_lambda_form {
 
 
 # Generate substitution s///
-# Output: (p-subst "pattern" "replacement" :g :i ...)
-#         (p-subst pat-expr "replacement" :g :i ...)  when pattern has $var
-#         (p-subst "pattern" (lambda () <cl-expr>) :g :i ...)  when replacement has $var
-#         (p-subst "pattern" (lambda () <cl-expr>) :g :e ...)  when /e
+# Output: (p-subst :pat "pattern" :rep "replacement" :flags "gi" :tier :native)
+#         :pat is the interpolation FORM when the pattern has a $var (and then
+#              :tier is :dynamic — the pattern is a run-time string)
+#         :rep is (lambda () <cl-expr>) when the replacement interpolates or /e
 sub gen_substitution {
   my $self = shift;
   my $node = shift;
@@ -4667,23 +4692,27 @@ sub gen_substitution_form {
   my $subst = $node->get_substitute_string;
   my $mods  = $node->get_modifiers;
 
-  my @mod_strs = map { ":$_" } sort keys %$mods;
+  my $letters = _mod_letters($mods);
 
   # perl takes the two DELIMITERS separately, and a single-quoted one turns
   # interpolation off for its half alone: `s{A}'[$x]'` has a dq-like pattern and
   # a literal replacement (probed).
   my ($mdelim, $rdelim) = _subst_delims($node);
 
-  # Pattern: a string literal atom, or the interpolation form ("…"/$var/
-  # (p-string-concat …)) evaluated to the pattern string at runtime.
-  my $match_form;
+  # Pattern: a string literal, or the interpolation form ("…"/$var/
+  # (p-string-concat …)) evaluated to the pattern string at runtime.  The
+  # TIER goes with it: a run-time pattern is `:dynamic`.
+  my ($match_form, $tier);
   if (_delim_interpolates($mdelim) && _has_regex_interpolation($match)) {
     $match_form = $self->_gen_interp_regex_pattern($match);
+    $tier = ':dynamic';
   } else {
-    (my $m = $match) =~ s/\\/\\\\/g;
-    $m =~ s/"/\\"/g;
-    $match_form = qq{"$m"};
+    $match_form = _cl_string_literal_form($match);
+    $tier = Pl::RegexTier::tier_keyword($match, $letters);
   }
+  # The keyword form's fixed tail — one place, so the four returns below
+  # cannot disagree about the slots (rule 11).
+  my @tail = (':flags', _cl_string_literal_form($letters), ':tier', $tier);
 
   # s///e: replacement is Perl code — parse it and wrap in a lambda.
   # The body arrives as a CLForm (task #78); raw only inside declined subtrees.
@@ -4702,7 +4731,8 @@ sub gen_substitution_form {
     for (2 .. _subst_e_count($node)) {
       $body = $self->_gen_eval_string_form($body);
     }
-    return ['p-subst', $match_form, ['lambda', ['list'], $body], @mod_strs];
+    return ['p-subst', ':pat', $match_form, ':rep',
+            ['lambda', ['list'], $body], @tail];
   }
 
   # A SINGLE-QUOTED replacement is literal text — no interpolation, no case
@@ -4712,9 +4742,9 @@ sub gen_substitution_form {
   # cl-ppcre, because that path is exactly the one that would read `$1`/`\1` as
   # a register reference.  Only `\'` and `\\` are unescaped, as in '…'.
   if (!_delim_interpolates($rdelim)) {
-    return ['p-subst', $match_form,
+    return ['p-subst', ':pat', $match_form, ':rep',
             ['lambda', ['list'], _cl_string_literal_form(_unescape_sq($subst))],
-            @mod_strs];
+            @tail];
   }
 
   # Replacement with variable interpolation (or a case-shift escape): wrap in a
@@ -4724,9 +4754,9 @@ sub gen_substitution_form {
   # substitution (no lambda call per match).  Widening this gate is its own
   # measured change (docs/interp-scan.md §wiring).
   if (_replacement_interpolates($subst)) {
-    return ['p-subst', $match_form,
+    return ['p-subst', ':pat', $match_form, ':rep',
             ['lambda', ['list'], $self->_gen_interp_replacement($subst)],
-            @mod_strs];
+            @tail];
   }
 
   # Normal case: the replacement is double-quoted context, so its escapes
@@ -4738,7 +4768,8 @@ sub gen_substitution_form {
   # CL string literal escaping — through the one writer, so a replacement
   # holding a surrogate or an above-U+10FFFF code point is split out the same
   # way a dq literal's is (#419) instead of being written raw.
-  return ['p-subst', $match_form, _cl_string_literal_form($s), @mod_strs];
+  return ['p-subst', ':pat', $match_form, ':rep',
+          _cl_string_literal_form($s), @tail];
 }
 
 # One dq-escape token starting at the backslash at position I of STR — the
@@ -5075,12 +5106,14 @@ sub gen_transliteration_form {
   my $to   = $node->get_substitute_string;
   my $mods = $node->get_modifiers;
 
-  # Process tr escape sequences to actual characters, then build safe CL literals
-  my $from_cl = cl_string_literal(_expand_tr_escapes($from));
-  my $to_cl   = cl_string_literal(_expand_tr_escapes($to));
-
-  my @mod_strs = map { ":$_" } sort keys %$mods;
-  return ['p-tr', $from_cl, $to_cl, @mod_strs];
+  # Process tr escape sequences to actual characters, then build safe CL
+  # literals through the ONE string writer (a form, not its flat print — the
+  # printed text is identical and the tree stays structural).  No `:tier`: a
+  # transliteration needs no regex engine (ir-spec §10 regex row).
+  return ['p-tr',
+          ':from',  _cl_string_literal_form(_expand_tr_escapes($from)),
+          ':to',    _cl_string_literal_form(_expand_tr_escapes($to)),
+          ':flags', _cl_string_literal_form(_mod_letters($mods))];
 }
 
 # Process tr/// string escape sequences (no interpolation, but \xHH etc. apply)
@@ -5360,22 +5393,75 @@ use constant MAX_CL_CODEPOINT => 0x10FFFF;   # SBCL char-code-limit - 1
 # the underscore because Pl/Parser.pm's drop form calls it across the module
 # boundary -- it escapes the dropped statement's own source text.
 sub cl_string_literal { Pl::CLForm::to_flat(_cl_string_literal_form(shift)) }
+
+# THE SLOTS THAT ARE NOT EVALUATED (task #1212).  `p-let`'s `:perl` fact and
+# `p-sub`'s `:prototype` sit inside a plist the macro READS as a literal list
+# (ir-spec §2b.2a, §5.1); a `(p-esc …)` there would be a two-element sublist
+# where a consumer expects a string, so those two slots keep the plain literal
+# — a control character in them stays raw, as it always was, and is harmless
+# because nothing line-oriented indexes a facts plist.  Named so the exception
+# is visible at the call site instead of being a silent property of one writer.
+sub cl_string_datum {
+  my $content = shift;
+  $content =~ s/\\/\\\\/g;
+  $content =~ s/"/\\"/g;
+  return qq{"$content"};
+}
+
+# ── THE CONTROL-CHARACTER RULE (task #1212; ir-spec §1, review §3.2) ──────
+# A literal holding a character below 0x20 goes out as `(p-esc "…")`, whose
+# payload spells those characters with the data form's escape alphabet
+# (backslash-n / -t / -r / -uXXXX, backslash and quote doubled).  CL string
+# syntax has no `\n`, so the alternative is a REAL newline inside the quotes,
+# which is what made an emitted file non-line-oriented (a grep hit half a
+# string, a diff split literals across hunks).  `p-esc` is a macro that
+# decodes at macroexpansion time, so the compiled code holds the same constant
+# and the run is unchanged.
+#
+# Emitted ONLY for content that needs it: without a control character the
+# literal is exactly the string it always was, which is what keeps the
+# flag-day's diff explainable file by file.
+my %ESC_NAMED = ("\n" => 'n', "\t" => 't', "\r" => 'r');
+
+sub _needs_esc { return $_[0] =~ /[\x00-\x1f]/ ? 1 : 0 }
+
+# The payload of a `(p-esc …)` for CONTENT: the escape alphabet applied, then
+# the ordinary CL-literal escaping of the result (so the reader hands `p-esc`
+# the payload verbatim).  Order matters — the backslash doubling must happen
+# BEFORE the control characters become backslash sequences, or their own
+# backslashes would be doubled too.
+sub _esc_payload {
+  my ($content) = @_;
+  $content =~ s/\\/\\\\/g;
+  $content =~ s/([\x00-\x1f])/ $ESC_NAMED{$1} ? "\\$ESC_NAMED{$1}" : sprintf('\\u%04X', ord $1) /ge;
+  # Now the CL-literal layer: the payload's own backslashes and quotes.
+  $content =~ s/\\/\\\\/g;
+  $content =~ s/"/\\"/g;
+  return qq{"$content"};
+}
+
+# A safe RUN of characters as an emitted piece: `(p-esc …)` when it holds a
+# control character, a plain literal otherwise.  Used for the whole literal
+# and, in the #419 split below, for each safe run.
+sub _string_piece {
+  my ($safe) = @_;
+  return ['p-esc', _esc_payload($safe)] if _needs_esc($safe);
+  $safe =~ s/\\/\\\\/g;
+  $safe =~ s/"/\\"/g;
+  return qq{"$safe"};
+}
+
 sub _cl_string_literal_form {
   my $content = shift;
   # Characters invalid in UTF-8: surrogates U+D800-U+DFFF, and non-chars U+FFFE/U+FFFF
   # (and the pattern repeats at every 0x10000 boundary: U+1FFFE, U+1FFFF, etc.)
   if ($content !~ $BAD_CHAR_RE) {
-    $content =~ s/\\/\\\\/g;
-    $content =~ s/"/\\"/g;
-    return qq{"$content"};
+    return _string_piece($content);
   }
   my @parts;
   while (length $content) {
     if ($content =~ /\A((?:$SAFE_CHARS)+)/s) {
-      my $safe = $1;
-      $safe =~ s/\\/\\\\/g;
-      $safe =~ s/"/\\"/g;
-      push @parts, qq{"$safe"};
+      push @parts, _string_piece($1);
       $content = substr($content, length($1));
     } else {
       my $cp = ord(substr($content, 0, 1));

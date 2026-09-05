@@ -103,7 +103,11 @@ use constant { PLAIN => 0, COPYING => 1, SCALAR => 2 };
 
 Pl::Passes::register_pass('classic-sort', \&run);
 
-sub run { my ($form) = @_; return _walk($form, PLAIN) }
+# ANNOTATE-ONLY (second argument, task #1213): under `--facts` with the pass
+# switched off, walk and PRINT each licence on the general p-sort form instead
+# of rewriting it.  Pl::Passes::run passes the flag; see its `run`.
+my $ANNO = 0;
+sub run { my ($form, $anno) = @_; $ANNO = $anno ? 1 : 0; return _walk($form, PLAIN) }
 
 # Walk one form, rewriting every licensed p-sort in it.  Children are rewritten
 # IN PLACE (a lowered form is printed once), so an unchanged tree costs one
@@ -132,8 +136,12 @@ sub _walk {
             : $SCALARCTX{$head}   ? SCALAR
             :                       PLAIN;
   for my $i (0 .. $#$f) { $f->[$i] = _walk($f->[$i], $child) }
-  return $f unless $head eq 'p-sort';
-  return _rewrite_sort($f, $mode) // $f;
+  return $f unless $head eq "p-sort";
+  my $rep = _rewrite_sort($f, $mode);
+  return $f unless defined $rep;
+  # The licence held.  Print it either way; take the replacement only when the
+  # pass is actually enabled.
+  return Pl::Passes::fact("classic-sort", 1, $ANNO ? $f : $rep, $rep->[1]);
 }
 
 # The p-sort form, licensed → its %p-sort-classic replacement, else undef.

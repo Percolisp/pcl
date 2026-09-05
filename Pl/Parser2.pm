@@ -39,6 +39,7 @@ use Pl::PExpr;
 use Pl::InterpScan ();
 use Pl::VarAnnotator;
 use Pl::Passes ();
+use Pl::Manifest ();   # needs_of_form -- the per-sub obligation classes (#1214)
 use Pl::ClassicSort ();   # registers the Kind-B pass `classic-sort' (task #996)
 use Pl::CLForm qw(raw raw_wrap cl_sym cl_pkg);
 use Pl::GlobalPartition qw(global_decl_form);
@@ -1944,8 +1945,8 @@ sub parse {
       # (Pl::Passes::run — the identity until a pass is registered) HERE, the
       # one place a lowered tree becomes text.  Captured/sched entries are v1
       # TEXT already and are not trees; they stay outside the registry.
-      decls    => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) } @decls],
-      defs     => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) } @defs],
+      decls    => [map { Pl::CLForm::to_string(Pl::Passes::run($_, "decls"), 0) } @decls],
+      defs     => [map { Pl::CLForm::to_string(Pl::Passes::run($_, "defs"), 0) } @defs],
       # A top-level `my` nests its whole block remainder in ONE `let` form; for
       # a large block (arith.t's ~180 `$T++` calls) that single form exhausts
       # SBCL's compiler heap when the R1 hot ops open-code inline.  v1 caps this
@@ -1961,7 +1962,7 @@ sub parse {
       # thresholds calibrated on v1-flat text (compile cost tracks content,
       # not layout) — three files spuriously gated at the E2.final root flip.
       run      => [map {
-        my $text = Pl::CLForm::to_string(Pl::Passes::run($_), 0);
+        my $text = Pl::CLForm::to_string(Pl::Passes::run($_, "run"), 0);
         (my $collapsed = $text) =~ s/\s+/ /g;
         $self->_gate_oversized_run_form(
           Pl::Parser::_cap_inlining_if_huge($text, length $collapsed),
@@ -1984,7 +1985,7 @@ sub parse {
       }],
       # #226: eval region's leading-package enter forms — emitted at the head
       # of the eval BODY, ahead of the defs/sched interleave.
-      pkg_enter => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) }
+      pkg_enter => [map { Pl::CLForm::to_string(Pl::Passes::run($_, "pkg_enter"), 0) }
                     @{ $self->{_eval_pkg_enter} // [] }],
       # #240 step 2: the region's CL package designator, recorded where the
       # enter forms were built (never derived a second time) — see
@@ -8132,7 +8133,7 @@ sub _sub_form {
   return ['p-sub', $clname, ['list', '&rest', '%_args'], $body]
     if Pl::CLForm::ir_plain();
   return ['p-sub', $clname, ['list', '&rest', '%_args'],
-          ['list', $self->_sub_facts($sub)], $body];
+          ['list', $self->_sub_facts($sub, $body)], $body];
 }
 
 # THE PER-SUB FACTS (task #1035 step 3; docs/ir-spec.md 2b.2a + 5.1).  A plist
@@ -8167,11 +8168,21 @@ sub _sub_form {
 #   :prototype "$$"           an OLD-STYLE prototype's text, from the one
 #                             prototype table.  A signature is not a prototype
 #                             and prints nothing.
+#   :needs (CLASSES…)         the OBLIGATION classes this sub's body
+#                             exercises, in `Pl::Manifest`'s own class names
+#                             (`:nonlocal_exit.die`, `:io`, `:regex.native`,
+#                             ir-spec §10b) — task #1214, Part B item B3.
+#                             ALWAYS printed, possibly `()`, because ABSENCE is
+#                             the valuable half: "nothing in this sub can
+#                             throw" is what lets a target omit a frame.  The
+#                             one fact here that is a complete answer rather
+#                             than a proof-if-present.
 my %SUB_FACT = map { $_ => 1 }
-  qw(:returns :wantarray-insensitive :writes-args :string-eval :captures :prototype);
+  qw(:returns :wantarray-insensitive :writes-args :string-eval :captures
+     :prototype :needs);
 
 sub _sub_facts {
-  my ($self, $sub) = @_;
+  my ($self, $sub, $body) = @_;
   my @f;
   if (my $si = $self->_cur_sub_info->{ $sub->name }) {
     push @f, ':returns', ":$si->{returns}"  if defined $si->{returns};
@@ -8185,8 +8196,12 @@ sub _sub_facts {
       ['list', map { cl_sym($_) } grep { !$seen{$_}++ } @$caps];
   }
   my $proto = $self->environment->get_prototype($sub->name);
-  push @f, ':prototype', Pl::ExprToCL::cl_string_literal($proto->{proto_string})
+  push @f, ':prototype', Pl::ExprToCL::cl_string_datum($proto->{proto_string})
     if $proto && $proto->{is_proto} && defined $proto->{proto_string};
+  # The obligation classes, from Pl::Manifest's ONE walk applied to the body
+  # the caller has just built (no second table, no second scan — rule 11).
+  push @f, ':needs', ['list', Pl::Manifest::needs_of_form($body)]
+    if defined $body;
   # The set is closed at THIS end too: a key added here without an ir-spec
   # entry and a runtime arm dies at the printer, not at the reader.
   for (my $i = 0; $i < @f; $i += 2) {
@@ -9758,16 +9773,19 @@ sub _lower_stmt {
       # A statement MODIFIER is excluded (the value is then conditional; that
       # is _modifier_ret_form's business), and a comma list has already gated
       # to v1 above.
-      if (!$mod
-          && defined $self->{_body_tail_stmt}
-          && $self->{_body_tail_stmt} == refaddr($stmt)
-          && Pl::Passes::enabled('tail-return')) {
+      # THE FACT before the switch (task #1213): `--facts` prints the licence
+      # on the general `p-return` form when PCL_OPT has the emission off.
+      my $tail_ok = (!$mod
+                     && defined $self->{_body_tail_stmt}
+                     && $self->{_body_tail_stmt} == refaddr($stmt)) ? 1 : 0;
+      if ($tail_ok && Pl::Passes::enabled('tail-return')) {
         my $tform = @$expr
           ? ['p-tail-value', $self->_lower_expr($expr, $stmt, 'inherit')]
           : ['p-return-empty'];
-        return $self->environment->wa_void_active
-          ? Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', $tform)
-          : $tform;
+        return Pl::Passes::fact('tail-return', 1,
+          $self->environment->wa_void_active
+            ? Pl::CLForm::ctx_bind('*pcl-caller-wantarray*', $tform)
+            : $tform);
       }
       # A returned call must see the CALLER's context (no *wantarray* bind).
       # Bare `return;` must be a ZERO-arg (p-return): in list context it
@@ -9777,6 +9795,7 @@ sub _lower_stmt {
       my $form = @$expr
         ? ['p-return', $self->_lower_expr($expr, $stmt, 'inherit')]
         : ['p-return'];
+      $form = Pl::Passes::fact('tail-return', $tail_ok, $form);
       return _apply_modifier($form, $mod, $cond, $self, $stmt, $tail_ctx);
     }
     # goto/next/last/redo: keep the keyword and let the ORIGINAL expression
@@ -9872,11 +9891,14 @@ sub _lower_stmt {
       # cost is its BRANCH, not its tests (-62.5 % on the 4e6 `*=`/`%=` loop;
       # see %compound-arith-form).  Only the ops whose runtime template reads
       # the marker are given it.
-      my @marker = ($vi->{$name}{numonly}
-                    && Pl::VarAnnotator::numeric_marker_op($expr->[1]->content)
-                    && Pl::Passes::enabled('numeric-slot')) ? (':numeric') : ();
-      return [$rawmac, $name,
-              $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt), @marker];
+      my $numfact = ($vi->{$name}{numonly}
+                     && Pl::VarAnnotator::numeric_marker_op($expr->[1]->content))
+                    ? 1 : 0;
+      my @marker = ($numfact && Pl::Passes::enabled('numeric-slot'))
+                   ? (':numeric') : ();
+      return Pl::Passes::fact('numeric-slot', $numfact,
+        [$rawmac, $name,
+         $self->_lower_expr([@$expr[2 .. $#$expr]], $stmt), @marker]);
     }
   }
 
@@ -9896,9 +9918,11 @@ sub _lower_stmt {
     if (defined $name && $name =~ /^\$\w+$/ && ($opc eq '++' || $opc eq '--')
         && !$self->{_file_lex_renamed}{$name}
         && $vi->{$name} && $vi->{$name}{unboxable}) {
+      my $numfact = $vi->{$name}{numonly} ? 1 : 0;
       my $form = [$opc eq '++' ? 'p-incf-raw' : 'p-decf-raw', $name,
-                  ($vi->{$name}{numonly} && Pl::Passes::enabled('numeric-slot'))
+                  ($numfact && Pl::Passes::enabled('numeric-slot'))
                     ? (':numeric') : ()];
+      $form = Pl::Passes::fact('numeric-slot', $numfact, $form);
       return ($post && defined $tail_ctx) ? ['prog1', $name, $form] : $form;
     }
   }
@@ -10351,12 +10375,18 @@ sub _lower_compound {
     # keep the p-foreach path — a skip is a missed optimization, never a
     # miscompile.  (Postfix `EXPR for A..B` is a different lowering site,
     # not covered here.)
-    my ($from_form, $to_form, $range_raw);
+    my ($from_form, $to_form, $range_raw, $topic_fact);
     # Kind-A gate (Pl::Passes, PCL_OPT): off, the range materializes through
     # the general p-foreach path — a skip is a missed optimization, never a
     # miscompile (the same contract as the guard-rejected shapes above).
-    my @range = (@alias_hd || !Pl::Passes::enabled('foreach-range'))
-              ? () : _foreach_range_split(\@list_parts);
+    # THE FACT (the list IS a bare range) is computed before the switch, so
+    # `--facts` prints the licence on the general p-foreach form with the
+    # emission off (task #1213).  The SPLIT is a pure shape test over the
+    # untouched tokens; only the lowering below is destructive, and that stays
+    # behind the gate.
+    my @range = @alias_hd ? () : _foreach_range_split(\@list_parts);
+    my $range_fact = @range ? 1 : 0;
+    @range = () unless Pl::Passes::enabled('foreach-range');
     if (@range) {
       ($from_form, $to_form) = eval {
         ($self->_lower_expr($range[0], $stmt), $self->_lower_expr($range[1], $stmt));
@@ -10381,9 +10411,8 @@ sub _lower_compound {
       # exception-set specials.  Reading a raw value is always safe (every
       # p-op coerces), so the gate only has to prove nothing WRITES THROUGH
       # the box, aliases it, or hands it to code this compiler cannot see.
-      $range_raw = 1
-        if defined $to_form && !$var
-        && Pl::Passes::enabled('raw-topic') && _topic_raw_ok($block);
+      $topic_fact = (defined $to_form && !$var && _topic_raw_ok($block)) ? 1 : 0;
+      $range_raw = 1 if $topic_fact && Pl::Passes::enabled('raw-topic');
     }
     my $list_form;
     unless (defined $to_form) {
@@ -10448,6 +10477,10 @@ sub _lower_compound {
     # because it is what makes `:my t` present, and p-foreach-raw refuses the
     # package-cell arm.
     my $ro = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro};
+    # The same conjuncts over the UNGATED verdict, for `--facts` (task #1213):
+    # `foreach_ro` is suppressed by PCL_OPT=-foreach-raw, `foreach_ro_fact` is
+    # not, so the licence can still be printed on the general form.
+    my $ro_fact = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro_fact};
     # #1140: the read-only verdict is about the LOOP VARIABLE, and that is not
     # the whole question.  `for my $x (@fa) { $fa[0] = 99; print $x }` printed
     # 1 where perl prints 99 — the slot's VALUE was bound before another path
@@ -10466,11 +10499,12 @@ sub _lower_compound {
     # stops taking the value-sorting fast path for the same reason the plain
     # loop stops taking the raw arm — hence "every array named in the list",
     # not just a bare `@a`.
-    if ($ro) {
+    if ($ro || $ro_fact) {
       for my $la (_list_array_names(\@list_parts)) {
         my $af = $vi->{$la} or next;
         next unless $af->{escapes} || $af->{written_in}{ refaddr $block };
         $ro = 0;
+        $ro_fact = 0;
         last;
       }
     }
@@ -10483,13 +10517,15 @@ sub _lower_compound {
     # written in this body), and `_foreach_bare_arrays` adds only the SHAPE
     # test.  Emitted as `(vector @a @b)` plus `:arrays t`, so the run's sources
     # are evaluated once at loop entry.
-    my @arrays;
-    if ($ro && !defined $to_form && Pl::Passes::enabled('foreach-arrays')) {
-      @arrays = Pl::Parser::_foreach_bare_arrays(\@list_parts);
+    my (@arrays, $arrays_fact);
+    if ($ro_fact && !defined $to_form) {
+      my @bare = Pl::Parser::_foreach_bare_arrays(\@list_parts);
       # Only arrays this segment DECLARED have facts; the conjunct above
       # skipped any name with no entry, so re-assert it here rather than
       # licensing the run on an unmeasured array.
-      @arrays = () if grep { !$vi->{$_} } @arrays;
+      @bare = () if grep { !$vi->{$_} } @bare;
+      $arrays_fact = @bare ? 1 : 0;
+      @arrays = @bare if $ro && Pl::Passes::enabled('foreach-arrays');
     }
     my @array_keys = @arrays ? (':arrays', 't') : ();
     $list_form = ['vector', map { cl_sym($_) } @arrays] if @arrays;
@@ -10499,12 +10535,20 @@ sub _lower_compound {
     # without it (%p-loop-driver; the macro treats the combination as a
     # compiler self-inconsistency and dies).
     @dyn = () if @cont;
-    return defined $to_form
+    my $loop = defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
          ['list', $cl_name, $from_form, $to_form],
          _label_keys($label), @dyn, @my_keys, @body, @cont]
       : [($ro ? 'p-foreach-raw' : 'p-foreach'), ['list', $cl_name, $list_form],
          _label_keys($label), @dyn, @array_keys, @my_keys, @body, @cont];
+    # THE FOUR LOOP LICENCES, printed on whichever form was chosen (#1213).
+    # One wrap point for all four: the facts were computed above, ungated, so
+    # the same names appear under `PCL_OPT=none --facts`.
+    $loop = Pl::Passes::fact('foreach-range',  $range_fact,  $loop);
+    $loop = Pl::Passes::fact('raw-topic',      $topic_fact,  $loop);
+    $loop = Pl::Passes::fact('foreach-arrays', $arrays_fact, $loop);
+    $loop = Pl::Passes::fact('foreach-raw',    $ro_fact,     $loop);
+    return $loop;
   }
 
   # `try BLOCK catch (VAR) BLOCK [finally BLOCK]` — perl 5.34's feature 'try'.
@@ -12217,7 +12261,7 @@ sub _decl_facts {
     # (the reasons in the order they applied, outermost last) -- self-describing
     # shapes, so a consumer that wants a single value takes the last.
     my $why = ref $r->[1] ? '(' . join(' ', @{ $r->[1] }) . ')' : $r->[1];
-    push @f, ':perl', Pl::ExprToCL::cl_string_literal($r->[0]), ':why', $why;
+    push @f, ':perl', Pl::ExprToCL::cl_string_datum($r->[0]), ':why', $why;
   }
   push @f, ':captured', 't' if $vi && $vi->{$name} && $vi->{$name}{captured};
   return @f;
