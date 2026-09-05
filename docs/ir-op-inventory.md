@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **685**
+* names exported: **694**
 * families: **19** with an ir-spec §10 rule, **34** without one
-* with a machine-readable `Contract:` tail: **58** of 685
+* with a machine-readable `Contract:` tail: **62** of 694
 * UNCLASSIFIED (no family rule matches): **1**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -30,14 +30,6 @@ Perl-facing spellings for four families — `p-&`-style bitwise, `p-x`,
 exports; each row now names the real ops (`p-bit-and`, `p-str-x`, `p-str-eq`,
 `p-pre++`, …), verified EMITTED before the edit.  The section below is the
 standing check that they have not drifted apart again.
-
-## Citations in ir-spec §10 that are not IR names
-
-Names the §10 table prints as family members that the runtime does NOT export.  A backend author works from that table, so each one is a name they would look for and not find.
-
-**Exists, but INTERNAL to `:pcl`** — never emitted bare, so it is not part of the IR's vocabulary: either a runtime-only helper, or an op the emitter writes package-QUALIFIED (1):
-
-* `pcl::p-qr`
 
 # Families with an ir-spec §10 rule
 
@@ -93,12 +85,13 @@ ir-spec §10 row **assignment** — store per §2.2; a list assignment used as a
 | `p-scalar-=` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-setf` | macro | `(place value)` | — | — | — | — | — | — | — |
 
-## bitwise (13)
+## bitwise (14)
 
 ir-spec §10 row **bitwise (mode-dispatched)** — overload hook first; then ONE mode decision (`%p-bitwise-operand-kind`): the op is NUMERIC iff an operand carries a number, else it STRINGIFIES both operands and operates byte by byte
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `%pcl-to-integer` | function | `(n)` | — | — | — | — | — | — | — |
 | `p-<<` | function | `(a b)` | — | — | — | — | — | — | — |
 | `p-<<-int` | function | `(a b)` | — | — | — | — | — | — | — |
 | `p->>` | function | `(a b)` | — | — | — | — | — | — | — |
@@ -121,12 +114,13 @@ ir-spec §10 row **command capture** — wantarray-sensitive, exactly like `p-re
 |---|---|---|---|---|---|---|---|---|---|
 | `p-backtick` | function | `(cmd)` | — | — | — | — | — | — | — |
 
-## compiled-regex (1)
+## compiled-regex (2)
 
 ir-spec §10 row **compiled regex (qr)** — a Regexp OBJECT, not a string: it carries its own flags and identity, and stringifies as perl's `(?^flags:SOURCE)` wrapper.  A pattern that is exactly ONE interpolated qr *is* that qr (the outer modifiers are ignored); a qr used as PART of a larger pattern embeds its wrapper verbatim
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `p-qr` | function | `(pattern-string)` | — | — | — | — | — | — | — |
 | `p-regex-from-parts` | function | `(pattern modifiers)` | — | — | — | — | — | — | — |
 
 ## compound-assignment (35)
@@ -259,7 +253,7 @@ ir-spec §10 row **introspection** — §7; `p-caller` returns package but file/
 | `p-undef-sub` | function | `(pkg-str name-str)` | — | — | — | — | — | — | — |
 | `pl-__SUB__` | function | `nil` | — | — | — | — | — | — | — |
 
-## io (23)
+## io (24)
 
 ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument.  2-arg `p-open` parses pipe/dup modes; `p-close` on a pipe handle reaps the child and sets `$?`
 
@@ -272,6 +266,7 @@ ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-ope
 | `p-fcntl` | macro | `(fh func arg)` | — | — | — | — | — | — | — |
 | `p-fileno` | macro | `(fh)` | — | — | — | — | — | — | — |
 | `p-getc` | macro | `(&rest args)` | — | — | — | — | — | — | — |
+| `p-install-data-handle` | function | `(handle text)` | insensitive | none | none | no | no | no | none |
 | `p-lock` | function | `(x)` | — | — | — | — | — | — | — |
 | `p-open` | macro | `(fh mode &optional filename)` | — | — | — | — | — | — | — |
 | `p-pipe` | macro | `(read-fh write-fh)` | — | — | — | — | — | — | — |
@@ -360,7 +355,7 @@ ir-spec §10 row **slice delete** — every one flattens its key/index arguments
 | `p-delete-kv-array-slice` | function | `(arr &rest indices)` | — | — | — | — | — | — | — |
 | `p-delete-kv-hash-slice` | function | `(hash &rest keys)` | — | — | — | — | — | — | — |
 
-## string (26)
+## string (27)
 
 ir-spec §10 row **string ops** — stringify operands (§3.2), return raw string; Perl's `$_`-default forms arrive with `$_` already explicit in the tree (§8)
 
@@ -378,6 +373,7 @@ ir-spec §10 row **string ops** — stringify operands (§3.2), return raw strin
 | `p-lc` | function | `(str)` | insensitive | str | none | no | no | no | none |
 | `p-lcfirst` | function | `(str)` | insensitive | str | none | no | no | no | none |
 | `p-length` | function | `(val)` | insensitive | str | none | no | no | no | none |
+| `p-literal-string` | function | `(&rest parts)` | insensitive | none | none | no | no | no | none |
 | `p-oct` | function | `(str)` | — | — | — | — | — | — | — |
 | `p-ord` | function | `(str)` | insensitive | str | none | no | no | no | none |
 | `p-quotemeta` | function | `(str)` | insensitive | str | none | no | no | no | none |
@@ -467,13 +463,14 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-capture-write` | function | `(value)` | — | — | — | — | — | — | — |
 | `p-high-capture` | function | `(n)` | — | — | — | — | — | — | — |
 
-## control-flow (25)
+## control-flow (26)
 
 *No ir-spec §10 row.*  conditionals, loops, loop control, sub return — ir-spec §6
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `%p-dyn-loop-exit` | function | `(kind)` | insensitive | none | none | yes | yes | no | none |
+| `%pcl-loop-tag` | function | `(prefix label)` | — | — | — | — | — | — | — |
 | `p-break` | function | `nil` | — | — | — | — | — | — | — |
 | `p-continue` | function | `nil` | — | — | — | — | — | — | — |
 | `p-do` | function | `(filename-val)` | — | — | — | — | — | — | — |
@@ -510,12 +507,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-readdir` | macro | `(dh)` | — | — | — | — | — | — | — |
 | `p-rewinddir` | macro | `(dh)` | — | — | — | — | — | — | — |
 
-## dynamic-scope (17)
+## dynamic-scope (18)
 
 *No ir-spec §10 row.*  `local` in each of its place shapes — ir-spec §7.2
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `%pcl-local-errno-init` | function | `(n)` | — | — | — | — | — | — | — |
 | `p-defcell` | macro | `(sym init &rest facts)` | — | — | — | — | — | — | — |
 | `p-local-array-elem` | macro | `(arr-var idx-form &body body)` | — | — | — | — | — | — | — |
 | `p-local-array-elem-init` | macro | `(arr-var idx-form init-form &body body)` | — | — | — | — | — | — | — |
@@ -814,12 +812,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-require-version` | function | `(ver)` | — | — | — | — | — | — | — |
 | `p-use` | function | `(module-name &key (import-args :default) (do-import t) into)` | — | — | — | — | — | — | — |
 
-## oo (5)
+## oo (6)
 
 *No ir-spec §10 row.*  method dispatch and C3 — ir-spec §7.3
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `%pcl-super-indirect` | function | `(method cur-pkg &rest inv-args)` | — | — | — | — | — | — | — |
 | `p-get-class` | function | `(obj)` | — | — | — | — | — | — | — |
 | `p-method-call` | function | `(obj method &rest args)` | — | — | — | — | — | — | — |
 | `p-resolve-invocant` | function | `(name)` | — | — | — | — | — | — | — |
@@ -922,7 +921,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-alias-hash-target` | function | `(ref)` | — | — | — | — | — | — | — |
 | `p-alias-scalar-target` | function | `(ref)` | — | — | — | — | — | — | — |
 
-## reference (20)
+## reference (21)
 
 *No ir-spec §10 row.*  reference construction, deref casts, lvalue cells — ir-spec §2.5
 
@@ -947,6 +946,7 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-substr-ref` | function | `(str start &optional len)` | — | — | — | — | — | — | — |
 | `p-vec-lvalue-cell` | function | `(str offset bits)` | — | — | — | — | — | — | — |
 | `p-vec-ref` | function | `(str offset bits)` | — | — | — | — | — | — | — |
+| `p-vector-append` | macro | `(dest src)` | insensitive | none | none | no | no | no | none |
 | `p-weaken` | function | `(ref)` | — | — | — | — | — | — | — |
 
 ## runtime-config (1)
@@ -957,12 +957,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 |---|---|---|---|---|---|---|---|---|---|
 | `*p-raw-elems*` | global | `` | — | — | — | — | — | — | — |
 
-## signature (3)
+## signature (4)
 
 *No ir-spec §10 row.*  signature arity and slurpy binding — ir-spec §5.2
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `p-arg-supplied-p` | macro | `(args index)` | insensitive | none | none | no | no | no | none |
 | `p-check-arity` | function | `(funcname got min max flexible &optional hash-start)` | — | — | — | — | — | — | — |
 | `p-sig-rest-array` | function | `(args start)` | — | — | — | — | — | — | — |
 | `p-sig-rest-hash` | function | `(args start)` | — | — | — | — | — | — | — |
