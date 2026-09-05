@@ -74,6 +74,14 @@
 #       "line 106", "line 107".  Verdict op/gv.t P 304/0 C 134/57, parallel
 #       and serial agreeing; its 4 aborted forms ("Died at gv.t line N") are
 #       PRE-EXISTING and already on the snapshot row.
+# s470br (task #1115, 2026-09-05): FOURTEEN rows removed BY EDIT -- io/utf8.t
+#   (10), uni/gv.t (3), io/bom.t (1) -- and nothing else of those files, whose
+#   other rows still diverge.  The io/ ones are #1115: a handle carries OCTETS
+#   unless a layer says otherwise, so their byte counts agree with perl now
+#   (base 13/14 -> 23/4 and 0/3 -> 1/2, both measured against a `git archive
+#   f728637` extraction).  The three uni/gv.t rows -- the `undef *GLOB` slot
+#   rows at t/uni/gv.t 110-112 -- are NOT mine: the base tree passes them too,
+#   so this baseline was stale for that file before s470br.
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -1741,7 +1749,6 @@ io/argv.t	39	ok	not ok	check for warning for |-
 io/argv.t	14	ok	not ok [PCL #16]	eof() true on unopened filehandle
 io/bom.t	2	ok	not ok	BOM indicates UTF-16BE
 io/bom.t	3	ok	not ok	BOM indicates UTF-16LE
-io/bom.t	1	ok	not ok	script starts with a BOM
 io/closepid.t	0	ok*	(no TAP)	*summary*
 io/crlf.t	0	(none)	renumbered	*summary*
 io/crlf.t	5	ok	not ok	[at t/io/crlf.t line 29]
@@ -1970,7 +1977,6 @@ io/tell.t	27	ok	(missing)	check tell() after writing "xxxx\n"
 io/tell.t	28	ok	(missing)	check tell() after writing in mode '>>'
 io/tell.t	36	ok	(missing)	eof with no ${^LAST_FH}
 io/tell.t	29	ok	(missing)	tell on coercible glob
-io/utf8.t	20	ok	not ok	(196.172.194.130)
 io/utf8.t	35	ok	(missing)	21395 '.= <>' bytes vs. utf8
 io/utf8.t	34	ok	(missing)	21395 '.= <>' utf8 vs. bytes
 io/utf8.t	52	ok	(missing)	23428 syswrite should not downgrade scalar
@@ -1978,9 +1984,6 @@ io/utf8.t	54	ok	(missing)	<:utf8 rcatline must warn about bad utf8
 io/utf8.t	60	ok	(missing)	<:utf8 readline (fixed) must warn about bad utf8
 io/utf8.t	53	ok	(missing)	<:utf8 readline must warn about bad utf8
 io/utf8.t	19	ok	not ok	[at t/io/utf8.t line 101]
-io/utf8.t	23	ok	not ok	[at t/io/utf8.t line 130]
-io/utf8.t	24	ok	not ok	[at t/io/utf8.t line 146]
-io/utf8.t	25	ok	not ok	[at t/io/utf8.t line 163]
 io/utf8.t	26	ok	not ok	[at t/io/utf8.t line 177]
 io/utf8.t	27	ok	not ok	[at t/io/utf8.t line 178]
 io/utf8.t	28	ok	(missing)	[at t/io/utf8.t line 214]
@@ -1989,12 +1992,6 @@ io/utf8.t	30	ok	(missing)	[at t/io/utf8.t line 234]
 io/utf8.t	31	ok	(missing)	[at t/io/utf8.t line 242]
 io/utf8.t	32	ok	(missing)	[at t/io/utf8.t line 251]
 io/utf8.t	33	ok	(missing)	[at t/io/utf8.t line 261]
-io/utf8.t	6	ok	not ok	[at t/io/utf8.t line 37]
-io/utf8.t	7	ok	not ok	[at t/io/utf8.t line 39]
-io/utf8.t	8	ok	not ok	[at t/io/utf8.t line 41]
-io/utf8.t	9	ok	not ok	[at t/io/utf8.t line 43]
-io/utf8.t	10	ok	not ok	[at t/io/utf8.t line 44]
-io/utf8.t	15	ok	not ok	[at t/io/utf8.t line 73]
 io/utf8.t	16	ok	not ok	[at t/io/utf8.t line 83]
 io/utf8.t	61	ok	(missing)	getc returning non-utf8 after utf8
 io/utf8.t	62	ok	(missing)	getc returning non-utf8 after utf8
@@ -18923,9 +18920,6 @@ uni/gv.t	41	ok	not ok	Warning on conversion to NV
 uni/gv.t	31	ok	not ok	Warning on conversion to UV
 uni/gv.t	39	ok	not ok	Warning on conversion to UV
 uni/gv.t	23	ok	not ok	[at t/uni/gv.t line 102]
-uni/gv.t	24	ok	not ok	[at t/uni/gv.t line 110]
-uni/gv.t	25	ok	not ok	[at t/uni/gv.t line 111]
-uni/gv.t	26	ok	not ok	[at t/uni/gv.t line 112]
 uni/gv.t	28	ok	not ok	[at t/uni/gv.t line 122]
 uni/gv.t	49	ok	not ok	[at t/uni/gv.t line 178]
 uni/gv.t	50	ok	not ok	[at t/uni/gv.t line 180]

@@ -119,6 +119,99 @@ not-supported.md → only then probe.*
 - **TWO subjobs at a time (USER, evening)** — see MEMORY feedback_two_agents_at_a_time.
 - **USER (2026-09-05): "forget beating Perl in individual items, we do enough for that — just try to get PCL as fast as possible."  The steering metric is PCL's ABSOLUTE time on representative programs (three macro rows + five constant terms + an sb-sprof profile per row → a RANKED table), not per-row pcl/perl ratios; the ten winning board rows are CONTROL rows only.  RANKING: at least HALF the weight on how low-hanging (easy to implement) a lever is, the rest on seconds removed.  **`pack`/`unpack` PARKED (USER) until the XS decision** — the transpiled oracle and its ~3 s extension load are not a target while pclxs may carry `pack`.  Plan: `docs/plan-speed-and-ir-s470.md` Part A (round 27 = the three S levers `symref-const`, sort-result ADOPTION, foreach-raw over a LIST of arrays, plus the yardstick: three macro rows + four constants + `sb-sprof` → a RANKED table).**
 - **The IR as a contract for a JavaScript or C backend = INVENTORY and MEASURE, not more semantics** (`docs/plan-speed-and-ir-s470.md` Part B): B1 the op inventory as generated data + gate row; B2 a per-program `USES`/`NEEDS`/`FACTS` manifest (`pl2cl --manifest`); B3 `:needs` on `p-sub`; B4 the host-leak census gate + the CL-kernel whitelist (ir-spec §11b); B5 `--emit-sexp`/JSON + structured regex literals; B6 `tools/ir-conform` (perl-oracled corpus, the pclxs pattern); B7 the target notes as tables.  **The FAST-backend half (Part B §B.3): every Kind-A/Kind-B licence is printed as a FACT on the general form (`PCL_OPT=none --facts`) — a foreign target cannot use PCL's SBCL-shaped rewrites but can use the PROOF behind each; the table maps each fact (scalar class, array escapes, foreach-raw, sub facts, raw params, capture manifest, tail-return, regex tier …) to what JS and C do with it; three facts PCL does not yet prove would pay on every target incl. CL: the numeric RANGE proof, element HOMOGENEITY, per-sub exception/dynamic-scope use.**  None changes generated-code speed; they interleave as the correctness slot.**
+## s470br (2026-09-05, Opus) — #1115: a filehandle carries OCTETS unless a layer says otherwise; PCL's own diagnostics need a writer of their own once STDERR is one
+
+- **#1115 — perl's default I/O discipline is BYTES, and PCL's was UTF-8.**
+  `%p-split-open-mode` answered `:default` for a mode with no `:encoding` layer
+  and SBCL's default external format is UTF-8, so every read of a non-ASCII file
+  measured CHARACTERS: 15-octet fixture, perl `length` 15 / `ord3` 195, PCL 12 /
+  233 — and with it every size, `tell`/`seek` offset, checksum and file re-write.
+  Fixed at the stream's EXTERNAL FORMAT: `:latin-1` (one character per octet) is
+  the CL spelling of "octets", the same reading #1084 already gave SOURCE.
+- **The layer model, probed whole before anything was written** (seven read
+  shapes + eight write shapes vs 5.40.3): layers are read LEFT TO RIGHT and the
+  LAST one that names a discipline wins (`<:raw:encoding(UTF-8)` decodes,
+  `<:encoding(UTF-8):raw` does not); the default is per DIRECTION; the standard
+  handles keep a per-DESCRIPTOR vector `*p-std-efs*` (per SLOT, not per
+  direction — `binmode(STDOUT,':utf8')` must not move STDERR).
+- **`binmode` stopped being a no-op.**  SBCL has no `(setf
+  stream-external-format)`, so an ordinary handle is REBUILT the way
+  `%p-line-buffer-if-tty` rebuilds buffering — dup the descriptor, new
+  fd-stream, close the original — carrying `$|`, the fork-pipe pid and `$.`
+  across and seeking an input stream back to its LOGICAL position (the dup
+  shares the descriptor's offset, which is ahead by SBCL's read-ahead).
+- **`use open` is the ONE never-loaded pragma with a runtime effect** and now
+  emits `(p-use-open LIST)` into the compile phase.  It is GLOBAL, not lexically
+  scoped — `docs/not-supported.md` names the divergence; every spelling in
+  perl's own `t/` and on the CPAN board turns it on at the top of a file, where
+  the two agree.
+- **A WIDE CHARACTER ON A BYTE HANDLE IS DECIDED PER STRING, NOT PER
+  CHARACTER.**  perl prints a UTF8-flagged SV as its WHOLE UTF-8 encoding, so
+  `print $fh "\x{e9}\x{2019}"` emits `c3 a9 e2 80 99` — the é becomes two octets
+  although one would hold it — with one `Wide character in print` per ARGUMENT,
+  on by default.  Using only SBCL's `OUTPUT-REPLACEMENT` restart (per character,
+  and free) gives `e9 e2 80 99`: one octet short of perl on exactly the common
+  `use utf8` shape.  So `%p-out-string` decides the string whole ("does any
+  character exceed 255" is the reading of the UTF8 flag that agrees with perl on
+  every probed shape) and the restart stays as the BACKSTOP for writes that do
+  not come through it.  `syswrite` is perl's one FATAL here and now is PCL's.
+- **Making STDERR a byte handle makes PCL's OWN diagnostics fatal, and that is
+  the general lesson**: `%p-announce-unsupported` writes "… is not implemented —
+  ignored" with an EM DASH, so the announcement signalled a
+  `stream-encoding-error` inside itself and took the program down — four rows of
+  `Pl/t/transpile-test-07.t` and five of `Pl/t/moo-01.t`, in files with nothing
+  to do with I/O, plus `tools/ir-inventory.pl`'s docstring dump.  The answer is
+  ONE WRITER PER AUDIENCE, never a hunt for em dashes: `%p-diag` (the runtime's
+  stderr diagnostics), `%tap-out` (the TAP layer's 25 `format t` calls),
+  `p-load-with-recovery` wrapped for a measured load — and **a TOOL that wants
+  character output now says so** (`(setf (svref *p-std-efs* 1) :utf-8)`).
+- **A `Pl/t` expectation encoded the old bug** (s377's four conjuncts):
+  `utf8-source-01.t` row 3 asserted that `use utf8; print substr("héllo",1,1)`
+  comes back as decodable UTF-8.  perl writes the single octet `0xE9` —
+  UTF8-flagged but every character fits in a byte, so perl DOWNGRADES it for a
+  handle with no `:utf8` layer.  The row now asserts the octets, which is
+  STRONGER: a byte-indexed `substr` would have written `0xC3`.
+- **Companion io/ + uni/ `--jobs 1` on the finished tree: 0 NEW ROW, 14 FIXED
+  ROW, 0 UNVERIFIED, 0 LOST.**  `io/utf8.t` 13/14 → **23/4** and `io/bom.t`
+  0/3 → **1/2** are #1115, confirmed by re-running both on a
+  `git archive f728637` extraction of the base; `uni/gv.t` 56/32 → 59/29 is
+  **NOT mine** — the base tree reads 59/29 too, so that snapshot row and its
+  three `undef *GLOB` rows were stale before this session.  All four spliced
+  into `baselines/perl-suite-run.tsv` + `perl-suite-fails.tsv` by hand with
+  those causes.
+- **A BEFORE leg that is still RUNNING when the first edit lands is worthless**
+  (own mistake, s470br): the io/+uni/ baseline was started before any edit but
+  finished after several, so its `uni/` half measured a partly-edited tree and
+  read `uni/gv.t` as unchanged.  What settles a mover is the BLESSED SNAPSHOT
+  plus a `git archive <base>` extraction — neither can drift under an edit in
+  flight, and the extraction is available to a worktree-isolated agent that
+  cannot add a second worktree.
+- Bars: corpus-diff vs `f728637` **1 of 111** (`perl-tests/magic.t`, the only
+  file with a `use open`), silent drops 5 unchanged; emission-ab over the 63
+  `use open` files in the four populations **61 DIFF / 2 SAME / RCDIFF 0**, and
+  the two SAME are `use open` inside a heredoc and inside POD — so the DIFF set
+  is exactly the real `use open` statements.  Generation **v2-790**.
+- **A REPAIR MUST NOT REACH FOR THE THING IT IS REPAIRING** — the two review
+  fixes the companion legs found, same lesson at two levels.  (a) The
+  stream-encoding-error handler warned, the harness binds `*error-output*` to a
+  line-atomic Gray stream, so the warning went into the SAME pending buffer as
+  the text that had just failed to encode and flushing it signalled on the same
+  character again — `uni/lex_utf8.t` died at SB-KERNEL:*MAXIMUM-ERROR-DEPTH*
+  (6/10 → 0/0) and `uni/fold.t` lost 928 rows.  The handler now only invokes the
+  restart; the WARNING belongs to `%p-out-string`, which decides the whole
+  string.  (b) `binmode *STDOUT, ':utf8'` hands over a TYPEGLOB, which
+  `%p-std-slot` does not read as a standard-handle name, so binmode's rebuild
+  path dup'd and CLOSED descriptor 1.  **The DESCRIPTOR is the definitive
+  property**: `%p-std-descriptor` routes any stream on fd 0/1/2 through
+  `%p-std-rebuild`.  `%p-std-slot`'s blindness is left alone on purpose — it is
+  shared with `%p-install-fh`, so widening it changes what `open(*STDOUT,…)`
+  does (**#1220**).
+- Filed: **#1220** (above) and **#1221** —
+  `utf8::encode`/`decode`/`upgrade`/`downgrade`/`is_utf8` are no-op stubs
+  returning 1, and #1115 makes "read bytes, then `utf8::decode`" the spelling
+  programs actually use, so the gap is now reachable by ordinary code where the
+  accidentally-decoding handle used to hide it.  `%p-utf8-octets` IS
+  `utf8::encode`; what those need is an LVALUE argument.
 
 ## s470bo (2026-09-05, Opus) — the bugs the s470bm IR censuses found: #1179, #1178, #1173, #1174, #1177, and four of #1175's six leak families
 

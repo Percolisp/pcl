@@ -266,6 +266,138 @@ back with #1022(b)) → 18644 on BR's tree.  CI green through `027ba9c`.  Three 
 WHY the USER capped concurrency at two.  **STOPPED for shutdown (USER); restart recipe in
 MEMORY.md's STATE line and each worktree's `scratch/<label>/STOP.md`.**
 
+## Session 470br (Opus agent, 2026-09-05) — #1115: a filehandle carries OCTETS unless a layer says otherwise — the default open, `binmode`, `use open`, and perl's wide-character rule on a byte handle
+
+**#1115** was the widest silent divergence PCL had left: `%p-split-open-mode`
+answered `:default` for a mode with no `:encoding` layer and SBCL's default
+external format is UTF-8, so **every read of a non-ASCII file measured
+CHARACTERS where perl measures octets** — and with it every size, every
+`tell`/`seek` offset, every checksum and every re-write of a file that any CPAN
+module performs.  Probed 5.40.3 on a 15-octet fixture holding U+00E9 and U+2019:
+`length` 15 and `ord(substr($s,3,1))` 195 in perl, 12 and 233 in PCL.
+
+**THE WHOLE LAYER MODEL WAS PROBED BEFORE ANYTHING WAS WRITTEN** (Fable's
+instruction), seven read shapes and eight write shapes vs perl 5.40.3
+(`scratch/s470br/p1115/`).  PCL now answers every one of them identically:
+
+| shape | perl / PCL |
+|---|---|
+| `open $fh,'<',$f` | len 15, ord3 195 (OCTETS) |
+| `'<:raw'` | 15 / 195 |
+| `'<:utf8'`, `'<:encoding(UTF-8)'` | 12 / 233 |
+| default open + `binmode($fh,':utf8')` / `':encoding(UTF-8)'` | 12 / 233 |
+| `:encoding(UTF-8)` open + bare `binmode($fh)` | 15 / 195 (pops to bytes) |
+| default write of an octet string | the octets, verbatim |
+| default write of a WIDE string | `c3 a9 e2 80 99` + one `Wide character in print` per ARGUMENT |
+| `>:encoding(UTF-8)` write of an octet string | each octet re-encoded (double encoding — perl's answer too) |
+| read default, write default | byte for byte |
+| `use open qw(:std :utf8)` | decodes reads, encodes writes, no warning on wide output |
+| `tell` / `-s` / `read` / `getc` | all count octets |
+
+**WHAT IT TOOK, and the one thing that is not obvious.**  Reading and the
+open-mode layers are `%p-layer-ef` over `%p-split-layers` — layers left to
+right, the LAST one that names a discipline wins, so `<:raw:encoding(UTF-8)`
+decodes and `<:encoding(UTF-8):raw` does not.  The default is per DIRECTION
+(`*p-default-in-ef*` / `*p-default-out-ef*`, both `:latin-1`), and the three
+standard handles have their own per-descriptor vector `*p-std-efs*` (per SLOT,
+not per direction: `binmode(STDOUT,':utf8')` must not move STDERR).  `binmode`
+stopped being a no-op: SBCL has no `(setf stream-external-format)`, so an
+ordinary handle is rebuilt the way `%p-line-buffer-if-tty` rebuilds buffering —
+dup the descriptor, build a new fd-stream, close the original — carrying $|, the
+fork-pipe pid and `$.` across, and seeking an input stream back to its LOGICAL
+position (the dup shares the descriptor's offset, which is ahead by the
+read-ahead).  A standard handle goes through `%p-std-rebuild`, which already
+owns those globals.  `use open` is **the one never-loaded pragma with a runtime
+effect** and now emits `(p-use-open LIST)` into the compile phase; it is GLOBAL
+rather than lexical, registered in `docs/not-supported.md`.
+
+**The WRITE side is where perl is subtle and the cheap implementation is
+wrong.**  perl decides per STRING, not per character: an SV with the UTF8 flag
+prints as its WHOLE UTF-8 encoding, so `print $fh "\x{e9}\x{2019}"` on a byte
+handle emits `c3 a9 e2 80 99` — the é becomes TWO octets although one would hold
+it.  A first version used only SBCL's `OUTPUT-REPLACEMENT` restart (which is
+per character, and costs nothing on the ordinary path) and produced
+`e9 e2 80 99`: one octet short of perl, and the difference is exactly the common
+`use utf8` shape.  So `%p-out-string` decides the string whole — "does any
+character exceed 255" is the reading of the UTF8 flag that agrees with perl on
+every probed shape — and the restart handler stays as the BACKSTOP for writes
+that do not come through it.  `syswrite` is perl's one fatal here
+(`Wide character in syswrite`, trappable, writes nothing) and now is PCL's too.
+
+**THE FAILURE THE GATE FOUND, AND IT IS THE GENERAL ONE**: making STDERR a byte
+handle made PCL's OWN diagnostics fatal.  `%p-announce-unsupported` writes
+"… is not implemented — ignored" with an EM DASH, so the announcement signalled
+a `stream-encoding-error` inside itself and took the whole program down — four
+rows of `Pl/t/transpile-test-07.t` and five of `Pl/t/moo-01.t`, in files that
+have nothing to do with I/O, and `tools/ir-inventory.pl`'s docstring dump with
+them.  The answer is one writer per audience rather than a hunt for em dashes:
+`%p-diag` for the runtime's six stderr diagnostics, `%tap-out` for the TAP
+layer's twenty-five `format t` calls, and `p-load-with-recovery` wrapped for
+everything a measured load prints; a tool that wants character output now says
+so (`ir-inventory.pl`'s dump sets `(svref *p-std-efs* 1) :utf-8`).
+
+**A `Pl/t` EXPECTATION ENCODED THE OLD BUG** (the s377 four-conjunct rule):
+`utf8-source-01.t` row 3 asserted that `use utf8; print substr("héllo",1,1)`
+comes back as decodable UTF-8.  perl writes the single octet `0xE9` — the string
+is UTF8-flagged but every character fits in a byte, so perl downgrades it for a
+handle with no `:utf8` layer.  The row now asserts the octets, which is
+STRONGER: a byte-indexed `substr` would have written `0xC3`.
+
+Bars: gate `PCLXS_DIR=~/pclxs tools/prove-core` **208 files / 7043 rows, green
+except the 13 pclxs xs rows** (`xs-pin says abi 6 but ~/pclxs is abi 8` — the
+standing allowance); corpus-diff vs
+`f728637` **1 of 111** (`perl-tests/magic.t`, the only file with a `use open`),
+silent drops 5 unchanged; emission-ab over the 63 `use open` files in the four
+populations **61 DIFF / 2 SAME / RCDIFF 0** — and the two SAME are `use open`
+inside a heredoc and inside POD, so the DIFF set is exactly the set of real
+`use open` statements (nothing else can reach the new arm: it is gated on
+`$module eq 'open'` inside the never-loaded-pragma branch).  Generation
+**v2-790**, three artifacts regenerated.  Guard `Pl/t/io-layers-01.t` (16 rows).
+Companion io/ + uni/ `--jobs 1` over the finished tree: **0 NEW ROW, 14 FIXED
+ROW, 0 UNVERIFIED, 0 LOST** — `io/utf8.t` 13/14 → **23/4** (ten rows that
+compare byte counts) and `io/bom.t` 0/3 → **1/2**, both confirmed MINE by
+re-running them on a `git archive f728637` extraction of the base; `uni/gv.t`
+56/32 → 59/29 is NOT mine — the base tree reads 59/29 too, so that snapshot row
+and its three `undef *GLOB` rows were STALE before this session.  All four rows
+spliced into `baselines/perl-suite-run.tsv` and `baselines/perl-suite-fails.tsv`
+BY HAND with those causes; a re-run of the three files is 0/0/0/0.
+`io/through.t` and `uni/variables.t` are contention and a TIMEOUT, not movers —
+the runner's own serial re-run says so.
+
+**AND ONE MEASUREMENT MISTAKE TO OWN**: the first BEFORE leg was *started*
+before the first edit but not *finished* before it, so its `io/through`,
+`io/utf8` and all thirty `uni/` rows were taken on a partly-edited tree —
+worthless for attribution, and I nearly read `uni/gv.t` as unchanged from it.
+What settled every mover was the BLESSED SNAPSHOT plus a `git archive` of the
+base commit: the pair that cannot drift under an edit in flight.
+
+**TWO REVIEW FIXES the companion legs found, and both are the same lesson at
+two levels: a repair must not reach for the thing it is repairing.**
+
+1. **The encoding handler must REPAIR AND SAY NOTHING.**  It warned
+   `Wide character in print`, the harness binds `*error-output*` to a
+   line-atomic Gray stream, so the warning went into the SAME pending buffer as
+   the text that had just failed to encode — and flushing that buffer signalled
+   on the same character again, forever: `uni/lex_utf8.t` died at
+   SB-KERNEL:*MAXIMUM-ERROR-DEPTH* (6/10 → 0/0) and `uni/fold.t` lost 928 rows
+   with it.  The warning belongs to `%p-out-string`, which knows the write is a
+   perl `print` and decides the WHOLE string before handing it over; anything
+   that reaches the handler instead did not come through there, and perl would
+   not be warning about it.  `%p-with-wide-upgrade` lost its SITE argument.
+2. **`binmode` must decide by DESCRIPTOR, not by designator.**
+   `binmode *STDOUT, ':utf8'` (t/uni/fold.t line 21) hands over a TYPEGLOB,
+   which `%p-std-slot` does not read as a standard-handle name — so the rebuild
+   path dup'd descriptor 1 and CLOSED the original, and every later print died
+   `#<fd-stream for "descriptor 1"> is closed`.  New `%p-std-descriptor`: a
+   stream on fd 0/1/2 is a standard handle whatever named it.  `%p-std-slot`'s
+   blindness is left alone deliberately — it is shared with `%p-install-fh`, so
+   widening it changes what `open(*STDOUT,…)` does and needs its own probe and
+   sweep (**#1220**).
+
+Also filed: **#1221** — `utf8::encode`/`decode`/`upgrade`/`downgrade`/`is_utf8`
+are no-op stubs returning 1, and #1115 makes "read bytes, then
+`utf8::decode`" the spelling programs actually use, so the gap is now reachable
+by ordinary code where the accidentally-decoding handle used to hide it.
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
