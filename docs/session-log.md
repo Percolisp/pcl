@@ -487,6 +487,43 @@ confirmation (NOT the quiet re-measure, which is Fable's): **A 0.1694 s vs B
 0.2153 s, B/A +27.1 %** best-of-7 at load 4.6 — the same size as the −22 %
 recorded at the stop.
 
+**REBASED ONTO MAIN `f01dcd6` (the s470br batch, generation v2-820), and the
+merge-time bars re-read on the combined tree.**  This batch stays runtime-only:
+main's generation string and main's regenerated artifacts are kept untouched,
+no bump and no regeneration.  Six of the seven commits replayed cleanly; the
+one conflict was the session-log insert point, resolved as a UNION (this
+section keeps its resume paragraphs, BR's `## Session 470br` follows it).
+**The rebase is proved rather than asserted**: `git diff ce4fbc3 HEAD -- cl Pl
+lib`, with blob hashes and hunk line numbers normalised, is IDENTICAL to main's
+own `614c6af..f01dcd6` delta over the same paths — so only BR's hunks came in
+and nothing of #1188 / L5 / L6 / L7 changed.  Parens balanced; one probe per
+lever on the combined tree: `exists $v[3]` on an out-of-range slice reads `E`
+as perl does (L7), `@a=(1..$n)` fills 1 2 3 4 (L6), and `./pcl -E 'use Carp'`
+shows **fasl-build then FASL HIT** on the second run (#1188).
+
+**A MEASUREMENT TRAP worth writing down: `./runpcl` cannot see the fasl cache
+at all** — it passes `--eval "(setf pcl::*pcl-skip-cache* t)"` by design, so
+every module load through it reports TEXT.  A first reading of "TEXT on both
+runs" looked like the rebase had broken #1188; the cache was fine and the
+runner was the wrong instrument.  `./pcl -E` (or any runner that does not skip
+the cache) is what shows the fasl path.
+
+**The rebased-tree numbers**: gate **212 files / 7183 rows** (BR's
+`io-layers-01.t` included), failing only the 13 pclxs xs rows; full sweep
+**TOTAL passing baseline 18644, current 18644 (+0)** — main's post-BR number —
+GATE clean, 0 new / 0 fixed, drops census 5 / current 5 (+0), planned-rows-not-
+asserted 12277 → 12277 (+0); the six companion legs reproduce
+`baselines/perl-suite-run.tsv` as BR left it, ROW DIFF **0 NEW / 0 FIXED / 0
+LOST**; `corpus-diff.pl f01dcd6` *emission identical across 111 files* with
+silent drops 5 unchanged; `ir-host-leak.pl` identical to a `git archive
+f01dcd6` extraction's own run (31 symbols over 111 files) — **no leak added**.
+`artifact-staleness-01.t`, `ir-inventory-01.t`, `perf-levers-02.t` and
+`module-fasl-cache-01.t` all green on the combined tree.  The sweep's UNSTABLE
+bucket reads 5 here against 4 pre-rebase (magic.t joins method.t / ref.t /
+yadayada.t) — all four are new fails ABOVE an abort point in files that are
+already PARTIAL, which is the bucket's definition of crash-file noise and not
+counted as a regression.
+
 ## Session 470br (Opus agent, 2026-09-05) — #1115: a filehandle carries OCTETS unless a layer says otherwise — the default open, `binmode`, `use open`, and perl's wide-character rule on a byte handle
 
 **#1115** was the widest silent divergence PCL had left: `%p-split-open-mode`
