@@ -244,6 +244,20 @@
 #     join.t      43 ->  41   5 restored; 3 PASS, 2 registered (utf8::encode).
 #   time.t and splice.t also had manufactured rows (1 and 2); both are STILL
 #   fully passing after restoration, so their rows do not move.
+# s470br (Opus, 2026-09-05, edited ROW BY ROW -- NEVER re-blessed from a run):
+#   the four files whose counts moved on 361f377, each number MEASURED on BOTH
+#   027ba9c (a `git archive` extraction) and 361f377 with
+#   `sweep-perl-tests.pl --jobs 1`:
+#     chop.t  PARTIAL 96/0/148  -> OK      144/0/148   (+48)  #1221
+#     index.t OK      110/0/120 -> OK      120/0/120   (+10)  #1221
+#     print.t OK      2/1/3     -> OK      3/0/3       (+1)   #1115
+#     ref.t   PARTIAL 193/16/245-> PARTIAL 195/16/245  (+2)   #1221
+#   That is +61 of the run's +63 TOTAL (18581 -> 18644).  THE REMAINING +2 ARE
+#   NOT LOCATED: this session's own `.faillog/_status.tsv` was overwritten by a
+#   single-file re-measure (a cwd reset sent a run meant for the base tree at
+#   the worktree), so the per-file diff against this file could not be
+#   completed.  The next session re-runs the full sweep and attributes them
+#   before the merge -- do not treat the +2 as blessed.
 aassign.t	OK	175	13	189
 anonsub.t	OK	1	0	1
 append.t	OK	13	0	13
@@ -260,7 +274,7 @@ bop.t	PARTIAL	480	29	510
 caller.t	PARTIAL	15	49	112
 chars.t	OK	34	0	34
 chdir.t	OK	25	0	44
-chop.t	PARTIAL	96	0	148
+chop.t	OK	144	0	148
 chr.t	OK	38	0	42
 # s428 (#411 elided-arrow call): closure.t 272 -> 273 EDITED BY HAND — `$s2->()()` (line 742) no longer DROPS.
 # s470 (Fable, #1083): closure.t 273 -> 274 EDITED BY HAND — `cloneable with //ee` (row 272) passes: a sub
@@ -296,7 +310,7 @@ hash.t	OK	7	7	14
 hashassign.t	OK	305	4	309
 hexfp.t	OK	107	14	125
 if.t	OK	2	0	2
-index.t	OK	110	0	120
+index.t	OK	120	0	120
 infnan.t	OK	1106	0	1112
 int.t	OK	19	0	19
 isa.t	OK	14	0	14
@@ -338,7 +352,7 @@ pos.t	OK	15	15	30
 #   ([perl #94476]); it left fail-baseline.tsv by EDIT in the same commit.
 postfixderef.t	PARTIAL	100	21	128
 pow.t	OK	268	0	268
-print.t	OK	2	1	3
+print.t	OK	3	0	3
 push.t	OK	32	0	32
 qq.t	OK	30	0	30
 qr.t	OK	23	14	37
@@ -350,7 +364,7 @@ recurse.t	OK	27	1	28
 # s446j (#517): ref.t 192 -> 193 EDITED BY HAND — `ref(\&{""})` is CODE, as perl says
 #   ([perl #94476]): `\&$name` is the late-bound code ref `\&NAME` is, not a SCALAR ref to
 #   p-get-coderef's NIL.  The row left fail-baseline.tsv by EDIT in the same commit.
-ref.t	PARTIAL	193	16	245
+ref.t	PARTIAL	195	16	245
 reset.t	OK	22	0	45
 reverse.t	OK	25	0	25
 scalar.t	OK	86	30	128

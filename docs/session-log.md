@@ -529,6 +529,44 @@ Guard `Pl/t/io-layers-01.t` 16 → **27 rows**; on a base extraction **16 of 27
 fail**, including every new row that can discriminate.  Generation **v2-820**,
 three artifacts and the IR inventory regenerated.
 
+
+**THE FULL SWEEP ON `361f377` IS CLEAN AND THE +63 IS ATTRIBUTED (all but two
+rows).**  TOTAL passing **18581 -> 18644**, 0 NEW, GATE clean, drops 5 = census.
+Four files moved, every number re-measured on BOTH trees (`sweep-perl-tests.pl
+--jobs 1` on a `git archive 027ba9c` extraction and on 361f377):
+
+| file | 027ba9c | 361f377 | cause |
+|---|---|---|---|
+| `chop.t`  | PARTIAL 96/0/148   | OK 144/0/148      | **#1221**, +48 |
+| `index.t` | OK 110/0/120       | OK 120/0/120      | **#1221**, +10 |
+| `print.t` | OK 2/1/3           | OK 3/0/3          | **#1115**, +1  |
+| `ref.t`   | PARTIAL 193/16/245 | PARTIAL 195/16/245| **#1221**, +2  |
+
+`chop.t:201` is `utf8::encode ($end_utf8); next if $end_utf8 eq $end;` — with
+the stub that guard fired on EVERY iteration, so the 4x4 start/end loop emitted
+2 rows where perl emits 6; the 48 rows are 4 starts x 3 non-ASCII ends x 4 rows.
+`index.t`'s ten `:utf8` skip-registry rows now PASS — **on `027ba9c` not one of
+them reports REGISTRY-STALE and on `361f377` all ten do**, so those ten
+registrations are stale and want dropping (NOT done here: a
+`cl/skip-registry.lisp` edit makes the full sweep non-optional, and this is a
+baseline edit against an already-measured sweep).  `print.t`'s row was probed
+byte for byte: perl writes the 8 original octets `c1 af c1 af c1 b0 c1 b3`,
+`027ba9c` wrote 16 because STDOUT re-encoded each character, HEAD writes the 8.
+The three baselines were edited **ROW BY ROW** with those causes;
+`perl-tests/index.t` LEAVES `row-shortfall.tsv` entirely, because no row in that
+file stands at 0.
+
+**AND ONE MEASUREMENT FLAW TO OWN, which is why +2 of the +63 are unattributed:**
+`.faillog/_status.tsv` from Fable's own sweep was OVERWRITTEN by a single-file
+re-measure of mine.  The cause is the agent-thread rule that **cwd resets
+between bash calls** — a `cd` to the base extraction did not survive, so two
+runs meant for `027ba9c` ran on the worktree instead and quietly agreed with it.
+The tell was that `runt` and the sweep disagreed on the same file; `env -C DIR`
+is the form that works.  The four files above were then re-measured properly.
+The remaining +2 need the full sweep re-run and a per-file diff of
+`_status.tsv` against `pass-baseline.tsv` — the next session's first step, and
+they are NOT blessed in the meantime.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same

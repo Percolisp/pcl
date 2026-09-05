@@ -8,6 +8,12 @@
 #   s470 (Fable, #1083): closure.t row 272 `cloneable with //ee` LEFT BY EDIT — a sub whose body can
 #   compile perl at run time (string eval, s///ee, use re eval + runtime pattern) is cloned per
 #   evaluation (BI s470bi, p-cloned-sub); the batch sweep on 8a3477d read it FIXED (+1, TOTAL 18559).
+# s470br (Opus, 2026-09-05): print.t "print doesn't launder utf8 overlongs"
+#   LEAVES BY EDIT -- it PASSES.  Cause #1115 (the byte default), probed byte
+#   for byte with the row's own program: perl writes the 8 original octets
+#   c1 af c1 af c1 b0 c1 b3; 027ba9c wrote 16 (c3 81 c2 af ...) because STDOUT
+#   was a UTF-8 handle and re-encoded each character; HEAD writes the 8.  The
+#   file is 2+1/3 -> 3+0/3 (both numbers MEASURED on 027ba9c and on 361f377).
 aassign.t	180	RT #130132 scalar derefffed 1	'3'	'2'	UNEXPLAINED
 aassign.t	181	RT #130132 scalar derefffed 2	'1'	'3'	UNEXPLAINED
 aassign.t	182	RT #130132 scalar undef 1	undef	'2'	UNEXPLAINED
@@ -314,7 +320,6 @@ pos.t	10	pos refuses @arrays	''	^Can't modify array dereference in match positio
 pos.t	4	pos() set inside //g	' ?'	'0123 5678910?'	UNEXPLAINED
 pos.t	20	s///g setting pos through a defelem	undef	'1'	#396 / #966 / #261 (pos on an aggregate element)
 pos.t	21	\G works with defelem scalars			#396 / #966 / #261 (pos on an aggregate element)
-print.t	3	print doesn't launder utf8 overlongs	'warning: Unsupported in-memory open mode: <:utf8 Could not open'	'Á¯Á¯Á°Á³'	UNEXPLAINED
 qr.t	23				UNEXPLAINED
 qr.t	29	PVLVs	'SCALAR'	'REGEXP'	CATALOG qr.t "PVLV deref / stringification of blessed qr//"
 qr.t	36	REGEXP RV leak	'0'	'1'	CATALOG qr.t "PVLV deref / stringification of blessed qr//"

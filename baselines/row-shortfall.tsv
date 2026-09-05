@@ -26,13 +26,38 @@
 #   and PCL's do-FILE path died on the U+2019 in that file's header comment;
 #   s470bi's #1084 fixed that, so the row is PRODUCED now and fails no more.
 #   The row leaves this file and its fail-baseline twin in the same commit.
+# s470br 2026-09-05 (Opus, edited ROW BY ROW; every number MEASURED on BOTH
+#   trees -- `sweep-perl-tests.pl --jobs 1` on a `git archive 027ba9c`
+#   extraction and on 361f377):
+#   perl-tests/chop.t  52 -> 4.  Cause #1221 (the utf8:: mutators really
+#     transform).  chop.t:201 is `utf8::encode ($end_utf8); next if
+#     $end_utf8 eq $end;` -- with the no-op stub the guard fired on EVERY
+#     iteration, so the 4x4 start/end loop emitted 2 rows instead of 6 for the
+#     12 non-ASCII ends: 4 starts x 3 ends x 4 rows = the 48 rows now produced
+#     (96+0/148 PARTIAL "ran 100 of 148" -> 144+0/148 OK).  The residue 4 is
+#     the skip-registry's chop.t 48-51 (principle-9 "Can't modify chop in
+#     assignment"), unchanged and still UNEXPLAINED by this file's lights.
+#   perl-tests/index.t 10 -> 0, ROW REMOVED (no row in this file stands at 0).
+#     Cause #1221.  The ten `:utf8` skip-registry rows ("index on a
+#     utf8::encode'd byte-string must use byte offsets", tests 51-58 and the
+#     two `^index|rindex octets, octets` patterns) now PASS: on 027ba9c the
+#     file emits 110 rows and none reports REGISTRY-STALE; on 361f377 it emits
+#     120 and ALL TEN report it.  ==> THE TEN REGISTRATIONS ARE NOW STALE and
+#     want dropping from cl/skip-registry.lisp -- NOT done here, because a
+#     harness edit makes the full sweep non-optional and this commit is a
+#     baseline edit against an already-measured sweep.  (chop.t's own stale
+#     entry, "chomp @a when.*eq 0 and", is PRE-EXISTING: it reports STALE on
+#     027ba9c too.)
+#   perl-tests/ref.t   36 -> 34.  Cause #1221: ref.t:577 `utf8::encode
+#     $name_utf8` in the symbolic-reference block, 193+16/245 -> 195+16/245.
+#     The file stays PARTIAL at the same last row (242, RT #78288).
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	10	UNEXPLAINED
 perl-tests/blocks.t	1	UNEXPLAINED
 perl-tests/bop.t	1	UNEXPLAINED
 perl-tests/caller.t	48	UNEXPLAINED
 perl-tests/chdir.t	19	UNEXPLAINED
-perl-tests/chop.t	52	UNEXPLAINED
+perl-tests/chop.t	4	UNEXPLAINED
 perl-tests/chr.t	4	UNEXPLAINED
 perl-tests/closure.t	2	UNEXPLAINED
 perl-tests/crypt.t	1	UNEXPLAINED
@@ -44,7 +69,6 @@ perl-tests/exp.t	1	UNEXPLAINED
 perl-tests/for.t	1	UNEXPLAINED
 perl-tests/grep.t	6	UNEXPLAINED
 perl-tests/hexfp.t	4	UNEXPLAINED
-perl-tests/index.t	10	UNEXPLAINED
 perl-tests/infnan.t	6	UNEXPLAINED
 perl-tests/join.t	2	UNEXPLAINED
 perl-tests/kvhslice.t	16	UNEXPLAINED
@@ -63,7 +87,7 @@ perl-tests/postfixderef.t	7	UNEXPLAINED
 perl-tests/quotemeta.t	20	UNEXPLAINED
 perl-tests/range.t	4	UNEXPLAINED
 perl-tests/readline.t	8	UNEXPLAINED
-perl-tests/ref.t	36	UNEXPLAINED
+perl-tests/ref.t	34	UNEXPLAINED
 perl-tests/reset.t	23	UNEXPLAINED
 perl-tests/scalar.t	12	UNEXPLAINED
 perl-tests/signatures.t	1	UNEXPLAINED

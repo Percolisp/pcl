@@ -288,6 +288,24 @@ not-supported.md → only then probe.*
   unexplained; `Pl/t/io-layers-01.t` 16 → 27 rows, 16 of 27 failing on the base.
   Generation **v2-820**.
 
+- **The +63 the full sweep on `361f377` reports is attributed to FOUR files, 61
+  of 63 rows**: `chop.t` 96 -> 144 and `index.t` 110 -> 120 and `ref.t` 193 ->
+  195 are all **#1221** (a real `utf8::encode`; chop.t's `next if $end_utf8 eq
+  $end` guard used to fire every time), `print.t` 2+1 -> 3+0 is **#1115** (the
+  byte STDOUT writes the 8 original octets where the UTF-8 handle wrote 16 —
+  probed).  Baselines edited ROW BY ROW; `perl-tests/index.t` leaves
+  `row-shortfall.tsv` because no row there stands at 0.
+- **A SKIP REGISTRATION THAT STOPS BEING TRUE IS FOUND BY DIFFING THE STALE
+  MESSAGE ACROSS TWO TREES**: `index.t`'s ten `:utf8` entries report
+  REGISTRY-STALE on `361f377` and NOT ONE of them does on `027ba9c` — which is
+  what proves the ten rows are #1221's and not an older fix.  They want dropping
+  from `cl/skip-registry.lisp`; that is a HARNESS edit, so it carries a full
+  sweep and did not ride this baseline commit.
+- **AN AGENT THREAD'S cwd RESETS BETWEEN BASH CALLS, so a `cd` to a base
+  extraction is a silent contamination** — two "base" runs actually ran on the
+  worktree and agreed with it, and they overwrote `.faillog/_status.tsv`.  The
+  tell was `runt` and the sweep disagreeing on the same file.  Use `env -C DIR`.
+
 ## s470bo (2026-09-05, Opus) — the bugs the s470bm IR censuses found: #1179, #1178, #1173, #1174, #1177, and four of #1175's six leak families
 
 - **`-norequire` is parent.pm's FLAG and its rule is FIRST POSITION ONLY** —
