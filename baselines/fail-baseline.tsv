@@ -8,6 +8,15 @@
 #   s470 (Fable, #1083): closure.t row 272 `cloneable with //ee` LEFT BY EDIT — a sub whose body can
 #   compile perl at run time (string eval, s///ee, use re eval + runtime pattern) is cloned per
 #   evaluation (BI s470bi, p-cloned-sub); the batch sweep on 8a3477d read it FIXED (+1, TOTAL 18559).
+# s470br round 3 (Opus, 2026-09-05): postfixderef.t 42 "UTF8 representation is
+#   3 chars" and 46 "Accessing via the UTF8 byte sequence still gives nothing"
+#   LEAVE BY EDIT -- they PASS.  Cause #1221 (`bd7dcb4`, the utf8:: mutators
+#   really transform).  postfixderef.t:206 encodes `chr 9787` in place, so the
+#   name is 3 octets (row 42) and is a DIFFERENT symbolic reference from the
+#   1-character one (row 46).  Probed vs perl 5.40.3: perl and HEAD both print
+#   `1/3/Face/undef`, the base tree prints `1/1/Face/Face`.  MEASURED on both
+#   trees, `sweep-perl-tests.pl --jobs 1`: 100+21 -> 102+19, same last row
+#   (121 of 128).  They are the "+2 not located" of the s470br note above.
 # s470br (Opus, 2026-09-05): print.t "print doesn't launder utf8 overlongs"
 #   LEAVES BY EDIT -- it PASSES.  Cause #1115 (the byte default), probed byte
 #   for byte with the row's own program: perl writes the 8 original octets
@@ -464,8 +473,6 @@ postfixderef.t	27	glob access syntax			UNEXPLAINED
 postfixderef.t	28		undef	'2'	UNEXPLAINED
 postfixderef.t	29		'2'	'3'	UNEXPLAINED
 postfixderef.t	36	no stooges outlast their scope	'36'	'40'	UNEXPLAINED
-postfixderef.t	42	UTF8 representation is 3 chars	'1'	'3'	CATALOG ref.t "NUL/UTF-8 symbolic-ref stash names"
-postfixderef.t	46	Accessing via the UTF8 byte sequence still gives nothing	'Face'	undef	CATALOG ref.t "NUL/UTF-8 symbolic-ref stash names"
 postfixderef.t	49	Accessing via the correct name works	undef	'Yummy'	CATALOG ref.t "NUL/UTF-8 symbolic-ref stash names"
 postfixderef.t	51	defined via the correct name works			CATALOG ref.t "NUL/UTF-8 symbolic-ref stash names"
 postfixderef.t	55	Accessing via the correct name works	undef	'Yummy'	CATALOG ref.t "NUL/UTF-8 symbolic-ref stash names"

@@ -244,6 +244,18 @@
 #     join.t      43 ->  41   5 restored; 3 PASS, 2 registered (utf8::encode).
 #   time.t and splice.t also had manufactured rows (1 and 2); both are STILL
 #   fully passing after restoration, so their rows do not move.
+# s470br round 3 (Opus, 2026-09-05, edited ROW BY ROW): postfixderef.t PARTIAL
+#   100/21/128 -> PARTIAL 102/19/128 (+2).  These ARE the "+2 not located" the
+#   note below left open; the full sweep on 4afd8ec places them.  MEASURED on
+#   BOTH trees with `sweep-perl-tests.pl --jobs 1` -- 027ba9c (a `git archive`
+#   extraction) 100+21, HEAD 102+19, and BOTH stop at the same row (121 of 128,
+#   so the file's row-shortfall stays 7).  Cause #1221 (`bd7dcb4`, the utf8::
+#   mutators really transform): postfixderef.t:206 is `utf8::encode $name_utf8`
+#   on `chr 9787`, so test 42 (`length $name_utf8` is 3) and test 46 (the
+#   3-octet name is a DIFFERENT symbolic reference, so it still gives undef)
+#   both pass.  Probed byte for byte vs perl 5.40.3 -- `1/3/Face/undef` on perl
+#   and on HEAD, `1/1/Face/Face` on the base -- so neither row passes on
+#   nothing.  The two rows leave fail-baseline.tsv by EDIT in the same commit.
 # s470br (Opus, 2026-09-05, edited ROW BY ROW -- NEVER re-blessed from a run):
 #   the four files whose counts moved on 361f377, each number MEASURED on BOTH
 #   027ba9c (a `git archive` extraction) and 361f377 with
@@ -350,7 +362,7 @@ parent.t	OK	7	2	9
 pos.t	OK	15	15	30
 # s446j (#517): postfixderef.t 95 -> 96 EDITED BY HAND — the same `ref(\&{""})` row as ref.t's
 #   ([perl #94476]); it left fail-baseline.tsv by EDIT in the same commit.
-postfixderef.t	PARTIAL	100	21	128
+postfixderef.t	PARTIAL	102	19	128
 pow.t	OK	268	0	268
 print.t	OK	3	0	3
 push.t	OK	32	0	32
