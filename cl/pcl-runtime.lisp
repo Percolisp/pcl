@@ -7293,6 +7293,73 @@ per element."
       (loop while (>= n (length a)) do (vector-push-extend nil a))
       (setf (aref a n) box))))
 
+;;; ── A CONSTANT-SUBSCRIPT SLICE ASSIGNMENT IS N DIRECT STORES (task #1203) ──
+;;; `@h{qw(a b)} = (…)`, `@a[1..3] = (…)`, `@a[0,2] = (…)` are idiomatic Perl,
+;;; and their subscripts are known while the file is being COMPILED.  The
+;;; general arms below cannot know that: they build the subscript list at RUN
+;;; time — a dolist over the subscript expressions, consing a list, nreversing
+;;; it — and then walk it beside the source vector.  For a constant list all of
+;;; that is a compile-time constant, so the assignment is exactly N stores.
+;;;
+;;; WHAT IS *NOT* SKIPPED, and each matters: the RHS is still evaluated ONCE and
+;;; SNAPSHOTTED before the first store (`@a[0,1] = @a[1,0]` reads the container's
+;;; own element boxes — #818 — so a store must not be visible to a later read);
+;;; a missing RHS value is still `*p-undef*` and an extra one is still dropped;
+;;; the value of the whole assignment is still the source vector, which is what
+;;; puts the COUNT in scalar context; and the STORE ITSELF is the same
+;;; `(setf (p-aref …))` / `(setf (p-gethash …))` the general loop uses, so
+;;; autovivification, magic and tie behave identically.  The container
+;;; expression is re-emitted per store, exactly as the general loop
+;;; re-evaluates it per iteration — the same evaluation count, deliberately.
+;;;
+;;; Sized before it was written (hand-replaced A/B, the §0.5 method): the
+;;; `sliceasgn` bench row **-62.7 %** against a byte-identical control pair
+;;; reading +0.5 % in the same window.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-const-subscript-values (forms)
+    "The flat list of subscript VALUES when every form in FORMS is a
+     compile-time constant subscript, and NIL when any is not.  Three shapes
+     occur in PCL's emission for a literal slice, and only three: a
+     self-evaluating number or string (`@a[0,2]`, `@h{'a','b'}`, `@h{qw(a b)}`),
+     a quoted literal, and a literal numeric range (`@a[1..3]`).  A DESCENDING
+     literal range yields the empty list, which is perl's answer for it and
+     which the caller must not read as a licence — hence the empty-list check
+     at the call site."
+    (let ((out '()))
+      (dolist (f forms (nreverse out))
+        (cond
+          ((or (numberp f) (stringp f)) (push f out))
+          ((and (consp f) (eq (car f) 'quote) (consp (cdr f)) (null (cddr f))
+                (let ((v (cadr f))) (or (numberp v) (stringp v))))
+           (push (cadr f) out))
+          ((and (consp f) (member (car f) '(p-.. p-...)) (= (length f) 3)
+                (integerp (second f)) (integerp (third f)))
+           (loop for i from (second f) to (third f) do (push i out)))
+          (t (return-from %p-const-subscript-values nil))))))
+
+  (defun %p-slice-src-bindings (src src-vec value)
+    "The LET* bindings both slice-assignment arms open with: VALUE evaluated
+     once into SRC, coerced to a vector, and SNAPSHOTTED before any store.
+     ONE spelling (rule 11) — the array arm and the hash arm had it twice, and
+     the constant-subscript arms make four."
+    `((,src ,value)
+      (,src-vec (%p-assign-snapshot-vector
+                 (cond
+                   ((listp ,src) (coerce ,src 'vector))
+                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
+                   (t (vector ,src)))))))
+
+  (defun %p-unrolled-slice-stores (accessor container subs src-vec)
+    "The N stores a constant-subscript slice assignment becomes: subscript K at
+     position I takes position I of SRC-VEC, or *p-undef* past its end.
+     ACCESSOR is the same `p-aref` / `p-gethash` place the general loops store
+     through, so nothing about the store changes."
+    (loop for k in subs
+          for i from 0
+          collect `(setf (,accessor ,container ,k)
+                         (if (< ,i (length ,src-vec)) (aref ,src-vec ,i)
+                             *p-undef*)))))
+
 ;; p-setf dispatches to the appropriate assignment form based on place type.
 ;; For element access (p-aref, p-gethash, etc.), uses CL's setf mechanism.
 (defmacro p-setf (place value)
@@ -7418,95 +7485,90 @@ per element."
     ;; List assignment: (vector $a $b $c) = @_ or similar -> p-list-=
     ((and (listp place) (eq (car place) 'vector))
      `(p-list-= ,place ,value))
-    ;; Array slice assignment: (p-setf (p-aslice arr indices...) values)
-    ;; Assigns each value from RHS to the corresponding index in LHS
-    ((and (listp place) (eq (car place) 'p-aslice))
-     (let ((arr (cadr place))
-           (indices-exprs (cddr place))
-           (src (gensym "SRC"))
-           (src-vec (gensym "SRC-VEC"))
-           (indices (gensym "INDICES")))
-       ;; The assignment proper; a simple-symbol array is auto-declared first
-       ;; (#387 family 46, s413: the body was spelled once per case).
-       (let ((body
-              `(let* ((,src ,value)
-                      ;; Convert source to vector, then SNAPSHOT it: perl
-                      ;; evaluates the whole RHS before the first store, and a
-                      ;; slice RHS holds the container's own element boxes
-                      ;; (#818), so `@a[0,1] = @a[1,0]` would otherwise read
-                      ;; source 1 after store 0 overwrote it.
-                      (,src-vec (%p-assign-snapshot-vector
-                                 (cond
-                                   ((listp ,src) (coerce ,src 'vector))
-                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                   (t (vector ,src)))))
-                      ;; Flatten indices (handle range operator returning vector or list)
-                      (,indices (let ((idx-list nil))
-                                  (dolist (idx (list ,@indices-exprs) (nreverse idx-list))
-                                    (cond
-                                      ((listp idx)
-                                       (dolist (i idx) (push i idx-list)))
-                                      ((and (vectorp idx) (not (stringp idx)))
-                                       (loop for i across idx do (push i idx-list)))
-                                      (t (push idx idx-list)))))))
-                 ;; Assign each element
-                 (loop for i from 0 below (length ,indices)
-                       for idx in ,indices
-                       do (setf (p-aref ,arr idx)
-                                (if (< i (length ,src-vec))
-                                    (aref ,src-vec i)
-                                    *p-undef*)))
-                 ;; Return the values that were assigned
-                 ,src-vec)))
-         (if (symbolp arr)
-             `(progn
-                (unless (boundp ',arr)
-                  (%p-ensure-storage (quote ,arr))
-                  (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
-                ,body)
-             ;; Non-symbol array expression - just use it directly
-             body))))
-    ;; Hash slice assignment: (p-setf (p-hslice hash keys...) values)
-    ((and (listp place) (eq (car place) 'p-hslice))
-     (let ((hash (cadr place))
-           (keys-exprs (cddr place))
-           (src (gensym "SRC"))
-           (src-vec (gensym "SRC-VEC"))
-           (keys (gensym "KEYS")))
-       ;; The assignment proper; a simple-symbol hash is auto-declared first
-       ;; (#387 family 46, s413: the body was spelled once per case).
-       (let ((body
-              `(let* ((,src ,value)
-                      ;; snapshot before the first store, as the array-slice
-                      ;; sibling above does (#818, `@h{'p','q'} = @h{'q','p'}`)
-                      (,src-vec (%p-assign-snapshot-vector
-                                 (cond
-                                   ((listp ,src) (coerce ,src 'vector))
-                                   ((and (vectorp ,src) (not (stringp ,src))) ,src)
-                                   (t (vector ,src)))))
-                      (,keys (let ((key-list nil))
-                               (dolist (k (list ,@keys-exprs) (nreverse key-list))
-                                 (cond
-                                   ((listp k)
-                                    (dolist (kk k) (push kk key-list)))
-                                   ((and (vectorp k) (not (stringp k)))
-                                    (loop for kk across k do (push kk key-list)))
-                                   (t (push k key-list)))))))
-                 (loop for i from 0 below (length ,keys)
-                       for k in ,keys
-                       do (setf (p-gethash ,hash k)
-                                (if (< i (length ,src-vec))
-                                    (aref ,src-vec i)
-                                    *p-undef*)))
-                 ,src-vec)))
-         (if (symbolp hash)
-             `(progn
-                (unless (boundp ',hash)
-                  (%p-ensure-storage (quote ,hash))
-                  (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
-                ,body)
-             ;; Non-symbol hash expression
-             body))))
+;; Array slice assignment: (p-setf (p-aslice arr indices...) values)
+;; Assigns each value from RHS to the corresponding index in LHS
+((and (listp place) (eq (car place) 'p-aslice))
+ (let* ((arr (cadr place))
+        (indices-exprs (cddr place))
+        (src (gensym "SRC"))
+        (src-vec (gensym "SRC-VEC"))
+        (indices (gensym "INDICES"))
+        (consts (%p-const-subscript-values indices-exprs)))
+   ;; The assignment proper; a simple-symbol array is auto-declared first
+   ;; (#387 family 46, s413: the body was spelled once per case).
+   (let ((body
+          `(let* ,(%p-slice-src-bindings src src-vec value)
+             ,@(if consts
+                   ;; CONSTANT indices: the N stores, no run-time index
+                   ;; walk (task #1203; see %p-const-subscript-values).
+                   (%p-unrolled-slice-stores 'p-aref arr consts src-vec)
+                   `(;; Flatten indices (handle range operator returning
+                     ;; vector or list)
+                     (let ((,indices (let ((idx-list nil))
+                                       (dolist (idx (list ,@indices-exprs)
+                                                (nreverse idx-list))
+                                         (cond
+                                           ((listp idx)
+                                            (dolist (i idx) (push i idx-list)))
+                                           ((and (vectorp idx) (not (stringp idx)))
+                                            (loop for i across idx do (push i idx-list)))
+                                           (t (push idx idx-list)))))))
+                       ;; Assign each element
+                       (loop for i from 0 below (length ,indices)
+                             for idx in ,indices
+                             do (setf (p-aref ,arr idx)
+                                      (if (< i (length ,src-vec))
+                                          (aref ,src-vec i)
+                                          *p-undef*))))))
+             ;; Return the values that were assigned
+             ,src-vec)))
+     (if (symbolp arr)
+         `(progn
+            (unless (boundp ',arr)
+              (%p-ensure-storage (quote ,arr))
+              (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
+            ,body)
+         ;; Non-symbol array expression - just use it directly
+         body))))
+;; Hash slice assignment: (p-setf (p-hslice hash keys...) values)
+((and (listp place) (eq (car place) 'p-hslice))
+ (let* ((hash (cadr place))
+        (keys-exprs (cddr place))
+        (src (gensym "SRC"))
+        (src-vec (gensym "SRC-VEC"))
+        (keys (gensym "KEYS"))
+        (consts (%p-const-subscript-values keys-exprs)))
+   ;; The assignment proper; a simple-symbol hash is auto-declared first
+   ;; (#387 family 46, s413: the body was spelled once per case).
+   (let ((body
+          `(let* ,(%p-slice-src-bindings src src-vec value)
+             ,@(if consts
+                   ;; CONSTANT keys — `@h{qw(a b)} = …`, the idiom (#1203)
+                   (%p-unrolled-slice-stores 'p-gethash hash consts src-vec)
+                   `((let ((,keys (let ((key-list nil))
+                                    (dolist (k (list ,@keys-exprs)
+                                             (nreverse key-list))
+                                      (cond
+                                        ((listp k)
+                                         (dolist (kk k) (push kk key-list)))
+                                        ((and (vectorp k) (not (stringp k)))
+                                         (loop for kk across k do (push kk key-list)))
+                                        (t (push k key-list)))))))
+                       (loop for i from 0 below (length ,keys)
+                             for k in ,keys
+                             do (setf (p-gethash ,hash k)
+                                      (if (< i (length ,src-vec))
+                                          (aref ,src-vec i)
+                                          *p-undef*))))))
+             ,src-vec)))
+     (if (symbolp hash)
+         `(progn
+            (unless (boundp ',hash)
+              (%p-ensure-storage (quote ,hash))
+              (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
+            ,body)
+         ;; Non-symbol hash expression
+         body))))
     ;; $! as lvalue: (p-setf (p-errno-string) val) -> set C errno
     ((and (listp place) (eq (car place) 'p-errno-string))
      `(setf (p-errno-string) ,value))
