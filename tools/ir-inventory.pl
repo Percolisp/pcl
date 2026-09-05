@@ -195,7 +195,7 @@ my %FAMILY;
   'logical' => [qw(p-&& p- p-! p-not p-and p-or p-xor p-//)],
   'bitwise' => [qw(p-bit-and p-bit-or p-bit-xor p-bit-not p-<< p->>
                    p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not
-                   p-to-s64 p-<<-int p->>-int)],
+                   p-to-s64 p-<<-int p->>-int %pcl-to-integer)],
   'assignment' => [qw(p-setf p-scalar-= p-array-= p-hash-= p-list-= p-my-=
                       p-array-fill p-hash-fill p-box-init p-hash-deref-=
                       p-array-deref-=)],
@@ -223,7 +223,7 @@ my %FAMILY;
                         p-for p-foreach p-foreach-raw p-foreach-range
                         p-foreach-range-raw p-return p-return-empty p-tail-value
                         p-goto-sub p-goto-computed p-last p-last-dynamic p-next
-                        p-redo p-continue p-break p-do
+                        p-redo p-continue p-break p-do %pcl-loop-tag
                         p-dyn-once %p-dyn-loop-exit)],
   'exception' => [qw(p-eval p-eval-block p-eval-thunk p-eval-lex-lookup p-try
                      p-alias-eval-cell *p-eval-lex-alist* p-exception
@@ -276,17 +276,17 @@ my %FAMILY;
                          p-local-array-elem p-local-hash-elem-init
                          p-local-array-elem-init p-local-array-slice
                          p-local-deref-scalar p-local-deref-array
-                         p-local-deref-hash)],
+                         p-local-deref-hash %pcl-local-errno-init)],
   'pack' => [qw(p-pack p-unpack)],
   'extension' => [qw(p-load-extension)],
   'capture-io' => [qw(p-high-capture p-capture-write p-capture-fh)],
   'call' => [qw(p-funcall-ref)],
   'oo' => [qw(p-get-class p-method-call p-resolve-invocant p-super-call
-              perl-pkg-to-clos-class)],
+              perl-pkg-to-clos-class %pcl-super-indirect)],
   'overload' => [qw(*p-overload-table* p-register-overloads p-find-overload
                     p-call-overload p-overload-strval p-overloaded)],
   'regex' => [qw(p-=~ p-!~ p-subst p-tr p-regex)],
-  'compiled-regex' => [qw(p-regex-from-parts)],
+  'compiled-regex' => [qw(p-regex-from-parts p-qr)],
   'magic-global' => [qw(@INC %INC %SIG @ARGV $ARGV @_ %_args p-errno-string
                         *p-errno-table*)],
   'context-frame' => [qw(*wantarray* p-list-ctx p-scalar-ctx p-void-ctx

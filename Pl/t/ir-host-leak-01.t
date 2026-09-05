@@ -56,13 +56,15 @@ my @CASES = (
   # MEASURED: the trigger is the `use integer` PRAGMA, not `int()` — one
   # pragma emits nine bare CL operators plus a qualified runtime internal.
   { name => 'useinteger',
-    why  => '#1175/#1177: `use integer` emits CL `rem`/`truncate`/`*` and the '
-          . 'bit ops, through `pcl::%pcl-to-integer`',
+    why  => '#1175: `use integer` emits CL `rem`/`truncate`/`*` and the bit '
+          . 'ops inline.  `pcl::%pcl-to-integer` LEFT this set in s470bo: '
+          . '#1177 exported the five names the emitter writes qualified, so '
+          . 'the inventory covers it and it is no longer a leak',
     perl => "use integer;\nmy \$x = length(\"abc\") % -10;\n"
           . "my \$y = (3 / -10) * -10;\nmy \$b = 5 & 3;\nmy \$c = 5 | 3;\n"
           . "my \$d = 5 ^ 3;\nmy \$e = ~5;\nprint \"\$x \$y \$b \$c \$d \$e\\n\";\n",
     leaks => ['op:*', 'op:logand', 'op:logior', 'op:lognot', 'op:logxor',
-              'op:pcl::%pcl-to-integer', 'op:rem', 'op:truncate'] },
+              'op:rem', 'op:truncate'] },
   { name => 'wideescape',
     why  => '#1175: a \\x{...} escape emits `concatenate`, `string`, `code-char` and the quoted type designator',
     perl => "my \$s = \"\\x{d800}\\x{ffff}\";\nprint length(\$s), \"\\n\";\n",

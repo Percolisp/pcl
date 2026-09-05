@@ -262,6 +262,20 @@
    #:*p-overload-table* #:p-register-overloads
    #:p-find-overload #:p-call-overload
    #:p-overload-strval #:p-overloaded
+   ;; THE FIVE NAMES THE EMITTER WRITES PACKAGE-QUALIFIED (task #1177).
+   ;; They worked without being exported precisely BECAUSE they are qualified —
+   ;; `pcl::%pcl-to-integer` resolves whatever the export list says — and that
+   ;; is the problem: ir-spec §10a's claim is "the export list IS the IR's
+   ;; vocabulary, and docs/ir-op-inventory.tsv is the port list", so five names
+   ;; a backend must implement (`use integer`'s arithmetic, a SUPER:: call,
+   ;; `local $!`, every labelled loop's catch tag, every qr// literal) were
+   ;; invisible to the author working from that list.  Exporting them is the
+   ;; option that cannot drift: the generator reads the export list, so the
+   ;; inventory is complete by construction, and tools/ir-host-leak.pl stops
+   ;; needing per-name exceptions.  The emitter keeps writing them qualified;
+   ;; nothing about the emission changes.
+   #:%pcl-to-integer #:%pcl-super-indirect #:%pcl-local-errno-init
+   #:%pcl-loop-tag #:p-qr
    ;; Regex
    #:p-=~ #:p-!~ #:p-subst #:p-tr #:p-regex #:p-regex-from-parts
    ;; Capture groups

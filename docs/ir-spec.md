@@ -2877,13 +2877,20 @@ symbols):
 | CL streams | `make-string-input-stream` | the `__DATA__` handle's registration (measured: NOT `open $fh, '<', \$s`) | #1175 |
 | the `loop` macro | `loop`, with its `for` / `across` / `do` keywords | a `\(LIST)` refgen over more than one element | #1175 |
 | a quoted symbol is THREE things | `'>` `'==` (operator selectors) vs `'string` (a host type designator) vs `'start` `'label1` `'undef` `'of` (perl labels and bareword filehandles) — indistinguishable from the token | `p-chain-cmp`, `%p-loop-tag`, `p-readline`, `p-open` | #1176 |
-| runtime INTERNALS the emitter writes package-qualified | `pcl::%pcl-to-integer` `pcl::%pcl-super-indirect` `pcl::%pcl-local-errno-init` `pcl::%pcl-loop-tag` `pcl::p-qr` | they work because they are qualified — and they are invisible to §10a's inventory, which lists EXPORTS, so a backend working from the port list will not find them | #1177 |
+| ~~runtime INTERNALS the emitter writes package-qualified~~ | ~~`pcl::%pcl-to-integer` `pcl::%pcl-super-indirect` `pcl::%pcl-local-errno-init` `pcl::%pcl-loop-tag` `pcl::p-qr`~~ | **CLOSED s470bo (#1177)**: all five are EXPORTS now, so §10a's generated inventory has a row for each and `tools/ir-host-leak.pl` needs no per-name exception.  The emitter still writes them qualified — nothing about the emission changed; what changed is that the port list is complete by construction | — |
 
 Until they are closed, a backend either implements those host functions or
 refuses the files that contain them; the census says which files those are.
 The corpus measurement at s470bm: **38 distinct leaked symbols over 111
 files**, and `lib/**` adds none (its only leaks are `use integer`'s, in
-`lib/Math/BigInt/Calc.pm`).
+`lib/Math/BigInt/Calc.pm`).  Re-measured at s470bo on the MERGED tree, which
+is the number to compare against from now on: **41 distinct before, 38 after**
+#1177 — the three that left are exactly `op:pcl::%pcl-to-integer`,
+`op:pcl::%pcl-super-indirect` and `op:pcl::%pcl-local-errno-init` (the other
+two of the five, `%pcl-loop-tag` and `p-qr`, were never counted: the tool
+carried a hard-coded exception for them, which is gone with them).  #1179
+removed a 42nd, `op:-norequire::plc--norequire`, which the perl-suite
+population showed and this one does not.
 
 ## 12. Worked example
 

@@ -168,10 +168,11 @@ sub runtime_exports {
   close $fh;
   die "ir-host-leak.pl: the inventory TSV has no rows — regenerate it\n"
     unless keys %n;
-  # `p-qr` is emitted but INTERNAL to :pcl (it is written qualified), so the
-  # export list has no row for it.  ir-spec §10a records the finding; here it
-  # simply has to be allowed, or every file with a `qr//` reads as a leak.
-  $n{$_} = 1 for qw(pcl::p-qr pcl:p-qr p-qr %pcl-loop-tag pcl::%pcl-loop-tag);
+  # (The `p-qr` / `%pcl-loop-tag` exceptions that stood here are GONE, task
+  # #1177: both — and the three other names the emitter wrote qualified — are
+  # exports now, so the inventory rows above cover them and this tool needs no
+  # per-name knowledge.  An exception here would hide exactly the class #1177
+  # was about.)
   return \%n;
 }
 
