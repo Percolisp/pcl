@@ -2357,10 +2357,15 @@ sub _process_element {
     $data =~ s/"/\\"/g;
     $self->_with_bucket('preamble', sub {
       $self->_emit(";; $ref — register DATA filehandle");
-      # ONE named op, not the three pieces spelled out: the old emission put a
-      # CL stream constructor and a quoted HANDLE-NAME symbol in the IR
-      # (#1175 family 4, #1176).
-      $self->_emit("(p-install-data-handle \"$data\")");
+      # ONE named op, not the pieces spelled out: the old emission put a CL
+      # stream constructor in the IR (#1175 family 4).  The handle NAME stays
+      # a quoted symbol and MUST: `DATA` is per-package in perl, and
+      # *p-filehandles* keys on the symbol, so the name has to be interned in
+      # THIS file's package — which only this emission can do.  Interning it
+      # inside the runtime made one key for the program and every module it
+      # loads, and the last module's `__END__` POD replaced the program's
+      # section (measured on sprintf.t: 559 tests -> 1).
+      $self->_emit("(p-install-data-handle 'DATA \"$data\")");
     });
     return;
   }

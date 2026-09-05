@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 26;
+plan tests => 28;
 
 sub run_cl {
     my ($code) = @_;
@@ -323,5 +323,50 @@ PL
 test_cl('#1175(5) \\(LIST) still spreads over a range plus an element', <<'PL', "3 123\n");
 my (@fuu) = \(1..2,3);
 print scalar(@fuu), " ", ${$fuu[0]}, ${$fuu[1]}, ${$fuu[2]}, "\n";
+PL
+
+# ── #1175(4): DATA is a PER-PACKAGE handle, and the op takes the symbol ────
+# The first shape of `p-install-data-handle` interned `'DATA` inside the
+# RUNTIME, so every file AND every module it loads shared one key: perl's own
+# Exporter.pm has an `__END__` POD section, so loading it REPLACED the
+# program's own section.  Measured on perl-tests/sprintf.t, whose 566-row
+# `__END__` table is read with `while (<DATA>)`: it planned 1 test instead of
+# 559, and the one record it read was Exporter's POD.  The handle name is an
+# ARGUMENT now, interned by the emitter in the file's own package.
+#
+# Both rows load Exporter (via `use Exporter`, which every `use`-ing module
+# does anyway) so the collision is IN the fixture, and both read in LIST
+# context — the spelling sprintf.t does not use, and so the one this file
+# would otherwise never cover.
+
+test_cl('#1175(4) a module\'s __END__ does not replace the program\'s DATA', <<'PL', "n=10 first=[alpha] last=[omega]\n");
+use Exporter;
+my @all = <DATA>;
+chomp @all;
+print "n=", scalar(@all), " first=[$all[0]] last=[$all[-1]]\n";
+__END__
+alpha
+beta
+
+# comment
+>%6. 6s<    >''<          >%6. 6s INVALID<
+gamma
+delta
+epsilon
+zeta
+omega
+PL
+
+test_cl('#1175(4) list-context <DATA> after a while-loop read', <<'PL', "first=[one] rest=3\n");
+use Exporter;
+my $first = <DATA>;
+chomp $first;
+my @rest = <DATA>;
+print "first=[$first] rest=", scalar(@rest), "\n";
+__DATA__
+one
+two
+three
+four
 PL
 

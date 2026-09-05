@@ -12469,16 +12469,27 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;; Filehandle storage - maps symbols to CL streams
 (defvar *p-filehandles* (make-hash-table :test 'eq))
 
-(defun p-install-data-handle (text)
-  "Register a file's `__DATA__` / `__END__` section as the DATA filehandle,
-   TEXT being the section verbatim.  The emitter used to write the three
-   pieces of this out — `(setf (gethash 'DATA *p-filehandles*)
-   (make-string-input-stream …))` — which put a CL stream constructor in the
-   IR (task #1175, family 4; 44 of perl's own t/ files carry it) and a quoted
-   symbol standing for a HANDLE NAME (#1176).  Both are gone by naming the
-   operation instead of spelling it.
+(defun p-install-data-handle (handle text)
+  "Register a file's `__DATA__` / `__END__` section as its DATA filehandle,
+   TEXT being the section verbatim.  The emitter used to write the pieces of
+   this out — `(setf (gethash 'DATA *p-filehandles*) (make-string-input-stream
+   …))` — which put a CL stream constructor in the IR (task #1175, family 4;
+   44 of perl's own t/ files carry it).
+
+   HANDLE IS AN ARGUMENT, AND THAT IS THE WHOLE POINT (regression fixed in the
+   same session it was introduced).  `DATA` is a PER-PACKAGE handle in perl —
+   `main::DATA` and `Foo::DATA` are different handles, and every module with an
+   `__END__` POD section has one — and `*p-filehandles*` keys on the SYMBOL,
+   so the name has to be interned in the EMITTING file's package, which only
+   the emitter can do.  A `'DATA` interned HERE would be `pcl::DATA` for every
+   caller: one key for the program and for each module it loads, so the last
+   module loaded silently REPLACED the program's section.  Measured on
+   perl-tests/sprintf.t, whose 566-row `__END__` table is read with `while
+   (<DATA>)`: it planned 1 test instead of 559 and the one record it read was
+   perl's own Exporter.pm POD.  The quoted handle NAME stays in the emission;
+   it is #1176's (c), the handle model, and not this task's.
    Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
-  (setf (gethash 'DATA *p-filehandles*) (make-string-input-stream text))
+  (setf (gethash handle *p-filehandles*) (make-string-input-stream text))
   t)
 
 ;; The stream most recently read by readline/<FH>.  Perl's argument-less `eof`
