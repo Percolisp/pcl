@@ -122,7 +122,7 @@
    #:p-sin #:p-cos #:p-atan2 #:p-exp #:p-log #:p-sqrt #:p-rand #:p-srand
    ;; String
    #:p-. #:p-str-x #:p-list-x #:p-length #:p-substr #:p-lc #:p-uc #:p-fc #:p-quotemeta
-   #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat
+   #:p-chomp #:p-chop #:p-index #:p-rindex #:p-string-concat #:p-literal-string
    #:p-chr #:p-ord #:p-hex #:p-oct #:p-lcfirst #:p-ucfirst #:p-sprintf #:p-printf #:p-crypt
    #:p-version-string
    #:p-pos
@@ -169,7 +169,7 @@
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
    ;; the local-push fast path (task #996 A3) — emitted, so exported
    #:%p-push1
-   #:p-check-arity #:p-sig-rest-array #:p-sig-rest-hash
+   #:p-check-arity #:p-arg-supplied-p #:p-sig-rest-array #:p-sig-rest-hash
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
    ;; Control flow
@@ -189,7 +189,7 @@
    #:p-exception #:p-exception-object
    ;; File I/O
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
-   #:p-binmode #:p-read #:p-sysread #:p-syswrite
+   #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
    #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
@@ -229,7 +229,7 @@
    #:p-alias-scalar-target #:p-alias-array-target #:p-alias-hash-target
    #:p-alias-code-target #:p-alias-hash-slot #:p-alias-array-slot
    #:p-alias-array-elements
-   #:p-backslash #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
+   #:p-backslash #:p-backslash-sub #:p-backslash-sub-ref #:p-backslash-list #:p-arylen-ref #:p-substr-ref #:p-pos-ref #:p-vec-ref #:p-substr-lvalue-cell #:p-pos-lvalue-cell #:p-vec-lvalue-cell #:p-arylen-lvalue-cell #:p-refgen-list #:p-vector-append #:p-box-for-local #:p-get-coderef #:p-ref #:p-reftype #:p-scalar #:p-wantarray #:p-caller #:p-prototype #:p-__pcl_set_prototype
    ;; Typeglob support
    #:p-typeglob #:p-typeglob-p #:make-p-typeglob
    #:p-typeglob-package #:p-typeglob-name
@@ -3992,6 +3992,24 @@
 (defun %pcl-dot-overloaded-p (v)
   "True when V is a box whose class registers a '.' overload handler."
   (and (p-box-p v) (p-find-overload v ".") t))
+
+(defun p-literal-string (&rest parts)
+  "A STRING LITERAL the emitted CL source cannot hold verbatim.  Each part is
+   either a PIECE of the string, or a CODE POINT as an INTEGER — a surrogate
+   (U+D800-DFFF) or a non-character (U+FFFE/U+FFFF at any plane), which a
+   UTF-8 source file may not contain.  Rebuilding the string here is what
+   keeps those code points out of the file.
+
+   It exists because the alternative was four CL host names and a quoted host
+   TYPE designator in the IR — `(concatenate 'string (string (code-char
+   55296)) …)` — which is task #1175's family 3 and, for the `'string`, one of
+   #1176's three meanings of a quoted symbol.  A code point ABOVE U+10FFFF is
+   NOT a part here: no CL character holds it, so the emitter writes a
+   `p-unrepresentable-char` form, which dies where the value would be used.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (apply #'concatenate 'string
+         (mapcar (lambda (p) (if (integerp p) (string (code-char p)) p))
+                 parts)))
 
 (defun p-string-concat (&rest args)
   "Perl string concatenation for string interpolation (\"$a $b\").
@@ -9642,6 +9660,16 @@ create the key on a read-only call, which perl does not."
     ((and hash-start (> got hash-start) (oddp (- got hash-start)))
      (error "Odd name/value argument for subroutine '~A'" funcname))))
 
+(defmacro p-arg-supplied-p (args index)
+  "Did the caller supply the INDEX'th positional argument?  This is the ONE
+   availability test a signature asks — an optional parameter's default and the
+   `local $G = …` default's wrapper both used to spell it `(> (length @_) N)`
+   inline, which put CL's `>` in the IR as a head (task #1175, family 2: 86
+   occurrences in perl-tests/signatures.t alone).  A MACRO, so the emission
+   costs exactly what the inline form cost.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  `(> (length ,args) ,index))
+
 (defun p-sig-rest-array (args start)
   "Slurpy @rest signature parameter: a fresh adjustable Perl array holding the
    flattened ARGS from index START onward."
@@ -12440,6 +12468,18 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 
 ;; Filehandle storage - maps symbols to CL streams
 (defvar *p-filehandles* (make-hash-table :test 'eq))
+
+(defun p-install-data-handle (text)
+  "Register a file's `__DATA__` / `__END__` section as the DATA filehandle,
+   TEXT being the section verbatim.  The emitter used to write the three
+   pieces of this out — `(setf (gethash 'DATA *p-filehandles*)
+   (make-string-input-stream …))` — which put a CL stream constructor in the
+   IR (task #1175, family 4; 44 of perl's own t/ files carry it) and a quoted
+   symbol standing for a HANDLE NAME (#1176).  Both are gone by naming the
+   operation instead of spelling it.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (setf (gethash 'DATA *p-filehandles*) (make-string-input-stream text))
+  t)
 
 ;; The stream most recently read by readline/<FH>.  Perl's argument-less `eof`
 ;; (and `eof` inside a `while (<FH>)` loop) tests "the last file read", not
@@ -17944,6 +17984,19 @@ buffer's fill-pointer; everything else falls back to file-length."
    Reading returns the element value (p-vec); writing stores it (p-vec-set).
    STR must be a box; OFFSET/BITS are fixed at refgen time."
   (p-backslash (p-vec-lvalue-cell str offset bits)))
+
+(defmacro p-vector-append (dest src)
+  "Push every element of the vector SRC onto the adjustable vector DEST.
+   The spread half of a `\\(LIST)` refgen over more than one element: the
+   emitter used to write CL's `loop` macro out with its `for` / `across` / `do`
+   keywords, and `loop` is the one CL macro whose body is a language of its own
+   — the single worst thing to leave in the IR for a backend to parse (task
+   #1175, family 5).  A MACRO, so the emission costs what the loop cost; SRC is
+   bound once, so an expression argument is not re-evaluated.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
+  (let ((x (gensym "PCL-VA-")) (v (gensym "PCL-VS-")))
+    `(let ((,v ,src))
+       (loop for ,x across ,v do (vector-push-extend ,x ,dest)))))
 
 (defun p-refgen-list (val)
   "Perl \\(LIST) — distribute reference generation over list elements.

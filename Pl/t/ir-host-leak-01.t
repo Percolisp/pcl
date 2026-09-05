@@ -49,10 +49,14 @@ my $tmp = tempdir(CLEANUP => 1);
 # `op:` is a symbol in OPERATOR position (the host is asked to CALL it);
 # `quoted:` is a quoted symbol (the runtime dispatches on it).
 my @CASES = (
+  # CLOSED s470bo (#1175 family 2): the availability test is `p-arg-supplied-p`
+  # now, so `op:>` left this set.  The row STAYS with an EMPTY expectation —
+  # that is what makes a re-opened family fail here instead of going unnoticed.
   { name => 'sigdefault',
-    why  => '#1175: the signature-default arity test emits CL `>` on `(length @_)`',
+    why  => '#1175 family 2, CLOSED s470bo: the signature-default arity test '
+          . 'is `p-arg-supplied-p`, not CL `>` on `(length @_)`',
     perl => "use feature 'signatures';\nno warnings;\nsub f (\$a = 222) { return \$a }\nprint f(), \"\\n\";\n",
-    leaks => ['op:>'] },
+    leaks => [] },
   # MEASURED: the trigger is the `use integer` PRAGMA, not `int()` — one
   # pragma emits nine bare CL operators plus a qualified runtime internal.
   { name => 'useinteger',
@@ -65,22 +69,31 @@ my @CASES = (
           . "my \$d = 5 ^ 3;\nmy \$e = ~5;\nprint \"\$x \$y \$b \$c \$d \$e\\n\";\n",
     leaks => ['op:*', 'op:logand', 'op:logior', 'op:lognot', 'op:logxor',
               'op:rem', 'op:truncate'] },
+  # CLOSED s470bo (#1175 family 3): one `p-literal-string` with the bad code
+  # points as INTEGER arguments; the `'string` type designator went with it.
   { name => 'wideescape',
-    why  => '#1175: a \\x{...} escape emits `concatenate`, `string`, `code-char` and the quoted type designator',
+    why  => '#1175 family 3, CLOSED s470bo: a \\x{...} escape is one '
+          . '`p-literal-string`, not `concatenate`/`string`/`code-char` and a '
+          . 'quoted host type designator',
     perl => "my \$s = \"\\x{d800}\\x{ffff}\";\nprint length(\$s), \"\\n\";\n",
-    leaks => ['op:code-char', 'op:concatenate', 'op:string', 'quoted:string'] },
+    leaks => [] },
   # MEASURED, not guessed: `open \$scalar` does NOT reach this — the emitter
-  # writes the stream form only for the `__DATA__` handle's registration.
+  # wrote the stream form only for the `__DATA__` handle's registration.
+  # CLOSED s470bo (#1175 family 4): one `p-install-data-handle`, which also
+  # takes the quoted handle NAME out of the emission (#1176).
   { name => 'datahandle',
-    why  => '#1175: the __DATA__ handle emits CL `make-string-input-stream`',
+    why  => '#1175 family 4, CLOSED s470bo: the __DATA__ handle is '
+          . '`p-install-data-handle`, not CL `make-string-input-stream`',
     perl => "print \"x\\n\";\n__DATA__\nhello\n",
-    leaks => ['op:make-string-input-stream'] },
-  # MEASURED: `\\(1 .. 2)` alone does not reach it — the `loop` shape needs a
+    leaks => [] },
+  # MEASURED: `\\(1 .. 2)` alone does not reach it — the spread shape needs a
   # refgen over a LIST with more than one element (ref.t:367's own spelling).
+  # CLOSED s470bo (#1175 family 5): `p-vector-append`.
   { name => 'refgenlist',
-    why  => "#1175: \\(LIST) emits CL's `loop` macro",
+    why  => "#1175 family 5, CLOSED s470bo: \\(LIST)'s spread is "
+          . '`p-vector-append`, not CL\'s `loop` macro written out',
     perl => "my(\@fuu) = \\(1..2,3);\nprint scalar(\@fuu), \"\\n\";\n",
-    leaks => ['op:loop'] },
+    leaks => [] },
   { name => 'chaincmp',
     why  => '#1176: a chained comparison passes its operator as a bare quoted CL symbol',
     perl => "no warnings;\nmy \@a = (1, 2, 3);\nprint((\$a[0] < \$a[1] < \$a[2]) ? \"y\" : \"n\", \"\\n\");\n",

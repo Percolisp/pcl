@@ -4301,12 +4301,13 @@ sub _gen_backslash_multi_term_form {
   }
 
   my $result_var = "|--pcl-bsl-r$id--|";
-  my $iter_var   = "|--pcl-bsl-x$id--|";
   my @stmts;
   for my $part (@parts) {
     if ($part->[0] eq 'spread') {
-      push @stmts, ['loop', 'for', $iter_var, 'across', $part->[1],
-                    'do', ['vector-push-extend', $iter_var, $result_var]];
+      # `p-vector-append` and not CL's `loop` written out: `loop`'s body is a
+      # language of its own and the worst thing to leave in the IR (#1175,
+      # family 5).  The macro binds its source once and needs no iter var.
+      push @stmts, ['p-vector-append', $result_var, $part->[1]];
     } else {
       push @stmts, ['vector-push-extend', $part->[1], $result_var];
     }
@@ -5314,13 +5315,20 @@ sub _cl_string_literal_form {
       $content = substr($content, length($1));
     } else {
       my $cp = ord(substr($content, 0, 1));
+      # A bad code point is a bare INTEGER part: `p-literal-string` reads an
+      # integer as a code point and a string as a piece.  The old spelling,
+      # ['string', ['code-char', N]] inside a ['concatenate', "'string", …],
+      # put four CL host names AND a quoted host type designator in the IR
+      # (#1175 family 3; the `'string` is also one of #1176's three meanings).
       push @parts, $cp > MAX_CL_CODEPOINT
         ? ['p-unrepresentable-char', $cp]
-        : ['string', ['code-char', $cp]];
+        : $cp;
       $content = substr($content, 1);
     }
   }
-  return @parts == 1 ? $parts[0] : ['concatenate', "'string", @parts];
+  return @parts == 1 && !ref($parts[0]) && $parts[0] =~ /\A"/
+         ? $parts[0]
+         : ['p-literal-string', @parts];
 }
 
 

@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 22;
+plan tests => 26;
 
 sub run_cl {
     my ($code) = @_;
@@ -293,5 +293,35 @@ printf "hash=%d aryref=%d sub=%d env=%d true=%d\n",
   (defined(exists &nope)             ? 1 : 0),
   (defined(exists $ENV{NO_SUCH_XYZ}) ? 1 : 0),
   ((exists $h{a} && exists $a[0] && exists &have) ? 1 : 0);
+PL
+
+# ── #1175: four host-leak families become four named ops ──────────────────
+# `Pl/t/ir-host-leak-01.t` is the SHAPE guard (each family's fixture now
+# leaks the empty set).  These are the VALUE guards: the whole point of the
+# rename is that nothing observable changes, so each row asserts perl's answer
+# for the construct whose emission moved.
+
+test_cl('#1175(2) a signature default still applies only when absent', <<'PL', "222 7\n");
+use feature 'signatures';
+no warnings;
+sub f ($a = 222) { return $a }
+print f(), " ", f(7), "\n";
+PL
+
+test_cl('#1175(3) a surrogate/non-character literal still has length 2', <<'PL', "2 55296 65535\n");
+my $s = "\x{d800}\x{ffff}";
+printf "%d %d %d\n", length($s), ord(substr($s,0,1)), ord(substr($s,1,1));
+PL
+
+test_cl('#1175(4) the __DATA__ handle still reads its section', <<'PL', "[alpha]\n[beta]\n");
+while (my $l = <DATA>) { chomp $l; print "[$l]\n"; }
+__DATA__
+alpha
+beta
+PL
+
+test_cl('#1175(5) \\(LIST) still spreads over a range plus an element', <<'PL', "3 123\n");
+my (@fuu) = \(1..2,3);
+print scalar(@fuu), " ", ${$fuu[0]}, ${$fuu[1]}, ${$fuu[2]}, "\n";
 PL
 

@@ -181,7 +181,7 @@ my %FAMILY;
                   p-chomp p-chop p-index p-rindex p-string-concat p-chr p-ord
                   p-hex p-oct p-lcfirst p-ucfirst p-sprintf p-crypt
                   p-version-string p-unrepresentable-char p-unparsable-quote
-                  p-join p-reverse)],
+                  p-join p-reverse p-literal-string)],
   'string-compare' => [qw(p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge
                           p-str-cmp)],
   'numeric-compare' => [qw(p-== p-!= p-< p-> p-<= p->= p-<=> p-chain-cmp)],
@@ -218,7 +218,8 @@ my %FAMILY;
                              p-values p-each p-grep p-map p-sort p-sort-get-fn
                              p-sort-named %p-sort-classic p-split p-copy-array
                              p-copy-hash p-scalar p-wantarray p-list-x)],
-  'signature' => [qw(p-check-arity p-sig-rest-array p-sig-rest-hash)],
+  'signature' => [qw(p-check-arity p-arg-supplied-p p-sig-rest-array
+                     p-sig-rest-hash)],
   'control-flow' => [qw(p-if p-unless p-while p-until p-do-while p-do-until
                         p-for p-foreach p-foreach-raw p-foreach-range
                         p-foreach-range-raw p-return p-return-empty p-tail-value
@@ -231,7 +232,7 @@ my %FAMILY;
   'io' => [qw(p-print p-say p-printf p-open p-sysopen p-close p-eof p-tell
               p-seek p-sysseek p-pipe p-select p-write p-binmode p-read
               p-sysread p-syswrite p-fileno p-fcntl p-getc p-readline
-              *p-filehandles* p-lock)],
+              *p-filehandles* p-lock p-install-data-handle)],
   'directory-io' => [qw(p-opendir p-readdir p-closedir p-rewinddir)],
   'socket' => [qw(p-socket p-socketpair p-bind p-connect p-listen p-accept
                   p-send p-recv p-shutdown p-getsockname p-getpeername
@@ -256,7 +257,7 @@ my %FAMILY;
   'refaliasing' => [qw(p-alias-scalar-target p-alias-array-target
                        p-alias-hash-target p-alias-code-target p-alias-hash-slot
                        p-alias-array-slot p-alias-array-elements)],
-  'reference' => [qw(p-backslash p-backslash-sub p-backslash-sub-ref
+  'reference' => [qw(p-vector-append p-backslash p-backslash-sub p-backslash-sub-ref
                      p-backslash-list p-arylen-ref p-substr-ref p-pos-ref
                      p-vec-ref p-substr-lvalue-cell p-pos-lvalue-cell
                      p-vec-lvalue-cell p-arylen-lvalue-cell p-refgen-list

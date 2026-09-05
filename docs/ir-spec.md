@@ -2866,17 +2866,17 @@ right.  Each is measured, not theoretical:
 
 A PCL-emitted file today also contains a handful of bare CL functions that
 reached the output through a v1 seam.  They are FILED, not fixed
-(`tools/ir-host-leak.pl` prints them; the corpus census is 38 distinct
-symbols):
+(`tools/ir-host-leak.pl` prints them; the corpus census is 31 distinct
+symbols after s470bo — see the closing list below the table):
 
 | family | symbols | where | task |
 |---|---|---|---|
-| CL arithmetic through a seam | `>` `-` `+` `*` `1+` `1-` `rem` `truncate` `eq` | the signature-default arity test (`(> (length @_) 0)`), negative literals, array-length arithmetic, and `use integer` | #1175 |
+| CL arithmetic through a seam | `-` `+` `*` `1+` `1-` `rem` `truncate` `eq` | negative literals, array-length arithmetic, and `use integer`.  `>` LEFT this row at s470bo: the signature-default arity test is `p-arg-supplied-p` now | #1175 |
 | CL bitwise | `logior` `logand` `logxor` `lognot` | `use integer`'s `& \| ^ ~` — `perl-tests/bop.t`, `lib/Math/BigInt/Calc.pm` | #1175 |
-| CL string building | `concatenate` `'string` `string` `code-char` `format` `intern` | `\x{…}` escapes, `tr///` ranges, `yadayada`'s message | #1175 |
-| CL streams | `make-string-input-stream` | the `__DATA__` handle's registration (measured: NOT `open $fh, '<', \$s`) | #1175 |
-| the `loop` macro | `loop`, with its `for` / `across` / `do` keywords | a `\(LIST)` refgen over more than one element | #1175 |
-| a quoted symbol is THREE things | `'>` `'==` (operator selectors) vs `'string` (a host type designator) vs `'start` `'label1` `'undef` `'of` (perl labels and bareword filehandles) — indistinguishable from the token | `p-chain-cmp`, `%p-loop-tag`, `p-readline`, `p-open` | #1176 |
+| CL string building | `format` `intern` | `yadayada`'s message, and `lc`'s symbol lookup.  `concatenate` `'string` `string` `code-char` LEFT this row at s470bo: a `\x{…}` escape and a `tr///` range are one `p-literal-string` with the bad code points as INTEGER arguments | #1175 |
+| ~~CL streams~~ | ~~`make-string-input-stream`~~ | **CLOSED s470bo**: the `__DATA__` handle's registration is `p-install-data-handle`, which takes the quoted handle NAME with it (measured: `open $fh, '<', \$s` never reached this) | — |
+| ~~the `loop` macro~~ | ~~`loop`, with its `for` / `across` / `do` keywords~~ | **CLOSED s470bo**: a `\(LIST)` refgen's spread is `p-vector-append` | — |
+| a quoted symbol is TWO things (was three) | `'>` `'==` (operator selectors) vs `'start` `'label1` `'undef` `'of` (perl labels and bareword filehandles) — indistinguishable from the token | `p-chain-cmp`, `%p-loop-tag`, `p-readline`, `p-open`.  The third meaning, the host TYPE designator `'string`, is gone with `p-literal-string` (s470bo) | #1176 |
 | ~~runtime INTERNALS the emitter writes package-qualified~~ | ~~`pcl::%pcl-to-integer` `pcl::%pcl-super-indirect` `pcl::%pcl-local-errno-init` `pcl::%pcl-loop-tag` `pcl::p-qr`~~ | **CLOSED s470bo (#1177)**: all five are EXPORTS now, so §10a's generated inventory has a row for each and `tools/ir-host-leak.pl` needs no per-name exception.  The emitter still writes them qualified — nothing about the emission changed; what changed is that the port list is complete by construction | — |
 
 Until they are closed, a backend either implements those host functions or
@@ -2884,13 +2884,22 @@ refuses the files that contain them; the census says which files those are.
 The corpus measurement at s470bm: **38 distinct leaked symbols over 111
 files**, and `lib/**` adds none (its only leaks are `use integer`'s, in
 `lib/Math/BigInt/Calc.pm`).  Re-measured at s470bo on the MERGED tree, which
-is the number to compare against from now on: **41 distinct before, 38 after**
-#1177 — the three that left are exactly `op:pcl::%pcl-to-integer`,
-`op:pcl::%pcl-super-indirect` and `op:pcl::%pcl-local-errno-init` (the other
-two of the five, `%pcl-loop-tag` and `p-qr`, were never counted: the tool
-carried a hard-coded exception for them, which is gone with them).  #1179
-removed a 42nd, `op:-norequire::plc--norequire`, which the perl-suite
-population showed and this one does not.
+is the number to compare against from now on: **41 distinct before, 31 after**.
+The ten that left, in the order they were closed:
+
+* #1177 — `pcl::%pcl-to-integer`, `pcl::%pcl-super-indirect`,
+  `pcl::%pcl-local-errno-init` (the other two of that five, `%pcl-loop-tag`
+  and `p-qr`, were never counted: the tool carried a hard-coded exception for
+  them, gone with them);
+* #1175 family 2 — `>`;
+* #1175 family 3 — `concatenate`, `'string`, `string`, `code-char`;
+* #1175 family 4 — `make-string-input-stream`;
+* #1175 family 5 — `loop`.
+
+#1179 removed an eleventh, `op:-norequire::plc--norequire`, which the
+perl-suite population showed and this one does not.  `Pl/t/ir-host-leak-01.t`
+keeps a row per closed family with an EMPTY expected set, so a re-opened
+family fails a gate row rather than going unnoticed.
 
 ## 12. Worked example
 

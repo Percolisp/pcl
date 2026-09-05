@@ -2357,8 +2357,10 @@ sub _process_element {
     $data =~ s/"/\\"/g;
     $self->_with_bucket('preamble', sub {
       $self->_emit(";; $ref — register DATA filehandle");
-      $self->_emit("(setf (gethash 'DATA *p-filehandles*)");
-      $self->_emit("  (make-string-input-stream \"$data\"))");
+      # ONE named op, not the three pieces spelled out: the old emission put a
+      # CL stream constructor and a quoted HANDLE-NAME symbol in the IR
+      # (#1175 family 4, #1176).
+      $self->_emit("(p-install-data-handle \"$data\")");
     });
     return;
   }
@@ -8372,7 +8374,9 @@ sub _process_sub_statement {
       # supplied arg is undef; `||=` also when it is false.  The `and` short-
       # circuits so an absent arg never indexes past @_.
       my $op    = $p->{default_op} // '=';
-      my $avail = "(> (length \@_) $idx)";
+      # `p-arg-supplied-p` and not `(> (length @_) N)` — the availability test
+      # is named so CL's `>` stops being a head in the IR (#1175, family 2).
+      my $avail = "(p-arg-supplied-p \@_ $idx)";
       my $cond  = $op eq '//=' ? "(and $avail (%pcl-definedp (aref \@_ $idx)))"
                 : $op eq '||=' ? "(and $avail (p-true-p (aref \@_ $idx)))"
                 :                $avail;
@@ -8397,7 +8401,8 @@ sub _process_sub_statement {
     # arg was supplied the default did not run, so $G is rebound to itself (a
     # no-op rebinding that restores to the same box).  See spec §4.2.
     for my $lw (@local_wraps) {
-      $self->_emit("(let (($lw->{var} (if (> (length \@_) $lw->{idx}) $lw->{var}"
+      $self->_emit("(let (($lw->{var} (if (p-arg-supplied-p \@_ $lw->{idx})"
+                 . " $lw->{var}"
                  . " (p-box-for-local (unbox $lw->{name})))))");
       $self->indent_level($self->indent_level + 1);
       $sig_wrap_closes++;
