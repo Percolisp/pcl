@@ -2,6 +2,122 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bi (Opus agent, 2026-09-05) — the s469bi correctness pool finished: #1045, #1084, #1020, #1083, #1022(a) — plus a MAIN-BREAKING emission bug (#1118) and a cache-key collision found on the way
+
+RELAUNCH of the stopped s469bi in its kept worktree.  Its uncommitted 8-file
+diff was WIP-committed, rebased onto main, split into the two intended
+commits, and the pool then finished.  Seven commits, `main..HEAD` = 7.
+
+**#1045 — a `goto` in a sub body makes the sub context-SENSITIVE.**
+`_sub_return_facts`, the oracle behind the Kind-A `insensitive-call` gate,
+looked only at `return` statements, so a body whose exit is `goto &NAME`
+looked like a body with no exits at all — provably insensitive — and the call
+site dropped its context bind.  Two silent wrongs, both now identical to perl
+on the default emission and under `PCL_OPT=none`: `"@{[ rgoto() ]}"` gave `3`
+(the COUNT) where perl gives `7 8 9`, and `scalar(gw())` gave `L` where perl
+gives `S`.  Every `goto` counts, not only the `&`-forms: `goto &NAME` REPLACES
+the frame (the target runs in this sub's CALLER's context, which is why
+`p-goto-sub` restores `*wantarray*`) and `goto LABEL` can land anywhere.  The
+verdict is the one an unknown callee already gets — routed, not invented.
+
+**#1084 — `do FILE` reads a file as SOURCE, the way `require` does.**  TWO
+independent silent defects, and ONE U+2019 in a COMMENT hit both.  `p-do`
+sized its buffer with FILE-LENGTH (octets) but filled it with DECODED
+characters and DISCARDED `read-sequence`'s count, so any multi-byte character
+left junk past the end of the text and PPI failed to tokenize it — `do
+"./f.pl"` died where `require` and `pl2cl` on the same file are fine
+(t/op/closure.t:721 is the pay-off row).  And the read used the DEFAULT
+external format, which decodes UTF-8, where perl reads source as OCTETS and
+lets `use utf8` decide.  New `%p-read-source-octets` (latin-1, honours the
+count).  The compiler half: `_maybe_decode_utf8` guarded on
+`!utf8::is_utf8($src)` — a question about perl's INTERNAL REPRESENTATION —
+and source arriving over the `pl2cl --server` pipe is FLAGGED while still
+holding one character per octet, so a `use utf8` file read as octets was never
+decoded.  `utf8::downgrade($copy, 1)` asks the real question.  All three
+spellings now agree with perl and with each other.
+
+**#1118 — a p-sub FACTS PLIST is not a p-let DECLARATION ENTRY.**  Found while
+explaining an emission A/B; PRE-EXISTING on main since #1035 step 3 (s469bg)
+and a HARD breakage.  `CLForm::to_string`'s declaration-entry layout is
+shape-keyed on "an atom, then a keyword atom", which `(:returns :str …)`
+matches exactly; claimed as an entry, the plist's tail went through `join`,
+and `:captures`'s ARRAY REF was stringified into the emitted CL as
+`ARRAY(0x…)`.  Non-deterministic output (main differs from itself), an
+ODD-LENGTH plist, and death at LOAD in `%p-check-facts` — measured casualties
+on main: `t/op/try.t`, `t/opbasic/concat.t`, cpan YAML::Tiny and
+Test::Tester::Capture, a whole file each.  One added conjunct (an entry's
+first element is a NAME, never a keyword) plus a plist layout that breaks
+between PAIRS.
+
+**#1020 — `undef *GLOB` clears every slot; it cleared NOTHING.**  `p-undef`
+handed `p-glob-undef-name` the CL package NAME ("MAIN"), which the callee
+case-INVERTED to "main", found no such package, and its `(when pkg …)`
+swallowed the whole body — a silent no-op for every glob in every package.
+Two further defects behind it: the CODE slot never removed the
+*p-declared-subs* entry (`defined &c` stayed true) and the IO slot was not
+touched.  The three clear halves come OUT of the `%p-glob-copy-*-slot` helpers
+as `%p-glob-clear-{var,code,io}-slot` so `undef` and the clear half of
+`*A = *B` share ONE reading (#602's rule), taking the PACKAGE OBJECT and the
+already-inverted name.  Every VALUE spelling is now byte-identical to perl,
+including `print FH` after `undef *FH` returning undef with EBADF; only the
+INTROSPECTION spelling diverges (perl REMOVES the aggregate slot, PCL empties
+it) — filed as **#1117**, which inherits perl-tests/sub.t row 24's cause.
+
+**#1083 — a sub that can COMPILE PERL AT RUN TIME is cloned per evaluation.**
+perl re-uses one CV for a `sub {…}` and clones only when PL_cv_has_eval is set.
+PCL answered `same` to all nine measured shapes — and got the six `same` ones
+right BY ACCIDENT (SBCL hoists a lambda with no free lexical into a constant),
+which is exactly why it missed the three `different` ones.  A classifier beside
+the anon-sub lowering asks the three events (a string `eval`; `s///ee`, counted
+from the trailing modifier letters because PPI collapses `ee` to `e => 1`; and
+`use re 'eval'` in force AND a runtime-built pattern — BOTH required), and the
+runtime's `p-cloned-sub` wraps the lambda.  A NESTED sub is NOT excluded, and
+that is measured: `sub { sub { my $q = sub { eval "1" }; 2 } }` is DIFFERENT in
+perl.  The obvious cheap alternative does not work — SBCL deletes a reference
+whose value is discarded and hoists the lambda again (measured).
+
+**#1022 half (a) — a bare `last`/`next`/`redo` with no lexical loop is LOUD**
+(the Fable ruling of s470).  It was a silent wrong in one spelling (`for` ran
+to completion, n=303 where perl says 1) and an SBCL compile error in the other.
+It now dies at run time, at its own site, trappably, naming the sub; a bare
+exit with no loop anywhere keeps perl's own text.  ONE document walk, ONE
+emission site, the verdict riding the token through `@PPI_ADHOC_KEYS`.  Two
+of the "what is a loop" answers came from the emission A/B rather than from a
+probe: a C-style `for` is PPI type `for` (missing it would have killed my.t and
+time.t), and **a `for`/`foreach` STATEMENT MODIFIER is a loop with no Compound
+around it — core Exporter.pm's `import` is written that way on purpose, so
+marking it would have made every `use` die**.  A `while` modifier is NOT a
+loop (probed: perl says `Can't "last" outside a loop block`).
+**MEASURED COST, deliberately left for Fable to rule on: perl-tests/loopctl.t
+OK 63/1 -> PARTIAL 40/0 (23 rows), op/loopctl.t -23, op/rt119311.t -3.**  The
+baselines are NOT edited and the commit is separate so it can be held.
+
+**Two infrastructure findings, both costly.**  The session's assigned
+generation string v2-690 was POISONED by its own stopped predecessor (entries
+written by a compiler predating #1035's facts plist killed the first gate at
+"unknown fact key p-args-body"); v2-700, the escape, turned out to be a
+SIBLING WORKTREE's string, and a gate row then died on a `File::Path` cache
+entry containing a function that exists nowhere in this tree.  Generation is **v2-710** at the
+final rebase (v2-712 in the commit that made the jump; renumbered above main's
+v2-700 on Fable's instruction), and the module cache's hand-maintained
+key is filed as **#1119** (the saved-CORE cache has been content-keyed since
+s439 and is immune).
+
+Filed: #1115 (PCL's `open` decodes UTF-8 by default where perl reads bytes —
+srclen 101 vs 107), #1116 (`do FILE` does not populate %INC), #1117, #1118
+(fixed), #1119, #1120 (`s///ee` behaves as `s///e`).
+
+Bars, all on the tree rebased onto main `e73038f`: gate **Files=202,
+Tests=6853** with only the 13 pclxs xs rows failing; corpus-diff **7 of 111**
+with silent drops 5 unchanged, every file attributed; emission-ab over **1048**
+files (lib shims + perl 5.40.3's t/ + the CPAN board) **SAME 1003 / DIFF 45 /
+RCDIFF 0**, every DIFF classified BY MECHANISM (15 #1045, 13 #1083, 1 both, 2
+#1022, 14 the #1118 pair-layout — byte-identical once whitespace is
+normalised); the body-comparing artifact-staleness row (#1072) green.  Every
+guard inverse-verified against main.  Generation **v2-710**.  No full sweep and
+no `--all` companion — Fable's legs, and #1022(a) needs a ruling before they
+can be clean.
+
 ## Session 470a5 (Opus agent, 2026-09-05) — #996 half A5: the classic sort comparators; `classic-sort` is the optimization registry's first Kind-B pass; sortnum 7.4× → 3.2×, sortstr 3.5× → 1.9×
 
 **What shipped.**  `sort LIST` and the four classic comparator blocks
