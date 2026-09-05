@@ -567,6 +567,78 @@ The remaining +2 need the full sweep re-run and a per-file diff of
 `_status.tsv` against `pass-baseline.tsv` — the next session's first step, and
 they are NOT blessed in the meantime.
 
+### Round 3 (2026-09-06) — the batch's own sweep re-run, the residual +2 placed, the ten stale registrations dropped, and the FIRST full companion run of the batch
+
+**The full sweep on `4afd8ec` is clean and, this time, re-verifiable.**
+`perl sweep-perl-tests.pl --jobs 4`: 0 new / 0 fixed / 0 LOST, drops census 5 =
+current 5, shortfall baseline 12277 = current 12277 (+0), **TOTAL passing
+18642 -> 18644 (+2)**, GATE clean.  The run's `.faillog` was COPIED to
+`scratch/s470br/faillog-4afd8ec/` before anything else touched it — round 2
+lost its own `_status.tsv` to a single-file re-measure and could not re-diff.
+
+**The +2 the previous commit could not place is ONE file.**  Diffing that run's
+`_status.tsv` against `baselines/pass-baseline.tsv` file by file gives exactly
+one mover: `postfixderef.t PARTIAL 100/21/128 -> PARTIAL 102/19/128`.  Measured
+on BOTH trees with `--jobs 1` — 100+21 on a `git archive 027ba9c` extraction
+(driven with `env -C`, the form that survives an agent thread's cwd reset) and
+102+19 on HEAD — and both stop at the SAME row, 121 of 128, so the file's
+`row-shortfall.tsv` entry stays 7 and needed no edit.  The two rows are 42
+"UTF8 representation is 3 chars" and 46 "Accessing via the UTF8 byte sequence
+still gives nothing", and their cause is **#1221**: `postfixderef.t:206` is
+`utf8::encode $name_utf8` on `chr 9787`, so the name is now 3 octets (row 42)
+and a DIFFERENT symbolic reference from the 1-character one (row 46).  Probed
+byte for byte — perl and HEAD both print `1/3/Face/undef`, the base prints
+`1/1/Face/Face` — so neither row passes on nothing.  Both left
+`fail-baseline.tsv` by EDIT; `pass-baseline.tsv` set to 102/19.  All 63 rows of
+the +63 are now attributed.
+
+**The ten `index.t` `:utf8` skip registrations were made STALE by #1221 and are
+gone.**  Verified before touching anything: `027ba9c` emits 0
+`# REGISTRY-STALE` lines for index.t, HEAD emits 10 — that diff IS the proof
+they are #1221's.  **No count moves, by construction**: `cl/pcl-test.lisp`
+emits a plain `ok` for a registered test that PASSES, so dropping a stale entry
+removes the diagnostic and nothing else (index.t is 120/0/0/120 before and
+after, and no baseline needed an index.t edit).  `chop.t`'s own stale entry is
+**PRE-EXISTING** — it reports stale on `027ba9c` too — and was left alone.  The
+docs that cited the ten, or the no-op they were registered against, were
+rewritten: `not-supported.md`'s `utf8::encode`/`utf8::decode` entry (simply
+false since #1221) is now **the per-scalar UTF-8 flag** (`utf8::is_utf8`, still
+always 1), the runbook's decision-tree pointer, `sweep-bug-catalog.md`'s
+index.t section + ranked row 6, and `questions.org`'s parenthetical.
+
+**THE FINDING: the batch's first full companion run has ONE REGRESSION, and it
+is #1115's.**  Round 1 ran only the `io/` and `uni/` legs and round 2 ran none,
+so `t/op/read.t` — which is in `t/op/` — was never measured: it goes **OK
+2116/0 -> DIFF 1852/264**, and every one of the 264 is a ` u` row of the file's
+read-into-buffer matrix.  Bisected in worktrees: 2116/0 at `027ba9c`,
+1852/264 at `3a89a5c` (#1115 + its review fixes, ONLY), and unchanged through
+`24030f4` and `f01dcd6`.  Probed: **`binmode FH, "utf8"` — a layer name with NO
+leading colon, which perl accepts — is not recognised**, so the handle stays a
+byte handle; perl reads back 5 characters for both spellings, PCL reads back 10
+UTF-8 octets for the colon-less one and says "Wide character in print" on the
+write side.  Before #1115 it passed for the wrong reason (binmode was a no-op
+AND the default was UTF-8).  Filed as **#1224** with the bisection, the probe
+and a fix sketch; NOT fixed here (the round-3 work order forbade touching
+`cl/`).  This is exactly the class the DECIDED s470 rule "the merge-time sweep
+is NON-NEGOTIABLE for `cl/` work" exists for.
+
+The rest of the companion run was attributed the same way, every claim measured
+on the base: two more one-row losses that ARE the batch's (io/open.t 154/34 ->
+153/35, run/switchC.t 4/11 -> 3/12), one shape change (uni/method.t 28/21 ->
+31/30 — it aborts later, so 12 more rows and +3 passing), the gains
+(op/chop.t +48, op/index.t +10, op/ref.t +2, op/postfixderef.t +2 — all #1221;
+io/perlio.t 22/0 DIFF -> 46/2 OK and op/print.t 2/1 -> 3/0 — #1115), and a set
+of "movers" that are **not the batch at all** because the SNAPSHOT is stale:
+op/multideref.t, io/perlio_open.t, op/magic.t, op/rt119311.t, run/fresh_perl.t
+(the "0 -> 91 NEW shortfall") and mro/method_caching.t all read IDENTICALLY on
+`027ba9c`.  `baselines/perl-suite-run.tsv` was deliberately NOT spliced: none
+of it is the registry commit's, and splicing it there would launder #1224 into
+the baseline.
+
+Bars for round 3: gate `tools/prove-core` **210 files / 7144 tests** twice
+(before and after the registry edit), green except the 13 standing pclxs xs
+rows; the full sweep twice, identical in every bucket; `check-parens` balanced.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
