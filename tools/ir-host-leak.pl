@@ -55,10 +55,12 @@ use Getopt::Long;
 my $root = "$RealBin/..";
 my ($list_file, $module_mode, $unclassified, $jobs, $quiet)
   = (undef, 0, 0, 8, 0);
+my $help = 0;
 GetOptions('list=s' => \$list_file, 'module' => \$module_mode,
            'unclassified' => \$unclassified, 'jobs=i' => \$jobs,
-           'quiet' => \$quiet)
+           'quiet' => \$quiet, 'help' => \$help)
   or die usage();
+if ($help) { print usage(); exit 0 }
 sub usage {
   return <<'U';
 usage: tools/ir-host-leak.pl [options] [FILE...]
@@ -67,6 +69,7 @@ usage: tools/ir-host-leak.pl [options] [FILE...]
   --unclassified    print the unknown-token census instead of the leak report
   --jobs N          parallel transpiles (default 8)
   --quiet           only the verdict line
+  --help            this message
   default input: perl-tests/*.t (corpus-diff's 111 files)
 U
 }

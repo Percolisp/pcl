@@ -65,10 +65,13 @@ binmode(STDERR, ':encoding(UTF-8)');
 my $root = "$RealBin/..";
 my ($out_tsv, $out_md, $quiet) = ("$root/docs/ir-op-inventory.tsv",
                                   "$root/docs/ir-op-inventory.md", 0);
-GetOptions('out-tsv=s' => \$out_tsv, 'out-md=s' => \$out_md, 'quiet' => \$quiet)
+my $help = 0;
+GetOptions('out-tsv=s' => \$out_tsv, 'out-md=s' => \$out_md, 'quiet' => \$quiet,
+           'help' => \$help)
   or die usage();
+if ($help) { print usage(); exit 0 }
 sub usage {
-  return "usage: tools/ir-inventory.pl [--out-tsv PATH] [--out-md PATH] [--quiet]\n"
+  return "usage: tools/ir-inventory.pl [--out-tsv PATH] [--out-md PATH] [--quiet] [--help]\n"
        . "  regenerates docs/ir-op-inventory.tsv and .md from the loaded runtime\n";
 }
 
@@ -106,7 +109,11 @@ my %FAMILY_META = (
   'numeric-compare'     => { spec => 'numeric compare' },
   'string'              => { spec => 'string ops' },
   'string-compare'      => { spec => 'string compare' },
-  'logical'             => { spec => 'logical' },
+  'logical'             => { spec => 'logical',
+    note => "The row named `p-` IS perl's `||`: the runtime writes it `p-||`, "
+          . "and the CL reader takes the `||` as an EMPTY multiple-escape "
+          . "section, so the symbol's name is `P-` (probed s470bm).  A "
+          . "text-parsing backend must fold `p-||` and `p-` — ir-spec §11b." },
   'assignment'          => { spec => 'assignment' },
   'compound-assignment' => { spec => 'compound assignment' },
   'increment'           => { spec => 'increment' },
@@ -702,6 +709,9 @@ HDR
       if ($meta->{spec}) {
         print {$fh} "ir-spec §10 row **$meta->{spec}** — "
           . ($SPEC10_RULE{$f} // '(rule not quoted here)') . "\n\n";
+        # A §10 family may ALSO carry a note; the one that does is `logical`,
+        # whose `p-` row is unreadable without it.
+        print {$fh} "$meta->{note}\n\n" if $meta->{note};
       }
       elsif ($meta->{note}) {
         print {$fh} "*No ir-spec §10 row.*  $meta->{note}\n\n";

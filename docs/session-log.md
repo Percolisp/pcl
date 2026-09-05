@@ -2,6 +2,175 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bm (Opus agent, 2026-09-05) — Part B instruments B1 + B2 + B4: the op inventory as DATA, the per-program manifest, the host-leak census
+
+Two product commits.  Nothing here changes the default emission —
+`tools/corpus-diff.pl ee9a658` reads IDENTICAL over 111 files and the 6
+shapes, the generation does not move (v2-720), and every new output is behind
+a flag or in a tool.  The one `cl/pcl-runtime.lisp` change is docstring TEXT,
+verified line by line.
+
+### B1 — the op inventory as GENERATED data (#1170)
+
+`tools/ir-inventory.pl` writes `docs/ir-op-inventory.tsv` (682 rows, one per
+`:pcl` export — the IR's whole vocabulary) and `docs/ir-op-inventory.md` (the
+same grouped by family, with ir-spec §10's rule quoted per family).  53
+families: **19 are §10 rows, 34 are families §10 has no row for** — that count
+is the measurement saying which rows §10 still owes.  0 UNCLASSIFIED.
+
+**The generator reads the LOADED runtime, not the source text, and that is not
+an implementation detail.**  `p-+`, `p-*`, the six numeric compares, the six
+string compares and the compound-assignment family have NO textual `(defun`
+anywhere: they are expansions of `%def-overloaded-arith` /
+`%def-overloaded-cmp` / `%def-overloaded-str-cmp`.  A text scan silently
+misses 20+ of the most-used ops in the IR — exactly the hole an inventory
+exists to close.  Cost: one SBCL start on the cached core.
+
+**The `Contract:` docstring tail** (normative, ir-spec §10a) is the extension
+point: a final paragraph `Contract: ctx= coerce= magic= dies= dynamic= phase=
+host=`, seven keys with CLOSED value sets.  An unknown key or value DIES, and
+so does a PARTIAL tail — absent must never read as a default, which is the
+rule everywhere else in that document.  Seeded on **55 ops** (numeric,
+numeric-compare, string, string-compare, elements): 41 by script into
+docstrings (each of the 41 changed lines verified to reappear as itself minus
+its closing quote, plus one Contract line) and 3 definer-macro format strings,
+which is what covers the 14 macro-generated ops.
+
+**The tail states the op's PERL contract.**  Where the implementation diverges
+that is a bug, not a weaker contract — `p-%` carries `dies=yes` and the NaN
+PCL answers today is #1173.
+
+Findings the inventory produced on its own:
+
+* **16 names ir-spec §10 CITES do not exist** — `p-&` `p-|` `p-^` `p-~` `p-x`
+  `p-eq`…`p-cmp` `p-++` `p----` `p-++-post` `p----post`: Perl-facing
+  spellings, not runtime names.  Two more exist but are INTERNAL:
+  `%p-empty-list` (a runtime helper the §10 regex row cites as if it were
+  emitted — it never is) and `p-qr` (emitted package-QUALIFIED).  The tool
+  reports the two classes apart.
+* **`p-||` and `p-` are the SAME symbol** (probed): `||` is an empty
+  multiple-escape section, so the symbol's name is `P-`.  A backend that
+  matches operator names textually must fold them; ir-spec §11b states it.
+* **27 exports have no definition** — 25 TAP names, MEASURED from
+  `cl/pcl-test.lisp` rather than listed, plus `%_args` (a lambda-list name)
+  and `p-backslash-list` (a place marker `p-setf`'s expansion matches on).
+  Anything else undefined DIES naming itself.
+
+Gate row `Pl/t/ir-inventory-01.t` (25 rows, **280 ms**): regenerate into a
+temp dir with the documented tool and compare the body — the #1072 pattern —
+plus shape assertions so an empty file cannot pass vacuously.
+
+### B2 — the per-program manifest, `pl2cl --manifest` (#1171)
+
+JSON with `uses` / `uses_other` / `needs` / `facts` plus provenance
+(`file`, `mode`, `generation`, `manifest_version`, `text_scanned`).  Normative
+in ir-spec §10b.
+
+**The ONE walk** is `Pl::Passes::run` — the place every top-level form already
+passes on its way to text.  The collector hangs off it as an OBSERVER whose
+return value is discarded, installed through `set_form_hook`/`set_text_hook`
+so that neither `Pl::Passes` nor `Pl::Parser2` gains a compile-time dependency
+on a flag-only module; with no hook installed each site is one scalar test.
+The two v1-TEXT buckets (`captured`, `sched`) never become trees, so they are
+regex-scanned and the manifest SAYS SO (`text_scanned`), rather than quietly
+under-counting.
+
+Two counts measured rather than assumed, both of which the first version got
+wrong:
+
+* two consecutive `my` STATEMENTS are **two** `p-let` forms, not one form with
+  two entries — each nests its own block remainder;
+* the `local` family is entirely v1 TEXT and has **two shapes**:
+  `(p-local-cell $g (p-box-for-local 2))`, where `p-box-for-local` is the
+  VALUE wrapper, and `(let (($/ (p-box-for-local ":")))`, where it is the
+  site's ONLY marker.  Counting both heads gave 6 sites for 5 `local`s;
+  counting only `p-local-*` gave 3.  The count is now (p-local-* heads) +
+  (p-box-for-local) − (the wraps), and `note_text` counts the wraps.
+
+Measured over four populations (summaries in the task and in
+`scratch/s470bm/manifests/`): the phase model and I/O are universal; **string
+eval is in half of perl-tests (55 of 111) and a third of perl's own t/ (205 of
+592), but only 14 of 287 CPAN dist files** — real CPAN test code is far more
+portable than perl's own suite; `local` + magic-global writes are in ~45 % of
+files, so the save/restore stack is not optional; `goto` is 5 corpus files,
+`formats` 0 in the corpus and 9 in perl's own, `xs` 0 everywhere — those three
+a backend can refuse cheaply.  The regex TIER is printed
+`tier: unclassified`, a DECLARED absence: the classifier is B5's.
+
+Guard `Pl/t/manifest-01.t` (43 rows, 1.7 s), including the drift guard that
+every op name the obligation table mentions exists in the generated inventory
+— the table is the manifest's own data (what machinery a TARGET needs), not
+§10's taxonomy (what an op IS), so it can drift and a renamed op would
+otherwise fall silently out of `needs`.
+
+### B4 — the host-leak census and the measured CL kernel (#1172)
+
+`tools/ir-host-leak.pl` scans emitted CL and reports every symbol that is
+neither a runtime export (read from B1's TSV, so the two instruments share ONE
+list), a whitelisted CL kernel form, a literal, nor a program identifier.
+**ir-spec §11b** is the measured whitelist — **100 names**, grouped, each with
+its JS and C rendering — plus the five READER rules a text-parsing backend
+needs (`|…|` verbatim; an EMPTY `||`; `#\c`; `#x`/`#o`/`#b` are NUMBERS; a
+string literal may hold a raw newline, tab or NUL).
+
+Three classifier decisions, each wrong first and measured now:
+
+* **POSITION matters.**  `(block start …)`'s `start` is a perl LABEL and is
+  the same SHAPE as a leaked CL function.  The scanner tracks four positions —
+  op / quoted / bind / arg — and only the first two are claims about the host.
+  Without it the census called 51 `_prev`, every `pcl-local-*` temp and every
+  loop label a leak.
+* **A HEADLESS list's first element is a BINDING NAME, not an operator**: a
+  list whose own first element is a list (`((x 1))`) is headless, which is
+  exactly the shape of every binding list, lambda list and plist the emitter
+  writes.  That is what took the compiler temps out.
+* **A `pcl::`-qualified token is NOT a program identifier.**  Treating it as
+  one (it looks package-qualified) hid a whole class — #1177.
+
+Census: perl-tests 111 files / 175,317 tokens → **38 distinct leaked symbols**;
+`lib/**.pm` adds only `use integer`'s; **perl's own t/, 592 files / 522,620
+tokens, added two REAL BUGS that no other instrument had**:
+
+* **#1178** — `ok((open my $fh, "+>", undef), …)` emits `(p-open (p-my $fh
+  "+>" …))`.  `p-my` does not exist (the runtime has `p-my-=`), SBCL fails to
+  compile the form and **the whole file dies at load**.  The plain spelling
+  `my $ok = open my $fh, …` is fine; it is the declaration inside a call
+  ARGUMENT that breaks.
+* **#1179** — `use parent qw( -norequire Foo )` makes `-norequire` a
+  SUPERCLASS: `@ISA` is `[-norequire Foo]` and `->isa("-norequire")` is true
+  (perl: `[Foo]`, false).  The comma spelling `use parent -norequire, "Foo"`
+  is handled correctly, so the qw() path does not strip the flag the comma
+  path strips.
+
+Gate row `Pl/t/ir-host-leak-01.t` (11 rows, **924 ms**): one minimal fixture
+per leak family asserting the EXACT set in both directions — a new symbol is a
+new leak, a missing one means the family closed — plus §11b's stated kernel
+size against the tool's `%KERNEL`.  The population census (~40 s over 111
+files) is a WHAT-TO-RUN-WHEN item, **not** a gate row: six real corpus files
+measured 8.4 s, more than a gate file may spend.
+
+### Filed, not fixed
+
+**#1173** (`5 % 0` answers NaN where perl DIES "Illegal modulus zero" — a
+silent wrong of rule 12's archetype kind; widened with `substr` past the end
+returning `""` and warning unconditionally, and `exists` on a non-ref scalar
+returning undef where perl gives `""`), **#1174** (`1/0` dies with SBCL's own
+text, "Operation was (/ 1 0)", where perl says "Illegal division by zero" —
+trappable either way, so the control flow is right and only the message
+leaks), **#1175** (the CL-function leak families, with each one's trigger
+probed to a fixture), **#1176** (a quoted symbol in the IR is three unrelated
+things — an operator selector, a host TYPE designator, and a perl
+label/filehandle NAME — and a consumer cannot tell them apart), **#1177**
+(five runtime internals emitted package-qualified and therefore invisible to
+the port list), **#1178**, **#1179**.
+
+### For Fable
+
+The population census belongs in CLAUDE.md's WHAT-TO-RUN-WHEN table (this
+agent may not edit that file): `tools/ir-host-leak.pl` on the `cl/**` row and
+the `Pl/**`-with-diffs row.  The recipe is in the tool's header and in
+ir-spec §11b.
+
 ## Session 470bk (Opus agent, 2026-09-05) — the correctness pool, round 26: the nested-element autoviv pair (#1058 + #1057) and four of the six overload-dispatch members (#1021, #1004, #1001(a) + #1005); BI's companion bless chore
 
 Six product commits, all RUNTIME-ONLY (`cl/pcl-runtime.lisp`), so corpus-diff

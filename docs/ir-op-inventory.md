@@ -306,6 +306,8 @@ ir-spec §10 row **I/O** — Perl builtins; bareword handles are symbols; `p-ope
 
 ir-spec §10 row **logical** — short-circuit macros returning operand values (§3.4)
 
+The row named `p-` IS perl's `||`: the runtime writes it `p-||`, and the CL reader takes the `||` as an EMPTY multiple-escape section, so the symbol's name is `P-` (probed s470bm).  A text-parsing backend must fold `p-||` and `p-` — ir-spec §11b.
+
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `p-` | macro | `(a b)` | — | — | — | — | — | — | — |
