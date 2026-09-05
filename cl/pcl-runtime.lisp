@@ -10727,7 +10727,12 @@ lexical exit when its walk out to the sub/file boundary met no loop.
 With a frame active, throw KIND to the innermost one: `catch`/`throw` picks
 the innermost dynamically enclosing loop, which is perl's own rule.  With no
 frame, perl's answer is a fatal error at the exit's own site, and this is its
-text — trappable by `eval`, like every other PCL die."
+text — trappable by `eval`, like every other PCL die.
+
+   `dynamic=yes` is the frame count it reads: a backend needs a save/restore
+   binding to answer \"is a loop frame active on this stack\", and `catch`
+   /`throw` are §11b kernel forms, so `host=none`.
+   Contract: ctx=insensitive coerce=none magic=none dies=yes dynamic=yes phase=no host=none"
   (unless (member kind '(:last :next :redo))
     (error "PCL: %p-dyn-loop-exit: unknown loop-control kind ~S" kind))
   (when (plusp *p-dyn-loop-frames*)
@@ -10833,7 +10838,12 @@ a fact about the construct, not a shortcut: a loop-once carries no state
 across iterations, so `redo` is simply a RESTART of FORM, and `next` and
 `last` both end the block.  FORM keeps its own `(block nil …)` — all three of
 _lower_bare_block's arms emit one — so every LEXICAL exit inside it stays a
-local transfer inside this catch."
+local transfer inside this catch.
+
+   The block's VALUE is FORM's, so nothing here observes context; `dies=no`
+   because the only `error` is a compiler self-inconsistency (rule 12), never a
+   Perl exception; `dynamic=yes` for the frame-count binding it establishes.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=yes phase=no host=none"
   (let ((drv (gensym "ONCE")) (out (gensym "ONCEOUT"))
         (val (gensym "VAL")) (mark (gensym "MARK")))
     `(block ,out

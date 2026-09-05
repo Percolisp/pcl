@@ -223,7 +223,8 @@ my %FAMILY;
                         p-for p-foreach p-foreach-raw p-foreach-range
                         p-foreach-range-raw p-return p-return-empty p-tail-value
                         p-goto-sub p-goto-computed p-last p-last-dynamic p-next
-                        p-redo p-continue p-break p-do)],
+                        p-redo p-continue p-break p-do
+                        p-dyn-once %p-dyn-loop-exit)],
   'exception' => [qw(p-eval p-eval-block p-eval-thunk p-eval-lex-lookup p-try
                      p-alias-eval-cell *p-eval-lex-alist* p-exception
                      p-exception-object p-die p-warn p-evalbytes)],

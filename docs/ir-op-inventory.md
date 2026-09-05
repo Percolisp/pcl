@@ -13,9 +13,9 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **682**
+* names exported: **684**
 * families: **19** with an ir-spec §10 rule, **34** without one
-* with a machine-readable `Contract:` tail: **55** of 682
+* with a machine-readable `Contract:` tail: **57** of 684
 * UNCLASSIFIED (no family rule matches): **0**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
@@ -467,17 +467,19 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-capture-write` | function | `(value)` | — | — | — | — | — | — | — |
 | `p-high-capture` | function | `(n)` | — | — | — | — | — | — | — |
 
-## control-flow (23)
+## control-flow (25)
 
 *No ir-spec §10 row.*  conditionals, loops, loop control, sub return — ir-spec §6
 
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
+| `%p-dyn-loop-exit` | function | `(kind)` | insensitive | none | none | yes | yes | no | none |
 | `p-break` | function | `nil` | — | — | — | — | — | — | — |
 | `p-continue` | function | `nil` | — | — | — | — | — | — | — |
 | `p-do` | function | `(filename-val)` | — | — | — | — | — | — | — |
 | `p-do-until` | macro | `(condition &body body)` | — | — | — | — | — | — | — |
 | `p-do-while` | macro | `(condition &body body)` | — | — | — | — | — | — | — |
+| `p-dyn-once` | macro | `(form)` | insensitive | none | none | no | yes | no | none |
 | `p-for` | macro | `((&optional init) (test) (&optional step) &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-foreach` | macro | `((var list) &rest body-and-keys)` | — | — | — | — | — | — | — |
 | `p-foreach-range` | macro | `((var from to) &rest body-and-keys)` | — | — | — | — | — | — | — |

@@ -2977,7 +2977,7 @@ result straight back in is not mistaken for a struct.
 `ioctl` is not implemented at all, for the same reason plus the absence of any
 constant table.
 
-## An unlabelled `last`/`next`/`redo` through an indirect call, or across compilation units
+## An unlabelled `last`/`next`/`redo` through an indirect call, a string eval, or across compilation units
 
 perl's unlabelled loop-control keywords act on the innermost **dynamically**
 enclosing loop, so a sub called from inside a loop can exit its CALLER's loop:
@@ -3000,8 +3000,10 @@ no dynamically enclosing loop keeps perl's own text,
 `Can't "last" outside a loop block`, trappably — which is also perl's answer
 for `do BLOCK while (…)` and for a `sort` comparator.
 
-What is **NOT** supported is below.  All of it is LOUD: the exit site dies with
-perl's text rather than exiting the wrong loop or doing nothing.
+What is **NOT** supported is below — an exit reached **through an indirect
+call, a string eval, or across compilation units**.  All of it is LOUD: the
+exit site dies with perl's text rather than exiting the wrong loop or doing
+nothing.
 
 **THE LICENCE IS REACHABILITY BY NAME, INSIDE ONE COMPILATION UNIT** (the
 #1162 ruling).  The compiler computes MAY-DYN-EXIT — the fixpoint over this
@@ -3014,9 +3016,12 @@ exit reached that way dies:
   computed method name (`$o->$m`), `&$code`, `goto &$code`;
 - a sub from **another compilation unit**: a `use`d module, a `require`d file;
 - a **string eval** (`eval q{last}`) — its code is compiled separately, so the
-  loop around the eval takes no frame.  The die lands in `$@` like any other,
-  and the loop then runs on: perl gives `n=1`, PCL `n=303` with
-  `$@` set.
+  loop around the eval takes no frame.  This is the one shape a working PCL
+  program is most likely to meet, and it is the one probe that moved when the
+  licence narrowed: the die lands in `$@` like any other die, and the loop then
+  runs on, so `for my $i (1..3) { $n++; eval q{last}; $n += 100 }` is `n=1` in
+  perl and `n=303` in PCL with `$@` set to
+  `Can't "last" outside a loop block`.  Guarded in `Pl/t/loop-exit-01.t`.
 
 The reason is measured, not stylistic: the frame's `catch` costs about 4.8 MB
 of SBCL **compile** IR, and `t/op/loopctl.t` — 89 loops in one 64 KB top-level
