@@ -540,6 +540,95 @@
       (t (eval `(define-symbol-macro ,sym (sb-ext:symbol-global-value ',sym)))
          sym))))
 
+;;; ── THE MODULE-FASL BUILD MODE (task #1188) ────────────────────────────
+;;; A module is cached as CL text and, since session 251, LOADED AS SOURCE on
+;;; every run — which means SBCL recompiles it every run (`use JSON::PP` cost
+;;; 6.4 s WARM, measured s470bn).  The reason it was not cached as a FASL is
+;;; the DOUBLE-EXECUTION bug (docs/module-double-exec-bug.md): compiling and
+;;; then loading in the SAME image runs a `sub NAME` install at BOTH passes,
+;;; and it runs a `BEGIN` block at the COMPILE pass only — so the load pass
+;;; re-installs the plain body OVER a BEGIN-time replacement whose idempotency
+;;; guard now skips, and the replacement is lost (Moo's deferred constructors:
+;;; empty attrs, `docs/module-double-exec-bug.md`'s GuardBoot repro).
+;;;
+;;; SO THE BUG IS AN ORDER, NOT A COUNT, and the fix is this flag — option C
+;;; of that doc done in the RUNTIME's macros instead of the transpiler, so the
+;;; emitted text does not change at all.  While *PCL-FASL-BUILD* is true —
+;;; bound around, and only around, the `compile-file` that builds a module's
+;;; cached fasl — the compile pass runs exactly the module forms that are
+;;; IDEMPOTENT, and every form that is not moves wholly into the fasl:
+;;;
+;;;   p-BEGIN        :compile+execute -> :load+execute   MOVES.  A BEGIN block
+;;;                  is the only module form that is arbitrary, ordered and
+;;;                  guarded; at the fasl's load it runs ONCE, in source order
+;;;                  with the declarations around it — which is exactly the
+;;;                  order the source-load path gives it today.
+;;;   p-sub          the LAMBDA INSTALL moves to load time; the compile pass
+;;;                  keeps only %p-reserve-sub-name (shadow + intern), which
+;;;                  the READER depends on (see that function).  So each body
+;;;                  is compiled ONCE, into the fasl, and lands after any
+;;;                  BEGIN that precedes it and before any that follows.
+;;;   p-CHECK        :load -> discarded (see %p-check-situations).
+;;;   p-eval-always  UNCHANGED — `use`/`require`/`our` are idempotent (`p-use`
+;;;                  is %INC-guarded) and the compile pass NEEDS them: it is
+;;;                  `(p-use "Exporter")` that creates the Exporter package
+;;;                  before the reader meets `Exporter::plc-exporter` in the
+;;;                  next form.  Measured: suppressing it fails JSON::PP's
+;;;                  compile with "Package Exporter does not exist".
+;;;   p-defpackage   UNCHANGED, for the same reader reason, and idempotent.
+;;;   p-defcell      UNCHANGED: its `define-symbol-macro` is a plain top-level
+;;;                  form (so the rest of the file reads the name THROUGH its
+;;;                  cell) and its initialiser is not a compile-time form.
+;;;
+;;; `load`ing the resulting fasl therefore runs the module exactly once, in
+;;; the same order a source load runs it — the semantics the session-251
+;;; workaround bought, at fasl speed.  When a module needs MORE at compile
+;;; time than this leaves it (a package nothing declared, a compile-time call
+;;; to one of its own subs), compile-file FAILS, and that is loud in the right
+;;; way: `p-load-module-cached` falls back to loading the .lisp as source,
+;;; exactly as before this task.
+(defvar *pcl-fasl-build* nil
+  "True only while building a cached module FASL out of the module's cached
+   CL text: a sub's lambda install and a BEGIN block then run at LOAD time
+   only, so the compiling image runs nothing of the module that is not
+   idempotent and the fasl carries every effect exactly once, in order.  See
+   the commentary above and docs/module-double-exec-bug.md.")
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-sub-situations ()
+    "The EVAL-WHEN situations a `sub NAME {…}` INSTALL takes: compile+load+
+     execute normally — Perl's rule that a declaration is visible to a BEGIN
+     block that follows it — and load+execute while building a module fasl,
+     where the compile pass keeps only the name reservation."
+    (if *pcl-fasl-build*
+        '(:load-toplevel :execute)
+        '(:compile-toplevel :load-toplevel :execute)))
+
+  (defun %p-begin-situations ()
+    "The EVAL-WHEN situations a `BEGIN { }` block takes: compile+execute
+     normally (it fires once — at compile time when a file is compiled, at
+     execute time when it is loaded as source, never at fasl load), and
+     load+execute while building a module fasl (it fires once, at the load of
+     that fasl, in source order with the declarations around it)."
+    (if *pcl-fasl-build*
+        '(:load-toplevel :execute)
+        '(:compile-toplevel :execute)))
+
+  (defun %p-check-situations ()
+    "The EVAL-WHEN situations a `CHECK { }`/`UNITCHECK { }` block takes.
+     Normally :load-toplevel — the CL phase that corresponds to perl's
+     end-of-compilation.  While building a module fasl it is (:execute), which
+     compile-file DISCARDS (CLHS 3.2.3.1: no CT, no LT, :execute, not-compile-
+     time mode) — and that is the RIGHT answer, because a module loaded at run
+     time is perl's own \"Too late to run CHECK block\" case and the
+     source-load path has never run one either.  Keeping :load-toplevel here
+     would make a fasl-loaded module run CHECK blocks a source-loaded one
+     does not."
+    (if *pcl-fasl-build*
+        '(:execute)
+        '(:load-toplevel))))
+
+
 ;;; p-defpackage: Create/update a Perl package namespace.
 ;;; Wraps defpackage in eval-when so it runs at compile time (needed so that
 ;;; subsequent in-package forms can find the package during compile-file), and
@@ -751,6 +840,29 @@
 ;;; because packages (:use :pcl) inherit those symbols.  By shadowing first we
 ;;; create a fresh local symbol; the body's built-in calls (p-shift @_) were
 ;;; already resolved at READ time to pcl::PL-SHIFT and are unaffected.
+;;;
+;;; %p-reserve-sub-name: the sub's own package-local symbol, shadowing any
+;;; inherited pcl: builtin of the same name, and interned so the rest of the
+;;; file READS that symbol.  THE READER DEPENDS ON THIS — which is why the
+;;; module-fasl build (*pcl-fasl-build*) keeps it at compile time even though
+;;; it moves the lambda install to load time: without the shadow, a module
+;;; method named `push` reads as the inherited `pcl:pl-push` and installing it
+;;; would clobber the runtime's own builtin (Tie::Array's sub PUSH / SHIFT).
+;;; ONE spelling, called from both the compile pass and the install.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-reserve-sub-name (name)
+    "Shadow and intern NAME's sub name in its home package; return the symbol.
+     The home package is the symbol's own (e.g. P1 for P1::pl-tmc) so a
+     package-qualified sub is defined in the right package whatever *package*
+     is; an uninterned name falls back to *package*.  The handler-bind muffles
+     SBCL's \"package at variance\" warning, which fires when a defpackage is
+     later re-evaluated and sees the extra shadow."
+    (let* ((target-pkg (or (symbol-package name) *package*))
+           (sym-name   (symbol-name name)))
+      (handler-bind ((warning #'muffle-warning))
+        (shadow sym-name target-pkg))
+      (intern sym-name target-pkg))))
+
 (defmacro p-sub (name params facts &body body)
   ;; FACTS is the compiler's proven-facts plist (task #1035 step 3), at a FIXED
   ;; position after the lambda list so a consumer reads it by position: always
@@ -760,40 +872,41 @@
   ;; bookkeeping let*), e.g. the v2 pipeline's (declare (ignore %_args)
   ;; (dynamic-extent %_args)) for subs that never touch @_.
   (%p-check-facts "p-sub" name facts *p-sub-fact-keys*)
-  (let ((decls (loop while (and (consp (first body))
-                                (eq (first (first body)) 'declare))
-                     collect (pop body))))
-    `(eval-when (:compile-toplevel :load-toplevel :execute)
-       ;; Use the symbol's own package (e.g. P1 for P1::p-tmc) so that
-       ;; package-qualified subs are defined in the right package regardless of
-       ;; the current *package*.  Fall back to *package* for unqualified names.
-       (let* ((target-pkg (or (symbol-package ',name) *package*))
-              (sym-name   (symbol-name ',name)))
-         ;; Shadow to prevent user methods from clobbering pcl:: built-ins with
-         ;; the same name (e.g. PUSH/SHIFT in Tie::Array).  The handler-bind
-         ;; muffles SBCL's "package at variance" warning that fires when defpackage
-         ;; is later re-evaluated and sees the extra shadow.
-         (handler-bind ((warning #'muffle-warning))
-           (shadow sym-name target-pkg))
-         (let ((local-sym (intern sym-name target-pkg))
-               ;; Per-sub constants, computed ONCE at definition: recomputing
-               ;; them per call (case-inversion + concatenate / gethash) was
-               ;; measured at ~150ns per call — the single largest sub-call cost.
-               (%%perl-name (%p-sub-perl-name ',name))
-               (%%home-pkg  (pcl-pkg-perl-name (symbol-package ',name))))
-           (setf (gethash local-sym *p-declared-subs*) :defined)
-           (setf (symbol-function local-sym)
-                 (lambda ,params
-                   ,@decls
-                   (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
-                                                        *pcl-caller-pkg-stack*))
-                          (*pcl-caller-subname-stack* (cons %%perl-name
-                                                            *pcl-caller-subname-stack*))
-                          (*pcl-current-package* %%home-pkg)
-                          (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
-                          (*pcl-caller-wantarray* *wantarray*))
-                     (p-sub-frame
-                      ,@body)))))))))
+  (let* ((decls (loop while (and (consp (first body))
+                                 (eq (first (first body)) 'declare))
+                      collect (pop body)))
+         (install
+          `(let ((local-sym (%p-reserve-sub-name ',name))
+                 ;; Per-sub constants, computed ONCE at definition:
+                 ;; recomputing them per call (case-inversion + concatenate /
+                 ;; gethash) was measured at ~150ns per call — the single
+                 ;; largest sub-call cost.
+                 (%%perl-name (%p-sub-perl-name ',name))
+                 (%%home-pkg  (pcl-pkg-perl-name (symbol-package ',name))))
+             (setf (gethash local-sym *p-declared-subs*) :defined)
+             (setf (symbol-function local-sym)
+                   (lambda ,params
+                     ,@decls
+                     (let* ((*pcl-caller-pkg-stack* (cons *pcl-current-package*
+                                                          *pcl-caller-pkg-stack*))
+                            (*pcl-caller-subname-stack* (cons %%perl-name
+                                                              *pcl-caller-subname-stack*))
+                            (*pcl-current-package* %%home-pkg)
+                            (*pcl-sub-call-depth* (1+ *pcl-sub-call-depth*))
+                            (*pcl-caller-wantarray* *wantarray*))
+                       (p-sub-frame
+                        ,@body)))))))
+    (if *pcl-fasl-build*
+        ;; Building a module fasl: the compile pass reserves the NAME (the
+        ;; reader needs it) and nothing else, so the body is compiled once —
+        ;; into the fasl — and installed at ITS load, after any BEGIN block
+        ;; that precedes it and before any that follows.  That order is the
+        ;; whole of the docs/module-double-exec-bug.md fix.
+        `(progn
+           (eval-when (:compile-toplevel) (%p-reserve-sub-name ',name))
+           (eval-when (:load-toplevel :execute) ,install))
+        `(eval-when (:compile-toplevel :load-toplevel :execute) ,install))))
+
 
 (defmacro p-args-body (&body body)
   "Standard named-sub prologue emitted by the code generator: bind Perl's @_
@@ -976,18 +1089,22 @@
 ;;; loading — mirroring Perl's rule that declarations take effect as the
 ;;; parser sees them.
 (defmacro p-eval-always (&body body)
+  ;; Unconditional, module-fasl build included: see the *pcl-fasl-build*
+  ;; commentary — `use`/`require`/`our` are idempotent and the compile pass
+  ;; needs them, because it is `(p-use "Exporter")` that creates the Exporter
+  ;; package before the reader meets a symbol in it.
   `(eval-when (:compile-toplevel :load-toplevel :execute) ,@body))
 
 ;;; p-BEGIN: Wrap a Perl BEGIN { } block.  Runs at compile time and when
 ;;; executing directly, but NOT when loading a pre-compiled FASL (so the
 ;;; block fires exactly once, as Perl guarantees).
 (defmacro p-BEGIN (&body body)
-  `(eval-when (:compile-toplevel :execute) ,@body))
+  `(eval-when ,(%p-begin-situations) ,@body))
 
 ;;; p-CHECK: Wrap a Perl CHECK { } or UNITCHECK { } block.  Runs after
 ;;; compilation, just before execution starts (CL :load-toplevel phase).
 (defmacro p-CHECK (&body body)
-  `(eval-when (:load-toplevel) ,@body))
+  `(eval-when ,(%p-check-situations) ,@body))
 
 ;;; Forward declarations to avoid style warnings.
 ;;; NOTE: do NOT tighten the return ftype of to-number/to-string — they are
@@ -17032,20 +17149,80 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Max cache age in seconds (default: 1 week)")
 (defparameter *pcl-skip-cache* nil
   "When true, bypass cache (set by --no-cache or PCL_NO_CACHE)")
-(defparameter *pcl-cache-fasl* nil
-  "When true, cache compiled FASL; when nil, cache .lisp and load as SOURCE.
+(defparameter *pcl-cache-fasl* t
+  "When true, a cached module is also compiled to a FASL and the FASL is what
+   later runs load; when nil, the cached .lisp is loaded as SOURCE every run
+   (which means SBCL recompiles the module on every run).
 
-   NOTE (session 251): defaults to NIL as a correctness workaround for the
-   module compile-file+load DOUBLE-EXECUTION bug.  With FASL caching on,
-   compile-file executes the module body once (running BEGIN-time, guarded
-   sub redefinitions such as Sub::Defer's deferred ctors), then `load` re-runs
-   the plain `sub NAME` installs at load time and CLOBBERS those redefinitions
-   (the guard makes the redefine skip on the load pass).  This breaks Moo
-   subclasses (empty attrs) and any module using the define-then-guarded-
-   BEGIN-redefine pattern (Moose/Sub::Quote/Type::Tiny/...).  Loading as
-   source is single-pass and correct, at the cost of slower module loads.
-   The proper fix (keep FASL, eliminate double-exec) is option C/D in
-   docs/module-double-exec-bug.md — DO NEXT SESSION.")
+   ON SINCE TASK #1188 (session 470bp).  It was nil from session 251 as a
+   correctness workaround for the compile-file+load DOUBLE-EXECUTION bug
+   (docs/module-double-exec-bug.md): compiling and loading in the SAME image
+   ran every declaration form twice, and the load pass re-installed a
+   `sub NAME` body over a BEGIN-time replacement whose idempotency guard now
+   skipped — Moo subclasses came out with empty attrs.  What makes it safe now
+   is *PCL-FASL-BUILD* (see its commentary at the top of this file): the
+   compile executes NOTHING of the module and the fasl carries every effect as
+   a load-time form, so the loading image runs the module exactly once, in
+   source order — the source-load semantics, at fasl speed.  Measured on the
+   round-27 yardstick: `use JSON::PP; print 1` 6.4 s -> under half a second.
+
+   Set PCL_NO_FASL_CACHE=1 (or bind this to nil) to go back to source loading;
+   the .lisp cache is unchanged and both modes read the same text.")
+
+;;; ── WHAT INVALIDATES A CACHED MODULE FASL (task #1188) ──────────────────
+;;; A cached .lisp is invalidated by the module SOURCE's mtime and by
+;;; *pcl-cache-generation* — the two things that decide the TEXT.  A fasl is
+;;; not text: it has this runtime's macro expansions BAKED IN (p-sub's
+;;; prologue, the fast-path operators, p-let/p-defcell), and it can only be
+;;; loaded by the SBCL that wrote it.  So a fasl needs a third ingredient the
+;;; .lisp does not, and it is the same one the cached CORE keys on
+;;; (tools/lib/PCLSbcl.pm): a CONTENT hash of cl/pcl-runtime.lisp plus the
+;;; SBCL identity.  Not an mtime — a stale fasl carrying a removed macro's
+;;; old expansion is exactly the silent-wrong this project refuses.
+;;;
+;;; It is computed ONCE, while this file loads, from *LOAD-TRUENAME* — so in
+;;; the normal case (a cached core, built by --load'ing this file) it is baked
+;;; into the core and costs nothing per run, and in source mode it costs one
+;;; 1.2 MB read (~9 ms) against a 1.2 s runtime load.  When it cannot be
+;;; computed (no *load-truename*: an unusual embedding) it is NIL and fasl
+;;; caching simply stays off — modules load as source, as they did before
+;;; this task.
+(defun %pcl-compute-runtime-identity ()
+  "A content key for THIS runtime image: cl/pcl-runtime.lisp's own source
+   hashed together with the SBCL that will compile against it.  NIL when the
+   source is not reachable at load time."
+  (let ((path (or *compile-file-truename* *load-truename*)))
+    (when path
+      (ignore-errors
+        (let* ((text (with-open-file (in path :element-type '(unsigned-byte 8))
+                       (let ((buf (make-array (file-length in)
+                                              :element-type '(unsigned-byte 8))))
+                         (read-sequence buf in)
+                         (sb-ext:octets-to-string buf :external-format :latin-1)))))
+          (format nil "~8,'0X~4,'0X"
+                  (logand (sxhash text) #xFFFFFFFF)
+                  (logand (sxhash (concatenate 'string (lisp-implementation-type)
+                                               "-" (lisp-implementation-version)))
+                          #xFFFF)))))))
+
+(defparameter *pcl-runtime-identity* (%pcl-compute-runtime-identity)
+  "Content key of this runtime + this SBCL; the third ingredient of a cached
+   module FASL's name (see the commentary above).  NIL disables fasl caching.")
+
+(defun %p-fasl-cache-enabled-p ()
+  "True when a cached module may be compiled to, and loaded from, a FASL.
+
+   NOT while *PCL-FASL-BUILD* is true: that is a nested load, reached from a
+   `use` running in the compile pass of ANOTHER module's fasl build, and
+   compiling there would nest compile-file inside compile-file for a fasl the
+   outer build may then discard.  The dependency loads from its text, and gets
+   its own fasl when the outer FASL's load reaches its `use` — by which time
+   the flag is unbound again."
+  (and *pcl-cache-fasl*
+       *pcl-runtime-identity*
+       (not *pcl-skip-cache*)
+       (not *pcl-fasl-build*)
+       (not (sb-posix:getenv "PCL_NO_FASL_CACHE"))))
 (defparameter *pcl-pl2cl-path* nil
   "Path to pl2cl script (set at load time)")
 
@@ -17130,14 +17307,21 @@ buffer's fill-pointer; everything else falls back to file-length."
    cached transpiles.  E4.1 step 2 (#242) removed the second pipeline; the
    literal \"v2\" stays in the key so this generation's paths keep hashing
    where they did before the flag went away.
-   LISP-P: if true, return .lisp path; else .fasl"
+   LISP-P: if true, return the .lisp path; else the .fasl path, which carries
+   *PCL-RUNTIME-IDENTITY* as a fourth component — a fasl has this runtime's
+   macro expansions baked in and only this SBCL can load it, so it must not
+   share a name with one built by another (see that variable's commentary).
+   Returns NIL for a fasl when the identity is unknown."
   (let* ((abs-path (namestring (truename source-path)))
          (hash (sxhash (concatenate 'string abs-path "|" *pcl-cache-generation*
                                     "|" "v2")))
-         (ext (if lisp-p ".lisp" ".fasl")))
+         (stem (format nil "~16,'0X" (logand hash #xFFFFFFFFFFFFFFFF))))
     (p-ensure-cache-dir)
-    (merge-pathnames (format nil "~16,'0X~A" (logand hash #xFFFFFFFFFFFFFFFF) ext)
-                     *pcl-cache-dir*)))
+    (cond (lisp-p (merge-pathnames (concatenate 'string stem ".lisp")
+                                   *pcl-cache-dir*))
+          (*pcl-runtime-identity*
+           (merge-pathnames (format nil "~A-~A.fasl" stem *pcl-runtime-identity*)
+                            *pcl-cache-dir*)))))
 
 (defun p-cache-valid-p (source-path cache-path)
   "Check if cached file is valid: exists, newer than source, not expired."
@@ -17244,6 +17428,138 @@ buffer's fill-pointer; everything else falls back to file-length."
           (error "~A" (string-right-trim '(#\Newline) resp-buf))))))
 
 ;;; --- Module Loading ---
+;;;
+;;; ONE MODULE LOAD IS ONE EXECUTION OF THE MODULE (task #1188).  The cache
+;;; holds the module's CL TEXT (keyed by source path + *pcl-cache-generation*)
+;;; and, beside it, that text COMPILED for this runtime and this SBCL (keyed
+;;; additionally by *pcl-runtime-identity*).  Whichever of the two runs, the
+;;; module's forms execute exactly once, in source order:
+;;;
+;;;   * the FASL runs them at its load, because it was built with
+;;;     *PCL-FASL-BUILD* bound — see that variable's commentary: the compile
+;;;     executes nothing and every declaration and BEGIN block is a load-time
+;;;     form in the fasl;
+;;;   * the TEXT runs them as `load` evaluates it, which is what PCL did on
+;;;     every run from session 251 until this task, and remains the fallback.
+;;;
+;;; The fallback is taken whenever the fasl is absent, stale, refused (built by
+;;; another SBCL — unreachable by construction, since its name says which) or
+;;; failed to build.  A failed build leaves a marker so the next run does not
+;;; pay for the same failure, the way a failed core build does.
+
+(defun %p-write-cache-file (path text)
+  "Write TEXT to PATH through a PID-unique temp + rename(2).
+   Never in place: :supersede truncates and writes the REAL file (measured
+   s339), so a parallel worker whose p-cache-valid-p saw the fresh mtime would
+   `load` a HALF-WRITTEN module and die — the cold-cache sweep race of task
+   #215.  rename(2) is atomic within a filesystem: the last writer wins and
+   the file is always consistent."
+  (let ((temp (make-pathname :defaults path
+                             :name (format nil "~A-~A" (pathname-name path)
+                                           (sb-posix:getpid)))))
+    (with-open-file (out temp :direction :output :if-exists :supersede)
+      (write-string text out))
+    (rename-file temp path)
+    path))
+
+(defun %p-fasl-failed-marker (fasl-path)
+  (make-pathname :defaults fasl-path
+                 :type (concatenate 'string (pathname-type fasl-path) ".failed")))
+
+(defun %p-fasl-build-refused-p (fasl-path)
+  "True when a recent build of FASL-PATH failed.  An hour, like the cached
+   core's .failed marker (tools/lib/PCLSbcl.pm): long enough that a run does
+   not re-pay a doomed compile, short enough that a fixed module recovers on
+   its own."
+  (let ((marker (%p-fasl-failed-marker fasl-path)))
+    (and (probe-file marker)
+         (< (- (get-universal-time) (file-write-date marker)) 3600))))
+
+(defun %p-secs-since (start)
+  "Seconds of wall clock since START, a GET-INTERNAL-REAL-TIME reading."
+  (/ (- (get-internal-real-time) start)
+     (float internal-time-units-per-second)))
+
+(defun %p-fasl-note (fmt &rest args)
+  "THE ONE place the module-fasl cache says anything.  Silent unless
+   PCL_FASL_DEBUG is set, because a module load is invisible in perl and so
+   its caching must be — nothing here is a program error: every failure ends
+   in the module loading from its text.  With the variable set it names, per
+   module, which of the three paths was taken (FASL HIT / fasl-build / TEXT),
+   how long the load took, and why a build was refused.  That is the
+   instrument for \"why is this program still slow\"."
+  (when (sb-posix:getenv "PCL_FASL_DEBUG")
+    (apply #'format *error-output* fmt args))
+  nil)
+
+(defun %p-note-fasl-failure (fasl-path reason)
+  "Record that FASL-PATH could not be built.  Not fatal: the module still
+   loads, from its text, and the only loss is speed."
+  (ignore-errors
+    (with-open-file (out (%p-fasl-failed-marker fasl-path)
+                         :direction :output :if-exists :supersede)
+      (format out "~A~%" reason)))
+  (%p-fasl-note "PCL: module fasl build failed (~A): ~A~%"
+                (file-namestring fasl-path) reason))
+
+(defun %p-build-module-fasl (lisp-path fasl-path)
+  "Compile the cached module text LISP-PATH into FASL-PATH.  T on success.
+   NIL — with a marker — on any failure, and then the caller loads the text.
+
+   *PCL-FASL-BUILD* is what makes this safe to do in the image that is about
+   to run the module: with it bound, compile-file executes none of the
+   module's own forms, so nothing here changes this program's state and the
+   fasl carries every effect once, at ITS load."
+  (when (%p-fasl-build-refused-p fasl-path)
+    (return-from %p-build-module-fasl nil))
+  (let ((temp (make-pathname :defaults fasl-path
+                             :name (format nil "~A-~A" (pathname-name fasl-path)
+                                           (sb-posix:getpid)))))
+    (handler-case
+        (multiple-value-bind (out warnings-p failure-p)
+            (let ((*pcl-fasl-build* t)
+                  (*compile-verbose* nil)
+                  (*compile-print* nil)
+                  ;; A module load is invisible in perl, so its COMPILATION
+                  ;; must be too.  Notes and the end-of-unit "Undefined
+                  ;; functions:" summary are not `warning`s and reach
+                  ;; *error-output* on their own; a forward call to a sub the
+                  ;; module defines later IS an undefined function at compile
+                  ;; time and always will be.  PCL_FASL_DEBUG shows the lot.
+                  (*error-output* (if (sb-posix:getenv "PCL_FASL_DEBUG")
+                                      *error-output*
+                                      (make-broadcast-stream)))
+                  (*standard-output* (make-broadcast-stream)))
+              (handler-bind ((sb-ext:compiler-note #'muffle-warning)
+                             (warning #'muffle-warning))
+                (compile-file lisp-path :output-file temp
+                              :print nil :verbose nil)))
+          (declare (ignore warnings-p))
+          (cond ((or (null out) failure-p)
+                 (ignore-errors (delete-file temp))
+                 (%p-note-fasl-failure fasl-path "compile-file reported failure"))
+                (t (rename-file out fasl-path)
+                   t)))
+      (error (e)
+        (ignore-errors (delete-file temp))
+        (%p-note-fasl-failure fasl-path e)))))
+
+(defun %p-load-module-fasl (fasl-path)
+  "Load a cached module FASL.  T on success; NIL only when the file is not a
+   fasl this SBCL can read AT ALL — which is decided before any of its forms
+   runs, so falling back to the text cannot double-execute anything.  Every
+   other error propagates: a module that dies at load dies the same way from
+   its text, and swallowing it here would leave the module half-loaded and
+   then run its first half a second time."
+  ;; The identity in the fasl's own NAME already means this SBCL wrote it, so
+  ;; this arm is for a leftover from an older key scheme or a truncated file.
+  (handler-case
+      (progn (handler-bind ((warning #'muffle-warning)) (load fasl-path))
+             t)
+    (sb-fasl::invalid-fasl (e)
+      (%p-note-fasl-failure fasl-path e)
+      (ignore-errors (delete-file fasl-path))
+      nil)))
 
 (defun p-load-module-cached (source-path)
   "Load a Perl module with caching. Returns t on success."
@@ -17252,72 +17568,42 @@ buffer's fill-pointer; everything else falls back to file-length."
   ;; rebind here so those changes don't leak into the caller's notion of the
   ;; current package (which caller()/overload::import read).  The orig-case name
   ;; map it populates is a separate global hash and intentionally persists.
-  (let ((*pcl-current-package* *pcl-current-package*)
-        (cache-path (p-compute-cache-path source-path (not *pcl-cache-fasl*))))
-    (cond
-      ;; Cache hit
-      ((p-cache-valid-p source-path cache-path)
-       ;; Muffle "package at variance" warnings: p-sub's eval-when :compile-toplevel
-       ;; shadow calls run during compile-file, then defpackage re-runs at load time
-       ;; and sees the extra shadow — harmless but noisy.
-       (handler-bind ((warning #'muffle-warning))
-         (load cache-path))
-       t)
-      ;; Cache miss - transpile and cache
-      (t
-       (let ((lisp-code (p-transpile-file source-path)))
-         (unless lisp-code
-           (error "Failed to transpile ~A" source-path))
-         (if *pcl-cache-fasl*
-             ;; FASL mode: compile to PID-unique temp files, then rename
-             ;; atomically to cache-path.  Multiple parallel workers may race
-             ;; here; rename(2) is atomic within a filesystem so the last
-             ;; writer wins but the file is always consistent.
-             (let* ((pid       (sb-posix:getpid))
-                    (base-name (pathname-name cache-path))
-                    (pid-name  (format nil "~A-~A" base-name pid))
-                    (temp-lisp (make-pathname :defaults cache-path
-                                              :name pid-name :type "lisp"))
-                    (temp-fasl (make-pathname :defaults cache-path
-                                              :name pid-name :type "fasl")))
-               (with-open-file (out temp-lisp
-                                    :direction :output
-                                    :if-exists :supersede)
-                 (write-string lisp-code out))
-               (let ((compiled (handler-bind ((warning #'muffle-warning))
-                                 (compile-file temp-lisp :output-file temp-fasl
-                                               :print nil :verbose nil))))
-                 (ignore-errors (delete-file temp-lisp))
-                 (unless compiled
-                   (error "compile-file failed for ~A" temp-lisp))
-                 ;; Atomic replace: safe even if another worker beat us here.
-                 (rename-file temp-fasl cache-path)
-                 (p-cleanup-old-cache)
-                 (handler-bind ((warning #'muffle-warning))
-                   (load cache-path))
-                 t))
-             ;; Lisp mode: cache .lisp — via a PID-unique temp + atomic rename,
-             ;; exactly like the FASL branch above.  This is the DEFAULT branch
-             ;; and it used to write cache-path in place: SBCL's :supersede
-             ;; truncates and writes the real file (measured s339), so a second
-             ;; worker whose p-cache-valid-p saw the fresh mtime would `load` a
-             ;; HALF-WRITTEN module and die.  That is the cold-cache sweep race
-             ;; of task #215 — one non-atomic copy of a mechanism its sibling
-             ;; already got right.
-             (let* ((pid       (sb-posix:getpid))
-                    (temp-lisp (make-pathname
-                                :defaults cache-path
-                                :name (format nil "~A-~A"
-                                              (pathname-name cache-path) pid))))
-               (with-open-file (out temp-lisp
-                                    :direction :output
-                                    :if-exists :supersede)
-                 (write-string lisp-code out))
-               (rename-file temp-lisp cache-path)
-               (p-cleanup-old-cache)
-               (handler-bind ((warning #'muffle-warning))
-                 (load cache-path))
-               t)))))))
+  (let* ((%start (get-internal-real-time))
+         (*pcl-current-package* *pcl-current-package*)
+         (lisp-path (p-compute-cache-path source-path t))
+         (fasl-path (when (%p-fasl-cache-enabled-p)
+                      (p-compute-cache-path source-path nil))))
+    ;; 1. A fasl for THIS runtime, newer than the source: one load and done.
+    (when (and fasl-path
+               (p-cache-valid-p source-path fasl-path)
+               (%p-load-module-fasl fasl-path))
+      (%p-fasl-note "PCL: module ~A -> FASL HIT (~,3Fs)~%"
+                    (file-namestring (truename source-path))
+                    (%p-secs-since %start))
+      (return-from p-load-module-cached t))
+    ;; 2. The text: transpile it when it is missing or older than the source.
+    (unless (p-cache-valid-p source-path lisp-path)
+      (let ((lisp-code (p-transpile-file source-path)))
+        (unless lisp-code
+          (error "Failed to transpile ~A" source-path))
+        (%p-write-cache-file lisp-path lisp-code)
+        (p-cleanup-old-cache)))
+    ;; 3. Build the fasl from that text and run THE FASL, so the module
+    ;;    executes once here too; on any failure, run the text.
+    (%p-fasl-note "PCL: module ~A -> ~:[TEXT~;fasl-build~] (~,3Fs to here)~%"
+                  (file-namestring (truename source-path)) (and fasl-path t)
+                  (%p-secs-since %start))
+    (or (and fasl-path
+             (%p-build-module-fasl lisp-path fasl-path)
+             (%p-load-module-fasl fasl-path))
+        (progn
+          ;; Muffle "package at variance" warnings: a p-defpackage that ran at
+          ;; compile time (its situations are kept — the reader needs the
+          ;; package) has added shadows that the load-time defpackage sees.
+          (handler-bind ((warning #'muffle-warning))
+            (load lisp-path))
+          t))))
+
 
 (defun p-find-module-package (module-name)
   "Find CL package for a Perl module.
