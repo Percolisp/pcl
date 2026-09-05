@@ -129,6 +129,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Computed goto (`goto EXPR`)](#computed-goto-goto-expr)
 * [`given`/`when` / smart match (`~~`)](#givenwhen--smart-match-)
 * [`defer { … }` blocks — DEFERRED](#defer----blocks--deferred--implementable-not-rejected)
+* [An unlabelled `last`/`next`/`redo` whose loop is not lexically here](#an-unlabelled-lastnextredo-whose-loop-is-not-lexically-here)
 
 ### Objects and OO
 
@@ -2959,3 +2960,62 @@ result straight back in is not mistaken for a struct.
 
 `ioctl` is not implemented at all, for the same reason plus the absence of any
 constant table.
+
+## An unlabelled `last`/`next`/`redo` whose loop is not lexically here
+
+perl's unlabelled loop-control keywords exit the innermost **dynamically**
+enclosing loop.  A sub called from inside a loop can therefore exit its
+CALLER's loop:
+
+```perl
+sub do_last { last }
+my $n = 0;
+for my $i (1..3) { $n++; do_last(); $n += 100 }   # perl: n = 1
+```
+
+PCL lowers a bare `last`/`next`/`redo` to a **lexical** CL exit, which is a
+different thing, and it failed in two ways — one of them silent.  The `for`
+spelling above answered `n=303`: the `last` did nothing, all three iterations
+ran, and the statement after the call ran each time.  The `while` spelling
+reached SBCL as `(go :next)` with no such tag in scope and died at the call
+site with `attempt to GO to nonexistent tag`.
+
+Such a statement now **dies at run time, at its own site, trappably**:
+
+```
+PCL: unsupported: "last" exiting subroutine do_last (dynamic loop exit; docs/not-supported.md)
+```
+
+A bare exit with no enclosing loop **anywhere** — `last;` at file level — keeps
+perl's own text, `Can't "last" outside a loop block`.
+
+**Why a die and not an announce-and-continue** (the s329 boundary, ruled again
+for this case by Fable in s470): that boundary covers an EFFECT-ONLY missing
+case in code that otherwise runs correctly.  An untaken loop exit is not that —
+it changes the CALLER's control flow, so the loop runs on with values the
+program then uses.  `while (1) { f() }` with `sub f { last }` never ends.
+
+**What still works, and is guarded** (`Pl/t/loop-exit-01.t`): the LABELLED form
+from a sub (`sub f { last OUTER }`) — it already lowers to the labelled
+non-local exit; every ordinary exit inside its own loop, in all four of PPI's
+loop shapes (`for`, `foreach`, `while`/`until`, and a bare block, which perl
+runs as a loop-once loop).
+
+**What would remove the limitation** is task #1022 half (b): a catch frame per
+loop ENTRY (not per iteration) with the loop state outside it, so a throw from
+a called sub can be caught by a loop it cannot see lexically.  It is
+measure-first — the frame must cost nothing on the counting-loop bench rows —
+and the cost of NOT having it is measured, in both populations:
+`perl-tests/loopctl.t` runs 40 of its 67 rows instead of 63 (its
+`sub test_last { last }` is called outside any `eval`, so the file aborts
+there), and in perl's own t/ the same shape costs `op/loopctl.t` 23 rows and
+`op/rt119311.t` 3 — that file is six `{ foo(sub { …; last }) }` sites, the
+very shape, testing a DESTROY-during-unwind bug.
+
+**What must NOT be marked, and was measured rather than assumed**: a `for`/
+`foreach` STATEMENT MODIFIER is a loop for `last` (`($heavy = /\W/) and last
+foreach (@_);` — core Exporter.pm's `import` is written exactly that way to
+avoid entering a block scope), and PPI puts no Compound around it.  A
+`while`/`until` modifier is NOT: perl answers `Can't "last" outside a loop
+block` for `$i++ and last while $i < 5`, the same rule that makes
+`do BLOCK while (…)` not a loop.

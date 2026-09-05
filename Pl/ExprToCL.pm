@@ -2111,6 +2111,27 @@ sub gen_funcall_form {
     }
   }
 
+  # An unlabelled next/last/redo whose loop is not LEXICALLY here (task #1022
+  # half (a)).  Parser2::_mark_dynamic_loop_exits stamped the keyword token
+  # when the walk out to the sub/file boundary met no loop; perl would exit the
+  # innermost DYNAMICALLY enclosing loop, which is the caller's.  Emitting the
+  # lexical exit anyway is a silent wrong in one spelling (`for` ran to
+  # completion with the statements after the call still executing, n=303 where
+  # perl says 1) and an SBCL compile error in the other ("attempt to GO to
+  # nonexistent tag"), so it becomes a run-time, trappable die at the site.
+  # A bare exit with no loop ANYWHERE keeps perl's own text.
+  if ($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo') {
+    my $fn = $self->expr_o->get_a_node($kids->[0]);
+    if (ref($fn) && defined $fn->{_pcl_dyn_loop_exit}) {
+      my $in_sub = $fn->{_pcl_dyn_loop_exit};
+      my $msg = length $in_sub
+        ? qq{PCL: unsupported: "$func_name" exiting subroutine $in_sub }
+          . qq{(dynamic loop exit; docs/not-supported.md)}
+        : qq{Can't "$func_name" outside a loop block};
+      return ['p-die', cl_string_literal($msg)];
+    }
+  }
+
   # next/last/redo LABEL → (p-next LABEL) etc.
   if (($func_name eq 'next' || $func_name eq 'last' || $func_name eq 'redo')
       && @$kids == 2) {

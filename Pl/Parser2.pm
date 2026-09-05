@@ -1042,6 +1042,7 @@ sub _source {
 # restore puts back the exact prior state, deleting keys that did not exist.
 # Used by _lower_expr's native attempt AND VarAnnotator's analysis parses.
 our @PPI_ADHOC_KEYS = qw(_bareword_string _has_match_context _pcl_decl_list
+                         _pcl_dyn_loop_exit
                          _core_qualified);
 
 sub _ppi_state_snapshot {
@@ -1495,6 +1496,8 @@ sub parse {
     $self->{_str_eval_in_named_sub} = 1;
     $self->{_sub_str_eval}{ refaddr($insub) } = 1;
   }
+
+  _mark_dynamic_loop_exits($doc);
 
   # W10: a file lexical declared in one segment and used in a later one spans
   # a package boundary.  v1 has an OPEN BUG here (it defvars the name under
@@ -5422,6 +5425,140 @@ sub _normalize_tie_my {
 # CL meaning here; a :prototype on an ANON sub cannot be consulted by the
 # caller-side parser, which keys on a declared name).  Registered upstream in
 # docs/ppi-upstream-bugs.md §7.
+# ── THE LOOP-CONTROL BOUNDARY (task #1022 half (a)) ─────────────────────────
+# perl's UNLABELLED `last`/`next`/`redo` exits the innermost DYNAMICALLY
+# enclosing loop, so a bare `last` in a sub called from a loop exits the
+# CALLER's loop.  PCL lowers it to a LEXICAL CL exit, which is not that, and
+# both failure modes are bad:
+#
+#   sub do_last { last }  for my $i (1..3) { $n++; do_last(); $n += 100 }
+#     perl: n=1     PCL: n=303   -- the `last` did NOTHING, in silence
+#   sub do_next { next }  while ($g++ < 3) { $n++; do_next(); $n += 100 }
+#     perl: n=3     PCL: SBCL "attempt to GO to nonexistent tag: :next"
+#
+# The s329 rule-12 boundary ("an EFFECT-only missing case announces and
+# continues") does NOT cover this, and the ruling says so (Fable, s470): it
+# covers code that otherwise runs correctly, and an UNTAKEN loop exit changes
+# the CALLER's control flow -- `while (1) { f() }` with `sub f { last }` never
+# ends, a `for` over-runs, and every value computed after the call is wrong.
+# So until the dynamic half (#1022 (b)) ships, such a statement DIES: a
+# run-time, trappable, perl-shaped die at the exit's own site.
+#
+# The verdict rides the TOKEN (@PPI_ADHOC_KEYS) rather than the statement,
+# because the same keyword reaches the emitter by several parse paths -- a
+# Statement::Break, a statement modifier, the right side of an `or`.  ONE
+# document walk here, ONE emission site in ExprToCL.
+#
+# WHAT COUNTS AS AN ENCLOSING LOOP -- PPI's own type names, every one of
+# them probed against PPI 1.291 rather than read off the docs:
+#   `for`       a C-style `for (INIT; COND; STEP)`
+#   `foreach`   `for`/`foreach` over a list, labelled or not
+#   `while`     `while` AND `until`
+#   `continue`  a BARE BLOCK -- ALWAYS this type, labelled or not, first
+#               statement or not; perl runs it as a loop-once loop, so a bare
+#               `last` inside one is a legal exit
+#   `label`     included for safety; the probed labelled forms all came back
+#               as one of the above, and a wrong YES only declines to die
+# An `if`/`unless` block is type `if` and is NOT one, nor is `try`.  Missing
+# `for` here was a real bug caught by corpus-diff: perl-tests/my.t and time.t
+# both put a `last` in a C-style for and would have DIED.
+# `do BLOCK while (…)` is NOT a loop in perl either ("Can't \"last\" outside a
+# loop block"), and PPI gives its block a plain Statement parent, so the walk
+# passes through it -- which is the right answer.
+my %LOOP_COMPOUND = map { $_ => 1 } qw(for foreach while continue label);
+
+# A `for`/`foreach` STATEMENT MODIFIER is a loop for `last` too, and PPI puts
+# no Compound around it -- the whole thing is one plain Statement, so the
+# ancestry walk sees nothing.  That is not a corner: core Exporter.pm's
+# `import` is written `($heavy = /\W/) and last foreach (@_);` precisely to
+# avoid entering a block scope, and marking it would have made every `use`
+# die.  Caught by the emission A/B, not by a probe.
+#
+# `while`/`until` modifiers are NOT in the set, and that is measured, not
+# symmetry: perl answers `Can't "last" outside a loop block` for
+# `$i++ and last while $i < 5` while the foreach modifier above exits
+# normally -- the same rule that makes `do BLOCK while (…)` not a loop.
+my %LOOP_MODIFIER = (for => 1, foreach => 1);
+
+# A trailing `for`/`foreach` modifier on THIS statement.  Direct children only,
+# so a `for` that is a hash key or lives inside a nested structure cannot fire;
+# a wrong YES only declines to die, which is the safe direction.
+sub _has_loop_modifier {
+  my ($stmt) = @_;
+  for my $c ($stmt->schildren) {
+    return 1 if $c->isa('PPI::Token::Word') && $LOOP_MODIFIER{$c->content};
+  }
+  return 0;
+}
+
+sub _mark_dynamic_loop_exits {
+  my ($doc) = @_;
+  my $words = $doc->find(sub {
+    $_[1]->isa('PPI::Token::Word')
+      && $_[1]->content =~ /\A(?:last|next|redo)\z/ }) || [];
+  for my $w (@$words) {
+    delete $w->{_pcl_dyn_loop_exit};
+    next unless _is_bare_loop_control($w);
+    my ($in_loop, $sub_name) = _loop_scope_of($w);
+    next if $in_loop;
+    $w->{_pcl_dyn_loop_exit} = defined $sub_name ? $sub_name : '';
+  }
+  return;
+}
+
+# Is this Word the loop-control KEYWORD, with no label?  A labelled exit
+# already works (it lowers to the labelled catch/tagbody), and the negatives
+# are the ordinary bareword ones: a method name, a hash key, a sub of that
+# name being defined, a fat-comma left side.
+sub _is_bare_loop_control {
+  my ($w) = @_;
+  my $prev = $w->sprevious_sibling;
+  return 0 if $prev && $prev->isa('PPI::Token::Operator')
+              && ($prev->content eq '->' || $prev->content eq '&');
+  return 0 if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+  my $nx = $w->snext_sibling;
+  return 0 if $nx && $nx->isa('PPI::Token::Operator')
+              && ($nx->content eq '=>' || $nx->content eq '::');
+  # A LABEL argument: the next word that is not a statement modifier.
+  return 0 if $nx && $nx->isa('PPI::Token::Word')
+              && !Pl::PExpr::Config::is_statement_modifier($nx->content);
+  return 1;
+}
+
+# Walk out from the loop-control word.  Returns (IN_LOOP, SUB_NAME): IN_LOOP
+# true when a lexically enclosing loop is reached first; otherwise SUB_NAME is
+# the enclosing sub's name ('__ANON__' for a `sub {…}`) or undef at file level.
+sub _loop_scope_of {
+  my ($w) = @_;
+  for (my $p = $w->parent; $p; $p = $p->parent) {
+    # ORDER IS LOAD-BEARING: PPI::Statement::Sub and ::Compound are both
+    # PPI::Statement, so the two specific arms must be asked first — with the
+    # generic one on top, the sub boundary was never reached and `sub f
+    # { last }` came back "file level, no loop" (it then took perl's own
+    # outside-a-loop text instead of naming the sub).
+    if ($p->isa('PPI::Statement::Sub')) {
+      return (0, $p->name // '__ANON__');
+    }
+    if ($p->isa('PPI::Statement::Compound')) {
+      my $t = $p->type // '';
+      return (1, undef) if $LOOP_COMPOUND{$t};
+      next;
+    }
+    if ($p->isa('PPI::Statement')) {
+      return (1, undef) if _has_loop_modifier($p);
+      next;
+    }
+    next unless $p->isa('PPI::Structure::Block');
+    my $prev = $p->sprevious_sibling;
+    $prev = $prev->sprevious_sibling
+      if $prev && ($prev->isa('PPI::Token::Prototype')
+                   || $prev->isa('PPI::Structure::Signature'));
+    return (0, '__ANON__')
+      if $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub';
+  }
+  return (0, undef);
+}
+
 sub _normalize_anon_sub_attrs {
   my ($self, $doc) = @_;
   # #270 first: a prototype whose text ends in `$` mangles the run one layer
