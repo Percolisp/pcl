@@ -2,6 +2,186 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bk (Opus agent, 2026-09-05) — the correctness pool, round 26: the nested-element autoviv pair (#1058 + #1057) and four of the six overload-dispatch members (#1021, #1004, #1001(a) + #1005); BI's companion bless chore
+
+Six product commits, all RUNTIME-ONLY (`cl/pcl-runtime.lisp`), so corpus-diff
+cannot see any of them and the generation does not move (v2-720, main's).
+Every expectation below is the live `perl` 5.40.3 answer; every guard row was
+inverse-verified on a worktree of main.
+
+### The autoviv pair — one rule, seen from two accessors
+
+**#1058.** `my %h; $h{a}{b}++` left the element **undef** where perl says 1,
+and it was SILENT: the outer key IS created, so `exists $h{a}`, `keys %h` and a
+later `=` all looked right.  The chain lowers to
+`(p-post++ (p-gethash-box (p-gethash-box %h "a") "b"))` — the inner call
+creates key `a` with an undef box and hands that box, A PLACE, to the outer
+call, which returned a fresh DETACHED box instead.  `p-post++` then incremented
+a box nobody could reach.  Rule 12 exactly.
+
+The fix is perl's own rule: an undef CONTAINER that is a writable place is
+dereferenced-and-created.  `p-gethash-box` and `p-aref-box` — the two EAGER
+lvalue accessors, and the only two (`Pl/ExprToCL.pm` emits them for l-value
+position only) — ask `(p-box-p container)` and route through
+`p-ensure-hashref` / `p-ensure-arrayref`, the pair that already spells this for
+the deref-rooted shapes.  A container that is NOT a box keeps the detached box,
+which is what stops a read path from creating structure.
+
+**NIL joins `*p-undef*` in that test**, and that is why `$a[0]{k}++` CRASHED
+rather than merely losing the write: `%p-elem-cell` promotes an array HOLE to a
+box of NIL, so the guard missed it and NIL reached SBCL's GETHASH.  One
+condition, two failure modes.
+
+**#1057.** `$h{a}{b} .= "x"` DIED with an SBCL type error — and so did `+=`
+`-=` `*=` `/=` `%=` `**=` `x=` `&=` `|=` `^=` `<<=` `>>=` and the
+string-bitwise `&.=` `|.=` `^.=`.  The cause is the STORE, not the read:
+`%store-back-form` builds `(setf PLACE (op PLACE VALUE))`, and the setf WRITER
+of `p-gethash`/`p-aref` cannot vivify its container — it is handed a VALUE.
+
+**The mechanism already existed** (rule 11): `expand-autoviv` /
+`expand-autoviv-for-array`, the compile-time place-chain walker `p-setf`
+reaches through `p-autoviv-set`.  One new helper binds the container through it
+(and the key beside it) and `%store-back-form` grows a third arm.  So
+`$h{a}{b} = 1` and `$h{a}{b} .= "x"` now vivify by the same code.
+
+**Why not simply route through `p-setf`, measured:** its nested arm stores with
+a RAW `(setf (gethash …))`, which REPLACES the slot — `my %m; $m{a}{b} = "x";
+my $al = \$m{a}{b}; $m{a}{b} .= "y"` would answer `x` where perl answers `xy`.
+Binding the vivified container and storing through the ordinary
+`(setf (p-gethash CONT KEY) …)` keeps `%p-gethash-store`'s write rule.  The
+plain nested `=` still loses that alias — pre-existing, filed as **#1151** with
+the one-line fix, and NOT made worse here.
+
+**The third spelling is deleted.** `&.=` `|.=` `^.=` expanded through
+`%p-store-back`, a SECOND copy of the store decision — same crash, free to
+drift.  They go through `%store-back-form` now and `%p-store-back` is gone.
+
+**Structural:** the walker's `eval-when` block MOVED, 58 lines unchanged, from
+below `p-autoviv-set` to above the store-back vocabulary that now calls it,
+because a forward call would print a compile-time warning into the output four
+gate files CAPTURE.  Verified a pure permutation with `LC_ALL=C sort` —
+**a locale-collating `sort` is NOT a valid check** (it reorders equal-collating
+lines and reported 2542 spurious differences).
+
+**Measured:** a 30-row matrix, one file per row so a crash cannot hide the
+rest.  **3 identical at the base, 12 after #1058, 23 after #1057.**  All seven
+residues are ONE thing: perl vivifies an intermediate on a pure READ as well
+(`my $v = $h{a}{b}` leaves `keys %h` = 1, and so do `exists`/`defined` of the
+inner key), which needs the EMISSION to know an element's result is
+dereferenced — **#1150**.  Also filed **#1152** (a FLAT element compound assign
+still evaluates its container and key twice: `$h{k()} .= "q"` calls `k()`
+twice, perl once; the one-predicate widening that finishes it changes a very
+hot shape and wants a full sweep).
+
+### The overload family — one dispatch helper, four members
+
+**#1021.** `sort @objs` ignored an overloaded `cmp`: perl `3 2 1`, PCL
+`1 2 3`.  `p-sort`'s no-comparator arm compared the STRINGIFICATIONS, and
+perldoc -f sort says the default sorts "in standard string comparison order" —
+which is the `cmp` OPERATOR, handler and all.  Silent, because a `cmp` that
+AGREES with its `""` comes out right by accident.  The fix routes the default
+through `p-str-cmp`, the same function `sort { $a cmp $b }` already reached, so
+the two cannot give two answers.  **Speed:** the overload question is asked
+ONCE PER SORT (`%p-sort-plain-elements-p`, O(n) beside an O(n log n) sort,
+first test `*p-any-overload-registered*`), never per comparison.
+`%p-sort-classic`'s `:default` arm inherits it, as its own docstring predicted.
+12 probe rows byte-identical, call counts included.
+
+**#1004.** A `++`/`--` handler is a MUTATOR of `$_[0]` and perl DISCARDS its
+return; PCL stored it, which DECLASSED the object (`ref` went `''`).  One line.
+It survived because a `++` handler normally returns `$_[0]`, so storing and
+discarding coincide — the existing #900 fixture is exactly that shape.  The
+arm's comment asserted the opposite and is corrected.  The `nomethod` arm three
+lines below has DISCARDED since #972, so the two now agree; the AUTOGENERATED
+`++`-from-`+` still REPLACES the place, and the guard proves it.
+
+**#1001(a) + #1005's `x` half.** `*=` `%=` `.=` `x=` reached NO dispatch, and
+`x` had none in EITHER form: they all INLINED their arithmetic instead of
+delegating to the base operator.  `%compound-arith-form` — the guarded
+delegation `+=`/`-=` have used since #900 — gains a form-BUILDER alternative to
+its `cl-op` symbol, plus three one-line out-of-line slow halves.  `x=`
+delegates outright, which also fixes **a second bug in the same copy**: its
+inlined body was the `(apply #'concatenate 'string (make-list N …))` spelling
+#880 removed from `p-str-x` because it exhausts the control stack.
+
+**THE SPEED COST IS REAL AND FLAGGED.**
+`for (1..4e6) { $n *= 3; $n %= 1000003 }` (emitted as `p-*=-raw`/`p-%=-raw`),
+best-of-5 interleaved, PCL startup measured separately at 0.157 s:
+process 0.172 → 0.188 s (+9.4 %), the LOOP alone 0.015 → 0.031 s (roughly
+doubled), perl 0.111 s total / 0.106 s of loop — so PCL still beats perl on
+that loop by 3.4× where it beat it by 7×.  `.=` is UNCHANGED (the `str-buffer`
+Kind-A emission owns the hot string path and never reaches `p-.=`).  Filed as
+**#1153** with the discriminating measurement: whether the raw-numeric VERDICT
+proves a raw twin's slot is never a p-box, which would make the guard dead code
+for a literal delta.  **The test ORDER was re-tried and reverted** — box-test
+first read 0.1859 s against 0.1893 s, inside both spreads, so #972's
+five-candidate table stands and the numbers are left in the code.
+
+**#1005.** `abs sqrt cos sin exp log atan2 !` never asked.  **THREE different
+fall-throughs, which is the finding:** `sqrt cos sin exp log atan2` have no
+autogeneration (own → `nomethod` → body); `!` IS autogenerated from `bool`, so
+`%with-unary-overload` gains the `:autogenerated` key its binary twin has had
+since #972 and only the OWN handler was missing; `abs` autogenerates from `<`
+and `-`, NOT from `0+`, so a class with those two answers an OBJECT — a third
+order, `%p-abs-overload`.  `int` is deliberately absent (perl derives it from
+`0+`, which PCL already answers).  `p-not` and `p-!` were two copies of one
+line; `not` is `!` with a different precedence and the same overload key, so
+there is one reading now.  27 probe rows: **25 identical, up from 9**.
+
+**WHERE IT STOPS, and why:** #1000 (`use integer` bypasses every operator's
+dispatch) needs a `Pl/` EMISSION change and a new `p-+-int` runtime family
+— a new mechanism, a generation bump and a full sweep.  #1006(a) (the `=` copy
+constructor) needs a notion of a SHARED overloaded place that PCL has no
+representation for.  #1006(b) is the only residue of #1005's own matrix (a
+`fallback => 0` class must reach `nomethod` for `.` and `x`) and was declined
+WITH its measurement: `nomethod` appears in ZERO of the 25 `use overload` files
+across all four populations, so the @ISA fallback walk it needs would cost the
+`""`-overload concat hot path for a case nothing measures.
+
+### BI's residue — the companion bless chore (no product change)
+
+Round 25's seven companion ROW-DIFF wins, blessed with their causes because
+BI's worktree was gone: op/closure.t 4 rows (#1083) + op/gv.t 3 rows (#1020),
+`op/closure.t` C 274/7 → 277/5 and `op/gv.t` C 131/60 → 134/57, both spliced by
+hand.  **The first attempt saw `0 FIXED`**, because it ran on the pre-rebase
+branch — a companion row can only be blessed from a tree that CONTAINS the
+commit that moved it, and that is worth remembering.  `--bless-fails` and
+`--bless-shortfall` rewrite the accumulated `# taken-at:` block down to one
+sha, so both provenance blocks were restored by hand.  One thing the chore did
+not name: op/closure.t's `aborted-forms:1` note had gone STALE in the same move
+(the file aborts none now) and is cleared, attributed to BI's batch as a whole
+rather than bisected within it.
+
+### Bars
+
+Gate `PCLXS_DIR=~/pclxs tools/prove-core` GREEN after every commit, ending at
+**203 files / 6866 rows** (only the 13 known pclxs xs rows fail).  Guards
+`Pl/t/autoviv-02.t` (NEW, 5 rows, 2.9 s — autoviv-01.t is the gate's slowest
+file and was not touched), `Pl/t/overload-01.t` 34 → 40, `Pl/t/raw-verdict-01.t`
+58 → 60 (+ its `AoMut` fixture), all inverse-verified on a `92a568e` worktree.
+Companion `--jobs 1` over op/sort.t, op/inc.t, op/hashassign.t, op/bop.t,
+uni/overload.t, op/each.t, op/ref.t, op/array.t, opbasic/arith.t,
+opbasic/concat.t: **ROW DIFF 0 NEW / 0 FIXED / 0 UNVERIFIED / 0 LOST**, and
+every file's C_ok/C_notok identical to its blessed snapshot row.
+`perl sweep-perl-tests.pl --jobs 1 perl-tests/eval.t` after the final rebase:
+**PARTIAL 128/32 of 169, last test 163** — the #1118 regression is gone and
+nothing here touches it.
+
+**A trap paid for twice.**  The first #1058 attempt added a forward
+`declaim (ftype (function (t) t) …)` for the two ensure functions.  They are
+already declaimed `(function * *)` 8200 lines earlier, and the MISMATCH printed
+an SBCL warning that polluted four output-CAPTURING gate files
+(local-elem-02.t 35/35, our-local-01.t 12, utf8-source-01.t 22,
+use-require-01.t 12) while the behaviour under test was fine.  A forward
+reference inside a function body needs no declaim; a NEW one must match any
+existing proclamation exactly (#1005's `p-<`/`p--` were added to the existing
+block for that reason).
+
+Tasks filed: **#1150** (read-side intermediate vivification, needs the
+emission), **#1151** (nested plain `=` loses an alias), **#1152** (flat element
+compound assign evaluates its key twice), **#1153** (the measured `*=`/`%=`
+guard cost).  Closed: #1058, #1057, #1021, #1004, #1005; #1001 half (a) only.
+
 ## Session 470bj (Opus agent, 2026-09-05) — #1140 the VarAnnotator ARRAY-fact family, and the three items that were waiting on it: #996 half A3 (`local-push`, pushloc 0.48× → 0.28×), foreach-raw's write-to-the-array hole, classic-sort's foreach licence made exact
 
 **What shipped.**  `Pl::VarAnnotator` was scalar-only *by construction* — its
