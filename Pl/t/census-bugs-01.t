@@ -27,7 +27,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 16;
+plan tests => 22;
 
 sub run_cl {
     my ($code) = @_;
@@ -207,3 +207,91 @@ PL
     like($cl, qr/local/,
          '#1178 a `local` in a call argument is not silently deleted (#1192)');
 }
+
+# ── #1174 + #1173: perl's two FATAL zero-operand arithmetic errors ────────
+# perl 5.40.3 dies "Illegal division by zero" / "Illegal modulus zero", both
+# trappable by eval.  PCL used to let SBCL's own condition print itself for
+# `/` (a CL s-expression, "Operation was (/ 1 0)", in a perl program's output)
+# and, for `%`, not to die at all — the zero case was folded in with NaN, so
+# `$x % $n` with a computed $n that happened to be 0 gave a plausible NaN the
+# program then consumed.
+#
+# The zero test differs between the two, and each spelling below was probed:
+# `/` tests the NUMBER (5/0.5 is 10, 1/-0.0 dies), `%` tests the TRUNCATED
+# number (5 % 0.5 AND 5 % 0.9 both die).
+
+test_cl('#1174 1/0 dies with perl\'s message, trappably', <<'PL', "v=undef err=[Illegal division by zero]\n");
+my ($x, $y) = (1, 0);
+my $v = eval { $x / $y };
+my $e = $@ || ''; $e =~ s/ at .*//s;
+printf "v=%s err=[%s]\n", (defined $v ? $v : 'undef'), $e;
+PL
+
+test_cl('#1174 1/0.0 and $x/=0 and 1/"abc" die the same way', <<'PL', "float=1 compound=1 string=1 undefarg=1 half=10\n");
+sub dies { my $c = shift; eval { $c->() }; return ($@ =~ /Illegal division by zero/) ? 1 : 0 }
+my $u;
+printf "float=%d compound=%d string=%d undefarg=%d half=%s\n",
+  dies(sub { my $z = 0.0; 1 / $z }),
+  dies(sub { my $n = 7; $n /= 0; $n }),
+  dies(sub { my $s = "abc"; 1 / $s }),
+  dies(sub { 1 / $u }),
+  (5 / 0.5);
+PL
+
+test_cl('#1173 5 % 0 dies instead of answering NaN', <<'PL', "v=undef err=[Illegal modulus zero]\n");
+my $v = eval { 5 % 0 };
+my $e = $@ || ''; $e =~ s/ at .*//s;
+printf "v=%s err=[%s]\n", (defined $v ? $v : 'undef'), $e;
+PL
+
+test_cl('#1173 the modulus zero test is on the TRUNCATED operand', <<'PL', "half=1 point9=1 compound=1 negzero=1 neg=-1\n");
+sub dies { my $c = shift; eval { $c->() }; return ($@ =~ /Illegal modulus zero/) ? 1 : 0 }
+printf "half=%d point9=%d compound=%d negzero=%d neg=%s\n",
+  dies(sub { 5 % 0.5 }),
+  dies(sub { 5 % 0.9 }),
+  dies(sub { my $n = 7; $n %= 0; $n }),
+  dies(sub { my $z = -0.0; 1 % $z }),
+  (5 % -3);
+PL
+
+# ── #1173(a): substr() PAST THE END is undef, not "" ──────────────────────
+# perl 5.40.3: substr("abc",10,2), substr("abc",10) and substr("abc",-10,2)
+# are all undef; substr("abc",3) — the position one past the end, which is IN
+# range — is "".  PCL answered a defined "" for every one of them, so
+# `defined substr($s,$i)` was true for every $i.
+
+#
+# The `$SIG{__WARN__}` line is what isolates the VALUE claim from the separate
+# diagnostic one: perl emits nothing here (the snippet has no `use warnings`)
+# while PCL emits "substr outside of string" unconditionally, which is the
+# #221 warnings-gated-diagnostic gap and NOT something this row should bless
+# into an expected string.
+
+test_cl('#1173(a) substr past the end is undef; one-past-the-end is ""', <<'PL', "d(10,2)=0 d(10)=0 d(-10,2)=0 d(3)=1 v(3)=[] v(1,-1)=[b]\n");
+local $SIG{__WARN__} = sub { };
+my $s = "abc";
+printf "d(10,2)=%d d(10)=%d d(-10,2)=%d d(3)=%d v(3)=[%s] v(1,-1)=[%s]\n",
+  (defined substr($s,10,2)  ? 1 : 0),
+  (defined substr($s,10)    ? 1 : 0),
+  (defined substr($s,-10,2) ? 1 : 0),
+  (defined substr($s,3)     ? 1 : 0),
+  substr($s,3), substr($s,1,-1);
+PL
+
+# ── #1173(b): a false `exists` is a DEFINED "" ────────────────────────────
+# perl's `exists` is a boolean builtin, so its false is "" — the #416 rule.
+# Every one of these was undef in PCL, which `defined()` can see.
+
+test_cl('#1173(b) a false exists is defined, in all five forms', <<'PL', "hash=1 aryref=1 sub=1 env=1 true=1\n");
+sub have { 1 }
+my @a = (1, 2);
+my $ar = [1, 2];
+my %h = (a => 1);
+printf "hash=%d aryref=%d sub=%d env=%d true=%d\n",
+  (defined(exists $h{zz})            ? 1 : 0),
+  (defined(exists $ar->[9])          ? 1 : 0),
+  (defined(exists &nope)             ? 1 : 0),
+  (defined(exists $ENV{NO_SUCH_XYZ}) ? 1 : 0),
+  ((exists $h{a} && exists $a[0] && exists &have) ? 1 : 0);
+PL
+

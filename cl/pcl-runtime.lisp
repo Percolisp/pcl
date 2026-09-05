@@ -3697,35 +3697,65 @@
     (t (%p---slow a b))))
 (declaim (notinline p--))
 
+;;; Perl's two FATAL zero-operand arithmetic errors (tasks #1174, #1173).
+;;; pp_divide dies "Illegal division by zero" and pp_modulo "Illegal modulus
+;;; zero"; PCL used to let SBCL's own DIVISION-BY-ZERO condition print itself
+;;; ("Operation was (/ 1 0)" — a CL s-expression in a perl program's output,
+;;; and a host leak in a message), and for `%` it did not die at all: the zero
+;;; case was folded in with NaN and the caller got a quiet NaN it then
+;;; consumed.  Both are one `p-die` now, which is trappable by `eval` as perl's
+;;; is.  The location suffix is the runtime's usual one (see not-supported.md).
+;;;
+;;; WHICH OPERAND VALUE IS ZERO differs between the two, and both were probed
+;;; (5.40.3): `/` tests the NUMBER, so `5 / 0.5` is 10 and `1 / -0.0` dies;
+;;; `%` tests the TRUNCATED number, so `5 % 0.5` and `5 % 0.9` BOTH die.
+
+(declaim (inline %p-divide-numbers))
+(defun %p-divide-numbers (na nb)
+  "perl's `/` on two numbers: pp_divide's fatal on a zero divisor, then the
+   quotient.  CL integer/integer gives a ratio where perl gives a float, so an
+   exact ratio is coerced — `(typep r 'ratio)` and not `rationalp`, which is
+   true for integers too and would try to float a bignum quotient."
+  (when (zerop nb) (p-die "Illegal division by zero"))
+  (let ((r (/ na nb)))
+    (if (typep r 'ratio) (coerce r 'double-float) r)))
+
 (defun %p-/-slow (a b)
   "Perl division slow path: use overload dispatch, then coercion."
   (%with-binary-overload ("/" a b)
-                         ;; CL integer/integer -> ratio; Perl gives float for non-integer results.
-                         ;; Use (typep r 'ratio) not rationalp: rationalp is true for integers too,
-                         ;; so (/ bignum 2) would crash trying to coerce a huge exact-integer to float.
-                         (let ((r (/ (to-number a) (to-number b))))
-                           (if (typep r 'ratio) (coerce r 'double-float) r))))
+                         (%p-divide-numbers (to-number a) (to-number b))))
 
 (declaim (inline p-/))
 (defun p-/ (a b)
   "Perl division with numberp fast path + use overload dispatch
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (if (and (numberp a) (numberp b))
-      (let ((r (/ a b)))
-        (if (typep r 'ratio) (coerce r 'double-float) r))
+      (%p-divide-numbers a b)
       (%p-/-slow a b)))
 (declaim (notinline p-/))
 
+(defun %p-modulo (a b)
+  "perl's `%` on two operands NEITHER of which is overloaded — the one body
+   `p-%`'s slow path and `%=`'s inline form both use, so the two cannot drift
+   (before this, `$x %= 0` raised a raw CL error while `$x % 0` answered NaN).
+
+   pp_modulo truncates both operands to integers, so the fatal is on the
+   TRUNCATED right operand: `5 % 0.5` dies in perl.  The NaN arm is perl's for
+   a NaN operand and for an infinite LEFT one; that it also fires for an
+   infinite RIGHT one is a measured divergence (`5 % inf` is 5 in perl) and is
+   task #1191, deliberately left alone here."
+  (let ((na (to-number a)) (nb (to-number b)))
+    (cond
+      ((or (%pcl-nan-p na) (%pcl-nan-p nb)
+           (and (floatp na) (sb-ext:float-infinity-p na))
+           (and (floatp nb) (sb-ext:float-infinity-p nb)))
+       (sb-kernel:make-double-float #x7FF80000 0))
+      ((zerop (truncate nb)) (p-die "Illegal modulus zero"))
+      (t (mod (truncate na) (truncate nb))))))
+
 (defun %p-%-slow (a b)
   "Perl modulo slow path with use overload '%' dispatch"
-  (%with-binary-overload ("%" a b)
-                         (let ((na (to-number a)) (nb (to-number b)))
-                           (if (or (%pcl-nan-p na) (%pcl-nan-p nb)
-                                   (and (floatp na) (sb-ext:float-infinity-p na))
-                                   (and (floatp nb) (sb-ext:float-infinity-p nb))
-                                   (zerop nb))
-                               (sb-kernel:make-double-float #x7FF80000 0)
-                               (mod (truncate na) (truncate nb))))))
+  (%with-binary-overload ("%" a b) (%p-modulo a b)))
 
 (declaim (inline p-%))
 (defun p-% (a b)
@@ -4264,7 +4294,17 @@
     (when oob
       (if replacement
           (error "substr outside of string")
-          (p-warn (format nil "substr outside of string~%"))))
+          (progn
+            ;; An out-of-range READ is perl's UNDEF, not the empty string it
+            ;; clamps to (#1173): `substr("abc",10,2)` and `substr("abc",10)`
+            ;; are both undef in 5.40.3, and `substr("abc",-10,2)` too, while
+            ;; `substr("abc",3)` — the position one PAST the end, which is in
+            ;; range — is "".  A defined "" is a value the program consumes:
+            ;; `defined substr($s,$i)` was true for every $i.
+            ;; The diagnostic stays unconditional; perl gates it on `use
+            ;; warnings`, which is the separate #221 gap.
+            (p-warn (format nil "substr outside of string~%"))
+            (return-from p-substr *p-undef*))))
     (if replacement
         ;; 4-arg form (or lvalue): replace and return the replaced portion
         (let* (;; Warn when target is a reference being coerced to string —
@@ -7904,11 +7944,13 @@ per element."
 
 (%define-compound-pair p-%= p-%=-raw (value)
                        "Perl %= (modulo-assign).  Overload `%` through
-   %p-compound-%-slow when an operand is blessed; see %compound-arith-form."
+   %p-compound-%-slow when an operand is blessed; see %compound-arith-form.
+   The non-blessed form is `%p-modulo`, the SAME body `p-%`'s slow path uses:
+   spelling the arithmetic out again here is how `$x %= 0` came to raise a raw
+   CL division-by-zero while `$x % 0` answered NaN (#1173)."
                        (%compound-arith-form
                         '%p-compound-%-slow
-                        (lambda (c d) `(mod (truncate (to-number ,c))
-                                            (truncate (to-number ,d))))
+                        (lambda (c d) `(%p-modulo ,c ,d))
                         cur value nil numericp))
 
 (%define-compound-pair p-**= p-**=-raw (value)
@@ -10514,8 +10556,15 @@ which is one of #1140's escape spellings (probed)."
     (if (stringp a) (p-ensure-arrayref arr) a)))
 
 (defun p-exists (hash key)
-  "Perl exists function
+  "Perl exists function — 1 or the DEFINED empty string, never undef (#1173).
+   perl's `exists` is a boolean-valued builtin, and a false answer from a
+   builtin is `\"\"`: `defined(exists $h{nope})` is TRUE in perl and was false
+   here, which is the same rule #416 settled for the regex builtins.
    Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
+  (p-bool (%p-exists-p hash key)))
+
+(defun %p-exists-p (hash key)
+  "The CL-boolean half of p-exists, so the perl-value wrapper is stated once."
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (cond
@@ -10599,17 +10648,19 @@ which is one of #1140's escape spellings (probed)."
    assigned slot may hold a bare number or string (the box carries IDENTITY,
    never existence).  Reading box-ness here made every raw element answer
    `exists` = FALSE (Pl/t/delete-01.t rows 4/10 caught it at the flip).
+   Answers 1 or the DEFINED empty string, never undef — see p-exists (#1173).
    Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
-  (let* ((a (%p-designator-array arr))
-         (i (truncate (to-number idx)))
-         (len (if (vectorp a) (length a) 0))
-         (actual-idx (if (< i 0) (+ len i) i)))
-    (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
-    (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
-         (aref a actual-idx)
-         ;; an unvivified deferred-element alias (@_ hole) is still a hole
-         (not (%p-defelem-p (aref a actual-idx)))
-         t)))
+  (p-bool
+   (let* ((a (%p-designator-array arr))
+          (i (truncate (to-number idx)))
+          (len (if (vectorp a) (length a) 0))
+          (actual-idx (if (< i 0) (+ len i) i)))
+     (when (%p-wrong-referent-p "ARRAY" a) (%p-not-a-ref "ARRAY"))
+     (and (vectorp a) (>= actual-idx 0) (< actual-idx len)
+          (aref a actual-idx)
+          ;; an unvivified deferred-element alias (@_ hole) is still a hole
+          (not (%p-defelem-p (aref a actual-idx)))
+          t))))
 
 (defun p-delete-hash-slice (hash &rest keys)
   "Perl delete for hash slices: delete @hash{k1, k2, ...}
@@ -19950,16 +20001,15 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; ============================================================
 
 (defun p-sub-exists (pkg-str name-str)
-  "Perl exists &funcname — true if sub has been declared or defined."
+  "Perl exists &funcname — 1 if the sub has been declared or defined, else the
+   DEFINED empty string (it was undef; see p-exists, #1173)."
   (let* ((pkg (%pcl-find-package pkg-str))
          (sym (when pkg
                 (find-symbol (%pcl-cl-sub-name name-str)
                              pkg))))
-    (if (and sym
-             (or (gethash sym *p-declared-subs*)
-                 (fboundp sym)))
-        (make-p-box 1)
-        (make-p-box nil))))
+    (make-p-box (p-bool (and sym
+                             (or (gethash sym *p-declared-subs*)
+                                 (fboundp sym)))))))
 
 (defun p-sub-defined (pkg-str name-str)
   "Perl defined &funcname — true only if sub has an actual body (not a stub)."
@@ -19985,28 +20035,27 @@ buffer's fill-pointer; everything else falls back to file-length."
   *p-undef*)
 
 (defun p-coderef-exists-p (coderef)
-  "Perl exists &{$coderef} — true if coderef points to a declared or defined sub.
+  "Perl exists &{$coderef} — 1 if coderef points to a declared or defined sub,
+   else the DEFINED empty string (it was undef; see p-exists, #1173).
    Accepts a real function object OR a symbolic sub-name string (no-strict-refs)."
-  (let ((v (unbox coderef)))
-    (when (p-box-p v) (setf v (p-box-value v)))
-    (cond
-      ((functionp v)
-       ;; A lazy AUTOLOAD fallback stands for a sub that was never declared:
-       ;; exists is false until the symbol gains a status or a definition.
-       ;; Any other function object exists (declared stub or defined body).
-       (let ((lazy (gethash v *p-lazy-coderef-target*)))
-         (if (and lazy
-                  (not (gethash lazy *p-declared-subs*))
-                  (not (fboundp lazy)))
-             (make-p-box nil)
-             (make-p-box 1))))
-      ;; Symbolic name: exists iff it resolves to a known sub (stub or defined).
-      ((or (stringp v) (numberp v))
-       (let ((sym (%p-resolve-sub-symbol v)))
-         (if (and sym (or (gethash sym *p-declared-subs*) (fboundp sym)))
-             (make-p-box 1)
-             (make-p-box nil))))
-      (t (make-p-box nil)))))
+  (make-p-box
+   (p-bool
+    (let ((v (unbox coderef)))
+      (when (p-box-p v) (setf v (p-box-value v)))
+      (cond
+        ((functionp v)
+         ;; A lazy AUTOLOAD fallback stands for a sub that was never declared:
+         ;; exists is false until the symbol gains a status or a definition.
+         ;; Any other function object exists (declared stub or defined body).
+         (let ((lazy (gethash v *p-lazy-coderef-target*)))
+           (not (and lazy
+                     (not (gethash lazy *p-declared-subs*))
+                     (not (fboundp lazy))))))
+        ;; Symbolic name: exists iff it resolves to a known sub (stub or defined).
+        ((or (stringp v) (numberp v))
+         (let ((sym (%p-resolve-sub-symbol v)))
+           (and sym (or (gethash sym *p-declared-subs*) (fboundp sym)) t)))
+        (t nil))))))
 
 (defun p-coderef-defined-p (coderef)
   "Perl defined &{$coderef} — true only if coderef points to a sub with a body.
