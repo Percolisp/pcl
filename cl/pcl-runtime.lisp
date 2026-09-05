@@ -6290,6 +6290,97 @@ per element."
         (dotimes (i n) (vector-push-extend (svref sd i) place))))
   place)
 
+;;; ── A RANGE IN AN ARRAY ASSIGNMENT IS NOT MATERIALISED (task #1204) ────────
+;;; `@a = (1..$n)` and `@a = (1..20, $_)` are how Perl builds an array, and
+;;; both went through the general path: `p-..` allocated a simple-vector of the
+;;; whole range, the enclosing `(vector …)` allocated another, the RHS was
+;;; snapshotted, and only then were the elements walked into the destination.
+;;; Every one of those allocations is avoidable — the destination's elements
+;;; ARE the counting loop.
+;;;
+;;; THE LICENCE IS SYNTACTIC AND IT IS THE MACRO'S OWN VIEW of the RHS: the
+;;; value form is a `(p-.. A B)`, or a `(vector S1 … Sk)` at least one of whose
+;;; pieces is one.  Nothing else qualifies, and a declined form takes the
+;;; general path unchanged — which since task #1181 has the block copy, so the
+;;; two fast paths cover different shapes rather than competing.
+;;;
+;;; WHAT THE SEGMENT PATH STILL DOES, in this order, because perl does:
+;;;   * evaluate EVERY piece — the range bounds included — BEFORE the
+;;;     destination is cleared, and SNAPSHOT each non-range piece, so
+;;;     `@a = (1..2, @a)` still reads the old @a (probed: `1 2 1 2`);
+;;;   * run the whole-array-assignment checks and reset the each() iterator;
+;;;   * store each non-range piece through the SAME walk the general path uses
+;;;     (%p-array-add-items — extracted from p-array-fill for this, not copied),
+;;;     so flattening, holes and boxing are one rule and cannot drift;
+;;;   * refuse an oversized range with perl's own two messages
+;;;     (%p-range-size-check, shared with `p-..`).
+;;; A magical STRING range ('a'..'zz') has no counting form, so that segment
+;;; goes through `p-..` and the ordinary walk: same answer, same cost as before.
+;;;
+;;; Sized before it was written (hand-replaced A/B, the §0.5 method): the
+;;; `arrfill` bench row **-93.9 %** against a byte-identical control pair
+;;; reading -1.0 % in the same window.
+(defun %p-array-add-items (src place)
+  "p-array-fill's walk over ONE source: flatten a vector / hash / list /
+   flatten-marker, store a scalar, preserve a hole.  It was `add-items`, a
+   LABELS inside p-array-fill; the segment fill below needs the same walk for
+   one piece, and a second copy of it is exactly the drift rule 11 forbids."
+  (labels ((add-items (src)
+             (cond
+               ((stringp src)
+                (vector-push-extend (make-p-box src) place))
+               ((hash-table-p src)
+                (maphash (lambda (k v)
+                           (when (%p-real-hash-key-p k)
+                             (vector-push-extend (make-p-box k) place)
+                             (%p-array-store-scalar place v)))
+                         src))
+               ((vectorp src)
+                ;; Index the element-storage vector directly when SRC is a
+                ;; plain array that is NOT the array being filled: PLACE
+                ;; grows under this loop and a growth reallocates its data
+                ;; vector, so a hoisted pointer would go stale — for any
+                ;; other SRC the two vectors are unrelated and the hoist is
+                ;; exactly the same reads.
+                (let ((sd (and (not (eq src place)) (%p-vec-data src)))
+                      (n (length src)))
+                  (if sd
+                      (dotimes (i n)
+                        (let ((item (svref sd i)))
+                          (%p-array-fill-item item place add-items)))
+                      (dotimes (i n)
+                        (let ((item (aref src i)))
+                          (%p-array-fill-item item place add-items))))))
+               ((listp src)
+                (loop for item in src
+                      do (%p-array-fill-item item place add-items)))
+               ;; %ENV / %INC: the marker IS the hash, expanded through the
+               ;; one env/INC walk (%p-marker-pairs, task #736).  This
+               ;; walker is p-array-fill's own (it preserves holes and
+               ;; stores into PLACE), so the arm is spelled here as well as
+               ;; in %p-flatten-list — the sibling hash-table arms are the
+               ;; same pair.
+               ((%p-hash-marker-p src)
+                (loop for x across (%p-marker-pairs src)
+                      do (%p-array-store-scalar place x)))
+               ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
+               (t
+                (when src
+                  (%p-array-store-scalar place src))))))
+    (add-items src)
+    place))
+
+(defun %p-array-fill-start (place)
+  "Begin a direct SEGMENT fill of PLACE: the three things p-array-fill does
+   before its own walk — perl's read-only refusal for a whole-array
+   assignment, the each() iterator reset an assignment performs, and the
+   emptying.  Every segment is appended after this."
+  (%p-check-array-writable place)
+  (remhash place *array-iterators*)
+  (setf (fill-pointer place) 0)
+  place)
+
+
 (defun p-array-fill (place value)
   "Clear adjustable array PLACE and refill it from VALUE: flatten nested vectors
    (but not strings), box elements, preserve nil holes.  Snapshots VALUE first so
@@ -6343,58 +6434,49 @@ per element."
         (adjust-array place want)))
     ;; Perl: assigning to an array resets the each() iterator
     (remhash place *array-iterators*)
-    (labels ((add-items (src)
-               (cond
-                 ((stringp src)
-                  (vector-push-extend (make-p-box src) place))
-                 ((hash-table-p src)
-                  (maphash (lambda (k v)
-                             (when (%p-real-hash-key-p k)
-                               (vector-push-extend (make-p-box k) place)
-                               (%p-array-store-scalar place v)))
-                           src))
-                 ((vectorp src)
-                  ;; Index the element-storage vector directly when SRC is a
-                  ;; plain array that is NOT the array being filled: PLACE
-                  ;; grows under this loop and a growth reallocates its data
-                  ;; vector, so a hoisted pointer would go stale — for any
-                  ;; other SRC the two vectors are unrelated and the hoist is
-                  ;; exactly the same reads.
-                  (let ((sd (and (not (eq src place)) (%p-vec-data src)))
-                        (n (length src)))
-                    (if sd
-                        (dotimes (i n)
-                          (let ((item (svref sd i)))
-                            (%p-array-fill-item item place add-items)))
-                        (dotimes (i n)
-                          (let ((item (aref src i)))
-                            (%p-array-fill-item item place add-items))))))
-                 ((listp src)
-                  (loop for item in src
-                        do (%p-array-fill-item item place add-items)))
-                 ;; %ENV / %INC: the marker IS the hash, expanded through the
-                 ;; one env/INC walk (%p-marker-pairs, task #736).  This
-                 ;; walker is p-array-fill's own (it preserves holes and
-                 ;; stores into PLACE), so the arm is spelled here as well as
-                 ;; in %p-flatten-list — the sibling hash-table arms are the
-                 ;; same pair.
-                 ((%p-hash-marker-p src)
-                  (loop for x across (%p-marker-pairs src)
-                        do (%p-array-store-scalar place x)))
-                 ;; Scalar (number, p-box, nil=undef) - wrap in a single-element array
-                 (t
-                  (when src
-                    (%p-array-store-scalar place src))))))
-      (add-items snap))
+    (%p-array-add-items snap place)
     place))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun %p-range-form-p (form)
+    "True when FORM is the emitted shape of a Perl range, `(p-.. A B)`.
+     `p-...` is the same operator in list context and p-array-='s RHS is
+     always list context, so both spellings count."
+    (and (consp form) (member (car form) '(p-.. p-...)) (= (length form) 3)))
+
+  (defun %p-fill-segments (form)
+    "The SEGMENT list when FORM is an array-assignment RHS the destination can
+     be built from directly, and NIL when it is not.  A segment is
+     `(:range A B)` for a range piece and `(:item F)` for any other piece.
+     Two shapes qualify and no others: a bare range, and a literal
+     `(vector …)` at least one of whose pieces is a range.  Requiring a range
+     is the point — without one the general path is already the better answer
+     (it has the block copy, task #1181), so this must not steal its work."
+    (cond
+      ((%p-range-form-p form) (list (list :range (second form) (third form))))
+      ((and (consp form) (eq (car form) 'vector)
+            (some #'%p-range-form-p (cdr form)))
+       (loop for f in (cdr form)
+             collect (if (%p-range-form-p f)
+                         (list :range (second f) (third f))
+                         (list :item f))))
+      (t nil)))
+
+  )
 
 (defmacro p-array-= (place value)
   "Assign to an array variable (@arr). Clears and refills from value.
    Flattens nested vectors (but not strings), wraps elements in boxes.
    Snapshots any adjustable vector in the RHS before clearing the LHS
    so that self-assignment (@a = @a) and embedding (@a = (1, @a, 2))
-   work correctly.  nil slots (deleted elements) are preserved."
-  (let ((val (gensym "VAL")))
+   work correctly.  nil slots (deleted elements) are preserved.
+
+   A RANGE SEGMENT LIST is built DIRECTLY instead of being materialised and
+   then walked, decided from the VALUE form and declining to the general path
+   below (task #1204, %p-fill-segments).  Its commentary is on the runtime
+   functions it calls."
+  (let ((val (gensym "VAL"))
+        (segs (%p-fill-segments value)))
     ;; Assigning to an array imposes LIST context on the RHS (Perl: @a = EXPR
     ;; evaluates EXPR in list context).  Bind *wantarray* t so a context-sensitive
     ;; RHS — most importantly readline `my @lines = <$fh>` — yields its list form
@@ -6402,11 +6484,37 @@ per element."
     ;; list-assign-rhs* stays nil so this is NOT the per-line `while(($x)=<FH>)`
     ;; case.  Funcalls are already wrapped by gen_funcall; an inner binding wins,
     ;; so this is a no-op for them and only fixes the unwrapped readline/each forms.
-    `(let ((,val (let ((*wantarray* t)) ,value)))
-       (unless (boundp ',place)
-         (%p-ensure-storage (quote ,place))
-         (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
-       (p-array-fill ,place ,val))))
+    (if segs
+        ;; SEGMENT FILL.  Every piece is evaluated (and every non-range piece
+        ;; SNAPSHOTTED) before the destination is cleared, because perl
+        ;; evaluates the whole RHS first: `@a = (1..2, @a)` must read the old
+        ;; @a.  The bounds of a range are pieces too (`@a = (1..scalar(@a))`).
+        (let ((binds '()) (fills '()))
+          (dolist (s segs)
+            (ecase (first s)
+              (:range (let ((a (gensym "LO")) (b (gensym "HI")))
+                        (push `(,a (let ((*wantarray* t)) ,(second s))) binds)
+                        (push `(,b (let ((*wantarray* t)) ,(third s))) binds)
+                        (push `(%p-array-fill-range ,place ,a ,b) fills)))
+              (:item (let ((v (gensym "SEG")))
+                       (push `(,v (%p-snapshot-array-rhs
+                                   (let ((*wantarray* t)) ,(second s))))
+                             binds)
+                       (push `(%p-array-add-items ,v ,place) fills)))))
+          `(progn
+             (unless (boundp ',place)
+               (%p-ensure-storage (quote ,place))
+               (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
+             (let* ,(nreverse binds)
+               (%p-array-fill-start ,place)
+               ,@(nreverse fills)
+               ,place)))
+        `(let ((,val (let ((*wantarray* t)) ,value)))
+           (unless (boundp ',place)
+             (%p-ensure-storage (quote ,place))
+             (setf (symbol-value ',place) (make-array 0 :adjustable t :fill-pointer 0)))
+           (p-array-fill ,place ,val)))))
+
 
 (defun p-hash-fill (place value)
   "Clear hash PLACE and repopulate it from VALUE (flattened to k-v pairs; an odd
@@ -7485,90 +7593,90 @@ per element."
     ;; List assignment: (vector $a $b $c) = @_ or similar -> p-list-=
     ((and (listp place) (eq (car place) 'vector))
      `(p-list-= ,place ,value))
-;; Array slice assignment: (p-setf (p-aslice arr indices...) values)
-;; Assigns each value from RHS to the corresponding index in LHS
-((and (listp place) (eq (car place) 'p-aslice))
- (let* ((arr (cadr place))
-        (indices-exprs (cddr place))
-        (src (gensym "SRC"))
-        (src-vec (gensym "SRC-VEC"))
-        (indices (gensym "INDICES"))
-        (consts (%p-const-subscript-values indices-exprs)))
-   ;; The assignment proper; a simple-symbol array is auto-declared first
-   ;; (#387 family 46, s413: the body was spelled once per case).
-   (let ((body
-          `(let* ,(%p-slice-src-bindings src src-vec value)
-             ,@(if consts
-                   ;; CONSTANT indices: the N stores, no run-time index
-                   ;; walk (task #1203; see %p-const-subscript-values).
-                   (%p-unrolled-slice-stores 'p-aref arr consts src-vec)
-                   `(;; Flatten indices (handle range operator returning
-                     ;; vector or list)
-                     (let ((,indices (let ((idx-list nil))
-                                       (dolist (idx (list ,@indices-exprs)
-                                                (nreverse idx-list))
-                                         (cond
-                                           ((listp idx)
-                                            (dolist (i idx) (push i idx-list)))
-                                           ((and (vectorp idx) (not (stringp idx)))
-                                            (loop for i across idx do (push i idx-list)))
-                                           (t (push idx idx-list)))))))
-                       ;; Assign each element
-                       (loop for i from 0 below (length ,indices)
-                             for idx in ,indices
-                             do (setf (p-aref ,arr idx)
-                                      (if (< i (length ,src-vec))
-                                          (aref ,src-vec i)
-                                          *p-undef*))))))
-             ;; Return the values that were assigned
-             ,src-vec)))
-     (if (symbolp arr)
-         `(progn
-            (unless (boundp ',arr)
-              (%p-ensure-storage (quote ,arr))
-              (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
-            ,body)
-         ;; Non-symbol array expression - just use it directly
-         body))))
-;; Hash slice assignment: (p-setf (p-hslice hash keys...) values)
-((and (listp place) (eq (car place) 'p-hslice))
- (let* ((hash (cadr place))
-        (keys-exprs (cddr place))
-        (src (gensym "SRC"))
-        (src-vec (gensym "SRC-VEC"))
-        (keys (gensym "KEYS"))
-        (consts (%p-const-subscript-values keys-exprs)))
-   ;; The assignment proper; a simple-symbol hash is auto-declared first
-   ;; (#387 family 46, s413: the body was spelled once per case).
-   (let ((body
-          `(let* ,(%p-slice-src-bindings src src-vec value)
-             ,@(if consts
-                   ;; CONSTANT keys — `@h{qw(a b)} = …`, the idiom (#1203)
-                   (%p-unrolled-slice-stores 'p-gethash hash consts src-vec)
-                   `((let ((,keys (let ((key-list nil))
-                                    (dolist (k (list ,@keys-exprs)
-                                             (nreverse key-list))
-                                      (cond
-                                        ((listp k)
-                                         (dolist (kk k) (push kk key-list)))
-                                        ((and (vectorp k) (not (stringp k)))
-                                         (loop for kk across k do (push kk key-list)))
-                                        (t (push k key-list)))))))
-                       (loop for i from 0 below (length ,keys)
-                             for k in ,keys
-                             do (setf (p-gethash ,hash k)
-                                      (if (< i (length ,src-vec))
-                                          (aref ,src-vec i)
-                                          *p-undef*))))))
-             ,src-vec)))
-     (if (symbolp hash)
-         `(progn
-            (unless (boundp ',hash)
-              (%p-ensure-storage (quote ,hash))
-              (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
-            ,body)
-         ;; Non-symbol hash expression
-         body))))
+    ;; Array slice assignment: (p-setf (p-aslice arr indices...) values)
+    ;; Assigns each value from RHS to the corresponding index in LHS
+    ((and (listp place) (eq (car place) 'p-aslice))
+     (let* ((arr (cadr place))
+            (indices-exprs (cddr place))
+            (src (gensym "SRC"))
+            (src-vec (gensym "SRC-VEC"))
+            (indices (gensym "INDICES"))
+            (consts (%p-const-subscript-values indices-exprs)))
+       ;; The assignment proper; a simple-symbol array is auto-declared first
+       ;; (#387 family 46, s413: the body was spelled once per case).
+       (let ((body
+              `(let* ,(%p-slice-src-bindings src src-vec value)
+                 ,@(if consts
+                       ;; CONSTANT indices: the N stores, no run-time index
+                       ;; walk (task #1203; see %p-const-subscript-values).
+                       (%p-unrolled-slice-stores 'p-aref arr consts src-vec)
+                       `(;; Flatten indices (handle range operator returning
+                         ;; vector or list)
+                         (let ((,indices (let ((idx-list nil))
+                                           (dolist (idx (list ,@indices-exprs)
+                                                    (nreverse idx-list))
+                                             (cond
+                                               ((listp idx)
+                                                (dolist (i idx) (push i idx-list)))
+                                               ((and (vectorp idx) (not (stringp idx)))
+                                                (loop for i across idx do (push i idx-list)))
+                                               (t (push idx idx-list)))))))
+                           ;; Assign each element
+                           (loop for i from 0 below (length ,indices)
+                                 for idx in ,indices
+                                 do (setf (p-aref ,arr idx)
+                                          (if (< i (length ,src-vec))
+                                              (aref ,src-vec i)
+                                              *p-undef*))))))
+                 ;; Return the values that were assigned
+                 ,src-vec)))
+         (if (symbolp arr)
+             `(progn
+                (unless (boundp ',arr)
+                  (%p-ensure-storage (quote ,arr))
+                  (setf (symbol-value ',arr) (make-array 0 :adjustable t :fill-pointer 0)))
+                ,body)
+             ;; Non-symbol array expression - just use it directly
+             body))))
+    ;; Hash slice assignment: (p-setf (p-hslice hash keys...) values)
+    ((and (listp place) (eq (car place) 'p-hslice))
+     (let* ((hash (cadr place))
+            (keys-exprs (cddr place))
+            (src (gensym "SRC"))
+            (src-vec (gensym "SRC-VEC"))
+            (keys (gensym "KEYS"))
+            (consts (%p-const-subscript-values keys-exprs)))
+       ;; The assignment proper; a simple-symbol hash is auto-declared first
+       ;; (#387 family 46, s413: the body was spelled once per case).
+       (let ((body
+              `(let* ,(%p-slice-src-bindings src src-vec value)
+                 ,@(if consts
+                       ;; CONSTANT keys — `@h{qw(a b)} = …`, the idiom (#1203)
+                       (%p-unrolled-slice-stores 'p-gethash hash consts src-vec)
+                       `((let ((,keys (let ((key-list nil))
+                                        (dolist (k (list ,@keys-exprs)
+                                                 (nreverse key-list))
+                                          (cond
+                                            ((listp k)
+                                             (dolist (kk k) (push kk key-list)))
+                                            ((and (vectorp k) (not (stringp k)))
+                                             (loop for kk across k do (push kk key-list)))
+                                            (t (push k key-list)))))))
+                           (loop for i from 0 below (length ,keys)
+                                 for k in ,keys
+                                 do (setf (p-gethash ,hash k)
+                                          (if (< i (length ,src-vec))
+                                              (aref ,src-vec i)
+                                              *p-undef*))))))
+                 ,src-vec)))
+         (if (symbolp hash)
+             `(progn
+                (unless (boundp ',hash)
+                  (%p-ensure-storage (quote ,hash))
+                  (setf (symbol-value ',hash) (make-hash-table :test 'equal)))
+                ,body)
+             ;; Non-symbol hash expression
+             body))))
     ;; $! as lvalue: (p-setf (p-errno-string) val) -> set C errno
     ((and (listp place) (eq (car place) 'p-errno-string))
      `(setf (p-errno-string) ,value))
@@ -8571,6 +8679,18 @@ per element."
               (p-die (make-p-box "Range iterator outside integer range") nil))
             (values :numeric ns-i ne-i))))))
 
+;;; perl's own refusal for an oversized numeric range, asked by `p-..` and by
+;;; the segment fill that builds a range straight into an array (task #1204) —
+;;; ONE spelling, so the two cannot answer differently.  perl croaks "panic:
+;;; memory wrap" when the element count's byte size wraps size_t, and fails
+;;; allocation ("Out of memory...") otherwise; range.t RT #130841 matches on
+;;; these texts, so the refusal guard speaks them too.
+(defun %p-range-size-check (a b)
+  (when (> (- b a) 100000000)
+    (if (> (- b a) #.(expt 2 61))
+        (error "panic: memory wrap")
+        (error "Out of memory during list extend"))))
+
 (defun p-.. (start end)
   "Perl range operator .. - returns a vector from start to end (inclusive).
    Works with numbers, single characters, and multi-character strings
@@ -8601,14 +8721,7 @@ per element."
                 (make-array 0)))
         ;; Numeric range (materialized — only reached outside foreach)
         (progn
-          (when (> (- b a) 100000000)
-            ;; perl croaks "panic: memory wrap" when the element count's
-            ;; byte size wraps size_t, and fails allocation ("Out of
-            ;; memory...") otherwise; range.t RT #130841 matches on these
-            ;; texts, so the refusal guard speaks them too.
-            (if (> (- b a) #.(expt 2 61))
-                (error "panic: memory wrap")
-                (error "Out of memory during list extend")))
+          (%p-range-size-check a b)
           ;; Fill the result vector directly.  The old shape CONSED the whole
           ;; range into a list and then COERCEd it — two passes and one cons
           ;; per element for a result whose length is known up front (p-.. was
@@ -8619,6 +8732,36 @@ per element."
                 (dotimes (i n) (setf (svref v i) (+ a i)))
                 v)
               (make-array 0))))))
+
+(defun %p-array-fill-range (place start end)
+  "Append the range START..END to PLACE without materialising it.
+   A magical STRING range has no counting form, so it goes through `p-..` and
+   the ordinary walk — the same answer the general path gives, since that is
+   the same call.
+
+   THE ELEMENT REPRESENTATION IS THE GATE'S, not this function's.  A range's
+   elements are plain integers, and for those %p-array-store-scalar stores the
+   integer RAW when *p-raw-elems* is on and a BOX when it is off — so the
+   direct arm is legal exactly while the gate is, and with the gate off this
+   goes through the one store rule like everything else.  (BN's block fill has
+   the same shape for the same reason: a fast path must disappear with the gate
+   or the all-boxed A/B world stops being measurable.)"
+  (multiple-value-bind (kind a b) (%p-range-classify start end)
+    (if (eq kind :string)
+        (%p-array-add-items (p-.. start end) place)
+        (progn
+          (%p-range-size-check a b)
+          (when (<= a b)
+            (let* ((n (1+ (- b a)))
+                   (want (+ (fill-pointer place) n)))
+              (when (and (> want (array-dimension place 0))
+                         (adjustable-array-p place))
+                (adjust-array place want))
+              (if *p-raw-elems*
+                  (loop for i from a to b do (%p-vpush i place))
+                  (loop for i from a to b
+                        do (%p-array-store-scalar place i))))))))
+  place)
 
 (defun p-... (start end)
   "Perl three-dot range operator ... - same as .. in list context."

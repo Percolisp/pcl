@@ -45,7 +45,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 6;
+plan tests => 11;
 
 # ── the two instruments ──────────────────────────────────────────────────────
 
@@ -145,5 +145,60 @@ my %k; my $r=[1,2]; @k{qw(a b)}=($r,3);   print "10:", ref($k{a}), $k{a}[1], $k{
 my $s=[0,0,0]; @{$s}[0,2]=(4,5);          print "11:@$s\n";
 my %m; my @kk=qw(a b); @m{@kk}=(1,2);     print "12:$m{a}$m{b}\n";
 my @n=(1,2,3); @n[3..1]=(7);              print "13:@n\n";
+PERL
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #1204 — an array assignment from a RANGE is not materialised
+# ─────────────────────────────────────────────────────────────────────────────
+{
+    my $mx = expand(
+        '(p-array-= @a (p-.. 1 5))',
+        '(p-array-= @a (vector (p-.. 1 20) $x))',
+        '(p-array-= @a @b)',
+        '(p-array-= @a (vector $x $y))',
+    );
+    my @l = split /\n/, $mx;
+    like($l[0], qr/%p-array-fill-range/i,
+         '#1204: a bare range RHS becomes a direct segment fill');
+    like($l[1], qr/%p-array-fill-range.*%p-array-add-items/is,
+         '#1204: a mixed list fills in segments — the range direct, the rest through the one walk');
+    # THE NEGATIVES.  Without a range there is nothing to avoid materialising,
+    # and the general path already has the block copy (task #1181) — this must
+    # not steal its work.
+    unlike($l[2], qr/%p-array-fill-range/i,
+           '#1204 NEGATIVE: a whole-array RHS keeps p-array-fill');
+    unlike($l[3], qr/%p-array-fill-range/i,
+           '#1204 NEGATIVE: a list with no range keeps p-array-fill');
+}
+
+{
+    # perl 5.40.3, probed.  The range alone and mixed with other pieces, a
+    # DYNAMIC bound, an EMPTY range, a magical STRING range (which has no
+    # counting form), a range in the MIDDLE, self-assignment through a range
+    # (the RHS must be read before the destination is cleared), the each()
+    # iterator a whole-array assignment resets, and a range inside a call.
+    my $want = <<'OUT';
+1:1 2 3 4 5 n=5
+2:1 2 3 9
+3:1 2 3 4
+4:n=0
+5:a b c d e
+6:0 1 2 3 4
+7:1 2 1 2
+8:0
+9:5 4 3
+OUT
+    is(run_pl(<<'PERL'), $want, '#1204: nine array-fill shapes are perl 5.40.3\'s answers');
+use strict; use warnings;
+my @a; @a=(1..5);                 print "1:@a n=", scalar(@a), "\n";
+my @b; my $x=9; @b=(1..3,$x);     print "2:@b\n";
+my @c; my $n=4; @c=(1..$n);       print "3:@c\n";
+my @d=(9); my $z=0; @d=(1..$z);   print "4:n=", scalar(@d), "\n";
+my @e; @e=('a'..'e');             print "5:@e\n";
+my @f; @f=(0,1..3,4);             print "6:@f\n";
+my @g=(1,2); @g=(1..2,@g);        print "7:@g\n";
+my @h=(1,2,3); my ($i0,$v0)=each @h; @h=(1..3); my ($i1,$v1)=each @h; print "8:$i1\n";
+my @j; @j=(reverse(3..5));        print "9:@j\n";
 PERL
 }
