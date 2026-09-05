@@ -238,6 +238,56 @@ not-supported.md → only then probe.*
   in the write direction as well.  It needs #1150's container vivification
   first.
 
+- **#1222 — `use open` is LEXICAL, and a runtime global is a SILENT WRONG once
+  bytes are the default.**  Measured: a module whose own top carries
+  `use open qw(:utf8)` changed its CALLER's plain `open` (perl `main-plain: 11
+  module-utf8: 8`, PCL `8 8`), and a block-scoped pragma leaked to the rest of
+  the file.  The layers are read STATICALLY, turned into SOURCE-LOCATION spans
+  (pragma → end of its enclosing block; innermost wins; an inner pragma
+  overrides only the directions it names) and emitted AT EACH SITE as
+  `(p-default-layers (IN OUT) CALL)` on `p-open`/`p-backtick` — perldoc open's
+  own list, so NOT sysopen/opendir/pipe.  `p-use-open` keeps only the `:std`
+  half.
+- **A LEXICAL PRAGMA THAT AN `open` SITE MUST SEE CANNOT RIDE THE SCOPE STACK**
+  — the spans are published by a Parser2 PRE-PASS.  A named sub's BODY is
+  lowered before the in-stream include statement is reached (#703's finding),
+  so the `use integer` mechanism is invisible inside a sub; measured, the
+  module's own pragma had no effect on its own sub.
+- **`no open` is a NO-OP in perl** (open.pm has `import` and NO `unimport`;
+  `use open qw(:utf8); no open;` still decodes, and `no open ':utf8'` is FATAL
+  there) — a design that says otherwise is wrong, and only the probe says so.
+- **#1223 — perl calls a `$SIG{__WARN__}` handler ONCE**, and a `warn` raised
+  inside it takes the DEFAULT action.  PCL re-entered it, so the commonest
+  handler idiom in perl's own suite (`… else { warn $_[0] }`, the shape
+  `perl-tests/substr.t` opens with) was an INFINITE LOOP: binding stack blown,
+  the file HUNG, 351 passing rows → 0 TIMEOUT.  Old bug; #1115 made it reachable
+  by giving PCL its first handler-provokable warning.
+- **THE HARNESS'S OWN WRITES MUST NOT WARN**: a warning runs the PROGRAM's
+  `$SIG{__WARN__}`, and `perl-tests/magic.t` dies on any warning
+  (`sub { die "Dying on warning", @_ }` at BEGIN), so one wide TAP description
+  ended that file (158 → 90).  `%p-out-string` takes SITE = nil for a silent
+  upgrade; only a real perl print/printf/say passes a site.
+- **A BYTE STDERR MUST BE ABLE TO CARRY TEXT PCL DID NOT ROUTE** — the class
+  fix, and the one that explains four crashes at once:
+  `+p-byte-external-format+` is `'(:latin-1 :replacement #\?)`.  SBCL's OWN
+  compiler diagnostics reach descriptor 2 unhandled, and `cl/pcl-test.lisp` is
+  compiled at RUN time by both measurement runners — ONE style warning quoting a
+  docstring with an EM DASH crashed substr.t, magic.t, tr.t and readline.t at
+  load with 0 rows.  Octets still go out byte for byte; a wide character in a
+  perl `print` never reaches the encoder (`%p-out-string` converts first).
+- **#1221 SHIPPED (filed by #1115's review, needed by `readline.t:233`)**: the
+  `utf8::` mutators really transform.  The LVALUE the task called the hard part
+  is an existing mechanism — `Pl::VarAnnotator`'s `%MUTATING_FN` is keyed on the
+  Word's CONTENT, which for `utf8::encode($s)` IS `utf8::encode`, so the four
+  names sit beside `chomp` and the argument stops being a raw slot.
+  `is_utf8` stays a no-op: the box model has no UTF8 flag.
+- Bars: the four files back at/above their pre-#1115 counts (substr.t **351**,
+  magic.t **158**, tr.t **239**, readline.t **23**, the last stopping at the
+  same row as a `027ba9c` archive), sweep-diff 0 NEW; corpus-diff 4 of 111 all
+  explained; emission-ab over the 127-file union 67 DIFF / RCDIFF 0 / 0
+  unexplained; `Pl/t/io-layers-01.t` 16 → 27 rows, 16 of 27 failing on the base.
+  Generation **v2-820**.
+
 ## s470bo (2026-09-05, Opus) — the bugs the s470bm IR censuses found: #1179, #1178, #1173, #1174, #1177, and four of #1175's six leak families
 
 - **`-norequire` is parent.pm's FLAG and its rule is FIRST POSITION ONLY** —

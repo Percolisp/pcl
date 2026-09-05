@@ -440,6 +440,95 @@ wrong: the emitter DROPS THE INNER SUBSCRIPT of `local $h{a}{b}` altogether
 to THAT — not a detached box, a different element, and silently wrong in the
 write direction too; it needs #1150's container vivification first.  **#1117,
 #1161, #1164** were not reached.
+
+**ROUND 2 — Fable's review of #1115 found one design error and four
+perl-tests regressions; all five are closed, and four of them are ONE lesson:
+a byte STDERR has to be able to carry text PCL did not route.**
+
+**#1222 — `use open` is LEXICAL, and #1115 made it a runtime GLOBAL.**  Measured
+on an 11-octet file (8 characters decoded), with a module whose own top carries
+`use open qw(:utf8)`: perl `main-plain: 11 module-utf8: 8 / block-utf8: 8 /
+after-block-plain: 11`, PCL `8 8 / 8 / 8` — **the module's pragma changed the
+CALLING program's plain `open`**, and a block-scoped one leaked to the rest of
+the file.  Before #1115 that was masked (everything decoded anyway); once bytes
+are the default it is a silent wrong that any CPAN module carrying `use open`
+inflicts on its caller.  The pragma is a compile-time fact, so the layers are
+read STATICALLY (`_use_open_layers`; all seven shapes in the four populations
+are `qw()`/quoted/fat-comma — 71 statements surveyed, no computed element),
+turned into SOURCE-LOCATION spans (`open_regions_of`: pragma → end of its
+enclosing block, innermost wins, an inner pragma overrides only the directions
+it names) and consulted AT EACH SITE, which emits
+`(p-default-layers (IN OUT) CALL)` on `p-open` and `p-backtick` — perldoc
+open's own list is "open() and readpipe(), as well as qx// and ``", so not
+sysopen, not opendir, not pipe.  `p-use-open` keeps only the `:std` half, which
+perl really does apply once, where the pragma sits.
+
+**The spans are published by a PARSER2 PRE-PASS, and that is measured, not
+stylistic**: a scope-stack pragma (the `use integer` mechanism, which is what
+this first tried) is invisible inside a named sub, because the sub's BODY is
+lowered before the in-stream include statement is reached — task #703's finding,
+and here it showed as the module's own pragma having no effect on its own sub.
+
+**AND ONE DEVIATION FROM THE DESIGN, because perl says so: `no open` is a
+NO-OP.**  perl's `open.pm` defines `import` and no `unimport`, so
+`use open qw(:utf8); no open;` still decodes (probed: 8, not 11) and
+`no open ':utf8'` is a fatal "Attempt to call undefined unimport method".  The
+first version truncated the region there; the probe killed it.
+
+**The four perl-tests regressions, each fixed at its cause.**
+
+**#1223 — perl does not RE-ENTER a `$SIG{__WARN__}` handler.**  Probed: the
+handler runs ONCE and a `warn` raised inside it takes the default action.  PCL
+re-entered it, which makes the commonest handler idiom in perl's own suite —
+`… else { warn $_[0] }`, which is how `perl-tests/substr.t` opens — an infinite
+loop.  It blew the binding stack and **hung** that file: 351 passing rows → 0,
+status TIMEOUT.  The bug is old; #1115 is what made it reachable, by giving PCL
+its first warning a handler can provoke.  One `*p-in-warn-handler*` guard, and
+substr.t is back at **351**.
+
+**The harness's own writes must upgrade SILENTLY.**  A warning runs the
+PROGRAM's `$SIG{__WARN__}`, and `perl-tests/magic.t` installs
+`sub { die "Dying on warning", @_ }` at BEGIN — so one wide TAP description
+ended that whole file (158 → 90).  `%p-out-string` gained SITE = nil; `%tap-out`
+and `%p-diag` pass it.  Only a real perl `print`/`printf`/`say` warns.
+
+**THE CLASS FIX: the byte format carries a REPLACEMENT.**
+`+p-byte-external-format+` is `'(:latin-1 :replacement #\?)`.  SBCL's own
+compiler diagnostics go straight to descriptor 2, and `cl/pcl-test.lisp` is
+`--load`ed (compiled) at RUN time by both measurement runners — **one style
+warning quoting a docstring that held an em dash** signalled a
+stream-encoding-error nothing was there to handle, and all four files crashed at
+load with 0 rows.  A core build is the same shape.  It costs nothing observable:
+every octet still goes out byte for byte, and a wide character in a perl `print`
+never reaches the encoder because `%p-out-string` converts the whole string
+first.  What becomes `?` is exactly the text that had no business being a byte.
+
+**#1221 — the `utf8::` mutators really transform now**, filed by #1115's own
+review and shipped here because `readline.t:233` depends on it
+(`utf8::encode($x); syswrite $out, $x` — with the stub a wide character reached
+`syswrite`, which perl makes fatal, ending the file at 18 rows instead of 23).
+The lvalue the task named as the hard part is an EXISTING mechanism:
+`Pl::VarAnnotator`'s `%MUTATING_FN` is keyed on the Word's content, which for
+`utf8::encode($s)` IS `utf8::encode`, so the four names sit beside `chomp` and
+the argument stops being a raw slot.  `encode`/`decode`/`downgrade` are real;
+`upgrade` answers perl's octet count; `is_utf8` stays a documented no-op,
+because the box model has no UTF8 flag — the one row of #1115's seven-shape read
+probe where PCL and perl still differ.
+
+**All four files are back at or above their pre-#1115 counts** (single-file
+sweeps, `--jobs 1`): substr.t **351** (was 0/TIMEOUT), magic.t **158** (was 90),
+tr.t **239** (was 223), readline.t **23** (was 18) — and readline.t now stops at
+the SAME row as the base tree, verified on a `git archive 027ba9c` extraction.
+sweep-diff: 0 NEW.  corpus-diff vs `027ba9c` **4 of 111**, every one explained
+(`closure.t` + `eval.t` are the only corpus files with an `s///ee`; `ord.t` +
+`readline.t` the only two calling a `utf8::` mutator; `magic.t` correctly
+IDENTICAL — its `use open IN => ":raw"` has no `:std` and no open site sits in
+its region).  emission-ab over the 127-file union of the two shapes: **67 DIFF /
+66 SAME / RCDIFF 0**, and a classifier over the 67 leaves **0 unexplained**.
+Guard `Pl/t/io-layers-01.t` 16 → **27 rows**; on a base extraction **16 of 27
+fail**, including every new row that can discriminate.  Generation **v2-820**,
+three artifacts and the IR inventory regenerated.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
