@@ -967,6 +967,26 @@ END_PERL
        'use parent -norequire still sets up the CLOS parent class');
 }
 
+# -norequire inside the qw() list is the SAME flag (#1179).  It used to reach
+# @ISA as a class: the emission carried a `-norequire` package, a defclass with
+# it as a superclass, and `Bar->isa("-norequire")` was true.  perl 5.40.3 puts
+# only Foo in @ISA (parent.pm shifts the flag off its import list).
+{
+  my $cl = transpile(<<'END_PERL');
+package Child;
+use parent qw( -norequire Parent );
+END_PERL
+  # (the `;; use parent qw( -norequire Parent )` source echo is a COMMENT and
+  # is expected; what must not appear is a -norequire NAME in emitted code)
+  my $code_only = join "\n", grep { !/^\s*;;/ } split /\n/, $cl;
+  unlike($code_only, qr/norequire/,
+         'qw(-norequire ...) leaves no -norequire name in the emission');
+  like($cl, qr/defclass plc-child \(Parent::plc-parent\)\s*\(\)/,
+       'qw(-norequire ...) makes Parent the ONLY superclass');
+  unlike($cl, qr/p-require-parent/,
+         'qw(-norequire ...) suppresses the implicit require, like the comma form');
+}
+
 # use base behaves like use parent (always requires)
 {
   my $cl = transpile(<<'END_PERL');

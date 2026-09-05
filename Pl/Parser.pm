@@ -3536,43 +3536,25 @@ sub _classify_isa_parents {
 sub _process_use_base {
   my ($self, $stmt, $perl_code, $module) = @_;
 
-  # Extract parent class names from the argument list
-  my @parents;
-  my $skip_next = 0;
+  # Flatten the import list in SOURCE ORDER, exactly as perl hands it to
+  # parent.pm's `import` — `-norequire` is NOT special here, it is simply the
+  # first element of that list.  Doing it in one pass is what makes the three
+  # spellings agree (#1179): the qw() spelling used to reach @parents with the
+  # flag still in it (`@ISA = (-norequire, Foo)`, and `->isa("-norequire")`
+  # true), because only the two comma spellings had a flag test.
+  my @parents = $self->_flatten_use_base_args($stmt, $module);
+
+  # parent.pm's own rule, verbatim:
+  #     if ( @_ and $_[0] eq '-norequire' ) { shift @_ }
+  # — the flag is honoured ONLY in first position.  `use parent qw(Foo
+  # -norequire)` really does try to `require Foo.pm` in perl (probed), so a
+  # later `-norequire` stays an ordinary (bogus) parent name, as perl leaves it.
   my $norequire = 0;   # 'use parent -norequire, ...' suppresses the implicit require
-  for my $child ($stmt->children) {
-    my $ref = ref($child);
-    # 'use parent -norequire, qw(...)' — PPI tokenizes -norequire as a single
-    # Word "-norequire" (not operator '-' + word).  Handle both spellings.
-    if ($ref eq 'PPI::Token::Word' && $child->content eq '-norequire') {
-      $norequire = 1; next;
-    }
-    if ($ref eq 'PPI::Token::Operator' && $child->content eq '-') {
-      $skip_next = 1; next;
-    }
-    if ($skip_next && $ref eq 'PPI::Token::Word') {
-      $norequire = 1 if $child->content eq 'norequire';
-      $skip_next = 0; next;
-    }
-    $skip_next = 0;
-    if ($ref eq 'PPI::Token::QuoteLike::Words') {
-      my $content = $child->content;
-      $content =~ s/^qw[^\w\s]//;
-      $content =~ s/[^\w\s]$//;
-      push @parents, split /\s+/, $content;
-    }
-    elsif ($ref eq 'PPI::Token::Quote::Single' || $ref eq 'PPI::Token::Quote::Double') {
-      push @parents, $child->string;
-    }
-    elsif ($ref eq 'PPI::Structure::List') {
-      for my $item ($child->children) {
-        next if ref($item) =~ /Whitespace|Separator/;
-        if (ref($item) eq 'PPI::Token::Quote::Single' || ref($item) eq 'PPI::Token::Quote::Double') {
-          push @parents, $item->string;
-        }
-      }
-    }
+  if (@parents && $parents[0] eq '-norequire') {
+    shift @parents;
+    $norequire = 1;
   }
+
   @parents = grep { /\S/ } @parents;
   return unless @parents;
 
@@ -3619,6 +3601,44 @@ sub _process_use_base {
     $self->_emit("(p-push \@ISA \"$parent\")");
   }
   $self->_emit("");
+}
+
+# The import list of `use base`/`use parent`, FLATTENED in source order — the
+# list perl builds and hands to the module's `import`.  One reading for every
+# spelling (#1179): a leading `-norequire` arrives here as an ordinary element
+# whether it was written as a bareword (`use parent -norequire, 'Foo'`, which
+# PPI tokenizes as a single Word), as `- norequire` (Operator + Word), or
+# inside the qw() list (`use parent qw( -norequire Foo )`).  The FLAG rule then
+# lives in exactly one place, in _process_use_base, where parent.pm has it.
+sub _flatten_use_base_args {
+  my ($self, $stmt, $module) = @_;
+
+  my @args = grep { ref($_) ne 'PPI::Token::Structure' } $stmt->schildren;
+  # drop the leading `use`/`no` keyword and the module name
+  shift @args if @args && ref($args[0]) eq 'PPI::Token::Word'
+                       && $args[0]->content =~ /^(?:use|no)$/;
+  shift @args if @args && ref($args[0]) eq 'PPI::Token::Word'
+                       && $args[0]->content eq $module;
+
+  my @names;
+  my $minus = 0;
+  for my $arg (@args) {
+    my $ref = ref($arg);
+    if ($ref eq 'PPI::Token::Operator') {
+      # `use parent - norequire, ...`: PPI splits the flag when a space follows
+      # the minus.  perl reads `-bareword` as the string "-bareword".
+      $minus = ($arg->content eq '-') ? 1 : 0;
+      next;
+    }
+    if ($ref eq 'PPI::Token::Word') {
+      push @names, ($minus ? '-' : '') . $arg->content;
+      $minus = 0;
+      next;
+    }
+    $minus = 0;
+    push @names, $self->_extract_parent_classes([$arg]);
+  }
+  return @names;
 }
 
 # Extract parent class names from an @ISA initializer expression
