@@ -213,6 +213,31 @@ not-supported.md → only then probe.*
   accidentally-decoding handle used to hide it.  `%p-utf8-octets` IS
   `utf8::encode`; what those need is an LVALUE argument.
 
+- **#1116 — `do FILE` records its own `%INC` entry, and THE MOMENT MATTERS.**
+  perl writes `$INC{FILE}` as soon as it has OPENED the file, keyed by the STRING
+  the caller wrote; a file that compiles and then DIES still leaves the entry, so
+  does one returning FALSE, and one that could not be opened leaves none — so
+  the write is after the read and before the compile.  `do` never CONSULTS `%INC`
+  (two `do`s run a file twice); only `require` does, which is how the missing
+  write made `do FILE; require FILE` run every side effect twice.  Normative in
+  ir-spec §9.
+- **#1120 — each `e` on a substitution is ONE ROUND.**  `/ee` evaluates the
+  replacement and then evaluates ITS RESULT as perl code.  PPI's
+  `get_modifiers` collapses `ee` to `e => 1`, so the count comes from the
+  token's trailing modifier letters (`Pl::Parser2::_regex_modifier_text`,
+  #1083's reading, one copy) and each extra round goes through
+  `_gen_eval_string_form` — the same emission a written-out `eval STRING` gets,
+  so the capture alist and the site's features come with it.
+- **#1150 is DESIGNED, not built** (in the task): `expand-autoviv` is the
+  walker and its base case is free, but `p-gethash`/`p-aref` are FUNCTIONS so it
+  cannot be reached from them — the shape is two one-line macros plus a wrap in
+  the two element emitters when the container is itself an accessor.
+- **#1190's own cause was WRONG and is corrected in the task**: the emitter
+  DROPS THE INNER SUBSCRIPT of `local $h{a}{b}`, so PCL localises `$h{a}` and
+  assigns to THAT — a different element, not a detached box, and silently wrong
+  in the write direction as well.  It needs #1150's container vivification
+  first.
+
 ## s470bo (2026-09-05, Opus) — the bugs the s470bm IR censuses found: #1179, #1178, #1173, #1174, #1177, and four of #1175's six leak families
 
 - **`-norequire` is parent.pm's FLAG and its rule is FIRST POSITION ONLY** —

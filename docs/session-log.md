@@ -398,6 +398,48 @@ Also filed: **#1221** — `utf8::encode`/`decode`/`upgrade`/`downgrade`/`is_utf8
 are no-op stubs returning 1, and #1115 makes "read bytes, then
 `utf8::decode`" the spelling programs actually use, so the gap is now reachable
 by ordinary code where the accidentally-decoding handle used to hide it.
+**#1116 — `do FILE` records the file in `%INC`.**  perl writes `$INC{FILE}` as
+soon as it has OPENED the file, keyed by THE STRING THE CALLER WROTE (`"./t.pl"`,
+`"inc.pl"` — not the resolved path).  PCL wrote nothing, so `do FILE; require
+FILE` ran the file TWICE and every side effect — a BEGIN-time registration, an
+`our @ISA` push, a counter — happened twice, silently.  WHERE the write goes had
+to be probed rather than guessed: a file that compiles and then DIES still leaves
+the entry, so does one that returns FALSE, and one that could not be OPENED
+leaves none — so it belongs after the read and before the compile.  `do` itself
+never CONSULTS `%INC` (two `do`s run a file twice), and `p-require-file` already
+read the table; this was the one write it was missing.  Nine of nine probe rows
+now match perl key for key, the `@INC`-search spelling included.  ir-spec §9 has
+the normative paragraph; guards go through `use-require-01.t`'s own `inc_agrees`,
+which runs the same program under REAL PERL, and both fail on a base extraction.
+
+**#1120 — `s///ee` evaluates the replacement AND THEN ITS RESULT.**  Each `e` is
+one round; PPI's `get_modifiers` collapses `ee` to `e => 1`, so the second one
+was dropped on the floor and the substitution put the unevaluated SOURCE TEXT
+into the string: `s/(\d)/q{$1+1}/ee` on "3" is 4 in perl and was the six
+characters `$1+1` here.  The count is read off the token's trailing modifier
+letters — #1083's existing reading, `Pl::Parser2::_regex_modifier_text`, reached
+through a runtime `require` because a compile-time `use` from ExprToCL is
+circular — and each extra round wraps the body in `_gen_eval_string_form`, the
+SAME emission a written-out `eval STRING` gets, so it carries the capture alist
+and the site's features.  corpus-diff 3 of 111: `closure.t` and `eval.t` (the
+only two corpus files with an `s///ee`, surveyed before running) plus `magic.t`
+from #1115; emission-ab over the 74 files carrying either shape 67 DIFF / 13 SAME
+/ **RCDIFF 0**, every DIFF explained.  Companion `re/subst.t` 205/67 = its
+snapshot row.  Five guard rows in `transpile-test-08.t` through `test_transpile`,
+so real perl is the oracle for each, and the `/e` row is the inverse guard
+against widening; four of five fail on a base extraction.
+
+**NOT BUILT, and each says why in its own task**: **#1150** (a pure READ must
+vivify the INTERMEDIATE) is DESIGNED into the task — the walker already exists
+(`expand-autoviv`, whose base case is free), `p-gethash`/`p-aref` are FUNCTIONS
+so it cannot be reached from them, and the shape is two one-line macros plus a
+wrap in `gen_hash_access_form` / `gen_array_access_form` when the container is
+itself an accessor.  **#1190** was RE-DIAGNOSED and the task's own cause is
+wrong: the emitter DROPS THE INNER SUBSCRIPT of `local $h{a}{b}` altogether
+(`(p-local-hash-elem-init %h "a" 5 …)`), so PCL localises `$h{a}` and assigns 5
+to THAT — not a detached box, a different element, and silently wrong in the
+write direction too; it needs #1150's container vivification first.  **#1117,
+#1161, #1164** were not reached.
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
