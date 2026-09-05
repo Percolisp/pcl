@@ -347,4 +347,38 @@ LISP
        '#1035: an unknown class, an unknown fact key or a stray atom DIES at macroexpansion');
 }
 
+# ── #1118: the FACTS PLIST is not a declaration entry ────────────────────────
+{
+    # A p-let declaration entry `(NAME CLASS INIT …FACTS)` and this plist are
+    # both HEADLESS lists, and CLForm::to_string keyed the entry layout on
+    # "atom, then keyword atom" -- which `(:returns :str …)` matches exactly.
+    # Claimed as an entry, the plist's tail went through `join`, so the nested
+    # `:captures (CELLS…)` -- an ARRAY REF -- was stringified into the emitted
+    # CL as `ARRAY(0x…)`.  Three consequences, all silent until the file was
+    # RUN: a fresh address per transpile (non-deterministic output, so every
+    # A/B read DIFF), an ODD-length plist, and death at LOAD in %p-check-facts
+    # ("facts of pl-f are not keyword pairs").  It needed a proven `:returns`
+    # family AND a capture manifest AND a plist too long to print flat --
+    # t/opbasic/concat.t and t/op/try.t both died on it.
+    my $src = <<'PERL';
+my $first_captured_cell_name = "abc";
+my $second_captured_cell_name = "def";
+sub f { my $t = $first_captured_cell_name . $second_captured_cell_name; return "$t!" }
+print f(), "\n";
+PERL
+    my $cl = cl_of($src);
+    unlike($cl, qr/ARRAY\(0x/,
+           '#1118: a perl arrayref never reaches the emitted CL');
+    like($cl, qr/\(p-sub pl-f\s+\(&rest %_args\)\s+\(:returns :str\s+:writes-args nil\s+:captures \(\$first_captured_cell_name \$second_captured_cell_name\)\)/,
+         '#1118: a long facts plist breaks between PAIRS, and :captures names the cells');
+    # Two transpiles of the same source must be BYTE-identical.  The
+    # tempfile path is in the preamble and differs per call, so it is
+    # normalised away; the address was not, and that is the whole point.
+    my $strip = sub { my $t = shift; $t =~ s{/tmp/\S+\.pl}{SRC}g; return $t };
+    is($strip->($cl), $strip->(cl_of($src)),
+       '#1118: ... so the emission is deterministic (it was an address before)');
+    is(run_cl($src), "abcdef!\n",
+       '#1118: ... and the file LOADS -- the odd-length plist killed it');
+}
+
 done_testing();

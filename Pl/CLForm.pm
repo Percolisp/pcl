@@ -320,6 +320,17 @@ sub to_flat {
 # consumer of this switch is a byte-diff against a tree that predates the step.
 sub ir_plain { return $ENV{PCL_IR_PLAIN} ? 1 : 0 }
 
+# TRUE when @$args is a keyword PLIST: every even position is a non-ref atom
+# spelled as a CL keyword.  The one shape test for the plist layout above; a
+# list that merely STARTS with a keyword (an argument run, say) is not one.
+sub _is_plist {
+  my ($args) = @_;
+  for (my $i = 0; $i < @$args; $i += 2) {
+    return 0 if ref $args->[$i] || $args->[$i] !~ /^:/;
+  }
+  return 1;
+}
+
 sub to_string {
   my ($f, $depth) = @_;
   $depth //= 0;
@@ -350,7 +361,21 @@ sub to_string {
     # flat: the class is what a reader looks for, and a line of its own would
     # separate it from the name it describes.  Shape-keyed (an atom followed
     # by a keyword atom), not name-keyed.
-    if (@args >= 3 && !ref $args[0] && !ref $args[1] && $args[1] =~ /^:/) {
+    #
+    # A declaration entry's FIRST element is a NAME, never a keyword, and that
+    # test is load-bearing (#1118): the OTHER headless list this printer sees
+    # is `p-sub`'s FACTS PLIST (ir-spec §5.1), whose first two atoms
+    # `:returns :str` fit the shape exactly.  Claimed as an entry, its tail
+    # went through `join` — so a nested `:captures (CELLS…)`, an ARRAY REF,
+    # was stringified into the emitted CL as `ARRAY(0x…)`.  That made the
+    # output NON-DETERMINISTIC (a fresh address per run, so every A/B read
+    # DIFF) and the plist ODD-LENGTH, and `%p-check-facts` then killed the
+    # file at LOAD: "facts of pl-f are not keyword pairs".  Reachable
+    # whenever a sub has a proven `:returns` family AND a capture manifest
+    # AND a plist too long to print flat — t/opbasic/concat.t and t/op/try.t
+    # both died on it.
+    if (@args >= 3 && !ref $args[0] && $args[0] !~ /^:/
+        && !ref $args[1] && $args[1] =~ /^:/) {
       my ($n, $c, $init, @facts) = @args;
       # The FACTS tail (`:perl "$x" :why :FAMILY :captured t`, ir-spec 2b.2a)
       # is short atoms describing the SAME binding, so it goes on ONE line
@@ -358,6 +383,19 @@ sub to_string {
       # separate lines would be unreadable and is not what a plist looks like.
       my $tail = @facts ? "\n$ind1" . join(' ', @facts) : '';
       return _close("($n $c\n" . $ind1 . to_string($init, $depth + 1) . $tail, $depth);
+    }
+    # A PLIST that did not fit flat (`p-sub`'s facts, ir-spec §5.1) breaks
+    # between PAIRS, never between a key and its value: a `:captures` alone on
+    # one line and its cell list on the next is not what a plist looks like,
+    # and it is the same argument the declaration tail above makes.  Keyed on
+    # the shape a plist has and nothing else has here — a leading keyword atom
+    # and an even length, with every key position a keyword atom.
+    if (@args && @args % 2 == 0 && _is_plist(\@args)) {
+      my @pairs;
+      for (my $i = 0; $i < @args; $i += 2) {
+        push @pairs, $args[$i] . ' ' . to_string($args[$i + 1], $depth + 1);
+      }
+      return _close('(' . join("\n$ind1", @pairs), $depth);
     }
     return _close('(' . join("\n$ind1", map { to_string($_, $depth + 1) } @args),
                   $depth);
