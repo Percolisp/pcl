@@ -252,6 +252,7 @@
    #:p-join #:p-split #:p-funcall-ref
    ;; Dereferencing (sigil cast operations)
    #:p-cast-@ #:p-cast-% #:p-cast-$
+   #:p-symref-site           ; the `symref-const' emission's per-site cache
    #:p-hash-deref-= #:p-array-deref-=
    ;; OO
    #:p-bless #:p-get-class #:p-method-call #:p-resolve-invocant
@@ -16164,7 +16165,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-740"
+(defparameter *pcl-cache-generation* "v2-750"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")
@@ -17803,7 +17804,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       (setf (symbol-value sym) init))
     (symbol-value sym)))
 
-(defun p-cast-@ (val)
+(defun p-cast-@ (val &optional site)
   "Perl array dereference @{$ref} - unbox to get the array.
    Handles both old format (box containing vector) and new format
    (box containing box containing vector, from p-backslash).
@@ -17831,7 +17832,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        (%p-glob-slot-place v "@" (make-array 0 :adjustable t :fill-pointer 0)))
       ;; Symbolic reference: @{"pkg::var"} — look up/create the package variable
       ((stringp v)
-       (%p-symref-array v))
+       (%p-symref-array v site))
       ;; val is an lvalue box containing undef: auto-vivify as array ref.
       ;; Store (make-p-box new-arr) so box-set sees a reference (not raw vector)
       ;; and preserves it instead of coercing to length.
@@ -17850,7 +17851,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Fallback: return whatever we have (may be *p-undef* if no box to write back)
       (t (or v *p-undef*)))))
 
-(defun p-cast-% (val)
+(defun p-cast-% (val &optional site)
   "Perl hash dereference %{$ref} - unbox to get the hash.
    Handles both old format (box containing hash) and new format
    (box containing box containing hash, from p-backslash).
@@ -17882,7 +17883,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; Mirrors p-cast-@'s %p-symref-array; without this a string fell through to
       ;; (t v) and \%{"Pkg::H"} backslashed the *string* (ref → SCALAR, not HASH),
       ;; which broke Exporter::Heavy's `*{...}=\%{"$pkg\::$name"}` %hash export.
-      ((stringp v) (%p-symref-hash v))
+      ((stringp v) (%p-symref-hash v site))
       ;; val is an lvalue box containing undef: auto-vivify as hash ref — the
       ;; MISSING TWIN of p-cast-@'s arm (task #720).  Store (make-p-box new-h)
       ;; for the same reason the array arm does: box-set must see a REFERENCE,
@@ -18040,48 +18041,127 @@ buffer's fill-pointer; everything else falls back to file-length."
           (when sym (%p-symref-memo-store name-str sigil cur sym))
           sym))))
 
-(defun %p-symref-box (name-str)
+;;; ── PER-SITE resolution: the Kind-A `symref-const` emission (task #1180) ───
+;;; A symbolic dereference whose operand is a compile-time STRING resolves to
+;;; the SAME symbol at every execution of that site, so the answer belongs in
+;;; a cell the site owns rather than in a table keyed by the name.  #812's memo
+;;; removed the name ARITHMETIC (the `search`, the case inversion, the two
+;;; fresh strings); what is left per access is a string `sxhash` + an `equal`
+;;; gethash + a list walk + the O(n) NUL scan each caller does first — and a
+;;; site cache removes all of that (measured -87 % on the `symref` bench row's
+;;; loop, s470bn).
+;;;
+;;; WHAT THE SITE MAY CACHE, and why it is exactly what #812's memo may cache:
+;;; the SYMBOL, never the box or the container.  `local $main::g` installs a
+;;; FRESH box in the cell (p-local-cell) and %p-symref-array REPLACES the
+;;; binding when it does not hold a vector, so a cached container would go
+;;; stale; the symbol a name denotes is stable forever (see the long note
+;;; above *p-symref-symbol-memo* for the three ways it could not be, and why
+;;; none of them happens).  `shadow` is the one that does happen — and it can
+;;; only fire for a FOREIGN-qualified name (%p-symref-intern's own condition),
+;;; where a reader can never have cached the inherited answer because
+;;; %p-symref-find declines it.  So the site needs no invalidation either.
+;;;
+;;; An UNQUALIFIED name resolves in *pcl-current-package*, which is dynamic, so
+;;; the site records the package it resolved under and re-resolves when that
+;;; differs.  A name with an explicit `::` — including the leading-`::` root
+;;; spelling, which IS main — is package-independent, and its site records the
+;;; marker T instead.  Only a HIT is cached: a miss must stay a miss, or
+;;; `${"n"} = 1; ${"n"}` would keep answering undef.
+;;;
+;;; SLOT 2 is the "storage ensured" flag: %p-symref-symbol runs
+;;; %p-ensure-storage on every CREATE hit because its memo entry may have been
+;;; stored by a reader, but a SITE is one syntactic position and so has one
+;;; create-ness — once ensured, ensured forever (a symbol macro cannot become
+;;; un-macro'd).
+(defmacro p-symref-site ()
+  "The per-call-site cache cell the `symref-const` emission passes to a cast:
+   `(p-cast-$ \"main::g\" (p-symref-site))`.  One fresh cell per EXPANSION,
+   i.e. per emitted site, evaluated once when the site's code is loaded."
+  '(load-time-value (make-array 3 :initial-element nil) nil))
+
+(defun %p-symref-site-resolve (site name-str sigil create)
+  (let ((sym (%p-symref-symbol name-str sigil create)))
+    (when sym
+      (setf (svref site 1) sym
+            (svref site 2) (and create t)
+            ;; Written LAST: slot 0 is the validity flag, so a reader that
+            ;; sees it must already see slots 1-2.
+            (svref site 0) (if (search "::" name-str)
+                               t
+                               (%pcl-memo-key *pcl-current-package*))))
+    sym))
+
+(declaim (inline %p-symref-sym))
+(defun %p-symref-sym (name-str sigil create site)
+  "The symbol NAME-STR/SIGIL denotes.  With a SITE (the `symref-const`
+   emission's per-call-site cache) the answer comes from the site; without one
+   it goes through #812's name memo.  ONE entry point for both, so the cached
+   and uncached readings cannot drift (rule 11): every %p-symref-* reader and
+   writer below calls this."
+  (if (and site
+           (let ((p (svref site 0)))
+             (and p (or (eq p t)
+                        (eq p *pcl-current-package*)
+                        (string= p *pcl-current-package*)))))
+      (let ((sym (svref site 1)))
+        (when (and create (not (svref site 2)))
+          (%p-ensure-storage sym)
+          (setf (svref site 2) t))
+        sym)
+      (if site
+          (%p-symref-site-resolve site name-str sigil create)
+          (%p-symref-symbol name-str sigil create))))
+
+;;; The NUL guard each reader/writer runs first is a per-access O(n) scan of a
+;;; name that, at a `symref-const` site, is a constant the EMITTER already
+;;; checked (Pl::ExprToCL::_symref_const_site).  So `(null site)` gates it.
+(declaim (inline %p-symref-nul-p))
+(defun %p-symref-nul-p (name-str site)
+  (and (null site) (find #\Nul name-str) t))
+
+(defun %p-symref-box (name-str &optional site)
   "Resolve Perl symbolic scalar reference NAME-STR to a CL box.
    Returns the box on success, NIL if the name is invalid or variable not found."
   ;; CL symbols cannot contain null bytes — silently return nil
-  (when (find #\Nul name-str) (return-from %p-symref-box nil))
-  (let ((sym (%p-symref-symbol name-str "$" nil)))
+  (when (%p-symref-nul-p name-str site) (return-from %p-symref-box nil))
+  (let ((sym (%p-symref-sym name-str "$" nil site)))
     (when (and sym (boundp sym))
       (let ((v (symbol-value sym)))
         (when (p-box-p v) v)))))
 
-(defun (setf %p-symref-box) (new-box name-str)
+(defun (setf %p-symref-box) (new-box name-str &optional site)
   "Set Perl symbolic scalar reference NAME-STR to NEW-BOX."
-  (when (find #\Nul name-str) (return-from %p-symref-box new-box))
-  (setf (symbol-value (%p-symref-symbol name-str "$" t)) new-box)
+  (when (%p-symref-nul-p name-str site) (return-from %p-symref-box new-box))
+  (setf (symbol-value (%p-symref-sym name-str "$" t site)) new-box)
   new-box)
 
-(defun %p-symref-array (name-str)
+(defun %p-symref-array (name-str &optional site)
   "Resolve symbolic array reference NAME-STR (e.g. '3foo::ISA') to the CL vector.
    Creates the package and the @VAR binding if they don't exist yet, so that
    assignment through a symbolic ref works: @{\"pkg::var\"} = (...).
    Returns the adjustable vector."
-  (when (find #\Nul name-str) (return-from %p-symref-array
-                                (make-array 0 :adjustable t :fill-pointer 0)))
+  (when (%p-symref-nul-p name-str site) (return-from %p-symref-array
+                                          (make-array 0 :adjustable t :fill-pointer 0)))
   ;; NB the hash twin below carries a marker arm and a rule-12 error (task
   ;; #701); this one deliberately does not, because the runtime keeps no
   ;; MARKER-valued array — every `@`-sigil global is a real vector.  If one
   ;; ever appears, this is its other half.
-  (let ((sym (%p-symref-symbol name-str "@" t)))
+  (let ((sym (%p-symref-sym name-str "@" t site)))
     (unless (and (boundp sym)
                  (vectorp (symbol-value sym))
                  (not (stringp (symbol-value sym))))
       (setf (symbol-value sym) (make-array 0 :adjustable t :fill-pointer 0)))
     (symbol-value sym)))
 
-(defun %p-symref-hash (name-str)
+(defun %p-symref-hash (name-str &optional site)
   "Resolve symbolic hash reference NAME-STR (e.g. 'Config::Config') to the CL
    hash-table.  Creates the package and the %VAR binding if they don't exist yet,
    so assignment through a symbolic ref works: %{\"pkg::var\"} = (...).
    Returns the hash-table."
-  (when (find #\Nul name-str) (return-from %p-symref-hash
-                                (make-hash-table :test 'equal)))
-  (let ((sym (%p-symref-symbol name-str "%" t)))
+  (when (%p-symref-nul-p name-str site) (return-from %p-symref-hash
+                                          (make-hash-table :test 'equal)))
+  (let ((sym (%p-symref-sym name-str "%" t site)))
     (if (boundp sym)
         (let ((v (symbol-value sym)))
           (cond
@@ -18108,23 +18188,30 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; their symbol ($1..$20, $&, $`, $', $+, $0, $?, …), never in a box, so the
 ;;; box reader alone answered undef for every one of them — while in perl
 ;;; ${"1"} IS $1 (task #505, s446j).
-(defun %p-symref-scalar-value (name-str)
+(defun %p-symref-symbol-value (sym)
+  "The value ${…} reads once its SYMBOL is resolved.  Factored out so the
+   name-memo path and the `symref-const` site path share ONE reading of what
+   a symbolic scalar read means (rule 11)."
+  ;; $& / $` / $' hold no value in their symbol at all — they are computed
+  ;; from the last match's offsets (task #477), so `boundp` is false and
+  ;; ${"&"} would answer undef.  Ask their getter instead.
+  (let ((getter (gethash sym *computed-magic-getters*)))
+    (if getter
+        (funcall getter)
+        (when (boundp sym)
+          (let* ((raw (symbol-value sym))
+                 (v (if (p-box-p raw) (p-box-value raw) raw)))
+            ;; Same rule as p-cast-$'s hard-ref arm: a magic cell answers
+            ;; through its getter, never as the raw struct.
+            (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v))))))
+
+(defun %p-symref-scalar-value (name-str &optional site)
   "The value the symbolic scalar reference ${NAME-STR} reads: the package
    cell's value, or — for the magic scalars the runtime stores unboxed — the
    symbol's own value.  NIL (perl undef) when the name has no variable."
-  (when (find #\Nul name-str) (return-from %p-symref-scalar-value nil))
-  (let ((sym (%p-symref-symbol name-str "$" nil)))
-    ;; $& / $` / $' hold no value in their symbol at all — they are computed
-    ;; from the last match's offsets (task #477), so `boundp` is false and
-    ;; ${"&"} would answer undef.  Ask their getter instead.
-    (let ((getter (and sym (gethash sym *computed-magic-getters*))))
-      (when getter (return-from %p-symref-scalar-value (funcall getter))))
-    (when (and sym (boundp sym))
-      (let* ((raw (symbol-value sym))
-             (v (if (p-box-p raw) (p-box-value raw) raw)))
-        ;; Same rule as p-cast-$'s hard-ref arm: a magic cell answers through
-        ;; its getter, never as the raw struct.
-        (if (p-magic-cell-p v) (funcall (p-magic-cell-getter v)) v)))))
+  (when (%p-symref-nul-p name-str site) (return-from %p-symref-scalar-value nil))
+  (let ((sym (%p-symref-sym name-str "$" nil site)))
+    (and sym (%p-symref-symbol-value sym))))
 
 (defun %p-symref-read-only-p (name-str)
   "Perl's read-only scalars, by NAME (no sigil): the regex-result family.  A
@@ -18137,13 +18224,13 @@ buffer's fill-pointer; everything else falls back to file-length."
            (every #'digit-char-p name-str))
       (member name-str '("&" "`" "'" "+") :test #'string=)))
 
-(defun %p-symref-scalar-set (name-str new-value)
+(defun %p-symref-scalar-set (name-str new-value &optional site)
   "Write NEW-VALUE through the symbolic scalar reference ${NAME-STR},
    vivifying the package cell.  Perl's read-only magic dies instead."
   (when (%p-symref-read-only-p name-str) (%p-readonly-modification))
-  (let ((box (or (%p-symref-box name-str)
+  (let ((box (or (%p-symref-box name-str site)
                  (let ((b (make-p-box nil)))
-                   (setf (%p-symref-box name-str) b)
+                   (setf (%p-symref-box name-str site) b)
                    b))))
     (box-set box new-value)))
 
@@ -18163,7 +18250,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; STRING spelling — `${"5"}`, `${$n}` with $n = "5", every magic name — is
 ;;; fixed below, which is the reachable half.  Residue: task #551.
 
-(defun p-cast-$ (val)
+(defun p-cast-$ (val &optional site)
   "Perl scalar dereference ${$ref} or symbolic ref ${'name'}.
    If val unboxes to a string or a number, treat as symbolic reference."
   (let ((inner (unbox val)))
@@ -18178,7 +18265,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ((stringp inner)
        ;; Symbolic reference: ${"varname"} — see the note above %p-symref-
        ;; scalar-value for why a NUMBER is not one here (task #505/#551).
-       (%p-symref-scalar-value inner))
+       (%p-symref-scalar-value inner site))
       ;; ${qr//}: perl's REGEXP sv stringifies as "(?^:...)" and numifies
       ;; through that string (0).  PCL merges the Regexp ref and its referent
       ;; into one struct (which numifies as an address, correct for the REF
@@ -18194,7 +18281,7 @@ buffer's fill-pointer; everything else falls back to file-length."
       ;; type-sniff at the deref site.
       (t inner))))
 
-(defun (setf p-cast-$) (new-value val)
+(defun (setf p-cast-$) (new-value val &optional site)
   "Perl scalar dereference assignment ${$ref} = val or ${'name'} = val.
    Handles symbolic references when val unboxes to a string."
   (let ((inner (unbox val)))
@@ -18209,7 +18296,7 @@ buffer's fill-pointer; everything else falls back to file-length."
        ;; Symbolic reference: ${"varname"} = val.  A NUMERIC name is NOT one
        ;; here either — same ambiguity, same reason (task #505/#551): the
        ;; (p-box-p val) arm below is the collapsed hard ref's write path.
-       (%p-symref-scalar-set inner new-value))
+       (%p-symref-scalar-set inner new-value site))
       ;; val itself is the scalar container (blessed scalar in tie methods)
       ((p-box-p val)
        (box-set val new-value))

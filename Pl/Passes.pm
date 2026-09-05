@@ -77,6 +77,7 @@ our %KIND_A = (
   # either way, which is the identity `Pl/t/passes-01.t` guards; a program
   # that HAS one cannot, because the frame is the feature.
   'dyn-loop-exit'  => "Pl::PExpr::TokenUtils::may_dyn_exit + Parser2 loops (task #1022 half (b), licence narrowed by #1162): a loop that can REACH a marked exit site BY NAME in this compilation unit establishes ONE catch of 'p-loop-dyn per loop ENTRY (`:dyn t`, %p-loop-driver / p-dyn-once), so a bare `last`/`next`/`redo` in a CALLED sub acts on the caller's innermost loop as perl's does; every other loop is emitted byte-identically and pays nothing, which matters because the catch costs ~4.8 MB of SBCL COMPILE IR",
+  'symref-const'   => "ExprToCL sigil casts (task #1180): a symbolic dereference whose operand is a compile-time STRING -- `\${\"main::g\"}`, `\@{\"Pkg::ISA\"}`, `%{\"Pkg::H\"}` -- passes the cast a PER-SITE cache cell ((p-symref-site)), so the symbol the name denotes is resolved once for the site instead of through #812's name memo (a string sxhash + an `equal` gethash + a list walk + an O(n) NUL scan) on every access",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 

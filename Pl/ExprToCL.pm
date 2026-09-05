@@ -1698,7 +1698,7 @@ sub gen_string_concat {
 sub gen_array_str_interp {
   my ($self, $node, $node_id, $kids) = @_;
   return '""' unless @$kids;
-  return ['p-join', '|$"|', ['p-cast-@', $self->gen_node_form($kids->[0])]];
+  return ['p-join', '|$"|', _cast_form('p-cast-@', $self->gen_node_form($kids->[0]))];
 }
 
 
@@ -3186,7 +3186,7 @@ sub gen_prefix_op_form {
         $self->lvalue_context(0);
         my $inner_expr = $self->gen_node_form($po_kids->[0]);
         $self->lvalue_context($saved);
-        return ["p-post$po_op", ["p-cast-$op", $inner_expr]];
+        return ["p-post$po_op", _cast_form("p-cast-$op", $inner_expr)];
       }
     }
     # else: fall through to the general sigil-cast handling below.
@@ -3240,7 +3240,7 @@ sub gen_prefix_op_form {
   }
   # Sigil cast operators (dereference).
   if ($op eq '@' || $op eq '%' || $op eq '$') {
-    return ["p-cast-$op", $operand];
+    return _cast_form("p-cast-$op", $operand);
   }
   # & Cast: &{expr} / &$var with no argument list — a CALL with the current
   # @_ (the coderef-mention parents intercept before this, as in the text
@@ -3367,6 +3367,35 @@ sub gen_array_access_form {
 my %PCL_EXPORTED_GLOBALS = map { $_ => 1 }
   qw($_ @_ %_args @ARGV $ARGV @ARGVOUT @INC %ENV %INC %SIG);
 
+# ── The Kind-A `symref-const` emission (task #1180) ──────────────────────────
+# ONE builder for every `(p-cast-$ …)` / `(p-cast-@ …)` / `(p-cast-% …)` form
+# (rule 11: five emitters used to spell the two-element list themselves, and a
+# per-emitter licence would be the same test copied five times).
+#
+# THE FACT is syntactic and local: the cast's operand is a CL string LITERAL,
+# so the name it dereferences is the same at every execution of the site and
+# the SYMBOL it denotes can live in a cell the site owns.  The runtime's
+# `(p-symref-site)` is that cell; `p-cast-*` take it as an optional second
+# argument, which is why the form's HEAD does not change — p-setf's place
+# tables, %p-accessor-place-p and the four ++/-- macros all key on `p-cast-$`
+# and keep matching, and `(setf (p-cast-$ NAME SITE) v)` reaches the same
+# writer through CL's own setf-function rule.
+#
+# The licence is DENIED for anything but a plain literal with no escape: a
+# backslash could spell a NUL (which the runtime's readers answer with undef /
+# a fresh empty container, a decision the site cache must not be asked to
+# hold), and a control character in the name is the same question.  A
+# NON-constant operand — `${"${pkg}::x"}` — keeps today's generic path, which
+# is what #812's name memo is for.
+sub _cast_form {
+  my ($head, $operand) = @_;
+  return [$head, $operand]
+    unless !ref($operand)
+        && $operand =~ /\A"([^"\\\x00-\x1f]+)"\z/
+        && Pl::Passes::enabled('symref-const');
+  return [$head, $operand, ['p-symref-site']];
+}
+
 # `%foo::SIG` → `(p-cast-% "foo::SIG")` — the SAME form `%{"foo::SIG"}`
 # already lowers to, so the fix is one emission rule over the resolver #685
 # corrected, not a second mechanism.  Returns () for everything else.
@@ -3378,7 +3407,7 @@ sub _foreign_runtime_global_form {
   return if $pkg eq '' || $pkg eq 'main';
   return unless $PCL_EXPORTED_GLOBALS{"$sigil$base"};
   my %cast = (q($) => 'p-cast-$', q(@) => 'p-cast-@', q(%) => 'p-cast-%');
-  return [ $cast{$sigil}, "\"${pkg}::${base}\"" ];
+  return _cast_form($cast{$sigil}, "\"${pkg}::${base}\"");
 }
 
 sub qualified_var_to_cl {
@@ -3741,7 +3770,7 @@ sub _slice_container_form {
   if ($r eq 'PPI::Token::Symbol' || $r eq 'PPI::Token::Magic') {
     return $form if ($node->content // '') =~ /^[\@\%]/;
   }
-  return [$cast, $form];
+  return _cast_form($cast, $form);
 }
 
 # @a[i,j] → (p-aslice @a i j), context-wrapped.

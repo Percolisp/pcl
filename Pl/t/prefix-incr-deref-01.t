@@ -119,7 +119,13 @@ PL
     my $cl = emitted(qq{no strict 'refs';\n++\${"23::foo"};\n});
     unlike($cl, qr/PARSE ERROR/,
            '#463(2): `++${"23::foo"};` is no longer a dropped statement');
-    like($cl, qr/\(p-pre\+\+ \(p-cast-\$ "23::foo"\)\)/,
+    # The trailing `(p-symref-site)` is the Kind-A `symref-const` cache a
+    # CONSTANT-name symbolic deref carries since task #1180 — an extra
+    # ARGUMENT to the same p-cast-$ head, which is exactly what this row is
+    # about: the place's head is what p-setf and the four ++/-- macros key on,
+    # so the site must not change it.  `PCL_OPT=-symref-const` prints the bare
+    # two-element form (Pl/t/perf-levers-01.t asserts both).
+    like($cl, qr/\(p-pre\+\+ \(p-cast-\$ "23::foo"(?: \(p-symref-site\))?\)\)/,
          '#463(2): it lowers to the ordinary prefix-increment of a scalar deref');
 }
 
