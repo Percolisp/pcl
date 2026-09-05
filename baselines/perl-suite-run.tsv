@@ -1,4 +1,15 @@
 # file	P_ok	P_notok	C_ok	C_notok	status	sig	[P=PERL, C=PCL]
+# s470bi (task #1022 half (a), 2026-09-05) -- TWO ROWS SPLICED BY HAND, one
+#   cause, and the cost is deliberately VISIBLE rather than hidden (the Fable
+#   ruling of s470).  A bare `last`/`next`/`redo` whose loop is not lexically
+#   in the sub now DIES at its own site: it used to do NOTHING silently in the
+#   `for` spelling (n=303 where perl says 1) and reach SBCL as "attempt to GO
+#   to nonexistent tag" in the `while` one.
+#     op/loopctl.t     63/4  ->  40/0    #1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
+#     op/rt119311.t    11/2  ->   8/2    #1022(a): the six `{ foo(sub { ...; last }) }` sites die at the site; waits on #1022(b)
+#   Both re-run ALONE and agreeing (#366).  Half (b) -- a catch frame per loop
+#   ENTRY -- wins the rows back; these two rows are then re-measured, not
+#   assumed.
 # s468bc (Opus, round 23, task #1037 -- A RULED REFUSAL IS A STATEMENT-LEVEL
 #   EVENT), SIXTEEN ROWS, every one of them a file that produced NO EMISSION
 #   AT ALL before and now transpiles.  There is ONE cause and it is the same
@@ -1470,7 +1481,7 @@ op/list.t	0	0	0	0	NOT-RUN	QUARANTINED: task #160 — 10 GB SBCL blowup OOM-kills
 op/local.t	316	3	300	19	DIFF	undef-fn:main::|pl-main::|	0
 op/localref.t	64	0	63	1	XDIFF	not-supported.md §DESTROY called by garbage collector — t64 needs refcount-deterministic DESTROY at local-restore	0
 op/lock.t	5	0	0	0	DIFF	aborted-forms:5: invalid number of arguments: N	0
-op/loopctl.t	66	1	63	4	DIFF		0
+op/loopctl.t	66	1	40	0	DIFF	aborted-forms:1: PCL: unsupported: "last" exiting subroutine test_last (dynamic loop exit; docs/not-support	0
 op/lop.t	47	0	47	0	OK		0
 op/lvref.t	199	2	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/magic-27839.t	2	0	2	0	OK		0
@@ -1517,7 +1528,7 @@ op/require_gh20577.t	9	0	4	5	DIFF		0
 op/require_override.t	10	0	7	3	DIFF		0
 op/reset.t	45	0	26	19	DIFF		0
 op/reverse.t	25	0	25	0	OK		0
-op/rt119311.t	22	0	11	2	DIFF	aborted-forms:2: Can't find label test at /home/bernt/perlN/perlbrew/build/perl-N.N.N/perl-N.N.N/t/op/rtN.t	0
+op/rt119311.t	22	0	8	2	DIFF	aborted-forms:5: PCL: unsupported: "last" exiting subroutine __ANON__ (dynamic loop exit; docs/not-supporte	0
 op/runlevel.t	24	0	0	0	DIFF		0
 op/select.t	9	0	3	6	DIFF		0
 op/setpgrpstack.t	3	0	3	0	OK		0

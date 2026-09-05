@@ -47,7 +47,14 @@ ODD-LENGTH plist, and death at LOAD in `%p-check-facts` — measured casualties
 on main: `t/op/try.t`, `t/opbasic/concat.t`, cpan YAML::Tiny and
 Test::Tester::Capture, a whole file each.  One added conjunct (an entry's
 first element is a NAME, never a keyword) plus a plist layout that breaks
-between PAIRS.
+between PAIRS.  **Fable measured its SWEEP cost at the merge review: on main
+`e73038f` it cost `perl-tests/eval.t` 36 passing rows (128 -> 92); this tree
+restores it to 128 passing / 32 failing, last test 163.**  It hid well —
+`PCL_OPT=-raw-op-family` and `-raw-return-family` each MASKED it, because the
+form carrying the corrupted `:captures` only reaches the file under the
+default emissions, so a PCL_OPT bisect made it vanish.  The A5 agent had filed
+the same bug from the other end as **#1125** ("the byte-compare says DIFF for
+no reason"), now closed as a duplicate pointing here.
 
 **#1020 — `undef *GLOB` clears every slot; it cleared NOTHING.**  `p-undef`
 handed `p-glob-undef-name` the CL package NAME ("MAIN"), which the callee
@@ -88,9 +95,25 @@ time.t), and **a `for`/`foreach` STATEMENT MODIFIER is a loop with no Compound
 around it — core Exporter.pm's `import` is written that way on purpose, so
 marking it would have made every `use` die**.  A `while` modifier is NOT a
 loop (probed: perl says `Can't "last" outside a loop block`).
-**MEASURED COST, deliberately left for Fable to rule on: perl-tests/loopctl.t
-OK 63/1 -> PARTIAL 40/0 (23 rows), op/loopctl.t -23, op/rt119311.t -3.**  The
-baselines are NOT edited and the commit is separate so it can be held.
+**MEASURED COST: perl-tests/loopctl.t OK 63/1 -> PARTIAL 40/0 (23 rows),
+op/loopctl.t 63/4 -> 40/0, op/rt119311.t 11/2 -> 8/2.**  **RULED by Fable at
+the merge review: the die STAYS** — the s329 announce-and-continue boundary is
+for effect-only misses in code that otherwise runs correctly, and an untaken
+loop exit changes the caller's control flow, so the trappable die is the
+correct interim and half (b) is the immediate next item, which wins the rows
+back.  The cost is therefore HONEST AND VISIBLE, blessed ROW BY ROW with one
+cause in five files: `pass-baseline.tsv` (loopctl.t 63/1 -> PARTIAL 40/0),
+`fail-baseline.tsv` (row 41 `dynamically scoped` leaves BY EDIT and is NOT
+fixed — it no longer RUNS, and comes back with its own cause if it fails again
+under (b)), `row-shortfall.tsv` (perl-tests/loopctl.t 3 -> 27 by hand,
+t/op/loopctl.t 27 and t/op/rt119311.t 9 -> 12 by `--bless-shortfall`),
+`perl-suite-run.tsv` (both count rows spliced by hand with their sigs) and
+`perl-suite-fails.tsv` (the 25 rows that stop being PRODUCED, blessed with
+`--bless-fails` AFTER READING every one of them from
+`.suitelog/*.fails.tsv`).  Verified: a single-file sweep of
+`perl-tests/loopctl.t` puts NO loopctl.t row in any `sweep-diff.pl` bucket —
+0 NEW / 0 FIXED / 0 LOST — and `planned rows not asserted` reads
+`baseline 27, current 27 (+0)`.
 
 **Two infrastructure findings, both costly.**  The session's assigned
 generation string v2-690 was POISONED by its own stopped predecessor (entries

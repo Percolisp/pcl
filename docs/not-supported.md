@@ -129,7 +129,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [Computed goto (`goto EXPR`)](#computed-goto-goto-expr)
 * [`given`/`when` / smart match (`~~`)](#givenwhen--smart-match-)
 * [`defer { … }` blocks — DEFERRED](#defer----blocks--deferred--implementable-not-rejected)
-* [An unlabelled `last`/`next`/`redo` whose loop is not lexically here](#an-unlabelled-lastnextredo-whose-loop-is-not-lexically-here)
+* [An unlabelled `last`/`next`/`redo` whose loop is not lexically here](#an-unlabelled-lastnextredo-whose-loop-is-not-lexically-here) — INTERIM, owner #1022 half (b)
 
 ### Objects and OO
 

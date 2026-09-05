@@ -16,7 +16,10 @@
 # perl-tests/pack.t is OK with 8,997 of 14,722 planned rows never produced;
 # the companion's 10 TRANSPILE files are one line each and 2,031 rows behind
 # them.  Neither is visible in any other bucket.
-# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (t/op/closure.t, t/op/write.t; hand-merged at the rebase)
+# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (t/op/closure.t,
+#   t/op/write.t) + s470bi 2026-09-05 (t/op/loopctl.t + t/op/rt119311.t ONLY,
+#   --bless-shortfall; perl-tests/loopctl.t edited by hand) -- hand-merged at
+#   each rebase, only the named files were ever re-measured.
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	10	UNEXPLAINED
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -43,7 +46,7 @@ perl-tests/lc.t	2577	UNEXPLAINED
 perl-tests/length.t	11	UNEXPLAINED
 perl-tests/lex.t	8	UNEXPLAINED
 perl-tests/local.t	6	UNEXPLAINED
-perl-tests/loopctl.t	3	UNEXPLAINED
+perl-tests/loopctl.t	27	#1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
 perl-tests/magic.t	19	UNEXPLAINED
 perl-tests/method.t	65	UNEXPLAINED
 perl-tests/multideref.t	13	UNEXPLAINED
@@ -177,6 +180,7 @@ t/op/lex.t	1	UNEXPLAINED
 t/op/lexsub.t	15	UNEXPLAINED
 t/op/lfs.t	17	UNEXPLAINED
 t/op/lock.t	5	UNEXPLAINED
+t/op/loopctl.t	27	#1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
 t/op/lvref.t	201	UNEXPLAINED
 t/op/magic.t	1	UNEXPLAINED
 t/op/method.t	38	UNEXPLAINED
@@ -190,7 +194,7 @@ t/op/postfixderef.t	7	UNEXPLAINED
 t/op/readline.t	4	UNEXPLAINED
 t/op/ref.t	15	UNEXPLAINED
 t/op/require_37033.t	4	UNEXPLAINED
-t/op/rt119311.t	9	UNEXPLAINED
+t/op/rt119311.t	12	#1022(a): the six `{ foo(sub { ...; last }) }` sites die at the site; waits on #1022(b)
 t/op/runlevel.t	24	UNEXPLAINED
 t/op/sigdispatch.t	2	UNEXPLAINED
 t/op/signame_canonical.t	15	UNEXPLAINED

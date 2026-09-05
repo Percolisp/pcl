@@ -1,3 +1,11 @@
+# s470bi (task #1022 half (a), 2026-09-05): the row `loopctl.t 41 dynamically
+#   scoped` left this file BY EDIT and is NOT FIXED.  It no longer RUNS: the
+#   `sub test_last { last }` it calls now dies at its own site (the ruled loud
+#   half -- it used to answer $ok=0 silently), so the file aborts at test 41.
+#   #1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
+#   When half (b) lands the row runs again; if it then FAILS it comes back
+#   here with its own cause, and if it passes it stays out.  The 22 rows after
+#   it are in perl-suite-fails.tsv / row-shortfall.tsv, not here.
 aassign.t	180	RT #130132 scalar derefffed 1	'3'	'2'	UNEXPLAINED
 aassign.t	181	RT #130132 scalar derefffed 2	'1'	'3'	UNEXPLAINED
 aassign.t	182	RT #130132 scalar undef 1	undef	'2'	UNEXPLAINED
@@ -473,7 +481,6 @@ kvhslice.t	9	last element in scalar context	'6'	'E'	#1023 (kv-slice in scalar co
 kvhslice.t	11		'0'	'2'	#1023 (kv-slice in scalar context yields the count)
 kvhslice.t	28		undef	'a'	#1024 (bareword key in a kv-slice is not autoquoted)
 kvhslice.t	29		undef	'A'	#1024 (bareword key in a kv-slice is not autoquoted)
-loopctl.t	41	dynamically scoped	'0'	== '1'	#1022 (unlabelled `last` inside a called sub)
 sort.t	26	redefinition should not take effect during the sort			UNEXPLAINED (review §1c: does NOT reproduce in isolation — an in-file interaction)
 sort.t	162	overload compare called once	'0'	'1'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	163	overload sort result	' '	'1 2'	#1021 (sort default comparator ignores an overloaded cmp)

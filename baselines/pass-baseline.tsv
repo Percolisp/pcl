@@ -1,4 +1,15 @@
 # taken-at: 5323d9e 2026-08-15
+# s470bi (task #1022 half (a), edited ROW BY ROW): loopctl.t OK 63/1 ->
+#   PARTIAL 40/0/67.  ONE cause, and it is a DELIBERATE cost the Fable ruling
+#   of s470 accepted rather than hide: a bare `last`/`next`/`redo` whose loop
+#   is not lexically in the sub now DIES at its own site (it used to do NOTHING
+#   silently -- the `for` spelling ran to completion, n=303 where perl says 1).
+#   #1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
+#   The call at loopctl.t:920 is outside any eval, so the file aborts at test
+#   41 and rows 41-67 never run; they are blessed in row-shortfall.tsv (3 ->
+#   27) and the row that used to FAIL there left fail-baseline.tsv by EDIT.
+#   Half (b) (a catch frame per loop ENTRY) wins all of it back, so this row
+#   is expected to move again -- re-measure it then, do not assume.
 # s466bc (round 23, task #1037, edited ROW BY ROW): state.t TRANSPILE_FAIL 0/0/-1
 #   -> PARTIAL 88/0/166.  ONE cause — a ruled refusal is now a STATEMENT-level
 #   event (the USER s465 ruling): the file transpiles, its 88 rows before the
@@ -297,7 +308,7 @@ lc.t	OK	82	0	2659
 length.t	PARTIAL	35	3	49
 lex.t	OK	45	0	53
 local.t	OK	300	13	319
-loopctl.t	OK	63	1	67
+loopctl.t	PARTIAL	40	0	67
 lop.t	OK	47	0	47
 # s445/s446i (#512): $0 is writable, so tests 104/105/110 (compare $0 after write) now PASS and left
 # fail-baseline.tsv by EDIT; test 204 (altering $0 via /proc/) is an HONEST new failure (no OS-level

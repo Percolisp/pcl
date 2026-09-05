@@ -36,7 +36,27 @@
 # descriptions interpolate perl's own hash order ("uses >0 heads (6)", "k1:
 # delete", "key '2' incremented correctly") and were measured DIFFERENT in two
 # runs of ONE tree.
-# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (the ten s468be files) + s469bf 2026-09-05 (run/cloexec.t re-blessed; re/pat.t + re/pat_advanced.t + re/regexp_unicode_prop.t hand-registered *rows-unstable*) — hand-merged, only the named files were re-measured
+# taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (the ten s468be
+#   files) + s469bf 2026-09-05 (run/cloexec.t re-blessed; re/pat.t +
+#   re/pat_advanced.t + re/regexp_unicode_prop.t hand-registered
+#   *rows-unstable*) + s470bi 2026-09-05 (op/loopctl.t + op/rt119311.t ONLY,
+#   --bless-fails after READING every new row) -- hand-merged, only the named
+#   files were ever re-measured.
+# s470bi (task #1022 half (a), RULED by Fable in s470 and blessed with its
+#   cost VISIBLE): a bare `last`/`next`/`redo` whose loop is not lexically in
+#   the sub now DIES at its own site, trappably, instead of doing nothing
+#   silently (`for` ran to completion: n=303 where perl says 1) or reaching
+#   SBCL as "attempt to GO to nonexistent tag".  TWENTY-FIVE rows therefore
+#   stop being PRODUCED, in two files, with ONE cause:
+#     op/loopctl.t   22 rows -> (missing).  #1022(a): sub test_last { last } dies at the site; rows after it wait on #1022(b)
+#       Its `sub test_last { last }` is called at line 920 outside any eval,
+#       so the file aborts at test 41 and rows 41-67 never run.
+#     op/rt119311.t   3 rows -> (missing).  #1022(a): the six `{ foo(sub { ...; last }) }` sites die at the site; waits on #1022(b)
+#       (rows 7-9; 10-18 were already blessed missing, and 19/20's PCL
+#       numbers shift 10/11 -> 7/8 as a consequence.)
+#   NOT FIXED, WAITING: half (b) -- a catch frame per loop ENTRY -- wins every
+#   one of these rows back, and when it lands they must be re-verified, not
+#   assumed (a row that fails for a NEW reason is a NEW row).
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -4954,11 +4974,33 @@ op/local.t	275	ok	not ok	localised sub via stash
 op/local.t	277	ok	not ok	localised sub via stash slice
 op/local.t	278	ok	not ok	localised sub via stash slice
 op/lock.t	0	ok*	(no TAP)	*summary*
-op/loopctl.t	61	not ok	ok	constant optimization doesn't change return value # TODO until is still wrongly optimized
-op/loopctl.t	41	ok	not ok	dynamically scoped
-op/loopctl.t	62	ok	not ok	last with non-constant label
-op/loopctl.t	63	ok	not ok	next with non-constant label
-op/loopctl.t	64	ok	not ok	redo with non-constant label
+op/loopctl.t	54	ok	(missing)	bug 21469: X okay at end of loop
+op/loopctl.t	48	ok	(missing)	bug 21469: correct at start of loop 1
+op/loopctl.t	50	ok	(missing)	bug 21469: correct at start of loop 2
+op/loopctl.t	52	ok	(missing)	bug 21469: correct at start of loop 3
+op/loopctl.t	49	ok	(missing)	bug 21469: correct at tail of loop 1
+op/loopctl.t	51	ok	(missing)	bug 21469: correct at tail of loop 2
+op/loopctl.t	53	ok	(missing)	bug 21469: correct at tail of loop 3
+op/loopctl.t	42	ok	(missing)	bug 27206: redo memory leak
+op/loopctl.t	43	ok	(missing)	bug 27206: redo with continue memory leak
+op/loopctl.t	47	ok	(missing)	bug 37725: reverse with empty slots bug
+op/loopctl.t	56	ok	(missing)	constant optimization doesn't change return value
+op/loopctl.t	57	ok	(missing)	constant optimization doesn't change return value
+op/loopctl.t	58	ok	(missing)	constant optimization doesn't change return value
+op/loopctl.t	59	ok	(missing)	constant optimization doesn't change return value
+op/loopctl.t	60	ok	(missing)	constant optimization doesn't change return value
+op/loopctl.t	61	not ok	(missing)	constant optimization doesn't change return value # TODO until is still wrongly optimized
+op/loopctl.t	41	ok	(missing)	dynamically scoped
+op/loopctl.t	46	ok	(missing)	for/redo lexical life
+op/loopctl.t	67	ok	(missing)	last returns nothing
+op/loopctl.t	62	ok	(missing)	last with non-constant label
+op/loopctl.t	63	ok	(missing)	next with non-constant label
+op/loopctl.t	66	ok	(missing)	no error, either
+op/loopctl.t	55	ok	(missing)	perl 112316: Labels with the same prefix don't get mixed up.
+op/loopctl.t	65	ok	(missing)	push @a, last;  does not push
+op/loopctl.t	64	ok	(missing)	redo with non-constant label
+op/loopctl.t	45	ok	(missing)	until/redo lexical life
+op/loopctl.t	44	ok	(missing)	while/redo lexical life
 op/magic.t	160	ok	not ok [PCL #162]	${^LAST_FH} after another tell
 op/magic.t	159	ok	not ok [PCL #161]	${^LAST_FH} after tell
 op/magic.t	161	ok	not ok [PCL #163]	${^LAST_FH} referencing lexical coercible glob
@@ -5503,14 +5545,17 @@ op/reset.t	29	ok	not ok	resetting array in the same gv as a ro scalar
 op/rt119311.t	0	(none)	renumbered	*summary*
 op/rt119311.t	15	ok	(missing)	die triggering DESTROY directly inside format
 op/rt119311.t	11	ok	(missing)	die triggering DESTROY that calls outer format
-op/rt119311.t	19	ok	not ok [PCL #10]	exit triggering DESTROY directly inside format
-op/rt119311.t	20	ok	not ok [PCL #11]	exit triggering DESTROY that calls outer format
+op/rt119311.t	19	ok	not ok [PCL #7]	exit triggering DESTROY directly inside format
+op/rt119311.t	20	ok	not ok [PCL #8]	exit triggering DESTROY that calls outer format
 op/rt119311.t	10	ok	(missing)	goto triggering DESTROY that calls current sub
 op/rt119311.t	16	ok	(missing)	last triggering DESTROY directly inside format
+op/rt119311.t	7	ok	(missing)	last triggering DESTROY that calls current sub
 op/rt119311.t	12	ok	(missing)	last triggering DESTROY that calls outer format
 op/rt119311.t	17	ok	(missing)	next triggering DESTROY directly inside format
+op/rt119311.t	8	ok	(missing)	next triggering DESTROY that calls current sub
 op/rt119311.t	13	ok	(missing)	next triggering DESTROY that calls outer format
 op/rt119311.t	18	ok	(missing)	redo triggering DESTROY directly inside format
+op/rt119311.t	9	ok	(missing)	redo triggering DESTROY that calls current sub
 op/rt119311.t	14	ok	(missing)	redo triggering DESTROY that calls outer format
 op/runlevel.t	0	ok*	(no TAP)	*summary*
 op/select.t	3	ok	not ok	select returns ref for glob generated by open
