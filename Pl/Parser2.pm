@@ -10765,14 +10765,106 @@ sub _lower_embedded_anon {
     _ppi_state_restore($ppi_snap);
     return undef;
   }
-  return ['lambda', ['list', '&rest', '%_args'],
-          ['let', ['list',
-                   ['list', '@_', ['p-flatten-args', '%_args']],
-                   $self->_anon_home_pkg_binding,
-                   ['list', '*pcl-caller-wantarray*', '*wantarray*']],
-           ['p-sub-frame',
-            ['block', 'nil', @$forms]]]];
+  my $lambda = ['lambda', ['list', '&rest', '%_args'],
+                ['let', ['list',
+                         ['list', '@_', ['p-flatten-args', '%_args']],
+                         $self->_anon_home_pkg_binding,
+                         ['list', '*pcl-caller-wantarray*', '*wantarray*']],
+                 ['p-sub-frame',
+                  ['block', 'nil', @$forms]]]];
+  return _anon_compiles_at_runtime($block) ? ['p-cloned-sub', $lambda] : $lambda;
 }
+
+# ── PER-EVALUATION CLONING (task #1083) ──────────────────────────────────────
+# perl re-uses ONE CV for a `sub {…}` evaluated repeatedly, and clones a fresh
+# one only when the body CAN COMPILE PERL AT RUN TIME — PL_cv_has_eval.
+# Measured over nine shapes (perl 5.40.3, scratch/s470bi/p1083/b.pl):
+#
+#   same       sub { 1 }              sub { my $x; $x }      sub { s/$x/1/ }
+#              sub { use re "eval"; 1 }   sub { s/1/1/e }    sub { eval { 1 } }
+#   different  sub { eval "1" }       sub { s/1/1/ee }
+#              sub { use re "eval"; my $x; s/$x/1/ }
+#
+# PCL matched the `same` half BY ACCIDENT: a lambda with no free lexical is
+# hoisted into a constant by SBCL, so two evaluations are one object — and it
+# therefore missed the whole `different` half (t/op/closure.t rows 273/274,
+# an `isnt` on two subs made in one loop).  This is the discriminator; the
+# wrapper is `p-cloned-sub` in the runtime, which carries the why.
+#
+# The three events, and why each is asked the way it is:
+#   * a string `eval` — an `eval` Word NOT followed by a Block.  Same test the
+#     file/named-sub scan in `parse` makes (`:string-eval`); asked here of a
+#     BLOCK rather than the document, because the answer is per anon sub.
+#   * `s///ee` — the SECOND `e` evals the replacement's RESULT as perl code.
+#     PPI's get_modifiers collapses `ee` to `e => 1` (probed), so the count
+#     comes from the trailing modifier letters of the token text.
+#   * `use re 'eval'` in scope AND a pattern built at run time.  BOTH are
+#     required: the pragma alone and an interpolated pattern alone are each
+#     `same` in perl.
+#
+# A NESTED `sub {…}` is NOT excluded, and that is measured, not assumed:
+# `sub { sub { my $q = sub { eval "1" }; 2 } }` is DIFFERENT in perl, so the
+# mark propagates OUT of an inner sub — the outer must hand back a fresh inner
+# each time.  `sub { sub { my $q = sub { 1 }; 2 } }` stays SAME.
+sub _anon_compiles_at_runtime {
+  my ($block) = @_;
+  my $hits = $block->find(sub {
+    my $e = $_[1];
+    return 1 if $e->isa('PPI::Token::Word') && $e->content eq 'eval';
+    return 1 if $e->isa('PPI::Token::Regexp::Substitute');
+    return 1 if $e->isa('PPI::Token::Regexp::Match');
+    return '';
+  }) || [];
+  for my $tok (@$hits) {
+    if ($tok->isa('PPI::Token::Word')) {
+      my $nx = $tok->snext_sibling;
+      next if $nx && $nx->isa('PPI::Structure::Block');   # eval BLOCK compiles nothing
+      return 1;
+    }
+    return 1 if $tok->isa('PPI::Token::Regexp::Substitute')
+             && _regex_modifier_text($tok) =~ tr/e// >= 2;
+    return 1 if _regex_pattern_interpolates($tok) && _re_eval_in_scope($tok);
+  }
+  return 0;
+}
+
+# The trailing modifier letters of a regex token (`s{a}{b}gee` -> "gee").
+sub _regex_modifier_text {
+  my ($tok) = @_;
+  my ($mods) = $tok->content =~ /([A-Za-z]*)\z/;
+  return $mods // '';
+}
+
+# Does this regex build its pattern at RUN time?  A sigil followed by a name
+# or a brace, in a pattern whose delimiter is not the non-interpolating `'`.
+sub _regex_pattern_interpolates {
+  my ($tok) = @_;
+  return 0 if $tok->content =~ /^(?:s|m|qr)?'/;
+  my $pat = eval { $tok->get_match_string };
+  return 0 unless defined $pat;
+  return $pat =~ /(?<!\\)[\$\@][\{\w]/ ? 1 : 0;
+}
+
+# Is `use re 'eval'` lexically in force at TOK?  perl scopes the pragma
+# lexically, so the walk goes out through every enclosing block to the
+# document and looks at the statements that PRECEDE the one TOK is in.
+sub _re_eval_in_scope {
+  my ($tok) = @_;
+  my $node = $tok;
+  while (my $parent = $node->parent) {
+    if ($parent->isa('PPI::Structure::Block') || $parent->isa('PPI::Document')) {
+      for my $sib ($parent->schildren) {
+        last if $sib == $node;
+        next unless $sib->isa('PPI::Statement::Include');
+        next unless ($sib->module // '') eq 're';
+        return 1 if $sib->content =~ /\beval\b/;
+      }
+    }
+    $node = $parent;
+  }
+  return 0;
+}
+
 
 # The `(*pcl-current-package* "Pkg")` binding an anon sub's wrapper carries
 # (task #515).  A sub's home package is the package it was COMPILED in, and

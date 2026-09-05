@@ -310,7 +310,7 @@
    #:p-weaken #:p-isweak
    #:pl-__SUB__                         ; CORE::__SUB__ stub (returns no-op lambda)
    ;; Compile-time definition macros (for BEGIN block support)
-   #:p-defpackage #:p-sub #:p-sub-frame #:p-args-body #:p-raw-params #:p-declare-sub
+   #:p-defpackage #:p-sub #:p-sub-frame #:p-cloned-sub #:p-args-body #:p-raw-params #:p-declare-sub
    ;; eval-when wrappers (named for readability in generated CL)
    #:p-eval-always #:p-BEGIN #:p-CHECK
    ;; Assignment forms (distinct from p-setf for clarity)
@@ -9116,6 +9116,35 @@ create the key on a read-only call, which perl does not."
    sub returns the PLACE, which is exactly what the bare catch already yields —
    this macro is the switch, and #930 is not implemented here."
   `(%p-leavesub (catch :p-return ,@body)))
+
+(defun p-cloned-sub (f)
+  "Return a code ref that CALLS F but is a DISTINCT OBJECT from every other
+   call's result — perl's per-evaluation CV clone (task #1083).
+
+   perl re-uses ONE CV for a `sub {…}` it evaluates repeatedly, and clones a
+   fresh one only when the body can COMPILE PERL AT RUNTIME (PL_cv_has_eval:
+   a string `eval`, `s///ee`, or a runtime-interpolated pattern under
+   `use re 'eval'`).  Measured across nine shapes, perl 5.40.3: `sub { 1 }`,
+   `sub { my $x; $x }`, `s/$x/1/` without the pragma, the pragma alone,
+   `s///e` and `eval BLOCK` all compare EQUAL; the three above compare
+   different.  PCL matched the equal half by ACCIDENT — a lambda with no free
+   lexical variable is hoisted into a constant by SBCL — and therefore missed
+   the whole different half.
+
+   A closure is distinct from another closure only if it actually CLOSES over
+   something, and the obvious cheap trick does not work: SBCL deletes a
+   reference whose value is discarded and hoists the lambda again (measured —
+   `(let ((c (list nil))) (lambda () (progn c 1)))` is EQ to itself, while
+   `(lambda () c)` is not).  So the wrapper closes over F, which it genuinely
+   uses.
+
+   The cost — one funcall and one &rest list per call — is paid ONLY by subs
+   that compile perl at run time, which already pay a transpile.  Every part
+   of the calling convention passes through: *wantarray* and
+   *pcl-caller-wantarray* are dynamic, @_ aliases the same BOXES (the list is
+   re-consed, the boxes are not), and the caller stack, the :p-return catch
+   and the leave rule all live INSIDE F's own p-sub-frame."
+  (lambda (&rest args) (apply f args)))
 
 (defun p-check-arity (funcname got min max flexible &optional hash-start)
   "Perl subroutine-signature arity check.  Throws a Perl-formatted

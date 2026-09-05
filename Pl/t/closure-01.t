@@ -397,4 +397,64 @@ sub getv { $v }
 print getv(), " ", scalar(@main::v), "\n";
 ', "8 8\n1 0\n");
 
+# ── #1083: a sub that can COMPILE PERL AT RUN TIME is cloned per evaluation ──
+# perl re-uses ONE CV for a `sub {…}` it evaluates repeatedly, and clones a
+# fresh one only when PL_cv_has_eval is set — a string `eval`, `s///ee`, or a
+# runtime-interpolated pattern under `use re 'eval'`.  PCL matched the
+# re-use half BY ACCIDENT (SBCL hoists a lambda with no free lexical into a
+# constant) and therefore missed the clone half entirely: t/op/closure.t rows
+# 273/274 are `isnt($s[0], $s[1])` on two subs made in one loop.
+#
+# All nine expectations below are perl 5.40.3's own answers
+# (scratch/s470bi/p1083/); the six `same` rows are the INVERSE half and were
+# already right — they are here because the fix must not widen onto them.
+test_io("#1083: the six shapes perl does NOT clone stay one object", '
+sub probe { my ($n,$m) = @_; my @s = ($m->(), $m->());
+            print "$n: ", ($s[0] == $s[1] ? "same" : "different"), "\n" }
+probe("plain",      sub { sub { 1 } });
+probe("my-only",    sub { sub { my $x; $x } });
+probe("subst-pat",  sub { sub { my $x; s/$x/1/ } });
+probe("pragma",     sub { sub { use re "eval"; 1 } });
+probe("e-only",     sub { sub { s/1/1/e } });
+probe("block-eval", sub { sub { eval { 1 } } });
+', "plain: same\nmy-only: same\nsubst-pat: same\npragma: same\ne-only: same\nblock-eval: same\n");
+
+test_io("#1083: the three shapes perl DOES clone are distinct objects", '
+sub probe { my ($n,$m) = @_; my @s = ($m->(), $m->());
+            print "$n: ", ($s[0] == $s[1] ? "same" : "different"), "\n" }
+probe("str-eval",    sub { sub { eval "1" } });
+probe("ee",          sub { sub { s/1/1/ee } });
+probe("re-eval+pat", sub { sub { use re "eval"; my $x; s/$x/1/ } });
+', "str-eval: different\nee: different\nre-eval+pat: different\n");
+
+# The mark propagates OUT of a nested sub — measured, not assumed: perl must
+# hand back a fresh INNER each time, so the OUTER is cloned too.  And a
+# non-interpolating delimiter builds no pattern at run time.
+test_io("#1083: a nested sub's eval clones the OUTER too", '
+sub probe { my ($n,$m) = @_; my @s = ($m->(), $m->());
+            print "$n: ", ($s[0] == $s[1] ? "same" : "different"), "\n" }
+probe("outer-of-inner-eval", sub { sub { my $q = sub { eval "1" }; 2 } });
+probe("plain-nested",        sub { sub { my $q = sub { 1 }; 2 } });
+probe("pragma+literal-pat",  sub { sub { use re "eval"; s/abc/1/ } });
+', "outer-of-inner-eval: different\nplain-nested: same\npragma+literal-pat: same\n");
+
+# The non-interpolating delimiter builds no pattern at run time, so the pragma
+# does not clone it either.  (Written by concatenation: a `s'...'...'` cannot
+# be spelled inside the single-quoted program strings above.)
+test_io("#1083: ... and a q-delimited pattern under the pragma is not a runtime one",
+        "\nsub probe { my (\$n,\$m) = \@_; my \@s = (\$m->(), \$m->());\n"
+      . "            print \"\$n: \", (\$s[0] == \$s[1] ? \"same\" : \"different\"), \"\\n\" }\n"
+      . "probe(\"sq-pattern\", sub { sub { use re \"eval\"; my \$x; s'\$x'1' } });\n",
+        "sq-pattern: same\n");
+
+# The wrapper must be transparent: a cloned sub still takes @_, sees its
+# caller's wantarray, and returns through its own frame.
+test_io("#1083: a cloned sub keeps the whole calling convention", '
+my $f = sub { my @a = @_; my $w = wantarray ? "L" : "S"; eval "1";
+              return "$w:@a" };
+my @l = $f->(1,2);
+my $s = $f->(3);
+print "$l[0] $s\n";
+', "L:1 2 S:3\n");
+
 done_testing();
