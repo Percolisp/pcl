@@ -2,6 +2,270 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470 (Fable, 2026-09-05) — ROUND 24 FINISHED (BF + BI), ROUND 25 (A5 + #1072) MERGED, ROUND 26 (BJ + BK) LAUNCHED; the eval.t LOST-36 regression found by the first sweep since s468
+
+**Part 0 — the restart recipe, executed as written (session-log §469).**  `git worktree
+list` + each STOP.md + `git diff --stat` there: BF = 6 clean commits on `c80b1a0` exactly
+as recorded; BI = 0 commits and the 8-file uncommitted diff (+102/−13) its record
+described; a third worktree (AY, s464) had 0 commits ahead and only scratch — archived
+and pruned.  Both agents relaunched FRESH and PINNED (opus) in their KEPT worktrees with
+a brief that pointed at COMMON.md + prompt.md + STOP.md and said `git rebase main` first.
+
+**Part 1 — BF MERGED ff (`9083d2e`).**  The relaunch rebased with both doc sides kept
+(its sections directly above `## Session 469bg` / `## s469bg`), verified the one leg the
+shutdown cut (`run/fresh_perl.t` XDIFF 59/32, ROW DIFF 0/0/0/0 — the FIFTH independent
+reading) and `tools/t/tap-align.t` 25/25.  Fable review: the `rowkey_desc` normaliser
+keys on PCL's own tempfile stub spelling (`/tmp/pcl-test-PID-N`) with a negative row, and
+both snapshot rows are edited by hand with their causes.
+
+**Part 2 — Round 25 = A5 + #1072, both MERGED ff; the #1022 ruling went in BI's brief.**
+* **C = #1072 (`0faac04`)**: `Pl/t/artifact-staleness-01.t` now REGENERATES each artifact
+  it discovers into a temp file and compares the BODY (everything after the `gen=` line),
+  running the documented recipes (`tools/rebuild-pack -o PATH` is new; mro/warnings through
+  `pl2cl --extension` + `tag-license`), never a re-spelling; an artifact the stamp loop
+  finds and `%RECIPE` cannot classify DIES naming it.  Nothing is normalised — measured:
+  `--extension` emits no preamble (#349) and the only caller-dependent text is the source
+  path AS SPELLED (`"lib/mro.pm line 71"` in a `die`), so the recipe runs with cwd = root.
+  File 25 ms → 3.56 s against a 130 s slowest file; the perturbation proof named each
+  artifact + line.  Gate 199/6796 cold.
+* **A5 = #996 sort half (`4b803c9` + `e73038f`)**: `sortnum` 7.39× → **3.15×**, `sortstr`
+  3.53× → **1.87×** (best-of-5 × 3 passes; both beat s469bh's hand-replaced ceilings
+  because the collector no longer PROMOTES the source).  **Fable's design premise, probed
+  first: `sort` returns ALIASES in perl AND in PCL** (`$_++ for sort @a` writes back; `map
+  { \$_ } sort @c` is `\$c[i]`) — that is why `%p-collect-list` promotes, so a value-sorting
+  fast path is licensed by the CONSUMER (array/list assignment, `join`/`print`/`say`/
+  `printf`/`push`/`unshift`/`return`/a sub's tail value, `[ … ]`, a `foreach-raw` loop;
+  `reverse` and the ctx wrapper pass through) or by a TEMPORARY SOURCE (literals, `keys`,
+  `map`, `split`, `readdir`, `glob`, a range, a user-sub call), never by the comparator
+  alone.  **A5's corrections to the design, both adopted: `values` is NOT fresh** (writes
+  through `sort values %h` reach the hash — probed), nor are `grep` and a nested `sort`;
+  and **five modes, not four** — `sort LIST` (`:default`) and `{ $a cmp $b }` share the
+  fast path but have DIFFERENT fallbacks (p-sort's no-block arm vs a `cmp` dispatch).
+  **Deviation RATIFIED: `classic-sort` is the FIRST Kind-B CLForm pass** (`Pl/ClassicSort.pm`),
+  because the licence is a consumer fact and the six consumers have no parent link in the
+  PExpr tree — the lowered tree is the one place they all pass through, and it already
+  carries the `p-foreach-raw` head (rule 11).  Corpus count: 250 sorts, 149 licensed shapes,
+  110 with a licence (44 %); `PCL_OPT=none` corpus-diff IDENTICAL over 111 + 6 shapes.
+  Fable's own probes on the tree (both modes): `do { sort … }` does NOT copy in perl
+  (`$_++ for do { sort @d }` writes back — the pass already left it generic; now a guard
+  row), `eval { }` and sub tails DO copy; overload + tie fall back; NaN order = the generic
+  path's; `$a`/`$b` untouched after.  Two divergences found, neither A5's: `sort @objs`
+  with an overloaded `cmp` = **#1021** (pre-existing, both modes; A5's `:default` fallback
+  goes through `p-sort` and INHERITS the fix); and `for my $x (sort … @fs) { $fs[1] = 99;
+  print $x }` = **foreach-raw's OWN hole** — plain `for my $x (@fa) { $fa[0] = 99; print $x }`
+  diverges on main under `-foreach-raw`… i.e. with foreach-raw ON (perl 99, PCL 1):
+  the licence covers writes THROUGH the loop var, not writes to the ARRAY by another path,
+  because VarAnnotator has no array facts.  **#1140 filed** = the ARRAY-fact family
+  (escapes + written-in-region) that licenses A3, closes that hole and makes A5's foreach
+  licence exact; A5's foreach member stays (it is exactly as sound as foreach-raw).
+  #1125 filed (emission NONDETERMINISTIC — an arrayref stringification leaks into
+  `:captures`; defeats byte-compares).  Gate 200/6825 on the rebased tree; corpus-diff 12
+  files / 90 regions, all `p-sort` → `%p-sort-classic`; emission-ab wide 941 SAME / 66
+  DIFF / RCDIFF 0; companion op/sort.t 183/22 unchanged in both modes.
+
+**Part 3 — the FIRST sweep since s468 (owed by s469) is NOT CLEAN: eval.t LOST 36.**
+Run on `e73038f` (BF + C + A5 in; BI not yet): TOTAL passing 18581 → 18545, 0 new / 0
+fixed, eval.t 128 → 92 passing with 45 planned rows never produced (was 9) — the file
+still ENDS at its last source block (the sig-die loop), so the rows vanish from the
+MIDDLE; the serial re-run reproduced it.  **Discriminated by the registry's own switch,
+one name at a time (each a 15 s single-file sweep): `PCL_OPT=none` restores 128/163;
+`-raw-op-family` and `-raw-return-family` each restore 128; every other name (incl.
+`-classic-sort`, `-tail-return`) leaves 92.**  So A5 is not the cause; the suspects are
+the round-24 code commits `71d1667` (#1105) / `a821ed0` (#1056) / `b80acdf`+`eee8fea`+
+`2a54b5b`+`600ed53` (#1035 — the only diff that mentions `raw-return-family`).  Handed to
+BK as item 0 (bisect by worktree, TAP-row diff good vs bad, emission diff, fix at the
+cause, own commit first).  LESSON: s469 merged BG and BH without the round-end sweep
+(shutdown); the very next sweep found the loss — the owed legs are owed for a reason.
+
+**Part 4 — BI MERGED ff (`8a3477d`, gen v2-710) after review; the OWED round-end legs on the
+merged tree; the PUSH.**  BI's eight commits: #1045 (`goto` makes a sub context-sensitive),
+#1084 (`do FILE` reads octets; `_maybe_decode_utf8` asks `utf8::downgrade`, not `is_utf8`),
+**#1118** (a `p-sub` FACTS PLIST matched CLForm's p-let declaration-entry SHAPE, so `:captures`'
+arrayref was `join`ed into the CL as `ARRAY(0x…)` — nondeterministic emission and death at
+LOAD; BG's #1035 introduced it; **it was the eval.t LOST-36 cause** — eval.t 128/32 last test
+163 on BI's tree, measured by Fable; A5's #1125 = the same bug, closed as dup), #1020
+(`undef *GLOB` cleared NOTHING — `"MAIN"` handed to a callee that inverted it to `"main"`, found
+no package and swallowed its body; now ONE reading shared with `*A = *B`), #1083 (a sub whose
+body can compile perl at run time is cloned per evaluation — `p-cloned-sub`; PCL matched perl's
+`sub { 1 }` by ACCIDENT, SBCL hoisting a free-variable-less lambda), #1022(a) (the trappable
+die; a `for`/`foreach` STATEMENT MODIFIER is a loop — core Exporter's `import` — a `while`
+modifier is not).  Fable probes on BI's tree identical to perl (nine #1083 shapes, six #1022
+shapes; the one difference is the ruled interim).  **#1022(a) RULED to stay**: cost 49 rows
+(loopctl.t 63/1 → 40/0, op/loopctl.t −23, op/rt119311.t −3), blessed ROW BY ROW with the cause
+in five baseline files; half (b) is the immediate next item.  Filed by BI: #1115 (`open`
+decodes UTF-8 by default where perl reads bytes), #1116 (`do FILE` and `%INC`), #1117
+(`*GLOB{ARRAY}` after `undef`), #1119 (module cache keyed by the hand-maintained generation
+string — two worktrees with one string share and corrupt each other's entries; cost BI two
+gate runs), #1120 (`s///ee` behaves as `/e`).
+**Legs on `8a3477d`**: full sweep TOTAL 18558 → 18559 GATE clean (the +1 = closure.t
+`cloneable with //ee`, #1083 — left `fail-baseline.tsv` BY EDIT, `pass-baseline.tsv` 273 → 274
+by hand, `43cde3f`); cold gate 202/6853 with only the 13 pclxs xs rows; companion op/sub.t
+op/gv.t op/undef.t op/closure.t op/loopctl.t op/sort.t op/rt119311.t: 0 NEW / 7 FIXED
+(op/closure.t 4 = #1083, op/gv.t 3 = #1020) / 0 LOST — blessing by cause handed to BK.
+**PUSHED (USER: "put the changes to the README live")**: `c80b1a0..43cde3f` (32 commits) then
+`92a568e` — the README's third "why" bullet is now the compiler toolkit with a documented IR
+(facts on declarations, the specified IR, the named passes, `PCL_OPT=none`), the
+small-implementation fact folded into its end; "etc." closes the first paragraph's runtime
+list.  CI in progress on both.  Round 26 launched at the USER's word ("two new subjobs"): BJ =
+#1140 + A3, BK = #1058/#1057 + the overload family.
+
+**Part 5 — BJ MERGED ff (`d54b798`, gen v2-720): #1140 the ARRAY-fact family, and with it
+#996 half A3, the foreach-raw write hole, and classic-sort's foreach licence made exact.**
+`Pl::VarAnnotator` was scalar-only by construction; the ONE existing walk now answers two
+facts per `my @name`: `escapes` (a reference taken, passed WHOLE to a call, aliased by a
+foreach whose var is written, captured by a `sub {…}`/map/grep block, `local`ised, …) and
+`written_in(REGION)` (keyed by the loop body block).  Kind-A `local-push` → `(%p-push1 @a X)`
+= `%p-array-store-scalar` (the SAME function `p-push-impl` calls) + the new length;
+`foreach-raw` gains `!escapes && !written_in(body)` over every array named in the list; the
+classic-sort foreach member is exact by construction.  **Three of Fable's design guesses about
+perl were wrong and BJ probed them**: `reverse @a`, `sort @a` (no block) and `values @a` hand
+ALIASES back (alias-transparent, neither reads nor escapes — the same finding A5 made for
+`values`); a symbolic reference cannot reach a `my` array (no blanket `@{"a"}` escape needed);
+`return @a` and a sub tail COPY.  Escaping the array for every `sort` BLOCK would have removed
+classic-sort's whole foreach licence — relaxed via the `$a`/`$b` alias pair the walk already
+tracks (#1142 residue).  Counts: `local-push` fires 3× in lib + 3× in perl-tests (23/127 push
+sites keep the general path); 16 foreach demotions across the four populations, each named
+by cause.  Bench (three A/B rounds, shared box): `pushloc` −43 % (**0.48× → 0.28×**, = #996's
+hand ceiling), `arrhash-k` −10 % (**1.15× → 1.03×**), `cfor` control +1–5 %, `feread` unmoved
+and still `p-foreach-raw`.  Gate 203/6914 xs-only; corpus-diff 3/111; emission-ab wide
+966/41/0 (5 of the 41 = #1118's `ARRAY(0x…)`, pre-merge); companion op/push.t 32/0,
+op/array.t 170/25, op/loopctl.t 63/4 = snapshot.  **The sweep IS the gate for a
+name-resolution-shaped change — run on BJ's tree BEFORE the merge: TOTAL 18559 (+0), GATE
+clean.**  Fable probes (16 shapes: every escape spelling, list pushes, `local`, alias-rw loops,
+the two hole reproducers, push-while-iterating, shift-while-iterating) identical to perl in
+both modes; every generic-path decision in the emission was a correct one.  Filed #1141–#1144.
+Closed #1140 and #996 (both halves).
+
+**Part 6 — the two overview plans (USER ask) and BK MERGED ff (`ee9a658`).**  USER: "what to do
+about speed — total speed, get the low hanging apples" → then "forget beating Perl in
+individual items, we do enough for that; just try to get PCL as fast as possible" → then
+"forget `pack()` until we know if XS will work; prioritize at least half the weight by how
+low hanging the fruit is" and "the IR is targeted for ease of implementing AND for making a
+fast implementation".  `docs/plan-speed-and-ir-s470.md` (pushed `5f9aa2b` → revised
+`37d7868`): Part A ranks levers with ≥ half the weight on EASE, `pack`/`unpack` PARKED until
+the XS decision, round 27 = the three S levers (symref-const, sort-result ADOPTION,
+foreach-raw over a LIST of arrays) + the yardstick (three macro rows `json-rt`/`moo-objs`/
+`textproc` at N and 2N, four constants, `sb-sprof` profiles → a RANKED table as §A.4); Part B
+= INVENTORY and MEASURE (B1 op inventory as data + gate row, B2 `pl2cl --manifest`
+uses/needs/facts, B3 `:needs` on `p-sub`, B4 host-leak gate + the CL-kernel whitelist as
+ir-spec §11b, B5 `--emit-sexp` + structured regex literals, B6 `tools/ir-conform`) and §B.3
+the FAST-backend half: every Kind-A/Kind-B licence printed as a FACT on the general form
+(`PCL_OPT=none --facts`), because a foreign target cannot use PCL's SBCL-shaped rewrites but
+can use the proof behind each; the table maps each fact to what JS and C do with it; three
+facts PCL does not yet prove would pay on every target incl. CL — the numeric RANGE proof,
+element HOMOGENEITY, per-sub exception/dynamic-scope use.  DECIDED §s470 (Fable) carries the
+rulings.  **BK (s470bk) MERGED**: nine commits, runtime-only — #1058 (a WRITE through an undef
+nested element vivifies its container — `$h{a}{b}++` on a fresh hash LOST the increment),
+#1057 (compound store through the walker `p-setf` uses; `%p-store-back` second copy deleted),
+#1021 (sort's DEFAULT comparator IS `cmp`, through `p-str-cmp`; overload asked once per sort),
+#1004 (`++`/`--` handler is a MUTATOR — perl discards its return), #1001(a) + #1005 (`*= %=
+.= x=` and `abs sqrt cos sin exp log atan2 !` reach their overload dispatch; `abs`
+autogenerates from `<`+`-`, `!` from `bool`), BI's 7-row companion bless.  Gate 204/6927
+xs-only; companion 10 files 0/0/0/0; eval.t 128/32 confirmed on its rebase.  **Flagged
+slowdown RULED**: #1001(a)'s guard costs a raw `*=`/`%=` loop ~2× (0.015 → 0.031 s, +9.4 %
+process) — the fix stays; the guard-free path for a RAW twin with a LITERAL delta is an
+EMITTER decision (both facts are the compiler's) → perf agent round 27 lever L4 (#1153).
+Fable probes on BK's tree identical to perl in both modes for every write shape, the default
+sort with an overloaded `cmp`, the `++` mutator, `*=`, unary and `x` dispatch; the two
+pure-READ vivification lines are #1150 (filed by BK, needs the emitter).  `p-not` IS emitted
+(three Parser.pm sites, the `not` operator) — Fable's premise that it was not was wrong; BK
+kept both symbols and corrected ir-spec §10's row (`p-!`/`p-not` were never short-circuit
+macros).  Filed #1150–#1153; closed #1058 #1057 #1021 #1004 #1005; #1001 pending half (b).
+**Round 27 LAUNCHED (BN, v2-750): L1 symref-const, L2 sort-result adoption, L4 #1153, then
+L3 after BL; then the yardstick.**  In flight: BL #1022(b), BM Part B B1/B2/B4.
+
+**Part 7 — the sweep after BK: multideref.t LOST 2, attributed, and an accepted divergence.**
+The `ee9a658` sweep read 0 new / 0 fixed / 1 LOST (multideref.t 43 → 41, serial re-run the same).
+The two rows are "RT #130727 array not autovivified" (+ part 2): `@{local $x[0][0]} = 1` on
+an undef intermediate.  perl DIES (`Can't use an undefined value as an ARRAY reference`) and
+leaves the element undef — a deliberate perl decision for an op that is both OPpLVAL_INTRO
+and OPpDEREF ("it may not make much sense", perl's own test); PCL — on `ee9a658` AND on the
+pre-BK `d54b798` alike — does not die there, and since #1058's write-vivification it
+vivifies and assigns exactly as the non-`local` `@{$x[0][0]} = 1` does on both sides (a shape
+BK FIXED: pre-BK PCL left it undef, a silent wrong).  So the rows were ACCIDENTAL passes (PCL
+never died, nothing vivified, `!defined` held) → registered in `cl/skip-registry.lisp` as an
+accepted divergence with a `not-supported.md` paragraph in the `local` section;
+pass-baseline 43 → 41 and row-shortfall 13 → 15 by hand (`34fbeab`).  The same probe found a
+PRE-EXISTING silent wrong beside it, **#1190**: `local $y[0][0] = 5` with an undef
+intermediate reads EMPTY inside the scope and never vivifies `$y[0]` (perl reads 5, vivifies);
+`my $q = local $w[0][0]` likewise — the local-element macros take the element of an undef
+intermediate without vivifying, the detached-place class #1058 closed for the plain accessors.
+
+**Part 8 — BL built #1022(b) and hit SBCL's compile heap; BM shipped the three Part B
+instruments; BO launched on the census's bugs.**  **BL (s470bl, `12e1617`)**: the dynamic loop
+exit at ZERO measured cost — one `catch` + one special bind per loop ENTRY (`%p-loop-driver`
+is the one implementation for `p-while`/`p-for`/both foreach expanders; `p-dyn-once` for a
+bare block; Kind-A `dyn-loop-exit`, off ⇒ frame-less loops AND half (a)'s die), 21 of 27 bench
+rows byte-identical, the 6 frame-carrying rows inside spread; perl-tests/loopctl.t 40/0 →
+**64/0 FULLY PASSING** (one better than pre-(a)); 53 probes vs perl; #1160 fixed on the way (a
+labelled bare block had no `(block nil …)`, so a bare `last` in one nested in a loop silently
+exited the WRONG loop).  **NOT MERGED**: `t/op/loopctl.t` (perl's own) is ONE 64 KB top-level
+form with 88 framed loops and each `catch` costs ≈ 4.8 MB of SBCL compile IR (244.6 → 691.2 MB
+consing; `progn` for `catch` → 266.6 MB; nesting, frame shape and policy ruled out by
+measurement) — the file produced no TAP.  **RULED #1162**: the frame licence narrows to "the
+body directly calls a NAMED same-unit sub in the MAY-DYN-EXIT fixpoint set"; an exit through a
+coderef/method/cross-unit call meets no frame and takes the perl-shaped die (loud, rule 12;
+the not-supported residue) — BL implementing.  Filed #1161, #1163, #1164; BL corrected the
+brief: a LABELLED dynamic exit already works on both sides.  **BM (s470bm, `b7fc7d5`)**: B1
+`tools/ir-inventory.pl` → `docs/ir-op-inventory.{tsv,md}` (682 exports, 53 families — 34 of
+them §10 had no row for; `Contract:` tails on 55 ops, grammar normative in ir-spec §10a; the
+generator reads the LOADED runtime because `p-+`, the compares and the compound family have no
+textual defun) + gate row; B2 `pl2cl --manifest` (uses/uses_other/needs/facts from ONE walk,
+a Passes observer hook) measured over the four populations — string eval in 55/111
+perl-tests, 205/592 perl t/, but only **14/287 CPAN dist t/** (real CPAN test code is far more
+portable than perl's own suite); `xs` 0 everywhere; B4 `tools/ir-host-leak.pl` + the measured
+**100-name CL kernel** as ir-spec §11b with JS/C renderings + gate row; census 38 leaked
+symbols in perl-tests, bugs #1173–#1179 (16 names §10 cited did not exist — reconciled).
+Gate 207/7006 xs-only; corpus-diff IDENTICAL.  **BO launched** (v2-760, IDs 1191–1199):
+#1179 `use parent qw(-norequire Foo)` (a superclass named `-norequire` — CPAN idiom) →
+#1178 (`p-my` non-existent op, file dead at load) → #1175 (the v1-seam leak families become
+`p-*` ops) → #1173/#1174 (division/modulus by zero die perl-shaped) → #1176/#1177.
+
+**Part 9 — BL MERGED ff (`f728637`, gen v2-740) under the #1162 licence; the USER's "three
+more subjobs"; BR launched.**  BL's second pass: `Pl::Parser2::_may_dyn_exit_set` = the
+fixpoint over the unit's call graph from the subs containing a marked site, carried on
+`Pl::Environment::dyn_exit_subs` because BOTH loop-lowering seams read it; `may_dyn_exit`
+(14 lines) replaced `calls_user_code` and its four word tables.  Result: `t/op/loopctl.t`
+**64/3** (one better than pre-(a)), one frame in that file and ONE in the whole perl-tests
+corpus (was 1214 in 93 files), `op/rt119311.t` 11/2, `perl-tests/loopctl.t` 64/0, ALL 27 bench
+rows byte-identical gate on/off, gate 207/7025 xs-only, corpus-diff 49/111 = the `(block nil`
+files (#1160) + the one framed file, RCDIFF 0 over 1035, the host-leak report byte-identical
+to main's (41 symbols), `Contract:` tails on `%p-dyn-loop-exit` / `p-dyn-once`, inventory 684
+names / 0 UNCLASSIFIED; the residue named in not-supported.md as "through an indirect call, a
+string eval, or across compilation units"; #1022 #1160 #1162 #1163 CLOSED, #1161 #1164 open.
+Fable probes on BL's tree: twelve dynamic-exit shapes identical to perl (foreach/while/C-for
+× last/next/redo, a two-level chain, a coderef and a method call — both framed because the
+callee's NAME is in the set — `do…while` and no-loop dying with perl's text, the sort
+comparator boundary where both die); `PCL_OPT=none` keeps half (a)'s die by design.  **Sweep
+on BL's tree BEFORE the merge: TOTAL 18581 (+0 against its edited baseline — the 24 loopctl
+rows back), GATE clean.**  USER: "when this is done, start three more subjobs" — briefs
+written: BP (round-28 perf: the aggregate family A.2 rows 5–7 + §A.4's easy top), BQ (Part B
+B5 `--emit-sexp` + structured regex literals with the TIER + `p-esc`, §B.3 `--facts`, B3
+`:needs`), BR (BI's residues #1115 → #1150 → #1190 → #1116 → #1120 → #1117 → #1161 → #1164);
+BR LAUNCHED into BL's slot (v2-790, IDs 1220–1229); BP/BQ launch as BN/BO finish so one perf
+agent measures at a time.
+
+**Part 10 — the rest of the day, compressed (records per agent are in their own sections):
+BM MERGED (`cd073e7` + the CLAUDE.md row `da5c310`), BN MERGED (`3e6dd8d`), BO MERGED
+(`027ba9c`, after a DATA regression: its `p-install-data-handle` interned ONE `DATA` key for
+every module — `DATA` is per-package — sprintf.t 532 → 0, fixed at the cause); BL MERGED
+(`f728637`); BR round 2 (`361f377`, v2-820: #1115 octet handles, #1222 `use open` LEXICAL — a
+module's pragma had flipped its caller's I/O, found by Fable's probe — #1223 a `$SIG{__WARN__}`
+handler is not re-entered (substr.t 351 → 0 TIMEOUT), #1221 the `utf8::` mutators real, #1116,
+#1120; sweep CLEAN **+63**, baselines being edited at the stop); BQ (`1a4509c`, v2-800: the IR
+as DATA — structured regex literals with the three-tier verdict, `p-esc`, `--emit-sexp`,
+`--facts`, `:needs`; its gate STARVED by the four-agent load, unfinished — merge order BR →
+BQ (renumber v2-830)); BP (#1188 fasl cache first, then aggregates) and BS (the filetest/stat
+family) in flight at the stop.  Rulings of the day, all in DECIDED §s470: #1022(a) stands and
+#1162 = the MAY-DYN-EXIT reachability licence; RT #130727 an accepted divergence; the
+absolute-time speed metric with `pack` PARKED and ease ≥ half the weight; the IR targeted for
+ease AND speed (facts, not rewrites); `use open` lexical; #1153 emitter-side; TWO subjobs at
+a time (USER, evening).  Sweep TOTAL went 18545 (LOST-36) → 18559 → 18581 (+22 loopctl rows
+back with #1022(b)) → 18644 on BR's tree.  CI green through `027ba9c`.  Three rate-limit cuts
+(all agents resumed via SendMessage each time) and the box at load 24–31 with four agents are
+WHY the USER capped concurrency at two.  **STOPPED for shutdown (USER); restart recipe in
+MEMORY.md's STATE line and each worktree's `scratch/<label>/STOP.md`.**
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
