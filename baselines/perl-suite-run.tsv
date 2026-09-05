@@ -14,6 +14,23 @@
 #                                         `error from -X <operand>` assertion.
 #   The other four files of the leg are UNCHANGED on both trees: io/fs.t 59/2,
 #   op/time.t 72/0 OK, op/stat.t 0/0 (#1232), op/filetest_t.t 0/0 (no /dev/tty).
+
+# s470bq (task #1219, 2026-09-06) -- ONE ROW SPLICED BY HAND.  op/eval.t
+#   C_ok 130 -> 131, C_notok 38 -> 37: test 6, `print eval '$foo = /';
+#   like($@, qr/Search/)`.  An UNTERMINATED regex literal used to read as an
+#   empty pattern with the tail as flags (an empty pattern matches, so the
+#   eval returned 1); it now raises perl's own "Search pattern not terminated"
+#   and returns undef, so the row PASSES.  MEASURED ON BOTH TREES ON THE SAME
+#   FOOTING (`--jobs 1`, the same three files): base `d59e58c` 130/38, this
+#   tree 131/37 -- and the perl-tests twin moved the same single row
+#   (pass-baseline eval.t 128/32 -> 129/31).
+#   THE OTHER 44 MOVERS THE s470bq COMPANION RUN FLAGGED ARE NOT SPLICED AND
+#   ARE NOT THIS BATCH'S: 42 of 45 read IDENTICALLY on a `d59e58c` extraction
+#   (the mro/* and io/* families are s470br's #1115 + s470bn, whose own record
+#   says this snapshot was deliberately left unspliced), and the remaining two
+#   -- io/open.t and io/pvbm.t -- read IDENTICALLY once both trees are run on
+#   the same footing (io/pvbm.t 20/8 on both; it is the known batch-contention
+#   flake, recorded six times since s437).
 # s470br (task #1115, 2026-09-05) -- THREE ROWS SPLICED BY HAND.  A filehandle
 #   carries OCTETS unless a layer says otherwise, which is perl's default: two
 #   files gain rows because their reads now measure bytes, and the third had
@@ -1474,7 +1491,7 @@ op/dor.t	34	0	31	3	DIFF		0
 op/dump.t	0	0	0	0	NOTAP		0
 op/each.t	65	0	35	12	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
 op/each_array.t	65	0	65	0	OK		0
-op/eval.t	169	0	130	38	DIFF	undef-fn:main::pl-ARRAY	0
+op/eval.t	169	0	131	37	DIFF	undef-fn:main::pl-ARRAY	0
 op/evalbytes.t	9	0	5	4	DIFF		0
 op/exec.t	41	0	24	1	DIFF	aborted-forms:1: Couldn't execute "lskdfj": No such file or directory	0
 op/exists_sub.t	19	0	18	1	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9) — t19 is the ONLY failing row (19/1 vs perl 19/0): `eval 'exists &t5()'` must set $@ =~ /not a subroutine name/. PCL DOES reject the invalid form — probe s319 gives "invalid number of arguments: 1" — so only the MESSAGE TEXT differs, and exact fatal-error text is not a goal (user 2026-07-28). Task #149 category :principle9.	0
