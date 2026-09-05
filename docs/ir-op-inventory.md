@@ -24,33 +24,20 @@ the prose does.  The grammar (keys, closed value sets, and what each means) is
 normative in `docs/ir-spec.md` §10.  `UNCLASSIFIED` in a contract column means
 the op has no tail yet, never a default.
 
+**§10 was RECONCILED against this file in s470bm.**  Its rows had named
+Perl-facing spellings for four families — `p-&`-style bitwise, `p-x`,
+`p-eq`…`p-cmp`, `p-++`-style increment — none of which is a symbol the runtime
+exports; each row now names the real ops (`p-bit-and`, `p-str-x`, `p-str-eq`,
+`p-pre++`, …), verified EMITTED before the edit.  The section below is the
+standing check that they have not drifted apart again.
+
 ## Citations in ir-spec §10 that are not IR names
 
 Names the §10 table prints as family members that the runtime does NOT export.  A backend author works from that table, so each one is a name they would look for and not find.
 
-**No such symbol at all** — the citation is a Perl-facing spelling, not the runtime name (16):
+**Exists, but INTERNAL to `:pcl`** — never emitted bare, so it is not part of the IR's vocabulary: either a runtime-only helper, or an op the emitter writes package-QUALIFIED (1):
 
-* `p-&`
-* `p-|`
-* `p-^`
-* `p-~`
-* `p-x`
-* `p-eq`
-* `p-ne`
-* `p-lt`
-* `p-gt`
-* `p-le`
-* `p-ge`
-* `p-cmp`
-* `p-++`
-* `p----`
-* `p-++-post`
-* `p----post`
-
-**Exists, but INTERNAL to `:pcl`** — never emitted bare, so it is not part of the IR's vocabulary: either a runtime-only helper, or an op the emitter writes package-QUALIFIED (2):
-
-* `%p-empty-list`
-* `p-qr`
+* `pcl::p-qr`
 
 # Families with an ir-spec §10 rule
 

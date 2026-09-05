@@ -351,26 +351,32 @@ my %NO_DEFINITION = (
 # Every name the §10 table prints as a family member.  A cited name that the
 # runtime does not export is a STALE CITATION — reported, because a backend
 # author works from that table.
+# RECONCILED against this inventory in s470bm: the rows that named
+# Perl-facing spellings (`p-&`, `p-x`, `p-eq`…`p-cmp`, `p-++`…) were corrected
+# to the symbols the runtime actually exports, each verified EMITTED first.
+# So this list should now come back clean, and a name appearing in the stale
+# report again means §10 and the runtime have drifted apart once more.
 my @SPEC10_CITED = qw(
   p-+ p-- p-* p-/ p-% p-** p-<< p->>
-  p-& p-| p-^ p-~ p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not
+  p-bit-and p-bit-or p-bit-xor p-bit-not
+  p-str-bit-and p-str-bit-or p-str-bit-xor p-str-bit-not
   p-== p-!= p-< p-> p-<= p->= p-<=>
-  p-. p-x p-lc p-uc p-lcfirst p-ucfirst p-length p-substr p-index p-reverse
-  p-sprintf p-join
-  p-eq p-ne p-lt p-gt p-le p-ge p-cmp
+  p-. p-string-concat p-str-x p-list-x p-lc p-uc p-lcfirst p-ucfirst p-length
+  p-substr p-index p-rindex p-reverse p-sprintf p-join
+  p-str-eq p-str-ne p-str-lt p-str-gt p-str-le p-str-ge p-str-cmp
   p-&& p-|| p-// p-! p-not
   p-my-= p-scalar-= p-array-= p-hash-= p-list-=
   p-incf p-decf p-*= p-/= p-%= p-**= p-.= p-str-x= p-bit-and= p-bit-or=
   p-bit-xor= p-<<= p->>= p-str-bit-and= p-str-bit-or= p-str-bit-xor=
   p-and-assign p-or-assign p-//=
-  p-++ p---- p-++-post p----post p-incf-raw p-decf-raw
+  p-pre++ p-pre-- p-post++ p-post-- p-incf-raw p-decf-raw
   p-aref p-gethash p-setf p-exists p-delete p-aslice p-hslice
   p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice
   p-delete-kv-array-slice
   p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map
   p-grep p-wantarray p-scalar p-defined %p-sort-classic %p-push1
-  p-=~ p-!~ p-regex p-subst p-tr p-split %p-empty-list
-  p-qr p-regex-from-parts
+  p-=~ p-!~ p-regex p-subst p-tr p-split
+  pcl::p-qr pcl::p-regex-from-parts
   p-print p-say p-printf p-open p-close p-readline p-eof p-binmode
   p-backtick
   p-ref p-bless p-caller p-can p-isa
@@ -383,6 +389,16 @@ my @SPEC10_CITED = qw(
 # "P-" and prin1 prints it `p-`; the citation is not stale, the spelling is a
 # reader fact (ir-spec §11b).
 my %CITED_ALIAS = ('p-||' => 'p-');
+
+# The key a citation is looked up under: the alias above, and a `pcl::` prefix
+# stripped — §10 spells the two regex-literal ops QUALIFIED because that is how
+# the emitter writes them, and the qualified spelling names the same symbol.
+sub _cited_key {
+  my ($n) = @_;
+  $n = $CITED_ALIAS{$n} // $n;
+  $n =~ s/\Apcl::?//;
+  return $n;
+}
 
 # ── The runtime dump ─────────────────────────────────────────────────────
 my $DUMP_LISP = <<'LISP';
@@ -645,7 +661,7 @@ my %SPEC10_RULE = (
   }
 
   my $n_contract = grep { $_->{contract} } @rows;
-  my @stale = grep { !$exported{ $CITED_ALIAS{$_} // $_ } } @SPEC10_CITED;
+  my @stale = grep { !$exported{ _cited_key($_) } } @SPEC10_CITED;
 
   open my $fh, '>:encoding(UTF-8)', $out_md or die "ir-inventory.pl: $out_md: $!\n";
   print {$fh} <<"HDR";
@@ -674,11 +690,18 @@ docstring — the runtime is the spec, so the machine-readable form lives where
 the prose does.  The grammar (keys, closed value sets, and what each means) is
 normative in `docs/ir-spec.md` §10.  `UNCLASSIFIED` in a contract column means
 the op has no tail yet, never a default.
+
+**§10 was RECONCILED against this file in s470bm.**  Its rows had named
+Perl-facing spellings for four families — `p-&`-style bitwise, `p-x`,
+`p-eq`…`p-cmp`, `p-++`-style increment — none of which is a symbol the runtime
+exports; each row now names the real ops (`p-bit-and`, `p-str-x`, `p-str-eq`,
+`p-pre++`, …), verified EMITTED before the edit.  The section below is the
+standing check that they have not drifted apart again.
 HDR
 
   if (@stale) {
-    my @wrong    = grep { !$internal{$_} } @stale;
-    my @internals = grep {  $internal{$_} } @stale;
+    my @wrong    = grep { !$internal{ _cited_key($_) } } @stale;
+    my @internals = grep {  $internal{ _cited_key($_) } } @stale;
     print {$fh} "\n## Citations in ir-spec §10 that are not IR names\n\n"
       . "Names the §10 table prints as family members that the runtime does "
       . "NOT export.  A backend author works from that table, so each one is "
@@ -739,7 +762,7 @@ if (!$quiet) {
   my %fam_count;
   $fam_count{ $_->{family} }++ for @rows;
   my $n_contract = grep { $_->{contract} } @rows;
-  my @stale = grep { !$exported{ $CITED_ALIAS{$_} // $_ } } @SPEC10_CITED;
+  my @stale = grep { !$exported{ _cited_key($_) } } @SPEC10_CITED;
   printf "ir-inventory: %d exported names, %d families, %d with a Contract: tail, %d UNCLASSIFIED\n",
     scalar @rows, scalar keys %fam_count, $n_contract, ($fam_count{UNCLASSIFIED} // 0);
   printf "  ir-spec \x{a7}10 cites %d names; %d are NOT exported: %s\n",

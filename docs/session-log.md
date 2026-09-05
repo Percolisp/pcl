@@ -42,12 +42,22 @@ PCL answers today is #1173.
 
 Findings the inventory produced on its own:
 
-* **16 names ir-spec §10 CITES do not exist** — `p-&` `p-|` `p-^` `p-~` `p-x`
-  `p-eq`…`p-cmp` `p-++` `p----` `p-++-post` `p----post`: Perl-facing
-  spellings, not runtime names.  Two more exist but are INTERNAL:
-  `%p-empty-list` (a runtime helper the §10 regex row cites as if it were
-  emitted — it never is) and `p-qr` (emitted package-QUALIFIED).  The tool
-  reports the two classes apart.
+* **16 names ir-spec §10 CITED did not exist — and §10 was CORRECTED, not
+  merely annotated** (merge review): `p-&` `p-|` `p-^` `p-~` `p-x`
+  `p-eq`…`p-cmp` `p-++` `p----` `p-++-post` `p----post` were Perl-facing
+  spellings, not runtime names.  Four rows now name the real ops —
+  `p-bit-and p-bit-or p-bit-xor p-bit-not`, `p-str-x` (with `p-list-x` named
+  as the list-repetition twin), `p-str-eq`…`p-str-cmp`, `p-pre++ p-pre--
+  p-post++ p-post--` — each **verified EMITTED first** (BK's lesson: check
+  before touching), and each row says in one clause why the spelling differs
+  from perl's operator.  The two INTERNAL citations were corrected too:
+  `%p-empty-list` was cited as the SPELLING of the empty list and is never
+  emitted (measured over 111 + 592 files), so the row now describes the
+  VALUE — a zero-length vector — and names the helper as runtime-internal;
+  `pcl::p-qr` §10 already spelled qualified, and it is the one citation still
+  outstanding because the symbol really is unexported (#1177).  The tool's
+  citation list is the standing check that the two do not drift apart again:
+  18 stale → 1.
 * **`p-||` and `p-` are the SAME symbol** (probed): `||` is an empty
   multiple-escape section, so the symbol's name is `P-`.  A backend that
   matches operator names textually must fold them; ir-spec §11b states it.
