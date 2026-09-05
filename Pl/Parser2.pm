@@ -1957,8 +1957,21 @@ sub parse {
           Pl::Parser::_cap_inlining_if_huge($text, length $collapsed),
           length $collapsed);
       } @runtime],
-      captured => [@{ $self->{_captured_decls} }],
-      sched    => [@{ $self->{_sched_defs} }],
+      # These two buckets are v1 TEXT, never trees (see the note above), so
+      # the #1171 manifest cannot walk them — it regex-scans them instead and
+      # reports how many chunks it had to (`text_scanned`).  The call is here
+      # and not in Pl::Passes::run for exactly that reason: a different input
+      # KIND, not a second walk of the same one.
+      captured => [do {
+        my @c = @{ $self->{_captured_decls} };
+        Pl::Passes::note_text($_) for @c;
+        @c;
+      }],
+      sched    => [do {
+        my @s = @{ $self->{_sched_defs} };
+        Pl::Passes::note_text($_) for @s;
+        @s;
+      }],
       # #226: eval region's leading-package enter forms — emitted at the head
       # of the eval BODY, ahead of the defs/sched interleave.
       pkg_enter => [map { Pl::CLForm::to_string(Pl::Passes::run($_), 0) }

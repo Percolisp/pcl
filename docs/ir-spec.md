@@ -27,8 +27,8 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170)
-* [11. What a translator may ignore](#11-what-a-translator-may-ignore)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171)
+* [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
 * [12. Worked example](#12-worked-example)
 
 ---
@@ -2656,6 +2656,46 @@ campaign's remaining work and the generator counts it per run (55 of 682 at
 s470bm: the numeric, numeric-compare, string, string-compare and element
 families).
 
+### 10b. The per-program MANIFEST — `pl2cl --manifest` (normative, s470bm, task #1171)
+
+§10a says what the ops ARE.  This says what a given PROGRAM asks of a target,
+so a backend author can answer "can I run this?" before writing a line:
+
+    pl2cl --manifest prog.pl          # JSON on stdout, INSTEAD of the CL
+    pl2cl --manifest --module Foo.pm  # the same for a module
+
+The counts come from ONE walk of the lowered CLForm tree, at the one place a
+lowered tree becomes text (`Pl::Passes::run`'s observer hook), so the flag adds
+no second representation and, being absent by default, cannot move the
+emission.  Four top-level keys plus provenance:
+
+| key | meaning |
+|---|---|
+| `uses` | every runtime op (`p-*` / `%p-*` / `%pcl-*`) with its count |
+| `uses_other` | every OTHER head symbol with its count — the CL kernel forms and the program's own `pl-*` subs.  Present so that no head is silently dropped; §11b says which of these a backend must implement |
+| `needs` | the OBLIGATION classes (below).  Every class is PRESENT, with a zero where the program does not need it — "absent" would make a consumer guess |
+| `facts` | which Kind-A/Kind-B licences fired, as `fired`/`candidates` wherever the tree can say both, plus the raw #1035 verdict census (`declaration_classes`, `declaration_facts`, `parameter_classes`, `sub_facts`) |
+| `file`, `mode`, `generation`, `manifest_version` | provenance; `generation` is §9.2's stamp |
+| `text_scanned` | how many v1-TEXT chunks the walk could only REGEX rather than walk (Parser2's `captured` and `sched` buckets never become trees).  Nonzero means `uses` is approximate for those chunks — stated, not hidden |
+
+The obligation classes, each keyed to the machinery a target must have:
+
+| class | sub-counts | what it obliges |
+|---|---|---|
+| `dynamic_scope` | `local`, `magic_global_write` | a save/restore stack (§7.2, §8) |
+| `nonlocal_exit` | `return`, `loop_control`, `goto`, `die`, `eval_block` | exceptions / `longjmp` / labelled break (§5.3, §6) |
+| `string_eval` | `eval`, `thunk` | a compiler reachable at run time (§9.1) |
+| `regex` | `literal`, `interpolated`, `qr`, `subst`, `tr`, `split`, `tier` | a regex engine.  `tier` is `unclassified` until B5's classifier exists — a DECLARED absence, never a guess |
+| `phase` | `begin`, `check`, `eval_when`, `run_blocks` | the phase model (§9), or form order (§11) |
+| `tie`, `overload`, `formats`, `xs`, `io`, `process` | (plain counts) | the hooks, the extension bridge, filehandles, subprocesses |
+
+`facts` is the material a FAST backend needs
+(`docs/plan-speed-and-ir-s470.md` §B.3): `raw-slot`, `raw-numeric`,
+`str-buffer`, `foreach-range`, `foreach-raw`, `local-push`, `classic-sort`,
+`tail-return`, `elem-setf` and `insensitive-call` each report `fired` out of
+`candidates`, so a target can see how much of the program PCL could prove
+something about — and `fired <= candidates` always holds.
+
 ## 11. What a translator may ignore
 
 - Comments; `(declare …)`; `(dynamic-extent …)`.
@@ -2665,6 +2705,126 @@ families).
   order; `BEGIN` ordering is preserved by form order alone.
 - The per-section `$a`/`$b` defvars and duplicate `defvar`s (idempotent).
 - `p-double-inf` — the single SBCL-specific symbol, meaning IEEE ±Inf.
+
+## 11b. The CL kernel a backend must implement (normative, s470bm, task #1172)
+
+§11 says what a translator may DROP.  This says what it must KEEP: the
+non-`p-*` vocabulary a PCL-emitted file actually contains.  It is MEASURED, not
+enumerated from the standard — `tools/ir-host-leak.pl` scans the emitted CL of
+a whole population, classifies every token as a runtime export, a kernel form,
+a literal or one of the program's own identifiers, and prints everything else.
+The list below is what the corpus uses; the tool's `%KERNEL` is the same set
+in machine form, and the two must agree.
+
+**The whole kernel is 100 names.**  That is the size of the job: a backend
+implements 68 host constructs plus the `p-*` inventory (§10a) and it can run
+any PCL output.
+
+### Sequencing, binding, and places
+
+| form | JavaScript | C |
+|---|---|---|
+| `progn` `prog1` `prog2` | a statement block; `prog1` needs a temp | a block; `prog1` needs a temp |
+| `let` `let*` | `let` in a block scope; `let*` is sequential `let`s | nested C blocks with locals |
+| `lambda` `function` `funcall` `apply` | a closure; `funcall` is a call, `apply` is `f(...args)` | a function pointer plus its captured environment; `apply` unpacks an argv |
+| `multiple-value-bind` `values` `multiple-value-list` `nth-value` | return a small array and destructure it | an out-parameter struct, or a pair returned by value |
+| `setq` `setf` `psetf` | assignment; `setf` of a call form is that place's setter — the emitter only ever uses `setf` on `aref`, `gethash`, `p-aref`, `p-gethash` and a variable | the same four setters |
+| `incf` `decf` `push` `pop` | `+=`, `-=`, `arr.unshift`, `arr.shift` — note CL `push`/`pop` are at the FRONT of a list | the same, on the list representation |
+| `the` | drop it (a type assertion, no semantics here) | drop it |
+
+### Conditionals
+
+| form | JavaScript | C |
+|---|---|---|
+| `if` `when` `unless` | `if` / `if (!…)`; every one of them is an EXPRESSION in CL, so a statement target needs a temp or a ternary | the same |
+| `cond` `case` `ecase` `typecase` | `if`/`else if` chains; `case` compares with `eql`, so a `switch` works for numbers and characters only.  `otherwise` is the default arm; `ecase` has none and must throw | the same; `ecase`'s missing arm is an `abort()` |
+| `and` `or` | `&&` / `||` — they return the OPERAND, not a boolean, exactly as JS does | a temp plus a branch; they do NOT return int |
+| `not` `null` | `!x` where the false value is CL `nil` — **`nil` is not perl's false** (§2.1) | the same |
+
+### Non-local control (§5.3, §6)
+
+| form | JavaScript | C |
+|---|---|---|
+| `block` `return-from` | a labelled block with `break LABEL`, when the exit is lexical; otherwise a throw of a tagged object caught by that block | a label plus `goto` when lexical, `longjmp` when not |
+| `catch` `throw` | a tagged exception: `throw {tag, value}`, caught and re-thrown if the tag does not match.  The tag is a VALUE compared with `eq`, not a static label | `setjmp`/`longjmp` with the tag in the jump buffer |
+| `tagbody` `go` | a `while (true) switch (pc)` state machine — `go` can jump BACKWARD, which a labelled `continue` cannot express | labels and `goto`, directly |
+| `unwind-protect` | `try { … } finally { … }` | a cleanup label the unwinder runs |
+
+### Definitions, classes, and the phase model (§9)
+
+| form | JavaScript | C |
+|---|---|---|
+| `defun` `defmacro` | a top-level function.  A `defmacro` is expanded by the CL compiler and never reaches a backend that reads the EMITTED file — the emitted file only CALLS the `p-*` macros, so a backend implements them as functions or inlines them | the same |
+| `defvar` `defparameter` `defconstant` | a module-level `let` (`defvar` only initialises when unbound; `defparameter` always) | a global; `defvar`'s once-only rule needs an initialised flag |
+| `define-symbol-macro` | a getter/setter pair the emitter's reads and writes go through | an accessor macro |
+| `defclass` `defmethod` `defgeneric` `make-instance` `find-class` | a class per perl package, for the CLOS-backed `@ISA`/C3 machinery (§7.3) | a vtable per package |
+| `eval-when` | run in form order (§11) | run in form order |
+| `in-package` `*package*` | the CURRENT PACKAGE is a real run-time value here, not only a reader concept: a section switch binds `*package*` and the runtime resolves unqualified names against it (§7.1, §9.1).  A backend needs a module-level `currentPackage` with save/restore | the same, as a global with a save/restore stack |
+
+### Data
+
+| form | JavaScript | C |
+|---|---|---|
+| `list` `list*` `cons` `car` `cdr` `first` `rest` `append` | cons cells.  They appear for the runtime's own list arguments (a capture alist, a facts plist), never for a perl array — that is `vector` | a cons struct, or arrays where the emitter's use is flat |
+| `vector` `make-array` `vector-push-extend` `aref` `elt` `svref` `length` | `Array`; `make-array … :adjustable t :fill-pointer 0` is `[]` and `vector-push-extend` is `push` | a growable array |
+| `make-hash-table` `gethash` | `Map` (the test is `equal`, i.e. structural string equality) | a string-keyed hash table |
+| `equal` `eql` `equalp` | hash-table TEST designators, quoted: `'equal` means "compare strings by content" | the same choice, at table construction |
+
+### Ignorable (see §11) and syntax
+
+`declare` `declaim` `locally` and their bodies — `ignore` `ignorable`
+`dynamic-extent` `notinline` `inline` `optimize` `special` `ftype` `type`
+`speed` `safety` `debug` `space` `compilation-speed` — are compiler hints and
+carry no semantics for a backend.  The lambda-list markers `&optional` `&rest`
+`&body` `&key` `&aux` `&allow-other-keys` are parameter syntax (§5.2).  `t`,
+`nil` and `otherwise` are the true/false/default constants — and `nil` is
+**not** perl's false (§2.1).
+
+### The reader rules a TEXT-parsing backend must implement
+
+The emitted file is CL source, so a consumer that parses it (rather than
+consuming B5's data form, when that exists) has to get five reader rules
+right.  Each is measured, not theoretical:
+
+1. **`|…|` is verbatim.**  Inside the bars the characters are the symbol's
+   name, unmodified — that is how `|$"|`, `|@,|` and every non-ASCII name are
+   spelled (§7.1, task #418).  Outside them the token is NFKC-normalised and
+   case-INVERTED, which is why an ASCII name must stay bare.
+2. **An EMPTY `||` contributes nothing**, so `p-||` and `p-` are the SAME
+   symbol — its name is `P-`, and it is perl's `||` (measured s470bm).  A
+   backend that matches operator names textually must fold them, or it will
+   not find the operator at all.
+3. **`#\c` is a character**, and `#\Newline`-style names run to the next
+   delimiter.
+4. **`#x` / `#o` / `#b` / `#NNr` are NUMBERS**, not symbols — the emitter
+   writes character codes and bit masks that way (400+ in `perl-tests/pack.t`).
+5. **A string literal may contain a raw newline, a raw tab and a NUL byte**
+   (friction §3.2): CL string syntax has no `\n` escape, so the emitter puts
+   the character itself in the file.  A line-oriented consumer must track
+   string state.
+
+### What is NOT in the kernel yet — the measured leaks
+
+A PCL-emitted file today also contains a handful of bare CL functions that
+reached the output through a v1 seam.  They are FILED, not fixed
+(`tools/ir-host-leak.pl` prints them; the corpus census is 38 distinct
+symbols):
+
+| family | symbols | where | task |
+|---|---|---|---|
+| CL arithmetic through a seam | `>` `-` `+` `*` `1+` `1-` `rem` `truncate` `eq` | the signature-default arity test (`(> (length @_) 0)`), negative literals, array-length arithmetic, and `use integer` | #1175 |
+| CL bitwise | `logior` `logand` `logxor` `lognot` | `use integer`'s `& \| ^ ~` — `perl-tests/bop.t`, `lib/Math/BigInt/Calc.pm` | #1175 |
+| CL string building | `concatenate` `'string` `string` `code-char` `format` `intern` | `\x{…}` escapes, `tr///` ranges, `yadayada`'s message | #1175 |
+| CL streams | `make-string-input-stream` | the `__DATA__` handle's registration (measured: NOT `open $fh, '<', \$s`) | #1175 |
+| the `loop` macro | `loop`, with its `for` / `across` / `do` keywords | a `\(LIST)` refgen over more than one element | #1175 |
+| a quoted symbol is THREE things | `'>` `'==` (operator selectors) vs `'string` (a host type designator) vs `'start` `'label1` `'undef` `'of` (perl labels and bareword filehandles) — indistinguishable from the token | `p-chain-cmp`, `%p-loop-tag`, `p-readline`, `p-open` | #1176 |
+| runtime INTERNALS the emitter writes package-qualified | `pcl::%pcl-to-integer` `pcl::%pcl-super-indirect` `pcl::%pcl-local-errno-init` `pcl::%pcl-loop-tag` `pcl::p-qr` | they work because they are qualified — and they are invisible to §10a's inventory, which lists EXPORTS, so a backend working from the port list will not find them | #1177 |
+
+Until they are closed, a backend either implements those host functions or
+refuses the files that contain them; the census says which files those are.
+The corpus measurement at s470bm: **38 distinct leaked symbols over 111
+files**, and `lib/**` adds none (its only leaks are `use integer`'s, in
+`lib/Math/BigInt/Calc.pm`).
 
 ## 12. Worked example
 

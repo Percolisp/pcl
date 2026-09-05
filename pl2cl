@@ -174,6 +174,7 @@ my $output_file;        # Output file for bundle/executable
 my $lenient_ppi = 0;    # DEBUG: truncate at first PPI-unparseable line (test runner only)
 my $eval_pkg;           # When set, emit minimal preamble for eval-string mode
 my $server_mode = 0;    # Persistent transpiler server mode
+my $manifest_mode = 0;  # Print the per-program manifest as JSON, not the CL
 # my $use_cache = 0;    # Opt-in caching (disabled by default) - COMMENTED OUT FOR NOW
 
 GetOptions(
@@ -187,8 +188,20 @@ GetOptions(
   'lenient-ppi'  => \$lenient_ppi,   # DEBUG: for test runner use only
   'eval-pkg=s'   => \$eval_pkg,      # eval "string" mode: minimal preamble for named package
   'server'       => \$server_mode,   # persistent transpiler server mode
+  'manifest'     => \$manifest_mode, # print the JSON manifest INSTEAD of the CL
   # 'cache'      => \$use_cache,  # COMMENTED OUT - caching disabled by default
 ) or die "Usage: pl2cl [options] <file.pl>\n";
+
+# THE PER-PROGRAM MANIFEST (task #1171; docs/plan-speed-and-ir-s470.md Part B
+# item B2, grammar in docs/ir-spec.md §10b).  `--manifest` prints JSON saying
+# what the program demands of a target — uses / needs / facts — INSTEAD of the
+# CL, so it cannot contaminate an output file.  The counts come from ONE walk
+# of the lowered CLForm tree, hooked into Pl::Passes::run; with the flag absent
+# nothing is loaded and nothing is walked.
+if ($manifest_mode) {
+  require Pl::Manifest;
+  Pl::Manifest::enable();
+}
 
 # The #138-family drop announcement (task #339) is a diagnostic for the person
 # running a transpile.  `--module` is the RUNTIME transpiling a module in the
@@ -493,10 +506,28 @@ if ($bundle_mode || $executable_mode) {
   exit 0;
 }
 
+# Print the manifest for whatever was just transpiled and exit.  ONE place, so
+# the file path and the mode label cannot drift between the two entry points.
+sub print_manifest {
+  my ($file) = @_;
+  require JSON::PP;   # core
+  my $m = Pl::Manifest::report(
+    file       => $file,
+    mode       => ($is_module ? 'module' : $is_extension ? 'extension'
+                              : defined $eval_pkg ? 'eval' : 'program'),
+    generation => cache_generation(),
+  );
+  binmode(STDOUT, ':raw');
+  print JSON::PP->new->utf8->canonical->pretty->encode($m);
+  return;
+}
+
 if (@ARGV && -f $ARGV[0]) {
   $source_file = $ARGV[0];
   my $output = parse_source('parse_file', $source_file,
     ($lenient_ppi ? (lenient_ppi => 1) : ()));
+
+  if ($manifest_mode) { print_manifest($source_file); exit 0 }
 
   if ($is_module || $is_extension) {
     # Module / extension mode: skip full preamble (@INC etc. are already live in
@@ -538,6 +569,8 @@ elsif (!-t STDIN) {
   my $output = parse_source('parse_code', $code,
                  (defined $eval_pkg ? (eval_mode => 1, eval_pkg => $eval_pkg) : ()));
 
+  if ($manifest_mode) { print_manifest('-'); exit 0 }
+
   if (defined $eval_pkg) {
     # eval-string mode: REPLACE (in-package :pcl) with just the package switch.
     # @INC, *pcl-pl2cl-path* etc. are already live in the running SBCL.
@@ -567,6 +600,8 @@ else {
   say "  --cache-lisp    Cache .lisp instead of .fasl (for debugging)";
   say "  --extension     Build a checked-in cl/*.lisp artifact: no program";
   say "                  preamble (it loads INTO a program that has one)";
+  say "  --manifest      Print the program's IR manifest as JSON instead of";
+  say "                  the CL: uses / needs / facts (docs/ir-spec.md 10b)";
   exit 1;
 }
 

@@ -74,6 +74,8 @@ our %KIND_A = (
 );
 
 my @PASSES;          # [name, coderef] in registration order (Kind B)
+my $FORM_HOOK;      # an OBSERVER of every finished top-level form (set_form_hook)
+my $TEXT_HOOK;      # ... and of the two v1-TEXT buckets (set_text_hook)
 my %PASS_INDEX;
 my ($all_off, %off, %on, $checked);
 _parse_env();
@@ -122,14 +124,48 @@ sub register_pass {
 }
 
 # Apply every enabled Kind-B pass, in order, to one top-level form.
+#
+# THE FORM HOOK HANGS OFF THIS FUNCTION (task #1171, Part B item B2): every
+# top-level form reaches here on its way to text, so a consumer that wants to
+# see the finished tree — `pl2cl --manifest`'s ONE walk — installs itself
+# with set_form_hook and needs no second walk and no second tree
+# representation.  An OBSERVER, not a pass: its return value is discarded, so
+# it cannot change emission, and with no hook installed the cost is one
+# scalar test per top-level form.
 sub run {
   my ($form) = @_;
-  return $form unless @PASSES;
+  return $form unless @PASSES || $FORM_HOOK;
   for my $p (@PASSES) {
     next unless enabled($p->[0]);
     $form = $p->[1]->($form);
   }
+  $FORM_HOOK->($form) if $FORM_HOOK;
   return $form;
+}
+
+sub set_form_hook {
+  my ($code) = @_;
+  die "Pl::Passes::set_form_hook: not a code ref\n"
+    if defined $code && ref($code) ne 'CODE';
+  $FORM_HOOK = $code;
+  return;
+}
+
+# The TEXT twin.  Two top-level buckets are v1 text and never become trees
+# (Parser2's `captured` and `sched`), so an observer that wants the WHOLE
+# program has to be offered them in the only form they have.  Same contract:
+# an observer, return value discarded, one scalar test when nothing watches.
+sub set_text_hook {
+  my ($code) = @_;
+  die "Pl::Passes::set_text_hook: not a code ref\n"
+    if defined $code && ref($code) ne 'CODE';
+  $TEXT_HOOK = $code;
+  return;
+}
+
+sub note_text {
+  $TEXT_HOOK->($_[0]) if $TEXT_HOOK;
+  return;
 }
 
 sub names { return (sort(keys %KIND_A), map { $_->[0] } @PASSES) }
