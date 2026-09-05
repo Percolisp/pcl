@@ -3536,7 +3536,8 @@
    symbol the transpiler emits into generated code (for overflowing float
    literals such as 1e9999; see Pl/ExprToCL.pm).  Keeping it behind a macro
    gives a future port (or a different CL implementation) a single place to
-   change, and expands at compile time so there is no runtime cost."
+   change, and expands at compile time so there is no runtime cost.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=sbcl"
   (if negative
       'sb-ext:double-float-negative-infinity
       'sb-ext:double-float-positive-infinity))
@@ -3638,7 +3639,11 @@
                                 (,cl-op (to-number a) (to-number b))))
        (declaim (inline ,name))
        (defun ,name (a &optional (b nil b-supplied-p))
-         ,(format nil "Perl ~A with numberp fast path + use overload dispatch" op-str)
+         ;; The `Contract:' tail is the machine-readable half of the docstring
+         ;; (docs/ir-spec.md §10, tools/ir-inventory.pl).  It is spelled HERE,
+         ;; in the definer, because these ops have no textual defun of their
+         ;; own -- which is exactly why the inventory reads the LOADED runtime.
+         ,(format nil "Perl ~A with numberp fast path + use overload dispatch~%   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none" op-str)
          (if (not b-supplied-p)
              ;; Unary form: e.g. +(expr) — return as-is (no overload for unary +)
              a
@@ -3681,7 +3686,8 @@
 
 (declaim (inline p--))
 (defun p-- (a &optional b)
-  "Perl subtraction / unary minus with numberp fast path + overload dispatch."
+  "Perl subtraction / unary minus with numberp fast path + overload dispatch.
+   Contract: ctx=insensitive coerce=num,str magic=none dies=no dynamic=no phase=no host=none"
   (cond
     ((null b) (if (numberp a) (- a) (%p-neg a)))
     ((and (numberp a) (numberp b)) (- a b))
@@ -3699,7 +3705,8 @@
 
 (declaim (inline p-/))
 (defun p-/ (a b)
-  "Perl division with numberp fast path + use overload dispatch"
+  "Perl division with numberp fast path + use overload dispatch
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (if (and (numberp a) (numberp b))
       (let ((r (/ a b)))
         (if (typep r 'ratio) (coerce r 'double-float) r))
@@ -3719,14 +3726,16 @@
 
 (declaim (inline p-%))
 (defun p-% (a b)
-  "Perl modulo with integer fast path + use overload dispatch"
+  "Perl modulo with integer fast path + use overload dispatch
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (if (and (integerp a) (integerp b) (not (eql b 0)))
       (mod a b)
       (%p-%-slow a b)))
 (declaim (notinline p-%))
 
 (defun p-** (a b)
-  "Perl exponentiation with use overload '**' dispatch"
+  "Perl exponentiation with use overload '**' dispatch
+   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (%with-binary-overload ("**" a b)
                          ;; No overload: numeric path with Inf-on-overflow
                          (let ((na (to-number a))
@@ -3745,7 +3754,8 @@
                                    sb-ext:double-float-positive-infinity))))))
 
 (defun p-int (val)
-  "Perl int - truncate toward zero. NaN and Inf return unchanged (Perl 5.36+)."
+  "Perl int - truncate toward zero. NaN and Inf return unchanged (Perl 5.36+).
+   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (let ((n (to-number val)))
     (if (floatp n)
         (if (or (%pcl-nan-p n) (sb-ext:float-infinity-p n))
@@ -3790,7 +3800,8 @@
           (t (values nil nil))))))
 
 (defun p-abs (val)
-  "Perl abs - absolute value.  `use overload' decides first (%p-abs-overload)."
+  "Perl abs - absolute value.  `use overload' decides first (%p-abs-overload).
+   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (multiple-value-bind (v appliedp) (%p-abs-overload val)
     (if appliedp v (abs (to-number val)))))
 
@@ -3924,7 +3935,8 @@
 
 (declaim (inline p-.))
 (defun p-. (a b)
-  "Perl string concatenation operator (.) with stringp fast path."
+  "Perl string concatenation operator (.) with stringp fast path.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (if (and (stringp a) (stringp b))
       (concatenate 'string a b)
       (%p-.-slow a b)))
@@ -3945,7 +3957,8 @@
    concat.  A SINGLE piece is a stringification, never a concat (\"$o\"
    uses '\"\"' alone), and pieces without a '.' handler keep the
    all-at-once fast path, whose to-string runs the '\"\"' overload via
-   box-sv -- which is perl's fallback for '.' as well."
+   box-sv -- which is perl's fallback for '.' as well.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (if (and (cdr args) (some #'%pcl-dot-overloaded-p args))
       (reduce #'p-. args)
       (apply #'concatenate 'string (mapcar #'to-string args))))
@@ -3961,7 +3974,8 @@
    `nomethod` — so the body below already IS perl's answer for a class with no
    `x` handler, and only the handler LOOKUP was missing.  (A class that says
    `fallback => 0` forbids that derivation and reaches `nomethod`; that is
-   task #1006(b), the same open question `p-.` carries.)"
+   task #1006(b), the same open question `p-.` carries.)
+   Contract: ctx=insensitive coerce=str,num magic=none dies=no dynamic=no phase=no host=none"
   (%with-binary-overload ("x" str count :autogenerated t)
                          (%p-str-x-plain str count)))
 
@@ -4201,7 +4215,8 @@
   "Perl length function - returns undef for undef input.
    Stringifies via to-string on the original (boxed) value so that a blessed
    object's overloaded '' handler fires (e.g. length($obj) on an object that
-   overloads stringification), rather than measuring the raw ref text."
+   overloads stringification), rather than measuring the raw ref text.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (let ((v (unbox val)))
     (if (or (eq v *p-undef*) (null v))
         *p-undef*
@@ -4211,7 +4226,8 @@
   "Perl substr function.
    2-3 args: extract substring.
    4 args: replace in place (if str is a box), return replaced portion.
-   Negative start: count from end. Negative length: stop that many chars before end."
+   Negative start: count from end. Negative length: stop that many chars before end.
+   Contract: ctx=insensitive coerce=str,num magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((s (to-string str))
          (slen (length s))
          (raw-st (truncate (to-number start)))
@@ -4289,16 +4305,19 @@
         (subseq s (min st slen) end-pos))))
 
 (defun p-lc (str)
-  "Perl lc - lowercase"
+  "Perl lc - lowercase
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (string-downcase (to-string str)))
 
 (defun p-uc (str)
-  "Perl uc - uppercase"
+  "Perl uc - uppercase
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (string-upcase (to-string str)))
 
 (defun p-fc (str)
   "Perl fc - fold case for case-insensitive comparison.
-   Uses string-downcase as approximation (full Unicode folding would need ICU)."
+   Uses string-downcase as approximation (full Unicode folding would need ICU).
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (string-downcase (to-string str)))
 
 (defun p-chomp-single (s)
@@ -4441,7 +4460,8 @@
   "Perl index - find substring.
    Negative start position is treated as 0.
    For empty substring, start is clamped to string length.
-   For non-empty substring, start beyond string length returns -1."
+   For non-empty substring, start beyond string length returns -1.
+   Contract: ctx=insensitive coerce=str,num magic=none dies=no dynamic=no phase=no host=none"
   (let* ((s (to-string str))
          (sub (to-string substr))
          (slen (length s))
@@ -4460,7 +4480,8 @@
   "Perl rindex - find substring from end.
    Negative start position returns -1 for non-empty substr.
    For empty substr, negative position is clamped to 0 (Perl returns 0).
-   Position beyond string length is clamped to string length."
+   Position beyond string length is clamped to string length.
+   Contract: ctx=insensitive coerce=str,num magic=none dies=no dynamic=no phase=no host=none"
   (let* ((s (to-string str))
          (sub (to-string substr))
          (slen (length s))
@@ -4501,7 +4522,8 @@
   (code 0 :type integer))
 
 (defun p-chr (n)
-  "Perl chr - character from code point."
+  "Perl chr - character from code point.
+   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (let ((num (to-number n)))
     (when (floatp num)
       (when #+sbcl (sb-ext:float-infinity-p num) #-sbcl nil
@@ -4516,7 +4538,8 @@
             (t (string (code-char code))))))))
 
 (defun p-ord (str)
-  "Perl ord - code point of first character"
+  "Perl ord - code point of first character
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (let ((v (unbox str)))
     ;; Super-Unicode character stored as p-superchar struct (code > U+10FFFF)
     (if (p-superchar-p v)
@@ -4589,14 +4612,16 @@
       (t (or (parse-integer (%strip-underscores s) :radix 8 :junk-allowed t) 0)))))
 
 (defun p-lcfirst (str)
-  "Perl lcfirst - lowercase first character"
+  "Perl lcfirst - lowercase first character
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (let ((s (to-string str)))
     (if (> (length s) 0)
         (concatenate 'string (string-downcase (subseq s 0 1)) (subseq s 1))
         s)))
 
 (defun p-ucfirst (str)
-  "Perl ucfirst - uppercase first character"
+  "Perl ucfirst - uppercase first character
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (let ((s (to-string str)))
     (if (> (length s) 0)
         (concatenate 'string (string-upcase (subseq s 0 1)) (subseq s 1))
@@ -4605,7 +4630,8 @@
 (defun p-quotemeta (str)
   "Perl quotemeta - escape non-word characters.
    For ASCII (code < 128): escape unless [A-Za-z0-9_].
-   For non-ASCII (code >= 128): escape unless Unicode alphanumeric (\\w)."
+   For non-ASCII (code >= 128): escape unless Unicode alphanumeric (\\w).
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (let ((s (to-string str)))
     (with-output-to-string (out)
       (loop for c across s
@@ -4637,7 +4663,8 @@
 (defun p-crypt (plaintext salt)
   "Perl crypt(PLAINTEXT, SALT): one-way hash via the system crypt(3).
    Dies on wide characters (codepoint > 255), like Perl.  Returns undef when
-   crypt(3) returns NULL (e.g. FIPS rejecting a weak algorithm)."
+   crypt(3) returns NULL (e.g. FIPS rejecting a weak algorithm).
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=posix"
   (let ((pt (to-string plaintext))
         (sl (to-string salt)))
     (when (or (find-if (lambda (c) (> (char-code c) 255)) pt)
@@ -5170,7 +5197,8 @@
    Supports: %d %i %u %o %x %X %b %B %e %E %f %F %g %G %s %c %%
    Flags: - + 0 space #
    Width and precision: literal or * (from args)
-   Positional: %N$type selects argument N (1-based)"
+   Positional: %N$type selects argument N (1-based)
+   Contract: ctx=insensitive coerce=str,num magic=none dies=no dynamic=no phase=no host=none"
   ;; Flatten any vector args: splice/map/grep in list context returns a vector
   ;; which Perl flattens into argument lists.
   ;; Blessed arrays (p-box with class) must NOT be flattened — they are
@@ -7948,7 +7976,8 @@ per element."
                                         (,cl-test na nb)))))))))))))
        (declaim (inline ,name))
        (defun ,name (a b)
-         ,(format nil "Perl ~A with numberp fast path (returns 1 / \"\")" op-str)
+         ;; `Contract:' tail — see the note in %def-overloaded-arith.
+         ,(format nil "Perl ~A with numberp fast path (returns 1 / \"\")~%   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none" op-str)
          (if (and (numberp a) (numberp b))
              (p-bool (if (or (%pcl-nan-p a) (%pcl-nan-p b))
                          ,nan-result
@@ -7975,7 +8004,8 @@ per element."
 
 (declaim (inline p-<=>))
 (defun p-<=> (a b)
-  "Perl spaceship operator with numberp fast path"
+  "Perl spaceship operator with numberp fast path
+   Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none"
   (if (and (numberp a) (numberp b))
       (if (or (%pcl-nan-p a) (%pcl-nan-p b))
           *p-undef*
@@ -8261,7 +8291,8 @@ per element."
                                   (,str-test (to-string a) (to-string b))))))))))))
        (declaim (inline ,name))
        (defun ,name (a b)
-         ,(format nil "Perl ~A with stringp fast path (returns 1 / \"\")" op-str)
+         ;; `Contract:' tail — see the note in %def-overloaded-arith.
+         ,(format nil "Perl ~A with stringp fast path (returns 1 / \"\")~%   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none" op-str)
          (if (and (stringp a) (stringp b))
              (p-bool (,str-test a b))
              (,slow a b)))
@@ -8283,7 +8314,8 @@ per element."
 
 (declaim (inline p-str-cmp))
 (defun p-str-cmp (a b)
-  "Perl string comparison (cmp) with stringp fast path"
+  "Perl string comparison (cmp) with stringp fast path
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (if (and (stringp a) (stringp b))
       (cond ((string< a b) -1) ((string> a b) 1) (t 0))
       (%p-str-cmp-slow a b)))
@@ -8331,7 +8363,8 @@ per element."
 (defmacro p-chain-cmp (first-term &rest ops-and-terms)
   "Chained comparison: a op1 b op2 c [op3 d ...].
    Evaluates each term exactly once with short-circuit semantics:
-   if any comparison is false, remaining terms are not evaluated."
+   if any comparison is false, remaining terms are not evaluated.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
   (let ((g1 (gensym "T1"))
         (g2 (gensym "T2")))
     `(let ((,g1 ,first-term)
@@ -8746,7 +8779,8 @@ per element."
    and saves two full calls plus a LENGTH per read (unbox 6.1 %, to-number +
    %unary-truncate 3.4 % of the `arrhash` row).  Anything else — a boxed
    container, a list, a string, a negative or non-fixnum index — falls through
-   to the general path below, unchanged."
+   to the general path below, unchanged.
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (when (and (typep idx 'fixnum) (>= (the fixnum idx) 0)
              (vectorp arr) (not (stringp arr)))
     (return-from p-aref
@@ -8862,7 +8896,8 @@ per element."
 
 (defun p-aref-box (arr idx)
   "Get the BOX at array index (for l-value operations like chop, ++).
-   Creates box if needed, auto-extends array. Returns the box itself."
+   Creates box if needed, auto-extends array. Returns the box itself.
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((a (unbox arr)))
     ;; THE INTERMEDIATE VIVIFICATION (#1058, s470bk) — the array twin of the
     ;; rule spelled out in p-gethash-box: an undef container that IS a writable
@@ -9706,7 +9741,8 @@ which is one of #1140's escape spellings (probed)."
    table is not a box (so `unbox` is the identity), is neither marker symbol,
    and is not a string; a string key is its own `to-string`.  Saves two full
    calls and four EQ/type tests per read (unbox + to-string were 9.3 % of the
-   `arrhash` row)."
+   `arrhash` row).
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (when (and (hash-table-p hash) (stringp key))
     (return-from p-gethash
       (multiple-value-bind (val found) (gethash key hash)
@@ -9816,7 +9852,8 @@ which is one of #1140's escape spellings (probed)."
 
 (defun p-gethash-box (hash key)
   "Get the BOX at hash key (for l-value operations like chop, ++).
-   Creates box if needed (autovivification). Returns the box itself."
+   Creates box if needed (autovivification). Returns the box itself.
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((h (unbox hash))
          (k (to-string key)))
     ;; THE INTERMEDIATE VIVIFICATION (#1058, s470bk).  An undef CONTAINER that
@@ -10100,7 +10137,8 @@ which is one of #1140's escape spellings (probed)."
    of ALIASES in perl, so `for (@a[0,1]) { $_ *= 10 }` writes through (#818).
    Copy positions (`my @c = @a[0,1]`, push, sort, list assign) unbox as they
    already do for a plain `@a`, which is the same shape.
-   Handles individual indices, lists, and vectors (from range operator)."
+   Handles individual indices, lists, and vectors (from range operator).
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
     ;; capacity known up front: growing from 0 reallocated the result
     ;; vector once per element (15 % of the `slices` bench row, s458ak)
@@ -10112,7 +10150,8 @@ which is one of #1140's escape spellings (probed)."
   "Perl hash slice @hash{keys} - returns a vector of the hash's own value
    slots as ALIASES (%p-alias-helem, the #818 sibling of p-aslice).
    Handles individual keys, lists, and vectors (from range operator).
-   Strings are vectors in CL but must not be expanded into characters."
+   Strings are vectors in CL but must not be expanded into characters.
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
     (let ((result (make-array n :adjustable t :fill-pointer 0)))
       (dotimes (i n result)
@@ -10121,7 +10160,8 @@ which is one of #1140's escape spellings (probed)."
 (defun p-kv-hslice (hash &rest keys)
   "Perl KV hash slice %hash{keys} - returns vector of key-value pairs.
    Handles individual keys, lists, and vectors (from range operator).
-   Strings are vectors in CL but must not be expanded into characters."
+   Strings are vectors in CL but must not be expanded into characters.
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (multiple-value-bind (flat n) (%p-flatten-slice-args keys)
     (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
       (dotimes (i n result)
@@ -10134,7 +10174,8 @@ which is one of #1140's escape spellings (probed)."
 (defun p-kv-aslice (arr &rest indices)
   "Perl KV array slice %arr[indices] - returns vector of (index, value) pairs.
    Handles individual indices, lists, and vectors (e.g. from range operator).
-   Repeated indices yield repeated pairs, matching Perl semantics."
+   Repeated indices yield repeated pairs, matching Perl semantics.
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (multiple-value-bind (flat n) (%p-flatten-slice-args indices)
     (let ((result (make-array (* 2 n) :adjustable t :fill-pointer 0)))
       (dotimes (j n result)
@@ -10372,7 +10413,8 @@ which is one of #1140's escape spellings (probed)."
     (if (stringp a) (p-ensure-arrayref arr) a)))
 
 (defun p-exists (hash key)
-  "Perl exists function"
+  "Perl exists function
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (cond
@@ -10397,7 +10439,8 @@ which is one of #1140's escape spellings (probed)."
    depends on this).  Weak keys so abandoned snapshots are collected.")
 
 (defun p-delete (hash key)
-  "Perl delete function for hashes - returns unboxed value"
+  "Perl delete function for hashes - returns unboxed value
+   Contract: ctx=insensitive coerce=str magic=none dies=yes dynamic=no phase=no host=none"
   (let ((h (%p-designator-hash hash))
         (k (to-string key)))
     (cond
@@ -10428,7 +10471,8 @@ which is one of #1140's escape spellings (probed)."
 (defun p-delete-array (arr idx)
   "Perl delete function for arrays.
    Sets element to nil (deleted marker) and returns the old value.
-   Trims trailing nil slots (Perl shrinks array when last element deleted)."
+   Trims trailing nil slots (Perl shrinks array when last element deleted).
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((a (%p-designator-array arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
@@ -10453,7 +10497,8 @@ which is one of #1140's escape spellings (probed)."
    that, not \"is a box\", is the existence test: under raw element storage an
    assigned slot may hold a bare number or string (the box carries IDENTITY,
    never existence).  Reading box-ness here made every raw element answer
-   `exists` = FALSE (Pl/t/delete-01.t rows 4/10 caught it at the flip)."
+   `exists` = FALSE (Pl/t/delete-01.t rows 4/10 caught it at the flip).
+   Contract: ctx=insensitive coerce=num magic=none dies=yes dynamic=no phase=no host=none"
   (let* ((a (%p-designator-array arr))
          (i (truncate (to-number idx)))
          (len (if (vectorp a) (length a) 0))
@@ -16959,7 +17004,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun p-reverse (&rest items)
   "Perl reverse: in list context reverses element order; in scalar context
-   concatenates all items into a string and reverses the characters."
+   concatenates all items into a string and reverses the characters.
+   Contract: ctx=sensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (if (eq *wantarray* t)
       ;; List context: reverse element order, preserving nil (deleted) slots
       (let* ((arr (apply #'%p-collect-list items))
@@ -16977,7 +17023,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defun p-join (sep &rest items)
   "Perl join(SEP, LIST) - joins elements with separator.
    Handles both (join SEP @array) and (join SEP elem1 elem2 ...).
-   Arrays/vectors and hashes in the argument list are flattened."
+   Arrays/vectors and hashes in the argument list are flattened.
+   Contract: ctx=insensitive coerce=str magic=none dies=no dynamic=no phase=no host=none"
   (let* (;; Warn for undef separator (Perl warns regardless of list length).
          ;; Skip for tied sep to avoid premature FETCH before item-count check.
          (_ (when (and (not (and (p-box-p sep) (p-tie-proxy-p (p-box-value sep))))

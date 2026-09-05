@@ -27,7 +27,7 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore)
 * [12. Worked example](#12-worked-example)
 
@@ -2608,6 +2608,53 @@ Anything not covered: read the `p-NAME` docstring in
 `cl/pcl-runtime.lisp` — by project rule the runtime implements *real Perl
 semantics only*, so the function *is* the spec, and
 `docs/not-supported.md` is the closed list of deliberate divergences.
+
+### 10a. The inventory is GENERATED, and each op's contract is a docstring tail (normative, s470bm, task #1170)
+
+The full inventory is data, not prose: **`docs/ir-op-inventory.tsv`** (one row
+per name the `:pcl` runtime package exports — the IR's whole vocabulary) and
+**`docs/ir-op-inventory.md`** (the same, grouped by family with the rule above
+quoted per family), both written by `tools/ir-inventory.pl` and gated by
+`Pl/t/ir-inventory-01.t`.  Read those to get the PORT LIST; read this section
+for what the columns mean.
+
+The generator reads the **loaded** runtime (`do-external-symbols` in an SBCL
+with `cl/pcl-runtime.lisp` in it), not the source text, and that is not an
+implementation detail: `p-+`, `p-*`, the six numeric compares, the six string
+compares and the compound-assignment family have **no textual `defun`** — they
+are expansions of `%def-overloaded-arith` / `%def-overloaded-cmp` /
+`%def-overloaded-str-cmp`.  A text scan of the runtime silently misses the
+most-used ops in the IR.
+
+**The machine-readable contract is a final paragraph of the op's own
+docstring**, because the runtime is the spec and the prose already lives there:
+
+    Contract: ctx=insensitive coerce=num magic=none dies=no dynamic=no phase=no host=none
+
+Keys are a CLOSED set and so is each key's value set; an unknown key or value
+is an ERROR in the generator, never data nobody can read (rule 12).  All seven
+keys must be present — a partial tail would read as defaults, and *absent means
+"not stated"* everywhere else in this document.
+
+| key | values | means |
+|---|---|---|
+| `ctx` | `sensitive` / `insensitive` | does the op observe `*wantarray*` (§4)? |
+| `coerce` | comma list of `num` `str` `bool`, or `none` | which Perl coercion (§3) it applies to its operands |
+| `magic` | comma list of magic-global names (`$_`, `$@`, `@-` …), or `none` | which §8 globals it reads or writes IMPLICITLY.  `none` is the common answer and is a real fact: the `$_`-default forms arrive with `$_` already explicit in the tree |
+| `dies` | `yes` / `no` | can the op itself raise a Perl exception?  A die from a user `use overload` handler or a tie method reached *through* it does not count — that is the handler's contract |
+| `dynamic` | `yes` / `no` | does implementing it need a dynamic (save/restore) binding? |
+| `phase` | `yes` / `no` | does it participate in the compile/load phase model (§9)? |
+| `host` | comma list of `sbcl` `posix` `ppcre` `ffi` `subprocess`, or `none` | what it needs from its host beyond plain computation |
+
+**The tail states the op's PERL contract — what a backend must implement.**
+Where PCL's current implementation diverges from it, the divergence is a filed
+bug, not a weaker contract: `p-%` carries `dies=yes` because perl dies
+"Illegal modulus zero", and the fact that PCL answers NaN today is task #1173.
+
+An op with no tail prints `UNCLASSIFIED` in every contract column.  That is the
+campaign's remaining work and the generator counts it per run (55 of 682 at
+s470bm: the numeric, numeric-compare, string, string-compare and element
+families).
 
 ## 11. What a translator may ignore
 
