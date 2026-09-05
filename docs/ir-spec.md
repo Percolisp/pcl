@@ -27,9 +27,9 @@ design ruling; `sNNN` names an internal working session.
 * [7. Packages, variables, and OO](#7-packages-variables-and-oo) — [namespaces and case](#71-namespaces-and-case) · [package variables and `local`](#72-package-variables-and-local) · [method dispatch](#73-method-dispatch) · [scheduled blocks](#74-scheduled-blocks) · [bareword filehandles](#75-bareword-filehandle-names-normative-s443f) · [stdio buffering](#76-stdio-buffering-normative-s451) · [I/O layers](#77-io-layers-a-handle-carries-octets-unless-told-otherwise-normative-s470br-task-1115)
 * [8. Magic globals](#8-magic-globals)
 * [9. The load model and string eval](#9-the-load-model-and-string-eval) — [the eval protocol](#91-the-string-eval-protocol-normative-s295) · [the generation stamp](#92-the-generation-stamp-is-a-promise-normative-s402) · [the drop form](#93-the-drop-form-a-statement-the-compiler-could-not-lower-normative-s435)
-* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
+* [10. Op inventory — family rules](#10-op-inventory--family-rules) — [the regex literal's `:tier`](#10-tier-the-regex-literals-tier--which-engine-a-target-needs-normative-s470bq-task-1211) · [the generated inventory and the `Contract:` tail](#10a-the-inventory-is-generated-and-each-ops-contract-is-a-docstring-tail-normative-s470bm-task-1170) · [the per-program manifest](#10b-the-per-program-manifest--pl2cl---manifest-normative-s470bm-task-1171) · [the stat / filetest family](#10c-the-stat--filetest-family-one-operand-resolution-and-what-_-remembers-normative-s470bs-tasks-1031-1033-1047-1048-1049)
 * [11. What a translator may ignore](#11-what-a-translator-may-ignore) — [11b. the CL kernel a backend must implement](#11b-the-cl-kernel-a-backend-must-implement-normative-s470bm-task-1172)
-* [12. Worked example](#12-worked-example)
+* [12. Worked example](#12-worked-example) — [12b. the DATA form (`--emit-sexp`)](#12b-the-data-form--pl2cl---emit-sexp-normative-s470bq-task-1215) · [12c. the FACTS form (`--facts`)](#12c-the-facts-form--pl2cl---facts-normative-s470bq-task-1213)
 
 ---
 
@@ -49,9 +49,13 @@ itself carries no host-specific semantics beyond them.
 
 - **Parse with an S-expression reader.** Symbols contain `$ @ % & : + - * /
   . < > = ~ ! # | ^` — never tokenize by regex. Strings are
-  double-quoted with `\"` and `\\` as the only escapes; they may contain
-  raw control characters (real newlines/tabs inside the quotes — see the
-  review doc §3.2).
+  double-quoted with `\"` and `\\` as the only escapes. **A literal holding a
+  character below 0x20 is not written raw: it goes out as `(p-esc "…")`**
+  (task #1212), whose payload spells those characters with the data form's
+  escape alphabet (§12b) and which a macro decodes at compile time — so **no
+  emitted string literal spans a line**, and a line break in the file is
+  always syntax. Or skip the CL syntax entirely: `pl2cl --emit-sexp` prints
+  the same tree in the data form of §12b.
 - **Comments (`;` to end of line) are non-semantic** — source echoes for
   humans — **with one exception, and a reserved second one.**  The exception
   is the first line, the pipeline marker (below, §9.2): a comment with a fixed
@@ -1115,6 +1119,7 @@ both ends (an unknown key is an error at macroexpansion):
 | `:string-eval` | `t` | the body contains a string `eval`.  True-only, and conservative: `->eval`, `eval =>` and a hash key spelled `eval` over-fire harmlessly |
 | `:captures` | a list of cell names | the promoted package cells this hoisted sub closes over, recorded by the promotion that PROVED the capture (§2b.3's `:captured` / `:spanning` families) |
 | `:prototype` | the text (`"$$"`) | an OLD-STYLE prototype.  A signature is not a prototype and prints nothing |
+| `:needs` | a list of class keywords | the OBLIGATION classes this sub's BODY exercises, in §10b's own class names (`:nonlocal_exit.die`, `:dynamic_scope.local`, `:io`, `:regex.native` …) — task #1214.  **The one key here that is a COMPLETE answer rather than a proof-if-present**, so it is always printed and `()` is a real fact: nothing in this sub can throw, so a target needs no frame; nothing localizes, so it needs no save/restore stack (`docs/plan-speed-and-ir-s470.md` §B.3).  It also lets a backend compile a program PARTIALLY — every sub whose classes it implements — and refuse the rest with §9.3b's shape.  Computed by the same walk `pl2cl --manifest` uses, scoped to the body, so the two answers cannot drift |
 
 `()` is common and means exactly "nothing proven": 155 of the perl-tests
 corpus's 661 `p-sub` forms print it, most of them `use constant` definitions,
@@ -2721,8 +2726,8 @@ function's docstring states its Perl contract. The families:
 | elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
 | slice delete | `p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice p-delete-kv-array-slice` | every one flattens its key/index arguments alike (`%p-flatten-slice-args`: a range or interpolated list contributes its elements, a STRING is one key — task #394), and every one answers **nil for an EMPTY slice** — undef in scalar context, the empty list in list context, per [perl #29127].  The emptiness test comes BEFORE the read-only check: perl allows `delete @ro[()]` on a read-only array and dies only on a real index (probed, s414) |
 | array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost.  `(%p-push1 @a X)` is the same sugar for `push`: exactly `(p-push @a X)` for a single SCALAR X on a non-escaping `my @a` (§2.3a), value = the new length; rewrite it back to `p-push` and nothing is lost |
-| regex | `p-=~ p-!~` with `(p-regex "/pat/flags") (p-subst …) (p-tr …)` | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is a zero-length VECTOR, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted.  (The runtime builds that vector with `%p-empty-list`, which is INTERNAL and is never emitted — measured s470bm over 111 + 592 files, so a translator sees the value and never the form) |
-| compiled regex (qr) | `(pcl::p-qr "qr/pat/flags")` literal · `(pcl::p-regex-from-parts PAT "flags")` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
+| regex | `p-=~ p-!~` with `(p-regex :pat "…" :flags "…" :tier T)`, `(p-subst :pat … :rep … :flags … :tier T)`, `(p-tr :from … :to … :flags …)` — the STRUCTURED literal (task #1211; the pre-s470bq spelling was one string with perl delimiters inside, `(p-regex "/pat/flags")`) | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is a zero-length VECTOR, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted.  (The runtime builds that vector with `%p-empty-list`, which is INTERNAL and is never emitted — measured s470bm over 111 + 592 files, so a translator sees the value and never the form) |
+| compiled regex (qr) | `(pcl::p-qr :pat "…" :flags "…" :tier T)` literal · `(pcl::p-regex-from-parts :pat FORM :flags "…" :tier :dynamic)` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
 | I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup |
 | command capture | `p-backtick` (`` `CMD` ``, every `qx` delimiter, `` <<`TAG` `` and the NAMED `readpipe EXPR` — ONE runtime function, four surface syntaxes) | **wantarray-sensitive, exactly like `p-readline`** (task #731): scalar/void yields the whole captured stdout as one string, LIST context yields it SPLIT INTO `$/` RECORDS, each keeping its separator — so empty output is the empty list in list context and `""` in scalar.  The split uses `%p-read-record`, the same `$/` reader `p-readline` uses, so slurp (`$/ = undef`), paragraph mode (`$/ = ""`) and a custom separator cannot drift apart between the two.  A package that displaced the builtin with `use subs "readpipe"` is called instead, for every one of the four syntaxes (#703/#734) |
 | introspection | `p-ref p-bless p-caller p-can p-isa` | §7; `p-caller` returns package but file/line are stubs (divergence) |
@@ -2733,6 +2738,41 @@ Anything not covered: read the `p-NAME` docstring in
 `cl/pcl-runtime.lisp` — by project rule the runtime implements *real Perl
 semantics only*, so the function *is* the spec, and
 `docs/not-supported.md` is the closed list of deliberate divergences.
+
+### 10-tier. The regex literal's `:tier` — which ENGINE a target needs (normative, s470bq, task #1211)
+
+Every regex literal carries `:tier`, a fact about the CONSTRUCTS in its
+pattern.  It is computed by one pure function over the pattern text and the
+modifier letters (`Pl/RegexTier.pm`), and **PCL's own CL target ignores it** —
+cl-ppcre runs everything cl-ppcre runs, and the keyword is never read at run
+time.  It is there so a backend can pick its engine per literal without
+re-parsing Perl source (`docs/js-target-plan.md` §II.8 item 3).
+
+| tier | means | a JavaScript target |
+|---|---|---|
+| `:native` | a local rewrite expresses it in the host's own engine | `RegExp` (ES2018: named captures, lookbehind, `\p{…}` under `u`, dotall, sticky) |
+| `:pcre` | the construct exists in perl and PCRE2 but not in a plain host engine | PCRE2 (WASM or a native binding) |
+| `:refused` | perl CODE inside the pattern — `(?{…})`, `(??{…})` | no engine runs it; refuse with §9.3b's shape, as the CL target already does |
+| `:dynamic` | the pattern INTERPOLATES, so it is not known at compile time | classify at run time — a declared absence, never a guess |
+
+The constructs, by tier.  Anything not listed is `:native`:
+
+| tier | constructs |
+|---|---|
+| `:refused` | `(?{…}` · `(??{…}` |
+| `:pcre` | atomic group `(?>` · conditional `(?(` · branch reset `(?\|` · recursion / subroutine call `(?R)` `(?N)` `(?-N)` `(?+N)` `(?&name)` `(?P>name)` · backtracking verbs `(*VERB)` · possessive quantifiers `X*+` `X++` `X?+` `X{n,m}+` · `\K` · `\R` `\h` `\H` `\v` `\V` · `\N` (NOT `\N{…}`, a named character) · `\C` `\X` · `\g1` `\g{…}` · a POSIX class `[[:alpha:]]` inside a bracketed class · the `/l` (locale) modifier |
+| `:native` | everything else: `(?:` `(?=` `(?!` `(?<=` `(?<!` `(?<name>…)` `\k<name>` `\p{…}` `\P{…}` `(?#…)` `\A` `\z` `\Z` `\G` `\b` the ordinary quantifiers, alternation and backreferences, and the modifiers `m i s x xx p o g c e d u a n r` |
+
+Two boundaries are stated rather than hidden.  **`\p{…}` is native for the
+Unicode *standard* property names**, which is what ES2018's `u` mode
+implements; a perl-only spelling (`\p{IsAlpha}`, a user-defined `\p{In…}`) is
+not, and the classifier does not carry a property-name table.  **An
+unrecognised modifier letter answers `:pcre`**, not an error: the tier is
+advisory (nothing here reaches the program), so rule 12's die boundary
+(DECIDED s329) does not apply and the conservative answer — "this target needs
+the bigger engine" — is the right one.
+
+`p-tr` has no `:tier`: a transliteration needs no regex engine.
 
 ### 10a. The inventory is GENERATED, and each op's contract is a docstring tail (normative, s470bm, task #1170)
 
@@ -2810,7 +2850,7 @@ The obligation classes, each keyed to the machinery a target must have:
 | `dynamic_scope` | `local`, `magic_global_write` | a save/restore stack (§7.2, §8) |
 | `nonlocal_exit` | `return`, `loop_control`, `goto`, `die`, `eval_block` | exceptions / `longjmp` / labelled break (§5.3, §6) |
 | `string_eval` | `eval`, `thunk` | a compiler reachable at run time (§9.1) |
-| `regex` | `literal`, `interpolated`, `qr`, `subst`, `tr`, `split`, `tier` | a regex engine.  `tier` is `unclassified` until B5's classifier exists — a DECLARED absence, never a guess |
+| `regex` | `literal`, `interpolated`, `qr`, `subst`, `tr`, `split`, `tier` | a regex engine.  `tier` is a HISTOGRAM over the four engine classes (`native`, `pcre`, `refused`, `dynamic`, §10-tier), each present with a zero — since task #1211 it is a measurement, not the declared absence it printed before |
 | `phase` | `begin`, `check`, `eval_when`, `run_blocks` | the phase model (§9), or form order (§11) |
 | `tie`, `overload`, `formats`, `xs`, `io`, `process` | (plain counts) | the hooks, the extension bridge, filehandles, subprocesses |
 
@@ -2979,10 +3019,15 @@ right.  Each is measured, not theoretical:
    delimiter.
 4. **`#x` / `#o` / `#b` / `#NNr` are NUMBERS**, not symbols — the emitter
    writes character codes and bit masks that way (400+ in `perl-tests/pack.t`).
-5. **A string literal may contain a raw newline, a raw tab and a NUL byte**
-   (friction §3.2): CL string syntax has no `\n` escape, so the emitter puts
-   the character itself in the file.  A line-oriented consumer must track
-   string state.
+5. ~~**A string literal may contain a raw newline, a raw tab and a NUL
+   byte**~~ — **CLOSED at s470bq (task #1212).**  CL string syntax still has
+   no `\n` escape, so the emitter no longer writes such a literal at all: a
+   string holding a character below 0x20 is `(p-esc "…")` with the §12b escape
+   alphabet in its payload, decoded at macroexpansion.  A line-oriented
+   consumer is therefore correct, and a backend implements `p-esc` as its own
+   string-unescape — the SAME routine §12b's reader needs.  (The two
+   non-evaluated plist slots, `p-let`'s `:perl` and `p-sub`'s `:prototype`,
+   keep the plain literal by design: a form there would be read as data.)
 
 ### What is NOT in the kernel yet — the measured leaks
 
@@ -3068,3 +3113,186 @@ for (const w of who.elementBoxes()) {            // §6.2 foreach binds boxes
 
 (A real translator would elide the `PReturn` frame when the body has one
 tail return — the same optimization PCL itself applies in reverse.)
+
+## 12b. The DATA form — `pl2cl --emit-sexp` (normative, s470bq, task #1215)
+
+§11b's last block lists the five CL reader rules a text-parsing backend must
+implement.  This section removes the need for them: **`pl2cl --emit-sexp`
+prints the same lowered tree in a form a ~50-line reader parses in any
+language.**  It is a SECOND PRINTER over the CLForm tree (`Pl/DataForm.pm`),
+never a transform of the CL text, and the default emission is unchanged — the
+flag is absent by default and prints INSTEAD of the CL.
+
+### The grammar
+
+    file    := line+
+    line    := form NEWLINE                  -- exactly one top-level form
+    form    := "(" ( form | atom )* ")"      -- space-separated
+    atom    := symbol | string | number
+    symbol  := "|" ( char-not-bar-or-backslash | "\\" char )* "|"
+    string  := '"' ( char | escape )* '"'
+    escape  := "\\\\" | "\\\"" | "\\n" | "\\t" | "\\r" | "\\u" HEX4
+    number  := "-"? DIGIT+ ( "." DIGIT+ )? ( [eE] [-+]? DIGIT+ )?
+
+Five rules, and they are the whole contract:
+
+1. **Every symbol is pipe-quoted, always** — `|p-+|`, `|$x|`, `|:class|`,
+   `|nil|`, `|&rest|`.  A KEYWORD's colon is INSIDE the bars, so a reader
+   never needs CL's keyword or package syntax; a package-qualified name keeps
+   its `::` inside the bars too (`|Foo::pl-bar|`, `|pcl::p-qr|`), which is
+   where the symbol's package is stated.  Only `|` and `\` are escaped inside.
+2. **Strings carry exactly the six escapes above and nothing else.**  Every
+   character below 0x20 and every non-ASCII code point is `\uXXXX`, so the
+   file is 7-bit and LINE-ORIENTED: a form never spans a line and a line
+   break is never data.  A code point above the BMP is a SURROGATE PAIR, as
+   in JSON — a JavaScript consumer's own string parser is already correct.
+3. **Numbers are decimal.**  §11b rule 4's `#x41` / `#o777` / `#b1010` radix
+   literals are converted; there is no `#` syntax in the data form at all.
+4. **A quoted symbol is `(|quote| |X|)` and a character literal is
+   `(|char| CODE)`** (or `(|char-name| "…")` for a name this printer does not
+   know) — §11b rules 3 and the three meanings of a quoted symbol become
+   ordinary forms.
+5. **There are no comments.**  The provenance the first line of a CL file
+   carries as `;;; pcl:` is the first FORM here (below).
+
+`(p-esc "…")` does not appear: the data form has its own string escapes, so
+the wrapper is collapsed to the plain string it denotes.
+
+### The frame forms
+
+    (|p-data-form| 1 "FILE" "MODE" "GENERATION")   -- first line: provenance
+    (|p-bucket| SECTION |:BUCKET| |:PHASE|)        -- before each run of forms
+    (|p-data-form-end| FORMS ISLANDS)              -- last line: the census
+
+`p-bucket`'s SECTION is a 0-based index over the file's package sections,
+BUCKET is `:decls` / `:pkg_enter` / `:defs` / `:run`, PHASE is `:compile` or
+`:run`.  The forms are printed in the order the file executes them — every
+section's compile-phase buckets first, then every section's run bucket, which
+is §9's phase model (a later section's `BEGIN` runs before an earlier
+section's run-time code).
+
+### What the data form does NOT carry — and what a consumer supplies
+
+Two things, both DECLARED rather than dropped in silence:
+
+* **v1-seam text.**  A chunk of CL the old text generator produced and that
+  never became a tree is `(|p-cl-text| "…")`; one that OPENS forms the tree's
+  own body then nests inside is `(|p-cl-text-wrap| "…" CLOSERS form…)`.  A
+  pre-spelled CL atom (`(make-p-box nil)` as a `p-let` init) is an island too.
+  `p-data-form-end`'s ISLANDS count is how many there were, so "how much of
+  this program is structured?" is a number and not an impression.  At s470bq
+  the corpus's islands are the `p-let` init spellings and the `local` family's
+  open text.
+* **The file's environment preamble and the CL-reader bookkeeping the
+  assembly writes as text** — `in-package`, `p-defpackage`, `defclass`, the
+  per-package `$a`/`$b` defvars, the forward-global `defvar`s,
+  `p-run-compile-phase-blocks`, `p-set-current-package`.  §11 already says the
+  preamble is environment bootstrap; the rest a consumer derives from the
+  `p-bucket` markers (a section's package, and the compile→run boundary at
+  the first `:run` bucket).  Closing this gap — expressing the assembly's own
+  lines as trees — is the data form's remaining work.
+
+### The reader, in Perl
+
+```perl
+sub node {                       # returns (node, rest-of-string)
+  my ($s) = @_;  $s =~ s/\A\s+//;
+  if ($s =~ s/\A\(//) {          # a list
+    my @k;
+    while (1) { $s =~ s/\A\s+//; last if $s =~ s/\A\)//;
+                my ($n, $r) = node($s); push @k, $n; $s = $r }
+    return (['list', \@k], $s);
+  }
+  if ($s =~ s/\A\|//) {          # a symbol: verbatim until the closing bar
+    my $n = '';
+    while (length $s) { my $c = substr($s,0,1,'');
+      if ($c eq "\\") { $n .= substr($s,0,1,''); next }
+      last if $c eq '|';  $n .= $c }
+    return (['sym', $n], $s);
+  }
+  if ($s =~ s/\A"//) {           # a string: six escapes, surrogate pairs
+    my $v = '';
+    while (length $s) { my $c = substr($s,0,1,'');
+      last if $c eq '"';
+      if ($c ne "\\") { $v .= $c; next }
+      my $d = substr($s,0,1,'');
+      if    ($d eq 'n') { $v .= "\n" } elsif ($d eq 't') { $v .= "\t" }
+      elsif ($d eq 'r') { $v .= "\r" }
+      elsif ($d eq 'u') { my $cp = hex(substr($s,0,4,''));
+        if ($cp >= 0xD800 && $cp <= 0xDBFF && $s =~ /\A\\u([0-9A-Fa-f]{4})/) {
+          my $lo = hex($1);
+          if ($lo >= 0xDC00 && $lo <= 0xDFFF) {
+            $cp = 0x10000 + (($cp-0xD800) << 10) + ($lo-0xDC00); substr($s,0,6,'') } }
+        $v .= chr($cp) }
+      else  { $v .= $d } }       # \\ and \"
+    return (['str', $v], $s);
+  }
+  $s =~ s/\A([^\s()]+)// or die "not a token: $s";
+  return (['num', $1], $s);      # a number, in its printed spelling
+}
+```
+
+`Pl/t/ir-data-form-01.t` holds exactly this reader, parses the emission of a
+fixture with every shape in it and RE-PRINTS — the round trip must be
+byte-identical, which is what makes this section a promise rather than a
+description.
+
+### The reader, in JavaScript
+
+The same five rules; the string case is `JSON.parse` on the token, because the
+escape alphabet above is a subset of JSON's:
+
+```js
+function node(s, i) {                       // returns [value, nextIndex]
+  while (/\s/.test(s[i])) i++;
+  if (s[i] === '(') { const k = []; i++;
+    for (;;) { while (/\s/.test(s[i])) i++;
+      if (s[i] === ')') return [{list: k}, i + 1];
+      const [n, j] = node(s, i); k.push(n); i = j; } }
+  if (s[i] === '|') { let n = ''; i++;
+    while (s[i] !== '|') { if (s[i] === '\\') i++; n += s[i++]; }
+    return [{sym: n}, i + 1]; }
+  if (s[i] === '"') { let j = i + 1;
+    while (s[j] !== '"') j += (s[j] === '\\' ? 2 : 1);
+    return [{str: JSON.parse(s.slice(i, j + 1))}, j + 1]; }
+  let j = i; while (j < s.length && !/[\s()]/.test(s[j])) j++;
+  return [{num: Number(s.slice(i, j))}, j];
+}
+```
+
+## 12c. The FACTS form — `pl2cl --facts` (normative, s470bq, task #1213)
+
+§10b's `facts` key says which of PCL's licences fired over a whole program.
+This says where: **with `--facts`, every Kind-A/Kind-B licence that HELD is
+printed as `(p-fact (NAME …) FORM)` around the form it licensed.**
+
+    (p-fact (foreach-raw) (p-foreach-raw ($v @a) …))
+    (p-fact (local-push)  (p-push @a $x))         ; under PCL_OPT=none
+    (p-fact (classic-sort :num-asc) (p-sort …))
+
+`p-fact` is a transparent macro (it expands to FORM), so the annotation costs
+nothing at run time and a consumer that ignores it reads the same program.
+The NAMES are the optimization registry's (`Pl/Passes.pm`), and the registry
+is where the closed set is checked.
+
+**Why it exists** (`docs/plan-speed-and-ir-s470.md` §B.3): a foreign backend
+cannot use PCL's fast SHAPES — `%p-push1`, `%p-sort-classic` and `p-incf-raw`
+are SBCL-shaped — but it can use the PROOF behind each of them to pick its
+own.  So `PCL_OPT=none --facts` is the general-form IR with every proof
+attached: the portable speed, with PCL's own consumption of it switched off.
+For that to work the FACT must be computed independently of the switch, and
+each wired site is written fact-first for exactly that reason.
+
+**Coverage, stated because it is partial.**  Ten licences are wired:
+`foreach-range`, `foreach-raw`, `foreach-arrays`, `raw-topic`, `local-push`,
+`classic-sort`, `tail-return`, `elem-setf`, `insensitive-call`,
+`symref-const`, plus `numeric-slot` with the caveat below.  The rest of the
+registry is the **verdict-coverage family** (`raw-slot`, `raw-numeric`,
+`str-buffer`, `raw-block-eval`, `raw-op-family`, `raw-closure-capture`,
+`raw-return-family`) and `dyn-loop-exit`.  Their licence is not a local form
+choice: it is a DECLARATION's class, and that class is already in the IR as
+`p-let`'s `:class` and facts tail (§2b.2a) — the thing `--facts` would add is
+what the class would have been had the verdict not been suppressed, which
+means running the verdict anyway.  `numeric-slot` is the boundary case: it is
+wired, but its SITE is only reached because `raw-slot` fired, so it does not
+appear under `PCL_OPT=none`.  Task #1216 owns the remainder.

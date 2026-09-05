@@ -163,7 +163,28 @@ printed form canonical.**
   the program as *data*. Do not build this before the seams are gone; a
   sexp dump with embedded text islands is worse than no dump.
 
-### 3.2 Control characters are emitted raw inside string literals
+  **SHIPPED s470bq (task #1215; grammar ir-spec §12b), with the warning
+  answered rather than waited out.**  The seams are not gone, so every island
+  is DECLARED — `(|p-cl-text| "…")` for a raw chunk, `(|p-cl-text-wrap| …)`
+  for one that opens forms around lowered body — and COUNTED in the file's
+  own trailer form.  A dump that says how much of the program it could not
+  structure is not worse than no dump; a dump that hides it would be.  The
+  ~50-line claim is now a GATE ROW: `Pl/t/ir-data-form-01.t` implements that
+  reader in plain Perl, parses the emission with it and re-prints
+  byte-identically.  What the data form still does not carry is the
+  assembly's own text lines (`in-package`, the forward-global `defvar`s, …),
+  named in §12b with the consumer's rule for supplying them.
+
+### 3.2 Control characters are emitted raw inside string literals — **CLOSED (s470bq, task #1212)**
+
+**Shipped exactly as sketched below**: `(p-esc "…")`, a macro decoding at
+macroexpansion, emitted only when the literal holds a character below 0x20.
+The escape alphabet is the data form's (§3.1 item 7 / ir-spec §12b), so a
+backend implements ONE unescape for both.  Heredocs and `__DATA__` were routed
+through the one string writer to get it.  Guard `Pl/t/ir-data-form-01.t`
+asserts that no emitted string literal spans a line.  The original entry
+follows.
+
 
 **Symptom:** `print "fib: $n\n"` emits a string literal containing an
 *actual* newline; `"a\tb"` contains an actual tab:
@@ -196,7 +217,15 @@ string. One-line printer change + a ~15-line macro. (A translator to
 another environment implements `p-esc` as its own string-unescape — easier,
 not harder, than handling raw control bytes.)
 
-### 3.3 Regex/subst/tr literals are un-parsed Perl source
+### 3.3 Regex/subst/tr literals are un-parsed Perl source — **CLOSED (s470bq, task #1210/#1211)**
+
+**Shipped as the one-shot flag-day this entry recommends** (generation
+v2-800): all five entry points take the keyword form and the old positional
+one DIES at macroexpansion.  It went further than the sketch in one way —
+each literal also carries `:tier`, the ENGINE CLASS a target needs for it
+(ir-spec §10-tier), which is the fact the JS plan's three-tier design wanted
+and which `pl2cl --manifest` now histograms.  The original entry follows.
+
 
 **Symptom:** `(p-regex "/(\\w+)\\s+(\\w+)/")`, `(p-subst "world" "perl")` —
 the regex still carries its Perl delimiters and (when present) trailing

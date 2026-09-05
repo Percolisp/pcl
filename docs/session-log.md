@@ -1102,6 +1102,112 @@ Bars for round 3: gate `tools/prove-core` **210 files / 7144 tests** twice
 (before and after the registry edit), green except the 13 standing pclxs xs
 rows; the full sweep twice, identical in every bucket; `check-parens` balanced.
 
+## Session 470bq (Opus agent, 2026-09-05) — Part B item B5: the IR as DATA (`--emit-sexp`), the regex literal STRUCTURED with its engine tier, `p-esc`, `--facts` and `:needs`
+
+Five deliverables of `docs/plan-speed-and-ir-s470.md` Part B, generation
+**v2-800** (the flag-day is the regex literals + `p-esc`).
+
+**The regex literal was ONE STRING with perl's delimiters inside it, and four
+copies of the code that built it (#1210).**  `(p-regex "/pat/i")` made every
+consumer — this runtime included — re-implement perl's delimiter/flag scan
+before it could see the pattern, although the compiler already HAD the parts:
+PPI hands them over separately and `_parse_regex_content` splits them.  All
+five entry points are now MACROS over a keyword form (`:pat` / `:flags` /
+`:tier`, and `:from` / `:to` for `p-tr`) expanding to exactly the call the
+string form used to make, so the run is byte-identical and the parse simply
+happens at the transpiler — friction §3.3's "negative runtime cost".  **The
+old positional form DIES at macroexpansion naming the site**: two shapes
+reaching one entry point is precisely the mix a compatibility arm would make
+invisible, and the generation bump makes the old shape unreachable anyway.
+
+The emitter side is where the finding was.  `gen_leaf` and `gen_leaf_form`
+each carried an m// arm and a qr// arm, byte-identical but for the head
+symbol — FOUR copies, which is exactly why `:tier` could not have been added
+in one place before (rule 11).  One `_regex_literal_form` replaced them, and
+routing `:pat`/`:flags` through `_cl_string_literal_form` — the ONE string
+writer — closed #419's unrepresentable-code-point hole inside regex literals
+without a second escaper.
+
+**The tier is one pure function, and its own bug taught the `}` rule
+(#1211).**  `Pl::RegexTier` implements js-target-plan §II.8 item 3: `native`
+(a local rewrite expresses it in the host engine), `pcre` (perl and PCRE2 but
+not a plain host engine), `refused` (`(?{…}` — perl code in the pattern), plus
+**`dynamic` for an interpolated pattern**, whose tier is a run-time question
+and is DECLARED rather than guessed.  Its first version called every `\p{…}+`
+pattern `pcre`, because `}+` looked possessive; the `}` arm now scans back and
+requires a counted `{n,m}`.  **An unrecognised modifier letter answers `pcre`,
+not an error** — rule 12's die boundary (s329) is "die when the missing case
+produces a value the program consumes", and nothing here reaches the program;
+`pcre` is the conservative answer and a wrong `native` would be the harmful
+one.  PCL's own target IGNORES the tier; what it buys is that
+`pl2cl --manifest`'s `needs.regex.tier` stops printing the word
+`unclassified` and prints a histogram over the four classes.
+
+**`p-esc` (#1212): no emitted string literal spans a line any more.**  CL
+string syntax has no `\n`, so `print "fib: $n\n"` used to put a REAL newline
+inside the quotes — a grep hit half a string, a diff split literals across
+hunks, line counts stopped matching form counts.  A literal holding any
+character below 0x20 now goes out as `(p-esc "…")`, whose payload uses the
+DATA FORM's escape alphabet, decoded at macroexpansion so the compiled code
+holds the same constant.  Deliberately the same alphabet: a backend
+implements ONE unescape for `--emit-sexp` and for `p-esc`.  Three sites were
+routed through the one string writer to get it — heredocs (the corpus's
+densest source of newlines) and `__DATA__` had their own inline escapers and
+therefore lacked #419's split as well.  **The one exception is stated at its
+call site**: `p-let`'s `:perl` and `p-sub`'s `:prototype` live in a plist the
+macro READS as data, so a `(p-esc …)` there would be a two-element sublist
+where a consumer expects a string; those take `cl_string_datum`.
+
+**`pl2cl --emit-sexp` (#1215) — and the review doc's warning answered rather
+than waited out.**  §3.1 item 7 said "do not build this before the seams are
+gone; a sexp dump with embedded text islands is worse than no dump."  The
+answer is that every island is DECLARED — `(|p-cl-text| "…")` for a raw chunk,
+`(|p-cl-text-wrap| "…" CLOSERS form…)` for one that opens forms around lowered
+body, and a pre-spelled CL atom (`(make-p-box nil)` as a `p-let` init) too —
+and COUNTED in the file's own last form.  A dump that says how much of the
+program it could not structure is not worse than no dump; a dump that hid it
+would be.  The rest is the grammar of ir-spec §12b: every symbol pipe-quoted
+with the keyword's colon INSIDE the bars, strings 7-bit with six escapes and
+JSON-style surrogate pairs, numbers decimal, one form per line, no comments.
+**The "~50-line reader" claim is now a GATE ROW**: `Pl/t/ir-data-form-01.t`
+implements that reader in plain Perl, parses the emission and re-prints
+byte-identically.  Order is the program, so the collector buffers by
+(section, bucket) and replays in #469's phase order; `Pl::Passes::run`
+forwards the BUCKET to the observer hook and Parser2's four call sites label
+it.  What the data form still omits — the assembly's own hand-written text
+lines — is named in §12b with the consumer's rule, and owned by **#1217**.
+
+**`pl2cl --facts` (#1213): the licence, printed on the form it licensed.**  A
+foreign backend cannot use PCL's fast SHAPES (`%p-push1`, `%p-sort-classic`
+and `p-incf-raw` are SBCL-shaped) but can use the PROOF behind each of them to
+pick its own, so `--facts` wraps each licensed form in `(p-fact (NAME) FORM)`
+and `PCL_OPT=none --facts` is the general-form IR with every proof attached.
+The design point is that **the fact is computed BEFORE the switch is
+consulted**: a gate written `enabled(NAME) && FACT` short-circuits the fact
+away, so each wired site was rewritten fact-first, and a DISABLED Kind-B pass
+now runs under `--facts` in ANNOTATE-ONLY mode.  Ten licences are wired; the
+verdict-COVERAGE family is not, and the reason is structural — their licence
+is a DECLARATION's class, already in the IR as `p-let`'s `:class`, so printing
+the counterfactual means running the verdict with the switch off.  That
+boundary is in **ir-spec §12c**, not only in task **#1216**, because a reader
+of the spec has to know which licences `--facts` can and cannot show.
+
+**`:needs` on `p-sub` (#1214)** is the obligation classes the body exercises,
+computed by `Pl::Manifest`'s own walk (made reentrant — every count lives in
+an accumulator, so `needs_of_form` walks one body into a fresh one; a second
+walk with its own copy of the table is the drift rule 11 forbids).  It is
+**always printed, possibly `()`**, because the absence is the half a target
+uses: nothing in this sub can throw, so no frame; nothing localizes, so no
+save/restore stack.
+
+Two smaller things fell out.  A **headed keyword plist now breaks between
+PAIRS** in the CL printer, for the same reason the headless facts plist
+already did — without it a long interpolated pattern printed `:flags` and
+`"i"` on separate lines.  And the flag-day made **four `Pl/t` files carry
+stale shape expectations** (manifest-01.t's tier row, regexp-subst-01.t's 23
+rows, codegen-01.t's raw-newline row, clform-01.t's 12): repaired in the same
+commit, per the s416 rule.
+
 ## Session 470bo (Opus agent, 2026-09-05) — the correctness pool, round 27: the bugs the s470bm IR censuses found (#1179, #1178, #1173, #1174, #1177, #1175 four of six)
 
 **#1179 — `use parent qw( -norequire Foo )` put the FLAG in @ISA, and the same
