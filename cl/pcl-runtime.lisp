@@ -11281,6 +11281,34 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
 ;;; p-do - Perl's do FILE (block form is inlined by codegen as (progn ...))
 ;;; Called only for do EXPR where EXPR is not a bare block.
 
+(defun %p-read-source-octets (path)
+  "Read PATH as PERL SOURCE TEXT: one character per OCTET, the whole file and
+   nothing but the file.  This is how the compiler's own file entry reads a
+   source file (perl `<$fh>` with no layer), so `do FILE` hands the transpiler
+   the same text `require FILE` and `pl2cl FILE` do.
+
+   BOTH halves of that were wrong here and both were silent (#1084):
+
+     * the buffer was sized by FILE-LENGTH — OCTETS — while READ-SEQUENCE
+       filled it with the DECODED characters and its count was DISCARDED, so
+       any multi-byte character left junk past the end of the text.  One
+       U+2019 in a COMMENT was enough: PPI failed to tokenize the trailing
+       rubbish and `do \"./tiny.pl\"` died where `pl2cl tiny.pl` is fine.
+       That single character is t/op/closure.t's whole remaining abort.
+     * the DEFAULT external format decodes UTF-8, so a `do`-ne file measured
+       `length(\"’\")` as 1 where perl — and PCL's own `require`, which
+       transpiles the FILE — answer 3.  perl reads source as octets and lets
+       `use utf8` decide; the compiler's _maybe_decode_utf8 makes exactly that
+       decision, and it needs the octets to make it.
+
+   The count is honoured rather than trusted: latin-1 makes octets and
+   characters the same number, and a short read must not be padded with junk
+   a second time."
+  (with-open-file (f path :direction :input :external-format :latin-1)
+    (let* ((s (make-string (file-length f)))
+           (n (read-sequence s f)))
+      (if (= n (length s)) s (subseq s 0 n)))))
+
 (defun %p-do-io-failed ()
   "`do FILE` could not READ the file it found: perl reports that in $!, and
    leaves $@ false.  Must be called FIRST inside the handler, while the C
@@ -11322,9 +11350,7 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         (handler-case
             (let ((content
                    (handler-case
-                       (with-open-file (f abs-path :direction :input)
-                         (let ((s (make-string (file-length f))))
-                           (read-sequence s f) s))
+                       (%p-read-source-octets abs-path)
                      ;; I/O error opening/reading (is-a-directory, permissions,
                      ;; …): perl leaves $@ FALSE and reports the reason in $!.
                      ;; The OS errno is live at this point (probed s321: opening

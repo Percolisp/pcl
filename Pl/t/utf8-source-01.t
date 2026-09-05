@@ -59,7 +59,7 @@ sub run_file_bytes {
     return decode_utf8($out);
 }
 
-plan tests => 36;
+plan tests => 38;
 
 # café = 4 chars under use utf8 (é is one char), 5 bytes without it.
 is(run_bytes(encode_utf8('use utf8; my $s = "café"; print length($s), "\n";')),
@@ -416,3 +416,84 @@ is(run_file_bytes(encode_utf8(
    . "print \"uni:\", \x{1eb8}, \"|lc:\", \x{1eb9}, \"\\n\";\n")),
    "uni:\x{1eb8}|lc:\x{1eb9}\n",
    'inverse: a non-ASCII bareword in no-strict operand position is still a STRING (#820)');
+
+# ---------------------------------------------------------------- #1084 -----
+# `do FILE` reads a file as SOURCE TEXT, and must read it exactly the way
+# `require FILE` and `pl2cl FILE` do.  It did not, in two independent and
+# silent ways, and ONE U+2019 in a COMMENT was enough to hit both:
+#
+#   * `p-do` sized its buffer with FILE-LENGTH (OCTETS) but filled it with the
+#     DECODED characters and DISCARDED read-sequence's count, so every
+#     multi-byte character left junk past the end of the text.  PPI then failed
+#     to tokenize the trailing rubbish and the whole `do` died with
+#     "PCL: cannot parse (inline code)" — where `require` on the same file, and
+#     `pl2cl` on the same file, are fine.  t/op/closure.t:721 is the pay-off row.
+#   * the read used the DEFAULT external format (UTF-8) where perl reads source
+#     as octets and lets `use utf8` decide, so a do-ne file measured
+#     length("’") as 1 where perl — and PCL's own `require` — answer 3.
+#
+# The three spellings (`do`, `require`, a string eval of the same text) must
+# agree, and they must agree with perl.  Two files, not one, because perl's
+# `do FILE` populates %INC and a `require` of the SAME path would then be a
+# no-op (a divergence of its own — filed separately, not baked in here).
+sub write_src_file {
+    my ($tag, $chars) = @_;
+    my $p = "/tmp/pcl_do_utf8_${tag}_$$.pl";
+    open my $w, '>', $p or die "open $p: $!";
+    binmode $w;
+    print $w encode_utf8($chars);
+    close $w;
+    return $p;
+}
+
+my $src_body = "# a curly quote \x{2019} in a comment\n"
+             . "\$main::v = 42;\n"
+             . "\$main::len = length(\"\x{2019}\");\n"
+             . "1;\n";
+
+{
+    my $t1 = write_src_file('t1', $src_body);
+    my $t2 = write_src_file('t2', $src_body);
+    my $prog = <<'PROG';
+do "__T1__" or die "do: " . ($@ || $!);
+print "do: v=$main::v len=$main::len\n";
+$main::v = 0; $main::len = -1;
+require "__T2__";
+print "req: v=$main::v len=$main::len\n";
+$main::v = 0; $main::len = -1;
+my $src = <<'SRC';
+__BODY__
+SRC
+eval $src or die "eval: $@";
+print "eval: v=$main::v len=$main::len\n";
+PROG
+    $prog =~ s/__T1__/$t1/;
+    $prog =~ s/__T2__/$t2/;
+    $prog =~ s/^__BODY__\n/$src_body/m;
+    is(run_file_bytes(encode_utf8($prog)),
+       "do: v=42 len=3\nreq: v=42 len=3\neval: v=42 len=3\n",
+       'do FILE / require FILE / string eval agree on a U+2019 in a comment (#1084)');
+    unlink $t1, $t2;
+}
+
+# The `use utf8` variant: the pragma is the file's OWN decision, so the octets
+# the reader hands the compiler are what lets _maybe_decode_utf8 make it.  Both
+# spellings must now say ONE character, as perl does.
+{
+    my $ubody = "use utf8;\n" . $src_body;
+    my $u1 = write_src_file('u1', $ubody);
+    my $u2 = write_src_file('u2', $ubody);
+    my $prog = <<'PROG';
+do "__U1__" or die "do: " . ($@ || $!);
+print "do: v=$main::v len=$main::len\n";
+$main::v = 0; $main::len = -1;
+require "__U2__";
+print "req: v=$main::v len=$main::len\n";
+PROG
+    $prog =~ s/__U1__/$u1/;
+    $prog =~ s/__U2__/$u2/;
+    is(run_file_bytes(encode_utf8($prog)),
+       "do: v=42 len=1\nreq: v=42 len=1\n",
+       'a `use utf8` file reaches the pragma through do FILE too (#1084)');
+    unlink $u1, $u2;
+}

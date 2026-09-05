@@ -183,10 +183,22 @@ sub _maybe_decode_utf8 {
   # string is left alone); without `use utf8` Perl treats high bytes as Latin-1,
   # which matches reading the bytes unchanged.  The pl2cl output is already
   # written UTF-8, so the wide chars round-trip into the generated CL.
-  if (defined $src && $src =~ /\buse\s+utf8\b/ && !utf8::is_utf8($src)) {
-    my $copy = $src;
-    utf8::decode($copy) and return $copy;   # leaves $src on invalid bytes
-  }
+  #
+  # "Already decoded?" is a question about the CHARACTERS, and utf8::is_utf8
+  # answers a different one — perl's INTERNAL representation.  Source that
+  # reaches this function through a UTF-8 transport (the `pl2cl --server`
+  # pipe, which `do FILE` and string eval both use) arrives flagged while
+  # still holding one character per source OCTET, and the flag test then
+  # declined to decode a `use utf8` file the runtime had read as octets
+  # (#1084: `do "./u8.pl"` measured length("’") as 3, where perl and PCL's
+  # own `require` say 1).  utf8::downgrade(…, FAIL_OK) asks the real
+  # question — is every character a byte value? — and yields the octet string
+  # when it is; a genuinely decoded source (any character above 255) fails it
+  # and is left alone, as before.
+  return $src unless defined $src && $src =~ /\buse\s+utf8\b/;
+  my $copy = $src;
+  return $src unless utf8::downgrade($copy, 1);
+  utf8::decode($copy) and return $copy;     # leaves $src on invalid bytes
   return $src;
 }
 
