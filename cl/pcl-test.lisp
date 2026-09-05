@@ -23,8 +23,8 @@
    once and write the string's UTF-8 encoding, which is what %p-out-string
    does; the handler is the backstop for the format directives' own output.
    It replaced 25 direct `format t` calls: one writer, not twenty-five."
-  (%p-with-wide-upgrade "print"
-                        (%p-out-string (apply #'format nil control args) *standard-output* "print")))
+  (%p-with-wide-upgrade
+    (%p-out-string (apply #'format nil control args) *standard-output* "print")))
 
 ;;; Test state
 (defvar *test-count* 0)
@@ -1210,7 +1210,7 @@
    applies to a perl `print` does not reach it — and since #1115 STDOUT is a
    BYTE handle, one non-ASCII test description would signal inside the write and
    take the whole file with it."
-  (%p-with-wide-upgrade "print" (%p-load-forms-with-recovery path)))
+  (%p-with-wide-upgrade (%p-load-forms-with-recovery path)))
 
 (defun %p-load-forms-with-recovery (path)
   (with-open-file (stream path :direction :input :external-format :utf-8)

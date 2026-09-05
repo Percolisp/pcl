@@ -1914,41 +1914,42 @@
    encode`.  Reached through FIND-SYMBOL because SB-IMPL is package-locked
    against interning, and looked up once rather than once per character.")
 
-(defvar *p-wide-char-warned* nil
-  "True once the current write has already warned, so the warning is issued
-   once per WRITE and not once per character — perl warns once per printed
-   ARGUMENT, and one argument holding two wide characters warns once (probed).")
-
 (defun %p-utf8-octets (s)
   "S re-expressed as OCTETS: each byte of S's UTF-8 encoding as one character
    0–255.  This is the form a byte handle can carry, and it is what perl puts
    there for a wide character."
   (map 'string #'code-char (sb-ext:string-to-octets s :external-format :utf-8)))
 
-(defun %p-wide-char-upgrade (c site)
+(defun %p-wide-char-upgrade (c)
   "STREAM-ENCODING-ERROR handler: put the offending character's UTF-8 octets in
-   its place and carry on, warning once per write.  DECLINES (returns, leaving
-   the condition to travel) when SBCL offers no replacement restart — the
-   caller's own guard then answers as it always did, rather than this pretending
-   to have handled it."
+   its place and carry on.  DECLINES (returns, leaving the condition to travel)
+   when SBCL offers no replacement restart — the caller's own guard then answers
+   as it always did, rather than this pretending to have handled it.
+
+   IT REPAIRS AND SAYS NOTHING, deliberately.  An earlier version warned here
+   and INFINITE-LOOPED: the harness binds *error-output* to a line-atomic Gray
+   stream, so the warning went into the same pending buffer as the text that had
+   just failed to encode, and flushing that buffer signalled on the same
+   character again (measured — `uni/lex_utf8.t` died at
+   SB-KERNEL:*MAXIMUM-ERROR-DEPTH*, 928 rows of `uni/fold.t` with it).  The
+   warning belongs to %p-out-string, which knows the write is a perl `print`
+   and decides the WHOLE string before handing it over; anything that reaches
+   this handler instead did not come through there — a PCL diagnostic, a TAP
+   line, a backtrace — and perl would not be warning about those."
   (let ((r (and *p-output-replacement-restart*
                 (find-restart *p-output-replacement-restart* c))))
     (when r
-      (let ((code (sb-int:character-encoding-error-code c)))
-        (unless *p-wide-char-warned*
-          ;; Set BEFORE the warn: a $SIG{__WARN__} handler may itself print,
-          ;; and this handler is still established around that write.
-          (setf *p-wide-char-warned* t)
-          (p-warn (format nil "Wide character in ~A" site)))
-        (invoke-restart r (%p-utf8-octets (string (code-char code))))))))
+      (invoke-restart r (%p-utf8-octets
+                         (string (code-char
+                                  (sb-int:character-encoding-error-code c))))))))
 
-(defmacro %p-with-wide-upgrade (site &body body)
-  "Run BODY under perl's wide-character-on-a-byte-handle rule (see above).
-   SITE names the operator for the warning text (`print`, `printf`, `say`)."
-  `(let ((*p-wide-char-warned* nil))
-     (handler-bind ((sb-int:stream-encoding-error
-                     (lambda (%c) (%p-wide-char-upgrade %c ,site))))
-       ,@body)))
+(defmacro %p-with-wide-upgrade (&body body)
+  "Run BODY with the byte-handle repair established: a character a byte handle
+   cannot encode is replaced by its UTF-8 octets instead of signalling (see
+   %p-wide-char-upgrade — it repairs and says nothing).  Cheap: the handler is
+   never entered until such a character actually meets such a handle."
+  `(handler-bind ((sb-int:stream-encoding-error #'%p-wide-char-upgrade))
+     ,@body))
 
 (defun %p-wide-char-p (s)
   "True when S holds a character above 255 — one with no OCTET representation.
@@ -2013,8 +2014,8 @@
    Pl/t/transpile-test-07.t and five of Pl/t/moo-01.t, in files that had nothing
    to do with I/O.  Perl's own answer to a wide character on a byte handle is
    to warn and write UTF-8, and that is what these lines now get."
-  (%p-with-wide-upgrade "print"
-                        (%p-out-string (apply #'format nil control args) *error-output* "print"))
+  (%p-with-wide-upgrade
+   (%p-out-string (apply #'format nil control args) *error-output* "print"))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -2369,8 +2370,9 @@
 (defmacro %p-guarded-write (site &body body)
   "Run BODY — a write to a filehandle — and answer the way PERL answers a write
    the OS refuses: FALSE with $! set.  Never a CL condition (task #590).
-   SITE names the operator, for the wide-character warning %p-with-wide-upgrade
-   issues; the two wrappers are one macro because every perl write wants both.
+   SITE names the operator for the wide-character warning %p-out-string issues;
+   the write guard and the byte-handle repair are one macro because every perl
+   write wants both.
 
    SBCL signals `stream-error` for a refused write, and BUFFERING decides WHEN:
    two bytes onto a read-only descriptor are swallowed and the EBADF surfaces at
@@ -2385,12 +2387,16 @@
    `type-error` — princ to a stream that is not an output stream — never gets
    here, because %p-out-fh-or-fail answers false for such a handle first.
 
-   ORDER MATTERS: the wide-character handler is established INSIDE this
+   ORDER MATTERS: the byte-handle repair is established INSIDE this
    handler-case, so it sees a stream-encoding-error (a stream-error subtype)
-   first and turns it into perl's warn-and-upgrade.  The other way round the
-   encoding error would be swallowed as a refused write and the print would
-   silently answer false."
-  `(handler-case (%p-with-wide-upgrade ,site ,@body)
+   first and replaces the character.  The other way round the encoding error
+   would be swallowed as a refused write and the print would silently answer
+   false.  SITE is unused by the guard itself — %p-out-string, which the print
+   family calls, is what warns — but every write site names it, so it stays in
+   the signature rather than becoming a thing a caller has to remember not to
+   pass."
+  (declare (ignorable site))
+  `(handler-case (%p-with-wide-upgrade ,@body)
      (stream-error () (%pcl-save-errno) *p-undef*)))
 
 (defvar |$\|| (make-p-box
@@ -12134,8 +12140,8 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
            ;; STDERR is a byte handle like any other since #1115, so a warning
            ;; carrying a wide character takes perl's upgrade here too — without
            ;; it SBCL would signal inside the warn and take the program with it.
-           (%p-with-wide-upgrade "warn"
-                                 (write-string s *error-output*))
+           (%p-with-wide-upgrade
+            (write-string s *error-output*))
            (force-output *error-output*)))))))
 
 ;;; Exception condition for object-based die
@@ -13051,7 +13057,9 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
    passes (read under the :invert readtable, `STDOUT` is |stdout| — hence
    string-equal) and the symbolic-filehandle box (`my $x = \"STDOUT\";
    open($x,…)` opens the STDOUT glob in perl), keyed exactly as %p-install-fh
-   keys such a box."
+   keys such a box.  NOT a typeglob and not a raw name string, though both NAME
+   a standard handle — see #1115's note on %p-binmode-impl, which decides by
+   DESCRIPTOR for exactly that reason (task filed separately)."
   (let ((name (cond ((and fh (symbolp fh)) (symbol-name fh))
                     ((and (p-box-p fh) (stringp (p-box-value fh))
                           (plusp (length (p-box-value fh))))
@@ -14285,6 +14293,20 @@ buffer's fill-pointer; everything else falls back to file-length."
   "Perl sysseek — bareword filehandle is auto-quoted."
   `(%p-sysseek-impl (%p-fh-arg ,fh) ,@args))
 
+(defun %p-std-descriptor (stream)
+  "0/1/2 when STREAM sits on a STANDARD descriptor, else nil.
+
+   THE DESCRIPTOR IS THE DEFINITIVE PROPERTY, and asking the DESIGNATOR is not
+   enough: `binmode *STDOUT, ':utf8'` (t/uni/fold.t line 21) hands over a
+   TYPEGLOB, which %p-std-slot does not read as a standard-handle name, so the
+   binmode went down the ordinary rebuild path and CLOSED descriptor 1 — every
+   later print died `#<fd-stream for \"descriptor 1\"> is closed` and the file
+   lost all 928 of its rows.  A stream on 0/1/2 is a standard handle whatever
+   named it, and it must be re-pointed by %p-std-rebuild (which owns the CL
+   globals and does not close) rather than dup'd and closed."
+  (let ((fd (and (sb-sys:fd-stream-p stream) (sb-sys:fd-stream-fd stream))))
+    (and fd (integerp fd) (<= 0 fd 2) fd)))
+
 (defun %p-rebuild-fd-stream (fh stream ef)
   "Re-open the ordinary (non-standard) handle FH's STREAM with external format
    EF and install the replacement.  Returns the new stream.
@@ -14356,7 +14378,7 @@ buffer's fill-pointer; everything else falls back to file-length."
          (cond
            ((not (sb-sys:fd-stream-p target)) t)
            ((eq (stream-external-format target) ef) t)
-           (t (let ((std (%p-std-slot fh)))
+           (t (let ((std (%p-std-descriptor target)))
                 (cond
                   (std (ignore-errors (finish-output target))
                        (setf (svref *p-std-efs* std) ef)
