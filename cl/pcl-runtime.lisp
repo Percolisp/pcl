@@ -12129,17 +12129,34 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
              s
              (format nil "~A at ~A.~%" s at-loc)))))))
 
+(defvar *p-in-warn-handler* nil
+  "True while a $SIG{__WARN__} handler is running.  PERL DOES NOT RE-ENTER THE
+   HANDLER for a warning raised inside it — probed 5.40.3:
+
+       $SIG{__WARN__} = sub { $n++; warn \"nested: $_[0]\" };  warn \"outer\\n\";
+
+   calls the handler ONCE and the nested `warn` takes the DEFAULT action (the
+   text reaches stderr).  Without that rule the commonest handler idiom in
+   perl's own suite — `… else { warn $_[0] }`, which is how perl-tests/substr.t
+   opens — is an INFINITE LOOP: handler → warn → handler → …  It blew the
+   binding stack and hung the whole file (351 rows → 0, TIMEOUT), and #1115 is
+   what made it reachable, by giving PCL its first warning a handler can
+   provoke (`Wide character in print`).")
+
 (defun p-warn (&rest raw-args)
   "Perl warn - respects $SIG{__WARN__} handler.
    Accepts an optional (:loc \"FILE line N\") marker from codegen for the
-   ' at FILE line N.' suffix on a message that doesn't end in a newline."
+   ' at FILE line N.' suffix on a message that doesn't end in a newline.
+   A warning raised INSIDE the handler skips it and takes the default action,
+   which is perl's own rule — see *p-in-warn-handler*."
   (multiple-value-bind (args loc) (%p-extract-loc raw-args)
     (let* ((msg (p-warn-build-message args loc))
-           (handler (gethash "__WARN__" %SIG)))
+           (handler (and (not *p-in-warn-handler*) (gethash "__WARN__" %SIG))))
       (cond
         ;; Custom handler: call with message as argument ($_[0])
         ((and handler (functionp (unbox handler)))
-         (let ((boxed (if (p-box-p msg) msg (make-p-box msg))))
+         (let ((boxed (if (p-box-p msg) msg (make-p-box msg)))
+               (*p-in-warn-handler* t))
            (funcall (unbox handler) boxed)))
         ;; "IGNORE": suppress warning
         ((and handler (stringp (unbox handler))
@@ -12148,11 +12165,11 @@ Used e.g. by p-skip to implement Test::More's skip() which calls (last SKIP)."
         ;; Default: print to *error-output*
         (t
          (let ((s (if (p-box-p msg) (to-string (unbox msg)) (format nil "~A" msg))))
-           ;; STDERR is a byte handle like any other since #1115, so a warning
-           ;; carrying a wide character takes perl's upgrade here too — without
-           ;; it SBCL would signal inside the warn and take the program with it.
-           (%p-with-wide-upgrade
-            (write-string s *error-output*))
+           ;; Through %p-out-string, so a warning carrying a wide character
+           ;; comes out as its UTF-8 encoding (perl's answer) rather than the
+           ;; byte format's replacement.  SITE nil: this IS the warn, so it
+           ;; must not raise another one.
+           (%p-out-string s *error-output* nil)
            (force-output *error-output*)))))))
 
 ;;; Exception condition for object-based die

@@ -272,4 +272,37 @@ PL
        q{#1222 `no open` does NOT end the region — perl's open.pm has no unimport});
 }
 
+# --- #1223: a $SIG{__WARN__} handler is not RE-ENTERED ---------------------
+#
+# perl calls the handler ONCE for one warning, and a `warn` raised inside it
+# takes the DEFAULT action (probed 5.40.3).  Without the rule the commonest
+# handler idiom in perl's own suite — `… else { warn $_[0] }`, which is how
+# perl-tests/substr.t opens — is an infinite loop: it blew the binding stack and
+# hung that whole file (351 rows -> 0, TIMEOUT) as soon as #1115 gave PCL its
+# first warning a handler could provoke.
+{
+    my $once = run_cl(<<'PL');
+my $n = 0;
+$SIG{__WARN__} = sub { $n++; die "RUNAWAY\n" if $n > 3; warn "nested: $_[0]" };
+warn "outer\n";
+print "handler calls: $n\n";
+PL
+    # BOTH halves of perl's rule, and order-independent because run_cl merges
+    # stderr (unbuffered) into a block-buffered stdout: the handler runs ONCE,
+    # and the `warn` it raised took the DEFAULT action, so its text is there.
+    like($once, qr/^handler calls: 1$/m,
+         '#1223 a __WARN__ handler is called ONCE, not re-entered');
+    like($once, qr/^nested: outer$/m,
+         '#1223 the warn raised INSIDE the handler takes the default action');
+
+    my $wide = run_cl(<<'PL');
+my $n = 0;
+$SIG{__WARN__} = sub { $n++; die "RUNAWAY\n" if $n > 3; print "H: ok\n" };
+print "W: \x{2019}\n";
+print "handler calls: $n\n";
+PL
+    like($wide, qr/^handler calls: 1$/m,
+         '#1223 the rule holds for the wide-character warning #1115 introduced');
+}
+
 done_testing();
