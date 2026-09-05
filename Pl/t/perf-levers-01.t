@@ -21,6 +21,8 @@
 #     dereference resolves to its symbol ONCE per site.
 #   numeric-slot (task #1183, Kind-A): a raw slot every one of whose writes
 #     stores a compile-time NUMBER drops the compound-assign overload guard.
+#   foreach-arrays (task #1184, Kind-A): `for my $x (@a, @b)` over BARE named
+#     arrays iterates each in turn, with no flattened temporary.
 #   the array-assignment BULK FILL (task #1181, runtime only — no PCL_OPT name
 #     because there is no emission to switch): `@x = LIST` is ONE block copy
 #     when every element would be stored as itself.
@@ -40,7 +42,7 @@ my $runtime = "$project_root/cl/pcl-runtime.lisp";
 my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
-plan tests => 38;
+plan tests => 54;
 
 sub write_pl {
     my ($src) = @_;
@@ -350,6 +352,65 @@ PERL
     is(run_with($ns_run, undef), $want_ns,
        'numeric-slot: every route an OBJECT reaches a raw slot by is perl 5.40.3\'s answer');
     is(run_with($ns_run, '-numeric-slot'), $want_ns, '-numeric-slot: the same answers');
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# foreach-arrays — task #1184 (the multi-array run, no flattened temporary)
+# ─────────────────────────────────────────────────────────────────────────────
+# Each case is its OWN sub so the #1140 array facts are scoped to it: an
+# `escapes` anywhere in a region disqualifies the array for every loop in it,
+# which is the licence working, not the emission missing.
+{
+    my $fa = write_pl(<<'PERL');
+use strict; use warnings;
+sub c1  { my @a=(1,2,3); my @b=(4,5); my $s=0; for my $x (@a,@b) { $s+=$x } return $s }
+sub c2  { my @a=(1,2,3); my @e=(); my @b=(4,5); my $s=0; for my $x (@a,@e,@b) { $s+=$x } return $s }
+sub c3  { my @e=(); my @f=(); my $s=0; for my $x (@e,@f) { $s+=$x } return "$s" }
+sub c5  { my @a=(1,2,3); my @b=(4,5); my $s=0; OUT: for my $x (@a,@b) { next OUT if $x==2; last OUT if $x==5; $s+=$x } return $s }
+sub c7  { my @a=(1,2,3); my @b=(4,5); my $s=0; my $r=0; for my $x (@a,@b) { $r++; if ($x==3 && $r<10) { redo } $s+=$x } return "$s $r" }
+sub c8  { my @a=(1,2,3); my @b=(4,5); my $s=0; for my $x (@a,@b) { $s+=$x } continue { $s+=100 } return $s }
+sub c9  { my @a=(1,2,3); my @b=(4,5); my $s=0; for my $x (@a[0,1],@b) { $s+=$x } return $s }
+sub c10 { my @a=(1,2,3); my $ar=\@a; my @b=(4,5); my $s=0; for my $x (@$ar,@b) { $s+=$x } return $s }
+sub c11 { my @a=(1,2,3); my $s=0; for my $x (@a,99) { $s+=$x } return $s }
+sub c13 { my @w=(1,2,3); my @v=(4,5); my $s=0; for my $x (@w,@v) { $w[2]=99; $s+=$x } return "$s @w" }
+sub c14 { my @a=(1,2,3); my @b=(4,5); my @c=(6); my $s=0; for my $x (@a,@b) { for my $y (@b,@c) { $s+=$x*$y } } return $s }
+sub c15 { my @p=(1,2); my @q=(3,4); for my $x (@p,@q) { $x*=10 } return "@p @q" }
+sub c16 { my @c=(6); my %h=(k=>1); my $s=0; for my $x (@c,%h) { $s += ($x=~/^\d+$/ ? $x : 0) } return $s }
+sub c17 { my @a=(1,2,3); my @b=(4,5); my $s=0; for my $x (@a,@b) { push @a, 9 if @a < 5; $s+=$x } return "$s ".scalar(@a) }
+print join(' ', c1(),c2(),c3(),c5(),c7(),c8(),c9(),c10(),c11(),c13(),c14(),c15(),c16(),c17()), "\n";
+PERL
+    my $fa_def = transpile_with($fa, undef);
+    # A `(vector @a @b)` list plus `:arrays t` — the printer may wrap the keys
+    # onto their own lines, so match with \s+.
+    my $runs = () = ($fa_def =~ /\(p-foreach-raw \(\$\w+ \(vector [^)]*\)\)\s+(?::label\s+\S+\s+)?:arrays\s+t\b/g);
+    is($runs, 8, 'foreach-arrays: eight licensed loops take the run (c1 c2 c3 c5 c7 c8 and c14\'s two nested ones)')
+      or diag("runs=$runs");
+    like($fa_def, qr/\(p-foreach-raw \(\$x \(vector \@a \@b\)\)\s+:arrays\s+t/,
+         'foreach-arrays: two bare arrays');
+    like($fa_def, qr/\(p-foreach-raw \(\$x \(vector \@a \@e \@b\)\)\s+:arrays\s+t/,
+         'foreach-arrays: three, one of them empty');
+    like($fa_def, qr/\(p-foreach-raw \(\$x \(vector \@a \@b\)\)\s+:label\s+OUT\s+:arrays\s+t/,
+         'foreach-arrays: a LABELLED loop keeps its label and takes the run');
+    # NEGATIVES — every one of them is a shape the run must not take.
+    like($fa_def, qr/\(p-aslice \@a 0 1\)/,      'foreach-arrays NEGATIVE: a SLICE is not a bare array');
+    like($fa_def, qr/p-flatten-args \(list \(p-cast-\@ \$ar\)/, 'foreach-arrays NEGATIVE: a DEREF is not a bare array');
+    like($fa_def, qr/p-flatten-args \(list \@a 99\)/,           'foreach-arrays NEGATIVE: a scalar in the list');
+    like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@w \@v\)/, 'foreach-arrays NEGATIVE: an array WRITTEN in the body (#1140)');
+    like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@p \@q\)/, 'foreach-arrays NEGATIVE: a WRITTEN loop variable declines the raw arm outright');
+    like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@c %h\)/,  'foreach-arrays NEGATIVE: a HASH in the list');
+    like($fa_def, qr/\(p-foreach \(\$x \(p-flatten-args \(list \@a \@b\)\)\)\s+:my\s+t\s+\(p-if\s+\(p-< \@a 5\)/,
+         'foreach-arrays NEGATIVE: a push into a source array (#1140 written_in) — and the BOXED foreach, since the write also revokes the read-only arm');
+    # NEGATIVE — the switch.
+    my $fa_off = transpile_with($fa, '-foreach-arrays');
+    unlike($fa_off, qr/:arrays/, '-foreach-arrays: no run anywhere');
+    like($fa_off, qr/\(p-foreach-raw \(\$x \(p-flatten-args \(list \@a \@b\)/,
+         '-foreach-arrays: the flattened list is back, still the raw arm');
+    unlike(transpile_with($fa, 'none'), qr/:arrays/, 'PCL_OPT=none: no run either');
+    # RUNTIME: perl 5.40.3's answers, unchanged by the switch.  `last`, `next`,
+    # `redo` and a `continue` block all cross an array boundary here.
+    my $want_fa = "15 15 0 8 15 12 515 12 15 105 111 1 2 99 225 10 20 30 40 7 15 5\n";
+    is(run_with($fa, undef), $want_fa, 'foreach-arrays: fourteen loop shapes are perl 5.40.3\'s answers');
+    is(run_with($fa, '-foreach-arrays'), $want_fa, '-foreach-arrays: the same answers');
 }
 
 # The registry's own contract: the name is known, and a typo still dies.

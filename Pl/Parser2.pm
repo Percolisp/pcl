@@ -10466,6 +10466,25 @@ sub _lower_compound {
         last;
       }
     }
+    # #1184 (Kind-A `foreach-arrays`): when the list is nothing but BARE named
+    # arrays and the loop already qualifies for the read-only arm, iterate them
+    # IN TURN instead of flattening them into a temporary first — the
+    # flattening is 88 % of the `feread2` bench row.  The licence needs no new
+    # fact: `$ro` above is exactly the two conjuncts (the loop variable is
+    # read-only, and every array named in the list neither escapes nor is
+    # written in this body), and `_foreach_bare_arrays` adds only the SHAPE
+    # test.  Emitted as `(vector @a @b)` plus `:arrays t`, so the run's sources
+    # are evaluated once at loop entry.
+    my @arrays;
+    if ($ro && !defined $to_form && Pl::Passes::enabled('foreach-arrays')) {
+      @arrays = Pl::Parser::_foreach_bare_arrays(\@list_parts);
+      # Only arrays this segment DECLARED have facts; the conjunct above
+      # skipped any name with no entry, so re-assert it here rather than
+      # licensing the run on an unmeasured array.
+      @arrays = () if grep { !$vi->{$_} } @arrays;
+    }
+    my @array_keys = @arrays ? (':arrays', 't') : ();
+    $list_form = ['vector', map { cl_sym($_) } @arrays] if @arrays;
     # A foreach's `continue` block reads the loop variable, so it lives INSIDE
     # the per-iteration binding and is not a post-form the dynamic-exit driver
     # can re-enter: decline the licence rather than run a caught `next`
@@ -10477,7 +10496,7 @@ sub _lower_compound {
          ['list', $cl_name, $from_form, $to_form],
          _label_keys($label), @dyn, @my_keys, @body, @cont]
       : [($ro ? 'p-foreach-raw' : 'p-foreach'), ['list', $cl_name, $list_form],
-         _label_keys($label), @dyn, @my_keys, @body, @cont];
+         _label_keys($label), @dyn, @array_keys, @my_keys, @body, @cont];
   }
 
   # `try BLOCK catch (VAR) BLOCK [finally BLOCK]` — perl 5.34's feature 'try'.

@@ -13,10 +13,10 @@ family have no textual `defun` anywhere).  The semantics of each op are its
 docstring in `cl/pcl-runtime.lisp`; the family RULES are `docs/ir-spec.md` §10
 and are quoted below per family.
 
-* names exported: **684**
+* names exported: **685**
 * families: **19** with an ir-spec §10 rule, **34** without one
-* with a machine-readable `Contract:` tail: **57** of 684
-* UNCLASSIFIED (no family rule matches): **0**
+* with a machine-readable `Contract:` tail: **58** of 685
+* UNCLASSIFIED (no family rule matches): **1**
 
 The contract columns come from a final `Contract:` paragraph of the op's own
 docstring — the runtime is the spec, so the machine-readable form lives where
@@ -136,31 +136,31 @@ ir-spec §10 row **compound assignment** — read-modify-write; boxed macros sto
 | name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
 |---|---|---|---|---|---|---|---|---|---|
 | `p-%=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-%=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-%=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-**=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-**=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-**=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-*=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-*=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-*=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-.=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-.=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-.=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-//=` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-/=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-/=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-/=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-<<=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-<<=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-<<=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p->>=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p->>=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p->>=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-and-assign` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-bit-and=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-bit-and=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-bit-and=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-bit-or=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-bit-or=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-bit-or=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-bit-xor=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-bit-xor=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-bit-xor=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-decf` | macro | `(place &optional (delta 1))` | — | — | — | — | — | — | — |
-| `p-decf-raw` | macro | `(var &optional (delta 1))` | — | — | — | — | — | — | — |
+| `p-decf-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-incf` | macro | `(place &optional (delta 1))` | — | — | — | — | — | — | — |
-| `p-incf-raw` | macro | `(var &optional (delta 1))` | — | — | — | — | — | — | — |
+| `p-incf-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 | `p-or-assign` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-str-bit-and=` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-str-bit-and=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
@@ -169,7 +169,7 @@ ir-spec §10 row **compound assignment** — read-modify-write; boxed macros sto
 | `p-str-bit-xor=` | macro | `(place value)` | — | — | — | — | — | — | — |
 | `p-str-bit-xor=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
 | `p-str-x=` | macro | `(place value)` | — | — | — | — | — | — | — |
-| `p-str-x=-raw` | macro | `(var value)` | — | — | — | — | — | — | — |
+| `p-str-x=-raw` | macro | `(var &rest %args)` | — | — | — | — | — | — | — |
 
 ## context-frame (9)
 
@@ -935,9 +935,9 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-backslash-sub` | function | `(sym)` | — | — | — | — | — | — | — |
 | `p-backslash-sub-ref` | function | `(val)` | — | — | — | — | — | — | — |
 | `p-box-for-local` | function | `(value)` | — | — | — | — | — | — | — |
-| `p-cast-$` | function | `(val)` | — | — | — | — | — | — | — |
-| `p-cast-%` | function | `(val)` | — | — | — | — | — | — | — |
-| `p-cast-@` | function | `(val)` | — | — | — | — | — | — | — |
+| `p-cast-$` | function | `(val &optional site)` | — | — | — | — | — | — | — |
+| `p-cast-%` | function | `(val &optional site)` | — | — | — | — | — | — | — |
+| `p-cast-@` | function | `(val &optional site)` | — | — | — | — | — | — | — |
 | `p-get-coderef` | function | `(name-val)` | — | — | — | — | — | — | — |
 | `p-isweak` | function | `(ref)` | — | — | — | — | — | — | — |
 | `p-pos-lvalue-cell` | function | `(var)` | — | — | — | — | — | — | — |
@@ -1099,3 +1099,13 @@ ir-spec §10 row **string compare** — stringify; return `1`/`""`
 | `p-getpwuid` | function | `(uid &key (wantarray (eq *wantarray* t)))` | — | — | — | — | — | — | — |
 | `p-setgrent` | function | `(&key (wantarray (eq *wantarray* t)))` | — | — | — | — | — | — | — |
 | `p-setpwent` | function | `(&key (wantarray (eq *wantarray* t)))` | — | — | — | — | — | — | — |
+
+# UNCLASSIFIED
+
+## UNCLASSIFIED (1)
+
+*No ir-spec §10 row and no note.*
+
+| name | kind | lambda list | ctx | coerce | magic | dies | dynamic | phase | host |
+|---|---|---|---|---|---|---|---|---|---|
+| `p-symref-site` | macro | `nil` | insensitive | none | none | no | no | no | none |

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-740
+;;; pcl: pipeline=v2 gen=v2-750
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -85,7 +85,7 @@
   (p-raw-params (($class :scalar))
     (block nil
       (p-void-ctx (p-if (p-str-eq $class "UNIVERSAL") (p-return 1))
-        (p-foreach-raw ($u (p-cast-@ "UNIVERSAL::ISA"))
+        (p-foreach-raw ($u (p-cast-@ "UNIVERSAL::ISA" (p-symref-site)))
           :my
           t
           (p-if (p-str-eq $u $class) (p-return 1)))

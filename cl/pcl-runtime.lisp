@@ -10986,20 +10986,24 @@ local transfer inside this catch.
   (let* ((label (when (eq (first body-and-keys) :label)
                   (second body-and-keys)))
          (rest (if label (cddr body-and-keys) body-and-keys))
-         (myp nil) (dynp nil)
+         (myp nil) (dynp nil) (arraysp nil)
          (continue-form nil)
          body pos)
-    (loop while (member (first rest) '(:my :dyn))
+    (loop while (member (first rest) '(:my :dyn :arrays))
           do (case (first rest)
-               (:my  (setf myp  (second rest)))
-               (:dyn (setf dynp (second rest))))
+               (:my     (setf myp     (second rest)))
+               (:dyn    (setf dynp    (second rest)))
+               ;; :arrays — the foreach list is a `(vector @a @b)` of BARE
+               ;; named arrays to iterate in turn, with no flattened temporary
+               ;; (task #1184; see %p-make-array-run).
+               (:arrays (setf arraysp (second rest))))
           (setf rest (cddr rest)))
     (setf body rest
           pos (position :continue rest))
     (when pos
       (setf continue-form (nth (1+ pos) rest))
       (setf body (subseq rest 0 pos)))
-    (values label continue-form body myp dynp)))
+    (values label continue-form body myp dynp arraysp)))
 
 ;;; Helper: generate the inner iteration body structure for Perl loops.
 ;;; Handles labeled (catch/throw for next/redo across loop boundaries)
@@ -11222,13 +11226,75 @@ container.  Do not widen this arm without asking that question again."
      UNDECLARED loop variable."
     (and (symbolp var) (nth-value 1 (macroexpand-1 var env)))))
 
+;;; ── THE ARRAY RUN: `for my $x (@a, @b)` without a flattened temporary ──────
+;;; (Task #1184, the Kind-A `foreach-arrays` emission.)  A foreach list that is
+;;; nothing but BARE named arrays iterates each of them in turn; the general
+;;; path builds a fresh vector of every element first, which for `feread2`
+;;; (2 x 500 elements, 30k repeats) is **88 %** of the row — the loop itself is
+;;; the other 12 %.
+;;;
+;;; WHAT IT SNAPSHOTS, and why that is exactly what the flattener does: the
+;;; ELEMENT-STORAGE vector and the LENGTH of each source, once, at loop entry.
+;;; So a `push` during the loop does not extend the iteration and a shrink does
+;;; not shorten it — which is today's multi-array behaviour, not a change.
+;;; (The SINGLE-array path iterates the live array and is untouched.)  Reading
+;;; the captured data vector also means a reallocation under a `push` cannot
+;;; make the loop read freed storage; it reads the snapshot, as before.
+;;;
+;;; THE LICENCE IS THE COMPILER'S: this shape is emitted only for a loop whose
+;;; variable carries the read-only verdict AND every named array satisfies the
+;;; #1140 facts (not escaping, not written in the body) — the same two
+;;; conjuncts p-foreach-raw already needs, no new fact.
+(defstruct (p-array-run (:constructor %p-make-run (data ends total)))
+  "The sources of a `:arrays` foreach, snapshotted at loop entry: DATA holds
+   one element-storage simple-vector per source, ENDS the cumulative element
+   count after each, TOTAL the sum."
+  (data #() :type simple-vector)
+  (ends #() :type simple-vector)
+  (total 0   :type fixnum))
+
+(defun %p-make-array-run (vecs)
+  "Build the run over VECS, the `(vector @a @b)` the emitter evaluates once.
+   A source that is not the plain element-storage shape is COERCED to a simple
+   vector rather than special-cased at every access; a source that is not a
+   vector at all is a compiler self-inconsistency and dies naming it (rule 12)
+   — the emission is licensed only for bare named arrays."
+  (let* ((n (length vecs))
+         (data (make-array n))
+         (ends (make-array n))
+         (total 0))
+    (declare (type fixnum total))
+    (dotimes (k n)
+      (let ((v (aref vecs k)))
+        (unless (and (vectorp v) (not (stringp v)))
+          (error "PCL internal: p-foreach :arrays over a ~A — the `foreach-arrays'~
+                  emission is licensed only for bare named arrays" (type-of v)))
+        (incf total (length v))
+        (setf (svref data k) (or (%p-vec-data v) (coerce v 'simple-vector))
+              (svref ends k) total)))
+    (%p-make-run data ends total)))
+
+(declaim (inline %p-run-elt-raw))
+(defun %p-run-elt-raw (run i)
+  "Element I of RUN, as it stands — the run's %p-foreach-elt-raw.  The source
+   is found by scanning ENDS, which is 1-2 fixnum compares for the two- and
+   three-array lists this emission exists for."
+  (declare (type fixnum i))
+  (let ((ends (p-array-run-ends run))
+        (k 0))
+    (declare (type fixnum k))
+    (loop while (>= i (the fixnum (svref ends k))) do (incf k))
+    (svref (svref (p-array-run-data run) k)
+           (- i (if (zerop k) 0 (the fixnum (svref ends (1- k))))))))
+
 (defun %expand-foreach (rawp var list body-and-keys env)
   "Shared expander for p-foreach / p-foreach-raw.  RAWP selects the loop-var
 binding ONLY: %p-foreach-elt (alias, promotes) vs %p-foreach-elt-raw (the
 slot as it stands).  Everything else — the flatten, the tagbody, the label
 catch, the package-cell localization — is one body, so the two loops cannot
 drift apart the way two copies would."
-  (multiple-value-bind (label continue-form body myp dynp) (parse-loop-keys body-and-keys)
+  (multiple-value-bind (label continue-form body myp dynp arraysp)
+      (parse-loop-keys body-and-keys)
     ;; A `continue` block sits INSIDE the per-iteration binding here (it reads
     ;; the loop variable), so it is not a post-form the driver can re-enter —
     ;; the compiler therefore never licenses the frame for a foreach with one,
@@ -11236,6 +11302,12 @@ drift apart the way two copies would."
     ;; (rule 12), not a quietly different loop.
     (when (and dynp continue-form)
       (error "p-foreach: :dyn with a :continue block — see %p-loop-driver"))
+    ;; `:arrays` binds the slot AS IT STANDS, which is the read-only verdict's
+    ;; own licence; with a promoting binding the run would have to write back
+    ;; into a source it deliberately only reads.  Its arrival on the boxed
+    ;; macro is a compiler self-inconsistency (rule 12).
+    (when (and arraysp (not rawp))
+      (error "p-foreach: :arrays without the read-only (raw) binding"))
     (let* ((block-name (or label (gensym "FOREACH")))
            (last-tag (when label (%pcl-loop-tag "LAST" label)))
            (vec (gensym))
@@ -11243,19 +11315,22 @@ drift apart the way two copies would."
            (old (gensym "OLD"))
            (i (gensym))
            (cellp (and (not myp) (%p-cell-loop-var-p var env)))
-           (elt-fn (if rawp '%p-foreach-elt-raw '%p-foreach-elt))
+           (elt-fn (if arraysp '%p-run-elt-raw
+                       (if rawp '%p-foreach-elt-raw '%p-foreach-elt)))
            (iter-forms (cons `(incf ,i)
                              (cons (make-loop-iteration-body label body)
                                    (when continue-form (list continue-form))))))
       `(block ,block-name
          (let* ((,raw (let ((*wantarray* t)) ,list))  ; list in list-context; body keeps outer context
-                (,vec (%p-flatten-for-list ,raw))
+                (,vec ,(if arraysp `(%p-make-array-run ,raw) `(%p-flatten-for-list ,raw)))
                 (,i 0)
                 ,@(when cellp `((,old (sb-ext:symbol-global-value ',var)))))
            ,(let* ((inner (%p-loop-driver
                            dynp block-name
                            (lambda (b)
-                             `(when (>= ,i (length ,vec)) (return-from ,b "")))
+                             `(when (>= ,i ,(if arraysp `(p-array-run-total ,vec)
+                                                `(length ,vec)))
+                                (return-from ,b "")))
                            (if cellp
                                `(progn
                                   (setf (sb-ext:symbol-global-value ',var)
@@ -18175,7 +18250,13 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defmacro p-symref-site ()
   "The per-call-site cache cell the `symref-const` emission passes to a cast:
    `(p-cast-$ \"main::g\" (p-symref-site))`.  One fresh cell per EXPANSION,
-   i.e. per emitted site, evaluated once when the site's code is loaded."
+   i.e. per emitted site, evaluated once when the site's code is loaded.
+
+   FOR A PORT: this is a pure MEMO — a backend that resolves symbolic names
+   some other way may expand it to any per-site mutable cell, or ignore the
+   argument entirely and answer the cast from the name (which is what
+   `PCL_OPT=-symref-const` emits).  It carries no semantics of its own.
+   Contract: ctx=insensitive coerce=none magic=none dies=no dynamic=no phase=no host=none"
   '(load-time-value (make-array 3 :initial-element nil) nil))
 
 (defun %p-symref-site-resolve (site name-str sigil create)

@@ -183,6 +183,14 @@ my @benches = (
   # elements, same 30k outer repeats) so the two rows subtract cleanly: if
   # this row is near feread's ratio the flattener is NOT the cost.
   ['feread2',   "$HN my \@a = (1..500); my \@b = (501..1000); my \$s=0; for (1..\$n) { for my \$x (\@a, \@b) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
+  # The same 1000 elements over THREE arrays (task #1184, s470bn): the control
+  # that says whether the multi-array loop's cost scales with the ARRAY COUNT
+  # or only with the element count.  Under the flattening path it scaled with
+  # neither visibly (the flatten walks the elements either way); under the
+  # `foreach-arrays` run it must stay level with feread2, because the extra
+  # array costs one more entry in the run's ends table and nothing per element.
+  # Matched to feread and feread2 on both axes so the three subtract cleanly.
+  ['feread3',   "$HN my \@a = (1..334); my \@b = (335..667); my \@c = (668..1000); my \$s=0; for (1..\$n) { for my \$x (\@a, \@b, \@c) { \$s += \$x } } print \"\$s\\n\";", 30_000, 0],
   ['ovlsub',    "$HN package V; use overload '-' => sub { V->new(\$_[2] ? \$_[1] - \$_[0]{v} : \$_[0]{v} - (ref \$_[1] ? \$_[1]{v} : \$_[1])) }, '\"\"' => sub { \$_[0]{v} }; sub new { bless { v => \$_[1] }, \$_[0] } package main; my \$x = V->new(1000); my \$s = 0; for (1..\$n) { my \$y = \$x - 3; \$s += \"\$y\" } print \"\$s\\n\";", 100_000, 0],
   ['symref',    "$HN no strict 'refs'; our \$g = 2; our \@ga = (1,2,3); my \$s=0; for (1..\$n) { \$s += \${'main::g'} + \${'g'} + scalar(\@{'main::ga'}) } print \"\$s\\n\";", 200_000, 0],
   # Scalar-context m//g per-match cost (task #680): N repeats of a 200k-char

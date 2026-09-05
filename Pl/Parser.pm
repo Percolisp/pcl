@@ -7628,7 +7628,11 @@ sub _foreach_alias_rewrite {
 #       rejected, because `for ($x, @a)` still aliases `$x` through
 #       p-flatten-args.  A superset is the only safe direction for a veto.
 # A THIRD comma walk in this family reopens the shared-primitive question.
-sub _foreach_scalar_elements {
+# The foreach list's DEPTH-0 comma elements, or () when it is not a plain
+# comma list.  ONE splitter (rule 11): the scalar-element resolver below and
+# the bare-array-run resolver beside it differ only in the PER-ELEMENT test,
+# and a second copy of this loop is how the two would drift.
+sub _foreach_split_elements {
   my ($list_parts) = @_;
   my @sig = _foreach_list_unwrap($list_parts);
   return () unless @sig;
@@ -7642,11 +7646,44 @@ sub _foreach_scalar_elements {
     $from = $lp + 1;
   }
   push @elems, [ @sig[$from .. $#sig] ];
+  return @elems;
+}
 
+sub _foreach_scalar_elements {
+  my ($list_parts) = @_;
+  my @elems = _foreach_split_elements($list_parts) or return ();
   for my $e (@elems) {
     return () unless @$e && _foreach_single_scalar_p($e);
   }
   return @elems;
+}
+
+# `for my $x (@a, @b)` — the ORDERED array names when the foreach list is
+# nothing but BARE named arrays, two or more of them (task #1184, the Kind-A
+# `foreach-arrays` emission); the empty list otherwise.
+#
+# STRICTLY bare: one `PPI::Token::Symbol` per element, sigil `@`, a plain
+# word name, and NO subscript after it.  `@a[1,2]` is a slice, `@$r` is a
+# deref, `@{...}` is a block — none of them is an array this loop may iterate
+# in place, and each of them is what the general flattening path is for.  The
+# CALLER adds the facts conjunct (#1140: not escaping, not written in the
+# body), which it already computes for the read-only verdict.
+sub _foreach_bare_arrays {
+  my ($list_parts) = @_;
+  my @elems = _foreach_split_elements($list_parts);
+  return () unless @elems >= 2;
+  my @names;
+  for my $e (@elems) {
+    return () unless @$e == 1;
+    my $t = $e->[0];
+    return () unless ref($t) eq 'PPI::Token::Symbol';
+    my $c = $t->content // '';
+    return () unless $c =~ /^\@\w+$/;
+    my $nx = $t->snext_sibling;
+    return () if $nx && $nx->isa('PPI::Structure::Subscript');
+    push @names, $c;
+  }
+  return @names;
 }
 
 # Is this foreach LIST exactly ONE SCALAR-valued operand — `$x`, `$h{k}`,
