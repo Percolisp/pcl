@@ -480,5 +480,5 @@ sort.t	163	overload sort result	' '	'1 2'	#1021 (sort default comparator ignores
 sort.t	164	overload string called twice	'0'	'2'	#1021 (sort default comparator ignores an overloaded cmp)
 sort.t	174	Match vars do not leak from one plain sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
 sort.t	175	Match vars do not leak from one $$ sort sub to the next	'WinLeakageLeakage'	^(?:Win)+\z	#684 (match variables are block-scoped in perl)
-sub.t	24	goto &xsub when @_ does not exist	'ARRAY(0xb)'	undef	UNEXPLAINED
+sub.t	24	goto &xsub when @_ does not exist	'ARRAY(0xb)'	undef	#1117 (was #1020, FIXED s470bi: undef *GLOB cleared nothing.  perl REMOVES the ARRAY slot, PCL empties it, so *_{ARRAY} is still a ref)
 bop.t	465	|= doesn't break string overload	'0'	'z'	#972 (DECIDED s463f: the three prerequisites of #960(a))

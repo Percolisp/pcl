@@ -226,7 +226,10 @@
 #     reset.t     41 ->  22  22 restored; 3 PASS, 19 registered (reset()/m?pat?).
 #     sub.t       62 ->  53  11 restored; 2 PASS (#964's own [perl #91844] row,
 #                            and #401's state-in-string-eval row), 8 registered,
-#                            1 fix target (#1020, `undef *GLOB` is a no-op).
+#                            1 fix target: #1020 (`undef *GLOB` was a silent
+#                            no-op) was FIXED in s470bi; the row now fails on
+#                            #1117 alone -- perl REMOVES the ARRAY slot where
+#                            PCL empties it, so *_{ARRAY} is still a ref.
 #     loopctl.t   67 ->  63   8 restored; 4 PASS (bug 37725 + 3 typeglob rebind),
 #                            3 registered, 1 fix target (#1022).
 #     local.t    303 -> 300   3 restored, all registered (principle 9).

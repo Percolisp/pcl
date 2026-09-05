@@ -231,7 +231,7 @@
    #:p-typeglob-package #:p-typeglob-name
    #:p-make-typeglob #:p-glob-assign #:p-glob-assign-dynamic
    #:p-dynamic-typeglob #:p-glob-copy
-   #:p-glob-slot #:p-glob-undef-name #:p-local-glob #:p-local-glob-if
+   #:p-glob-slot #:p-glob-undef #:p-local-glob #:p-local-glob-if
    #:p-local-glob-dynamic #:p-local-dot
    #:p-defcell #:p-local-cell #:p-local-cell-if #:p-local-maybe
    #:p-local-pipe
@@ -982,7 +982,7 @@
                 p-get-coderef))
 (declaim (ftype (function (t t) t) p-can p-isa p-glob-slot))
 (declaim (ftype (function (&rest t) t)
-                p-method-call p-glob-undef-name p-glob-copy parse-number
+                p-method-call p-glob-undef p-glob-copy parse-number
                 build-ppcre-options))
 (defvar *p-undef* :undef "Perl's undef value")
 
@@ -3446,8 +3446,8 @@
        (box-set val *p-undef*))
       ;; undef *foo — clear all typeglob slots
       ((p-typeglob-p val)
-       (p-glob-undef-name (package-name (p-typeglob-package val))
-                          (p-typeglob-name val)))))
+       (p-glob-undef (p-typeglob-package val)
+                     (p-typeglob-name val)))))
   *p-undef*)
 
 ;;; Internal predicate — returns CL nil/t (for use in CL if/unless/when/and/or).
@@ -18278,13 +18278,55 @@ buffer's fill-pointer; everything else falls back to file-length."
 
 (defun %p-glob-empty-slot (prefix)
   "The EMPTY value a cleared glob slot holds, for slot sigil PREFIX.  ONE
-   reading, shared by `undef *foo` (p-glob-undef-name) and by the clear half
+   reading, shared by `undef *foo` (p-glob-undef) and by the clear half
    of a glob-to-glob assignment (p-glob-copy, task #602).  Rule 12: an
    unknown sigil is a compiler/runtime inconsistency, never a silent nil."
   (cond ((string= prefix "$") (make-p-box *p-undef*))
         ((string= prefix "@") (make-array 0 :adjustable t :fill-pointer 0))
         ((string= prefix "%") (make-hash-table :test 'equal))
         (t (error "%p-glob-empty-slot: no empty for glob slot sigil ~S" prefix))))
+
+;;; THE CLEAR HALF of the glob family, ONE reading (task #1020, rule 11).
+;;; Two spellings ask for it and they ask the same question: `undef *G`
+;;; (p-glob-undef) clears every slot, and `*A = *B` (p-glob-copy) clears the
+;;; slots B does not have (task #602).  Each helper takes the PACKAGE OBJECT
+;;; and the ALREADY-CASE-INVERTED name — %p-glob-syms-in's pair, the one a
+;;; p-typeglob carries — because re-deriving them from strings is exactly what
+;;; #1020 was.
+
+(defun %p-glob-clear-var-slot (prefix pkg uname)
+  "EMPTY one VARIABLE slot ($ / @ / %) of glob PKG::UNAME.
+
+   The clear fires ONLY when the slot is already BOUND: neither spelling ever
+   CREATES a variable perl would not (probed: `defined $c3` is false after
+   `*c3 = *neverdefined`, and no $c3 comes into being).
+
+   perl REMOVES an aggregate slot where this EMPTIES it — after `undef *a`,
+   `*a{ARRAY}` is undef in perl until the next read re-vivifies it — so the
+   introspection spelling still diverges: task #1117, which also owns
+   perl-tests/sub.t row 24.  Every VALUE spelling agrees."
+  (let ((sym (intern (%p-slot-name prefix uname) pkg)))
+    (when (boundp sym) (set sym (%p-glob-empty-slot prefix)))))
+
+(defun %p-glob-clear-code-slot (pkg uname)
+  "UNDEFINE the CODE slot of glob PKG::UNAME, so BOTH `defined &name` and
+   `exists &name` answer false afterwards — perl's answer after `undef *name`
+   and after `*A = *B` where B has no code slot (probed 5.40.3: `exists &c`
+   goes from 1 to 0, and a name that was only FORWARD-declared, `sub d;`,
+   likewise).  *p-declared-subs* is the other half of the slot, not a cache:
+   `defined &foo` reads it, and a forward declaration lives ONLY there, so the
+   entry goes whether or not the symbol was fbound."
+  (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
+    (when (fboundp sym) (fmakunbound sym))
+    (remhash sym *p-declared-subs*)))
+
+(defun %p-glob-clear-io-slot (pkg uname)
+  "DEREGISTER the IO slot of glob PKG::UNAME — the open-stream registration,
+   keyed in *p-filehandles* by the bareword symbol.  perl's `undef *FH` makes
+   `*FH{IO}` undef and a later `print FH` FAIL (probed: it returns undef and
+   sets $! to Bad file descriptor), which is what losing the registration
+   gives."
+  (remhash (intern uname pkg) *p-filehandles*))
 
 (defun %p-glob-copy-var-slot (prefix sp sn dst-pkg dst-uname)
   "One VARIABLE slot ($ / @ / %) of a glob-to-glob assignment.
@@ -18294,15 +18336,12 @@ buffer's fill-pointer; everything else falls back to file-length."
    *x = *neverdefined` leaves $x undef, and `*a2 = *b2` with only an array on
    b2 empties $a2 and %a2).  Copying bound slots only left the destination's
    old value in place: task #602, and the reason t/re/pat.t:1715's
-   `*^R = *caretRglobwithnoscalar` did not make $^R undef.
-
-   The clear fires ONLY when the destination slot is already BOUND: `*A = *B`
-   never CREATES a variable perl would not (probed: `defined $c3` is false
-   after `*c3 = *neverdefined`, and no $c3 comes into being)."
-  (let ((src-sym (intern (%p-slot-name prefix sn) sp))
-        (dst-sym (intern (%p-slot-name prefix dst-uname) dst-pkg)))
-    (cond ((boundp src-sym) (setf (symbol-value dst-sym) (symbol-value src-sym)))
-          ((boundp dst-sym) (set dst-sym (%p-glob-empty-slot prefix))))))
+   `*^R = *caretRglobwithnoscalar` did not make $^R undef."
+  (let ((src-sym (intern (%p-slot-name prefix sn) sp)))
+    (if (boundp src-sym)
+        (setf (symbol-value (intern (%p-slot-name prefix dst-uname) dst-pkg))
+              (symbol-value src-sym))
+        (%p-glob-clear-var-slot prefix dst-pkg dst-uname))))
 
 (defun %p-glob-copy-code-slot (sp sn dst-pkg dst-uname)
   "The CODE slot of a glob-to-glob assignment.  The alias inherits the
@@ -18310,15 +18349,13 @@ buffer's fill-pointer; everything else falls back to file-length."
    untracked-but-fbound source), so `defined &dst` matches `defined &src`
    (task #83); a source with no CODE slot UNDEFINES the destination's, which
    is what `defined &x` answers in perl after `*x = *neverdefined` (#602)."
-  (let ((src-sym (intern (%pcl-uname-to-sub sn) sp))
-        (dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
-    (cond ((fboundp src-sym)
-           (setf (fdefinition dst-sym) (fdefinition src-sym))
-           (setf (gethash dst-sym *p-declared-subs*)
-                 (or (gethash src-sym *p-declared-subs*) :defined)))
-          ((fboundp dst-sym)
-           (fmakunbound dst-sym)
-           (remhash dst-sym *p-declared-subs*)))))
+  (let ((src-sym (intern (%pcl-uname-to-sub sn) sp)))
+    (if (fboundp src-sym)
+        (let ((dst-sym (intern (%pcl-uname-to-sub dst-uname) dst-pkg)))
+          (setf (fdefinition dst-sym) (fdefinition src-sym))
+          (setf (gethash dst-sym *p-declared-subs*)
+                (or (gethash src-sym *p-declared-subs*) :defined)))
+        (%p-glob-clear-code-slot dst-pkg dst-uname))))
 
 (defun %p-glob-copy-io-slot (sp sn dst-pkg dst-uname)
   "The IO slot of a glob-to-glob assignment: the open-stream registration, so
@@ -18326,12 +18363,11 @@ buffer's fill-pointer; everything else falls back to file-length."
    reads <FH>).  Keyed in *p-filehandles* by the bareword symbol, the same
    naming convention the variable slots use.  A source with no handle
    DEREGISTERS the destination's, the #602 rule for this slot."
-  (let ((src-sym (intern sn sp))
-        (dst-sym (intern dst-uname dst-pkg)))
+  (let ((src-sym (intern sn sp)))
     (multiple-value-bind (stream present) (gethash src-sym *p-filehandles*)
       (if present
-          (setf (gethash dst-sym *p-filehandles*) stream)
-          (remhash dst-sym *p-filehandles*)))))
+          (setf (gethash (intern dst-uname dst-pkg) *p-filehandles*) stream)
+          (%p-glob-clear-io-slot dst-pkg dst-uname)))))
 
 (defun p-glob-copy (dst-pkg dst-uname src-glob)
   "`*DST = *SRC` — REPLACE dst's glob with src's, slot for slot (task #602).
@@ -18346,17 +18382,32 @@ buffer's fill-pointer; everything else falls back to file-length."
       (%p-glob-copy-var-slot prefix sp sn dst-pkg dst-uname))
     (%p-glob-copy-io-slot sp sn dst-pkg dst-uname)))
 
-(defun p-glob-undef-name (pkg-str name-str)
-  "undef *foo — clear all slots."
-  (let* ((pkg   (find-package (%pcl-invert-case pkg-str)))
-         (uname (%pcl-invert-case name-str)))
-    (when pkg
-      (let ((sym (intern (%pcl-uname-to-sub uname) pkg)))
-        (when (fboundp sym) (fmakunbound sym)))
-      (dolist (prefix '("$" "@" "%"))
-        (let ((sym (intern (%p-slot-name prefix uname) pkg)))
-          (when (boundp sym)
-            (set sym (%p-glob-empty-slot prefix))))))))
+(defun p-glob-undef (pkg uname)
+  "`undef *foo` — clear EVERY slot of the glob: the same clearing `*A = *B`
+   applies to the slots the source lacks (#602's rule, ONE reading — the
+   %p-glob-clear-* helpers above).
+
+   Takes the PACKAGE OBJECT and the ALREADY-CASE-INVERTED name, the pair a
+   p-typeglob carries.  The string-taking spelling this replaces re-derived
+   both, and got both wrong: its only caller handed it the CL package NAME
+   (\"MAIN\"), which it then case-INVERTED to \"main\", found no such package,
+   and its `(when pkg …)` swallowed the entire body.  So `undef *GLOB` was a
+   SILENT no-op for every glob in every package (#1020) — nothing on stderr,
+   nothing skipped: the statement ran and did nothing, and
+
+     our $s = 5; our @a = (9); our %h = (k=>1); sub c {\"code\"}
+     undef *s; undef *a; undef *h; undef *c;
+
+   left all four exactly as they were where perl clears all four.  The old
+   body also never touched *p-declared-subs* (so `defined &c` stayed true even
+   when the fmakunbound DID run) nor *p-filehandles*.
+
+   perl's aggregate slots go AWAY, where this leaves a fresh empty one, so the
+   INTROSPECTION spelling (`*a{ARRAY}`) still diverges — task #1117."
+  (%p-glob-clear-code-slot pkg uname)
+  (dolist (prefix '("$" "@" "%"))
+    (%p-glob-clear-var-slot prefix pkg uname))
+  (%p-glob-clear-io-slot pkg uname))
 
 (defun p-glob-slot (glob slot)
   "Read *foo{SLOT}."
