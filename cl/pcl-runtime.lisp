@@ -190,7 +190,7 @@
    ;; File I/O
    #:p-open #:p-sysopen #:p-close #:p-eof #:p-tell #:p-seek #:p-sysseek #:p-pipe #:p-select #:p-write
    #:p-binmode #:p-read #:p-sysread #:p-syswrite #:p-install-data-handle
-   #:p-use-open
+   #:p-use-open #:p-default-layers
    ;; Socket builtins
    #:p-socket #:p-socketpair #:p-bind #:p-connect #:p-listen #:p-accept
    #:p-send #:p-recv #:p-shutdown #:p-getsockname #:p-getpeername
@@ -13426,18 +13426,20 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
   nil)
 
 (defun p-use-open (&rest args)
-  "The `use open` pragma (#1115).  ARGS is the pragma's LIST: `IN` / `OUT` /
-   `IO` say which default a following layer string sets, a bare layer string
-   sets both, and `:std` additionally re-points the three standard handles at
-   the defaults the whole list leaves in force — which is what
-   `use open qw(:std :utf8)` means in perl, whatever order the two appear in.
+  "The `:std` HALF of the `use open` pragma, and only that half (#1115, #1222).
 
-   DIVERGENCE, registered in docs/not-supported.md: perl's `open` pragma is
-   LEXICALLY scoped and this one is global from the point the `use` runs.
-   Every spelling in perl's own t/ and on the CPAN board turns it on at the top
-   of a file, where the two agree; a `use open` scoped to an inner block keeps
-   acting for the rest of the run."
-  (let ((slot :both) (std nil))
+   perl's `open` pragma does two different things, on two different clocks.
+   The layers it puts on ORDINARY opens are LEXICAL and compile-time, so they
+   are emitted AT EACH SITE by `p-default-layers` — never set here, because a
+   global made a module's own `use open` change its CALLER's I/O and made a
+   block-scoped one leak to the rest of the file (both measured; see
+   p-default-layers).  `:std` is the other half: perl applies it to the three
+   standard handles ONCE, where the pragma sits, and that is a real runtime
+   effect, so the compiler emits this call only for a list containing `:std`.
+
+   ARGS is the pragma's LIST, so the direction words are honoured for `:std`
+   too: `use open IN => ':utf8', ':std'` re-points STDIN alone."
+  (let ((slot :both) (std nil) (in nil) (out nil))
     (dolist (a (coerce (p-flatten-args args) 'list))
       (let ((s (to-string (unbox a))))
         (cond ((string= s "IN")  (setf slot :in))
@@ -13447,12 +13449,20 @@ zero-fill any gap from a forward seek, otherwise extend at the end."
               ((and (plusp (length s)) (char= (char s 0) #\:))
                (let ((ef (%p-layer-ef s nil)))
                  (when ef
-                   (when (member slot '(:in :both)) (setf *p-default-in-ef* ef))
-                   (when (member slot '(:out :both)) (setf *p-default-out-ef* ef)))
+                   (when (member slot '(:in :both)) (setf in ef))
+                   (when (member slot '(:out :both)) (setf out ef)))
                  (setf slot :both)))
               ((zerop (length s)))
               (t (%p-announce-unsupported "use open" s)))))
-    (when std (%p-apply-std-layers)))
+    (when std
+      (when in  (setf (svref *p-std-efs* 0) in))
+      (when out (setf (svref *p-std-efs* 1) out
+                      (svref *p-std-efs* 2) out))
+      (ignore-errors (finish-output *standard-output*))
+      (ignore-errors (finish-output *error-output*))
+      (%p-std-rebuild 0)
+      (%p-std-rebuild 1)
+      (%p-std-rebuild 2)))
   t)
 
 (%p-apply-std-buffering)

@@ -8827,8 +8827,146 @@ sub _emit_inc_note {
   }
 }
 
+# The layers a `use open` LIST puts in force, read STATICALLY (task #1222).
+#
+# THE PRAGMA IS A COMPILE-TIME, LEXICAL FACT, so the emitter has to know it at
+# each `open` site; a runtime global made a module's own `use open` change its
+# CALLER's I/O (measured: 11-octet file, perl `main-plain: 11 module-utf8: 8`,
+# PCL `8 8`) and made a block-scoped one leak to the rest of the file.
+#
+# Answers (IN, OUT, STD): IN/OUT are layer SUFFIX strings as %p-layer-ef reads
+# them (":utf8", ":encoding(cp1252)"), undef for "this list does not name that
+# direction", and STD is true when `:std` is in the list.  Reading is static
+# because perl's own `use` runs `import` at BEGIN: every `use open` in perl's
+# t/, perl-tests/, lib/ and the CPAN board is qw()/quoted/fat-comma (surveyed —
+# 71 statements, 7 distinct shapes, no computed element).  A non-literal element
+# ANNOUNCES rather than guessing, because guessing here is a silent wrong.
+sub _use_open_layers {
+  my ($stmt) = @_;
+  my @words;
+  my $nonliteral = 0;
+  my $seen_module = 0;
+  for my $tok (@{ $stmt->find(sub { $_[1]->isa('PPI::Token') }) || [] }) {
+    next if $tok->isa('PPI::Token::Whitespace') || $tok->isa('PPI::Token::Comment');
+    if ($tok->isa('PPI::Token::Word')) {
+      my $c = $tok->content;
+      next if $c eq 'use' || $c eq 'no';
+      if (!$seen_module && $c eq 'open') { $seen_module = 1; next }
+      push @words, $c;                       # IN / OUT / IO
+      next;
+    }
+    next if $tok->isa('PPI::Token::Structure');
+    next if $tok->isa('PPI::Token::Operator')
+            && ($tok->content eq ',' || $tok->content eq '=>');
+    if ($tok->isa('PPI::Token::QuoteLike::Words')) {
+      push @words, $tok->literal;
+      next;
+    }
+    if ($tok->isa('PPI::Token::Quote')) {
+      push @words, $tok->can('string') ? $tok->string : $tok->content;
+      next;
+    }
+    $nonliteral = 1;
+  }
+  if ($nonliteral) {
+    warn "PCL: use open: a computed layer list is not read at compile time — "
+       . "the pragma has no effect on this scope (docs/not-supported.md)\n";
+    return (undef, undef, 0);
+  }
+  my ($in, $out, $std, $slot) = (undef, undef, 0, 'both');
+  for my $w (@words) {
+    if    ($w eq 'IN')  { $slot = 'in';   next }
+    elsif ($w eq 'OUT') { $slot = 'out';  next }
+    elsif ($w eq 'IO')  { $slot = 'both'; next }
+    if (lc($w) eq ':std') { $std = 1; next }
+    next unless $w =~ /^:/;
+    # Layers STACK, so a second one for the same direction appends — the same
+    # left-to-right reading %p-layer-ef makes of a mode's own suffix.
+    $in  = ($in  // '') . $w if $slot eq 'in'  || $slot eq 'both';
+    $out = ($out // '') . $w if $slot eq 'out' || $slot eq 'both';
+    $slot = 'both';
+  }
+  return ($in, $out, $std);
+}
+
+# Every `use open` REGION in a document, as source-location spans (task #1222).
+#
+# The pragma is LEXICAL, and a location-keyed span is the only reading that can
+# answer an `open` site: a scope-stack pragma set when the include statement
+# processes is invisible inside a named sub, because the sub's BODY is lowered
+# first (task #703 found the same thing for `use subs`).  So this runs as a
+# PRE-PASS, before any lowering, exactly like _premerge_use_subs.
+#
+# A region runs from the pragma statement to the end of its ENCLOSING BLOCK —
+# perl's own rule — or to the end of the document when the pragma sits at file
+# level.  `no open` in the same block truncates the innermost open region at
+# its own position.  Each region carries the layer SUFFIX strings per direction
+# (undef = "this pragma does not name that direction", so an inner pragma
+# overrides only what it names, as ${^OPEN} does).
+#
+# Returns an ARRAY of [START, END, IN, OUT]; START/END are [line, column].
+sub open_regions_of {
+  my ($doc) = @_;
+  my @regions;
+  for my $stmt (@{ $doc->find('PPI::Statement::Include') || [] }) {
+    next if ($stmt->module // '') ne 'open';
+    my $loc = $stmt->location or next;
+    # `no open` IS A NO-OP, and that is measured, not assumed: perl's own
+    # open.pm defines `import` and NO `unimport` (5.40.3, lib/5.40.3/open.pm),
+    # so `use open qw(:utf8); no open; open …` still decodes — probed, 8 not 11
+    # — and `no open ':utf8'` is a FATAL "Attempt to call undefined unimport
+    # method".  A first version of this pass truncated the region at a `no
+    # open`, which the probe killed; PCL is merely more permissive about the
+    # fatal spelling, which is the harmless direction.
+    next if ($stmt->type // 'use') eq 'no';
+    my ($in, $out) = _use_open_layers($stmt);
+    next unless defined $in || defined $out;
+    push @regions, [ [ $loc->[0], $loc->[1] ], _open_region_end($stmt), $in, $out ];
+  }
+  return \@regions;
+}
+
+# The end of the lexical scope a `use open` at STMT governs: its enclosing
+# BLOCK's closing brace, or the end of the document at file level.
+sub _open_region_end {
+  my ($stmt) = @_;
+  my $node = $stmt;
+  while (my $parent = $node->parent) {
+    if ($parent->isa('PPI::Structure::Block')) {
+      my $last = $parent->last_token;
+      my $l = $last && $last->location;
+      return [ $l->[0], $l->[1] ] if $l;
+      last;
+    }
+    last if $parent->isa('PPI::Document');
+    $node = $parent;
+  }
+  return [ 1e9, 1e9 ];
+}
+
+sub _loc_lt {
+  my ($a, $b) = @_;
+  return $a->[0] < $b->[0] || ($a->[0] == $b->[0] && $a->[1] < $b->[1]);
+}
+
+# The layers in force at LOC — the INNERMOST region wins, and an inner pragma
+# overrides only the directions it names.  Returns (IN, OUT), each possibly ''.
+sub open_layers_at {
+  my ($regions, $loc) = @_;
+  return ('', '') unless $regions && @$regions && $loc;
+  my ($in, $out) = ('', '');
+  for my $r (@$regions) {
+    next unless _loc_lt($r->[0], $loc) && _loc_lt($loc, $r->[1]);
+    $in  = $r->[2] if defined $r->[2];
+    $out = $r->[3] if defined $r->[3];
+  }
+  return ($in, $out);
+}
+
 # Process use/require statements
 sub _process_include_statement {
+
+
   my $self = shift;
   my $stmt = shift;
 
@@ -9046,20 +9184,32 @@ sub _process_include_statement {
         $self->environment->set_pragma('strict_subs', 1);
       }
     }
-    # `use open` is the ONE never-loaded pragma with a RUNTIME effect: it moves
-    # the default PerlIO layers, which decide whether a later `open` DECODES
-    # (task #1115 — PCL's handles carry octets unless a layer says otherwise,
-    # like perl's).  Its LIST is an ordinary perl list, so it goes through the
-    # same import-argument parse the general `use` arm below uses, and lands in
-    # the definitions bucket for the same reason a `use` does: perl's pragma is
-    # compile-time, so it must be in force before any runtime open runs.
+    # `use open` decides whether a later `open` DECODES (task #1115), and it is
+    # LEXICAL (task #1222) — so the layers are recorded as a PRAGMA on the
+    # Environment's scope stack, exactly as `use integer` above is, and the
+    # emitter puts them on each `open` site inside the region.  A runtime global
+    # was measured wrong in two directions: a module whose own top carries
+    # `use open qw(:utf8)` changed its CALLER's plain `open`, and a block-scoped
+    # one leaked to the rest of the file.
+    #
+    # The `:std` half is the exception and stays a runtime call where the pragma
+    # sits: perl applies that to STDIN/STDOUT/STDERR once, at compile time.
     if ($module eq 'open') {
-      my @arg_tokens = $self->_use_import_arg_tokens($stmt);
-      if (@arg_tokens) {
-        my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);  # LIST ctx
-        $self->_with_bucket('definitions', sub {
-          $self->_emit("(p-eval-always (p-use-open $args_cl))");
-        });
+      # The LAYERS are not recorded here: a named sub's BODY is lowered before
+      # the in-stream include statement is reached (task #703's finding), so a
+      # scope-stack pragma set at this point is invisible to every `open`
+      # inside a sub — measured, the module's own `use open` had no effect on
+      # its own `slurp`.  They come from `open_regions_of`, a PRE-PASS keyed on
+      # SOURCE LOCATION, published before any lowering (Pl::Parser2).
+      my (undef, undef, $std) = _use_open_layers($stmt);
+      if ($std) {
+        my @arg_tokens = $self->_use_import_arg_tokens($stmt);
+        if (@arg_tokens) {
+          my $args_cl = $self->_parse_expression(\@arg_tokens, $stmt, 1);  # LIST ctx
+          $self->_with_bucket('definitions', sub {
+            $self->_emit("(p-eval-always (p-use-open $args_cl))");
+          });
+        }
       }
     }
     $self->_emit(";; $perl_code (pragma)");

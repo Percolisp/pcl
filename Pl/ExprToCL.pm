@@ -1912,7 +1912,39 @@ sub _class_name_bareword {
 # The word list is Pl::PExpr::Config's `statement_keywords`, not a local copy:
 # the same six words are already inlined as a regex in several parser sites and
 # an seventh copy here would be the drift rule 11 exists to stop.
+# The ops a `use open` decides the default layers for (task #1222).  perldoc
+# open names exactly these: "the open() and readpipe() functions, as well as
+# the qx// and `` operators".  NOT sysopen (perl's raw open takes no PerlIO
+# layer stack), not opendir, not pipe — narrower than a guess would be, and
+# that is the point.
+my %LAYER_SENSITIVE_OPS = map { $_ => 1 } qw(p-open p-backtick);
+
+# Wrap CALL in the layers a `use open` puts in force AT THIS SITE, or hand it
+# back untouched.  The pragma is LEXICAL and compile-time, so the Environment's
+# scope stack already carries it (set by the `use open` arm in Pl::Parser,
+# inherited and restored by push_scope/pop_scope exactly as `use integer` is) —
+# all this does is read it at the site and emit the wrapper the runtime macro
+# consumes.  A global instead of this was measured wrong twice: a module's own
+# `use open` changed its CALLER's `open`, and a block-scoped one leaked out.
+sub _wrap_default_layers {
+  my ($self, $cl_func, $call, $site_node) = @_;
+  return $call unless $LAYER_SENSITIVE_OPS{$cl_func};
+  my $parser = ($self->expr_o && $self->expr_o->can('has_parser')
+                && $self->expr_o->has_parser) ? $self->expr_o->parser : undef;
+  return $call unless $parser;
+  my $regions = $parser->lex_home->{_open_regions};
+  return $call unless $regions && @$regions;
+  my $loc = (ref($site_node) && $site_node->can('location'))
+            ? $site_node->location : undef;
+  return $call unless $loc;
+  my ($in, $out) = Pl::Parser::open_layers_at($regions, $loc);
+  return $call unless length($in) || length($out);
+  my $esc = sub { my $s = shift // ''; $s =~ s/(["\\])/\\$1/g; return qq{"$s"} };
+  return ['p-default-layers', [ $esc->($in), $esc->($out) ], $call];
+}
+
 sub gen_funcall_form {
+
   my $self    = shift;
   my $node    = shift;
   my $node_id = shift;
@@ -2562,6 +2594,9 @@ sub gen_funcall_form {
   } else {
     $call = [$cl_func, @args];
   }
+  # `use open`'s layers are LEXICAL, so they go on THIS site (task #1222).
+  $call = $self->_wrap_default_layers($cl_func, $call,
+                                      $self->expr_o->get_a_node($kids->[0]));
 
   # 'my'/'our' in expression context is an identity.
   if (($func_name eq 'my' || $func_name eq 'our') && @args == 1) {
@@ -3911,6 +3946,9 @@ sub gen_progn_form {
 sub gen_backtick_form {
   my ($self, $node, $node_id, $kids) = @_;
   my $call = ['p-backtick', $self->gen_node_form($kids->[0])];
+  # A backtick is a PPI NODE type, not a funcall, so it needs the `use open`
+  # wrapper of its own — perldoc open lists qx// and `` beside open() (#1222).
+  $call = $self->_wrap_default_layers('p-backtick', $call, $node);
   my $ctx  = defined $node_id
              ? $self->expr_o->get_node_context($node_id) : INHERIT_CTX;
   return $self->_wrap_wantarray_ctx_form($call, $ctx);

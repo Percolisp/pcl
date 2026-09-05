@@ -2200,8 +2200,24 @@ handle's discipline, in this order: the layers in its own open MODE, a later
 are read LEFT TO RIGHT and the last one that names a discipline wins
 (`<:raw:encoding(UTF-8)` decodes, `<:encoding(UTF-8):raw` does not).  The three
 standard handles follow the same rule, and `use open qw(:std …)` is what moves
-them.  Emission: `use open LIST` lowers to `(p-use-open LIST)` in the compile
-phase — the only never-loaded pragma with a runtime effect.
+them.
+
+**The `open` pragma is LEXICAL, so its layers are a COMPILE-TIME fact carried to
+each site — never a global the pragma sets when it runs** (task #1222).  A
+translator that makes it global gets two silent wrongs the moment bytes are the
+default: a module whose own top carries `use open qw(:utf8)` changes its
+CALLER's plain `open`, and a pragma inside a block keeps acting after the block
+ends (both measured against perl).  Emission is therefore split in two.  The
+layers a `use open` puts on ORDINARY opens wrap the site:
+`(p-default-layers (IN-LAYERS OUT-LAYERS) (p-open …))`, where the two are layer
+suffix strings (`":utf8"`, `":encoding(cp1252)"`, `""` for none) parsed by the
+same left-to-right rule as a mode's own suffix, so the mode still wins.  The
+wrapped ops are perldoc open's own list — `open` and `readpipe`, hence `qx//`
+and backticks — and NOT `sysopen`, `opendir` or `pipe`.  The `:std` half is the
+other clock: perl applies it to the three standard handles ONCE, where the
+pragma sits, so a list containing `:std` also lowers to `(p-use-open LIST)` in
+the compile phase — the only never-loaded pragma with a runtime effect.  `no
+open` is a no-op in perl itself (`open.pm` has `import` and no `unimport`).
 
 **Writing a character a byte handle cannot hold is NOT an error.**  perl decides
 per STRING, not per character: an SV whose UTF8 flag is on prints as its WHOLE

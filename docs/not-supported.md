@@ -176,7 +176,7 @@ The handful most likely to matter to a program that is otherwise portable:
 * [`split` implicit LHS-arity limit](#split-implicit-lhs-arity-limit-my-ab--split-----split-)
 * [`pack`/`unpack` — pointer types (`p`/`P`) and 80-bit long double (`D`)](#packunpack--pointer-types-pp-and-80-bit-long-double-d)
 * [An IN-MEMORY handle opened onto STDOUT/STDERR/STDIN](#an-in-memory-handle-opened-onto-stdoutstderrstdin)
-* [`use open` is GLOBAL, not lexically scoped](#use-open-is-global-not-lexically-scoped)
+* [`use open` with a COMPUTED layer list](#use-open-with-a-computed-layer-list)
 * [PerlIO layer stacks and `PerlIO::get_layers`](#perlio-layer-stacks-and-perlioget_layers)
 * [`Hash::Util` bucket statistics](#hashutil-bucket-statistics)
 * [`${^MAX_NESTED_EVAL_BEGIN_BLOCKS}`](#max_nested_eval_begin_blocks)
@@ -1052,25 +1052,34 @@ exactly — that is what `Pl/t/std-handle-open-01.t` rows 1 and 5 assert.
 
 ---
 
-## `use open` is GLOBAL, not lexically scoped
+## `use open` with a COMPUTED layer list
 
-**Perl:** the `open` pragma is lexically scoped — `{ use open qw(:std :utf8); … }`
-affects only the opens inside that block, and the layers revert at the closing
-brace.  `no open` turns it off for the rest of the enclosing scope.
+**Perl:** the `open` pragma's `import` runs at compile time with whatever its
+argument list evaluates to, so `use open ($layers)` is legal and takes effect.
 
-**PCL (task #1115):** `use open LIST` calls `p-use-open` at compile time and the
-defaults it sets stay in force for the REST OF THE RUN.  `no open` is a no-op.
-The two agree for every spelling that occurs in perl's own `t/`, in
-`perl-tests/` and on the CPAN board — all of them put the pragma at the top of a
-file, where "the rest of the file" and "the rest of the run" are the same thing
-for that program.  They part company only for a pragma deliberately scoped to an
-inner block, which then keeps acting after the block ends.
+**PCL (tasks #1115, #1222):** the pragma's layers are read STATICALLY out of the
+source, which is what lets the compiler attach them to each `open`/`readpipe`
+site inside the pragma's lexical extent (`docs/ir-spec.md` §7.7).  A list element
+that is not a literal — a variable, a call, an interpolated string — cannot be
+read that way, so PCL ANNOUNCES it and the pragma has no effect on that scope:
 
-**Why not lexical:** the layers are a property of the RUNTIME `open` call, and
-PCL's compiler would have to carry a lexical layer stack through every emitted
-`open`/`binmode`/`readpipe` site to reproduce it.  The measured population needs
-none of that; the entry is here so the divergence is named rather than
-discovered.
+    PCL: use open: a computed layer list is not read at compile time —
+    the pragma has no effect on this scope
+
+The measured population needs none of it: all 71 `use open` statements in perl's
+own `t/`, in `perl-tests/`, in `lib/` and on the CPAN board spell the list with
+`qw()`, quoted strings or fat commas.
+
+**What IS supported, and was not before #1222:** the pragma is LEXICAL.  A
+`use open` inside a block, a sub or a module affects only the opens in that
+scope; an inner pragma overrides only the directions it names; a module's own
+pragma does not reach its caller.  `:std` stays a runtime effect applied once,
+where the pragma sits, as perl applies it.
+
+**`no open` is a NO-OP — and that is perl's answer, not a divergence:** perl's
+`open.pm` defines `import` and no `unimport`, so `use open qw(:utf8); no open;`
+still decodes, and `no open ':utf8'` is a fatal *Attempt to call undefined
+unimport method* (probed 5.40.3).
 
 ---
 

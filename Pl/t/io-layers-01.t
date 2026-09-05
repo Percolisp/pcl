@@ -184,4 +184,92 @@ PL
          'use open lowers to a p-use-open call with its list');
 }
 
+# --- #1222: `use open` is LEXICAL ------------------------------------------
+#
+# perl's open pragma is compile-time and LEXICAL, so a module's own `use open`
+# must not touch its CALLER's I/O and a block-scoped one must not leak past the
+# block.  A runtime global got both wrong, and #1115 is what made it a silent
+# WRONG rather than a silent no-op: once bytes are the default, any CPAN module
+# carrying `use open` flips its caller's reads.  Every expectation is perl
+# 5.40.3's own answer on an 11-octet file that is 8 characters decoded.
+{
+    my $lib = "$dir/lib";
+    mkdir $lib or die "mkdir $lib: $!";
+    open my $m, '>', "$lib/UOpen1222.pm" or die "write UOpen1222: $!";
+    print $m <<'PM';
+package UOpen1222;
+use open qw(:utf8);
+sub slurp {
+    my ($p) = @_;
+    open my $fh, '<', $p or die "UOpen1222: $!";
+    my $s = do { local $/; <$fh> };
+    close $fh;
+    return length($s);
+}
+1;
+PM
+    close $m;
+    my $d11 = "$dir/d11.txt";
+    open my $w, '>:raw', $d11 or die "write d11: $!";
+    print $w "ab\xc3\xa9de\xe2\x80\x99fg";     # 11 octets, 8 characters
+    close $w;
+
+    my $mod = run_cl(<<"PL");
+use lib "$lib";
+use UOpen1222;
+sub plain { open my \$fh, '<', \$_[0] or die; my \$s = do { local \$/; <\$fh> }; close \$fh; length(\$s) }
+print "main-plain: ", plain("$d11"), "\\n";
+print "module-utf8: ", UOpen1222::slurp("$d11"), "\\n";
+print "after: ", plain("$d11"), "\\n";
+PL
+    is($mod, "main-plain: 11\nmodule-utf8: 8\nafter: 11\n",
+       q{#1222 a module's own `use open` does NOT reach its caller's open});
+
+    my $blk = run_cl(<<"PL");
+{
+    use open qw(:utf8);
+    open my \$a, '<', "$d11" or die;
+    my \$s = do { local \$/; <\$a> };
+    close \$a;
+    print "in-block: ", length(\$s), "\\n";
+}
+open my \$b, '<', "$d11" or die;
+my \$s2 = do { local \$/; <\$b> };
+close \$b;
+print "after-block: ", length(\$s2), "\\n";
+PL
+    is($blk, "in-block: 8\nafter-block: 11\n",
+       q{#1222 a block-scoped `use open` does not leak past the block});
+
+    my $nest = run_cl(<<"PL");
+{
+    use open qw(:utf8);
+    open my \$c, '<', "$d11" or die; my \$s = do { local \$/; <\$c> }; close \$c;
+    print "outer: ", length(\$s), "\\n";
+    {
+        use open IN => ':raw';
+        open my \$d, '<', "$d11" or die; my \$t = do { local \$/; <\$d> }; close \$d;
+        print "nested-raw: ", length(\$t), "\\n";
+    }
+    open my \$e, '<', "$d11" or die; my \$u = do { local \$/; <\$e> }; close \$e;
+    print "back: ", length(\$u), "\\n";
+}
+PL
+    is($nest, "outer: 8\nnested-raw: 11\nback: 8\n",
+       q{#1222 a nested `use open IN => ':raw'` overrides only the direction it names});
+
+    # `no open` is a NO-OP in perl: open.pm defines `import` and NO `unimport`
+    # (probed 5.40.3 — this prints 8, and `no open ':utf8'` is FATAL there).
+    my $noopen = run_cl(<<"PL");
+{
+    use open qw(:utf8);
+    no open;
+    open my \$h, '<', "$d11" or die; my \$s = do { local \$/; <\$h> }; close \$h;
+    print "no-open: ", length(\$s), "\\n";
+}
+PL
+    is($noopen, "no-open: 8\n",
+       q{#1222 `no open` does NOT end the region — perl's open.pm has no unimport});
+}
+
 done_testing();

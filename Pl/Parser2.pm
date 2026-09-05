@@ -1300,6 +1300,14 @@ sub parse {
   # top level called the sub (task #703, probed).
   $self->_premerge_use_subs($doc);
 
+  # `use open`'s LAYERS, as source-location spans, for the same reason and by
+  # the same clock (task #1222): the pragma is LEXICAL and a named sub's body
+  # is lowered before the in-stream include statement is reached, so the spans
+  # have to exist before any lowering.  Published through the seam parser's
+  # lex_home, which is how _eval_site_features already reaches ExprToCL.
+  $self->fallback_parser->lex_home->{_open_regions} =
+    Pl::Parser::open_regions_of($doc);
+
   # `goto LABEL` cannot leave the enclosing subroutine in Perl (and a sort
   # comparator counts: "Can't goto out of a pseudo block") — when no such
   # label exists inside that barrier, the goto is a GUARANTEED runtime error
