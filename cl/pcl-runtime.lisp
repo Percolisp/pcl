@@ -15402,6 +15402,49 @@ buffer's fill-pointer; everything else falls back to file-length."
           4096
           (ceiling (sb-posix:stat-size st) 512)))
 
+;;; ============================================================
+;;; THE ONE STAT / FILETEST OPERAND RESOLVER
+;;; ============================================================
+;;; `stat`, `lstat` and the 27 filetests all take THE SAME operand, and perl
+;;; reads it ONE way.  `%p-stat-operand' IS that reading, and nothing else in
+;;; this family looks at its own argument (rule 11): the readings had drifted
+;;; into separate copies, which is how `-e STDOUT' answered false while
+;;; `stat STDOUT' answered thirteen elements.  Each rule below is probed
+;;; against perl 5.40.3 (the s470bs scratch probes p01/p03/p04/p05):
+;;;
+;;;  * a blessed operand whose class overloads `-X' lets the HANDLER answer
+;;;    (task #1031).  The handler is passed the operator's LETTER as its
+;;;    second argument and a false-but-defined third — probed
+;;;    ($obj, "e", "") — no stat runs, and the `_' cache is NOT touched
+;;;    (probed: `stat "/etc/passwd"; -e $ft; stat _' still answers 13).
+;;;    `stat'/`lstat' are not filetests and never ask: `stat $x' on a class
+;;;    that overloads only `-X' stringifies and fails.
+;;;
+;;;  * any other blessed or referencing operand STRINGIFIES — through the
+;;;    `""' handler when the class overloads it (once per test, probed), else
+;;;    the plain address form — and the string is a PATH (task #1031).
+;;;    `-e $path_object' is the everyday idiom this restores: Path::Tiny,
+;;;    Path::Class and friends are string-overloaded path objects, and the old
+;;;    answer was a silent "no such file", the worst shape the bug could take.
+;;;
+;;;  * a STRING is a PATH, always (task #1049).  `-e "FH"' tests a file called
+;;;    FH even while a handle of that name is open.  `-t' is the ONE
+;;;    exception, and it was measured rather than assumed: `-t "STDIN"'
+;;;    answers "" with ENOTTY (it FOUND the handle) while `-t "/etc/passwd"'
+;;;    answers undef with EBADF.
+;;;
+;;;  * a bareword, a glob VALUE (`*FH'), a glob REF (`\*FH'), an IO ref
+;;;    (`*$fh{IO}'), a lexical handle and a standard stream are all HANDLES,
+;;;    resolved through `%p-resolve-fh' — THE filehandle resolver — and
+;;;    fstat(2)ed by descriptor (task #1048).
+;;;
+;;;  * `_' re-reads the operand the previous stat/filetest left behind.
+;;;
+;;;  * `-l' NEVER takes a handle: it stringifies anything that is not a
+;;;    bareword.  Probed: `-l $lex' and `-l \*FH' both fail with ENOENT on the
+;;;    glob's own string, and op/filetest.t asserts that `-l \*foo' names a
+;;;    file.  A bareword goes into the handle slot and cannot be lstat'ed.
+
 ;;; `_` — perl's stat-cache filehandle.  `-e $f and -f _ and -r _` is an
 ;;; everyday idiom meaning "reuse the buffer from the last stat, do not stat
 ;;; again"; it saves two stat(2) calls.  The emitter lowers the bareword to a
@@ -15410,130 +15453,195 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; bare symbol: Perl subs emit as `pl-*` and Perl scalars keep their `$`.
 ;;;
 ;;; DELIBERATE DIVERGENCE from perl: perl caches the stat BUFFER and answers
-;;; from it with no syscall; PCL caches the OPERAND (path or stream) and stats
-;;; again.  Same answer outside a race, and it keeps each test's own logic —
-;;; access(2) for -r/-w/-x, lstat for -l, the first-block scan for -T/-B —
-;;; instead of reimplementing perl's buffer-vs-syscall table.
+;;; from it with no syscall; PCL caches the OPERAND (path or descriptor) and
+;;; stats again.  Same answer outside a race, and it keeps each test's own
+;;; logic — access(2) for -r/-w/-x, lstat for -l, the first-block scan for
+;;; -T/-B — instead of reimplementing perl's buffer-vs-syscall table.
 (defvar _ '%pcl-stat-cache
   "Perl's stat-cache filehandle `_`.  Its value is a marker: a filetest or
    stat receiving it re-uses the previous operand instead of its own.")
 
 (defvar *pcl-stat-cache-path* nil
-  "Operand of the most recent stat/lstat/filetest — a path string or a stream.
-   nil before the first one, which makes a premature `_` test false.")
+  "Operand of the most recent stat/lstat/filetest as the ONE resolver left it:
+   a path string, or an integer descriptor when the operand was a handle.  nil
+   before the first one, which makes a premature `_` test false.")
 
-(defun %p-stat-arg (file-or-fh)
-  "Resolve a stat/lstat argument to either a CL stream (filehandle) or a path
-   string.  Accepts a stream, a box holding a stream, a bareword/symbol or
-   string naming a filehandle, or a plain path string.  Also maintains the `_`
-   stat cache: the marker reads the remembered operand, anything else becomes
-   the remembered operand."
-  (let ((v (if (p-box-p file-or-fh) (p-box-value file-or-fh) file-or-fh)))
-    (when (eq v '%pcl-stat-cache)
-      (setf v *pcl-stat-cache-path*))
-    (setf *pcl-stat-cache-path* v)
+(defvar *pcl-stat-cache-fd* nil
+  "Whether *pcl-stat-cache-path* holds a DESCRIPTOR rather than a pathname.
+   The `_` marker must hand the kind back with the payload — re-classifying an
+   integer would read descriptor 3 as the file named \"3\".")
+
+(defun %p-stat-op-letter-p (op)
+  "Whether OP names a FILETEST (one letter) rather than `stat'/`lstat'.  Only
+   a filetest asks the `-X' overload, and only a filetest is spelled `-l'."
+  (= (length op) 1))
+
+(defun %p-stat-overload-answer (arg op)
+  "The value a `-X' overload handler gives for OP on ARG, or :none when there
+   is no handler (or OP is `stat'/`lstat', which never ask).  perl asks this
+   FIRST — before any stat and before the `\"\"' conversion — and passes the
+   handler the operator's letter and a false-but-defined third argument."
+  (if (and (%p-stat-op-letter-p op) (not (%p-no-overload-possible-p arg)))
+      (let ((h (p-find-overload arg "-X")))
+        (if h (p-call-overload h arg (make-p-box op) nil) :none))
+      :none))
+
+(defun %p-stat-handle-fd (v)
+  "The DESCRIPTOR behind a handle-shaped operand V — a stream, a socket, a
+   typeglob, a bareword handle name — or nil when V names no OPEN handle.
+   Goes through `%p-resolve-fh' and `%p-fd-of-stream', the two readings
+   `fileno' already uses, so a synonym stream (STDOUT and friends) and a
+   socket answer here exactly as they answer there."
+  (let ((s (%p-as-stream (%p-resolve-fh v))))
+    (and s (open-stream-p s) (%p-fd-of-stream s))))
+
+(defun %p-stat-handle-shaped-p (v)
+  "Whether the RAW value V (a box already peeled) is a filehandle DESIGNATOR
+   rather than a name: a stream, a socket object or a typeglob.  A SYMBOL is
+   handle-shaped too but is asked separately, because `-l' reads a bareword
+   and a glob differently."
+  (or (streamp v) (%p-socket-p v) (p-typeglob-p v)))
+
+(defun %p-stat-descriptor (v)
+  "The resolved form of a handle-shaped operand V: (:fd N) when the handle is
+   open, else the empty path, which fails as perl's does."
+  (let ((fd (%p-stat-handle-fd v)))
+    (if fd (values :fd fd) (values :path ""))))
+
+(defun %p-stat-resolve-box (arg v op)
+  "Resolve a BOXED operand ARG whose payload is V.  A payload that is itself a
+   handle designator is a handle; anything else STRINGIFIES THE BOX, which is
+   what runs the `\"\"' overload and a tie's FETCH — peeling the box first is
+   exactly how the handler never ran (task #1031)."
+  (if (and (%p-stat-handle-shaped-p v) (not (string= op "l")))
+      (%p-stat-descriptor arg)
+      (values :path (to-string arg))))
+
+(defun %p-stat-resolve (arg op)
+  "Classify a stat/filetest operand ARG for operator OP into (:path STRING) or
+   (:fd INTEGER).  THE one reading — see the section comment above."
+  (let ((v (if (p-box-p arg) (p-box-value arg) arg)))
     (cond
-      ((streamp v) v)
-      ((null v) "")                         ; `_` before any stat: no operand
-      ((or (symbolp v) (stringp v))
-       (let ((s (p-get-stream v)))          ; FH name → stream, else path
-         (cond (s (setf *pcl-stat-cache-path* s) s)
-               (t (to-string v)))))
-      (t (to-string v)))))
+      ((p-box-p arg) (%p-stat-resolve-box arg v op))
+      ((%p-stat-handle-shaped-p v)
+       (if (string= op "l")
+           (values :path (to-string v))
+           (%p-stat-descriptor v)))
+      ;; A bareword handle NAME.  `-l' never takes one, so it must not fall
+      ;; through to a path named after the handle.
+      ((symbolp v)
+       (if (string= op "l") (values :path "") (%p-stat-descriptor v)))
+      ((null v) (values :path ""))       ; `_` before any stat: no operand
+      ((stringp v) (values :path v))     ; a string is a PATH (task #1049)
+      (t (values :path (to-string v))))))
 
-(defun %p--path (file)
-  "Resolve a FILETEST operand to a path string, through the one stat-argument
-   funnel (so `_` and filehandle names work the same as for stat).  A stream
-   resolves through /dev/fd/N, which lets `-s $fh` stat the open handle."
-  (let ((arg (%p-stat-arg file)))
-    (if (streamp arg)
-        (handler-case (format nil "/dev/fd/~D" (sb-sys:fd-stream-fd arg))
-          (error () ""))
-        arg)))
+(defun %p-stat-operand (arg op)
+  "THE ONE resolution of a stat / lstat / filetest operand.  OP is the
+   operator's own name — one letter for a filetest, \"stat\" or \"lstat\" for
+   the two functions — because perl's answer depends on it in three places: a
+   `-X' handler is passed the letter, `-l' never accepts a handle, and only a
+   filetest asks the overload at all.
+
+   Two values, the KIND and its payload:
+     :over VALUE     a `-X' overload handler already answered; VALUE is it
+     :fd   INTEGER   fstat(2) this descriptor
+     :path STRING    stat(2) this pathname
+
+   Maintains the `_` cache: the marker reads the remembered operand (with its
+   kind), anything else becomes the remembered operand.  An overloaded answer
+   leaves the cache alone, as perl does."
+  (let ((ov (%p-stat-overload-answer arg op)))
+    (cond
+      ((not (eq ov :none)) (values :over ov))
+      ((eq (if (p-box-p arg) (p-box-value arg) arg) '%pcl-stat-cache)
+       (values (if *pcl-stat-cache-fd* :fd :path) *pcl-stat-cache-path*))
+      (t
+       (multiple-value-bind (kind val) (%p-stat-resolve arg op)
+         (setf *pcl-stat-cache-path* val
+               *pcl-stat-cache-fd*   (eq kind :fd))
+         (values kind val))))))
+
+(defun %p--path (kind val)
+  "The pathname to hand the filesystem for a resolved operand: the path
+   itself, or /dev/fd/N for a descriptor — which is what lets access(2) and
+   the -T/-B block scan work on an open handle."
+  (if (eq kind :fd) (format nil "/dev/fd/~D" val) val))
+
+(defun %p-stat-buf (kind val lstatp)
+  "Run the stat for an already-resolved operand: the sb-posix struct, or NIL
+   with the syscall's errno saved."
+  (handler-case
+      (if (eq kind :fd)
+          (sb-posix:fstat val)
+          (if lstatp (sb-posix:lstat val) (sb-posix:stat val)))
+    (error () (%pcl-save-errno) nil)))
 
 (defun %p-stat-impl (file-or-fh)
   "Perl stat — 13-element file-status list (dev ino mode nlink uid gid rdev
    size atime mtime ctime blksize blocks).  Follows symlinks.  nil on failure."
-  (let ((arg (%p-stat-arg file-or-fh)))
-    (handler-case
-        (%p-stat-vector
-         (if (streamp arg)
-             (sb-posix:fstat (sb-sys:fd-stream-fd arg))
-             (sb-posix:stat arg)))
-      (error () (%pcl-save-errno) nil))))
+  (multiple-value-bind (kind val) (%p-stat-operand file-or-fh "stat")
+    (let ((st (%p-stat-buf kind val nil)))
+      (and st (%p-stat-vector st)))))
 
 (defun %p-lstat-impl (file)
-  "Perl lstat — like stat but does NOT follow a symlink (reports the link)."
-  (let ((arg (%p-stat-arg file)))
-    (handler-case
-        (%p-stat-vector
-         (if (streamp arg)
-             (sb-posix:fstat (sb-sys:fd-stream-fd arg))
-             (sb-posix:lstat arg)))
-      (error () (%pcl-save-errno) nil))))
+  "Perl lstat — like stat but does NOT follow a symlink (reports the link).
+   Unlike `-l' it DOES accept a filehandle (probed: `lstat FH' answers 1)."
+  (multiple-value-bind (kind val) (%p-stat-operand file "lstat")
+    (let ((st (%p-stat-buf kind val t)))
+      (and st (%p-stat-vector st)))))
 
 ;;; ============================================================
-;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z)
+;;; File Test Operators (-e, -d, -f, -r, -w, -x, -s, -z, …)
 ;;; ============================================================
+;;; Every one of them is `%p--stat-test' (or `%p--access-test', or the -T/-B
+;;; block scan) over THE resolver above, so the operand rules cannot drift
+;;; from one operator to the next.
+
+(defun %p--stat-test (file op pred &key lstat)
+  "Shared body for every stat-based filetest: resolve FILE for OP through the
+   one operand resolver, stat (or lstat) it, and answer (funcall PRED struct).
+   A `-X' overload answers instead of the stat; a failed stat answers nil."
+  (multiple-value-bind (kind val) (%p-stat-operand file op)
+    (if (eq kind :over)
+        val
+        (let ((st (%p-stat-buf kind val lstat)))
+          (and st (funcall pred st))))))
+
+(defun %p--access-test (file op mode)
+  "Shared body for -r/-w/-x: resolve FILE, then access(2) with MODE.  perl
+   answers these from the stat buffer's mode bits against the effective ids;
+   PCL asks the kernel, which also honours ACLs."
+  (multiple-value-bind (kind val) (%p-stat-operand file op)
+    (if (eq kind :over)
+        val
+        (handler-case (progn (sb-posix:access (%p--path kind val) mode) 1)
+          (error () (%pcl-save-errno) nil)))))
 
 (defun %p--e-impl (file)
-  "Perl -e: test if file exists"
-  (let* ((path (%p--path file))
-         ;; The empty path is ENOENT in perl, but (probe-file "") answers the
-         ;; CWD in SBCL — so reject it before probing.  It reaches here from
-         ;; undef and from `_` used before any stat.
-         (exists (and (plusp (length path))
-                      (or (probe-file (%p-literal-path path))
-                          ;; probe-file may fail on directories in some implementations
-                          (ignore-errors
-                            (sb-posix:stat path)
-                            t)))))
-    (if exists 1 nil)))
+  "Perl -e: the file exists — a stat that succeeds, which is perl's own test."
+  (%p--stat-test file "e" (lambda (st) (declare (ignore st)) 1)))
 
 (defun %p--d-impl (file)
   "Perl -d: test if file is a directory"
-  (handler-case
-      (let ((stat (sb-posix:stat (%p--path file))))
-        (if (sb-posix:s-isdir (sb-posix:stat-mode stat))
-            1
-            nil))
-    (error () nil)))
+  (%p--stat-test file "d"
+                 (lambda (st) (if (sb-posix:s-isdir (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--f-impl (file)
   "Perl -f: test if file is a regular file"
-  (handler-case
-      (let ((stat (sb-posix:stat (%p--path file))))
-        (if (sb-posix:s-isreg (sb-posix:stat-mode stat))
-            1
-            nil))
-    (error () nil)))
+  (%p--stat-test file "f"
+                 (lambda (st) (if (sb-posix:s-isreg (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--r-impl (file)
   "Perl -r: test if file is readable"
-  (let ((path (%p--path file)))
-    (handler-case
-        (progn
-          (sb-posix:access path sb-posix:r-ok)
-          1)
-      (error () nil))))
+  (%p--access-test file "r" sb-posix:r-ok))
 
 (defun %p--w-impl (file)
   "Perl -w: test if file is writable"
-  (let ((path (%p--path file)))
-    (handler-case
-        (progn
-          (sb-posix:access path sb-posix:w-ok)
-          1)
-      (error () nil))))
+  (%p--access-test file "w" sb-posix:w-ok))
 
 (defun %p--x-impl (file)
   "Perl -x: test if file is executable"
-  (let ((path (%p--path file)))
-    (handler-case
-        (progn
-          (sb-posix:access path sb-posix:x-ok)
-          1)
-      (error () nil))))
+  (%p--access-test file "x" sb-posix:x-ok))
 
 (defun %p--s-impl (file)
   "Perl -s: the file's SIZE — the one filetest whose answer is a value rather
@@ -15542,112 +15650,105 @@ buffer's fill-pointer; everything else falls back to file-length."
    where perl prints 0).  undef only when the stat FAILS — that is perl's own
    split, and it is what keeps `-s $missing` distinguishable from `-s $empty`.
    0 is false to p-true-p, so every boolean use is unchanged."
-  (handler-case
-      (sb-posix:stat-size (sb-posix:stat (%p--path file)))
-    (error () nil)))
+  (%p--stat-test file "s" #'sb-posix:stat-size))
 
 (defun %p--z-impl (file)
   "Perl -z: test if file has zero size"
-  (handler-case
-      (let* ((stat (sb-posix:stat (%p--path file)))
-             (size (sb-posix:stat-size stat)))
-        (if (= size 0) 1 nil))
-    (error () nil)))
-
-(defun %p--stat-test (file pred &key lstat)
-  "Shared body for the mode-bit filetests: stat (or lstat) FILE, apply PRED
-   to the stat struct, return Perl truth (1/nil); any stat error is nil."
-  (handler-case
-      (let ((stat (if lstat
-                      (sb-posix:lstat (%p--path file))
-                      (sb-posix:stat (%p--path file)))))
-        (if (funcall pred stat) 1 nil))
-    (error () nil)))
+  (%p--stat-test file "z"
+                 (lambda (st) (if (= (sb-posix:stat-size st) 0) 1 nil))))
 
 (defun %p--l-impl (file)
-  "Perl -l: test if file is a symbolic link (lstat, not stat)"
-  (%p--stat-test file
-                 (lambda (s) (sb-posix:s-islnk (sb-posix:stat-mode s)))
+  "Perl -l: test if file is a symbolic link (lstat, not stat).  It is the one
+   filetest that NEVER takes a filehandle — see the resolver's `-l' rule."
+  (%p--stat-test file "l"
+                 (lambda (st) (if (sb-posix:s-islnk (sb-posix:stat-mode st)) 1 nil))
                  :lstat t))
 
 (defun %p--p-impl (file)
   "Perl -p: test if file is a named pipe (FIFO)"
-  (%p--stat-test file (lambda (s) (sb-posix:s-isfifo (sb-posix:stat-mode s)))))
+  (%p--stat-test file "p"
+                 (lambda (st) (if (sb-posix:s-isfifo (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--S-impl (file)
   "Perl -S: test if file is a socket"
-  (%p--stat-test file (lambda (s) (sb-posix:s-issock (sb-posix:stat-mode s)))))
+  (%p--stat-test file "S"
+                 (lambda (st) (if (sb-posix:s-issock (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--b-impl (file)
   "Perl -b: test if file is a block special file"
-  (%p--stat-test file (lambda (s) (sb-posix:s-isblk (sb-posix:stat-mode s)))))
+  (%p--stat-test file "b"
+                 (lambda (st) (if (sb-posix:s-isblk (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--c-impl (file)
   "Perl -c: test if file is a character special file"
-  (%p--stat-test file (lambda (s) (sb-posix:s-ischr (sb-posix:stat-mode s)))))
+  (%p--stat-test file "c"
+                 (lambda (st) (if (sb-posix:s-ischr (sb-posix:stat-mode st)) 1 nil))))
 
 (defun %p--u-impl (file)
   "Perl -u: test if file has the setuid bit set"
-  (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o4000))))
+  (%p--stat-test file "u"
+                 (lambda (st) (if (logtest (sb-posix:stat-mode st) #o4000) 1 nil))))
 
 (defun %p--g-impl (file)
   "Perl -g: test if file has the setgid bit set"
-  (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o2000))))
+  (%p--stat-test file "g"
+                 (lambda (st) (if (logtest (sb-posix:stat-mode st) #o2000) 1 nil))))
 
 (defun %p--k-impl (file)
   "Perl -k: test if file has the sticky bit set"
-  (%p--stat-test file (lambda (s) (logtest (sb-posix:stat-mode s) #o1000))))
+  (%p--stat-test file "k"
+                 (lambda (st) (if (logtest (sb-posix:stat-mode st) #o1000) 1 nil))))
 
 (defun %p--o-impl (file)
   "Perl -o: test if file is owned by the effective uid"
-  (%p--stat-test file (lambda (s) (= (sb-posix:stat-uid s) (sb-posix:geteuid)))))
+  (%p--stat-test file "o"
+                 (lambda (st) (if (= (sb-posix:stat-uid st) (sb-posix:geteuid)) 1 nil))))
 
 (defun %p--O-impl (file)
   "Perl -O: test if file is owned by the real uid"
-  (%p--stat-test file (lambda (s) (= (sb-posix:stat-uid s) (sb-posix:getuid)))))
+  (%p--stat-test file "O"
+                 (lambda (st) (if (= (sb-posix:stat-uid st) (sb-posix:getuid)) 1 nil))))
 
 ;; -R/-W/-X are the real-uid variants of -r/-w/-x.  perl uses access() vs
 ;; eaccess(); the two differ only in setuid/setgid programs, which PCL
 ;; programs are not, so the effective-uid tests stand in.
 (defun %p--R-impl (file)
   "Perl -R: readable by the REAL uid (== -r for non-setuid programs)"
-  (%p--r-impl file))
+  (%p--access-test file "R" sb-posix:r-ok))
 
 (defun %p--W-impl (file)
   "Perl -W: writable by the REAL uid (== -w for non-setuid programs)"
-  (%p--w-impl file))
+  (%p--access-test file "W" sb-posix:w-ok))
 
 (defun %p--X-impl (file)
   "Perl -X: executable by the REAL uid (== -x for non-setuid programs)"
-  (%p--x-impl file))
+  (%p--access-test file "X" sb-posix:x-ok))
 
-(defun %p--file-age (file accessor)
+(defun %p--file-age (file op accessor)
   "Days between program start ($^T) and the ACCESSOR time of FILE (-M/-A/-C).
    $^T is referenced via symbol-value: its defvar appears later in this file."
-  (handler-case
-      (let ((stat (sb-posix:stat (%p--path file))))
-        (/ (- (symbol-value '|$^T|) (funcall accessor stat)) 86400.0d0))
-    (error () nil)))
+  (%p--stat-test file op
+                 (lambda (st)
+                   (/ (- (symbol-value '|$^T|) (funcall accessor st)) 86400.0d0))))
 
 (defun %p--M-impl (file)
   "Perl -M: script start time minus file modification time, in days"
-  (%p--file-age file #'sb-posix:stat-mtime))
+  (%p--file-age file "M" #'sb-posix:stat-mtime))
 
 (defun %p--A-impl (file)
   "Perl -A: script start time minus file access time, in days"
-  (%p--file-age file #'sb-posix:stat-atime))
+  (%p--file-age file "A" #'sb-posix:stat-atime))
 
 (defun %p--C-impl (file)
   "Perl -C: script start time minus file inode-change time, in days"
-  (%p--file-age file #'sb-posix:stat-ctime))
+  (%p--file-age file "C" #'sb-posix:stat-ctime))
 
-(defun %p--text-scan (file)
-  "First-block scan for -T/-B (perl's heuristic): :empty, :text or :binary.
-   A NUL byte in the first 512 bytes means binary; else >30% odd bytes
-   (high-bit set, or controls outside TAB/LF/FF/CR/ESC) means binary."
+(defun %p--scan-first-block (path)
+  "perl's -T/-B heuristic over the first block of PATH: :empty, :text or
+   :binary.  A NUL byte in the first 512 bytes means binary; else >30% odd
+   bytes (high-bit set, or controls outside TAB/LF/FF/CR/ESC) means binary."
   (handler-case
-      (with-open-file (s (%p-literal-path (%p--path file))
-                         :element-type '(unsigned-byte 8))
+      (with-open-file (s (%p-literal-path path) :element-type '(unsigned-byte 8))
         (let* ((buf (make-array 512 :element-type '(unsigned-byte 8)))
                (n (read-sequence buf s)))
           (if (zerop n)
@@ -15655,25 +15756,31 @@ buffer's fill-pointer; everything else falls back to file-length."
               (let ((odd 0))
                 (dotimes (i n)
                   (let ((b (aref buf i)))
-                    (when (zerop b) (return-from %p--text-scan :binary))
+                    (when (zerop b) (return-from %p--scan-first-block :binary))
                     (when (or (> b 127)
-                              (and (< b 32)
-                                   (not (member b '(9 10 12 13 27)))))
+                              (and (< b 32) (not (member b '(9 10 12 13 27)))))
                       (incf odd))))
                 (if (> (* 10 odd) (* 3 n)) :binary :text)))))
-    (error () nil)))
+    (error () (%pcl-save-errno) nil)))
+
+(defun %p--text-scan (file op)
+  "The -T/-B first-block scan over THE resolver.  Two values: the scan
+   verdict (:empty/:text/:binary, or nil when the file could not be read) and
+   a `-X' overload's answer when one replaced the scan."
+  (multiple-value-bind (kind val) (%p-stat-operand file op)
+    (if (eq kind :over)
+        (values nil val)
+        (values (%p--scan-first-block (%p--path kind val)) nil))))
 
 (defun %p--T-impl (file)
   "Perl -T: heuristic text-file test (empty files are text)"
-  (case (%p--text-scan file)
-    ((:empty :text) 1)
-    (t nil)))
+  (multiple-value-bind (scan ov) (%p--text-scan file "T")
+    (if ov ov (case scan ((:empty :text) 1) (t nil)))))
 
 (defun %p--B-impl (file)
   "Perl -B: heuristic binary-file test (empty files are binary too, as in perl)"
-  (case (%p--text-scan file)
-    ((:empty :binary) 1)
-    (t nil)))
+  (multiple-value-bind (scan ov) (%p--text-scan file "B")
+    (if ov ov (case scan ((:empty :binary) 1) (t nil)))))
 
 ;;; A BAREWORD FILEHANDLE IS A NAME IN A stat / FILETEST SLOT TOO (task #1032).
 ;;; `stat FH` and `-e FH` emitted the bare CL symbol FH, which is an UNBOUND
@@ -15685,8 +15792,8 @@ buffer's fill-pointer; everything else falls back to file-length."
 ;;; Every other handle-taking builtin already answers this with `%p-fh-arg` at
 ;;; its call site — p-open, p-close, p-eof, p-tell, p-seek, p-binmode,
 ;;; p-fileno, p-readline, and `p--t`, which IS a filetest and is therefore the
-;;; sibling this family had all along (rule 11).  `%p-stat-arg`, the one funnel
-;;; both `stat` and `%p--path` already go through, has always accepted a symbol
+;;; sibling this family had all along (rule 11).  `%p-stat-operand`, the one
+;;; funnel `stat`, `lstat` and every filetest go through, resolves a symbol
 ;;; naming a handle; the only thing missing was the QUOTE at the call site.
 ;;; So the public name becomes a macro and the body keeps its name with a
 ;;; `%`…`-impl` spelling, exactly as `p--t` / `%p--t-impl` already do.

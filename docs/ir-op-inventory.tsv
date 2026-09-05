@@ -132,7 +132,7 @@ $~	variable	magic-global		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UN
 *pcl-caller-subname-stack*	variable	package-tracking		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
 *pcl-caller-wantarray*	variable	context-frame		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Saved *wantarray* from sub entry. p-wantarray reads this so wantarray() always reflects the context of the CURRENT sub's caller, even when *wantarray* has been 
 *pcl-current-package*	variable	package-tracking		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
-*pcl-stat-cache-path*	variable	filetest		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Operand of the most recent stat/lstat/filetest — a path string or a stream. nil before the first one, which makes a premature `_` test false.
+*pcl-stat-cache-path*	variable	filetest		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Operand of the most recent stat/lstat/filetest as the ONE resolver left it: a path string, or an integer descriptor when the operand was a handle. nil before th
 *pcl-sub-call-depth*	variable	context-frame		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		
 *unitcheck-blocks*	variable	phase		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		UNITCHECK thunks (push = LIFO = perl's reverse order)
 *wantarray*	variable	context-frame		UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED	UNCLASSIFIED		Context for the current call: t=list, nil=scalar, :void=void.

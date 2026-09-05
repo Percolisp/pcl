@@ -47,7 +47,7 @@ my @sbcl_rt = PCLCore::sbcl_prefix($runtime);
 plan skip_all => "pl2cl not found" unless -x $pl2cl;
 plan skip_all => "sbcl not found"  unless `which sbcl 2>/dev/null`;
 
-plan tests => 55;
+plan tests => 89;
 
 my $workdir = tempdir(CLEANUP => 1);
 
@@ -70,6 +70,15 @@ my $PROG = <<'PERL';
 no warnings;
 use constant CPATH => $ENV{PCL_GUARD_FILE};
 sub SPATH { $ENV{PCL_GUARD_FILE} }
+{ package StrOv;  use overload '""' => sub { $ENV{PCL_GUARD_FILE} }, fallback => 1; }
+{ package FtOv;   use overload '-X' => sub { $FtOv::seen = $_[1]; "-$_[1]" }, fallback => 1; }
+{ package BothOv; use overload '""' => sub { "/nonexistent-zz" },
+                               '-X' => sub { "-$_[1]" }, fallback => 1; }
+{ package NoneOv; use overload '+' => sub { 1 }, fallback => 1; }
+my $sov = bless {}, 'StrOv';
+my $fov = bless {}, 'FtOv';
+my $bov = bless {}, 'BothOv';
+my $nov = bless {}, 'NoneOv';
 my $tmp = $ENV{PCL_GUARD_FILE};
 open(OUT, '>', $tmp) or die "open OUT: $!";
 print OUT "hello\n";
@@ -105,6 +114,37 @@ print "24=", (-e main::FH ? 1 : 0), "\n";
 my @h = stat(main::FH); print "25=", scalar(@h), "\n";
 print "26=", (defined(-M FH) ? "ok" : "bad"), "\n";
 print "27=", (fileno(STDOUT) >= 0 ? "ok" : "bad"), "\n";
+# --- s470bs: THE ONE OPERAND RESOLVER (tasks #1031 #1048 #1049) ------------
+# A STRING is a PATH even while a handle of that name is open (#1049).
+print "28=", (-e "FH" ? 1 : 0), "\n";
+# A glob VALUE, a glob REF and a standard stream are HANDLES (#1048).
+print "29=", (-e *FH ? 1 : 0), "\n";
+print "30=", (-f \*FH ? 1 : 0), "\n";
+print "31=", (-e STDOUT ? 1 : 0), "\n";
+my @gv = stat(*FH);   print "32=", scalar(@gv), "\n";
+my @gr = stat(\*FH);  print "33=", scalar(@gr), "\n";
+my @so = stat(STDOUT);print "34=", scalar(@so), "\n";
+# `-l' is the ONE filetest that never takes a handle: it stringifies, so a
+# glob is a (nonexistent) FILE NAME rather than the open file's inode.
+print "35=", (-l \*FH ? 1 : 0), "\n";
+# A blessed operand with a `""' overload STRINGIFIES to a path (#1031) — the
+# Path::Tiny idiom, whose old answer was a silent "no such file".
+print "36=", (-e $sov ? 1 : 0), "\n";
+print "37=", (-s $sov), "\n";
+my @sv = stat($sov); print "38=", scalar(@sv), "\n";
+# A `-X' handler ANSWERS, and is passed the operator's letter.
+print "39=", (-e $fov), "\n";
+print "40=", (-f $fov), "\n";
+print "41=", $FtOv::seen, "\n";
+# `-X' wins over `""' when a class has both, and an overloaded filetest does
+# NOT disturb the `_' cache (probed 5.40.3).
+print "42=", (-e $bov), "\n";
+my @cv = stat($tmp);
+my $ign = -e $fov;
+my @af = stat(_);  print "43=", scalar(@af), "\n";
+# A class that overloads something else entirely falls back to the PLAIN
+# stringification, so the answer matches the address string's own.
+print "44=", ((-e $nov ? 1 : 0) == (-e "$nov" ? 1 : 0) ? "same" : "differ"), "\n";
 close(FH);
 unlink $tmp;
 PERL
@@ -137,6 +177,25 @@ my %EXPECT = (
     '25' => '13',
     '26' => 'ok',   # -M reaches a value (its VALUE is #1042, pre-existing)
     '27' => 'ok',
+    # --- s470bs: THE ONE OPERAND RESOLVER -------------------------------
+    '28' => '0',    # a STRING is a PATH, not the open handle it names (#1049)
+    '29' => '1',    # a glob VALUE is a handle (#1048)
+    '30' => '1',    # a glob REF is a handle
+    '31' => '1',    # a standard stream is a handle — it has no pathname, so
+                    #   this is the row that forces fstat(fileno) (#1048)
+    '32' => '13',
+    '33' => '13',
+    '34' => '13',
+    '35' => '0',    # `-l' stringifies: a glob is a FILE NAME, never a handle
+    '36' => '1',    # a `""'-overloaded operand STRINGIFIES to a path (#1031)
+    '37' => '6',
+    '38' => '13',
+    '39' => '-e',   # a `-X' handler ANSWERS, and gets the operator's letter
+    '40' => '-f',
+    '41' => 'f',
+    '42' => '-e',   # `-X' beats `""' when a class declares both
+    '43' => '13',   # an overloaded filetest leaves the `_' cache alone
+    '44' => 'same', # any other overloading falls back to plain stringification
 );
 
 my $n = 0;
