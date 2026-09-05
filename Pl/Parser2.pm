@@ -8521,6 +8521,14 @@ sub _lower_block {
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $first };
 
+  # #1140: publish THIS region's VarAnnotator verdicts for _lower_expr to hand
+  # ExprToCL (the Kind-A `local-push` rule reads the ARRAY entries).  Same two
+  # places as the line above and for the same reason — the declaration paths
+  # below lower expressions without reaching _lower_stmt — and `local` so a
+  # nested sub body lowered mid-statement restores the enclosing region's
+  # verdicts when it returns.
+  local $self->{_cur_vi} = $vi;
+
   # -- local …;  → v1's local machinery via the fallback seam; the opened
   # save/restore scope wraps the lowered block remainder (see _lower_local).
   # Standalone `delete local $h{k};` is a plain PPI::Statement with the same
@@ -9591,6 +9599,7 @@ sub _lower_stmt {
   # reach here on their own (a compound's parts, a for-head's init/step).
   $self->fallback_parser->lex_home->{_eval_site_features} =
     $self->{_eval_features_by_stmt}{ refaddr $stmt };
+  local $self->{_cur_vi} = $vi;      # #1140, same pairing (see _lower_block)
 
   # `class NAME ;` in a file that has actually switched the feature on: the
   # indirect-object reading PCL would otherwise emit is a silent method call
@@ -10342,6 +10351,32 @@ sub _lower_compound {
     # because it is what makes `:my t` present, and p-foreach-raw refuses the
     # package-cell arm.
     my $ro = $loop_my && $var && $vi->{$name} && $vi->{$name}{foreach_ro};
+    # #1140: the read-only verdict is about the LOOP VARIABLE, and that is not
+    # the whole question.  `for my $x (@fa) { $fa[0] = 99; print $x }` printed
+    # 1 where perl prints 99 — the slot's VALUE was bound before another path
+    # wrote the slot.  When the list is a bare `my @a` of THIS region, the
+    # array facts answer it: `escapes` covers a write through a reference, a
+    # callee or a closure, `written_in` a direct write in this loop's own
+    # body.  The conjunct is applied HERE, not folded into `foreach_ro`,
+    # because the verdict is name-keyed and two loops can share `$x` while
+    # iterating different arrays.  An array with no entry — a package array,
+    # `@_`, a lexical declared in an enclosing region — keeps the pre-#1140
+    # verdict; that boundary is the family's, stated in VarAnnotator.
+    #
+    # THIS IS ALSO WHAT MAKES `classic-sort`'s FOREACH LICENCE EXACT.  That
+    # pass counts a `p-foreach-raw` list as a copying consumer by consulting
+    # this very verdict, so `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99 }`
+    # stops taking the value-sorting fast path for the same reason the plain
+    # loop stops taking the raw arm — hence "every array named in the list",
+    # not just a bare `@a`.
+    if ($ro) {
+      for my $la (_list_array_names(\@list_parts)) {
+        my $af = $vi->{$la} or next;
+        next unless $af->{escapes} || $af->{written_in}{ refaddr $block };
+        $ro = 0;
+        last;
+      }
+    }
     return defined $to_form
       ? [($range_raw ? 'p-foreach-range-raw' : 'p-foreach-range'),
          ['list', $cl_name, $from_form, $to_form],
@@ -10398,6 +10433,31 @@ sub _lower_compound {
 # loop var aliases nothing (→ raw-slot candidate), so there is exactly one
 # definition of "the list is one range".
 sub _foreach_range_split { Pl::VarAnnotator::foreach_range_split(@_) }
+
+# #1140: every unqualified array NAMED anywhere in a foreach LIST.  Not just
+# a bare `@a`: perl's foreach aliases whatever the list produces, and `sort`,
+# `reverse`, `values` and a plain comma list all hand the SOURCE array's
+# elements through (probed — `$_++ for reverse @a` increments @a), so
+# `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99; print $x }` is perl 99
+# too.  Over-collecting is the safe direction: an array named in the list but
+# not actually aliased only costs the loop its raw arm.
+sub _list_array_names {
+  my ($parts) = @_;
+  my %seen;
+  for my $p (grep { ref $_ } @$parts) {
+    my @toks = $p->isa('PPI::Node') ? $p->tokens : ($p);
+    for my $t (@toks) {
+      next unless $t->isa('PPI::Token::Symbol');
+      my $c = $t->content // '';
+      $seen{$c} = 1                if $c =~ /^\@\w+$/;   # @a, @a[…]
+      $seen{'@' . $1} = 1          if $c =~ /^\$(\w+)$/  # $a[i] — element
+                                   && do { my $nx = $t->snext_sibling;
+                                           $nx && $nx->isa('PPI::Structure::Subscript')
+                                              && $nx->start && $nx->start->content eq '[' };
+    }
+  }
+  return keys %seen;
+}
 
 # #761: the constructs a raw-topic loop body may contain.  Deliberately a
 # SHORT ALLOWLIST rather than a denylist — the question "can this reach code
@@ -11095,8 +11155,9 @@ sub _lower_expr {
     # residue is only the genuinely-declining subtrees.  The two facts are
     # what the Kind-A rules in ExprToCL read.
     $p->_parse_expression_form(\@parts, $stmt, $fb_ctx,
-      sub_info => $self->_cur_sub_info,
-      lexicals => $self->{_let_bound_vars} // {});
+      sub_info   => $self->_cur_sub_info,
+      lexicals   => $self->{_let_bound_vars} // {},
+      var_facts  => $self->{_cur_vi} // {});
   };
   die "Parser2: expression fallback failed for: " . join(' ', map { $_->content } @parts)
     unless defined $form;

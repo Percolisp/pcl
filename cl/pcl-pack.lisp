@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-710
+;;; pcl: pipeline=v2 gen=v2-720
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -1940,9 +1940,9 @@
                   (p-let (($c :box (make-p-box nil)))
                     (p-my-= $c (p-substr $tmpl $i 1))
                     (p-if (p-str-eq $c "[")
-                      (progn (p-push @stk "["))
+                      (progn (%p-push1 @stk "["))
                       (p-if (p-str-eq $c "(")
-                        (progn (p-push @stk "("))
+                        (progn (%p-push1 @stk "("))
                         (p-if (p-str-eq $c "]")
                           (progn
                             (p-if (p-|| (p-! @stk) (p-str-ne (p-aref @stk -1) "["))

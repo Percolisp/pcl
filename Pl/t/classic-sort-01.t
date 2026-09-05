@@ -32,14 +32,16 @@
 # aliases through, so it keeps the general form; `eval { }' and a sub tail do
 # copy.  Both are rows below.
 #
-# WHAT IS DELIBERATELY *NOT* ASSERTED HERE: the (A) `foreach-raw' member
-# inherits foreach-raw's own condition — the loop variable is only ever READ —
-# and neither verdict covers a write to the ARRAY by another path during the
-# loop, because VarAnnotator has no array facts.  `for my $x (@fa)
-# { $fa[0] = 99; print $x; last }' already diverges from perl under
-# `PCL_OPT=-foreach-raw' alone, so the sort-fed spelling is exactly as sound
-# as the plain one.  No row here asserts that wrong answer; task #1140 (the
-# array-fact family) is what makes both exact.
+# THE (A) `foreach-raw' MEMBER'S BOUNDARY, WHICH IS NOW EXACT (s470bj, task
+# #1140): that verdict says the loop variable is only ever READ, which does
+# not by itself cover a write to the ARRAY by another path during the loop.
+# VarAnnotator's array facts supply the other half, so Parser2 emits
+# `p-foreach-raw' only when every array NAMED in the list is a non-escaping
+# `my @a' the body does not write — and this pass inherits the fix by reading
+# that head.  `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99; print $x;
+# last }' prints perl's 99 now; the row lives in Pl/t/array-facts-01.t
+# (`classic-sort follows: the sorted SOURCE array is written in the body'),
+# beside its plain twin, because both are one fact.
 
 use v5.30;
 use strict;

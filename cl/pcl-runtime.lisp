@@ -167,6 +167,8 @@
    #:p-aslice #:p-hslice #:p-kv-hslice #:p-kv-aslice #:p-list-scalar #:p-slice-result
    #:p-hash #:p-array-init #:p-array-last-index #:p-set-array-length
    #:p-push #:p-pop #:p-shift #:p-unshift #:p-splice #:p-flatten #:p-flatten-args
+   ;; the local-push fast path (task #996 A3) — emitted, so exported
+   #:%p-push1
    #:p-check-arity #:p-sig-rest-array #:p-sig-rest-hash
    #:p-keys #:p-values #:p-each #:p-exists #:p-exists-array #:p-delete #:p-delete-array
    #:p-delete-hash-slice #:p-delete-kv-hash-slice #:p-delete-array-slice #:p-delete-kv-array-slice
@@ -9253,6 +9255,35 @@ create the key on a read-only call, which perl does not."
         (t (%p-array-store-scalar arr item)))))
   (length arr))
 
+(declaim (inline %p-push1))
+(defun %p-push1 (arr item)
+  "THE `local-push' FAST PATH (task #996 half A3, licensed by task #1140's
+VarAnnotator array facts): append ONE scalar to a `my @a' that nothing else
+can reach.  Perl's push returns the array's new length.
+
+The store is `%p-array-store-scalar' — deliberately the SAME function
+p-push-impl calls for a scalar item, so the copy semantics, the
+blessed/dualvar/is-ref rules and the raw-element gate cannot drift between
+the two paths.  What is skipped is everything p-push-impl needs only because
+its arguments are unknown: the p-push macro's per-call `(boundp '@a)'
+auto-declare (a declared `my @a' always has its cell), the `&rest' list
+consing, the array-shape type test that separates a real growable array from
+a read-only one or a non-array (`%p-push-cold'), and the four-way per-item
+cond (flatten marker / raw vector / raw hash / scalar).
+
+SOUND ONLY because the compiler proved BOTH halves: the array is a
+non-escaping `my @a' declared in the emitting region, and the argument's own
+shape produces exactly one scalar.  `push @a, @b' / `%h' / a list-valued call
+must keep p-push-impl — the flattening is what the four-way cond is for.
+
+If the licence were ever WRONG the failure is LOUD, not silent (rule 12): a
+read-only array is a simple vector, so `%p-vpush' finds no fill pointer and
+VECTOR-PUSH-EXTEND signals; a non-array signals a type error.  It cannot be
+reached today — `Internals::SvREADONLY(@a, 1)' passes the array to a call,
+which is one of #1140's escape spellings (probed)."
+  (%p-array-store-scalar arr item)
+  (length arr))
+
 (defun p-pop (arr)
   "Perl pop - removes from end, returns the element as-is (preserving references)."
   (%p-check-array-writable arr)              ; task #159
@@ -15645,7 +15676,7 @@ buffer's fill-pointer; everything else falls back to file-length."
 (defparameter *pcl-cache-dir*
   (merge-pathnames ".pcl-cache/" (user-homedir-pathname))
   "Directory for cached compiled modules")
-(defparameter *pcl-cache-generation* "v2-710"
+(defparameter *pcl-cache-generation* "v2-720"
   "Mixed into cache paths together with the effective pipeline; bump on any
    codegen change that invalidates cached module transpiles (pipeline flips,
    major emission changes).")

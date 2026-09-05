@@ -69,6 +69,7 @@ our %KIND_A = (
   'raw-closure-capture' => 'VarAnnotator nested-sub-ref: an anon sub CAPTURING a name is not itself a boxing event (a CL closure captures a raw let slot natively) — only a real boxing event inside the closure vetoes',
   'raw-topic'      => 'Parser2 foreach: a topic loop `for (A..B) {…}` whose body has no dynamic `$_` reader binds `$_` as a raw per-iteration lexical (p-foreach-range-raw) instead of localizing the global',
   'raw-return-family' => "Parser2 sub_info `returns` + VarAnnotator write family (task #77): a root write `my \$x = f()` calling a KNOWN user sub whose every return is operator-coerced or literal takes THAT family, so the slot is a PROVEN raw write (no strict-freeze wrapper) instead of an unproven shape",
+  'local-push'     => "VarAnnotator array facts (task #1140) + ExprToCL's push emission: `push \@a, SCALAR` on a NON-ESCAPING `my \@a` is (%p-push1 \@a X) -- %p-array-store-scalar plus the new length -- instead of p-push-impl's &rest consing, array-shape type test and four-way per-item cond (task #996 half A3)",
   'foreach-raw'    => 'VarAnnotator foreach_ro + Parser2 foreach: a `for my $v (LIST)` whose only region event is the foreach alias itself AND which has no native-write fact either (a root `$v = …` / `$v *= 2` / `$v++` leaves no event) — i.e. every use is a pure read — lowers to p-foreach-raw, which binds the slot AS IT STANDS instead of promoting each element to a box (boxed-aggregates design SS4.4, the proven arm)',
 );
 

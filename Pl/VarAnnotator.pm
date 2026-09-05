@@ -86,6 +86,8 @@ use v5.30;
 use strict;
 use warnings;
 
+use Scalar::Util qw(refaddr);
+
 use Pl::PExpr ();
 use Pl::Passes ();
 
@@ -199,6 +201,163 @@ sub arg_writing_builtin {
   return 0;
 }
 
+# ==========================================================================
+# THE ARRAY FACTS (task #1140) — the SECOND name kind this walker classifies.
+# ==========================================================================
+#
+# Until s470bj `Pl::VarAnnotator` was scalar-only by construction: the decl
+# walk did `next unless $var =~ /^\$\w+$/`, so no `@name` ever got a verdict
+# and three separate items were waiting on the same missing family (#1140).
+# Two facts per `my @name` declared in the region, both computed by the ONE
+# walk below — no second scanner (standing rule §8, docs/var-handling-review-s379):
+#
+#   escapes       — the container, or any of its elements, is reachable under
+#                   a name other than this lexical: a reference is taken
+#                   (`\@a`, `\$a[i]`), it is passed WHOLE to a call or handed
+#                   to an aliasing builtin, a nested sub (anon OR named)
+#                   names it, it is tied, a string eval sits in the region, it
+#                   is redeclared, or it appears in a position this walk has
+#                   NOT classified.  The default for an unclassified position
+#                   is ESCAPE, so a spelling nobody thought of costs an
+#                   optimization, never a value.
+#   written_in(R) — a direct write to the array inside the PPI region R (the
+#                   body block of a `for`/`foreach`), keyed by that block's
+#                   refaddr: whole assignment, push/pop/shift/unshift/splice,
+#                   element or slice assignment (compound and ++/-- included),
+#                   `chomp @a`, `undef @a`, an `s///` on an element, `$#a =`.
+#
+# WHAT THEY LICENSE (the consumers; each is one conjunct on an existing
+# verdict, never a second walk):
+#   * Kind-A `local-push` (ExprToCL's push emission): `push @a, SCALAR` on a
+#     non-escaping `my @a` is `(%p-push1 @a X)` — %p-array-store-scalar plus
+#     the new length — instead of p-push-impl's &rest consing, array-shape
+#     type test and four-way per-item cond.
+#   * `foreach-raw` (Parser2's foreach lowering): the existing read-only
+#     LOOP-VARIABLE verdict gains `!escapes && !written_in(body)` when the
+#     list is a bare `my @a`.  That closes #1140's hole — `for my $x (@fa) {
+#     $fa[0] = 99; print $x; last }` printed 1 where perl prints 99, because
+#     the slot's VALUE was bound before the write.
+#   * `classic-sort`'s foreach licence (Pl/ClassicSort.pm) consults the
+#     `p-foreach-raw` head, so it inherits the fix by construction.
+#
+# THE LIST IS SHORT BY MEASUREMENT, NOT BY INTUITION.  `reverse @a`,
+# `sort @a` with NO block, `values @a`, `map` and `grep` ALL hand the caller
+# aliases of the elements — probed against perl 5.40.3
+# (`$_++ for reverse @a` increments @a; scratch/s470bj/probe/sem1.pl).  What
+# does copy: `join`/`print`/`sprintf`, `push @b, @a`, `return @a` and a sub's
+# tail value (the call boundary copies — the same probe, and the finding
+# Pl/ClassicSort.pm's licence B already rests on).
+my %ARRAY_READ_FN = map { $_ => 1 } qw(print say printf sprintf join
+                                       scalar defined warn die
+                                       if unless while until);
+# The last four are not calls at all: a statement MODIFIER with no expression
+# in front of it (`last unless @seqs;`, `next if @a;`) does not meet
+# Parser2::_split_modifier's shape, so PExpr parses the whole run and hands
+# this walk a funcall node named `unless`.  Its argument is a CONDITION — a
+# truth test, i.e. a read — and no user sub can be reached this way (they are
+# keywords).  `for`/`foreach` are deliberately absent: that modifier ALIASES
+# its list, and _arr_alias_list owns it.
+# Builtins whose FIRST argument is the array they WRITE; every later argument
+# is an ordinary read (push/unshift COPY what they store).
+my %ARRAY_WRITE_FN = map { $_ => 1 } qw(push unshift pop shift splice);
+# Builtins that RETURN the caller's aliases unchanged, so they are neither a
+# read nor an escape: they pass THEIR OWN position's licence through to their
+# arguments.  `my @z = sort @a` copies (the assignment does), `f(sort @a)`
+# escapes (the callee gets the aliases in @_), and `for my $x (sort @a)`
+# aliases — which is the FOREACH's business, recorded by _arr_alias_list and
+# answered by the loop-variable verdict, not by a second escape here.
+#
+# NOT map/grep, and not a `sort` WITH A BLOCK: there user code sees the
+# aliases as `$_` / `$a` / `$b` and can take a reference to one —
+# `my @r = map { \$_ } sort @c` really does hand out `\$c[i]` (probed, and
+# the very shape scratch/a5/alias.pl checks).  A block argument therefore
+# switches `sort` back to escaping.
+my %ARRAY_THRU_FN = map { $_ => 1 } qw(sort reverse values);
+my %ARRAY_BLOCK_NODE = (inline_lambda => 1, anon_sub => 1);
+# The element/slice access node types that name an ARRAY directly (`$a[i]`,
+# `@a[…]`, `%a[…]`).  The `_ref_acc` twins do NOT: `$r->[0]`'s base is the
+# scalar $r, and the array it reaches has no name here.
+my %ARRAY_ACCESS = map { $_ => 1 } qw(a_acc slice_a_acc kv_slice_a_acc);
+# Internal node types the ARRAY licence travels through unchanged (a comma
+# list is value-transparent) and types that COPY every operand into fresh
+# storage (`[…]` / `{…}` constructors), so an array in one is a plain read.
+# (`tree_val` = parens.  The single-child spelling has its own branch in the
+# walk; a MULTI-child one — `my ($x, @c) = @_` — reaches the generic tail, and
+# leaving it out was what made `@c` escape there for no reason.)
+my %ARR_TRANSPARENT = (progn => 1, tree_val => 1);
+my %ARR_COPYING     = (arr_init => 1, hash_init => 1);
+
+# A SYMBOLIC REFERENCE CANNOT REACH A `my` ARRAY, so there is deliberately no
+# blanket `@{"name"}` / `@$name` escape here (the #1140 design sketch called
+# for one).  Probed: `no strict 'refs'; my @a=(1,2); push @{"a"}, 5` leaves
+# @a at 2 elements and puts the 5 in @main::a.  The only way a symbolic name
+# reaches a lexical array is a glob assignment `*a = \@a`, which takes a
+# reference — already an escape.
+sub _arr_esc {
+  my ($ctx, $name, $why) = @_;
+  return unless defined $name && $name =~ /^\@\w+$/;
+  $ctx->{arr_esc}{$name}{$why}++;
+}
+
+# Record a direct write to @NAME against every loop region currently open.
+sub _arr_write {
+  my ($ctx, $name) = @_;
+  return unless defined $name && $name =~ /^\@\w+$/;
+  $ctx->{arr_write}{$name}{$_} = 1 for @{ $ctx->{region} };
+}
+
+# One @array LEAF met by the walk.  $aread is the POSITION's licence: true
+# when the position provably only reads the array's values, false (the
+# default) when this walk has not classified it — which escapes.
+sub _arr_leaf {
+  my ($ctx, $node, $aread) = @_;
+  return if $aread;
+  return unless ref($node) eq 'PPI::Token::Symbol';
+  my $c = $node->content // '';
+  _arr_esc($ctx, $c, 'unclassified-position') if $c =~ /^\@\w+$/;
+}
+
+# ARRAY-ONLY lvalue marking for a builtin that writes its first argument
+# (push/pop/shift/unshift/splice).  Deliberately NOT routed through
+# _tw_mark_lvalue: that marker records SCALAR boxing events, and `push @$r, X`
+# would then box $r — a scalar verdict change this family must never make.
+sub _arr_mark_target {
+  my ($ctx, $xo, $id) = @_;
+  return if !defined $id;
+  my $n = $xo->get_a_node($id);
+  return if $xo->is_internal_node_type($n);
+  return unless ref($n) eq 'PPI::Token::Symbol';
+  my $c = $n->content // '';
+  _arr_write($ctx, $c) if $c =~ /^\@\w+$/;
+}
+
+# Record one escape REASON against every `@name` in a subtree (array-only,
+# like _arr_mark_target: it must not touch the scalar events).
+sub _arr_mark_subtree {
+  my ($ctx, $xo, $id, $why) = @_;
+  return if !defined $id;
+  my $n = $xo->get_a_node($id);
+  if (ref($n) && !$xo->is_internal_node_type($n)
+      && $n->isa('PPI::Token::Symbol')) {
+    _arr_esc($ctx, $n->content, $why);
+  }
+  _arr_mark_subtree($ctx, $xo, $_, $why)
+    for @{ $xo->get_node_children($id) || [] };
+}
+
+# Is NAME (a plain `$scalar`) written, referenced or aliased ANYWHERE in this
+# region?  The reason list is not the whole write story — the writes Parser2
+# lowers natively leave FACTS and no event — so this asks both, exactly as
+# the foreach_ro licence does.  Region-wide, therefore over-firing: the safe
+# direction for the escape it relaxes.
+sub _name_touched {
+  my ($ctx, $name) = @_;
+  return 1 if %{ $ctx->{ev}{$name} // {} };
+  return 1 if $ctx->{write_fam}{$name} || $ctx->{incdec_root}{$name}
+           || $ctx->{init_bad}{$name}  || $ctx->{write_obj}{$name};
+  return 0;
+}
+
 # The ONE entry.  Both former fallbacks to the text annotator now DIE (#303,
 # s393): the annotator decides whether a name may leave its box, so a
 # fallback verdict is a VALUE the emitter consumes — a wrong one is a silent
@@ -282,6 +441,12 @@ sub _analyze_tree {
     has_eval       => 0,
     nested_sub     => {},
     use_class      => {},   # $x => {num|str|bool|opaque => count} (B-regimes)
+    # --- the ARRAY facts (#1140); see "THE ARRAY FACTS" above
+    arr_decl       => {},   # '@a' => count of `my @a` declarations here
+    arr_esc        => {},   # '@a' => { why => count }
+    arr_write      => {},   # '@a' => { loop-body refaddr => 1 }
+    arr_alias_by   => {},   # '@a' => { '$v' => 1 } — foreach loop vars over it
+    region         => [],   # open loop-body refaddrs, innermost last
   };
   for my $p (@{ $extra_params // [] }) {
     $ctx->{decl_count}{$p} = 1;
@@ -417,15 +582,20 @@ sub _analyze_tree {
     # was the catch: `$i`'s reasons were exactly [foreach-alias], the arm
     # fired, `(p-*= $i 2)` box-set a raw value and the doubling vanished
     # silently.  So the licence tests the facts too — no write of ANY kind.
-    $vi{$name}{foreach_ro} = 1
-      if $ctx->{foreach_my_alias}{$name}
+    my $ro_ok = $ctx->{foreach_my_alias}{$name}
       && @reasons == 1 && $reasons[0] eq 'foreach-alias'
       && !$ctx->{write_fam}{$name}       # root `$v = …` / `$v OP= …`
       && !$ctx->{incdec_root}{$name}     # root `$v++` / `$v--`
       && !$ctx->{init_bad}{$name}        # root write of unproven shape
-      && !$ctx->{write_obj}{$name}       # root write of an object
-      && Pl::Passes::enabled('foreach-raw');
+      && !$ctx->{write_obj}{$name};      # root write of an object
+    # #1140 reads this SEPARATELY from the gated verdict key: whether a
+    # foreach alias can write its list's array is a fact about the program,
+    # not about which optimizations are switched on, so `PCL_OPT=-foreach-raw`
+    # must not change the ARRAY verdicts (and therefore `local-push`).
+    $ctx->{foreach_ro_raw}{$name} = 1 if $ro_ok;
+    $vi{$name}{foreach_ro} = 1 if $ro_ok && Pl::Passes::enabled('foreach-raw');
   }
+  _array_verdicts($ctx, \%vi);
   # THE CAPTURE FACT (task #1035 step 2; docs/ir-spec.md 2b.2a `:captured`).
   # `nested_sub` is this walk's record of "a nested ANONYMOUS sub's body names
   # this scalar" -- the same reading that vetoes a raw slot when the closure
@@ -441,13 +611,19 @@ sub _analyze_tree {
   $vi{$_}{captured} = 1 for grep { $ctx->{nested_sub}{$_} } keys %vi;
   if ($no_raw_slot) {
     for my $v (values %vi) {
+      next if $v->{array};               # #1140: not a storage verdict
       $v->{unboxable} = 0;
       delete @$v{qw(coerce strbuf)};
       push @{ $v->{reasons} }, 'opt-off:raw-slot' if $ENV{PCL_B_DEBUG};
     }
   }
   if ($ENV{PCL_B_DEBUG}) {
-    for my $name (sort keys %vi) {
+    for my $name (sort grep { $vi{$_}{array} } keys %vi) {   # #1140
+      warn sprintf "A-DEBUG %s escapes=%d written_in=%d why=[%s]\n",
+        $name, $vi{$name}{escapes}, scalar(keys %{ $vi{$name}{written_in} }),
+        join(',', @{ $vi{$name}{reasons} // [] });
+    }
+    for my $name (sort grep { !$vi{$_}{array} } keys %vi) {
       warn sprintf "B-DEBUG %s unboxable=%d coerce=%s strbuf=%d reasons=[%s] uses={%s}\n",
         $name, $vi{$name}{unboxable}, $vi{$name}{coerce} // '-',
         $vi{$name}{strbuf} // 0,
@@ -457,6 +633,54 @@ sub _analyze_tree {
     }
   }
   return \%vi;
+}
+
+# THE ARRAY VERDICTS (#1140).  Runs AFTER the scalar loop because the
+# foreach-alias rule reads the LOOP VARIABLE's own read-only answer, which
+# that loop produced; there is no cycle back, because a loop variable's
+# verdict never consults an array.  One entry per `my @name` DECLARED in this
+# region — a package array, `@_`, and a lexical declared in an enclosing
+# region get no entry at all, and every consumer reads "no entry" as "no
+# licence" (the family's stated boundary; `for my $x (@pkg_array)` therefore
+# keeps the pre-#1140 verdict).
+sub _array_verdicts {
+  my ($ctx, $vi) = @_;
+  # A `sort { … } @a` escape is RELAXABLE (see _tw_walk_funcall_args): the
+  # comparator's only channel to the array is the alias pair `$a`/`$b`, and
+  # this walk records every write/reference/alias of those from the block
+  # body, which _tw_expr_parse walks with the seam flag.  Region-wide and
+  # therefore over-firing — one write to `$a` anywhere keeps every sort-block
+  # escape in the region.  RESIDUE (task #1142): a comparator that CALLS a sub
+  # which writes the package `$a`/`$b` is not visible here; the same residue
+  # the #761 topic gate names, and the reason map/grep blocks are not relaxed
+  # at all (their alias is `$_`, which callees write as an idiom).
+  my $ab_clean = !_name_touched($ctx, '$a') && !_name_touched($ctx, '$b');
+  for my $arr (keys %{ $ctx->{arr_decl} }) {
+    my $body = substr $arr, 1;
+    my @why;
+    push @why, 'multi-decl'     if $ctx->{arr_decl}{$arr} != 1;
+    # A string eval can name anything in its region's scope and write it.
+    push @why, 'eval-in-region' if $ctx->{has_eval};
+    push @why, grep { !($ab_clean && $_ eq 'sort-block') }
+               sort keys %{ $ctx->{arr_esc}{$arr} // {} };
+    # A foreach ALIAS is a write channel exactly when its loop variable is not
+    # proven read-only — including every plain (non-`my`) loop variable and
+    # `$_`, which arrive under the name '' and can never be cleared.
+    for my $v (sort keys %{ $ctx->{arr_alias_by}{$arr} // {} }) {
+      push @why, 'foreach-alias-rw'
+        unless length($v) && $ctx->{foreach_ro_raw}{$v};
+    }
+    # Source this walk could not parse: the text gates are all it has.
+    push @why, 'fallback-text'
+      if grep { /\Q$arr\E(?!\w)/ || /\$\Q$body\E\s*\[/ }
+         @{ $ctx->{fallback_texts} };
+    $vi->{$arr} = {
+      array      => 1,
+      escapes    => (@why ? 1 : 0),
+      written_in => ($ctx->{arr_write}{$arr} // {}),
+      ($ENV{PCL_B_DEBUG} ? (reasons => \@why) : ()),
+    };
+  }
 }
 
 # S1 str-buffer verdict (task #62; the W15.8 append fix rides on the raw
@@ -627,6 +851,34 @@ sub _tw_region_facts {
         if !$capture_needs_event || _text_gate_tags($n, $body, 1);
     }
   }
+
+  # #1140, the ARRAY half of the same region fact: a nested sub that NAMES an
+  # array makes it escape.  Two differences from the scalar scan above, both
+  # deliberate:
+  #   * NAMED subs count too.  The scalar scan is anon-only because a named
+  #     sub's capture of a file lexical is the promotion story (p-defcell);
+  #     for an array the question is not where the storage lives but WHO CAN
+  #     WRITE IT during a loop, and a named sub in the region can.
+  #   * The capture alone escapes — there is no "…and the body carries a
+  #     boxing event" narrowing (#760's `raw-closure-capture`).  A CL closure
+  #     shares a raw let SLOT natively, which is what makes that narrowing
+  #     sound for a scalar; an array's elements are a different question and
+  #     a read-only capture is not provable from here.
+  # Text-shaped over the block's source, therefore over-firing — the safe
+  # direction for an escape.  `$name[` catches an element write; `@$r` and
+  # `@{…}` name no array, so they are not matched.
+  my $subblocks = $stmt->find(sub {
+    return '' unless $_[1]->isa('PPI::Structure::Block');
+    my $up = $_[1]->parent;
+    return 1 if $up && $up->isa('PPI::Statement::Sub');
+    my $prev = $_[1]->sprevious_sibling;
+    return !!($prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'sub');
+  }) || [];
+  for my $b (@$subblocks) {
+    my $c = $b->content;
+    _arr_esc($ctx, $1, 'nested-sub')       while $c =~ /(\@\w+)/g;
+    _arr_esc($ctx, '@' . $1, 'nested-sub') while $c =~ /\$(\w+)\s*\[/g;
+  }
 }
 
 # ---------------------------------------------------------- statement walk
@@ -665,12 +917,14 @@ sub _tw_stmt {
       # walk.  Plain (non-my) loop vars are dynamically-scoped globals a
       # callee can see — always the alias veto, never raw.
       my ($var) = grep { $_->isa('PPI::Token::Symbol') } @k;
+      my $is_my_var = 0;      # hoisted: #1140's array-alias record reads it
       if ($var) {
         my $is_my = do {
           my $prev;
           for my $e (@k) { last if $e == $var; $prev = $e }
           $prev && $prev->isa('PPI::Token::Word') && $prev->content eq 'my';
         };
+        $is_my_var = $is_my ? 1 : 0;
         my ($list) = grep { $_->isa('PPI::Structure::List') } @k;
         my @lp = $list
           ? (map { $_->schildren } grep { $_->isa('PPI::Statement') } $list->children)
@@ -714,7 +968,22 @@ sub _tw_stmt {
       # _ev_foreach_alias_list.  The statement-MODIFIER spelling of the same
       # loop vetoes from _tw_stmt_expr, through the same helper.
       _ev_foreach_alias_list($ctx, \@lp2);
+      # #1140: every array NAMED in the foreach LIST is ALIASED by this loop
+      # variable, so whether it escapes depends on that variable's own
+      # read-only verdict — which the verdict loop computes first, and then
+      # reads back through arr_alias_by.  A PLAIN (non-`my`) loop variable,
+      # `$_` included, is a dynamically-scoped global a callee can write, so
+      # it is recorded under the name '' which no verdict can clear.
+      _arr_alias_list($ctx, $list2, ($var && $is_my_var) ? $var->content : '');
     }
+    # #1140: the loop BODY is the region `written_in` is asked about, keyed by
+    # that block's refaddr — the same PPI object Parser2's foreach lowering
+    # holds.  ONE id per loop, taken from the first block, so a write in the
+    # `continue` block lands on the body's id too (it runs during the loop
+    # just the same).
+    my ($body_blk) = grep { $_->isa('PPI::Structure::Block') } @k;
+    my $loop_rid = ($kw && $kw->content =~ /^for(?:each)?$/ && $body_blk)
+                   ? refaddr($body_blk) : undef;
     for my $k (@k) {
       if ($k->isa('PPI::Structure::Condition')) {
         # if/while/unless/until condition: the root expression is truth-
@@ -724,7 +993,10 @@ sub _tw_stmt {
       elsif ($k->isa('PPI::Structure::For')
           || $k->isa('PPI::Structure::List')
           || $k->isa('PPI::Structure::Block')) {
+        my $open = defined $loop_rid && $k->isa('PPI::Structure::Block');
+        push @{ $ctx->{region} }, $loop_rid if $open;
         _tw_stmts($ctx, [$k->schildren]);
+        pop @{ $ctx->{region} } if $open;
       }
     }
     return;
@@ -811,6 +1083,27 @@ sub _ev_foreach_alias_list {
   }
 }
 
+# #1140: record every array NAMED in a foreach LIST as ALIASED BY $varname.
+# The loop variable aliases the list's elements, so a write through it reaches
+# the array — and whether that can happen is exactly the loop variable's own
+# read-only verdict, which the array verdict loop reads back through here.
+# $varname '' means a PLAIN (non-`my`) loop variable, `$_` included: a
+# dynamically-scoped global a callee can write, so no verdict clears it.
+#
+# Text-shaped over the list's source, therefore over-firing — the safe
+# direction for an escape (`for my $x (scalar(@a))` aliases nothing and is
+# recorded anyway).  Takes either the PPI list structure (the block spelling)
+# or the modifier spelling's token run.
+sub _arr_alias_list {
+  my ($ctx, $list, $varname) = @_;
+  return unless defined $list;
+  my $c = ref($list) eq 'ARRAY'
+        ? join(' ', map { $_->content } grep { ref $_ } @$list)
+        : $list->content;
+  $ctx->{arr_alias_by}{$1}{$varname} = 1       while $c =~ /(\@\w+)/g;
+  $ctx->{arr_alias_by}{'@' . $1}{$varname} = 1 while $c =~ /\$(\w+)\s*\[/g;
+}
+
 sub _tw_stmt_expr {
   my ($ctx, $parts, $native_root, $uctx) = @_;
   my @parts = grep { ref $_ && $_->significant && !_semi($_) } @$parts;
@@ -822,7 +1115,12 @@ sub _tw_stmt_expr {
   my ($expr, $mod, $cond) = Pl::Parser2::_split_modifier(\@parts);
   if ($mod) {
     _tw_stmt_expr($ctx, $cond, 0, 'bool');
-    _ev_foreach_alias_list($ctx, $cond) if $mod =~ /^for(?:each)?$/;
+    if ($mod =~ /^for(?:each)?$/) {
+      _ev_foreach_alias_list($ctx, $cond);
+      # #1140: the modifier spelling's loop variable is always `$_` — a
+      # global, hence the unclearable '' name.
+      _arr_alias_list($ctx, $cond, '');
+    }
     local $ctx->{cond} = 1;
     _tw_expr_parse($ctx, $expr, 0);
     return;
@@ -894,12 +1192,21 @@ sub _tw_expr_parse {
     my ($root, $decls) = $expr_o->parse_expr_to_tree(\@parts);
     for my $d (@{ $decls // [] }) {
       my $var = $d->{var} // '';
+      # #1140: an `@name` declaration is the ARRAY family's entry point.  A
+      # `my` decl is the only one that can carry a verdict — `our`/`state`/
+      # `local` name a package or persistent cell a callee can reach, so they
+      # escape (and `local @a` on a lexical is not legal perl anyway).
+      if ($var =~ /^\@\w+$/) {
+        if ($d->{type} eq 'my') { $ctx->{arr_decl}{$var}++ }
+        else                    { _arr_esc($ctx, $var, "decl-$d->{type}") }
+        next;
+      }
       next unless $var =~ /^\$\w+$/;
       if    ($d->{type} eq 'my')    { $ctx->{decl_count}{$var}++ }
       elsif ($d->{type} eq 'local') { _ev($ctx, $var, 'local') }
       # our/state: package/persistent cells — never raw-let candidates here
     }
-    _tw_walk($ctx, $expr_o, $root, $native_root && !$ctx->{seam}, $uctx);
+    _tw_walk($ctx, $expr_o, $root, $native_root && !$ctx->{seam}, $uctx, 1);
     1;
   };
 
@@ -944,8 +1251,13 @@ sub _tw_top_blocks {
 # operands' classes from the whitelist tables (its own incoming $uctx only
 # passes through value-transparent wrappers: parens/tree_val, unary +,
 # ternary branches, and &&/||-in-bool).
+# $aread (#1140) is the ARRAY licence of this subtree's POSITION: true when
+# an `@name` leaf found here is only READ (its values copied or inspected),
+# false — the default — when the position hands the array somewhere this walk
+# cannot follow, which escapes.  Deliberately the unsafe-by-default polarity:
+# a spelling nobody classified costs an optimization, never a value.
 sub _tw_walk {
-  my ($ctx, $xo, $id, $root_native, $uctx) = @_;
+  my ($ctx, $xo, $id, $root_native, $uctx, $aread) = @_;
   my $node = $xo->get_a_node($id);
   my $kids = $xo->get_node_children($id) || [];
 
@@ -980,14 +1292,14 @@ sub _tw_walk {
         _tw_mark_lvalue($ctx, $xo, $_, 'arg-to-writer')         # #995
           for @$kids[1 .. $#$kids];
       }
-      _tw_walk_funcall_args($ctx, $xo, $fname, $kids);
+      _tw_walk_funcall_args($ctx, $xo, $fname, $kids, $aread);
       return;
     }
     if ($t eq '=~') {
       # the match/substitution target is an lvalue: `$h{$k} =~ s///` writes
       # the ELEMENT, the key is a read (#995)
       _tw_mark_lvalue($ctx, $xo, $kids->[0], 'regex-target') if @$kids;
-      _tw_walk($ctx, $xo, $_, 0) for @$kids;
+      _tw_walk($ctx, $xo, $_, 0, undef, 1) for @$kids;
       return;
     }
     if ($t eq 'prefix_op' || $t eq 'postfix_op') {
@@ -1016,7 +1328,7 @@ sub _tw_walk {
         _tw_mark_lvalue($ctx, $xo, $kids->[$ex_i], 'write-incdec');
         # the operand subtree (`++($x = 5)`, `++$a[$i]`) can hold embedded
         # writes/uses that still need the generic walk
-        _tw_walk($ctx, $xo, $kids->[$ex_i], 0);
+        _tw_walk($ctx, $xo, $kids->[$ex_i], 0, undef, 1);
         return;
       }
       if ($opc eq '\\') {
@@ -1031,17 +1343,17 @@ sub _tw_walk {
       my $child_uctx = ($opc eq '!' || $opc eq 'not') ? 'bool'
                      : $opc eq '+'                    ? $uctx
                      :                                  undef;
-      _tw_walk($ctx, $xo, $kids->[$ex_i], 0, $child_uctx) if @$kids > $ex_i;
+      _tw_walk($ctx, $xo, $kids->[$ex_i], 0, $child_uctx, 1) if @$kids > $ex_i;
       return;
     }
     if ($t eq 'string_concat') {
       # interpolation stringifies each part → 'str' use of a part's value
-      _tw_walk($ctx, $xo, $_, 0, 'str') for @$kids;
+      _tw_walk($ctx, $xo, $_, 0, 'str', 1) for @$kids;
       return;
     }
     if ($t eq 'ternary' && @$kids == 3) {
-      _tw_walk($ctx, $xo, $kids->[0], 0, 'bool');
-      _tw_walk($ctx, $xo, $_, 0, $uctx) for @$kids[1, 2];   # value pass-through
+      _tw_walk($ctx, $xo, $kids->[0], 0, 'bool', 1);
+      _tw_walk($ctx, $xo, $_, 0, $uctx, $aread) for @$kids[1, 2];  # value pass-through
       return;
     }
     if ($ACCESS_NODE{$t}) {
@@ -1059,13 +1371,13 @@ sub _tw_walk {
       # deref and slice spellings stringify/numify their subscripts exactly
       # as the plain ones do, and %ACCESS_NODE is the one table that knows
       # both the shape and the class.
-      _tw_walk($ctx, $xo, $kids->[0], 0) if @$kids;
+      _tw_walk($ctx, $xo, $kids->[0], 0, undef, 1) if @$kids;
       my $key_uctx = $ACCESS_NODE{$t};
-      _tw_walk($ctx, $xo, $_, 0, $key_uctx) for @$kids[1 .. $#$kids];
+      _tw_walk($ctx, $xo, $_, 0, $key_uctx, 1) for @$kids[1 .. $#$kids];
       return;
     }
     if ($t eq 'tree_val' && @$kids == 1) {           # parens: value-transparent
-      _tw_walk($ctx, $xo, $kids->[0], 0, $uctx);
+      _tw_walk($ctx, $xo, $kids->[0], 0, $uctx, $aread);
       return;
     }
     # progn, slices, hash_init/arr_init, methodcall, anon_sub, inline_lambda
@@ -1074,7 +1386,13 @@ sub _tw_walk {
     # recurse with opaque use class (their operands' values escape).
     # root-nativeness never propagates through a wrapper: Parser2's native
     # setf path requires the bare `$x = RHS` token shape at statement root.
-    _tw_walk($ctx, $xo, $_, 0) for @$kids;
+    # #1140: `progn` (a comma list) is value-transparent, so it passes the
+    # position's array licence through; `[…]`/`{…}` constructors COPY what
+    # they are given, so an array in one is a read.  Every other type here
+    # hands the array to code this walk cannot see (a method's @_, a
+    # closure, a code-ref call) — the default, which escapes.
+    my $kid_aread = $ARR_TRANSPARENT{$t} ? $aread : $ARR_COPYING{$t} ? 1 : 0;
+    _tw_walk($ctx, $xo, $_, 0, undef, $kid_aread) for @$kids;
     return;
   }
 
@@ -1101,9 +1419,9 @@ sub _tw_walk {
         # arm's reason for the shapes that need one (D11: every $scalar
         # inside a list LHS is written by seam machinery).
         _tw_mark_lvalue($ctx, $xo, $kids->[0], 'write-list');
-        _tw_walk($ctx, $xo, $kids->[0], 0);
+        _tw_walk($ctx, $xo, $kids->[0], 0, undef, 1);
       }
-      _tw_walk($ctx, $xo, $kids->[1], 0);
+      _tw_walk($ctx, $xo, $kids->[1], 0, undef, 1);
       return;
     }
     if ($COMPOUND_ASSIGN{$op}) {
@@ -1133,7 +1451,7 @@ sub _tw_walk {
         # same lvalue-root rule as `=` and `++`: `$h{$k} .= "x"` writes the
         # element, the key is a read (#995)
         _tw_mark_lvalue($ctx, $xo, $kids->[0], 'write-compound');
-        _tw_walk($ctx, $xo, $kids->[0], 0);
+        _tw_walk($ctx, $xo, $kids->[0], 0, undef, 1);
       }
       # RHS operand class follows the op's coercion: += … <<= → num;
       # .= → str; x= repeat COUNT → num; bitwise/||=/&&=///= → opaque.
@@ -1142,13 +1460,13 @@ sub _tw_walk {
              : $op eq '.='        ? 'str'
              : $op eq 'x='        ? 'num'
              :                      undef;
-      _tw_walk($ctx, $xo, $kids->[1], 0, $ru) if @$kids > 1;
-      _tw_walk($ctx, $xo, $_, 0) for @$kids[2 .. $#$kids];   # arity safety
+      _tw_walk($ctx, $xo, $kids->[1], 0, $ru, 1) if @$kids > 1;
+      _tw_walk($ctx, $xo, $_, 0, undef, 1) for @$kids[2 .. $#$kids];  # arity safety
       return;
     }
     if ($op eq '=~' || $op eq '!~') {
       _tw_mark_lvalue($ctx, $xo, $kids->[0], 'regex-target');   # #995
-      _tw_walk($ctx, $xo, $_, 0) for @$kids;
+      _tw_walk($ctx, $xo, $_, 0, undef, 1) for @$kids;
       return;
     }
     # Generic operator: classify operands from the whitelist tables.
@@ -1157,8 +1475,8 @@ sub _tw_walk {
     # value escapes to the consumer).  Everything else — `..` endpoints,
     # `& | ^`, `//` (a defined-test), `,` — stays opaque.
     if ($op eq 'x' && @$kids == 2) {
-      _tw_walk($ctx, $xo, $kids->[0], 0, 'str');
-      _tw_walk($ctx, $xo, $kids->[1], 0, 'num');
+      _tw_walk($ctx, $xo, $kids->[0], 0, 'str', 1);
+      _tw_walk($ctx, $xo, $kids->[1], 0, 'num', 1);
       return;
     }
     my $child_uctx = ($USE_NUM_OP{$op} && @$kids >= 2) ? 'num'
@@ -1166,7 +1484,7 @@ sub _tw_walk {
                    : ($USE_BOOL_THROUGH_OP{$op}
                       && ($uctx // '') eq 'bool')      ? 'bool'
                    :                                     undef;
-    _tw_walk($ctx, $xo, $_, 0, $child_uctx) for @$kids;
+    _tw_walk($ctx, $xo, $_, 0, $child_uctx, 1) for @$kids;
     return;
   }
 
@@ -1175,6 +1493,7 @@ sub _tw_walk {
   # tree has no Symbol node for (regex patterns, backticks, heredocs) —
   # scanned textually.  A substitution with /e has CODE in the replacement
   # the tree cannot see: apply the text gates to its source.
+  _arr_leaf($ctx, $node, $aread);          # #1140: the @array half
   if ($r eq 'PPI::Token::Symbol' && !@$kids && $node->content =~ /^\$\w+$/) {
     _use($ctx, $node->content, $uctx);
     return;
@@ -1208,6 +1527,13 @@ sub _tw_scan_quote_leaf {
   while ($c =~ /\$\{?(\w+)\}?((?:->)?[\[\{])?/g) {
     _use($ctx, '$' . $1, $2 ? undef : 'str');
   }
+  # #1140: a plain `"@a"` interpolation only STRINGIFIES the array, but a
+  # BLOCK deref `"@{[ … ]}"` carries arbitrary code this walk never sees (it
+  # is compiled by StringInterpolation, not by the tree), so every array named
+  # in such a string escapes.
+  return unless $c =~ /\@\{/;
+  _arr_esc($ctx, $1, 'interp-block')       while $c =~ /(\@\w+)/g;
+  _arr_esc($ctx, '@' . $1, 'interp-block') while $c =~ /\$(\w+)\s*\[/g;
 }
 
 # Classified walk of funcall ARG subtrees (B-regimes): builtins in %USE_FN
@@ -1216,8 +1542,29 @@ sub _tw_scan_quote_leaf {
 # nodes (print $fh …) never consume an arg position and their innards are
 # opaque (a handle-carrying scalar must stay boxed).
 sub _tw_walk_funcall_args {
-  my ($ctx, $xo, $fname, $kids) = @_;
+  my ($ctx, $xo, $fname, $kids, $aread) = @_;
   my $spec = $USE_FN{$fname};
+  # #1140: the ARRAY licence of each argument position.  %ARRAY_READ_FN
+  # copies its arguments; %ARRAY_WRITE_FN writes its FIRST and copies the
+  # rest; %ARRAY_THRU_FN passes THIS call's own licence through (it returns
+  # the caller's aliases unchanged); every other callee — a user sub, a
+  # method, `map`/`grep`, a `sort` with a block — escapes (probed).
+  my $arr_write = $ARRAY_WRITE_FN{$fname} ? 1 : 0;
+  my $has_block = $ARRAY_THRU_FN{$fname} && _has_block_arg($xo, $kids);
+  my $arr_thru  = $ARRAY_THRU_FN{$fname} && !$has_block;
+  # A `sort { … }` escape is recorded as its OWN reason and NOT left to the
+  # leaf handler's position-blind one, because the verdict loop can RELAX it:
+  # the block's only channel to the array is the alias pair `$a`/`$b`, and
+  # this same walk already records every write and every `\$a` of those (the
+  # comparator body is walked with the seam flag by _tw_expr_parse).  Without
+  # that, `for my $x (sort { $a <=> $b } @src) {…}` would lose the raw arm for
+  # a comparator that provably only reads — and with it `classic-sort`'s
+  # foreach licence, which reads the p-foreach-raw head (#996 A5).
+  my $sort_block = $has_block && $fname eq 'sort';
+  my $arr_read  = ($arr_write || $ARRAY_READ_FN{$fname}) ? 1
+                : $arr_thru                              ? ($aread ? 1 : 0)
+                : $sort_block                            ? 1
+                :                                          0;
   my $argi = 0;
   for my $kid (@$kids[1 .. $#$kids]) {
     my $n = $xo->get_a_node($kid);
@@ -1228,9 +1575,28 @@ sub _tw_walk_funcall_args {
     my $class = !$spec     ? undef
               : !ref $spec ? 'str'          # 'str-all'
               :              $spec->[$argi];
-    _tw_walk($ctx, $xo, $kid, 0, $class);
+    _arr_mark_target($ctx, $xo, $kid) if $arr_write && $argi == 0;
+    # The generic leaf handler records this escape too, under its own
+    # position-blind name; this arm adds the CALLEE, which is the only thing
+    # that makes an A-DEBUG line actionable ("arg-to-grep", "arg-to-mysub").
+    _arr_esc($ctx, $n->content, "arg-to-$fname")
+      if !$arr_read && ref($n) eq 'PPI::Token::Symbol' && length($fname // '');
+    _arr_mark_subtree($ctx, $xo, $kid, 'sort-block') if $sort_block;
+    _tw_walk($ctx, $xo, $kid, 0, $class, $arr_read);
     $argi++;
   }
+}
+
+# Does this funcall carry a BLOCK argument (a `sort { … }` comparator, a
+# `map`/`grep` body)?  A block is user code that sees the aliased elements.
+sub _has_block_arg {
+  my ($xo, $kids) = @_;
+  for my $kid (@$kids[1 .. $#$kids]) {
+    my $n = $xo->get_a_node($kid);
+    next unless $xo->is_internal_node_type($n);
+    return 1 if $ARRAY_BLOCK_NODE{ $n->{type} // '' };
+  }
+  return 0;
 }
 
 # THE lvalue-root marker (#995) — the ONE place that decides which scalar a
@@ -1262,29 +1628,61 @@ sub _tw_mark_lvalue {
   my $n = $xo->get_a_node($id);
   my $t = $xo->is_internal_node_type($n) // '';
   my $descended = 0;
+  my $last_t;                          # #1140: the INNERMOST access type
   while ($ACCESS_NODE{$t}) {
     my $base = ($xo->get_node_children($id) || [])->[0];
     return if !defined $base;          # subscript-less access: nothing to mark
     $descended = 1;
+    $last_t = $t;
     $id = $base;
     $n  = $xo->get_a_node($id);
     $t  = $xo->is_internal_node_type($n) // '';
   }
-  return if $descended
-    && ref($n) && !$xo->is_internal_node_type($n)
-    && $n->isa('PPI::Token::Symbol') && $n->symbol =~ /^[\@\%]/;
+  if ($descended
+      && ref($n) && !$xo->is_internal_node_type($n)
+      && $n->isa('PPI::Token::Symbol') && $n->symbol =~ /^[\@\%]/) {
+    # A plain container root: NO scalar is written (the existing rule), but
+    # the ARRAY family wants to know (#1140).  `$a[i] = …` / `@a[…] = …`
+    # WRITE @a; `\$a[i]` hands out a live element, which ESCAPES it.  The
+    # container kind comes from the innermost ACCESS TYPE, not from
+    # ->symbol's own re-reading of the token's sibling.
+    if ($ARRAY_ACCESS{ $last_t // '' } && $n->content =~ /^[\$\@\%](\w+)$/) {
+      my $arr = '@' . $1;
+      if ($event eq 'ref-taken' || $event eq 'tie-target'
+          || $event eq 'arg-to-writer') { _arr_esc($ctx, $arr, $event) }
+      else                              { _arr_write($ctx, $arr) }
+    }
+    return;
+  }
   _tw_mark($ctx, $xo, $id, $descended ? 'write-deref-viv' : $event);
 }
 
 # Mark every $scalar Symbol in the subtree with a boxing event.
+# #1140: an `@name` Symbol or a `$#name` ArrayIndex in the same subtree is the
+# ARRAY half of the very same event — `@a = …` / `undef @a` / `chomp @a` /
+# `$#a = 3` write it, `\@a` and `tie @a` hand it out.
 sub _tw_mark {
   my ($ctx, $xo, $id, $event) = @_;
   my $node = $xo->get_a_node($id);
   if (ref($node) && !$xo->is_internal_node_type($node)
       && $node->isa('PPI::Token::Symbol')) {
     _ev($ctx, $node->content, $event);
+    _tw_mark_array($ctx, $node->content, $event);
+  }
+  elsif (ref($node) && !$xo->is_internal_node_type($node)
+         && $node->isa('PPI::Token::ArrayIndex')
+         && ($node->content // '') =~ /^\$#(\w+)$/) {
+    _tw_mark_array($ctx, '@' . $1, $event);
   }
   _tw_mark($ctx, $xo, $_, $event) for @{ $xo->get_node_children($id) || [] };
+}
+
+sub _tw_mark_array {
+  my ($ctx, $name, $event) = @_;
+  return unless $name =~ /^\@\w+$/;
+  if ($event eq 'ref-taken' || $event eq 'tie-target'
+      || $event eq 'arg-to-writer') { _arr_esc($ctx, $name, $event) }
+  else                              { _arr_write($ctx, $name) }
 }
 
 # Mirror of _arith_rhs on the tree: the RHS stores a raw CL value when its

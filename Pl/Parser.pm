@@ -10301,6 +10301,7 @@ sub _expr_generator {
     indent_level => 0,
     ($opt{sub_info} ? (sub_info => $opt{sub_info}) : ()),
     ($opt{lexicals} ? (lexicals => $opt{lexicals}) : ()),
+    ($opt{var_facts} ? (var_facts => $opt{var_facts}) : ()),
   );
 }
 
@@ -10903,8 +10904,9 @@ sub _regex_gap_hits {
 # exactly; the PARSE ERROR / no-output shapes come back as raw chunks.
 sub _parse_expression_form {
   my ($self, $parts, $stmt, $context, %opt) = @_;
-  # %opt: sub_info + lexicals — the two FACTS ExprToCL's Kind-A rules read
-  # (Phase A: they used to reach only ExprToCL2's native attempt).
+  # %opt: sub_info + lexicals + var_facts — the FACTS ExprToCL's Kind-A rules
+  # read (Phase A: the first two used to reach only ExprToCL2's native
+  # attempt; var_facts is #1140's array family, for `local-push`).
 
   my $form;
   eval {

@@ -2,6 +2,165 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470bj (Opus agent, 2026-09-05) — #1140 the VarAnnotator ARRAY-fact family, and the three items that were waiting on it: #996 half A3 (`local-push`, pushloc 0.48× → 0.28×), foreach-raw's write-to-the-array hole, classic-sort's foreach licence made exact
+
+**What shipped.**  `Pl::VarAnnotator` was scalar-only *by construction* — its
+decl walk did `next unless $var =~ /^\$\w+$/` and the verdict loop ran over
+`keys %{$ctx->{decl_count}}`, so no `@name` ever got a verdict at all, and
+three separate items were blocked on the same missing facts.  It now answers
+two questions per `my @name` declared in a region, computed by the ONE
+existing walk (no second scanner — the s379 standing rule):
+
+- **`escapes`** — the container, or any element, is reachable under some name
+  other than this lexical: `\@a`, `\$a[i]`, passed WHOLE to a call/method/code
+  ref, named in a nested sub (anonymous **or** named), `tie`d, blessed through
+  a reference, a string `eval` in the region, declared more than once, the
+  list of a `foreach` whose loop variable is not itself proven read-only, or
+  **any position the walk has not classified**.
+- **`written_in(REGION)`** — a direct write inside a `for`/`foreach` body
+  block, keyed by that block's `refaddr` (the same PPI object Parser2's
+  foreach lowering holds; VarAnnotator and Parser2 see one document).
+
+ir-spec **§2.3a** is the normative statement, §5.4 and §6.2 record what the
+facts license.  Generation **v2-720**; the three artifacts regenerated.
+
+**The polarity is the design.**  `_tw_walk` gained a 6th argument `$aread`
+meaning "an `@name` leaf found HERE is only read", passed at the ~20
+classified recursion sites (operators, `=` both sides, string interpolation,
+ternary branches, element accesses, parens, comma lists, the statement root,
+read-only builtin arguments) and ABSENT everywhere else — a funcall argument
+of an unknown callee, a method call, a closure, a code-ref call, and the
+generic internal tail all escape by default.  A spelling nobody thought of
+therefore costs an optimization, never a value.  Both consumers treat "no
+verdict" (a package array, `@_`, a lexical from an enclosing region) as no
+licence, which is the family's stated boundary.
+
+**THREE OF THE DESIGN'S GUESSES ABOUT PERL WERE WRONG, and only probing found
+them** (`scratch/s470bj/probe/sem1.pl`, perl 5.40.3):
+
+1. `reverse @a` HANDS ALIASES BACK — `$_++ for reverse @a` increments `@a`.
+   So do `sort @a` with NO block and `values @a`.  They are therefore neither
+   reads nor escapes but **alias-TRANSPARENT**: they pass their own position's
+   licence through, so `my @z = sort @a` is a read (the assignment copies)
+   while `f(sort @a)` escapes and `$_++ for sort @a` is the foreach modifier's
+   business.  `map`/`grep` are NOT transparent — their block sees `$_` aliased
+   and can take a reference to it (`my @r = map { \$_ } sort @c` hands out
+   `\$c[i]`, the very shape the s470a5 probe `alias.pl` checks).
+2. A SYMBOLIC REFERENCE CANNOT REACH A `my` ARRAY, so the blanket
+   `@{"name"}` / `@$name` escape the task asked for is unnecessary:
+   `no strict 'refs'; my @a=(1,2); push @{"a"}, 5` leaves `@a` at two elements
+   and puts the 5 in `@main::a`.  The only path to a lexical is `*a = \@a`,
+   which takes a reference and is already an escape.
+3. `return @a` and a sub's TAIL value do not alias — the call boundary copies,
+   which is the same finding s470a5's licence B already rests on.
+
+**THE ONE THING THAT WOULD HAVE REGRESSED SHIPPED WORK.**  A `sort { … }`
+block IS user code that sees the aliases as `$a`/`$b`, so the first version
+escaped the array for it — and that silently took `classic-sort`'s entire
+foreach licence away (`Pl/t/classic-sort-01.t`'s "a foreach-raw list is a
+copying consumer" row, which asserts a licence measured over 250 corpus
+sorts).  The relaxation: the comparator's only channel to the array is that
+alias pair, and this same walk already records every write, `\` and alias of
+`$a`/`$b` (the block body is walked with the seam flag by `_tw_expr_parse`) —
+so a `sort-block` escape is dropped when the region touches neither name.
+Region-wide, therefore over-firing, which is the safe direction.  Residue in
+**#1142**: a comparator that CALLS a sub writing the package `$a`/`$b` is not
+visible here — the same residue the #761 topic gate names, and the reason
+`map`/`grep` blocks are not relaxed at all.
+
+**The foreach conjunct is at the LOWERING SITE.**  `foreach_ro` is name-keyed
+and two loops in one region can share `$x` while iterating different arrays,
+so the conjunct is spelled in `Parser2::_lower_compound`, where the list and
+the body block are both in hand.  It asks about EVERY array named in the list
+(`_list_array_names`), not a bare `@a` — because `sort`, `reverse`, `values`
+and a plain comma list all hand the SOURCE array's elements through.  That is
+what makes the `sort`-fed reproducer work, and `classic-sort` needed **no code
+change at all**: it reads the `p-foreach-raw` head by design, so it inherits
+the fix.
+
+    my @fa = (1,2,3);
+    for my $x (@fa) { $fa[0] = 99; print "plain:$x\n"; last }
+    my @fs = (3,1,2);
+    for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99; print "sorted:$x\n"; last }
+
+    perl 5.40.3   plain:99 / sorted:99
+    before        plain:1  / sorted:1
+    after         plain:99 / sorted:99      (default AND PCL_OPT=none)
+
+**#996 half A3 — `local-push`.**  A Kind-A name in `Pl/Passes.pm`;
+`push @a, SCALAR` on a non-escaping `my @a` emits `(%p-push1 @a X)`, which is
+`%p-array-store-scalar` plus the new length.  That store is *deliberately* the
+same function `p-push-impl` calls for a scalar item, so the copy semantics,
+the blessed/dualvar/is-ref rules and the raw-element gate cannot drift between
+the two paths; what is skipped is everything `p-push-impl` needs only because
+its arguments are unknown — the `p-push` macro's per-call `(boundp '@a)`, the
+`&rest` list consing, the array-shape type test (`%p-push-cold`) and the
+four-way per-item cond.  Two halves, and only the first is a fact: the ARRAY
+is proven (the licence must not be a shape test at the push site — #996's own
+words), the ITEM is a shape (`_push_item_is_scalar`).  A read-only array can
+never reach it — `Internals::SvREADONLY(@a,1)` passes the array to a call,
+which is an escape (probed) — and if the licence were ever wrong the failure
+is LOUD: `%p-vpush` finds no fill pointer and `VECTOR-PUSH-EXTEND` signals.
+
+**`_node_is_definitely_scalar` was NOT widened**, although `local-push`'s item
+licence is exactly that predicate one notch wider.  Its only consumer,
+`gen_progn_form`'s choice between `['vector', …]` and `p-flatten-args`, would
+then change emission across the whole corpus — a separate optimization with
+its own bar, filed as **#1141** (and it wants a bench row first: no standing
+row builds a list of computed values in a loop).
+
+**THE NUMBERS** (`tools/bench-exec.pl`, best-of-5, THREE A/B rounds of the
+same tree; A = `PCL_OPT=-local-push` = today's push emission, B = the licence
+on.  The box was shared with two sibling agents: round 1 ran at load 8.7 and
+its perl column reads 0.157 s against 0.109 s in round 3, so read the RATIOS
+and the per-round deltas, not the absolute seconds):
+
+    row         A pcl(s)              B pcl(s)              delta            ratio
+    pushloc     0.0786 0.0563 0.0539  0.0450 0.0319 0.0305  −42.7/−43.3/−43.4 %  0.48× → 0.28×
+    arrhash-k   0.1097 0.0779 0.0717  0.0988 0.0687 0.0644  −9.9/−11.8/−10.2 %   1.15× → 1.03×
+    cfor (ctl)  0.0476 0.0320 0.0309  0.0487 0.0335 0.0313  +2.3/+4.7/+1.3 %     unmoved
+
+`pushloc` lands exactly on the ceiling #996 measured by hand (−40.9 %).  The
+foreach rows do NOT move — `feread` 0.44× (A) / 0.45× (B) against the 0.47×
+#862 recorded, and both `feread` and `feread2` keep `p-foreach-raw` in the
+emission (their arrays are not written in the loop).
+
+**THE COUNT.**  `local-push` fires 3× in `lib/**.pm` (Cwd, List::Util twice)
+and 3× over `perl-tests/*.t`; 23 lib and 127 corpus `push` sites keep the
+general path — test files are `eval`-heavy, and `escapes` is a REGION fact, so
+one string `eval` revokes every array in a file.  `p-foreach-raw` demotions:
+3 in lib (all `@seqs` in `lib/mro.pm`, cause `arg-to-grep` — line 84 is
+`@seqs = grep { scalar @$_ } @seqs`, a block that only READS, which is
+#1142's measured mover) and 1 in the corpus (`chdir.t`'s `@magic_envs`, cause
+`nested-sub` + `fallback-text`: `sub clean_env` names it and the `END` block
+mentions it, and `clean_env` is CALLED FROM the loop body — conservative, and
+the demotion is exactly what the family is for if it ever wrote).
+
+**BARS.**  Gate `PCLXS_DIR=~/pclxs tools/prove-core` green.
+`tools/corpus-diff.pl e73038f`: 3 of 111 files differ, silent drops 5
+unchanged, shapes 6 identical — `grent.t` + `split.t` are `p-push` →
+`%p-push1`, `chdir.t` is the one demotion above.  `tools/emission-ab.pl` over
+lib + shapes: 28 files, 3 DIFF (the two push files + mro.pm), RCDIFF 0; over
+the wide list (perl 5.40.3 `t/` + `cpan-tests/modules/**`, 1007 files):
+RCDIFF 0.  Companion `op/push.t` + `op/array.t` + `op/loopctl.t` `--jobs 1`
+before/after.  Guard `Pl/t/array-facts-01.t` (61 rows, 8.4 s wall),
+inverse-verified on an `e73038f` worktree: exactly 23 rows fail there — the 12
+`local-push` positives, the 5 alias-transparent rows, the foreach-shape rows
+the conjunct changes, and the two #1140 reproducers.
+
+**Two guard headers were repaired in the same commit** (the s416 stale-guard
+rule): `Pl/ClassicSort.pm`'s licence-A comment and
+`Pl/t/classic-sort-01.t`'s header both said the foreach member's boundary was
+inexact "because VarAnnotator has no array facts at all", which stopped being
+true here; and `classic-sort-01.t` gained no row, because the boundary's rows
+belong with the fact — they are in `array-facts-01.t`, both twins side by side.
+
+**Filed:** #1141 (fold the two scalar-shape predicates; bench row first),
+#1142 (relax a `map`/`grep`/`sort` block that only reads — the mro.pm mover
+is its acceptance), #1143 (`Internals::SvREADONLY(@a,1)` leaves `scalar(@a)`
+reading the ELEMENTS, not the count — pre-existing, identical on `e73038f`
+and under `PCL_OPT=none`), #1144 (a topic or modifier `for` over `@a` escapes
+it, because `$_` is a global no verdict can clear).
 ## Session 470bi (Opus agent, 2026-09-05) — the s469bi correctness pool finished: #1045, #1084, #1020, #1083, #1022(a) — plus a MAIN-BREAKING emission bug (#1118) and a cache-key collision found on the way
 
 RELAUNCH of the stopped s469bi in its kept worktree.  Its uncommitted 8-file

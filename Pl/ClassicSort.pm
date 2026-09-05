@@ -38,13 +38,18 @@ package Pl::ClassicSort;
 #       is TRANSPARENT (it hands the aliases through unchanged) and so is the
 #       context wrapper, so both propagate the licence.
 #       THE `p-foreach-raw' MEMBER INHERITS foreach-raw's OWN CONDITION, no
-#       more and no less (s470a5 merge review).  That verdict covers writes
-#       THROUGH the loop variable; it does NOT cover a write to the ARRAY by
-#       another path during the loop, because VarAnnotator has no array facts
-#       at all.  So `for my $x (@fa) { $fa[0] = 99; print $x; last }' already
-#       prints perl's 99 only with `PCL_OPT=-foreach-raw', and the sort-fed
-#       spelling is exactly as sound as that — no better, no worse.  The
-#       array-fact family that makes both exact is task #1140.
+#       more and no less — and since s470bj that condition is EXACT, so this
+#       licence is too, by construction and with no change here.  The
+#       read-only verdict covers writes THROUGH the loop variable;
+#       VarAnnotator's ARRAY facts (task #1140) supply the other half, so
+#       Parser2 emits `p-foreach-raw' only when every array NAMED in the
+#       loop's list is a non-escaping `my @a' the body does not write.
+#       `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99; print $x; last }'
+#       therefore prints perl's 99: the loop keeps `p-foreach' and this pass
+#       never sees a licence.  (That is also why the conjunct asks about every
+#       array NAMED in the list rather than a bare `@a' — `sort', `reverse',
+#       `values' and a comma list all hand the SOURCE array's elements
+#       through, probed.)
 #       NOT a member: `do { sort … }'.  A do-block's tail hands the aliases
 #       through in perl (`$_++ for do { sort @d }' writes back into @d —
 #       probed), so it is not a copying consumer.  `eval { }' and a sub tail

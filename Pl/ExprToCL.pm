@@ -57,18 +57,22 @@ has lvalue_context => (
   default  => 0,
 );
 
-# The two per-sub / per-scope FACTS the Kind-A rules below consume (Phase A of
-# docs/plan-one-compiler-s411.md — folded here from ExprToCL2, the deleted
-# second generator).  Both default EMPTY: a caller that has no facts (v1's
-# statement layer, the re-entrant string/regex compiles) simply never
-# licenses the fast shapes.  Parser2::_lower_expr passes its _cur_sub_info
-# and _let_bound_vars.
+# The three per-sub / per-scope FACTS the Kind-A rules below consume (Phase A
+# of docs/plan-one-compiler-s411.md — the first two folded here from
+# ExprToCL2, the deleted second generator).  All default EMPTY: a caller that
+# has no facts (v1's statement layer, the re-entrant string/regex compiles)
+# simply never licenses the fast shapes.  Parser2::_lower_expr passes its
+# _cur_sub_info, _let_bound_vars and _cur_vi.
 has sub_info => (          # name → { cl_name, insensitive, … } (Parser2 sub facts)
   is      => 'ro',
   default => sub { {} },
 );
 has lexicals => (          # sigil-name → 1 for every let-bound lexical in scope
   is      => 'ro',
+  default => sub { {} },
+);
+has var_facts => (         # VarAnnotator's verdicts for the enclosing region;
+  is      => 'ro',         # #1140's ARRAY entries are what `local-push` reads
   default => sub { {} },
 );
 
@@ -2287,6 +2291,12 @@ sub gen_funcall_form {
       $arg = ['p-flatten', $arg] if $should_flatten;
       push @items, $arg;
     }
+    # Kind-A `local-push` (task #996 half A3, licensed by #1140's array
+    # facts): one scalar appended to a `my @a` nothing else can reach needs
+    # none of p-push-impl's generality.
+    return ['%p-push1', $target, $items[0]]
+      if $func_name eq 'push' && @items == 1
+      && $self->_local_push_ok($kids->[1], $kids->[2], $target);
     return [$cl_func, $target, @items];
   }
 
@@ -2634,6 +2644,105 @@ sub _elem_setf_ok {
   return 0 if $self->environment
     && exists +($self->environment->state_var_renames // {})->{$container};
   return _pure_form($left->[2]);
+}
+
+# --------------------------------------------------------------------------
+# THE `local-push` LICENCE (Kind A; task #996 half A3, task #1140's facts).
+#
+# `(p-push @a X)` pays, per call: the p-push macro's `(unless (boundp '@a) …)`
+# auto-declare, p-push-impl's `&rest` list consing, its array-shape type test
+# (is this a real growable array, or a read-only one, or not an array at all)
+# and its four-way per-item cond (flatten marker / raw vector / raw hash /
+# scalar).  `(%p-push1 @a X)` is `%p-array-store-scalar` — the SAME function
+# p-push-impl calls for a scalar, so the copy semantics, the blessed/dualvar/
+# ref rules and the raw-element gate cannot drift — plus the new length.
+#
+# TWO HALVES, and only the first is a fact:
+#   * THE ARRAY.  A `my @a` DECLARED in this region that VarAnnotator proved
+#     non-escaping.  Deliberately not a shape test at this site (#996's own
+#     words): an array that escapes ANYWHERE in its scope keeps p-push-impl,
+#     because only the region walk can see the `\@a` three statements later.
+#     The emitted symbol must also be a let-bound lexical here — a package
+#     cell is a different container from the one the facts speak about, and
+#     it is the one case where the macro's auto-declare has work to do.
+#   * THE ITEM.  A single argument that provably produces ONE SCALAR, which
+#     is a property of the argument's own shape and nothing else.  That is
+#     what makes the flatten/spread arms unreachable; `push @a, @b` / `%h` /
+#     a list-valued call keep the generic path, because the flattening IS
+#     what the four-way cond is for and that is a separate licence.
+sub _local_push_ok {
+  my ($self, $target_id, $item_id, $target_form) = @_;
+  return 0 unless Pl::Passes::enabled('local-push');
+  my $tn = $self->expr_o->get_a_node($target_id);
+  return 0 if $self->expr_o->is_internal_node_type($tn);
+  return 0 unless ref($tn) eq 'PPI::Token::Symbol'
+               && ($tn->content // '') =~ /^\@\w+$/;
+  my $af = $self->var_facts->{ $tn->content };
+  return 0 unless $af && $af->{array} && !$af->{escapes};
+  return 0 if ref $target_form;
+  return 0 unless $self->lexicals->{$target_form};
+  return $self->_push_item_is_scalar($item_id);
+}
+
+# Operators whose p-function COERCES its operands and returns a raw CL number
+# or string — one value, whatever the operands were.  The same closed set and
+# the same reasoning as Pl::VarAnnotator's %ARITH_OP (its header states the
+# invariant); `x` is absent because `(1,2) x 3` repeats a LIST, `..` because a
+# range IS a list, `,` and the assignments because their value is an operand's.
+my %PUSH_SCALAR_OP = map { $_ => 1 } qw(+ - * / % ** .
+                                        < > <= >= == != <=>
+                                        eq ne lt gt le ge cmp);
+my %PUSH_SCALAR_UNARY = map { $_ => 1 } qw(! not - + ~);
+
+# Provably ONE scalar.  Builds on _node_is_definitely_scalar (literals and
+# $-sigiled leaves) rather than widening it: that predicate's other consumer
+# (gen_progn_form's `vector` vs `p-flatten-args` choice) would change emission
+# corpus-wide, which is a separate optimization with its own bar (#1141).
+# A false answer only costs the general path, so every shape not listed
+# declines — a funcall, a method call, a slice, a range, `wantarray`.
+sub _push_item_is_scalar {
+  my ($self, $id) = @_;
+  return 1 if $self->_node_is_definitely_scalar($id);
+  my $n    = $self->expr_o->get_a_node($id);
+  my $kids = $self->expr_o->get_node_children($id) || [];
+  if ($self->expr_o->is_internal_node_type($n)) {
+    my $t = $n->{type} // '';
+    # an interpolated string; an anon container/sub constructor (ONE ref); a
+    # single element of an array/hash, through a name or a reference
+    return 1 if $t eq 'string_concat' || $t eq 'arr_init' || $t eq 'hash_init'
+             || $t eq 'anon_sub'
+             || $t eq 'h_acc'     || $t eq 'a_acc'
+             || $t eq 'h_ref_acc' || $t eq 'a_ref_acc';
+    return $self->_push_item_is_scalar($kids->[0])
+      if $t eq 'tree_val' && @$kids == 1;              # (EXPR)
+    if (($t eq 'prefix_op' || $t eq 'postfix_op') && @$kids == 2) {
+      # Dispatch on the operator's CONTENT over a closed set, not on its token
+      # class: PPI hands `\` over as a Cast, and so are the sigil casts `@$r`
+      # / `%$r` this must decline (`@$r` in a push argument is a LIST).
+      my ($op_i, $ex_i) = $t eq 'prefix_op' ? (0, 1) : (1, 0);
+      my $op = $self->expr_o->get_a_node($kids->[$op_i]);
+      return 0 if $self->expr_o->is_internal_node_type($op);
+      my $c = ref($op) ? ($op->content // '') : '';
+      return 1 if $c eq '++' || $c eq '--';
+      # `\` makes ONE reference of a single named container; `\(@a)` and
+      # `\(@a, @b)` make a LIST of them, so only a bare Symbol operand counts
+      return $self->_ref_operand_is_single($kids->[$ex_i]) if $c eq "\\";
+      return 0 unless $PUSH_SCALAR_UNARY{$c};
+      return $self->_push_item_is_scalar($kids->[$ex_i]);
+    }
+    return 0;
+  }
+  return 1 if ref($n) eq 'PPI::Token::Operator' && @$kids == 2
+           && $PUSH_SCALAR_OP{ $n->content // '' };
+  return 0;
+}
+
+sub _ref_operand_is_single {
+  my ($self, $id) = @_;
+  my $n = $self->expr_o->get_a_node($id);
+  return 0 if $self->expr_o->is_internal_node_type($n);
+  return ref($n) eq 'PPI::Token::Symbol'
+      && ($n->content // '') =~ /^[\$\@\%\&]\w+$/ ? 1 : 0;
 }
 
 sub _ctx_wrap_form {

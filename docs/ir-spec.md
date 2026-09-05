@@ -346,6 +346,43 @@ storing), but *flattened views* (`@_`, a foreach binding) can —
 bare lexical `@array` as the sole foreach list is iterated **live** (no
 copy): `push` during the loop extends the iteration, like perl.
 
+### 2.3a Array facts — what the compiler proves about a `my @a`
+
+Two compile-time facts per `my @name` declared in a region (task #1140,
+`Pl/VarAnnotator.pm`; a translator needs them only to understand why two
+different forms appear for the same source, and both forms mean the same
+thing).  They are **not** part of the data model — they are the licence for
+the two fast forms below.
+
+- **`escapes`** — the container, or any of its elements, is reachable under
+  some name other than this lexical: a reference is taken (`\@a`,
+  `\$a[i]`), the array is passed WHOLE to a call or a method or a code ref,
+  a nested sub (anonymous **or** named) in the region mentions it, it is
+  `tie`d, it is blessed through a reference, a string `eval` sits in the
+  region, the name is declared more than once, it is the list of a `foreach`
+  whose loop variable is not itself proven read-only, or it appears in any
+  position the analysis has not classified.  The default for an unclassified
+  position is **escape**, so an unforeseen spelling costs an optimization and
+  never a value.  A **symbolic** reference is deliberately not a channel:
+  `no strict 'refs'; push @{"a"}, 5` reaches `@main::a`, never a lexical
+  (probed) — the only way a symbolic name reaches one is a glob assignment
+  `*a = \@a`, which takes a reference and is already an escape.
+- **`written_in(R)`** — the array is directly written inside the PPI region
+  `R` (the body block of a `for`/`foreach`): whole assignment,
+  `push`/`pop`/`shift`/`unshift`/`splice`, element or slice assignment
+  (compound and `++`/`--` included), `chomp @a`, `undef @a`, `$#a =`, an
+  `s///` on an element.
+
+What they license: `(%p-push1 @a X)` in place of `(p-push @a X)` — §7's
+op table — and the exactness of `p-foreach-raw` (§6.2).  The builtins that
+**do not** escape an array argument are a short list *by measurement*:
+`print`/`say`/`printf`/`sprintf`/`join`/`scalar`/`defined`/`warn`/`die`,
+plus `push`/`unshift`'s non-target arguments.  `reverse @a`, `sort @a` with
+no block, `values @a`, `map` and `grep` all hand the caller ALIASES of the
+elements — `$_++ for reverse @a` increments `@a` (probed, perl 5.40.3) — so
+they escape.  `return @a` and a sub's tail value do **not**: the call
+boundary copies.
+
 ### 2.4 Hashes
 
 A Perl hash is a string-keyed equality hash table. **All keys are
@@ -1452,13 +1489,16 @@ tail is **not** a copying consumer — perl hands its aliases through
 are.
 
 **The `p-foreach-raw` member of (A) inherits `foreach-raw`'s own condition,
-no more and no less.** That verdict says the loop variable is only ever READ,
-which covers writes *through* the loop variable; it does not cover a write to
-the ARRAY by another path during the loop, because the annotator has no array
-facts. So `for my $x (@fa) { $fa[0] = 99; print $x; last }` already diverges
-from perl under `foreach-raw` alone, and the `sort`-fed spelling is exactly as
-sound as that. Task **#1140** (the array-fact family) makes both exact; a
-translator implementing `p-foreach-raw` faithfully inherits the same boundary.
+no more and no less — and since s470bj (task #1140) that condition is
+EXACT.** The read-only verdict says the loop variable is only ever READ, which
+covers writes *through* the loop variable; it does not by itself cover a write
+to the ARRAY by another path during the loop. The array facts (§2.3a) supply
+that missing half: `foreach-raw` is now emitted only when every array NAMED in
+the loop's list is a non-escaping `my @a` that the loop's own body does not
+write. So `for my $x (@fa) { $fa[0] = 99; print $x; last }` and its
+`sort`-fed twin both print perl's `99`, and this pass inherits the fix by
+construction because it reads the `p-foreach-raw` head. A translator
+implementing `p-foreach-raw` faithfully inherits the same guarantee.
 
 `grep`/`map`/`eval` block bodies are plain `(lambda …)` with **neither**
 the catch nor the context bind — `return` inside them must propagate to the
@@ -1517,6 +1557,20 @@ is **monotone**: a read-only walk over an array would otherwise box every slot
 permanently, taxing every later read of that array.  Emitted only with `:my`;
 the package-cell arm is refused (a raw value in a global a callee can write
 through would lose the write).  Switchable as the Kind-A gate `foreach-raw`.
+
+**Since s470bj (task #1140) the promise covers the CONTAINER too**, and it had
+to: the read-only verdict is about the loop VARIABLE, so a write to the array
+by another path during the loop was invisible to it and
+`for my $x (@fa) { $fa[0] = 99; print $x; last }` printed `1` where perl
+prints `99` (the slot's value was bound before the write).  The compiler now
+also requires, for every array NAMED in the loop's list, that the array-fact
+family (§2.3a) says it does not ESCAPE and is not WRITTEN in this loop's body
+block.  "Every array named in the list", not just a bare `@a`: `sort`,
+`reverse`, `values` and a plain comma list all hand the SOURCE array's
+elements through, so `for my $x (sort { $a <=> $b } @fs) { $fs[1] = 99 … }` is
+perl `99` as well (probed).  An array with no verdict — a package array, `@_`,
+a lexical declared in an enclosing region — does not constrain the loop, which
+is the family's stated boundary, not a claim about it.
 
 **Loop variable: lexical or localized.**  Perl's `foreach $pkgvar (…)`
 implicitly *localizes* the package variable — the loop variable is aliased to
@@ -2541,7 +2595,7 @@ function's docstring states its Perl contract. The families:
 | increment | `p-++ p---- p-++-post p----post` · on raw slots `p-incf-raw`/`p-decf-raw` (statement-root only; tail postfix wraps in `prog1` for the old value) | numeric ±1 on the box/slot; `p-++` on a pure-alpha string does Perl string increment (`"az"→"ba"`) — a raw slot only takes root incdec when every write is numeric-valued (A-num), so the raw twins are never asked to do the magical form |
 | elements | `p-aref p-gethash` (read) `(setf p-aref/p-gethash)` / `p-setf` (write) `p-exists p-delete p-aslice p-hslice` | reads unbox scalars, keep reference boxes (§2.3–2.4); writes through `p-setf` autovivify intermediate refs; `p-delete` returns the removed value |
 | slice delete | `p-delete-hash-slice p-delete-array-slice p-delete-kv-hash-slice p-delete-kv-array-slice` | every one flattens its key/index arguments alike (`%p-flatten-slice-args`: a range or interpolated list contributes its elements, a STRING is one key — task #394), and every one answers **nil for an EMPTY slice** — undef in scalar context, the empty list in list context, per [perl #29127].  The emptiness test comes BEFORE the read-only check: perl allows `delete @ro[()]` on a read-only array and dies only on a real index (probed, s414) |
-| array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost |
+| array/hash builtins | `p-push p-pop p-shift p-unshift p-splice p-keys p-values p-each p-sort p-map p-grep p-wantarray p-scalar p-defined` | Perl signatures; `p-sort` default is string order, comparator lambda gets `$a`/`$b`; `p-defined` returns `1`/`""`.  `p-sort` also has a *sugar* form with no comparator, `(%p-sort-classic MODE ARGS…)` — §5.4; expand it back to `p-sort` and nothing is lost.  `(%p-push1 @a X)` is the same sugar for `push`: exactly `(p-push @a X)` for a single SCALAR X on a non-escaping `my @a` (§2.3a), value = the new length; rewrite it back to `p-push` and nothing is lost |
 | regex | `p-=~ p-!~` with `(p-regex "/pat/flags") (p-subst …) (p-tr …)` | match/substitute/transliterate against a box (writes back for s///, tr///); sets §8 match state; list context returns captures; `p-split`.  **A FAILED `m//` answers by context and by NOTHING else (tasks #962/#459):** scalar/void gives perl's defined-false `""` (never `undef`, never `0` — the `$&`-family rule of #416), and LIST context gives **the EMPTY LIST**, whatever the pattern — a capture-less miss is not a one-element false value.  The empty list is spelled `(%p-empty-list)`, a zero-length vector, never raw `nil`: only `%p-flatten-list` reads raw `nil` as "no elements", while `p-array-fill` keeps it as an array HOLE and `p-flatten-args` spreads it as ONE argument, so `f(/nomatch/, "d")` handed the callee two arguments where perl hands one and every later argument shifted |
 | compiled regex (qr) | `(pcl::p-qr "qr/pat/flags")` literal · `(pcl::p-regex-from-parts PAT "flags")` interpolated | A **Regexp object**, not a string: it carries its own flags and identity. It stringifies as perl's `(?^flags:SOURCE)` wrapper — from the SOURCE text as written, never from any backend-rewritten form, and `/xx` prints both x's (a one-x wrapper silently demotes an interpolated pattern to `/x`). Two rules a translator must implement, both about the wrapper (s322, task #181): **(1)** a pattern that is exactly ONE interpolated qr *is* that qr — `qr/$re/` and `/$re/` keep `$re`'s own flags and **ignore the outer modifiers** (`qr/$re/i` on `qr/abc/` does not match `"ABC"`), so the check must happen where the operand is still the object; **(2)** a qr used as PART of a larger pattern embeds its wrapper verbatim (`qr/x$re/` → `(?^:x(?^:abcdef))`), which is what keeps the inner flags scoped. Consequently a variable holding a qr must NOT be frozen to its string form by any raw-slot/unboxing optimization (`write-object` in `Pl/VarAnnotator.pm`): the stringification is lossy and is re-parsed by the next regex that interpolates it |
 | I/O | `p-print p-say p-printf` (`:fh HANDLE` key) `p-open p-close p-readline p-eof p-binmode …` | Perl builtins; bareword handles are symbols; `p-open` boxes its handle argument. 2-arg `p-open` parses pipe/dup modes (s301, #70): `"|-"`/`"-|"` **fork** (returns child pid to the parent / `0` in the child, whose STDIN/STDOUT is rewired to the pipe; with command text the child execs it — `"| cmd"`/`"cmd |"` are the classic spellings); `p-close` on a pipe handle **reaps the child, sets `$?`**, and is true iff exit 0. Dup modes: `">&FH"`/`"<&FH"` dup the fd (fresh descriptor; onto the well-known fd for STD handles), `">&=FH"`/`">&=N"` are fdopen-style — same fd or stream alias, no dup |

@@ -1,4 +1,4 @@
-;;; pcl: pipeline=v2 gen=v2-710
+;;; pcl: pipeline=v2 gen=v2-720
 ;;;; Copyright (c) 2025-2026 the PCL authors
 ;;;; This is free software; you can redistribute it and/or modify it under the
 ;;;; same terms as the Perl 5 programming language system itself.
@@ -139,13 +139,13 @@
                     (p-list-ctx (p-grep (lambda ($_) (p-scalar (p-cast-@ $_))) @seqs)))
                   (p-if (p-! @seqs) (p-last))
                   (p-let (($cand :box (make-p-box nil)))
-                    (p-foreach-raw ($seq @seqs)
+                    (p-foreach ($seq @seqs)
                       :my
                       t
                       (p-let (($head :box (make-p-box nil)))
                         (p-my-= $head (p-aref-deref $seq 0))
                         (p-let (($in_tail :scalar 0))
-                          (p-foreach-raw ($s @seqs)
+                          (p-foreach ($s @seqs)
                             :my
                             t
                             (p-foreach-range-raw ($i 1 (p-array-last-index $s))
@@ -163,7 +163,7 @@
                           "'
 ")))
                     (p-push @result $cand)
-                    (p-foreach-raw ($seq @seqs)
+                    (p-foreach ($seq @seqs)
                       :my
                       t
                       (p-if (p-&& (p-cast-@ $seq) (p-str-eq (p-aref-deref $seq 0) $cand))
