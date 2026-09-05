@@ -37,7 +37,8 @@ Route each failure by what `got`/`expected` shows:
   produce it → **not-supported (principle 9 / error-msg) → REGISTER**, citing
   `docs/not-supported.md` 'Error compatibility for invalid Perl input' or 'Error message text'.
 - **Feature is in `docs/not-supported.md`** (read-only scalars/Internals, `@_`/element/ref
-  aliasing, lvalue subs/substr, DESTROY-via-GC, `use bytes`, utf8 flag/`utf8::encode`,
+  aliasing, lvalue subs/substr, DESTROY-via-GC, `use bytes`, the per-scalar utf8 flag
+  (`utf8::is_utf8`; `encode`/`decode`/`downgrade` DO transform since #1221),
   tie internals, `(?{code})`, format/write, given/when) → **REGISTER**, citing the section.
 - **Nothing matches** → it's a genuine gap → **FIX**, or leave it failing (don't register
   things that aren't documented not-supported — that's the discipline that keeps `Fail`

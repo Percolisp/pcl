@@ -286,7 +286,8 @@
      char (Latin-1 / iso-8859-1 external format). =sb-posix:pipe= streams are
      set up this way. So a packed string written out yields the right bytes.
    - What's genuinely missing is *not* bytes — it's:
-     1. The per-scalar UTF-8 /flag/ (=utf8::encode=/=decode= toggling — see
+     1. The per-scalar UTF-8 /flag/ (=utf8::is_utf8=; =encode=/=decode= really
+        transform since #1221 — see
         =not-supported.md= "Unicode semantics"): we can't distinguish "string
         of 2 chars" from "string of N utf-8 bytes of those chars" because CL
         has one string type. For round-tripping raw bytes this rarely matters;

@@ -413,20 +413,33 @@ diverge from Perl in several respects:
 > code puts `use utf8` at the top and treats the whole file as UTF-8, so this
 > never bites in practice.
 
-- **`utf8::encode` / `utf8::decode`**: Perl has an internal UTF-8 flag per
-  scalar that can be toggled.  CL strings are always Unicode; the flag does not
-  exist.  `utf8::encode` is therefore a **no-op** — measured s337:
-  `utf8::encode("\x{100}")` leaves a 1-character string of ord 256, where perl
-  produces the 2 bytes 196,128.  Tests that call `utf8::encode` and then compare
-  the *byte* encoding to the *character* string are not meaningful in PCL.
-  **Second-order consequence (s337, #150 part 2):** a test file can *skip its own
-  rows* over this.  `t/op/chop.t` guards a 4-assertion block with
-  `next if $end_utf8 eq $end` after encoding; under PCL the two are always equal,
-  so the block never runs and the file emits **100 of perl's 148 rows** —
-  `perl-tests/chop.t` is PARTIAL/INCOMPLETE for this reason and not because
-  anything failed.  (Until s337 that copy had its plan hand-lowered to 100, which
-  made the shortfall read as a clean pass.)  Nothing can be skip-registered here:
-  the rows are never emitted at all.
+- **The per-scalar UTF-8 flag** (`utf8::is_utf8`): Perl has an internal UTF-8
+  flag per scalar, and `utf8::is_utf8` reports it.  CL strings are always
+  Unicode; the flag does not exist, so `utf8::is_utf8` always answers **1**.
+  That is the ONE remaining divergence of the seven read shapes #1115 probed
+  against perl 5.40.3 — every `length` and every `ord` now agrees.
+  `utf8::upgrade` likewise has no representation to change; it answers perl's
+  OCTET COUNT so a program that uses the return value gets a number of the
+  right shape, but a subsequent `is_utf8` still says 1 either way.
+
+  > **Fixed in s470br (#1221): `utf8::encode`, `utf8::decode` and
+  > `utf8::downgrade` really transform the string.**  They used to be no-op
+  > stubs returning 1, which is what the paragraph here used to document.
+  > `utf8::encode($s)` now replaces `$s` with its UTF-8 octets in place
+  > (`"\x{2080}x"` becomes 4 characters, as perl reports 4); `utf8::decode`
+  > reads the octets back and answers FALSE without touching the string when
+  > they are not valid UTF-8 (perl's own behaviour, probed — a decode error is
+  > answered, never signalled); `utf8::downgrade` answers, and keeps perl's
+  > die without a true `FAIL_OK`.  They modify in place, so the four names sit
+  > in `Pl::VarAnnotator`'s `%MUTATING_FN` beside `chomp`, which is what makes
+  > the argument arrive as a box.  A non-box argument (a literal, an
+  > unpromoted raw slot) is answered without being changed — the same shape
+  > `chomp "literal"` has.
+  >
+  > Two second-order consequences that used to be documented here are gone
+  > with it: `t/op/chop.t`'s `next if $end_utf8 eq $end` guard no longer fires
+  > on every iteration (`perl-tests/chop.t` went 96 → 144 of 148 rows), and
+  > the ten `index.t` `:utf8` skip-registry entries were dropped as STALE.
 
 - **Multi-character case mappings**: `uc("\x{DF}")` in Perl returns `"SS"` (two
   characters).  SBCL's `string-upcase` returns `"SS"` too, but `uc("\x{587}")`

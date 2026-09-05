@@ -718,7 +718,7 @@ failures; see the later do.t entry.)
 
 ---
 
-### index.t (1 failure, 119/120 passing; 10 utf8::encode tests registered not-supported - session 224)
+### index.t (fully passing 120/120 since s470br; the 10 utf8::encode registrations are GONE)
 
 **Session 224:** tests 49-58 (the `utf8::encode` octet-vs-char-offset cluster) registered
 in `cl/skip-registry.lisp` (:utf8) - PCL has no per-scalar UTF-8 flag, CL strings are
@@ -726,9 +726,14 @@ always Unicode. NUL-search tests (the old "tests 63-72" bullet) now PASS. Only *
 ("index respects changes in ref stringification" - the `""` overload must fire when
 `index` stringifies a blessed scalar-ref constant) remains as a real fix target.
 
-- **`utf8::encode` octet-mode index** (tests 49–58, ~10 failures): After `utf8::encode($s)`
-  the string is raw bytes. `index($encoded, $encoded_pattern)` should find at byte position,
-  not character position. PCL treats everything as characters.
+**s470br (2026-09-05):** the file is **120/120, fully passing**.  The ten `:utf8`
+registrations were dropped as STALE (#1221 — `utf8::encode` really transforms), and
+test 111 passes too — it was already passing on `027ba9c`, so the "remains a fix
+target" sentence above had gone stale before this session.
+
+- **`utf8::encode` octet-mode index** (tests 49–58): ✅ FIXED (s470br, #1221 — `utf8::encode`
+  really replaces the string with its UTF-8 octets, so `index`/`rindex` see byte offsets).
+  The ten `:utf8` skip-registry entries were dropped as STALE in the same commit.
 
 - **NUL character search** (tests 63–72, ~10 failures): `index($str, "\0")` returns -1 when
   it should find the NUL byte. CL strings are NUL-safe but PCL's `p-index` may stop at NUL
@@ -1127,7 +1132,7 @@ Ordered by estimated fixable test count, excluding pack.t (separate plan).
 | 3 | `Hash::Util` bucket stats — document/skip | hash.t | ~225 tests (all not-supported) |
 | 4 | `gmtime` large/negative timestamps | time.t 47–70 | ✅ FIXED (time.t fully passing) |
 | 5 | NUL character search in `index`/`rindex` | index.t 63–72 | ✅ FIXED (already passing) |
-| 6 | `index` in utf8::encode octet mode | index.t 49–58 | ~10 tests |
+| 6 | `index` in utf8::encode octet mode | index.t 49–58 | ✅ FIXED (s470br, #1221) |
 | 7 | AASSIGN_COMMON: `@a = @a` snapshot RHS | array.t 33–62 | ~27 tests |
 | 8 | `pack c/C/s/...` Inf/NaN error messages | infnan.t 56–167 | ~112 tests |
 | 9 | `do {}` scalar context at sub return | do.t 17–38 | ~14 tests (wantarray-adjacent) |
