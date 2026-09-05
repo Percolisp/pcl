@@ -18,8 +18,14 @@
 # them.  Neither is visible in any other bucket.
 # taken-at: s468bc 2026-09-04 (main) + s468be 2026-09-04 (t/op/closure.t,
 #   t/op/write.t) + s470bi 2026-09-05 (t/op/loopctl.t + t/op/rt119311.t ONLY,
-#   --bless-shortfall; perl-tests/loopctl.t edited by hand) -- hand-merged at
-#   each rebase, only the named files were ever re-measured.
+#   --bless-shortfall; perl-tests/loopctl.t edited by hand) + s470bk
+#   2026-09-05 (t/op/closure.t + t/op/gv.t ONLY, --bless-shortfall) --
+#   hand-merged at each rebase, only the named files were ever re-measured.
+# s470bk 2026-09-05: t/op/closure.t 1 -> 0.  Its last unproduced row (276,
+#   "cloning closure proto with no CvOUTSIDE") needed `do "./op/closure_test.pl"`
+#   and PCL's do-FILE path died on the U+2019 in that file's header comment;
+#   s470bi's #1084 fixed that, so the row is PRODUCED now and fails no more.
+#   The row leaves this file and its fail-baseline twin in the same commit.
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	10	UNEXPLAINED
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -146,7 +152,6 @@ t/op/attrs.t	14	UNEXPLAINED
 t/op/bless.t	1	UNEXPLAINED
 t/op/bop.t	13	UNEXPLAINED
 t/op/chop.t	48	UNEXPLAINED
-t/op/closure.t	1	#1084 — the file's last unproduced row (276, "cloning closure proto with no CvOUTSIDE") needs `do "./op/closure_test.pl"` (closure.t:721), and PCL's do-FILE path dies on the U+2019 in that file's header comment.  Was 6 rows before #1032 un-aborted `fileno ff; write ff` at line 661 (s468be).
 t/op/coreamp.t	723	UNEXPLAINED — MIXED, not measured per row.  The `CORE::given` refusal is one cause (statement-level since s466, #1037, which is why the file produces 55 rows at all instead of none), but the file also aborts FIFTEEN forms, the first on `Undefined subroutine &File::Spec::Functions` (#1073), and its 46 failing rows are the &CORE:: sub family.  Attribution of the 723 is an audit job, so the row stays in the queue on purpose.
 t/op/coresubs.t	1109	UNEXPLAINED
 t/op/current_sub.t	11	XDIFF: not-supported.md §__SUB__ — current-sub reference DEFERRED (needs dynamic *current-s...

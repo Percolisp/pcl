@@ -1207,6 +1207,27 @@
 #   BA's leg was `--dir io --dir op`, so run/ was never measured and this mover reached
 #   main uncounted; s468be's attribution could not see it either (its dirs were io/op
 #   too, and an XDIFF file's rows are gated by the #185 registry, not by I1's ROW DIFF).
+# s470bk 2026-09-05 -- TWO rows spliced BY HAND, both s470bi's work merged to
+#   main before this session measured them (BI's residue: its worktree was
+#   gone).  Measured `tools/run-perl-suite.pl op/closure.t op/gv.t --jobs 1`
+#   on this tree, parallel and serial agreeing on both files:
+#     op/closure.t  C 274/7 -> 277/5.  CAUSE #1083 -- a sub whose body
+#       compiles perl at RUN time is cloned per evaluation.  Four ROW-level
+#       fixes (see baselines/perl-suite-fails.tsv's s470bk block), one of
+#       which was `(missing)` and is PRODUCED now because #1084 fixed the
+#       do-FILE path's U+2019 death; the file's SHORTFALL therefore went
+#       1 -> 0 in the same run.
+#       Its aborted-forms NOTE went stale in the same move and is CLEARED:
+#       the file aborted 1 form on e73038f ("PCL: cannot parse (inline code):
+#       PPI failed to tokenize it") and aborts NONE now.  Attributed to BI's
+#       batch as a whole (#1083 compiles a sub body at run time, #1084 fixes
+#       the do-FILE path) -- this session did not bisect within BI's six
+#       commits, and says so rather than picking one.
+#     op/gv.t       C 131/60 -> 134/57.  CAUSE #1020 -- `undef *GLOB` clears
+#       every slot instead of being a silent no-op.  Three row-level fixes
+#       ("[at t/op/gv.t line 105]", "line 106", "line 107").  Its 4 aborted
+#       forms ("Died at gv.t line N") are unchanged and PRE-EXISTING -- the
+#       row already carried them.
 base/cond.t	4	0	4	0	OK		0
 base/if.t	2	0	2	0	OK		0
 base/lex.t	120	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
@@ -1398,7 +1419,7 @@ op/chars.t	34	0	34	0	OK		0
 op/chdir.t	44	0	42	2	FIXTURE	Task #172 (s319): the shadow t/ SYMLINKS op/, and getcwd(3) returns the PHYSICAL path, so the test's `"$Cwd/op"` can never equal the post-chdir cwd. perl runs in the real tree, PCL in the shadow. Probed identical in both: bare chdir() honouring HOME *and* LOGDIR, delete $ENV{}, cwd() tracking a chdir, rel2abs(curdir), and chdir-into-a-symlink resolving to the physical path. Nothing in PCL is wrong; the two sides run in different trees.	0
 op/chop.t	148	0	96	4	DIFF		0
 op/chr.t	45	0	38	7	XDIFF	not-supported.md §Unicode semantics differences — ALL 7 failing rows (38/7 vs perl 45/0) are two blessed subsections. t10-13 are the `### use bytes` block (t/op/chr.t lines 28-31: under the pragma `chr(-1)` must be the single byte "\xFF"; PCL has no byte view, so it keeps "\x{FFFD}"). t40-42 are `### Code points above U+10FFFF` (lines 80-82: chr(0x110000)/0x1FFFFF/0x200000 in perl's extended UTF-8) — measured s319/s320: SBCL's char-code-limit is 1114112, so a CL string physically cannot hold them and (code-char #x110000) yields no character. Blessed in fable-answers-s318.md §11; task #173.	0
-op/closure.t	281	1	274	7	DIFF	aborted-forms:1: PCL: cannot parse (inline code): PPI failed to tokenize it at (eval N) line N.	0
+op/closure.t	281	1	277	5	DIFF		0
 op/cmpchain.t	1750	0	1521	229	XDIFF	not-supported.md §Error compatibility for invalid Perl input (CLAUDE.md §9, verbatim example) — ALL 274 failing rows (1476/274 vs perl 1750/0) are the SAME assertion: `is eval("sub { \$a <=> \$b <=> \$c }"), undef, "… non-associative"`, i.e. invalid Perl must FAIL TO COMPILE. PCL is a transpiler for working Perl, not a validator, so it compiles the chain and returns a coderef (probe s319). Counted every row: 274 of 274 say "non-associative", none assert a value. The legitimately CHAINABLE comparisons (`$a == $b == $c`) work correctly in PCL — verified — so this is exclusively the rejection category, task #149 :principle9.	0
 op/concat2.t	4	0	4	0	OK		0
 op/cond.t	5	0	4	1	XDIFF	reaped 1 orphan(s) | not-supported.md §pathological-nesting — 20k-deep ternary eval: quadratic PExpr transpile + SBCL control-stack; DEFERRED post-R1 (user s309)	0
@@ -1449,7 +1470,7 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	131	60	DIFF	aborted-forms:4: Died at gv.t line N. 	0
+op/gv.t	304	0	134	57	DIFF	aborted-forms:4: Died at gv.t line N. 	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0

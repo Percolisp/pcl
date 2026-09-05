@@ -40,8 +40,9 @@
 #   files) + s469bf 2026-09-05 (run/cloexec.t re-blessed; re/pat.t +
 #   re/pat_advanced.t + re/regexp_unicode_prop.t hand-registered
 #   *rows-unstable*) + s470bi 2026-09-05 (op/loopctl.t + op/rt119311.t ONLY,
-#   --bless-fails after READING every new row) -- hand-merged, only the named
-#   files were ever re-measured.
+#   --bless-fails after READING every new row) + s470bk 2026-09-05
+#   (op/closure.t + op/gv.t ONLY, --bless-fails after READING every removed
+#   row) -- hand-merged, only the named files were ever re-measured.
 # s470bi (task #1022 half (a), RULED by Fable in s470 and blessed with its
 #   cost VISIBLE): a bare `last`/`next`/`redo` whose loop is not lexically in
 #   the sub now DIES at its own site, trappably, instead of doing nothing
@@ -57,6 +58,22 @@
 #   NOT FIXED, WAITING: half (b) -- a catch frame per loop ENTRY -- wins every
 #   one of these rows back, and when it lands they must be re-verified, not
 #   assumed (a row that fails for a NEW reason is a NEW row).
+# s470bk 2026-09-05 -- SEVEN rows FIXED, in two files, with two causes, both
+#   shipped by s470bi and merged to main before this bless (the rows are
+#   BI's residue: its worktree was gone, so the bookkeeping fell here).
+#   Every removed row was READ from this run's .suitelog/*.fails.tsv:
+#     op/closure.t  4 rows -> gone.  #1083 (a sub whose body compiles perl at
+#       RUN time is cloned per evaluation): *summary*, "cloneable with //ee",
+#       "cloneable with use re eval", and "cloning closure proto with no
+#       CvOUTSIDE" (that last one was `(missing)`, not `not ok` -- it is the
+#       row #1084's do-FILE fix made PRODUCIBLE, which is why the SHORTFALL
+#       row for the same file went 1 -> 0 in the same run).
+#       Verdict op/closure.t P 281/1 C 277/5, parallel and serial agreeing.
+#     op/gv.t       3 rows -> gone.  #1020 (`undef *GLOB` clears every slot,
+#       where it used to be a silent no-op): "[at t/op/gv.t line 105]",
+#       "line 106", "line 107".  Verdict op/gv.t P 304/0 C 134/57, parallel
+#       and serial agreeing; its 4 aborted forms ("Died at gv.t line N") are
+#       PRE-EXISTING and already on the snapshot row.
 base/rs.t	16	ok	not ok	$/ = []; produced expected error message
 base/rs.t	15	ok	not ok	$/ = []; should die
 base/rs.t	24	ok	not ok	$/ = \*STDOUT; produced expected error message
@@ -2412,13 +2429,9 @@ op/chop.t	65	ok	(missing)	start=78 end=212 ($/ as bytes)
 op/chop.t	64	ok	(missing)	start=78 end=212 ($/ as bytes) [returns 0]
 op/chop.t	63	ok	(missing)	start=78 end=212 (end as bytes)
 op/chop.t	62	ok	(missing)	start=78 end=212 (end as bytes) [returns 0]
-op/closure.t	0	(none)	renumbered	*summary*
 op/closure.t	265	ok	not ok	RT \#10085
 op/closure.t	264	ok	not ok	RT \#1028
 op/closure.t	270	ok	not ok	[at t/op/closure.t line 653]
-op/closure.t	274	ok	not ok	cloneable with //ee
-op/closure.t	273	ok	not ok	cloneable with use re eval
-op/closure.t	276	ok	(missing)	cloning closure proto with no CvOUTSIDE
 op/closure.t	271	ok	not ok	don't copy a stale lexical; create a fresh undef one instead
 op/context.t	8	ok	not ok	context of { foo(); BEGIN {} }
 op/coreamp.t	63	ok	not ok [PCL #36]	&CORE::close with no args
@@ -4108,9 +4121,6 @@ op/gv.t	41	ok	not ok	Warning on conversion to NV
 op/gv.t	31	ok	not ok	Warning on conversion to UV
 op/gv.t	39	ok	not ok	Warning on conversion to UV
 op/gv.t	172	ok	not ok	[at (eval 47) line 1]
-op/gv.t	24	ok	not ok	[at t/op/gv.t line 105]
-op/gv.t	25	ok	not ok	[at t/op/gv.t line 106]
-op/gv.t	26	ok	not ok	[at t/op/gv.t line 107]
 op/gv.t	28	ok	not ok	[at t/op/gv.t line 117]
 op/gv.t	49	ok	not ok	[at t/op/gv.t line 166]
 op/gv.t	51	ok	not ok	[at t/op/gv.t line 170]
