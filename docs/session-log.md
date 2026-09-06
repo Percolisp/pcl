@@ -2,6 +2,168 @@
 
 Append new entries at the top. One section per session.
 
+## Session 470by (Opus agent, 2026-09-06 + resume) — #1300: the CACHE SURFACE — the cache directory becomes a PROCESS fact (#1303), the prune reads LAST USE (#682 folds in), the directory is 0700, and `--cache-info` / `--no-cache` / `--version` / `pl2cl --help` exist
+
+**A / #1303 — where the cache is, is a fact about the PROCESS, not about the
+build.**  `*pcl-cache-dir*` was a `defparameter` INITFORM, so it was evaluated
+when the runtime *loads* — which on the normal path is when a saved CORE is
+built.  `PCL_CACHE_DIR` was therefore a lie for the biggest cache (`proto/`,
+`core/` and `pcl --clear-cache` all honoured it, being Perl-side), and an
+installed core built by one user would have sent every other user's modules
+into the builder's home.  One function now answers it, `%p-default-cache-dir`,
+called from an `sb-ext:*init-hooks*` entry — the shape `$$`, the FP modes, the
+standard handles and `PCL_RAW_ELEMS` already use, for the same reason.  The
+three Perl readings (`pcl`:63, `PCLSbcl::core_cache_dir`,
+`Pl::ProtoCache::cache_dir`) become one, `PCLPaths::cache_root`
+(+ `cache_root_source`, which is what `--cache-info` prints).
+
+**The F1 probe, before and after.**  BEFORE: `PCL_CACHE_DIR=<tmp> pcl -e 'use
+Text::ParseWords …'` wrote the prototype entry under the tmpdir and the module
+`.lisp` under `~/.pcl-cache` (530 → 533 files).  AFTER: `~/.pcl-cache`
+unchanged, `modules/` and `proto/` both under the tmpdir.  And the shape no
+local rehearsal reproduced, the one an installed core has: a core BUILT with
+`PCL_CACHE_DIR=A` and RUN with `PCL_CACHE_DIR=B` puts the modules in B.
+
+**B / F2, with #682 — an entry is kept while it is USED, not while it is
+young.**  Validity is the #1261 manifest and nothing else, so the age rule is
+disk hygiene, and the honest question there is "does anything still reach this
+entry".  The old rule (7 days, WRITE date) deleted a correct, daily-used cache
+once a week.  A USED entry is now re-stamped by `%p-note-cache-use` — the
+`.lisp`, the `.deps` and this runtime's `.fasl` TOGETHER, because the prune
+reads each file's own mtime and half an entry is not an entry — at most once a
+day per entry and once per source per process; `p-cleanup-old-cache` drops what
+nothing has reached for 30 days, in `<cache>/modules/` AND in `<cache>/proto/`,
+which #682 filed and which nothing had ever pruned.
+
+**MEASURED, which is why the scan is claimed once a day**: 590 module files
+7.0 ms + 1112 prototype files 14.0 ms = **21 ms per scan**, warm — and it ran on
+EVERY cache miss, i.e. once per module of a cold run.  `%p-claim-prune` writes a
+`.last-prune` stamp (temp file + `rename(2)`) and the scan happens at most daily.
+The touch itself is one `utime(2)`: **0.0020 ms**.
+
+**C / F8 — the cache directory is created 0700, and an unsafe one is refused.**
+A cached module is a fasl: code this process loads and runs.  The root is
+created `0700` (`%p-ensure-dir-0700`; `make_path(..., {mode => 0700})` on the
+Perl side) and one owned by another uid, or writable by group or other, is
+REFUSED with a perl-shaped, `eval`-trappable `p-die` naming the directory, the
+mode found and the fix, `chmod 700 DIR` (rule 12).  Only the ROOT is asked: at
+0700 nobody else can traverse into it.  **This box's own cache was `drwxrwxr-x`
+(0775)** — the refusal would have fired on the next run — so
+`~/.pcl-cache{,/modules,/proto,/core}` were `chmod 700`ed.  What a mode check
+cannot see is written down rather than assumed (ir-spec §9.2b): a root under a
+non-sticky world-writable parent can be renamed away by another user.
+
+**D — the commands.**  `pcl --no-cache` forwards `pl2cl`'s existing flag; there
+is no second mechanism.  BUT THE EXISTING ONE ONLY SKIPPED READS: with
+`*pcl-skip-cache*` the `.lisp` and its manifest were still WRITTEN, so the one
+flag for "is it the cache?" repopulated the very thing in question (measured: 2
+files).  `%p-load-module-uncached` transpiles to a temp file outside the cache,
+loads it and deletes it.  `pcl --cache-info` (45 ms warm) prints the directory
+and whether it came from the environment or the default, size + count per kind,
+which core this run would use — asked of `PCLSbcl`, the one command-line builder
+— and the compile policy from the RUNTIME's own resolver, because the two
+directory lists are `realpath`'d at call time and re-deriving them in Perl would
+be a second answer.  `pcl --version` (64 ms) prints the four numbers that can
+disagree: PCL version, cache generation, SBCL, PPI.  `pl2cl --help` exists (it
+answered "Unknown option: help"), from one usage text shared with the
+no-arguments path.  `tools/install-pcl` writes `<libdir>/VERSION`, without which
+an installed `pcl --version` can only say "unknown".
+
+**THE FULL SWEEP FOUND A BUG IN THAT NEW PATH — and only the sweep could.**
+`%p-load-module-uncached` returns EARLY from `p-load-module-cached`, and so
+skipped that function's own `(*pcl-current-package* *pcl-current-package*)`
+rebinding.  A loaded module sets the variable through its `package` statements,
+so without the rebinding the module's package LEAKED into the caller and every
+later unqualified name resolved in the wrong one — coming back `undef`.
+Measured, not reasoned about: hexfp.t 107 → 100 and sub.t 53 → 51 (two NEW
+failures), both surviving the serial re-run, every moved row `got=undef`;
+restoring the rebinding put both files back to base.  `tools/sweep-perl-tests.pl`
+sets `*pcl-skip-cache*` for every file it runs, which is exactly why this was
+invisible to the gate (whose `pcl`-spawning rows use the cache) and why a `cl/`
+change owes a sweep.
+
+**E — the docs.**  README's "Caches and switches" became three paragraphs (what
+is cached / when a cached thing is stale / the knobs), because the old one was
+two sentences and one of them was false: "`PCL_CACHE_DIR` moves it" was true of
+the core, the prototype facts and `--clear-cache`, and not of the module cache.
+`docs/ir-spec.md` §9.2b gained three normative paragraphs beside the entry
+format: where the cache is, what keeps an entry, and the 0700 rule.
+
+**#1338, absorbed under the filler rule (the same mechanism this session
+rewrote): the shared cache is racy BY DESIGN, so a reader never dies over it.**
+`<cache>/` belongs to the USER, not to a process — two worktrees, two CI jobs,
+the eight workers of a `prove -j8` — so any file this side lists, stats or
+stamps can be gone before the next call.  Measured twice in Fable's gates: an
+unhandled `SB-INT:SIMPLE-FILE-ERROR` out of `p-cleanup-old-cache` inside
+`p-load-module-cached` killed the unrelated program that was loading
+`Sub::Quote` (moo-01.t 0/15, 15/15 re-run alone), and in the next gate
+eighteen write-date signatures took three files.  **That particular die was
+already gone here** — items A–D had rewritten the prune with the stat inside
+`ignore-errors` — which is why every row of the guard file passes on the
+parent commit too.  What was left is the rest of the family: five more places
+that asked `probe-file` and then `file-write-date` (`p-cache-valid-p` twice,
+`%p-note-cache-use`, `%p-claim-prune`, `%p-fasl-build-refused-p`) and one
+`load` of a fasl that may have gone since the check.  `%p-mtime` is now the
+runtime's ONLY `file-write-date` — grep says exactly one — and it answers NIL,
+which means SKIP on the hygiene side and MISS on the validity side (the s329
+boundary: effect-only, so not rule 12's die).
+
+**And the file the race was measured on was a WRITER'S TEMP.**  So the prune
+does not ask about those at all: `%p-cache-temp-path` is the one construction
+both writers publish through (they each built the name inline before — the
+duplication that lets a reader's idea of "a temp" drift from a writer's), and
+`%p-cache-temp-p` is the one recognition.  The suffix became `-tmp<pid>`
+because a bare `-<digits>` collides with the ~0.5 % of fasl identity fields
+that are all decimal digits.  The cost is in the docstring rather than
+discovered later: a temp whose writer crashed is never pruned, one small file
+per crash.
+
+**THE BARS, all re-taken after the rebase onto `31473881`.**  Gate 216 files / 7517 rows, Result FAIL = only the 13 pclxs
+`xs-01/02/03` rows (the standing state), and
+`grep -a -c write-date` over the whole gate log is **0** — which is
+#1338's own acceptance test, one entire `prove -j8` with no race signature.
+Full sweep `--jobs 4` (run after the `*pcl-current-package*` fix, quoted from
+its own log): **TOTAL passing: baseline 18647, current 18647 (+0)**, `0 new, 0
+fixed, 4 unstable (crash-file noise), 15 unverified (did not run)`, **TOTAL
+dropped statements: census 5, current 5 (+0)**, `GATE: clean`.
+`tools/corpus-diff.pl` vs both `cd34df72` and `31473881`: emission IDENTICAL over 111 files, silent drops 5 unchanged (no emission change, so no generation bump; the tree carries main's `v2-840`).  `tools/ir-host-leak.pl` byte-identical
+between a `git archive cd34df72` extraction and this tree — 31 distinct leaked
+symbols over 111 files on both, so nothing was added.  `tools/tag-license
+--check` exit 0.
+
+**The CPAN board, cold and warm, is the cache A/B the module cache itself
+cannot give.**  The 14-dist board ran COLD (`PCL_CACHE_DIR=` a directory PCL
+created for itself) and then WARM in the same directory: **183 of 183 rows
+identical to `baselines/cpan-board14-s467.tsv`, and identical to each other** —
+no cold/warm difference, so no cache bug.  Said plainly, because it bounds what
+the board proves: `tools/run-dist-t.pl` runs `pl2cl --no-cache` and then
+`sbcl --load cl/pcl-runtime.lisp` with `*pcl-skip-cache*`, so the board
+exercises `pl2cl` (including this batch's `--no-cache` change) and the
+prototype cache, and never the module cache.
+
+**And the F8 refusal fired on the ordinary accident, first try.**  The cold run
+was pointed at a directory made by hand with `mkdir`, which under the usual
+`0002` umask is `0775` — group-writable — so every transpile in the run refused,
+each naming the directory, the mode and `chmod 700 DIR`.  Re-pointed at a path
+that did not exist, PCL created it itself at `0700` and the run went through.
+That is the feature working on the case it was written for, and it is worth
+knowing that `mkdir "$PCL_CACHE_DIR"` is exactly the wrong way to prepare one.
+
+**The timings, warm, best-of-5 twice, with the box at load 6.9–7.6 beside a
+sibling agent (so read them as "no regression", not as absolute numbers):**
+`pcl -E 'use Moo; print 1'` 435 / 438 ms before and 455 / 421 ms after;
+`pcl -E 'use JSON::PP; print 1'` 1476 / 1422 ms before and 1396 / 1399 ms
+after.  The touch is one `utime(2)` and the scan it replaced was 21 ms on every
+miss, so the direction is right even where the noise swallows it.
+
+**`PCL_SHOW_SBCL` / `pcl -v`, before and after**: the SBCL command line is
+byte-identical — same flags, same `--control-stack-size 512`, same `--core`
+placement — except the core's NAME (it is keyed on the runtime's content and
+the tree's absolute path, and both differ) and the per-run `/tmp` temp names.
+Worth writing down while it is in hand: `pcl` prints that line under `-v`, not
+under `PCL_SHOW_SBCL`; `runpcl` and the four dev runners use the environment
+variable.
+
 ## Session 473 (Fable, 2026-09-06, evening) — the s472 restart: BT + BX phase 1 merged, #1338 found, the s473 queue planned
 
 Restarted the three agents the shutdown stopped (recipe `PAUSE-s473.md`): BT owed only a gate — Fable ran it (214/7383, one file lost to the #1338 race, 15/15 alone), rebased it onto the USER's README fix and merged `637fc58e`; BX and BY resumed as fresh Opus agents in their own worktrees.  BX phase 1 (five green commits + records) merged as `21f6622c` after one review fix: its baseline edit had re-encoded 25 unrelated rows (a `.tsv` is BINARY — DECIDED §s473).  The USER asked for a continuous pipeline ("keep starting new subjobs for the tasks and plan for them"): `docs/plan-post-s473.md` is the queue, with eight new briefs (the `local` family, the nested-element family, die location sized first, numeric representation incl. the #1245/#1230 crash, loop control, product bugs #1060/#1284/#1119, #1249's singletons + the typeglob sizing, perf round 30) beside BU/BZ/#1262.  Owed companion `--all --quick` started on main.  Runtime size measured for the USER: 25,427 lines, 12,899 of code without blanks/comments/docstrings, 1,095 definitions.  The owed companion `--all --quick` ran on main under the merges (a confounded run: its stat_errors/readline movers were the old code against the new baselines) and its six real movers were measured on fcf076f1 and 637fc58e extractions and spliced by hand with causes: only run/runenv_randseed.t (#1236) is this session's; tiearray.t's 20 lost rows are #1429 (the #1273 fatal on a `$NEGATIVE_INDICES` tied array, since s471a), tie_fetch_count.t's two new rows are #1430 (range FETCHes twice).  `--bless-fails`/`--bless-shortfall` were tried, found to drop every hand note, and reverted (DECIDED §s473).  BX phase 2 (#1237) merged as `d348dcea` with a merge chore (two corpus rows left known-fail).  BU (perf round 29) launched into BX's slot.

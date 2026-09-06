@@ -2725,7 +2725,15 @@ unreachable the moment the compiler stamp changes. The scan is claimed once a
 day through a `.last-prune` marker in the cache root, because it is invoked on
 every cache *miss* and a cold run has one miss per module. Pruning is safe
 against readers: unlinking a file an open reader holds is harmless on Linux,
-and every entry is published temp-file + `rename(2)`.
+and every entry is published temp-file + `rename(2)`. A writer's in-flight
+temp is named `<entry-name>-tmp<pid>`; it is never a cache entry and never
+pruned — the prune passes over a temp-shaped name without so much as stating
+it, because that file belongs to the process writing it. The cost of that
+rule, stated rather than discovered later: a temp whose writer crashed is
+never removed. The directory is also SHARED — two checkouts, two CI jobs and
+the eight workers of one `prove -j8` all write it — so every read of it
+tolerates a file that has gone since it was listed: a missing mtime means SKIP
+on the hygiene side and MISS on the validity side, and never an error.
 
 **The cache directory is created `0700`, and an unsafe one is refused.** A
 cached module is a fasl — compiled code the process loads and runs — so a
