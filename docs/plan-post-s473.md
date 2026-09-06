@@ -46,7 +46,7 @@ successor.
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range).  Next free after these: **1429**.
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range).  Next free after these: **1431** (#1429 tiearray $NEGATIVE_INDICES, #1430 range double-FETCH filed s473).
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script

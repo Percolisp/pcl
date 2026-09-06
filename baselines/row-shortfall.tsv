@@ -72,6 +72,8 @@
 #   registered skip for `$a[-1] = 0` went stale and the row asserts now.  This
 #   is what the instrument is FOR: a 59-row loss that no other bucket could see,
 #   found, bisected and closed from this file's row alone.
+# s473 2026-09-06 (Fable): perl-tests/tiearray.t 20 ADDED by hand (task #1429) after the companion
+#   --all --quick; nothing re-blessed (a --bless-shortfall drops this header, measured and reverted).
 perl-tests/aassign.t	1	UNEXPLAINED
 perl-tests/array.t	9	UNEXPLAINED -- was 10; ONE row left in s471a (#1273 made test 82 `$a[-1] = 0` ASSERT instead of skip, so it is produced now).  The remaining 9 are skip-registry skips, unaudited
 perl-tests/blocks.t	1	UNEXPLAINED
@@ -242,6 +244,7 @@ t/op/switch.t	195	XDIFF: not-supported.md §`given`/`when` / smart match (`~~`) 
 t/op/symbolcache.t	1	UNEXPLAINED
 t/op/tie.t	95	UNEXPLAINED
 t/op/tie_fetch_count.t	202	not-supported.md §`given`/`when` / smart match (`~~`) — the file’s ONE infix `~~` statement.  Statement-level since s466 (#1037): 141 of perl’s 343 rows now run, and the 202 missing ones are the tail of the refused statement’s enclosing top-level form (#1055).  aborted-forms:1, and that one form IS the refusal.
+t/op/tiearray.t	20	#1429 (s473, Fable): the #1273 rule-12 fatal fires on a TIED array whose class sets $NEGATIVE_INDICES (`$n[-2] = q(a)`, t/op/tiearray.t ~268) and aborts the form: the STORE + DELETE/EXISTS block, "n freed" and the NegFetchsize block are never produced.  PRE-EXISTING at fcf076f1 (extraction); companion op/tiearray.t 40/35 -> 26/29.
 t/op/tiehandle.t	23	UNEXPLAINED
 t/op/tr.t	2	UNEXPLAINED
 t/op/try.t	2	UNEXPLAINED

@@ -68,6 +68,12 @@
 #                                         `error from -X <operand>` assertion.
 #   The other four files of the leg are UNCHANGED on both trees: io/fs.t 59/2,
 #   op/time.t 72/0 OK, op/stat.t 0/0 (#1232), op/filetest_t.t 0/0 (no /dev/tty).
+#   s473 (Fable, 2026-09-06) -- SIX rows spliced by hand after the companion --all --quick
+#     on main (a run whose tree MOVED under it: BX phases 1+2 merged mid-run, so its
+#     readline/stat_errors movers were the OLD code against the NEW baselines and are
+#     NOT spliced -- serial re-runs on d348dcea read the snapshot exactly).  Each of the
+#     six carries its cause in column 7; the WHEN was measured on git-archive extractions
+#     of fcf076f1 (the snapshot's own s470bv bless point) and 637fc58e (pre-BX).
 
 # s470bq (task #1219, 2026-09-06) -- ONE ROW SPLICED BY HAND.  op/eval.t
 #   C_ok 130 -> 131, C_notok 38 -> 37: test 6, `print eval '$foo = /';
@@ -1407,7 +1413,7 @@ io/perlio_leaks.t	8	4	0	12	DIFF		0
 io/perlio_open.t	10	0	9	1	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
 io/pipe.t	27	0	18	14	DIFF		0
 io/print.t	24	0	23	1	DIFF		0
-io/pvbm.t	28	0	20	8	DIFF	s457ai: NOT a mover -- measured IDENTICAL on a 0237940 base tree; the snapshot row was stale (the known pvbm flapper, DECIDED s437/s438)	0
+io/pvbm.t	28	0	23	5	DIFF	s473 (Fable): 20/8 -> 23/5 on d348dcea (serial; 22/6 on the 637fc58e extraction): the 3 FIXED rows are stat/lstat/truncate(PVBM ref) -- #1043 (s470bx, stat/lstat answer their context) for the last one; the known pvbm flapper (DECIDED s437/s438) reads 23/5 alone, the number memory records	0
 io/read.t	2	0	2	0	OK		0
 io/say.t	13	0	13	0	OK		0
 io/scalar.t	128	0	98	30	DIFF		0
@@ -1553,7 +1559,7 @@ op/exp.t	31	0	31	0	OK		0
 op/fh.t	8	0	6	2	DIFF		0
 op/filehandle.t	4	0	1	1	DIFF	aborted-forms:1: IO::Seekable::getpos missing at /home/bernt/perlN/perlbrew/perls/perl-N.N.N/lib/N.N.N/File	0
 op/filetest.t	436	0	369	65	DIFF	aborted-forms:1: Undefined subroutine &main::f called	1
-op/filetest_stack_ok.t	136	0	71	65	DIFF		0
+op/filetest_stack_ok.t	136	0	98	38	DIFF	s473 (Fable): 71/65 -> 98/38, PRE-EXISTING at fcf076f1 AND 637fc58e: the 27 FIXED rows are the -X $overld stack rows (the s470bs filetest operand resolver, #1031 family); the row was stale, not moved by this session	0
 op/filetest_t.t	7	0	0	0	DIFF	aborted-forms:1: Error opening #P"/dev/tty": No such device or address	0
 op/flip.t	14	0	12	2	DIFF		0
 op/for-many.t	71	0	63	8	DIFF		0
@@ -1569,7 +1575,7 @@ op/goto_xs.t	11	0	10	1	DIFF	aborted-forms:1: The function common-lisp:nil is und
 op/grent.t	3	0	3	0	OK		0
 op/grep.t	77	0	71	6	DIFF		0
 op/groups.t	4	0	4	0	OK		0
-op/gv.t	304	0	134	57	DIFF	aborted-forms:4: Died at gv.t line N. 	0
+op/gv.t	304	0	135	56	DIFF	aborted-forms:4: Died at gv.t line N. ; s473 (Fable): 134/57 -> 135/56, ONE row ("Export of proxy constant as is") FIXED between the s470bi bless and fcf076f1 (measured 135/56 on the fcf076f1, 637fc58e and d348dcea trees alike); NOT bisected within the s470bj..s471b batches, said so rather than picking one	0
 op/hash-clear-placeholders.t	9	0	0	0	DIFF	aborted-forms:3: Can't locate loadable object for module this module in @INC While evaluating the form star	0
 op/hash-rt85026.t	1	0	0	0	DIFF	aborted-forms:2: Can't locate loadable object for module this module in @INC	0
 op/hash.t	494	0	8	7	DIFF	aborted-forms:1: Can't locate loadable object for module this module in @INC	0
@@ -1687,8 +1693,8 @@ op/taint.t	0	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 op/threads-dirh.t	0	0	0	1	NOTAP	aborted-forms:1: This Perl not built to support threads 	0
 op/threads.t	0	0	2	19	NOTAP	aborted-forms:11: This Perl not built to support threads ; reaped 4 orphan(s)	0
 op/tie.t	94	1	0	0	DIFF		0
-op/tie_fetch_count.t	343	0	76	65	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N	0
-op/tiearray.t	75	0	40	35	DIFF	s470bv: stale at 614c6af, before the s470 batches; NOT bisected -- see task #1276	0
+op/tie_fetch_count.t	343	0	129	12	DIFF	aborted-forms:1: PCL: smart match (~~) is not supported -- removed in perl N.N, at tie_fetch_count.t line N; s473 (Fable): 76/65 -> 129/12, PRE-EXISTING at fcf076f1 AND 637fc58e: the 55 FIXED rows are the -X $tied_glob / -X filetest rows (the s470bs filetest operand resolver, #1031/#1049/#1048/#1033/#1047); the 2 NEW rows ($tied.."a", "a"..$tied: FETCH called twice) = task #1430	0
+op/tiearray.t	75	0	26	29	DIFF	aborted-forms:1: Modification of non-creatable array value attempted, subscript -N PCL: tie: an ARRAY (class NegIndex); s473 (Fable): 40/35 -> 26/29, PRE-EXISTING at fcf076f1 AND 637fc58e (extractions, serial): the #1273 rule-12 fatal (s471a) fires on a TIED array whose class sets $NEGATIVE_INDICES -- task #1429 (20 rows never produced, 15 NEW fails at t/op/tiearray.t lines 273-284)	0
 op/tiehandle.t	67	0	12	32	DIFF		0
 op/tiehash.t	27	0	20	7	DIFF		0
 op/time.t	72	0	72	0	OK		0
@@ -1807,7 +1813,7 @@ run/locale.t	44	0	0	0	DIFF		0
 run/noswitch.t	3	0	2	1	DIFF		0
 run/runenv.t	106	0	0	0	TRANSPILE	TRANSPILE-FAIL	-1
 run/runenv_hashseed.t	278	0	9	0	DIFF	aborted-forms:1: Undefined subroutine &main::unlink_tempfiles called	0
-run/runenv_randseed.t	9	0	2	7	DIFF		0
+run/runenv_randseed.t	9	0	3	6	DIFF	s473 (Fable): 2/7 -> 3/6, OURS: task #1236 (s470bx) -- rand is auto-seeded from entropy on first use, so two runs differ; measured 2/7 on the 637fc58e extraction and 3/6 on d348dcea	0
 run/script.t	3	0	3	0	OK		0
 run/switch0.t	1	0	0	1	DIFF		0
 run/switchC.t	15	0	3	12	DIFF	s470bv: #1115 -3 / +1 and #1221 +1, both bisected: rows 3/5/6 (-CI,-Co,-Ci) passed only because PCL decoded EVERYTHING by default, i.e. -C was permanently on by accident; row 8 started passing because bytes is right without the switch; row 4 (-CE) passes since #1221 makes utf8::encode real.  PCL implements -C nowhere -- task #1272	0
