@@ -16,7 +16,7 @@ successor.
 ## 1. Where the tree is (2026-09-06 evening)
 - main `21f6622c` (gen v2-840) = s470bt (B6 `tools/ir-conform` + the 345-case corpus + B7) and
   s470bx phase 1 (#1042 #1236 #1043 #1231 #1044) merged this session; CI green through `2e39cc67`.
-- In flight: **BX phase 2** (#1237, `agent-a1e3dadc46671bef8`); **BY** (#1300 #1303 #682 + the
+- MERGED after this plan was written: **BX phase 2** (#1237 — the read family's errnos; corpus rows 122-io + 123-io left known-fail at the merge).  In flight: **BU** (perf round 29, `agent-a4ae344882cebc0bc`); **BY** (#1300 #1303 #682 + the
   absorbed **#1338**, `agent-a5d566deb35707e17`).
 - Part B of plan-speed-and-ir-s470 is COMPLETE (B1–B7).  Part A continues by rounds.
 - The ir-conform corpus's 58 known fails are the correctness worklist's new metric
@@ -41,12 +41,12 @@ successor.
 | 9 | **s473e** | loop control: #1244(a)=#1161, (b), (c), #1164 — 4 rows | v2-920 | a slot |
 | 10 | **s473i** | product bugs: #1060 `--executable`, #1284 `-I` to the module transpile, #1119 content-keyed module cache | v2-930 | BZ + s473p merged (cache + `pcl` regions) |
 | 11 | **s473h** | #1249's seven singletons (+ #1290), and #1242/#1117 SIZED (not designed) | v2-940 | a slot |
-| — | (after BX-2) | the open/handle family #1246 + #1308 + #1309 + #1307 + #1233 + #1220 (+ #1247's other half) — brief to be written from BX's #1237 result | | BX phase 2 merged |
+| 12 | **s473f** | the handle family: #1309 #1246 #1307 #1308 (representation measured first) #1233 #1220 #1074 #1247(b) — 4 rows | v2-950 | a slot |
 | — | Fable designs | #1117 typeglob slots (from s473h's sizing); #582 `@ISA`-write invalidation (USER: box magic?); #71 PCRE2 (from s473p's measurement); #1202 extension fasl (USER-parked with pack) | | |
 
 Task ID ranges reserved: BZ 1325–1334, #1262 1335–1337, s473a 1339–1348, s473b 1349–1358,
 s473c 1359–1368, s473d 1369–1378, s473e 1379–1388, s473h 1389–1398, s473i 1399–1408,
-s473p 1409–1418, BU 1250–1259 (old range).  Next free after these: **1419**.
+s473p 1409–1418, s473f 1419–1428, BU 1250–1259 (old range).  Next free after these: **1429**.
 
 ## 3. Standing decisions made this session (also DECIDED §s473)
 - A baseline `.tsv` is BINARY: edit through `:raw` handles only.  s470bx's row-removal script
